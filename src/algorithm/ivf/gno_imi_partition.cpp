@@ -17,6 +17,7 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <atomic>
 #include <fstream>
 #include <numeric>
@@ -32,6 +33,8 @@
 #include "vsag_exception.h"
 
 namespace vsag {
+
+static constexpr BucketIdType INVALID_BUCKET_ID = static_cast<BucketIdType>(-1);
 
 static constexpr const char* SEARCH_PARAM_TEMPLATE_STR = R"(
 {{
@@ -230,6 +233,7 @@ GNOIMIPartition::ClassifyDatasForSearch(const void* datas,
     }
     auto buckets_per_data = param.scan_bucket_size;
     Vector<BucketIdType> result(buckets_per_data * count, this->allocator_);
+    std::fill(result.begin(), result.end(), static_cast<BucketIdType>(-1));
     auto candidate_count_s = bucket_count_s_;
     Vector<BucketIdType> candidate_s_id(candidate_count_s, this->allocator_);
     Vector<float> candidate_s_dist(candidate_count_s, this->allocator_);

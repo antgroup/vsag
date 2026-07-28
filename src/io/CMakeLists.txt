@@ -23,6 +23,11 @@ set (IO_SRC
         buffer_io/buffer_io.cpp
         async_io/async_io_parameter.cpp
         async_io/async_io.cpp
+        uring_io/uring_io_parameter.cpp
+        uring_io/uring_io_context.cpp
+        uring_io/uring_io_context_guard.cpp
+        uring_io/uring_io_read_object.cpp
+        uring_io/uring_io.cpp
         mmap_io/mmap_io_parameter.cpp
         mmap_io/mmap_io.cpp
         memory_block_io/memory_block_io.cpp
@@ -31,12 +36,26 @@ set (IO_SRC
 )
 
 add_library (io OBJECT ${IO_SRC})
+
+set (IO_LINK_LIBRARIES coverage_config vsag_src_common)
+
 if (HAVE_LIBAIO)
-    target_link_libraries (io PRIVATE aio coverage_config vsag_src_common)
+    list (APPEND IO_LINK_LIBRARIES aio)
     message (STATUS "io module: linking with libaio")
 else ()
-    target_link_libraries (io PRIVATE coverage_config vsag_src_common)
     message (STATUS "io module: libaio not available, async I/O disabled")
+endif ()
+
+if (HAVE_LIBURING)
+    list (APPEND IO_LINK_LIBRARIES ${URING_LIBRARY})
+    message (STATUS "io module: linking with liburing")
+else ()
+    message (STATUS "io module: liburing not available, io_uring disabled")
+endif ()
+
+target_link_libraries (io PRIVATE ${IO_LINK_LIBRARIES})
+if (HAVE_LIBURING)
+    target_include_directories (io PRIVATE ${URING_INCLUDE_DIR})
 endif ()
 
 if (ENABLE_TESTS)

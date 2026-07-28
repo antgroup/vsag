@@ -92,6 +92,7 @@ public:
     void
     Deserialize(StreamReader& reader);
 
+    friend class Pyramid;
     friend class PyramidAnalyzer;
 
 public:
@@ -195,7 +196,8 @@ public:
     CalDistanceById(const float* query,
                     const int64_t* ids,
                     int64_t count,
-                    bool calculate_precise_distance = true) const override;
+                    bool calculate_precise_distance = true,
+                    int64_t topk = -1) const override;
 
     void
     Deserialize(StreamReader& reader) override;

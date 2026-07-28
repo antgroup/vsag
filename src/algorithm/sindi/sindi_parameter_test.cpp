@@ -15,6 +15,8 @@
 
 #include "sindi_parameter.h"
 
+#include <string>
+
 #include "inner_string_params.h"
 #include "parameter_test.h"
 #include "unittest.h"
@@ -47,6 +49,8 @@ struct SINDIDefaultParam {
     int term_id_limit = 10000;
     int avg_doc_term_length = 100;
     bool remap_term_ids = false;
+    std::string rerank_type = SPARSE_RERANK_TYPE_FP32;
+    int64_t dmq_shared_codebook_threshold = DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD;
     bool immutable = false;
 };
 
@@ -65,6 +69,8 @@ generate_sindi_param(const SINDIDefaultParam& param) {
     json[SPARSE_TERM_ID_LIMIT].SetInt(param.term_id_limit);
     json[SPARSE_AVG_DOC_TERM_LENGTH].SetInt(param.avg_doc_term_length);
     json[SPARSE_REMAP_TERM_IDS].SetBool(param.remap_term_ids);
+    json[SPARSE_RERANK_TYPE].SetString(param.rerank_type);
+    json[SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD].SetInt(param.dmq_shared_codebook_threshold);
     json[SPARSE_IMMUTABLE].SetBool(param.immutable);
     return json.Dump();
 }
@@ -83,10 +89,14 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     REQUIRE(param->term_id_limit == default_param.term_id_limit);
     REQUIRE(param->avg_doc_term_length == default_param.avg_doc_term_length);
     REQUIRE(param->remap_term_ids == default_param.remap_term_ids);
+    REQUIRE(param->rerank_type == default_param.rerank_type);
+    REQUIRE(param->dmq_shared_codebook_threshold == default_param.dmq_shared_codebook_threshold);
     REQUIRE(param->immutable == default_param.immutable);
 
     vsag::ParameterTest::TestToJson(param);
     REQUIRE_FALSE(param->ToJson().Contains(SPARSE_IMMUTABLE));
+    REQUIRE_FALSE(param->ToJson().Contains("dmq_bits"));
+    REQUIRE_FALSE(param->ToJson().Contains(SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD));
 
     auto search_param_str = R"({
         "sindi": {
@@ -128,7 +138,56 @@ TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
     TEST_COMPATIBILITY_CASE(
         "avg_doc_term_length compatibility", avg_doc_term_length, 100, 200, false);
     TEST_COMPATIBILITY_CASE("remap_term_ids compatibility", remap_term_ids, false, true, false);
-    TEST_COMPATIBILITY_CASE("immutable compatibility", immutable, false, true, true);
+    TEST_COMPATIBILITY_CASE("immutable compatibility", immutable, false, true, false);
+    TEST_COMPATIBILITY_CASE("fp32 ignores dmq shared codebook threshold",
+                            dmq_shared_codebook_threshold,
+                            1024,
+                            1025,
+                            true);
+
+    SECTION("dmq shared codebook threshold compatibility") {
+        SINDIDefaultParam param1;
+        SINDIDefaultParam param2;
+        param1.rerank_type = SPARSE_RERANK_TYPE_DMQ8;
+        param2.rerank_type = SPARSE_RERANK_TYPE_DMQ8;
+        param1.dmq_shared_codebook_threshold = 1024;
+        param2.dmq_shared_codebook_threshold = 1025;
+        auto sindi_param1 = std::make_shared<vsag::SINDIParameter>();
+        auto sindi_param2 = std::make_shared<vsag::SINDIParameter>();
+        sindi_param1->FromString(generate_sindi_param(param1));
+        sindi_param2->FromString(generate_sindi_param(param2));
+        REQUIRE_FALSE(sindi_param1->CheckCompatibility(sindi_param2));
+    }
+
+    SECTION("rerank_type compatibility") {
+        SINDIDefaultParam fp32_param;
+        SINDIDefaultParam dmq_param;
+        dmq_param.rerank_type = SPARSE_RERANK_TYPE_DMQ8;
+        auto fp32_param_str = generate_sindi_param(fp32_param);
+        auto dmq_param_str = generate_sindi_param(dmq_param);
+        auto sindi_param1 = std::make_shared<vsag::SINDIParameter>();
+        auto sindi_param2 = std::make_shared<vsag::SINDIParameter>();
+        sindi_param1->FromString(fp32_param_str);
+        sindi_param2->FromString(dmq_param_str);
+        REQUIRE_FALSE(sindi_param1->CheckCompatibility(sindi_param2));
+    }
+
+    SECTION("legacy dmq rerank type is rejected") {
+        SINDIDefaultParam param1;
+        param1.rerank_type = "dmq";
+        auto param_str1 = generate_sindi_param(param1);
+        auto sindi_param1 = std::make_shared<vsag::SINDIParameter>();
+        REQUIRE_THROWS(sindi_param1->FromString(param_str1));
+    }
+
+    SECTION("dmq8 requires reorder") {
+        SINDIDefaultParam param1;
+        param1.use_reorder = false;
+        param1.rerank_type = SPARSE_RERANK_TYPE_DMQ8;
+        auto param_str1 = generate_sindi_param(param1);
+        auto sindi_param1 = std::make_shared<vsag::SINDIParameter>();
+        REQUIRE_THROWS(sindi_param1->FromString(param_str1));
+    }
 }
 
 TEST_CASE("SINDI immutable Parameter", "[ut][SINDIParameter]") {
@@ -139,7 +198,7 @@ TEST_CASE("SINDI immutable Parameter", "[ut][SINDIParameter]") {
         REQUIRE(param->immutable == false);
     }
 
-    SECTION("deserialize-only") {
+    SECTION("serialized only when enabled") {
         SINDIDefaultParam dp;
         dp.immutable = true;
         auto param = std::make_shared<vsag::SINDIParameter>();
@@ -147,7 +206,8 @@ TEST_CASE("SINDI immutable Parameter", "[ut][SINDIParameter]") {
         REQUIRE(param->immutable == true);
 
         auto json = param->ToJson();
-        REQUIRE_FALSE(json.Contains(SPARSE_IMMUTABLE));
+        REQUIRE(json.Contains(SPARSE_IMMUTABLE));
+        REQUIRE(json[SPARSE_IMMUTABLE].GetBool());
     }
 }
 
@@ -235,5 +295,30 @@ TEST_CASE("SINDI remap_term_ids Parameter", "[ut][SINDIParameter]") {
         auto param2 = std::make_shared<vsag::SINDIParameter>();
         param2->FromJson(json2);
         REQUIRE(param2->remap_term_ids == true);
+    }
+}
+
+TEST_CASE("SINDI DMQ shared codebook threshold Parameter", "[ut][SINDIParameter]") {
+    SECTION("default is 1024 when not specified") {
+        auto param = std::make_shared<vsag::SINDIParameter>();
+        param->FromString(
+            R"({"term_id_limit":1000,"window_size":50000,"rerank_type":"dmq8","use_reorder":true})");
+        REQUIRE(param->dmq_shared_codebook_threshold == 1024);
+        REQUIRE(param->ToJson()[SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD].GetInt() == 1024);
+    }
+
+    SECTION("zero disables sharing") {
+        SINDIDefaultParam default_param;
+        default_param.dmq_shared_codebook_threshold = 0;
+        auto param = std::make_shared<vsag::SINDIParameter>();
+        param->FromString(generate_sindi_param(default_param));
+        REQUIRE(param->dmq_shared_codebook_threshold == 0);
+    }
+
+    SECTION("negative values are rejected") {
+        SINDIDefaultParam default_param;
+        default_param.dmq_shared_codebook_threshold = -1;
+        auto param = std::make_shared<vsag::SINDIParameter>();
+        REQUIRE_THROWS(param->FromString(generate_sindi_param(default_param)));
     }
 }

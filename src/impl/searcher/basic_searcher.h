@@ -53,6 +53,17 @@ public:
            QueryContext* ctx,
            DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
+    DistHeapPtr
+    SearchWithPresetComputer(const GraphInterfacePtr& graph,
+                             const FlattenInterfacePtr& flatten,
+                             const VisitedListPtr& vl,
+                             const void* query,
+                             const InnerSearchParam& inner_search_param,
+                             const LabelTablePtr& label_table,
+                             QueryContext* ctx,
+                             DistanceRecordVector* rabitq_lower_bound_candidates,
+                             const ComputerInterfacePtr& preset_computer) const;
+
     virtual DistHeapPtr
     Search(const GraphInterfacePtr& graph,
            const FlattenInterfacePtr& flatten,
@@ -101,7 +112,8 @@ private:
                 const InnerSearchParam& inner_search_param,
                 const LabelTablePtr& label_table,
                 QueryContext* ctx,
-                DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+                DistanceRecordVector* rabitq_lower_bound_candidates,
+                const ComputerInterfacePtr& preset_computer) const;
 
     template <InnerSearchMode mode = KNN_SEARCH>
     DistHeapPtr

@@ -15,16 +15,21 @@
 
 #pragma once
 
-#include <chrono>
-#include <thread>
-#include <unordered_map>
+#include <cstdint>
+#include <vector>
 
 #include "monitor.h"
 namespace vsag::eval {
 
+struct LatencyTimingBatch {
+    std::vector<double> latency_ms;
+    uint64_t successful_query_count{0};
+    double wall_time_seconds{0.0};
+};
+
 class LatencyMonitor : public Monitor {
 public:
-    explicit LatencyMonitor(uint64_t max_record_counts = 0);
+    LatencyMonitor();
 
     ~LatencyMonitor() override = default;
 
@@ -38,7 +43,7 @@ public:
     GetResult() override;
 
     void
-    Record(void* input) override;
+    SetTimingBatch(LatencyTimingBatch timing_batch);
 
     void
     SetMetrics(std::string metric);
@@ -48,10 +53,10 @@ private:
     cal_and_set_result(const std::string& metric, JsonType& result);
 
     double
-    cal_qps();
+    cal_qps() const;
 
     double
-    cal_avg_latency();
+    cal_avg_latency() const;
 
     double
     cal_latency_rate(double rate);
@@ -59,8 +64,9 @@ private:
 private:
     std::vector<double> latency_records_;
 
-    using Clock = std::chrono::high_resolution_clock;
-    std::unordered_map<std::thread::id, decltype(Clock::now())> cur_time_;
+    uint64_t successful_query_count_{0};
+
+    double wall_time_seconds_{0.0};
 
     std::vector<std::string> metrics_;
 };

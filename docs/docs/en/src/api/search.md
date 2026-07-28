@@ -41,6 +41,15 @@ enum class SearchMode {
 | `limited_size_` | `int64_t` | `-1` | Cap on range results; `-1` means no limit. |
 | `params_str_` | `std::string` | `""` | Algorithm-specific search params as JSON (e.g. `ef_search`). |
 
+### IVF bucket routing
+
+IVF accepts `{"ivf":{"scan_buckets_count":N,"disable_bucket_scan":true}}` through
+`params_str_`. This routing-only mode returns the `N` selected bucket IDs per query in the
+result `Dataset` instead of vector labels. `NumElements()` equals the number of queries,
+`Dim()` equals `scan_buckets_count`, `GetIds()` contains bucket IDs (with `-1` for empty
+slots), and `GetDistances()` has distances to bucket centroids. No vector scan is performed,
+so filters, `topk`, range limits, reordering, and reasoning options are ignored.
+
 ### Filtering fields
 
 Three filtering mechanisms are available and are combined with logical **AND** when more than one is

@@ -64,6 +64,7 @@ public:
     float alpha{1.0F};
 
     bool support_duplicate{false};
+    bool deduplicate_storage{false};
     float duplicate_distance_threshold{0.0F};
     bool support_force_remove{false};
 

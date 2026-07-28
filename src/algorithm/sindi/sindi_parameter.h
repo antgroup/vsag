@@ -31,6 +31,13 @@ enum class SparseValueQuantizationType {
     FP16,
 };
 
+static constexpr const char* SPARSE_RERANK_TYPE = "rerank_type";
+static constexpr const char* SPARSE_RERANK_TYPE_FP32 = "fp32";
+static constexpr const char* SPARSE_RERANK_TYPE_DMQ8 = "dmq8";
+
+static constexpr const char* SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD = "dmq_shared_codebook_threshold";
+static constexpr uint32_t DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD = 1024;
+
 std::string
 SparseValueQuantizationTypeToString(SparseValueQuantizationType type);
 
@@ -60,6 +67,10 @@ public:
     SparseValueQuantizationType sparse_value_quant_type{SparseValueQuantizationType::FP32};
 
     bool remap_term_ids{false};
+
+    std::string rerank_type{SPARSE_RERANK_TYPE_FP32};
+
+    uint32_t dmq_shared_codebook_threshold{DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD};
 
     bool immutable{false};
 

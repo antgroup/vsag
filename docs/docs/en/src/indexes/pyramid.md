@@ -97,6 +97,10 @@ Build-time parameters live under `index_param`.
 | `reorder_source` | string | `"precise"` | Reorder from a separate precise store (`"precise"`) or from base storage (`"base"`). Split RaBitQ selects `"base"` automatically. |
 | `rabitq_bits_per_dim_precise` | int | unset | RaBitQ split `y` bits. When set with `base_quantization_type: "rabitq"` and `precise_quantization_type: "rabitq"`, Pyramid uses split storage; `rabitq_bits_per_dim_base` remains `x`, and `x + y <= 8`. |
 | `rabitq_error_rate` | float | quantizer default | Lower-bound error multiplier used by split RaBitQ search. |
+| `fast_encode_rabitq` | bool | `true` | Use the fast multi-bit RaBitQ encoder for RaBitQ base or precise storage; set to `false` for the exact encoder. |
+| `fast_encode_rabitq_rounds` | int | `6` | Fast RaBitQ refinement rounds in `[1, 32]`. |
+| `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | Base and reorder storage backends; `uring_io` is available in builds with liburing. |
+| `base_file_path` / `precise_file_path` | string | — | Required for disk-backed storage such as `buffer_io`, `async_io`, `uring_io`, or `mmap_io`. |
 | `index_min_size` | int | `0` | Minimum sub-index size; smaller groups fall back to scan. |
 | `support_duplicate` | bool | `false` | Allow duplicate ids. |
 | `build_thread_count` | int | `1` | Threads used for parallel build. |
@@ -254,6 +258,10 @@ new_index->Deserialize(binary_set);
 
 If you don't need path-based scoping, [HGraph](hgraph.md) is simpler and generally
 faster.
+
+Use [Index Analysis](../resources/analyze_index.md) to inspect Pyramid tree structure,
+per-subindex quality, sampled base recall, and duplicate ratios reported by `GetStats()`. Pyramid
+does not currently expose query-driven metrics through `AnalyzeIndexBySearch`.
 
 ## Mark remove
 

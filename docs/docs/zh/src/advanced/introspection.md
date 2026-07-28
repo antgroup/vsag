@@ -47,8 +47,11 @@ query_ds->NumElements(1)->SparseVectors(/* ... */);
 auto r = index->CalDistanceById(query_ds, ids, count, /*calculate_precise_distance=*/true);
 ```
 
-结果 `Dataset` 中 `GetDistances()` 持有 `count` 个距离。若某个 id 无效（不在索引中），对应位置
-返回 `-1.0F`。
+裸指针重载返回一行 `count` 个距离。对于公布 `SUPPORT_BATCH_CALC_DISTANCE_BY_ID` 能力的
+索引，`DatasetPtr` 重载可以处理多个 query，此时候选 ID 和距离是
+`NumElements() * count` 的 row-major 矩阵。无效 ID 对应 `-1.0F`。传入正数 `topk`
+时，每行会返回按距离排序的最近候选及其 ID。完整布局和支持矩阵见
+[按 ID 计算距离](calc_distance_by_id.md)。
 
 ### `calculate_precise_distance`
 

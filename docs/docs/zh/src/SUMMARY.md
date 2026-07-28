@@ -7,6 +7,7 @@
 - [安装](guide/installation.md)
 - [创建索引](guide/create_index.md)
 - [k-近邻搜索](guide/knn_search.md)
+- [C API](guide/c_api.md)
 - [pyvsag](guide/pyvsag.md)
 
 # 索引
@@ -17,6 +18,7 @@
 - [LazyHGraph](indexes/lazy_hgraph.md)
 - [IVF](indexes/ivf.md)
 - [SINDI](indexes/sindi.md)
+- [SIMQ](indexes/simq.md)
 - [Pyramid](indexes/pyramid.md)
 - [BruteForce](indexes/brute_force.md)
 
@@ -36,6 +38,7 @@
 # 开发者指南
 
 - [代码目录结构](development/code_structure.md)
+- [新索引接入检查清单](development/new_index_checklist.md)
 - [编译构建](development/building.md)
 - [离线 / 内网环境构建](development/offline_build.md)
 - [运行测试](development/testing.md)
@@ -44,6 +47,7 @@
 # 高级功能
 
 - [索引构建与训练](advanced/build_and_train.md)
+- [HGraph 构建缓存](advanced/build_cache.md)
 - [范围搜索](advanced/range_search.md)
 - [按 ID 计算距离](advanced/calc_distance_by_id.md)
 - [带过滤的搜索](advanced/filtered_search.md)
@@ -86,7 +90,8 @@
 
 - [FAQ 常见问题](resources/faq.md)
 - [版本日志](resources/release_notes.md)
-- [路线图](resources/roadmap_2025.md)
+  - [VSAG 1.0](resources/release_notes/v1.0.md)
+- [2025 路线图](resources/roadmap_2025.md)
 - [开源社区](resources/community.md)
 - [使用 AI Agent 创建 Issue](resources/filing_issues_with_agent.md)
 - [关联项目](resources/related_projects.md)

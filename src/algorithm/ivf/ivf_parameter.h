@@ -56,6 +56,7 @@ public:
 
 public:
     int64_t scan_buckets_count{30};
+    bool disable_bucket_scan{false};
     float first_order_scan_ratio{1.0F};
 
 private:

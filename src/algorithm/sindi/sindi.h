@@ -16,6 +16,7 @@
 #pragma once
 
 #include <optional>
+#include <string>
 
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sindi/term_id_mapper.h"
@@ -92,9 +93,7 @@ public:
     InitFeatures() override;
 
     std::unordered_map<std::string, uint64_t>
-    GetMemoryUsageDetail() const override {
-        return {};
-    }
+    GetMemoryUsageDetail() const override;
 
     std::string
     GetStats() const override;
@@ -179,7 +178,8 @@ public:
     CalDistanceById(const DatasetPtr& query,
                     const int64_t* ids,
                     int64_t count,
-                    bool calculate_precise_distance = true) const override;
+                    bool calculate_precise_distance = true,
+                    int64_t topk = -1) const override;
 
     std::pair<int64_t, int64_t>
     GetMinAndMaxId() const override;
@@ -258,8 +258,8 @@ private:
     void
     deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWindow& window) const;
 
-    void
-    serialize_immutable_window(StreamWriter& writer, const ImmutableSINDIWindow& window) const;
+    static void
+    serialize_immutable_window(StreamWriter& writer, const ImmutableSINDIWindow& window);
 
     void
     compact_window_to_immutable(const SparseTermDataCell& term_list,
@@ -359,9 +359,12 @@ private:
     float doc_prune_ratio_{0};   // ratio of docs pruned during build
     float doc_retain_ratio_{0};  // ratio of docs kept after pruning
 
-    FlattenInterfacePtr rerank_flat_{nullptr};  // re-rank back-end
+    FlattenInterfacePtr rerank_flat_{nullptr};  // re-rank datacell
 
     SparseValueQuantizationType sparse_value_quant_type_{SparseValueQuantizationType::FP32};
+
+    std::string rerank_type_{"fp32"};
+    uint32_t dmq_shared_codebook_threshold_{DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD};
 
     bool deserialize_without_footer_{false};  // backward-compat: old format lacks footer
     bool deserialize_without_buffer_{false};  // backward-compat: old format lacks buffer

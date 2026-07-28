@@ -68,19 +68,56 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `max_degree` | int | `64` | Maximum out-degree per graph node |
 | `ef_construction` | int | `400` | Candidate list size during build (higher = better recall, slower build) |
 | `graph_type` | string | `"nsw"` | Graph algorithm: `nsw` or `odescent` |
+| `use_reverse_edges` | bool | `false` | Track incoming neighbors for O(1) reverse-edge lookup. Roughly doubles edge storage and is unsupported with `graph_storage_type: "compressed"`. |
+| `label_remap_type` | string | `"pg"` | Label-to-inner-ID map implementation: `"pg"` or `"robin"`. Keep the same value when restoring or combining compatible indexes. |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse search |
+| `reorder_source` | string | `"precise"` | Reorder from `"precise"` codes or directly from `"base"` codes. RaBitQ x+y split sets `"base"` automatically. |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer used for reordering (takes effect only with `use_reorder: true`) |
 | `base_pq_dim` | int | `1` | Number of PQ subspaces. When using `pq` / `pqfs`, set this explicitly instead of relying on the default. |
+| `mrle_dim` | int | `0` | Output dimension for an MRLE transform in `tq_chain`; allowed range `[0, dim]`, where `0` means the input dimension. |
+| `fast_encode_rabitq` | bool | `true` | Use the fast multi-bit RaBitQ encoder; set to `false` for the previous exact encoder. |
+| `fast_encode_rabitq_rounds` | int | `6` | Fast RaBitQ coordinate-refinement rounds, in `[1, 32]`. |
 | `build_thread_count` | int | `100` | Threads used to parallelise build |
 | `support_duplicate` | bool | `false` | Enable duplicate-ID detection on insert |
+| `deduplicate_storage` | bool | `false` | Share vector storage between duplicates; requires `support_duplicate: true` |
 | `duplicate_distance_threshold` | float | `0.0` | Duplicate-detection distance threshold. When greater than `0`, deduplicate by the nearest candidate distance; when `0`, fall back to the current code `memcmp` check |
 | `support_remove` | bool | `false` | Enable graph delete-tracking metadata used by mark-remove recovery paths |
 | `support_force_remove` | bool | `false` | Enable `RemoveMode::FORCE_REMOVE` and its extra synchronization on the built index |
 | `store_raw_vector` | bool | `false` | Keep the raw vector in addition to the quantized copy (useful for `cosine`) |
 | `use_elp_optimizer` | bool | `false` | Auto-tune search parameters after build |
-| `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | Storage backend (`memory_io`, `block_memory_io`, `buffer_io`, `async_io`, `mmap_io`) |
-| `base_file_path` / `precise_file_path` | string | — | File path; required when the corresponding `*_io_type` is disk-backed (`buffer_io`, `async_io`, `mmap_io`) |
+| `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | Storage backend (`memory_io`, `block_memory_io`, `buffer_io`, `async_io`, `uring_io`, `mmap_io`) |
+| `base_file_path` / `precise_file_path` | string | — | File path; required when the corresponding `*_io_type` is disk-backed (`buffer_io`, `async_io`, `uring_io`, `mmap_io`) |
+| `base_direct_read` / `precise_direct_read` | bool | `false` | With `uring_io`, open the corresponding file using direct IO instead of the page cache. |
 | `hgraph_init_capacity` | int | `100` | Initial capacity hint (doesn't cap the final size) |
+| `persist_source_id` | bool | `false` | Persist source-ID metadata during serialization so a restored index can later export a reusable build cache. |
+
+`use_reverse_edges` is intended for workloads that need fast incoming-neighbor inspection, graph
+analysis, or future graph-maintenance algorithms. It is disabled by default because maintaining
+the reverse adjacency approximately doubles edge storage.
+
+`label_remap_type` changes the internal label map, not user-visible IDs. `"pg"` is the default;
+`"robin"` selects the alternate robin-map implementation. Benchmark the target ID distribution
+before changing it.
+
+### Deduplicating vector storage
+
+Set both `support_duplicate: true` and `deduplicate_storage: true` to let duplicate
+vectors share one physical code slot while retaining their individual labels. This option
+currently supports only dense-vector HGraph indexes using `graph_type: "nsw"`; it is not
+available for the separate HNSW index or for `graph_type: "odescent"`.
+
+The following operations and configurations are not supported while storage deduplication
+is enabled:
+
+- force removal (`support_force_remove: true`);
+- cache-assisted build after `ImportCache()`;
+- `Merge`;
+- legacy v0.14 serialization.
+
+`UpdateVector` is supported only for IDs whose vector storage is not shared with another
+duplicate-group member.
+
+Current serialization and streaming serialization are supported.
 
 ## Supported input data types
 
@@ -201,7 +238,7 @@ Search-time parameters live under the `hgraph` sub-object:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `ef_search` | int | — (required) | Size of the search frontier. Larger = higher recall, slower query. |
+| `ef_search` | int64 | — (required) | Positive search-frontier size. Any value up to `INT64_MAX` is accepted; there is no `topk`-relative upper bound. Larger values increase recall, latency, and frontier memory. |
 | `hops_limit` | int | unlimited | Hard cap on the number of hops the beam search performs before returning the current frontier. |
 | `skip_ratio` | float | `0.2` | Performance tuning parameter for filtered search. Controls the ratio of invalid points to skip, in range `[0.0, 1.0]`. `skip_ratio=0.2` means skip 20% of invalid points and only check 80%. Higher values improve performance but may reduce recall. Only applies to searches with filters. See [Filter Skip Strategy](#filter-skip-strategy-skip_ratio-and-skip_strategy) below. |
 | `skip_strategy` | string | `"deterministic_accumulative"` | Strategy for filter skipping. Options: `"random"` (random skipping) or `"deterministic_accumulative"` (deterministic cumulative skipping). See [Filter Skip Strategy](#filter-skip-strategy-skip_ratio-and-skip_strategy) below. |
@@ -322,6 +359,10 @@ Important notes:
 - Mixed workloads with incremental insertion (optionally force removal via `support_force_remove`).
 - Memory-constrained deployments that benefit from `sq8` / `sq4_uniform` / `pq` — often
   in combination with `use_reorder` to recover recall.
+
+For repeated daily or snapshot builds with stable source identifiers, see
+[HGraph Build Cache](../advanced/build_cache.md). It documents `Dataset::SourceID`,
+`ExportCache`/`ImportCache`, `persist_source_id`, and cache hit-rate diagnostics.
 
 If your workload is partition-heavy (coarse-grained buckets scanned per query) or
 strongly I/O-bound on a SSD, compare against [IVF](ivf.md) before committing to HGraph.

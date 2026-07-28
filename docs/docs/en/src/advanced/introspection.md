@@ -51,8 +51,12 @@ query_ds->NumElements(1)->SparseVectors(/* ... */);
 auto r = index->CalDistanceById(query_ds, ids, count, /*calculate_precise_distance=*/true);
 ```
 
-The result `Dataset` holds `count` distances in `GetDistances()`. A value of `-1.0F` means the
-corresponding id was invalid (not present in the index).
+The raw-pointer overload returns one row of `count` distances. The `DatasetPtr` overload can
+process several queries on indexes that advertise `SUPPORT_BATCH_CALC_DISTANCE_BY_ID`: candidate
+IDs and distances then form `NumElements() * count` row-major matrices. A value of `-1.0F` means
+the corresponding ID was invalid. A positive `topk` returns the nearest candidates per row,
+sorted by distance, together with their IDs. See
+[Calculate Distance by ID](calc_distance_by_id.md) for the layout and support matrix.
 
 ### `calculate_precise_distance`
 

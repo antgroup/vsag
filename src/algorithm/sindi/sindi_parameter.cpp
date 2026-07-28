@@ -15,6 +15,8 @@
 
 #include "sindi_parameter.h"
 
+#include <limits>
+
 #include "impl/logger/logger.h"
 #include "inner_string_params.h"
 #include "utils/param_compat_macros.h"
@@ -127,6 +129,43 @@ SINDIParameter::FromJson(const JsonType& json) {
         remap_term_ids = json[SPARSE_REMAP_TERM_IDS].GetBool();
     }
 
+    if (json.Contains(SPARSE_RERANK_TYPE)) {
+        rerank_type = json[SPARSE_RERANK_TYPE].GetString();
+    } else {
+        rerank_type = SPARSE_RERANK_TYPE_FP32;
+    }
+    CHECK_ARGUMENT(rerank_type == SPARSE_RERANK_TYPE_FP32 || rerank_type == SPARSE_RERANK_TYPE_DMQ8,
+                   fmt::format("rerank_type must be fp32 or dmq8, got {}", rerank_type));
+    CHECK_ARGUMENT(use_reorder || rerank_type == SPARSE_RERANK_TYPE_FP32,
+                   "rerank_type=dmq8 requires use_reorder=true");
+
+    if (json.Contains(SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD)) {
+        const auto threshold_json = json[SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD];
+        CHECK_ARGUMENT(threshold_json.IsNumberInteger(),
+                       "dmq_shared_codebook_threshold must be an integer");
+        if (threshold_json.IsNumberUnsigned()) {
+            const auto threshold = threshold_json.GetUint64();
+            CHECK_ARGUMENT(threshold <= std::numeric_limits<uint32_t>::max(),
+                           fmt::format("dmq_shared_codebook_threshold must be in [0, {}], got {}",
+                                       std::numeric_limits<uint32_t>::max(),
+                                       threshold));
+            dmq_shared_codebook_threshold = static_cast<uint32_t>(threshold);
+        } else {
+            const auto threshold = threshold_json.GetInt();
+            CHECK_ARGUMENT(threshold >= 0,
+                           fmt::format("dmq_shared_codebook_threshold must be in [0, {}], got {}",
+                                       std::numeric_limits<uint32_t>::max(),
+                                       threshold));
+            CHECK_ARGUMENT(static_cast<uint64_t>(threshold) <= std::numeric_limits<uint32_t>::max(),
+                           fmt::format("dmq_shared_codebook_threshold must be in [0, {}], got {}",
+                                       std::numeric_limits<uint32_t>::max(),
+                                       threshold));
+            dmq_shared_codebook_threshold = static_cast<uint32_t>(threshold);
+        }
+    } else {
+        dmq_shared_codebook_threshold = DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD;
+    }
+
     if (json.Contains(SPARSE_IMMUTABLE)) {
         immutable = json[SPARSE_IMMUTABLE].GetBool();
     }
@@ -146,6 +185,14 @@ SINDIParameter::ToJson() const {
     json[SPARSE_WINDOW_SIZE].SetInt(window_size);
     json[SPARSE_AVG_DOC_TERM_LENGTH].SetInt(avg_doc_term_length);
     json[SPARSE_REMAP_TERM_IDS].SetBool(remap_term_ids);
+    if (immutable) {
+        json[SPARSE_IMMUTABLE].SetBool(true);
+    }
+    json[SPARSE_RERANK_TYPE].SetString(rerank_type);
+    if (rerank_type == SPARSE_RERANK_TYPE_DMQ8) {
+        json[SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD].SetInt(
+            static_cast<int64_t>(dmq_shared_codebook_threshold));
+    }
     return json;
 }
 
@@ -159,6 +206,11 @@ SINDIParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, sparse_value_quant_type);
     CHECK_FIELD_EQ(*this, *p, avg_doc_term_length);
     CHECK_FIELD_EQ(*this, *p, remap_term_ids);
+    CHECK_FIELD_EQ(*this, *p, immutable);
+    CHECK_FIELD_EQ(*this, *p, rerank_type);
+    if (rerank_type == SPARSE_RERANK_TYPE_DMQ8) {
+        CHECK_FIELD_EQ(*this, *p, dmq_shared_codebook_threshold);
+    }
     return true;
 }
 

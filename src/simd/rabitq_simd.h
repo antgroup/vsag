@@ -28,6 +28,9 @@ RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
 
 namespace avx512 {
 float
+RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim);
+
+float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
 
 void
@@ -124,6 +127,16 @@ RaBitQFloatSupplementCodeIP(const float* vector,
 uint32_t
 RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
 
+uint64_t
+RaBitQCodeCodeIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
+void
+RaBitQPackScalarToSplitPlanes(const uint8_t* scalar_codes,
+                              uint8_t* filter_planes,
+                              uint8_t* supplement_planes,
+                              uint64_t dim,
+                              uint32_t total_bits,
+                              uint32_t filter_bits);
+
 void
 KacsWalk(float* data, uint64_t len);
 
@@ -141,6 +154,19 @@ RotateOp(float* data, int idx, int dim_, int step);
 }  // namespace avx512
 
 namespace avx2 {
+float
+RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim);
+
+uint64_t
+RaBitQCodeCodeIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
+void
+RaBitQPackScalarToSplitPlanes(const uint8_t* scalar_codes,
+                              uint8_t* filter_planes,
+                              uint8_t* supplement_planes,
+                              uint64_t dim,
+                              uint32_t total_bits,
+                              uint32_t filter_bits);
+
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
 
@@ -455,6 +481,16 @@ RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim);
 uint32_t
 RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
 
+uint64_t
+RaBitQCodeCodeIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
+void
+RaBitQPackScalarToSplitPlanes(const uint8_t* scalar_codes,
+                              uint8_t* filter_planes,
+                              uint8_t* supplement_planes,
+                              uint64_t dim,
+                              uint32_t total_bits,
+                              uint32_t filter_bits);
+
 void
 KacsWalk(float* data, uint64_t len);
 
@@ -472,6 +508,9 @@ RotateOp(float* data, int idx, int dim_, int step);
 }  // namespace generic
 
 namespace neon {
+float
+RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim);
+
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
 
@@ -510,6 +549,16 @@ RaBitQFloatSupplementCodeIP(const float* vector,
 
 uint32_t
 RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
+
+uint64_t
+RaBitQCodeCodeIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
+void
+RaBitQPackScalarToSplitPlanes(const uint8_t* scalar_codes,
+                              uint8_t* filter_planes,
+                              uint8_t* supplement_planes,
+                              uint64_t dim,
+                              uint32_t total_bits,
+                              uint32_t filter_bits);
 
 void
 KacsWalk(float* data, uint64_t len);
@@ -529,6 +578,9 @@ RotateOp(float* data, int idx, int dim_, int step);
 
 namespace sve {
 float
+RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim);
+
+float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
 
 void
@@ -566,6 +618,16 @@ RaBitQFloatSupplementCodeIP(const float* vector,
 
 uint32_t
 RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
+
+uint64_t
+RaBitQCodeCodeIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
+void
+RaBitQPackScalarToSplitPlanes(const uint8_t* scalar_codes,
+                              uint8_t* filter_planes,
+                              uint8_t* supplement_planes,
+                              uint64_t dim,
+                              uint32_t total_bits,
+                              uint32_t filter_bits);
 
 void
 KacsWalk(float* data, uint64_t len);
@@ -673,6 +735,14 @@ using RaBitQFloatSupplementCodeType = float (*)(const float* vector,
 
 using RaBitQSQ4UBinaryType = uint32_t (*)(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
 
+using RaBitQCodeCodeType = uint64_t (*)(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
+using RaBitQPackScalarToSplitPlanesType = void (*)(const uint8_t* scalar_codes,
+                                                   uint8_t* filter_planes,
+                                                   uint8_t* supplement_planes,
+                                                   uint64_t dim,
+                                                   uint32_t total_bits,
+                                                   uint32_t filter_bits);
+
 using RaBitQFloatSQType = float (*)(const float* vector, const uint8_t* codes, uint64_t dim);
 
 using FHTRotateType = void (*)(float* data, uint64_t dim_);
@@ -699,6 +769,8 @@ extern RaBitQFloatSplitCodeType RaBitQFloatSplitCodeIP;
 extern RaBitQFloatSupplementCodeType RaBitQFloatSupplementCodeIP;
 extern RaBitQFloatSQType RaBitQFloatSQIP;
 extern RaBitQSQ4UBinaryType RaBitQSQ4UBinaryIP;
+extern RaBitQCodeCodeType RaBitQCodeCodeIP;
+extern RaBitQPackScalarToSplitPlanesType RaBitQPackScalarToSplitPlanes;
 extern FHTRotateType FHTRotate;
 extern KacsWalkType KacsWalk;
 extern VecRescaleType VecRescale;

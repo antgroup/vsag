@@ -24,6 +24,59 @@ VSAG_DEFINE_SIMD_DISPATCH(RaBitQFloatThreeBitIPBatch4, RaBitQFloatThreeBitBatch4
 VSAG_DEFINE_SIMD_DISPATCH(RaBitQFloatSplitCodeIP, RaBitQFloatSplitCodeType);
 VSAG_DEFINE_SIMD_DISPATCH(RaBitQFloatSupplementCodeIP, RaBitQFloatSupplementCodeType);
 VSAG_DEFINE_SIMD_DISPATCH_VPOPCNTDQ(RaBitQSQ4UBinaryIP, RaBitQSQ4UBinaryType);
+static RaBitQCodeCodeType
+GetRaBitQCodeCodeIP() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::RaBitQCodeCodeIP;
+#endif
+    }
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQCodeCodeIP;
+#endif
+    }
+    if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::RaBitQCodeCodeIP;
+#endif
+    }
+    if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::RaBitQCodeCodeIP;
+#endif
+    }
+    return generic::RaBitQCodeCodeIP;
+}
+RaBitQCodeCodeType RaBitQCodeCodeIP = GetRaBitQCodeCodeIP();
+static RaBitQPackScalarToSplitPlanesType
+GetRaBitQPackScalarToSplitPlanes() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::RaBitQPackScalarToSplitPlanes;
+#endif
+    }
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQPackScalarToSplitPlanes;
+#endif
+    }
+    if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::RaBitQPackScalarToSplitPlanes;
+#endif
+    }
+    if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::RaBitQPackScalarToSplitPlanes;
+#endif
+    }
+    return generic::RaBitQPackScalarToSplitPlanes;
+}
+
+RaBitQPackScalarToSplitPlanesType RaBitQPackScalarToSplitPlanes =
+    GetRaBitQPackScalarToSplitPlanes();
+
 VSAG_DEFINE_SIMD_DISPATCH(FHTRotate, FHTRotateType);
 VSAG_DEFINE_SIMD_DISPATCH(KacsWalk, KacsWalkType);
 VSAG_DEFINE_SIMD_DISPATCH(VecRescale, VecRescaleType);
@@ -161,9 +214,31 @@ GetRaBitQFloatMultiBitIPBatch4ByLookup() {
 RaBitQFloatMultiBitBatch4ByLookupType RaBitQFloatMultiBitIPBatch4ByLookup =
     GetRaBitQFloatMultiBitIPBatch4ByLookup();
 
-// RaBitQFloatSQIP currently only has a generic implementation. Kept as
-// an explicit one-liner so the absence of SIMD variants is obvious.
-RaBitQFloatSQType RaBitQFloatSQIP = generic::RaBitQFloatSQIP;
+static RaBitQFloatSQType
+GetRaBitQFloatSQIP() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::RaBitQFloatSQIP;
+#endif
+    }
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQFloatSQIP;
+#endif
+    }
+    if (SimdStatus::SupportSVE()) {
+#if defined(ENABLE_SVE)
+        return sve::RaBitQFloatSQIP;
+#endif
+    }
+    if (SimdStatus::SupportNEON()) {
+#if defined(ENABLE_NEON)
+        return neon::RaBitQFloatSQIP;
+#endif
+    }
+    return generic::RaBitQFloatSQIP;
+}
+RaBitQFloatSQType RaBitQFloatSQIP = GetRaBitQFloatSQIP();
 
 // FlipSign only has AVX512 / SVE / NEON implementations (no AVX2, AVX
 // or SSE variants). Kept as an explicit cascade rather than introducing

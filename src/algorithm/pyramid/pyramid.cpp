@@ -276,7 +276,12 @@ IndexNode::Search(const SearchFunc& search_func,
                   const VisitedListPtr& vl,
                   const DistHeapPtr& search_result,
                   uint64_t ef_search) const {
-    if (status_ != IndexNode::Status::NO_INDEX) {
+    bool has_index = false;
+    {
+        std::shared_lock lock(mutex_);
+        has_index = status_ != IndexNode::Status::NO_INDEX;
+    }
+    if (has_index) {
         auto self_search_result = search_func(this, vl);
         search_result->Merge(*self_search_result);
         while (search_result->Size() > ef_search) {
@@ -934,6 +939,7 @@ Pyramid::InitFeatures() {
 
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
+        IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID,
     });
 
     // concurrency
@@ -1148,6 +1154,33 @@ Pyramid::add_one_point(const Hierarchy& h,
 
     if (node->status_ == IndexNode::Status::FLAT) {
         node->ids_.push_back(inner_id);
+        if (node->ids_.size() < node->index_min_size_) {
+            return;
+        }
+
+        // Keep the FLAT node intact until the replacement graph is complete.
+        IndexNode graph_node(allocator_, node->graph_param_, node->index_min_size_);
+        graph_node.level_ = node->level_;
+        graph_node.ids_ = node->ids_;
+        graph_node.Init();
+
+        auto codes = use_reorder_ ? precise_codes_ : base_codes_;
+        Vector<float> decoded_vector(dim_, allocator_);
+        for (const auto id : node->ids_) {
+            bool need_release = false;
+            const auto* buffer = codes->GetCodesById(id, need_release);
+            codes->Decode(buffer, decoded_vector.data());
+            if (need_release) {
+                codes->Release(buffer);
+            }
+            add_one_point(h, &graph_node, id, decoded_vector.data());
+        }
+
+        node->graph_ = std::move(graph_node.graph_);
+        node->graph_param_ = std::move(graph_node.graph_param_);
+        node->entry_point_ = graph_node.entry_point_;
+        node->status_ = IndexNode::Status::GRAPH;
+        Vector<InnerIdType>(allocator_).swap(node->ids_);
         return;
     }
 
@@ -1408,13 +1441,19 @@ DatasetPtr
 Pyramid::CalDistanceById(const float* query,
                          const int64_t* ids,
                          int64_t count,
-                         bool calculate_precise_distance) const {
+                         bool calculate_precise_distance,
+                         int64_t topk) const {
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     auto flat = this->base_codes_;
     if (has_precise_reorder() && calculate_precise_distance) {
         flat = this->precise_codes_;
     }
-    return InnerIndexInterface::cal_distance_by_id(query, ids, count, flat);
+    std::vector<bool> validity;
+    auto result = InnerIndexInterface::cal_distance_by_id(query, ids, count, flat, &validity);
+    if (topk == -1) {
+        return result;
+    }
+    return ApplyTopkWithValidity(result->GetDistances(), ids, count, 1, topk, validity, allocator_);
 }
 
 void

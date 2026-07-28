@@ -41,6 +41,15 @@ enum class SearchMode {
 | `limited_size_` | `int64_t` | `-1` | 范围结果的上限；`-1` 表示不限。 |
 | `params_str_` | `std::string` | `""` | 算法特有的搜索参数 JSON（如 `ef_search`）。 |
 
+### IVF 桶路由
+
+IVF 可通过 `params_str_` 接收
+`{"ivf":{"scan_buckets_count":N,"disable_bucket_scan":true}}`。该仅路由模式按查询返回
+`N` 个 bucket ID，而非向量 label。`NumElements()` 为查询数，`Dim()` 为
+`scan_buckets_count`，`GetIds()` 包含桶 ID（空槽位为 `-1`），
+`GetDistances()` 为到各桶中心的距离。不扫描桶内向量，因此过滤器、`topk`、范围限制、精排和
+reasoning 选项均会被忽略。
+
 ### 过滤字段
 
 有三种过滤机制可用；当启用了多于一种时，它们以逻辑**与（AND）**组合。

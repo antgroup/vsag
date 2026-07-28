@@ -126,6 +126,27 @@ vsag::Options::Instance().set_logger(&my_logger);
 `debug`、`info`、`warn`/`warning`、`error`、`critical` 或 `off`。无效值会被忽略，并保留默认等级。
 显式调用 `SetLevel` 仍会覆盖从环境变量得到的等级。
 
+### 启动 init banner
+
+VSAG 会在 `vsag::init()` 运行时输出启动初始化 banner。如需隐藏该 banner，
+请在进程启动前设置 `VSAG_SUPPRESS_INIT_BANNER`。这适用于测试、CI 任务，
+或需要更安静启动日志的应用。
+
+可识别的真值为 `1`、`on` 和 `true`；`on` 与 `true` 按 ASCII 大小写不敏感匹配，
+因此 `ON`、`On` 和 `TRUE` 也有效。其他值会保留 banner 输出。
+
+请务必在进程启动前设置该变量。VSAG 也会在静态初始化阶段运行
+`vsag::init()`，因此在进程内部稍后再设置该变量，无法隐藏首次 banner。
+
+banner 包含类似 `48C503G` 的 `instance spec` 值，将 cpuinfo 获取的核心数与物理内存总量合并展示。
+内存使用 `1024^3` 字节进行整 GiB 向下取整；如果平台查询失败，内存部分显示为 `?G`。包括
+`neon` 和 `sve` 在内的 SIMD 行，仍保持原有的 distribution/platform/using 能力语义。
+
+```bash
+VSAG_SUPPRESS_INIT_BANNER=1 ./your_vsag_app
+VSAG_SUPPRESS_INIT_BANNER=true ./your_vsag_test
+```
+
 ```cpp
 class Logger {
 public:

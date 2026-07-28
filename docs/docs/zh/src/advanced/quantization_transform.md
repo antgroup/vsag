@@ -120,16 +120,19 @@ token 两侧的空白会被自动 trim
 
 ### HGraph 顶层映射
 
-使用 HGraph 时，两个顶层快捷键会被映射到嵌套的量化器参数中
-（`src/algorithm/hgraph.cpp:370-385`）：
+使用 HGraph 时，顶层快捷键会被映射到嵌套的量化器参数中：
 
 - `tq_chain` → `base_codes.quantization_params.tq_chain`
 - `rabitq_pca_dim` → `base_codes.quantization_params.pca_dim`
+- `mrle_dim` → `base_codes.quantization_params.mrle_dim`
 
 `rabitq_pca_dim` 这个名字早于 Transform Quantizer 引入；当链中包含 `pca` 时，它实际
 驱动的是 **`pca` 变换的输出维**（与 RaBitQ 无关）。如果链以 `rabitq` 结尾且未使用
 `pca`，则同一个键会配置 RaBitQ 自身的 PCA 预处理
 （`src/quantization/rabitq_quantization/rabitq_quantizer_parameter.cpp:30`）。
+
+`mrle_dim` 接受 `[0, dim]` 内的整数；`0` 表示输入维度。它在 `tq_chain` 包含
+`mrle` 时生效，且 `mrle` 必须保持为链中的第一个变换。
 
 ## Reorder 与精确码存储
 

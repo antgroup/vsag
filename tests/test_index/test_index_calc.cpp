@@ -73,8 +73,6 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
         } else {
             result = index->CalDistanceById(
                 query->GetFloat32Vectors(), gts->GetIds() + (i * gt_topK), gt_topK);
-            REQUIRE_FALSE(
-                index->CalDistanceById(query, gts->GetIds() + (i * gt_topK), gt_topK).has_value());
         }
         if (not expected_success) {
             return;
@@ -103,6 +101,180 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
             REQUIRE(dist == -1);
         }
         queries->NumElements(query_count);
+    }
+
+    SECTION("test topk single-query batch") {
+        if (not index->CheckFeature(vsag::SUPPORT_BATCH_CALC_DISTANCE_BY_ID)) {
+            return;
+        }
+        int64_t topk = std::min(gt_topK, (int64_t)3);
+        for (int64_t i = 0; i < query_count; ++i) {
+            auto query = get_one_query(queries, i);
+            tl::expected<DatasetPtr, vsag::Error> result;
+            if (is_sparse) {
+                result = index->CalDistanceById(
+                    query, gts->GetIds() + (i * gt_topK), gt_topK, true, topk);
+            } else {
+                result = index->CalDistanceById(
+                    query->GetFloat32Vectors(), gts->GetIds() + (i * gt_topK), gt_topK, true, topk);
+            }
+            REQUIRE(result.has_value());
+            REQUIRE(result.value()->GetDim() == topk);
+            REQUIRE(result.value()->GetIds() != nullptr);
+            auto* topk_dists = result.value()->GetDistances();
+            auto* topk_ids = result.value()->GetIds();
+            for (int64_t j = 0; j < topk - 1; ++j) {
+                REQUIRE(topk_dists[j] <= topk_dists[j + 1]);
+            }
+            for (int64_t j = 0; j < topk; ++j) {
+                bool found = false;
+                for (int64_t k = 0; k < gt_topK; ++k) {
+                    if (topk_ids[j] == gts->GetIds()[i * gt_topK + k]) {
+                        REQUIRE(std::abs(topk_dists[j] - gts->GetDistances()[i * gt_topK + k]) <
+                                error);
+                        found = true;
+                        break;
+                    }
+                }
+                REQUIRE(found);
+            }
+        }
+    }
+}
+
+void
+TestIndex::TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
+                                               const TestDatasetPtr& dataset,
+                                               float error,
+                                               bool expected_success,
+                                               bool is_sparse,
+                                               bool expect_all_missing_on_failure) {
+    if (not index->CheckFeature(vsag::SUPPORT_BATCH_CALC_DISTANCE_BY_ID)) {
+        return;
+    }
+    auto queries = dataset->query_;
+    auto num_queries = queries->GetNumElements();
+    auto gts = dataset->ground_truth_;
+    auto gt_topK = dataset->top_k;
+    (void)is_sparse;
+    if (num_queries < 2) {
+        return;
+    }
+
+    // Use each query's own ground-truth IDs as the row-major batch ID matrix.
+    const int64_t* batch_ids = gts->GetIds();
+    auto multi_result = index->CalDistanceById(queries, batch_ids, gt_topK);
+    if (not expected_success) {
+        if (not expect_all_missing_on_failure) {
+            REQUIRE_FALSE(multi_result.has_value());
+            return;
+        }
+        REQUIRE(multi_result.has_value());
+        auto* distances = multi_result.value()->GetDistances();
+        for (int64_t q = 0; q < num_queries; ++q) {
+            for (int64_t j = 0; j < gt_topK; ++j) {
+                REQUIRE(distances[q * gt_topK + j] == -1);
+            }
+        }
+        return;
+    }
+    REQUIRE(multi_result.has_value());
+    auto* multi_distances = multi_result.value()->GetDistances();
+
+    for (int64_t q = 0; q < num_queries; ++q) {
+        auto single_query = get_one_query(queries, q);
+        const int64_t* row_ids = batch_ids + q * gt_topK;
+        auto single_result = index->CalDistanceById(single_query, row_ids, gt_topK);
+        REQUIRE(single_result.has_value());
+        auto* single_distances = single_result.value()->GetDistances();
+        for (int64_t j = 0; j < gt_topK; ++j) {
+            float expected_dist = single_distances[j];
+            float actual_dist = multi_distances[q * gt_topK + j];
+            REQUIRE(std::abs(expected_dist - actual_dist) < error);
+        }
+    }
+
+    SECTION("test non-existing id with multi-query") {
+        int64_t test_num = 5;
+        std::vector<int64_t> mixed_ids(num_queries * test_num);
+        for (int64_t q = 0; q < num_queries; ++q) {
+            const int64_t* row_ids = batch_ids + q * gt_topK;
+            for (int64_t i = 0; i < test_num; ++i) {
+                mixed_ids[q * test_num + i] =
+                    (i % 2 == 0) ? row_ids[i % gt_topK] : -(q * test_num + i + 1);
+            }
+        }
+        auto r2 = index->CalDistanceById(queries, mixed_ids.data(), test_num);
+        REQUIRE(r2.has_value());
+        auto* d2 = r2.value()->GetDistances();
+        for (int64_t q = 0; q < num_queries; ++q) {
+            for (int64_t i = 0; i < test_num; ++i) {
+                if (i % 2 != 0) {
+                    REQUIRE(d2[q * test_num + i] == -1);
+                }
+            }
+        }
+
+        auto topk_result = index->CalDistanceById(queries, mixed_ids.data(), test_num, true, 3);
+        REQUIRE(topk_result.has_value());
+        auto* topk_dists = topk_result.value()->GetDistances();
+        auto* topk_ids = topk_result.value()->GetIds();
+        for (int64_t q = 0; q < num_queries; ++q) {
+            for (int64_t i = 0; i < 3; ++i) {
+                REQUIRE(topk_ids[q * 3 + i] >= 0);
+                REQUIRE(topk_dists[q * 3 + i] != -1.0F);
+            }
+        }
+    }
+
+    SECTION("test topk multi-query batch") {
+        int64_t topk = std::min(gt_topK, (int64_t)3);
+        auto topk_result = index->CalDistanceById(queries, batch_ids, gt_topK, true, topk);
+        REQUIRE(topk_result.has_value());
+        auto* topk_dists = topk_result.value()->GetDistances();
+        auto* topk_ids_out = topk_result.value()->GetIds();
+        REQUIRE(topk_dists != nullptr);
+        REQUIRE(topk_ids_out != nullptr);
+        for (int64_t q = 0; q < num_queries; ++q) {
+            const float* row_dists = topk_dists + q * topk;
+            const int64_t* row_ids_out = topk_ids_out + q * topk;
+            for (int64_t i = 0; i < topk - 1; ++i) {
+                REQUIRE(row_dists[i] <= row_dists[i + 1]);
+            }
+            for (int64_t i = 0; i < topk; ++i) {
+                bool found = false;
+                for (int64_t j = 0; j < gt_topK; ++j) {
+                    if (row_ids_out[i] == batch_ids[q * gt_topK + j]) {
+                        float expected = multi_distances[q * gt_topK + j];
+                        REQUIRE(std::abs(row_dists[i] - expected) < error);
+                        found = true;
+                        break;
+                    }
+                }
+                REQUIRE(found);
+            }
+        }
+    }
+
+    SECTION("test topk > count returns all") {
+        int64_t big_topk = gt_topK + 100;
+        auto big_result = index->CalDistanceById(queries, batch_ids, gt_topK, true, big_topk);
+        REQUIRE(big_result.has_value());
+        REQUIRE(big_result.value()->GetDim() == gt_topK);
+        auto* big_dists = big_result.value()->GetDistances();
+        for (int64_t q = 0; q < num_queries; ++q) {
+            for (int64_t j = 0; j < gt_topK; ++j) {
+                REQUIRE(std::abs(big_dists[q * gt_topK + j] - multi_distances[q * gt_topK + j]) <
+                        error);
+            }
+        }
+    }
+
+    SECTION("test topk -1 no ids in result") {
+        auto default_result = index->CalDistanceById(queries, batch_ids, gt_topK);
+        REQUIRE(default_result.has_value());
+        REQUIRE(default_result.value()->GetIds() == nullptr);
+        REQUIRE(default_result.value()->GetDim() == gt_topK);
     }
 }
 

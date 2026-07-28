@@ -99,7 +99,8 @@ is_valid_streaming_io_type(const char* io_type) {
     const std::string_view type(io_type);
     return type == IO_TYPE_VALUE_MEMORY_IO || type == IO_TYPE_VALUE_BLOCK_MEMORY_IO ||
            type == IO_TYPE_VALUE_BUFFER_IO || type == IO_TYPE_VALUE_ASYNC_IO ||
-           type == IO_TYPE_VALUE_MMAP_IO || type == IO_TYPE_VALUE_READER_IO;
+           type == IO_TYPE_VALUE_MMAP_IO || type == IO_TYPE_VALUE_READER_IO ||
+           type == IO_TYPE_VALUE_URING_IO;
 }
 
 void
@@ -150,6 +151,22 @@ apply_hgraph_streaming_load_parameters(JsonType& index_param, const std::string&
                                   PRECISE_CODES_KEY,
                                   nullptr,
                                   load_json[HGRAPH_PRECISE_FILE_PATH].GetString().c_str());
+    }
+    if (load_json.Contains(HGRAPH_BASE_DIRECT_READ)) {
+        CHECK_ARGUMENT(load_json[HGRAPH_BASE_DIRECT_READ].IsBool(),
+                       "base_direct_read must be a boolean");
+        if (index_param.Contains(BASE_CODES_KEY)) {
+            index_param[BASE_CODES_KEY][IO_PARAMS_KEY][IO_DIRECT_READ_KEY].SetBool(
+                load_json[HGRAPH_BASE_DIRECT_READ].GetBool());
+        }
+    }
+    if (load_json.Contains(HGRAPH_PRECISE_DIRECT_READ)) {
+        CHECK_ARGUMENT(load_json[HGRAPH_PRECISE_DIRECT_READ].IsBool(),
+                       "precise_direct_read must be a boolean");
+        if (index_param.Contains(PRECISE_CODES_KEY)) {
+            index_param[PRECISE_CODES_KEY][IO_PARAMS_KEY][IO_DIRECT_READ_KEY].SetBool(
+                load_json[HGRAPH_PRECISE_DIRECT_READ].GetBool());
+        }
     }
     if (load_json.Contains(RAW_VECTOR_IO_TYPE)) {
         require_string_load_parameter(load_json, RAW_VECTOR_IO_TYPE);

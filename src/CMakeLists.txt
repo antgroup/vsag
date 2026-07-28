@@ -63,7 +63,8 @@ foreach (_lib vsag vsag_static)
 endforeach ()
 
 set (VSAG_DEP_LIBS antlr4-autogen antlr4-runtime diskann simd io quantizer storage utils factory analyzer
-      datacell ${IMPL_LIBS} ${ALGORITHM_LIBS} attr pthread m dl ${BLAS_LIBRARIES})
+      datacell rabitq_split_datacell_factory ${IMPL_LIBS} ${ALGORITHM_LIBS} attr pthread m dl
+      ${BLAS_LIBRARIES})
 
 # `vsag_src_common` aggregates third-party include paths and link
 # dependencies (fmt::fmt, nlohmann_json::nlohmann_json, tsl::robin_map, and

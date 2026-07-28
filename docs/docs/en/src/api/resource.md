@@ -128,6 +128,28 @@ created to choose `trace`, `debug`, `info`, `warn`/`warning`, `error`, `critical
 values are ignored and keep the default level. An explicit `SetLevel` call still overrides the
 environment-derived level.
 
+### Startup init banner
+
+VSAG logs a startup initialization banner when `vsag::init()` runs. To suppress that banner, set
+`VSAG_SUPPRESS_INIT_BANNER` before starting the process. This is useful for tests, CI jobs, or
+applications that need quieter startup logs.
+
+Truthy values are `1`, `on`, and `true`; matching for `on` and `true` is ASCII case-insensitive, so
+`ON`, `On`, and `TRUE` also work. Other values leave the banner enabled.
+
+Set the variable before process start. VSAG also runs `vsag::init()` during static initialization,
+so setting the variable later from inside the process cannot suppress the first banner.
+
+The banner includes an `instance spec` value such as `48C503G`, combining the cpuinfo core count
+with total physical memory. Memory is reported in whole GiB using floor division by `1024^3`; if the
+platform query fails, the memory portion is shown as `?G`. SIMD lines, including `neon` and `sve`,
+retain their existing distribution/platform/using capability semantics.
+
+```bash
+VSAG_SUPPRESS_INIT_BANNER=1 ./your_vsag_app
+VSAG_SUPPRESS_INIT_BANNER=true ./your_vsag_test
+```
+
 ```cpp
 class Logger {
 public:

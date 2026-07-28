@@ -133,16 +133,19 @@ The transformer JSON is read by `VectorTransformerParameter::FromJson`
 
 ### HGraph external mapping
 
-When using HGraph, two top-level shortcuts are mapped into the nested quantizer params
-(`src/algorithm/hgraph.cpp:370-385`):
+When using HGraph, top-level shortcuts are mapped into the nested quantizer params:
 
 - `tq_chain` → `base_codes.quantization_params.tq_chain`
 - `rabitq_pca_dim` → `base_codes.quantization_params.pca_dim`
+- `mrle_dim` → `base_codes.quantization_params.mrle_dim`
 
 The name `rabitq_pca_dim` predates Transform Quantizer; when the chain includes `pca`, it
 drives the **`pca` transformer's output dim** (it is not RaBitQ-specific). When the chain
 ends in `rabitq` without `pca`, the same key configures RaBitQ's own PCA preprocessing
 (`src/quantization/rabitq_quantization/rabitq_quantizer_parameter.cpp:30`).
+
+`mrle_dim` accepts an integer in `[0, dim]`; `0` means the input dimension. It has an effect when
+`tq_chain` includes `mrle`, which must remain the first transform in the chain.
 
 ## Reordering and the precise codes store
 

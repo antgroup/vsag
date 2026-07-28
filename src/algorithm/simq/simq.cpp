@@ -746,20 +746,35 @@ SIMQ::KnnSearch(const DatasetPtr& query,
     }
     uint64_t rerank_candidate_count = coarse_results.size();
 
-    // Exact MaxSim rerank via MultiVectorDataCell
+    // Exact MaxSim rerank via MultiVectorDataCell (batched for async IO)
     auto computer = mv_codes_->FactoryComputer(&query_mvs[0]);
     std::vector<std::pair<float, InnerIdType>> reranked;
     reranked.reserve(coarse_results.size());
     uint64_t filtered_candidate_count = 0;
+
+    // Collect all valid doc_ids first
+    std::vector<InnerIdType> batch_ids;
+    batch_ids.reserve(coarse_results.size());
     for (auto& [doc_id, _] : coarse_results) {
         if (filter != nullptr && !filter->CheckValid(this->label_table_->GetLabelById(doc_id))) {
             ++filtered_candidate_count;
             continue;
         }
-        float dist = 0.0F;
-        mv_codes_->Query(&dist, computer, &doc_id, 1);
-        ++stats.dist_cmp;
-        reranked.emplace_back(dist, doc_id);
+        batch_ids.push_back(doc_id);
+    }
+
+    // Single batched Query call (enables MultiRead in MultiVectorDataCell)
+    if (!batch_ids.empty()) {
+        std::vector<float> batch_dists(batch_ids.size());
+        mv_codes_->Query(batch_dists.data(),
+                         computer,
+                         batch_ids.data(),
+                         static_cast<InnerIdType>(batch_ids.size()));
+        stats.dist_cmp.fetch_add(static_cast<uint32_t>(batch_ids.size()),
+                                 std::memory_order_relaxed);
+        for (uint64_t i = 0; i < batch_ids.size(); i++) {
+            reranked.emplace_back(batch_dists[i], batch_ids[i]);
+        }
     }
     std::sort(reranked.begin(), reranked.end(), [](const auto& a, const auto& b) {
         return a.first < b.first;

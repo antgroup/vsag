@@ -256,6 +256,26 @@ LazyHGraph::CalcDistanceById(const float* query,
     return ActiveIndex()->CalcDistanceById(query, id, calculate_precise_distance);
 }
 
+DatasetPtr
+LazyHGraph::CalDistanceById(const float* query,
+                            const int64_t* ids,
+                            int64_t count,
+                            bool calculate_precise_distance,
+                            int64_t topk) const {
+    std::shared_lock lock(this->phase_mutex_);
+    return ActiveIndex()->CalDistanceById(query, ids, count, calculate_precise_distance, topk);
+}
+
+DatasetPtr
+LazyHGraph::CalDistanceById(const DatasetPtr& query,
+                            const int64_t* ids,
+                            int64_t count,
+                            bool calculate_precise_distance,
+                            int64_t topk) const {
+    std::shared_lock lock(this->phase_mutex_);
+    return ActiveIndex()->CalDistanceById(query, ids, count, calculate_precise_distance, topk);
+}
+
 bool
 LazyHGraph::CheckIdExist(int64_t id) const {
     std::shared_lock lock(this->phase_mutex_);
@@ -407,6 +427,7 @@ LazyHGraph::InitFeatures() {
         IndexFeature::SUPPORT_RANGE_SEARCH,
         IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
         IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
+        IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID,
         IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS,
         IndexFeature::SUPPORT_SEARCH_CONCURRENT,
         IndexFeature::SUPPORT_ADD_CONCURRENT,

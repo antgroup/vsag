@@ -62,19 +62,51 @@ auto result = index->KnnSearch(
 | `max_degree` | int | `64` | 图节点最大出度 |
 | `ef_construction` | int | `400` | 构建阶段的候选集大小（越大召回越高，构建越慢） |
 | `graph_type` | string | `"nsw"` | 构图算法：`nsw` 或 `odescent` |
+| `use_reverse_edges` | bool | `false` | 跟踪入边，实现 O(1) 反向邻居查找；边存储约翻倍，且 `graph_storage_type: "compressed"` 不支持 |
+| `label_remap_type` | string | `"pg"` | label 到内部 ID 的 map 实现：`"pg"` 或 `"robin"`；恢复或组合兼容索引时应保持一致 |
 | `use_reorder` | bool | `false` | 是否额外保留一份高精度副本用于精排 |
+| `reorder_source` | string | `"precise"` | 从 `"precise"` 编码或直接从 `"base"` 编码重排；RaBitQ x+y split 会自动设置为 `"base"` |
 | `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型（仅在 `use_reorder: true` 时生效） |
 | `base_pq_dim` | int | `1` | PQ 子空间数（`pq` / `pqfs` 时必填） |
+| `mrle_dim` | int | `0` | `tq_chain` 中 MRLE 的输出维度，范围 `[0, dim]`；`0` 表示输入维度 |
+| `fast_encode_rabitq` | bool | `true` | 使用多 bit RaBitQ 快速编码；设为 `false` 使用原有精确编码器 |
+| `fast_encode_rabitq_rounds` | int | `6` | RaBitQ 快速编码的坐标微调轮数，范围 `[1, 32]` |
 | `build_thread_count` | int | `100` | 构建阶段并发线程数 |
 | `support_duplicate` | bool | `false` | 是否在插入时做重复 ID 检测 |
+| `deduplicate_storage` | bool | `false` | 让重复向量共享存储；需同时设置 `support_duplicate: true` |
 | `duplicate_distance_threshold` | float | `0.0` | 重复判定距离阈值。大于 `0` 时按最近候选的距离判重；等于 `0` 时退化为当前编码 `memcmp` 判重 |
 | `support_remove` | bool | `false` | 是否启用 mark-remove 恢复路径所需的图删除追踪元数据 |
 | `support_force_remove` | bool | `false` | 是否启用 `RemoveMode::FORCE_REMOVE` 及其额外同步 |
 | `store_raw_vector` | bool | `false` | 除量化副本外再保留原始向量（`cosine` 场景有用） |
 | `use_elp_optimizer` | bool | `false` | 构建完成后自动调优检索参数 |
-| `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | 存储后端（`memory_io`、`block_memory_io`、`buffer_io`、`async_io`、`mmap_io`） |
-| `base_file_path` / `precise_file_path` | string | — | 磁盘后端时的文件路径（使用 `mmap_io` / `async_io` / `buffer_io` 时必填） |
+| `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | 存储后端（`memory_io`、`block_memory_io`、`buffer_io`、`async_io`、`uring_io`、`mmap_io`） |
+| `base_file_path` / `precise_file_path` | string | — | 磁盘后端时的文件路径（使用 `mmap_io` / `async_io` / `uring_io` / `buffer_io` 时必填） |
+| `base_direct_read` / `precise_direct_read` | bool | `false` | 使用 `uring_io` 时，以 direct IO 打开对应文件而非经过页缓存 |
 | `hgraph_init_capacity` | int | `100` | 初始容量提示（不会限制最终规模） |
+| `persist_source_id` | bool | `false` | 序列化时保留 Source ID 元数据，使恢复后的索引仍可导出可复用的构建缓存 |
+
+`use_reverse_edges` 面向需要快速检查入邻居、图分析或图维护算法的负载。维护反向邻接表会让边
+存储约翻倍，因此默认关闭。
+
+`label_remap_type` 只改变内部 label map，不改变用户 ID。默认值为 `"pg"`；
+`"robin"` 选择另一种 robin-map 实现，建议针对实际 ID 分布实测后再调整。
+
+### 向量存储去重
+
+同时设置 `support_duplicate: true` 和 `deduplicate_storage: true` 后，重复向量会共享
+同一个物理编码槽位，但仍保留各自的标签。该选项目前仅支持使用 `graph_type: "nsw"` 的
+稠密向量 HGraph 索引；独立的 HNSW 索引以及 `graph_type: "odescent"` 均不支持。
+
+启用存储去重后，暂不支持以下操作和配置：
+
+- 强制删除（`support_force_remove: true`）；
+- 调用 `ImportCache()` 后基于缓存加速构建；
+- `Merge`；
+- v0.14 旧版序列化格式。
+
+`UpdateVector` 仅支持尚未与其他重复组成员共享向量存储的 ID。
+
+当前序列化格式和 streaming serialization 均受支持。
 
 ## 支持的输入数据类型
 
@@ -188,7 +220,7 @@ base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `ef_search` | int | —（必填） | 搜索前沿候选集的大小，越大召回越高、查询越慢。 |
+| `ef_search` | int64 | —（必填） | 正数搜索前沿大小；接受到 `INT64_MAX`，不存在与 `topk` 相关的上限。值越大，召回、延迟和前沿内存通常都越高。 |
 | `hops_limit` | int | 不限 | beam search 在返回当前前沿前允许的最大跳数。 |
 | `skip_ratio` | float | `0.2` | 过滤场景下的性能调优参数。控制跳过无效点的比例，取值范围 `[0.0, 1.0]`。`skip_ratio=0.2` 表示跳过 20% 的无效点，只检查 80% 的无效点。值越大性能越好但召回率可能越低。仅在带 filter 的搜索中生效。详见下文[过滤跳过策略](#过滤跳过策略skip_ratio-与-skip_strategy)。 |
 | `skip_strategy` | string | `"deterministic_accumulative"` | 过滤跳过的策略。可选值：`"random"`（随机跳过）或 `"deterministic_accumulative"`（确定性累积跳过）。详见下文[过滤跳过策略](#过滤跳过策略skip_ratio-与-skip_strategy)。 |
@@ -297,6 +329,10 @@ auto result = index->KnnSearch(query, topk, params, my_filter).value();
 - 对延迟敏感且要求高召回的场景。
 - 需要增量插入（可选通过 `support_force_remove` 打开物理删除）的混合负载。
 - 内存受限环境，可用 `sq8` / `sq4_uniform` / `pq` 压缩，再配合 `use_reorder` 弥补召回。
+
+对于 Source ID 稳定的每日构建或快照构建，参见
+[HGraph 构建缓存](../advanced/build_cache.md)。其中说明了 `Dataset::SourceID`、
+`ExportCache`/`ImportCache`、`persist_source_id` 与缓存命中率诊断。
 
 如果你的业务偏向粗粒度分桶（每次查询只扫部分桶）或严重受 SSD I/O 制约，建议先对比
 [IVF](ivf.md) 再决定是否选择 HGraph。

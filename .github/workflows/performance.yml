@@ -28,7 +28,7 @@ jobs:
         # Performance benchmarks already run against OpenBLAS (the default
         # backend). Use the pre-installed system OpenBLAS so the BLAS build
         # itself doesn't eat into the daily perf window.
-        run: EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON" make release
+        run: EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON" make release VSAG_ENABLE_TOOLS=ON
       - name: Run Perf - Recall 90%, 95%, 99%
         run:  |
           ./build-release/tools/eval/eval_performance .github/perf-mini.yml

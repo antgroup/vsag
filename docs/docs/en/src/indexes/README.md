@@ -13,6 +13,7 @@ The pages in this section cover the actively developed indexes:
 | `lazy_hgraph` | [LazyHGraph](lazy_hgraph.md) | Small-to-growing FP32 collections that start exact and later convert to HGraph |
 | `ivf` | [IVF](ivf.md) | Partition-based search, high-throughput batch queries, large corpora |
 | `sindi` | [SINDI](sindi.md) | Sparse vectors (BM25 / learned sparse) on inner-product |
+| `simq` | [SIMQ](simq.md) | ColBERT-style multi-vector retrieval (MaxSim) |
 | `pyramid` | [Pyramid](pyramid.md) | Multi-tenant or tag-partitioned corpora with hierarchical paths |
 
 `brute_force` is also available as an exact-search baseline (see

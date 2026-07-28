@@ -92,6 +92,10 @@ auto result = index->KnnSearch(
 | `reorder_source` | string | `"precise"` | 从单独的 precise storage（`"precise"`）或 base storage（`"base"`）执行重排。RaBitQ split 会自动选择 `"base"`。 |
 | `rabitq_bits_per_dim_precise` | int | 未设置 | RaBitQ split 的 `y` bits。和 `base_quantization_type: "rabitq"`、`precise_quantization_type: "rabitq"` 一起设置时，Pyramid 使用 split storage；`rabitq_bits_per_dim_base` 仍表示 `x`，且 `x + y <= 8`。 |
 | `rabitq_error_rate` | float | 量化器默认值 | split RaBitQ 搜索使用的 lower-bound 误差倍率。 |
+| `fast_encode_rabitq` | bool | `true` | 对 RaBitQ 底层或精排存储使用多 bit 快速编码器；设为 `false` 使用精确编码器 |
+| `fast_encode_rabitq_rounds` | int | `6` | RaBitQ 快速编码的微调轮数，范围 `[1, 32]` |
+| `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | 底层与精排存储后端；以 liburing 构建时可用 `uring_io` |
+| `base_file_path` / `precise_file_path` | string | — | `buffer_io`、`async_io`、`uring_io`、`mmap_io` 等磁盘存储必须设置 |
 | `index_min_size` | int | `0` | 子索引的最小规模；小于该值的分区会退化为线性扫描 |
 | `support_duplicate` | bool | `false` | 是否允许重复 ID |
 | `build_thread_count` | int | `1` | 构建阶段并发线程数 |
@@ -240,6 +244,10 @@ new_index->Deserialize(binary_set);
   构图的分区。
 
 如果不需要按路径限定查询范围，[HGraph](hgraph.md) 更简洁，性能通常也更高。
+
+可以通过[索引分析](../resources/analyze_index.md)检查 Pyramid 的树结构、子索引质量、
+`GetStats()` 输出的 base 采样召回率和重复比例。Pyramid 目前不通过
+`AnalyzeIndexBySearch` 提供查询驱动指标。
 
 ## 标记删除
 

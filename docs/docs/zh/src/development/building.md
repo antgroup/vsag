@@ -2,6 +2,20 @@
 
 VSAG 是一个 C++ 项目，使用 CMake 构建。项目源码使用 C++17 标准编写，请确保你使用的编译器支持 C++17 的语法。我们建议你使用 GCC 9.4.0 或者 Clang 13.0.0 以后的版本，因为这些版本在我们的开发中工作良好。
 
+支持的平台包括 Ubuntu 20.04+、CentOS 7+，以及 Apple Silicon 上的 macOS 14+。
+macOS 使用 Xcode Command Line Tools 提供的 Apple Clang 和 Homebrew 依赖；当前支持范围是
+arm64 核心 C++ 构建，预编译 C++ 包与 Python wheel 仍以 Linux 为主。首次构建前运行：
+
+```bash
+./scripts/deps/install_deps.sh
+```
+
+脚本会自动选择 Linux 发行版或 macOS 对应的依赖安装流程。
+
+如果需要启用 Linux `io_uring` 后端，请安装 liburing，并在直接配置 CMake 时添加
+`-DENABLE_LIBURING=ON`。默认值为 `OFF`；在非 Linux 平台或未找到 liburing 时，
+请求 `uring_io` 的配置会打印一次性告警并回退到 `buffer_io`。
+
 在 CMake 配置中，有许多参数和编译目标。为了方便使用，我们将常用的编译目标（或命令）写到了 Makefile 中，使用 Unix Makefiles 进行管理，已避免记忆各种配置或者从命令行输入大段参数。这些编译目标（或命令）可以通过在项目根目录运行 `make help` 查看：
 
 ```bash

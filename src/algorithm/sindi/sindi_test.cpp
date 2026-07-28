@@ -43,6 +43,20 @@ public:
     TermListsHeapInsertPruneThreshold() {
         return SINDI::K_TERM_LISTS_HEAP_INSERT_PRUNE_THRESHOLD;
     }
+
+    static void
+    SerializeImmutableWindow(const SINDI& index,
+                             StreamWriter& writer,
+                             const ImmutableSINDIWindow& window) {
+        index.serialize_immutable_window(writer, window);
+    }
+
+    static void
+    DeserializeImmutableWindow(const SINDI& index,
+                               StreamReader& reader,
+                               ImmutableSINDIWindow& window) {
+        index.deserialize_immutable_window(reader, window);
+    }
 };
 
 }  // namespace vsag
@@ -539,7 +553,7 @@ TEST_CASE("SINDI Quantization Test", "[ut][SINDI]") {
     }
 }
 
-TEST_CASE("SINDI Immutable Deserialize KNN Test", "[ut][SINDI]") {
+TEST_CASE("SINDI Immutable Sparse Deserialize KNN Test", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
@@ -594,7 +608,7 @@ TEST_CASE("SINDI Immutable Deserialize KNN Test", "[ut][SINDI]") {
         "term_id_limit": {},
         "remap_term_ids": {},
         "avg_doc_term_length": 64,
-        "immutable": false
+        "immutable": true
     }})",
                                         use_reorder,
                                         use_quantization,
@@ -709,6 +723,117 @@ TEST_CASE("SINDI Immutable Runtime Rejects Mutable Operations", "[ut][SINDI]") {
     REQUIRE_NOTHROW(index.Serialize(writer));
 }
 
+TEST_CASE("SINDI Immutable Sparse Window Serialization Size", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    auto param = std::make_shared<vsag::SINDIParameter>();
+    param->FromJson(vsag::JsonType::Parse(R"({
+        "use_quantization": false,
+        "window_size": 10000,
+        "term_id_limit": 50000000,
+        "remap_term_ids": true,
+        "immutable": true
+    })"));
+    SINDI index(param, common_param);
+
+    ImmutableSINDIWindow window(allocator.get());
+    window.sorted_global_terms.push_back(24000000);
+    window.offsets.push_back(0);
+    window.offsets.push_back(1);
+    window.id_payloads.push_back(7);
+    window.value_payloads.resize(sizeof(float));
+
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    SINDITestAccess::SerializeImmutableWindow(index, writer, window);
+
+    constexpr uint64_t vector_header_bytes = sizeof(uint64_t) * 4;
+    constexpr uint64_t vector_payload_bytes =
+        sizeof(uint32_t) + sizeof(uint32_t) * 2 + sizeof(uint16_t) + sizeof(float);
+    REQUIRE(writer.GetCursor() == vector_header_bytes + vector_payload_bytes);
+}
+
+TEST_CASE("SINDI Immutable Sparse Window Rejects Excessive Term Count", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    auto param = std::make_shared<vsag::SINDIParameter>();
+    param->FromJson(vsag::JsonType::Parse(R"({
+        "use_quantization": false,
+        "window_size": 10000,
+        "term_id_limit": 100,
+        "remap_term_ids": true,
+        "immutable": true
+    })"));
+    SINDI index(param, common_param);
+
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    const uint64_t excessive_term_count = 101;
+    StreamWriter::WriteObj(writer, excessive_term_count);
+
+    vsag::IOStreamReader reader(stream);
+    ImmutableSINDIWindow window(allocator.get());
+    REQUIRE_THROWS_AS(SINDITestAccess::DeserializeImmutableWindow(index, reader, window),
+                      vsag::VsagException);
+}
+
+TEST_CASE("SINDI Immutable Sparse Window Rejects Mismatched Offset Count", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    auto param = std::make_shared<vsag::SINDIParameter>();
+    param->FromJson(vsag::JsonType::Parse(R"({
+        "use_quantization": false,
+        "window_size": 10000,
+        "term_id_limit": 100,
+        "remap_term_ids": true,
+        "immutable": true
+    })"));
+    SINDI index(param, common_param);
+
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    StreamWriter::WriteVector(writer, std::vector<uint32_t>{0});
+    const uint64_t mismatched_offset_count = 101;
+    StreamWriter::WriteObj(writer, mismatched_offset_count);
+
+    vsag::IOStreamReader reader(stream);
+    ImmutableSINDIWindow window(allocator.get());
+    REQUIRE_THROWS_AS(SINDITestAccess::DeserializeImmutableWindow(index, reader, window),
+                      vsag::VsagException);
+}
+
+TEST_CASE("SINDI Immutable Sparse Window Rejects Excessive Posting Count", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    auto param = std::make_shared<vsag::SINDIParameter>();
+    param->FromJson(vsag::JsonType::Parse(R"({
+        "use_quantization": false,
+        "window_size": 10000,
+        "term_id_limit": 100,
+        "remap_term_ids": true,
+        "immutable": true
+    })"));
+    SINDI index(param, common_param);
+
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    StreamWriter::WriteVector(writer, std::vector<uint32_t>{0});
+    StreamWriter::WriteVector(writer, std::vector<uint32_t>{0, 10001});
+
+    vsag::IOStreamReader reader(stream);
+    ImmutableSINDIWindow window(allocator.get());
+    REQUIRE_THROWS_AS(SINDITestAccess::DeserializeImmutableWindow(index, reader, window),
+                      vsag::VsagException);
+}
+
 TEST_CASE("SINDI Immutable Build Search And Serialize Test", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
@@ -801,10 +926,15 @@ TEST_CASE("SINDI Immutable Build Search And Serialize Test", "[ut][SINDI]") {
     add_data->NumElements(1)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
     REQUIRE_THROWS_AS(immutable_index->Add(add_data), vsag::VsagException);
 
-    auto mutable_from_immutable = std::make_unique<SINDI>(mutable_param, common_param);
     auto immutable_from_immutable = std::make_unique<SINDI>(immutable_param, common_param);
-    test_serializion(*immutable_index, *mutable_from_immutable);
+    auto mutable_from_immutable = std::make_unique<SINDI>(mutable_param, common_param);
+    REQUIRE_THROWS_AS(test_serializion(*immutable_index, *mutable_from_immutable),
+                      vsag::VsagException);
     test_serializion(*immutable_index, *immutable_from_immutable);
+
+    auto immutable_from_mutable = std::make_unique<SINDI>(immutable_param, common_param);
+    REQUIRE_THROWS_AS(test_serializion(*mutable_index, *immutable_from_mutable),
+                      vsag::VsagException);
 
     static constexpr auto search_param_str = R"(
     {
@@ -822,20 +952,14 @@ TEST_CASE("SINDI Immutable Build Search And Serialize Test", "[ut][SINDI]") {
         query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
         auto expected = mutable_index->KnnSearch(query, 10, search_param_str, nullptr);
         auto built = immutable_index->KnnSearch(query, 10, search_param_str, nullptr);
-        auto mutable_roundtrip =
-            mutable_from_immutable->KnnSearch(query, 10, search_param_str, nullptr);
         auto immutable_roundtrip =
             immutable_from_immutable->KnnSearch(query, 10, search_param_str, nullptr);
         REQUIRE(built->GetDim() == expected->GetDim());
-        REQUIRE(mutable_roundtrip->GetDim() == expected->GetDim());
         REQUIRE(immutable_roundtrip->GetDim() == expected->GetDim());
         for (int64_t j = 0; j < expected->GetDim(); ++j) {
             REQUIRE(built->GetIds()[j] == expected->GetIds()[j]);
-            REQUIRE(mutable_roundtrip->GetIds()[j] == expected->GetIds()[j]);
             REQUIRE(immutable_roundtrip->GetIds()[j] == expected->GetIds()[j]);
             REQUIRE(std::abs(built->GetDistances()[j] - expected->GetDistances()[j]) < 1e-3);
-            REQUIRE(std::abs(mutable_roundtrip->GetDistances()[j] - expected->GetDistances()[j]) <
-                    1e-3);
             REQUIRE(std::abs(immutable_roundtrip->GetDistances()[j] - expected->GetDistances()[j]) <
                     1e-3);
         }
@@ -1505,6 +1629,42 @@ TEST_CASE("SINDI Remap UpdateVector Compatibility", "[ut][SINDI]") {
         delete[] item.vals_;
         delete[] item.ids_;
     }
+}
+
+TEST_CASE("SINDI DMQ EstimateMemory uses compact IDs and shared codebooks", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 100000;
+
+    constexpr uint32_t term_id_limit = 100000;
+    constexpr uint64_t num_elements = 1000;
+    auto estimate_memory = [&](bool remap_term_ids, uint32_t shared_codebook_threshold) {
+        auto parameter = std::make_shared<SINDIParameter>();
+        parameter->FromString(fmt::format(R"({{
+            "use_reorder": true,
+            "rerank_type": "dmq8",
+            "term_id_limit": {},
+            "window_size": 10000,
+            "avg_doc_term_length": 100,
+            "remap_term_ids": {},
+            "dmq_shared_codebook_threshold": {}
+        }})",
+                                          term_id_limit,
+                                          remap_term_ids,
+                                          shared_codebook_threshold));
+        return SINDI(parameter, common_param).EstimateMemory(num_elements);
+    };
+
+    const uint64_t shared_memory = estimate_memory(false, 1024);
+    const uint64_t unshared_memory = estimate_memory(false, 0);
+    REQUIRE(shared_memory * 10 < unshared_memory);
+
+    const uint64_t remapped_shared_memory = estimate_memory(true, 1024);
+    constexpr uint64_t term_id_mapper_entry_memory_bytes = 54;
+    REQUIRE(remapped_shared_memory - shared_memory ==
+            term_id_limit * term_id_mapper_entry_memory_bytes);
 }
 
 TEST_CASE("SINDI Remap Memory Comparison", "[ut][SINDI]") {

@@ -17,8 +17,28 @@
 file (GLOB DATACELL_SRCS "*.cpp")
 list (FILTER DATACELL_SRCS EXCLUDE REGEX "_test.cpp")
 
+set (RABITQ_SPLIT_FACTORY_SRCS
+     "${CMAKE_CURRENT_SOURCE_DIR}/rabitq_split_datacell_factory_l2.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/rabitq_split_datacell_factory_ip.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/rabitq_split_datacell_factory_cosine.cpp")
+list (REMOVE_ITEM DATACELL_SRCS ${RABITQ_SPLIT_FACTORY_SRCS})
+
+add_library (rabitq_split_datacell_factory OBJECT ${RABITQ_SPLIT_FACTORY_SRCS})
+target_link_libraries (
+  rabitq_split_datacell_factory
+  PRIVATE transform quantizer io attr coverage_config vsag_src_common)
+if (CMAKE_GENERATOR MATCHES "Ninja")
+    set_property (GLOBAL APPEND PROPERTY JOB_POOLS rabitq_split_factory_pool=1)
+    set_property (
+      TARGET rabitq_split_datacell_factory
+      PROPERTY JOB_POOL_COMPILE rabitq_split_factory_pool)
+endif ()
+
 add_library (datacell OBJECT ${DATACELL_SRCS})
 target_link_libraries (datacell PRIVATE transform quantizer io attr coverage_config vsag_src_common)
+if (CMAKE_GENERATOR MATCHES "Ninja")
+    set_property (TARGET datacell PROPERTY JOB_POOL_COMPILE rabitq_split_factory_pool)
+endif ()
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE DATACELL_TESTS "*_test.cpp")

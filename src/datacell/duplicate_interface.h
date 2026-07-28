@@ -39,6 +39,12 @@ public:
     [[nodiscard]] virtual auto
     GetGroupId(InnerIdType id) const -> InnerIdType = 0;
 
+    [[nodiscard]] virtual auto
+    GetGroupSize(InnerIdType id) const -> uint64_t {
+        auto group_id = this->GetGroupId(id);
+        return static_cast<uint64_t>(this->GetDuplicateIds(group_id).size()) + 1;
+    }
+
     virtual void
     Serialize(StreamWriter& writer) const = 0;
 
@@ -47,6 +53,18 @@ public:
 
     virtual void
     DeserializeFromLegacyFormat(StreamReader& reader, size_t total_size) = 0;
+
+    virtual void
+    MergeOther(const DuplicateInterface& other, InnerIdType bias, InnerIdType count) {
+        for (InnerIdType id = 0; id < count; ++id) {
+            if (other.GetGroupId(id) != id) {
+                continue;
+            }
+            for (auto duplicate_id : other.GetDuplicateIds(id)) {
+                this->SetDuplicateId(id + bias, duplicate_id + bias);
+            }
+        }
+    }
 
     virtual void
     Resize(InnerIdType new_size) = 0;

@@ -56,11 +56,8 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
         }
         if (not vl->Get(neighbors[i])) {
             vl->Set(neighbors[i]);
-            // Removed filter->CheckValid() to eliminate duplicate filter checking.
-            // Filter is applied at result-collection stage.
-            // ShouldVisit() probabilistically gates traversal to preserve graph connectivity.
             if (not filter || count_no_visited == 0 || skip_strategy == nullptr ||
-                skip_strategy->ShouldVisit()) {
+                skip_strategy->ShouldVisit() || filter->CheckValid(neighbors[i])) {
                 to_be_visited_id[count_no_visited] = neighbors[i];
                 count_no_visited++;
             }
@@ -86,7 +83,8 @@ BasicSearcher::Search(const GraphInterfacePtr& graph,
                                              inner_search_param,
                                              label_table,
                                              ctx,
-                                             rabitq_lower_bound_candidates);
+                                             rabitq_lower_bound_candidates,
+                                             nullptr);
     }
     return this->search_impl<RANGE_SEARCH>(graph,
                                            flatten,
@@ -95,7 +93,40 @@ BasicSearcher::Search(const GraphInterfacePtr& graph,
                                            inner_search_param,
                                            label_table,
                                            ctx,
-                                           rabitq_lower_bound_candidates);
+                                           rabitq_lower_bound_candidates,
+                                           nullptr);
+}
+
+DistHeapPtr
+BasicSearcher::SearchWithPresetComputer(const GraphInterfacePtr& graph,
+                                        const FlattenInterfacePtr& flatten,
+                                        const VisitedListPtr& vl,
+                                        const void* query,
+                                        const InnerSearchParam& inner_search_param,
+                                        const LabelTablePtr& label_table,
+                                        QueryContext* ctx,
+                                        DistanceRecordVector* rabitq_lower_bound_candidates,
+                                        const ComputerInterfacePtr& preset_computer) const {
+    if (inner_search_param.search_mode == KNN_SEARCH) {
+        return this->search_impl<KNN_SEARCH>(graph,
+                                             flatten,
+                                             vl,
+                                             query,
+                                             inner_search_param,
+                                             label_table,
+                                             ctx,
+                                             rabitq_lower_bound_candidates,
+                                             preset_computer);
+    }
+    return this->search_impl<RANGE_SEARCH>(graph,
+                                           flatten,
+                                           vl,
+                                           query,
+                                           inner_search_param,
+                                           label_table,
+                                           ctx,
+                                           rabitq_lower_bound_candidates,
+                                           preset_computer);
 }
 
 DistHeapPtr
@@ -326,7 +357,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            const InnerSearchParam& inner_search_param,
                            const LabelTablePtr& label_table,
                            QueryContext* ctx,
-                           DistanceRecordVector* rabitq_lower_bound_candidates) const {
+                           DistanceRecordVector* rabitq_lower_bound_candidates,
+                           const ComputerInterfacePtr& preset_computer) const {
     // set customize query alloctor
     Allocator* alloc = select_query_allocator(ctx, allocator_);
 
@@ -337,7 +369,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         return top_candidates;
     }
 
-    auto computer = flatten->FactoryComputer(query);
+    auto computer = preset_computer != nullptr ? preset_computer : flatten->FactoryComputer(query);
 
     auto is_id_allowed = inner_search_param.is_inner_id_allowed;
     auto ep = inner_search_param.ep;
@@ -539,9 +571,16 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             if (min_distance <= inner_search_param.duplicate_distance_threshold) {
                 inner_search_param.duplicate_id = min_index;
             }
-        } else if (inner_search_param.duplicate_query_id < flatten->TotalCount() &&
-                   flatten->CompareVectors(inner_search_param.duplicate_query_id, min_index)) {
-            inner_search_param.duplicate_id = min_index;
+        } else {
+            const bool has_stored_query =
+                inner_search_param.duplicate_query_id < flatten->TotalCount();
+            const bool is_duplicate =
+                has_stored_query
+                    ? flatten->CompareVectors(inner_search_param.duplicate_query_id, min_index)
+                    : flatten->CompareRawVectorWithId(query, min_index);
+            if (is_duplicate) {
+                inner_search_param.duplicate_id = min_index;
+            }
         }
     }
 

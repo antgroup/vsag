@@ -88,6 +88,26 @@ silently skipped and not counted.
 
 A runnable example is available at `examples/cpp/303_feature_remove.cpp`.
 
+### BruteForce Deletion
+
+BruteForce also supports both modes, but it does **not** use HGraph's
+`support_force_remove` setting. `MARK_REMOVE` writes a tombstone and keeps vector storage.
+`FORCE_REMOVE` needs no extra configuration: it physically removes entries, moving the final
+internal slot when necessary while keeping external ids intact.
+
+BruteForce uses `block_memory_io` by default. Every successful force-removal batch reduces its
+logical vector and optional extra-information storage to the live entry count and releases trailing
+complete blocks; its final partial block remains allocated. The label table reclaims its backing
+allocation when its live entry count falls to at most half of its current capacity, avoiding repeated
+full-table copies. `GetMemoryUsage()` reflects the compacted index allocation. This does not guarantee that the
+process allocator immediately returns memory to the operating system or that RSS decreases. Force removal is synchronous and takes the
+BruteForce global exclusive lock, so it waits for in-flight searches and blocks new searches while
+it runs; batch ids and avoid it on latency-sensitive paths.
+
+```cpp
+index->Remove(std::vector<int64_t>{id1, id2}, vsag::RemoveMode::FORCE_REMOVE);
+```
+
 ## Updating Vectors and Ids
 
 ### `UpdateVector`

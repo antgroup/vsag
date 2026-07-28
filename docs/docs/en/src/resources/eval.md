@@ -87,6 +87,24 @@ Note: under `global.exporters`, each entry is a **named** exporter (a YAML map),
 - **Latency**: average, P50/P95/P99
 - **Resource**: peak memory usage
 
+### Search Measurement Semantics
+
+- **Latency** is the elapsed wall duration of each measured `Index::KnnSearch` call, measured
+  with the monotonic `std::chrono::steady_clock`.
+- **QPS** is the number of successful queries divided by the wall duration, in seconds, of the
+  measured search pass.
+- Statistics extraction, recall calculation, and memory sampling run outside the performance
+  pass and do not contribute to latency or QPS.
+- Every measured query is included, including the first query on each worker. The tool does not
+  apply an implicit warm-up; run any desired warm-up explicitly before the measured pass.
+
+JSON results include `measurement_method`, `measurement_sample_count`,
+`measurement_successful_query_count`, and `measurement_duration(s)` so the measurement population
+and method can be audited.
+
+Results produced by older versions that measured intervals between monitor callbacks are not
+directly comparable with results that use these semantics.
+
 ## Search Modes
 
 `search_mode` accepts `knn`, `range`, `knn_filter`, and `range_filter`.

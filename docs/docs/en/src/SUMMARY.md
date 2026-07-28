@@ -7,6 +7,7 @@
 - [Installation](guide/installation.md)
 - [Creating an Index](guide/create_index.md)
 - [k-Nearest Neighbor Search](guide/knn_search.md)
+- [C API](guide/c_api.md)
 - [pyvsag](guide/pyvsag.md)
 
 # Indexes
@@ -17,6 +18,7 @@
 - [LazyHGraph](indexes/lazy_hgraph.md)
 - [IVF](indexes/ivf.md)
 - [SINDI](indexes/sindi.md)
+- [SIMQ](indexes/simq.md)
 - [Pyramid](indexes/pyramid.md)
 - [BruteForce](indexes/brute_force.md)
 
@@ -36,6 +38,7 @@
 # Developer Guide
 
 - [Code Structure](development/code_structure.md)
+- [New Index Integration Checklist](development/new_index_checklist.md)
 - [Building](development/building.md)
 - [Offline / Air-gapped Builds](development/offline_build.md)
 - [Running Tests](development/testing.md)
@@ -44,6 +47,7 @@
 # Advanced Features
 
 - [Build and Train](advanced/build_and_train.md)
+- [HGraph Build Cache](advanced/build_cache.md)
 - [Range Search](advanced/range_search.md)
 - [Calculate Distance by ID](advanced/calc_distance_by_id.md)
 - [Filtered Search](advanced/filtered_search.md)
@@ -86,7 +90,8 @@
 
 - [FAQ](resources/faq.md)
 - [Release Notes](resources/release_notes.md)
-- [Roadmap](resources/roadmap_2025.md)
+  - [VSAG 1.0](resources/release_notes/v1.0.md)
+- [Roadmap (2025)](resources/roadmap_2025.md)
 - [Community](resources/community.md)
 - [Filing Issues with an AI Agent](resources/filing_issues_with_agent.md)
 - [Related Projects](resources/related_projects.md)
