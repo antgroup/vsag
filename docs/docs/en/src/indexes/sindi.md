@@ -128,11 +128,10 @@ and `metric_type` **must** be `"ip"`.
 |-----------|------|---------|-------------|
 | `term_io` | object | `{"type": "reader_io"}` | Backend used when deserializing term-first postings. Supports `reader_io`, in-memory IO, and file-backed `mmap_io`, `buffer_io`, or `async_io`. File-backed IO requires `file_path`. |
 | `rerank_io` | object | `{"type": "block_memory_io"}` | Backend for rerank vectors when `use_reorder` is enabled. A missing file-backed `file_path` is derived as `<term_io.file_path>.rerank`. |
-| `rerank_layout` | string | `"none"` | Rerank-vector layout: `"none"` or `"top_terms_signature"`. The latter requires `use_reorder: true`. |
-| `rerank_layout_top_terms` | int | `16` | Positive number of leading terms used by `"top_terms_signature"`. |
+| `rerank_layout` | non-negative int | `0` | Number of leading terms used by the top-terms-signature rerank layout. `0` disables the layout; a positive value requires `use_reorder: true`. |
 
 For SINDI V2, `rerank_type: "dmq8"` currently requires the default in-memory
-`block_memory_io` rerank backend and `rerank_layout: "none"`.
+`block_memory_io` rerank backend and `rerank_layout: 0`.
 
 Search parameters must use a sub-object matching the factory entry: `{"sindi": {...}}`
 for `sindi`, or `{"sindi_v2": {...}}` for `sindi_v2`.
@@ -202,6 +201,10 @@ Search-time parameters live under the sub-object matching the factory entry:
 After combining the ratio and threshold limits, SINDI scans at least one posting from every
 non-empty term list.
 
+Within each window, postings for a term are sorted by their stored value in descending
+order, then by internal document id in ascending order. If both term-prune limits are
+enabled, the scanned prefix is the smaller of
+`floor(list_size · (1 - ratio))` and `floor(threshold / window_count)`.
 SINDI chooses the heap-insertion strategy automatically from the build-time
 `doc_prune_ratio` and search-time `query_prune_ratio`. With the current `0.1`
 threshold, SINDI uses the distance-array insertion path when both ratios are

@@ -15,6 +15,8 @@
 
 #include "mutable_sindi_term_datacell.h"
 
+#include <array>
+#include <limits>
 #include <set>
 #include <sstream>
 
@@ -76,6 +78,47 @@ TEST_CASE("MutableSindiTermDataCell inserts every provided term",
     REQUIRE(window.term_capacity_ == 1001);
     REQUIRE(window.term_sizes_[1000] == 1);
     REQUIRE(window.term_sizes_[3] == 1);
+}
+
+TEST_CASE("MutableSindiTermDataCell sorts postings by stored value",
+          "[ut][MutableSindiTermDataCell]") {
+    const auto quantization = GENERATE(SparseValueQuantizationType::FP32,
+                                       SparseValueQuantizationType::FP16,
+                                       SparseValueQuantizationType::SQ8);
+    DYNAMIC_SECTION("quantization=" << static_cast<int>(quantization)) {
+        auto allocator = SafeAllocator::FactoryDefaultAllocator();
+        auto quantization_params = std::make_shared<QuantizationParams>();
+        quantization_params->min_val = 0.0F;
+        quantization_params->max_val = 4.0F;
+        quantization_params->diff = 4.0F;
+        MutableSindiTermDataCell data_cell(
+            16, 4, allocator.get(), quantization, quantization_params);
+
+        uint32_t term = 3;
+        std::array<float, 4> values = {1.0F, 3.0F, 2.0F, 3.0F};
+        for (uint32_t document = 0; document < values.size(); ++document) {
+            SparseVector vector{1, &term, values.data() + document};
+            data_cell.InsertVector(vector, document);
+        }
+
+        data_cell.SortByValue(0);
+        data_cell.SortByValue(0);
+        const auto& window = data_cell.GetWindow(0);
+        const std::array<uint16_t, 4> expected_ids = {1, 3, 2, 0};
+        REQUIRE(
+            std::equal(expected_ids.begin(), expected_ids.end(), window.term_ids_[term]->begin()));
+
+        const auto value_code_size = sindi_datacell_utils::GetValueCodeSize(quantization);
+        float previous = std::numeric_limits<float>::infinity();
+        for (uint32_t posting = 0; posting < values.size(); ++posting) {
+            const auto decoded = sindi_datacell_utils::DecodeValue(
+                window.term_datas_[term]->data() + static_cast<uint64_t>(posting) * value_code_size,
+                quantization,
+                quantization_params.get());
+            REQUIRE(decoded <= previous);
+            previous = decoded;
+        }
+    }
 }
 
 TEST_CASE("MutableSindiTermDataCell Basic Test", "[ut][MutableSindiTermDataCell]") {

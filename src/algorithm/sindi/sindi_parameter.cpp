@@ -73,8 +73,8 @@ SINDIParameter::FromJson(const JsonType& json) {
 
     if (json.Contains(SPARSE_DOC_PRUNE_RATIO)) {
         doc_prune_ratio = json[SPARSE_DOC_PRUNE_RATIO].GetFloat();
-        CHECK_ARGUMENT((0.0F <= doc_prune_ratio and doc_prune_ratio < 1.0F),
-                       fmt::format("doc_prune_ratio must be in [0, 1), got {}", doc_prune_ratio));
+        CHECK_ARGUMENT((0.0F <= doc_prune_ratio and doc_prune_ratio <= 0.9F),
+                       fmt::format("doc_prune_ratio must in [0, 0.9], got {}", doc_prune_ratio));
     } else {
         doc_prune_ratio = DEFAULT_DOC_PRUNE_RATIO;
     }

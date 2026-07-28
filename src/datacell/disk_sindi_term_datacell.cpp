@@ -498,6 +498,7 @@ DiskSindiTermDataCell<IOTmpl>::QueryWindow(float* dists,
                                            const SparseTermComputerPtr& computer,
                                            bool use_term_lists_heap_insert,
                                            SindiQueryContext& query_context) const {
+    (void)use_term_lists_heap_insert;
     const auto& query_term_buffers = query_context.query_term_buffers;
     std::shared_lock lock(term_buffers_mutex_);
     while (computer->HasNextTerm()) {
@@ -511,9 +512,7 @@ DiskSindiTermDataCell<IOTmpl>::QueryWindow(float* dists,
             continue;
         }
         auto [start, count] = tb->GetPostingRange(window_id);
-        if (use_term_lists_heap_insert) {
-            count = static_cast<uint32_t>(static_cast<float>(count) * computer->term_retain_ratio_);
-        }
+        count = computer->GetTermScanCount(count);
         if (count == 0) {
             continue;
         }

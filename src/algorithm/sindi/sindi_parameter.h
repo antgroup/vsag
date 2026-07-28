@@ -15,7 +15,6 @@
 
 #pragma once
 
-#include <cstdint>
 #include <string>
 
 #include "algorithm/inner_index_parameter.h"
@@ -99,7 +98,7 @@ public:
     // data cell
     float query_prune_ratio{0};
     float term_prune_ratio{0};
-    uint64_t term_retain_threshold{0};
+    uint64_t term_prune_threshold{0};
 };
 
 }  // namespace vsag

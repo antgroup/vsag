@@ -62,9 +62,7 @@ public:
 
     bool immutable{false};
 
-    std::string rerank_layout{"none"};
-
-    uint32_t rerank_layout_top_terms{16};
+    uint32_t rerank_layout{0};
 
     uint32_t avg_doc_term_length{100};
 
@@ -92,6 +90,7 @@ public:
     // data cell
     float query_prune_ratio{0};
     float term_prune_ratio{0};
+    uint64_t term_prune_threshold{0};
 };
 
 }  // namespace vsag

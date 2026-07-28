@@ -115,8 +115,7 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindow(
             continue;
         }
         const auto [start, posting_count] = tb->GetPostingRange(window_id);
-        uint32_t term_size =
-            static_cast<uint32_t>(static_cast<float>(posting_count) * computer->term_retain_ratio_);
+        const auto term_size = computer->GetTermScanCount(posting_count);
 
         const auto* one_term_ids = tb->IdsData();
         uint32_t i = start;

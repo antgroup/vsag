@@ -197,7 +197,7 @@ get_example_config() {
                 {
                     "sindi": {
                         "query_prune_ratio": 0.0,
-                        "term_prune_ratio": 0.0,
+                        "term_prune": {"ratio": 0.0},
                         "n_candidate": 20
                     }
                 }

@@ -16,6 +16,7 @@
 
 #include <fmt/format.h>
 
+#include <array>
 #include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <cstring>
@@ -106,6 +107,72 @@ TEST_CASE("DiskSindiTermDataCell restores payload io", "[ut][DiskSindiTermDataCe
     float restored_value = 0.0F;
     std::memcpy(&restored_value, term_buffer.ValuesData(), sizeof(float));
     REQUIRE(restored_value == target_value);
+}
+
+TEST_CASE("DiskSindiTermDataCell applies term prune without term-list heap insertion",
+          "[ut][DiskSindiTermDataCell]") {
+    fixtures::TempDir dir("disk_sindi_term_prune");
+    constexpr uint32_t term_id_limit = 8;
+    constexpr uint32_t window_size = 4;
+    uint32_t term = 3;
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    auto io_param = IOParameter::GetIOParameterByJson(JsonType::Parse(
+        fmt::format(R"({{"type":"buffer_io","file_path":"{}"}})", dir.GenerateRandomFile(true))));
+    auto source =
+        std::make_shared<MutableSindiTermDataCell>(term_id_limit,
+                                                   window_size,
+                                                   common_param.allocator_.get(),
+                                                   SparseValueQuantizationType::FP32,
+                                                   std::make_shared<QuantizationParams>());
+    std::array<float, 6> values = {1.0F, 3.0F, 2.0F, 1.0F, 4.0F, 2.0F};
+    for (uint32_t document = 0; document < values.size(); ++document) {
+        SparseVector vector{1, &term, values.data() + document};
+        source->InsertVector(vector, document);
+    }
+    source->SortByValue(0);
+    source->SortByValue(1);
+    source->Finalize();
+
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    source->SerializeTermLayout(writer, source->GetTermDictCount());
+    stream.seekg(0, std::ios::beg);
+
+    auto restored = DiskSindiTermDataCellInterface::MakeInstance(term_id_limit,
+                                                                 common_param.allocator_.get(),
+                                                                 false,
+                                                                 nullptr,
+                                                                 window_size,
+                                                                 io_param,
+                                                                 common_param);
+    IOStreamReader reader(stream);
+    restored->DeserializeTermLayout(reader, 2, values.size());
+
+    Vector<uint32_t> query_terms(common_param.allocator_.get());
+    query_terms.push_back(term);
+    SindiQueryContext query_context(common_param.allocator_.get());
+    query_context.query_term_buffers = restored->LoadQueryTermBuffers(query_terms);
+
+    float query_value = 1.0F;
+    SparseVector query{1, &term, &query_value};
+    SINDIV2SearchParameter search_parameter;
+    search_parameter.term_prune_threshold = 2;
+    auto computer = std::make_shared<SparseTermComputer>(
+        query, search_parameter, common_param.allocator_.get(), 2);
+
+    std::array<float, window_size> distances{};
+    restored->QueryWindow(distances.data(), 0, computer, false, query_context);
+    REQUIRE(distances[0] == 0.0F);
+    REQUIRE(distances[1] == -3.0F);
+    REQUIRE(distances[2] == 0.0F);
+    REQUIRE(distances[3] == 0.0F);
+
+    distances.fill(0.0F);
+    restored->QueryWindow(distances.data(), 1, computer, false, query_context);
+    REQUIRE(distances[0] == -4.0F);
+    REQUIRE(distances[1] == 0.0F);
 }
 
 #if HAVE_LIBAIO

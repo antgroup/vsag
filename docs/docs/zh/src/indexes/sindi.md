@@ -120,11 +120,10 @@ auto result = index->KnnSearch(
 |------|------|--------|------|
 | `term_io` | object | `{"type": "reader_io"}` | 反序列化 term-first posting 时使用的后端；支持 `reader_io`、内存 IO，以及 `mmap_io`、`buffer_io`、`async_io` 等文件后端。文件后端必须配置 `file_path` |
 | `rerank_io` | object | `{"type": "block_memory_io"}` | 开启 `use_reorder` 时保存精排向量的后端；文件后端未配置 `file_path` 时，默认使用 `<term_io.file_path>.rerank` |
-| `rerank_layout` | string | `"none"` | 精排向量布局，可选 `"none"` 或 `"top_terms_signature"`；后者要求 `use_reorder: true` |
-| `rerank_layout_top_terms` | int | `16` | `"top_terms_signature"` 使用的前导 term 数量，必须为正整数 |
+| `rerank_layout` | 非负整数 | `0` | top-terms-signature 精排布局使用的前导 term 数量；`0` 表示不启用，正数要求 `use_reorder: true` |
 
 SINDI V2 使用 `rerank_type: "dmq8"` 时，目前要求精排后端为默认的内存
-`block_memory_io`，并且 `rerank_layout` 必须为 `"none"`。
+`block_memory_io`，并且 `rerank_layout` 必须为 `0`。
 
 查询参数应放在与入口同名的子对象下：`sindi` 使用 `{"sindi": {...}}`，
 `sindi_v2` 使用 `{"sindi_v2": {...}}`。
@@ -188,6 +187,9 @@ SINDI V2 使用 `rerank_type: "dmq8"` 时，目前要求精排后端为默认的
 
 合并 ratio 与 threshold 限制后，每条非空倒排链至少扫描一个 posting。
 
+同一 window 内的单 term posting 先按实际存储值降序排列，值相同时按内部 doc id
+升序排列。ratio 和 threshold 同时生效时，实际扫描
+`floor(list_size · (1 - ratio))` 与 `floor(threshold / window_count)` 中的较小值。
 SINDI 会根据构建阶段的 `doc_prune_ratio` 与检索阶段的 `query_prune_ratio`
 自动选择堆插入策略。按当前 `0.1` 阈值，当两个比例都 `<= 0.1` 时，SINDI 使用
 基于距离数组的入堆路径；只要任一比例大于 `0.1`，就使用基于 term-list 的入堆路径。

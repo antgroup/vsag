@@ -149,6 +149,9 @@ public:
     InsertVector(const SparseVector& sparse_base, uint32_t doc_id);
 
     void
+    SortByValue(uint32_t window_id);
+
+    void
     ResizeTermList(InnerIdType new_term_capacity);
 
     void

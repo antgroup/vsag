@@ -28,10 +28,7 @@ namespace {
 constexpr const char* SINDI_V2_TERM_IO_KEY = "term_io";
 constexpr const char* SINDI_V2_RERANK_IO_KEY = "rerank_io";
 constexpr const char* SINDI_V2_RERANK_LAYOUT_KEY = "rerank_layout";
-constexpr const char* SINDI_V2_RERANK_LAYOUT_TOP_TERMS_KEY = "rerank_layout_top_terms";
 constexpr const char* SINDI_V2_USE_TERM_LISTS_HEAP_INSERT_KEY = "use_term_lists_heap_insert";
-constexpr const char* SINDI_V2_RERANK_LAYOUT_NONE = "none";
-constexpr const char* SINDI_V2_RERANK_LAYOUT_TOP_TERMS_SIGNATURE = "top_terms_signature";
 
 }  // namespace
 
@@ -162,28 +159,29 @@ SINDIV2Parameter::FromJson(const JsonType& json) {
     }
 
     if (json.Contains(SINDI_V2_RERANK_LAYOUT_KEY)) {
-        rerank_layout = json[SINDI_V2_RERANK_LAYOUT_KEY].GetString();
-        CHECK_ARGUMENT(rerank_layout == SINDI_V2_RERANK_LAYOUT_NONE ||
-                           rerank_layout == SINDI_V2_RERANK_LAYOUT_TOP_TERMS_SIGNATURE,
-                       fmt::format("unsupported SINDIV2 rerank_layout: {}", rerank_layout));
+        const auto layout_json = json[SINDI_V2_RERANK_LAYOUT_KEY];
+        CHECK_ARGUMENT(layout_json.IsNumberInteger(),
+                       "SINDIV2 rerank_layout must be a non-negative integer");
+        if (layout_json.IsNumberUnsigned()) {
+            const auto layout = layout_json.GetUint64();
+            CHECK_ARGUMENT(layout <= std::numeric_limits<uint32_t>::max(),
+                           "SINDIV2 rerank_layout exceeds uint32 range");
+            rerank_layout = static_cast<uint32_t>(layout);
+        } else {
+            const auto layout = layout_json.GetInt();
+            CHECK_ARGUMENT(layout >= 0 && static_cast<uint64_t>(layout) <=
+                                              std::numeric_limits<uint32_t>::max(),
+                           "SINDIV2 rerank_layout must be in uint32 range");
+            rerank_layout = static_cast<uint32_t>(layout);
+        }
     } else {
-        rerank_layout = SINDI_V2_RERANK_LAYOUT_NONE;
+        rerank_layout = 0;
     }
 
-    if (json.Contains(SINDI_V2_RERANK_LAYOUT_TOP_TERMS_KEY)) {
-        rerank_layout_top_terms = json[SINDI_V2_RERANK_LAYOUT_TOP_TERMS_KEY].GetInt();
-        CHECK_ARGUMENT(rerank_layout_top_terms > 0,
-                       fmt::format("rerank_layout_top_terms must be greater than 0, but now is {}",
-                                   rerank_layout_top_terms));
-    } else {
-        rerank_layout_top_terms = 16;
-    }
-
-    CHECK_ARGUMENT(use_reorder || rerank_layout == SINDI_V2_RERANK_LAYOUT_NONE,
+    CHECK_ARGUMENT(use_reorder || rerank_layout == 0,
                    "SINDIV2 rerank_layout requires use_reorder=true");
-    CHECK_ARGUMENT(
-        rerank_type != SPARSE_RERANK_TYPE_DMQ8 || rerank_layout == SINDI_V2_RERANK_LAYOUT_NONE,
-        "SINDIV2 rerank_type=dmq8 requires rerank_layout=none");
+    CHECK_ARGUMENT(rerank_type != SPARSE_RERANK_TYPE_DMQ8 || rerank_layout == 0,
+                   "SINDIV2 rerank_type=dmq8 requires rerank_layout=0");
 
     if (json.Contains(SINDI_V2_TERM_IO_KEY)) {
         term_io_parameter = IOParameter::GetIOParameterByJson(json[SINDI_V2_TERM_IO_KEY]);
@@ -228,8 +226,7 @@ SINDIV2Parameter::ToJson() const {
     if (immutable) {
         json[SPARSE_IMMUTABLE].SetBool(true);
     }
-    json[SINDI_V2_RERANK_LAYOUT_KEY].SetString(rerank_layout);
-    json[SINDI_V2_RERANK_LAYOUT_TOP_TERMS_KEY].SetInt(rerank_layout_top_terms);
+    json[SINDI_V2_RERANK_LAYOUT_KEY].SetInt(rerank_layout);
     if (term_io_parameter != nullptr) {
         json[SINDI_V2_TERM_IO_KEY].SetJson(term_io_parameter->ToJson());
     }
@@ -279,9 +276,6 @@ SINDIV2Parameter::CheckCompatibility(const vsag::ParamPtr& other) const {
     if (this->rerank_layout != sindi_v2_param->rerank_layout) {
         return false;
     }
-    if (this->rerank_layout_top_terms != sindi_v2_param->rerank_layout_top_terms) {
-        return false;
-    }
     return true;
 }
 
@@ -289,31 +283,51 @@ void
 SINDIV2SearchParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(json.Contains(INDEX_SINDI_V2),
                    fmt::format("parameters must contains {}", INDEX_SINDI_V2));
-    if (json[INDEX_SINDI_V2].Contains(SPARSE_TERM_PRUNE_RATIO)) {
-        term_prune_ratio = json[INDEX_SINDI_V2][SPARSE_TERM_PRUNE_RATIO].GetFloat();
-        CHECK_ARGUMENT((0.0F <= term_prune_ratio and term_prune_ratio <= 0.9F),
-                       fmt::format("term_prune_ratio must in [0, 0.9], got {}", term_prune_ratio));
-    } else {
-        term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
+    const auto search_json = json[INDEX_SINDI_V2];
+
+    term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
+    term_prune_threshold = DEFAULT_TERM_PRUNE_THRESHOLD;
+    if (search_json.Contains(SPARSE_TERM_PRUNE)) {
+        const auto term_prune_json = search_json[SPARSE_TERM_PRUNE];
+        CHECK_ARGUMENT(term_prune_json.IsObject(), "term_prune must be an object");
+        if (term_prune_json.Contains(SPARSE_TERM_PRUNE_RATIO)) {
+            term_prune_ratio = term_prune_json[SPARSE_TERM_PRUNE_RATIO].GetFloat();
+            CHECK_ARGUMENT(
+                (0.0F <= term_prune_ratio and term_prune_ratio <= 0.9F),
+                fmt::format("term_prune.ratio must be in [0, 0.9], got {}", term_prune_ratio));
+        }
+        if (term_prune_json.Contains(SPARSE_TERM_PRUNE_THRESHOLD)) {
+            const auto threshold_json = term_prune_json[SPARSE_TERM_PRUNE_THRESHOLD];
+            CHECK_ARGUMENT(threshold_json.IsNumberInteger(),
+                           "term_prune.threshold must be a non-negative integer");
+            if (threshold_json.IsNumberUnsigned()) {
+                term_prune_threshold = threshold_json.GetUint64();
+            } else {
+                const auto threshold = threshold_json.GetInt();
+                CHECK_ARGUMENT(
+                    threshold >= 0,
+                    fmt::format("term_prune.threshold must be non-negative, got {}", threshold));
+                term_prune_threshold = static_cast<uint64_t>(threshold);
+            }
+        }
     }
 
-    if (json[INDEX_SINDI_V2].Contains(SPARSE_QUERY_PRUNE_RATIO)) {
-        query_prune_ratio = json[INDEX_SINDI_V2][SPARSE_QUERY_PRUNE_RATIO].GetFloat();
+    if (search_json.Contains(SPARSE_QUERY_PRUNE_RATIO)) {
+        query_prune_ratio = search_json[SPARSE_QUERY_PRUNE_RATIO].GetFloat();
         CHECK_ARGUMENT(
             (0.0F <= query_prune_ratio and query_prune_ratio <= 0.9F),
             fmt::format("query_prune_ratio must in [0, 0.9], got {}", query_prune_ratio));
     } else {
         query_prune_ratio = DEFAULT_QUERY_PRUNE_RATIO;
     }
-    if (json[INDEX_SINDI_V2].Contains(SPARSE_N_CANDIDATE)) {
-        n_candidate = json[INDEX_SINDI_V2][SPARSE_N_CANDIDATE].GetInt();
+    if (search_json.Contains(SPARSE_N_CANDIDATE)) {
+        n_candidate = search_json[SPARSE_N_CANDIDATE].GetInt();
     } else {
         n_candidate = DEFAULT_N_CANDIDATE;
     }
 
-    if (json[INDEX_SINDI_V2].Contains(SINDI_V2_USE_TERM_LISTS_HEAP_INSERT_KEY)) {
-        use_term_lists_heap_insert =
-            json[INDEX_SINDI_V2][SINDI_V2_USE_TERM_LISTS_HEAP_INSERT_KEY].GetBool();
+    if (search_json.Contains(SINDI_V2_USE_TERM_LISTS_HEAP_INSERT_KEY)) {
+        use_term_lists_heap_insert = search_json[SINDI_V2_USE_TERM_LISTS_HEAP_INSERT_KEY].GetBool();
     } else {
         use_term_lists_heap_insert = true;
     }
@@ -324,7 +338,10 @@ SINDIV2SearchParameter::ToJson() const {
     json[INDEX_SINDI_V2].SetJson(JsonType());
     json[INDEX_SINDI_V2][SPARSE_QUERY_PRUNE_RATIO].SetFloat(query_prune_ratio);
     json[INDEX_SINDI_V2][SPARSE_N_CANDIDATE].SetInt(n_candidate);
-    json[INDEX_SINDI_V2][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
+    json[INDEX_SINDI_V2][SPARSE_TERM_PRUNE].SetJson(JsonType());
+    json[INDEX_SINDI_V2][SPARSE_TERM_PRUNE][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
+    json[INDEX_SINDI_V2][SPARSE_TERM_PRUNE][SPARSE_TERM_PRUNE_THRESHOLD].SetUint64(
+        term_prune_threshold);
     json[INDEX_SINDI_V2][SINDI_V2_USE_TERM_LISTS_HEAP_INSERT_KEY].SetBool(
         use_term_lists_heap_insert);
     return json;

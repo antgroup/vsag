@@ -23,8 +23,7 @@ namespace vsag {
 namespace {
 
 constexpr uint32_t K_SPARSE_DMQ_DATACELL_MAGIC = 0x53444D51U;
-// TODO: Reset the DMQ serialization version to 1 in a dedicated format change.
-constexpr uint32_t K_SPARSE_DMQ_DATACELL_VERSION = 6;
+constexpr uint32_t K_SPARSE_DMQ_SERIALIZATION_VERSION = 1;
 
 }  // namespace
 
@@ -219,7 +218,7 @@ void
 SparseDmqDataCell::Serialize(StreamWriter& writer) {
     std::shared_lock lock(this->mutex_);
     StreamWriter::WriteObj(writer, K_SPARSE_DMQ_DATACELL_MAGIC);
-    StreamWriter::WriteObj(writer, K_SPARSE_DMQ_DATACELL_VERSION);
+    StreamWriter::WriteObj(writer, K_SPARSE_DMQ_SERIALIZATION_VERSION);
     StreamWriter::WriteObj(writer, this->total_count_);
     StreamWriter::WriteVector(writer, offsets_);
     StreamWriter::WriteVector(writer, codes_);
@@ -235,7 +234,7 @@ SparseDmqDataCell::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
                    "serialized DMQ datacell has invalid magic");
     uint32_t version = 0;
     StreamReader::ReadObj(reader, version);
-    CHECK_ARGUMENT(version == K_SPARSE_DMQ_DATACELL_VERSION,
+    CHECK_ARGUMENT(version == K_SPARSE_DMQ_SERIALIZATION_VERSION,
                    fmt::format("unsupported sparse DMQ datacell version {}", version));
     StreamReader::ReadObj(reader, this->total_count_);
     StreamReader::ReadVector(reader, offsets_);

@@ -92,7 +92,7 @@ CreateDmqParameter(bool immutable, bool remap_term_ids) {
 constexpr auto kDmqSearchParameters = R"({
     "sindi": {
         "query_prune_ratio": 0.0,
-        "term_prune_ratio": 0.0,
+        "term_prune": {"ratio": 0.0},
         "n_candidate": 3,
         "use_term_lists_heap_insert": false
     }
@@ -165,7 +165,7 @@ TEST_CASE("SINDI DMQ Rerank DataCell Test", "[ut][SINDI]") {
     std::string search_param_str = R"({
         "sindi": {
             "query_prune_ratio": 0.0,
-            "term_prune_ratio": 0.0,
+            "term_prune": {"ratio": 0.0},
             "n_candidate": 3,
             "use_term_lists_heap_insert": false
         }
@@ -292,7 +292,7 @@ TEST_CASE("SINDI DMQ Rerank with Quantized Posting Test", "[ut][SINDI]") {
     std::string search_param_str = R"({
         "sindi": {
             "query_prune_ratio": 0.0,
-            "term_prune_ratio": 0.0,
+            "term_prune": {"ratio": 0.0},
             "n_candidate": 3,
             "use_term_lists_heap_insert": false
         }
