@@ -380,7 +380,6 @@ private:
     ReorderInterfacePtr reorder_{nullptr};  // reorder helper (if use_reorder_)
 
     uint32_t index_min_size_{0};  // min node size before graph is built
-    bool immutable_{false};       // true after SetImmutable()
 };
 
 }  // namespace vsag

@@ -1311,14 +1311,14 @@ Pyramid::search_node(const IndexNode* node,
 }
 void
 Pyramid::SetImmutable() {
-    if (this->immutable_) {
+    if (this->immutable_.load(std::memory_order_acquire)) {
         return;
     }
     label_table_->SetImmutable();
     this->points_mutex_.reset();
     this->points_mutex_ = std::make_shared<EmptyMutex>();
     this->searcher_->SetMutexArray(this->points_mutex_);
-    immutable_ = true;
+    this->immutable_.store(true, std::memory_order_release);
 }
 
 float
