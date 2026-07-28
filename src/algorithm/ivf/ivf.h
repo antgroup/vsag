@@ -207,6 +207,13 @@ private:
            QueryContext& ctx,
            ReasoningContext* reasoning_ctx = nullptr) const;
 
+    DistHeapPtr
+    search_with_custom_distance(const DatasetPtr& query,
+                                const SearchRequest& request,
+                                const InnerSearchParam& param,
+                                QueryContext& ctx,
+                                ReasoningContext* reasoning_ctx = nullptr) const;
+
     /**
      * @brief Re-score the top candidates in @p input with high-precision
      *        codes and return the final result Dataset.

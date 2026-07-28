@@ -17,9 +17,11 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <limits>
 #include <random>
 #include <set>
+#include <unordered_map>
 
 #include "algorithm/inner_index_interface.h"
 #include "attr/argparse.h"
@@ -1709,6 +1711,151 @@ IVF::search(const DatasetPtr& query,
     return search_result;
 }
 
+DistHeapPtr
+IVF::search_with_custom_distance(const DatasetPtr& query,
+                                 const SearchRequest& request,
+                                 const InnerSearchParam& param,
+                                 QueryContext& ctx,
+                                 ReasoningContext* reasoning_ctx) const {
+    const auto* query_data = query->GetFloat32Vectors();
+    auto candidate_buckets =
+        partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, &ctx);
+    if (reasoning_ctx != nullptr) {
+        reasoning_ctx->RecordBucketSelection(candidate_buckets);
+    }
+
+    int64_t topk = request.topk_;
+    const int64_t origin_topk = topk;
+    if (buckets_per_data_ > 1) {
+        CHECK_ARGUMENT(topk <= std::numeric_limits<int64_t>::max() / buckets_per_data_,
+                       "topk is too large for multi-bucket IVF search");
+        topk *= buckets_per_data_;
+    }
+
+    auto search_result = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
+    const auto& filter = param.is_inner_id_allowed;
+    Filter* attr_filter = nullptr;
+
+    Vector<InnerIdType> candidate_ids(this->allocator_);
+    Vector<int64_t> candidate_labels(this->allocator_);
+    Vector<float> scores(this->allocator_);
+    const uint64_t batch_capacity = std::min<uint64_t>(
+        request.distance_batch_size_, std::max<uint64_t>(1, this->GetNumElements()));
+    candidate_ids.reserve(batch_capacity);
+    candidate_labels.reserve(batch_capacity);
+    scores.resize(batch_capacity);
+
+    auto is_timed_out = [&]() {
+        if (param.time_cost == nullptr or not param.time_cost->CheckOvertime()) {
+            return false;
+        }
+        if (ctx.stats != nullptr) {
+            ctx.stats->is_timeout.store(true, std::memory_order_relaxed);
+        }
+        return true;
+    };
+
+    auto submit_batch = [&]() {
+        if (candidate_ids.empty()) {
+            return true;
+        }
+        if (is_timed_out()) {
+            return false;
+        }
+        request.distance_batch_func_(
+            candidate_labels.data(), candidate_labels.size(), scores.data());
+        for (uint64_t i = 0; i < candidate_ids.size(); ++i) {
+            CHECK_ARGUMENT(std::isfinite(scores[i]),
+                           "custom query distance callback must return finite scores");
+            if (reasoning_ctx != nullptr) {
+                reasoning_ctx->RecordVisit(candidate_ids[i] / buckets_per_data_, scores[i], 0);
+            }
+            search_result->Push(scores[i], candidate_ids[i]);
+            while (search_result->Size() > static_cast<uint64_t>(topk)) {
+                if (reasoning_ctx != nullptr) {
+                    reasoning_ctx->RecordEviction(search_result->Top().second / buckets_per_data_,
+                                                  0);
+                }
+                search_result->Pop();
+            }
+        }
+        candidate_ids.clear();
+        candidate_labels.clear();
+        return true;
+    };
+
+    bool timed_out = false;
+    for (const auto bucket_id : candidate_buckets) {
+        if (is_timed_out()) {
+            timed_out = true;
+            break;
+        }
+        if (bucket_id == INVALID_BUCKET_ID) {
+            continue;
+        }
+        if (not param.executors.empty()) {
+            param.executors[0]->Clear();
+            attr_filter = param.executors[0]->Run(bucket_id);
+        }
+        const auto bucket_size = bucket_->GetBucketSize(bucket_id);
+        const auto* ids = bucket_->GetInnerIds(bucket_id);
+        for (InnerIdType offset = 0; offset < bucket_size; ++offset) {
+            const auto inner_id = ids[offset];
+            if (inner_id == std::numeric_limits<InnerIdType>::max()) {
+                continue;
+            }
+            const auto origin_id = inner_id / buckets_per_data_;
+            if (attr_filter != nullptr and not attr_filter->CheckValid(offset)) {
+                if (reasoning_ctx != nullptr) {
+                    reasoning_ctx->RecordFilterReject(origin_id);
+                }
+                continue;
+            }
+            if (filter != nullptr and not filter->CheckValid(origin_id)) {
+                if (reasoning_ctx != nullptr) {
+                    reasoning_ctx->RecordFilterReject(origin_id);
+                }
+                continue;
+            }
+            candidate_ids.push_back(inner_id);
+            candidate_labels.push_back(label_table_->GetLabelById(origin_id));
+            if (candidate_ids.size() == batch_capacity and not submit_batch()) {
+                timed_out = true;
+                break;
+            }
+        }
+        if (timed_out) {
+            break;
+        }
+    }
+    if (not timed_out) {
+        submit_batch();
+    }
+
+    if (buckets_per_data_ == 1) {
+        return search_result;
+    }
+
+    std::unordered_map<InnerIdType, float> id_to_min_score;
+    while (not search_result->Empty()) {
+        const auto& [score, inner_id] = search_result->Top();
+        const auto origin_id = inner_id / buckets_per_data_;
+        auto iter = id_to_min_score.find(origin_id);
+        if (iter == id_to_min_score.end() or score < iter->second) {
+            id_to_min_score[origin_id] = score;
+        }
+        search_result->Pop();
+    }
+
+    for (const auto& [origin_id, score] : id_to_min_score) {
+        search_result->Push(score, origin_id);
+        if (search_result->Size() > static_cast<uint64_t>(origin_topk)) {
+            search_result->Pop();
+        }
+    }
+    return search_result;
+}
+
 void
 IVF::merge_one_unit(const MergeUnit& unit) {
     check_merge_illegal(unit);
@@ -1771,8 +1918,28 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     bool is_range = (request.mode_ == SearchMode::RANGE_SEARCH);
 
     auto param = this->create_search_param(request.params_str_, request.filter_);
+    const bool use_custom_distance = request.distance_batch_func_ != nullptr;
+    if (use_custom_distance) {
+        CHECK_ARGUMENT(request.distance_batch_size_ > 0,
+                       "custom query distance batch size must be greater than 0");
+        CHECK_ARGUMENT(not is_range, "IVF custom query distance only supports KNN search");
+        CHECK_ARGUMENT(not param.disable_bucket_scan,
+                       "IVF custom query distance does not support disable_bucket_scan");
+        CHECK_ARGUMENT(request.topk_ > 0, "topk must be greater than 0");
+        CHECK_ARGUMENT(param.parallel_search_thread_count == 1,
+                       "IVF custom query distance does not support parallel search");
+        param.enable_reorder = false;
+    }
 
     auto query = request.query_;
+    if (use_custom_distance) {
+        CHECK_ARGUMENT(query != nullptr, "query dataset cannot be null");
+        CHECK_ARGUMENT(query->GetNumElements() == 1,
+                       "IVF custom search requires exactly one query");
+        CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr,
+                       "query float32 vectors cannot be null");
+        CHECK_ARGUMENT(query->GetDim() == this->dim_, "query dimension must match index dimension");
+    }
     if (param.disable_bucket_scan) {
         CHECK_ARGUMENT(query != nullptr, "query dataset cannot be null");
         CHECK_ARGUMENT(query->GetNumElements() >= 1,
@@ -1794,6 +1961,19 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             executor->Init();
             param.executors.emplace_back(executor);
         }
+    }
+    if (use_custom_distance) {
+        param.search_mode = KNN_SEARCH;
+        param.topk = request.topk_;
+        auto search_result = search_with_custom_distance(query, request, param, ctx);
+        if (search_result == nullptr || search_result->Empty()) {
+            auto dataset_results = DatasetImpl::MakeEmptyDataset();
+            dataset_results->Statistics(stats.Dump());
+            return dataset_results;
+        }
+        auto dataset_results = this->pack_knn_result(search_result, ctx.alloc);
+        dataset_results->Statistics(stats.Dump());
+        return dataset_results;
     }
     std::shared_ptr<ReasoningContext> reasoning_ctx;
     if (not request.expected_labels_.empty()) {

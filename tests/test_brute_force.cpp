@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -1534,4 +1535,96 @@ TEST_CASE("(PR) BruteForce Reasoning No Output When Disabled", "[ft][bruteforce]
     for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
         REQUIRE(result.value()->GetIds()[i] == knn_result.value()->GetIds()[i]);
     }
+}
+
+TEST_CASE("(PR) BruteForce Custom Batch Distance", "[ft][bruteforce][custom_distance][pr]") {
+    using namespace fixtures;
+
+    auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32");
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    std::vector<int64_t> scored_ids;
+    uint64_t max_batch_size = 0;
+    vsag::SearchRequest request;
+    request.topk_ = 3;
+    request.distance_batch_size_ = 3;
+    request.enable_filter_ = true;
+    request.filter_ = std::make_shared<EvenIdFilter>();
+    request.distance_batch_func_ = [&](const int64_t* ids, uint64_t count, float* distances) {
+        max_batch_size = std::max(max_batch_size, count);
+        for (uint64_t i = 0; i < count; ++i) {
+            scored_ids.push_back(ids[i]);
+            distances[i] = static_cast<float>(ids[i]);
+        }
+    };
+
+    auto result = index->SearchWithRequest(request);
+    REQUIRE(result.has_value());
+    REQUIRE(max_batch_size == 3);
+    REQUIRE(result.value()->GetDim() == 3);
+    for (const auto id : scored_ids) {
+        REQUIRE(id % 2 == 0);
+    }
+
+    std::vector<int64_t> expected_ids;
+    for (int64_t i = 0; i < dataset->base_->GetNumElements(); ++i) {
+        const auto id = dataset->base_->GetIds()[i];
+        if (id % 2 == 0) {
+            expected_ids.push_back(id);
+        }
+    }
+    std::sort(expected_ids.begin(), expected_ids.end());
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(result.value()->GetIds()[i] == expected_ids[i]);
+        REQUIRE(result.value()->GetDistances()[i] == static_cast<float>(expected_ids[i]));
+    }
+}
+
+TEST_CASE("(PR) BruteForce Custom Batch Distance Validation",
+          "[ft][bruteforce][custom_distance][pr]") {
+    using namespace fixtures;
+
+    auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32");
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(16, 32, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    vsag::SearchRequest request;
+    request.topk_ = 1;
+    request.distance_batch_func_ = [](const int64_t*, uint64_t, float* distances) {
+        distances[0] = std::numeric_limits<float>::quiet_NaN();
+    };
+
+    request.distance_batch_size_ = 0;
+    auto invalid_batch_size = index->SearchWithRequest(request);
+    REQUIRE_FALSE(invalid_batch_size.has_value());
+    REQUIRE(invalid_batch_size.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    request.distance_batch_size_ = 1;
+    auto non_finite_score = index->SearchWithRequest(request);
+    REQUIRE_FALSE(non_finite_score.has_value());
+    REQUIRE(non_finite_score.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    request.distance_batch_func_ = [](const int64_t*, uint64_t count, float* distances) {
+        std::fill(distances, distances + count, 0.0F);
+    };
+    request.topk_ = 0;
+    auto invalid_topk = index->SearchWithRequest(request);
+    REQUIRE_FALSE(invalid_topk.has_value());
+    REQUIRE(invalid_topk.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    request.mode_ = vsag::SearchMode::RANGE_SEARCH;
+    request.radius_ = -1.0F;
+    request.limited_size_ = -1;
+    auto invalid_radius = index->SearchWithRequest(request);
+    REQUIRE_FALSE(invalid_radius.has_value());
+    REQUIRE(invalid_radius.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    request.radius_ = 1.0F;
+    request.limited_size_ = 0;
+    auto invalid_limit = index->SearchWithRequest(request);
+    REQUIRE_FALSE(invalid_limit.has_value());
+    REQUIRE(invalid_limit.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 }

@@ -380,15 +380,35 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     const auto& query = request.query_;
     bool is_range = (request.mode_ == SearchMode::RANGE_SEARCH);
     auto k = request.topk_;
+    const bool use_custom_distance = request.distance_batch_func_ != nullptr;
+
+    if (use_custom_distance) {
+        CHECK_ARGUMENT(request.distance_batch_size_ > 0,
+                       "distance_batch_size must be greater than 0");
+        CHECK_ARGUMENT(not is_range, "HGraph custom distance only supports KNN search");
+    }
 
     if (is_range) {
-        this->validate_range_args(query, request.radius_, request.limited_size_);
+        if (not use_custom_distance) {
+            this->validate_range_args(query, request.radius_, request.limited_size_);
+        }
     } else {
-        this->validate_knn_args(query, k);
+        if (not use_custom_distance) {
+            this->validate_knn_args(query, k);
+        } else {
+            CHECK_ARGUMENT(k > 0, "topk must be greater than 0");
+        }
     }
 
     auto params = HGraphSearchParameters::FromJson(request.params_str_);
     ctx.rabitq_error_rate = params.rabitq_error_rate;
+
+    if (use_custom_distance) {
+        CHECK_ARGUMENT(params.parallel_search_thread_count == 1,
+                       "HGraph custom query distance does not support parallel search");
+        CHECK_ARGUMENT(params.brute_force_threshold <= 0.0F,
+                       "HGraph custom query distance does not support brute_force_threshold");
+    }
 
     CHECK_ARGUMENT(  // NOLINT
         params.ef_search >= 1,
@@ -412,7 +432,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     std::shared_ptr<ReasoningContext> reasoning_ctx;
     if (not is_range and not request.expected_labels_.empty()) {
         reasoning_ctx = std::make_shared<ReasoningContext>(this->allocator_);
-        reasoning_ctx->SetSearchParams(k, "HGraph", use_reorder_, request.filter_ != nullptr);
+        reasoning_ctx->SetSearchParams(
+            k, "HGraph", use_custom_distance ? false : use_reorder_, request.filter_ != nullptr);
 
         UnorderedMap<int64_t, InnerIdType> label_to_inner_id(this->allocator_);
         for (const auto& label : request.expected_labels_) {
@@ -426,19 +447,28 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             request.expected_labels_.begin(), request.expected_labels_.end(), this->allocator_);
         reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
 
-        const auto* const query_vector = get_data(query);
-        auto precise_flatten = this->basic_flatten_codes_;
-        if (use_reorder_) {
-            precise_flatten = this->high_precise_codes_;
+        FlattenInterfacePtr precise_flatten = nullptr;
+        ComputerInterfacePtr computer = nullptr;
+        if (not use_custom_distance) {
+            precise_flatten = this->basic_flatten_codes_;
+            if (use_reorder_) {
+                precise_flatten = this->high_precise_codes_;
+            }
+            if (create_new_raw_vector_) {
+                precise_flatten = this->raw_vector_;
+            }
+            computer = precise_flatten->FactoryComputer(get_data(query));
         }
-        if (create_new_raw_vector_) {
-            precise_flatten = this->raw_vector_;
-        }
-        auto computer = precise_flatten->FactoryComputer(query_vector);
         for (const auto& pair : label_to_inner_id) {
             float dist = 0.0F;
             const auto inner_id = pair.second;
-            precise_flatten->Query(&dist, computer, &inner_id, 1);
+            if (use_custom_distance) {
+                const auto label = this->label_table_->GetLabelById(inner_id);
+                request.distance_batch_func_(&label, 1, &dist);
+                CHECK_ARGUMENT(std::isfinite(dist), "distance callback must return finite scores");
+            } else {
+                precise_flatten->Query(&dist, computer, &inner_id, 1);
+            }
             reasoning_ctx->SetTrueDistance(inner_id, dist);
         }
         ctx.reasoning_ctx = reasoning_ctx.get();
@@ -449,15 +479,35 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.topk = 1;
     search_param.ef = 1;
     search_param.is_inner_id_allowed = nullptr;
-    search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
+    search_param.enable_rabitq_one_bit_search =
+        use_custom_distance ? false : params.rabitq_one_bit_search;
+    search_param.distance_batch_func = request.distance_batch_func_;
+    search_param.distance_batch_size = request.distance_batch_size_;
 
     if (search_param.ep == INVALID_ENTRY_POINT) {
         return make_empty_dataset_with_stats();
     }
 
-    auto vt = this->pool_->TakeOne();
+    struct visited_list_guard {
+        std::shared_ptr<VisitedListPool> pool;
+        VisitedListPtr visited_list;
 
-    const auto* raw_query = get_data(query);
+        void
+        Release() {
+            if (visited_list != nullptr) {
+                pool->ReturnOne(visited_list);
+                visited_list.reset();
+            }
+        }
+
+        ~visited_list_guard() {
+            Release();
+        }
+    };
+    visited_list_guard vt_guard{this->pool_, this->pool_->TakeOne()};
+    auto& vt = vt_guard.visited_list;
+
+    const auto* raw_query = use_custom_distance ? nullptr : get_data(query);
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(
             raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param, vt, &ctx);
@@ -482,8 +532,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         search_param.consider_duplicate = true;
         search_param.range_search_limit_size = static_cast<int>(request.limited_size_);
         search_param.parallel_search_thread_count = params.parallel_search_thread_count;
-        search_param.enable_reorder = params.enable_reorder;
-        search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
+        search_param.enable_reorder = use_custom_distance ? false : params.enable_reorder;
+        search_param.enable_rabitq_one_bit_search =
+            use_custom_distance ? false : params.rabitq_one_bit_search;
     } else {
         search_param.ef = std::max(params.ef_search, k);
         search_param.is_inner_id_allowed = ft;
@@ -493,9 +544,10 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                 std::min(search_param.topk,
                          static_cast<int64_t>(static_cast<float>(k) * params.topk_factor));
         }
-        search_param.enable_reorder = params.enable_reorder;
+        search_param.enable_reorder = use_custom_distance ? false : params.enable_reorder;
         search_param.consider_duplicate = true;
-        search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
+        search_param.enable_rabitq_one_bit_search =
+            use_custom_distance ? false : params.rabitq_one_bit_search;
         if (params.enable_time_record) {
             search_param.time_cost = std::make_shared<Timer>();
             search_param.time_cost->SetThreshold(params.timeout_ms);
@@ -529,33 +581,42 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     DistHeapPtr search_result;
     bool brute_force_used = false;
     MCIHybridSearchResult mci_result(params, ft);
-    if (params.brute_force_threshold > 0.0F and
-        mci_result.valid_ratio <= params.brute_force_threshold) {
-        if (is_range) {
-            search_result = this->brute_force_search<InnerSearchMode::RANGE_SEARCH>(
-                raw_query, ft, request.limited_size_, request.radius_, &ctx);
+    if (not use_custom_distance) {
+        if (params.brute_force_threshold > 0.0F and
+            mci_result.valid_ratio <= params.brute_force_threshold) {
+            if (is_range) {
+                search_result = this->brute_force_search<InnerSearchMode::RANGE_SEARCH>(
+                    raw_query, ft, request.limited_size_, request.radius_, &ctx);
+            } else {
+                search_result = this->brute_force_search<InnerSearchMode::KNN_SEARCH>(
+                    raw_query, ft, k, 0.0F, &ctx);
+            }
+            brute_force_used = true;
+            mci_result.route = "brute_force";
         } else {
-            search_result =
-                this->brute_force_search<InnerSearchMode::KNN_SEARCH>(raw_query, ft, k, 0.0F, &ctx);
+            mci_result = this->try_mci_search(request, params, ft, raw_query, search_param, &ctx);
+            if (mci_result.route == "mci") {
+                search_result = std::move(mci_result.result);
+            } else {
+                search_result = this->search_one_graph(raw_query,
+                                                       this->bottom_graph_,
+                                                       this->basic_flatten_codes_,
+                                                       search_param,
+                                                       vt,
+                                                       &ctx,
+                                                       rabitq_lower_bound_candidates_ptr);
+            }
         }
-        brute_force_used = true;
-        mci_result.route = "brute_force";
     } else {
-        mci_result = this->try_mci_search(request, params, ft, raw_query, search_param, &ctx);
-        if (mci_result.route == "mci") {
-            search_result = std::move(mci_result.result);
-        } else {
-            search_result = this->search_one_graph(raw_query,
-                                                   this->bottom_graph_,
-                                                   this->basic_flatten_codes_,
-                                                   search_param,
-                                                   vt,
-                                                   &ctx,
-                                                   rabitq_lower_bound_candidates_ptr);
-        }
+        search_result = this->search_one_graph(raw_query,
+                                               this->bottom_graph_,
+                                               this->basic_flatten_codes_,
+                                               search_param,
+                                               vt,
+                                               &ctx,
+                                               rabitq_lower_bound_candidates_ptr);
     }
-
-    this->pool_->ReturnOne(vt);
+    vt_guard.Release();
 
     // Reorder
     if (mci_result.route != "mci" and not brute_force_used and use_reorder_ and
