@@ -72,7 +72,9 @@ public:
      * @param common_param The common index parameters.
      */
     explicit MemoryIO(const IOParamPtr& param, const IndexCommonParam& common_param)
-        : MemoryIO(std::dynamic_pointer_cast<MemoryIOParameter>(param), common_param) {
+        : MemoryIO(std::dynamic_pointer_cast<MemoryIOParameter>(UnwrapReadCacheParam(param)),
+                   common_param) {
+        EnableReadCache(param);
     }
 
     /**

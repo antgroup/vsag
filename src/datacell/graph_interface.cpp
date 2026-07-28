@@ -18,6 +18,7 @@
 #include "compressed_graph_datacell.h"
 #include "graph_datacell.h"
 #include "io/io_headers.h"
+#include "io/read_cache/read_cache_parameter.h"
 #include "sparse_graph_datacell.h"
 
 namespace vsag {
@@ -79,6 +80,49 @@ GraphInterface::MakeInstance(const GraphInterfaceParamPtr& graph_param,
             }
             if (io_string == IO_TYPE_VALUE_READER_IO) {
                 return std::make_shared<GraphDataCell<ReaderIO>>(graph_param, common_param);
+            }
+            if (io_string == IO_TYPE_VALUE_READ_CACHE) {
+                auto graph_dc_param =
+                    std::dynamic_pointer_cast<GraphDataCellParameter>(graph_param);
+                if (not graph_dc_param) {
+                    return nullptr;
+                }
+                auto cache_param =
+                    std::dynamic_pointer_cast<ReadCacheParameter>(graph_dc_param->io_parameter_);
+                if (cache_param) {
+                    auto inner_type = cache_param->inner_io_type_;
+                    if (inner_type == IO_TYPE_VALUE_MMAP_IO) {
+                        return std::make_shared<GraphDataCell<MMapIO>>(graph_param, common_param);
+                    }
+                    if (inner_type == IO_TYPE_VALUE_BUFFER_IO) {
+                        return std::make_shared<GraphDataCell<BufferIO>>(graph_param, common_param);
+                    }
+                    if (inner_type == IO_TYPE_VALUE_ASYNC_IO) {
+#if HAVE_LIBAIO
+                        return std::make_shared<GraphDataCell<AsyncIO>>(graph_param, common_param);
+#else
+                        return std::make_shared<GraphDataCell<BufferIO>>(graph_param, common_param);
+#endif
+                    }
+                    if (inner_type == IO_TYPE_VALUE_URING_IO) {
+                        return std::make_shared<GraphDataCell<UringIO>>(graph_param, common_param);
+                    }
+                    if (inner_type == IO_TYPE_VALUE_MEMORY_IO) {
+                        return std::make_shared<GraphDataCell<MemoryIO>>(graph_param, common_param);
+                    }
+                    if (inner_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
+                        return std::make_shared<GraphDataCell<MemoryBlockIO>>(graph_param,
+                                                                              common_param);
+                    }
+                    if (inner_type == IO_TYPE_VALUE_READER_IO) {
+                        return std::make_shared<GraphDataCell<ReaderIO>>(graph_param, common_param);
+                    }
+                    throw VsagException(
+                        ErrorType::INVALID_ARGUMENT,
+                        std::string("Unsupported ReadCache inner_io_type: ") + inner_type);
+                }
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "ReadCache requires ReadCacheParameter");
             }
             return nullptr;
     }

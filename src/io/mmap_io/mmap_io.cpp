@@ -64,6 +64,10 @@ MMapIO::MMapIO(std::string filename, Allocator* allocator)
                         saved_errno,
                         std::error_code(saved_errno, std::system_category()).message()));
     }
+    // Stat file to get size for existing files
+    if (this->exist_file_) {
+        this->size_ = std::filesystem::file_size(this->filepath_);
+    }
     auto mmap_size = this->size_;
     if (this->size_ == 0) {
         mmap_size = DEFAULT_INIT_MMAP_SIZE;
@@ -91,7 +95,10 @@ MMapIO::MMapIO(const MMapIOParamPtr& io_param, const IndexCommonParam& common_pa
     : MMapIO(io_param->path_, common_param.allocator_.get()){};
 
 MMapIO::MMapIO(const IOParamPtr& param, const IndexCommonParam& common_param)
-    : MMapIO(std::dynamic_pointer_cast<MMapIOParameter>(param), common_param){};
+    : MMapIO(std::dynamic_pointer_cast<MMapIOParameter>(UnwrapReadCacheParam(param)),
+             common_param) {
+    EnableReadCache(param);
+};
 
 MMapIO::~MMapIO() {
     auto munmap_size = std::max(this->size_, static_cast<uint64_t>(DEFAULT_INIT_MMAP_SIZE));

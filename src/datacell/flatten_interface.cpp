@@ -18,6 +18,7 @@
 #include "index_common_param.h"
 #include "inner_string_params.h"
 #include "io/io_headers.h"
+#include "io/read_cache/read_cache_parameter.h"
 #include "multi_vector_datacell.h"
 #include "quantization/int8_quantizer.h"
 #include "quantization/quantizer_adapter.h"
@@ -247,6 +248,41 @@ FlattenInterface::MakeInstance(const FlattenInterfaceParamPtr& param,
     }
     if (io_type_name == IO_TYPE_VALUE_READER_IO) {
         return make_instance<ReaderIO>(param, common_param);
+    }
+    if (io_type_name == IO_TYPE_VALUE_READ_CACHE) {
+        auto cache_param = std::dynamic_pointer_cast<ReadCacheParameter>(param->io_parameter);
+        if (cache_param == nullptr) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "ReadCache requires ReadCacheParameter");
+        }
+        const auto& inner_type = cache_param->inner_io_type_;
+        if (inner_type == IO_TYPE_VALUE_MMAP_IO) {
+            return make_instance<MMapIO>(param, common_param);
+        }
+        if (inner_type == IO_TYPE_VALUE_BUFFER_IO) {
+            return make_instance<BufferIO>(param, common_param);
+        }
+        if (inner_type == IO_TYPE_VALUE_ASYNC_IO) {
+#if HAVE_LIBAIO
+            return make_instance<AsyncIO>(param, common_param);
+#else
+            return make_instance<BufferIO>(param, common_param);
+#endif
+        }
+        if (inner_type == IO_TYPE_VALUE_URING_IO) {
+            return make_instance<UringIO>(param, common_param);
+        }
+        if (inner_type == IO_TYPE_VALUE_MEMORY_IO) {
+            return make_instance<MemoryIO>(param, common_param);
+        }
+        if (inner_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
+            return make_instance<MemoryBlockIO>(param, common_param);
+        }
+        if (inner_type == IO_TYPE_VALUE_READER_IO) {
+            return make_instance<ReaderIO>(param, common_param);
+        }
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Unsupported ReadCache inner_io_type: " + inner_type);
     }
     return nullptr;
 }

@@ -30,7 +30,9 @@ ReaderIO::ReaderIO(const ReaderIOParamPtr& /*param*/, const IndexCommonParam& co
 }
 
 ReaderIO::ReaderIO(const IOParamPtr& param, const IndexCommonParam& common_param)
-    : ReaderIO(std::dynamic_pointer_cast<ReaderIOParameter>(param), common_param) {
+    : ReaderIO(std::dynamic_pointer_cast<ReaderIOParameter>(UnwrapReadCacheParam(param)),
+               common_param) {
+    EnableReadCache(param);
 }
 
 void
@@ -46,6 +48,7 @@ ReaderIO::InitIOImpl(const vsag::IOParamPtr& io_param) {
                             "ReaderIOParam is required for ReaderIO initialization.");
     }
     reader_ = reader_param->reader;
+    size_ = reader_->Size();
 }
 
 bool

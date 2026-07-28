@@ -20,8 +20,14 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <memory>
+#include <mutex>
 
 #include "io/common/io_parameter.h"
+#include "io/read_cache/lru_page_cache.h"
+#include "io/read_cache/page.h"
+#include "io/read_cache/page_cache.h"
+#include "io/read_cache/read_cache_parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/byte_buffer.h"
@@ -68,6 +74,7 @@ public:
     Write(const uint8_t* data, uint64_t size, uint64_t offset) {
         static_assert(has_WriteImpl<IOTmpl>::value);
         cast().WriteImpl(data, size, offset);
+        InvalidateCacheRange(size, offset);
     }
 
     /**
@@ -84,6 +91,9 @@ public:
     inline bool
     Read(uint64_t size, uint64_t offset, uint8_t* data) const {
         static_assert(has_ReadImpl<IOTmpl>::value);
+        if (cache_ != nullptr) {
+            return ReadCached(size, offset, data);
+        }
         return cast().ReadImpl(size, offset, data);
     }
 
@@ -101,6 +111,22 @@ public:
     [[nodiscard]] inline const uint8_t*
     Read(uint64_t size, uint64_t offset, bool& need_release) const {
         static_assert(has_DirectReadImpl<IOTmpl>::value);
+        if (cache_ != nullptr) {
+            need_release = false;
+            if (size == 0 or not IsValidRange(size, offset)) {
+                return nullptr;
+            }
+            auto* data = static_cast<uint8_t*>(allocator_->Allocate(size));
+            if (data == nullptr) {
+                return nullptr;
+            }
+            if (not ReadCached(size, offset, data)) {
+                allocator_->Deallocate(data);
+                return nullptr;
+            }
+            need_release = true;
+            return data;
+        }
         return cast().DirectReadImpl(size, offset, need_release);  // TODO(LHT129): use IOReadObject
     }
 
@@ -119,6 +145,15 @@ public:
     inline bool
     MultiRead(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const {
         static_assert(has_MultiReadImpl<IOTmpl>::value);
+        if (cache_ != nullptr) {
+            for (uint64_t i = 0; i < count; ++i) {
+                if (not ReadCached(sizes[i], offsets[i], datas)) {
+                    return false;
+                }
+                datas += sizes[i];
+            }
+            return true;
+        }
         return cast().MultiReadImpl(datas, sizes, offsets, count);
     }
 
@@ -194,6 +229,10 @@ public:
 
     inline void
     Release(const uint8_t* data) const {
+        if (cache_ != nullptr) {
+            allocator_->Deallocate(const_cast<uint8_t*>(data));
+            return;
+        }
         if constexpr (has_ReleaseImpl<IOTmpl>::value) {
             return cast().ReleaseImpl(data);
         }
@@ -210,15 +249,16 @@ public:
      */
     inline void
     InitIO(const IOParamPtr& io_param) {
+        EnableReadCache(io_param);
         if constexpr (has_InitIOImpl<IOTmpl>::value) {
-            return cast().InitIOImpl(io_param);
+            return cast().InitIOImpl(UnwrapReadCacheParam(io_param));
         }
     }
 
     inline void
     Resize(uint64_t size) {
         if constexpr (has_ResizeImpl<IOTmpl>::value) {
-            return cast().ResizeImpl(size);
+            cast().ResizeImpl(size);
         } else {
             if (size <= this->size_) {
                 return;
@@ -232,22 +272,38 @@ public:
                 offset += cur_size;
             }
         }
+        ClearCache();
     }
 
     inline void
     Shrink(uint64_t size) {
         if constexpr (has_ShrinkImpl<IOTmpl>::value) {
-            return cast().ShrinkImpl(size);
+            cast().ShrinkImpl(size);
         } else {
             if (size <= this->size_) {
                 this->size_ = size;
             }
         }
+        ClearCache();
     }
 
     inline int64_t
     GetMemoryUsage() const {
         return this->size_;
+    }
+
+    void
+    EnableReadCache(const IOParamPtr& io_param) {
+        auto cache_param = std::dynamic_pointer_cast<ReadCacheParameter>(io_param);
+        if (cache_param == nullptr) {
+            return;
+        }
+        auto page_count = cache_param->total_cache_size_ / Page::DEFAULT_PAGE_SIZE;
+        if (page_count == 0) {
+            cache_.reset();
+            return;
+        }
+        cache_ = std::make_unique<LRUPageCache>(page_count);
     }
 
 public:
@@ -317,10 +373,89 @@ private:
         return static_cast<const IOTmpl&>(*this);
     }
 
+    [[nodiscard]] bool
+    IsValidRange(uint64_t size, uint64_t offset) const {
+        return offset <= size_ and size <= size_ - offset;
+    }
+
+    bool
+    ReadCached(uint64_t size, uint64_t offset, uint8_t* data) const {
+        if (not IsValidRange(size, offset)) {
+            return false;
+        }
+        uint64_t copied = 0;
+        while (copied < size) {
+            uint64_t current_offset = offset + copied;
+            uint64_t page_id = current_offset / Page::DEFAULT_PAGE_SIZE;
+            uint64_t page_offset = current_offset % Page::DEFAULT_PAGE_SIZE;
+            uint64_t copy_size = std::min(size - copied, Page::DEFAULT_PAGE_SIZE - page_offset);
+            auto page = GetOrLoadPage(page_id);
+            if (page == nullptr) {
+                return false;
+            }
+            std::memcpy(data + copied, page->Data() + page_offset, copy_size);
+            copied += copy_size;
+        }
+        return true;
+    }
+
+    PagePtr
+    GetOrLoadPage(uint64_t page_id) const {
+        if (page_id > UINT64_MAX / Page::DEFAULT_PAGE_SIZE) {
+            return nullptr;
+        }
+        uint64_t offset = page_id * Page::DEFAULT_PAGE_SIZE;
+        if (offset >= size_) {
+            return nullptr;
+        }
+        std::scoped_lock<std::mutex> lock(cache_mutex_);
+        auto page = cache_->Get(page_id);
+        if (page != nullptr) {
+            return page;
+        }
+        auto new_page = std::make_shared<Page>(allocator_);
+        if (new_page->Data() == nullptr) {
+            return nullptr;
+        }
+        uint64_t read_size = std::min(Page::DEFAULT_PAGE_SIZE, size_ - offset);
+        if (not cast().ReadImpl(read_size, offset, new_page->Data())) {
+            return nullptr;
+        }
+        return cache_->Insert(page_id, std::move(new_page));
+    }
+
+    void
+    InvalidateCacheRange(uint64_t size, uint64_t offset) {
+        if (cache_ == nullptr or size == 0) {
+            return;
+        }
+        std::scoped_lock<std::mutex> lock(cache_mutex_);
+        if (offset > UINT64_MAX - (size - 1)) {
+            cache_->Clear();
+            return;
+        }
+        uint64_t first_page = offset / Page::DEFAULT_PAGE_SIZE;
+        uint64_t last_page = (offset + size - 1) / Page::DEFAULT_PAGE_SIZE;
+        for (uint64_t page_id = first_page; page_id <= last_page; ++page_id) {
+            cache_->Remove(page_id);
+        }
+    }
+
+    void
+    ClearCache() {
+        if (cache_ != nullptr) {
+            std::scoped_lock<std::mutex> lock(cache_mutex_);
+            cache_->Clear();
+        }
+    }
+
     /**
      * @brief The size of the max buffer used for serialization.
      */
     static constexpr uint64_t SERIALIZE_BUFFER_SIZE = 1024 * 1024 * 2;
+
+    mutable std::mutex cache_mutex_;
+    mutable std::unique_ptr<PageCache> cache_;
 
 private:
     /**

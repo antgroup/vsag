@@ -91,7 +91,7 @@ public:
         while (cur_size < size) {
             auto area = start_area->first;
             auto area_size = std::min(size - cur_size, area.size - (start_offset - area.offset));
-            inner_io_->WriteImpl(data + cur_size, area_size, start_offset);
+            inner_io_->Write(data + cur_size, area_size, start_offset);
             cur_size += area_size;
             start_area++;
             if (start_area != areas_.end()) {
@@ -134,7 +134,7 @@ public:
                 start_offset = start_area->first.offset;
             }
         }
-        ret = inner_io_->MultiReadImpl(data, sizes.data(), offsets.data(), sizes.size());
+        ret = inner_io_->MultiRead(data, sizes.data(), offsets.data(), sizes.size());
         return ret;
     }
 

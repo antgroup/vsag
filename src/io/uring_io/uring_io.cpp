@@ -73,7 +73,7 @@ UringIO::UringIO(const UringIOParameterPtr& io_param, const IndexCommonParam& co
 UringIO::UringIO(const IOParamPtr& param, const IndexCommonParam& common_param)
     : UringIO(
           [&]() -> UringIOParameterPtr {
-              auto p = std::dynamic_pointer_cast<UringIOParameter>(param);
+              auto p = std::dynamic_pointer_cast<UringIOParameter>(UnwrapReadCacheParam(param));
               if (p == nullptr) {
                   throw VsagException(ErrorType::INVALID_ARGUMENT,
                                       "invalid IO parameter type for UringIO");
@@ -81,6 +81,7 @@ UringIO::UringIO(const IOParamPtr& param, const IndexCommonParam& common_param)
               return p;
           }(),
           common_param) {
+    EnableReadCache(param);
 }
 
 UringIO::~UringIO() {

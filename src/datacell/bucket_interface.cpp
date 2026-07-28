@@ -15,7 +15,10 @@
 #include "bucket_interface.h"
 
 #include "bucket_interface_factory.h"
+#include "bucket_interface_factory_impl.h"
 #include "inner_string_params.h"
+#include "io/io_headers.h"
+#include "io/read_cache/read_cache_parameter.h"
 
 namespace vsag {
 
@@ -43,6 +46,30 @@ BucketInterface::MakeInstance(const BucketDataCellParamPtr& param,
     }
     if (io_type_name == IO_TYPE_VALUE_BUFFER_IO) {
         return MakeBufferBucketDataCell(param, common_param);
+    }
+    if (io_type_name == IO_TYPE_VALUE_READ_CACHE) {
+        auto cache_param = std::dynamic_pointer_cast<ReadCacheParameter>(param->io_parameter);
+        if (cache_param) {
+            auto inner_type = cache_param->inner_io_type_;
+            if (inner_type == IO_TYPE_VALUE_MMAP_IO) {
+                return MakeBucketDataCellInstance<NonContinuousIO<MMapIO>>(param, common_param);
+            }
+            if (inner_type == IO_TYPE_VALUE_BUFFER_IO) {
+                return MakeBucketDataCellInstance<NonContinuousIO<BufferIO>>(param, common_param);
+            }
+            if (inner_type == IO_TYPE_VALUE_ASYNC_IO) {
+#if HAVE_LIBAIO
+                return MakeBucketDataCellInstance<NonContinuousIO<AsyncIO>>(param, common_param);
+#else
+                return MakeBucketDataCellInstance<NonContinuousIO<BufferIO>>(param, common_param);
+#endif
+            }
+            if (inner_type == IO_TYPE_VALUE_URING_IO) {
+                return MakeBucketDataCellInstance<NonContinuousIO<UringIO>>(param, common_param);
+            }
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "Unsupported ReadCache inner_io_type");
+        }
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "ReadCache requires ReadCacheParameter");
     }
     return nullptr;
 }

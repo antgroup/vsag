@@ -48,13 +48,20 @@ AsyncIO::AsyncIO(std::string filename, Allocator* allocator)
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             fmt::format("open file {} error {}", this->filepath_, strerror(errno)));
     }
+    // Stat file to get size
+    if (this->exist_file_) {
+        this->size_ = std::filesystem::file_size(this->filepath_);
+    }
 }
 
 AsyncIO::AsyncIO(const AsyncIOParameterPtr& io_param, const IndexCommonParam& common_param)
     : AsyncIO(io_param->path_, common_param.allocator_.get()){};
 
 AsyncIO::AsyncIO(const IOParamPtr& param, const IndexCommonParam& common_param)
-    : AsyncIO(std::dynamic_pointer_cast<AsyncIOParameter>(param), common_param){};
+    : AsyncIO(std::dynamic_pointer_cast<AsyncIOParameter>(UnwrapReadCacheParam(param)),
+              common_param) {
+    EnableReadCache(param);
+};
 
 AsyncIO::~AsyncIO() {
     close(this->wfd_);

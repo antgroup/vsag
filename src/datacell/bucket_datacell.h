@@ -23,11 +23,26 @@
 #include "bucket_interface.h"
 #include "impl/inner_search_param.h"
 #include "io/container/io_array.h"
+#include "io/read_cache/page.h"
+#include "io/read_cache/read_cache_parameter.h"
 #include "quantization/product_quantization/pq_fastscan_quantizer.h"
 #include "simd/fp32_simd.h"
 #include "utils/byte_buffer.h"
 
 namespace vsag {
+
+inline IOParamPtr
+AdjustBucketReadCacheParam(const IOParamPtr& io_param, BucketIdType bucket_count) {
+    auto cache_param = std::dynamic_pointer_cast<ReadCacheParameter>(io_param);
+    if (cache_param == nullptr or bucket_count == 0) {
+        return io_param;
+    }
+    auto adjusted_param = std::make_shared<ReadCacheParameter>(*cache_param);
+    uint64_t total_pages = cache_param->total_cache_size_ / Page::DEFAULT_PAGE_SIZE;
+    uint64_t pages_per_bucket = total_pages / bucket_count;
+    adjusted_param->total_cache_size_ = pages_per_bucket * Page::DEFAULT_PAGE_SIZE;
+    return adjusted_param;
+}
 
 template <typename QuantTmpl, typename IOTmpl>
 class BucketDataCell : public BucketInterface {
@@ -203,7 +218,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::BucketDataCell(const QuantizerParamPtr& quant
                                                   BucketIdType bucket_count,
                                                   bool use_residual)
     : BucketInterface(),
-      datas_(common_param.allocator_.get(), io_param, common_param),
+      datas_(common_param.allocator_.get(),
+             AdjustBucketReadCacheParam(io_param, bucket_count),
+             common_param),
       bucket_sizes_(bucket_count, 0, common_param.allocator_.get()),
       inner_ids_(bucket_count,
                  Vector<InnerIdType>(common_param.allocator_.get()),
