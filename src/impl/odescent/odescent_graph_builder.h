@@ -177,6 +177,10 @@ private:
     const ODescentParameterPtr odescent_param_;
 
     const FlattenInterfacePtr& flatten_interface_;
+
+    // Build() initializes this before the first parallelize_task() call and never mutates it
+    // afterward. Task enqueue publishes the initialized pointer to workers, and each parallel phase
+    // waits on all futures before continuing, so get_distance() only performs concurrent reads.
     FlattenInterfacePtr build_flatten_interface_{nullptr};
     const float* build_vectors_{nullptr};
     int64_t build_vector_count_{0};
