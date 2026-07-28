@@ -42,6 +42,8 @@ include (extern/cpuinfo/cpuinfo.cmake)
 include (extern/fmt/fmt.cmake)
 include (extern/thread_pool/thread_pool.cmake)
 include (extern/tsl/tsl.cmake)
+# Experimental feature; enable it by switching the commented include.
+# include (extern/roaringbitmap/roaringbitmap_amalgamation.cmake)
 include (extern/roaringbitmap/roaringbitmap.cmake)
 
 if (ENABLE_TOOLS AND ENABLE_CXX11_ABI)
