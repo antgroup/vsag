@@ -82,7 +82,32 @@ IOParameter::GetIOParameterByJson(const JsonType& json) {
     } catch (std::invalid_argument& error) {
         return nullptr;
     }
+    if (io_ptr != nullptr) {
+        io_ptr->LoadReadCacheConfig(json);
+    }
     return io_ptr;
+}
+
+void
+IOParameter::LoadReadCacheConfig(const JsonType& json) {
+    if (json.Contains(READ_CACHE_ENABLED_KEY)) {
+        CHECK_ARGUMENT(json[READ_CACHE_ENABLED_KEY].IsBool(),
+                       "enable_read_cache must be a boolean");
+        enable_read_cache_ = json[READ_CACHE_ENABLED_KEY].GetBool();
+    }
+    if (json.Contains(READ_CACHE_TOTAL_CACHE_SIZE_KEY)) {
+        const auto& val = json[READ_CACHE_TOTAL_CACHE_SIZE_KEY];
+        CHECK_ARGUMENT(val.IsNumberUnsigned(), "total_cache_size must be a non-negative integer");
+        read_cache_total_size_ = val.GetUint64();
+    }
+}
+
+void
+IOParameter::AppendReadCacheConfig(JsonType& json) const {
+    if (enable_read_cache_) {
+        json[READ_CACHE_ENABLED_KEY].SetBool(true);
+        json[READ_CACHE_TOTAL_CACHE_SIZE_KEY].SetUint64(read_cache_total_size_);
+    }
 }
 IOParameter::IOParameter(std::string name) : name_(std::move(name)) {
 }

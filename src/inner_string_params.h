@@ -71,6 +71,8 @@ const char* const IO_TYPE_VALUE_READER_IO = "reader_io";
 const char* const IO_TYPE_VALUE_ASYNC_IO = "async_io";
 const char* const IO_TYPE_VALUE_URING_IO = "uring_io";
 const char* const IO_TYPE_VALUE_BLOCK_MEMORY_IO = "block_memory_io";
+const char* const READ_CACHE_TOTAL_CACHE_SIZE_KEY = "total_cache_size";
+const char* const READ_CACHE_ENABLED_KEY = "enable_read_cache";
 const char* const BLOCK_IO_BLOCK_SIZE_KEY = "block_size";
 
 // IO param for file
@@ -229,6 +231,8 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"IO_TYPE_VALUE_MEMORY_IO", IO_TYPE_VALUE_MEMORY_IO},
     {"IO_TYPE_VALUE_BLOCK_MEMORY_IO", IO_TYPE_VALUE_BLOCK_MEMORY_IO},
     {"IO_TYPE_VALUE_BUFFER_IO", IO_TYPE_VALUE_BUFFER_IO},
+    {"READ_CACHE_TOTAL_CACHE_SIZE_KEY", READ_CACHE_TOTAL_CACHE_SIZE_KEY},
+    {"READ_CACHE_ENABLED_KEY", READ_CACHE_ENABLED_KEY},
     {"IO_PARAMS_KEY", IO_PARAMS_KEY},
     {"BLOCK_IO_BLOCK_SIZE_KEY", BLOCK_IO_BLOCK_SIZE_KEY},
     {"QUANTIZATION_TYPE_VALUE_SQ8", QUANTIZATION_TYPE_VALUE_SQ8},

@@ -54,7 +54,9 @@ AsyncIO::AsyncIO(const AsyncIOParameterPtr& io_param, const IndexCommonParam& co
     : AsyncIO(io_param->path_, common_param.allocator_.get()){};
 
 AsyncIO::AsyncIO(const IOParamPtr& param, const IndexCommonParam& common_param)
-    : AsyncIO(std::dynamic_pointer_cast<AsyncIOParameter>(param), common_param){};
+    : AsyncIO(std::dynamic_pointer_cast<AsyncIOParameter>(param), common_param) {
+    EnableReadCache(param);
+};
 
 AsyncIO::~AsyncIO() {
     close(this->wfd_);

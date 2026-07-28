@@ -39,6 +39,7 @@ MemoryBlockIO::MemoryBlockIO(const MemoryBlockIOParamPtr& param,
 
 MemoryBlockIO::MemoryBlockIO(const IOParamPtr& param, const IndexCommonParam& common_param)
     : MemoryBlockIO(std::dynamic_pointer_cast<MemoryBlockIOParameter>(param), common_param) {
+    EnableReadCache(param);
 }
 
 MemoryBlockIO::~MemoryBlockIO() {

@@ -141,6 +141,14 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             },
         },
         {
+            IVF_BASE_CACHE_TOTAL_SIZE,
+            {
+                BUCKET_PARAMS_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_TOTAL_CACHE_SIZE_KEY,
+            },
+        },
+        {
             IVF_PRECISE_QUANTIZATION_TYPE,
             {
                 PRECISE_CODES_KEY,
@@ -162,6 +170,14 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                 PRECISE_CODES_KEY,
                 IO_PARAMS_KEY,
                 IO_FILE_PATH_KEY,
+            },
+        },
+        {
+            IVF_PRECISE_CACHE_TOTAL_SIZE,
+            {
+                PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_TOTAL_CACHE_SIZE_KEY,
             },
         },
         {
@@ -330,6 +346,22 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             GRAPH_BUILD_THRESHOLD_KEY,
             {
                 GRAPH_BUILD_THRESHOLD_KEY,
+            },
+        },
+        {
+            IVF_BASE_ENABLE_READ_CACHE,
+            {
+                BUCKET_PARAMS_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_ENABLED_KEY,
+            },
+        },
+        {
+            IVF_PRECISE_ENABLE_READ_CACHE,
+            {
+                PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_ENABLED_KEY,
             },
         },
     };

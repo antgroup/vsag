@@ -3858,3 +3858,43 @@ TEST_CASE("HGraph Concurrent Tune(disable_future_tuning=false) and CalDistanceBy
 
     REQUIRE(cal_count.load() > 0);
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
+                             "HGraph ReadCache With Async Backend",
+                             "[ft][hgraph][cacheio][pr]") {
+    auto resource = HGraphTestIndex::GetResource(true);
+    auto dim = 128;
+    std::string search_param = R"({"hgraph": {"ef_search": 200}})";
+
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim, resource->base_count, "l2");
+
+    auto precise_file_path = HGraphTestIndex::dir.GenerateRandomFile(false);
+    std::string read_cache_param = fmt::format(R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": {},
+        "index_param": {{
+            "use_reorder": true,
+            "base_quantization_type": "sq8",
+            "precise_quantization_type": "fp32",
+            "max_degree": 96,
+            "ef_construction": 500,
+            "base_pq_dim": {},
+            "base_io_type": "memory_io",
+             "precise_io_type": "async_io",
+             "precise_enable_read_cache": true,
+            "precise_file_path": "{}",
+            "precise_cache_total_size": 268435456,
+            "graph_io_type": "block_memory_io"
+        }}
+    }}
+    )",
+                                               dim,
+                                               dim,
+                                               precise_file_path);
+
+    auto cache_index = TestIndex::TestFactory(name, read_cache_param, true);
+    TestIndex::TestBuildIndex(cache_index, dataset, true);
+    HGraphTestIndex::TestGeneral(cache_index, dataset, search_param, 0.98f);
+}

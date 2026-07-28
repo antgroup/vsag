@@ -193,12 +193,21 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                 IO_FILE_PATH_KEY,
             },
         },
+        // clang-format off
         {
             HGRAPH_BASE_DIRECT_READ,
             {
                 BASE_CODES_KEY,
                 IO_PARAMS_KEY,
                 IO_DIRECT_READ_KEY,
+            },
+        },
+        {
+            HGRAPH_BASE_CACHE_TOTAL_SIZE,
+            {
+                BASE_CODES_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_TOTAL_CACHE_SIZE_KEY,
             },
         },
         {
@@ -217,6 +226,15 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                 IO_DIRECT_READ_KEY,
             },
         },
+        {
+            HGRAPH_PRECISE_CACHE_TOTAL_SIZE,
+            {
+                PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_TOTAL_CACHE_SIZE_KEY,
+            },
+        },
+        // clang-format on
         {
             HGRAPH_PRECISE_QUANTIZATION_TYPE,
             {
@@ -239,6 +257,14 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                 GRAPH_KEY,
                 IO_PARAMS_KEY,
                 IO_FILE_PATH_KEY,
+            },
+        },
+        {
+            HGRAPH_GRAPH_CACHE_TOTAL_SIZE,
+            {
+                GRAPH_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_TOTAL_CACHE_SIZE_KEY,
             },
         },
         {
@@ -561,6 +587,46 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY,
             {
                 HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY,
+            },
+        },
+        {
+            HGRAPH_BASE_ENABLE_READ_CACHE,
+            {
+                BASE_CODES_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_ENABLED_KEY,
+            },
+        },
+        {
+            HGRAPH_PRECISE_ENABLE_READ_CACHE,
+            {
+                PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_ENABLED_KEY,
+            },
+        },
+        {
+            HGRAPH_GRAPH_ENABLE_READ_CACHE,
+            {
+                GRAPH_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_ENABLED_KEY,
+            },
+        },
+        {
+            HGRAPH_RAW_VECTOR_ENABLE_READ_CACHE,
+            {
+                RAW_VECTOR_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_ENABLED_KEY,
+            },
+        },
+        {
+            HGRAPH_RAW_VECTOR_CACHE_TOTAL_SIZE,
+            {
+                RAW_VECTOR_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_TOTAL_CACHE_SIZE_KEY,
             },
         }};
     const std::string hgraph_params_template =

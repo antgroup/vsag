@@ -81,6 +81,7 @@ UringIO::UringIO(const IOParamPtr& param, const IndexCommonParam& common_param)
               return p;
           }(),
           common_param) {
+    EnableReadCache(param);
 }
 
 UringIO::~UringIO() {

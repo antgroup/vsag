@@ -73,6 +73,7 @@ public:
      */
     explicit MemoryIO(const IOParamPtr& param, const IndexCommonParam& common_param)
         : MemoryIO(std::dynamic_pointer_cast<MemoryIOParameter>(param), common_param) {
+        EnableReadCache(param);
     }
 
     /**

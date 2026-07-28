@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,29 +12,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "io/memory_io/memory_io_parameter.h"
+#pragma once
 
-#include "inner_string_params.h"
+#include <cstdint>
+#include <list>
+#include <unordered_map>
+
+#include "io/read_cache/page_cache.h"
 
 namespace vsag {
 
-MemoryIOParameter::MemoryIOParameter() : IOParameter(IO_TYPE_VALUE_MEMORY_IO) {
-}
+/**
+ * @brief PageCache with Least-Recently-Used eviction policy.
+ */
+class LRUPageCache : public PageCache {
+public:
+    explicit LRUPageCache(uint64_t max_pages);
 
-MemoryIOParameter::MemoryIOParameter(const vsag::JsonType& json)
-    : IOParameter(IO_TYPE_VALUE_MEMORY_IO) {
-    this->FromJson(json);  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
-}
+protected:
+    void
+    OnAccess(uint64_t page_id) override;
 
-void
-MemoryIOParameter::FromJson(const JsonType& json) {
-}
+    void
+    OnInsert(uint64_t page_id) override;
 
-JsonType
-MemoryIOParameter::ToJson() const {
-    JsonType json;
-    json[TYPE_KEY].SetString(IO_TYPE_VALUE_MEMORY_IO);
-    AppendReadCacheConfig(json);
-    return json;
-}
+    void
+    OnRemove(uint64_t page_id) override;
+
+    uint64_t
+    PickVictim() override;
+
+private:
+    std::list<uint64_t> order_;
+    std::unordered_map<uint64_t, std::list<uint64_t>::iterator> iters_;
+};
+
 }  // namespace vsag
