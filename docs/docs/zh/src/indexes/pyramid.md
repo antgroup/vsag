@@ -89,6 +89,7 @@ auto result = index->KnnSearch(
 | `no_build_levels` | int[] | `[]` | 跳过构图的层级（从根节点开始的 0-based 下标） |
 | `use_reorder` | bool | `false` | 是否保留高精度副本用于精排 |
 | `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型。与 `rabitq_bits_per_dim_precise` 配合设为 `"rabitq"` 时，可启用从 base storage 重排的 RaBitQ x+y split。 |
+| `rabitq_bits_per_dim_base` | int | `1` | RaBitQ 底库存储码的每维位数。在 x+y split 模式下表示 `x`，即图遍历使用的 filter bits；范围为 `[1, 8]`。 |
 | `rabitq_bits_per_dim_precise` | int | 未设置 | RaBitQ split 的 `y` bits。和 `base_quantization_type: "rabitq"`、`precise_quantization_type: "rabitq"` 一起设置时，Pyramid 使用 split storage；`rabitq_bits_per_dim_base` 仍表示 `x`，且 `x + y <= 8`。 |
 | `fast_encode_rabitq` | bool | `true` | 对 RaBitQ 底层或精排存储使用多 bit 快速编码器；设为 `false` 使用精确编码器 |
 | `fast_encode_rabitq_rounds` | int | `6` | RaBitQ 快速编码的微调轮数，范围 `[1, 32]` |
