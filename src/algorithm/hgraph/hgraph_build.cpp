@@ -144,7 +144,8 @@ HGraph::Build(const DatasetPtr& data) {
     this->build_cache_hit_nodes_ = 0;
     this->build_cache_missed_nodes_ = 0;
     std::vector<int64_t> ret;
-    if (this->has_loaded_cache()) {
+    const bool using_build_cache = this->has_loaded_cache();
+    if (using_build_cache) {
         if (this->using_dedup_storage()) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                 "HGraph deduplicate_storage does not support build_with_cache");
@@ -166,7 +167,8 @@ HGraph::Build(const DatasetPtr& data) {
     if (use_elp_optimizer_) {
         elp_optimize();
     }
-    if (this->mci_parameters_.enabled and graph_type_ != GRAPH_TYPE_VALUE_NSW) {
+    if (this->mci_parameters_.enabled and
+        (using_build_cache or graph_type_ != GRAPH_TYPE_VALUE_NSW)) {
         this->build_mci_clique_index(ret.empty() ? this->get_data(data) : nullptr);
     }
     return ret;
