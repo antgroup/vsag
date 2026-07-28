@@ -77,11 +77,13 @@ map_rabitq_split_param(const JsonType& external_json, JsonType& inner_json) {
 
     const int64_t filter_bits = external_json[PYRAMID_RABITQ_BITS_PER_DIM_BASE].GetInt();
     const int64_t supplement_bits = external_json[PYRAMID_RABITQ_BITS_PER_DIM_PRECISE].GetInt();
+    const bool filter_bits_in_range = filter_bits >= 1 and filter_bits <= 8;
     CHECK_ARGUMENT(
-        filter_bits >= 1 and filter_bits <= 8,
+        filter_bits_in_range,
         fmt::format("{} must be in [1, 8], got {}", PYRAMID_RABITQ_BITS_PER_DIM_BASE, filter_bits));
+    const bool supplement_bits_in_range = supplement_bits >= 1 and supplement_bits <= 8;
     CHECK_ARGUMENT(
-        supplement_bits >= 1 and supplement_bits <= 8,
+        supplement_bits_in_range,
         fmt::format(
             "{} must be in [1, 8], got {}", PYRAMID_RABITQ_BITS_PER_DIM_PRECISE, supplement_bits));
     const int64_t total_bits = filter_bits + supplement_bits;
