@@ -301,6 +301,17 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() > 0);
     REQUIRE(result.value()->GetDim() <= 5);
+    REQUIRE_NOTHROW(index->GetStats());
+
+    auto restored = TestFactory("pyramid", param_json.Dump(), true);
+    TestSerializeBinarySet(
+        index, restored, dataset, GeneratePyramidSearchParametersString(100), true);
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    auto streamed = TestFactory("pyramid", param_json.Dump(), true);
+    REQUIRE(streamed->DeserializeStreaming(stream).has_value());
+    REQUIRE_NOTHROW(streamed->GetStats());
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,

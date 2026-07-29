@@ -173,6 +173,10 @@ public:
                 reorder_ = std::make_shared<FlattenReorder>(precise_codes_, allocator_);
             }
         }
+        if (pyramid_param->store_raw_vector) {
+            raw_vector_ =
+                FlattenInterface::MakeInstance(pyramid_param->raw_vector_param, common_param);
+        }
     }
 
     explicit Pyramid(const ParamPtr& param, const IndexCommonParam& common_param)
@@ -377,11 +381,17 @@ private:
         return has_precise_codes() ? precise_codes_ : base_codes_;
     }
 
+    FlattenInterfacePtr
+    decodable_codes() const {
+        return raw_vector_ != nullptr ? raw_vector_ : graph_codes();
+    }
+
 private:
     ODescentParameterPtr odescent_param_{nullptr};  // ODescent build parameters
     UnorderedMap<std::string, std::unique_ptr<Hierarchy>> hierarchies_;  // named hierarchies
     FlattenInterfacePtr base_codes_{nullptr};          // coarse codes for graph build/search
     FlattenInterfacePtr precise_codes_{nullptr};       // precise codes for reorder (if enabled)
+    FlattenInterfacePtr raw_vector_{nullptr};          // original vectors for decode-only paths
     std::unique_ptr<VisitedListPool> pool_ = nullptr;  // pool of visited-lists for search
 
     MutexArrayPtr points_mutex_{nullptr};                // per-point locks for concurrent access

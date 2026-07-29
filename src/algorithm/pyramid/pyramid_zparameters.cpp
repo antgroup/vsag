@@ -295,6 +295,10 @@ PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
     if (this->use_reorder and this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
         CHECK_SUB_PARAM(*this, *p, precise_codes_param);
     }
+    CHECK_FIELD_EQ(*this, *p, store_raw_vector);
+    if (this->store_raw_vector) {
+        CHECK_SUB_PARAM(*this, *p, raw_vector_param);
+    }
     CHECK_FIELD_EQ(*this, *p, index_min_size);
     CHECK_FIELD_EQ(*this, *p, support_duplicate);
     return true;
