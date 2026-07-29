@@ -23,6 +23,7 @@
 #include <optional>
 #include <tuple>
 
+#include "algorithm/index_utils.h"
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
 #include "datacell/attribute_inverted_interface.h"
@@ -387,13 +388,14 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
             CHECK_ARGUMENT(request.radius_ >= 0.0F, "radius must be non-negative");
             CHECK_ARGUMENT(request.limited_size_ != 0, "limited_size must not be 0");
         } else if (not is_multi_vector_) {
-            this->validate_range_args(request.query_, request.radius_, request.limited_size_);
+            index_utils::ValidateRangeArgs(
+                data_type_, dim_, request.query_, request.radius_, request.limited_size_);
         }
     } else {
         if (use_custom_distance) {
             CHECK_ARGUMENT(request.topk_ > 0, "topk must be greater than 0");
         } else if (not is_multi_vector_) {
-            this->validate_knn_args(request.query_, request.topk_);
+            index_utils::ValidateKnnArgs(data_type_, dim_, request.query_, request.topk_);
         }
     }
 
@@ -404,7 +406,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
     auto radius = is_range ? request.radius_ : std::numeric_limits<float>::max();
 
     if (total_count_.load() == 0) {
-        return make_empty_result();
+        return index_utils::MakeEmptyResult();
     }
 
     DistHeapPtr heap = nullptr;
@@ -678,7 +680,7 @@ BruteForce::Serialize(StreamWriter& writer) const {
     basic_info["has_extra_info"].SetBool(this->extra_info_size_ > 0 and
                                          this->extra_infos_ != nullptr);
     basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
-    write_index_footer(writer, basic_info);
+    index_utils::WriteIndexFooter(writer, basic_info);
 }
 
 MetadataPtr
@@ -977,7 +979,7 @@ BruteForce::read_streaming_body(StreamReader& reader,
 void
 BruteForce::Deserialize(StreamReader& reader) {
     JsonType basic_info;
-    bool has_footer = read_index_footer(reader, basic_info);
+    bool has_footer = index_utils::ReadIndexFooter(reader, basic_info);
 
     BufferStreamReader buffer_reader(
         &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);

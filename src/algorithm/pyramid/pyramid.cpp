@@ -18,9 +18,11 @@
 #include <chrono>
 #include <exception>
 
+#include "algorithm/index_utils.h"
 #include "algorithm/inner_index_interface.h"
 #include "analyzer/analyzer.h"
 #include "datacell/flatten_interface.h"
+#include "dataset_impl.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
@@ -456,7 +458,7 @@ Pyramid::Serialize(StreamWriter& writer) const {
     JsonType basic_info;
     basic_info["max_capacity"].SetInt(max_capacity_);
     basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
-    write_index_footer(writer, basic_info);
+    index_utils::WriteIndexFooter(writer, basic_info);
 }
 
 MetadataPtr
@@ -695,7 +697,7 @@ void
 Pyramid::Deserialize(StreamReader& reader) {
     // try to deserialize footer (only in new version)
     JsonType basic_info;
-    if (not read_index_footer(reader, basic_info)) {
+    if (not index_utils::ReadIndexFooter(reader, basic_info)) {
         throw VsagException(ErrorType::READ_ERROR, "failed to read index footer");
     }
     auto max_capacity = basic_info["max_capacity"].GetInt();

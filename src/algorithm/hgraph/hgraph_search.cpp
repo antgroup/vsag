@@ -16,6 +16,7 @@
 
 #include <algorithm>
 
+#include "algorithm/index_utils.h"
 #include "attr/argparse.h"
 #include "dataset_impl.h"
 #include "hgraph.h"  // IWYU pragma: keep
@@ -74,7 +75,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     if (GetNumElements() == 0) {
         return DatasetImpl::MakeEmptyDataset();
     }
-    this->validate_knn_args(query, k);
+    index_utils::ValidateKnnArgs(data_type_, dim_, query, k);
 
     auto params = HGraphSearchParameters::FromJson(parameters);
     ctx.rabitq_error_rate = params.rabitq_error_rate;
@@ -390,11 +391,12 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
     if (is_range) {
         if (not use_custom_distance) {
-            this->validate_range_args(query, request.radius_, request.limited_size_);
+            index_utils::ValidateRangeArgs(
+                data_type_, dim_, query, request.radius_, request.limited_size_);
         }
     } else {
         if (not use_custom_distance) {
-            this->validate_knn_args(query, k);
+            index_utils::ValidateKnnArgs(data_type_, dim_, query, k);
         } else {
             CHECK_ARGUMENT(k > 0, "topk must be greater than 0");
         }

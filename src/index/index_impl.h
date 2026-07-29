@@ -18,6 +18,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "common.h"
+#include "dataset_impl.h"
 #include "index_common_param.h"
 #include "vsag/index.h"
 namespace vsag {

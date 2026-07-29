@@ -26,6 +26,7 @@
 #include <unordered_set>
 #include <utility>
 
+#include "algorithm/index_utils.h"
 #include "dataset_impl.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"
@@ -953,7 +954,7 @@ SIMQ::Serialize(StreamWriter& writer) const {
     info["dim"].SetInt(dim_);
     info["total_count"].SetInt(total_count_.load());
     info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
-    write_index_footer(writer, info);
+    index_utils::WriteIndexFooter(writer, info);
 }
 
 void
@@ -961,7 +962,7 @@ SIMQ::Deserialize(StreamReader& reader) {
     std::unique_lock lock(global_mutex_);
 
     JsonType info;
-    if (!read_index_footer(reader, info)) {
+    if (!index_utils::ReadIndexFooter(reader, info)) {
         throw VsagException(ErrorType::READ_ERROR, "simq: failed to read index footer");
     }
 

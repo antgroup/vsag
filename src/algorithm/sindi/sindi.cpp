@@ -26,6 +26,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "algorithm/index_utils.h"
 #include "analyzer/analyzer.h"
 #include "datacell/sparse_dmq_datacell.h"
 #include "datacell/sparse_vector_datacell_parameter.h"
@@ -618,7 +619,7 @@ SINDI::KnnSearch(const DatasetPtr& query,
     if (remap_term_ids_) {
         effective_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
         if (effective_query.len_ == 0) {
-            return make_empty_result();
+            return index_utils::MakeEmptyResult();
         }
     }
 
@@ -910,7 +911,7 @@ SINDI::immutable_search_impl(const SparseTermComputerPtr& computer,
         scan_immutable_window_by_mapped_terms(dists.data(), window, computer, mapped_terms);
 
         if (reasoning_ctx != nullptr) {
-            selected_buckets->push_back(cur);
+            selected_buckets->push_back(static_cast<BucketIdType>(cur));
             auto doc_count = static_cast<uint32_t>(std::min<int64_t>(
                 window_size_, cur_element_count_ - static_cast<int64_t>(window_start_id)));
             for (uint32_t i = 0; i < doc_count; ++i) {
@@ -1059,7 +1060,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         term_list->Query(dists.data(), computer);
 
         if (reasoning_ctx != nullptr) {
-            selected_buckets->push_back(cur);
+            selected_buckets->push_back(static_cast<BucketIdType>(cur));
             auto doc_count = static_cast<uint32_t>(std::min<int64_t>(
                 window_size_, cur_element_count_ - static_cast<int64_t>(window_start_id)));
             for (uint32_t i = 0; i < doc_count; ++i) {
@@ -1209,7 +1210,7 @@ SINDI::RangeSearch(const DatasetPtr& query,
     if (remap_term_ids_) {
         effective_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
         if (effective_query.len_ == 0) {
-            return make_empty_result();
+            return index_utils::MakeEmptyResult();
         }
     }
 
@@ -1277,7 +1278,7 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
     if (remap_term_ids_) {
         effective_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
         if (effective_query.len_ == 0) {
-            return make_empty_result();
+            return index_utils::MakeEmptyResult();
         }
     }
 
@@ -1457,7 +1458,7 @@ SINDI::Serialize(StreamWriter& writer) const {
     } else if (use_reorder_) {
         jsonify_basic_info[SINDI_RERANK_FLAT_FORMAT_KEY].SetInt(SINDI_RERANK_FLAT_FORMAT_DATACELL);
     }
-    write_index_footer(writer, jsonify_basic_info);
+    index_utils::WriteIndexFooter(writer, jsonify_basic_info);
 }
 
 MetadataPtr
@@ -1756,7 +1757,7 @@ SINDI::Deserialize(StreamReader& reader) {
     if (not deserialize_without_footer_) {
         JsonType jsonify_basic_info;
         try {
-            if (read_index_footer(reader, jsonify_basic_info)) {
+            if (index_utils::ReadIndexFooter(reader, jsonify_basic_info)) {
                 has_footer = true;
                 // Check if the index parameter is compatible
                 {

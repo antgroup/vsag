@@ -29,6 +29,7 @@
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_datacell_parameter.h"
 #include "datacell/graph_interface_parameter.h"
+#include "dataset_impl.h"
 #include "flat_bucket_searcher.h"
 #include "gno_imi_partition.h"
 #include "graph_bucket_searcher.h"

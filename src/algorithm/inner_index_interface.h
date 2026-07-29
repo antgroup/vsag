@@ -26,7 +26,6 @@
 #include "datacell/attribute_inverted_interface.h"
 #include "datacell/extra_info_interface.h"
 #include "datacell/flatten_interface.h"
-#include "dataset_impl.h"
 #include "impl/heap/distance_heap.h"
 #include "impl/label_table/label_table.h"
 #include "inner_index_parameter.h"
@@ -642,30 +641,6 @@ protected:
     // Pack search results from a distance heap with extra info
     DatasetPtr
     pack_knn_result_with_extra_info(DistHeapPtr& heap, Allocator* allocator = nullptr) const;
-
-    // Create an empty search result with optional statistics
-    static DatasetPtr
-    make_empty_result(const std::string& stats_json = "");
-
-    // Write index footer with basic_info metadata
-    static void
-    write_index_footer(StreamWriter& writer, const JsonType& basic_info);
-
-    // Read index footer and return basic_info metadata; returns false if old format
-    static bool
-    read_index_footer(StreamReader& reader, JsonType& basic_info);
-
-    // Validate search query: checks dim and num_elements
-    void
-    validate_search_query(const DatasetPtr& query) const;
-
-    // Validate KNN search arguments: query, k
-    void
-    validate_knn_args(const DatasetPtr& query, int64_t k) const;
-
-    // Validate range search arguments: query, radius, limited_size
-    void
-    validate_range_args(const DatasetPtr& query, float radius, int64_t limited_size) const;
 
 public:
     LabelTablePtr label_table_{nullptr};
