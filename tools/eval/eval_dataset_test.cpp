@@ -381,7 +381,15 @@ TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][
     auto created = vsag::Factory::CreateIndex("hgraph", create_params);
     REQUIRE(created.has_value());
     auto index = created.value();
-    REQUIRE(index->Build(base).has_value());
+
+    vsag::eval::EvalConfig build_config;
+    build_config.index_name = "hgraph";
+    build_config.build_param = create_params;
+    build_config.enable_tps = false;
+    build_config.enable_memory = false;
+    const auto build_result = vsag::eval::EvaluateBuild(index, dataset, build_config);
+    REQUIRE(build_result.contains("duration(s)"));
+    REQUIRE_FALSE(build_result.contains("tps"));
 
     vsag::eval::EvalConfig config;
     config.index_name = "hgraph";

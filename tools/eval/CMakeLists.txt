@@ -68,7 +68,6 @@ if (ENABLE_TESTS)
     target_link_libraries (eval_dataset_test PRIVATE
         Catch2::Catch2WithMain
         eval_obj
-        simd
         vsag
         vsag_eval_common
         ${HDF5_CPP_STATIC_LIBRARY}

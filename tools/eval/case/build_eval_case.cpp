@@ -40,10 +40,8 @@ BuildEvalCase::init_monitors() {
         auto memory_peak_monitor = std::make_shared<MemoryPeakMonitor>("build");
         this->monitors_.emplace_back(std::move(memory_peak_monitor));
     }
-    if (config_.enable_tps) {
-        auto duration_monitor = std::make_shared<DurationMonitor>();
-        this->monitors_.emplace_back(std::move(duration_monitor));
-    }
+    auto duration_monitor = std::make_shared<DurationMonitor>();
+    this->monitors_.emplace_back(std::move(duration_monitor));
 }
 
 JsonType
@@ -111,7 +109,10 @@ BuildEvalCase::process_result() {
         EvalCase::MergeJsonType(one_result, eval_result);
     }
     result = eval_result;
-    result["tps"] = double(this->dataset_ptr_->GetNumberOfBase()) / double(result["duration(s)"]);
+    if (config_.enable_tps) {
+        result["tps"] =
+            double(this->dataset_ptr_->GetNumberOfBase()) / double(result["duration(s)"]);
+    }
     EvalCase::MergeJsonType(this->basic_info_, result);
     result["index_info"] = JsonType::parse(config_.build_param);
     result["action"] = "build";
