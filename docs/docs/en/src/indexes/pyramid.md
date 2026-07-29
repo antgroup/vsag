@@ -115,7 +115,7 @@ Search-time parameters live under the `pyramid` sub-object:
 | `subindex_ef_search` | int | `50` | Candidate list size used when traversing intermediate sub-graphs on the path. |
 | `hierarchies` | string[] | `[]` | Select which hierarchy to search. Empty means use the default (unnamed) hierarchy. |
 | `hierarchy_op` | string | `"single"` | How to combine results across hierarchies: `single` (search one hierarchy), `union`, or `intersection`. **Note:** `union` and `intersection` are not yet implemented — setting them will cause `KnnSearch`/`RangeSearch` to return an error. |
-| `rabitq_error_rate` | float | index default | Positive lower-bound error multiplier for this search. |
+| `rabitq_error_rate` | float | `1.9` | Positive lower-bound error multiplier for this search. The default `1.9` is relatively large; increasing it improves accuracy but slows down search. |
 
 ```cpp
 auto result = index->KnnSearch(
