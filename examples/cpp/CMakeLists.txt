@@ -162,3 +162,17 @@ target_link_libraries(406_feature_read_cache vsag)
 
 add_executable(407_feature_ivf_read_cache 407_feature_ivf_read_cache.cpp)
 target_link_libraries(407_feature_ivf_read_cache vsag)
+
+if (TARGET vsag::autotune)
+    add_executable (326_feature_create_index_with_constraints
+        326_feature_create_index_with_constraints.cpp)
+    target_link_libraries (326_feature_create_index_with_constraints vsag::autotune)
+
+    add_executable (327_feature_autotune_existing_index
+        327_feature_autotune_existing_index.cpp)
+    target_link_libraries (327_feature_autotune_existing_index vsag::autotune)
+
+    add_executable (328_feature_autotune_existing_pyramid
+        328_feature_autotune_existing_pyramid.cpp)
+    target_link_libraries (328_feature_autotune_existing_pyramid vsag::autotune)
+endif ()

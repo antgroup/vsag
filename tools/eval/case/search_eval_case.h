@@ -30,12 +30,16 @@ public:
     SearchEvalCase(const std::string& dataset_path,
                    const std::string& index_path,
                    vsag::IndexPtr index,
-                   EvalConfig config);
+                   EvalConfig config,
+                   EvalDatasetPtr dataset = nullptr);
 
     ~SearchEvalCase() override = default;
 
     JsonType
     Run() override;
+
+    JsonType
+    RunInMemory();
 
 private:
     enum SearchType {

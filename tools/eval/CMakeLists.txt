@@ -28,6 +28,7 @@ set (eval_srcs
     monitor/http_server_monitor.cpp
     eval_config.cpp
     eval_dataset.cpp
+    evaluator.cpp
     eval_job.cpp)
 
 add_library (vsag_eval_common INTERFACE)

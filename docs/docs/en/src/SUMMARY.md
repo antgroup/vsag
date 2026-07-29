@@ -83,6 +83,8 @@
 - [Optimizer (Tune)](advanced/optimizer.md)
 - [Benchmarks](resources/performance.md)
 - [Evaluation Tool](resources/eval.md)
+- [AutoTune Tool](resources/autotune.md)
+  - [AutoTune V1 CLI JSON Contract](resources/autotune_api_v1.md)
 - [HDF5 Dataset Format](resources/dataset_format.md)
 - [Index Analysis Tool](resources/analyze_index.md)
 - [Compatibility Check Tool](resources/check_compatibility.md)

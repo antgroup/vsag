@@ -17,12 +17,14 @@
 
 #include <omp.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
-#include <iostream>
+#include <mutex>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 #include "../monitor/latency_monitor.h"
@@ -34,6 +36,41 @@
 #include "vsag_exception.h"
 
 namespace vsag::eval {
+
+namespace {
+
+class SearchFailure {
+public:
+    bool
+    Failed() const {
+        return failed_.load(std::memory_order_acquire);
+    }
+
+    void
+    Record(const std::string& message) {
+        bool expected = false;
+        if (failed_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            message_ = message;
+        }
+    }
+
+    void
+    ThrowIfFailed() {
+        if (not Failed()) {
+            return;
+        }
+        std::lock_guard<std::mutex> lock(mutex_);
+        throw std::runtime_error("query error: " + message_);
+    }
+
+private:
+    std::atomic<bool> failed_{false};
+    std::mutex mutex_;
+    std::string message_;
+};
+
+}  // namespace
 
 class FilterObj : public vsag::Filter {
 public:
@@ -60,8 +97,10 @@ private:
 SearchEvalCase::SearchEvalCase(const std::string& dataset_path,
                                const std::string& index_path,
                                vsag::IndexPtr index,
-                               EvalConfig config)
-    : EvalCase(dataset_path, index_path, index), config_(std::move(config)) {
+                               EvalConfig config,
+                               EvalDatasetPtr dataset)
+    : EvalCase(dataset_path, index_path, std::move(index), std::move(dataset)),
+      config_(std::move(config)) {
     auto search_mode = config_.search_mode;
     if (search_mode == "knn") {
         this->search_type_ = SearchType::KNN;
@@ -84,7 +123,7 @@ SearchEvalCase::init_monitor() {
 
 void
 SearchEvalCase::init_latency_monitor() {
-    if (config_.enable_latency or config_.enable_tps or config_.enable_percent_latency) {
+    if (config_.enable_latency or config_.enable_qps or config_.enable_percent_latency) {
         this->latency_monitor_ = std::make_shared<LatencyMonitor>();
         if (config_.enable_qps) {
             this->latency_monitor_->SetMetrics("qps");
@@ -126,6 +165,15 @@ JsonType
 SearchEvalCase::Run() {
     std::ifstream infile(this->index_path_, std::ios::binary);
     this->deserialize(infile);
+    auto result = this->RunInMemory();
+    if (config_.delete_index_after_search) {
+        std::remove(this->index_path_.c_str());
+    }
+    return result;
+}
+
+JsonType
+SearchEvalCase::RunInMemory() {
     switch (this->search_type_) {
         case KNN:
             this->do_knn_search();
@@ -140,11 +188,7 @@ SearchEvalCase::Run() {
             this->do_range_filter_search();
             break;
     }
-    auto result = this->process_result();
-    if (config_.delete_index_after_search) {
-        std::remove(this->index_path_.c_str());
-    }
-    return result;
+    return this->process_result();
 }
 
 void
@@ -172,6 +216,9 @@ SearchEvalCase::do_knn_search() {
         } else {
             query->SparseVectors((const SparseVector*)query_vector);
         }
+        if (this->dataset_ptr_->GetTestPaths() != nullptr) {
+            query->Paths(this->dataset_ptr_->GetTestPaths() + query_id);
+        }
         return std::make_pair(std::move(query), query_vector);
     };
 
@@ -187,20 +234,25 @@ SearchEvalCase::do_knn_search() {
         if (is_latency_monitor) {
             using Clock = std::chrono::steady_clock;
             std::vector<double> latency_records(min_query);
+            SearchFailure search_failure;
             const auto wall_start = Clock::now();
 #pragma omp parallel for schedule(dynamic)
             for (int64_t id = 0; id < min_query; ++id) {
+                if (search_failure.Failed()) {
+                    continue;
+                }
                 auto i = static_cast<uint64_t>(id) % query_count;
                 auto query_and_vector = prepare_query(i);
                 auto& query = query_and_vector.first;
                 auto [result, latency_ms] = MeasureSearch(
                     [&]() { return this->index_->KnnSearch(query, topk, config_.search_param); });
                 if (not result.has_value()) {
-                    std::cerr << "query error: " << result.error().message << std::endl;
-                    exit(-1);
+                    search_failure.Record(result.error().message);
+                    continue;
                 }
                 latency_records[static_cast<uint64_t>(id)] = latency_ms;
             }
+            search_failure.ThrowIfFailed();
             const auto wall_end = Clock::now();
             auto timing_batch = LatencyTimingBatch{
                 std::move(latency_records),
@@ -212,47 +264,56 @@ SearchEvalCase::do_knn_search() {
             continue;
         }
 
+        SearchFailure search_failure;
 #pragma omp parallel for schedule(dynamic)
         for (int64_t id = 0; id < min_query; ++id) {
+            if (search_failure.Failed()) {
+                continue;
+            }
             auto i = static_cast<uint64_t>(id) % query_count;
             auto query_and_vector = prepare_query(i);
             auto& query = query_and_vector.first;
             const void* query_vector = query_and_vector.second;
             auto result = this->index_->KnnSearch(query, topk, config_.search_param);
             if (not result.has_value()) {
-                std::cerr << "query error: " << result.error().message << std::endl;
-                exit(-1);
+                search_failure.Record(result.error().message);
+                continue;
             }
             if (collect_statistics) {
                 this->record_statistics(result.value());
             }
-            const int64_t* neighbors = result.value()->GetIds();
-            int64_t* ground_truth_neighbors = dataset_ptr_->GetNeighbors(i);
-            auto record = std::make_tuple(neighbors,
-                                          ground_truth_neighbors,
-                                          dataset_ptr_.get(),
-                                          query_vector,
-                                          result.value()->GetDim());
+            SearchRecord record{result.value()->GetIds(),
+                                dataset_ptr_->GetNeighbors(i),
+                                dataset_ptr_.get(),
+                                query_vector,
+                                static_cast<uint64_t>(result.value()->GetDim()),
+                                topk};
             monitor->Record(&record);
         }
+        search_failure.ThrowIfFailed();
         monitor->Stop();
         statistics_collected = statistics_collected or collect_statistics;
     }
 
     if (not statistics_collected and not this->monitors_.empty()) {
         omp_set_num_threads(config_.num_threads_searching);
+        SearchFailure search_failure;
 #pragma omp parallel for schedule(dynamic)
         for (int64_t id = 0; id < min_query; ++id) {
+            if (search_failure.Failed()) {
+                continue;
+            }
             auto i = static_cast<uint64_t>(id) % query_count;
             auto query_and_vector = prepare_query(i);
             auto& query = query_and_vector.first;
             auto result = this->index_->KnnSearch(query, topk, config_.search_param);
             if (not result.has_value()) {
-                std::cerr << "query error: " << result.error().message << std::endl;
-                exit(-1);
+                search_failure.Record(result.error().message);
+                continue;
             }
             this->record_statistics(result.value());
         }
+        search_failure.ThrowIfFailed();
     }
 }
 
@@ -299,8 +360,7 @@ SearchEvalCase::do_knn_filter_search() {
                     return this->index_->KnnSearch(query, topk, config_.search_param, filter);
                 });
                 if (not result.has_value()) {
-                    std::cerr << "query error: " << result.error().message << std::endl;
-                    exit(-1);
+                    throw std::runtime_error("query error: " + result.error().message);
                 }
                 latency_records[static_cast<uint64_t>(id)] = latency_ms;
             }
@@ -330,13 +390,14 @@ SearchEvalCase::do_knn_filter_search() {
                 train_labels, test_label, this->dataset_ptr_->GetValidRatio(test_label));
             auto result = this->index_->KnnSearch(query, topk, config_.search_param, filter);
             if (not result.has_value()) {
-                std::cerr << "query error: " << result.error().message << std::endl;
-                exit(-1);
+                throw std::runtime_error("query error: " + result.error().message);
             }
-            const int64_t* neighbors = result.value()->GetIds();
-            int64_t* ground_truth_neighbors = dataset_ptr_->GetNeighbors(i);
-            auto record = std::make_tuple(
-                neighbors, ground_truth_neighbors, dataset_ptr_.get(), query_vector, topk);
+            SearchRecord record{result.value()->GetIds(),
+                                dataset_ptr_->GetNeighbors(i),
+                                dataset_ptr_.get(),
+                                query_vector,
+                                static_cast<uint64_t>(result.value()->GetDim()),
+                                topk};
             monitor->Record(&record);
         }
         monitor->Stop();
@@ -359,6 +420,7 @@ SearchEvalCase::process_result() {
     result["index_info"] = JsonType::parse(config_.build_param);
     result["search_param"] = config_.search_param;
     result["index"] = config_.index_name;
+    result["index_memory(B)"] = this->index_->GetMemoryUsage();
     try {
         auto detail = this->index_->GetMemoryUsageDetail();
         for (const auto& [name, size] : detail) {

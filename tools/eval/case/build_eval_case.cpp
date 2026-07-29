@@ -15,7 +15,6 @@
 
 #include "./build_eval_case.h"
 
-#include <algorithm>
 #include <filesystem>
 #include <utility>
 
@@ -28,8 +27,10 @@ namespace vsag::eval {
 BuildEvalCase::BuildEvalCase(const std::string& dataset_path,
                              const std::string& index_path,
                              vsag::IndexPtr index,
-                             EvalConfig config)
-    : EvalCase(dataset_path, index_path, index), config_(std::move(config)) {
+                             EvalConfig config,
+                             EvalDatasetPtr dataset)
+    : EvalCase(dataset_path, index_path, std::move(index), std::move(dataset)),
+      config_(std::move(config)) {
     this->init_monitors();
 }
 
@@ -49,16 +50,23 @@ JsonType
 BuildEvalCase::Run() {
     this->do_build();
     this->serialize();
-    auto result = this->process_result();
-    return result;
+    return this->process_result();
 }
+
+JsonType
+BuildEvalCase::RunInMemory() {
+    this->do_build();
+    return this->process_result();
+}
+
 void
 BuildEvalCase::do_build() {
     auto base = vsag::Dataset::Make();
     int64_t total_base = this->dataset_ptr_->GetNumberOfBase();
-    std::vector<int64_t> ids(total_base);
-    std::iota(ids.begin(), ids.end(), 0);
-    base->NumElements(total_base)->Dim(this->dataset_ptr_->GetDim())->Ids(ids.data())->Owner(false);
+    base->NumElements(total_base)
+        ->Dim(this->dataset_ptr_->GetDim())
+        ->Ids(this->dataset_ptr_->GetTrainIds())
+        ->Owner(false);
     if (this->dataset_ptr_->GetVectorType() == DENSE_VECTORS) {
         if (this->dataset_ptr_->GetTrainDataType() == vsag::DATATYPE_FLOAT32) {
             base->Float32Vectors((const float*)this->dataset_ptr_->GetTrain());
@@ -67,6 +75,9 @@ BuildEvalCase::do_build() {
         }
     } else {
         base->SparseVectors((const SparseVector*)this->dataset_ptr_->GetTrain());
+    }
+    if (this->dataset_ptr_->GetTrainPaths() != nullptr) {
+        base->Paths(this->dataset_ptr_->GetTrainPaths());
     }
     for (auto& monitor : monitors_) {
         monitor->Start();
@@ -105,6 +116,7 @@ BuildEvalCase::process_result() {
     result["index_info"] = JsonType::parse(config_.build_param);
     result["action"] = "build";
     result["index"] = config_.index_name;
+    result["index_memory(B)"] = this->index_->GetMemoryUsage();
     try {
         auto detail = this->index_->GetMemoryUsageDetail();
         for (const auto& [name, size] : detail) {
