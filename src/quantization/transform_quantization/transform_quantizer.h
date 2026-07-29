@@ -269,7 +269,7 @@ TransformQuantizer<QuantTmpl, metric>::ExecuteChainTransform(float* prev_data,
             meta->EncodeMeta(codes + meta_offsets[i]);
         }
 
-        memcpy(prev_data, next_data.data(), this->dim_ * sizeof(float));
+        memcpy(prev_data, next_data.data(), vector_transformer->GetOutputDim() * sizeof(float));
     }
 }
 

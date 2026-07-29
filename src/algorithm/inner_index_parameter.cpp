@@ -98,11 +98,13 @@ MapRaBitQSplitParam(const JsonType& external_json, JsonType& inner_json) {
 
     const int64_t filter_bits = external_json[RABITQ_BITS_PER_DIM_BASE].GetInt();
     const int64_t supplement_bits = external_json[RABITQ_BITS_PER_DIM_PRECISE].GetInt();
+    const bool valid_filter_bits = filter_bits >= 1 and filter_bits <= 8;
     CHECK_ARGUMENT(
-        filter_bits >= 1 and filter_bits <= 8,
+        valid_filter_bits,
         fmt::format("{} must be in [1, 8], got {}", RABITQ_BITS_PER_DIM_BASE, filter_bits));
+    const bool valid_supplement_bits = supplement_bits >= 1 and supplement_bits <= 8;
     CHECK_ARGUMENT(
-        supplement_bits >= 1 and supplement_bits <= 8,
+        valid_supplement_bits,
         fmt::format("{} must be in [1, 8], got {}", RABITQ_BITS_PER_DIM_PRECISE, supplement_bits));
     const int64_t total_bits = filter_bits + supplement_bits;
     CHECK_ARGUMENT(total_bits <= 8,
@@ -132,7 +134,8 @@ ValidateMRLEDim(const JsonType& external_json, uint64_t dim) {
         external_json[INDEX_MRLE_DIM].IsNumberInteger(),
         fmt::format("mrle_dim must be an integer, got {}", external_json[INDEX_MRLE_DIM].Dump()));
     const int64_t mrle_dim = external_json[INDEX_MRLE_DIM].GetInt();
-    CHECK_ARGUMENT(mrle_dim >= 0 and mrle_dim <= static_cast<int64_t>(dim),
+    const bool valid_mrle_dim = mrle_dim >= 0 and mrle_dim <= static_cast<int64_t>(dim);
+    CHECK_ARGUMENT(valid_mrle_dim,
                    fmt::format("mrle_dim({}) must be in range [0, {}]", mrle_dim, dim));
 }
 
