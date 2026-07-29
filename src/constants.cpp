@@ -234,7 +234,6 @@ const char* const PYRAMID_GRAPH_TYPE = "graph_type";
 const char* const PYRAMID_GRAPH_STORAGE_TYPE = "graph_storage_type";
 const char* const PYRAMID_BUILD_THREAD_COUNT = "build_thread_count";
 const char* const PYRAMID_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
-const char* const PYRAMID_REORDER_SOURCE = REORDER_SOURCE_KEY;
 const char* const PYRAMID_RABITQ_BITS_PER_DIM_BASE = RABITQ_BITS_PER_DIM_BASE;
 const char* const PYRAMID_RABITQ_BITS_PER_DIM_QUERY = RABITQ_BITS_PER_DIM_QUERY;
 const char* const PYRAMID_RABITQ_BITS_PER_DIM_PRECISE = RABITQ_BITS_PER_DIM_PRECISE;
