@@ -417,7 +417,8 @@ SearchEvalCase::process_result() {
     }
     result["action"] = "search";
     result["search_mode"] = config_.search_mode;
-    result["index_info"] = JsonType::parse(config_.build_param);
+    result["index_info"] =
+        config_.build_param.empty() ? JsonType::object() : JsonType::parse(config_.build_param);
     result["search_param"] = config_.search_param;
     result["index"] = config_.index_name;
     result["index_memory(B)"] = this->index_->GetMemoryUsage();

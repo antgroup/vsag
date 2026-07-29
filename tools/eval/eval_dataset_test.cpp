@@ -22,6 +22,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -188,6 +189,11 @@ TEST_CASE("EvalDataset builds a dense in-memory view with original ids", "[ut][e
     auto without_ground_truth = EvalDataset::FromDatasets(base, queries, nullptr, "cosine");
     REQUIRE(without_ground_truth->GetGroundTruthK() == 0);
     REQUIRE(without_ground_truth->GetNeighbors(0) == nullptr);
+
+    const auto save_path = TempPath("in_memory_save");
+    REQUIRE_THROWS_WITH(EvalDataset::Save(dataset, save_path),
+                        "saving an in-memory EvalDataset view is not supported");
+    REQUIRE_FALSE(std::filesystem::exists(save_path));
 }
 
 TEST_CASE("EvalDataset rejects incomplete and incompatible HDF5 schemas", "[ut][eval_dataset]") {
@@ -393,7 +399,6 @@ TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][
 
     vsag::eval::EvalConfig config;
     config.index_name = "hgraph";
-    config.build_param = create_params;
     config.search_param = R"({"hgraph":{"ef_search":8}})";
     config.top_k = 1;
     config.search_query_count = 2;
@@ -409,6 +414,8 @@ TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][
     const auto qps_only = vsag::eval::EvaluateSearch(index, dataset, config);
     REQUIRE(qps_only.contains("qps"));
     REQUIRE(qps_only["measurement_sample_count"].get<uint64_t>() == 2);
+    REQUIRE(qps_only["index_info"].is_object());
+    REQUIRE(qps_only["index_info"].empty());
 
     config.search_param = R"({"hgraph":{"ef_search":0}})";
     REQUIRE_THROWS_WITH(

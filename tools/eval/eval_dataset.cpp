@@ -957,6 +957,10 @@ serialize_token_sequences(const std::vector<SparseVector>& vectors,
 
 void
 EvalDataset::Save(const EvalDatasetPtr& dataset, const std::string& filename) {
+    if (dataset->base_dataset_ != nullptr || dataset->query_dataset_ != nullptr ||
+        dataset->ground_truth_dataset_ != nullptr) {
+        throw std::invalid_argument("saving an in-memory EvalDataset view is not supported");
+    }
     H5File file(filename, H5F_ACC_TRUNC);
 
     // write vector type attribute
