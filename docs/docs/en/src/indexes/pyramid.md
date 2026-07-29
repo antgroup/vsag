@@ -105,6 +105,20 @@ Build-time parameters live under `index_param`.
 | `build_thread_count` | int | `1` | Threads used for parallel build. |
 | `hierarchies` | array | `[]` | Named hierarchy definitions. Each element is either a string (inherits all top-level params) or an object with `name` and optional overrides (`max_degree`, `ef_construction`, `alpha`, `no_build_levels`, `index_min_size`). When present, multi-hierarchy mode is activated and each hierarchy maintains its own independent path tree. |
 
+### RaBitQ split configuration
+
+Set all five parameters together to enable RaBitQ x+y split storage and reordering:
+
+```json
+{
+    "use_reorder": true,
+    "base_quantization_type": "rabitq",
+    "precise_quantization_type": "rabitq",
+    "rabitq_bits_per_dim_base": 3,
+    "rabitq_bits_per_dim_precise": 5
+}
+```
+
 ## Search parameters
 
 Search-time parameters live under the `pyramid` sub-object:

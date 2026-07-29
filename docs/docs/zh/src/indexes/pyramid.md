@@ -100,6 +100,20 @@ auto result = index->KnnSearch(
 | `build_thread_count` | int | `1` | 构建阶段并发线程数 |
 | `hierarchies` | array | `[]` | 命名层级定义。每个元素可以是字符串（继承全部顶层参数）或对象（含 `name` 及可选覆盖参数：`max_degree`、`ef_construction`、`alpha`、`no_build_levels`、`index_min_size`）。设置后激活多层级模式，每个层级维护独立的路径树。 |
 
+### RaBitQ split 配置
+
+需要同时设置以下五个参数，才能启用 RaBitQ x+y split 存储和精排：
+
+```json
+{
+    "use_reorder": true,
+    "base_quantization_type": "rabitq",
+    "precise_quantization_type": "rabitq",
+    "rabitq_bits_per_dim_base": 3,
+    "rabitq_bits_per_dim_precise": 5
+}
+```
+
 ## 检索参数
 
 检索参数放在 `pyramid` 子对象下：
