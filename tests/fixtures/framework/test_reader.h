@@ -35,7 +35,7 @@ public:
      * @brief Constructs a TestReader from a Binary object.
      * @param binary The binary data to wrap for reading.
      */
-    explicit TestReader(vsag::Binary binary);
+    explicit TestReader(vsag::Binary binary, uint64_t memory_usage = 0);
 
     /**
      * @brief Reads data from the binary at the specified offset.
@@ -63,8 +63,12 @@ public:
     [[nodiscard]] uint64_t
     Size() const override;
 
+    [[nodiscard]] uint64_t
+    GetMemoryUsage() const override;
+
 private:
     vsag::Binary binary_;  // The wrapped binary data.
+    uint64_t memory_usage_{0};
 };
 
 }  // namespace fixtures

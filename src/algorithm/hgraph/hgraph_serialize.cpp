@@ -1073,6 +1073,12 @@ HGraph::GetMemoryUsageDetail() const {
     if (this->create_new_raw_vector_ && this->raw_vector_ != nullptr) {
         memory_usage["raw_vector"] = this->raw_vector_->GetMemoryUsage();
     }
+    if (this->reader_ != nullptr) {
+        memory_usage["reader"] = this->reader_->GetMemoryUsage();
+    }
+    if (this->precise_reader_ != nullptr && this->precise_reader_.get() != this->reader_.get()) {
+        memory_usage["precise_reader"] = this->precise_reader_->GetMemoryUsage();
+    }
     return memory_usage;
 }
 

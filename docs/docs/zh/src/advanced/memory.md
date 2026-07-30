@@ -88,6 +88,9 @@ uint64_t bytes = index->GetMemoryUsage();
   RSS 还包含 allocator 的开销、临时 scratch buffer、以及索引外部持有的数据（例如用户自有的输入
   向量缓冲）。SINDI 索引尤其建议在构建完成**之后**调用 `GetMemoryUsage()` 才能拿到具有代表性的
   数值。
+- HGraph 通过 `ReaderIO` 加载时，如果被索引持有的 `Reader` 重写了
+  `Reader::GetMemoryUsage()`，其常驻内存会计入统计。该方法默认返回 0；带内存页缓存的自定义
+  Reader 应重写此方法。底层文件或远端数据源本身不计入内存统计。
 
 可运行示例：`examples/cpp/319_feature_get_memory_usage.cpp`，其中包含一个辅助函数将接口值与进程
 驻留内存进行对照。
@@ -107,7 +110,8 @@ for (const auto& [component, bytes] : detail) {
 
 目前仅 HGraph 提供了有效实现，返回的组件包括 `basic_flatten_codes`、`bottom_graph`、
 `route_graph`、`neighbors_mutex`、`pool`、`label_table`、`high_precise_codes`、
-`extra_infos` 和 `raw_vector`。SINDI 返回空 map，其他索引类型默认抛出异常。
+`extra_infos`、`raw_vector`、`reader` 和 `precise_reader`。仅在索引持有对应 Reader 时才会
+返回 Reader 相关项。SINDI 返回空 map，其他索引类型默认抛出异常。
 
 ### 能力标志
 
@@ -127,5 +131,6 @@ for (const auto& [component, bytes] : detail) {
 ## 注意事项
 
 - 自定义 Allocator 必须是线程安全的。
+- 自定义 `Reader::GetMemoryUsage()` 实现必须是线程安全的。
 - `Allocator` 生命周期必须覆盖所有引用它的索引与结果对象。
 - 若未显式指定，VSAG 会创建一个默认的基于 `malloc` 的 allocator。

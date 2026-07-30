@@ -97,6 +97,10 @@ Properties:
   allocator overhead, scratch buffers, and any data held outside the index (e.g. user-owned input
   vectors). For SINDI in particular, call `GetMemoryUsage()` **after** the build completes to get
   a representative value.
+- For an HGraph loaded through `ReaderIO`, resident memory owned by a retained `Reader` is included
+  when the reader overrides `Reader::GetMemoryUsage()`. The default implementation returns zero;
+  custom readers with an in-memory page cache should override it. The underlying file or remote
+  data source is not part of the reported memory.
 
 See `examples/cpp/319_feature_get_memory_usage.cpp` for a runnable example, including a helper
 that compares the interface value with the process resident size.
@@ -118,8 +122,9 @@ understanding *where* the memory is going inside an index.
 
 Currently only HGraph provides a meaningful implementation, returning components such as
 `basic_flatten_codes`, `bottom_graph`, `route_graph`, `neighbors_mutex`, `pool`,
-`label_table`, `high_precise_codes`, `extra_infos`, and `raw_vector`. SINDI returns an empty
-map. Other index types throw an exception by default.
+`label_table`, `high_precise_codes`, `extra_infos`, `raw_vector`, `reader`, and
+`precise_reader`. Reader keys are present only when the corresponding retained reader exists.
+SINDI returns an empty map. Other index types throw an exception by default.
 
 ### Capability Flags
 
@@ -140,5 +145,6 @@ full control over parallelism and resource ownership. See
 ## Notes
 
 - A custom allocator must be thread-safe.
+- A custom `Reader::GetMemoryUsage()` override must be thread-safe.
 - The allocator's lifetime must outlive any index and result object referencing it.
 - If nothing is configured, VSAG falls back to a default `malloc`-based allocator.
