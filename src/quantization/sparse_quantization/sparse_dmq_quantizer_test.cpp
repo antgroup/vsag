@@ -134,9 +134,17 @@ TEST_CASE("SparseDmqQuantizer packs compact term ids by distinct term count",
 
         REQUIRE(quantizer.TrainImpl(reinterpret_cast<const float*>(&vector), 1));
         REQUIRE(quantizer.GetIdBits() == expected_bits);
-        REQUIRE(quantizer.GetEncodedSize(vector) ==
-                sizeof(SparseDmqQuantizer::EncodedHeader) +
-                    (static_cast<uint64_t>(term_count) * expected_bits + 7) / 8 + term_count);
+        const uint64_t packed_id_size = (static_cast<uint64_t>(term_count) * expected_bits + 7) / 8;
+        REQUIRE(quantizer.GetEncodedIdSize(term_count) <= packed_id_size);
+        REQUIRE(quantizer.GetEncodedSize(vector) == sizeof(SparseDmqQuantizer::EncodedHeader) +
+                                                        quantizer.GetEncodedIdSize(term_count) +
+                                                        term_count);
+
+        const uint64_t hybrid_size = quantizer.GetEncodedSize(vector);
+        quantizer.SetIdEncodingType(SparseDmqQuantizer::IdEncodingType::PACKED);
+        REQUIRE(quantizer.GetEncodedIdSize(term_count) == packed_id_size);
+        REQUIRE(quantizer.GetEncodedSize(vector) >= hybrid_size);
+        quantizer.SetIdEncodingType(SparseDmqQuantizer::IdEncodingType::HYBRID_ELIAS_FANO);
 
         std::vector<uint8_t> codes(quantizer.GetEncodedSize(vector));
         REQUIRE(quantizer.EncodeOne(reinterpret_cast<const float*>(&vector), codes.data()));
@@ -148,6 +156,52 @@ TEST_CASE("SparseDmqQuantizer packs compact term ids by distinct term count",
         allocator->Deallocate(decoded.ids_);
         allocator->Deallocate(decoded.vals_);
     }
+}
+
+TEST_CASE("SparseDmqQuantizer seeks Elias-Fano ids during query scoring",
+          "[ut][SparseDmqQuantizer]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    std::vector<uint32_t> training_ids(128);
+    std::vector<float> training_values(128);
+    for (uint32_t index = 0; index < training_ids.size(); ++index) {
+        training_ids[index] = index;
+        training_values[index] = static_cast<float>(index + 1) / training_ids.size();
+    }
+    SparseVector training{
+        static_cast<uint32_t>(training_ids.size()), training_ids.data(), training_values.data()};
+    SparseDmqQuantizer quantizer(127, allocator.get());
+    REQUIRE(quantizer.TrainImpl(reinterpret_cast<const float*>(&training), 1));
+
+    std::vector<uint32_t> base_ids{1, 17, 33, 64, 95, 127};
+    std::vector<float> base_values{0.1F, 0.2F, 0.3F, 0.4F, 0.5F, 0.6F};
+    SparseVector base{static_cast<uint32_t>(base_ids.size()), base_ids.data(), base_values.data()};
+    REQUIRE(quantizer.UseEliasFano(base.len_));
+    std::vector<uint8_t> codes(quantizer.GetEncodedSize(base));
+    REQUIRE(quantizer.EncodeOne(reinterpret_cast<const float*>(&base), codes.data()));
+
+    std::vector<uint32_t> query_ids{0, 1, 2, 17, 63, 64, 100, 127};
+    std::vector<float> query_values{0.2F, 0.3F, 0.4F, 0.5F, 0.6F, 0.7F, 0.8F, 0.9F};
+    SparseVector query{
+        static_cast<uint32_t>(query_ids.size()), query_ids.data(), query_values.data()};
+    auto computer = quantizer.FactoryComputer();
+    computer->SetQuery(reinterpret_cast<const float*>(&query));
+    float distance = 0.0F;
+    computer->ComputeDist(codes.data(), &distance);
+
+    SparseVector decoded;
+    REQUIRE(quantizer.DecodeOne(codes.data(), reinterpret_cast<float*>(&decoded)));
+    float expected_distance = 1.0F;
+    for (uint32_t index = 0; index < decoded.len_; ++index) {
+        const auto iterator =
+            std::lower_bound(query_ids.begin(), query_ids.end(), decoded.ids_[index]);
+        if (iterator != query_ids.end() && *iterator == decoded.ids_[index]) {
+            const uint32_t query_index = static_cast<uint32_t>(iterator - query_ids.begin());
+            expected_distance -= decoded.vals_[index] * query_values[query_index];
+        }
+    }
+    REQUIRE(std::abs(distance - expected_distance) <= 1e-6F);
+    allocator->Deallocate(decoded.ids_);
+    allocator->Deallocate(decoded.vals_);
 }
 
 TEST_CASE("SparseDmqQuantizer shares low frequency codebooks", "[ut][SparseDmqQuantizer]") {

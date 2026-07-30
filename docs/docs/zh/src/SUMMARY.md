@@ -33,6 +33,8 @@
 - [PQ FastScan](quantization/pqfs.md)
 - [RaBitQ](quantization/rabitq.md)
 - [RaBitQ x+y Split](quantization/rabitq_split.md)
+- [DMQ（稀疏向量分布维持量化）](quantization/dmq.md)
+- [Elias–Fano 有序整数压缩](quantization/elias-fano.md)
 - [量化变换（TQ）](advanced/quantization_transform.md)
 
 # 开发者指南

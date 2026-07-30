@@ -24,6 +24,11 @@ namespace vsag {
 
 class SparseDmqQuantizer : public Quantizer<SparseDmqQuantizer> {
 public:
+    enum class IdEncodingType : uint8_t {
+        PACKED,
+        HYBRID_ELIAS_FANO,
+    };
+
     static constexpr uint32_t BITS = 8;
     static constexpr uint32_t CODEBOOK_SIZE = 1U << BITS;
     static constexpr uint32_t THRESHOLD_COUNT = CODEBOOK_SIZE - 1;
@@ -90,6 +95,9 @@ public:
     [[nodiscard]] uint64_t
     GetEncodedSize(const SparseVector& vector) const;
 
+    [[nodiscard]] uint64_t
+    GetEncodedIdSize(uint32_t count) const;
+
     [[nodiscard]] static uint32_t
     GetEncodedLength(const uint8_t* codes);
 
@@ -109,6 +117,25 @@ public:
     [[nodiscard]] uint32_t
     GetSharedCodebookThreshold() const {
         return shared_codebook_threshold_;
+    }
+
+    [[nodiscard]] uint64_t
+    GetPackedIdSize(uint32_t count) const;
+
+    [[nodiscard]] uint64_t
+    GetEliasFanoIdSize(uint32_t count) const;
+
+    [[nodiscard]] bool
+    UseEliasFano(uint32_t count) const;
+
+    void
+    SetIdEncodingType(IdEncodingType type) {
+        id_encoding_type_ = type;
+    }
+
+    [[nodiscard]] IdEncodingType
+    GetIdEncodingType() const {
+        return id_encoding_type_;
     }
 
     void
@@ -146,6 +173,7 @@ private:
     Vector<uint32_t> compact_id_lookup_;
     uint32_t id_bits_{32};
     uint32_t shared_codebook_threshold_{DEFAULT_SHARED_CODEBOOK_THRESHOLD};
+    IdEncodingType id_encoding_type_{IdEncodingType::PACKED};
 };
 
 }  // namespace vsag

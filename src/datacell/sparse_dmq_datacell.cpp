@@ -23,7 +23,8 @@ namespace vsag {
 namespace {
 
 constexpr uint32_t K_SPARSE_DMQ_DATACELL_MAGIC = 0x53444D51U;
-constexpr uint32_t K_SPARSE_DMQ_DATACELL_VERSION = 6;
+constexpr uint32_t K_SPARSE_DMQ_DATACELL_LEGACY_VERSION = 6;
+constexpr uint32_t K_SPARSE_DMQ_DATACELL_VERSION = 7;
 
 }  // namespace
 
@@ -216,7 +217,11 @@ void
 SparseDmqDataCell::Serialize(StreamWriter& writer) {
     std::shared_lock lock(this->mutex_);
     StreamWriter::WriteObj(writer, K_SPARSE_DMQ_DATACELL_MAGIC);
-    StreamWriter::WriteObj(writer, K_SPARSE_DMQ_DATACELL_VERSION);
+    const uint32_t version =
+        quantizer_->GetIdEncodingType() == SparseDmqQuantizer::IdEncodingType::PACKED
+            ? K_SPARSE_DMQ_DATACELL_LEGACY_VERSION
+            : K_SPARSE_DMQ_DATACELL_VERSION;
+    StreamWriter::WriteObj(writer, version);
     StreamWriter::WriteObj(writer, this->total_count_);
     StreamWriter::WriteVector(writer, offsets_);
     StreamWriter::WriteVector(writer, codes_);
@@ -232,12 +237,16 @@ SparseDmqDataCell::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
                    "serialized DMQ datacell has invalid magic");
     uint32_t version = 0;
     StreamReader::ReadObj(reader, version);
-    CHECK_ARGUMENT(version == K_SPARSE_DMQ_DATACELL_VERSION,
-                   fmt::format("unsupported sparse DMQ datacell version {}", version));
+    CHECK_ARGUMENT(
+        version == K_SPARSE_DMQ_DATACELL_LEGACY_VERSION || version == K_SPARSE_DMQ_DATACELL_VERSION,
+        fmt::format("unsupported sparse DMQ datacell version {}", version));
     StreamReader::ReadObj(reader, this->total_count_);
     StreamReader::ReadVector(reader, offsets_);
     StreamReader::ReadVector(reader, codes_);
     quantizer_->Deserialize(reader);
+    quantizer_->SetIdEncodingType(version == K_SPARSE_DMQ_DATACELL_LEGACY_VERSION
+                                      ? SparseDmqQuantizer::IdEncodingType::PACKED
+                                      : SparseDmqQuantizer::IdEncodingType::HYBRID_ELIAS_FANO);
     CHECK_ARGUMENT(offsets_.size() == static_cast<uint64_t>(this->total_count_) + 1,
                    "serialized DMQ offset count is inconsistent");
     CHECK_ARGUMENT(not offsets_.empty(), "serialized DMQ offsets are empty");

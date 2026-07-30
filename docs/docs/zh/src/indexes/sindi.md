@@ -19,7 +19,8 @@ SINDI（**S**parse **IN**verted **D**ense **I**ndex）是 VSAG 面向 **稀疏�
 3. **打分。** 检索时，SINDI 遍历查询向量的非零项，按窗口访问对应的倒排表，使用大小为
    `n_candidate` 的大顶堆聚合得分，最后取 top-k。启用 `use_reorder` 时，候选会在正排
    存储上重打分。默认正排存储保留 fp32 值；设置 `rerank_type: "dmq8"` 时使用压缩的
-   DMQ 正排以降低重排内存。
+   DMQ 正排以降低重排内存。DMQ 的 compact term ID 会按向量在定宽 bit-pack 和
+   Elias–Fano 编码之间选择占用更小的格式。
 
 返回的距离为 `1 - inner_product`，使结果与稠密索引一样按升序排序。
 

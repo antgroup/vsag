@@ -71,11 +71,13 @@ true`）。本章介绍每一种受支持的量化器：它做什么、接受哪
 | `rabitq` | 1 或 HGraph x+y | **是** | 否 | 1 比特 / 低比特 split 二值量化，最强压缩 |
 | `tq` | 取决于链路 | 取决于末端量化器 | 否 | [量化变换](../advanced/quantization_transform.md)：在另一个量化器之前串接旋转 / PCA |
 
-`int8` 与 `sparse` 不作为通用的 `base_quantization_type` 暴露：
+`int8`、`sparse` 与 `dmq8` 不作为通用的 `base_quantization_type` 暴露：
 
 - `int8` 在使用 `dtype: "int8"` 时被自动选用，并非一种压缩模式。
 - `sparse` 为 [SINDI](../indexes/sindi.md) 的倒排链表服务，密集索引不可
   直接选择。
+- `dmq8` 为 SINDI 的重排正排存储服务，仅可通过 `rerank_type: "dmq8"`
+  启用，详见 [DMQ](dmq.md)。
 
 ## 训练需求
 
@@ -88,9 +90,9 @@ true`）。本章介绍每一种受支持的量化器：它做什么、接受哪
 
 ## 度量兼容性
 
-本章所列量化器全部支持三种稠密度量（`l2` / `ip` / `cosine`）。对 `cosine`，
-索引会在量化前对向量做归一化，因此底层量化器看不到原始模长。一些实践
-要点：
+上表所列稠密量化器全部支持三种稠密度量（`l2` / `ip` / `cosine`）。
+SINDI 专用的 DMQ8 仅支持内积。对 `cosine`，索引会在量化前对向量做归一化，
+因此底层量化器看不到原始模长。一些实践要点：
 
 - `pq` / `pqfs` 在每个子空间上做距离查表；当 `pq_dim` 非常小（≤ 4），
   在 `ip` / `cosine` 上比 `l2` 更容易受各向异性影响。
@@ -148,4 +150,6 @@ true`）。本章介绍每一种受支持的量化器：它做什么、接受哪
 - [PQ FastScan](pqfs.md)
 - [RaBitQ](rabitq.md)
 - [RaBitQ x+y Split](rabitq_split.md)
+- [DMQ（稀疏向量分布维持量化）](dmq.md)
+- [Elias–Fano 有序整数压缩](elias-fano.md)
 - [量化变换（TQ）](../advanced/quantization_transform.md)

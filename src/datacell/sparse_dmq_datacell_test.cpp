@@ -112,6 +112,75 @@ TEST_CASE("SparseDmqDataCell implements FlattenInterface", "[ut][SparseDmqDataCe
     }
 }
 
+TEST_CASE("SparseDmqDataCell reads and preserves legacy packed IDs", "[ut][SparseDmqDataCell]") {
+    IndexCommonParam common_param;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 1024;
+
+    std::vector<uint32_t> ids_0{2, 5, 9};
+    std::vector<float> vals_0{0.2F, 0.5F, 0.8F};
+    std::vector<uint32_t> ids_1{2, 7, 9};
+    std::vector<float> vals_1{0.6F, 0.3F, 0.4F};
+    std::vector<SparseVector> vectors{
+        {static_cast<uint32_t>(ids_0.size()), ids_0.data(), vals_0.data()},
+        {static_cast<uint32_t>(ids_1.size()), ids_1.data(), vals_1.data()},
+    };
+
+    SparseDmqQuantizer legacy_quantizer(1024, common_param.allocator_.get());
+    legacy_quantizer.SetIdEncodingType(SparseDmqQuantizer::IdEncodingType::PACKED);
+    REQUIRE(
+        legacy_quantizer.TrainImpl(reinterpret_cast<const float*>(vectors.data()), vectors.size()));
+    std::vector<uint64_t> offsets{0};
+    std::vector<uint8_t> codes;
+    for (const auto& vector : vectors) {
+        const uint64_t offset = codes.size();
+        codes.resize(offset + legacy_quantizer.GetEncodedSize(vector));
+        REQUIRE(legacy_quantizer.EncodeOneImpl(reinterpret_cast<const float*>(&vector),
+                                               codes.data() + offset));
+        offsets.push_back(codes.size());
+    }
+
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    constexpr uint32_t magic = 0x53444D51U;
+    constexpr uint32_t legacy_version = 6;
+    const InnerIdType count = vectors.size();
+    StreamWriter::WriteObj(writer, magic);
+    StreamWriter::WriteObj(writer, legacy_version);
+    StreamWriter::WriteObj(writer, count);
+    StreamWriter::WriteVector(writer, offsets);
+    StreamWriter::WriteVector(writer, codes);
+    legacy_quantizer.Serialize(writer);
+
+    SparseDmqDataCell restored(1024, common_param);
+    IOStreamReader reader(stream);
+    REQUIRE_NOTHROW(restored.Deserialize(reader));
+    std::vector<uint32_t> query_ids{2, 9};
+    std::vector<float> query_vals{0.75F, 0.25F};
+    SparseVector query{
+        static_cast<uint32_t>(query_ids.size()), query_ids.data(), query_vals.data()};
+    auto computer = restored.FactoryComputer(&query);
+    std::vector<InnerIdType> inner_ids{0, 1};
+    std::vector<float> distances(inner_ids.size());
+    restored.Query(distances.data(), computer, inner_ids.data(), inner_ids.size());
+    for (uint64_t index = 0; index < vectors.size(); ++index) {
+        SparseVector decoded;
+        restored.GetSparseVectorByInnerId(index, &decoded, common_param.allocator_.get());
+        REQUIRE(std::abs(distances[index] - sparse_distance(query, decoded)) <= 1e-6F);
+        common_param.allocator_->Deallocate(decoded.ids_);
+        common_param.allocator_->Deallocate(decoded.vals_);
+    }
+
+    std::stringstream reserialized;
+    IOStreamWriter reserialized_writer(reserialized);
+    restored.Serialize(reserialized_writer);
+    const auto bytes = reserialized.str();
+    uint32_t reserialized_version = 0;
+    std::memcpy(&reserialized_version, bytes.data() + sizeof(uint32_t), sizeof(uint32_t));
+    REQUIRE(reserialized_version == legacy_version);
+}
+
 TEST_CASE("SparseDmqDataCell serializes an empty model", "[ut][SparseDmqDataCell]") {
     IndexCommonParam common_param;
     common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();

@@ -29,6 +29,7 @@
 #include "analyzer/analyzer.h"
 #include "datacell/sparse_dmq_datacell.h"
 #include "datacell/sparse_vector_datacell_parameter.h"
+#include "impl/elias_fano_stream.h"
 #include "impl/heap/standard_heap.h"
 #include "index_feature_list.h"
 #include "io/memory_block_io/memory_block_io_parameter.h"
@@ -1836,7 +1837,15 @@ SINDI::EstimateMemory(uint64_t num_elements) const {
                 std::min<uint64_t>(term_id_limit_, total_sparse_values);
             const uint32_t rerank_id_bits = get_bits_for_term_id_limit(
                 estimated_term_count == 0 ? 0 : static_cast<uint32_t>(estimated_term_count - 1));
-            mem += (total_sparse_values * rerank_id_bits + 7) / 8;
+            if (estimated_term_count != 0 && num_elements != 0) {
+                const uint64_t packed_id_bytes =
+                    (static_cast<uint64_t>(avg_doc_term_length_) * rerank_id_bits + 7) / 8;
+                const uint64_t elias_fano_id_bytes =
+                    EliasFanoStream::GetLayout(avg_doc_term_length_,
+                                               static_cast<uint32_t>(estimated_term_count))
+                        .SizeInBytes();
+                mem += num_elements * std::min(packed_id_bytes, elias_fano_id_bytes);
+            }
             mem += total_sparse_values;
             mem += num_elements * (sizeof(uint64_t) + sizeof(SparseDmqQuantizer::EncodedHeader));
             uint64_t estimated_codebook_count = estimated_term_count;

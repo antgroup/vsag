@@ -3,3 +3,6 @@ authors = []
 language = "zh"
 src = "src"
 title = "VSAG文档"
+
+[output.html]
+mathjax-support = true

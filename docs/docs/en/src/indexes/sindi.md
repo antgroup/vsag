@@ -23,7 +23,8 @@ pairs and is the only VSAG index that accepts `dtype: "sparse"`.
    into a max-heap of size `n_candidate`, and returns the top-k. When `use_reorder`
    is enabled, the candidates are re-scored against a forward store. The default
    forward store keeps fp32 values, while `rerank_type: "dmq8"` uses a compressed
-   DMQ store to reduce rerank memory.
+   DMQ store to reduce rerank memory. DMQ compact term IDs use a per-vector hybrid of
+   fixed-width packing and Elias–Fano coding, selecting the smaller representation.
 
 Distance is returned as `1 - inner_product` so results sort ascending as in the
 dense indexes.

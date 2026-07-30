@@ -73,13 +73,15 @@ the concrete quantizer based on the JSON `type` field.
 | `rabitq` | 1 or HGraph x+y | **yes** | no | 1-bit / low-bit split binary quantization, strongest compression |
 | `tq` | depends on chain | depends on terminal quantizer | no | [Transform Quantizer](../advanced/quantization_transform.md): prepend rotations / PCA before another quantizer |
 
-`int8` and `sparse` are not exposed as general-purpose
+`int8`, `sparse`, and `dmq8` are not exposed as general-purpose
 `base_quantization_type` values:
 
 - `int8` is selected automatically when `dtype: "int8"` is used; it is not a
   compression mode.
 - `sparse` backs the inverted lists of [SINDI](../indexes/sindi.md) and is
   not selectable on dense indexes.
+- `dmq8` backs SINDI's rerank forward store and is enabled only through
+  `rerank_type: "dmq8"`; see [DMQ](dmq.md).
 
 ## Training requirement
 
@@ -94,10 +96,10 @@ base quantizer.
 
 ## Metric compatibility
 
-All quantizers documented here support the three dense metrics
-(`l2` / `ip` / `cosine`). For `cosine`, the index normalizes vectors before
-quantization, so the underlying quantizer never sees the original magnitude.
-A few practical notes:
+All dense quantizers in the table support the three dense metrics
+(`l2` / `ip` / `cosine`). The SINDI-specific DMQ8 supports inner product
+only. For `cosine`, the index normalizes vectors before quantization, so the
+underlying quantizer never sees the original magnitude. A few practical notes:
 
 - `pq` / `pqfs` perform their distance lookup tables per subspace; very low
   `pq_dim` (≤ 4) on `ip` / `cosine` is more sensitive to anisotropy than `l2`.
@@ -159,4 +161,6 @@ Refer to each index page for its full parameter list.
 - [PQ FastScan](pqfs.md)
 - [RaBitQ](rabitq.md)
 - [RaBitQ x+y Split](rabitq_split.md)
+- [DMQ (Sparse Distribution Maintenance Quantization)](dmq.md)
+- [Elias–Fano Ordered Integer Compression](elias-fano.md)
 - [Transform Quantizer (TQ)](../advanced/quantization_transform.md)

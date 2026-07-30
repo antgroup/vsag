@@ -24,6 +24,7 @@
 #include <utility>
 
 #include "common.h"
+#include "impl/elias_fano_stream.h"
 
 namespace vsag {
 namespace {
@@ -108,6 +109,31 @@ private:
     uint32_t mask_;
 };
 
+struct DmqIdEncodingLayout {
+    bool use_elias_fano{false};
+    uint64_t encoded_bytes{0};
+    EliasFanoStreamLayout elias_fano;
+};
+
+DmqIdEncodingLayout
+get_id_encoding_layout(uint32_t count,
+                       uint32_t universe,
+                       uint32_t packed_bits,
+                       SparseDmqQuantizer::IdEncodingType encoding_type) {
+    DmqIdEncodingLayout result;
+    result.encoded_bytes = get_packed_size(count, packed_bits);
+    if (encoding_type != SparseDmqQuantizer::IdEncodingType::HYBRID_ELIAS_FANO || count == 0) {
+        return result;
+    }
+    CHECK_ARGUMENT(universe != 0, "DMQ term model is empty");
+    result.elias_fano = EliasFanoStream::GetLayout(count, universe);
+    if (result.elias_fano.SizeInBytes() < result.encoded_bytes) {
+        result.use_elias_fano = true;
+        result.encoded_bytes = result.elias_fano.SizeInBytes();
+    }
+    return result;
+}
+
 std::tuple<Vector<uint32_t>, Vector<float>>
 sort_sparse_vector(const SparseVector& vector, Allocator* allocator) {
     Vector<uint32_t> indexes(vector.len_, allocator);
@@ -154,8 +180,36 @@ SparseDmqQuantizer::SparseDmqQuantizer(uint32_t term_id_limit,
 }
 
 uint64_t
+SparseDmqQuantizer::GetPackedIdSize(uint32_t count) const {
+    return get_packed_size(count, id_bits_);
+}
+
+uint64_t
+SparseDmqQuantizer::GetEliasFanoIdSize(uint32_t count) const {
+    if (count == 0) {
+        return 0;
+    }
+    CHECK_ARGUMENT(not term_ids_.empty(), "DMQ term model is empty");
+    return EliasFanoStream::GetLayout(count, static_cast<uint32_t>(term_ids_.size())).SizeInBytes();
+}
+
+bool
+SparseDmqQuantizer::UseEliasFano(uint32_t count) const {
+    return get_id_encoding_layout(
+               count, static_cast<uint32_t>(term_ids_.size()), id_bits_, id_encoding_type_)
+        .use_elias_fano;
+}
+
+uint64_t
+SparseDmqQuantizer::GetEncodedIdSize(uint32_t count) const {
+    return get_id_encoding_layout(
+               count, static_cast<uint32_t>(term_ids_.size()), id_bits_, id_encoding_type_)
+        .encoded_bytes;
+}
+
+uint64_t
 SparseDmqQuantizer::GetEncodedSize(const SparseVector& vector) const {
-    return sizeof(EncodedHeader) + get_packed_size(vector.len_, id_bits_) + vector.len_;
+    return sizeof(EncodedHeader) + GetEncodedIdSize(vector.len_) + vector.len_;
 }
 
 uint32_t
@@ -382,16 +436,29 @@ SparseDmqQuantizer::EncodeOneImpl(const float* data, uint8_t* codes) const {
     header.len = vector.len_;
     double sum = std::accumulate(values.begin(), values.end(), 0.0);
     header.factors.mean = vector.len_ == 0 ? 0.0F : static_cast<float>(sum / vector.len_);
-    auto* packed_ids = codes + sizeof(header);
-    const uint64_t id_bytes = get_packed_size(vector.len_, id_bits_);
-    std::fill_n(packed_ids, id_bytes, 0);
-    auto* value_codes = packed_ids + id_bytes;
+    auto* encoded_ids = codes + sizeof(header);
+    const auto id_layout = get_id_encoding_layout(
+        vector.len_, static_cast<uint32_t>(term_ids_.size()), id_bits_, id_encoding_type_);
+    auto* value_codes = encoded_ids + id_layout.encoded_bytes;
+    for (uint32_t index = 0; index < vector.len_; ++index) {
+        ids[index] = GetCompactId(ids[index]);
+    }
+    if (id_layout.use_elias_fano) {
+        EliasFanoStream::Encode(ids.data(),
+                                vector.len_,
+                                static_cast<uint32_t>(term_ids_.size()),
+                                id_layout.elias_fano,
+                                encoded_ids);
+    } else {
+        std::fill_n(encoded_ids, id_layout.encoded_bytes, 0);
+        for (uint32_t index = 0; index < vector.len_; ++index) {
+            store_packed(encoded_ids, index, id_bits_, ids[index]);
+        }
+    }
     double numerator = 0.0;
     double denominator = 0.0;
     for (uint32_t index = 0; index < vector.len_; ++index) {
-        const uint32_t compact_id = GetCompactId(ids[index]);
-        const uint32_t codebook_index = GetCodebookIndex(compact_id);
-        store_packed(packed_ids, index, id_bits_, compact_id);
+        const uint32_t codebook_index = GetCodebookIndex(ids[index]);
         const auto& codebook = codebooks_[codebook_index];
         const float residual = values[index] - header.factors.mean;
         value_codes[index] = EncodeResidual(residual, codebook);
@@ -414,17 +481,27 @@ SparseDmqQuantizer::DecodeOneImpl(const uint8_t* codes, float* data) const {
     vector->ids_ =
         static_cast<uint32_t*>(this->allocator_->Allocate(sizeof(uint32_t) * header.len));
     vector->vals_ = static_cast<float*>(this->allocator_->Allocate(sizeof(float) * header.len));
-    const auto* packed_ids = codes + sizeof(header);
-    const auto* value_codes = packed_ids + get_packed_size(header.len, id_bits_);
-    PackedReader id_reader(packed_ids, id_bits_);
-    for (uint32_t index = 0; index < header.len; ++index) {
-        const uint32_t compact_id = id_reader.Read();
-        CHECK_ARGUMENT(compact_id < term_ids_.size(),
-                       fmt::format("invalid DMQ compact ID {}", compact_id));
-        const uint32_t codebook_index = GetCodebookIndex(compact_id);
-        vector->ids_[index] = term_ids_[compact_id];
-        vector->vals_[index] =
-            DecodeValue(header.factors, codebooks_[codebook_index], value_codes[index]);
+    const auto* encoded_ids = codes + sizeof(header);
+    const auto id_layout = get_id_encoding_layout(
+        header.len, static_cast<uint32_t>(term_ids_.size()), id_bits_, id_encoding_type_);
+    const auto* value_codes = encoded_ids + id_layout.encoded_bytes;
+    auto decode = [&](auto& id_reader) {
+        for (uint32_t index = 0; index < header.len; ++index) {
+            const uint32_t compact_id = id_reader.Read();
+            CHECK_ARGUMENT(compact_id < term_ids_.size(),
+                           fmt::format("invalid DMQ compact ID {}", compact_id));
+            const uint32_t codebook_index = GetCodebookIndex(compact_id);
+            vector->ids_[index] = term_ids_[compact_id];
+            vector->vals_[index] =
+                DecodeValue(header.factors, codebooks_[codebook_index], value_codes[index]);
+        }
+    };
+    if (id_layout.use_elias_fano) {
+        EliasFanoStreamReader id_reader(encoded_ids, header.len, id_layout.elias_fano);
+        decode(id_reader);
+    } else {
+        PackedReader id_reader(encoded_ids, id_bits_);
+        decode(id_reader);
     }
     return true;
 }
@@ -449,45 +526,66 @@ SparseDmqQuantizer::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) co
     std::memcpy(&right, codes2, sizeof(right));
     const auto* left_ids = codes1 + sizeof(left);
     const auto* right_ids = codes2 + sizeof(right);
-    const auto* left_codes = left_ids + get_packed_size(left.len, id_bits_);
-    const auto* right_codes = right_ids + get_packed_size(right.len, id_bits_);
+    const uint32_t universe = static_cast<uint32_t>(term_ids_.size());
+    const auto left_layout =
+        get_id_encoding_layout(left.len, universe, id_bits_, id_encoding_type_);
+    const auto right_layout =
+        get_id_encoding_layout(right.len, universe, id_bits_, id_encoding_type_);
+    const auto* left_codes = left_ids + left_layout.encoded_bytes;
+    const auto* right_codes = right_ids + right_layout.encoded_bytes;
     if (left.len == 0 || right.len == 0) {
         return 1.0F;
     }
-    PackedReader left_reader(left_ids, id_bits_);
-    PackedReader right_reader(right_ids, id_bits_);
-    uint32_t left_index = 0;
-    uint32_t right_index = 0;
-    uint32_t left_id = left_reader.Read();
-    uint32_t right_id = right_reader.Read();
-    float product = 0.0F;
-    while (left_index < left.len && right_index < right.len) {
-        if (left_id < right_id) {
-            ++left_index;
-            if (left_index < left.len) {
-                left_id = left_reader.Read();
-            }
-        } else if (left_id > right_id) {
-            ++right_index;
-            if (right_index < right.len) {
-                right_id = right_reader.Read();
-            }
-        } else {
-            const uint32_t codebook_index = GetCodebookIndex(left_id);
-            const auto& codebook = codebooks_[codebook_index];
-            product += DecodeValue(left.factors, codebook, left_codes[left_index]) *
-                       DecodeValue(right.factors, codebook, right_codes[right_index]);
-            ++left_index;
-            ++right_index;
-            if (left_index < left.len) {
-                left_id = left_reader.Read();
-            }
-            if (right_index < right.len) {
-                right_id = right_reader.Read();
+    auto compute = [&](auto& left_reader, auto& right_reader) {
+        uint32_t left_index = 0;
+        uint32_t right_index = 0;
+        uint32_t left_id = left_reader.Read();
+        uint32_t right_id = right_reader.Read();
+        float product = 0.0F;
+        while (left_index < left.len && right_index < right.len) {
+            if (left_id < right_id) {
+                ++left_index;
+                if (left_index < left.len) {
+                    left_id = left_reader.Read();
+                }
+            } else if (left_id > right_id) {
+                ++right_index;
+                if (right_index < right.len) {
+                    right_id = right_reader.Read();
+                }
+            } else {
+                const uint32_t codebook_index = GetCodebookIndex(left_id);
+                const auto& codebook = codebooks_[codebook_index];
+                product += DecodeValue(left.factors, codebook, left_codes[left_index]) *
+                           DecodeValue(right.factors, codebook, right_codes[right_index]);
+                ++left_index;
+                ++right_index;
+                if (left_index < left.len) {
+                    left_id = left_reader.Read();
+                }
+                if (right_index < right.len) {
+                    right_id = right_reader.Read();
+                }
             }
         }
+        return 1.0F - product;
+    };
+    if (left_layout.use_elias_fano) {
+        EliasFanoStreamReader left_reader(left_ids, left.len, left_layout.elias_fano);
+        if (right_layout.use_elias_fano) {
+            EliasFanoStreamReader right_reader(right_ids, right.len, right_layout.elias_fano);
+            return compute(left_reader, right_reader);
+        }
+        PackedReader right_reader(right_ids, id_bits_);
+        return compute(left_reader, right_reader);
     }
-    return 1.0F - product;
+    PackedReader left_reader(left_ids, id_bits_);
+    if (right_layout.use_elias_fano) {
+        EliasFanoStreamReader right_reader(right_ids, right.len, right_layout.elias_fano);
+        return compute(left_reader, right_reader);
+    }
+    PackedReader right_reader(right_ids, id_bits_);
+    return compute(left_reader, right_reader);
 }
 
 void
@@ -537,34 +635,58 @@ SparseDmqQuantizer::ComputeDistImpl(Computer<SparseDmqQuantizer>& computer,
     const auto& query = *reinterpret_cast<const QueryData*>(computer.buf_);
     EncodedHeader header;
     std::memcpy(&header, codes, sizeof(header));
-    const auto* packed_ids = codes + sizeof(header);
-    const auto* value_codes = packed_ids + get_packed_size(header.len, id_bits_);
-    float query_sum = 0.0F;
-    float qualifier_product = 0.0F;
-    uint32_t query_index = 0;
-    PackedReader id_reader(packed_ids, id_bits_);
-    for (uint32_t base_index = 0; base_index < header.len; ++base_index) {
-        const uint32_t id = id_reader.Read();
-        uint32_t matched = K_INVALID_INDEX;
-        if (query.has_lookup) {
-            if (id < query.term_to_index.size()) {
-                matched = query.term_to_index[id];
-            }
-        } else {
-            while (query_index < query.ids.size() && query.ids[query_index] < id) {
-                ++query_index;
-            }
-            if (query_index < query.ids.size() && query.ids[query_index] == id) {
-                matched = query_index;
+    const auto* encoded_ids = codes + sizeof(header);
+    const auto id_layout = get_id_encoding_layout(
+        header.len, static_cast<uint32_t>(term_ids_.size()), id_bits_, id_encoding_type_);
+    const auto* value_codes = encoded_ids + id_layout.encoded_bytes;
+    if (id_layout.use_elias_fano) {
+        float query_sum = 0.0F;
+        float qualifier_product = 0.0F;
+        EliasFanoSeekReader id_reader(encoded_ids, header.len, id_layout.elias_fano);
+        for (uint32_t query_index = 0; query_index < query.ids.size(); ++query_index) {
+            const auto range = id_reader.FindEqualRange(query.ids[query_index]);
+            for (uint32_t position = range.begin; position < range.end; ++position) {
+                query_sum += query.values[query_index];
+                qualifier_product +=
+                    query.code_lut[static_cast<uint64_t>(query_index) * CODEBOOK_SIZE +
+                                   value_codes[position]];
             }
         }
-        if (matched != K_INVALID_INDEX) {
-            query_sum += query.values[matched];
-            qualifier_product += query.code_lut[static_cast<uint64_t>(matched) * CODEBOOK_SIZE +
-                                                value_codes[base_index]];
-        }
+        dists[0] =
+            1.0F - (header.factors.mean * query_sum + header.factors.alpha * qualifier_product);
+        return;
     }
-    dists[0] = 1.0F - (header.factors.mean * query_sum + header.factors.alpha * qualifier_product);
+
+    auto compute = [&](auto& id_reader) {
+        float query_sum = 0.0F;
+        float qualifier_product = 0.0F;
+        uint32_t query_index = 0;
+        for (uint32_t base_index = 0; base_index < header.len; ++base_index) {
+            const uint32_t id = id_reader.Read();
+            uint32_t matched = K_INVALID_INDEX;
+            if (query.has_lookup) {
+                if (id < query.term_to_index.size()) {
+                    matched = query.term_to_index[id];
+                }
+            } else {
+                while (query_index < query.ids.size() && query.ids[query_index] < id) {
+                    ++query_index;
+                }
+                if (query_index < query.ids.size() && query.ids[query_index] == id) {
+                    matched = query_index;
+                }
+            }
+            if (matched != K_INVALID_INDEX) {
+                query_sum += query.values[matched];
+                qualifier_product += query.code_lut[static_cast<uint64_t>(matched) * CODEBOOK_SIZE +
+                                                    value_codes[base_index]];
+            }
+        }
+        dists[0] =
+            1.0F - (header.factors.mean * query_sum + header.factors.alpha * qualifier_product);
+    };
+    PackedReader id_reader(encoded_ids, id_bits_);
+    compute(id_reader);
 }
 
 void
@@ -634,6 +756,7 @@ void
 SparseDmqQuantizer::ExportModel(const SparseDmqQuantizer& other) {
     id_bits_ = other.id_bits_;
     shared_codebook_threshold_ = other.shared_codebook_threshold_;
+    id_encoding_type_ = other.id_encoding_type_;
     term_ids_ = other.term_ids_;
     codebooks_ = other.codebooks_;
     codebook_index_by_compact_id_ = other.codebook_index_by_compact_id_;

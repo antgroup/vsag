@@ -33,6 +33,8 @@
 - [PQ FastScan](quantization/pqfs.md)
 - [RaBitQ](quantization/rabitq.md)
 - [RaBitQ x+y Split](quantization/rabitq_split.md)
+- [DMQ (Sparse Distribution Maintenance Quantization)](quantization/dmq.md)
+- [Elias–Fano Ordered Integer Compression](quantization/elias-fano.md)
 - [Transform Quantizer (TQ)](advanced/quantization_transform.md)
 
 # Developer Guide
