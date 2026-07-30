@@ -118,7 +118,7 @@ public:
     Fork(const IndexCommonParam& param) override {
         if (this->disk_backed_precise_bucket_) {
             throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                "Clone does not support disk-backed IVF precise buckets");
+                                "Fork does not support disk-backed IVF precise buckets");
         }
         return std::make_shared<IVF>(this->create_param_ptr_, param);
     }

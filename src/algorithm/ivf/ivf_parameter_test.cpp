@@ -166,17 +166,32 @@ TEST_CASE("IVF precise codes layout parameter", "[ut][IVFParameter]") {
                 vsag::PRECISE_CODES_LAYOUT_VALUE_FLAT);
     }
 
-    SECTION("bucket layout supports multiple postings per data") {
+    SECTION("bucket layout supports one posting per data") {
         IVFDefaultParam index_param;
         index_param.precise_codes_layout = "bucket";
-        index_param.buckets_per_data = 3;
 
         auto param = std::make_shared<vsag::IVFParameter>();
         param->FromString(generate_ivf_param(index_param));
 
         REQUIRE(param->precise_codes_layout == vsag::PRECISE_CODES_LAYOUT_VALUE_BUCKET);
-        REQUIRE(param->buckets_per_data == 3);
+        REQUIRE(param->buckets_per_data == 1);
         vsag::ParameterTest::TestToJson(param);
+    }
+
+    SECTION("bucket layout rejects multiple postings per data") {
+        IVFDefaultParam index_param;
+        index_param.precise_codes_layout = "bucket";
+        index_param.buckets_per_data = 2;
+
+        auto param = std::make_shared<vsag::IVFParameter>();
+        try {
+            param->FromString(generate_ivf_param(index_param));
+            FAIL("multiple postings should be rejected for bucket-aligned precise codes");
+        } catch (const vsag::VsagException& error) {
+            REQUIRE(error.error_.type == vsag::ErrorType::INVALID_ARGUMENT);
+            REQUIRE(error.error_.message ==
+                    "precise_codes_layout=bucket requires buckets_per_data=1");
+        }
     }
 
     SECTION("reject invalid layout") {

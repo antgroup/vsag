@@ -210,12 +210,11 @@ private:
 };
 
 std::string
-GenerateBucketPreciseParameters(int buckets_per_data,
-                                const std::string& precise_io_type = "block_memory_io",
+GenerateBucketPreciseParameters(const std::string& precise_io_type = "block_memory_io",
                                 const std::string& precise_file_path = "",
                                 int thread_count = 1) {
     auto params = nlohmann::json::parse(IVFTestIndex::GenerateIVFBuildParametersString(
-        "l2", 16, "sq8,fp32", 16, "random", false, buckets_per_data, false, thread_count));
+        "l2", 16, "sq8,fp32", 16, "random", false, 1, false, thread_count));
     params["index_param"]["precise_codes_layout"] = "bucket";
     params["index_param"]["precise_io_type"] = precise_io_type;
     params["index_param"]["precise_file_path"] = precise_file_path;
@@ -410,6 +409,18 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
+TEST_CASE("IVF bucket precise rejects multiple postings per data", "[ft][ivf][reorder][pr]") {
+    auto params = nlohmann::json::parse(GenerateBucketPreciseParameters());
+    params["index_param"]["buckets_per_data"] = 2;
+
+    auto result = vsag::Factory::CreateIndex(IVFTestIndex::name, params.dump());
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(result.error().message.find(
+                "precise_codes_layout=bucket requires buckets_per_data=1") != std::string::npos);
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
                              "IVF bucket precise mirrors basic postings",
                              "[ft][ivf][reorder][serialize][pr]") {
@@ -417,15 +428,12 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
     constexpr int64_t dim = 16;
     constexpr int64_t base_count = 128;
     constexpr int64_t buckets_count = 16;
-    const auto buckets_per_data = GENERATE(1, 2);
     const auto precise_io_type = GENERATE("block_memory_io", "buffer_io");
-    INFO(fmt::format("buckets_per_data: {}", buckets_per_data));
     INFO(fmt::format("precise_io_type: {}", precise_io_type));
 
     const auto precise_file_path =
         precise_io_type == std::string("buffer_io") ? dir.GenerateRandomFile(false) : std::string();
-    const auto params =
-        GenerateBucketPreciseParameters(buckets_per_data, precise_io_type, precise_file_path);
+    const auto params = GenerateBucketPreciseParameters(precise_io_type, precise_file_path);
     const auto search_param = fmt::format(search_param_tmp, buckets_count);
     auto dataset = pool.GetDatasetAndCreate(dim, base_count, "l2");
     auto index = TestFactory(name, params, true);
@@ -439,7 +447,7 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
     const auto restored_file_path =
         precise_io_type == std::string("buffer_io") ? dir.GenerateRandomFile(false) : std::string();
     const auto restored_params =
-        GenerateBucketPreciseParameters(buckets_per_data, precise_io_type, restored_file_path);
+        GenerateBucketPreciseParameters(precise_io_type, restored_file_path);
     auto restored = TestFactory(name, restored_params, true);
     TestSerializeBinarySet(index, restored, dataset, search_param, true);
     CheckBucketPreciseIndex(restored, dataset, search_param);
@@ -454,7 +462,7 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
     constexpr int64_t dim = 16;
     constexpr int64_t base_count = 128;
     constexpr int64_t buckets_count = 16;
-    const auto params = GenerateBucketPreciseParameters(2, "block_memory_io", "", 4);
+    const auto params = GenerateBucketPreciseParameters("block_memory_io", "", 4);
     const auto search_param = fmt::format(search_param_tmp, buckets_count);
     auto dataset = pool.GetDatasetAndCreate(dim, base_count, "l2");
     auto index = TestFactory(name, params, true);
@@ -493,7 +501,7 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
     constexpr int64_t dim = 16;
     constexpr int64_t base_count = 128;
     const auto precise_file_path = dir.GenerateRandomFile(false);
-    const auto params = GenerateBucketPreciseParameters(1, "buffer_io", precise_file_path);
+    const auto params = GenerateBucketPreciseParameters("buffer_io", precise_file_path);
     auto dataset = pool.GetDatasetAndCreate(dim, base_count, "l2");
     auto index = TestFactory(name, params, true);
     TestBuildIndex(index, dataset, true);
@@ -530,7 +538,7 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
 
     SECTION("rejects empty streaming load") {
         const auto empty_file_path = dir.GenerateRandomFile(false);
-        const auto empty_params = GenerateBucketPreciseParameters(1, "buffer_io", empty_file_path);
+        const auto empty_params = GenerateBucketPreciseParameters("buffer_io", empty_file_path);
         auto empty_index = TestFactory(name, empty_params, true);
         std::stringstream stream;
         REQUIRE(empty_index->SerializeStreaming(stream).has_value());
@@ -542,7 +550,7 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
 
     SECTION("rejects mmap before creating the precise file") {
         const auto mmap_file_path = dir.GenerateRandomFile(false);
-        const auto mmap_params = GenerateBucketPreciseParameters(1, "mmap_io", mmap_file_path);
+        const auto mmap_params = GenerateBucketPreciseParameters("mmap_io", mmap_file_path);
         auto result = vsag::Factory::CreateIndex(name, mmap_params);
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
@@ -554,7 +562,7 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
         REQUIRE(index->SerializeStreaming(stream).has_value());
         const auto restored_file_path = dir.GenerateRandomFile(false);
         const auto restored_params =
-            GenerateBucketPreciseParameters(1, "buffer_io", restored_file_path);
+            GenerateBucketPreciseParameters("buffer_io", restored_file_path);
         auto restored = TestFactory(name, restored_params, true);
         std::stringstream deserialize_stream(stream.str());
         REQUIRE(restored->DeserializeStreaming(deserialize_stream).has_value());
@@ -575,7 +583,7 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
     constexpr int64_t dim = 16;
     constexpr int64_t base_count = 128;
     constexpr int64_t buckets_count = 16;
-    const auto params = GenerateBucketPreciseParameters(2);
+    const auto params = GenerateBucketPreciseParameters();
     const auto search_param = fmt::format(search_param_tmp, buckets_count);
     auto dataset = pool.GetDatasetAndCreate(dim, base_count, "l2");
     auto model = TestFactory(name, params, true);
