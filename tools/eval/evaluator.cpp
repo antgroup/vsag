@@ -14,6 +14,8 @@
 
 #include "evaluator.h"
 
+#include <omp.h>
+
 #include <stdexcept>
 
 #include "case/build_eval_case.h"
@@ -22,6 +24,19 @@
 namespace vsag::eval {
 
 namespace {
+
+class ScopedOpenMpThreads {
+public:
+    ScopedOpenMpThreads() : original_(omp_get_max_threads()) {
+    }
+
+    ~ScopedOpenMpThreads() {
+        omp_set_num_threads(original_);
+    }
+
+private:
+    int original_;
+};
 
 void
 validate(const IndexPtr& index, const EvalDatasetPtr& dataset) {
@@ -72,6 +87,7 @@ JsonType
 EvaluateSearch(const IndexPtr& index, const EvalDatasetPtr& dataset, const EvalConfig& config) {
     validate(index, dataset);
     validate_search(dataset, config);
+    ScopedOpenMpThreads openmp_threads;
     SearchEvalCase eval_case("", "", index, config, dataset);
     return eval_case.RunInMemory();
 }

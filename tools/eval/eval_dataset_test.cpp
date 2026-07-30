@@ -16,6 +16,7 @@
 #include "eval_dataset.h"
 
 #include <H5Cpp.h>
+#include <omp.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -404,7 +405,8 @@ TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][
     config.search_param = R"({"hgraph":{"ef_search":8}})";
     config.top_k = 1;
     config.search_query_count = 2;
-    config.num_threads_searching = 2;
+    const auto caller_thread_count = omp_get_max_threads();
+    config.num_threads_searching = caller_thread_count == 1 ? 2 : 1;
     config.enable_recall = false;
     config.enable_percent_recall = false;
     config.enable_qps = true;
@@ -418,11 +420,13 @@ TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][
     REQUIRE(qps_only["measurement_sample_count"].get<uint64_t>() == 2);
     REQUIRE(qps_only["index_info"].is_object());
     REQUIRE(qps_only["index_info"].empty());
+    REQUIRE(omp_get_max_threads() == caller_thread_count);
 
     config.search_param = R"({"hgraph":{"ef_search":0}})";
     REQUIRE_THROWS_WITH(
         vsag::eval::EvaluateSearch(index, dataset, config),
         Catch::Matchers::ContainsSubstring("query error: ef_search(0) must be at least 1"));
+    REQUIRE(omp_get_max_threads() == caller_thread_count);
 
     config.search_param = R"({"hgraph":{"ef_search":8}})";
     config.top_k = 0;
