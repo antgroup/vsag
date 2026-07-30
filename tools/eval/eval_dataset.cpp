@@ -742,9 +742,11 @@ EvalDataset::Load(const std::string& filename) {
         }
     }
 
-    if (obj->number_of_base_ <= 0 || obj->number_of_query_ <= 0 || obj->dim_ <= 0) {
-        throw std::invalid_argument(
-            "train and test datasets must contain vectors with a positive dimension");
+    if (obj->number_of_base_ <= 0 || obj->number_of_query_ <= 0) {
+        throw std::invalid_argument("train and test datasets must contain vectors");
+    }
+    if (obj->vector_type_ != SPARSE_VECTORS && obj->dim_ <= 0) {
+        throw std::invalid_argument("train and test vector dimensions must be positive");
     }
     if (neighbors_shape.first != obj->number_of_query_) {
         throw std::invalid_argument("neighbors row count must match query count: neighbors=" +

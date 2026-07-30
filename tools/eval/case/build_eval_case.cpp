@@ -114,7 +114,8 @@ BuildEvalCase::process_result() {
             double(this->dataset_ptr_->GetNumberOfBase()) / double(result["duration(s)"]);
     }
     EvalCase::MergeJsonType(this->basic_info_, result);
-    result["index_info"] = JsonType::parse(config_.build_param);
+    result["index_info"] =
+        config_.build_param.empty() ? JsonType::object() : JsonType::parse(config_.build_param);
     result["action"] = "build";
     result["index"] = config_.index_name;
     result["index_memory(B)"] = this->index_->GetMemoryUsage();

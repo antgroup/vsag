@@ -38,28 +38,29 @@ using vsag::eval::EvalDataset;
 using vsag::eval::EvalDatasetPtr;
 
 EvalDatasetPtr
-BuildSparseDataset(bool with_token_sequences) {
+BuildSparseDataset(bool with_token_sequences, bool all_empty = false) {
     // Build a tiny sparse dataset (3 train, 2 test) and optionally attach
     // the original tokenized term-id sequences.
     auto ds = std::make_shared<EvalDataset>();
 
     // Sparse train vectors.
     std::vector<SparseVector> train(3);
-    train[0].len_ = 2;
-    train[0].ids_ = new uint32_t[2]{1, 5};
-    train[0].vals_ = new float[2]{0.5f, 1.0f};
-    train[1].len_ = 1;
-    train[1].ids_ = new uint32_t[1]{3};
-    train[1].vals_ = new float[1]{0.25f};
-    train[2].len_ = 0;  // empty sparse vector
-
     std::vector<SparseVector> test(2);
-    test[0].len_ = 2;
-    test[0].ids_ = new uint32_t[2]{2, 7};
-    test[0].vals_ = new float[2]{0.4f, 0.6f};
-    test[1].len_ = 1;
-    test[1].ids_ = new uint32_t[1]{9};
-    test[1].vals_ = new float[1]{1.0f};
+    if (not all_empty) {
+        train[0].len_ = 2;
+        train[0].ids_ = new uint32_t[2]{1, 5};
+        train[0].vals_ = new float[2]{0.5f, 1.0f};
+        train[1].len_ = 1;
+        train[1].ids_ = new uint32_t[1]{3};
+        train[1].vals_ = new float[1]{0.25f};
+
+        test[0].len_ = 2;
+        test[0].ids_ = new uint32_t[2]{2, 7};
+        test[0].vals_ = new float[2]{0.4f, 0.6f};
+        test[1].len_ = 1;
+        test[1].ids_ = new uint32_t[1]{9};
+        test[1].vals_ = new float[1]{1.0f};
+    }
 
     if (with_token_sequences) {
         train[0].token_seq_len_ = 4;
@@ -390,12 +391,13 @@ TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][
 
     vsag::eval::EvalConfig build_config;
     build_config.index_name = "hgraph";
-    build_config.build_param = create_params;
     build_config.enable_tps = false;
     build_config.enable_memory = false;
     const auto build_result = vsag::eval::EvaluateBuild(index, dataset, build_config);
     REQUIRE(build_result.contains("duration(s)"));
     REQUIRE_FALSE(build_result.contains("tps"));
+    REQUIRE(build_result["index_info"].is_object());
+    REQUIRE(build_result["index_info"].empty());
 
     vsag::eval::EvalConfig config;
     config.index_name = "hgraph";
@@ -567,6 +569,29 @@ TEST_CASE("EvalDataset sparse round-trip without token sequences", "[ut][eval_da
     for (int i = 0; i < 3; ++i) {
         REQUIRE(train[i].token_seq_len_ == 0);
         REQUIRE(train[i].token_sequence_ == nullptr);
+    }
+    std::remove(path.c_str());
+}
+
+TEST_CASE("EvalDataset sparse round-trip preserves all-empty records", "[ut][eval_dataset]") {
+    auto path = TempPath("all_empty_sparse");
+    {
+        auto ds = BuildSparseDataset(/*with_token_sequences=*/false, /*all_empty=*/true);
+        EvalDataset::Save(ds, path);
+    }
+
+    auto loaded = EvalDataset::Load(path);
+    REQUIRE(loaded->GetVectorType() == vsag::SPARSE_VECTORS);
+    REQUIRE(loaded->GetNumberOfBase() == 3);
+    REQUIRE(loaded->GetNumberOfQuery() == 2);
+    REQUIRE(loaded->GetDim() == 0);
+    const auto* train = static_cast<const SparseVector*>(loaded->GetTrain());
+    const auto* test = static_cast<const SparseVector*>(loaded->GetTest());
+    for (uint64_t i = 0; i < 3; ++i) {
+        REQUIRE(train[i].len_ == 0);
+    }
+    for (uint64_t i = 0; i < 2; ++i) {
+        REQUIRE(test[i].len_ == 0);
     }
     std::remove(path.c_str());
 }
