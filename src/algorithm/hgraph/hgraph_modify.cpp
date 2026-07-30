@@ -198,7 +198,15 @@ HGraph::force_remove_one(int64_t label) {
     if (was_mark_removed) {
         this->delete_count_.fetch_sub(1);
     }
-    this->total_count_.fetch_sub(1);
+    {
+        std::scoped_lock lock(this->global_mutex_);
+        if (this->total_count_.load() == 1) {
+            this->entry_point_id_ = INVALID_ENTRY_POINT;
+            this->bottom_graph_->SetTotalCount(0);
+            this->route_graphs_.clear();
+        }
+        this->total_count_.fetch_sub(1);
+    }
     return 1;
 }
 

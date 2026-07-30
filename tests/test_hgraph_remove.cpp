@@ -15,6 +15,7 @@
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <future>
+#include <limits>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <thread>
@@ -287,6 +288,26 @@ TEST_CASE("HGraph ForceRemove All Elements", "[ft][hgraph]") {
     auto empty_result = index->KnnSearch(empty_query, 10, search_param);
     REQUIRE(empty_result.has_value());
     REQUIRE(empty_result.value()->GetDim() == 0);
+
+    auto empty_range_result =
+        index->RangeSearch(empty_query, std::numeric_limits<float>::max(), search_param);
+    REQUIRE(empty_range_result.has_value());
+    REQUIRE(empty_range_result.value()->GetDim() == 0);
+
+    int64_t new_id = NUM_ELEMENTS;
+    auto new_dataset = vsag::Dataset::Make();
+    new_dataset->Dim(DIM)
+        ->NumElements(1)
+        ->Ids(&new_id)
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    auto add_result = index->Add(new_dataset);
+    REQUIRE(add_result.has_value());
+
+    auto rebuilt_result = index->KnnSearch(empty_query, 10, search_param);
+    REQUIRE(rebuilt_result.has_value());
+    REQUIRE(rebuilt_result.value()->GetDim() == 1);
+    REQUIRE(rebuilt_result.value()->GetIds()[0] == new_id);
 }
 
 TEST_CASE("HGraph ForceRemove All Elements Twice", "[ft][hgraph]") {

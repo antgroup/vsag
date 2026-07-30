@@ -402,7 +402,11 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         }
         shared_lock = this->acquire_global_read_lock();
     }
-    k = std::min(k, GetNumElements());
+    const auto element_count = GetNumElements();
+    if (element_count == 0) {
+        return make_empty_dataset_with_stats();
+    }
+    k = std::min(k, element_count);
 
     // Setup reasoning context (KNN only)
     std::shared_ptr<ReasoningContext> reasoning_ctx;
