@@ -330,7 +330,9 @@ Pyramid::build_by_odescent(const DatasetPtr& base) {
     const auto* data_ids = base->GetIds();
 
     resize(data_num);
-    std::memcpy(label_table_->label_table_.data(), data_ids, sizeof(LabelType) * data_num);
+    for (InnerIdType inner_id = 0; inner_id < data_num; ++inner_id) {
+        label_table_->Insert(inner_id, data_ids[inner_id]);
+    }
 
     base_codes_->BatchInsertVector(data_vectors, data_num);
     if (has_precise_reorder()) {

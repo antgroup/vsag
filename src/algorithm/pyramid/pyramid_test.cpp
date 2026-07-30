@@ -17,6 +17,7 @@
 
 #include <array>
 #include <cmath>
+#include <filesystem>
 #include <future>
 #include <numeric>
 #include <sstream>
@@ -371,6 +372,11 @@ TEST_CASE("Pyramid stores raw vectors during ODescent build", "[ut][pyramid][raw
     for (int64_t i = 0; i < dim; ++i) {
         REQUIRE(restored[i] == vectors[i]);
     }
+    auto raw = index->GetDataByIds(ids.data(), 2);
+    REQUIRE(raw->GetFloat32Vectors() != nullptr);
+    for (int64_t i = 0; i < dim * 2; ++i) {
+        REQUIRE(raw->GetFloat32Vectors()[i] == vectors[i]);
+    }
 }
 
 TEST_CASE("Pyramid reuses FP32 codes as raw vectors", "[ut][pyramid][raw_vector]") {
@@ -621,6 +627,27 @@ TEST_CASE("Pyramid raw vector serialization handles IO storage changes",
     }
     SECTION("streaming dedicated to alias") {
         round_trip(true, true);
+    }
+    SECTION("streaming load applies storage overrides") {
+        auto producer = std::make_shared<vsag::Pyramid>(make_param(true), common_param);
+        REQUIRE(producer->Build(dataset).empty());
+        std::stringstream buffer;
+        producer->SerializeStreaming(buffer);
+        producer.reset();
+        std::filesystem::remove_all(dir.path);
+
+        std::stringstream reader(buffer.str());
+        auto loaded = vsag::Index::Load(reader,
+                                        R"({
+                                            "base_io_type": "block_memory_io",
+                                            "raw_vector_io_type": "block_memory_io"
+                                        })");
+        REQUIRE(loaded.has_value());
+        auto restored = loaded.value()->GetRawVectorByIds(ids.data(), count);
+        REQUIRE(restored.has_value());
+        for (int64_t i = 0; i < dim * count; ++i) {
+            REQUIRE(restored.value()->GetFloat32Vectors()[i] == vectors[i]);
+        }
     }
 }
 

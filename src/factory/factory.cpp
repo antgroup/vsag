@@ -122,7 +122,7 @@ set_streaming_io_override(JsonType& index_param,
 }
 
 void
-apply_hgraph_streaming_load_parameters(JsonType& index_param, const std::string& parameters) {
+apply_flatten_streaming_load_parameters(JsonType& index_param, const std::string& parameters) {
     auto load_json = JsonType::Parse(parameters.empty() ? "{}" : parameters);
     if (load_json.Contains(HGRAPH_BASE_IO_TYPE)) {
         require_string_load_parameter(load_json, HGRAPH_BASE_IO_TYPE);
@@ -241,13 +241,14 @@ create_streaming_index_from_metadata(const MetadataPtr& metadata,
         return create_streaming_index<BruteForce, BruteForceParameter>(index_param, common_param);
     }
     if (index_name == INDEX_HGRAPH) {
-        apply_hgraph_streaming_load_parameters(index_param, parameters);
+        apply_flatten_streaming_load_parameters(index_param, parameters);
         return create_streaming_index<HGraph, HGraphParameter>(index_param, common_param);
     }
     if (index_name == INDEX_IVF) {
         return create_streaming_index<IVF, IVFParameter>(index_param, common_param);
     }
     if (index_name == INDEX_PYRAMID) {
+        apply_flatten_streaming_load_parameters(index_param, parameters);
         return create_streaming_index<Pyramid, PyramidParameters>(index_param, common_param);
     }
     if (index_name == INDEX_SINDI) {

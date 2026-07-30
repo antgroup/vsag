@@ -200,8 +200,10 @@ PyramidParameters::FromJson(const JsonType& json) {
             param->quantizer_parameter->GetTypeName() != QUANTIZATION_TYPE_VALUE_FP32) {
             return;
         }
-        std::dynamic_pointer_cast<FP32QuantizerParameter>(param->quantizer_parameter)->hold_molds =
-            true;
+        auto fp32_param =
+            std::dynamic_pointer_cast<FP32QuantizerParameter>(param->quantizer_parameter);
+        CHECK_ARGUMENT(fp32_param != nullptr, "invalid fp32 quantizer parameter");
+        fp32_param->hold_molds = true;
     };
     restore_legacy_raw_fp32_param(this->base_codes_param, BASE_CODES_KEY);
     if (this->use_reorder) {
