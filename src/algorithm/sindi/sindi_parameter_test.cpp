@@ -141,8 +141,10 @@ TEST_CASE("SINDI Term Prune Parameters", "[ut][SINDIParameter]") {
 
     SECTION("accepts ratio without threshold") {
         SINDISearchParameter param;
-        param.FromJson(JsonType::Parse(R"({"sindi": {"term_prune_ratio": 0.2}})"));
-        REQUIRE(param.term_prune_ratio == 0.2F);
+        param.FromJson(
+            JsonType::Parse(R"({"sindi": {"query_prune_ratio": 0.99, "term_prune_ratio": 0.99}})"));
+        REQUIRE(param.query_prune_ratio == 0.99F);
+        REQUIRE(param.term_prune_ratio == 0.99F);
         REQUIRE(param.term_prune_threshold == DEFAULT_TERM_PRUNE_THRESHOLD);
     }
 
@@ -163,7 +165,9 @@ TEST_CASE("SINDI Term Prune Parameters", "[ut][SINDIParameter]") {
     SECTION("rejects invalid values") {
         const std::vector<std::string> invalid_params = {
             R"({"sindi": {"term_prune_ratio": -0.1}})",
-            R"({"sindi": {"term_prune_ratio": 0.91}})",
+            R"({"sindi": {"term_prune_ratio": 1.0}})",
+            R"({"sindi": {"query_prune_ratio": -0.1}})",
+            R"({"sindi": {"query_prune_ratio": 1.0}})",
             R"({"sindi": {"term_prune_threshold": -1}})",
             R"({"sindi": {"term_prune_threshold": 1.5}})",
             R"({"sindi": {"term_prune_threshold": 18446744073709551616}})",
@@ -172,6 +176,17 @@ TEST_CASE("SINDI Term Prune Parameters", "[ut][SINDIParameter]") {
             SINDISearchParameter param;
             REQUIRE_THROWS(param.FromJson(JsonType::Parse(invalid_param)));
         }
+    }
+}
+
+TEST_CASE("SINDI Doc Prune Ratio Boundaries", "[ut][SINDIParameter]") {
+    SINDIParameter param;
+    REQUIRE_NOTHROW(param.FromJson(JsonType::Parse(R"({"doc_prune_ratio": 0.99})")));
+    REQUIRE(param.doc_prune_ratio == 0.99F);
+
+    for (const auto& invalid_param :
+         {R"({"doc_prune_ratio": -0.1})", R"({"doc_prune_ratio": 1.0})"}) {
+        REQUIRE_THROWS(param.FromJson(JsonType::Parse(invalid_param)));
     }
 }
 
