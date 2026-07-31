@@ -172,7 +172,13 @@ higher_is_better(const std::string& metric) {
 
 bool
 available_for_existing_index(const std::string& metric) {
-    return metric != "build_seconds" && metric != "build_and_search_seconds";
+    return metric != "build_seconds" && metric != "build_and_search_seconds" &&
+           metric != "index_size_mb";
+}
+
+bool
+useful_existing_index_objective(const std::string& metric) {
+    return available_for_existing_index(metric) && metric != "index_memory_mb";
 }
 
 bool
@@ -378,7 +384,8 @@ parse_parameters(const std::string& value, const std::string& path) {
 }
 
 RequestContext
-make_context(const DatasetPtr& base,
+make_context(eval::EvalDatasetPtr dataset,
+             uint64_t base_count,
              const std::string& metric_type,
              const Workload& workload,
              const std::vector<Constraint>& constraints,
@@ -388,16 +395,16 @@ make_context(const DatasetPtr& base,
     RequestContext request;
     request.workspace_path =
         config.workspace_path.empty() ? "/tmp/vsag_autotune" : config.workspace_path;
-    request.result_path = config.report_path;
     request.keep_intermediate = config.keep_intermediate;
     request.include_raw_eval = config.include_raw_evaluation;
     request.max_trials = config.max_trials;
     request.top_k = workload.top_k;
     request.concurrency = workload.concurrency;
 
-    require(base != nullptr, "request.base is required");
-    require(base->GetIds() != nullptr, "request.base IDs are required");
-    require(workload.queries != nullptr, "request.workload.queries is required");
+    request.dataset = std::move(dataset);
+    request.base_count = base_count;
+    request.query_count = static_cast<uint64_t>(request.dataset->GetNumberOfQuery());
+    request.ground_truth_k = request.dataset->GetGroundTruthK();
     require(request.top_k > 0, "request.workload.top_k must be positive");
     require(request.top_k <= static_cast<uint64_t>(std::numeric_limits<int>::max()),
             "request.workload.top_k is too large");
@@ -417,27 +424,14 @@ make_context(const DatasetPtr& base,
                 "request.constraints.recall_at_k must be in [0, 1]");
         require(!search_only || available_for_existing_index(name),
                 "request.constraints." + name + " is unavailable for search tuning");
-        require(!search_only || name != "index_size_mb",
-                "request.constraints.index_size_mb is unavailable for an in-memory index");
         require(request.constraints.emplace(name, constraint.value).second,
                 "request.constraints contains duplicate metric: " + name);
         request.enable_recall = request.enable_recall || constraint.metric == Metric::RECALL_AT_K;
     }
-    require(!search_only || available_for_existing_index(request.objective),
-            "request.objective is unavailable for search tuning");
-    require(!search_only || request.objective != "index_size_mb",
-            "request.objective index_size_mb is unavailable for an in-memory index");
+    require(!search_only || useful_existing_index_objective(request.objective),
+            "request.objective cannot rank search candidates: " + request.objective);
 
-    const auto metric = normalize(metric_type);
-    require(metric == "l2" || metric == "ip" || metric == "cosine",
-            "request.metric_type must be l2, ip, or cosine");
-    request.dataset =
-        eval::EvalDataset::FromDatasets(base, workload.queries, workload.ground_truth, metric);
-    request.base_count = static_cast<uint64_t>(request.dataset->GetNumberOfBase());
-    request.query_count = static_cast<uint64_t>(request.dataset->GetNumberOfQuery());
-    request.ground_truth_k = request.dataset->GetGroundTruthK();
-    require(request.top_k <= request.base_count,
-            "request.workload.top_k exceeds the base dataset size");
+    require(request.top_k <= request.base_count, "request.workload.top_k exceeds the index size");
     if (request.enable_recall) {
         require(workload.ground_truth != nullptr,
                 "request.workload.ground_truth is required for recall_at_k");
@@ -445,15 +439,17 @@ make_context(const DatasetPtr& base,
                 "request.workload.top_k exceeds ground truth k");
     }
 
+    JsonType dataset_info{{"base_count", request.base_count},
+                          {"query_count", request.query_count},
+                          {"ground_truth_k", request.ground_truth_k},
+                          {"dim", request.dataset->GetDim()},
+                          {"dtype", vsag::DATATYPE_FLOAT32}};
+    if (!metric_type.empty()) {
+        dataset_info["metric_type"] = metric_type;
+    }
     request.effective_request = {
         {"version", 1},
-        {"dataset",
-         {{"base_count", request.base_count},
-          {"query_count", request.query_count},
-          {"ground_truth_k", request.ground_truth_k},
-          {"dim", request.dataset->GetDim()},
-          {"dtype", vsag::DATATYPE_FLOAT32},
-          {"metric_type", metric}}},
+        {"dataset", std::move(dataset_info)},
         {"workload", {{"top_k", request.top_k}, {"concurrency", request.concurrency}}},
         {"constraints", JsonType::object()},
         {"objective", {{"metric", request.objective}}},
@@ -461,13 +457,25 @@ make_context(const DatasetPtr& base,
          {{"workspace_path", request.workspace_path},
           {"keep_intermediate", request.keep_intermediate},
           {"max_trials", request.max_trials}}},
-        {"output",
-         {{"report_path", request.result_path},
-          {"include_raw_evaluation", request.include_raw_eval}}}};
+        {"output", {{"include_raw_evaluation", request.include_raw_eval}}}};
     for (const auto& [name, value] : request.constraints) {
         request.effective_request["constraints"][name] = value;
     }
     return request;
+}
+
+std::string
+index_name(const IndexPtr& index) {
+    switch (index->GetIndexType()) {
+        case IndexType::HGRAPH:
+            return INDEX_HGRAPH;
+        case IndexType::IVF:
+            return INDEX_IVF;
+        case IndexType::PYRAMID:
+            return INDEX_PYRAMID;
+        default:
+            throw std::invalid_argument("request.index type is unsupported by AutoTune");
+    }
 }
 
 IndexInput
@@ -495,9 +503,17 @@ parse_index_space(const IndexSpace& value, uint64_t position, bool search_only) 
 
 IndexTuningRequest
 ParseRequest(const IndexRequest& input) {
+    require(input.base != nullptr, "request.base is required");
+    require(input.base->GetIds() != nullptr, "request.base IDs are required");
+    const auto metric = normalize(input.metric_type);
+    require(metric == "l2" || metric == "ip" || metric == "cosine",
+            "request.metric_type must be l2, ip, or cosine");
+    auto dataset = eval::EvalDataset::FromDatasets(
+        input.base, input.workload.queries, input.workload.ground_truth, metric);
     IndexTuningRequest request;
-    request.context = make_context(input.base,
-                                   input.metric_type,
+    request.context = make_context(std::move(dataset),
+                                   static_cast<uint64_t>(input.base->GetNumElements()),
+                                   metric,
                                    input.workload,
                                    input.constraints,
                                    input.objective,
@@ -511,7 +527,6 @@ ParseRequest(const IndexRequest& input) {
         }
     }
     const auto dim = static_cast<uint64_t>(request.context.dataset->GetDim());
-    const auto metric = normalize(input.metric_type);
     for (auto& index : request.indexes) {
         merge_dataset_field(index.create_params, "dim", dim, index.name);
         merge_dataset_field(index.create_params, "dtype", vsag::DATATYPE_FLOAT32, index.name);
@@ -527,16 +542,21 @@ ParseRequest(const IndexRequest& input) {
 SearchTuningRequest
 ParseRequest(const SearchRequest& input) {
     require(input.index != nullptr, "request.index is required");
+    const auto element_count = input.index->GetNumElements();
+    require(element_count > 0, "request.index must not be empty");
+    auto dataset =
+        eval::EvalDataset::FromSearchDatasets(input.workload.queries, input.workload.ground_truth);
     SearchTuningRequest request;
-    request.context = make_context(input.base,
-                                   input.metric_type,
+    request.context = make_context(std::move(dataset),
+                                   static_cast<uint64_t>(element_count),
+                                   "",
                                    input.workload,
                                    input.constraints,
                                    input.objective,
                                    input.config,
                                    true);
     IndexSpace space;
-    space.name = input.index_name;
+    space.name = index_name(input.index);
     space.search_parameter_space = input.parameter_space;
     request.index_input = parse_index_space(space, 0, true);
     request.index = input.index;
@@ -563,6 +583,7 @@ ParseRequest(const JsonType& input) {
     check_file(data_path, "data_path");
 
     IndexRequest typed;
+    std::string report_path;
     attach_offline_dataset(typed, eval::EvalDataset::Load(data_path));
     if (input.contains("indexes")) {
         require(input["indexes"].is_array() && !input["indexes"].empty(),
@@ -628,8 +649,8 @@ ParseRequest(const JsonType& input) {
         const auto& output = input["output"];
         known_keys(output, {"result_path", "include_raw_eval"}, "request.output");
         if (output.contains("result_path")) {
-            typed.config.report_path = required_string(output, "result_path", "request.output");
-            require(!same_path(typed.config.report_path, data_path),
+            report_path = required_string(output, "result_path", "request.output");
+            require(!same_path(report_path, data_path),
                     "request.output.result_path must not alias data_path");
         }
         if (output.contains("include_raw_eval")) {
@@ -641,13 +662,17 @@ ParseRequest(const JsonType& input) {
 
     if (!input.contains("index_path")) {
         auto parsed = ParseRequest(typed);
+        parsed.context.result_path = report_path;
         parsed.context.effective_request["data_path"] = data_path;
+        if (!report_path.empty()) {
+            parsed.context.effective_request["output"]["report_path"] = report_path;
+        }
         return parsed;
     }
 
     const auto index_path = required_string(input, "index_path", "request");
     check_file(index_path, "index_path");
-    require(!same_path(typed.config.report_path, index_path),
+    require(!same_path(report_path, index_path),
             "request.output.result_path must not alias index_path");
     require(typed.index_spaces.size() == 1,
             "index_path requires exactly one indexes[] specification");
@@ -672,18 +697,19 @@ ParseRequest(const JsonType& input) {
 
     SearchRequest search;
     search.index = created.value();
-    search.index_name = space.name;
-    search.base = typed.base;
-    search.metric_type = typed.metric_type;
     search.workload = typed.workload;
     search.parameter_space = space.search_parameter_space;
     search.constraints = typed.constraints;
     search.objective = typed.objective;
     search.config = typed.config;
     auto parsed = ParseRequest(search);
+    parsed.context.result_path = report_path;
     parsed.context.effective_request["data_path"] = data_path;
     parsed.context.effective_request["index_path"] = index_path;
     parsed.context.effective_request["create_params"] = create_params;
+    if (!report_path.empty()) {
+        parsed.context.effective_request["output"]["report_path"] = report_path;
+    }
     return parsed;
 }
 
@@ -792,36 +818,68 @@ namespace vsag::autotune {
 
 namespace {
 
+void
+prepare_report_path(const std::string& path) {
+    const auto parent = std::filesystem::path(path).parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent);
+    }
+    std::ofstream output(path, std::ios::app);
+    if (!output.good()) {
+        throw std::runtime_error("failed to open report path: " + path);
+    }
+}
+
+void
+finalize_artifacts(JsonType& report, bool keep_all, const std::optional<std::string>& selected);
+
+std::optional<std::string>
+selected_artifact(const JsonType& report);
+
 template <typename Parser>
 JsonType
-run_tuning_locked(Parser parser,
-                  bool cleanup_run_on_failure,
-                  std::chrono::steady_clock::time_point start) {
+run_tuning_locked(Parser parser, bool persist_report, std::chrono::steady_clock::time_point start) {
     std::string stage = "validation";
     std::string run_path;
+    std::string report_path;
     bool keep_intermediate = false;
     const auto failure = [&](const std::string& message) {
-        if ((cleanup_run_on_failure || !keep_intermediate) && !run_path.empty()) {
+        if (!keep_intermediate && !run_path.empty()) {
             std::error_code cleanup_error;
             std::filesystem::remove_all(run_path, cleanup_error);
         }
         const char* const code = stage == "validation" || stage == "candidate_generation"
                                      ? "invalid_request"
                                      : "execution_failed";
-        return JsonType{{"version", 1},
+        JsonType report{{"version", 1},
                         {"status", "failed"},
                         {"recommendation", nullptr},
                         {"best_effort", nullptr},
                         {"elapsed_seconds", internal::elapsed(start)},
                         {"failure", internal::Failure(stage, code, message)}};
+        if (!report_path.empty()) {
+            report["report_path"] = report_path;
+            try {
+                internal::WriteJson(report_path, report);
+            } catch (...) {
+            }
+        }
+        return report;
     };
     try {
         auto request = parser();
         auto& context = request.context;
         keep_intermediate = context.keep_intermediate;
+        const auto run_name = internal::new_run_name();
+        if (persist_report) {
+            report_path = context.result_path.empty()
+                              ? context.workspace_path + "/" + run_name + ".json"
+                              : context.result_path;
+            stage = "report";
+            prepare_report_path(report_path);
+        }
         stage = "candidate_generation";
         const auto candidates = internal::GenerateCandidates(request);
-        const auto run_name = internal::new_run_name();
         stage = "evaluation";
         internal::Evaluation evaluation;
         if constexpr (std::is_same_v<decltype(request), internal::IndexTuningRequest>) {
@@ -834,15 +892,22 @@ run_tuning_locked(Parser parser,
         auto report = internal::SelectResult(context, evaluation);
         report["version"] = 1;
         report["request"] = context.effective_request;
+        if (!report_path.empty()) {
+            report["report_path"] = report_path;
+            report["request"]["output"]["report_path"] = report_path;
+        }
+        if constexpr (std::is_same_v<decltype(request), internal::IndexTuningRequest>) {
+            const auto selected = selected_artifact(report);
+            finalize_artifacts(report, context.keep_intermediate, selected);
+            if (!context.keep_intermediate && !selected.has_value() && !run_path.empty()) {
+                std::error_code error;
+                std::filesystem::remove_all(run_path, error);
+            }
+        }
         report["elapsed_seconds"] = internal::elapsed(start);
-        report["report_path"] = context.result_path.empty()
-                                    ? context.workspace_path + "/" + run_name + ".json"
-                                    : context.result_path;
         stage = "report";
-        internal::WriteJson(report["report_path"].template get<std::string>(), report);
-        if (!context.keep_intermediate && !run_path.empty()) {
-            std::error_code error;
-            std::filesystem::remove_all(run_path, error);
+        if (!report_path.empty()) {
+            internal::WriteJson(report_path, report);
         }
         return report;
     } catch (const std::exception& error) {
@@ -855,20 +920,15 @@ run_tuning_locked(Parser parser,
 template <typename Parser>
 JsonType
 run_tuning(Parser parser,
-           bool cleanup_run_on_failure = false,
            std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now()) {
     std::lock_guard<std::mutex> lock(internal::run_mutex());
-    return run_tuning_locked(std::move(parser), cleanup_run_on_failure, start);
+    return run_tuning_locked(std::move(parser), false, start);
 }
 
 Error
 report_error(const JsonType& report) {
-    const auto status = report.value("status", std::string("failed"));
-    auto type =
-        status == "no_feasible_candidate" ? ErrorType::INVALID_ARGUMENT : ErrorType::INTERNAL_ERROR;
-    auto message = status == "no_feasible_candidate"
-                       ? std::string("no candidate satisfies all constraints")
-                       : std::string("AutoTune failed");
+    auto type = ErrorType::INTERNAL_ERROR;
+    auto message = std::string("AutoTune failed");
     if (report.contains("failure") && report["failure"].is_object()) {
         const auto& failure = report["failure"];
         if (failure.value("stage", std::string()) == "validation" ||
@@ -876,9 +936,6 @@ report_error(const JsonType& report) {
             type = ErrorType::INVALID_ARGUMENT;
         }
         message = failure.value("message", message);
-    }
-    if (report.contains("report_path") && report["report_path"].is_string()) {
-        message += " (report: " + report["report_path"].get<std::string>() + ")";
     }
     return {type, std::move(message)};
 }
@@ -913,40 +970,44 @@ update_artifact(JsonType& value,
 }
 
 void
-finalize_index_report(JsonType& report,
-                      const Config& config,
-                      const std::optional<std::string>& selected) {
-    if (report.contains("request") && report["request"].is_object() &&
-        report["request"].contains("config") && report["request"]["config"].is_object()) {
-        report["request"]["config"]["keep_intermediate"] = config.keep_intermediate;
-    }
-
+finalize_artifacts(JsonType& report, bool keep_all, const std::optional<std::string>& selected) {
     std::unordered_set<std::string> removed;
     if (report.contains("builds") && report["builds"].is_array()) {
         for (auto& build : report["builds"]) {
-            update_artifact(build, config.keep_intermediate, selected, removed);
+            update_artifact(build, keep_all, selected, removed);
         }
     }
     if (report.contains("trials") && report["trials"].is_array()) {
         for (auto& trial : report["trials"]) {
-            update_artifact(trial, config.keep_intermediate, selected, removed);
+            update_artifact(trial, keep_all, selected, removed);
         }
     }
     for (const auto* key : {"recommendation", "best_effort"}) {
         if (report.contains(key)) {
-            update_artifact(report[key], config.keep_intermediate, selected, removed);
+            update_artifact(report[key], keep_all, selected, removed);
         }
-    }
-
-    if (report.contains("report_path") && report["report_path"].is_string()) {
-        internal::WriteJson(report["report_path"].get<std::string>(), report);
     }
 }
 
+std::optional<std::string>
+selected_artifact(const JsonType& report) {
+    if (report.value("status", std::string()) != "success" || !report.contains("recommendation") ||
+        !report["recommendation"].is_object()) {
+        return std::nullopt;
+    }
+    const auto& recommendation = report["recommendation"];
+    if (!recommendation.contains("artifacts") || !recommendation["artifacts"].is_object() ||
+        !recommendation["artifacts"].contains("index_path") ||
+        !recommendation["artifacts"]["index_path"].is_string()) {
+        return std::nullopt;
+    }
+    return recommendation["artifacts"]["index_path"].get<std::string>();
+}
+
 void
-finalize_index_report_noexcept(JsonType& report, const Config& config) noexcept {
+finalize_artifacts_noexcept(JsonType& report, bool keep_all) noexcept {
     try {
-        finalize_index_report(report, config, std::nullopt);
+        finalize_artifacts(report, keep_all, std::nullopt);
     } catch (...) {
     }
 }
@@ -965,20 +1026,25 @@ validation_failure(const std::chrono::steady_clock::time_point& start, const std
 
 tl::expected<IndexResult, Error>
 TuneIndex(const IndexRequest& request) {
-    auto retained_request = request;
-    retained_request.config.keep_intermediate = true;
-    auto report =
-        run_tuning([&retained_request]() { return internal::ParseRequest(retained_request); },
-                   !request.config.keep_intermediate);
-    if (report.value("status", std::string("failed")) != "success") {
-        try {
-            finalize_index_report(report, request.config, std::nullopt);
-        } catch (const std::exception& error) {
-            finalize_index_report_noexcept(report, request.config);
-            return tl::unexpected(Error(ErrorType::INTERNAL_ERROR, error.what()));
-        }
+    const auto start = std::chrono::steady_clock::now();
+    auto report = run_tuning([&request]() { return internal::ParseRequest(request); }, start);
+    const auto status = report.value("status", std::string("failed"));
+    if (status == "failed") {
         return tl::unexpected(report_error(report));
     }
+    if (status == "no_feasible_candidate") {
+        IndexResult result;
+        result.status = TuneStatus::NO_FEASIBLE_CANDIDATE;
+        result.report = report;
+        result.best_effort = report.value("best_effort", JsonType(nullptr));
+        return result;
+    }
+
+    const auto artifact_failure = [&](Error error) -> tl::expected<IndexResult, Error> {
+        finalize_artifacts_noexcept(report, request.config.keep_intermediate);
+        return tl::unexpected(std::move(error));
+    };
+
     try {
         const auto& recommendation = report.at("recommendation");
         const auto index_name = recommendation.at("index_name").get<std::string>();
@@ -988,46 +1054,53 @@ TuneIndex(const IndexRequest& request) {
             recommendation.at("artifacts").at("index_path").get<std::string>();
         auto created = Factory::CreateIndex(index_name, create_parameters);
         if (!created.has_value()) {
-            finalize_index_report(report, request.config, std::nullopt);
-            return tl::unexpected(created.error());
+            return artifact_failure(created.error());
         }
         std::ifstream input(artifact_path, std::ios::binary);
         if (!input.good()) {
-            finalize_index_report(report, request.config, std::nullopt);
-            return tl::unexpected(
+            return artifact_failure(
                 Error(ErrorType::MISSING_FILE, "failed to open index artifact: " + artifact_path));
         }
         auto loaded = created.value()->Deserialize(input);
         if (!loaded.has_value()) {
-            finalize_index_report(report, request.config, std::nullopt);
-            return tl::unexpected(loaded.error());
+            return artifact_failure(loaded.error());
         }
-        finalize_index_report(report, request.config, artifact_path);
-        return IndexResult{created.value(),
-                           index_name,
-                           create_parameters,
-                           search_parameters,
-                           recommendation.at("metrics").dump(),
-                           artifact_path,
-                           report.at("report_path").get<std::string>(),
-                           report.dump()};
+
+        IndexResult result;
+        result.index = created.value();
+        result.index_name = index_name;
+        result.create_parameters = create_parameters;
+        result.search_parameters = search_parameters;
+        result.metrics = recommendation.at("metrics");
+        result.artifact_path = artifact_path;
+        result.report = report;
+        return result;
     } catch (const std::exception& error) {
-        finalize_index_report_noexcept(report, request.config);
-        return tl::unexpected(Error(ErrorType::INTERNAL_ERROR, error.what()));
+        return artifact_failure(Error(ErrorType::INTERNAL_ERROR, error.what()));
     }
 }
 
 tl::expected<SearchResult, Error>
 TuneSearch(const SearchRequest& request) {
     auto report = run_tuning([&request]() { return internal::ParseRequest(request); });
-    if (report.value("status", std::string("failed")) != "success") {
+    const auto status = report.value("status", std::string("failed"));
+    if (status == "failed") {
         return tl::unexpected(report_error(report));
     }
+    if (status == "no_feasible_candidate") {
+        SearchResult result;
+        result.status = TuneStatus::NO_FEASIBLE_CANDIDATE;
+        result.report = report;
+        result.best_effort = report.value("best_effort", JsonType(nullptr));
+        return result;
+    }
+
     const auto& recommendation = report["recommendation"];
-    return SearchResult{recommendation["search_params"].dump(),
-                        recommendation["metrics"].dump(),
-                        report["report_path"].get<std::string>(),
-                        report.dump()};
+    SearchResult result;
+    result.parameters = recommendation["search_params"].dump();
+    result.metrics = recommendation["metrics"];
+    result.report = report;
+    return result;
 }
 
 JsonType
@@ -1038,7 +1111,7 @@ RunAutoTune(const JsonType& request) {
         return std::visit(
             [start](auto parsed) {
                 return run_tuning_locked(
-                    [parsed = std::move(parsed)]() { return parsed; }, false, start);
+                    [parsed = std::move(parsed)]() { return parsed; }, true, start);
             },
             internal::ParseRequest(request));
     } catch (const H5::Exception& error) {

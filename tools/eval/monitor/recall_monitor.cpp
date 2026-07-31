@@ -19,6 +19,7 @@
 #include <limits>
 #include <mutex>
 #include <numeric>
+#include <unordered_set>
 #include <vector>
 
 #include "../eval_dataset.h"
@@ -43,7 +44,21 @@ get_recall(const float* distances,
     return static_cast<double>(count) / static_cast<double>(top_k);
 }
 
-RecallMonitor::RecallMonitor(uint64_t max_record_counts) : Monitor("recall_monitor") {
+static double
+get_id_recall(const int64_t* neighbors,
+              const int64_t* ground_truth_neighbors,
+              uint64_t recall_num,
+              uint64_t top_k) {
+    std::unordered_set<int64_t> expected(ground_truth_neighbors, ground_truth_neighbors + top_k);
+    uint64_t count = 0;
+    for (uint64_t i = 0; i < recall_num; ++i) {
+        count += expected.erase(neighbors[i]);
+    }
+    return static_cast<double>(count) / static_cast<double>(top_k);
+}
+
+RecallMonitor::RecallMonitor(uint64_t max_record_counts, bool use_id_based_recall)
+    : Monitor("recall_monitor"), use_id_based_recall_(use_id_based_recall) {
     if (max_record_counts > 0) {
         this->recall_records_.reserve(max_record_counts);
     }
@@ -77,6 +92,11 @@ RecallMonitor::Record(void* input) {
     const auto result_count = std::min(record.result_count, requested_top_k);
     if (requested_top_k == 0) {
         this->recall_records_.emplace_back(0.0);
+        return;
+    }
+    if (use_id_based_recall_) {
+        this->recall_records_.emplace_back(
+            get_id_recall(neighbors, gt_neighbors, result_count, requested_top_k));
         return;
     }
     uint64_t dim = dataset->GetDim();

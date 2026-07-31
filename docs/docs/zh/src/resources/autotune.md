@@ -66,11 +66,14 @@ auto neighbors =
 IVF 候选；显式参数中的数组和 `$range` 与 CLI 契约语义相同。
 
 返回值包括已加载的 `index`、`index_name`、完整具体 `create_parameters`、经过验证的
-`search_parameters`、metrics、artifact 路径和完整报告。最终推荐 artifact 会保留，因此
-可以用 `index_name + create_parameters` 重新创建空索引并反序列化该文件；未选中的中间
-artifact 默认删除。
+`search_parameters`、metrics、artifact 路径和完整报告。`metrics` 和 `report` 都是
+`JsonType` 对象。typed API 在内存中返回报告，绝不会写报告文件。最终推荐 artifact 会
+保留，因此可以用 `index_name + create_parameters` 重新创建空索引并反序列化该文件；
+未选中的中间 artifact 默认删除。
 
-如果没有候选满足全部约束，`TuneIndex` 返回 `INVALID_ARGUMENT`，不会加载 `best_effort`。
+如果没有候选满足全部约束，调用仍正常完成，并返回
+`status=TuneStatus::NO_FEASIBLE_CANDIDATE` 和结构化 `best_effort`；此时 `index` 等推荐
+字段无效。请求非法或执行失败时仍然返回 error。
 
 完整示例见
 [`examples/cpp/326_feature_create_index_with_constraints.cpp`][factory-example]。同时启用工具和
@@ -160,9 +163,6 @@ cmake --build build-release --target 326_feature_create_index_with_constraints -
 ```cpp
 vsag::autotune::SearchRequest request;
 request.index = existing_index;
-request.index_name = "hgraph";
-request.base = base;
-request.metric_type = vsag::METRIC_L2;
 request.workload = {queries, ground_truth, 10, 48};
 request.parameter_space = R"({"hgraph":{"ef_search":[40,80,120]}})";
 request.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 0.95}};
@@ -172,8 +172,13 @@ auto result = vsag::autotune::TuneSearch(request).value();
 auto neighbors = existing_index->KnnSearch(query, 10, result.parameters).value();
 ```
 
-该接口避免序列化和文件 I/O，并让全部 search trial 复用调用方的索引。共享 recall evaluator
-目前仍要求提供 `base`。CLI 的 `index_path` 只是离线适配：先创建并反序列化 Index，再进入
+该接口避免序列化和文件 I/O，并让全部 search trial 复用调用方的索引。AutoTune 从
+`IndexPtr` 推导索引类型和元素数量，因此 search tuning 只需要 query，不需要 base dataset
+或 metric type。使用 recall 时还需要 ground truth：每条 query 的 `recall_at_k` 定义为
+返回结果和 ground truth 前 `top_k` 个 ID 的交集大小除以 `top_k`，最终指标是所有 query
+的平均值。recall 既不是约束也不是目标时，ground truth 可省略。
+
+CLI 的 `index_path` 仍是离线适配：它先使用具体 create 参数创建并反序列化 Index，再进入
 同一条 search-only 流程。
 
 Pyramid 通过这个 search-only 模式接入。HDF5 CLI 适配器不提供 query path，因此只能评测
@@ -205,7 +210,8 @@ Pyramid path 调优示例见
 | `build_seconds`、`search_seconds`、`build_and_search_seconds` | 不高于请求值 |
 
 已有索引模式不提供 `build_seconds`、`index_size_mb` 和 `build_and_search_seconds`。
-目标方向由指标本身决定，因此不需要 `direction` 字段。
+`index_memory_mb` 可以作为约束，但不能作为目标，因为同一个已有索引的所有 search 候选
+内存相同，无法据此排序。目标方向由指标本身决定，因此不需要 `direction` 字段。
 
 AutoTune 使用独立的 latency/QPS pass 和 recall/statistics pass，因此同一条逻辑 query 在
 每个 trial 中会执行多次。`search_seconds` 包含两个内存 pass 和指标采集，但不包含索引
@@ -223,10 +229,14 @@ AutoTune 使用独立的 latency/QPS pass 和 recall/statistics pass，因此同
 - `report_path`：完整可复现报告的位置。
 
 完整报告还包含每个 build 和 trial、约束 violation、补齐后的请求，以及分阶段的结构化
-失败。search-only 模式的 `builds` 为空，trial 不包含 artifact 或 build 字段。当
-CLI 或 `RunAutoTune` 设置 `keep_intermediate=false` 时，评测后会删除全部生成索引。typed
-`TuneIndex` 为返回可复现结果始终保留推荐 artifact；该选项为 false 时只删除未选中的
-artifact。两种入口都会保留报告文件。
+失败。search-only 模式的 `builds` 为空，trial 不包含 artifact 或 build 字段。CLI 和 typed
+`TuneIndex` 设置 `keep_intermediate=false` 时都只保留最终推荐索引，并删除未选中的
+artifact；设置为 `true` 时保留所有生成索引。
+
+请求通过初始校验后，CLI 和 `RunAutoTune` 会持久化完整报告：显式 `output.result_path`
+会覆盖输出路径，否则在 workspace 下生成默认路径。早期校验和请求文件错误不会写报告。
+typed `TuneIndex` 和 `TuneSearch` 绝不会写报告文件，而是通过返回值提供完整的 `JsonType`
+报告。
 
 ## V1 边界
 

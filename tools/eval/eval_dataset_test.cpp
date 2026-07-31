@@ -198,6 +198,38 @@ TEST_CASE("EvalDataset builds a dense in-memory view with original ids", "[ut][e
     REQUIRE_FALSE(std::filesystem::exists(save_path));
 }
 
+TEST_CASE("EvalDataset builds a query-only view for id recall", "[ut][eval_dataset]") {
+    constexpr int64_t dim = 2;
+    std::vector<float> query_vectors{1.0F, 2.0F, 3.0F, 4.0F};
+    auto queries = vsag::Dataset::Make()
+                       ->NumElements(2)
+                       ->Dim(dim)
+                       ->Float32Vectors(query_vectors.data())
+                       ->Owner(false);
+
+    std::vector<int64_t> ground_truth_ids{10, 20, 30, 40};
+    auto ground_truth =
+        vsag::Dataset::Make()->NumElements(2)->Dim(2)->Ids(ground_truth_ids.data())->Owner(false);
+
+    auto dataset = EvalDataset::FromSearchDatasets(queries, ground_truth);
+    REQUIRE(dataset->GetTrain() == nullptr);
+    REQUIRE(dataset->GetTest() == query_vectors.data());
+    REQUIRE(dataset->GetNumberOfBase() == 0);
+    REQUIRE(dataset->GetNumberOfQuery() == 2);
+    REQUIRE(dataset->GetGroundTruthK() == 2);
+
+    int64_t result_ids[]{10, 99};
+    vsag::eval::SearchRecord record{
+        result_ids, dataset->GetNeighbors(0), dataset.get(), dataset->GetOneTest(0), 2, 2};
+    vsag::eval::RecallMonitor recall_monitor(1, true);
+    recall_monitor.SetMetrics("avg_recall");
+    recall_monitor.Record(&record);
+    REQUIRE(recall_monitor.GetResult()["recall_avg"].get<double>() == 0.5);
+
+    REQUIRE_THROWS_WITH(EvalDataset::FromSearchDatasets(nullptr, ground_truth),
+                        "queries dataset is required and must not be empty");
+}
+
 TEST_CASE("EvalDataset rejects incomplete and incompatible HDF5 schemas", "[ut][eval_dataset]") {
     const std::vector<std::string> required_datasets{"train", "test", "neighbors", "distances"};
     for (const auto& missing : required_datasets) {

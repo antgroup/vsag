@@ -720,6 +720,28 @@ TEST_CASE("AutoTune builds once per create candidate and supports an existing in
     REQUIRE(existing_result["request"]["create_params"]["metric_type"] == "l2");
 }
 
+TEST_CASE("AutoTune CLI keeps only the recommended artifact by default") {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kOFF);
+    ScopedBlockSizeLimit block_size_limit(256UL * 1024);
+    ScopedPath dataset(temp_path("autotune-retained-dataset", ".hdf5"));
+    ScopedPath workspace(temp_path("autotune-retained-workspace"));
+    write_dataset(dataset.Get());
+    auto input = request(dataset.Get(), workspace.Get());
+    input["indexes"] = JsonType::array({input["indexes"][0]});
+    input["indexes"][0]["search_params"]["hgraph"]["ef_search"] = 8;
+    input["tuning_config"].erase("keep_intermediate");
+    input["tuning_config"]["max_trials"] = 1;
+
+    const auto result = vsag::autotune::RunAutoTune(input);
+    INFO(result.dump(2));
+    REQUIRE(result["status"] == "success");
+    REQUIRE(result["recommendation"]["artifacts"]["retained"] == true);
+    REQUIRE(std::filesystem::is_regular_file(
+        result["recommendation"]["artifacts"]["index_path"].get<std::string>()));
+    REQUIRE(count_index_artifacts(workspace.Get()) == 1);
+    REQUIRE(std::filesystem::is_regular_file(result["report_path"].get<std::string>()));
+}
+
 TEST_CASE("AutoTune searches an in-memory existing index") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kOFF);
     ScopedBlockSizeLimit block_size_limit(256UL * 1024);
@@ -735,9 +757,6 @@ TEST_CASE("AutoTune searches an in-memory existing index") {
 
     vsag::autotune::SearchRequest input;
     input.index = created.value();
-    input.index_name = "hgraph";
-    input.base = fixture.base;
-    input.metric_type = vsag::METRIC_L2;
     input.workload = {fixture.queries, fixture.ground_truth, 3, 2};
     input.parameter_space = R"({"hgraph":{"ef_search":[8,16]}})";
     input.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 0.0}};
@@ -747,7 +766,8 @@ TEST_CASE("AutoTune searches an in-memory existing index") {
 
     const auto tuned = vsag::autotune::TuneSearch(input);
     REQUIRE(tuned.has_value());
-    const auto result = JsonType::parse(tuned.value().report);
+    REQUIRE(tuned->status == vsag::autotune::TuneStatus::SUCCESS);
+    const auto& result = tuned->report;
     REQUIRE(result["status"] == "success");
     REQUIRE(result["builds"].empty());
     REQUIRE(result["trials"].size() == 2);
@@ -756,6 +776,26 @@ TEST_CASE("AutoTune searches an in-memory existing index") {
         REQUIRE(trial["metrics"].contains("recall_at_k"));
         REQUIRE(trial["metrics"].contains("latency_avg_ms"));
     }
+
+    input.workload.ground_truth = nullptr;
+    input.constraints = {{vsag::autotune::Metric::QPS, 0.0}};
+    const auto latency_only = vsag::autotune::TuneSearch(input);
+    REQUIRE(latency_only.has_value());
+    REQUIRE(latency_only->status == vsag::autotune::TuneStatus::SUCCESS);
+    REQUIRE_FALSE(latency_only->metrics.contains("recall_at_k"));
+    REQUIRE_FALSE(latency_only->report.contains("report_path"));
+    REQUIRE(load_json_reports(workspace.Get()).empty());
+
+    input.objective = vsag::autotune::Metric::INDEX_MEMORY_MB;
+    REQUIRE_THROWS_WITH(
+        vsag::autotune::internal::ParseRequest(input),
+        Catch::Matchers::ContainsSubstring("objective cannot rank search candidates"));
+    input.objective = vsag::autotune::Metric::LATENCY_AVG_MS;
+
+    input.parameter_space = R"({"ivf":{"scan_buckets_count":1}})";
+    REQUIRE_THROWS_WITH(
+        vsag::autotune::internal::ParseRequest(input),
+        Catch::Matchers::ContainsSubstring("search_parameter_space.ivf is unsupported"));
 }
 
 TEST_CASE("AutoTune uses default candidates for an in-memory IVF index") {
@@ -772,9 +812,6 @@ TEST_CASE("AutoTune uses default candidates for an in-memory IVF index") {
 
     vsag::autotune::SearchRequest input;
     input.index = created.value();
-    input.index_name = "ivf";
-    input.base = fixture.base;
-    input.metric_type = vsag::METRIC_L2;
     input.workload = {fixture.queries, fixture.ground_truth, 3, 2};
     input.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 0.0}};
     input.objective = vsag::autotune::Metric::LATENCY_AVG_MS;
@@ -783,7 +820,8 @@ TEST_CASE("AutoTune uses default candidates for an in-memory IVF index") {
 
     const auto tuned = vsag::autotune::TuneSearch(input);
     REQUIRE(tuned.has_value());
-    const auto result = JsonType::parse(tuned.value().report);
+    REQUIRE(tuned->status == vsag::autotune::TuneStatus::SUCCESS);
+    const auto& result = tuned->report;
     REQUIRE(result["status"] == "success");
     REQUIRE(result["trials"].size() == 4);
     REQUIRE(result["recommendation"]["search_params"]["ivf"].contains("scan_buckets_count"));
@@ -821,9 +859,6 @@ TEST_CASE("AutoTune searches an existing Pyramid index for one path workload") {
 
     vsag::autotune::SearchRequest input;
     input.index = created.value();
-    input.index_name = "pyramid";
-    input.base = base;
-    input.metric_type = vsag::METRIC_L2;
     input.workload.queries = queries;
     input.workload.ground_truth = fixture.ground_truth;
     input.workload.top_k = 3;
@@ -836,7 +871,8 @@ TEST_CASE("AutoTune searches an existing Pyramid index for one path workload") {
 
     const auto tuned = vsag::autotune::TuneSearch(input);
     REQUIRE(tuned.has_value());
-    const auto result = JsonType::parse(tuned.value().report);
+    REQUIRE(tuned->status == vsag::autotune::TuneStatus::SUCCESS);
+    const auto& result = tuned->report;
     REQUIRE(result["status"] == "success");
     REQUIRE(result["trials"].size() == 2);
     REQUIRE(result["recommendation"]["index_name"] == "pyramid");
@@ -845,8 +881,9 @@ TEST_CASE("AutoTune searches an existing Pyramid index for one path workload") {
 
     input.constraints.push_back({vsag::autotune::Metric::INDEX_MEMORY_MB, 1.0});
     const auto memory_constrained = vsag::autotune::TuneSearch(input);
-    REQUIRE_FALSE(memory_constrained.has_value());
-    REQUIRE(memory_constrained.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(memory_constrained.has_value());
+    REQUIRE(memory_constrained->status == vsag::autotune::TuneStatus::NO_FEASIBLE_CANDIDATE);
+    REQUIRE(memory_constrained->best_effort["constraint_evaluation"]["satisfied"] == false);
 
     input.constraints.pop_back();
     input.workload.queries = fixture.queries;
@@ -888,14 +925,16 @@ TEST_CASE("TuneIndex returns a queryable selected index") {
     auto tuned = vsag::autotune::TuneIndex(input);
     REQUIRE(tuned.has_value());
     const auto& result = tuned.value();
+    REQUIRE(result.status == vsag::autotune::TuneStatus::SUCCESS);
+    REQUIRE(result.best_effort.is_null());
     REQUIRE(result.index != nullptr);
     REQUIRE(result.index->GetNumElements() == 64);
     REQUIRE(result.index_name == "hgraph");
     REQUIRE(JsonType::parse(result.create_parameters)["dim"] == 8);
     REQUIRE(JsonType::parse(result.search_parameters)["hgraph"]["ef_search"] == 16);
-    REQUIRE(JsonType::parse(result.metrics).contains("recall_at_k"));
+    REQUIRE(result.metrics.contains("recall_at_k"));
     REQUIRE(std::filesystem::is_regular_file(result.artifact_path));
-    REQUIRE(std::filesystem::is_regular_file(result.report_path));
+    REQUIRE_FALSE(result.report.contains("report_path"));
 
     auto query = vsag::Dataset::Make();
     query->NumElements(1)
@@ -916,7 +955,7 @@ TEST_CASE("TuneIndex returns a queryable selected index") {
     REQUIRE(restored.value()->Deserialize(artifact).has_value());
     REQUIRE(restored.value()->KnnSearch(query, 3, result.search_parameters).has_value());
 
-    const auto report = JsonType::parse(result.report);
+    const auto& report = result.report;
     REQUIRE(report["status"] == "success");
     REQUIRE(report["builds"].size() == 2);
     REQUIRE(std::count_if(report["builds"].begin(), report["builds"].end(), [](const auto& build) {
@@ -928,7 +967,7 @@ TEST_CASE("TuneIndex returns a queryable selected index") {
     REQUIRE(report["request"]["config"]["workspace_path"] == workspace.Get());
 }
 
-TEST_CASE("TuneIndex rejects an infeasible recommendation") {
+TEST_CASE("TuneIndex reports an infeasible recommendation") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kOFF);
     ScopedBlockSizeLimit block_size_limit(256UL * 1024);
     ScopedPath workspace(temp_path("autotune-infeasible-workspace"));
@@ -942,16 +981,17 @@ TEST_CASE("TuneIndex rejects an infeasible recommendation") {
     input.config.max_trials = 1;
 
     const auto tuned = vsag::autotune::TuneIndex(input);
-    REQUIRE_FALSE(tuned.has_value());
-    REQUIRE(tuned.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    REQUIRE_THAT(tuned.error().message, Catch::Matchers::ContainsSubstring("report:"));
+    REQUIRE(tuned.has_value());
+    REQUIRE(tuned->status == vsag::autotune::TuneStatus::NO_FEASIBLE_CANDIDATE);
+    REQUIRE(tuned->index == nullptr);
+    REQUIRE(tuned->best_effort["constraint_evaluation"]["satisfied"] == false);
+    REQUIRE_FALSE(tuned->report.contains("report_path"));
     REQUIRE(count_index_artifacts(workspace.Get()) == 0);
-    const auto reports = load_json_reports(workspace.Get());
-    REQUIRE(reports.size() == 1);
-    REQUIRE(reports[0]["status"] == "no_feasible_candidate");
-    REQUIRE(reports[0]["request"]["config"]["keep_intermediate"] == false);
-    REQUIRE(reports[0]["builds"][0]["artifacts"]["retained"] == false);
-    REQUIRE(reports[0]["best_effort"]["artifacts"]["retained"] == false);
+    REQUIRE(load_json_reports(workspace.Get()).empty());
+    REQUIRE(tuned->report["status"] == "no_feasible_candidate");
+    REQUIRE(tuned->report["request"]["config"]["keep_intermediate"] == false);
+    REQUIRE(tuned->report["builds"][0]["artifacts"]["retained"] == false);
+    REQUIRE(tuned->best_effort["artifacts"]["retained"] == false);
 }
 
 TEST_CASE("TuneIndex cleans artifacts when all search trials fail") {
@@ -969,33 +1009,43 @@ TEST_CASE("TuneIndex cleans artifacts when all search trials fail") {
     const auto tuned = vsag::autotune::TuneIndex(input);
     REQUIRE_FALSE(tuned.has_value());
     REQUIRE(tuned.error().type == vsag::ErrorType::INTERNAL_ERROR);
-    REQUIRE_THAT(tuned.error().message, Catch::Matchers::ContainsSubstring("report:"));
     REQUIRE(count_index_artifacts(workspace.Get()) == 0);
-    const auto reports = load_json_reports(workspace.Get());
-    REQUIRE(reports.size() == 1);
-    REQUIRE(reports[0]["status"] == "failed");
-    REQUIRE(reports[0]["failure"]["code"] == "all_trials_failed");
-    REQUIRE(reports[0]["request"]["config"]["keep_intermediate"] == false);
-    REQUIRE(reports[0]["builds"][0]["artifacts"]["retained"] == false);
+    REQUIRE(load_json_reports(workspace.Get()).empty());
 }
 
-TEST_CASE("TuneIndex reports report-writing failures") {
+TEST_CASE("TuneIndex returns its report without writing a report file") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kOFF);
     ScopedBlockSizeLimit block_size_limit(256UL * 1024);
-    ScopedPath workspace(temp_path("autotune-report-failure-workspace"));
+    ScopedPath workspace(temp_path("autotune-in-memory-report-workspace"));
     MemoryFixture fixture;
-
-    const auto report_directory = workspace.Get() + "/report-is-a-directory";
-    std::filesystem::create_directories(report_directory);
     auto input = fixture.Request(workspace.Get());
     input.index_spaces[0].create_parameter_space =
         R"({"index_param":{"base_quantization_type":"fp32","max_degree":8,)"
         R"("ef_construction":40,"build_thread_count":2}})";
     input.config.max_trials = 1;
-    input.config.report_path = report_directory;
 
     const auto tuned = vsag::autotune::TuneIndex(input);
-    REQUIRE_FALSE(tuned.has_value());
-    REQUIRE(tuned.error().type == vsag::ErrorType::INTERNAL_ERROR);
+    REQUIRE(tuned.has_value());
+    REQUIRE(tuned->status == vsag::autotune::TuneStatus::SUCCESS);
+    REQUIRE(tuned->report["status"] == "success");
+    REQUIRE_FALSE(tuned->report.contains("report_path"));
+    REQUIRE(load_json_reports(workspace.Get()).empty());
+}
+
+TEST_CASE("AutoTune validates the CLI report path before evaluation") {
+    ScopedPath dataset(temp_path("autotune-report-path-dataset", ".hdf5"));
+    ScopedPath workspace(temp_path("autotune-report-path-workspace"));
+    write_dataset(dataset.Get());
+    const auto report_directory = workspace.Get() + "/report-is-a-directory";
+    std::filesystem::create_directories(report_directory);
+
+    auto input = request(dataset.Get(), workspace.Get());
+    input["output"] = {{"result_path", report_directory}};
+    const auto result = vsag::autotune::RunAutoTune(input);
+
+    REQUIRE(result["status"] == "failed");
+    REQUIRE(result["failure"]["stage"] == "report");
+    REQUIRE_THAT(result["failure"]["message"].get<std::string>(),
+                 Catch::Matchers::ContainsSubstring("failed to open report path"));
     REQUIRE(count_index_artifacts(workspace.Get()) == 0);
 }

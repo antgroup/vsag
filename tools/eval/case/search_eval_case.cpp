@@ -141,8 +141,8 @@ SearchEvalCase::init_latency_monitor() {
 void
 SearchEvalCase::init_recall_monitor() {
     if (config_.enable_recall or config_.enable_percent_recall) {
-        auto recall_monitor =
-            std::make_shared<RecallMonitor>(this->dataset_ptr_->GetNumberOfQuery());
+        auto recall_monitor = std::make_shared<RecallMonitor>(
+            this->dataset_ptr_->GetNumberOfQuery(), config_.use_id_based_recall);
         if (config_.enable_recall) {
             recall_monitor->SetMetrics("avg_recall");
         }

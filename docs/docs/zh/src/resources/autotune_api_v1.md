@@ -146,13 +146,15 @@ bucket 数量。AutoTune 无法推断已有 IVF 的 bucket 数量，因此 searc
 - AutoTune 不补充 create 候选，也不会执行 build；
 - 缺失的 search 字段仍可使用内置查询候选；
 - `build_seconds`、`index_size_mb` 和 `build_and_search_seconds` 不能作为约束或目标；
+- `index_memory_mb` 可以作为约束，但不能作为目标；
 - 不会删除调用方提供的索引。
 
 V1 反序列化前需要使用具体创建参数实例化正确的 VSAG 索引，目前不会从序列化文件推导
 这些参数。
 
-对于 typed `SearchRequest`，索引已经完成实例化和加载，因此只需索引名和 search
-`parameter_space`，不需要 create 参数。
+对于 typed `SearchRequest`，索引已经完成实例化和加载。AutoTune 从 `IndexPtr` 推导索引
+类型和元素数量；请求只提供 index、workload、search `parameter_space`、constraints、
+objective 和 config，不需要 create 参数、base dataset 或 metric type。
 
 HDF5 适配器不提供 Pyramid query path，因此 CLI 只能评测 Pyramid 原生的默认/root 查询。
 按 path 调优 Pyramid 需要使用 typed `SearchRequest`，并通过 query Dataset 的
@@ -177,6 +179,8 @@ hierarchy。
 
 V1 始终评测 HDF5 文件中的全量 query，并且只支持 KNN。benchmark 机器、系统负载和运行
 环境都属于 workload 的一部分；延迟和 QPS 不能直接移植到不同机器规格或负载条件。
+对于 typed `SearchRequest`，`top_k` 会和 `IndexPtr::GetNumElements()` 比较，不依赖 base
+dataset。只有 recall 是约束或目标时才必须提供 ground truth。
 
 ## 约束和优化目标
 
@@ -196,13 +200,13 @@ V1 始终评测 HDF5 文件中的全量 query，并且只支持 KNN。benchmark 
 }
 ```
 
-| 指标 | 约束 | 目标方向 | 已有索引可用 |
+| 指标 | 约束 | 目标方向 | 已有索引用法 |
 | --- | --- | --- | --- |
 | `recall_at_k` | actual ≥ threshold | 最大化 | 是 |
 | `qps` | actual ≥ threshold | 最大化 | 是 |
 | `latency_avg_ms` | actual ≤ threshold | 最小化 | 是 |
 | `latency_p99_ms` | actual ≤ threshold | 最小化 | 是 |
-| `index_memory_mb` | actual ≤ threshold | 最小化 | 是 |
+| `index_memory_mb` | actual ≤ threshold | 最小化 | 仅约束 |
 | `index_size_mb` | actual ≤ threshold | 最小化 | 否 |
 | `build_seconds` | actual ≤ threshold | 最小化 | 否 |
 | `search_seconds` | actual ≤ threshold | 最小化 | 是 |
@@ -212,6 +216,9 @@ V1 始终评测 HDF5 文件中的全量 query，并且只支持 KNN。benchmark 
 
 V1 指标口径：
 
+- 每条 query 的 `recall_at_k` 是返回结果和 ground truth 前 `top_k` 个 ID 的交集大小除以
+  `top_k`，最终指标是所有 query 的平均值。它需要 ground truth，但不需要 base vector 或
+  metric type。
 - `build_seconds` 是 eval 工具报告的索引 `Build` 操作耗时。
 - 它不包含索引序列化、数据集加载和候选编排。
 - `search_seconds` 是完整内存 search eval trial 的墙钟时间，不包含索引反序列化，但包含
@@ -247,19 +254,25 @@ V1 指标口径：
 
 | 字段 | 默认值 | 含义 |
 | --- | --- | --- |
-| `tuning_config.workspace_path` | `/tmp/vsag_autotune` | run 产物和默认报告目录。 |
-| `tuning_config.keep_intermediate` | `false` | 是否保留生成的中间索引产物。 |
+| `tuning_config.workspace_path` | `/tmp/vsag_autotune` | run 产物和 CLI 默认报告目录。 |
+| `tuning_config.keep_intermediate` | `false` | 是否保留所有生成索引。 |
 | `tuning_config.max_trials` | `1000` | 计划最坏 trial 数上限；硬上限为 `100000`。 |
-| `output.result_path` | `<workspace>/run-<id>.json` | 完整报告路径。 |
+| `output.result_path` | `<workspace>/run-<id>.json` | CLI 完整报告路径。 |
 | `output.include_raw_eval` | `false` | 在 build/trial 中包含原生 eval JSON。 |
 
-`output.result_path` 不能与 `data_path` 或 `index_path` 指向同一文件。离线 JSON/CLI 入口
-设置 `keep_intermediate=false` 时，评测后删除所有生成索引。typed `TuneIndex` 为返回可复现
-结果始终保留推荐 artifact；该选项只控制未选中 artifact 的保留。报告单独保留。
+`output.result_path` 不能与 `data_path` 或 `index_path` 指向同一文件。通过初始校验后，
+离线 JSON/CLI 入口会写完整报告：显式 `output.result_path` 会覆盖输出位置，否则 AutoTune
+在 `workspace_path` 下生成报告路径。早期校验和请求文件错误不会写报告。
+
+typed `TuneIndex` 和 `TuneSearch` 不接收报告路径，也绝不会写报告文件，而是通过结果对象
+返回完整的 `JsonType` 报告。CLI 和 typed `TuneIndex` 设置
+`keep_intermediate=false` 时都只保留推荐索引并删除未选中 artifact；设置为 `true` 时保留
+所有生成索引。没有 recommendation 时，默认删除所有生成索引。`TuneSearch` 不生成
+artifact，因此 `workspace_path` 和 `keep_intermediate` 对它没有影响。
 
 ## 完整报告
 
-完成评测后会写入并返回以下顶层结构：
+完成评测后会返回以下顶层结构；CLI 还会把它写入磁盘：
 
 ```json
 {
@@ -285,11 +298,12 @@ V1 指标口径：
 | `trials` | 每组已执行的具体 search 候选一条记录。 |
 | `request` | 调优引擎实际使用的有效规范化请求。 |
 | `elapsed_seconds` | 截止结果选择的 AutoTune 墙钟时间，不含报告写入和清理。 |
-| `report_path` | 持久化完整报告路径。 |
+| `report_path` | 持久化完整报告路径；只在 CLI/JSON 适配器中存在。 |
 | `failure` | 整体执行失败时出现。 |
 
 早期校验失败不包含 `builds`、`trials` 或 `report_path`，也不会写报告。如果所有候选评测
-失败，只要报告路径仍然可用，就会保留尝试过的 build/trial 记录并写报告。
+失败，CLI 只要报告路径仍然可用，就会保留尝试过的 build/trial 记录并写报告。typed API
+的报告绝不会包含 `report_path`。
 
 规范化 `request` 包含推导出的 dataset 元数据、workload 默认值、constraints、objective、
 config 和 output。build-and-search 模式还包含 `index_spaces`；search-only 模式包含
@@ -300,7 +314,8 @@ config 和 output。build-and-search 模式还包含 `index_spaces`；search-onl
 
 - `success`：至少一个成功 trial 满足全部约束，设置 `recommendation`。
 - `no_feasible_candidate`：存在成功 trial，但没有任何一个满足全部约束；设置
-  `best_effort` 用于解释，它不是有效推荐。
+  `best_effort` 用于解释，它不是有效推荐。typed 调用会返回带
+  `TuneStatus::NO_FEASIBLE_CANDIDATE` 的值，而不是 error。
 - `failed`：请求非法、执行或报告阶段失败，或者没有成功且带目标指标的 trial。
 
 ### Recommendation 和 Best Effort
@@ -376,7 +391,7 @@ V1 只在 build-and-search 记录中提供 artifact 字段。`artifacts.source` 
 `artifacts.index_path` 用于说明被评测索引曾存放在哪里，不保证响应返回时路径仍然存在。
 需要检查 `artifacts.retained`：
 
-- `true`：这是 typed `TuneIndex` 返回的推荐产物，或者请求保留；
+- `true`：这是最终推荐产物，或者请求保留所有生成索引；
 - `false`：AutoTune 计划删除或已经删除生成产物。
 
 ### 结构化失败
@@ -422,9 +437,9 @@ CLI 按以下顺序输出完整报告的紧凑子集：
 标准输出会省略值为 null 的结果分支和详细 build/trial 数组。完整证据请读取
 `report_path`。
 
-CLI 在 `status=failed` 或命令行/请求文件出错时返回 `1`。目前 `success` 和
-`no_feasible_candidate` 都返回 `0`；调用方必须检查 `status`，不能只用退出码判断是否
-存在 recommendation。
+CLI 在 `status=failed` 或命令行/请求文件出错时返回 `1`。`success` 和
+`no_feasible_candidate` 都返回 `0`；调用方必须检查 `status`，不能只用退出码判断是否存在
+recommendation。
 
 ## Build-tree C++ 入口
 
@@ -454,15 +469,13 @@ request.objective = Metric::LATENCY_AVG_MS;
 auto result = TuneIndex(request);
 ```
 
-返回值包含已加载、可查询的推荐索引，以及具体 create 和 search 参数。`TuneSearch` 对已经
-构建或加载的索引调查询参数：
+返回值包含已加载、可查询的推荐索引，以及具体 create 和 search 参数。`metrics` 和完整
+`report` 都以 `JsonType` 返回；typed 调用绝不会持久化报告。`TuneSearch` 对已经构建或
+加载的索引调查询参数：
 
 ```cpp
 SearchRequest request;
 request.index = existing_index;
-request.index_name = "hgraph";
-request.base = base;
-request.metric_type = METRIC_L2;
 request.workload = {queries, ground_truth, 10, 48};
 request.parameter_space = search_candidate_space;
 request.constraints = {{Metric::RECALL_AT_K, 0.95}};
@@ -470,4 +483,11 @@ request.objective = Metric::LATENCY_AVG_MS;
 auto result = TuneSearch(request);
 ```
 
-`TuneSearch` 不提供构建阶段指标和 `index_size_mb`。
+AutoTune 从 `existing_index` 推导类型和元素数量，因此 `TuneSearch` 不需要 base vector 或
+metric type。只有 recall 是约束或目标时才需要 ground truth。`TuneSearch` 不提供构建阶段
+指标和 `index_size_mb`。`index_memory_mb` 可以作为约束，但不能作为目标，因为它不会随
+search 候选变化。
+
+两个 typed 调用仅在请求非法或执行失败时返回 `tl::unexpected<Error>`。如果评测正常完成但
+没有候选满足全部约束，则返回 `status=TuneStatus::NO_FEASIBLE_CANDIDATE` 和结构化
+`best_effort`；该状态下推荐字段无效。

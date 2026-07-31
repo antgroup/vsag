@@ -94,20 +94,13 @@ PrepareWorkload(PathWorkload& workload,
 }
 
 tl::expected<vsag::autotune::SearchResult, vsag::Error>
-TunePath(const vsag::IndexPtr& index,
-         const vsag::DatasetPtr& base,
-         const PathWorkload& workload,
-         const std::string& workspace) {
+TunePath(const vsag::IndexPtr& index, const PathWorkload& workload) {
     vsag::autotune::SearchRequest request;
     request.index = index;
-    request.index_name = "pyramid";
-    request.base = base;
-    request.metric_type = vsag::METRIC_L2;
     request.workload = {workload.queries, workload.ground_truth, TOP_K, 1};
     request.parameter_space = R"({"pyramid":{"ef_search":[10,20,40,80,160]}})";
     request.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 0.80}};
     request.objective = vsag::autotune::Metric::LATENCY_AVG_MS;
-    request.config.workspace_path = workspace;
     request.config.max_trials = 5;
     return vsag::autotune::TuneSearch(request);
 }
@@ -116,8 +109,8 @@ void
 PrintResult(const std::string& path, const vsag::autotune::SearchResult& result) {
     std::cout << "\npath: " << path << '\n'
               << "recommended search_params: " << result.parameters << '\n'
-              << "validated metrics: " << result.metrics << '\n'
-              << "report: " << result.report_path << std::endl;
+              << "validated metrics: " << result.metrics.dump() << '\n'
+              << "trials evaluated: " << result.report["trials"].size() << std::endl;
 }
 
 }  // namespace
@@ -185,15 +178,23 @@ main() {
     PrepareWorkload(
         hard_workload, base_ids, base_vectors, EASY_COUNT, HARD_COUNT, "catalog/hard", random);
 
-    auto easy_result =
-        TunePath(index, base, easy_workload, "/tmp/vsag_autotune_existing_pyramid_example/easy");
-    auto hard_result =
-        TunePath(index, base, hard_workload, "/tmp/vsag_autotune_existing_pyramid_example/hard");
+    auto easy_result = TunePath(index, easy_workload);
+    auto hard_result = TunePath(index, hard_workload);
     if (!easy_result.has_value() || !hard_result.has_value()) {
         const auto message =
             !easy_result.has_value() ? easy_result.error().message : hard_result.error().message;
         std::cerr << "AutoTune failed: " << message << std::endl;
         return 1;
+    }
+    if (easy_result->status == vsag::autotune::TuneStatus::NO_FEASIBLE_CANDIDATE ||
+        hard_result->status == vsag::autotune::TuneStatus::NO_FEASIBLE_CANDIDATE) {
+        const auto& result =
+            easy_result->status == vsag::autotune::TuneStatus::NO_FEASIBLE_CANDIDATE
+                ? easy_result.value()
+                : hard_result.value();
+        std::cerr << "No candidate satisfied one path workload. Best effort:\n"
+                  << result.best_effort.dump(2) << std::endl;
+        return 2;
     }
 
     std::cout << "The same Pyramid index is tuned once per representative path workload."

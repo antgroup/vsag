@@ -156,13 +156,16 @@ With `index_path`:
 - missing search fields may still receive built-in search candidates;
 - `build_seconds`, `index_size_mb`, and `build_and_search_seconds` cannot be constraints or
   objectives;
+- `index_memory_mb` can be a constraint but not the objective;
 - the caller-owned index is never deleted.
 
 The concrete create parameters are needed to instantiate the correct VSAG index before
 deserialization. AutoTune does not infer them from the serialized file in V1.
 
-For a typed `SearchRequest`, the index is already instantiated and loaded. It therefore needs an
-index name and search `parameter_space`, but no create parameters.
+For a typed `SearchRequest`, the index is already instantiated and loaded. AutoTune derives its
+index type and element count from `IndexPtr`; the request supplies only the index, workload, search
+`parameter_space`, constraints, objective, and config. It needs neither create parameters nor the
+base dataset or metric type.
 
 The HDF5 adapter does not provide Pyramid query paths, so the CLI can evaluate only Pyramid's
 native default/root search. Path-specific Pyramid tuning requires a typed `SearchRequest` whose
@@ -188,6 +191,8 @@ Pyramid hierarchies are not supported by AutoTune.
 V1 always evaluates the complete query set in the HDF5 file and supports only KNN search. The
 benchmark machine, system load, and runtime environment are part of the measured workload.
 Latency and QPS are not portable across different machine specifications or load conditions.
+For a typed `SearchRequest`, `top_k` is checked against `IndexPtr::GetNumElements()` instead of a
+base dataset. Ground truth may be null unless recall is a constraint or the objective.
 
 ## Constraints and Objective
 
@@ -207,13 +212,13 @@ comparison and objective direction are inferred from the metric and cannot be ov
 }
 ```
 
-| Metric | Constraint | Objective direction | Existing index |
+| Metric | Constraint | Objective direction | Existing-index use |
 | --- | --- | --- | --- |
 | `recall_at_k` | actual ≥ threshold | Maximize | Yes |
 | `qps` | actual ≥ threshold | Maximize | Yes |
 | `latency_avg_ms` | actual ≤ threshold | Minimize | Yes |
 | `latency_p99_ms` | actual ≤ threshold | Minimize | Yes |
-| `index_memory_mb` | actual ≤ threshold | Minimize | Yes |
+| `index_memory_mb` | actual ≤ threshold | Minimize | Constraint only |
 | `index_size_mb` | actual ≤ threshold | Minimize | No |
 | `build_seconds` | actual ≤ threshold | Minimize | No |
 | `search_seconds` | actual ≤ threshold | Minimize | Yes |
@@ -223,6 +228,9 @@ Thresholds must be finite and non-negative. `recall_at_k` must also be at most `
 
 Metric meanings in V1:
 
+- For each query, `recall_at_k` is the size of the intersection between the first `top_k`
+  returned IDs and ground-truth IDs, divided by `top_k`; the reported metric is the average over
+  all queries. It needs ground truth but does not need base vectors or a metric type.
 - `build_seconds` measures the index `Build` operation reported by the evaluation tool.
 - It excludes index serialization, dataset loading, and candidate orchestration.
 - `search_seconds` measures the wall time of a complete in-memory search evaluation trial. It
@@ -263,20 +271,27 @@ repeat runs when latency or QPS drives selection.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `tuning_config.workspace_path` | `/tmp/vsag_autotune` | Run artifacts and default reports. |
-| `tuning_config.keep_intermediate` | `false` | Retain generated intermediate index artifacts. |
+| `tuning_config.workspace_path` | `/tmp/vsag_autotune` | Run artifacts and CLI default reports. |
+| `tuning_config.keep_intermediate` | `false` | Keep all generated indexes. |
 | `tuning_config.max_trials` | `1000` | Maximum planned worst-case trials; hard maximum `100000`. |
-| `output.result_path` | `<workspace>/run-<id>.json` | Full report path. |
+| `output.result_path` | `<workspace>/run-<id>.json` | CLI full report path. |
 | `output.include_raw_eval` | `false` | Include native eval JSON in build and trial records. |
 
-`output.result_path` cannot alias `data_path` or `index_path`. For the offline JSON/CLI entry,
-generated indexes are removed after evaluation when `keep_intermediate` is false. Typed
-`TuneIndex` always retains the recommended artifact so it can return a reproducible result; the
-option controls retention of unselected artifacts. The report is retained independently.
+`output.result_path` cannot alias `data_path` or `index_path`. After initial validation succeeds,
+the offline JSON/CLI entry writes the full report. An explicit `output.result_path` overrides its
+location; otherwise AutoTune generates a report path under `workspace_path`. Early validation and
+request-file failures do not write one.
+
+Typed `TuneIndex` and `TuneSearch` do not accept a report path and never write report files. Their
+result objects return the complete report as `JsonType`. For both the CLI and typed `TuneIndex`,
+`keep_intermediate=false` retains only the recommended generated index and removes unselected
+artifacts; `true` retains every generated index. When there is no recommendation, the default is
+to remove all generated indexes. Because `TuneSearch` creates no artifacts,
+`workspace_path` and `keep_intermediate` have no effect on it.
 
 ## Full Report
 
-A completed evaluation writes and returns this top-level shape:
+A completed evaluation returns this top-level shape. The CLI also writes it to disk:
 
 ```json
 {
@@ -302,12 +317,13 @@ A completed evaluation writes and returns this top-level shape:
 | `trials` | One record per executed concrete search candidate. |
 | `request` | Effective normalized request used by the tuning engine. |
 | `elapsed_seconds` | AutoTune wall time through selection, excluding report writing and cleanup. |
-| `report_path` | Persisted full report path. |
+| `report_path` | Persisted full report path; CLI/JSON adapter only. |
 | `failure` | Present when the overall run failed. |
 
 Early validation failures do not have `builds`, `trials`, or `report_path`, and no report file is
-written. A run in which all candidate evaluations fail does contain the attempted build and trial
-records and is written when the report path itself is usable.
+written. A CLI run in which all candidate evaluations fail does contain the attempted build and
+trial records and is written when the report path itself is usable. Typed API reports never
+contain `report_path`.
 
 The normalized `request` contains derived dataset metadata, workload defaults, constraints,
 objective, config, and output fields. Build-and-search mode adds `index_spaces`; search-only mode
@@ -318,7 +334,8 @@ present, `index_path` as top-level fields inside this normalized object.
 
 - `success`: at least one successful trial satisfies every constraint; `recommendation` is set.
 - `no_feasible_candidate`: successful trials exist, but none satisfies every constraint;
-  `best_effort` is set for explanation and is not a valid recommendation.
+  `best_effort` is set for explanation and is not a valid recommendation. Typed calls return a
+  value with `TuneStatus::NO_FEASIBLE_CANDIDATE`, not an error.
 - `failed`: the request is invalid, execution/reporting fails, or no trial can be evaluated
   successfully with the objective metric.
 
@@ -396,7 +413,7 @@ Artifact fields appear only in build-and-search records in V1. `artifacts.source
 and `artifacts.index_path` is evidence of where the evaluated index was stored, not a promise that
 the path still exists. Check `artifacts.retained`:
 
-- `true`: this is the selected artifact returned by typed `TuneIndex`, or retention was requested;
+- `true`: this is the selected artifact, or retention of all generated indexes was requested;
 - `false`: AutoTune planned to remove or already removed the generated artifact.
 
 ### Structured Failures
@@ -442,9 +459,9 @@ The CLI prints a compact subset of the full report in this order:
 Null result branches and the detailed build/trial arrays are omitted from standard output. Read
 `report_path` for complete evidence.
 
-The CLI exits with code `1` for `status=failed` and command-line/request-file errors. It currently
-exits with code `0` for both `success` and `no_feasible_candidate`; callers must inspect `status`
-rather than using the exit code to decide whether a recommendation exists.
+The CLI exits with code `1` for `status=failed` and command-line/request-file errors. It exits with
+code `0` for both `success` and `no_feasible_candidate`; callers must inspect `status` rather than
+using only the exit code to decide whether a recommendation exists.
 
 ## Build-Tree C++ Entry Point
 
@@ -476,14 +493,12 @@ auto result = TuneIndex(request);
 ```
 
 It returns a loaded, query-ready selected index together with concrete create and search
-parameters. `TuneSearch` tunes an already built or loaded index:
+parameters. `metrics` and the complete `report` are returned as `JsonType`; typed calls never
+persist the report. `TuneSearch` tunes an already built or loaded index:
 
 ```cpp
 SearchRequest request;
 request.index = existing_index;
-request.index_name = "hgraph";
-request.base = base;
-request.metric_type = METRIC_L2;
 request.workload = {queries, ground_truth, 10, 48};
 request.parameter_space = search_candidate_space;
 request.constraints = {{Metric::RECALL_AT_K, 0.95}};
@@ -491,4 +506,13 @@ request.objective = Metric::LATENCY_AVG_MS;
 auto result = TuneSearch(request);
 ```
 
-Build-time metrics and `index_size_mb` are unavailable to `TuneSearch`.
+AutoTune derives the type and element count of `existing_index`. `TuneSearch` therefore does not
+need base vectors or a metric type. Ground truth is required only when recall is a constraint or
+the objective. Build-time metrics and `index_size_mb` are unavailable to `TuneSearch`.
+`index_memory_mb` may be a constraint but cannot be the objective because it does not vary across
+search candidates.
+
+Both typed calls return `tl::unexpected<Error>` only for invalid requests and execution failures.
+If evaluation completes but no candidate satisfies every constraint, they return a result with
+`status=TuneStatus::NO_FEASIBLE_CANDIDATE` and structured `best_effort`; recommendation fields are
+invalid in that state.

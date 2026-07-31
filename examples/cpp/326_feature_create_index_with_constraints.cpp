@@ -62,14 +62,19 @@ main() {
         std::cerr << "Failed to tune index: " << tuned.error().message << std::endl;
         return 1;
     }
+    if (tuned->status == vsag::autotune::TuneStatus::NO_FEASIBLE_CANDIDATE) {
+        std::cerr << "No candidate satisfied the constraints. Best effort:\n"
+                  << tuned->best_effort.dump(2) << std::endl;
+        return 2;
+    }
 
     const auto& result = tuned.value();
     std::cout << "index_name: " << result.index_name << '\n'
               << "create_params: " << result.create_parameters << '\n'
               << "search_params: " << result.search_parameters << '\n'
-              << "validated_metrics: " << result.metrics << '\n'
+              << "validated_metrics: " << result.metrics.dump() << '\n'
               << "index_artifact: " << result.artifact_path << '\n'
-              << "report: " << result.report_path << std::endl;
+              << "trials_evaluated: " << result.report["trials"].size() << std::endl;
 
     auto query = vsag::Dataset::Make();
     query->NumElements(1)->Dim(DIM)->Float32Vectors(query_vectors.data())->Owner(false);

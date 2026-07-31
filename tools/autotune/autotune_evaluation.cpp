@@ -128,6 +128,7 @@ search_config(const RequestContext& request, const Candidate& candidate) {
     config.enable_memory = false;
     config.enable_recall = request.enable_recall;
     config.enable_percent_recall = false;
+    config.use_id_based_recall = true;
     return config;
 }
 
@@ -227,7 +228,7 @@ EvaluateCandidates(const IndexTuningRequest& tuning_request,
                         {{"index_path", index_path},
                          {"source", "generated"},
                          {"use_existing_index", false},
-                         {"retained", request.keep_intermediate}}}};
+                         {"retained", true}}}};
 
         MetricMap shared_metrics;
         IndexPtr index;
@@ -309,11 +310,6 @@ EvaluateCandidates(const IndexTuningRequest& tuning_request,
                 return evaluate(concrete);
             };
             EvaluateEfSearchRange(*candidate.ef_search_range, recall_target, evaluate_ef_search);
-        }
-
-        if (!request.keep_intermediate) {
-            std::error_code error;
-            std::filesystem::remove(index_path, error);
         }
     }
     return evaluation;

@@ -83,14 +83,10 @@ main() {
 
     vsag::autotune::SearchRequest request;
     request.index = index;
-    request.base = base;
-    request.metric_type = vsag::METRIC_L2;
     request.workload = {queries, ground_truth, 1, 1};
-    request.index_name = "hgraph";
     request.parameter_space = R"({"hgraph":{"ef_search":[4,8,16]}})";
     request.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 1.0}};
     request.objective = vsag::autotune::Metric::LATENCY_AVG_MS;
-    request.config.workspace_path = "/tmp/vsag_autotune_existing_index_example";
     request.config.max_trials = 3;
 
     const auto tuned = vsag::autotune::TuneSearch(request);
@@ -98,11 +94,16 @@ main() {
         std::cerr << "AutoTune failed: " << tuned.error().message << std::endl;
         return 1;
     }
+    if (tuned->status == vsag::autotune::TuneStatus::NO_FEASIBLE_CANDIDATE) {
+        std::cerr << "No candidate satisfied the constraints. Best effort:\n"
+                  << tuned->best_effort.dump(2) << std::endl;
+        return 2;
+    }
 
     const auto& result = tuned.value();
     std::cout << "recommended search_params: " << result.parameters << '\n'
-              << "validated metrics: " << result.metrics << '\n'
-              << "report: " << result.report_path << std::endl;
+              << "validated metrics: " << result.metrics.dump() << '\n'
+              << "trials evaluated: " << result.report["trials"].size() << std::endl;
 
     auto query = vsag::Dataset::Make()
                      ->NumElements(1)

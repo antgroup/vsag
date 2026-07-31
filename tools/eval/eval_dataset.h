@@ -49,6 +49,9 @@ public:
                  const vsag::DatasetPtr& ground_truth,
                  const std::string& metric_type);
 
+    static EvalDatasetPtr
+    FromSearchDatasets(const vsag::DatasetPtr& queries, const vsag::DatasetPtr& ground_truth);
+
     static void
     Save(const EvalDatasetPtr& dataset, const std::string& filename);
 

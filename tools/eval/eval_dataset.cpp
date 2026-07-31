@@ -318,6 +318,42 @@ EvalDataset::FromDatasets(const vsag::DatasetPtr& base,
 }
 
 EvalDatasetPtr
+EvalDataset::FromSearchDatasets(const vsag::DatasetPtr& queries,
+                                const vsag::DatasetPtr& ground_truth) {
+    if (queries == nullptr || queries->GetNumElements() <= 0) {
+        throw std::invalid_argument("queries dataset is required and must not be empty");
+    }
+    if (queries->GetDim() <= 0 || queries->GetFloat32Vectors() == nullptr) {
+        throw std::invalid_argument(
+            "in-memory search evaluation requires positive-dimensional float32 queries");
+    }
+    if (ground_truth != nullptr &&
+        (ground_truth->GetNumElements() != queries->GetNumElements() ||
+         ground_truth->GetDim() <= 0 || ground_truth->GetIds() == nullptr)) {
+        throw std::invalid_argument(
+            "ground_truth must contain one non-empty id row for every query");
+    }
+
+    auto dataset = std::make_shared<EvalDataset>();
+    dataset->query_dataset_ = queries;
+    dataset->ground_truth_dataset_ = ground_truth;
+    dataset->vector_type_ = DENSE_VECTORS;
+    dataset->train_data_type_ = vsag::DATATYPE_FLOAT32;
+    dataset->test_data_type_ = vsag::DATATYPE_FLOAT32;
+    dataset->train_data_size_ = sizeof(float);
+    dataset->test_data_size_ = sizeof(float);
+    dataset->number_of_query_ = queries->GetNumElements();
+    dataset->dim_ = queries->GetDim();
+    dataset->train_shape_ = {0, dataset->dim_};
+    dataset->test_shape_ = {dataset->number_of_query_, dataset->dim_};
+    dataset->neighbors_shape_ =
+        ground_truth == nullptr ? shape_t{0, 0}
+                                : shape_t{ground_truth->GetNumElements(), ground_truth->GetDim()};
+    dataset->file_path_ = "<memory>";
+    return dataset;
+}
+
+EvalDatasetPtr
 EvalDataset::Load(const std::string& filename) {
     H5::H5File file(filename, H5F_ACC_RDONLY);
 

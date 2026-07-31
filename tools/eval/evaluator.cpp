@@ -71,6 +71,9 @@ validate_search(const EvalDatasetPtr& dataset, const EvalConfig& config) {
             throw std::invalid_argument(
                 "evaluation ground truth must contain at least top_k neighbors per query");
         }
+        if (!config.use_id_based_recall && dataset->GetNumberOfBase() <= 0) {
+            throw std::invalid_argument("distance-based recall evaluation requires base vectors");
+        }
     }
 }
 

@@ -61,12 +61,10 @@ struct Workload {
     uint64_t concurrency{1};
 };
 
-/// Execution and report options shared by index and search tuning.
+/// Evaluation options shared by index and search tuning.
 struct Config {
-    /// Directory for generated reports and index artifacts.
+    /// Directory for generated index artifacts.
     std::string workspace_path{"/tmp/vsag_autotune"};
-    /// Optional report destination; an empty value generates a path under workspace_path.
-    std::string report_path;
     /// Maximum number of concrete search trials planned for the request.
     uint64_t max_trials{1000};
     /// Keep every generated index artifact instead of only the selected artifact.
@@ -101,12 +99,6 @@ struct IndexRequest {
 struct SearchRequest {
     /// Existing index reused in place; TuneSearch neither rebuilds nor takes exclusive ownership.
     IndexPtr index;
-    /// Concrete type of index, including pyramid for search-only tuning.
-    std::string index_name;
-    /// Base vectors and IDs used to evaluate recall and validate ground truth.
-    DatasetPtr base;
-    /// l2, ip, or cosine; it must match the existing index and datasets.
-    std::string metric_type;
     Workload workload;
     /// JSON search candidate space; missing supported fields receive built-in proposals.
     std::string parameter_space{"{}"};
@@ -115,8 +107,14 @@ struct SearchRequest {
     Config config;
 };
 
-/// Successful index-tuning result.
+enum class TuneStatus {
+    SUCCESS = 0,
+    NO_FEASIBLE_CANDIDATE,
+};
+
+/// Completed index-tuning result. Recommendation fields are valid only on SUCCESS.
 struct IndexResult {
+    TuneStatus status{TuneStatus::SUCCESS};
     /// Loaded selected index, ready for queries.
     IndexPtr index;
     std::string index_name;
@@ -125,31 +123,34 @@ struct IndexResult {
     /// Concrete JSON parameters recommended for queries.
     std::string search_parameters;
     /// Validated metric values as a JSON object.
-    std::string metrics;
+    JsonType metrics = JsonType::object();
     /// Selected serialized artifact; the caller removes it when it is no longer needed.
     std::string artifact_path;
-    std::string report_path;
     /// Complete report as JSON.
-    std::string report;
+    JsonType report = JsonType::object();
+    /// Closest evaluated candidate when status is NO_FEASIBLE_CANDIDATE.
+    JsonType best_effort = nullptr;
 };
 
-/// Successful search-only tuning result.
+/// Completed search-tuning result. Recommendation fields are valid only on SUCCESS.
 struct SearchResult {
+    TuneStatus status{TuneStatus::SUCCESS};
     /// Concrete JSON parameters recommended for the existing index.
     std::string parameters;
     /// Validated metric values as a JSON object.
-    std::string metrics;
-    std::string report_path;
+    JsonType metrics = JsonType::object();
     /// Complete report as JSON.
-    std::string report;
+    JsonType report = JsonType::object();
+    /// Closest evaluated candidate when status is NO_FEASIBLE_CANDIDATE.
+    JsonType best_effort = nullptr;
 };
 
 /**
  * Experimental, synchronous build-tree tool API. It is not installed as part of the VSAG SDK.
  *
- * Returns INVALID_ARGUMENT for invalid requests or no feasible candidate, and an execution error
- * for evaluation, artifact, or report failures. On success, only the selected artifact is retained
- * unless Config::keep_intermediate is true.
+ * Returns an error for invalid requests or execution failures. A completed request with no
+ * feasible candidate returns TuneStatus::NO_FEASIBLE_CANDIDATE and a structured best_effort. On
+ * success, only the selected artifact is retained unless Config::keep_intermediate is true.
  */
 tl::expected<IndexResult, Error>
 TuneIndex(const IndexRequest& request);
@@ -157,13 +158,14 @@ TuneIndex(const IndexRequest& request);
 /**
  * Synchronously evaluates search candidates against SearchRequest::index without rebuilding it.
  *
- * Returns INVALID_ARGUMENT for invalid requests or no feasible candidate, and an execution error
- * for evaluation or report failures.
+ * Returns an error for invalid requests or execution failures. A completed request with no
+ * feasible candidate returns TuneStatus::NO_FEASIBLE_CANDIDATE and a structured best_effort.
  */
 tl::expected<SearchResult, Error>
 TuneSearch(const SearchRequest& request);
 
-/// Offline JSON adapter used by the CLI. Validation failures are returned as structured JSON.
+/// Offline JSON adapter used by the CLI. Parsed requests persist a full report; validation
+/// failures are returned as structured JSON.
 JsonType
 RunAutoTune(const JsonType& request);
 

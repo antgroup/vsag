@@ -70,13 +70,15 @@ and IVF spaces; otherwise arrays and `$range` expressions use the same semantics
 contract.
 
 The result contains the loaded `index`, `index_name`, complete concrete `create_parameters`,
-validated `search_parameters`, metrics, artifact path, and the complete report. The recommended
-artifact is retained, so another process can recreate an empty index from
-`index_name + create_parameters` and deserialize that file. Unselected intermediate artifacts are
-removed by default.
+validated `search_parameters`, metrics, artifact path, and the complete report. `metrics` and
+`report` are `JsonType` objects. The typed API returns the report in memory and never writes a
+report file. The recommended artifact is retained, so another process can recreate an empty index
+from `index_name + create_parameters` and deserialize that file. Unselected intermediate
+artifacts are removed by default.
 
-If no candidate satisfies every constraint, `TuneIndex` returns an `INVALID_ARGUMENT` error
-instead of loading `best_effort`.
+If no candidate satisfies every constraint, the completed call has
+`status=TuneStatus::NO_FEASIBLE_CANDIDATE` and a structured `best_effort`; recommendation fields
+such as `index` are not valid. Invalid requests and execution failures still return an error.
 
 See
 [`examples/cpp/326_feature_create_index_with_constraints.cpp`][factory-example] for a complete
@@ -169,9 +171,6 @@ Programmatic callers use a separate `SearchRequest` and call `TuneSearch`:
 ```cpp
 vsag::autotune::SearchRequest request;
 request.index = existing_index;
-request.index_name = "hgraph";
-request.base = base;
-request.metric_type = vsag::METRIC_L2;
 request.workload = {queries, ground_truth, 10, 48};
 request.parameter_space = R"({"hgraph":{"ef_search":[40,80,120]}})";
 request.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 0.95}};
@@ -182,8 +181,14 @@ auto neighbors = existing_index->KnnSearch(query, 10, result.parameters).value()
 ```
 
 This avoids serialization and file I/O and reuses the caller's index for all search trials.
-`base` is currently required by the shared recall evaluator. The CLI's `index_path` field remains
-an offline adapter: it creates and deserializes an index, then enters the same search-only flow.
+AutoTune derives the index type and element count from `IndexPtr`. Search tuning therefore needs
+queries but not the base dataset or metric type. When recall is requested, it also needs ground
+truth and defines per-query `recall_at_k` as the intersection of the returned and ground-truth IDs
+in their first `top_k` entries, divided by `top_k`; the reported value is the average over all
+queries. Ground truth is optional when recall is neither a constraint nor the objective.
+
+The CLI's `index_path` field remains an offline adapter: it uses the concrete create parameters to
+create and deserialize an index, then enters the same search-only flow.
 
 Pyramid is supported in this search-only mode. The HDF5 CLI adapter does not provide query paths,
 so it can evaluate only Pyramid's native default/root search. Typed requests take paths directly
@@ -215,8 +220,9 @@ The following metrics can be used as constraints or as the objective:
 | `build_seconds`, `search_seconds`, `build_and_search_seconds` | At most the requested value |
 
 `build_seconds`, `index_size_mb`, and `build_and_search_seconds` are unavailable in
-existing-index mode. The objective direction is inferred from the metric, so no `direction` field
-is needed.
+existing-index mode. `index_memory_mb` may be a constraint, but not the objective, because it is
+constant across search candidates for the same existing index and cannot rank them. The objective
+direction is inferred from the metric, so no `direction` field is needed.
 
 AutoTune uses a dedicated latency/QPS pass and a separate recall/statistics pass, so a logical
 query runs more than once per trial. `search_seconds` covers both in-memory passes and metric
@@ -236,10 +242,15 @@ Standard output is a short summary ordered for copying:
 
 The full report also contains every build and trial, constraint violations, the normalized request,
 and structured per-stage failures. In search-only mode `builds` is empty and trials contain no
-artifact or build fields. For the CLI and `RunAutoTune`, `keep_intermediate=false` removes every
-generated index after evaluation. Typed `TuneIndex` always retains the recommended artifact so it
-can return a reproducible result, while removing unselected artifacts when the option is false.
-The report itself is retained in both cases.
+artifact or build fields. For both the CLI and typed `TuneIndex`, `keep_intermediate=false` retains
+only the recommended generated index and removes unselected artifacts. Setting it to `true`
+retains every generated index.
+
+After initial request validation succeeds, the CLI and `RunAutoTune` persist the full report:
+`output.result_path` overrides the path, otherwise a generated path under the workspace is used.
+Early validation and request-file failures do not write a report. Typed `TuneIndex` and
+`TuneSearch` never write a report file; callers receive the complete `JsonType` report in the
+result.
 
 ## V1 Boundaries
 
