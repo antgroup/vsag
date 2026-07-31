@@ -247,6 +247,7 @@ jobs:
           path: ./build
       - name: Run Unittests
         run: |
+          export LD_LIBRARY_PATH="$PWD/build/src:$PWD/build/tools/autotune"
           echo leak:libomp.so > omp.supp
           echo leak:libgomp.so >> omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
@@ -309,8 +310,6 @@ jobs:
     needs: [changes, build-asan-x86]
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
-    env:
-      LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
       image: vsaglib/vsag:ci-x86-openblas
       volumes:
@@ -329,6 +328,7 @@ jobs:
       - name: Run Examples
         shell: bash
         run: |
+          export LD_LIBRARY_PATH="$PWD/build/src:$PWD/build/tools/autotune"
           cd ./build/examples/cpp
           for example in ./*; do
             filename=$(basename "$example")
