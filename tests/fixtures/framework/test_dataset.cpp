@@ -157,19 +157,17 @@ GenerateRandomDataset(uint64_t dim,
         ->NumElements(count)
         ->Owner(true);
 
-    if (vector_type == "sparse" or vector_type == "positive_sparse") {
+    if (vector_type == "sparse") {
         auto vecs = fixtures::generate_vectors(count, dim, need_normalize, seed);
         auto vecs_int8 = fixtures::generate_int8_codes(count, dim, seed);
-        const auto sparse_min_value = vector_type == "positive_sparse" ? 0.1F : -1.0F;
         if (not has_duplicate) {
             base->Float32Vectors(CopyVector(vecs))->Int8Vectors(CopyVector(vecs_int8));
-            base->SparseVectors(
-                CopyVector(GenerateSparseVectors(count, dim, 1000, sparse_min_value, 1.0F)));
+            base->SparseVectors(CopyVector(GenerateSparseVectors(count, dim, 1000, 0.1F, 1.0F)));
         } else {
             base->Float32Vectors(DuplicateCopyVector(vecs))
                 ->Int8Vectors(DuplicateCopyVector(vecs_int8));
-            base->SparseVectors(DuplicateCopyVector(
-                GenerateSparseVectors(count, dim, 1000, sparse_min_value, 1.0F)));
+            base->SparseVectors(
+                DuplicateCopyVector(GenerateSparseVectors(count, dim, 1000, 0.1F, 1.0F)));
         }
     } else if (vector_type == "multi") {
         auto [vector_lens, total_vector_len] = GenerateMultiVectorLens(count, seed + 2);
@@ -256,7 +254,7 @@ CalDistanceFloatMetrix(const vsag::DatasetPtr query,
             if (vector_type == "dense") {
                 dist = dist_func(
                     query->GetFloat32Vectors() + dim * i, base->GetFloat32Vectors() + dim * j, dim);
-            } else if (vector_type == "sparse" or vector_type == "positive_sparse") {
+            } else if (vector_type == "sparse") {
                 dist = GetSparseDistance(query->GetSparseVectors()[i], base->GetSparseVectors()[j]);
             } else {
                 throw std::runtime_error("no such vector type");

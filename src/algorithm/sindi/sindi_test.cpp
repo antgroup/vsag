@@ -19,7 +19,6 @@
 #include <array>
 #include <cmath>
 #include <cstring>
-#include <limits>
 #include <set>
 #include <sstream>
 #include <tuple>
@@ -56,8 +55,14 @@ public:
     static void
     DeserializeImmutableWindow(const SINDI& index,
                                StreamReader& reader,
-                               ImmutableSINDIWindow& window) {
-        index.deserialize_immutable_window(reader, window);
+                               ImmutableSINDIWindow& window,
+                               bool postings_sorted = false) {
+        index.deserialize_immutable_window(reader, window, postings_sorted);
+    }
+
+    static bool
+    ReadIndexFooter(SINDI& index, StreamReader& reader, JsonType& basic_info) {
+        return index.read_index_footer(reader, basic_info);
     }
 
     static uint64_t
@@ -227,6 +232,13 @@ TEST_CASE("SINDI Term Prune Uses Highest Positive Value Postings", "[ut][SINDI]"
     std::stringstream stream;
     IOStreamWriter writer(stream);
     index.Serialize(writer);
+
+    std::stringstream footer_stream(stream.str());
+    IOStreamReader footer_reader(footer_stream);
+    JsonType basic_info;
+    REQUIRE(SINDITestAccess::ReadIndexFooter(index, footer_reader, basic_info));
+    REQUIRE(basic_info["sindi_posting_list_format_version"].GetInt() == 1);
+
     SINDI restored(parameter, common_param);
     IOStreamReader reader(stream);
     restored.Deserialize(reader);
@@ -455,6 +467,13 @@ TEST_CASE("SINDI streaming compatibility", "[ut][SINDI][streaming][compatibility
     std::stringstream stream;
     REQUIRE_NOTHROW(index->SerializeStreaming(stream));
     const auto bytes = stream.str();
+
+    std::stringstream metadata_stream(bytes);
+    const auto metadata_result = Index::GetStreamingMetadata(metadata_stream);
+    REQUIRE(metadata_result.has_value());
+    const auto metadata = JsonType::Parse(metadata_result.value().metadata_json);
+    const auto basic_info = metadata[BASIC_INFO];
+    REQUIRE(basic_info["sindi_posting_list_format_version"].GetInt() == 1);
 
     SECTION("skips unknown non-critical block") {
         auto mutated = InsertUnknownStreamingBlock(bytes, false);
@@ -1034,7 +1053,7 @@ TEST_CASE("SINDI Immutable Sparse Window Sorts Legacy Postings On Deserialize", 
     REQUIRE(highest_value == 4.0F);
 }
 
-TEST_CASE("SINDI Immutable Sparse Window Rejects NaN Posting Values", "[ut][SINDI]") {
+TEST_CASE("SINDI Immutable Sparse Window Trusts Versioned Posting Order", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
@@ -1048,21 +1067,25 @@ TEST_CASE("SINDI Immutable Sparse Window Rejects NaN Posting Values", "[ut][SIND
     })"));
     SINDI index(param, common_param);
 
-    ImmutableSINDIWindow legacy_window(allocator.get());
-    legacy_window.offsets = {0, 1};
-    legacy_window.id_payloads = {0};
-    const auto nan = std::numeric_limits<float>::quiet_NaN();
-    legacy_window.value_payloads.resize(sizeof(nan));
-    std::memcpy(legacy_window.value_payloads.data(), &nan, sizeof(nan));
+    ImmutableSINDIWindow versioned_window(allocator.get());
+    versioned_window.offsets = {0, 2};
+    versioned_window.id_payloads = {0, 1};
+    std::vector<float> values = {1.0F, 4.0F};
+    versioned_window.value_payloads.resize(values.size() * sizeof(float));
+    std::memcpy(versioned_window.value_payloads.data(),
+                values.data(),
+                versioned_window.value_payloads.size());
 
     std::stringstream stream;
     vsag::IOStreamWriter writer(stream);
-    SINDITestAccess::SerializeImmutableWindow(index, writer, legacy_window);
+    SINDITestAccess::SerializeImmutableWindow(index, writer, versioned_window);
 
     vsag::IOStreamReader reader(stream);
     ImmutableSINDIWindow restored(allocator.get());
-    REQUIRE_THROWS_AS(SINDITestAccess::DeserializeImmutableWindow(index, reader, restored),
-                      VsagException);
+    // Preserve insertion order to prove the version marker skips normalization.
+    SINDITestAccess::DeserializeImmutableWindow(index, reader, restored, true);
+
+    REQUIRE(restored.id_payloads == Vector<uint16_t>({0, 1}, allocator.get()));
 }
 
 TEST_CASE("SINDI Immutable Sparse Window Rejects Excessive Term Count", "[ut][SINDI]") {

@@ -266,13 +266,15 @@ private:
     serialize_windows(StreamWriter& writer) const;
 
     void
-    deserialize_windows(StreamReader& reader_ref);
+    deserialize_windows(StreamReader& reader_ref, bool postings_sorted);
 
     void
     trim_deserialized_trailing_windows();
 
     void
-    deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWindow& window) const;
+    deserialize_immutable_window(StreamReader& reader_ref,
+                                 ImmutableSINDIWindow& window,
+                                 bool postings_sorted = false) const;
 
     static void
     serialize_immutable_window(StreamWriter& writer, const ImmutableSINDIWindow& window);

@@ -66,8 +66,8 @@ auto result = index->KnnSearch(
 
 ## Build parameters
 
-Build-time parameters live under `index_param`. `dtype` **must** be `"sparse"`,
-`metric_type` **must** be `"ip"`, and all indexed and query sparse vector values must be positive.
+Build-time parameters live under `index_param`. `dtype` **must** be `"sparse"`
+and `metric_type` **must** be `"ip"`.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -132,6 +132,8 @@ It rejects incremental `Add`, `GetSparseVectorByInnerId`, `CalcDistanceById`, an
 `CalDistanceById`. Streaming serialization is not supported for immutable SINDI; use the matching
 legacy serialization APIs or keep the index mutable when the streaming format is required.
 The serialized index must be loaded into a SINDI created with the same `immutable` setting.
+New indexes record the sorted posting-list format version and skip normalization when loaded.
+Indexes written without this marker remain compatible and are normalized during loading.
 
 ## Search parameters
 
@@ -142,7 +144,10 @@ Search-time parameters live under the `sindi` sub-object:
 | `n_candidate` | int | `0` | Candidate heap size. When `0`, defaults to `SPARSE_AMPLIFICATION_FACTOR · topk` (500×). If set, must satisfy `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk`. |
 | `query_prune_ratio` | float | `0.0` | Fraction of lowest-weight query terms skipped (`[0.0, 1.0)`). |
 | `term_prune_ratio` | float | `0.0` | Fraction of the lowest-value postings skipped from each term list (`[0.0, 1.0)`). |
-| `term_retain_threshold` | uint64 | `0` | Maximum postings for one term across all windows. A value of `0` disables this limit; positive values allow each window to scan at most `floor(threshold / window_count)` postings. |
+| `term_retain_threshold` | uint64 | `0` | Maximum postings for one term across all windows. A value of `0` disables this limit; positive values allow each non-empty window posting list to scan at most `max(1, floor(threshold / window_count))` postings. |
+
+After combining the ratio and threshold limits, SINDI scans at least one posting from every
+non-empty term list.
 
 SINDI chooses the heap-insertion strategy automatically from the build-time
 `doc_prune_ratio` and search-time `query_prune_ratio`. With the current `0.1`

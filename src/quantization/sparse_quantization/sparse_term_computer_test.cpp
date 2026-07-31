@@ -161,4 +161,13 @@ TEST_CASE("SparseTermComputer Term Scan Count", "[ut][SparseTermComputer]") {
         SparseTermComputer computer(query, search_params, allocator.get(), 2);
         REQUIRE(computer.GetTermScanCount(10) == 10);
     }
+
+    SECTION("non-empty posting lists retain at least one document") {
+        SINDISearchParameter search_params;
+        search_params.term_prune_ratio = 0.99F;
+        search_params.term_retain_threshold = 1;
+        SparseTermComputer computer(query, search_params, allocator.get(), 2);
+        REQUIRE(computer.GetTermScanCount(10) == 1);
+        REQUIRE(computer.GetTermScanCount(0) == 0);
+    }
 }

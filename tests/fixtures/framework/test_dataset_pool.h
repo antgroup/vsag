@@ -94,16 +94,6 @@ public:
     TestDatasetPtr
     GetSparseDatasetAndCreate(uint64_t count, uint64_t dim, float valid_ratio = 0.8);
 
-    /**
-     * @brief Gets or creates a sparse test dataset with strictly positive values.
-     * @param count Number of vectors.
-     * @param dim Dimension of vectors.
-     * @param valid_ratio Ratio of valid vectors.
-     * @return Shared pointer to the TestDataset.
-     */
-    TestDatasetPtr
-    GetPositiveSparseDatasetAndCreate(uint64_t count, uint64_t dim, float valid_ratio = 0.8);
-
 private:
     /**
      * @brief Generates a unique key for dataset lookup.

@@ -16,12 +16,9 @@
 #include "sindi.h"
 
 #include <algorithm>
-#include <array>
-#include <cmath>
 #include <cstring>
 #include <limits>
 #include <memory>
-#include <numeric>
 #include <shared_mutex>
 #include <tuple>
 #include <unordered_map>
@@ -54,78 +51,14 @@ constexpr uint64_t TERM_ID_MAPPER_ENTRY_MEMORY_BYTES = 54;
 constexpr const char* SINDI_RERANK_FLAT_FORMAT_KEY = "sindi_rerank_flat_format";
 constexpr int64_t SINDI_RERANK_FLAT_FORMAT_DATACELL = 2;
 constexpr int64_t SINDI_RERANK_FLAT_FORMAT_DMQ = 3;
+constexpr const char* SINDI_POSTING_LIST_FORMAT_VERSION_KEY = "sindi_posting_list_format_version";
+constexpr int64_t SINDI_SORTED_POSTING_LIST_FORMAT_VERSION = 1;
 
-void
-sort_posting_list_by_value(uint16_t* ids,
-                           uint8_t* data,
-                           uint32_t posting_count,
-                           SparseValueQuantizationType quantization_type,
-                           Vector<uint32_t>& order,
-                           Vector<float>& values) {
-    if (posting_count == 0) {
-        return;
-    }
-
-    const auto value_code_size = SparseTermDataCell::GetSparseValueCodeSize(quantization_type);
-    order.resize(posting_count);
-    std::iota(order.begin(), order.end(), 0);
-    values.resize(posting_count);
-    if (quantization_type == SparseValueQuantizationType::SQ8) {
-        for (uint32_t i = 0; i < posting_count; ++i) {
-            values[i] = static_cast<float>(data[i]);
-        }
-    } else if (quantization_type == SparseValueQuantizationType::FP16) {
-        for (uint32_t i = 0; i < posting_count; ++i) {
-            uint16_t value = 0;
-            std::memcpy(&value, data + static_cast<uint64_t>(i) * value_code_size, value_code_size);
-            values[i] = generic::FP16ToFloat(value);
-        }
-    } else {
-        for (uint32_t i = 0; i < posting_count; ++i) {
-            std::memcpy(
-                &values[i], data + static_cast<uint64_t>(i) * value_code_size, value_code_size);
-        }
-    }
-    CHECK_ARGUMENT(
-        std::none_of(values.begin(), values.end(), [](float value) { return std::isnan(value); }),
-        "serialized SINDI posting values must not be NaN");
-    if (posting_count == 1) {
-        return;
-    }
-    std::sort(order.begin(), order.end(), [&values, ids](uint32_t left, uint32_t right) {
-        if (values[left] != values[right]) {
-            return values[left] > values[right];
-        }
-        return ids[left] < ids[right];
-    });
-
-    for (uint32_t start = 0; start < posting_count; ++start) {
-        if (order[start] == start) {
-            continue;
-        }
-
-        const auto saved_id = ids[start];
-        std::array<uint8_t, sizeof(float)> saved_data{};
-        std::memcpy(saved_data.data(),
-                    data + static_cast<uint64_t>(start) * value_code_size,
-                    value_code_size);
-
-        auto current = start;
-        while (order[current] != start) {
-            const auto source = order[current];
-            ids[current] = ids[source];
-            std::memcpy(data + static_cast<uint64_t>(current) * value_code_size,
-                        data + static_cast<uint64_t>(source) * value_code_size,
-                        value_code_size);
-            order[current] = current;
-            current = source;
-        }
-        ids[current] = saved_id;
-        std::memcpy(data + static_cast<uint64_t>(current) * value_code_size,
-                    saved_data.data(),
-                    value_code_size);
-        order[current] = current;
-    }
+bool
+has_sorted_posting_lists(const JsonType& basic_info) {
+    return basic_info.Contains(SINDI_POSTING_LIST_FORMAT_VERSION_KEY) and
+           basic_info[SINDI_POSTING_LIST_FORMAT_VERSION_KEY].GetInt() >=
+               SINDI_SORTED_POSTING_LIST_FORMAT_VERSION;
 }
 
 DatasetPtr
@@ -986,7 +919,7 @@ SINDI::immutable_search_impl(const SparseTermComputerPtr& computer,
         scan_immutable_window_by_mapped_terms(dists.data(), window, computer, mapped_terms);
 
         if (reasoning_ctx != nullptr) {
-            selected_buckets->push_back(cur);
+            selected_buckets->push_back(static_cast<BucketIdType>(cur));
             auto doc_count = static_cast<uint32_t>(std::min<int64_t>(
                 window_size_, cur_element_count_ - static_cast<int64_t>(window_start_id)));
             for (uint32_t i = 0; i < doc_count; ++i) {
@@ -1135,7 +1068,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         term_list->Query(dists.data(), computer);
 
         if (reasoning_ctx != nullptr) {
-            selected_buckets->push_back(cur);
+            selected_buckets->push_back(static_cast<BucketIdType>(cur));
             auto doc_count = static_cast<uint32_t>(std::min<int64_t>(
                 window_size_, cur_element_count_ - static_cast<int64_t>(window_start_id)));
             for (uint32_t i = 0; i < doc_count; ++i) {
@@ -1531,6 +1464,8 @@ SINDI::Serialize(StreamWriter& writer) const {
 
     JsonType jsonify_basic_info;
     jsonify_basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
+    jsonify_basic_info[SINDI_POSTING_LIST_FORMAT_VERSION_KEY].SetInt(
+        SINDI_SORTED_POSTING_LIST_FORMAT_VERSION);
     if (use_reorder_ && rerank_type_ == SPARSE_RERANK_TYPE_DMQ8) {
         jsonify_basic_info[SINDI_RERANK_FLAT_FORMAT_KEY].SetInt(SINDI_RERANK_FLAT_FORMAT_DMQ);
     } else if (use_reorder_) {
@@ -1554,6 +1489,8 @@ SINDI::collect_streaming_header() const {
     basic_info["cur_element_count"].SetInt(this->cur_element_count_.load());
     basic_info["use_reorder"].SetBool(this->use_reorder_);
     basic_info["remap_term_ids"].SetBool(this->remap_term_ids_);
+    basic_info[SINDI_POSTING_LIST_FORMAT_VERSION_KEY].SetInt(
+        SINDI_SORTED_POSTING_LIST_FORMAT_VERSION);
     if (use_reorder_) {
         const auto rerank_format = rerank_type_ == SPARSE_RERANK_TYPE_DMQ8
                                        ? SINDI_RERANK_FLAT_FORMAT_DMQ
@@ -1643,7 +1580,7 @@ SINDI::serialize_streaming_body(StreamWriter& writer) const {
 }
 
 void
-SINDI::deserialize_windows(StreamReader& reader_ref) {
+SINDI::deserialize_windows(StreamReader& reader_ref, bool postings_sorted) {
     uint64_t cur_element_count = 0;
     StreamReader::ReadObj(reader_ref, cur_element_count);
     CHECK_ARGUMENT(cur_element_count <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
@@ -1666,7 +1603,8 @@ SINDI::deserialize_windows(StreamReader& reader_ref) {
         immutable_data_->windows.reserve(window_term_list_size);
         for (uint32_t i = 0; i < window_term_list_size; ++i) {
             immutable_data_->windows.emplace_back(allocator_);
-            deserialize_immutable_window(reader_ref, immutable_data_->windows.back());
+            deserialize_immutable_window(
+                reader_ref, immutable_data_->windows.back(), postings_sorted);
         }
         window_term_list_.clear();
         window_term_list_.shrink_to_fit();
@@ -1678,7 +1616,7 @@ SINDI::deserialize_windows(StreamReader& reader_ref) {
                                                           allocator_,
                                                           sparse_value_quant_type_,
                                                           quantization_params_);
-            window->Deserialize(reader_ref);
+            window->Deserialize(reader_ref, postings_sorted);
         }
     }
     trim_deserialized_trailing_windows();
@@ -1721,6 +1659,7 @@ SINDI::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
     std::scoped_lock wlock(this->global_mutex_);
 
     auto basic_info = metadata->Get(BASIC_INFO);
+    const auto postings_sorted = has_sorted_posting_lists(basic_info);
     if (basic_info.Contains(INDEX_PARAM)) {
         auto index_param = std::make_shared<SINDIParameter>();
         index_param->FromString(basic_info[INDEX_PARAM].GetString());
@@ -1775,9 +1714,10 @@ SINDI::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
 
         switch (static_cast<StreamSerializationTag>(block_header.tag)) {
             case StreamSerializationTag::SINDI_WINDOWS:
-                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
-                    this->deserialize_windows(block);
-                });
+                ReadSeekableBlockPayload(
+                    block_reader, block_header, [this, postings_sorted](StreamReader& block) {
+                        this->deserialize_windows(block, postings_sorted);
+                    });
                 loaded_windows = true;
                 break;
             case StreamSerializationTag::LABEL_TABLE:
@@ -1853,11 +1793,13 @@ SINDI::Deserialize(StreamReader& reader) {
     bool has_datacell_rerank_format = false;
     bool has_footer = false;
     bool has_dmq_rerank_format = false;
+    bool postings_sorted = false;
     if (not deserialize_without_footer_) {
         JsonType jsonify_basic_info;
         try {
             if (read_index_footer(reader, jsonify_basic_info)) {
                 has_footer = true;
+                postings_sorted = has_sorted_posting_lists(jsonify_basic_info);
                 // Check if the index parameter is compatible
                 {
                     auto param = jsonify_basic_info[INDEX_PARAM].GetString();
@@ -1929,7 +1871,8 @@ SINDI::Deserialize(StreamReader& reader) {
         immutable_data_->windows.reserve(window_term_list_size);
         for (uint32_t i = 0; i < window_term_list_size; ++i) {
             immutable_data_->windows.emplace_back(allocator_);
-            deserialize_immutable_window(reader_ref, immutable_data_->windows.back());
+            deserialize_immutable_window(
+                reader_ref, immutable_data_->windows.back(), postings_sorted);
         }
         window_term_list_.clear();
         window_term_list_.shrink_to_fit();
@@ -1941,7 +1884,7 @@ SINDI::Deserialize(StreamReader& reader) {
                                                           allocator_,
                                                           sparse_value_quant_type_,
                                                           quantization_params_);
-            window->Deserialize(reader_ref);
+            window->Deserialize(reader_ref, postings_sorted);
         }
     }
     trim_deserialized_trailing_windows();
@@ -2035,7 +1978,9 @@ SINDI::serialize_immutable_window(StreamWriter& writer, const ImmutableSINDIWind
 }
 
 void
-SINDI::deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWindow& window) const {
+SINDI::deserialize_immutable_window(StreamReader& reader_ref,
+                                    ImmutableSINDIWindow& window,
+                                    bool postings_sorted) const {
     const auto value_code_size =
         SparseTermDataCell::GetSparseValueCodeSize(sparse_value_quant_type_);
     const auto read_vector = [&reader_ref](auto& values, uint64_t max_size, const char* message) {
@@ -2108,20 +2053,26 @@ SINDI::deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWind
                        "immutable SINDI window-local doc id exceeds window size");
     }
 
-    // Older serialized windows stored postings in insertion order. Normalize them on load so
-    // value-aware pruning is correct for indexes produced before posting-list sorting existed.
+    if (postings_sorted) {
+        return;
+    }
+
+    // Older serialized windows did not record posting-list ordering. Normalize them on load so
+    // value-aware pruning remains compatible with indexes written before the format version.
     Vector<uint32_t> order(allocator_);
-    Vector<float> values(allocator_);
+    Vector<uint16_t> sorted_ids(allocator_);
+    Vector<uint8_t> sorted_data(allocator_);
     for (uint64_t term = 1; term < window.offsets.size(); ++term) {
         const auto begin = window.offsets[term - 1];
         const auto count = window.offsets[term] - begin;
-        sort_posting_list_by_value(
+        SparseTermDataCell::SortPostingListByValue(
             window.id_payloads.data() + begin,
             window.value_payloads.data() + static_cast<uint64_t>(begin) * value_code_size,
             count,
             sparse_value_quant_type_,
             order,
-            values);
+            sorted_ids,
+            sorted_data);
     }
 }
 

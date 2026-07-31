@@ -94,6 +94,15 @@ public:
     void
     SortByValue();
 
+    static void
+    SortPostingListByValue(uint16_t* ids,
+                           uint8_t* data,
+                           uint32_t posting_count,
+                           SparseValueQuantizationType quantization_type,
+                           Vector<uint32_t>& order,
+                           Vector<uint16_t>& sorted_ids,
+                           Vector<uint8_t>& sorted_data);
+
     void
     ResizeTermList(InnerIdType new_term_capacity);
 
@@ -104,7 +113,7 @@ public:
     Serialize(StreamWriter& writer) const;
 
     void
-    Deserialize(StreamReader& reader);
+    Deserialize(StreamReader& reader, bool postings_sorted = false);
 
     float
     CalcDistanceByInnerId(const SparseTermComputerPtr& computer, uint16_t base_id);

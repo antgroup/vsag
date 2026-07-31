@@ -189,10 +189,14 @@ public:
 
     uint32_t
     GetTermScanCount(uint32_t term_size) const {
+        if (term_size == 0) {
+            return 0;
+        }
         const auto ratio_limit =
             static_cast<uint32_t>(static_cast<float>(term_size) * term_retain_ratio_);
-        return static_cast<uint32_t>(
+        const auto scan_count = static_cast<uint32_t>(
             std::min<uint64_t>(ratio_limit, term_retain_threshold_per_window_));
+        return std::max<uint32_t>(scan_count, 1);
     }
 
 private:
