@@ -220,24 +220,24 @@ SINDISearchParameter::FromJson(const JsonType& json) {
                    fmt::format("parameters must contains {}", INDEX_SINDI));
 
     term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
-    term_prune_threshold = DEFAULT_TERM_PRUNE_THRESHOLD;
+    term_retain_threshold = DEFAULT_TERM_RETAIN_THRESHOLD;
     if (json[INDEX_SINDI].Contains(SPARSE_TERM_PRUNE_RATIO)) {
         term_prune_ratio = json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO].GetFloat();
         CHECK_ARGUMENT((0.0F <= term_prune_ratio and term_prune_ratio < 1.0F),
                        fmt::format("term_prune_ratio must be in [0, 1), got {}", term_prune_ratio));
     }
-    if (json[INDEX_SINDI].Contains(SPARSE_TERM_PRUNE_THRESHOLD)) {
-        const auto threshold_json = json[INDEX_SINDI][SPARSE_TERM_PRUNE_THRESHOLD];
+    if (json[INDEX_SINDI].Contains(SPARSE_TERM_RETAIN_THRESHOLD)) {
+        const auto threshold_json = json[INDEX_SINDI][SPARSE_TERM_RETAIN_THRESHOLD];
         CHECK_ARGUMENT(threshold_json.IsNumberInteger(),
-                       "term_prune_threshold must be a non-negative integer");
+                       "term_retain_threshold must be a non-negative integer");
         if (threshold_json.IsNumberUnsigned()) {
-            term_prune_threshold = threshold_json.GetUint64();
+            term_retain_threshold = threshold_json.GetUint64();
         } else {
             const auto threshold = threshold_json.GetInt();
             CHECK_ARGUMENT(
                 threshold >= 0,
-                fmt::format("term_prune_threshold must be non-negative, got {}", threshold));
-            term_prune_threshold = static_cast<uint64_t>(threshold);
+                fmt::format("term_retain_threshold must be non-negative, got {}", threshold));
+            term_retain_threshold = static_cast<uint64_t>(threshold);
         }
     }
 
@@ -269,7 +269,7 @@ SINDISearchParameter::ToJson() const {
     json[INDEX_SINDI][SPARSE_QUERY_PRUNE_RATIO].SetFloat(query_prune_ratio);
     json[INDEX_SINDI][SPARSE_N_CANDIDATE].SetInt(n_candidate);
     json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
-    json[INDEX_SINDI][SPARSE_TERM_PRUNE_THRESHOLD].SetUint64(term_prune_threshold);
+    json[INDEX_SINDI][SPARSE_TERM_RETAIN_THRESHOLD].SetUint64(term_retain_threshold);
     return json;
 }
 

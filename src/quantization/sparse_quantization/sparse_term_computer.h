@@ -51,10 +51,10 @@ public:
           raw_query_(sparse_query),
           query_retain_ratio_(1.0F - search_param.query_prune_ratio),
           term_retain_ratio_(1.0F - search_param.term_prune_ratio),
-          term_prune_threshold_per_window_(search_param.term_prune_threshold == 0
-                                               ? std::numeric_limits<uint64_t>::max()
-                                               : search_param.term_prune_threshold /
-                                                     std::max<uint64_t>(window_num, 1)) {
+          term_retain_threshold_per_window_(search_param.term_retain_threshold == 0
+                                                ? std::numeric_limits<uint64_t>::max()
+                                                : search_param.term_retain_threshold /
+                                                      std::max<uint64_t>(window_num, 1)) {
         SetQuery(sparse_query);
     }
 
@@ -192,7 +192,7 @@ public:
         const auto ratio_limit =
             static_cast<uint32_t>(static_cast<float>(term_size) * term_retain_ratio_);
         return static_cast<uint32_t>(
-            std::min<uint64_t>(ratio_limit, term_prune_threshold_per_window_));
+            std::min<uint64_t>(ratio_limit, term_retain_threshold_per_window_));
     }
 
 private:
@@ -247,7 +247,7 @@ public:
 
     float term_retain_ratio_{0.0F};
 
-    uint64_t term_prune_threshold_per_window_{std::numeric_limits<uint64_t>::max()};
+    uint64_t term_retain_threshold_per_window_{std::numeric_limits<uint64_t>::max()};
 
     uint32_t pruned_len_{0};
 

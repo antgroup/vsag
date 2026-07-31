@@ -200,7 +200,7 @@ TEST_CASE("SINDI Term Prune Uses Highest Positive Value Postings", "[ut][SINDI]"
     auto query = Dataset::Make();
     query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
 
-    const auto threshold_search = R"({"sindi": {"n_candidate": 1, "term_prune_threshold": 1}})";
+    const auto threshold_search = R"({"sindi": {"n_candidate": 1, "term_retain_threshold": 1}})";
     auto threshold_result = index.KnnSearch(query, 1, threshold_search, nullptr);
     REQUIRE(threshold_result->GetDim() == 1);
     REQUIRE(threshold_result->GetIds()[0] == 11);
@@ -216,7 +216,7 @@ TEST_CASE("SINDI Term Prune Uses Highest Positive Value Postings", "[ut][SINDI]"
         "sindi": {
             "n_candidate": 2,
             "term_prune_ratio": 0.25,
-            "term_prune_threshold": 2
+            "term_retain_threshold": 2
         }
     })";
     auto combined_result = index.KnnSearch(query, 2, combined_search, nullptr);
@@ -276,7 +276,7 @@ TEST_CASE("SINDI Sorts Incremental Partial Windows", "[ut][SINDI]") {
     SparseVector query_vector{1, &term, &query_value};
     auto query = Dataset::Make();
     query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
-    const auto search_parameters = R"({"sindi": {"n_candidate": 1, "term_prune_threshold": 1}})";
+    const auto search_parameters = R"({"sindi": {"n_candidate": 1, "term_retain_threshold": 1}})";
     auto result = index.KnnSearch(query, 1, search_parameters, nullptr);
     REQUIRE(result->GetIds()[0] == appended_label);
 
@@ -285,7 +285,7 @@ TEST_CASE("SINDI Sorts Incremental Partial Windows", "[ut][SINDI]") {
     REQUIRE(index.Add(appended).empty());
 }
 
-TEST_CASE("SINDI Term Prune Threshold Is Divided Across Windows", "[ut][SINDI]") {
+TEST_CASE("SINDI Term Retain Threshold Is Divided Across Windows", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
@@ -320,7 +320,7 @@ TEST_CASE("SINDI Term Prune Threshold Is Divided Across Windows", "[ut][SINDI]")
     SparseVector query_vector{1, &term, &query_value};
     auto query = Dataset::Make();
     query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
-    const auto search_parameters = R"({"sindi": {"n_candidate": 2, "term_prune_threshold": 2}})";
+    const auto search_parameters = R"({"sindi": {"n_candidate": 2, "term_retain_threshold": 2}})";
     auto result = index.KnnSearch(query, 2, search_parameters, nullptr);
 
     REQUIRE(result->GetDim() == 2);
@@ -366,7 +366,7 @@ TEST_CASE("SINDI Rejected Add Does Not Create Empty Threshold Windows", "[ut][SI
     SparseVector query_vector{1, &term, &query_value};
     auto query = Dataset::Make();
     query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
-    const auto search_parameters = R"({"sindi": {"n_candidate": 1, "term_prune_threshold": 1}})";
+    const auto search_parameters = R"({"sindi": {"n_candidate": 1, "term_retain_threshold": 1}})";
     auto result = index.KnnSearch(query, 1, search_parameters, nullptr);
 
     REQUIRE(result->GetDim() == 1);
