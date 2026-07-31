@@ -216,14 +216,16 @@ metric_type(const std::string& dataset_metric) {
 
 struct offline_dataset_owner {
     eval::EvalDatasetPtr source;
+    std::vector<int64_t> identity_ids;
     DatasetPtr base;
     DatasetPtr queries;
     DatasetPtr ground_truth;
 };
 
-template <typename Request>
 void
-attach_offline_dataset(Request& request, const eval::EvalDatasetPtr& dataset) {
+attach_offline_dataset(IndexRequest& request,
+                       const eval::EvalDatasetPtr& dataset,
+                       bool include_base) {
     require(dataset->GetVectorType() == "dense_vectors",
             "AutoTune V1 supports only dense vector datasets");
     require(dataset->GetTrainDataType() == vsag::DATATYPE_FLOAT32 &&
@@ -235,12 +237,22 @@ attach_offline_dataset(Request& request, const eval::EvalDatasetPtr& dataset) {
     const auto base_count = dataset->GetNumberOfBase();
     const auto query_count = dataset->GetNumberOfQuery();
     const auto ground_truth_k = static_cast<int64_t>(dataset->GetGroundTruthK());
-    owner->base = Dataset::Make()
-                      ->NumElements(base_count)
-                      ->Dim(dataset->GetDim())
-                      ->Ids(dataset->GetTrainIds())
-                      ->Float32Vectors(static_cast<const float*>(dataset->GetTrain()))
-                      ->Owner(false);
+    if (include_base) {
+        const auto* train_ids = dataset->GetTrainIds();
+        if (train_ids == nullptr) {
+            owner->identity_ids.resize(static_cast<uint64_t>(base_count));
+            for (int64_t i = 0; i < base_count; ++i) {
+                owner->identity_ids[static_cast<uint64_t>(i)] = i;
+            }
+            train_ids = owner->identity_ids.data();
+        }
+        owner->base = Dataset::Make()
+                          ->NumElements(base_count)
+                          ->Dim(dataset->GetDim())
+                          ->Ids(train_ids)
+                          ->Float32Vectors(static_cast<const float*>(dataset->GetTrain()))
+                          ->Owner(false);
+    }
     owner->queries = Dataset::Make()
                          ->NumElements(query_count)
                          ->Dim(dataset->GetDim())
@@ -255,7 +267,9 @@ attach_offline_dataset(Request& request, const eval::EvalDatasetPtr& dataset) {
                                   ->Owner(false);
     }
 
-    request.base = DatasetPtr(owner, owner->base.get());
+    if (owner->base != nullptr) {
+        request.base = DatasetPtr(owner, owner->base.get());
+    }
     request.workload.queries = DatasetPtr(owner, owner->queries.get());
     if (owner->ground_truth != nullptr) {
         request.workload.ground_truth = DatasetPtr(owner, owner->ground_truth.get());
@@ -584,7 +598,8 @@ ParseRequest(const JsonType& input) {
 
     IndexRequest typed;
     std::string report_path;
-    attach_offline_dataset(typed, eval::EvalDataset::Load(data_path));
+    attach_offline_dataset(
+        typed, eval::EvalDataset::Load(data_path), !input.contains("index_path"));
     if (input.contains("indexes")) {
         require(input["indexes"].is_array() && !input["indexes"].empty(),
                 "request.indexes must be a non-empty array");
@@ -682,7 +697,7 @@ ParseRequest(const JsonType& input) {
     require(create_params.contains("index_param") && create_params["index_param"].is_object(),
             "request.indexes[0].create_params.index_param is required");
     merge_dataset_field(
-        create_params, "dim", static_cast<uint64_t>(typed.base->GetDim()), space.name);
+        create_params, "dim", static_cast<uint64_t>(typed.workload.queries->GetDim()), space.name);
     merge_dataset_field(create_params, "dtype", vsag::DATATYPE_FLOAT32, space.name);
     merge_dataset_field(create_params, "metric_type", normalize(typed.metric_type), space.name);
     auto created = Factory::CreateIndex(normalize(space.name), create_params.dump());

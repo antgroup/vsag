@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -228,6 +229,30 @@ TEST_CASE("EvalDataset builds a query-only view for id recall", "[ut][eval_datas
 
     REQUIRE_THROWS_WITH(EvalDataset::FromSearchDatasets(nullptr, ground_truth),
                         "queries dataset is required and must not be empty");
+}
+
+TEST_CASE("EvalDataset rejects overflowing ground-truth ID counts", "[ut][eval_dataset]") {
+    std::vector<float> vectors{0.0F, 0.0F};
+    int64_t base_id = 0;
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(1)
+                    ->Dim(2)
+                    ->Ids(&base_id)
+                    ->Float32Vectors(vectors.data())
+                    ->Owner(false);
+    auto queries = vsag::Dataset::Make()
+                       ->NumElements(std::numeric_limits<int64_t>::max())
+                       ->Dim(2)
+                       ->Float32Vectors(vectors.data())
+                       ->Owner(false);
+    auto ground_truth = vsag::Dataset::Make()
+                            ->NumElements(std::numeric_limits<int64_t>::max())
+                            ->Dim(2)
+                            ->Ids(&base_id)
+                            ->Owner(false);
+
+    REQUIRE_THROWS_WITH(EvalDataset::FromDatasets(base, queries, ground_truth, "l2"),
+                        "ground_truth contains too many ids");
 }
 
 TEST_CASE("EvalDataset rejects incomplete and incompatible HDF5 schemas", "[ut][eval_dataset]") {
@@ -599,8 +624,7 @@ TEST_CASE("EvalDataset sparse round-trip without token sequences", "[ut][eval_da
     REQUIRE(loaded->GetNumberOfBase() == 3);
     REQUIRE(loaded->GetNumberOfQuery() == 2);
     const auto* train = static_cast<const SparseVector*>(loaded->GetTrain());
-    REQUIRE(loaded->GetTrainIds()[0] == 0);
-    REQUIRE(loaded->GetTrainIds()[2] == 2);
+    REQUIRE(loaded->GetTrainIds() == nullptr);
     REQUIRE(loaded->GetOneTrainById(1) == train + 1);
     for (int i = 0; i < 3; ++i) {
         REQUIRE(train[i].token_seq_len_ == 0);

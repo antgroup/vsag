@@ -174,7 +174,8 @@ public:
         if (base_dataset_ != nullptr && base_dataset_->GetIds() != nullptr) {
             return base_dataset_->GetIds();
         }
-        return identity_train_ids_.get();
+        // A null pointer represents implicit row-number IDs.
+        return nullptr;
     }
 
     [[nodiscard]] const std::string*
@@ -359,7 +360,6 @@ protected:
     std::shared_ptr<char[]> test_;
     std::shared_ptr<int64_t[]> neighbors_;
     std::shared_ptr<float[]> distances_;
-    std::shared_ptr<int64_t[]> identity_train_ids_;
     bool train_ids_are_identity_{false};
     std::shared_ptr<int64_t[]> train_labels_{nullptr};
     std::shared_ptr<int64_t[]> test_labels_{nullptr};

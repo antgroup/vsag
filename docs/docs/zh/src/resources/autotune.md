@@ -51,9 +51,11 @@ request.constraints = {
 };
 request.objective = vsag::autotune::Metric::LATENCY_AVG_MS;
 
-auto result = vsag::autotune::TuneIndex(request).value();
-auto neighbors =
-    result.index->KnnSearch(query, 10, result.search_parameters).value();
+auto result = vsag::autotune::TuneIndex(request);
+if (result.has_value() && result->status == vsag::autotune::TuneStatus::SUCCESS) {
+    auto neighbors =
+        result->index->KnnSearch(query, 10, result->search_parameters).value();
+}
 ```
 
 `base` 和 `queries` 必须是 dense float32 Dataset，base ID 必须存在且唯一。ground truth 的
@@ -69,7 +71,7 @@ IVF 候选；显式参数中的数组和 `$range` 与 CLI 契约语义相同。
 `search_parameters`、metrics、artifact 路径和完整报告。`metrics` 和 `report` 都是
 `JsonType` 对象。typed API 在内存中返回报告，绝不会写报告文件。最终推荐 artifact 会
 保留，因此可以用 `index_name + create_parameters` 重新创建空索引并反序列化该文件；
-未选中的中间 artifact 默认删除。
+未选中的中间 artifact 默认删除。调用方应在不再需要时删除推荐 artifact。
 
 如果没有候选满足全部约束，调用仍正常完成，并返回
 `status=TuneStatus::NO_FEASIBLE_CANDIDATE` 和结构化 `best_effort`；此时 `index` 等推荐
@@ -168,8 +170,10 @@ request.parameter_space = R"({"hgraph":{"ef_search":[40,80,120]}})";
 request.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 0.95}};
 request.objective = vsag::autotune::Metric::LATENCY_AVG_MS;
 
-auto result = vsag::autotune::TuneSearch(request).value();
-auto neighbors = existing_index->KnnSearch(query, 10, result.parameters).value();
+auto result = vsag::autotune::TuneSearch(request);
+if (result.has_value() && result->status == vsag::autotune::TuneStatus::SUCCESS) {
+    auto neighbors = existing_index->KnnSearch(query, 10, result->parameters).value();
+}
 ```
 
 该接口避免序列化和文件 I/O，并让全部 search trial 复用调用方的索引。AutoTune 从

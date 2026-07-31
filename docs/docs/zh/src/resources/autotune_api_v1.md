@@ -297,7 +297,7 @@ artifact，因此 `workspace_path` 和 `keep_intermediate` 对它没有影响。
 | `builds` | 每组具体生成 build 一条记录；search-only 模式为空数组。 |
 | `trials` | 每组已执行的具体 search 候选一条记录。 |
 | `request` | 调优引擎实际使用的有效规范化请求。 |
-| `elapsed_seconds` | 截止结果选择的 AutoTune 墙钟时间，不含报告写入和清理。 |
+| `elapsed_seconds` | AutoTune 墙钟时间包含 artifact 清理，不含最终报告写入。 |
 | `report_path` | 持久化完整报告路径；只在 CLI/JSON 适配器中存在。 |
 | `failure` | 整体执行失败时出现。 |
 

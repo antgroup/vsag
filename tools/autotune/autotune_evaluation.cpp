@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <omp.h>
-
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -32,19 +30,6 @@ namespace vsag::autotune::internal {
 namespace {
 
 constexpr double BYTES_PER_MEBIBYTE = 1024.0 * 1024.0;
-
-class ScopedOpenMpThreads {
-public:
-    ScopedOpenMpThreads() : original_(omp_get_max_threads()) {
-    }
-
-    ~ScopedOpenMpThreads() {
-        omp_set_num_threads(original_);
-    }
-
-private:
-    int original_;
-};
 
 double
 elapsed(const std::chrono::steady_clock::time_point& start) {
@@ -153,6 +138,10 @@ serialize_index(const IndexPtr& index, const std::string& path) {
     if (!serialized.has_value()) {
         throw std::runtime_error(serialized.error().message);
     }
+    output.flush();
+    if (!output.good()) {
+        throw std::runtime_error("failed to write index artifact: " + path);
+    }
 }
 
 }  // namespace
@@ -202,7 +191,6 @@ EvaluateCandidates(const IndexTuningRequest& tuning_request,
                    const std::vector<Candidate>& candidates,
                    const std::string& run_path) {
     const auto& request = tuning_request.context;
-    ScopedOpenMpThreads openmp_threads;
     Evaluation evaluation;
     std::map<std::string, std::vector<uint64_t>> groups;
     for (uint64_t i = 0; i < candidates.size(); ++i) {
@@ -318,7 +306,6 @@ EvaluateCandidates(const IndexTuningRequest& tuning_request,
 Evaluation
 EvaluateCandidates(const SearchTuningRequest& tuning_request,
                    const std::vector<Candidate>& candidates) {
-    ScopedOpenMpThreads openmp_threads;
     const auto& request = tuning_request.context;
     Evaluation evaluation;
     uint64_t trial_number = 0;

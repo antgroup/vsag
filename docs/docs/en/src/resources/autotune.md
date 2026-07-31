@@ -54,9 +54,11 @@ request.constraints = {
 };
 request.objective = vsag::autotune::Metric::LATENCY_AVG_MS;
 
-auto result = vsag::autotune::TuneIndex(request).value();
-auto neighbors =
-    result.index->KnnSearch(query, 10, result.search_parameters).value();
+auto result = vsag::autotune::TuneIndex(request);
+if (result.has_value() && result->status == vsag::autotune::TuneStatus::SUCCESS) {
+    auto neighbors =
+        result->index->KnnSearch(query, 10, result->search_parameters).value();
+}
 ```
 
 `base` and `queries` are dense float32 datasets. `base` IDs must be present and unique. The
@@ -74,7 +76,8 @@ validated `search_parameters`, metrics, artifact path, and the complete report. 
 `report` are `JsonType` objects. The typed API returns the report in memory and never writes a
 report file. The recommended artifact is retained, so another process can recreate an empty index
 from `index_name + create_parameters` and deserialize that file. Unselected intermediate
-artifacts are removed by default.
+artifacts are removed by default. The caller removes the recommended artifact when it is no longer
+needed.
 
 If no candidate satisfies every constraint, the completed call has
 `status=TuneStatus::NO_FEASIBLE_CANDIDATE` and a structured `best_effort`; recommendation fields
@@ -176,8 +179,10 @@ request.parameter_space = R"({"hgraph":{"ef_search":[40,80,120]}})";
 request.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 0.95}};
 request.objective = vsag::autotune::Metric::LATENCY_AVG_MS;
 
-auto result = vsag::autotune::TuneSearch(request).value();
-auto neighbors = existing_index->KnnSearch(query, 10, result.parameters).value();
+auto result = vsag::autotune::TuneSearch(request);
+if (result.has_value() && result->status == vsag::autotune::TuneStatus::SUCCESS) {
+    auto neighbors = existing_index->KnnSearch(query, 10, result->parameters).value();
+}
 ```
 
 This avoids serialization and file I/O and reuses the caller's index for all search trials.

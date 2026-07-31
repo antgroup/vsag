@@ -16,6 +16,7 @@
 #include "eval_dataset.h"
 
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 #include "impl/logger/logger.h"
@@ -212,14 +213,9 @@ get_distance(const SparseVector* vector1, const SparseVector* vector2, const voi
 
 void
 EvalDataset::InitializeTrainIds(const int64_t* ids) {
-    identity_train_ids_.reset();
     train_ids_are_identity_ = true;
     train_id_to_row_.clear();
     if (ids == nullptr) {
-        identity_train_ids_ = std::shared_ptr<int64_t[]>(new int64_t[number_of_base_]);
-        for (int64_t i = 0; i < number_of_base_; ++i) {
-            identity_train_ids_[i] = i;
-        }
         return;
     }
 
@@ -307,6 +303,10 @@ EvalDataset::FromDatasets(const vsag::DatasetPtr& base,
 
     dataset->InitializeTrainIds(base->GetIds());
     if (ground_truth != nullptr) {
+        if (ground_truth->GetNumElements() >
+            std::numeric_limits<int64_t>::max() / ground_truth->GetDim()) {
+            throw std::invalid_argument("ground_truth contains too many ids");
+        }
         const auto ground_truth_count = ground_truth->GetNumElements() * ground_truth->GetDim();
         for (int64_t i = 0; i < ground_truth_count; ++i) {
             if (dataset->GetOneTrainById(ground_truth->GetIds()[i]) == nullptr) {

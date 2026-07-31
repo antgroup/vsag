@@ -574,6 +574,10 @@ TEST_CASE("AutoTune keeps normalized offline request metadata") {
     const auto parsed = vsag::autotune::internal::ParseRequest(input);
     const auto& index_request = std::get<vsag::autotune::internal::IndexTuningRequest>(parsed);
     const auto& effective = index_request.context.effective_request;
+    const auto* train_ids = index_request.context.dataset->GetTrainIds();
+    REQUIRE(train_ids != nullptr);
+    REQUIRE(train_ids[0] == 0);
+    REQUIRE(train_ids[63] == 63);
     REQUIRE(effective["data_path"] == dataset.Get());
     REQUIRE(effective["dataset"]["dim"] == 8);
     REQUIRE(effective["dataset"]["dtype"] == "float32");
@@ -589,6 +593,40 @@ TEST_CASE("AutoTune keeps normalized offline request metadata") {
     REQUIRE(effective["workload"]["concurrency"] == 2);
     REQUIRE(effective["config"]["keep_intermediate"] == true);
     REQUIRE_FALSE(effective.contains("tuning_config"));
+}
+
+TEST_CASE("AutoTune rejects index artifacts that fail to flush") {
+    if (!std::filesystem::exists("/dev/full")) {
+        return;
+    }
+
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kOFF);
+    ScopedBlockSizeLimit block_size_limit(256UL * 1024);
+    ScopedPath run_path(temp_path("autotune-full-device"));
+    std::filesystem::create_directories(run_path.Get() + "/artifacts");
+    std::error_code link_error;
+    std::filesystem::create_symlink(
+        "/dev/full", run_path.Get() + "/artifacts/build-0.index", link_error);
+    REQUIRE_FALSE(link_error);
+
+    MemoryFixture fixture;
+    auto input = fixture.Request(run_path.Get());
+    input.index_spaces[0].create_parameter_space =
+        R"({"index_param":{"base_quantization_type":"fp32","max_degree":8,)"
+        R"("ef_construction":40,"build_thread_count":2}})";
+    input.config.max_trials = 1;
+    const auto request = vsag::autotune::internal::ParseRequest(input);
+    const auto candidates = vsag::autotune::internal::GenerateCandidates(request);
+    REQUIRE(candidates.size() == 1);
+
+    const auto evaluation =
+        vsag::autotune::internal::EvaluateCandidates(request, candidates, run_path.Get());
+    REQUIRE(evaluation.builds.size() == 1);
+    REQUIRE(evaluation.builds[0]["status"] == "failed");
+    REQUIRE_THAT(evaluation.builds[0]["failure"]["message"].get<std::string>(),
+                 Catch::Matchers::ContainsSubstring("failed to write index artifact"));
+    REQUIRE(evaluation.trials.size() == 1);
+    REQUIRE(evaluation.trials[0]["failure"]["code"] == "build_failed");
 }
 
 TEST_CASE("AutoTune rejects report paths that alias an existing index") {

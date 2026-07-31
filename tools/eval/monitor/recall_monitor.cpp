@@ -49,10 +49,14 @@ get_id_recall(const int64_t* neighbors,
               const int64_t* ground_truth_neighbors,
               uint64_t recall_num,
               uint64_t top_k) {
-    std::unordered_set<int64_t> expected(ground_truth_neighbors, ground_truth_neighbors + top_k);
+    std::unordered_set<int64_t> remaining_ground_truth(ground_truth_neighbors,
+                                                       ground_truth_neighbors + top_k);
     uint64_t count = 0;
     for (uint64_t i = 0; i < recall_num; ++i) {
-        count += expected.erase(neighbors[i]);
+        // Erasing a match ensures duplicate result IDs are counted only once.
+        if (remaining_ground_truth.erase(neighbors[i]) > 0) {
+            ++count;
+        }
     }
     return static_cast<double>(count) / static_cast<double>(top_k);
 }

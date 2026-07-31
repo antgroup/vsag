@@ -316,7 +316,7 @@ A completed evaluation returns this top-level shape. The CLI also writes it to d
 | `builds` | One record per concrete generated build group; empty in search-only mode. |
 | `trials` | One record per executed concrete search candidate. |
 | `request` | Effective normalized request used by the tuning engine. |
-| `elapsed_seconds` | AutoTune wall time through selection, excluding report writing and cleanup. |
+| `elapsed_seconds` | AutoTune wall time through artifact cleanup; excludes final report writing. |
 | `report_path` | Persisted full report path; CLI/JSON adapter only. |
 | `failure` | Present when the overall run failed. |
 

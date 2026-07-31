@@ -16,7 +16,9 @@
 #include "./build_eval_case.h"
 
 #include <filesystem>
+#include <numeric>
 #include <utility>
+#include <vector>
 
 #include "../monitor/duration_monitor.h"
 #include "../monitor/memory_peak_monitor.h"
@@ -61,10 +63,14 @@ void
 BuildEvalCase::do_build() {
     auto base = vsag::Dataset::Make();
     int64_t total_base = this->dataset_ptr_->GetNumberOfBase();
-    base->NumElements(total_base)
-        ->Dim(this->dataset_ptr_->GetDim())
-        ->Ids(this->dataset_ptr_->GetTrainIds())
-        ->Owner(false);
+    const auto* train_ids = this->dataset_ptr_->GetTrainIds();
+    std::vector<int64_t> identity_ids;
+    if (train_ids == nullptr) {
+        identity_ids.resize(static_cast<uint64_t>(total_base));
+        std::iota(identity_ids.begin(), identity_ids.end(), int64_t{0});
+        train_ids = identity_ids.data();
+    }
+    base->NumElements(total_base)->Dim(this->dataset_ptr_->GetDim())->Ids(train_ids)->Owner(false);
     if (this->dataset_ptr_->GetVectorType() == DENSE_VECTORS) {
         if (this->dataset_ptr_->GetTrainDataType() == vsag::DATATYPE_FLOAT32) {
             base->Float32Vectors((const float*)this->dataset_ptr_->GetTrain());
