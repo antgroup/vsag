@@ -65,12 +65,6 @@ public:
         return index.window_term_list_.size();
     }
 
-    static bool
-    MutableTermIsSorted(const SINDI& index, uint64_t window, uint32_t term) {
-        const auto& data_cell = index.window_term_list_.at(window);
-        return data_cell->term_sorted_sizes_.at(term) == data_cell->term_sizes_.at(term);
-    }
-
     static void
     AppendEmptyMutableWindow(SINDI& index) {
         index.window_term_list_.emplace_back(
@@ -242,7 +236,7 @@ TEST_CASE("SINDI Term Prune Uses Highest Positive Value Postings", "[ut][SINDI]"
     REQUIRE(std::abs(restored_result->GetDistances()[0] + 3.0F) < 1e-3F);
 }
 
-TEST_CASE("SINDI Defers Sorting Incremental Partial Windows", "[ut][SINDI]") {
+TEST_CASE("SINDI Sorts Incremental Partial Windows", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
@@ -270,7 +264,6 @@ TEST_CASE("SINDI Defers Sorting Incremental Partial Windows", "[ut][SINDI]") {
 
     SINDI index(parameter, common_param);
     REQUIRE(index.Build(base).empty());
-    REQUIRE(SINDITestAccess::MutableTermIsSorted(index, 0, term));
 
     float appended_value = 4.0F;
     int64_t appended_label = 12;
@@ -278,7 +271,6 @@ TEST_CASE("SINDI Defers Sorting Incremental Partial Windows", "[ut][SINDI]") {
     auto appended = Dataset::Make();
     appended->NumElements(1)->SparseVectors(&appended_vector)->Ids(&appended_label)->Owner(false);
     REQUIRE(index.Add(appended).empty());
-    REQUIRE_FALSE(SINDITestAccess::MutableTermIsSorted(index, 0, term));
 
     float query_value = 1.0F;
     SparseVector query_vector{1, &term, &query_value};
@@ -291,7 +283,6 @@ TEST_CASE("SINDI Defers Sorting Incremental Partial Windows", "[ut][SINDI]") {
     appended_value = 3.0F;
     appended_label = 13;
     REQUIRE(index.Add(appended).empty());
-    REQUIRE(SINDITestAccess::MutableTermIsSorted(index, 0, term));
 }
 
 TEST_CASE("SINDI Term Prune Threshold Is Divided Across Windows", "[ut][SINDI]") {

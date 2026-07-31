@@ -42,8 +42,6 @@ public:
           term_ids_(allocator),
           term_datas_(allocator),
           term_sizes_(allocator),
-          term_sorted_sizes_(allocator),
-          dirty_terms_(allocator),
           sparse_value_quant_type_(sparse_value_quant_type),
           quantization_params_(std::move(quantization_params)) {
     }
@@ -159,10 +157,6 @@ public:
     Vector<std::unique_ptr<Vector<uint8_t>>> term_datas_;
 
     Vector<uint32_t> term_sizes_;
-
-    Vector<uint32_t> term_sorted_sizes_;
-
-    Vector<uint32_t> dirty_terms_;
 
     Allocator* const allocator_{nullptr};
 

@@ -444,9 +444,7 @@ SINDI::Add(const DatasetPtr& base) {
         window_term_list_.resize(populated_window_count);
     }
     for (int64_t window = first_affected_window; window <= last_affected_window; ++window) {
-        if (window_term_list_[window]->total_count_ == window_size_) {
-            window_term_list_[window]->SortByValue();
-        }
+        window_term_list_[window]->SortByValue();
     }
     if (window_changed) {
         this->cal_memory_usage();
@@ -465,7 +463,6 @@ SINDI::Build(const DatasetPtr& base) {
     {
         std::scoped_lock wlock(this->global_mutex_);
         for (auto& window : window_term_list_) {
-            window->SortByValue();
             window->Compact();
         }
         this->cal_memory_usage();
