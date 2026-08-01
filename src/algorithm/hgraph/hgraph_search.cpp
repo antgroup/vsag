@@ -17,11 +17,13 @@
 #include <algorithm>
 
 #include "attr/argparse.h"
+#include "datacell/rabitq_split_datacell.h"
 #include "dataset_impl.h"
 #include "hgraph.h"  // IWYU pragma: keep
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/search_reasoning.h"
+#include "impl/searcher/hgraph_rabitq_searcher.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -78,6 +80,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
 
     auto params = HGraphSearchParameters::FromJson(parameters);
     ctx.rabitq_error_rate = params.rabitq_error_rate;
+    ctx.enable_rabitq_reorder = params.enable_reorder;
     CHECK_ARGUMENT(  // NOLINT
         params.ef_search >= 1,
         fmt::format("ef_search({}) must be at least 1", params.ef_search));
@@ -150,13 +153,15 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.ef = std::max(params.ef_search, k);
         search_param.is_inner_id_allowed = ft;
         search_param.topk = static_cast<int64_t>(search_param.ef);
+        search_param.rerank_topk = k;
         search_param.parallel_search_thread_count = params.parallel_search_thread_count;
         search_param.enable_reorder = params.enable_reorder;
         search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
+        search_param.consider_duplicate = this->support_duplicate_;
         search_param.skip_ratio = params.skip_ratio;
         search_param.skip_strategy_type = params.skip_strategy_type;
 
-        DistanceRecordVector rabitq_lower_bound_candidates(ctx.alloc);
+        RaBitQCandidateVector rabitq_lower_bound_candidates(ctx.alloc);
         auto* rabitq_lower_bound_candidates_ptr =
             search_param.enable_rabitq_one_bit_search and use_reorder_ and
                     search_param.enable_reorder and reorder_by_base_
@@ -228,7 +233,7 @@ HGraph::search_one_graph(const void* query,
                          InnerSearchParam& inner_search_param,
                          const VisitedListPtr& vt,
                          QueryContext* ctx,
-                         DistanceRecordVector* rabitq_lower_bound_candidates) const {
+                         RaBitQCandidateVector* rabitq_lower_bound_candidates) const {
     bool new_visited_list = vt == nullptr;
     VisitedListPtr visited_list;
     if (new_visited_list) {
@@ -238,7 +243,24 @@ HGraph::search_one_graph(const void* query,
         visited_list->Reset();
     }
     DistHeapPtr result = nullptr;
-    if (inner_search_param.parallel_search_thread_count > 1) {
+    if constexpr (mode == KNN_SEARCH) {
+        if (not this->support_duplicate_ and rabitq_fused_datacell_ != nullptr and
+            inner_search_param.distance_batch_func == nullptr and
+            graph.get() == rabitq_fused_datacell_.get() and
+            flatten.get() == basic_flatten_codes_.get() and
+            inner_search_param.parallel_search_thread_count <= 1 and
+            not inner_search_param.find_duplicate and not inner_search_param.consider_duplicate) {
+            result = rabitq_fused_searcher_->Search(rabitq_fused_datacell_,
+                                                    flatten,
+                                                    visited_list,
+                                                    query,
+                                                    inner_search_param,
+                                                    ctx,
+                                                    rabitq_lower_bound_candidates);
+        }
+    }
+    if (result == nullptr and inner_search_param.parallel_search_thread_count > 1 and
+        this->thread_pool_ != nullptr) {
         result = this->parallel_searcher_->Search(graph,
                                                   flatten,
                                                   visited_list,
@@ -247,7 +269,7 @@ HGraph::search_one_graph(const void* query,
                                                   this->label_table_,
                                                   ctx,
                                                   rabitq_lower_bound_candidates);
-    } else {
+    } else if (result == nullptr) {
         result = this->searcher_->Search(graph,
                                          flatten,
                                          visited_list,
@@ -271,7 +293,7 @@ HGraph::search_one_graph(const void* query,
                          InnerSearchParam& inner_search_param,
                          IteratorFilterContext* iter_ctx,
                          QueryContext* ctx,
-                         DistanceRecordVector* rabitq_lower_bound_candidates) const {
+                         RaBitQCandidateVector* rabitq_lower_bound_candidates) const {
     auto visited_list = this->pool_->TakeOne();
     auto result = this->searcher_->Search(graph,
                                           flatten,
@@ -402,6 +424,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
     auto params = HGraphSearchParameters::FromJson(request.params_str_);
     ctx.rabitq_error_rate = params.rabitq_error_rate;
+    ctx.enable_rabitq_reorder = params.enable_reorder;
 
     if (use_custom_distance) {
         CHECK_ARGUMENT(params.parallel_search_thread_count == 1,
@@ -508,10 +531,30 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     auto& vt = vt_guard.visited_list;
 
     const auto* raw_query = use_custom_distance ? nullptr : get_data(query);
-    for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
-        auto result = this->search_one_graph(
-            raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param, vt, &ctx);
-        search_param.ep = result->Top().second;
+    auto* split_codes =
+        dynamic_cast<RaBitQSplitDataCellInterface*>(basic_flatten_codes_.get());
+    if (not use_custom_distance and rabitq_fused_datacell_ != nullptr and
+        split_codes != nullptr) {
+        search_param.rabitq_fused_computer = split_codes->FactoryFusedComputer(raw_query);
+        for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
+            search_param.ep =
+                rabitq_fused_searcher_->Route(this->route_graphs_[i],
+                                              rabitq_fused_datacell_,
+                                              basic_flatten_codes_,
+                                              search_param.rabitq_fused_computer,
+                                              search_param.ep,
+                                              search_param.enable_rabitq_one_bit_search);
+        }
+    } else {
+        for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
+            auto result = this->search_one_graph(raw_query,
+                                                 this->route_graphs_[i],
+                                                 this->basic_flatten_codes_,
+                                                 search_param,
+                                                 vt,
+                                                 &ctx);
+            search_param.ep = result->Top().second;
+        }
     }
 
     FilterPtr ft = this->create_search_filter(request.filter_, params.use_extra_info_filter);
@@ -529,7 +572,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         search_param.is_inner_id_allowed = ft;
         search_param.radius = request.radius_;
         search_param.search_mode = RANGE_SEARCH;
-        search_param.consider_duplicate = true;
+        search_param.consider_duplicate = this->support_duplicate_;
         search_param.range_search_limit_size = static_cast<int>(request.limited_size_);
         search_param.parallel_search_thread_count = params.parallel_search_thread_count;
         search_param.enable_reorder = use_custom_distance ? false : params.enable_reorder;
@@ -539,13 +582,14 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         search_param.ef = std::max(params.ef_search, k);
         search_param.is_inner_id_allowed = ft;
         search_param.topk = static_cast<int64_t>(search_param.ef);
+        search_param.rerank_topk = k;
         if (params.topk_factor > 1.0F) {
             search_param.topk =
                 std::min(search_param.topk,
                          static_cast<int64_t>(static_cast<float>(k) * params.topk_factor));
         }
         search_param.enable_reorder = use_custom_distance ? false : params.enable_reorder;
-        search_param.consider_duplicate = true;
+        search_param.consider_duplicate = this->support_duplicate_;
         search_param.enable_rabitq_one_bit_search =
             use_custom_distance ? false : params.rabitq_one_bit_search;
         if (params.enable_time_record) {
@@ -571,10 +615,16 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.skip_ratio = params.skip_ratio;
     search_param.skip_strategy_type = params.skip_strategy_type;
 
-    DistanceRecordVector rabitq_lower_bound_candidates(ctx.alloc);
+    const bool fused_search_already_reranked =
+        not use_custom_distance and not is_range and not this->support_duplicate_ and
+        rabitq_fused_datacell_ != nullptr and
+        bottom_graph_.get() == rabitq_fused_datacell_.get() and basic_flatten_codes_ != nullptr and
+        search_param.parallel_search_thread_count <= 1 and not search_param.find_duplicate and
+        not search_param.consider_duplicate;
+    RaBitQCandidateVector rabitq_lower_bound_candidates(ctx.alloc);
     auto* rabitq_lower_bound_candidates_ptr =
-        search_param.enable_rabitq_one_bit_search and use_reorder_ and
-                search_param.enable_reorder and reorder_by_base_
+        not fused_search_already_reranked and search_param.enable_rabitq_one_bit_search and
+                use_reorder_ and search_param.enable_reorder and reorder_by_base_
             ? &rabitq_lower_bound_candidates
             : nullptr;
 
@@ -619,8 +669,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     vt_guard.Release();
 
     // Reorder
-    if (mci_result.route != "mci" and not brute_force_used and use_reorder_ and
-        search_param.enable_reorder) {
+    if (not fused_search_already_reranked and mci_result.route != "mci" and not brute_force_used and
+        use_reorder_ and search_param.enable_reorder) {
         auto limit = is_range ? request.limited_size_ : k;
         this->reorder(raw_query,
                       this->get_reorder_codes(),
@@ -629,8 +679,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                       nullptr,
                       ctx,
                       rabitq_lower_bound_candidates_ptr);
-    } else if (mci_result.route != "mci" and not brute_force_used and
-               search_param.enable_reorder and params.rabitq_one_bit_search) {
+    } else if (not fused_search_already_reranked and mci_result.route != "mci" and
+               not brute_force_used and search_param.enable_reorder and
+               params.rabitq_one_bit_search) {
         auto limit = is_range ? request.limited_size_ : k;
         this->reorder(raw_query, this->basic_flatten_codes_, search_result, limit, nullptr, ctx);
     }

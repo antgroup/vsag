@@ -649,6 +649,72 @@ RaBitQFloatThreeBitCenteredIPBatch4(const float* vector,
     }
 }
 
+float
+RaBitQFloatFourBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim) {
+    if (dim == 0) {
+        return 0.0F;
+    }
+
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint8_t* plane0 = bits;
+    const uint8_t* plane1 = bits + plane_bytes;
+    const uint8_t* plane2 = bits + 2 * plane_bytes;
+    const uint8_t* plane3 = bits + 3 * plane_bytes;
+    float result = 0.0F;
+    for (uint64_t d = 0; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        float weight = (plane0[byte_idx] & bit_mask) != 0U ? 4.0F : -4.0F;
+        weight += (plane1[byte_idx] & bit_mask) != 0U ? 2.0F : -2.0F;
+        weight += (plane2[byte_idx] & bit_mask) != 0U ? 1.0F : -1.0F;
+        weight += (plane3[byte_idx] & bit_mask) != 0U ? 0.5F : -0.5F;
+        result += vector[d] * weight;
+    }
+    return result;
+}
+
+void
+RaBitQFloatFourBitCenteredIPBatch4(const float* vector,
+                                   const uint8_t* bits1,
+                                   const uint8_t* bits2,
+                                   const uint8_t* bits3,
+                                   const uint8_t* bits4,
+                                   uint64_t dim,
+                                   float* results) {
+    results[0] = 0.0F;
+    results[1] = 0.0F;
+    results[2] = 0.0F;
+    results[3] = 0.0F;
+    if (dim == 0) {
+        return;
+    }
+
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint8_t* plane0[4] = {bits1, bits2, bits3, bits4};
+    const uint8_t* plane1[4] = {
+        bits1 + plane_bytes, bits2 + plane_bytes, bits3 + plane_bytes, bits4 + plane_bytes};
+    const uint8_t* plane2[4] = {bits1 + 2 * plane_bytes,
+                                bits2 + 2 * plane_bytes,
+                                bits3 + 2 * plane_bytes,
+                                bits4 + 2 * plane_bytes};
+    const uint8_t* plane3[4] = {bits1 + 3 * plane_bytes,
+                                bits2 + 3 * plane_bytes,
+                                bits3 + 3 * plane_bytes,
+                                bits4 + 3 * plane_bytes};
+    for (uint64_t d = 0; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const float value = vector[d];
+        for (uint32_t i = 0; i < 4; ++i) {
+            float weight = (plane0[i][byte_idx] & bit_mask) != 0U ? 4.0F : -4.0F;
+            weight += (plane1[i][byte_idx] & bit_mask) != 0U ? 2.0F : -2.0F;
+            weight += (plane2[i][byte_idx] & bit_mask) != 0U ? 1.0F : -1.0F;
+            weight += (plane3[i][byte_idx] & bit_mask) != 0U ? 0.5F : -0.5F;
+            results[i] += value * weight;
+        }
+    }
+}
+
 void
 RaBitQFloatBuildByteIPLookupTable(const float* vector, uint64_t dim, float* lookup) {
     const uint64_t block_count = (dim + 7) / 8;
@@ -796,6 +862,34 @@ RaBitQFloatSupplementCodeIP(const float* vector,
     return result;
 }
 
+// Ported from RaBitQ-Library's Apache-2.0 7-bit ExData layout.
+float
+RaBitQFloatExCode7IP(const float* vector, const uint8_t* compact_code, uint64_t dim) {
+    if ((dim & 63U) != 0U) {
+        return 0.0F;
+    }
+    float result = 0.0F;
+    for (uint64_t block = 0; block < dim; block += 64) {
+        const uint8_t* low_codes = compact_code;
+        for (uint64_t lane = 0; lane < 48; ++lane) {
+            const uint32_t top = (compact_code[48 + (lane & 7U)] >> (lane >> 3U)) & 1U;
+            const uint32_t code = (low_codes[lane] & 0x3FU) | (top << 6U);
+            result += vector[block + lane] * static_cast<float>(code);
+        }
+        for (uint64_t lane = 48; lane < 64; ++lane) {
+            const uint64_t packed_lane = lane - 48;
+            const uint32_t low = ((low_codes[packed_lane] >> 6U) & 0x3U) |
+                                 (((low_codes[16 + packed_lane] >> 6U) & 0x3U) << 2U) |
+                                 (((low_codes[32 + packed_lane] >> 6U) & 0x3U) << 4U);
+            const uint32_t top = (compact_code[48 + (lane & 7U)] >> (lane >> 3U)) & 1U;
+            const uint32_t code = low | (top << 6U);
+            result += vector[block + lane] * static_cast<float>(code);
+        }
+        compact_code += 56;
+    }
+    return result;
+}
+
 float
 RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim) {
     if (dim == 0) {
@@ -869,6 +963,51 @@ RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
     }
 
     return result;
+}
+
+uint64_t
+RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
+    uint32_t inner_product = 0;
+    uint32_t base_sum = 0;
+    const uint64_t num_bytes = (dim + 7) / 8;
+    for (uint64_t i = 0; i < num_bytes; ++i) {
+        const auto base = bits[i];
+        base_sum += static_cast<uint32_t>(__builtin_popcount(base));
+        for (uint32_t bit = 0; bit < 4; ++bit) {
+            inner_product +=
+                static_cast<uint32_t>(__builtin_popcount(codes[bit * num_bytes + i] & base)) << bit;
+        }
+    }
+    return static_cast<uint64_t>(inner_product) | (static_cast<uint64_t>(base_sum) << 32U);
+}
+
+void
+RaBitQSQ4UBinaryIPWithBaseSumBatch4(const uint8_t* codes,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint64_t* results) {
+    uint32_t inner_products[4] = {0, 0, 0, 0};
+    uint32_t base_sums[4] = {0, 0, 0, 0};
+    const uint8_t* bases[4] = {bits1, bits2, bits3, bits4};
+    const uint64_t num_bytes = (dim + 7) / 8;
+    for (uint64_t i = 0; i < num_bytes; ++i) {
+        for (uint32_t base_id = 0; base_id < 4; ++base_id) {
+            const auto base = bases[base_id][i];
+            base_sums[base_id] += static_cast<uint32_t>(__builtin_popcount(base));
+            for (uint32_t bit = 0; bit < 4; ++bit) {
+                inner_products[base_id] +=
+                    static_cast<uint32_t>(__builtin_popcount(codes[bit * num_bytes + i] & base))
+                    << bit;
+            }
+        }
+    }
+    for (uint32_t i = 0; i < 4; ++i) {
+        results[i] =
+            static_cast<uint64_t>(inner_products[i]) | (static_cast<uint64_t>(base_sums[i]) << 32U);
+    }
 }
 
 float

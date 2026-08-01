@@ -17,9 +17,11 @@
 
 #include <cmath>
 #include <limits>
+#include <numeric>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include "impl/allocator/default_allocator.h"
 #include "unittest.h"
@@ -106,4 +108,31 @@ TEST_CASE("UtilFunctions Basic", "[ut][UtilFunctions]") {
         auto t = get_current_time();
         REQUIRE_FALSE(t.empty());
     }
+}
+
+TEST_CASE("sample_train_data honors a fixed random seed", "[ut][UtilFunctions]") {
+    constexpr int64_t dim = 3;
+    constexpr int64_t count = 2048;
+    constexpr int64_t sample_count = 512;
+    std::vector<float> vectors(count * dim);
+    std::iota(vectors.begin(), vectors.end(), 0.0F);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto data = Dataset::Make();
+    data->NumElements(count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    auto allocator = std::make_shared<DefaultAllocator>();
+
+    auto first = sample_train_data(data, count, dim, sample_count, allocator.get(), 0x52425131U);
+    auto second = sample_train_data(data, count, dim, sample_count, allocator.get(), 0x52425131U);
+
+    REQUIRE(first->GetNumElements() == sample_count);
+    REQUIRE(second->GetNumElements() == sample_count);
+    REQUIRE(std::equal(first->GetIds(), first->GetIds() + sample_count, second->GetIds()));
+    REQUIRE(std::equal(first->GetFloat32Vectors(),
+                       first->GetFloat32Vectors() + sample_count * dim,
+                       second->GetFloat32Vectors()));
 }

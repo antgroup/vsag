@@ -47,6 +47,7 @@ const char* const ATTR_PARAMS_KEY = "attr_params";
 const char* const HGRAPH_USE_ELP_OPTIMIZER_KEY = "use_elp_optimizer";
 const char* const HGRAPH_IGNORE_REORDER_KEY = "ignore_reorder";
 const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY = "build_by_base";
+const char* const HGRAPH_RABITQ_FUSED_DATACELL_KEY = "rabitq_fused_datacell";
 const char* const HGRAPH_USE_REVERSE_EDGES_KEY = "use_reverse_edges";
 const char* const HGRAPH_PERSIST_SOURCE_ID_KEY = "persist_source_id";
 const char* const HGRAPH_MCI_KEY = "mci";
@@ -222,6 +223,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"HGRAPH_USE_ELP_OPTIMIZER_KEY", HGRAPH_USE_ELP_OPTIMIZER_KEY},
     {"HGRAPH_IGNORE_REORDER_KEY", HGRAPH_IGNORE_REORDER_KEY},
     {"HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY", HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY},
+    {"HGRAPH_RABITQ_FUSED_DATACELL_KEY", HGRAPH_RABITQ_FUSED_DATACELL_KEY},
     {"GRAPH_KEY", GRAPH_KEY},
     {"BASE_CODES_KEY", BASE_CODES_KEY},
     {"PRECISE_CODES_KEY", PRECISE_CODES_KEY},

@@ -24,6 +24,7 @@ RaBitQ x+y split 是 HGraph 和 Pyramid 面向低比特底库码的存储与搜�
         "base_quantization_type": "rabitq",
         "precise_quantization_type": "rabitq",
         "use_reorder": true,
+        "rabitq_fused_datacell": true,
         "rabitq_bits_per_dim_query": 32,
         "rabitq_bits_per_dim_base": 3,
         "rabitq_bits_per_dim_precise": 5,
@@ -45,6 +46,7 @@ RaBitQ x+y split 是 HGraph 和 Pyramid 面向低比特底库码的存储与搜�
 | `rabitq_bits_per_dim_query` | split storage 必须使用 `32`。 |
 | `rabitq_error_rate` | lower-bound 误差项的默认正数倍率。 |
 | `use_reorder` | 建议设为 `true`，使用 `x+y` 距离排序候选。 |
+| `rabitq_fused_datacell` | 启用图与量化码的融合内存布局；默认值为 `false`。 |
 
 参数约束为：
 
@@ -56,6 +58,24 @@ x + y <= 8
 
 如果不配置 `rabitq_bits_per_dim_precise`，HGraph 和 Pyramid 使用 standard RaBitQ 路径，
 不会创建 split storage。
+
+### 融合内存布局
+
+将 `rabitq_fused_datacell` 设为 `true` 后，底层节点的邻居、cluster id、
+label、x-bit code 和 y-bit supplement 会存入同一个 cache-line 对齐的 record。
+专用搜索循环直接读取该 record，并联合预取图邻居和量化码。codec 使用
+固定随机种子可复现训练的 16 个 residual clusters。
+
+融合布局是显式启用的，并且比普通 split storage 有更严格的约束：
+
+- `1 <= x <= 4`、`y >= 1` 且 `x + y <= 8`。
+- metric 必须是 L2 或内积。
+- graph、filter code 和 supplement code 必须全部使用内存 IO。
+- 必须关闭 MCI、`deduplicate_storage` 和 force remove。
+- fused v1 不支持 PCA；请省略 `rabitq_pca_dim` 或将其设为 `0`。
+- 不支持旧版 v0.14 序列化格式。
+
+未启用该参数的索引保持原有布局、行为和序列化格式。
 
 使用以下搜索参数启用 filter/lower-bound 搜索路径：
 
@@ -72,8 +92,10 @@ x + y <= 8
 
 外部搜索参数仍命名为 `rabitq_one_bit_search`，但对 split 索引，它会使用
 `rabitq_bits_per_dim_base` 配置的全部 `x` 个 filter bits。
-`hgraph.rabitq_error_rate` 可以为单次搜索覆盖索引默认值。record 中保存的是乘倍率前的
-几何误差尺度，因此 sweep 这个搜索参数不需要重建索引。
+`hgraph.rabitq_error_rate` 可以为单次搜索覆盖索引默认值，且不需要
+重建索引。原生 fused record 保存乘倍率前的几何误差尺度；
+HNSW-compatible fused `1+7` record 保留按规范默认值缩放的 metadata，
+并在查询时按相对该默认值的倍率应用 override。
 
 ## 搜索流程
 
@@ -252,17 +274,22 @@ sum_i q_i * u_i
       + sum_i q_i * s_i
 ```
 
-对使用 x-bit lookup filter 的 L2 搜索，HGraph 和 Pyramid 会把之前计算的 filter distance
-作为 hint 传给 reorder。`ComputeDistWithSplitCodeAndFilterDist` 从 hint 恢复第一项，
-只从 y 个 supplement planes 计算第二项：
+对使用 x-bit lookup filter 的 L2 搜索，HGraph 和 Pyramid 可以把之前计算的
+filter distance 作为 hint 传给 reorder。
+`ComputeDistWithSplitCodeAndFilterDist` 从该 hint 恢复第一项。HGraph 的 fused
+L2 和内积路径则直接携带 filter inner product；
+`ComputeDistWithSplitCodeAndFilterIP` 无需从 distance 恢复该值。两条路径都只从
+y 个 supplement planes 计算第二项：
 
 ```text
 full contribution = shifted filter contribution + supplement contribution
 ```
 
-因此 `3+5` 索引会复用 3-bit filter 结果，每个重排候选只扫描 5 个新的 bit-plane。
-如果 hint 不存在或不能使用，代码会回退到 `ComputeDistWithSplitCode`，直接从两个
-split records 计算相同的最终距离。
+因此 fused `2+y`、`3+y` 和 `4+y` 会复用精确的 x-bit filter inner
+product，每个重排候选只扫描 y 个 supplement planes。fused `1+y` 的遍历使用
+4-bit query bit-plane 与 popcount 近似值；精确重排会重新计算它的
+1-bit 精确贡献，因为近似值不能作为精确 full-distance hint。如果没有
+可用 hint，代码会直接从两个 split records 计算相同的最终距离。
 
 ## 内存、磁盘和混合 IO
 
@@ -326,6 +353,10 @@ split datacell 按以下顺序序列化：
 x/y bit 数和 query bits。修改编码参数需要重建索引；只调整搜索参数
 `hgraph.rabitq_error_rate` 不需要。
 
+对于 fused 索引，codec model 随 split datacell 序列化，每个节点的 code 只在
+bottom-graph slab 中序列化一次。普通和 streaming 往返都会保留该布局，
+不会再生成一份随节点数增长的 split code 副本。
+
 ## 实现位置
 
 | 模块 | 文件 / 入口 |
@@ -335,18 +366,24 @@ x/y bit 数和 query bits。修改编码参数需要重建索引；只调整搜�
 | plane 布局和 code 拆分 | `RaBitQuantizer::StoredPlaneIndex`、`SplitCode` |
 | filter 距离和 lower bound | `ComputeDistWithOneBitLowerBound` |
 | 直接计算 split distance | `ComputeDistWithSplitCode` |
-| 使用 filter hint 的 reorder | `ComputeDistWithSplitCodeAndFilterDist` |
+| 使用 filter hint 的 reorder | `ComputeDistWithSplitCodeAndFilterDist`、`ComputeDistWithSplitCodeAndFilterIP` |
 | SIMD dispatch | `src/simd/rabitq_simd.cpp` |
 | AVX2 / AVX512 lookup kernel | `src/simd/avx2.cpp`、`src/simd/avx512.cpp` |
 | 内存/磁盘/混合 IO 示例 | `examples/cpp/323_index_hgraph_rabitq_split.cpp` |
 
 ## 使用注意
 
-- split storage 当前可用于 HGraph 和 Pyramid，并且要求 fp32 query code。Pyramid 的 split 索引默认启用 one-bit split 搜索路径；如需强制使用普通搜索路径，可以在 `pyramid` 搜索参数下传 `rabitq_one_bit_search: false`。
-- 支持 `l2`、`ip` 和 `cosine`；利用 filter hint 的 reorder 快速路径当前针对 L2。
+- split storage 当前可用于 HGraph 和 Pyramid，并且要求 fp32 query code。
+  Pyramid 的 split 索引默认启用 one-bit split 搜索路径；如需强制使用普通搜索路径，
+  可以在 `pyramid` 搜索参数下传 `rabitq_one_bit_search: false`。
+- 支持 `l2`、`ip` 和 `cosine`；通用 filter-distance hint 快速路径当前针对
+  L2，HGraph fused 的直接 filter-inner-product 快速路径支持 L2 和内积。
+- fused datacell 只支持 L2、内积以及上文所述的纯内存配置。
+- 启用 `support_duplicate: true` 时，重复向量 build probe 和展开 alias 的查询使用
+  HGraph canonical searcher；fused slab 仍负责保存 code 和 graph。
 - 除非已经验证仅靠 x-bit 遍历距离能满足召回要求，否则应保持
   `use_reorder: true`。
 - 修改 x、y、metric 或 transform 参数后必须重建索引；在搜索参数中覆盖
   `hgraph.rabitq_error_rate` 不需要重建。
 - RaBitQ 通用说明见 [RaBitQ](rabitq.md)，完整 HGraph 参数见
-  [HGraph 索引](../indexes/hgraph.md)和 [Pyramid 索引](../indexes/pyramid.md)。
+  [HGraph 索引](../indexes/hgraph.md) 和 [Pyramid 索引](../indexes/pyramid.md)。

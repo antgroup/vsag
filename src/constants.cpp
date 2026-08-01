@@ -202,6 +202,7 @@ const char* const HGRAPH_PRECISE_DIRECT_READ = "precise_direct_read";
 const char* const HGRAPH_PARAMETER_EF_RUNTIME = "ef_search";
 const char* const HGRAPH_PARAMETER_HOPS_LIMIT = "hops_limit";
 const char* const HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH = "rabitq_one_bit_search";
+const char* const HGRAPH_RABITQ_FUSED_DATACELL = "rabitq_fused_datacell";
 const char* const HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD = "brute_force_threshold";
 const char* const HGRAPH_USE_MCI = "use_mci";
 const char* const HGRAPH_MCI_MCS = "mci_mcs";

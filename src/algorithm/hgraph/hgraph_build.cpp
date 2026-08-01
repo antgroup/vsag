@@ -24,6 +24,8 @@
 #include <unordered_set>
 
 #include "datacell/flatten_datacell_parameter.h"
+#include "datacell/hgraph_rabitq_fused_datacell.h"
+#include "datacell/rabitq_split_datacell.h"
 #include "dataset_impl.h"
 #include "hgraph.h"  // IWYU pragma: keep
 #include "hgraph_fast_build.h"
@@ -114,6 +116,13 @@ wait_all_futures(std::vector<std::future<void>>& futures) {
 
 void
 HGraph::Train(const DatasetPtr& base) {
+    // ODescent may reserve all IDs and build with temporary SQ8 codes before training the
+    // persistent fused codec.  In that first-build state the graph count is non-zero but no codec
+    // model or fused node code exists yet, so training remains both required and safe.
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        this->rabitq_fused_datacell_ == nullptr or this->GetNumElements() == 0 or
+            this->rabitq_fused_datacell_->CodecModel().empty(),
+        "cannot retrain a non-empty fused RaBitQ HGraph");
     this->train_codes_with_dataset(this->sample_train_dataset(base));
 }
 
@@ -121,6 +130,10 @@ DatasetPtr
 HGraph::sample_train_dataset(const DatasetPtr& base) const {
     int64_t total_elements = base->GetNumElements();
     int64_t dim = base->GetDim();
+    if (rabitq_fused_datacell_ != nullptr) {
+        return vsag::sample_train_data(
+            base, total_elements, dim, train_sample_count_, allocator_, 0x52425131U);
+    }
     return vsag::sample_train_data(base, total_elements, dim, train_sample_count_, allocator_);
 }
 
@@ -128,6 +141,14 @@ void
 HGraph::train_codes_with_dataset(const DatasetPtr& train_data) {
     const auto* data_ptr = get_data(train_data);
     this->basic_flatten_codes_->Train(data_ptr, train_data->GetNumElements());
+    if (rabitq_fused_datacell_ != nullptr) {
+        auto split_codes =
+            std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(basic_flatten_codes_);
+        CHECK_ARGUMENT(split_codes != nullptr, "fused HGraph lost its RaBitQ split codes");
+        split_codes->TrainFusedCodec(
+            static_cast<const float*>(data_ptr), train_data->GetNumElements(), 16);
+        rabitq_fused_datacell_->SetCodecModel(split_codes->ExportFusedCodec());
+    }
     if (has_precise_reorder()) {
         this->high_precise_codes_->Train(data_ptr, train_data->GetNumElements());
     }
@@ -524,12 +545,32 @@ HGraph::insert_persistent_codes(const void* data, InnerIdType inner_id) {
 void
 HGraph::insert_persistent_codes_unlocked(const void* data, InnerIdType inner_id) {
     this->basic_flatten_codes_->InsertVector(data, inner_id);
+    this->sync_fused_node_codes(inner_id, data);
     if (has_precise_reorder()) {
         this->high_precise_codes_->InsertVector(data, inner_id);
     }
     if (create_new_raw_vector_) {
         raw_vector_->InsertVector(data, inner_id);
     }
+}
+
+void
+HGraph::sync_fused_node_codes(InnerIdType inner_id, const void* data) {
+    if (rabitq_fused_datacell_ == nullptr) {
+        return;
+    }
+    auto split_codes =
+        std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(basic_flatten_codes_);
+    CHECK_ARGUMENT(split_codes != nullptr, "fused HGraph lost its RaBitQ split codes");
+    const auto label = label_table_->GetLabelById(inner_id);
+    ByteBuffer one_bit(split_codes->OneBitCodeSize(), allocator_);
+    ByteBuffer supplement(split_codes->SupplementCodeSize(), allocator_);
+    uint32_t cluster_id = 0;
+    CHECK_ARGUMENT(split_codes->EncodeFused(
+                       static_cast<const float*>(data), one_bit.data, supplement.data, &cluster_id),
+                   "failed to encode fused RaBitQ node codes");
+    rabitq_fused_datacell_->SetNodeCodes(
+        inner_id, label, cluster_id, one_bit.data, supplement.data);
 }
 
 void
@@ -723,7 +764,9 @@ HGraph::probe_graph_for_add(const void* data,
     if (this->support_duplicate_) {
         param.find_duplicate = true;
         param.duplicate_query_id =
-            this->using_dedup_storage() ? std::numeric_limits<InnerIdType>::max() : inner_id;
+            this->using_dedup_storage() or this->rabitq_fused_datacell_ != nullptr
+                ? std::numeric_limits<InnerIdType>::max()
+                : inner_id;
         param.duplicate_distance_threshold = this->duplicate_distance_threshold_;
     }
 
@@ -982,6 +1025,20 @@ HGraph::InitFeatures() {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_KNN_SEARCH_WITH_EX_FILTER);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT);
     }
+
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_MERGE_INDEX, false);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_TUNE, false);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_CONCURRENT, false);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_CONCURRENT, false);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_DELETE_CONCURRENT,
+                                              false);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT,
+                                              false);
+        if (this->raw_vector_ == nullptr) {
+            this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_AFTER_BUILD, false);
+        }
+    }
 }
 
 void
@@ -1005,14 +1062,16 @@ HGraph::reorder(const void* query,
                 int64_t k,
                 IteratorFilterContext* iter_ctx,
                 QueryContext& ctx,
-                const DistanceRecordVector* rabitq_lower_bound_candidates) const {
+                const RaBitQCandidateVector* rabitq_lower_bound_candidates) const {
     uint64_t size = candidate_heap->Size();
     if (k <= 0) {
         k = static_cast<int64_t>(size);
     }
     auto reorder_impl = reorder_;
     if (reorder_impl == nullptr) {
-        reorder_impl = std::make_shared<FlattenReorder>(flatten, allocator_);
+        auto fused_graph =
+            flatten.get() == basic_flatten_codes_.get() ? rabitq_fused_datacell_ : nullptr;
+        reorder_impl = std::make_shared<FlattenReorder>(flatten, allocator_, fused_graph);
     }
     auto reorder_heap = reorder_impl->Reorder(candidate_heap,
                                               static_cast<const float*>(query),

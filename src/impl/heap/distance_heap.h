@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <limits>
 #include <type_traits>
 #include <utility>
 
@@ -91,4 +92,12 @@ protected:
 };
 
 using DistanceRecordVector = Vector<DistanceHeap::DistanceRecord>;
+
+struct RaBitQCandidateRecord {
+    float lower_bound{std::numeric_limits<float>::max()};
+    float filter_inner_product{std::numeric_limits<float>::quiet_NaN()};
+    InnerIdType id{0};
+};
+
+using RaBitQCandidateVector = Vector<RaBitQCandidateRecord>;
 }  // namespace vsag
