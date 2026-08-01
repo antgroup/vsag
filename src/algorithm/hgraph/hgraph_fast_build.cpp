@@ -46,6 +46,9 @@ wait_all_futures(std::vector<std::future<void>>& futures) {
 }  // namespace
 
 HGraphOptimizedBuildSession::HGraphOptimizedBuildSession(HGraph& hgraph) : hgraph_(&hgraph) {
+    if (hgraph.rabitq_fused_datacell_ != nullptr) {
+        return;
+    }
     if (hgraph.using_dedup_storage()) {
         return;
     }

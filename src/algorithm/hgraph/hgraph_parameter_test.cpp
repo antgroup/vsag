@@ -720,6 +720,88 @@ TEST_CASE("HGraph maps RaBitQ x+y split params", "[ut][HGraphParameter]") {
     REQUIRE(typed_param->reorder_source == std::string("base"));
 }
 
+TEST_CASE("HGraph maps and validates fused RaBitQ split datacell", "[ut][HGraphParameter]") {
+    auto make_param = []() {
+        return vsag::JsonType::Parse(R"({
+            "base_quantization_type": "rabitq",
+            "precise_quantization_type": "rabitq",
+            "base_io_type": "memory_io",
+            "base_supplement_io_type": "memory_io",
+            "rabitq_bits_per_dim_base": 1,
+            "rabitq_bits_per_dim_precise": 7,
+            "graph_io_type": "memory_io",
+            "graph_storage_type": "flat",
+            "graph_type": "nsw",
+            "max_degree": 32,
+            "ef_construction": 200,
+            "use_reorder": true,
+            "reorder_source": "base",
+            "rabitq_fused_datacell": true
+        })");
+    };
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 960;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto mapped = vsag::HGraph::CheckAndMappingExternalParam(make_param(), common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->rabitq_fused_datacell);
+    REQUIRE_FALSE(typed_param->mci_parameters.enabled);
+    REQUIRE(typed_param->base_codes_param->name == std::string(vsag::RABITQ_SPLIT_DATA_CELL));
+
+    SECTION("accept filter widths one through four") {
+        for (int32_t filter_bits = 1; filter_bits <= 4; ++filter_bits) {
+            auto param = make_param();
+            param["rabitq_bits_per_dim_base"].SetInt(filter_bits);
+            param["rabitq_bits_per_dim_precise"].SetInt(8 - filter_bits);
+            CAPTURE(filter_bits);
+            REQUIRE_NOTHROW(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+        }
+    }
+
+    SECTION("reject filter widths above four") {
+        auto param = make_param();
+        param["rabitq_bits_per_dim_base"].SetInt(5);
+        param["rabitq_bits_per_dim_precise"].SetInt(3);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+
+    SECTION("reject MCI") {
+        auto param = make_param();
+        param["use_mci"].SetBool(true);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+
+    SECTION("reject non-memory supplement") {
+        auto param = make_param();
+        param["base_supplement_io_type"].SetString("mmap_io");
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+
+    SECTION("reject cosine") {
+        common_param.metric_ = vsag::MetricType::METRIC_TYPE_COSINE;
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(make_param(), common_param));
+    }
+
+    SECTION("reject PCA with INVALID_ARGUMENT") {
+        auto param = make_param();
+        param[vsag::RABITQ_PCA_DIM].SetInt(480);
+        bool rejected = false;
+        try {
+            static_cast<void>(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+        } catch (const vsag::VsagException& exception) {
+            rejected = true;
+            REQUIRE(exception.error_.type == vsag::ErrorType::INVALID_ARGUMENT);
+            REQUIRE(std::string(exception.what()).find("does not support PCA") !=
+                    std::string::npos);
+        }
+        REQUIRE(rejected);
+    }
+}
+
 TEST_CASE("HGraph maps RaBitQ without y bits to standard RaBitQ", "[ut][HGraphParameter]") {
     auto param = vsag::JsonType::Parse(R"({
         "base_quantization_type": "rabitq",

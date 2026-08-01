@@ -101,6 +101,16 @@ TEST_CASE("VisitedList Basic Test", "[ut][VisitedList]") {
         REQUIRE_FALSE(vl_ptr->Get(64));
     }
 
+    SECTION("test and set") {
+        REQUIRE_FALSE(vl_ptr->TestAndSet(63));
+        REQUIRE(vl_ptr->TestAndSet(63));
+        REQUIRE_FALSE(vl_ptr->TestAndSet(64));
+        REQUIRE(vl_ptr->Get(63));
+        REQUIRE(vl_ptr->Get(64));
+        vl_ptr->Reset();
+        REQUIRE_FALSE(vl_ptr->TestAndSet(63));
+    }
+
     SECTION("test memory usage") {
         const auto word_count = (static_cast<uint64_t>(size) + VisitedList::kBitsPerWord - 1) /
                                 VisitedList::kBitsPerWord;

@@ -82,8 +82,34 @@ public:
     }
 
     virtual void
+    QueryWithDistanceLowerBoundAndFilterIP(float* result_dists,
+                                           float* lower_bounds,
+                                           float* filter_inner_products,
+                                           const ComputerInterfacePtr& computer,
+                                           const InnerIdType* idx,
+                                           InnerIdType id_count,
+                                           QueryContext* ctx = nullptr) {
+        this->QueryWithDistanceLowerBound(result_dists, lower_bounds, computer, idx, id_count, ctx);
+        if (filter_inner_products != nullptr) {
+            std::fill(filter_inner_products,
+                      filter_inner_products + id_count,
+                      std::numeric_limits<float>::quiet_NaN());
+        }
+    }
+
+    virtual void
     QueryWithDistanceHint(float* result_dists,
                           const float* /*hint_dists*/,
+                          const ComputerInterfacePtr& computer,
+                          const InnerIdType* idx,
+                          InnerIdType id_count,
+                          QueryContext* ctx = nullptr) {
+        this->Query(result_dists, computer, idx, id_count, ctx);
+    }
+
+    virtual void
+    QueryWithFilterIPHint(float* result_dists,
+                          const float* /*filter_inner_products*/,
                           const ComputerInterfacePtr& computer,
                           const InnerIdType* idx,
                           InnerIdType id_count,

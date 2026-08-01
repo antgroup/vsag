@@ -38,6 +38,243 @@ avx2_reduce_add_ps(__m256 a) {
 
 namespace vsag::avx2 {
 
+uint64_t
+RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    const uint64_t num_bytes = (dim + 7) / 8;
+    const __m256i lookup = _mm256_setr_epi8(0,
+                                            1,
+                                            1,
+                                            2,
+                                            1,
+                                            2,
+                                            2,
+                                            3,
+                                            1,
+                                            2,
+                                            2,
+                                            3,
+                                            2,
+                                            3,
+                                            3,
+                                            4,
+                                            0,
+                                            1,
+                                            1,
+                                            2,
+                                            1,
+                                            2,
+                                            2,
+                                            3,
+                                            1,
+                                            2,
+                                            2,
+                                            3,
+                                            2,
+                                            3,
+                                            3,
+                                            4);
+    const __m256i low_mask = _mm256_set1_epi8(0x0F);
+    const auto popcount = [&lookup, &low_mask](__m256i value) {
+        const auto low = _mm256_and_si256(value, low_mask);
+        const auto high = _mm256_and_si256(_mm256_srli_epi16(value, 4), low_mask);
+        const auto counts =
+            _mm256_add_epi8(_mm256_shuffle_epi8(lookup, low), _mm256_shuffle_epi8(lookup, high));
+        return _mm256_sad_epu8(counts, _mm256_setzero_si256());
+    };
+
+    __m256i base_acc = _mm256_setzero_si256();
+    __m256i inner_acc[4] = {_mm256_setzero_si256(),
+                            _mm256_setzero_si256(),
+                            _mm256_setzero_si256(),
+                            _mm256_setzero_si256()};
+    uint64_t offset = 0;
+    for (; offset + 32 <= num_bytes; offset += 32) {
+        const auto base = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(bits + offset));
+        base_acc = _mm256_add_epi64(base_acc, popcount(base));
+        for (uint32_t bit = 0; bit < 4; ++bit) {
+            const auto query = _mm256_loadu_si256(
+                reinterpret_cast<const __m256i*>(codes + bit * num_bytes + offset));
+            inner_acc[bit] =
+                _mm256_add_epi64(inner_acc[bit], popcount(_mm256_and_si256(query, base)));
+        }
+    }
+
+    const uint64_t remaining_words = (num_bytes - offset) / sizeof(int32_t);
+    if (remaining_words > 0) {
+        const auto lane_ids = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+        const auto mask =
+            _mm256_cmpgt_epi32(_mm256_set1_epi32(static_cast<int>(remaining_words)), lane_ids);
+        const auto base =
+            _mm256_maskload_epi32(reinterpret_cast<const int32_t*>(bits + offset), mask);
+        base_acc = _mm256_add_epi64(base_acc, popcount(base));
+        for (uint32_t bit = 0; bit < 4; ++bit) {
+            const auto query = _mm256_maskload_epi32(
+                reinterpret_cast<const int32_t*>(codes + bit * num_bytes + offset), mask);
+            inner_acc[bit] =
+                _mm256_add_epi64(inner_acc[bit], popcount(_mm256_and_si256(query, base)));
+        }
+        offset += remaining_words * sizeof(int32_t);
+    }
+
+    alignas(32) uint64_t lanes[4];
+    _mm256_store_si256(reinterpret_cast<__m256i*>(lanes), base_acc);
+    uint32_t base_sum = static_cast<uint32_t>(lanes[0] + lanes[1] + lanes[2] + lanes[3]);
+    uint32_t inner_product = 0;
+    for (uint32_t bit = 0; bit < 4; ++bit) {
+        _mm256_store_si256(reinterpret_cast<__m256i*>(lanes), inner_acc[bit]);
+        inner_product += static_cast<uint32_t>(lanes[0] + lanes[1] + lanes[2] + lanes[3]) << bit;
+    }
+    for (; offset < num_bytes; ++offset) {
+        const auto base = bits[offset];
+        base_sum += static_cast<uint32_t>(__builtin_popcount(base));
+        for (uint32_t bit = 0; bit < 4; ++bit) {
+            inner_product +=
+                static_cast<uint32_t>(__builtin_popcount(codes[bit * num_bytes + offset] & base))
+                << bit;
+        }
+    }
+    return static_cast<uint64_t>(inner_product) | (static_cast<uint64_t>(base_sum) << 32U);
+#else
+    return generic::RaBitQSQ4UBinaryIPWithBaseSum(codes, bits, dim);
+#endif
+}
+
+void
+RaBitQSQ4UBinaryIPWithBaseSumBatch4(const uint8_t* codes,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint64_t* results) {
+#if defined(ENABLE_AVX2)
+    const uint64_t num_bytes = (dim + 7) / 8;
+    const uint8_t* bases[4] = {bits1, bits2, bits3, bits4};
+    const __m256i lookup = _mm256_setr_epi8(0,
+                                            1,
+                                            1,
+                                            2,
+                                            1,
+                                            2,
+                                            2,
+                                            3,
+                                            1,
+                                            2,
+                                            2,
+                                            3,
+                                            2,
+                                            3,
+                                            3,
+                                            4,
+                                            0,
+                                            1,
+                                            1,
+                                            2,
+                                            1,
+                                            2,
+                                            2,
+                                            3,
+                                            1,
+                                            2,
+                                            2,
+                                            3,
+                                            2,
+                                            3,
+                                            3,
+                                            4);
+    const __m256i low_mask = _mm256_set1_epi8(0x0F);
+    const auto popcount = [&lookup, &low_mask](__m256i value) {
+        const auto low = _mm256_and_si256(value, low_mask);
+        const auto high = _mm256_and_si256(_mm256_srli_epi16(value, 4), low_mask);
+        const auto counts =
+            _mm256_add_epi8(_mm256_shuffle_epi8(lookup, low), _mm256_shuffle_epi8(lookup, high));
+        return _mm256_sad_epu8(counts, _mm256_setzero_si256());
+    };
+
+    __m256i base_acc[4];
+    __m256i inner_acc[4][4];
+    for (uint32_t base_id = 0; base_id < 4; ++base_id) {
+        base_acc[base_id] = _mm256_setzero_si256();
+        for (uint32_t bit = 0; bit < 4; ++bit) {
+            inner_acc[base_id][bit] = _mm256_setzero_si256();
+        }
+    }
+
+    uint64_t offset = 0;
+    for (; offset + 32 <= num_bytes; offset += 32) {
+        __m256i base_values[4];
+        for (uint32_t base_id = 0; base_id < 4; ++base_id) {
+            base_values[base_id] =
+                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(bases[base_id] + offset));
+            base_acc[base_id] = _mm256_add_epi64(base_acc[base_id], popcount(base_values[base_id]));
+        }
+        for (uint32_t bit = 0; bit < 4; ++bit) {
+            const auto query = _mm256_loadu_si256(
+                reinterpret_cast<const __m256i*>(codes + bit * num_bytes + offset));
+            for (uint32_t base_id = 0; base_id < 4; ++base_id) {
+                inner_acc[base_id][bit] =
+                    _mm256_add_epi64(inner_acc[base_id][bit],
+                                     popcount(_mm256_and_si256(query, base_values[base_id])));
+            }
+        }
+    }
+
+    const uint64_t remaining_words = (num_bytes - offset) / sizeof(int32_t);
+    if (remaining_words > 0) {
+        const auto lane_ids = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+        const auto mask =
+            _mm256_cmpgt_epi32(_mm256_set1_epi32(static_cast<int>(remaining_words)), lane_ids);
+        __m256i base_values[4];
+        for (uint32_t base_id = 0; base_id < 4; ++base_id) {
+            base_values[base_id] = _mm256_maskload_epi32(
+                reinterpret_cast<const int32_t*>(bases[base_id] + offset), mask);
+            base_acc[base_id] = _mm256_add_epi64(base_acc[base_id], popcount(base_values[base_id]));
+        }
+        for (uint32_t bit = 0; bit < 4; ++bit) {
+            const auto query = _mm256_maskload_epi32(
+                reinterpret_cast<const int32_t*>(codes + bit * num_bytes + offset), mask);
+            for (uint32_t base_id = 0; base_id < 4; ++base_id) {
+                inner_acc[base_id][bit] =
+                    _mm256_add_epi64(inner_acc[base_id][bit],
+                                     popcount(_mm256_and_si256(query, base_values[base_id])));
+            }
+        }
+        offset += remaining_words * sizeof(int32_t);
+    }
+
+    uint32_t inner_products[4] = {0, 0, 0, 0};
+    uint32_t base_sums[4] = {0, 0, 0, 0};
+    alignas(32) uint64_t lanes[4];
+    for (uint32_t base_id = 0; base_id < 4; ++base_id) {
+        _mm256_store_si256(reinterpret_cast<__m256i*>(lanes), base_acc[base_id]);
+        base_sums[base_id] = static_cast<uint32_t>(lanes[0] + lanes[1] + lanes[2] + lanes[3]);
+        for (uint32_t bit = 0; bit < 4; ++bit) {
+            _mm256_store_si256(reinterpret_cast<__m256i*>(lanes), inner_acc[base_id][bit]);
+            inner_products[base_id] +=
+                static_cast<uint32_t>(lanes[0] + lanes[1] + lanes[2] + lanes[3]) << bit;
+        }
+    }
+    for (; offset < num_bytes; ++offset) {
+        for (uint32_t base_id = 0; base_id < 4; ++base_id) {
+            const auto base = bases[base_id][offset];
+            base_sums[base_id] += static_cast<uint32_t>(__builtin_popcount(base));
+            for (uint32_t bit = 0; bit < 4; ++bit) {
+                inner_products[base_id] += static_cast<uint32_t>(__builtin_popcount(
+                                               codes[bit * num_bytes + offset] & base))
+                                           << bit;
+            }
+        }
+    }
+    for (uint32_t i = 0; i < 4; ++i) {
+        results[i] =
+            static_cast<uint64_t>(inner_products[i]) | (static_cast<uint64_t>(base_sums[i]) << 32U);
+    }
+#else
+    generic::RaBitQSQ4UBinaryIPWithBaseSumBatch4(codes, bits1, bits2, bits3, bits4, dim, results);
+#endif
+}
+
 float
 L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (float*)pVect1v;
@@ -847,6 +1084,39 @@ RaBitQFloatThreeBitCenteredIPBatch4(const float* vector,
 }
 
 float
+RaBitQFloatFourBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    return simd::RaBitQFloatFourBitCenteredIPImpl<simd::RaBitQTraits<simd::AVX2_RaBitQ_Tag>>(
+        vector, bits, dim, &generic::RaBitQFloatFourBitCenteredIP);
+#else
+    return generic::RaBitQFloatFourBitCenteredIP(vector, bits, dim);
+#endif
+}
+
+void
+RaBitQFloatFourBitCenteredIPBatch4(const float* vector,
+                                   const uint8_t* bits1,
+                                   const uint8_t* bits2,
+                                   const uint8_t* bits3,
+                                   const uint8_t* bits4,
+                                   uint64_t dim,
+                                   float* results) {
+#if defined(ENABLE_AVX2)
+    simd::RaBitQFloatFourBitCenteredIPBatch4Impl<simd::RaBitQTraits<simd::AVX2_RaBitQ_Tag>>(
+        vector,
+        bits1,
+        bits2,
+        bits3,
+        bits4,
+        dim,
+        results,
+        &generic::RaBitQFloatFourBitCenteredIPBatch4);
+#else
+    generic::RaBitQFloatFourBitCenteredIPBatch4(vector, bits1, bits2, bits3, bits4, dim, results);
+#endif
+}
+
+float
 RaBitQFloatThreeBitIPByLookup(const float* lookup,
                               const uint8_t* bits,
                               uint64_t dim,
@@ -1033,6 +1303,68 @@ RaBitQFloatSupplementCodeIP(const float* vector,
     return result;
 #else
     return avx::RaBitQFloatSupplementCodeIP(vector, supplement_code, dim, supplement_bits);
+#endif
+}
+
+// Ported from RaBitQ-Library's Apache-2.0 ip64_fxu7_avx2 kernel.
+float
+RaBitQFloatExCode7IP(const float* vector, const uint8_t* compact_code, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    if ((dim & 63U) != 0U) {
+        return generic::RaBitQFloatExCode7IP(vector, compact_code, dim);
+    }
+    const __m128i mask6 = _mm_set1_epi8(0x3F);
+    const __m128i mask2 = _mm_set1_epi8(static_cast<char>(0xC0));
+    const __m128i top_mask = _mm_set1_epi8(0x40);
+    __m256 sum = _mm256_setzero_ps();
+
+    const auto contribute = [&sum](__m128i codes, const float* query) {
+        __m256 q = _mm256_loadu_ps(query);
+        __m256 cf = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(codes));
+        sum = _mm256_fmadd_ps(q, cf, sum);
+        q = _mm256_loadu_ps(query + 8);
+        cf = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_srli_si128(codes, 8)));
+        sum = _mm256_fmadd_ps(q, cf, sum);
+    };
+
+    for (uint64_t block = 0; block < dim; block += 64) {
+        const __m128i compact1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(compact_code));
+        const __m128i compact2 =
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(compact_code + 16));
+        const __m128i compact3 =
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(compact_code + 32));
+        uint64_t top_bits = 0;
+        std::memcpy(&top_bits, compact_code + 48, sizeof(top_bits));
+        compact_code += 56;
+
+        __m128i code0 = _mm_and_si128(compact1, mask6);
+        __m128i code1 = _mm_and_si128(compact2, mask6);
+        __m128i code2 = _mm_and_si128(compact3, mask6);
+        __m128i code3 =
+            _mm_or_si128(_mm_or_si128(_mm_srli_epi16(_mm_and_si128(compact1, mask2), 6),
+                                      _mm_srli_epi16(_mm_and_si128(compact2, mask2), 4)),
+                         _mm_srli_epi16(_mm_and_si128(compact3, mask2), 2));
+
+        code0 = _mm_or_si128(code0,
+                             _mm_and_si128(_mm_set_epi64x(top_bits << 5, top_bits << 6), top_mask));
+        code1 = _mm_or_si128(code1,
+                             _mm_and_si128(_mm_set_epi64x(top_bits << 3, top_bits << 4), top_mask));
+        code2 = _mm_or_si128(code2,
+                             _mm_and_si128(_mm_set_epi64x(top_bits << 1, top_bits << 2), top_mask));
+        code3 =
+            _mm_or_si128(code3, _mm_and_si128(_mm_set_epi64x(top_bits >> 1, top_bits), top_mask));
+
+        contribute(code0, vector + block);
+        contribute(code1, vector + block + 16);
+        contribute(code2, vector + block + 32);
+        contribute(code3, vector + block + 48);
+    }
+
+    alignas(32) float lanes[8];
+    _mm256_store_ps(lanes, sum);
+    return lanes[0] + lanes[1] + lanes[2] + lanes[3] + lanes[4] + lanes[5] + lanes[6] + lanes[7];
+#else
+    return generic::RaBitQFloatExCode7IP(vector, compact_code, dim);
 #endif
 }
 

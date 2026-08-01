@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <numeric>
 #include <utility>
@@ -33,6 +34,25 @@ using namespace vsag;
 
 const auto dims = fixtures::get_common_used_dims(6, 129);
 const auto counts = {100};
+
+namespace {
+
+bool
+IsNaNBitPattern(float value) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return (bits & 0x7FFFFFFFU) > 0x7F800000U;
+}
+
+}  // namespace
+
+TEST_CASE("RaBitQ finite guard survives fast math", "[ut][RaBitQuantizer][rabitq_split]") {
+    REQUIRE(IsFiniteRaBitQValue(0.0F));
+    REQUIRE(IsFiniteRaBitQValue(std::numeric_limits<float>::max()));
+    REQUIRE_FALSE(IsFiniteRaBitQValue(std::numeric_limits<float>::quiet_NaN()));
+    REQUIRE_FALSE(IsFiniteRaBitQValue(std::numeric_limits<float>::infinity()));
+    REQUIRE_FALSE(IsFiniteRaBitQValue(-std::numeric_limits<float>::infinity()));
+}
 
 TEST_CASE("RaBitQ Basic Test", "[ut][RaBitQuantizer]") {
     bool use_fht = GENERATE(true, false);
@@ -520,7 +540,7 @@ TEST_CASE("RaBitQ one-bit split code-code distance", "[ut][RaBitQuantizer]") {
 
 TEST_CASE("RaBitQ Split Code Storage", "[ut][RaBitQuantizer]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    constexpr auto dim = 64;
+    const uint64_t dim = GENERATE(64, 960);
     constexpr auto count = 32;
     auto vecs = fixtures::generate_vectors(count, dim);
 
@@ -576,11 +596,17 @@ TEST_CASE("RaBitQ Split Code Storage", "[ut][RaBitQuantizer]") {
 
         float one_bit_dist = 0.0F;
         float lower_bound = std::numeric_limits<float>::max();
-        REQUIRE(quantizer.ComputeDistWithOneBitLowerBound(
-            *computer, one_bit_code.data(), &one_bit_dist, &lower_bound));
+        float filter_inner_product = 0.0F;
+        REQUIRE(quantizer.ComputeDistWithOneBitLowerBoundAndFilterIP(
+            *computer, one_bit_code.data(), &one_bit_dist, &lower_bound, &filter_inner_product));
         REQUIRE(std::isfinite(one_bit_dist));
         REQUIRE(std::isfinite(lower_bound));
         REQUIRE(lower_bound <= one_bit_dist + 1e-5F);
+        if (filter_bits == 1) {
+            REQUIRE(IsNaNBitPattern(filter_inner_product));
+        } else {
+            REQUIRE(std::isfinite(filter_inner_product));
+        }
 
         if (filter_bits > 1) {
             float stored_filter_norm_code = 0.0F;
@@ -604,15 +630,37 @@ TEST_CASE("RaBitQ Split Code Storage", "[ut][RaBitQuantizer]") {
             }
             const auto expected_filter_norm_code = static_cast<float>(std::sqrt(filter_norm_sqr));
             REQUIRE(std::abs(stored_filter_norm_code - expected_filter_norm_code) <= 1e-5F);
+        }
 
-            if (filter_bits == 2 or filter_bits == 3) {
-                float hinted_split_dist = 0.0F;
+        if (quantizer.ReorderBits() > 0 and
+            (filter_bits == 1 or filter_bits == 2 or filter_bits == 3)) {
+            float hinted_split_dist = 0.0F;
+            float direct_ip_split_dist = 0.0F;
+            if (filter_bits == 1) {
+                REQUIRE_FALSE(
+                    quantizer.ComputeDistWithSplitCodeAndFilterDist(*computer,
+                                                                    one_bit_code.data(),
+                                                                    supplement_code.data(),
+                                                                    one_bit_dist,
+                                                                    &hinted_split_dist));
+                REQUIRE_FALSE(quantizer.ComputeDistWithSplitCodeAndFilterIP(*computer,
+                                                                            one_bit_code.data(),
+                                                                            supplement_code.data(),
+                                                                            0.0F,
+                                                                            &direct_ip_split_dist));
+            } else {
                 REQUIRE(quantizer.ComputeDistWithSplitCodeAndFilterDist(*computer,
                                                                         one_bit_code.data(),
                                                                         supplement_code.data(),
                                                                         one_bit_dist,
                                                                         &hinted_split_dist));
-                REQUIRE(std::abs(split_dist - hinted_split_dist) <= 1e-5F);
+                REQUIRE(quantizer.ComputeDistWithSplitCodeAndFilterIP(*computer,
+                                                                      one_bit_code.data(),
+                                                                      supplement_code.data(),
+                                                                      filter_inner_product,
+                                                                      &direct_ip_split_dist));
+                REQUIRE(std::abs(hinted_split_dist - direct_ip_split_dist) <= 1e-5F);
+                REQUIRE(std::abs(split_dist - direct_ip_split_dist) <= 1e-5F);
             }
         }
 
@@ -679,10 +727,10 @@ TEST_CASE("RaBitQ Split Code Storage", "[ut][RaBitQuantizer]") {
 
 TEST_CASE("RaBitQ Split IP Batch4 and Reorder Hint", "[ut][RaBitQuantizer]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    constexpr uint64_t dim = 64;
+    const uint64_t dim = GENERATE(64, 960);
     constexpr uint64_t count = 32;
     constexpr uint64_t base_bits = 8;
-    constexpr uint64_t filter_bits = 3;
+    const uint64_t filter_bits = GENERATE(1, 3);
     auto vecs = fixtures::generate_vectors(count, dim);
 
     RaBitQuantizer<MetricType::METRIC_TYPE_IP> quantizer(
@@ -713,18 +761,44 @@ TEST_CASE("RaBitQ Split IP Batch4 and Reorder Hint", "[ut][RaBitQuantizer]") {
         REQUIRE(quantizer.EncodeOne(vecs.data() + i * dim, full_code.data()));
         quantizer.SplitCode(full_code.data(), one_bit_codes[i].data(), supplement_code.data());
 
-        REQUIRE(quantizer.ComputeDistWithOneBitLowerBound(
-            *computer, one_bit_codes[i].data(), single_dists + i, single_lower_bounds + i));
+        float filter_inner_product = 0.0F;
+        REQUIRE(quantizer.ComputeDistWithOneBitLowerBoundAndFilterIP(*computer,
+                                                                     one_bit_codes[i].data(),
+                                                                     single_dists + i,
+                                                                     single_lower_bounds + i,
+                                                                     &filter_inner_product));
         float split_dist = 0.0F;
         REQUIRE(quantizer.ComputeDistWithSplitCode(
             *computer, one_bit_codes[i].data(), supplement_code.data(), &split_dist));
         float hinted_split_dist = 0.0F;
-        REQUIRE(quantizer.ComputeDistWithSplitCodeAndFilterDist(*computer,
-                                                                one_bit_codes[i].data(),
-                                                                supplement_code.data(),
-                                                                single_dists[i],
-                                                                &hinted_split_dist));
-        REQUIRE(std::abs(split_dist - hinted_split_dist) <= 1e-5F);
+        float direct_ip_split_dist = 0.0F;
+        if (filter_bits == 1) {
+            REQUIRE(IsNaNBitPattern(filter_inner_product));
+            REQUIRE_FALSE(quantizer.ComputeDistWithSplitCodeAndFilterDist(*computer,
+                                                                          one_bit_codes[i].data(),
+                                                                          supplement_code.data(),
+                                                                          single_dists[i],
+                                                                          &hinted_split_dist));
+            REQUIRE_FALSE(quantizer.ComputeDistWithSplitCodeAndFilterIP(*computer,
+                                                                        one_bit_codes[i].data(),
+                                                                        supplement_code.data(),
+                                                                        0.0F,
+                                                                        &direct_ip_split_dist));
+        } else {
+            REQUIRE(std::isfinite(filter_inner_product));
+            REQUIRE(quantizer.ComputeDistWithSplitCodeAndFilterDist(*computer,
+                                                                    one_bit_codes[i].data(),
+                                                                    supplement_code.data(),
+                                                                    single_dists[i],
+                                                                    &hinted_split_dist));
+            REQUIRE(quantizer.ComputeDistWithSplitCodeAndFilterIP(*computer,
+                                                                  one_bit_codes[i].data(),
+                                                                  supplement_code.data(),
+                                                                  filter_inner_product,
+                                                                  &direct_ip_split_dist));
+            REQUIRE(std::abs(hinted_split_dist - direct_ip_split_dist) <= 1e-5F);
+            REQUIRE(std::abs(split_dist - direct_ip_split_dist) <= 1e-5F);
+        }
     }
 
     float batch_dists[4] = {};

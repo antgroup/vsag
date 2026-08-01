@@ -54,6 +54,20 @@ public:
         return this->tags_[word_id] == this->tag_ and (this->words_[word_id] & mask) != 0;
     }
 
+    [[nodiscard]] bool
+    TestAndSet(const InnerIdType& id) {
+        const auto word_id = static_cast<uint64_t>(id) / kBitsPerWord;
+        const auto mask = WordType{1} << (static_cast<uint64_t>(id) % kBitsPerWord);
+        if (this->tags_[word_id] != this->tag_) {
+            this->tags_[word_id] = this->tag_;
+            this->words_[word_id] = mask;
+            return false;
+        }
+        const bool was_set = (this->words_[word_id] & mask) != 0;
+        this->words_[word_id] |= mask;
+        return was_set;
+    }
+
     void
     Prefetch(const InnerIdType& id) {
         const auto word_id = static_cast<uint64_t>(id) / kBitsPerWord;

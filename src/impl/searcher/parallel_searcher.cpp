@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "datacell/flatten_interface.h"
+#include "impl/filter/duplicate_group_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/searcher/searcher_utils.h"
 #include "utils/filter_search_skip_strategy.h"
@@ -87,7 +88,7 @@ ParallelSearcher::Search(const GraphInterfacePtr& graph,
                          const InnerSearchParam& inner_search_param,
                          const LabelTablePtr& label_table,
                          QueryContext* ctx,
-                         DistanceRecordVector* rabitq_lower_bound_candidates) const {
+                         RaBitQCandidateVector* rabitq_lower_bound_candidates) const {
     if (inner_search_param.search_mode == KNN_SEARCH) {
         return this->search_impl<KNN_SEARCH>(graph,
                                              flatten,
@@ -117,7 +118,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                               const InnerSearchParam& inner_search_param,
                               const LabelTablePtr& label_table,
                               QueryContext* ctx,
-                              DistanceRecordVector* rabitq_lower_bound_candidates) const {
+                              RaBitQCandidateVector* rabitq_lower_bound_candidates) const {
     // set customize query alloctor
     Allocator* alloc = select_query_allocator(ctx, allocator_);
 
@@ -149,11 +150,11 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<float> line_dists(vector_size, alloc);
     Vector<float> lower_bound_dists(vector_size, alloc);
     Vector<std::pair<float, uint64_t>> node_pair(beam, alloc);
+    const auto visit_filter = MakeDuplicateGroupFilter(
+        inner_search_param.is_inner_id_allowed, graph, inner_search_param.consider_duplicate);
     auto skip_strategy = create_filter_search_skip_strategy(
         inner_search_param.skip_strategy_type,
-        inner_search_param.is_inner_id_allowed != nullptr
-            ? inner_search_param.is_inner_id_allowed->ValidRatio()
-            : 1.0F,
+        visit_filter != nullptr ? visit_filter->ValidRatio() : 1.0F,
         inner_search_param.skip_ratio);
     if (rabitq_lower_bound_candidates != nullptr) {
         rabitq_lower_bound_candidates->clear();
@@ -168,6 +169,41 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     auto check_func = [&is_id_allowed, &attr_ft](InnerIdType id) {
         return (is_id_allowed == nullptr or is_id_allowed->CheckValid(id)) and
                (attr_ft == nullptr or attr_ft->CheckValid(id));
+    };
+    auto push_duplicate_candidates = [&](InnerIdType id, float distance) {
+        if (not inner_search_param.consider_duplicate) {
+            return;
+        }
+        for (const auto duplicate_id : graph->GetDuplicateIds(id)) {
+            if (check_func(duplicate_id)) {
+                top_candidates->Push(distance, duplicate_id);
+            }
+        }
+    };
+    auto append_lower_bound_candidates = [&](InnerIdType id, float bound) {
+        if (rabitq_lower_bound_candidates == nullptr) {
+            return;
+        }
+        const auto group_id = inner_search_param.consider_duplicate ? graph->GetGroupId(id) : id;
+        const auto append = [&](InnerIdType candidate, float candidate_bound) {
+            if (check_func(candidate)) {
+                rabitq_lower_bound_candidates->push_back(
+                    {candidate_bound, std::numeric_limits<float>::quiet_NaN(), candidate});
+            }
+        };
+        append(group_id, bound);
+        if (inner_search_param.consider_duplicate) {
+            for (const auto duplicate_id : graph->GetDuplicateIds(group_id)) {
+                if (not check_func(duplicate_id)) {
+                    continue;
+                }
+                float duplicate_distance = 0.0F;
+                float duplicate_bound = std::numeric_limits<float>::max();
+                flatten->QueryWithDistanceLowerBound(
+                    &duplicate_distance, &duplicate_bound, computer, &duplicate_id, 1, ctx);
+                append(duplicate_id, duplicate_bound);
+            }
+        }
     };
 
     if (inner_search_param.enable_rabitq_one_bit_search) {
@@ -191,10 +227,18 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
             }
         }
     }
+    push_duplicate_candidates(ep, dist);
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
         while (dist > inner_search_param.radius and not top_candidates->Empty()) {
             top_candidates->Pop();
         }
+    } else if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+        while (top_candidates->Size() > ef) {
+            top_candidates->Pop();
+        }
+    }
+    if (not top_candidates->Empty()) {
+        lower_bound = top_candidates->Top().first;
     }
     if (not top_candidates->Empty()) {
         lower_bound = top_candidates->Top().first;
@@ -260,7 +304,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         count_no_visited = visit(graph,
                                  vl,
                                  node_pair,
-                                 inner_search_param.is_inner_id_allowed,
+                                 visit_filter,
                                  skip_strategy.get(),
                                  to_be_visited_id,
                                  neighbors,
@@ -353,9 +397,8 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                 continue;
             }
             if constexpr (mode == KNN_SEARCH) {
-                if (collect_rabitq_lower_bound and lower_bound_dists[i] < lower_bound and
-                    check_func(cur_id)) {
-                    rabitq_lower_bound_candidates->emplace_back(lower_bound_dists[i], cur_id);
+                if (collect_rabitq_lower_bound and lower_bound_dists[i] < lower_bound) {
+                    append_lower_bound_candidates(cur_id, lower_bound_dists[i]);
                 }
             }
             if (dist < THRESHOLD_ERROR) {
@@ -367,21 +410,13 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                 if (check_func(cur_id)) {
                     top_candidates->Push(dist, cur_id);
                 }
-                if (inner_search_param.consider_duplicate) {
-                    const auto duplicate_ids = graph->GetDuplicateIds(cur_id);
-                    for (const auto& item : duplicate_ids) {
-                        if (check_func(item)) {
-                            top_candidates->Push(dist, item);
-                        }
-                    }
-                }
+                push_duplicate_candidates(cur_id, dist);
 
                 if constexpr (mode == KNN_SEARCH) {
-                    if (top_candidates->Size() > ef) {
+                    while (top_candidates->Size() > ef) {
                         top_candidates->Pop();
                     }
                 }
-
                 if (not top_candidates->Empty()) {
                     lower_bound = top_candidates->Top().first;
                 }

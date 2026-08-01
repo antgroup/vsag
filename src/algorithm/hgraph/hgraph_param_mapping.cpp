@@ -15,6 +15,7 @@
 #include <fmt/format.h>
 
 #include "common.h"
+#include "datacell/graph_datacell_parameter.h"
 #include "hgraph.h"  // IWYU pragma: keep
 #include "hgraph_parameter.h"
 
@@ -60,6 +61,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             HGRAPH_BUILD_BY_BASE_QUANTIZATION,
             {
                 HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY,
+            },
+        },
+        {
+            HGRAPH_RABITQ_FUSED_DATACELL,
+            {
+                HGRAPH_RABITQ_FUSED_DATACELL_KEY,
             },
         },
         {
@@ -568,6 +575,7 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
         "{HGRAPH_USE_ENV_OPTIMIZER}": false,
         "{HGRAPH_IGNORE_REORDER_KEY}": false,
         "{HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY}": false,
+        "{HGRAPH_RABITQ_FUSED_DATACELL_KEY}": false,
         "{RESIZE_INCREASE_COUNT_BIT}": {DEFAULT_RESIZE_INCREASE_COUNT_BIT},
         "{HGRAPH_USE_ATTRIBUTE_FILTER_KEY}": false,
         "{GRAPH_KEY}": {
@@ -683,6 +691,19 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     auto hgraph_parameter = std::make_shared<HGraphParameter>();
     hgraph_parameter->data_type = common_param.data_type_;
     hgraph_parameter->FromJson(inner_json);
+    if (hgraph_parameter->rabitq_fused_datacell) {
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            common_param.metric_ == MetricType::METRIC_TYPE_L2SQR or
+                common_param.metric_ == MetricType::METRIC_TYPE_IP,
+            "rabitq_fused_datacell only supports L2 and inner product");
+        const auto graph_param =
+            std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_parameter->bottom_graph_param);
+        CHECK_ARGUMENT(graph_param != nullptr, "rabitq_fused_datacell requires flat graph storage");
+        const auto graph_io_type = graph_param->io_parameter_->GetTypeName();
+        CHECK_ARGUMENT(graph_io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO or
+                           graph_io_type == IO_TYPE_VALUE_MEMORY_IO,
+                       "rabitq_fused_datacell only supports an in-memory graph");
+    }
     uint64_t max_degree = hgraph_parameter->bottom_graph_param->max_degree_;
 
     auto max_degree_threshold = std::max<int64_t>(common_param.dim_, 128);

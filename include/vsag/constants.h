@@ -237,6 +237,7 @@ extern const char* const HGRAPH_PRECISE_DIRECT_READ;
 extern const char* const HGRAPH_PARAMETER_EF_RUNTIME;
 extern const char* const HGRAPH_PARAMETER_HOPS_LIMIT;
 extern const char* const HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH;
+extern const char* const HGRAPH_RABITQ_FUSED_DATACELL;
 extern const char* const HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD;
 extern const char* const HGRAPH_USE_MCI;
 extern const char* const HGRAPH_MCI_MCS;

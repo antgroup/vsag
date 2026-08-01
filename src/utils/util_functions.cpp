@@ -275,7 +275,8 @@ sample_train_data(const vsag::DatasetPtr& data,
                   int64_t total_elements,
                   int64_t dim,
                   int64_t train_sample_count,
-                  Allocator* allocator) {
+                  Allocator* allocator,
+                  std::optional<uint64_t> random_seed) {
     const int64_t min_train_size = 512;
     const int64_t max_train_size = 65536;
 
@@ -306,7 +307,7 @@ sample_train_data(const vsag::DatasetPtr& data,
     sampled_indices.resize(actual_size);
     std::iota(sampled_indices.begin(), sampled_indices.end(), 0);
     std::random_device rd;
-    std::mt19937_64 gen(rd());
+    std::mt19937_64 gen(random_seed.has_value() ? *random_seed : rd());
     for (int64_t i = sample_count; i < total_elements; ++i) {
         std::uniform_int_distribution<int64_t> dist(0, i);
         int64_t j = dist(gen);
