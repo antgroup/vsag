@@ -176,7 +176,14 @@ Footer::Parse(StreamReader& reader) {
     uint32_t checksum;
     memcpy(&checksum, meta_buffer.data() + 16 + metadata_string_length, 4);
     logger::debug("deserial checksum: 0x{:x}", checksum);
-    if (calculate_checksum(metadata_string) != checksum) {
+    // Dual-accept on read: old versions wrote the checksum with a non-standard
+    // sign-extending CRC32, which diverges from the canonical one when the
+    // metadata contains bytes >= 0x80 (footer JSON carries user-controlled
+    // UTF-8 strings such as index_name and index parameters). Verify with the
+    // canonical CRC32 first, then fall back to the legacy implementation so
+    // that data serialized by old versions still loads.
+    if (calculate_checksum(metadata_string) != checksum &&
+        calculate_checksum_legacy(metadata_string) != checksum) {
         reader.PopSeek();
         return nullptr;
     }

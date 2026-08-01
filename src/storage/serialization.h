@@ -232,13 +232,36 @@ private:
         return table;
     }
 
-    // Keep this byte-for-byte compatible with the legacy footer checksum.
+    // Canonical CRC32 (reflected, polynomial 0xEDB88320). This is the only
+    // implementation used on the write path.
     static uint32_t
     calculate_checksum(std::string_view bytes) {
         const uint32_t* table = crc32_table();
         uint32_t crc = 0xFFFFFFFF;
         for (const char& byte : bytes) {
             crc = table[(crc ^ static_cast<uint8_t>(byte)) & 0xFF] ^ (crc >> 8);
+        }
+        return crc ^ 0xFFFFFFFF;
+    }
+
+    // Non-standard CRC32 used by old versions to write the footer checksum:
+    // `crc ^= byte` sign-extends the (signed) char, so the result differs from
+    // calculate_checksum() whenever the input contains bytes >= 0x80. The footer
+    // JSON carries user-controlled UTF-8 strings (e.g. index_name, index
+    // parameters), so such bytes do occur in practice. Kept only as a read-side
+    // fallback in Footer::Parse to load data written by old versions; the write
+    // path must use calculate_checksum(). This fallback may be removed only after
+    // support for footers written by pre-dual-accept versions is explicitly
+    // dropped; remove the legacy tests in footer_parse_test.cpp together with it.
+    static uint32_t
+    calculate_checksum_legacy(std::string_view bytes) {
+        constexpr uint32_t polynomial = 0xEDB88320;
+        uint32_t crc = 0xFFFFFFFF;
+        for (const char& byte : bytes) {
+            crc ^= byte;  // intentional sign extension, byte-for-byte legacy behavior
+            for (uint64_t j = 0; j < 8; ++j) {
+                crc = (crc >> 1) ^ ((crc & 1) == 1 ? polynomial : 0);
+            }
         }
         return crc ^ 0xFFFFFFFF;
     }
