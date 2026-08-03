@@ -119,10 +119,20 @@ HGraph::KnnSearch(const DatasetPtr& query,
     // non-iterator KnnSearch overload (which delegates to SearchWithRequest)
     // still benefits from the brute-force fallback.
     if (is_last_filter) {
+        if (const auto* pending_duplicates = iter_filter_ctx->GetPendingDuplicates();
+            pending_duplicates != nullptr) {
+            for (const auto& [pending_id, pending_dist] : *pending_duplicates) {
+                if (iter_filter_ctx->CheckPoint(pending_id)) {
+                    search_result->Push(pending_dist, pending_id);
+                }
+            }
+        }
         while (!iter_filter_ctx->Empty()) {
             uint32_t cur_inner_id = iter_filter_ctx->GetTopID();
             float cur_dist = iter_filter_ctx->GetTopDist();
-            search_result->Push(cur_dist, cur_inner_id);
+            if (not iter_filter_ctx->IsPendingDuplicate(cur_inner_id)) {
+                search_result->Push(cur_dist, cur_inner_id);
+            }
             iter_filter_ctx->PopDiscard();
         }
     } else {
@@ -152,6 +162,8 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.topk = static_cast<int64_t>(search_param.ef);
         search_param.parallel_search_thread_count = params.parallel_search_thread_count;
         search_param.enable_reorder = params.enable_reorder;
+        search_param.consider_duplicate = true;
+        search_param.max_duplicates_per_group = params.max_duplicates_per_group;
         search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
         search_param.skip_ratio = params.skip_ratio;
         search_param.skip_strategy_type = params.skip_strategy_type;
@@ -205,12 +217,12 @@ HGraph::KnnSearch(const DatasetPtr& query,
             ->ExtraInfoSize(static_cast<int64_t>(extra_info_size_));
     }
     for (int64_t j = count - 1; j >= 0; --j) {
-        dists[j] = search_result->Top().first;
-        ids[j] = this->label_table_->GetLabelById(search_result->Top().second);
-        iter_filter_ctx->SetPoint(search_result->Top().second);
+        const auto result = search_result->Top();
+        dists[j] = result.first;
+        ids[j] = this->label_table_->GetLabelById(result.second);
+        iter_filter_ctx->SetPoint(result.second);
         if (extra_infos != nullptr) {
-            this->extra_infos_->GetExtraInfoById(search_result->Top().second,
-                                                 extra_infos + extra_info_size_ * j);
+            this->extra_infos_->GetExtraInfoById(result.second, extra_infos + extra_info_size_ * j);
         }
         search_result->Pop();
     }
@@ -495,6 +507,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         }
         search_param.enable_reorder = params.enable_reorder;
         search_param.consider_duplicate = true;
+        search_param.max_duplicates_per_group = params.max_duplicates_per_group;
         search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
         if (params.enable_time_record) {
             search_param.time_cost = std::make_shared<Timer>();

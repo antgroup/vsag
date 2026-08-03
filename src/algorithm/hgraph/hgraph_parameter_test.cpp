@@ -531,6 +531,16 @@ TEST_CASE("HGraph Search Parameters reject ef_search integer overflow",
         R"({"hgraph": {"ef_search": 9223372036854775808}})"));
 }
 
+TEST_CASE("HGraph Search Parameters validate max_duplicates_per_group",
+          "[ut][HGraphSearchParameters][duplicate]") {
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph": {"ef_search": 32, "max_duplicates_per_group": -2}})"));
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph": {"ef_search": 32, "max_duplicates_per_group": 1.5}})"));
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph": {"ef_search": 32, "max_duplicates_per_group": 9223372036854775808}})"));
+}
+
 TEST_CASE("HGraph maps label_remap_type to inner index parameter", "[ut][HGraphParameter]") {
     auto param = vsag::JsonType::Parse(R"({
         "base_quantization_type": "fp32",

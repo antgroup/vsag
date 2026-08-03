@@ -234,6 +234,7 @@ extern const char* const HGRAPH_PARAMETER_EF_RUNTIME;
 extern const char* const HGRAPH_PARAMETER_HOPS_LIMIT;
 extern const char* const HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH;
 extern const char* const HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD;
+extern const char* const HGRAPH_PARAMETER_MAX_DUPLICATES_PER_GROUP;
 extern const char* const HGRAPH_USE_MCI;
 extern const char* const HGRAPH_MCI_MCS;
 extern const char* const HGRAPH_MCI_CLIQUE_MAX;

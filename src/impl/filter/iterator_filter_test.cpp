@@ -81,3 +81,24 @@ TEST_CASE("Iterator Context CheckPoint And SetPoint", "[ut][hnsw][filter]") {
     filter_context.SetPoint(3);
     REQUIRE_FALSE(filter_context.CheckPoint(3));
 }
+
+TEST_CASE("Iterator Context keeps pending duplicates out of graph discard", "[ut][filter]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    IteratorFilterContext filter_context;
+    REQUIRE(filter_context.init(100, 10, allocator.get()).has_value());
+
+    REQUIRE(filter_context.AddPendingDuplicate(0.25F, 7));
+    REQUIRE_FALSE(filter_context.AddPendingDuplicate(0.75F, 7));
+    REQUIRE(filter_context.IsPendingDuplicate(7));
+    REQUIRE(filter_context.GetPendingDuplicateElementNum() == 1);
+
+    filter_context.AddDiscardNode(0.5F, 7);
+    REQUIRE(filter_context.Empty());
+    REQUIRE(filter_context.GetPendingDuplicateElementNum() == 1);
+    REQUIRE(filter_context.GetPendingDuplicates()->at(7) == 0.25F);
+
+    filter_context.SetPoint(7);
+    REQUIRE_FALSE(filter_context.IsPendingDuplicate(7));
+    REQUIRE(filter_context.GetPendingDuplicateElementNum() == 0);
+    REQUIRE_FALSE(filter_context.CheckPoint(7));
+}

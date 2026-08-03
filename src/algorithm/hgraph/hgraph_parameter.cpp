@@ -365,6 +365,21 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
             fmt::format("brute_force_threshold({}) must in range[0.0, 1.0]",
                         obj.brute_force_threshold));
     }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_MAX_DUPLICATES_PER_GROUP)) {
+        const auto& max_duplicates_json =
+            params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_MAX_DUPLICATES_PER_GROUP];
+        CHECK_ARGUMENT(max_duplicates_json.IsNumberInteger(),
+                       "max_duplicates_per_group must be an integer");
+        if (max_duplicates_json.IsNumberUnsigned()) {
+            CHECK_ARGUMENT(max_duplicates_json.GetUint64() <=
+                               static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+                           "max_duplicates_per_group exceeds int64_t range");
+        }
+        obj.max_duplicates_per_group = max_duplicates_json.GetInt();
+        CHECK_ARGUMENT(obj.max_duplicates_per_group >= -1,
+                       fmt::format("max_duplicates_per_group({}) must be >= -1",
+                                   obj.max_duplicates_per_group));
+    }
     if (params[INDEX_TYPE_HGRAPH].Contains(RABITQ_QUANTIZATION_ERROR_RATE_KEY)) {
         obj.rabitq_error_rate =
             params[INDEX_TYPE_HGRAPH][RABITQ_QUANTIZATION_ERROR_RATE_KEY].GetFloat();
