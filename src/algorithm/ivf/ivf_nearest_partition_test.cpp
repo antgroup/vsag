@@ -93,21 +93,6 @@ TEST_CASE("IVF Nearest Partition Serialize Test", "[ut][IVFNearestPartition]") {
     auto partition2 = std::make_unique<IVFNearestPartition>(bucket_count, param, strategy_param);
     test_serializion(*partition, *partition2);
 
-    auto index = partition2->route_index_ptr_;
-    std::string route_search_param = R"(
-    {
-        "hgraph": {
-            "ef_search": 20
-        }
-    }
-    )";
-    FilterPtr filter = nullptr;
-
-    for (int64_t i = 0; i < data_count; ++i) {
-        auto query = Dataset::Make();
-        query->Dim(dim)->Float32Vectors(vec.data() + i * dim)->NumElements(1)->Owner(false);
-        auto result = index->KnnSearch(query, 1, route_search_param, filter);
-        auto id = result->GetIds()[0];
-        REQUIRE(id == class_result[i]);
-    }
+    auto restored_class_result = partition2->ClassifyDatas(vec.data(), data_count, 1, nullptr);
+    REQUIRE(restored_class_result == class_result);
 }
