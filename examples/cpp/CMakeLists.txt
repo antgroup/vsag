@@ -50,6 +50,9 @@ target_link_libraries (111_index_lazy_hgraph vsag)
 add_executable (112_index_pyramid_multi_hierarchy 112_index_pyramid_multi_hierarchy.cpp)
 target_link_libraries (112_index_pyramid_multi_hierarchy vsag)
 
+add_executable (113_index_ivf_graph_bucket 113_index_ivf_graph_bucket.cpp)
+target_link_libraries (113_index_ivf_graph_bucket vsag)
+
 add_executable (201_custom_allocator 201_custom_allocator.cpp)
 target_link_libraries (201_custom_allocator vsag)
 
@@ -151,3 +154,11 @@ target_link_libraries(324_feature_lazy_hgraph_extra_info vsag)
 
 add_executable(325_feature_uring_io 325_feature_uring_io.cpp)
 target_link_libraries(325_feature_uring_io vsag)
+add_executable(324_feature_hgraph_mci_companion 324_feature_hgraph_mci_companion.cpp)
+target_link_libraries(324_feature_hgraph_mci_companion vsag)
+
+add_executable(406_feature_read_cache 406_feature_read_cache.cpp)
+target_link_libraries(406_feature_read_cache vsag)
+
+add_executable(407_feature_ivf_read_cache 407_feature_ivf_read_cache.cpp)
+target_link_libraries(407_feature_ivf_read_cache vsag)

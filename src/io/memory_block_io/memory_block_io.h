@@ -68,6 +68,11 @@ public:
      */
     ~MemoryBlockIO();
 
+    int64_t
+    GetMemoryUsageImpl() const {
+        return static_cast<int64_t>(this->blocks_.size() * this->block_size_);
+    }
+
     /**
      * @brief Writes data to the blocks at a specified offset.
      *

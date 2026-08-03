@@ -44,6 +44,7 @@ BufferIO::BufferIO(const BufferIOParameterPtr& io_param, const IndexCommonParam&
 
 BufferIO::BufferIO(const IOParamPtr& param, const IndexCommonParam& common_param)
     : BufferIO(std::dynamic_pointer_cast<BufferIOParameter>(param), common_param) {
+    EnableReadCache(param);
 }
 
 void

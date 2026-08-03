@@ -18,6 +18,10 @@
 
 namespace vsag {
 
+constexpr uint64_t DEFAULT_RESIZE_INCREASE_COUNT_BIT = 10;
+constexpr uint64_t MIN_RESIZE_INCREASE_COUNT_BIT = 1;
+constexpr uint64_t MAX_RESIZE_INCREASE_COUNT_BIT = 31;
+
 extern const char* const INDEX_HGRAPH;
 extern const char* const INDEX_LAZY_HGRAPH;
 extern const char* const INDEX_DISKANN;
@@ -202,6 +206,7 @@ extern const char* const HGRAPH_GRAPH_MAX_DEGREE;
 extern const char* const HGRAPH_BUILD_EF_CONSTRUCTION;
 extern const char* const HGRAPH_BUILD_ALPHA;
 extern const char* const HGRAPH_INIT_CAPACITY;
+extern const char* const RESIZE_INCREASE_COUNT_BIT;
 extern const char* const HGRAPH_GRAPH_TYPE;
 extern const char* const HGRAPH_GRAPH_STORAGE_TYPE;
 extern const char* const HGRAPH_GRAPH_IO_TYPE;
@@ -214,6 +219,14 @@ extern const char* const HGRAPH_BASE_PQ_DIM;
 extern const char* const HGRAPH_BASE_FILE_PATH;
 extern const char* const HGRAPH_BASE_DIRECT_READ;
 extern const char* const HGRAPH_BASE_SUPPLEMENT_FILE_PATH;
+extern const char* const HGRAPH_BASE_ENABLE_READ_CACHE;
+extern const char* const HGRAPH_BASE_CACHE_TOTAL_SIZE;
+extern const char* const HGRAPH_GRAPH_ENABLE_READ_CACHE;
+extern const char* const HGRAPH_GRAPH_CACHE_TOTAL_SIZE;
+extern const char* const HGRAPH_PRECISE_ENABLE_READ_CACHE;
+extern const char* const HGRAPH_PRECISE_CACHE_TOTAL_SIZE;
+extern const char* const HGRAPH_RAW_VECTOR_ENABLE_READ_CACHE;
+extern const char* const HGRAPH_RAW_VECTOR_CACHE_TOTAL_SIZE;
 extern const char* const HGRAPH_PRECISE_IO_TYPE;
 extern const char* const HGRAPH_PRECISE_FILE_PATH;
 extern const char* const HGRAPH_PRECISE_DIRECT_READ;
@@ -221,6 +234,12 @@ extern const char* const HGRAPH_PARAMETER_EF_RUNTIME;
 extern const char* const HGRAPH_PARAMETER_HOPS_LIMIT;
 extern const char* const HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH;
 extern const char* const HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD;
+extern const char* const HGRAPH_USE_MCI;
+extern const char* const HGRAPH_MCI_MCS;
+extern const char* const HGRAPH_MCI_CLIQUE_MAX;
+extern const char* const HGRAPH_MCI_ALPHA;
+extern const char* const HGRAPH_MCI_SEED_RATIO;
+extern const char* const HGRAPH_MCI_HGRAPH_VALID_RATIO_THRESHOLD;
 extern const char* const HGRAPH_EXTRA_INFO_SIZE;
 extern const char* const HGRAPH_SUPPORT_DUPLICATE;
 extern const char* const HGRAPH_DEDUPLICATE_STORAGE;
@@ -250,6 +269,10 @@ extern const char* const IVF_BASE_QUANTIZATION_TYPE;
 extern const char* const IVF_BASE_IO_TYPE;
 extern const char* const IVF_BASE_PQ_DIM;
 extern const char* const IVF_BASE_FILE_PATH;
+extern const char* const IVF_BASE_ENABLE_READ_CACHE;
+extern const char* const IVF_BASE_CACHE_TOTAL_SIZE;
+extern const char* const IVF_PRECISE_ENABLE_READ_CACHE;
+extern const char* const IVF_PRECISE_CACHE_TOTAL_SIZE;
 extern const char* const IVF_PRECISE_QUANTIZATION_TYPE;
 extern const char* const IVF_PRECISE_IO_TYPE;
 extern const char* const IVF_PRECISE_FILE_PATH;

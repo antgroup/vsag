@@ -49,6 +49,7 @@ UringIOParameter::ToJson() const {
     json[TYPE_KEY].SetString(IO_TYPE_VALUE_URING_IO);
     json[IO_FILE_PATH_KEY].SetString(this->path_);
     json[IO_DIRECT_READ_KEY].SetBool(this->direct_read_);
+    AppendReadCacheConfig(json);
     return json;
 }
 }  // namespace vsag

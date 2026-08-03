@@ -23,11 +23,24 @@
 #include "bucket_interface.h"
 #include "impl/inner_search_param.h"
 #include "io/container/io_array.h"
+#include "io/read_cache/page.h"
 #include "quantization/product_quantization/pq_fastscan_quantizer.h"
 #include "simd/fp32_simd.h"
 #include "utils/byte_buffer.h"
 
 namespace vsag {
+
+inline IOParamPtr
+AdjustBucketReadCacheParam(const IOParamPtr& io_param, BucketIdType bucket_count) {
+    if (io_param == nullptr or not io_param->enable_read_cache_ or bucket_count == 0) {
+        return io_param;
+    }
+    JsonType json = io_param->ToJson();
+    uint64_t total_pages = io_param->read_cache_total_size_ / Page::DEFAULT_PAGE_SIZE;
+    uint64_t pages_per_bucket = total_pages / bucket_count;
+    json[READ_CACHE_TOTAL_CACHE_SIZE_KEY].SetUint64(pages_per_bucket * Page::DEFAULT_PAGE_SIZE);
+    return IOParameter::GetIOParameterByJson(json);
+}
 
 template <typename QuantTmpl, typename IOTmpl>
 class BucketDataCell : public BucketInterface {
@@ -203,7 +216,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::BucketDataCell(const QuantizerParamPtr& quant
                                                   BucketIdType bucket_count,
                                                   bool use_residual)
     : BucketInterface(),
-      datas_(common_param.allocator_.get(), io_param, common_param),
+      datas_(common_param.allocator_.get(),
+             AdjustBucketReadCacheParam(io_param, bucket_count),
+             common_param),
       bucket_sizes_(bucket_count, 0, common_param.allocator_.get()),
       inner_ids_(bucket_count,
                  Vector<InnerIdType>(common_param.allocator_.get()),

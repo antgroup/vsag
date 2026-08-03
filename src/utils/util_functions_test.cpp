@@ -16,6 +16,7 @@
 #include "util_functions.h"
 
 #include <cmath>
+#include <limits>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -54,6 +55,7 @@ TEST_CASE("UtilFunctions Basic", "[ut][UtilFunctions]") {
         REQUIRE(next_multiple_of_power_of_two(5, 2) == 8);
         REQUIRE(next_multiple_of_power_of_two(16, 4) == 16);
         REQUIRE_THROWS(next_multiple_of_power_of_two(1, 64));
+        REQUIRE_THROWS(next_multiple_of_power_of_two(std::numeric_limits<uint64_t>::max(), 1));
     }
 
     SECTION("select k numbers") {

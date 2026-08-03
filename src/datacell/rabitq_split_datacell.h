@@ -189,10 +189,11 @@ public:
         // memory + supplement on disk). Otherwise fall back to the shared
         // io_param with the legacy file-path suffix to keep the two backing
         // files separate for file-backed IO.
-        const IOParamPtr one_bit_io_param = SuffixIOParam(io_param, "_onebit");
+        const bool shares_io_param = supplement_io_param == nullptr;
+        const IOParamPtr one_bit_io_param = SuffixIOParam(io_param, "_onebit", shares_io_param);
         const IOParamPtr supp_io_param = (supplement_io_param != nullptr)
                                              ? supplement_io_param
-                                             : SuffixIOParam(io_param, "_supplement");
+                                             : SuffixIOParam(io_param, "_supplement", true);
         if (supplement_io_param != nullptr) {
             this->supplement_io_type_ = supplement_io_param->GetTypeName();
         }
@@ -763,7 +764,8 @@ public:
 
     void
     InitIO(const IOParamPtr& io_param) override {
-        this->x_bit_cell_->InitIO(SuffixIOParam(io_param, "_onebit"));
+        const bool shares_io_param = this->supplement_io_type_.empty();
+        this->x_bit_cell_->InitIO(SuffixIOParam(io_param, "_onebit", shares_io_param));
         // In hybrid mode (one-bit and supplement use different IO backends)
         // the caller-facing `io_param` is the one-bit IO parameter type and
         // cannot be passed directly to `supplement_cell_`. Rebuild a fresh
@@ -774,7 +776,8 @@ public:
 
     void
     InitIO(const IOParamPtr& one_bit_io_param, const IOParamPtr& supplement_io_param) {
-        this->x_bit_cell_->InitIO(SuffixIOParam(one_bit_io_param, "_onebit"));
+        const bool shares_io_param = supplement_io_param == nullptr;
+        this->x_bit_cell_->InitIO(SuffixIOParam(one_bit_io_param, "_onebit", shares_io_param));
         if (supplement_io_param != nullptr) {
             // Refresh the recorded supplement type so subsequent
             // single-parameter InitIO calls (e.g. from Deserialize) can
@@ -1000,7 +1003,7 @@ private:
     }
 
     static IOParamPtr
-    SuffixIOParam(const IOParamPtr& io_param, const std::string& suffix) {
+    SuffixIOParam(const IOParamPtr& io_param, const std::string& suffix, bool split_cache = false) {
         if (io_param == nullptr) {
             return nullptr;
         }
@@ -1008,6 +1011,9 @@ private:
         if (json.Contains(IO_FILE_PATH_KEY)) {
             std::string path = json[IO_FILE_PATH_KEY].GetString();
             json[IO_FILE_PATH_KEY].SetString(path + suffix);
+        }
+        if (split_cache and io_param->enable_read_cache_) {
+            json[READ_CACHE_TOTAL_CACHE_SIZE_KEY].SetUint64(io_param->read_cache_total_size_ / 2);
         }
         return IOParameter::GetIOParameterByJson(json);
     }
@@ -1026,7 +1032,7 @@ private:
             return nullptr;
         }
         if (this->supplement_io_type_.empty()) {
-            return SuffixIOParam(io_param, "_supplement");
+            return SuffixIOParam(io_param, "_supplement", true);
         }
         auto json = io_param->ToJson();
         json[TYPE_KEY].SetString(this->supplement_io_type_);

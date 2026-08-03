@@ -65,6 +65,7 @@ Advanced users can pass an `index_param` object to enable quantization or storag
 |-----------|------|---------|-------------|
 | `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` — see the [Quantization chapter](../quantization/README.md) for per-quantizer details |
 | `use_attribute_filter` | bool | `false` | Enable attribute-based filtering (see [Attribute Filter](../advanced/attribute_filter.md)) |
+| `resize_increase_count_bit` | int | `10` | `log2` of the slot-growth batch. Valid range is `1` to `31`; `1` grows in 2-slot batches and `10` in 1,024-slot batches. Smaller values reduce preallocation but can increase reallocations. |
 
 > **Note on `store_raw_vector`.** The `store_raw_vector` flag is parsed by the shared
 > `InnerIndexParameter` but BruteForce does **not** consult it when deciding whether

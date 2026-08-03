@@ -15,7 +15,9 @@
 #include "bucket_interface.h"
 
 #include "bucket_interface_factory.h"
+#include "bucket_interface_factory_impl.h"
 #include "inner_string_params.h"
+#include "io/io_headers.h"
 
 namespace vsag {
 

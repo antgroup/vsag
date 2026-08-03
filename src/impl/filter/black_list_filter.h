@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <functional>
 
 #include "typing.h"
@@ -28,17 +29,31 @@ public:
     explicit BlackListFilter(const IdFilterFuncType& fallback_func)
         : fallback_func_(fallback_func), is_bitset_filter_(false), bitset_(nullptr){};
 
-    explicit BlackListFilter(const BitsetPtr& bitset)
-        : bitset_(bitset.get()), is_bitset_filter_(true){};
+    explicit BlackListFilter(const BitsetPtr& bitset, uint64_t total_count = 0)
+        : bitset_(bitset.get()),
+          is_bitset_filter_(true),
+          total_count_(total_count),
+          invalid_count_(bitset == nullptr ? 0 : bitset->Count()) {
+    }
 
     explicit BlackListFilter(const Bitset* bitset) : bitset_(bitset), is_bitset_filter_(true){};
 
     bool
     CheckValid(int64_t id) const override;
 
+    [[nodiscard]] float
+    ValidRatio() const override;
+
+    [[nodiscard]] bool
+    IsBitsetFilter() const {
+        return is_bitset_filter_;
+    }
+
 private:
     IdFilterFuncType fallback_func_{nullptr};
     const Bitset* bitset_{nullptr};
     const bool is_bitset_filter_;
+    uint64_t total_count_{0};
+    uint64_t invalid_count_{0};
 };
 }  // namespace vsag

@@ -38,6 +38,9 @@ public:
     /// Indicates deserialization is required when loading from disk.
     static constexpr bool SkipDeserialize = false;
 
+    // MMapIO keeps a non-empty backing mapping for subsequent writes.
+    static constexpr bool SupportsZeroSizeResize = false;
+
 public:
     /**
      * @brief Constructs a MMapIO object with a filename and allocator.
@@ -132,6 +135,9 @@ private:
 
     /// Pointer to the base of the memory-mapped region.
     uint8_t* mapped_ptr_{nullptr};
+
+    /// Physical extent of mapped_ptr_, which can differ from the logical size.
+    uint64_t mapped_size_{0};
 
     /// Flag indicating if file existed before opening; false means file will be removed on destruction.
     bool exist_file_{false};

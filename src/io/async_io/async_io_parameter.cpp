@@ -37,6 +37,7 @@ AsyncIOParameter::ToJson() const {
     JsonType json;
     json[TYPE_KEY].SetString(IO_TYPE_VALUE_ASYNC_IO);
     json[IO_FILE_PATH_KEY].SetString(this->path_);
+    AppendReadCacheConfig(json);
     return json;
 }
 }  // namespace vsag

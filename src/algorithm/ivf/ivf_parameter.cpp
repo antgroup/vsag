@@ -48,6 +48,26 @@ IVFParameter::FromJson(const JsonType& json) {
             this->ivf_partition_strategy_parameter->gnoimi_param->first_order_buckets_count *
             this->ivf_partition_strategy_parameter->gnoimi_param->second_order_buckets_count);
     }
+
+    if (json.Contains(GRAPH_BUILD_THRESHOLD_KEY)) {
+        this->graph_build_threshold = json[GRAPH_BUILD_THRESHOLD_KEY].GetInt();
+        if (this->graph_build_threshold < 0) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("graph_build_threshold must be non-negative, got {}",
+                                            this->graph_build_threshold));
+        }
+        if (this->graph_build_threshold > 0) {
+            auto graph_json = JsonType::Parse(R"({
+                "io_params": {"type": "memory_io"},
+                "graph_storage_type": "flat",
+                "max_degree": 64,
+                "init_capacity": 100,
+                "support_remove": false
+            })");
+            this->graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
+                GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT, graph_json);
+        }
+    }
 }
 
 JsonType
@@ -58,6 +78,7 @@ IVFParameter::ToJson() const {
     json[IVF_PARTITION_STRATEGY_PARAMS_KEY].SetJson(
         this->ivf_partition_strategy_parameter->ToJson());
     json[BUCKET_PER_DATA_KEY].SetInt(this->buckets_per_data);
+    json[GRAPH_BUILD_THRESHOLD_KEY].SetInt(this->graph_build_threshold);
     return json;
 }
 bool
@@ -67,8 +88,12 @@ IVFParameter::CheckCompatibility(const ParamPtr& other) const {
     }
     PARAM_CAST_OR_RETURN(IVFParameter, p, other);
     CHECK_FIELD_EQ(*this, *p, buckets_per_data);
+    CHECK_FIELD_EQ(*this, *p, graph_build_threshold);
     CHECK_SUB_PARAM(*this, *p, bucket_param);
     CHECK_SUB_PARAM(*this, *p, ivf_partition_strategy_parameter);
+    if (this->graph_build_threshold > 0) {
+        CHECK_SUB_PARAM(*this, *p, graph_param);
+    }
     return true;
 }
 
@@ -99,6 +124,13 @@ IVFSearchParameters::FromJson(const std::string& json_string) {
     if (params[INDEX_TYPE_IVF].Contains(GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO)) {
         obj.first_order_scan_ratio =
             params[INDEX_TYPE_IVF][GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO].GetFloat();
+    }
+
+    if (params[INDEX_TYPE_IVF].Contains(IVF_SEARCH_PARAM_EF_SEARCH)) {
+        auto ef_val = params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_EF_SEARCH].GetInt();
+        if (ef_val > 0) {
+            obj.ef_search = ef_val;
+        }
     }
 
     return obj;
