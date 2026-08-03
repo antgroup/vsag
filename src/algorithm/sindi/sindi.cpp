@@ -910,7 +910,7 @@ SINDI::immutable_search_impl(const SparseTermComputerPtr& computer,
         scan_immutable_window_by_mapped_terms(dists.data(), window, computer, mapped_terms);
 
         if (reasoning_ctx != nullptr) {
-            selected_buckets->push_back(cur);
+            selected_buckets->push_back(static_cast<BucketIdType>(cur));
             auto doc_count = static_cast<uint32_t>(std::min<int64_t>(
                 window_size_, cur_element_count_ - static_cast<int64_t>(window_start_id)));
             for (uint32_t i = 0; i < doc_count; ++i) {
@@ -1059,7 +1059,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         term_list->Query(dists.data(), computer);
 
         if (reasoning_ctx != nullptr) {
-            selected_buckets->push_back(cur);
+            selected_buckets->push_back(static_cast<BucketIdType>(cur));
             auto doc_count = static_cast<uint32_t>(std::min<int64_t>(
                 window_size_, cur_element_count_ - static_cast<int64_t>(window_start_id)));
             for (uint32_t i = 0; i < doc_count; ++i) {
