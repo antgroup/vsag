@@ -350,6 +350,23 @@ TEST_CASE("AutoTune candidate rules only fill missing fields") {
     const auto integer_range = vsag::autotune::internal::GenerateCandidates(request);
     REQUIRE(integer_range.size() == 1);
     REQUIRE(integer_range[0].search_params["hgraph"]["ef_search"] == minimum);
+
+    constexpr double large_start = 1e15;
+    request.indexes[0].search_params = {
+        {"hgraph",
+         {{"ef_search",
+           {{"$range", {{"start", large_start}, {"stop", large_start + 1.0}, {"step", 0.25}}}}}}}};
+    const auto large_float_range = vsag::autotune::internal::GenerateCandidates(request);
+    REQUIRE(large_float_range.size() == 5);
+    REQUIRE(large_float_range.front().search_params["hgraph"]["ef_search"] == large_start);
+    REQUIRE(large_float_range.back().search_params["hgraph"]["ef_search"] == large_start + 1.0);
+
+    const auto oversized = static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) + uint64_t{1};
+    request.indexes[0].search_params = {
+        {"hgraph",
+         {{"ef_search", {{"$range", {{"start", oversized}, {"stop", oversized}, {"step", 1}}}}}}}};
+    REQUIRE_THROWS_WITH(vsag::autotune::internal::GenerateCandidates(request),
+                        Catch::Matchers::ContainsSubstring("$range integer values must fit int64"));
 }
 
 TEST_CASE("AutoTune proposes conservative defaults for existing IVF indexes") {
@@ -507,6 +524,12 @@ TEST_CASE("AutoTune validates typed requests and optional ground truth") {
                                       ->Owner(false);
     REQUIRE_THROWS_WITH(vsag::autotune::internal::ParseRequest(input),
                         Catch::Matchers::ContainsSubstring("not present in base"));
+
+    input = fixture.Request(temp_path("autotune-typed-duplicate-search-namespace"));
+    input.index_spaces[0].search_parameter_space =
+        R"({"HGRAPH":{"ef_search":8},"hgraph":{"ef_search":16}})";
+    REQUIRE_THROWS_WITH(vsag::autotune::internal::ParseRequest(input),
+                        Catch::Matchers::ContainsSubstring("duplicate index namespace"));
 }
 
 TEST_CASE("AutoTune returns structured offline validation failures") {

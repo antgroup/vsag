@@ -485,6 +485,12 @@ TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][
         Catch::Matchers::ContainsSubstring("query error: ef_search(0) must be at least 1"));
     REQUIRE(omp_get_max_threads() == caller_thread_count);
 
+    config.enable_qps = false;
+    REQUIRE_THROWS_WITH(
+        vsag::eval::EvaluateSearch(index, dataset, config),
+        Catch::Matchers::ContainsSubstring("query error: ef_search(0) must be at least 1"));
+    config.enable_qps = true;
+
     config.search_param = R"({"hgraph":{"ef_search":8}})";
     config.top_k = 0;
     REQUIRE_THROWS_WITH(vsag::eval::EvaluateSearch(index, dataset, config),
@@ -504,6 +510,10 @@ TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][
     config.search_query_count = 0;
     REQUIRE_THROWS_WITH(vsag::eval::EvaluateSearch(index, dataset, config),
                         "evaluation search query count must be positive");
+
+    config.search_query_count = std::numeric_limits<uint64_t>::max();
+    REQUIRE_THROWS_WITH(vsag::eval::EvaluateSearch(index, dataset, config),
+                        "evaluation search query count exceeds the supported range");
 
     config.search_query_count = 2;
     config.top_k = 1;

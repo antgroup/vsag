@@ -295,7 +295,7 @@ SearchEvalCase::do_knn_search() {
         statistics_collected = statistics_collected or collect_statistics;
     }
 
-    if (not statistics_collected and not this->monitors_.empty()) {
+    if (not statistics_collected) {
         omp_set_num_threads(config_.num_threads_searching);
         SearchFailure search_failure;
 #pragma omp parallel for schedule(dynamic)

@@ -508,6 +508,8 @@ parse_index_space(const IndexSpace& value, uint64_t position, bool search_only) 
     for (const auto& item : search.items()) {
         require(normalize(item.key()) == index.name,
                 path + ".search_parameter_space." + item.key() + " is unsupported");
+        require(!index.search_params.contains(index.name),
+                path + ".search_parameter_space contains duplicate index namespace");
         index.search_params[index.name] = item.value();
     }
     return index;

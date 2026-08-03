@@ -27,6 +27,18 @@ namespace {
 
 using Emit = std::function<void(const JsonType&)>;
 
+int64_t
+range_integer(const JsonType& value) {
+    if (value.is_number_unsigned()) {
+        const auto number = value.get<uint64_t>();
+        if (number > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+            throw std::invalid_argument("$range integer values must fit int64");
+        }
+        return static_cast<int64_t>(number);
+    }
+    return value.get<int64_t>();
+}
+
 void
 expand(const JsonType& value, const Emit& emit);
 
@@ -61,9 +73,9 @@ expand_range(const JsonType& range, const Emit& emit) {
 
     if (range["start"].is_number_integer() && range["stop"].is_number_integer() &&
         range["step"].is_number_integer()) {
-        const auto start = range["start"].get<int64_t>();
-        const auto stop = range["stop"].get<int64_t>();
-        const auto step = range["step"].get<int64_t>();
+        const auto start = range_integer(range["start"]);
+        const auto stop = range_integer(range["stop"]);
+        const auto step = range_integer(range["step"]);
         if (step == 0 || (start < stop && step < 0) || (start > stop && step > 0)) {
             throw std::invalid_argument("$range step does not reach stop");
         }
@@ -91,12 +103,12 @@ expand_range(const JsonType& range, const Emit& emit) {
         (start < stop && step < 0.0) || (start > stop && step > 0.0)) {
         throw std::invalid_argument("$range step does not reach stop");
     }
-    const auto tolerance = std::numeric_limits<double>::epsilon() *
-                           std::max({1.0, std::abs(start), std::abs(stop)}) * 8.0;
     double previous = 0.0;
     bool emitted = false;
     for (uint64_t i = 0;; ++i) {
         auto current = start + static_cast<double>(i) * step;
+        const auto tolerance = std::max(std::abs(std::nextafter(current, stop) - current),
+                                        std::abs(std::nextafter(stop, current) - stop));
         if (!std::isfinite(current) ||
             (step > 0.0 && current > stop && current - stop > tolerance) ||
             (step < 0.0 && current < stop && stop - current > tolerance)) {
