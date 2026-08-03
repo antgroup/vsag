@@ -209,7 +209,7 @@ if (NOT OPENBLAS_FOUND)
             OMP_NUM_THREADS=1
             PATH=/usr/lib/ccache:$ENV{PATH}
             LD_LIBRARY_PATH=/opt/alibaba-cloud-compiler/lib64/:$ENV{LD_LIBRARY_PATH}
-            make USE_THREAD=0 USE_LOCKING=1 DYNAMIC_ARCH=1 NOFORTRAN=1 -j${NUM_BUILDING_JOBS}
+            make USE_THREAD=0 USE_LOCKING=1 DYNAMIC_ARCH=1 NOFORTRAN=1 -j1
         INSTALL_COMMAND
             make DYNAMIC_ARCH=1 NOFORTRAN=1 PREFIX=${install_dir} install
         BUILD_IN_SOURCE 1
