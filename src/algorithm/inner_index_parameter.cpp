@@ -141,13 +141,21 @@ ValidateMRLEDim(const JsonType& external_json, uint64_t dim) {
 
 bool
 RequiresRawVectorForTransformQuantizer(const JsonType& inner_json) {
+    const auto& base_type = inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY];
     const bool is_transform_quantizer =
-        inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].GetString() ==
-        QUANTIZATION_TYPE_VALUE_TQ;
+        base_type.IsString() and base_type.GetString() == QUANTIZATION_TYPE_VALUE_TQ;
+    if (not is_transform_quantizer) {
+        return false;
+    }
+
+    const auto& use_reorder = inner_json[USE_REORDER_KEY];
+    // An omitted reorder_source uses InnerIndexParameter's default precise source.
+    const bool reorders_from_base =
+        inner_json.Contains(REORDER_SOURCE_KEY) and inner_json[REORDER_SOURCE_KEY].IsString() and
+        inner_json[REORDER_SOURCE_KEY].GetString() == HGRAPH_REORDER_SOURCE_BASE;
     const bool has_precise_decode_source =
-        inner_json[USE_REORDER_KEY].GetBool() and
-        inner_json[REORDER_SOURCE_KEY].GetString() != HGRAPH_REORDER_SOURCE_BASE;
-    return is_transform_quantizer and not has_precise_decode_source;
+        use_reorder.IsBool() and use_reorder.GetBool() and not reorders_from_base;
+    return not has_precise_decode_source;
 }
 
 void
