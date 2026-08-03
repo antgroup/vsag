@@ -208,7 +208,9 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 flatten->Query(&cur_dist, computer, &cur_inner_id, 1, ctx);
                 // Sign convention: top_candidates stores positive distances (nearest = smallest);
                 // candidate_set is a max-heap, so distances are negated (nearest = largest, popped first).
-                top_candidates->Push(cur_dist, cur_inner_id);
+                if (cur_dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
+                    top_candidates->Push(cur_dist, cur_inner_id);
+                }
                 candidate_set->Push(-cur_dist, cur_inner_id);
                 if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
                     if (cur_dist > inner_search_param.radius and not top_candidates->Empty()) {
@@ -236,7 +238,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         } else {
             flatten->Query(&dist, computer, &ep, 1, ctx);
         }
-        if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
+        if ((not is_id_allowed || is_id_allowed->CheckValid(ep)) and
+            dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
             top_candidates->Push(dist, ep);
             lower_bound = top_candidates->Top().first;
         }
@@ -314,7 +317,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 }
                 candidate_set->Push(-dist, cur_id);
                 flatten->Prefetch(candidate_set->Top().second);
-                if (id_allowed) {
+                if (id_allowed && dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
                     top_candidates->Push(dist, cur_id);
                 }
 
@@ -413,7 +416,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         flatten->Query(&dist, computer, &ep, 1, ctx);
     }
     ++dist_cmp;
-    if (check_func(ep)) {
+    if (check_func(ep) && dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
         top_candidates->Push(dist, ep);
         lower_bound = top_candidates->Top().first;
     }
@@ -510,7 +513,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 candidate_set->Push(-dist, cur_id);
                 //                flatten->Prefetch(candidate_set->Top().second);
-                if (check_func(cur_id)) {
+                if (check_func(cur_id) &&
+                    dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
                     top_candidates->Push(dist, cur_id);
                 } else if (reasoning != nullptr) {
                     reasoning->RecordFilterReject(cur_id);
@@ -518,7 +522,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 if (inner_search_param.consider_duplicate) {
                     const auto duplicate_ids = graph->GetDuplicateIds(cur_id);
                     for (const auto& item : duplicate_ids) {
-                        if (check_func(item)) {
+                        if (check_func(item) &&
+                            dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
                             top_candidates->Push(dist, item);
                         }
                     }
