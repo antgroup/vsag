@@ -58,6 +58,7 @@ namespace vsag {
 class FlattenOptimizedBuildInterface;
 class HGraphOptimizedBuildSession;
 class IteratorFilterContext;
+class ReasoningContext;
 
 /**
  * @brief HGraph: hierarchical navigable graph index.
@@ -804,6 +805,55 @@ private:
         uint64_t seed_count{0};
         bool used_precise_float_csr{false};
     };
+
+    [[nodiscard]] QueryContext
+    create_query_context(const SearchRequest& request,
+                         const HGraphSearchParameters& params,
+                         int64_t k,
+                         bool use_custom_distance,
+                         SearchStatistics* stats,
+                         std::shared_ptr<ReasoningContext>& reasoning_ctx) const;
+
+    void
+    search_route_graphs(const SearchRequest& request,
+                        const HGraphSearchParameters& params,
+                        InnerIdType entry_point,
+                        bool use_custom_distance,
+                        const void* query,
+                        const VisitedListPtr& visited_list,
+                        QueryContext* ctx,
+                        InnerSearchParam& search_param) const;
+
+    static void
+    configure_bottom_graph_search(const SearchRequest& request,
+                                  const HGraphSearchParameters& params,
+                                  bool is_range,
+                                  int64_t k,
+                                  bool use_custom_distance,
+                                  const FilterPtr& filter,
+                                  const std::optional<float>& threshold,
+                                  QueryContext* ctx,
+                                  InnerSearchParam& search_param);
+
+    [[nodiscard]] DatasetPtr
+    pack_search_result(const SearchRequest& request,
+                       int64_t k,
+                       DistHeapPtr search_result,
+                       const QueryContext& ctx,
+                       const MCIHybridSearchResult& mci_result,
+                       const SearchStatistics& stats,
+                       const std::shared_ptr<ReasoningContext>& reasoning_ctx) const;
+
+    [[nodiscard]] HGraphSearchParameters
+    parse_and_validate_search_params(const SearchRequest& request,
+                                     bool is_range,
+                                     int64_t k,
+                                     bool use_custom_distance) const;
+
+    [[nodiscard]] std::shared_ptr<ReasoningContext>
+    initialize_reasoning_context(const SearchRequest& request,
+                                 int64_t k,
+                                 bool use_custom_distance) const;
 
     [[nodiscard]] MCIHybridSearchResult
     try_mci_search(const SearchRequest& request,
