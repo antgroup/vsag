@@ -147,6 +147,13 @@ Pyramid build parameters also live under `index_param`:
 }
 ```
 
+MRLE with split RaBitQ uses `base_quantization_type: "tq"`,
+`tq_chain: "mrle, rabitq"`, `mrle_dim`, and the
+`rabitq_bits_per_dim_base`/`rabitq_bits_per_dim_precise` pair. It automatically reorders from the
+split base codes and retains original FP32 vectors for decode-only operations. See the
+[Pyramid page](../indexes/pyramid.md#mrle-with-split-rabitq) for a complete configuration and
+storage/recall tradeoffs.
+
 ## SINDI (sparse vectors)
 
 ```json

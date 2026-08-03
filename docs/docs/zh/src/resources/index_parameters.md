@@ -140,6 +140,12 @@ Pyramid 构建参数同样放在 `index_param` 下：
 }
 ```
 
+MRLE 与 split RaBitQ 组合使用 `base_quantization_type: "tq"`、
+`tq_chain: "mrle, rabitq"`、`mrle_dim`，以及
+`rabitq_bits_per_dim_base`/`rabitq_bits_per_dim_precise`。该配置会自动从 split base codes
+精排，并保留原始 FP32 向量供仅解码路径使用。完整配置及存储/召回权衡见
+[Pyramid 页面](../indexes/pyramid.md)。
+
 ## SINDI（稀疏向量）
 
 ```json

@@ -32,6 +32,9 @@ MapRaBitQSplitParam(const JsonType& external_json, JsonType& inner_json);
 void
 ValidateMRLEDim(const JsonType& external_json, uint64_t dim);
 
+bool
+RequiresRawVectorForTransformQuantizer(const JsonType& inner_json);
+
 class InnerIndexParameter : public Parameter {
 public:
     explicit InnerIndexParameter() = default;

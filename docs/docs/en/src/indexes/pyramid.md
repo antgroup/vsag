@@ -78,13 +78,38 @@ auto result = index->KnnSearch(
     R"({"pyramid": {"ef_search": 100}})").value();
 ```
 
+## MRLE with split RaBitQ
+
+Pyramid can truncate embeddings trained with Matryoshka Representation Learning before encoding
+them as split RaBitQ codes:
+
+```json
+{
+    "base_quantization_type": "tq",
+    "tq_chain": "mrle, rabitq",
+    "mrle_dim": 1280,
+    "precise_quantization_type": "rabitq",
+    "rabitq_bits_per_dim_base": 3,
+    "rabitq_bits_per_dim_precise": 5,
+    "use_reorder": true
+}
+```
+
+This configuration searches the 3-bit filter planes and uses the 5-bit supplement planes for
+reordering; both parts encode the same truncated vector. Pyramid automatically selects
+`reorder_source: "base"` and retains original FP32 vectors for graph promotion and statistics.
+The raw-vector copy adds storage, and truncation can reduce recall unless the embedding model was
+trained for prefix dimensions.
+
 ## Build parameters
 
 Build-time parameters live under `index_param`.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `base_quantization_type` | string | — | Coarse storage quantizer (`fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`). See the [Quantization chapter](../quantization/README.md) for per-quantizer details. |
+| `base_quantization_type` | string | — | Coarse storage quantizer (`fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `tq`). See the [Quantization chapter](../quantization/README.md) for per-quantizer details. |
+| `tq_chain` | string | — | Transform chain used when `base_quantization_type` is `tq`, for example `"mrle, rabitq"`. |
+| `mrle_dim` | int | `0` | Prefix dimension retained by MRLE; `0` keeps the input dimension. |
 | `max_degree` | int | `64` | Maximum out-degree per node within a sub-graph. |
 | `graph_type` | string | `"nsw"` | `nsw` or `odescent`. |
 | `ef_construction` | int | `400` | Candidate list size for `nsw` builds. |
@@ -93,7 +118,10 @@ Build-time parameters live under `index_param`.
 | `neighbor_sample_rate` | float | — | ODescent neighbor sampling rate. |
 | `no_build_levels` | int[] | `[]` | Tree levels that skip graph construction (0-indexed from the root). |
 | `use_reorder` | bool | `false` | Keep a high-precision copy for rescoring. |
+| `reorder_source` | string | `"precise"` | Distance source for reorder: `precise` or `base`. MRLE split RaBitQ selects `base` automatically. |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer for reordering. |
+| `rabitq_bits_per_dim_base` | int | — | Filter-plane bits for split RaBitQ. |
+| `rabitq_bits_per_dim_precise` | int | — | Supplement-plane bits for split RaBitQ; filter plus supplement must not exceed 8. |
 | `fast_encode_rabitq` | bool | `true` | Use the fast multi-bit RaBitQ encoder for RaBitQ base or precise storage; set to `false` for the exact encoder. |
 | `fast_encode_rabitq_rounds` | int | `6` | Fast RaBitQ refinement rounds in `[1, 32]`. |
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | Base and reorder storage backends; `uring_io` is available in builds with liburing. |

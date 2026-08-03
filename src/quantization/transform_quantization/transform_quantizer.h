@@ -112,7 +112,7 @@ public:
     }
 
     void
-    TransformBaseVector(const float* input, float* output) const;
+    TransformBaseVector(const float* input, Vector<float>& output) const;
 
 public:
     VectorTransformerPtr
@@ -245,9 +245,12 @@ TransformQuantizer<QuantTmpl, metric>::TrainImpl(const float* data, uint64_t cou
     // 2. execute transform on original data
     const uint64_t transformed_dim = this->GetTransformedDim();
     Vector<float> transformed_data(transformed_dim * count, 0, this->allocator_);
+    Vector<float> transformed_vector(this->allocator_);
     for (uint64_t i = 0; i < count; ++i) {
-        this->TransformBaseVector(data + i * this->dim_,
-                                  transformed_data.data() + i * transformed_dim);
+        this->TransformBaseVector(data + i * this->dim_, transformed_vector);
+        memcpy(transformed_data.data() + i * transformed_dim,
+               transformed_vector.data(),
+               transformed_dim * sizeof(float));
     }
 
     // 3. train quantizer based on transformed data
@@ -276,11 +279,10 @@ TransformQuantizer<QuantTmpl, metric>::ExecuteChainTransform(float* prev_data,
 template <typename QuantTmpl, MetricType metric>
 void
 TransformQuantizer<QuantTmpl, metric>::TransformBaseVector(const float* input,
-                                                           float* output) const {
-    Vector<float> data_buffer(this->dim_, 0, this->allocator_);
-    data_buffer.assign(input, input + this->dim_);
-    ExecuteChainTransform(data_buffer.data(), nullptr, nullptr);
-    memcpy(output, data_buffer.data(), this->GetTransformedDim() * sizeof(float));
+                                                           Vector<float>& output) const {
+    output.assign(input, input + this->dim_);
+    ExecuteChainTransform(output.data(), nullptr, nullptr);
+    output.resize(this->GetTransformedDim());
 }
 
 template <typename QuantTmpl, MetricType metric>

@@ -69,8 +69,7 @@ struct BottomQuantizerAccessor<TransformQuantizer<InnerQuantizerT, metric>> {
     PrepareBottomInput(const TransformQuantizerType& quantizer,
                        const float* input,
                        Vector<float>& scratch) {
-        scratch.resize(quantizer.GetTransformedDim());
-        quantizer.TransformBaseVector(input, scratch.data());
+        quantizer.TransformBaseVector(input, scratch);
         return scratch.data();
     }
 };

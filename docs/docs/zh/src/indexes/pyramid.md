@@ -73,13 +73,37 @@ auto result = index->KnnSearch(
     R"({"pyramid": {"ef_search": 100}})").value();
 ```
 
+## MRLE 与 split RaBitQ
+
+对于使用 Matryoshka Representation Learning 训练的向量，Pyramid 可以先截断维度，再编码
+为 split RaBitQ：
+
+```json
+{
+    "base_quantization_type": "tq",
+    "tq_chain": "mrle, rabitq",
+    "mrle_dim": 1280,
+    "precise_quantization_type": "rabitq",
+    "rabitq_bits_per_dim_base": 3,
+    "rabitq_bits_per_dim_precise": 5,
+    "use_reorder": true
+}
+```
+
+该配置使用 3-bit filter planes 搜索、5-bit supplement planes 精排；两部分编码的是同一个
+截断后向量。Pyramid 会自动选择 `reorder_source: "base"`，并保留原始 FP32 向量供构图提升
+和统计使用。原始向量副本会占用额外空间；如果 embedding 模型没有针对前缀维度训练，截断
+可能显著降低召回率。
+
 ## 构建参数
 
 构建参数放在 `index_param` 下。
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `base_quantization_type` | string | — | 底层量化类型（`fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`）。各量化器细节见[量化章节](../quantization/README.md)。 |
+| `base_quantization_type` | string | — | 底层量化类型（`fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`tq`）。各量化器细节见[量化章节](../quantization/README.md)。 |
+| `tq_chain` | string | — | `base_quantization_type` 为 `tq` 时使用的变换链，例如 `"mrle, rabitq"`。 |
+| `mrle_dim` | int | `0` | MRLE 保留的前缀维度；`0` 表示保持输入维度。 |
 | `max_degree` | int | `64` | 子图内节点的最大出度 |
 | `graph_type` | string | `"nsw"` | `nsw` 或 `odescent` |
 | `ef_construction` | int | `400` | `nsw` 构图时的候选集大小 |
@@ -88,7 +112,10 @@ auto result = index->KnnSearch(
 | `neighbor_sample_rate` | float | — | ODescent 的邻居采样比率 |
 | `no_build_levels` | int[] | `[]` | 跳过构图的层级（从根节点开始的 0-based 下标） |
 | `use_reorder` | bool | `false` | 是否保留高精度副本用于精排 |
+| `reorder_source` | string | `"precise"` | 精排距离来源：`precise` 或 `base`；MRLE split RaBitQ 会自动选择 `base`。 |
 | `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型 |
+| `rabitq_bits_per_dim_base` | int | — | split RaBitQ 的 filter-plane bit 数。 |
+| `rabitq_bits_per_dim_precise` | int | — | split RaBitQ 的 supplement-plane bit 数；与 filter bit 之和不能超过 8。 |
 | `fast_encode_rabitq` | bool | `true` | 对 RaBitQ 底层或精排存储使用多 bit 快速编码器；设为 `false` 使用精确编码器 |
 | `fast_encode_rabitq_rounds` | int | `6` | RaBitQ 快速编码的微调轮数，范围 `[1, 32]` |
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | 底层与精排存储后端；以 liburing 构建时可用 `uring_io` |

@@ -139,6 +139,17 @@ ValidateMRLEDim(const JsonType& external_json, uint64_t dim) {
                    fmt::format("mrle_dim({}) must be in range [0, {}]", mrle_dim, dim));
 }
 
+bool
+RequiresRawVectorForTransformQuantizer(const JsonType& inner_json) {
+    const bool is_transform_quantizer =
+        inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].GetString() ==
+        QUANTIZATION_TYPE_VALUE_TQ;
+    const bool has_precise_decode_source =
+        inner_json[USE_REORDER_KEY].GetBool() and
+        inner_json[REORDER_SOURCE_KEY].GetString() != HGRAPH_REORDER_SOURCE_BASE;
+    return is_transform_quantizer and not has_precise_decode_source;
+}
+
 void
 InnerIndexParameter::FromJson(const JsonType& json) {
     if (json.Contains(USE_REORDER_KEY)) {

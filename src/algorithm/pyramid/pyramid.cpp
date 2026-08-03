@@ -1131,11 +1131,9 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
     mapping_external_param_to_inner(external_param, external_mapping, inner_json);
     MapRaBitQSplitParam(external_param, inner_json);
     ValidateMRLEDim(external_param, common_param.dim_);
-    const bool requires_raw_vector =
-        inner_json[BASE_CODES_KEY][CODES_TYPE_KEY].GetString() == RABITQ_SPLIT_CODES and
-        inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].GetString() ==
-            QUANTIZATION_TYPE_VALUE_TQ;
-    inner_json[STORE_RAW_VECTOR_KEY].SetBool(requires_raw_vector);
+    if (RequiresRawVectorForTransformQuantizer(inner_json)) {
+        inner_json[STORE_RAW_VECTOR_KEY].SetBool(true);
+    }
     auto pyramid_params = std::make_shared<PyramidParameters>();
     pyramid_params->FromJson(inner_json);
     return pyramid_params;

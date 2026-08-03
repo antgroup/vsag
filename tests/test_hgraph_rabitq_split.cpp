@@ -236,6 +236,7 @@ TEST_CASE("HGraph MRLE RaBitQ Split", "[ft][rabitq_split][hgraph][MRLE]") {
     auto index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param_json.Dump(), true);
     auto dataset = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, base_count, "l2");
     TestIndex::TestBuildIndex(index, dataset, true);
+    REQUIRE_NOTHROW(index->GetStats());
     TestIndex::TestKnnSearch(index, dataset, kSplitSearchParam, 0.05F, true);
 }
 

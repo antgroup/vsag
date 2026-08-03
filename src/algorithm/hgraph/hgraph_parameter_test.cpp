@@ -888,6 +888,8 @@ TEST_CASE("HGraph maps MRLE RaBitQ split to base reorder", "[ut][HGraphParameter
     REQUIRE(typed_param != nullptr);
     REQUIRE(typed_param->reorder_source == std::string("base"));
     REQUIRE(typed_param->precise_codes_param == nullptr);
+    REQUIRE(typed_param->store_raw_vector);
+    REQUIRE(typed_param->raw_vector_param != nullptr);
     const auto base_json = typed_param->base_codes_param->ToJson();
     REQUIRE(base_json["codes_type"].GetString() == std::string("rabitq_split"));
     REQUIRE(base_json["quantization_params"]["type"].GetString() == std::string("tq"));

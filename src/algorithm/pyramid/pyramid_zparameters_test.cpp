@@ -282,6 +282,21 @@ TEST_CASE("Pyramid Parameters CheckCompatibility", "[ut][PyramidParameter][Check
     TEST_COMPATIBILITY_CASE("different index min size", index_min_size, 500, 1500, false);
     TEST_COMPATIBILITY_CASE("different support duplicate", support_duplicate, false, true, false);
 
+    SECTION("different reorder sources") {
+        PyramidDefaultParam default_param;
+        auto precise_param = std::make_shared<vsag::PyramidParameters>();
+        auto base_param = std::make_shared<vsag::PyramidParameters>();
+        auto precise_json = vsag::JsonType::Parse(generate_pyramid(default_param));
+        auto base_json = precise_json;
+        precise_json[vsag::REORDER_SOURCE_KEY].SetString(vsag::HGRAPH_REORDER_SOURCE_PRECISE);
+        base_json[vsag::REORDER_SOURCE_KEY].SetString(vsag::HGRAPH_REORDER_SOURCE_BASE);
+        precise_param->FromJson(precise_json);
+        base_param->FromJson(base_json);
+
+        REQUIRE_FALSE(precise_param->CheckCompatibility(base_param));
+        REQUIRE_FALSE(base_param->CheckCompatibility(precise_param));
+    }
+
     SECTION("same hierarchies in different order") {
         auto param1 = ParsePyramidWithHierarchies(
             nlohmann::json::array({{{"name", "site"}, {"no_build_levels", {0, 1}}},
@@ -484,4 +499,24 @@ TEST_CASE("Pyramid maps MRLE RaBitQ split to base reorder", "[ut][PyramidParamet
     REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_filter"].GetInt() == 3);
     REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_base"].GetInt() == 8);
     REQUIRE(raw_json["quantization_params"]["type"].GetString() == std::string("fp32"));
+}
+
+TEST_CASE("Pyramid retains vectors for TQ without precise decode source",
+          "[ut][PyramidParameters][TQ]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "tq",
+        "tq_chain": "mrle, fp32",
+        "mrle_dim": 64,
+        "use_reorder": false
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::PyramidParameters>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->store_raw_vector);
+    REQUIRE(typed_param->raw_vector_param != nullptr);
 }

@@ -676,6 +676,9 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     }
 
     ValidateMRLEDim(external_param, common_param.dim_);
+    if (RequiresRawVectorForTransformQuantizer(inner_json)) {
+        inner_json[STORE_RAW_VECTOR_KEY].SetBool(true);
+    }
 
     auto hgraph_parameter = std::make_shared<HGraphParameter>();
     hgraph_parameter->data_type = common_param.data_type_;
