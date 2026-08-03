@@ -14,11 +14,13 @@
 
 #include "graph_bucket_searcher.h"
 
+#include <algorithm>
 #include <limits>
 
 #include "attr/executor/executor.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "impl/searcher/basic_searcher.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -82,144 +84,61 @@ GraphBucketSearcher::search_graph(BucketIdType bucket_id,
                                   BucketIdType buckets_per_data,
                                   DistHeapPtr& heap,
                                   ReasoningContext* reasoning_ctx) const {
-    auto bucket_size = bucket->GetBucketSize(bucket_id);
+    const auto bucket_size = bucket->GetBucketSize(bucket_id);
     if (bucket_size == 0) {
         return;
     }
     const auto& graph = bucket_graphs_[bucket_id];
     const auto* ids = bucket->GetInnerIds(bucket_id);
-
-    uint64_t ef = param.ef;
-    if (param.search_mode == InnerSearchMode::KNN_SEARCH && ef < static_cast<uint64_t>(topk)) {
-        ef = static_cast<uint64_t>(topk);
-    }
-    // Cap ef at bucket_size to avoid full-graph traversal for unlimited RANGE_SEARCH
-    // where the caller sets topk to total index size.
-    if (ef > static_cast<uint64_t>(bucket_size)) {
-        ef = static_cast<uint64_t>(bucket_size);
-    }
-
-    VisitedList vl(bucket_size, allocator_);
-
-    StandardHeap<true, false> top_candidates(allocator_, -1);
-    StandardHeap<true, false> candidate_set(allocator_, -1);
-
-    const auto& ft = param.is_inner_id_allowed;
-    const auto topk_u = static_cast<uint64_t>(topk);
-
-    Filter* attr_ft = nullptr;
-    if (not param.executors.empty() and
-        static_cast<uint64_t>(thread_id) < param.executors.size() and
-        param.executors[thread_id] != nullptr) {
-        param.executors[thread_id]->Clear();
-        attr_ft = param.executors[thread_id]->Run(bucket_id);
-    }
-
-    auto check_func = [&ft, &attr_ft, &ids](InnerIdType local_id, InnerIdType origin_id) {
-        return (ft == nullptr or ft->CheckValid(origin_id)) and
-               (attr_ft == nullptr or attr_ft->CheckValid(local_id));
-    };
-
-    // Find a valid (non-hole) entry point
     InnerIdType entry = 0;
-    while (entry < static_cast<InnerIdType>(bucket_size) &&
-           ids[entry] == std::numeric_limits<InnerIdType>::max()) {
+    while (entry < bucket_size && ids[entry] == std::numeric_limits<InnerIdType>::max()) {
         ++entry;
     }
-    if (entry >= static_cast<InnerIdType>(bucket_size)) {
-        return;  // all entries are holes, fall back
-    }
-    float entry_dist = bucket->QueryOneById(computer, bucket_id, entry);
-    auto origin_entry = ids[entry] / buckets_per_data;
-    if (reasoning_ctx != nullptr) {
-        reasoning_ctx->RecordVisit(origin_entry, entry_dist, 0);
-    }
-    if (check_func(entry, origin_entry)) {
-        top_candidates.Push(entry_dist, entry);
-    } else if (reasoning_ctx != nullptr) {
-        reasoning_ctx->RecordFilterReject(origin_entry);
-    }
-    candidate_set.Push(-entry_dist, entry);
-    vl.Set(entry);
-
-    auto lower_bound = std::numeric_limits<float>::max();
-    if (not top_candidates.Empty()) {
-        lower_bound = top_candidates.Top().first;
+    if (entry == bucket_size) {
+        return;
     }
 
-    const auto max_degree = graph->MaximumDegree();
-    Vector<InnerIdType> neighbors(allocator_);
-
-    while (not candidate_set.Empty()) {
-        auto current_node_pair = candidate_set.Top();
-
-        if ((-current_node_pair.first) > lower_bound and top_candidates.Size() >= ef) {
-            break;
-        }
-        candidate_set.Pop();
-
-        const auto neighbor_count = graph->GetNeighborSize(current_node_pair.second);
-        if (neighbor_count > max_degree) {
-            continue;
-        }
-        graph->GetNeighbors(current_node_pair.second, neighbors);
-
-        for (const auto neighbor_id : neighbors) {
-            if (vl.Get(neighbor_id)) {
-                continue;
-            }
-            vl.Set(neighbor_id);
-
-            float d = bucket->QueryOneById(computer, bucket_id, neighbor_id);
-            auto origin_id = ids[neighbor_id] / buckets_per_data;
-            if (reasoning_ctx != nullptr) {
-                reasoning_ctx->RecordVisit(origin_id, d, 1);
-            }
-
-            if (top_candidates.Size() < ef or lower_bound > d or
-                (param.search_mode == RANGE_SEARCH and d <= param.radius + THRESHOLD_ERROR)) {
-                candidate_set.Push(-d, neighbor_id);
-                if (check_func(neighbor_id, origin_id)) {
-                    top_candidates.Push(d, neighbor_id);
-                } else if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordFilterReject(origin_id);
-                }
-                if (param.search_mode == KNN_SEARCH and top_candidates.Size() > ef) {
-                    if (reasoning_ctx != nullptr) {
-                        reasoning_ctx->RecordEviction(
-                            ids[top_candidates.Top().second] / buckets_per_data, 1);
-                    }
-                    top_candidates.Pop();
-                }
-                if (not top_candidates.Empty()) {
-                    lower_bound = top_candidates.Top().first;
-                }
-            }
-        }
+    Filter* attr_filter = nullptr;
+    if (not param.executors.empty() && static_cast<uint64_t>(thread_id) < param.executors.size() &&
+        param.executors[thread_id] != nullptr) {
+        param.executors[thread_id]->Clear();
+        attr_filter = param.executors[thread_id]->Run(bucket_id);
+    }
+    InnerSearchParam search_param = param;
+    search_param.ep = entry;
+    uint64_t result_limit = std::numeric_limits<uint64_t>::max();
+    if (search_param.search_mode == KNN_SEARCH) {
+        CHECK_ARGUMENT(topk > 0, "topk must be greater than 0");
+        result_limit = static_cast<uint64_t>(topk);
+        search_param.ef = std::max(search_param.ef, result_limit);
+    } else if (topk > 0) {
+        result_limit = static_cast<uint64_t>(topk);
+    }
+    search_param.ef = std::min<uint64_t>(search_param.ef, bucket_size);
+    search_param.topk = topk;
+    if (search_param.search_mode == RANGE_SEARCH) {
+        // BasicSearcher uses a non-positive range limit to mean unlimited; clamp only positive
+        // limits because InnerSearchParam stores this field as int.
+        search_param.range_search_limit_size =
+            topk > 0 ? static_cast<int>(std::min<int64_t>(topk, std::numeric_limits<int>::max()))
+                     : 0;
     }
 
-    if (param.search_mode == KNN_SEARCH) {
-        while (top_candidates.Size() > topk_u) {
-            top_candidates.Pop();
-        }
-    } else {
-        while (not top_candidates.Empty() and
-               top_candidates.Top().first > param.radius + THRESHOLD_ERROR) {
-            top_candidates.Pop();
-        }
-        if (topk_u > 0) {
-            while (top_candidates.Size() > topk_u) {
-                top_candidates.Pop();
-            }
-        }
+    // BucketInterface can create computers only from raw queries, not local IDs. Search only
+    // needs query distances, so use the no-factory provider and make pairwise misuse explicit.
+    BucketDistanceProvider distance_provider(bucket, bucket_id, computer, ids, buckets_per_data);
+    auto visited = std::make_shared<VisitedList>(bucket_size, allocator_);
+    QueryContext query_context{};
+    query_context.reasoning_ctx = reasoning_ctx;
+    BasicSearcher searcher(allocator_);
+    auto top_candidates = searcher.Search(
+        graph, distance_provider, visited, search_param, attr_filter, &query_context);
+    while (not top_candidates->Empty()) {
+        const auto [distance, local_id] = top_candidates->Top();
+        heap->Push(distance, ids[local_id]);
+        top_candidates->Pop();
     }
-
-    while (not top_candidates.Empty()) {
-        auto [d, local_id] = top_candidates.Top();
-        heap->Push(d, ids[local_id]);
-        top_candidates.Pop();
-    }
-    while (heap->Size() > topk_u) {
+    while (heap->Size() > result_limit) {
         heap->Pop();
     }
 }

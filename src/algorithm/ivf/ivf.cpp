@@ -34,6 +34,7 @@
 #include "graph_bucket_searcher.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/inner_search_param.h"
+#include "impl/pruning_strategy.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
@@ -738,131 +739,25 @@ IVF::build_bucket_graphs(const DatasetPtr& base) {
             CHECK_ARGUMENT(query != nullptr, "base dataset has no graph build vector data");
             return bucket_->FactoryComputer(query);
         };
-
-        // Adapted from HGraph select_edges_by_heuristic: retain close, diverse edges.
-        auto select_edges_by_heuristic = [&](InnerIdType source, Vector<InnerIdType>& neighbors) {
-            auto source_computer = make_computer(source);
-            Vector<std::pair<float, InnerIdType>> candidates(allocator_);
-            candidates.reserve(neighbors.size());
-            for (const auto neighbor : neighbors) {
-                if (neighbor == source || neighbor >= bucket_size ||
-                    inner_ids[neighbor] == std::numeric_limits<InnerIdType>::max()) {
-                    continue;
-                }
-                bool duplicate = false;
-                for (const auto& candidate : candidates) {
-                    if (candidate.second == neighbor) {
-                        duplicate = true;
-                        break;
-                    }
-                }
-                if (!duplicate) {
-                    candidates.emplace_back(bucket_->QueryOneById(source_computer, b, neighbor),
-                                            neighbor);
-                }
-            }
-            std::sort(candidates.begin(), candidates.end(), [](const auto& lhs, const auto& rhs) {
-                return lhs.first < rhs.first;
-            });
-
-            neighbors.clear();
-            Vector<ComputerInterfacePtr> selected_computers(allocator_);
-            for (const auto& candidate : candidates) {
-                bool good = true;
-                for (const auto& selected_comp : selected_computers) {
-                    const auto pair_distance =
-                        bucket_->QueryOneById(selected_comp, b, candidate.second);
-                    if (pair_distance < candidate.first) {
-                        good = false;
-                        break;
-                    }
-                }
-                if (good) {
-                    neighbors.push_back(candidate.second);
-                    selected_computers.push_back(make_computer(candidate.second));
-                    if (neighbors.size() == static_cast<uint64_t>(effective_degree)) {
-                        break;
-                    }
-                }
-            }
-        };
+        auto mutexes = std::make_shared<EmptyMutex>();
+        BasicSearcher searcher(common_param_);
 
         const auto entry = valid_ids.front();
         graph->InsertNeighborsById(entry, Vector<InnerIdType>(allocator_));
-        VisitedList visited(bucket_size, allocator_);
-        Vector<InnerIdType> graph_neighbors(effective_degree, allocator_);
-
+        auto visited = std::make_shared<VisitedList>(bucket_size, allocator_);
         for (uint64_t node_pos = 1; node_pos < valid_ids.size(); ++node_pos) {
             const auto node = valid_ids[node_pos];
-            auto computer = make_computer(node);
-            const auto entry_dist = bucket_->QueryOneById(computer, b, entry);
-            const auto ef = std::min(ef_construction, node_pos);
-
-            visited.Reset();
-            StandardHeap<true, false> top_candidates(allocator_, -1);
-            StandardHeap<true, false> candidate_set(allocator_, -1);
-            top_candidates.Push(entry_dist, entry);
-            candidate_set.Push(-entry_dist, entry);
-            visited.Set(entry);
-            auto lower_bound = entry_dist;
-
-            while (not candidate_set.Empty()) {
-                const auto current = candidate_set.Top();
-                if (-current.first > lower_bound && top_candidates.Size() >= ef) {
-                    break;
-                }
-                candidate_set.Pop();
-
-                graph->GetNeighbors(current.second, graph_neighbors);
-                const auto neighbor_count = graph->GetNeighborSize(current.second);
-                for (uint32_t i = 0; i < neighbor_count; ++i) {
-                    const auto neighbor = graph_neighbors[i];
-                    if (neighbor >= bucket_size || visited.Get(neighbor) ||
-                        inner_ids[neighbor] == std::numeric_limits<InnerIdType>::max()) {
-                        continue;
-                    }
-                    visited.Set(neighbor);
-                    const auto distance = bucket_->QueryOneById(computer, b, neighbor);
-                    if (top_candidates.Size() < ef || distance < lower_bound) {
-                        candidate_set.Push(-distance, neighbor);
-                        top_candidates.Push(distance, neighbor);
-                        if (top_candidates.Size() > ef) {
-                            top_candidates.Pop();
-                        }
-                        lower_bound = top_candidates.Top().first;
-                    }
-                }
-            }
-
-            Vector<std::pair<float, InnerIdType>> candidates(allocator_);
-            candidates.reserve(top_candidates.Size());
-            for (uint64_t i = 0; i < top_candidates.Size(); ++i) {
-                candidates.push_back(top_candidates.GetData()[i]);
-            }
-            std::sort(candidates.begin(), candidates.end(), [](const auto& lhs, const auto& rhs) {
-                return lhs.first < rhs.first;
-            });
-
-            // Adapted from HGraph mutually_connect_new_element.
-            Vector<InnerIdType> node_neighbors(allocator_);
-            node_neighbors.reserve(candidates.size());
-            for (const auto& candidate : candidates) {
-                node_neighbors.push_back(candidate.second);
-            }
-            select_edges_by_heuristic(node, node_neighbors);
-            graph->InsertNeighborsById(node, node_neighbors);
-
-            for (const auto neighbor : node_neighbors) {
-                Vector<InnerIdType> reciprocal(allocator_);
-                graph->GetNeighbors(neighbor, reciprocal);
-                if (reciprocal.size() < static_cast<uint64_t>(effective_degree)) {
-                    reciprocal.push_back(node);
-                } else {
-                    reciprocal.push_back(node);
-                    select_edges_by_heuristic(neighbor, reciprocal);
-                }
-                graph->InsertNeighborsById(neighbor, reciprocal);
-            }
+            InnerSearchParam search_param;
+            search_param.ep = entry;
+            search_param.ef = std::min(ef_construction, node_pos);
+            search_param.topk = static_cast<int64_t>(search_param.ef);
+            BucketDistanceProvider distance_provider(
+                bucket_, b, make_computer(node), make_computer, inner_ids, buckets_per_data_);
+            visited->Reset();
+            auto candidates =
+                searcher.Search(graph, distance_provider, visited, search_param, nullptr, nullptr);
+            mutually_connect_new_element(
+                node, candidates, graph, distance_provider, mutexes, allocator_);
         }
 
         bucket_graphs_[b] = std::move(graph);
