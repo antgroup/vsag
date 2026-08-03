@@ -158,6 +158,13 @@ RequiresRawVectorForTransformQuantizer(const JsonType& inner_json) {
     return not has_precise_decode_source;
 }
 
+bool
+RequiresRawVectorForMRLERaBitQSplit(const JsonType& inner_json) {
+    const auto& codes_type = inner_json[BASE_CODES_KEY][CODES_TYPE_KEY];
+    return codes_type.IsString() and codes_type.GetString() == RABITQ_SPLIT_CODES and
+           RequiresRawVectorForTransformQuantizer(inner_json);
+}
+
 void
 InnerIndexParameter::FromJson(const JsonType& json) {
     if (json.Contains(USE_REORDER_KEY)) {

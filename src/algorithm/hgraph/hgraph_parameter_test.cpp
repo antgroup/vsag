@@ -701,6 +701,8 @@ TEST_CASE("HGraph maps RaBitQ x+y split params", "[ut][HGraphParameter]") {
     auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
 
     REQUIRE(typed_param != nullptr);
+    REQUIRE_FALSE(typed_param->store_raw_vector);
+    REQUIRE(typed_param->raw_vector_param == nullptr);
     auto base_json = typed_param->base_codes_param->ToJson();
     REQUIRE(base_json["codes_type"].GetString() == std::string("rabitq_split"));
     REQUIRE(base_json["io_params"]["type"].GetString() == std::string("block_memory_io"));
@@ -770,6 +772,8 @@ TEST_CASE("HGraph maps mrle_dim external parameter", "[ut][HGraphParameter]") {
     auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
 
     REQUIRE(typed_param != nullptr);
+    REQUIRE_FALSE(typed_param->store_raw_vector);
+    REQUIRE(typed_param->raw_vector_param == nullptr);
     auto base_json = typed_param->base_codes_param->ToJson();
     REQUIRE(base_json["quantization_params"][vsag::MRLE_DIM_KEY].GetInt() == 127);
 }

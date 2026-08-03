@@ -240,6 +240,46 @@ TEST_CASE("HGraph MRLE RaBitQ Split", "[ft][rabitq_split][hgraph][MRLE]") {
     TestIndex::TestKnnSearch(index, dataset, kSplitSearchParam, 0.05F, true);
 }
 
+TEST_CASE("HGraph tunes FP32 to MRLE RaBitQ Split", "[ft][rabitq_split][hgraph][MRLE][tune]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 128;
+    constexpr uint64_t base_count = 600;
+
+    auto source_param = fmt::format(R"({{
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": {},
+        "index_param": {{
+            "base_quantization_type": "fp32",
+            "use_reorder": false,
+            "max_degree": 32,
+            "ef_construction": 200,
+            "graph_storage_type": "compressed"
+        }}
+    }})",
+                                    dim);
+    auto target_param =
+        HGraphRaBitQSplitTestIndex::GenerateBuildParam("l2", dim, "memory_io", "", 3, 5, true);
+    auto target_json = vsag::JsonType::Parse(target_param);
+    target_json["index_param"]["base_quantization_type"].SetString("tq");
+    target_json["index_param"]["tq_chain"].SetString("mrle, rabitq");
+    target_json["index_param"]["mrle_dim"].SetInt(64);
+    target_param = target_json.Dump();
+
+    auto index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, source_param, true);
+    auto dataset = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, base_count, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto tune_result = index->Tune(target_param, true);
+    REQUIRE(tune_result.has_value());
+    REQUIRE(tune_result.value());
+    REQUIRE_NOTHROW(index->GetStats());
+    TestIndex::TestKnnSearch(index, dataset, kSplitSearchParam, 0.05F, true);
+
+    auto reloaded = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, target_param, true);
+    TestIndex::TestSerializeFile(index, reloaded, dataset, kSplitSearchParam, true);
+}
+
 TEST_CASE("HGraph RaBitQ Split ODescent optimized build", "[ft][rabitq_split][hgraph][odescent]") {
     using namespace fixtures;
     constexpr int64_t dim = 128;

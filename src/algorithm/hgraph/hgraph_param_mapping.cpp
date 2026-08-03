@@ -676,7 +676,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     }
 
     ValidateMRLEDim(external_param, common_param.dim_);
-    if (RequiresRawVectorForTransformQuantizer(inner_json)) {
+    if (RequiresRawVectorForMRLERaBitQSplit(inner_json)) {
         inner_json[STORE_RAW_VECTOR_KEY].SetBool(true);
     }
 

@@ -147,6 +147,11 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
 
     // map
     auto inner_json = map_hgraph_param(hgraph_json);
+    ValidateMRLEDim(hgraph_json, this->dim_);
+    const bool requires_raw_vector = RequiresRawVectorForMRLERaBitQSplit(inner_json);
+    if (requires_raw_vector) {
+        inner_json[STORE_RAW_VECTOR_KEY].SetBool(true);
+    }
 
     // construct param obj
     auto hgraph_parameter = std::make_shared<HGraphParameter>();
@@ -166,7 +171,6 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
         new_precise_code =
             FlattenInterface::MakeInstance(hgraph_parameter->precise_codes_param, common_param);
     }
-
     const auto current_count = total_count_.load(std::memory_order_acquire);
     auto covers_active_ids = [current_count](const FlattenInterfacePtr& codes) {
         return codes != nullptr and codes->TotalCount() >= current_count;
@@ -175,6 +179,12 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     // Check which codes need to be rebuilt.
     bool is_tune_base_code = false;
     bool is_tune_precise_code = false;
+    const bool is_tune_raw_code = requires_raw_vector and not covers_active_ids(raw_vector_);
+    FlattenInterfacePtr new_raw_code;
+    if (is_tune_raw_code) {
+        new_raw_code =
+            FlattenInterface::MakeInstance(hgraph_parameter->raw_vector_param, common_param);
+    }
     const bool drop_precise_codes = not need_precise_codes;
     if (basic_flatten_codes_->GetQuantizerName() != new_basic_code->GetQuantizerName()) {
         is_tune_base_code = true;
@@ -186,7 +196,7 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     }
 
     FlattenInterfacePtr tune_source;
-    if (is_tune_base_code or is_tune_precise_code) {
+    if (is_tune_base_code or is_tune_precise_code or is_tune_raw_code) {
         if (covers_active_ids(raw_vector_)) {
             tune_source = raw_vector_;
         } else if (covers_active_ids(high_precise_codes_) and
@@ -222,7 +232,7 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
 
     auto train_count = std::min(this->train_sample_count_, this->GetNumElements());
     Vector<float> train_data(train_count * dim_, 0, allocator_);
-    if (is_tune_base_code or is_tune_precise_code) {
+    if (is_tune_base_code or is_tune_precise_code or is_tune_raw_code) {
         for (InnerIdType i = 0; i < train_count; i++) {
             decode_tune_source(i, train_data.data() + i * dim_);
         }
@@ -261,6 +271,7 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     auto new_basic = tune_and_rebuild(is_tune_base_code, basic_flatten_codes_, new_basic_code);
     auto new_precise =
         tune_and_rebuild(is_tune_precise_code, high_precise_codes_, new_precise_code);
+    auto new_raw = tune_and_rebuild(is_tune_raw_code, raw_vector_, new_raw_code);
 
     // Acquire exclusive global lock to atomically swap flatten codes,
     // preventing concurrent searches from accessing partially updated state.
@@ -285,15 +296,25 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
         param->use_reorder = new_use_reorder;
         param->reorder_source = inner_parameter->reorder_source;
 
-        check_and_init_raw_vector(param->raw_vector_param, common_param, false);
+        if (requires_raw_vector) {
+            raw_vector_ = new_raw;
+            has_raw_vector_ = true;
+            create_new_raw_vector_ = true;
+            param->store_raw_vector = true;
+            param->raw_vector_param = hgraph_parameter->raw_vector_param;
+        } else {
+            check_and_init_raw_vector(param->raw_vector_param, common_param, false);
+        }
         init_resize_bit_and_reorder();
 
         // set status
         if (disable_future_tuning) {
             this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_TUNE, false);
-            this->raw_vector_.reset();
-            has_raw_vector_ = false;
-            create_new_raw_vector_ = false;
+            if (not requires_raw_vector) {
+                this->raw_vector_.reset();
+                has_raw_vector_ = false;
+                create_new_raw_vector_ = false;
+            }
         }
     }
     return true;
