@@ -116,13 +116,16 @@ wait_all_futures(std::vector<std::future<void>>& futures) {
 
 void
 HGraph::Train(const DatasetPtr& base) {
-    // ODescent may reserve all IDs and build with temporary SQ8 codes before training the
-    // persistent fused codec.  In that first-build state the graph count is non-zero but no codec
-    // model or fused node code exists yet, so training remains both required and safe.
-    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
-        this->rabitq_fused_datacell_ == nullptr or this->GetNumElements() == 0 or
-            this->rabitq_fused_datacell_->CodecModel().empty(),
-        "cannot retrain a non-empty fused RaBitQ HGraph");
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        // ODescent may reserve graph IDs before deferred persistent-code training.  The split
+        // datacell count remains zero until those codes are inserted, which distinguishes that
+        // state (and an empty exported model) from a populated index.
+        CHECK_ARGUMENT(this->basic_flatten_codes_->TotalCount() == 0,
+                       "cannot retrain a non-empty fused RaBitQ HGraph");
+        if (not this->rabitq_fused_datacell_->CodecModel().empty()) {
+            return;
+        }
+    }
     this->train_codes_with_dataset(this->sample_train_dataset(base));
 }
 
@@ -403,8 +406,14 @@ HGraph::prepare_add_context(const DatasetPtr& data) {
     {
         std::scoped_lock lock(this->add_mutex_);
         if (this->total_count_ == 0) {
-            context.train_data = this->sample_train_dataset(data);
-            this->train_codes_with_dataset(context.train_data);
+            const bool reuse_fused_codec = this->rabitq_fused_datacell_ != nullptr and
+                                           not this->rabitq_fused_datacell_->CodecModel().empty();
+            if (reuse_fused_codec) {
+                context.train_data = data;
+            } else {
+                context.train_data = this->sample_train_dataset(data);
+                this->train_codes_with_dataset(context.train_data);
+            }
         }
     }
     context.first_empty_add = context.train_data != nullptr;
