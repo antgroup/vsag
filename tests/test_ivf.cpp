@@ -1942,9 +1942,9 @@ TEST_CASE("IVF custom distance applies general filtering after attribute callbac
         ->AttributeSets(attribute_sets)
         ->Owner(true);
 
-    auto param = IVFTestIndex::GenerateIVFBuildParametersString(
+    auto param = fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
         "l2", dim, "fp32", 1, "kmeans", false, 1, true);
-    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+    auto index = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, param, true);
     REQUIRE(index->Build(base).has_value());
 
     std::vector<int64_t> callback_labels;
