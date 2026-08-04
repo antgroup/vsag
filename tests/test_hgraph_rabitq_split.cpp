@@ -1132,6 +1132,86 @@ TEST_CASE("HGraph fused RaBitQ split honors disabled reorder",
     }
 }
 
+TEST_CASE("HGraph fused RaBitQ split reuses full distances across deferred finalize",
+          "[ft][rabitq_split][hgraph][fused][search][full_hint]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 128;
+    constexpr uint64_t base_count = 512;
+    constexpr int64_t topk = 10;
+    constexpr uint64_t query_count = 8;
+    const uint32_t filter_bits = GENERATE(1U, 3U);
+    const std::string metric_type = GENERATE("l2", "ip");
+    const uint32_t supplement_bits = filter_bits == 1U ? 3U : 5U;
+
+    auto param = HGraphRaBitQSplitTestIndex::GenerateBuildParam(
+        metric_type, dim, "memory_io", "", filter_bits, supplement_bits, true);
+    auto param_json = vsag::JsonType::Parse(param);
+    param_json["index_param"]["graph_io_type"].SetString("memory_io");
+    param_json["index_param"]["graph_storage_type"].SetString("flat");
+    param_json["index_param"]["reorder_source"].SetString("base");
+    param_json["index_param"]["rabitq_fused_datacell"].SetBool(true);
+    param_json["index_param"]["rabitq_use_fht"].SetBool(true);
+    param_json["index_param"]["store_raw_vector"].SetBool(false);
+    param_json["index_param"]["use_mci"].SetBool(false);
+    param_json["index_param"]["support_duplicate"].SetBool(false);
+    param_json["index_param"]["build_thread_count"].SetInt(1);
+
+    auto source =
+        HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric_type);
+    auto index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param_json.Dump(), true);
+    auto build_result = index->Build(source->base_);
+    REQUIRE(build_result.has_value());
+    REQUIRE(build_result.value().empty());
+
+    for (const uint32_t ef_search : {20U, 40U, 80U}) {
+        uint64_t full_count = 0;
+        uint64_t hint_full_count = 0;
+        uint64_t fallback_full_count = 0;
+        uint64_t reorder_distance_count = 0;
+        for (uint64_t query_index = 0; query_index < query_count; ++query_index) {
+            CAPTURE(filter_bits, supplement_bits, metric_type, ef_search, query_index);
+            const auto search_param = fmt::format(
+                R"({{
+                    "hgraph": {{
+                        "ef_search": {},
+                        "rabitq_one_bit_search": true,
+                        "enable_reorder": true,
+                        "parallelism": 1
+                    }}
+                }})",
+                ef_search);
+            auto query = get_one_query(source->query_, query_index);
+            auto result = index->KnnSearch(query, topk, search_param);
+            REQUIRE(result.has_value());
+            REQUIRE(result.value()->GetDim() == topk);
+            const auto stats = result.value()->GetStatistics({"rabitq_full_count",
+                                                              "rabitq_reorder_hint_full_count",
+                                                              "rabitq_reorder_fallback_full_count",
+                                                              "reorder_distance_count"});
+            REQUIRE(stats.size() == 4);
+            full_count += std::stoull(stats[0]);
+            hint_full_count += std::stoull(stats[1]);
+            fallback_full_count += std::stoull(stats[2]);
+            reorder_distance_count += std::stoull(stats[3]);
+        }
+
+        REQUIRE(full_count > 0);
+        REQUIRE(hint_full_count + fallback_full_count == full_count);
+        if (filter_bits == 1U) {
+            REQUIRE(hint_full_count == 0);
+            REQUIRE(fallback_full_count == full_count);
+        } else {
+            REQUIRE(hint_full_count == full_count);
+            REQUIRE(fallback_full_count == 0);
+        }
+        if (ef_search <= 40U) {
+            REQUIRE(reorder_distance_count < full_count);
+        } else {
+            REQUIRE(reorder_distance_count == 0);
+        }
+    }
+}
+
 TEST_CASE("HGraph fused RaBitQ split keeps zero-residual nodes without reorder",
           "[ft][rabitq_split][hgraph][fused][fused_zero_residual]") {
     using namespace fixtures;

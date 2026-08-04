@@ -374,7 +374,8 @@ public:
                      InnerSearchParam& inner_search_param,
                      const VisitedListPtr& vt,
                      QueryContext* ctx,
-                     RaBitQCandidateVector* rabitq_lower_bound_candidates = nullptr) const;
+                     RaBitQCandidateVector* rabitq_lower_bound_candidates = nullptr,
+                     bool* fused_search_finalized = nullptr) const;
 
     /// Overload that accepts an IteratorFilterContext for iterative search.
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
