@@ -212,12 +212,17 @@ private:
 std::string
 GenerateBucketPreciseParameters(const std::string& precise_io_type = "block_memory_io",
                                 const std::string& precise_file_path = "",
-                                int thread_count = 1) {
+                                int thread_count = 1,
+                                bool enable_read_cache = false) {
     auto params = nlohmann::json::parse(IVFTestIndex::GenerateIVFBuildParametersString(
         "l2", 16, "sq8,fp32", 16, "random", false, 1, false, thread_count));
     params["index_param"]["precise_codes_layout"] = "bucket";
     params["index_param"]["precise_io_type"] = precise_io_type;
     params["index_param"]["precise_file_path"] = precise_file_path;
+    if (enable_read_cache) {
+        params["index_param"]["precise_enable_read_cache"] = true;
+        params["index_param"]["precise_cache_total_size"] = 128 * 1024;
+    }
     return params.dump();
 }
 
@@ -429,11 +434,14 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
     constexpr int64_t base_count = 128;
     constexpr int64_t buckets_count = 16;
     const auto precise_io_type = GENERATE("block_memory_io", "buffer_io");
+    const bool enable_read_cache = precise_io_type == std::string("buffer_io");
     INFO(fmt::format("precise_io_type: {}", precise_io_type));
+    INFO(fmt::format("enable_read_cache: {}", enable_read_cache));
 
     const auto precise_file_path =
         precise_io_type == std::string("buffer_io") ? dir.GenerateRandomFile(false) : std::string();
-    const auto params = GenerateBucketPreciseParameters(precise_io_type, precise_file_path);
+    const auto params =
+        GenerateBucketPreciseParameters(precise_io_type, precise_file_path, 1, enable_read_cache);
     const auto search_param = fmt::format(search_param_tmp, buckets_count);
     auto dataset = pool.GetDatasetAndCreate(dim, base_count, "l2");
     auto index = TestFactory(name, params, true);
@@ -447,7 +455,7 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
     const auto restored_file_path =
         precise_io_type == std::string("buffer_io") ? dir.GenerateRandomFile(false) : std::string();
     const auto restored_params =
-        GenerateBucketPreciseParameters(precise_io_type, restored_file_path);
+        GenerateBucketPreciseParameters(precise_io_type, restored_file_path, 1, enable_read_cache);
     auto restored = TestFactory(name, restored_params, true);
     TestSerializeBinarySet(index, restored, dataset, search_param, true);
     CheckBucketPreciseIndex(restored, dataset, search_param);

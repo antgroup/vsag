@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <exception>
 #include <limits>
 #include <sstream>
@@ -198,6 +199,86 @@ TEST_CASE("BucketDataCell rejects invalid parameters", "[ut][BucketDataCell]") {
     IndexCommonParam common_param;
 
     REQUIRE(BucketInterface::MakeInstance(nullptr, common_param) == nullptr);
+}
+
+TEST_CASE("BucketDataCell rejects inconsistent serialized metadata", "[ut][BucketDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 4;
+    constexpr const char* param_str = R"(
+        {
+            "io_params": {
+                "type": "memory_io"
+            },
+            "quantization_params": {
+                "type": "fp32"
+            },
+            "buckets_count": 1
+        }
+        )";
+
+    auto make_bucket = [&]() {
+        auto param_json = JsonType::Parse(param_str);
+        auto param = std::make_shared<BucketDataCellParameter>();
+        param->FromJson(param_json);
+
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.dim_ = dim;
+        common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+        return BucketInterface::MakeInstance(param, common_param);
+    };
+
+    auto bucket = make_bucket();
+    auto vectors = fixtures::generate_vectors(1, dim);
+    bucket->Train(vectors.data(), 1);
+    bucket->InsertVector(vectors.data(), 0, 0);
+
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    bucket->Serialize(writer);
+    const auto serialized = stream.str();
+
+    SECTION("inner id vector is shorter than bucket size") {
+        auto malformed = serialized;
+        constexpr InnerIdType invalid_bucket_size = 2;
+        std::memcpy(malformed.data() + malformed.size() - sizeof(invalid_bucket_size),
+                    &invalid_bucket_size,
+                    sizeof(invalid_bucket_size));
+
+        std::stringstream malformed_stream(malformed);
+        IOStreamReader reader(malformed_stream);
+        auto restored = make_bucket();
+        try {
+            restored->Deserialize(reader);
+            FAIL("inconsistent inner id metadata should be rejected");
+        } catch (const VsagException& error) {
+            REQUIRE(error.error_.type == ErrorType::INVALID_BINARY);
+            REQUIRE(error.error_.message ==
+                    "serialized bucket 0 inner id count is smaller than bucket size");
+        }
+    }
+
+    SECTION("bucket size vector does not cover every bucket") {
+        auto malformed = serialized;
+        constexpr uint64_t invalid_bucket_size_count = 0;
+        const uint64_t count_offset =
+            static_cast<uint64_t>(malformed.size()) - sizeof(InnerIdType) - sizeof(uint64_t);
+        std::memcpy(malformed.data() + count_offset,
+                    &invalid_bucket_size_count,
+                    sizeof(invalid_bucket_size_count));
+
+        std::stringstream malformed_stream(malformed);
+        IOStreamReader reader(malformed_stream);
+        auto restored = make_bucket();
+        try {
+            restored->Deserialize(reader);
+            FAIL("inconsistent bucket size metadata should be rejected");
+        } catch (const VsagException& error) {
+            REQUIRE(error.error_.type == ErrorType::INVALID_BINARY);
+            REQUIRE(error.error_.message ==
+                    "serialized bucket size vector does not match bucket count");
+        }
+    }
 }
 
 TEST_CASE("BucketDataCell supports RabitQ", "[ut][BucketDataCell]") {

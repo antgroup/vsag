@@ -554,6 +554,25 @@ BucketDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> re
         }
     }
     StreamReader::ReadVector(reader, this->bucket_sizes_);
+    if (this->bucket_sizes_.size() != static_cast<uint64_t>(this->bucket_count_)) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            "serialized bucket size vector does not match bucket count");
+    }
+    for (BucketIdType i = 0; i < this->bucket_count_; ++i) {
+        const auto bucket_size = static_cast<uint64_t>(this->bucket_sizes_[i]);
+        if (this->inner_ids_[i].size() < bucket_size) {
+            throw VsagException(
+                ErrorType::INVALID_BINARY,
+                fmt::format("serialized bucket {} inner id count is smaller than bucket size", i));
+        }
+        if (this->use_residual_ and this->metric_ == MetricType::METRIC_TYPE_L2SQR and
+            this->residual_bias_[i].size() < bucket_size) {
+            throw VsagException(
+                ErrorType::INVALID_BINARY,
+                fmt::format("serialized bucket {} residual bias count is smaller than bucket size",
+                            i));
+        }
+    }
 }
 
 template <typename QuantTmpl, typename IOTmpl>
