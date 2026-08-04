@@ -47,7 +47,7 @@ struct fused_wire_layout {
 };
 
 uint64_t
-FusedCodecModelSize(int64_t dim) {
+fused_codec_model_size(int64_t dim) {
     CHECK_ARGUMENT(dim > 0, "invalid fused RaBitQ dimension");
     constexpr uint64_t fixed_size = sizeof(uint32_t) + sizeof(uint64_t) + sizeof(uint32_t);
     constexpr uint64_t bytes_per_dimension = K_FUSED_CLUSTER_COUNT * sizeof(float);
@@ -59,7 +59,7 @@ FusedCodecModelSize(int64_t dim) {
 }
 
 uint64_t
-RemainingBytes(StreamReader& reader) {
+remaining_bytes(StreamReader& reader) {
     const auto length = reader.Length();
     const auto cursor = reader.GetCursor();
     CHECK_ARGUMENT(cursor <= length, "invalid fused graph reader cursor");
@@ -92,13 +92,16 @@ HGraphRaBitQFusedDataCell::HGraphRaBitQFusedDataCell(const GraphDataCellParamPtr
     remove_flag_bit_ = graph_param->remove_flag_bit_;
     constexpr uint32_t id_width = sizeof(InnerIdType) * 8;
     CHECK_ARGUMENT(remove_flag_bit_ < id_width, "invalid fused graph remove flag bits");
-    CHECK_ARGUMENT(not support_remove_ or remove_flag_bit_ > 0,
-                   "fused graph removal requires version bits");
+    if (support_remove_) {
+        CHECK_ARGUMENT(remove_flag_bit_ > 0, "fused graph removal requires version bits");
+    }
     id_bit_ = id_width - remove_flag_bit_;
     remove_flag_mask_ = id_bit_ == id_width ? std::numeric_limits<InnerIdType>::max()
                                             : (InnerIdType{1} << id_bit_) - 1U;
-    CHECK_ARGUMENT(not support_remove_ or max_capacity_ <= remove_flag_mask_,
-                   "fused graph initial capacity exceeds remove-id bits");
+    if (support_remove_) {
+        CHECK_ARGUMENT(max_capacity_ <= remove_flag_mask_,
+                       "fused graph initial capacity exceeds remove-id bits");
+    }
 
     neighbors_offset_ = K_HEADER_SIZE;
     cluster_id_offset_ =
@@ -557,11 +560,14 @@ HGraphRaBitQFusedDataCell::Deserialize(StreamReader& reader) {
 
     uint64_t codec_model_size = 0;
     StreamReader::ReadObj(reader, codec_model_size);
-    CHECK_ARGUMENT(codec_model_size == 0 or codec_model_size == FusedCodecModelSize(dim_),
-                   "invalid fused RaBitQ codec payload size");
-    CHECK_ARGUMENT(RemainingBytes(reader) >= sizeof(uint64_t) and
-                       codec_model_size <= RemainingBytes(reader) - sizeof(uint64_t),
-                   "truncated fused RaBitQ codec payload");
+    if (codec_model_size != 0) {
+        CHECK_ARGUMENT(codec_model_size == fused_codec_model_size(dim_),
+                       "invalid fused RaBitQ codec payload size");
+    }
+    auto available_bytes = remaining_bytes(reader);
+    CHECK_ARGUMENT(available_bytes >= sizeof(uint64_t), "truncated fused RaBitQ codec payload");
+    available_bytes -= sizeof(uint64_t);
+    CHECK_ARGUMENT(codec_model_size <= available_bytes, "truncated fused RaBitQ codec payload");
     std::string codec_model(codec_model_size, '\0');
     reader.Read(codec_model.data(), codec_model_size);
 
@@ -569,7 +575,7 @@ HGraphRaBitQFusedDataCell::Deserialize(StreamReader& reader) {
     StreamReader::ReadObj(reader, bytes);
     const uint64_t expected_bytes = static_cast<uint64_t>(max_capacity_) * layout.record_size;
     CHECK_ARGUMENT(bytes == expected_bytes, "invalid fused graph payload size");
-    CHECK_ARGUMENT(bytes <= RemainingBytes(reader), "truncated fused graph node payload");
+    CHECK_ARGUMENT(bytes <= remaining_bytes(reader), "truncated fused graph node payload");
 
     codec_model_ = std::move(codec_model);
     id_bit_ = wire_id_bit;
