@@ -31,6 +31,7 @@ constexpr uint64_t K_COUNT_OFFSET = 0;
 constexpr uint64_t K_VERSION_OFFSET = sizeof(uint32_t);
 constexpr uint64_t K_HEADER_SIZE = 2 * sizeof(uint32_t);
 constexpr uint32_t K_SERIALIZATION_VERSION = 1;
+constexpr uint64_t K_FUSED_CLUSTER_COUNT = 16;
 
 struct fused_wire_layout {
     uint64_t record_size{0};
@@ -44,6 +45,26 @@ struct fused_wire_layout {
     bool support_remove{false};
     uint32_t remove_flag_bit{0};
 };
+
+uint64_t
+FusedCodecModelSize(int64_t dim) {
+    CHECK_ARGUMENT(dim > 0, "invalid fused RaBitQ dimension");
+    constexpr uint64_t fixed_size = sizeof(uint32_t) + sizeof(uint64_t) + sizeof(uint32_t);
+    constexpr uint64_t bytes_per_dimension = K_FUSED_CLUSTER_COUNT * sizeof(float);
+    const auto unsigned_dim = static_cast<uint64_t>(dim);
+    CHECK_ARGUMENT(
+        unsigned_dim <= (std::numeric_limits<uint64_t>::max() - fixed_size) / bytes_per_dimension,
+        "fused RaBitQ codec size overflow");
+    return fixed_size + unsigned_dim * bytes_per_dimension;
+}
+
+uint64_t
+RemainingBytes(StreamReader& reader) {
+    const auto length = reader.Length();
+    const auto cursor = reader.GetCursor();
+    CHECK_ARGUMENT(cursor <= length, "invalid fused graph reader cursor");
+    return length - cursor;
+}
 }  // namespace
 
 uint64_t
@@ -57,15 +78,27 @@ HGraphRaBitQFusedDataCell::HGraphRaBitQFusedDataCell(const GraphDataCellParamPtr
                                                      const IndexCommonParam& common_param)
     : storage_(common_param.allocator_.get()),
       one_bit_code_size_(one_bit_code_size),
-      supplement_code_size_(supplement_code_size) {
+      supplement_code_size_(supplement_code_size),
+      dim_(common_param.dim_) {
+    CHECK_ARGUMENT(graph_param != nullptr, "fused graph parameter must not be null");
+    CHECK_ARGUMENT(graph_param->max_degree_ <= std::numeric_limits<uint32_t>::max(),
+                   "fused graph maximum degree exceeds uint32 range");
+    CHECK_ARGUMENT(graph_param->init_max_capacity_ <= std::numeric_limits<InnerIdType>::max(),
+                   "fused graph initial capacity exceeds id range");
     allocator_ = common_param.allocator_.get();
     maximum_degree_ = static_cast<uint32_t>(graph_param->max_degree_);
     max_capacity_ = static_cast<InnerIdType>(graph_param->init_max_capacity_);
     support_remove_ = graph_param->support_remove_;
     remove_flag_bit_ = graph_param->remove_flag_bit_;
-    id_bit_ = static_cast<uint32_t>(sizeof(InnerIdType) * 8) - remove_flag_bit_;
-    remove_flag_mask_ = id_bit_ == sizeof(InnerIdType) * 8 ? std::numeric_limits<InnerIdType>::max()
-                                                           : (InnerIdType{1} << id_bit_) - 1U;
+    constexpr uint32_t id_width = sizeof(InnerIdType) * 8;
+    CHECK_ARGUMENT(remove_flag_bit_ < id_width, "invalid fused graph remove flag bits");
+    CHECK_ARGUMENT(not support_remove_ or remove_flag_bit_ > 0,
+                   "fused graph removal requires version bits");
+    id_bit_ = id_width - remove_flag_bit_;
+    remove_flag_mask_ = id_bit_ == id_width ? std::numeric_limits<InnerIdType>::max()
+                                            : (InnerIdType{1} << id_bit_) - 1U;
+    CHECK_ARGUMENT(not support_remove_ or max_capacity_ <= remove_flag_mask_,
+                   "fused graph initial capacity exceeds remove-id bits");
 
     neighbors_offset_ = K_HEADER_SIZE;
     cluster_id_offset_ =
@@ -74,6 +107,10 @@ HGraphRaBitQFusedDataCell::HGraphRaBitQFusedDataCell(const GraphDataCellParamPtr
     one_bit_offset_ = label_offset_ + sizeof(LabelType);
     supplement_offset_ = one_bit_offset_ + one_bit_code_size_;
     record_size_ = AlignUp(supplement_offset_ + supplement_code_size_, K_CACHE_LINE_SIZE);
+    CHECK_ARGUMENT(
+        max_capacity_ <=
+            (std::numeric_limits<uint64_t>::max() - (K_CACHE_LINE_SIZE - 1)) / record_size_,
+        "fused graph initial capacity and record stride overflow");
 
     if (graph_param->use_reverse_edges_) {
         reverse_edges_ = std::make_unique<ReverseEdge>(allocator_);
@@ -518,11 +555,21 @@ HGraphRaBitQFusedDataCell::Deserialize(StreamReader& reader) {
             layout.remove_flag_bit == expected_layout.remove_flag_bit,
         "fused graph remove parameters do not match construction parameters");
 
-    auto codec_model = StreamReader::ReadString(reader);
+    uint64_t codec_model_size = 0;
+    StreamReader::ReadObj(reader, codec_model_size);
+    CHECK_ARGUMENT(codec_model_size == 0 or codec_model_size == FusedCodecModelSize(dim_),
+                   "invalid fused RaBitQ codec payload size");
+    CHECK_ARGUMENT(RemainingBytes(reader) >= sizeof(uint64_t) and
+                       codec_model_size <= RemainingBytes(reader) - sizeof(uint64_t),
+                   "truncated fused RaBitQ codec payload");
+    std::string codec_model(codec_model_size, '\0');
+    reader.Read(codec_model.data(), codec_model_size);
+
     uint64_t bytes = 0;
     StreamReader::ReadObj(reader, bytes);
     const uint64_t expected_bytes = static_cast<uint64_t>(max_capacity_) * layout.record_size;
     CHECK_ARGUMENT(bytes == expected_bytes, "invalid fused graph payload size");
+    CHECK_ARGUMENT(bytes <= RemainingBytes(reader), "truncated fused graph node payload");
 
     codec_model_ = std::move(codec_model);
     id_bit_ = wire_id_bit;

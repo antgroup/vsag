@@ -629,13 +629,14 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                                  float* distance) {
         ++rabitq_full_count;
         if constexpr (Scorer::K_EXACT_FILTER_HINT) {
-            if (IsFiniteRaBitQValue(filter_inner_product) and
-                scorer.FullWithHint(node, filter_inner_product, distance)) {
-                ++rabitq_hint_full_count;
-                return true;
+            if (IsFiniteRaBitQValue(filter_inner_product)) {
+                if (scorer.FullWithHint(node, filter_inner_product, distance)) {
+                    ++rabitq_hint_full_count;
+                    return true;
+                }
+                ++rabitq_reorder_fallback_full_count;
             }
         }
-        ++rabitq_reorder_fallback_full_count;
         return scorer.FullDirect(node, distance);
     };
     const auto record_lower_bound =

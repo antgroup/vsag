@@ -286,6 +286,7 @@ private:
     uint64_t supplement_offset_{0};
     uint64_t one_bit_code_size_{0};
     uint64_t supplement_code_size_{0};
+    int64_t dim_{0};
     bool support_remove_{false};
     uint32_t remove_flag_bit_{8};
     uint32_t id_bit_{24};

@@ -2281,6 +2281,8 @@ RaBitQuantizer<metric>::PrepareFourBitTraversalQuery(const float* normalized_que
     float reconstruction_norm_sqr = 0.0F;
     float query_sum = 0.0F;
     for (uint64_t i = 0; i < this->dim_; ++i) {
+        CHECK_ARGUMENT(IsFiniteRaBitQValue(normalized_query[i]),
+                       "RaBitQ query must contain only finite values");
         auto magnitude =
             static_cast<uint32_t>(query_scale * std::fabs(normalized_query[i]) + 1e-5F);
         magnitude = std::min(magnitude, k_ex_mask);
@@ -2357,6 +2359,8 @@ RaBitQuantizer<metric>::PrepareHnswFourBitQuery(const float* transformed_query,
 
     double norm_sqr = 0.0;
     for (uint64_t i = 0; i < this->dim_; ++i) {
+        CHECK_ARGUMENT(IsFiniteRaBitQValue(transformed_query[i]),
+                       "RaBitQ query must contain only finite values");
         norm_sqr += static_cast<double>(transformed_query[i]) * transformed_query[i];
     }
     const auto norm = static_cast<float>(std::sqrt(norm_sqr));

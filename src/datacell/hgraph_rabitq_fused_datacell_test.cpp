@@ -68,6 +68,7 @@ TEST_CASE("HGraph RaBitQ fused node layout and serialization", "[ut][HGraphRaBit
     auto restored = std::make_shared<HGraphRaBitQFusedDataCell>(
         graph_param, one_bit_size, supplement_size, common_param);
     test_serializion(*graph, *restored);
+    REQUIRE(restored->CodecModel().empty());
     const auto* restored_record = restored->GetNodeRecord(0);
     REQUIRE(restored->GetLabel(restored_record) == 42);
     REQUIRE(restored->GetClusterId(restored_record) == 7);
@@ -118,6 +119,7 @@ TEST_CASE("HGraph RaBitQ fused deserialize validates its wire layout",
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
+    common_param.dim_ = 8;
 
     auto graph_param = std::make_shared<GraphDataCellParameter>();
     graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
@@ -130,6 +132,9 @@ TEST_CASE("HGraph RaBitQ fused deserialize validates its wire layout",
     constexpr uint64_t supplement_size = 16;
     auto graph = std::make_shared<HGraphRaBitQFusedDataCell>(
         graph_param, one_bit_size, supplement_size, common_param);
+    const uint64_t expected_codec_model_size =
+        16 + 16 * static_cast<uint64_t>(common_param.dim_) * sizeof(float);
+    graph->SetCodecModel(std::string(expected_codec_model_size, '\0'));
     Vector<InnerIdType> empty_neighbors(allocator.get());
     graph->InsertNeighborsById(0, empty_neighbors);
     std::stringstream stream;
@@ -212,6 +217,19 @@ TEST_CASE("HGraph RaBitQ fused deserialize validates its wire layout",
         require_rejected(overwrite(payload, payload_size_offset, uint64_t{0}));
     }
 
+    SECTION("codec model length is bounded before allocation") {
+        require_rejected(
+            overwrite(payload, codec_model_size_offset, std::numeric_limits<uint64_t>::max()));
+    }
+
+    SECTION("node payload is bounded before allocation") {
+        constexpr InnerIdType large_capacity = (InnerIdType{1} << 24U) - 1U;
+        auto malformed = overwrite(payload, capacity_offset, large_capacity);
+        const uint64_t declared_bytes = static_cast<uint64_t>(large_capacity) * graph->RecordSize();
+        malformed = overwrite(malformed, payload_size_offset, declared_bytes);
+        require_rejected(malformed);
+    }
+
     SECTION("count exceeds capacity") {
         require_rejected(overwrite(payload, capacity_offset, InnerIdType{0}));
     }
@@ -219,6 +237,24 @@ TEST_CASE("HGraph RaBitQ fused deserialize validates its wire layout",
     SECTION("constructor maximum degree") {
         graph_param->max_degree_ = 31;
         require_rejected(payload);
+    }
+
+    SECTION("constructor rejects invalid removal bit count") {
+        graph_param->remove_flag_bit_ = sizeof(InnerIdType) * 8;
+        REQUIRE_THROWS(std::make_shared<HGraphRaBitQFusedDataCell>(
+            graph_param, one_bit_size, supplement_size, common_param));
+    }
+
+    SECTION("constructor requires version bits when removal is enabled") {
+        graph_param->remove_flag_bit_ = 0;
+        REQUIRE_THROWS(std::make_shared<HGraphRaBitQFusedDataCell>(
+            graph_param, one_bit_size, supplement_size, common_param));
+    }
+
+    SECTION("constructor bounds capacity by removal id bits") {
+        graph_param->init_max_capacity_ = InnerIdType{1} << 24U;
+        REQUIRE_THROWS(std::make_shared<HGraphRaBitQFusedDataCell>(
+            graph_param, one_bit_size, supplement_size, common_param));
     }
 }
 

@@ -1528,26 +1528,47 @@ public:
         CHECK_ARGUMENT(not serialized.empty(), "fused RaBitQ codec payload is empty");
         CHECK_ARGUMENT(this->quantization_param_ != nullptr,
                        "fused RaBitQ quantizer parameter is unavailable");
+        constexpr uint64_t cluster_count = 16;
+        constexpr uint64_t fixed_payload_size =
+            sizeof(uint32_t) + sizeof(uint64_t) + sizeof(uint32_t);
+        constexpr uint64_t bytes_per_dimension = cluster_count * sizeof(float);
+        CHECK_ARGUMENT(common_param_.dim_ > 0, "invalid fused RaBitQ dimension");
+        const auto dim = static_cast<uint64_t>(common_param_.dim_);
+        CHECK_ARGUMENT(dim <= (std::numeric_limits<uint64_t>::max() - fixed_payload_size) /
+                                  bytes_per_dimension,
+                       "fused RaBitQ codec size overflow");
+        const uint64_t expected_centroid_count = cluster_count * dim;
+        const uint64_t expected_payload_size =
+            fixed_payload_size + expected_centroid_count * sizeof(float);
+        CHECK_ARGUMENT(serialized.size() == expected_payload_size,
+                       "invalid fused RaBitQ codec payload size");
+
         std::stringstream input(serialized);
         IOStreamReader reader(input);
         uint32_t version = 0;
         StreamReader::ReadObj(reader, version);
         CHECK_ARGUMENT(version == 1, "unsupported fused RaBitQ codec version");
-        StreamReader::ReadVector(reader, fused_centroids_);
-        uint32_t cluster_count = 0;
-        StreamReader::ReadObj(reader, cluster_count);
-        CHECK_ARGUMENT(cluster_count == 16, "invalid fused RaBitQ cluster count");
-        CHECK_ARGUMENT(
-            fused_centroids_.size() == static_cast<uint64_t>(cluster_count) * common_param_.dim_,
-            "invalid fused RaBitQ centroid payload");
+        uint64_t centroid_count = 0;
+        StreamReader::ReadObj(reader, centroid_count);
+        CHECK_ARGUMENT(centroid_count == expected_centroid_count,
+                       "invalid fused RaBitQ centroid payload");
+        fused_centroids_.resize(expected_centroid_count);
+        reader.Read(reinterpret_cast<char*>(fused_centroids_.data()),
+                    expected_centroid_count * sizeof(float));
+        uint32_t serialized_cluster_count = 0;
+        StreamReader::ReadObj(reader, serialized_cluster_count);
+        CHECK_ARGUMENT(serialized_cluster_count == cluster_count,
+                       "invalid fused RaBitQ cluster count");
+        CHECK_ARGUMENT(reader.GetCursor() == reader.Length(),
+                       "trailing fused RaBitQ codec payload");
 
         std::stringstream model_output;
         IOStreamWriter model_writer(model_output);
         quantizer_->Serialize(model_writer);
         const auto serialized_model = model_output.str();
         fused_quantizers_.clear();
-        fused_quantizers_.reserve(cluster_count);
-        for (uint32_t cluster_id = 0; cluster_id < cluster_count; ++cluster_id) {
+        fused_quantizers_.reserve(serialized_cluster_count);
+        for (uint32_t cluster_id = 0; cluster_id < serialized_cluster_count; ++cluster_id) {
             auto quantizer =
                 std::make_shared<RaBitQuantizer<metric>>(quantization_param_, common_param_);
             std::stringstream model_input(serialized_model);

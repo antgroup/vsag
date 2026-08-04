@@ -820,7 +820,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         if (use_custom_distance) {
             score_ids(to_be_visited_id.data(), count_no_visited, line_dists.data());
         } else if (inner_search_param.enable_rabitq_one_bit_search and
-            rabitq_lower_bound_candidates != nullptr) {
+                   rabitq_lower_bound_candidates != nullptr) {
             collect_rabitq_lower_bound = true;
             flatten->QueryWithDistanceLowerBoundAndFilterIP(line_dists.data(),
                                                             lower_bound_dists.data(),

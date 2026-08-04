@@ -531,10 +531,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     auto& vt = vt_guard.visited_list;
 
     const auto* raw_query = use_custom_distance ? nullptr : get_data(query);
-    auto* split_codes =
-        dynamic_cast<RaBitQSplitDataCellInterface*>(basic_flatten_codes_.get());
-    if (not use_custom_distance and rabitq_fused_datacell_ != nullptr and
-        split_codes != nullptr) {
+    auto* split_codes = dynamic_cast<RaBitQSplitDataCellInterface*>(basic_flatten_codes_.get());
+    if (not use_custom_distance and rabitq_fused_datacell_ != nullptr and split_codes != nullptr) {
         search_param.rabitq_fused_computer = split_codes->FactoryFusedComputer(raw_query);
         for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
             search_param.ep =
