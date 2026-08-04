@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
 #include <cstring>
 #include <limits>
 #include <sstream>
@@ -1911,6 +1912,72 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     REQUIRE(result.value()->GetDim() == 1);
     REQUIRE(result.value()->GetIds()[0] == 20);
     REQUIRE(result.value()->GetDistances()[0] == 1.0F);
+class AllowEveryFourthLabelFilter : public vsag::Filter {
+public:
+    bool
+    CheckValid(int64_t label) const override {
+        return (label >> 16) % 4 == 0;
+    }
+};
+
+TEST_CASE("IVF custom distance applies general filtering after attribute callback",
+          "[ft][search][ivf][attribute][pr]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t count = 12;
+    auto base = vsag::Dataset::Make();
+    auto* vectors = new float[count * dim]{};
+    auto* labels = new int64_t[count];
+    auto* attribute_sets = new vsag::AttributeSet[count];
+    for (int64_t i = 0; i < count; ++i) {
+        labels[i] = i << 16;
+        auto* attribute = new vsag::AttributeValue<std::string>();
+        attribute->name_ = "group";
+        attribute->GetValue() = {i % 2 == 0 ? "callback" : "excluded"};
+        attribute_sets[i].attrs_.push_back(attribute);
+    }
+    base->NumElements(count)
+        ->Dim(dim)
+        ->Float32Vectors(vectors)
+        ->Ids(labels)
+        ->AttributeSets(attribute_sets)
+        ->Owner(true);
+
+    auto param = IVFTestIndex::GenerateIVFBuildParametersString(
+        "l2", dim, "fp32", 1, "kmeans", false, 1, true);
+    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+    REQUIRE(index->Build(base).has_value());
+
+    std::vector<int64_t> callback_labels;
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(vectors)->Owner(false);
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 3;
+    request.params_str_ = R"({"ivf":{"scan_buckets_count":1}})";
+    request.filter_ = std::make_shared<AllowEveryFourthLabelFilter>();
+    request.enable_attribute_filter_ = true;
+    request.attribute_filter_str_ = R"(multi_in(group, "callback", "|"))";
+    request.distance_batch_size_ = 2;
+    request.distance_batch_func_ = [&callback_labels](
+                                       const int64_t* ids, uint64_t size, float* distances) {
+        callback_labels.insert(callback_labels.end(), ids, ids + size);
+        for (uint64_t i = 0; i < size; ++i) {
+            distances[i] = static_cast<float>(ids[i]);
+        }
+    };
+
+    auto result = index->SearchWithRequest(request);
+    REQUIRE(result.has_value());
+    REQUIRE(callback_labels.size() == 6);
+    for (int64_t i = 0; i < count; ++i) {
+        const auto found = std::find(callback_labels.begin(), callback_labels.end(), labels[i]);
+        REQUIRE((found != callback_labels.end()) == (i % 2 == 0));
+    }
+    REQUIRE(result.value()->GetDim() == 3);
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(result.value()->GetIds()[i] == labels[i * 4]);
+        REQUIRE(result.value()->GetDistances()[i] == static_cast<float>(labels[i * 4]));
+    }
 }
 
 // RejectAllFilter for testing empty results

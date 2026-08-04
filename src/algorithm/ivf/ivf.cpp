@@ -1664,8 +1664,15 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
         for (uint64_t i = 0; i < candidate_ids.size(); ++i) {
             CHECK_ARGUMENT(std::isfinite(scores[i]),
                            "custom query distance callback must return finite scores");
+            const auto origin_id = candidate_ids[i] / buckets_per_data_;
+            if (filter != nullptr and not filter->CheckValid(origin_id)) {
+                if (reasoning_ctx != nullptr) {
+                    reasoning_ctx->RecordFilterReject(origin_id);
+                }
+                continue;
+            }
             if (reasoning_ctx != nullptr) {
-                reasoning_ctx->RecordVisit(candidate_ids[i] / buckets_per_data_, scores[i], 0);
+                reasoning_ctx->RecordVisit(origin_id, scores[i], 0);
             }
             search_result->Push(scores[i], candidate_ids[i]);
             while (search_result->Size() > static_cast<uint64_t>(topk)) {
@@ -1703,12 +1710,6 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
             }
             const auto origin_id = inner_id / buckets_per_data_;
             if (attr_filter != nullptr and not attr_filter->CheckValid(offset)) {
-                if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordFilterReject(origin_id);
-                }
-                continue;
-            }
-            if (filter != nullptr and not filter->CheckValid(origin_id)) {
                 if (reasoning_ctx != nullptr) {
                     reasoning_ctx->RecordFilterReject(origin_id);
                 }
