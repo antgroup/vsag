@@ -30,6 +30,14 @@ public:
     explicit HGraphRaBitQSearcher(const IndexCommonParam& common_param,
                                   MutexArrayPtr neighbors_mutex);
 
+    static constexpr uint64_t K_DEFERRED_RERANK_MAX_EF = 40;
+
+    [[nodiscard]] static bool
+    ShouldDeferRerank(const InnerSearchParam& search_param) {
+        return search_param.enable_rabitq_one_bit_search and search_param.enable_reorder and
+               search_param.ef <= K_DEFERRED_RERANK_MAX_EF;
+    }
+
     void
     SetMutexArray(const MutexArrayPtr& neighbors_mutex) {
         neighbors_mutex_ = neighbors_mutex;
@@ -42,7 +50,8 @@ public:
            const void* query,
            const InnerSearchParam& search_param,
            QueryContext* ctx,
-           RaBitQCandidateVector* lower_bound_candidates) const;
+           RaBitQCandidateVector* lower_bound_candidates,
+           bool* search_finalized = nullptr) const;
 
     InnerIdType
     Route(const GraphInterfacePtr& route_graph,

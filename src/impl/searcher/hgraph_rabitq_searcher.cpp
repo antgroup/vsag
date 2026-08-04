@@ -52,6 +52,9 @@ private:
 };
 
 constexpr uint32_t K_FUSED_CLUSTER_COUNT = 16;
+constexpr uint32_t K_FULL_DISTANCE_AVAILABLE = 1U << 31U;
+constexpr uint32_t K_CANDIDATE_INDEX_MASK = K_FULL_DISTANCE_AVAILABLE - 1U;
+constexpr uint32_t K_INVALID_CANDIDATE_INDEX = K_CANDIDATE_INDEX_MASK;
 
 struct search_buffer_record {
     float distance;
@@ -62,7 +65,20 @@ struct bounded_result_record {
     float distance;
     float filter_inner_product;
     InnerIdType id;
+    uint32_t state;
+
+    [[nodiscard]] bool
+    FullDistanceAvailable() const {
+        return (state & K_FULL_DISTANCE_AVAILABLE) != 0;
+    }
+
+    [[nodiscard]] uint32_t
+    CandidateIndex() const {
+        return state & K_CANDIDATE_INDEX_MASK;
+    }
 };
+
+static_assert(sizeof(bounded_result_record) == 16);
 
 /**
  * Fixed-capacity sorted result buffer matching RaBitQ-Library's BoundedKNN.
@@ -77,7 +93,11 @@ public:
     }
 
     void
-    Insert(InnerIdType id, float distance, float filter_inner_product) {
+    Insert(InnerIdType id,
+           float distance,
+           float filter_inner_product,
+           bool full_distance_available = false,
+           uint32_t candidate_index = K_INVALID_CANDIDATE_INDEX) {
         if (capacity_ == 0 or (size_ == capacity_ and distance > data_[size_ - 1].distance)) {
             return;
         }
@@ -85,7 +105,11 @@ public:
         std::memmove(data_.data() + position + 1,
                      data_.data() + position,
                      (size_ - position) * sizeof(bounded_result_record));
-        data_[position] = {distance, filter_inner_product, id};
+        data_[position] = {
+            distance,
+            filter_inner_product,
+            id,
+            candidate_index | (full_distance_available ? K_FULL_DISTANCE_AVAILABLE : 0U)};
         size_ += static_cast<uint64_t>(size_ < capacity_);
     }
 
@@ -102,6 +126,11 @@ public:
     [[nodiscard]] const bounded_result_record&
     operator[](uint64_t index) const {
         return data_[index];
+    }
+
+    [[nodiscard]] InnerIdType
+    WorstId() const {
+        return data_[size_ - 1].id;
     }
 
 private:
@@ -571,14 +600,16 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
     }
     if (lower_bound_candidates != nullptr) {
         lower_bound_candidates->clear();
-        lower_bound_candidates->reserve(2U * search_param.ef);
+        const uint64_t reserve_hint =
+            (static_cast<uint64_t>(search_param.ef) + 4U) * graph->MaximumDegree() + 1U;
+        lower_bound_candidates->reserve(std::min<uint64_t>(graph->TotalCount(), reserve_hint));
     }
 
     const uint64_t rerank_topk = static_cast<uint64_t>(std::max<int64_t>(
         1, search_param.rerank_topk > 0 ? search_param.rerank_topk : search_param.topk));
     const bool should_rerank =
         search_param.enable_rabitq_one_bit_search and search_param.enable_reorder;
-    const bool deferred_rerank = should_rerank and search_param.ef <= 40;
+    const bool deferred_rerank = HGraphRaBitQSearcher::ShouldDeferRerank(search_param);
     const uint64_t deferred_rerank_count = std::max<uint64_t>(search_param.ef, 2 * rerank_topk);
     BoundedResults results(deferred_rerank ? deferred_rerank_count : rerank_topk, allocator);
     SearchBuffer candidate_set(search_param.ef, allocator);
@@ -588,6 +619,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
     uint32_t rabitq_filter_fallback_full_count = 0;
     uint32_t rabitq_hint_full_count = 0;
     uint32_t rabitq_reorder_fallback_full_count = 0;
+    uint32_t deferred_finalize_full_count = 0;
     Filter* attribute_filter = nullptr;
     if (not search_param.executors.empty() and search_param.executors[0] != nullptr) {
         search_param.executors[0]->Clear();
@@ -602,7 +634,9 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
     const auto score_node = [&](const HGraphRaBitQFusedDataCell::CodeView& node,
                                 float* distance,
                                 float* lower_bound,
-                                float* filter_inner_product) {
+                                float* filter_inner_product,
+                                bool* full_distance_available) {
+        *full_distance_available = false;
         if (search_param.enable_rabitq_one_bit_search) {
             ++rabitq_filter_count;
             if (scorer.Estimate(node, distance, lower_bound, filter_inner_product)) {
@@ -618,7 +652,8 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         }
         ++rabitq_full_count;
         *filter_inner_product = std::numeric_limits<float>::quiet_NaN();
-        if (not scorer.FullDirect(node, distance)) {
+        *full_distance_available = scorer.FullDirect(node, distance);
+        if (not *full_distance_available) {
             return false;
         }
         *lower_bound = *distance;
@@ -634,43 +669,67 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                     ++rabitq_hint_full_count;
                     return true;
                 }
-                ++rabitq_reorder_fallback_full_count;
             }
         }
+        ++rabitq_reorder_fallback_full_count;
         return scorer.FullDirect(node, distance);
     };
-    const auto record_lower_bound =
-        [&](InnerIdType id, float lower_bound, float filter_inner_product, bool allowed) {
-            if (lower_bound_candidates == nullptr or not allowed) {
-                return;
-            }
-            lower_bound_candidates->push_back({lower_bound,
-                                               Scorer::K_EXACT_FILTER_HINT
-                                                   ? filter_inner_product
-                                                   : std::numeric_limits<float>::quiet_NaN(),
-                                               id});
-        };
+    const auto record_lower_bound = [&](InnerIdType id,
+                                        float lower_bound,
+                                        float filter_inner_product,
+                                        bool allowed,
+                                        float full_distance) {
+        if (lower_bound_candidates == nullptr or not allowed) {
+            return K_INVALID_CANDIDATE_INDEX;
+        }
+        const auto candidate_index = lower_bound_candidates->size();
+        if (candidate_index >= K_INVALID_CANDIDATE_INDEX) {
+            return K_INVALID_CANDIDATE_INDEX;
+        }
+        lower_bound_candidates->push_back({lower_bound,
+                                           Scorer::K_EXACT_FILTER_HINT
+                                               ? filter_inner_product
+                                               : std::numeric_limits<float>::quiet_NaN(),
+                                           id,
+                                           full_distance});
+        return static_cast<uint32_t>(candidate_index);
+    };
 
     const auto entry_node = graph->GetCodeView(search_param.ep);
     float entry_distance = 0.0F;
     float entry_lower_bound = 0.0F;
     float entry_filter_ip = std::numeric_limits<float>::quiet_NaN();
-    if (not score_node(entry_node, &entry_distance, &entry_lower_bound, &entry_filter_ip)) {
+    bool entry_full_distance_available = false;
+    if (not score_node(entry_node,
+                       &entry_distance,
+                       &entry_lower_bound,
+                       &entry_filter_ip,
+                       &entry_full_distance_available)) {
         return std::make_shared<StandardHeap<true, false>>(allocator, -1);
     }
     const bool entry_allowed = is_allowed(search_param.ep);
-    record_lower_bound(search_param.ep, entry_lower_bound, entry_filter_ip, entry_allowed);
     // RaBitQ-Library inserts the bottom-layer entry point with its full distance.
-    if (should_rerank and not refine_node(entry_node, entry_filter_ip, &entry_distance)) {
-        return std::make_shared<StandardHeap<true, false>>(allocator, -1);
+    if (should_rerank and not entry_full_distance_available) {
+        if (not refine_node(entry_node, entry_filter_ip, &entry_distance)) {
+            return std::make_shared<StandardHeap<true, false>>(allocator, -1);
+        }
+        entry_full_distance_available = true;
     }
+    const auto entry_candidate_index = record_lower_bound(
+        search_param.ep,
+        entry_lower_bound,
+        entry_filter_ip,
+        entry_allowed,
+        entry_full_distance_available ? entry_distance : std::numeric_limits<float>::quiet_NaN());
     candidate_set.Insert(search_param.ep, entry_distance);
     visited_list->Set(search_param.ep);
     if (entry_allowed) {
-        results.Insert(search_param.ep,
-                       entry_distance,
-                       Scorer::K_EXACT_FILTER_HINT ? entry_filter_ip
-                                                   : std::numeric_limits<float>::quiet_NaN());
+        results.Insert(
+            search_param.ep,
+            entry_distance,
+            Scorer::K_EXACT_FILTER_HINT ? entry_filter_ip : std::numeric_limits<float>::quiet_NaN(),
+            entry_full_distance_available,
+            entry_candidate_index);
     }
 
     uint32_t hops = 0;
@@ -692,25 +751,30 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                                          float distance,
                                          float lower_bound,
                                          float filter_inner_product,
-                                         bool supplement_prefetched) {
+                                         bool supplement_prefetched,
+                                         bool full_distance_available) {
         ++distance_computations;
         if (reasoning != nullptr) {
             reasoning->RecordVisit(neighbor, distance, hops);
         }
 
         const bool allowed = is_allowed(neighbor);
-        const bool lower_bound_promising =
-            results.Size() < rerank_topk or
-            (should_rerank ? lower_bound : distance) < results.WorstDistance();
-        if (lower_bound_promising) {
-            record_lower_bound(neighbor, lower_bound, filter_inner_product, allowed);
-        }
         if (deferred_rerank) {
+            const auto candidate_index = record_lower_bound(
+                neighbor,
+                lower_bound,
+                filter_inner_product,
+                allowed,
+                full_distance_available ? distance : std::numeric_limits<float>::quiet_NaN());
             if (not candidate_set.IsFull(distance)) {
                 candidate_set.Insert(neighbor, distance);
             }
             if (allowed) {
-                results.Insert(neighbor, distance, filter_inner_product);
+                results.Insert(neighbor,
+                               distance,
+                               filter_inner_product,
+                               full_distance_available,
+                               candidate_index);
             } else if (reasoning != nullptr) {
                 reasoning->RecordFilterReject(neighbor);
             }
@@ -718,27 +782,41 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
             return;
         }
 
+        const bool lower_bound_promising =
+            results.Size() < rerank_topk or
+            (should_rerank ? lower_bound : distance) < results.WorstDistance();
         const bool promising =
             results.Size() < rerank_topk or (should_rerank ? lower_bound < results.WorstDistance()
                                                            : distance < results.WorstDistance());
-        if (promising and should_rerank) {
+        if (promising and should_rerank and not full_distance_available) {
             if (not supplement_prefetched) {
                 graph->PrefetchFusedSupplement(neighbor);
             }
             if (not refine_node(node, filter_inner_product, &distance)) {
                 return;
             }
+            full_distance_available = true;
+        }
+        if (lower_bound_promising) {
+            record_lower_bound(
+                neighbor,
+                lower_bound,
+                filter_inner_product,
+                allowed,
+                full_distance_available ? distance : std::numeric_limits<float>::quiet_NaN());
         }
         if (not candidate_set.IsFull(distance)) {
             candidate_set.Insert(neighbor, distance);
         }
         if (promising and allowed) {
-            results.Insert(neighbor, distance, filter_inner_product);
+            results.Insert(neighbor, distance, filter_inner_product, full_distance_available);
             if (search_param.consider_duplicate) {
                 for (const auto duplicate : graph->GetDuplicateIds(neighbor)) {
                     if (is_allowed(duplicate)) {
-                        results.Insert(
-                            duplicate, distance, std::numeric_limits<float>::quiet_NaN());
+                        results.Insert(duplicate,
+                                       distance,
+                                       std::numeric_limits<float>::quiet_NaN(),
+                                       full_distance_available);
                     }
                 }
             }
@@ -807,6 +885,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                                            std::numeric_limits<float>::quiet_NaN(),
                                            std::numeric_limits<float>::quiet_NaN()};
             bool valid[4]{};
+            bool full_distance_available[4]{};
             if (batch_count == 4 and search_param.enable_rabitq_one_bit_search) {
                 rabitq_filter_count += 4;
                 scorer.EstimateBatch4(
@@ -824,6 +903,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                         ++rabitq_full_count;
                         filter_inner_products[lane] = std::numeric_limits<float>::quiet_NaN();
                         valid[lane] = scorer.FullDirect(batch_codes[lane], distances + lane);
+                        full_distance_available[lane] = valid[lane];
                         lower_bounds[lane] = distances[lane];
                     }
                 }
@@ -832,7 +912,8 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                     valid[lane] = score_node(batch_codes[lane],
                                              distances + lane,
                                              lower_bounds + lane,
-                                             filter_inner_products + lane);
+                                             filter_inner_products + lane,
+                                             full_distance_available + lane);
                 }
             }
 
@@ -841,7 +922,8 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                 const bool result_not_full = results.Size() < rerank_topk;
                 const float bound_snapshot = results.WorstDistance();
                 for (uint32_t lane = 0; lane < batch_count; ++lane) {
-                    if (valid[lane] and (result_not_full or lower_bounds[lane] < bound_snapshot)) {
+                    if (valid[lane] and not full_distance_available[lane] and
+                        (result_not_full or lower_bounds[lane] < bound_snapshot)) {
                         graph->PrefetchFusedSupplement(batch_ids[lane]);
                         supplement_prefetched[lane] = true;
                     }
@@ -854,7 +936,8 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                                         distances[lane],
                                         lower_bounds[lane],
                                         filter_inner_products[lane],
-                                        supplement_prefetched[lane]);
+                                        supplement_prefetched[lane],
+                                        full_distance_available[lane]);
                 }
             }
         }
@@ -862,24 +945,85 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
 
     if (deferred_rerank) {
         BoundedResults refined(rerank_topk, allocator);
+        const auto has_valid_full_distance = [](float distance) {
+            return IsFiniteRaBitQValue(distance) and distance < std::numeric_limits<float>::max();
+        };
         constexpr uint32_t k_deferred_prefetch = 4;
         const auto initial_prefetch = std::min<uint64_t>(k_deferred_prefetch, results.Size());
         for (uint64_t i = 0; i < initial_prefetch; ++i) {
-            graph->PrefetchFusedSupplement(results[i].id);
+            if (not results[i].FullDistanceAvailable()) {
+                graph->PrefetchFusedSupplement(results[i].id);
+            }
         }
         for (uint64_t i = 0; i < results.Size(); ++i) {
-            if (i + k_deferred_prefetch < results.Size()) {
-                graph->PrefetchFusedSupplement(results[i + k_deferred_prefetch].id);
+            const auto lookahead = i + k_deferred_prefetch;
+            if (lookahead < results.Size() and not results[lookahead].FullDistanceAvailable()) {
+                graph->PrefetchFusedSupplement(results[lookahead].id);
             }
             const auto& candidate = results[i];
-            const auto node = graph->GetCodeView(candidate.id);
             float full_distance = candidate.distance;
-            if (refine_node(node, candidate.filter_inner_product, &full_distance)) {
+            bool full_distance_available = candidate.FullDistanceAvailable();
+            if (not full_distance_available) {
+                const auto node = graph->GetCodeView(candidate.id);
+                full_distance_available =
+                    refine_node(node, candidate.filter_inner_product, &full_distance);
+            }
+            if (candidate.CandidateIndex() <
+                (lower_bound_candidates == nullptr ? 0 : lower_bound_candidates->size())) {
+                (*lower_bound_candidates)[candidate.CandidateIndex()].full_distance =
+                    full_distance_available ? full_distance : std::numeric_limits<float>::max();
+            } else if (full_distance_available) {
                 refined.Insert(candidate.id,
                                full_distance,
                                Scorer::K_EXACT_FILTER_HINT
                                    ? candidate.filter_inner_product
-                                   : std::numeric_limits<float>::quiet_NaN());
+                                   : std::numeric_limits<float>::quiet_NaN(),
+                               true);
+            }
+        }
+
+        if (lower_bound_candidates != nullptr) {
+            const auto insert_refined = [&](const RaBitQCandidateRecord& candidate,
+                                            float full_distance) {
+                if (reasoning != nullptr) {
+                    reasoning->RecordReorder(candidate.id, candidate.lower_bound, full_distance);
+                }
+                const bool will_evict =
+                    refined.Size() == rerank_topk and full_distance <= refined.WorstDistance();
+                const auto evicted_id = will_evict ? refined.WorstId() : 0;
+                refined.Insert(candidate.id, full_distance, candidate.filter_inner_product, true);
+                if (will_evict and reasoning != nullptr) {
+                    reasoning->RecordReorderEviction(evicted_id, 0);
+                }
+            };
+            // Establish an exact kth threshold from every full distance already computed for the
+            // shortlist or by a filter fallback before considering any missing supplement.
+            for (const auto& candidate : *lower_bound_candidates) {
+                if (has_valid_full_distance(candidate.full_distance)) {
+                    insert_refined(candidate, candidate.full_distance);
+                }
+            }
+            for (auto& candidate : *lower_bound_candidates) {
+                if (has_valid_full_distance(candidate.full_distance) or
+                    candidate.full_distance == std::numeric_limits<float>::max()) {
+                    continue;
+                }
+                const bool promising = refined.Size() < rerank_topk or
+                                       not IsFiniteRaBitQValue(candidate.lower_bound) or
+                                       candidate.lower_bound < refined.WorstDistance();
+                if (not promising) {
+                    continue;
+                }
+                graph->PrefetchFusedSupplement(candidate.id);
+                const auto node = graph->GetCodeView(candidate.id);
+                float full_distance = 0.0F;
+                ++deferred_finalize_full_count;
+                if (not refine_node(node, candidate.filter_inner_product, &full_distance)) {
+                    candidate.full_distance = std::numeric_limits<float>::max();
+                    continue;
+                }
+                candidate.full_distance = full_distance;
+                insert_refined(candidate, full_distance);
             }
         }
         results = std::move(refined);
@@ -900,6 +1044,8 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                                                              std::memory_order_relaxed);
         ctx->stats->rabitq_reorder_fallback_full_count.fetch_add(rabitq_reorder_fallback_full_count,
                                                                  std::memory_order_relaxed);
+        ctx->stats->reorder_distance_count.fetch_add(deferred_finalize_full_count,
+                                                     std::memory_order_relaxed);
     }
     return output;
 }
@@ -1057,7 +1203,11 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
                              const void* query,
                              const InnerSearchParam& search_param,
                              QueryContext* ctx,
-                             RaBitQCandidateVector* lower_bound_candidates) const {
+                             RaBitQCandidateVector* lower_bound_candidates,
+                             bool* search_finalized) const {
+    if (search_finalized != nullptr) {
+        *search_finalized = false;
+    }
     auto* allocator = select_query_allocator(ctx, allocator_);
     auto* split_codes = dynamic_cast<RaBitQSplitDataCellInterface*>(flatten.get());
     if (graph == nullptr or split_codes == nullptr or search_param.find_duplicate or
@@ -1075,7 +1225,7 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
         1, search_param.rerank_topk > 0 ? search_param.rerank_topk : search_param.topk));
     const bool should_rerank =
         search_param.enable_rabitq_one_bit_search and search_param.enable_reorder;
-    const bool deferred_rerank = should_rerank and search_param.ef <= 40;
+    const bool deferred_rerank = HGraphRaBitQSearcher::ShouldDeferRerank(search_param);
     const bool exact_filter_ip_hint = split_codes->FusedFilterBits() >= 2;
     const uint64_t deferred_rerank_count = std::max<uint64_t>(search_param.ef, 2 * rerank_topk);
     auto computer = search_param.rabitq_fused_computer != nullptr
@@ -1087,61 +1237,40 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
     const float runtime_error_rate =
         ctx == nullptr ? std::numeric_limits<float>::quiet_NaN() : ctx->rabitq_error_rate;
     if (has_direct_traversal_query) {
+        const auto run_direct_search = [&](const auto& scorer) {
+            auto result = search_direct_fused(graph,
+                                              visited_list,
+                                              search_param,
+                                              ctx,
+                                              lower_bound_candidates,
+                                              allocator,
+                                              neighbors_mutex_,
+                                              scorer);
+            if (search_finalized != nullptr) {
+                *search_finalized = not deferred_rerank or lower_bound_candidates != nullptr;
+            }
+            return result;
+        };
         if (not traversal_query.affine) {
             LegacyOneBitScorer scorer(traversal_query, runtime_error_rate);
-            return search_direct_fused(graph,
-                                       visited_list,
-                                       search_param,
-                                       ctx,
-                                       lower_bound_candidates,
-                                       allocator,
-                                       neighbors_mutex_,
-                                       scorer);
+            return run_direct_search(scorer);
         }
         switch (traversal_query.filter_bits) {
             case 1: {
                 AffineScorer<1> scorer(traversal_query, runtime_error_rate);
-                return search_direct_fused(graph,
-                                           visited_list,
-                                           search_param,
-                                           ctx,
-                                           lower_bound_candidates,
-                                           allocator,
-                                           neighbors_mutex_,
-                                           scorer);
+                return run_direct_search(scorer);
             }
             case 2: {
                 AffineScorer<2> scorer(traversal_query, runtime_error_rate);
-                return search_direct_fused(graph,
-                                           visited_list,
-                                           search_param,
-                                           ctx,
-                                           lower_bound_candidates,
-                                           allocator,
-                                           neighbors_mutex_,
-                                           scorer);
+                return run_direct_search(scorer);
             }
             case 3: {
                 AffineScorer<3> scorer(traversal_query, runtime_error_rate);
-                return search_direct_fused(graph,
-                                           visited_list,
-                                           search_param,
-                                           ctx,
-                                           lower_bound_candidates,
-                                           allocator,
-                                           neighbors_mutex_,
-                                           scorer);
+                return run_direct_search(scorer);
             }
             case 4: {
                 AffineScorer<4> scorer(traversal_query, runtime_error_rate);
-                return search_direct_fused(graph,
-                                           visited_list,
-                                           search_param,
-                                           ctx,
-                                           lower_bound_candidates,
-                                           allocator,
-                                           neighbors_mutex_,
-                                           scorer);
+                return run_direct_search(scorer);
             }
             default:
                 break;

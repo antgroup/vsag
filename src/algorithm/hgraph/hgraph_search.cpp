@@ -233,7 +233,11 @@ HGraph::search_one_graph(const void* query,
                          InnerSearchParam& inner_search_param,
                          const VisitedListPtr& vt,
                          QueryContext* ctx,
-                         RaBitQCandidateVector* rabitq_lower_bound_candidates) const {
+                         RaBitQCandidateVector* rabitq_lower_bound_candidates,
+                         bool* fused_search_finalized) const {
+    if (fused_search_finalized != nullptr) {
+        *fused_search_finalized = false;
+    }
     bool new_visited_list = vt == nullptr;
     VisitedListPtr visited_list;
     if (new_visited_list) {
@@ -256,7 +260,8 @@ HGraph::search_one_graph(const void* query,
                                                     query,
                                                     inner_search_param,
                                                     ctx,
-                                                    rabitq_lower_bound_candidates);
+                                                    rabitq_lower_bound_candidates,
+                                                    fused_search_finalized);
         }
     }
     if (result == nullptr and inner_search_param.parallel_search_thread_count > 1 and
@@ -613,21 +618,28 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.skip_ratio = params.skip_ratio;
     search_param.skip_strategy_type = params.skip_strategy_type;
 
-    const bool fused_search_already_reranked =
+    const bool can_use_fused_direct_search =
         not use_custom_distance and not is_range and not this->support_duplicate_ and
         rabitq_fused_datacell_ != nullptr and
         bottom_graph_.get() == rabitq_fused_datacell_.get() and basic_flatten_codes_ != nullptr and
         search_param.parallel_search_thread_count <= 1 and not search_param.find_duplicate and
         not search_param.consider_duplicate;
+    const bool fused_search_can_finalize =
+        can_use_fused_direct_search and
+        (not use_reorder_ or not search_param.enable_reorder or reorder_by_base_);
+    const bool fused_search_needs_candidates =
+        fused_search_can_finalize and HGraphRaBitQSearcher::ShouldDeferRerank(search_param);
     RaBitQCandidateVector rabitq_lower_bound_candidates(ctx.alloc);
     auto* rabitq_lower_bound_candidates_ptr =
-        not fused_search_already_reranked and search_param.enable_rabitq_one_bit_search and
-                use_reorder_ and search_param.enable_reorder and reorder_by_base_
+        (not fused_search_can_finalize or fused_search_needs_candidates) and
+                search_param.enable_rabitq_one_bit_search and use_reorder_ and
+                search_param.enable_reorder and reorder_by_base_
             ? &rabitq_lower_bound_candidates
             : nullptr;
 
     DistHeapPtr search_result;
     bool brute_force_used = false;
+    bool fused_search_finalized = false;
     MCIHybridSearchResult mci_result(params, ft);
     if (not use_custom_distance) {
         if (params.brute_force_threshold > 0.0F and
@@ -652,7 +664,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                                                        search_param,
                                                        vt,
                                                        &ctx,
-                                                       rabitq_lower_bound_candidates_ptr);
+                                                       rabitq_lower_bound_candidates_ptr,
+                                                       &fused_search_finalized);
             }
         }
     } else {
@@ -662,9 +675,14 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                                                search_param,
                                                vt,
                                                &ctx,
-                                               rabitq_lower_bound_candidates_ptr);
+                                               rabitq_lower_bound_candidates_ptr,
+                                               &fused_search_finalized);
     }
     vt_guard.Release();
+
+    const bool fused_search_already_reranked =
+        fused_search_finalized and
+        (not use_reorder_ or not search_param.enable_reorder or reorder_by_base_);
 
     // Reorder
     if (not fused_search_already_reranked and mci_result.route != "mci" and not brute_force_used and

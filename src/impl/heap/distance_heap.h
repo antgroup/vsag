@@ -97,6 +97,8 @@ struct RaBitQCandidateRecord {
     float lower_bound{std::numeric_limits<float>::max()};
     float filter_inner_product{std::numeric_limits<float>::quiet_NaN()};
     InnerIdType id{0};
+    // NaN means that an exact full distance is unavailable for the current query.
+    float full_distance{std::numeric_limits<float>::quiet_NaN()};
 };
 
 using RaBitQCandidateVector = Vector<RaBitQCandidateRecord>;

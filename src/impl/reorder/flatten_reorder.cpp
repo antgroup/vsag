@@ -219,31 +219,69 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
     if (topk <= 0) {
         topk = static_cast<int64_t>(max_candidate_size);
     }
-    auto* split_codes = dynamic_cast<RaBitQSplitDataCellInterface*>(flatten_.get());
-    auto computer = fused_graph_ != nullptr and split_codes != nullptr
-                        ? split_codes->FactoryFusedComputer(query)
-                        : flatten_->FactoryComputer(query);
-    if (topk == 0 || max_candidate_size == 0) {
+    if (topk == 0 or max_candidate_size == 0) {
         return std::make_shared<StandardHeap<true, false>>(query_allocator, 0);
     }
 
+    auto has_valid_distance = [](float distance) {
+        return IsFiniteRaBitQValue(distance) and distance < std::numeric_limits<float>::max();
+    };
+    auto* split_codes = dynamic_cast<RaBitQSplitDataCellInterface*>(flatten_.get());
+    const bool accepts_full_distance_hints = fused_graph_ != nullptr and split_codes != nullptr;
     Vector<InnerIdType> all_ids(max_candidate_size, query_allocator);
     Vector<float> lower_bound_probe_dists(max_candidate_size, query_allocator);
     Vector<float> lower_bounds(max_candidate_size, query_allocator);
     Vector<float> filter_inner_products(
         max_candidate_size, std::numeric_limits<float>::quiet_NaN(), query_allocator);
-    UnorderedSet<InnerIdType> merged_ids(query_allocator);
-    merged_ids.reserve(max_candidate_size);
+    Vector<float> full_distances(
+        max_candidate_size, std::numeric_limits<float>::quiet_NaN(), query_allocator);
+    UnorderedMap<InnerIdType, uint64_t> fused_merged_ids(query_allocator);
+    UnorderedSet<InnerIdType> legacy_merged_ids(query_allocator);
+    if (accepts_full_distance_hints) {
+        fused_merged_ids.reserve(max_candidate_size);
+    } else {
+        legacy_merged_ids.reserve(max_candidate_size);
+    }
 
     uint64_t candidate_size = 0;
     if (rabitq_lower_bound_candidates != nullptr) {
         for (const auto& item : *rabitq_lower_bound_candidates) {
-            if (merged_ids.insert(item.id).second) {
+            if (not accepts_full_distance_hints) {
+                if (legacy_merged_ids.insert(item.id).second) {
+                    all_ids[candidate_size] = item.id;
+                    lower_bound_probe_dists[candidate_size] = item.lower_bound;
+                    lower_bounds[candidate_size] = item.lower_bound;
+                    filter_inner_products[candidate_size] = item.filter_inner_product;
+                    ++candidate_size;
+                }
+                continue;
+            }
+
+            const auto [iter, inserted] = fused_merged_ids.emplace(item.id, candidate_size);
+            if (inserted) {
                 all_ids[candidate_size] = item.id;
                 lower_bound_probe_dists[candidate_size] = item.lower_bound;
                 lower_bounds[candidate_size] = item.lower_bound;
                 filter_inner_products[candidate_size] = item.filter_inner_product;
+                full_distances[candidate_size] = item.full_distance;
                 ++candidate_size;
+                continue;
+            }
+
+            const auto idx = iter->second;
+            if (has_valid_distance(item.lower_bound) and
+                (not has_valid_distance(lower_bounds[idx]) or
+                 item.lower_bound < lower_bounds[idx])) {
+                lower_bound_probe_dists[idx] = item.lower_bound;
+                lower_bounds[idx] = item.lower_bound;
+            }
+            if (not IsFiniteRaBitQValue(filter_inner_products[idx]) and
+                IsFiniteRaBitQValue(item.filter_inner_product)) {
+                filter_inner_products[idx] = item.filter_inner_product;
+            }
+            if (not has_valid_distance(full_distances[idx]) and
+                has_valid_distance(item.full_distance)) {
+                full_distances[idx] = item.full_distance;
             }
         }
     }
@@ -252,17 +290,31 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
     const auto* candidate_result = input == nullptr ? nullptr : input->GetData();
     for (uint64_t i = 0; i < heap_candidate_size; ++i) {
         const auto id = candidate_result[i].second;
-        if (merged_ids.insert(id).second) {
+        const bool inserted = accepts_full_distance_hints
+                                  ? fused_merged_ids.emplace(id, candidate_size).second
+                                  : legacy_merged_ids.insert(id).second;
+        if (inserted) {
             all_ids[candidate_size++] = id;
         }
     }
+
+    ComputerInterfacePtr computer{nullptr};
+    const auto ensure_computer = [&]() -> const ComputerInterfacePtr& {
+        if (computer == nullptr) {
+            computer = fused_graph_ != nullptr and split_codes != nullptr
+                           ? split_codes->FactoryFusedComputer(query)
+                           : flatten_->FactoryComputer(query);
+        }
+        return computer;
+    };
+
     const uint64_t unhinted_candidate_size = candidate_size - hinted_candidate_size;
     if (unhinted_candidate_size > 0) {
         add_reorder_lower_bound_probe_count(ctx, unhinted_candidate_size);
         QueryLowerBound(lower_bound_probe_dists.data() + hinted_candidate_size,
                         lower_bounds.data() + hinted_candidate_size,
                         filter_inner_products.data() + hinted_candidate_size,
-                        computer,
+                        ensure_computer(),
                         all_ids.data() + hinted_candidate_size,
                         unhinted_candidate_size,
                         &ctx);
@@ -270,44 +322,80 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
 
     topk = std::min(topk, static_cast<int64_t>(candidate_size));
     auto reorder_heap = std::make_shared<StandardHeap<true, false>>(query_allocator, topk);
-    if (topk == 0 || candidate_size == 0) {
+    if (topk == 0 or candidate_size == 0) {
         return reorder_heap;
     }
 
-    auto has_valid_lower_bound = [](float lower_bound) {
-        return IsFiniteRaBitQValue(lower_bound) and lower_bound < std::numeric_limits<float>::max();
+    const auto push_full_distance = [&](uint64_t idx, float distance) {
+        if (ctx.reasoning_ctx != nullptr) {
+            ctx.reasoning_ctx->RecordReorder(all_ids[idx], lower_bound_probe_dists[idx], distance);
+        }
+        if (reorder_heap->Size() < topk or distance < reorder_heap->Top().first) {
+            reorder_heap->Push(distance, all_ids[idx]);
+            if (reorder_heap->Size() > topk) {
+                const auto curr = reorder_heap->Top();
+                add_iterator_discard(curr.first, curr.second);
+                if (ctx.reasoning_ctx != nullptr) {
+                    ctx.reasoning_ctx->RecordReorderEviction(curr.second, 0);
+                }
+                reorder_heap->Pop();
+            }
+        } else {
+            add_iterator_discard(distance, all_ids[idx]);
+        }
     };
+
+    bool all_full_distances_available = true;
+    for (uint64_t i = 0; i < candidate_size; ++i) {
+        if (not has_valid_distance(full_distances[i])) {
+            all_full_distances_available = false;
+            break;
+        }
+    }
+    if (all_full_distances_available) {
+        for (uint64_t i = 0; i < candidate_size; ++i) {
+            push_full_distance(i, full_distances[i]);
+        }
+        return reorder_heap;
+    }
+
     bool lower_bounds_available = true;
     for (uint64_t i = 0; i < candidate_size; ++i) {
-        if (not has_valid_lower_bound(lower_bounds[i])) {
+        if (not has_valid_distance(lower_bounds[i])) {
             lower_bounds_available = false;
             break;
         }
     }
 
     if (not lower_bounds_available) {
-        add_reorder_distance_count(ctx, candidate_size);
-        flatten_->Query(
-            lower_bound_probe_dists.data(), computer, all_ids.data(), candidate_size, &ctx);
+        Vector<InnerIdType> missing_ids(candidate_size, query_allocator);
+        Vector<float> missing_hints(candidate_size, query_allocator);
+        Vector<float> missing_dists(candidate_size, query_allocator);
+        Vector<uint64_t> missing_indices(candidate_size, query_allocator);
+        uint64_t missing_count = 0;
         for (uint64_t i = 0; i < candidate_size; ++i) {
-            if (ctx.reasoning_ctx != nullptr) {
-                ctx.reasoning_ctx->RecordReorder(
-                    all_ids[i], lower_bounds[i], lower_bound_probe_dists[i]);
+            if (has_valid_distance(full_distances[i])) {
+                continue;
             }
-            if (reorder_heap->Size() < topk or
-                lower_bound_probe_dists[i] < reorder_heap->Top().first) {
-                reorder_heap->Push(lower_bound_probe_dists[i], all_ids[i]);
-                if (reorder_heap->Size() > topk) {
-                    const auto curr = reorder_heap->Top();
-                    add_iterator_discard(curr.first, curr.second);
-                    if (ctx.reasoning_ctx != nullptr) {
-                        ctx.reasoning_ctx->RecordReorderEviction(reorder_heap->Top().second, 0);
-                    }
-                    reorder_heap->Pop();
-                }
-            } else {
-                add_iterator_discard(lower_bound_probe_dists[i], all_ids[i]);
+            missing_ids[missing_count] = all_ids[i];
+            missing_hints[missing_count] = filter_inner_products[i];
+            missing_indices[missing_count] = i;
+            ++missing_count;
+        }
+        if (missing_count > 0) {
+            add_reorder_distance_count(ctx, missing_count);
+            QueryFullWithHint(missing_dists.data(),
+                              missing_hints.data(),
+                              ensure_computer(),
+                              missing_ids.data(),
+                              missing_count,
+                              &ctx);
+            for (uint64_t i = 0; i < missing_count; ++i) {
+                full_distances[missing_indices[i]] = missing_dists[i];
             }
+        }
+        for (uint64_t i = 0; i < candidate_size; ++i) {
+            push_full_distance(i, full_distances[i]);
         }
         return reorder_heap;
     }
@@ -318,48 +406,82 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
         return lower_bounds[lhs] < lower_bounds[rhs];
     });
 
-    const uint64_t bootstrap_size = std::min<uint64_t>(static_cast<uint64_t>(topk), candidate_size);
     constexpr uint64_t batch_size = 256;
-    const auto buffer_size = std::max<uint64_t>(bootstrap_size, batch_size);
-    Vector<InnerIdType> ids(buffer_size, query_allocator);
-    Vector<float> dists(buffer_size, query_allocator);
-    Vector<float> filter_ip_hints(buffer_size, query_allocator);
-    Vector<uint64_t> batch_indices(buffer_size, query_allocator);
+    Vector<float> batch_dists(batch_size, query_allocator);
+    Vector<uint64_t> batch_indices(batch_size, query_allocator);
+    Vector<InnerIdType> missing_ids(batch_size, query_allocator);
+    Vector<float> missing_hints(batch_size, query_allocator);
+    Vector<float> missing_dists(batch_size, query_allocator);
+    Vector<uint64_t> missing_positions(batch_size, query_allocator);
 
-    for (uint64_t i = 0; i < bootstrap_size; ++i) {
-        const auto idx = order[i];
-        ids[i] = all_ids[idx];
-        filter_ip_hints[i] = filter_inner_products[idx];
-    }
-    add_reorder_distance_count(ctx, bootstrap_size);
-    QueryFullWithHint(
-        dists.data(), filter_ip_hints.data(), computer, ids.data(), bootstrap_size, &ctx);
-    for (uint64_t i = 0; i < bootstrap_size; ++i) {
-        if (ctx.reasoning_ctx != nullptr) {
-            const auto idx = order[i];
-            ctx.reasoning_ctx->RecordReorder(ids[i], lower_bound_probe_dists[idx], dists[i]);
+    const auto compute_missing_full_distances = [&](uint64_t batch_count) {
+        uint64_t missing_count = 0;
+        for (uint64_t i = 0; i < batch_count; ++i) {
+            const auto idx = batch_indices[i];
+            if (has_valid_distance(full_distances[idx])) {
+                batch_dists[i] = full_distances[idx];
+                continue;
+            }
+            missing_ids[missing_count] = all_ids[idx];
+            missing_hints[missing_count] = filter_inner_products[idx];
+            missing_positions[missing_count] = i;
+            ++missing_count;
         }
-        reorder_heap->Push(dists[i], ids[i]);
+        if (missing_count == 0) {
+            return;
+        }
+        add_reorder_distance_count(ctx, missing_count);
+        QueryFullWithHint(missing_dists.data(),
+                          missing_hints.data(),
+                          ensure_computer(),
+                          missing_ids.data(),
+                          missing_count,
+                          &ctx);
+        for (uint64_t i = 0; i < missing_count; ++i) {
+            const auto position = missing_positions[i];
+            const auto idx = batch_indices[position];
+            batch_dists[position] = missing_dists[i];
+            full_distances[idx] = missing_dists[i];
+        }
+    };
+
+    // Seed the exact threshold with every full distance produced during traversal.  Missing
+    // candidates then load their supplement only while their lower bound can still enter top-k.
+    for (uint64_t i = 0; i < candidate_size; ++i) {
+        if (has_valid_distance(full_distances[i])) {
+            push_full_distance(i, full_distances[i]);
+        }
     }
 
-    uint64_t cursor = bootstrap_size;
+    uint64_t cursor = 0;
     while (cursor < candidate_size) {
-        if (reorder_heap->Size() == topk &&
-            lower_bounds[order[cursor]] >= reorder_heap->Top().first) {
+        while (cursor < candidate_size and has_valid_distance(full_distances[order[cursor]])) {
+            ++cursor;
+        }
+        if (cursor == candidate_size) {
             break;
         }
-
-        const auto threshold = reorder_heap->Top().first;
+        const bool heap_full = reorder_heap->Size() == static_cast<uint64_t>(topk);
+        const float threshold =
+            heap_full ? reorder_heap->Top().first : std::numeric_limits<float>::max();
+        if (heap_full and lower_bounds[order[cursor]] >= threshold) {
+            break;
+        }
+        const uint64_t batch_limit =
+            heap_full ? batch_size
+                      : std::min<uint64_t>(batch_size,
+                                           static_cast<uint64_t>(topk) - reorder_heap->Size());
         uint64_t batch_count = 0;
-        while (cursor < candidate_size && batch_count < batch_size) {
+        while (cursor < candidate_size and batch_count < batch_limit) {
             const auto idx = order[cursor];
-            if (lower_bounds[idx] >= threshold) {
+            if (has_valid_distance(full_distances[idx])) {
+                ++cursor;
+                continue;
+            }
+            if (heap_full and lower_bounds[idx] >= threshold) {
                 break;
             }
-            ids[batch_count] = all_ids[idx];
-            filter_ip_hints[batch_count] = filter_inner_products[idx];
-            batch_indices[batch_count] = idx;
-            ++batch_count;
+            batch_indices[batch_count++] = idx;
             ++cursor;
         }
 
@@ -367,27 +489,9 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
             break;
         }
 
-        add_reorder_distance_count(ctx, batch_count);
-        QueryFullWithHint(
-            dists.data(), filter_ip_hints.data(), computer, ids.data(), batch_count, &ctx);
+        compute_missing_full_distances(batch_count);
         for (uint64_t i = 0; i < batch_count; ++i) {
-            if (ctx.reasoning_ctx != nullptr) {
-                ctx.reasoning_ctx->RecordReorder(
-                    ids[i], lower_bound_probe_dists[batch_indices[i]], dists[i]);
-            }
-            if (dists[i] < reorder_heap->Top().first) {
-                reorder_heap->Push(dists[i], ids[i]);
-                if (reorder_heap->Size() > topk) {
-                    const auto curr = reorder_heap->Top();
-                    add_iterator_discard(curr.first, curr.second);
-                    if (ctx.reasoning_ctx != nullptr) {
-                        ctx.reasoning_ctx->RecordReorderEviction(reorder_heap->Top().second, 0);
-                    }
-                    reorder_heap->Pop();
-                }
-            } else {
-                add_iterator_discard(dists[i], ids[i]);
-            }
+            push_full_distance(batch_indices[i], batch_dists[i]);
         }
     }
     if (iter_ctx != nullptr) {
@@ -397,20 +501,21 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
             uint64_t batch_count = 0;
             while (cursor < candidate_size and batch_count < batch_size) {
                 const auto idx = order[cursor++];
-                ids[batch_count] = all_ids[idx];
-                filter_ip_hints[batch_count] = filter_inner_products[idx];
-                batch_indices[batch_count] = idx;
-                ++batch_count;
+                if (not has_valid_distance(full_distances[idx])) {
+                    batch_indices[batch_count++] = idx;
+                }
             }
-            add_reorder_distance_count(ctx, batch_count);
-            QueryFullWithHint(
-                dists.data(), filter_ip_hints.data(), computer, ids.data(), batch_count, &ctx);
+            if (batch_count == 0) {
+                continue;
+            }
+            compute_missing_full_distances(batch_count);
             for (uint64_t i = 0; i < batch_count; ++i) {
+                const auto idx = batch_indices[i];
                 if (ctx.reasoning_ctx != nullptr) {
                     ctx.reasoning_ctx->RecordReorder(
-                        ids[i], lower_bound_probe_dists[batch_indices[i]], dists[i]);
+                        all_ids[idx], lower_bound_probe_dists[idx], batch_dists[i]);
                 }
-                add_iterator_discard(dists[i], ids[i]);
+                add_iterator_discard(batch_dists[i], all_ids[idx]);
             }
         }
     }
