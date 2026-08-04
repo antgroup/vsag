@@ -290,6 +290,77 @@ TEST_CASE("HGraph RaBitQ Split validates dimension before optimized training",
     REQUIRE(index->GetNumElements() == base_count);
 }
 
+TEST_CASE("HGraph fused RaBitQ exported model reuses its codec during build",
+          "[ft][rabitq_split][hgraph][fused][export_model]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 64;
+    constexpr uint64_t base_count = 64;
+    constexpr int64_t topk = 10;
+    const std::string graph_type = GENERATE("odescent", "nsw");
+    CAPTURE(graph_type);
+
+    auto param =
+        HGraphRaBitQSplitTestIndex::GenerateBuildParam("l2", dim, "memory_io", "", 1, 7, true);
+    auto param_json = vsag::JsonType::Parse(param);
+    param_json["index_param"]["graph_io_type"].SetString("memory_io");
+    param_json["index_param"]["graph_storage_type"].SetString("flat");
+    param_json["index_param"]["graph_type"].SetString(graph_type);
+    param_json["index_param"]["reorder_source"].SetString("base");
+    param_json["index_param"]["rabitq_fused_datacell"].SetBool(true);
+    param_json["index_param"]["rabitq_use_fht"].SetBool(true);
+    param_json["index_param"]["store_raw_vector"].SetBool(false);
+    param_json["index_param"]["use_mci"].SetBool(false);
+    param_json["index_param"]["build_thread_count"].SetInt(1);
+    param = param_json.Dump();
+
+    auto dataset = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, base_count, "l2");
+    std::vector<float> target_vectors(
+        dataset->base_->GetFloat32Vectors(),
+        dataset->base_->GetFloat32Vectors() + base_count * static_cast<uint64_t>(dim));
+    for (uint64_t i = 0; i < target_vectors.size(); ++i) {
+        target_vectors[i] = target_vectors[i] * 1.75F + 3.0F +
+                            static_cast<float>(i % static_cast<uint64_t>(dim)) * 0.01F;
+    }
+    auto target_base = vsag::Dataset::Make();
+    target_base->NumElements(base_count)
+        ->Dim(dim)
+        ->Ids(dataset->base_->GetIds())
+        ->Float32Vectors(target_vectors.data())
+        ->Owner(false);
+    auto target_query = vsag::Dataset::Make();
+    target_query->NumElements(1)->Dim(dim)->Float32Vectors(target_vectors.data())->Owner(false);
+
+    const auto serialized_model = [](const TestIndex::IndexPtr& index) {
+        auto serialized = index->Serialize();
+        REQUIRE(serialized.has_value());
+        const auto binary = serialized.value().Get(HGraphRaBitQSplitTestIndex::name);
+        REQUIRE(binary.data != nullptr);
+        REQUIRE(binary.size > 0);
+        return std::string(reinterpret_cast<const char*>(binary.data.get()), binary.size);
+    };
+
+    auto source = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param, true);
+    auto source_build = source->Build(dataset->base_);
+    REQUIRE(source_build.has_value());
+
+    auto model_result = source->ExportModel();
+    REQUIRE(model_result.has_value());
+    auto model = model_result.value();
+    REQUIRE(model->GetNumElements() == 0);
+    const auto expected_model = serialized_model(model);
+    auto model_build = model->Build(target_base);
+    REQUIRE(model_build.has_value());
+    REQUIRE(model->GetNumElements() == base_count);
+
+    auto populated_model_result = model->ExportModel();
+    REQUIRE(populated_model_result.has_value());
+    REQUIRE(serialized_model(populated_model_result.value()) == expected_model);
+
+    auto search_result = model->KnnSearch(target_query, topk, kSplitSearchParam);
+    REQUIRE(search_result.has_value());
+    REQUIRE(search_result.value()->GetDim() == topk);
+}
+
 TEST_CASE("HGraph RaBitQ Split drains accepted build tasks after enqueue failure",
           "[ft][rabitq_split][hgraph]") {
     using namespace fixtures;
