@@ -284,6 +284,33 @@ TEST_CASE("RaBitQSplitDataCell fused residual clusters", "[ut][RaBitQSplitDataCe
 
     Vector<uint8_t> one_bit(split->OneBitCodeSize(), allocator.get());
     Vector<uint8_t> supplement(split->SupplementCodeSize(), allocator.get());
+    const float invalid_values[] = {std::numeric_limits<float>::quiet_NaN(),
+                                    std::numeric_limits<float>::infinity(),
+                                    -std::numeric_limits<float>::infinity()};
+    constexpr uint8_t output_sentinel = 0xA5;
+    for (const float invalid_value : invalid_values) {
+        CAPTURE(invalid_value);
+        std::vector<float> invalid_training(vectors.data(), vectors.data() + vectors.size());
+        invalid_training[0] = invalid_value;
+        REQUIRE_THROWS(split->TrainFusedCodec(invalid_training.data(), count, cluster_count));
+        REQUIRE(split->ExportFusedCodec() == codec_model);
+
+        std::vector<float> invalid_vector(vectors.data(), vectors.data() + dim);
+        invalid_vector[0] = invalid_value;
+        std::fill(one_bit.begin(), one_bit.end(), output_sentinel);
+        std::fill(supplement.begin(), supplement.end(), output_sentinel);
+        uint32_t invalid_cluster_id = cluster_count;
+        REQUIRE_FALSE(split->EncodeFused(
+            invalid_vector.data(), one_bit.data(), supplement.data(), &invalid_cluster_id));
+        REQUIRE(invalid_cluster_id == cluster_count);
+        REQUIRE(std::all_of(one_bit.begin(), one_bit.end(), [](uint8_t value) {
+            return value == output_sentinel;
+        }));
+        REQUIRE(std::all_of(supplement.begin(), supplement.end(), [](uint8_t value) {
+            return value == output_sentinel;
+        }));
+    }
+
     UnorderedSet<uint32_t> assigned_clusters(allocator.get());
     for (uint64_t cluster = 0; cluster < cluster_count; ++cluster) {
         uint32_t cluster_id = 0;

@@ -135,7 +135,7 @@ public:
     void
     EncodeHnswOneBitMetadata(const float* data, uint8_t* one_bit_code) const;
 
-    void
+    bool
     EncodeHnswSupplement(const float* data, uint8_t* supplement_code) const;
 
     void

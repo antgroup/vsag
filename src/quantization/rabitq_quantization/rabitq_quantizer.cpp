@@ -31,6 +31,19 @@
 
 namespace vsag {
 
+namespace {
+
+[[nodiscard]] bool
+is_normal_ra_bit_q_value(float value) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    constexpr uint32_t k_exponent_mask = 0x7F800000U;
+    const uint32_t exponent = bits & k_exponent_mask;
+    return exponent != 0U and exponent != k_exponent_mask;
+}
+
+}  // namespace
+
 template <MetricType metric>
 RaBitQuantizer<metric>::RaBitQuantizer(int dim,
                                        uint64_t pca_dim,
@@ -2445,8 +2458,16 @@ RaBitQuantizer<metric>::EncodeHnswOneBitMetadata(const float* data, uint8_t* one
 }
 
 template <MetricType metric>
-void
+bool
 RaBitQuantizer<metric>::EncodeHnswSupplement(const float* data, uint8_t* supplement_code) const {
+    if (data == nullptr or supplement_code == nullptr or centroid_.size() != this->dim_) {
+        return false;
+    }
+    for (uint64_t i = 0; i < this->original_dim_; ++i) {
+        if (not IsFiniteRaBitQValue(data[i])) {
+            return false;
+        }
+    }
     constexpr uint32_t k_ex_bits = 7;
     constexpr uint32_t k_ex_mask = (1U << k_ex_bits) - 1U;
     constexpr float k_center = 127.5F;
@@ -2460,18 +2481,34 @@ RaBitQuantizer<metric>::EncodeHnswSupplement(const float* data, uint8_t* supplem
 
     double residual_norm_sqr = 0.0;
     for (uint64_t i = 0; i < this->dim_; ++i) {
+        if (not IsFiniteRaBitQValue(transformed_data[i]) or not IsFiniteRaBitQValue(centroid_[i])) {
+            return false;
+        }
         residual[i] = transformed_data[i] - centroid_[i];
+        if (not IsFiniteRaBitQValue(residual[i])) {
+            return false;
+        }
         residual_norm_sqr += static_cast<double>(residual[i]) * residual[i];
     }
     const auto residual_norm = static_cast<float>(std::sqrt(residual_norm_sqr));
+    if (not IsFiniteRaBitQValue(residual_norm)) {
+        return false;
+    }
     const float scale =
         residual_norm > 0.0F
             ? k_scale_960 * std::sqrt(static_cast<float>(this->dim_) / 960.0F) / residual_norm
             : 0.0F;
+    if (not IsFiniteRaBitQValue(scale)) {
+        return false;
+    }
     double ipnorm = 0.0;
     for (uint64_t i = 0; i < this->dim_; ++i) {
-        auto magnitude = static_cast<uint32_t>(scale * std::fabs(residual[i]) + 1e-5F);
-        magnitude = std::min(magnitude, k_ex_mask);
+        const float scaled_magnitude = scale * std::fabs(residual[i]) + 1e-5F;
+        if (not IsFiniteRaBitQValue(scaled_magnitude)) {
+            return false;
+        }
+        const auto magnitude =
+            static_cast<uint32_t>(std::min(scaled_magnitude, static_cast<float>(k_ex_mask)));
         ex_codes[i] = static_cast<uint8_t>(residual[i] < 0.0F ? k_ex_mask - magnitude : magnitude);
         ipnorm += (static_cast<double>(magnitude) + 0.5) *
                   std::fabs(static_cast<double>(residual[i])) /
@@ -2527,7 +2564,7 @@ RaBitQuantizer<metric>::EncodeHnswSupplement(const float* data, uint8_t* supplem
                               ? static_cast<float>(residual_code_ip)
                               : std::numeric_limits<float>::infinity();
     const auto inverse_ipnorm = static_cast<float>(1.0 / ipnorm);
-    const float ipnorm_inv = std::isnormal(inverse_ipnorm) ? inverse_ipnorm : 1.0F;
+    const float ipnorm_inv = is_normal_ra_bit_q_value(inverse_ipnorm) ? inverse_ipnorm : 1.0F;
     float f_add = 0.0F;
     float f_rescale = 0.0F;
     if constexpr (metric == MetricType::METRIC_TYPE_IP) {
@@ -2541,9 +2578,13 @@ RaBitQuantizer<metric>::EncodeHnswSupplement(const float* data, uint8_t* supplem
                                    2.0 * residual_norm_sqr * centroid_code_ip / safe_ip);
         f_rescale = -2.0F * ipnorm_inv * residual_norm;
     }
+    if (not IsFiniteRaBitQValue(f_add) or not IsFiniteRaBitQValue(f_rescale)) {
+        return false;
+    }
     std::memcpy(supplement_code + SupplementMetaOffset(), &f_add, sizeof(float));
     std::memcpy(
         supplement_code + SupplementMetaOffset() + sizeof(float), &f_rescale, sizeof(float));
+    return true;
 }
 
 template <MetricType metric>

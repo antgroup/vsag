@@ -579,6 +579,111 @@ TEST_CASE("HGraph RaBitQ split rejects non-finite one-bit queries",
     }
 }
 
+TEST_CASE("HGraph fused RaBitQ split rejects non-finite base vectors",
+          "[ft][rabitq_split][hgraph][fused][validation]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 64;
+    constexpr uint64_t base_count = 64;
+
+    auto param =
+        HGraphRaBitQSplitTestIndex::GenerateBuildParam("l2", dim, "memory_io", "", 1, 7, true);
+    auto param_json = vsag::JsonType::Parse(param);
+    param_json["index_param"]["graph_io_type"].SetString("memory_io");
+    param_json["index_param"]["graph_storage_type"].SetString("flat");
+    param_json["index_param"]["graph_type"].SetString("odescent");
+    param_json["index_param"]["reorder_source"].SetString("base");
+    param_json["index_param"]["rabitq_fused_datacell"].SetBool(true);
+    param_json["index_param"]["rabitq_use_fht"].SetBool(true);
+    param_json["index_param"]["store_raw_vector"].SetBool(true);
+    param_json["index_param"]["use_mci"].SetBool(false);
+    param_json["index_param"]["build_thread_count"].SetInt(1);
+    param = param_json.Dump();
+
+    auto source = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, base_count, "l2");
+    const float invalid_values[] = {std::numeric_limits<float>::quiet_NaN(),
+                                    std::numeric_limits<float>::infinity(),
+                                    -std::numeric_limits<float>::infinity()};
+    for (const float invalid_value : invalid_values) {
+        CAPTURE(invalid_value);
+        std::vector<float> invalid_vectors(
+            source->base_->GetFloat32Vectors(),
+            source->base_->GetFloat32Vectors() + base_count * static_cast<uint64_t>(dim));
+        invalid_vectors[0] = invalid_value;
+        auto invalid_base = vsag::Dataset::Make();
+        invalid_base->NumElements(base_count)
+            ->Dim(dim)
+            ->Ids(source->base_->GetIds())
+            ->Float32Vectors(invalid_vectors.data())
+            ->Owner(false);
+        auto invalid_index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param, true);
+        auto build_result = invalid_index->Build(invalid_base);
+        REQUIRE_FALSE(build_result.has_value());
+        REQUIRE(build_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+        REQUIRE(invalid_index->GetNumElements() == 0);
+    }
+
+    auto index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param, true);
+    auto build_result = index->Build(source->base_);
+    REQUIRE(build_result.has_value());
+    REQUIRE(index->GetNumElements() == base_count);
+
+    const auto* base_ids = source->base_->GetIds();
+    const int64_t existing_label = base_ids[0];
+    const auto* existing_vector = source->base_->GetFloat32Vectors();
+    auto original_distance = index->CalcDistanceById(existing_vector, existing_label);
+    REQUIRE(original_distance.has_value());
+    const int64_t max_label = *std::max_element(base_ids, base_ids + base_count);
+    uint64_t invalid_value_index = 0;
+    for (const float invalid_value : invalid_values) {
+        CAPTURE(invalid_value_index);
+        std::vector<float> invalid_vector(existing_vector, existing_vector + dim);
+        invalid_vector[0] = invalid_value;
+
+        const int64_t added_label = max_label + static_cast<int64_t>(invalid_value_index) + 1;
+        auto invalid_add = vsag::Dataset::Make();
+        invalid_add->NumElements(1)
+            ->Dim(dim)
+            ->Ids(&added_label)
+            ->Float32Vectors(invalid_vector.data())
+            ->Owner(false);
+        const uint64_t count_before_add = index->GetNumElements();
+        auto add_result = index->Add(invalid_add);
+        REQUIRE_FALSE(add_result.has_value());
+        REQUIRE(add_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+        REQUIRE(index->GetNumElements() == count_before_add);
+        REQUIRE_FALSE(index->CheckIdExist(added_label));
+
+        auto invalid_update = vsag::Dataset::Make();
+        invalid_update->NumElements(1)
+            ->Dim(dim)
+            ->Ids(&existing_label)
+            ->Float32Vectors(invalid_vector.data())
+            ->Owner(false);
+        auto update_result = index->UpdateVector(existing_label, invalid_update, true);
+        REQUIRE_FALSE(update_result.has_value());
+        REQUIRE(update_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+        REQUIRE(index->GetNumElements() == base_count);
+        auto unchanged_distance = index->CalcDistanceById(existing_vector, existing_label);
+        REQUIRE(unchanged_distance.has_value());
+        REQUIRE(unchanged_distance.value() == original_distance.value());
+        ++invalid_value_index;
+    }
+
+    std::vector<float> short_vector(existing_vector, existing_vector + dim - 1);
+    auto wrong_dim_update = vsag::Dataset::Make();
+    wrong_dim_update->NumElements(1)
+        ->Dim(dim - 1)
+        ->Ids(&existing_label)
+        ->Float32Vectors(short_vector.data())
+        ->Owner(false);
+    auto wrong_dim_result = index->UpdateVector(existing_label, wrong_dim_update, true);
+    REQUIRE_FALSE(wrong_dim_result.has_value());
+    REQUIRE(wrong_dim_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    auto unchanged_distance = index->CalcDistanceById(existing_vector, existing_label);
+    REQUIRE(unchanged_distance.has_value());
+    REQUIRE(unchanged_distance.value() == original_distance.value());
+}
+
 TEST_CASE("HGraph fused RaBitQ split compact round trip",
           "[ft][rabitq_split][hgraph][fused][serialize]") {
     using namespace fixtures;
