@@ -121,6 +121,10 @@ Set all five parameters together to enable RaBitQ x+y split storage and reorderi
 }
 ```
 
+Because split codes cannot be decoded back to the input vector, Pyramid also retains an internal
+FP32 copy for incremental flat-to-graph promotion and analyzer sampling. Search distances still use
+the split codes; the FP32 copy adds `count * dim * sizeof(float)` bytes of vector storage.
+
 ### MRLE with split RaBitQ
 
 Pyramid can truncate embeddings trained with Matryoshka Representation Learning before encoding

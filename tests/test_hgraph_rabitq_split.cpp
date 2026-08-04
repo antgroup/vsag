@@ -397,9 +397,7 @@ TEST_CASE("HGraph RaBitQ Split rejects unsupported non-empty Add", "[ft][rabitq_
 
     auto param =
         HGraphRaBitQSplitTestIndex::GenerateBuildParam(metric, dim, "memory_io", "", 3, 5, true);
-    auto param_json = vsag::JsonType::Parse(param);
-    param_json["index_param"]["use_reorder"].SetBool(false);
-    auto index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param_json.Dump(), true);
+    auto index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param, true);
     auto dataset = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric);
 
     auto initial = vsag::Dataset::Make();
