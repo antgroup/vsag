@@ -25,7 +25,6 @@ HGraph and Pyramid select split mode when both quantization types are `rabitq` a
         "base_quantization_type": "rabitq",
         "precise_quantization_type": "rabitq",
         "use_reorder": true,
-        "rabitq_fused_datacell": true,
         "rabitq_bits_per_dim_query": 32,
         "rabitq_bits_per_dim_base": 3,
         "rabitq_bits_per_dim_precise": 5,
@@ -47,7 +46,7 @@ The relevant parameters are:
 | `rabitq_bits_per_dim_query` | Must be `32` for split storage. |
 | `rabitq_error_rate` | Default positive multiplier applied to the lower-bound error term. |
 | `use_reorder` | Should be `true` so candidates are ranked with the `x+y` distance. |
-| `rabitq_fused_datacell` | Enables fused in-memory graph/code layout; default `false`. |
+| `rabitq_fused_datacell` | HGraph only; enables fused graph/code layout. Default: `false`. |
 
 The constraints are:
 
@@ -60,13 +59,15 @@ x + y <= 8
 If `rabitq_bits_per_dim_precise` is omitted, HGraph and Pyramid use the standard RaBitQ
 path instead of split storage.
 
-### Fused in-memory layout
+### HGraph fused in-memory layout
 
-Set `rabitq_fused_datacell` to `true` to store each bottom-layer node's
-neighbors, cluster id, label, x-bit code, and y-bit supplement in one
-cache-line-aligned record. The specialized search loop reads the record
-directly and prefetches graph links and quantized codes together. The codec
-uses 16 reproducibly trained residual clusters.
+For HGraph only, set `rabitq_fused_datacell` to `true` to store each
+bottom-layer node's neighbors, cluster id, label, x-bit code, and y-bit
+supplement in one cache-line-aligned record. Pyramid uses ordinary split
+storage; `rabitq_fused_datacell` is not a Pyramid parameter. The specialized
+HGraph search loop reads the record directly and prefetches graph links and
+quantized codes together. The codec uses 16 reproducibly trained residual
+clusters.
 
 The fused layout is opt-in and has stricter constraints than ordinary split
 storage:
@@ -94,13 +95,25 @@ Enable the filter/lower-bound search path with:
 }
 ```
 
+For Pyramid, put the equivalent search controls under `pyramid`:
+
+```json
+{
+    "pyramid": {
+        "ef_search": 200,
+        "rabitq_one_bit_search": true,
+        "rabitq_error_rate": 1.9
+    }
+}
+```
+
 The external search key is named `rabitq_one_bit_search`, but on a split index
 it uses all `x` filter bits configured by `rabitq_bits_per_dim_base`.
-`hgraph.rabitq_error_rate` overrides the index default for that search without
-requiring a rebuild. Native fused records store the geometric error scale
-before this multiplier is applied. HNSW-compatible fused `1+7` records retain
-metadata scaled by the canonical default and apply an override as a ratio at
-query time.
+`hgraph.rabitq_error_rate` and `pyramid.rabitq_error_rate` override the index
+default for their respective searches without requiring a rebuild. Native
+fused HGraph records store the geometric error scale before this multiplier is
+applied. HNSW-compatible fused `1+7` records retain metadata scaled by the
+canonical default and apply an override as a ratio at query time.
 
 ## Search pipeline
 
@@ -285,21 +298,25 @@ sum_i q_i * u_i
       + sum_i q_i * s_i
 ```
 
-For L2 with an x-bit lookup filter, HGraph and Pyramid can pass the previously
-computed filter distance to reorder as a hint.
-`ComputeDistWithSplitCodeAndFilterDist` recovers the first term from that hint.
-The fused HGraph L2 and inner-product paths instead carry the filter inner
-product directly; `ComputeDistWithSplitCodeAndFilterIP` consumes it without
-recovering it from a distance. Both paths compute only the second term from the
-y supplement planes:
+For `x >= 2`, the canonical HGraph and Pyramid graph-search path carries the
+exact x-bit filter inner product from traversal to reorder. Ordinary split
+storage exposes it through `QueryWithDistanceLowerBoundAndFilterIP`, and
+reorder consumes it through `QueryWithFilterIPHint` and
+`ComputeDistWithSplitCodeAndFilterIP`. Fused HGraph uses the same exact hint
+semantics while reading the code directly from the node record. These
+canonical paths do not recover the inner product from a distance, and full
+rerank computes only the second term from the y supplement planes:
 
 ```text
 full contribution = shifted filter contribution + supplement contribution
 ```
 
-Thus `2+y`, `3+y`, and `4+y` fused indexes reuse the exact x-bit filter
-inner product and scan only the y supplement planes for each reranked
-candidate. The fused `1+y` traversal uses a four-bit query bit-plane and
+Thus ordinary and fused `2+y`, `3+y`, and `4+y` indexes reuse the exact x-bit
+filter inner product and scan only the y supplement planes for each reranked
+candidate. `QueryWithDistanceHint` and
+`ComputeDistWithSplitCodeAndFilterDist` remain compatibility APIs for callers
+that only have a filter distance; they are not the canonical graph-search
+pipeline. The fused `1+y` traversal uses a four-bit query bit-plane and
 popcount approximation; precise reranking recomputes its exact one-bit
 contribution because the approximate value is not an exact full-distance
 hint. If a usable hint is unavailable, the code computes the same final
@@ -369,7 +386,7 @@ The split datacell serializes, in order:
 Create the destination index with parameters compatible with the serialized
 index, especially `dim`, `metric_type`, x/y bit widths, and query bits.
 Changing an encoded parameter requires rebuilding the index. Tuning only the
-search-time `hgraph.rabitq_error_rate` does not.
+search-time `hgraph.rabitq_error_rate` or `pyramid.rabitq_error_rate` does not.
 
 For a fused index, the codec model is serialized with the split datacell and
 the per-node codes are serialized once as part of the bottom-graph slab.
@@ -380,7 +397,7 @@ second count-scaled copy of the split codes.
 
 | Area | File / entry point |
 | --- | --- |
-| External x/y parameter mapping | `src/algorithm/hgraph/hgraph_param_mapping.cpp` |
+| External x/y parameter mapping | `hgraph_param_mapping.cpp`, `pyramid.cpp` |
 | Split record ownership and IO | `src/datacell/rabitq_split_datacell.h` |
 | Plane layout and code splitting | `RaBitQuantizer::StoredPlaneIndex`, `SplitCode` |
 | Filter estimate and lower bound | `ComputeDistWithOneBitLowerBound` |
@@ -396,9 +413,9 @@ second count-scaled copy of the split codes.
   query codes. Pyramid enables the one-bit split search path by default for
   split indexes; pass `rabitq_one_bit_search: false` under `pyramid` to force
   the standard search path.
-- `l2`, `ip`, and `cosine` are supported. The generic filter-distance hint
-  shortcut currently targets L2; the fused HGraph direct-filter-inner-product
-  shortcut supports L2 and inner product.
+- `l2`, `ip`, and `cosine` are supported. For `x >= 2`, the canonical ordinary
+  split and fused HGraph paths directly reuse the exact filter inner product
+  for L2 and inner product. Other cases safely compute the full split distance.
 - The fused datacell supports only L2 and inner product and only the in-memory
   configuration described above.
 - With `support_duplicate: true`, duplicate build probes and alias-expanding
@@ -407,7 +424,8 @@ second count-scaled copy of the split codes.
 - Keep `use_reorder: true` unless x-bit traversal accuracy alone has been
   validated for the dataset.
 - Changing x, y, metric, or transform parameters requires rebuilding the
-  index. A search-time `hgraph.rabitq_error_rate` override does not.
+  index. A search-time `hgraph.rabitq_error_rate` or
+  `pyramid.rabitq_error_rate` override does not.
 - Use [RaBitQ](rabitq.md) for the general quantizer description and
   [HGraph](../indexes/hgraph.md) and [Pyramid](../indexes/pyramid.md) for the
   complete index parameter tables.
