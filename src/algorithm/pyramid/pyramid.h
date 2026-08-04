@@ -340,7 +340,7 @@ private:
                 InnerSearchParam& search_param,
                 QueryContext& ctx,
                 const std::string& hierarchy_name,
-                const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+                const RaBitQCandidateVector* rabitq_lower_bound_candidates = nullptr) const;
 
     /// Probabilistic check: should total_count trigger a new entry-point update?
     bool
@@ -371,7 +371,7 @@ private:
                 const FlattenInterfacePtr& codes,
                 QueryContext& ctx,
                 uint64_t subindex_ef_search,
-                DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+                RaBitQCandidateVector* rabitq_lower_bound_candidates = nullptr) const;
 
     [[nodiscard]] bool
     has_precise_reorder() const {
