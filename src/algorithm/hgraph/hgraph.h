@@ -479,6 +479,9 @@ private:
     void
     validate_add_data(const DatasetPtr& data) const;
 
+    void
+    validate_fused_vector_data(const float* data, uint64_t count) const;
+
     AddContext
     prepare_add_context(const DatasetPtr& data);
 

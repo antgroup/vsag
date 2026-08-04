@@ -161,6 +161,9 @@ HGraph::train_codes_with_dataset(const DatasetPtr& train_data) {
 std::vector<int64_t>
 HGraph::Build(const DatasetPtr& data) {
     CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        this->validate_add_data(data);
+    }
     this->build_cache_hit_rate_ = -1.0F;
     this->build_cache_hit_nodes_ = 0;
     this->build_cache_missed_nodes_ = 0;
@@ -353,13 +356,33 @@ HGraph::Add(const DatasetPtr& data) {
 }
 
 void
+HGraph::validate_fused_vector_data(const float* data, uint64_t count) const {
+    if (this->rabitq_fused_datacell_ == nullptr) {
+        return;
+    }
+    CHECK_ARGUMENT(data != nullptr, "fused RaBitQ base vectors must not be null");
+    const auto dim = static_cast<uint64_t>(this->dim_);
+    for (uint64_t row = 0; row < count; ++row) {
+        for (uint64_t d = 0; d < dim; ++d, ++data) {
+            if (not IsFiniteRaBitQValue(*data)) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "fused RaBitQ base vectors must contain only finite values");
+            }
+        }
+    }
+}
+
+void
 HGraph::validate_add_data(const DatasetPtr& data) const {
     auto base_dim = data->GetDim();
     if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
         CHECK_ARGUMENT(base_dim == dim_,
                        fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
     }
-    CHECK_ARGUMENT(get_data(data) != nullptr, "base.float_vector is nullptr");
+    const auto* base_data = get_data(data);
+    CHECK_ARGUMENT(base_data != nullptr, "base.float_vector is nullptr");
+    this->validate_fused_vector_data(static_cast<const float*>(base_data),
+                                     static_cast<uint64_t>(data->GetNumElements()));
 }
 
 HGraph::AddContext

@@ -1234,6 +1234,8 @@ public:
         CHECK_ARGUMENT(cluster_count == 16, "fused RaBitQ requires exactly 16 clusters");
         CHECK_ARGUMENT(this->quantization_param_ != nullptr,
                        "fused RaBitQ quantizer parameter is unavailable");
+        CHECK_ARGUMENT(this->AreFusedVectorsFinite(data, count),
+                       "fused RaBitQ training data must contain only finite values");
 
         KMeansCluster kmeans(
             static_cast<int32_t>(common_param_.dim_), allocator_, common_param_.thread_pool_);
@@ -1286,6 +1288,9 @@ public:
             cluster_id == nullptr or fused_quantizers_.empty()) {
             return false;
         }
+        if (not this->AreFusedVectorsFinite(data, 1)) {
+            return false;
+        }
         *cluster_id = NearestFusedCluster(data);
         ByteBuffer full_code(code_size_, allocator_);
         auto& quantizer = fused_quantizers_[*cluster_id];
@@ -1295,7 +1300,9 @@ public:
         quantizer->SplitCode(full_code.data, one_bit_code, supplement_code);
         if (IsLegacyHnswFusedCodec()) {
             quantizer->EncodeHnswOneBitMetadata(data, one_bit_code);
-            quantizer->EncodeHnswSupplement(data, supplement_code);
+            if (not quantizer->EncodeHnswSupplement(data, supplement_code)) {
+                return false;
+            }
         } else if (not quantizer->EncodeFusedAffineMetadata(data, one_bit_code, supplement_code)) {
             return false;
         }
@@ -1862,6 +1869,22 @@ private:
     [[nodiscard]] bool
     IsLegacyHnswFusedCodec() const {
         return quantizer_->FilterBits() == 1 and quantizer_->ReorderBits() == 7;
+    }
+
+    [[nodiscard]] bool
+    AreFusedVectorsFinite(const float* data, uint64_t count) const {
+        if (data == nullptr) {
+            return false;
+        }
+        const auto dim = static_cast<uint64_t>(common_param_.dim_);
+        for (uint64_t row = 0; row < count; ++row) {
+            for (uint64_t d = 0; d < dim; ++d, ++data) {
+                if (not IsFiniteRaBitQValue(*data)) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     [[nodiscard]] uint32_t
