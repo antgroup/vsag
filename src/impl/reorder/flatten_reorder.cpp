@@ -93,9 +93,9 @@ FlattenReorder::QueryFullWithHint(float* distances,
     for (uint64_t i = 0; i < count; ++i) {
         const auto* record = fused_graph_->GetNodeRecord(ids[i]);
         const auto cluster_id = fused_graph_->GetClusterId(record);
+        ++full_count;
         bool used_hint = false;
         if (exact_filter_ip_hint and IsFiniteRaBitQValue(filter_inner_products[i])) {
-            ++full_count;
             used_hint =
                 split_codes->ComputeFusedFullWithFilterIP(computer,
                                                           cluster_id,
@@ -109,7 +109,6 @@ FlattenReorder::QueryFullWithHint(float* distances,
             ++hint_full_count;
         } else {
             ++fallback_full_count;
-            ++full_count;
             split_codes->ComputeFusedFull(computer,
                                           cluster_id,
                                           fused_graph_->GetOneBitCode(record),

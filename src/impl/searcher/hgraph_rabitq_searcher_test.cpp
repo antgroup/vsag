@@ -24,6 +24,7 @@
 #include "datacell/hgraph_rabitq_fused_datacell.h"
 #include "datacell/rabitq_split_datacell.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/reorder/flatten_reorder.h"
 #include "index_common_param.h"
 #include "io/memory_io/memory_io_parameter.h"
 #include "unittest.h"
@@ -207,6 +208,24 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
     };
     run_search(make_search_graph(true), 5);
     run_search(make_search_graph(false), 0);
+
+    graph->SetNodeCodes(
+        0, 0, encoded[0].cluster_id, encoded[0].filter.data(), encoded[0].supplement.data());
+    RaBitQCandidateVector candidates(allocator.get());
+    candidates.push_back({0.0F, std::numeric_limits<float>::max(), static_cast<InnerIdType>(0)});
+    SearchStatistics reorder_statistics;
+    QueryContext reorder_context;
+    reorder_context.alloc = allocator.get();
+    reorder_context.stats = &reorder_statistics;
+    FlattenReorder reorder(flatten, allocator.get(), graph);
+    auto reordered =
+        reorder.Reorder(nullptr, vectors.data(), 1, reorder_context, nullptr, &candidates);
+    REQUIRE(reordered != nullptr);
+    REQUIRE(reordered->Size() == 1);
+    REQUIRE(reorder_statistics.reorder_distance_count.load() == 1);
+    REQUIRE(reorder_statistics.rabitq_full_count.load() == 1);
+    REQUIRE(reorder_statistics.rabitq_reorder_hint_full_count.load() == 0);
+    REQUIRE(reorder_statistics.rabitq_reorder_fallback_full_count.load() == 1);
 }
 
 }  // namespace vsag

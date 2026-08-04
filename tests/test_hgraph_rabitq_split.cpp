@@ -510,6 +510,75 @@ TEST_CASE("HGraph RaBitQ Split Reject Unsupported Hybrid", "[ft][rabitq_split][h
     REQUIRE_FALSE(result.has_value());
 }
 
+TEST_CASE("HGraph RaBitQ split rejects non-finite one-bit queries",
+          "[ft][rabitq_split][hgraph][fused][validation]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 64;
+    constexpr uint64_t base_count = 64;
+    constexpr int64_t topk = 10;
+    const bool fused = GENERATE(false, true);
+    CAPTURE(fused);
+
+    auto param =
+        HGraphRaBitQSplitTestIndex::GenerateBuildParam("l2", dim, "memory_io", "", 1, 7, true);
+    auto param_json = vsag::JsonType::Parse(param);
+    param_json["index_param"]["graph_io_type"].SetString("memory_io");
+    param_json["index_param"]["graph_storage_type"].SetString("flat");
+    param_json["index_param"]["reorder_source"].SetString("base");
+    param_json["index_param"]["rabitq_fused_datacell"].SetBool(fused);
+    param_json["index_param"]["rabitq_use_fht"].SetBool(true);
+    param_json["index_param"]["store_raw_vector"].SetBool(false);
+    param_json["index_param"]["use_mci"].SetBool(false);
+    param_json["index_param"]["build_thread_count"].SetInt(1);
+
+    auto source = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, base_count, "l2");
+    auto index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param_json.Dump(), true);
+    auto build_result = index->Build(source->base_);
+    REQUIRE(build_result.has_value());
+
+    const float invalid_values[] = {std::numeric_limits<float>::quiet_NaN(),
+                                    std::numeric_limits<float>::infinity(),
+                                    -std::numeric_limits<float>::infinity()};
+    for (const float invalid_value : invalid_values) {
+        CAPTURE(invalid_value);
+        std::vector<float> query_vector(source->query_->GetFloat32Vectors(),
+                                        source->query_->GetFloat32Vectors() + dim);
+        query_vector[0] = invalid_value;
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
+        auto result = index->KnnSearch(query, topk, kSplitSearchParam);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+
+    if (fused) {
+        uint64_t scored_count = 0;
+        uint64_t largest_batch = 0;
+        const auto score = [](int64_t label) { return static_cast<float>(label % 1000000); };
+        vsag::SearchRequest request;
+        request.topk_ = topk;
+        request.params_str_ = fmt::format(
+            R"({{"hgraph":{{"ef_search":{},"rabitq_one_bit_search":true}}}})", base_count);
+        request.distance_batch_size_ = 3;
+        request.distance_batch_func_ =
+            [&](const int64_t* labels, uint64_t count, float* distances) {
+                scored_count += count;
+                largest_batch = std::max(largest_batch, count);
+                for (uint64_t i = 0; i < count; ++i) {
+                    distances[i] = score(labels[i]);
+                }
+            };
+        auto result = index->SearchWithRequest(request);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == topk);
+        REQUIRE(scored_count > 0);
+        REQUIRE(largest_batch <= request.distance_batch_size_);
+        for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+            REQUIRE(result.value()->GetDistances()[i] == score(result.value()->GetIds()[i]));
+        }
+    }
+}
+
 TEST_CASE("HGraph fused RaBitQ split compact round trip",
           "[ft][rabitq_split][hgraph][fused][serialize]") {
     using namespace fixtures;
@@ -562,6 +631,15 @@ TEST_CASE("HGraph fused RaBitQ split compact round trip",
     auto expected = index->KnnSearch(query, topk, kSplitSearchParam);
     REQUIRE(expected.has_value());
     REQUIRE(expected.value()->GetDim() == topk);
+    if (filter_bits == 1) {
+        const auto stats = expected.value()->GetStatistics({"rabitq_full_count",
+                                                            "rabitq_reorder_hint_full_count",
+                                                            "rabitq_reorder_fallback_full_count"});
+        REQUIRE(stats.size() == 3);
+        REQUIRE(std::stoull(stats[0]) > 0);
+        REQUIRE(std::stoull(stats[1]) == 0);
+        REQUIRE(std::stoull(stats[2]) == 0);
+    }
     const std::vector<int64_t> expected_ids(expected.value()->GetIds(),
                                             expected.value()->GetIds() + topk);
     const std::vector<float> expected_distances(expected.value()->GetDistances(),

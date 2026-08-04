@@ -268,7 +268,19 @@ TEST_CASE("RaBitQSplitDataCell fused residual clusters", "[ut][RaBitQSplitDataCe
     REQUIRE(split->FusedSupplementBits() == 7);
     REQUIRE(split->UsesLegacyHnswFusedCodec());
     split->TrainFusedCodec(vectors.data(), count, cluster_count);
-    REQUIRE_FALSE(split->ExportFusedCodec().empty());
+    const auto codec_model = split->ExportFusedCodec();
+    REQUIRE_FALSE(codec_model.empty());
+
+    auto invalid_centroid_count = codec_model;
+    const uint64_t oversized_count = std::numeric_limits<uint64_t>::max();
+    std::memcpy(invalid_centroid_count.data() + sizeof(uint32_t),
+                &oversized_count,
+                sizeof(oversized_count));
+    REQUIRE_THROWS(split->ImportFusedCodec(invalid_centroid_count));
+
+    auto trailing_codec_model = codec_model;
+    trailing_codec_model.push_back('\0');
+    REQUIRE_THROWS(split->ImportFusedCodec(trailing_codec_model));
 
     Vector<uint8_t> one_bit(split->OneBitCodeSize(), allocator.get());
     Vector<uint8_t> supplement(split->SupplementCodeSize(), allocator.get());
