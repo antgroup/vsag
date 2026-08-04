@@ -24,6 +24,7 @@
 #include "datacell/hgraph_rabitq_fused_datacell.h"
 #include "datacell/rabitq_split_datacell.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/heap/standard_heap.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "index_common_param.h"
 #include "io/memory_io/memory_io_parameter.h"
@@ -226,6 +227,21 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
     REQUIRE(reorder_statistics.rabitq_full_count.load() == 1);
     REQUIRE(reorder_statistics.rabitq_reorder_hint_full_count.load() == 0);
     REQUIRE(reorder_statistics.rabitq_reorder_fallback_full_count.load() == 1);
+
+    auto invalid_supplement = encoded[0].supplement;
+    std::memcpy(invalid_supplement.data() + traversal_query.supplement_metadata_offset,
+                &invalid_metadata,
+                sizeof(invalid_metadata));
+    graph->SetNodeCodes(
+        0, 0, encoded[0].cluster_id, encoded[0].filter.data(), invalid_supplement.data());
+    REQUIRE_THROWS_AS(
+        reorder.Reorder(nullptr, vectors.data(), 1, reorder_context, nullptr, &candidates),
+        VsagException);
+
+    auto input = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
+    input->Push(0.0F, 0);
+    REQUIRE_THROWS_AS(reorder.Reorder(input, vectors.data(), 1, reorder_context, nullptr, nullptr),
+                      VsagException);
 }
 
 }  // namespace vsag

@@ -109,12 +109,13 @@ FlattenReorder::QueryFullWithHint(float* distances,
             ++hint_full_count;
         } else {
             ++fallback_full_count;
-            split_codes->ComputeFusedFull(computer,
-                                          cluster_id,
-                                          fused_graph_->GetOneBitCode(record),
-                                          fused_graph_->GetSupplementCode(record),
-                                          distances + i,
-                                          nullptr);
+            CHECK_ARGUMENT(split_codes->ComputeFusedFull(computer,
+                                                         cluster_id,
+                                                         fused_graph_->GetOneBitCode(record),
+                                                         fused_graph_->GetSupplementCode(record),
+                                                         distances + i,
+                                                         nullptr),
+                           "failed to compute fused RaBitQ distance");
         }
     }
     if (ctx != nullptr and ctx->stats != nullptr) {
@@ -178,12 +179,14 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
         if (fused_graph_ != nullptr and split_codes != nullptr) {
             for (uint64_t i = 0; i < heap_candidate_size; ++i) {
                 const auto* record = fused_graph_->GetNodeRecord(ids[i]);
-                split_codes->ComputeFusedFull(computer,
-                                              fused_graph_->GetClusterId(record),
-                                              fused_graph_->GetOneBitCode(record),
-                                              fused_graph_->GetSupplementCode(record),
-                                              dists.data() + i,
-                                              &ctx);
+                CHECK_ARGUMENT(
+                    split_codes->ComputeFusedFull(computer,
+                                                  fused_graph_->GetClusterId(record),
+                                                  fused_graph_->GetOneBitCode(record),
+                                                  fused_graph_->GetSupplementCode(record),
+                                                  dists.data() + i,
+                                                  &ctx),
+                    "failed to compute fused RaBitQ distance");
             }
         } else {
             flatten_->Query(dists.data(), computer, ids.data(), heap_candidate_size, &ctx);
