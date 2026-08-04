@@ -21,6 +21,7 @@
 #include "bucket_datacell_parameter.h"
 #include "index_common_param.h"
 #include "quantization/computer.h"
+#include "query_context.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
@@ -46,6 +47,19 @@ public:
     QueryOneById(const ComputerInterfacePtr& computer,
                  const BucketIdType& bucket_id,
                  const InnerIdType& offset_id) = 0;
+
+    virtual void
+    Query(float* result_dists,
+          const ComputerInterfacePtr& computer,
+          const BucketIdType* bucket_ids,
+          const InnerIdType* offset_ids,
+          InnerIdType id_count,
+          QueryContext* ctx = nullptr) {
+        (void)ctx;
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            result_dists[i] = QueryOneById(computer, bucket_ids[i], offset_ids[i]);
+        }
+    }
 
     virtual ComputerInterfacePtr
     FactoryComputer(const void* query) = 0;

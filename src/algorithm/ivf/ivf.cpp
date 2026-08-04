@@ -1591,10 +1591,23 @@ IVF::reorder_with_precise_bucket(const DistHeapPtr& input,
 
     auto computer = precise_bucket_->FactoryComputer(query);
     const auto* candidates = input->GetData();
+    Vector<BucketIdType> bucket_ids(candidate_count, query_allocator);
+    Vector<InnerIdType> offset_ids(candidate_count, query_allocator);
+    Vector<float> precise_distances(candidate_count, query_allocator);
+    for (uint64_t i = 0; i < candidate_count; ++i) {
+        const auto [bucket_id, offset_id] = this->get_location(candidates[i].second);
+        bucket_ids[i] = bucket_id;
+        offset_ids[i] = offset_id;
+    }
+    precise_bucket_->Query(precise_distances.data(),
+                           computer,
+                           bucket_ids.data(),
+                           offset_ids.data(),
+                           static_cast<InnerIdType>(candidate_count),
+                           &ctx);
     for (uint64_t i = 0; i < candidate_count; ++i) {
         const auto [coarse_distance, inner_id] = candidates[i];
-        const auto [bucket_id, offset_id] = this->get_location(inner_id);
-        auto precise_distance = precise_bucket_->QueryOneById(computer, bucket_id, offset_id);
+        const auto precise_distance = precise_distances[i];
         if (ctx.reasoning_ctx != nullptr) {
             ctx.reasoning_ctx->RecordReorder(inner_id, coarse_distance, precise_distance);
         }
@@ -2265,13 +2278,37 @@ IVF::CalDistanceById(const float* query,
     if (this->use_reorder_ && calculate_precise_distance && reorder_codes_ != nullptr) {
         auto computer = this->reorder_codes_->FactoryComputer(query);
         this->reorder_codes_->Query(distances, computer, inner_ids.data(), count);
-    } else {
-        auto codes = this->use_reorder_ && calculate_precise_distance ? precise_bucket_ : bucket_;
-        auto computer = codes->FactoryComputer(query);
+    } else if (this->use_reorder_ && calculate_precise_distance && precise_bucket_ != nullptr) {
+        auto computer = this->precise_bucket_->FactoryComputer(query);
+        Vector<BucketIdType> bucket_ids(allocator_);
+        Vector<InnerIdType> offset_ids(allocator_);
+        Vector<int64_t> result_indices(allocator_);
+        bucket_ids.reserve(count);
+        offset_ids.reserve(count);
+        result_indices.reserve(count);
         for (int64_t i = 0; i < count; ++i) {
             if (validity[i]) {
                 auto [bucket_id, offset_id] = this->get_location(inner_ids[i]);
-                distances[i] = codes->QueryOneById(computer, bucket_id, offset_id);
+                bucket_ids.emplace_back(bucket_id);
+                offset_ids.emplace_back(offset_id);
+                result_indices.emplace_back(i);
+            }
+        }
+        Vector<float> valid_distances(result_indices.size(), allocator_);
+        this->precise_bucket_->Query(valid_distances.data(),
+                                     computer,
+                                     bucket_ids.data(),
+                                     offset_ids.data(),
+                                     static_cast<InnerIdType>(result_indices.size()));
+        for (uint64_t i = 0; i < result_indices.size(); ++i) {
+            distances[result_indices[i]] = valid_distances[i];
+        }
+    } else {
+        auto computer = this->bucket_->FactoryComputer(query);
+        for (int64_t i = 0; i < count; ++i) {
+            if (validity[i]) {
+                auto [bucket_id, offset_id] = this->get_location(inner_ids[i]);
+                distances[i] = this->bucket_->QueryOneById(computer, bucket_id, offset_id);
             }
         }
     }

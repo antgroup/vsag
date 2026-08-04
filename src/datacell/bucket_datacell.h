@@ -27,6 +27,7 @@
 #include "quantization/product_quantization/pq_fastscan_quantizer.h"
 #include "simd/fp32_simd.h"
 #include "utils/byte_buffer.h"
+#include "utils/timer.h"
 
 namespace vsag {
 
@@ -65,6 +66,22 @@ public:
                  const InnerIdType& offset_id) override {
         auto comp = std::static_pointer_cast<Computer<QuantTmpl>>(computer);
         return this->query_one_by_id(comp, bucket_id, offset_id);
+    }
+
+    void
+    Query(float* result_dists,
+          const ComputerInterfacePtr& computer,
+          const BucketIdType* bucket_ids,
+          const InnerIdType* offset_ids,
+          InnerIdType id_count,
+          QueryContext* ctx = nullptr) override {
+        if (id_count > 0 and GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "PQFastScan doesn't support ComputeDist, only support "
+                                "ComputeBatchDist");
+        }
+        auto comp = static_cast<Computer<QuantTmpl>*>(computer.get());
+        this->query(result_dists, comp, bucket_ids, offset_ids, id_count, ctx);
     }
 
     ComputerInterfacePtr
@@ -168,6 +185,14 @@ private:
     query_one_by_id(const std::shared_ptr<Computer<QuantTmpl>>& computer,
                     const BucketIdType& bucket_id,
                     const InnerIdType& offset_id);
+
+    inline void
+    query(float* result_dists,
+          Computer<QuantTmpl>* computer,
+          const BucketIdType* bucket_ids,
+          const InnerIdType* offset_ids,
+          InnerIdType id_count,
+          QueryContext* ctx);
 
     inline void
     encode_vector(const void* vector, BucketIdType bucket_id, ByteBuffer& codes, float& res_score);
@@ -277,6 +302,148 @@ BucketDataCell<QuantTmpl, IOTmpl>::query_one_by_id(
         ret -= ip_distance;
     }
     return ret;
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+BucketDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
+                                         Computer<QuantTmpl>* computer,
+                                         const BucketIdType* bucket_ids,
+                                         const InnerIdType* offset_ids,
+                                         InnerIdType id_count,
+                                         QueryContext* ctx) {
+    if (id_count == 0) {
+        return;
+    }
+
+    struct QueryRequest {
+        BucketIdType bucket_id;
+        InnerIdType offset_id;
+        InnerIdType result_index;
+    };
+
+    Allocator* search_alloc = select_query_allocator(ctx, allocator_);
+    Vector<QueryRequest> requests(search_alloc);
+    requests.reserve(id_count);
+    for (InnerIdType i = 0; i < id_count; ++i) {
+        check_valid_bucket_id(bucket_ids[i]);
+        requests.emplace_back(QueryRequest{bucket_ids[i], offset_ids[i], i});
+    }
+    std::sort(requests.begin(), requests.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.bucket_id != rhs.bucket_id) {
+            return lhs.bucket_id < rhs.bucket_id;
+        }
+        if (lhs.offset_id != rhs.offset_id) {
+            return lhs.offset_id < rhs.offset_id;
+        }
+        return lhs.result_index < rhs.result_index;
+    });
+
+    uint64_t io_count = 0;
+    double io_cost_ms = 0.0F;
+    Vector<InnerIdType> unique_offsets(search_alloc);
+    Vector<uint64_t> read_sizes(search_alloc);
+    Vector<uint64_t> read_offsets(search_alloc);
+    unique_offsets.reserve(id_count);
+    read_sizes.reserve(id_count);
+    read_offsets.reserve(id_count);
+    ByteBuffer codes(static_cast<uint64_t>(id_count) * code_size_, search_alloc);
+    Vector<float> unique_dists(id_count, 0.0F, search_alloc);
+    uint64_t group_begin = 0;
+    while (group_begin < requests.size()) {
+        const auto bucket_id = requests[group_begin].bucket_id;
+        uint64_t group_end = group_begin + 1;
+        while (group_end < requests.size() and requests[group_end].bucket_id == bucket_id) {
+            ++group_end;
+        }
+
+        std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
+        for (uint64_t i = group_begin; i < group_end; ++i) {
+            const auto offset_id = requests[i].offset_id;
+            if (offset_id >= this->bucket_sizes_[bucket_id]) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid offset id for bucket");
+            }
+            if (this->inner_ids_[bucket_id][offset_id] == EMPTY_INNER_ID) {
+                throw VsagException(
+                    ErrorType::INVALID_ARGUMENT,
+                    fmt::format("visited empty offset in bucket: bucket_id={}, offset_id={}",
+                                bucket_id,
+                                offset_id));
+            }
+        }
+
+        unique_offsets.clear();
+        for (uint64_t i = group_begin; i < group_end; ++i) {
+            const auto offset_id = requests[i].offset_id;
+            if (unique_offsets.empty() or unique_offsets.back() != offset_id) {
+                unique_offsets.emplace_back(offset_id);
+            }
+        }
+
+        read_sizes.clear();
+        read_offsets.clear();
+        for (const auto offset_id : unique_offsets) {
+            if (not read_offsets.empty() and
+                read_offsets.back() + read_sizes.back() ==
+                    static_cast<uint64_t>(offset_id) * code_size_ and
+                code_size_ <= static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) and
+                read_sizes.back() <=
+                    static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) - code_size_) {
+                read_sizes.back() += code_size_;
+            } else {
+                read_sizes.emplace_back(code_size_);
+                read_offsets.emplace_back(static_cast<uint64_t>(offset_id) * code_size_);
+            }
+        }
+
+        bool read_success = false;
+        double group_io_cost_ms = 0.0F;
+        {
+            Timer timer(group_io_cost_ms);
+            read_success = this->datas_[bucket_id].MultiRead(
+                codes.data, read_sizes.data(), read_offsets.data(), read_sizes.size());
+        }
+        if (not read_success) {
+            throw VsagException(ErrorType::READ_ERROR, "failed to batch read bucket data");
+        }
+        io_count += read_sizes.size();
+        io_cost_ms += group_io_cost_ms;
+
+        computer->ScanBatchDists(unique_offsets.size(), codes.data, unique_dists.data());
+        if (use_residual_) {
+            Vector<float> centroid(this->quantizer_->GetDim(), search_alloc);
+            strategy_->GetCentroid(bucket_id, centroid);
+            auto ip_distance = FP32ComputeIP(
+                computer->raw_query_.data(), centroid.data(), this->quantizer_->GetDim());
+            if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
+                ip_distance *= 2;
+                for (uint64_t i = 0; i < unique_offsets.size(); ++i) {
+                    unique_dists[i] -= residual_bias_[bucket_id][unique_offsets[i]];
+                }
+            }
+            for (uint64_t i = 0; i < unique_offsets.size(); ++i) {
+                unique_dists[i] -= ip_distance;
+            }
+        }
+
+        uint64_t unique_index = 0;
+        for (uint64_t i = group_begin; i < group_end; ++i) {
+            if (i > group_begin and requests[i].offset_id != requests[i - 1].offset_id) {
+                ++unique_index;
+            }
+            result_dists[requests[i].result_index] = unique_dists[unique_index];
+        }
+        group_begin = group_end;
+    }
+
+    if constexpr (not IOTmpl::InMemory) {
+        if (ctx != nullptr and ctx->stats != nullptr) {
+            ctx->stats->io_cnt.fetch_add(static_cast<uint32_t>(io_count),
+                                         std::memory_order_relaxed);
+            ctx->stats->io_time_ms.fetch_add(static_cast<uint32_t>(io_cost_ms),
+                                             std::memory_order_relaxed);
+        }
+    }
 }
 
 template <typename QuantTmpl, typename IOTmpl>

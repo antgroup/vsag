@@ -221,7 +221,9 @@ GenerateBucketPreciseParameters(const std::string& precise_io_type = "block_memo
     params["index_param"]["precise_file_path"] = precise_file_path;
     if (enable_read_cache) {
         params["index_param"]["precise_enable_read_cache"] = true;
-        params["index_param"]["precise_cache_total_size"] = 128 * 1024;
+        // BucketDataCell divides the cache budget across the 16 buckets. Allocate one
+        // 128-KiB cache page per bucket so this case exercises the read-cache path.
+        params["index_param"]["precise_cache_total_size"] = 16 * 128 * 1024;
     }
     return params.dump();
 }
