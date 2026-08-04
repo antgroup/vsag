@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "impl/distance_provider_for_graph.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
 
@@ -43,6 +44,13 @@ DEFINE_POINTER(MutexArray);
 void
 select_edges_by_heuristic(const DistHeapPtr& edges,
                           uint64_t max_size,
+                          const DistanceProviderForGraph& distance_provider,
+                          Allocator* allocator,
+                          float alpha = 1.0F);
+
+void
+select_edges_by_heuristic(const DistHeapPtr& edges,
+                          uint64_t max_size,
                           const FlattenInterfacePtr& flatten,
                           Allocator* allocator,
                           float alpha = 1.0F);
@@ -63,6 +71,14 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
  * @param alpha Diversity parameter controlling the trade-off between proximity
  *              and diversity. Higher values allow more diverse neighbors.
  */
+void
+select_edges_by_heuristic(Vector<InnerIdType>& neighbors,
+                          InnerIdType node_id,
+                          uint64_t max_size,
+                          const DistanceProviderForGraph& distance_provider,
+                          Allocator* allocator,
+                          float alpha = 1.0F);
+
 void
 select_edges_by_heuristic(Vector<InnerIdType>& neighbors,
                           InnerIdType node_id,
@@ -89,6 +105,15 @@ select_edges_by_heuristic(Vector<InnerIdType>& neighbors,
  * @return InnerIdType The ID of the farthest selected neighbor, typically used
  *                     as an entry point for subsequent operations.
  */
+InnerIdType
+mutually_connect_new_element(InnerIdType cur_c,
+                             const DistHeapPtr& top_candidates,
+                             const GraphInterfacePtr& graph,
+                             const DistanceProviderForGraph& distance_provider,
+                             const MutexArrayPtr& neighbors_mutexes,
+                             Allocator* allocator,
+                             float alpha = 1.0F);
+
 InnerIdType
 mutually_connect_new_element(InnerIdType cur_c,
                              const DistHeapPtr& top_candidates,

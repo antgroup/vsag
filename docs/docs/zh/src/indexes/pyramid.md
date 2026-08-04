@@ -73,28 +73,6 @@ auto result = index->KnnSearch(
     R"({"pyramid": {"ef_search": 100}})").value();
 ```
 
-## MRLE 与 split RaBitQ
-
-对于使用 Matryoshka Representation Learning 训练的向量，Pyramid 可以先截断维度，再编码
-为 split RaBitQ：
-
-```json
-{
-    "base_quantization_type": "tq",
-    "tq_chain": "mrle, rabitq",
-    "mrle_dim": 1280,
-    "precise_quantization_type": "rabitq",
-    "rabitq_bits_per_dim_base": 3,
-    "rabitq_bits_per_dim_precise": 5,
-    "use_reorder": true
-}
-```
-
-该配置使用 3-bit filter planes 搜索、5-bit supplement planes 精排；两部分编码的是同一个
-截断后向量。Pyramid 会自动选择 `reorder_source: "base"`，并保留原始 FP32 向量供构图提升
-和统计使用。原始向量副本会占用额外空间；如果 embedding 模型没有针对前缀维度训练，截断
-可能显著降低召回率。
-
 ## 构建参数
 
 构建参数放在 `index_param` 下。
@@ -112,10 +90,9 @@ auto result = index->KnnSearch(
 | `neighbor_sample_rate` | float | — | ODescent 的邻居采样比率 |
 | `no_build_levels` | int[] | `[]` | 跳过构图的层级（从根节点开始的 0-based 下标） |
 | `use_reorder` | bool | `false` | 是否保留高精度副本用于精排 |
-| `reorder_source` | string | `"precise"` | 精排距离来源：`precise` 或 `base`；MRLE split RaBitQ 会自动选择 `base`。 |
-| `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型 |
-| `rabitq_bits_per_dim_base` | int | — | split RaBitQ 的 filter-plane bit 数。 |
-| `rabitq_bits_per_dim_precise` | int | — | split RaBitQ 的 supplement-plane bit 数；与 filter bit 之和不能超过 8。 |
+| `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型。与 `rabitq_bits_per_dim_precise` 配合设为 `"rabitq"` 时，可启用从 base storage 重排的 RaBitQ x+y split。 |
+| `rabitq_bits_per_dim_base` | int | `1` | RaBitQ 底库存储码的每维位数。在 x+y split 模式下表示 `x`，即图遍历使用的 filter bits；范围为 `[1, 8]`。 |
+| `rabitq_bits_per_dim_precise` | int | 未设置 | RaBitQ split 的 `y` bits。和 `base_quantization_type: "rabitq"`、`precise_quantization_type: "rabitq"` 一起设置时，Pyramid 使用 split storage；`rabitq_bits_per_dim_base` 仍表示 `x`，且 `x + y <= 8`。 |
 | `fast_encode_rabitq` | bool | `true` | 对 RaBitQ 底层或精排存储使用多 bit 快速编码器；设为 `false` 使用精确编码器 |
 | `fast_encode_rabitq_rounds` | int | `6` | RaBitQ 快速编码的微调轮数，范围 `[1, 32]` |
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | 底层与精排存储后端；以 liburing 构建时可用 `uring_io` |
@@ -124,6 +101,42 @@ auto result = index->KnnSearch(
 | `support_duplicate` | bool | `false` | 是否允许重复 ID |
 | `build_thread_count` | int | `1` | 构建阶段并发线程数 |
 | `hierarchies` | array | `[]` | 命名层级定义。每个元素可以是字符串（继承全部顶层参数）或对象（含 `name` 及可选覆盖参数：`max_degree`、`ef_construction`、`alpha`、`no_build_levels`、`index_min_size`）。设置后激活多层级模式，每个层级维护独立的路径树。 |
+
+### RaBitQ split 配置
+
+需要同时设置以下五个参数，才能启用 RaBitQ x+y split 存储和精排：
+
+```json
+{
+    "use_reorder": true,
+    "base_quantization_type": "rabitq",
+    "precise_quantization_type": "rabitq",
+    "rabitq_bits_per_dim_base": 3,
+    "rabitq_bits_per_dim_precise": 5
+}
+```
+
+### MRLE 与 split RaBitQ
+
+对于使用 Matryoshka Representation Learning 训练的向量，Pyramid 可以先截断维度，再编码
+为 split RaBitQ：
+
+```json
+{
+    "base_quantization_type": "tq",
+    "tq_chain": "mrle, rabitq",
+    "mrle_dim": 1280,
+    "precise_quantization_type": "rabitq",
+    "rabitq_bits_per_dim_base": 3,
+    "rabitq_bits_per_dim_precise": 5,
+    "use_reorder": true
+}
+```
+
+该配置使用 3-bit filter planes 构图和搜索、5-bit supplement planes 精排；两部分编码的是
+同一个截断后向量。Pyramid 从 split base datacell 精排，并保留原始 FP32 向量供构图提升和
+统计使用。原始向量副本会占用额外空间；如果 embedding 模型没有针对前缀维度训练，截断
+可能显著降低召回率。
 
 ## 检索参数
 
@@ -135,6 +148,7 @@ auto result = index->KnnSearch(
 | `subindex_ef_search` | int | `50` | 沿路径向下遍历中间子图时的候选集大小 |
 | `hierarchies` | string[] | `[]` | 指定检索哪个层级。空数组表示使用默认（匿名）层级。 |
 | `hierarchy_op` | string | `"single"` | 多层级结果合并方式：`single`（检索单个层级）、`union`、`intersection`。**注意：** `union` 和 `intersection` 尚未实现——设置后 `KnnSearch`/`RangeSearch` 会返回错误。 |
+| `rabitq_error_rate` | float | `1.9` | 本次搜索使用的正数 lower-bound 误差倍率。默认值 `1.9` 较大；值越大，精度越高，但搜索速度越慢。 |
 
 ```cpp
 auto result = index->KnnSearch(

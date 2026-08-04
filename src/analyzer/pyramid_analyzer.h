@@ -26,6 +26,7 @@ public:
           sample_ids_(pyramid->allocator_),
           sample_datas_(pyramid->allocator_),
           subindex_stats_(pyramid->allocator_),
+          duplicate_computers_(pyramid->allocator_),
           ground_truth_(pyramid->allocator_),
           search_result_(pyramid->allocator_),
           low_recall_nodes_(pyramid->allocator_),
@@ -188,8 +189,11 @@ private:
     get_avg_distance_from_groundtruth(const Vector<InnerIdType>& sample_ids,
                                       const UnorderedMap<InnerIdType, DistHeapPtr>& ground_truth);
 
+    const Vector<ComputerInterfacePtr>&
+    get_duplicate_computers();
+
     float
-    get_node_duplicate_ratio(const IndexNode* node, const Vector<InnerIdType>& node_ids);
+    get_node_duplicate_ratio(const Vector<InnerIdType>& node_ids);
 
     bool
     check_entry_point_duplicate(const IndexNode* node,
@@ -202,6 +206,7 @@ private:
     Vector<float> sample_datas_;
     uint32_t sample_size_;
     Vector<SubIndexStats> subindex_stats_;
+    Vector<ComputerInterfacePtr> duplicate_computers_;
 
     UnorderedMap<InnerIdType, DistHeapPtr> ground_truth_;
     UnorderedMap<InnerIdType, Vector<LabelType>> search_result_;

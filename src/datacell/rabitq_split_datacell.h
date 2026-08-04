@@ -799,6 +799,11 @@ public:
         return this->quantizer_->Name();
     }
 
+    [[nodiscard]] bool
+    SupportSplitCodeStorage() const override {
+        return true;
+    }
+
     [[nodiscard]] MetricType
     GetMetricType() override {
         return this->quantizer_->Metric();

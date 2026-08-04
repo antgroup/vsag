@@ -66,6 +66,14 @@ MapRaBitQSplitParam(const JsonType& external_json, JsonType& inner_json) {
         external_json.Contains(HGRAPH_PRECISE_QUANTIZATION_TYPE),
         fmt::format(
             "{} requires {}", RABITQ_BITS_PER_DIM_PRECISE, HGRAPH_PRECISE_QUANTIZATION_TYPE));
+    CHECK_ARGUMENT(
+        external_json.Contains(USE_REORDER_KEY) and external_json[USE_REORDER_KEY].IsBool() and
+            external_json[USE_REORDER_KEY].GetBool(),
+        fmt::format("{} requires {}=true", RABITQ_BITS_PER_DIM_PRECISE, USE_REORDER_KEY));
+    CHECK_ARGUMENT(external_json[HGRAPH_BASE_QUANTIZATION_TYPE].IsString(),
+                   fmt::format("{} must be a string", HGRAPH_BASE_QUANTIZATION_TYPE));
+    CHECK_ARGUMENT(external_json[HGRAPH_PRECISE_QUANTIZATION_TYPE].IsString(),
+                   fmt::format("{} must be a string", HGRAPH_PRECISE_QUANTIZATION_TYPE));
 
     const auto base_type = external_json[HGRAPH_BASE_QUANTIZATION_TYPE].GetString();
     const auto precise_type = external_json[HGRAPH_PRECISE_QUANTIZATION_TYPE].GetString();
@@ -112,6 +120,13 @@ MapRaBitQSplitParam(const JsonType& external_json, JsonType& inner_json) {
                                RABITQ_BITS_PER_DIM_BASE,
                                RABITQ_BITS_PER_DIM_PRECISE,
                                total_bits));
+    if (external_json.Contains(RABITQ_BITS_PER_DIM_QUERY)) {
+        const int64_t query_bits = external_json[RABITQ_BITS_PER_DIM_QUERY].GetInt();
+        CHECK_ARGUMENT(query_bits == 32,
+                       fmt::format("split storage requires {} to be 32, got {}",
+                                   RABITQ_BITS_PER_DIM_QUERY,
+                                   query_bits));
+    }
 
     inner_json[REORDER_SOURCE_KEY].SetString(HGRAPH_REORDER_SOURCE_BASE);
     inner_json[BASE_CODES_KEY][CODES_TYPE_KEY].SetString(RABITQ_SPLIT_CODES);

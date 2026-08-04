@@ -1292,6 +1292,70 @@ TEST_CASE("(PR) HGraph Reasoning Zero Overhead When Disabled", "[ft][hgraph][rea
     REQUIRE(ratios[measure_samples / 2] < 1.5);
 }
 
+TEST_CASE("(PR) HGraph Custom Batch Distance", "[ft][hgraph][custom_distance][pr]") {
+    using namespace fixtures;
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    uint64_t max_batch_size = 0;
+    vsag::SearchRequest request;
+    request.topk_ = 5;
+    request.params_str_ = fmt::format(fixtures::search_param_tmp, 256, false);
+    request.distance_batch_size_ = 2;
+    request.distance_batch_func_ = [&](const int64_t* ids, uint64_t count, float* distances) {
+        max_batch_size = std::max(max_batch_size, count);
+        for (uint64_t i = 0; i < count; ++i) {
+            distances[i] = static_cast<float>(ids[i]);
+        }
+    };
+
+    auto result = index->SearchWithRequest(request);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() > 0);
+    REQUIRE(max_batch_size <= request.distance_batch_size_);
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(result.value()->GetDistances()[i] ==
+                static_cast<float>(result.value()->GetIds()[i]));
+    }
+
+    request.distance_batch_size_ = 0;
+    auto invalid_batch_size = index->SearchWithRequest(request);
+    REQUIRE_FALSE(invalid_batch_size.has_value());
+    REQUIRE(invalid_batch_size.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    request.distance_batch_size_ = 1;
+    request.distance_batch_func_ = [](const int64_t*, uint64_t, float* distances) {
+        distances[0] = std::numeric_limits<float>::quiet_NaN();
+    };
+    auto non_finite_score = index->SearchWithRequest(request);
+    REQUIRE_FALSE(non_finite_score.has_value());
+    REQUIRE(non_finite_score.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    request.distance_batch_func_ = [](const int64_t*, uint64_t count, float* distances) {
+        std::fill(distances, distances + count, 0.0F);
+    };
+    request.mode_ = vsag::SearchMode::RANGE_SEARCH;
+    auto unsupported_range = index->SearchWithRequest(request);
+    REQUIRE_FALSE(unsupported_range.has_value());
+    REQUIRE(unsupported_range.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    request.mode_ = vsag::SearchMode::KNN_SEARCH;
+    request.topk_ = 5;
+    request.params_str_ = R"({"hgraph":{"ef_search":256,"parallelism":2}})";
+    auto unsupported_parallel = index->SearchWithRequest(request);
+    REQUIRE_FALSE(unsupported_parallel.has_value());
+    REQUIRE(unsupported_parallel.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    request.params_str_ = R"({"hgraph":{"ef_search":256,"brute_force_threshold":0.1}})";
+    auto unsupported_brute_force = index->SearchWithRequest(request);
+    REQUIRE_FALSE(unsupported_brute_force.has_value());
+    REQUIRE(unsupported_brute_force.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+}
+
 static void
 TestHGraphGetRawVector(const fixtures::HGraphTestIndexPtr& test_index,
                        const fixtures::HGraphResourcePtr& resource) {

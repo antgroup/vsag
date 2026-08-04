@@ -17,24 +17,62 @@
 
 #include "datacell/flatten_datacell.h"
 #include "datacell/graph_interface.h"
+#include "hash_types.h"
 #include "impl/heap/standard_heap.h"
 #include "utils/lock_strategy.h"
 namespace vsag {
+
+namespace {
+
+class PairwiseDistanceComputer {
+public:
+    PairwiseDistanceComputer(const DistanceProviderForGraph& distance_provider,
+                             Allocator* allocator)
+        : distance_provider_(distance_provider), computers_(allocator) {
+    }
+
+    PairwiseDistanceComputer(const PairwiseDistanceComputer&) = delete;
+    PairwiseDistanceComputer&
+    operator=(const PairwiseDistanceComputer&) = delete;
+    PairwiseDistanceComputer(PairwiseDistanceComputer&&) = delete;
+    PairwiseDistanceComputer&
+    operator=(PairwiseDistanceComputer&&) = delete;
+
+    float
+    PairwiseDistance(InnerIdType id1, InnerIdType id2) {
+        if (not distance_provider_.SupportsComputerById()) {
+            return distance_provider_.PairwiseDistance(id1, id2);
+        }
+        auto& computer = computers_[id1];
+        if (computer == nullptr) {
+            computer = distance_provider_.FactoryComputerById(id1);
+        }
+        return distance_provider_.PairwiseDistance(id1, id2, computer);
+    }
+
+private:
+    const DistanceProviderForGraph& distance_provider_;
+    // The helper lives for one pruning pass; its source IDs are bounded by the selected-edge limit.
+    UnorderedMap<InnerIdType, ComputerInterfacePtr> computers_;
+};
+
+}  // namespace
 
 void
 select_edges_by_heuristic(Vector<InnerIdType>& neighbors,
                           InnerIdType node_id,
                           uint64_t max_size,
-                          const FlattenInterfacePtr& flatten,
+                          const DistanceProviderForGraph& distance_provider,
                           Allocator* allocator,
                           float alpha) {
+    PairwiseDistanceComputer pairwise_distance(distance_provider, allocator);
     auto edges = std::make_shared<StandardHeap<true, false>>(allocator, -1);
     for (const auto& neighbor : neighbors) {
-        float dist = flatten->ComputePairVectors(node_id, neighbor);
+        float dist = pairwise_distance.PairwiseDistance(node_id, neighbor);
         edges->Push(dist, neighbor);
     }
 
-    select_edges_by_heuristic(edges, max_size, flatten, allocator, alpha);
+    select_edges_by_heuristic(edges, max_size, distance_provider, allocator, alpha);
 
     neighbors.clear();
     while (not edges->Empty()) {
@@ -46,7 +84,7 @@ select_edges_by_heuristic(Vector<InnerIdType>& neighbors,
 void
 select_edges_by_heuristic(const DistHeapPtr& edges,
                           uint64_t max_size,
-                          const FlattenInterfacePtr& flatten,
+                          const DistanceProviderForGraph& distance_provider,
                           Allocator* allocator,
                           float alpha) {
     if (edges->Size() < max_size) {
@@ -55,6 +93,7 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
 
     auto queue_closest = std::make_shared<StandardHeap<true, false>>(allocator, -1);
     Vector<std::pair<float, InnerIdType>> return_list(allocator);
+    PairwiseDistanceComputer pairwise_distance(distance_provider, allocator);
     while (not edges->Empty()) {
         queue_closest->Push(-edges->Top().first, edges->Top().second);
         edges->Pop();
@@ -70,7 +109,8 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
         bool good = true;
 
         for (const auto& second_pair : return_list) {
-            float curdist = flatten->ComputePairVectors(second_pair.second, current_pair.second);
+            float curdist =
+                pairwise_distance.PairwiseDistance(second_pair.second, current_pair.second);
             if (alpha * curdist < float_query) {
                 good = false;
                 break;
@@ -90,12 +130,13 @@ InnerIdType
 mutually_connect_new_element(InnerIdType cur_c,
                              const DistHeapPtr& top_candidates,
                              const GraphInterfacePtr& graph,
-                             const FlattenInterfacePtr& flatten,
+                             const DistanceProviderForGraph& distance_provider,
                              const MutexArrayPtr& neighbors_mutexes,
                              Allocator* allocator,
                              float alpha) {
+    PairwiseDistanceComputer pairwise_distance(distance_provider, allocator);
     const uint64_t max_size = graph->MaximumDegree();
-    select_edges_by_heuristic(top_candidates, max_size, flatten, allocator, alpha);
+    select_edges_by_heuristic(top_candidates, max_size, distance_provider, allocator, alpha);
     if (top_candidates->Size() > max_size) {
         throw VsagException(
             ErrorType::INTERNAL_ERROR,
@@ -135,17 +176,18 @@ mutually_connect_new_element(InnerIdType cur_c,
             graph->InsertNeighborsById(selected_neighbor, neighbors);
         } else {
             // finding the "weakest" element to replace it with the new one
-            float d_max = flatten->ComputePairVectors(cur_c, selected_neighbor);
+            float d_max = pairwise_distance.PairwiseDistance(selected_neighbor, cur_c);
 
             auto candidates = std::make_shared<StandardHeap<true, false>>(allocator, -1);
             candidates->Push(d_max, cur_c);
 
             for (uint64_t j = 0; j < sz_link_list_other; j++) {
-                candidates->Push(flatten->ComputePairVectors(neighbors[j], selected_neighbor),
-                                 neighbors[j]);
+                candidates->Push(
+                    pairwise_distance.PairwiseDistance(selected_neighbor, neighbors[j]),
+                    neighbors[j]);
             }
 
-            select_edges_by_heuristic(candidates, max_size, flatten, allocator, alpha);
+            select_edges_by_heuristic(candidates, max_size, distance_provider, allocator, alpha);
 
             Vector<InnerIdType> cand_neighbors(allocator);
             while (not candidates->Empty()) {
@@ -158,6 +200,40 @@ mutually_connect_new_element(InnerIdType cur_c,
     }
 
     return next_closest_entry_point;
+}
+
+void
+select_edges_by_heuristic(Vector<InnerIdType>& neighbors,
+                          InnerIdType node_id,
+                          uint64_t max_size,
+                          const FlattenInterfacePtr& flatten,
+                          Allocator* allocator,
+                          float alpha) {
+    FlattenDistanceProvider distance_provider(flatten, nullptr);
+    select_edges_by_heuristic(neighbors, node_id, max_size, distance_provider, allocator, alpha);
+}
+
+void
+select_edges_by_heuristic(const DistHeapPtr& edges,
+                          uint64_t max_size,
+                          const FlattenInterfacePtr& flatten,
+                          Allocator* allocator,
+                          float alpha) {
+    FlattenDistanceProvider distance_provider(flatten, nullptr);
+    select_edges_by_heuristic(edges, max_size, distance_provider, allocator, alpha);
+}
+
+InnerIdType
+mutually_connect_new_element(InnerIdType cur_c,
+                             const DistHeapPtr& top_candidates,
+                             const GraphInterfacePtr& graph,
+                             const FlattenInterfacePtr& flatten,
+                             const MutexArrayPtr& neighbors_mutexes,
+                             Allocator* allocator,
+                             float alpha) {
+    FlattenDistanceProvider distance_provider(flatten, nullptr);
+    return mutually_connect_new_element(
+        cur_c, top_candidates, graph, distance_provider, neighbors_mutexes, allocator, alpha);
 }
 
 }  // namespace vsag

@@ -17,9 +17,11 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <limits>
 #include <random>
 #include <set>
+#include <unordered_map>
 
 #include "algorithm/inner_index_interface.h"
 #include "attr/argparse.h"
@@ -32,6 +34,7 @@
 #include "graph_bucket_searcher.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/inner_search_param.h"
+#include "impl/pruning_strategy.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
@@ -736,131 +739,25 @@ IVF::build_bucket_graphs(const DatasetPtr& base) {
             CHECK_ARGUMENT(query != nullptr, "base dataset has no graph build vector data");
             return bucket_->FactoryComputer(query);
         };
-
-        // Adapted from HGraph select_edges_by_heuristic: retain close, diverse edges.
-        auto select_edges_by_heuristic = [&](InnerIdType source, Vector<InnerIdType>& neighbors) {
-            auto source_computer = make_computer(source);
-            Vector<std::pair<float, InnerIdType>> candidates(allocator_);
-            candidates.reserve(neighbors.size());
-            for (const auto neighbor : neighbors) {
-                if (neighbor == source || neighbor >= bucket_size ||
-                    inner_ids[neighbor] == std::numeric_limits<InnerIdType>::max()) {
-                    continue;
-                }
-                bool duplicate = false;
-                for (const auto& candidate : candidates) {
-                    if (candidate.second == neighbor) {
-                        duplicate = true;
-                        break;
-                    }
-                }
-                if (!duplicate) {
-                    candidates.emplace_back(bucket_->QueryOneById(source_computer, b, neighbor),
-                                            neighbor);
-                }
-            }
-            std::sort(candidates.begin(), candidates.end(), [](const auto& lhs, const auto& rhs) {
-                return lhs.first < rhs.first;
-            });
-
-            neighbors.clear();
-            Vector<ComputerInterfacePtr> selected_computers(allocator_);
-            for (const auto& candidate : candidates) {
-                bool good = true;
-                for (const auto& selected_comp : selected_computers) {
-                    const auto pair_distance =
-                        bucket_->QueryOneById(selected_comp, b, candidate.second);
-                    if (pair_distance < candidate.first) {
-                        good = false;
-                        break;
-                    }
-                }
-                if (good) {
-                    neighbors.push_back(candidate.second);
-                    selected_computers.push_back(make_computer(candidate.second));
-                    if (neighbors.size() == static_cast<uint64_t>(effective_degree)) {
-                        break;
-                    }
-                }
-            }
-        };
+        auto mutexes = std::make_shared<EmptyMutex>();
+        BasicSearcher searcher(common_param_);
 
         const auto entry = valid_ids.front();
         graph->InsertNeighborsById(entry, Vector<InnerIdType>(allocator_));
-        VisitedList visited(bucket_size, allocator_);
-        Vector<InnerIdType> graph_neighbors(effective_degree, allocator_);
-
+        auto visited = std::make_shared<VisitedList>(bucket_size, allocator_);
         for (uint64_t node_pos = 1; node_pos < valid_ids.size(); ++node_pos) {
             const auto node = valid_ids[node_pos];
-            auto computer = make_computer(node);
-            const auto entry_dist = bucket_->QueryOneById(computer, b, entry);
-            const auto ef = std::min(ef_construction, node_pos);
-
-            visited.Reset();
-            StandardHeap<true, false> top_candidates(allocator_, -1);
-            StandardHeap<true, false> candidate_set(allocator_, -1);
-            top_candidates.Push(entry_dist, entry);
-            candidate_set.Push(-entry_dist, entry);
-            visited.Set(entry);
-            auto lower_bound = entry_dist;
-
-            while (not candidate_set.Empty()) {
-                const auto current = candidate_set.Top();
-                if (-current.first > lower_bound && top_candidates.Size() >= ef) {
-                    break;
-                }
-                candidate_set.Pop();
-
-                graph->GetNeighbors(current.second, graph_neighbors);
-                const auto neighbor_count = graph->GetNeighborSize(current.second);
-                for (uint32_t i = 0; i < neighbor_count; ++i) {
-                    const auto neighbor = graph_neighbors[i];
-                    if (neighbor >= bucket_size || visited.Get(neighbor) ||
-                        inner_ids[neighbor] == std::numeric_limits<InnerIdType>::max()) {
-                        continue;
-                    }
-                    visited.Set(neighbor);
-                    const auto distance = bucket_->QueryOneById(computer, b, neighbor);
-                    if (top_candidates.Size() < ef || distance < lower_bound) {
-                        candidate_set.Push(-distance, neighbor);
-                        top_candidates.Push(distance, neighbor);
-                        if (top_candidates.Size() > ef) {
-                            top_candidates.Pop();
-                        }
-                        lower_bound = top_candidates.Top().first;
-                    }
-                }
-            }
-
-            Vector<std::pair<float, InnerIdType>> candidates(allocator_);
-            candidates.reserve(top_candidates.Size());
-            for (uint64_t i = 0; i < top_candidates.Size(); ++i) {
-                candidates.push_back(top_candidates.GetData()[i]);
-            }
-            std::sort(candidates.begin(), candidates.end(), [](const auto& lhs, const auto& rhs) {
-                return lhs.first < rhs.first;
-            });
-
-            // Adapted from HGraph mutually_connect_new_element.
-            Vector<InnerIdType> node_neighbors(allocator_);
-            node_neighbors.reserve(candidates.size());
-            for (const auto& candidate : candidates) {
-                node_neighbors.push_back(candidate.second);
-            }
-            select_edges_by_heuristic(node, node_neighbors);
-            graph->InsertNeighborsById(node, node_neighbors);
-
-            for (const auto neighbor : node_neighbors) {
-                Vector<InnerIdType> reciprocal(allocator_);
-                graph->GetNeighbors(neighbor, reciprocal);
-                if (reciprocal.size() < static_cast<uint64_t>(effective_degree)) {
-                    reciprocal.push_back(node);
-                } else {
-                    reciprocal.push_back(node);
-                    select_edges_by_heuristic(neighbor, reciprocal);
-                }
-                graph->InsertNeighborsById(neighbor, reciprocal);
-            }
+            InnerSearchParam search_param;
+            search_param.ep = entry;
+            search_param.ef = std::min(ef_construction, node_pos);
+            search_param.topk = static_cast<int64_t>(search_param.ef);
+            BucketDistanceProvider distance_provider(
+                bucket_, b, make_computer(node), make_computer, inner_ids, buckets_per_data_);
+            visited->Reset();
+            auto candidates =
+                searcher.Search(graph, distance_provider, visited, search_param, nullptr, nullptr);
+            mutually_connect_new_element(
+                node, candidates, graph, distance_provider, mutexes, allocator_);
         }
 
         bucket_graphs_[b] = std::move(graph);
@@ -1709,6 +1606,151 @@ IVF::search(const DatasetPtr& query,
     return search_result;
 }
 
+DistHeapPtr
+IVF::search_with_custom_distance(const DatasetPtr& query,
+                                 const SearchRequest& request,
+                                 const InnerSearchParam& param,
+                                 QueryContext& ctx,
+                                 ReasoningContext* reasoning_ctx) const {
+    const auto* query_data = query->GetFloat32Vectors();
+    auto candidate_buckets =
+        partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, &ctx);
+    if (reasoning_ctx != nullptr) {
+        reasoning_ctx->RecordBucketSelection(candidate_buckets);
+    }
+
+    int64_t topk = request.topk_;
+    const int64_t origin_topk = topk;
+    if (buckets_per_data_ > 1) {
+        CHECK_ARGUMENT(topk <= std::numeric_limits<int64_t>::max() / buckets_per_data_,
+                       "topk is too large for multi-bucket IVF search");
+        topk *= buckets_per_data_;
+    }
+
+    auto search_result = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
+    const auto& filter = param.is_inner_id_allowed;
+    Filter* attr_filter = nullptr;
+
+    Vector<InnerIdType> candidate_ids(this->allocator_);
+    Vector<int64_t> candidate_labels(this->allocator_);
+    Vector<float> scores(this->allocator_);
+    const uint64_t batch_capacity = std::min<uint64_t>(
+        request.distance_batch_size_, std::max<uint64_t>(1, this->GetNumElements()));
+    candidate_ids.reserve(batch_capacity);
+    candidate_labels.reserve(batch_capacity);
+    scores.resize(batch_capacity);
+
+    auto is_timed_out = [&]() {
+        if (param.time_cost == nullptr or not param.time_cost->CheckOvertime()) {
+            return false;
+        }
+        if (ctx.stats != nullptr) {
+            ctx.stats->is_timeout.store(true, std::memory_order_relaxed);
+        }
+        return true;
+    };
+
+    auto submit_batch = [&]() {
+        if (candidate_ids.empty()) {
+            return true;
+        }
+        if (is_timed_out()) {
+            return false;
+        }
+        request.distance_batch_func_(
+            candidate_labels.data(), candidate_labels.size(), scores.data());
+        for (uint64_t i = 0; i < candidate_ids.size(); ++i) {
+            CHECK_ARGUMENT(std::isfinite(scores[i]),
+                           "custom query distance callback must return finite scores");
+            if (reasoning_ctx != nullptr) {
+                reasoning_ctx->RecordVisit(candidate_ids[i] / buckets_per_data_, scores[i], 0);
+            }
+            search_result->Push(scores[i], candidate_ids[i]);
+            while (search_result->Size() > static_cast<uint64_t>(topk)) {
+                if (reasoning_ctx != nullptr) {
+                    reasoning_ctx->RecordEviction(search_result->Top().second / buckets_per_data_,
+                                                  0);
+                }
+                search_result->Pop();
+            }
+        }
+        candidate_ids.clear();
+        candidate_labels.clear();
+        return true;
+    };
+
+    bool timed_out = false;
+    for (const auto bucket_id : candidate_buckets) {
+        if (is_timed_out()) {
+            timed_out = true;
+            break;
+        }
+        if (bucket_id == INVALID_BUCKET_ID) {
+            continue;
+        }
+        if (not param.executors.empty()) {
+            param.executors[0]->Clear();
+            attr_filter = param.executors[0]->Run(bucket_id);
+        }
+        const auto bucket_size = bucket_->GetBucketSize(bucket_id);
+        const auto* ids = bucket_->GetInnerIds(bucket_id);
+        for (InnerIdType offset = 0; offset < bucket_size; ++offset) {
+            const auto inner_id = ids[offset];
+            if (inner_id == std::numeric_limits<InnerIdType>::max()) {
+                continue;
+            }
+            const auto origin_id = inner_id / buckets_per_data_;
+            if (attr_filter != nullptr and not attr_filter->CheckValid(offset)) {
+                if (reasoning_ctx != nullptr) {
+                    reasoning_ctx->RecordFilterReject(origin_id);
+                }
+                continue;
+            }
+            if (filter != nullptr and not filter->CheckValid(origin_id)) {
+                if (reasoning_ctx != nullptr) {
+                    reasoning_ctx->RecordFilterReject(origin_id);
+                }
+                continue;
+            }
+            candidate_ids.push_back(inner_id);
+            candidate_labels.push_back(label_table_->GetLabelById(origin_id));
+            if (candidate_ids.size() == batch_capacity and not submit_batch()) {
+                timed_out = true;
+                break;
+            }
+        }
+        if (timed_out) {
+            break;
+        }
+    }
+    if (not timed_out) {
+        submit_batch();
+    }
+
+    if (buckets_per_data_ == 1) {
+        return search_result;
+    }
+
+    std::unordered_map<InnerIdType, float> id_to_min_score;
+    while (not search_result->Empty()) {
+        const auto& [score, inner_id] = search_result->Top();
+        const auto origin_id = inner_id / buckets_per_data_;
+        auto iter = id_to_min_score.find(origin_id);
+        if (iter == id_to_min_score.end() or score < iter->second) {
+            id_to_min_score[origin_id] = score;
+        }
+        search_result->Pop();
+    }
+
+    for (const auto& [origin_id, score] : id_to_min_score) {
+        search_result->Push(score, origin_id);
+        if (search_result->Size() > static_cast<uint64_t>(origin_topk)) {
+            search_result->Pop();
+        }
+    }
+    return search_result;
+}
+
 void
 IVF::merge_one_unit(const MergeUnit& unit) {
     check_merge_illegal(unit);
@@ -1771,8 +1813,28 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     bool is_range = (request.mode_ == SearchMode::RANGE_SEARCH);
 
     auto param = this->create_search_param(request.params_str_, request.filter_);
+    const bool use_custom_distance = request.distance_batch_func_ != nullptr;
+    if (use_custom_distance) {
+        CHECK_ARGUMENT(request.distance_batch_size_ > 0,
+                       "custom query distance batch size must be greater than 0");
+        CHECK_ARGUMENT(not is_range, "IVF custom query distance only supports KNN search");
+        CHECK_ARGUMENT(not param.disable_bucket_scan,
+                       "IVF custom query distance does not support disable_bucket_scan");
+        CHECK_ARGUMENT(request.topk_ > 0, "topk must be greater than 0");
+        CHECK_ARGUMENT(param.parallel_search_thread_count == 1,
+                       "IVF custom query distance does not support parallel search");
+        param.enable_reorder = false;
+    }
 
     auto query = request.query_;
+    if (use_custom_distance) {
+        CHECK_ARGUMENT(query != nullptr, "query dataset cannot be null");
+        CHECK_ARGUMENT(query->GetNumElements() == 1,
+                       "IVF custom search requires exactly one query");
+        CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr,
+                       "query float32 vectors cannot be null");
+        CHECK_ARGUMENT(query->GetDim() == this->dim_, "query dimension must match index dimension");
+    }
     if (param.disable_bucket_scan) {
         CHECK_ARGUMENT(query != nullptr, "query dataset cannot be null");
         CHECK_ARGUMENT(query->GetNumElements() >= 1,
@@ -1794,6 +1856,19 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             executor->Init();
             param.executors.emplace_back(executor);
         }
+    }
+    if (use_custom_distance) {
+        param.search_mode = KNN_SEARCH;
+        param.topk = request.topk_;
+        auto search_result = search_with_custom_distance(query, request, param, ctx);
+        if (search_result == nullptr || search_result->Empty()) {
+            auto dataset_results = DatasetImpl::MakeEmptyDataset();
+            dataset_results->Statistics(stats.Dump());
+            return dataset_results;
+        }
+        auto dataset_results = this->pack_knn_result(search_result, ctx.alloc);
+        dataset_results->Statistics(stats.Dump());
+        return dataset_results;
     }
     std::shared_ptr<ReasoningContext> reasoning_ctx;
     if (not request.expected_labels_.empty()) {

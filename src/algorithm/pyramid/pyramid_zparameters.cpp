@@ -16,6 +16,7 @@
 #include "pyramid_zparameters.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <unordered_set>
@@ -166,6 +167,9 @@ PyramidParameters::FromJson(const JsonType& json) {
     }
 
     this->base_codes_param = CreateFlattenParam(json[BASE_CODES_KEY]);
+    const bool use_split_codes = this->base_codes_param->name == RABITQ_SPLIT_DATA_CELL;
+    this->reorder_source =
+        use_split_codes ? HGRAPH_REORDER_SOURCE_BASE : HGRAPH_REORDER_SOURCE_PRECISE;
 
     if (json.Contains(NO_BUILD_LEVELS)) {
         const auto& no_build_levels_json = json[NO_BUILD_LEVELS];
@@ -176,8 +180,10 @@ PyramidParameters::FromJson(const JsonType& json) {
     }
 
     this->use_reorder = json[USE_REORDER_KEY].GetBool();
-    if (this->use_reorder and this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
+    if (this->use_reorder && not use_split_codes) {
         this->precise_codes_param = CreateFlattenParam(json[PRECISE_CODES_KEY]);
+    } else {
+        this->precise_codes_param = nullptr;
     }
 
     if (json.Contains(INDEX_MIN_SIZE)) {
@@ -233,7 +239,7 @@ PyramidParameters::ToJson() const {
     json[USE_REORDER_KEY].SetBool(this->use_reorder);
     json[INDEX_MIN_SIZE].SetInt(index_min_size);
     json[SUPPORT_DUPLICATE].SetBool(support_duplicate);
-    if (this->use_reorder and this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
+    if (this->use_reorder && this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
         json[PRECISE_CODES_KEY].SetJson(precise_codes_param->ToJson());
     }
     if (this->has_hierarchies) {
@@ -293,7 +299,7 @@ PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
     }
     CHECK_FIELD_EQ(*this, *p, use_reorder);
     CHECK_FIELD_EQ(*this, *p, reorder_source);
-    if (this->use_reorder and this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
+    if (this->use_reorder && this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
         CHECK_SUB_PARAM(*this, *p, precise_codes_param);
     }
     CHECK_FIELD_EQ(*this, *p, store_raw_vector);
@@ -323,6 +329,20 @@ PyramidSearchParameters::FromJson(const std::string& json_string) {
     if (params[INDEX_PYRAMID].Contains(PYRAMID_PARAMETER_SUBINDEX_EF_SEARCH)) {
         obj.subindex_ef_search =
             params[INDEX_PYRAMID][PYRAMID_PARAMETER_SUBINDEX_EF_SEARCH].GetInt();
+    }
+    if (params[INDEX_PYRAMID].Contains(PYRAMID_PARAMETER_RABITQ_ONE_BIT_SEARCH)) {
+        obj.has_rabitq_one_bit_search = true;
+        obj.rabitq_one_bit_search =
+            params[INDEX_PYRAMID][PYRAMID_PARAMETER_RABITQ_ONE_BIT_SEARCH].GetBool();
+    }
+    if (params[INDEX_PYRAMID].Contains(RABITQ_ERROR_RATE)) {
+        obj.rabitq_error_rate = params[INDEX_PYRAMID][RABITQ_ERROR_RATE].GetFloat();
+        CHECK_ARGUMENT(std::isfinite(obj.rabitq_error_rate),
+                       fmt::format("rabitq_error_rate must be finite and positive, got {}",
+                                   obj.rabitq_error_rate));
+        CHECK_ARGUMENT(obj.rabitq_error_rate > 0.0F,
+                       fmt::format("rabitq_error_rate must be finite and positive, got {}",
+                                   obj.rabitq_error_rate));
     }
     std::unordered_set<std::string> seen_names;
     if (params[INDEX_PYRAMID].Contains(PYRAMID_PARAMETER_HIERARCHIES)) {

@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <numeric>
 #include <vector>
 
 #include "impl/allocator/safe_allocator.h"
@@ -37,6 +38,7 @@ PyramidTestIndex
 MakePyramidIndex(uint32_t index_min_size,
                  uint64_t build_thread_count = 1,
                  bool use_rabitq_with_sq8 = false,
+                 bool split_rabitq = false,
                  bool use_mrle_split = false,
                  bool use_mrle_fp32 = false) {
     PyramidTestIndex result;
@@ -57,8 +59,13 @@ MakePyramidIndex(uint32_t index_min_size,
         "no_build_levels": [0],
         "index_min_size": 3
     })");
-    external_param[vsag::PYRAMID_INDEX_MIN_SIZE].SetInt(index_min_size);
-    external_param[vsag::PYRAMID_BUILD_THREAD_COUNT].SetUint64(build_thread_count);
+    if (split_rabitq) {
+        external_param[vsag::PYRAMID_BASE_QUANTIZATION_TYPE].SetString("rabitq");
+        external_param[vsag::PYRAMID_PRECISE_QUANTIZATION_TYPE].SetString("rabitq");
+        external_param[vsag::PYRAMID_RABITQ_BITS_PER_DIM_BASE].SetInt(3);
+        external_param[vsag::PYRAMID_RABITQ_BITS_PER_DIM_PRECISE].SetInt(5);
+        external_param[vsag::PYRAMID_USE_REORDER].SetBool(true);
+    }
     if (use_mrle_split) {
         external_param[vsag::PYRAMID_BASE_QUANTIZATION_TYPE].SetString(
             vsag::QUANTIZATION_TYPE_VALUE_TQ);
@@ -68,7 +75,7 @@ MakePyramidIndex(uint32_t index_min_size,
         external_param[vsag::INDEX_TQ_CHAIN].SetString("mrle, rabitq");
         external_param[vsag::INDEX_MRLE_DIM].SetInt(2);
         external_param[vsag::PYRAMID_RABITQ_BITS_PER_DIM_BASE].SetInt(3);
-        external_param[vsag::RABITQ_BITS_PER_DIM_PRECISE].SetInt(5);
+        external_param[vsag::PYRAMID_RABITQ_BITS_PER_DIM_PRECISE].SetInt(5);
     }
     if (use_mrle_fp32) {
         external_param[vsag::PYRAMID_BASE_QUANTIZATION_TYPE].SetString(
@@ -77,6 +84,8 @@ MakePyramidIndex(uint32_t index_min_size,
         external_param[vsag::INDEX_TQ_CHAIN].SetString("mrle, fp32");
         external_param[vsag::INDEX_MRLE_DIM].SetInt(2);
     }
+    external_param[vsag::PYRAMID_INDEX_MIN_SIZE].SetInt(index_min_size);
+    external_param[vsag::PYRAMID_BUILD_THREAD_COUNT].SetUint64(build_thread_count);
     if (use_rabitq_with_sq8) {
         external_param[vsag::PYRAMID_BASE_QUANTIZATION_TYPE].SetString("rabitq");
         external_param[vsag::PYRAMID_PRECISE_QUANTIZATION_TYPE].SetString("sq8");
@@ -105,6 +114,12 @@ int64_t
 GetPyramidSubindexCount(const std::shared_ptr<vsag::Pyramid>& index, const char* status) {
     auto stats = vsag::JsonType::Parse(index->GetStats());
     return stats["subindex_quality"][status].GetInt();
+}
+
+float
+GetPyramidDuplicateRatio(const std::shared_ptr<vsag::Pyramid>& index) {
+    auto stats = vsag::JsonType::Parse(index->GetStats());
+    return stats["duplicate_ratio"].GetFloat();
 }
 
 }  // namespace
@@ -151,8 +166,33 @@ TEST_CASE("Split function tests", "[ut][pyramid]") {
     }
 }
 
+TEST_CASE("Pyramid stats count duplicates within each leaf", "[ut][pyramid][analyzer]") {
+    constexpr int64_t count = 7;
+    auto test_index = MakePyramidIndex(100, 1, true);
+    const auto& index = test_index.index;
+    std::vector<float> vectors = {
+        1.0F, 2.0F, 3.0F, 4.0F,  // leaf a: representative
+        1.0F, 2.0F, 3.0F, 4.0F,  // leaf a: duplicate
+        2.0F, 3.0F, 4.0F, 5.0F,  // leaf a: unique
+        1.0F, 2.0F, 3.0F, 4.0F,  // leaf b: not a cross-leaf duplicate
+        6.0F, 7.0F, 8.0F, 9.0F,  // leaf c: representative
+        6.0F, 7.0F, 8.0F, 9.0F,  // leaf c: duplicate
+        9.0F, 8.0F, 7.0F, 6.0F,  // leaf d: singleton
+    };
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> paths = {"a", "a", "a", "b", "c", "c", "d"};
+
+    REQUIRE(
+        index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count)).empty());
+    REQUIRE(std::abs(GetPyramidDuplicateRatio(index) - 2.0F / static_cast<float>(count)) < 1e-6F);
+}
+
 TEST_CASE("Pyramid promotes flat node at index minimum size", "[ut][pyramid]") {
-    auto test_index = MakePyramidIndex(3);
+    const bool split_rabitq = GENERATE(false, true);
+    const bool build_all_at_once = GENERATE(false, true);
+    CAPTURE(split_rabitq, build_all_at_once);
+    auto test_index = MakePyramidIndex(3, 1, false, split_rabitq);
     const auto& index = test_index.index;
     std::vector<float> vectors = {
         0.0F,
@@ -171,14 +211,20 @@ TEST_CASE("Pyramid promotes flat node at index minimum size", "[ut][pyramid]") {
     std::vector<int64_t> ids = {100, 101, 102};
     std::vector<std::string> paths(3, "tenant");
 
-    REQUIRE(index->Add(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), 2)).empty());
-    REQUIRE(GetPyramidSubindexCount(index, "flat_subindexes") == 1);
-    REQUIRE(GetPyramidSubindexCount(index, "graph_subindexes") == 0);
+    if (build_all_at_once) {
+        REQUIRE(
+            index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), 3)).empty());
+    } else {
+        REQUIRE(
+            index->Add(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), 2)).empty());
+        REQUIRE(GetPyramidSubindexCount(index, "flat_subindexes") == 1);
+        REQUIRE(GetPyramidSubindexCount(index, "graph_subindexes") == 0);
 
-    REQUIRE(index
-                ->Add(MakePyramidDataset(
-                    vectors.data() + 2 * PYRAMID_TEST_DIM, ids.data() + 2, paths.data() + 2, 1))
-                .empty());
+        REQUIRE(index
+                    ->Add(MakePyramidDataset(
+                        vectors.data() + 2 * PYRAMID_TEST_DIM, ids.data() + 2, paths.data() + 2, 1))
+                    .empty());
+    }
     REQUIRE(GetPyramidSubindexCount(index, "flat_subindexes") == 0);
     REQUIRE(GetPyramidSubindexCount(index, "graph_subindexes") == 1);
     REQUIRE(GetPyramidSubindexCount(index, "total_vectors_in_graph") == 3);
@@ -188,12 +234,18 @@ TEST_CASE("Pyramid promotes flat node at index minimum size", "[ut][pyramid]") {
             MakePyramidDataset(vectors.data() + i * PYRAMID_TEST_DIM, nullptr, paths.data() + i, 1);
         auto result =
             index->KnnSearch(query, 1, R"({"pyramid":{"ef_search":10}})", vsag::FilterPtr{});
+        REQUIRE(result->GetDim() == 1);
         REQUIRE(result->GetIds()[0] == ids[i]);
+        if (split_rabitq) {
+            auto stats = result->GetStatistics({"reorder_lower_bound_probe_count"});
+            REQUIRE(stats.size() == 1);
+            REQUIRE(std::stoul(stats[0]) > 0);
+        }
     }
 }
 
 TEST_CASE("Pyramid MRLE split retains vectors for flat node promotion", "[ut][pyramid][MRLE]") {
-    auto test_index = MakePyramidIndex(3, 4, false, true);
+    auto test_index = MakePyramidIndex(3, 4, false, false, true);
     const auto& index = test_index.index;
     std::vector<float> vectors = {
         0.0F,
@@ -227,7 +279,7 @@ TEST_CASE("Pyramid MRLE split retains vectors for flat node promotion", "[ut][py
 }
 
 TEST_CASE("Pyramid TQ retains vectors without precise decode source", "[ut][pyramid][TQ]") {
-    auto test_index = MakePyramidIndex(3, 1, false, false, true);
+    auto test_index = MakePyramidIndex(3, 1, false, false, false, true);
     const auto& index = test_index.index;
     std::vector<float> vectors = {
         0.0F,

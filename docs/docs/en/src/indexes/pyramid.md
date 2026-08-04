@@ -78,29 +78,6 @@ auto result = index->KnnSearch(
     R"({"pyramid": {"ef_search": 100}})").value();
 ```
 
-## MRLE with split RaBitQ
-
-Pyramid can truncate embeddings trained with Matryoshka Representation Learning before encoding
-them as split RaBitQ codes:
-
-```json
-{
-    "base_quantization_type": "tq",
-    "tq_chain": "mrle, rabitq",
-    "mrle_dim": 1280,
-    "precise_quantization_type": "rabitq",
-    "rabitq_bits_per_dim_base": 3,
-    "rabitq_bits_per_dim_precise": 5,
-    "use_reorder": true
-}
-```
-
-This configuration searches the 3-bit filter planes and uses the 5-bit supplement planes for
-reordering; both parts encode the same truncated vector. Pyramid automatically selects
-`reorder_source: "base"` and retains original FP32 vectors for graph promotion and statistics.
-The raw-vector copy adds storage, and truncation can reduce recall unless the embedding model was
-trained for prefix dimensions.
-
 ## Build parameters
 
 Build-time parameters live under `index_param`.
@@ -118,10 +95,9 @@ Build-time parameters live under `index_param`.
 | `neighbor_sample_rate` | float | — | ODescent neighbor sampling rate. |
 | `no_build_levels` | int[] | `[]` | Tree levels that skip graph construction (0-indexed from the root). |
 | `use_reorder` | bool | `false` | Keep a high-precision copy for rescoring. |
-| `reorder_source` | string | `"precise"` | Distance source for reorder: `precise` or `base`. MRLE split RaBitQ selects `base` automatically. |
-| `precise_quantization_type` | string | `"fp32"` | Quantizer for reordering. |
-| `rabitq_bits_per_dim_base` | int | — | Filter-plane bits for split RaBitQ. |
-| `rabitq_bits_per_dim_precise` | int | — | Supplement-plane bits for split RaBitQ; filter plus supplement must not exceed 8. |
+| `precise_quantization_type` | string | `"fp32"` | Quantizer for reordering. Use `"rabitq"` with `rabitq_bits_per_dim_precise` to enable RaBitQ x+y split reorder from base storage. |
+| `rabitq_bits_per_dim_base` | int | `1` | RaBitQ stored-code bits. In x+y split mode, this is `x`, the filter bits used during graph traversal; allowed range is `[1, 8]`. |
+| `rabitq_bits_per_dim_precise` | int | unset | RaBitQ split `y` bits. When set with `base_quantization_type: "rabitq"` and `precise_quantization_type: "rabitq"`, Pyramid uses split storage; `rabitq_bits_per_dim_base` remains `x`, and `x + y <= 8`. |
 | `fast_encode_rabitq` | bool | `true` | Use the fast multi-bit RaBitQ encoder for RaBitQ base or precise storage; set to `false` for the exact encoder. |
 | `fast_encode_rabitq_rounds` | int | `6` | Fast RaBitQ refinement rounds in `[1, 32]`. |
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | Base and reorder storage backends; `uring_io` is available in builds with liburing. |
@@ -130,6 +106,43 @@ Build-time parameters live under `index_param`.
 | `support_duplicate` | bool | `false` | Allow duplicate ids. |
 | `build_thread_count` | int | `1` | Threads used for parallel build. |
 | `hierarchies` | array | `[]` | Named hierarchy definitions. Each element is either a string (inherits all top-level params) or an object with `name` and optional overrides (`max_degree`, `ef_construction`, `alpha`, `no_build_levels`, `index_min_size`). When present, multi-hierarchy mode is activated and each hierarchy maintains its own independent path tree. |
+
+### RaBitQ split configuration
+
+Set all five parameters together to enable RaBitQ x+y split storage and reordering:
+
+```json
+{
+    "use_reorder": true,
+    "base_quantization_type": "rabitq",
+    "precise_quantization_type": "rabitq",
+    "rabitq_bits_per_dim_base": 3,
+    "rabitq_bits_per_dim_precise": 5
+}
+```
+
+### MRLE with split RaBitQ
+
+Pyramid can truncate embeddings trained with Matryoshka Representation Learning before encoding
+them as split RaBitQ codes:
+
+```json
+{
+    "base_quantization_type": "tq",
+    "tq_chain": "mrle, rabitq",
+    "mrle_dim": 1280,
+    "precise_quantization_type": "rabitq",
+    "rabitq_bits_per_dim_base": 3,
+    "rabitq_bits_per_dim_precise": 5,
+    "use_reorder": true
+}
+```
+
+The 3-bit filter planes are used for graph traversal and the 5-bit supplement planes for
+reordering; both encode the same truncated vector. Pyramid reorders from the split base datacell
+and retains original FP32 vectors for graph promotion and statistics. The raw-vector copy adds
+storage, and truncation can reduce recall unless the embedding model was trained for prefix
+dimensions.
 
 ## Search parameters
 
@@ -141,6 +154,7 @@ Search-time parameters live under the `pyramid` sub-object:
 | `subindex_ef_search` | int | `50` | Candidate list size used when traversing intermediate sub-graphs on the path. |
 | `hierarchies` | string[] | `[]` | Select which hierarchy to search. Empty means use the default (unnamed) hierarchy. |
 | `hierarchy_op` | string | `"single"` | How to combine results across hierarchies: `single` (search one hierarchy), `union`, or `intersection`. **Note:** `union` and `intersection` are not yet implemented — setting them will cause `KnnSearch`/`RangeSearch` to return an error. |
+| `rabitq_error_rate` | float | `1.9` | Positive lower-bound error multiplier for this search. The default `1.9` is relatively large; increasing it improves accuracy but slows down search. |
 
 ```cpp
 auto result = index->KnnSearch(

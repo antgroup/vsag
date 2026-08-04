@@ -1730,6 +1730,70 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     }
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF Custom Batch Distance",
+                             "[ft][search][ivf][pr]") {
+    constexpr int64_t dim = 16;
+    constexpr int64_t count = 200;
+    constexpr uint64_t batch_size = 7;
+    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(dim, count, "l2");
+    auto param = IVFTestIndex::GenerateIVFBuildParametersString("l2", dim, "fp32", 4);
+    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    uint64_t largest_batch = 0;
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dim)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 3;
+    request.params_str_ = R"({"ivf":{"scan_buckets_count":4}})";
+    request.distance_batch_size_ = batch_size;
+    request.distance_batch_func_ = [&largest_batch](
+                                       const int64_t* ids, uint64_t size, float* distances) {
+        largest_batch = std::max(largest_batch, size);
+        for (uint64_t i = 0; i < size; ++i) {
+            distances[i] = static_cast<float>(ids[i]);
+        }
+    };
+
+    auto result = index->SearchWithRequest(request);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetNumElements() == 1);
+    REQUIRE(result.value()->GetDim() == request.topk_);
+    REQUIRE(largest_batch > 0);
+    REQUIRE(largest_batch <= batch_size);
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(result.value()->GetDistances()[i] ==
+                static_cast<float>(result.value()->GetIds()[i]));
+    }
+
+    request.mode_ = vsag::SearchMode::RANGE_SEARCH;
+    auto range_result = index->SearchWithRequest(request);
+    REQUIRE_FALSE(range_result.has_value());
+    REQUIRE(range_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    request.mode_ = vsag::SearchMode::KNN_SEARCH;
+    request.distance_batch_size_ = 0;
+    auto invalid_batch_result = index->SearchWithRequest(request);
+    REQUIRE_FALSE(invalid_batch_result.has_value());
+    REQUIRE(invalid_batch_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    request.distance_batch_size_ = batch_size;
+    request.params_str_ = R"({"ivf":{"scan_buckets_count":4,"disable_bucket_scan":true}})";
+    auto route_only_result = index->SearchWithRequest(request);
+    REQUIRE_FALSE(route_only_result.has_value());
+    REQUIRE(route_only_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    request.params_str_ = R"({"ivf":{"scan_buckets_count":4,"parallelism":2}})";
+    auto parallel_result = index->SearchWithRequest(request);
+    REQUIRE_FALSE(parallel_result.has_value());
+    REQUIRE(parallel_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+}
+
 // RejectAllFilter for testing empty results
 class RejectAllFilter : public vsag::Filter {
 public:

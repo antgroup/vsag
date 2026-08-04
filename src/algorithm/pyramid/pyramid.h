@@ -131,8 +131,10 @@ public:
           odescent_param_(pyramid_param->odescent_param),
           index_min_size_(pyramid_param->index_min_size),
           graph_type_(pyramid_param->graph_type),
-          support_duplicate_(pyramid_param->support_duplicate),
-          reorder_by_base_(pyramid_param->reorder_source == HGRAPH_REORDER_SOURCE_BASE) {
+          default_rabitq_one_bit_search_(pyramid_param->use_reorder and
+                                         pyramid_param->base_codes_param->name ==
+                                             RABITQ_SPLIT_DATA_CELL),
+          support_duplicate_(pyramid_param->support_duplicate) {
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
         if (pyramid_param->has_hierarchies) {
             for (const auto& h_param : pyramid_param->hierarchies) {
@@ -164,14 +166,12 @@ public:
         }
         points_mutex_ = std::make_shared<PointsMutex>(max_capacity_, allocator_);
         searcher_ = std::make_unique<BasicSearcher>(common_param, points_mutex_);
+        if (has_precise_reorder()) {
+            precise_codes_ =
+                FlattenInterface::MakeInstance(pyramid_param->precise_codes_param, common_param);
+        }
         if (use_reorder_) {
-            if (reorder_by_base_) {
-                reorder_ = std::make_shared<FlattenReorder>(base_codes_, allocator_);
-            } else {
-                precise_codes_ = FlattenInterface::MakeInstance(pyramid_param->precise_codes_param,
-                                                                common_param);
-                reorder_ = std::make_shared<FlattenReorder>(precise_codes_, allocator_);
-            }
+            reorder_ = std::make_shared<FlattenReorder>(get_reorder_codes(), allocator_);
         }
         if (pyramid_param->store_raw_vector) {
             raw_vector_ =
@@ -339,7 +339,8 @@ private:
                 const SearchFunc& search_func,
                 InnerSearchParam& search_param,
                 QueryContext& ctx,
-                const std::string& hierarchy_name = "") const;
+                const std::string& hierarchy_name,
+                const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
     /// Probabilistic check: should total_count trigger a new entry-point update?
     bool
@@ -369,21 +370,23 @@ private:
                 const DatasetPtr& query,
                 const FlattenInterfacePtr& codes,
                 QueryContext& ctx,
-                uint64_t subindex_ef_search) const;
+                uint64_t subindex_ef_search,
+                DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
-    bool
-    has_precise_codes() const {
-        return use_reorder_ and not reorder_by_base_;
+    [[nodiscard]] bool
+    has_precise_reorder() const {
+        return use_reorder_ and not base_codes_->SupportSplitCodeStorage();
     }
 
-    FlattenInterfacePtr
-    graph_codes() const {
-        return has_precise_codes() ? precise_codes_ : base_codes_;
+    [[nodiscard]] FlattenInterfacePtr
+    get_reorder_codes() const {
+        return base_codes_->SupportSplitCodeStorage() ? base_codes_ : precise_codes_;
     }
 
-    FlattenInterfacePtr
+    [[nodiscard]] FlattenInterfacePtr
     decodable_codes() const {
-        return raw_vector_ != nullptr ? raw_vector_ : graph_codes();
+        return raw_vector_ != nullptr ? raw_vector_
+                                      : (has_precise_reorder() ? precise_codes_ : base_codes_);
     }
 
 private:
@@ -400,11 +403,11 @@ private:
     int64_t cur_element_count_{0};                       // number of vectors currently stored
     std::atomic<int64_t> delete_count_{0};               // number of deleted vectors
     bool support_duplicate_{false};                      // whether to allow duplicate ids
-    bool reorder_by_base_{false};                        // reorder directly from base codes
 
     mutable std::shared_mutex resize_mutex_;        // guards resize operations
     std::mutex cur_element_count_mutex_;            // guards cur_element_count_ updates
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};  // graph algorithm type
+    bool default_rabitq_one_bit_search_{false};     // default split lower-bound search
 
     std::mutex entry_point_mutex_;  // guards entry-point selection
     std::default_random_engine level_generator_{

@@ -17,6 +17,7 @@
 
 #include <fmt/ranges.h>
 
+#include <cmath>
 #include <nlohmann/json.hpp>
 
 #include "index_common_param.h"
@@ -282,21 +283,6 @@ TEST_CASE("Pyramid Parameters CheckCompatibility", "[ut][PyramidParameter][Check
     TEST_COMPATIBILITY_CASE("different index min size", index_min_size, 500, 1500, false);
     TEST_COMPATIBILITY_CASE("different support duplicate", support_duplicate, false, true, false);
 
-    SECTION("different reorder sources") {
-        PyramidDefaultParam default_param;
-        auto precise_param = std::make_shared<vsag::PyramidParameters>();
-        auto base_param = std::make_shared<vsag::PyramidParameters>();
-        auto precise_json = vsag::JsonType::Parse(generate_pyramid(default_param));
-        auto base_json = precise_json;
-        precise_json[vsag::REORDER_SOURCE_KEY].SetString(vsag::HGRAPH_REORDER_SOURCE_PRECISE);
-        base_json[vsag::REORDER_SOURCE_KEY].SetString(vsag::HGRAPH_REORDER_SOURCE_BASE);
-        precise_param->FromJson(precise_json);
-        base_param->FromJson(base_json);
-
-        REQUIRE_FALSE(precise_param->CheckCompatibility(base_param));
-        REQUIRE_FALSE(base_param->CheckCompatibility(precise_param));
-    }
-
     SECTION("same hierarchies in different order") {
         auto param1 = ParsePyramidWithHierarchies(
             nlohmann::json::array({{{"name", "site"}, {"no_build_levels", {0, 1}}},
@@ -467,6 +453,45 @@ TEST_CASE("Pyramid maps fast RaBitQ to base and precise quantizers", "[ut][Pyram
     REQUIRE(precise_json["quantization_params"]["fast_encode_rabitq_rounds"].GetInt() == 11);
 }
 
+TEST_CASE("Pyramid maps RaBitQ x+y split params", "[ut][PyramidParameters]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "base_io_type": "block_memory_io",
+        "base_file_path": "/tmp/vsag_pyramid_rabitq_split_base",
+        "base_supplement_io_type": "async_io",
+        "base_supplement_file_path": "/tmp/vsag_pyramid_rabitq_split_supplement",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::PyramidParameters>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->use_reorder);
+    REQUIRE(typed_param->reorder_source == std::string("base"));
+    REQUIRE(typed_param->precise_codes_param == nullptr);
+    const auto base_json = typed_param->base_codes_param->ToJson();
+    REQUIRE(base_json["codes_type"].GetString() == std::string("rabitq_split"));
+    REQUIRE(base_json["io_params"]["type"].GetString() == std::string("block_memory_io"));
+#if HAVE_LIBAIO
+    const std::string expected_supplement_io_type = "async_io";
+#else
+    const std::string expected_supplement_io_type = "buffer_io";
+#endif
+    REQUIRE(base_json["supplement_io_params"]["type"].GetString() == expected_supplement_io_type);
+    REQUIRE(base_json["supplement_io_params"]["file_path"].GetString() ==
+            std::string("/tmp/vsag_pyramid_rabitq_split_supplement"));
+    REQUIRE(base_json["quantization_params"]["rabitq_version"].GetString() == std::string("split"));
+    REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_base"].GetInt() == 8);
+    REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_filter"].GetInt() == 3);
+}
+
 TEST_CASE("Pyramid maps MRLE RaBitQ split to base reorder", "[ut][PyramidParameters][MRLE]") {
     auto param = vsag::JsonType::Parse(R"({
         "base_quantization_type": "tq",
@@ -519,4 +544,91 @@ TEST_CASE("Pyramid retains vectors for TQ without precise decode source",
     REQUIRE(typed_param != nullptr);
     REQUIRE(typed_param->store_raw_vector);
     REQUIRE(typed_param->raw_vector_param != nullptr);
+}
+
+TEST_CASE("Pyramid rejects invalid RaBitQ split params", "[ut][PyramidParameters]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto wrong_query_bits = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "rabitq_bits_per_dim_query": 4,
+        "use_reorder": true
+    })");
+    REQUIRE_THROWS(vsag::Pyramid::CheckAndMappingExternalParam(wrong_query_bits, common_param));
+
+    auto non_string_quantization_type = vsag::JsonType::Parse(R"({
+        "base_quantization_type": true,
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "use_reorder": true
+    })");
+    REQUIRE_THROWS(
+        vsag::Pyramid::CheckAndMappingExternalParam(non_string_quantization_type, common_param));
+
+    auto disabled_reorder = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "use_reorder": false
+    })");
+    REQUIRE_THROWS(vsag::Pyramid::CheckAndMappingExternalParam(disabled_reorder, common_param));
+}
+
+TEST_CASE("Pyramid maps RaBitQ without y bits to standard RaBitQ", "[ut][PyramidParameters]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "fp32",
+        "rabitq_bits_per_dim_base": 3,
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::PyramidParameters>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->reorder_source == std::string("precise"));
+    REQUIRE(typed_param->precise_codes_param != nullptr);
+    const auto base_json = typed_param->base_codes_param->ToJson();
+    REQUIRE(base_json["codes_type"].GetString() == std::string("flatten"));
+    REQUIRE(base_json["quantization_params"]["rabitq_version"].GetString() ==
+            std::string("standard"));
+    REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_base"].GetInt() == 3);
+}
+
+TEST_CASE("Pyramid parses RaBitQ split search parameters", "[ut][PyramidParameters]") {
+    auto default_params = vsag::PyramidSearchParameters::FromJson(R"({
+        "pyramid": {
+            "ef_search": 100
+        }
+    })");
+    REQUIRE_FALSE(default_params.has_rabitq_one_bit_search);
+    REQUIRE_FALSE(default_params.rabitq_one_bit_search);
+
+    auto explicit_params = vsag::PyramidSearchParameters::FromJson(R"({
+        "pyramid": {
+            "ef_search": 100,
+            "rabitq_one_bit_search": false,
+            "rabitq_error_rate": 2.5
+        }
+    })");
+    REQUIRE(explicit_params.has_rabitq_one_bit_search);
+    REQUIRE_FALSE(explicit_params.rabitq_one_bit_search);
+    REQUIRE(std::abs(explicit_params.rabitq_error_rate - 2.5F) < 1e-5F);
+
+    REQUIRE_THROWS(vsag::PyramidSearchParameters::FromJson(R"({
+        "pyramid": {
+            "ef_search": 100,
+            "rabitq_error_rate": 0.0
+        }
+    })"));
 }
