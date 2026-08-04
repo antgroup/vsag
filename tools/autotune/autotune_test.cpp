@@ -361,6 +361,16 @@ TEST_CASE("AutoTune candidate rules only fill missing fields") {
     REQUIRE(large_float_range.front().search_params["hgraph"]["ef_search"] == large_start);
     REQUIRE(large_float_range.back().search_params["hgraph"]["ef_search"] == large_start + 1.0);
 
+    request.indexes[0].search_params = {
+        {"hgraph",
+         {{"ef_search",
+           {{"$range",
+             {{"start", large_start},
+              {"stop", std::nextafter(large_start, std::numeric_limits<double>::infinity())},
+              {"step", 0.01}}}}}}}};
+    REQUIRE_THROWS_WITH(vsag::autotune::internal::GenerateCandidates(request),
+                        Catch::Matchers::ContainsSubstring("$range step is too small to advance"));
+
     const auto oversized = static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) + uint64_t{1};
     request.indexes[0].search_params = {
         {"hgraph",
@@ -380,6 +390,22 @@ TEST_CASE("AutoTune proposes conservative defaults for existing IVF indexes") {
     const std::vector<uint64_t> expected{1, 4, 16, 64};
     for (uint64_t i = 0; i < candidates.size(); ++i) {
         REQUIRE(candidates[i].search_params["ivf"]["scan_buckets_count"] == expected[i]);
+    }
+}
+
+TEST_CASE("AutoTune validates IVF buckets_count before proposing search candidates") {
+    vsag::autotune::internal::IndexTuningRequest request;
+    request.context.base_count = 10000;
+    request.context.top_k = 10;
+    request.context.max_trials = 3;
+    request.indexes = {{"ivf", JsonType::object(), JsonType::object()}};
+
+    for (const auto& buckets : {JsonType(-1), JsonType(1024.0)}) {
+        request.indexes[0].create_params = {{"index_param", {{"buckets_count", buckets}}}};
+        REQUIRE_THROWS_WITH(
+            vsag::autotune::internal::GenerateCandidates(request),
+            Catch::Matchers::ContainsSubstring(
+                "ivf create_params.index_param.buckets_count must be a positive integer"));
     }
 }
 

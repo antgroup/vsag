@@ -39,6 +39,25 @@ range_integer(const JsonType& value) {
     return value.get<int64_t>();
 }
 
+uint64_t
+positive_uint64(const JsonType& value, const std::string& path) {
+    if (!value.is_number_integer()) {
+        throw std::invalid_argument(path + " must be a positive integer");
+    }
+    if (value.is_number_unsigned()) {
+        const auto number = value.get<uint64_t>();
+        if (number == 0) {
+            throw std::invalid_argument(path + " must be a positive integer");
+        }
+        return number;
+    }
+    const auto number = value.get<int64_t>();
+    if (number <= 0) {
+        throw std::invalid_argument(path + " must be a positive integer");
+    }
+    return static_cast<uint64_t>(number);
+}
+
 void
 expand(const JsonType& value, const Emit& emit);
 
@@ -114,11 +133,11 @@ expand_range(const JsonType& range, const Emit& emit) {
             (step < 0.0 && current < stop && stop - current > tolerance)) {
             return;
         }
-        if (std::abs(current - stop) <= tolerance) {
-            current = stop;
-        }
         if (emitted && current == previous) {
             throw std::invalid_argument("$range step is too small to advance");
+        }
+        if (emitted && std::abs(current - stop) <= tolerance) {
+            current = stop;
         }
         emit(current);
         if (current == stop) {
@@ -253,7 +272,8 @@ fill_ivf_search(JsonType& search_params, const JsonType& create_params) {
         return;
     }
 
-    const auto buckets = create_params["index_param"]["buckets_count"].get<uint64_t>();
+    const auto buckets = positive_uint64(create_params["index_param"]["buckets_count"],
+                                         "ivf create_params.index_param.buckets_count");
     if (buckets <= 16) {
         values = {
             1, std::max<uint64_t>(1, buckets / 4), std::max<uint64_t>(1, buckets / 2), buckets};
