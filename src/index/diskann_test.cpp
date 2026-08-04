@@ -15,9 +15,12 @@
 
 #include "diskann.h"
 
+#include <cstdint>
 #include <fstream>
 #include <nlohmann/json.hpp>
+#include <sstream>
 #include <tuple>
+#include <vector>
 
 #include "diskann_zparameters.h"
 #include "distance.h"
@@ -38,6 +41,59 @@ parse_diskann_params(vsag::IndexCommonParam index_common_param) {
     )";
     auto parsed_params = vsag::JsonType::Parse(build_parameter_json);
     return vsag::DiskannParameters::FromJson(parsed_params, index_common_param);
+}
+
+namespace {
+
+template <typename T>
+void
+write_value(std::stringstream& stream, const T& value) {
+    stream.write(reinterpret_cast<const char*>(&value), sizeof(value));
+}
+
+}  // namespace
+
+TEST_CASE("create_disk_layout reads stringstream after size lookup", "[ut][diskann]") {
+    constexpr uint32_t npts = 2;
+    constexpr uint32_t ndims = 2;
+    constexpr uint32_t width = 1;
+    constexpr uint32_t medoid = 0;
+    constexpr uint64_t frozen_num = 0;
+    constexpr uint64_t sector_len = 512;
+
+    constexpr uint64_t index_file_size =
+        sizeof(uint64_t) + 2 * sizeof(uint32_t) + sizeof(uint64_t) +
+        npts * (sizeof(uint32_t) + sizeof(uint32_t));
+
+    std::stringstream vamana_reader;
+    write_value(vamana_reader, index_file_size);
+    write_value(vamana_reader, width);
+    write_value(vamana_reader, medoid);
+    write_value(vamana_reader, frozen_num);
+
+    for (uint32_t i = 0; i < npts; ++i) {
+        const uint32_t nnbrs = 1;
+        const uint32_t neighbor = (i + 1) % npts;
+        write_value(vamana_reader, nnbrs);
+        write_value(vamana_reader, neighbor);
+    }
+
+    vamana_reader.seekg(0, std::ios_base::beg);
+    REQUIRE(vamana_reader.tellg() == std::streampos(0));
+
+    const std::vector<float> data = {1.0F, 2.0F, 3.0F, 4.0F};
+    const std::vector<uint64_t> skip_locs;
+    std::stringstream diskann_writer;
+
+    REQUIRE_NOTHROW(diskann::create_disk_layout<float>(data.data(),
+                                                       npts,
+                                                       ndims,
+                                                       skip_locs,
+                                                       vamana_reader,
+                                                       diskann_writer,
+                                                       sector_len,
+                                                       diskann::Metric::L2));
+    REQUIRE(diskann_writer.tellp() > std::streampos(0));
 }
 
 TEST_CASE("diskann build", "[ut][diskann]") {
