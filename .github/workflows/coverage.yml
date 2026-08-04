@@ -36,10 +36,25 @@ jobs:
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
       image: vsaglib/vsag:ci-x86-openblas
+    env:
+      VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
+      VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: '0'
+          persist-credentials: false
+      - name: Prepare FetchContent Sources
+        uses: ./.github/actions/prepare-fetchcontent
+        with:
+          include-tests: "true"
+      - name: Cache ExternalProject Archives
+        uses: actions/cache@v4
+        with:
+          path: .ci-downloads
+          key: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
+          restore-keys: |
+            external-${{ runner.os }}-${{ runner.arch }}-
       - name: Install lcov
         run: |
           apt update
@@ -57,7 +72,10 @@ jobs:
         # `make cov` defaults to the OpenBLAS backend. Use the system-installed
         # OpenBLAS in the ci-x86-openblas image instead of building OpenBLAS
         # from source every run.
-        run: export CMAKE_GENERATOR="Ninja" EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON"; make cov
+        run: |
+          export CMAKE_GENERATOR="Ninja"
+          export EXTRA_DEFINED="-DVSAG_USE_SYSTEM_OPENBLAS=ON"
+          make cov
       - name: Run Test
         run: |
           ./scripts/testing/test_parallel_bg.sh

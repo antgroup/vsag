@@ -35,6 +35,7 @@ JsonType
 MemoryIOParameter::ToJson() const {
     JsonType json;
     json[TYPE_KEY].SetString(IO_TYPE_VALUE_MEMORY_IO);
+    AppendReadCacheConfig(json);
     return json;
 }
 }  // namespace vsag

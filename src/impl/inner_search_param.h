@@ -22,6 +22,7 @@
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/pointer_define.h"
 #include "utils/timer.h"
+#include "vsag/search_request.h"
 
 namespace vsag {
 
@@ -50,6 +51,8 @@ public:
     int range_search_limit_size{-1};
     int64_t parallel_search_thread_count{1};
     bool enable_rabitq_one_bit_search{false};
+    SearchDistanceBatchFunc distance_batch_func{nullptr};
+    uint64_t distance_batch_size{1};
 
     // for ivf
     int scan_bucket_size{1};

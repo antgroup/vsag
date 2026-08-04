@@ -15,6 +15,8 @@
 
 #include "black_list_filter.h"
 
+#include <algorithm>
+
 #include "common.h"
 
 namespace vsag {
@@ -27,4 +29,13 @@ BlackListFilter::CheckValid(int64_t id) const {
     }
     return not fallback_func_(id);
 }
+float
+BlackListFilter::ValidRatio() const {
+    if (not is_bitset_filter_ or total_count_ == 0) {
+        return 1.0F;
+    }
+    const auto valid_count = total_count_ - std::min(total_count_, invalid_count_);
+    return static_cast<float>(valid_count) / static_cast<float>(total_count_);
+}
+
 }  // namespace vsag

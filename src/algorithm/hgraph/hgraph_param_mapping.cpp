@@ -91,6 +91,8 @@ map_rabitq_split_param(const JsonType& external_json, JsonType& inner_json) {
 
 JsonType
 HGraph::map_hgraph_param(const JsonType& hgraph_json) {
+    CHECK_ARGUMENT(not hgraph_json.Contains(HGRAPH_MCI_KEY),
+                   "nested hgraph mci parameters are not supported; use flat mci_* parameters");
     static const ConstParamMap external_mapping = {
         {
             HGRAPH_USE_REORDER,
@@ -191,12 +193,21 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                 IO_FILE_PATH_KEY,
             },
         },
+        // clang-format off
         {
             HGRAPH_BASE_DIRECT_READ,
             {
                 BASE_CODES_KEY,
                 IO_PARAMS_KEY,
                 IO_DIRECT_READ_KEY,
+            },
+        },
+        {
+            HGRAPH_BASE_CACHE_TOTAL_SIZE,
+            {
+                BASE_CODES_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_TOTAL_CACHE_SIZE_KEY,
             },
         },
         {
@@ -215,6 +226,15 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                 IO_DIRECT_READ_KEY,
             },
         },
+        {
+            HGRAPH_PRECISE_CACHE_TOTAL_SIZE,
+            {
+                PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_TOTAL_CACHE_SIZE_KEY,
+            },
+        },
+        // clang-format on
         {
             HGRAPH_PRECISE_QUANTIZATION_TYPE,
             {
@@ -237,6 +257,14 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                 GRAPH_KEY,
                 IO_PARAMS_KEY,
                 IO_FILE_PATH_KEY,
+            },
+        },
+        {
+            HGRAPH_GRAPH_CACHE_TOTAL_SIZE,
+            {
+                GRAPH_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_TOTAL_CACHE_SIZE_KEY,
             },
         },
         {
@@ -293,6 +321,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             {
                 GRAPH_KEY,
                 GRAPH_PARAM_INIT_MAX_CAPACITY_KEY,
+            },
+        },
+        {
+            RESIZE_INCREASE_COUNT_BIT,
+            {
+                RESIZE_INCREASE_COUNT_BIT,
             },
         },
         {
@@ -512,6 +546,88 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             {
                 LABEL_REMAP_TYPE_KEY,
             },
+        },
+        {
+            HGRAPH_USE_MCI,
+            {
+                HGRAPH_USE_MCI,
+            },
+        },
+        {
+            HGRAPH_MCI_MCS,
+            {
+                HGRAPH_MCI_MCS,
+            },
+        },
+        {
+            HGRAPH_MCI_CLIQUE_MAX,
+            {
+                HGRAPH_MCI_CLIQUE_MAX,
+            },
+        },
+        {
+            HGRAPH_MCI_ALPHA,
+            {
+                HGRAPH_MCI_ALPHA,
+            },
+        },
+        {
+            HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY,
+            {
+                HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY,
+            },
+        },
+        {
+            HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY,
+            {
+                HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY,
+            },
+        },
+        {
+            HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY,
+            {
+                HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY,
+            },
+        },
+        {
+            HGRAPH_BASE_ENABLE_READ_CACHE,
+            {
+                BASE_CODES_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_ENABLED_KEY,
+            },
+        },
+        {
+            HGRAPH_PRECISE_ENABLE_READ_CACHE,
+            {
+                PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_ENABLED_KEY,
+            },
+        },
+        {
+            HGRAPH_GRAPH_ENABLE_READ_CACHE,
+            {
+                GRAPH_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_ENABLED_KEY,
+            },
+        },
+        {
+            HGRAPH_RAW_VECTOR_ENABLE_READ_CACHE,
+            {
+                RAW_VECTOR_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_ENABLED_KEY,
+            },
+        },
+        {
+            HGRAPH_RAW_VECTOR_CACHE_TOTAL_SIZE,
+            {
+                RAW_VECTOR_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_TOTAL_CACHE_SIZE_KEY,
+            },
         }};
     const std::string hgraph_params_template =
         R"(
@@ -521,6 +637,7 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
         "{HGRAPH_USE_ENV_OPTIMIZER}": false,
         "{HGRAPH_IGNORE_REORDER_KEY}": false,
         "{HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY}": false,
+        "{RESIZE_INCREASE_COUNT_BIT}": {DEFAULT_RESIZE_INCREASE_COUNT_BIT},
         "{HGRAPH_USE_ATTRIBUTE_FILTER_KEY}": false,
         "{GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {
@@ -614,7 +731,6 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
     auto inner_json = JsonType::Parse(str);
     mapping_external_param_to_inner(hgraph_json, external_mapping, inner_json);
     map_rabitq_split_param(hgraph_json, inner_json);
-
     return inner_json;
 }
 

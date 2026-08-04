@@ -19,6 +19,7 @@ set (IVF_SRCS
         ivf_parameter.cpp
         ivf_partition_strategy.cpp
         flat_bucket_searcher.cpp
+        graph_bucket_searcher.cpp
         ivf_partition_strategy_parameter.cpp
         ivf_nearest_partition.cpp
         gno_imi_partition.cpp

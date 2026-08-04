@@ -49,6 +49,13 @@ const char* const HGRAPH_IGNORE_REORDER_KEY = "ignore_reorder";
 const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY = "build_by_base";
 const char* const HGRAPH_USE_REVERSE_EDGES_KEY = "use_reverse_edges";
 const char* const HGRAPH_PERSIST_SOURCE_ID_KEY = "persist_source_id";
+const char* const HGRAPH_MCI_KEY = "mci";
+const char* const HGRAPH_MCI_SEED_COUNT_KEY = "mci_seed_count";
+const char* const HGRAPH_MCI_KNNG_PATH_KEY = "mci_knng_path";
+const char* const HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY =
+    "mci_incremental_join_ratio_threshold";
+const char* const HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY = "mci_incremental_added_mct";
+const char* const HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY = "mci_incremental_clique_max";
 const char* const LABEL_REMAP_TYPE_VALUE_ROBIN = "robin";
 const char* const LABEL_REMAP_TYPE_VALUE_PG = "pg";
 const char* const GRAPH_KEY = "graph";
@@ -64,6 +71,8 @@ const char* const IO_TYPE_VALUE_READER_IO = "reader_io";
 const char* const IO_TYPE_VALUE_ASYNC_IO = "async_io";
 const char* const IO_TYPE_VALUE_URING_IO = "uring_io";
 const char* const IO_TYPE_VALUE_BLOCK_MEMORY_IO = "block_memory_io";
+const char* const READ_CACHE_TOTAL_CACHE_SIZE_KEY = "total_cache_size";
+const char* const READ_CACHE_ENABLED_KEY = "enable_read_cache";
 const char* const BLOCK_IO_BLOCK_SIZE_KEY = "block_size";
 
 // IO param for file
@@ -199,6 +208,9 @@ const char* const SEARCH_PARALLELISM = "parallelism";
 const char* const SEARCH_MAX_TIME_COST_MS = "timeout_ms";
 const char* const SPARSE_N_CANDIDATE = "n_candidate";
 
+const char* const GRAPH_BUILD_THRESHOLD_KEY = "graph_build_threshold";
+const char* const IVF_SEARCH_PARAM_EF_SEARCH = "ef_search";
+
 const char* const DISKANN_SUPPORT_CALC_DISTANCE_BY_ID = "support_calc_distance_by_id";
 
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
@@ -219,6 +231,8 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"IO_TYPE_VALUE_MEMORY_IO", IO_TYPE_VALUE_MEMORY_IO},
     {"IO_TYPE_VALUE_BLOCK_MEMORY_IO", IO_TYPE_VALUE_BLOCK_MEMORY_IO},
     {"IO_TYPE_VALUE_BUFFER_IO", IO_TYPE_VALUE_BUFFER_IO},
+    {"READ_CACHE_TOTAL_CACHE_SIZE_KEY", READ_CACHE_TOTAL_CACHE_SIZE_KEY},
+    {"READ_CACHE_ENABLED_KEY", READ_CACHE_ENABLED_KEY},
     {"IO_PARAMS_KEY", IO_PARAMS_KEY},
     {"BLOCK_IO_BLOCK_SIZE_KEY", BLOCK_IO_BLOCK_SIZE_KEY},
     {"QUANTIZATION_TYPE_VALUE_SQ8", QUANTIZATION_TYPE_VALUE_SQ8},
@@ -300,6 +314,10 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"TQ_CHAIN_KEY", TQ_CHAIN_KEY},
     {"NO_BUILD_LEVELS", NO_BUILD_LEVELS},
     {"GRAPH_TYPE_KEY", GRAPH_TYPE_KEY},
-    {"SUPPORT_FORCE_REMOVE", SUPPORT_FORCE_REMOVE}};
+    {"SUPPORT_FORCE_REMOVE", SUPPORT_FORCE_REMOVE},
+    {"GRAPH_BUILD_THRESHOLD_KEY", GRAPH_BUILD_THRESHOLD_KEY},
+    {"RESIZE_INCREASE_COUNT_BIT", "resize_increase_count_bit"},
+    {"DEFAULT_RESIZE_INCREASE_COUNT_BIT", "10"},
+};
 
 }  // namespace vsag

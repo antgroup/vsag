@@ -15,6 +15,7 @@
 
 #include "bruteforce_parameter.h"
 
+#include "bruteforce.h"
 #include "parameter_test.h"
 #include "unittest.h"
 
@@ -41,4 +42,31 @@ TEST_CASE("BruteForce Parameters CheckCompatibility",
         REQUIRE(param->use_attribute_filter == true);
         REQUIRE_FALSE(param->CheckCompatibility(std::make_shared<vsag::EmptyParameter>()));
     }
+}
+
+TEST_CASE("BruteForce maps resize increase count bit", "[ut][BruteForceParameter]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto default_param = std::dynamic_pointer_cast<vsag::BruteForceParameter>(
+        vsag::BruteForce::CheckAndMappingExternalParam(vsag::JsonType::Parse("{}"), common_param));
+    REQUIRE(default_param != nullptr);
+    REQUIRE(default_param->resize_increase_count_bit == vsag::DEFAULT_RESIZE_INCREASE_COUNT_BIT);
+
+    auto configured_param = std::dynamic_pointer_cast<vsag::BruteForceParameter>(
+        vsag::BruteForce::CheckAndMappingExternalParam(
+            vsag::JsonType::Parse(R"({"resize_increase_count_bit": 1})"), common_param));
+    REQUIRE(configured_param != nullptr);
+    REQUIRE(configured_param->resize_increase_count_bit == 1);
+    REQUIRE(configured_param->ToJson()[vsag::RESIZE_INCREASE_COUNT_BIT].GetUint64() == 1);
+
+    REQUIRE_THROWS(vsag::BruteForce::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"resize_increase_count_bit": 0})"), common_param));
+    REQUIRE_THROWS(vsag::BruteForce::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"resize_increase_count_bit": 32})"), common_param));
+    REQUIRE_THROWS(vsag::BruteForce::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"resize_increase_count_bit": 1.5})"), common_param));
+    REQUIRE_THROWS(vsag::BruteForce::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"resize_increase_count_bit": -1})"), common_param));
 }

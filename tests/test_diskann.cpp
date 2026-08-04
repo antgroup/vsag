@@ -132,10 +132,10 @@ TEST_CASE_METHOD(fixtures::DiskANNTestIndex,
             auto distances = res->GetDistances();
             auto cal_res =
                 index
-                    ->CalDistanceById(queries->GetFloat32Vectors() + i * queries->GetDim(),
-                                      ids,
-                                      res->GetDim(),
-                                      false)
+                    ->CalcDistancesById(queries->GetFloat32Vectors() + i * queries->GetDim(),
+                                        ids,
+                                        res->GetDim(),
+                                        false)
                     .value();
             auto cal_distance = cal_res->GetDistances();
             for (auto j = 0; j < topk; ++j) {

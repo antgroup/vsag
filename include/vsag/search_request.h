@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,9 @@
 #include "vsag/iterator_context.h"
 
 namespace vsag {
+
+using SearchDistanceBatchFunc =
+    std::function<void(const int64_t* ids, uint64_t count, float* distances)>;
 
 enum class SearchMode {
     KNN_SEARCH = 1,
@@ -82,6 +86,25 @@ public:
      *          Examples: ef_search, etc.
      */
     std::string params_str_{};
+
+    /**
+     * @brief Optional request-scoped callback for custom query scoring.
+     *
+     * Receives stable external IDs and writes one lower-is-better score per ID.
+     * When non-null, supported indexes use this callback for search traversal and
+     * result ordering instead of their built-in vector metric. Graph traversal can
+     * score filtered IDs to keep the graph connected, but filtered IDs are never
+     * returned as results.
+     */
+    SearchDistanceBatchFunc distance_batch_func_{nullptr};
+
+    /**
+     * @brief Maximum number of IDs submitted to distance_batch_func_ per invocation.
+     *
+     * Defaults to 1 for scalar scorers. Set this to the scorer's efficient batch
+     * width when it benefits from batched inference or data access.
+     */
+    uint64_t distance_batch_size_{1};
 
     // for attribute filter
     /**

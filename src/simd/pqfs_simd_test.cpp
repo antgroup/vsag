@@ -88,6 +88,23 @@ TEST_CASE("PQFastScan SIMD Compute", "[ut][simd]") {
     }
 }
 
+TEST_CASE("PQFastScan SIMD Compute High Dim", "[ut][simd]") {
+    // pq_dim beyond ~258 overflows the int16 accumulators in the SIMD kernels;
+    // generic accumulates in int32 and stays exact, so it is the reference.
+    const std::vector<int64_t> dims = {2048, 4096, 8192};
+    int64_t count = 10;
+    for (const auto& pq_dim : dims) {
+        auto dim = pq_dim * 16;
+        auto lut =
+            fixtures::generate_uint8_codes(count, pq_dim * 16, fixtures::RandomValue(0, 999));
+        auto codes =
+            fixtures::generate_uint8_codes(count, pq_dim * 16, fixtures::RandomValue(0, 9999));
+        for (uint64_t i = 0; i < count; ++i) {
+            TEST_ACCURACY(PQFastScanLookUp32);
+        }
+    }
+}
+
 #define BENCHMARK_SIMD_COMPUTE(Simd, Comp)                                               \
     BENCHMARK_ADVANCED(#Simd #Comp) {                                                    \
         for (int i = 0; i < count; ++i) {                                                \

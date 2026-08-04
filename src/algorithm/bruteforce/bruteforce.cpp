@@ -15,7 +15,9 @@
 #include "bruteforce.h"
 
 #include <atomic>
+#include <cmath>
 #include <cstring>
+#include <exception>
 #include <mutex>
 #include <new>
 #include <optional>
@@ -69,10 +71,7 @@ BruteForce::BruteForce(const BruteForceParameterPtr& param, const IndexCommonPar
     : InnerIndexInterface(param, common_param) {
     inner_codes_ = FlattenInterface::MakeInstance(param->base_codes_param, common_param);
     is_multi_vector_ = (param->base_codes_param->name == MULTI_VECTOR_DATA_CELL);
-    auto code_size = this->inner_codes_->code_size_;
-    auto increase_count = Options::Instance().block_size_limit() / std::max(code_size, 1U);
-    this->resize_increase_count_bit_ = std::max(
-        DEFAULT_RESIZE_BIT, static_cast<uint64_t>(log2(static_cast<double>(increase_count))));
+    this->resize_increase_count_bit_ = param->resize_increase_count_bit;
     this->use_attribute_filter_ = param->use_attribute_filter;
     this->has_raw_vector_ = !is_multi_vector_;
 }
@@ -370,15 +369,30 @@ DatasetPtr
 BruteForce::SearchWithRequest(const SearchRequest& request) const {
     std::shared_lock read_lock(this->global_mutex_);
 
-    auto computer = this->make_search_computer(request.query_);
+    const bool use_custom_distance = request.distance_batch_func_ != nullptr;
+    if (use_custom_distance) {
+        CHECK_ARGUMENT(request.distance_batch_size_ > 0,
+                       "distance_batch_size must be greater than 0");
+    }
+
+    ComputerInterfacePtr computer = nullptr;
+    if (not use_custom_distance) {
+        computer = this->make_search_computer(request.query_);
+    }
 
     bool is_range = (request.mode_ == SearchMode::RANGE_SEARCH);
     if (is_range) {
-        if (not is_multi_vector_) {
+        if (use_custom_distance) {
+            CHECK_ARGUMENT(std::isfinite(request.radius_), "radius must be finite");
+            CHECK_ARGUMENT(request.radius_ >= 0.0F, "radius must be non-negative");
+            CHECK_ARGUMENT(request.limited_size_ != 0, "limited_size must not be 0");
+        } else if (not is_multi_vector_) {
             this->validate_range_args(request.query_, request.radius_, request.limited_size_);
         }
     } else {
-        if (not is_multi_vector_) {
+        if (use_custom_distance) {
+            CHECK_ARGUMENT(request.topk_ > 0, "topk must be greater than 0");
+        } else if (not is_multi_vector_) {
             this->validate_knn_args(request.query_, request.topk_);
         }
     }
@@ -437,7 +451,13 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         for (const auto& pair : label_to_inner_id) {
             float dist = 0.0F;
             const auto inner_id = pair.second;
-            this->inner_codes_->Query(&dist, computer, &inner_id, 1);
+            if (use_custom_distance) {
+                const auto label = this->label_table_->GetLabelById(inner_id);
+                request.distance_batch_func_(&label, 1, &dist);
+                CHECK_ARGUMENT(std::isfinite(dist), "distance callback must return finite scores");
+            } else {
+                this->inner_codes_->Query(&dist, computer, &inner_id, 1);
+            }
             reasoning_ctx->SetTrueDistance(inner_id, dist);
         }
     }
@@ -453,8 +473,39 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
 
     auto search_func = [&](InnerIdType start, InnerIdType end, const DistHeapPtr& cur_heap) {
         uint32_t dist_cmp_local = 0;
+        std::vector<InnerIdType> custom_inner_ids;
+        std::vector<int64_t> custom_labels;
+        std::vector<float> custom_dists;
+        if (use_custom_distance) {
+            const uint64_t batch_capacity =
+                std::min<uint64_t>(request.distance_batch_size_, end - start);
+            custom_inner_ids.reserve(batch_capacity);
+            custom_labels.reserve(batch_capacity);
+            custom_dists.resize(batch_capacity);
+        }
+
+        auto flush_custom_batch = [&]() {
+            if (custom_inner_ids.empty()) {
+                return;
+            }
+            request.distance_batch_func_(
+                custom_labels.data(), custom_labels.size(), custom_dists.data());
+            for (uint64_t j = 0; j < custom_inner_ids.size(); ++j) {
+                const float dist = custom_dists[j];
+                CHECK_ARGUMENT(std::isfinite(dist), "distance callback must return finite scores");
+                if (reasoning != nullptr) {
+                    reasoning->RecordVisit(custom_inner_ids[j], dist, 0);
+                }
+                if (not is_range || dist <= radius) {
+                    cur_heap->Push(dist, custom_inner_ids[j]);
+                }
+            }
+            dist_cmp_local += static_cast<uint32_t>(custom_inner_ids.size());
+            custom_inner_ids.clear();
+            custom_labels.clear();
+        };
+
         for (InnerIdType i = start; i < end; ++i) {
-            float dist = 0.0F;
             if (attr_filter != nullptr and not attr_filter->CheckValid(i)) {
                 if (reasoning != nullptr) {
                     reasoning->RecordFilterReject(i);
@@ -462,21 +513,31 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
                 continue;
             }
             if (ft == nullptr or ft->CheckValid(i)) {
-                inner_codes_->Query(&dist, computer, &i, 1);
-                ++dist_cmp_local;
-                if (reasoning != nullptr) {
-                    reasoning->RecordVisit(i, dist, 0);
+                if (use_custom_distance) {
+                    custom_inner_ids.push_back(i);
+                    custom_labels.push_back(this->label_table_->GetLabelById(i));
+                    if (custom_inner_ids.size() == request.distance_batch_size_) {
+                        flush_custom_batch();
+                    }
+                } else {
+                    float dist = 0.0F;
+                    inner_codes_->Query(&dist, computer, &i, 1);
+                    ++dist_cmp_local;
+                    if (reasoning != nullptr) {
+                        reasoning->RecordVisit(i, dist, 0);
+                    }
+                    if (is_range and dist > radius) {
+                        continue;
+                    }
+                    cur_heap->Push(dist, i);
                 }
-                if (is_range and dist > radius) {
-                    continue;
-                }
-                cur_heap->Push(dist, i);
             } else {
                 if (reasoning != nullptr) {
                     reasoning->RecordFilterReject(i);
                 }
             }
         }
+        flush_custom_batch();
         dist_cmp.fetch_add(dist_cmp_local, std::memory_order_relaxed);
     };
 
@@ -494,11 +555,24 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         for (auto i = 0; i < parallel_count; ++i) {
             auto start = i * chunk_size;
             auto end = std::min(start + chunk_size, count);
+            if (start >= end) {
+                continue;
+            }
             auto future = this->thread_pool_->GeneralEnqueue(search_func, start, end, heaps[i]);
             futures.emplace_back(std::move(future));
         }
+        std::exception_ptr first_error = nullptr;
         for (auto& future : futures) {
-            future.get();
+            try {
+                future.get();
+            } catch (...) {
+                if (first_error == nullptr) {
+                    first_error = std::current_exception();
+                }
+            }
+        }
+        if (first_error != nullptr) {
+            std::rethrow_exception(first_error);
         }
         heap = heaps[0];
         for (auto i = 1; i < parallel_count; ++i) {
@@ -798,6 +872,11 @@ BruteForce::read_streaming_body(StreamReader& reader,
             logger::error(message);
             throw VsagException(ErrorType::INVALID_ARGUMENT, message);
         }
+        auto effective_param = std::make_shared<BruteForceParameter>(
+            *std::static_pointer_cast<BruteForceParameter>(this->create_param_ptr_));
+        effective_param->resize_increase_count_bit = index_param->resize_increase_count_bit;
+        this->create_param_ptr_ = effective_param;
+        this->resize_increase_count_bit_ = index_param->resize_increase_count_bit;
     }
 
     dim_ = basic_info["dim"].GetInt();
@@ -927,6 +1006,11 @@ BruteForce::Deserialize(StreamReader& reader) {
                 logger::error(message);
                 throw VsagException(ErrorType::INVALID_ARGUMENT, message);
             }
+            auto effective_param = std::make_shared<BruteForceParameter>(
+                *std::static_pointer_cast<BruteForceParameter>(this->create_param_ptr_));
+            effective_param->resize_increase_count_bit = index_param->resize_increase_count_bit;
+            this->create_param_ptr_ = effective_param;
+            this->resize_increase_count_bit_ = index_param->resize_increase_count_bit;
         }
         dim_ = basic_info["dim"].GetInt();
         total_count_.store(basic_info["total_count"].GetUint64());
@@ -1037,6 +1121,7 @@ static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
     {
         "{TYPE_KEY}": "{INDEX_BRUTE_FORCE}",
         "{USE_REORDER_KEY}": false,
+        "{RESIZE_INCREASE_COUNT_BIT}": {DEFAULT_RESIZE_INCREASE_COUNT_BIT},
         "{BASE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -1086,6 +1171,7 @@ static const std::string WARP_PARAMS_TEMPLATE =
     {
         "{TYPE_KEY}": "{INDEX_BRUTE_FORCE}",
         "{USE_REORDER_KEY}": false,
+        "{RESIZE_INCREASE_COUNT_BIT}": {DEFAULT_RESIZE_INCREASE_COUNT_BIT},
         "{BASE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -1115,6 +1201,12 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
         warp_external_param.Erase(WARP_MODE_MARKER);
 
         const ConstParamMap external_mapping = {
+            {
+                RESIZE_INCREASE_COUNT_BIT,
+                {
+                    RESIZE_INCREASE_COUNT_BIT,
+                },
+            },
             {
                 BRUTE_FORCE_BASE_QUANTIZATION_TYPE,
                 {
@@ -1156,6 +1248,12 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
     }
 
     const ConstParamMap external_mapping = {
+        {
+            RESIZE_INCREASE_COUNT_BIT,
+            {
+                RESIZE_INCREASE_COUNT_BIT,
+            },
+        },
         {
             BRUTE_FORCE_BASE_QUANTIZATION_TYPE,
             {

@@ -38,6 +38,7 @@ JsonType
 MemoryBlockIOParameter::ToJson() const {
     JsonType json;
     json[TYPE_KEY].SetString(IO_TYPE_VALUE_BLOCK_MEMORY_IO);
+    AppendReadCacheConfig(json);
     return json;
 }
 

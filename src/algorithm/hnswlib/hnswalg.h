@@ -29,6 +29,7 @@
 #include <random>
 #include <shared_mutex>
 #include <stdexcept>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -422,14 +423,53 @@ public:
         return *ll_cur & DELETE_MARK;
     }
 
+    template <typename T>
+    static inline T
+    readUnaligned(const void* ptr) {
+        static_assert(std::is_trivially_copyable<T>::value, "T must be trivially copyable");
+        T value;
+        std::memcpy(&value, ptr, sizeof(T));
+        return value;
+    }
+
+    template <typename T>
+    static inline void
+    writeUnaligned(void* ptr, T value) {
+        static_assert(std::is_trivially_copyable<T>::value, "T must be trivially copyable");
+        std::memcpy(ptr, &value, sizeof(T));
+    }
+
+    static_assert(sizeof(InnerIdType) == sizeof(linklistsizeint),
+                  "HNSW link-list storage uses linklistsizeint-sized neighbor words");
+
+    static inline const char*
+    linkWordPtr(const linklistsizeint* ptr, uint64_t index) {
+        return reinterpret_cast<const char*>(ptr) + index * sizeof(linklistsizeint);
+    }
+
+    static inline char*
+    linkWordPtr(linklistsizeint* ptr, uint64_t index) {
+        return reinterpret_cast<char*>(ptr) + index * sizeof(linklistsizeint);
+    }
+
     static inline unsigned short int
     getListCount(const linklistsizeint* ptr) {
-        return *((unsigned short int*)ptr);
+        return readUnaligned<unsigned short int>(ptr);
     }
 
     static inline void
     setListCount(linklistsizeint* ptr, unsigned short int size) {
-        *((unsigned short int*)(ptr)) = size;
+        writeUnaligned<unsigned short int>(ptr, size);
+    }
+
+    static inline InnerIdType
+    getLinkAt(const linklistsizeint* ptr, uint64_t index) {
+        return readUnaligned<InnerIdType>(linkWordPtr(ptr, index));
+    }
+
+    static inline void
+    setLinkAt(linklistsizeint* ptr, uint64_t index, InnerIdType value) {
+        writeUnaligned<InnerIdType>(linkWordPtr(ptr, index), value);
     }
 
     /*

@@ -26,6 +26,8 @@
 
 namespace vsag {
 
+class ReasoningContext;
+
 struct ImmutableSINDIWindow {
     explicit ImmutableSINDIWindow(Allocator* allocator)
         : sorted_global_terms(allocator),
@@ -130,6 +132,9 @@ public:
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
 
+    DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const override;
+
     InnerIndexPtr
     Fork(const IndexCommonParam& param) override {
         return nullptr;
@@ -175,6 +180,12 @@ public:
                      bool calculate_precise_distance = true) const override;
 
     DatasetPtr
+    CalcDistancesById(const DatasetPtr& query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true) const override;
+
+    DatasetPtr
     CalDistanceById(const DatasetPtr& query,
                     const int64_t* ids,
                     int64_t count,
@@ -208,7 +219,8 @@ private:
                 const InnerSearchParam& inner_param,
                 Allocator* allocator,
                 bool use_term_lists_heap_insert,
-                const SparseVector* original_query = nullptr) const;
+                const SparseVector* original_query = nullptr,
+                ReasoningContext* reasoning_ctx = nullptr) const;
 
     template <InnerSearchMode mode>
     DatasetPtr
@@ -216,7 +228,8 @@ private:
                           const InnerSearchParam& inner_param,
                           Allocator* allocator,
                           bool use_term_lists_heap_insert,
-                          const SparseVector* original_query = nullptr) const;
+                          const SparseVector* original_query = nullptr,
+                          ReasoningContext* reasoning_ctx = nullptr) const;
 
     bool
     UseTermListsHeapInsert(const SINDISearchParameter& search_param) const;
@@ -320,6 +333,9 @@ private:
                                    MaxHeap& heap,
                                    const InnerSearchParam& param,
                                    uint32_t offset_id) const;
+
+    void
+    AttachReasoningReport(const DatasetPtr& dataset_results, ReasoningContext* reasoning_ctx) const;
 
     /// Recalculate and cache the memory-usage counter.
     void

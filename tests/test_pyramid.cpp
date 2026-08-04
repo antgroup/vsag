@@ -248,6 +248,37 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid Set Immutable",
+                             "[ft][immutable][pyramid]") {
+    const auto metric_type = "l2";
+    PyramidParam pyramid_param;
+    const auto param =
+        GeneratePyramidBuildParametersString(metric_type, dims.front(), pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+    auto dataset =
+        pool.GetDatasetAndCreate(dims.front(), base_count, metric_type, /*with_path=*/true);
+    TestBuildIndex(index, dataset, true);
+
+    REQUIRE(index->SetImmutable().has_value());
+    REQUIRE(index->SetImmutable().has_value());
+
+    auto add_result = index->Add(dataset->base_);
+    REQUIRE_FALSE(add_result.has_value());
+    REQUIRE(add_result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+
+    auto build_result = index->Build(dataset->base_);
+    REQUIRE_FALSE(build_result.has_value());
+    REQUIRE(build_result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+
+    std::vector<int64_t> ids{dataset->base_->GetIds()[0]};
+    auto remove_result = index->Remove(ids);
+    REQUIRE_FALSE(remove_result.has_value());
+    REQUIRE(remove_result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+
+    TestKnnSearch(index, dataset, GeneratePyramidSearchParametersString(100), 0.94, true);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid multi-bit RaBitQ fast encoding",
                              "[ft][pyramid][rabitq]") {
     constexpr int64_t dim = 64;

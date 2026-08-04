@@ -19,6 +19,8 @@
 #include "datacell/attribute_bucket_inverted_datacell.h"
 #include "datacell/bucket_datacell.h"
 #include "datacell/flatten_interface.h"
+#include "datacell/graph_interface.h"
+#include "datacell/graph_interface_parameter.h"
 #include "impl/heap/distance_heap.h"
 #include "impl/reorder/reorder.h"
 #include "impl/searcher/basic_searcher.h"
@@ -78,6 +80,12 @@ public:
 
     std::vector<int64_t>
     Build(const DatasetPtr& base) override;
+
+    DatasetPtr
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true) const override;
 
     DatasetPtr
     CalDistanceById(const float* query,
@@ -199,6 +207,13 @@ private:
            QueryContext& ctx,
            ReasoningContext* reasoning_ctx = nullptr) const;
 
+    DistHeapPtr
+    search_with_custom_distance(const DatasetPtr& query,
+                                const SearchRequest& request,
+                                const InnerSearchParam& param,
+                                QueryContext& ctx,
+                                ReasoningContext* reasoning_ctx = nullptr) const;
+
     /**
      * @brief Re-score the top candidates in @p input with high-precision
      *        codes and return the final result Dataset.
@@ -225,6 +240,9 @@ private:
     /// Populate location_map_ after deserialization or merge.
     void
     fill_location_map();
+
+    void
+    build_bucket_graphs(const DatasetPtr& base);
 
     /**
      * @brief Decode the packed (bucket_id, local_inner_id) pair from
@@ -257,6 +275,10 @@ private:
 private:
     BucketInterfacePtr bucket_{nullptr};  // bucket storage (raw or attribute-aware)
     IVFBucketSearcherPtr bucket_searcher_{nullptr};
+    Vector<GraphInterfacePtr> bucket_graphs_;
+    GraphInterfaceParamPtr graph_param_{nullptr};
+    int64_t graph_build_threshold_{0};
+    IndexCommonParam common_param_;
 
     IVFPartitionStrategyPtr partition_strategy_{nullptr};  // centroid / partition logic
     BucketIdType buckets_per_data_;                        // buckets each vector is assigned to

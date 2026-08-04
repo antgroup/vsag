@@ -173,6 +173,13 @@ export class Index {
     calDistanceById(query: Float32Array, ids: BigInt64Array): Float32Array {
         return this._native.calDistanceById(query, ids);
     }
+
+    /**
+     * Calculate distances between a query vector and vectors specified by IDs.
+     */
+    calcDistancesById(query: Float32Array, ids: BigInt64Array): Float32Array {
+        return this._native.calcDistancesById(query, ids);
+    }
 }
 
 /**

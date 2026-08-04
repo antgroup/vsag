@@ -31,6 +31,7 @@ ReaderIO::ReaderIO(const ReaderIOParamPtr& /*param*/, const IndexCommonParam& co
 
 ReaderIO::ReaderIO(const IOParamPtr& param, const IndexCommonParam& common_param)
     : ReaderIO(std::dynamic_pointer_cast<ReaderIOParameter>(param), common_param) {
+    EnableReadCache(param);
 }
 
 void
@@ -45,7 +46,13 @@ ReaderIO::InitIOImpl(const vsag::IOParamPtr& io_param) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             "ReaderIOParam is required for ReaderIO initialization.");
     }
+    if (reader_param->reader == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "ReaderIO requires a non-null reader.");
+    }
     reader_ = reader_param->reader;
+    if (not HasDeserialized()) {
+        this->size_ = reader_->Size();
+    }
 }
 
 bool

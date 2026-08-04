@@ -197,6 +197,7 @@ HGraph::serialize_basic_info() const {
     jsonify_basic_info["extra_info_size"].SetUint64(this->extra_info_size_);
     jsonify_basic_info["data_type"].SetInt(static_cast<int64_t>(this->data_type_));
     jsonify_basic_info["persist_source_id"].SetBool(this->persist_source_id_);
+    jsonify_basic_info[HGRAPH_USE_MCI].SetBool(this->mci_parameters_.enabled);
     // logger::debug("mult: {}", this->mult_);
     TO_JSON_BASE64(jsonify_basic_info, mult);
     jsonify_basic_info["max_capacity"].SetUint64(this->max_capacity_.load());
@@ -236,6 +237,12 @@ HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
     if (jsonify_basic_info.Contains("persist_source_id")) {
         this->persist_source_id_ = jsonify_basic_info["persist_source_id"].GetBool();
     }
+    if (jsonify_basic_info.Contains("use_mci")) {
+        this->mci_parameters_.enabled = jsonify_basic_info[HGRAPH_USE_MCI].GetBool();
+        if (this->mci_parameters_.enabled and this->mci_cliques_ == nullptr) {
+            this->mci_cliques_ = std::make_shared<CliqueDataCell>(this->allocator_);
+        }
+    }
     FROM_JSON_BASE64(jsonify_basic_info, mult);
     // logger::debug("mult: {}", this->mult_);
     auto max_capacity = jsonify_basic_info["max_capacity"].GetUint64();
@@ -262,6 +269,11 @@ HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
             logger::error(message);
             throw VsagException(ErrorType::INVALID_ARGUMENT, message);
         }
+        auto effective_param = std::make_shared<HGraphParameter>(
+            *std::static_pointer_cast<HGraphParameter>(this->create_param_ptr_));
+        effective_param->resize_increase_count_bit = index_param->resize_increase_count_bit;
+        this->create_param_ptr_ = effective_param;
+        this->resize_increase_count_bit_ = index_param->resize_increase_count_bit;
     }
 }
 
@@ -403,6 +415,9 @@ HGraph::Serialize(StreamWriter& writer) const {
     if (create_new_raw_vector_) {
         this->raw_vector_->Serialize(writer);
     }
+    if (this->mci_parameters_.enabled and this->mci_cliques_ != nullptr) {
+        this->mci_cliques_->Serialize(writer);
+    }
 
     // serialize footer (introduced since v0.15)
     auto jsonify_basic_info = this->serialize_basic_info();
@@ -419,6 +434,10 @@ HGraph::Serialize(StreamWriter& writer) const {
 
 MetadataPtr
 HGraph::collect_streaming_header() const {
+    if (this->mci_parameters_.enabled) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "HGraph MCI does not support streaming serialization");
+    }
     auto metadata = std::make_shared<Metadata>();
     metadata->Set("format", "vsag_stream_v1");
     metadata->Set("index_name", this->GetName());
@@ -608,6 +627,10 @@ HGraph::read_streaming_body(StreamReader& reader,
         serialized_total_count = basic_info["total_count"].GetUint64();
     }
     this->deserialize_basic_info(basic_info);
+    if (this->mci_parameters_.enabled) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "HGraph MCI does not support streaming deserialization");
+    }
     if (not has_serialized_index_param && this->using_dedup_storage()) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             "HGraph deduplicate_storage requires serialized index parameter");
@@ -1010,6 +1033,12 @@ HGraph::Deserialize(StreamReader& reader) {
         if (create_new_raw_vector_) {
             this->raw_vector_->Deserialize(buffer_reader);
         }
+        if (this->mci_parameters_.enabled) {
+            if (this->mci_cliques_ == nullptr) {
+                this->mci_cliques_ = std::make_shared<CliqueDataCell>(this->allocator_);
+            }
+            this->mci_cliques_->Deserialize(buffer_reader);
+        }
         if (this->raw_vector_ != nullptr) {
             this->has_raw_vector_ = true;
         }
@@ -1072,6 +1101,9 @@ HGraph::GetMemoryUsageDetail() const {
     }
     if (this->create_new_raw_vector_ && this->raw_vector_ != nullptr) {
         memory_usage["raw_vector"] = this->raw_vector_->GetMemoryUsage();
+    }
+    if (this->mci_cliques_ != nullptr) {
+        memory_usage["mci_cliques"] = this->mci_cliques_->GetMemoryUsage();
     }
     return memory_usage;
 }

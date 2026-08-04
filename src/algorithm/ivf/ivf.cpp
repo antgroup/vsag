@@ -17,16 +17,21 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <limits>
 #include <random>
 #include <set>
+#include <unordered_map>
 
 #include "algorithm/inner_index_interface.h"
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
 #include "datacell/flatten_interface.h"
+#include "datacell/graph_datacell_parameter.h"
+#include "datacell/graph_interface_parameter.h"
 #include "flat_bucket_searcher.h"
 #include "gno_imi_partition.h"
+#include "graph_bucket_searcher.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/inner_search_param.h"
 #include "impl/reasoning/search_reasoning.h"
@@ -44,6 +49,7 @@
 #include "storage/stream_writer.h"
 #include "storage/tlv_section.h"
 #include "utils/util_functions.h"
+#include "utils/visited_list.h"
 #include "vsag_exception.h"
 
 namespace vsag {
@@ -104,7 +110,8 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
         },
         "{ATTR_PARAMS_KEY}": {
             "{ATTR_HAS_BUCKETS_KEY}": true
-        }
+        },
+        "{GRAPH_BUILD_THRESHOLD_KEY}": 0
     })";
 
 ParamPtr
@@ -136,6 +143,14 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             },
         },
         {
+            IVF_BASE_CACHE_TOTAL_SIZE,
+            {
+                BUCKET_PARAMS_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_TOTAL_CACHE_SIZE_KEY,
+            },
+        },
+        {
             IVF_PRECISE_QUANTIZATION_TYPE,
             {
                 PRECISE_CODES_KEY,
@@ -157,6 +172,14 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                 PRECISE_CODES_KEY,
                 IO_PARAMS_KEY,
                 IO_FILE_PATH_KEY,
+            },
+        },
+        {
+            IVF_PRECISE_CACHE_TOTAL_SIZE,
+            {
+                PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_TOTAL_CACHE_SIZE_KEY,
             },
         },
         {
@@ -321,6 +344,28 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                 TRAIN_SAMPLE_COUNT_KEY,
             },
         },
+        {
+            GRAPH_BUILD_THRESHOLD_KEY,
+            {
+                GRAPH_BUILD_THRESHOLD_KEY,
+            },
+        },
+        {
+            IVF_BASE_ENABLE_READ_CACHE,
+            {
+                BUCKET_PARAMS_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_ENABLED_KEY,
+            },
+        },
+        {
+            IVF_PRECISE_ENABLE_READ_CACHE,
+            {
+                PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                READ_CACHE_ENABLED_KEY,
+            },
+        },
     };
 
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
@@ -342,6 +387,8 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param),
       buckets_per_data_(param->buckets_per_data),
       location_map_(common_param.allocator_.get()),
+      bucket_graphs_(common_param.allocator_.get()),
+      common_param_(common_param),
       bucket_searcher_(std::make_shared<FlatBucketSearcher>()) {
     this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
     if (this->bucket_ == nullptr) {
@@ -368,6 +415,13 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     if (param->build_thread_count > 1 and this->thread_pool_ == nullptr) {
         this->thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
         this->thread_pool_->SetPoolSize(param->build_thread_count);
+    }
+
+    this->graph_param_ = param->graph_param;
+    this->graph_build_threshold_ = param->graph_build_threshold;
+    if (this->graph_build_threshold_ > 0) {
+        this->bucket_searcher_ = std::make_shared<GraphBucketSearcher>(
+            this->graph_build_threshold_, this->bucket_graphs_, this->allocator_);
     }
 
     if (bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
@@ -447,9 +501,17 @@ IVF::InitFeatures() {
 
 std::vector<int64_t>
 IVF::Build(const DatasetPtr& base) {
+    if (graph_build_threshold_ > 0) {
+        CHECK_ARGUMENT(this->total_elements_ == 0,
+                       "graph bucket searcher requires a fresh Build with no prior data");
+    }
     this->Train(base);
     // TODO(LHT): duplicate
     auto result = this->Add(base);
+    if (graph_build_threshold_ > 0) {
+        this->build_bucket_graphs(base);
+    }
+    this->cal_memory_usage();
     return result;
 }
 
@@ -556,6 +618,256 @@ IVF::Add(const DatasetPtr& base) {
     return {};
 }
 
+static const void*
+get_ivf_graph_build_data(const DatasetPtr& dataset,
+                         DataTypes data_type,
+                         uint64_t index,
+                         uint64_t dim) {
+    if (data_type == DataTypes::DATA_TYPE_FLOAT) {
+        const auto* ptr = dataset->GetFloat32Vectors();
+        return ptr != nullptr ? ptr + index * dim : nullptr;
+    }
+    if (data_type == DataTypes::DATA_TYPE_INT8) {
+        const auto* ptr = dataset->GetInt8Vectors();
+        return ptr != nullptr ? ptr + index * dim : nullptr;
+    }
+    if (data_type == DataTypes::DATA_TYPE_FP16 || data_type == DataTypes::DATA_TYPE_BF16) {
+        const auto* ptr = dataset->GetFloat16Vectors();
+        return ptr != nullptr ? ptr + index * dim : nullptr;
+    }
+    if (data_type == DataTypes::DATA_TYPE_SPARSE) {
+        const auto* ptr = dataset->GetSparseVectors();
+        return ptr != nullptr ? ptr + index : nullptr;
+    }
+    throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid data type for IVF graph build");
+}
+
+static GraphInterfaceParamPtr
+get_ivf_graph_param(const std::string& graph_param_string) {
+    auto graph_json = JsonType::Parse(graph_param_string);
+    if (!graph_json.Contains(IO_PARAMS_KEY) || !graph_json.Contains(GRAPH_STORAGE_TYPE_KEY) ||
+        graph_json[GRAPH_STORAGE_TYPE_KEY].GetString() != GRAPH_STORAGE_TYPE_VALUE_FLAT) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            "bucket graph requires flat storage with memory-backed IO");
+    }
+
+    auto param = std::dynamic_pointer_cast<GraphDataCellParameter>(
+        GraphInterfaceParameter::GetGraphParameterByJson(
+            GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT, graph_json));
+    if (param == nullptr || param->io_parameter_ == nullptr || param->support_remove_) {
+        throw VsagException(ErrorType::INVALID_BINARY, "invalid bucket graph parameters");
+    }
+
+    const auto io_type = param->io_parameter_->GetTypeName();
+    if (io_type != IO_TYPE_VALUE_MEMORY_IO && io_type != IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            fmt::format("unsupported bucket graph IO type: {}", io_type));
+    }
+    return param;
+}
+
+static JsonType
+serialize_ivf_graph_param(const GraphInterfaceParamPtr& graph_param) {
+    auto graph_json = graph_param->ToJson();
+    graph_json[GRAPH_STORAGE_TYPE_KEY].SetString(GRAPH_STORAGE_TYPE_VALUE_FLAT);
+    return graph_json;
+}
+
+static bool
+has_any_fresh_bucket_graph(const BucketInterfacePtr& bucket,
+                           const Vector<GraphInterfacePtr>& bucket_graphs) {
+    for (BucketIdType b = 0; b < static_cast<BucketIdType>(bucket_graphs.size()); ++b) {
+        if (bucket_graphs[b] != nullptr &&
+            bucket_graphs[b]->TotalCount() == bucket->GetBucketSize(b)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void
+IVF::build_bucket_graphs(const DatasetPtr& base) {
+    if (graph_build_threshold_ <= 0) {
+        return;
+    }
+    if (common_param_.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+        return;
+    }
+    if (graph_param_ == nullptr) {
+        graph_param_ = std::make_shared<GraphDataCellParameter>();
+    }
+
+    constexpr int64_t max_degree = 64;
+    constexpr uint64_t ef_construction = 300;
+    const auto bucket_count = bucket_->bucket_count_;
+    bucket_graphs_.resize(bucket_count);
+
+    for (BucketIdType b = 0; b < bucket_count; ++b) {
+        const auto bucket_size = bucket_->GetBucketSize(b);
+        if (bucket_size < graph_build_threshold_) {
+            continue;
+        }
+
+        const auto* inner_ids = bucket_->GetInnerIds(b);
+        Vector<InnerIdType> valid_ids(allocator_);
+        valid_ids.reserve(bucket_size);
+        for (InnerIdType i = 0; i < static_cast<InnerIdType>(bucket_size); ++i) {
+            if (inner_ids[i] != std::numeric_limits<InnerIdType>::max()) {
+                valid_ids.push_back(i);
+            }
+        }
+        if (valid_ids.size() < static_cast<uint64_t>(graph_build_threshold_)) {
+            continue;
+        }
+
+        const auto effective_degree =
+            std::min(max_degree, static_cast<int64_t>(valid_ids.size()) - 1);
+        if (effective_degree <= 0) {
+            continue;
+        }
+
+        auto graph = GraphInterface::MakeInstance(graph_param_, this->common_param_);
+        graph->Resize(bucket_size);
+        graph->SetTotalCount(bucket_size);
+        graph->SetMaximumDegree(static_cast<uint32_t>(effective_degree));
+
+        auto make_computer = [&](InnerIdType local_id) {
+            const auto orig_idx = static_cast<uint64_t>(inner_ids[local_id]) / buckets_per_data_;
+            const auto* query =
+                get_ivf_graph_build_data(base, common_param_.data_type_, orig_idx, this->dim_);
+            CHECK_ARGUMENT(query != nullptr, "base dataset has no graph build vector data");
+            return bucket_->FactoryComputer(query);
+        };
+
+        // Adapted from HGraph select_edges_by_heuristic: retain close, diverse edges.
+        auto select_edges_by_heuristic = [&](InnerIdType source, Vector<InnerIdType>& neighbors) {
+            auto source_computer = make_computer(source);
+            Vector<std::pair<float, InnerIdType>> candidates(allocator_);
+            candidates.reserve(neighbors.size());
+            for (const auto neighbor : neighbors) {
+                if (neighbor == source || neighbor >= bucket_size ||
+                    inner_ids[neighbor] == std::numeric_limits<InnerIdType>::max()) {
+                    continue;
+                }
+                bool duplicate = false;
+                for (const auto& candidate : candidates) {
+                    if (candidate.second == neighbor) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (!duplicate) {
+                    candidates.emplace_back(bucket_->QueryOneById(source_computer, b, neighbor),
+                                            neighbor);
+                }
+            }
+            std::sort(candidates.begin(), candidates.end(), [](const auto& lhs, const auto& rhs) {
+                return lhs.first < rhs.first;
+            });
+
+            neighbors.clear();
+            Vector<ComputerInterfacePtr> selected_computers(allocator_);
+            for (const auto& candidate : candidates) {
+                bool good = true;
+                for (const auto& selected_comp : selected_computers) {
+                    const auto pair_distance =
+                        bucket_->QueryOneById(selected_comp, b, candidate.second);
+                    if (pair_distance < candidate.first) {
+                        good = false;
+                        break;
+                    }
+                }
+                if (good) {
+                    neighbors.push_back(candidate.second);
+                    selected_computers.push_back(make_computer(candidate.second));
+                    if (neighbors.size() == static_cast<uint64_t>(effective_degree)) {
+                        break;
+                    }
+                }
+            }
+        };
+
+        const auto entry = valid_ids.front();
+        graph->InsertNeighborsById(entry, Vector<InnerIdType>(allocator_));
+        VisitedList visited(bucket_size, allocator_);
+        Vector<InnerIdType> graph_neighbors(effective_degree, allocator_);
+
+        for (uint64_t node_pos = 1; node_pos < valid_ids.size(); ++node_pos) {
+            const auto node = valid_ids[node_pos];
+            auto computer = make_computer(node);
+            const auto entry_dist = bucket_->QueryOneById(computer, b, entry);
+            const auto ef = std::min(ef_construction, node_pos);
+
+            visited.Reset();
+            StandardHeap<true, false> top_candidates(allocator_, -1);
+            StandardHeap<true, false> candidate_set(allocator_, -1);
+            top_candidates.Push(entry_dist, entry);
+            candidate_set.Push(-entry_dist, entry);
+            visited.Set(entry);
+            auto lower_bound = entry_dist;
+
+            while (not candidate_set.Empty()) {
+                const auto current = candidate_set.Top();
+                if (-current.first > lower_bound && top_candidates.Size() >= ef) {
+                    break;
+                }
+                candidate_set.Pop();
+
+                graph->GetNeighbors(current.second, graph_neighbors);
+                const auto neighbor_count = graph->GetNeighborSize(current.second);
+                for (uint32_t i = 0; i < neighbor_count; ++i) {
+                    const auto neighbor = graph_neighbors[i];
+                    if (neighbor >= bucket_size || visited.Get(neighbor) ||
+                        inner_ids[neighbor] == std::numeric_limits<InnerIdType>::max()) {
+                        continue;
+                    }
+                    visited.Set(neighbor);
+                    const auto distance = bucket_->QueryOneById(computer, b, neighbor);
+                    if (top_candidates.Size() < ef || distance < lower_bound) {
+                        candidate_set.Push(-distance, neighbor);
+                        top_candidates.Push(distance, neighbor);
+                        if (top_candidates.Size() > ef) {
+                            top_candidates.Pop();
+                        }
+                        lower_bound = top_candidates.Top().first;
+                    }
+                }
+            }
+
+            Vector<std::pair<float, InnerIdType>> candidates(allocator_);
+            candidates.reserve(top_candidates.Size());
+            for (uint64_t i = 0; i < top_candidates.Size(); ++i) {
+                candidates.push_back(top_candidates.GetData()[i]);
+            }
+            std::sort(candidates.begin(), candidates.end(), [](const auto& lhs, const auto& rhs) {
+                return lhs.first < rhs.first;
+            });
+
+            // Adapted from HGraph mutually_connect_new_element.
+            Vector<InnerIdType> node_neighbors(allocator_);
+            node_neighbors.reserve(candidates.size());
+            for (const auto& candidate : candidates) {
+                node_neighbors.push_back(candidate.second);
+            }
+            select_edges_by_heuristic(node, node_neighbors);
+            graph->InsertNeighborsById(node, node_neighbors);
+
+            for (const auto neighbor : node_neighbors) {
+                Vector<InnerIdType> reciprocal(allocator_);
+                graph->GetNeighbors(neighbor, reciprocal);
+                if (reciprocal.size() < static_cast<uint64_t>(effective_degree)) {
+                    reciprocal.push_back(node);
+                } else {
+                    reciprocal.push_back(node);
+                    select_edges_by_heuristic(neighbor, reciprocal);
+                }
+                graph->InsertNeighborsById(neighbor, reciprocal);
+            }
+        }
+
+        bucket_graphs_[b] = std::move(graph);
+    }
+}
 DatasetPtr
 IVF::KnnSearch(const DatasetPtr& query,
                int64_t k,
@@ -665,6 +977,32 @@ IVF::Serialize(StreamWriter& writer) const {
         WRITE_DATACELL_WITH_NAME(writer, "attr_filter_index", attr_filter_index_);
     }
 
+    if (graph_build_threshold_ > 0 && graph_param_ != nullptr &&
+        has_any_fresh_bucket_graph(bucket_, bucket_graphs_)) {
+        datacell_offsets["bucket_graphs"].SetInt(offset);
+        auto bucket_graphs_start = writer.GetCursor();
+        StreamWriter::WriteObj(writer, graph_build_threshold_);
+        StreamWriter::WriteString(writer, serialize_ivf_graph_param(graph_param_).Dump());
+        int64_t graph_count = 0;
+        for (BucketIdType b = 0; b < static_cast<BucketIdType>(bucket_graphs_.size()); ++b) {
+            if (bucket_graphs_[b] != nullptr &&
+                bucket_graphs_[b]->TotalCount() == bucket_->GetBucketSize(b)) {
+                ++graph_count;
+            }
+        }
+        StreamWriter::WriteObj(writer, graph_count);
+        for (BucketIdType b = 0; b < static_cast<BucketIdType>(bucket_graphs_.size()); ++b) {
+            if (bucket_graphs_[b] != nullptr &&
+                bucket_graphs_[b]->TotalCount() == bucket_->GetBucketSize(b)) {
+                StreamWriter::WriteObj(writer, b);
+                bucket_graphs_[b]->Serialize(writer);
+            }
+        }
+        auto bucket_graphs_size = writer.GetCursor() - bucket_graphs_start;
+        datacell_sizes["bucket_graphs"].SetInt(bucket_graphs_size);
+        offset += bucket_graphs_size;
+    }
+
     // serialize footer (introduced since v0.15)
     JsonType basic_info;
     basic_info["total_elements"].SetInt(this->total_elements_);
@@ -732,6 +1070,14 @@ IVF::collect_streaming_header() const {
                                      StreamSerializationBlockCurrentVersion(tag),
                                      StreamSerializationTagCritical(tag));
     }
+    if (graph_build_threshold_ > 0 && graph_param_ != nullptr &&
+        has_any_fresh_bucket_graph(bucket_, bucket_graphs_)) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::IVF_BUCKET_GRAPH);
+        AppendStreamingManifestBlock(manifest,
+                                     tag,
+                                     StreamSerializationBlockCurrentVersion(tag),
+                                     StreamSerializationTagCritical(tag));
+    }
     metadata->Set("block_manifest", manifest);
     metadata->SetEmptyIndex(this->GetNumElements() == 0);
     return metadata;
@@ -767,6 +1113,27 @@ IVF::serialize_streaming_body(StreamWriter& writer) const {
         WriteStreamingBlock(
             writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& w) {
                 this->attr_filter_index_->Serialize(w);
+            });
+    }
+    if (graph_build_threshold_ > 0 && graph_param_ != nullptr &&
+        has_any_fresh_bucket_graph(bucket_, bucket_graphs_)) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::IVF_BUCKET_GRAPH);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& w) {
+                StreamWriter::WriteObj(w, graph_build_threshold_);
+                StreamWriter::WriteString(w, serialize_ivf_graph_param(graph_param_).Dump());
+                auto graph_count = static_cast<uint64_t>(bucket_graphs_.size());
+                StreamWriter::WriteObj(w, graph_count);
+                for (uint64_t i = 0; i < graph_count; ++i) {
+                    bool has_graph = (bucket_graphs_[i] != nullptr &&
+                                      bucket_graphs_[i]->TotalCount() ==
+                                          bucket_->GetBucketSize(static_cast<BucketIdType>(i)));
+                    StreamWriter::WriteObj(w, has_graph);
+                    if (has_graph) {
+                        StreamWriter::WriteObj(w, static_cast<BucketIdType>(i));
+                        bucket_graphs_[i]->Serialize(w);
+                    }
+                }
             });
     }
 }
@@ -868,6 +1235,66 @@ IVF::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
                     this->has_attribute_ = true;
                 }
                 break;
+            case StreamSerializationTag::IVF_BUCKET_GRAPH: {
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    StreamReader::ReadObj(block, this->graph_build_threshold_);
+                    this->graph_param_ = get_ivf_graph_param(StreamReader::ReadString(block));
+                    uint64_t graph_count = 0;
+                    StreamReader::ReadObj(block, graph_count);
+                    auto bucket_count = this->bucket_->bucket_count_;
+                    if (graph_count > static_cast<uint64_t>(bucket_count)) {
+                        throw VsagException(
+                            ErrorType::INVALID_BINARY,
+                            fmt::format("bucket graph_count {} exceeds bucket_count {}",
+                                        graph_count,
+                                        bucket_count));
+                    }
+                    this->bucket_graphs_.resize(bucket_count);
+                    for (uint64_t i = 0; i < graph_count; ++i) {
+                        bool has_graph = false;
+                        StreamReader::ReadObj(block, has_graph);
+                        if (has_graph) {
+                            BucketIdType bid = 0;
+                            StreamReader::ReadObj(block, bid);
+                            auto graph = GraphInterface::MakeInstance(this->graph_param_,
+                                                                      this->common_param_);
+                            graph->Deserialize(block);
+                            if (bid >= 0 && bid < static_cast<BucketIdType>(bucket_count)) {
+                                const auto total = graph->TotalCount();
+                                const auto expected_total = bucket_->GetBucketSize(bid);
+                                if (total != expected_total || total > graph->MaxCapacity()) {
+                                    throw VsagException(
+                                        ErrorType::INVALID_BINARY,
+                                        "corrupt bucket graph: invalid total count");
+                                }
+                                for (InnerIdType nid = 0; nid < total; ++nid) {
+                                    if (graph->GetNeighborSize(nid) > graph->MaximumDegree()) {
+                                        throw VsagException(ErrorType::INVALID_BINARY,
+                                                            "corrupt bucket graph: neighbor count "
+                                                            "exceeds maximum degree");
+                                    }
+                                    Vector<InnerIdType> nbrs(this->allocator_);
+                                    graph->GetNeighbors(nid, nbrs);
+                                    for (auto nb : nbrs) {
+                                        if (nb >= total) {
+                                            throw VsagException(
+                                                ErrorType::INVALID_BINARY,
+                                                "corrupt bucket graph: neighbor ID out of range");
+                                        }
+                                    }
+                                }
+                                this->bucket_graphs_[bid] = std::move(graph);
+                            }
+                        }
+                    }
+                });
+                if (graph_build_threshold_ > 0 && this->bucket_searcher_ != nullptr) {
+                    // Replace flat searcher with graph searcher now that graphs are loaded.
+                    this->bucket_searcher_ = std::make_shared<GraphBucketSearcher>(
+                        graph_build_threshold_, bucket_graphs_, allocator_);
+                }
+                break;
+            }
             default:
                 if (block_header.IsCritical()) {
                     throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
@@ -978,6 +1405,57 @@ IVF::Deserialize(StreamReader& reader) {
         if (this->bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
             this->has_raw_vector_ = true;
         }
+
+        if (datacell_offsets.Contains("bucket_graphs")) {
+            auto bucket_count = bucket_->bucket_count_;
+            bucket_graphs_.resize(bucket_count);
+            buffer_reader.PushSeek(datacell_offsets["bucket_graphs"].GetInt());
+            auto graph_reader = buffer_reader.Slice(datacell_sizes["bucket_graphs"].GetInt());
+            int64_t stored_threshold = 0;
+            StreamReader::ReadObj(graph_reader, stored_threshold);
+            graph_build_threshold_ = stored_threshold;
+            graph_param_ = get_ivf_graph_param(StreamReader::ReadString(graph_reader));
+            int64_t graph_count = 0;
+            StreamReader::ReadObj(graph_reader, graph_count);
+            CHECK_ARGUMENT(graph_count >= 0, "bucket graph_count is negative");
+            CHECK_ARGUMENT(graph_count <= bucket_count, "bucket graph_count exceeds bucket_count");
+            for (int64_t g = 0; g < graph_count; ++g) {
+                BucketIdType bid = 0;
+                StreamReader::ReadObj(graph_reader, bid);
+                auto graph = GraphInterface::MakeInstance(graph_param_, this->common_param_);
+                graph->Deserialize(graph_reader);
+                if (bid >= 0 && bid < bucket_count) {
+                    const auto total = graph->TotalCount();
+                    const auto expected_total = bucket_->GetBucketSize(bid);
+                    if (total != expected_total || total > graph->MaxCapacity()) {
+                        throw VsagException(ErrorType::INVALID_BINARY,
+                                            "corrupt bucket graph: invalid total count");
+                    }
+                    for (InnerIdType nid = 0; nid < total; ++nid) {
+                        if (graph->GetNeighborSize(nid) > graph->MaximumDegree()) {
+                            throw VsagException(
+                                ErrorType::INVALID_BINARY,
+                                "corrupt bucket graph: neighbor count exceeds maximum degree");
+                        }
+                        Vector<InnerIdType> nbrs(allocator_);
+                        graph->GetNeighbors(nid, nbrs);
+                        for (auto nb : nbrs) {
+                            if (nb >= total) {
+                                throw VsagException(
+                                    ErrorType::INVALID_BINARY,
+                                    "corrupt bucket graph: neighbor ID out of range");
+                            }
+                        }
+                    }
+                    bucket_graphs_[bid] = std::move(graph);
+                }
+            }
+            buffer_reader.PopSeek();
+            if (graph_build_threshold_ > 0) {
+                this->bucket_searcher_ = std::make_shared<GraphBucketSearcher>(
+                    graph_build_threshold_, bucket_graphs_, allocator_);
+            }
+        }
     }
     this->fill_location_map();
     this->cal_memory_usage();
@@ -999,6 +1477,7 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
     param.enable_reorder = search_param.enable_reorder;
     param.first_order_scan_ratio = search_param.first_order_scan_ratio;
     param.parallel_search_thread_count = search_param.parallel_search_thread_count;
+    param.ef = static_cast<uint64_t>(search_param.ef_search);
     if (search_param.enable_time_record) {
         param.time_cost = std::make_shared<Timer>();
         param.time_cost->SetThreshold(search_param.timeout_ms);
@@ -1190,6 +1669,12 @@ IVF::search(const DatasetPtr& query,
             auto size = heap->Size();
             const auto* data = heap->GetData();
             for (int i = 0; i < size; ++i) {
+                if (reasoning_ctx != nullptr and
+                    search_result->Size() >= static_cast<uint64_t>(topk) and
+                    data[i].first < search_result->Top().first) {
+                    reasoning_ctx->RecordEviction(search_result->Top().second / buckets_per_data_,
+                                                  1);
+                }
                 search_result->Push(data[i]);
             }
         }
@@ -1226,6 +1711,151 @@ IVF::search(const DatasetPtr& query,
     return search_result;
 }
 
+DistHeapPtr
+IVF::search_with_custom_distance(const DatasetPtr& query,
+                                 const SearchRequest& request,
+                                 const InnerSearchParam& param,
+                                 QueryContext& ctx,
+                                 ReasoningContext* reasoning_ctx) const {
+    const auto* query_data = query->GetFloat32Vectors();
+    auto candidate_buckets =
+        partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, &ctx);
+    if (reasoning_ctx != nullptr) {
+        reasoning_ctx->RecordBucketSelection(candidate_buckets);
+    }
+
+    int64_t topk = request.topk_;
+    const int64_t origin_topk = topk;
+    if (buckets_per_data_ > 1) {
+        CHECK_ARGUMENT(topk <= std::numeric_limits<int64_t>::max() / buckets_per_data_,
+                       "topk is too large for multi-bucket IVF search");
+        topk *= buckets_per_data_;
+    }
+
+    auto search_result = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
+    const auto& filter = param.is_inner_id_allowed;
+    Filter* attr_filter = nullptr;
+
+    Vector<InnerIdType> candidate_ids(this->allocator_);
+    Vector<int64_t> candidate_labels(this->allocator_);
+    Vector<float> scores(this->allocator_);
+    const uint64_t batch_capacity = std::min<uint64_t>(
+        request.distance_batch_size_, std::max<uint64_t>(1, this->GetNumElements()));
+    candidate_ids.reserve(batch_capacity);
+    candidate_labels.reserve(batch_capacity);
+    scores.resize(batch_capacity);
+
+    auto is_timed_out = [&]() {
+        if (param.time_cost == nullptr or not param.time_cost->CheckOvertime()) {
+            return false;
+        }
+        if (ctx.stats != nullptr) {
+            ctx.stats->is_timeout.store(true, std::memory_order_relaxed);
+        }
+        return true;
+    };
+
+    auto submit_batch = [&]() {
+        if (candidate_ids.empty()) {
+            return true;
+        }
+        if (is_timed_out()) {
+            return false;
+        }
+        request.distance_batch_func_(
+            candidate_labels.data(), candidate_labels.size(), scores.data());
+        for (uint64_t i = 0; i < candidate_ids.size(); ++i) {
+            CHECK_ARGUMENT(std::isfinite(scores[i]),
+                           "custom query distance callback must return finite scores");
+            if (reasoning_ctx != nullptr) {
+                reasoning_ctx->RecordVisit(candidate_ids[i] / buckets_per_data_, scores[i], 0);
+            }
+            search_result->Push(scores[i], candidate_ids[i]);
+            while (search_result->Size() > static_cast<uint64_t>(topk)) {
+                if (reasoning_ctx != nullptr) {
+                    reasoning_ctx->RecordEviction(search_result->Top().second / buckets_per_data_,
+                                                  0);
+                }
+                search_result->Pop();
+            }
+        }
+        candidate_ids.clear();
+        candidate_labels.clear();
+        return true;
+    };
+
+    bool timed_out = false;
+    for (const auto bucket_id : candidate_buckets) {
+        if (is_timed_out()) {
+            timed_out = true;
+            break;
+        }
+        if (bucket_id == INVALID_BUCKET_ID) {
+            continue;
+        }
+        if (not param.executors.empty()) {
+            param.executors[0]->Clear();
+            attr_filter = param.executors[0]->Run(bucket_id);
+        }
+        const auto bucket_size = bucket_->GetBucketSize(bucket_id);
+        const auto* ids = bucket_->GetInnerIds(bucket_id);
+        for (InnerIdType offset = 0; offset < bucket_size; ++offset) {
+            const auto inner_id = ids[offset];
+            if (inner_id == std::numeric_limits<InnerIdType>::max()) {
+                continue;
+            }
+            const auto origin_id = inner_id / buckets_per_data_;
+            if (attr_filter != nullptr and not attr_filter->CheckValid(offset)) {
+                if (reasoning_ctx != nullptr) {
+                    reasoning_ctx->RecordFilterReject(origin_id);
+                }
+                continue;
+            }
+            if (filter != nullptr and not filter->CheckValid(origin_id)) {
+                if (reasoning_ctx != nullptr) {
+                    reasoning_ctx->RecordFilterReject(origin_id);
+                }
+                continue;
+            }
+            candidate_ids.push_back(inner_id);
+            candidate_labels.push_back(label_table_->GetLabelById(origin_id));
+            if (candidate_ids.size() == batch_capacity and not submit_batch()) {
+                timed_out = true;
+                break;
+            }
+        }
+        if (timed_out) {
+            break;
+        }
+    }
+    if (not timed_out) {
+        submit_batch();
+    }
+
+    if (buckets_per_data_ == 1) {
+        return search_result;
+    }
+
+    std::unordered_map<InnerIdType, float> id_to_min_score;
+    while (not search_result->Empty()) {
+        const auto& [score, inner_id] = search_result->Top();
+        const auto origin_id = inner_id / buckets_per_data_;
+        auto iter = id_to_min_score.find(origin_id);
+        if (iter == id_to_min_score.end() or score < iter->second) {
+            id_to_min_score[origin_id] = score;
+        }
+        search_result->Pop();
+    }
+
+    for (const auto& [origin_id, score] : id_to_min_score) {
+        search_result->Push(score, origin_id);
+        if (search_result->Size() > static_cast<uint64_t>(origin_topk)) {
+            search_result->Pop();
+        }
+    }
+    return search_result;
+}
+
 void
 IVF::merge_one_unit(const MergeUnit& unit) {
     check_merge_illegal(unit);
@@ -1254,12 +1884,11 @@ IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
     auto other_ivf_index = std::dynamic_pointer_cast<IVF>(
         std::dynamic_pointer_cast<IndexImpl<IVF>>(unit.index)->GetInnerIndex());
     if (other_ivf_index->use_reorder_ != this->use_reorder_) {
-        throw VsagException(
-            ErrorType::INVALID_ARGUMENT,
-            fmt::format(
-                "Merge Failed: ivf use_reorder not match, current index is {}, other index is {}",
-                this->use_reorder_,
-                other_ivf_index->use_reorder_));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("Merge Failed: ivf use_reorder not match, current "
+                                        "index is {}, other index is {}",
+                                        this->use_reorder_,
+                                        other_ivf_index->use_reorder_));
     }
     auto cur_model = this->ExportModel(index->GetCommonParam());
     std::stringstream ss1;
@@ -1289,8 +1918,28 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     bool is_range = (request.mode_ == SearchMode::RANGE_SEARCH);
 
     auto param = this->create_search_param(request.params_str_, request.filter_);
+    const bool use_custom_distance = request.distance_batch_func_ != nullptr;
+    if (use_custom_distance) {
+        CHECK_ARGUMENT(request.distance_batch_size_ > 0,
+                       "custom query distance batch size must be greater than 0");
+        CHECK_ARGUMENT(not is_range, "IVF custom query distance only supports KNN search");
+        CHECK_ARGUMENT(not param.disable_bucket_scan,
+                       "IVF custom query distance does not support disable_bucket_scan");
+        CHECK_ARGUMENT(request.topk_ > 0, "topk must be greater than 0");
+        CHECK_ARGUMENT(param.parallel_search_thread_count == 1,
+                       "IVF custom query distance does not support parallel search");
+        param.enable_reorder = false;
+    }
 
     auto query = request.query_;
+    if (use_custom_distance) {
+        CHECK_ARGUMENT(query != nullptr, "query dataset cannot be null");
+        CHECK_ARGUMENT(query->GetNumElements() == 1,
+                       "IVF custom search requires exactly one query");
+        CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr,
+                       "query float32 vectors cannot be null");
+        CHECK_ARGUMENT(query->GetDim() == this->dim_, "query dimension must match index dimension");
+    }
     if (param.disable_bucket_scan) {
         CHECK_ARGUMENT(query != nullptr, "query dataset cannot be null");
         CHECK_ARGUMENT(query->GetNumElements() >= 1,
@@ -1312,6 +1961,19 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             executor->Init();
             param.executors.emplace_back(executor);
         }
+    }
+    if (use_custom_distance) {
+        param.search_mode = KNN_SEARCH;
+        param.topk = request.topk_;
+        auto search_result = search_with_custom_distance(query, request, param, ctx);
+        if (search_result == nullptr || search_result->Empty()) {
+            auto dataset_results = DatasetImpl::MakeEmptyDataset();
+            dataset_results->Statistics(stats.Dump());
+            return dataset_results;
+        }
+        auto dataset_results = this->pack_knn_result(search_result, ctx.alloc);
+        dataset_results->Statistics(stats.Dump());
+        return dataset_results;
     }
     std::shared_ptr<ReasoningContext> reasoning_ctx;
     if (not request.expected_labels_.empty()) {
@@ -1457,6 +2119,14 @@ void
 IVF::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const {
     auto [bucket_id, bucket_offset] = this->get_location(inner_id);
     this->attr_filter_index_->GetAttribute(bucket_id, bucket_offset, attr);
+}
+
+DatasetPtr
+IVF::CalcDistancesById(const float* query,
+                       const int64_t* ids,
+                       int64_t count,
+                       bool calculate_precise_distance) const {
+    return this->CalDistanceById(query, ids, count, calculate_precise_distance);
 }
 
 DatasetPtr
@@ -1647,6 +2317,11 @@ IVF::cal_memory_usage() {
     memory += this->label_table_->GetMemoryUsage();
     memory += location_map_.size() * sizeof(uint64_t);
     memory += partition_strategy_->GetMemoryUsage();
+    for (auto& g : bucket_graphs_) {
+        if (g != nullptr) {
+            memory += g->GetMemoryUsage();
+        }
+    }
     std::unique_lock lock(this->memory_usage_mutex_);
     this->current_memory_usage_.store(memory);
 }

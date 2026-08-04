@@ -39,6 +39,15 @@ public:
     static IOParamPtr
     GetIOParameterByJson(const JsonType& json);
 
+    void
+    LoadReadCacheConfig(const JsonType& json);
+
+    void
+    AppendReadCacheConfig(JsonType& json) const;
+
+    bool enable_read_cache_{false};
+    uint64_t read_cache_total_size_{256ULL * 1024 * 1024};
+
 public:
     /**
      * @brief Returns the type name of this IO parameter.

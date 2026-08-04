@@ -73,6 +73,7 @@ public:
      */
     explicit MemoryIO(const IOParamPtr& param, const IndexCommonParam& common_param)
         : MemoryIO(std::dynamic_pointer_cast<MemoryIOParameter>(param), common_param) {
+        EnableReadCache(param);
     }
 
     /**
@@ -148,6 +149,13 @@ public:
      */
     void
     PrefetchImpl(uint64_t offset, uint64_t cache_line = 64);
+
+    // Exposes the owned contiguous buffer for internal read-only fast paths.
+    // The returned pointer is invalidated by resize/reallocation or destruction.
+    [[nodiscard]] const uint8_t*
+    GetReadOnlyRawData() const {
+        return buffer_;
+    }
 
 private:
     /**

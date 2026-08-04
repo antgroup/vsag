@@ -18,6 +18,7 @@
 #include <fmt/format.h>
 
 #include <chrono>
+#include <exception>
 
 #include "algorithm/inner_index_interface.h"
 #include "analyzer/analyzer.h"
@@ -856,7 +857,7 @@ Pyramid::ExportModel(const IndexCommonParam& param) const {
 
 std::vector<int64_t>
 Pyramid::Add(const DatasetPtr& base) {
-    int64_t data_num = base->GetNumElements();
+    const int64_t data_num = base->GetNumElements();
     const auto* data_vectors = base->GetFloat32Vectors();
     const auto* data_ids = base->GetIds();
     std::vector<int64_t> failed_ids;
@@ -865,33 +866,99 @@ Pyramid::Add(const DatasetPtr& base) {
     {
         std::lock_guard lock(cur_element_count_mutex_);
         local_cur_element_count = cur_element_count_;
+        auto new_capacity = max_capacity_;
         if (max_capacity_ == 0) {
-            auto new_capacity = std::max(INIT_CAPACITY, data_num);
-            resize(new_capacity);
+            new_capacity = std::max(INIT_CAPACITY, data_num);
         } else if (max_capacity_ < data_num + cur_element_count_) {
-            auto new_capacity = std::min(MAX_CAPACITY_EXTEND, max_capacity_);
+            new_capacity = std::min(MAX_CAPACITY_EXTEND, max_capacity_);
             new_capacity = std::max(data_num + cur_element_count_ - max_capacity_, new_capacity) +
                            max_capacity_;
+        }
+        bool base_storage_resized = false;
+        bool precise_storage_resized = false;
+        if (new_capacity > max_capacity_) {
+            base_storage_resized = new_capacity > static_cast<int64_t>(base_codes_->max_capacity_);
+            precise_storage_resized =
+                not use_reorder_ ||
+                new_capacity > static_cast<int64_t>(precise_codes_->max_capacity_);
             resize(new_capacity);
         }
-        int64_t valid_id_count = 0;
+
+        data_biases.reserve(data_num);
         for (int64_t i = 0; i < data_num; ++i) {
             if (not label_table_->CheckLabel(data_ids[i])) {
-                label_table_->Insert(valid_id_count + local_cur_element_count, data_ids[i]);
-                base_codes_->InsertVector(data_vectors + dim_ * i,
-                                          valid_id_count + local_cur_element_count);
-                if (has_precise_reorder()) {
-                    precise_codes_->InsertVector(data_vectors + dim_ * i,
-                                                 valid_id_count + local_cur_element_count);
-                }
-                valid_id_count++;
+                const auto inner_id =
+                    static_cast<InnerIdType>(local_cur_element_count + data_biases.size());
+                label_table_->Insert(inner_id, data_ids[i]);
                 data_biases.push_back(i);
             } else {
                 logger::warn("Label {} already exists, skip adding.", data_ids[i]);
                 failed_ids.push_back(data_ids[i]);
             }
         }
-        cur_element_count_ += valid_id_count;
+
+        const auto encode_range = [this, data_vectors, local_cur_element_count, &data_biases](
+                                      uint64_t begin, uint64_t end) {
+            for (uint64_t offset = begin; offset < end; ++offset) {
+                const auto* vector = data_vectors + dim_ * data_biases[offset];
+                const auto inner_id = static_cast<InnerIdType>(local_cur_element_count + offset);
+                base_codes_->InsertVector(vector, inner_id);
+                if (use_reorder_) {
+                    precise_codes_->InsertVector(vector, inner_id);
+                }
+            }
+        };
+        const auto supports_parallel_encode = [](const FlattenInterfacePtr& codes) {
+            const auto name = codes->GetQuantizerName();
+            return codes->InMemory() &&
+                   (name == QUANTIZATION_TYPE_VALUE_FP32 ||
+                    name == QUANTIZATION_TYPE_VALUE_RABITQ || name == QUANTIZATION_TYPE_VALUE_SQ8);
+        };
+        const bool use_parallel_encode =
+            local_cur_element_count == 0 && thread_pool_ != nullptr && build_thread_count_ > 1 &&
+            data_biases.size() > 1 && supports_parallel_encode(base_codes_) &&
+            (not use_reorder_ || supports_parallel_encode(precise_codes_)) &&
+            base_storage_resized && precise_storage_resized;
+        if (use_parallel_encode) {
+            const uint64_t worker_count =
+                std::min<uint64_t>(build_thread_count_, data_biases.size());
+            const uint64_t block_size = (data_biases.size() + worker_count - 1) / worker_count;
+            Vector<std::future<void>> futures(allocator_);
+            futures.reserve(worker_count);
+            const auto wait_futures = [&futures]() {
+                std::exception_ptr first_exception = nullptr;
+                for (auto& future : futures) {
+                    try {
+                        future.get();
+                    } catch (...) {
+                        if (not first_exception) {
+                            first_exception = std::current_exception();
+                        }
+                    }
+                }
+                if (first_exception) {
+                    std::rethrow_exception(first_exception);
+                }
+            };
+            try {
+                for (uint64_t begin = 0; begin < data_biases.size(); begin += block_size) {
+                    const uint64_t end = std::min<uint64_t>(begin + block_size, data_biases.size());
+                    futures.push_back(thread_pool_->GeneralEnqueue(
+                        [encode_range, begin, end]() { encode_range(begin, end); }));
+                }
+            } catch (...) {
+                const auto enqueue_exception = std::current_exception();
+                try {
+                    wait_futures();
+                } catch (...) {
+                }
+                std::rethrow_exception(enqueue_exception);
+            }
+            wait_futures();
+        } else {
+            encode_range(0, data_biases.size());
+        }
+        cur_element_count_ += static_cast<int64_t>(data_biases.size());
     }
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
 
@@ -1418,14 +1485,14 @@ Pyramid::search_node(const IndexNode* node,
 }
 void
 Pyramid::SetImmutable() {
-    if (this->immutable_) {
+    if (this->immutable_.load(std::memory_order_acquire)) {
         return;
     }
     label_table_->SetImmutable();
     this->points_mutex_.reset();
     this->points_mutex_ = std::make_shared<EmptyMutex>();
     this->searcher_->SetMutexArray(this->points_mutex_);
-    immutable_ = true;
+    this->immutable_.store(true, std::memory_order_release);
 }
 
 float
@@ -1436,6 +1503,14 @@ Pyramid::CalcDistanceById(const float* query, int64_t id, bool calculate_precise
         flat = this->precise_codes_;
     }
     return InnerIndexInterface::calc_distance_by_id(query, id, flat);
+}
+
+DatasetPtr
+Pyramid::CalcDistancesById(const float* query,
+                           const int64_t* ids,
+                           int64_t count,
+                           bool calculate_precise_distance) const {
+    return this->CalDistanceById(query, ids, count, calculate_precise_distance);
 }
 
 DatasetPtr

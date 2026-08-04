@@ -50,10 +50,11 @@ TEST_CASE("IVF Nearest Partition Basic Test", "[ut][IVFNearestPartition]") {
         REQUIRE(class_result.size() == data_count);
 
         auto index = partition->route_index_ptr_;
+        // Match ClassifyDatas so this checks its routing rather than HGraph search breadth.
         std::string route_search_param = R"(
         {
             "hgraph": {
-                "ef_search": 20
+                "ef_search": 10
             }
         }
         )";

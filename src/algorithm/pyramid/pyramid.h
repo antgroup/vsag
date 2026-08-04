@@ -193,6 +193,12 @@ public:
                      bool calculate_precise_distance = true) const override;
 
     DatasetPtr
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true) const override;
+
+    DatasetPtr
     CalDistanceById(const float* query,
                     const int64_t* ids,
                     int64_t count,
@@ -398,7 +404,6 @@ private:
     ReorderInterfacePtr reorder_{nullptr};  // reorder helper (if use_reorder_)
 
     uint32_t index_min_size_{0};  // min node size before graph is built
-    bool immutable_{false};       // true after SetImmutable()
 };
 
 }  // namespace vsag

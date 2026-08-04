@@ -1239,24 +1239,13 @@ TEST_CASE("(PR) HGraph Reasoning Zero Overhead When Disabled", "[ft][hgraph][rea
         ->Float32Vectors(dataset->base_->GetFloat32Vectors())
         ->Owner(false);
 
-    constexpr int warmup_rounds = 20;
-    constexpr int measure_rounds = 100;
+    constexpr uint64_t warmup_rounds = 20;
+    constexpr uint64_t measure_rounds = 20;
+    constexpr uint64_t measure_samples = 7;
+    // CI runs this test beside six other functional-test processes. Alternating the order and
+    // taking the median prevents one scheduler interruption from looking like request overhead.
 
     std::string search_params = fmt::format(fixtures::search_param_tmp, 100, false);
-
-    for (int i = 0; i < warmup_rounds; ++i) {
-        index->KnnSearch(query, 10, search_params, vsag::BitsetPtr(nullptr));
-    }
-
-    auto start_baseline = std::chrono::steady_clock::now();
-    for (int i = 0; i < measure_rounds; ++i) {
-        auto r = index->KnnSearch(query, 10, search_params, vsag::BitsetPtr(nullptr));
-        REQUIRE(r.has_value());
-    }
-    auto end_baseline = std::chrono::steady_clock::now();
-    auto baseline_us =
-        std::chrono::duration_cast<std::chrono::microseconds>(end_baseline - start_baseline)
-            .count();
 
     vsag::SearchRequest req_no_reasoning;
     req_no_reasoning.topk_ = 10;
@@ -1264,23 +1253,107 @@ TEST_CASE("(PR) HGraph Reasoning Zero Overhead When Disabled", "[ft][hgraph][rea
     req_no_reasoning.query_ = query;
     req_no_reasoning.expected_labels_ = {};
 
-    for (int i = 0; i < warmup_rounds; ++i) {
+    for (uint64_t i = 0; i < warmup_rounds; ++i) {
+        index->KnnSearch(query, 10, search_params, vsag::BitsetPtr(nullptr));
         index->SearchWithRequest(req_no_reasoning);
     }
 
-    auto start_no_reasoning = std::chrono::steady_clock::now();
-    for (int i = 0; i < measure_rounds; ++i) {
-        auto r = index->SearchWithRequest(req_no_reasoning);
-        REQUIRE(r.has_value());
-    }
-    auto end_no_reasoning = std::chrono::steady_clock::now();
-    auto no_reasoning_us =
-        std::chrono::duration_cast<std::chrono::microseconds>(end_no_reasoning - start_no_reasoning)
-            .count();
+    auto measure = [&](const auto& search) {
+        auto start = std::chrono::steady_clock::now();
+        for (uint64_t i = 0; i < measure_rounds; ++i) {
+            auto result = search();
+            REQUIRE(result.has_value());
+        }
+        return std::chrono::steady_clock::now() - start;
+    };
+    auto baseline_search = [&] {
+        return index->KnnSearch(query, 10, search_params, vsag::BitsetPtr(nullptr));
+    };
+    auto no_reasoning_search = [&] { return index->SearchWithRequest(req_no_reasoning); };
 
-    const auto baseline_denominator = std::max(baseline_us, decltype(baseline_us){1});
-    double ratio = static_cast<double>(no_reasoning_us) / static_cast<double>(baseline_denominator);
-    REQUIRE(ratio < 1.5);
+    std::vector<double> ratios;
+    ratios.reserve(measure_samples);
+    for (uint64_t sample = 0; sample < measure_samples; ++sample) {
+        std::chrono::steady_clock::duration baseline_duration;
+        std::chrono::steady_clock::duration no_reasoning_duration;
+        if (sample % 2 == 0) {
+            baseline_duration = measure(baseline_search);
+            no_reasoning_duration = measure(no_reasoning_search);
+        } else {
+            no_reasoning_duration = measure(no_reasoning_search);
+            baseline_duration = measure(baseline_search);
+        }
+        ratios.push_back(static_cast<double>(no_reasoning_duration.count()) /
+                         static_cast<double>(std::max(baseline_duration.count(),
+                                                      decltype(baseline_duration.count()){1})));
+    }
+
+    std::sort(ratios.begin(), ratios.end());
+    REQUIRE(ratios[measure_samples / 2] < 1.5);
+}
+
+TEST_CASE("(PR) HGraph Custom Batch Distance", "[ft][hgraph][custom_distance][pr]") {
+    using namespace fixtures;
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    uint64_t max_batch_size = 0;
+    vsag::SearchRequest request;
+    request.topk_ = 5;
+    request.params_str_ = fmt::format(fixtures::search_param_tmp, 256, false);
+    request.distance_batch_size_ = 2;
+    request.distance_batch_func_ = [&](const int64_t* ids, uint64_t count, float* distances) {
+        max_batch_size = std::max(max_batch_size, count);
+        for (uint64_t i = 0; i < count; ++i) {
+            distances[i] = static_cast<float>(ids[i]);
+        }
+    };
+
+    auto result = index->SearchWithRequest(request);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() > 0);
+    REQUIRE(max_batch_size <= request.distance_batch_size_);
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(result.value()->GetDistances()[i] ==
+                static_cast<float>(result.value()->GetIds()[i]));
+    }
+
+    request.distance_batch_size_ = 0;
+    auto invalid_batch_size = index->SearchWithRequest(request);
+    REQUIRE_FALSE(invalid_batch_size.has_value());
+    REQUIRE(invalid_batch_size.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    request.distance_batch_size_ = 1;
+    request.distance_batch_func_ = [](const int64_t*, uint64_t, float* distances) {
+        distances[0] = std::numeric_limits<float>::quiet_NaN();
+    };
+    auto non_finite_score = index->SearchWithRequest(request);
+    REQUIRE_FALSE(non_finite_score.has_value());
+    REQUIRE(non_finite_score.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    request.distance_batch_func_ = [](const int64_t*, uint64_t count, float* distances) {
+        std::fill(distances, distances + count, 0.0F);
+    };
+    request.mode_ = vsag::SearchMode::RANGE_SEARCH;
+    auto unsupported_range = index->SearchWithRequest(request);
+    REQUIRE_FALSE(unsupported_range.has_value());
+    REQUIRE(unsupported_range.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    request.mode_ = vsag::SearchMode::KNN_SEARCH;
+    request.topk_ = 5;
+    request.params_str_ = R"({"hgraph":{"ef_search":256,"parallelism":2}})";
+    auto unsupported_parallel = index->SearchWithRequest(request);
+    REQUIRE_FALSE(unsupported_parallel.has_value());
+    REQUIRE(unsupported_parallel.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    request.params_str_ = R"({"hgraph":{"ef_search":256,"brute_force_threshold":0.1}})";
+    auto unsupported_brute_force = index->SearchWithRequest(request);
+    REQUIRE_FALSE(unsupported_brute_force.has_value());
+    REQUIRE(unsupported_brute_force.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 }
 
 static void
@@ -3666,7 +3739,7 @@ TEST_CASE("HGraph Concurrent Tune and CalDistanceById", "[ft][concurrent][hgraph
     for (int i = 0; i < 4; ++i) {
         readers.emplace_back([&]() {
             while (!stop.load(std::memory_order_relaxed)) {
-                index.value()->CalDistanceById(query.data(), batch_ids.data(), 3);
+                (void)index.value()->CalcDistancesById(query.data(), batch_ids.data(), 3);
                 cal_count.fetch_add(1, std::memory_order_relaxed);
             }
         });
@@ -3831,7 +3904,7 @@ TEST_CASE("HGraph Concurrent Tune(disable_future_tuning=false) and CalDistanceBy
     for (int i = 0; i < 4; ++i) {
         readers.emplace_back([&]() {
             while (!stop.load(std::memory_order_relaxed)) {
-                index.value()->CalDistanceById(query.data(), batch_ids.data(), 3);
+                (void)index.value()->CalcDistancesById(query.data(), batch_ids.data(), 3);
                 cal_count.fetch_add(1, std::memory_order_relaxed);
             }
         });
@@ -3848,4 +3921,44 @@ TEST_CASE("HGraph Concurrent Tune(disable_future_tuning=false) and CalDistanceBy
     }
 
     REQUIRE(cal_count.load() > 0);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
+                             "HGraph ReadCache With Async Backend",
+                             "[ft][hgraph][cacheio][pr]") {
+    auto resource = HGraphTestIndex::GetResource(true);
+    auto dim = 128;
+    std::string search_param = R"({"hgraph": {"ef_search": 200}})";
+
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim, resource->base_count, "l2");
+
+    auto precise_file_path = HGraphTestIndex::dir.GenerateRandomFile(false);
+    std::string read_cache_param = fmt::format(R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": {},
+        "index_param": {{
+            "use_reorder": true,
+            "base_quantization_type": "sq8",
+            "precise_quantization_type": "fp32",
+            "max_degree": 96,
+            "ef_construction": 500,
+            "base_pq_dim": {},
+            "base_io_type": "memory_io",
+             "precise_io_type": "async_io",
+             "precise_enable_read_cache": true,
+            "precise_file_path": "{}",
+            "precise_cache_total_size": 268435456,
+            "graph_io_type": "block_memory_io"
+        }}
+    }}
+    )",
+                                               dim,
+                                               dim,
+                                               precise_file_path);
+
+    auto cache_index = TestIndex::TestFactory(name, read_cache_param, true);
+    TestIndex::TestBuildIndex(cache_index, dataset, true);
+    HGraphTestIndex::TestGeneral(cache_index, dataset, search_param, 0.98f);
 }
