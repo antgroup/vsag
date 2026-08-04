@@ -155,6 +155,11 @@ public:
     [[nodiscard]] virtual std::string
     GetQuantizerName() = 0;
 
+    [[nodiscard]] virtual bool
+    SupportSplitCodeStorage() const {
+        return false;
+    }
+
     [[nodiscard]] virtual MetricType
     GetMetricType() = 0;
 

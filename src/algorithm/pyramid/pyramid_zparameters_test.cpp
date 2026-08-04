@@ -516,6 +516,15 @@ TEST_CASE("Pyramid rejects invalid RaBitQ split params", "[ut][PyramidParameters
     })");
     REQUIRE_THROWS(
         vsag::Pyramid::CheckAndMappingExternalParam(non_string_quantization_type, common_param));
+
+    auto disabled_reorder = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "use_reorder": false
+    })");
+    REQUIRE_THROWS(vsag::Pyramid::CheckAndMappingExternalParam(disabled_reorder, common_param));
 }
 
 TEST_CASE("Pyramid maps RaBitQ without y bits to standard RaBitQ", "[ut][PyramidParameters]") {

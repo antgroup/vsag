@@ -131,8 +131,7 @@ public:
           odescent_param_(pyramid_param->odescent_param),
           index_min_size_(pyramid_param->index_min_size),
           graph_type_(pyramid_param->graph_type),
-          reorder_by_base_(pyramid_param->reorder_source == HGRAPH_REORDER_SOURCE_BASE),
-          default_rabitq_one_bit_search_(pyramid_param->use_reorder and reorder_by_base_ and
+          default_rabitq_one_bit_search_(pyramid_param->use_reorder and
                                          pyramid_param->base_codes_param->name ==
                                              RABITQ_SPLIT_DATA_CELL),
           support_duplicate_(pyramid_param->support_duplicate) {
@@ -336,7 +335,8 @@ private:
                 const SearchFunc& search_func,
                 InnerSearchParam& search_param,
                 QueryContext& ctx,
-                const std::string& hierarchy_name = "") const;
+                const std::string& hierarchy_name,
+                const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
     /// Probabilistic check: should total_count trigger a new entry-point update?
     bool
@@ -366,16 +366,17 @@ private:
                 const DatasetPtr& query,
                 const FlattenInterfacePtr& codes,
                 QueryContext& ctx,
-                uint64_t subindex_ef_search) const;
+                uint64_t subindex_ef_search,
+                DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
     [[nodiscard]] bool
     has_precise_reorder() const {
-        return use_reorder_ and not reorder_by_base_;
+        return use_reorder_ and not base_codes_->SupportSplitCodeStorage();
     }
 
     [[nodiscard]] FlattenInterfacePtr
     get_reorder_codes() const {
-        return reorder_by_base_ ? base_codes_ : precise_codes_;
+        return base_codes_->SupportSplitCodeStorage() ? base_codes_ : precise_codes_;
     }
 
 private:
@@ -395,7 +396,6 @@ private:
     mutable std::shared_mutex resize_mutex_;        // guards resize operations
     std::mutex cur_element_count_mutex_;            // guards cur_element_count_ updates
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};  // graph algorithm type
-    bool reorder_by_base_{false};                   // use base codes for reorder
     bool default_rabitq_one_bit_search_{false};     // default split lower-bound search
 
     std::mutex entry_point_mutex_;  // guards entry-point selection

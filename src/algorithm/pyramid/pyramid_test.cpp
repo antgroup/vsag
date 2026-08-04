@@ -15,7 +15,6 @@
 
 #include "pyramid.h"
 
-#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -58,8 +57,8 @@ MakePyramidIndex(uint32_t index_min_size,
     if (split_rabitq) {
         external_param[vsag::PYRAMID_BASE_QUANTIZATION_TYPE].SetString("rabitq");
         external_param[vsag::PYRAMID_PRECISE_QUANTIZATION_TYPE].SetString("rabitq");
-        external_param[vsag::PYRAMID_RABITQ_BITS_PER_DIM_BASE].SetInt(1);
-        external_param[vsag::PYRAMID_RABITQ_BITS_PER_DIM_PRECISE].SetInt(1);
+        external_param[vsag::PYRAMID_RABITQ_BITS_PER_DIM_BASE].SetInt(3);
+        external_param[vsag::PYRAMID_RABITQ_BITS_PER_DIM_PRECISE].SetInt(5);
         external_param[vsag::PYRAMID_USE_REORDER].SetBool(true);
     }
     external_param[vsag::PYRAMID_INDEX_MIN_SIZE].SetInt(index_min_size);
@@ -185,7 +184,12 @@ TEST_CASE("Pyramid promotes flat node at index minimum size", "[ut][pyramid]") {
         auto result =
             index->KnnSearch(query, 1, R"({"pyramid":{"ef_search":10}})", vsag::FilterPtr{});
         REQUIRE(result->GetDim() == 1);
-        REQUIRE(std::find(ids.begin(), ids.end(), result->GetIds()[0]) != ids.end());
+        REQUIRE(result->GetIds()[0] == ids[i]);
+        if (split_rabitq) {
+            auto stats = result->GetStatistics({"reorder_lower_bound_probe_count"});
+            REQUIRE(stats.size() == 1);
+            REQUIRE(std::stoul(stats[0]) > 0);
+        }
     }
 }
 

@@ -167,6 +167,9 @@ PyramidParameters::FromJson(const JsonType& json) {
     }
 
     this->base_codes_param = CreateFlattenParam(json[BASE_CODES_KEY]);
+    const bool use_split_codes = this->base_codes_param->name == RABITQ_SPLIT_DATA_CELL;
+    this->reorder_source =
+        use_split_codes ? HGRAPH_REORDER_SOURCE_BASE : HGRAPH_REORDER_SOURCE_PRECISE;
 
     if (json.Contains(NO_BUILD_LEVELS)) {
         const auto& no_build_levels_json = json[NO_BUILD_LEVELS];
@@ -177,7 +180,7 @@ PyramidParameters::FromJson(const JsonType& json) {
     }
 
     this->use_reorder = json[USE_REORDER_KEY].GetBool();
-    if (this->use_reorder && this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
+    if (this->use_reorder && not use_split_codes) {
         this->precise_codes_param = CreateFlattenParam(json[PRECISE_CODES_KEY]);
     } else {
         this->precise_codes_param = nullptr;

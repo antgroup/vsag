@@ -85,7 +85,8 @@ public:
              SafeThreadPool* thread_pool,
              bool pruning = true,
              const float* build_vectors = nullptr,
-             int64_t build_vector_count = 0)
+             int64_t build_vector_count = 0,
+             FlattenInterfacePtr build_flatten_interface = nullptr)
         : odescent_param_(std::move(odescent_parameter)),
           flatten_interface_(flatten_interface),
           pruning_(pruning),
@@ -93,9 +94,15 @@ public:
           graph_(allocator),
           points_lock_(allocator),
           thread_pool_(thread_pool),
+          build_flatten_interface_(std::move(build_flatten_interface)),
           build_vectors_(build_vectors),
           build_vector_count_(build_vector_count) {
     }
+
+    static FlattenInterfacePtr
+    CreateBuildFlatten(const FlattenInterfacePtr& flatten_interface,
+                       const float* build_vectors,
+                       int64_t build_vector_count);
 
     bool
     Build(const GraphInterfacePtr& graph_storage = nullptr) {

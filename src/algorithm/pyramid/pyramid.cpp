@@ -56,6 +56,12 @@ map_rabitq_split_param(const JsonType& external_json, JsonType& inner_json) {
                    fmt::format("{} requires {}",
                                PYRAMID_RABITQ_BITS_PER_DIM_PRECISE,
                                PYRAMID_PRECISE_QUANTIZATION_TYPE));
+    CHECK_ARGUMENT(
+        external_json.Contains(PYRAMID_USE_REORDER) and
+            external_json[PYRAMID_USE_REORDER].IsBool() and
+            external_json[PYRAMID_USE_REORDER].GetBool(),
+        fmt::format(
+            "{} requires {}=true", PYRAMID_RABITQ_BITS_PER_DIM_PRECISE, PYRAMID_USE_REORDER));
 
     CHECK_ARGUMENT(external_json[PYRAMID_BASE_QUANTIZATION_TYPE].IsString(),
                    fmt::format("{} must be a string", PYRAMID_BASE_QUANTIZATION_TYPE));
@@ -102,7 +108,6 @@ map_rabitq_split_param(const JsonType& external_json, JsonType& inner_json) {
                                    query_bits));
     }
 
-    inner_json[REORDER_SOURCE_KEY].SetString(HGRAPH_REORDER_SOURCE_BASE);
     inner_json[BASE_CODES_KEY][CODES_TYPE_KEY].SetString(RABITQ_SPLIT_CODES);
     inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_VERSION_KEY].SetString(
         RaBitQuantizerParameter::RABITQ_VERSION_SPLIT);
@@ -314,12 +319,19 @@ Pyramid::build_by_odescent(const DatasetPtr& base) {
     auto codes = has_precise_reorder() ? precise_codes_ : base_codes_;
 
     if (thread_pool_ != nullptr && hierarchies_.size() > 1) {
+        auto build_flatten = ODescent::CreateBuildFlatten(codes, data_vectors, data_num);
         Vector<std::future<void>> futures(allocator_);
         for (const auto& [hname, h_ptr] : hierarchies_) {
             auto* root_ptr = h_ptr->root.get();
-            futures.push_back(thread_pool_->GeneralEnqueue([&, codes, root_ptr]() {
-                ODescent builder(
-                    odescent_param_, codes, allocator_, nullptr, true, data_vectors, data_num);
+            futures.push_back(thread_pool_->GeneralEnqueue([&, codes, build_flatten, root_ptr]() {
+                ODescent builder(odescent_param_,
+                                 codes,
+                                 allocator_,
+                                 nullptr,
+                                 true,
+                                 data_vectors,
+                                 data_num,
+                                 build_flatten);
                 root_ptr->Build(builder);
             }));
         }
@@ -380,14 +392,39 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     }
 
     search_param.is_inner_id_allowed = this->create_search_filter(filter);
+    const bool collect_rabitq_lower_bounds = search_param.enable_rabitq_one_bit_search and
+                                             use_reorder_ and
+                                             base_codes_->SupportSplitCodeStorage();
+    DistanceRecordVector rabitq_lower_bound_candidates(allocator_);
+    std::mutex rabitq_lower_bound_mutex;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
-        return this->search_node(
-            node, vl, search_param, query, base_codes_, ctx, parsed_param.subindex_ef_search);
+        DistanceRecordVector local_candidates(allocator_);
+        auto* candidates = collect_rabitq_lower_bounds ? &local_candidates : nullptr;
+        auto result = this->search_node(node,
+                                        vl,
+                                        search_param,
+                                        query,
+                                        base_codes_,
+                                        ctx,
+                                        parsed_param.subindex_ef_search,
+                                        candidates);
+        if (candidates != nullptr and not candidates->empty()) {
+            std::lock_guard lock(rabitq_lower_bound_mutex);
+            rabitq_lower_bound_candidates.insert(
+                rabitq_lower_bound_candidates.end(), candidates->begin(), candidates->end());
+        }
+        return result;
     };
 
     std::string hierarchy_name =
         parsed_param.hierarchies.empty() ? "" : parsed_param.hierarchies[0];
-    auto result = this->search_impl(query, search_func, search_param, ctx, hierarchy_name);
+    auto result =
+        this->search_impl(query,
+                          search_func,
+                          search_param,
+                          ctx,
+                          hierarchy_name,
+                          collect_rabitq_lower_bounds ? &rabitq_lower_bound_candidates : nullptr);
     result->Statistics(stats.Dump());
     return result;
 }
@@ -427,14 +464,39 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     }
 
     search_param.is_inner_id_allowed = this->create_search_filter(filter);
+    const bool collect_rabitq_lower_bounds = search_param.enable_rabitq_one_bit_search and
+                                             use_reorder_ and
+                                             base_codes_->SupportSplitCodeStorage();
+    DistanceRecordVector rabitq_lower_bound_candidates(allocator_);
+    std::mutex rabitq_lower_bound_mutex;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
-        return this->search_node(
-            node, vl, search_param, query, base_codes_, ctx, parsed_param.subindex_ef_search);
+        DistanceRecordVector local_candidates(allocator_);
+        auto* candidates = collect_rabitq_lower_bounds ? &local_candidates : nullptr;
+        auto result = this->search_node(node,
+                                        vl,
+                                        search_param,
+                                        query,
+                                        base_codes_,
+                                        ctx,
+                                        parsed_param.subindex_ef_search,
+                                        candidates);
+        if (candidates != nullptr and not candidates->empty()) {
+            std::lock_guard lock(rabitq_lower_bound_mutex);
+            rabitq_lower_bound_candidates.insert(
+                rabitq_lower_bound_candidates.end(), candidates->begin(), candidates->end());
+        }
+        return result;
     };
 
     std::string hierarchy_name =
         parsed_param.hierarchies.empty() ? "" : parsed_param.hierarchies[0];
-    auto result = this->search_impl(query, search_func, search_param, ctx, hierarchy_name);
+    auto result =
+        this->search_impl(query,
+                          search_func,
+                          search_param,
+                          ctx,
+                          hierarchy_name,
+                          collect_rabitq_lower_bounds ? &rabitq_lower_bound_candidates : nullptr);
     result->Statistics(stats.Dump());
     return result;
 }
@@ -444,7 +506,8 @@ Pyramid::search_impl(const DatasetPtr& query,
                      const SearchFunc& search_func,
                      InnerSearchParam& search_param,
                      QueryContext& ctx,
-                     const std::string& hierarchy_name) const {
+                     const std::string& hierarchy_name,
+                     const DistanceRecordVector* rabitq_lower_bound_candidates) const {
     auto h_iter = hierarchies_.find(hierarchy_name);
     CHECK_ARGUMENT(h_iter != hierarchies_.end(),
                    fmt::format("unknown hierarchy name: '{}'", hierarchy_name));
@@ -472,8 +535,12 @@ Pyramid::search_impl(const DatasetPtr& query,
     pool_->ReturnOne(vl);
 
     if (use_reorder_) {
-        search_result = this->reorder_->Reorder(
-            search_result, query->GetFloat32Vectors(), search_param.topk, ctx);
+        search_result = this->reorder_->Reorder(search_result,
+                                                query->GetFloat32Vectors(),
+                                                search_param.topk,
+                                                ctx,
+                                                nullptr,
+                                                rabitq_lower_bound_candidates);
     }
 
     if (search_result->Empty()) {
@@ -879,7 +946,7 @@ Pyramid::Add(const DatasetPtr& base) {
         if (new_capacity > max_capacity_) {
             base_storage_resized = new_capacity > static_cast<int64_t>(base_codes_->max_capacity_);
             precise_storage_resized =
-                not use_reorder_ ||
+                not has_precise_reorder() ||
                 new_capacity > static_cast<int64_t>(precise_codes_->max_capacity_);
             resize(new_capacity);
         }
@@ -897,13 +964,17 @@ Pyramid::Add(const DatasetPtr& base) {
             }
         }
 
+        if (local_cur_element_count == 0 and not data_biases.empty()) {
+            this->Train(base);
+        }
+
         const auto encode_range = [this, data_vectors, local_cur_element_count, &data_biases](
                                       uint64_t begin, uint64_t end) {
             for (uint64_t offset = begin; offset < end; ++offset) {
                 const auto* vector = data_vectors + dim_ * data_biases[offset];
                 const auto inner_id = static_cast<InnerIdType>(local_cur_element_count + offset);
                 base_codes_->InsertVector(vector, inner_id);
-                if (use_reorder_) {
+                if (has_precise_reorder()) {
                     precise_codes_->InsertVector(vector, inner_id);
                 }
             }
@@ -917,7 +988,7 @@ Pyramid::Add(const DatasetPtr& base) {
         const bool use_parallel_encode =
             local_cur_element_count == 0 && thread_pool_ != nullptr && build_thread_count_ > 1 &&
             data_biases.size() > 1 && supports_parallel_encode(base_codes_) &&
-            (not use_reorder_ || supports_parallel_encode(precise_codes_)) &&
+            (not has_precise_reorder() || supports_parallel_encode(precise_codes_)) &&
             base_storage_resized && precise_storage_resized;
         if (use_parallel_encode) {
             const uint64_t worker_count =
@@ -1425,7 +1496,8 @@ Pyramid::search_node(const IndexNode* node,
                      const DatasetPtr& query,
                      const FlattenInterfacePtr& codes,
                      QueryContext& ctx,
-                     uint64_t subindex_ef_search) const {
+                     uint64_t subindex_ef_search,
+                     DistanceRecordVector* rabitq_lower_bound_candidates) const {
     std::shared_lock lock(node->mutex_);
     DistHeapPtr results = nullptr;
 
@@ -1478,7 +1550,8 @@ Pyramid::search_node(const IndexNode* node,
                                     query->GetFloat32Vectors(),
                                     modified_param,
                                     label_table_,
-                                    &ctx);
+                                    &ctx,
+                                    rabitq_lower_bound_candidates);
     }
 
     return results;

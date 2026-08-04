@@ -71,21 +71,32 @@ ODescent::Build(const Vector<InnerIdType>& ids_sequence, const GraphInterfacePtr
 
 void
 ODescent::prepare_build_flatten() {
-    if (this->build_flatten_interface_ != nullptr or this->build_vectors_ == nullptr or
-        this->build_vector_count_ <= 0 or
-        this->flatten_interface_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_RABITQ) {
+    if (this->build_flatten_interface_ != nullptr) {
         return;
+    }
+
+    this->build_flatten_interface_ = CreateBuildFlatten(
+        this->flatten_interface_, this->build_vectors_, this->build_vector_count_);
+}
+
+FlattenInterfacePtr
+ODescent::CreateBuildFlatten(const FlattenInterfacePtr& flatten_interface,
+                             const float* build_vectors,
+                             int64_t build_vector_count) {
+    if (build_vectors == nullptr or build_vector_count <= 0 or
+        not flatten_interface->SupportSplitCodeStorage()) {
+        return nullptr;
     }
 
     auto sq8_param = std::make_shared<FlattenDataCellParameter>();
     sq8_param->quantizer_parameter = std::make_shared<ScalarQuantizerParameter<8>>();
     sq8_param->io_parameter = std::make_shared<MemoryIOParameter>();
 
-    auto common_param = this->flatten_interface_->ExportCommonParam();
-    this->build_flatten_interface_ = FlattenInterface::MakeInstance(sq8_param, common_param);
-    this->build_flatten_interface_->Train(this->build_vectors_, this->build_vector_count_);
-    this->build_flatten_interface_->BatchInsertVector(this->build_vectors_,
-                                                      this->build_vector_count_);
+    auto common_param = flatten_interface->ExportCommonParam();
+    auto build_flatten = FlattenInterface::MakeInstance(sq8_param, common_param);
+    build_flatten->Train(build_vectors, build_vector_count);
+    build_flatten->BatchInsertVector(build_vectors, build_vector_count);
+    return build_flatten;
 }
 
 void
