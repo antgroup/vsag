@@ -1912,6 +1912,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     REQUIRE(result.value()->GetDim() == 1);
     REQUIRE(result.value()->GetIds()[0] == 20);
     REQUIRE(result.value()->GetDistances()[0] == 1.0F);
+}
+
 class AllowEveryFourthLabelFilter : public vsag::Filter {
 public:
     bool
