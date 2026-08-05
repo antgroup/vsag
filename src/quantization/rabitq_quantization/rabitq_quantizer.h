@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <cstdint>
+#include <cstring>
 #include <limits>
 #include <string>
 
@@ -25,6 +27,20 @@
 #include "rabitq_quantizer_parameter.h"
 
 namespace vsag {
+
+[[nodiscard]] inline bool
+IsFiniteRaBitQValue(float value) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    constexpr uint32_t k_exponent_mask = 0x7F800000U;
+    return (bits & k_exponent_mask) != k_exponent_mask;
+}
+
+enum class RaBitQFusedIPPrecision : uint8_t {
+    INVALID = 0,
+    EXACT = 1,
+    APPROXIMATE = 2,
+};
 
 /** Implement of RaBitQ Quantization, Integrate MRQ (Minimized Residual Quantization) and Extend-RaBitQ
  *
@@ -71,6 +87,9 @@ public:
     bool
     TrainImpl(const float* data, uint64_t count);
 
+    void
+    SetCentroid(const float* centroid);
+
     bool
     EncodeOneImpl(const float* data, uint8_t* codes) const;
 
@@ -91,6 +110,112 @@ public:
 
     void
     ProcessQueryImpl(const float* query, Computer<RaBitQuantizer>& computer) const;
+
+    void
+    TransformFusedQuery(const float* query,
+                        Vector<float>& transformed_query,
+                        float& query_raw_norm,
+                        norm_type& mrq_norm_sqr) const;
+
+    void
+    ProcessTransformedFusedQuery(const float* transformed_query,
+                                 float query_raw_norm,
+                                 norm_type mrq_norm_sqr,
+                                 Computer<RaBitQuantizer>& computer) const;
+
+    // RaBitQ-Library HNSW-compatible fused traversal helpers. These intentionally
+    // quantize the rotated query once, without subtracting a cluster centroid.
+    void
+    PrepareHnswFourBitQuery(const float* transformed_query,
+                            Vector<uint8_t>& query_planes,
+                            float& delta,
+                            float& vl,
+                            float& query_sum) const;
+
+    void
+    EncodeHnswOneBitMetadata(const float* data, uint8_t* one_bit_code) const;
+
+    bool
+    EncodeHnswSupplement(const float* data, uint8_t* supplement_code) const;
+
+    void
+    ComputeHnswCentroidTerms(const float* transformed_query, float& g_add, float& g_error) const;
+
+    bool
+    ComputeHnswOneBit(
+        const uint8_t* query_planes,
+        float query_delta,
+        float query_vl,
+        float query_sum,
+        float g_add,
+        float g_error,
+        const uint8_t* one_bit_code,
+        const uint8_t* supplement_code,
+        float* distance,
+        float* lower_bound,
+        float* filter_inner_product,
+        float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN()) const;
+
+    bool
+    ComputeHnswFull(const float* transformed_query,
+                    float query_sum,
+                    float g_add,
+                    float g_error,
+                    const uint8_t* one_bit_code,
+                    const uint8_t* supplement_code,
+                    float filter_inner_product,
+                    float* distance,
+                    float* lower_bound) const;
+
+    // Replaces the native split metadata in-place with fused affine coefficients.
+    // The x/y plane payload and the record sizes are unchanged.
+    bool
+    EncodeFusedAffineMetadata(const float* data,
+                              uint8_t* one_bit_code,
+                              uint8_t* supplement_code) const;
+
+    bool
+    DecodeFusedSplitCode(const uint8_t* one_bit_code,
+                         const uint8_t* supplement_code,
+                         bool legacy_hnsw_codec,
+                         float* data) const;
+
+    bool
+    ComputeFusedAffineFilter(const float* transformed_query,
+                             const uint8_t* query_planes,
+                             float query_delta,
+                             float query_vl,
+                             float query_sum,
+                             float g_add,
+                             float g_error,
+                             const uint8_t* one_bit_code,
+                             float runtime_rabitq_error_rate,
+                             float* distance,
+                             float* lower_bound,
+                             float* centered_filter_inner_product,
+                             RaBitQFusedIPPrecision* precision) const;
+
+    bool
+    ComputeFusedAffineFullWithFilterIP(const float* transformed_query,
+                                       float query_sum,
+                                       float g_add,
+                                       const uint8_t* one_bit_code,
+                                       const uint8_t* supplement_code,
+                                       float exact_centered_filter_inner_product,
+                                       float* distance) const;
+
+    bool
+    ComputeFusedAffineFullDirect(const float* transformed_query,
+                                 float query_sum,
+                                 float g_add,
+                                 const uint8_t* one_bit_code,
+                                 const uint8_t* supplement_code,
+                                 float* distance) const;
+
+    [[nodiscard]] float
+    DefaultRaBitQErrorRate() const {
+        return rabitq_error_rate_;
+    }
 
     void
     ComputeDistImpl(Computer<RaBitQuantizer>& computer, const uint8_t* codes, float* dists) const;
@@ -235,6 +360,19 @@ public:
         float* lower_bound,
         float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN()) const;
 
+    // Same coarse x-bit estimate as ComputeDistWithOneBitLowerBound(). When the
+    // filter-stage inner product is exact, it is returned for direct split
+    // reranking. The x=1 four-bit traversal estimate is approximate, so that
+    // mode returns NaN and requires the full path to rescan the x-bit code.
+    bool
+    ComputeDistWithOneBitLowerBoundAndFilterIP(
+        Computer<RaBitQuantizer>& computer,
+        const uint8_t* one_bit_code,
+        float* dists,
+        float* lower_bound,
+        float* filter_inner_product,
+        float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN()) const;
+
     void
     ComputeDistsWithOneBitLowerBoundBatch4(
         Computer<RaBitQuantizer>& computer,
@@ -263,16 +401,24 @@ public:
                              float* dists) const;
 
     // Computes the full x+y split distance while reusing the filter-stage distance.
-    // `filter_dist` is the x-bit distance already produced by
+    // `filter_dist` is the exact x-bit distance already produced by
     // ComputeDistWithOneBitLowerBound(); it is not a lower bound and not the final
     // x+y distance. Passing it here lets the reorder path scan only the y-bit
-    // supplement planes instead of rescanning the x-bit filter planes.
+    // supplement planes instead of rescanning the x-bit filter planes. The
+    // x=1 four-bit traversal estimate is rejected because it is approximate.
     bool
     ComputeDistWithSplitCodeAndFilterDist(Computer<RaBitQuantizer>& computer,
                                           const uint8_t* one_bit_code,
                                           const uint8_t* supplement_code,
                                           float filter_dist,
                                           float* dists) const;
+
+    bool
+    ComputeDistWithSplitCodeAndFilterIP(Computer<RaBitQuantizer>& computer,
+                                        const uint8_t* one_bit_code,
+                                        const uint8_t* supplement_code,
+                                        float filter_inner_product,
+                                        float* dists) const;
 
     [[nodiscard]] uint64_t
     OneBitRecordNormOffset() const;
@@ -325,7 +471,19 @@ public:
     [[nodiscard]] uint64_t
     AlignCodeField(uint64_t size) const;
 
+    [[nodiscard]] bool
+    HasFourBitTraversalQuery(const Computer<RaBitQuantizer>& computer) const;
+
 private:
+    bool
+    ComputeFusedExactCenteredFilterIP(const float* transformed_query,
+                                      const uint8_t* one_bit_code,
+                                      float* centered_filter_inner_product) const;
+
+    void
+    PrepareFourBitTraversalQuery(const float* normalized_query,
+                                 Computer<RaBitQuantizer>& computer) const;
+
     bool
     EncodeOneInternal(const float* data,
                       uint8_t* codes,

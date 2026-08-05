@@ -32,6 +32,7 @@ struct QueryContext {
     SearchStatistics* stats = nullptr;
     ReasoningContext* reasoning_ctx = nullptr;
     float rabitq_error_rate = std::numeric_limits<float>::quiet_NaN();
+    bool enable_rabitq_reorder = true;
 };
 
 class SearchStatistics {

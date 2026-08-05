@@ -31,7 +31,7 @@ public:
             int64_t topk,
             QueryContext& ctx,
             IteratorFilterContext* iter_ctx = nullptr,
-            const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) = 0;
+            const RaBitQCandidateVector* rabitq_lower_bound_candidates = nullptr) = 0;
 };
 
 }  // namespace vsag

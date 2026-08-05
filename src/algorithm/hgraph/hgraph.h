@@ -56,6 +56,8 @@
 
 namespace vsag {
 class FlattenOptimizedBuildInterface;
+class HGraphRaBitQFusedDataCell;
+class HGraphRaBitQSearcher;
 class HGraphOptimizedBuildSession;
 class IteratorFilterContext;
 
@@ -250,6 +252,9 @@ public:
     void
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override;
 
+    bool
+    UpdateId(int64_t old_id, int64_t new_id) override;
+
     void
     UpdateAttribute(int64_t id,
                     const AttributeSet& new_attrs,
@@ -337,6 +342,12 @@ public:
     void
     insert_persistent_codes_to_slot(const void* data, CodeSlotIdType code_slot_id);
 
+    void
+    sync_fused_node_codes(InnerIdType inner_id, const void* data);
+
+    void
+    restore_fused_codec();
+
     /// Ensure physical code storage can hold required_capacity physical slots.
     void
     ensure_physical_code_capacity(CodeSlotIdType required_capacity);
@@ -363,7 +374,8 @@ public:
                      InnerSearchParam& inner_search_param,
                      const VisitedListPtr& vt,
                      QueryContext* ctx,
-                     DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+                     RaBitQCandidateVector* rabitq_lower_bound_candidates = nullptr,
+                     bool* fused_search_finalized = nullptr) const;
 
     /// Overload that accepts an IteratorFilterContext for iterative search.
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
@@ -375,7 +387,7 @@ public:
                      IteratorFilterContext* iter_ctx,
                      // ctx can be nullptr in adding scenario
                      QueryContext* ctx,
-                     DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+                     RaBitQCandidateVector* rabitq_lower_bound_candidates = nullptr) const;
 
 private:
     [[nodiscard]] std::shared_lock<std::shared_mutex>
@@ -467,6 +479,9 @@ private:
 
     void
     validate_add_data(const DatasetPtr& data) const;
+
+    void
+    validate_fused_vector_data(const float* data, uint64_t count) const;
 
     AddContext
     prepare_add_context(const DatasetPtr& data);
@@ -634,7 +649,7 @@ private:
             int64_t k,
             IteratorFilterContext* iter_ctx,
             QueryContext& ctx,
-            const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+            const RaBitQCandidateVector* rabitq_lower_bound_candidates = nullptr) const;
 
     /// Run ELP (Edge-Link Pruning) optimizer on the bottom graph.
     void
@@ -837,6 +852,8 @@ private:
 
     Vector<GraphInterfacePtr> route_graphs_;   // upper-layer route graphs
     GraphInterfacePtr bottom_graph_{nullptr};  // base-level graph (all vectors)
+    std::shared_ptr<HGraphRaBitQFusedDataCell> rabitq_fused_datacell_{nullptr};
+    std::shared_ptr<HGraphRaBitQSearcher> rabitq_fused_searcher_{nullptr};
     SparseGraphDatacellParamPtr hierarchical_datacell_param_{nullptr};  // params for route graphs
 
     bool use_elp_optimizer_{false};  // enable ELP edge-link pruning
