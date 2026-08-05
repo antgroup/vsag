@@ -63,6 +63,7 @@ public:
     float first_order_scan_ratio{1.0F};
     std::optional<float> distance_threshold{std::nullopt};
     std::vector<ExecutorPtr> executors;
+    std::vector<int64_t> bucket_ids;
 
     // deal with duplicate ids
     mutable int64_t duplicate_id{-1};

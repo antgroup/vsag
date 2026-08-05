@@ -2339,3 +2339,154 @@ TEST_CASE("IVF GraphBucketSearcher Without Graph", "[ft][ivf][graph]") {
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() > 0);
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF SearchWithRequest Bucket IDs Bypass",
+                             "[ft][ivf][pr]") {
+    constexpr auto dim = 32;
+    constexpr auto buckets_count = 10;
+    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(dim, 200, "l2");
+    std::vector<float> query_vector(dataset->base_->GetFloat32Vectors(),
+                                    dataset->base_->GetFloat32Vectors() + dim);
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
+
+    auto param = IVFTestIndex::GenerateIVFBuildParametersString("l2", dim, "fp32", buckets_count);
+    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto search_param = fmt::format(R"({{"ivf":{{"scan_buckets_count":3}}}})");
+    auto search_param_all = fmt::format(R"({{"ivf":{{"scan_buckets_count":{}}}}})", buckets_count);
+
+    SECTION("bucket_ids bypass returns results from specified buckets") {
+        // Verify bypass with ALL buckets produces identical results to default routing
+        // scanning all buckets, proving the bypass path actually works
+        std::vector<int64_t> all_bucket_ids;
+        for (int64_t i = 0; i < buckets_count; ++i) {
+            all_bucket_ids.push_back(i);
+        }
+        vsag::SearchRequest request_bypass_all;
+        request_bypass_all.query_ = query;
+        request_bypass_all.topk_ = 10;
+        request_bypass_all.params_str_ = search_param_all;
+        request_bypass_all.bucket_ids_ = {all_bucket_ids};
+        auto result_bypass_all = index->SearchWithRequest(request_bypass_all);
+        REQUIRE(result_bypass_all.has_value());
+
+        vsag::SearchRequest request_default_all;
+        request_default_all.query_ = query;
+        request_default_all.topk_ = 10;
+        request_default_all.params_str_ = search_param_all;
+        auto result_default_all = index->SearchWithRequest(request_default_all);
+        REQUIRE(result_default_all.has_value());
+
+        REQUIRE(result_bypass_all.value()->GetDim() == result_default_all.value()->GetDim());
+        const auto* bypass_ids = result_bypass_all.value()->GetIds();
+        const auto* default_ids = result_default_all.value()->GetIds();
+        const auto* bypass_dists = result_bypass_all.value()->GetDistances();
+        const auto* default_dists = result_default_all.value()->GetDistances();
+        for (int64_t i = 0; i < result_bypass_all.value()->GetDim(); ++i) {
+            REQUIRE(bypass_ids[i] == default_ids[i]);
+            REQUIRE(bypass_dists[i] == default_dists[i]);
+        }
+    }
+
+    SECTION("empty bucket_ids behaves as default routing") {
+        vsag::SearchRequest request;
+        request.query_ = query;
+        request.topk_ = 10;
+        request.params_str_ = search_param;
+        auto result_default = index->SearchWithRequest(request);
+        REQUIRE(result_default.has_value());
+
+        request.bucket_ids_ = {};
+        auto result_empty = index->SearchWithRequest(request);
+        REQUIRE(result_empty.has_value());
+        REQUIRE(result_default.value()->GetDim() == result_empty.value()->GetDim());
+        const auto* default_ids = result_default.value()->GetIds();
+        const auto* empty_ids = result_empty.value()->GetIds();
+        const auto* default_dists = result_default.value()->GetDistances();
+        const auto* empty_dists = result_empty.value()->GetDistances();
+        for (int64_t i = 0; i < result_default.value()->GetDim(); ++i) {
+            REQUIRE(default_ids[i] == empty_ids[i]);
+            REQUIRE(default_dists[i] == empty_dists[i]);
+        }
+    }
+
+    SECTION("single bucket returns subset of results") {
+        vsag::SearchRequest request_all;
+        request_all.query_ = query;
+        request_all.topk_ = 10;
+        request_all.params_str_ = search_param_all;
+        auto result_all = index->SearchWithRequest(request_all);
+        REQUIRE(result_all.has_value());
+
+        vsag::SearchRequest request_one;
+        request_one.query_ = query;
+        request_one.topk_ = 10;
+        request_one.params_str_ = search_param;
+        request_one.bucket_ids_ = {{0}};
+        auto result_one = index->SearchWithRequest(request_one);
+        REQUIRE(result_one.has_value());
+        REQUIRE(result_one.value()->GetDim() <= result_all.value()->GetDim());
+    }
+
+    SECTION("reject invalid bucket id") {
+        vsag::SearchRequest request;
+        request.query_ = query;
+        request.topk_ = 10;
+        request.params_str_ = search_param;
+        request.bucket_ids_ = {{static_cast<int64_t>(buckets_count + 100)}};
+        auto result = index->SearchWithRequest(request);
+        REQUIRE_FALSE(result.has_value());
+    }
+
+    SECTION("reject negative bucket id") {
+        vsag::SearchRequest request;
+        request.query_ = query;
+        request.topk_ = 10;
+        request.params_str_ = search_param;
+        request.bucket_ids_ = {{-1}};
+        auto result = index->SearchWithRequest(request);
+        REQUIRE_FALSE(result.has_value());
+    }
+
+    SECTION("reject empty inner vector") {
+        vsag::SearchRequest request;
+        request.query_ = query;
+        request.topk_ = 10;
+        request.params_str_ = search_param;
+        request.bucket_ids_ = {{}};
+        auto result = index->SearchWithRequest(request);
+        REQUIRE_FALSE(result.has_value());
+    }
+
+    SECTION("reject multiple query entries") {
+        vsag::SearchRequest request;
+        request.query_ = query;
+        request.topk_ = 10;
+        request.params_str_ = search_param;
+        request.bucket_ids_ = {{0}, {1}};
+        auto result = index->SearchWithRequest(request);
+        REQUIRE_FALSE(result.has_value());
+    }
+
+    SECTION("reject duplicate bucket ids") {
+        vsag::SearchRequest request;
+        request.query_ = query;
+        request.topk_ = 10;
+        request.params_str_ = search_param;
+        request.bucket_ids_ = {{0, 0}};
+        auto result = index->SearchWithRequest(request);
+        REQUIRE_FALSE(result.has_value());
+    }
+    SECTION("reject bucket_ids with disable_bucket_scan") {
+        vsag::SearchRequest request;
+        request.query_ = query;
+        request.topk_ = 10;
+        request.params_str_ = R"({"ivf":{"scan_buckets_count":3,"disable_bucket_scan":true}})";
+        request.bucket_ids_ = {{0}};
+        auto result = index->SearchWithRequest(request);
+        REQUIRE_FALSE(result.has_value());
+    }
+}

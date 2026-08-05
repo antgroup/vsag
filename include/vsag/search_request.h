@@ -215,6 +215,15 @@ public:
      *          preserves the default KNN behavior.
      */
     std::optional<float> threshold_{std::nullopt};
+
+    /**
+     * @brief Pre-selected bucket IDs for bypassing IVF bucket routing (ClassifyDatasForSearch)
+     * @details Currently only single-query is supported; outer vector must contain exactly one entry.
+     *          Inner vector contains ordered bucket IDs (caller is responsible for ordering).
+     *          When non-empty with at least one ID, skips ClassifyDatasForSearch and searches only
+     *          the specified buckets. Empty means "use default bucket routing".
+     */
+    std::vector<std::vector<int64_t>> bucket_ids_{};
 };
 
 }  // namespace vsag

@@ -1486,8 +1486,15 @@ IVF::search(const DatasetPtr& query,
             ReasoningContext* reasoning_ctx) const {
     const auto* query_data = query->GetFloat32Vectors();
     Vector<float> normalize_data(dim_, allocator_);
-    auto candidate_buckets =
-        partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, &ctx);
+    Vector<BucketIdType> candidate_buckets(allocator_);
+    if (not param.bucket_ids.empty()) {
+        candidate_buckets.reserve(param.bucket_ids.size());
+        for (auto id : param.bucket_ids) {
+            candidate_buckets.push_back(static_cast<BucketIdType>(id));
+        }
+    } else {
+        candidate_buckets = partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, &ctx);
+    }
     if (reasoning_ctx != nullptr) {
         reasoning_ctx->RecordBucketSelection(candidate_buckets);
     }
@@ -1615,8 +1622,15 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
                                  QueryContext& ctx,
                                  ReasoningContext* reasoning_ctx) const {
     const auto* query_data = query->GetFloat32Vectors();
-    auto candidate_buckets =
-        partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, &ctx);
+    Vector<BucketIdType> candidate_buckets(allocator_);
+    if (not param.bucket_ids.empty()) {
+        candidate_buckets.reserve(param.bucket_ids.size());
+        for (auto id : param.bucket_ids) {
+            candidate_buckets.push_back(static_cast<BucketIdType>(id));
+        }
+    } else {
+        candidate_buckets = partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, &ctx);
+    }
     if (reasoning_ctx != nullptr) {
         reasoning_ctx->RecordBucketSelection(candidate_buckets);
     }
@@ -1827,6 +1841,41 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         CHECK_ARGUMENT(param.parallel_search_thread_count == 1,
                        "IVF custom query distance does not support parallel search");
         param.enable_reorder = false;
+    }
+
+    if (not request.bucket_ids_.empty()) {
+        CHECK_ARGUMENT(request.bucket_ids_.size() == 1,
+                       fmt::format("bucket_ids_ currently supports only single-query mode; "
+                                   "expected size 1, got {}",
+                                   request.bucket_ids_.size()));
+        const auto& ids = request.bucket_ids_[0];
+        CHECK_ARGUMENT(not ids.empty(),
+                       "bucket_ids_[0] must not be empty; "
+                       "use empty outer vector for default routing");
+        std::set<int64_t> seen_ids;
+        param.bucket_ids.reserve(ids.size());
+        for (auto id : ids) {
+            CHECK_ARGUMENT(
+                id >= 0,
+                fmt::format("bucket_id {} out of range [0, {})", id, this->bucket_->bucket_count_));
+            CHECK_ARGUMENT(
+                id < static_cast<int64_t>(this->bucket_->bucket_count_),
+                fmt::format("bucket_id {} out of range [0, {})", id, this->bucket_->bucket_count_));
+            CHECK_ARGUMENT(seen_ids.insert(id).second, fmt::format("duplicate bucket_id {}", id));
+            param.bucket_ids.push_back(id);
+        }
+        auto query_check = request.query_;
+        CHECK_ARGUMENT(query_check != nullptr, "query dataset cannot be null");
+        CHECK_ARGUMENT(query_check->GetNumElements() == 1,
+                       fmt::format("bucket_ids_ currently supports only single-query mode; "
+                                   "expected 1 query, got {}",
+                                   query_check->GetNumElements()));
+        CHECK_ARGUMENT(query_check->GetFloat32Vectors() != nullptr,
+                       "query float32 vectors cannot be null");
+        CHECK_ARGUMENT(query_check->GetDim() == this->dim_,
+                       "query dimension must match index dimension");
+        CHECK_ARGUMENT(not param.disable_bucket_scan,
+                       "bucket_ids_ is incompatible with disable_bucket_scan mode");
     }
 
     auto query = request.query_;

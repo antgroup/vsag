@@ -88,6 +88,27 @@ result `Dataset` instead of vector labels. `NumElements()` equals the number of 
 slots), and `GetDistances()` has distances to bucket centroids. No vector scan is performed,
 so filters, `topk`, range limits, reordering, and reasoning options are ignored.
 
+### IVF bucket IDs bypass
+
+The `bucket_ids_` field allows callers to provide pre-selected bucket IDs, bypassing IVF's
+internal bucket routing (`ClassifyDatasForSearch`). When non-empty, the search skips centroid-based
+selection and scans only the specified buckets.
+
+| Field | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `bucket_ids_` | `std::vector<std::vector<int64_t>>` | `{}` | Pre-selected bucket IDs for bypassing IVF routing. |
+
+**Semantics:**
+- **Empty** (default): Use normal bucket routing via `ClassifyDatasForSearch`.
+- **Non-empty**: Skip routing and scan only the provided bucket IDs.
+
+**Constraints:**
+- Currently only single-query is supported; the outer vector must contain exactly one entry.
+- Each bucket ID must be in range `[0, bucket_count)`.
+- Duplicate bucket IDs are rejected.
+- Incompatible with `disable_bucket_scan` mode.
+- Caller is responsible for ordering bucket IDs (no automatic sorting).
+
 ### Filtering fields
 
 Three filtering mechanisms are available and are combined with logical **AND** when more than one is

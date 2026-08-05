@@ -15,6 +15,7 @@
 #pragma once
 
 #include <nlohmann/json.hpp>
+#include <set>
 
 #include "algorithm/inner_index_interface.h"
 #include "common.h"
@@ -497,6 +498,44 @@ public:
 
     [[nodiscard]] tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const override {
+        // Validate bucket_ids_ structural constraints before empty-index early return
+        if (not request.bucket_ids_.empty()) {
+            if (request.bucket_ids_.size() != 1) {
+                return tl::unexpected(Error(
+                    ErrorType::INVALID_ARGUMENT,
+                    "bucket_ids_ currently supports only single-query mode; expected size 1, got " +
+                        std::to_string(request.bucket_ids_.size())));
+            }
+            const auto& ids = request.bucket_ids_[0];
+            if (ids.empty()) {
+                return tl::unexpected(Error(ErrorType::INVALID_ARGUMENT,
+                                            "bucket_ids_[0] must not be empty; use empty outer "
+                                            "vector for default routing"));
+            }
+            std::set<int64_t> seen_ids;
+            for (auto id : ids) {
+                if (id < 0) {
+                    return tl::unexpected(
+                        Error(ErrorType::INVALID_ARGUMENT,
+                              "bucket_id " + std::to_string(id) + " is negative"));
+                }
+                if (not seen_ids.insert(id).second) {
+                    return tl::unexpected(Error(ErrorType::INVALID_ARGUMENT,
+                                                "duplicate bucket_id " + std::to_string(id)));
+                }
+            }
+            try {
+                auto json_params = nlohmann::json::parse(request.params_str_);
+                if (json_params.contains("ivf") and
+                    json_params["ivf"].contains("disable_bucket_scan") and
+                    json_params["ivf"]["disable_bucket_scan"].get<bool>()) {
+                    return tl::unexpected(
+                        Error(ErrorType::INVALID_ARGUMENT,
+                              "bucket_ids_ is incompatible with disable_bucket_scan mode"));
+                }
+            } catch (const nlohmann::json::exception&) {
+            }
+        }
         SAFE_CALL(ValidateSearchThreshold(request.threshold_);
                   if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(request.params_str_)) {
                       return DatasetImpl::MakeEmptyDataset();
@@ -600,7 +639,7 @@ private:
             return params_json.contains("ivf") &&
                    params_json["ivf"].contains("disable_bucket_scan") &&
                    params_json["ivf"]["disable_bucket_scan"].get<bool>();
-        } catch (...) {
+        } catch (const nlohmann::json::exception&) {
             return false;
         }
     }
