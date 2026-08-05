@@ -245,6 +245,12 @@ CheckBucketPreciseIndex(const TestIndex::IndexPtr& index,
     REQUIRE(result.value()->GetIds()[0] == dataset->base_->GetIds()[query_id]);
     REQUIRE(std::abs(result.value()->GetDistances()[0]) < 2e-6F);
 
+    auto threshold_search_param = nlohmann::json::parse(search_param);
+    threshold_search_param["threshold"] = -1.0F;
+    auto threshold_result = index->KnnSearch(query, 1, threshold_search_param.dump());
+    REQUIRE(threshold_result.has_value());
+    REQUIRE(threshold_result.value()->GetDim() == 0);
+
     auto distance =
         index->CalcDistanceById(query->GetFloat32Vectors(), dataset->base_->GetIds()[query_id]);
     REQUIRE(distance.has_value());
