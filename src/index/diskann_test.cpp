@@ -40,6 +40,15 @@ parse_diskann_params(vsag::IndexCommonParam index_common_param) {
     return vsag::DiskannParameters::FromJson(parsed_params, index_common_param);
 }
 
+uint64_t
+get_diskann_artifact_size(const vsag::BinarySet& binary_set) {
+    return binary_set.Get(vsag::DISKANN_PQ).size +
+           binary_set.Get(vsag::DISKANN_COMPRESSED_VECTOR).size +
+           binary_set.Get(vsag::DISKANN_LAYOUT_FILE).size +
+           binary_set.Get(vsag::DISKANN_TAG_FILE).size +
+           binary_set.Get(vsag::DISKANN_GRAPH).size;
+}
+
 TEST_CASE("diskann build", "[ut][diskann]") {
     vsag::logger::set_level(vsag::logger::level::debug);
     vsag::IndexCommonParam common_param;
@@ -449,6 +458,49 @@ TEST_CASE("deserialize on not empty index", "[ut][diskann]") {
     auto voidresult = index->Deserialize(binary_set.value());
     REQUIRE_FALSE(voidresult.has_value());
     REQUIRE(voidresult.error().type == vsag::ErrorType::INDEX_NOT_EMPTY);
+}
+
+TEST_CASE("diskann memory usage accounts cached artifacts", "[ut][diskann]") {
+    vsag::logger::set_level(vsag::logger::level::debug);
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    vsag::DiskannParameters diskann_obj = parse_diskann_params(common_param);
+    diskann_obj.metric = diskann::Metric::L2;
+    diskann_obj.pq_sample_rate = 1.0f;
+    diskann_obj.pq_dims = 16;
+    diskann_obj.max_degree = 12;
+    diskann_obj.ef_construction = 100;
+    diskann_obj.use_bsa = false;
+    diskann_obj.use_reference = false;
+    diskann_obj.use_preload = true;
+
+    auto index = std::make_shared<vsag::DiskANN>(diskann_obj, common_param);
+
+    int64_t num_elements = 100;
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, common_param.dim_);
+
+    auto dataset = vsag::Dataset::Make();
+    dataset->Dim(common_param.dim_)
+        ->NumElements(num_elements)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    auto result = index->Build(dataset);
+    REQUIRE(result.has_value());
+
+    auto binary_set = index->Serialize();
+    REQUIRE(binary_set.has_value());
+
+    const auto artifact_size = get_diskann_artifact_size(binary_set.value());
+    REQUIRE(artifact_size > 0);
+    REQUIRE(index->GetMemoryUsage() >= artifact_size);
+
+    auto restored_index = std::make_shared<vsag::DiskANN>(diskann_obj, common_param);
+    auto deserialize_result = restored_index->Deserialize(binary_set.value());
+    REQUIRE(deserialize_result.has_value());
+    REQUIRE(restored_index->GetMemoryUsage() >= artifact_size);
 }
 
 TEST_CASE("split building process", "[ut][diskann]") {

@@ -177,16 +177,7 @@ public:
     }
 
     uint64_t
-    GetMemoryUsage() const override {
-        if (status_ == MEMORY) {
-            return index_->get_memory_usage() + disk_pq_compressed_vectors_.str().size() +
-                   pq_pivots_stream_.str().size() + disk_layout_stream_.str().size() +
-                   tag_stream_.str().size() + graph_stream_.str().size();
-        } else if (status_ == HYBRID) {
-            return index_->get_memory_usage();
-        }
-        return 0;
-    }
+    GetMemoryUsage() const override;
 
     uint64_t
     EstimateBuildMemory(uint64_t num_elements) const override;
@@ -277,6 +268,11 @@ private:
     std::stringstream disk_layout_stream_;
     std::stringstream tag_stream_;
     std::stringstream graph_stream_;
+    uint64_t pq_pivots_stream_size_ = 0;
+    uint64_t disk_pq_compressed_vectors_size_ = 0;
+    uint64_t disk_layout_stream_size_ = 0;
+    uint64_t tag_stream_size_ = 0;
+    uint64_t graph_stream_size_ = 0;
 
     const IndexCommonParam index_common_param_;
 
