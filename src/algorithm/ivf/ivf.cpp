@@ -1560,11 +1560,10 @@ IVF::reorder(int64_t topk,
              QueryContext& ctx,
              ReasoningContext* reasoning_ctx,
              const std::optional<float>& distance_threshold) const {
-    auto reorder_heap = precise_bucket_ != nullptr
-                            ? this->reorder_with_precise_bucket(
-                                  input, query, topk, ctx, distance_threshold)
-                            : reorder_->Reorder(
-                                  input, query, topk, ctx, nullptr, nullptr, distance_threshold);
+    auto reorder_heap =
+        precise_bucket_ != nullptr
+            ? this->reorder_with_precise_bucket(input, query, topk, ctx, distance_threshold)
+            : reorder_->Reorder(input, query, topk, ctx, nullptr, nullptr, distance_threshold);
     auto dataset_results = this->pack_knn_result(reorder_heap, ctx.alloc);
 
     return dataset_results;
@@ -1611,9 +1610,8 @@ IVF::reorder_with_precise_bucket(const DistHeapPtr& input,
         if (ctx.reasoning_ctx != nullptr) {
             ctx.reasoning_ctx->RecordReorder(inner_id, coarse_distance, precise_distance);
         }
-        if (distance_threshold.has_value() and
-            (not std::isfinite(precise_distance) or
-             precise_distance > distance_threshold.value())) {
+        if (distance_threshold.has_value() and (not std::isfinite(precise_distance) or
+                                                precise_distance > distance_threshold.value())) {
             continue;
         }
         if (reorder_heap->Size() < topk or precise_distance < reorder_heap->Top().first) {
