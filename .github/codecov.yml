@@ -60,7 +60,6 @@ component_management:
       paths:
         - src/index/**
         - src/algorithm/**
-        - extern/diskann/**
     - component_id: module_simd
       name: simd
       paths:

@@ -174,8 +174,6 @@ auto d = index->CalcDistanceById(query, /*id=*/42);
 | pyramid | yes | yes | yes | |
 | lazy_hgraph | yes | no | depends on the active internal index | DatasetPtr batch calls delegate to the active BruteForce/HGraph; availability can change after a phase transition. |
 | sindi | no | yes | yes | Sparse vectors only. |
-| hnsw | yes | no | no | Dense batch supports `topk == -1` only. |
-| diskann | yes | no | no | Dense batch supports `topk == -1` only. |
 
 Indexes that do not implement the API surface for a given overload return an
 `UNSUPPORTED_INDEX_OPERATION` error.

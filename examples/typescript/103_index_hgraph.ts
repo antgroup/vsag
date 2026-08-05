@@ -14,11 +14,9 @@
 
 import { Index } from "vsag";
 
-function hnswTest(): void {
-    /******************* Prepare Base Dataset *****************/
+function hgraphTest(): void {
     const numVectors = 1000;
     const dim = 128;
-
     const ids = new BigInt64Array(numVectors);
     const vectors = new Float32Array(dim * numVectors);
 
@@ -29,56 +27,40 @@ function hnswTest(): void {
         vectors[i] = Math.random();
     }
 
-    /******************* Create HNSW Index *****************/
     const indexParams = JSON.stringify({
         dtype: "float32",
         metric_type: "l2",
-        dim: dim,
-        hnsw: {
+        dim,
+        index_param: {
+            base_quantization_type: "fp32",
             max_degree: 16,
             ef_construction: 100,
+            alpha: 1.2,
         },
     });
 
-    console.log("[Create] hnsw index");
-    const index = new Index("hnsw", indexParams);
-
-    /******************* Build HNSW Index *****************/
-    console.log("[Build] hnsw index");
+    const index = new Index("hgraph", indexParams);
     index.build(vectors, ids, numVectors, dim);
-    console.log(`After build, index contains: ${index.getNumElements()} elements`);
 
-    /******************* KnnSearch For HNSW Index *****************/
     const queryVector = new Float32Array(dim);
     for (let i = 0; i < dim; i++) {
         queryVector[i] = Math.random();
     }
 
-    const searchParams = JSON.stringify({
-        hnsw: {
-            ef_search: 100,
-        },
-    });
-
-    console.log("[Search] hnsw index");
+    const searchParams = JSON.stringify({ hgraph: { ef_search: 100 } });
     const topk = 10;
     const { ids: resultIds, distances } = index.knnSearch(queryVector, topk, searchParams);
 
-    /******************* Print Search Result *****************/
-    console.log("results:");
     for (let i = 0; i < topk; i++) {
-        console.log(`  ${resultIds[i]}: ${distances[i]}`);
+        console.log(`${resultIds[i]}: ${distances[i]}`);
     }
 
-    /******************* Save and Load *****************/
-    const filename = "/tmp/101_index_hnsw_ts.index";
-    console.log(`[Save] index to ${filename}`);
+    const filename = "/tmp/103_index_hgraph_ts.index";
     index.save(filename);
 
-    const newIndex = new Index("hnsw", indexParams);
-    console.log(`[Load] index from ${filename}`);
+    const newIndex = new Index("hgraph", indexParams);
     newIndex.load(filename);
     console.log(`After load, index contains: ${newIndex.getNumElements()} elements`);
 }
 
-hnswTest();
+hgraphTest();

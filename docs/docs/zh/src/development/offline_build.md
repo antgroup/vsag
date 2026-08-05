@@ -63,7 +63,6 @@ ExternalProject_Add (antlr4
 | --- | --- | --- | --- |
 | `VSAG_THIRDPARTY_JSON` | nlohmann/json 3.11.3 | `github.com/nlohmann/json/.../v3.11.3.tar.gz` | 始终 |
 | `VSAG_THIRDPARTY_ANTLR4` | ANTLR4 runtime 4.13.2 | `github.com/antlr/antlr4/.../4.13.2.tar.gz` | 始终 |
-| `VSAG_THIRDPARTY_BOOST` | Boost 1.67.0（头文件） | `archives.boost.io/.../boost_1_67_0.tar.gz` | 始终 |
 | `VSAG_THIRDPARTY_OPENBLAS` | OpenBLAS 0.3.24 | `github.com/OpenMathLib/OpenBLAS/.../OpenBLAS-0.3.24.tar.gz` | 默认 BLAS 后端（未使用系统库 / MKL 时） |
 | `VSAG_THIRDPARTY_CPUINFO` | pytorch/cpuinfo | `github.com/pytorch/cpuinfo/archive/ca678952...tar.gz` | 始终 |
 | `VSAG_THIRDPARTY_FMT` | fmt 10.2.1 | `github.com/fmtlib/fmt/.../10.2.1.tar.gz` | 始终（除非使用系统 fmt） |
@@ -82,14 +81,13 @@ ExternalProject_Add (antlr4
 > [`extern/<lib>/<lib>.cmake`](https://github.com/antgroup/vsag/tree/main/extern)
 > 文件。镜像时（尤其是版本升级后）请以该文件为准。
 
-此处未列出的（不下载，因此无需覆盖）：**Intel MKL**（通过 `find_path` 在主机上查找）与
-**DiskANN**（以源码内置于 `extern/diskann/`）。
+此处未列出的（不下载，因此无需覆盖）：**Intel MKL**（通过 `find_path` 在主机上查找）。
 
 ## 我需要哪些依赖？
 
 你只需镜像本次构建实际会下载的依赖：
 
-- **核心库**（`make debug` / `make release`）：`JSON`、`ANTLR4`、`BOOST`、
+- **核心库**（`make debug` / `make release`）：`JSON`、`ANTLR4`、
   `OPENBLAS`、`CPUINFO`、`FMT`、`THREAD_POOL`、`TSL`、`ROARINGBITMAP`。
   其中两个是条件依赖：当 BLAS 由 Intel MKL（x86_64 且 `ENABLE_INTEL_MKL=ON`）或系统
   OpenBLAS 提供时，`OPENBLAS` **不会**下载；当找到系统 `fmt` 时，`FMT` 会被跳过。
@@ -112,7 +110,6 @@ export VSAG_MIRROR=https://mirror.corp.example.com/vsag-thirdparty
 
 export VSAG_THIRDPARTY_JSON=$VSAG_MIRROR/v3.11.3.tar.gz
 export VSAG_THIRDPARTY_ANTLR4=$VSAG_MIRROR/antlr4-4.13.2.tar.gz
-export VSAG_THIRDPARTY_BOOST=$VSAG_MIRROR/boost_1_67_0.tar.gz
 export VSAG_THIRDPARTY_OPENBLAS=$VSAG_MIRROR/OpenBLAS-0.3.24.tar.gz
 export VSAG_THIRDPARTY_CPUINFO=$VSAG_MIRROR/cpuinfo-ca678952.tar.gz
 export VSAG_THIRDPARTY_FMT=$VSAG_MIRROR/fmt-10.2.1.tar.gz
@@ -134,7 +131,6 @@ OSS / S3 存储桶用法完全相同——直接使用其公网（或网络可�
 ```bash
 export VSAG_THIRDPARTY_JSON=/data/vsag-deps/v3.11.3.tar.gz
 export VSAG_THIRDPARTY_ANTLR4=/data/vsag-deps/antlr4-4.13.2.tar.gz
-export VSAG_THIRDPARTY_BOOST=/data/vsag-deps/boost_1_67_0.tar.gz
 export VSAG_THIRDPARTY_OPENBLAS=/data/vsag-deps/OpenBLAS-0.3.24.tar.gz
 export VSAG_THIRDPARTY_CPUINFO=/data/vsag-deps/cpuinfo-ca678952.tar.gz
 export VSAG_THIRDPARTY_FMT=/data/vsag-deps/fmt-10.2.1.tar.gz

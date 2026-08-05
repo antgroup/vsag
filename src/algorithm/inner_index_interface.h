@@ -117,7 +117,7 @@ public:
     /**
      * @brief Calculate distance by ID using raw float pointer.
      *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * Suitable for dense vector indexes such as HGraph, BruteForce, IVF, and Pyramid.
      * The query must be a contiguous float32 array with dimension matching the index.
         * For sparse vector indexes (SINDI), this overload is not applicable.
      *
@@ -138,7 +138,7 @@ public:
     /**
      * @brief Calculate distances by IDs (batch) using raw float pointer.
      *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * Suitable for dense vector indexes such as HGraph, BruteForce, IVF, and Pyramid.
      * The query must be a contiguous float32 array. For sparse vector indexes,
      * this overload is not applicable.
      *

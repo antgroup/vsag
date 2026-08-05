@@ -8,7 +8,7 @@ This page documents how to build VSAG from source.
 - **Compiler**: GCC 9.4.0+, Clang 13.0.0+, or Apple Clang from Xcode Command Line Tools
 - **CMake**: 3.18.0+
 - **clang-format / clang-tidy**: exactly version 15 (enforced)
-- Optional: HDF5 (for `tools/eval/eval_performance`), libaio (for DiskANN async IO),
+- Optional: HDF5 (for `tools/eval/eval_performance`), libaio (for the `async_io` data-cell backend),
   liburing (for `uring_io` on Linux), Intel MKL.
 
 We recommend using the official Docker dev image, which already contains the matching toolchain:
@@ -68,7 +68,7 @@ cache options (`ENABLE_*`). Defaults below reflect a plain `make release`.
 | Makefile env var | CMake option | Default | Effect |
 |------------------|--------------|---------|--------|
 | `VSAG_ENABLE_INTEL_MKL` | `ENABLE_INTEL_MKL` | `OFF` | Use Intel MKL for BLAS kernels |
-| `VSAG_ENABLE_LIBAIO` | `ENABLE_LIBAIO` | `ON` on Linux | Enable DiskANN async IO via libaio |
+| `VSAG_ENABLE_LIBAIO` | `ENABLE_LIBAIO` | `ON` on Linux | Enable the `async_io` data-cell backend via libaio |
 | `VSAG_ENABLE_TOOLS` | `ENABLE_TOOLS` | `OFF` | Build utilities under `tools/` |
 | `VSAG_ENABLE_EXAMPLES` | `ENABLE_EXAMPLES` | `OFF` | Build sample programs under `examples/cpp/` |
 | n/a | `ENABLE_LIBURING` | `OFF` | Enable the Linux `uring_io` backend when liburing is installed |

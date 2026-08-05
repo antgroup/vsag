@@ -69,6 +69,7 @@ if (ENABLE_TESTS)
         Catch2::Catch2WithMain
         eval_obj
         vsag
+        simd
         vsag_eval_common
         ${HDF5_CPP_STATIC_LIBRARY}
         ${HDF5_C_STATIC_LIBRARY}

@@ -84,7 +84,6 @@ def extract(base_csv, base_id_column_name, base_vector_column_name,
                      id_callback=proc1)
     # with h5py.File(output_hdf5, 'r') as hdf5file:
     #     base = np.array(hdf5file["base"])
-    #     bf_index = hnswlib.BFIndex(space='l2', dim=base.shape[1])
     #     bf_index.init_index(max_elements=base.shape[0])
     #     bf_index.add_items(base)
 

@@ -67,7 +67,7 @@ The bindings source lives under `typescript/` and the npm package name is `vsag`
 Enable or disable at CMake configure time with these cache options:
 
 - `ENABLE_INTEL_MKL=ON` — Intel MKL acceleration.
-- `ENABLE_LIBAIO=ON` — Linux AIO for DiskANN async IO.
+- `ENABLE_LIBAIO=ON` — Linux AIO for the `async_io` data-cell backend.
 - `ENABLE_LIBURING=ON` — Linux `io_uring` backend; requires liburing.
 - `ENABLE_TOOLS=ON` — build tools under `tools/` (including `eval_performance`).
 - `ENABLE_EXAMPLES=ON` — build sample programs under `examples/cpp/`.

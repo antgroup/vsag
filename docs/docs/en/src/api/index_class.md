@@ -1,7 +1,7 @@
 # Index
 
 `vsag::Index` (declared in `vsag/index.h`) is the central abstraction of the library. Every concrete
-index type — HGraph, IVF, DiskANN, BruteForce, SINDI, Pyramid, and so on — implements this
+index type — HGraph, IVF, BruteForce, SINDI, Pyramid, and so on — implements this
 interface. You never instantiate `Index` directly; obtain one from
 [`Factory::CreateIndex`](factory_engine.md#createindex) or [`Engine::CreateIndex`](factory_engine.md#createindex-1)
 and hold it through `IndexPtr` (`std::shared_ptr<Index>`).
@@ -34,7 +34,8 @@ Pointer/handle types used throughout this page: `DatasetPtr` ([Dataset](dataset.
 
 ```cpp
 enum class IndexType {
-    HNSW, DISKANN, HGRAPH, IVF, PYRAMID, BRUTEFORCE, SPARSE, SINDI, WARP, LAZY_HGRAPH, SIMQ
+    HGRAPH = 2, IVF = 3, PYRAMID = 4, BRUTEFORCE = 5, SPARSE = 6, SINDI = 7,
+    WARP = 8, LAZY_HGRAPH = 9, SIMQ = 10
 };
 ```
 

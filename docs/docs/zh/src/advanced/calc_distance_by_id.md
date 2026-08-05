@@ -165,8 +165,6 @@ auto d = index->CalcDistanceById(query, /*id=*/42);
 | pyramid | 支持 | 支持 | 支持 | |
 | lazy_hgraph | 支持 | 不支持 | 取决于当前生效的内部索引 | DatasetPtr 批量调用会委托给当前 BruteForce/HGraph；可用性可能在 phase 切换后改变。 |
 | sindi | 不支持 | 支持 | 支持 | 仅稀疏向量。 |
-| hnsw | 支持 | 不支持 | 不支持 | 稠密批量接口仅支持 `topk == -1`。 |
-| diskann | 支持 | 不支持 | 不支持 | 稠密批量接口仅支持 `topk == -1`。 |
 
 对于未实现某重载的索引，调用会返回 `UNSUPPORTED_INDEX_OPERATION` 错误。
 

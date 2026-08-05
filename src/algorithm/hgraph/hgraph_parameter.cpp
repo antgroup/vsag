@@ -387,17 +387,17 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
                        fmt::format("rabitq_error_rate must be finite and positive, got {}",
                                    obj.rabitq_error_rate));
     }
-    if (params[INDEX_TYPE_HGRAPH].Contains(HNSW_PARAMETER_SKIP_RATIO)) {
-        obj.skip_ratio = params[INDEX_TYPE_HGRAPH][HNSW_PARAMETER_SKIP_RATIO].GetFloat();
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_SKIP_RATIO)) {
+        obj.skip_ratio = params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_SKIP_RATIO].GetFloat();
         CHECK_ARGUMENT((0.0F <= obj.skip_ratio) and (obj.skip_ratio <= 1.0F),  // NOLINT
                        fmt::format("skip_ratio({}) must be in range [0.0, 1.0]", obj.skip_ratio));
     }
-    if (params[INDEX_TYPE_HGRAPH].Contains(HNSW_PARAMETER_SKIP_STRATEGY)) {
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_SKIP_STRATEGY)) {
         CHECK_ARGUMENT(
-            params[INDEX_TYPE_HGRAPH][HNSW_PARAMETER_SKIP_STRATEGY].IsString(),
-            fmt::format("parameters[{}] must be string type", HNSW_PARAMETER_SKIP_STRATEGY));
+            params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_SKIP_STRATEGY].IsString(),
+            fmt::format("parameters[{}] must be string type", HGRAPH_PARAMETER_SKIP_STRATEGY));
         obj.skip_strategy_type = parse_filter_search_skip_strategy_type(
-            params[INDEX_TYPE_HGRAPH][HNSW_PARAMETER_SKIP_STRATEGY].GetString());
+            params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_SKIP_STRATEGY].GetString());
     }
 
     return obj;

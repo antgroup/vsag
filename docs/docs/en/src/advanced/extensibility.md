@@ -87,9 +87,8 @@ named binary stream. Implement `Read`, `AsyncRead`, and `Size` at minimum;
 batched IO. `vsag::Factory::CreateLocalFileReader` is a reference
 implementation for local files.
 
-Runnable example: `examples/cpp/102_index_diskann.cpp` (DiskANN deserialization
-uses `ReaderSet`). See [Serialization](serialization.md) for the full
-serialize / deserialize matrix.
+See [Serialization Types](../api/serialization.md#readerset) for a `ReaderSet` construction example
+and [Serialization](serialization.md) for the full serialize / deserialize matrix.
 
 ## Logger
 
@@ -113,7 +112,6 @@ settings that do not belong to a specific index:
 
 | Setter | Default | Notes |
 |---|---|---|
-| `set_num_threads_io(n)` | `8` | Threads used for disk-index IO during search. Must be in `[1, 200]`. |
 | `set_num_threads_building(n)` | `4` | Threads used while building disk indexes. |
 | `set_block_size_limit(bytes)` | `128 MiB` | Maximum size of a single allocation block. Must be `≥ 256 KiB` (`src/options.cpp:53-57`). |
 | `set_direct_IO_object_align_bit(bits)` | `9` | Direct-IO alignment, in bits. Must be `≤ 21` (alignment size up to 2 MiB; `src/options.cpp:40-46`). |
@@ -149,4 +147,4 @@ applications.
 - `examples/cpp/202_custom_logger.cpp`
 - `examples/cpp/203_custom_thread_pool.cpp`
 - `examples/cpp/301_feature_filter.cpp`
-- `examples/cpp/102_index_diskann.cpp`
+- `examples/cpp/401_persistent_kv.cpp`

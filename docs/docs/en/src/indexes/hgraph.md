@@ -105,7 +105,7 @@ before changing it.
 Set both `support_duplicate: true` and `deduplicate_storage: true` to let duplicate
 vectors share one physical code slot while retaining their individual labels. This option
 currently supports only dense-vector HGraph indexes using `graph_type: "nsw"`; it is not
-available for the separate HNSW index or for `graph_type: "odescent"`.
+available for `graph_type: "odescent"`.
 
 The following operations and configurations are not supported while storage deduplication
 is enabled:

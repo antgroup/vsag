@@ -96,7 +96,7 @@ auto result = index->KnnSearch(
 
 同时设置 `support_duplicate: true` 和 `deduplicate_storage: true` 后，重复向量会共享
 同一个物理编码槽位，但仍保留各自的标签。该选项目前仅支持使用 `graph_type: "nsw"` 的
-稠密向量 HGraph 索引；独立的 HNSW 索引以及 `graph_type: "odescent"` 均不支持。
+稠密向量 HGraph 索引；`graph_type: "odescent"` 不支持。
 
 启用存储去重后，暂不支持以下操作和配置：
 

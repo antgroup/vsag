@@ -24,9 +24,6 @@ constexpr uint64_t MAX_RESIZE_INCREASE_COUNT_BIT = 31;
 
 extern const char* const INDEX_HGRAPH;
 extern const char* const INDEX_LAZY_HGRAPH;
-extern const char* const INDEX_DISKANN;
-extern const char* const INDEX_HNSW;
-extern const char* const INDEX_FRESH_HNSW;
 extern const char* const INDEX_PYRAMID;
 extern const char* const INDEX_SINDI;
 extern const char* const INDEX_BRUTE_FORCE;
@@ -50,13 +47,6 @@ extern const char* const MULTI_VECTORS;
 extern const char* const MULTI_VECTOR_DIM;
 extern const char* const SOURCE_ID;
 
-extern const char* const HNSW_DATA;
-extern const char* const CONJUGATE_GRAPH_DATA;
-extern const char* const DISKANN_PQ;
-extern const char* const DISKANN_COMPRESSED_VECTOR;
-extern const char* const DISKANN_LAYOUT_FILE;
-extern const char* const DISKANN_TAG_FILE;
-extern const char* const DISKANN_GRAPH;
 extern const char* const SIMPLEFLAT_VECTORS;
 extern const char* const SIMPLEFLAT_IDS;
 extern const char* const METRIC_L2;
@@ -82,40 +72,15 @@ extern const char* const PARAMETER_REPR;
 extern const char* const REPR_DENSE;
 extern const char* const REPR_SPARSE;
 extern const char* const REPR_MULTI_VECTOR;
-extern const char* const PARAMETER_USE_CONJUGATE_GRAPH;
-extern const char* const PARAMETER_USE_CONJUGATE_GRAPH_SEARCH;
 extern const char* const PARAMETER_USE_OLD_SERIAL_FORMAT;
 
-extern const char* const DISKANN_PARAMETER_L;
-extern const char* const DISKANN_PARAMETER_R;
-extern const char* const DISKANN_PARAMETER_P_VAL;
-extern const char* const DISKANN_PARAMETER_DISK_PQ_DIMS;
-extern const char* const DISKANN_PARAMETER_PRELOAD;
-extern const char* const DISKANN_PARAMETER_USE_REFERENCE;
-extern const char* const DISKANN_PARAMETER_USE_OPQ;
-extern const char* const DISKANN_PARAMETER_USE_ASYNC_IO;
-extern const char* const DISKANN_PARAMETER_USE_BSA;
-extern const char* const DISKANN_PARAMETER_GRAPH_TYPE;
 extern const char* const ODESCENT_PARAMETER_ALPHA;
 extern const char* const ODESCENT_PARAMETER_GRAPH_ITER_TURN;
 extern const char* const ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE;
 extern const char* const ODESCENT_PARAMETER_MIN_IN_DEGREE;
 extern const char* const ODESCENT_PARAMETER_BUILD_BLOCK_SIZE;
-extern const char* const DISKANN_GRAPH_TYPE_VAMANA;
 extern const char* const GRAPH_TYPE_ODESCENT;
 extern const char* const GRAPH_TYPE_NSW;
-
-extern const char* const DISKANN_PARAMETER_BEAM_SEARCH;
-extern const char* const DISKANN_PARAMETER_IO_LIMIT;
-extern const char* const DISKANN_PARAMETER_EF_SEARCH;
-extern const char* const DISKANN_PARAMETER_REORDER;
-
-extern const char* const HNSW_PARAMETER_EF_RUNTIME;
-extern const char* const HNSW_PARAMETER_M;
-extern const char* const HNSW_PARAMETER_CONSTRUCTION;
-extern const char* const HNSW_PARAMETER_REVERSED_EDGES;
-extern const char* const HNSW_PARAMETER_SKIP_RATIO;
-extern const char* const HNSW_PARAMETER_SKIP_STRATEGY;
 
 extern const char* const INDEX_PARAM;
 
@@ -239,6 +204,8 @@ extern const char* const HGRAPH_PARAMETER_EF_RUNTIME;
 extern const char* const HGRAPH_PARAMETER_HOPS_LIMIT;
 extern const char* const HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH;
 extern const char* const HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD;
+extern const char* const HGRAPH_PARAMETER_SKIP_RATIO;
+extern const char* const HGRAPH_PARAMETER_SKIP_STRATEGY;
 extern const char* const HGRAPH_USE_MCI;
 extern const char* const HGRAPH_MCI_MCS;
 extern const char* const HGRAPH_MCI_CLIQUE_MAX;

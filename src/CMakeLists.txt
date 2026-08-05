@@ -49,7 +49,7 @@ set_target_properties (vsag PROPERTIES
 if (ENABLE_SOVERSION)
     set_target_properties (vsag PROPERTIES
         VERSION "${VSAG_VERSION_TRIPLE}"
-        SOVERSION "${VSAG_VERSION_MAJOR}")
+        SOVERSION "${VSAG_VERSION_MAJOR}.${VSAG_VERSION_MINOR}")
 endif ()
 
 # Public include directory: usable both during the build (BUILD_INTERFACE)
@@ -62,7 +62,7 @@ foreach (_lib vsag vsag_static)
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 endforeach ()
 
-set (VSAG_DEP_LIBS antlr4-autogen antlr4-runtime diskann simd io quantizer storage utils factory analyzer
+set (VSAG_DEP_LIBS antlr4-autogen antlr4-runtime simd io quantizer storage utils factory analyzer
       datacell rabitq_split_datacell_factory ${IMPL_LIBS} ${ALGORITHM_LIBS} attr pthread m dl
       ${BLAS_LIBRARIES})
 
@@ -91,8 +91,8 @@ if (TARGET vsag_openmp)
     vsag_link_openmp_private (vsag_static)
 endif ()
 
-maybe_add_dependencies (vsag antlr4 roaring boost)
-maybe_add_dependencies (vsag_static antlr4 roaring boost)
+maybe_add_dependencies (vsag antlr4 roaring)
+maybe_add_dependencies (vsag_static antlr4 roaring)
 if (VSAG_BLAS_BACKEND STREQUAL "openblas")
     maybe_add_dependencies (vsag openblas)
     maybe_add_dependencies (vsag_static openblas)

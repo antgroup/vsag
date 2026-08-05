@@ -71,7 +71,7 @@ Defined in `vsag/errors.h`. Values start at `1` (`0` is reserved).
 | Behavior | `INDEX_EMPTY` | Index is empty; cannot search or serialize. |
 | Runtime | `NO_ENOUGH_MEMORY` | Memory allocation failed. |
 | Runtime | `READ_ERROR` | Failed to read from a binary. |
-| Runtime | `MISSING_FILE` | A required file is missing (e.g. DiskANN deserialization). |
+| Runtime | `MISSING_FILE` | A required index file is missing during deserialization. |
 | Runtime | `INVALID_BINARY` | Serialized binary content is invalid. |
 
 Because most index methods are `virtual` with a default body that returns

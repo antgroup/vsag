@@ -212,8 +212,6 @@ const char* const SPARSE_N_CANDIDATE = "n_candidate";
 const char* const GRAPH_BUILD_THRESHOLD_KEY = "graph_build_threshold";
 const char* const IVF_SEARCH_PARAM_EF_SEARCH = "ef_search";
 
-const char* const DISKANN_SUPPORT_CALC_DISTANCE_BY_ID = "support_calc_distance_by_id";
-
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_HGRAPH", INDEX_TYPE_HGRAPH},
     {"INDEX_TYPE_IVF", INDEX_TYPE_IVF},

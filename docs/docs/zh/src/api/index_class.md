@@ -1,6 +1,6 @@
 # Index
 
-`vsag::Index`（声明于 `vsag/index.h`）是本库的核心抽象。每一种具体索引 —— HGraph、IVF、DiskANN、
+`vsag::Index`（声明于 `vsag/index.h`）是本库的核心抽象。每一种具体索引 —— HGraph、IVF、
 BruteForce、SINDI、Pyramid 等 —— 都实现这一接口。你从不直接实例化 `Index`，而是通过
 [`Factory::CreateIndex`](factory_engine.md#createindex) 或
 [`Engine::CreateIndex`](factory_engine.md#createindex-1) 获取，并用 `IndexPtr`
@@ -32,7 +32,8 @@ using IndexPtr = std::shared_ptr<Index>;
 
 ```cpp
 enum class IndexType {
-    HNSW, DISKANN, HGRAPH, IVF, PYRAMID, BRUTEFORCE, SPARSE, SINDI, WARP, LAZY_HGRAPH, SIMQ
+    HGRAPH = 2, IVF = 3, PYRAMID = 4, BRUTEFORCE = 5, SPARSE = 6, SINDI = 7,
+    WARP = 8, LAZY_HGRAPH = 9, SIMQ = 10
 };
 ```
 

@@ -24,12 +24,10 @@
 #include "datacell/flatten_datacell.h"
 #include "datacell/graph_datacell.h"
 #include "datacell/sparse_graph_datacell.h"
-#include "diskann_logger.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/logger/logger.h"
 #include "odescent_graph_parameter.h"
 #include "simd/simd.h"
-#include "utils.h"
 #include "vsag/dataset.h"
 
 namespace vsag {
