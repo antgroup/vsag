@@ -1863,21 +1863,6 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             param.executors.emplace_back(executor);
         }
     }
-    if (use_custom_distance) {
-        param.search_mode = KNN_SEARCH;
-        param.topk = request.topk_;
-        auto search_result = search_with_custom_distance(query, request, param, ctx);
-        filter_search_result_by_threshold(
-            search_result, request.threshold_, select_query_allocator(ctx.alloc, this->allocator_));
-        if (search_result == nullptr || search_result->Empty()) {
-            auto dataset_results = DatasetImpl::MakeEmptyDataset();
-            dataset_results->Statistics(stats.Dump());
-            return dataset_results;
-        }
-        auto dataset_results = this->pack_knn_result(search_result, ctx.alloc);
-        dataset_results->Statistics(stats.Dump());
-        return dataset_results;
-    }
     std::shared_ptr<ReasoningContext> reasoning_ctx;
     if (not request.expected_labels_.empty()) {
         reasoning_ctx = std::make_shared<ReasoningContext>(this->allocator_);
@@ -1913,6 +1898,25 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             reasoning_ctx->SetTrueDistance(inner_id, dist);
         }
         ctx.reasoning_ctx = reasoning_ctx.get();
+    }
+
+    if (use_custom_distance) {
+        param.search_mode = KNN_SEARCH;
+        param.topk = request.topk_;
+        auto search_result =
+            search_with_custom_distance(query, request, param, ctx, reasoning_ctx.get());
+        filter_search_result_by_threshold(
+            search_result, request.threshold_, select_query_allocator(ctx.alloc, this->allocator_));
+        if (search_result == nullptr || search_result->Empty()) {
+            auto dataset_results = DatasetImpl::MakeEmptyDataset();
+            this->AttachReasoningReport(dataset_results, reasoning_ctx.get());
+            dataset_results->Statistics(stats.Dump());
+            return dataset_results;
+        }
+        auto dataset_results = this->pack_knn_result(search_result, ctx.alloc);
+        this->AttachReasoningReport(dataset_results, reasoning_ctx.get());
+        dataset_results->Statistics(stats.Dump());
+        return dataset_results;
     }
 
     if (is_range) {
