@@ -168,7 +168,7 @@ air-gapped, or internal-mirror builds.
   - Override the OpenBLAS source archive URL/path used by `ExternalProject_Add`
   - Useful for offline builds, local mirrors, or pre-downloaded archives
 
-The full list of variables (`VSAG_THIRDPARTY_ANTLR4`, `VSAG_THIRDPARTY_BOOST`,
+The full list of variables (`VSAG_THIRDPARTY_ANTLR4`, `VSAG_THIRDPARTY_OPENBLAS`,
 `VSAG_THIRDPARTY_FMT`, …), usage examples, and the exact archives to mirror are
 documented in the [Offline / Air-gapped Builds](docs/docs/en/src/development/offline_build.md)
 guide. The note next to each `URL_HASH` in `extern/<lib>/<lib>.cmake` is the

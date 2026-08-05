@@ -75,7 +75,6 @@ The resolution order is therefore:
 | --- | --- | --- | --- |
 | `VSAG_THIRDPARTY_JSON` | nlohmann/json 3.11.3 | `github.com/nlohmann/json/.../v3.11.3.tar.gz` | always |
 | `VSAG_THIRDPARTY_ANTLR4` | ANTLR4 runtime 4.13.2 | `github.com/antlr/antlr4/.../4.13.2.tar.gz` | always |
-| `VSAG_THIRDPARTY_BOOST` | Boost 1.67.0 (headers) | `archives.boost.io/.../boost_1_67_0.tar.gz` | always |
 | `VSAG_THIRDPARTY_OPENBLAS` | OpenBLAS 0.3.24 | `github.com/OpenMathLib/OpenBLAS/.../OpenBLAS-0.3.24.tar.gz` | default BLAS backend (when not using system / MKL) |
 | `VSAG_THIRDPARTY_CPUINFO` | pytorch/cpuinfo | `github.com/pytorch/cpuinfo/archive/ca678952...tar.gz` | always |
 | `VSAG_THIRDPARTY_FMT` | fmt 10.2.1 | `github.com/fmtlib/fmt/.../10.2.1.tar.gz` | always (unless system fmt) |
@@ -95,15 +94,14 @@ The resolution order is therefore:
 > [`extern/<lib>/<lib>.cmake`](https://github.com/antgroup/vsag/tree/main/extern)
 > file. Check that file when mirroring, especially after a version bump.
 
-Not listed here (no download, so no override needed): **Intel MKL** (located on
-the host with `find_path`) and **DiskANN** (vendored in-tree under
-`extern/diskann/`).
+Not listed here (no download, so no override needed): **Intel MKL**, which is located on the host
+with `find_path`.
 
 ## Which dependencies do I need?
 
 You only have to mirror what your specific build actually downloads:
 
-- **Core library** (`make debug` / `make release`): `JSON`, `ANTLR4`, `BOOST`,
+- **Core library** (`make debug` / `make release`): `JSON`, `ANTLR4`,
   `OPENBLAS`, `CPUINFO`, `FMT`, `THREAD_POOL`, `TSL`, `ROARINGBITMAP`.
   Two of these are conditional: `OPENBLAS` is **not** downloaded when BLAS comes
   from Intel MKL (x86_64 with `ENABLE_INTEL_MKL=ON`) or from a system OpenBLAS,
@@ -128,7 +126,6 @@ export VSAG_MIRROR=https://mirror.corp.example.com/vsag-thirdparty
 
 export VSAG_THIRDPARTY_JSON=$VSAG_MIRROR/v3.11.3.tar.gz
 export VSAG_THIRDPARTY_ANTLR4=$VSAG_MIRROR/antlr4-4.13.2.tar.gz
-export VSAG_THIRDPARTY_BOOST=$VSAG_MIRROR/boost_1_67_0.tar.gz
 export VSAG_THIRDPARTY_OPENBLAS=$VSAG_MIRROR/OpenBLAS-0.3.24.tar.gz
 export VSAG_THIRDPARTY_CPUINFO=$VSAG_MIRROR/cpuinfo-ca678952.tar.gz
 export VSAG_THIRDPARTY_FMT=$VSAG_MIRROR/fmt-10.2.1.tar.gz
@@ -151,7 +148,6 @@ On a machine that has *no* network at all, copy the archives onto the box first
 ```bash
 export VSAG_THIRDPARTY_JSON=/data/vsag-deps/v3.11.3.tar.gz
 export VSAG_THIRDPARTY_ANTLR4=/data/vsag-deps/antlr4-4.13.2.tar.gz
-export VSAG_THIRDPARTY_BOOST=/data/vsag-deps/boost_1_67_0.tar.gz
 export VSAG_THIRDPARTY_OPENBLAS=/data/vsag-deps/OpenBLAS-0.3.24.tar.gz
 export VSAG_THIRDPARTY_CPUINFO=/data/vsag-deps/cpuinfo-ca678952.tar.gz
 export VSAG_THIRDPARTY_FMT=/data/vsag-deps/fmt-10.2.1.tar.gz

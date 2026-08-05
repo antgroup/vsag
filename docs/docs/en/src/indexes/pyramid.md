@@ -290,5 +290,4 @@ not physically reclaimed.
 
 - [Creating an Index](../guide/create_index.md)
 - [Index Parameters](../resources/index_parameters.md)
-- [Graph Enhancement](../advanced/enhance_graph.md)
 - [HGraph](hgraph.md)

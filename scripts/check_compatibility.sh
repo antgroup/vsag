@@ -25,8 +25,17 @@ if [[ ${#old_version_indexes[@]} -eq 0 ]]; then
 fi
 
 all_success=true
+checked_count=0
 
 for version in "${old_version_indexes[@]}"; do
+    case "${version,,}" in
+        *_hnsw|*_fresh_hnsw|*_diskann)
+            echo "Skipping intentionally removed index: $version"
+            continue
+            ;;
+    esac
+
+    ((checked_count += 1))
     echo "Checking compatibility for: $version"
     if ! "${compatibility_tool}" "$version"; then
         echo "Error: Compatibility check failed for $version"
@@ -35,7 +44,10 @@ for version in "${old_version_indexes[@]}"; do
     fi
 done
 
-if [ "$all_success" = true ]; then
+if [[ $checked_count -eq 0 ]]; then
+    echo "Error: No maintained-index compatibility artifacts were found" >&2
+    exit 1
+elif [ "$all_success" = true ]; then
     echo "All compatibility checks passed"
     exit 0
 else

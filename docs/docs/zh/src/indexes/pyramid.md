@@ -274,5 +274,4 @@ Pyramid 支持 `RemoveMode::MARK_REMOVE`。调用 `Remove(ids)`（默认模式�
 
 - [创建索引](../guide/create_index.md)
 - [索引参数](../resources/index_parameters.md)
-- [图索引增强](../advanced/enhance_graph.md)
 - [HGraph](hgraph.md)

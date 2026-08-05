@@ -13,7 +13,6 @@
 # limitations under the License.
 
 
-add_subdirectory (hnswlib)
 add_subdirectory (sindi)
 add_subdirectory (hgraph)
 add_subdirectory (lazy_hgraph)
@@ -33,7 +32,6 @@ maybe_add_dependencies (algorithm antlr4)
 
 set (ALGORITHM_LIBS
         algorithm
-        hnswlib
         sindi
         hgraph
         lazy_hgraph

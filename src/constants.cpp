@@ -20,9 +20,6 @@ namespace vsag {
 
 const char* const INDEX_HGRAPH = "hgraph";
 const char* const INDEX_LAZY_HGRAPH = "lazy_hgraph";
-const char* const INDEX_DISKANN = "diskann";
-const char* const INDEX_HNSW = "hnsw";
-const char* const INDEX_FRESH_HNSW = "fresh_hnsw";
 const char* const INDEX_PYRAMID = "pyramid";
 const char* const INDEX_SINDI = "sindi";
 const char* const INDEX_BRUTE_FORCE = "brute_force";
@@ -48,13 +45,6 @@ const char* const MULTI_VECTORS = "multi_vectors";
 const char* const MULTI_VECTOR_DIM = "multi_vector_dim";
 const char* const SOURCE_ID = "source_id";
 
-const char* const HNSW_DATA = "hnsw_data";
-const char* const CONJUGATE_GRAPH_DATA = "conjugate_graph_data";
-const char* const DISKANN_PQ = "diskann_qp";
-const char* const DISKANN_COMPRESSED_VECTOR = "diskann_compressed_vector";
-const char* const DISKANN_LAYOUT_FILE = "diskann_layout_file";
-const char* const DISKANN_TAG_FILE = "diskann_tag_file";
-const char* const DISKANN_GRAPH = "diskann_graph";
 const char* const SIMPLEFLAT_VECTORS = "simpleflat_vectors";
 const char* const SIMPLEFLAT_IDS = "simpleflat_ids";
 const char* const METRIC_L2 = "l2";
@@ -80,41 +70,16 @@ const char* const PARAMETER_REPR = "repr";
 const char* const REPR_DENSE = "dense";
 const char* const REPR_SPARSE = "sparse";
 const char* const REPR_MULTI_VECTOR = "multi_vector";
-const char* const PARAMETER_USE_CONJUGATE_GRAPH = "use_conjugate_graph";
-const char* const PARAMETER_USE_CONJUGATE_GRAPH_SEARCH = "use_conjugate_graph_search";
 const char* const PARAMETER_USE_OLD_SERIAL_FORMAT = "use_old_serial_format";
 
-const char* const DISKANN_PARAMETER_L = "ef_construction";
-const char* const DISKANN_PARAMETER_R = "max_degree";
-const char* const DISKANN_PARAMETER_P_VAL = "pq_sample_rate";
-const char* const DISKANN_PARAMETER_DISK_PQ_DIMS = "pq_dims";
-const char* const DISKANN_PARAMETER_PRELOAD = "use_pq_search";
-const char* const DISKANN_PARAMETER_USE_REFERENCE = "use_reference";
-const char* const DISKANN_PARAMETER_USE_OPQ = "use_opq";
-const char* const DISKANN_PARAMETER_USE_ASYNC_IO = "use_async_io";
-const char* const DISKANN_PARAMETER_USE_BSA = "use_bsa";
-
-const char* const DISKANN_PARAMETER_BEAM_SEARCH = "beam_search";
-const char* const DISKANN_PARAMETER_IO_LIMIT = "io_limit";
-const char* const DISKANN_PARAMETER_EF_SEARCH = "ef_search";
-const char* const DISKANN_PARAMETER_REORDER = "use_reorder";
-const char* const DISKANN_PARAMETER_GRAPH_TYPE = "graph_type";
 const char* const ODESCENT_PARAMETER_ALPHA = "alpha";
 const char* const ODESCENT_PARAMETER_GRAPH_ITER_TURN = "graph_iter_turn";
 const char* const ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE = "neighbor_sample_rate";
 const char* const ODESCENT_PARAMETER_MIN_IN_DEGREE = "min_in_degree";
 const char* const ODESCENT_PARAMETER_BUILD_BLOCK_SIZE = "build_block_size";
 
-const char* const DISKANN_GRAPH_TYPE_VAMANA = "vamana";
 const char* const GRAPH_TYPE_ODESCENT = "odescent";
 const char* const GRAPH_TYPE_NSW = "nsw";
-
-const char* const HNSW_PARAMETER_EF_RUNTIME = "ef_search";
-const char* const HNSW_PARAMETER_M = "max_degree";
-const char* const HNSW_PARAMETER_CONSTRUCTION = "ef_construction";
-const char* const HNSW_PARAMETER_REVERSED_EDGES = "use_reversed_edges";
-const char* const HNSW_PARAMETER_SKIP_RATIO = "skip_ratio";
-const char* const HNSW_PARAMETER_SKIP_STRATEGY = "skip_strategy";
 
 const char* const INDEX_PARAM = "index_param";
 
@@ -203,6 +168,8 @@ const char* const HGRAPH_PARAMETER_EF_RUNTIME = "ef_search";
 const char* const HGRAPH_PARAMETER_HOPS_LIMIT = "hops_limit";
 const char* const HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH = "rabitq_one_bit_search";
 const char* const HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD = "brute_force_threshold";
+const char* const HGRAPH_PARAMETER_SKIP_RATIO = "skip_ratio";
+const char* const HGRAPH_PARAMETER_SKIP_STRATEGY = "skip_strategy";
 const char* const HGRAPH_USE_MCI = "use_mci";
 const char* const HGRAPH_MCI_MCS = "mci_mcs";
 const char* const HGRAPH_MCI_CLIQUE_MAX = "mci_clique_max";

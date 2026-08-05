@@ -265,11 +265,6 @@ public:
                             const std::string& search_param,
                             float expected_recall = 0.99,
                             bool expected_success = true);
-    static void
-    TestConcurrentDestruct(TestIndex::IndexPtr& index,
-                           const TestDatasetPtr& dataset,
-                           const std::string& search_param);
-
     static IndexPtr
     TestMergeIndex(const std::string& name,
                    const std::string& build_param,

@@ -6,13 +6,15 @@ the complete per-patch pull request list, assets, and contributor credits.
 
 ## Release Series
 
+- [VSAG 1.1](release_notes/v1.1.md)
+  - Status: in development
 - [VSAG 1.0](release_notes/v1.0.md)
   - First release: [v1.0.0](https://github.com/antgroup/vsag/releases/tag/v1.0.0),
     July 12, 2026
   - Latest patch: `v1.0.0`
   - Status: stable
 
-Future release notes follow the same layout: `v1.1`, `v1.2`, `v2.0`, and so on. Patch releases
+Future release notes follow the same layout: `v1.2`, `v2.0`, and so on. Patch releases
 update their existing series page instead of creating a separate website page.
 
 ## Version and Note Grouping

@@ -10,8 +10,8 @@ Apache 2.0 license.
   covering in-memory, sparse and multi-tenant scenarios.
 - **Rich quantization**: fp32 / fp16 / bf16 / int8 / sq8 / sq4 / pq, with SIMD dispatch on x86_64
   and AArch64.
-- **Advanced capabilities**: range search, filtered search, serialization, conjugate graph
-  enhancement, online `Tune`-based optimization, custom allocator / thread pool.
+- **Advanced capabilities**: range search, filtered search, serialization, online `Tune`-based
+  optimization, custom allocator / thread pool.
 - **Language bindings**: native C++, Python via `pyvsag`, Node.js / TypeScript via the npm package
   `vsag`.
 

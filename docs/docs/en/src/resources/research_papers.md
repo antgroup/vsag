@@ -46,8 +46,8 @@ Experiments on public and real industrial datasets show EnhanceGraph significant
 accuracy without sacrificing search efficiency, with recall gains reaching from 41.74% to 93.42%.
 EnhanceGraph has been integrated into VSAG.
 
-> Available in VSAG via the
-> [`use_conjugate_graph`](../advanced/enhance_graph.md) parameter.
+> This integration was available through VSAG 1.0 and was removed with the deprecated HNSW index
+> in VSAG 1.1.
 
 ## 4. SINDI: an Efficient Index for Approximate Maximum Inner Product Search on Sparse Vectors [[arxiv]](https://arxiv.org/abs/2509.08395)
 

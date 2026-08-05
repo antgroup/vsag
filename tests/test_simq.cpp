@@ -22,7 +22,7 @@
  *   - metric: inner product (ip)
  *
  * Search design (ColBERT-style two-phase retrieval):
- *   Phase 1 (coarse): each query token searches the cluster-center HNSW for
+ *   Phase 1 (coarse): each query token searches the cluster-center graph for
  *   coarse_k nearest cluster centers; their member docs form the candidate set.
  *   Phase 2 (rerank): exact MaxSim over the top-rerank_k candidates.
  *

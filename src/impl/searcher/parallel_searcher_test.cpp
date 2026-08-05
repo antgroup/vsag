@@ -15,166 +15,78 @@
 
 #include "parallel_searcher.h"
 
+#include <set>
+#include <vector>
+
 #include "searcher_test.h"
 #include "unittest.h"
+
 using namespace vsag;
 
-TEST_CASE("Parallel search with HNSW", "[ut][ParallelSearcher]") {
-    // data attr
-    uint32_t base_size = 1000;
-    uint32_t query_size = 100;
-    uint64_t dim = 128;
-
-    auto thread_pool = SafeThreadPool::FactoryDefaultThreadPool();
-
-    // build and search attr
-    uint32_t M = 16;
-    uint32_t ef_construction = 100;
-    uint32_t ef_search = 300;
-    uint32_t k = ef_search;
-    InnerIdType fixed_entry_point_id = 0;
-    uint64_t default_max_element = 1;
-
-    // data preparation
+TEST_CASE("ParallelSearcher matches BasicSearcher on a generic graph", "[ut][ParallelSearcher]") {
+    constexpr uint32_t base_size = 200;
+    constexpr uint64_t dim = 32;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto base_vectors = fixtures::generate_vectors(base_size, dim, true);
     std::vector<InnerIdType> ids(base_size);
     std::iota(ids.begin(), ids.end(), 0);
 
-    // hnswlib build
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    auto space = std::make_shared<hnswlib::L2Space>(dim);
-    auto io = std::make_shared<MemoryIO>(allocator.get());
-    auto alg_hnsw =
-        std::make_shared<hnswlib::HierarchicalNSW>(space.get(),
-                                                   default_max_element,
-                                                   allocator.get(),
-                                                   M / 2,
-                                                   ef_construction,
-                                                   Options::Instance().block_size_limit());
-    alg_hnsw->init_memory_space();
-    for (int64_t i = 0; i < base_size; ++i) {
-        auto successful_insert =
-            alg_hnsw->addPoint((const void*)(base_vectors.data() + i * dim), ids[i]);
-        REQUIRE(successful_insert == true);
-    }
-
-    // graph data cell
-    auto graph_data_cell = std::make_shared<AdaptGraphDataCell>(alg_hnsw);
-
-    // vector data cell
-    constexpr const char* param_temp = R"({{"type": "{}"}})";
-    auto fp32_param = QuantizerParameter::GetQuantizerParameterByJson(
-        JsonType::Parse(fmt::format(param_temp, "fp32")));
-    auto io_param =
-        IOParameter::GetIOParameterByJson(JsonType::Parse(fmt::format(param_temp, "memory_io")));
     IndexCommonParam common;
     common.dim_ = dim;
     common.allocator_ = allocator;
-    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
 
-    auto vector_data_cell = std::make_shared<
-        FlattenDataCell<FP32Quantizer<vsag::MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
-        fp32_param, io_param, common);
-    vector_data_cell->SetQuantizer(
-        std::make_shared<FP32Quantizer<vsag::MetricType::METRIC_TYPE_L2SQR>>(dim, allocator.get()));
-    vector_data_cell->SetIO(std::make_unique<MemoryIO>(allocator.get()));
+    constexpr const char* param_template = R"({{"type": "{}"}})";
+    auto quantizer_param = QuantizerParameter::GetQuantizerParameterByJson(
+        JsonType::Parse(fmt::format(param_template, "fp32")));
+    auto io_param = IOParameter::GetIOParameterByJson(
+        JsonType::Parse(fmt::format(param_template, "memory_io")));
+    auto flatten =
+        std::make_shared<FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
+            quantizer_param, io_param, common);
+    flatten->Train(base_vectors.data(), base_size);
+    flatten->BatchInsertVector(base_vectors.data(), base_size, ids.data());
 
-    vector_data_cell->Train(base_vectors.data(), base_size);
-    vector_data_cell->BatchInsertVector(base_vectors.data(), base_size, ids.data());
-
-    auto init_size = 10;
     auto pool = std::make_shared<VisitedListPool>(
-        init_size, allocator.get(), vector_data_cell->TotalCount(), allocator.get());
+        2, allocator.get(), flatten->TotalCount(), allocator.get());
+    auto parallel =
+        std::make_shared<ParallelSearcher>(common, SafeThreadPool::FactoryDefaultThreadPool());
+    auto basic = std::make_shared<BasicSearcher>(common);
 
-    auto exception_func = [&](const InnerSearchParam& search_param) -> void {
-        // init searcher
-        auto searcher = std::make_shared<ParallelSearcher>(common, thread_pool);
-        {
-            // search with empty graph_data_cell
-            auto vl = pool->TakeOne();
-            auto failed_without_vector = searcher->Search(
-                graph_data_cell, nullptr, vl, base_vectors.data(), search_param, nullptr);
-            pool->ReturnOne(vl);
-            REQUIRE(failed_without_vector->Size() == 0);
+    InnerSearchParam search_param;
+    search_param.ep = 0;
+    search_param.ef = 40;
+    search_param.topk = 20;
+    search_param.parallel_search_thread_count = 4;
+
+    auto run_search = [&](const auto& searcher, const GraphInterfacePtr& graph) {
+        auto visited_list = pool->TakeOne();
+        QueryContext* context = nullptr;
+        auto result = searcher->Search(graph,
+                                       flatten,
+                                       visited_list,
+                                       base_vectors.data(),
+                                       search_param,
+                                       LabelTablePtr{},
+                                       context);
+        pool->ReturnOne(visited_list);
+        std::set<std::pair<float, InnerIdType>> values;
+        while (not result->Empty()) {
+            values.insert(result->Top());
+            result->Pop();
         }
-        {
-            // search with empty vector_data_cell
-            auto vl = pool->TakeOne();
-            auto failed_without_graph =
-                searcher->Search(nullptr, vector_data_cell, vl, base_vectors.data(), search_param);
-            pool->ReturnOne(vl);
-            REQUIRE(failed_without_graph->Size() == 0);
-        }
+        return values;
     };
 
-    auto filter_func = [](LabelType id) -> bool { return id % 2 == 0; };
-    float range = 0.1F;
-    auto f = std::make_shared<BlackListFilter>(filter_func);
-
-    // search param
-    InnerSearchParam search_param_temp;
-    search_param_temp.ep = fixed_entry_point_id;
-    search_param_temp.ef = ef_search;
-    search_param_temp.topk = k;
-    search_param_temp.is_inner_id_allowed = nullptr;
-    search_param_temp.radius = range;
-
-    std::vector<InnerSearchParam> params(4);
-    params[0] = search_param_temp;
-    params[1] = search_param_temp;
-    params[1].is_inner_id_allowed = f;
-    params[2] = search_param_temp;
-    params[2].search_mode = RANGE_SEARCH;
-    params[3] = params[2];
-    params[3].is_inner_id_allowed = f;
-
-    for (const auto& search_param : params) {
-        exception_func(search_param);
-        auto searcher = std::make_shared<ParallelSearcher>(common, thread_pool);
-        for (int i = 0; i < query_size; i++) {
-            std::unordered_set<InnerIdType> valid_set, set;
-            auto vl = pool->TakeOne();
-            auto result = searcher->Search(
-                graph_data_cell, vector_data_cell, vl, base_vectors.data() + i * dim, search_param);
-            pool->ReturnOne(vl);
-            auto result_size = result->Size();
-            for (int j = 0; j < result_size; j++) {
-                set.insert(result->Top().second);
-                result->Pop();
-            }
-            if (search_param.search_mode == KNN_SEARCH) {
-                auto valid_result =
-                    alg_hnsw->searchBaseLayerST<false, false>(fixed_entry_point_id,
-                                                              base_vectors.data() + i * dim,
-                                                              ef_search,
-                                                              search_param.is_inner_id_allowed);
-                REQUIRE(result_size == valid_result.size());
-                for (int j = 0; j < result_size; j++) {
-                    valid_set.insert(valid_result.top().second);
-                    valid_result.pop();
-                }
-            } else if (search_param.search_mode == RANGE_SEARCH) {
-                auto valid_result =
-                    alg_hnsw->searchBaseLayerST<false, false>(fixed_entry_point_id,
-                                                              base_vectors.data() + i * dim,
-                                                              range,
-                                                              ef_search,
-                                                              search_param.is_inner_id_allowed);
-                REQUIRE(result_size == valid_result.size());
-                for (int j = 0; j < result_size; j++) {
-                    valid_set.insert(valid_result.top().second);
-                    valid_result.pop();
-                }
-            }
-
-            for (auto id : set) {
-                REQUIRE(valid_set.count(id) > 0);
-            }
-            for (auto id : valid_set) {
-                REQUIRE(set.count(id) > 0);
-            }
-        }
+    for (const auto& graph : {MakeRingGraph(base_size, 8), MakeIrregularGraph(base_size)}) {
+        REQUIRE(run_search(parallel, graph) == run_search(basic, graph));
     }
+
+    auto visited_list = pool->TakeOne();
+    auto empty_result =
+        parallel->Search(nullptr, flatten, visited_list, base_vectors.data(), search_param);
+    pool->ReturnOne(visited_list);
+    REQUIRE(empty_result->Empty());
 }
 
 TEST_CASE("ParallelSearcher traverses through a non-finite-distance bridge",

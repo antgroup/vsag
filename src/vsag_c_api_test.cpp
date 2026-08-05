@@ -164,6 +164,12 @@ TEST_CASE("vsag_c_api factory and destroy", "[vsag_c_api][ut]") {
     auto invalid_index = vsag_index_factory("invalid_index", index_param);
     REQUIRE(invalid_index == nullptr);
 
+    for (const auto* removed_name : {"hnsw", "fresh_hnsw", "diskann"}) {
+        INFO("removed index name: " << removed_name);
+        auto removed_index = vsag_index_factory(removed_name, index_param);
+        REQUIRE(removed_index == nullptr);
+    }
+
     // Test destroy
     Error_t ret = vsag_index_destroy(index);
     REQUIRE(ret.code == VSAG_SUCCESS);

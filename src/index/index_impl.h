@@ -396,26 +396,6 @@ public:
         SAFE_CALL(this->inner_index_->Merge(merge_units));
     }
 
-    tl::expected<uint32_t, Error>
-    Pretrain(const std::vector<int64_t>& base_tag_ids,
-             uint32_t k,
-             const std::string& parameters) override {
-        CHECK_IMMUTABLE_INDEX("pretrain");
-        SAFE_CALL(return this->inner_index_->Pretrain(base_tag_ids, k, parameters));
-    }
-
-    tl::expected<uint32_t, Error>
-    Feedback(const DatasetPtr& query,
-             int64_t k,
-             const std::string& parameters,
-             int64_t global_optimum_tag_id = std::numeric_limits<int64_t>::max()) override {
-        CHECK_IMMUTABLE_INDEX("feedback");
-        if (query->GetNumElements() == 0) {
-            return 0;
-        }
-        SAFE_CALL(return this->inner_index_->Feedback(query, k, parameters, global_optimum_tag_id));
-    }
-
     [[nodiscard]] tl::expected<DatasetPtr, Error>
     RangeSearch(const DatasetPtr& query,
                 float radius,

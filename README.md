@@ -56,7 +56,7 @@ The result is as follows:
 
 ### Quickstart
 
-Below is a minimal example of creating an HNSW index, building it with random vectors, and performing a k-NN search — shown in C++, Python, and TypeScript.
+Below is a minimal example of creating an HGraph index, building it with random vectors, and performing a k-NN search — shown in C++, Python, and TypeScript.
 
 <details>
 <summary><b>C++</b></summary>
@@ -80,9 +80,10 @@ int main() {
     base->NumElements(num_vectors)->Dim(dim)->Ids(ids)->Float32Vectors(vectors);
 
     // Create and build index
-    auto index = vsag::Factory::CreateIndex("hnsw", R"(
+    auto index = vsag::Factory::CreateIndex("hgraph", R"(
         {"dtype":"float32","metric_type":"l2","dim":128,
-         "hnsw":{"max_degree":16,"ef_construction":100}})").value();
+         "index_param":{"base_quantization_type":"fp32","max_degree":16,
+         "ef_construction":100,"alpha":1.2}})").value();
     index->Build(base);
 
     // Search
@@ -91,7 +92,7 @@ int main() {
     auto query = vsag::Dataset::Make();
     query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Owner(true);
 
-    auto result = index->KnnSearch(query, 10, R"({"hnsw":{"ef_search":100}})").value();
+    auto result = index->KnnSearch(query, 10, R"({"hgraph":{"ef_search":100}})").value();
     for (int64_t i = 0; i < result->GetDim(); ++i)
         std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
     return 0;
@@ -117,14 +118,15 @@ data = np.float32(np.random.random((num_elements, dim)))
 # Create and build index
 index_params = json.dumps({
     "dtype": "float32", "metric_type": "l2", "dim": dim,
-    "hnsw": {"max_degree": 16, "ef_construction": 100},
+    "index_param": {"base_quantization_type": "fp32", "max_degree": 16,
+                    "ef_construction": 100, "alpha": 1.2},
 })
-index = pyvsag.Index("hnsw", index_params)
+index = pyvsag.Index("hgraph", index_params)
 index.build(vectors=data, ids=ids, num_elements=num_elements, dim=dim)
 
 # Search
 query = np.float32(np.random.random(dim))
-search_params = json.dumps({"hnsw": {"ef_search": 100}})
+search_params = json.dumps({"hgraph": {"ef_search": 100}})
 result_ids, result_dists = index.knn_search(vector=query, k=10, parameters=search_params)
 for rid, rdist in zip(result_ids, result_dists):
     print(f"{rid}: {rdist}")
@@ -149,16 +151,17 @@ for (let i = 0; i < dim * numVectors; i++) vectors[i] = Math.random();
 // Create and build index
 const indexParams = JSON.stringify({
     dtype: "float32", metric_type: "l2", dim,
-    hnsw: { max_degree: 16, ef_construction: 100 },
+    index_param: { base_quantization_type: "fp32", max_degree: 16,
+                   ef_construction: 100, alpha: 1.2 },
 });
-const index = new Index("hnsw", indexParams);
+const index = new Index("hgraph", indexParams);
 index.build(vectors, ids, numVectors, dim);
 
 // Search
 const query = new Float32Array(dim);
 for (let i = 0; i < dim; i++) query[i] = Math.random();
 
-const searchParams = JSON.stringify({ hnsw: { ef_search: 100 } });
+const searchParams = JSON.stringify({ hgraph: { ef_search: 100 } });
 const { ids: resultIds, distances } = index.knnSearch(query, 10, searchParams);
 for (let i = 0; i < 10; i++) {
     console.log(`${resultIds[i]}: ${distances[i]}`);
@@ -219,9 +222,9 @@ add_dependencies (vsag-cmake-example vsag)
 C++, Python, and TypeScript examples are provided. Please explore the [examples](./examples/) directory for details.
 
 We suggest you start with:
-- **C++**: [101_index_hnsw.cpp](./examples/cpp/101_index_hnsw.cpp)
-- **Python**: [example_hnsw.py](./examples/python/example_hnsw.py)
-- **TypeScript**: [101_index_hnsw.ts](./examples/typescript/101_index_hnsw.ts)
+- **C++**: [103_index_hgraph.cpp](./examples/cpp/103_index_hgraph.cpp)
+- **Python**: [103_index_hgraph.py](./examples/python/103_index_hgraph.py)
+- **TypeScript**: [103_index_hgraph.ts](./examples/typescript/103_index_hgraph.ts)
 
 ## Building from Source
 Please read the [DEVELOPMENT](./DEVELOPMENT.md) guide for instructions on how to build.

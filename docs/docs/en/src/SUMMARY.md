@@ -59,7 +59,6 @@
 - [Per-Search Allocator](advanced/search_allocator.md)
 - [Index Introspection](advanced/introspection.md)
 - [Extensibility](advanced/extensibility.md)
-- [Graph Enhancement](advanced/enhance_graph.md)
 - [Extra Info](advanced/extra_info.md)
 - [Index Lifecycle Management](advanced/index_lifecycle.md)
 - [HGraph MCI Companion](advanced/hgraph_mci_companion.md)
@@ -91,6 +90,7 @@
 
 - [FAQ](resources/faq.md)
 - [Release Notes](resources/release_notes.md)
+  - [VSAG 1.1](resources/release_notes/v1.1.md)
   - [VSAG 1.0](resources/release_notes/v1.0.md)
 - [Roadmap (2025)](resources/roadmap_2025.md)
 - [Community](resources/community.md)
