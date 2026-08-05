@@ -177,7 +177,16 @@ public:
     }
 
     uint64_t
-    GetMemoryUsage() const override;
+    GetMemoryUsage() const override {
+        if (status_ == MEMORY) {
+            return index_->get_memory_usage() + disk_pq_compressed_vectors_.str().size() +
+                   pq_pivots_stream_.str().size() + disk_layout_stream_.str().size() +
+                   tag_stream_.str().size() + graph_stream_.str().size();
+        } else if (status_ == HYBRID) {
+            return index_->get_memory_usage();
+        }
+        return 0;
+    }
 
     uint64_t
     EstimateBuildMemory(uint64_t num_elements) const override;
@@ -263,11 +272,11 @@ private:
     std::shared_ptr<LocalFileReader> reader_;
     std::shared_ptr<diskann::PQFlashIndex<float, int64_t>> index_;
     std::shared_ptr<diskann::Index<float, int64_t, int64_t>> build_index_;
-    mutable std::stringstream pq_pivots_stream_;
-    mutable std::stringstream disk_pq_compressed_vectors_;
-    mutable std::stringstream disk_layout_stream_;
-    mutable std::stringstream tag_stream_;
-    mutable std::stringstream graph_stream_;
+    std::stringstream pq_pivots_stream_;
+    std::stringstream disk_pq_compressed_vectors_;
+    std::stringstream disk_layout_stream_;
+    std::stringstream tag_stream_;
+    std::stringstream graph_stream_;
 
     const IndexCommonParam index_common_param_;
 

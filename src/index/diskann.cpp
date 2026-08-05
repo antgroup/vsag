@@ -156,33 +156,16 @@ private:
 };
 
 uint64_t
-get_stringstream_size(std::stringstream& stream, bool restore_pos = false) {
-    // Serialization callers expect the read pointer at the beginning before copying.
-    const auto old_state = stream.rdstate();
-    stream.clear();
-
-    const auto old_pos = stream.tellg();
-    stream.seekg(0, std::ios_base::end);
-    const auto end_pos = stream.tellg();
-
-    stream.clear();
-    if (restore_pos && old_pos != std::streampos(-1)) {
-        stream.seekg(old_pos);
-    } else {
-        stream.seekg(0, std::ios_base::beg);
-    }
-
-    stream.clear(old_state);
-
-    if (end_pos == std::streampos(-1)) {
-        throw VsagException(ErrorType::READ_ERROR, "failed to get stringstream size");
-    }
-
-    return static_cast<uint64_t>(end_pos);
+get_stringstream_size(const std::stringstream& stream) {
+    std::streambuf* buf = stream.rdbuf();
+    std::streamsize size = buf->pubseekoff(
+        0, std::stringstream::end, std::stringstream::in);  // get the stream buffer size
+    buf->pubseekpos(0, std::stringstream::in);              // reset pointer pos
+    return size;
 }
 
 Binary
-convert_stream_to_binary(std::stringstream& stream) {
+convert_stream_to_binary(const std::stringstream& stream) {
     std::streambuf* buf = stream.rdbuf();
     auto size = static_cast<std::streamsize>(get_stringstream_size(stream));
     std::shared_ptr<int8_t[]> binary_data(new int8_t[size]);
@@ -1101,22 +1084,6 @@ DiskANN::deserialize(std::istream& in_stream) {
     }
 
     return {};
-}
-
-uint64_t
-DiskANN::GetMemoryUsage() const {
-    std::shared_lock lock(rw_mutex_);
-    if (status_ == MEMORY) {
-        return index_->get_memory_usage() +
-               get_stringstream_size(disk_pq_compressed_vectors_, true) +
-               get_stringstream_size(pq_pivots_stream_, true) +
-               get_stringstream_size(disk_layout_stream_, true) +
-               get_stringstream_size(tag_stream_, true) +
-               get_stringstream_size(graph_stream_, true);
-    } else if (status_ == HYBRID) {
-        return index_->get_memory_usage();
-    }
-    return 0;
 }
 
 std::string
