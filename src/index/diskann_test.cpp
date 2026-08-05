@@ -61,9 +61,9 @@ TEST_CASE("create_disk_layout reads stringstream after size lookup", "[ut][diska
     constexpr uint64_t frozen_num = 0;
     constexpr uint64_t sector_len = 512;
 
-    constexpr uint64_t index_file_size =
-        sizeof(uint64_t) + 2 * sizeof(uint32_t) + sizeof(uint64_t) +
-        npts * (sizeof(uint32_t) + sizeof(uint32_t));
+    constexpr uint64_t index_file_size = sizeof(uint64_t) + 2 * sizeof(uint32_t) +
+                                         sizeof(uint64_t) +
+                                         npts * (sizeof(uint32_t) + sizeof(uint32_t));
 
     std::stringstream vamana_reader;
     write_value(vamana_reader, index_file_size);
