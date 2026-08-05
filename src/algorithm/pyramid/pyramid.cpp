@@ -1077,9 +1077,8 @@ Pyramid::Add(const DatasetPtr& base) {
             precise_storage_resized =
                 not has_precise_reorder() ||
                 new_capacity > static_cast<int64_t>(precise_codes_->max_capacity_);
-            raw_storage_resized =
-                not create_new_raw_vector_ ||
-                new_capacity > static_cast<int64_t>(raw_vector_->max_capacity_);
+            raw_storage_resized = not create_new_raw_vector_ ||
+                                  new_capacity > static_cast<int64_t>(raw_vector_->max_capacity_);
             resize(new_capacity);
         }
 

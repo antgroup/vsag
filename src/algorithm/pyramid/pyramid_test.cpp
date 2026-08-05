@@ -649,6 +649,18 @@ TEST_CASE("Pyramid raw vector serialization handles IO storage changes",
             REQUIRE(restored.value()->GetFloat32Vectors()[i] == vectors[i]);
         }
     }
+    SECTION("streaming load rejects reader io") {
+        auto producer = std::make_shared<vsag::Pyramid>(make_param(true), common_param);
+        REQUIRE(producer->Build(dataset).empty());
+        std::stringstream buffer;
+        producer->SerializeStreaming(buffer);
+
+        std::stringstream reader(buffer.str());
+        auto loaded = vsag::Index::Load(reader, R"({"raw_vector_io_type":"reader_io"})");
+        REQUIRE_FALSE(loaded.has_value());
+        REQUIRE(loaded.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+        REQUIRE(loaded.error().message.find("reader_io") != std::string::npos);
+    }
 }
 
 TEST_CASE("Pyramid does not alias normalized FP32 codes as cosine raw vectors",
