@@ -265,6 +265,24 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid reordered range search retains filtered neighbors",
+                             "[ft][pyramid][range]") {
+    constexpr int64_t dim = 8;
+    PyramidParam pyramid_param;
+    pyramid_param.use_reorder = true;
+    pyramid_param.base_quantization_type = "rabitq";
+    pyramid_param.precise_quantization_type = "fp32";
+    auto param = GeneratePyramidBuildParametersString("l2", dim, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+    auto dataset = pool.GetDatasetAndCreate(dim, base_count, "l2", /*with_path=*/true);
+    TestContinueAdd(index, dataset, true);
+    index->SetImmutable();
+
+    auto search_param = GeneratePyramidSearchParametersString(100);
+    TestFilterSearch(index, dataset, search_param, 0.94F, true);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Set Immutable",
                              "[ft][immutable][pyramid]") {
     const auto metric_type = "l2";

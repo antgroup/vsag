@@ -16,6 +16,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include "algorithm/inner_index_interface.h"
@@ -336,7 +337,8 @@ private:
                 InnerSearchParam& search_param,
                 QueryContext& ctx,
                 const std::string& hierarchy_name,
-                const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+                const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr,
+                std::optional<float> result_radius = std::nullopt) const;
 
     /// Probabilistic check: should total_count trigger a new entry-point update?
     bool
