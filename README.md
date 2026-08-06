@@ -378,17 +378,17 @@ VSAG referenced the following works during its implementation:
         </tr>
         <tr>
             <td align="center">
-                <a href="https://github.com/Coien-rr">
-                    <img src="https://avatars.githubusercontent.com/u/83146518?v=4" width="100" alt="Coien-rr"/>
-                    <br />
-                    <sub><b>Cooper</b></sub>
-                </a>
-            </td>
-            <td align="center">
                 <a href="https://github.com/LightWant">
                     <img src="https://avatars.githubusercontent.com/u/32861432?v=4" width="100" alt="LightWant"/>
                     <br />
                     <sub><b>LightWant</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/Coien-rr">
+                    <img src="https://avatars.githubusercontent.com/u/83146518?v=4" width="100" alt="Coien-rr"/>
+                    <br />
+                    <sub><b>Cooper</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -413,26 +413,33 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/vsag-bot">
+                    <img src="https://avatars.githubusercontent.com/u/276218163?v=4" width="100" alt="vsag-bot"/>
+                    <br />
+                    <sub><b>vsag-bot</b></sub>
+                </a>
+            </td>
+        </tr>
+        <tr>
+            <td align="center">
+                <a href="https://github.com/jfeng18">
+                    <img src="https://avatars.githubusercontent.com/u/288662032?v=4" width="100" alt="jfeng18"/>
+                    <br />
+                    <sub><b>Jiangtian Feng</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/yulijunzj">
                     <img src="https://avatars.githubusercontent.com/u/22726506?v=4" width="100" alt="yulijunzj"/>
                     <br />
                     <sub><b>L J. Yun</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/misaka0714">
                     <img src="https://avatars.githubusercontent.com/u/129934985?v=4" width="100" alt="misaka0714"/>
                     <br />
                     <sub><b>baoyuan</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/jfeng18">
-                    <img src="https://avatars.githubusercontent.com/u/288662032?v=4" width="100" alt="jfeng18"/>
-                    <br />
-                    <sub><b>Jiangtian Feng</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -456,6 +463,8 @@ VSAG referenced the following works during its implementation:
                     <sub><b>Ant OSS</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/pkusunjy">
                     <img src="https://avatars.githubusercontent.com/u/11880269?v=4" width="100" alt="pkusunjy"/>
@@ -463,8 +472,6 @@ VSAG referenced the following works during its implementation:
                     <sub><b>Sun Jiayu</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/Sia-Sheerland">
                     <img src="https://avatars.githubusercontent.com/u/204556736?v=4" width="100" alt="Sia-Sheerland"/>
@@ -500,6 +507,8 @@ VSAG referenced the following works during its implementation:
                     <sub><b>Liyao Xiong</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/mly5269">
                     <img src="https://avatars.githubusercontent.com/u/130448862?v=4" width="100" alt="mly5269"/>
@@ -507,20 +516,11 @@ VSAG referenced the following works during its implementation:
                     <sub><b>mly</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/Ningsir">
                     <img src="https://avatars.githubusercontent.com/u/34963409?v=4" width="100" alt="Ningsir"/>
                     <br />
                     <sub><b>Xinger</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/vsag-bot">
-                    <img src="https://avatars.githubusercontent.com/u/276218163?v=4" width="100" alt="vsag-bot"/>
-                    <br />
-                    <sub><b>vsag-bot</b></sub>
                 </a>
             </td>
             <td align="center">
