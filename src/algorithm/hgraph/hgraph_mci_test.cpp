@@ -371,9 +371,10 @@ TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][
                                  R"("hgraph_valid_ratio_threshold":1.0}})",
                                  mixed_filter);
     REQUIRE(result.has_value());
-    REQUIRE(result.value()->GetDim() == 0);
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == ids[base_count + 1]);
     REQUIRE(std::stoull(result.value()->GetStatistics({"mci_seed_count"})[0]) == 0);
-    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("hgraph")");
 
     const std::vector<int64_t> stale_ids{9000, 9001, 9002};
     auto stale_filter = std::make_shared<CountingValidIdsFilter>(stale_ids);
@@ -385,8 +386,8 @@ TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][
                                  stale_filter);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() == 0);
-    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
-    REQUIRE(stale_filter->CheckCount() == 0);
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("hgraph")");
+    REQUIRE(stale_filter->CheckCount() > 0);
 }
 
 TEST_CASE("HGraph cache-accelerated NSW build creates MCI companion", "[ut][hgraph][mci]") {
@@ -579,7 +580,7 @@ TEST_CASE("MCI builder treats clique_max only as a storage cap", "[ut][hgraph][m
     params.total = total;
     params.dim = dim;
     params.candidate_limit = 5;
-    params.clique_max = 50;
+    params.clique_max = 2;
     params.max_degree = 2;
     params.alpha = 2.1F;
     params.thread_count = 2;
@@ -587,8 +588,11 @@ TEST_CASE("MCI builder treats clique_max only as a storage cap", "[ut][hgraph][m
 
     vsag::DefaultAllocator allocator;
     const auto cliques = vsag::BuildMCICliques(vectors.data(), graph, params, &allocator);
+    REQUIRE_FALSE(cliques.empty());
+    REQUIRE(std::all_of(
+        cliques.begin(), cliques.end(), [](const auto& clique) { return clique.size() <= 2; }));
     REQUIRE(std::any_of(
-        cliques.begin(), cliques.end(), [](const auto& clique) { return clique.size() == 3; }));
+        cliques.begin(), cliques.end(), [](const auto& clique) { return clique.size() == 2; }));
 }
 
 TEST_CASE("MCI builder transports worker exceptions", "[ut][hgraph][mci]") {

@@ -53,11 +53,14 @@ struct MCIEpochMarks {
 
     [[nodiscard]] bool
     Get(InnerIdType id) const {
-        return marks[id] == tag;
+        return id < marks.size() and marks[id] == tag;
     }
 
     void
     Set(InnerIdType id) {
+        if (id >= marks.size()) {
+            marks.resize(static_cast<uint64_t>(id) + 1, 0);
+        }
         marks[id] = tag;
     }
 };
@@ -243,7 +246,7 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
                     const InnerSearchParam& inner_search_param,
                     const MCISearcherParam& mci_param,
                     QueryContext* ctx) const {
-    auto* alloc = allocator_;
+    auto* alloc = select_query_allocator(ctx, allocator_);
     const auto candidate_limit =
         std::max<int64_t>(inner_search_param.topk, static_cast<int64_t>(inner_search_param.ef));
     auto heap = DistanceHeap::MakeInstanceBySize<true, true>(alloc, candidate_limit);

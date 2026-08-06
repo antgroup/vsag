@@ -565,7 +565,7 @@ HGraph::try_mci_search(const SearchRequest& request,
     result.seed_count = seed_inner_ids.size();
     mci_param.seed_count = result.seed_count;
     mci_param.seed_inner_ids = &seed_inner_ids;
-    if (bitset_seed_source and seed_inner_ids.empty()) {
+    if (seed_inner_ids.empty()) {
         return result;
     }
 
