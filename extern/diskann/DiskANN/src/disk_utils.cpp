@@ -22,6 +22,35 @@
 namespace diskann
 {
 
+static uint64_t get_stringstream_size(std::stringstream &stream)
+{
+    const auto old_state = stream.rdstate();
+    stream.clear();
+
+    const auto old_pos = stream.tellg();
+    stream.seekg(0, std::ios_base::end);
+    const auto end_pos = stream.tellg();
+
+    if (old_pos != std::streampos(-1))
+    {
+        stream.seekg(old_pos);
+    }
+    else
+    {
+        stream.seekg(0, std::ios_base::beg);
+    }
+
+    stream.clear(old_state);
+
+    if (end_pos == std::streampos(-1))
+    {
+        throw diskann::ANNException("Failed to get stringstream size", -1, __FUNCSIG__, __FILE__,
+                                    __LINE__);
+    }
+
+    return static_cast<uint64_t>(end_pos);
+}
+
 void add_new_file_to_single_index(std::string index_file, std::string new_file)
 {
     std::unique_ptr<uint64_t[]> metadata;
@@ -1041,7 +1070,7 @@ void create_disk_layout(const T *data, uint32_t npts, uint32_t ndims, const std:
         uint32_t npts_reorder_file = 0, ndims_reorder_file = 0;
 
         // create cached reader + writer
-        uint64_t actual_file_size = vamana_reader.str().size();
+        uint64_t actual_file_size = get_stringstream_size(vamana_reader);
         // diskann::cout << "Vamana index file size=" << actual_file_size << std::endl;
 
         // metadata: width, medoid
