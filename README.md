@@ -538,12 +538,21 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/Hastyshell">
+                    <img src="https://avatars.githubusercontent.com/u/82279870?v=4" width="100" alt="Hastyshell"/>
+                    <br />
+                    <sub><b>Siyang Tang</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/hhy3">
                     <img src="https://avatars.githubusercontent.com/u/44047980?v=4" width="100" alt="hhy3"/>
                     <br />
                     <sub><b>Zihao Wang</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/jiaweizone">
                     <img src="https://avatars.githubusercontent.com/u/251354?v=4" width="100" alt="jiaweizone"/>
@@ -551,8 +560,6 @@ VSAG referenced the following works during its implementation:
                     <sub><b>wei</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/liric24">
                     <img src="https://avatars.githubusercontent.com/u/11338347?v=4" width="100" alt="liric24"/>
