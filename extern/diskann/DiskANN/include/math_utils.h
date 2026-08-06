@@ -9,6 +9,10 @@
 namespace math_utils
 {
 
+// compute_closest_centers processes points in blocks so the GEMM scratch matrix stays bounded
+// to num_centers * kMaxClosestCenterBlockSize floats.
+constexpr uint64_t kMaxClosestCenterBlockSize = 65536;
+
 float calc_distance(float *vec_1, float *vec_2, uint64_t dim);
 
 // compute l2-squared norms of data stored in row major num_points * dim,

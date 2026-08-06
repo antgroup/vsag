@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 #include <limits>
+#include <memory>
 #ifdef __APPLE__
 #include <cstdlib>
 #else
@@ -161,53 +162,58 @@ void compute_closest_centers(float *data, uint64_t num_points, uint64_t dim, flo
         return;
     }
 
+    if (num_points == 0 || k == 0)
+    {
+        return;
+    }
+
     bool is_norm_given_for_pts = (pts_norms_squared != NULL);
 
-    float *pivs_norms_squared = new float[num_centers];
+    std::unique_ptr<float[]> pivs_norms_squared(new float[num_centers]);
+    std::unique_ptr<float[]> owned_pts_norms_squared;
     if (!is_norm_given_for_pts)
-        pts_norms_squared = new float[num_points];
+    {
+        owned_pts_norms_squared.reset(new float[num_points]);
+        pts_norms_squared = owned_pts_norms_squared.get();
+    }
 
-    uint64_t PAR_BLOCK_SIZE = num_points;
-    uint64_t N_BLOCKS =
-        (num_points % PAR_BLOCK_SIZE) == 0 ? (num_points / PAR_BLOCK_SIZE) : (num_points / PAR_BLOCK_SIZE) + 1;
+    uint64_t par_block_size = std::min<uint64_t>(num_points, kMaxClosestCenterBlockSize);
+    uint64_t n_blocks = (num_points + par_block_size - 1) / par_block_size;
 
     if (!is_norm_given_for_pts)
         math_utils::compute_vecs_l2sq(pts_norms_squared, data, num_points, dim);
-    math_utils::compute_vecs_l2sq(pivs_norms_squared, pivot_data, num_centers, dim);
-    uint32_t *closest_centers = new uint32_t[PAR_BLOCK_SIZE * k];
-    float *distance_matrix = new float[num_centers * PAR_BLOCK_SIZE];
+    math_utils::compute_vecs_l2sq(pivs_norms_squared.get(), pivot_data, num_centers, dim);
+    std::unique_ptr<uint32_t[]> closest_centers(new uint32_t[par_block_size * k]);
+    std::unique_ptr<float[]> distance_matrix(new float[num_centers * par_block_size]);
 
-    for (uint64_t cur_blk = 0; cur_blk < N_BLOCKS; cur_blk++)
+    for (uint64_t cur_blk = 0; cur_blk < n_blocks; cur_blk++)
     {
-        float *data_cur_blk = data + cur_blk * PAR_BLOCK_SIZE * dim;
-        uint64_t num_pts_blk = std::min(PAR_BLOCK_SIZE, num_points - cur_blk * PAR_BLOCK_SIZE);
-        float *pts_norms_blk = pts_norms_squared + cur_blk * PAR_BLOCK_SIZE;
+        uint64_t block_begin = cur_blk * par_block_size;
+        float *data_cur_blk = data + block_begin * dim;
+        uint64_t num_pts_blk = std::min(par_block_size, num_points - block_begin);
+        float *pts_norms_blk = pts_norms_squared + block_begin;
 
-        math_utils::compute_closest_centers_in_block(data_cur_blk, num_pts_blk, dim, pivot_data, num_centers,
-                                                     pts_norms_blk, pivs_norms_squared, closest_centers,
-                                                     distance_matrix, k);
+        math_utils::compute_closest_centers_in_block(data_cur_blk, num_pts_blk, dim, pivot_data,
+                                                     num_centers, pts_norms_blk,
+                                                     pivs_norms_squared.get(),
+                                                     closest_centers.get(), distance_matrix.get(), k);
 
         // #pragma omp parallel for schedule(static, 1)
-        for (int64_t j = cur_blk * PAR_BLOCK_SIZE;
-             j < std::min((int64_t)num_points, (int64_t)((cur_blk + 1) * PAR_BLOCK_SIZE)); j++)
+        for (uint64_t local = 0; local < num_pts_blk; local++)
         {
+            uint64_t global = block_begin + local;
             for (uint64_t l = 0; l < k; l++)
             {
-                uint64_t this_center_id = closest_centers[(j - cur_blk * PAR_BLOCK_SIZE) * k + l];
-                closest_centers_ivf[j * k + l] = (uint32_t)this_center_id;
+                uint64_t this_center_id = closest_centers[local * k + l];
+                closest_centers_ivf[global * k + l] = (uint32_t)this_center_id;
                 if (inverted_index != NULL)
                 {
                     // #pragma omp critical
-                    inverted_index[this_center_id].push_back(j);
+                    inverted_index[this_center_id].push_back(global);
                 }
             }
         }
     }
-    delete[] closest_centers;
-    delete[] distance_matrix;
-    delete[] pivs_norms_squared;
-    if (!is_norm_given_for_pts)
-        delete[] pts_norms_squared;
 }
 
 // if to_subtract is 1, will subtract nearest center from each row. Else will
