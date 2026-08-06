@@ -174,7 +174,6 @@ BuildMCICliques(const float* vectors,
         std::atomic<uint64_t> next_id{0};
         Vector<std::thread> workers(allocator);
         workers.reserve(thread_count);
-        MCIThreadJoinGuard join_guard(workers);
         std::mutex norm_mutex;
         std::exception_ptr worker_exception;
         std::mutex exception_mutex;
@@ -188,6 +187,7 @@ BuildMCICliques(const float* vectors,
                 }
             }
         };
+        MCIThreadJoinGuard join_guard(workers);
         for (uint64_t tid = 0; tid < thread_count; ++tid) {
             workers.emplace_back(catch_worker_exception, [&, tid]() {
                 double local_max = 0.0;
@@ -284,7 +284,6 @@ BuildMCICliques(const float* vectors,
         Vector<MCIV3ThreadTiming> round_timings(thread_count, allocator);
         Vector<std::thread> workers(allocator);
         workers.reserve(thread_count);
-        MCIThreadJoinGuard join_guard(workers);
         std::exception_ptr worker_exception;
         std::mutex exception_mutex;
         auto catch_worker_exception = [&](auto worker) {
@@ -297,6 +296,7 @@ BuildMCICliques(const float* vectors,
                 }
             }
         };
+        MCIThreadJoinGuard join_guard(workers);
 
         for (uint64_t tid = 0; tid < thread_count; ++tid) {
             workers.emplace_back(catch_worker_exception, [&, tid]() {
