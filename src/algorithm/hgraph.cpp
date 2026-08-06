@@ -933,10 +933,20 @@ HGraph::KnnSearch(const DatasetPtr& query,
     auto search_result = DistanceHeap::MakeInstanceBySize<true, false>(ctx.alloc, k);
     const auto* query_data = get_data(query);
     if (is_last_filter) {
+        if (const auto* pending_duplicates = iter_filter_ctx->GetPendingDuplicates();
+            pending_duplicates != nullptr) {
+            for (const auto& [pending_id, pending_dist] : *pending_duplicates) {
+                if (iter_filter_ctx->CheckPoint(pending_id)) {
+                    search_result->Push(pending_dist, pending_id);
+                }
+            }
+        }
         while (!iter_filter_ctx->Empty()) {
             uint32_t cur_inner_id = iter_filter_ctx->GetTopID();
             float cur_dist = iter_filter_ctx->GetTopDist();
-            search_result->Push(cur_dist, cur_inner_id);
+            if (not iter_filter_ctx->IsPendingDuplicate(cur_inner_id)) {
+                search_result->Push(cur_dist, cur_inner_id);
+            }
             iter_filter_ctx->PopDiscard();
         }
     } else {
@@ -964,6 +974,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.is_inner_id_allowed = ft;
         search_param.topk = static_cast<int64_t>(search_param.ef);
         search_param.consider_duplicate = this->label_table_->CompressDuplicateData();
+        search_param.max_duplicates_per_group = params.max_duplicates_per_group;
         search_param.parallel_search_thread_count = params.parallel_search_thread_count;
         search_param.min_distance = params.min_distance;
 
@@ -1410,6 +1421,9 @@ HGraph::Serialize(StreamWriter& writer) const {
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Serialize(writer);
         }
+        if (this->label_table_->CompressDuplicateData()) {
+            this->label_table_->SerializeDuplicateRecords(writer);
+        }
         return;
     }
 
@@ -1473,6 +1487,11 @@ HGraph::Deserialize(StreamReader& reader) {
 
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Deserialize(reader);
+        }
+        if (this->label_table_->CompressDuplicateData()) {
+            const auto logical_element_count =
+                static_cast<uint64_t>(this->label_table_->GetTotalCount());
+            this->label_table_->DeserializeDuplicateRecords(reader, logical_element_count);
         }
     } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
         logger::debug("parse with new version format");
@@ -2222,6 +2241,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             search_param.topk, static_cast<int64_t>(static_cast<float>(k) * params.topk_factor));
     }
     search_param.consider_duplicate = true;
+    search_param.max_duplicates_per_group = params.max_duplicates_per_group;
     if (params.enable_time_record) {
         search_param.time_cost = std::make_shared<Timer>();
         search_param.time_cost->SetThreshold(params.timeout_ms);

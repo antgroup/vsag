@@ -15,6 +15,8 @@
 
 #include "hgraph_parameter.h"
 
+#include <nlohmann/json.hpp>
+
 #include "datacell/extra_info_datacell_parameter.h"
 #include "datacell/flatten_datacell_parameter.h"
 #include "datacell/graph_datacell_parameter.h"
@@ -222,6 +224,22 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
 
     if (params[INDEX_TYPE_HGRAPH].Contains("min_distance")) {
         obj.min_distance = params[INDEX_TYPE_HGRAPH]["min_distance"].GetFloat();
+    }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_MAX_DUPLICATES_PER_GROUP)) {
+        const auto& max_duplicates =
+            params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_MAX_DUPLICATES_PER_GROUP];
+        CHECK_ARGUMENT(max_duplicates.IsNumberInteger(),
+                       "max_duplicates_per_group must be an integer");
+        const auto* max_duplicates_json = max_duplicates.GetInnerJson();
+        if (max_duplicates_json->is_number_unsigned()) {
+            CHECK_ARGUMENT(max_duplicates_json->get<uint64_t>() <=
+                               static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+                           "max_duplicates_per_group exceeds int64_t range");
+        }
+        obj.max_duplicates_per_group = max_duplicates.GetInt();
+        CHECK_ARGUMENT(obj.max_duplicates_per_group >= -1,
+                       fmt::format("max_duplicates_per_group({}) must be >= -1",
+                                   obj.max_duplicates_per_group));
     }
 
     return obj;

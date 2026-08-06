@@ -139,13 +139,66 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             : 1.0F,
         inner_search_param.skip_ratio);
 
+    auto add_pending_duplicates = [&](float duplicate_dist, InnerIdType group_head_id) {
+        if constexpr (mode != InnerSearchMode::KNN_SEARCH) {
+            return;
+        }
+        if (not inner_search_param.consider_duplicate or
+            inner_search_param.max_duplicates_per_group == 0 or label_table == nullptr or
+            not label_table->CompressDuplicateData() or
+            duplicate_dist <= inner_search_param.min_distance + THRESHOLD_ERROR) {
+            return;
+        }
+
+        int64_t duplicate_count = 0;
+        for (const auto duplicate_id : label_table->GetDuplicateId(group_head_id)) {
+            if (inner_search_param.max_duplicates_per_group >= 0 and
+                duplicate_count >= inner_search_param.max_duplicates_per_group) {
+                break;
+            }
+            if (is_id_allowed != nullptr and not is_id_allowed->CheckValid(duplicate_id)) {
+                continue;
+            }
+
+            ++duplicate_count;
+            if (not iter_ctx->CheckPoint(duplicate_id) or
+                not iter_ctx->AddPendingDuplicate(duplicate_dist, duplicate_id)) {
+                continue;
+            }
+            top_candidates->Push(duplicate_dist, duplicate_id);
+        }
+    };
+
+    auto shrink_top_candidates = [&](uint64_t limit) {
+        while (top_candidates->Size() > limit) {
+            const auto current = top_candidates->Top();
+            if (iter_ctx->CheckPoint(current.second)) {
+                iter_ctx->AddDiscardNode(current.first, current.second);
+            }
+            top_candidates->Pop();
+        }
+    };
+
     if (!iter_ctx->IsFirstUsed()) {
-        if (iter_ctx->Empty()) {
+        if (iter_ctx->Empty() and iter_ctx->GetPendingDuplicateElementNum() == 0) {
             return top_candidates;
+        }
+
+        if (const auto* pending_duplicates = iter_ctx->GetPendingDuplicates();
+            pending_duplicates != nullptr) {
+            for (const auto& [pending_id, pending_dist] : *pending_duplicates) {
+                if (iter_ctx->CheckPoint(pending_id)) {
+                    top_candidates->Push(pending_dist, pending_id);
+                }
+            }
         }
         while (!iter_ctx->Empty()) {
             uint32_t cur_inner_id = iter_ctx->GetTopID();
             float cur_dist = iter_ctx->GetTopDist();
+            if (iter_ctx->IsPendingDuplicate(cur_inner_id)) {
+                iter_ctx->PopDiscard();
+                continue;
+            }
             vl->Set(cur_inner_id);
             if (iter_ctx->CheckPoint(cur_inner_id)) {
                 lower_bound = std::max(lower_bound, cur_dist);
@@ -153,7 +206,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 if (cur_dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
                     top_candidates->Push(cur_dist, cur_inner_id);
                 }
-                candidate_set->Push(cur_dist, cur_inner_id);
+                add_pending_duplicates(cur_dist, cur_inner_id);
+                candidate_set->Push(-cur_dist, cur_inner_id);
                 if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
                     if (cur_dist > inner_search_param.radius and not top_candidates->Empty()) {
                         top_candidates->Pop();
@@ -162,39 +216,27 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             }
             iter_ctx->PopDiscard();
         }
+        if constexpr (mode == KNN_SEARCH) {
+            shrink_top_candidates(ef);
+        }
+        if (not top_candidates->Empty()) {
+            lower_bound = top_candidates->Top().first;
+        }
     } else {
         flatten->Query(&dist, computer, &ep, 1, ctx);
         if ((not is_id_allowed || is_id_allowed->CheckValid(ep)) and
             !(dist <= inner_search_param.min_distance + THRESHOLD_ERROR)) {
             top_candidates->Push(dist, ep);
+        }
+        add_pending_duplicates(dist, ep);
+        if constexpr (mode == KNN_SEARCH) {
+            shrink_top_candidates(ef);
+        }
+        if (not top_candidates->Empty()) {
             lower_bound = top_candidates->Top().first;
         }
         candidate_set->Push(-dist, ep);
         vl->Set(ep);
-
-        if (inner_search_param.consider_duplicate and label_table != nullptr and
-            label_table->CompressDuplicateData()) {
-            const auto& duplicate_ids = label_table->GetDuplicateId(ep);
-            for (const auto& item : duplicate_ids) {
-                if ((not is_id_allowed || is_id_allowed->CheckValid(item)) and
-                    iter_ctx->CheckPoint(item) and
-                    dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
-                    top_candidates->Push(dist, item);
-                }
-            }
-            if constexpr (mode == KNN_SEARCH) {
-                if (top_candidates->Size() > ef) {
-                    if (iter_ctx->CheckPoint(top_candidates->Top().second)) {
-                        auto cur_node_pair = top_candidates->Top();
-                        iter_ctx->AddDiscardNode(cur_node_pair.first, cur_node_pair.second);
-                    }
-                    top_candidates->Pop();
-                }
-            }
-            if (not top_candidates->Empty()) {
-                lower_bound = top_candidates->Top().first;
-            }
-        }
     }
 
     while (not candidate_set->Empty()) {
@@ -242,25 +284,10 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                     top_candidates->Push(dist, to_be_visited_id[i]);
                 }
 
-                if (inner_search_param.consider_duplicate and label_table != nullptr and
-                    label_table->CompressDuplicateData()) {
-                    const auto& duplicate_ids = label_table->GetDuplicateId(to_be_visited_id[i]);
-                    for (const auto& item : duplicate_ids) {
-                        if ((not is_id_allowed || is_id_allowed->CheckValid(item)) and
-                            iter_ctx->CheckPoint(item)) {
-                            top_candidates->Push(dist, item);
-                        }
-                    }
-                }
+                add_pending_duplicates(dist, to_be_visited_id[i]);
 
                 if constexpr (mode == KNN_SEARCH) {
-                    if (top_candidates->Size() > ef) {
-                        if (iter_ctx->CheckPoint(top_candidates->Top().second)) {
-                            auto cur_node_pair = top_candidates->Top();
-                            iter_ctx->AddDiscardNode(cur_node_pair.first, cur_node_pair.second);
-                        }
-                        top_candidates->Pop();
-                    }
+                    shrink_top_candidates(ef);
                 }
 
                 if (not top_candidates->Empty()) {
@@ -271,13 +298,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     }
 
     if constexpr (mode == KNN_SEARCH) {
-        while (top_candidates->Size() > inner_search_param.topk) {
-            auto cur_node_pair = top_candidates->Top();
-            if (iter_ctx->CheckPoint(cur_node_pair.second)) {
-                iter_ctx->AddDiscardNode(cur_node_pair.first, cur_node_pair.second);
-            }
-            top_candidates->Pop();
-        }
+        shrink_top_candidates(inner_search_param.topk);
     }
 
     return top_candidates;
@@ -336,6 +357,33 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                (attr_ft == nullptr or attr_ft->CheckValid(id));
     };
 
+    auto add_duplicate_results = [&](float duplicate_dist, InnerIdType group_head_id) {
+        if (not inner_search_param.consider_duplicate or label_table == nullptr or
+            not label_table->CompressDuplicateData() or
+            duplicate_dist <= inner_search_param.min_distance + THRESHOLD_ERROR) {
+            return;
+        }
+        if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+            if (inner_search_param.max_duplicates_per_group == 0) {
+                return;
+            }
+        }
+
+        int64_t duplicate_count = 0;
+        for (const auto duplicate_id : label_table->GetDuplicateId(group_head_id)) {
+            if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+                if (inner_search_param.max_duplicates_per_group >= 0 and
+                    duplicate_count >= inner_search_param.max_duplicates_per_group) {
+                    break;
+                }
+            }
+            if (check_func(duplicate_id)) {
+                top_candidates->Push(duplicate_dist, duplicate_id);
+                ++duplicate_count;
+            }
+        }
+    };
+
     flatten->Query(&dist, computer, &ep, 1, ctx);
     ++dist_cmp;
     if (check_func(ep) && !(dist <= inner_search_param.min_distance + THRESHOLD_ERROR)) {
@@ -350,22 +398,14 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     candidate_set->Push(-dist, ep);
     vl->Set(ep);
 
-    if (inner_search_param.consider_duplicate and label_table != nullptr and
-        label_table->CompressDuplicateData()) {
-        const auto& duplicate_ids = label_table->GetDuplicateId(ep);
-        for (const auto& item : duplicate_ids) {
-            if (check_func(item) && dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
-                top_candidates->Push(dist, item);
-            }
+    add_duplicate_results(dist, ep);
+    if constexpr (mode == KNN_SEARCH) {
+        while (top_candidates->Size() > ef) {
+            top_candidates->Pop();
         }
-        if constexpr (mode == KNN_SEARCH) {
-            if (top_candidates->Size() > ef) {
-                top_candidates->Pop();
-            }
-        }
-        if (not top_candidates->Empty()) {
-            lower_bound = top_candidates->Top().first;
-        }
+    }
+    if (not top_candidates->Empty()) {
+        lower_bound = top_candidates->Top().first;
     }
 
     while (not candidate_set->Empty()) {
@@ -416,19 +456,10 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                     dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
                     top_candidates->Push(dist, to_be_visited_id[i]);
                 }
-                if (inner_search_param.consider_duplicate and label_table != nullptr and
-                    label_table->CompressDuplicateData()) {
-                    const auto& duplicate_ids = label_table->GetDuplicateId(to_be_visited_id[i]);
-                    for (const auto& item : duplicate_ids) {
-                        if (check_func(item) &&
-                            dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
-                            top_candidates->Push(dist, item);
-                        }
-                    }
-                }
+                add_duplicate_results(dist, to_be_visited_id[i]);
 
                 if constexpr (mode == KNN_SEARCH) {
-                    if (top_candidates->Size() > ef) {
+                    while (top_candidates->Size() > ef) {
                         top_candidates->Pop();
                     }
                 }

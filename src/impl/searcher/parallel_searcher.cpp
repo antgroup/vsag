@@ -15,6 +15,7 @@
 
 #include "parallel_searcher.h"
 
+#include <future>
 #include <limits>
 #include <utility>
 
@@ -138,8 +139,34 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
             : 1.0F,
         inner_search_param.skip_ratio);
 
+    auto add_knn_duplicate_results = [&](float duplicate_dist, InnerIdType group_head_id) {
+        if (not inner_search_param.consider_duplicate or label_table == nullptr or
+            not label_table->CompressDuplicateData() or
+            inner_search_param.max_duplicates_per_group == 0 or
+            duplicate_dist <= inner_search_param.min_distance + THRESHOLD_ERROR) {
+            return;
+        }
+
+        int64_t duplicate_count = 0;
+        for (const auto duplicate_id : label_table->GetDuplicateId(group_head_id)) {
+            if (inner_search_param.max_duplicates_per_group >= 0 and
+                duplicate_count >= inner_search_param.max_duplicates_per_group) {
+                break;
+            }
+            if (is_id_allowed == nullptr or is_id_allowed->CheckValid(duplicate_id)) {
+                top_candidates->Push(duplicate_dist, duplicate_id);
+                ++duplicate_count;
+            }
+        }
+    };
+
     flatten->Query(&dist, computer, &ep, 1, ctx);
-    if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
+    bool entry_point_allowed = not is_id_allowed or is_id_allowed->CheckValid(ep);
+    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+        entry_point_allowed =
+            entry_point_allowed and dist > inner_search_param.min_distance + THRESHOLD_ERROR;
+    }
+    if (entry_point_allowed) {
         top_candidates->Push(dist, ep);
         lower_bound = top_candidates->Top().first;
     }
@@ -154,22 +181,23 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     candidate_set->Push(-dist, ep);
     vl->Set(ep);
 
-    if (inner_search_param.consider_duplicate && label_table &&
-        label_table->CompressDuplicateData()) {
-        const auto& duplicate_ids = label_table->GetDuplicateId(ep);
-        for (const auto& item : duplicate_ids) {
-            if (not is_id_allowed || is_id_allowed->CheckValid(item)) {
-                top_candidates->Push(dist, item);
+    if constexpr (mode == KNN_SEARCH) {
+        add_knn_duplicate_results(dist, ep);
+        while (top_candidates->Size() > ef) {
+            top_candidates->Pop();
+        }
+    } else if constexpr (mode == RANGE_SEARCH) {
+        if (inner_search_param.consider_duplicate and label_table != nullptr and
+            label_table->CompressDuplicateData()) {
+            for (const auto duplicate_id : label_table->GetDuplicateId(ep)) {
+                if (is_id_allowed == nullptr or is_id_allowed->CheckValid(duplicate_id)) {
+                    top_candidates->Push(dist, duplicate_id);
+                }
             }
         }
-        if constexpr (mode == KNN_SEARCH) {
-            if (top_candidates->Size() > ef) {
-                top_candidates->Pop();
-            }
-        }
-        if (not top_candidates->Empty()) {
-            lower_bound = top_candidates->Top().first;
-        }
+    }
+    if (not top_candidates->Empty()) {
+        lower_bound = top_candidates->Top().first;
     }
 
     auto num_threads = inner_search_param.parallel_search_thread_count - 1;
@@ -192,8 +220,10 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         }
     };
 
+    std::vector<std::future<void>> futures;
+    futures.reserve(num_threads);
     for (uint64_t i = 0; i < num_threads; i++) {
-        pool->GeneralEnqueue(task, i);
+        futures.emplace_back(pool->GeneralEnqueue(task, i));
     }
 
     while (not candidate_set->Empty()) {
@@ -271,19 +301,20 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                     dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
                     top_candidates->Push(dist, to_be_visited_id[i]);
                 }
-                if (inner_search_param.consider_duplicate && label_table &&
-                    label_table->CompressDuplicateData()) {
-                    const auto& duplicate_ids = label_table->GetDuplicateId(to_be_visited_id[i]);
-                    for (const auto& item : duplicate_ids) {
-                        if (dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
-                            top_candidates->Push(dist, item);
-                        }
-                    }
-                }
-
                 if constexpr (mode == KNN_SEARCH) {
-                    if (top_candidates->Size() > ef) {
+                    add_knn_duplicate_results(dist, to_be_visited_id[i]);
+                    while (top_candidates->Size() > ef) {
                         top_candidates->Pop();
+                    }
+                } else if constexpr (mode == RANGE_SEARCH) {
+                    if (inner_search_param.consider_duplicate and label_table != nullptr and
+                        label_table->CompressDuplicateData()) {
+                        for (const auto duplicate_id :
+                             label_table->GetDuplicateId(to_be_visited_id[i])) {
+                            if (dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
+                                top_candidates->Push(dist, duplicate_id);
+                            }
+                        }
                     }
                 }
 
@@ -313,7 +344,9 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     for (uint64_t i = 0; i < num_threads; i++) {
         queues[i].Push({nullptr, nullptr, 0});
     }
-
+    for (auto& future : futures) {
+        future.get();
+    }
     return top_candidates;
 }
 

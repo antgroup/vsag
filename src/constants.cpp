@@ -164,6 +164,7 @@ const char* const HGRAPH_PRECISE_IO_TYPE = "precise_io_type";
 const char* const HGRAPH_PRECISE_FILE_PATH = "precise_file_path";
 const char* const HGRAPH_PARAMETER_EF_RUNTIME = "ef_search";
 const char* const HGRAPH_PARAMETER_HOPS_LIMIT = "hops_limit";
+const char* const HGRAPH_PARAMETER_MAX_DUPLICATES_PER_GROUP = "max_duplicates_per_group";
 const char* const HGRAPH_EXTRA_INFO_SIZE = "extra_info_size";
 const char* const HGRAPH_SUPPORT_DUPLICATE = "support_duplicate";
 const char* const HGRAPH_DUPLICATE_DISTANCE_THRESHOLD = "duplicate_distance_threshold";

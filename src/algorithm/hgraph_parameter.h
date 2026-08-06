@@ -82,6 +82,9 @@ public:
     bool use_reorder{false};
     bool use_extra_info_filter{false};
     float min_distance{std::numeric_limits<float>::lowest()};
+    // Maximum additional duplicate IDs returned per group during KNN graph search.
+    // -1 means unlimited; 0 disables duplicate expansion.
+    int64_t max_duplicates_per_group{-1};
 
 private:
     HGraphSearchParameters() = default;
