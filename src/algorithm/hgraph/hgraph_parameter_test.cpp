@@ -316,6 +316,7 @@ TEST_CASE("HGraph maps flat MCI parameters", "[ut][HGraphParameter]") {
         "mci_mcs": 8,
         "mci_clique_max": 4,
         "mci_alpha": 1.2,
+        "mci_knng_source": "odescent",
         "mci_incremental_join_ratio_threshold": 0.7,
         "mci_incremental_added_mct": 2,
         "mci_incremental_clique_max": 4
@@ -332,6 +333,7 @@ TEST_CASE("HGraph maps flat MCI parameters", "[ut][HGraphParameter]") {
     REQUIRE(typed_param->mci_parameters.mcs == 8);
     REQUIRE(typed_param->mci_parameters.clique_max == 4);
     REQUIRE(typed_param->mci_parameters.alpha == 1.2F);
+    REQUIRE(typed_param->mci_parameters.knng_source == "odescent");
     REQUIRE(typed_param->mci_parameters.incremental_join_ratio_threshold == 0.7F);
     REQUIRE(typed_param->mci_parameters.incremental_added_mct == 2);
     REQUIRE(typed_param->mci_parameters.incremental_clique_max == 4);
@@ -342,6 +344,7 @@ TEST_CASE("HGraph maps flat MCI parameters", "[ut][HGraphParameter]") {
     REQUIRE(json["mci_mcs"].GetInt() == 8);
     REQUIRE(json["mci_clique_max"].GetInt() == 4);
     REQUIRE(json["mci_alpha"].GetFloat() == 1.2F);
+    REQUIRE(json["mci_knng_source"].GetString() == "odescent");
 }
 
 TEST_CASE("HGraph enables MCI from any public trigger", "[ut][HGraphParameter]") {
@@ -392,6 +395,11 @@ TEST_CASE("HGraph enables MCI from any public trigger", "[ut][HGraphParameter]")
     SECTION("mci_alpha") {
         auto param = make_param();
         param["mci_alpha"].SetFloat(1.2F);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("mci_knng_source") {
+        auto param = make_param();
+        param["mci_knng_source"].SetString("odescent");
         REQUIRE(is_mci_enabled(param));
     }
 
@@ -458,6 +466,11 @@ TEST_CASE("HGraph rejects invalid flat MCI parameters", "[ut][HGraphParameter]")
     SECTION("mci_incremental_clique_max") {
         auto param = make_param();
         param["mci_incremental_clique_max"].SetInt(-1);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("mci_knng_source") {
+        auto param = make_param();
+        param["mci_knng_source"].SetString("unknown");
         REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
     }
 }

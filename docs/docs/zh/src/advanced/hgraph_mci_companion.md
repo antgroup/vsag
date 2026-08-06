@@ -11,9 +11,9 @@ HGraph 可以选择构建一个 MCI（Maximal Clique Index）挂件，用于带�
 ## 构建配置
 
 MCI 构建参数直接放在 `index_param` 下，不再使用嵌套对象。满足以下任一条件即
-启用挂件：`use_mci` 为 true，或出现 `mci_mcs`、`mci_clique_max`、`mci_alpha` 中的
-任意一个。
-四个字段都省略时关闭 MCI：
+启用挂件：`use_mci` 为 true，或出现任意 MCI 构建参数。`mci_knng_source` 用于
+选择构团所需 KNN 图的来源：可以从已经构建好的 HGraph bottom graph 派生，也可以
+单独构建一张 ODescent 图。
 
 ```json
 {
@@ -26,18 +26,22 @@ MCI 构建参数直接放在 `index_param` 下，不再使用嵌套对象。满�
     "ef_construction": 400,
     "mci_mcs": 200,
     "mci_clique_max": 50,
-    "mci_alpha": 1.2
+    "mci_alpha": 1.2,
+    "mci_knng_source": "odescent"
   }
 }
 ```
 
-HGraph 会从已经构建好的 HGraph 图和向量数据中派生 KNN 图，用于构建团。
+`mci_knng_source` 默认为 `hgraph`，保持现有行为不变。设为 `odescent` 时，
+MCI 会直接基于已存储向量构建专用 KNN 图。若内部配置了外部 KNN 图文件路径，
+外部文件的优先级高于此选项。
 
 | 参数 | 作用 |
 | --- | --- |
 | `use_mci` | 设为 `true` 时使用默认构建参数启用 MCI。 |
 | `mci_mcs` | 构建团时使用的候选邻居数量。 |
 | `mci_clique_max` | 全量构建时的最大团大小。 |
+| `mci_knng_source` | KNN 图来源：`hgraph`（默认）或 `odescent`。 |
 | `mci_alpha` | 团构建扩展系数。 |
 | `mci_incremental_join_ratio_threshold` | Add 时加入已有团的阈值。 |
 | `mci_incremental_added_mct` | 新节点最多加入的已有团数量。 |

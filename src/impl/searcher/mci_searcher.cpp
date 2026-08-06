@@ -53,14 +53,11 @@ struct MCIEpochMarks {
 
     [[nodiscard]] bool
     Get(InnerIdType id) const {
-        return id < marks.size() and marks[id] == tag;
+        return marks[id] == tag;
     }
 
     void
     Set(InnerIdType id) {
-        if (id >= marks.size()) {
-            marks.resize(static_cast<uint64_t>(id) + 1, 0);
-        }
         marks[id] = tag;
     }
 };
@@ -166,6 +163,7 @@ search_precise_float_csr(const CliqueDataCellBaseView& view,
     };
 
     const auto seed_target = std::min<uint64_t>(mci_param.seed_count, total);
+    const bool check_overtime = inner_search_param.time_cost != nullptr;
     uint64_t seeds = 0;
     bool timed_out = false;
     bool seed_list_provided = false;
@@ -174,7 +172,7 @@ search_precise_float_csr(const CliqueDataCellBaseView& view,
         const auto seed_count = mci_param.seed_inner_ids->size();
         const auto sampled_seed_count = std::min<uint64_t>(seed_target, seed_count);
         for (uint64_t i = 0; i < sampled_seed_count; ++i) {
-            if (mci_check_overtime(inner_search_param, ctx)) {
+            if (check_overtime and mci_check_overtime(inner_search_param, ctx)) {
                 timed_out = true;
                 break;
             }
@@ -186,7 +184,7 @@ search_precise_float_csr(const CliqueDataCellBaseView& view,
     }
     if (not seed_list_provided) {
         for (InnerIdType seed = 0; seed < total and seeds < seed_target; ++seed) {
-            if (mci_check_overtime(inner_search_param, ctx)) {
+            if (check_overtime and mci_check_overtime(inner_search_param, ctx)) {
                 timed_out = true;
                 break;
             }
@@ -198,7 +196,7 @@ search_precise_float_csr(const CliqueDataCellBaseView& view,
 
     uint32_t hops = 0;
     while (not timed_out and hops < mci_param.hops_limit) {
-        if (mci_check_overtime(inner_search_param, ctx)) {
+        if (check_overtime and mci_check_overtime(inner_search_param, ctx)) {
             break;
         }
         auto* candidate = get_closest_unexpanded();
@@ -245,7 +243,7 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
                     const InnerSearchParam& inner_search_param,
                     const MCISearcherParam& mci_param,
                     QueryContext* ctx) const {
-    auto* alloc = select_query_allocator(ctx, allocator_);
+    auto* alloc = allocator_;
     const auto candidate_limit =
         std::max<int64_t>(inner_search_param.topk, static_cast<int64_t>(inner_search_param.ef));
     auto heap = DistanceHeap::MakeInstanceBySize<true, true>(alloc, candidate_limit);
@@ -335,6 +333,7 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
     };
 
     const auto seed_target = std::min<uint64_t>(mci_param.seed_count, total);
+    const bool check_overtime = inner_search_param.time_cost != nullptr;
     uint64_t seeds = 0;
     bool timed_out = false;
     bool seed_list_provided = false;
@@ -343,7 +342,7 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
         const auto seed_count = mci_param.seed_inner_ids->size();
         const auto sampled_seed_count = std::min<uint64_t>(seed_target, seed_count);
         for (uint64_t i = 0; i < sampled_seed_count; ++i) {
-            if (mci_check_overtime(inner_search_param, ctx)) {
+            if (check_overtime and mci_check_overtime(inner_search_param, ctx)) {
                 timed_out = true;
                 break;
             }
@@ -355,7 +354,7 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
     }
     if (not seed_list_provided) {
         for (InnerIdType seed = 0; seed < total and seeds < seed_target; ++seed) {
-            if (mci_check_overtime(inner_search_param, ctx)) {
+            if (check_overtime and mci_check_overtime(inner_search_param, ctx)) {
                 timed_out = true;
                 break;
             }
@@ -369,7 +368,7 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
     Vector<InnerIdType> clique_ids(alloc);
     Vector<InnerIdType> members(alloc);
     while (not timed_out and hops < mci_param.hops_limit) {
-        if (mci_check_overtime(inner_search_param, ctx)) {
+        if (check_overtime and mci_check_overtime(inner_search_param, ctx)) {
             break;
         }
         auto* candidate = get_closest_unexpanded();

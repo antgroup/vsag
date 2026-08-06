@@ -18,10 +18,11 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
-#include <future>
+#include <exception>
 #include <limits>
 #include <map>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 #include "impl/logger/logger.h"
@@ -32,8 +33,6 @@ namespace vsag {
 namespace {
 
 constexpr uint64_t K_V3_SCHEDULE_CHUNK = 64;
-constexpr uint64_t K_MCI_MIN_CLIQUE_SIZE = 50;
-
 // NOLINTNEXTLINE(readability-identifier-naming)
 struct MCIV3Candidate {
     InnerIdType id{0};
@@ -134,7 +133,7 @@ BuildMCICliques(const float* vectors,
     const auto candidate_limit =
         std::min<uint64_t>({params.candidate_limit, graph.row_stride, total - 1});
     const auto clique_threshold =
-        std::min<uint64_t>({K_MCI_MIN_CLIQUE_SIZE, candidate_limit + 1, total});
+        std::max<uint64_t>(2, std::min<uint64_t>({params.clique_max, candidate_limit + 1, total}));
     const auto node_clique_limit = std::max<int>(3, static_cast<int>(total / 100));
     const auto thread_count = std::max<uint64_t>(1, std::min<uint64_t>(params.thread_count, total));
     const auto max_saved_cliques =
@@ -155,11 +154,22 @@ BuildMCICliques(const float* vectors,
     double max_norm_error = 0.0;
     {
         std::atomic<uint64_t> next_id{0};
-        std::vector<std::future<void>> workers;
-        workers.reserve(thread_count);
+        Vector<std::thread> workers(allocator);
         std::mutex norm_mutex;
+        std::exception_ptr worker_exception;
+        std::mutex exception_mutex;
+        auto catch_worker_exception = [&](auto worker) {
+            try {
+                worker();
+            } catch (...) {
+                std::lock_guard<std::mutex> lock(exception_mutex);
+                if (worker_exception == nullptr) {
+                    worker_exception = std::current_exception();
+                }
+            }
+        };
         for (uint64_t tid = 0; tid < thread_count; ++tid) {
-            workers.emplace_back(std::async(std::launch::async, [&, tid]() {
+            workers.emplace_back(catch_worker_exception, [&, tid]() {
                 double local_max = 0.0;
                 while (true) {
                     const auto start = next_id.fetch_add(K_V3_SCHEDULE_CHUNK);
@@ -176,10 +186,13 @@ BuildMCICliques(const float* vectors,
                 }
                 std::lock_guard<std::mutex> lock(norm_mutex);
                 max_norm_error = std::max(max_norm_error, local_max);
-            }));
+            });
         }
         for (auto& worker : workers) {
-            worker.get();
+            worker.join();
+        }
+        if (worker_exception != nullptr) {
+            std::rethrow_exception(worker_exception);
         }
     }
     const bool unit_norm = max_norm_error < 1e-3;
@@ -188,8 +201,11 @@ BuildMCICliques(const float* vectors,
                  max_norm_error);
 
     auto distance_from_dot = [&](InnerIdType lhs, InnerIdType rhs, float dot) {
-        if (params.metric == MetricType::METRIC_TYPE_L2SQR) {
-            return FP32ComputeL2Sqr(VectorAt(vectors, dim, lhs), VectorAt(vectors, dim, rhs), dim);
+        if (params.metric == MetricType::METRIC_TYPE_L2SQR or
+            (params.metric == MetricType::METRIC_TYPE_COSINE and unit_norm)) {
+            const float distance =
+                unit_norm ? 2.0F - 2.0F * dot : l2_norms[lhs] + l2_norms[rhs] - 2.0F * dot;
+            return distance > 0.0F ? distance : 0.0F;
         }
         if (params.metric == MetricType::METRIC_TYPE_IP) {
             return 1.0F - dot;
@@ -201,15 +217,9 @@ BuildMCICliques(const float* vectors,
         return 1.0F - dot / std::sqrt(norm_product);
     };
     auto compute_distance = [&](InnerIdType lhs, InnerIdType rhs) {
-        if (params.metric == MetricType::METRIC_TYPE_L2SQR) {
-            return FP32ComputeL2Sqr(VectorAt(vectors, dim, lhs), VectorAt(vectors, dim, rhs), dim);
-        }
         return distance_from_dot(
             lhs, rhs, FP32ComputeIP(VectorAt(vectors, dim, lhs), VectorAt(vectors, dim, rhs), dim));
     };
-    const auto compute_distance_batch = params.metric == MetricType::METRIC_TYPE_L2SQR
-                                            ? FP32ComputeL2SqrBatch4
-                                            : FP32ComputeIPBatch4;
 
     std::vector<std::atomic<int>> num_cliques_per_node(total);
     for (auto& count : num_cliques_per_node) {
@@ -246,11 +256,22 @@ BuildMCICliques(const float* vectors,
         std::atomic<uint64_t> sum_edge_size{0};
         std::atomic<uint64_t> sum_clique_count{0};
         Vector<MCIV3ThreadTiming> round_timings(thread_count, allocator);
-        std::vector<std::future<void>> workers;
-        workers.reserve(thread_count);
+        Vector<std::thread> workers(allocator);
+        std::exception_ptr worker_exception;
+        std::mutex exception_mutex;
+        auto catch_worker_exception = [&](auto worker) {
+            try {
+                worker();
+            } catch (...) {
+                std::lock_guard<std::mutex> lock(exception_mutex);
+                if (worker_exception == nullptr) {
+                    worker_exception = std::current_exception();
+                }
+            }
+        };
 
         for (uint64_t tid = 0; tid < thread_count; ++tid) {
-            workers.emplace_back(std::async(std::launch::async, [&, tid]() {
+            workers.emplace_back(catch_worker_exception, [&, tid]() {
                 std::vector<MCIV3Edge> edges;
                 edges.reserve(candidate_limit * (candidate_limit + 1) / 2);
                 Vector<MCIV3Candidate> candidates(candidate_limit, allocator);
@@ -264,9 +285,6 @@ BuildMCICliques(const float* vectors,
                 auto append_selected_clique = [&](const auto& clique) {
                     selected_by_thread[tid].emplace_back(allocator);
                     selected_by_thread[tid].back().assign(clique.begin(), clique.end());
-                    if (selected_by_thread[tid].back().size() > params.clique_max) {
-                        selected_by_thread[tid].back().resize(params.clique_max);
-                    }
                 };
 
                 auto solve_seed = [&](InnerIdType seed) {
@@ -325,7 +343,8 @@ BuildMCICliques(const float* vectors,
                     stage_start = std::chrono::steady_clock::now();
                     for (uint64_t i = 0; i < candidate_size; ++i) {
                         const auto candidate_id = candidates[i].id;
-                        candidates[i].distance = compute_distance(candidate_id, seed);
+                        const float dot = FP32ComputeIP(candidate_vectors[i], query, dim);
+                        candidates[i].distance = distance_from_dot(candidate_id, seed, dot);
                     }
                     std::sort(candidates.begin(),
                               candidates.begin() + static_cast<int64_t>(candidate_size),
@@ -341,7 +360,7 @@ BuildMCICliques(const float* vectors,
                         ExpandDistanceLimit(candidates[0].distance, now_alpha, params.metric);
                     stage_start = std::chrono::steady_clock::now();
                     for (uint64_t i = 0; i < candidate_size; ++i) {
-                        if (candidates[i].distance <= distance_limit) {
+                        if (candidates[i].distance < distance_limit) {
                             edges.push_back(
                                 MCIV3Edge{seed, candidates[i].id, candidates[i].distance});
                         }
@@ -351,23 +370,21 @@ BuildMCICliques(const float* vectors,
                         const auto* lhs_vector = candidate_vectors[i];
                         uint64_t j = i + 1;
                         for (; j + 3 < candidate_size; j += 4) {
-                            float distances[4]{0.0F, 0.0F, 0.0F, 0.0F};
-                            compute_distance_batch(lhs_vector,
-                                                   dim,
-                                                   candidate_vectors[j],
-                                                   candidate_vectors[j + 1],
-                                                   candidate_vectors[j + 2],
-                                                   candidate_vectors[j + 3],
-                                                   distances[0],
-                                                   distances[1],
-                                                   distances[2],
-                                                   distances[3]);
+                            float dots[4]{0.0F, 0.0F, 0.0F, 0.0F};
+                            FP32ComputeIPBatch4(lhs_vector,
+                                                dim,
+                                                candidate_vectors[j],
+                                                candidate_vectors[j + 1],
+                                                candidate_vectors[j + 2],
+                                                candidate_vectors[j + 3],
+                                                dots[0],
+                                                dots[1],
+                                                dots[2],
+                                                dots[3]);
                             for (uint64_t batch = 0; batch < 4; ++batch) {
                                 const auto rhs_id = candidates[j + batch].id;
                                 const float distance =
-                                    params.metric == MetricType::METRIC_TYPE_L2SQR
-                                        ? distances[batch]
-                                        : distance_from_dot(lhs_id, rhs_id, distances[batch]);
+                                    distance_from_dot(lhs_id, rhs_id, dots[batch]);
                                 if (distance <= distance_limit) {
                                     edges.push_back(MCIV3Edge{lhs_id, rhs_id, distance});
                                 }
@@ -439,15 +456,6 @@ BuildMCICliques(const float* vectors,
                     uint64_t chosen_count = 0;
                     for (uint64_t i = 0; i < local_clique_count; ++i) {
                         auto& clique = local_max_cliques[i];
-                        if (clique.size() > params.clique_max) {
-                            const bool contains_seed =
-                                std::find(clique.begin(), clique.end(), seed) != clique.end();
-                            clique.resize(params.clique_max);
-                            if (contains_seed and
-                                std::find(clique.begin(), clique.end(), seed) == clique.end()) {
-                                clique.back() = seed;
-                            }
-                        }
                         bool has_uncovered_node = false;
                         bool contains_seed = false;
                         for (auto id : clique) {
@@ -501,10 +509,13 @@ BuildMCICliques(const float* vectors,
                         solve_seed(seed);
                     }
                 }
-            }));
+            });
         }
         for (auto& worker : workers) {
-            worker.get();
+            worker.join();
+        }
+        if (worker_exception != nullptr) {
+            std::rethrow_exception(worker_exception);
         }
 
         uncovered = 0;
