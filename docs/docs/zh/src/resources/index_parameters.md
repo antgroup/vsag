@@ -157,6 +157,32 @@ Pyramid 构建参数同样放在 `index_param` 下：
 `use_quantization`、不可变构建与 `n_candidate` 等搜索参数见
 [SINDI 页面](../indexes/sindi.md)。
 
+## SINDI_V2（稀疏向量）
+
+SINDI_V2 兼容 SINDI 的全部功能，并支持内存与磁盘 I/O。
+
+```json
+{
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "dim": 1024,
+    "index_param": {
+        "term_id_limit": 30000,
+        "use_reorder": true,
+        "term_io": {
+            "type": "async_io",
+            "file_path": "/path/to/sindi_v2.terms"
+        },
+        "rerank_io": {
+            "type": "async_io",
+            "file_path": "/path/to/sindi_v2.rerank"
+        }
+    }
+}
+```
+
+详情见 [SINDI_V2 页面](../indexes/sindi_v2.md)。
+
 ## 运行期参数
 
 除构建参数外，`Index::Tune` 与 `SearchParam` 可在运行时调整 `ef_search`、`nprobe` 等参数。参考

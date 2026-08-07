@@ -16,6 +16,7 @@
 #include "sparse_term_computer.h"
 
 #include <cstring>
+#include <limits>
 
 #include "algorithm/sindi/sindi_parameter.h"
 #include "impl/allocator/safe_allocator.h"

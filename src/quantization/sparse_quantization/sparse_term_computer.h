@@ -23,12 +23,14 @@
 #include <type_traits>
 
 #include "algorithm/sindi/sindi_parameter.h"
+#include "algorithm/sindi_v2/sindi_v2_parameter.h"
 #include "metric_type.h"
 #include "simd/fp16_simd.h"
 #include "simd/fp32_simd.h"
 #include "simd/sq8_simd.h"
 #include "utils/pointer_define.h"
 #include "utils/sparse_vector_transform.h"
+
 namespace vsag {
 
 struct QuantizationParams {
@@ -38,6 +40,7 @@ struct QuantizationParams {
 };
 
 static constexpr int INVALID_TERM = -1;
+DEFINE_POINTER(QuantizationParams)
 DEFINE_POINTER(SparseTermComputer)
 class SparseTermComputer {
 public:
@@ -45,6 +48,21 @@ public:
 
     explicit SparseTermComputer(const SparseVector& sparse_query,
                                 const SINDISearchParameter& search_param,
+                                Allocator* allocator = nullptr,
+                                uint64_t window_num = 1)
+        : sorted_query_(allocator),
+          raw_query_(sparse_query),
+          query_retain_ratio_(1.0F - search_param.query_prune_ratio),
+          term_retain_ratio_(1.0F - search_param.term_prune_ratio),
+          term_retain_threshold_per_window_(search_param.term_retain_threshold == 0
+                                                ? std::numeric_limits<uint64_t>::max()
+                                                : search_param.term_retain_threshold /
+                                                      std::max<uint64_t>(window_num, 1)) {
+        SetQuery(sparse_query);
+    }
+
+    explicit SparseTermComputer(const SparseVector& sparse_query,
+                                const SINDIV2SearchParameter& search_param,
                                 Allocator* allocator = nullptr,
                                 uint64_t window_num = 1)
         : sorted_query_(allocator),
@@ -187,7 +205,7 @@ public:
         return sorted_query_[term_iterator].first;
     }
 
-    uint32_t
+    [[nodiscard]] uint32_t
     GetTermScanCount(uint32_t term_size) const {
         if (term_size == 0) {
             return 0;

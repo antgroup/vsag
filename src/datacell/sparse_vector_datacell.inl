@@ -17,7 +17,11 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
+#include <limits>
+
 #include "sparse_vector_datacell.h"
+#include "vsag/options.h"
 
 namespace vsag {
 template <typename QuantTmpl, typename IOTmpl>
@@ -25,13 +29,27 @@ void
 SparseVectorDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
                                                const std::shared_ptr<Computer<QuantTmpl>>& computer,
                                                const InnerIdType* idx,
-                                               InnerIdType id_count) {
+                                               InnerIdType id_count,
+                                               QueryContext* ctx) {
+    if (id_count == 0) {
+        return;
+    }
+
+    const auto load_location = [this](InnerIdType id) {
+        DocLocation location;
+        offset_io_->Read(sizeof(location),
+                         static_cast<uint64_t>(id) * sizeof(location),
+                         reinterpret_cast<uint8_t*>(&location));
+        return location;
+    };
+
     std::shared_lock lock(mutex_);
-    for (int i = 0; i < id_count; ++i) {
-        bool need_release{true};
-        auto codes = this->GetCodesById(idx[i], need_release);
+
+    const auto compute_direct = [&](const DocLocation& location, InnerIdType result_index) {
+        bool need_release = false;
+        const auto* codes = io_->Read(location.size, location.offset, need_release);
         try {
-            computer->ComputeDist(codes, result_dists + i);
+            computer->ComputeDist(codes, result_dists + result_index);
         } catch (...) {
             if (need_release) {
                 this->Release(codes);
@@ -40,6 +58,94 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
         }
         if (need_release) {
             this->Release(codes);
+        }
+    };
+
+    if (query_io_strategy_ == QueryIOStrategy::DIRECT_READ) {
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            const auto location = load_location(idx[i]);
+            compute_direct(location, i);
+        }
+        return;
+    }
+
+    struct QueryLocation {
+        DocLocation location;
+        InnerIdType result_index{0};
+    };
+
+    Allocator* query_allocator = select_query_allocator(ctx, allocator_);
+    Vector<QueryLocation> locations(id_count, query_allocator);
+    for (InnerIdType i = 0; i < id_count; ++i) {
+        locations[i] = {load_location(idx[i]), i};
+    }
+    std::sort(locations.begin(), locations.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.location.offset != rhs.location.offset) {
+            return lhs.location.offset < rhs.location.offset;
+        }
+        return lhs.result_index < rhs.result_index;
+    });
+
+    if (query_io_strategy_ == QueryIOStrategy::SORTED_DIRECT_READ) {
+        for (const auto& item : locations) {
+            compute_direct(item.location, item.result_index);
+        }
+        return;
+    }
+
+    const uint64_t merge_gap_limit = 1ULL << Options::Instance().direct_IO_object_align_bit();
+    constexpr uint64_t max_merged_io_len = 1ULL << 20;
+
+    struct MergedRange {
+        uint64_t offset{0};
+        uint64_t size{0};
+        uint64_t first_location{0};
+        uint64_t last_location{0};
+    };
+
+    Vector<MergedRange> ranges(query_allocator);
+    ranges.reserve(id_count);
+    for (uint64_t i = 0; i < static_cast<uint64_t>(id_count); ++i) {
+        const auto& location = locations[i].location;
+        const uint64_t location_end = location.offset + location.size;
+        if (not ranges.empty()) {
+            auto& range = ranges.back();
+            const uint64_t range_end = range.offset + range.size;
+            const uint64_t gap = location.offset > range_end ? location.offset - range_end : 0;
+            const uint64_t merged_end = std::max(range_end, location_end);
+            const uint64_t merged_size = merged_end - range.offset;
+            if (gap <= merge_gap_limit && merged_size <= max_merged_io_len) {
+                range.size = merged_size;
+                range.last_location = i;
+                continue;
+            }
+        }
+        ranges.push_back({location.offset, location.size, i, i});
+    }
+
+    const uint64_t range_count = ranges.size();
+    Vector<uint64_t> read_sizes(range_count, query_allocator);
+    Vector<uint64_t> read_offsets(range_count, query_allocator);
+    Vector<uint64_t> scratch_offsets(range_count, query_allocator);
+    uint64_t scratch_size = 0;
+    for (uint64_t i = 0; i < range_count; ++i) {
+        read_sizes[i] = ranges[i].size;
+        read_offsets[i] = ranges[i].offset;
+        scratch_offsets[i] = scratch_size;
+        scratch_size += ranges[i].size;
+    }
+
+    Vector<uint8_t> scratch(scratch_size, query_allocator);
+    io_->MultiRead(scratch.data(), read_sizes.data(), read_offsets.data(), range_count);
+
+    for (uint64_t range_index = 0; range_index < range_count; ++range_index) {
+        const auto& range = ranges[range_index];
+        const auto* range_data = scratch.data() + scratch_offsets[range_index];
+        for (uint64_t location_index = range.first_location; location_index <= range.last_location;
+             ++location_index) {
+            const auto& item = locations[location_index];
+            const auto* codes = range_data + item.location.offset - range.offset;
+            computer->ComputeDist(codes, result_dists + item.result_index);
         }
     }
 }
@@ -73,8 +179,12 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamRead
         uint64_t legacy_offset_io_size = 0;
         StreamReader::ReadObj(reader, legacy_offset_io_size);
         const uint64_t legacy_entry_size = sizeof(LegacyDocLocation);
-        const uint64_t doc_count =
-            legacy_entry_size == 0 ? 0 : legacy_offset_io_size / legacy_entry_size;
+        if (legacy_offset_io_size % legacy_entry_size != 0) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("invalid legacy SparseVectorDataCell offset size: {}",
+                                            legacy_offset_io_size));
+        }
+        const uint64_t doc_count = legacy_offset_io_size / legacy_entry_size;
         this->offset_io_->Resize(doc_count * sizeof(DocLocation));
         if (doc_count > 0) {
             constexpr uint64_t BATCH = 4096;
@@ -149,9 +259,14 @@ template <typename QuantTmpl, typename IOTmpl>
 void
 SparseVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerIdType idx) {
     auto sparse_vector = (const SparseVector*)vector;
-    uint64_t code_size = (sparse_vector->len_ * 2 + 1) * sizeof(uint32_t);
-    auto* codes = reinterpret_cast<uint8_t*>(allocator_->Allocate(code_size));
-    quantizer_->EncodeOne((const float*)vector, codes);
+    uint64_t code_size = (static_cast<uint64_t>(sparse_vector->len_) * 2 + 1) * sizeof(uint32_t);
+    if (code_size > std::numeric_limits<uint32_t>::max()) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("sparse vector code size {} exceeds uint32_t limit", code_size));
+    }
+    Vector<uint8_t> codes(code_size, allocator_);
+    quantizer_->EncodeOne((const float*)vector, codes.data());
     DocLocation location;
     {
         std::scoped_lock lock(mutex_, current_offset_mutex_);
@@ -167,9 +282,8 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerI
         offset_io_->Write(reinterpret_cast<uint8_t*>(&location),
                           sizeof(location),
                           static_cast<uint64_t>(idx) * sizeof(location));
-        io_->Write(codes, code_size, location.offset);
+        io_->Write(codes.data(), code_size, location.offset);
     }
-    allocator_->Deallocate(codes);
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -181,6 +295,14 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::InMemory() const {
 template <typename QuantTmpl, typename IOTmpl>
 const uint8_t*
 SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCodesById(InnerIdType id, bool& need_release) const {
+    std::shared_lock lock(mutex_);
+    return this->get_codes_by_id_no_lock(id, need_release);
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+const uint8_t*
+SparseVectorDataCell<QuantTmpl, IOTmpl>::get_codes_by_id_no_lock(InnerIdType id,
+                                                                 bool& need_release) const {
     DocLocation location;
     offset_io_->Read(sizeof(location),
                      static_cast<uint64_t>(id) * sizeof(location),
@@ -197,7 +319,7 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::GetSparseVectorByInnerId(
     std::shared_lock lock(mutex_);
 
     bool need_release{false};
-    const auto* codes = this->GetCodesById(inner_id, need_release);
+    const auto* codes = this->get_codes_by_id_no_lock(inner_id, need_release);
     data->len_ = *reinterpret_cast<const uint32_t*>(codes);
     const auto* entries = reinterpret_cast<const BufferEntry*>(codes + sizeof(uint32_t));
     data->ids_ = static_cast<uint32_t*>(allocator->Allocate(sizeof(uint32_t) * data->len_));
@@ -252,8 +374,8 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::ComputePairVectors(InnerIdType id1, Inn
     const uint8_t* codes1 = nullptr;
     const uint8_t* codes2 = nullptr;
     try {
-        codes1 = this->GetCodesById(id1, release1);
-        codes2 = this->GetCodesById(id2, release2);
+        codes1 = this->get_codes_by_id_no_lock(id1, release1);
+        codes2 = this->get_codes_by_id_no_lock(id2, release2);
         auto result = this->quantizer_->Compute(codes1, codes2);
         if (release1) {
             this->Release(codes1);
@@ -281,9 +403,18 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::SparseVectorDataCell(
     : allocator_(common_param.allocator_.get()) {
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
     this->io_ = std::make_shared<IOTmpl>(io_param, common_param);
+    const auto& io_type = io_param->GetTypeName();
+    if (io_type == IO_TYPE_VALUE_MEMORY_IO || io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
+        this->query_io_strategy_ = QueryIOStrategy::DIRECT_READ;
+    } else if (io_type == IO_TYPE_VALUE_MMAP_IO) {
+        this->query_io_strategy_ = QueryIOStrategy::SORTED_DIRECT_READ;
+    } else {
+        this->query_io_strategy_ = QueryIOStrategy::MULTI_READ;
+    }
     this->offset_io_ =
         std::make_shared<MemoryBlockIO>(Options::Instance().block_size_limit(), allocator_);
-    this->max_code_size_ = sizeof(uint32_t);
+    this->max_code_size_ =
+        std::max<uint64_t>(sizeof(uint32_t), (common_param.dim_ * 2 + 1) * sizeof(uint32_t));
     this->max_capacity_ = 0;
     this->code_size_ = this->quantizer_->GetCodeSize();
 }

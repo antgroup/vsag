@@ -17,9 +17,12 @@
 
 #include <limits>
 
+#include "flatten_datacell.h"
 #include "flatten_interface.h"
+#include "inner_string_params.h"
 #include "io/common/basic_io.h"
 #include "io/memory_block_io/memory_block_io.h"
+#include "quantization/sparse_quantization/sparse_quantizer.h"
 #include "vsag/dataset.h"
 
 namespace vsag {
@@ -40,7 +43,7 @@ public:
           InnerIdType id_count,
           QueryContext* ctx = nullptr) override {
         auto comp = std::static_pointer_cast<Computer<QuantTmpl>>(computer);
-        this->query(result_dists, comp, idx, id_count);
+        this->query(result_dists, comp, idx, id_count, ctx);
     }
 
     ComputerInterfacePtr
@@ -144,15 +147,27 @@ public:
         this->io_ = io;
     }
 
+    void
+    InitIO(const IOParamPtr& io_param) override {
+        this->io_->InitIO(io_param);
+    }
+
     uint64_t
     GetMemoryUsage() const override;
 
 private:
+    enum class QueryIOStrategy : uint8_t {
+        DIRECT_READ,
+        SORTED_DIRECT_READ,
+        MULTI_READ,
+    };
+
     inline void
     query(float* result_dists,
           const std::shared_ptr<Computer<QuantTmpl>>& computer,
           const InnerIdType* idx,
-          InnerIdType id_count);
+          InnerIdType id_count,
+          QueryContext* ctx);
 
     ComputerInterfacePtr
     factory_computer(const float* query) {
@@ -161,14 +176,16 @@ private:
         return computer;
     }
 
+    const uint8_t*
+    get_codes_by_id_no_lock(InnerIdType id, bool& need_release) const;
+
 private:
-    // Packed so each entry is exactly 12 bytes on disk and in the offset_io_
-    // buffer. The unpacked layout would round sizeof up to 16 due to the
-    // uint64 alignment requirement, wasting 33% of the offset table.
-    struct __attribute__((packed)) DocLocation {
+#pragma pack(push, 1)
+    struct DocLocation {
         uint64_t offset{0};
         uint32_t size{0};
     };
+#pragma pack(pop)
     static_assert(sizeof(DocLocation) == 12, "DocLocation must be 12 bytes on disk");
 
     // Legacy on-disk layout: kept for backward-compatible deserialization of indexes
@@ -193,6 +210,7 @@ private:
 
     std::shared_ptr<Quantizer<QuantTmpl>> quantizer_{nullptr};
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
+    QueryIOStrategy query_io_strategy_{QueryIOStrategy::MULTI_READ};
 
     Allocator* const allocator_{nullptr};
     std::shared_ptr<MemoryBlockIO> offset_io_{nullptr};

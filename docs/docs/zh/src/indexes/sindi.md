@@ -4,8 +4,8 @@
 
 SINDI（**S**parse **IN**verted **D**ense **I**ndex）是 VSAG 面向 **稀疏向量** 的索引——
 例如 BM25、SPLADE 以及其他学习稀疏（learned sparse）编码器产出的向量。与稠密索引
-（HGraph、IVF）不同，SINDI 直接在“词项-权重”对上工作，是 VSAG 中唯一接受
-`dtype: "sparse"` 的索引。
+（HGraph、IVF）不同，SINDI 直接在“词项-权重”对上工作，是 VSAG 中接受
+`dtype: "sparse"` 的索引之一。
 
 - 源码：`src/algorithm/sindi/`
 - 示例：[`examples/cpp/109_index_sindi.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/109_index_sindi.cpp)
@@ -22,6 +22,8 @@ SINDI（**S**parse **IN**verted **D**ense **I**ndex）是 VSAG 面向 **稀疏�
    DMQ 正排以降低重排内存。
 
 返回的距离为 `1 - inner_product`，使结果与稠密索引一样按升序排序。
+
+需要同时支持内存与磁盘 I/O 时，请选择 [SINDI_V2](sindi_v2.md)。
 
 ## 快速开始
 

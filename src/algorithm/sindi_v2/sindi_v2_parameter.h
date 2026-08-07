@@ -18,30 +18,16 @@
 #include <string>
 
 #include "algorithm/inner_index_parameter.h"
+#include "algorithm/sindi/sindi_parameter.h"
 #include "index_common_param.h"
+#include "io/common/io_parameter.h"
 #include "utils/pointer_define.h"
 
 namespace vsag {
 
-DEFINE_POINTER(SINDIParameter);
+DEFINE_POINTER(SINDIV2Parameter);
 
-enum class SparseValueQuantizationType {
-    FP32,
-    SQ8,
-    FP16,
-};
-
-static constexpr const char* SPARSE_RERANK_TYPE = "rerank_type";
-static constexpr const char* SPARSE_RERANK_TYPE_FP32 = "fp32";
-static constexpr const char* SPARSE_RERANK_TYPE_DMQ8 = "dmq8";
-
-static constexpr const char* SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD = "dmq_shared_codebook_threshold";
-static constexpr uint32_t DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD = 1024;
-
-std::string
-SparseValueQuantizationTypeToString(SparseValueQuantizationType type);
-
-class SINDIParameter : public InnerIndexParameter {
+class SINDIV2Parameter : public InnerIndexParameter {
 public:
     void
     FromJson(const JsonType& json) override;
@@ -52,7 +38,7 @@ public:
     bool
     CheckCompatibility(const vsag::ParamPtr& other) const override;
 
-    SINDIParameter() = default;
+    SINDIV2Parameter() = default;
 
 public:
     // index
@@ -64,6 +50,8 @@ public:
 
     bool use_reorder{false};
 
+    bool use_quantization{false};
+
     SparseValueQuantizationType sparse_value_quant_type{SparseValueQuantizationType::FP32};
 
     bool remap_term_ids{false};
@@ -74,13 +62,15 @@ public:
 
     bool immutable{false};
 
-    // temporal parameter
-    bool deserialize_without_footer{false};
-    bool deserialize_without_buffer{false};
+    uint32_t rerank_layout{0};
+
     uint32_t avg_doc_term_length{100};
+
+    IOParamPtr term_io_parameter{nullptr};
+    IOParamPtr rerank_io_parameter{nullptr};
 };
 
-class SINDISearchParameter : public Parameter {
+class SINDIV2SearchParameter : public Parameter {
 public:
     void
     FromJson(const JsonType& json) override;
@@ -88,11 +78,14 @@ public:
     JsonType
     ToJson() const override;
 
-    SINDISearchParameter() = default;
+    SINDIV2SearchParameter() = default;
 
 public:
     // search
     uint32_t n_candidate{0};
+
+    // choose heap insert path during search
+    bool use_term_lists_heap_insert{true};
 
     // data cell
     float query_prune_ratio{0};

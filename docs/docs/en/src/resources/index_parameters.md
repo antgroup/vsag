@@ -164,6 +164,32 @@ Pyramid build parameters also live under `index_param`:
 See the [SINDI page](../indexes/sindi.md) for `use_quantization`, immutable builds, and search
 parameters such as `n_candidate`.
 
+## SINDI_V2 (sparse vectors)
+
+SINDI_V2 supports all SINDI features with both in-memory and disk-based I/O.
+
+```json
+{
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "dim": 1024,
+    "index_param": {
+        "term_id_limit": 30000,
+        "use_reorder": true,
+        "term_io": {
+            "type": "async_io",
+            "file_path": "/path/to/sindi_v2.terms"
+        },
+        "rerank_io": {
+            "type": "async_io",
+            "file_path": "/path/to/sindi_v2.rerank"
+        }
+    }
+}
+```
+
+See the [SINDI_V2 page](../indexes/sindi_v2.md) for details.
+
 ## Runtime Parameters
 
 Beyond build-time parameters, `Index::Tune` and `SearchParam` tweak runtime settings such as

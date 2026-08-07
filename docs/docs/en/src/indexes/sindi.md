@@ -5,7 +5,7 @@
 SINDI (**S**parse **IN**verted **D**ense **I**ndex) is VSAG's index for **sparse
 vectors** — the kind produced by BM25, SPLADE, and other learned-sparse encoders.
 Unlike the dense indexes (HGraph, IVF), SINDI operates directly on term/value
-pairs and is the only VSAG index that accepts `dtype: "sparse"`.
+pairs and is one of the VSAG indexes that accepts `dtype: "sparse"`.
 
 - Source: `src/algorithm/sindi/`
 - Example: [`examples/cpp/109_index_sindi.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/109_index_sindi.cpp)
@@ -27,6 +27,9 @@ pairs and is the only VSAG index that accepts `dtype: "sparse"`.
 
 Distance is returned as `1 - inner_product` so results sort ascending as in the
 dense indexes.
+
+For deployments that need both in-memory and disk-based I/O, use
+[SINDI_V2](sindi_v2.md).
 
 ## Quick start
 
