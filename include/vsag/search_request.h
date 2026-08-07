@@ -39,11 +39,21 @@ enum class SearchMode {
 class SearchRequest {
 public:
     // basic params
-    /** 
+    /**
      * @brief Query dataset containing the vector or vectors to search for
-     * @details This DatasetPtr holds the query vector used for similarity search. 
-     *          IVF KNN requests and supported AnalyzeIndexBySearch implementations accept
-     *          multiple query vectors; other requests allow one.
+     * @details This DatasetPtr holds the query data used for similarity search.
+     *          - Single query: Set NumElements to 1 with one vector. Supported by all
+     *            search modes (KNN_SEARCH, RANGE_SEARCH).
+     *          - Batched KNN: Set NumElements to the number of queries, with vectors
+     *            stored contiguously. Supported by HGraph::SearchWithRequest and
+     *            IVF::SearchWithRequest; results are returned with NumElements =
+     *            query_count and a row-major Dim determined by the implementation
+     *            (which can be less than topk when the index is smaller). Queries that yield
+     *            fewer neighbors than the returned Dim are padded with sentinel entries
+     *            (id = -1, distance = +infinity). Batch KNN rejects an index containing external
+      *            label -1 to keep this padding unambiguous.
+     *          - Batched RANGE_SEARCH is not supported; implementations MUST reject
+     *            NumElements > 1 for range mode.
      */
     DatasetPtr query_{nullptr};
 
@@ -219,8 +229,9 @@ public:
 
     /**
      * @brief Pre-selected bucket IDs for bypassing IVF bucket routing (ClassifyDatasForSearch)
-     * @details The outer vector contains one entry per query vector.
-     *          Inner vector contains ordered bucket IDs (caller is responsible for ordering).
+     * @details Supports one ordered bucket-ID list per query vector. For a single query,
+     *          the outer vector must contain exactly one entry.
+     *          Inner vectors contain ordered bucket IDs (caller is responsible for ordering).
      *          When non-empty with at least one ID, skips ClassifyDatasForSearch and searches only
      *          the specified buckets. Empty means "use default bucket routing".
      */

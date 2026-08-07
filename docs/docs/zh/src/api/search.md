@@ -13,7 +13,7 @@
 
 ```cpp
 vsag::SearchRequest request;
-request.query_ = query;      // 含单个查询向量的 DatasetPtr
+request.query_ = query;      // 单个查询，或 HGraph/IVF 的连续 KNN 查询批次
 request.mode_ = vsag::SearchMode::KNN_SEARCH;
 request.topk_ = 10;
 request.params_str_ = R"({"hgraph": {"ef_search": 100}})";
@@ -34,7 +34,7 @@ enum class SearchMode {
 
 | 字段 | 类型 | 默认值 | 含义 |
 |------|------|--------|------|
-| `query_` | `DatasetPtr` | `nullptr` | 查询。IVF KNN 请求支持多个查询向量，其他请求只允许一个。 |
+| `query_` | `DatasetPtr` | `nullptr` | 查询。HGraph 和 IVF 的 KNN 支持连续的多查询批次；范围搜索只支持单个查询。 |
 | `mode_` | `SearchMode` | `KNN_SEARCH` | KNN 还是范围搜索。 |
 | `topk_` | `int64_t` | `10` | 要返回的邻居数（KNN 模式）。必须为正。 |
 | `radius_` | `float` | `0.5` | 距离阈值（范围模式）。非负。 |
@@ -95,13 +95,9 @@ reasoning 选项均会被忽略。
 **语义：**
 - **空**（默认）：使用正常的桶路由（`ClassifyDatasForSearch`）。
 - **非空**：跳过路由，仅扫描提供的桶 ID。
-- **批量 IVF KNN**：`bucket_ids_` 外层每项对应一个查询向量。
-  结果为矩形：`NumElements()` 是查询数，`Dim()` 是 `topk_`。
-  缺失邻居用 `-1` 和无穷距离填充。
 
 **约束：**
-- 批量 IVF 搜索仅支持 KNN；不支持自定义查询距离和 reasoning labels。
-- 非空外层向量必须为每个查询向量提供一个非空条目。
+- 当前仅支持单查询；外层向量必须恰好包含一个条目。
 - 每个桶 ID 必须在 `[0, bucket_count)` 范围内。
 - 重复的桶 ID 会被拒绝。
 - 与 `disable_bucket_scan` 模式不兼容。
