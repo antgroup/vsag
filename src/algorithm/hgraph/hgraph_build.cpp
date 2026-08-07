@@ -34,8 +34,10 @@
 #include "impl/searcher/basic_searcher.h"
 #include "io/memory_io/memory_io_parameter.h"
 #include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
+#include "storage/serialization_tags.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
+#include "storage/tlv_section.h"
 #include "utils/util_functions.h"
 #include "vsag/options.h"
 
@@ -1035,13 +1037,52 @@ void
 HGraph::ExportCache(std::ostream& out_stream) const {
     IOStreamWriter writer(out_stream);
     this->fullfill_cache();
-    this->cache_->Serialize(writer);
+    const auto cache_tag = static_cast<uint32_t>(StreamSerializationTag::BUILD_CACHE);
+    WriteStreamingBlock(
+        writer, cache_tag, StreamSerializationTagCritical(cache_tag), [this](StreamWriter& block) {
+            this->cache_->Serialize(block);
+        });
+    StreamBlockHeader::WriteSectionEnd(writer);
 }
 
 void
 HGraph::ImportCache(std::istream& in_stream) {
     IOStreamReader reader(in_stream);
-    this->cache_->Deserialize(reader);
+    bool loaded_cache = false;
+    while (true) {
+        auto block_header = StreamBlockHeader::Read(reader);
+        if (block_header.IsSectionEnd()) {
+            break;
+        }
+        BoundedForwardReader block_reader(&reader, block_header.value_len);
+        if (!StreamSerializationBlockVersionSupported(block_header.tag,
+                                                      block_header.block_version)) {
+            if (block_header.IsCritical()) {
+                throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "unsupported HGraph build cache block version");
+            }
+            block_reader.SkipRemaining();
+            continue;
+        }
+        switch (static_cast<StreamSerializationTag>(block_header.tag)) {
+            case StreamSerializationTag::BUILD_CACHE:
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    this->cache_->Deserialize(block);
+                });
+                loaded_cache = true;
+                break;
+            default:
+                if (block_header.IsCritical()) {
+                    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                        "unknown HGraph build cache block");
+                }
+                break;
+        }
+        block_reader.SkipRemaining();
+    }
+    if (!loaded_cache) {
+        throw VsagException(ErrorType::READ_ERROR, "HGraph build cache block is missing");
+    }
 }
 
 void

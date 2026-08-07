@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,6 +14,7 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
 
 #include "storage/serialization.h"
@@ -23,11 +23,11 @@
 
 namespace vsag {
 
-class HGraphCache {
+class BuildCache {
 public:
-    explicit HGraphCache(Allocator* allocator);
+    explicit BuildCache(Allocator* allocator);
 
-    ~HGraphCache() = default;
+    ~BuildCache() = default;
 
     void
     Serialize(StreamWriter& writer) const;
@@ -49,4 +49,5 @@ public:
     // neighbors_[source_id][1...] are neighbor inner_ids
     UnorderedMap<std::string, Vector<InnerIdType>> neighbors_;
 };
+
 }  // namespace vsag
