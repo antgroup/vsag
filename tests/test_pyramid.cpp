@@ -174,6 +174,18 @@ CollectIds(const vsag::DatasetPtr& result) -> std::set<int64_t> {
     return ids;
 }
 
+uint32_t
+SearchAndGetHops(const vsag::IndexPtr& index,
+                 const vsag::DatasetPtr& query,
+                 int64_t topk,
+                 const std::string& search_param) {
+    auto result = index->KnnSearch(query, topk, search_param);
+    REQUIRE(result.has_value());
+    const auto hops = result.value()->GetStatistics({"hops"});
+    REQUIRE(hops.size() == 1);
+    return static_cast<uint32_t>(std::stoul(hops.front()));
+}
+
 void
 RequireDistancesNearZero(const vsag::DatasetPtr& result, const std::set<int64_t>& expected_ids) {
     for (int64_t i = 0; i < result->GetDim(); ++i) {
@@ -634,6 +646,12 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         R"({"pyramid":{"ef_search":100,"hops_limit":200}})";
     constexpr static const char* search_param_invalid_hops_limit =
         R"({"pyramid":{"ef_search":100,"hops_limit":50}})";
+    constexpr static const char* search_param_for_hops_statistics =
+        R"({"pyramid":{"ef_search":1,"hops_limit":2}})";
+    constexpr static const char* search_param_without_hops_limit_for_statistics =
+        R"({"pyramid":{"ef_search":1}})";
+    constexpr static const char* search_param_ignored_hops_limit_for_statistics =
+        R"({"pyramid":{"ef_search":1,"hops_limit":1}})";
     PyramidParam pyramid_param;
     std::vector<std::vector<int>> tmp_levels = {{1, 2}, {0, 1, 2}};
     for (auto& dim : dims) {
@@ -654,6 +672,17 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
             if (has_root) {
                 TestKnnSearch(index, dataset, search_param_with_hops_limit, 0.9, true);
                 TestKnnSearch(index, dataset, search_param_invalid_hops_limit, 0.94, true);
+
+                auto query = fixtures::get_one_query(dataset->query_, 0);
+                const auto unlimited_hops = SearchAndGetHops(
+                    index, query, dataset->top_k, search_param_without_hops_limit_for_statistics);
+                const auto limited_hops = SearchAndGetHops(
+                    index, query, dataset->top_k, search_param_for_hops_statistics);
+                const auto ignored_hops = SearchAndGetHops(
+                    index, query, dataset->top_k, search_param_ignored_hops_limit_for_statistics);
+                REQUIRE(unlimited_hops > limited_hops);
+                REQUIRE(limited_hops <= 2);
+                REQUIRE(ignored_hops == unlimited_hops);
             }
             TestFilterSearch(index, dataset, search_param, 0.94, has_root);
             TestRangeSearch(index, dataset, search_param, 0.94, 10, has_root);
