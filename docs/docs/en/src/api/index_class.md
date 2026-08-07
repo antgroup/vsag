@@ -134,9 +134,10 @@ The recommended entry point is [`SearchWithRequest`](#searchwithrequest), which 
 [`SearchRequest`](search.md#searchrequest) carrying the query, mode, top-k / radius, and any filters.
 The older per-argument `KnnSearch` / `RangeSearch` overloads remain for compatibility.
 
-Every search returns a `DatasetPtr`: for KNN, `num_elements == 1` and `ids` / `distances` have
-length `k`; for range search, the result length is the number of matches. See [Dataset](dataset.md)
-for how to read results.
+Every search returns a `DatasetPtr`: single-query KNN has `num_elements == 1`; HGraph and IVF also
+support batched KNN with a row-major `num_elements x dim` result. HGraph pads missing neighbors with
+`id == -1` and infinite distance. For range search, the result length is the number of matches. See
+[Dataset](dataset.md) for how to read results.
 
 ### `SearchWithRequest`
 

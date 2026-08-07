@@ -329,6 +329,7 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
             this->label_table_->InsertRemap(key, value);
         }
         this->label_table_->total_count_.store(static_cast<int64_t>(size));
+        this->label_table_->RebuildActivePaddingLabelIdsFromRemap();
     }
 
     // Optional source_id_table_ block. If the next 8 bytes don't match
@@ -604,6 +605,7 @@ HGraph::deserialize_label_info_streaming(StreamReader& reader) const {
             this->label_table_->InsertRemap(key, value);
         }
         this->label_table_->total_count_.store(static_cast<int64_t>(size));
+        this->label_table_->RebuildActivePaddingLabelIdsFromRemap();
     }
 
     if (this->persist_source_id_) {

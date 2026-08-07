@@ -132,7 +132,8 @@ using WriteFuncType = std::function<void(OffsetType, SizeType, const void*)>;
 [`SearchRequest`](search.md#searchrequest)，其中携带查询、模式、top-k / 半径以及各类过滤器。较旧的
 逐参数 `KnnSearch` / `RangeSearch` 重载为兼容性保留。
 
-每次搜索都返回一个 `DatasetPtr`：对 KNN，`num_elements == 1`，`ids` / `distances` 长度为 `k`；对范围
+每次搜索都返回一个 `DatasetPtr`：单查询 KNN 的 `num_elements == 1`；HGraph 和 IVF 还支持批量 KNN，
+返回按行主序排列的 `num_elements x dim` 矩阵。HGraph 的不足项以 `id == -1` 和无穷距离填充。对范围
 搜索，结果长度即命中数。如何读取结果见 [Dataset](dataset.md)。
 
 ### `SearchWithRequest`
