@@ -15,6 +15,7 @@
 
 #include "fp32_quantizer.h"
 
+#include "simd/basic_func.h"
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
 #include "simd/simd.h"
@@ -121,6 +122,10 @@ FP32Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2)
                                 reinterpret_cast<const float*>(codes2),
                                 this->dim_);
     }
+    if (metric == MetricType::METRIC_TYPE_L1) {
+        const uint64_t dim = this->dim_;
+        return L1Distance(codes1, codes2, &dim);
+    }
     return 0.0F;
 }
 
@@ -178,6 +183,9 @@ FP32Quantizer<metric>::ComputeDistImpl(Computer<FP32Quantizer<metric>>& computer
         *dists = FP32ComputeL2Sqr(reinterpret_cast<const float*>(codes),
                                   reinterpret_cast<const float*>(computer.buf_),
                                   this->dim_);
+    } else if (metric == MetricType::METRIC_TYPE_L1) {
+        const uint64_t dim = this->dim_;
+        *dists = L1Distance(codes, computer.buf_, &dim);
     } else {
         *dists = 0.0F;
     }
@@ -245,6 +253,12 @@ FP32Quantizer<metric>::ComputeDistsBatch4Impl(Computer<FP32Quantizer<metric>>& c
                                dists2,
                                dists3,
                                dists4);
+    } else if constexpr (metric == MetricType::METRIC_TYPE_L1) {
+        const uint64_t dim = this->dim_;
+        dists1 = L1Distance(computer.buf_, codes1, &dim);
+        dists2 = L1Distance(computer.buf_, codes2, &dim);
+        dists3 = L1Distance(computer.buf_, codes3, &dim);
+        dists4 = L1Distance(computer.buf_, codes4, &dim);
     } else {
         dists1 = 0.0F;
         dists2 = 0.0F;
@@ -260,4 +274,5 @@ FP32Quantizer<metric>::ReleaseComputerImpl(Computer<FP32Quantizer<metric>>& comp
 }
 
 TEMPLATE_QUANTIZER(FP32Quantizer);
+template class FP32Quantizer<MetricType::METRIC_TYPE_L1>;
 }  // namespace vsag

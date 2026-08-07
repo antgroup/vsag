@@ -64,6 +64,11 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
         transform(name.begin(), name.end(), name.begin(), ::tolower);
         auto parsed_params = JsonType::Parse(parameters);
         auto index_common_params = IndexCommonParam::CheckAndCreate(parsed_params, this->resource_);
+        if (index_common_params.metric_ == MetricType::METRIC_TYPE_L1 && name != INDEX_HNSW &&
+            name != INDEX_HGRAPH) {
+            LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                  "l1 metric is supported only by the hnsw and hgraph indexes");
+        }
         if (name == INDEX_HNSW) {
             // read parameters from json, throw exception if not exists
             CHECK_ARGUMENT(parsed_params.Contains(INDEX_HNSW),

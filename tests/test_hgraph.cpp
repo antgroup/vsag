@@ -15,10 +15,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <chrono>
 #include <limits>
+#include <set>
 #include <thread>
 
 #include "algorithm/hgraph.h"
@@ -2980,4 +2982,85 @@ TEST_CASE("HGraph Concurrent Tune and CalcDistanceById (single id)", "[ft][concu
     }
 
     REQUIRE(cal_count.load() > 0);
+}
+
+TEST_CASE("HGraph float32 L1", "[ft][hgraph][l1]") {
+    constexpr int64_t dim = 2;
+    constexpr int64_t base_count = 8;
+    const std::vector<int64_t> ids = {1, 2, 3, 4, 5, 6, 7, 8};
+    const std::vector<float> original_vectors = {
+        3.0F, 0.0F, 2.0F, 2.0F, 5.0F, 0.0F, 3.0F, 3.0F,
+        7.0F, 0.0F, 4.0F, 4.0F, 9.0F, 0.0F, 5.0F, 5.0F,
+    };
+    std::vector<float> base_vectors = original_vectors;
+
+    const std::string build_parameters = R"({
+        "dtype": "float32",
+        "metric_type": "l1",
+        "dim": 2,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 8,
+            "ef_construction": 100,
+            "build_thread_count": 0,
+            "store_raw_vector": true
+        }
+    })";
+    auto factory_result = vsag::Factory::CreateIndex("hgraph", build_parameters);
+    REQUIRE(factory_result.has_value());
+    auto index = std::move(factory_result.value());
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(base_count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(base_vectors.data())
+        ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    const std::vector<float> query_vector = {0.0F, 0.0F};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dim)
+        ->Float32Vectors(query_vector.data())
+        ->Owner(false);
+    const std::string search_parameters = R"({"hgraph": {"ef_search": 100}})";
+
+    auto result = index->KnnSearch(query, 2, search_parameters);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 2);
+    REQUIRE(result.value()->GetIds()[0] == 1);
+    REQUIRE(result.value()->GetIds()[1] == 2);
+    REQUIRE(result.value()->GetDistances()[0] == Catch::Approx(3.0F));
+    REQUIRE(result.value()->GetDistances()[1] == Catch::Approx(4.0F));
+
+    std::fill(base_vectors.begin(), base_vectors.end(), -999.0F);
+    auto raw = index->GetRawVectorByIds(ids.data(), base_count);
+    REQUIRE(raw.has_value());
+    REQUIRE(raw.value()->GetNumElements() == base_count);
+    REQUIRE(raw.value()->GetDim() == dim);
+    for (int64_t i = 0; i < base_count * dim; ++i) {
+        REQUIRE(raw.value()->GetFloat32Vectors()[i] ==
+                Catch::Approx(original_vectors[static_cast<uint64_t>(i)]));
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
+                             "HGraph float32 L1 recall",
+                             "[ft][hgraph][l1][recall]") {
+    constexpr int64_t dim = 128;
+    constexpr uint64_t dataset_base_count = 600;
+    constexpr float minimum_recall = 0.95F;
+
+    HGraphBuildParam build_param("l1", dim, "fp32");
+    build_param.store_raw_vector = true;
+    auto build_parameters = GenerateHGraphBuildParametersString(build_param);
+    auto index = TestFactory(name, build_parameters, true);
+    auto dataset = pool.GetDatasetAndCreate(dim, dataset_base_count, "l1");
+    TestBuildIndex(index, dataset, true);
+
+    const auto search_parameters = fmt::format(fixtures::search_param_tmp, 200, false);
+    TestKnnSearch(index, dataset, search_parameters, minimum_recall, true);
+    TestKnnSearchIter(index, dataset, search_parameters, minimum_recall, true);
+    TestGetRawVectorByIds(index, dataset, true);
 }

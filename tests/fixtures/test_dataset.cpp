@@ -16,6 +16,7 @@
 #include "test_dataset.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <functional>
 
@@ -140,6 +141,14 @@ CalDistanceFloatMetrix(const vsag::DatasetPtr query,
             vsag::Normalize(codes, norm_codes.get(), dim);
             return 1 - vsag::FP32ComputeIP(norm_query.get(), norm_codes.get(), dim);
         };
+    } else if (metric_str == "l1") {
+        dist_func = [](const float* query, const float* codes, uint64_t dim) -> float {
+            float distance = 0.0F;
+            for (uint64_t i = 0; i < dim; ++i) {
+                distance += std::fabs(query[i] - codes[i]);
+            }
+            return distance;
+        };
     }
     auto dim = base->GetDim();
 #pragma omp parallel for schedule(dynamic)
@@ -193,6 +202,14 @@ CalDistanceFloatMetrixWithExFilter(const vsag::DatasetPtr query,
             vsag::Normalize(query, norm_query.get(), dim);
             vsag::Normalize(codes, norm_codes.get(), dim);
             return 1 - vsag::FP32ComputeIP(norm_query.get(), norm_codes.get(), dim);
+        };
+    } else if (metric_str == "l1") {
+        dist_func = [](const float* query, const float* codes, uint64_t dim) -> float {
+            float distance = 0.0F;
+            for (uint64_t i = 0; i < dim; ++i) {
+                distance += std::fabs(query[i] - codes[i]);
+            }
+            return distance;
         };
     }
     auto dim = base->GetDim();

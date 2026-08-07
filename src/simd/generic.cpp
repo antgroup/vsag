@@ -14,9 +14,25 @@
 // limitations under the License.
 
 #include "simd.h"
+
+#include <cmath>
+
 #include "simd/int8_simd.h"
 
 namespace vsag::generic {
+
+float
+L1Distance(const void* query1, const void* query2, const void* dim_ptr) {
+    const auto* lhs = static_cast<const float*>(query1);
+    const auto* rhs = static_cast<const float*>(query2);
+    const uint64_t dim = *static_cast<const uint64_t*>(dim_ptr);
+    float distance = 0.0F;
+
+    for (uint64_t i = 0; i < dim; ++i) {
+        distance += std::fabs(lhs[i] - rhs[i]);
+    }
+    return distance;
+}
 
 float
 L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {

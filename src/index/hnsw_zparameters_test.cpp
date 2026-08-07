@@ -33,6 +33,31 @@ TEST_CASE("create hnsw with correct parameter", "[ut][hnsw]") {
     vsag::HnswParameters::FromJson(parsed_params, common_param);
 }
 
+TEST_CASE("create float32 hnsw with l1 parameter", "[ut][hnsw][l1]") {
+    auto parsed_params = vsag::JsonType::Parse(R"(
+        {
+            "max_degree": 8,
+            "ef_construction": 100
+        }
+    )");
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 5;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L1;
+
+    auto params = vsag::HnswParameters::FromJson(parsed_params, common_param);
+    REQUIRE(params.type == vsag::DataTypes::DATA_TYPE_FLOAT);
+    REQUIRE_FALSE(params.normalize);
+    REQUIRE(params.space->get_data_size() == 5 * sizeof(float));
+
+    const float lhs[5]{-1.0F, 2.5F, 4.0F, 0.0F, -2.0F};
+    const float rhs[5]{2.0F, -0.5F, 1.0F, 0.25F, 3.0F};
+    REQUIRE(params.space->get_dist_func()(lhs, rhs, params.space->get_dist_func_param()) == 14.25F);
+
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_INT8;
+    REQUIRE_THROWS(vsag::HnswParameters::FromJson(parsed_params, common_param));
+}
+
 TEST_CASE("create hnsw with wrong parameter", "[ut][hnsw]") {
     vsag::IndexCommonParam common_param;
     common_param.dim_ = 128;

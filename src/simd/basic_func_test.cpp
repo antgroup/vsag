@@ -68,6 +68,16 @@ TEST_CASE("L2Sqr & InnerProduct SIMD Compute", "[ut][simd]") {
     }
 }
 
+TEST_CASE("L1 distance computes absolute differences", "[ut][simd][l1]") {
+    const std::vector<float> lhs = {1.0F, -2.0F, 3.0F, -4.0F};
+    const std::vector<float> rhs = {-1.0F, -1.0F, 5.0F, 0.0F};
+    const uint64_t dim = lhs.size();
+
+    REQUIRE(generic::L1Distance(lhs.data(), rhs.data(), &dim) == 9.0F);
+    REQUIRE(L1Distance(lhs.data(), rhs.data(), &dim) == 9.0F);
+    REQUIRE(generic::L1Distance(lhs.data(), lhs.data(), &dim) == 0.0F);
+}
+
 TEST_CASE("Int8 SIMD Compute", "[ut][simd][int8]") {
     auto dims = fixtures::get_common_used_dims(8, 217);
     int64_t count = 100;

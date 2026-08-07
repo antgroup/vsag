@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,12 +14,36 @@
 
 #pragma once
 
-namespace vsag {
-enum class MetricType {
-    METRIC_TYPE_L2SQR = 0,
-    METRIC_TYPE_IP = 1,
-    METRIC_TYPE_COSINE = 2,
-    METRIC_TYPE_L1 = 3,
+#include "simd/basic_func.h"
+#include "space_interface.h"
+
+namespace hnswlib {
+
+class L1Space : public SpaceInterface {
+public:
+    explicit L1Space(uint64_t dim)
+        : fstdistfunc_(vsag::L1Distance), data_size_(dim * sizeof(float)), dim_(dim) {
+    }
+
+    size_t
+    get_data_size() override {
+        return data_size_;
+    }
+
+    DISTFUNC
+    get_dist_func() override {
+        return fstdistfunc_;
+    }
+
+    void*
+    get_dist_func_param() override {
+        return &dim_;
+    }
+
+private:
+    DISTFUNC fstdistfunc_;
+    size_t data_size_;
+    uint64_t dim_;
 };
 
-}  // namespace vsag
+}  // namespace hnswlib
