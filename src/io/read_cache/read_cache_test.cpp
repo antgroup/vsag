@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <atomic>
+#include <chrono>
 #include <cstring>
+#include <thread>
 #include <vector>
 
 #include "impl/allocator/safe_allocator.h"
@@ -61,6 +64,55 @@ public:
 
 private:
     const std::vector<uint8_t>& data_;
+};
+
+class CountingIO : public BasicIO<CountingIO> {
+public:
+    static constexpr bool InMemory = false;
+    static constexpr bool SkipDeserialize = false;
+
+    explicit CountingIO(Allocator* allocator) : BasicIO<CountingIO>(allocator) {
+    }
+
+    void
+    WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
+        if (data_.size() < offset + size) {
+            data_.resize(offset + size);
+        }
+        std::memcpy(data_.data() + offset, data, size);
+        size_ = data_.size();
+    }
+
+    bool
+    ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
+        ++read_count;
+        std::memcpy(data, data_.data() + offset, size);
+        return true;
+    }
+
+    bool
+    MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const {
+        ++multi_read_count;
+        if (delay_multi_read) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        if (fail_next_multi_read.exchange(false)) {
+            return false;
+        }
+        for (uint64_t i = 0; i < count; ++i) {
+            std::memcpy(datas, data_.data() + offsets[i], sizes[i]);
+            datas += sizes[i];
+        }
+        return true;
+    }
+
+    mutable std::atomic<uint64_t> read_count{0};
+    mutable std::atomic<uint64_t> multi_read_count{0};
+    std::atomic<bool> delay_multi_read{false};
+    mutable std::atomic<bool> fail_next_multi_read{false};
+
+private:
+    std::vector<uint8_t> data_;
 };
 
 }  // namespace
@@ -120,6 +172,73 @@ TEST_CASE("BasicIO cache component direct and multi read", "[ReadCache][ut]") {
     std::vector<uint8_t> result(70);
     REQUIRE(io.MultiRead(result.data(), sizes, offsets, 2));
     REQUIRE(std::memcmp(result.data(), data.data(), result.size()) == 0);
+}
+
+TEST_CASE("BasicIO cache batches missing pages", "[ReadCache][ut]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    CountingIO io(allocator.get());
+    io.EnableReadCache(MakeReadCacheParam(4));
+
+    std::vector<uint8_t> source(Page::DEFAULT_PAGE_SIZE * 3);
+    for (uint64_t i = 0; i < source.size(); ++i) {
+        source[i] = static_cast<uint8_t>(i);
+    }
+    io.Write(source.data(), source.size(), 0);
+
+    uint64_t sizes[] = {32, 64, 48};
+    uint64_t offsets[] = {Page::DEFAULT_PAGE_SIZE - 16,
+                          Page::DEFAULT_PAGE_SIZE + 20,
+                          Page::DEFAULT_PAGE_SIZE * 2 + 40};
+    std::vector<uint8_t> result(144);
+    REQUIRE(io.MultiRead(result.data(), sizes, offsets, 3));
+    REQUIRE(io.multi_read_count == 1);
+    REQUIRE(io.read_count == 0);
+    REQUIRE(std::memcmp(result.data(), source.data() + offsets[0], sizes[0]) == 0);
+    REQUIRE(std::memcmp(result.data() + sizes[0], source.data() + offsets[1], sizes[1]) == 0);
+    REQUIRE(std::memcmp(
+                result.data() + sizes[0] + sizes[1], source.data() + offsets[2], sizes[2]) == 0);
+}
+
+TEST_CASE("BasicIO cache shares in-flight page loads and retries failures", "[ReadCache][ut]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    CountingIO io(allocator.get());
+    io.EnableReadCache(MakeReadCacheParam());
+
+    std::vector<uint8_t> source(Page::DEFAULT_PAGE_SIZE, 0xA5);
+    io.Write(source.data(), source.size(), 0);
+    io.delay_multi_read = true;
+
+    std::atomic<bool> start{false};
+    std::vector<uint8_t> first(source.size());
+    std::vector<uint8_t> second(source.size());
+    auto read_page = [&](std::vector<uint8_t>& result) {
+        while (not start.load()) {
+        }
+        uint64_t size = result.size();
+        uint64_t offset = 0;
+        REQUIRE(io.MultiRead(result.data(), &size, &offset, 1));
+    };
+    std::thread first_reader(read_page, std::ref(first));
+    std::thread second_reader(read_page, std::ref(second));
+    start = true;
+    first_reader.join();
+    second_reader.join();
+
+    REQUIRE(io.multi_read_count == 1);
+    REQUIRE(first == source);
+    REQUIRE(second == source);
+
+    CountingIO failing_io(allocator.get());
+    failing_io.EnableReadCache(MakeReadCacheParam());
+    failing_io.Write(source.data(), source.size(), 0);
+    failing_io.fail_next_multi_read = true;
+    uint64_t size = source.size();
+    uint64_t offset = 0;
+    std::vector<uint8_t> result(source.size());
+    REQUIRE_FALSE(failing_io.MultiRead(result.data(), &size, &offset, 1));
+    REQUIRE(failing_io.MultiRead(result.data(), &size, &offset, 1));
+    REQUIRE(failing_io.multi_read_count == 2);
+    REQUIRE(result == source);
 }
 
 TEST_CASE("BasicIO cache component initializes ReaderIO", "[ReadCache][ut]") {

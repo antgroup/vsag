@@ -18,11 +18,15 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <memory>
 #include <mutex>
 #include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include "io/common/io_parameter.h"
 #include "io/read_cache/lru_page_cache.h"
@@ -160,9 +164,41 @@ public:
         static_assert(has_MultiReadImpl<IOTmpl>::value);
         if constexpr (not InMemory) {
             if (cache_ != nullptr) {
+                std::vector<uint64_t> page_ids;
+                std::unordered_set<uint64_t> seen_page_ids;
                 for (uint64_t i = 0; i < count; ++i) {
-                    if (not ReadCached(sizes[i], offsets[i], datas)) {
+                    if (not IsValidRange(sizes[i], offsets[i])) {
                         return false;
+                    }
+                    if (sizes[i] == 0) {
+                        continue;
+                    }
+                    const uint64_t first_page = offsets[i] / Page::DEFAULT_PAGE_SIZE;
+                    const uint64_t last_page =
+                        (offsets[i] + sizes[i] - 1) / Page::DEFAULT_PAGE_SIZE;
+                    for (uint64_t page_id = first_page; page_id <= last_page; ++page_id) {
+                        if (seen_page_ids.emplace(page_id).second) {
+                            page_ids.emplace_back(page_id);
+                        }
+                    }
+                }
+
+                std::unordered_map<uint64_t, PagePtr> pages;
+                if (not LoadCachedPages(page_ids, pages)) {
+                    return false;
+                }
+
+                for (uint64_t i = 0; i < count; ++i) {
+                    uint64_t copied = 0;
+                    while (copied < sizes[i]) {
+                        const uint64_t current_offset = offsets[i] + copied;
+                        const uint64_t page_id = current_offset / Page::DEFAULT_PAGE_SIZE;
+                        const uint64_t page_offset = current_offset % Page::DEFAULT_PAGE_SIZE;
+                        const uint64_t copy_size =
+                            std::min(sizes[i] - copied, Page::DEFAULT_PAGE_SIZE - page_offset);
+                        const auto& page = pages.at(page_id);
+                        std::memcpy(datas + copied, page->Data() + page_offset, copy_size);
+                        copied += copy_size;
                     }
                     datas += sizes[i];
                 }
@@ -406,6 +442,13 @@ protected:
     Allocator* const allocator_;
 
 private:
+    struct LoadingPage {
+        std::condition_variable cv;
+        PagePtr page;
+        bool done{false};
+        bool stale{false};
+    };
+
     /**
      * @brief Casts the current object to the underlying IO object type.
      *
@@ -457,24 +500,110 @@ private:
         if (page_id > UINT64_MAX / Page::DEFAULT_PAGE_SIZE) {
             return nullptr;
         }
-        uint64_t offset = page_id * Page::DEFAULT_PAGE_SIZE;
+        const uint64_t offset = page_id * Page::DEFAULT_PAGE_SIZE;
         if (offset >= size_) {
             return nullptr;
         }
-        std::scoped_lock<std::mutex> lock(cache_mutex_);
-        auto page = cache_->Get(page_id);
-        if (page != nullptr) {
-            return page;
-        }
-        auto new_page = std::make_shared<Page>(allocator_);
-        if (new_page->Data() == nullptr) {
+        std::unordered_map<uint64_t, PagePtr> pages;
+        if (not LoadCachedPages({page_id}, pages)) {
             return nullptr;
         }
-        uint64_t read_size = std::min(Page::DEFAULT_PAGE_SIZE, size_ - offset);
-        if (not cast().ReadImpl(read_size, offset, new_page->Data())) {
-            return nullptr;
+        return pages.at(page_id);
+    }
+
+    bool
+    LoadCachedPages(const std::vector<uint64_t>& page_ids,
+                    std::unordered_map<uint64_t, PagePtr>& pages) const {
+        std::vector<std::pair<uint64_t, std::shared_ptr<LoadingPage>>> owned_loads;
+        std::vector<std::pair<uint64_t, std::shared_ptr<LoadingPage>>> waiting_loads;
+        {
+            std::scoped_lock<std::mutex> lock(cache_mutex_);
+            for (const uint64_t page_id : page_ids) {
+                if (const auto page = cache_->Get(page_id); page != nullptr) {
+                    pages.emplace(page_id, page);
+                    continue;
+                }
+                if (const auto iter = loading_pages_.find(page_id); iter != loading_pages_.end()) {
+                    waiting_loads.emplace_back(page_id, iter->second);
+                    continue;
+                }
+                auto state = std::make_shared<LoadingPage>();
+                loading_pages_.emplace(page_id, state);
+                owned_loads.emplace_back(page_id, std::move(state));
+            }
         }
-        return cache_->Insert(page_id, std::move(new_page));
+
+        std::vector<PagePtr> loaded_pages;
+        std::vector<uint64_t> read_sizes;
+        std::vector<uint64_t> read_offsets;
+        std::vector<uint8_t> read_data;
+        bool success = true;
+        try {
+            uint64_t total_size = 0;
+            for (const auto& [page_id, state] : owned_loads) {
+                const uint64_t offset = page_id * Page::DEFAULT_PAGE_SIZE;
+                const uint64_t read_size = std::min(Page::DEFAULT_PAGE_SIZE, size_ - offset);
+                auto page = std::make_shared<Page>(allocator_);
+                if (page->Data() == nullptr) {
+                    success = false;
+                    break;
+                }
+                loaded_pages.emplace_back(std::move(page));
+                read_sizes.emplace_back(read_size);
+                read_offsets.emplace_back(offset);
+                total_size += read_size;
+            }
+            if (success and not owned_loads.empty()) {
+                read_data.resize(total_size);
+                success = cast().MultiReadImpl(
+                    read_data.data(), read_sizes.data(), read_offsets.data(), owned_loads.size());
+                uint64_t copied = 0;
+                for (uint64_t i = 0; success and i < loaded_pages.size(); ++i) {
+                    std::memcpy(loaded_pages[i]->Data(), read_data.data() + copied, read_sizes[i]);
+                    copied += read_sizes[i];
+                }
+            }
+        } catch (...) {
+            FinishPageLoads(owned_loads, loaded_pages, false, pages);
+            throw;
+        }
+
+        FinishPageLoads(owned_loads, loaded_pages, success, pages);
+        if (not success) {
+            return false;
+        }
+
+        for (const auto& [page_id, state] : waiting_loads) {
+            std::unique_lock<std::mutex> lock(cache_mutex_);
+            state->cv.wait(lock, [&state] { return state->done; });
+            pages.emplace(page_id, state->page);
+        }
+        return std::all_of(
+            pages.begin(), pages.end(), [](const auto& page) { return page.second != nullptr; });
+    }
+
+    void
+    FinishPageLoads(
+        const std::vector<std::pair<uint64_t, std::shared_ptr<LoadingPage>>>& owned_loads,
+        const std::vector<PagePtr>& loaded_pages,
+        bool success,
+        std::unordered_map<uint64_t, PagePtr>& pages) const {
+        {
+            std::scoped_lock<std::mutex> lock(cache_mutex_);
+            for (uint64_t i = 0; i < owned_loads.size(); ++i) {
+                const auto& [page_id, state] = owned_loads[i];
+                if (success) {
+                    state->page =
+                        state->stale ? loaded_pages[i] : cache_->Insert(page_id, loaded_pages[i]);
+                    pages.emplace(page_id, state->page);
+                }
+                state->done = true;
+                loading_pages_.erase(page_id);
+            }
+        }
+        for (const auto& [page_id, state] : owned_loads) {
+            state->cv.notify_all();
+        }
     }
 
     void
@@ -491,6 +620,9 @@ private:
         uint64_t last_page = (offset + size - 1) / Page::DEFAULT_PAGE_SIZE;
         for (uint64_t page_id = first_page; page_id <= last_page; ++page_id) {
             cache_->Remove(page_id);
+            if (const auto iter = loading_pages_.find(page_id); iter != loading_pages_.end()) {
+                iter->second->stale = true;
+            }
         }
     }
 
@@ -499,6 +631,9 @@ private:
         if (cache_ != nullptr) {
             std::scoped_lock<std::mutex> lock(cache_mutex_);
             cache_->Clear();
+            for (const auto& [page_id, state] : loading_pages_) {
+                state->stale = true;
+            }
         }
     }
 
@@ -509,6 +644,7 @@ private:
 
     mutable std::mutex cache_mutex_;
     mutable std::unique_ptr<PageCache> cache_;
+    mutable std::unordered_map<uint64_t, std::shared_ptr<LoadingPage>> loading_pages_;
     bool has_deserialized_{false};
 
 private:
