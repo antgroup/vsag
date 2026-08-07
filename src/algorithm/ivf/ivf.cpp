@@ -2141,12 +2141,22 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         CHECK_ARGUMENT(request.expected_labels_.empty(),
                        "IVF batch search does not support expected labels");
         CHECK_ARGUMENT(request.topk_ > 0, "topk must be greater than 0");
+        CHECK_ARGUMENT(!this->label_table_->HasActivePaddingLabel(),
+                       "batch KNN does not support an index containing external label -1");
         CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr,
                        "query float32 vectors cannot be null");
         CHECK_ARGUMENT(query->GetDim() == this->dim_, "query dimension must match index dimension");
 
         const auto num_queries = query->GetNumElements();
+        CHECK_ARGUMENT(
+            num_queries <= std::numeric_limits<int64_t>::max() / request.topk_,
+            fmt::format(
+                "num_queries({}) * topk({}) would overflow int64_t", num_queries, request.topk_));
         const auto total_slots = num_queries * request.topk_;
+        CHECK_ARGUMENT(total_slots <= std::numeric_limits<size_t>::max() / sizeof(int64_t),
+                       "batch result id allocation would overflow size_t");
+        CHECK_ARGUMENT(total_slots <= std::numeric_limits<size_t>::max() / sizeof(float),
+                       "batch result distance allocation would overflow size_t");
         auto* alloc = select_query_allocator(ctx.alloc, this->allocator_);
         auto* ids = static_cast<int64_t*>(alloc->Allocate(sizeof(int64_t) * total_slots));
         auto* distances = static_cast<float*>(alloc->Allocate(sizeof(float) * total_slots));
@@ -2159,6 +2169,84 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         if (not request.bucket_ids_.empty()) {
             base_request.bucket_ids_.clear();
         }
+        const auto saturating_add_uint32 = [](std::atomic<uint32_t>& target, uint64_t amount) {
+            auto current = target.load(std::memory_order_relaxed);
+            while (true) {
+                const auto accepted =
+                    std::min<uint64_t>(amount, std::numeric_limits<uint32_t>::max() - current);
+                const auto next = static_cast<uint32_t>(current + accepted);
+                if (target.compare_exchange_weak(
+                        current, next, std::memory_order_relaxed, std::memory_order_relaxed)) {
+                    return accepted < amount;
+                }
+            }
+        };
+        const auto merge_statistics = [&](const DatasetPtr& one_result) {
+            const auto one_stats = JsonType::Parse(one_result->GetStatistics());
+            if (one_stats["is_timeout"].GetBool()) {
+                stats.is_timeout.store(true, std::memory_order_relaxed);
+            }
+            bool overflowed = false;
+            overflowed = saturating_add_uint32(stats.dist_cmp, one_stats["dist_cmp"].GetUint64()) ||
+                         overflowed;
+            overflowed =
+                saturating_add_uint32(stats.hops, one_stats["hops"].GetUint64()) || overflowed;
+            overflowed =
+                saturating_add_uint32(stats.io_cnt, one_stats["io_cnt"].GetUint64()) || overflowed;
+            overflowed =
+                saturating_add_uint32(stats.io_time_ms, one_stats["io_time_ms"].GetUint64()) ||
+                overflowed;
+            overflowed = saturating_add_uint32(stats.reorder_distance_count,
+                                               one_stats["reorder_distance_count"].GetUint64()) ||
+                         overflowed;
+            overflowed =
+                saturating_add_uint32(stats.reorder_lower_bound_probe_count,
+                                      one_stats["reorder_lower_bound_probe_count"].GetUint64()) ||
+                overflowed;
+            overflowed = saturating_add_uint32(stats.rabitq_filter_count,
+                                               one_stats["rabitq_filter_count"].GetUint64()) ||
+                         overflowed;
+            overflowed = saturating_add_uint32(stats.rabitq_full_count,
+                                               one_stats["rabitq_full_count"].GetUint64()) ||
+                         overflowed;
+            overflowed =
+                saturating_add_uint32(stats.rabitq_filter_fallback_full_count,
+                                      one_stats["rabitq_filter_fallback_full_count"].GetUint64()) ||
+                overflowed;
+            overflowed =
+                saturating_add_uint32(stats.rabitq_reorder_hint_full_count,
+                                      one_stats["rabitq_reorder_hint_full_count"].GetUint64()) ||
+                overflowed;
+            overflowed = saturating_add_uint32(
+                             stats.rabitq_reorder_fallback_full_count,
+                             one_stats["rabitq_reorder_fallback_full_count"].GetUint64()) ||
+                         overflowed;
+            overflowed =
+                SearchStatistics::SaturatingAdd(stats.distance_evaluations,
+                                                one_stats["distance_evaluations"].GetUint64()) ||
+                overflowed;
+            for (size_t i = 0; i < stats.distance_evaluations_by_phase.size(); ++i) {
+                const auto phase = static_cast<SearchStatistics::DistancePhase>(i);
+                overflowed =
+                    SearchStatistics::SaturatingAdd(stats.distance_evaluations_by_phase[i],
+                                                    one_stats["distance_evaluations_by_phase"]
+                                                             [SearchStatistics::PhaseName(phase)]
+                                                                 .GetUint64()) ||
+                    overflowed;
+            }
+            for (size_t i = 0; i < stats.distance_evaluations_by_backend.size(); ++i) {
+                const auto backend = static_cast<DistanceEvaluationBackend>(i);
+                overflowed = SearchStatistics::SaturatingAdd(
+                                 stats.distance_evaluations_by_backend[i],
+                                 one_stats["distance_evaluations_by_backend"]
+                                          [SearchStatistics::BackendName(backend)]
+                                              .GetUint64()) ||
+                             overflowed;
+            }
+            if (overflowed || not one_stats["complete"].GetBool()) {
+                stats.complete.store(false, std::memory_order_relaxed);
+            }
+        };
         auto search_func = [&](int64_t query_idx) -> void {
             auto one_query = Dataset::Make();
             one_query->NumElements(1)
@@ -2177,6 +2265,8 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             }
             one_request.params_str_ = json.Dump();
             auto one_result = this->SearchWithRequest(one_request);
+            CHECK_ARGUMENT(one_result != nullptr, "IVF batch search returned an empty result");
+            merge_statistics(one_result);
             const auto count = std::min(request.topk_, one_result->GetDim());
             if (count > 0) {
                 std::copy_n(one_result->GetIds(), count, ids + query_idx * request.topk_);
@@ -2219,6 +2309,14 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             param.executors.emplace_back(executor);
         }
     }
+    CHECK_ARGUMENT(query != nullptr, "query dataset cannot be null");
+    CHECK_ARGUMENT(query->GetNumElements() > 0, "query count must be greater than 0");
+    CHECK_ARGUMENT(query->GetDim() == this->dim_, "query dimension must match index dimension");
+    if (is_range) {
+        CHECK_ARGUMENT(query->GetNumElements() == 1,
+                       "IVF range search only supports a single query");
+    }
+
     std::shared_ptr<ReasoningContext> reasoning_ctx;
     if (not request.expected_labels_.empty()) {
         reasoning_ctx = std::make_shared<ReasoningContext>(this->allocator_);
@@ -2322,6 +2420,7 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     // Reordered searches defer the finite bound to exact distances, but bucket selection still
     // needs threshold-mode state so non-finite approximations cannot consume the rerank pool.
     param.distance_threshold = request.threshold_;
+
     auto search_result = this->search<KNN_SEARCH>(query, param, ctx, reasoning_ctx.get());
     if (reorder_enabled) {
         auto result = reorder(request.threshold_.has_value() ? param.topk : request.topk_,

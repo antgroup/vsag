@@ -16,6 +16,7 @@
 #pragma once
 
 #include <atomic>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -282,17 +283,21 @@ public:
      * pointer is absent.
      */
     const void*
-    get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
+    get_data(const DatasetPtr& dataset, int64_t index = 0) const {
+        CHECK_ARGUMENT(index >= 0, "query index must be non-negative");
+        CHECK_ARGUMENT(data_type_ == DataTypes::DATA_TYPE_SPARSE ||
+                           (dim_ > 0 && index <= std::numeric_limits<int64_t>::max() / dim_),
+                       "query offset exceeds int64_t range");
         if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
             auto* ptr = dataset->GetFloat32Vectors();
-            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
+            return ptr ? ptr + index * dim_ : nullptr;
         } else if (data_type_ == DataTypes::DATA_TYPE_INT8) {
             auto* ptr = dataset->GetInt8Vectors();
-            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
+            return ptr ? ptr + index * dim_ : nullptr;
         } else if (data_type_ == DataTypes::DATA_TYPE_FP16 ||
                    data_type_ == DataTypes::DATA_TYPE_BF16) {
             auto* ptr = dataset->GetFloat16Vectors();
-            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
+            return ptr ? ptr + index * dim_ : nullptr;
         } else if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
             auto* ptr = dataset->GetSparseVectors();
             return ptr ? ptr + index : nullptr;
@@ -640,6 +645,12 @@ private:
                        float radius,
                        QueryContext* ctx,
                        const std::optional<float>& threshold = std::nullopt) const;
+
+    DatasetPtr
+    search_range_with_request(const SearchRequest& request,
+                              const HGraphSearchParameters& params,
+                              const FilterPtr& filter,
+                              QueryContext& ctx) const;
 
 private:
     /// Reorder the candidate heap using precise codes, updating in-place.
