@@ -1912,6 +1912,19 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             param.executors.emplace_back(executor);
         }
     }
+    CHECK_ARGUMENT(query != nullptr, "query dataset cannot be null");
+    const auto query_count = query->GetNumElements();
+    CHECK_ARGUMENT(query_count > 0, "query count must be greater than 0");
+    CHECK_ARGUMENT(query->GetDim() == this->dim_, "query dimension must match index dimension");
+    if (is_range) {
+        CHECK_ARGUMENT(query_count == 1, "IVF range search only supports a single query");
+    } else if (query_count > 1) {
+        CHECK_ARGUMENT(request.expected_labels_.empty(),
+                       "reasoning (expected_labels_) is only supported for single-query search");
+        CHECK_ARGUMENT(!this->label_table_->HasActivePaddingLabel(),
+                       "batch KNN does not support an index containing external label -1");
+    }
+
     std::shared_ptr<ReasoningContext> reasoning_ctx;
     if (not request.expected_labels_.empty()) {
         reasoning_ctx = std::make_shared<ReasoningContext>(this->allocator_);
@@ -2011,6 +2024,67 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     // Reordered searches defer the finite bound to exact distances, but bucket selection still
     // needs threshold-mode state so non-finite approximations cannot consume the rerank pool.
     param.distance_threshold = request.threshold_;
+
+    // Multi-query batch KNN: process every query row and pack a rectangular result.
+    if (query_count > 1) {
+        CHECK_ARGUMENT(request.topk_ > 0, "topk must be greater than 0");
+        CHECK_ARGUMENT(
+            query_count <= std::numeric_limits<int64_t>::max() / request.topk_,
+            fmt::format(
+                "query_count({}) * topk({}) would overflow int64_t", query_count, request.topk_));
+
+        const auto total_result_count = query_count * request.topk_;
+        CHECK_ARGUMENT(total_result_count <= std::numeric_limits<size_t>::max() / sizeof(int64_t),
+                       "batch result id allocation would overflow size_t");
+        CHECK_ARGUMENT(total_result_count <= std::numeric_limits<size_t>::max() / sizeof(float),
+                       "batch result distance allocation would overflow size_t");
+        auto* alloc = ctx.alloc != nullptr ? ctx.alloc : this->allocator_;
+        auto [dataset_results, dists, ids] = create_fast_dataset(total_result_count, alloc);
+        std::fill_n(dists, total_result_count, std::numeric_limits<float>::infinity());
+        std::fill_n(ids, total_result_count, -1);
+
+        const auto* query_data = query->GetFloat32Vectors();
+        CHECK_ARGUMENT(query_data != nullptr, "query float32 vectors cannot be null");
+        for (int64_t q_idx = 0; q_idx < query_count; ++q_idx) {
+            if (param.time_cost != nullptr) {
+                param.time_cost->Reset();
+            }
+            auto single_query = Dataset::Make();
+            single_query->NumElements(1)
+                ->Dim(query->GetDim())
+                ->Float32Vectors(query_data + q_idx * query->GetDim())
+                ->Owner(false);
+
+            auto search_result = this->search<KNN_SEARCH>(single_query, param, ctx, nullptr);
+            DatasetPtr single_result;
+            if (reorder_enabled) {
+                single_result = reorder(request.topk_,
+                                        search_result,
+                                        single_query->GetFloat32Vectors(),
+                                        param,
+                                        ctx,
+                                        nullptr);
+            } else {
+                single_result = this->pack_knn_result(search_result, alloc);
+            }
+
+            const auto count = std::min(single_result->GetDim(), request.topk_);
+            if (count > 0) {
+                std::memcpy(ids + q_idx * request.topk_,
+                            single_result->GetIds(),
+                            sizeof(int64_t) * static_cast<size_t>(count));
+                std::memcpy(dists + q_idx * request.topk_,
+                            single_result->GetDistances(),
+                            sizeof(float) * static_cast<size_t>(count));
+            }
+        }
+
+        dataset_results->NumElements(query_count);
+        dataset_results->Dim(request.topk_);
+        dataset_results->Statistics(stats.Dump());
+        return dataset_results;
+    }
+
     auto search_result = this->search<KNN_SEARCH>(query, param, ctx, reasoning_ctx.get());
     if (reorder_enabled) {
         auto result = reorder(request.threshold_.has_value() ? param.topk : request.topk_,

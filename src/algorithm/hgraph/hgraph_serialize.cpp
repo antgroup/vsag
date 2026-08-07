@@ -317,6 +317,7 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
         this->label_table_->Deserialize(reader);
     } else {
         StreamReader::ReadVector(reader, this->label_table_->label_table_);
+        this->label_table_->RebuildActivePaddingLabelIds();
         uint64_t size;
         StreamReader::ReadObj(reader, size);
         this->label_table_->ResetRemap(size);
@@ -566,6 +567,7 @@ HGraph::deserialize_label_info_streaming(StreamReader& reader) const {
         this->label_table_->Deserialize(reader);
     } else {
         StreamReader::ReadVector(reader, this->label_table_->label_table_);
+        this->label_table_->RebuildActivePaddingLabelIds();
         uint64_t size;
         StreamReader::ReadObj(reader, size);
         this->label_table_->ResetRemap(size);
