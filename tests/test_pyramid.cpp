@@ -630,6 +630,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     std::string base_quantization_str = GENERATE("fp32");
     const std::string name = "pyramid";
     auto search_param = GeneratePyramidSearchParametersString(100);
+    constexpr static const char* search_param_with_hops_limit =
+        R"({"pyramid":{"ef_search":100,"hops_limit":200}})";
+    constexpr static const char* search_param_invalid_hops_limit =
+        R"({"pyramid":{"ef_search":100,"hops_limit":50}})";
     PyramidParam pyramid_param;
     std::vector<std::vector<int>> tmp_levels = {{1, 2}, {0, 1, 2}};
     for (auto& dim : dims) {
@@ -647,6 +651,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
             TestContinueAdd(index, dataset, true);
             auto has_root = level[0] != 0;
             TestKnnSearch(index, dataset, search_param, 0.94, has_root);
+            if (has_root) {
+                TestKnnSearch(index, dataset, search_param_with_hops_limit, 0.9, true);
+                TestKnnSearch(index, dataset, search_param_invalid_hops_limit, 0.94, true);
+            }
             TestFilterSearch(index, dataset, search_param, 0.94, has_root);
             TestRangeSearch(index, dataset, search_param, 0.94, 10, has_root);
             TestCalcDistanceById(index, dataset, 1e-5, true);

@@ -386,6 +386,19 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     search_param.enable_rabitq_one_bit_search = parsed_param.has_rabitq_one_bit_search
                                                     ? parsed_param.rabitq_one_bit_search
                                                     : default_rabitq_one_bit_search_;
+
+    // Keep the same contract as HGraph: a useful hop cap must exceed ef_search.
+    if (static_cast<uint64_t>(parsed_param.hops_limit) <= parsed_param.ef_search) {
+        search_param.hops_limit = std::numeric_limits<uint32_t>::max();
+        if (parsed_param.hops_limit != std::numeric_limits<uint32_t>::max()) {
+            logger::warn(
+                fmt::format("hops_limit({}) is not greater than ef_search({}), ignoring hops_limit",
+                            parsed_param.hops_limit,
+                            parsed_param.ef_search));
+        }
+    } else {
+        search_param.hops_limit = parsed_param.hops_limit;
+    }
     if (this->support_duplicate_) {
         search_param.consider_duplicate = true;
     }
@@ -1547,6 +1560,9 @@ Pyramid::search_node(const IndexNode* node,
     } else if (node->status_ == IndexNode::Status::GRAPH) {
         InnerSearchParam modified_param = search_param;
         modified_param.ep = node->entry_point_;
+        if (node->level_ != 0) {
+            modified_param.hops_limit = std::numeric_limits<uint32_t>::max();
+        }
         if (node->level_ != 0 && search_param.search_mode == KNN_SEARCH) {
             modified_param.ef =
                 std::min(modified_param.ef,

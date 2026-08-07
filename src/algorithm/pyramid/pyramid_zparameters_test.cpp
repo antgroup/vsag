@@ -578,3 +578,13 @@ TEST_CASE("Pyramid parses RaBitQ split search parameters", "[ut][PyramidParamete
         }
     })"));
 }
+
+TEST_CASE("Pyramid parses hops limit search parameter", "[ut][PyramidParameters]") {
+    auto default_params =
+        vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":100}})");
+    REQUIRE(default_params.hops_limit == std::numeric_limits<uint32_t>::max());
+
+    auto explicit_params = vsag::PyramidSearchParameters::FromJson(
+        R"({"pyramid":{"ef_search":100,"hops_limit":200}})");
+    REQUIRE(explicit_params.hops_limit == 200);
+}

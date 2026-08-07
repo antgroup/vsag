@@ -145,6 +145,7 @@ extern const char* const PYRAMID_PRECISE_IO_TYPE;
 extern const char* const PYRAMID_PRECISE_FILE_PATH;
 extern const char* const PYRAMID_PARAMETER_EF_SEARCH;
 extern const char* const PYRAMID_PARAMETER_SUBINDEX_EF_SEARCH;
+extern const char* const PYRAMID_PARAMETER_HOPS_LIMIT;
 extern const char* const PYRAMID_PARAMETER_RABITQ_ONE_BIT_SEARCH;
 extern const char* const PYRAMID_PARAMETER_HIERARCHIES;
 extern const char* const PYRAMID_PARAMETER_HIERARCHY_OP;

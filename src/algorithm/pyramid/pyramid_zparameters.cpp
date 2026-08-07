@@ -326,6 +326,9 @@ PyramidSearchParameters::FromJson(const std::string& json_string) {
         obj.subindex_ef_search =
             params[INDEX_PYRAMID][PYRAMID_PARAMETER_SUBINDEX_EF_SEARCH].GetInt();
     }
+    if (params[INDEX_PYRAMID].Contains(PYRAMID_PARAMETER_HOPS_LIMIT)) {
+        obj.hops_limit = params[INDEX_PYRAMID][PYRAMID_PARAMETER_HOPS_LIMIT].GetInt();
+    }
     if (params[INDEX_PYRAMID].Contains(PYRAMID_PARAMETER_RABITQ_ONE_BIT_SEARCH)) {
         obj.has_rabitq_one_bit_search = true;
         obj.rabitq_one_bit_search =
