@@ -29,6 +29,7 @@
 #include "impl/searcher/basic_searcher.h"
 #include "index_feature_list.h"
 #include "io/memory_io/memory_io_parameter.h"
+#include "pyramid_index_node.h"
 #include "pyramid_zparameters.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "query_context.h"
@@ -36,80 +37,8 @@
 
 namespace vsag {
 
-class IndexNode;
-using SearchFunc = std::function<DistHeapPtr(const IndexNode* node, const VisitedListPtr& vl)>;
-
 std::vector<std::string>
 split(const std::string& str, char delimiter);
-
-/**
- * @brief IndexNode: a tree node in the Pyramid hierarchy.
- *
- * Each IndexNode optionally holds a small graph (when the number of ids
- * exceeds index_min_size_) and a map of child nodes keyed by path segment.
- * The tree structure mirrors the hierarchical path labels (e.g. "a/b/c")
- * assigned to vectors at insertion time.
- */
-class IndexNode {
-public:
-    enum class Status { NO_INDEX = 0, GRAPH = 1, FLAT = 2 };
-
-public:
-    IndexNode(Allocator* allocator_, GraphInterfaceParamPtr graph_param, uint32_t index_min_size);
-
-    /// Build the internal graph using ODescent over the stored ids.
-    void
-    Build(ODescent& odescent);
-
-    /// Allocate the graph storage if not yet done.
-    void
-    Init();
-
-    /**
-     * @brief Recursively search this node and its matching children.
-     *
-     * @param search_func  functor that searches a single node's graph;
-     *                     typically bound to the caller's query and ef.
-     * @param vl           visited-list for dedup across the recursion.
-     * @param search_result  output heap accumulating candidates.
-     * @param ef_search    expansion factor passed to the graph search.
-     */
-    void
-    Search(const SearchFunc& search_func,
-           const VisitedListPtr& vl,
-           const DistHeapPtr& search_result,
-           uint64_t ef_search) const;
-
-    void
-    AddChild(const std::string& key);
-
-    IndexNode*
-    GetChild(const std::string& key, bool need_init = false);
-
-    void
-    Serialize(StreamWriter& writer) const;
-
-    void
-    Deserialize(StreamReader& reader);
-
-    friend class Pyramid;
-    friend class PyramidAnalyzer;
-
-public:
-    GraphInterfacePtr graph_{nullptr};  // graph over the ids in this node
-    InnerIdType entry_point_{0};        // entry point for graph search
-    uint32_t level_{0};                 // depth in the tree (root = 0)
-    mutable std::shared_mutex mutex_;   // per-node lock for concurrent add/search
-
-    Vector<InnerIdType> ids_;          // internal ids stored at this node
-    uint32_t index_min_size_{0};       // threshold to trigger graph build
-    Status status_{Status::NO_INDEX};  // current build state
-
-private:
-    UnorderedMap<std::string, std::unique_ptr<IndexNode>> children_;  // keyed by path segment
-    Allocator* allocator_{nullptr};
-    GraphInterfaceParamPtr graph_param_{nullptr};
-};
 
 /**
  * @brief Pyramid: hierarchical graph index for path-labeled vectors.
@@ -253,6 +182,9 @@ public:
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
 
+    DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const override;
+
     void
     Serialize(StreamWriter& writer) const override;
 
@@ -338,6 +270,11 @@ private:
                 const std::string& hierarchy_name,
                 const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
+    InnerSearchParam
+    create_knn_search_param(const PyramidSearchParameters& parsed_param,
+                            int64_t k,
+                            const FilterPtr& filter) const;
+
     /// Probabilistic check: should total_count trigger a new entry-point update?
     bool
     is_update_entry_point(uint64_t total_count) {
@@ -394,7 +331,7 @@ private:
     bool support_duplicate_{false};                      // whether to allow duplicate ids
 
     mutable std::shared_mutex resize_mutex_;        // guards resize operations
-    std::mutex cur_element_count_mutex_;            // guards cur_element_count_ updates
+    mutable std::mutex cur_element_count_mutex_;    // guards cur_element_count_ updates
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};  // graph algorithm type
     bool default_rabitq_one_bit_search_{false};     // default split lower-bound search
 
