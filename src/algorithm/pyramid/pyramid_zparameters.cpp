@@ -186,6 +186,31 @@ PyramidParameters::FromJson(const JsonType& json) {
         this->precise_codes_param = nullptr;
     }
 
+    auto restore_legacy_raw_fp32_param = [this, &json](const FlattenInterfaceParamPtr& param,
+                                                       const char* key) {
+        if (not this->store_raw_vector || param == nullptr || not json.Contains(key)) {
+            return;
+        }
+        const auto& flatten_json = json[key];
+        if (not flatten_json.Contains(QUANTIZATION_PARAMS_KEY)) {
+            return;
+        }
+        const auto& quantization_json = flatten_json[QUANTIZATION_PARAMS_KEY];
+        if (quantization_json.Contains(HOLD_MOLDS) ||
+            param->quantizer_parameter->GetTypeName() != QUANTIZATION_TYPE_VALUE_FP32) {
+            return;
+        }
+        auto fp32_param =
+            std::dynamic_pointer_cast<FP32QuantizerParameter>(param->quantizer_parameter);
+        CHECK_ARGUMENT(fp32_param != nullptr, "invalid fp32 quantizer parameter");
+        fp32_param->hold_molds = true;
+    };
+    restore_legacy_raw_fp32_param(this->base_codes_param, BASE_CODES_KEY);
+    if (this->use_reorder) {
+        restore_legacy_raw_fp32_param(this->precise_codes_param, PRECISE_CODES_KEY);
+    }
+    restore_legacy_raw_fp32_param(this->raw_vector_param, RAW_VECTOR_KEY);
+
     if (json.Contains(INDEX_MIN_SIZE)) {
         this->index_min_size = json[INDEX_MIN_SIZE].GetInt();
     }
@@ -301,6 +326,10 @@ PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, reorder_source);
     if (this->use_reorder && this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
         CHECK_SUB_PARAM(*this, *p, precise_codes_param);
+    }
+    CHECK_FIELD_EQ(*this, *p, store_raw_vector);
+    if (this->store_raw_vector) {
+        CHECK_SUB_PARAM(*this, *p, raw_vector_param);
     }
     CHECK_FIELD_EQ(*this, *p, index_min_size);
     CHECK_FIELD_EQ(*this, *p, support_duplicate);
