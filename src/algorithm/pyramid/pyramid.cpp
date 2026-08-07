@@ -1562,12 +1562,12 @@ Pyramid::search_node(const IndexNode* node,
         modified_param.ep = node->entry_point_;
         if (node->level_ != 0) {
             modified_param.hops_limit = std::numeric_limits<uint32_t>::max();
-        }
-        if (node->level_ != 0 && search_param.search_mode == KNN_SEARCH) {
-            modified_param.ef =
-                std::min(modified_param.ef,
-                         get_suitable_ef_search(
-                             search_param.topk, node->graph_->TotalCount(), subindex_ef_search));
+            if (search_param.search_mode == KNN_SEARCH) {
+                modified_param.ef = std::min(
+                    modified_param.ef,
+                    get_suitable_ef_search(
+                        search_param.topk, node->graph_->TotalCount(), subindex_ef_search));
+            }
         }
         modified_param.topk = static_cast<int64_t>(modified_param.ef);
         results = searcher_->Search(node->graph_,

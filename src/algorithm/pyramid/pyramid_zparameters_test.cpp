@@ -587,4 +587,9 @@ TEST_CASE("Pyramid parses hops limit search parameter", "[ut][PyramidParameters]
     auto explicit_params = vsag::PyramidSearchParameters::FromJson(
         R"({"pyramid":{"ef_search":100,"hops_limit":200}})");
     REQUIRE(explicit_params.hops_limit == 200);
+
+    REQUIRE_THROWS(vsag::PyramidSearchParameters::FromJson(
+        R"({"pyramid":{"ef_search":100,"hops_limit":-1}})"));
+    REQUIRE_THROWS(vsag::PyramidSearchParameters::FromJson(
+        R"({"pyramid":{"ef_search":100,"hops_limit":4294967296}})"));
 }
