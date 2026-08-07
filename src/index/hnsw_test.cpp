@@ -64,8 +64,7 @@ TEST_CASE("build & add", "[ut][hnsw]") {
     IndexCommonParam common_param;
     common_param.dim_ = dim;
     common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    common_param.metric_ =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    common_param.metric_ = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     common_param.allocator_ = allocator;
 
     HnswParameters hnsw_obj = parse_hnsw_params(common_param);
@@ -106,8 +105,7 @@ TEST_CASE("build with allocator", "[ut][hnsw]") {
 
     common_param.dim_ = dim;
     common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    common_param.metric_ =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    common_param.metric_ = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     common_param.allocator_ = allocator;
 
     HnswParameters hnsw_obj = parse_hnsw_params(common_param);
@@ -136,8 +134,7 @@ TEST_CASE("knn_search", "[ut][hnsw]") {
     IndexCommonParam common_param;
     common_param.dim_ = dim;
     common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    common_param.metric_ =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    common_param.metric_ = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
     HnswParameters hnsw_obj = parse_hnsw_params(common_param);
@@ -259,8 +256,7 @@ TEST_CASE("iterator filter init allocation failure", "[ut][hnsw]") {
     IndexCommonParam common_param;
     common_param.dim_ = dim;
     common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    common_param.metric_ =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    common_param.metric_ = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
     HnswParameters hnsw_obj = parse_hnsw_params(common_param);
@@ -304,8 +300,7 @@ TEST_CASE("range_search", "[ut][hnsw]") {
     IndexCommonParam common_param;
     common_param.dim_ = dim;
     common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    common_param.metric_ =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    common_param.metric_ = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
     HnswParameters hnsw_obj = parse_hnsw_params(common_param);
@@ -402,8 +397,7 @@ TEST_CASE("serialize empty index", "[ut][hnsw]") {
     IndexCommonParam common_param;
     common_param.dim_ = dim;
     common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    common_param.metric_ =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    common_param.metric_ = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
     HnswParameters hnsw_obj = parse_hnsw_params(common_param);
@@ -440,8 +434,7 @@ TEST_CASE("deserialize on not empty index", "[ut][hnsw]") {
     IndexCommonParam common_param;
     common_param.dim_ = dim;
     common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    common_param.metric_ =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    common_param.metric_ = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
     HnswParameters hnsw_obj = parse_hnsw_params(common_param);
@@ -498,8 +491,7 @@ TEST_CASE("static hnsw", "[ut][hnsw]") {
     IndexCommonParam common_param;
     common_param.dim_ = dim;
     common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    common_param.metric_ =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    common_param.metric_ = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
     HnswParameters hnsw_obj = parse_hnsw_params(common_param);
@@ -565,8 +557,7 @@ TEST_CASE("hnsw add vector with duplicated id", "[ut][hnsw]") {
     IndexCommonParam common_param;
     common_param.dim_ = dim;
     common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    common_param.metric_ =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    common_param.metric_ = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
     HnswParameters hnsw_obj = parse_hnsw_params(common_param);
@@ -608,8 +599,7 @@ TEST_CASE("build with reversed edges", "[ut][hnsw]") {
     IndexCommonParam common_param;
     common_param.dim_ = dim;
     common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    common_param.metric_ =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    common_param.metric_ = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
     HnswParameters hnsw_obj = parse_hnsw_params(common_param);
@@ -710,8 +700,7 @@ TEST_CASE("feedback with invalid argument", "[ut][hnsw]") {
     IndexCommonParam common_param;
     common_param.dim_ = dim;
     common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    common_param.metric_ =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    common_param.metric_ = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
     HnswParameters hnsw_obj = parse_hnsw_params(common_param);
@@ -753,8 +742,7 @@ TEST_CASE("redundant feedback and empty enhancement", "[ut][hnsw]") {
     IndexCommonParam common_param;
     common_param.dim_ = 128;
     common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    common_param.metric_ =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    common_param.metric_ = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
     HnswParameters hnsw_obj = parse_hnsw_params(common_param);
@@ -818,8 +806,7 @@ TEST_CASE("feedback and pretrain without use conjugate graph", "[ut][hnsw]") {
     IndexCommonParam common_param;
     common_param.dim_ = dim;
     common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    common_param.metric_ =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    common_param.metric_ = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
     HnswParameters hnsw_obj = parse_hnsw_params(common_param);
@@ -866,8 +853,7 @@ TEST_CASE("feedback and pretrain on empty index", "[ut][hnsw]") {
     IndexCommonParam common_param;
     common_param.dim_ = dim;
     common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    common_param.metric_ =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    common_param.metric_ = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
     HnswParameters hnsw_obj = parse_hnsw_params(common_param);
@@ -916,8 +902,7 @@ TEST_CASE("invalid pretrain", "[ut][hnsw]") {
     IndexCommonParam common_param;
     common_param.dim_ = dim;
     common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    common_param.metric_ =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    common_param.metric_ = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
 
     HnswParameters hnsw_obj = parse_hnsw_params(common_param);
@@ -977,8 +962,7 @@ TEST_CASE("get distance by label", "[ut][hnsw]") {
     auto [base_ids, base_vectors] = fixtures::generate_ids_and_vectors(num_base, dim);
 
     // hnsw index
-    const auto metric_type =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    const auto metric_type = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     auto space = make_hnsw_test_space(dim, metric_type);
 
     SECTION("hnsw test") {
@@ -994,8 +978,7 @@ TEST_CASE("get distance by label", "[ut][hnsw]") {
 
     SECTION("static hnsw test") {
         DefaultAllocator allocator;
-        auto* alg_hnsw_static =
-            new hnswlib::StaticHierarchicalNSW(space.get(), 100, &allocator);
+        auto* alg_hnsw_static = new hnswlib::StaticHierarchicalNSW(space.get(), 100, &allocator);
         alg_hnsw_static->init_memory_space();
         alg_hnsw_static->addPoint(base_vectors.data(), 0);
         fixtures::dist_t distance = alg_hnsw_static->getDistanceByLabel(0, base_vectors.data());
@@ -1016,8 +999,7 @@ TEST_CASE("get min and max id", "[ut][hnsw]") {
     auto [base_ids, base_vectors] = fixtures::generate_ids_and_vectors(num_base, dim);
 
     // hnsw index
-    const auto metric_type =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    const auto metric_type = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     auto space = make_hnsw_test_space(dim, metric_type);
 
     SECTION("hnsw test") {
@@ -1037,8 +1019,7 @@ TEST_CASE("get min and max id", "[ut][hnsw]") {
 
     SECTION("static hnsw test") {
         DefaultAllocator allocator;
-        auto* alg_hnsw_static =
-            new hnswlib::StaticHierarchicalNSW(space.get(), 100, &allocator);
+        auto* alg_hnsw_static = new hnswlib::StaticHierarchicalNSW(space.get(), 100, &allocator);
         alg_hnsw_static->init_memory_space();
         alg_hnsw_static->addPoint(base_vectors.data(), 0);
         alg_hnsw_static->addPoint(base_vectors.data(), 5);
@@ -1063,8 +1044,7 @@ TEST_CASE("get data by label", "[ut][hnsw]") {
     auto [base_ids, base_vectors] = fixtures::generate_ids_and_vectors(num_base, dim);
 
     // hnsw index
-    const auto metric_type =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    const auto metric_type = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     auto space = make_hnsw_test_space(dim, metric_type);
 
     SECTION("hnsw test") {
@@ -1086,8 +1066,7 @@ TEST_CASE("get data by label", "[ut][hnsw]") {
 
     SECTION("static hnsw test") {
         DefaultAllocator allocator;
-        auto* alg_hnsw_static =
-            new hnswlib::StaticHierarchicalNSW(space.get(), 100, &allocator);
+        auto* alg_hnsw_static = new hnswlib::StaticHierarchicalNSW(space.get(), 100, &allocator);
         std::shared_ptr<int8_t[]> base_data(new int8_t[dim * sizeof(float)]);
         alg_hnsw_static->init_memory_space();
         alg_hnsw_static->addPoint(base_vectors.data(), 0);
@@ -1114,8 +1093,7 @@ TEST_CASE("extract/set data and graph", "[ut][hnsw]") {
 
     common_param.dim_ = dim;
     common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    common_param.metric_ =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    common_param.metric_ = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     common_param.allocator_ = allocator;
 
     HnswParameters hnsw_obj = parse_hnsw_params(common_param);
@@ -1188,8 +1166,7 @@ TEST_CASE("update mark-deleted vector", "[ut][hnsw]") {
     int update_size = 50;
 
     // create hnsw
-    const auto metric_type =
-        GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
+    const auto metric_type = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_L1);
     auto space = make_hnsw_test_space(dim, metric_type);
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto* alg_hnsw = new hnswlib::HierarchicalNSW(space.get(), 100, allocator.get());

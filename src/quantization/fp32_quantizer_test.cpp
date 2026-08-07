@@ -91,15 +91,8 @@ TEST_CASE("FP32 L1 Compute", "[ut][FP32Quantizer][l1]") {
     float dist2 = 0.0F;
     float dist3 = 0.0F;
     float dist4 = 0.0F;
-    quantizer.ComputeDistsBatch4(*computer,
-                                 lhs_codes,
-                                 rhs_codes,
-                                 lhs_codes,
-                                 rhs_codes,
-                                 dist1,
-                                 dist2,
-                                 dist3,
-                                 dist4);
+    quantizer.ComputeDistsBatch4(
+        *computer, lhs_codes, rhs_codes, lhs_codes, rhs_codes, dist1, dist2, dist3, dist4);
     REQUIRE(dist1 == 0.0F);
     REQUIRE(dist2 == 14.25F);
     REQUIRE(dist3 == 0.0F);

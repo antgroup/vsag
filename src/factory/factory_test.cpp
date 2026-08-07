@@ -108,8 +108,16 @@ TEST_CASE("Create Float32 L1 Index", "[ut][factory][l1]") {
 
     SECTION("float32 l1 hgraph rejects compressed quantization") {
         const char* unsupported_quantizations[] = {
-            "fp16", "bf16", "sq8", "sq4", "sq8_uniform",
-            "sq4_uniform", "pq", "pqfs", "rabitq", "tq",
+            "fp16",
+            "bf16",
+            "sq8",
+            "sq4",
+            "sq8_uniform",
+            "sq4_uniform",
+            "pq",
+            "pqfs",
+            "rabitq",
+            "tq",
         };
         for (const auto* quantization : unsupported_quantizations) {
             auto parameters = vsag::JsonType::Parse(R"(

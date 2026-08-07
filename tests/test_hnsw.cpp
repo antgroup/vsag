@@ -579,10 +579,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Get Min Max ID", "[f
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Get Raw Vector", "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    const auto [dtype, metric_type] = GENERATE(
-        std::make_pair(std::string("float32"), std::string("l2")),
-        std::make_pair(std::string("float32"), std::string("l1")),
-        std::make_pair(std::string("int8"), std::string("ip")));
+    const auto [dtype, metric_type] =
+        GENERATE(std::make_pair(std::string("float32"), std::string("l2")),
+                 std::make_pair(std::string("float32"), std::string("l1")),
+                 std::make_pair(std::string("int8"), std::string("ip")));
     const std::string name = "hnsw";
     for (auto& dim : dims) {
         vsag::Options::Instance().set_block_size_limit(size);

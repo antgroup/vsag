@@ -2989,8 +2989,22 @@ TEST_CASE("HGraph float32 L1", "[ft][hgraph][l1]") {
     constexpr int64_t base_count = 8;
     const std::vector<int64_t> ids = {1, 2, 3, 4, 5, 6, 7, 8};
     const std::vector<float> original_vectors = {
-        3.0F, 0.0F, 2.0F, 2.0F, 5.0F, 0.0F, 3.0F, 3.0F,
-        7.0F, 0.0F, 4.0F, 4.0F, 9.0F, 0.0F, 5.0F, 5.0F,
+        3.0F,
+        0.0F,
+        2.0F,
+        2.0F,
+        5.0F,
+        0.0F,
+        3.0F,
+        3.0F,
+        7.0F,
+        0.0F,
+        4.0F,
+        4.0F,
+        9.0F,
+        0.0F,
+        5.0F,
+        5.0F,
     };
     std::vector<float> base_vectors = original_vectors;
 
@@ -3020,10 +3034,7 @@ TEST_CASE("HGraph float32 L1", "[ft][hgraph][l1]") {
 
     const std::vector<float> query_vector = {0.0F, 0.0F};
     auto query = vsag::Dataset::Make();
-    query->NumElements(1)
-        ->Dim(dim)
-        ->Float32Vectors(query_vector.data())
-        ->Owner(false);
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
     const std::string search_parameters = R"({"hgraph": {"ef_search": 100}})";
 
     auto result = index->KnnSearch(query, 2, search_parameters);

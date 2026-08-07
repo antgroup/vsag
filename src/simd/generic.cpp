@@ -13,10 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "simd.h"
-
 #include <cmath>
 
+#include "simd.h"
 #include "simd/int8_simd.h"
 
 namespace vsag::generic {

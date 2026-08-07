@@ -76,8 +76,7 @@ TEST_CASE("IndexCommonParam Basic Test", "[ut][IndexCommonParam]") {
 }
 
 TEST_CASE("IndexCommonParam L1 Test", "[ut][IndexCommonParam][l1]") {
-    auto resource =
-        std::make_shared<vsag::ResourceOwnerWrapper>(new vsag::Resource(), true);
+    auto resource = std::make_shared<vsag::ResourceOwnerWrapper>(new vsag::Resource(), true);
 
     SECTION("float32 l1 succeeds") {
         auto params = vsag::JsonType::Parse(R"({
