@@ -64,6 +64,83 @@ TEST_CASE("Create Index with Full Parameters", "[ut][factory]") {
     }
 }
 
+TEST_CASE("Create Float32 L1 Index", "[ut][factory][l1]") {
+    vsag::logger::set_level(vsag::logger::level::debug);
+
+    SECTION("float32 l1 supports hnsw and fp32 hgraph") {
+        auto parameters = vsag::JsonType::Parse(R"(
+        {
+            "dtype": "float32",
+            "metric_type": "l1",
+            "dim": 16,
+            "hnsw": {
+                "max_degree": 8,
+                "ef_construction": 100
+            }
+        }
+        )");
+
+        REQUIRE(vsag::Factory::CreateIndex("hnsw", parameters.Dump()).has_value());
+
+        auto hgraph_parameters = vsag::JsonType::Parse(R"(
+        {
+            "dtype": "float32",
+            "metric_type": "l1",
+            "dim": 16,
+            "index_param": {
+                "base_quantization_type": "fp32",
+                "max_degree": 8,
+                "ef_construction": 100,
+                "build_thread_count": 0,
+                "store_raw_vector": true
+            }
+        }
+        )");
+        REQUIRE(vsag::Factory::CreateIndex("hgraph", hgraph_parameters.Dump()).has_value());
+
+        const char* unsupported_indexes[] = {"fresh_hnsw", "brute_force", "diskann", "ivf"};
+        for (const auto* index_name : unsupported_indexes) {
+            auto index = vsag::Factory::CreateIndex(index_name, parameters.Dump());
+            REQUIRE_FALSE(index.has_value());
+            REQUIRE(index.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+        }
+    }
+
+    SECTION("float32 l1 hgraph rejects compressed quantization") {
+        const char* unsupported_quantizations[] = {
+            "fp16",
+            "bf16",
+            "sq8",
+            "sq4",
+            "sq8_uniform",
+            "sq4_uniform",
+            "pq",
+            "pqfs",
+            "rabitq",
+            "tq",
+        };
+        for (const auto* quantization : unsupported_quantizations) {
+            auto parameters = vsag::JsonType::Parse(R"(
+            {
+                "dtype": "float32",
+                "metric_type": "l1",
+                "dim": 16,
+                "index_param": {
+                    "max_degree": 8,
+                    "ef_construction": 100,
+                    "build_thread_count": 0
+                }
+            }
+            )");
+            parameters["index_param"]["base_quantization_type"].SetString(quantization);
+
+            auto index = vsag::Factory::CreateIndex("hgraph", parameters.Dump());
+            REQUIRE_FALSE(index.has_value());
+            REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+        }
+    }
+}
+
 TEST_CASE("Create Local File Reader", "[ut][factory]") {
     vsag::logger::set_level(vsag::logger::level::debug);
 

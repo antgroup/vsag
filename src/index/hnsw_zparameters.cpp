@@ -26,6 +26,10 @@ HnswParameters::FromJson(const JsonType& hnsw_param_obj,
                          const IndexCommonParam& index_common_param) {
     HnswParameters obj;
 
+    CHECK_ARGUMENT(index_common_param.metric_ != MetricType::METRIC_TYPE_L1 ||
+                       index_common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT,
+                   "l1 metric must use float32 dtype");
+
     if (index_common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT) {
         obj.type = DataTypes::DATA_TYPE_FLOAT;
     } else if (index_common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
@@ -43,6 +47,8 @@ HnswParameters::FromJson(const JsonType& hnsw_param_obj,
     } else if (index_common_param.metric_ == MetricType::METRIC_TYPE_COSINE) {
         obj.normalize = true;
         obj.space = std::make_shared<hnswlib::InnerProductSpace>(index_common_param.dim_, obj.type);
+    } else if (index_common_param.metric_ == MetricType::METRIC_TYPE_L1) {
+        obj.space = std::make_shared<hnswlib::L1Space>(index_common_param.dim_);
     }
 
     // set obj.max_degree

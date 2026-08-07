@@ -71,6 +71,34 @@ TEST_CASE("FP32 Compute", "[ut][FP32Quantizer]") {
     }
 }
 
+TEST_CASE("FP32 L1 Compute", "[ut][FP32Quantizer][l1]") {
+    constexpr uint64_t dim = 5;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    FP32Quantizer<MetricType::METRIC_TYPE_L1> quantizer(dim, allocator.get());
+    const float lhs[dim]{-1.0F, 2.5F, 4.0F, 0.0F, -2.0F};
+    const float rhs[dim]{2.0F, -0.5F, 1.0F, 0.25F, 3.0F};
+    uint8_t lhs_codes[dim * sizeof(float)]{};
+    uint8_t rhs_codes[dim * sizeof(float)]{};
+    REQUIRE(quantizer.EncodeOne(lhs, lhs_codes));
+    REQUIRE(quantizer.EncodeOne(rhs, rhs_codes));
+    REQUIRE(quantizer.Compute(lhs_codes, rhs_codes) == 14.25F);
+
+    auto computer = quantizer.FactoryComputer();
+    computer->SetQuery(lhs);
+    REQUIRE(quantizer.ComputeDist(*computer, rhs_codes) == 14.25F);
+
+    float dist1 = 0.0F;
+    float dist2 = 0.0F;
+    float dist3 = 0.0F;
+    float dist4 = 0.0F;
+    quantizer.ComputeDistsBatch4(
+        *computer, lhs_codes, rhs_codes, lhs_codes, rhs_codes, dist1, dist2, dist3, dist4);
+    REQUIRE(dist1 == 0.0F);
+    REQUIRE(dist2 == 14.25F);
+    REQUIRE(dist3 == 0.0F);
+    REQUIRE(dist4 == 14.25F);
+}
+
 template <MetricType metric>
 void
 TestSerializeAndDeserializeMetricFP32(uint64_t dim, int count, float error = 1e-5) {

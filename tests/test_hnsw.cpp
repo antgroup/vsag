@@ -232,7 +232,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Estimate Memory", "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "cosine");
+    auto metric_type = GENERATE("l2", "cosine", "l1");
 
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 200, false);
@@ -256,7 +256,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                              "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_type = GENERATE("l2", "ip", "cosine", "l1");
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
     for (auto& dim : dims) {
@@ -280,7 +280,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Test non-standard IDs", "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2");
+    auto metric_type = GENERATE("l2", "l1");
 
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 200);
@@ -320,7 +320,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                              "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2");
+    auto metric_type = GENERATE("l2", "l1");
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
 
@@ -342,7 +342,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                              "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_type = GENERATE("l2", "ip", "cosine", "l1");
     auto dataset = pool.GetNanDataset(metric_type);
     auto dim = dataset->dim_;
     const std::string name = "hnsw";
@@ -359,7 +359,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Build", "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_type = GENERATE("l2", "ip", "cosine", "l1");
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
     for (auto& dim : dims) {
@@ -384,7 +384,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Build", "[ft][hnsw]"
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Merge", "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2");
+    auto metric_type = GENERATE("l2", "l1");
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
     for (auto& dim : dims) {
@@ -405,7 +405,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Merge", "[ft][hnsw]"
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Filter", "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2");
+    auto metric_type = GENERATE("l2", "l1");
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
     auto dim = 32;
@@ -427,7 +427,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Filter", "[ft][hnsw]
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Add", "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_type = GENERATE("l2", "ip", "cosine", "l1");
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
     for (auto& dim : dims) {
@@ -453,7 +453,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Add", "[ft][hnsw]") 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Concurrent Add", "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_type = GENERATE("l2", "ip", "cosine", "l1");
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
     for (auto& dim : dims) {
@@ -480,7 +480,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Remove", "[ft][hnsw]
     auto test_recovery = GENERATE(true, false);
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    std::vector<std::string> metric_types = {"l2", "ip", "cosine"};
+    std::vector<std::string> metric_types = {"l2", "ip", "cosine", "l1"};
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
     for (auto& dim : dims) {
@@ -505,7 +505,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Remove", "[ft][hnsw]
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Update Id", "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_type = GENERATE("l2", "ip", "cosine", "l1");
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
     for (auto& dim : dims) {
@@ -522,7 +522,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Update Id", "[ft][hn
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Batch Calc Dis Id", "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_type = GENERATE("l2", "ip", "cosine", "l1");
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
     for (auto& dim : dims) {
@@ -541,7 +541,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                              "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2");
+    auto metric_type = GENERATE("l2", "l1");
     auto use_static = GENERATE(true);
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
@@ -562,7 +562,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Get Min Max ID", "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2");
+    auto metric_type = GENERATE("l2", "l1");
     auto use_static = GENERATE(true, false);
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
@@ -579,13 +579,12 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Get Min Max ID", "[f
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Get Raw Vector", "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto dtype = GENERATE("float32", "int8");
-    auto metric_type = GENERATE("l2");
+    const auto [dtype, metric_type] =
+        GENERATE(std::make_pair(std::string("float32"), std::string("l2")),
+                 std::make_pair(std::string("float32"), std::string("l1")),
+                 std::make_pair(std::string("int8"), std::string("ip")));
     const std::string name = "hnsw";
     for (auto& dim : dims) {
-        if (dtype == std::string("int8")) {
-            metric_type = "ip";
-        }
         vsag::Options::Instance().set_block_size_limit(size);
         auto param = GenerateHNSWBuildParametersString(metric_type, dim, false, dtype);
         auto index = TestFactory(name, param, true);
@@ -599,7 +598,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Get Raw Vector", "[f
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Update Vector", "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2");
+    auto metric_type = GENERATE("l2", "l1");
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
     for (auto& dim : dims) {
@@ -618,7 +617,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                              "[ft][hnsw][serialization]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_type = GENERATE("l2", "ip", "cosine", "l1");
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
 
@@ -641,7 +640,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                              "[ft][hnsw][serialization]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = "l2";
+    auto metric_type = GENERATE("l2", "l1");
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
     auto dim = 128;
@@ -675,7 +674,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
     auto allocator = std::make_shared<fixtures::RandomAllocator>();
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_type = GENERATE("l2", "ip", "cosine", "l1");
     const std::string name = "hnsw";
     for (auto& dim : dims) {
         vsag::Options::Instance().set_block_size_limit(size);
@@ -695,7 +694,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                              "[ft][hnsw][concurrent]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_type = GENERATE("l2", "ip", "cosine", "l1");
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
     for (auto& dim : dims) {
@@ -720,7 +719,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                              "[ft][hnsw][immutable]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = "l2";
+    auto metric_type = GENERATE("l2", "l1");
     const std::string name = "hnsw";
     auto dim = 128;
     auto search_param = fmt::format(search_param_tmp, 100);
@@ -746,7 +745,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                              "[ft][hnsw][immutable]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = "l2";
+    auto metric_type = GENERATE("l2", "l1");
     const std::string name = "hnsw";
     auto dim = 128;
     auto search_param = fmt::format(search_param_tmp, 100);

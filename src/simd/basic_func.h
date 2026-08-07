@@ -22,6 +22,8 @@ namespace vsag {
 #define DECLARE_BASIC_FUNCTIONS(ns)                                                         \
     namespace ns {                                                                          \
     float                                                                                   \
+    L1Distance(const void* pVect1v, const void* pVect2v, const void* qty_ptr);              \
+    float                                                                                   \
     L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr);                   \
     float                                                                                   \
     InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr);              \
@@ -56,6 +58,7 @@ extern DistanceFuncType InnerProductDistance;
 extern DistanceFuncType INT8L2Sqr;
 extern DistanceFuncType INT8InnerProduct;
 extern DistanceFuncType INT8InnerProductDistance;
+extern DistanceFuncType L1Distance;
 
 using PQDistanceFuncType = void (*)(const void* single_dim_centers,
                                     float single_dim_val,

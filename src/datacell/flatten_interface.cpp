@@ -156,6 +156,21 @@ template <typename IOTemp>
 static FlattenInterfacePtr
 make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
     auto metric = common_param.metric_;
+    if (metric == MetricType::METRIC_TYPE_L1) {
+        if (common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "l1 metric must use float32 dtype");
+        }
+        if (param->name != FLATTEN_DATA_CELL) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "l1 metric supports only flatten data cell");
+        }
+        if (param->quantizer_parameter->GetTypeName() != QUANTIZATION_TYPE_VALUE_FP32) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "l1 metric supports only fp32 quantization");
+        }
+        return make_instance_flatten<FP32Quantizer<MetricType::METRIC_TYPE_L1>, IOTemp>(
+            param, common_param);
+    }
     if (metric == MetricType::METRIC_TYPE_L2SQR) {
         return make_instance<MetricType::METRIC_TYPE_L2SQR, IOTemp>(param, common_param);
     }

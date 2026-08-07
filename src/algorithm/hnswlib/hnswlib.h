@@ -41,4 +41,5 @@
 #include "hnswalg.h"
 #include "hnswalg_static.h"
 #include "space_ip.h"
+#include "space_l1.h"
 #include "space_l2.h"
