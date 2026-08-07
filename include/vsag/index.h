@@ -273,14 +273,17 @@ public:
     // [search methods]
 
     /**
-      * @brief Performing single KNN search on index
+      * @brief Perform KNN search; HGraph and IVF also accept batched queries.
       * 
       * @param query should contains dim, num_elements and vectors
       * @param k the result size of every query
       * @param invalid represents whether an element is filtered out by pre-filter
       * @return result contains 
-      *                - num_elements: 1
-      *                - ids, distances: length is (num_elements * k)
+      *                - single-query: num_elements = 1, dim is the actual result count
+      *                - batched HGraph/IVF KNN: num_elements is the query count;
+      *                  ids and distances use row-major num_elements x dim storage
+      *                - HGraph missing neighbors use id = -1, distance = +infinity;
+      *                  active external label -1 is rejected for batched HGraph KNN
       */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
@@ -289,14 +292,17 @@ public:
               BitsetPtr invalid = nullptr) const = 0;
 
     /**
-      * @brief Performing single KNN search on index
+      * @brief Perform KNN search; HGraph and IVF also accept batched queries.
       *
       * @param query should contains dim, num_elements and vectors
       * @param k the result size of every query
       * @param filter represents whether an element is filtered out by pre-filter
       * @return result contains
-      *                - num_elements: 1
-      *                - ids, distances: length is (num_elements * k)
+      *                - single-query: num_elements = 1, dim is the actual result count
+      *                - batched HGraph/IVF KNN: num_elements is the query count;
+      *                  ids and distances use row-major num_elements x dim storage
+      *                - HGraph missing neighbors use id = -1, distance = +infinity;
+      *                  active external label -1 is rejected for batched HGraph KNN
       */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
@@ -305,14 +311,17 @@ public:
               const std::function<bool(int64_t)>& filter) const = 0;
 
     /**
-      * @brief Performing single KNN search on index
+      * @brief Perform KNN search; HGraph and IVF also accept batched queries.
       *
       * @param query should contains dim, num_elements and vectors
       * @param k the result size of every query
       * @param filter represents whether an element is filtered out by pre-filter
       * @return result contains
-      *                - num_elements: 1
-      *                - ids, distances: length is (num_elements * k)
+      *                - single-query: num_elements = 1, dim is the actual result count
+      *                - batched HGraph/IVF KNN: num_elements is the query count;
+      *                  ids and distances use row-major num_elements x dim storage
+      *                - HGraph missing neighbors use id = -1, distance = +infinity;
+      *                  active external label -1 is rejected for batched HGraph KNN
       */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
@@ -327,9 +336,11 @@ public:
       * @brief Performing search with request on index
       * 
       * @param request @see SearchRequest
-      * @return result contains 
-      *                - num_elements: 1
-      *                - ids, distances: length is (num_elements * k)               
+      * @return result contains
+      *                - single-query: num_elements = 1 and dim is the actual result count
+      *                - HGraph/IVF batched KNN: num_elements is the query count; ids and
+      *                  distances form a row-major num_elements x dim matrix. Missing HGraph
+      *                  neighbors are padded with id = -1 and distance = +infinity.
       */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const {

@@ -116,9 +116,17 @@ if (result.has_value()) {
 }
 ```
 
-For KNN, `GetNumElements()` is `1` and the ids/distances arrays have length `k`. For range search,
-the number of matches is reported through the result's dimension. See
+For single-query KNN, `GetNumElements()` is `1` and `GetDim()` is the actual result count. HGraph
+and IVF batched KNN results are row-major `GetNumElements() x GetDim()` matrices. HGraph pads short
+rows with `id == -1` and infinite distance. For range search, the number of matches is reported
+through the result's dimension. See
 [k-Nearest Neighbor Search](../guide/knn_search.md).
+
+
+For HGraph batched KNN, an empty index (including one with all elements removed) returns
+`NumElements = query_count` and `Dim = requested k`, with every slot padded by `-1` and
+`+infinity`. For a non-empty index, `Dim = min(requested k, live element count)`; filtering
+can leave padded slots within that width. Single-query empty results retain `Dim = 0`.
 
 ## `SparseVector`
 
