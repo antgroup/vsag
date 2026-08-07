@@ -2419,6 +2419,12 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
                                     dataset->base_->GetFloat32Vectors() + dim);
     auto query = vsag::Dataset::Make();
     query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
+    std::vector<float> batch_query_vectors(query_vector.begin(), query_vector.end());
+    batch_query_vectors.insert(batch_query_vectors.end(),
+                               dataset->base_->GetFloat32Vectors() + dim,
+                               dataset->base_->GetFloat32Vectors() + 2 * dim);
+    auto batch_query = vsag::Dataset::Make();
+    batch_query->NumElements(2)->Dim(dim)->Float32Vectors(batch_query_vectors.data())->Owner(false);
 
     auto param = IVFTestIndex::GenerateIVFBuildParametersString("l2", dim, "fp32", buckets_count);
     auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
@@ -2530,12 +2536,92 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
         REQUIRE_FALSE(result.has_value());
     }
 
-    SECTION("reject multiple query entries") {
+    SECTION("batch queries use corresponding bucket ID lists") {
+        std::vector<int64_t> all_bucket_ids;
+        for (int64_t i = 0; i < buckets_count; ++i) {
+            all_bucket_ids.push_back(i);
+        }
         vsag::SearchRequest request;
-        request.query_ = query;
+        request.query_ = batch_query;
+        request.topk_ = 10;
+        request.params_str_ = search_param_all;
+        request.bucket_ids_ = {all_bucket_ids, all_bucket_ids};
+        auto batch_result = index->SearchWithRequest(request);
+        REQUIRE(batch_result.has_value());
+        REQUIRE(batch_result.value()->GetNumElements() == 2);
+        REQUIRE(batch_result.value()->GetDim() == request.topk_);
+
+        vsag::SearchRequest first_request = request;
+        first_request.query_ = query;
+        first_request.bucket_ids_ = {all_bucket_ids};
+        auto first_result = index->SearchWithRequest(first_request);
+        REQUIRE(first_result.has_value());
+
+        auto second_query = vsag::Dataset::Make();
+        second_query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(batch_query_vectors.data() + dim)
+            ->Owner(false);
+        vsag::SearchRequest second_request = first_request;
+        second_request.query_ = second_query;
+        auto second_result = index->SearchWithRequest(second_request);
+        REQUIRE(second_result.has_value());
+
+        const auto* batch_ids = batch_result.value()->GetIds();
+        const auto* batch_dists = batch_result.value()->GetDistances();
+        for (int64_t i = 0; i < request.topk_; ++i) {
+            REQUIRE(batch_ids[i] == first_result.value()->GetIds()[i]);
+            REQUIRE(batch_dists[i] == first_result.value()->GetDistances()[i]);
+            REQUIRE(batch_ids[request.topk_ + i] == second_result.value()->GetIds()[i]);
+            REQUIRE(batch_dists[request.topk_ + i] == second_result.value()->GetDistances()[i]);
+        }
+    }
+
+    SECTION("batch queries with default routing (no bucket_ids)") {
+        vsag::SearchRequest request;
+        request.query_ = batch_query;
+        request.topk_ = 10;
+        request.params_str_ = search_param_all;
+        auto batch_result = index->SearchWithRequest(request);
+        REQUIRE(batch_result.has_value());
+        REQUIRE(batch_result.value()->GetNumElements() == 2);
+        REQUIRE(batch_result.value()->GetDim() == request.topk_);
+
+        vsag::SearchRequest single_req;
+        single_req.query_ = query;
+        single_req.topk_ = 10;
+        single_req.params_str_ = search_param_all;
+        auto first_result = index->SearchWithRequest(single_req);
+        REQUIRE(first_result.has_value());
+
+        auto second_query = vsag::Dataset::Make();
+        second_query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(batch_query_vectors.data() + dim)
+            ->Owner(false);
+        vsag::SearchRequest second_req;
+        second_req.query_ = second_query;
+        second_req.topk_ = 10;
+        second_req.params_str_ = search_param_all;
+        auto second_result = index->SearchWithRequest(second_req);
+        REQUIRE(second_result.has_value());
+
+        const auto* batch_ids = batch_result.value()->GetIds();
+        const auto* batch_dists = batch_result.value()->GetDistances();
+        for (int64_t i = 0; i < request.topk_; ++i) {
+            REQUIRE(batch_ids[i] == first_result.value()->GetIds()[i]);
+            REQUIRE(batch_dists[i] == first_result.value()->GetDistances()[i]);
+            REQUIRE(batch_ids[request.topk_ + i] == second_result.value()->GetIds()[i]);
+            REQUIRE(batch_dists[request.topk_ + i] == second_result.value()->GetDistances()[i]);
+        }
+    }
+
+    SECTION("reject bucket ID lists that do not match query count") {
+        vsag::SearchRequest request;
+        request.query_ = batch_query;
         request.topk_ = 10;
         request.params_str_ = search_param;
-        request.bucket_ids_ = {{0}, {1}};
+        request.bucket_ids_ = {{0}};
         auto result = index->SearchWithRequest(request);
         REQUIRE_FALSE(result.has_value());
     }

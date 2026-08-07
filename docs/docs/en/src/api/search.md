@@ -34,7 +34,7 @@ enum class SearchMode {
 
 | Field | Type | Default | Meaning |
 |-------|------|---------|---------|
-| `query_` | `DatasetPtr` | `nullptr` | The query. Exactly one query vector is allowed. |
+| `query_` | `DatasetPtr` | `nullptr` | The query. IVF KNN requests support multiple query vectors; other requests allow one. |
 | `mode_` | `SearchMode` | `KNN_SEARCH` | KNN vs. range search. |
 | `topk_` | `int64_t` | `10` | Neighbors to return (KNN mode). Must be positive. |
 | `radius_` | `float` | `0.5` | Distance threshold (range mode). Non-negative. |
@@ -101,9 +101,13 @@ selection and scans only the specified buckets.
 **Semantics:**
 - **Empty** (default): Use normal bucket routing via `ClassifyDatasForSearch`.
 - **Non-empty**: Skip routing and scan only the provided bucket IDs.
+- **Batch IVF KNN**: One outer `bucket_ids_` entry per query vector.
+  Result is rectangular: `NumElements()` is query count, `Dim()` is `topk_`.
+  Missing neighbors are `-1` with infinite distance.
 
 **Constraints:**
-- Currently only single-query is supported; the outer vector must contain exactly one entry.
+- Batch IVF search supports KNN only; custom query distance and reasoning labels are unsupported.
+- A non-empty outer vector must contain exactly one non-empty entry per query vector.
 - Each bucket ID must be in range `[0, bucket_count)`.
 - Duplicate bucket IDs are rejected.
 - Incompatible with `disable_bucket_scan` mode.
