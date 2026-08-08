@@ -88,9 +88,21 @@ Build-time parameters live under `index_param`. See
 | `fast_encode_rabitq_rounds` | int | `6` | CAQ adjustment rounds; allowed range is `[1, 32]` |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse scan |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer used for reordering (with `use_reorder: true`) |
+| `precise_codes_layout` | string | `"flat"` | Storage layout for precise codes: `"flat"` keeps the legacy one-code-per-vector layout; `"bucket"` stores the precise code in the same bucket and offset as its basic posting |
 | `base_io_type` | string | `"memory_io"` | Storage backend for coarse codes; supports `uring_io` when built with liburing |
 | `precise_io_type` | string | `"block_memory_io"` | Storage backend for precise codes (`memory_io`, `block_memory_io`, `mmap_io`, `buffer_io`, `async_io`, `uring_io`, `reader_io`) |
 | `precise_file_path` | string | `""` | File path when the precise IO type is disk-backed |
+
+`precise_codes_layout: "bucket"` requires `use_reorder: true`. It supports
+`memory_io`, `block_memory_io`, `buffer_io`, `async_io`, and `uring_io`
+(when io_uring is available); `mmap_io`, `reader_io`, and `pqfs` precise
+quantization are not supported. The bucket layout currently requires
+`buckets_per_data: 1`; configurations that assign one vector to multiple buckets are rejected.
+
+For file-backed bucket-aligned precise codes, `Clone`, `ExportModel`, `Merge`, and static
+`Index::Load` are rejected because those operations cannot yet assign an independent target
+file. To restore a streaming index on disk, create the destination IVF with a different
+`precise_file_path` and call `DeserializeStreaming`.
 
 A rule of thumb for `buckets_count` is `sqrt(N)` to `4 * sqrt(N)` where `N` is the
 corpus size.

@@ -48,6 +48,19 @@ public:
                  const BucketIdType& bucket_id,
                  const InnerIdType& offset_id) = 0;
 
+    virtual void
+    Query(float* result_dists,
+          const ComputerInterfacePtr& computer,
+          const BucketIdType* bucket_ids,
+          const InnerIdType* offset_ids,
+          InnerIdType id_count,
+          QueryContext* ctx = nullptr) {
+        (void)ctx;
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            result_dists[i] = QueryOneById(computer, bucket_ids[i], offset_ids[i]);
+        }
+    }
+
     virtual ComputerInterfacePtr
     FactoryComputer(const void* query) = 0;
 

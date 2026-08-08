@@ -177,11 +177,16 @@ IVF writes these streaming blocks in order:
 | `ivf_bucket` | bucket datacell payloads for inverted lists | yes |
 | `ivf_partition_strategy` | partition strategy state, such as trained centroids | yes |
 | `label_table` | external labels and label remap | yes |
-| `high_precision_codes` | reorder codes when IVF reorder is enabled | conditional |
+| `high_precision_codes` | flat reorder codes when IVF reorder uses the `flat` layout | conditional |
+| `ivf_precise_bucket` | bucket-aligned reorder codes when IVF reorder uses the `bucket` layout | conditional |
 | `attribute_filter` | optional attribute filter index | conditional |
 
 `DeserializeStreaming` restores the full in-memory IVF index. `Index::Load` can create the IVF
 index directly from streaming metadata and currently loads all emitted IVF blocks into memory.
+The two precise-code blocks are mutually exclusive and are selected by
+`precise_codes_layout`. For file-backed bucket-aligned precise codes, create an IVF destination
+with an independent `precise_file_path` and use `DeserializeStreaming`; static `Index::Load` is
+rejected until it can accept an independent target path.
 
 ## SINDI Blocks
 

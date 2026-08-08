@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <exception>
 #include <limits>
 #include <sstream>
@@ -31,6 +32,34 @@
 #include "unittest.h"
 
 using namespace vsag;
+
+namespace {
+
+class FixedCentroidPartitionStrategy : public IVFPartitionStrategy {
+public:
+    FixedCentroidPartitionStrategy(const IndexCommonParam& common_param, BucketIdType bucket_count)
+        : IVFPartitionStrategy(common_param, bucket_count) {
+    }
+
+    void
+    Train(const DatasetPtr) override {
+        is_trained_ = true;
+    }
+
+    Vector<BucketIdType>
+    ClassifyDatas(const void*, int64_t count, BucketIdType, QueryContext*) const override {
+        return Vector<BucketIdType>(count, 0, allocator_);
+    }
+
+    void
+    GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) override {
+        for (uint64_t i = 0; i < centroid.size(); ++i) {
+            centroid[i] = static_cast<float>((bucket_id + 1) * (i + 1)) * 0.01F;
+        }
+    }
+};
+
+}  // namespace
 
 namespace vsag {
 class BucketInterfaceTest {
@@ -200,6 +229,342 @@ TEST_CASE("BucketDataCell rejects invalid parameters", "[ut][BucketDataCell]") {
     IndexCommonParam common_param;
 
     REQUIRE(BucketInterface::MakeInstance(nullptr, common_param) == nullptr);
+}
+
+TEST_CASE("BucketDataCell rejects inconsistent serialized metadata", "[ut][BucketDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 4;
+    constexpr const char* param_str = R"(
+        {
+            "io_params": {
+                "type": "memory_io"
+            },
+            "quantization_params": {
+                "type": "fp32"
+            },
+            "buckets_count": 1
+        }
+        )";
+
+    auto make_bucket = [&]() {
+        auto param_json = JsonType::Parse(param_str);
+        auto param = std::make_shared<BucketDataCellParameter>();
+        param->FromJson(param_json);
+
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.dim_ = dim;
+        common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+        return BucketInterface::MakeInstance(param, common_param);
+    };
+
+    auto bucket = make_bucket();
+    auto vectors = fixtures::generate_vectors(1, dim);
+    bucket->Train(vectors.data(), 1);
+    bucket->InsertVector(vectors.data(), 0, 0);
+
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    bucket->Serialize(writer);
+    const auto serialized = stream.str();
+
+    SECTION("inner id vector is shorter than bucket size") {
+        auto malformed = serialized;
+        constexpr InnerIdType invalid_bucket_size = 2;
+        std::memcpy(malformed.data() + malformed.size() - sizeof(invalid_bucket_size),
+                    &invalid_bucket_size,
+                    sizeof(invalid_bucket_size));
+
+        std::stringstream malformed_stream(malformed);
+        IOStreamReader reader(malformed_stream);
+        auto restored = make_bucket();
+        try {
+            restored->Deserialize(reader);
+            FAIL("inconsistent inner id metadata should be rejected");
+        } catch (const VsagException& error) {
+            REQUIRE(error.error_.type == ErrorType::INVALID_BINARY);
+            REQUIRE(error.error_.message ==
+                    "serialized bucket 0 inner id count is smaller than bucket size");
+        }
+    }
+
+    SECTION("bucket size vector does not cover every bucket") {
+        auto malformed = serialized;
+        constexpr uint64_t invalid_bucket_size_count = 0;
+        const uint64_t count_offset =
+            static_cast<uint64_t>(malformed.size()) - sizeof(InnerIdType) - sizeof(uint64_t);
+        std::memcpy(malformed.data() + count_offset,
+                    &invalid_bucket_size_count,
+                    sizeof(invalid_bucket_size_count));
+
+        std::stringstream malformed_stream(malformed);
+        IOStreamReader reader(malformed_stream);
+        auto restored = make_bucket();
+        try {
+            restored->Deserialize(reader);
+            FAIL("inconsistent bucket size metadata should be rejected");
+        } catch (const VsagException& error) {
+            REQUIRE(error.error_.type == ErrorType::INVALID_BINARY);
+            REQUIRE(error.error_.message ==
+                    "serialized bucket size vector does not match bucket count");
+        }
+    }
+}
+
+TEST_CASE("BucketDataCell batch query", "[ut][BucketDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto query_allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 8;
+    constexpr uint64_t bucket_count = 3;
+    constexpr uint64_t vectors_per_bucket = 4;
+    constexpr uint64_t base_count = bucket_count * vectors_per_bucket;
+    const auto io_type = GENERATE(std::string("memory_io"), std::string("buffer_io"));
+    auto vectors = fixtures::generate_vectors(base_count, dim);
+    auto queries = fixtures::generate_vectors(1, dim, 41);
+    fixtures::TempDir temp_dir("vsag_bucket_batch_query_test");
+
+    auto make_bucket = [&]() {
+        auto file_path = temp_dir.GenerateRandomFile(false);
+        auto param_json = JsonType::Parse(fmt::format(
+            R"({{
+                "io_params": {{
+                    "type": "{}",
+                    "file_path": "{}"
+                }},
+                "quantization_params": {{
+                    "type": "fp32"
+                }},
+                "buckets_count": {}
+            }})",
+            io_type,
+            file_path,
+            bucket_count));
+        auto param = std::make_shared<BucketDataCellParameter>();
+        param->FromJson(param_json);
+
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.dim_ = dim;
+        common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+        auto bucket = BucketInterface::MakeInstance(param, common_param);
+        bucket->Train(vectors.data(), base_count);
+        return bucket;
+    };
+
+    auto bucket = make_bucket();
+    for (uint64_t bucket_id = 0; bucket_id < bucket_count; ++bucket_id) {
+        for (uint64_t offset_id = 0; offset_id < vectors_per_bucket; ++offset_id) {
+            auto inner_id = bucket_id * vectors_per_bucket + offset_id;
+            bucket->InsertVector(vectors.data() + inner_id * dim,
+                                 static_cast<BucketIdType>(bucket_id),
+                                 static_cast<InnerIdType>(inner_id));
+        }
+    }
+
+    std::vector<BucketIdType> bucket_ids{2, 0, 1, 0, 2, 1, 0};
+    std::vector<InnerIdType> offset_ids{3, 1, 2, 2, 3, 0, 1};
+    std::vector<float> expected(bucket_ids.size());
+    std::vector<float> actual(bucket_ids.size());
+    auto computer = bucket->FactoryComputer(queries.data());
+    for (uint64_t i = 0; i < bucket_ids.size(); ++i) {
+        expected[i] = bucket->QueryOneById(computer, bucket_ids[i], offset_ids[i]);
+    }
+
+    SearchStatistics stats;
+    QueryContext ctx{query_allocator.get(), &stats};
+    bucket->Query(actual.data(),
+                  computer,
+                  bucket_ids.data(),
+                  offset_ids.data(),
+                  static_cast<InnerIdType>(bucket_ids.size()),
+                  &ctx);
+    REQUIRE(actual == expected);
+    if (io_type == "buffer_io") {
+        // Four contiguous read ranges remain after sorting and de-duplicating the locations.
+        REQUIRE(stats.io_cnt.load(std::memory_order_relaxed) == 4);
+    }
+
+    REQUIRE_NOTHROW(bucket->Query(nullptr, ComputerInterfacePtr{}, nullptr, nullptr, 0, &ctx));
+
+    SECTION("invalid bucket is rejected") {
+        BucketIdType invalid_bucket_id = -1;
+        InnerIdType offset_id = 0;
+        float dist = 0.0F;
+        REQUIRE_THROWS(bucket->Query(&dist, computer, &invalid_bucket_id, &offset_id, 1));
+    }
+
+    SECTION("invalid offset is rejected") {
+        BucketIdType bucket_id = 0;
+        InnerIdType invalid_offset_id = 100;
+        float dist = 0.0F;
+        REQUIRE_THROWS(bucket->Query(&dist, computer, &bucket_id, &invalid_offset_id, 1));
+    }
+
+    SECTION("hole is rejected") {
+        auto sparse_bucket = make_bucket();
+        sparse_bucket->InsertVectorWithOffset(vectors.data() + 2 * dim, 0, 2, 2);
+        auto sparse_computer = sparse_bucket->FactoryComputer(queries.data());
+        BucketIdType bucket_id = 0;
+        InnerIdType hole_offset_id = 0;
+        float dist = 0.0F;
+        REQUIRE_THROWS(
+            sparse_bucket->Query(&dist, sparse_computer, &bucket_id, &hole_offset_id, 1));
+    }
+}
+
+TEST_CASE("BucketDataCell batch query preserves residual correction", "[ut][BucketDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 8;
+    constexpr uint64_t bucket_count = 2;
+    constexpr uint64_t base_count = 8;
+    auto vectors = fixtures::generate_vectors(base_count, dim);
+    auto queries = fixtures::generate_vectors(1, dim, 43);
+    MetricType metrics[] = {
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP, MetricType::METRIC_TYPE_COSINE};
+
+    for (auto metric : metrics) {
+        auto param_json = JsonType::Parse(R"({
+            "io_params": {
+                "type": "memory_io"
+            },
+            "quantization_params": {
+                "type": "fp32"
+            },
+            "buckets_count": 2,
+            "use_residual": true
+        })");
+        auto param = std::make_shared<BucketDataCellParameter>();
+        param->FromJson(param_json);
+
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.dim_ = dim;
+        common_param.metric_ = metric;
+        auto bucket = BucketInterface::MakeInstance(param, common_param);
+        auto strategy =
+            std::make_shared<FixedCentroidPartitionStrategy>(common_param, bucket_count);
+        bucket->SetStrategy(strategy);
+        bucket->Train(vectors.data(), base_count);
+        for (uint64_t i = 0; i < base_count; ++i) {
+            bucket->InsertVector(vectors.data() + i * dim,
+                                 static_cast<BucketIdType>(i % bucket_count),
+                                 static_cast<InnerIdType>(i));
+        }
+
+        std::vector<BucketIdType> bucket_ids{1, 0, 1, 0, 1};
+        std::vector<InnerIdType> offset_ids{2, 3, 0, 1, 2};
+        std::vector<float> expected(bucket_ids.size());
+        std::vector<float> actual(bucket_ids.size());
+        auto computer = bucket->FactoryComputer(queries.data());
+        for (uint64_t i = 0; i < bucket_ids.size(); ++i) {
+            expected[i] = bucket->QueryOneById(computer, bucket_ids[i], offset_ids[i]);
+        }
+        bucket->Query(actual.data(),
+                      computer,
+                      bucket_ids.data(),
+                      offset_ids.data(),
+                      static_cast<InnerIdType>(bucket_ids.size()));
+        for (uint64_t i = 0; i < actual.size(); ++i) {
+            REQUIRE(std::abs(actual[i] - expected[i]) < 1e-5F);
+        }
+    }
+}
+
+TEST_CASE("BucketDataCell batch query handles all bucket quantizers", "[ut][BucketDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 64;
+    constexpr uint64_t train_count = 300;
+    constexpr uint64_t bucket_count = 2;
+    constexpr uint64_t vectors_per_bucket = 64;
+    auto vectors = fixtures::generate_vectors(train_count, dim);
+    auto queries = fixtures::generate_vectors(1, dim, 47);
+    fixtures::TempDir temp_dir("vsag_bucket_batch_quantizers_test");
+
+    const std::vector<std::pair<std::string, std::string>> quantizers = {
+        {"fp32", R"({"type": "fp32"})"},
+        {"sq8", R"({"type": "sq8"})"},
+        {"sq4", R"({"type": "sq4"})"},
+        {"sq4_uniform", R"({"type": "sq4_uniform"})"},
+        {"sq8_uniform", R"({"type": "sq8_uniform"})"},
+        {"bf16", R"({"type": "bf16"})"},
+        {"fp16", R"({"type": "fp16"})"},
+        {"pq", R"({"type": "pq", "pq_dim": 8, "pq_bits": 8})"},
+        {"pqfs", R"({"type": "pqfs", "pq_dim": 8})"},
+        {"rabitq",
+         R"({"type": "rabitq", "rabitq_bits_per_dim_query": 32, "rabitq_bits_per_dim_base": 1})"},
+    };
+
+    for (const auto& io_type : {std::string("memory_io"), std::string("buffer_io")}) {
+        for (const auto& [quantizer_name, quantizer_json] : quantizers) {
+            CAPTURE(io_type, quantizer_name);
+            JsonType param_json;
+            JsonType io_json;
+            io_json["type"].SetString(io_type);
+            io_json["file_path"].SetString(temp_dir.GenerateRandomFile(false));
+            param_json["io_params"].SetJson(io_json);
+            param_json["quantization_params"].SetJson(JsonType::Parse(quantizer_json));
+            param_json["buckets_count"].SetInt(bucket_count);
+            auto param = std::make_shared<BucketDataCellParameter>();
+            param->FromJson(param_json);
+
+            IndexCommonParam common_param;
+            common_param.allocator_ = allocator;
+            common_param.dim_ = dim;
+            common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+            auto bucket = BucketInterface::MakeInstance(param, common_param);
+            bucket->Train(vectors.data(), train_count);
+            for (uint64_t bucket_id = 0; bucket_id < bucket_count; ++bucket_id) {
+                for (uint64_t offset_id = 0; offset_id < vectors_per_bucket; ++offset_id) {
+                    auto inner_id = bucket_id * vectors_per_bucket + offset_id;
+                    bucket->InsertVector(vectors.data() + inner_id * dim,
+                                         static_cast<BucketIdType>(bucket_id),
+                                         static_cast<InnerIdType>(inner_id));
+                }
+            }
+            // PQFS queries require its normal IVF package state; Package is a no-op for others.
+            bucket->Package();
+
+            auto computer = bucket->FactoryComputer(queries.data());
+            std::vector<BucketIdType> bucket_ids{1, 0, 1, 0, 1, 0};
+            std::vector<InnerIdType> offset_ids{33, 1, 2, 34, 33, 2};
+            std::vector<float> actual(bucket_ids.size());
+            if (quantizer_name == "pqfs") {
+                try {
+                    bucket->Query(actual.data(),
+                                  computer,
+                                  bucket_ids.data(),
+                                  offset_ids.data(),
+                                  static_cast<InnerIdType>(bucket_ids.size()));
+                    FAIL("PQFS batch point query should preserve QueryOneById rejection");
+                } catch (const VsagException& error) {
+                    REQUIRE(error.error_.type == ErrorType::INTERNAL_ERROR);
+                    REQUIRE(error.error_.message ==
+                            "PQFastScan doesn't support ComputeDist, only support "
+                            "ComputeBatchDist");
+                }
+                continue;
+            }
+
+            std::vector<float> expected(bucket_ids.size());
+            for (uint64_t i = 0; i < expected.size(); ++i) {
+                expected[i] = bucket->QueryOneById(computer, bucket_ids[i], offset_ids[i]);
+            }
+            SearchStatistics stats;
+            QueryContext ctx{nullptr, &stats};
+            bucket->Query(actual.data(),
+                          computer,
+                          bucket_ids.data(),
+                          offset_ids.data(),
+                          static_cast<InnerIdType>(bucket_ids.size()),
+                          &ctx);
+            for (uint64_t i = 0; i < actual.size(); ++i) {
+                REQUIRE(std::abs(actual[i] - expected[i]) < 1e-5F);
+            }
+            if (io_type == "buffer_io") {
+                REQUIRE(stats.io_cnt.load(std::memory_order_relaxed) == 4);
+            }
+        }
+    }
 }
 
 TEST_CASE("BucketDataCell supports RabitQ", "[ut][BucketDataCell]") {
