@@ -69,6 +69,35 @@ CodeSlotMap::PublishSlot(InnerIdType inner_id, CodeSlotIdType code_slot_id) {
     published_logical_count_.fetch_add(1, std::memory_order_acq_rel);
 }
 
+void
+// NOLINTNEXTLINE(readability-make-member-function-const): rebinding mutates slot bindings.
+CodeSlotMap::RebindSlot(InnerIdType inner_id,
+                        CodeSlotIdType expected_code_slot_id,
+                        CodeSlotIdType new_code_slot_id) {
+    const auto physical_count = physical_count_.load(std::memory_order_acquire);
+    CHECK_ARGUMENT(expected_code_slot_id < physical_count,
+                   fmt::format("expected code slot id({}) must be less than physical_count({})",
+                               expected_code_slot_id,
+                               physical_count));
+    CHECK_ARGUMENT(new_code_slot_id < physical_count,
+                   fmt::format("new code slot id({}) must be less than physical_count({})",
+                               new_code_slot_id,
+                               physical_count));
+    if (inner_id >= logical_capacity_) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("inner_id({}) has no bound code slot", inner_id));
+    }
+
+    auto expected = expected_code_slot_id;
+    const auto rebound = inner_to_slot_[inner_id].compare_exchange_strong(
+        expected, new_code_slot_id, std::memory_order_release, std::memory_order_acquire);
+    CHECK_ARGUMENT(rebound,
+                   fmt::format("inner_id({}) is bound to slot {}, expected slot {}",
+                               inner_id,
+                               expected,
+                               expected_code_slot_id));
+}
+
 CodeSlotIdType
 CodeSlotMap::Resolve(InnerIdType inner_id) const {
     if (inner_id >= logical_capacity_) {

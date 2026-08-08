@@ -115,8 +115,10 @@ is enabled:
 - `Merge`;
 - legacy v0.14 serialization.
 
-`UpdateVector` is supported only for IDs whose vector storage is not shared with another
-duplicate-group member.
+`UpdateVector` keeps the existing HGraph in-place update semantics. If the target logical ID still
+shares a physical code slot, HGraph writes the replacement vector to a private slot and atomically
+redirects only that ID. Graph topology and duplicate-group metadata remain unchanged, matching
+`UpdateVector` behavior when storage deduplication is disabled.
 
 Current serialization and streaming serialization are supported.
 

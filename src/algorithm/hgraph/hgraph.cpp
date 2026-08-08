@@ -772,29 +772,61 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
         }
     }
 
-    if (this->using_dedup_storage()) {
-        auto duplicate_tracker = this->bottom_graph_->GetDuplicateTracker();
-        CHECK_ARGUMENT(duplicate_tracker != nullptr,
-                       "deduplicate_storage update requires duplicate tracker");
-        if (duplicate_tracker->GetGroupSize(inner_id) > 1) {
-            throw VsagException(
-                ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                "updating a member of a deduplicated vector group is not supported");
+    if (not this->using_dedup_storage()) {
+        // Updating vector storage requires exclusive access; the datacell handles its own
+        // lower-level synchronization.
+        std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+        bool update_status = basic_flatten_codes_->UpdateVector(new_base_vec, inner_id);
+        if (has_precise_reorder()) {
+            update_status =
+                update_status && high_precise_codes_->UpdateVector(new_base_vec, inner_id);
+        }
+        return update_status;
+    }
+
+    // Deduplicated storage needs both locks exclusively: the global lock freezes Add/Search slot
+    // visibility while the codes lock pins every physical flatten used by MCI. std::lock avoids
+    // imposing a new order on existing paths that acquire these locks in opposite orders.
+    std::unique_lock<std::shared_mutex> global_lock(this->global_mutex_, std::defer_lock);
+    std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_, std::defer_lock);
+    std::lock(global_lock, codes_lock);
+
+    const auto duplicate_tracker = this->bottom_graph_->GetDuplicateTracker();
+    CHECK_ARGUMENT(duplicate_tracker != nullptr,
+                   "deduplicate_storage update requires duplicate tracker");
+    const auto current_slot = this->code_slot_map_->Resolve(inner_id);
+    const auto duplicate_ids = duplicate_tracker->GetDuplicateIds(inner_id);
+    bool slot_is_shared = false;
+    for (const auto duplicate_id : duplicate_ids) {
+        if (this->code_slot_map_->Resolve(duplicate_id) == current_slot) {
+            slot_is_shared = true;
+            break;
         }
     }
 
-    // note that only modify vector need to obtain unique lock
-    // and the lock has been obtained inside datacell
-    std::shared_lock<std::shared_mutex> map_lock;
-    if (this->using_dedup_storage() && !this->immutable_.load(std::memory_order_acquire)) {
-        map_lock = this->acquire_global_read_lock();
+    if (not slot_is_shared) {
+        bool update_status = basic_flatten_codes_->UpdateVector(new_base_vec, inner_id);
+        if (has_precise_reorder()) {
+            update_status =
+                update_status && high_precise_codes_->UpdateVector(new_base_vec, inner_id);
+        }
+        // A member previously split from a shared slot must keep its private raw code in sync on
+        // later updates. Preserve the existing unique-ID behavior outside duplicate groups.
+        if (create_new_raw_vector_ and not duplicate_ids.empty()) {
+            update_status = update_status && raw_vector_->UpdateVector(new_base_vec, inner_id);
+        }
+        return update_status;
     }
-    std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
-    bool update_status = basic_flatten_codes_->UpdateVector(new_base_vec, inner_id);
-    if (has_precise_reorder()) {
-        update_status = update_status && high_precise_codes_->UpdateVector(new_base_vec, inner_id);
-    }
-    return update_status;
+
+    // Keep the pre-dedup UpdateVector semantics: only this logical ID changes, while graph and
+    // duplicate metadata remain untouched. Fully initialize a private slot before publishing the
+    // new mapping so readers observe either the complete old vector or the complete new vector.
+    const auto next_slot = this->code_slot_map_->PhysicalCount();
+    this->ensure_physical_code_capacity_unlocked(next_slot + 1);
+    const auto new_slot = this->code_slot_map_->AllocateSlot();
+    this->insert_persistent_codes_to_slot(new_base_vec, new_slot);
+    this->code_slot_map_->RebindSlot(inner_id, current_slot, new_slot);
+    return true;
 }
 
 std::string

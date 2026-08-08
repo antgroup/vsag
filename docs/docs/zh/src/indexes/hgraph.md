@@ -105,7 +105,9 @@ auto result = index->KnnSearch(
 - `Merge`；
 - v0.14 旧版序列化格式。
 
-`UpdateVector` 仅支持尚未与其他重复组成员共享向量存储的 ID。
+`UpdateVector` 保持 HGraph 现有的原地更新语义。如果目标逻辑 ID 仍与其他成员共享物理编码
+槽位，HGraph 会将新向量写入独立槽位，并以原子方式仅重定向该 ID。图结构和重复组元数据均
+保持不变，与未启用存储去重时的 `UpdateVector` 行为一致。
 
 当前序列化格式和 streaming serialization 均受支持。
 

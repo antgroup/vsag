@@ -27,10 +27,10 @@ namespace vsag {
 using CodeSlotIdType = InnerIdType;
 
 // Maps logical inner IDs to physical slots in shared code storage. Resolve* translates logical
-// IDs to physical slot IDs, while PublishSlot atomically binds a logical ID to a slot.
+// IDs to physical slot IDs, while PublishSlot and RebindSlot atomically update those bindings.
 class CodeSlotMap {
 public:
-    // Capacity changes must be externally synchronized with Resolve, PublishSlot, and
+    // Capacity changes must be externally synchronized with Resolve, PublishSlot, RebindSlot, and
     // AllocateSlot. Slot bindings themselves are published and read atomically.
     explicit CodeSlotMap(Allocator* allocator);
 
@@ -41,6 +41,17 @@ public:
 
     void
     PublishSlot(InnerIdType inner_id, CodeSlotIdType code_slot_id);
+
+    /**
+     * Replace an existing logical-to-physical binding.
+     *
+     * The caller must fully initialize new_code_slot_id before publishing it here. The expected
+     * slot makes concurrent or stale rebinding attempts fail without changing the mapping.
+     */
+    void
+    RebindSlot(InnerIdType inner_id,
+               CodeSlotIdType expected_code_slot_id,
+               CodeSlotIdType new_code_slot_id);
 
     [[nodiscard]] CodeSlotIdType
     Resolve(InnerIdType inner_id) const;

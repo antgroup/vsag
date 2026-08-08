@@ -942,7 +942,7 @@ TEST_CASE("HGraph deduplicate_storage ExportModel keeps an empty reusable model"
     REQUIRE(ResultContainsId(search_result.value(), 40));
 }
 
-TEST_CASE("HGraph deduplicate_storage rejects UpdateVector for a shared duplicate group",
+TEST_CASE("HGraph deduplicate_storage copy-on-write updates a shared duplicate group",
           "[ut][hgraph][duplicate][update]") {
     constexpr int64_t dim = 2;
     auto common_param = MakeCommonParam(dim);
@@ -956,17 +956,26 @@ TEST_CASE("HGraph deduplicate_storage rejects UpdateVector for a shared duplicat
         0.0F,
         1.0F,
         0.0F,
+        1.0F,
+        0.0F,
     };
-    std::vector<int64_t> ids = {10, 20, 30};
-    auto base = MakeFloatDataset(vectors, ids, dim, 3);
+    std::vector<int64_t> ids = {10, 20, 30, 40};
+    auto base = MakeFloatDataset(vectors, ids, dim, 4);
     REQUIRE(index->Build(base).has_value());
+
+    auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
+    REQUIRE(hgraph != nullptr);
+    REQUIRE(hgraph->GetCodeStorageCounts() ==
+            (std::pair<vsag::InnerIdType, vsag::CodeSlotIdType>{4, 2}));
 
     std::vector<float> updated_vector = {3.0F, 0.0F};
     std::vector<int64_t> update_id = {30};
     auto update_data = MakeFloatDataset(updated_vector, update_id, dim, 1);
-    auto update_result = index->UpdateVector(update_id[0], update_data, true);
-    REQUIRE_FALSE(update_result.has_value());
-    REQUIRE(update_result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+    auto update_result = index->UpdateVector(update_id[0], update_data);
+    REQUIRE(update_result.has_value());
+    REQUIRE(update_result.value());
+    REQUIRE(hgraph->GetCodeStorageCounts() ==
+            (std::pair<vsag::InnerIdType, vsag::CodeSlotIdType>{4, 3}));
 
     std::vector<float> original_duplicate_vector = {1.0F, 0.0F};
     auto representative_distance =
@@ -976,7 +985,46 @@ TEST_CASE("HGraph deduplicate_storage rejects UpdateVector for a shared duplicat
 
     auto duplicate_distance = index->CalcDistanceById(original_duplicate_vector.data(), 30, false);
     REQUIRE(duplicate_distance.has_value());
-    REQUIRE(duplicate_distance.value() == 0.0F);
+    REQUIRE(duplicate_distance.value() > 0.0F);
+    auto updated_distance = index->CalcDistanceById(updated_vector.data(), 30, false);
+    REQUIRE(updated_distance.has_value());
+    REQUIRE(updated_distance.value() == 0.0F);
+
+    std::vector<float> representative_update_vector = {4.0F, 0.0F};
+    std::vector<int64_t> representative_update_id = {20};
+    auto representative_update_data =
+        MakeFloatDataset(representative_update_vector, representative_update_id, dim, 1);
+    auto representative_update_result =
+        index->UpdateVector(representative_update_id[0], representative_update_data, true);
+    REQUIRE(representative_update_result.has_value());
+    REQUIRE(representative_update_result.value());
+    REQUIRE(hgraph->GetCodeStorageCounts() ==
+            (std::pair<vsag::InnerIdType, vsag::CodeSlotIdType>{4, 4}));
+
+    auto untouched_duplicate_distance =
+        index->CalcDistanceById(original_duplicate_vector.data(), 40, false);
+    REQUIRE(untouched_duplicate_distance.has_value());
+    REQUIRE(untouched_duplicate_distance.value() == 0.0F);
+
+    updated_vector[0] = 5.0F;
+    REQUIRE(index->UpdateVector(update_id[0], update_data, true).value());
+    representative_update_vector[0] = 6.0F;
+    REQUIRE(
+        index->UpdateVector(representative_update_id[0], representative_update_data, true).value());
+    REQUIRE(hgraph->GetCodeStorageCounts() ==
+            (std::pair<vsag::InnerIdType, vsag::CodeSlotIdType>{4, 4}));
+    REQUIRE(index->CalcDistanceById(updated_vector.data(), 30, false).value() == 0.0F);
+    REQUIRE(index->CalcDistanceById(representative_update_vector.data(), 20, false).value() ==
+            0.0F);
+
+    std::vector<float> last_sibling_update_vector = {7.0F, 0.0F};
+    std::vector<int64_t> last_sibling_update_id = {40};
+    auto last_sibling_update =
+        MakeFloatDataset(last_sibling_update_vector, last_sibling_update_id, dim, 1);
+    REQUIRE(index->UpdateVector(last_sibling_update_id[0], last_sibling_update, true).value());
+    REQUIRE(hgraph->GetCodeStorageCounts() ==
+            (std::pair<vsag::InnerIdType, vsag::CodeSlotIdType>{4, 4}));
+    REQUIRE(index->CalcDistanceById(last_sibling_update_vector.data(), 40, false).value() == 0.0F);
 
     std::vector<float> unique_update_vector = {4.0F, 0.0F};
     std::vector<int64_t> unique_update_id = {10};
@@ -988,6 +1036,169 @@ TEST_CASE("HGraph deduplicate_storage rejects UpdateVector for a shared duplicat
         index->CalcDistanceById(unique_update_vector.data(), unique_update_id[0], false);
     REQUIRE(unique_distance.has_value());
     REQUIRE(unique_distance.value() == 0.0F);
+    REQUIRE(hgraph->GetCodeStorageCounts() ==
+            (std::pair<vsag::InnerIdType, vsag::CodeSlotIdType>{4, 4}));
+
+    std::vector<float> added_duplicate_vector = representative_update_vector;
+    std::vector<int64_t> added_duplicate_id = {50};
+    auto added_duplicate = MakeFloatDataset(added_duplicate_vector, added_duplicate_id, dim, 1);
+    REQUIRE(index->Add(added_duplicate).has_value());
+    REQUIRE(hgraph->GetCodeStorageCounts() ==
+            (std::pair<vsag::InnerIdType, vsag::CodeSlotIdType>{5, 4}));
+
+    representative_update_vector[0] = 8.0F;
+    REQUIRE(
+        index->UpdateVector(representative_update_id[0], representative_update_data, true).value());
+    REQUIRE(hgraph->GetCodeStorageCounts() ==
+            (std::pair<vsag::InnerIdType, vsag::CodeSlotIdType>{5, 5}));
+    REQUIRE(index->CalcDistanceById(representative_update_vector.data(), 20, false).value() ==
+            0.0F);
+    REQUIRE(index->CalcDistanceById(added_duplicate_vector.data(), 50, false).value() == 0.0F);
+
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = MakeHGraphIndex(hgraph_json, common_param);
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    auto restored_hgraph = std::dynamic_pointer_cast<vsag::HGraph>(restored->GetInnerIndex());
+    REQUIRE(restored_hgraph != nullptr);
+    REQUIRE(restored_hgraph->GetCodeStorageCounts() ==
+            (std::pair<vsag::InnerIdType, vsag::CodeSlotIdType>{5, 5}));
+    REQUIRE(restored->CalcDistanceById(representative_update_vector.data(), 20, false).value() ==
+            0.0F);
+    REQUIRE(restored->CalcDistanceById(last_sibling_update_vector.data(), 40, false).value() ==
+            0.0F);
+    REQUIRE(restored->CalcDistanceById(added_duplicate_vector.data(), 50, false).value() == 0.0F);
+
+    representative_update_vector[0] = 9.0F;
+    REQUIRE(restored->UpdateVector(representative_update_id[0], representative_update_data, true)
+                .value());
+    REQUIRE(restored_hgraph->GetCodeStorageCounts() ==
+            (std::pair<vsag::InnerIdType, vsag::CodeSlotIdType>{5, 5}));
+    REQUIRE(restored->CalcDistanceById(representative_update_vector.data(), 20, false).value() ==
+            0.0F);
+}
+
+TEST_CASE("HGraph deduplicate_storage UpdateVector writes every private code layer",
+          "[ut][hgraph][duplicate][update]") {
+    SECTION("precise reorder codes") {
+        constexpr int64_t dim = 4;
+        auto common_param = MakeCommonParam(dim);
+        auto hgraph_json = MakeFp32ReorderHGraphJson();
+        auto index = MakeHGraphIndex(hgraph_json, common_param);
+
+        std::vector<float> vectors(dim * 2, 0.0F);
+        std::vector<int64_t> ids = {10, 20};
+        REQUIRE(index->Build(MakeFloatDataset(vectors, ids, dim, 2)).has_value());
+
+        std::vector<float> updated_vector = {2.0F, 0.0F, 0.0F, 0.0F};
+        std::vector<int64_t> update_id = {20};
+        auto update = MakeFloatDataset(updated_vector, update_id, dim, 1);
+        REQUIRE(index->UpdateVector(update_id[0], update, true).value());
+
+        auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
+        REQUIRE(hgraph != nullptr);
+        REQUIRE(hgraph->GetCodeStorageCounts() ==
+                (std::pair<vsag::InnerIdType, vsag::CodeSlotIdType>{2, 2}));
+        REQUIRE(index->CalcDistanceById(updated_vector.data(), 20, false).value() == 0.0F);
+        REQUIRE(index->CalcDistanceById(updated_vector.data(), 20, true).value() == 0.0F);
+        REQUIRE(index->CalcDistanceById(vectors.data(), 10, false).value() == 0.0F);
+        REQUIRE(index->CalcDistanceById(vectors.data(), 10, true).value() == 0.0F);
+    }
+
+    SECTION("separate raw vectors") {
+        constexpr int64_t dim = 960;
+        auto common_param = MakeCommonParam(dim);
+        auto hgraph_json = MakeRabitQRawVectorHGraphJson();
+        auto index = MakeHGraphIndex(hgraph_json, common_param);
+
+        std::vector<float> vectors(dim * 3);
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[d] = static_cast<float>(d % 17) * 0.01F;
+            vectors[dim + d] = 1.0F + static_cast<float>(d % 13) * 0.01F;
+            vectors[2 * dim + d] = vectors[dim + d];
+        }
+        std::vector<int64_t> ids = {10, 20, 30};
+        REQUIRE(index->Build(MakeFloatDataset(vectors, ids, dim, 3)).has_value());
+
+        std::vector<float> updated_vector(dim);
+        for (int64_t d = 0; d < dim; ++d) {
+            updated_vector[d] = 2.0F + static_cast<float>(d % 11) * 0.01F;
+        }
+        std::vector<int64_t> update_id = {30};
+        auto update = MakeFloatDataset(updated_vector, update_id, dim, 1);
+        const auto old_base_distance =
+            index->CalcDistanceById(updated_vector.data(), update_id[0], false).value();
+        REQUIRE(index->UpdateVector(update_id[0], update, true).value());
+
+        auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
+        REQUIRE(hgraph != nullptr);
+        REQUIRE(hgraph->GetCodeStorageCounts() ==
+                (std::pair<vsag::InnerIdType, vsag::CodeSlotIdType>{3, 3}));
+        REQUIRE(index->CalcDistanceById(updated_vector.data(), 30, false).value() <
+                old_base_distance);
+        REQUIRE(index->CalcDistanceById(updated_vector.data(), 30, true).value() == 0.0F);
+        REQUIRE(index->CalcDistanceById(vectors.data() + dim, 20, true).value() == 0.0F);
+
+        for (int64_t d = 0; d < dim; ++d) {
+            updated_vector[d] = 3.0F + static_cast<float>(d % 7) * 0.01F;
+        }
+        const auto previous_base_distance =
+            index->CalcDistanceById(updated_vector.data(), update_id[0], false).value();
+        REQUIRE(index->UpdateVector(update_id[0], update, true).value());
+        REQUIRE(hgraph->GetCodeStorageCounts() ==
+                (std::pair<vsag::InnerIdType, vsag::CodeSlotIdType>{3, 3}));
+        REQUIRE(index->CalcDistanceById(updated_vector.data(), 30, false).value() <
+                previous_base_distance);
+        REQUIRE(index->CalcDistanceById(updated_vector.data(), 30, true).value() == 0.0F);
+    }
+}
+
+TEST_CASE("HGraph deduplicate_storage concurrent updates allocate one private slot",
+          "[ut][hgraph][duplicate][concurrent][update]") {
+    constexpr int64_t dim = 2;
+    auto common_param = MakeCommonParam(dim);
+    auto hgraph_json = MakeFp32HGraphJson();
+    auto index = MakeHGraphIndex(hgraph_json, common_param);
+
+    std::vector<float> vectors(dim * 2, 0.0F);
+    std::vector<int64_t> ids = {10, 20};
+    REQUIRE(index->Build(MakeFloatDataset(vectors, ids, dim, 2)).has_value());
+
+    std::vector<float> first_vector = {2.0F, 0.0F};
+    std::vector<float> second_vector = {3.0F, 0.0F};
+    std::vector<int64_t> update_id = {20};
+    auto first_update = MakeFloatDataset(first_vector, update_id, dim, 1);
+    auto second_update = MakeFloatDataset(second_vector, update_id, dim, 1);
+
+    std::atomic<uint64_t> ready{0};
+    std::atomic<bool> start{false};
+    auto launch_update = [&](const vsag::DatasetPtr& update) {
+        return std::async(std::launch::async, [&, update]() {
+            ready.fetch_add(1, std::memory_order_release);
+            while (not start.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            auto result = index->UpdateVector(update_id[0], update, true);
+            return result.has_value() and result.value();
+        });
+    };
+    auto first_result = launch_update(first_update);
+    auto second_result = launch_update(second_update);
+    while (ready.load(std::memory_order_acquire) < 2) {
+        std::this_thread::yield();
+    }
+    start.store(true, std::memory_order_release);
+
+    REQUIRE(first_result.get());
+    REQUIRE(second_result.get());
+    auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
+    REQUIRE(hgraph != nullptr);
+    REQUIRE(hgraph->GetCodeStorageCounts() ==
+            (std::pair<vsag::InnerIdType, vsag::CodeSlotIdType>{2, 2}));
+    REQUIRE(index->CalcDistanceById(vectors.data(), 10, false).value() == 0.0F);
+    const auto first_distance = index->CalcDistanceById(first_vector.data(), 20, false).value();
+    const auto second_distance = index->CalcDistanceById(second_vector.data(), 20, false).value();
+    REQUIRE((first_distance == 0.0F) != (second_distance == 0.0F));
 }
 
 TEST_CASE("HGraph deduplicate_storage batch Add supports internal parallel add",

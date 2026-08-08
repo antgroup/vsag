@@ -668,7 +668,7 @@ private:
         return support_force_remove_;
     }
 
-    /// True when duplicate logical ids share physical vector storage slots.
+    /// True when logical-to-physical shared vector storage is enabled.
     [[nodiscard]] bool
     using_dedup_storage() const {
         return support_duplicate_ and deduplicate_storage_;

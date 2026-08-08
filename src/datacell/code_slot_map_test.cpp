@@ -237,6 +237,34 @@ TEST_CASE("CodeSlotMap rejects invalid mappings", "[ut][datacell][code_slot_map]
     REQUIRE_THROWS(mapping.PublishSlot(1, slot + 1));
 }
 
+TEST_CASE("CodeSlotMap rebinds one logical id to an initialized slot",
+          "[ut][datacell][code_slot_map]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    vsag::CodeSlotMap mapping(allocator.get());
+
+    mapping.ReserveLogicalSize(3);
+    auto shared_slot = mapping.AllocateSlot();
+    mapping.PublishSlot(0, shared_slot);
+    mapping.PublishSlot(1, shared_slot);
+    auto private_slot = mapping.AllocateSlot();
+    mapping.PublishSlot(2, private_slot);
+
+    auto replacement_slot = mapping.AllocateSlot();
+    mapping.RebindSlot(1, shared_slot, replacement_slot);
+
+    REQUIRE(mapping.Resolve(0) == shared_slot);
+    REQUIRE(mapping.Resolve(1) == replacement_slot);
+    REQUIRE(mapping.Resolve(2) == private_slot);
+    REQUIRE(mapping.PhysicalCount() == 3);
+    REQUIRE(mapping.PublishedLogicalCount() == 3);
+
+    REQUIRE_THROWS(mapping.RebindSlot(0, replacement_slot, private_slot));
+    REQUIRE_THROWS(mapping.RebindSlot(0, replacement_slot + 1, private_slot));
+    REQUIRE_THROWS(mapping.RebindSlot(0, shared_slot, replacement_slot + 1));
+    REQUIRE_THROWS(mapping.RebindSlot(3, shared_slot, private_slot));
+    REQUIRE(mapping.Resolve(0) == shared_slot);
+}
+
 TEST_CASE("CodeSlotMap serializes logical to physical slots", "[ut][datacell][code_slot_map]") {
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     vsag::CodeSlotMap mapping(allocator.get());
