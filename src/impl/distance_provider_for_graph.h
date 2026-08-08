@@ -115,6 +115,37 @@ private:
     ComputerInterfacePtr computer_;
 };
 
+class FlattenIdDistanceProvider final : public DistanceProviderForGraph {
+public:
+    FlattenIdDistanceProvider(FlattenInterfacePtr flatten, InnerIdType query_id)
+        : flatten_(std::move(flatten)), query_id_(query_id) {
+    }
+
+    [[nodiscard]] float
+    QueryDistance(InnerIdType id, QueryContext* ctx = nullptr) const override;
+
+    void
+    BatchQueryDistance(float* distances,
+                       const InnerIdType* ids,
+                       InnerIdType count,
+                       QueryContext* ctx = nullptr) const override;
+
+    [[nodiscard]] float
+    PairwiseDistance(InnerIdType id1,
+                     InnerIdType id2,
+                     const ComputerInterfacePtr& computer = nullptr) const override;
+
+    [[nodiscard]] ComputerInterfacePtr
+    FactoryComputerById(InnerIdType id) const override;
+
+    void
+    Prefetch(InnerIdType id) const override;
+
+private:
+    FlattenInterfacePtr flatten_;
+    InnerIdType query_id_;
+};
+
 class BucketDistanceProvider final : public DistanceProviderForGraph {
 public:
     using ComputerFactory = std::function<ComputerInterfacePtr(InnerIdType)>;
