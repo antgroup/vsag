@@ -503,6 +503,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            HGRAPH_MCI_KNNG_SOURCE,
+            {
+                HGRAPH_MCI_KNNG_SOURCE,
+            },
+        },
+        {
             HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY,
             {
                 HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY,

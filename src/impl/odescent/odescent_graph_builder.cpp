@@ -71,12 +71,13 @@ ODescent::Build(const Vector<InnerIdType>& ids_sequence, const GraphInterfacePtr
 
 void
 ODescent::prepare_build_flatten() {
-    if (this->build_flatten_interface_ != nullptr) {
-        return;
+    if (this->build_flatten_interface_ == nullptr) {
+        this->build_flatten_interface_ = CreateBuildFlatten(
+            this->flatten_interface_, this->build_vectors_, this->build_vector_count_);
     }
-
-    this->build_flatten_interface_ = CreateBuildFlatten(
-        this->flatten_interface_, this->build_vectors_, this->build_vector_count_);
+    this->distance_flatten_interface_ = this->build_flatten_interface_ == nullptr
+                                            ? this->flatten_interface_.get()
+                                            : this->build_flatten_interface_.get();
 }
 
 FlattenInterfacePtr

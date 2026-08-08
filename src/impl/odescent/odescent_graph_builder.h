@@ -127,12 +127,11 @@ public:
 private:
     inline float
     get_distance(uint32_t loc1, uint32_t loc2) {
-        auto flatten = this->build_flatten_interface_ == nullptr ? this->flatten_interface_
-                                                                 : this->build_flatten_interface_;
         if (valid_ids_ != nullptr) {
-            return flatten->ComputePairVectors(valid_ids_[loc1], valid_ids_[loc2]);
+            return distance_flatten_interface_->ComputePairVectors(valid_ids_[loc1],
+                                                                   valid_ids_[loc2]);
         }
-        return flatten->ComputePairVectors(loc1, loc2);
+        return distance_flatten_interface_->ComputePairVectors(loc1, loc2);
     }
 
     void
@@ -189,6 +188,7 @@ private:
     // afterward. Task enqueue publishes the initialized pointer to workers, and each parallel phase
     // waits on all futures before continuing, so get_distance() only performs concurrent reads.
     FlattenInterfacePtr build_flatten_interface_{nullptr};
+    FlattenInterface* distance_flatten_interface_{nullptr};
     const float* build_vectors_{nullptr};
     int64_t build_vector_count_{0};
 };
