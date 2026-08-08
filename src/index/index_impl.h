@@ -501,28 +501,43 @@ public:
     SearchWithRequest(const SearchRequest& request) const override {
         // Validate bucket_ids_ structural constraints before empty-index early return
         if (not request.bucket_ids_.empty()) {
-            if (request.bucket_ids_.size() != 1) {
-                return tl::unexpected(Error(
-                    ErrorType::INVALID_ARGUMENT,
-                    "bucket_ids_ currently supports only single-query mode; expected size 1, got " +
-                        std::to_string(request.bucket_ids_.size())));
-            }
-            const auto& ids = request.bucket_ids_[0];
-            if (ids.empty()) {
+            if (request.query_ == nullptr) {
                 return tl::unexpected(Error(ErrorType::INVALID_ARGUMENT,
-                                            "bucket_ids_[0] must not be empty; use empty outer "
-                                            "vector for default routing"));
+                                            "query_ cannot be null when bucket_ids_ is set"));
             }
-            std::set<int64_t> seen_ids;
-            for (auto id : ids) {
-                if (id < 0) {
+            if (request.bucket_ids_.size() !=
+                static_cast<size_t>(request.query_->GetNumElements())) {
+                return tl::unexpected(
+                    Error(ErrorType::INVALID_ARGUMENT,
+                          "bucket_ids_ size (" + std::to_string(request.bucket_ids_.size()) +
+                              ") must match the number of query vectors (" +
+                              std::to_string(request.query_->GetNumElements()) + ")"));
+            }
+            if (this->GetIndexType() != IndexType::IVF && request.bucket_ids_.size() != 1) {
+                return tl::unexpected(
+                    Error(ErrorType::INVALID_ARGUMENT,
+                          "bucket_ids_ supports multiple query vectors only for IVF indexes"));
+            }
+            for (uint64_t query_idx = 0; query_idx < request.bucket_ids_.size(); ++query_idx) {
+                const auto& ids = request.bucket_ids_[query_idx];
+                if (ids.empty()) {
                     return tl::unexpected(
                         Error(ErrorType::INVALID_ARGUMENT,
-                              "bucket_id " + std::to_string(id) + " is negative"));
+                              "bucket_ids_[" + std::to_string(query_idx) +
+                                  "] must not be empty; use an empty outer vector "
+                                  "for default routing"));
                 }
-                if (not seen_ids.insert(id).second) {
-                    return tl::unexpected(Error(ErrorType::INVALID_ARGUMENT,
-                                                "duplicate bucket_id " + std::to_string(id)));
+                std::set<int64_t> seen_ids;
+                for (auto id : ids) {
+                    if (id < 0) {
+                        return tl::unexpected(
+                            Error(ErrorType::INVALID_ARGUMENT,
+                                  "bucket_id " + std::to_string(id) + " is negative"));
+                    }
+                    if (not seen_ids.insert(id).second) {
+                        return tl::unexpected(Error(ErrorType::INVALID_ARGUMENT,
+                                                    "duplicate bucket_id " + std::to_string(id)));
+                    }
                 }
             }
             try {

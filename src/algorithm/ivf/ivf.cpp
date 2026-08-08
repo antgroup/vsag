@@ -1855,31 +1855,12 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     param.query_context = &ctx;
 
     if (not request.bucket_ids_.empty()) {
-        CHECK_ARGUMENT(request.bucket_ids_.size() == 1,
-                       fmt::format("bucket_ids_ currently supports only single-query mode; "
-                                   "expected size 1, got {}",
-                                   request.bucket_ids_.size()));
-        const auto& ids = request.bucket_ids_[0];
-        CHECK_ARGUMENT(not ids.empty(),
-                       "bucket_ids_[0] must not be empty; "
-                       "use empty outer vector for default routing");
-        std::set<int64_t> seen_ids;
-        param.bucket_ids.reserve(ids.size());
-        for (auto id : ids) {
-            CHECK_ARGUMENT(
-                id >= 0,
-                fmt::format("bucket_id {} out of range [0, {})", id, this->bucket_->bucket_count_));
-            CHECK_ARGUMENT(
-                id < static_cast<int64_t>(this->bucket_->bucket_count_),
-                fmt::format("bucket_id {} out of range [0, {})", id, this->bucket_->bucket_count_));
-            CHECK_ARGUMENT(seen_ids.insert(id).second, fmt::format("duplicate bucket_id {}", id));
-            param.bucket_ids.push_back(id);
-        }
         auto query_check = request.query_;
         CHECK_ARGUMENT(query_check != nullptr, "query dataset cannot be null");
-        CHECK_ARGUMENT(query_check->GetNumElements() == 1,
-                       fmt::format("bucket_ids_ currently supports only single-query mode; "
-                                   "expected 1 query, got {}",
+        CHECK_ARGUMENT(request.bucket_ids_.size() == query_check->GetNumElements(),
+                       fmt::format("bucket_ids_ size must match the number of query vectors; "
+                                   "got {} bucket lists for {} queries",
+                                   request.bucket_ids_.size(),
                                    query_check->GetNumElements()));
         CHECK_ARGUMENT(query_check->GetFloat32Vectors() != nullptr,
                        "query float32 vectors cannot be null");
@@ -1887,6 +1868,29 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                        "query dimension must match index dimension");
         CHECK_ARGUMENT(not param.disable_bucket_scan,
                        "bucket_ids_ is incompatible with disable_bucket_scan mode");
+        for (uint64_t query_idx = 0; query_idx < request.bucket_ids_.size(); ++query_idx) {
+            const auto& ids = request.bucket_ids_[query_idx];
+            CHECK_ARGUMENT(not ids.empty(),
+                           fmt::format("bucket_ids_[{}] must not be empty; "
+                                       "use empty outer vector for default routing",
+                                       query_idx));
+            std::set<int64_t> seen_ids;
+            for (auto id : ids) {
+                CHECK_ARGUMENT(
+                    id >= 0,
+                    fmt::format(
+                        "bucket_id {} out of range [0, {})", id, this->bucket_->bucket_count_));
+                CHECK_ARGUMENT(
+                    id < static_cast<int64_t>(this->bucket_->bucket_count_),
+                    fmt::format(
+                        "bucket_id {} out of range [0, {})", id, this->bucket_->bucket_count_));
+                CHECK_ARGUMENT(seen_ids.insert(id).second,
+                               fmt::format("duplicate bucket_id {}", id));
+            }
+        }
+        if (query_check->GetNumElements() == 1) {
+            param.bucket_ids.assign(request.bucket_ids_[0].begin(), request.bucket_ids_[0].end());
+        }
     }
 
     auto query = request.query_;
@@ -1908,6 +1912,60 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         CHECK_ARGUMENT(not request.threshold_.has_value(),
                        "threshold filtering is not supported with disable_bucket_scan");
         auto result = this->route_buckets_only(query, param, ctx);
+        result->Statistics(stats.Dump());
+        return result;
+    }
+
+    if (query != nullptr && query->GetNumElements() > 1) {
+        CHECK_ARGUMENT(not is_range, "IVF batch search only supports KNN search");
+        CHECK_ARGUMENT(not use_custom_distance,
+                       "IVF batch search does not support custom query distance");
+        CHECK_ARGUMENT(request.expected_labels_.empty(),
+                       "IVF batch search does not support expected labels");
+        CHECK_ARGUMENT(request.topk_ > 0, "topk must be greater than 0");
+        CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr,
+                       "query float32 vectors cannot be null");
+        CHECK_ARGUMENT(query->GetDim() == this->dim_, "query dimension must match index dimension");
+
+        const auto num_queries = query->GetNumElements();
+        const auto total_slots = num_queries * request.topk_;
+        auto* alloc = select_query_allocator(ctx.alloc, this->allocator_);
+        auto* ids = static_cast<int64_t*>(alloc->Allocate(sizeof(int64_t) * total_slots));
+        auto* distances = static_cast<float*>(alloc->Allocate(sizeof(float) * total_slots));
+        std::fill_n(ids, total_slots, -1);
+        std::fill_n(distances, total_slots, std::numeric_limits<float>::infinity());
+
+        const auto* query_data = query->GetFloat32Vectors();
+        auto one_request = request;
+        one_request.expected_labels_.clear();
+        if (not request.bucket_ids_.empty()) {
+            one_request.bucket_ids_.clear();
+        }
+        for (int64_t query_idx = 0; query_idx < num_queries; ++query_idx) {
+            auto one_query = Dataset::Make();
+            one_query->NumElements(1)
+                ->Dim(query->GetDim())
+                ->Float32Vectors(query_data + query_idx * query->GetDim())
+                ->Owner(false);
+
+            one_request.query_ = one_query;
+            if (not request.bucket_ids_.empty()) {
+                one_request.bucket_ids_ = {request.bucket_ids_[query_idx]};
+            }
+            auto one_result = this->SearchWithRequest(one_request);
+            const auto count = std::min(request.topk_, one_result->GetDim());
+            if (count > 0) {
+                std::copy_n(one_result->GetIds(), count, ids + query_idx * request.topk_);
+                std::copy_n(
+                    one_result->GetDistances(), count, distances + query_idx * request.topk_);
+            }
+        }
+        auto result = Dataset::Make()
+                          ->NumElements(num_queries)
+                          ->Dim(request.topk_)
+                          ->Ids(ids)
+                          ->Distances(distances)
+                          ->Owner(true, alloc);
         result->Statistics(stats.Dump());
         return result;
     }
