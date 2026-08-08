@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <memory>
 #include <unordered_set>
 
@@ -332,5 +333,44 @@ protected:
     int64_t multi_vector_dim_{0};
 
     std::string vector_type_ = DENSE_VECTORS;
+
+    // Pyramid path hierarchies: hierarchy_name -> vector of paths
+    // Populated when HDF5 contains a /paths/ group with sub-groups per hierarchy.
+    std::unordered_map<std::string, std::vector<std::string>> train_paths_;
+    std::unordered_map<std::string, std::vector<std::string>> test_paths_;
+
+public:
+    [[nodiscard]] bool
+    HasPaths() const {
+        return !train_paths_.empty() || !test_paths_.empty();
+    }
+
+    [[nodiscard]] std::vector<std::string>
+    GetHierarchyNames() const {
+        std::vector<std::string> hierarchy_names;
+        hierarchy_names.reserve(train_paths_.size() + test_paths_.size());
+        for (const auto& entry : train_paths_) {
+            hierarchy_names.push_back(entry.first);
+        }
+        for (const auto& entry : test_paths_) {
+            if (train_paths_.count(entry.first) == 0) {
+                hierarchy_names.push_back(entry.first);
+            }
+        }
+        std::sort(hierarchy_names.begin(), hierarchy_names.end());
+        return hierarchy_names;
+    }
+
+    [[nodiscard]] const std::string*
+    GetTrainPaths(const std::string& hierarchy_name) const {
+        auto it = train_paths_.find(hierarchy_name);
+        return it != train_paths_.end() ? it->second.data() : nullptr;
+    }
+
+    [[nodiscard]] const std::string*
+    GetTestPaths(const std::string& hierarchy_name) const {
+        auto it = test_paths_.find(hierarchy_name);
+        return it != test_paths_.end() ? it->second.data() : nullptr;
+    }
 };
 }  // namespace vsag::eval
