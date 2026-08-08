@@ -3009,7 +3009,7 @@ TEST_CASE("HGraph Concurrent Read Write", "[ft][concurrent][hgraph]") {
                 ->Float32Vectors(dataset[old_value].data())
                 ->Owner(false);
 
-            // Do hnsw add.
+            // Add one vector to the graph index.
             auto res = vsag_index->Add(base);
             if (!res.has_value()) {
                 std::cout << "put error: " << res.error().message << std::endl;

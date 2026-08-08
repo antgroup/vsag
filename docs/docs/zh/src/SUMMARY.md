@@ -59,7 +59,6 @@
 - [搜索路径 Allocator](advanced/search_allocator.md)
 - [索引自省](advanced/introspection.md)
 - [可扩展性](advanced/extensibility.md)
-- [图索引增强](advanced/enhance_graph.md)
 - [Extra Info（附加信息）](advanced/extra_info.md)
 - [索引生命周期管理](advanced/index_lifecycle.md)
 - [HGraph MCI 挂件](advanced/hgraph_mci_companion.md)
@@ -91,6 +90,7 @@
 
 - [FAQ 常见问题](resources/faq.md)
 - [版本日志](resources/release_notes.md)
+  - [VSAG 1.1](resources/release_notes/v1.1.md)
   - [VSAG 1.0](resources/release_notes/v1.0.md)
 - [2025 路线图](resources/roadmap_2025.md)
 - [开源社区](resources/community.md)

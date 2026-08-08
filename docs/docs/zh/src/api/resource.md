@@ -111,7 +111,6 @@ vsag::Options::Instance().set_logger(&my_logger);
 
 | 配置项 | 访问器 | 默认值 | 含义 |
 |--------|--------|--------|------|
-| IO 线程 | `num_threads_io()` / `set_num_threads_io(n)` | `8` | 搜索期间磁盘索引 IO 的线程数（1–200）。 |
 | 构建线程 | `num_threads_building()` / `set_num_threads_building(n)` | `4` | 构建索引的线程数。 |
 | 块大小上限 | `block_size_limit()` / `set_block_size_limit(bytes)` | `128 MB` | 每个分配块的最大字节数（必须 > 2 MB）。 |
 | Direct-IO 对齐 | `direct_IO_object_align_bit()` / `set_direct_IO_object_align_bit(bits)` | `9` | Direct-IO 对象对齐，以位为单位（< 21）。 |

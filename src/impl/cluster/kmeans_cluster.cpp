@@ -20,7 +20,6 @@
 #include <random>
 
 #include "algorithm/inner_index_interface.h"
-#include "diskann_logger.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/blas/blas_function.h"
 #include "simd/amx_bf16_matmul.h"

@@ -91,8 +91,8 @@ The result contains up to `k` neighbors sorted by ascending distance to the quer
 ## Threshold Filtering
 
 Threshold filtering is supported by the maintained indexes: BruteForce, HGraph, IVF, Pyramid,
-SINDI, and SIMQ. HNSW and DiskANN are deprecated and are explicit unsupported
-non-goals; this option does not add or change behavior for either legacy index.
+SINDI, and SIMQ. HNSW and DiskANN are removed and unsupported; this option does not add or change
+behavior for either legacy index.
 
 KNN search accepts an optional top-level `threshold` in the JSON search parameters:
 

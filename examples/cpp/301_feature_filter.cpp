@@ -41,23 +41,26 @@ main(int argc, char** argv) {
         ->Float32Vectors(datas.data())
         ->Owner(false);
 
-    /******************* Create HNSW Index *****************/
-    auto hnsw_build_parameters = R"(
+    /******************* Create HGraph Index *****************/
+    auto hgraph_build_parameters = R"(
     {
         "dtype": "float32",
         "metric_type": "l2",
         "dim": 128,
-        "hnsw": {
+        "index_param": {
+            "base_quantization_type": "fp32",
             "max_degree": 16,
-            "ef_construction": 100
+            "ef_construction": 100,
+            "alpha": 1.2
         }
     }
     )";
-    auto index = vsag::Factory::CreateIndex("hnsw", hnsw_build_parameters).value();
+    auto index = vsag::Factory::CreateIndex("hgraph", hgraph_build_parameters).value();
 
-    /******************* Build HNSW Index *****************/
+    /******************* Build HGraph Index *****************/
     if (auto build_result = index->Build(base); build_result.has_value()) {
-        std::cout << "After Build(), Index Hnsw contains: " << index->GetNumElements() << std::endl;
+        std::cout << "After Build(), Index HGraph contains: " << index->GetNumElements()
+                  << std::endl;
     } else {
         std::cerr << "Failed to build index: internalError" << build_result.error().message
                   << std::endl;
@@ -99,16 +102,16 @@ main(int argc, char** argv) {
     };
     auto filter_object = std::make_shared<MyFilter>();
 
-    /******************* HNSW Filter Search With Bitset *****************/
-    auto hnsw_search_parameters = R"(
+    /******************* HGraph Filter Search With Bitset *****************/
+    auto hgraph_search_parameters = R"(
     {
-        "hnsw": {
+        "hgraph": {
             "ef_search": 100
         }
     }
     )";
     int64_t topk = 10;
-    auto search_result = index->KnnSearch(query, topk, hnsw_search_parameters, filter_bitset);
+    auto search_result = index->KnnSearch(query, topk, hgraph_search_parameters, filter_bitset);
     if (not search_result.has_value()) {
         std::cerr << "Failed to search index with filter" << search_result.error().message
                   << std::endl;
@@ -122,8 +125,8 @@ main(int argc, char** argv) {
         std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
     }
 
-    /******************* HNSW Filter Search With filter function *****************/
-    search_result = index->KnnSearch(query, topk, hnsw_search_parameters, filter_func);
+    /******************* HGraph Filter Search With filter function *****************/
+    search_result = index->KnnSearch(query, topk, hgraph_search_parameters, filter_func);
     if (not search_result.has_value()) {
         std::cerr << "Failed to search index with filter" << search_result.error().message
                   << std::endl;
@@ -137,8 +140,8 @@ main(int argc, char** argv) {
         std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
     }
 
-    /******************* HNSW Filter Search With Filter Object *****************/
-    search_result = index->KnnSearch(query, topk, hnsw_search_parameters, filter_object);
+    /******************* HGraph Filter Search With Filter Object *****************/
+    search_result = index->KnnSearch(query, topk, hgraph_search_parameters, filter_object);
     if (not search_result.has_value()) {
         std::cerr << "Failed to search index with filter" << search_result.error().message
                   << std::endl;

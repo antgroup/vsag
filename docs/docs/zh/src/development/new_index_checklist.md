@@ -127,10 +127,10 @@ feature flag。
     `GetVectorByIds()`、`GetDataByIds()`、`GetIndexDetailInfos()` 或
     `GetDetailDataByName()`。
 
-- [ ] 模型导出、clone、merge、tune、feedback 和 cache 导入/导出。
+- [ ] 模型导出、clone、merge、tune 和 cache 导入/导出。
   - 当索引可以在不错误共享可变存储的情况下复制时，实现 `Clone()` 和 `ExportModel()`。
   - 只有在参数兼容性、ID 重映射和删除语义清晰时，才实现 `Merge()`。
-  - 只有带有明确参数解析和测试时，才实现 `Tune()`、`Feedback()`、`ExportCache()` 和
+  - 只有带有明确参数解析和测试时，才实现 `Tune()`、`ExportCache()` 和
     `ImportCache()`。
 
 - [ ] 绑定、示例、benchmark 和文档。

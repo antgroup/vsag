@@ -202,20 +202,17 @@ TEST_CASE("InnerIndexInterface NOT Implemented", "[ut][InnerIndexInterface]") {
     common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
 
     BinarySet binary;
-    std::vector<int64_t> pretrain_ids;
     std::vector<MergeUnit> merge_units;
 
     REQUIRE_THROWS(empty_index->Remove(0));
     REQUIRE_THROWS(empty_index->GetNumberRemoved());
     REQUIRE_THROWS(empty_index->EstimateMemory(1000));
     REQUIRE_THROWS(empty_index->EstimateBuildMemory(1000));
-    REQUIRE_THROWS(empty_index->Feedback(nullptr, 10, ""));
     REQUIRE_THROWS(empty_index->GetStats());
     REQUIRE_THROWS(empty_index->UpdateId(0, 1));
     REQUIRE_THROWS(empty_index->UpdateVector(0, nullptr));
     REQUIRE_THROWS(empty_index->UpdateExtraInfo(nullptr));
     REQUIRE_THROWS(empty_index->ContinueBuild(nullptr, binary));
-    REQUIRE_THROWS(empty_index->Pretrain(pretrain_ids, 10, ""));
     REQUIRE_THROWS(empty_index->CalcDistanceById(nullptr, 1));
     REQUIRE_THROWS(empty_index->ExportModel(common_param));
     REQUIRE_THROWS(empty_index->GetCodeByInnerId(1, nullptr));

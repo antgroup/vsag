@@ -42,7 +42,6 @@ TEST_CASE("immutable index test", "[ut][index_impl]") {
 
     vsag::DatasetPtr dataset = vsag::Dataset::Make();
     vsag::BinarySet binary_set;
-    std::vector<int64_t> base_tag_ids;
     std::vector<vsag::MergeUnit> merge_units;
     std::stringstream ss;
 
@@ -79,14 +78,6 @@ TEST_CASE("immutable index test", "[ut][index_impl]") {
     auto result_update_vector = index->UpdateVector(0, dataset);
     REQUIRE_FALSE(result_update_vector.has_value());
     REQUIRE(result_update_vector.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
-
-    auto result_pretrain = index->Pretrain(base_tag_ids, 0, "");
-    REQUIRE_FALSE(result_pretrain.has_value());
-    REQUIRE(result_pretrain.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
-
-    auto result_feedback = index->Feedback(dataset, 0, "");
-    REQUIRE_FALSE(result_feedback.has_value());
-    REQUIRE(result_feedback.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
 
     auto result_merge = index->Merge(merge_units);
     REQUIRE_FALSE(result_merge.has_value());
@@ -132,10 +123,6 @@ TEST_CASE("index empty input test", "[ut][index_impl]") {
     auto result_update_extrainfo = index->UpdateExtraInfo(dataset);
     REQUIRE(result_update_extrainfo.has_value());
     REQUIRE(result_update_extrainfo.value() == false);
-
-    auto result_feedback = index->Feedback(dataset, 0, "");
-    REQUIRE(result_feedback.has_value());
-    REQUIRE(result_feedback.value() == 0);
 
     // test search empty dataset
     int64_t k = 0;

@@ -39,7 +39,6 @@ Detailed parameters: [Index Parameters](index_parameters.md).
 ## Tuning
 
 - Use [`Tune`](../advanced/optimizer.md) against realistic query distributions.
-- Enable the [conjugate graph](../advanced/enhance_graph.md) for tail-heavy workloads.
 - Treat [`eval_performance`](eval.md) as a continuous regression test.
 
 ## Deployment

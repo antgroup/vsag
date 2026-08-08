@@ -23,7 +23,7 @@ cmake --build build-release -j
 
 ## 输入
 
-命令接收一个形如 `<tag>_<algo_name>` 的位置参数，例如 `v1.0.0_hnsw`。对于该标识，工具会在
+命令接收一个形如 `<tag>_<algo_name>` 的位置参数，例如 `v1.1.0_hgraph`。对于该标识，工具会在
 `/tmp/` 下查找以下文件：
 
 | 文件 | 用途 |
@@ -38,7 +38,7 @@ cmake --build build-release -j
 ## 使用
 
 ```bash
-./build-release/tools/check_compatibility/check_compatibility v1.0.0_hnsw
+./build-release/tools/check_compatibility/check_compatibility v1.1.0_hgraph
 ```
 
 工具会创建当前版本的索引实例，反序列化旧索引文件，然后执行一次小规模 KNN 搜索。加载和搜索都成功

@@ -54,7 +54,7 @@ configure_package_config_file (
 write_basic_package_version_file (
     "${CMAKE_CURRENT_BINARY_DIR}/vsagConfigVersion.cmake"
     VERSION "${VSAG_VERSION_TRIPLE}"
-    COMPATIBILITY SameMajorVersion)
+    COMPATIBILITY SameMinorVersion)
 
 install (FILES
     "${CMAKE_CURRENT_BINARY_DIR}/vsagConfig.cmake"

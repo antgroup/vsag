@@ -4,9 +4,8 @@ VSAG uses [Catch2](https://github.com/catchorg/Catch2) for testing, organized in
 
 - **Unit tests** live next to source files under `src/`.
 - **Functional tests** live under `tests/` and cover cross-module, end-to-end behavior. Typical
-  files include `test_hnsw.cpp`, `test_hgraph.cpp`, `test_diskann.cpp`, `test_ivf.cpp`,
-  `test_pyramid.cpp`, `test_sindi.cpp`, `test_brute_force.cpp`, `test_multi_thread.cpp`,
-  `test_memleak.cpp`.
+  files include `test_hgraph.cpp`, `test_ivf.cpp`, `test_pyramid.cpp`, `test_sindi.cpp`,
+  `test_brute_force.cpp`, and `test_memleak.cpp`.
 
 ## Run the Full Suite
 
@@ -32,7 +31,7 @@ make cov
 
 ```bash
 ./build-debug/tests/functional_tests "[hgraph]"
-./build-debug/tests/functional_tests "[hnsw][concurrent]"
+./build-debug/tests/functional_tests "[hgraph][concurrent]"
 ```
 
 Catch2 supports filtering by name, tag, and wildcards — see `--help`.
@@ -46,7 +45,8 @@ higher, as measured by the `make cov` flow and the CI coverage job.
 
 - `test_memleak.cpp`: run under AddressSanitizer / LeakSanitizer to verify construction and
   destruction paths.
-- `test_multi_thread.cpp`: concurrent `Build` / `KnnSearch` / `RangeSearch` correctness.
+- `test_index/test_index_concurrent.cpp`: shared concurrent add and search correctness for
+  maintained indexes that advertise the corresponding feature flags.
 
 ## Python Tests
 

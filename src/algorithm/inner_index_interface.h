@@ -117,7 +117,7 @@ public:
     /**
      * @brief Calculate distance by ID using raw float pointer.
      *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * Suitable for dense vector indexes such as HGraph, BruteForce, IVF, and Pyramid.
      * The query must be a contiguous float32 array with dimension matching the index.
         * For sparse vector indexes (SINDI), this overload is not applicable.
      *
@@ -138,7 +138,7 @@ public:
     /**
      * @brief Calculate distances by IDs (batch) using raw float pointer.
      *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * Suitable for dense vector indexes such as HGraph, BruteForce, IVF, and Pyramid.
      * The query must be a contiguous float32 array. For sparse vector indexes,
      * this overload is not applicable.
      *
@@ -263,15 +263,6 @@ public:
     ExportModel(const IndexCommonParam& param) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support ExportModel");
-    }
-
-    virtual uint32_t
-    Feedback(const DatasetPtr& query,
-             int64_t k,
-             const std::string& parameters,
-             int64_t global_optimum_tag_id = std::numeric_limits<int64_t>::max()) {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support Feedback");
     }
 
     [[nodiscard]] virtual InnerIndexPtr
@@ -418,12 +409,6 @@ public:
     virtual void
     Merge(const std::vector<MergeUnit>& merge_units) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index doesn't support Merge");
-    }
-
-    virtual uint32_t
-    Pretrain(const std::vector<int64_t>& base_tag_ids, uint32_t k, const std::string& parameters) {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support Pretrain");
     }
 
     [[nodiscard]] virtual DatasetPtr

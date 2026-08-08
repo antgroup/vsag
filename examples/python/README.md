@@ -22,30 +22,24 @@ of installing from PyPI.
 
 ```bash
 pip install pyvsag numpy
-python examples/python/101_index_hnsw.py
+python examples/python/103_index_hgraph.py
 ```
 
 ## File naming convention
 
 Numbered examples mirror the numbering in
 [`../cpp/`](../cpp/README.md) so a given prefix means the same topic
-across languages. The legacy `example_*.py` files predate that scheme
-and are kept for backward compatibility — prefer the numbered ones for
-new code.
+across languages. Use the numbered examples for new code.
 
 ## Examples
 
 | File | Index | Notes |
 | --- | --- | --- |
-| [`101_index_hnsw.py`](101_index_hnsw.py) | HNSW | Shortest "build + KNN" round-trip; start here. |
-| [`102_index_diskann.py`](102_index_diskann.py) | DiskANN | Disk-resident graph index. |
-| [`103_index_hgraph.py`](103_index_hgraph.py) | HGraph | VSAG's headline in-memory graph index. |
+| [`103_index_hgraph.py`](103_index_hgraph.py) | HGraph | VSAG's headline in-memory graph index; start here. |
 | [`105_index_brute_force.py`](105_index_brute_force.py) | BruteForce | Exact reference for recall calibration. |
 | [`106_index_ivf.py`](106_index_ivf.py) | IVF | Inverted file, tuned for large-`k` / batch queries. |
 | [`109_index_sindi.py`](109_index_sindi.py) | SINDI | Sparse vector index (text / inverted retrieval). |
 | [`110_index_sindi_sq8_dmq_reorder.py`](110_index_sindi_sq8_dmq_reorder.py) | SINDI SQ8 + DMQ8 | Sparse vectors with SQ8 quantization + DMQ reranking. |
-| [`example_hnsw.py`](example_hnsw.py) | HNSW (legacy) | Kept for backward compatibility; prefer `101_*.py`. |
-| [`example_diskann.py`](example_diskann.py) | DiskANN (legacy) | Kept for backward compatibility; prefer `102_*.py`. |
 
 ## Where to go next
 

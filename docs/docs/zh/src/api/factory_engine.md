@@ -40,7 +40,7 @@ CreateIndex(const std::string& name,
 
 | 参数 | 说明 |
 |------|------|
-| `name` | 索引类型名，例如 `"hgraph"`、`"ivf"`、`"diskann"`、`"brute_force"`、`"sindi"`、`"pyramid"`。 |
+| `name` | 索引类型名，例如 `"hgraph"`、`"ivf"`、`"brute_force"`、`"sindi"`、`"pyramid"`。已移除的 `"hnsw"`、`"fresh_hnsw"` 与 `"diskann"` 返回 `UNSUPPORTED_INDEX`。 |
 | `parameters` | 描述索引配置的 JSON 字符串（dtype、dim、metric，以及各索引特有的键）。见 [索引参数](../resources/index_parameters.md)。 |
 | `allocator` | 可选的自定义 [`Allocator`](resource.md#allocator)。为 `nullptr` 时，VSAG 使用内置的默认 allocator。调用方必须在返回索引的整个生命周期内保持 allocator 有效。 |
 
@@ -114,49 +114,6 @@ CreateIndex(const std::string& name, const std::string& parameters);
 
 关于 `Resource`、`Allocator` 与 `ThreadPool` 如何协作，见 [资源管理](resource.md)；可运行示例见
 `examples/cpp/201_custom_allocator.cpp` / `203_custom_thread_pool.cpp`。
-
-## 顶层辅助函数
-
-这些自由函数（声明于 `vsag/index.h`）帮助你在创建索引前生成并校验配置字符串。它们都返回
-`tl::expected<..., Error>`。
-
-### `generate_build_parameters`
-
-```cpp
-tl::expected<std::string, Error>
-generate_build_parameters(std::string metric_type,
-                          int64_t num_elements,
-                          int64_t dim,
-                          bool use_conjugate_graph = false);
-```
-
-*（实验性。）* 根据数据集形状（`metric_type`、`num_elements`、`dim`）生成一份建议的构建参数 JSON
-字符串。传入 `use_conjugate_graph = true` 可启用[共轭图增强](../advanced/enhance_graph.md)。
-
-### `estimate_search_time`
-
-```cpp
-tl::expected<float, Error>
-estimate_search_time(const std::string& index_name,
-                     int64_t data_num,
-                     int64_t data_dim,
-                     const std::string& parameters);
-```
-
-估算给定索引类型与配置下的单次查询搜索时间（毫秒）。
-
-### `check_diskann_hnsw_build_parameters` / `check_diskann_hnsw_search_parameters`
-
-```cpp
-tl::expected<bool, Error>
-check_diskann_hnsw_build_parameters(const std::string& json_string);
-
-tl::expected<bool, Error>
-check_diskann_hnsw_search_parameters(const std::string& json_string);
-```
-
-分别校验 DiskANN/HNSW 的构建与搜索参数 JSON。成功时值为 `true`；失败时 `Error` 的 message 会说明问题
-所在。此类校验的命令行封装见[兼容性检查工具](../resources/check_compatibility.md)。
 
 ## 参见
 

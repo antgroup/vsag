@@ -175,7 +175,6 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     auto base_count = 100;
     auto dataset = pool->GetDatasetAndCreate(dim, base_count, "l2");
     BinarySet binary;
-    std::vector<int64_t> pretrain_ids;
     FilterPtr filter = nullptr;
     SearchRequest req;
     IteratorContext* itex = nullptr;
@@ -187,14 +186,12 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     REQUIRE_FALSE(index->CheckFeature(IndexFeature::SUPPORT_ESTIMATE_MEMORY));
     REQUIRE_THROWS(index->EstimateMemory(1000));
     REQUIRE_THROWS(index->EstimateBuildMemory(1000));
-    REQUIRE_FALSE(index->Feedback(dataset->query_, 10, "").has_value());
     REQUIRE_THROWS_MATCHES(index->GetStats(),
                            std::runtime_error,
                            Catch::Matchers::Message("Index does not support GetStats"));
     REQUIRE_FALSE(index->UpdateId(0, 1).has_value());
     REQUIRE_FALSE(index->UpdateVector(0, dataset->query_).has_value());
     REQUIRE_FALSE(index->ContinueBuild(dataset->base_, binary).has_value());
-    REQUIRE_FALSE(index->Pretrain(pretrain_ids, 10, "").has_value());
     REQUIRE_THROWS(index->CheckIdExist(0));
     REQUIRE_FALSE(index->CalcDistanceById(dataset->base_->GetFloat32Vectors(), 1).has_value());
     REQUIRE_FALSE(index->CalcDistanceById(dataset->query_, 1).has_value());

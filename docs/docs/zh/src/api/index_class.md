@@ -1,6 +1,6 @@
 # Index
 
-`vsag::Index`（声明于 `vsag/index.h`）是本库的核心抽象。每一种具体索引 —— HGraph、IVF、DiskANN、
+`vsag::Index`（声明于 `vsag/index.h`）是本库的核心抽象。每一种具体索引 —— HGraph、IVF、
 BruteForce、SINDI、Pyramid 等 —— 都实现这一接口。你从不直接实例化 `Index`，而是通过
 [`Factory::CreateIndex`](factory_engine.md#createindex) 或
 [`Engine::CreateIndex`](factory_engine.md#createindex-1) 获取，并用 `IndexPtr`
@@ -32,7 +32,8 @@ using IndexPtr = std::shared_ptr<Index>;
 
 ```cpp
 enum class IndexType {
-    HNSW, DISKANN, HGRAPH, IVF, PYRAMID, BRUTEFORCE, SPARSE, SINDI, WARP, LAZY_HGRAPH, SIMQ
+    HGRAPH = 2, IVF = 3, PYRAMID = 4, BRUTEFORCE = 5, SPARSE = 6, SINDI = 7,
+    WARP = 8, LAZY_HGRAPH = 9, SIMQ = 10
 };
 ```
 
@@ -221,15 +222,6 @@ RangeSearch(const DatasetPtr& query, float radius, const std::string& parameters
 `calculate_precise_distance = true` 时可能会加载全精度向量（可能来自磁盘）而非量化编码。见
 [按 ID 计算距离](../advanced/calc_distance_by_id.md) 与
 `examples/cpp/306_feature_calculate_distance_by_id.cpp`。
-
-## 共轭图增强
-
-| 方法 | 签名 | 说明 |
-|------|------|------|
-| `Pretrain` | `tl::expected<uint32_t, Error> Pretrain(const std::vector<int64_t>& base_tag_ids, uint32_t k, const std::string& parameters)` | 通过检索生成的查询来增强选定的基础向量。返回成功插入数。 |
-| `Feedback` | `tl::expected<uint32_t, Error> Feedback(const DatasetPtr& query, int64_t k, const std::string& parameters, int64_t global_optimum_tag_id = INT64_MAX)` | 把已知最优解反馈到共轭图中。 |
-
-见 [图索引增强](../advanced/enhance_graph.md)。
 
 ## 数据获取
 

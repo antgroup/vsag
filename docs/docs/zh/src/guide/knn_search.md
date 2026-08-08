@@ -95,7 +95,7 @@ BruteForce 索引支持用 Build 和 Add 方法写入数据，这里我们用 Ad
 ## 按阈值过滤
 
 阈值过滤支持仍在维护的索引：BruteForce、HGraph、IVF、Pyramid、SINDI 和 SIMQ。
-HNSW 和 DiskANN 已弃用，是明确不在范围内的目标；本选项不会为这两个旧索引新增或修改行为。
+HNSW 和 DiskANN 已移除且不受支持；本选项不会为这两个旧索引新增或修改行为。
 
 KNN 搜索参数支持在 JSON 顶层设置可选的 `threshold`：
 

@@ -53,17 +53,17 @@ struct MergeUnit {
 };
 
 enum class IndexType {
-    HNSW,
-    DISKANN,
-    HGRAPH,
-    IVF,
-    PYRAMID,
-    BRUTEFORCE,
-    SPARSE,
-    SINDI,
-    WARP,
-    LAZY_HGRAPH,
-    SIMQ
+    // Values 0 and 1 were assigned to the removed HNSW and DiskANN types. Do not reuse them:
+    // maintained index ordinals must remain stable for API and serialization compatibility.
+    HGRAPH = 2,
+    IVF = 3,
+    PYRAMID = 4,
+    BRUTEFORCE = 5,
+    SPARSE = 6,
+    SINDI = 7,
+    WARP = 8,
+    LAZY_HGRAPH = 9,
+    SIMQ = 10
 };
 
 #define DATA_FLAG_FLOAT32_VECTOR 0x01
@@ -466,39 +466,9 @@ public:
     }
 
     /**
-     * @brief Pretraining the conjugate graph involves searching with generated queries and providing feedback.
-     *
-     * @param base_tag_ids is the label of choosen base vectors that need to be enhanced
-     * @param k is the number of edges inserted into conjugate graph
-     * @return result is the number of successful insertions into conjugate graph
-     */
-    virtual tl::expected<uint32_t, Error>
-    Pretrain(const std::vector<int64_t>& base_tag_ids, uint32_t k, const std::string& parameters) {
-        return tl::unexpected(
-            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support pretrain"));
-    }
-
-    /**
-     * @brief Performing feedback on conjugate graph
-     *
-     * @param query should contains dim, num_elements and vectors
-     * @param k is the number of edges inserted into conjugate graph
-     * @param global_optimum_tag_id is the label of exact nearest neighbor
-     * @return result is the number of successful insertions into conjugate graph
-     */
-    virtual tl::expected<uint32_t, Error>
-    Feedback(const DatasetPtr& query,
-             int64_t k,
-             const std::string& parameters,
-             int64_t global_optimum_tag_id = std::numeric_limits<int64_t>::max()) {
-        return tl::unexpected(
-            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support feedback"));
-    }
-
-    /**
      * @brief Calculate the distance between the query and the vector of the given ID.
      *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * Suitable for dense vector indexes such as HGraph, BruteForce, IVF, and Pyramid.
      * The query must be a contiguous float32 array with dimension matching the index.
      * For sparse vector indexes (SINDI), this overload is not applicable;
      * use CalcDistanceById(DatasetPtr, int64_t, bool) instead.
@@ -548,9 +518,8 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID for batch.
      *
-     * Suitable for dense vector indexes. HGraph, BruteForce, IVF, and Pyramid support
-     * top-k output when they advertise the corresponding batch distance feature; DiskANN and
-     * HNSW only support the default topk == -1 behavior and reject positive topk values.
+     * Suitable for dense vector indexes. HGraph, BruteForce, IVF, and Pyramid support top-k
+     * output when they advertise the corresponding batch distance feature.
      * The query must be a contiguous float32 array. For sparse vector indexes
      * (SINDI), this overload is not applicable; use
      * CalDistanceById(DatasetPtr, const int64_t*, int64_t, bool) instead.
@@ -1139,44 +1108,5 @@ public:
 #endif
     }
 };
-
-/**
-  * @brief check if the build parameter is valid
-  *
-  * @return true if the parameter is valid, otherwise error with detail message.
-  */
-tl::expected<bool, Error>
-check_diskann_hnsw_build_parameters(const std::string& json_string);
-
-/**
-  * @brief check if the build parameter is valid
-  *
-  * @return true if the parameter is valid, otherwise error with detail message.
-  */
-tl::expected<bool, Error>
-check_diskann_hnsw_search_parameters(const std::string& json_string);
-
-/**
-  * @brief estimate search time for index
-  *
-  * @return the estimated search time in milliseconds.
-  */
-tl::expected<float, Error>
-estimate_search_time(const std::string& index_name,
-                     int64_t data_num,
-                     int64_t data_dim,
-                     const std::string& parameters);
-
-/**
-  * [experimental]
-  * @brief generate build index parameters from data size and dim
-  *
-  * @return the build parameter string
-  */
-tl::expected<std::string, Error>
-generate_build_parameters(std::string metric_type,
-                          int64_t num_elements,
-                          int64_t dim,
-                          bool use_conjugate_graph = false);
 
 }  // namespace vsag

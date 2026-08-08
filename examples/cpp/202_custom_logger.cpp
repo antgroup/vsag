@@ -81,13 +81,15 @@ main() {
             "dtype": "float32",
             "metric_type": "l2",
             "dim": 4,
-            "hnsw": {
+            "index_param": {
+                "base_quantization_type": "fp32",
                 "max_degree": 16,
-                "ef_construction": 100
+                "ef_construction": 100,
+                "alpha": 1.2
             }
         }
         )";
-        auto index = vsag::Factory::CreateIndex("hnsw", paramesters);
+        auto index = vsag::Factory::CreateIndex("hgraph", paramesters);
     }
 
     /******************* Customized Logger (e.g., denoted by [mylogger]::[debug]) *****************/
@@ -100,13 +102,15 @@ main() {
             "dtype": "float32",
             "metric_type": "l2",
             "dim": 4,
-            "hnsw": {
+            "index_param": {
+                "base_quantization_type": "fp32",
                 "max_degree": 16,
-                "ef_construction": 100
+                "ef_construction": 100,
+                "alpha": 1.2
             }
         }
         )";
-        auto index = vsag::Factory::CreateIndex("hnsw", paramesters);
+        auto index = vsag::Factory::CreateIndex("hgraph", paramesters);
     }
     // logger MUST be set nullptr avoiding undefined behaviors.
     vsag::Options::Instance().set_logger(nullptr);

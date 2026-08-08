@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,79 +12,71 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <fmt/format.h>
-
 #include <catch2/catch_test_macros.hpp>
-#include <iostream>
 
-#include "functest.h"
 #include "vsag/vsag.h"
 
-TEST_CASE("Test Engine", "[ft][engine]") {
-    int dim = 16;
-    int max_elements = 1000;
-
-    auto index_parameters = R"(
-        {
-            "dim": 16,
-            "dtype": "float32",
-            "hnsw": {
-                "ef_construction": 100,
-                "ef_search": 100,
-                "max_degree": 16
-            },
-            "metric_type": "l2"
-        }
-    )";
-
+TEST_CASE("Engine uses the supported index registry", "[ft][engine]") {
     vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
     vsag::Engine engine(&resource);
 
-    std::shared_ptr<vsag::Index> hnsw;
-    auto index = engine.CreateIndex("hnsw", index_parameters);
-    REQUIRE(index.has_value());
-    hnsw = index.value();
-    // Generate random data
-    std::mt19937 rng(97);
-    std::uniform_real_distribution<float> distrib_real;
-    auto* ids = new int64_t[max_elements];
-    auto* data = new float[dim * max_elements];
-    for (int i = 0; i < max_elements; i++) {
-        ids[i] = i;
-    }
-    for (int i = 0; i < dim * max_elements; i++) {
-        data[i] = distrib_real(rng);
-    }
-
-    auto dataset = vsag::Dataset::Make();
-    dataset->Dim(dim)->NumElements(max_elements)->Ids(ids)->Float32Vectors(data);
-    hnsw->Build(dataset);
-
-    // Query the elements for themselves and measure recall 1@1
-    float correct = 0;
-    for (int i = 0; i < max_elements; i++) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(dim)->Float32Vectors(data + i * dim)->Owner(false);
-
-        std::string parameters = R"(
-            {
-                "hnsw": {
-                    "ef_search": 100
-                }
-            }
-        )";
-        int64_t k = 10;
-        if (auto result = hnsw->KnnSearch(query, k, parameters); result.has_value()) {
-            if (result.value()->GetIds()[0] == i) {
-                correct++;
-            }
-        } else if (result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
-            fixtures::logger::error << "failed to search on index: internalError" << std::endl;
+    auto supported = engine.CreateIndex("brute_force", R"(
+    {
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 4,
+        "index_param": {
+            "base_quantization_type": "fp32"
         }
     }
-    float recall = correct / static_cast<float>(max_elements);
+    )");
+    REQUIRE(supported.has_value());
 
-    REQUIRE(recall == 1);
+    std::vector<int64_t> ids = {0, 1, 2, 3};
+    std::vector<float> vectors = {
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        1.0F,
+        1.0F,
+        1.0F,
+        1.0F,
+        2.0F,
+        2.0F,
+        2.0F,
+        2.0F,
+        3.0F,
+        3.0F,
+        3.0F,
+        3.0F,
+    };
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(ids.size())
+                    ->Dim(4)
+                    ->Ids(ids.data())
+                    ->Float32Vectors(vectors.data())
+                    ->Owner(false);
+    auto build_result = supported.value()->Build(base);
+    REQUIRE(build_result.has_value());
+
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(4)
+                     ->Float32Vectors(vectors.data() + 8)
+                     ->Owner(false);
+    auto search_result = supported.value()->KnnSearch(query, 1, "{}");
+    REQUIRE(search_result.has_value());
+    REQUIRE(search_result.value()->GetDim() == 1);
+    REQUIRE(search_result.value()->GetIds()[0] == 2);
+
+    for (const auto* removed_name : {"hnsw", "fresh_hnsw", "diskann"}) {
+        auto removed =
+            engine.CreateIndex(removed_name, R"({"dtype":"float32","metric_type":"l2","dim":4})");
+        INFO(removed_name);
+        REQUIRE_FALSE(removed.has_value());
+        REQUIRE(removed.error().type == vsag::ErrorType::UNSUPPORTED_INDEX);
+    }
 
     engine.Shutdown();
 }

@@ -136,18 +136,6 @@ generate_attributes(uint64_t count,
                     uint32_t max_value_count = 10,
                     int seed = 97);
 
-vsag::IndexPtr
-generate_index(const std::string& name,
-               const std::string& metric_type,
-               int64_t num_vectors,
-               int64_t dim,
-               std::vector<int64_t>& ids,
-               std::vector<float>& vectors,
-               bool use_conjugate_graph = false);
-
-std::string
-generate_hnsw_build_parameters_string(const std::string& metric_type, int64_t dim);
-
 vsag::DatasetPtr
 generate_one_dataset(int64_t dim, uint64_t count);
 

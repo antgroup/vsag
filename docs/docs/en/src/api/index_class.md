@@ -1,7 +1,7 @@
 # Index
 
 `vsag::Index` (declared in `vsag/index.h`) is the central abstraction of the library. Every concrete
-index type — HGraph, IVF, DiskANN, BruteForce, SINDI, Pyramid, and so on — implements this
+index type — HGraph, IVF, BruteForce, SINDI, Pyramid, and so on — implements this
 interface. You never instantiate `Index` directly; obtain one from
 [`Factory::CreateIndex`](factory_engine.md#createindex) or [`Engine::CreateIndex`](factory_engine.md#createindex-1)
 and hold it through `IndexPtr` (`std::shared_ptr<Index>`).
@@ -34,7 +34,8 @@ Pointer/handle types used throughout this page: `DatasetPtr` ([Dataset](dataset.
 
 ```cpp
 enum class IndexType {
-    HNSW, DISKANN, HGRAPH, IVF, PYRAMID, BRUTEFORCE, SPARSE, SINDI, WARP, LAZY_HGRAPH, SIMQ
+    HGRAPH = 2, IVF = 3, PYRAMID = 4, BRUTEFORCE = 5, SPARSE = 6, SINDI = 7,
+    WARP = 8, LAZY_HGRAPH = 9, SIMQ = 10
 };
 ```
 
@@ -226,15 +227,6 @@ error). See [Range Search](../advanced/range_search.md) and `examples/cpp/302_fe
 `calculate_precise_distance = true` may load full-precision vectors (possibly from disk) instead of
 quantized codes. See [Calculate Distance by ID](../advanced/calc_distance_by_id.md) and
 `examples/cpp/306_feature_calculate_distance_by_id.cpp`.
-
-## Conjugate-graph enhancement
-
-| Method | Signature | Notes |
-|--------|-----------|-------|
-| `Pretrain` | `tl::expected<uint32_t, Error> Pretrain(const std::vector<int64_t>& base_tag_ids, uint32_t k, const std::string& parameters)` | Enhances chosen base vectors by searching generated queries. Returns successful insertions. |
-| `Feedback` | `tl::expected<uint32_t, Error> Feedback(const DatasetPtr& query, int64_t k, const std::string& parameters, int64_t global_optimum_tag_id = INT64_MAX)` | Feeds a known optimum back into the conjugate graph. |
-
-See [Graph Enhancement](../advanced/enhance_graph.md).
 
 ## Data retrieval
 

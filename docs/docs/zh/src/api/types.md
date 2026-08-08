@@ -222,12 +222,12 @@ float range_search_recall(const float* base, const int64_t* base_ids, int64_t nu
 
 | 组 | 示例 |
 |----|------|
-| 索引类型名 | `INDEX_HGRAPH`、`INDEX_IVF`、`INDEX_DISKANN`、`INDEX_BRUTE_FORCE`、`INDEX_SINDI`、`INDEX_PYRAMID` |
+| 索引类型名 | `INDEX_HGRAPH`、`INDEX_IVF`、`INDEX_BRUTE_FORCE`、`INDEX_SINDI`、`INDEX_PYRAMID` |
 | Dataset 字段名 | `DIM`、`NUM_ELEMENTS`、`IDS`、`DISTS`、`FLOAT32_VECTORS`、`SPARSE_VECTORS` |
 | 度量名 | `METRIC_L2`、`METRIC_COSINE`、`METRIC_IP` |
 | 数据类型名 | `DATATYPE_FLOAT32`、`DATATYPE_FLOAT16`、`DATATYPE_BFLOAT16`、`DATATYPE_INT8`、`DATATYPE_SPARSE` |
 | 顶层参数 | `PARAMETER_DTYPE`、`PARAMETER_DIM`、`PARAMETER_METRIC_TYPE`、`INDEX_PARAM` |
-| 各索引参数 | `HGRAPH_*`、`IVF_*`、`DISKANN_PARAMETER_*`、`PYRAMID_*`、`BRUTE_FORCE_*` |
+| 各索引参数 | `HGRAPH_*`、`IVF_*`、`PYRAMID_*`、`BRUTE_FORCE_*` |
 | 统计键 | `STATSTIC_MEMORY`、`STATSTIC_KNN_TIME`、`STATSTIC_RANGE_TIME` |
 
 各参数键的含义见 [索引参数](../resources/index_parameters.md) 与各 [索引页面](../indexes/README.md)。

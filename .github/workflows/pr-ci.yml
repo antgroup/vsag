@@ -154,7 +154,6 @@ jobs:
           find ./build -type f -name "*.cpp" -exec rm -f {} +
           find ./build -type f -name "*.a" -exec rm -f {} +
           rm -rf ./build/hdf5
-          rm -rf ./build/boost
       - name: Save Build
         uses: actions/upload-artifact@v5
         with:
