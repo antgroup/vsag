@@ -16,12 +16,22 @@
 #include "eval_dataset.h"
 
 #include <H5Cpp.h>
+#include <omp.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <limits>
 #include <string>
 #include <vector>
+
+#include "case/eval_case.h"
+#include "evaluator.h"
+#include "monitor/recall_monitor.h"
+#include "vsag/factory.h"
 
 namespace {
 
@@ -30,28 +40,29 @@ using vsag::eval::EvalDataset;
 using vsag::eval::EvalDatasetPtr;
 
 EvalDatasetPtr
-BuildSparseDataset(bool with_token_sequences) {
+BuildSparseDataset(bool with_token_sequences, bool all_empty = false) {
     // Build a tiny sparse dataset (3 train, 2 test) and optionally attach
     // the original tokenized term-id sequences.
     auto ds = std::make_shared<EvalDataset>();
 
     // Sparse train vectors.
     std::vector<SparseVector> train(3);
-    train[0].len_ = 2;
-    train[0].ids_ = new uint32_t[2]{1, 5};
-    train[0].vals_ = new float[2]{0.5f, 1.0f};
-    train[1].len_ = 1;
-    train[1].ids_ = new uint32_t[1]{3};
-    train[1].vals_ = new float[1]{0.25f};
-    train[2].len_ = 0;  // empty sparse vector
-
     std::vector<SparseVector> test(2);
-    test[0].len_ = 2;
-    test[0].ids_ = new uint32_t[2]{2, 7};
-    test[0].vals_ = new float[2]{0.4f, 0.6f};
-    test[1].len_ = 1;
-    test[1].ids_ = new uint32_t[1]{9};
-    test[1].vals_ = new float[1]{1.0f};
+    if (not all_empty) {
+        train[0].len_ = 2;
+        train[0].ids_ = new uint32_t[2]{1, 5};
+        train[0].vals_ = new float[2]{0.5f, 1.0f};
+        train[1].len_ = 1;
+        train[1].ids_ = new uint32_t[1]{3};
+        train[1].vals_ = new float[1]{0.25f};
+
+        test[0].len_ = 2;
+        test[0].ids_ = new uint32_t[2]{2, 7};
+        test[0].vals_ = new float[2]{0.4f, 0.6f};
+        test[1].len_ = 1;
+        test[1].ids_ = new uint32_t[1]{9};
+        test[1].vals_ = new float[1]{1.0f};
+    }
 
     if (with_token_sequences) {
         train[0].token_seq_len_ = 4;
@@ -141,6 +152,457 @@ TempPath(const std::string& tag) {
 
 }  // namespace
 
+TEST_CASE("EvalDataset builds a dense in-memory view with original ids", "[ut][eval_dataset]") {
+    constexpr int64_t dim = 2;
+    std::vector<float> base_vectors{1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F};
+    std::vector<int64_t> base_ids{101, 7, 42};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(3)
+        ->Dim(dim)
+        ->Ids(base_ids.data())
+        ->Float32Vectors(base_vectors.data())
+        ->Owner(false);
+
+    std::vector<float> query_vectors{1.0F, 2.0F, 5.0F, 6.0F};
+    auto queries = vsag::Dataset::Make();
+    queries->NumElements(2)->Dim(dim)->Float32Vectors(query_vectors.data())->Owner(false);
+
+    std::vector<int64_t> ground_truth_ids{101, 7, 42, 7};
+    auto ground_truth = vsag::Dataset::Make();
+    ground_truth->NumElements(2)->Dim(2)->Ids(ground_truth_ids.data())->Owner(false);
+
+    auto dataset = EvalDataset::FromDatasets(base, queries, ground_truth, "l2");
+    REQUIRE(dataset->GetTrain() == base_vectors.data());
+    REQUIRE(dataset->GetTest() == query_vectors.data());
+    REQUIRE(dataset->GetTrainIds() == base_ids.data());
+    REQUIRE(dataset->GetMetric() == "euclidean");
+    REQUIRE(dataset->GetGroundTruthK() == 2);
+    REQUIRE(dataset->GetNeighbors(1)[0] == 42);
+    REQUIRE(static_cast<const float*>(dataset->GetOneTrainById(7))[0] == 3.0F);
+    REQUIRE(dataset->GetOneTrainById(999) == nullptr);
+
+    int64_t one_result = 101;
+    vsag::eval::SearchRecord record{
+        &one_result, dataset->GetNeighbors(0), dataset.get(), dataset->GetOneTest(0), 1, 2};
+    vsag::eval::RecallMonitor recall_monitor(1);
+    recall_monitor.SetMetrics("avg_recall");
+    recall_monitor.Record(&record);
+    REQUIRE(recall_monitor.GetResult()["recall_avg"].get<double>() == 0.5);
+
+    auto without_ground_truth = EvalDataset::FromDatasets(base, queries, nullptr, "cosine");
+    REQUIRE(without_ground_truth->GetGroundTruthK() == 0);
+    REQUIRE(without_ground_truth->GetNeighbors(0) == nullptr);
+
+    const auto save_path = TempPath("in_memory_save");
+    REQUIRE_THROWS_WITH(EvalDataset::Save(dataset, save_path),
+                        "saving an in-memory EvalDataset view is not supported");
+    REQUIRE_FALSE(std::filesystem::exists(save_path));
+}
+
+TEST_CASE("EvalDataset builds a query-only view for id recall", "[ut][eval_dataset]") {
+    constexpr int64_t dim = 2;
+    std::vector<float> query_vectors{1.0F, 2.0F, 3.0F, 4.0F};
+    auto queries = vsag::Dataset::Make()
+                       ->NumElements(2)
+                       ->Dim(dim)
+                       ->Float32Vectors(query_vectors.data())
+                       ->Owner(false);
+
+    std::vector<int64_t> ground_truth_ids{10, 20, 30, 40};
+    auto ground_truth =
+        vsag::Dataset::Make()->NumElements(2)->Dim(2)->Ids(ground_truth_ids.data())->Owner(false);
+
+    auto dataset = EvalDataset::FromSearchDatasets(queries, ground_truth);
+    REQUIRE(dataset->GetTrain() == nullptr);
+    REQUIRE(dataset->GetTest() == query_vectors.data());
+    REQUIRE(dataset->GetNumberOfBase() == 0);
+    REQUIRE(dataset->GetNumberOfQuery() == 2);
+    REQUIRE(dataset->GetGroundTruthK() == 2);
+
+    int64_t result_ids[]{10, 99};
+    vsag::eval::SearchRecord record{
+        result_ids, dataset->GetNeighbors(0), dataset.get(), dataset->GetOneTest(0), 2, 2};
+    vsag::eval::RecallMonitor recall_monitor(1, true);
+    recall_monitor.SetMetrics("avg_recall");
+    recall_monitor.Record(&record);
+    REQUIRE(recall_monitor.GetResult()["recall_avg"].get<double>() == 0.5);
+
+    REQUIRE_THROWS_WITH(EvalDataset::FromSearchDatasets(nullptr, ground_truth),
+                        "queries dataset is required and must not be empty");
+}
+
+TEST_CASE("EvalDataset rejects overflowing ground-truth ID counts", "[ut][eval_dataset]") {
+    std::vector<float> vectors{0.0F, 0.0F};
+    int64_t base_id = 0;
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(1)
+                    ->Dim(2)
+                    ->Ids(&base_id)
+                    ->Float32Vectors(vectors.data())
+                    ->Owner(false);
+    auto queries = vsag::Dataset::Make()
+                       ->NumElements(std::numeric_limits<int64_t>::max())
+                       ->Dim(2)
+                       ->Float32Vectors(vectors.data())
+                       ->Owner(false);
+    auto ground_truth = vsag::Dataset::Make()
+                            ->NumElements(std::numeric_limits<int64_t>::max())
+                            ->Dim(2)
+                            ->Ids(&base_id)
+                            ->Owner(false);
+
+    REQUIRE_THROWS_WITH(EvalDataset::FromDatasets(base, queries, ground_truth, "l2"),
+                        "ground_truth contains too many ids");
+}
+
+TEST_CASE("EvalDataset rejects incomplete and incompatible HDF5 schemas", "[ut][eval_dataset]") {
+    const std::vector<std::string> required_datasets{"train", "test", "neighbors", "distances"};
+    for (const auto& missing : required_datasets) {
+        const auto path = TempPath("missing_" + missing);
+        {
+            H5::H5File file(path, H5F_ACC_TRUNC);
+            hsize_t dims[2] = {1, 1};
+            H5::DataSpace space(2, dims);
+            for (const auto& name : required_datasets) {
+                if (name != missing) {
+                    file.createDataSet(name, H5::PredType::NATIVE_FLOAT, space);
+                }
+            }
+        }
+        REQUIRE_THROWS_WITH(
+            EvalDataset::Load(path),
+            Catch::Matchers::ContainsSubstring("missing required HDF5 dataset '" + missing + "'"));
+        std::remove(path.c_str());
+    }
+
+    const auto path = TempPath("dimension_mismatch");
+    {
+        H5::H5File file(path, H5F_ACC_TRUNC);
+        hsize_t train_dims[2] = {1, 2};
+        hsize_t test_dims[2] = {1, 3};
+        hsize_t result_dims[2] = {1, 1};
+        H5::DataSpace train_space(2, train_dims);
+        H5::DataSpace test_space(2, test_dims);
+        H5::DataSpace result_space(2, result_dims);
+        file.createDataSet("train", H5::PredType::NATIVE_FLOAT, train_space);
+        file.createDataSet("test", H5::PredType::NATIVE_FLOAT, test_space);
+        file.createDataSet("neighbors", H5::PredType::NATIVE_INT64, result_space);
+        file.createDataSet("distances", H5::PredType::NATIVE_FLOAT, result_space);
+    }
+    REQUIRE_THROWS_WITH(
+        EvalDataset::Load(path),
+        Catch::Matchers::ContainsSubstring("train and test vector dimensions must match"));
+    std::remove(path.c_str());
+
+    const auto result_shape_path = TempPath("result_shape_mismatch");
+    {
+        H5::H5File file(result_shape_path, H5F_ACC_TRUNC);
+        hsize_t vector_dims[2] = {2, 2};
+        hsize_t neighbor_dims[2] = {2, 1};
+        hsize_t distance_dims[2] = {1, 1};
+        H5::DataSpace vector_space(2, vector_dims);
+        H5::DataSpace neighbor_space(2, neighbor_dims);
+        H5::DataSpace distance_space(2, distance_dims);
+        file.createDataSet("train", H5::PredType::NATIVE_FLOAT, vector_space);
+        file.createDataSet("test", H5::PredType::NATIVE_FLOAT, vector_space);
+        file.createDataSet("neighbors", H5::PredType::NATIVE_INT64, neighbor_space);
+        file.createDataSet("distances", H5::PredType::NATIVE_FLOAT, distance_space);
+    }
+    REQUIRE_THROWS_WITH(
+        EvalDataset::Load(result_shape_path),
+        Catch::Matchers::ContainsSubstring("distances shape must match neighbors shape"));
+    std::remove(result_shape_path.c_str());
+
+    const auto query_count_path = TempPath("query_count_mismatch");
+    {
+        H5::H5File file(query_count_path, H5F_ACC_TRUNC);
+        hsize_t train_dims[2] = {2, 2};
+        hsize_t test_dims[2] = {2, 2};
+        hsize_t result_dims[2] = {1, 1};
+        H5::DataSpace train_space(2, train_dims);
+        H5::DataSpace test_space(2, test_dims);
+        H5::DataSpace result_space(2, result_dims);
+        file.createDataSet("train", H5::PredType::NATIVE_FLOAT, train_space);
+        file.createDataSet("test", H5::PredType::NATIVE_FLOAT, test_space);
+        file.createDataSet("neighbors", H5::PredType::NATIVE_INT64, result_space);
+        file.createDataSet("distances", H5::PredType::NATIVE_FLOAT, result_space);
+    }
+    REQUIRE_THROWS_WITH(
+        EvalDataset::Load(query_count_path),
+        Catch::Matchers::ContainsSubstring("neighbors row count must match query count"));
+    std::remove(query_count_path.c_str());
+
+    const auto unsupported_type_path = TempPath("unsupported_type");
+    {
+        H5::H5File file(unsupported_type_path, H5F_ACC_TRUNC);
+        hsize_t dims[2] = {1, 1};
+        H5::DataSpace space(2, dims);
+        file.createDataSet("train", H5::PredType::NATIVE_FLOAT, space);
+        file.createDataSet("test", H5::PredType::NATIVE_FLOAT, space);
+        file.createDataSet("neighbors", H5::PredType::NATIVE_INT64, space);
+        file.createDataSet("distances", H5::PredType::NATIVE_FLOAT, space);
+        H5::StrType string_type(H5::PredType::C_S1, H5T_VARIABLE);
+        auto attribute = file.createAttribute("type", string_type, H5::DataSpace(H5S_SCALAR));
+        std::string type = "unsupported";
+        attribute.write(string_type, type);
+    }
+    REQUIRE_THROWS_WITH(
+        EvalDataset::Load(unsupported_type_path),
+        Catch::Matchers::ContainsSubstring("unsupported HDF5 dataset type 'unsupported'"));
+    std::remove(unsupported_type_path.c_str());
+
+    const auto unsupported_rank_path = TempPath("unsupported_rank");
+    {
+        H5::H5File file(unsupported_rank_path, H5F_ACC_TRUNC);
+        hsize_t train_dims[3] = {1, 1, 1};
+        hsize_t matrix_dims[2] = {1, 1};
+        H5::DataSpace train_space(3, train_dims);
+        H5::DataSpace matrix_space(2, matrix_dims);
+        file.createDataSet("train", H5::PredType::NATIVE_FLOAT, train_space);
+        file.createDataSet("test", H5::PredType::NATIVE_FLOAT, matrix_space);
+        file.createDataSet("neighbors", H5::PredType::NATIVE_INT64, matrix_space);
+        file.createDataSet("distances", H5::PredType::NATIVE_FLOAT, matrix_space);
+    }
+    REQUIRE_THROWS_WITH(EvalDataset::Load(unsupported_rank_path),
+                        Catch::Matchers::ContainsSubstring("unsupported dataset rank: 3"));
+    std::remove(unsupported_rank_path.c_str());
+
+    const auto label_shape_path = TempPath("label_shape_mismatch");
+    {
+        H5::H5File file(label_shape_path, H5F_ACC_TRUNC);
+        hsize_t train_dims[2] = {2, 2};
+        hsize_t test_dims[2] = {1, 2};
+        hsize_t result_dims[2] = {1, 1};
+        hsize_t train_label_dims[1] = {1};
+        hsize_t test_label_dims[1] = {1};
+        H5::DataSpace train_space(2, train_dims);
+        H5::DataSpace test_space(2, test_dims);
+        H5::DataSpace result_space(2, result_dims);
+        H5::DataSpace train_label_space(1, train_label_dims);
+        H5::DataSpace test_label_space(1, test_label_dims);
+        file.createDataSet("train", H5::PredType::NATIVE_FLOAT, train_space);
+        file.createDataSet("test", H5::PredType::NATIVE_FLOAT, test_space);
+        file.createDataSet("neighbors", H5::PredType::NATIVE_INT64, result_space);
+        file.createDataSet("distances", H5::PredType::NATIVE_FLOAT, result_space);
+        file.createDataSet("train_labels", H5::PredType::NATIVE_INT64, train_label_space);
+        file.createDataSet("test_labels", H5::PredType::NATIVE_INT64, test_label_space);
+    }
+    REQUIRE_THROWS_WITH(EvalDataset::Load(label_shape_path),
+                        Catch::Matchers::ContainsSubstring(
+                            "train_labels must be one-dimensional with one label per base vector"));
+    std::remove(label_shape_path.c_str());
+
+    const auto unsupported_distance_path = TempPath("unsupported_distance");
+    {
+        H5::H5File file(unsupported_distance_path, H5F_ACC_TRUNC);
+        hsize_t dims[2] = {1, 1};
+        H5::DataSpace space(2, dims);
+        file.createDataSet("train", H5::PredType::NATIVE_FLOAT, space);
+        file.createDataSet("test", H5::PredType::NATIVE_FLOAT, space);
+        file.createDataSet("neighbors", H5::PredType::NATIVE_INT64, space);
+        file.createDataSet("distances", H5::PredType::NATIVE_FLOAT, space);
+        H5::StrType string_type(H5::PredType::C_S1, H5T_VARIABLE);
+        auto attribute = file.createAttribute("distance", string_type, H5::DataSpace(H5S_SCALAR));
+        std::string distance = "unsupported";
+        attribute.write(string_type, distance);
+    }
+    REQUIRE_THROWS_WITH(EvalDataset::Load(unsupported_distance_path),
+                        Catch::Matchers::ContainsSubstring(
+                            "unsupported HDF5 distance 'unsupported' for dense vectors"));
+    std::remove(unsupported_distance_path.c_str());
+}
+
+TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][eval_dataset]") {
+    constexpr int64_t dim = 2;
+    std::vector<float> base_vectors{0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F};
+    std::vector<int64_t> base_ids{0, 1, 2, 3};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(4)
+        ->Dim(dim)
+        ->Ids(base_ids.data())
+        ->Float32Vectors(base_vectors.data())
+        ->Owner(false);
+
+    std::vector<float> query_vectors{0.0F, 0.0F, 1.0F, 1.0F};
+    auto queries = vsag::Dataset::Make();
+    queries->NumElements(2)->Dim(dim)->Float32Vectors(query_vectors.data())->Owner(false);
+
+    std::vector<int64_t> ground_truth_ids{0, 3};
+    auto ground_truth = vsag::Dataset::Make();
+    ground_truth->NumElements(2)->Dim(1)->Ids(ground_truth_ids.data())->Owner(false);
+    auto dataset = EvalDataset::FromDatasets(base, queries, ground_truth, "l2");
+
+    const std::string create_params = R"(
+        {
+            "dim": 2,
+            "dtype": "float32",
+            "metric_type": "l2",
+            "index_param": {
+                "base_quantization_type": "fp32",
+                "max_degree": 8,
+                "ef_construction": 20
+            }
+        })";
+    auto created = vsag::Factory::CreateIndex("hgraph", create_params);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+
+    vsag::eval::EvalConfig build_config;
+    build_config.index_name = "hgraph";
+    build_config.enable_tps = false;
+    build_config.enable_memory = false;
+    const auto build_result = vsag::eval::EvaluateBuild(index, dataset, build_config);
+    REQUIRE(build_result.contains("duration(s)"));
+    REQUIRE_FALSE(build_result.contains("tps"));
+    REQUIRE(build_result["index_info"].is_object());
+    REQUIRE(build_result["index_info"].empty());
+
+    vsag::eval::EvalConfig config;
+    config.index_name = "hgraph";
+    config.search_param = R"({"hgraph":{"ef_search":8}})";
+    config.top_k = 1;
+    config.search_query_count = 2;
+    const auto caller_thread_count = omp_get_max_threads();
+    config.num_threads_searching = caller_thread_count == 1 ? 2 : 1;
+    config.enable_recall = false;
+    config.enable_percent_recall = false;
+    config.enable_qps = true;
+    config.enable_tps = false;
+    config.enable_memory = false;
+    config.enable_latency = false;
+    config.enable_percent_latency = false;
+
+    const auto qps_only = vsag::eval::EvaluateSearch(index, dataset, config);
+    REQUIRE(qps_only.contains("qps"));
+    REQUIRE(qps_only["measurement_sample_count"].get<uint64_t>() == 2);
+    REQUIRE(qps_only["index_info"].is_object());
+    REQUIRE(qps_only["index_info"].empty());
+    REQUIRE(omp_get_max_threads() == caller_thread_count);
+
+    config.search_param = R"({"hgraph":{"ef_search":0}})";
+    REQUIRE_THROWS_WITH(
+        vsag::eval::EvaluateSearch(index, dataset, config),
+        Catch::Matchers::ContainsSubstring("query error: ef_search(0) must be at least 1"));
+    REQUIRE(omp_get_max_threads() == caller_thread_count);
+
+    config.enable_qps = false;
+    REQUIRE_THROWS_WITH(
+        vsag::eval::EvaluateSearch(index, dataset, config),
+        Catch::Matchers::ContainsSubstring("query error: ef_search(0) must be at least 1"));
+    config.enable_qps = true;
+
+    config.search_param = R"({"hgraph":{"ef_search":8}})";
+    config.top_k = 0;
+    REQUIRE_THROWS_WITH(vsag::eval::EvaluateSearch(index, dataset, config),
+                        "evaluation top_k must be positive");
+
+    config.top_k = 1;
+    config.search_mode = "range";
+    REQUIRE_THROWS_WITH(vsag::eval::EvaluateSearch(index, dataset, config),
+                        "in-memory evaluation supports only knn search mode");
+
+    config.search_mode = "knn";
+    config.num_threads_searching = 0;
+    REQUIRE_THROWS_WITH(vsag::eval::EvaluateSearch(index, dataset, config),
+                        "evaluation search thread count must be positive");
+
+    config.num_threads_searching = 2;
+    config.search_query_count = 0;
+    REQUIRE_THROWS_WITH(vsag::eval::EvaluateSearch(index, dataset, config),
+                        "evaluation search query count must be positive");
+
+    config.search_query_count = std::numeric_limits<uint64_t>::max();
+    REQUIRE_THROWS_WITH(vsag::eval::EvaluateSearch(index, dataset, config),
+                        "evaluation search query count exceeds the supported range");
+
+    config.search_query_count = 2;
+    config.top_k = 1;
+    config.enable_recall = true;
+    auto without_ground_truth = EvalDataset::FromDatasets(base, queries, nullptr, "l2");
+    REQUIRE_THROWS_WITH(vsag::eval::EvaluateSearch(index, without_ground_truth, config),
+                        "evaluation ground truth must contain at least top_k neighbors per query");
+
+    config.top_k = 2;
+    REQUIRE_THROWS_WITH(vsag::eval::EvaluateSearch(index, dataset, config),
+                        "evaluation ground truth must contain at least top_k neighbors per query");
+}
+
+TEST_CASE("EvalCase builds and searches an in-memory dataset with original ids",
+          "[ut][eval_dataset]") {
+    constexpr int64_t dim = 2;
+    std::vector<float> base_vectors{1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F};
+    std::vector<int64_t> base_ids{101, 7, 42};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(3)
+        ->Dim(dim)
+        ->Ids(base_ids.data())
+        ->Float32Vectors(base_vectors.data())
+        ->Owner(false);
+
+    std::vector<float> query_vectors{5.0F, 6.0F};
+    auto queries = vsag::Dataset::Make();
+    queries->NumElements(1)->Dim(dim)->Float32Vectors(query_vectors.data())->Owner(false);
+
+    std::vector<int64_t> ground_truth_ids{42};
+    auto ground_truth = vsag::Dataset::Make();
+    ground_truth->NumElements(1)->Dim(1)->Ids(ground_truth_ids.data())->Owner(false);
+    auto dataset = EvalDataset::FromDatasets(base, queries, ground_truth, "l2");
+
+    vsag::eval::EvalConfig config;
+    config.index_name = "brute_force";
+    config.index_path = "/tmp/eval_dataset_memory.index";
+    config.build_param = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 2,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "store_raw_vector": true
+        }
+    })";
+    config.top_k = 1;
+    config.search_query_count = 1;
+    config.enable_memory = false;
+    std::remove(config.index_path.c_str());
+
+    auto build = vsag::eval::EvalCase::MakeInstance(config, "build", dataset);
+    REQUIRE(build->Run()["action"] == "build");
+    auto search = vsag::eval::EvalCase::MakeInstance(config, "search", dataset);
+    const auto result = search->Run();
+    REQUIRE(result["action"] == "search");
+    REQUIRE(result["recall_avg"].get<double>() == 1.0);
+    REQUIRE(result["statistics_query_count"].get<uint64_t>() == 1);
+    REQUIRE(std::isfinite(result["qps"].get<double>()));
+    REQUIRE(std::isfinite(result["latency_avg(ms)"].get<double>()));
+    REQUIRE(std::isfinite(result["latency_detail(ms)"]["p99"].get<double>()));
+
+    std::vector<float> concurrent_query_vectors{5.0F, 6.0F, 1.0F, 2.0F};
+    auto concurrent_queries = vsag::Dataset::Make();
+    concurrent_queries->NumElements(2)
+        ->Dim(dim)
+        ->Float32Vectors(concurrent_query_vectors.data())
+        ->Owner(false);
+    std::vector<int64_t> concurrent_ground_truth_ids{42, 101};
+    auto concurrent_ground_truth = vsag::Dataset::Make();
+    concurrent_ground_truth->NumElements(2)
+        ->Dim(1)
+        ->Ids(concurrent_ground_truth_ids.data())
+        ->Owner(false);
+    auto concurrent_dataset =
+        EvalDataset::FromDatasets(base, concurrent_queries, concurrent_ground_truth, "l2");
+    config.search_query_count = 2;
+    config.num_threads_searching = 2;
+    auto concurrent_search =
+        vsag::eval::EvalCase::MakeInstance(config, "search", concurrent_dataset);
+    const auto concurrent_result = concurrent_search->Run();
+    REQUIRE(concurrent_result["recall_avg"].get<double>() == 1.0);
+    REQUIRE(concurrent_result["statistics_query_count"].get<uint64_t>() == 2);
+    REQUIRE(std::isfinite(concurrent_result["qps"].get<double>()));
+    REQUIRE(std::isfinite(concurrent_result["latency_avg(ms)"].get<double>()));
+    REQUIRE(std::isfinite(concurrent_result["latency_detail(ms)"]["p99"].get<double>()));
+    std::remove(config.index_path.c_str());
+}
+
 TEST_CASE("EvalDataset sparse round-trip without token sequences", "[ut][eval_dataset]") {
     auto path = TempPath("nosqry");
     {
@@ -172,9 +634,34 @@ TEST_CASE("EvalDataset sparse round-trip without token sequences", "[ut][eval_da
     REQUIRE(loaded->GetNumberOfBase() == 3);
     REQUIRE(loaded->GetNumberOfQuery() == 2);
     const auto* train = static_cast<const SparseVector*>(loaded->GetTrain());
+    REQUIRE(loaded->GetTrainIds() == nullptr);
+    REQUIRE(loaded->GetOneTrainById(1) == train + 1);
     for (int i = 0; i < 3; ++i) {
         REQUIRE(train[i].token_seq_len_ == 0);
         REQUIRE(train[i].token_sequence_ == nullptr);
+    }
+    std::remove(path.c_str());
+}
+
+TEST_CASE("EvalDataset sparse round-trip preserves all-empty records", "[ut][eval_dataset]") {
+    auto path = TempPath("all_empty_sparse");
+    {
+        auto ds = BuildSparseDataset(/*with_token_sequences=*/false, /*all_empty=*/true);
+        EvalDataset::Save(ds, path);
+    }
+
+    auto loaded = EvalDataset::Load(path);
+    REQUIRE(loaded->GetVectorType() == vsag::SPARSE_VECTORS);
+    REQUIRE(loaded->GetNumberOfBase() == 3);
+    REQUIRE(loaded->GetNumberOfQuery() == 2);
+    REQUIRE(loaded->GetDim() == 0);
+    const auto* train = static_cast<const SparseVector*>(loaded->GetTrain());
+    const auto* test = static_cast<const SparseVector*>(loaded->GetTest());
+    for (uint64_t i = 0; i < 3; ++i) {
+        REQUIRE(train[i].len_ == 0);
+    }
+    for (uint64_t i = 0; i < 2; ++i) {
+        REQUIRE(test[i].len_ == 0);
     }
     std::remove(path.c_str());
 }

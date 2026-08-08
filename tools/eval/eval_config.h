@@ -56,6 +56,7 @@ public:
     bool enable_memory{true};
     bool enable_latency{true};
     bool enable_percent_latency{true};
+    bool use_id_based_recall{false};
 
     EvalConfig() = default;
 };
