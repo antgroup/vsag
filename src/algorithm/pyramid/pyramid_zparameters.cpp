@@ -330,6 +330,15 @@ PyramidSearchParameters::FromJson(const std::string& json_string) {
         obj.subindex_ef_search =
             params[INDEX_PYRAMID][PYRAMID_PARAMETER_SUBINDEX_EF_SEARCH].GetInt();
     }
+    if (params[INDEX_PYRAMID].Contains(PYRAMID_PARAMETER_HOPS_LIMIT)) {
+        const auto hops_limit = params[INDEX_PYRAMID][PYRAMID_PARAMETER_HOPS_LIMIT].GetInt();
+        CHECK_ARGUMENT(hops_limit >= 0 && static_cast<uint64_t>(hops_limit) <=
+                                              std::numeric_limits<uint32_t>::max(),
+                       fmt::format("hops_limit({}) must be in range[0, {}]",
+                                   hops_limit,
+                                   std::numeric_limits<uint32_t>::max()));
+        obj.hops_limit = static_cast<uint32_t>(hops_limit);
+    }
     if (params[INDEX_PYRAMID].Contains(PYRAMID_PARAMETER_RABITQ_ONE_BIT_SEARCH)) {
         obj.has_rabitq_one_bit_search = true;
         obj.rabitq_one_bit_search =
