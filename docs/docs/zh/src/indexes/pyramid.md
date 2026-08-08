@@ -116,9 +116,9 @@ auto result = index->KnnSearch(
 }
 ```
 
-由于 split code 无法解码回输入向量，Pyramid 还会保留一份内部 FP32 副本，用于增量
-FLAT→GRAPH 晋升和 Analyzer 采样。检索距离仍使用 split code；该副本会额外占用
-`count * dim * sizeof(float)` 字节的向量存储。
+Pyramid 使用 split code 的 code-code 距离完成增量 FLAT→GRAPH 晋升，因此默认不再
+保留内部 FP32 副本。需要完整 Analyzer 原始向量指标时，仍可显式启用 raw vector
+存储；未保存原始向量时，Analyzer 会跳过依赖原始 FP32 数据的指标。
 
 ### MRLE 与 split RaBitQ
 

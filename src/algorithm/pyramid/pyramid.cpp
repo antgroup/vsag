@@ -23,6 +23,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "analyzer/analyzer.h"
 #include "datacell/flatten_interface.h"
+#include "impl/distance_provider_for_graph.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
@@ -1219,10 +1220,7 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
     mapping_external_param_to_inner(external_param, external_mapping, inner_json);
     MapRaBitQSplitParam(external_param, inner_json);
     ValidateMRLEDim(external_param, common_param.dim_);
-    const auto& base_codes_type = inner_json[BASE_CODES_KEY][CODES_TYPE_KEY];
-    const bool uses_split_codes =
-        base_codes_type.IsString() and base_codes_type.GetString() == RABITQ_SPLIT_CODES;
-    if (uses_split_codes or RequiresRawVectorForTransformQuantizer(inner_json)) {
+    if (RequiresRawVectorForTransformQuantizer(inner_json)) {
         inner_json[STORE_RAW_VECTOR_KEY].SetBool(true);
     }
     auto pyramid_params = std::make_shared<PyramidParameters>();
@@ -1303,20 +1301,26 @@ Pyramid::add_one_point(const Hierarchy& h,
         graph_node.ids_ = node->ids_;
         graph_node.Init();
 
-        auto codes = decodable_codes();
-        Vector<float> decoded_vector(dim_, allocator_);
-        for (const auto id : node->ids_) {
-            bool need_release = false;
-            const auto* buffer = codes->GetCodesById(id, need_release);
-            const bool decoded = codes->Decode(buffer, decoded_vector.data());
-            if (need_release) {
-                codes->Release(buffer);
+        if (base_codes_->SupportSplitCodeStorage()) {
+            for (const auto id : node->ids_) {
+                add_one_point(h, &graph_node, id, nullptr);
             }
-            if (not decoded) {
-                throw VsagException(ErrorType::INTERNAL_ERROR,
-                                    "Pyramid graph promotion requires decodable vectors");
+        } else {
+            auto codes = decodable_codes();
+            Vector<float> decoded_vector(dim_, allocator_);
+            for (const auto id : node->ids_) {
+                bool need_release = false;
+                const auto* buffer = codes->GetCodesById(id, need_release);
+                const bool decoded = codes->Decode(buffer, decoded_vector.data());
+                if (need_release) {
+                    codes->Release(buffer);
+                }
+                if (not decoded) {
+                    throw VsagException(ErrorType::INTERNAL_ERROR,
+                                        "Pyramid graph promotion requires decodable vectors");
+                }
+                add_one_point(h, &graph_node, id, decoded_vector.data());
             }
-            add_one_point(h, &graph_node, id, decoded_vector.data());
         }
 
         node->graph_ = std::move(graph_node.graph_);
@@ -1352,8 +1356,33 @@ Pyramid::add_one_point(const Hierarchy& h,
         }
 
         auto vl = pool_->TakeOne();
-        auto results = searcher_->Search(
-            node->graph_, codes, vl, vector, search_param, (LabelTablePtr) nullptr, nullptr);
+        DistHeapPtr results;
+        if (vector != nullptr) {
+            results = searcher_->Search(
+                node->graph_, codes, vl, vector, search_param, (LabelTablePtr) nullptr, nullptr);
+        } else {
+            FlattenIdDistanceProvider distance_provider(codes, inner_id);
+            results = searcher_->Search(
+                node->graph_, distance_provider, vl, search_param, nullptr, nullptr);
+            if (support_duplicate_ and not results->Empty()) {
+                const auto* data = results->GetData();
+                auto min_distance = data[0].first;
+                auto min_index = data[0].second;
+                for (uint32_t i = 1; i < results->Size(); ++i) {
+                    if (data[i].first < min_distance) {
+                        min_distance = data[i].first;
+                        min_index = data[i].second;
+                    }
+                }
+                if (search_param.duplicate_distance_threshold > 0.0F) {
+                    if (min_distance <= search_param.duplicate_distance_threshold) {
+                        search_param.duplicate_id = min_index;
+                    }
+                } else if (codes->CompareVectors(inner_id, min_index)) {
+                    search_param.duplicate_id = min_index;
+                }
+            }
+        }
         pool_->ReturnOne(vl);
         if (this->support_duplicate_ && search_param.duplicate_id >= 0) {
             std::unique_lock lock(this->label_lookup_mutex_);
@@ -1400,7 +1429,8 @@ Pyramid::add_to_hierarchy(Hierarchy& h,
         auto path_slices = split(current_path, PART_SLASH);
         IndexNode* node = h.root.get();
         auto inner_id = static_cast<InnerIdType>(i + local_cur_element_count);
-        const auto* vector = data_vectors + dim_ * data_bias;
+        const auto* vector =
+            base_codes_->SupportSplitCodeStorage() ? nullptr : data_vectors + dim_ * data_bias;
         int no_build_level_index = 0;
         for (int j = 0; j <= static_cast<int>(path_slices.size()); ++j) {
             IndexNode* new_node = nullptr;

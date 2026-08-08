@@ -40,7 +40,7 @@ PyramidAnalyzer::GetStats() {
         h_stats["leaf_node_size_distribution"].SetJson(get_leaf_node_size_distribution(root));
         h_stats["subindex_quality"].SetJson(get_subindex_quality(root));
 
-        if (not sample_ids_.empty() && not search_params_.empty()) {
+        if (not sample_ids_.empty() && not sample_datas_.empty() && not search_params_.empty()) {
             auto recall_stats = get_graph_node_recall_stats(root, search_params_);
             h_stats["recall_base"].SetFloat(recall_stats["weighted_recall"].GetFloat());
             h_stats["graph_node_count"].SetInt(recall_stats["node_count"].GetInt());
@@ -487,6 +487,12 @@ PyramidAnalyzer::sample_global() {
         sample_ids_.resize(actual_sample_size);
     }
 
+    const bool has_decodable_codes = pyramid_->raw_vector_ != nullptr ||
+                                     pyramid_->has_precise_reorder() ||
+                                     not pyramid_->base_codes_->SupportSplitCodeStorage();
+    if (not has_decodable_codes) {
+        return;
+    }
     sample_datas_.resize(static_cast<size_t>(actual_sample_size) * dim_);
 
     for (uint32_t i = 0; i < actual_sample_size; ++i) {
@@ -1415,10 +1421,10 @@ PyramidAnalyzer::get_graph_node_recall_stats(IndexNode* root, const std::string&
 
 float
 PyramidAnalyzer::GetDuplicateRatio(IndexNode* root) {
-    if (sample_datas_.empty()) {
+    if (sample_ids_.empty()) {
         sample_global();
     }
-    if (sample_datas_.empty()) {
+    if (sample_ids_.empty()) {
         return 0.0F;
     }
 
@@ -1470,12 +1476,13 @@ PyramidAnalyzer::get_duplicate_computers() {
 
 float
 PyramidAnalyzer::get_node_duplicate_ratio(const Vector<InnerIdType>& node_ids) {
-    if (node_ids.empty() || sample_datas_.empty()) {
+    if (node_ids.empty() || sample_ids_.empty()) {
         return 0.0F;
     }
 
-    const auto& computers = get_duplicate_computers();
-    if (computers.empty()) {
+    const bool use_id_queries = sample_datas_.empty();
+    const auto* computers = use_id_queries ? nullptr : &get_duplicate_computers();
+    if (not use_id_queries and computers->empty()) {
         return 0.0F;
     }
 
@@ -1485,7 +1492,7 @@ PyramidAnalyzer::get_node_duplicate_ratio(const Vector<InnerIdType>& node_ids) {
     Vector<Vector<InnerIdType>> groups(allocator_);
     groups.emplace_back(node_ids.begin(), node_ids.end(), allocator_);
 
-    for (uint64_t q = 0; q < computers.size() && not groups.empty(); ++q) {
+    for (uint64_t q = 0; q < sample_ids_.size() && not groups.empty(); ++q) {
         Vector<Vector<InnerIdType>> new_groups(allocator_);
 
         for (auto& group : groups) {
@@ -1494,7 +1501,11 @@ PyramidAnalyzer::get_node_duplicate_ratio(const Vector<InnerIdType>& node_ids) {
             }
 
             Vector<float> dists(group.size(), allocator_);
-            codes->Query(dists.data(), computers[q], group.data(), group.size());
+            if (use_id_queries) {
+                codes->QueryById(dists.data(), sample_ids_[q], group.data(), group.size());
+            } else {
+                codes->Query(dists.data(), (*computers)[q], group.data(), group.size());
+            }
 
             Vector<std::pair<float, InnerIdType>> sorted(group.size(), allocator_);
             for (uint64_t i = 0; i < group.size(); ++i) {
@@ -1552,13 +1563,9 @@ PyramidAnalyzer::check_entry_point_duplicate(const IndexNode* node,
         return false;
     }
 
-    Vector<float> entry_vector(dim_, allocator_);
-    pyramid_->GetVectorByInnerId(entry_id, entry_vector.data());
-
     auto codes = pyramid_->base_codes_;
-    auto comp = codes->FactoryComputer(entry_vector.data());
     Vector<float> dists(node_ids.size(), allocator_);
-    codes->Query(dists.data(), comp, node_ids.data(), node_ids.size());
+    codes->QueryById(dists.data(), entry_id, node_ids.data(), node_ids.size());
 
     constexpr float epsilon = 2e-6F;
     uint32_t count = 0;

@@ -718,6 +718,12 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
     for (InnerIdType id = 0; id < count; ++id) {
         REQUIRE(std::abs(pair_dists[id] - flatten->ComputePairVectors(0, id)) <= 1e-6F);
     }
+    std::vector<float> id_dists(count);
+    flatten->QueryById(id_dists.data(), 0, build_ids.data(), count);
+    for (InnerIdType id = 0; id < count; ++id) {
+        REQUIRE(std::abs(id_dists[id] - pair_dists[id]) <= 1e-6F);
+    }
+
     flatten->Resize(count + 8);
     flatten->Move(1, 2);
     std::memcpy(expected_codes.data() + 2 * flatten->code_size_,
@@ -750,6 +756,11 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
     optimized_build->FinalizeOptimizedBuild();
     REQUIRE_FALSE(optimized_build->IsOptimizedBuildActive());
     REQUIRE(std::abs(flatten->ComputePairVectors(0, 2) - build_pair_distance) <= 1e-5F);
+    flatten->QueryById(id_dists.data(), 0, build_ids.data(), count);
+    for (InnerIdType id = 0; id < count; ++id) {
+        REQUIRE(std::abs(id_dists[id] - flatten->ComputePairVectors(0, id)) <= 1e-5F);
+    }
+
     std::vector<float> split_dists(count);
     flatten->Query(split_dists.data(), computer, ids.data(), count);
     for (InnerIdType id = 0; id < count; ++id) {

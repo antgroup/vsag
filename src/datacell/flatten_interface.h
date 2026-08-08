@@ -59,6 +59,17 @@ public:
           QueryContext* ctx = nullptr) = 0;
 
     virtual void
+    QueryById(float* result_dists,
+              InnerIdType query_id,
+              const InnerIdType* idx,
+              InnerIdType id_count,
+              QueryContext* /*ctx*/ = nullptr) {
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            result_dists[i] = this->ComputePairVectors(query_id, idx[i]);
+        }
+    }
+
+    virtual void
     QueryWithDistanceFilter(float* result_dists,
                             const ComputerInterfacePtr& computer,
                             const InnerIdType* idx,

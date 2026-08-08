@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "datacell/flatten_interface.h"
+#include "datacell/graph_datacell_parameter.h"
 #include "impl/filter/iterator_filter.h"
 #include "searcher_test.h"
 #include "unittest.h"
@@ -230,6 +231,67 @@ TEST_CASE("Search with HNSW", "[ut][BasicSearcher]") {
             }
         }
     }
+}
+
+TEST_CASE("Search with stored vector ID", "[ut][BasicSearcher][DistanceProvider]") {
+    constexpr uint64_t dim = 8;
+    constexpr InnerIdType count = 4;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.dim_ = dim;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+    constexpr const char* param_temp = R"({{"type": "{}"}})";
+    auto fp32_param = QuantizerParameter::GetQuantizerParameterByJson(
+        JsonType::Parse(fmt::format(param_temp, "fp32")));
+    auto io_param =
+        IOParameter::GetIOParameterByJson(JsonType::Parse(fmt::format(param_temp, "memory_io")));
+    auto flatten =
+        std::make_shared<FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
+            fp32_param, io_param, common);
+
+    const std::vector<float> vectors = {
+        0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+        2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0,
+    };
+    flatten->Train(vectors.data(), count);
+    flatten->Resize(count);
+    InnerIdType insert_ids[count] = {0, 1, 2, 3};
+    flatten->BatchInsertVector(vectors.data(), count, insert_ids);
+
+    auto graph_param = std::make_shared<GraphDataCellParameter>();
+    graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+    graph_param->max_degree_ = count - 1;
+    auto graph = GraphInterface::MakeInstance(graph_param, common);
+    graph->Resize(count);
+    graph->InsertNeighborsById(0, Vector<InnerIdType>({1}, allocator.get()));
+    graph->InsertNeighborsById(1, Vector<InnerIdType>({0, 2}, allocator.get()));
+    graph->InsertNeighborsById(2, Vector<InnerIdType>({1, 3}, allocator.get()));
+    graph->InsertNeighborsById(3, Vector<InnerIdType>({2}, allocator.get()));
+
+    FlattenIdDistanceProvider provider(flatten, 0);
+    REQUIRE(provider.QueryDistance(1) == 1.0F);
+    REQUIRE(provider.PairwiseDistance(1, 3) == 4.0F);
+    REQUIRE_THROWS(provider.FactoryComputerById(0));
+    provider.Prefetch(1);
+
+    std::vector<InnerIdType> ids = {0, 1, 2, 3};
+    std::vector<float> distances(count);
+    provider.BatchQueryDistance(distances.data(), ids.data(), count);
+    REQUIRE(distances == std::vector<float>{0.0F, 1.0F, 4.0F, 9.0F});
+
+    InnerSearchParam search_param;
+    search_param.ep = 0;
+    search_param.ef = count;
+    search_param.topk = count;
+    search_param.search_mode = KNN_SEARCH;
+    auto pool = std::make_shared<VisitedListPool>(1, allocator.get(), count, allocator.get());
+    auto vl = pool->TakeOne();
+    BasicSearcher searcher(common);
+    auto result = searcher.Search(graph, provider, vl, search_param, nullptr, nullptr);
+    pool->ReturnOne(vl);
+    REQUIRE(result->Size() == count);
 }
 
 TEST_CASE("Optimize SQ4", "[ut][BasicOptimizer]") {
