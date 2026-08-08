@@ -411,13 +411,34 @@ Pyramid::RangeSearch(const DatasetPtr& query,
 
     std::string hierarchy_name =
         parsed_param.hierarchies.empty() ? "" : parsed_param.hierarchies[0];
-    auto result =
-        this->search_impl(query,
-                          search_func,
-                          search_param,
-                          ctx,
-                          hierarchy_name,
-                          collect_rabitq_lower_bounds ? &rabitq_lower_bound_candidates : nullptr);
+    const auto* lower_bound_candidates =
+        collect_rabitq_lower_bounds ? &rabitq_lower_bound_candidates : nullptr;
+    const auto result_radius = use_reorder_ ? std::optional<float>{radius} : std::nullopt;
+    auto result = this->search_impl(query,
+                                    search_func,
+                                    search_param,
+                                    ctx,
+                                    hierarchy_name,
+                                    lower_bound_candidates,
+                                    result_radius);
+    if (use_reorder_ and result->GetDim() == 0) {
+        // Quantized distances can overestimate the exact distance enough to reject every
+        // candidate before reorder. Retry with bounded KNN traversal so precise reorder gets a
+        // candidate set without turning a genuinely empty range query into an exhaustive scan.
+        search_param.search_mode = KNN_SEARCH;
+        search_param.radius = std::numeric_limits<float>::max();
+        search_param.topk = limited_size == -1
+                                ? static_cast<int64_t>(search_param.ef)
+                                : std::min(limited_size, static_cast<int64_t>(search_param.ef));
+        rabitq_lower_bound_candidates.clear();
+        result = this->search_impl(query,
+                                   search_func,
+                                   search_param,
+                                   ctx,
+                                   hierarchy_name,
+                                   lower_bound_candidates,
+                                   result_radius);
+    }
     result->Statistics(stats.Dump());
     return result;
 }
@@ -428,7 +449,8 @@ Pyramid::search_impl(const DatasetPtr& query,
                      InnerSearchParam& search_param,
                      QueryContext& ctx,
                      const std::string& hierarchy_name,
-                     const DistanceRecordVector* rabitq_lower_bound_candidates) const {
+                     const DistanceRecordVector* rabitq_lower_bound_candidates,
+                     std::optional<float> result_radius) const {
     auto h_iter = hierarchies_.find(hierarchy_name);
     CHECK_ARGUMENT(h_iter != hierarchies_.end(),
                    fmt::format("unknown hierarchy name: '{}'", hierarchy_name));
@@ -468,8 +490,9 @@ Pyramid::search_impl(const DatasetPtr& query,
         return DatasetImpl::MakeEmptyDataset();
     }
 
+    const float trim_radius = result_radius.value_or(search_param.radius);
     while (not search_result->Empty() && (search_result->Size() > search_param.topk ||
-                                          search_result->Top().first > search_param.radius)) {
+                                          search_result->Top().first > trim_radius)) {
         search_result->Pop();
     }
 
