@@ -42,7 +42,7 @@ public:
 
 private:
     DISTFUNC fstdistfunc_;
-    size_t data_size_;
+    uint64_t data_size_;
     uint64_t dim_;
 };
 

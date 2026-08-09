@@ -49,6 +49,17 @@ namespace vsag {
                            float& result3,                                                    \
                            float& result4);                                                   \
     void                                                                                      \
+    L1DistanceBatch4(const float* RESTRICT query,                                             \
+                     uint64_t dim,                                                            \
+                     const float* RESTRICT codes1,                                            \
+                     const float* RESTRICT codes2,                                            \
+                     const float* RESTRICT codes3,                                            \
+                     const float* RESTRICT codes4,                                            \
+                     float& result1,                                                          \
+                     float& result2,                                                          \
+                     float& result3,                                                          \
+                     float& result4);                                                         \
+    void                                                                                      \
     FP32Sub(const float* x, const float* y, float* z, uint64_t dim);                          \
     void                                                                                      \
     FP32Add(const float* x, const float* y, float* z, uint64_t dim);                          \
@@ -87,6 +98,7 @@ using FP32ComputeBatch4Type = void (*)(const float* RESTRICT query,
                                        float& result4);
 extern FP32ComputeBatch4Type FP32ComputeIPBatch4;
 extern FP32ComputeBatch4Type FP32ComputeL2SqrBatch4;
+extern FP32ComputeBatch4Type L1DistanceBatch4;
 
 using FP32ArithmeticType = void (*)(const float* x, const float* y, float* z, uint64_t dim);
 extern FP32ArithmeticType FP32Sub;

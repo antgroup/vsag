@@ -143,6 +143,13 @@ GetFP32ComputeL2SqrBatch4() {
 }
 FP32ComputeBatch4Type FP32ComputeL2SqrBatch4 = GetFP32ComputeL2SqrBatch4();
 
+static FP32ComputeBatch4Type
+GetL1DistanceBatch4() {
+    // TODO: Add SIMD-accelerated L1DistanceBatch4 implementations and select the best one here.
+    return generic::L1DistanceBatch4;
+}
+FP32ComputeBatch4Type L1DistanceBatch4 = GetL1DistanceBatch4();
+
 static FP32ArithmeticType
 GetFP32Sub() {
     if (SimdStatus::SupportAVX512()) {

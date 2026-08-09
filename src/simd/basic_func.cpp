@@ -21,6 +21,7 @@ namespace vsag {
 
 static DistanceFuncType
 GetL1Distance() {
+    //TODO: SIMD-accelerated implementations are planned for a follow-up PR
     return generic::L1Distance;
 }
 DistanceFuncType L1Distance = GetL1Distance();

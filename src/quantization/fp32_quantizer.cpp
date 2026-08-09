@@ -254,11 +254,16 @@ FP32Quantizer<metric>::ComputeDistsBatch4Impl(Computer<FP32Quantizer<metric>>& c
                                dists3,
                                dists4);
     } else if constexpr (metric == MetricType::METRIC_TYPE_L1) {
-        const uint64_t dim = this->dim_;
-        dists1 = L1Distance(computer.buf_, codes1, &dim);
-        dists2 = L1Distance(computer.buf_, codes2, &dim);
-        dists3 = L1Distance(computer.buf_, codes3, &dim);
-        dists4 = L1Distance(computer.buf_, codes4, &dim);
+        L1DistanceBatch4(reinterpret_cast<const float*>(computer.buf_),
+                         this->dim_,
+                         reinterpret_cast<const float*>(codes1),
+                         reinterpret_cast<const float*>(codes2),
+                         reinterpret_cast<const float*>(codes3),
+                         reinterpret_cast<const float*>(codes4),
+                         dists1,
+                         dists2,
+                         dists3,
+                         dists4);
     } else {
         dists1 = 0.0F;
         dists2 = 0.0F;

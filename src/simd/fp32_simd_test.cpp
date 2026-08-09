@@ -19,6 +19,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "fixtures.h"
+#include "simd/basic_func.h"
 #include "simd_status.h"
 
 using namespace vsag;
@@ -237,6 +238,51 @@ TEST_CASE("FP32 SIMD Compute", "[ut][simd]") {
         for (uint64_t i = 0; i < count; i += 4) {
             TEST_FP32_COMPUTE_ACCURACY_BATCH4(FP32ComputeIP, FP32ComputeIPBatch4);
             TEST_FP32_COMPUTE_ACCURACY_BATCH4(FP32ComputeL2Sqr, FP32ComputeL2SqrBatch4);
+        }
+    }
+}
+
+TEST_CASE("FP32 L1 Batch4 matches standalone distances", "[ut][simd][l1]") {
+    const std::vector<uint64_t> dims = {1, 5, 16, 64, 127, 217};
+    for (const auto dim : dims) {
+        const auto vectors = fixtures::generate_vectors(5, dim);
+        const auto* query = vectors.data();
+        const auto* codes1 = query + dim;
+        const auto* codes2 = codes1 + dim;
+        const auto* codes3 = codes2 + dim;
+        const auto* codes4 = codes3 + dim;
+        const std::vector<float> expected = {L1Distance(query, codes1, &dim),
+                                             L1Distance(query, codes2, &dim),
+                                             L1Distance(query, codes3, &dim),
+                                             L1Distance(query, codes4, &dim)};
+
+        std::vector<float> generic_result(4, 0.0F);
+        generic::L1DistanceBatch4(query,
+                                  dim,
+                                  codes1,
+                                  codes2,
+                                  codes3,
+                                  codes4,
+                                  generic_result[0],
+                                  generic_result[1],
+                                  generic_result[2],
+                                  generic_result[3]);
+
+        std::vector<float> dispatched_result(4, 0.0F);
+        L1DistanceBatch4(query,
+                         dim,
+                         codes1,
+                         codes2,
+                         codes3,
+                         codes4,
+                         dispatched_result[0],
+                         dispatched_result[1],
+                         dispatched_result[2],
+                         dispatched_result[3]);
+
+        for (uint64_t i = 0; i < 4; ++i) {
+            REQUIRE(fixtures::dist_t(generic_result[i]) == fixtures::dist_t(expected[i]));
+            REQUIRE(fixtures::dist_t(dispatched_result[i]) == fixtures::dist_t(expected[i]));
         }
     }
 }
