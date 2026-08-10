@@ -261,7 +261,7 @@ EvalDataset::Load(const std::string& filename) {
                                    std::sqrt(vsag::InnerProduct(query1, query1, qty_ptr) *
                                              vsag::InnerProduct(query2, query2, qty_ptr));
                 };
-            } else if (metric == "manhattan" || metric == "l1") {
+            } else if (metric == "l1") {
                 obj->distance_func_ = vsag::L1Distance;
             }
         } else {
