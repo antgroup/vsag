@@ -100,6 +100,22 @@ SparseTermDataCell::SortPostingListByValue(uint16_t* ids,
 
 void
 SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& computer) const {
+    query_impl(global_dists, computer, nullptr);
+}
+
+uint64_t
+SparseTermDataCell::Query(float* global_dists,
+                          const SparseTermComputerPtr& computer,
+                          SparseEvaluationTracker& evaluation_tracker) const {
+    evaluation_tracker.BeginWindow();
+    query_impl(global_dists, computer, &evaluation_tracker);
+    return evaluation_tracker.Count();
+}
+
+void
+SparseTermDataCell::query_impl(float* global_dists,
+                               const SparseTermComputerPtr& computer,
+                               SparseEvaluationTracker* evaluation_tracker) const {
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();
         auto term = computer->GetTerm(it);
@@ -119,6 +135,9 @@ SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& comp
         const auto term_count = computer->GetTermScanCount(posting_count);
         const auto* term_ids = term_ids_[term]->data();
         const auto* term_data = term_datas_[term]->data();
+        if (evaluation_tracker != nullptr) {
+            evaluation_tracker->Mark(term_ids, term_count);
+        }
 
         if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
             computer->ScanForAccumulateSQ8(it, term_ids, term_data, term_count, global_dists);

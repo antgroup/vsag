@@ -75,6 +75,7 @@ public:
         SearchResult_t result;
         result.dists = scores.data();
         result.ids = results.data();
+        result.other_result = nullptr;
         for (int i = 0; i < num_vectors; ++i) {
             auto ret = vsag_index_knn_search(
                 index, datas.data() + i * dim, dim, topk, hgraph_search_parameters, &result);
@@ -152,6 +153,25 @@ TEST_CASE("vsag_c_api basic test", "[vsag_c_api][ut]") {
         vsag_index_destroy(index2);
     }
 
+    vsag_index_destroy(index);
+}
+
+TEST_CASE("vsag_c_api statistics are opt-in and owned", "[vsag_c_api][ut]") {
+    auto index = vsag_index_factory(index_name, index_param);
+    REQUIRE(index != nullptr);
+    VsagTestCase test_case;
+    REQUIRE(vsag_index_build(index, test_case.datas.data(), test_case.ids.data(), dim, num_vectors)
+                .code == VSAG_SUCCESS);
+    std::vector<int64_t> ids(1);
+    std::vector<float> dists(1);
+    SearchResult_t result{dists.data(), ids.data(), 0, nullptr};
+    REQUIRE(vsag_search_result_enable_statistics(&result).code == VSAG_SUCCESS);
+    REQUIRE(vsag_index_knn_search(
+                index, test_case.datas.data(), dim, 1, hgraph_search_parameters, &result)
+                .code == VSAG_SUCCESS);
+    REQUIRE(vsag_search_result_get_statistics(&result) != nullptr);
+    vsag_search_result_destroy_statistics(&result);
+    REQUIRE(vsag_search_result_get_statistics(&result) == nullptr);
     vsag_index_destroy(index);
 }
 
@@ -549,6 +569,30 @@ TEST_CASE("vsag_c_api search error paths", "[vsag_c_api][ut]") {
 
     auto filter_func = [](int64_t id) -> bool { return id >= 0; };
 
+    REQUIRE(vsag_index_knn_search(
+                index, test_case.datas.data(), dim, topk, hgraph_search_parameters, nullptr)
+                .code != VSAG_SUCCESS);
+    REQUIRE(vsag_index_knn_search_with_filter(index,
+                                              test_case.datas.data(),
+                                              dim,
+                                              topk,
+                                              hgraph_search_parameters,
+                                              filter_func,
+                                              nullptr)
+                .code != VSAG_SUCCESS);
+    REQUIRE(vsag_index_range_search(
+                index, test_case.datas.data(), dim, 10.0F, topk, hgraph_search_parameters, nullptr)
+                .code != VSAG_SUCCESS);
+    REQUIRE(vsag_index_range_search_with_filter(index,
+                                                test_case.datas.data(),
+                                                dim,
+                                                10.0F,
+                                                topk,
+                                                hgraph_search_parameters,
+                                                filter_func,
+                                                nullptr)
+                .code != VSAG_SUCCESS);
+
     constexpr const char* invalid_search_parameters = "not-json";
     ret = vsag_index_knn_search(
         index, test_case.datas.data(), dim, topk, invalid_search_parameters, &result);
@@ -701,6 +745,87 @@ TEST_CASE("vsag_c_api range search k validation", "[vsag_c_api][ut]") {
                                   &result);
     REQUIRE(ret.code == VSAG_SUCCESS);
     REQUIRE(result.count <= small_k);
+
+    vsag_index_destroy(index);
+}
+
+TEST_CASE("vsag_c_api search statistics ownership", "[vsag_c_api][ut]") {
+    REQUIRE(vsag_search_result_get_statistics(nullptr) == nullptr);
+
+    auto index = vsag_index_factory(index_name, index_param);
+    REQUIRE(index != nullptr);
+    VsagTestCase test_case;
+    auto ret =
+        vsag_index_build(index, test_case.datas.data(), test_case.ids.data(), dim, num_vectors);
+    REQUIRE(ret.code == VSAG_SUCCESS);
+
+    std::vector<int64_t> ids(3);
+    std::vector<float> dists(3);
+    SearchResult_t result{.dists = dists.data(), .ids = ids.data()};
+    REQUIRE(vsag_search_result_enable_statistics(&result).code == VSAG_SUCCESS);
+    ret = vsag_index_knn_search(
+        index, test_case.datas.data(), dim, 3, hgraph_search_parameters, &result);
+    REQUIRE(ret.code == VSAG_SUCCESS);
+    REQUIRE(vsag_search_result_get_statistics(&result) != nullptr);
+    vsag_search_result_destroy_statistics(&result);
+    REQUIRE(result.other_result == nullptr);
+    REQUIRE(vsag_search_result_get_statistics(&result) == nullptr);
+
+    vsag_index_destroy(index);
+}
+
+TEST_CASE("vsag_c_api statistics opt-in tolerates legacy uninitialized storage",
+          "[vsag_c_api][ut]") {
+    std::vector<int64_t> ids(1);
+    std::vector<float> dists(1);
+    SearchResult_t result;
+    result.dists = dists.data();
+    result.ids = ids.data();
+    result.count = 0;
+
+    REQUIRE(vsag_search_result_enable_statistics(&result).code == VSAG_SUCCESS);
+    vsag_search_result_destroy_statistics(&result);
+    REQUIRE(result.other_result == nullptr);
+}
+
+TEST_CASE("vsag_c_api failed searches consume statistics opt-in", "[vsag_c_api][ut]") {
+    auto index = vsag_index_factory(index_name, index_param);
+    REQUIRE(index != nullptr);
+    VsagTestCase test_case;
+    REQUIRE(vsag_index_build(index, test_case.datas.data(), test_case.ids.data(), dim, num_vectors)
+                .code == VSAG_SUCCESS);
+
+    std::vector<int64_t> ids(1);
+    std::vector<float> dists(1);
+    SearchResult_t result{.dists = dists.data(), .ids = ids.data()};
+    auto filter = [](int64_t) { return true; };
+
+    auto require_consumed = [&](auto&& search) {
+        REQUIRE(vsag_search_result_enable_statistics(&result).code == VSAG_SUCCESS);
+        REQUIRE(search().code != VSAG_SUCCESS);
+        REQUIRE(result.other_result == nullptr);
+        REQUIRE(vsag_search_result_enable_statistics(&result).code == VSAG_SUCCESS);
+        vsag_search_result_destroy_statistics(&result);
+    };
+
+    require_consumed([&] {
+        return vsag_index_knn_search(index, test_case.datas.data(), dim, 0, "{}", &result);
+    });
+    require_consumed([&] {
+        return vsag_index_knn_search_with_filter(
+            index, test_case.datas.data(), dim, 0, "{}", filter, &result);
+    });
+    require_consumed([&] {
+        return vsag_index_range_search(index, test_case.datas.data(), dim, 1.0F, 0, "{}", &result);
+    });
+    require_consumed([&] {
+        return vsag_index_range_search_with_filter(
+            index, test_case.datas.data(), dim, 1.0F, 0, "{}", filter, &result);
+    });
+    require_consumed([&] {
+        return vsag_index_knn_search(
+            index, test_case.datas.data(), dim, 1, "not valid JSON", &result);
+    });
 
     vsag_index_destroy(index);
 }

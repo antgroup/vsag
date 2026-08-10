@@ -103,6 +103,9 @@ private:
 private:
     Allocator* allocator_{nullptr};
     std::shared_ptr<SparseDmqQuantizer> quantizer_;
+    static_assert(SparseDmqQuantizer::BITS == 8, "DMQ backend classification requires 8-bit codes");
+    // Sparse DMQ has one fixed 8-bit residual representation; update this with any new encoding.
+    DistanceEvaluationBackend backend_{DistanceEvaluationBackend::SPARSE_SQ8};
     Vector<uint64_t> offsets_;
     Vector<uint8_t> codes_;
 };

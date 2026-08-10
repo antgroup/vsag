@@ -633,6 +633,10 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             }
             inner_search_param.distance_batch_func(
                 custom_labels.data(), batch_count, scores + offset);
+            if (ctx != nullptr and ctx->stats != nullptr) {
+                ctx->stats->AddDistance(
+                    ctx->distance_phase, DistanceEvaluationBackend::UNKNOWN, batch_count);
+            }
             for (uint64_t i = 0; i < batch_count; ++i) {
                 CHECK_ARGUMENT(std::isfinite(scores[offset + i]),
                                "distance callback must return finite scores");

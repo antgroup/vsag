@@ -78,11 +78,34 @@ BucketDistanceProvider::BucketDistanceProvider(std::shared_ptr<BucketInterface> 
 }
 
 float
-BucketDistanceProvider::QueryDistance(InnerIdType id, QueryContext* /*ctx*/) const {
+BucketDistanceProvider::QueryDistance(InnerIdType id, QueryContext* ctx) const {
     if (not IsValid(id)) {
         return std::numeric_limits<float>::infinity();
     }
-    return bucket_->QueryOneById(computer_, bucket_id_, id);
+    const auto distance = bucket_->QueryOneById(computer_, bucket_id_, id);
+    if (ctx != nullptr and ctx->stats != nullptr) {
+        ctx->stats->AddDistance(ctx->distance_phase, bucket_->backend_);
+    }
+    return distance;
+}
+
+void
+BucketDistanceProvider::BatchQueryDistance(float* distances,
+                                           const InnerIdType* ids,
+                                           InnerIdType count,
+                                           QueryContext* ctx) const {
+    uint64_t evaluated = 0;
+    for (InnerIdType i = 0; i < count; ++i) {
+        if (not IsValid(ids[i])) {
+            distances[i] = std::numeric_limits<float>::infinity();
+            continue;
+        }
+        distances[i] = bucket_->QueryOneById(computer_, bucket_id_, ids[i]);
+        ++evaluated;
+    }
+    if (ctx != nullptr and ctx->stats != nullptr) {
+        ctx->stats->AddDistance(ctx->distance_phase, bucket_->backend_, evaluated);
+    }
 }
 
 float

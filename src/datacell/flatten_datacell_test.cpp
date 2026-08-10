@@ -719,7 +719,11 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
         REQUIRE(std::abs(pair_dists[id] - flatten->ComputePairVectors(0, id)) <= 1e-6F);
     }
     std::vector<float> id_dists(count);
-    flatten->QueryById(id_dists.data(), 0, build_ids.data(), count);
+    SearchStatistics stats;
+    QueryContext ctx{.stats = &stats};
+    flatten->QueryById(id_dists.data(), 0, build_ids.data(), count, &ctx);
+    auto statistics = JsonType::Parse(stats.Dump());
+    REQUIRE(statistics["distance_evaluations_by_backend"]["rabitq"].GetUint64() == count);
     for (InnerIdType id = 0; id < count; ++id) {
         REQUIRE(std::abs(id_dists[id] - pair_dists[id]) <= 1e-6F);
     }
@@ -756,7 +760,9 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
     optimized_build->FinalizeOptimizedBuild();
     REQUIRE_FALSE(optimized_build->IsOptimizedBuildActive());
     REQUIRE(std::abs(flatten->ComputePairVectors(0, 2) - build_pair_distance) <= 1e-5F);
-    flatten->QueryById(id_dists.data(), 0, build_ids.data(), count);
+    flatten->QueryById(id_dists.data(), 0, build_ids.data(), count, &ctx);
+    statistics = JsonType::Parse(stats.Dump());
+    REQUIRE(statistics["distance_evaluations_by_backend"]["rabitq"].GetUint64() == 2 * count);
     for (InnerIdType id = 0; id < count; ++id) {
         REQUIRE(std::abs(id_dists[id] - flatten->ComputePairVectors(0, id)) <= 1e-5F);
     }

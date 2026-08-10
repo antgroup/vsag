@@ -148,42 +148,56 @@ TEST_CASE("index empty input test", "[ut][index_impl]") {
     vsag::FilterPtr filter_ptr = nullptr;
     vsag::IteratorContext* iter_ctx = nullptr;
     vsag::SearchParam search_param(true, parameters, filter_ptr, nullptr);
+    auto require_zero_statistics = [](const vsag::DatasetPtr& result) {
+        auto statistics = vsag::JsonType::Parse(result->GetStatistics());
+        REQUIRE(statistics["distance_evaluations"].GetUint64() == 0);
+        REQUIRE(statistics["complete"].GetBool());
+    };
 
     auto search_result = index->KnnSearch(query, k, parameters, invalid);
     REQUIRE(search_result.has_value());
     REQUIRE(search_result.value()->GetDim() == 0);
+    require_zero_statistics(search_result.value());
 
     search_result = index->KnnSearch(query, k, parameters, filter);
     REQUIRE(search_result.has_value());
     REQUIRE(search_result.value()->GetDim() == 0);
+    require_zero_statistics(search_result.value());
 
     search_result = index->KnnSearch(query, k, parameters, filter_ptr);
     REQUIRE(search_result.has_value());
     REQUIRE(search_result.value()->GetDim() == 0);
+    require_zero_statistics(search_result.value());
 
     search_result = index->KnnSearch(query, k, search_param);
     REQUIRE(search_result.has_value());
     REQUIRE(search_result.value()->GetDim() == 0);
+    require_zero_statistics(search_result.value());
 
     search_result = index->KnnSearch(query, k, parameters, filter_ptr, iter_ctx, true);
     REQUIRE(search_result.has_value());
     REQUIRE(search_result.value()->GetDim() == 0);
+    require_zero_statistics(search_result.value());
 
     search_result = index->RangeSearch(query, radius, parameters, limited_size);
     REQUIRE(search_result.has_value());
     REQUIRE(search_result.value()->GetDim() == 0);
+    require_zero_statistics(search_result.value());
 
     search_result = index->RangeSearch(query, radius, parameters, invalid, limited_size);
     REQUIRE(search_result.has_value());
     REQUIRE(search_result.value()->GetDim() == 0);
+    require_zero_statistics(search_result.value());
 
     search_result = index->RangeSearch(query, radius, parameters, filter, limited_size);
     REQUIRE(search_result.has_value());
     REQUIRE(search_result.value()->GetDim() == 0);
+    require_zero_statistics(search_result.value());
 
     search_result = index->RangeSearch(query, radius, parameters, filter_ptr, limited_size);
     REQUIRE(search_result.has_value());
     REQUIRE(search_result.value()->GetDim() == 0);
+    require_zero_statistics(search_result.value());
 }
 
 class IdentifyAllocator : public vsag::Allocator {

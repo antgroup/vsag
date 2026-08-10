@@ -20,6 +20,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "common.h"
 #include "index_common_param.h"
+#include "query_context.h"
 #include "utils/search_threshold.h"
 #include "vsag/index.h"
 namespace vsag {
@@ -58,7 +59,7 @@ public:
 
 #define CHECK_QUERY_RETURN_EMPTY_DATASET(query) \
     if ((query)->GetNumElements() == 0) {       \
-        return DatasetImpl::MakeEmptyDataset(); \
+        return make_empty_search_result();      \
     }
 #define CHECK_IMMUTABLE_INDEX(operation_str)                                       \
     if (this->inner_index_->immutable_.load(std::memory_order_acquire)) {          \
@@ -310,7 +311,7 @@ public:
         }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return DatasetImpl::MakeEmptyDataset();
+            return make_empty_search_result();
         }
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, invalid));
     }
@@ -326,7 +327,7 @@ public:
         }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return DatasetImpl::MakeEmptyDataset();
+            return make_empty_search_result();
         }
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, filter));
     }
@@ -342,7 +343,7 @@ public:
         }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return DatasetImpl::MakeEmptyDataset();
+            return make_empty_search_result();
         }
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, filter));
     }
@@ -355,7 +356,7 @@ public:
         }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(search_param.parameters)) {
-            return DatasetImpl::MakeEmptyDataset();
+            return make_empty_search_result();
         }
         if (search_param.is_iter_filter) {
             SAFE_CALL(return this->inner_index_->KnnSearch(query,
@@ -384,7 +385,7 @@ public:
         }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return DatasetImpl::MakeEmptyDataset();
+            return make_empty_search_result();
         }
         SAFE_CALL(return this->inner_index_->KnnSearch(
             query, k, parameters, filter, nullptr, iter_ctx, is_last_filter));
@@ -423,7 +424,7 @@ public:
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return DatasetImpl::MakeEmptyDataset();
+            return make_empty_search_result();
         }
         SAFE_CALL(return this->inner_index_->RangeSearch(query, radius, parameters, limited_size));
     }
@@ -436,7 +437,7 @@ public:
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return DatasetImpl::MakeEmptyDataset();
+            return make_empty_search_result();
         }
         SAFE_CALL(return this->inner_index_->RangeSearch(
             query, radius, parameters, invalid, limited_size));
@@ -450,7 +451,7 @@ public:
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return DatasetImpl::MakeEmptyDataset();
+            return make_empty_search_result();
         }
         SAFE_CALL(return this->inner_index_->RangeSearch(
             query, radius, parameters, filter, limited_size));
@@ -464,7 +465,7 @@ public:
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return DatasetImpl::MakeEmptyDataset();
+            return make_empty_search_result();
         }
         SAFE_CALL(return this->inner_index_->RangeSearch(
             query, radius, parameters, filter, limited_size));
@@ -538,7 +539,7 @@ public:
         }
         SAFE_CALL(ValidateSearchThreshold(request.threshold_);
                   if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(request.params_str_)) {
-                      return DatasetImpl::MakeEmptyDataset();
+                      return make_empty_search_result();
                   } return this->inner_index_->SearchWithRequest(request));
     }
 
@@ -627,6 +628,26 @@ private:
         } catch (const std::exception& e) {
             return tl::unexpected(Error(ErrorType::UNKNOWN_ERROR, e.what()));
         }
+    }
+
+    DatasetPtr
+    make_empty_search_result() const {
+        auto result = DatasetImpl::MakeEmptyDataset();
+        switch (GetIndexType()) {
+            case IndexType::HGRAPH:
+            case IndexType::IVF:
+            case IndexType::PYRAMID:
+            case IndexType::BRUTEFORCE:
+            case IndexType::SINDI:
+            case IndexType::SIMQ: {
+                SearchStatistics statistics;
+                result->Statistics(statistics.Dump());
+                break;
+            }
+            default:
+                break;
+        }
+        return result;
     }
 
     bool

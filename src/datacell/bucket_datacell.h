@@ -231,6 +231,8 @@ BucketDataCell<QuantTmpl, IOTmpl>::BucketDataCell(const QuantizerParamPtr& quant
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
     this->code_size_ = quantizer_->GetCodeSize();
     this->use_residual_ = use_residual;
+    this->backend_ =
+        QuantizerDistanceBackend<QuantTmpl>::Get(static_cast<const QuantTmpl&>(*quantizer_));
 
     datas_.Resize(bucket_count);
 }
@@ -546,6 +548,8 @@ void
 BucketDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
     BucketInterface::Deserialize(reader);
     quantizer_->Deserialize(reader);
+    this->backend_ =
+        QuantizerDistanceBackend<QuantTmpl>::Get(static_cast<const QuantTmpl&>(*quantizer_));
     for (BucketIdType i = 0; i < this->bucket_count_; ++i) {
         datas_[i].Deserialize(reader);
         StreamReader::ReadVector(reader, inner_ids_[i]);

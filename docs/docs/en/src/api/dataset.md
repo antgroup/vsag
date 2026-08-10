@@ -154,3 +154,33 @@ destructor frees each `vectors_` separately.
 - [Index](index_class.md) — the methods that consume and return datasets.
 - [Search Request & Filters](search.md) — wrapping a query dataset in a `SearchRequest`.
 - [Auxiliary Types](types.md) — `AttributeSet` and attribute value types.
+
+## Per-search distance statistics
+
+Results from maintained HGraph, BruteForce, IVF, Pyramid, SINDI, and SIMQ searches include an
+additive `GetStatistics()` contract:
+
+```json
+{"distance_evaluations":1164,
+ "distance_evaluations_by_phase":{"routing":64,"approximate":1000,"rerank":100},
+ "distance_evaluations_by_backend":{"sq8":1000,"fp32":100,"unknown":0},
+ "complete":true}
+```
+
+One logical query-to-candidate distance or bound evaluation counts once. A batch of `N` counts
+`N`; duplicate evaluations count each time; pre-distance rejects, filters, graph edges, prefetches,
+heap operations, and skipped lower bounds count zero. A lower bound and later exact rerank count
+separately. Phases are `routing`, `approximate`, and `rerank`; backends are stable representation
+families such as `fp32`, `fp16`, `bf16`, `int8`, `sq8`, `sq4`, `pq`, `pq_fastscan`, `rabitq`,
+`binary`, and sparse families, never ISA or batch variants.
+
+The total equals the phase sum. Known backend values equal the total; unknown work is in `unknown`
+and sets `complete` to `false`. Values are unsigned 64-bit JSON integers with saturating addition.
+Legacy `dist_cmp` and `reorder_distance_count` remain available unchanged for compatibility.
+Python preserves `(ids, distances)` tuple unpacking. Opt in with
+`knn_search_with_statistics`: the dense overload returns one statistics JSON string, while the
+sparse CSR overload returns one string per query. `range_search_with_statistics` returns the range
+arrays plus one statistics JSON string. C preserves `SearchResult_t`; call
+`vsag_search_result_enable_statistics()` before a search and release returned statistics with
+`vsag_search_result_destroy_statistics()`. Legacy callers retain `other_result` ownership and
+incur no statistics allocation. Legacy HNSW and DiskANN are explicit non-goals.

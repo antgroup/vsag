@@ -371,6 +371,8 @@ DatasetPtr
 BruteForce::SearchWithRequest(const SearchRequest& request) const {
     ValidateSearchThreshold(request.threshold_);
     std::shared_lock read_lock(this->global_mutex_);
+    SearchStatistics statistics;
+    QueryContext query_context{.stats = &statistics};
 
     const bool use_custom_distance = request.distance_batch_func_ != nullptr;
     if (use_custom_distance) {
@@ -407,7 +409,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
     auto radius = is_range ? request.radius_ : std::numeric_limits<float>::max();
 
     if (total_count_.load() == 0) {
-        return make_empty_result();
+        return make_empty_result(statistics.Dump());
     }
 
     DistHeapPtr heap = nullptr;
@@ -458,8 +460,10 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
                 const auto label = this->label_table_->GetLabelById(inner_id);
                 request.distance_batch_func_(&label, 1, &dist);
                 CHECK_ARGUMENT(std::isfinite(dist), "distance callback must return finite scores");
+                statistics.AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
+                                       DistanceEvaluationBackend::UNKNOWN);
             } else {
-                this->inner_codes_->Query(&dist, computer, &inner_id, 1);
+                this->inner_codes_->Query(&dist, computer, &inner_id, 1, &query_context);
             }
             reasoning_ctx->SetTrueDistance(inner_id, dist);
         }
@@ -507,7 +511,10 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
             custom_inner_ids.clear();
             custom_labels.clear();
         };
-
+        QueryContext local_query_context = query_context;
+        // Worker distances are counted locally and merged once below. Keep the statistics sink for
+        // legacy IO counters, but suppress only the datacell's per-call distance aggregation.
+        local_query_context.track_distance_evaluations = false;
         for (InnerIdType i = start; i < end; ++i) {
             if (attr_filter != nullptr and not attr_filter->CheckValid(i)) {
                 if (reasoning != nullptr) {
@@ -524,7 +531,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
                     }
                 } else {
                     float dist = 0.0F;
-                    inner_codes_->Query(&dist, computer, &i, 1);
+                    inner_codes_->Query(&dist, computer, &i, 1, &local_query_context);
                     ++dist_cmp_local;
                     if (reasoning != nullptr) {
                         reasoning->RecordVisit(i, dist, 0);
@@ -544,6 +551,10 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         }
         flush_custom_batch();
         dist_cmp.fetch_add(dist_cmp_local, std::memory_order_relaxed);
+        statistics.AddDistance(
+            SearchStatistics::DistancePhase::APPROXIMATE,
+            use_custom_distance ? DistanceEvaluationBackend::UNKNOWN : inner_codes_->backend_,
+            dist_cmp_local);
     };
 
     auto count = total_count_.load();
@@ -616,7 +627,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         result->Reasoning(reasoning_ctx->GenerateReport());
     }
 
-    JsonType stats;
+    auto stats = JsonType::Parse(statistics.Dump());
     stats["dist_cmp"].SetInt(dist_cmp.load(std::memory_order_relaxed));
     result->Statistics(stats.Dump());
 

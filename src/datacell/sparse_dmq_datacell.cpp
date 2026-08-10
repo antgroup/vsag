@@ -51,7 +51,6 @@ SparseDmqDataCell::Query(float* result_dists,
                          const InnerIdType* idx,
                          InnerIdType id_count,
                          QueryContext* ctx) {
-    (void)ctx;
     CHECK_ARGUMENT(result_dists != nullptr, "SparseDmqDataCell result buffer is null");
     if (id_count != 0) {
         CHECK_ARGUMENT(idx != nullptr, "SparseDmqDataCell ids are null");
@@ -61,6 +60,9 @@ SparseDmqDataCell::Query(float* result_dists,
     std::shared_lock lock(this->mutex_);
     for (InnerIdType index = 0; index < id_count; ++index) {
         dmq_computer->ComputeDist(GetCode(idx[index]), result_dists + index);
+    }
+    if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations) {
+        ctx->stats->AddDistance(ctx->distance_phase, backend_, id_count);
     }
 }
 

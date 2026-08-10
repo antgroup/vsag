@@ -220,7 +220,8 @@ private:
                 Allocator* allocator,
                 bool use_term_lists_heap_insert,
                 const SparseVector* original_query = nullptr,
-                ReasoningContext* reasoning_ctx = nullptr) const;
+                ReasoningContext* reasoning_ctx = nullptr,
+                SearchStatistics* statistics = nullptr) const;
 
     template <InnerSearchMode mode>
     DatasetPtr
@@ -229,7 +230,8 @@ private:
                           Allocator* allocator,
                           bool use_term_lists_heap_insert,
                           const SparseVector* original_query = nullptr,
-                          ReasoningContext* reasoning_ctx = nullptr) const;
+                          ReasoningContext* reasoning_ctx = nullptr,
+                          SearchStatistics* statistics = nullptr) const;
 
     bool
     UseTermListsHeapInsert(const SINDISearchParameter& search_param,
@@ -295,11 +297,12 @@ private:
                               const SparseTermComputerPtr& computer,
                               ImmutableMappedQueryTerms& mapped_terms) const;
 
-    void
+    uint64_t
     scan_immutable_window_by_mapped_terms(float* dists,
                                           const ImmutableSINDIWindow& window,
                                           const SparseTermComputerPtr& computer,
-                                          const ImmutableMappedQueryTerms& mapped_terms) const;
+                                          const ImmutableMappedQueryTerms& mapped_terms,
+                                          SparseEvaluationTracker& evaluation_tracker) const;
 
     template <InnerSearchMode mode, InnerSearchType type>
     void

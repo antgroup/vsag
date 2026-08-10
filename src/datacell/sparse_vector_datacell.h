@@ -41,6 +41,9 @@ public:
           QueryContext* ctx = nullptr) override {
         auto comp = std::static_pointer_cast<Computer<QuantTmpl>>(computer);
         this->query(result_dists, comp, idx, id_count);
+        if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations and
+            id_count > 0)
+            ctx->stats->AddDistance(ctx->distance_phase, backend_, id_count);
     }
 
     ComputerInterfacePtr
@@ -195,6 +198,7 @@ private:
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 
     Allocator* const allocator_{nullptr};
+    DistanceEvaluationBackend backend_{DistanceEvaluationBackend::UNKNOWN};
     std::shared_ptr<MemoryBlockIO> offset_io_{nullptr};
     uint64_t current_offset_{0};
     uint64_t max_code_size_{0};

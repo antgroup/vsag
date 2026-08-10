@@ -132,6 +132,16 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
 
     SECTION("test query") {
         std::vector<float> dists(count_base, 0);
+        SparseEvaluationTracker evaluation_tracker(count_base, allocator.get());
+        const auto evaluated = data_cell->Query(dists.data(), computer, evaluation_tracker);
+        REQUIRE(evaluated == count_base);
+        for (auto i = 0; i < dists.size(); i++) {
+            REQUIRE(std::abs(dists[i] - exp_dists[i]) < 1e-3);
+        }
+        std::fill(dists.begin(), dists.end(), 0.0F);
+        REQUIRE(data_cell->Query(dists.data(), computer, evaluation_tracker) == count_base);
+
+        std::fill(dists.begin(), dists.end(), 0.0F);
         data_cell->Query(dists.data(), computer);
         for (auto i = 0; i < dists.size(); i++) {
             REQUIRE(std::abs(dists[i] - exp_dists[i]) < 1e-3);
@@ -348,7 +358,8 @@ TEST_CASE("SparseTermDatacell Sorts Posting Lists By Value", "[ut][SparseTermDat
     search_params.term_prune_ratio = 0.5F;
     auto computer = std::make_shared<SparseTermComputer>(query, search_params, allocator.get());
     std::vector<float> dists(5, 0.0F);
-    data_cell.Query(dists.data(), computer);
+    SparseEvaluationTracker evaluation_tracker(dists.size(), allocator.get());
+    REQUIRE(data_cell.Query(dists.data(), computer, evaluation_tracker) == 2);
     REQUIRE(dists[0] == 0.0F);
     REQUIRE(dists[1] < 0.0F);
     REQUIRE(dists[2] == 0.0F);

@@ -280,6 +280,31 @@ TEST_CASE("HGraph tunes FP32 to MRLE RaBitQ Split", "[ft][rabitq_split][hgraph][
     TestIndex::TestSerializeFile(index, reloaded, dataset, kSplitSearchParam, true);
 }
 
+TEST_CASE("HGraph RaBitQ reorder probes use the rerank statistics phase",
+          "[ft][rabitq_split][hgraph][statistics]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 128;
+    constexpr uint64_t base_count = 200;
+
+    auto param =
+        HGraphRaBitQSplitTestIndex::GenerateBuildParam("l2", dim, "memory_io", "", 3, 5, true);
+    auto index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param, true);
+    auto dataset = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, base_count, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = get_one_query(dataset->query_, 0);
+    auto result = index->KnnSearch(query, 10, kSplitSearchParam);
+    REQUIRE(result.has_value());
+    auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
+    const auto lower_bound_probes = statistics["reorder_lower_bound_probe_count"].GetUint64();
+    const auto reorder_distances = statistics["reorder_distance_count"].GetUint64();
+    const auto rerank = statistics["distance_evaluations_by_phase"]["rerank"].GetUint64();
+
+    REQUIRE(lower_bound_probes > 0);
+    REQUIRE(reorder_distances > 0);
+    REQUIRE(rerank == lower_bound_probes + reorder_distances);
+}
+
 TEST_CASE("HGraph RaBitQ Split ODescent optimized build", "[ft][rabitq_split][hgraph][odescent]") {
     using namespace fixtures;
     constexpr int64_t dim = 128;

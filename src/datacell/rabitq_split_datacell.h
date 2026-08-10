@@ -212,6 +212,7 @@ public:
           QueryContext* ctx = nullptr) override {
         if (this->optimized_build_active_) {
             this->query_optimized_build_codes(result_dists, computer, idx, id_count);
+            this->add_distance_evaluations(ctx, id_count);
             return;
         }
         auto* comp = this->get_bottom_computer(computer);
@@ -220,9 +221,11 @@ public:
                 if constexpr (OneBitIOTmpl::InMemory and not SupplementIOTmpl::InMemory) {
                     this->query_full_dist_by_supplement_multiread(
                         result_dists, comp, idx, id_count, ctx);
+                    this->add_distance_evaluations(ctx, id_count);
                     return;
                 }
                 this->query_full_dist_by_multiread(result_dists, comp, idx, id_count, ctx);
+                this->add_distance_evaluations(ctx, id_count);
                 return;
             }
         }
@@ -237,6 +240,7 @@ public:
             }
             this->compute_full_dist(idx[i], comp, result_dists + i, ctx);
         }
+        this->add_distance_evaluations(ctx, id_count);
     }
 
     void
@@ -244,7 +248,7 @@ public:
               InnerIdType query_id,
               const InnerIdType* idx,
               InnerIdType id_count,
-              QueryContext* /*ctx*/ = nullptr) override {
+              QueryContext* ctx = nullptr) override {
         if (not this->optimized_build_active_) {
             // Persisted split storage has no temporary scalar codes. Merge the query once and
             // reuse its full code; optimized builds use the scalar-code path below.
@@ -264,6 +268,7 @@ public:
                 }
                 result_dists[i] = this->bottom_quantizer().Compute(query_code.data, base_code.data);
             }
+            this->add_distance_evaluations(ctx, id_count);
             return;
         }
 
@@ -288,6 +293,7 @@ public:
         if (need_release) {
             this->optimized_build_scalar_codes_->Release(query_code);
         }
+        this->add_distance_evaluations(ctx, id_count);
     }
 
     void
@@ -299,6 +305,7 @@ public:
                           QueryContext* ctx = nullptr) override {
         if (this->optimized_build_active_) {
             this->query_optimized_build_codes(result_dists, computer, idx, id_count);
+            this->add_distance_evaluations(ctx, id_count);
             return;
         }
         auto* comp = this->get_bottom_computer(computer);
@@ -307,10 +314,12 @@ public:
                 if constexpr (OneBitIOTmpl::InMemory and not SupplementIOTmpl::InMemory) {
                     this->query_full_dist_by_supplement_multiread(
                         result_dists, comp, idx, id_count, ctx, hint_dists);
+                    this->add_distance_evaluations(ctx, id_count);
                     return;
                 }
                 this->query_full_dist_by_multiread(
                     result_dists, comp, idx, id_count, ctx, hint_dists);
+                this->add_distance_evaluations(ctx, id_count);
                 return;
             }
         }
@@ -327,6 +336,7 @@ public:
                 hint_dists == nullptr ? std::numeric_limits<float>::max() : hint_dists[i];
             this->compute_full_dist(idx[i], comp, result_dists + i, ctx, hint);
         }
+        this->add_distance_evaluations(ctx, id_count);
     }
 
     void
@@ -338,6 +348,7 @@ public:
                             QueryContext* ctx = nullptr) override {
         if (this->optimized_build_active_) {
             this->query_optimized_build_codes(result_dists, computer, idx, id_count);
+            this->add_distance_evaluations(ctx, id_count);
             return;
         }
         auto* comp = this->get_bottom_computer(computer);
@@ -386,6 +397,7 @@ public:
             this->release_one_bit_code(one_bit_code, one_bit_need_release);
             this->release_supplement_code(supplement_code, supplement_need_release);
         }
+        this->add_distance_evaluations(ctx, id_count);
     }
 
     void
@@ -400,6 +412,7 @@ public:
             if (lower_bounds != nullptr) {
                 std::fill(lower_bounds, lower_bounds + id_count, std::numeric_limits<float>::max());
             }
+            this->add_distance_evaluations(ctx, id_count);
             return;
         }
         auto* comp = this->get_bottom_computer(computer);
@@ -408,6 +421,7 @@ public:
             if (id_count > 1) {
                 this->query_one_bit_lower_bound_by_multiread(
                     result_dists, lower_bounds, comp, idx, id_count, ctx);
+                this->add_distance_evaluations(ctx, id_count);
                 return;
             }
         }
@@ -519,6 +533,7 @@ public:
             }
             this->release_one_bit_code(one_bit_code, one_bit_need_release);
         }
+        this->add_distance_evaluations(ctx, id_count);
     }
 
     ComputerInterfacePtr
@@ -1286,6 +1301,13 @@ private:
     [[nodiscard]] static float
     query_rabitq_error_rate(QueryContext* ctx) {
         return ctx == nullptr ? std::numeric_limits<float>::quiet_NaN() : ctx->rabitq_error_rate;
+    }
+
+    void
+    add_distance_evaluations(QueryContext* ctx, uint64_t count) const {
+        if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations and
+            count > 0)
+            ctx->stats->AddDistance(ctx->distance_phase, DistanceEvaluationBackend::RABITQ, count);
     }
 
     void

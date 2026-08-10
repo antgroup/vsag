@@ -21,6 +21,7 @@
 #include "bucket_datacell_parameter.h"
 #include "index_common_param.h"
 #include "quantization/computer.h"
+#include "query_context.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
@@ -138,6 +139,7 @@ public:
     uint32_t code_size_{0};
     IVFPartitionStrategyPtr strategy_{nullptr};
     bool use_residual_{false};
+    DistanceEvaluationBackend backend_{DistanceEvaluationBackend::UNKNOWN};
 };
 
 }  // namespace vsag

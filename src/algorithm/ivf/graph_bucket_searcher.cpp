@@ -128,7 +128,8 @@ GraphBucketSearcher::search_graph(BucketIdType bucket_id,
     // needs query distances, so use the no-factory provider and make pairwise misuse explicit.
     BucketDistanceProvider distance_provider(bucket, bucket_id, computer, ids, buckets_per_data);
     auto visited = std::make_shared<VisitedList>(bucket_size, allocator_);
-    QueryContext query_context{};
+    QueryContext query_context =
+        param.query_context == nullptr ? QueryContext{} : *param.query_context;
     query_context.reasoning_ctx = reasoning_ctx;
     BasicSearcher searcher(allocator_);
     auto top_candidates = searcher.Search(

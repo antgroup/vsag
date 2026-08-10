@@ -103,6 +103,8 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamRead
         }
     }
     this->quantizer_->Deserialize(reader);
+    backend_ =
+        QuantizerDistanceBackend<QuantTmpl>::Get(static_cast<const QuantTmpl&>(*this->quantizer_));
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -280,6 +282,8 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::SparseVectorDataCell(
     const IndexCommonParam& common_param)
     : allocator_(common_param.allocator_.get()) {
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
+    this->backend_ =
+        QuantizerDistanceBackend<QuantTmpl>::Get(static_cast<const QuantTmpl&>(*this->quantizer_));
     this->io_ = std::make_shared<IOTmpl>(io_param, common_param);
     this->offset_io_ =
         std::make_shared<MemoryBlockIO>(Options::Instance().block_size_limit(), allocator_);
