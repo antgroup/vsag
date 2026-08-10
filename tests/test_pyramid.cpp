@@ -73,7 +73,7 @@ public:
 };
 
 TestDatasetPool PyramidTestIndex::pool{};
-std::vector<int> PyramidTestIndex::dims = fixtures::get_common_used_dims(1, RandomValue(0, 999));
+std::vector<int> PyramidTestIndex::dims = fixtures::get_common_used_dims(1);
 std::vector<std::vector<int>> PyramidTestIndex::levels{{0, 1}, {0, 2}, {0, 1, 2}};
 std::string
 PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric_type,
@@ -227,9 +227,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     const std::string name = "pyramid";
     auto search_param = GeneratePyramidSearchParametersString(100);
     for (auto& dim : dims) {
-        INFO(fmt::format("metric_type={}, dim={}, use_reorder={}, immutable={}",
+        INFO(fmt::format("metric_type={}, dim={}, graph_type={}, use_reorder={}, immutable={}",
                          metric_type,
                          dim,
+                         pyramid_param.graph_type,
                          use_reorder,
                          immutable));
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
