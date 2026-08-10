@@ -515,16 +515,40 @@ TEST_CASE("Pyramid maps MRLE RaBitQ split to base reorder", "[ut][PyramidParamet
     REQUIRE(typed_param != nullptr);
     REQUIRE(typed_param->reorder_source == std::string("base"));
     REQUIRE(typed_param->precise_codes_param == nullptr);
-    REQUIRE(typed_param->store_raw_vector);
-    REQUIRE(typed_param->raw_vector_param != nullptr);
+    REQUIRE_FALSE(typed_param->store_raw_vector);
+    REQUIRE(typed_param->raw_vector_param == nullptr);
     const auto base_json = typed_param->base_codes_param->ToJson();
-    const auto raw_json = typed_param->raw_vector_param->ToJson();
     REQUIRE(base_json["codes_type"].GetString() == std::string("rabitq_split"));
     REQUIRE(base_json["quantization_params"]["type"].GetString() == std::string("tq"));
     REQUIRE(base_json["quantization_params"]["tq_chain"].GetString() == std::string("mrle,rabitq"));
     REQUIRE(base_json["quantization_params"]["mrle_dim"].GetInt() == 64);
     REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_filter"].GetInt() == 3);
     REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_base"].GetInt() == 8);
+}
+
+TEST_CASE("Pyramid maps explicit raw-vector storage for MRLE RaBitQ split",
+          "[ut][PyramidParameters][MRLE]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "tq",
+        "tq_chain": "mrle, rabitq",
+        "mrle_dim": 64,
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "use_reorder": true,
+        "store_raw_vector": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::PyramidParameters>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->store_raw_vector);
+    REQUIRE(typed_param->raw_vector_param != nullptr);
+    const auto raw_json = typed_param->raw_vector_param->ToJson();
     REQUIRE(raw_json["quantization_params"]["type"].GetString() == std::string("fp32"));
 }
 

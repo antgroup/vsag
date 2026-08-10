@@ -38,12 +38,12 @@ FlattenIdDistanceProvider::BatchQueryDistance(float* distances,
 float
 FlattenIdDistanceProvider::PairwiseDistance(InnerIdType id1,
                                             InnerIdType id2,
-                                            const ComputerInterfacePtr&) const {
+                                            const ComputerInterfacePtr& /*computer*/) const {
     return flatten_->ComputePairVectors(id1, id2);
 }
 
 ComputerInterfacePtr
-FlattenIdDistanceProvider::FactoryComputerById(InnerIdType) const {
+FlattenIdDistanceProvider::FactoryComputerById(InnerIdType /*id*/) const {
     throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                         "FlattenIdDistanceProvider cannot create a computer by vector ID");
 }

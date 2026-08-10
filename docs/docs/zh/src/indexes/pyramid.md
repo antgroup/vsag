@@ -116,9 +116,9 @@ auto result = index->KnnSearch(
 }
 ```
 
-Pyramid 使用 split code 的 code-code 距离完成增量 FLAT→GRAPH 晋升，因此默认不再
-保留内部 FP32 副本。需要完整 Analyzer 原始向量指标时，仍可显式启用 raw vector
-存储；未保存原始向量时，Analyzer 会跳过依赖原始 FP32 数据的指标。
+Pyramid 使用 split code 的 code-code 距离完成增量 FLAT→GRAPH 晋升，因此默认不保留
+内部 FP32 副本。需要访问原始向量或完整 Analyzer 指标时，可在构建时将
+`store_raw_vector` 设置为 `true`。
 
 ### MRLE 与 split RaBitQ
 
@@ -138,9 +138,9 @@ Pyramid 使用 split code 的 code-code 距离完成增量 FLAT→GRAPH 晋升�
 ```
 
 该配置使用 3-bit filter planes 构图和搜索、5-bit supplement planes 精排；两部分编码的是
-同一个截断后向量。Pyramid 从 split base datacell 精排，并保留原始 FP32 向量供构图提升和
-统计使用。原始向量副本会占用额外空间；如果 embedding 模型没有针对前缀维度训练，截断
-可能显著降低召回率。
+同一个截断后向量。Pyramid 使用 split code-code 距离完成构图提升，不保留原始 FP32
+向量；除非构建时启用 `store_raw_vector`，否则依赖可解码向量的 Analyzer 指标会被标记为
+不可用。如果 embedding 模型没有针对前缀维度训练，截断可能显著降低召回率。
 
 ## 检索参数
 

@@ -33,6 +33,14 @@ PyramidAnalyzer::GetStats() {
     stats["total_count"].SetInt(this->total_count_);
 
     sample_global();
+    const bool sample_metrics_available = pyramid_->raw_vector_ != nullptr or
+                                          pyramid_->has_precise_reorder() or
+                                          not pyramid_->base_codes_->SupportSplitCodeStorage();
+    stats["sample_metrics_available"].SetBool(sample_metrics_available);
+    if (not sample_metrics_available) {
+        stats["sample_metrics_unavailable_reason"].SetString(
+            "the index does not retain decodable vectors");
+    }
 
     auto analyze_one_hierarchy = [&](IndexNode* root) -> JsonType {
         JsonType h_stats;

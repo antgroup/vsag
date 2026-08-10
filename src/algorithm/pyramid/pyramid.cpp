@@ -1200,6 +1200,7 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
         {PYRAMID_GRAPH_STORAGE_TYPE, {GRAPH_KEY, GRAPH_STORAGE_TYPE_KEY}},
         {PYRAMID_PRECISE_IO_TYPE, {PRECISE_CODES_KEY, IO_PARAMS_KEY, TYPE_KEY}},
         {PYRAMID_BUILD_THREAD_COUNT, {BUILD_THREAD_COUNT_KEY}},
+        {STORE_RAW_VECTOR, {STORE_RAW_VECTOR_KEY}},
         {PYRAMID_NO_BUILD_LEVELS, {NO_BUILD_LEVELS}},
         {PYRAMID_HIERARCHIES, {PYRAMID_HIERARCHIES}},
         {PYRAMID_BASE_PQ_DIM,
@@ -1220,7 +1221,8 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
     mapping_external_param_to_inner(external_param, external_mapping, inner_json);
     MapRaBitQSplitParam(external_param, inner_json);
     ValidateMRLEDim(external_param, common_param.dim_);
-    if (RequiresRawVectorForTransformQuantizer(inner_json)) {
+    if (RequiresRawVectorForTransformQuantizer(inner_json) and
+        not RequiresRawVectorForMRLERaBitQSplit(inner_json)) {
         inner_json[STORE_RAW_VECTOR_KEY].SetBool(true);
     }
     auto pyramid_params = std::make_shared<PyramidParameters>();
@@ -1301,7 +1303,7 @@ Pyramid::add_one_point(const Hierarchy& h,
         graph_node.ids_ = node->ids_;
         graph_node.Init();
 
-        if (base_codes_->SupportSplitCodeStorage()) {
+        if (base_codes_->SupportSplitCodeStorage() and raw_vector_ == nullptr) {
             for (const auto id : node->ids_) {
                 add_one_point(h, &graph_node, id, nullptr);
             }
@@ -1365,6 +1367,8 @@ Pyramid::add_one_point(const Hierarchy& h,
             results = searcher_->Search(
                 node->graph_, distance_provider, vl, search_param, nullptr, nullptr);
             if (support_duplicate_ and not results->Empty()) {
+                // StandardHeap exposes heap storage rather than sorted output, so inspect every
+                // candidate to find the actual nearest neighbor for duplicate detection.
                 const auto* data = results->GetData();
                 auto min_distance = data[0].first;
                 auto min_index = data[0].second;

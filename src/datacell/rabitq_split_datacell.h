@@ -246,6 +246,8 @@ public:
               InnerIdType id_count,
               QueryContext* /*ctx*/ = nullptr) override {
         if (not this->optimized_build_active_) {
+            // Persisted split storage has no temporary scalar codes. Merge the query once and
+            // reuse its full code; optimized builds use the scalar-code path below.
             ByteBuffer query_code(this->code_size_, allocator_);
             ByteBuffer base_code(this->code_size_, allocator_);
             if (not this->GetCodesById(query_id, query_code.data)) {
@@ -260,7 +262,7 @@ public:
                     throw VsagException(ErrorType::INTERNAL_ERROR,
                                         "failed to read split RaBitQ base code");
                 }
-                result_dists[i] = this->quantizer_->Compute(query_code.data, base_code.data);
+                result_dists[i] = this->bottom_quantizer().Compute(query_code.data, base_code.data);
             }
             return;
         }
@@ -768,7 +770,7 @@ public:
         ByteBuffer codes2(this->code_size_, allocator_);
         this->GetCodesById(id1, codes1.data);
         this->GetCodesById(id2, codes2.data);
-        return this->quantizer_->Compute(codes1.data, codes2.data);
+        return this->bottom_quantizer().Compute(codes1.data, codes2.data);
     }
 
     void

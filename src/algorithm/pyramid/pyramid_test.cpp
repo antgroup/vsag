@@ -40,7 +40,8 @@ MakePyramidIndex(uint32_t index_min_size,
                  bool use_rabitq_with_sq8 = false,
                  bool split_rabitq = false,
                  bool use_mrle_split = false,
-                 bool use_mrle_fp32 = false) {
+                 bool use_mrle_fp32 = false,
+                 bool store_raw_vector = false) {
     PyramidTestIndex result;
     vsag::IndexCommonParam common_param;
     common_param.dim_ = PYRAMID_TEST_DIM;
@@ -86,6 +87,7 @@ MakePyramidIndex(uint32_t index_min_size,
     }
     external_param[vsag::PYRAMID_INDEX_MIN_SIZE].SetInt(index_min_size);
     external_param[vsag::PYRAMID_BUILD_THREAD_COUNT].SetUint64(build_thread_count);
+    external_param[vsag::STORE_RAW_VECTOR].SetBool(store_raw_vector);
     if (use_rabitq_with_sq8) {
         external_param[vsag::PYRAMID_BASE_QUANTIZATION_TYPE].SetString("rabitq");
         external_param[vsag::PYRAMID_PRECISE_QUANTIZATION_TYPE].SetString("sq8");
@@ -244,7 +246,7 @@ TEST_CASE("Pyramid promotes flat node at index minimum size", "[ut][pyramid]") {
     }
 }
 
-TEST_CASE("Pyramid MRLE split retains vectors for flat node promotion", "[ut][pyramid][MRLE]") {
+TEST_CASE("Pyramid MRLE split promotes flat nodes without raw vectors", "[ut][pyramid][MRLE]") {
     auto test_index = MakePyramidIndex(3, 4, false, false, true);
     const auto& index = test_index.index;
     std::vector<float> vectors = {
@@ -271,6 +273,42 @@ TEST_CASE("Pyramid MRLE split retains vectors for flat node promotion", "[ut][py
                 .empty());
 
     REQUIRE(GetPyramidSubindexCount(index, "graph_subindexes") == 1);
+    auto stats = vsag::JsonType::Parse(index->GetStats());
+    REQUIRE_FALSE(stats["sample_metrics_available"].GetBool());
+    REQUIRE(stats.Contains("sample_metrics_unavailable_reason"));
+    for (int64_t i = 0; i < 3; ++i) {
+        auto query =
+            MakePyramidDataset(vectors.data() + i * PYRAMID_TEST_DIM, nullptr, paths.data() + i, 1);
+        auto result =
+            index->KnnSearch(query, 1, R"({"pyramid":{"ef_search":10}})", vsag::FilterPtr{});
+        REQUIRE(result->GetDim() == 1);
+        REQUIRE(result->GetIds()[0] == ids[i]);
+    }
+}
+
+TEST_CASE("Pyramid MRLE split stores raw vectors when enabled", "[ut][pyramid][MRLE]") {
+    auto test_index = MakePyramidIndex(3, 1, false, false, true, false, true);
+    const auto& index = test_index.index;
+    std::vector<float> vectors = {
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        1.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        1.0F,
+        0.0F,
+        0.0F,
+    };
+    std::vector<int64_t> ids = {100, 101, 102};
+    std::vector<std::string> paths(3, "tenant");
+
+    REQUIRE(index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), 3)).empty());
+    auto stats = vsag::JsonType::Parse(index->GetStats());
+    REQUIRE(stats["sample_metrics_available"].GetBool());
     for (int64_t i = 0; i < 3; ++i) {
         std::array<float, PYRAMID_TEST_DIM> decoded{};
         index->GetVectorByInnerId(i, decoded.data());
