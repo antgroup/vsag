@@ -1066,7 +1066,7 @@ InnerIndexInterface::cal_distance_by_id(const float* query,
                                         const FlattenInterfacePtr& data,
                                         std::vector<bool>* validity) const {
     auto result = Dataset::Make();
-    result->Owner(true, allocator_);
+    result->NumElements(1)->Dim(count)->Owner(true, allocator_);
     auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
     result->Distances(distances);
     auto computer = data->FactoryComputer(query);
