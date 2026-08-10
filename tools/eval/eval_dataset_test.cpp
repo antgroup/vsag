@@ -17,24 +17,80 @@
 
 #include <H5Cpp.h>
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace {
 
 using vsag::SparseVector;
 using vsag::eval::EvalDataset;
-using vsag::eval::EvalDatasetPtr;
 
-EvalDatasetPtr
-BuildSparseDataset(bool with_token_sequences) {
+class TestEvalDataset : public EvalDataset {
+public:
+    std::vector<SparseVector>&
+    train() {
+        return this->sparse_train_;
+    }
+
+    std::vector<SparseVector>&
+    test() {
+        return this->sparse_test_;
+    }
+
+    void
+    set_metric(const std::string& metric) {
+        this->metric_ = metric;
+    }
+
+    void
+    set_type(const std::string& type) {
+        this->vector_type_ = type;
+    }
+
+    void
+    set_counts(int64_t base, int64_t query) {
+        this->number_of_base_ = base;
+        this->number_of_query_ = query;
+    }
+
+    void
+    set_neighbors_shape(int64_t query, int64_t topk) {
+        this->neighbors_shape_ = {query, topk};
+    }
+
+    void
+    set_neighbors(int64_t* neighbors) {
+        this->neighbors_.reset(neighbors);
+    }
+
+    void
+    set_distances(float* distances) {
+        this->distances_.reset(distances);
+    }
+
+    std::unordered_map<std::string, std::vector<std::string>>&
+    train_paths() {
+        return this->train_paths_;
+    }
+
+    std::unordered_map<std::string, std::vector<std::string>>&
+    test_paths() {
+        return this->test_paths_;
+    }
+};
+
+std::shared_ptr<TestEvalDataset>
+BuildSparseDataset(bool with_token_sequences,
+                   bool with_paths = false,
+                   bool test_only_paths = false) {
     // Build a tiny sparse dataset (3 train, 2 test) and optionally attach
     // the original tokenized term-id sequences.
-    auto ds = std::make_shared<EvalDataset>();
-
     // Sparse train vectors.
     std::vector<SparseVector> train(3);
     train[0].len_ = 2;
@@ -68,47 +124,7 @@ BuildSparseDataset(bool with_token_sequences) {
         test[1].token_sequence_ = new uint32_t[3]{1, 2, 3};
     }
 
-    // Inject the sparse vectors via friend access through pointer.
-    // EvalDataset's members are private; expose a tiny helper through
-    // direct memory write would be invasive. Instead we build via Save's
-    // public API by reaching through a shim subclass.
-    struct ShimDataset : public EvalDataset {
-        std::vector<SparseVector>&
-        train() {
-            return this->sparse_train_;
-        }
-        std::vector<SparseVector>&
-        test() {
-            return this->sparse_test_;
-        }
-        void
-        set_metric(const std::string& m) {
-            this->metric_ = m;
-        }
-        void
-        set_type(const std::string& t) {
-            this->vector_type_ = t;
-        }
-        void
-        set_counts(int64_t base, int64_t query) {
-            this->number_of_base_ = base;
-            this->number_of_query_ = query;
-        }
-        void
-        set_neighbors_shape(int64_t q, int64_t k) {
-            this->neighbors_shape_ = {q, k};
-        }
-        void
-        set_neighbors(int64_t* ptr) {
-            this->neighbors_.reset(ptr);
-        }
-        void
-        set_distances(float* ptr) {
-            this->distances_.reset(ptr);
-        }
-    };
-
-    auto shim = std::make_shared<ShimDataset>();
+    auto shim = std::make_shared<TestEvalDataset>();
     shim->set_type(vsag::SPARSE_VECTORS);
     shim->set_metric("ip");
     shim->train() = std::move(train);
@@ -128,6 +144,12 @@ BuildSparseDataset(bool with_token_sequences) {
     shim->set_neighbors_shape(static_cast<int64_t>(shim->test().size()), kK);
     shim->set_neighbors(nb);
     shim->set_distances(dist);
+    if (with_paths) {
+        if (!test_only_paths) {
+            shim->train_paths()["site"] = {"root/a", "root/b", "root/c"};
+        }
+        shim->test_paths()["site"] = {"root/a", "root/c"};
+    }
 
     return shim;
 }
@@ -344,6 +366,181 @@ TEST_CASE("EvalDataset sparse round-trip writes record-offset indexes", "[ut][ev
     REQUIRE(loaded->GetSparseTestOffsets() == std::vector<uint64_t>{0, 20, 32});
     REQUIRE(loaded->GetTrainTokenSequenceOffsets() == std::vector<uint64_t>{0, 20, 32, 36});
     REQUIRE(loaded->GetTestTokenSequenceOffsets() == std::vector<uint64_t>{0, 8, 24});
+    std::remove(path.c_str());
+}
+
+TEST_CASE("EvalDataset round-trips Pyramid path datasets", "[ut][eval_dataset]") {
+    auto path = TempPath("paths_roundtrip");
+    {
+        auto ds = BuildSparseDataset(/*with_token_sequences=*/false, /*with_paths=*/true);
+        REQUIRE(ds->GetHierarchyNames() == std::vector<std::string>{"site"});
+        EvalDataset::Save(ds, path);
+    }
+
+    auto loaded = EvalDataset::Load(path);
+    REQUIRE(loaded->HasPaths());
+    const auto& hierarchies = loaded->GetHierarchyNames();
+    REQUIRE(std::find(hierarchies.begin(), hierarchies.end(), "site") != hierarchies.end());
+    const auto* train_paths = loaded->GetTrainPaths("site");
+    REQUIRE(train_paths != nullptr);
+    REQUIRE(train_paths[0] == "root/a");
+    REQUIRE(train_paths[2] == "root/c");
+    const auto* test_paths = loaded->GetTestPaths("site");
+    REQUIRE(test_paths != nullptr);
+    REQUIRE(test_paths[0] == "root/a");
+    REQUIRE(test_paths[1] == "root/c");
+    std::remove(path.c_str());
+}
+
+TEST_CASE("EvalDataset saves and loads test-only Pyramid paths", "[ut][eval_dataset]") {
+    auto path = TempPath("paths_test_only");
+    {
+        auto ds = BuildSparseDataset(
+            /*with_token_sequences=*/false, /*with_paths=*/true, /*test_only_paths=*/true);
+        EvalDataset::Save(ds, path);
+    }
+
+    auto loaded = EvalDataset::Load(path);
+    REQUIRE(loaded->HasPaths());
+    const auto& hierarchies = loaded->GetHierarchyNames();
+    REQUIRE(std::find(hierarchies.begin(), hierarchies.end(), "site") != hierarchies.end());
+    REQUIRE(loaded->GetTrainPaths("site") == nullptr);
+    const auto* test_paths = loaded->GetTestPaths("site");
+    REQUIRE(test_paths != nullptr);
+    REQUIRE(test_paths[0] == "root/a");
+    REQUIRE(test_paths[1] == "root/c");
+    std::remove(path.c_str());
+}
+
+TEST_CASE("EvalDataset rejects malformed Pyramid path dataset shapes", "[ut][eval_dataset]") {
+    auto path = TempPath("paths_bad_shape");
+    auto ds = BuildSparseDataset(/*with_token_sequences=*/false, /*with_paths=*/true);
+    EvalDataset::Save(ds, path);
+
+    SECTION("rank two") {
+        H5::H5File file(path, H5F_ACC_RDWR);
+        file.unlink("/paths/site/train");
+        H5::StrType str_type(H5::PredType::C_S1, H5T_VARIABLE);
+        hsize_t dims[2] = {3, 1};
+        H5::DataSpace space(2, dims);
+        auto dataset = file.createDataSet("/paths/site/train", str_type, space);
+        const char* values[3] = {"root/a", "root/b", "root/c"};
+        dataset.write(values, str_type);
+    }
+
+    SECTION("scalar") {
+        H5::H5File file(path, H5F_ACC_RDWR);
+        file.unlink("/paths/site/train");
+        H5::StrType str_type(H5::PredType::C_S1, H5T_VARIABLE);
+        H5::DataSpace space(H5S_SCALAR);
+        auto dataset = file.createDataSet("/paths/site/train", str_type, space);
+        const char* value = "root/a";
+        dataset.write(&value, str_type);
+    }
+
+    REQUIRE_THROWS_WITH(EvalDataset::Load(path),
+                        Catch::Matchers::ContainsSubstring("must be one-dimensional"));
+    std::remove(path.c_str());
+}
+
+TEST_CASE("EvalDataset rejects mismatched Pyramid path counts", "[ut][eval_dataset]") {
+    auto path = TempPath("paths_bad_count");
+    auto ds = BuildSparseDataset(/*with_token_sequences=*/false, /*with_paths=*/true);
+    EvalDataset::Save(ds, path);
+
+    {
+        H5::H5File file(path, H5F_ACC_RDWR);
+        file.unlink("/paths/site/train");
+        H5::StrType str_type(H5::PredType::C_S1, H5T_VARIABLE);
+        hsize_t dims[1] = {2};
+        H5::DataSpace space(1, dims);
+        auto dataset = file.createDataSet("/paths/site/train", str_type, space);
+        const char* values[2] = {"root/a", "root/b"};
+        dataset.write(values, str_type);
+    }
+
+    REQUIRE_THROWS_WITH(
+        EvalDataset::Load(path),
+        Catch::Matchers::ContainsSubstring("Pyramid path dataset '/paths/site/train'"));
+    std::remove(path.c_str());
+}
+
+TEST_CASE("EvalDataset does not ignore malformed Pyramid path objects", "[ut][eval_dataset]") {
+    auto path = TempPath("paths_bad_object");
+    auto ds = BuildSparseDataset(/*with_token_sequences=*/false, /*with_paths=*/true);
+    EvalDataset::Save(ds, path);
+    std::string expected_message;
+
+    SECTION("path split is not a dataset") {
+        {
+            H5::H5File file(path, H5F_ACC_RDWR);
+            file.unlink("/paths/site/train");
+            file.createGroup("/paths/site/train");
+        }
+        expected_message = "/paths/site/train";
+    }
+
+    SECTION("path hierarchy is not a group") {
+        {
+            H5::H5File file(path, H5F_ACC_RDWR);
+            hsize_t dims[1] = {1};
+            H5::DataSpace space(1, dims);
+            int value = 1;
+            auto dataset =
+                file.createDataSet("/paths/not_a_group", H5::PredType::NATIVE_INT, space);
+            dataset.write(&value, H5::PredType::NATIVE_INT);
+        }
+        expected_message = "must be an HDF5 group";
+    }
+
+    SECTION("paths root is not a group") {
+        {
+            H5::H5File file(path, H5F_ACC_RDWR);
+            file.unlink("/paths");
+            hsize_t dims[1] = {1};
+            H5::DataSpace space(1, dims);
+            int value = 1;
+            auto dataset = file.createDataSet("/paths", H5::PredType::NATIVE_INT, space);
+            dataset.write(&value, H5::PredType::NATIVE_INT);
+        }
+        expected_message = "failed to load Pyramid paths";
+    }
+
+    REQUIRE_THROWS_WITH(EvalDataset::Load(path),
+                        Catch::Matchers::ContainsSubstring(expected_message));
+    std::remove(path.c_str());
+}
+
+TEST_CASE("EvalDataset validates Pyramid path counts before truncating output",
+          "[ut][eval_dataset]") {
+    auto path = TempPath("paths_save_count");
+    auto ds = BuildSparseDataset(/*with_token_sequences=*/false, /*with_paths=*/true);
+    std::string invalid_dataset_path;
+
+    SECTION("train paths") {
+        ds->train_paths()["site"].pop_back();
+        invalid_dataset_path = "/paths/site/train";
+    }
+
+    SECTION("test paths") {
+        ds->test_paths()["site"].pop_back();
+        invalid_dataset_path = "/paths/site/test";
+    }
+
+    {
+        H5::H5File file(path, H5F_ACC_TRUNC);
+        H5::DataSpace scalar(H5S_SCALAR);
+        auto attribute = file.createAttribute("sentinel", H5::PredType::NATIVE_INT, scalar);
+        int value = 42;
+        attribute.write(H5::PredType::NATIVE_INT, &value);
+    }
+
+    REQUIRE_THROWS_WITH(EvalDataset::Save(ds, path),
+                        Catch::Matchers::ContainsSubstring(invalid_dataset_path));
+    {
+        H5::H5File file(path, H5F_ACC_RDONLY);
+        REQUIRE(file.attrExists("sentinel"));
+    }
     std::remove(path.c_str());
 }
 

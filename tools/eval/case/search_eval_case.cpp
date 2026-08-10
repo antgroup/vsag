@@ -159,7 +159,18 @@ SearchEvalCase::do_knn_search() {
     this->logger_->Debug("query count is " + std::to_string(query_count));
     auto min_query = std::max(static_cast<uint64_t>(query_count), config_.search_query_count);
 
-    auto prepare_query = [this](uint64_t query_id) {
+    // Precompute per-hierarchy test path pointers to avoid repeated map lookups.
+    std::vector<std::pair<std::string, const std::string*>> test_path_refs;
+    if (this->dataset_ptr_->HasPaths()) {
+        for (const auto& hname : this->dataset_ptr_->GetHierarchyNames()) {
+            const auto* paths = this->dataset_ptr_->GetTestPaths(hname);
+            if (paths != nullptr) {
+                test_path_refs.emplace_back(hname, paths);
+            }
+        }
+    }
+
+    auto prepare_query = [this, &test_path_refs](uint64_t query_id) {
         auto query = vsag::Dataset::Make();
         query->NumElements(1)->Dim(this->dataset_ptr_->GetDim())->Owner(false);
         const void* query_vector = this->dataset_ptr_->GetOneTest(query_id);
@@ -171,6 +182,9 @@ SearchEvalCase::do_knn_search() {
             }
         } else {
             query->SparseVectors((const SparseVector*)query_vector);
+        }
+        for (const auto& [hname, paths] : test_path_refs) {
+            query->Paths(hname, paths + query_id);
         }
         return std::make_pair(std::move(query), query_vector);
     };
@@ -274,6 +288,17 @@ SearchEvalCase::do_knn_filter_search() {
     }
     this->logger_->Debug("query count is " + std::to_string(query_count));
     auto min_query = std::max<int64_t>(query_count, 10000);
+
+    std::vector<std::pair<std::string, const std::string*>> filter_path_refs;
+    if (this->dataset_ptr_->HasPaths()) {
+        for (const auto& hname : this->dataset_ptr_->GetHierarchyNames()) {
+            const auto* paths = this->dataset_ptr_->GetTestPaths(hname);
+            if (paths != nullptr) {
+                filter_path_refs.emplace_back(hname, paths);
+            }
+        }
+    }
+
     for (auto& monitor : this->monitors_) {
         const bool is_latency_monitor =
             this->latency_monitor_ != nullptr and monitor.get() == this->latency_monitor_.get();
@@ -291,6 +316,9 @@ SearchEvalCase::do_knn_filter_search() {
                     query->Float32Vectors((const float*)query_vector);
                 } else if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_INT8) {
                     query->Int8Vectors((const int8_t*)query_vector);
+                }
+                for (const auto& [hname, paths] : filter_path_refs) {
+                    query->Paths(hname, paths + i);
                 }
                 auto test_label = test_labels[i];
                 auto filter = std::make_shared<FilterObj>(
@@ -324,6 +352,9 @@ SearchEvalCase::do_knn_filter_search() {
                 query->Float32Vectors((const float*)query_vector);
             } else if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_INT8) {
                 query->Int8Vectors((const int8_t*)query_vector);
+            }
+            for (const auto& [hname, paths] : filter_path_refs) {
+                query->Paths(hname, paths + i);
             }
             auto test_label = test_labels[i];
             auto filter = std::make_shared<FilterObj>(
