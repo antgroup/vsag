@@ -265,6 +265,41 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid reordered range search retries empty graph traversal",
+                             "[ft][pyramid][range]") {
+    PyramidParam pyramid_param;
+    pyramid_param.use_reorder = true;
+    pyramid_param.base_quantization_type = "rabitq";
+    pyramid_param.precise_quantization_type = "fp32";
+    const auto param = GeneratePyramidBuildParametersString("l2", 4, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+
+    std::vector<std::array<float, 4>> vectors;
+    std::vector<int64_t> ids;
+    std::vector<std::string> paths;
+    for (uint64_t i = 0; i < 64; ++i) {
+        vectors.push_back({std::sin(static_cast<float>(i) * 0.7F),
+                           std::cos(static_cast<float>(i) * 1.3F),
+                           std::sin(static_cast<float>(i) * 2.1F),
+                           std::cos(static_cast<float>(i) * 2.9F)});
+        ids.push_back(static_cast<int64_t>(i));
+        paths.emplace_back("a/d/f");
+    }
+    REQUIRE(index->Build(MakeDenseDataset(vectors, ids, paths)).has_value());
+    REQUIRE(index->SetImmutable().has_value());
+
+    auto query_vector = vectors[32];
+    query_vector[0] += 0.01F;
+    auto query = MakeSingleQuery(query_vector, "a/d/f");
+    constexpr float radius = 0.0002F;
+    auto result = index->RangeSearch(query, radius, GeneratePyramidSearchParametersString(100));
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == ids[32]);
+    REQUIRE(result.value()->GetDistances()[0] < radius);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Set Immutable",
                              "[ft][immutable][pyramid]") {
     const auto metric_type = "l2";

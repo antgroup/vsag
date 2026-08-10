@@ -418,6 +418,19 @@ Pyramid::RangeSearch(const DatasetPtr& query,
                           ctx,
                           hierarchy_name,
                           collect_rabitq_lower_bounds ? &rabitq_lower_bound_candidates : nullptr);
+    if (use_reorder_ and result->GetDim() == 0) {
+        // Quantized distances can reject every candidate before precise reorder. Retry with a
+        // bounded KNN traversal, then let search_impl trim the reordered distances by radius.
+        search_param.search_mode = KNN_SEARCH;
+        rabitq_lower_bound_candidates.clear();
+        result = this->search_impl(
+            query,
+            search_func,
+            search_param,
+            ctx,
+            hierarchy_name,
+            collect_rabitq_lower_bounds ? &rabitq_lower_bound_candidates : nullptr);
+    }
     result->Statistics(stats.Dump());
     return result;
 }
