@@ -1433,8 +1433,9 @@ Pyramid::add_to_hierarchy(Hierarchy& h,
         auto path_slices = split(current_path, PART_SLASH);
         IndexNode* node = h.root.get();
         auto inner_id = static_cast<InnerIdType>(i + local_cur_element_count);
-        const auto* vector =
-            base_codes_->SupportSplitCodeStorage() ? nullptr : data_vectors + dim_ * data_bias;
+        const auto* vector = base_codes_->SupportSplitCodeStorage() and raw_vector_ == nullptr
+                                 ? nullptr
+                                 : data_vectors + dim_ * data_bias;
         int no_build_level_index = 0;
         for (int j = 0; j <= static_cast<int>(path_slices.size()); ++j) {
             IndexNode* new_node = nullptr;
