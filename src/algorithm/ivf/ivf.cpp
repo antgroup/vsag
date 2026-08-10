@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <random>
 #include <set>
@@ -599,19 +600,32 @@ IVF::Add(const DatasetPtr& base) {
         }
     };
     std::vector<std::future<void>> futures;
-    for (int64_t i = 0; i < num_element; ++i) {
-        if (this->thread_pool_ != nullptr) {
-            auto future = thread_pool_->GeneralEnqueue(add_func, i);
-            futures.emplace_back(std::move(future));
-        } else {
-            add_func(i);
+    std::exception_ptr first_exception = nullptr;
+    try {
+        for (int64_t i = 0; i < num_element; ++i) {
+            if (this->thread_pool_ != nullptr) {
+                futures.emplace_back(thread_pool_->GeneralEnqueue(add_func, i));
+            } else {
+                add_func(i);
+            }
         }
+    } catch (...) {
+        first_exception = std::current_exception();
     }
 
     if (this->thread_pool_ != nullptr) {
         for (auto& future : futures) {
-            future.get();
+            try {
+                future.get();
+            } catch (...) {
+                if (first_exception == nullptr) {
+                    first_exception = std::current_exception();
+                }
+            }
         }
+    }
+    if (first_exception != nullptr) {
+        std::rethrow_exception(first_exception);
     }
     this->bucket_->Package();
     if (need_cal_memory_usage) {

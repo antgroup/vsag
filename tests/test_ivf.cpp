@@ -1386,7 +1386,9 @@ IVF_PR_DAILY_CASE("IVF Clone", "[ft][clone][ivf]", TestIVFClone)
 
 static void
 TestIVFRandomAllocator(const fixtures::IVFResourcePtr& resource) {
-    auto allocator = std::make_shared<fixtures::RandomAllocator>();
+    constexpr uint32_t allocator_seed = 1544291908U;
+    auto allocator = std::make_shared<fixtures::RandomAllocator>(allocator_seed);
+    INFO(fmt::format("allocator_seed: {}", allocator_seed));
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
