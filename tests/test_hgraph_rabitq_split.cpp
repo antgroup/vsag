@@ -306,7 +306,7 @@ TEST_CASE("HGraph tunes FP32 to MRLE RaBitQ Split", "[ft][rabitq_split][hgraph][
     TestIndex::TestSerializeFile(index, reloaded, dataset, kSplitSearchParam, true);
 }
 
-TEST_CASE("HGraph RaBitQ reorder probes use the rerank statistics phase",
+TEST_CASE("HGraph RaBitQ reorder work uses the rerank statistics phase",
           "[ft][rabitq_split][hgraph][statistics]") {
     using namespace fixtures;
     constexpr int64_t dim = 128;
@@ -326,8 +326,10 @@ TEST_CASE("HGraph RaBitQ reorder probes use the rerank statistics phase",
     const auto reorder_distances = statistics["reorder_distance_count"].GetUint64();
     const auto rerank = statistics["distance_evaluations_by_phase"]["rerank"].GetUint64();
 
-    REQUIRE(lower_bound_probes > 0);
-    REQUIRE(reorder_distances > 0);
+    // Direct fused traversal can supply lower-bound hints for every candidate, so a search may
+    // legitimately need no additional lower-bound probes. It must still perform rerank work, and
+    // every distance evaluated by either reorder path must be attributed to the rerank phase.
+    REQUIRE(lower_bound_probes + reorder_distances > 0);
     REQUIRE(rerank == lower_bound_probes + reorder_distances);
 }
 

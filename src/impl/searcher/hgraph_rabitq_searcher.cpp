@@ -1052,6 +1052,11 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                                                                  std::memory_order_relaxed);
         ctx->stats->reorder_distance_count.fetch_add(deferred_finalize_full_count,
                                                      std::memory_order_relaxed);
+        if (ctx->track_distance_evaluations and deferred_finalize_full_count > 0) {
+            ctx->stats->AddDistance(DistanceEvaluationPhase::RERANK,
+                                    DistanceEvaluationBackend::RABITQ,
+                                    deferred_finalize_full_count);
+        }
     }
     return output;
 }

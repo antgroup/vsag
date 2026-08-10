@@ -65,6 +65,9 @@ FlattenReorder::QueryLowerBound(float* distances,
         }
     }
     if (ctx != nullptr and ctx->stats != nullptr) {
+        if (ctx->track_distance_evaluations and count > 0) {
+            ctx->stats->AddDistance(ctx->distance_phase, DistanceEvaluationBackend::RABITQ, count);
+        }
         ctx->stats->rabitq_filter_count.fetch_add(static_cast<uint32_t>(count),
                                                   std::memory_order_relaxed);
         ctx->stats->rabitq_filter_fallback_full_count.fetch_add(fallback_count,
@@ -119,6 +122,9 @@ FlattenReorder::QueryFullWithHint(float* distances,
         }
     }
     if (ctx != nullptr and ctx->stats != nullptr) {
+        if (ctx->track_distance_evaluations and count > 0) {
+            ctx->stats->AddDistance(ctx->distance_phase, DistanceEvaluationBackend::RABITQ, count);
+        }
         ctx->stats->rabitq_full_count.fetch_add(full_count, std::memory_order_relaxed);
         ctx->stats->rabitq_reorder_hint_full_count.fetch_add(hint_full_count,
                                                              std::memory_order_relaxed);

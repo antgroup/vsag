@@ -723,6 +723,7 @@ public:
         if (fused_code_storage_ != nullptr) {
             this->query_fused_full_with_filter_ip(
                 result_dists, filter_inner_products, computer, idx, id_count, ctx);
+            this->add_distance_evaluations(ctx, id_count);
             return;
         }
         auto* comp = this->get_bottom_computer(computer);
@@ -741,6 +742,7 @@ public:
                                                        ? std::numeric_limits<float>::quiet_NaN()
                                                        : filter_inner_products[i]);
         }
+        this->add_distance_evaluations(ctx, id_count);
     }
 
     ComputerInterfacePtr
