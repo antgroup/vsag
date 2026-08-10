@@ -196,12 +196,12 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
                 for (uint64_t i = 0; i < heap_candidate_size; ++i) {
                     const auto* record = fused_graph_->GetNodeRecord(ids[i]);
                     CHECK_ARGUMENT(
-                    split_codes->ComputeFusedFull(computer,
-                                                  fused_graph_->GetClusterId(record),
-                                                  fused_graph_->GetOneBitCode(record),
-                                                  fused_graph_->GetSupplementCode(record),
-                                                  dists.data() + i,
-                                                  &ctx),
+                        split_codes->ComputeFusedFull(computer,
+                                                      fused_graph_->GetClusterId(record),
+                                                      fused_graph_->GetOneBitCode(record),
+                                                      fused_graph_->GetSupplementCode(record),
+                                                      dists.data() + i,
+                                                      &ctx),
                         "failed to compute fused RaBitQ distance");
                 }
             } else {

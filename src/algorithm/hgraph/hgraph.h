@@ -483,6 +483,9 @@ private:
     void
     validate_fused_vector_data(const float* data, uint64_t count) const;
 
+    void
+    validate_fused_encoding_data(const float* data, uint64_t count) const;
+
     AddContext
     prepare_add_context(const DatasetPtr& data);
 

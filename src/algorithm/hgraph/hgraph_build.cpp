@@ -229,8 +229,6 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
             ++new_ids_count;
         }
     }
-    this->resize(current_count + new_ids_count);
-    this->total_count_ += new_ids_count;
     Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
     auto need_sq8_build_data =
         need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
@@ -246,9 +244,13 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         temporary_sq8_build_data->Train(vectors, total);
     }
     bool defer_persistent_codes = temporary_sq8_build_data != nullptr;
-    if (not defer_persistent_codes) {
+    if (not defer_persistent_codes or this->rabitq_fused_datacell_ != nullptr) {
         this->Train(data);
     }
+    this->validate_fused_encoding_data(static_cast<const float*>(vectors),
+                                       static_cast<uint64_t>(total));
+    this->resize(current_count + new_ids_count);
+    this->total_count_ += new_ids_count;
     Vector<std::pair<InnerIdType, int64_t>> deferred_code_ids(allocator_);
     for (InnerIdType cur_size = 0; cur_size < valid_indices.size(); ++cur_size) {
         auto i = valid_indices[cur_size];
@@ -305,7 +307,9 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
     if (defer_persistent_codes) {
         build_data.reset();
         temporary_sq8_build_data.reset();
-        this->Train(data);
+        if (this->rabitq_fused_datacell_ == nullptr) {
+            this->Train(data);
+        }
         for (const auto& [inner_id, local_idx] : deferred_code_ids) {
             this->insert_persistent_codes(get_data(data, local_idx), inner_id);
         }
@@ -330,6 +334,8 @@ HGraph::Add(const DatasetPtr& data) {
 
     this->validate_add_data(data);
     auto context = this->prepare_add_context(data);
+    this->validate_fused_encoding_data(static_cast<const float*>(get_data(data)),
+                                       static_cast<uint64_t>(data->GetNumElements()));
     this->prepare_graph_read_codes(data, context);
     auto batch = this->prepare_add_batch(data);
     this->prepare_temporary_graph_read_codes(data, context, batch);
@@ -372,6 +378,25 @@ HGraph::validate_fused_vector_data(const float* data, uint64_t count) const {
                                     "fused RaBitQ base vectors must contain only finite values");
             }
         }
+    }
+}
+
+void
+HGraph::validate_fused_encoding_data(const float* data, uint64_t count) const {
+    if (this->rabitq_fused_datacell_ == nullptr) {
+        return;
+    }
+    auto split_codes =
+        std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(basic_flatten_codes_);
+    CHECK_ARGUMENT(split_codes != nullptr, "fused HGraph lost its RaBitQ split codes");
+    ByteBuffer one_bit(split_codes->OneBitCodeSize(), allocator_);
+    ByteBuffer supplement(split_codes->SupplementCodeSize(), allocator_);
+    const auto dim = static_cast<uint64_t>(this->dim_);
+    for (uint64_t row = 0; row < count; ++row) {
+        uint32_t cluster_id = 0;
+        CHECK_ARGUMENT(
+            split_codes->EncodeFused(data + row * dim, one_bit.data, supplement.data, &cluster_id),
+            "failed to encode fused RaBitQ node codes");
     }
 }
 

@@ -114,6 +114,35 @@ TEST_CASE("HGraph RaBitQ fused delete version invalidates old edges",
     REQUIRE(neighbors == Vector<InnerIdType>({1}, allocator.get()));
 }
 
+TEST_CASE("HGraph RaBitQ fused move restores versions before incoming edges",
+          "[ut][HGraphRaBitQFusedDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    auto graph_param = std::make_shared<GraphDataCellParameter>();
+    graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+    graph_param->max_degree_ = 4;
+    graph_param->init_max_capacity_ = 4;
+    graph_param->support_remove_ = true;
+    graph_param->remove_flag_bit_ = 1;
+    graph_param->use_reverse_edges_ = true;
+
+    auto graph = std::make_shared<HGraphRaBitQFusedDataCell>(graph_param, 16, 16, common_param);
+    Vector<InnerIdType> empty_neighbors(allocator.get());
+    Vector<InnerIdType> source_neighbor(allocator.get());
+    source_neighbor.push_back(0);
+    graph->InsertNeighborsById(0, empty_neighbors);
+    graph->InsertNeighborsById(1, source_neighbor);
+    graph->InsertNeighborsById(2, empty_neighbors);
+    graph->DeleteNeighborsById(2);
+
+    graph->Move(0, 2);
+    Vector<InnerIdType> neighbors(allocator.get());
+    graph->GetNeighbors(1, neighbors);
+    REQUIRE(neighbors == Vector<InnerIdType>({2}, allocator.get()));
+}
+
 TEST_CASE("HGraph RaBitQ fused deserialize validates its wire layout",
           "[ut][HGraphRaBitQFusedDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();

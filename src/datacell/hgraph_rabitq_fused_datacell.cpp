@@ -391,9 +391,15 @@ HGraphRaBitQFusedDataCell::Move(InnerIdType from, InnerIdType to) {
     Vector<uint8_t> source_record(record_size_, allocator_);
     std::memcpy(source_record.data(), GetNodeRecord(from), record_size_);
 
+    // Incoming edges encode the target's remove version, so restore it before rebuilding them.
+    auto* target_record = MutableNodeRecord(to);
+    SetNodeVersion(target_record, NodeVersion(source_record.data()));
+
     Vector<InnerIdType> reverse_neighbors(allocator_);
     GetIncomingNeighbors(from, reverse_neighbors);
     Vector<InnerIdType> neighbors(allocator_);
+    // Move runs under HGraph's external mutation lock, so this temporary empty adjacency is not
+    // observable by concurrent readers.
     InsertNeighborsById(to, neighbors);
     for (const auto reverse_neighbor : reverse_neighbors) {
         GetNeighbors(reverse_neighbor, neighbors);
@@ -417,8 +423,6 @@ HGraphRaBitQFusedDataCell::Move(InnerIdType from, InnerIdType to) {
     from_neighbors.clear();
     InsertNeighborsById(from, from_neighbors);
 
-    auto* target_record = MutableNodeRecord(to);
-    SetNodeVersion(target_record, NodeVersion(source_record.data()));
     std::memcpy(target_record + cluster_id_offset_,
                 source_record.data() + cluster_id_offset_,
                 record_size_ - cluster_id_offset_);
@@ -577,6 +581,11 @@ HGraphRaBitQFusedDataCell::Deserialize(StreamReader& reader) {
     CHECK_ARGUMENT(bytes == expected_bytes, "invalid fused graph payload size");
     CHECK_ARGUMENT(bytes <= remaining_bytes(reader), "truncated fused graph node payload");
 
+    Vector<uint8_t> node_payload(bytes, allocator_);
+    if (bytes > 0) {
+        reader.Read(reinterpret_cast<char*>(node_payload.data()), bytes);
+    }
+
     codec_model_ = std::move(codec_model);
     id_bit_ = wire_id_bit;
     remove_flag_mask_ = wire_remove_flag_mask;
@@ -587,7 +596,7 @@ HGraphRaBitQFusedDataCell::Deserialize(StreamReader& reader) {
         reinterpret_cast<uintptr_t>(storage_.data() + aligned_offset_) % K_CACHE_LINE_SIZE == 0,
         "fused graph node slab is not cache-line aligned");
     if (bytes > 0) {
-        reader.Read(reinterpret_cast<char*>(storage_.data() + aligned_offset_), bytes);
+        std::memcpy(storage_.data() + aligned_offset_, node_payload.data(), bytes);
     }
 }
 

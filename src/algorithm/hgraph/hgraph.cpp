@@ -852,6 +852,8 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
         }
     }
 
+    this->validate_fused_encoding_data(static_cast<const float*>(new_base_vec), 1);
+
     // note that only modify vector need to obtain unique lock
     // and the lock has been obtained inside datacell
     std::shared_lock<std::shared_mutex> map_lock;

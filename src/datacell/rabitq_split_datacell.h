@@ -532,7 +532,7 @@ public:
                 result_dists, lower_bounds, filter_inner_products, computer, idx, id_count, ctx);
             return;
         }
-        auto* comp = static_cast<Computer<RaBitQuantizer<metric>>*>(computer.get());
+        auto* comp = this->get_bottom_computer(computer);
         this->add_filter_count(ctx, id_count);
         for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
             this->prefetch_one_bit(idx[i]);
@@ -545,7 +545,7 @@ public:
             const auto* one_bit_code = this->get_one_bit_code(idx[i], need_release);
             bool computed = false;
             try {
-                computed = this->quantizer_->ComputeDistWithOneBitLowerBoundAndFilterIP(
+                computed = this->bottom_quantizer().ComputeDistWithOneBitLowerBoundAndFilterIP(
                     *comp,
                     one_bit_code,
                     result_dists + i,
@@ -725,7 +725,7 @@ public:
                 result_dists, filter_inner_products, computer, idx, id_count, ctx);
             return;
         }
-        auto* comp = static_cast<Computer<RaBitQuantizer<metric>>*>(computer.get());
+        auto* comp = this->get_bottom_computer(computer);
         for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
             this->prefetch_full_code(idx[i]);
         }
@@ -1129,12 +1129,12 @@ public:
 
     [[nodiscard]] uint32_t
     FusedFilterBits() const override {
-        return quantizer_->FilterBits();
+        return bottom_quantizer().FilterBits();
     }
 
     [[nodiscard]] uint32_t
     FusedSupplementBits() const override {
-        return quantizer_->ReorderBits();
+        return bottom_quantizer().ReorderBits();
     }
 
     [[nodiscard]] bool
@@ -1201,9 +1201,9 @@ public:
                               float* lower_bound,
                               float* filter_inner_product,
                               QueryContext* ctx) const override {
-        auto* comp = static_cast<Computer<RaBitQuantizer<metric>>*>(computer.get());
+        auto* comp = this->get_bottom_computer(computer);
         this->add_filter_count(ctx, 1);
-        const bool computed = this->quantizer_->ComputeDistWithOneBitLowerBoundAndFilterIP(
+        const bool computed = this->bottom_quantizer().ComputeDistWithOneBitLowerBoundAndFilterIP(
             *comp,
             one_bit_code,
             distance,
@@ -1223,12 +1223,12 @@ public:
                             float filter_inner_product,
                             float* distance,
                             QueryContext* ctx) const override {
-        if (this->quantizer_->FilterBits() < 2) {
+        if (this->bottom_quantizer().FilterBits() < 2) {
             return false;
         }
-        auto* comp = static_cast<Computer<RaBitQuantizer<metric>>*>(computer.get());
+        auto* comp = this->get_bottom_computer(computer);
         this->add_full_count(ctx, 1);
-        const bool computed = this->quantizer_->ComputeDistWithSplitCodeAndFilterIP(
+        const bool computed = this->bottom_quantizer().ComputeDistWithSplitCodeAndFilterIP(
             *comp, one_bit_code, supplement_code, filter_inner_product, distance);
         if (computed) {
             this->add_reorder_hint_full_count(ctx, 1);
@@ -1244,9 +1244,9 @@ public:
                 const uint8_t* supplement_code,
                 float* distance,
                 QueryContext* ctx) const override {
-        auto* comp = static_cast<Computer<RaBitQuantizer<metric>>*>(computer.get());
+        auto* comp = this->get_bottom_computer(computer);
         this->add_full_count(ctx, 1);
-        return this->quantizer_->ComputeDistWithSplitCode(
+        return this->bottom_quantizer().ComputeDistWithSplitCode(
             *comp, one_bit_code, supplement_code, distance);
     }
 
@@ -1283,19 +1283,12 @@ public:
                 fused_centroids_.data() + static_cast<uint64_t>(cluster_id) * common_param_.dim_);
         }
 
-        std::stringstream model_stream;
-        IOStreamWriter model_writer(model_stream);
-        quantizer_->Serialize(model_writer);
-        const auto serialized_model = model_stream.str();
-
         fused_quantizers_.clear();
         fused_quantizers_.reserve(cluster_count);
         for (uint32_t cluster_id = 0; cluster_id < cluster_count; ++cluster_id) {
             auto quantizer =
                 std::make_shared<RaBitQuantizer<metric>>(quantization_param_, common_param_);
-            std::stringstream input(serialized_model);
-            IOStreamReader model_reader(input);
-            quantizer->Deserialize(model_reader);
+            quantizer->ShareFusedModelFrom(this->bottom_quantizer());
             quantizer->SetCentroid(fused_centroids_.data() +
                                    static_cast<uint64_t>(cluster_id) * common_param_.dim_);
             fused_quantizers_.push_back(std::move(quantizer));
@@ -1343,7 +1336,7 @@ public:
                                                        result->transformed_query_,
                                                        result->query_raw_norm_,
                                                        result->mrq_norm_sqr_);
-        if (quantizer_->FilterBits() == 1) {
+        if (bottom_quantizer().FilterBits() == 1) {
             fused_quantizers_.front()->PrepareHnswFourBitQuery(result->transformed_query_.data(),
                                                                result->hnsw_query_planes_,
                                                                result->hnsw_query_delta_,
@@ -1378,7 +1371,7 @@ public:
         if (fused_computer == nullptr or fused_quantizers_.empty()) {
             return false;
         }
-        const auto filter_bits = quantizer_->FilterBits();
+        const auto filter_bits = bottom_quantizer().FilterBits();
         query->query_planes =
             filter_bits == 1 ? fused_computer->hnsw_query_planes_.data() : nullptr;
         query->transformed_query = fused_computer->transformed_query_.data();
@@ -1386,16 +1379,16 @@ public:
         query->cluster_g_error = fused_computer->hnsw_g_error_.data();
         query->dim = common_param_.dim_;
         query->one_bit_metadata_offset = IsLegacyHnswFusedCodec()
-                                             ? quantizer_->PlaneBytes()
-                                             : quantizer_->OneBitRecordNormOffset();
-        query->supplement_metadata_offset = quantizer_->SupplementMetaOffset();
+                                             ? bottom_quantizer().PlaneBytes()
+                                             : bottom_quantizer().OneBitRecordNormOffset();
+        query->supplement_metadata_offset = bottom_quantizer().SupplementMetaOffset();
         query->cluster_count = static_cast<uint32_t>(fused_quantizers_.size());
         query->filter_bits = filter_bits;
-        query->supplement_bits = quantizer_->ReorderBits();
+        query->supplement_bits = bottom_quantizer().ReorderBits();
         query->query_delta = fused_computer->hnsw_query_delta_;
         query->query_vl = fused_computer->hnsw_query_vl_;
         query->query_sum = fused_computer->hnsw_query_sum_;
-        query->default_rabitq_error_rate = quantizer_->DefaultRaBitQErrorRate();
+        query->default_rabitq_error_rate = bottom_quantizer().DefaultRaBitQErrorRate();
         query->affine = not IsLegacyHnswFusedCodec();
         query->filter_inner_product_is_exact = query->affine and filter_bits >= 2;
         return query->transformed_query != nullptr and query->cluster_g_add != nullptr and
@@ -1438,8 +1431,9 @@ public:
                 this->query_rabitq_error_rate(ctx));
         } else {
             RaBitQFusedIPPrecision precision = RaBitQFusedIPPrecision::INVALID;
-            const auto* query_planes =
-                quantizer_->FilterBits() == 1 ? fused_computer->hnsw_query_planes_.data() : nullptr;
+            const auto* query_planes = bottom_quantizer().FilterBits() == 1
+                                           ? fused_computer->hnsw_query_planes_.data()
+                                           : nullptr;
             computed = fused_quantizers_[cluster_id]->ComputeFusedAffineFilter(
                 fused_computer->transformed_query_.data(),
                 query_planes,
@@ -1454,7 +1448,7 @@ public:
                 lower_bound,
                 &local_filter_inner_product,
                 &precision);
-            if (computed and quantizer_->FilterBits() >= 2 and
+            if (computed and bottom_quantizer().FilterBits() >= 2 and
                 precision == RaBitQFusedIPPrecision::EXACT and filter_inner_product != nullptr) {
                 *filter_inner_product = local_filter_inner_product;
             }
@@ -1479,7 +1473,7 @@ public:
         }
         this->add_full_count(ctx, 1);
         bool computed = false;
-        if (not IsLegacyHnswFusedCodec() and quantizer_->FilterBits() >= 2) {
+        if (not IsLegacyHnswFusedCodec() and bottom_quantizer().FilterBits() >= 2) {
             computed = fused_quantizers_[cluster_id]->ComputeFusedAffineFullWithFilterIP(
                 fused_computer->transformed_query_.data(),
                 fused_computer->hnsw_query_sum_,
@@ -1592,18 +1586,12 @@ public:
         CHECK_ARGUMENT(reader.GetCursor() == reader.Length(),
                        "trailing fused RaBitQ codec payload");
 
-        std::stringstream model_output;
-        IOStreamWriter model_writer(model_output);
-        quantizer_->Serialize(model_writer);
-        const auto serialized_model = model_output.str();
         fused_quantizers_.clear();
         fused_quantizers_.reserve(serialized_cluster_count);
         for (uint32_t cluster_id = 0; cluster_id < serialized_cluster_count; ++cluster_id) {
             auto quantizer =
                 std::make_shared<RaBitQuantizer<metric>>(quantization_param_, common_param_);
-            std::stringstream model_input(serialized_model);
-            IOStreamReader model_reader(model_input);
-            quantizer->Deserialize(model_reader);
+            quantizer->ShareFusedModelFrom(this->bottom_quantizer());
             quantizer->SetCentroid(fused_centroids_.data() +
                                    static_cast<uint64_t>(cluster_id) * common_param_.dim_);
             fused_quantizers_.push_back(std::move(quantizer));
@@ -2202,7 +2190,7 @@ private:
                                     QueryContext* ctx) const {
         this->prefetch_fused_codes(ids, id_count, true);
         const bool exact_filter_ip_hint =
-            not IsLegacyHnswFusedCodec() and this->quantizer_->FilterBits() >= 2;
+            not IsLegacyHnswFusedCodec() and this->bottom_quantizer().FilterBits() >= 2;
         for (InnerIdType i = 0; i < id_count; ++i) {
             const auto view = this->get_fused_code_view(ids[i]);
             const float filter_ip = filter_inner_products == nullptr
@@ -2610,7 +2598,7 @@ private:
                       float hint_dist = std::numeric_limits<float>::max()) const {
         this->add_full_count(ctx, 1);
         bool computed = false;
-        const bool has_hint = this->quantizer_->FilterBits() >= 2 and
+        const bool has_hint = this->bottom_quantizer().FilterBits() >= 2 and
                               IsFiniteRaBitQValue(hint_dist) and
                               hint_dist < std::numeric_limits<float>::max();
         if (has_hint) {
@@ -2638,11 +2626,11 @@ private:
                                      QueryContext* ctx,
                                      float filter_inner_product) const {
         this->add_full_count(ctx, 1);
-        const bool has_hint =
-            this->quantizer_->FilterBits() >= 2 and IsFiniteRaBitQValue(filter_inner_product);
+        const bool has_hint = this->bottom_quantizer().FilterBits() >= 2 and
+                              IsFiniteRaBitQValue(filter_inner_product);
         bool computed = false;
         if (has_hint) {
-            computed = this->quantizer_->ComputeDistWithSplitCodeAndFilterIP(
+            computed = this->bottom_quantizer().ComputeDistWithSplitCodeAndFilterIP(
                 *computer, one_bit_code, supplement_code, filter_inner_product, result_dist);
         }
         if (computed) {
@@ -2652,10 +2640,10 @@ private:
         if (has_hint) {
             this->add_reorder_fallback_full_count(ctx, 1);
         }
-        if (not this->quantizer_->ComputeDistWithSplitCode(
+        if (not this->bottom_quantizer().ComputeDistWithSplitCode(
                 *computer, one_bit_code, supplement_code, result_dist)) {
             ByteBuffer full_code(this->code_size_, allocator_);
-            this->quantizer_->MergeSplitCode(one_bit_code, supplement_code, full_code.data);
+            this->bottom_quantizer().MergeSplitCode(one_bit_code, supplement_code, full_code.data);
             computer->ComputeDist(full_code.data, result_dist);
         }
     }

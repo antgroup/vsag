@@ -47,6 +47,8 @@ public:
     }
 
 private:
+    // Search owns the shared mutex array for longer than every per-node guard; retaining only a
+    // reference avoids shared_ptr atomic traffic in the traversal hot loop.
     const MutexArrayPtr& mutexes_;
     InnerIdType id_;
 };
@@ -59,6 +61,7 @@ constexpr uint32_t K_INVALID_CANDIDATE_INDEX = K_CANDIDATE_INDEX_MASK;
 struct search_buffer_record {
     float distance;
     InnerIdType id;
+    bool checked;
 };
 
 struct bounded_result_record {
@@ -138,6 +141,7 @@ private:
     binary_search(float distance) const {
         uint64_t lo = 0;
         uint64_t length = size_;
+        // Advance by a conditionally selected half to keep this hot search branchless.
         while (length > 1) {
             const auto half = length >> 1U;
             length -= half;
@@ -487,16 +491,20 @@ public:
         }
         const float exact_centered_ip = AffineFilterIP<1>::Exact(query_, node.one_bit_code);
         const float supplement_ip =
-            (query_.dim & 63U) == 0U
+            query_.supplement_bits == 7 and (query_.dim & 63U) == 0U
                 ? RaBitQFloatExCode7IP(query_.transformed_query, node.supplement_code, query_.dim)
-                : RaBitQFloatSupplementCodeIP(
-                      query_.transformed_query, node.supplement_code, query_.dim, 7);
+                : RaBitQFloatSupplementCodeIP(query_.transformed_query,
+                                              node.supplement_code,
+                                              query_.dim,
+                                              query_.supplement_bits);
         const auto* metadata = node.supplement_code + query_.supplement_metadata_offset;
         const float full_add = read_float(metadata);
         const float full_rescale = read_float(metadata + sizeof(float));
-        *distance =
-            full_add + query_.cluster_g_add[node.cluster_id] +
-            full_rescale * (128.0F * exact_centered_ip + supplement_ip - 63.5F * query_.query_sum);
+        const auto supplement_scale = static_cast<float>(1U << query_.supplement_bits);
+        const float supplement_center = 0.5F * (supplement_scale - 1.0F);
+        *distance = full_add + query_.cluster_g_add[node.cluster_id] +
+                    full_rescale * (supplement_scale * exact_centered_ip + supplement_ip -
+                                    supplement_center * query_.query_sum);
         return IsFiniteRaBitQValue(*distance);
     }
 
@@ -532,7 +540,7 @@ public:
         std::memmove(data_.data() + pos + 1,
                      data_.data() + pos,
                      (size_ - pos) * sizeof(search_buffer_record));
-        data_[pos] = {distance, id};
+        data_[pos] = {distance, id, false};
         size_ += static_cast<uint64_t>(size_ < capacity_);
         current_ = std::min(current_, pos);
     }
@@ -545,9 +553,9 @@ public:
     InnerIdType
     Pop() {
         const auto id = data_[current_].id;
-        data_[current_].id |= K_CHECKED_MASK;
+        data_[current_].checked = true;
         ++current_;
-        while (current_ < size_ and (data_[current_].id & K_CHECKED_MASK) != 0) {
+        while (current_ < size_ and data_[current_].checked) {
             ++current_;
         }
         return id;
@@ -564,12 +572,11 @@ public:
     }
 
 private:
-    static constexpr InnerIdType K_CHECKED_MASK = InnerIdType{1} << (sizeof(InnerIdType) * 8 - 1);
-
     [[nodiscard]] uint64_t
     binary_search(float distance) const {
         uint64_t lo = 0;
         uint64_t length = size_;
+        // Advance by a conditionally selected half to keep this hot search branchless.
         while (length > 1) {
             const auto half = length >> 1U;
             length -= half;
@@ -851,9 +858,8 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         MaybeSharedLock node_lock(neighbors_mutex, current_id);
         const auto current_node = graph->GetNodeView(current_id);
         const auto neighbor_count = current_node.neighbor_count;
-        if (neighbor_count > graph->MaximumDegree()) {
-            continue;
-        }
+        CHECK_ARGUMENT(neighbor_count <= graph->MaximumDegree(),
+                       "corrupt fused graph neighbor count");
         const auto* neighbors = current_node.neighbors;
         uint32_t cursor = 0;
         while (cursor < neighbor_count) {
@@ -1476,9 +1482,8 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
         MaybeSharedLock node_lock(neighbors_mutex_, current_id);
         const auto node = graph->GetNodeView(current_id);
         const auto neighbor_count = node.neighbor_count;
-        if (neighbor_count > graph->MaximumDegree()) {
-            continue;
-        }
+        CHECK_ARGUMENT(neighbor_count <= graph->MaximumDegree(),
+                       "corrupt fused graph neighbor count");
         const auto* neighbors = node.neighbors;
         const auto initial_prefetch = std::min(prefetch_lookahead, neighbor_count);
         for (uint32_t i = 0; i < initial_prefetch; ++i) {

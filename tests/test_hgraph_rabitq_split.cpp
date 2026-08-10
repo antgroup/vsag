@@ -740,6 +740,21 @@ TEST_CASE("HGraph fused RaBitQ split rejects non-finite base vectors",
         ++invalid_value_index;
     }
 
+    std::vector<float> overflowing_vector(static_cast<uint64_t>(dim),
+                                          std::numeric_limits<float>::max());
+    const int64_t overflowing_label = max_label + 100;
+    auto overflowing_add = vsag::Dataset::Make();
+    overflowing_add->NumElements(1)
+        ->Dim(dim)
+        ->Ids(&overflowing_label)
+        ->Float32Vectors(overflowing_vector.data())
+        ->Owner(false);
+    const uint64_t count_before_overflow = index->GetNumElements();
+    auto overflow_result = index->Add(overflowing_add);
+    REQUIRE_FALSE(overflow_result.has_value());
+    REQUIRE(index->GetNumElements() == count_before_overflow);
+    REQUIRE_FALSE(index->CheckIdExist(overflowing_label));
+
     std::vector<float> short_vector(existing_vector, existing_vector + dim - 1);
     auto wrong_dim_update = vsag::Dataset::Make();
     wrong_dim_update->NumElements(1)
@@ -814,7 +829,9 @@ TEST_CASE("HGraph fused RaBitQ split compact round trip",
         REQUIRE(stats.size() == 3);
         REQUIRE(std::stoull(stats[0]) > 0);
         REQUIRE(std::stoull(stats[1]) == 0);
-        REQUIRE(std::stoull(stats[2]) == 0);
+        // Legacy 1+7 traversal uses an approximate 4-bit query projection, so exact rerank must
+        // recompute the full distance instead of treating that estimate as an exact hint.
+        REQUIRE(std::stoull(stats[2]) > 0);
     }
     const std::vector<int64_t> expected_ids(expected.value()->GetIds(),
                                             expected.value()->GetIds() + topk);

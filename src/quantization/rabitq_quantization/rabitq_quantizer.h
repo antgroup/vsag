@@ -90,6 +90,11 @@ public:
     void
     SetCentroid(const float* centroid);
 
+    // Fused residual clusters differ only by centroid. Reuse the immutable trained transforms
+    // instead of retaining one dense dim-by-dim matrix per cluster.
+    void
+    ShareFusedModelFrom(const RaBitQuantizer& source);
+
     bool
     EncodeOneImpl(const float* data, uint8_t* codes) const;
 

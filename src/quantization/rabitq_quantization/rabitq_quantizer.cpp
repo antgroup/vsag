@@ -281,6 +281,17 @@ RaBitQuantizer<metric>::SetCentroid(const float* centroid) {
     centroid_.assign(rotated_centroid.begin(), rotated_centroid.end());
 }
 
+template <MetricType metric>
+void
+RaBitQuantizer<metric>::ShareFusedModelFrom(const RaBitQuantizer& source) {
+    CHECK_ARGUMENT(this->dim_ == source.dim_ and this->original_dim_ == source.original_dim_ and
+                       this->pca_dim_ == source.pca_dim_ and this->use_fht_ == source.use_fht_,
+                   "incompatible RaBitQ fused model");
+    this->rom_ = source.rom_;
+    this->pca_ = source.pca_;
+    this->is_trained_ = source.is_trained_;
+}
+
 inline float
 ip_obar_q(float ip_yu_q, float q_prime_sum, float y_norm, int B) {
     // used for recover distance from ip_yu_q
