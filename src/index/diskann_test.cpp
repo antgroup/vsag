@@ -15,6 +15,7 @@
 
 #include "diskann.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -25,6 +26,7 @@
 #include "diskann_zparameters.h"
 #include "distance.h"
 #include "index_common_param.h"
+#include "math_utils.h"
 #include "unittest.h"
 #include "utils/timer.h"
 #include "vsag/errors.h"
@@ -49,6 +51,93 @@ template <typename T>
 void
 write_value(std::stringstream& stream, const T& value) {
     stream.write(reinterpret_cast<const char*>(&value), sizeof(value));
+}
+
+std::vector<float>
+make_centers(uint64_t num_centers, uint64_t dim) {
+    std::vector<float> values(num_centers * dim);
+    for (uint64_t i = 0; i < num_centers; ++i) {
+        for (uint64_t j = 0; j < dim; ++j) {
+            values[i * dim + j] = static_cast<float>(i * 32 + j) / 7.0F;
+        }
+    }
+    return values;
+}
+
+std::vector<float>
+make_points_near_centers(uint64_t num_points, uint64_t dim, uint64_t num_centers) {
+    std::vector<float> values(num_points * dim);
+    for (uint64_t i = 0; i < num_points; ++i) {
+        uint64_t center_id = i % num_centers;
+        float offset = static_cast<float>((i % 7) + 1) / 100.0F;
+        for (uint64_t j = 0; j < dim; ++j) {
+            values[i * dim + j] = static_cast<float>(center_id * 32 + j) / 7.0F + offset;
+        }
+    }
+    return values;
+}
+
+std::vector<float>
+compute_l2sq(const std::vector<float>& values, uint64_t count, uint64_t dim) {
+    std::vector<float> norms(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        float norm = 0.0F;
+        for (uint64_t j = 0; j < dim; ++j) {
+            float value = values[i * dim + j];
+            norm += value * value;
+        }
+        norms[i] = norm;
+    }
+    return norms;
+}
+
+std::vector<uint32_t>
+compute_closest_centers_single_block(const std::vector<float>& data,
+                                     uint64_t num_points,
+                                     uint64_t dim,
+                                     const std::vector<float>& centers,
+                                     uint64_t num_centers,
+                                     const std::vector<float>& pts_norms,
+                                     uint64_t k) {
+    auto center_norms = compute_l2sq(centers, num_centers, dim);
+    std::vector<uint32_t> closest_centers(num_points * k);
+    std::vector<float> distance_matrix(num_points * num_centers);
+
+    math_utils::compute_closest_centers_in_block(data.data(),
+                                                 num_points,
+                                                 dim,
+                                                 centers.data(),
+                                                 num_centers,
+                                                 pts_norms.data(),
+                                                 center_norms.data(),
+                                                 closest_centers.data(),
+                                                 distance_matrix.data(),
+                                                 k);
+
+    return closest_centers;
+}
+
+void
+require_inverted_index_matches_assignments(const std::vector<std::vector<uint64_t>>& inverted_index,
+                                           const std::vector<uint32_t>& assignments,
+                                           uint64_t num_points,
+                                           uint64_t k) {
+    std::vector<uint64_t> seen_count(num_points);
+    for (uint64_t center_id = 0; center_id < inverted_index.size(); ++center_id) {
+        for (uint64_t point_id : inverted_index[center_id]) {
+            REQUIRE(point_id < num_points);
+            bool matched = false;
+            for (uint64_t rank = 0; rank < k; ++rank) {
+                matched = matched || assignments[point_id * k + rank] == center_id;
+            }
+            REQUIRE(matched);
+            ++seen_count[point_id];
+        }
+    }
+
+    for (uint64_t point_id = 0; point_id < num_points; ++point_id) {
+        REQUIRE(seen_count[point_id] == k);
+    }
 }
 
 }  // namespace
@@ -94,6 +183,86 @@ TEST_CASE("create_disk_layout reads stringstream after size lookup", "[ut][diska
                                                        sector_len,
                                                        diskann::Metric::L2));
     REQUIRE(diskann_writer.tellp() > std::streampos(0));
+}
+
+TEST_CASE("compute_closest_centers handles empty input", "[ut][diskann]") {
+    constexpr uint64_t num_points = 0;
+    constexpr uint64_t dim = 4;
+    constexpr uint64_t num_centers = 3;
+    constexpr uint64_t k = 1;
+
+    std::vector<uint32_t> closest_centers = {12345U};
+    std::vector<std::vector<uint64_t>> inverted_index(num_centers);
+
+    math_utils::compute_closest_centers(nullptr,
+                                        num_points,
+                                        dim,
+                                        nullptr,
+                                        num_centers,
+                                        k,
+                                        closest_centers.data(),
+                                        inverted_index.data(),
+                                        nullptr);
+
+    REQUIRE(closest_centers[0] == 12345U);
+    for (const auto& bucket : inverted_index) {
+        REQUIRE(bucket.empty());
+    }
+}
+
+TEST_CASE("compute_closest_centers handles zero closest-center request", "[ut][diskann]") {
+    constexpr uint64_t num_points = 4;
+    constexpr uint64_t dim = 3;
+    constexpr uint64_t num_centers = 0;
+    constexpr uint64_t k = 0;
+
+    std::vector<float> data(num_points * dim, 1.0F);
+    std::vector<uint32_t> closest_centers = {12345U};
+
+    math_utils::compute_closest_centers(data.data(),
+                                        num_points,
+                                        dim,
+                                        nullptr,
+                                        num_centers,
+                                        k,
+                                        closest_centers.data(),
+                                        nullptr,
+                                        nullptr);
+
+    REQUIRE(closest_centers[0] == 12345U);
+}
+
+TEST_CASE("compute_closest_centers matches single block reference", "[ut][diskann]") {
+    constexpr uint64_t num_points = math_utils::kMaxClosestCenterBlockSize + 11;
+    constexpr uint64_t dim = 5;
+    constexpr uint64_t num_centers = 32;
+    constexpr uint64_t k = 1;
+
+    auto centers = make_centers(num_centers, dim);
+    auto data = make_points_near_centers(num_points, dim, num_centers);
+    auto pts_norms = compute_l2sq(data, num_points, dim);
+    auto expected = compute_closest_centers_single_block(
+        data, num_points, dim, centers, num_centers, pts_norms, k);
+
+    std::vector<uint32_t> actual(num_points * k);
+    std::vector<std::vector<uint64_t>> inverted_index(num_centers);
+    math_utils::compute_closest_centers(data.data(),
+                                        num_points,
+                                        dim,
+                                        centers.data(),
+                                        num_centers,
+                                        k,
+                                        actual.data(),
+                                        inverted_index.data(),
+                                        pts_norms.data());
+
+    auto mismatch = std::mismatch(actual.begin(), actual.end(), expected.begin());
+    if (mismatch.first != actual.end()) {
+        auto mismatch_index = static_cast<uint64_t>(mismatch.first - actual.begin());
+        INFO("mismatch at assignment offset " << mismatch_index);
+    }
+    REQUIRE(mismatch.first == actual.end());
+    require_inverted_index_matches_assignments(inverted_index, actual, num_points, k);
 }
 
 TEST_CASE("diskann build", "[ut][diskann]") {

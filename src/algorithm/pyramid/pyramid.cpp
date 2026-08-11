@@ -304,6 +304,19 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     search_param.enable_rabitq_one_bit_search = parsed_param.has_rabitq_one_bit_search
                                                     ? parsed_param.rabitq_one_bit_search
                                                     : default_rabitq_one_bit_search_;
+
+    // Keep the same contract as HGraph: a useful hop cap must exceed ef_search.
+    if (static_cast<uint64_t>(parsed_param.hops_limit) <= parsed_param.ef_search) {
+        search_param.hops_limit = std::numeric_limits<uint32_t>::max();
+        if (parsed_param.hops_limit != std::numeric_limits<uint32_t>::max()) {
+            logger::warn(
+                fmt::format("hops_limit({}) is not greater than ef_search({}), ignoring hops_limit",
+                            parsed_param.hops_limit,
+                            parsed_param.ef_search));
+        }
+    } else {
+        search_param.hops_limit = parsed_param.hops_limit;
+    }
     if (this->support_duplicate_) {
         search_param.consider_duplicate = true;
     }
@@ -447,14 +460,14 @@ Pyramid::search_impl(const DatasetPtr& query,
     DistHeapPtr search_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
 
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
-    auto vl = pool_->TakeOne();
+    VisitedListGuard vl_guard(pool_.get());
+    const VisitedListPtr& vl = vl_guard.get();
     if (query_path != nullptr) {
         const std::string& current_path = query_path[0];
         search_hierarchy(h, search_func, vl, search_result, current_path, search_param);
     } else {
         h.root->Search(search_func, vl, search_result, search_param.ef);
     }
-    pool_->ReturnOne(vl);
 
     if (use_reorder_) {
         search_result = this->reorder_->Reorder(search_result,
@@ -1357,7 +1370,8 @@ Pyramid::add_one_point(const Hierarchy& h,
             graph_lock.unlock();
         }
 
-        auto vl = pool_->TakeOne();
+        VisitedListGuard vl_guard(pool_.get());
+        const VisitedListPtr& vl = vl_guard.get();
         DistHeapPtr results;
         if (vector != nullptr) {
             results = searcher_->Search(
@@ -1387,7 +1401,6 @@ Pyramid::add_one_point(const Hierarchy& h,
                 }
             }
         }
-        pool_->ReturnOne(vl);
         if (this->support_duplicate_ && search_param.duplicate_id >= 0) {
             std::unique_lock lock(this->label_lookup_mutex_);
             node->graph_->SetDuplicateId(static_cast<InnerIdType>(search_param.duplicate_id),
@@ -1494,9 +1507,9 @@ Pyramid::search_hierarchy(const Hierarchy& h,
         if (valid) {
             if (thread_pool_ != nullptr && search_param.parallel_search_thread_count > 1) {
                 futures.push_back(thread_pool_->GeneralEnqueue([&, node, i]() -> void {
-                    auto local_vl = pool_->TakeOne();
+                    VisitedListGuard vl_guard(pool_.get());
+                    const VisitedListPtr& local_vl = vl_guard.get();
                     node->Search(search_func, local_vl, search_result_lists[i], search_param.ef);
-                    pool_->ReturnOne(local_vl);
                 }));
             } else {
                 node->Search(search_func, vl, search_result_lists[i], search_param.ef);
@@ -1582,11 +1595,14 @@ Pyramid::search_node(const IndexNode* node,
     } else if (node->status_ == IndexNode::Status::GRAPH) {
         InnerSearchParam modified_param = search_param;
         modified_param.ep = node->entry_point_;
-        if (node->level_ != 0 && search_param.search_mode == KNN_SEARCH) {
-            modified_param.ef =
-                std::min(modified_param.ef,
-                         get_suitable_ef_search(
-                             search_param.topk, node->graph_->TotalCount(), subindex_ef_search));
+        if (node->level_ != 0) {
+            modified_param.hops_limit = std::numeric_limits<uint32_t>::max();
+            if (search_param.search_mode == KNN_SEARCH) {
+                modified_param.ef = std::min(
+                    modified_param.ef,
+                    get_suitable_ef_search(
+                        search_param.topk, node->graph_->TotalCount(), subindex_ef_search));
+            }
         }
         modified_param.topk = static_cast<int64_t>(modified_param.ef);
         results = searcher_->Search(node->graph_,

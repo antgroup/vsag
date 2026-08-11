@@ -275,7 +275,10 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
     auto gts = dataset->filter_ground_truth_;
     auto gt_topK = dataset->top_k;
     float cur_recall = 0.0f;
+    float range_recall = 0.0F;
     auto topk = gt_topK;
+    const bool support_filter_range =
+        index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER);
     for (auto i = 0; i < query_count; ++i) {
         auto query = get_one_query(queries, i);
         tl::expected<DatasetPtr, vsag::Error> res;
@@ -302,20 +305,27 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
             return;
         }
         REQUIRE(res.value()->GetDim() == topk);
-        if (index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER)) {
-            auto threshold = res.value()->GetDistances()[topk - 1] + 1e-5;
+        auto gt = gts->GetIds() + gt_topK * i;
+        if (support_filter_range) {
+            const auto range_gt_count = gt_topK - 1;
+            const auto* gt_distances = gts->GetDistances() + gt_topK * i;
+            // KNN and RangeSearch use independent approximate candidate searches. Define the
+            // radius from exact ground truth and evaluate aggregate recall instead of requiring
+            // every RangeSearch result to be non-empty.
+            const auto threshold =
+                0.5F * (gt_distances[range_gt_count - 1] + gt_distances[range_gt_count]);
             auto range_result =
                 index->RangeSearch(query, threshold, search_param, dataset->filter_function_);
             REQUIRE(range_result.has_value());
-            REQUIRE(range_result.value()->GetDim() > 0);
-            if (range_result.value()->GetDim() < topk - 1) {
-                WARN(fmt::format("range search result dim {} is less than {}",
-                                 range_result.value()->GetDim(),
-                                 topk - 1));
+            const auto range_dim = range_result.value()->GetDim();
+            const auto* range_ids = range_result.value()->GetIds();
+            for (int64_t j = 0; j < range_dim; ++j) {
+                REQUIRE_FALSE(dataset->filter_function_(range_ids[j]));
             }
+            const auto hits = Intersection(gt, range_gt_count, range_ids, range_dim);
+            range_recall += static_cast<float>(hits) / static_cast<float>(range_gt_count);
         }
         auto result = res.value()->GetIds();
-        auto gt = gts->GetIds() + gt_topK * i;
         auto val = Intersection(gt, gt_topK, result, topk);
         cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
     }
@@ -325,6 +335,14 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
                          expected_recall * query_count));
     }
     REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
+    if (support_filter_range) {
+        if (range_recall <= expected_recall * query_count) {
+            WARN(fmt::format("range_recall({}) <= expected_recall * query_count({})",
+                             range_recall,
+                             expected_recall * query_count));
+        }
+        REQUIRE(range_recall > expected_recall * query_count * RECALL_THRESHOLD);
+    }
 }
 
 void

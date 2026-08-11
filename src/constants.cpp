@@ -207,6 +207,9 @@ const char* const HGRAPH_USE_MCI = "use_mci";
 const char* const HGRAPH_MCI_MCS = "mci_mcs";
 const char* const HGRAPH_MCI_CLIQUE_MAX = "mci_clique_max";
 const char* const HGRAPH_MCI_ALPHA = "mci_alpha";
+const char* const HGRAPH_MCI_KNNG_SOURCE = "mci_knng_source";
+const char* const HGRAPH_MCI_KNNG_SOURCE_HGRAPH = "hgraph";
+const char* const HGRAPH_MCI_KNNG_SOURCE_ODESCENT = "odescent";
 const char* const HGRAPH_MCI_SEED_RATIO = "mci_seed_ratio";
 const char* const HGRAPH_MCI_HGRAPH_VALID_RATIO_THRESHOLD = "hgraph_valid_ratio_threshold";
 const char* const HGRAPH_EXTRA_INFO_SIZE = "extra_info_size";
@@ -269,6 +272,7 @@ const char* const PYRAMID_PRECISE_IO_TYPE = "precise_io_type";
 const char* const PYRAMID_PRECISE_FILE_PATH = "precise_file_path";
 const char* const PYRAMID_PARAMETER_EF_SEARCH = "ef_search";
 const char* const PYRAMID_PARAMETER_SUBINDEX_EF_SEARCH = "subindex_ef_search";
+const char* const PYRAMID_PARAMETER_HOPS_LIMIT = "hops_limit";
 const char* const PYRAMID_PARAMETER_RABITQ_ONE_BIT_SEARCH = "rabitq_one_bit_search";
 // search-time param key (in search JSON under "pyramid")
 const char* const PYRAMID_PARAMETER_HIERARCHIES = "hierarchies";
