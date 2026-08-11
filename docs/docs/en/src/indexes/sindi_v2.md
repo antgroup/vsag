@@ -64,8 +64,7 @@ auto result = index->KnnSearch(
         "n_candidate": 100,
         "query_prune_ratio": 0.1,
         "term_prune_ratio": 0.2,
-        "term_retain_threshold": 10000,
-        "use_term_lists_heap_insert": true
+        "term_retain_threshold": 10000
     }})").value();
 ```
 
@@ -107,10 +106,14 @@ Search parameters live under `{"sindi_v2": {...}}`.
 | `query_prune_ratio` | float | `0.0` | Fraction of the lowest-weight query terms skipped (`[0.0, 1.0)`). |
 | `term_prune_ratio` | float | `0.0` | Fraction of the lowest stored values skipped in each term list (`[0.0, 1.0)`). |
 | `term_retain_threshold` | uint64 | `0` | Maximum postings for one term across all windows. `0` disables the limit; positive values allow each non-empty window posting list to scan at most `max(1, floor(threshold / window_count))` postings. |
-| `use_term_lists_heap_insert` | bool | `true` | Select the term-list candidate insertion path. |
 
 After combining the ratio and threshold limits, SINDI V2 scans at least one posting from every
 non-empty term list.
+
+SINDI V2 chooses the heap-insertion strategy automatically from the build-time
+`doc_prune_ratio` and search-time `query_prune_ratio`. With the current `0.1`
+threshold, it uses distance-array insertion when both ratios are `<= 0.1`; if
+either ratio is greater than `0.1`, it uses term-list heap insertion.
 
 ## Choosing between SINDI and SINDI_V2
 

@@ -19,6 +19,7 @@
 
 #include <limits>
 
+#include "impl/logger/logger.h"
 #include "inner_string_params.h"
 #include "io/memory_block_io/memory_block_io_parameter.h"
 #include "io/reader_io/reader_io_parameter.h"
@@ -28,7 +29,7 @@ namespace {
 constexpr const char* SINDI_V2_TERM_IO_KEY = "term_io";
 constexpr const char* SINDI_V2_RERANK_IO_KEY = "rerank_io";
 constexpr const char* SINDI_V2_RERANK_LAYOUT_KEY = "rerank_layout";
-constexpr const char* SINDI_V2_USE_TERM_LISTS_HEAP_INSERT_KEY = "use_term_lists_heap_insert";
+constexpr const char* LEGACY_USE_TERM_LISTS_HEAP_INSERT_KEY = "use_term_lists_heap_insert";
 
 }  // namespace
 
@@ -325,10 +326,11 @@ SINDIV2SearchParameter::FromJson(const JsonType& json) {
         n_candidate = DEFAULT_N_CANDIDATE;
     }
 
-    if (search_json.Contains(SINDI_V2_USE_TERM_LISTS_HEAP_INSERT_KEY)) {
-        use_term_lists_heap_insert = search_json[SINDI_V2_USE_TERM_LISTS_HEAP_INSERT_KEY].GetBool();
-    } else {
-        use_term_lists_heap_insert = true;
+    if (search_json.Contains(LEGACY_USE_TERM_LISTS_HEAP_INSERT_KEY)) {
+        logger::warn(
+            "SINDI_V2 search parameter use_term_lists_heap_insert is ignored. "
+            "Remove this key; heap insertion is derived from doc_prune_ratio "
+            "and query_prune_ratio with the current SINDI prune-ratio threshold");
     }
 }
 JsonType
@@ -339,8 +341,6 @@ SINDIV2SearchParameter::ToJson() const {
     json[INDEX_SINDI_V2][SPARSE_N_CANDIDATE].SetInt(n_candidate);
     json[INDEX_SINDI_V2][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
     json[INDEX_SINDI_V2][SPARSE_TERM_RETAIN_THRESHOLD].SetUint64(term_retain_threshold);
-    json[INDEX_SINDI_V2][SINDI_V2_USE_TERM_LISTS_HEAP_INSERT_KEY].SetBool(
-        use_term_lists_heap_insert);
     return json;
 }
 

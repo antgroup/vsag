@@ -41,6 +41,16 @@ TEST_CASE("SINDIV2 term prune parameter validation", "[ut][SINDIV2Parameter]") {
     REQUIRE(configured.term_retain_threshold == 4096);
     const auto roundtrip = configured.ToJson();
     REQUIRE(roundtrip[INDEX_SINDI_V2][SPARSE_TERM_RETAIN_THRESHOLD].GetUint64() == 4096);
+    REQUIRE_FALSE(roundtrip[INDEX_SINDI_V2].Contains("use_term_lists_heap_insert"));
+
+    const auto legacy = parse(R"({
+        "sindi_v2": {
+            "query_prune_ratio": 0.2,
+            "use_term_lists_heap_insert": false
+        }
+    })");
+    REQUIRE(legacy.query_prune_ratio == 0.2F);
+    REQUIRE_FALSE(legacy.ToJson()[INDEX_SINDI_V2].Contains("use_term_lists_heap_insert"));
 
     const auto explicit_zero =
         parse(R"({"sindi_v2": {"term_prune_ratio": 0.0, "term_retain_threshold": 0}})");

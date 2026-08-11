@@ -49,6 +49,19 @@ constexpr int64_t SINDI_V2_TERM_LAYOUT_VERSION = 1;
 constexpr const char* SINDI_V2_TERM_LAYOUT_KIND_KEY = "sindi_v2_term_layout_kind";
 constexpr const char* SINDI_V2_TERM_LAYOUT_KIND = "term";
 
+DistanceEvaluationBackend
+sparse_backend(SparseValueQuantizationType quant_type) {
+    switch (quant_type) {
+        case SparseValueQuantizationType::FP16:
+            return DistanceEvaluationBackend::SPARSE_FP16;
+        case SparseValueQuantizationType::SQ8:
+            return DistanceEvaluationBackend::SPARSE_SQ8;
+        case SparseValueQuantizationType::FP32:
+        default:
+            return DistanceEvaluationBackend::SPARSE_FP32;
+    }
+}
+
 class BinaryReader : public Reader {
 public:
     explicit BinaryReader(Binary binary) : binary_(std::move(binary)) {
@@ -254,6 +267,7 @@ SINDIV2::SINDIV2(const SINDIV2ParameterPtr& param, const IndexCommonParam& commo
       dmq_shared_codebook_threshold_(param->dmq_shared_codebook_threshold),
       term_id_limit_(param->term_id_limit),
       window_size_(param->window_size),
+      doc_prune_ratio_(param->doc_prune_ratio),
       doc_retain_ratio_(1.0F - param->doc_prune_ratio),
       quantization_params_(std::make_shared<QuantizationParams>()),
       avg_doc_term_length_(param->avg_doc_term_length),
@@ -672,8 +686,10 @@ SINDIV2::KnnSearch(const DatasetPtr& query,
     CHECK_ARGUMENT(
         sparse_query.len_ > 0,
         fmt::format("query->GetSparseVectors()->len_ ({}) is invalid", sparse_query.len_));
+    SearchStatistics statistics;
     if (cur_element_count_ == 0) {
         auto [results, ret_dists, ret_ids] = create_fast_dataset(0, search_allocator);
+        results->Statistics(statistics.Dump());
         return results;
     }
 
@@ -701,6 +717,7 @@ SINDIV2::KnnSearch(const DatasetPtr& query,
         effective_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
         if (effective_query.len_ == 0) {
             auto [results, ret_dists, ret_ids] = create_fast_dataset(0, search_allocator);
+            results->Statistics(statistics.Dump());
             return results;
         }
     }
@@ -715,12 +732,15 @@ SINDIV2::KnnSearch(const DatasetPtr& query,
         query_context.query_term_buffers = term_datacell_->LoadQueryTermBuffers(query_term_ids);
     }
 
-    return search_impl<KNN_SEARCH>(computer,
-                                   inner_param,
-                                   search_allocator,
-                                   search_param.use_term_lists_heap_insert,
-                                   query_context,
-                                   rerank_query);
+    auto result = search_impl<KNN_SEARCH>(computer,
+                                          inner_param,
+                                          search_allocator,
+                                          UseTermListsHeapInsert(search_param),
+                                          query_context,
+                                          rerank_query,
+                                          &statistics);
+    result->Statistics(statistics.Dump());
+    return result;
 }
 
 template <InnerSearchMode mode>
@@ -730,7 +750,8 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                      Allocator* allocator,
                      bool use_term_lists_heap_insert,
                      SindiQueryContext& query_context,
-                     const SparseVector* original_query) const {
+                     const SparseVector* original_query,
+                     SearchStatistics* statistics) const {
     MaxHeap heap(allocator);
     int64_t k = 0;
 
@@ -749,6 +770,11 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                                     computer,
                                     use_term_lists_heap_insert,
                                     query_context);
+        if (statistics != nullptr) {
+            statistics->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
+                                    sparse_backend(sparse_value_quant_type_),
+                                    query_context.evaluation_tracker.Count());
+        }
 
         if (use_term_lists_heap_insert) {
             term_datacell_->InsertHeapByWindow(dists.data(),
@@ -821,8 +847,9 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
         auto rerank_dists = std::move(dists);
         rerank_dists.resize(candidate_size);
         auto rerank_computer = rerank_flat_->FactoryComputer(&rerank_query);
-        QueryContext rerank_context;
-        rerank_context.alloc = allocator;
+        QueryContext rerank_context{.alloc = allocator,
+                                    .stats = statistics,
+                                    .distance_phase = DistanceEvaluationPhase::RERANK};
         rerank_flat_->Query(rerank_dists.data(),
                             rerank_computer,
                             candidate_ids.data(),
@@ -874,8 +901,10 @@ SINDIV2::RangeSearch(const DatasetPtr& query,
     auto sparse_query = query->GetSparseVectors()[0];
     CHECK_ARGUMENT(sparse_query.len_ > 0,
                    fmt::format("query sparse vector length {} is invalid", sparse_query.len_));
+    SearchStatistics statistics;
     if (cur_element_count_ == 0) {
         auto [results, ret_dists, ret_ids] = create_fast_dataset(0, allocator_);
+        results->Statistics(statistics.Dump());
         return results;
     }
 
@@ -895,6 +924,7 @@ SINDIV2::RangeSearch(const DatasetPtr& query,
         sparse_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
         if (sparse_query.len_ == 0) {
             auto [results, ret_dists, ret_ids] = create_fast_dataset(0, allocator_);
+            results->Statistics(statistics.Dump());
             return results;
         }
     }
@@ -905,12 +935,21 @@ SINDIV2::RangeSearch(const DatasetPtr& query,
     query_context.query_term_buffers = term_datacell_->LoadQueryTermBuffers(query_term_ids);
     const SparseVector* rerank_query =
         remap_term_ids_ && use_reorder_ ? &query->GetSparseVectors()[0] : nullptr;
-    return search_impl<RANGE_SEARCH>(computer,
-                                     inner_param,
-                                     allocator_,
-                                     search_param.use_term_lists_heap_insert,
-                                     query_context,
-                                     rerank_query);
+    auto result = search_impl<RANGE_SEARCH>(computer,
+                                            inner_param,
+                                            allocator_,
+                                            UseTermListsHeapInsert(search_param),
+                                            query_context,
+                                            rerank_query,
+                                            &statistics);
+    result->Statistics(statistics.Dump());
+    return result;
+}
+
+bool
+SINDIV2::UseTermListsHeapInsert(const SINDIV2SearchParameter& search_param) const {
+    return doc_prune_ratio_ > K_TERM_LISTS_HEAP_INSERT_PRUNE_THRESHOLD ||
+           search_param.query_prune_ratio > K_TERM_LISTS_HEAP_INSERT_PRUNE_THRESHOLD;
 }
 
 void

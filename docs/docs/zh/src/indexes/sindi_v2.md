@@ -62,8 +62,7 @@ auto result = index->KnnSearch(
         "n_candidate": 100,
         "query_prune_ratio": 0.1,
         "term_prune_ratio": 0.2,
-        "term_retain_threshold": 10000,
-        "use_term_lists_heap_insert": true
+        "term_retain_threshold": 10000
     }})").value();
 ```
 
@@ -105,9 +104,12 @@ auto result = index->KnnSearch(
 | `query_prune_ratio` | float | `0.0` | 跳过最低权重查询 term 的比例，范围为 `[0.0, 1.0)`。 |
 | `term_prune_ratio` | float | `0.0` | 每条 term list 中跳过最低存储权重的比例，范围为 `[0.0, 1.0)`。 |
 | `term_retain_threshold` | uint64 | `0` | 单个 term 在所有 window 中最多扫描的 posting 总数；`0` 表示关闭，正数使每个非空 window posting list 最多扫描 `max(1, floor(threshold / window_count))` 条。 |
-| `use_term_lists_heap_insert` | bool | `true` | 是否选择基于 term list 的候选插入路径。 |
 
 合并 ratio 与 threshold 限制后，每条非空 term list 至少扫描一个 posting。
+
+SINDI V2 会根据构建阶段的 `doc_prune_ratio` 与检索阶段的 `query_prune_ratio`
+自动选择堆插入策略。按当前 `0.1` 阈值，当两个比例都 `<= 0.1` 时，使用基于距离数组的
+入堆路径；只要任一比例大于 `0.1`，就使用基于 term-list 的入堆路径。
 
 ## 如何选择 SINDI 与 SINDI_V2
 
