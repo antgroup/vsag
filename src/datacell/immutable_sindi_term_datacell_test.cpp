@@ -84,6 +84,96 @@ TEST_CASE("ImmutableSindiTermDataCell trusts versioned posting order",
     REQUIRE(window.id_payloads == Vector<uint16_t>({0, 1}, allocator.get()));
 }
 
+TEST_CASE("ImmutableSindiTermDataCell appends uncompact staging windows",
+          "[ut][SINDI][ImmutableSindiTermDataCell]") {
+    constexpr uint32_t term_id_limit = 16;
+    constexpr uint32_t window_size = 3;
+    const auto remap_term_ids = GENERATE(false, true);
+    const auto quantization = GENERATE(SparseValueQuantizationType::FP32,
+                                       SparseValueQuantizationType::FP16,
+                                       SparseValueQuantizationType::SQ8);
+
+    DYNAMIC_SECTION("remap=" << remap_term_ids
+                             << ", quantization=" << static_cast<int>(quantization)) {
+        auto allocator = SafeAllocator::FactoryDefaultAllocator();
+        auto quantization_params = std::make_shared<QuantizationParams>();
+        quantization_params->min_val = 0.0F;
+        quantization_params->max_val = 2.0F;
+        quantization_params->diff = 2.0F;
+
+        MutableSindiTermDataCell staging(
+            term_id_limit, window_size, allocator.get(), quantization, quantization_params);
+        uint32_t first_term = 1;
+        float first_value = 0.25F;
+        SparseVector first{1, &first_term, &first_value};
+        staging.InsertVector(first, 0);
+        uint32_t second_term = 3;
+        float second_value = 1.25F;
+        SparseVector second{1, &second_term, &second_value};
+        staging.InsertVector(second, 1);
+        std::array<uint32_t, 2> third_terms = {1, 9};
+        std::array<float, 2> third_values = {2.0F, 0.5F};
+        SparseVector third{2, third_terms.data(), third_values.data()};
+        staging.InsertVector(third, 2);
+        staging.SortByValue(0);
+
+        REQUIRE(staging.GetWindow(0).term_capacity_ > 10);
+        ImmutableSindiTermDataCell direct(term_id_limit,
+                                          window_size,
+                                          remap_term_ids,
+                                          quantization,
+                                          quantization_params,
+                                          allocator.get());
+        direct.AppendWindow(staging.GetWindow(0));
+
+        staging.Compact();
+        REQUIRE(staging.GetWindow(0).term_capacity_ == 10);
+        ImmutableSindiTermDataCell compacted(term_id_limit,
+                                             window_size,
+                                             remap_term_ids,
+                                             quantization,
+                                             quantization_params,
+                                             allocator.get());
+        compacted.AppendWindow(staging.GetWindow(0));
+
+        const auto& direct_window = direct.GetWindows().front();
+        const auto& compacted_window = compacted.GetWindows().front();
+        REQUIRE(direct_window.sorted_global_terms == compacted_window.sorted_global_terms);
+        REQUIRE(direct_window.offsets == compacted_window.offsets);
+        REQUIRE(direct_window.id_payloads == compacted_window.id_payloads);
+        REQUIRE(direct_window.value_payloads == compacted_window.value_payloads);
+        REQUIRE(direct_window.sorted_global_terms.capacity() ==
+                direct_window.sorted_global_terms.size());
+        REQUIRE(direct_window.offsets.capacity() == direct_window.offsets.size());
+        REQUIRE(direct_window.id_payloads.capacity() == direct_window.id_payloads.size());
+        REQUIRE(direct_window.value_payloads.capacity() == direct_window.value_payloads.size());
+
+        std::stringstream direct_stream;
+        IOStreamWriter direct_writer(direct_stream);
+        direct.SerializeWindows(direct_writer);
+        std::stringstream compacted_stream;
+        IOStreamWriter compacted_writer(compacted_stream);
+        compacted.SerializeWindows(compacted_writer);
+        REQUIRE(direct_stream.str() == compacted_stream.str());
+    }
+}
+
+TEST_CASE("ImmutableSindiTermDataCell rejects malformed staging windows",
+          "[ut][SINDI][ImmutableSindiTermDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto quantization_params = std::make_shared<QuantizationParams>();
+    ImmutableSindiTermDataCell destination(
+        1, 1, false, SparseValueQuantizationType::FP32, quantization_params, allocator.get());
+    MutableSINDIWindow staging(allocator.get());
+    staging.term_capacity_ = 1;
+    staging.term_ids_.resize(1);
+    staging.term_datas_.resize(1);
+    staging.term_sizes_.push_back(1);
+
+    REQUIRE_THROWS(destination.AppendWindow(staging));
+    REQUIRE(destination.GetWindowCount() == 0);
+}
+
 TEST_CASE("ImmutableSindiTermDataCell term-first memory load uses exact capacity",
           "[ut][SINDIV2][ImmutableSindiTermDataCell]") {
     constexpr uint32_t term_id_limit = 16;

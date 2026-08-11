@@ -15,11 +15,13 @@
 #include "sindi_datacell_utils.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <numeric>
 #include <type_traits>
 
+#include "common.h"
 #include "simd/fp16_simd.h"
 #include "vsag_exception.h"
 
@@ -347,17 +349,38 @@ parse_term_payload_impl(const uint8_t* payload,
 
     SindiTermBuffer buffer(allocator);
     buffer.window_offsets.resize(static_cast<uint64_t>(window_count) + 1, 0);
-    if (view_payload) {
+    const auto* payload_ids = payload + ids_offset;
+    const bool ids_are_aligned = reinterpret_cast<uintptr_t>(payload_ids) % alignof(uint16_t) == 0;
+    if (view_payload && ids_are_aligned) {
         buffer.external_ids = reinterpret_cast<const uint16_t*>(payload + ids_offset);
+    } else {
+        buffer.ids.resize(entry.posting_count);
+        std::memcpy(buffer.ids.data(), payload + ids_offset, ids_size);
+    }
+    if (view_payload) {
         buffer.external_values = payload + cursor;
         buffer.external_values_size = values_size;
     } else {
-        buffer.ids.resize(entry.posting_count);
         buffer.values.resize(values_size);
-        std::memcpy(buffer.ids.data(), payload + ids_offset, ids_size);
         std::memcpy(buffer.values.data(), payload + cursor, values_size);
     }
     const auto* ids = buffer.IdsData();
+    const auto* values = buffer.ValuesData();
+
+    for (uint32_t posting = 0; posting < entry.posting_count; ++posting) {
+        const auto* encoded = values + static_cast<uint64_t>(posting) * value_code_size;
+        float value = 0.0F;
+        if (value_code_size == sizeof(float)) {
+            std::memcpy(&value, encoded, sizeof(value));
+        } else if (value_code_size == sizeof(uint16_t)) {
+            uint16_t fp16 = 0;
+            std::memcpy(&fp16, encoded, sizeof(fp16));
+            value = generic::FP16ToFloat(fp16);
+        }
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            value_code_size == sizeof(uint8_t) || std::isfinite(value),
+            "SINDI_V2 posting payload contains a non-finite value");
+    }
 
     uint32_t posting_count = 0;
     uint32_t previous_window = std::numeric_limits<uint32_t>::max();
@@ -382,10 +405,17 @@ parse_term_payload_impl(const uint8_t* payload,
         const auto window_start = static_cast<uint64_t>(meta.window_id) * window_size;
         const auto window_document_count = static_cast<uint32_t>(std::min<uint64_t>(
             window_size, total_count > window_start ? total_count - window_start : 0));
+        Vector<uint16_t> unique_ids(allocator);
+        unique_ids.reserve(meta.posting_count);
         for (uint32_t posting = 0; posting < meta.posting_count; ++posting) {
-            CHECK_ARGUMENT(ids[posting_count + posting] < window_document_count,
+            const auto id = ids[posting_count + posting];
+            CHECK_ARGUMENT(id < window_document_count,
                            "SINDI_V2 posting id exceeds its window document count");
+            unique_ids.push_back(id);
         }
+        std::sort(unique_ids.begin(), unique_ids.end());
+        CHECK_ARGUMENT(std::adjacent_find(unique_ids.begin(), unique_ids.end()) == unique_ids.end(),
+                       "SINDI_V2 posting payload contains duplicate ids");
         posting_count += meta.posting_count;
         previous_window = meta.window_id;
     }

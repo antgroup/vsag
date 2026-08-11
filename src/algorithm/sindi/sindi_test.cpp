@@ -27,9 +27,42 @@
 #include "algorithm/sparse_distance.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
+#include "storage/serialization_tags.h"
 #include "storage/serialization_template_test.h"
+#include "storage/streaming_serialization_test_utils.h"
 #include "unittest.h"
 using namespace vsag;
+
+namespace {
+
+using vsag::test::EraseStreamingBlock;
+using vsag::test::InsertUnknownStreamingBlock;
+
+float
+sparse_inner_product_distance(uint32_t len1,
+                              const uint32_t* ids1,
+                              const float* vals1,
+                              uint32_t len2,
+                              const uint32_t* ids2,
+                              const float* vals2) {
+    float sum = 0.0F;
+    uint32_t i = 0;
+    uint32_t j = 0;
+    while (i < len1 && j < len2) {
+        if (ids1[i] < ids2[j]) {
+            ++i;
+        } else if (ids1[i] > ids2[j]) {
+            ++j;
+        } else {
+            sum += vals1[i] * vals2[j];
+            ++i;
+            ++j;
+        }
+    }
+    return 1.0F - sum;
+}
+
+}  // namespace
 
 namespace vsag {
 
@@ -90,7 +123,23 @@ public:
     static bool
     MutableTermIsSorted(const SINDI& index, uint32_t window, uint32_t term) {
         const auto& data = index.mutable_term_datacell_->GetWindow(window);
-        return data.term_sorted_sizes_[term] == data.term_sizes_[term];
+        const auto& ids = *data.term_ids_[term];
+        const auto& values = *data.term_datas_[term];
+        const auto code_size = index.mutable_term_datacell_->GetTermValueCodeSize();
+        for (uint32_t i = 1; i < data.term_sizes_[term]; ++i) {
+            const auto previous = sindi_datacell_utils::DecodeValue(
+                values.data() + static_cast<uint64_t>(i - 1) * code_size,
+                index.sparse_value_quant_type_,
+                index.quantization_params_.get());
+            const auto current = sindi_datacell_utils::DecodeValue(
+                values.data() + static_cast<uint64_t>(i) * code_size,
+                index.sparse_value_quant_type_,
+                index.quantization_params_.get());
+            if (previous < current || (previous == current && ids[i - 1] > ids[i])) {
+                return false;
+            }
+        }
+        return true;
     }
 
     static void
@@ -604,6 +653,88 @@ create_exact_sindi_param(uint32_t term_id_limit,
     return index_param;
 }
 
+TEST_CASE("SINDI streaming compatibility", "[ut][SINDI][streaming][compatibility]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 64;
+
+    constexpr uint32_t num_base = 128;
+    constexpr int64_t max_dim = 64;
+    constexpr int64_t max_id = 30000;
+    std::vector<int64_t> ids(num_base);
+    for (uint32_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base = fixtures::GenerateSparseVectors(num_base, max_dim, max_id, 0, 10, 114);
+    auto base = Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    static constexpr auto param_str = R"({
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": 30001,
+        "avg_doc_term_length": 100
+    })";
+    auto index_param = std::make_shared<SINDIParameter>();
+    index_param->FromJson(JsonType::Parse(param_str));
+
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+    REQUIRE(index->Build(base).empty());
+
+    std::stringstream stream;
+    REQUIRE_NOTHROW(index->SerializeStreaming(stream));
+    const auto bytes = stream.str();
+
+    std::stringstream metadata_stream(bytes);
+    const auto metadata_result = Index::GetStreamingMetadata(metadata_stream);
+    REQUIRE(metadata_result.has_value());
+    const auto metadata = JsonType::Parse(metadata_result.value().metadata_json);
+    REQUIRE(metadata[BASIC_INFO]["sindi_posting_list_format_version"].GetInt() == 1);
+
+    SECTION("skips unknown non-critical block") {
+        auto mutated = InsertUnknownStreamingBlock(bytes, false);
+        auto restored = std::make_unique<SINDI>(index_param, common_param);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_NOTHROW(restored->DeserializeStreaming(deserialize_stream));
+        REQUIRE(restored->GetNumElements() == num_base);
+
+        std::stringstream load_stream(mutated);
+        auto loaded = Index::Load(load_stream, "{}");
+        REQUIRE(loaded.has_value());
+        REQUIRE(loaded.value()->GetNumElements() == num_base);
+    }
+
+    SECTION("rejects unknown critical block") {
+        auto mutated = InsertUnknownStreamingBlock(bytes, true);
+        auto restored = std::make_unique<SINDI>(index_param, common_param);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_THROWS(restored->DeserializeStreaming(deserialize_stream));
+
+        std::stringstream load_stream(mutated);
+        REQUIRE_FALSE(Index::Load(load_stream, "{}").has_value());
+    }
+
+    SECTION("rejects missing required block") {
+        auto mutated = EraseStreamingBlock(bytes, StreamSerializationTag::SINDI_WINDOWS);
+        auto restored = std::make_unique<SINDI>(index_param, common_param);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_THROWS(restored->DeserializeStreaming(deserialize_stream));
+
+        std::stringstream load_stream(mutated);
+        REQUIRE_FALSE(Index::Load(load_stream, "{}").has_value());
+    }
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
 std::vector<std::pair<int64_t, float>>
 brute_force_sparse_knn(const SparseVector& query,
                        const std::vector<SparseVector>& base,
@@ -615,12 +746,12 @@ brute_force_sparse_knn(const SparseVector& query,
     result.reserve(base.size());
     for (uint64_t i = 0; i < base.size(); ++i) {
         auto [base_ids, base_vals] = sort_sparse_vector(base[i], allocator);
-        auto distance = get_distance(query.len_,
-                                     query_ids.data(),
-                                     query_vals.data(),
-                                     base[i].len_,
-                                     base_ids.data(),
-                                     base_vals.data());
+        auto distance = sparse_inner_product_distance(query.len_,
+                                                      query_ids.data(),
+                                                      query_vals.data(),
+                                                      base[i].len_,
+                                                      base_ids.data(),
+                                                      base_vals.data());
         result.emplace_back(ids[i], distance);
     }
     std::sort(result.begin(), result.end(), [](const auto& lhs, const auto& rhs) {
@@ -1106,21 +1237,11 @@ TEST_CASE("SINDI Immutable Sparse Deserialize KNN Test", "[ut][SINDI]") {
         }
     }
 
-    SparseVector source_vector;
     SparseVector immutable_vector;
-    source->GetSparseVectorByInnerId(0, &source_vector, allocator.get());
-    immutable->GetSparseVectorByInnerId(0, &immutable_vector, allocator.get());
-    REQUIRE(immutable_vector.len_ == source_vector.len_);
-    for (uint32_t i = 0; i < source_vector.len_; ++i) {
-        REQUIRE(immutable_vector.ids_[i] == source_vector.ids_[i]);
-        REQUIRE(std::abs(immutable_vector.vals_[i] - source_vector.vals_[i]) < 1e-3F);
-    }
-    REQUIRE(std::abs(immutable->CalcDistanceById(query, ids[0]) -
-                     source->CalcDistanceById(query, ids[0])) < 1e-3F);
-    allocator->Deallocate(source_vector.ids_);
-    allocator->Deallocate(source_vector.vals_);
-    allocator->Deallocate(immutable_vector.ids_);
-    allocator->Deallocate(immutable_vector.vals_);
+    REQUIRE_THROWS(source->GetSparseVectorByInnerId(0, &immutable_vector, allocator.get()));
+    REQUIRE_THROWS(immutable->GetSparseVectorByInnerId(0, &immutable_vector, allocator.get()));
+    REQUIRE_THROWS(immutable->CalcDistanceById(query, ids[0]));
+    REQUIRE_THROWS(immutable->CalDistanceById(query, ids.data(), num_base));
 
     for (auto& item : sv_base) {
         delete[] item.vals_;
@@ -2367,7 +2488,7 @@ TEST_CASE("SINDI Remap Memory Comparison - MD5 Vocabulary", "[ut][SINDI]") {
     }
 }
 
-TEST_CASE("SINDI prunes before remapping and calibrates SQ8 from retained values", "[ut][SINDI]") {
+TEST_CASE("SINDI prunes before remapping and calibrates SQ8 from raw values", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
@@ -2401,21 +2522,102 @@ TEST_CASE("SINDI prunes before remapping and calibrates SQ8 from retained values
             REQUIRE_FALSE(SINDITestAccess::TryMap(index, 200).has_value());
 
             const auto quantization = SINDITestAccess::QuantizationParamsValue(index);
-            REQUIRE(std::abs(quantization.min_val - 1.0F) < 1e-6F);
+            REQUIRE(std::abs(quantization.min_val - 0.1F) < 1e-6F);
             REQUIRE(std::abs(quantization.max_val - 1.0F) < 1e-6F);
-            REQUIRE(std::abs(quantization.diff - 1.0F) < 1e-6F);
+            REQUIRE(std::abs(quantization.diff - 0.9F) < 1e-6F);
 
             uint32_t missing_term = 200;
             float query_value = 1.0F;
             SparseVector missing_query{1, &missing_term, &query_value};
             auto query = Dataset::Make();
             query->NumElements(1)->SparseVectors(&missing_query)->Owner(false);
-            REQUIRE(std::abs(index.CalcDistanceById(query, label, false) - 1.0F) < 1e-6F);
+            if (immutable) {
+                REQUIRE_THROWS(index.CalcDistanceById(query, label, false));
+            } else {
+                REQUIRE(std::abs(index.CalcDistanceById(query, label, false) - 1.0F) < 1e-6F);
+            }
 
             uint32_t retained_term = 100;
             SparseVector retained_query{1, &retained_term, &query_value};
             query->SparseVectors(&retained_query);
-            REQUIRE(std::abs(index.CalcDistanceById(query, label, false)) < 1e-6F);
+            if (immutable) {
+                REQUIRE_THROWS(index.CalcDistanceById(query, label, false));
+            } else {
+                REQUIRE(std::abs(index.CalcDistanceById(query, label, false)) < 1e-6F);
+            }
+        }
+    }
+}
+
+TEST_CASE("SINDI nonprune remaps terms in input order", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 2;
+
+    uint32_t term_ids[] = {200, 100};
+    float term_values[] = {0.1F, 1.0F};
+    SparseVector sparse_vector{2, term_ids, term_values};
+    int64_t label = 7;
+    auto base = Dataset::Make();
+    base->NumElements(1)->SparseVectors(&sparse_vector)->Ids(&label)->Owner(false);
+
+    for (const bool immutable : {false, true}) {
+        DYNAMIC_SECTION("immutable=" << immutable) {
+            auto parameter = std::make_shared<SINDIParameter>();
+            parameter->FromJson(JsonType::Parse(fmt::format(R"({{
+                "term_id_limit": 16,
+                "window_size": 10000,
+                "doc_prune_ratio": 0.0,
+                "use_quantization": false,
+                "use_reorder": false,
+                "remap_term_ids": true,
+                "immutable": {}
+            }})",
+                                                            immutable)));
+            SINDI index(parameter, common_param);
+            REQUIRE(index.Build(base).empty());
+            REQUIRE(SINDITestAccess::MapperSize(index) == 2);
+            REQUIRE(SINDITestAccess::TryMap(index, 200) == 0);
+            REQUIRE(SINDITestAccess::TryMap(index, 100) == 1);
+        }
+    }
+}
+
+TEST_CASE("SINDI nonprune remap preserves upstream overflow state", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 2;
+
+    uint32_t term_ids[] = {200, 100};
+    float term_values[] = {0.1F, 1.0F};
+    SparseVector sparse_vector{2, term_ids, term_values};
+    int64_t label = 7;
+    auto base = Dataset::Make();
+    base->NumElements(1)->SparseVectors(&sparse_vector)->Ids(&label)->Owner(false);
+
+    for (const bool immutable : {false, true}) {
+        DYNAMIC_SECTION("immutable=" << immutable) {
+            auto parameter = std::make_shared<SINDIParameter>();
+            parameter->FromJson(JsonType::Parse(fmt::format(R"({{
+                "term_id_limit": 1,
+                "window_size": 10000,
+                "doc_prune_ratio": 0.0,
+                "use_quantization": false,
+                "use_reorder": false,
+                "remap_term_ids": true,
+                "immutable": {}
+            }})",
+                                                            immutable)));
+            SINDI index(parameter, common_param);
+            REQUIRE(index.Build(base) == std::vector<int64_t>{label});
+            REQUIRE(index.GetNumElements() == 0);
+            REQUIRE(SINDITestAccess::MapperSize(index) == 1);
+            REQUIRE(SINDITestAccess::TryMap(index, 200) == 0);
+            REQUIRE_FALSE(SINDITestAccess::TryMap(index, 100).has_value());
         }
     }
 }

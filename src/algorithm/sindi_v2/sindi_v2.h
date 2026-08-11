@@ -134,6 +134,9 @@ public:
     void
     SetIO(const std::shared_ptr<Reader> reader) override;
 
+    InnerIndexPtr
+    Clone(const IndexCommonParam& param) override;
+
 private:
     static constexpr float K_TERM_LISTS_HEAP_INSERT_PRUNE_THRESHOLD = 0.1F;
 
@@ -148,7 +151,8 @@ private:
                 Allocator* allocator,
                 bool use_term_lists_heap_insert,
                 SindiQueryContext& query_context,
-                const SparseVector* original_query = nullptr) const;
+                const SparseVector* original_query = nullptr,
+                SearchStatistics* statistics = nullptr) const;
 
     bool
     UseTermListsHeapInsert(const SINDIV2SearchParameter& search_param) const;
@@ -204,7 +208,6 @@ private:
     std::string rerank_type_{SPARSE_RERANK_TYPE_FP32};
     uint32_t dmq_shared_codebook_threshold_{DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD};
     float doc_prune_ratio_{0};
-    float doc_retain_ratio_{0};
 
     FlattenInterfacePtr rerank_flat_{nullptr};
 

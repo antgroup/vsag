@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <limits>
 
+#include "container_types.h"
 #include "sparse_vector_datacell.h"
 #include "vsag/options.h"
 
@@ -34,12 +35,14 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
     if (id_count == 0) {
         return;
     }
+    CHECK_ARGUMENT(idx != nullptr, "SparseVectorDataCell query ids are null");
 
     const auto load_location = [this](InnerIdType id) {
-        DocLocation location;
-        offset_io_->Read(sizeof(location),
-                         static_cast<uint64_t>(id) * sizeof(location),
-                         reinterpret_cast<uint8_t*>(&location));
+        DocLocation location{};
+        const bool read_ok = offset_io_->Read(sizeof(location),
+                                              static_cast<uint64_t>(id) * sizeof(location),
+                                              reinterpret_cast<uint8_t*>(&location));
+        CHECK_ARGUMENT(read_ok, "SparseVectorDataCell failed to read document location");
         return location;
     };
 
@@ -48,6 +51,10 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
     const auto compute_direct = [&](const DocLocation& location, InnerIdType result_index) {
         bool need_release = false;
         const auto* codes = io_->Read(location.size, location.offset, need_release);
+        if (codes == nullptr) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "SparseVectorDataCell failed to read vector codes");
+        }
         try {
             computer->ComputeDist(codes, result_dists + result_index);
         } catch (...) {
@@ -136,7 +143,10 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
     }
 
     Vector<uint8_t> scratch(scratch_size, query_allocator);
-    io_->MultiRead(scratch.data(), read_sizes.data(), read_offsets.data(), range_count);
+    if (not io_->MultiRead(scratch.data(), read_sizes.data(), read_offsets.data(), range_count)) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "SparseVectorDataCell failed to read vector-code batch");
+    }
 
     for (uint64_t range_index = 0; range_index < range_count; ++range_index) {
         const auto& range = ranges[range_index];
@@ -305,11 +315,17 @@ template <typename QuantTmpl, typename IOTmpl>
 const uint8_t*
 SparseVectorDataCell<QuantTmpl, IOTmpl>::get_codes_by_id_no_lock(InnerIdType id,
                                                                  bool& need_release) const {
-    DocLocation location;
-    offset_io_->Read(sizeof(location),
-                     static_cast<uint64_t>(id) * sizeof(location),
-                     reinterpret_cast<uint8_t*>(&location));
-    return io_->Read(location.size, location.offset, need_release);
+    DocLocation location{};
+    const bool read_ok = offset_io_->Read(sizeof(location),
+                                          static_cast<uint64_t>(id) * sizeof(location),
+                                          reinterpret_cast<uint8_t*>(&location));
+    CHECK_ARGUMENT(read_ok, "SparseVectorDataCell failed to read document location");
+    const auto* codes = io_->Read(location.size, location.offset, need_release);
+    if (codes == nullptr) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "SparseVectorDataCell failed to read vector codes");
+    }
+    return codes;
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -324,6 +340,14 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::GetSparseVectorByInnerId(
     const auto* codes = this->get_codes_by_id_no_lock(inner_id, need_release);
     data->len_ = *reinterpret_cast<const uint32_t*>(codes);
     const auto* entries = reinterpret_cast<const BufferEntry*>(codes + sizeof(uint32_t));
+    if (data->len_ == 0) {
+        data->ids_ = nullptr;
+        data->vals_ = nullptr;
+        if (need_release) {
+            this->Release(codes);
+        }
+        return;
+    }
     data->ids_ = static_cast<uint32_t*>(allocator->Allocate(sizeof(uint32_t) * data->len_));
     try {
         data->vals_ = static_cast<float*>(allocator->Allocate(sizeof(float) * data->len_));

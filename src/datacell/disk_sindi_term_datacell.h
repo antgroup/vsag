@@ -15,7 +15,9 @@
 
 #pragma once
 
+#include <cmath>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <vector>
 
@@ -40,8 +42,6 @@ using TermBuffer = SindiTermBuffer;
 
 class DiskSindiTermDataCellInterface : public SindiSearchTermDataCell {
 public:
-    virtual ~DiskSindiTermDataCellInterface() = default;
-
     static std::shared_ptr<DiskSindiTermDataCellInterface>
     MakeInstance(uint32_t term_id_limit,
                  Allocator* allocator,
@@ -51,100 +51,11 @@ public:
                  const IOParamPtr& io_param,
                  const IndexCommonParam& common_param);
 
-    static std::shared_ptr<DiskSindiTermDataCellInterface>
-    MakeInstance(uint32_t term_id_limit,
-                 Allocator* allocator,
-                 bool use_quantization,
-                 QuantizationParamsPtr quantization_params,
-                 uint32_t window_size,
-                 const IOParamPtr& io_param,
-                 const IndexCommonParam& common_param) {
-        auto quantization_type =
-            use_quantization ? SparseValueQuantizationType::SQ8 : SparseValueQuantizationType::FP32;
-        return MakeInstance(term_id_limit,
-                            allocator,
-                            quantization_type,
-                            std::move(quantization_params),
-                            window_size,
-                            io_param,
-                            common_param);
-    }
-
     virtual void
     DeserializeTermLayout(StreamReader& reader, uint32_t window_count, uint64_t total_count) = 0;
 
     virtual void
-    InitIO(const IOParamPtr& io_param) = 0;
-
-    virtual void
     SetIO(const std::shared_ptr<Reader>& reader) = 0;
-
-    virtual QueryTermBuffers
-    LoadQueryTermBuffers(const Vector<uint32_t>& query_term_ids) const override = 0;
-
-    virtual uint32_t
-    GetWindowCount() const override = 0;
-
-    virtual uint32_t
-    GetTermDictCount() const override = 0;
-
-    virtual uint64_t
-    GetMemoryUsage() const override = 0;
-
-    virtual void
-    QueryWindow(float* dists,
-                uint32_t window_id,
-                const SparseTermComputerPtr& computer,
-                bool use_term_lists_heap_insert,
-                SindiQueryContext& query_context) const override = 0;
-
-    virtual void
-    InsertHeapByWindowKnn(float* dists,
-                          uint32_t window_id,
-                          const SparseTermComputerPtr& computer,
-                          MaxHeap& heap,
-                          const InnerSearchParam& param,
-                          uint32_t offset_id,
-                          bool with_filter,
-                          const QueryTermBuffers& query_term_buffers) const = 0;
-
-    virtual void
-    InsertHeapByDistsKnn(float* dists,
-                         uint32_t dists_size,
-                         MaxHeap& heap,
-                         const InnerSearchParam& param,
-                         uint32_t offset_id,
-                         bool with_filter) const = 0;
-
-    void
-    InsertHeapByWindow(float* dists,
-                       uint32_t window_id,
-                       const SparseTermComputerPtr& computer,
-                       MaxHeap& heap,
-                       const InnerSearchParam& param,
-                       uint32_t offset_id,
-                       InnerSearchMode mode,
-                       bool with_filter,
-                       const SindiQueryContext& query_context) const override = 0;
-
-    void
-    InsertHeapByDists(float* dists,
-                      uint32_t dists_size,
-                      MaxHeap& heap,
-                      const InnerSearchParam& param,
-                      uint32_t offset_id,
-                      InnerSearchMode mode,
-                      bool with_filter) const override = 0;
-
-    virtual void
-    GetSparseVector(uint32_t inner_id,
-                    SparseVector* data,
-                    Allocator* specified_allocator) const override = 0;
-
-    virtual float
-    CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
-                          uint32_t base_id,
-                          const QueryTermBuffers& query_term_buffers) const override = 0;
 };
 
 using DiskSindiTermDataCellInterfacePtr = std::shared_ptr<DiskSindiTermDataCellInterface>;
@@ -169,16 +80,11 @@ public:
                           uint64_t total_count) override;
 
     void
-    InitIO(const IOParamPtr& io_param) override;
-
-    void
     SetIO(const std::shared_ptr<Reader>& reader) override;
 
     QueryTermBuffers
-    LoadQueryTermBuffers(const Vector<uint32_t>& query_term_ids) const override;
-
-    const TermBuffer*
-    GetTermBufferNoLock(uint32_t term_id, const QueryTermBuffers& query_term_buffers) const;
+    LoadQueryTermBuffers(const Vector<uint32_t>& query_term_ids,
+                         Allocator* query_allocator = nullptr) const override;
 
     uint32_t
     GetWindowCount() const override {
@@ -201,24 +107,6 @@ public:
                 SindiQueryContext& query_context) const override;
 
     void
-    InsertHeapByWindowKnn(float* dists,
-                          uint32_t window_id,
-                          const SparseTermComputerPtr& computer,
-                          MaxHeap& heap,
-                          const InnerSearchParam& param,
-                          uint32_t offset_id,
-                          bool with_filter,
-                          const QueryTermBuffers& query_term_buffers) const override;
-
-    void
-    InsertHeapByDistsKnn(float* dists,
-                         uint32_t dists_size,
-                         MaxHeap& heap,
-                         const InnerSearchParam& param,
-                         uint32_t offset_id,
-                         bool with_filter) const override;
-
-    void
     InsertHeapByWindow(float* dists,
                        uint32_t window_id,
                        const SparseTermComputerPtr& computer,
@@ -238,6 +126,41 @@ public:
                       InnerSearchMode mode,
                       bool with_filter) const override;
 
+    void
+    GetSparseVector(uint32_t inner_id,
+                    SparseVector* data,
+                    Allocator* specified_allocator) const override;
+
+    float
+    CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
+                          uint32_t base_id,
+                          const QueryTermBuffers& query_term_buffers) const override;
+
+private:
+    void
+    InitIO(const IOParamPtr& io_param);
+
+    const TermBuffer*
+    GetTermBufferNoLock(uint32_t term_id, const QueryTermBuffers& query_term_buffers) const;
+
+    void
+    InsertHeapByWindowKnn(float* dists,
+                          uint32_t window_id,
+                          const SparseTermComputerPtr& computer,
+                          MaxHeap& heap,
+                          const InnerSearchParam& param,
+                          uint32_t offset_id,
+                          bool with_filter,
+                          const QueryTermBuffers& query_term_buffers) const;
+
+    void
+    InsertHeapByDistsKnn(float* dists,
+                         uint32_t dists_size,
+                         MaxHeap& heap,
+                         const InnerSearchParam& param,
+                         uint32_t offset_id,
+                         bool with_filter) const;
+
     template <InnerSearchMode mode, InnerSearchType type>
     void
     InsertHeapByWindow(float* dists,
@@ -256,17 +179,6 @@ public:
                       const InnerSearchParam& param,
                       uint32_t offset_id) const;
 
-    void
-    GetSparseVector(uint32_t inner_id,
-                    SparseVector* data,
-                    Allocator* specified_allocator) const override;
-
-    float
-    CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
-                          uint32_t base_id,
-                          const QueryTermBuffers& query_term_buffers) const override;
-
-private:
     template <InnerSearchMode mode, InnerSearchType type>
     void
     insert_candidate_into_heap(uint32_t id,
@@ -274,8 +186,11 @@ private:
                                float& cur_heap_top,
                                MaxHeap& heap,
                                uint32_t offset_id,
+                               uint32_t n_candidate,
                                float radius,
-                               const FilterPtr& filter) const;
+                               const FilterPtr& filter,
+                               const std::optional<float>& threshold,
+                               bool enable_reorder) const;
 
     template <InnerSearchType type>
     bool
@@ -285,7 +200,9 @@ private:
                       MaxHeap& heap,
                       uint32_t offset_id,
                       uint32_t n_candidate,
-                      const FilterPtr& filter) const;
+                      const FilterPtr& filter,
+                      const std::optional<float>& threshold,
+                      bool enable_reorder) const;
 
     void
     ValidateBoundLayout(uint64_t payload_size) const;

@@ -67,7 +67,10 @@ public:
     DeserializeTermLayout(StreamReader& reader, uint32_t window_count, uint64_t total_count);
 
     QueryTermBuffers
-    LoadQueryTermBuffers(const Vector<uint32_t>& query_term_ids) const override {
+    LoadQueryTermBuffers(const Vector<uint32_t>& query_term_ids,
+                         Allocator* query_allocator = nullptr) const override {
+        (void)query_term_ids;
+        (void)query_allocator;
         return QueryTermBuffers(allocator_);
     }
 
@@ -155,7 +158,8 @@ private:
                          const MappedQueryTerms& mapped_terms,
                          MaxHeap& heap,
                          const InnerSearchParam& param,
-                         uint32_t offset_id) const;
+                         uint32_t offset_id,
+                         SparseEvaluationTracker* candidate_tracker = nullptr) const;
 
     template <InnerSearchMode mode, InnerSearchType type>
     void

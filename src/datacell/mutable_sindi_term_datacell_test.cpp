@@ -27,13 +27,14 @@ using namespace vsag;
 
 namespace {
 
-void
+uint64_t
 QueryFirstWindow(const MutableSindiTermDataCellPtr& data_cell,
                  float* dists,
                  const SparseTermComputerPtr& computer,
                  Allocator* allocator) {
     SindiQueryContext query_context(allocator);
     data_cell->QueryWindow(dists, 0, computer, false, query_context);
+    return query_context.evaluation_tracker.Count();
 }
 
 }  // namespace
@@ -134,15 +135,12 @@ TEST_CASE("MutableSindiTermDataCell prunes sorted postings", "[ut][MutableSindiT
         data_cell->InsertVector(vector, document);
     }
     data_cell->SortByValue(0);
-    REQUIRE(data_cell->GetWindow(0).term_sorted_sizes_[term] == 3);
 
     SparseVector appended{1, &term, values.data() + 3};
     data_cell->InsertVector(appended, 3);
-    REQUIRE(data_cell->GetWindow(0).term_sorted_sizes_[term] == 3);
     REQUIRE(data_cell->GetWindow(0).term_sizes_[term] == 4);
 
     data_cell->SortByValue(0);
-    REQUIRE(data_cell->GetWindow(0).term_sorted_sizes_[term] == 4);
 
     float query_value = 1.0F;
     SparseVector query{1, &term, &query_value};
@@ -177,7 +175,6 @@ TEST_CASE("MutableSindiTermDataCell normalizes legacy posting order on deseriali
     IOStreamReader reader(stream);
     restored.DeserializeWindows(reader, 1);
     REQUIRE(*restored.GetWindow(0).term_ids_[term] == Vector<uint16_t>({1, 0}, allocator.get()));
-    REQUIRE(restored.GetWindow(0).term_sorted_sizes_[term] == 2);
 }
 
 TEST_CASE("MutableSindiTermDataCell trusts versioned posting order on deserialize",
@@ -200,7 +197,6 @@ TEST_CASE("MutableSindiTermDataCell trusts versioned posting order on deserializ
     IOStreamReader reader(stream);
     restored.DeserializeWindows(reader, 1, true);
     REQUIRE(*restored.GetWindow(0).term_ids_[term] == Vector<uint16_t>({0, 1}, allocator.get()));
-    REQUIRE(restored.GetWindow(0).term_sorted_sizes_[term] == 2);
 }
 
 TEST_CASE("MutableSindiTermDataCell Basic Test", "[ut][MutableSindiTermDataCell]") {
@@ -303,10 +299,12 @@ TEST_CASE("MutableSindiTermDataCell Basic Test", "[ut][MutableSindiTermDataCell]
 
     SECTION("test query") {
         std::vector<float> dists(count_base, 0);
-        QueryFirstWindow(data_cell, dists.data(), computer, allocator.get());
+        REQUIRE(QueryFirstWindow(data_cell, dists.data(), computer, allocator.get()) == count_base);
         for (auto i = 0; i < dists.size(); i++) {
             REQUIRE(std::abs(dists[i] - exp_dists[i]) < 1e-3);
         }
+        std::fill(dists.begin(), dists.end(), 0.0F);
+        REQUIRE(QueryFirstWindow(data_cell, dists.data(), computer, allocator.get()) == count_base);
     }
 
     SECTION("test insert heap in knn search") {

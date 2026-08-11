@@ -96,6 +96,36 @@ TEST_CASE("SINDIV2 term_id_limit upper bound", "[ut][SINDIV2Parameter]") {
     })")));
 }
 
+TEST_CASE("SINDIV2 unsigned parameters reject negative values", "[ut][SINDIV2Parameter]") {
+    SINDIV2Parameter index_parameter;
+    REQUIRE_THROWS(index_parameter.FromJson(JsonType::Parse(R"({"term_id_limit": -1})")));
+    REQUIRE_THROWS(index_parameter.FromJson(JsonType::Parse(R"({"avg_doc_term_length": -1})")));
+
+    SINDIV2SearchParameter search_parameter;
+    REQUIRE_THROWS(
+        search_parameter.FromJson(JsonType::Parse(R"({"sindi_v2": {"n_candidate": -1}})")));
+}
+
+TEST_CASE("SINDIV2 rejects unsupported or conflicting io", "[ut][SINDIV2Parameter]") {
+    SINDIV2Parameter parameter;
+    REQUIRE_THROWS_WITH(parameter.FromJson(JsonType::Parse(R"({
+            "term_io": {"type": "block_memory_io"}
+        })")),
+                        Catch::Matchers::ContainsSubstring("unsupported SINDIV2 term_io type"));
+    REQUIRE_NOTHROW(parameter.FromJson(JsonType::Parse(R"({
+            "use_reorder": true,
+            "term_io": {"type": "memory_io"},
+            "rerank_io": {"type": "reader_io"}
+        })")));
+    REQUIRE(parameter.rerank_io_parameter->GetTypeName() == IO_TYPE_VALUE_READER_IO);
+    REQUIRE_THROWS_WITH(parameter.FromJson(JsonType::Parse(R"({
+            "use_reorder": true,
+            "term_io": {"type": "buffer_io", "file_path": "/tmp/sindi-v2"},
+            "rerank_io": {"type": "mmap_io", "file_path": "/tmp/sindi-v2"}
+        })")),
+                        Catch::Matchers::ContainsSubstring("must use different file_path values"));
+}
+
 TEST_CASE("SINDIV2 default rerank io uses block memory io", "[ut][SINDIV2Parameter]") {
     auto param_str = R"({
         "term_id_limit": 30109,

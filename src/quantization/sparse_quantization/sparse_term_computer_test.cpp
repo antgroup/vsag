@@ -73,8 +73,14 @@ TEST_CASE("SparseTermComputer Basic Test", "[ut][SparseTermComputer]") {
     SECTION("Scan with quantized data (uint8_t)") {
         std::vector<float> dists(10, 0);
         std::vector<uint8_t> term_vals{0, 2, 4, 6, 8};
-        computer->ScanForAccumulateSQ8(
-            test_term_it, term_ids.data(), term_vals.data(), term_ids.size(), dists.data());
+        QuantizationParams quantization_params;
+        quantization_params.diff = 255.0F;
+        computer->ScanForAccumulateSQ8(test_term_it,
+                                       term_ids.data(),
+                                       term_vals.data(),
+                                       term_ids.size(),
+                                       dists.data(),
+                                       &quantization_params);
         for (uint64_t i = 0; i < term_ids.size(); i++) {
             auto id = term_ids[i];
             REQUIRE(std::abs(dists[id] - (term_vals[i] * query_val)) < 1e-3);

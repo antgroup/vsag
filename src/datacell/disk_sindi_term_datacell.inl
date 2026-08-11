@@ -25,8 +25,18 @@ DiskSindiTermDataCell<IOTmpl>::insert_candidate_into_heap(uint32_t id,
                                                           float& cur_heap_top,
                                                           MaxHeap& heap,
                                                           uint32_t offset_id,
+                                                          uint32_t n_candidate,
                                                           float radius,
-                                                          const FilterPtr& filter) const {
+                                                          const FilterPtr& filter,
+                                                          const std::optional<float>& threshold,
+                                                          bool enable_reorder) const {
+    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+        if (threshold.has_value() and
+            (not std::isfinite(dist) or (not enable_reorder and 1.0F + dist > threshold.value()))) {
+            dist = 0.0F;
+            return;
+        }
+    }
     if constexpr (type == InnerSearchType::WITH_FILTER) {
 #if __cplusplus >= 202002L
         if (dist > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
@@ -48,8 +58,11 @@ DiskSindiTermDataCell<IOTmpl>::insert_candidate_into_heap(uint32_t id,
     }
     heap.emplace(dist, id + offset_id);
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-        heap.pop();
-        cur_heap_top = heap.top().first;
+        if (heap.size() > n_candidate) {
+            heap.pop();
+        }
+        cur_heap_top =
+            heap.size() == n_candidate ? heap.top().first : std::numeric_limits<float>::max();
     }
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
         cur_heap_top = radius - 1;
@@ -66,7 +79,14 @@ DiskSindiTermDataCell<IOTmpl>::fill_heap_initial(uint32_t id,
                                                  MaxHeap& heap,
                                                  uint32_t offset_id,
                                                  uint32_t n_candidate,
-                                                 const FilterPtr& filter) const {
+                                                 const FilterPtr& filter,
+                                                 const std::optional<float>& threshold,
+                                                 bool enable_reorder) const {
+    if (threshold.has_value() and
+        (not std::isfinite(dist) or (not enable_reorder and 1.0F + dist > threshold.value()))) {
+        dist = 0.0F;
+        return false;
+    }
     if (dist < 0) {
         if constexpr (type == InnerSearchType::WITH_FILTER) {
             if (not filter->CheckValid(id + offset_id)) {
@@ -99,6 +119,7 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindow(
     auto n_candidate = param.ef;
     auto radius = param.radius;
     auto filter = param.is_inner_id_allowed;
+    UnorderedSet<uint16_t> range_candidates(allocator_);
 
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
         cur_heap_top = radius - 1;
@@ -123,8 +144,15 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindow(
             if (heap.size() < n_candidate) {
                 for (; i < start + term_size; i++) {
                     id = one_term_ids[i];
-                    if (fill_heap_initial<type>(
-                            id, dists[id], cur_heap_top, heap, offset_id, n_candidate, filter)) {
+                    if (fill_heap_initial<type>(id,
+                                                dists[id],
+                                                cur_heap_top,
+                                                heap,
+                                                offset_id,
+                                                n_candidate,
+                                                filter,
+                                                param.distance_threshold,
+                                                param.enable_reorder)) {
                         i++;
                         break;
                     }
@@ -134,8 +162,21 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindow(
 
         for (; i < start + term_size; i++) {
             id = one_term_ids[i];
-            insert_candidate_into_heap<mode, type>(
-                id, dists[id], cur_heap_top, heap, offset_id, radius, filter);
+            if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+                if (not range_candidates.insert(static_cast<uint16_t>(id)).second) {
+                    continue;
+                }
+            }
+            insert_candidate_into_heap<mode, type>(id,
+                                                   dists[id],
+                                                   cur_heap_top,
+                                                   heap,
+                                                   offset_id,
+                                                   n_candidate,
+                                                   radius,
+                                                   filter,
+                                                   param.distance_threshold,
+                                                   param.enable_reorder);
         }
     }
     computer->ResetTerm();
@@ -162,8 +203,15 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByDists(float* dists,
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
         if (heap.size() < n_candidate) {
             for (; id < dists_size; id++) {
-                if (fill_heap_initial<type>(
-                        id, dists[id], cur_heap_top, heap, offset_id, n_candidate, filter)) {
+                if (fill_heap_initial<type>(id,
+                                            dists[id],
+                                            cur_heap_top,
+                                            heap,
+                                            offset_id,
+                                            n_candidate,
+                                            filter,
+                                            param.distance_threshold,
+                                            param.enable_reorder)) {
                     id++;
                     break;
                 }
@@ -172,8 +220,16 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByDists(float* dists,
     }
 
     for (; id < dists_size; id++) {
-        insert_candidate_into_heap<mode, type>(
-            id, dists[id], cur_heap_top, heap, offset_id, radius, filter);
+        insert_candidate_into_heap<mode, type>(id,
+                                               dists[id],
+                                               cur_heap_top,
+                                               heap,
+                                               offset_id,
+                                               n_candidate,
+                                               radius,
+                                               filter,
+                                               param.distance_threshold,
+                                               param.enable_reorder);
     }
 }
 

@@ -82,7 +82,7 @@ TEST_CASE("DiskSindiTermDataCell restores payload io", "[ut][DiskSindiTermDataCe
 
     auto restored = DiskSindiTermDataCellInterface::MakeInstance(term_id_limit,
                                                                  common_param.allocator_.get(),
-                                                                 false,
+                                                                 SparseValueQuantizationType::FP32,
                                                                  nullptr,
                                                                  window_size,
                                                                  io_param,
@@ -155,7 +155,7 @@ TEST_CASE("DiskSindiTermDataCell applies term prune without term-list heap inser
 
     auto restored = DiskSindiTermDataCellInterface::MakeInstance(term_id_limit,
                                                                  common_param.allocator_.get(),
-                                                                 false,
+                                                                 SparseValueQuantizationType::FP32,
                                                                  nullptr,
                                                                  window_size,
                                                                  io_param,
@@ -228,7 +228,7 @@ TEST_CASE("DiskSindiTermDataCell batch loads async term payloads", "[ut][DiskSin
 
     auto restored = DiskSindiTermDataCellInterface::MakeInstance(term_id_limit,
                                                                  common_param.allocator_.get(),
-                                                                 false,
+                                                                 SparseValueQuantizationType::FP32,
                                                                  nullptr,
                                                                  window_size,
                                                                  io_param,
@@ -237,7 +237,7 @@ TEST_CASE("DiskSindiTermDataCell batch loads async term payloads", "[ut][DiskSin
     restored->DeserializeTermLayout(reader, 3, 11);
 
     Vector<uint32_t> query_terms(common_param.allocator_.get());
-    query_terms = {2, 5, 7, 9, term_id_limit + 1};
+    query_terms = {2, 5, 2, 7, 9, term_id_limit + 1};
     const auto buffers = restored->LoadQueryTermBuffers(query_terms);
 
     REQUIRE(buffers.size() == 3);
@@ -281,6 +281,16 @@ TEST_CASE("DiskSindiTermDataCell batch loads async term payloads", "[ut][DiskSin
     std::memcpy(values, term_nine.ValuesData(), sizeof(values));
     REQUIRE(values[0] == 3.0F);
     REQUIRE(values[1] == 5.0F);
+
+    SparseVector restored_first;
+    restored->GetSparseVector(1, &restored_first, common_param.allocator_.get());
+    REQUIRE(restored_first.len_ == 2);
+    REQUIRE(restored_first.ids_[0] == 2);
+    REQUIRE(restored_first.ids_[1] == 5);
+    REQUIRE(restored_first.vals_[0] == 1.25F);
+    REQUIRE(restored_first.vals_[1] == 0.5F);
+    common_param.allocator_->Deallocate(restored_first.ids_);
+    common_param.allocator_->Deallocate(restored_first.vals_);
 }
 #endif
 
@@ -346,7 +356,7 @@ TEST_CASE("DiskSindiTermDataCell expands sparse window metadata", "[ut][DiskSind
 
     auto restored = DiskSindiTermDataCellInterface::MakeInstance(term_id_limit,
                                                                  common_param.allocator_.get(),
-                                                                 false,
+                                                                 SparseValueQuantizationType::FP32,
                                                                  nullptr,
                                                                  window_size,
                                                                  io_param,
@@ -375,7 +385,12 @@ TEST_CASE("DiskSindiTermDataCell rejects memory io", "[ut][DiskSindiTermDataCell
     auto io_param = IOParameter::GetIOParameterByJson(JsonType::Parse(R"({"type":"memory_io"})"));
 
     REQUIRE_THROWS_WITH(
-        DiskSindiTermDataCellInterface::MakeInstance(
-            10, common_param.allocator_.get(), false, nullptr, 10000, io_param, common_param),
+        DiskSindiTermDataCellInterface::MakeInstance(10,
+                                                     common_param.allocator_.get(),
+                                                     SparseValueQuantizationType::FP32,
+                                                     nullptr,
+                                                     10000,
+                                                     io_param,
+                                                     common_param),
         Catch::Matchers::ContainsSubstring("unsupported SINDIV2 term io type"));
 }

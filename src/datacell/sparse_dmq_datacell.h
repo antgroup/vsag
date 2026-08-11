@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include "container_types.h"
 #include "flatten_interface.h"
 #include "index_common_param.h"
 #include "quantization/sparse_quantization/sparse_dmq_quantizer.h"

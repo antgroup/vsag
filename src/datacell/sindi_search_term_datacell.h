@@ -14,7 +14,9 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cassert>
+#include <limits>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -29,6 +31,53 @@
 #include "vsag/dataset.h"
 
 namespace vsag {
+
+class SparseEvaluationTracker {
+public:
+    explicit SparseEvaluationTracker(Allocator* allocator) : generations_(allocator) {
+    }
+
+    void
+    BeginWindow(uint32_t capacity) {
+        if (generations_.size() != capacity) {
+            generations_.assign(capacity, 0);
+            generation_ = 1;
+        } else if (generation_ == std::numeric_limits<uint16_t>::max()) {
+            std::fill(generations_.begin(), generations_.end(), 0);
+            generation_ = 1;
+        } else {
+            ++generation_;
+        }
+        evaluated_ = 0;
+    }
+
+    void
+    Mark(const uint16_t* ids, uint32_t count) {
+        for (uint32_t i = 0; i < count; ++i) {
+            MarkOne(ids[i]);
+        }
+    }
+
+    bool
+    MarkOne(uint16_t id) {
+        if (generations_[id] == generation_) {
+            return false;
+        }
+        generations_[id] = generation_;
+        ++evaluated_;
+        return true;
+    }
+
+    [[nodiscard]] uint64_t
+    Count() const {
+        return evaluated_;
+    }
+
+private:
+    Vector<uint16_t> generations_;
+    uint16_t generation_{0};
+    uint64_t evaluated_{0};
+};
 
 struct SindiTermBuffer {
     explicit SindiTermBuffer(Allocator* allocator = nullptr)
@@ -88,11 +137,16 @@ using MappedQueryTerms = Vector<std::pair<uint32_t, uint32_t>>;
 
 struct SindiQueryContext {
     explicit SindiQueryContext(Allocator* allocator)
-        : query_term_buffers(allocator), mapped_query_terms(allocator) {
+        : query_term_buffers(allocator),
+          mapped_query_terms(allocator),
+          evaluation_tracker(allocator),
+          candidate_tracker(allocator) {
     }
 
     QueryTermBuffers query_term_buffers;
     MappedQueryTerms mapped_query_terms;
+    SparseEvaluationTracker evaluation_tracker;
+    mutable SparseEvaluationTracker candidate_tracker;
 };
 
 /**
@@ -107,7 +161,8 @@ public:
     virtual ~SindiSearchTermDataCell() = default;
 
     virtual QueryTermBuffers
-    LoadQueryTermBuffers(const Vector<uint32_t>& query_term_ids) const = 0;
+    LoadQueryTermBuffers(const Vector<uint32_t>& query_term_ids,
+                         Allocator* query_allocator = nullptr) const = 0;
 
     virtual void
     QueryWindow(float* dists,

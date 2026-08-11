@@ -227,8 +227,10 @@ DiskSindiTermDataCell<IOTmpl>::ValidateBoundLayout(uint64_t payload_size) const 
 
 template <typename IOTmpl>
 QueryTermBuffers
-DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& query_term_ids) const {
-    QueryTermBuffers query_term_buffers(allocator_);
+DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& query_term_ids,
+                                                    Allocator* query_allocator) const {
+    auto* allocator = query_allocator == nullptr ? allocator_ : query_allocator;
+    QueryTermBuffers query_term_buffers(allocator);
     if (io_ == nullptr) {
         return query_term_buffers;
     }
@@ -238,8 +240,10 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
         DiskTermEntry entry{};
     };
 
-    std::vector<query_term_read_plan> read_plans;
+    Vector<query_term_read_plan> read_plans(allocator);
+    UnorderedSet<uint32_t> planned_terms(allocator);
     read_plans.reserve(query_term_ids.size());
+    planned_terms.reserve(query_term_ids.size());
     query_term_buffers.reserve(query_term_ids.size());
     uint32_t window_count = 0;
     uint32_t window_size = 0;
@@ -254,8 +258,7 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
         payload_size = payload_size_;
         sparse_value_quant_type = sparse_value_quant_type_;
         for (uint32_t term_id : query_term_ids) {
-            if (term_id >= term_dict_.size()) {
-                logger::warn("term_id {} out of range in LoadQueryTermBuffers", term_id);
+            if (term_id >= term_dict_.size() || planned_terms.contains(term_id)) {
                 continue;
             }
 
@@ -263,6 +266,7 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
             if (entry.posting_count == 0) {
                 continue;
             }
+            planned_terms.insert(term_id);
             read_plans.push_back({term_id, entry});
         }
     }
@@ -279,9 +283,9 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
     const auto value_code_size = sindi_datacell_utils::GetValueCodeSize(sparse_value_quant_type);
 
     if constexpr (not std::is_same_v<IOTmpl, MMapIO>) {
-        std::vector<uint64_t> sizes;
-        std::vector<uint64_t> offsets;
-        std::vector<uint64_t> buffer_offsets;
+        Vector<uint64_t> sizes(allocator);
+        Vector<uint64_t> offsets(allocator);
+        Vector<uint64_t> buffer_offsets(allocator);
         sizes.reserve(read_plans.size());
         offsets.reserve(read_plans.size());
         buffer_offsets.reserve(read_plans.size());
@@ -299,7 +303,7 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
         }
 
         if (not read_plans.empty()) {
-            Vector<uint8_t> payloads(total_payload_size, 0, allocator_);
+            Vector<uint8_t> payloads(total_payload_size, 0, allocator);
             const bool read_succeeded =
                 io_->MultiRead(payloads.data(), sizes.data(), offsets.data(), read_plans.size());
             if (not read_succeeded) {
@@ -317,7 +321,7 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
                                                            window_size,
                                                            total_count,
                                                            value_code_size,
-                                                           allocator_);
+                                                           allocator);
                 query_term_buffers.emplace(plan.term_id, std::move(term_buffer));
             }
         }
@@ -342,7 +346,7 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
                                                                  window_size,
                                                                  total_count,
                                                                  value_code_size,
-                                                                 allocator_);
+                                                                 allocator);
 
         query_term_buffers.emplace(term_id, std::move(term_buffer));
     }
@@ -463,6 +467,7 @@ DiskSindiTermDataCell<IOTmpl>::QueryWindow(float* dists,
                                            SindiQueryContext& query_context) const {
     (void)use_term_lists_heap_insert;
     const auto& query_term_buffers = query_context.query_term_buffers;
+    query_context.evaluation_tracker.BeginWindow(window_size_);
     std::shared_lock lock(term_layout_mutex_);
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();
@@ -479,10 +484,15 @@ DiskSindiTermDataCell<IOTmpl>::QueryWindow(float* dists,
         if (count == 0) {
             continue;
         }
+        query_context.evaluation_tracker.Mark(tb->IdsData() + start, count);
 
         if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
-            computer->ScanForAccumulateSQ8(
-                it, tb->IdsData() + start, tb->ValuesData() + start, count, dists);
+            computer->ScanForAccumulateSQ8(it,
+                                           tb->IdsData() + start,
+                                           tb->ValuesData() + start,
+                                           count,
+                                           dists,
+                                           quantization_params_.get());
         } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
             computer->ScanForAccumulateFP16Bytes(
                 it,
@@ -508,7 +518,7 @@ DiskSindiTermDataCell<IOTmpl>::GetSparseVector(uint32_t inner_id,
                                                SparseVector* data,
                                                Allocator* specified_allocator) const {
     Allocator* allocator = specified_allocator != nullptr ? specified_allocator : allocator_;
-    Vector<uint32_t> term_ids(allocator_);
+    Vector<uint32_t> term_ids(allocator);
     {
         std::shared_lock lock(term_layout_mutex_);
         term_ids.reserve(term_dict_.size());
@@ -518,14 +528,17 @@ DiskSindiTermDataCell<IOTmpl>::GetSparseVector(uint32_t inner_id,
             }
         }
     }
-    auto query_term_buffers = this->LoadQueryTermBuffers(term_ids);
+    auto query_term_buffers = this->LoadQueryTermBuffers(term_ids, allocator);
     std::shared_lock lock(term_layout_mutex_);
     Vector<uint32_t> ids(allocator);
     Vector<float> vals(allocator);
 
-    for (const auto& kv : query_term_buffers) {
-        uint32_t term_id = kv.first;
-        const auto& tb = kv.second;
+    for (uint32_t term_id : term_ids) {
+        const auto buffer_iter = query_term_buffers.find(term_id);
+        if (buffer_iter == query_term_buffers.end()) {
+            continue;
+        }
+        const auto& tb = buffer_iter->second;
         uint32_t window_id = inner_id / window_size_;
         uint32_t local_id = inner_id % window_size_;
         if (window_id >= window_count_) {

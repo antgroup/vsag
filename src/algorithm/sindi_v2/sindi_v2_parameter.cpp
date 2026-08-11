@@ -43,6 +43,28 @@ is_file_backed_io(const std::string& io_type_name) {
            io_type_name == IO_TYPE_VALUE_ASYNC_IO;
 }
 
+uint32_t
+parse_uint32(const JsonType& value, const char* name) {
+    CHECK_ARGUMENT(value.IsNumberInteger(), fmt::format("{} must be an integer", name));
+    uint64_t parsed = 0;
+    if (value.IsNumberUnsigned()) {
+        parsed = value.GetUint64();
+    } else {
+        const auto signed_value = value.GetInt();
+        CHECK_ARGUMENT(signed_value >= 0, fmt::format("{} must be non-negative", name));
+        parsed = static_cast<uint64_t>(signed_value);
+    }
+    CHECK_ARGUMENT(parsed <= std::numeric_limits<uint32_t>::max(),
+                   fmt::format("{} exceeds uint32 range", name));
+    return static_cast<uint32_t>(parsed);
+}
+
+bool
+is_supported_term_io(const std::string& io_type_name) {
+    return io_type_name == IO_TYPE_VALUE_MEMORY_IO || io_type_name == IO_TYPE_VALUE_READER_IO ||
+           is_file_backed_io(io_type_name);
+}
+
 JsonType
 get_rerank_io_json(const JsonType& json) {
     auto rerank_io_json = json[SINDI_V2_RERANK_IO_KEY];
@@ -64,7 +86,7 @@ get_rerank_io_json(const JsonType& json) {
 void
 SINDIV2Parameter::FromJson(const JsonType& json) {
     if (json.Contains(SPARSE_TERM_ID_LIMIT)) {
-        term_id_limit = json[SPARSE_TERM_ID_LIMIT].GetInt();
+        term_id_limit = parse_uint32(json[SPARSE_TERM_ID_LIMIT], SPARSE_TERM_ID_LIMIT);
 
         CHECK_ARGUMENT(
             (0 < term_id_limit and term_id_limit <= 50'000'000),
@@ -104,7 +126,7 @@ SINDIV2Parameter::FromJson(const JsonType& json) {
     use_quantization = sparse_value_quant_type != SparseValueQuantizationType::FP32;
 
     if (json.Contains(SPARSE_WINDOW_SIZE)) {
-        window_size = json[SPARSE_WINDOW_SIZE].GetInt();
+        window_size = parse_uint32(json[SPARSE_WINDOW_SIZE], SPARSE_WINDOW_SIZE);
         CHECK_ARGUMENT(
             (10'000 <= window_size and window_size <= 60'000),
             fmt::format("window_size must in [10000, 60000], but now is {}", window_size));
@@ -113,7 +135,8 @@ SINDIV2Parameter::FromJson(const JsonType& json) {
     }
 
     if (json.Contains(SPARSE_AVG_DOC_TERM_LENGTH)) {
-        avg_doc_term_length = json[SPARSE_AVG_DOC_TERM_LENGTH].GetInt();
+        avg_doc_term_length =
+            parse_uint32(json[SPARSE_AVG_DOC_TERM_LENGTH], SPARSE_AVG_DOC_TERM_LENGTH);
         CHECK_ARGUMENT((0 < avg_doc_term_length),
                        fmt::format("avg_doc_term_length must be greater than 0, but now is {}",
                                    avg_doc_term_length));
@@ -194,6 +217,9 @@ SINDIV2Parameter::FromJson(const JsonType& json) {
     } else {
         term_io_parameter = std::make_shared<ReaderIOParameter>();
     }
+    CHECK_ARGUMENT(
+        is_supported_term_io(term_io_parameter->GetTypeName()),
+        fmt::format("unsupported SINDIV2 term_io type: {}", term_io_parameter->GetTypeName()));
 
     if (json.Contains(SINDI_V2_RERANK_IO_KEY)) {
         rerank_io_parameter = IOParameter::GetIOParameterByJson(get_rerank_io_json(json));
@@ -203,6 +229,17 @@ SINDIV2Parameter::FromJson(const JsonType& json) {
         }
     } else {
         rerank_io_parameter = std::make_shared<MemoryBlockIOParameter>();
+    }
+    if (is_file_backed_io(term_io_parameter->GetTypeName()) &&
+        is_file_backed_io(rerank_io_parameter->GetTypeName())) {
+        const auto term_io_json = term_io_parameter->ToJson();
+        const auto rerank_io_json = rerank_io_parameter->ToJson();
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            not term_io_json.Contains(IO_FILE_PATH_KEY) ||
+                not rerank_io_json.Contains(IO_FILE_PATH_KEY) ||
+                term_io_json[IO_FILE_PATH_KEY].GetString() !=
+                    rerank_io_json[IO_FILE_PATH_KEY].GetString(),
+            "SINDIV2 term_io and rerank_io must use different file_path values");
     }
     CHECK_ARGUMENT(rerank_type != SPARSE_RERANK_TYPE_DMQ8 ||
                        rerank_io_parameter->GetTypeName() == IO_TYPE_VALUE_BLOCK_MEMORY_IO,
@@ -287,7 +324,7 @@ SINDIV2Parameter::CheckCompatibility(const vsag::ParamPtr& other) const {
 void
 SINDIV2SearchParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(json.Contains(INDEX_SINDI_V2),
-                   fmt::format("parameters must contains {}", INDEX_SINDI_V2));
+                   fmt::format("parameters must contain {}", INDEX_SINDI_V2));
     const auto search_json = json[INDEX_SINDI_V2];
 
     term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
@@ -321,7 +358,7 @@ SINDIV2SearchParameter::FromJson(const JsonType& json) {
         query_prune_ratio = DEFAULT_QUERY_PRUNE_RATIO;
     }
     if (search_json.Contains(SPARSE_N_CANDIDATE)) {
-        n_candidate = search_json[SPARSE_N_CANDIDATE].GetInt();
+        n_candidate = parse_uint32(search_json[SPARSE_N_CANDIDATE], SPARSE_N_CANDIDATE);
     } else {
         n_candidate = DEFAULT_N_CANDIDATE;
     }

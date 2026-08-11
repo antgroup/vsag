@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include "algorithm/sindi/sindi_parameter.h"
 #include "datacell/sindi_datacell_utils.h"
 #include "datacell/sindi_search_term_datacell.h"
@@ -30,19 +32,13 @@ namespace vsag {
 
 struct MutableSINDIWindow {
     explicit MutableSINDIWindow(Allocator* allocator = nullptr)
-        : term_ids_(allocator),
-          term_datas_(allocator),
-          term_sizes_(allocator),
-          term_sorted_sizes_(allocator),
-          dirty_terms_(allocator) {
+        : term_ids_(allocator), term_datas_(allocator), term_sizes_(allocator) {
     }
 
     uint32_t term_capacity_{0};
     Vector<std::unique_ptr<Vector<uint16_t>>> term_ids_;
     Vector<std::unique_ptr<Vector<uint8_t>>> term_datas_;
     Vector<uint32_t> term_sizes_;
-    Vector<uint32_t> term_sorted_sizes_;
-    Vector<uint32_t> dirty_terms_;
 };
 
 DEFINE_POINTER(MutableSindiTermDataCell);
@@ -82,7 +78,10 @@ public:
     DeserializeTermLayout(StreamReader& reader, uint32_t window_count, uint64_t total_count);
 
     QueryTermBuffers
-    LoadQueryTermBuffers(const Vector<uint32_t>& query_term_ids) const override {
+    LoadQueryTermBuffers(const Vector<uint32_t>& query_term_ids,
+                         Allocator* query_allocator = nullptr) const override {
+        (void)query_term_ids;
+        (void)query_allocator;
         return QueryTermBuffers(allocator_);
     }
 
@@ -215,7 +214,7 @@ private:
     ResizeTermList(MutableSINDIWindow& window, InnerIdType new_term_capacity) const;
 
     void
-    SortByValue(MutableSINDIWindow& window);
+    SortByValue(MutableSINDIWindow& window) const;
 
     void
     Compact(MutableSINDIWindow& window);
@@ -247,7 +246,8 @@ private:
                           const SparseTermComputerPtr& computer,
                           MaxHeap& heap,
                           const InnerSearchParam& param,
-                          uint32_t offset_id) const;
+                          uint32_t offset_id,
+                          SparseEvaluationTracker* candidate_tracker = nullptr) const;
 
     template <InnerSearchMode mode, InnerSearchType type>
     void
@@ -256,8 +256,11 @@ private:
                                float& cur_heap_top,
                                MaxHeap& heap,
                                uint32_t offset_id,
+                               uint32_t n_candidate,
                                float radius,
-                               const FilterPtr& filter) const;
+                               const FilterPtr& filter,
+                               const std::optional<float>& threshold,
+                               bool enable_reorder) const;
 
     template <InnerSearchType type>
     bool
@@ -267,7 +270,9 @@ private:
                       MaxHeap& heap,
                       uint32_t offset_id,
                       uint32_t n_candidate,
-                      const FilterPtr& filter) const;
+                      const FilterPtr& filter,
+                      const std::optional<float>& threshold,
+                      bool enable_reorder) const;
 
 public:
     uint32_t term_id_limit_{0};

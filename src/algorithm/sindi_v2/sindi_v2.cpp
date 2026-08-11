@@ -22,6 +22,7 @@
 #include <limits>
 #include <mutex>
 #include <sstream>
+#include <unordered_set>
 #include <vector>
 
 #include "datacell/sparse_dmq_datacell.h"
@@ -45,9 +46,10 @@ namespace vsag {
 namespace {
 
 constexpr const char* SINDI_V2_TERM_LAYOUT_VERSION_KEY = "sindi_v2_term_layout_version";
-constexpr int64_t SINDI_V2_TERM_LAYOUT_VERSION = 1;
+constexpr int64_t SINDI_V2_TERM_LAYOUT_VERSION = 2;
 constexpr const char* SINDI_V2_TERM_LAYOUT_KIND_KEY = "sindi_v2_term_layout_kind";
 constexpr const char* SINDI_V2_TERM_LAYOUT_KIND = "term";
+constexpr uint64_t TERM_ID_MAPPER_ENTRY_MEMORY_BYTES = 54;
 
 DistanceEvaluationBackend
 sparse_backend(SparseValueQuantizationType quant_type) {
@@ -65,17 +67,33 @@ sparse_backend(SparseValueQuantizationType quant_type) {
 class BinaryReader : public Reader {
 public:
     explicit BinaryReader(Binary binary) : binary_(std::move(binary)) {
+        CHECK_ARGUMENT(binary_.size <= std::numeric_limits<size_t>::max(),
+                       "SINDI_V2 binary is too large");
     }
 
     void
     Read(uint64_t offset, uint64_t len, void* dest) override {
-        std::memcpy(dest, binary_.data.get() + offset, len);
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            offset <= binary_.size && len <= binary_.size - offset,
+            "SINDI_V2 binary read is out of range");
+        if (len == 0) {
+            return;
+        }
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            binary_.data != nullptr && dest != nullptr,
+            "SINDI_V2 binary read has a null buffer");
+        std::memcpy(
+            dest, binary_.data.get() + static_cast<size_t>(offset), static_cast<size_t>(len));
     }
 
     void
     AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
-        Read(offset, len, dest);
-        callback(IOErrorCode::IO_SUCCESS, "success");
+        try {
+            Read(offset, len, dest);
+            callback(IOErrorCode::IO_SUCCESS, "success");
+        } catch (const std::exception& error) {
+            callback(IOErrorCode::IO_ERROR, error.what());
+        }
     }
 
     [[nodiscard]] uint64_t
@@ -89,24 +107,49 @@ private:
 
 class StreamBackedReader : public Reader {
 public:
-    explicit StreamBackedReader(std::istream& stream) : stream_(stream) {
-        auto cursor = stream_.tellg();
-        stream_.seekg(0, std::ios::end);
-        size_ = static_cast<uint64_t>(stream_.tellg());
-        stream_.seekg(cursor, std::ios::beg);
+    explicit StreamBackedReader(std::istream& stream) {
+        const auto cursor = stream.tellg();
+        CHECK_ARGUMENT(cursor >= 0, "SINDI_V2 stream cursor is invalid");
+        stream.clear();
+        stream.seekg(0, std::ios::end);
+        const auto end = stream.tellg();
+        CHECK_ARGUMENT(end >= 0, "SINDI_V2 stream size is invalid");
+        size_ = static_cast<uint64_t>(end);
+        CHECK_ARGUMENT(size_ <= std::numeric_limits<size_t>::max(), "SINDI_V2 stream is too large");
+        CHECK_ARGUMENT(size_ <= static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max()),
+                       "SINDI_V2 stream is too large");
+        data_.resize(static_cast<size_t>(size_));
+        stream.clear();
+        stream.seekg(0, std::ios::beg);
+        if (size_ != 0) {
+            stream.read(reinterpret_cast<char*>(data_.data()), static_cast<std::streamsize>(size_));
+            CHECK_ARGUMENT(static_cast<uint64_t>(stream.gcount()) == size_,
+                           "SINDI_V2 stream read is truncated");
+        }
+        stream.clear();
+        stream.seekg(cursor, std::ios::beg);
     }
 
     void
     Read(uint64_t offset, uint64_t len, void* dest) override {
-        std::lock_guard<std::mutex> lock(mutex_);
-        stream_.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
-        stream_.read(static_cast<char*>(dest), static_cast<std::streamsize>(len));
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            offset <= size_ && len <= size_ - offset,
+            "SINDI_V2 stream read is out of range");
+        if (len == 0) {
+            return;
+        }
+        CHECK_ARGUMENT(dest != nullptr, "SINDI_V2 stream read destination is null");
+        std::memcpy(dest, data_.data() + static_cast<size_t>(offset), static_cast<size_t>(len));
     }
 
     void
     AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
-        Read(offset, len, dest);
-        callback(IOErrorCode::IO_SUCCESS, "success");
+        try {
+            Read(offset, len, dest);
+            callback(IOErrorCode::IO_SUCCESS, "success");
+        } catch (const std::exception& error) {
+            callback(IOErrorCode::IO_ERROR, error.what());
+        }
     }
 
     [[nodiscard]] uint64_t
@@ -115,9 +158,8 @@ public:
     }
 
 private:
-    std::istream& stream_;
+    std::vector<uint8_t> data_;
     uint64_t size_{0};
-    std::mutex mutex_;
 };
 
 DatasetPtr
@@ -268,7 +310,6 @@ SINDIV2::SINDIV2(const SINDIV2ParameterPtr& param, const IndexCommonParam& commo
       term_id_limit_(param->term_id_limit),
       window_size_(param->window_size),
       doc_prune_ratio_(param->doc_prune_ratio),
-      doc_retain_ratio_(1.0F - param->doc_prune_ratio),
       quantization_params_(std::make_shared<QuantizationParams>()),
       avg_doc_term_length_(param->avg_doc_term_length),
       remap_term_ids_(param->remap_term_ids),
@@ -358,12 +399,12 @@ SINDIV2::sort_and_prune_sparse_vector_for_build(const SparseVector& input,
     });
 
     auto retained_count = static_cast<uint32_t>(sorted_terms.size());
-    if (sorted_terms.size() > 1 && doc_retain_ratio_ != 1.0F) {
+    if (sorted_terms.size() > 1 && doc_prune_ratio_ != 0.0F) {
         float total_mass = 0.0F;
         for (const auto& [_, value] : sorted_terms) {
             total_mass += value;
         }
-        const float retained_mass = total_mass * doc_retain_ratio_;
+        const float retained_mass = total_mass * (1.0F - doc_prune_ratio_);
         float current_mass = 0.0F;
         retained_count = 0;
         while (current_mass < retained_mass && retained_count < sorted_terms.size()) {
@@ -391,9 +432,12 @@ SINDIV2::init_quantization_params_from_pruned_vectors(const DatasetPtr& base) {
     Vector<float> pruned_vals(allocator_);
     const auto* sparse_vectors = base->GetSparseVectors();
     const auto* ids = base->GetIds();
+    std::unordered_set<int64_t> accepted_labels;
+    accepted_labels.reserve(static_cast<uint64_t>(base->GetNumElements()));
     for (int64_t document = 0; document < base->GetNumElements(); ++document) {
         const auto& sparse_vector = sparse_vectors[document];
-        if (sparse_vector.len_ == 0 || label_table_->CheckLabel(ids[document])) {
+        if (sparse_vector.len_ == 0 || label_table_->CheckLabel(ids[document]) ||
+            accepted_labels.count(ids[document]) != 0) {
             continue;
         }
         try {
@@ -404,6 +448,7 @@ SINDIV2::init_quantization_params_from_pruned_vectors(const DatasetPtr& base) {
                 max_val = std::max(max_val, pruned.vals_[term]);
                 has_retained_value = true;
             }
+            accepted_labels.insert(ids[document]);
         } catch (const VsagException&) {
             continue;
         }
@@ -425,6 +470,9 @@ SINDIV2::Add(const DatasetPtr& base) {
     std::scoped_lock wlock(this->global_mutex_);
 
     CHECK_ARGUMENT(not immutable_enabled_, "immutable SINDIV2 does not support Add");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        not use_reorder_ || param_->rerank_io_parameter->GetTypeName() != IO_TYPE_VALUE_READER_IO,
+        "SINDIV2 reader_io is not writable and cannot be used for rerank builds");
     if (rerank_type_ == SPARSE_RERANK_TYPE_DMQ8 && cur_element_count_ != 0) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "SINDIV2 DMQ rerank does not support incremental Add");
@@ -547,6 +595,9 @@ SINDIV2::Build(const DatasetPtr& base) {
 std::vector<int64_t>
 SINDIV2::build_immutable(const DatasetPtr& base) {
     std::scoped_lock wlock(this->global_mutex_);
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        not use_reorder_ || param_->rerank_io_parameter->GetTypeName() != IO_TYPE_VALUE_READER_IO,
+        "SINDIV2 reader_io is not writable and cannot be used for rerank builds");
     const auto data_num = base->GetNumElements();
     CHECK_ARGUMENT(data_num > 0, "data_num is zero when build immutable SINDIV2");
     const auto* sparse_vectors = base->GetSparseVectors();
@@ -695,13 +746,19 @@ SINDIV2::KnnSearch(const DatasetPtr& query,
 
     SINDIV2SearchParameter search_param;
     search_param.FromJson(JsonType::Parse(parameters));
-    CHECK_ARGUMENT(search_param.n_candidate <= SPARSE_AMPLIFICATION_FACTOR * k,
+    CHECK_ARGUMENT(k <= std::numeric_limits<int64_t>::max() / SPARSE_AMPLIFICATION_FACTOR,
+                   "k is too large to derive the SINDI_V2 candidate limit");
+    const auto max_candidate_count = SPARSE_AMPLIFICATION_FACTOR * k;
+    CHECK_ARGUMENT(search_param.n_candidate <= static_cast<uint64_t>(max_candidate_count),
                    fmt::format("n_candidate ({}) should be less than {} * k ({})",
                                search_param.n_candidate,
                                SPARSE_AMPLIFICATION_FACTOR,
                                k));
+    const auto candidate_count = search_param.n_candidate == 0
+                                     ? static_cast<uint64_t>(max_candidate_count)
+                                     : static_cast<uint64_t>(search_param.n_candidate);
     InnerSearchParam inner_param;
-    inner_param.ef = std::max(static_cast<int64_t>(search_param.n_candidate), k);
+    inner_param.ef = std::max(candidate_count, static_cast<uint64_t>(k));
     inner_param.topk = k;
 
     FilterPtr ft = nullptr;
@@ -715,11 +772,6 @@ SINDIV2::KnnSearch(const DatasetPtr& query,
     Vector<float> tmp_vals(search_allocator);
     if (remap_term_ids_) {
         effective_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
-        if (effective_query.len_ == 0) {
-            auto [results, ret_dists, ret_ids] = create_fast_dataset(0, search_allocator);
-            results->Statistics(statistics.Dump());
-            return results;
-        }
     }
 
     auto computer = std::make_shared<SparseTermComputer>(
@@ -727,15 +779,16 @@ SINDIV2::KnnSearch(const DatasetPtr& query,
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
 
     SindiQueryContext query_context(search_allocator);
-    if (param_->term_io_parameter->GetTypeName() != IO_TYPE_VALUE_MEMORY_IO) {
-        auto query_term_ids = collect_query_term_ids(computer, search_allocator);
-        query_context.query_term_buffers = term_datacell_->LoadQueryTermBuffers(query_term_ids);
-    }
+    auto query_term_ids = collect_query_term_ids(computer, search_allocator);
+    query_context.query_term_buffers =
+        term_datacell_->LoadQueryTermBuffers(query_term_ids, search_allocator);
+    const bool use_term_lists_heap_insert =
+        effective_query.len_ != 0 && UseTermListsHeapInsert(search_param);
 
     auto result = search_impl<KNN_SEARCH>(computer,
                                           inner_param,
                                           search_allocator,
-                                          UseTermListsHeapInsert(search_param),
+                                          use_term_lists_heap_insert,
                                           query_context,
                                           rerank_query,
                                           &statistics);
@@ -762,6 +815,7 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
     Vector<float> dists(window_size_, 0.0, allocator);
     auto filter = inner_param.is_inner_id_allowed;
     const auto [min_window_id, max_window_id] = this->get_min_max_window_id(filter);
+    const bool has_effective_query_terms = not computer->sorted_query_.empty();
 
     for (auto cur = min_window_id; cur <= max_window_id; cur++) {
         auto window_start_id = static_cast<uint32_t>(cur) * window_size_;
@@ -776,7 +830,40 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                                     query_context.evaluation_tracker.Count());
         }
 
-        if (use_term_lists_heap_insert) {
+        if (not has_effective_query_terms) {
+            uint32_t valid_window_size = 0;
+            if (window_start_id < static_cast<uint64_t>(cur_element_count_)) {
+                const auto remaining_count =
+                    static_cast<uint64_t>(cur_element_count_) - window_start_id;
+                valid_window_size =
+                    static_cast<uint32_t>(std::min<uint64_t>(window_size_, remaining_count));
+            }
+            for (uint32_t local_id = 0; local_id < valid_window_size; ++local_id) {
+                const auto inner_id = window_start_id + local_id;
+                if (filter != nullptr && not filter->CheckValid(inner_id)) {
+                    continue;
+                }
+                if (inner_param.distance_threshold.has_value() && not inner_param.enable_reorder &&
+                    1.0F > inner_param.distance_threshold.value()) {
+                    continue;
+                }
+                if constexpr (mode == KNN_SEARCH) {
+                    heap.emplace(0.0F, inner_id);
+                    if (heap.size() > inner_param.ef) {
+                        heap.pop();
+                    }
+                } else {
+                    if (1.0F > inner_param.radius) {
+                        continue;
+                    }
+                    heap.emplace(0.0F, inner_id);
+                    if (inner_param.range_search_limit_size != -1 &&
+                        heap.size() > static_cast<uint64_t>(inner_param.range_search_limit_size)) {
+                        heap.pop();
+                    }
+                }
+            }
+        } else if (use_term_lists_heap_insert) {
             term_datacell_->InsertHeapByWindow(dists.data(),
                                                static_cast<uint32_t>(cur),
                                                computer,
@@ -910,6 +997,9 @@ SINDIV2::RangeSearch(const DatasetPtr& query,
 
     SINDIV2SearchParameter search_param;
     search_param.FromJson(JsonType::Parse(parameters));
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        limited_size >= -1 && limited_size <= std::numeric_limits<int>::max(),
+        "SINDI_V2 range limit must be -1 or fit in int range");
     InnerSearchParam inner_param;
     inner_param.radius = radius;
     inner_param.range_search_limit_size = static_cast<int>(limited_size);
@@ -922,26 +1012,23 @@ SINDIV2::RangeSearch(const DatasetPtr& query,
     Vector<float> tmp_vals(allocator_);
     if (remap_term_ids_) {
         sparse_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
-        if (sparse_query.len_ == 0) {
-            auto [results, ret_dists, ret_ids] = create_fast_dataset(0, allocator_);
-            results->Statistics(statistics.Dump());
-            return results;
-        }
     }
     auto computer = std::make_shared<SparseTermComputer>(
         sparse_query, search_param, allocator_, term_datacell_->GetWindowCount());
     const auto query_term_ids = collect_query_term_ids(computer, allocator_);
     SindiQueryContext query_context(allocator_);
-    query_context.query_term_buffers = term_datacell_->LoadQueryTermBuffers(query_term_ids);
+    query_context.query_term_buffers =
+        term_datacell_->LoadQueryTermBuffers(query_term_ids, allocator_);
     const SparseVector* rerank_query =
         remap_term_ids_ && use_reorder_ ? &query->GetSparseVectors()[0] : nullptr;
-    auto result = search_impl<RANGE_SEARCH>(computer,
-                                            inner_param,
-                                            allocator_,
-                                            UseTermListsHeapInsert(search_param),
-                                            query_context,
-                                            rerank_query,
-                                            &statistics);
+    auto result =
+        search_impl<RANGE_SEARCH>(computer,
+                                  inner_param,
+                                  allocator_,
+                                  sparse_query.len_ != 0 && UseTermListsHeapInsert(search_param),
+                                  query_context,
+                                  rerank_query,
+                                  &statistics);
     result->Statistics(statistics.Dump());
     return result;
 }
@@ -961,7 +1048,15 @@ SINDIV2::cal_memory_usage() {
     if (this->rerank_flat_ != nullptr) {
         memory += this->rerank_flat_->GetMemoryUsage();
     }
+    memory += label_table_->GetMemoryUsage();
+    if (extra_infos_ != nullptr) {
+        memory += extra_infos_->GetMemoryUsage();
+    }
     memory += sizeof(QuantizationParams);
+    if (remap_term_ids_ && term_id_mapper_ != nullptr) {
+        memory +=
+            static_cast<uint64_t>(term_id_mapper_->Size()) * TERM_ID_MAPPER_ENTRY_MEMORY_BYTES;
+    }
 
     std::unique_lock lock(this->memory_usage_mutex_);
     this->current_memory_usage_.store(static_cast<int64_t>(memory));
@@ -1005,6 +1100,10 @@ SINDIV2::Serialize(StreamWriter& writer) const {
 
     if (use_reorder_) {
         rerank_flat_->Serialize(writer);
+    }
+
+    if (extra_info_size_ > 0 && extra_infos_ != nullptr) {
+        extra_infos_->Serialize(writer);
     }
 
     label_table_->Serialize(writer);
@@ -1108,11 +1207,22 @@ SINDIV2::Deserialize(StreamReader& reader) {
 
     reader.Seek(serialized_base_offset);
     StreamReader::ReadObj(reader, cur_element_count_);
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        cur_element_count_ >= 0 &&
+            static_cast<uint64_t>(cur_element_count_) <= std::numeric_limits<InnerIdType>::max(),
+        "SINDI_V2 serialized element count is invalid");
 
     if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
         StreamReader::ReadObj(reader, quantization_params_->min_val);
         StreamReader::ReadObj(reader, quantization_params_->max_val);
         StreamReader::ReadObj(reader, quantization_params_->diff);
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            std::isfinite(quantization_params_->min_val) &&
+                std::isfinite(quantization_params_->max_val) &&
+                std::isfinite(quantization_params_->diff) &&
+                quantization_params_->min_val <= quantization_params_->max_val &&
+                quantization_params_->diff > 0.0F,
+            "SINDI_V2 serialized SQ8 calibration is invalid");
     }
 
     auto window_count =
@@ -1155,9 +1265,21 @@ SINDIV2::Deserialize(StreamReader& reader) {
 
     if (use_reorder_) {
         rerank_flat_->Deserialize(reader);
+        CHECK_ARGUMENT(rerank_flat_->TotalCount() == static_cast<InnerIdType>(cur_element_count_),
+                       "SINDI_V2 rerank count does not match element count");
+    }
+
+    if (extra_info_size_ > 0 && extra_infos_ != nullptr) {
+        extra_infos_->Deserialize(reader);
+        CHECK_ARGUMENT(extra_infos_->TotalCount() == static_cast<InnerIdType>(cur_element_count_),
+                       "SINDI_V2 extra-info count does not match element count");
+        CHECK_ARGUMENT(extra_infos_->ExtraInfoSize() == extra_info_size_,
+                       "SINDI_V2 extra-info width does not match index configuration");
     }
 
     label_table_->Deserialize(reader);
+    CHECK_ARGUMENT(label_table_->GetTotalCount() == cur_element_count_,
+                   "SINDI_V2 label count does not match element count");
 
     if (remap_term_ids_ && term_id_mapper_) {
         term_id_mapper_->Deserialize(reader);
@@ -1282,7 +1404,7 @@ SINDIV2::CalcDistanceById(const DatasetPtr& vector,
     search_param.query_prune_ratio = 0;
     auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
     auto query_term_ids = collect_query_term_ids(computer, allocator_);
-    auto query_term_buffers = term_datacell_->LoadQueryTermBuffers(query_term_ids);
+    auto query_term_buffers = term_datacell_->LoadQueryTermBuffers(query_term_ids, allocator_);
     return term_datacell_->CalcDistanceByInnerId(
         computer, static_cast<uint32_t>(inner_id), query_term_buffers);
 }
@@ -1356,7 +1478,8 @@ SINDIV2::CalDistanceById(const DatasetPtr& query,
         auto computer =
             std::make_shared<SparseTermComputer>(mapped_query, search_param, allocator_);
         const auto query_term_ids = collect_query_term_ids(computer, allocator_);
-        const auto query_term_buffers = term_datacell_->LoadQueryTermBuffers(query_term_ids);
+        const auto query_term_buffers =
+            term_datacell_->LoadQueryTermBuffers(query_term_ids, allocator_);
         for (int64_t index = 0; index < count; ++index) {
             const auto [success, inner_id] = this->label_table_->TryGetIdByLabel(row_ids[index]);
             if (not success) {
@@ -1381,6 +1504,17 @@ SINDIV2::SetImmutable() {
     this->immutable_ = true;
 }
 
+InnerIndexPtr
+SINDIV2::Clone(const IndexCommonParam& param) {
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    this->Serialize(writer);
+    stream.seekg(0, std::ios::beg);
+    auto clone = std::make_shared<SINDIV2>(param_, param);
+    clone->Deserialize(stream);
+    return clone;
+}
+
 void
 SINDIV2::InitFeatures() {
     this->index_feature_list_->SetFeatures({
@@ -1391,7 +1525,11 @@ SINDIV2::InitFeatures() {
         IndexFeature::SUPPORT_RANGE_SEARCH,
         IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
         IndexFeature::SUPPORT_SERIALIZE_FILE,
+        IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
         IndexFeature::SUPPORT_DESERIALIZE_FILE,
+        IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
+        IndexFeature::SUPPORT_DESERIALIZE_READER_SET,
+        IndexFeature::SUPPORT_CLONE,
         IndexFeature::SUPPORT_ESTIMATE_MEMORY,
         IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
         IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS,
@@ -1400,6 +1538,10 @@ SINDIV2::InitFeatures() {
     });
     if (not immutable_enabled_) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID);
+    }
+    if (not immutable_enabled_ && rerank_type_ != SPARSE_RERANK_TYPE_DMQ8 &&
+        param_->term_io_parameter->GetTypeName() == IO_TYPE_VALUE_MEMORY_IO) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_AFTER_BUILD);
     }
 }
 

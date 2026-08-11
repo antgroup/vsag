@@ -13,7 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <atomic>
 #include <cmath>
+#include <cstring>
 
 #include "datacell/sparse_vector_datacell_parameter.h"
 #include "framework/test_thread_pool.h"

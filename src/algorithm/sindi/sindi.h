@@ -195,7 +195,8 @@ private:
                 Allocator* allocator,
                 bool use_term_lists_heap_insert,
                 const SparseVector* original_query = nullptr,
-                ReasoningContext* reasoning_ctx = nullptr) const;
+                ReasoningContext* reasoning_ctx = nullptr,
+                SearchStatistics* statistics = nullptr) const;
 
     bool
     UseTermListsHeapInsert(const SINDISearchParameter& search_param,
@@ -247,7 +248,7 @@ private:
     serialize_immutable_window(StreamWriter& writer, const ImmutableSINDIWindow& window) const;
 
     std::vector<int64_t>
-    add(const DatasetPtr& base);
+    add(const DatasetPtr& base, bool sort_affected_windows);
 
     std::vector<int64_t>
     build_immutable(const DatasetPtr& base);
@@ -262,7 +263,7 @@ private:
                                            Vector<float>& pruned_vals) const;
 
     void
-    init_quantization_params_from_pruned_vectors(const DatasetPtr& base);
+    init_quantization_params_from_vectors(const DatasetPtr& base);
 
     FlattenInterface*
     get_rerank_datacell() const;
@@ -304,8 +305,7 @@ private:
 
     bool use_reorder_{false};  // enable reranking stage
 
-    float doc_prune_ratio_{0};   // ratio of docs pruned during build
-    float doc_retain_ratio_{0};  // ratio of docs kept after pruning
+    float doc_prune_ratio_{0};  // ratio of docs pruned during build
 
     FlattenInterfacePtr rerank_flat_{nullptr};
 

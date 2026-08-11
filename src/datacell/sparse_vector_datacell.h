@@ -45,8 +45,9 @@ public:
         auto comp = std::static_pointer_cast<Computer<QuantTmpl>>(computer);
         this->query(result_dists, comp, idx, id_count, ctx);
         if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations and
-            id_count > 0)
+            id_count > 0) {
             ctx->stats->AddDistance(ctx->distance_phase, backend_, id_count);
+        }
     }
 
     ComputerInterfacePtr
@@ -183,6 +184,9 @@ private:
     get_codes_by_id_no_lock(InnerIdType id, bool& need_release) const;
 
 private:
+    // Packed so each entry is exactly 12 bytes on disk and in the offset_io_
+    // buffer. The unpacked layout would round sizeof up to 16 due to the
+    // uint64 alignment requirement, wasting 33% of the offset table.
 #pragma pack(push, 1)
     struct DocLocation {
         uint64_t offset{0};
@@ -216,7 +220,6 @@ private:
     QueryIOStrategy query_io_strategy_{QueryIOStrategy::MULTI_READ};
 
     Allocator* const allocator_{nullptr};
-    DistanceEvaluationBackend backend_{DistanceEvaluationBackend::UNKNOWN};
     std::shared_ptr<MemoryBlockIO> offset_io_{nullptr};
     uint64_t current_offset_{0};
     uint64_t max_code_size_{0};
