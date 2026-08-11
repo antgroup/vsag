@@ -320,6 +320,15 @@ HGraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestCalcDistanceById(index, dataset, 1e-5, expect_success);
     TestGetRawVectorByIds(index, dataset, expect_success);
     TestBatchCalcDistanceById(index, dataset, 1e-5, expect_success);
+    if (expect_success && dataset->query_->GetFloat32Vectors() != nullptr) {
+        const auto count = dataset->top_k;
+        auto result = index->CalDistanceById(
+            dataset->query_->GetFloat32Vectors(), dataset->ground_truth_->GetIds(), count, -1);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDistances() != nullptr);
+        REQUIRE(result.value()->GetNumElements() == 1);
+        REQUIRE(result.value()->GetDim() == count);
+    }
     TestMultiQueryBatchCalcDistanceById(index, dataset, 1e-5, expect_success);
     TestSearchAllocator(index, dataset, search_param, recall, true);
     TestUpdateVector(index, dataset, search_param, false);
