@@ -322,8 +322,11 @@ HGraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestBatchCalcDistanceById(index, dataset, 1e-5, expect_success);
     if (expect_success && dataset->query_->GetFloat32Vectors() != nullptr) {
         const auto count = dataset->top_k;
-        auto result = index->CalDistanceById(
-            dataset->query_->GetFloat32Vectors(), dataset->ground_truth_->GetIds(), count, -1);
+        auto result = index->CalcDistancesById(dataset->query_->GetFloat32Vectors(),
+                                               dataset->ground_truth_->GetIds(),
+                                               count,
+                                               true,
+                                               -1);
         REQUIRE(result.has_value());
         REQUIRE(result.value()->GetDistances() != nullptr);
         REQUIRE(result.value()->GetNumElements() == 1);
