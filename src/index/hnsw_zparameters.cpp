@@ -26,9 +26,10 @@ HnswParameters::FromJson(const JsonType& hnsw_param_obj,
                          const IndexCommonParam& index_common_param) {
     HnswParameters obj;
 
-    CHECK_ARGUMENT(index_common_param.metric_ != MetricType::METRIC_TYPE_L1 ||
-                       index_common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT,
-                   "l1 metric must use float32 dtype");
+    if (index_common_param.metric_ == MetricType::METRIC_TYPE_L1 &&
+        index_common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "l1 metric must use float32 dtype");
+    }
 
     if (index_common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT) {
         obj.type = DataTypes::DATA_TYPE_FLOAT;

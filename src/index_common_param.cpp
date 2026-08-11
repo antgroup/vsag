@@ -115,9 +115,10 @@ IndexCommonParam::CheckAndCreate(JsonType& params, const std::shared_ptr<Resourc
         result.dim_ = MAX_DIM_SPARSE;
     }
 
-    CHECK_ARGUMENT(result.metric_ != MetricType::METRIC_TYPE_L1 ||
-                       result.data_type_ == DataTypes::DATA_TYPE_FLOAT,
-                   "l1 metric must use float32 dtype");
+    if (result.metric_ == MetricType::METRIC_TYPE_L1 &&
+        result.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "l1 metric must use float32 dtype");
+    }
 
     if (params.Contains(EXTRA_INFO_SIZE)) {
         fill_extra_info_size(result, params[EXTRA_INFO_SIZE]);
