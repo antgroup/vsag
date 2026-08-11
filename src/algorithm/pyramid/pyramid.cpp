@@ -1377,7 +1377,7 @@ Pyramid::add_one_point(const Hierarchy& h,
             results = searcher_->Search(
                 node->graph_, codes, vl, vector, search_param, (LabelTablePtr) nullptr, nullptr);
         } else {
-            FlattenIdDistanceProvider distance_provider(codes, inner_id);
+            FlattenIdDistanceProvider distance_provider(base_codes_, inner_id);
             results = searcher_->Search(
                 node->graph_, distance_provider, vl, search_param, nullptr, nullptr);
             if (support_duplicate_ and not results->Empty()) {
