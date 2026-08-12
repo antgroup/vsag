@@ -35,11 +35,15 @@ jobs:
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.non_markdown == 'true'
     runs-on: ubuntu-22.04
+    env:
+      # TSan instruments VSAG, not third-party dependencies. Daily TSan stays on MKL
+      # to preserve coverage of that backend.
+      EXTRA_DEFINED: -DVSAG_USE_SYSTEM_OPENBLAS=ON
     concurrency:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-x86-mkl
+      image: vsaglib/vsag:ci-x86-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -76,7 +80,7 @@ jobs:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-x86-mkl
+      image: vsaglib/vsag:ci-x86-openblas
     steps:
       - uses: actions/checkout@v4
       - name: Clean Env
