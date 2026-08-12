@@ -76,6 +76,8 @@ Build-time parameters live under `index_param`. See
 | `first_order_buckets_count` | int | `10` | First-level count (effective for `gno_imi`) |
 | `second_order_buckets_count` | int | `10` | Second-level count (effective for `gno_imi`) |
 | `ivf_train_type` | string | `"kmeans"` | Centroid training: `kmeans` or `random` |
+| `route_max_degree` | int | `64` | Routing HGraph maximum degree (effective for `ivf`) |
+| `route_ef_construction` | int | `300` | Routing HGraph construction search breadth (effective for `ivf`) |
 | `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` — see the [Quantization chapter](../quantization/README.md) for per-quantizer details |
 | `base_pq_dim` | int | `1` | PQ subspaces (required with `pq` / `pqfs`) |
 | `rabitq_pca_dim` | int | `0` | Optional PCA preprocessing dimension for `base_quantization_type: "rabitq"` |

@@ -70,6 +70,8 @@ auto result = index->KnnSearch(
 | `first_order_buckets_count` | int | `10` | 第一级桶数（`gno_imi` 策略下生效） |
 | `second_order_buckets_count` | int | `10` | 第二级桶数（`gno_imi` 策略下生效） |
 | `ivf_train_type` | string | `"kmeans"` | 中心训练方式：`kmeans` 或 `random` |
+| `route_max_degree` | int | `64` | 路由 HGraph 的最大度数（`ivf` 策略下生效） |
+| `route_ef_construction` | int | `300` | 路由 HGraph 的构建搜索宽度（`ivf` 策略下生效） |
 | `base_quantization_type` | string | `"fp32"` | `fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq` —— 各量化器细节见[量化章节](../quantization/README.md) |
 | `base_pq_dim` | int | `1` | PQ 子空间数（`pq` / `pqfs` 时必填） |
 | `rabitq_pca_dim` | int | `0` | `base_quantization_type: "rabitq"` 时可选的 PCA 预处理维度 |

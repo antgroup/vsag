@@ -161,8 +161,8 @@ IVFNearestPartition::factory_router_index(const IndexCommonParam& common_param) 
     ParamPtr param_ptr;
     JsonType hgraph_json;
     hgraph_json["base_quantization_type"].SetString("fp32");
-    hgraph_json["max_degree"].SetInt(64);
-    hgraph_json["ef_construction"].SetInt(300);
+    hgraph_json["max_degree"].SetInt(ivf_partition_strategy_param_->route_max_degree);
+    hgraph_json["ef_construction"].SetInt(ivf_partition_strategy_param_->route_ef_construction);
 
     param_ptr = HGraph::CheckAndMappingExternalParam(hgraph_json, common_param);
     this->route_index_ptr_ = std::make_shared<HGraph>(param_ptr, common_param);
