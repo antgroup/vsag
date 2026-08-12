@@ -72,6 +72,8 @@ extern const char* const PARAMETER_REPR;
 extern const char* const REPR_DENSE;
 extern const char* const REPR_SPARSE;
 extern const char* const REPR_MULTI_VECTOR;
+extern const char* const PARAMETER_USE_CONJUGATE_GRAPH;
+extern const char* const PARAMETER_USE_CONJUGATE_GRAPH_SEARCH;
 extern const char* const PARAMETER_USE_OLD_SERIAL_FORMAT;
 
 extern const char* const ODESCENT_PARAMETER_ALPHA;

@@ -52,6 +52,7 @@ HGraph places its build parameters under the generic `index_param` key (see
 | `label_remap_type` | `pg` | Label-map implementation: `pg` (default) or `robin` |
 | `reorder_source` | `precise` | Reorder from the `precise` store or directly from `base`; RaBitQ x+y split, including `tq_chain="mrle, rabitq"`, selects `base` automatically |
 | `persist_source_id` | `false` | Include HGraph source-ID metadata in serialization; useful when a restored index must later export a build cache |
+| `use_conjugate_graph` | `false` | Enable HGraph feedback/pretraining and persist the auxiliary conjugate graph |
 | `mrle_dim` | `0` | MRLE output dimension in `[0, dim]`; `0` means input dimension |
 | `fast_encode_rabitq` | `true` | Use fast multi-bit RaBitQ encoding; `false` restores the exact encoder |
 | `fast_encode_rabitq_rounds` | `6` | Fast-encoder refinement rounds in `[1, 32]` |
@@ -64,6 +65,8 @@ At search time:
 
 `ef_search` accepts any positive signed 64-bit integer. It is no longer capped relative to
 `topk`; very large values can substantially increase latency and memory used by the frontier.
+`use_conjugate_graph_search` is a boolean (default `true`) that uses learned conjugate edges when
+the index was built with `use_conjugate_graph: true`.
 
 The `hgraph` search-param object also accepts `brute_force_threshold` (a float
 in `[0.0, 1.0]`, default `0.0`). When set above zero and the request carries a
