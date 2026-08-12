@@ -103,7 +103,7 @@ TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
     REQUIRE(param->use_reorder == true);
     REQUIRE(param->build_thread_count == 3);
     REQUIRE(param->precise_codes_param->quantizer_parameter->GetTypeName() == "fp32");
-    REQUIRE(param->train_sample_count == 65536L);
+    REQUIRE(param->train_sample_count == 65536L);  // buckets_count=3, so max(65536, 3*64)=65536
 
     index_param.ivf_train_type = "random";
     index_param.partition_strategy_type = "gno_imi";
@@ -122,6 +122,14 @@ TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
     REQUIRE(param->ivf_partition_strategy_parameter->gnoimi_param->second_order_buckets_count ==
             50);
     REQUIRE(param->buckets_per_data == 2);
+    // buckets_count=10000, so train_sample_count=max(65536, 10000*64)=640000
+    REQUIRE(param->train_sample_count == 640000);
+
+    // Test explicit train_sample_count overrides automatic scaling
+    param_json["train_sample_count"].SetInt(1000000);
+    param = std::make_shared<vsag::IVFParameter>();
+    param->FromJson(param_json);
+    REQUIRE(param->train_sample_count == 1000000);
 
     vsag::ParameterTest::TestToJson(param);
 
@@ -305,6 +313,30 @@ TEST_CASE("SampleTrainingData Function Test", "[ut][sample_train_data]") {
     REQUIRE(result != normal_dataset);
     REQUIRE(result->GetNumElements() == 512);  // Should use min_train_size
     REQUIRE(result->GetDim() == large_dim);
+}
+
+TEST_CASE("sample_train_data honors large explicit values", "[ut][sample_train_data]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    const int64_t dim = 10;
+    const int64_t total = 100000;
+    const int64_t requested = 70000;  // Above former 65536 cap
+
+    std::vector<float> data(dim * total);
+    std::iota(data.begin(), data.end(), 0.0f);
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 0);
+
+    auto dataset = vsag::Dataset::Make();
+    dataset->Dim(dim)
+        ->NumElements(total)
+        ->Ids(ids.data())
+        ->Float32Vectors(data.data())
+        ->Owner(false);
+
+    auto result = vsag::sample_train_data(dataset, total, dim, requested, allocator.get());
+    REQUIRE(result != dataset);
+    REQUIRE(result->GetNumElements() == requested);
+    REQUIRE(result->GetDim() == dim);
 }
 
 TEST_CASE("IVF maps fast RaBitQ to base and precise quantizers", "[ut][IVFParameter]") {

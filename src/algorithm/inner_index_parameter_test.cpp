@@ -55,7 +55,7 @@ TEST_CASE("Parameters Train Sample Count Test", "[ut][InnerIndexParameter][train
 
     REQUIRE_THROWS_AS(param->FromJson(param_json), vsag::VsagException);
 
-    // Test invalid value exceeding maximum 65536
+    // Explicit values may exceed the default maximum 65536
     json_obj = vsag::JsonType::Parse(param_str);
     json_obj["train_sample_count"].SetInt(1000000);
     modified_param_str = json_obj.Dump();
@@ -63,7 +63,8 @@ TEST_CASE("Parameters Train Sample Count Test", "[ut][InnerIndexParameter][train
     param_json = vsag::JsonType::Parse(modified_param_str);
     param = std::make_shared<vsag::InnerIndexParameter>();
 
-    REQUIRE_THROWS_AS(param->FromJson(param_json), vsag::VsagException);
+    REQUIRE_NOTHROW(param->FromJson(param_json));
+    REQUIRE(param->train_sample_count == 1000000);
 }
 
 TEST_CASE("Sampling Logic Test", "[ut][InnerIndexParameter][sampling]") {

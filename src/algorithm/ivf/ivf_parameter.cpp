@@ -17,6 +17,9 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
+#include <limits>
+
 #include "inner_string_params.h"
 #include "utils/param_compat_macros.h"
 #include "vsag/constants.h"
@@ -47,6 +50,18 @@ IVFParameter::FromJson(const JsonType& json) {
         this->bucket_param->buckets_count = static_cast<BucketIdType>(
             this->ivf_partition_strategy_parameter->gnoimi_param->first_order_buckets_count *
             this->ivf_partition_strategy_parameter->gnoimi_param->second_order_buckets_count);
+    }
+
+    // Automatically scale train_sample_count based on buckets_count if not explicitly set
+    if (not json.Contains(TRAIN_SAMPLE_COUNT_KEY)) {
+        constexpr int64_t samples_per_bucket = 64;
+        const auto max_train_sample_count = std::numeric_limits<int64_t>::max();
+        const auto bucket_sample_count =
+            this->bucket_param->buckets_count > max_train_sample_count / samples_per_bucket
+                ? max_train_sample_count
+                : this->bucket_param->buckets_count * samples_per_bucket;
+        this->train_sample_count =
+            std::max(static_cast<int64_t>(MAX_TRAIN_COUNT), bucket_sample_count);
     }
 
     if (json.Contains(GRAPH_BUILD_THRESHOLD_KEY)) {

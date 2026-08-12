@@ -242,10 +242,6 @@ InnerIndexParameter::FromJson(const JsonType& json) {
             this->train_sample_count >= 512,
             fmt::format("train_sample_count must be greater than or equal to 512, got: {}",
                         this->train_sample_count));
-        CHECK_ARGUMENT(
-            this->train_sample_count <= 65536L,
-            fmt::format("train_sample_count must be less than or equal to 65536, got: {}",
-                        this->train_sample_count));
     }
 }
 
