@@ -316,10 +316,10 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     const bool collect_rabitq_lower_bounds = search_param.enable_rabitq_one_bit_search and
                                              use_reorder_ and
                                              base_codes_->SupportSplitCodeStorage();
-    RaBitQCandidateVector rabitq_lower_bound_candidates(allocator_);
+    DistanceRecordVector rabitq_lower_bound_candidates(allocator_);
     std::mutex rabitq_lower_bound_mutex;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
-        RaBitQCandidateVector local_candidates(allocator_);
+        DistanceRecordVector local_candidates(allocator_);
         auto* candidates = collect_rabitq_lower_bounds ? &local_candidates : nullptr;
         auto result = this->search_node(node,
                                         vl,
@@ -388,10 +388,10 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     const bool collect_rabitq_lower_bounds = search_param.enable_rabitq_one_bit_search and
                                              use_reorder_ and
                                              base_codes_->SupportSplitCodeStorage();
-    RaBitQCandidateVector rabitq_lower_bound_candidates(allocator_);
+    DistanceRecordVector rabitq_lower_bound_candidates(allocator_);
     std::mutex rabitq_lower_bound_mutex;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
-        RaBitQCandidateVector local_candidates(allocator_);
+        DistanceRecordVector local_candidates(allocator_);
         auto* candidates = collect_rabitq_lower_bounds ? &local_candidates : nullptr;
         auto result = this->search_node(node,
                                         vl,
@@ -428,7 +428,7 @@ Pyramid::search_impl(const DatasetPtr& query,
                      InnerSearchParam& search_param,
                      QueryContext& ctx,
                      const std::string& hierarchy_name,
-                     const RaBitQCandidateVector* rabitq_lower_bound_candidates) const {
+                     const DistanceRecordVector* rabitq_lower_bound_candidates) const {
     auto h_iter = hierarchies_.find(hierarchy_name);
     CHECK_ARGUMENT(h_iter != hierarchies_.end(),
                    fmt::format("unknown hierarchy name: '{}'", hierarchy_name));
@@ -1501,7 +1501,7 @@ Pyramid::search_node(const IndexNode* node,
                      const FlattenInterfacePtr& codes,
                      QueryContext& ctx,
                      uint64_t subindex_ef_search,
-                     RaBitQCandidateVector* rabitq_lower_bound_candidates) const {
+                     DistanceRecordVector* rabitq_lower_bound_candidates) const {
     std::shared_lock lock(node->mutex_);
     DistHeapPtr results = nullptr;
 

@@ -614,11 +614,18 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
 
     const uint64_t rerank_topk = static_cast<uint64_t>(std::max<int64_t>(
         1, search_param.rerank_topk > 0 ? search_param.rerank_topk : search_param.topk));
+    const bool range_search = search_param.search_mode == RANGE_SEARCH;
+    const uint64_t result_limit =
+        range_search ? (search_param.range_search_limit_size > 0
+                            ? static_cast<uint64_t>(search_param.range_search_limit_size)
+                            : static_cast<uint64_t>(graph->Capacity()))
+                     : rerank_topk;
     const bool should_rerank =
         search_param.enable_rabitq_one_bit_search and search_param.enable_reorder;
-    const bool deferred_rerank = HGraphRaBitQSearcher::ShouldDeferRerank(search_param);
+    const bool deferred_rerank =
+        not range_search and HGraphRaBitQSearcher::ShouldDeferRerank(search_param);
     const uint64_t deferred_rerank_count = std::max<uint64_t>(search_param.ef, 2 * rerank_topk);
-    BoundedResults results(deferred_rerank ? deferred_rerank_count : rerank_topk, allocator);
+    BoundedResults results(deferred_rerank ? deferred_rerank_count : result_limit, allocator);
     SearchBuffer candidate_set(search_param.ef, allocator);
 
     uint32_t rabitq_filter_count = 0;
@@ -701,6 +708,41 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                                            full_distance});
         return static_cast<uint32_t>(candidate_index);
     };
+    const auto result_eligible = [&](float distance) {
+        return not range_search or distance <= search_param.radius;
+    };
+    const auto insert_duplicates = [&](InnerIdType id) {
+        if (not search_param.consider_duplicate) {
+            return;
+        }
+        const auto group_id = graph->GetGroupId(id);
+        auto duplicate_ids = graph->GetDuplicateIds(group_id);
+        duplicate_ids.push_back(group_id);
+        for (const auto duplicate : duplicate_ids) {
+            if (duplicate == id) {
+                continue;
+            }
+            if (not is_allowed(duplicate)) {
+                continue;
+            }
+            float duplicate_distance = 0.0F;
+            ++rabitq_full_count;
+            if (not scorer.FullDirect(graph->GetCodeView(duplicate), &duplicate_distance) or
+                not result_eligible(duplicate_distance)) {
+                continue;
+            }
+            const auto candidate_index = record_lower_bound(duplicate,
+                                                            duplicate_distance,
+                                                            std::numeric_limits<float>::quiet_NaN(),
+                                                            true,
+                                                            duplicate_distance);
+            results.Insert(duplicate,
+                           duplicate_distance,
+                           std::numeric_limits<float>::quiet_NaN(),
+                           true,
+                           candidate_index);
+        }
+    };
 
     const auto entry_node = graph->GetCodeView(search_param.ep);
     float entry_distance = 0.0F;
@@ -730,7 +772,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         entry_full_distance_available ? entry_distance : std::numeric_limits<float>::quiet_NaN());
     candidate_set.Insert(search_param.ep, entry_distance);
     visited_list->Set(search_param.ep);
-    if (entry_allowed) {
+    if (entry_allowed and result_eligible(entry_distance)) {
         results.Insert(
             search_param.ep,
             entry_distance,
@@ -738,6 +780,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
             entry_full_distance_available,
             entry_candidate_index);
     }
+    insert_duplicates(search_param.ep);
 
     uint32_t hops = 0;
     uint32_t distance_computations = 1;
@@ -777,14 +820,17 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                 candidate_set.Insert(neighbor, distance);
             }
             if (allowed) {
-                results.Insert(neighbor,
-                               distance,
-                               filter_inner_product,
-                               full_distance_available,
-                               candidate_index);
+                if (result_eligible(distance)) {
+                    results.Insert(neighbor,
+                                   distance,
+                                   filter_inner_product,
+                                   full_distance_available,
+                                   candidate_index);
+                }
             } else if (reasoning != nullptr) {
                 reasoning->RecordFilterReject(neighbor);
             }
+            insert_duplicates(neighbor);
             prefetch_next_candidate();
             return;
         }
@@ -815,20 +861,13 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         if (not candidate_set.IsFull(distance)) {
             candidate_set.Insert(neighbor, distance);
         }
-        if (promising and allowed) {
+        if (promising and allowed and result_eligible(distance)) {
             results.Insert(neighbor, distance, filter_inner_product, full_distance_available);
-            if (search_param.consider_duplicate) {
-                for (const auto duplicate : graph->GetDuplicateIds(neighbor)) {
-                    if (is_allowed(duplicate)) {
-                        results.Insert(duplicate,
-                                       distance,
-                                       std::numeric_limits<float>::quiet_NaN(),
-                                       full_distance_available);
-                    }
-                }
-            }
         } else if (not allowed and reasoning != nullptr) {
             reasoning->RecordFilterReject(neighbor);
+        }
+        if (promising) {
+            insert_duplicates(neighbor);
         }
         prefetch_next_candidate();
     };
@@ -1221,30 +1260,49 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
     }
     auto* allocator = select_query_allocator(ctx, allocator_);
     auto* split_codes = dynamic_cast<RaBitQSplitDataCellInterface*>(flatten.get());
-    if (graph == nullptr or split_codes == nullptr or search_param.find_duplicate or
-        search_param.consider_duplicate) {
+    if (graph == nullptr or split_codes == nullptr or search_param.find_duplicate) {
         return nullptr;
     }
     if (search_param.ef == 0 or not graph->CheckIdExists(search_param.ep)) {
         return std::make_shared<StandardHeap<true, false>>(allocator, -1);
     }
-
+    if (query == nullptr) {
+        return nullptr;
+    }
     if (lower_bound_candidates != nullptr) {
         lower_bound_candidates->clear();
     }
     const uint64_t rerank_topk = static_cast<uint64_t>(std::max<int64_t>(
         1, search_param.rerank_topk > 0 ? search_param.rerank_topk : search_param.topk));
+    const bool range_search = search_param.search_mode == RANGE_SEARCH;
+    const uint64_t result_limit =
+        range_search ? (search_param.range_search_limit_size > 0
+                            ? static_cast<uint64_t>(search_param.range_search_limit_size)
+                            : static_cast<uint64_t>(graph->Capacity()))
+                     : rerank_topk;
     const bool should_rerank =
         search_param.enable_rabitq_one_bit_search and search_param.enable_reorder;
-    const bool deferred_rerank = HGraphRaBitQSearcher::ShouldDeferRerank(search_param);
+    const bool deferred_rerank =
+        not range_search and HGraphRaBitQSearcher::ShouldDeferRerank(search_param);
     const bool exact_filter_ip_hint = split_codes->FusedFilterBits() >= 2;
     const uint64_t deferred_rerank_count = std::max<uint64_t>(search_param.ef, 2 * rerank_topk);
     auto computer = search_param.rabitq_fused_computer != nullptr
                         ? search_param.rabitq_fused_computer
                         : split_codes->FactoryFusedComputer(query);
+    if (computer == nullptr) {
+        return nullptr;
+    }
     RaBitQFusedTraversalQuery traversal_query;
     const bool has_direct_traversal_query =
         split_codes->GetFusedTraversalQuery(computer, &traversal_query);
+    if (has_direct_traversal_query) {
+        const auto* float_query = static_cast<const float*>(query);
+        for (uint64_t i = 0; i < traversal_query.dim; ++i) {
+            if (not std::isfinite(float_query[i])) {
+                return nullptr;
+            }
+        }
+    }
     const float runtime_error_rate =
         ctx == nullptr ? std::numeric_limits<float>::quiet_NaN() : ctx->rabitq_error_rate;
     if (has_direct_traversal_query) {
@@ -1422,6 +1480,34 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
         return split_codes->ComputeFusedFull(
             computer, node.cluster_id, node.one_bit_code, node.supplement_code, distance, nullptr);
     };
+    const auto result_eligible = [&](float distance) {
+        return not range_search or distance <= search_param.radius;
+    };
+    const auto push_duplicates = [&](InnerIdType id) {
+        if (not search_param.consider_duplicate) {
+            return;
+        }
+        const auto group_id = graph->GetGroupId(id);
+        auto duplicate_ids = graph->GetDuplicateIds(group_id);
+        duplicate_ids.push_back(group_id);
+        for (const auto duplicate : duplicate_ids) {
+            if (duplicate == id or not is_allowed(duplicate)) {
+                continue;
+            }
+            const auto node = graph->GetCodeView(duplicate);
+            float duplicate_distance = 0.0F;
+            ++rabitq_full_count;
+            if (split_codes->ComputeFusedFull(computer,
+                                              node.cluster_id,
+                                              node.one_bit_code,
+                                              node.supplement_code,
+                                              &duplicate_distance,
+                                              nullptr) and
+                result_eligible(duplicate_distance)) {
+                result->Push(duplicate_distance, duplicate);
+            }
+        }
+    };
 
     float entry_distance = 0.0F;
     float entry_lower_bound = 0.0F;
@@ -1440,9 +1526,10 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
     }
     candidate_set.Insert(search_param.ep, entry_distance);
     visited_list->Set(search_param.ep);
-    if (is_allowed(search_param.ep)) {
+    if (is_allowed(search_param.ep) and result_eligible(entry_distance)) {
         result->Push(entry_distance, search_param.ep);
     }
+    push_duplicates(search_param.ep);
 
     uint32_t hops = 0;
     uint32_t distance_computations = 1;
@@ -1561,20 +1648,16 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
             if (not candidate_set.IsFull(distance)) {
                 candidate_set.Insert(neighbor, distance);
             }
-            if (promising and allowed) {
+            if (promising and allowed and result_eligible(distance)) {
                 result->Push(distance, neighbor);
-                if (search_param.consider_duplicate) {
-                    for (const auto duplicate : graph->GetDuplicateIds(neighbor)) {
-                        if (is_allowed(duplicate)) {
-                            result->Push(distance, duplicate);
-                        }
-                    }
-                }
                 while (result->Size() > rerank_topk) {
                     result->Pop();
                 }
             } else if (not allowed and reasoning != nullptr) {
                 reasoning->RecordFilterReject(neighbor);
+            }
+            if (promising) {
+                push_duplicates(neighbor);
             }
             if (candidate_set.HasNext()) {
                 prefetch_graph_l2(candidate_set.NextId());
@@ -1609,7 +1692,7 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
         }
         result = std::move(refined);
     }
-    while (result->Size() > rerank_topk) {
+    while (result->Size() > result_limit) {
         result->Pop();
     }
     if (ctx != nullptr and ctx->stats != nullptr) {

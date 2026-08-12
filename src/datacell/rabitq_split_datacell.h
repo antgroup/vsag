@@ -92,7 +92,7 @@ public:
     UsesLegacyHnswFusedCodec() const = 0;
 
     virtual void
-    AttachFusedCodeStorage(RaBitQFusedCodeStorageInterface* storage) = 0;
+    AttachFusedCodeStorage(RabitQFusedInterface* storage) = 0;
 
     [[nodiscard]] virtual bool
     UsesExternalFusedCodeStorage() const = 0;
@@ -919,6 +919,11 @@ public:
     void
     InsertVector(const void* vector,
                  InnerIdType idx = std::numeric_limits<InnerIdType>::max()) override {
+        if (this->fused_code_storage_ != nullptr and
+            this->fused_code_storage_->FusedStorageSealed()) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "fused RaBitQ code storage is sealed after Build");
+        }
         {
             std::lock_guard lock(this->mutex_);
             if (idx == std::numeric_limits<InnerIdType>::max()) {
@@ -945,7 +950,8 @@ public:
             return false;
         }
         if (this->fused_code_storage_ != nullptr) {
-            return true;
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "fused RaBitQ code storage is read-only after Build");
         }
         std::lock_guard lock(this->mutex_);
         this->write_encoded_vector(static_cast<const float*>(vector), idx);
@@ -1145,7 +1151,7 @@ public:
     }
 
     void
-    AttachFusedCodeStorage(RaBitQFusedCodeStorageInterface* storage) override {
+    AttachFusedCodeStorage(RabitQFusedInterface* storage) override {
         CHECK_ARGUMENT(storage != nullptr, "fused RaBitQ code storage must not be null");
         CHECK_ARGUMENT(not optimized_build_active_,
                        "cannot attach fused RaBitQ storage during optimized build");
@@ -1798,7 +1804,8 @@ public:
     void
     Move(InnerIdType from, InnerIdType to) override {
         if (this->fused_code_storage_ != nullptr) {
-            return;
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "fused RaBitQ code storage does not support Move");
         }
         if (this->optimized_build_active_) {
             ByteBuffer build_record(this->optimized_build_record_size_, allocator_);
@@ -1818,8 +1825,8 @@ public:
     void
     ShrinkToFit(InnerIdType capacity) override {
         if (this->fused_code_storage_ != nullptr) {
-            this->max_capacity_ = capacity;
-            return;
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "fused RaBitQ code storage does not support ShrinkToFit");
         }
         this->x_bit_cell_->Shrink(capacity);
         this->supplement_cell_->Shrink(capacity);
@@ -1875,7 +1882,7 @@ public:
     std::string supplement_io_type_{};
     bool optimized_build_active_{false};
     uint64_t optimized_build_record_size_{0};
-    RaBitQFusedCodeStorageInterface* fused_code_storage_{nullptr};
+    RabitQFusedInterface* fused_code_storage_{nullptr};
 
 private:
     BottomQuantizer&

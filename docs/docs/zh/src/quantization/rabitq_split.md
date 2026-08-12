@@ -66,14 +66,27 @@ cluster id、label、x-bit code 和 y-bit supplement 会存入同一个 cache-li
 Pyramid 参数。HGraph 专用搜索循环直接读取该 record，并联合预取图邻居和
 量化码。codec 使用固定随机种子可复现训练的 16 个 residual clusters。
 
+该选项创建一次构建、构建后只读的内存索引。它支持一次 `Build`、检索（包括过滤、
+iterator、Range Search 和并发查询）、按 ID 计算距离、内存统计以及
+Serialize/Deserialize。`Add`、两种 Remove、向量/ID/属性/extra-info 更新、Merge、
+Tune、Clone、ExportModel 和 Build Cache 导入导出都会返回不支持。未启用 fused 的
+HGraph 保持原有增量生命周期。
+
+每个 record 以 4-byte 邻居数量开头，随后是纯 `InnerIdType` 邻居 ID；节点不再有
+version，邻居 ID 也不编码 version。之后依次保存 cluster id、对齐后的 external
+label、filter code 和 supplement，record stride 仍向上对齐到 64-byte。存储只在
+`Build` 期间按需增长，构建结束后不再 move 或 shrink。
+
 融合布局是显式启用的，并且比普通 split storage 有更严格的约束：
 
 - `1 <= x <= 4`、`y >= 1` 且 `x + y <= 8`。
 - metric 必须是 L2 或内积。
 - graph、filter code 和 supplement code 必须全部使用内存 IO。
-- 必须关闭 MCI、`deduplicate_storage` 和 force remove。
-- fused v1 不支持 PCA；请省略 `rabitq_pca_dim` 或将其设为 `0`。
+- 必须关闭 MCI、`deduplicate_storage`、remove metadata、reverse edges 和 force remove。
+- fused 不支持 PCA；请省略 `rabitq_pca_dim` 或将其设为 `0`。
 - 不支持旧版 v0.14 序列化格式。
+- fused slab 使用独立 wire version；当前格式会明确拒绝曾包含 node version 和
+  remove flags 的开发期旧格式，不提供迁移分支。
 
 未启用该参数的索引保持原有布局、行为和序列化格式。
 
@@ -286,22 +299,18 @@ sum_i q_i * u_i
       + sum_i q_i * s_i
 ```
 
-当 `x >= 2` 时，HGraph 和 Pyramid 的 canonical graph-search 路径会把遍历阶段
-算出的精确 x-bit filter inner product 直接传给 reorder。普通 split storage
-通过 `QueryWithDistanceLowerBoundAndFilterIP` 输出该值，reorder 再通过
-`QueryWithFilterIPHint` 和 `ComputeDistWithSplitCodeAndFilterIP` 直接消费。
-HGraph fused 路径从 node record 读取 code，但使用相同的精确 hint 语义。
-这些路径无需从 distance 恢复 inner product，full rerank 只计算 y supplement
-planes 对应的第二项：
+当 `x >= 2` 时，HGraph fused 专用 search/reorder 路径会把遍历阶段算出的精确
+x-bit filter inner product 直接传给 reorder，并直接从 node record 读取 code，
+因此 full rerank 只计算 y supplement planes 对应的第二项：
 
 ```text
 full contribution = shifted filter contribution + supplement contribution
 ```
 
-因此普通和 fused `2+y`、`3+y`、`4+y` 都会复用精确的 x-bit filter inner
-product，每个重排候选只扫描 y 个 supplement planes。
-`QueryWithDistanceHint` 和 `ComputeDistWithSplitCodeAndFilterDist` 仍作为兼容 API，
-供只有 filter distance 的调用方使用，但它们不是 canonical graph-search 路径。
+因此 fused `2+y`、`3+y`、`4+y` 会复用精确的 x-bit filter inner product，每个
+重排候选只扫描 y 个 supplement planes。携带 filter-IP/full-distance 的 richer
+candidate 只存在于 HGraph fused 专用路径；通用 HGraph searcher、Pyramid 和
+`ReorderInterface` 继续使用原有 distance/id candidate 协议。
 fused `1+y` 的遍历使用 4-bit query bit-plane 与 popcount 近似值；精确重排会
 重新计算它的 1-bit 精确贡献，因为该近似值不能作为精确 full-distance hint。
 如果没有可用 hint，代码会直接从两个 split records 计算相同的最终距离。
@@ -395,6 +404,8 @@ bottom-graph slab 中序列化一次。普通和 streaming 往返都会保留该
   HGraph fused 路径会为 L2 和内积直接复用精确 filter inner product；其他情况
   会安全地计算完整 split distance。
 - fused datacell 只支持 L2、内积以及上文所述的纯内存配置。
+- HGraph fused 只允许一次 `Build`，随后只读；序列化、反序列化和查询统计不会修改
+  索引数据，因此仍然支持。
 - 启用 `support_duplicate: true` 时，重复向量 build probe 和展开 alias 的查询使用
   HGraph canonical searcher；fused slab 仍负责保存 code 和 graph。
 - 除非已经验证仅靠 x-bit 遍历距离能满足召回要求，否则应保持

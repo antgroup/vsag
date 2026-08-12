@@ -33,9 +33,9 @@ struct RaBitQFusedCodeView {
  * BinData/ExData records; the x=1..4 native formats retain the ordinary split bit-plane encoding.
  * Callers must retain the cluster id and use the fused distance methods selected by the codec.
  */
-class RaBitQFusedCodeStorageInterface {
+class RabitQFusedInterface {
 public:
-    virtual ~RaBitQFusedCodeStorageInterface() = default;
+    virtual ~RabitQFusedInterface() = default;
 
     [[nodiscard]] virtual bool
     GetFusedCodeView(InnerIdType id, RaBitQFusedCodeView& view) const = 0;
@@ -54,6 +54,9 @@ public:
 
     [[nodiscard]] virtual uint64_t
     FusedSupplementCodeSize() const = 0;
+
+    [[nodiscard]] virtual bool
+    FusedStorageSealed() const = 0;
 };
 
 }  // namespace vsag

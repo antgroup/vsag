@@ -121,6 +121,9 @@ public:
     InnerIndexPtr
     ExportModel(const IndexCommonParam& param) const override;
 
+    InnerIndexPtr
+    Clone(const IndexCommonParam& param) override;
+
     uint64_t
     EstimateMemory(uint64_t num_elements) const override;
 
@@ -254,6 +257,9 @@ public:
 
     bool
     UpdateId(int64_t old_id, int64_t new_id) override;
+
+    bool
+    UpdateExtraInfo(const DatasetPtr& new_base) override;
 
     void
     UpdateAttribute(int64_t id,
@@ -390,6 +396,12 @@ public:
                      RaBitQCandidateVector* rabitq_lower_bound_candidates = nullptr) const;
 
 private:
+    void
+    check_fused_mutation_supported(std::string_view operation) const;
+
+    std::vector<int64_t>
+    add_impl(const DatasetPtr& data);
+
     [[nodiscard]] std::shared_lock<std::shared_mutex>
     acquire_global_read_lock() const {
         if (not this->physical_code_resize_pending_.load(std::memory_order_acquire)) {

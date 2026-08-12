@@ -376,12 +376,11 @@ TEST_CASE("HGraph RaBitQ Split validates dimension before optimized training",
     REQUIRE(index->GetNumElements() == base_count);
 }
 
-TEST_CASE("HGraph fused RaBitQ exported model reuses its codec during build",
+TEST_CASE("HGraph fused RaBitQ rejects ExportModel",
           "[ft][rabitq_split][hgraph][fused][export_model]") {
     using namespace fixtures;
     constexpr int64_t dim = 64;
     constexpr uint64_t base_count = 64;
-    constexpr int64_t topk = 10;
     const std::string graph_type = GENERATE("odescent", "nsw");
     CAPTURE(graph_type);
 
@@ -400,51 +399,13 @@ TEST_CASE("HGraph fused RaBitQ exported model reuses its codec during build",
     param = param_json.Dump();
 
     auto dataset = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, base_count, "l2");
-    std::vector<float> target_vectors(
-        dataset->base_->GetFloat32Vectors(),
-        dataset->base_->GetFloat32Vectors() + base_count * static_cast<uint64_t>(dim));
-    for (uint64_t i = 0; i < target_vectors.size(); ++i) {
-        target_vectors[i] = target_vectors[i] * 1.75F + 3.0F +
-                            static_cast<float>(i % static_cast<uint64_t>(dim)) * 0.01F;
-    }
-    auto target_base = vsag::Dataset::Make();
-    target_base->NumElements(base_count)
-        ->Dim(dim)
-        ->Ids(dataset->base_->GetIds())
-        ->Float32Vectors(target_vectors.data())
-        ->Owner(false);
-    auto target_query = vsag::Dataset::Make();
-    target_query->NumElements(1)->Dim(dim)->Float32Vectors(target_vectors.data())->Owner(false);
-
-    const auto serialized_model = [](const TestIndex::IndexPtr& index) {
-        auto serialized = index->Serialize();
-        REQUIRE(serialized.has_value());
-        const auto binary = serialized.value().Get(HGraphRaBitQSplitTestIndex::name);
-        REQUIRE(binary.data != nullptr);
-        REQUIRE(binary.size > 0);
-        return std::string(reinterpret_cast<const char*>(binary.data.get()), binary.size);
-    };
-
     auto source = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param, true);
     auto source_build = source->Build(dataset->base_);
     REQUIRE(source_build.has_value());
 
     auto model_result = source->ExportModel();
-    REQUIRE(model_result.has_value());
-    auto model = model_result.value();
-    REQUIRE(model->GetNumElements() == 0);
-    const auto expected_model = serialized_model(model);
-    auto model_build = model->Build(target_base);
-    REQUIRE(model_build.has_value());
-    REQUIRE(model->GetNumElements() == base_count);
-
-    auto populated_model_result = model->ExportModel();
-    REQUIRE(populated_model_result.has_value());
-    REQUIRE(serialized_model(populated_model_result.value()) == expected_model);
-
-    auto search_result = model->KnnSearch(target_query, topk, kSplitSearchParam);
-    REQUIRE(search_result.has_value());
-    REQUIRE(search_result.value()->GetDim() == topk);
+    REQUIRE_FALSE(model_result.has_value());
+    REQUIRE(model_result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
 }
 
 TEST_CASE("HGraph RaBitQ Split drains accepted build tasks after enqueue failure",
@@ -722,7 +683,7 @@ TEST_CASE("HGraph fused RaBitQ split rejects non-finite base vectors",
         const uint64_t count_before_add = index->GetNumElements();
         auto add_result = index->Add(invalid_add);
         REQUIRE_FALSE(add_result.has_value());
-        REQUIRE(add_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+        REQUIRE(add_result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
         REQUIRE(index->GetNumElements() == count_before_add);
         REQUIRE_FALSE(index->CheckIdExist(added_label));
 
@@ -734,7 +695,7 @@ TEST_CASE("HGraph fused RaBitQ split rejects non-finite base vectors",
             ->Owner(false);
         auto update_result = index->UpdateVector(existing_label, invalid_update, true);
         REQUIRE_FALSE(update_result.has_value());
-        REQUIRE(update_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+        REQUIRE(update_result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
         REQUIRE(index->GetNumElements() == base_count);
         auto unchanged_distance = index->CalcDistanceById(existing_vector, existing_label);
         REQUIRE(unchanged_distance.has_value());
@@ -754,6 +715,7 @@ TEST_CASE("HGraph fused RaBitQ split rejects non-finite base vectors",
     const uint64_t count_before_overflow = index->GetNumElements();
     auto overflow_result = index->Add(overflowing_add);
     REQUIRE_FALSE(overflow_result.has_value());
+    REQUIRE(overflow_result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
     REQUIRE(index->GetNumElements() == count_before_overflow);
     REQUIRE_FALSE(index->CheckIdExist(overflowing_label));
 
@@ -766,7 +728,7 @@ TEST_CASE("HGraph fused RaBitQ split rejects non-finite base vectors",
         ->Owner(false);
     auto wrong_dim_result = index->UpdateVector(existing_label, wrong_dim_update, true);
     REQUIRE_FALSE(wrong_dim_result.has_value());
-    REQUIRE(wrong_dim_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(wrong_dim_result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
     auto unchanged_distance = index->CalcDistanceById(existing_vector, existing_label);
     REQUIRE(unchanged_distance.has_value());
     REQUIRE(unchanged_distance.value() == original_distance.value());
@@ -806,16 +768,11 @@ TEST_CASE("HGraph fused RaBitQ split compact round trip",
     const int64_t old_label = base_ids[base_count - 1];
     const int64_t new_label =
         *std::max_element(base_ids, base_ids + base_count) + static_cast<int64_t>(base_count) + 1;
-    auto equal_missing = index->UpdateId(new_label, new_label);
-    REQUIRE(equal_missing.has_value());
-    REQUIRE(equal_missing.value());
     auto update = index->UpdateId(old_label, new_label);
-    REQUIRE(update.has_value());
-    REQUIRE(update.value());
-    REQUIRE_FALSE(index->CheckIdExist(old_label));
-    REQUIRE(index->CheckIdExist(new_label));
-    REQUIRE_FALSE(index->UpdateId(new_label, base_ids[0]).has_value());
-    REQUIRE_FALSE(index->UpdateId(old_label, new_label + 1).has_value());
+    REQUIRE_FALSE(update.has_value());
+    REQUIRE(update.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+    REQUIRE(index->CheckIdExist(old_label));
+    REQUIRE_FALSE(index->CheckIdExist(new_label));
 
     const float recall = TestIndex::TestKnnSearch(index, dataset, kSplitSearchParam, 0.5F, true);
     REQUIRE(recall > 0.5F);
@@ -842,8 +799,8 @@ TEST_CASE("HGraph fused RaBitQ split compact round trip",
 
     auto require_same_result = [&](const TestIndex::IndexPtr& restored) {
         REQUIRE(restored->GetNumElements() == base_count);
-        REQUIRE_FALSE(restored->CheckIdExist(old_label));
-        REQUIRE(restored->CheckIdExist(new_label));
+        REQUIRE(restored->CheckIdExist(old_label));
+        REQUIRE_FALSE(restored->CheckIdExist(new_label));
         auto actual = restored->KnnSearch(query, topk, kSplitSearchParam);
         REQUIRE(actual.has_value());
         REQUIRE(actual.value()->GetDim() == topk);

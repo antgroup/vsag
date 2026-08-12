@@ -69,15 +69,32 @@ HGraph search loop reads the record directly and prefetches graph links and
 quantized codes together. The codec uses 16 reproducibly trained residual
 clusters.
 
+This option creates a build-once, read-only in-memory index. It supports one
+`Build`, search (including filters, iterators, range search, and concurrent
+queries), distance-by-id, memory statistics, and serialization/deserialization.
+It rejects `Add`, both remove modes, vector/id/attribute/extra-info updates,
+merge, tune, clone, model export, and build-cache import/export. Ordinary
+non-fused HGraph keeps its incremental lifecycle.
+
+Each record starts with a 4-byte neighbor count followed by plain
+`InnerIdType` neighbor IDs. There is no node version and no version encoding in
+neighbor IDs. Cluster id, aligned external label, filter code, and supplement
+follow; the record stride remains rounded up to a 64-byte boundary. Storage can
+grow while `Build` is running but is not moved or shrunk afterward.
+
 The fused layout is opt-in and has stricter constraints than ordinary split
 storage:
 
 - `1 <= x <= 4`, `y >= 1`, and `x + y <= 8`.
 - The metric must be L2 or inner product.
 - The graph, filter codes, and supplement codes must all use memory IO.
-- MCI, `deduplicate_storage`, and force remove must be disabled.
-- PCA is not supported in fused v1; omit `rabitq_pca_dim` or set it to `0`.
+- MCI, `deduplicate_storage`, removal metadata, reverse edges, and force remove
+  must be disabled.
+- PCA is not supported; omit `rabitq_pca_dim` or set it to `0`.
 - The legacy v0.14 serialization format is not supported.
+- The fused slab wire format is versioned independently. The current format
+  intentionally rejects earlier development formats that contained node
+  versions and remove flags.
 
 Indexes created without this option keep their existing layout, behavior, and
 serialization format.
@@ -298,25 +315,20 @@ sum_i q_i * u_i
       + sum_i q_i * s_i
 ```
 
-For `x >= 2`, the canonical HGraph and Pyramid graph-search path carries the
-exact x-bit filter inner product from traversal to reorder. Ordinary split
-storage exposes it through `QueryWithDistanceLowerBoundAndFilterIP`, and
-reorder consumes it through `QueryWithFilterIPHint` and
-`ComputeDistWithSplitCodeAndFilterIP`. Fused HGraph uses the same exact hint
-semantics while reading the code directly from the node record. These
-canonical paths do not recover the inner product from a distance, and full
-rerank computes only the second term from the y supplement planes:
+For `x >= 2`, the dedicated fused HGraph search/reorder path carries the exact
+x-bit filter inner product from traversal to reorder. It consumes the hint
+while reading codes directly from the node record, so full rerank computes only
+the second term from the y supplement planes:
 
 ```text
 full contribution = shifted filter contribution + supplement contribution
 ```
 
-Thus ordinary and fused `2+y`, `3+y`, and `4+y` indexes reuse the exact x-bit
-filter inner product and scan only the y supplement planes for each reranked
-candidate. `QueryWithDistanceHint` and
-`ComputeDistWithSplitCodeAndFilterDist` remain compatibility APIs for callers
-that only have a filter distance; they are not the canonical graph-search
-pipeline. The fused `1+y` traversal uses a four-bit query bit-plane and
+Thus fused `2+y`, `3+y`, and `4+y` indexes reuse the exact x-bit filter inner
+product and scan only the y supplement planes for each reranked candidate. The
+richer filter-IP/full-distance candidate record is private to HGraph's fused
+search path; generic HGraph searchers, Pyramid, and `ReorderInterface` retain
+the original distance/id candidate protocol. The fused `1+y` traversal uses a four-bit query bit-plane and
 popcount approximation; precise reranking recomputes its exact one-bit
 contribution because the approximate value is not an exact full-distance
 hint. If a usable hint is unavailable, the code computes the same final
@@ -418,6 +430,8 @@ second count-scaled copy of the split codes.
   for L2 and inner product. Other cases safely compute the full split distance.
 - The fused datacell supports only L2 and inner product and only the in-memory
   configuration described above.
+- Fused HGraph is a single-`Build`, read-only index. Serialize/deserialize and
+  query statistics remain available because they do not mutate index data.
 - With `support_duplicate: true`, duplicate build probes and alias-expanding
   queries use the canonical HGraph searcher; the fused slab remains the code
   and graph storage.

@@ -37,17 +37,19 @@ TEST_CASE("HGraph RaBitQ fused node layout and serialization", "[ut][HGraphRaBit
     graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
     graph_param->max_degree_ = 32;
     graph_param->init_max_capacity_ = 8;
-    graph_param->support_remove_ = true;
-    graph_param->remove_flag_bit_ = 8;
 
-    constexpr uint64_t one_bit_size = 136;
-    constexpr uint64_t supplement_size = 848;
+    constexpr uint64_t one_bit_size = 132;
+    constexpr uint64_t supplement_size = 860;
     auto graph = std::make_shared<HGraphRaBitQFusedDataCell>(
         graph_param, one_bit_size, supplement_size, common_param);
 
     REQUIRE(reinterpret_cast<uintptr_t>(graph->GetNodeRecord(0)) % 64 == 0);
-    REQUIRE(graph->RecordSize() % 64 == 0);
-    REQUIRE(graph->OneBitOffset() == 152);
+    REQUIRE(graph->NeighborsOffset() == 4);
+    REQUIRE(graph->ClusterIdOffset() == 132);
+    REQUIRE(graph->LabelOffset() == 136);
+    REQUIRE(graph->OneBitOffset() == 144);
+    REQUIRE(graph->SupplementOffset() == 276);
+    REQUIRE(graph->RecordSize() == 1152);
 
     Vector<uint8_t> one_bit(one_bit_size, 0x5A, allocator.get());
     Vector<uint8_t> supplement(supplement_size, 0xA5, allocator.get());
@@ -58,6 +60,9 @@ TEST_CASE("HGraph RaBitQ fused node layout and serialization", "[ut][HGraphRaBit
     graph->InsertNeighborsById(1, empty_neighbors);
     graph->InsertNeighborsById(2, empty_neighbors);
     graph->InsertNeighborsById(3, empty_neighbors);
+    REQUIRE(graph->GetNeighborData(graph->GetNodeRecord(0))[0] == 1);
+    REQUIRE(graph->GetNeighborData(graph->GetNodeRecord(0))[1] == 2);
+    REQUIRE(graph->GetNeighborData(graph->GetNodeRecord(0))[2] == 3);
 
     const auto* record = graph->GetNodeRecord(0);
     REQUIRE(graph->GetLabel(record) == 42);
@@ -78,69 +83,16 @@ TEST_CASE("HGraph RaBitQ fused node layout and serialization", "[ut][HGraphRaBit
                         supplement.data(),
                         supplement_size) == 0);
 
-    graph->Move(0, 4);
-    const auto* moved_record = graph->GetNodeRecord(4);
-    REQUIRE(graph->GetLabel(moved_record) == 42);
-    REQUIRE(graph->GetClusterId(moved_record) == 7);
-}
-
-TEST_CASE("HGraph RaBitQ fused delete version invalidates old edges",
-          "[ut][HGraphRaBitQFusedDataCell]") {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    IndexCommonParam common_param;
-    common_param.allocator_ = allocator;
-
-    auto graph_param = std::make_shared<GraphDataCellParameter>();
-    graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
-    graph_param->max_degree_ = 4;
-    graph_param->init_max_capacity_ = 4;
-    graph_param->support_remove_ = true;
-    graph_param->remove_flag_bit_ = 8;
-
-    auto graph = std::make_shared<HGraphRaBitQFusedDataCell>(graph_param, 16, 16, common_param);
-    Vector<InnerIdType> one_neighbor({1}, allocator.get());
-    Vector<InnerIdType> empty_neighbors(allocator.get());
-    graph->InsertNeighborsById(0, one_neighbor);
-    graph->InsertNeighborsById(1, empty_neighbors);
-
-    Vector<InnerIdType> neighbors(allocator.get());
-    graph->GetNeighbors(0, neighbors);
-    REQUIRE(neighbors == Vector<InnerIdType>({1}, allocator.get()));
-    graph->DeleteNeighborsById(1);
-    graph->GetNeighbors(0, neighbors);
-    REQUIRE(neighbors.empty());
-    graph->RecoverDeleteNeighborsById(1);
-    graph->GetNeighbors(0, neighbors);
-    REQUIRE(neighbors == Vector<InnerIdType>({1}, allocator.get()));
-}
-
-TEST_CASE("HGraph RaBitQ fused move restores versions before incoming edges",
-          "[ut][HGraphRaBitQFusedDataCell]") {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    IndexCommonParam common_param;
-    common_param.allocator_ = allocator;
-
-    auto graph_param = std::make_shared<GraphDataCellParameter>();
-    graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
-    graph_param->max_degree_ = 4;
-    graph_param->init_max_capacity_ = 4;
-    graph_param->support_remove_ = true;
-    graph_param->remove_flag_bit_ = 1;
-    graph_param->use_reverse_edges_ = true;
-
-    auto graph = std::make_shared<HGraphRaBitQFusedDataCell>(graph_param, 16, 16, common_param);
-    Vector<InnerIdType> empty_neighbors(allocator.get());
-    Vector<InnerIdType> source_neighbor(allocator.get());
-    source_neighbor.push_back(0);
-    graph->InsertNeighborsById(0, empty_neighbors);
-    graph->InsertNeighborsById(1, source_neighbor);
-    graph->InsertNeighborsById(2, empty_neighbors);
-    graph->DeleteNeighborsById(2);
-
-    graph->Move(0, 2);
-    Vector<InnerIdType> neighbors(allocator.get());
-    graph->GetNeighbors(1, neighbors);
-    REQUIRE(neighbors == Vector<InnerIdType>({2}, allocator.get()));
+    graph->Resize(16);
+    REQUIRE(graph->MaxCapacity() == 16);
+    REQUIRE(graph->GetLabel(graph->GetNodeRecord(0)) == 42);
+    graph->Resize(2);
+    REQUIRE(graph->MaxCapacity() == 16);
+    graph->Seal();
+    REQUIRE(graph->FusedStorageSealed());
+    REQUIRE_THROWS(graph->Resize(32));
+    REQUIRE_THROWS(graph->InsertNeighborsById(0, neighbors));
+    REQUIRE_THROWS(graph->SetFusedCodes(0, 7, one_bit.data(), supplement.data()));
 }
 
 TEST_CASE("HGraph RaBitQ fused deserialize validates its wire layout",
@@ -154,8 +106,6 @@ TEST_CASE("HGraph RaBitQ fused deserialize validates its wire layout",
     graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
     graph_param->max_degree_ = 32;
     graph_param->init_max_capacity_ = 8;
-    graph_param->support_remove_ = true;
-    graph_param->remove_flag_bit_ = 8;
 
     constexpr uint64_t one_bit_size = 16;
     constexpr uint64_t supplement_size = 16;
@@ -188,10 +138,6 @@ TEST_CASE("HGraph RaBitQ fused deserialize validates its wire layout",
     const uint64_t one_bit_size_offset = cursor;
     cursor += sizeof(uint64_t);
     cursor += sizeof(uint64_t);  // supplement code size
-    const uint64_t support_remove_offset = cursor;
-    cursor += sizeof(bool);
-    const uint64_t remove_flag_bit_offset = cursor;
-    cursor += sizeof(uint32_t);
     const uint64_t codec_model_size_offset = cursor;
 
     uint64_t codec_model_size = 0;
@@ -213,16 +159,7 @@ TEST_CASE("HGraph RaBitQ fused deserialize validates its wire layout",
     };
 
     SECTION("serialization version") {
-        require_rejected(overwrite(payload, version_offset, uint32_t{2}));
-    }
-
-    SECTION("remove flag representation") {
-        require_rejected(overwrite(payload, support_remove_offset, uint8_t{2}));
-    }
-
-    SECTION("remove flag bit count") {
-        require_rejected(overwrite(
-            payload, remove_flag_bit_offset, static_cast<uint32_t>(sizeof(InnerIdType) * 8)));
+        require_rejected(overwrite(payload, version_offset, uint32_t{1}));
     }
 
     SECTION("non-monotonic code offsets") {
@@ -252,7 +189,7 @@ TEST_CASE("HGraph RaBitQ fused deserialize validates its wire layout",
     }
 
     SECTION("node payload is bounded before allocation") {
-        constexpr InnerIdType large_capacity = (InnerIdType{1} << 24U) - 1U;
+        constexpr InnerIdType large_capacity = std::numeric_limits<InnerIdType>::max();
         auto malformed = overwrite(payload, capacity_offset, large_capacity);
         const uint64_t declared_bytes = static_cast<uint64_t>(large_capacity) * graph->RecordSize();
         malformed = overwrite(malformed, payload_size_offset, declared_bytes);
@@ -268,20 +205,14 @@ TEST_CASE("HGraph RaBitQ fused deserialize validates its wire layout",
         require_rejected(payload);
     }
 
-    SECTION("constructor rejects invalid removal bit count") {
-        graph_param->remove_flag_bit_ = sizeof(InnerIdType) * 8;
+    SECTION("constructor rejects removal") {
+        graph_param->support_remove_ = true;
         REQUIRE_THROWS(std::make_shared<HGraphRaBitQFusedDataCell>(
             graph_param, one_bit_size, supplement_size, common_param));
     }
 
-    SECTION("constructor requires version bits when removal is enabled") {
-        graph_param->remove_flag_bit_ = 0;
-        REQUIRE_THROWS(std::make_shared<HGraphRaBitQFusedDataCell>(
-            graph_param, one_bit_size, supplement_size, common_param));
-    }
-
-    SECTION("constructor bounds capacity by removal id bits") {
-        graph_param->init_max_capacity_ = InnerIdType{1} << 24U;
+    SECTION("constructor rejects reverse edges") {
+        graph_param->use_reverse_edges_ = true;
         REQUIRE_THROWS(std::make_shared<HGraphRaBitQFusedDataCell>(
             graph_param, one_bit_size, supplement_size, common_param));
     }

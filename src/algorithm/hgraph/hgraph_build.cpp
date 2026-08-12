@@ -116,16 +116,7 @@ wait_all_futures(std::vector<std::future<void>>& futures) {
 
 void
 HGraph::Train(const DatasetPtr& base) {
-    if (this->rabitq_fused_datacell_ != nullptr) {
-        // ODescent may reserve graph IDs before deferred persistent-code training.  The split
-        // datacell count remains zero until those codes are inserted, which distinguishes that
-        // state (and an empty exported model) from a populated index.
-        CHECK_ARGUMENT(this->basic_flatten_codes_->TotalCount() == 0,
-                       "cannot retrain a non-empty fused RaBitQ HGraph");
-        if (not this->rabitq_fused_datacell_->CodecModel().empty()) {
-            return;
-        }
-    }
+    this->check_fused_mutation_supported("Train");
     this->train_codes_with_dataset(this->sample_train_dataset(base));
 }
 
@@ -173,6 +164,7 @@ HGraph::Build(const DatasetPtr& data) {
     std::vector<int64_t> ret;
     const bool using_build_cache = this->has_loaded_cache();
     if (using_build_cache) {
+        this->check_fused_mutation_supported("Build with imported cache");
         if (this->using_dedup_storage()) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                 "HGraph deduplicate_storage does not support build_with_cache");
@@ -186,7 +178,7 @@ HGraph::Build(const DatasetPtr& data) {
         if (optimized_result.has_value()) {
             ret = std::move(optimized_result.value());
         } else if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
-            ret = this->Add(data);
+            ret = this->add_impl(data);
         } else {
             ret = this->build_by_odescent(data);
         }
@@ -197,6 +189,9 @@ HGraph::Build(const DatasetPtr& data) {
     if (this->mci_parameters_.enabled and
         (using_build_cache or graph_type_ != GRAPH_TYPE_VALUE_NSW)) {
         this->build_mci_clique_index(ret.empty() ? this->get_data(data) : nullptr);
+    }
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        this->rabitq_fused_datacell_->Seal();
     }
     return ret;
 }
@@ -245,7 +240,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
     }
     bool defer_persistent_codes = temporary_sq8_build_data != nullptr;
     if (not defer_persistent_codes or this->rabitq_fused_datacell_ != nullptr) {
-        this->Train(data);
+        this->train_codes_with_dataset(this->sample_train_dataset(data));
     }
     this->validate_fused_encoding_data(static_cast<const float*>(vectors),
                                        static_cast<uint64_t>(total));
@@ -308,7 +303,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         build_data.reset();
         temporary_sq8_build_data.reset();
         if (this->rabitq_fused_datacell_ == nullptr) {
-            this->Train(data);
+            this->train_codes_with_dataset(this->sample_train_dataset(data));
         }
         for (const auto& [inner_id, local_idx] : deferred_code_ids) {
             this->insert_persistent_codes(get_data(data, local_idx), inner_id);
@@ -319,6 +314,12 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
 
 std::vector<int64_t>
 HGraph::Add(const DatasetPtr& data) {
+    this->check_fused_mutation_supported("Add");
+    return this->add_impl(data);
+}
+
+std::vector<int64_t>
+HGraph::add_impl(const DatasetPtr& data) {
     std::unique_lock<std::mutex> mci_add_lock(this->mci_add_mutex_, std::defer_lock);
     if (this->mci_parameters_.enabled) {
         mci_add_lock.lock();
@@ -1090,17 +1091,21 @@ HGraph::InitFeatures() {
     }
 
     if (this->rabitq_fused_datacell_ != nullptr) {
+        this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN, false);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_MERGE_INDEX, false);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_TUNE, false);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CLONE, false);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_EXPORT_MODEL, false);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_AFTER_BUILD, false);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_CONCURRENT, false);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_CONCURRENT, false);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_DELETE_CONCURRENT,
                                               false);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT,
                                               false);
-        if (this->raw_vector_ == nullptr) {
-            this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_AFTER_BUILD, false);
-        }
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_ID_CONCURRENT, false);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT,
+                                              false);
     }
 }
 
@@ -1131,24 +1136,48 @@ HGraph::reorder(const void* query,
     if (k <= 0) {
         k = static_cast<int64_t>(size);
     }
-    auto reorder_impl = reorder_;
-    if (reorder_impl == nullptr) {
-        auto fused_graph =
-            flatten.get() == basic_flatten_codes_.get() ? rabitq_fused_datacell_ : nullptr;
-        reorder_impl = std::make_shared<FlattenReorder>(flatten, allocator_, fused_graph);
+    const auto fused_graph =
+        flatten.get() == basic_flatten_codes_.get() ? rabitq_fused_datacell_ : nullptr;
+    if (fused_graph != nullptr) {
+        auto fused_reorder = std::dynamic_pointer_cast<FlattenReorder>(reorder_);
+        if (fused_reorder == nullptr) {
+            fused_reorder = std::make_shared<FlattenReorder>(flatten, allocator_, fused_graph);
+        }
+        candidate_heap = fused_reorder->ReorderFused(candidate_heap,
+                                                     static_cast<const float*>(query),
+                                                     k,
+                                                     ctx,
+                                                     iter_ctx,
+                                                     rabitq_lower_bound_candidates,
+                                                     distance_threshold);
+        return;
     }
-    auto reorder_heap = reorder_impl->Reorder(candidate_heap,
+
+    DistanceRecordVector generic_candidates(select_query_allocator(ctx.alloc, allocator_));
+    const DistanceRecordVector* generic_candidates_ptr = nullptr;
+    if (rabitq_lower_bound_candidates != nullptr) {
+        generic_candidates.reserve(rabitq_lower_bound_candidates->size());
+        for (const auto& candidate : *rabitq_lower_bound_candidates) {
+            generic_candidates.emplace_back(candidate.lower_bound, candidate.id);
+        }
+        generic_candidates_ptr = &generic_candidates;
+    }
+    auto generic_reorder = reorder_;
+    if (generic_reorder == nullptr) {
+        generic_reorder = std::make_shared<FlattenReorder>(flatten, allocator_);
+    }
+    candidate_heap = generic_reorder->Reorder(candidate_heap,
                                               static_cast<const float*>(query),
                                               k,
                                               ctx,
                                               iter_ctx,
-                                              rabitq_lower_bound_candidates,
+                                              generic_candidates_ptr,
                                               distance_threshold);
-    candidate_heap = reorder_heap;
 }
 
 void
 HGraph::ExportCache(std::ostream& out_stream) const {
+    this->check_fused_mutation_supported("ExportCache");
     IOStreamWriter writer(out_stream);
     this->fullfill_cache();
     this->cache_->Serialize(writer);
@@ -1156,6 +1185,7 @@ HGraph::ExportCache(std::ostream& out_stream) const {
 
 void
 HGraph::ImportCache(std::istream& in_stream) {
+    this->check_fused_mutation_supported("ImportCache");
     IOStreamReader reader(in_stream);
     this->cache_->Deserialize(reader);
 }

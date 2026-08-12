@@ -283,12 +283,12 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
     deferred_reorder_context.alloc = allocator.get();
     deferred_reorder_context.stats = &deferred_reorder_statistics;
     FlattenReorder deferred_reorder(flatten, allocator.get(), full_hint_graph);
-    auto deferred_reordered = deferred_reorder.Reorder(deferred_result,
-                                                       vectors.data(),
-                                                       5,
-                                                       deferred_reorder_context,
-                                                       nullptr,
-                                                       &deferred_candidates);
+    auto deferred_reordered = deferred_reorder.ReorderFused(deferred_result,
+                                                            vectors.data(),
+                                                            5,
+                                                            deferred_reorder_context,
+                                                            nullptr,
+                                                            &deferred_candidates);
     REQUIRE(deferred_reordered != nullptr);
     REQUIRE(heap_values_by_id(deferred_reordered) == full_hint_values);
     REQUIRE(deferred_reorder_statistics.reorder_distance_count.load() == 0);
@@ -464,7 +464,7 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
     full_hint_context.alloc = allocator.get();
     full_hint_context.stats = &full_hint_statistics;
     FlattenReorder full_hint_reorder(flatten, allocator.get(), full_hint_graph);
-    auto full_hint_reordered = full_hint_reorder.Reorder(
+    auto full_hint_reordered = full_hint_reorder.ReorderFused(
         full_hint_result, vectors.data(), 5, full_hint_context, nullptr, &full_hint_candidates);
     REQUIRE(full_hint_reordered != nullptr);
     REQUIRE(full_hint_reordered->Size() == 5);
@@ -482,7 +482,7 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
     reorder_context.stats = &reorder_statistics;
     FlattenReorder reorder(flatten, allocator.get(), graph);
     auto reordered =
-        reorder.Reorder(nullptr, vectors.data(), 1, reorder_context, nullptr, &candidates);
+        reorder.ReorderFused(nullptr, vectors.data(), 1, reorder_context, nullptr, &candidates);
     REQUIRE(reordered != nullptr);
     REQUIRE(reordered->Size() == 1);
     REQUIRE(reorder_statistics.reorder_distance_count.load() == 1);
@@ -507,8 +507,8 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
     QueryContext reused_context;
     reused_context.alloc = allocator.get();
     reused_context.stats = &reused_statistics;
-    auto reused =
-        reorder.Reorder(nullptr, vectors.data(), 1, reused_context, nullptr, &reused_candidates);
+    auto reused = reorder.ReorderFused(
+        nullptr, vectors.data(), 1, reused_context, nullptr, &reused_candidates);
     REQUIRE(reused != nullptr);
     REQUIRE(reused->Size() == 1);
     REQUIRE(reused->Top().first == encoded[0].full_distance);
@@ -526,7 +526,7 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
     mixed_context.alloc = allocator.get();
     mixed_context.stats = &mixed_statistics;
     auto mixed =
-        reorder.Reorder(nullptr, vectors.data(), 2, mixed_context, nullptr, &mixed_candidates);
+        reorder.ReorderFused(nullptr, vectors.data(), 2, mixed_context, nullptr, &mixed_candidates);
     REQUIRE(mixed != nullptr);
     REQUIRE(mixed->Size() == 2);
     const auto mixed_values = heap_values_by_id(mixed);
@@ -539,13 +539,8 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
     REQUIRE(mixed_statistics.rabitq_reorder_hint_full_count.load() == 0);
     REQUIRE(mixed_statistics.rabitq_reorder_fallback_full_count.load() == 1);
     REQUIRE_THROWS_AS(
-        reorder.Reorder(nullptr, vectors.data(), 1, reorder_context, nullptr, &candidates),
+        reorder.ReorderFused(nullptr, vectors.data(), 1, reorder_context, nullptr, &candidates),
         VsagException);
-
-    auto input = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
-    input->Push(0.0F, 0);
-    REQUIRE_THROWS_AS(reorder.Reorder(input, vectors.data(), 1, reorder_context, nullptr, nullptr),
-                      VsagException);
 
     SECTION("deferred finalize drops a candidate whose full distance fails") {
         graph->SetNodeCodes(

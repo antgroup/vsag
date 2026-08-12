@@ -28,8 +28,6 @@
 
 namespace vsag {
 
-class RaBitQSplitDataCellInterface;
-
 /**
  * Bottom-layer HGraph storage specialized for fused RaBitQ split codes.
  *
@@ -38,8 +36,7 @@ class RaBitQSplitDataCellInterface;
  * x-bit code and y-bit supplement are addressed from one node pointer. The code sizes are fixed for
  * an index and support filter widths from one through four bits.
  */
-class HGraphRaBitQFusedDataCell final : public GraphInterface,
-                                        public RaBitQFusedCodeStorageInterface {
+class HGraphRaBitQFusedDataCell final : public GraphInterface, public RabitQFusedInterface {
 public:
     struct NodeView {
         const uint8_t* record;
@@ -64,12 +61,6 @@ public:
     void
     InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) override;
 
-    void
-    DeleteNeighborsById(InnerIdType id) override;
-
-    void
-    RecoverDeleteNeighborsById(InnerIdType id) override;
-
     [[nodiscard]] uint32_t
     GetNeighborSize(InnerIdType id) const override;
 
@@ -90,12 +81,6 @@ public:
 
     void
     Deserialize(StreamReader& reader) override;
-
-    void
-    Move(InnerIdType from, InnerIdType to) override;
-
-    void
-    ShrinkToFit(InnerIdType capacity) override;
 
     [[nodiscard]] uint64_t
     GetMemoryUsage() const override;
@@ -154,14 +139,15 @@ public:
         return supplement_code_size_;
     }
 
-    void
-    SetLabel(InnerIdType id, LabelType label);
+    [[nodiscard]] bool
+    FusedStorageSealed() const override {
+        return sealed_;
+    }
 
-    bool
-    SyncNodeCodes(InnerIdType id,
-                  LabelType label,
-                  uint32_t cluster_id,
-                  const RaBitQSplitDataCellInterface& split_codes);
+    void
+    Seal() {
+        sealed_ = true;
+    }
 
     void
     SetCodecModel(std::string codec_model) {
@@ -184,12 +170,7 @@ public:
     [[nodiscard]] bool
     ResolveNeighbor(InnerIdType stored_neighbor, InnerIdType& neighbor) const {
         neighbor = stored_neighbor;
-        if (not support_remove_) {
-            return neighbor < total_count_;
-        }
-        const uint32_t version = neighbor >> id_bit_;
-        neighbor &= remove_flag_mask_;
-        return neighbor < total_count_ and NodeVersion(GetNodeRecord(neighbor)) == version;
+        return neighbor < total_count_;
     }
 
     [[nodiscard]] const uint8_t*
@@ -234,9 +215,34 @@ public:
         return record_size_;
     }
 
+    [[nodiscard]] InnerIdType
+    Capacity() const {
+        return max_capacity_;
+    }
+
     [[nodiscard]] uint64_t
     OneBitOffset() const {
         return one_bit_offset_;
+    }
+
+    [[nodiscard]] uint64_t
+    NeighborsOffset() const {
+        return neighbors_offset_;
+    }
+
+    [[nodiscard]] uint64_t
+    ClusterIdOffset() const {
+        return cluster_id_offset_;
+    }
+
+    [[nodiscard]] uint64_t
+    LabelOffset() const {
+        return label_offset_;
+    }
+
+    [[nodiscard]] uint64_t
+    SupplementOffset() const {
+        return supplement_offset_;
     }
 
     [[nodiscard]] uint64_t
@@ -245,6 +251,14 @@ public:
     }
 
 private:
+    void
+    CheckMutable() const {
+        if (sealed_) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "fused RaBitQ graph is sealed after Build");
+        }
+    }
+
     static void
     PrefetchRange(const uint8_t* begin, uint64_t size, int locality) {
         constexpr uintptr_t cache_line_size = 64;
@@ -266,12 +280,6 @@ private:
     [[nodiscard]] uint8_t*
     MutableNodeRecord(InnerIdType id);
 
-    [[nodiscard]] static uint32_t
-    NodeVersion(const uint8_t* record);
-
-    static void
-    SetNodeVersion(uint8_t* record, uint32_t version);
-
     void
     Reallocate(InnerIdType new_capacity);
 
@@ -287,10 +295,7 @@ private:
     uint64_t one_bit_code_size_{0};
     uint64_t supplement_code_size_{0};
     int64_t dim_{0};
-    bool support_remove_{false};
-    uint32_t remove_flag_bit_{8};
-    uint32_t id_bit_{24};
-    uint32_t remove_flag_mask_{0x00FFFFFF};
+    bool sealed_{false};
     std::string codec_model_;
     mutable std::shared_mutex storage_mutex_;
 };

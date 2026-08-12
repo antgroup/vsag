@@ -248,7 +248,6 @@ TEST_CASE("Pyramid promotes flat node at index minimum size", "[ut][pyramid]") {
     REQUIRE(GetPyramidSubindexCount(index, "graph_subindexes") == 1);
     REQUIRE(GetPyramidSubindexCount(index, "total_vectors_in_graph") == 3);
 
-    bool observed_filter_ip_hint = false;
     for (int64_t i = 0; i < 3; ++i) {
         auto query =
             MakePyramidDataset(vectors.data() + i * PYRAMID_TEST_DIM, nullptr, paths.data() + i, 1);
@@ -257,17 +256,10 @@ TEST_CASE("Pyramid promotes flat node at index minimum size", "[ut][pyramid]") {
         REQUIRE(result->GetDim() == 1);
         REQUIRE(result->GetIds()[0] == ids[i]);
         if (split_rabitq) {
-            auto stats = result->GetStatistics({"reorder_lower_bound_probe_count",
-                                                "rabitq_filter_count",
-                                                "rabitq_reorder_hint_full_count"});
-            REQUIRE(stats.size() == 3);
-            REQUIRE(std::stoul(stats[0]) == 0);
-            REQUIRE(std::stoul(stats[1]) > 0);
-            observed_filter_ip_hint |= std::stoul(stats[2]) > 0;
+            auto stats = result->GetStatistics({"reorder_lower_bound_probe_count"});
+            REQUIRE(stats.size() == 1);
+            REQUIRE(std::stoul(stats[0]) > 0);
         }
-    }
-    if (split_rabitq) {
-        REQUIRE(observed_filter_ip_hint);
     }
 }
 

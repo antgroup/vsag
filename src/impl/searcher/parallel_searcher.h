@@ -40,7 +40,7 @@ public:
            const InnerSearchParam& inner_search_param,
            const LabelTablePtr& label_table = nullptr,
            QueryContext* ctx = nullptr,
-           RaBitQCandidateVector* rabitq_lower_bound_candidates = nullptr) const;
+           DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
     void
     SetMutexArray(MutexArrayPtr new_mutex_array);
@@ -67,7 +67,7 @@ private:
                 const InnerSearchParam& inner_search_param,
                 const LabelTablePtr& label_table = nullptr,
                 QueryContext* ctx = nullptr,
-                RaBitQCandidateVector* rabitq_lower_bound_candidates = nullptr) const;
+                DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
 private:
     Allocator* allocator_{nullptr};

@@ -842,6 +842,76 @@ TEST_CASE("HGraph fused RaBitQ GetStats decodes vectors from node records",
     }
 }
 
+TEST_CASE("HGraph fused RaBitQ exposes a build-once read-only lifecycle",
+          "[ut][hgraph][rabitq_split][fused][lifecycle]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 32;
+    auto common_param = MakeCommonParam(dim);
+    auto hgraph_json = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "base_io_type": "memory_io",
+        "base_supplement_io_type": "memory_io",
+        "rabitq_bits_per_dim_base": 2,
+        "rabitq_bits_per_dim_precise": 6,
+        "graph_io_type": "memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "odescent",
+        "max_degree": 8,
+        "ef_construction": 32,
+        "build_thread_count": 1,
+        "use_reorder": true,
+        "reorder_source": "base",
+        "rabitq_fused_datacell": true
+    })");
+    auto index = MakeHGraphIndex(hgraph_json, common_param);
+
+    REQUIRE_FALSE(index->CheckFeature(vsag::IndexFeature::SUPPORT_ADD_AFTER_BUILD));
+    REQUIRE_FALSE(index->CheckFeature(vsag::IndexFeature::SUPPORT_MERGE_INDEX));
+    REQUIRE_FALSE(index->CheckFeature(vsag::IndexFeature::SUPPORT_CLONE));
+    REQUIRE_FALSE(index->CheckFeature(vsag::IndexFeature::SUPPORT_EXPORT_MODEL));
+    REQUIRE_FALSE(index->CheckFeature(vsag::IndexFeature::SUPPORT_TUNE));
+    REQUIRE_FALSE(index->CheckFeature(vsag::IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT));
+    REQUIRE_FALSE(index->CheckFeature(vsag::IndexFeature::SUPPORT_UPDATE_ID_CONCURRENT));
+
+    std::vector<float> vectors(static_cast<uint64_t>(count) * dim);
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i + 100;
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[static_cast<uint64_t>(i) * dim + d] =
+                static_cast<float>((i * 17 + d * 13) % 101) / 101.0F;
+        }
+    }
+    auto base = MakeFloatDataset(vectors, ids, dim, count);
+    REQUIRE(index->Build(base).has_value());
+
+    auto require_unsupported = [](const auto& result) {
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+    };
+    require_unsupported(index->Train(base));
+    require_unsupported(index->Add(base));
+    const std::vector<int64_t> remove_ids{ids.front()};
+    require_unsupported(index->Remove(remove_ids, vsag::RemoveMode::MARK_REMOVE));
+    require_unsupported(index->Remove(remove_ids, vsag::RemoveMode::FORCE_REMOVE));
+    require_unsupported(index->UpdateVector(ids.front(), base, true));
+    require_unsupported(index->UpdateId(ids.front(), ids.front() + 1000));
+    require_unsupported(index->UpdateExtraInfo(base));
+    require_unsupported(index->Tune("{}"));
+    require_unsupported(index->Merge({}));
+    require_unsupported(index->Clone());
+    require_unsupported(index->ExportModel());
+
+    std::stringstream cache;
+    require_unsupported(index->ExportCache(cache));
+    require_unsupported(index->ImportCache(cache));
+
+    const vsag::AttributeSet attrs{};
+    REQUIRE_THROWS_AS(index->GetInnerIndex()->UpdateAttribute(ids.front(), attrs),
+                      vsag::VsagException);
+}
+
 TEST_CASE("HGraph deduplicate_storage supports precise reorder code path",
           "[ut][hgraph][duplicate][reorder][add]") {
     constexpr int64_t dim = 4;

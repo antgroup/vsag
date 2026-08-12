@@ -291,22 +291,23 @@ HGraph::search_one_graph(const void* query,
         visited_list->Reset();
     }
     DistHeapPtr result = nullptr;
-    if constexpr (mode == KNN_SEARCH) {
-        if (not this->support_duplicate_ and rabitq_fused_datacell_ != nullptr and
-            inner_search_param.distance_batch_func == nullptr and
-            graph.get() == rabitq_fused_datacell_.get() and
-            flatten.get() == basic_flatten_codes_.get() and
-            inner_search_param.parallel_search_thread_count <= 1 and
-            not inner_search_param.find_duplicate and not inner_search_param.consider_duplicate) {
-            result = rabitq_fused_searcher_->Search(rabitq_fused_datacell_,
-                                                    flatten,
-                                                    visited_list,
-                                                    query,
-                                                    inner_search_param,
-                                                    ctx,
-                                                    rabitq_lower_bound_candidates,
-                                                    fused_search_finalized);
-        }
+    Allocator* candidate_allocator =
+        ctx != nullptr and ctx->alloc != nullptr ? ctx->alloc : this->allocator_;
+    DistanceRecordVector generic_lower_bound_candidates(candidate_allocator);
+    auto* generic_lower_bound_candidates_ptr =
+        rabitq_lower_bound_candidates == nullptr ? nullptr : &generic_lower_bound_candidates;
+    if (rabitq_fused_datacell_ != nullptr and graph.get() == rabitq_fused_datacell_.get() and
+        flatten.get() == basic_flatten_codes_.get() and
+        (inner_search_param.parallel_search_thread_count <= 1 or this->support_duplicate_) and
+        not inner_search_param.find_duplicate) {
+        result = rabitq_fused_searcher_->Search(rabitq_fused_datacell_,
+                                                flatten,
+                                                visited_list,
+                                                query,
+                                                inner_search_param,
+                                                ctx,
+                                                rabitq_lower_bound_candidates,
+                                                fused_search_finalized);
     }
     if (result == nullptr and inner_search_param.parallel_search_thread_count > 1 and
         this->thread_pool_ != nullptr) {
@@ -317,7 +318,7 @@ HGraph::search_one_graph(const void* query,
                                                   inner_search_param,
                                                   this->label_table_,
                                                   ctx,
-                                                  rabitq_lower_bound_candidates);
+                                                  generic_lower_bound_candidates_ptr);
     } else if (result == nullptr) {
         result = this->searcher_->Search(graph,
                                          flatten,
@@ -326,7 +327,16 @@ HGraph::search_one_graph(const void* query,
                                          inner_search_param,
                                          this->label_table_,
                                          ctx,
-                                         rabitq_lower_bound_candidates);
+                                         generic_lower_bound_candidates_ptr);
+    }
+    if (result != nullptr and rabitq_lower_bound_candidates != nullptr and
+        not generic_lower_bound_candidates.empty()) {
+        rabitq_lower_bound_candidates->clear();
+        rabitq_lower_bound_candidates->reserve(generic_lower_bound_candidates.size());
+        for (const auto& [lower_bound, id] : generic_lower_bound_candidates) {
+            rabitq_lower_bound_candidates->push_back(
+                {lower_bound, std::numeric_limits<float>::quiet_NaN(), id});
+        }
     }
     if (new_visited_list) {
         this->pool_->ReturnOne(visited_list);
@@ -344,14 +354,44 @@ HGraph::search_one_graph(const void* query,
                          QueryContext* ctx,
                          RaBitQCandidateVector* rabitq_lower_bound_candidates) const {
     auto visited_list = this->pool_->TakeOne();
-    auto result = this->searcher_->Search(graph,
-                                          flatten,
-                                          visited_list,
-                                          query,
-                                          inner_search_param,
-                                          iter_ctx,
-                                          ctx,
-                                          rabitq_lower_bound_candidates);
+    Allocator* candidate_allocator =
+        ctx != nullptr and ctx->alloc != nullptr ? ctx->alloc : this->allocator_;
+    DistanceRecordVector generic_lower_bound_candidates(candidate_allocator);
+    DistHeapPtr result = nullptr;
+    if (iter_ctx->IsFirstUsed() and rabitq_fused_datacell_ != nullptr and
+        graph.get() == rabitq_fused_datacell_.get() and
+        flatten.get() == basic_flatten_codes_.get() and not inner_search_param.find_duplicate) {
+        const auto requested_count = inner_search_param.rerank_topk;
+        auto fused_search_param = inner_search_param;
+        fused_search_param.rerank_topk = fused_search_param.topk;
+        fused_search_param.enable_reorder = false;
+        result = rabitq_fused_searcher_->Search(
+            rabitq_fused_datacell_, flatten, visited_list, query, fused_search_param, ctx, nullptr);
+        while (result != nullptr and result->Size() > requested_count) {
+            const auto discarded = result->Top();
+            result->Pop();
+            iter_ctx->AddDiscardNode(discarded.first, discarded.second);
+        }
+    }
+    if (result == nullptr) {
+        result = this->searcher_->Search(
+            graph,
+            flatten,
+            visited_list,
+            query,
+            inner_search_param,
+            iter_ctx,
+            ctx,
+            rabitq_lower_bound_candidates == nullptr ? nullptr : &generic_lower_bound_candidates);
+    }
+    if (rabitq_lower_bound_candidates != nullptr) {
+        rabitq_lower_bound_candidates->clear();
+        rabitq_lower_bound_candidates->reserve(generic_lower_bound_candidates.size());
+        for (const auto& [lower_bound, id] : generic_lower_bound_candidates) {
+            rabitq_lower_bound_candidates->push_back(
+                {lower_bound, std::numeric_limits<float>::quiet_NaN(), id});
+        }
+    }
     this->pool_->ReturnOne(visited_list);
     return result;
 }
@@ -674,11 +714,10 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.skip_strategy_type = params.skip_strategy_type;
 
     const bool can_use_fused_direct_search =
-        not use_custom_distance and not is_range and not this->support_duplicate_ and
-        rabitq_fused_datacell_ != nullptr and
+        not use_custom_distance and rabitq_fused_datacell_ != nullptr and
         bottom_graph_.get() == rabitq_fused_datacell_.get() and basic_flatten_codes_ != nullptr and
-        search_param.parallel_search_thread_count <= 1 and not search_param.find_duplicate and
-        not search_param.consider_duplicate;
+        (search_param.parallel_search_thread_count <= 1 or this->support_duplicate_) and
+        not search_param.find_duplicate;
     const bool fused_search_can_finalize =
         can_use_fused_direct_search and
         (not use_reorder_ or not search_param.enable_reorder or reorder_by_base_);

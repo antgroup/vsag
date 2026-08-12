@@ -54,7 +54,7 @@ public:
            const InnerSearchParam& inner_search_param,
            const LabelTablePtr& label_table,
            QueryContext* ctx,
-           RaBitQCandidateVector* rabitq_lower_bound_candidates = nullptr) const;
+           DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
     DistHeapPtr
     SearchWithPresetComputer(const GraphInterfacePtr& graph,
@@ -64,7 +64,7 @@ public:
                              const InnerSearchParam& inner_search_param,
                              const LabelTablePtr& label_table,
                              QueryContext* ctx,
-                             RaBitQCandidateVector* rabitq_lower_bound_candidates,
+                             DistanceRecordVector* rabitq_lower_bound_candidates,
                              const ComputerInterfacePtr& preset_computer) const;
 
     virtual DistHeapPtr
@@ -75,7 +75,7 @@ public:
            const InnerSearchParam& inner_search_param,
            IteratorFilterContext* iter_ctx,
            QueryContext* ctx,
-           RaBitQCandidateVector* rabitq_lower_bound_candidates = nullptr) const;
+           DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
     DistHeapPtr
     Search(const GraphInterfacePtr& graph,
@@ -123,7 +123,7 @@ private:
                 const InnerSearchParam& inner_search_param,
                 const LabelTablePtr& label_table,
                 QueryContext* ctx,
-                RaBitQCandidateVector* rabitq_lower_bound_candidates,
+                DistanceRecordVector* rabitq_lower_bound_candidates,
                 const ComputerInterfacePtr& preset_computer) const;
 
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
@@ -135,7 +135,7 @@ private:
                 const InnerSearchParam& inner_search_param,
                 IteratorFilterContext* iter_ctx,
                 QueryContext* ctx,
-                RaBitQCandidateVector* rabitq_lower_bound_candidates = nullptr) const;
+                DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     DistHeapPtr
