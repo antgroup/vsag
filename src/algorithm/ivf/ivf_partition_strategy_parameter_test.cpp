@@ -87,4 +87,17 @@ TEST_CASE("IVF Partition Strategy Routing Parameters", "[ut][IVFPartitionStrateg
         "ivf_train_type": "kmeans",
         "route_ef_construction": 0
     })"));
+    REQUIRE_THROWS(param->FromString(R"(
+    {
+        "partition_strategy_type": "ivf",
+        "ivf_train_type": "kmeans",
+        "route_max_degree": 3
+    })"));
+    REQUIRE_THROWS(param->FromString(R"(
+    {
+        "partition_strategy_type": "ivf",
+        "ivf_train_type": "kmeans",
+        "route_max_degree": 512,
+        "route_ef_construction": 300
+    })"));
 }

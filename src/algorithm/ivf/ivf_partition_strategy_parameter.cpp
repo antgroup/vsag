@@ -42,13 +42,17 @@ IVFPartitionStrategyParameters::FromJson(const JsonType& json) {
         this->partition_strategy_type = IVFPartitionStrategyType::GNO_IMI;
     }
     if (json.Contains(IVF_ROUTE_MAX_DEGREE_KEY)) {
-        this->route_max_degree = json[IVF_ROUTE_MAX_DEGREE_KEY].GetInt();
+        this->route_max_degree = static_cast<int32_t>(json[IVF_ROUTE_MAX_DEGREE_KEY].GetInt());
         CHECK_ARGUMENT(this->route_max_degree > 0, "route_max_degree must be positive");
     }
     if (json.Contains(IVF_ROUTE_EF_CONSTRUCTION_KEY)) {
-        this->route_ef_construction = json[IVF_ROUTE_EF_CONSTRUCTION_KEY].GetInt();
+        this->route_ef_construction =
+            static_cast<int32_t>(json[IVF_ROUTE_EF_CONSTRUCTION_KEY].GetInt());
         CHECK_ARGUMENT(this->route_ef_construction > 0, "route_ef_construction must be positive");
     }
+    CHECK_ARGUMENT(this->route_max_degree >= 4, "route_max_degree must be at least 4");
+    CHECK_ARGUMENT(this->route_ef_construction >= this->route_max_degree,
+                   "route_ef_construction must be no less than route_max_degree");
 
     this->gnoimi_param = std::make_shared<GNOIMIParameter>();
     if (this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI) {
