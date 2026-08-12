@@ -399,6 +399,13 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/jfeng18">
+                    <img src="https://avatars.githubusercontent.com/u/288662032?v=4" width="100" alt="jfeng18"/>
+                    <br />
+                    <sub><b>Jiangtian Feng</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/nedchu">
                     <img src="https://avatars.githubusercontent.com/u/11944144?v=4" width="100" alt="nedchu"/>
                     <br />
@@ -412,20 +419,13 @@ VSAG referenced the following works during its implementation:
                     <sub><b>azl</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/vsag-bot">
                     <img src="https://avatars.githubusercontent.com/u/276218163?v=4" width="100" alt="vsag-bot"/>
                     <br />
                     <sub><b>vsag-bot</b></sub>
-                </a>
-            </td>
-        </tr>
-        <tr>
-            <td align="center">
-                <a href="https://github.com/jfeng18">
-                    <img src="https://avatars.githubusercontent.com/u/288662032?v=4" width="100" alt="jfeng18"/>
-                    <br />
-                    <sub><b>Jiangtian Feng</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -487,12 +487,28 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/dasurax">
+                    <img src="https://avatars.githubusercontent.com/u/9841872?v=4" width="100" alt="dasurax"/>
+                    <br />
+                    <sub><b>dasurax</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/Hastyshell">
+                    <img src="https://avatars.githubusercontent.com/u/82279870?v=4" width="100" alt="Hastyshell"/>
+                    <br />
+                    <sub><b>Siyang Tang</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/HeHuMing">
                     <img src="https://avatars.githubusercontent.com/u/223064905?v=4" width="100" alt="HeHuMing"/>
                     <br />
                     <sub><b>HuMing He</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/jiacai2050">
                     <img src="https://avatars.githubusercontent.com/u/3848910?v=4" width="100" alt="jiacai2050"/>
@@ -507,8 +523,6 @@ VSAG referenced the following works during its implementation:
                     <sub><b>Liyao Xiong</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/mly5269">
                     <img src="https://avatars.githubusercontent.com/u/130448862?v=4" width="100" alt="mly5269"/>
@@ -528,20 +542,6 @@ VSAG referenced the following works during its implementation:
                     <img src="https://avatars.githubusercontent.com/u/51120671?v=4" width="100" alt="cubicc"/>
                     <br />
                     <sub><b>cubicc</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/dasurax">
-                    <img src="https://avatars.githubusercontent.com/u/9841872?v=4" width="100" alt="dasurax"/>
-                    <br />
-                    <sub><b>dasurax</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/Hastyshell">
-                    <img src="https://avatars.githubusercontent.com/u/82279870?v=4" width="100" alt="Hastyshell"/>
-                    <br />
-                    <sub><b>Siyang Tang</b></sub>
                 </a>
             </td>
             <td align="center">
