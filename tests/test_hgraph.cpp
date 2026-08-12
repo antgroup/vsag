@@ -320,18 +320,6 @@ HGraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestCalcDistanceById(index, dataset, 1e-5, expect_success);
     TestGetRawVectorByIds(index, dataset, expect_success);
     TestBatchCalcDistanceById(index, dataset, 1e-5, expect_success);
-    if (expect_success && dataset->query_->GetFloat32Vectors() != nullptr) {
-        const auto count = dataset->top_k;
-        auto result = index->CalcDistancesById(dataset->query_->GetFloat32Vectors(),
-                                               dataset->ground_truth_->GetIds(),
-                                               count,
-                                               true,
-                                               -1);
-        REQUIRE(result.has_value());
-        REQUIRE(result.value()->GetDistances() != nullptr);
-        REQUIRE(result.value()->GetNumElements() == 1);
-        REQUIRE(result.value()->GetDim() == count);
-    }
     TestMultiQueryBatchCalcDistanceById(index, dataset, 1e-5, expect_success);
     TestSearchAllocator(index, dataset, search_param, recall, true);
     TestUpdateVector(index, dataset, search_param, false);
@@ -1050,6 +1038,28 @@ TestHGraphWithAttr(const fixtures::HGraphTestIndexPtr& test_index,
 }
 
 HGRAPH_PR_DAILY_CASE("HGraph With Attr", "[ft][filter_search][hgraph]", TestHGraphWithAttr)
+
+TEST_CASE("HGraph CalDistanceById default topk returns shaped result", "[ft][hgraph][pr]") {
+    using namespace fixtures;
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    const auto count = dataset->top_k;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    auto result = index->CalDistanceById(
+        dataset->query_->GetFloat32Vectors(), dataset->ground_truth_->GetIds(), count, true, -1);
+#pragma GCC diagnostic pop
+
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDistances() != nullptr);
+    REQUIRE(result.value()->GetNumElements() == 1);
+    REQUIRE(result.value()->GetDim() == count);
+}
 
 TEST_CASE("(PR) HGraph SearchWithRequest Reasoning", "[ft][hgraph][pr]") {
     using namespace fixtures;
