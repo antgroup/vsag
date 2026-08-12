@@ -8,6 +8,7 @@ set(HGRAPH_SRCS
     hgraph_param_mapping.cpp
     hgraph_search.cpp
     hgraph_serialize.cpp
+    hgraph_enhance.cpp
 )
 
 add_library(hgraph OBJECT ${HGRAPH_SRCS})

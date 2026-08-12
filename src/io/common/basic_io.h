@@ -18,6 +18,7 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -306,11 +307,12 @@ public:
      */
     inline void
     Serialize(StreamWriter& writer) {
-        StreamWriter::WriteObj(writer, this->size_);
+        const auto size = this->size_.load(std::memory_order_acquire);
+        StreamWriter::WriteObj(writer, size);
         ByteBuffer buffer(SERIALIZE_BUFFER_SIZE, this->allocator_);
         uint64_t offset = 0;
-        while (offset < this->size_) {
-            auto cur_size = std::min(SERIALIZE_BUFFER_SIZE, this->size_ - offset);
+        while (offset < size) {
+            auto cur_size = std::min(SERIALIZE_BUFFER_SIZE, size - offset);
             this->Read(cur_size, offset, buffer.data);
             writer.Write(reinterpret_cast<const char*>(buffer.data), cur_size);
             offset += cur_size;
@@ -330,7 +332,7 @@ public:
         this->start_ = reader.GetCursor();
         if constexpr (SkipDeserialize) {
             reader.Seek(reader.GetCursor() + size);
-            this->size_ = std::max(this->size_, size);
+            this->PublishSize(size);
         } else {
             // Reset the logical and physical extent so a shorter deserialization
             // cannot retain stale bytes from a previously opened file.
@@ -412,12 +414,13 @@ public:
         if constexpr (has_ResizeImpl<IOTmpl>::value) {
             cast().ResizeImpl(size);
         } else {
-            if (size <= this->size_) {
+            const auto current_size = this->size_.load(std::memory_order_acquire);
+            if (size <= current_size) {
                 return;
             }
             ByteBuffer buffer(SERIALIZE_BUFFER_SIZE, this->allocator_);
             memset(buffer.data, 0, SERIALIZE_BUFFER_SIZE);
-            uint64_t offset = this->size_;
+            uint64_t offset = current_size;
             while (offset < size) {
                 auto cur_size = std::min(SERIALIZE_BUFFER_SIZE, size - offset);
                 this->Write(buffer.data, cur_size, offset);
@@ -434,8 +437,8 @@ public:
         if constexpr (has_ShrinkImpl<IOTmpl>::value) {
             cast().ShrinkImpl(size);
         } else {
-            if (size <= this->size_) {
-                this->size_ = size;
+            if (size <= this->size_.load(std::memory_order_acquire)) {
+                this->size_.store(size, std::memory_order_release);
             }
         }
         if constexpr (not InMemory) {
@@ -448,7 +451,7 @@ public:
         if constexpr (has_GetMemoryUsageImpl<IOTmpl>::value) {
             return cast().GetMemoryUsageImpl();
         }
-        return this->size_;
+        return this->size_.load(std::memory_order_acquire);
     }
 
     [[nodiscard]] bool
@@ -496,10 +499,21 @@ public:
     /**
      * @brief The size of the IO object.
      */
-    uint64_t size_{0};
+    // Writers publish newly initialized storage through size_; readers acquire that publication
+    // before validating offsets. Some in-memory IO implementations append concurrently with reads.
+    std::atomic<uint64_t> size_{0};
     uint64_t start_{0};
 
 protected:
+    void
+    PublishSize(uint64_t size) {
+        auto current = size_.load(std::memory_order_relaxed);
+        while (current < size and
+               not size_.compare_exchange_weak(
+                   current, size, std::memory_order_release, std::memory_order_relaxed)) {
+        }
+    }
+
     /**
      * @brief Protected non-virtual destructor.
      *
@@ -525,7 +539,7 @@ protected:
     [[nodiscard]] inline bool
     check_valid_offset(uint64_t size) const {
         // Check if the given offset is within the bounds of the IO object.
-        return size <= this->size_;
+        return size <= this->size_.load(std::memory_order_acquire);
     }
 
 protected:
@@ -561,7 +575,8 @@ private:
 
     [[nodiscard]] bool
     IsValidRange(uint64_t size, uint64_t offset) const {
-        return offset <= size_ and size <= size_ - offset;
+        const auto total_size = size_.load(std::memory_order_acquire);
+        return offset <= total_size and size <= total_size - offset;
     }
 
     ReadCacheSnapshot
@@ -601,7 +616,8 @@ private:
             return nullptr;
         }
         const uint64_t offset = page_id * Page::DEFAULT_PAGE_SIZE;
-        if (offset >= size_) {
+        const auto total_size = size_.load(std::memory_order_acquire);
+        if (offset >= total_size) {
             return nullptr;
         }
         if (cache.cache == nullptr or page_id > UINT64_MAX - cache.page_id_base) {
@@ -630,7 +646,8 @@ private:
                 page = std::make_shared<Page>(allocator_);
                 success = page->Data() != nullptr;
                 if (success) {
-                    const uint64_t read_size = std::min(Page::DEFAULT_PAGE_SIZE, size_ - offset);
+                    const uint64_t read_size =
+                        std::min(Page::DEFAULT_PAGE_SIZE, total_size - offset);
                     success = cast().ReadImpl(read_size, offset, page->Data());
                 }
             } catch (...) {
@@ -728,17 +745,19 @@ private:
             loaded_pages.reserve(owned_loads.size());
             read_sizes.reserve(owned_loads.size());
             read_offsets.reserve(owned_loads.size());
+            const auto published_size = size_.load(std::memory_order_acquire);
             for (const auto& [page_id, _] : owned_loads) {
                 if (page_id > UINT64_MAX / Page::DEFAULT_PAGE_SIZE) {
                     success = false;
                     break;
                 }
                 const uint64_t offset = page_id * Page::DEFAULT_PAGE_SIZE;
-                if (offset >= size_) {
+                if (offset >= published_size) {
                     success = false;
                     break;
                 }
-                const uint64_t read_size = std::min(Page::DEFAULT_PAGE_SIZE, size_ - offset);
+                const uint64_t read_size =
+                    std::min(Page::DEFAULT_PAGE_SIZE, published_size - offset);
                 if (read_size > UINT64_MAX - total_size) {
                     success = false;
                     break;

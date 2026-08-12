@@ -50,7 +50,7 @@ public:
     WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
         state_->data_.resize(std::max<uint64_t>(state_->data_.size(), offset + size));
         std::memcpy(state_->data_.data() + offset, data, size);
-        this->size_ = std::max(this->size_, offset + size);
+        this->PublishSize(offset + size);
     }
 
     bool

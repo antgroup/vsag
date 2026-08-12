@@ -41,7 +41,7 @@ public:
 
     void
     WriteImpl(const uint8_t*, uint64_t size, uint64_t offset) {
-        this->size_ = std::max(this->size_, offset + size);
+        this->PublishSize(offset + size);
     }
 
     bool

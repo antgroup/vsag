@@ -39,7 +39,7 @@ public:
     WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
         ++write_count_;
         REQUIRE(data != nullptr);
-        this->size_ = std::max(this->size_, offset + size);
+        this->PublishSize(offset + size);
     }
 
     uint64_t

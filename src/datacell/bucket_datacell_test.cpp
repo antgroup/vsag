@@ -174,7 +174,7 @@ public:
         if (size > 0) {
             std::memcpy(data_.data() + offset, data, size);
         }
-        this->size_ = std::max(this->size_, next_size);
+        this->PublishSize(next_size);
     }
 
     void

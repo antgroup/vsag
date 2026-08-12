@@ -98,9 +98,7 @@ public:
                 start_offset = start_area->first.offset;
             }
         }
-        if (offset + size > this->size_) {
-            this->size_ = offset + size;
-        }
+        this->PublishSize(offset + size);
     }
 
     /**

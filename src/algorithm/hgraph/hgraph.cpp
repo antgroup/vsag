@@ -63,7 +63,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       graph_type_(hgraph_param->graph_type),
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
       mci_parameters_(hgraph_param->mci_parameters),
-      use_old_serial_format_(common_param.use_old_serial_format_) {
+      use_old_serial_format_(common_param.use_old_serial_format_),
+      use_conjugate_graph_(hgraph_param->use_conjugate_graph) {
     this->support_duplicate_ = hgraph_param->support_duplicate;
     this->deduplicate_storage_ = hgraph_param->deduplicate_storage;
     const bool is_dense_vector = common_param.repr_ == RecordRepr::DENSE &&
@@ -91,6 +92,9 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     this->mci_searcher_ = std::make_shared<MCISearcher>(common_param);
     if (this->mci_parameters_.enabled) {
         this->mci_cliques_ = std::make_shared<CliqueDataCell>(common_param.allocator_.get());
+    }
+    if (this->use_conjugate_graph_) {
+        this->conjugate_graph_ = std::make_shared<ConjugateGraph>(common_param.allocator_.get());
     }
 
     this->bottom_graph_ =
@@ -838,6 +842,10 @@ HGraph::cal_memory_usage() {
     }
     if (this->mci_cliques_ != nullptr) {
         memory += this->mci_cliques_->GetMemoryUsage();
+    }
+    if (this->conjugate_graph_ != nullptr) {
+        std::shared_lock graph_lock(this->conjugate_graph_mutex_);
+        memory += this->conjugate_graph_->GetMemoryUsage();
     }
 
     std::unique_lock lock(this->memory_usage_mutex_);

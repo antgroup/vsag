@@ -195,6 +195,18 @@ TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCo
                             false)
     TEST_COMPATIBILITY_CASE(
         "different support force remove", support_force_remove, true, false, false)
+    SECTION("conjugate graph is backward compatible") {
+        HGraphDefaultParam default_param;
+        auto param_str = generate_hgraph_param(default_param);
+        auto enabled = std::make_shared<vsag::HGraphParameter>();
+        auto disabled = std::make_shared<vsag::HGraphParameter>();
+        enabled->FromString(param_str);
+        disabled->FromString(param_str);
+        enabled->use_conjugate_graph = true;
+
+        REQUIRE(enabled->CheckCompatibility(disabled));
+        REQUIRE_FALSE(disabled->CheckCompatibility(enabled));
+    }
 }
 // clang-format on
 
@@ -226,6 +238,26 @@ TEST_CASE("HGraph maps support_duplicate to graph parameter", "[ut][HGraphParame
     REQUIRE(typed_param->deduplicate_storage);
     REQUIRE(typed_param->duplicate_distance_threshold == 0.25F);
     REQUIRE(typed_param->bottom_graph_param->support_duplicate_);
+}
+
+TEST_CASE("HGraph maps conjugate graph parameters", "[ut][HGraphParameter]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto external = vsag::JsonType::Parse(R"({"use_conjugate_graph": true})");
+    auto mapped = std::dynamic_pointer_cast<vsag::HGraphParameter>(
+        vsag::HGraph::CheckAndMappingExternalParam(external, common_param));
+    REQUIRE(mapped != nullptr);
+    REQUIRE(mapped->use_conjugate_graph);
+    REQUIRE(mapped->ToJson()[vsag::PARAMETER_USE_CONJUGATE_GRAPH].GetBool());
+
+    auto enabled = vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph":{"ef_search":10,"use_conjugate_graph_search":true}})");
+    REQUIRE(enabled.use_conjugate_graph_search);
+    auto disabled = vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph":{"ef_search":10,"use_conjugate_graph_search":false}})");
+    REQUIRE_FALSE(disabled.use_conjugate_graph_search);
 }
 
 TEST_CASE("HGraph maps resize increase count bit", "[ut][HGraphParameter]") {

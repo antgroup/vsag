@@ -576,6 +576,232 @@ RequireHGraphStreamingSearchMatches(const fixtures::TestIndex::IndexPtr& expecte
     }
 }
 
+TEST_CASE("HGraph conjugate graph feedback, update, and serialization",
+          "[ft][hgraph][conjugate_graph]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 2;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "fp32");
+    build_param.thread_count = 1;
+    build_param.use_attr_filter = true;
+    auto param_json =
+        vsag::JsonType::Parse(HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
+    param_json[vsag::INDEX_PARAM][vsag::PARAMETER_USE_CONJUGATE_GRAPH].SetBool(true);
+    auto param = param_json.Dump();
+
+    std::vector<int64_t> ids = {10, 20, 30};
+    std::vector<float> vectors = {0.0F, 0.0F, 1.0F, 0.0F, 2.0F, 0.0F};
+    std::vector<vsag::AttributeSet> attribute_sets(3);
+    std::vector<vsag::AttributeValue<std::string>> attributes(3);
+    for (uint64_t i = 0; i < attributes.size(); ++i) {
+        attributes[i].name_ = "group";
+        attributes[i].GetValue() = {i == 1 ? "allowed" : "excluded"};
+        attribute_sets[i].attrs_.push_back(&attributes[i]);
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(3)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->AttributeSets(attribute_sets.data())
+        ->Owner(false);
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data() + dim)->Owner(false);
+
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    REQUIRE(index->Build(base).has_value());
+    const auto search_disabled = R"({"hgraph":{"ef_search":1,"use_conjugate_graph_search":false}})";
+    const auto search_enabled = R"({"hgraph":{"ef_search":1,"use_conjugate_graph_search":true}})";
+    const auto memory_before_feedback = index->GetMemoryUsage();
+    const auto graph_memory_before_feedback = index->GetMemoryUsageDetail().at("conjugate_graph");
+    REQUIRE(index->Feedback(query, 1, search_disabled, 30).value() == 1);
+    constexpr uint64_t serialized_edge_size = 2 * sizeof(int64_t) + sizeof(uint64_t);
+    REQUIRE(index->GetMemoryUsage() == memory_before_feedback + serialized_edge_size);
+    REQUIRE(index->GetMemoryUsageDetail().at("conjugate_graph") ==
+            graph_memory_before_feedback + serialized_edge_size);
+    REQUIRE(index->Feedback(query, 1, search_disabled, 30).value() == 0);
+    REQUIRE_FALSE(index->Feedback(query, 0, search_disabled, 30).has_value());
+    REQUIRE_FALSE(index->Feedback(query, 1, search_disabled, 99).has_value());
+    REQUIRE(index->UpdateId(30, 300).value());
+
+    auto enhanced = index->KnnSearch(query, 1, search_enabled).value();
+    REQUIRE(enhanced->GetIds()[0] == 20);
+
+    auto filtered_query = vsag::Dataset::Make();
+    filtered_query->NumElements(1)
+        ->Dim(dim)
+        ->Float32Vectors(vectors.data() + 2 * dim)
+        ->Owner(false);
+    vsag::SearchRequest filtered_request;
+    filtered_request.query_ = filtered_query;
+    filtered_request.topk_ = 1;
+    filtered_request.params_str_ = search_enabled;
+    filtered_request.enable_attribute_filter_ = true;
+    filtered_request.attribute_filter_str_ = R"(multi_in(group, "allowed", "|"))";
+    auto filtered = index->SearchWithRequest(filtered_request).value();
+    REQUIRE(filtered->GetDim() == 1);
+    REQUIRE(filtered->GetIds()[0] == 20);
+
+    REQUIRE(index->Pretrain({}, 1, search_disabled).value() == 0);
+    REQUIRE_FALSE(index->Pretrain({99}, 1, search_disabled).has_value());
+    auto pretrain = index->Pretrain({10}, 2, search_disabled);
+    REQUIRE(pretrain.has_value());
+    REQUIRE(pretrain.value() > 0);
+
+    auto verify = [&](const TestIndex::IndexPtr& restored) {
+        auto feedback = restored->Feedback(query, 1, search_disabled, 300);
+        REQUIRE(feedback.has_value());
+        REQUIRE(feedback.value() == 0);
+    };
+
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto binary_restored = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    REQUIRE(binary_restored->Deserialize(binary.value()).has_value());
+    verify(binary_restored);
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    const auto bytes = stream.str();
+    auto block =
+        vsag::test::FindStreamingBlock(bytes, vsag::StreamSerializationTag::CONJUGATE_GRAPH);
+    REQUIRE(block.payload_size > 0);
+    auto stream_restored = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    std::stringstream input(bytes);
+    REQUIRE(stream_restored->DeserializeStreaming(input).has_value());
+    verify(stream_restored);
+
+    param_json[vsag::INDEX_PARAM][vsag::PARAMETER_USE_CONJUGATE_GRAPH].SetBool(false);
+    const auto disabled_param = param_json.Dump();
+    auto disabled = TestIndex::TestFactory(HGraphTestIndex::name, disabled_param, true);
+    REQUIRE(disabled->Build(base).has_value());
+    REQUIRE_FALSE(disabled->Feedback(query, 1, search_disabled, 30).has_value());
+    REQUIRE_FALSE(disabled->Pretrain({10}, 1, search_disabled).has_value());
+
+    std::stringstream disabled_binary_stream;
+    REQUIRE(disabled->Serialize(disabled_binary_stream).has_value());
+    const auto disabled_binary_bytes = disabled_binary_stream.str();
+    auto disabled_binary_restored =
+        TestIndex::TestFactory(HGraphTestIndex::name, disabled_param, true);
+    std::stringstream disabled_binary_input(disabled_binary_bytes);
+    REQUIRE(disabled_binary_restored->Deserialize(disabled_binary_input).has_value());
+    auto binary_mismatched = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    std::stringstream binary_mismatched_input(disabled_binary_bytes);
+    REQUIRE(binary_mismatched->Deserialize(binary_mismatched_input).has_value());
+    REQUIRE(binary_mismatched->Feedback(query, 1, search_disabled, 30).value() == 1);
+
+    std::stringstream disabled_stream;
+    REQUIRE(disabled->SerializeStreaming(disabled_stream).has_value());
+    const auto disabled_bytes = disabled_stream.str();
+    auto disabled_stream_restored =
+        TestIndex::TestFactory(HGraphTestIndex::name, disabled_param, true);
+    std::stringstream disabled_input(disabled_bytes);
+    REQUIRE(disabled_stream_restored->DeserializeStreaming(disabled_input).has_value());
+    auto mismatched = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    std::stringstream enabled_mismatched_input(disabled_bytes);
+    REQUIRE(mismatched->DeserializeStreaming(enabled_mismatched_input).has_value());
+    REQUIRE(mismatched->Feedback(query, 1, search_disabled, 30).value() == 1);
+
+    auto disabled_mismatched = TestIndex::TestFactory(HGraphTestIndex::name, disabled_param, true);
+    std::stringstream mismatched_input(bytes);
+    REQUIRE_FALSE(disabled_mismatched->DeserializeStreaming(mismatched_input).has_value());
+}
+
+TEST_CASE("HGraph feedback exact search is safe during concurrent Add",
+          "[ft][hgraph][conjugate_graph][concurrent]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 2;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "fp32");
+    build_param.thread_count = 1;
+    auto param_json =
+        vsag::JsonType::Parse(HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
+    param_json[vsag::INDEX_PARAM][vsag::PARAMETER_USE_CONJUGATE_GRAPH].SetBool(true);
+    param_json[vsag::INDEX_PARAM][vsag::HGRAPH_INIT_CAPACITY].SetUint64(2);
+    param_json[vsag::INDEX_PARAM][vsag::RESIZE_INCREASE_COUNT_BIT].SetUint64(1);
+
+    std::vector<int64_t> ids = {10, 20};
+    std::vector<float> vectors = {0.0F, 0.0F, 1.0F, 0.0F};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->Dim(dim)->Ids(ids.data())->Float32Vectors(vectors.data())->Owner(false);
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
+
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param_json.Dump(), true);
+    REQUIRE(index->Build(base).has_value());
+    const auto search_parameters =
+        R"({"hgraph":{"ef_search":8,"use_conjugate_graph_search":false}})";
+    std::atomic<bool> start{false};
+    std::atomic<bool> add_succeeded{true};
+    std::atomic<bool> feedback_succeeded{true};
+
+    std::thread writer([&]() {
+        while (not start.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        for (int64_t i = 0; i < 128; ++i) {
+            std::vector<int64_t> add_ids = {1000 + i};
+            std::vector<float> add_vectors = {static_cast<float>(i + 2), 0.0F};
+            auto add = vsag::Dataset::Make();
+            add->NumElements(1)
+                ->Dim(dim)
+                ->Ids(add_ids.data())
+                ->Float32Vectors(add_vectors.data())
+                ->Owner(false);
+            if (not index->Add(add).has_value()) {
+                add_succeeded.store(false, std::memory_order_release);
+                return;
+            }
+        }
+    });
+    std::thread reader([&]() {
+        while (not start.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        for (int64_t i = 0; i < 128; ++i) {
+            if (not index->Feedback(query, 1, search_parameters).has_value()) {
+                feedback_succeeded.store(false, std::memory_order_release);
+                return;
+            }
+        }
+    });
+
+    start.store(true, std::memory_order_release);
+    writer.join();
+    reader.join();
+    REQUIRE(add_succeeded.load(std::memory_order_acquire));
+    REQUIRE(feedback_succeeded.load(std::memory_order_acquire));
+    REQUIRE(index->GetNumElements() == 130);
+}
+
+TEST_CASE("HGraph conjugate graph does not widen range reorder",
+          "[ft][hgraph][conjugate_graph][range]") {
+    const auto params = R"({
+        "dtype":"float32", "metric_type":"l2", "dim":1,
+        "index_param":{"base_quantization_type":"sq8","precise_quantization_type":"fp32",
+        "max_degree":16,"ef_construction":32,"use_reorder":true,"use_conjugate_graph":true}
+    })";
+    auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+    constexpr int64_t count = 20;
+    std::vector<float> vectors(count);
+    std::vector<int64_t> ids(count);
+    std::iota(vectors.begin(), vectors.end(), 0.0F);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto base = vsag::Dataset::Make();
+    base->NumElements(count)->Dim(1)->Ids(ids.data())->Float32Vectors(vectors.data())->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    const float query_vector = 0.0F;
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(1)->Float32Vectors(&query_vector)->Owner(false);
+    auto result = index->RangeSearch(query,
+                                     std::numeric_limits<float>::max(),
+                                     R"({"hgraph":{"ef_search":20,"enable_reorder":true}})",
+                                     2);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 2);
+    auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
+    REQUIRE(statistics["distance_evaluations_by_phase"]["rerank"].GetUint64() == 2);
+}
+
 #define HGRAPH_PR_DAILY_CASE(title, tags, helper)                        \
     TEST_CASE("(PR) " title, tags "[pr]") {                              \
         auto test_index = std::make_shared<fixtures::HGraphTestIndex>(); \

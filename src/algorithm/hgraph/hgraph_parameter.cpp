@@ -169,6 +169,9 @@ HGraphParameter::FromJson(const JsonType& json) {
     if (json.Contains(HGRAPH_PERSIST_SOURCE_ID_KEY)) {
         this->persist_source_id = json[HGRAPH_PERSIST_SOURCE_ID_KEY].GetBool();
     }
+    if (json.Contains(PARAMETER_USE_CONJUGATE_GRAPH)) {
+        this->use_conjugate_graph = json[PARAMETER_USE_CONJUGATE_GRAPH].GetBool();
+    }
     const bool has_mci_parameter =
         json.Contains(HGRAPH_MCI_MCS) or json.Contains(HGRAPH_MCI_CLIQUE_MAX) or
         json.Contains(HGRAPH_MCI_ALPHA) or json.Contains(HGRAPH_MCI_KNNG_SOURCE) or
@@ -255,6 +258,7 @@ HGraphParameter::ToJson() const {
     json[DUPLICATE_DISTANCE_THRESHOLD].SetFloat(this->duplicate_distance_threshold);
     json[SUPPORT_FORCE_REMOVE].SetBool(this->support_force_remove);
     json[HGRAPH_PERSIST_SOURCE_ID_KEY].SetBool(this->persist_source_id);
+    json[PARAMETER_USE_CONJUGATE_GRAPH].SetBool(this->use_conjugate_graph);
     if (this->mci_parameters.enabled) {
         json[HGRAPH_USE_MCI].SetBool(true);
         json[HGRAPH_MCI_MCS].SetInt(static_cast<int64_t>(this->mci_parameters.mcs));
@@ -303,6 +307,13 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, deduplicate_storage);
     CHECK_FIELD_EQ(*this, *p, duplicate_distance_threshold);
     CHECK_FIELD_EQ(*this, *p, support_force_remove);
+    // A conjugate-enabled reader can load an older index without the optional graph and start
+    // with an empty one. The reverse direction would discard serialized enhancement data.
+    if (not this->use_conjugate_graph and p->use_conjugate_graph) {
+        logger::error(
+            "HGraphParameter::CheckCompatibility: serialized conjugate graph is not supported");
+        return false;
+    }
     CHECK_FIELD_EQ(*this, *p, mci_parameters.enabled);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.mcs);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.clique_max);
@@ -352,6 +363,10 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
     }
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_USE_MCI)) {
         obj.use_mci = params[INDEX_TYPE_HGRAPH][HGRAPH_USE_MCI].GetBool();
+    }
+    if (params[INDEX_TYPE_HGRAPH].Contains(PARAMETER_USE_CONJUGATE_GRAPH_SEARCH)) {
+        obj.use_conjugate_graph_search =
+            params[INDEX_TYPE_HGRAPH][PARAMETER_USE_CONJUGATE_GRAPH_SEARCH].GetBool();
     }
     CHECK_ARGUMENT(not params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_SEED_COUNT_KEY),
                    "hgraph mci_seed_count is not supported; use mci_seed_ratio");

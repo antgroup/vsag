@@ -64,9 +64,7 @@ MemoryBlockIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
         ++start_no;
         start_off = 0;
     }
-    if (size + offset > this->size_) {
-        this->size_ = size + offset;
-    }
+    this->PublishSize(size + offset);
 }
 
 bool

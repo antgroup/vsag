@@ -62,6 +62,9 @@ target_link_libraries(302_feature_range_search vsag)
 add_executable (303_feature_remove 303_feature_remove.cpp)
 target_link_libraries (303_feature_remove vsag)
 
+add_executable(304_feature_enhance_graph 304_feature_enhance_graph.cpp)
+target_link_libraries(304_feature_enhance_graph vsag)
+
 # add_executable(305_feature_update 305_feature_update.cpp)
 # target_link_libraries(305_feature_update vsag)
 

@@ -37,6 +37,7 @@
 #include "datacell/sparse_graph_datacell_parameter.h"
 #include "hgraph_parameter.h"
 #include "impl/basic_optimizer.h"
+#include "impl/conjugate_graph.h"
 #include "impl/heap/distance_heap.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
@@ -216,6 +217,17 @@ public:
     uint32_t
     Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override;
 
+    uint32_t
+    Feedback(const DatasetPtr& query,
+             int64_t k,
+             const std::string& parameters,
+             int64_t global_optimum_tag_id = std::numeric_limits<int64_t>::max()) override;
+
+    uint32_t
+    Pretrain(const std::vector<int64_t>& base_tag_ids,
+             uint32_t k,
+             const std::string& parameters) override;
+
     void
     Serialize(StreamWriter& writer) const override;
 
@@ -246,6 +258,9 @@ public:
 
     bool
     UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override;
+
+    bool
+    UpdateId(int64_t old_id, int64_t new_id) override;
 
     void
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override;
@@ -895,9 +910,12 @@ private:
 
     bool use_old_serial_format_{false};  // true when deserialized from legacy format
 
-    bool support_duplicate_{false};             // allow duplicate external ids
-    bool deduplicate_storage_{false};           // share duplicate vector storage slots
-    bool support_force_remove_{false};          // enable physical deletion
+    bool support_duplicate_{false};     // allow duplicate external ids
+    bool deduplicate_storage_{false};   // share duplicate vector storage slots
+    bool support_force_remove_{false};  // enable physical deletion
+    bool use_conjugate_graph_{false};   // enable graph-enhancement feedback
+    std::shared_ptr<ConjugateGraph> conjugate_graph_{nullptr};
+    mutable std::shared_mutex conjugate_graph_mutex_;
     float duplicate_distance_threshold_{0.0F};  // distance threshold for duplicate detection
 
     bool persist_source_id_{false};  // whether to persist source_id in serialization
