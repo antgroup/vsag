@@ -48,6 +48,9 @@ public:
                  const BucketIdType& bucket_id,
                  const InnerIdType& offset_id) = 0;
 
+    virtual float
+    ComputePairVectors(BucketIdType bucket_id, InnerIdType id1, InnerIdType id2) = 0;
+
     virtual ComputerInterfacePtr
     FactoryComputer(const void* query) = 0;
 

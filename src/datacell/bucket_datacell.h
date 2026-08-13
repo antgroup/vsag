@@ -67,6 +67,9 @@ public:
         return this->query_one_by_id(comp, bucket_id, offset_id);
     }
 
+    float
+    ComputePairVectors(BucketIdType bucket_id, InnerIdType id1, InnerIdType id2) override;
+
     ComputerInterfacePtr
     FactoryComputer(const void* query) override;
 
@@ -672,4 +675,46 @@ BucketDataCell<QuantTmpl, IOTmpl>::GetCodesById(BucketIdType bucket_id,
     this->datas_[bucket_id].Read(this->code_size_, offset_id * this->code_size_, data);
 }
 
+template <typename QuantTmpl, typename IOTmpl>
+float
+BucketDataCell<QuantTmpl, IOTmpl>::ComputePairVectors(BucketIdType bucket_id,
+                                                      InnerIdType id1,
+                                                      InnerIdType id2) {
+    if (bucket_id >= this->bucket_count_) {
+        throw VsagException(
+            ErrorType::INTERNAL_ERROR,
+            fmt::format("ComputePairVectors failed: bucket id ({}) is invalid", bucket_id));
+    }
+    if (id1 >= this->bucket_sizes_[bucket_id] || id2 >= this->bucket_sizes_[bucket_id]) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("ComputePairVectors failed: offset id is invalid"));
+    }
+    if (this->inner_ids_[bucket_id][id1] == EMPTY_INNER_ID ||
+        this->inner_ids_[bucket_id][id2] == EMPTY_INNER_ID) {
+        throw VsagException(
+            ErrorType::INTERNAL_ERROR,
+            "ComputePairVectors failed: cannot compute distance for deleted vector");
+    }
+    std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
+    constexpr size_t kStackThreshold = 256;
+    uint8_t stack_buf1[kStackThreshold];
+    uint8_t stack_buf2[kStackThreshold];
+
+    uint8_t *code1_ptr, *code2_ptr;
+    std::vector<uint8_t> heap_buf1, heap_buf2;
+
+    if (this->code_size_ <= kStackThreshold) {
+        code1_ptr = stack_buf1;
+        code2_ptr = stack_buf2;
+    } else {
+        heap_buf1.resize(this->code_size_);
+        heap_buf2.resize(this->code_size_);
+        code1_ptr = heap_buf1.data();
+        code2_ptr = heap_buf2.data();
+    }
+
+    this->datas_[bucket_id].Read(this->code_size_, id1 * this->code_size_, code1_ptr);
+    this->datas_[bucket_id].Read(this->code_size_, id2 * this->code_size_, code2_ptr);
+    return this->quantizer_->Compute(code1_ptr, code2_ptr);
+}
 }  // namespace vsag

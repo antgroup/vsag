@@ -222,6 +222,11 @@ public:
         SAFE_CALL(this->inner_index_->ImportCache(in_stream));
     }
 
+    tl::expected<void, Error>
+    RebuildIVFBucketGraphs() override {
+        CHECK_IMMUTABLE_INDEX("rebuild bucket graphs");
+        SAFE_CALL(this->inner_index_->RebuildBucketGraphs());
+    }
     tl::expected<DatasetPtr, Error>
     GetDataByIds(const int64_t* ids, int64_t count) const override {
         SAFE_CALL(return this->inner_index_->GetDataByIds(ids, count));

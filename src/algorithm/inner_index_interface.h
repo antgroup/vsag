@@ -519,6 +519,12 @@ public:
     }
 
     virtual void
+    RebuildBucketGraphs() {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support RebuildBucketGraphs");
+    }
+
+    virtual void
     Train(const DatasetPtr& base){};
 
     virtual void

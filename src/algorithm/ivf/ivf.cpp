@@ -511,7 +511,7 @@ IVF::Build(const DatasetPtr& base) {
     // TODO(LHT): duplicate
     auto result = this->Add(base);
     if (graph_build_threshold_ > 0) {
-        this->build_bucket_graphs(base);
+        this->build_bucket_graphs();
     }
     this->cal_memory_usage();
     return result;
@@ -620,30 +620,6 @@ IVF::Add(const DatasetPtr& base) {
     return {};
 }
 
-static const void*
-get_ivf_graph_build_data(const DatasetPtr& dataset,
-                         DataTypes data_type,
-                         uint64_t index,
-                         uint64_t dim) {
-    if (data_type == DataTypes::DATA_TYPE_FLOAT) {
-        const auto* ptr = dataset->GetFloat32Vectors();
-        return ptr != nullptr ? ptr + index * dim : nullptr;
-    }
-    if (data_type == DataTypes::DATA_TYPE_INT8) {
-        const auto* ptr = dataset->GetInt8Vectors();
-        return ptr != nullptr ? ptr + index * dim : nullptr;
-    }
-    if (data_type == DataTypes::DATA_TYPE_FP16 || data_type == DataTypes::DATA_TYPE_BF16) {
-        const auto* ptr = dataset->GetFloat16Vectors();
-        return ptr != nullptr ? ptr + index * dim : nullptr;
-    }
-    if (data_type == DataTypes::DATA_TYPE_SPARSE) {
-        const auto* ptr = dataset->GetSparseVectors();
-        return ptr != nullptr ? ptr + index : nullptr;
-    }
-    throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid data type for IVF graph build");
-}
-
 static GraphInterfaceParamPtr
 get_ivf_graph_param(const std::string& graph_param_string) {
     auto graph_json = JsonType::Parse(graph_param_string);
@@ -687,12 +663,51 @@ has_any_fresh_bucket_graph(const BucketInterfacePtr& bucket,
     return false;
 }
 
-void
-IVF::build_bucket_graphs(const DatasetPtr& base) {
-    if (graph_build_threshold_ <= 0) {
-        return;
+class PairwiseBucketDistanceProvider final : public DistanceProviderForGraph {
+public:
+    PairwiseBucketDistanceProvider(std::shared_ptr<BucketInterface> bucket,
+                                   BucketIdType bucket_id,
+                                   InnerIdType query_id)
+        : bucket_(std::move(bucket)), bucket_id_(bucket_id), query_id_(query_id) {
     }
-    if (common_param_.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+
+    [[nodiscard]] float
+    QueryDistance(InnerIdType id, QueryContext* ctx = nullptr) const override {
+        return bucket_->ComputePairVectors(bucket_id_, query_id_, id);
+    }
+
+    void
+    BatchQueryDistance(float* distances,
+                       const InnerIdType* ids,
+                       InnerIdType count,
+                       QueryContext* ctx = nullptr) const override {
+        for (InnerIdType i = 0; i < count; ++i) {
+            distances[i] = bucket_->ComputePairVectors(bucket_id_, query_id_, ids[i]);
+        }
+    }
+
+    [[nodiscard]] float
+    PairwiseDistance(InnerIdType id1,
+                     InnerIdType id2,
+                     const ComputerInterfacePtr& computer = nullptr) const override {
+        return bucket_->ComputePairVectors(bucket_id_, id1, id2);
+    }
+
+    [[nodiscard]] ComputerInterfacePtr
+    FactoryComputerById(InnerIdType id) const override {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "PairwiseBucketDistanceProvider does not support FactoryComputerById");
+    }
+
+private:
+    std::shared_ptr<BucketInterface> bucket_;
+    InnerIdType query_id_;
+    BucketIdType bucket_id_;
+};
+
+void
+IVF::build_bucket_graphs() {
+    if (graph_build_threshold_ <= 0) {
         return;
     }
     if (graph_param_ == nullptr) {
@@ -704,10 +719,10 @@ IVF::build_bucket_graphs(const DatasetPtr& base) {
     const auto bucket_count = bucket_->bucket_count_;
     bucket_graphs_.resize(bucket_count);
 
-    for (BucketIdType b = 0; b < bucket_count; ++b) {
+    auto build_one_bucket = [&](BucketIdType b) {
         const auto bucket_size = bucket_->GetBucketSize(b);
         if (bucket_size < graph_build_threshold_) {
-            continue;
+            return;
         }
 
         const auto* inner_ids = bucket_->GetInnerIds(b);
@@ -719,13 +734,13 @@ IVF::build_bucket_graphs(const DatasetPtr& base) {
             }
         }
         if (valid_ids.size() < static_cast<uint64_t>(graph_build_threshold_)) {
-            continue;
+            return;
         }
 
         const auto effective_degree =
             std::min(max_degree, static_cast<int64_t>(valid_ids.size()) - 1);
         if (effective_degree <= 0) {
-            continue;
+            return;
         }
 
         auto graph = GraphInterface::MakeInstance(graph_param_, this->common_param_);
@@ -733,13 +748,6 @@ IVF::build_bucket_graphs(const DatasetPtr& base) {
         graph->SetTotalCount(bucket_size);
         graph->SetMaximumDegree(static_cast<uint32_t>(effective_degree));
 
-        auto make_computer = [&](InnerIdType local_id) {
-            const auto orig_idx = static_cast<uint64_t>(inner_ids[local_id]) / buckets_per_data_;
-            const auto* query =
-                get_ivf_graph_build_data(base, common_param_.data_type_, orig_idx, this->dim_);
-            CHECK_ARGUMENT(query != nullptr, "base dataset has no graph build vector data");
-            return bucket_->FactoryComputer(query);
-        };
         auto mutexes = std::make_shared<EmptyMutex>();
         BasicSearcher searcher(common_param_);
 
@@ -752,8 +760,7 @@ IVF::build_bucket_graphs(const DatasetPtr& base) {
             search_param.ep = entry;
             search_param.ef = std::min(ef_construction, node_pos);
             search_param.topk = static_cast<int64_t>(search_param.ef);
-            BucketDistanceProvider distance_provider(
-                bucket_, b, make_computer(node), make_computer, inner_ids, buckets_per_data_);
+            PairwiseBucketDistanceProvider distance_provider(bucket_, b, node);
             visited->Reset();
             auto candidates =
                 searcher.Search(graph, distance_provider, visited, search_param, nullptr, nullptr);
@@ -762,6 +769,21 @@ IVF::build_bucket_graphs(const DatasetPtr& base) {
         }
 
         bucket_graphs_[b] = std::move(graph);
+    };
+
+    if (this->thread_pool_ != nullptr) {
+        std::vector<std::future<void>> futures;
+        futures.reserve(bucket_count);
+        for (BucketIdType b = 0; b < bucket_count; ++b) {
+            futures.emplace_back(this->thread_pool_->GeneralEnqueue(build_one_bucket, b));
+        }
+        for (auto& future : futures) {
+            future.get();
+        }
+    } else {
+        for (BucketIdType b = 0; b < bucket_count; ++b) {
+            build_one_bucket(b);
+        }
     }
 }
 DatasetPtr
@@ -2401,4 +2423,29 @@ IVF::GetMemoryUsage() const {
     return memory;
 }
 
+void
+IVF::RebuildBucketGraphs() {
+    if (graph_build_threshold_ <= 0) {
+        throw VsagException(
+            ErrorType::UNSUPPORTED_INDEX_OPERATION,
+            "RebuildIVFBucketGraphs: index was not configured with graph_build_threshold > 0");
+    }
+    if (common_param_.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "RebuildIVFBucketGraphs: only supports float32 data type");
+    }
+
+    // Build new graphs in temp storage first (exception safety)
+    auto old_graphs = std::move(bucket_graphs_);
+    bucket_graphs_.resize(old_graphs.size(), nullptr);
+
+    try {
+        this->build_bucket_graphs();
+        this->cal_memory_usage();
+    } catch (...) {
+        // Restore old graphs on failure
+        bucket_graphs_ = std::move(old_graphs);
+        throw;
+    }
+}
 }  // namespace vsag

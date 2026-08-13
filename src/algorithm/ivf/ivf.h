@@ -80,6 +80,8 @@ public:
 
     std::vector<int64_t>
     Build(const DatasetPtr& base) override;
+    void
+    RebuildBucketGraphs() override;
 
     DatasetPtr
     CalcDistancesById(const float* query,
@@ -243,7 +245,7 @@ private:
     fill_location_map();
 
     void
-    build_bucket_graphs(const DatasetPtr& base);
+    build_bucket_graphs();
 
     /**
      * @brief Decode the packed (bucket_id, local_inner_id) pair from

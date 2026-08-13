@@ -1092,6 +1092,27 @@ public:
             Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support ImportCache"));
     }
 
+    /**
+     * @brief Rebuild per-bucket graphs for IVF indices after Add operations.
+     *
+     * When an IVF index is configured with graph_build_threshold > 0, large buckets
+     * get internal graphs for faster search. After Add() operations, these graphs
+     * become stale. This method explicitly rebuilds them using bucket-internal
+     * distance computation (no external dataset needed).
+     *
+     * Requirements:
+     * - Index must be IVF with graph_build_threshold > 0
+     * - Not safe for concurrent use with Add/Remove/Build/Serialize
+     *
+     * @return tl::expected<void, Error>; an Error is returned if the index does not
+     * support this operation or if graph_build_threshold was not configured.
+     */
+    virtual tl::expected<void, Error>
+    RebuildIVFBucketGraphs() {
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support RebuildIVFBucketGraphs"));
+    }
+
 public:
     virtual ~Index() = default;
 

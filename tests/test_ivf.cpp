@@ -2272,6 +2272,55 @@ TEST_CASE("IVF GraphBucketSearcher Add After Build Falls Back To Flat", "[ft][iv
     REQUIRE(result.value()->GetIds()[0] == dataset->base_->GetIds()[base_count - 1]);
 }
 
+TEST_CASE("IVF RebuildBucketGraphs Restores Graph After Add", "[ft][ivf][graph]") {
+    auto dim = 32;
+    auto metric = "l2";
+    auto base_count = 1000;
+    auto buckets_count = 10;
+    auto threshold = 30;
+    auto param = GenerateIVFGraphBuildParametersString(metric, dim, buckets_count, threshold);
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric);
+
+    auto index = vsag::Factory::CreateIndex("ivf", param);
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(dataset->base_).has_value());
+
+    auto add_count = 100;
+    auto added_dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, add_count, metric);
+    REQUIRE(index.value()->Add(added_dataset->base_).has_value());
+
+    auto rebuild_result = index.value()->RebuildIVFBucketGraphs();
+    REQUIRE(rebuild_result.has_value());
+
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    auto search_param = GenerateIVFGraphSearchParametersString(buckets_count, 100);
+    auto result = index.value()->KnnSearch(query, 10, search_param);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 10);
+
+    // Verify graph search was actually used (check statistics)
+    auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
+    REQUIRE(statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() > 0);
+}
+
+TEST_CASE("IVF RebuildBucketGraphs Disabled Threshold Rejected", "[ft][ivf][graph]") {
+    auto dim = 32;
+    auto metric = "l2";
+    auto base_count = 100;
+    auto buckets_count = 10;
+    auto param = fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
+        metric, dim, "fp32", buckets_count);
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric);
+
+    auto index = vsag::Factory::CreateIndex("ivf", param);
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(dataset->base_).has_value());
+
+    auto rebuild_result = index.value()->RebuildIVFBucketGraphs();
+    REQUIRE_FALSE(rebuild_result.has_value());
+    REQUIRE(rebuild_result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+}
+
 TEST_CASE("IVF GraphBucketSearcher Serialization", "[ft][ivf][graph][serialize]") {
     auto dim = 32;
     auto metric = "l2";
