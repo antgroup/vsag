@@ -37,6 +37,13 @@ namespace vsag {
 
 namespace {
 
+struct FileCloser {
+    void
+    operator()(std::FILE* file) const {
+        std::fclose(file);
+    }
+};
+
 void
 seek_temporary_file(std::FILE* file, uint64_t offset) {
 #if defined(_WIN32)
@@ -274,7 +281,7 @@ ReadSeekableBlockPayload(StreamReader& reader,
         return;
     }
 
-    std::unique_ptr<std::FILE, decltype(&std::fclose)> temp_file(std::tmpfile(), std::fclose);
+    std::unique_ptr<std::FILE, FileCloser> temp_file(std::tmpfile());
     if (temp_file == nullptr) {
         throw VsagException(ErrorType::READ_ERROR,
                             "failed to create temporary file for streaming block payload");

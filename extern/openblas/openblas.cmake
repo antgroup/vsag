@@ -184,6 +184,13 @@ if (NOT OPENBLAS_FOUND)
     # (which implies -ffast-math) breaks CPU detection. Replace with -O2.
     string (REPLACE "-Ofast" "-O2" _openblas_c_flags "${VSAG_THIRDPARTY_C_FLAGS}")
     string (REPLACE "-ffast-math" "" _openblas_c_flags "${_openblas_c_flags}")
+    # GCC 15 defaults to GNU C23, where an empty parameter list means that a function takes
+    # no arguments. OpenBLAS' f2c-generated LAPACK sources use empty parameter lists with the
+    # pre-C23 "unspecified arguments" meaning, so compile the bundled release as GNU C17.
+    if (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL 15)
+        string (APPEND _openblas_c_flags
+                " -std=gnu17 -Wno-error=incompatible-pointer-types")
+    endif ()
     string (REPLACE "-Ofast" "-O2" _openblas_cxx_flags "${VSAG_THIRDPARTY_CXX_FLAGS}")
     string (REPLACE "-ffast-math" "" _openblas_cxx_flags "${_openblas_cxx_flags}")
     string (STRIP "${_openblas_c_flags}" _openblas_c_flags)
