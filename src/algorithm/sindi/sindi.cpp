@@ -793,7 +793,7 @@ SINDI::immutable_insert_candidate_into_heap(uint32_t id,
         }
     }
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
-        if (range_search_limit_size == 0) {
+        if (dist == 0.0F or range_search_limit_size == 0) {
             dist = 0;
             return;
         }

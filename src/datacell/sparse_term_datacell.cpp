@@ -163,6 +163,11 @@ SparseTermDataCell::insert_candidate_into_heap(uint32_t id,
                                                const FilterPtr& filter,
                                                const std::optional<float>& threshold,
                                                bool enable_reorder) const {
+    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+        if (dist == 0.0F) {
+            return;
+        }
+    }
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
         if (threshold.has_value() and
             (not std::isfinite(dist) or (not enable_reorder and 1.0F + dist > threshold.value()))) {
