@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
 
@@ -31,7 +32,24 @@ namespace vsag {
  * from the cache concurrently.
  */
 class PageCache {
+private:
+    class LoadingPage;
+
 public:
+    class LoadHandle {
+        friend class PageCache;
+
+    private:
+        std::shared_ptr<LoadingPage> state_;
+    };
+
+    class LoadResult {
+    public:
+        PagePtr page;
+        LoadHandle handle;
+        bool should_load{false};
+    };
+
     explicit PageCache(uint64_t max_pages);
 
     virtual ~PageCache() = default;
@@ -44,6 +62,32 @@ public:
      */
     virtual PagePtr
     Get(uint64_t page_id);
+
+    /**
+     * @brief Get a cached page or register a single owner to load a cache miss.
+     *
+     * Other callers for the same miss receive a handle that can be waited on.
+     */
+    LoadResult
+    Acquire(uint64_t page_id);
+
+    /**
+     * @brief Wait for an in-flight page load to complete.
+     */
+    PagePtr
+    Wait(const LoadHandle& handle);
+
+    /**
+     * @brief Returns whether an in-flight load was invalidated before completion.
+     */
+    bool
+    IsStale(const LoadHandle& handle) const;
+
+    /**
+     * @brief Publish a page load result and wake callers waiting on the page.
+     */
+    PagePtr
+    Complete(uint64_t page_id, const LoadHandle& handle, PagePtr page, bool success);
 
     /**
      * @brief Insert a page, evicting victims first if the cache is full.
@@ -90,9 +134,13 @@ protected:
     virtual uint64_t
     PickVictim() = 0;
 
+    PagePtr
+    InsertLocked(uint64_t page_id, PagePtr page);
+
 protected:
     mutable std::mutex mutex_;
     std::unordered_map<uint64_t, PagePtr> pages_;
+    std::unordered_map<uint64_t, std::shared_ptr<LoadingPage>> loading_pages_;
     uint64_t max_pages_{0};
 };
 

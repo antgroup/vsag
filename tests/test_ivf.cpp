@@ -691,7 +691,7 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
                      expected_search.value()->GetDistances()[0]) < 2e-6F);
     REQUIRE(precise_reader->ReadBytes() > 0);
     if (enable_read_cache) {
-        REQUIRE(precise_reader->ReadCalls() > 0);
+        REQUIRE(precise_reader->ReadCalls() + precise_reader->MultiReadCalls() > 0);
         precise_reader->ResetCounters();
         auto cached_search = loaded.value()->KnnSearch(query, 1, search_param);
         REQUIRE(cached_search.has_value());
@@ -723,7 +723,7 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
         auto first_distances =
             fresh_loaded.value()->CalcDistancesById(query_vector, ids, batch_count);
         REQUIRE(first_distances.has_value());
-        REQUIRE(fresh_reader->ReadCalls() > 0);
+        REQUIRE(fresh_reader->ReadCalls() + fresh_reader->MultiReadCalls() > 0);
         REQUIRE(fresh_reader->ReadBytes() > 0);
         for (int64_t i = 0; i < batch_count; ++i) {
             REQUIRE(std::abs(first_distances.value()->GetDistances()[i] -
