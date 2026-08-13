@@ -15,6 +15,7 @@
 include_guard (GLOBAL)
 
 include (cmake/CheckSIMDCompilerFlag.cmake)
+include (cmake/VSAGThirdPartyOverride.cmake)
 include (ExternalProject)
 
 include (extern/json/json.cmake)

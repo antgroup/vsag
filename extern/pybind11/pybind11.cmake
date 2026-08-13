@@ -2,14 +2,8 @@ include(FetchContent)
 
 set(pybind11_urls
     https://github.com/pybind/pybind11/archive/refs/tags/v2.11.1.tar.gz
-    # this url is maintained by the vsag project, if it's broken, please try
-    #  the latest commit or contact the vsag project
-    https://vsagcache.oss-rg-china-mainland.aliyuncs.com/pybind11/v2.11.1.tar.gz
 )
-if(DEFINED ENV{VSAG_THIRDPARTY_PYBIND11})
-  message(STATUS "Using local path for pybind11: $ENV{VSAG_THIRDPARTY_PYBIND11}")
-  list(PREPEND pybind11_urls "$ENV{VSAG_THIRDPARTY_PYBIND11}")
-endif()
+vsag_resolve_thirdparty_override (PYBIND11 v2.11.1 pybind11_urls)
 FetchContent_Declare(
         pybind11
         URL ${pybind11_urls}

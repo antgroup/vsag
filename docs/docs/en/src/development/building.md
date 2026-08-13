@@ -90,7 +90,7 @@ that requests `uring_io` then logs a one-time warning and falls back to `buffer_
 VSAG downloads its third-party libraries at configure/build time. In offline or
 restricted-network environments, set the per-dependency `VSAG_THIRDPARTY_*`
 environment variables to fetch each archive from a local path or an internal
-mirror (internal HTTP server, OSS bucket, etc.). See
+mirror (internal HTTP server, object storage, etc.). See
 [Offline / Air-gapped Builds](offline_build.md) for the full list of variables
 and worked examples.
 

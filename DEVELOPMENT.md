@@ -157,19 +157,18 @@ the new option in new scripts.
 
 ### Third-Party Source Overrides
 
-VSAG downloads its third-party libraries at configure/build time. Each
-downloaded dependency honors a `VSAG_THIRDPARTY_<LIB>` **environment variable**
-that, when set, is tried before the upstream URL and the project's Aliyun OSS
-mirror. The value may be a local filesystem path or any URL (internal HTTP
-server, OSS bucket, etc.), which makes it the primary mechanism for offline,
+VSAG downloads its third-party libraries at configure/build time. Each downloaded
+dependency honors a pin-qualified `VSAG_THIRDPARTY_<LIB>_<PIN_SUFFIX>` **environment
+variable** that, when set, is tried before the upstream URL and project mirror. The
+unversioned variable remains as a deprecated compatibility fallback. The value may
+be a local filesystem path or URL, making this the primary mechanism for offline,
 air-gapped, or internal-mirror builds.
 
-- **`VSAG_THIRDPARTY_OPENBLAS`** (representative example)
+- **`VSAG_THIRDPARTY_OPENBLAS_0_3_24`** (representative `main` example)
   - Override the OpenBLAS source archive URL/path used by `ExternalProject_Add`
   - Useful for offline builds, local mirrors, or pre-downloaded archives
 
-The full list of variables (`VSAG_THIRDPARTY_ANTLR4`, `VSAG_THIRDPARTY_OPENBLAS`,
-`VSAG_THIRDPARTY_FMT`, …), usage examples, and the exact archives to mirror are
+The full list of pinned variables, suffix rules, usage examples, and exact archives to mirror are
 documented in the [Offline / Air-gapped Builds](docs/docs/en/src/development/offline_build.md)
 guide. The note next to each `URL_HASH` in `extern/<lib>/<lib>.cmake` is the
 source of truth for the exact upstream URL and expected checksum.
