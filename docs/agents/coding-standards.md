@@ -2,13 +2,14 @@
 canonical: docs/agents/coding-standards.md
 purpose: C++ coding standards and common patterns enforced in VSAG
 key-facts:
-  - 4-space indent, 100-col limit, .cpp suffix, trailing newline required
+  - C++ files use 4-space indent and a 100-col limit; non-C++ text has no line-width limit
+  - .cpp suffix and trailing newline required
   - Public APIs live in include/vsag/; implementation in src/
   - Prefer uint64_t over size_t for macOS compatibility
 related:
   - ../../CONTRIBUTING.md
   - ../docs/en/src/development/code_structure.md
-last-reviewed: 2026-05-12
+last-reviewed: 2026-08-13
 -->
 
 # Coding Standards
@@ -17,9 +18,10 @@ Follow the Google C++ Style Guide with the project-specific rules below.
 
 ## Formatting
 
-- 4-space indentation
+- Use 4-space indentation in C++ source and header files.
 - Use `.cpp` instead of `.cc`
-- 100-character line limit
+- Keep C++ source and header files within a 100-character line limit.
+- Do not impose the C++ line limit on Markdown or other non-C++ text files.
 - Ensure committed text files end with a trailing newline
 
 ## Code layout
