@@ -15,7 +15,10 @@
 #include "io/read_cache/page_cache.h"
 
 #include <algorithm>
+#include <chrono>
 #include <deque>
+#include <future>
+#include <stdexcept>
 
 #include "impl/allocator/safe_allocator.h"
 #include "unittest.h"
@@ -50,6 +53,9 @@ protected:
 
     uint64_t
     PickVictim() override {
+        if (throw_on_pick_) {
+            throw std::runtime_error("pick failed");
+        }
         if (order_.empty()) {
             return UINT64_MAX;
         }
@@ -58,6 +64,8 @@ protected:
 
 public:
     uint64_t last_access_{UINT64_MAX};
+
+    bool throw_on_pick_{false};
 
 private:
     std::deque<uint64_t> order_;
@@ -111,4 +119,30 @@ TEST_CASE("PageCache Eviction Test", "[PageCache][ut]") {
     REQUIRE(cache.Get(1) == nullptr);
     REQUIRE(cache.Get(2) != nullptr);
     REQUIRE(cache.Get(3) != nullptr);
+}
+
+TEST_CASE("PageCache Complete wakes waiters when insertion throws", "[PageCache][ut]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    FifoPageCache cache(1);
+    cache.Insert(1, MakePage(allocator.get(), 1));
+
+    auto owner = cache.Acquire(2);
+    REQUIRE(owner.should_load);
+    auto waiter = cache.Acquire(2);
+    REQUIRE_FALSE(waiter.should_load);
+
+    auto waited_page = std::async(std::launch::async,
+                                  [&cache, handle = waiter.handle] { return cache.Wait(handle); });
+
+    cache.throw_on_pick_ = true;
+    REQUIRE_THROWS_AS(cache.Complete(2, owner.handle, MakePage(allocator.get(), 2), true),
+                      std::runtime_error);
+    REQUIRE(waited_page.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
+    REQUIRE(waited_page.get() == nullptr);
+
+    cache.throw_on_pick_ = false;
+    auto retry = cache.Acquire(2);
+    REQUIRE(retry.should_load);
+    auto retried_page = MakePage(allocator.get(), 2);
+    REQUIRE(cache.Complete(2, retry.handle, retried_page, true) == retried_page);
 }
