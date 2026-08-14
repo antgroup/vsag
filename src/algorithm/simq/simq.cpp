@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <future>
 #include <limits>
 #include <numeric>
 #include <random>
@@ -92,11 +93,13 @@ public:
                             int64_t max_cluster_size,
                             int64_t split_start_idx,
                             int64_t random_seed,
+                            uint64_t build_thread_count,
                             IndexCommonParam common_param)
         : init_cluster_ratio_(init_cluster_ratio),
           max_cluster_size_(static_cast<int>(max_cluster_size)),
           split_start_idx_(static_cast<int>(split_start_idx)),
           random_seed_(static_cast<int>(random_seed)),
+          build_thread_count_(build_thread_count),
           common_param_(std::move(common_param)) {
     }
 
@@ -129,6 +132,7 @@ private:
     int max_cluster_size_;
     int split_start_idx_;
     int random_seed_;
+    uint64_t build_thread_count_;
     IndexCommonParam common_param_;
 
     const float* vecs_{nullptr};
@@ -145,7 +149,9 @@ HGraphDynamicClustering::build_hgraph(const std::vector<int>& center_ids, int64_
     cp.data_type_ = DataTypes::DATA_TYPE_FLOAT;
     cp.dim_ = dim;
 
-    auto param = HGraph::CheckAndMappingExternalParam(JsonType::Parse("{}"), cp);
+    auto hgraph_params = JsonType::Parse("{}");
+    hgraph_params[BUILD_THREAD_COUNT_KEY].SetUint64(std::max<uint64_t>(1, build_thread_count_));
+    auto param = HGraph::CheckAndMappingExternalParam(hgraph_params, cp);
     hgraph_ = std::make_shared<HGraph>(param, cp);
 
     auto n = static_cast<int64_t>(center_ids.size());
@@ -314,9 +320,13 @@ SIMQ::Build(const DatasetPtr& data) {
     const int64_t* labels = data->GetIds();
     CHECK_ARGUMENT(labels != nullptr, "simq build: labels (ids) is nullptr");
 
-    // Count total token vectors for clustering
+    // Count token vectors and record each document offset for disjoint parallel writes.
     uint64_t total_vecs = 0;
+    Vector<uint64_t> doc_offsets(static_cast<uint64_t>(num_docs), allocator_);
     for (int64_t i = 0; i < num_docs; ++i) {
+        CHECK_ARGUMENT(mvs[i].len_ == 0 || mvs[i].vectors_ != nullptr,
+                       fmt::format("simq build: vectors for doc {} is nullptr", i));
+        doc_offsets[static_cast<uint64_t>(i)] = total_vecs;
         total_vecs += mvs[i].len_;
     }
     CHECK_ARGUMENT(total_vecs > 0, "simq build: total number of vectors must be > 0");
@@ -329,22 +339,40 @@ SIMQ::Build(const DatasetPtr& data) {
     token_to_offset_.resize(total_vecs);
     token_to_dist_.resize(total_vecs, 0.0F);
 
-    uint64_t vec_off = 0;
-    for (int64_t i = 0; i < num_docs; ++i) {
-        uint64_t n = static_cast<uint64_t>(mvs[i].len_) * static_cast<uint64_t>(mv_dim);
-        if (n > 0) {
-            CHECK_ARGUMENT(mvs[i].vectors_ != nullptr,
-                           fmt::format("simq build: vectors for doc {} is nullptr", i));
-            std::memcpy(flat.data() + vec_off * static_cast<uint64_t>(mv_dim),
-                        mvs[i].vectors_,
-                        n * sizeof(float));
+    const auto flatten_range = [&](int64_t begin, int64_t end) {
+        for (int64_t i = begin; i < end; ++i) {
+            const auto vec_off = doc_offsets[static_cast<uint64_t>(i)];
+            const auto token_count = static_cast<uint64_t>(mvs[i].len_);
+            const auto float_count = token_count * static_cast<uint64_t>(mv_dim);
+            if (float_count > 0) {
+                std::memcpy(flat.data() + vec_off * static_cast<uint64_t>(mv_dim),
+                            mvs[i].vectors_,
+                            float_count * sizeof(float));
+            }
+            for (uint32_t t = 0; t < mvs[i].len_; ++t) {
+                vec_to_doc[vec_off + t] = static_cast<InnerIdType>(i);
+                token_to_doc_[vec_off + t] = static_cast<InnerIdType>(i);
+                token_to_offset_[vec_off + t] = t;
+            }
         }
-        for (uint32_t t = 0; t < mvs[i].len_; ++t) {
-            vec_to_doc[vec_off + t] = static_cast<InnerIdType>(i);
-            token_to_doc_[vec_off + t] = static_cast<InnerIdType>(i);
-            token_to_offset_[vec_off + t] = t;
+    };
+    const auto worker_count =
+        std::min<uint64_t>(build_thread_count_, static_cast<uint64_t>(num_docs));
+    if (thread_pool_ != nullptr and worker_count > 1) {
+        std::vector<std::future<void>> futures;
+        futures.reserve(worker_count);
+        for (uint64_t worker = 0; worker < worker_count; ++worker) {
+            const auto begin =
+                static_cast<int64_t>(worker * static_cast<uint64_t>(num_docs) / worker_count);
+            const auto end =
+                static_cast<int64_t>((worker + 1) * static_cast<uint64_t>(num_docs) / worker_count);
+            futures.emplace_back(thread_pool_->GeneralEnqueue(flatten_range, begin, end));
         }
-        vec_off += mvs[i].len_;
+        for (auto& future : futures) {
+            future.get();
+        }
+    } else {
+        flatten_range(0, num_docs);
     }
 
     total_count_ = static_cast<uint64_t>(num_docs);
@@ -369,8 +397,12 @@ SIMQ::run_clustering(const float* flat_vecs,
                      const Vector<InnerIdType>& vec_to_doc,
                      int64_t num_vecs,
                      int64_t dim) {
-    HGraphDynamicClustering clustering(
-        init_cluster_ratio_, max_cluster_size_, split_start_idx_, random_seed_, common_param_);
+    HGraphDynamicClustering clustering(init_cluster_ratio_,
+                                       max_cluster_size_,
+                                       split_start_idx_,
+                                       random_seed_,
+                                       build_thread_count_,
+                                       common_param_);
     clustering.Fit(flat_vecs, num_vecs, dim);
 
     auto nc = static_cast<int64_t>(clustering.cluster_centers_.size());
@@ -428,38 +460,59 @@ SIMQ::build_rep_hgraph(const float* flat_vecs, int64_t dim) {
     std::vector<float> rep_vecs(static_cast<uint64_t>(num_clusters_) * static_cast<uint64_t>(dim));
     std::vector<int64_t> labels(static_cast<uint64_t>(num_clusters_));
 
-    for (int64_t idx = 0; idx < num_clusters_; ++idx) {
-        auto& members = cluster_token_members[static_cast<uint64_t>(idx)];
-        auto* dst = rep_vecs.data() + idx * dim;
-        // Label is the sequential cluster index so coarse_search IDs map directly
-        labels[static_cast<uint64_t>(idx)] = idx;
+    const auto build_representatives = [&](int64_t begin, int64_t end) {
+        for (int64_t idx = begin; idx < end; ++idx) {
+            const auto& members = cluster_token_members[static_cast<uint64_t>(idx)];
+            auto* dst = rep_vecs.data() + idx * dim;
+            // Label is the sequential cluster index so coarse_search IDs map directly.
+            labels[static_cast<uint64_t>(idx)] = idx;
 
-        if (members.empty()) {
-            std::memset(dst, 0, static_cast<uint64_t>(dim) * sizeof(float));
-            continue;
-        }
+            if (members.empty()) {
+                std::memset(dst, 0, static_cast<uint64_t>(dim) * sizeof(float));
+                continue;
+            }
 
-        std::vector<float> mean(static_cast<uint64_t>(dim), 0.0F);
-        for (int vid : members) {
-            const auto* v = flat_vecs + vid * dim;
-            for (int d = 0; d < dim; ++d) {
-                mean[static_cast<uint64_t>(d)] += v[d];
+            std::vector<float> mean(static_cast<uint64_t>(dim), 0.0F);
+            for (int vid : members) {
+                const auto* v = flat_vecs + vid * dim;
+                for (int d = 0; d < dim; ++d) {
+                    mean[static_cast<uint64_t>(d)] += v[d];
+                }
             }
+            float best_dot = -1e30F;
+            int best_vid = members[0];
+            for (int vid : members) {
+                const auto* v = flat_vecs + vid * dim;
+                float dot = 0.0F;
+                for (int d = 0; d < dim; ++d) {
+                    dot += v[d] * mean[static_cast<uint64_t>(d)];
+                }
+                if (dot > best_dot) {
+                    best_dot = dot;
+                    best_vid = vid;
+                }
+            }
+            std::memcpy(
+                dst, flat_vecs + best_vid * dim, static_cast<uint64_t>(dim) * sizeof(float));
         }
-        float best_dot = -1e30F;
-        int best_vid = members[0];
-        for (int vid : members) {
-            const auto* v = flat_vecs + vid * dim;
-            float dot = 0.0F;
-            for (int d = 0; d < dim; ++d) {
-                dot += v[d] * mean[static_cast<uint64_t>(d)];
-            }
-            if (dot > best_dot) {
-                best_dot = dot;
-                best_vid = vid;
-            }
+    };
+    const auto worker_count =
+        std::min<uint64_t>(build_thread_count_, static_cast<uint64_t>(num_clusters_));
+    if (thread_pool_ != nullptr and worker_count > 1) {
+        std::vector<std::future<void>> futures;
+        futures.reserve(worker_count);
+        for (uint64_t worker = 0; worker < worker_count; ++worker) {
+            const auto begin =
+                static_cast<int64_t>(worker * static_cast<uint64_t>(num_clusters_) / worker_count);
+            const auto end = static_cast<int64_t>(
+                (worker + 1) * static_cast<uint64_t>(num_clusters_) / worker_count);
+            futures.emplace_back(thread_pool_->GeneralEnqueue(build_representatives, begin, end));
         }
-        std::memcpy(dst, flat_vecs + best_vid * dim, static_cast<uint64_t>(dim) * sizeof(float));
+        for (auto& future : futures) {
+            future.get();
+        }
+    } else {
+        build_representatives(0, num_clusters_);
     }
 
     IndexCommonParam cp = common_param_;
@@ -467,7 +520,9 @@ SIMQ::build_rep_hgraph(const float* flat_vecs, int64_t dim) {
     cp.data_type_ = DataTypes::DATA_TYPE_FLOAT;
     cp.dim_ = dim;
 
-    auto param = HGraph::CheckAndMappingExternalParam(JsonType::Parse("{}"), cp);
+    auto hgraph_params = JsonType::Parse("{}");
+    hgraph_params[BUILD_THREAD_COUNT_KEY].SetUint64(std::max<uint64_t>(1, build_thread_count_));
+    auto param = HGraph::CheckAndMappingExternalParam(hgraph_params, cp);
     rep_hgraph_ = std::make_shared<HGraph>(param, cp);
 
     auto ds = Dataset::Make();
@@ -1107,6 +1162,7 @@ SIMQ::CheckAndMappingExternalParam(const JsonType& external_param,
         {"random_seed", {"random_seed"}},
         {"coarse_k", {"coarse_k"}},
         {"rerank_k", {"rerank_k"}},
+        {BUILD_THREAD_COUNT_KEY, {BUILD_THREAD_COUNT_KEY}},
     };
 
     if (common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {

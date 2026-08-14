@@ -108,7 +108,8 @@ make_build_param(const std::string& mv_file_path,
                  int64_t max_cluster_size = 200,
                  int64_t split_start_idx = 100,
                  int64_t coarse_k = 20,
-                 int64_t rerank_k = 1000) {
+                 int64_t rerank_k = 1000,
+                 int64_t build_thread_count = 1) {
     return fmt::format(
         R"({{
             "dtype": "float32",
@@ -121,7 +122,8 @@ make_build_param(const std::string& mv_file_path,
                 "max_cluster_size": {},
                 "split_start_idx": {},
                 "coarse_k": {},
-                "rerank_k": {}
+                "rerank_k": {},
+                "build_thread_count": {}
             }}
         }})",
         SIMQ_DIM,
@@ -130,7 +132,8 @@ make_build_param(const std::string& mv_file_path,
         max_cluster_size,
         split_start_idx,
         coarse_k,
-        rerank_k);
+        rerank_k,
+        build_thread_count);
 }
 
 static std::string
@@ -396,8 +399,8 @@ TEST_CASE("SIMQ: build and knn search recall", "[simq][build][search]") {
     auto ds = generate_dataset();
     TempFile tmp;
 
-    // ~80 clusters (sqrt(8000)); coarse_k=10 per token → 4×10=40 probes / 80 = 50% coverage
-    auto build_param = make_build_param(tmp.path);
+    // ~80 clusters (sqrt(8000)); coarse_k=20 per token → 4×20=80 probes / 80 = 100% coverage
+    auto build_param = make_build_param(tmp.path, 0.01F, 200, 100, 20, 1000, 4);
     auto search_param = make_search_param();
 
     // Create index
