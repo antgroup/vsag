@@ -146,6 +146,19 @@ ParsePyramidWithHierarchies(const nlohmann::json& hierarchies) {
     return param;
 }
 
+TEST_CASE("Pyramid persist_source_id parameter", "[ut][PyramidParameters]") {
+    PyramidDefaultParam default_param;
+    auto param_json = vsag::JsonType::Parse(generate_pyramid(default_param));
+    auto param = std::make_shared<vsag::PyramidParameters>();
+    param->FromJson(param_json);
+    REQUIRE_FALSE(param->persist_source_id);
+
+    param_json["persist_source_id"].SetBool(true);
+    param->FromJson(param_json);
+    REQUIRE(param->persist_source_id);
+    REQUIRE(param->ToJson()["persist_source_id"].GetBool());
+}
+
 TEST_CASE("Pyramid Hierarchy Parameters Test", "[ut][PyramidParameters][hierarchy]") {
     SECTION("parse string and object hierarchy definitions") {
         auto param = ParsePyramidWithHierarchies(
@@ -402,6 +415,7 @@ TEST_CASE("Pyramid maps support_duplicate to graph parameter", "[ut][PyramidPara
         "ef_construction": 100,
         "index_min_size": 0,
         "support_duplicate": true,
+        "persist_source_id": true,
         "hierarchies": [
             "site",
             {"name": "taxonomy", "no_build_levels": [0, 2]}
@@ -417,6 +431,7 @@ TEST_CASE("Pyramid maps support_duplicate to graph parameter", "[ut][PyramidPara
 
     REQUIRE(typed_param != nullptr);
     REQUIRE(typed_param->support_duplicate);
+    REQUIRE(typed_param->persist_source_id);
     REQUIRE(typed_param->graph_param->support_duplicate_);
     REQUIRE(typed_param->has_hierarchies);
     REQUIRE(typed_param->hierarchies.size() == 2);

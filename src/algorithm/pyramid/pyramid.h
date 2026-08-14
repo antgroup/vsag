@@ -19,6 +19,7 @@
 #include <utility>
 
 #include "algorithm/inner_index_interface.h"
+#include "algorithm/pyramid/pyramid_build_cache.h"
 #include "datacell/graph_interface.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
 #include "impl/allocator/safe_allocator.h"
@@ -134,7 +135,9 @@ public:
           default_rabitq_one_bit_search_(pyramid_param->use_reorder and
                                          pyramid_param->base_codes_param->name ==
                                              RABITQ_SPLIT_DATA_CELL),
-          support_duplicate_(pyramid_param->support_duplicate) {
+          support_duplicate_(pyramid_param->support_duplicate),
+          persist_source_id_(pyramid_param->persist_source_id),
+          cache_(std::make_unique<PyramidBuildCache>(common_param.allocator_.get())) {
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
         if (pyramid_param->has_hierarchies) {
             for (const auto& h_param : pyramid_param->hierarchies) {
@@ -271,6 +274,12 @@ public:
     Train(const vsag::DatasetPtr& base) override;
 
     void
+    ExportCache(std::ostream& out_stream) const override;
+
+    void
+    ImportCache(std::istream& in_stream) override;
+
+    void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 
     friend class PyramidAnalyzer;
@@ -322,6 +331,11 @@ private:
         VisitedListPool* pool_;
         VisitedListPtr vl_;
     };
+    void
+    serialize_source_id_table(StreamWriter& writer) const;
+
+    void
+    deserialize_source_id_table(StreamReader& reader);
 
     /// One named hierarchy with its own root IndexNode and build parameters.
     struct Hierarchy {
@@ -384,7 +398,12 @@ private:
 
     /// Recursively insert a single vector into the hierarchy tree.
     void
-    add_one_point(const Hierarchy& h, IndexNode* node, InnerIdType inner_id, const float* vector);
+    add_one_point(const Hierarchy& h,
+                  IndexNode* node,
+                  InnerIdType inner_id,
+                  const float* vector,
+                  uint64_t ef_construction = 0,
+                  bool use_self_as_entry = false);
 
     /// Split a path string into its hierarchical segments.
     static std::vector<std::vector<std::string>>
@@ -417,6 +436,25 @@ private:
                                       : (has_precise_reorder() ? precise_codes_ : base_codes_);
     }
 
+    bool
+    has_loaded_cache() const {
+        return this->cache_ != nullptr && not this->cache_->Empty();
+    }
+
+    void
+    fulfill_cache(PyramidBuildCache& cache_snapshot) const;
+
+    std::vector<int64_t>
+    build_with_cache(const DatasetPtr& base);
+
+    static void
+    collect_graph_nodes(IndexNode* node,
+                        const std::string& node_path,
+                        std::vector<std::pair<std::string, IndexNode*>>& out);
+
+    void
+    init_index_nodes_with_ids(IndexNode* node) const;
+
 private:
     ODescentParameterPtr odescent_param_{nullptr};  // ODescent build parameters
     UnorderedMap<std::string, std::unique_ptr<Hierarchy>> hierarchies_;  // named hierarchies
@@ -443,6 +481,14 @@ private:
     ReorderInterfacePtr reorder_{nullptr};  // reorder helper (if use_reorder_)
 
     uint32_t index_min_size_{0};  // min node size before graph is built
+
+    bool persist_source_id_{false};  // whether to persist source_id in serialization
+
+    std::unique_ptr<PyramidBuildCache> cache_{nullptr};  // per-graph caches for warm-start build
+
+    float build_cache_hit_rate_{-1.0F};     // cache hit rate from last cache-based build
+    uint64_t build_cache_hit_nodes_{0};     // number of nodes with cache hit
+    uint64_t build_cache_missed_nodes_{0};  // number of nodes without cache hit
 };
 
 }  // namespace vsag

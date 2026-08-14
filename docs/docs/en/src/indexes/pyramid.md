@@ -149,6 +149,10 @@ graph promotion and does not retain the original FP32 vectors. Metrics that requ
 vectors are marked unavailable unless `store_raw_vector` was enabled at build time. Truncation can
 reduce recall unless the embedding model was trained for prefix dimensions.
 
+## Build cache
+
+`ExportCache` captures per-hierarchy, per-node NSW graph seeds and `ImportCache` makes them available to a later `Build`. Cache data uses the index cache payload format, not the streaming index serialization format. Set `persist_source_id: true` before footer-serializing an index whose cache will be reused, and provide a unique `Dataset::SourceID` for every vector in both builds. Cache warm builds apply only to `graph_type: "nsw"`; ODescent, duplicate-ID mode, missing source IDs, and duplicate source IDs automatically fall back to a normal cold build. `ef_construction` is not an eligibility condition for the cache path. Fully restored cached graph rows are retained, while cache misses are constructed from the current vectors.
+
 ## Search parameters
 
 Search-time parameters live under the `pyramid` sub-object:

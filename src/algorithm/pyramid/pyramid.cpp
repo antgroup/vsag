@@ -39,6 +39,7 @@
 namespace vsag {
 
 const static float RADIUS_EPSILON = 1.1F;
+static constexpr uint64_t SOURCE_ID_TABLE_MAGIC = 0x534F555243454944ULL;  // SOURCEID
 
 std::vector<std::string>
 split(const std::string& str, char delimiter) {
@@ -225,10 +226,14 @@ Pyramid::build_by_odescent(const DatasetPtr& base) {
     int64_t data_num = base->GetNumElements();
     const auto* data_vectors = base->GetFloat32Vectors();
     const auto* data_ids = base->GetIds();
+    const auto* source_ids = base->GetSourceID();
 
     resize(data_num);
     for (InnerIdType inner_id = 0; inner_id < data_num; ++inner_id) {
         label_table_->Insert(inner_id, data_ids[inner_id]);
+        if (source_ids != nullptr) {
+            label_table_->InsertSourceId(inner_id, source_ids[inner_id]);
+        }
     }
 
     base_codes_->BatchInsertVector(data_vectors, data_num);
@@ -537,6 +542,7 @@ Pyramid::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
 void
 Pyramid::Serialize(StreamWriter& writer) const {
     label_table_->Serialize(writer);
+    serialize_source_id_table(writer);
     base_codes_->Serialize(writer);
     if (has_precise_reorder()) {
         precise_codes_->Serialize(writer);
@@ -562,6 +568,41 @@ Pyramid::Serialize(StreamWriter& writer) const {
     basic_info["max_capacity"].SetInt(max_capacity_);
     basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
     write_index_footer(writer, basic_info);
+}
+
+void
+Pyramid::serialize_source_id_table(StreamWriter& writer) const {
+    if (not persist_source_id_) {
+        return;
+    }
+    const auto& source_ids = label_table_->GetSourceIdTableRef();
+    StreamWriter::WriteObj(writer, SOURCE_ID_TABLE_MAGIC);
+    StreamWriter::WriteObj(writer, static_cast<uint64_t>(source_ids.size()));
+    for (const auto& source_id : source_ids) {
+        StreamWriter::WriteString(writer, source_id);
+    }
+}
+
+void
+Pyramid::deserialize_source_id_table(StreamReader& reader) {
+    if (not persist_source_id_) {
+        return;
+    }
+    uint64_t magic = 0;
+    StreamReader::ReadObj(reader, magic);
+    if (magic != SOURCE_ID_TABLE_MAGIC) {
+        throw VsagException(ErrorType::READ_ERROR, "missing Pyramid source_id_table marker");
+    }
+    uint64_t count = 0;
+    StreamReader::ReadObj(reader, count);
+    if (count > label_table_->label_table_.size()) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "corrupted Pyramid source_id_table count");
+    }
+    Vector<std::string> source_ids(count, std::string{}, allocator_);
+    for (uint64_t i = 0; i < count; ++i) {
+        source_ids[i] = StreamReader::ReadString(reader);
+    }
+    label_table_->ReplaceSourceIdTable(std::move(source_ids));
 }
 
 MetadataPtr
@@ -837,6 +878,7 @@ Pyramid::Deserialize(StreamReader& reader) {
         &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
 
     label_table_->Deserialize(buffer_reader);
+    deserialize_source_id_table(buffer_reader);
     delete_count_.store(static_cast<int64_t>(label_table_->GetAllDeletedIds().size()),
                         std::memory_order_relaxed);
     base_codes_->Deserialize(buffer_reader);
@@ -906,6 +948,7 @@ Pyramid::Add(const DatasetPtr& base) {
     const int64_t data_num = base->GetNumElements();
     const auto* data_vectors = base->GetFloat32Vectors();
     const auto* data_ids = base->GetIds();
+    const auto* source_ids = base->GetSourceID();
     std::vector<int64_t> failed_ids;
     Vector<int64_t> data_biases(allocator_);
     int64_t local_cur_element_count = 0;
@@ -939,6 +982,9 @@ Pyramid::Add(const DatasetPtr& base) {
                 const auto inner_id =
                     static_cast<InnerIdType>(local_cur_element_count + data_biases.size());
                 label_table_->Insert(inner_id, data_ids[i]);
+                if (source_ids != nullptr) {
+                    label_table_->InsertSourceId(inner_id, source_ids[i]);
+                }
                 data_biases.push_back(i);
             } else {
                 logger::warn("Label {} already exists, skip adding.", data_ids[i]);
@@ -1222,6 +1268,7 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
         {STORE_RAW_VECTOR, {STORE_RAW_VECTOR_KEY}},
         {PYRAMID_NO_BUILD_LEVELS, {NO_BUILD_LEVELS}},
         {PYRAMID_HIERARCHIES, {PYRAMID_HIERARCHIES}},
+        {PYRAMID_PERSIST_SOURCE_ID, {PYRAMID_PERSIST_SOURCE_ID_KEY}},
         {PYRAMID_BASE_PQ_DIM,
          {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, PRODUCT_QUANTIZATION_DIM_KEY}},
         {PYRAMID_BASE_FILE_PATH, {BASE_CODES_KEY, IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
@@ -1265,6 +1312,29 @@ Pyramid::Build(const DatasetPtr& base) {
     CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
     int64_t data_num = base->GetNumElements();
 
+    if (graph_type_ == GRAPH_TYPE_VALUE_NSW && not support_duplicate_ && has_loaded_cache() &&
+        base->GetSourceID() != nullptr) {
+        UnorderedSet<std::string> source_ids(allocator_);
+        UnorderedSet<LabelType> labels(allocator_);
+        source_ids.reserve(data_num);
+        labels.reserve(data_num);
+        bool unique = true;
+        const auto* source_id_data = base->GetSourceID();
+        const auto* data_ids = base->GetIds();
+        for (int64_t i = 0; i < data_num; ++i) {
+            unique =
+                source_ids.emplace(source_id_data[i]).second && labels.emplace(data_ids[i]).second;
+            if (not unique) {
+                break;
+            }
+        }
+        if (unique) {
+            return build_with_cache(base);
+        }
+        logger::warn(
+            "[pyramid_build_cache] duplicate source_id or label; falling back to cold build");
+    }
+
     this->Train(base);
     std::vector<int64_t> ret;
 
@@ -1303,7 +1373,9 @@ void
 Pyramid::add_one_point(const Hierarchy& h,
                        IndexNode* node,
                        InnerIdType inner_id,
-                       const float* vector) {
+                       const float* vector,
+                       uint64_t ef_construction,
+                       bool use_self_as_entry) {
     std::unique_lock graph_lock(node->mutex_);
 
     if (node->status_ == IndexNode::Status::NO_INDEX) {
@@ -1357,9 +1429,10 @@ Pyramid::add_one_point(const Hierarchy& h,
         node->graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         node->entry_point_ = inner_id;
     } else {
+        const uint64_t effective_ef = ef_construction == 0 ? h.ef_construction : ef_construction;
         InnerSearchParam search_param;
-        search_param.ef = h.ef_construction;
-        search_param.topk = static_cast<int64_t>(h.ef_construction);
+        search_param.ef = effective_ef;
+        search_param.topk = static_cast<int64_t>(effective_ef);
         search_param.search_mode = KNN_SEARCH;
         search_param.hops_limit = 10000;
         if (support_duplicate_) {
@@ -1372,7 +1445,10 @@ Pyramid::add_one_point(const Hierarchy& h,
             std::scoped_lock<std::mutex> entry_point_lock(entry_point_mutex_);
             update_entry_point = is_update_entry_point(node->graph_->TotalCount());
         }
-        search_param.ep = node->entry_point_;
+        Vector<InnerIdType> cached_neighbors(allocator_);
+        node->graph_->GetNeighbors(inner_id, cached_neighbors);
+        search_param.ep =
+            (use_self_as_entry && not cached_neighbors.empty()) ? inner_id : node->entry_point_;
         if (not update_entry_point) {
             graph_lock.unlock();
         }
@@ -1407,6 +1483,27 @@ Pyramid::add_one_point(const Hierarchy& h,
                     search_param.duplicate_id = min_index;
                 }
             }
+        }
+        // HGraph-style cache-hit refinement: retain the restored row as local seeds,
+        // start from self, then merge current-vector search candidates. Cold/miss construction
+        // keeps its search heap unchanged and therefore does not allocate a merge heap.
+        if (use_self_as_entry && not cached_neighbors.empty()) {
+            auto merged_results = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+            UnorderedSet<InnerIdType> seen(allocator_);
+            seen.reserve(cached_neighbors.size() + results->Size());
+            for (const auto neighbor : cached_neighbors) {
+                if (neighbor != inner_id && seen.emplace(neighbor).second) {
+                    merged_results->Push(codes->ComputePairVectors(inner_id, neighbor), neighbor);
+                }
+            }
+            while (not results->Empty()) {
+                const auto candidate = results->Top();
+                results->Pop();
+                if (candidate.second != inner_id && seen.emplace(candidate.second).second) {
+                    merged_results->Push(candidate.first, candidate.second);
+                }
+            }
+            results = std::move(merged_results);
         }
         if (this->support_duplicate_ && search_param.duplicate_id >= 0) {
             std::unique_lock lock(this->label_lookup_mutex_);
@@ -1703,7 +1800,367 @@ Pyramid::GetStats() const {
     analyzer_param.search_params = R"({"pyramid": {"ef_search": 500}})";
     auto analyzer = CreateAnalyzer(this, analyzer_param);
     JsonType stats = analyzer->GetStats();
+    if (build_cache_hit_rate_ >= 0.0F) {
+        stats["build_cache_hit_rate"].SetFloat(build_cache_hit_rate_);
+        stats["build_cache_hit_nodes"].SetUint64(build_cache_hit_nodes_);
+        stats["build_cache_missed_nodes"].SetUint64(build_cache_missed_nodes_);
+    } else {
+        stats["build_cache_hit_rate"]["skipped_reason"].SetString(
+            "index was not built from an imported cache");
+    }
     return stats.Dump(4);
+}
+void
+Pyramid::collect_graph_nodes(IndexNode* node,
+                             const std::string& node_path,
+
+                             std::vector<std::pair<std::string, IndexNode*>>& out) {
+    if (node == nullptr) {
+        return;
+    }
+    if (node->status_ == IndexNode::Status::GRAPH) {
+        out.emplace_back(node_path, node);
+    }
+    for (const auto& [key, child] : node->children_) {
+        std::string child_path = node_path;
+        if (child_path.empty()) {
+            child_path = key;
+        } else {
+            child_path.push_back(PART_SLASH);
+            child_path.append(key);
+        }
+        collect_graph_nodes(child.get(), child_path, out);
+    }
+}
+
+void
+Pyramid::init_index_nodes_with_ids(IndexNode* node) const {
+    if (node == nullptr) {
+        return;
+    }
+    if (not node->ids_.empty()) {
+        node->Init();
+    }
+    for (const auto& [key, child] : node->children_) {
+        init_index_nodes_with_ids(child.get());
+    }
+}
+
+void
+Pyramid::fulfill_cache(PyramidBuildCache& cache_snapshot) const {
+    const auto& source_id_table = label_table_->GetSourceIdTableRef();
+    if (source_id_table.empty()) {
+        return;
+    }
+
+    UnorderedSet<std::string> seen_source_ids(allocator_);
+    seen_source_ids.reserve(source_id_table.size());
+    for (const auto& source_id : source_id_table) {
+        if (source_id.empty()) {
+            continue;
+        }
+        auto inserted = seen_source_ids.emplace(source_id);
+        if (not inserted.second) {
+            logger::warn(
+                "[pyramid_build_cache] skip export because source_id "
+                "is duplicated");
+            return;
+        }
+    }
+
+    for (const auto& [hname, h_ptr] : hierarchies_) {
+        std::vector<std::pair<std::string, IndexNode*>> graph_nodes;
+        collect_graph_nodes(h_ptr->root.get(), std::string{}, graph_nodes);
+        for (const auto& [node_path, gnode] : graph_nodes) {
+            std::shared_lock lock(gnode->mutex_);
+            auto graph_ids = gnode->graph_->GetIds();
+            if (graph_ids.empty()) {
+                continue;
+            }
+            BuildCache graph_cache(allocator_);
+            UnorderedMap<InnerIdType, InnerIdType> global_to_local(allocator_);
+            global_to_local.reserve(graph_ids.size());
+            for (auto inner_id : graph_ids) {
+                if (static_cast<uint64_t>(inner_id) >= source_id_table.size()) {
+                    continue;
+                }
+                const auto& source_id = source_id_table[inner_id];
+                if (source_id.empty()) {
+                    continue;
+                }
+                auto local_id = static_cast<InnerIdType>(graph_cache.source_ids_.size());
+                global_to_local.emplace(inner_id, local_id);
+                graph_cache.source_ids_.push_back(source_id);
+            }
+            for (auto inner_id : graph_ids) {
+                auto source_iter = global_to_local.find(inner_id);
+                if (source_iter == global_to_local.end()) {
+                    continue;
+                }
+                Vector<InnerIdType> neighbors(allocator_);
+                gnode->graph_->GetNeighbors(inner_id, neighbors);
+                if (neighbors.empty()) {
+                    continue;
+                }
+                Vector<InnerIdType> entry(allocator_);
+                entry.push_back(source_iter->second);
+                for (auto n : neighbors) {
+                    auto neighbor_iter = global_to_local.find(n);
+                    if (neighbor_iter != global_to_local.end()) {
+                        entry.push_back(neighbor_iter->second);
+                    }
+                }
+                const auto& source_id = graph_cache.source_ids_[source_iter->second];
+                graph_cache.neighbors_.insert_or_assign(source_id, std::move(entry));
+            }
+            if (not graph_cache.neighbors_.empty()) {
+                auto& target_cache = cache_snapshot.CreateGraphCache(hname, node_path);
+                target_cache.source_ids_ = std::move(graph_cache.source_ids_);
+                target_cache.neighbors_ = std::move(graph_cache.neighbors_);
+            }
+        }
+    }
+}
+
+void
+Pyramid::ExportCache(std::ostream& out_stream) const {
+    IOStreamWriter writer(out_stream);
+    PyramidBuildCache cache_snapshot(allocator_);
+    if (not support_duplicate_) {
+        this->fulfill_cache(cache_snapshot);
+    } else {
+        logger::warn(
+            "[pyramid_build_cache] skip export because duplicate "
+            "labels are enabled");
+    }
+    cache_snapshot.Serialize(writer);
+}
+
+void
+Pyramid::ImportCache(std::istream& in_stream) {
+    IOStreamReader reader(in_stream);
+    this->cache_->Deserialize(reader);
+}
+
+std::vector<int64_t>
+Pyramid::build_with_cache(const DatasetPtr& base) {
+    build_cache_hit_rate_ = -1.0F;
+    build_cache_hit_nodes_ = 0;
+    build_cache_missed_nodes_ = 0;
+
+    auto start = std::chrono::steady_clock::now();
+    int64_t data_num = base->GetNumElements();
+    const auto* data_vectors = base->GetFloat32Vectors();
+    const auto* data_ids = base->GetIds();
+    const auto* source_ids = base->GetSourceID();
+
+    CHECK_ARGUMENT(source_ids != nullptr, "build_with_cache requires dataset with source_ids");
+    CHECK_ARGUMENT(not support_duplicate_, "build_with_cache does not support duplicate labels");
+
+    this->Train(base);
+    resize(data_num);
+    for (int64_t i = 0; i < data_num; ++i) {
+        auto inner_id = static_cast<InnerIdType>(i);
+        // Insert updates both the label remap and label-table total_count_.
+        label_table_->Insert(inner_id, data_ids[i]);
+        label_table_->InsertSourceId(inner_id, source_ids[i]);
+    }
+    base_codes_->BatchInsertVector(data_vectors, data_num);
+    if (has_precise_reorder()) {
+        precise_codes_->BatchInsertVector(data_vectors, data_num);
+    }
+    cur_element_count_ = data_num;
+
+    for (const auto& [hname, h_ptr] : hierarchies_) {
+        const auto* hpath = base->GetPaths(hname);
+        if (hpath != nullptr) {
+            populate_path_tree(*h_ptr, hpath, data_num);
+        }
+    }
+
+    for (const auto& [hname, h_ptr] : hierarchies_) {
+        init_index_nodes_with_ids(h_ptr->root.get());
+    }
+
+    auto codes = has_precise_reorder() ? precise_codes_ : base_codes_;
+    std::vector<bool> global_hits(static_cast<size_t>(data_num), false);
+
+    for (const auto& [hname, h_ptr] : hierarchies_) {
+        std::vector<std::pair<std::string, IndexNode*>> graph_nodes;
+        collect_graph_nodes(h_ptr->root.get(), std::string{}, graph_nodes);
+        std::vector<bool> hierarchy_hits(static_cast<size_t>(data_num), false);
+
+        UnorderedMap<std::string, InnerIdType> source_id_to_inner(allocator_);
+        source_id_to_inner.reserve(data_num);
+        for (InnerIdType id = 0; id < static_cast<InnerIdType>(data_num); ++id) {
+            source_id_to_inner[source_ids[id]] = id;
+        }
+
+        for (const auto& [node_path, gnode] : graph_nodes) {
+            Vector<InnerIdType> node_member_ids(allocator_);
+            {
+                std::shared_lock lock(gnode->mutex_);
+                node_member_ids = gnode->ids_;
+            }
+
+            Vector<InnerIdType> node_missed_ids(allocator_);
+            Vector<InnerIdType> node_hit_ids(allocator_);
+            auto* graph_cache = cache_->GetGraphCache(hname, node_path);
+            if (graph_cache != nullptr) {
+                std::unique_lock lock(gnode->mutex_);
+                UnorderedSet<InnerIdType> node_ids(allocator_);
+                node_ids.reserve(node_member_ids.size());
+                for (auto inner_id : node_member_ids) {
+                    node_ids.insert(inner_id);
+                }
+
+                for (auto inner_id : node_member_ids) {
+                    if (inner_id >= static_cast<InnerIdType>(data_num)) {
+                        continue;
+                    }
+                    auto source_id = source_ids[inner_id];
+                    auto cached = graph_cache->GetNeighbors(source_id);
+                    if (cached.empty()) {
+                        node_missed_ids.push_back(inner_id);
+                        continue;
+                    }
+
+                    Vector<InnerIdType> new_neighbors(allocator_);
+                    for (const auto& nb_src : cached) {
+                        auto it = source_id_to_inner.find(nb_src);
+                        if (it != source_id_to_inner.end() && it->second != inner_id &&
+                            node_ids.find(it->second) != node_ids.end()) {
+                            new_neighbors.push_back(it->second);
+                        }
+                    }
+                    std::sort(new_neighbors.begin(), new_neighbors.end());
+                    new_neighbors.erase(std::unique(new_neighbors.begin(), new_neighbors.end()),
+                                        new_neighbors.end());
+
+                    if (new_neighbors.empty()) {
+                        node_missed_ids.push_back(inner_id);
+                        continue;
+                    }
+
+                    if (gnode->graph_->TotalCount() == 0) {
+                        gnode->entry_point_ = inner_id;
+                    }
+
+                    const auto max_deg = gnode->graph_->MaximumDegree();
+                    if (new_neighbors.size() > max_deg) {
+                        DistHeapPtr candidates =
+                            std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+                        for (auto nb : new_neighbors) {
+                            float dist = codes->ComputePairVectors(inner_id, nb);
+                            candidates->Push(dist, nb);
+                        }
+                        while (candidates->Size() > max_deg) {
+                            candidates->Pop();
+                        }
+                        new_neighbors.clear();
+                        new_neighbors.reserve(max_deg);
+                        while (!candidates->Empty()) {
+                            new_neighbors.push_back(candidates->Top().second);
+                            candidates->Pop();
+                        }
+                    }
+                    // Cache entries seed only outgoing edges. add_one_point() below refines them
+                    // against current vectors and installs deduplicated reverse edges.
+                    gnode->graph_->InsertNeighborsById(inner_id, new_neighbors);
+                    node_hit_ids.push_back(inner_id);
+                    hierarchy_hits[static_cast<size_t>(inner_id)] = true;
+                }
+            } else {
+                node_missed_ids = node_member_ids;
+            }
+
+            IndexNode* const graph_node = gnode;
+            auto refine_nodes = [this, &h = *h_ptr, graph_node, data_vectors](
+                                    const Vector<InnerIdType>& ids,
+                                    uint64_t ef_construction,
+                                    bool use_self_as_entry) {
+                auto refine_one =
+                    [this, &h, graph_node, data_vectors, ef_construction, use_self_as_entry](
+                        InnerIdType inner_id) {
+                        add_one_point(h,
+                                      graph_node,
+                                      inner_id,
+                                      data_vectors + dim_ * inner_id,
+                                      ef_construction,
+                                      use_self_as_entry);
+                    };
+
+                Vector<std::future<void>> futures(allocator_);
+                // All futures are joined below before graph_node or data_vectors can go out of scope.
+                std::exception_ptr first_error;
+                for (const auto inner_id : ids) {
+                    try {
+                        if (thread_pool_ != nullptr) {
+                            futures.push_back(thread_pool_->GeneralEnqueue(refine_one, inner_id));
+                        } else {
+                            refine_one(inner_id);
+                        }
+                    } catch (...) {
+                        first_error = std::current_exception();
+                        break;
+                    }
+                }
+                for (auto& future : futures) {
+                    try {
+                        future.get();
+                    } catch (...) {
+                        if (first_error == nullptr) {
+                            first_error = std::current_exception();
+                        }
+                    }
+                }
+                if (first_error != nullptr) {
+                    std::rethrow_exception(first_error);
+                }
+            };
+
+            refine_nodes(node_missed_ids, h_ptr->ef_construction, false);
+            // Match HGraph's warm hit phase: self-entry keeps refinement local and the
+            // reduced budget limits work while merged cache rows preserve graph connectivity.
+            refine_nodes(node_hit_ids, std::max<uint64_t>(h_ptr->ef_construction / 3, 1), true);
+            Vector<InnerIdType>(allocator_).swap(gnode->ids_);
+        }
+
+        for (InnerIdType id = 0; id < static_cast<InnerIdType>(data_num); ++id) {
+            if (hierarchy_hits[static_cast<size_t>(id)]) {
+                global_hits[static_cast<size_t>(id)] = true;
+            }
+        }
+    }
+
+    for (bool is_hit : global_hits) {
+        if (is_hit) {
+            ++build_cache_hit_nodes_;
+        }
+    }
+    build_cache_missed_nodes_ = static_cast<uint64_t>(data_num) - build_cache_hit_nodes_;
+
+    uint64_t total = build_cache_hit_nodes_ + build_cache_missed_nodes_;
+    if (total > 0) {
+        build_cache_hit_rate_ =
+            static_cast<float>(build_cache_hit_nodes_) / static_cast<float>(total);
+    } else {
+        build_cache_hit_rate_ = 0.0F;
+    }
+
+    auto end = std::chrono::steady_clock::now();
+    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    logger::info(
+        "[pyramid_build_cache] completed in {} ms, hit_rate={:.4f}, "
+        "hit={}, missed={}",
+        elapsed_ms,
+        build_cache_hit_rate_,
+        build_cache_hit_nodes_,
+        build_cache_missed_nodes_);
+
+    // Imported-cache eligibility rejects duplicate labels, so this matches the normal Build result
+    // for the same valid dataset: no failed ids.
+    return {};
 }
 
 std::string
@@ -1714,7 +2171,8 @@ Pyramid::AnalyzeIndexBySearch(const SearchRequest& request) {
         not request.enable_filter_ && not request.enable_bitset_filter_ &&
         not request.enable_attribute_filter_ && not request.enable_iterator_search_;
     CHECK_ARGUMENT(is_supported_search,
-                   "Pyramid AnalyzeIndexBySearch does not support filtered or iterator search");
+                   "Pyramid AnalyzeIndexBySearch does not support "
+                   "filtered or iterator search");
     CHECK_ARGUMENT(request.topk_ > 0,
                    fmt::format("topk({}) must be greater than 0", request.topk_));
     CHECK_ARGUMENT(request.topk_ <= static_cast<int64_t>(std::numeric_limits<uint32_t>::max()),

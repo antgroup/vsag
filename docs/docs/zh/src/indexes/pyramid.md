@@ -143,6 +143,10 @@ Pyramid 使用 split code 的 code-code 距离完成增量 FLAT→GRAPH 晋升�
 向量；除非构建时启用 `store_raw_vector`，否则依赖可解码向量的 Analyzer 指标会被标记为
 不可用。如果 embedding 模型没有针对前缀维度训练，截断可能显著降低召回率。
 
+## 构建缓存
+
+`ExportCache` 会保存每个层级、每个节点的 NSW 图种子，`ImportCache` 可在后续 `Build` 中复用。缓存数据使用索引缓存 payload 格式，而非 streaming 索引序列化格式。需要复用缓存的索引通过 footer 序列化前应设置 `persist_source_id: true`，并且两次构建中的每个向量都必须提供唯一的 `Dataset::SourceID`。缓存预热仅适用于 `graph_type: "nsw"`；ODescent、重复 ID 模式、缺少 source ID 或 source ID 重复时会自动回退到普通冷构建。`ef_construction` 不作为缓存路径的准入条件。完整恢复的缓存图行会被保留，缓存未命中的节点则使用当前向量构建。
+
 ## 检索参数
 
 检索参数放在 `pyramid` 子对象下：
