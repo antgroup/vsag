@@ -369,7 +369,7 @@ public:
           const InnerIdType* idx,
           InnerIdType id_count,
           QueryContext* ctx = nullptr) override {
-        if (fused_code_storage_ != nullptr) {
+        if (fused_code_storage_ != nullptr and not this->optimized_build_active_) {
             this->query_fused_full(result_dists, computer, idx, id_count, ctx);
             return;
         }
@@ -413,7 +413,7 @@ public:
                           const InnerIdType* idx,
                           InnerIdType id_count,
                           QueryContext* ctx = nullptr) override {
-        if (fused_code_storage_ != nullptr) {
+        if (fused_code_storage_ != nullptr and not this->optimized_build_active_) {
             this->query_fused_full(result_dists, computer, idx, id_count, ctx);
             return;
         }
@@ -460,7 +460,7 @@ public:
                             InnerIdType id_count,
                             float threshold,
                             QueryContext* ctx = nullptr) override {
-        if (fused_code_storage_ != nullptr) {
+        if (fused_code_storage_ != nullptr and not this->optimized_build_active_) {
             this->query_fused_with_distance_filter(
                 result_dists, computer, idx, id_count, threshold, ctx);
             return;
@@ -579,7 +579,7 @@ public:
                                 const InnerIdType* idx,
                                 InnerIdType id_count,
                                 QueryContext* ctx = nullptr) override {
-        if (fused_code_storage_ != nullptr) {
+        if (fused_code_storage_ != nullptr and not this->optimized_build_active_) {
             this->query_fused_lower_bound(
                 result_dists, lower_bounds, nullptr, computer, idx, id_count, ctx);
             return;
@@ -779,9 +779,6 @@ public:
 
     bool
     BeginOptimizedBuild(const FlattenOptimizedBuildContext& context) override {
-        if (this->fused_code_storage_ != nullptr) {
-            return false;
-        }
         if (this->optimized_build_active_ or
             not this->bottom_quantizer().SupportScalarCodeBuild()) {
             return false;
@@ -806,6 +803,14 @@ public:
     void
     FinalizeOptimizedBuild() override {
         if (not this->optimized_build_active_) {
+            return;
+        }
+
+        // HGraph writes cluster-residual fused codes directly into the node slab while the
+        // temporary scalar codes are used for graph construction. There is no ordinary split
+        // storage to materialize for this mode.
+        if (this->fused_code_storage_ != nullptr) {
+            this->AbortOptimizedBuild();
             return;
         }
 
@@ -937,7 +942,7 @@ public:
                 "optimized RaBitQ build storage must be resized before inserting vectors");
             this->total_count_ = std::max(this->total_count_, idx + 1);
         }
-        if (this->fused_code_storage_ != nullptr) {
+        if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
             return;
         }
         this->write_encoded_vector(static_cast<const float*>(vector), idx);
@@ -969,7 +974,7 @@ public:
 
     float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) override {
-        if (this->fused_code_storage_ != nullptr) {
+        if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
             throw VsagException(
                 ErrorType::UNSUPPORTED_INDEX_OPERATION,
                 "pairwise distance is unavailable for cluster-residual fused RaBitQ codes");
@@ -1026,6 +1031,10 @@ public:
             return;
         }
         if (this->fused_code_storage_ != nullptr) {
+            if (this->optimized_build_active_) {
+                this->optimized_build_scalar_codes_->Resize(new_capacity);
+                this->optimized_build_code_sums_->resize(new_capacity, 0);
+            }
             this->max_capacity_ = new_capacity;
             return;
         }
@@ -1040,7 +1049,7 @@ public:
 
     void
     Prefetch(InnerIdType id) override {
-        if (this->fused_code_storage_ != nullptr) {
+        if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
             this->fused_code_storage_->PrefetchFusedCodes(id, false);
             return;
         }
@@ -1645,7 +1654,7 @@ public:
 
     [[nodiscard]] const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const override {
-        if (this->fused_code_storage_ != nullptr) {
+        if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
             need_release = false;
             return nullptr;
         }
@@ -1672,7 +1681,7 @@ public:
 
     bool
     GetCodesById(InnerIdType id, uint8_t* codes) const override {
-        if (this->fused_code_storage_ != nullptr) {
+        if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
             return false;
         }
         if (this->optimized_build_active_) {

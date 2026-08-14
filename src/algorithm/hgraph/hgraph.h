@@ -344,6 +344,9 @@ public:
     void
     insert_persistent_codes_unlocked(const void* data, InnerIdType inner_id);
 
+    void
+    insert_fused_optimized_build_codes(const void* data, InnerIdType inner_id);
+
     /// Write codes to a physical code slot when deduplicated storage is enabled.
     void
     insert_persistent_codes_to_slot(const void* data, CodeSlotIdType code_slot_id);

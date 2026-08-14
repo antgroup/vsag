@@ -1097,13 +1097,14 @@ TEST_CASE("HGraph fused RaBitQ split preserves trailing vector aliases",
 }
 
 TEST_CASE("HGraph fused RaBitQ split honors disabled reorder",
-          "[ft][rabitq_split][hgraph][fused][search]") {
+          "[ft][rabitq_split][hgraph][fused][search][optimized_build]") {
     using namespace fixtures;
     constexpr int64_t dim = 128;
     constexpr uint64_t base_count = 128;
     constexpr int64_t topk = 10;
     const uint32_t filter_bits = GENERATE(1U, 2U, 3U, 4U);
     const bool support_duplicate = GENERATE(false, true);
+    const bool store_raw_vector = GENERATE(false, true);
 
     auto param = HGraphRaBitQSplitTestIndex::GenerateBuildParam(
         "l2", dim, "memory_io", "", filter_bits, 8U - filter_bits, true);
@@ -1113,10 +1114,10 @@ TEST_CASE("HGraph fused RaBitQ split honors disabled reorder",
     param_json["index_param"]["reorder_source"].SetString("base");
     param_json["index_param"]["rabitq_fused_datacell"].SetBool(true);
     param_json["index_param"]["rabitq_use_fht"].SetBool(true);
-    param_json["index_param"]["store_raw_vector"].SetBool(false);
+    param_json["index_param"]["store_raw_vector"].SetBool(store_raw_vector);
     param_json["index_param"]["use_mci"].SetBool(false);
     param_json["index_param"]["support_duplicate"].SetBool(support_duplicate);
-    param_json["index_param"]["build_thread_count"].SetInt(1);
+    param_json["index_param"]["build_thread_count"].SetInt(4);
 
     auto source = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, base_count, "l2");
     auto index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param_json.Dump(), true);
@@ -1127,7 +1128,7 @@ TEST_CASE("HGraph fused RaBitQ split honors disabled reorder",
 
     for (const uint32_t ef_search : {20U, 80U}) {
         for (const uint32_t parallelism : {1U, 2U}) {
-            CAPTURE(filter_bits, support_duplicate, ef_search, parallelism);
+            CAPTURE(filter_bits, support_duplicate, store_raw_vector, ef_search, parallelism);
             const auto search_param = fmt::format(
                 R"({{
                     "hgraph": {{

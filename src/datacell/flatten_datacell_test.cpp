@@ -448,7 +448,20 @@ TEST_CASE("RaBitQSplitDataCell native fused bit splits", "[ut][RaBitQSplitDataCe
         auto graph = std::make_shared<HGraphRaBitQFusedDataCell>(
             graph_param, split->OneBitCodeSize(), split->SupplementCodeSize(), common_param);
         split->AttachFusedCodeStorage(graph.get());
+        auto optimized_build = std::dynamic_pointer_cast<FlattenOptimizedBuildInterface>(flatten);
+        REQUIRE(optimized_build != nullptr);
+        auto build_pool = SafeThreadPool::FactoryDefaultThreadPool();
+        build_pool->SetPoolSize(4);
+        flatten->Resize(4);
+        REQUIRE(optimized_build->BeginOptimizedBuild({build_pool, 4}));
         Vector<uint8_t> filter_code(split->OneBitCodeSize(), allocator.get());
+        for (InnerIdType id = 0; id < 4; ++id) {
+            flatten->InsertVector(
+                encoded_vectors.data() + static_cast<uint64_t>(id % 3) * split_case.dim, id);
+        }
+        REQUIRE(std::isfinite(flatten->ComputePairVectors(0, 3)));
+        optimized_build->FinalizeOptimizedBuild();
+        REQUIRE_FALSE(optimized_build->IsOptimizedBuildActive());
         Vector<uint8_t> supplement_code(split->SupplementCodeSize(), allocator.get());
         auto computer = split->FactoryFusedComputer(query.data());
         REQUIRE(computer != nullptr);

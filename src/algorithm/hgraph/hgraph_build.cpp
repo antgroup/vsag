@@ -385,7 +385,7 @@ HGraph::validate_fused_vector_data(const float* data, uint64_t count) const {
 
 void
 HGraph::validate_fused_encoding_data(const float* data, uint64_t count) const {
-    if (this->rabitq_fused_datacell_ == nullptr) {
+    if (this->rabitq_fused_datacell_ == nullptr or this->optimized_build_codes_ != nullptr) {
         return;
     }
     auto split_codes =
@@ -610,6 +610,26 @@ HGraph::insert_persistent_codes_unlocked(const void* data, InnerIdType inner_id)
     }
     if (create_new_raw_vector_) {
         raw_vector_->InsertVector(data, inner_id);
+    }
+}
+void
+HGraph::insert_fused_optimized_build_codes(const void* data, InnerIdType inner_id) {
+    CHECK_ARGUMENT(
+        this->rabitq_fused_datacell_ != nullptr and this->optimized_build_codes_ != nullptr,
+        "fused optimized build is not active");
+    this->basic_flatten_codes_->InsertVector(data, inner_id);
+    this->sync_fused_node_codes(inner_id, data);
+
+    // Fused HGraph always reorders from the base code. Keep the fallback guarded so an internal
+    // parameter configuration cannot silently skip auxiliary storage.
+    if (has_precise_reorder() or create_new_raw_vector_) {
+        std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+        if (has_precise_reorder()) {
+            this->high_precise_codes_->InsertVector(data, inner_id);
+        }
+        if (create_new_raw_vector_) {
+            this->raw_vector_->InsertVector(data, inner_id);
+        }
     }
 }
 

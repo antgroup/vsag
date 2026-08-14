@@ -46,14 +46,12 @@ wait_all_futures(std::vector<std::future<void>>& futures) {
 }  // namespace
 
 HGraphOptimizedBuildSession::HGraphOptimizedBuildSession(HGraph& hgraph) : hgraph_(&hgraph) {
-    if (hgraph.rabitq_fused_datacell_ != nullptr) {
-        return;
-    }
     if (hgraph.using_dedup_storage()) {
         return;
     }
     const bool build_uses_base_codes =
-        hgraph.has_precise_reorder() ? hgraph.build_by_base_ : hgraph.raw_vector_ == nullptr;
+        hgraph.rabitq_fused_datacell_ != nullptr or
+        (hgraph.has_precise_reorder() ? hgraph.build_by_base_ : hgraph.raw_vector_ == nullptr);
     if (not build_uses_base_codes) {
         return;
     }
@@ -121,7 +119,7 @@ HGraph::try_optimized_build(const DatasetPtr& data) {
 
     std::vector<int64_t> result;
     if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
-        result = this->Add(data);
+        result = this->add_impl(data);
     } else {
         result = this->build_by_odescent(data);
     }
@@ -143,7 +141,12 @@ HGraph::prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows) 
 
     if (this->thread_pool_ == nullptr) {
         for (const auto& row : rows) {
-            this->insert_persistent_codes(get_data(data, row.input_idx), row.inner_id);
+            if (this->rabitq_fused_datacell_ != nullptr) {
+                this->insert_fused_optimized_build_codes(get_data(data, row.input_idx),
+                                                         row.inner_id);
+            } else {
+                this->insert_persistent_codes(get_data(data, row.input_idx), row.inner_id);
+            }
         }
         return;
     }
@@ -157,7 +160,11 @@ HGraph::prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows) 
         const auto input_idx = row.input_idx;
         futures.emplace_back(
             this->thread_pool_->GeneralEnqueue([this, data, inner_id, input_idx]() {
-                this->insert_persistent_codes(get_data(data, input_idx), inner_id);
+                if (this->rabitq_fused_datacell_ != nullptr) {
+                    this->insert_fused_optimized_build_codes(get_data(data, input_idx), inner_id);
+                } else {
+                    this->insert_persistent_codes(get_data(data, input_idx), inner_id);
+                }
             }));
     }
     wait_all_futures(futures);
