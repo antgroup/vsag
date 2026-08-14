@@ -102,9 +102,11 @@ VSAG provides several CMake options to customize the build:
 
 ### Third-Party Source Overrides
 
-- **`VSAG_THIRDPARTY_OPENBLAS`**
-  - Override the OpenBLAS source archive URL/path used by `ExternalProject_Add`
-  - Useful for offline builds, local mirrors, or pre-downloaded archives
+Third-party archives can be supplied through pin-qualified environment variables such as
+`VSAG_THIRDPARTY_OPENBLAS_0_3_23`. The deprecated unversioned variable remains a compatibility
+fallback. Pin-qualified overrides take precedence, followed by the unversioned fallback and the
+authoritative upstream URLs. Override diagnostics report only the selected variable name and
+never its value.
 
 ### Other Build Options
 

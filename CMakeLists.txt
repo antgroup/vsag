@@ -223,6 +223,7 @@ endif ()
 # thirdparties of lib
 include (cmake/CheckSIMDCompilerFlag.cmake)
 include (ExternalProject)
+include (cmake/VSAGThirdPartyOverride.cmake)
 include (extern/json/json.cmake)
 include (extern/antlr4/antlr4.cmake)
 include (extern/boost/boost.cmake)
