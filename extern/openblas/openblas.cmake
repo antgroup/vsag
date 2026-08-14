@@ -173,14 +173,8 @@ if (NOT OPENBLAS_FOUND)
 
     set (openblas_urls
         https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.23/OpenBLAS-0.3.23.tar.gz
-        # this url is maintained by the vsag project, if it's broken, please try
-        #  the latest commit or contact the vsag project
-        https://vsagcache.oss-rg-china-mainland.aliyuncs.com/openblas/OpenBLAS-0.3.23.tar.gz
     )
-    if (DEFINED ENV{VSAG_THIRDPARTY_OPENBLAS})
-        message (STATUS "Using local path for openblas: $ENV{VSAG_THIRDPARTY_OPENBLAS}")
-        list (PREPEND openblas_urls "$ENV{VSAG_THIRDPARTY_OPENBLAS}")
-    endif ()
+    vsag_resolve_thirdparty_override (OPENBLAS v0.3.23 openblas_urls)
 
     # OpenBLAS build tools (getarch) require strict FP semantics; -Ofast
     # (which implies -ffast-math) breaks CPU detection. Replace with -O2.
