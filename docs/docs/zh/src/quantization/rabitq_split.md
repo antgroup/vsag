@@ -70,7 +70,9 @@ Pyramid 参数。HGraph 专用搜索循环直接读取该 record，并联合预�
 iterator、Range Search 和并发查询）、按 ID 计算距离、内存统计以及
 Serialize/Deserialize。`Add`、两种 Remove、向量/ID/属性/extra-info 更新、Merge、
 Tune、Clone、ExportModel 和 Build Cache 导入导出都会返回不支持。未启用 fused 的
-HGraph 保持原有增量生命周期。
+HGraph 保持原有增量生命周期。成功完成 `Build` 或 Deserialize 后，索引会自动执行
+HGraph immutable 状态切换：检索跳过 global lock，节点锁替换为 `EmptyMutex`。再次调用
+`SetImmutable` 是安全的，但没有必要。
 
 每个 record 以 4-byte 邻居数量开头，随后是纯 `InnerIdType` 邻居 ID；节点不再有
 version，邻居 ID 也不编码 version。之后依次保存 cluster id、对齐后的 external

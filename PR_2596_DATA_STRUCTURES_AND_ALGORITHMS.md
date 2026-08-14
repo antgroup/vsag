@@ -18,7 +18,9 @@
 
 fused 模式是一次 `Build` 后只读的内存索引。它保留检索、按 ID 距离、内存统计和
 Serialize/Deserialize；`Add`、Remove、Update、Merge、Tune、Clone、ExportModel 和
-Build Cache 均返回 `UNSUPPORTED_INDEX_OPERATION`。非 fused HGraph 行为不变。
+Build Cache 均返回 `UNSUPPORTED_INDEX_OPERATION`。成功完成 `Build` 或 Deserialize 后
+会自动调用 HGraph immutable 状态切换，把 global search lock 旁路并将节点锁替换为
+`EmptyMutex`；用户无需再手动调用 `SetImmutable`。非 fused HGraph 行为不变。
 
 ```mermaid
 flowchart LR
@@ -146,7 +148,8 @@ record 的 stride 也是 64-byte 倍数。实现见
 
 record 不包含 node version，邻居槽也不再编码 version。`InsertNeighborsById` 直接写入
 `InnerIdType`。slab 只允许在构建过程中通过 `Resize` 增长；fused datacell 不实现
-Delete/Recover、Move 和 ShrinkToFit，也不维护 reverse edges。
+Delete/Recover、Move 和 ShrinkToFit，也不维护 reverse edges。构建完成后先 `Seal` slab，
+再自动执行 `SetImmutable`；反序列化恢复并校验 codec 后执行相同的状态切换。
 
 ### 3.3 分级预取
 

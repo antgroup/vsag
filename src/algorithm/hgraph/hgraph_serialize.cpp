@@ -904,11 +904,14 @@ HGraph::read_streaming_body(StreamReader& reader,
         this->has_raw_vector_ = true;
     }
     this->restore_fused_codec();
-    this->cal_memory_usage();
 
     if (use_elp_optimizer_) {
         elp_optimize();
     }
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        this->SetImmutable();
+    }
+    this->cal_memory_usage();
 }
 
 void
@@ -1077,12 +1080,15 @@ HGraph::Deserialize(StreamReader& reader) {
         }
     }
     this->restore_fused_codec();
-    this->cal_memory_usage();
 
     // post serialize procedure
     if (use_elp_optimizer_) {
         elp_optimize();
     }
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        this->SetImmutable();
+    }
+    this->cal_memory_usage();
 }
 
 void

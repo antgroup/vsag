@@ -27,7 +27,9 @@
 #include <thread>
 #include <vector>
 
+#include "algorithm/hgraph/hgraph.h"
 #include "functest.h"
+#include "index/index_impl.h"
 #include "storage/serialization_tags.h"
 #include "storage/streaming_serialization_test_utils.h"
 #include "test_index.h"
@@ -406,6 +408,59 @@ TEST_CASE("HGraph fused RaBitQ rejects ExportModel",
     auto model_result = source->ExportModel();
     REQUIRE_FALSE(model_result.has_value());
     REQUIRE(model_result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+}
+
+TEST_CASE("HGraph fused RaBitQ automatically becomes immutable",
+          "[ft][rabitq_split][hgraph][fused][immutable][serialize]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 64;
+    constexpr uint64_t base_count = 64;
+    constexpr int64_t topk = 10;
+
+    auto param =
+        HGraphRaBitQSplitTestIndex::GenerateBuildParam("l2", dim, "memory_io", "", 1, 7, true);
+    auto param_json = vsag::JsonType::Parse(param);
+    param_json["index_param"]["graph_io_type"].SetString("memory_io");
+    param_json["index_param"]["graph_storage_type"].SetString("flat");
+    param_json["index_param"]["reorder_source"].SetString("base");
+    param_json["index_param"]["rabitq_fused_datacell"].SetBool(true);
+    param_json["index_param"]["rabitq_use_fht"].SetBool(true);
+    param_json["index_param"]["store_raw_vector"].SetBool(false);
+    param_json["index_param"]["use_mci"].SetBool(false);
+    param_json["index_param"]["build_thread_count"].SetInt(1);
+    param = param_json.Dump();
+
+    auto dataset = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, base_count, "l2");
+    auto query = get_one_query(dataset->query_, 0);
+    auto require_immutable = [&](const TestIndex::IndexPtr& index) {
+        auto index_impl = std::dynamic_pointer_cast<vsag::IndexImpl<vsag::HGraph>>(index);
+        REQUIRE(index_impl != nullptr);
+        auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(index_impl->GetInnerIndex());
+        REQUIRE(hgraph != nullptr);
+        REQUIRE(hgraph->immutable_.load(std::memory_order_acquire));
+        REQUIRE(index->GetMemoryUsageDetail().at("neighbors_mutex") == 0);
+        REQUIRE(index->SetImmutable().has_value());
+
+        auto result = index->KnnSearch(query, topk, kSplitSearchParam);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == topk);
+    };
+
+    auto index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param, true);
+    REQUIRE(index->Build(dataset->base_).has_value());
+    require_immutable(index);
+
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto binary_restored = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param, true);
+    REQUIRE(binary_restored->Deserialize(binary.value()).has_value());
+    require_immutable(binary_restored);
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    auto streaming_restored = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param, true);
+    REQUIRE(streaming_restored->DeserializeStreaming(stream).has_value());
+    require_immutable(streaming_restored);
 }
 
 TEST_CASE("HGraph RaBitQ Split drains accepted build tasks after enqueue failure",

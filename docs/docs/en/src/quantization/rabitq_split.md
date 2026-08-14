@@ -74,7 +74,10 @@ This option creates a build-once, read-only in-memory index. It supports one
 queries), distance-by-id, memory statistics, and serialization/deserialization.
 It rejects `Add`, both remove modes, vector/id/attribute/extra-info updates,
 merge, tune, clone, model export, and build-cache import/export. Ordinary
-non-fused HGraph keeps its incremental lifecycle.
+non-fused HGraph keeps its incremental lifecycle. A successful `Build` or
+Deserialize automatically calls the HGraph immutable transition: global search
+locking is skipped and per-node locks are replaced with `EmptyMutex`. Calling
+`SetImmutable` again is safe but unnecessary.
 
 Each record starts with a 4-byte neighbor count followed by plain
 `InnerIdType` neighbor IDs. There is no node version and no version encoding in

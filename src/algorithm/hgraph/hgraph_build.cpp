@@ -192,6 +192,7 @@ HGraph::Build(const DatasetPtr& data) {
     }
     if (this->rabitq_fused_datacell_ != nullptr) {
         this->rabitq_fused_datacell_->Seal();
+        this->SetImmutable();
     }
     return ret;
 }
