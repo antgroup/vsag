@@ -7,14 +7,8 @@ set(install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
 
 set(hdf5_urls
     https://github.com/HDFGroup/hdf5/archive/refs/tags/hdf5_1.14.4.tar.gz
-    # this url is maintained by the vsag project, if it's broken, please try
-    #  the latest commit or contact the vsag project
-    https://vsagcache.oss-rg-china-mainland.aliyuncs.com/hdf5/hdf5_1.14.4.tar.gz
 )
-if(NOT "$ENV{VSAG_THIRDPARTY_HDF5}" STREQUAL "")
-    message(STATUS "Using override URL/archive for hdf5: $ENV{VSAG_THIRDPARTY_HDF5}")
-    list(PREPEND hdf5_urls "$ENV{VSAG_THIRDPARTY_HDF5}")
-endif()
+vsag_resolve_thirdparty_override (HDF5 hdf5_1.14.4 hdf5_urls)
 
 ExternalProject_Add(
     ${name}

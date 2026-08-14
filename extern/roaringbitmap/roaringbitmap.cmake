@@ -1,14 +1,8 @@
 include(FetchContent)
 set(roaringbitmap_urls
     https://github.com/RoaringBitmap/CRoaring/archive/refs/tags/v3.0.1.tar.gz
-    # this url is maintained by the vsag project, if it's broken, please try
-    #  the latest commit or contact the vsag project
-    https://vsagcache.oss-rg-china-mainland.aliyuncs.com/roaringbitmap/v3.0.1.tar.gz
 )
-if(NOT "$ENV{VSAG_THIRDPARTY_ROARINGBITMAP}" STREQUAL "")
-  message(STATUS "Using override URL/archive for roaringbitmap: $ENV{VSAG_THIRDPARTY_ROARINGBITMAP}")
-  list(PREPEND roaringbitmap_urls "$ENV{VSAG_THIRDPARTY_ROARINGBITMAP}")
-endif()
+vsag_resolve_thirdparty_override (ROARINGBITMAP v3.0.1 roaringbitmap_urls)
 FetchContent_Declare(
         roaringbitmap
         URL ${roaringbitmap_urls}

@@ -3,14 +3,8 @@ include(FetchContent)
 
 set(nlohmann_json_urls
     https://github.com/nlohmann/json/archive/refs/tags/v3.11.3.tar.gz
-    # this url is maintained by the vsag project, if it's broken, please try
-    #  the latest commit or contact the vsag project
-    https://vsagcache.oss-rg-china-mainland.aliyuncs.com/nlohmann_json/v3.11.3.tar.gz
 )
-if(NOT "$ENV{VSAG_THIRDPARTY_JSON}" STREQUAL "")
-  message(STATUS "Using override URL/archive for nlohmann_json: $ENV{VSAG_THIRDPARTY_JSON}")
-  list(PREPEND nlohmann_json_urls "$ENV{VSAG_THIRDPARTY_JSON}")
-endif()
+vsag_resolve_thirdparty_override (JSON v3.11.3 nlohmann_json_urls)
 FetchContent_Declare(
     nlohmann_json
     URL ${nlohmann_json_urls}

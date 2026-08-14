@@ -9,14 +9,8 @@ get_filename_component(compiler_path ${CMAKE_CXX_COMPILER} DIRECTORY)
 
 set(boost_urls
     https://archives.boost.io/release/1.67.0/source/boost_1_67_0.tar.gz
-    # this url is maintained by the vsag project, if it's broken, please try
-    #  the latest commit or contact the vsag project
-    https://vsagcache.oss-rg-china-mainland.aliyuncs.com/boost/boost_1_67_0.tar.gz
 )
-if(NOT "$ENV{VSAG_THIRDPARTY_BOOST}" STREQUAL "")
-    message(STATUS "Using override URL/archive for boost: $ENV{VSAG_THIRDPARTY_BOOST}")
-    list(PREPEND boost_urls "$ENV{VSAG_THIRDPARTY_BOOST}")
-endif()
+vsag_resolve_thirdparty_override (BOOST 1.67.0 boost_urls)
 
 ExternalProject_Add(
     ${name}
@@ -78,4 +72,3 @@ ExternalProject_Add_Step(${name} clean
 )
 
 ExternalProject_Add_StepTargets(${name} clean)
-

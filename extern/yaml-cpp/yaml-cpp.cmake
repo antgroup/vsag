@@ -2,14 +2,8 @@ include (FetchContent)
 
 set(yaml_cpp_urls
     https://github.com/jbeder/yaml-cpp/archive/refs/tags/0.8.0.tar.gz
-    # this url is maintained by the vsag project, if it's broken, please try
-    #  the latest commit or contact the vsag project
-    https://vsagcache.oss-rg-china-mainland.aliyuncs.com/yaml-cpp/0.8.0.tar.gz
 )
-if(NOT "$ENV{VSAG_THIRDPARTY_YAML_CPP}" STREQUAL "")
-  message(STATUS "Using override URL/archive for yaml-cpp: $ENV{VSAG_THIRDPARTY_YAML_CPP}")
-  list(PREPEND yaml_cpp_urls "$ENV{VSAG_THIRDPARTY_YAML_CPP}")
-endif()
+vsag_resolve_thirdparty_override (YAML_CPP 0.8.0 yaml_cpp_urls)
 FetchContent_Declare (
         yaml-cpp
         URL ${yaml_cpp_urls}
