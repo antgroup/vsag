@@ -15,6 +15,8 @@
 
 #include "standard_heap.h"
 
+#include <algorithm>
+
 namespace vsag {
 template <bool max_heap, bool fixed_size>
 StandardHeap<max_heap, fixed_size>::StandardHeap(Allocator* allocator, int64_t max_size)
@@ -22,7 +24,11 @@ StandardHeap<max_heap, fixed_size>::StandardHeap(Allocator* allocator, int64_t m
     // Search heaps are usually created empty and grow to a small bounded
     // frontier. Reserve the common initial capacity so each query does not
     // repeatedly allocate and move heap records.
-    queue_.reserve(max_size > 0 ? static_cast<uint64_t>(max_size) : 64);
+    constexpr uint64_t kInitialReserve = 64;
+    const auto initial_reserve =
+        max_size > 0 ? std::min<uint64_t>(static_cast<uint64_t>(max_size), kInitialReserve)
+                     : kInitialReserve;
+    queue_.reserve(initial_reserve);
 }
 
 template <bool max_heap, bool fixed_size>

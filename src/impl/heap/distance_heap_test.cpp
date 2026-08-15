@@ -19,11 +19,25 @@
 #include <limits>
 #include <vector>
 
+#include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
 #include "memmove_heap.h"
 #include "standard_heap.h"
 #include "unittest.h"
 using namespace vsag;
+
+namespace {
+class RecordingAllocator : public DefaultAllocator {
+public:
+    void*
+    Allocate(uint64_t size) override {
+        allocation_sizes.push_back(size);
+        return DefaultAllocator::Allocate(size);
+    }
+
+    std::vector<uint64_t> allocation_sizes;
+};
+}  // namespace
 
 class TestDistanceHeap {
 public:
@@ -95,6 +109,49 @@ TEST_CASE_METHOD(TestDistanceHeap, "standard_heap test", "[ut][distance_heap]") 
         StandardHeap<false, false> heap4(allocator.get(), max_size);
         RunBasicTest(heap4, false);
     }
+}
+
+TEST_CASE("standard_heap bounds initial reserve", "[ut][distance_heap]") {
+    constexpr uint64_t initial_capacity = 64;
+    const auto expected_bytes = [](uint64_t capacity) {
+        return capacity * sizeof(DistanceHeap::DistanceRecord);
+    };
+    const auto check_initial_reserve = [&](int64_t max_size, uint64_t expected_capacity) {
+        RecordingAllocator allocator;
+        {
+            StandardHeap<true, true> heap(&allocator, max_size);
+            REQUIRE(heap.Empty());
+        }
+        REQUIRE(allocator.allocation_sizes.size() == 1);
+        REQUIRE(allocator.allocation_sizes.front() == expected_bytes(expected_capacity));
+    };
+
+    check_initial_reserve(3, 3);
+    check_initial_reserve(std::numeric_limits<int64_t>::max(), initial_capacity);
+    check_initial_reserve(-1, initial_capacity);
+}
+
+TEST_CASE("standard_heap small fixed and dynamic behavior", "[ut][distance_heap]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+
+    StandardHeap<true, true> fixed_heap(allocator.get(), 3);
+    fixed_heap.Push(3.0F, 3);
+    fixed_heap.Push(1.0F, 1);
+    fixed_heap.Push(2.0F, 2);
+    fixed_heap.Push(4.0F, 4);
+    REQUIRE(fixed_heap.Size() == 3);
+    REQUIRE(fixed_heap.Top().first == 3.0F);
+
+    StandardHeap<true, false> dynamic_heap(allocator.get(), -1);
+    dynamic_heap.Push(3.0F, 3);
+    dynamic_heap.Push(1.0F, 1);
+    dynamic_heap.Push(2.0F, 2);
+    REQUIRE(dynamic_heap.Size() == 3);
+    REQUIRE(dynamic_heap.Top().first == 3.0F);
+    dynamic_heap.Pop();
+    REQUIRE(dynamic_heap.Top().first == 2.0F);
+    dynamic_heap.Pop();
+    REQUIRE(dynamic_heap.Top().first == 1.0F);
 }
 
 TEST_CASE_METHOD(TestDistanceHeap, "memmove_heap test", "[ut][distance_heap]") {
