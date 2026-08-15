@@ -1,0 +1,38 @@
+{
+  "datapath": "/mnt/data/sift-128-euclidean.hdf5",
+  "index_path": "/mnt/data/vsag-indexes/shared/hgraph.index",
+  "index_name": "hgraph",
+  "create_params": {
+    "dim": 128,
+    "dtype": "float32",
+    "metric_type": "l2",
+    "index_param": {
+      "base_quantization_type": "fp32",
+      "max_degree": 16,
+      "ef_construction": 300
+    }
+  },
+  "search_params": {
+    "hgraph": {
+      "ef_search": 40
+    }
+  },
+  "set_immutable": false,
+  "topk": 10,
+  "search_query_count": 1000,
+  "concurrency": [1, 2, 4, 8, 16, 32],
+  "rounds": 1,
+  "hash_files": false,
+  "acceptance": {
+    "qps_min_pct": 15,
+    "p99_max_regression_pct": 10,
+    "recall_max_abs_change": 0.01,
+    "target_concurrency": [8, 16, 32]
+  },
+  "baseline": {
+    "eval_binary": "/mnt/data/vsag-builds/baseline/tools/eval/eval_performance"
+  },
+  "candidate": {
+    "eval_binary": "/mnt/data/vsag-builds/candidate/tools/eval/eval_performance"
+  }
+}

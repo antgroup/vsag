@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "case/eval_case.h"
+#include "eval_config.h"
 #include "evaluator.h"
 #include "monitor/recall_monitor.h"
 #include "vsag/factory.h"
@@ -151,6 +152,32 @@ TempPath(const std::string& tag) {
 }
 
 }  // namespace
+
+TEST_CASE("EvalConfig parses optional set_immutable", "[ut][eval_config]") {
+    auto yaml = YAML::Load(R"(
+datapath: /tmp/eval.hdf5
+type: search
+index_name: hgraph
+create_params: '{}'
+search_params: '{}'
+set_immutable: true
+)");
+    vsag::eval::eval_job global_options;
+    vsag::eval::EvalConfig::CheckKeyAndType(yaml);
+    const auto config = vsag::eval::EvalConfig::Load(yaml, global_options);
+    REQUIRE(config.set_immutable);
+
+    auto default_yaml = YAML::Load(R"(
+datapath: /tmp/eval.hdf5
+type: search
+index_name: hgraph
+create_params: '{}'
+search_params: '{}'
+)");
+    vsag::eval::EvalConfig::CheckKeyAndType(default_yaml);
+    const auto default_config = vsag::eval::EvalConfig::Load(default_yaml, global_options);
+    REQUIRE_FALSE(default_config.set_immutable);
+}
 
 TEST_CASE("EvalDataset builds a dense in-memory view with original ids", "[ut][eval_dataset]") {
     constexpr int64_t dim = 2;
@@ -525,6 +552,20 @@ TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][
     config.top_k = 2;
     REQUIRE_THROWS_WITH(vsag::eval::EvaluateSearch(index, dataset, config),
                         "evaluation ground truth must contain at least top_k neighbors per query");
+
+    config.build_param = create_params;
+    config.index_path = TempPath("hgraph_immutable_index");
+    config.top_k = 1;
+    config.enable_recall = false;
+    config.set_immutable = true;
+    auto serialized_build = vsag::eval::EvalCase::MakeInstance(config, "build", dataset);
+    REQUIRE(serialized_build->Run()["action"] == "build");
+    REQUIRE(std::filesystem::exists(config.index_path));
+    auto serialized_search = vsag::eval::EvalCase::MakeInstance(config, "search", dataset);
+    const auto immutable_result = serialized_search->Run();
+    REQUIRE(immutable_result["action"] == "search");
+    REQUIRE(immutable_result["measurement_successful_query_count"].get<uint64_t>() == 2);
+    std::remove(config.index_path.c_str());
 }
 
 TEST_CASE("EvalCase builds and searches an in-memory dataset with original ids",
@@ -575,6 +616,13 @@ TEST_CASE("EvalCase builds and searches an in-memory dataset with original ids",
     REQUIRE(std::isfinite(result["qps"].get<double>()));
     REQUIRE(std::isfinite(result["latency_avg(ms)"].get<double>()));
     REQUIRE(std::isfinite(result["latency_detail(ms)"]["p99"].get<double>()));
+
+    config.set_immutable = true;
+    auto unsupported_immutable_search =
+        vsag::eval::EvalCase::MakeInstance(config, "search", dataset);
+    REQUIRE_THROWS_WITH(unsupported_immutable_search->Run(),
+                        Catch::Matchers::ContainsSubstring("failed to set index immutable"));
+    config.set_immutable = false;
 
     std::vector<float> concurrent_query_vectors{5.0F, 6.0F, 1.0F, 2.0F};
     auto concurrent_queries = vsag::Dataset::Make();

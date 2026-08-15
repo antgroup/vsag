@@ -174,6 +174,12 @@ SearchEvalCase::Run() {
 
 JsonType
 SearchEvalCase::RunInMemory() {
+    if (config_.set_immutable) {
+        auto result = this->index_->SetImmutable();
+        if (not result.has_value()) {
+            throw std::runtime_error("failed to set index immutable: " + result.error().message);
+        }
+    }
     switch (this->search_type_) {
         case KNN:
             this->do_knn_search();

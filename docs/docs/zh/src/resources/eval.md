@@ -35,8 +35,10 @@ cmake --build build-release -j
 ```
 
 常用参数还包括 `--search_mode`（`knn` / `range` / `knn_filter` / `range_filter`）、
-`--search-query-count`、`--delete-index-after-search`，以及一系列用于关闭单项指标的
-`--disable_*` 开关。参考模板 `tools/eval/eval_template.yaml` 展示了完整的 YAML 结构。
+`--search-query-count`、`--delete-index-after-search`、`--set_immutable`，以及一系列用于关闭
+单项指标的 `--disable_*` 开关。`--set_immutable` 默认是 `false`；启用后，评测器会在索引加载或
+构建完成、搜索开始前调用 `Index::SetImmutable()`。索引不支持该操作时评测会失败。参考模板
+`tools/eval/eval_template.yaml` 展示了完整的 YAML 结构。
 
 ### 2. 配置文件模式（适合批量对比）
 
@@ -70,10 +72,123 @@ eval_case1:
   create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","max_degree":32,"ef_construction":300}}'
   search_params: '{"hgraph":{"ef_search":60}}'
   index_path: /tmp/vsag_eval/hgraph_fp32
+  set_immutable: false
   topk: 10
 ```
 
 注意：`global.exporters` 下每一项都是**具名**的导出器（即 YAML map），并不是数组。
+
+## 并发 A/B 验收 Harness
+
+需要对 baseline/candidate 做可复现的外层查询并发对比时，使用
+`tools/eval/run_concurrency_ab.py`。它为每个变体分别调用独立的 evaluator binary，并逐个
+case 运行，因此搜索计量语义仍由 `eval_performance` 决定；harness 负责固定输入参数，运行
+并发 `1/2/4/8/16/32`，让每个并发档位的成对运行交替决定哪一个变体先执行，并把每次评估的
+原始 JSON 写入一个报告。
+
+先准备一个共享序列化索引和两个变体各自的 evaluator binary。harness 使用 `type: search`，
+不会构建或修改索引：
+
+```bash
+python3 tools/eval/run_concurrency_ab.py \
+    --spec tools/eval/concurrency_ab.example.json \
+    --output /tmp/vsag-concurrency-ab.json \
+    --hash-files
+```
+
+输入 spec 使用 JSON，因此可以在不额外安装 YAML 库的情况下生成和审查；完整格式见
+`tools/eval/concurrency_ab.example.json`。`datapath`、`index_path`、`create_params`、
+`search_params`、`topk` 和 `search_query_count` 在两个变体之间共享；两个变体必须分别提供
+`eval_binary`。将 `rounds` 设为大于 1 可重复运行成对实验。变体可以显式覆盖 `index_path`
+来进行两个索引的对比，但报告会给出 warning；推荐使用顶层共享 `index_path`。
+spec 中的 `set_immutable` 也在两个变体之间共享，默认是 `false`。启用时两个 evaluator binary
+都会在反序列化完成、搜索开始前调用 `Index::SetImmutable()`，因此启用只读搜索路径本身不会被算作
+候选版本独有的改动。
+`--hash-files` 会把数据集、两个索引和两个 evaluator binary 的 SHA-256 指纹写入报告，哈希
+计算不在搜索计量阶段内，索引 hash 不同时会给出 warning。
+
+`runs` 中每条记录包含以下验收字段：
+
+```json
+{
+  "variant": "baseline",
+  "pair_number": 1,
+  "outer_concurrency": 1,
+  "evaluator_binary": "/path/to/baseline/eval_performance",
+  "index_path": "/path/to/shared.index",
+  "errors": 0,
+  "qps": 1234.5,
+  "p50_ms": 0.81,
+  "p99_ms": 1.42,
+  "recall_avg": 0.99,
+  "raw_result": {}
+}
+```
+
+可以在 spec 中配置可选的 `acceptance` 性能验收门槛。默认值为
+`qps_min_pct: 15`、`p99_max_regression_pct: 10`、`recall_max_abs_change: 0.01`，以及
+`target_concurrency: [8, 16, 32]`：
+
+```json
+"acceptance": {
+  "qps_min_pct": 15,
+  "p99_max_regression_pct": 10,
+  "recall_max_abs_change": 0.01,
+  "target_concurrency": [8, 16, 32]
+}
+```
+
+Harness 会按 `pair_number` 匹配同一轮、同一外层并发下的 baseline/candidate 运行，计算
+`qps_change_pct = (candidate / baseline - 1) * 100`、同样定义的 `p99_change_pct`，以及
+`recall_abs_change = abs(candidate - baseline)`。`acceptance.by_concurrency` 给出这些 paired
+change 按并发取的中位数，并给出 `pass`、`fail` 或 `not_target` 判定；完整配对记录保存在
+`acceptance.pairs` 中：
+
+```json
+{
+  "status": "pass",
+  "thresholds": {
+    "qps_min_pct": 15.0,
+    "p99_max_regression_pct": 10.0,
+    "recall_max_abs_change": 0.01,
+    "target_concurrency": [8, 16, 32]
+  },
+  "by_concurrency": [
+    {
+      "outer_concurrency": 8,
+      "target": true,
+      "status": "pass",
+      "qps_change_pct": 16.2,
+      "p99_change_pct": 3.1,
+      "recall_abs_change": 0.002
+    }
+  ],
+  "reasons": []
+}
+```
+
+`acceptance.status` 与 harness 执行层的 `status`、`errors` 相互独立。失败运行、缺少指标、配对不完整，
+或百分比指标的 baseline 为 0 时，都会写入 `acceptance.reasons` 并使对应并发判定为 `fail`，不能静默排除。
+健康的非目标并发显示为 `not_target`；但其中的无效配对仍显示为 `fail`，以暴露执行缺陷。
+只有性能未达标时，执行层仍保持 `status: "ok", errors: 0`。
+
+`outer_concurrency` 对应评测器的 `num_threads_searching` OpenMP 查询循环线程数。对比变体时，
+应保持 `search_params` 中的 `parallel_search_thread_count` 不变。每个 YAML case 都会把 JSON
+导出到临时文件；evaluator 的 stdout/stderr 只作为诊断文本保留，不会被当作结果解析。
+`summary` 给出每个变体/并发组合在多轮 `rounds` 中各指标的中位数；`runs` 保留真实执行顺序，
+并在 `raw_result` 下保留完整的单 case `eval_performance` JSON。
+
+harness 的 `errors` 是**运行级**错误数（`error_scope` 为 `evaluator_invocation`）：评测进程成功时为 0，
+超时、非零退出、启动失败或输出不是 JSON 时为 1。当前原生评测器遇到首个查询错误会直接退出，不会返回逐查询错误计数，
+因此失败运行不能给出精确的失败查询数。成功运行的 `raw_result` 仍包含
+`measurement_successful_query_count`，可用来检查两个变体是否完成了相同的有效查询数量。
+`recall_avg` 是聚合召回率，不是逐查询结果 ID 对比；harness 也不会隐式添加预热轮次。
+
+在 WSL 中运行 harness 的标准库测试：
+
+```bash
+python3 -m unittest discover -s tools/eval -p 'test_run_concurrency_ab.py' -v
+```
 
 ## 支持的评估维度
 

@@ -76,6 +76,9 @@ parse_args(argparse::ArgumentParser& parser, int argc, char** argv) {
     parser.add_argument("--delete-index-after-search")
         .default_value(false)
         .help("Delete index after search");
+    parser.add_argument("--set_immutable")
+        .default_value(false)
+        .help("Set the index immutable before search");
     parser.add_argument("--topk")
         .default_value(10)
         .help("The topk value for knn search or knn_filter search")

@@ -44,6 +44,7 @@ EvalConfig::Load(argparse::ArgumentParser& parser) {
     config.search_query_count = parser.get<uint64_t>("--search-query-count");
 
     config.delete_index_after_search = parser.get<bool>("--delete-index-after-search");
+    config.set_immutable = parser.get<bool>("--set_immutable");
 
     if (parser.get<bool>("--disable_recall")) {
         config.enable_recall = false;
@@ -97,6 +98,7 @@ EvalConfig::Load(YAML::Node& yaml_node, const eval_job& global_options) {
 
     check_and_get_value<bool>(
         yaml_node, "delete_index_after_search", config.delete_index_after_search);
+    check_and_get_value<bool>(yaml_node, "set_immutable", config.set_immutable);
 
     check_and_get_value<int>(yaml_node, "num_threads_building", config.num_threads_building);
     check_and_get_value<int>(yaml_node, "num_threads_searching", config.num_threads_searching);
@@ -159,6 +161,7 @@ EvalConfig::CheckKeyAndType(YAML::Node& yaml_node) {
     check_and_get_value<>(yaml_node, "index_path");
     check_and_get_value<int>(yaml_node, "topk");
     check_and_get_value<float>(yaml_node, "range");
+    check_and_get_value<bool>(yaml_node, "set_immutable");
     check_and_get_value<bool>(yaml_node, "disable_recall");
     check_and_get_value<bool>(yaml_node, "disable_percent_recall");
     check_and_get_value<bool>(yaml_node, "disable_qps");
