@@ -5,7 +5,7 @@ global:
         to: "stdout"
       save-to-file:
         format: "json"
-        to: "file://tmp/eval_example_output.json"
+        to: "file:///tmp/eval_example_output.json"
       send-to-influxdb:
         format: "line_protocol"
         to: "influxdb://127.0.0.1:8086/api/v2/write?org=7d71a0eb85deafbe&bucket=583a2fd8dd85e66c&precision=ns"
@@ -21,6 +21,7 @@ eval_case1:
     index_path: "/tmp/sift-128-euclidean/index/hgraph_index"
     search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
     set_immutable: false # call Index::SetImmutable() before search
+    warmup_query_count: 10000 # unmeasured queries before the measured search pass
     topk: 10
     range: 0.5
     delete_index_after_search: false # free up storage space used by index

@@ -17,22 +17,26 @@
       "ef_search": 40
     }
   },
+  "warmup_query_count": 10000,
   "set_immutable": false,
   "topk": 10,
   "search_query_count": 1000,
   "concurrency": [1, 2, 4, 8, 16, 32],
-  "rounds": 1,
+  "rounds": 5,
   "hash_files": false,
   "acceptance": {
     "qps_min_pct": 15,
     "p99_max_regression_pct": 10,
     "recall_max_abs_change": 0.01,
-    "target_concurrency": [8, 16, 32]
+    "target_concurrency": [8, 16, 32],
+    "min_valid_pairs": 3
   },
   "baseline": {
-    "eval_binary": "/mnt/data/vsag-builds/baseline/tools/eval/eval_performance"
+    "eval_binary": "/mnt/data/vsag-builds/baseline/tools/eval/eval_performance",
+    "shared_library": "/mnt/data/vsag-builds/baseline/src/libvsag.so.0.0.0"
   },
   "candidate": {
-    "eval_binary": "/mnt/data/vsag-builds/candidate/tools/eval/eval_performance"
+    "eval_binary": "/mnt/data/vsag-builds/candidate/tools/eval/eval_performance",
+    "shared_library": "/mnt/data/vsag-builds/candidate/src/libvsag.so.0.0.0"
   }
 }

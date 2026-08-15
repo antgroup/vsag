@@ -68,6 +68,9 @@ private:
     do_knn_search();
 
     void
+    warmup_knn_search();
+
+    void
     do_range_search();
 
     void

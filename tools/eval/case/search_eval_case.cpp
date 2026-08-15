@@ -94,6 +94,26 @@ private:
     float valid_ratio_;
 };
 
+std::pair<vsag::DatasetPtr, const void*>
+prepare_query(const EvalDatasetPtr& dataset, uint64_t query_id) {
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dataset->GetDim())->Owner(false);
+    const void* query_vector = dataset->GetOneTest(query_id);
+    if (dataset->GetVectorType() == DENSE_VECTORS) {
+        if (dataset->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
+            query->Float32Vectors((const float*)query_vector);
+        } else if (dataset->GetTestDataType() == vsag::DATATYPE_INT8) {
+            query->Int8Vectors((const int8_t*)query_vector);
+        }
+    } else {
+        query->SparseVectors((const SparseVector*)query_vector);
+    }
+    if (dataset->GetTestPaths() != nullptr) {
+        query->Paths(dataset->GetTestPaths() + query_id);
+    }
+    return std::make_pair(std::move(query), query_vector);
+}
+
 SearchEvalCase::SearchEvalCase(const std::string& dataset_path,
                                const std::string& index_path,
                                vsag::IndexPtr index,
@@ -180,6 +200,9 @@ SearchEvalCase::RunInMemory() {
             throw std::runtime_error("failed to set index immutable: " + result.error().message);
         }
     }
+    if (this->search_type_ == SearchType::KNN) {
+        this->warmup_knn_search();
+    }
     switch (this->search_type_) {
         case KNN:
             this->do_knn_search();
@@ -203,30 +226,36 @@ SearchEvalCase::deserialize(std::ifstream& infile) {
 }
 
 void
+SearchEvalCase::warmup_knn_search() {
+    if (config_.warmup_query_count == 0) {
+        return;
+    }
+    auto query_count = this->dataset_ptr_->GetNumberOfQuery();
+    this->logger_->Debug("warmup query count is " + std::to_string(config_.warmup_query_count));
+    omp_set_num_threads(config_.num_threads_searching);
+    SearchFailure search_failure;
+#pragma omp parallel for schedule(dynamic)
+    for (int64_t id = 0; id < static_cast<int64_t>(config_.warmup_query_count); ++id) {
+        if (search_failure.Failed()) {
+            continue;
+        }
+        auto i = static_cast<uint64_t>(id) % query_count;
+        auto query_and_vector = prepare_query(this->dataset_ptr_, i);
+        auto& query = query_and_vector.first;
+        auto result = this->index_->KnnSearch(query, config_.top_k, config_.search_param);
+        if (not result.has_value()) {
+            search_failure.Record(result.error().message);
+        }
+    }
+    search_failure.ThrowIfFailed();
+}
+
+void
 SearchEvalCase::do_knn_search() {
     uint64_t topk = config_.top_k;
     auto query_count = this->dataset_ptr_->GetNumberOfQuery();
     this->logger_->Debug("query count is " + std::to_string(query_count));
     auto min_query = std::max(static_cast<uint64_t>(query_count), config_.search_query_count);
-
-    auto prepare_query = [this](uint64_t query_id) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(this->dataset_ptr_->GetDim())->Owner(false);
-        const void* query_vector = this->dataset_ptr_->GetOneTest(query_id);
-        if (this->dataset_ptr_->GetVectorType() == DENSE_VECTORS) {
-            if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
-                query->Float32Vectors((const float*)query_vector);
-            } else if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_INT8) {
-                query->Int8Vectors((const int8_t*)query_vector);
-            }
-        } else {
-            query->SparseVectors((const SparseVector*)query_vector);
-        }
-        if (this->dataset_ptr_->GetTestPaths() != nullptr) {
-            query->Paths(this->dataset_ptr_->GetTestPaths() + query_id);
-        }
-        return std::make_pair(std::move(query), query_vector);
-    };
 
     bool statistics_collected = false;
     for (auto& monitor : this->monitors_) {
@@ -248,7 +277,7 @@ SearchEvalCase::do_knn_search() {
                     continue;
                 }
                 auto i = static_cast<uint64_t>(id) % query_count;
-                auto query_and_vector = prepare_query(i);
+                auto query_and_vector = prepare_query(this->dataset_ptr_, i);
                 auto& query = query_and_vector.first;
                 auto [result, latency_ms] = MeasureSearch(
                     [&]() { return this->index_->KnnSearch(query, topk, config_.search_param); });
@@ -277,7 +306,7 @@ SearchEvalCase::do_knn_search() {
                 continue;
             }
             auto i = static_cast<uint64_t>(id) % query_count;
-            auto query_and_vector = prepare_query(i);
+            auto query_and_vector = prepare_query(this->dataset_ptr_, i);
             auto& query = query_and_vector.first;
             const void* query_vector = query_and_vector.second;
             auto result = this->index_->KnnSearch(query, topk, config_.search_param);
@@ -310,7 +339,7 @@ SearchEvalCase::do_knn_search() {
                 continue;
             }
             auto i = static_cast<uint64_t>(id) % query_count;
-            auto query_and_vector = prepare_query(i);
+            auto query_and_vector = prepare_query(this->dataset_ptr_, i);
             auto& query = query_and_vector.first;
             auto result = this->index_->KnnSearch(query, topk, config_.search_param);
             if (not result.has_value()) {

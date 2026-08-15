@@ -46,6 +46,7 @@ public:
     uint64_t search_query_count{100'000L};
     bool delete_index_after_search{false};
     bool set_immutable{false};
+    uint64_t warmup_query_count{10'000};
 
     int32_t num_threads_building{1};
     int32_t num_threads_searching{1};

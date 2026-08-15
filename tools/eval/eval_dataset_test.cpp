@@ -161,11 +161,13 @@ index_name: hgraph
 create_params: '{}'
 search_params: '{}'
 set_immutable: true
+warmup_query_count: 7
 )");
     vsag::eval::eval_job global_options;
     vsag::eval::EvalConfig::CheckKeyAndType(yaml);
     const auto config = vsag::eval::EvalConfig::Load(yaml, global_options);
     REQUIRE(config.set_immutable);
+    REQUIRE(config.warmup_query_count == 7);
 
     auto default_yaml = YAML::Load(R"(
 datapath: /tmp/eval.hdf5
@@ -177,6 +179,7 @@ search_params: '{}'
     vsag::eval::EvalConfig::CheckKeyAndType(default_yaml);
     const auto default_config = vsag::eval::EvalConfig::Load(default_yaml, global_options);
     REQUIRE_FALSE(default_config.set_immutable);
+    REQUIRE(default_config.warmup_query_count == 10000);
 }
 
 TEST_CASE("EvalDataset builds a dense in-memory view with original ids", "[ut][eval_dataset]") {
@@ -489,6 +492,7 @@ TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][
     config.search_param = R"({"hgraph":{"ef_search":8}})";
     config.top_k = 1;
     config.search_query_count = 2;
+    config.warmup_query_count = 3;
     const auto caller_thread_count = omp_get_max_threads();
     config.num_threads_searching = caller_thread_count == 1 ? 2 : 1;
     config.enable_recall = false;
@@ -502,6 +506,8 @@ TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][
     const auto qps_only = vsag::eval::EvaluateSearch(index, dataset, config);
     REQUIRE(qps_only.contains("qps"));
     REQUIRE(qps_only["measurement_sample_count"].get<uint64_t>() == 2);
+    REQUIRE(qps_only["measurement_successful_query_count"].get<uint64_t>() == 2);
+    REQUIRE(qps_only["error_count"].get<uint64_t>() == 0);
     REQUIRE(qps_only["index_info"].is_object());
     REQUIRE(qps_only["index_info"].empty());
     REQUIRE(omp_get_max_threads() == caller_thread_count);

@@ -106,6 +106,7 @@ TEST_CASE("LatencyMonitor retains the first query sample", "[ut][eval][latency_m
     RequireAllPercentiles(result, 7.0);
     REQUIRE(result["measurement_sample_count"].get<uint64_t>() == 1);
     REQUIRE(result["measurement_successful_query_count"].get<uint64_t>() == 1);
+    REQUIRE(result["error_count"].get<uint64_t>() == 0);
     RequireNear(result["measurement_duration(s)"].get<double>(), 0.25);
     REQUIRE(result["measurement_method"]["latency"].get<std::string>() ==
             "steady_clock_around_knn_search");

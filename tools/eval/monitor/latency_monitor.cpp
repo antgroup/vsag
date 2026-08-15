@@ -45,6 +45,7 @@ LatencyMonitor::GetResult() {
     result["measurement_method"]["qps"] = "successful_queries_per_wall_time";
     result["measurement_sample_count"] = static_cast<uint64_t>(this->latency_records_.size());
     result["measurement_successful_query_count"] = this->successful_query_count_;
+    result["error_count"] = 0;
     result["measurement_duration(s)"] = this->wall_time_seconds_;
     return result;
 }

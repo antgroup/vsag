@@ -12,6 +12,8 @@ import argparse
 import hashlib
 import json
 import math
+import os
+import re
 import shutil
 import statistics
 import subprocess
@@ -29,6 +31,7 @@ DEFAULT_ACCEPTANCE = {
     "p99_max_regression_pct": 10.0,
     "recall_max_abs_change": 0.01,
     "target_concurrency": [8, 16, 32],
+    "min_valid_pairs": 3,
 }
 
 
@@ -61,12 +64,26 @@ def _positive_int(value: Any, field: str) -> int:
     return result
 
 
+def _nonnegative_int(value: Any, field: str) -> int:
+    if isinstance(value, bool):
+        raise HarnessError(f"{field} must be a non-negative integer")
+    if isinstance(value, float) and (not math.isfinite(value) or not value.is_integer()):
+        raise HarnessError(f"{field} must be a non-negative integer")
+    try:
+        result = int(value)
+    except (TypeError, ValueError) as error:
+        raise HarnessError(f"{field} must be a non-negative integer") from error
+    if result < 0:
+        raise HarnessError(f"{field} must be a non-negative integer")
+    return result
+
+
 def _nonnegative_float(value: Any, field: str) -> float:
     if isinstance(value, bool):
         raise HarnessError(f"{field} must be a finite non-negative number")
     try:
         result = float(value)
-    except (TypeError, ValueError) as error:
+    except (TypeError, ValueError, OverflowError) as error:
         raise HarnessError(f"{field} must be a finite non-negative number") from error
     if not math.isfinite(result) or result < 0:
         raise HarnessError(f"{field} must be a finite non-negative number")
@@ -105,6 +122,10 @@ def _normalize_acceptance(raw: Dict[str, Any]) -> Dict[str, Any]:
             "acceptance.recall_max_abs_change",
         ),
         "target_concurrency": normalized_target_concurrency,
+        "min_valid_pairs": _positive_int(
+            value.get("min_valid_pairs", DEFAULT_ACCEPTANCE["min_valid_pairs"]),
+            "acceptance.min_valid_pairs",
+        ),
     }
 
 
@@ -114,10 +135,8 @@ def _yaml_string(value: str) -> str:
 
 def _file_export_target(path: Path) -> str:
     # FileExporter strips the six-character file:// prefix before opening the path.
-    posix_path = path.as_posix()
-    if posix_path.startswith("/"):
-        posix_path = posix_path[1:]
-    return "file://" + posix_path
+    absolute_path = path.expanduser().resolve()
+    return "file://" + absolute_path.as_posix()
 
 
 def _json_text(value: Dict[str, Any]) -> str:
@@ -126,7 +145,7 @@ def _json_text(value: Dict[str, Any]) -> str:
 
 def normalize_spec(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Validate and normalize the JSON spec used by the harness."""
-    required = ("datapath", "index_name", "create_params", "search_params")
+    required = ("datapath", "index_path", "index_name", "create_params", "search_params")
     missing = [key for key in required if key not in raw]
     if missing:
         raise HarnessError("missing required spec fields: " + ", ".join(missing))
@@ -143,20 +162,30 @@ def normalize_spec(raw: Dict[str, Any]) -> Dict[str, Any]:
         raise HarnessError("concurrency values must be unique")
 
     shared_index_path = raw.get("index_path")
-    if shared_index_path:
-        shared_index_path = str(Path(str(shared_index_path)).expanduser())
+    if not shared_index_path:
+        raise HarnessError("index_path is required and must be shared by both variants")
+    shared_index_path = str(Path(str(shared_index_path)).expanduser())
 
     variants: Dict[str, Dict[str, str]] = {}
     for variant in VARIANTS:
         value = raw.get(variant)
-        if not isinstance(value, dict) or not value.get("eval_binary"):
-            raise HarnessError(f"{variant}.eval_binary is required")
-        index_path = value.get("index_path", shared_index_path)
-        if not index_path:
-            raise HarnessError(f"{variant}.index_path or top-level index_path is required")
+        if not isinstance(value, dict):
+            raise HarnessError(f"{variant} must be an object with eval_binary and shared_library")
+        expected_keys = {"eval_binary", "shared_library"}
+        missing = expected_keys - set(value)
+        extra = set(value) - expected_keys
+        if missing or extra:
+            details = []
+            if missing:
+                details.append("missing " + ", ".join(sorted(missing)))
+            if extra:
+                details.append("unexpected " + ", ".join(sorted(extra)))
+            raise HarnessError(f"{variant} schema error: " + "; ".join(details))
+        if not value["eval_binary"] or not value["shared_library"]:
+            raise HarnessError(f"{variant}.eval_binary and {variant}.shared_library are required")
         variants[variant] = {
             "eval_binary": str(value["eval_binary"]),
-            "index_path": str(Path(str(index_path)).expanduser()),
+            "shared_library": str(Path(str(value["shared_library"])).expanduser()),
         }
 
     datapath = str(Path(str(raw["datapath"])).expanduser())
@@ -166,9 +195,9 @@ def normalize_spec(raw: Dict[str, Any]) -> Dict[str, Any]:
     if timeout_seconds is not None:
         try:
             timeout_seconds = float(timeout_seconds)
-        except (TypeError, ValueError) as error:
+        except (TypeError, ValueError, OverflowError) as error:
             raise HarnessError("timeout_seconds must be positive") from error
-        if timeout_seconds <= 0:
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
             raise HarnessError("timeout_seconds must be positive")
 
     hash_files = raw.get("hash_files", False)
@@ -178,6 +207,10 @@ def normalize_spec(raw: Dict[str, Any]) -> Dict[str, Any]:
     set_immutable = raw.get("set_immutable", False)
     if not isinstance(set_immutable, bool):
         raise HarnessError("set_immutable must be boolean")
+
+    warmup_query_count = _nonnegative_int(
+        raw.get("warmup_query_count", 10000), "warmup_query_count"
+    )
 
     acceptance = _normalize_acceptance(raw)
 
@@ -191,6 +224,7 @@ def normalize_spec(raw: Dict[str, Any]) -> Dict[str, Any]:
         "search_params_text": _json_text(search_params),
         "search_mode": search_mode,
         "set_immutable": set_immutable,
+        "warmup_query_count": warmup_query_count,
         "topk": _positive_int(raw.get("topk", 10), "topk"),
         "search_query_count": _positive_int(
             raw.get("search_query_count", 100000), "search_query_count"
@@ -215,7 +249,7 @@ def build_case_yaml(
     """Build one eval_performance YAML with JSON exported to a temporary file."""
     if variant not in VARIANTS:
         raise HarnessError(f"unknown variant: {variant}")
-    index_path = spec[variant]["index_path"]
+    index_path = spec["index_path"]
     return "\n".join(
         [
             "global:",
@@ -233,6 +267,7 @@ def build_case_yaml(
             f"  index_path: {_yaml_string(index_path)}",
             f"  search_mode: {_yaml_string(spec['search_mode'])}",
             f"  set_immutable: {'true' if spec['set_immutable'] else 'false'}",
+            f"  warmup_query_count: {spec['warmup_query_count']}",
             f"  topk: {spec['topk']}",
             f"  search_query_count: {spec['search_query_count']}",
             "  disable_memory: true",
@@ -257,6 +292,111 @@ def _resolve_binary(binary: str) -> str:
     if resolved:
         return resolved
     raise HarnessError(f"eval binary was not found: {binary}")
+
+
+def _realpath(path: Path, field: str) -> str:
+    try:
+        return str(path.expanduser().resolve(strict=True))
+    except OSError as error:
+        raise HarnessError(f"{field} does not resolve to a readable file: {path}") from error
+
+
+def _variant_environment(shared_library_realpath: str) -> Dict[str, str]:
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"LD_LIBRARY_PATH", "LD_PRELOAD", "LD_AUDIT"}
+    }
+    env["LD_LIBRARY_PATH"] = str(Path(shared_library_realpath).parent)
+    return env
+
+
+def _parse_ldd_libvsag(output: str, variant: str) -> str:
+    resolved_paths = []
+    for line in output.splitlines():
+        if "libvsag.so" not in line:
+            continue
+        if "not found" in line:
+            raise HarnessError(f"ldd could not resolve libvsag for {variant}: {line.strip()}")
+        match = re.match(r"\s*libvsag\.so(?:\.[^\s]+)?\s*=>\s*(\S+)\s+\(", line)
+        if match:
+            resolved_paths.append(match.group(1))
+    if len(resolved_paths) != 1:
+        raise HarnessError(
+            f"ldd did not resolve exactly one libvsag.so dependency for {variant}: "
+            f"found {len(resolved_paths)}"
+        )
+    return resolved_paths[0]
+
+
+def _preflight_variant(variant: str, binary: str, shared_library: str) -> Dict[str, Any]:
+    binary_realpath = _realpath(Path(binary), f"{variant}.eval_binary")
+    library_path = Path(shared_library).expanduser()
+    if not library_path.name.startswith("libvsag.so"):
+        raise HarnessError(
+            f"{variant}.shared_library must be libvsag.so or a versioned libvsag.so file"
+        )
+    library_realpath = _realpath(library_path, f"{variant}.shared_library")
+    library_env = _variant_environment(library_realpath)
+    ldd_path = shutil.which("ldd")
+    if not ldd_path:
+        raise HarnessError("ldd is required for shared library preflight")
+    try:
+        completed = subprocess.run(
+            [ldd_path, binary_realpath],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+            env=library_env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise HarnessError(f"ldd preflight failed for {variant}: {error}") from error
+    if completed.returncode != 0:
+        raise HarnessError(
+            f"ldd preflight failed for {variant} with status {completed.returncode}: "
+            f"{_trim(completed.stderr)}"
+        )
+    resolved_library = _parse_ldd_libvsag(completed.stdout, variant)
+    resolved_library_realpath = _realpath(Path(resolved_library), f"{variant} resolved libvsag")
+    if resolved_library_realpath != library_realpath:
+        raise HarnessError(
+            f"{variant} ldd resolved libvsag {resolved_library_realpath}, "
+            f"but shared_library is {library_realpath}"
+        )
+    return {
+        "eval_binary": binary,
+        "evaluator_realpath": binary_realpath,
+        "evaluator_sha256": _sha256(Path(binary_realpath)),
+        "shared_library": shared_library,
+        "shared_library_realpath": library_realpath,
+        "shared_library_sha256": _sha256(Path(library_realpath)),
+        "resolved_libvsag_realpath": resolved_library_realpath,
+        "resolved_libvsag_sha256": _sha256(Path(resolved_library_realpath)),
+        "ld_library_path": str(Path(library_realpath).parent),
+        "environment": library_env,
+    }
+
+
+def _preflight_variants(
+    normalized: Dict[str, Any], binaries: Dict[str, str]
+) -> Dict[str, Dict[str, Any]]:
+    identities = {
+        variant: _preflight_variant(
+            variant, binaries[variant], normalized[variant]["shared_library"]
+        )
+        for variant in VARIANTS
+    }
+    comparisons = (
+        ("evaluator_realpath", "evaluator realpath"),
+        ("evaluator_sha256", "evaluator SHA-256"),
+        ("resolved_libvsag_realpath", "resolved libvsag realpath"),
+        ("resolved_libvsag_sha256", "resolved libvsag SHA-256"),
+    )
+    for key, label in comparisons:
+        if identities["baseline"][key] == identities["candidate"][key]:
+            raise HarnessError(f"baseline and candidate must have different {label}")
+    return identities
 
 
 def _number(value: Any) -> Optional[float]:
@@ -290,7 +430,7 @@ def _trim(text: Any, limit: int = 4000) -> str:
 
 
 def _run_one(
-    binary: str,
+    variant_info: Dict[str, Any],
     spec: Dict[str, Any],
     variant: str,
     concurrency: int,
@@ -308,6 +448,7 @@ def _run_one(
         result_path.unlink()
     except FileNotFoundError:
         pass
+    binary = variant_info["evaluator_realpath"]
     command = [binary, str(config_path)]
     base: Dict[str, Any] = {
         "run_id": f"run-{run_number:04d}",
@@ -318,7 +459,11 @@ def _run_one(
         "variant": variant,
         "outer_concurrency": concurrency,
         "evaluator_binary": binary,
-        "index_path": spec[variant]["index_path"],
+        "evaluator_realpath": variant_info["evaluator_realpath"],
+        "evaluator_sha256": variant_info["evaluator_sha256"],
+        "resolved_libvsag_realpath": variant_info["resolved_libvsag_realpath"],
+        "resolved_libvsag_sha256": variant_info["resolved_libvsag_sha256"],
+        "index_path": spec["index_path"],
         "command": command,
         "errors": 0,
     }
@@ -330,6 +475,7 @@ def _run_one(
             text=True,
             timeout=spec["timeout_seconds"],
             check=False,
+            env=variant_info["environment"],
         )
     except subprocess.TimeoutExpired as error:
         base.update(
@@ -404,7 +550,11 @@ def _run_one(
     case_result = raw_result[CASE_NAME]
     metrics = _metrics(case_result)
     missing_metrics = [name for name, value in metrics.items() if value is None]
-    for name in ("measurement_sample_count", "measurement_successful_query_count"):
+    for name in (
+        "measurement_sample_count",
+        "measurement_successful_query_count",
+        "error_count",
+    ):
         value = case_result.get(name)
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             missing_metrics.append(name)
@@ -433,6 +583,7 @@ def _run_one(
             "measurement_successful_query_count": case_result.get(
                 "measurement_successful_query_count"
             ),
+            "error_count": case_result.get("error_count"),
             "raw_result": raw_result,
         }
     )
@@ -538,6 +689,33 @@ def _pair_changes(
         selected[variant] = run
 
     if len(selected) != len(VARIANTS):
+        return record
+
+    count_fields = (
+        "measurement_sample_count",
+        "measurement_successful_query_count",
+        "error_count",
+    )
+    record["measurement"] = {
+        variant: {field: selected[variant].get(field) for field in count_fields}
+        for variant in VARIANTS
+    }
+    for field in count_fields:
+        values_for_field = [selected[variant].get(field) for variant in VARIANTS]
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in values_for_field
+        ):
+            record["reasons"].append(f"paired metric '{field}' is missing or invalid")
+            continue
+        if values_for_field[0] != values_for_field[1]:
+            record["reasons"].append(
+                f"paired metric '{field}' differs: "
+                f"baseline={values_for_field[0]}, candidate={values_for_field[1]}"
+            )
+    if any(selected[variant].get("error_count") != 0 for variant in VARIANTS):
+        record["reasons"].append("paired error_count must be zero")
+    if record["reasons"]:
         return record
 
     metrics = {
@@ -658,6 +836,11 @@ def evaluate_acceptance(
             for pair in invalid_pairs:
                 detail = "; ".join(pair["reasons"])
                 level_reasons.append(f"pair_number={pair['pair_number']}: {detail}")
+            if len(valid_pairs) < thresholds["min_valid_pairs"]:
+                level_reasons.append(
+                    f"valid pair count {len(valid_pairs)} is below minimum "
+                    f"{thresholds['min_valid_pairs']}"
+                )
             if not valid_pairs:
                 level_reasons.append("no valid baseline/candidate paired changes are available")
             if qps_change_pct is None:
@@ -723,30 +906,60 @@ def evaluate_acceptance(
     }
 
 
+def _cpu_info() -> Dict[str, Any]:
+    logical_cpu_count = os.cpu_count()
+    if not hasattr(os, "sched_getaffinity"):
+        return {
+            "sched_affinity": None,
+            "affinity_cpu_count": None,
+            "logical_cpu_count": logical_cpu_count,
+            "reason": "os.sched_getaffinity is unavailable",
+        }
+    try:
+        affinity = sorted(os.sched_getaffinity(0))
+    except OSError as error:
+        return {
+            "sched_affinity": None,
+            "affinity_cpu_count": None,
+            "logical_cpu_count": logical_cpu_count,
+            "reason": f"os.sched_getaffinity failed: {error}",
+        }
+    return {
+        "sched_affinity": affinity,
+        "affinity_cpu_count": len(affinity),
+        "logical_cpu_count": logical_cpu_count,
+        "reason": None,
+    }
+
+
 def run_suite(spec: Dict[str, Any], output_path: Optional[Path] = None) -> Dict[str, Any]:
     normalized = normalize_spec(spec)
     binaries = {
         variant: _resolve_binary(normalized[variant]["eval_binary"]) for variant in VARIANTS
     }
-    input_paths = [Path(normalized["datapath"])] + [
-        Path(normalized[variant]["index_path"]) for variant in VARIANTS
-    ]
+    input_paths = [Path(normalized["datapath"]), Path(normalized["index_path"])]
     for path in input_paths:
         if not path.is_file():
             raise HarnessError(f"evaluation input does not exist or is not a file: {path}")
 
+    identities = _preflight_variants(normalized, binaries)
+    cpu = _cpu_info()
     warnings: List[str] = []
-    index_paths = {normalized[variant]["index_path"] for variant in VARIANTS}
-    if len(index_paths) != 1:
-        warnings.append(
-            "baseline and candidate use different index_path values; prefer one shared index_path"
-        )
-        if not normalized["hash_files"]:
-            warnings.append("different index files were not content-hashed; rerun with --hash-files")
-    if binaries["baseline"] == binaries["candidate"]:
-        warnings.append(
-            "baseline and candidate resolve to the same evaluator binary; this is an index-only comparison"
-        )
+    warning_records: List[Dict[str, Any]] = []
+    if cpu["affinity_cpu_count"] is not None:
+        for level in normalized["concurrency"]:
+            if level > cpu["affinity_cpu_count"]:
+                warning = {
+                    "type": "oversubscription",
+                    "outer_concurrency": level,
+                    "affinity_cpu_count": cpu["affinity_cpu_count"],
+                    "message": (
+                        f"concurrency {level} exceeds sched affinity CPU count "
+                        f"{cpu['affinity_cpu_count']}"
+                    ),
+                }
+                warning_records.append(warning)
+                warnings.append(warning["message"])
 
     fixed_input: Dict[str, Any] = {
         "datapath": normalized["datapath"],
@@ -756,6 +969,7 @@ def run_suite(spec: Dict[str, Any], output_path: Optional[Path] = None) -> Dict[
         "search_params": normalized["search_params"],
         "search_mode": normalized["search_mode"],
         "set_immutable": normalized["set_immutable"],
+        "warmup_query_count": normalized["warmup_query_count"],
         "topk": normalized["topk"],
         "search_query_count": normalized["search_query_count"],
         "acceptance": normalized["acceptance"],
@@ -763,13 +977,14 @@ def run_suite(spec: Dict[str, Any], output_path: Optional[Path] = None) -> Dict[
     if normalized["hash_files"]:
         fixed_input["sha256"] = {
             "datapath": _sha256(Path(normalized["datapath"])),
-            "indexes": {
-                variant: _sha256(Path(normalized[variant]["index_path"])) for variant in VARIANTS
+            "indexes": {"shared": _sha256(Path(normalized["index_path"]))},
+            "eval_binaries": {
+                variant: identities[variant]["evaluator_sha256"] for variant in VARIANTS
             },
-            "eval_binaries": {variant: _sha256(Path(binaries[variant])) for variant in VARIANTS},
+            "shared_libraries": {
+                variant: identities[variant]["resolved_libvsag_sha256"] for variant in VARIANTS
+            },
         }
-        if fixed_input["sha256"]["indexes"]["baseline"] != fixed_input["sha256"]["indexes"]["candidate"]:
-            warnings.append("baseline and candidate index SHA-256 hashes differ")
 
     report: Dict[str, Any] = {
         "schema_version": 1,
@@ -777,8 +992,7 @@ def run_suite(spec: Dict[str, Any], output_path: Optional[Path] = None) -> Dict[
         "fixed_input": fixed_input,
         "variants": {
             variant: {
-                "eval_binary": binaries[variant],
-                "index_path": normalized[variant]["index_path"],
+                key: value for key, value in identities[variant].items() if key != "environment"
             }
             for variant in VARIANTS
         },
@@ -786,7 +1000,9 @@ def run_suite(spec: Dict[str, Any], output_path: Optional[Path] = None) -> Dict[
         "rounds": normalized["rounds"],
         "execution_order": "pairwise; the leading variant alternates for each pair",
         "error_scope": "evaluator_invocation",
+        "cpu": cpu,
         "warnings": warnings,
+        "warning_records": warning_records,
         "errors": 0,
         "runs": [],
     }
@@ -805,7 +1021,7 @@ def run_suite(spec: Dict[str, Any], output_path: Optional[Path] = None) -> Dict[
                 for order_in_pair, variant in enumerate(order, start=1):
                     run_number += 1
                     run = _run_one(
-                        binaries[variant],
+                        identities[variant],
                         normalized,
                         variant,
                         level,
@@ -852,7 +1068,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument(
         "--hash-files",
         action="store_true",
-        help="include SHA-256 fingerprints for the dataset, both index files, and both evaluator binaries",
+        help=(
+            "include SHA-256 fingerprints for the dataset/shared index; "
+            "evaluator and library fingerprints are always reported"
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -862,7 +1081,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             spec["hash_files"] = True
         report = run_suite(spec, args.output)
     except HarnessError as error:
-        parser.error(str(error))
+        print(f"error: {error}", file=sys.stderr)
+        return 1
 
     for warning in report["warnings"]:
         print(f"warning: {warning}", file=sys.stderr)
@@ -870,7 +1090,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         f"wrote {args.output} ({len(report['runs'])} runs, errors={report['errors']}, "
         f"acceptance={report['acceptance']['status']})"
     )
-    return 0 if report["status"] == "ok" else 1
+    if report["status"] != "ok":
+        return 1
+    return 0 if report["acceptance"]["status"] == "pass" else 2
 
 
 if __name__ == "__main__":

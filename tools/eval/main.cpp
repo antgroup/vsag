@@ -91,6 +91,10 @@ parse_args(argparse::ArgumentParser& parser, int argc, char** argv) {
         .default_value(100000)
         .help("The number of queries to run for search performance evaluation")
         .scan<'i', uint64_t>();
+    parser.add_argument("--warmup-query-count")
+        .default_value(10000)
+        .help("The number of unmeasured warmup queries to run before search evaluation")
+        .scan<'i', uint64_t>();
 
     // metrics
     parser.add_argument("--disable_recall")
