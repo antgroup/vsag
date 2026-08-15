@@ -19,6 +19,10 @@ namespace vsag {
 template <bool max_heap, bool fixed_size>
 StandardHeap<max_heap, fixed_size>::StandardHeap(Allocator* allocator, int64_t max_size)
     : DistanceHeap(allocator, max_size), queue_(allocator) {
+    // Search heaps are usually created empty and grow to a small bounded
+    // frontier. Reserve the common initial capacity so each query does not
+    // repeatedly allocate and move heap records.
+    queue_.reserve(max_size > 0 ? static_cast<uint64_t>(max_size) : 64);
 }
 
 template <bool max_heap, bool fixed_size>
