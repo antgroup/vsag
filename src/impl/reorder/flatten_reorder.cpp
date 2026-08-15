@@ -61,6 +61,9 @@ FlattenReorder::QueryLowerBound(float* distances,
                                                             lower_bounds + i,
                                                             filter_inner_products + i,
                                                             rate_context_ptr)) {
+            distances[i] = std::numeric_limits<float>::max();
+            lower_bounds[i] = std::numeric_limits<float>::max();
+            filter_inner_products[i] = std::numeric_limits<float>::quiet_NaN();
             ++fallback_count;
         }
     }
@@ -112,13 +115,14 @@ FlattenReorder::QueryFullWithHint(float* distances,
             ++hint_full_count;
         } else {
             ++fallback_full_count;
-            CHECK_ARGUMENT(split_codes->ComputeFusedFull(computer,
-                                                         cluster_id,
-                                                         fused_graph_->GetOneBitCode(record),
-                                                         fused_graph_->GetSupplementCode(record),
-                                                         distances + i,
-                                                         nullptr),
-                           "failed to compute fused RaBitQ distance");
+            if (not split_codes->ComputeFusedFull(computer,
+                                                  cluster_id,
+                                                  fused_graph_->GetOneBitCode(record),
+                                                  fused_graph_->GetSupplementCode(record),
+                                                  distances + i,
+                                                  nullptr)) {
+                distances[i] = std::numeric_limits<float>::max();
+            }
         }
     }
     if (ctx != nullptr and ctx->stats != nullptr) {
@@ -434,6 +438,9 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
         }
         return true;
     };
+    const auto has_valid_distance = [](float distance) {
+        return IsFiniteRaBitQValue(distance) and distance < std::numeric_limits<float>::max();
+    };
     const uint64_t heap_candidate_size = input == nullptr ? 0 : input->Size();
     const auto add_iterator_discard = [iter_ctx](float distance, InnerIdType id) {
         if (iter_ctx != nullptr) {
@@ -459,20 +466,23 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
             if (fused_graph_ != nullptr and split_codes != nullptr) {
                 for (uint64_t i = 0; i < heap_candidate_size; ++i) {
                     const auto* record = fused_graph_->GetNodeRecord(ids[i]);
-                    CHECK_ARGUMENT(
-                        split_codes->ComputeFusedFull(computer,
-                                                      fused_graph_->GetClusterId(record),
-                                                      fused_graph_->GetOneBitCode(record),
-                                                      fused_graph_->GetSupplementCode(record),
-                                                      dists.data() + i,
-                                                      &ctx),
-                        "failed to compute fused RaBitQ distance");
+                    if (not split_codes->ComputeFusedFull(computer,
+                                                          fused_graph_->GetClusterId(record),
+                                                          fused_graph_->GetOneBitCode(record),
+                                                          fused_graph_->GetSupplementCode(record),
+                                                          dists.data() + i,
+                                                          &ctx)) {
+                        dists[i] = std::numeric_limits<float>::max();
+                    }
                 }
             } else {
                 flatten_->Query(dists.data(), computer, ids.data(), heap_candidate_size, &ctx);
             }
         }
         for (uint64_t i = 0; i < heap_candidate_size; ++i) {
+            if (not has_valid_distance(dists[i])) {
+                continue;
+            }
             if (ctx.reasoning_ctx != nullptr) {
                 ctx.reasoning_ctx->RecordReorder(
                     candidate_result[i].second, candidate_result[i].first, dists[i]);
@@ -507,9 +517,6 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
         return std::make_shared<StandardHeap<true, false>>(query_allocator, 0);
     }
 
-    auto has_valid_distance = [](float distance) {
-        return IsFiniteRaBitQValue(distance) and distance < std::numeric_limits<float>::max();
-    };
     auto* split_codes = dynamic_cast<RaBitQSplitDataCellInterface*>(flatten_.get());
     const bool accepts_full_distance_hints = fused_graph_ != nullptr and split_codes != nullptr;
     Vector<InnerIdType> all_ids(max_candidate_size, query_allocator);
@@ -612,6 +619,9 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
     }
 
     const auto push_full_distance = [&](uint64_t idx, float distance) {
+        if (not has_valid_distance(distance)) {
+            return;
+        }
         if (ctx.reasoning_ctx != nullptr) {
             ctx.reasoning_ctx->RecordReorder(all_ids[idx], lower_bound_probe_dists[idx], distance);
         }

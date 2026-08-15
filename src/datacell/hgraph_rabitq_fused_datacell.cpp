@@ -178,8 +178,10 @@ HGraphRaBitQFusedDataCell::InsertNeighborsById(InnerIdType id,
     for (uint64_t i = 0; i < neighbor_ids.size(); ++i) {
         output[i] = neighbor_ids[i];
     }
-    auto current = total_count_.load();
-    while (current < id + 1 and not total_count_.compare_exchange_weak(current, id + 1)) {
+    auto current = total_count_.load(std::memory_order_relaxed);
+    while (current < id + 1 and
+           not total_count_.compare_exchange_weak(
+               current, id + 1, std::memory_order_release, std::memory_order_relaxed)) {
     }
 }
 
@@ -409,21 +411,23 @@ HGraphRaBitQFusedDataCell::Deserialize(StreamReader& reader) {
     CHECK_ARGUMENT(bytes == expected_bytes, "invalid fused graph payload size");
     CHECK_ARGUMENT(bytes <= remaining_bytes(reader), "truncated fused graph node payload");
 
-    Vector<uint8_t> node_payload(bytes, allocator_);
+    Vector<uint8_t> replacement(bytes + K_CACHE_LINE_SIZE - 1, 0, allocator_);
+    const auto replacement_address = reinterpret_cast<uintptr_t>(replacement.data());
+    const uint64_t replacement_offset =
+        (K_CACHE_LINE_SIZE - replacement_address % K_CACHE_LINE_SIZE) % K_CACHE_LINE_SIZE;
     if (bytes > 0) {
-        reader.Read(reinterpret_cast<char*>(node_payload.data()), bytes);
+        reader.Read(reinterpret_cast<char*>(replacement.data() + replacement_offset), bytes);
     }
 
     codec_model_ = std::move(codec_model);
-    storage_.clear();
-    aligned_offset_ = 0;
-    Reallocate(max_capacity_);
+    storage_ = std::move(replacement);
+    aligned_offset_ = replacement_offset;
+    if (duplicate_tracker_ != nullptr) {
+        duplicate_tracker_->Resize(max_capacity_);
+    }
     CHECK_ARGUMENT(
         reinterpret_cast<uintptr_t>(storage_.data() + aligned_offset_) % K_CACHE_LINE_SIZE == 0,
         "fused graph node slab is not cache-line aligned");
-    if (bytes > 0) {
-        std::memcpy(storage_.data() + aligned_offset_, node_payload.data(), bytes);
-    }
     Seal();
 }
 

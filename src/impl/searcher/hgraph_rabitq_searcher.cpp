@@ -440,7 +440,9 @@ public:
         const float filter_error = read_float(metadata + 2U * sizeof(float));
         *distance = filter_add + query_.cluster_g_add[node.cluster_id] +
                     filter_rescale * *filter_inner_product;
-        *lower_bound = *distance - filter_error * scaled_cluster_g_error_[node.cluster_id];
+        const float raw_lower_bound =
+            *distance - filter_error * scaled_cluster_g_error_[node.cluster_id];
+        *lower_bound = raw_lower_bound - 1e-5F * std::max(1.0F, std::fabs(raw_lower_bound));
         return IsFiniteRaBitQValue(*distance) and IsFiniteRaBitQValue(*lower_bound) and
                IsFiniteRaBitQValue(*filter_inner_product);
     }
@@ -469,8 +471,9 @@ public:
             const float filter_error = read_float(metadata + 2U * sizeof(float));
             distances[i] = filter_add + query_.cluster_g_add[nodes[i].cluster_id] +
                            filter_rescale * filter_inner_products[i];
-            lower_bounds[i] =
+            const float raw_lower_bound =
                 distances[i] - filter_error * scaled_cluster_g_error_[nodes[i].cluster_id];
+            lower_bounds[i] = raw_lower_bound - 1e-5F * std::max(1.0F, std::fabs(raw_lower_bound));
             valid[i] = IsFiniteRaBitQValue(distances[i]) and
                        IsFiniteRaBitQValue(lower_bounds[i]) and
                        IsFiniteRaBitQValue(filter_inner_products[i]);

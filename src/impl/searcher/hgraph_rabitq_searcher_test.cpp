@@ -538,9 +538,10 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
     REQUIRE(mixed_statistics.rabitq_full_count.load() == 1);
     REQUIRE(mixed_statistics.rabitq_reorder_hint_full_count.load() == 0);
     REQUIRE(mixed_statistics.rabitq_reorder_fallback_full_count.load() == 1);
-    REQUIRE_THROWS_AS(
-        reorder.ReorderFused(nullptr, vectors.data(), 1, reorder_context, nullptr, &candidates),
-        VsagException);
+    auto failed =
+        reorder.ReorderFused(nullptr, vectors.data(), 1, reorder_context, nullptr, &candidates);
+    REQUIRE(failed != nullptr);
+    REQUIRE(failed->Empty());
 
     SECTION("deferred finalize drops a candidate whose full distance fails") {
         graph->SetNodeCodes(
