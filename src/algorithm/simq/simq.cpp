@@ -64,6 +64,7 @@ dump_simq_statistics(const SearchStatistics& stats,
                      uint64_t coarse_candidate_count,
                      uint64_t rerank_candidate_count,
                      uint64_t filtered_candidate_count,
+                     uint64_t rerank_batch_count,
                      uint64_t result_count,
                      bool limited_size_applied,
                      double coarse_ms,
@@ -78,6 +79,7 @@ dump_simq_statistics(const SearchStatistics& stats,
     json["simq_coarse_candidate_count"].SetUint64(coarse_candidate_count);
     json["simq_rerank_candidate_count"].SetUint64(rerank_candidate_count);
     json["simq_filtered_candidate_count"].SetUint64(filtered_candidate_count);
+    json["simq_rerank_batch_count"].SetUint64(rerank_batch_count);
     json["simq_result_count"].SetUint64(result_count);
     json["simq_limited_size_applied"].SetBool(limited_size_applied);
     json["simq_coarse_ms"].SetDouble(coarse_ms);
@@ -1378,7 +1380,7 @@ SIMQ::KnnSearch(const DatasetPtr& query,
     if (total_count_ == 0 || rep_hgraph_ == nullptr) {
         auto result = Dataset::Make();
         result->Statistics(
-            dump_simq_statistics(stats, 0, 0, 0, 0, 0, 0, false, 0.0, 0.0, 0.0, 0, 0, 0));
+            dump_simq_statistics(stats, 0, 0, 0, 0, 0, 0, 0, false, 0.0, 0.0, 0.0, 0, 0, 0));
         return result;
     }
 
@@ -1424,6 +1426,8 @@ SIMQ::KnnSearch(const DatasetPtr& query,
         }
         batch_ids.push_back(doc_id);
     }
+
+    const uint64_t rerank_batch_count = batch_ids.empty() ? 0 : 1;
 
     // Single batched Query call (enables MultiRead in MultiVectorDataCell)
     auto t_query_start = std::chrono::steady_clock::now();
@@ -1491,6 +1495,7 @@ SIMQ::KnnSearch(const DatasetPtr& query,
                                                coarse_candidate_count,
                                                rerank_candidate_count,
                                                filtered_candidate_count,
+                                               rerank_batch_count,
                                                static_cast<uint64_t>(result_count),
                                                limited_size_applied,
                                                coarse_ms,
@@ -1514,7 +1519,7 @@ SIMQ::RangeSearch(const DatasetPtr& query,
     if (total_count_ == 0 || rep_hgraph_ == nullptr) {
         auto result = Dataset::Make();
         result->Statistics(
-            dump_simq_statistics(stats, 0, 0, 0, 0, 0, 0, false, 0.0, 0.0, 0.0, 0, 0, 0));
+            dump_simq_statistics(stats, 0, 0, 0, 0, 0, 0, 0, false, 0.0, 0.0, 0.0, 0, 0, 0));
         return result;
     }
 
@@ -1550,17 +1555,41 @@ SIMQ::RangeSearch(const DatasetPtr& query,
     std::vector<std::pair<float, InnerIdType>> in_range;
     uint64_t filtered_candidate_count = 0;
     auto t_query_start = std::chrono::steady_clock::now();
+
+    std::vector<InnerIdType> batch_ids;
+    batch_ids.reserve(coarse_results.size());
     for (auto& [doc_id, _] : coarse_results) {
         if (filter != nullptr && !filter->CheckValid(this->label_table_->GetLabelById(doc_id))) {
             ++filtered_candidate_count;
             continue;
         }
-        float dist = 0.0F;
-        mv_codes_->Query(&dist, computer, &doc_id, 1);
-        stats.dist_cmp.fetch_add(1, std::memory_order_relaxed);
-        if (std::isfinite(dist) and dist <= radius) {
-            in_range.emplace_back(dist, doc_id);
+        batch_ids.push_back(doc_id);
+    }
+
+    const uint64_t rerank_batch_count = batch_ids.empty() ? 0 : 1;
+    uint32_t mv_io_ms = 0;
+    uint32_t mv_compute_ms = 0;
+    uint32_t mv_candidates = 0;
+    if (!batch_ids.empty()) {
+        in_range.reserve(batch_ids.size());
+        std::vector<float> batch_dists(batch_ids.size());
+        QueryContext query_context{.stats = &stats,
+                                   .distance_phase = DistanceEvaluationPhase::RERANK};
+        mv_codes_->Query(batch_dists.data(),
+                         computer,
+                         batch_ids.data(),
+                         static_cast<InnerIdType>(batch_ids.size()),
+                         &query_context);
+        stats.dist_cmp.fetch_add(static_cast<uint32_t>(batch_ids.size()),
+                                 std::memory_order_relaxed);
+        for (uint64_t i = 0; i < batch_ids.size(); ++i) {
+            if (std::isfinite(batch_dists[i]) and batch_dists[i] <= radius) {
+                in_range.emplace_back(batch_dists[i], batch_ids[i]);
+            }
         }
+        mv_io_ms = stats.mv_io_time_ms.load(std::memory_order_relaxed);
+        mv_compute_ms = stats.mv_compute_time_ms.load(std::memory_order_relaxed);
+        mv_candidates = stats.mv_candidate_count.load(std::memory_order_relaxed);
     }
     double query_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_query_start)
@@ -1591,14 +1620,15 @@ SIMQ::RangeSearch(const DatasetPtr& query,
                                                coarse_candidate_count,
                                                rerank_candidate_count,
                                                filtered_candidate_count,
+                                               rerank_batch_count,
                                                static_cast<uint64_t>(in_range.size()),
                                                limited_size_applied,
                                                coarse_ms,
                                                query_ms,
                                                sort_ms,
-                                               0,
-                                               0,
-                                               0));
+                                               mv_io_ms,
+                                               mv_compute_ms,
+                                               mv_candidates));
     return std::move(result_ds);
 }
 
