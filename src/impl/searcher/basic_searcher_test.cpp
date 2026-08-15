@@ -93,6 +93,36 @@ TEST_CASE("BasicSearcher supports KNN, range, filters, and empty data cells",
     pool->ReturnOne(vl);
 }
 
+TEST_CASE("BasicSearcher returns valid heaps from all search entry points with missing inputs",
+          "[ut][BasicSearcher][search_impl]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    BasicSearcher searcher(common);
+
+    InnerSearchParam param;
+    auto flatten_result =
+        searcher.Search(nullptr, nullptr, nullptr, nullptr, param, LabelTablePtr{}, nullptr);
+    REQUIRE(flatten_result != nullptr);
+    REQUIRE(flatten_result->Empty());
+
+    auto iterator_result = searcher.Search(nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           nullptr,
+                                           param,
+                                           static_cast<IteratorFilterContext*>(nullptr),
+                                           nullptr);
+    REQUIRE(iterator_result != nullptr);
+    REQUIRE(iterator_result->Empty());
+
+    FlattenDistanceProvider distance_provider(nullptr, nullptr);
+    auto graph_result =
+        searcher.Search(nullptr, distance_provider, nullptr, param, nullptr, nullptr);
+    REQUIRE(graph_result != nullptr);
+    REQUIRE(graph_result->Empty());
+}
+
 TEST_CASE("Search with stored vector ID", "[ut][BasicSearcher][DistanceProvider]") {
     constexpr uint64_t dim = 8;
     constexpr InnerIdType count = 4;

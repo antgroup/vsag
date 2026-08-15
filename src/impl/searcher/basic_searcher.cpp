@@ -179,7 +179,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            QueryContext* ctx) const {
     Allocator* alloc = select_query_allocator(ctx, allocator_);
     auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
-    auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
+    StandardHeap<true, false> candidate_set_storage(alloc, -1);
+    auto* candidate_set = &candidate_set_storage;
     if (not graph or not vl) {
         return top_candidates;
     }
@@ -331,7 +332,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Allocator* alloc = select_query_allocator(ctx, allocator_);
 
     auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
-    auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
+    StandardHeap<true, false> candidate_set_storage(alloc, -1);
+    auto* candidate_set = &candidate_set_storage;
 
     if (not graph or not flatten) {
         return top_candidates;
@@ -561,7 +563,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Allocator* alloc = select_query_allocator(ctx, allocator_);
 
     auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
-    auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
+    StandardHeap<true, false> candidate_set_storage(alloc, -1);
+    auto* candidate_set = &candidate_set_storage;
 
     const bool use_custom_distance = inner_search_param.distance_batch_func != nullptr;
     if (not graph or (not flatten and not use_custom_distance)) {
