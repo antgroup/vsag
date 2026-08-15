@@ -16,6 +16,7 @@
 #include "hgraph_parameter.h"
 
 #include <cmath>
+#include <optional>
 
 #include "datacell/extra_info_datacell_parameter.h"
 #include "datacell/flatten_datacell_parameter.h"
@@ -26,6 +27,7 @@
 #include "impl/odescent/odescent_graph_parameter.h"
 #include "inner_string_params.h"
 #include "utils/param_compat_macros.h"
+#include "utils/search_threshold.h"
 #include "vsag/constants.h"
 
 namespace vsag {
@@ -317,7 +319,13 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
 
 HGraphSearchParameters
 HGraphSearchParameters::FromJson(const std::string& json_string) {
-    auto params = JsonType::Parse(json_string);
+    const auto* cached_json = GetCachedSearchParameters(json_string);
+    std::optional<JsonType> uncached_json;
+    if (cached_json == nullptr) {
+        uncached_json.emplace(JsonType::Parse(json_string));
+        cached_json = &uncached_json.value();
+    }
+    const auto& params = *cached_json;
 
     HGraphSearchParameters obj;
 

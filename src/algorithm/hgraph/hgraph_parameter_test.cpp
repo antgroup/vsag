@@ -17,13 +17,16 @@
 
 #include <fmt/format.h>
 
+#include <atomic>
 #include <cmath>
+#include <thread>
 
 #include "hgraph.h"
 #include "index_common_param.h"
 #include "inner_string_params.h"
 #include "parameter_test.h"
 #include "unittest.h"
+#include "utils/search_threshold.h"
 
 #define TEST_COMPATIBILITY_CASE(section_name, param_member, val1, val2, expect_compatible) \
     SECTION(section_name) {                                                                \
@@ -661,6 +664,76 @@ TEST_CASE("HGraphSearchParameters parses skip_ratio and skip_strategy",
         REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
             R"({"hgraph": {"ef_search": 32, "skip_strategy": 123}})"));
     }
+}
+
+TEST_CASE("HGraph search parameter cache preserves validation semantics",
+          "[ut][HGraphSearchParameters][cache]") {
+    const std::string first = R"({"hgraph":{"ef_search":32},"threshold":0.25})";
+    const std::string second = R"({"hgraph":{"ef_search":64},"threshold":0.75})";
+
+    auto first_threshold = vsag::ParseSearchThreshold(first);
+    auto first_params = vsag::HGraphSearchParameters::FromJson(first);
+    REQUIRE(first_threshold.has_value());
+    REQUIRE(first_threshold.value() == 0.25F);
+    REQUIRE(first_params.ef_search == 32);
+
+    auto second_threshold = vsag::ParseSearchThreshold(second);
+    auto second_params = vsag::HGraphSearchParameters::FromJson(second);
+    REQUIRE(second_threshold.has_value());
+    REQUIRE(second_threshold.value() == 0.75F);
+    REQUIRE(second_params.ef_search == 64);
+
+    REQUIRE_THROWS(vsag::ParseSearchThreshold("{"));
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson("{"));
+    REQUIRE_THROWS(vsag::ParseSearchThreshold(R"({"threshold":"invalid"})"));
+
+    auto first_again = vsag::ParseSearchThreshold(first);
+    REQUIRE(first_again.has_value());
+    REQUIRE(first_again.value() == 0.25F);
+
+    const std::string first_copy = first;
+    REQUIRE(vsag::GetCachedSearchParameters(first) == vsag::GetCachedSearchParameters(first_copy));
+    REQUIRE_FALSE(vsag::ParseSearchThreshold("").has_value());
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(""));
+
+    const std::string oversized =
+        std::string(R"({"hgraph":{"ef_search":32},"padding":")") + std::string(4070, 'x') + "\"}";
+    REQUIRE(oversized.size() > 4096);
+    REQUIRE(vsag::GetCachedSearchParameters(oversized) == nullptr);
+    auto oversized_params = vsag::HGraphSearchParameters::FromJson(oversized);
+    REQUIRE(oversized_params.ef_search == 32);
+}
+
+TEST_CASE("HGraph search parameter cache is thread local",
+          "[ut][HGraphSearchParameters][cache][concurrent]") {
+    const std::string first = R"({"hgraph":{"ef_search":32},"threshold":0.25})";
+    const std::string second = R"({"hgraph":{"ef_search":64},"threshold":0.75})";
+    std::atomic<bool> failed{false};
+    std::vector<std::thread> workers;
+    workers.reserve(8);
+    for (uint32_t i = 0; i < 8; ++i) {
+        workers.emplace_back([&, i]() {
+            const auto& parameters = i % 2 == 0 ? first : second;
+            const auto expected_threshold = i % 2 == 0 ? 0.25F : 0.75F;
+            const auto expected_ef = i % 2 == 0 ? 32 : 64;
+            for (uint32_t j = 0; j < 500; ++j) {
+                try {
+                    const auto threshold = vsag::ParseSearchThreshold(parameters);
+                    const auto params = vsag::HGraphSearchParameters::FromJson(parameters);
+                    if (not threshold.has_value() or threshold.value() != expected_threshold or
+                        params.ef_search != expected_ef) {
+                        failed.store(true, std::memory_order_relaxed);
+                    }
+                } catch (...) {
+                    failed.store(true, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+    for (auto& worker : workers) {
+        worker.join();
+    }
+    REQUIRE_FALSE(failed.load(std::memory_order_relaxed));
 }
 
 TEST_CASE("HGraph maps support_force_remove to inner parameter", "[ut][HGraphParameter]") {

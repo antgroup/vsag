@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <new>
 #include <optional>
@@ -29,12 +30,43 @@ namespace vsag {
 
 inline constexpr const char* SEARCH_THRESHOLD = "threshold";
 
+inline const JsonType*
+GetCachedSearchParameters(const std::string& parameters) {
+    constexpr uint64_t kMaxCachedParameterBytes = 4096;
+    if (static_cast<uint64_t>(parameters.size()) > kMaxCachedParameterBytes) {
+        return nullptr;
+    }
+
+    struct SearchParameterCache {
+        std::string parameters;
+        std::optional<JsonType> json;
+        bool valid{false};
+    };
+    thread_local SearchParameterCache cache;
+
+    if (cache.valid && cache.parameters == parameters) {
+        return &cache.json.value();
+    }
+
+    cache.valid = false;
+    cache.parameters = parameters;
+    cache.json.emplace(JsonType::Parse(parameters));
+    cache.valid = true;
+    return &cache.json.value();
+}
+
 inline std::optional<float>
 ParseSearchThreshold(const std::string& parameters) {
     if (parameters.empty()) {
         return std::nullopt;
     }
-    const auto json = JsonType::Parse(parameters);
+    const auto* cached_json = GetCachedSearchParameters(parameters);
+    std::optional<JsonType> uncached_json;
+    if (cached_json == nullptr) {
+        uncached_json.emplace(JsonType::Parse(parameters));
+        cached_json = &uncached_json.value();
+    }
+    const auto& json = *cached_json;
     if (not json.Contains(SEARCH_THRESHOLD)) {
         return std::nullopt;
     }
