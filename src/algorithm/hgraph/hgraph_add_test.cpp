@@ -1138,6 +1138,92 @@ TEST_CASE("HGraph deduplicate_storage physical growth is single-flight",
     REQUIRE(all_resizers_finished);
 }
 
+TEST_CASE("HGraph immutable transition keeps concurrent search results stable",
+          "[ut][hgraph][immutable][concurrent]") {
+    constexpr int64_t dim = 8;
+    constexpr int64_t base_count = 64;
+    constexpr uint64_t search_threads = 8;
+    constexpr uint64_t searches_per_thread = 32;
+    const std::string search_parameters = R"({"hgraph": {"ef_search": 32}})";
+
+    auto common_param = MakeCommonParam(dim);
+    auto index = MakeHGraphIndex(MakeFp32HGraphJson(false), common_param);
+
+    std::vector<float> vectors(base_count * dim);
+    std::vector<int64_t> ids(base_count);
+    for (int64_t i = 0; i < base_count; ++i) {
+        ids[i] = i;
+        vectors[i * dim] = static_cast<float>(i);
+    }
+    auto base = MakeFloatDataset(vectors, ids, dim, base_count);
+    REQUIRE(index->Build(base).has_value());
+
+    std::vector<float> query_vector(dim, 0.0F);
+    auto query = MakeFloatQuery(query_vector, dim);
+    auto expected = index->KnnSearch(query, 5, search_parameters);
+    REQUIRE(expected.has_value());
+
+    const auto* expected_ids = expected.value()->GetIds();
+    const auto* expected_distances = expected.value()->GetDistances();
+    std::atomic<uint64_t> searchers_ready{0};
+    std::atomic<uint64_t> mutable_searches_started{0};
+    std::atomic<bool> start_search{false};
+    std::atomic<bool> immutable_search_ready{false};
+    std::atomic<bool> failed{false};
+    auto verify_search = [&]() {
+        auto result = index->KnnSearch(query, 5, search_parameters);
+        if (not result.has_value() || result.value()->GetDim() != 5) {
+            return false;
+        }
+        const auto* result_ids = result.value()->GetIds();
+        const auto* result_distances = result.value()->GetDistances();
+        for (int64_t k = 0; k < 5; ++k) {
+            if (result_ids[k] != expected_ids[k] || result_distances[k] != expected_distances[k]) {
+                return false;
+            }
+        }
+        return true;
+    };
+    std::vector<std::future<void>> searchers;
+    searchers.reserve(search_threads);
+    for (uint64_t i = 0; i < search_threads; ++i) {
+        searchers.emplace_back(std::async(std::launch::async, [&]() {
+            searchers_ready.fetch_add(1, std::memory_order_release);
+            while (not start_search.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            mutable_searches_started.fetch_add(1, std::memory_order_release);
+            if (not verify_search()) {
+                failed.store(true, std::memory_order_release);
+            }
+            while (not immutable_search_ready.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            for (uint64_t j = 0; j < searches_per_thread; ++j) {
+                if (not verify_search()) {
+                    failed.store(true, std::memory_order_release);
+                    break;
+                }
+            }
+        }));
+    }
+
+    while (searchers_ready.load(std::memory_order_acquire) < search_threads) {
+        std::this_thread::yield();
+    }
+    start_search.store(true, std::memory_order_release);
+    while (mutable_searches_started.load(std::memory_order_acquire) < search_threads) {
+        std::this_thread::yield();
+    }
+    REQUIRE(index->SetImmutable().has_value());
+    immutable_search_ready.store(true, std::memory_order_release);
+    for (auto& searcher : searchers) {
+        searcher.get();
+    }
+    REQUIRE_FALSE(failed.load(std::memory_order_acquire));
+    REQUIRE(index->SetImmutable().has_value());
+}
+
 TEST_CASE("HGraph deduplicate_storage concurrent Add keeps visible duplicates searchable",
           "[ut][hgraph][duplicate][concurrent][add]") {
     constexpr int64_t dim = 2;
