@@ -221,7 +221,8 @@ SparseTermDataCell::fill_heap_initial(uint32_t id,
     }
     if (dist < 0) {
         if constexpr (type == InnerSearchType::WITH_FILTER) {
-            if (not filter->CheckValid(id + offset_id)) {
+            const bool valid = filter->CheckValid(id + offset_id);
+            if (not valid) {
                 dist = 0;
                 return false;
             }
@@ -235,17 +236,24 @@ SparseTermDataCell::fill_heap_initial(uint32_t id,
 }
 
 template <InnerSearchMode mode, InnerSearchType type>
-void
+bool
 SparseTermDataCell::InsertHeapByTermLists(float* dists,
                                           const SparseTermComputerPtr& computer,
                                           MaxHeap& heap,
                                           const InnerSearchParam& param,
-                                          uint32_t offset_id) const {
+                                          uint32_t offset_id,
+                                          const uint64_t* filter_callback_limit) const {
     uint32_t id = 0;
     float cur_heap_top = std::numeric_limits<float>::max();
     auto n_candidate = param.ef;
     auto radius = param.radius;
     auto filter = param.is_inner_id_allowed;
+
+    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+        if (heap.size() == n_candidate) {
+            cur_heap_top = heap.top().first;
+        }
+    }
 
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
         // note that radius = 1 - ip -> radius - 1 = 0 - ip
@@ -270,15 +278,22 @@ SparseTermDataCell::InsertHeapByTermLists(float* dists,
             if (heap.size() < n_candidate) {
                 for (; i < term_end; i++) {
                     id = one_term_ids[i];
-                    if (fill_heap_initial<type>(id,
-                                                dists[id],
-                                                cur_heap_top,
-                                                heap,
-                                                offset_id,
-                                                n_candidate,
-                                                filter,
-                                                param.distance_threshold,
-                                                param.enable_reorder)) {
+                    const bool heap_filled = fill_heap_initial<type>(id,
+                                                                     dists[id],
+                                                                     cur_heap_top,
+                                                                     heap,
+                                                                     offset_id,
+                                                                     n_candidate,
+                                                                     filter,
+                                                                     param.distance_threshold,
+                                                                     param.enable_reorder);
+                    if constexpr (type == InnerSearchType::WITH_FILTER) {
+                        if (filter_callback_limit != nullptr and *filter_callback_limit == 0) {
+                            computer->ResetTerm();
+                            return true;
+                        }
+                    }
+                    if (heap_filled) {
                         i++;
                         break;
                     }
@@ -298,22 +313,36 @@ SparseTermDataCell::InsertHeapByTermLists(float* dists,
                                                    filter,
                                                    param.distance_threshold,
                                                    param.enable_reorder);
+            if constexpr (type == InnerSearchType::WITH_FILTER) {
+                if (filter_callback_limit != nullptr and *filter_callback_limit == 0) {
+                    computer->ResetTerm();
+                    return true;
+                }
+            }
         }
     }
     computer->ResetTerm();
+    return false;
 }
 
 template <InnerSearchMode mode, InnerSearchType type>
-void
+bool
 SparseTermDataCell::InsertHeapByDists(float* dists,
                                       uint32_t dists_size,
                                       MaxHeap& heap,
                                       const InnerSearchParam& param,
-                                      uint32_t offset_id) const {
+                                      uint32_t offset_id,
+                                      const uint64_t* filter_callback_limit) const {
     float cur_heap_top = std::numeric_limits<float>::max();
     auto n_candidate = param.ef;
     auto radius = param.radius;
     auto filter = param.is_inner_id_allowed;
+
+    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+        if (heap.size() == n_candidate) {
+            cur_heap_top = heap.top().first;
+        }
+    }
 
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
         cur_heap_top = radius - 1;
@@ -323,15 +352,21 @@ SparseTermDataCell::InsertHeapByDists(float* dists,
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
         if (heap.size() < n_candidate) {
             for (; id < total_count_; id++) {
-                if (fill_heap_initial<type>(id,
-                                            dists[id],
-                                            cur_heap_top,
-                                            heap,
-                                            offset_id,
-                                            n_candidate,
-                                            filter,
-                                            param.distance_threshold,
-                                            param.enable_reorder)) {
+                const bool heap_filled = fill_heap_initial<type>(id,
+                                                                 dists[id],
+                                                                 cur_heap_top,
+                                                                 heap,
+                                                                 offset_id,
+                                                                 n_candidate,
+                                                                 filter,
+                                                                 param.distance_threshold,
+                                                                 param.enable_reorder);
+                if constexpr (type == InnerSearchType::WITH_FILTER) {
+                    if (filter_callback_limit != nullptr and *filter_callback_limit == 0) {
+                        return true;
+                    }
+                }
+                if (heap_filled) {
                     id++;
                     break;
                 }
@@ -350,7 +385,13 @@ SparseTermDataCell::InsertHeapByDists(float* dists,
                                                filter,
                                                param.distance_threshold,
                                                param.enable_reorder);
+        if constexpr (type == InnerSearchType::WITH_FILTER) {
+            if (filter_callback_limit != nullptr and *filter_callback_limit == 0) {
+                return true;
+            }
+        }
     }
+    return false;
 }
 
 void
@@ -727,70 +768,78 @@ SparseTermDataCell::Decode(const uint8_t* src, size_t size, float* dst) const {
     }
 }
 
-template void
+template bool
 SparseTermDataCell::InsertHeapByTermLists<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
     float* dists,
     const SparseTermComputerPtr& computer,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_limit) const;
 
-template void
+template bool
 SparseTermDataCell::InsertHeapByTermLists<InnerSearchMode::KNN_SEARCH,
                                           InnerSearchType::WITH_FILTER>(
     float* dists,
     const SparseTermComputerPtr& computer,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_limit) const;
 
-template void
+template bool
 SparseTermDataCell::InsertHeapByTermLists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::PURE>(
     float* dists,
     const SparseTermComputerPtr& computer,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_limit) const;
 
-template void
+template bool
 SparseTermDataCell::InsertHeapByTermLists<InnerSearchMode::RANGE_SEARCH,
                                           InnerSearchType::WITH_FILTER>(
     float* dists,
     const SparseTermComputerPtr& computer,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_limit) const;
 
-template void
+template bool
 SparseTermDataCell::InsertHeapByDists<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_limit) const;
 
-template void
+template bool
 SparseTermDataCell::InsertHeapByDists<InnerSearchMode::KNN_SEARCH, InnerSearchType::WITH_FILTER>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_limit) const;
 
-template void
+template bool
 SparseTermDataCell::InsertHeapByDists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::PURE>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_limit) const;
 
-template void
+template bool
 SparseTermDataCell::InsertHeapByDists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::WITH_FILTER>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_limit) const;
 
 }  // namespace vsag

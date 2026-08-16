@@ -129,6 +129,198 @@ private:
     std::unordered_set<int64_t> valid_ids_set_;
 };
 
+class CountingFilter : public Filter {
+public:
+    explicit CountingFilter(int64_t only_valid_id, bool accept_all = false)
+        : only_valid_id_(only_valid_id), accept_all_(accept_all) {
+    }
+
+    [[nodiscard]] bool
+    CheckValid(int64_t id) const override {
+        ++count_;
+        return WouldAccept(id);
+    }
+
+    [[nodiscard]] bool
+    WouldAccept(int64_t id) const {
+        return accept_all_ or id == only_valid_id_;
+    }
+
+    [[nodiscard]] uint64_t
+    Count() const {
+        return count_;
+    }
+
+private:
+    int64_t only_valid_id_{-1};
+    bool accept_all_{false};
+    mutable uint64_t count_{0};
+};
+
+TEST_CASE("SINDI Filter Callback Limit", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 1;
+
+    const bool immutable = GENERATE(false, true);
+    const float query_prune_ratio = GENERATE(0.0F, 0.2F);
+    const auto search_mode = GENERATE(SearchMode::KNN_SEARCH, SearchMode::RANGE_SEARCH);
+    const bool use_search_request = GENERATE(false, true);
+    CAPTURE(immutable, query_prune_ratio, search_mode, use_search_request);
+
+    auto parameter = std::make_shared<SINDIParameter>();
+    parameter->term_id_limit = 8;
+    parameter->window_size = 4;
+    parameter->doc_prune_ratio = 0.0F;
+    parameter->avg_doc_term_length = 1;
+    parameter->immutable = immutable;
+
+    constexpr uint64_t count = 8;
+    uint32_t term = 3;
+    std::vector<float> values(count, 1.0F);
+    std::vector<int64_t> labels(count);
+    std::vector<SparseVector> vectors(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        labels[i] = static_cast<int64_t>(i);
+        vectors[i] = SparseVector{1, &term, &values[i]};
+    }
+    auto base = Dataset::Make();
+    base->NumElements(count)->SparseVectors(vectors.data())->Ids(labels.data())->Owner(false);
+
+    SINDI index(parameter, common_param);
+    REQUIRE(index.Build(base).empty());
+
+    float query_value = 1.0F;
+    SparseVector query_vector{1, &term, &query_value};
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+
+    const auto search = [&](const std::string& parameters, const FilterPtr& filter) {
+        if (use_search_request) {
+            SearchRequest request;
+            request.query_ = query;
+            request.mode_ = search_mode;
+            request.topk_ = 4;
+            request.radius_ = 0.0F;
+            request.limited_size_ = 4;
+            request.params_str_ = parameters;
+            request.enable_filter_ = true;
+            request.filter_ = filter;
+            request.expected_labels_ = {2};
+            return index.SearchWithRequest(request);
+        }
+        if (search_mode == SearchMode::RANGE_SEARCH) {
+            return index.RangeSearch(query, 0.0F, parameters, filter, 4);
+        }
+        return index.KnnSearch(query, 4, parameters, filter);
+    };
+
+    const auto limited_parameters = fmt::format(
+        R"({{"sindi": {{"n_candidate": 4, "query_prune_ratio": {}, "filter_callback_limit": 3}}}})",
+        query_prune_ratio);
+    auto limited_filter = std::make_shared<CountingFilter>(2);
+    auto limited_result = search(limited_parameters, limited_filter);
+
+    REQUIRE(limited_filter->Count() == 3);
+    REQUIRE(limited_result->GetDim() == 1);
+    REQUIRE(limited_result->GetIds()[0] == 2);
+    REQUIRE(limited_filter->WouldAccept(limited_result->GetIds()[0]));
+
+    auto rejecting_filter = std::make_shared<CountingFilter>(-1);
+    auto rejected_result = search(limited_parameters, rejecting_filter);
+    REQUIRE(rejecting_filter->Count() == 3);
+    REQUIRE(rejected_result->GetDim() == 0);
+
+    const auto unlimited_parameters = fmt::format(
+        R"({{"sindi": {{"n_candidate": 4, "query_prune_ratio": {}, "filter_callback_limit": 0}}}})",
+        query_prune_ratio);
+    auto unlimited_filter = std::make_shared<CountingFilter>(2);
+    auto unlimited_result = search(unlimited_parameters, unlimited_filter);
+
+    REQUIRE(unlimited_filter->Count() > 3);
+    REQUIRE(unlimited_result->GetDim() == 1);
+    REQUIRE(unlimited_result->GetIds()[0] == 2);
+
+    if (not immutable) {
+        REQUIRE(index.Remove(std::vector<int64_t>{0}, RemoveMode::MARK_REMOVE) == 1);
+        const auto deleted_parameters = fmt::format(
+            R"({{"sindi": {{"n_candidate": 4, "query_prune_ratio": {}, "filter_callback_limit": 1}}}})",
+            query_prune_ratio);
+        auto deleted_filter = std::make_shared<CountingFilter>(1);
+        auto deleted_result = search(deleted_parameters, deleted_filter);
+
+        REQUIRE(deleted_filter->Count() == 1);
+        REQUIRE(deleted_result->GetDim() == 1);
+        REQUIRE(deleted_result->GetIds()[0] == 1);
+
+        if (use_search_request) {
+            SearchRequest request;
+            request.query_ = query;
+            request.mode_ = search_mode;
+            request.topk_ = 4;
+            request.radius_ = 0.0F;
+            request.limited_size_ = 4;
+            request.params_str_ = deleted_parameters;
+            auto unfiltered_result = index.SearchWithRequest(request);
+
+            REQUIRE(unfiltered_result->GetDim() == 4);
+            for (int64_t i = 0; i < unfiltered_result->GetDim(); ++i) {
+                REQUIRE(unfiltered_result->GetIds()[i] != 0);
+            }
+        }
+    }
+}
+
+TEST_CASE("SINDI Filtered KNN Restores Heap Top Across Windows", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 1;
+
+    const bool immutable = GENERATE(false, true);
+    const float query_prune_ratio = GENERATE(0.0F, 0.2F);
+    CAPTURE(immutable, query_prune_ratio);
+
+    auto parameter = std::make_shared<SINDIParameter>();
+    parameter->term_id_limit = 8;
+    parameter->window_size = 4;
+    parameter->doc_prune_ratio = 0.0F;
+    parameter->avg_doc_term_length = 1;
+    parameter->immutable = immutable;
+
+    constexpr uint64_t count = 5;
+    uint32_t term = 3;
+    std::vector<float> values = {10.0F, 1.0F, 1.0F, 1.0F, 1.0F};
+    std::vector<int64_t> labels(count);
+    std::vector<SparseVector> vectors(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        labels[i] = static_cast<int64_t>(i);
+        vectors[i] = SparseVector{1, &term, &values[i]};
+    }
+    auto base = Dataset::Make();
+    base->NumElements(count)->SparseVectors(vectors.data())->Ids(labels.data())->Owner(false);
+
+    SINDI index(parameter, common_param);
+    REQUIRE(index.Build(base).empty());
+
+    float query_value = 1.0F;
+    SparseVector query_vector{1, &term, &query_value};
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+    const auto search_parameters = fmt::format(
+        R"({{"sindi": {{"n_candidate": 1, "query_prune_ratio": {}}}}})", query_prune_ratio);
+
+    auto filter = std::make_shared<CountingFilter>(-1, true);
+    auto result = index.KnnSearch(query, 1, search_parameters, filter);
+
+    REQUIRE(result->GetDim() == 1);
+    REQUIRE(result->GetIds()[0] == 0);
+    REQUIRE(filter->Count() == 1);
+}
+
 TEST_CASE("SINDI Heap Insert Strategy Test", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;

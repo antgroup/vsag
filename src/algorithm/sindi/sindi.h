@@ -221,7 +221,8 @@ private:
                 bool use_term_lists_heap_insert,
                 const SparseVector* original_query = nullptr,
                 ReasoningContext* reasoning_ctx = nullptr,
-                SearchStatistics* statistics = nullptr) const;
+                SearchStatistics* statistics = nullptr,
+                const uint64_t* filter_callback_limit = nullptr) const;
 
     template <InnerSearchMode mode>
     DatasetPtr
@@ -231,7 +232,8 @@ private:
                           bool use_term_lists_heap_insert,
                           const SparseVector* original_query = nullptr,
                           ReasoningContext* reasoning_ctx = nullptr,
-                          SearchStatistics* statistics = nullptr) const;
+                          SearchStatistics* statistics = nullptr,
+                          const uint64_t* filter_callback_limit = nullptr) const;
 
     bool
     UseTermListsHeapInsert(const SINDISearchParameter& search_param,
@@ -331,22 +333,24 @@ private:
                                 bool enable_reorder) const;
 
     template <InnerSearchMode mode, InnerSearchType type>
-    void
+    bool
     immutable_insert_heap_by_mapped_terms(float* dists,
                                           const ImmutableSINDIWindow& window,
                                           const SparseTermComputerPtr& computer,
                                           const ImmutableMappedQueryTerms& mapped_terms,
                                           MaxHeap& heap,
                                           const InnerSearchParam& param,
-                                          uint32_t offset_id) const;
+                                          uint32_t offset_id,
+                                          const uint64_t* filter_callback_limit) const;
 
     template <InnerSearchMode mode, InnerSearchType type>
-    void
+    bool
     immutable_insert_heap_by_dists(float* dists,
                                    uint32_t dists_size,
                                    MaxHeap& heap,
                                    const InnerSearchParam& param,
-                                   uint32_t offset_id) const;
+                                   uint32_t offset_id,
+                                   const uint64_t* filter_callback_limit) const;
 
     void
     AttachReasoningReport(const DatasetPtr& dataset_results, ReasoningContext* reasoning_ctx) const;

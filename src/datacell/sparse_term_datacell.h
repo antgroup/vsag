@@ -107,12 +107,13 @@ public:
      */
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH,
               InnerSearchType type = InnerSearchType::PURE>
-    void
+    bool
     InsertHeapByTermLists(float* dists,
                           const SparseTermComputerPtr& computer,
                           MaxHeap& heap,
                           const InnerSearchParam& param,
-                          uint32_t offset_id) const;
+                          uint32_t offset_id,
+                          const uint64_t* filter_callback_limit = nullptr) const;
 
     /**
      * @brief Insert candidates into heap directly from precomputed distance array
@@ -125,12 +126,13 @@ public:
      */
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH,
               InnerSearchType type = InnerSearchType::PURE>
-    void
+    bool
     InsertHeapByDists(float* dists,
                       uint32_t dists_size,
                       MaxHeap& heap,
                       const InnerSearchParam& param,
-                      uint32_t offset_id) const;
+                      uint32_t offset_id,
+                      const uint64_t* filter_callback_limit = nullptr) const;
 
     void
     DocPrune(Vector<std::pair<uint32_t, float>>& sorted_base) const;

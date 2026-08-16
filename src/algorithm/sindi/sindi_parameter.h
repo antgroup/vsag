@@ -94,6 +94,7 @@ public:
 public:
     // search
     uint32_t n_candidate{0};
+    uint64_t filter_callback_limit{0};
 
     // data cell
     float query_prune_ratio{0};

@@ -221,6 +221,7 @@ SINDISearchParameter::FromJson(const JsonType& json) {
 
     term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
     term_retain_threshold = DEFAULT_TERM_RETAIN_THRESHOLD;
+    filter_callback_limit = DEFAULT_FILTER_CALLBACK_LIMIT;
     if (json[INDEX_SINDI].Contains(SPARSE_TERM_PRUNE_RATIO)) {
         term_prune_ratio = json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO].GetFloat();
         CHECK_ARGUMENT((0.0F <= term_prune_ratio and term_prune_ratio < 1.0F),
@@ -238,6 +239,20 @@ SINDISearchParameter::FromJson(const JsonType& json) {
                 threshold >= 0,
                 fmt::format("term_retain_threshold must be non-negative, got {}", threshold));
             term_retain_threshold = static_cast<uint64_t>(threshold);
+        }
+    }
+    if (json[INDEX_SINDI].Contains(SPARSE_FILTER_CALLBACK_LIMIT)) {
+        const auto limit_json = json[INDEX_SINDI][SPARSE_FILTER_CALLBACK_LIMIT];
+        CHECK_ARGUMENT(limit_json.IsNumberInteger(),
+                       "filter_callback_limit must be a non-negative integer");
+        if (limit_json.IsNumberUnsigned()) {
+            filter_callback_limit = limit_json.GetUint64();
+        } else {
+            const auto limit = limit_json.GetInt();
+            CHECK_ARGUMENT(
+                limit >= 0,
+                fmt::format("filter_callback_limit must be non-negative, got {}", limit));
+            filter_callback_limit = static_cast<uint64_t>(limit);
         }
     }
 
@@ -268,6 +283,7 @@ SINDISearchParameter::ToJson() const {
     json[INDEX_SINDI].SetJson(JsonType());
     json[INDEX_SINDI][SPARSE_QUERY_PRUNE_RATIO].SetFloat(query_prune_ratio);
     json[INDEX_SINDI][SPARSE_N_CANDIDATE].SetInt(n_candidate);
+    json[INDEX_SINDI][SPARSE_FILTER_CALLBACK_LIMIT].SetUint64(filter_callback_limit);
     json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
     json[INDEX_SINDI][SPARSE_TERM_RETAIN_THRESHOLD].SetUint64(term_retain_threshold);
     return json;
