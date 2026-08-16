@@ -35,7 +35,7 @@ SQ4UniformQuantizerParameter::FromJson(const JsonType& json) {
 
 void
 SQ4UniformQuantizerParameter::ValidateTruncRate(float trunc_rate) {
-    if (not std::isfinite(trunc_rate) or trunc_rate < 0.0F or trunc_rate > 0.5F) {
+    if (!std::isfinite(trunc_rate) || trunc_rate < 0.0F || trunc_rate > 0.5F) {
         throw VsagException(
             ErrorType::INVALID_ARGUMENT,
             fmt::format("sq4_uniform_trunc_rate must be finite and in [0, 0.5], but got {}",
