@@ -397,27 +397,34 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     if (this->bucket_ == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bucket init error");
     }
-    if (param->ivf_partition_strategy_parameter->partition_strategy_type ==
-        IVFPartitionStrategyType::IVF) {
-        this->partition_strategy_ = std::make_shared<IVFNearestPartition>(
-            bucket_->bucket_count_, common_param, param->ivf_partition_strategy_parameter);
-    } else if (param->ivf_partition_strategy_parameter->partition_strategy_type ==
-               IVFPartitionStrategyType::GNO_IMI) {
-        this->partition_strategy_ = std::make_shared<GNOIMIPartition>(
-            common_param, param->ivf_partition_strategy_parameter);
-    }
-    if (this->use_reorder_) {
-        this->reorder_codes_ =
-            FlattenInterface::MakeInstance(param->precise_codes_param, common_param);
-        reorder_ = std::make_shared<FlattenReorder>(this->reorder_codes_, allocator_);
-    }
-    if (param->bucket_param->use_residual_) {
-        this->bucket_->SetStrategy(partition_strategy_);
-    }
+
+    // Initialize thread pool before partition strategy construction
     this->thread_pool_ = common_param.thread_pool_;
     if (param->build_thread_count > 1 and this->thread_pool_ == nullptr) {
         this->thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
         this->thread_pool_->SetPoolSize(param->build_thread_count);
+    }
+
+    // Create modified common_param with the initialized thread_pool_
+    IndexCommonParam modified_common_param = common_param;
+    modified_common_param.thread_pool_ = this->thread_pool_;
+
+    if (param->ivf_partition_strategy_parameter->partition_strategy_type ==
+        IVFPartitionStrategyType::IVF) {
+        this->partition_strategy_ = std::make_shared<IVFNearestPartition>(
+            bucket_->bucket_count_, modified_common_param, param->ivf_partition_strategy_parameter);
+    } else if (param->ivf_partition_strategy_parameter->partition_strategy_type ==
+               IVFPartitionStrategyType::GNO_IMI) {
+        this->partition_strategy_ = std::make_shared<GNOIMIPartition>(
+            modified_common_param, param->ivf_partition_strategy_parameter);
+    }
+    if (this->use_reorder_) {
+        this->reorder_codes_ =
+            FlattenInterface::MakeInstance(param->precise_codes_param, modified_common_param);
+        reorder_ = std::make_shared<FlattenReorder>(this->reorder_codes_, allocator_);
+    }
+    if (param->bucket_param->use_residual_) {
+        this->bucket_->SetStrategy(partition_strategy_);
     }
 
     this->graph_param_ = param->graph_param;
