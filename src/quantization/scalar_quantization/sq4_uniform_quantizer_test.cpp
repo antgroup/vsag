@@ -15,6 +15,8 @@
 
 #include "sq4_uniform_quantizer.h"
 
+#include <limits>
+
 #include "impl/allocator/safe_allocator.h"
 #include "quantization/quantizer_test.h"
 #include "scalar_quantizer_test_utils.h"
@@ -23,6 +25,35 @@ using namespace vsag;
 
 const auto dims = fixtures::get_common_used_dims();
 const auto counts = {10, 101};
+
+TEST_CASE("SQ4 Uniform validates truncation rate", "[ut][SQ4UniformQuantizer]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+
+    SECTION("accepts finite boundary values") {
+        for (const float rate : {0.0F, 0.05F, 0.5F}) {
+            CAPTURE(rate);
+            REQUIRE_NOTHROW(
+                SQ4UniformQuantizer<MetricType::METRIC_TYPE_L2SQR>(4, allocator.get(), rate));
+        }
+    }
+
+    SECTION("rejects non-finite and out-of-range values") {
+        const float invalid_rates[] = {-0.01F,
+                                       0.5001F,
+                                       std::numeric_limits<float>::quiet_NaN(),
+                                       std::numeric_limits<float>::infinity(),
+                                       -std::numeric_limits<float>::infinity()};
+        for (const float rate : invalid_rates) {
+            CAPTURE(rate);
+            try {
+                (void)SQ4UniformQuantizer<MetricType::METRIC_TYPE_L2SQR>(4, allocator.get(), rate);
+                FAIL("invalid SQ4 uniform truncation rate was accepted");
+            } catch (const VsagException& error) {
+                REQUIRE(error.error_.type == ErrorType::INVALID_ARGUMENT);
+            }
+        }
+    }
+}
 
 template <MetricType metric>
 void
