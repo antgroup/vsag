@@ -218,6 +218,29 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
         return;
     }
 
+    auto release_uint32_metadata = [this](const uint32_t* vector_counts, auto release) {
+        for (auto iter = this->data_.cbegin(); iter != this->data_.cend(); ++iter) {
+            if (not IsUInt32MetadataKey(iter->first)) {
+                continue;
+            }
+            const auto* stored_values = std::get_if<const uint32_t*>(&iter->second);
+            if (stored_values == nullptr) {
+                continue;
+            }
+            const auto* values = *stored_values;
+            bool already_released = values == nullptr or values == vector_counts;
+            for (auto previous = this->data_.cbegin(); not already_released and previous != iter;
+                 ++previous) {
+                const auto* previous_values = std::get_if<const uint32_t*>(&previous->second);
+                already_released = IsUInt32MetadataKey(previous->first) and
+                                   previous_values != nullptr and *previous_values == values;
+            }
+            if (not already_released) {
+                release(values);
+            }
+        }
+    };
+
     if (allocator_ != nullptr) {
         allocator_->Deallocate(void_ptr(DatasetImpl::GetIds()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetDistances()));
@@ -225,7 +248,11 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
         allocator_->Deallocate(void_ptr(DatasetImpl::GetFloat16Vectors()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetFloat32Vectors()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetExtraInfos()));
-        allocator_->Deallocate(void_ptr(DatasetImpl::GetVectorCounts()));
+        const auto* vector_counts = DatasetImpl::GetVectorCounts();
+        allocator_->Deallocate(void_ptr(vector_counts));
+        release_uint32_metadata(vector_counts, [this](const uint32_t* values) {
+            allocator_->Deallocate(void_ptr(values));
+        });
         const auto* sparse_vectors = DatasetImpl::GetSparseVectors();
         if (sparse_vectors != nullptr) {
             for (int i = 0; i < DatasetImpl::GetNumElements(); i++) {
@@ -258,7 +285,9 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
         delete[] DatasetImpl::GetFloat16Vectors();
         delete[] DatasetImpl::GetFloat32Vectors();
         delete[] DatasetImpl::GetExtraInfos();
-        delete[] DatasetImpl::GetVectorCounts();
+        const auto* vector_counts = DatasetImpl::GetVectorCounts();
+        delete[] vector_counts;
+        release_uint32_metadata(vector_counts, [](const uint32_t* values) { delete[] values; });
 
         if (DatasetImpl::GetSparseVectors() != nullptr) {
             for (int i = 0; i < DatasetImpl::GetNumElements(); i++) {
@@ -362,6 +391,13 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
                                                         static_cast<uint64_t>(num_elements)));
         }
     }
+    for (const auto& [key, value] : this->data_) {
+        if (IsUInt32MetadataKey(key)) {
+            copy_dataset->UInt32Metadata(
+                UInt32MetadataNameFromKey(key),
+                allocate_and_copy(std::get<const uint32_t*>(value), num_elements, allocator_ref));
+        }
+    }
 
     if (this->GetSourceID() != nullptr) {
         auto* source_ids = new std::string[num_elements];
@@ -462,6 +498,32 @@ DatasetImpl::Append(const DatasetPtr& other) {
         }
     }
 
+    std::vector<std::string> uint32_metadata_keys;
+    for (const auto& [key, value] : this->data_) {
+        if (not IsUInt32MetadataKey(key) || std::get<const uint32_t*>(value) == nullptr) {
+            continue;
+        }
+        const auto name = UInt32MetadataNameFromKey(key);
+        if (other->GetUInt32Metadata(name) == nullptr) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Cannot append dataset without uint32 metadata " + name);
+        }
+        uint32_metadata_keys.push_back(key);
+    }
+    if (other_impl != nullptr) {
+        for (const auto& [key, value] : other_impl->data_) {
+            if (not IsUInt32MetadataKey(key) || std::get<const uint32_t*>(value) == nullptr) {
+                continue;
+            }
+            const auto name = UInt32MetadataNameFromKey(key);
+            if (this->GetUInt32Metadata(name) == nullptr) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "Cannot append dataset with uint32 metadata " + name +
+                                        " to dataset without it");
+            }
+        }
+    }
+
     // check sparse-vectors
     if (this->data_.find(SPARSE_VECTORS) != this->data_.end() &&
         other->GetSparseVectors() == nullptr) {
@@ -498,6 +560,19 @@ DatasetImpl::Append(const DatasetPtr& other) {
                             "Cannot append dataset without source id to dataset with source id");
     }
 
+    // Pointer-backed Dataset fields may alias. Detach uint32 metadata before reallocating any
+    // aliased array so each appended field can receive its own tail without a double reallocation.
+    std::unordered_set<const uint32_t*> seen_uint32_metadata;
+    const auto* vector_counts = this->GetVectorCounts();
+    for (const auto& key : uint32_metadata_keys) {
+        auto iter = this->data_.find(key);
+        const auto* values = std::get<const uint32_t*>(iter->second);
+        const bool aliases_metadata = not seen_uint32_metadata.insert(values).second;
+        if (values == vector_counts or aliases_metadata) {
+            iter->second = allocate_and_copy(values, old_num_elements, this->allocator_);
+        }
+    }
+
     // append contiguous arrays via realloc-and-copy
     APPEND_DATA(IDS, int64_t*, Ids, 1);
     APPEND_DATA(DISTS, float*, Distances, dim);
@@ -505,6 +580,17 @@ DatasetImpl::Append(const DatasetPtr& other) {
     APPEND_DATA(FLOAT16_VECTORS, uint16_t*, Float16Vectors, dim);
     APPEND_DATA(FLOAT32_VECTORS, float*, Float32Vectors, dim);
     APPEND_DATA(VECTOR_COUNTS, uint32_t*, VectorCounts, 1);
+    for (const auto& key : uint32_metadata_keys) {
+        auto iter = this->data_.find(key);
+        auto* values = const_cast<uint32_t*>(std::get<const uint32_t*>(iter->second));
+        const auto name = UInt32MetadataNameFromKey(key);
+        this->UInt32Metadata(name,
+                             allocate_and_copy(other->GetUInt32Metadata(name),
+                                               new_num_elements,
+                                               this->allocator_,
+                                               values,
+                                               old_num_elements));
+    }
     if (this->GetExtraInfoSize() != 0) {
         APPEND_DATA(EXTRA_INFOS, char*, ExtraInfos, this->GetExtraInfoSize());
     }

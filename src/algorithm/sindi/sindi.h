@@ -17,6 +17,7 @@
 
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sindi/term_id_mapper.h"
@@ -225,13 +226,35 @@ private:
 
     template <InnerSearchMode mode>
     DatasetPtr
-    immutable_search_impl(const SparseTermComputerPtr& computer,
-                          const InnerSearchParam& inner_param,
-                          Allocator* allocator,
-                          bool use_term_lists_heap_insert,
-                          const SparseVector* original_query = nullptr,
-                          ReasoningContext* reasoning_ctx = nullptr,
-                          SearchStatistics* statistics = nullptr) const;
+    immutable_search_impl(
+        const SparseTermComputerPtr& computer,
+        const InnerSearchParam& inner_param,
+        Allocator* allocator,
+        bool use_term_lists_heap_insert,
+        const SparseVector* original_query = nullptr,
+        ReasoningContext* reasoning_ctx = nullptr,
+        SearchStatistics* statistics = nullptr,
+        const std::optional<std::pair<uint32_t, uint32_t>>& host_range = std::nullopt) const;
+
+    DatasetPtr
+    search_host_direct(const SparseVector& query,
+                       uint32_t host_begin,
+                       uint32_t host_end,
+                       int64_t k,
+                       const FilterPtr& filter,
+                       const std::optional<float>& distance_threshold,
+                       Allocator* allocator,
+                       SearchStatistics* statistics) const;
+
+    DatasetPtr
+    route_host_search(const DatasetPtr& query,
+                      const SparseVector& sparse_query,
+                      int64_t k,
+                      FilterPtr& filter,
+                      const std::optional<float>& distance_threshold,
+                      Allocator* allocator,
+                      SearchStatistics* statistics,
+                      std::optional<std::pair<uint32_t, uint32_t>>& host_range) const;
 
     bool
     UseTermListsHeapInsert(const SINDISearchParameter& search_param,
@@ -267,6 +290,12 @@ private:
 
     void
     serialize_windows(StreamWriter& writer) const;
+
+    void
+    serialize_host_metadata(StreamWriter& writer) const;
+
+    void
+    deserialize_host_metadata(StreamReader& reader);
 
     void
     deserialize_windows(StreamReader& reader_ref, bool postings_sorted);
@@ -395,6 +424,9 @@ private:
 
     std::string rerank_type_{"fp32"};
     uint32_t dmq_shared_codebook_threshold_{DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD};
+    uint32_t host_filter_threshold_{DEFAULT_SPARSE_HOST_FILTER_THRESHOLD};
+    Vector<uint32_t> host_ids_;
+    Vector<uint32_t> host_offsets_;
 
     bool deserialize_without_footer_{false};  // backward-compat: old format lacks footer
     bool deserialize_without_buffer_{false};  // backward-compat: old format lacks buffer

@@ -51,6 +51,7 @@ struct SINDIDefaultParam {
     bool remap_term_ids = false;
     std::string rerank_type = SPARSE_RERANK_TYPE_FP32;
     int64_t dmq_shared_codebook_threshold = DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD;
+    int64_t host_filter_threshold = DEFAULT_SPARSE_HOST_FILTER_THRESHOLD;
     bool immutable = false;
 };
 
@@ -71,6 +72,7 @@ generate_sindi_param(const SINDIDefaultParam& param) {
     json[SPARSE_REMAP_TERM_IDS].SetBool(param.remap_term_ids);
     json[SPARSE_RERANK_TYPE].SetString(param.rerank_type);
     json[SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD].SetInt(param.dmq_shared_codebook_threshold);
+    json[SPARSE_HOST_FILTER_THRESHOLD].SetInt(param.host_filter_threshold);
     json[SPARSE_IMMUTABLE].SetBool(param.immutable);
     return json.Dump();
 }
@@ -91,6 +93,7 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     REQUIRE(param->remap_term_ids == default_param.remap_term_ids);
     REQUIRE(param->rerank_type == default_param.rerank_type);
     REQUIRE(param->dmq_shared_codebook_threshold == default_param.dmq_shared_codebook_threshold);
+    REQUIRE(param->host_filter_threshold == default_param.host_filter_threshold);
     REQUIRE(param->immutable == default_param.immutable);
 
     vsag::ParameterTest::TestToJson(param);
@@ -197,6 +200,21 @@ TEST_CASE("SINDI Doc Prune Ratio Boundaries", "[ut][SINDIParameter]") {
     }
 }
 
+TEST_CASE("SINDI Host Filter Threshold Boundaries", "[ut][SINDIParameter]") {
+    SINDIParameter parameter;
+    REQUIRE_NOTHROW(parameter.FromJson(JsonType::Parse(R"({"host_filter_threshold": 0})")));
+    REQUIRE(parameter.host_filter_threshold == 0);
+    REQUIRE_NOTHROW(
+        parameter.FromJson(JsonType::Parse(R"({"host_filter_threshold": 4294967295})")));
+    REQUIRE(parameter.host_filter_threshold == std::numeric_limits<uint32_t>::max());
+
+    for (const auto& invalid_parameter : {R"({"host_filter_threshold": -1})",
+                                          R"({"host_filter_threshold": 1.5})",
+                                          R"({"host_filter_threshold": 4294967296})"}) {
+        REQUIRE_THROWS(parameter.FromJson(JsonType::Parse(invalid_parameter)));
+    }
+}
+
 TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
     TEST_COMPATIBILITY_CASE("use_reorder compatibility", use_reorder, true, false, false);
     TEST_COMPATIBILITY_CASE("value quantization compatibility",
@@ -211,6 +229,8 @@ TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
         "avg_doc_term_length compatibility", avg_doc_term_length, 100, 200, false);
     TEST_COMPATIBILITY_CASE("remap_term_ids compatibility", remap_term_ids, false, true, false);
     TEST_COMPATIBILITY_CASE("immutable compatibility", immutable, false, true, false);
+    TEST_COMPATIBILITY_CASE(
+        "host filter threshold is metadata-scoped", host_filter_threshold, 40, 41, true);
     TEST_COMPATIBILITY_CASE("fp32 ignores dmq shared codebook threshold",
                             dmq_shared_codebook_threshold,
                             1024,
