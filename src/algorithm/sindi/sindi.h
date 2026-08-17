@@ -20,6 +20,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sindi/term_id_mapper.h"
+#include "algorithm/sindi_host_filter.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/immutable_sindi_term_datacell.h"
 #include "datacell/mutable_sindi_term_datacell.h"
@@ -198,7 +199,8 @@ private:
                 const SparseVector* original_query = nullptr,
                 ReasoningContext* reasoning_ctx = nullptr,
                 SearchStatistics* statistics = nullptr,
-                const uint64_t* filter_callback_remaining = nullptr) const;
+                const uint64_t* filter_callback_remaining = nullptr,
+                const SindiHostSearchRoute& host_route = {}) const;
 
     bool
     UseTermListsHeapInsert(const SINDISearchParameter& search_param,
@@ -312,6 +314,7 @@ private:
 
     std::string rerank_type_{"fp32"};
     uint32_t dmq_shared_codebook_threshold_{DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD};
+    SindiHostFilter host_filter_;
 
     bool deserialize_without_footer_{false};  // backward-compat: old format lacks footer
     bool deserialize_without_buffer_{false};  // backward-compat: old format lacks buffer

@@ -80,6 +80,7 @@ auto result = index->KnnSearch(
 | `use_reorder` | bool | `false` | 保存高精度向量并对粗排候选重排。 |
 | `rerank_type` | string | `"fp32"` | 重排存储类型：`fp32` 或 `dmq8`。 |
 | `dmq_shared_codebook_threshold` | int | `1024` | 低频 term 使用共享 DMQ codebook 的阈值。 |
+| `host_filter_threshold` | int | `40` | 开启 `use_reorder` 时，文档数不超过该阈值的 host 直接通过重排存储打分；其他 host 查询使用 posting window。 |
 | `remap_term_ids` | bool | `false` | 压缩稀疏或间隔很大的外部 term ID。 |
 | `avg_doc_term_length` | int | `100` | 仅用于内存估算。 |
 | `immutable` | bool | `false` | 选择紧凑的只读内存 term DataCell。 |
@@ -93,6 +94,14 @@ auto result = index->KnnSearch(
 
 `rerank_layout > 0` 要求 `use_reorder: true`。`rerank_type: "dmq8"` 要求
 `rerank_layout: 0`，并使用默认的 `block_memory_io` 重排后端。
+
+### Host 过滤
+
+SINDI_V2 支持与 [SINDI](sindi.md#host-过滤) 相同的 `uint32_t` `host_id` 构建数据和 KNN 查询
+metadata 约定。mutable 与 immutable 索引均支持该功能，也不要求开启 `use_reorder`。两者共用
+host 分组与路由组件，同时 SINDI_V2 保持自己的 term-first posting 存储。开启重排时，小 host
+直接通过配置的重排后端打分；否则在 posting-window 检索中执行 host 成员检查。mutable
+`Add()` 的 metadata 规则和仅支持 KNN 的范围与 SINDI 相同。
 
 ## 检索参数
 

@@ -140,6 +140,17 @@ TEST_CASE("SparseTermComputer Term Scan Count", "[ut][SparseTermComputer]") {
         REQUIRE(computer.GetTermScanCount(10) == 7);
     }
 
+    SECTION("per-window override retains the complete posting list") {
+        SINDISearchParameter search_params;
+        search_params.term_prune_ratio = 0.5F;
+        SparseTermComputer computer(query, search_params, allocator.get(), 1);
+        REQUIRE(computer.GetTermScanCount(10) == 5);
+        computer.SetTermPruneEnabled(false);
+        REQUIRE(computer.GetTermScanCount(10) == 10);
+        computer.SetTermPruneEnabled(true);
+        REQUIRE(computer.GetTermScanCount(10) == 5);
+    }
+
     SECTION("threshold is divided by total window count") {
         SINDISearchParameter search_params;
         search_params.term_retain_threshold = 10;

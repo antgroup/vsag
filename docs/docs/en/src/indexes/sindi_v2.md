@@ -82,6 +82,7 @@ Build parameters live under `index_param`.
 | `use_reorder` | bool | `false` | Store high-precision vectors and rerank coarse candidates. |
 | `rerank_type` | string | `"fp32"` | Rerank storage type: `fp32` or `dmq8`. |
 | `dmq_shared_codebook_threshold` | int | `1024` | Low-frequency term threshold for the shared DMQ codebook. |
+| `host_filter_threshold` | int | `40` | When `use_reorder` is enabled, hosts with at most this many documents use direct rerank-store scoring; other host searches use posting windows. |
 | `remap_term_ids` | bool | `false` | Compact sparse or widely separated external term IDs. |
 | `avg_doc_term_length` | int | `100` | Memory-estimation hint only. |
 | `immutable` | bool | `false` | Select the compact read-only in-memory term DataCell. |
@@ -95,6 +96,15 @@ derives it as `<term_io.file_path>.rerank`.
 
 `rerank_layout > 0` requires `use_reorder: true`. `rerank_type: "dmq8"`
 requires `rerank_layout: 0` and the default `block_memory_io` rerank backend.
+
+### Host filtering
+
+SINDI_V2 supports the same `uint32_t` `host_id` build and KNN-query metadata contract as
+[SINDI](sindi.md#host-filtering). Both mutable and immutable indexes are supported, with or without
+`use_reorder`. It uses the shared host grouping and routing component while retaining its own
+term-first posting storage. When reranking is enabled, small hosts are scored directly through the
+configured rerank backend; otherwise host membership is enforced during posting-window search.
+The mutable `Add()` metadata rules and KNN-only scope are the same as SINDI.
 
 ## Search parameters
 

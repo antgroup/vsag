@@ -207,14 +207,19 @@ public:
 
     [[nodiscard]] uint32_t
     GetTermScanCount(uint32_t term_size) const {
-        if (term_size == 0) {
-            return 0;
+        if (term_size == 0 or not term_prune_enabled_) {
+            return term_size;
         }
         const auto ratio_limit =
             static_cast<uint32_t>(static_cast<float>(term_size) * term_retain_ratio_);
         const auto scan_count = static_cast<uint32_t>(
             std::min<uint64_t>(ratio_limit, term_retain_threshold_per_window_));
         return std::max<uint32_t>(scan_count, 1);
+    }
+
+    void
+    SetTermPruneEnabled(bool enabled) {
+        term_prune_enabled_ = enabled;
     }
 
 private:
@@ -274,6 +279,8 @@ public:
     uint32_t pruned_len_{0};
 
     uint32_t term_iterator_{0};
+
+    bool term_prune_enabled_{true};
 
     Allocator* const allocator_{nullptr};
 };

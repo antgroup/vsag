@@ -76,6 +76,7 @@ auto result = index->KnnSearch(
 | `use_reorder` | bool | `false` | 是否保留一份正排存储，在 SINDI 粗排后对候选做精排 |
 | `rerank_type` | string | `"fp32"` | `use_reorder` 开启时使用的正排存储类型。`fp32` 保留精确值；`dmq8` 使用压缩的 8-bit DMQ 编码 |
 | `dmq_shared_codebook_threshold` | int | `1024` | `rerank_type: "dmq8"` 时，出现次数不超过该值的 term 共用一个 codebook；更高频的 term 保持独立 codebook。设为 `0` 可关闭共享 |
+| `host_filter_threshold` | int | `40` | 开启 `use_reorder` 时，文档数不超过该阈值的 host 直接使用正排打分；其他 host 查询使用 posting window |
 | `remap_term_ids` | bool | `false` | 是否在建索引前重映射词项 ID，适用于词项 ID 很稀疏或存在大量空洞的词表 |
 | `avg_doc_term_length` | int | `100` | 仅用于内存估算 |
 | `immutable` | bool | `false` | 构建或加载紧凑的只读运行态；`Build()` 会逐窗口压缩以降低峰值内存，增量 `Add()` 会被拒绝 |
@@ -126,6 +127,40 @@ auto result = index->KnnSearch(
 反序列化时，新建 SINDI 的 `immutable` 设置必须与存储格式一致。
 新索引会记录有序倒排链格式版本，加载时可跳过归一化排序；缺少该标记的旧索引仍保持兼容，
 并在加载时完成排序归一化。
+
+### Host 过滤
+
+mutable 和 immutable SINDI 及 [SINDI_V2](sindi_v2.md) 索引都可以按单值数值 host 对文档
+分组，避免返回其他 host 的文档。该功能不要求设置 `immutable: true` 或
+`use_reorder: true`。开启重排时支持 `rerank_type: "fp32"` 与 `rerank_type: "dmq8"`。
+构建数据需要为每篇文档附加一个非零 `uint32_t` 类型的 `host_id`：
+
+```cpp
+base->NumElements(n)
+    ->SparseVectors(sparse_vectors)
+    ->Ids(ids)
+    ->UInt32Metadata("host_id", base_host_ids)
+    ->Owner(false);
+index->Build(base);
+
+uint32_t query_host_id = 42;
+query->NumElements(1)
+    ->SparseVectors(&query_vec)
+    ->UInt32Metadata("host_id", &query_host_id)
+    ->Owner(false);
+```
+
+每个 `Build()` 或 mutable `Add()` 批次都会按 host 对 inner ID 分组，同时保持 external label
+不变。开启 `use_reorder` 时，成功插入文档数不超过 `host_filter_threshold` 的 host 由配置的
+FP32 或 DMQ 正排直接打分。更大的 host，以及 `use_reorder: false` 时的所有 host，使用 posting
+window 检索，并在 host 的一个或多个 inner-ID 区间上执行精确成员检查。两条路径都会应用删除
+标记和额外的用户 `Filter`。
+
+host ID 可以是任意非零 `uint32_t` 值，单个索引最多包含 50,000,000 个不同 host。构建 host
+非法时整个构建失败；查询 host 非法或没有已索引文档时返回空结果。mutable 索引一旦包含 host
+metadata，后续每次 `Add()` 也必须提供 `host_id`；已有无 host 文档后不能再引入 host metadata。
+查询不提供 `host_id` 时保留全索引 KNN 行为。构建时没有 base host metadata 的索引会忽略查询
+host metadata，行为保持不变。host 过滤当前仅适用于 KNN；范围搜索仍使用原有全索引路径。
 
 ## 检索参数
 

@@ -16,6 +16,7 @@
 
 #include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <limits>
 
 #include "inner_string_params.h"
 #include "sindi_v2.h"
@@ -114,6 +115,21 @@ TEST_CASE("SINDIV2 unsigned parameters reject negative values", "[ut][SINDIV2Par
     SINDIV2SearchParameter search_parameter;
     REQUIRE_THROWS(
         search_parameter.FromJson(JsonType::Parse(R"({"sindi_v2": {"n_candidate": -1}})")));
+}
+
+TEST_CASE("SINDIV2 host filter threshold boundaries", "[ut][SINDIV2Parameter]") {
+    SINDIV2Parameter parameter;
+    REQUIRE_NOTHROW(parameter.FromJson(JsonType::Parse(R"({"host_filter_threshold": 0})")));
+    REQUIRE(parameter.host_filter_threshold == 0);
+    REQUIRE_NOTHROW(
+        parameter.FromJson(JsonType::Parse(R"({"host_filter_threshold": 4294967295})")));
+    REQUIRE(parameter.host_filter_threshold == std::numeric_limits<uint32_t>::max());
+
+    for (const auto& invalid_parameter : {R"({"host_filter_threshold": -1})",
+                                          R"({"host_filter_threshold": 1.5})",
+                                          R"({"host_filter_threshold": 4294967296})"}) {
+        REQUIRE_THROWS(parameter.FromJson(JsonType::Parse(invalid_parameter)));
+    }
 }
 
 TEST_CASE("SINDIV2 rejects unsupported or conflicting io", "[ut][SINDIV2Parameter]") {

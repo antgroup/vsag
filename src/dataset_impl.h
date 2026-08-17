@@ -19,6 +19,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <variant>
 
@@ -240,6 +241,20 @@ public:
     }
 
     DatasetPtr
+    UInt32Metadata(const std::string& name, const uint32_t* values) override {
+        this->data_[UInt32MetadataKey(name)] = values;
+        return shared_from_this();
+    }
+
+    const uint32_t*
+    GetUInt32Metadata(const std::string& name) const override {
+        if (auto iter = this->data_.find(UInt32MetadataKey(name)); iter != this->data_.end()) {
+            return std::get<const uint32_t*>(iter->second);
+        }
+        return nullptr;
+    }
+
+    DatasetPtr
     ExtraInfos(const char* extra_info) override {
         this->data_[EXTRA_INFOS] = extra_info;
         return shared_from_this();
@@ -371,6 +386,26 @@ private:
     static std::string
     HierarchyNameFromPathsKey(const std::string& key) {
         return key.substr(HierarchyPathsPrefix().size());
+    }
+
+    static constexpr std::string_view
+    UInt32MetadataPrefix() {
+        return "uint32_metadata:";
+    }
+
+    static std::string
+    UInt32MetadataKey(const std::string& name) {
+        return std::string(UInt32MetadataPrefix()) + name;
+    }
+
+    static bool
+    IsUInt32MetadataKey(const std::string& key) {
+        return key.rfind(UInt32MetadataPrefix(), 0) == 0;
+    }
+
+    static std::string
+    UInt32MetadataNameFromKey(const std::string& key) {
+        return key.substr(UInt32MetadataPrefix().size());
     }
 
 private:

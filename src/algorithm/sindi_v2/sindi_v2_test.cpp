@@ -153,7 +153,212 @@ create_sindi_v2_param(uint32_t term_id_limit,
     return param;
 }
 
+class AllowLabelFilter : public Filter {
+public:
+    explicit AllowLabelFilter(int64_t label) : label_(label) {
+    }
+
+    bool
+    CheckValid(int64_t label) const override {
+        return label == label_;
+    }
+
+private:
+    int64_t label_;
+};
+
 }  // namespace
+
+TEST_CASE("SINDIV2 immutable host filter routes", "[ut][SINDIV2][host_filter]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    uint32_t term = 1;
+    std::array<float, 4> values{4.0F, 0.0F, 2.0F, 3.0F};
+    std::array<int64_t, 4> labels{10, 40, 20, 30};
+    std::array<uint32_t, 4> host_ids{
+        std::numeric_limits<uint32_t>::max(), 1, std::numeric_limits<uint32_t>::max(), 1};
+    std::array<SparseVector, 4> vectors{};
+    vectors[0] = SparseVector{1, &term, &values[0]};
+    vectors[2] = SparseVector{1, &term, &values[2]};
+    vectors[3] = SparseVector{1, &term, &values[3]};
+    auto base = Dataset::Make()
+                    ->NumElements(vectors.size())
+                    ->SparseVectors(vectors.data())
+                    ->Ids(labels.data())
+                    ->UInt32Metadata("host_id", host_ids.data())
+                    ->Owner(false);
+
+    auto parameter = std::make_shared<SINDIV2Parameter>();
+    parameter->term_id_limit = 8;
+    parameter->window_size = 10000;
+    parameter->use_reorder = true;
+    parameter->immutable = true;
+    parameter->host_filter_threshold = 1;
+    parameter->term_io_parameter = std::make_shared<MemoryIOParameter>();
+    parameter->rerank_io_parameter = std::make_shared<MemoryBlockIOParameter>();
+    SINDIV2 index(parameter, common_param);
+    REQUIRE(index.Build(base) == std::vector<int64_t>{40});
+
+    float query_value = 1.0F;
+    SparseVector query_vector{1, &term, &query_value};
+    uint32_t query_host_id = 1;
+    auto query = Dataset::Make()
+                     ->NumElements(1)
+                     ->SparseVectors(&query_vector)
+                     ->UInt32Metadata("host_id", &query_host_id)
+                     ->Owner(false);
+    const std::string search_parameters = R"({"sindi_v2": {"n_candidate": 3}})";
+
+    auto direct_result = index.KnnSearch(query, 2, search_parameters, nullptr);
+    REQUIRE(direct_result->GetDim() == 1);
+    REQUIRE(direct_result->GetIds()[0] == 30);
+    REQUIRE(index.KnnSearch(query, 2, search_parameters, std::make_shared<AllowLabelFilter>(20))
+                ->GetDim() == 0);
+
+    query_host_id = std::numeric_limits<uint32_t>::max();
+    auto window_result = index.KnnSearch(query, 2, search_parameters, nullptr);
+    REQUIRE(window_result->GetDim() == 2);
+    REQUIRE(window_result->GetIds()[0] == 10);
+    REQUIRE(window_result->GetIds()[1] == 20);
+    query_host_id = 0;
+    REQUIRE(index.KnnSearch(query, 2, search_parameters, nullptr)->GetDim() == 0);
+}
+
+TEST_CASE("SINDIV2 host filter supports mutable immutable and reorder modes",
+          "[ut][SINDIV2][host_filter]") {
+    const bool immutable = GENERATE(false, true);
+    const bool use_reorder = GENERATE(false, true);
+    DYNAMIC_SECTION("immutable=" << immutable << ", use_reorder=" << use_reorder) {
+        auto allocator = SafeAllocator::FactoryDefaultAllocator();
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+        uint32_t term = 1;
+        std::array<float, 4> values{4.0F, 0.0F, 2.0F, 3.0F};
+        std::array<int64_t, 4> labels{10, 40, 20, 30};
+        std::array<uint32_t, 4> host_ids{2, 1, 2, 1};
+        std::array<SparseVector, 4> vectors{};
+        vectors[0] = SparseVector{1, &term, &values[0]};
+        vectors[2] = SparseVector{1, &term, &values[2]};
+        vectors[3] = SparseVector{1, &term, &values[3]};
+        auto base = Dataset::Make()
+                        ->NumElements(vectors.size())
+                        ->SparseVectors(vectors.data())
+                        ->Ids(labels.data())
+                        ->UInt32Metadata("host_id", host_ids.data())
+                        ->Owner(false);
+
+        auto parameter = std::make_shared<SINDIV2Parameter>();
+        parameter->term_id_limit = 8;
+        parameter->window_size = 10000;
+        parameter->use_reorder = use_reorder;
+        parameter->immutable = immutable;
+        parameter->host_filter_threshold = 1;
+        parameter->term_io_parameter = std::make_shared<MemoryIOParameter>();
+        parameter->rerank_io_parameter = std::make_shared<MemoryBlockIOParameter>();
+        SINDIV2 index(parameter, common_param);
+        REQUIRE(index.Build(base) == std::vector<int64_t>{40});
+
+        float query_value = 1.0F;
+        SparseVector query_vector{1, &term, &query_value};
+        uint32_t query_host_id = 1;
+        auto query = Dataset::Make()
+                         ->NumElements(1)
+                         ->SparseVectors(&query_vector)
+                         ->UInt32Metadata("host_id", &query_host_id)
+                         ->Owner(false);
+        const std::string search_parameters = R"({"sindi_v2": {"n_candidate": 3}})";
+        auto result = index.KnnSearch(query, 2, search_parameters, nullptr);
+        REQUIRE(result->GetDim() == 1);
+        REQUIRE(result->GetIds()[0] == 30);
+
+        query_host_id = 2;
+        result = index.KnnSearch(query, 2, search_parameters, nullptr);
+        REQUIRE(result->GetDim() == 2);
+        REQUIRE(result->GetIds()[0] == 10);
+        REQUIRE(result->GetIds()[1] == 20);
+
+        if (not immutable) {
+            std::array<float, 2> added_values{5.0F, 6.0F};
+            std::array<SparseVector, 2> added_vectors{SparseVector{1, &term, &added_values[0]},
+                                                      SparseVector{1, &term, &added_values[1]}};
+            std::array<int64_t, 2> added_labels{50, 60};
+            std::array<uint32_t, 2> added_hosts{1, 2};
+            auto added = Dataset::Make()
+                             ->NumElements(added_vectors.size())
+                             ->SparseVectors(added_vectors.data())
+                             ->Ids(added_labels.data())
+                             ->UInt32Metadata("host_id", added_hosts.data())
+                             ->Owner(false);
+            REQUIRE(index.Add(added).empty());
+            query_host_id = 1;
+            result = index.KnnSearch(query, 2, search_parameters, nullptr);
+            REQUIRE(result->GetDim() == 2);
+            REQUIRE(result->GetIds()[0] == 50);
+            REQUIRE(result->GetIds()[1] == 30);
+        }
+    }
+}
+
+TEST_CASE("SINDIV2 host filter preserves term prune candidates at window boundaries",
+          "[ut][SINDIV2][host_filter]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    uint32_t term_id = 1;
+    std::array<float, 4> values{10.0F, 9.0F, 2.0F, 1.0F};
+    std::array<int64_t, 4> labels{10, 11, 20, 21};
+    std::array<uint32_t, 4> host_ids{1, 1, 2, 2};
+    std::array<SparseVector, 4> vectors;
+    for (uint32_t i = 0; i < vectors.size(); ++i) {
+        vectors[i] = SparseVector{1, &term_id, &values[i]};
+    }
+    auto base = Dataset::Make()
+                    ->NumElements(vectors.size())
+                    ->SparseVectors(vectors.data())
+                    ->Ids(labels.data())
+                    ->UInt32Metadata("host_id", host_ids.data())
+                    ->Owner(false);
+
+    auto parameter = std::make_shared<SINDIV2Parameter>();
+    parameter->term_id_limit = 8;
+    parameter->window_size = 4;
+    parameter->use_reorder = true;
+    parameter->immutable = true;
+    parameter->host_filter_threshold = 0;
+    parameter->term_io_parameter = std::make_shared<MemoryIOParameter>();
+    parameter->rerank_io_parameter = std::make_shared<MemoryBlockIOParameter>();
+    SINDIV2 index(parameter, common_param);
+    REQUIRE(index.Build(base).empty());
+
+    float query_value = 1.0F;
+    SparseVector query_vector{1, &term_id, &query_value};
+    uint32_t query_host_id = 2;
+    auto query = Dataset::Make()
+                     ->NumElements(1)
+                     ->SparseVectors(&query_vector)
+                     ->UInt32Metadata("host_id", &query_host_id)
+                     ->Owner(false);
+    const auto query_prune_ratio = GENERATE(0.0F, 0.2F);
+    const auto search_parameters = fmt::format(R"({{
+        "sindi_v2": {{
+            "query_prune_ratio": {},
+            "term_prune_ratio": 0.5,
+            "n_candidate": 2
+        }}
+    }})",
+                                               query_prune_ratio);
+    auto result = index.KnnSearch(query, 2, search_parameters, nullptr);
+    REQUIRE(result->GetDim() == 2);
+    REQUIRE(result->GetIds()[0] == 20);
+    REQUIRE(result->GetIds()[1] == 21);
+}
 
 TEST_CASE("SINDIV2 Heap Insert Strategy Test", "[ut][SINDIV2]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();

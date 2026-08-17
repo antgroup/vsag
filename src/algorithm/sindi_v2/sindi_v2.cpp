@@ -324,12 +324,13 @@ SINDIV2::CheckAndMappingExternalParam(const JsonType& external_param,
 
 SINDIV2::SINDIV2(const SINDIV2ParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param),
+      term_id_limit_(param->term_id_limit),
+      window_size_(param->window_size),
       use_reorder_(param->use_reorder),
       sparse_value_quant_type_(param->sparse_value_quant_type),
       rerank_type_(param->rerank_type),
       dmq_shared_codebook_threshold_(param->dmq_shared_codebook_threshold),
-      term_id_limit_(param->term_id_limit),
-      window_size_(param->window_size),
+      host_filter_(param->host_filter_threshold, common_param.allocator_.get()),
       doc_prune_ratio_(param->doc_prune_ratio),
       quantization_params_(std::make_shared<QuantizationParams>()),
       avg_doc_term_length_(param->avg_doc_term_length),
@@ -520,6 +521,8 @@ SINDIV2::Add(const DatasetPtr& base) {
 
     auto data_num = base->GetNumElements();
     CHECK_ARGUMENT(data_num > 0, "data_num is zero when add vectors");
+    const auto first_inner_id = static_cast<uint32_t>(cur_element_count_);
+    auto host_build = host_filter_.PrepareBuild(base, first_inner_id);
 
     const auto* sparse_vectors = base->GetSparseVectors();
     const auto* ids = base->GetIds();
@@ -545,7 +548,11 @@ SINDIV2::Add(const DatasetPtr& base) {
     if (use_reorder_ && rerank_layout_ > 0) {
         rerank_layout_records.reserve(data_num);
     }
-    for (uint32_t i = 0; i < data_num; ++i) {
+    for (int64_t position = 0; position < data_num; ++position) {
+        const auto i =
+            host_build.Enabled()
+                ? static_cast<int64_t>(host_build.SourceIndex(static_cast<uint32_t>(position)))
+                : position;
         const auto& sparse_vector = sparse_vectors[i];
         if (not accepted_documents.empty() && accepted_documents[i] == 0) {
             failed_ids.push_back(ids[i]);
@@ -602,6 +609,7 @@ SINDIV2::Add(const DatasetPtr& base) {
                 {sparse_vectors + i, static_cast<InnerIdType>(cur_element_count_), {}});
         }
 
+        host_build.RecordSuccess(static_cast<uint32_t>(position));
         last_affected_window = cur_element_count_ / window_size_;
         cur_element_count_++;
     }
@@ -613,6 +621,8 @@ SINDIV2::Add(const DatasetPtr& base) {
     if (use_reorder_ && rerank_layout_ > 0) {
         write_rerank_flat_with_layout(rerank_flat_, rerank_layout_records, rerank_layout_);
     }
+    host_filter_.CommitBuild(
+        std::move(host_build), first_inner_id, static_cast<uint32_t>(cur_element_count_));
 
     for (int64_t window = first_affected_window; window <= last_affected_window; ++window) {
         mutable_term_datacell->SortByValue(static_cast<uint32_t>(window));
@@ -645,6 +655,7 @@ SINDIV2::build_immutable(const DatasetPtr& base) {
     const auto* ids = base->GetIds();
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
+    auto host_build = host_filter_.PrepareBuild(base, 0);
 
     Vector<uint8_t> accepted_documents(allocator_);
     if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
@@ -679,7 +690,11 @@ SINDIV2::build_immutable(const DatasetPtr& base) {
     if (use_reorder_ && rerank_layout_ > 0) {
         rerank_layout_records.reserve(data_num);
     }
-    for (int64_t i = 0; i < data_num; ++i) {
+    for (int64_t position = 0; position < data_num; ++position) {
+        const auto i =
+            host_build.Enabled()
+                ? static_cast<int64_t>(host_build.SourceIndex(static_cast<uint32_t>(position)))
+                : position;
         const auto& sparse_vector = sparse_vectors[i];
         if ((not accepted_documents.empty() && accepted_documents[i] == 0) ||
             (accepted_documents.empty() &&
@@ -725,6 +740,7 @@ SINDIV2::build_immutable(const DatasetPtr& base) {
             rerank_layout_records.push_back(
                 {sparse_vectors + i, static_cast<InnerIdType>(cur_element_count_), {}});
         }
+        host_build.RecordSuccess(static_cast<uint32_t>(position));
         cur_element_count_++;
         if (cur_element_count_ % window_size_ == 0) {
             staging->SortByValue(0);
@@ -746,6 +762,7 @@ SINDIV2::build_immutable(const DatasetPtr& base) {
     if (use_reorder_ && rerank_layout_ > 0) {
         write_rerank_flat_with_layout(rerank_flat_, rerank_layout_records, rerank_layout_);
     }
+    host_filter_.CommitBuild(std::move(host_build), 0, static_cast<uint32_t>(cur_element_count_));
     term_datacell_ = std::move(immutable);
     this->cal_memory_usage();
     return failed_ids;
@@ -811,6 +828,28 @@ SINDIV2::KnnSearch(const DatasetPtr& query,
     }
     inner_param.is_inner_id_allowed = ft;
 
+    const auto host_route = host_filter_.Classify(query, rerank_flat_ != nullptr);
+    if (host_route.kind == SindiHostRouteKind::EMPTY) {
+        auto result = collect_results(
+            std::make_shared<StandardHeap<true, false>>(search_allocator, -1), search_allocator);
+        result->Statistics(statistics.Dump());
+        return result;
+    }
+    host_filter_.ApplyFilter(host_route, inner_param.is_inner_id_allowed);
+    if (host_route.kind == SindiHostRouteKind::DIRECT) {
+        auto result = SindiHostFilter::SearchDirect(host_route,
+                                                    sparse_query,
+                                                    k,
+                                                    inner_param.is_inner_id_allowed,
+                                                    std::nullopt,
+                                                    rerank_flat_,
+                                                    label_table_,
+                                                    search_allocator,
+                                                    &statistics);
+        result->Statistics(statistics.Dump());
+        return result;
+    }
+
     SparseVector effective_query = sparse_query;
     Vector<uint32_t> tmp_ids(search_allocator);
     Vector<float> tmp_vals(search_allocator);
@@ -835,7 +874,8 @@ SINDIV2::KnnSearch(const DatasetPtr& query,
                                           use_term_lists_heap_insert,
                                           query_context,
                                           rerank_query,
-                                          &statistics);
+                                          &statistics,
+                                          host_route);
     result->Statistics(statistics.Dump());
     return result;
 }
@@ -848,26 +888,29 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                      bool use_term_lists_heap_insert,
                      SindiQueryContext& query_context,
                      const SparseVector* original_query,
-                     SearchStatistics* statistics) const {
+                     SearchStatistics* statistics,
+                     const SindiHostSearchRoute& host_route) const {
     MaxHeap heap(allocator);
     int64_t k = 0;
+    auto effective_inner_param = inner_param;
 
     if constexpr (mode == KNN_SEARCH) {
-        k = inner_param.topk;
+        k = effective_inner_param.topk;
     }
 
     Vector<float> dists(window_size_, 0.0, allocator);
-    auto filter = inner_param.is_inner_id_allowed;
-    const auto [min_window_id, max_window_id] = this->get_min_max_window_id(filter);
+    auto& filter = effective_inner_param.is_inner_id_allowed;
+    auto [min_window_id, max_window_id] = this->get_min_max_window_id(filter);
+    SindiHostFilter::ApplyWindowRoute(host_route, window_size_, min_window_id, max_window_id);
     const bool has_effective_query_terms = not computer->sorted_query_.empty();
 
     for (auto cur = min_window_id; cur <= max_window_id; cur++) {
-        auto window_start_id = static_cast<uint32_t>(cur) * window_size_;
-        term_datacell_->QueryWindow(dists.data(),
-                                    static_cast<uint32_t>(cur),
-                                    computer,
-                                    use_term_lists_heap_insert,
-                                    query_context);
+        const auto window_id = static_cast<uint32_t>(cur);
+        const auto window_start_id = window_id * window_size_;
+        computer->SetTermPruneEnabled(
+            not host_filter_.RequiresFullTermScan(host_route, window_id, window_size_));
+        term_datacell_->QueryWindow(
+            dists.data(), window_id, computer, use_term_lists_heap_insert, query_context);
         if (statistics != nullptr) {
             statistics->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
                                     sparse_backend(sparse_value_quant_type_),
@@ -887,35 +930,37 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                 if (filter != nullptr && not filter->CheckValid(inner_id)) {
                     continue;
                 }
-                if (inner_param.distance_threshold.has_value() && not inner_param.enable_reorder &&
-                    1.0F > inner_param.distance_threshold.value()) {
+                if (effective_inner_param.distance_threshold.has_value() &&
+                    not effective_inner_param.enable_reorder &&
+                    1.0F > effective_inner_param.distance_threshold.value()) {
                     continue;
                 }
                 if constexpr (mode == KNN_SEARCH) {
                     heap.emplace(0.0F, inner_id);
-                    if (heap.size() > inner_param.ef) {
+                    if (heap.size() > effective_inner_param.ef) {
                         heap.pop();
                     }
                 } else {
-                    if (1.0F > inner_param.radius) {
+                    if (1.0F > effective_inner_param.radius) {
                         continue;
                     }
                     heap.emplace(0.0F, inner_id);
-                    if (inner_param.range_search_limit_size != -1 &&
-                        heap.size() > static_cast<uint64_t>(inner_param.range_search_limit_size)) {
+                    if (effective_inner_param.range_search_limit_size != -1 &&
+                        heap.size() >
+                            static_cast<uint64_t>(effective_inner_param.range_search_limit_size)) {
                         heap.pop();
                     }
                 }
             }
         } else if (use_term_lists_heap_insert) {
             term_datacell_->InsertHeapByWindow(dists.data(),
-                                               static_cast<uint32_t>(cur),
+                                               window_id,
                                                computer,
                                                heap,
-                                               inner_param,
+                                               effective_inner_param,
                                                window_start_id,
                                                mode,
-                                               inner_param.is_inner_id_allowed != nullptr,
+                                               effective_inner_param.is_inner_id_allowed != nullptr,
                                                query_context);
         } else {
             uint32_t valid_window_size = 0;
@@ -927,10 +972,10 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
             term_datacell_->InsertHeapByDists(dists.data(),
                                               valid_window_size,
                                               heap,
-                                              inner_param,
+                                              effective_inner_param,
                                               window_start_id,
                                               mode,
-                                              inner_param.is_inner_id_allowed != nullptr);
+                                              effective_inner_param.is_inner_id_allowed != nullptr);
         }
     }
 
@@ -958,12 +1003,12 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                 cur_heap_top = high_precise_heap->Top().first;
             }
             if constexpr (mode == RANGE_SEARCH) {
-                if (high_precise_distance <= inner_param.radius) {
+                if (high_precise_distance <= effective_inner_param.radius) {
                     high_precise_heap->Push(high_precise_distance, label);
                 }
-                if (inner_param.range_search_limit_size != -1 and
+                if (effective_inner_param.range_search_limit_size != -1 and
                     high_precise_heap->Size() >
-                        static_cast<uint64_t>(inner_param.range_search_limit_size)) {
+                        static_cast<uint64_t>(effective_inner_param.range_search_limit_size)) {
                     high_precise_heap->Pop();
                 }
             }
@@ -996,8 +1041,8 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
     // low precision
     if constexpr (mode == RANGE_SEARCH) {
         k = static_cast<int64_t>(heap.size());
-        if (inner_param.range_search_limit_size != -1) {
-            k = inner_param.range_search_limit_size;
+        if (effective_inner_param.range_search_limit_size != -1) {
+            k = effective_inner_param.range_search_limit_size;
         }
     }
 
@@ -1101,6 +1146,7 @@ SINDIV2::cal_memory_usage() {
         memory +=
             static_cast<uint64_t>(term_id_mapper_->Size()) * TERM_ID_MAPPER_ENTRY_MEMORY_BYTES;
     }
+    memory += host_filter_.GetMemoryUsage();
 
     std::unique_lock lock(this->memory_usage_mutex_);
     this->current_memory_usage_.store(static_cast<int64_t>(memory));
@@ -1330,7 +1376,6 @@ SINDIV2::Deserialize(StreamReader& reader) {
         CHECK_ARGUMENT(term_id_mapper_->Size() == term_datacell_->GetTermDictCount(),
                        "SINDIV2 remapped term dict count does not match mapper size");
     }
-
     this->cal_memory_usage();
 }
 

@@ -60,6 +60,8 @@ public:
 
     uint32_t dmq_shared_codebook_threshold{DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD};
 
+    uint32_t host_filter_threshold{DEFAULT_SPARSE_HOST_FILTER_THRESHOLD};
+
     bool immutable{false};
 
     uint32_t rerank_layout{0};
