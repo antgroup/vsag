@@ -76,6 +76,14 @@ clean-release:           ## Clear build-release/ directory.
 install:                 ## Build and install the release version of vsag.
 ```
 
+## Third-Party Source Overrides
+
+Third-party archives can be supplied through pin-qualified environment variables such as
+`VSAG_THIRDPARTY_OPENBLAS_0_3_23`. The deprecated unversioned variable remains a compatibility
+fallback. Pin-qualified overrides take precedence, followed by the unversioned fallback and the
+authoritative upstream URLs. Override diagnostics report only the selected variable name and
+never its value.
+
 ## Project Structure
 - `cmake/`: cmake util functions
 - `docker/`: the dockerfile to build develop and ci image
