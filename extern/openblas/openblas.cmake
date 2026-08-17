@@ -5,14 +5,8 @@ set(install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
 
 set(openblas_urls
     https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.23/OpenBLAS-0.3.23.tar.gz
-    # this url is maintained by the vsag project, if it's broken, please try
-    #  the latest commit or contact the vsag project
-    https://vsagcache.oss-rg-china-mainland.aliyuncs.com/openblas/OpenBLAS-0.3.23.tar.gz
 )
-if(NOT "$ENV{VSAG_THIRDPARTY_OPENBLAS}" STREQUAL "")
-    message(STATUS "Using override URL/archive for openblas: $ENV{VSAG_THIRDPARTY_OPENBLAS}")
-    list(PREPEND openblas_urls "$ENV{VSAG_THIRDPARTY_OPENBLAS}")
-endif()
+vsag_resolve_thirdparty_override (OPENBLAS v0.3.23 openblas_urls)
 
 ExternalProject_Add(
     ${name}

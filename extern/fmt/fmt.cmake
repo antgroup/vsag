@@ -7,14 +7,8 @@ set (FMT_SYSTEM_HEADERS ON)
 
 set(fmt_urls
     https://github.com/fmtlib/fmt/archive/refs/tags/10.2.1.tar.gz
-    # this url is maintained by the vsag project, if it's broken, please try
-    #  the latest commit or contact the vsag project
-    https://vsagcache.oss-rg-china-mainland.aliyuncs.com/fmt/10.2.1.tar.gz
 )
-if(NOT "$ENV{VSAG_THIRDPARTY_FMT}" STREQUAL "")
-  message(STATUS "Using override URL/archive for fmt: $ENV{VSAG_THIRDPARTY_FMT}")
-  list(PREPEND fmt_urls "$ENV{VSAG_THIRDPARTY_FMT}")
-endif()
+vsag_resolve_thirdparty_override (FMT 10.2.1 fmt_urls)
 FetchContent_Declare(
     fmt
     URL ${fmt_urls}

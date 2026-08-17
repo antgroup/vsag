@@ -14,14 +14,8 @@ set (FULL_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${VSAG_ANTLR4_CXX11_ABI}")
 
 set(antlr4_urls
     https://github.com/antlr/antlr4/archive/refs/tags/4.13.2.tar.gz
-    # this url is maintained by the vsag project, if it's broken, please try
-    #  the latest commit or contact the vsag project
-    https://vsagcache.oss-rg-china-mainland.aliyuncs.com/antlr4/v4.13.2.tar.gz
 )
-if(NOT "$ENV{VSAG_THIRDPARTY_ANTLR4}" STREQUAL "")
-    message(STATUS "Using override URL/archive for antlr4: $ENV{VSAG_THIRDPARTY_ANTLR4}")
-    list(PREPEND antlr4_urls "$ENV{VSAG_THIRDPARTY_ANTLR4}")
-endif()
+vsag_resolve_thirdparty_override (ANTLR4 4.13.2 antlr4_urls)
 
 ExternalProject_Add(
         ${name}
