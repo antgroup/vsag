@@ -50,10 +50,8 @@ public:
 
     virtual ~VectorTransformer() = default;
 
-    virtual TransformerMetaPtr
-    Transform(const float* input_vec, float* output_vec) const {
-        return nullptr;
-    };
+    virtual void
+    Transform(const float* input_vec, float* output_vec, uint8_t* meta = nullptr) const = 0;
 
     virtual void
     Serialize(StreamWriter& writer) const = 0;
