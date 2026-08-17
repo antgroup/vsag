@@ -76,7 +76,7 @@ VSAG 不提供项目控制的压缩包镜像。如需使用本地或内网镜像
 | `VSAG_THIRDPARTY_JSON_3_11_3` | nlohmann/json 3.11.3 | `github.com/nlohmann/json/.../v3.11.3.tar.gz` | 始终 |
 | `VSAG_THIRDPARTY_ANTLR4_4_13_2` | ANTLR4 runtime 4.13.2 | `github.com/antlr/antlr4/.../4.13.2.tar.gz` | 始终 |
 | `VSAG_THIRDPARTY_BOOST_1_67_0` | Boost 1.67.0（头文件） | `archives.boost.io/.../boost_1_67_0.tar.gz` | 始终 |
-| `VSAG_THIRDPARTY_OPENBLAS_0_3_23` | OpenBLAS 0.3.23 | `github.com/OpenMathLib/OpenBLAS/.../OpenBLAS-0.3.23.tar.gz` | 默认 BLAS 后端（未使用系统库 / MKL 时） |
+| `VSAG_THIRDPARTY_OPENBLAS_0_3_24` | OpenBLAS 0.3.24 | `github.com/OpenMathLib/OpenBLAS/.../OpenBLAS-0.3.24.tar.gz` | 默认 BLAS 后端（未使用系统库 / MKL 时） |
 | `VSAG_THIRDPARTY_CPUINFO_COMMIT_CA678952A9A8` | pytorch/cpuinfo | `github.com/pytorch/cpuinfo/archive/ca678952...tar.gz` | 始终 |
 | `VSAG_THIRDPARTY_FMT_10_2_1` | fmt 10.2.1 | `github.com/fmtlib/fmt/.../10.2.1.tar.gz` | 始终（除非使用系统 fmt） |
 | `VSAG_THIRDPARTY_THREAD_POOL_COMMIT_3507796E172D` | log4cplus/ThreadPool | `github.com/log4cplus/ThreadPool/archive/3507796e...tar.gz` | 始终 |
@@ -125,7 +125,7 @@ export VSAG_MIRROR=https://mirror.corp.example.com/vsag-thirdparty
 export VSAG_THIRDPARTY_JSON_3_11_3=$VSAG_MIRROR/v3.11.3.tar.gz
 export VSAG_THIRDPARTY_ANTLR4_4_13_2=$VSAG_MIRROR/antlr4-4.13.2.tar.gz
 export VSAG_THIRDPARTY_BOOST_1_67_0=$VSAG_MIRROR/boost_1_67_0.tar.gz
-export VSAG_THIRDPARTY_OPENBLAS_0_3_23=$VSAG_MIRROR/OpenBLAS-0.3.23.tar.gz
+export VSAG_THIRDPARTY_OPENBLAS_0_3_24=$VSAG_MIRROR/OpenBLAS-0.3.24.tar.gz
 export VSAG_THIRDPARTY_CPUINFO_COMMIT_CA678952A9A8=$VSAG_MIRROR/cpuinfo-ca678952.tar.gz
 export VSAG_THIRDPARTY_FMT_10_2_1=$VSAG_MIRROR/fmt-10.2.1.tar.gz
 export VSAG_THIRDPARTY_THREAD_POOL_COMMIT_3507796E172D=$VSAG_MIRROR/thread_pool-3507796e.tar.gz
@@ -146,7 +146,7 @@ make release
 export VSAG_THIRDPARTY_JSON_3_11_3=/data/vsag-deps/v3.11.3.tar.gz
 export VSAG_THIRDPARTY_ANTLR4_4_13_2=/data/vsag-deps/antlr4-4.13.2.tar.gz
 export VSAG_THIRDPARTY_BOOST_1_67_0=/data/vsag-deps/boost_1_67_0.tar.gz
-export VSAG_THIRDPARTY_OPENBLAS_0_3_23=/data/vsag-deps/OpenBLAS-0.3.23.tar.gz
+export VSAG_THIRDPARTY_OPENBLAS_0_3_24=/data/vsag-deps/OpenBLAS-0.3.24.tar.gz
 export VSAG_THIRDPARTY_CPUINFO_COMMIT_CA678952A9A8=/data/vsag-deps/cpuinfo-ca678952.tar.gz
 export VSAG_THIRDPARTY_FMT_10_2_1=/data/vsag-deps/fmt-10.2.1.tar.gz
 export VSAG_THIRDPARTY_THREAD_POOL_COMMIT_3507796E172D=/data/vsag-deps/thread_pool-3507796e.tar.gz
@@ -164,7 +164,7 @@ make release
 如果只有某一个下载不稳定，只覆盖它即可，其余继续使用默认地址：
 
 ```bash
-export VSAG_THIRDPARTY_OPENBLAS_0_3_23=https://mirror.example.com/OpenBLAS-0.3.23.tar.gz
+export VSAG_THIRDPARTY_OPENBLAS_0_3_24=https://mirror.example.com/OpenBLAS-0.3.24.tar.gz
 make release
 ```
 
@@ -179,7 +179,7 @@ export VSAG_THIRDPARTY_OPENBLAS_0_3_24=/data/vsag-deps/OpenBLAS-0.3.24.tar.gz
 export VSAG_THIRDPARTY_YAML_CPP_0_8_0=/data/vsag-deps/yaml-cpp-0.8.0.tar.gz
 export VSAG_THIRDPARTY_YAML_CPP_0_9_0=/data/vsag-deps/yaml-cpp-0.9.0.tar.gz
 
-git switch 1.0    # 选择 OpenBLAS 0.3.23 与 yaml-cpp 0.9.0
+git switch 1.0    # 选择 OpenBLAS 0.3.24 与 yaml-cpp 0.9.0
 make release
 ```
 

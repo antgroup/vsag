@@ -90,7 +90,7 @@ The suffix is derived from the exact pinned identifier:
 | `VSAG_THIRDPARTY_JSON_3_11_3` | nlohmann/json 3.11.3 | `github.com/nlohmann/json/.../v3.11.3.tar.gz` | always |
 | `VSAG_THIRDPARTY_ANTLR4_4_13_2` | ANTLR4 runtime 4.13.2 | `github.com/antlr/antlr4/.../4.13.2.tar.gz` | always |
 | `VSAG_THIRDPARTY_BOOST_1_67_0` | Boost 1.67.0 (headers) | `archives.boost.io/.../boost_1_67_0.tar.gz` | always |
-| `VSAG_THIRDPARTY_OPENBLAS_0_3_23` | OpenBLAS 0.3.23 | `github.com/OpenMathLib/OpenBLAS/.../OpenBLAS-0.3.23.tar.gz` | default BLAS backend (when not using system / MKL) |
+| `VSAG_THIRDPARTY_OPENBLAS_0_3_24` | OpenBLAS 0.3.24 | `github.com/OpenMathLib/OpenBLAS/.../OpenBLAS-0.3.24.tar.gz` | default BLAS backend (when not using system / MKL) |
 | `VSAG_THIRDPARTY_CPUINFO_COMMIT_CA678952A9A8` | pytorch/cpuinfo | `github.com/pytorch/cpuinfo/archive/ca678952...tar.gz` | always |
 | `VSAG_THIRDPARTY_FMT_10_2_1` | fmt 10.2.1 | `github.com/fmtlib/fmt/.../10.2.1.tar.gz` | always (unless system fmt) |
 | `VSAG_THIRDPARTY_THREAD_POOL_COMMIT_3507796E172D` | log4cplus/ThreadPool | `github.com/log4cplus/ThreadPool/archive/3507796e...tar.gz` | always |
@@ -142,7 +142,7 @@ export VSAG_MIRROR=https://mirror.corp.example.com/vsag-thirdparty
 export VSAG_THIRDPARTY_JSON_3_11_3=$VSAG_MIRROR/v3.11.3.tar.gz
 export VSAG_THIRDPARTY_ANTLR4_4_13_2=$VSAG_MIRROR/antlr4-4.13.2.tar.gz
 export VSAG_THIRDPARTY_BOOST_1_67_0=$VSAG_MIRROR/boost_1_67_0.tar.gz
-export VSAG_THIRDPARTY_OPENBLAS_0_3_23=$VSAG_MIRROR/OpenBLAS-0.3.23.tar.gz
+export VSAG_THIRDPARTY_OPENBLAS_0_3_24=$VSAG_MIRROR/OpenBLAS-0.3.24.tar.gz
 export VSAG_THIRDPARTY_CPUINFO_COMMIT_CA678952A9A8=$VSAG_MIRROR/cpuinfo-ca678952.tar.gz
 export VSAG_THIRDPARTY_FMT_10_2_1=$VSAG_MIRROR/fmt-10.2.1.tar.gz
 export VSAG_THIRDPARTY_THREAD_POOL_COMMIT_3507796E172D=$VSAG_MIRROR/thread_pool-3507796e.tar.gz
@@ -163,7 +163,7 @@ On a machine that has *no* network at all, copy the archives onto the box first
 export VSAG_THIRDPARTY_JSON_3_11_3=/data/vsag-deps/v3.11.3.tar.gz
 export VSAG_THIRDPARTY_ANTLR4_4_13_2=/data/vsag-deps/antlr4-4.13.2.tar.gz
 export VSAG_THIRDPARTY_BOOST_1_67_0=/data/vsag-deps/boost_1_67_0.tar.gz
-export VSAG_THIRDPARTY_OPENBLAS_0_3_23=/data/vsag-deps/OpenBLAS-0.3.23.tar.gz
+export VSAG_THIRDPARTY_OPENBLAS_0_3_24=/data/vsag-deps/OpenBLAS-0.3.24.tar.gz
 export VSAG_THIRDPARTY_CPUINFO_COMMIT_CA678952A9A8=/data/vsag-deps/cpuinfo-ca678952.tar.gz
 export VSAG_THIRDPARTY_FMT_10_2_1=/data/vsag-deps/fmt-10.2.1.tar.gz
 export VSAG_THIRDPARTY_THREAD_POOL_COMMIT_3507796E172D=/data/vsag-deps/thread_pool-3507796e.tar.gz
@@ -182,7 +182,7 @@ If only one download is unreliable, override just that one and let the rest use
 the defaults:
 
 ```bash
-export VSAG_THIRDPARTY_OPENBLAS_0_3_23=https://mirror.example.com/OpenBLAS-0.3.23.tar.gz
+export VSAG_THIRDPARTY_OPENBLAS_0_3_24=https://mirror.example.com/OpenBLAS-0.3.24.tar.gz
 make release
 ```
 
@@ -197,7 +197,7 @@ export VSAG_THIRDPARTY_OPENBLAS_0_3_24=/data/vsag-deps/OpenBLAS-0.3.24.tar.gz
 export VSAG_THIRDPARTY_YAML_CPP_0_8_0=/data/vsag-deps/yaml-cpp-0.8.0.tar.gz
 export VSAG_THIRDPARTY_YAML_CPP_0_9_0=/data/vsag-deps/yaml-cpp-0.9.0.tar.gz
 
-git switch 1.0    # selects OpenBLAS 0.3.23 and yaml-cpp 0.9.0
+git switch 1.0    # selects OpenBLAS 0.3.24 and yaml-cpp 0.9.0
 make release
 ```
 

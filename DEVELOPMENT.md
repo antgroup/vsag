@@ -164,7 +164,7 @@ remains as a deprecated compatibility fallback. The value may be a local filesys
 path or URL, making this the primary mechanism for offline,
 air-gapped, or internal-mirror builds.
 
-- **`VSAG_THIRDPARTY_OPENBLAS_0_3_23`** (representative `1.0` example)
+- **`VSAG_THIRDPARTY_OPENBLAS_0_3_24`** (representative `1.0` example)
   - Override the OpenBLAS source archive URL/path used by `ExternalProject_Add`
   - Useful for offline builds, local mirrors, or pre-downloaded archives
 

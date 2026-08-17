@@ -58,7 +58,7 @@ set (expected_dependencies
      ROARINGBITMAP TABULATE THREAD_POOL TSL YAML_CPP)
 set (expected_pins
      4.13.2 v3.1 1.67.0 v3.7.1 ca678952a9a8eaa6de112d154e8e104b22f9ab3f
-     10.2.1 hdf5_1.14.4 v0.35.0 v3.11.3 v0.3.23 v2.11.1 v3.0.1
+     10.2.1 hdf5_1.14.4 v0.35.0 v3.11.3 v0.3.24 v2.11.1 v3.0.1
      3a58301067bbc03da89ae5a51b3e05b7da719d38
      3507796e172d36555b47d6191f170823d9f6b12c v1.4.0 yaml-cpp-0.9.0)
 set (expected_variables
@@ -66,7 +66,7 @@ set (expected_variables
      VSAG_THIRDPARTY_BOOST_1_67_0 VSAG_THIRDPARTY_CATCH2_3_7_1
      VSAG_THIRDPARTY_CPUINFO_COMMIT_CA678952A9A8 VSAG_THIRDPARTY_FMT_10_2_1
      VSAG_THIRDPARTY_HDF5_1_14_4 VSAG_THIRDPARTY_HTTPLIB_0_35_0
-     VSAG_THIRDPARTY_JSON_3_11_3 VSAG_THIRDPARTY_OPENBLAS_0_3_23
+     VSAG_THIRDPARTY_JSON_3_11_3 VSAG_THIRDPARTY_OPENBLAS_0_3_24
      VSAG_THIRDPARTY_PYBIND11_2_11_1 VSAG_THIRDPARTY_ROARINGBITMAP_3_0_1
      VSAG_THIRDPARTY_TABULATE_COMMIT_3A58301067BB
      VSAG_THIRDPARTY_THREAD_POOL_COMMIT_3507796E172D VSAG_THIRDPARTY_TSL_1_4_0
@@ -181,6 +181,31 @@ run_fixture ("" "" output)
 assert_matches ("${output}" "source=default" "default source")
 assert_matches ("${output}" "TEST_SELECTION=default" "mismatched pin ignored")
 assert_not_matches ("${output}" "mismatched-archive" "ignored variable value")
+
+unset (ENV{VSAG_THIRDPARTY_OPENBLAS_0_3_24})
+unset (ENV{VSAG_THIRDPARTY_OPENBLAS})
+set (ENV{VSAG_THIRDPARTY_OPENBLAS_0_3_23} "obsolete-openblas-archive")
+set (openblas_urls default-openblas)
+vsag_resolve_thirdparty_override (OPENBLAS v0.3.24 openblas_urls)
+list (GET openblas_urls 0 selected_openblas_url)
+assert_equal ("${selected_openblas_url}" "default-openblas" "obsolete OpenBLAS pin ignored")
+
+set (ENV{VSAG_THIRDPARTY_OPENBLAS} "legacy-openblas-archive")
+set (openblas_urls default-openblas)
+vsag_resolve_thirdparty_override (OPENBLAS v0.3.24 openblas_urls)
+list (GET openblas_urls 0 selected_openblas_url)
+assert_equal ("${selected_openblas_url}" "legacy-openblas-archive"
+              "OpenBLAS legacy fallback")
+
+set (ENV{VSAG_THIRDPARTY_OPENBLAS_0_3_24} "pinned-openblas-archive")
+set (openblas_urls default-openblas)
+vsag_resolve_thirdparty_override (OPENBLAS v0.3.24 openblas_urls)
+list (GET openblas_urls 0 selected_openblas_url)
+assert_equal ("${selected_openblas_url}" "pinned-openblas-archive"
+              "OpenBLAS pinned precedence")
+unset (ENV{VSAG_THIRDPARTY_OPENBLAS_0_3_24})
+unset (ENV{VSAG_THIRDPARTY_OPENBLAS_0_3_23})
+unset (ENV{VSAG_THIRDPARTY_OPENBLAS})
 
 set (ENV{VSAG_THIRDPARTY_FMT} "https://user:legacy-secret@example.invalid/fmt.tar.gz")
 execute_process (
