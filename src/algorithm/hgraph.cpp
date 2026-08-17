@@ -933,10 +933,20 @@ HGraph::KnnSearch(const DatasetPtr& query,
     auto search_result = DistanceHeap::MakeInstanceBySize<true, false>(ctx.alloc, k);
     const auto* query_data = get_data(query);
     if (is_last_filter) {
+        if (const auto* pending_duplicates = iter_filter_ctx->GetPendingDuplicates();
+            pending_duplicates != nullptr) {
+            for (const auto& [pending_id, pending_dist] : *pending_duplicates) {
+                if (iter_filter_ctx->CheckPoint(pending_id)) {
+                    search_result->Push(pending_dist, pending_id);
+                }
+            }
+        }
         while (!iter_filter_ctx->Empty()) {
             uint32_t cur_inner_id = iter_filter_ctx->GetTopID();
             float cur_dist = iter_filter_ctx->GetTopDist();
-            search_result->Push(cur_dist, cur_inner_id);
+            if (not iter_filter_ctx->IsPendingDuplicate(cur_inner_id)) {
+                search_result->Push(cur_dist, cur_inner_id);
+            }
             iter_filter_ctx->PopDiscard();
         }
     } else {
@@ -964,6 +974,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.is_inner_id_allowed = ft;
         search_param.topk = static_cast<int64_t>(search_param.ef);
         search_param.consider_duplicate = this->label_table_->CompressDuplicateData();
+        search_param.max_duplicates_per_group = params.max_duplicates_per_group;
         search_param.parallel_search_thread_count = params.parallel_search_thread_count;
         search_param.min_distance = params.min_distance;
 
@@ -1410,6 +1421,9 @@ HGraph::Serialize(StreamWriter& writer) const {
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Serialize(writer);
         }
+        if (this->label_table_->CompressDuplicateData()) {
+            this->label_table_->SerializeDuplicateRecords(writer);
+        }
         return;
     }
 
@@ -1443,9 +1457,52 @@ HGraph::Serialize(StreamWriter& writer) const {
 }
 
 void
+HGraph::Deserialize(std::istream& in_stream) {
+    if (not this->use_old_serial_format_) {
+        InnerIndexInterface::Deserialize(in_stream);
+        return;
+    }
+
+    try {
+        uint64_t cursor = 0;
+        auto read_func = [&](uint64_t offset, uint64_t size, void* data) {
+            if (offset != cursor) {
+                throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "v0.14 sequential stream does not support seek");
+            }
+            in_stream.read(static_cast<char*>(data), static_cast<int64_t>(size));
+            if (in_stream.gcount() != static_cast<int64_t>(size)) {
+                throw VsagException(
+                    ErrorType::READ_ERROR,
+                    fmt::format("Attempted to read: {} bytes. Remaining content size: {} bytes.",
+                                size,
+                                in_stream.gcount()));
+            }
+            cursor += size;
+        };
+        ReadFuncStreamReader reader(read_func, 0, 0);
+        this->deserialize(reader, true);
+        if (reader.GetCursor() != cursor) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "v0.14 sequential stream does not support seek");
+        }
+    } catch (const std::bad_alloc& e) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to Deserialize: ", e.what());
+    }
+}
+
+void
 HGraph::Deserialize(StreamReader& reader) {
-    // try to deserialize footer (only in new version)
-    auto footer = Footer::Parse(reader);
+    this->deserialize(reader, false);
+}
+
+void
+HGraph::deserialize(StreamReader& reader, bool force_v0_14) {
+    FooterPtr footer = nullptr;
+    if (not force_v0_14) {
+        // try to deserialize footer (only in new version)
+        footer = Footer::Parse(reader);
+    }
 
     if (footer == nullptr) {  // old format, DON'T EDIT, remove in the future
         logger::debug("parse with v0.14 version format");
@@ -1473,6 +1530,11 @@ HGraph::Deserialize(StreamReader& reader) {
 
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Deserialize(reader);
+        }
+        if (this->label_table_->CompressDuplicateData()) {
+            const auto logical_element_count =
+                static_cast<uint64_t>(this->label_table_->GetTotalCount());
+            this->label_table_->DeserializeDuplicateRecords(reader, logical_element_count);
         }
     } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
         logger::debug("parse with new version format");
@@ -2222,6 +2284,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             search_param.topk, static_cast<int64_t>(static_cast<float>(k) * params.topk_factor));
     }
     search_param.consider_duplicate = true;
+    search_param.max_duplicates_per_group = params.max_duplicates_per_group;
     if (params.enable_time_record) {
         search_param.time_cost = std::make_shared<Timer>();
         search_param.time_cost->SetThreshold(params.timeout_ms);

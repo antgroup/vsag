@@ -19,6 +19,7 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <chrono>
 #include <limits>
+#include <sstream>
 #include <thread>
 
 #include "algorithm/hgraph.h"
@@ -357,6 +358,40 @@ HGraphTestIndex::TestMemoryUsageDetail(const IndexPtr& index) {
     REQUIRE(memory_detail.Contains("route_graph"));
 }
 }  // namespace fixtures
+
+namespace {
+
+class ForwardOnlyStringBuffer final : public std::stringbuf {
+public:
+    explicit ForwardOnlyStringBuffer(const std::string& data)
+        : std::stringbuf(data, std::ios::in | std::ios::binary) {
+    }
+
+    [[nodiscard]] uint64_t
+    GetSeekCount() const {
+        return seek_count_;
+    }
+
+protected:
+    pos_type
+    seekoff(off_type,
+            std::ios_base::seekdir,
+            std::ios_base::openmode = std::ios_base::in | std::ios_base::out) override {
+        ++seek_count_;
+        return pos_type(off_type(-1));
+    }
+
+    pos_type
+    seekpos(pos_type, std::ios_base::openmode = std::ios_base::in | std::ios_base::out) override {
+        ++seek_count_;
+        return pos_type(off_type(-1));
+    }
+
+private:
+    uint64_t seek_count_{0};
+};
+
+}  // namespace
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
                              "HGraph Factory Test With Exceptions",
@@ -1631,6 +1666,142 @@ TEST_CASE("HGraph Deserialize Old Format With Duplicate Support",
         REQUIRE(duplicate_record == nullptr);
     }
     REQUIRE_NOTHROW(static_cast<void>(index2->GetStats()));
+
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE("HGraph old format supports forward-only streams", "[ft][hgraph][serialization][pr]") {
+    constexpr int64_t dim = 8;
+    const bool support_duplicate = GENERATE(false, true);
+    const auto build_param = fmt::format(
+        R"({{
+            "dtype": "float32",
+            "metric_type": "l2",
+            "dim": {},
+            "use_old_serial_format": true,
+            "index_param": {{
+                "max_degree": 16,
+                "ef_construction": 100,
+                "base_quantization_type": "fp32",
+                "build_thread_count": 1,
+                "support_duplicate": {}
+            }}
+        }})",
+        dim,
+        support_duplicate);
+
+    auto index_result = vsag::Factory::CreateIndex("hgraph", build_param);
+    REQUIRE(index_result.has_value());
+    auto index = index_result.value();
+
+    std::vector<int64_t> ids{0, 1, 2, 3, 4, 5, 6, 7};
+    std::vector<float> vectors(ids.size() * dim, 0.0F);
+    for (uint64_t i = 4; i < ids.size(); ++i) {
+        std::fill(vectors.begin() + i * dim, vectors.begin() + (i + 1) * dim, i * 10.0F);
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(ids.size())
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    std::ostringstream serialized(std::ios::out | std::ios::binary);
+    REQUIRE(index->Serialize(serialized).has_value());
+
+    auto restored_result = vsag::Factory::CreateIndex("hgraph", build_param);
+    REQUIRE(restored_result.has_value());
+    ForwardOnlyStringBuffer buffer(serialized.str());
+    std::istream stream(&buffer);
+    REQUIRE(restored_result.value()->Deserialize(stream).has_value());
+    REQUIRE(buffer.GetSeekCount() == 0);
+    REQUIRE(restored_result.value()->GetNumElements() == ids.size());
+    if (support_duplicate) {
+        auto impl =
+            std::dynamic_pointer_cast<vsag::IndexImpl<vsag::HGraph>>(restored_result.value());
+        REQUIRE(impl != nullptr);
+        auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(impl->GetInnerIndex());
+        REQUIRE(hgraph != nullptr);
+        REQUIRE(hgraph->label_table_->duplicate_count_ == 1);
+        REQUIRE(hgraph->label_table_->duplicate_records_[0] != nullptr);
+        REQUIRE(hgraph->label_table_->duplicate_records_[0]->duplicate_ids.size() == 3);
+        REQUIRE_NOTHROW(static_cast<void>(restored_result.value()->GetStats()));
+    }
+}
+
+TEST_CASE("HGraph Old Format Preserves Duplicate Records", "[ft][hgraph][serialization][pr]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    vsag::Options::Instance().set_block_size_limit(1024 * 1024 * 2);
+
+    constexpr int64_t dim = 8;
+    constexpr const char* build_param = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 8,
+        "use_old_serial_format": true,
+        "index_param": {
+            "max_degree": 16,
+            "ef_construction": 100,
+            "base_quantization_type": "fp32",
+            "build_thread_count": 1,
+            "support_duplicate": true
+        }
+    })";
+
+    auto index_result = vsag::Factory::CreateIndex("hgraph", build_param);
+    REQUIRE(index_result.has_value());
+    auto index = index_result.value();
+
+    std::vector<int64_t> ids{0, 100, 101, 102, 4, 5, 6, 7};
+    std::vector<float> vectors(ids.size() * dim, 0.0F);
+    for (uint64_t i = 4; i < ids.size(); ++i) {
+        std::fill(vectors.begin() + i * dim, vectors.begin() + (i + 1) * dim, i * 10.0F);
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(ids.size())
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    std::vector<float> query_vector(dim, 0.0F);
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
+    constexpr const char* search_param = R"({"hgraph":{"ef_search":32}})";
+    const auto search_duplicate_group = [&](const vsag::IndexPtr& target) {
+        auto result = target->KnnSearch(query, 4, search_param);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 4);
+        std::vector<int64_t> result_ids(result.value()->GetIds(), result.value()->GetIds() + 4);
+        std::sort(result_ids.begin(), result_ids.end());
+        for (int64_t i = 0; i < 4; ++i) {
+            REQUIRE(result.value()->GetDistances()[i] == 0.0F);
+        }
+        return result_ids;
+    };
+    const std::vector<int64_t> expected_ids{0, 100, 101, 102};
+    REQUIRE(search_duplicate_group(index) == expected_ids);
+
+    auto serialized = index->Serialize();
+    REQUIRE(serialized.has_value());
+    auto reloaded_result = vsag::Factory::CreateIndex("hgraph", build_param);
+    REQUIRE(reloaded_result.has_value());
+    auto reloaded = reloaded_result.value();
+    REQUIRE(reloaded->Deserialize(serialized.value()).has_value());
+
+    auto impl = std::dynamic_pointer_cast<vsag::IndexImpl<vsag::HGraph>>(reloaded);
+    REQUIRE(impl != nullptr);
+    auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(impl->GetInnerIndex());
+    REQUIRE(hgraph != nullptr);
+    REQUIRE(hgraph->label_table_->duplicate_count_ == 1);
+    const auto duplicate_ids = hgraph->label_table_->GetDuplicateId(0);
+    REQUIRE(duplicate_ids.size() == 3);
+    REQUIRE(duplicate_ids.contains(1));
+    REQUIRE(duplicate_ids.contains(2));
+    REQUIRE(duplicate_ids.contains(3));
+    REQUIRE(search_duplicate_group(reloaded) == expected_ids);
 
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }

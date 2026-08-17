@@ -508,6 +508,9 @@ HGraphAnalyzer::GetDegreeDistribution() {
     Vector<uint32_t> in_degree(this->total_count_, allocator_);
     Vector<uint32_t> out_degree(this->total_count_, allocator_);
     for (InnerIdType i = 0; i < this->total_count_; ++i) {
+        if (is_duplicate_ids_[i]) {
+            continue;
+        }
         Vector<InnerIdType> neighbors(allocator_);
         hgraph_->bottom_graph_->GetNeighbors(i, neighbors);
         out_degree[i] = neighbors.size();
