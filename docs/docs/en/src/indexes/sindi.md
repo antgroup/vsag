@@ -79,6 +79,7 @@ and `metric_type` **must** be `"ip"`.
 | `use_reorder` | bool | `false` | Keep a forward store and rescore candidates after coarse SINDI scoring. |
 | `rerank_type` | string | `"fp32"` | Forward-store type used when `use_reorder` is enabled. `fp32` keeps exact values; `dmq8` stores compressed 8-bit DMQ codes. |
 | `dmq_shared_codebook_threshold` | int | `1024` | With `rerank_type: "dmq8"`, terms occurring at most this many times share one codebook; more frequent terms keep independent codebooks. Set to `0` to disable sharing. |
+| `host_filter_threshold` | int | `40` | With immutable host filtering, hosts with at most this many documents use direct forward-store scoring; larger hosts search only their overlapping windows before reranking. |
 | `remap_term_ids` | bool | `false` | Remap term IDs before indexing; useful when term IDs are sparse or have large gaps. |
 | `avg_doc_term_length` | int | `100` | Hint for memory estimation only. |
 | `immutable` | bool | `false` | Build or load the compact read-only runtime. `Build()` compacts completed windows as it proceeds to reduce peak memory; incremental `Add()` is rejected. |
@@ -127,13 +128,47 @@ reported with this feature, peak build memory fell from 27.03 GB to 6.08 GB (77.
 build time increased from about 330 seconds to 599 seconds. Treat these figures as workload-specific
 evidence, not a capacity guarantee.
 
-The immutable runtime supports KNN and range search plus legacy `Serialize`/`Deserialize`.
+The immutable runtime supports KNN and range search plus legacy and streaming serialization.
 It rejects incremental `Add`, `GetSparseVectorByInnerId`, `CalcDistanceById`, and
-`CalDistanceById`. Streaming serialization is not supported for immutable SINDI; use the matching
-legacy serialization APIs or keep the index mutable when the streaming format is required.
+`CalDistanceById`.
 The serialized index must be loaded into a SINDI created with the same `immutable` setting.
 New indexes record the sorted posting-list format version and skip normalization when loaded.
 Indexes written without this marker remain compatible and are normalized during loading.
+
+### Immutable host filtering
+
+Read-only indexes can group documents by a single numeric host and avoid searching unrelated
+windows. The feature requires `immutable: true` and `use_reorder: true`; both
+`rerank_type: "fp32"` and `rerank_type: "dmq8"` are supported. Attach one non-zero `uint32_t`
+`host_id` per base document:
+
+```cpp
+base->NumElements(n)
+    ->SparseVectors(sparse_vectors)
+    ->Ids(ids)
+    ->UInt32Metadata("host_id", base_host_ids)
+    ->Owner(false);
+index->Build(base);
+
+uint32_t query_host_id = 42;
+query->NumElements(1)
+    ->SparseVectors(&query_vec)
+    ->UInt32Metadata("host_id", &query_host_id)
+    ->Owner(false);
+```
+
+Build reorders internal IDs by host while preserving external labels. A host with at most
+`host_filter_threshold` successfully inserted documents is scored directly by the configured FP32
+or DMQ forward store. A larger host scans only the fixed-size windows overlapping its internal-ID
+interval and then applies normal reranking. Tombstones and an additional user `Filter` are applied
+on both paths.
+
+Host IDs are 1-based and currently limited to 50,000,000. An invalid build host rejects the build;
+an absent query host or a host with no indexed documents returns an empty result. Omitting
+`host_id` from a query preserves full-index KNN behavior. Indexes built without base host metadata,
+including older serialized indexes, ignore query host metadata and retain their previous behavior.
+Host filtering currently applies only to KNN; range search keeps its existing full-index behavior.
+Both legacy and streaming serialization preserve the host routing metadata.
 
 ## Search parameters
 

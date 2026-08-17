@@ -74,6 +74,7 @@ auto result = index->KnnSearch(
 | `use_reorder` | bool | `false` | 是否保留一份正排存储，在 SINDI 粗排后对候选做精排 |
 | `rerank_type` | string | `"fp32"` | `use_reorder` 开启时使用的正排存储类型。`fp32` 保留精确值；`dmq8` 使用压缩的 8-bit DMQ 编码 |
 | `dmq_shared_codebook_threshold` | int | `1024` | `rerank_type: "dmq8"` 时，出现次数不超过该值的 term 共用一个 codebook；更高频的 term 保持独立 codebook。设为 `0` 可关闭共享 |
+| `host_filter_threshold` | int | `40` | immutable host 过滤中，文档数不超过该阈值的 host 直接使用正排打分；更大的 host 仅搜索与其重叠的窗口，再做重排 |
 | `remap_term_ids` | bool | `false` | 是否在建索引前重映射词项 ID，适用于词项 ID 很稀疏或存在大量空洞的词表 |
 | `avg_doc_term_length` | int | `100` | 仅用于内存估算 |
 | `immutable` | bool | `false` | 构建或加载紧凑的只读运行态；`Build()` 会逐窗口压缩以降低峰值内存，增量 `Add()` 会被拒绝 |
@@ -118,12 +119,43 @@ auto result = index->KnnSearch(
 提交时的 Sparse4M FP16 实测中，构建峰值内存从 27.03 GB 降到 6.08 GB（降低 77.51%），
 构建时间则从约 330 秒增加到 599 秒。这些数字是特定负载的实测证据，不是容量保证。
 
-不可变运行态支持 KNN、范围搜索以及旧版 `Serialize`/`Deserialize`。它不支持增量
+不可变运行态支持 KNN、范围搜索以及旧版和 streaming 序列化。它不支持增量
 `Add`、`GetSparseVectorByInnerId`、`CalcDistanceById` 与 `CalDistanceById`。
-不可变 SINDI 不支持流式序列化；需要流式格式时应保持索引可变，或使用匹配的旧版序列化接口。
 反序列化时，新建 SINDI 的 `immutable` 设置必须与存储格式一致。
 新索引会记录有序倒排链格式版本，加载时可跳过归一化排序；缺少该标记的旧索引仍保持兼容，
 并在加载时完成排序归一化。
+
+### Immutable host 过滤
+
+只读索引可以按单值数值 host 对文档分组，从而避免搜索无关窗口。该功能要求同时设置
+`immutable: true` 和 `use_reorder: true`，并支持 `rerank_type: "fp32"` 与
+`rerank_type: "dmq8"`。构建数据需要为每篇文档附加一个非零 `uint32_t` 类型的 `host_id`：
+
+```cpp
+base->NumElements(n)
+    ->SparseVectors(sparse_vectors)
+    ->Ids(ids)
+    ->UInt32Metadata("host_id", base_host_ids)
+    ->Owner(false);
+index->Build(base);
+
+uint32_t query_host_id = 42;
+query->NumElements(1)
+    ->SparseVectors(&query_vec)
+    ->UInt32Metadata("host_id", &query_host_id)
+    ->Owner(false);
+```
+
+构建会按 host 重排 inner ID，同时保持 external label 不变。成功插入文档数不超过
+`host_filter_threshold` 的 host 由配置的 FP32 或 DMQ 正排直接打分；更大的 host 只扫描覆盖
+其 inner-ID 区间的固定大小窗口，然后执行正常重排。两条路径都会应用删除标记和额外的用户
+`Filter`。
+
+host ID 从 1 开始，当前上限为 50,000,000。构建 host 非法时整个构建失败；查询 host 非法
+或没有已索引文档时返回空结果。查询不提供 `host_id` 时保留全索引 KNN 行为。构建时没有
+base host metadata 的索引（包括旧版序列化索引）会忽略查询 host metadata，行为保持不变。
+host 过滤当前仅适用于 KNN；范围搜索仍使用原有全索引路径。旧版与 streaming 序列化都会
+保存 host 路由 metadata。
 
 ## 检索参数
 

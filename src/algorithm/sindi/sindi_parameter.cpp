@@ -166,6 +166,32 @@ SINDIParameter::FromJson(const JsonType& json) {
         dmq_shared_codebook_threshold = DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD;
     }
 
+    if (json.Contains(SPARSE_HOST_FILTER_THRESHOLD)) {
+        const auto threshold_json = json[SPARSE_HOST_FILTER_THRESHOLD];
+        CHECK_ARGUMENT(threshold_json.IsNumberInteger(),
+                       "host_filter_threshold must be a non-negative integer");
+        if (threshold_json.IsNumberUnsigned()) {
+            const auto threshold = threshold_json.GetUint64();
+            CHECK_ARGUMENT(threshold <= std::numeric_limits<uint32_t>::max(),
+                           fmt::format("host_filter_threshold must be in [0, {}], got {}",
+                                       std::numeric_limits<uint32_t>::max(),
+                                       threshold));
+            host_filter_threshold = static_cast<uint32_t>(threshold);
+        } else {
+            const auto threshold = threshold_json.GetInt();
+            CHECK_ARGUMENT(
+                threshold >= 0,
+                fmt::format("host_filter_threshold must be non-negative, got {}", threshold));
+            CHECK_ARGUMENT(static_cast<uint64_t>(threshold) <= std::numeric_limits<uint32_t>::max(),
+                           fmt::format("host_filter_threshold must be in [0, {}], got {}",
+                                       std::numeric_limits<uint32_t>::max(),
+                                       threshold));
+            host_filter_threshold = static_cast<uint32_t>(threshold);
+        }
+    } else {
+        host_filter_threshold = DEFAULT_SPARSE_HOST_FILTER_THRESHOLD;
+    }
+
     if (json.Contains(SPARSE_IMMUTABLE)) {
         immutable = json[SPARSE_IMMUTABLE].GetBool();
     }
@@ -193,6 +219,7 @@ SINDIParameter::ToJson() const {
         json[SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD].SetInt(
             static_cast<int64_t>(dmq_shared_codebook_threshold));
     }
+    json[SPARSE_HOST_FILTER_THRESHOLD].SetInt(static_cast<int64_t>(host_filter_threshold));
     return json;
 }
 

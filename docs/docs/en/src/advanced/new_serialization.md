@@ -203,10 +203,11 @@ SINDI writes these streaming blocks in order:
 | `label_table` | external labels and label remap | yes |
 | `sindi_rerank_index` | optional rerank flat index when rerank is enabled | conditional |
 | `sindi_term_id_mapper` | optional term-id remapping table | conditional |
+| `sindi_host_metadata` | host threshold and internal-ID interval offsets | conditional |
 
 `DeserializeStreaming` restores the full in-memory SINDI index. `Index::Load` can create the SINDI
 index directly from streaming metadata and currently loads all emitted SINDI blocks into memory.
-Immutable SINDI runtime serialization is not supported by this streaming path.
+The streaming path supports both mutable and immutable SINDI runtimes.
 
 ## Pyramid Blocks
 

@@ -531,6 +531,61 @@ TEST_CASE("Dataset Named Paths Test", "[ut][dataset]") {
     }
 }
 
+TEST_CASE("Dataset Named UInt32 Metadata Test", "[ut][dataset]") {
+    {
+        auto* shared_metadata = new uint32_t[2]{3, 5};
+        auto aliased = vsag::Dataset::Make();
+        aliased->NumElements(2)
+            ->Dim(1)
+            ->VectorCounts(shared_metadata)
+            ->UInt32Metadata("host_id", shared_metadata)
+            ->UInt32Metadata("tenant_id", shared_metadata)
+            ->Owner(true);
+    }
+
+    auto* first_host_ids = new uint32_t[2]{3, 5};
+    auto first = vsag::Dataset::Make();
+    first->NumElements(2)
+        ->Dim(1)
+        ->VectorCounts(first_host_ids)
+        ->UInt32Metadata("host_id", first_host_ids)
+        ->Owner(true);
+
+    REQUIRE(first->GetUInt32Metadata("host_id") == first_host_ids);
+    REQUIRE(first->GetUInt32Metadata("missing") == nullptr);
+
+    auto copy = first->DeepCopy();
+    REQUIRE(copy->GetUInt32Metadata("host_id") != first_host_ids);
+    REQUIRE(copy->GetUInt32Metadata("host_id")[0] == 3);
+    REQUIRE(copy->GetUInt32Metadata("host_id")[1] == 5);
+
+    auto* appended_host_ids = new uint32_t[2]{7, 11};
+    auto* appended_vector_counts = new uint32_t[2]{13, 17};
+    auto appended = vsag::Dataset::Make();
+    appended->NumElements(2)
+        ->Dim(1)
+        ->VectorCounts(appended_vector_counts)
+        ->UInt32Metadata("host_id", appended_host_ids)
+        ->Owner(true);
+    first->Append(appended);
+    REQUIRE(first->GetNumElements() == 4);
+    REQUIRE(first->GetUInt32Metadata("host_id")[2] == 7);
+    REQUIRE(first->GetUInt32Metadata("host_id")[3] == 11);
+    REQUIRE(first->GetVectorCounts()[2] == 13);
+    REQUIRE(first->GetVectorCounts()[3] == 17);
+
+    auto slice = vsag::Dataset::Make();
+    slice->NumElements(2)
+        ->Dim(1)
+        ->UInt32Metadata("host_id", first->GetUInt32Metadata("host_id") + 1)
+        ->Owner(false);
+    REQUIRE(slice->GetUInt32Metadata("host_id")[0] == 5);
+    REQUIRE(slice->GetUInt32Metadata("host_id")[1] == 7);
+
+    auto missing_metadata = vsag::Dataset::Make()->NumElements(1)->Dim(1)->Owner(false);
+    REQUIRE_THROWS(first->Append(missing_metadata));
+}
+
 TEST_CASE("Dataset MultiVector Basic Test", "[ut][dataset]") {
     SECTION("MultiVectorDim default is 0") {
         auto dataset = vsag::Dataset::Make();

@@ -38,6 +38,8 @@ static constexpr const char* SPARSE_RERANK_TYPE_DMQ8 = "dmq8";
 
 static constexpr const char* SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD = "dmq_shared_codebook_threshold";
 static constexpr uint32_t DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD = 1024;
+static constexpr const char* SPARSE_HOST_FILTER_THRESHOLD = "host_filter_threshold";
+static constexpr uint32_t DEFAULT_SPARSE_HOST_FILTER_THRESHOLD = 40;
 
 std::string
 SparseValueQuantizationTypeToString(SparseValueQuantizationType type);
@@ -72,6 +74,8 @@ public:
     std::string rerank_type{SPARSE_RERANK_TYPE_FP32};
 
     uint32_t dmq_shared_codebook_threshold{DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD};
+
+    uint32_t host_filter_threshold{DEFAULT_SPARSE_HOST_FILTER_THRESHOLD};
 
     bool immutable{false};
 
