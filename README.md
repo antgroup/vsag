@@ -607,7 +607,7 @@ VSAG referenced the following works during its implementation:
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=antgroup/vsag&type=Date)](https://star-history.com/#antgroup/vsag&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=antgroup/vsag&type=Date)](https://star-history.dera.page/#antgroup/vsag&Date)
 
 ## License
 [Apache License 2.0](./LICENSE)
