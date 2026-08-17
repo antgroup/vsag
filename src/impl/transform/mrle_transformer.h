@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <cstring>
+
 #include "metric_type.h"
 #include "simd/normalize.h"
 #include "vector_transformer.h"
@@ -33,14 +35,14 @@ public:
 
     ~MRLETransformer() override = default;
 
-    TransformerMetaPtr
-    Transform(const float* original_vec, float* transformed_vec) const override {
-        auto meta = std::make_shared<MRLETMeta>();
+    void
+    Transform(const float* original_vec,
+              float* transformed_vec,
+              uint8_t* /*meta*/ = nullptr) const override {
         memcpy(transformed_vec, original_vec, this->output_dim_ * sizeof(float));
         if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
             Normalize(transformed_vec, transformed_vec, this->output_dim_);
         }
-        return meta;
     }
 
     void

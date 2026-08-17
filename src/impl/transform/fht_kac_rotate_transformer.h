@@ -28,8 +28,8 @@ public:
 
     ~FhtKacRotator() override = default;
 
-    TransformerMetaPtr
-    Transform(const float* data, float* rotated_vec) const override;
+    void
+    Transform(const float* data, float* rotated_vec, uint8_t* meta = nullptr) const override;
 
     void
     InverseTransform(const float* data, float* rotated_vec) const override;

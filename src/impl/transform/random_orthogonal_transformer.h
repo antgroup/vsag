@@ -29,8 +29,10 @@ public:
 
     ~RandomOrthogonalMatrix() override = default;
 
-    TransformerMetaPtr
-    Transform(const float* original_vec, float* transformed_vec) const override;
+    void
+    Transform(const float* original_vec,
+              float* transformed_vec,
+              uint8_t* meta = nullptr) const override;
 
     void
     InverseTransform(const float* transformed_vec, float* original_vec) const override;

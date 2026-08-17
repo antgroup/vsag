@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <cassert>
 #include <sstream>
 #include <string>
 
@@ -119,8 +120,12 @@ public:
     MakeTransformerInstance(std::string transform_str,
                             const VectorTransformerParameter& param) const;
 
-    void
-    ExecuteChainTransform(float* prev_data, const uint32_t* meta_offsets, uint8_t* codes) const;
+    const float*
+    ExecuteChainTransform(const float* input,
+                          const uint32_t* meta_offsets,
+                          uint8_t* codes,
+                          Vector<float>& primary_scratch,
+                          Vector<float>& secondary_scratch) const;
 
     float
     ExecuteChainDistanceRecovery(float quantize_dist,
@@ -245,11 +250,13 @@ TransformQuantizer<QuantTmpl, metric>::TrainImpl(const float* data, uint64_t cou
     // 2. execute transform on original data
     const uint64_t transformed_dim = this->GetTransformedDim();
     Vector<float> transformed_data(transformed_dim * count, 0, this->allocator_);
-    Vector<float> transformed_vector(this->allocator_);
+    Vector<float> primary_scratch(this->allocator_);
+    Vector<float> secondary_scratch(this->allocator_);
     for (uint64_t i = 0; i < count; ++i) {
-        this->TransformBaseVector(data + i * this->dim_, transformed_vector);
+        const auto* transformed = ExecuteChainTransform(
+            data + i * this->dim_, nullptr, nullptr, primary_scratch, secondary_scratch);
         memcpy(transformed_data.data() + i * transformed_dim,
-               transformed_vector.data(),
+               transformed,
                transformed_dim * sizeof(float));
     }
 
@@ -259,42 +266,70 @@ TransformQuantizer<QuantTmpl, metric>::TrainImpl(const float* data, uint64_t cou
 }
 
 template <typename QuantTmpl, MetricType metric>
-void
-TransformQuantizer<QuantTmpl, metric>::ExecuteChainTransform(float* prev_data,
-                                                             const uint32_t* meta_offsets,
-                                                             uint8_t* codes) const {
-    Vector<float> next_data(this->dim_, 0, this->allocator_);
-
-    for (uint32_t i = 0; i < this->transform_chain_.size(); i++) {
-        auto vector_transformer = this->transform_chain_[i];
-        auto meta = vector_transformer->Transform(prev_data, next_data.data());
-        if (codes != nullptr) {
-            meta->EncodeMeta(codes + meta_offsets[i]);
-        }
-
-        memcpy(prev_data, next_data.data(), vector_transformer->GetOutputDim() * sizeof(float));
+const float*
+TransformQuantizer<QuantTmpl, metric>::ExecuteChainTransform(
+    const float* input,
+    const uint32_t* meta_offsets,
+    uint8_t* codes,
+    Vector<float>& primary_scratch,
+    Vector<float>& secondary_scratch) const {
+    if (primary_scratch.size() < this->dim_) {
+        primary_scratch.resize(this->dim_, 0.0F);
     }
+
+    const float* current = input;
+    float* next = primary_scratch.data();
+    for (uint32_t i = 0; i < this->transform_chain_.size(); i++) {
+        const auto& vector_transformer = this->transform_chain_[i];
+        uint8_t* meta = nullptr;
+        if (codes != nullptr) {
+            assert(meta_offsets != nullptr);
+            if (meta_offsets != nullptr && vector_transformer->GetMetaSize() > 0) {
+                meta = codes + meta_offsets[i];
+            }
+        }
+        vector_transformer->Transform(current, next, meta);
+        current = next;
+
+        if (i + 1 < this->transform_chain_.size()) {
+            if (next == primary_scratch.data()) {
+                if (secondary_scratch.size() < this->dim_) {
+                    secondary_scratch.resize(this->dim_, 0.0F);
+                }
+                next = secondary_scratch.data();
+            } else {
+                next = primary_scratch.data();
+            }
+        }
+    }
+    return current;
 }
 
 template <typename QuantTmpl, MetricType metric>
 void
 TransformQuantizer<QuantTmpl, metric>::TransformBaseVector(const float* input,
                                                            Vector<float>& output) const {
-    output.assign(input, input + this->dim_);
-    ExecuteChainTransform(output.data(), nullptr, nullptr);
-    output.resize(this->GetTransformedDim());
+    Vector<float> secondary_scratch(this->allocator_);
+    const auto* transformed =
+        ExecuteChainTransform(input, nullptr, nullptr, output, secondary_scratch);
+    if (transformed == output.data()) {
+        output.resize(this->GetTransformedDim());
+    } else {
+        output.assign(transformed, transformed + this->GetTransformedDim());
+    }
 }
 
 template <typename QuantTmpl, MetricType metric>
 bool
 TransformQuantizer<QuantTmpl, metric>::EncodeOneImpl(const float* data, uint8_t* codes) const {
     // 1. execute transform
-    Vector<float> data_buffer(this->dim_, 0, this->allocator_);
-    data_buffer.assign(data, data + this->dim_);
-    ExecuteChainTransform(data_buffer.data(), base_meta_offsets_.data(), codes);
+    Vector<float> primary_scratch(this->allocator_);
+    Vector<float> secondary_scratch(this->allocator_);
+    const auto* transformed = ExecuteChainTransform(
+        data, base_meta_offsets_.data(), codes, primary_scratch, secondary_scratch);
 
     // 2. execute quantize
-    return quantizer_->EncodeOne(data_buffer.data(), codes);
+    return quantizer_->EncodeOne(transformed, codes);
 };
 
 template <typename QuantTmpl, MetricType metric>
@@ -313,14 +348,15 @@ TransformQuantizer<QuantTmpl, metric>::ProcessQueryImpl(
     }
 
     // 1. execute transform
-    Vector<float> data_buffer(this->dim_, 0, this->allocator_);
-    data_buffer.assign(query, query + this->dim_);
-    ExecuteChainTransform(
-        data_buffer.data(), query_meta_offsets_.data(), computer.inner_computer_->buf_);
+    const auto* transformed = ExecuteChainTransform(query,
+                                                    query_meta_offsets_.data(),
+                                                    computer.inner_computer_->buf_,
+                                                    computer.primary_scratch_,
+                                                    computer.secondary_scratch_);
 
     // 2. execute quantize
     // note that only when computer.buf_ == nullptr, quantizer_ will allocate data to buf_
-    quantizer_->ProcessQuery(data_buffer.data(), *computer.inner_computer_);
+    quantizer_->ProcessQuery(transformed, *computer.inner_computer_);
 };
 
 template <typename QuantTmpl, MetricType metric>
@@ -332,7 +368,7 @@ TransformQuantizer<QuantTmpl, metric>::ExecuteChainDistanceRecovery(float quanti
                                                                     const uint8_t* codes_2) const {
     auto dist = quantize_dist;
     for (uint32_t i = 0; i < this->transform_chain_.size(); i++) {
-        auto vector_transformer = this->transform_chain_[i];
+        const auto& vector_transformer = this->transform_chain_[i];
         const auto* meta_1 = codes_1 + meta_offsets_1[i];
         const auto* meta_2 = codes_2 + meta_offsets_2[i];
 
@@ -395,8 +431,18 @@ bool
 TransformQuantizer<QuantTmpl, metric>::EncodeBatchImpl(const float* data,
                                                        uint8_t* codes,
                                                        uint64_t count) const {
+    Vector<float> primary_scratch(this->allocator_);
+    Vector<float> secondary_scratch(this->allocator_);
     for (uint64_t i = 0; i < count; ++i) {
-        EncodeOneImpl(data + i * this->dim_, codes + i * this->code_size_);
+        auto* output_codes = codes + i * this->code_size_;
+        const auto* transformed = ExecuteChainTransform(data + i * this->dim_,
+                                                        base_meta_offsets_.data(),
+                                                        output_codes,
+                                                        primary_scratch,
+                                                        secondary_scratch);
+        if (not quantizer_->EncodeOne(transformed, output_codes)) {
+            return false;
+        }
     }
     return true;
 }

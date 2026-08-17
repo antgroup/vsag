@@ -35,8 +35,7 @@ TEST_CASE("MRLETransformer L2 Transform Test", "[ut][MRLETransformer]") {
         input[i] = static_cast<float>(i + 1);
     }
 
-    auto meta = transformer.Transform(input.data(), output.data());
-    REQUIRE(meta != nullptr);
+    transformer.Transform(input.data(), output.data());
 
     for (int64_t i = 0; i < dim; ++i) {
         REQUIRE(std::abs(output[i] - input[i]) < EPSILON);
@@ -55,8 +54,7 @@ TEST_CASE("MRLETransformer Cosine Transform Test", "[ut][MRLETransformer]") {
         input[i] = static_cast<float>(i + 1);
     }
 
-    auto meta = transformer.Transform(input.data(), output.data());
-    REQUIRE(meta != nullptr);
+    transformer.Transform(input.data(), output.data());
 
     float sum = 0.0F;
     for (int64_t i = 0; i < dim; ++i) {
