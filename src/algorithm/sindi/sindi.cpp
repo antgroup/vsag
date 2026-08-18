@@ -641,7 +641,7 @@ SINDI::KnnSearch(const DatasetPtr& query,
     CHECK_ARGUMENT(search_param.n_candidate <= SPARSE_AMPLIFICATION_FACTOR * k,
                    fmt::format("n_candidate ({}) should be less than {} * k ({})",
                                search_param.n_candidate,
-                               AMPLIFICATION_FACTOR,
+                               SPARSE_AMPLIFICATION_FACTOR,
                                k));
     InnerSearchParam inner_param;
     inner_param.ef = std::max(static_cast<int64_t>(search_param.n_candidate), k);

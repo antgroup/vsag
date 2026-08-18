@@ -201,6 +201,31 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "n_candidate Limit Matches Error Message",
+                             "[ft][search][sindi]") {
+    fixtures::SINDIParam param;
+    auto index = TestFactory("sindi", GenerateBuildParameter(param), true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    TestBuildIndex(index, dataset, true);
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+
+    const auto make_param = [](uint32_t n_candidate) {
+        return fmt::format(R"({{"sindi":{{"n_candidate":{},"query_prune_ratio":0.0,)"
+                           R"("term_prune_ratio":0.0}}}})",
+                           n_candidate);
+    };
+
+    constexpr int64_t k = 1;
+    // the error message must cite the same factor (500) used by the check
+    auto result = index->KnnSearch(query, k, make_param(500 * k + 1));
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().message.find("should be less than 500 * k") != std::string::npos);
+
+    result = index->KnnSearch(query, k, make_param(500 * k));
+    REQUIRE(result.has_value());
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
                              "SINDI Build and Search",
                              "[ft][build][search][sindi]") {
     fixtures::SINDIParam param;

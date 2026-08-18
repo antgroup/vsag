@@ -141,7 +141,7 @@ Search-time parameters live under the `sindi` sub-object:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `n_candidate` | int | `0` | Candidate heap size. When `0`, defaults to `SPARSE_AMPLIFICATION_FACTOR · topk` (500×). If set, must satisfy `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk`. |
+| `n_candidate` | int | `0` | Candidate heap size. The effective candidate effort is `max(n_candidate, topk)`, so the default `0` keeps the heap at `topk` with no candidate amplification. Must satisfy `0 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk` (500×). |
 | `query_prune_ratio` | float | `0.0` | Fraction of lowest-weight query terms skipped (`[0.0, 1.0)`). |
 | `term_prune_ratio` | float | `0.0` | Fraction of the lowest-value postings skipped from each term list (`[0.0, 1.0)`). |
 | `term_retain_threshold` | uint64 | `0` | Maximum postings for one term across all windows. A value of `0` disables this limit; positive values allow each non-empty window posting list to scan at most `max(1, floor(threshold / window_count))` postings. |
