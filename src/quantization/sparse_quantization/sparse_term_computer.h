@@ -24,7 +24,6 @@
 
 #include "algorithm/sindi/sindi_parameter.h"
 #include "algorithm/sindi_v2/sindi_v2_parameter.h"
-#include "common.h"
 #include "metric_type.h"
 #include "simd/fp16_simd.h"
 #include "simd/fp32_simd.h"
@@ -98,25 +97,15 @@ public:
                          const uint16_t* term_ids,
                          const uint8_t* term_datas,
                          uint32_t term_count,
-                         float* global_dists,
-                         const QuantizationParams* quantization_params) {
+                         float* global_dists) {
         float query_val = sorted_query_[term_iterator].second;
-        CHECK_ARGUMENT(quantization_params != nullptr,
-                       "SQ8 sparse accumulation requires quantization parameters");
 
         // TODO(ZXY): add prefetch to decrease cache miss like:
         //  __builtin_prefetch(term_ids + term_count / 2, 0, 3);
         //  __builtin_prefetch(term_datas + term_count / 2, 0, 3);
         //  __builtin_prefetch(global_dists + term_ids[term_count / 2], 0, 3);
 
-        const auto scale = quantization_params->diff / 255.0F;
-        SQ8SparseAccumulate(global_dists, term_ids, term_datas, query_val * scale, term_count);
-        const auto minimum_contribution = query_val * quantization_params->min_val;
-        if (minimum_contribution != 0.0F) {
-            for (uint32_t index = 0; index < term_count; ++index) {
-                global_dists[term_ids[index]] += minimum_contribution;
-            }
-        }
+        SQ8SparseAccumulate(global_dists, term_ids, term_datas, query_val, term_count);
     }
 
     void

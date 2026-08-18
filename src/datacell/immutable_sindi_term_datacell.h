@@ -89,7 +89,7 @@ public:
                 bool use_term_lists_heap_insert,
                 SindiQueryContext& query_context) const override;
 
-    void
+    bool
     InsertHeapByWindow(float* dists,
                        uint32_t window_id,
                        const SparseTermComputerPtr& computer,
@@ -98,16 +98,18 @@ public:
                        uint32_t offset_id,
                        InnerSearchMode mode,
                        bool with_filter,
-                       const SindiQueryContext& query_context) const override;
+                       const SindiQueryContext& query_context,
+                       const uint64_t* filter_callback_remaining = nullptr) const override;
 
-    void
+    bool
     InsertHeapByDists(float* dists,
                       uint32_t dists_size,
                       MaxHeap& heap,
                       const InnerSearchParam& param,
                       uint32_t offset_id,
                       InnerSearchMode mode,
-                      bool with_filter) const override;
+                      bool with_filter,
+                      const uint64_t* filter_callback_remaining = nullptr) const override;
 
     float
     CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
@@ -151,7 +153,7 @@ private:
                     MappedQueryTerms& mapped_terms) const;
 
     template <InnerSearchMode mode, InnerSearchType type>
-    void
+    bool
     insert_heap_by_terms(float* dists,
                          const ImmutableSINDIWindow& window,
                          const SparseTermComputerPtr& computer,
@@ -159,15 +161,17 @@ private:
                          MaxHeap& heap,
                          const InnerSearchParam& param,
                          uint32_t offset_id,
-                         SparseEvaluationTracker* candidate_tracker = nullptr) const;
+                         SparseEvaluationTracker* candidate_tracker = nullptr,
+                         const uint64_t* filter_callback_remaining = nullptr) const;
 
     template <InnerSearchMode mode, InnerSearchType type>
-    void
+    bool
     insert_heap_by_dists(float* dists,
                          uint32_t dists_size,
                          MaxHeap& heap,
                          const InnerSearchParam& param,
-                         uint32_t offset_id) const;
+                         uint32_t offset_id,
+                         const uint64_t* filter_callback_remaining = nullptr) const;
 
     uint32_t term_id_limit_{0};
     uint32_t window_size_{0};

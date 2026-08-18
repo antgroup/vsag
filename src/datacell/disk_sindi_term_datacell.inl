@@ -37,7 +37,7 @@ DiskSindiTermDataCell<IOTmpl>::insert_candidate_into_heap(uint32_t id,
             return;
         }
     }
-    if constexpr (type == InnerSearchType::WITH_FILTER) {
+    if constexpr (type != InnerSearchType::PURE) {
 #if __cplusplus >= 202002L
         if (dist > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
 #else
@@ -88,7 +88,7 @@ DiskSindiTermDataCell<IOTmpl>::fill_heap_initial(uint32_t id,
         return false;
     }
     if (dist < 0) {
-        if constexpr (type == InnerSearchType::WITH_FILTER) {
+        if constexpr (type != InnerSearchType::PURE) {
             if (not filter->CheckValid(id + offset_id)) {
                 dist = 0;
                 return false;
@@ -104,24 +104,31 @@ DiskSindiTermDataCell<IOTmpl>::fill_heap_initial(uint32_t id,
 
 template <typename IOTmpl>
 template <InnerSearchMode mode, InnerSearchType type>
-void
-DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindow(
-    float* dists,
-    uint32_t window_id,
-    const SparseTermComputerPtr& computer,
-    MaxHeap& heap,
-    const InnerSearchParam& param,
-    uint32_t offset_id,
-    const QueryTermBuffers& query_term_buffers) const {
+bool
+DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindow(float* dists,
+                                                  uint32_t window_id,
+                                                  const SparseTermComputerPtr& computer,
+                                                  MaxHeap& heap,
+                                                  const InnerSearchParam& param,
+                                                  uint32_t offset_id,
+                                                  const QueryTermBuffers& query_term_buffers,
+                                                  const uint64_t* filter_callback_remaining) const {
     std::shared_lock lock(term_layout_mutex_);
     uint32_t id = 0;
     float cur_heap_top = std::numeric_limits<float>::max();
     auto n_candidate = param.ef;
     auto radius = param.radius;
     auto filter = param.is_inner_id_allowed;
-    UnorderedSet<uint16_t> range_candidates(allocator_);
-
+    [[maybe_unused]] std::optional<UnorderedSet<uint16_t>> range_candidates;
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+        range_candidates.emplace(allocator_);
+    }
+
+    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+        if (heap.size() == n_candidate) {
+            cur_heap_top = heap.top().first;
+        }
+    } else {
         cur_heap_top = radius - 1;
     }
 
@@ -144,15 +151,23 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindow(
             if (heap.size() < n_candidate) {
                 for (; i < start + term_size; i++) {
                     id = one_term_ids[i];
-                    if (fill_heap_initial<type>(id,
-                                                dists[id],
-                                                cur_heap_top,
-                                                heap,
-                                                offset_id,
-                                                n_candidate,
-                                                filter,
-                                                param.distance_threshold,
-                                                param.enable_reorder)) {
+                    const bool heap_filled = fill_heap_initial<type>(id,
+                                                                     dists[id],
+                                                                     cur_heap_top,
+                                                                     heap,
+                                                                     offset_id,
+                                                                     n_candidate,
+                                                                     filter,
+                                                                     param.distance_threshold,
+                                                                     param.enable_reorder);
+                    if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
+                        if (filter_callback_remaining != nullptr and
+                            *filter_callback_remaining == 0) {
+                            computer->ResetTerm();
+                            return true;
+                        }
+                    }
+                    if (heap_filled) {
                         i++;
                         break;
                     }
@@ -163,7 +178,7 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindow(
         for (; i < start + term_size; i++) {
             id = one_term_ids[i];
             if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
-                if (not range_candidates.insert(static_cast<uint16_t>(id)).second) {
+                if (not range_candidates->insert(static_cast<uint16_t>(id)).second) {
                     continue;
                 }
             }
@@ -177,25 +192,37 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindow(
                                                    filter,
                                                    param.distance_threshold,
                                                    param.enable_reorder);
+            if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
+                if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
+                    computer->ResetTerm();
+                    return true;
+                }
+            }
         }
     }
     computer->ResetTerm();
+    return false;
 }
 
 template <typename IOTmpl>
 template <InnerSearchMode mode, InnerSearchType type>
-void
+bool
 DiskSindiTermDataCell<IOTmpl>::InsertHeapByDists(float* dists,
                                                  uint32_t dists_size,
                                                  MaxHeap& heap,
                                                  const InnerSearchParam& param,
-                                                 uint32_t offset_id) const {
+                                                 uint32_t offset_id,
+                                                 const uint64_t* filter_callback_remaining) const {
     float cur_heap_top = std::numeric_limits<float>::max();
     auto n_candidate = param.ef;
     auto radius = param.radius;
     auto filter = param.is_inner_id_allowed;
 
-    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+        if (heap.size() == n_candidate) {
+            cur_heap_top = heap.top().first;
+        }
+    } else {
         cur_heap_top = radius - 1;
     }
 
@@ -203,15 +230,21 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByDists(float* dists,
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
         if (heap.size() < n_candidate) {
             for (; id < dists_size; id++) {
-                if (fill_heap_initial<type>(id,
-                                            dists[id],
-                                            cur_heap_top,
-                                            heap,
-                                            offset_id,
-                                            n_candidate,
-                                            filter,
-                                            param.distance_threshold,
-                                            param.enable_reorder)) {
+                const bool heap_filled = fill_heap_initial<type>(id,
+                                                                 dists[id],
+                                                                 cur_heap_top,
+                                                                 heap,
+                                                                 offset_id,
+                                                                 n_candidate,
+                                                                 filter,
+                                                                 param.distance_threshold,
+                                                                 param.enable_reorder);
+                if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
+                    if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
+                        return true;
+                    }
+                }
+                if (heap_filled) {
                     id++;
                     break;
                 }
@@ -230,7 +263,13 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByDists(float* dists,
                                                filter,
                                                param.distance_threshold,
                                                param.enable_reorder);
+        if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
+            if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
+                return true;
+            }
+        }
     }
+    return false;
 }
 
 }  // namespace vsag

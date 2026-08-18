@@ -39,6 +39,7 @@ struct MutableSINDIWindow {
     Vector<std::unique_ptr<Vector<uint16_t>>> term_ids_;
     Vector<std::unique_ptr<Vector<uint8_t>>> term_datas_;
     Vector<uint32_t> term_sizes_;
+    bool postings_sorted_{true};
 };
 
 DEFINE_POINTER(MutableSindiTermDataCell);
@@ -98,7 +99,7 @@ public:
                 bool use_term_lists_heap_insert,
                 SindiQueryContext& query_context) const override;
 
-    void
+    bool
     InsertHeapByWindow(float* dists,
                        uint32_t window_id,
                        const SparseTermComputerPtr& computer,
@@ -107,16 +108,18 @@ public:
                        uint32_t offset_id,
                        InnerSearchMode mode,
                        bool with_filter,
-                       const SindiQueryContext& query_context) const override;
+                       const SindiQueryContext& query_context,
+                       const uint64_t* filter_callback_remaining = nullptr) const override;
 
-    void
+    bool
     InsertHeapByDists(float* dists,
                       uint32_t dists_size,
                       MaxHeap& heap,
                       const InnerSearchParam& param,
                       uint32_t offset_id,
                       InnerSearchMode mode,
-                      bool with_filter) const override;
+                      bool with_filter,
+                      const uint64_t* filter_callback_remaining = nullptr) const override;
 
     /**
      * @brief Insert candidates into heap by iterating through term lists
@@ -129,12 +132,13 @@ public:
      */
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH,
               InnerSearchType type = InnerSearchType::PURE>
-    void
+    bool
     InsertHeapByTermLists(float* dists,
                           const SparseTermComputerPtr& computer,
                           MaxHeap& heap,
                           const InnerSearchParam& param,
-                          uint32_t offset_id) const;
+                          uint32_t offset_id,
+                          const uint64_t* filter_callback_remaining = nullptr) const;
 
     /**
      * @brief Insert candidates into heap directly from precomputed distance array
@@ -147,12 +151,13 @@ public:
      */
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH,
               InnerSearchType type = InnerSearchType::PURE>
-    void
+    bool
     InsertHeapByDists(float* dists,
                       uint32_t dists_size,
                       MaxHeap& heap,
                       const InnerSearchParam& param,
-                      uint32_t offset_id) const;
+                      uint32_t offset_id,
+                      const uint64_t* filter_callback_remaining = nullptr) const;
 
     // doc_id is interpreted in the coordinate space owned by this data cell.
     void
@@ -240,14 +245,15 @@ private:
     GetWindowMemoryUsage(const MutableSINDIWindow& window);
 
     template <InnerSearchMode mode, InnerSearchType type>
-    void
+    bool
     InsertHeapByTermLists(const MutableSINDIWindow& window,
                           float* dists,
                           const SparseTermComputerPtr& computer,
                           MaxHeap& heap,
                           const InnerSearchParam& param,
                           uint32_t offset_id,
-                          SparseEvaluationTracker* candidate_tracker = nullptr) const;
+                          SparseEvaluationTracker* candidate_tracker = nullptr,
+                          const uint64_t* filter_callback_remaining = nullptr) const;
 
     template <InnerSearchMode mode, InnerSearchType type>
     void

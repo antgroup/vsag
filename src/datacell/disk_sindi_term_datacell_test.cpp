@@ -20,6 +20,7 @@
 #include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <cstring>
+#include <limits>
 #include <sstream>
 
 #include "datacell/mutable_sindi_term_datacell.h"
@@ -32,6 +33,37 @@
 #include "unittest.h"
 
 using namespace vsag;
+
+namespace {
+
+class StringReader : public Reader {
+public:
+    explicit StringReader(std::string bytes) : bytes_(std::move(bytes)) {
+    }
+
+    void
+    Read(uint64_t offset, uint64_t len, void* dest) override {
+        REQUIRE(offset <= bytes_.size());
+        REQUIRE(len <= bytes_.size() - offset);
+        std::memcpy(dest, bytes_.data() + offset, len);
+    }
+
+    void
+    AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
+        Read(offset, len, dest);
+        callback(IOErrorCode::IO_SUCCESS, "success");
+    }
+
+    [[nodiscard]] uint64_t
+    Size() const override {
+        return bytes_.size();
+    }
+
+private:
+    std::string bytes_;
+};
+
+}  // namespace
 
 TEST_CASE("DiskSindiTermDataCell restores payload io", "[ut][DiskSindiTermDataCell]") {
     fixtures::TempDir dir("disk_sindi_term_datacell");
@@ -120,6 +152,137 @@ TEST_CASE("DiskSindiTermDataCell restores payload io", "[ut][DiskSindiTermDataCe
     float restored_value = 0.0F;
     std::memcpy(&restored_value, term_buffer.ValuesData(), sizeof(float));
     REQUIRE(restored_value == target_value);
+}
+
+TEST_CASE("DiskSindiTermDataCell validates payloads before query", "[ut][DiskSindiTermDataCell]") {
+    fixtures::TempDir dir("disk_sindi_payload_validation");
+    constexpr uint32_t term_id_limit = 8;
+    constexpr uint32_t window_size = 4;
+    constexpr uint32_t term_id = 3;
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    auto source =
+        std::make_shared<MutableSindiTermDataCell>(term_id_limit,
+                                                   window_size,
+                                                   common_param.allocator_.get(),
+                                                   SparseValueQuantizationType::FP32,
+                                                   std::make_shared<QuantizationParams>());
+    uint32_t term = term_id;
+    std::array<float, 2> values = {1.0F, 2.0F};
+    for (uint32_t document = 0; document < values.size(); ++document) {
+        SparseVector vector{1, &term, values.data() + document};
+        source->InsertVector(vector, document);
+    }
+    source->Finalize();
+
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    source->SerializeTermLayout(writer, source->GetTermDictCount());
+    const auto serialized = stream.str();
+    uint64_t term_dict_count = 0;
+    std::memcpy(&term_dict_count, serialized.data(), sizeof(term_dict_count));
+    REQUIRE(term_dict_count == term_id + 1);
+    std::vector<DiskTermEntry> term_dict(term_dict_count);
+    std::memcpy(term_dict.data(),
+                serialized.data() + sizeof(term_dict_count),
+                term_dict.size() * sizeof(DiskTermEntry));
+    const auto payload_size_offset =
+        sizeof(term_dict_count) + term_dict.size() * sizeof(DiskTermEntry);
+    uint64_t payload_size = 0;
+    std::memcpy(&payload_size, serialized.data() + payload_size_offset, sizeof(payload_size));
+    const auto payload_start = payload_size_offset + sizeof(payload_size);
+    const auto& entry = term_dict[term_id];
+    REQUIRE(entry.posting_count == 2);
+    REQUIRE(payload_size == entry.posting_payload_size);
+    const auto term_payload_start = payload_start + entry.posting_payload_offset;
+    const auto ids_offset = sizeof(uint32_t) + sizeof(TermWindowMeta);
+    const auto values_offset = ids_offset + entry.posting_count * sizeof(uint16_t) +
+                               sindi_datacell_utils::GetIdsPadding(entry.posting_count);
+
+    auto duplicate_ids = serialized;
+    uint16_t first_id = 0;
+    std::memcpy(
+        &first_id, duplicate_ids.data() + term_payload_start + ids_offset, sizeof(first_id));
+    std::memcpy(duplicate_ids.data() + term_payload_start + ids_offset + sizeof(first_id),
+                &first_id,
+                sizeof(first_id));
+    const auto* duplicate_payload =
+        reinterpret_cast<const uint8_t*>(duplicate_ids.data() + term_payload_start);
+    REQUIRE_THROWS_WITH(sindi_datacell_utils::ViewTermPayload(duplicate_payload,
+                                                              entry.posting_payload_size,
+                                                              entry,
+                                                              1,
+                                                              window_size,
+                                                              2,
+                                                              sizeof(float),
+                                                              common_param.allocator_.get()),
+                        Catch::Matchers::ContainsSubstring("duplicate ids"));
+    REQUIRE_NOTHROW(sindi_datacell_utils::ViewTrustedTermPayload(duplicate_payload,
+                                                                 entry.posting_payload_size,
+                                                                 entry,
+                                                                 1,
+                                                                 window_size,
+                                                                 2,
+                                                                 sizeof(float),
+                                                                 common_param.allocator_.get()));
+
+    auto non_finite_value = serialized;
+    const auto nan = std::numeric_limits<float>::quiet_NaN();
+    std::memcpy(non_finite_value.data() + term_payload_start + values_offset, &nan, sizeof(nan));
+    const auto* non_finite_payload =
+        reinterpret_cast<const uint8_t*>(non_finite_value.data() + term_payload_start);
+    REQUIRE_THROWS_WITH(sindi_datacell_utils::ViewTermPayload(non_finite_payload,
+                                                              entry.posting_payload_size,
+                                                              entry,
+                                                              1,
+                                                              window_size,
+                                                              2,
+                                                              sizeof(float),
+                                                              common_param.allocator_.get()),
+                        Catch::Matchers::ContainsSubstring("non-finite"));
+    REQUIRE_NOTHROW(sindi_datacell_utils::ViewTrustedTermPayload(non_finite_payload,
+                                                                 entry.posting_payload_size,
+                                                                 entry,
+                                                                 1,
+                                                                 window_size,
+                                                                 2,
+                                                                 sizeof(float),
+                                                                 common_param.allocator_.get()));
+
+    const auto io_type = GENERATE(IO_TYPE_VALUE_BUFFER_IO, IO_TYPE_VALUE_MMAP_IO);
+    DYNAMIC_SECTION("deserialize validates io_type=" << io_type) {
+        auto io_param = IOParameter::GetIOParameterByJson(JsonType::Parse(fmt::format(
+            R"({{"type":"{}","file_path":"{}"}})", io_type, dir.GenerateRandomFile(true))));
+        auto restored =
+            DiskSindiTermDataCellInterface::MakeInstance(term_id_limit,
+                                                         common_param.allocator_.get(),
+                                                         SparseValueQuantizationType::FP32,
+                                                         nullptr,
+                                                         window_size,
+                                                         io_param,
+                                                         common_param);
+        std::stringstream corrupted_stream(duplicate_ids);
+        IOStreamReader reader(corrupted_stream);
+        REQUIRE_THROWS_WITH(restored->DeserializeTermLayout(reader, 1, 2),
+                            Catch::Matchers::ContainsSubstring("duplicate ids"));
+    }
+
+    auto reader_io_param =
+        IOParameter::GetIOParameterByJson(JsonType::Parse(R"({"type":"reader_io"})"));
+    auto reader_restored =
+        DiskSindiTermDataCellInterface::MakeInstance(term_id_limit,
+                                                     common_param.allocator_.get(),
+                                                     SparseValueQuantizationType::FP32,
+                                                     nullptr,
+                                                     window_size,
+                                                     reader_io_param,
+                                                     common_param);
+    std::stringstream corrupted_stream(duplicate_ids);
+    IOStreamReader layout_reader(corrupted_stream);
+    REQUIRE_NOTHROW(reader_restored->DeserializeTermLayout(layout_reader, 1, 2));
+    REQUIRE_THROWS_WITH(reader_restored->SetIO(std::make_shared<StringReader>(duplicate_ids)),
+                        Catch::Matchers::ContainsSubstring("duplicate ids"));
 }
 
 TEST_CASE("DiskSindiTermDataCell applies term prune without term-list heap insertion",

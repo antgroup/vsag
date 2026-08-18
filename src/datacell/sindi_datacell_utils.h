@@ -119,6 +119,16 @@ ParseTermPayload(const uint8_t* payload,
                  Allocator* allocator);
 
 [[nodiscard]] SindiTermBuffer
+ParseTrustedTermPayload(const uint8_t* payload,
+                        uint64_t payload_size,
+                        const DiskTermEntry& entry,
+                        uint32_t window_count,
+                        uint32_t window_size,
+                        uint64_t total_count,
+                        uint32_t value_code_size,
+                        Allocator* allocator);
+
+[[nodiscard]] SindiTermBuffer
 ViewTermPayload(const uint8_t* payload,
                 uint64_t payload_size,
                 const DiskTermEntry& entry,
@@ -127,6 +137,16 @@ ViewTermPayload(const uint8_t* payload,
                 uint64_t total_count,
                 uint32_t value_code_size,
                 Allocator* allocator);
+
+[[nodiscard]] SindiTermBuffer
+ViewTrustedTermPayload(const uint8_t* payload,
+                       uint64_t payload_size,
+                       const DiskTermEntry& entry,
+                       uint32_t window_count,
+                       uint32_t window_size,
+                       uint64_t total_count,
+                       uint32_t value_code_size,
+                       Allocator* allocator);
 
 void
 ValidateTermDict(const std::vector<DiskTermEntry>& term_dict, uint64_t payload_size);

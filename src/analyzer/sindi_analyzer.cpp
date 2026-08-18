@@ -330,8 +330,7 @@ SINDIAnalyzer::collect_doc_prune_candidates(const SparseVector& query,
                                                term_list.term_ids_[term]->data(),
                                                term_list.term_datas_[term]->data(),
                                                term_size,
-                                               dists.data(),
-                                               sindi_->quantization_params_.get());
+                                               dists.data());
             } else if (sindi_->sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
                 computer->ScanForAccumulateFP16Bytes(term_idx,
                                                      term_list.term_ids_[term]->data(),

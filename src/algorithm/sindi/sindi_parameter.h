@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 #include "algorithm/inner_index_parameter.h"

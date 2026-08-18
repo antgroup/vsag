@@ -422,7 +422,7 @@ SINDIV2::sort_and_prune_sparse_vector_for_build(const SparseVector& input,
     return {retained_count, pruned_ids.data(), pruned_vals.data()};
 }
 
-void
+Vector<uint8_t>
 SINDIV2::init_quantization_params_from_pruned_vectors(const DatasetPtr& base) {
     float min_val = std::numeric_limits<float>::max();
     float max_val = std::numeric_limits<float>::lowest();
@@ -432,12 +432,23 @@ SINDIV2::init_quantization_params_from_pruned_vectors(const DatasetPtr& base) {
     Vector<float> pruned_vals(allocator_);
     const auto* sparse_vectors = base->GetSparseVectors();
     const auto* ids = base->GetIds();
+    const auto data_num = base->GetNumElements();
+    Vector<uint8_t> accepted_documents(static_cast<uint64_t>(data_num), 0, allocator_);
+    bool labels_strictly_increasing = true;
+    for (int64_t document = 1; document < data_num; ++document) {
+        if (ids[document] <= ids[document - 1]) {
+            labels_strictly_increasing = false;
+            break;
+        }
+    }
     std::unordered_set<int64_t> accepted_labels;
-    accepted_labels.reserve(static_cast<uint64_t>(base->GetNumElements()));
-    for (int64_t document = 0; document < base->GetNumElements(); ++document) {
+    if (not labels_strictly_increasing) {
+        accepted_labels.reserve(static_cast<uint64_t>(data_num));
+    }
+    for (int64_t document = 0; document < data_num; ++document) {
         const auto& sparse_vector = sparse_vectors[document];
-        if (sparse_vector.len_ == 0 || label_table_->CheckLabel(ids[document]) ||
-            accepted_labels.count(ids[document]) != 0) {
+        if (sparse_vector.len_ == 0 ||
+            (not labels_strictly_increasing && accepted_labels.count(ids[document]) != 0)) {
             continue;
         }
         try {
@@ -448,7 +459,10 @@ SINDIV2::init_quantization_params_from_pruned_vectors(const DatasetPtr& base) {
                 max_val = std::max(max_val, pruned.vals_[term]);
                 has_retained_value = true;
             }
-            accepted_labels.insert(ids[document]);
+            accepted_documents[document] = 1;
+            if (not labels_strictly_increasing) {
+                accepted_labels.insert(ids[document]);
+            }
         } catch (const VsagException&) {
             continue;
         }
@@ -463,6 +477,7 @@ SINDIV2::init_quantization_params_from_pruned_vectors(const DatasetPtr& base) {
     if (quantization_params_->diff < 1e-6F) {
         quantization_params_->diff = 1.0F;
     }
+    return accepted_documents;
 }
 
 std::vector<int64_t>
@@ -490,8 +505,9 @@ SINDIV2::Add(const DatasetPtr& base) {
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
 
+    Vector<uint8_t> accepted_documents(allocator_);
     if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8 && cur_element_count_ == 0) {
-        this->init_quantization_params_from_pruned_vectors(base);
+        accepted_documents = this->init_quantization_params_from_pruned_vectors(base);
     }
 
     Vector<std::pair<uint32_t, float>> sorted_terms(allocator_);
@@ -510,12 +526,16 @@ SINDIV2::Add(const DatasetPtr& base) {
     }
     for (uint32_t i = 0; i < data_num; ++i) {
         const auto& sparse_vector = sparse_vectors[i];
-        if (label_table_->CheckLabel(ids[i])) {
+        if (not accepted_documents.empty() && accepted_documents[i] == 0) {
+            failed_ids.push_back(ids[i]);
+            continue;
+        }
+        if (accepted_documents.empty() && label_table_->CheckLabel(ids[i])) {
             failed_ids.push_back(ids[i]);
             logger::warn("id ({}) already exists", ids[i]);
             continue;
         }
-        if (sparse_vector.len_ <= 0) {
+        if (accepted_documents.empty() && sparse_vector.len_ <= 0) {
             failed_ids.push_back(ids[i]);
             logger::warn(
                 "sparse_vector.len_ ({}) is invalid for id ({})", sparse_vector.len_, ids[i]);
@@ -605,8 +625,9 @@ SINDIV2::build_immutable(const DatasetPtr& base) {
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
 
+    Vector<uint8_t> accepted_documents(allocator_);
     if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
-        this->init_quantization_params_from_pruned_vectors(base);
+        accepted_documents = this->init_quantization_params_from_pruned_vectors(base);
     }
 
     auto immutable = std::make_shared<ImmutableSindiTermDataCell>(term_id_limit_,
@@ -639,7 +660,9 @@ SINDIV2::build_immutable(const DatasetPtr& base) {
     }
     for (int64_t i = 0; i < data_num; ++i) {
         const auto& sparse_vector = sparse_vectors[i];
-        if (label_table_->CheckLabel(ids[i]) || sparse_vector.len_ == 0) {
+        if ((not accepted_documents.empty() && accepted_documents[i] == 0) ||
+            (accepted_documents.empty() &&
+             (label_table_->CheckLabel(ids[i]) || sparse_vector.len_ == 0))) {
             failed_ids.push_back(ids[i]);
             continue;
         }

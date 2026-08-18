@@ -16,6 +16,7 @@
 #pragma once
 
 #include <optional>
+#include <string>
 
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sindi/term_id_mapper.h"
@@ -196,7 +197,8 @@ private:
                 bool use_term_lists_heap_insert,
                 const SparseVector* original_query = nullptr,
                 ReasoningContext* reasoning_ctx = nullptr,
-                SearchStatistics* statistics = nullptr) const;
+                SearchStatistics* statistics = nullptr,
+                const uint64_t* filter_callback_remaining = nullptr) const;
 
     bool
     UseTermListsHeapInsert(const SINDISearchParameter& search_param,
@@ -265,9 +267,6 @@ private:
     void
     init_quantization_params_from_vectors(const DatasetPtr& base);
 
-    FlattenInterface*
-    get_rerank_datacell() const;
-
     /// Recalculate and cache the memory-usage counter.
     void
     cal_memory_usage();
@@ -307,7 +306,7 @@ private:
 
     float doc_prune_ratio_{0};  // ratio of docs pruned during build
 
-    FlattenInterfacePtr rerank_flat_{nullptr};
+    FlattenInterfacePtr rerank_flat_{nullptr};  // re-rank datacell
 
     SparseValueQuantizationType sparse_value_quant_type_{SparseValueQuantizationType::FP32};
 

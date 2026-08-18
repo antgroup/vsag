@@ -169,7 +169,7 @@ private:
                                            Vector<uint32_t>& pruned_ids,
                                            Vector<float>& pruned_vals) const;
 
-    void
+    Vector<uint8_t>
     init_quantization_params_from_pruned_vectors(const DatasetPtr& base);
 
     SparseVector

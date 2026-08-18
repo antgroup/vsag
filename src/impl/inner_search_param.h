@@ -33,7 +33,7 @@ struct QueryContext;
 
 enum InnerSearchMode { KNN_SEARCH = 1, RANGE_SEARCH = 2 };
 
-enum InnerSearchType { PURE = 1, WITH_FILTER = 2 };
+enum InnerSearchType { PURE = 1, WITH_FILTER = 2, WITH_FILTER_LIMIT = 3 };
 
 class InnerSearchParam {
 public:

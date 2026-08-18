@@ -172,6 +172,7 @@ MutableSindiTermDataCell::DeserializeTermLayout(StreamReader& reader,
                                              buffer.values.begin() + data_begin,
                                              buffer.values.begin() + data_end);
             target.term_sizes_[term] = count;
+            target.postings_sorted_ = false;
         }
     }
     for (uint32_t window = 0; window < window_count; ++window) {
@@ -243,8 +244,7 @@ MutableSindiTermDataCell::QueryWindow(float* dists,
                                            window.term_ids_[term]->data(),
                                            window.term_datas_[term]->data(),
                                            term_size,
-                                           dists,
-                                           quantization_params_.get());
+                                           dists);
         } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
             computer->ScanForAccumulateFP16Bytes(it,
                                                  window.term_ids_[term]->data(),
@@ -262,7 +262,7 @@ MutableSindiTermDataCell::QueryWindow(float* dists,
     computer->ResetTerm();
 }
 
-void
+bool
 MutableSindiTermDataCell::InsertHeapByWindow(float* dists,
                                              uint32_t window_id,
                                              const SparseTermComputerPtr& computer,
@@ -271,7 +271,8 @@ MutableSindiTermDataCell::InsertHeapByWindow(float* dists,
                                              uint32_t offset_id,
                                              InnerSearchMode mode,
                                              bool with_filter,
-                                             const SindiQueryContext& query_context) const {
+                                             const SindiQueryContext& query_context,
+                                             const uint64_t* filter_callback_remaining) const {
     CHECK_ARGUMENT(window_id < windows_.size(), "mutable SINDI window id out of range");
     const auto& window = windows_[window_id];
     SparseEvaluationTracker* candidate_tracker = nullptr;
@@ -281,46 +282,82 @@ MutableSindiTermDataCell::InsertHeapByWindow(float* dists,
     }
     if (mode == InnerSearchMode::KNN_SEARCH) {
         if (with_filter) {
-            this->InsertHeapByTermLists<InnerSearchMode::KNN_SEARCH, InnerSearchType::WITH_FILTER>(
-                window, dists, computer, heap, param, offset_id);
-        } else {
-            this->InsertHeapByTermLists<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
-                window, dists, computer, heap, param, offset_id);
+            if (filter_callback_remaining != nullptr) {
+                return this->InsertHeapByTermLists<InnerSearchMode::KNN_SEARCH,
+                                                   InnerSearchType::WITH_FILTER_LIMIT>(
+                    window,
+                    dists,
+                    computer,
+                    heap,
+                    param,
+                    offset_id,
+                    nullptr,
+                    filter_callback_remaining);
+            }
+            return this
+                ->InsertHeapByTermLists<InnerSearchMode::KNN_SEARCH, InnerSearchType::WITH_FILTER>(
+                    window, dists, computer, heap, param, offset_id);
         }
-    } else if (with_filter) {
-        this->InsertHeapByTermLists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::WITH_FILTER>(
-            window, dists, computer, heap, param, offset_id, candidate_tracker);
-    } else {
-        this->InsertHeapByTermLists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::PURE>(
-            window, dists, computer, heap, param, offset_id, candidate_tracker);
+        return this->InsertHeapByTermLists<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
+            window, dists, computer, heap, param, offset_id);
     }
+    if (with_filter) {
+        if (filter_callback_remaining != nullptr) {
+            return this->InsertHeapByTermLists<InnerSearchMode::RANGE_SEARCH,
+                                               InnerSearchType::WITH_FILTER_LIMIT>(
+                window,
+                dists,
+                computer,
+                heap,
+                param,
+                offset_id,
+                candidate_tracker,
+                filter_callback_remaining);
+        }
+        return this
+            ->InsertHeapByTermLists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::WITH_FILTER>(
+                window, dists, computer, heap, param, offset_id, candidate_tracker);
+    }
+    return this->InsertHeapByTermLists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::PURE>(
+        window, dists, computer, heap, param, offset_id, candidate_tracker);
 }
 
-void
+bool
 MutableSindiTermDataCell::InsertHeapByDists(float* dists,
                                             uint32_t dists_size,
                                             MaxHeap& heap,
                                             const InnerSearchParam& param,
                                             uint32_t offset_id,
                                             InnerSearchMode mode,
-                                            bool with_filter) const {
+                                            bool with_filter,
+                                            const uint64_t* filter_callback_remaining) const {
     const auto window_id = offset_id / window_size_;
     CHECK_ARGUMENT(window_id < windows_.size(), "mutable SINDI window id out of range");
     if (mode == InnerSearchMode::KNN_SEARCH) {
         if (with_filter) {
-            this->InsertHeapByDists<InnerSearchMode::KNN_SEARCH, InnerSearchType::WITH_FILTER>(
-                dists, dists_size, heap, param, offset_id);
-        } else {
-            this->InsertHeapByDists<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
-                dists, dists_size, heap, param, offset_id);
+            if (filter_callback_remaining != nullptr) {
+                return this->InsertHeapByDists<InnerSearchMode::KNN_SEARCH,
+                                               InnerSearchType::WITH_FILTER_LIMIT>(
+                    dists, dists_size, heap, param, offset_id, filter_callback_remaining);
+            }
+            return this
+                ->InsertHeapByDists<InnerSearchMode::KNN_SEARCH, InnerSearchType::WITH_FILTER>(
+                    dists, dists_size, heap, param, offset_id);
         }
-    } else if (with_filter) {
-        this->InsertHeapByDists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::WITH_FILTER>(
-            dists, dists_size, heap, param, offset_id);
-    } else {
-        this->InsertHeapByDists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::PURE>(
+        return this->InsertHeapByDists<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
             dists, dists_size, heap, param, offset_id);
     }
+    if (with_filter) {
+        if (filter_callback_remaining != nullptr) {
+            return this->InsertHeapByDists<InnerSearchMode::RANGE_SEARCH,
+                                           InnerSearchType::WITH_FILTER_LIMIT>(
+                dists, dists_size, heap, param, offset_id, filter_callback_remaining);
+        }
+        return this->InsertHeapByDists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::WITH_FILTER>(
+            dists, dists_size, heap, param, offset_id);
+    }
+    return this->InsertHeapByDists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::PURE>(
+        dists, dists_size, heap, param, offset_id);
 }
 
 template <InnerSearchMode mode, InnerSearchType type>
@@ -347,7 +384,7 @@ MutableSindiTermDataCell::insert_candidate_into_heap(uint32_t id,
             return;
         }
     }
-    if constexpr (type == InnerSearchType::WITH_FILTER) {
+    if constexpr (type != InnerSearchType::PURE) {
 #if __cplusplus >= 202002L
         if (dist > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
 #else
@@ -397,7 +434,7 @@ MutableSindiTermDataCell::fill_heap_initial(uint32_t id,
         return false;
     }
     if (dist < 0) {
-        if constexpr (type == InnerSearchType::WITH_FILTER) {
+        if constexpr (type != InnerSearchType::PURE) {
             if (not filter->CheckValid(id + offset_id)) {
                 dist = 0;
                 return false;
@@ -412,32 +449,44 @@ MutableSindiTermDataCell::fill_heap_initial(uint32_t id,
 }
 
 template <InnerSearchMode mode, InnerSearchType type>
-void
+bool
 MutableSindiTermDataCell::InsertHeapByTermLists(float* dists,
                                                 const SparseTermComputerPtr& computer,
                                                 MaxHeap& heap,
                                                 const InnerSearchParam& param,
-                                                uint32_t offset_id) const {
-    this->InsertHeapByTermLists<mode, type>(
-        this->GetWindow(0), dists, computer, heap, param, offset_id);
+                                                uint32_t offset_id,
+                                                const uint64_t* filter_callback_remaining) const {
+    return this->InsertHeapByTermLists<mode, type>(this->GetWindow(0),
+                                                   dists,
+                                                   computer,
+                                                   heap,
+                                                   param,
+                                                   offset_id,
+                                                   nullptr,
+                                                   filter_callback_remaining);
 }
 
 template <InnerSearchMode mode, InnerSearchType type>
-void
+bool
 MutableSindiTermDataCell::InsertHeapByTermLists(const MutableSINDIWindow& window,
                                                 float* dists,
                                                 const SparseTermComputerPtr& computer,
                                                 MaxHeap& heap,
                                                 const InnerSearchParam& param,
                                                 uint32_t offset_id,
-                                                SparseEvaluationTracker* candidate_tracker) const {
+                                                SparseEvaluationTracker* candidate_tracker,
+                                                const uint64_t* filter_callback_remaining) const {
     uint32_t id = 0;
     float cur_heap_top = std::numeric_limits<float>::max();
     auto n_candidate = param.ef;
     auto radius = param.radius;
     auto filter = param.is_inner_id_allowed;
 
-    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+        if (heap.size() == n_candidate) {
+            cur_heap_top = heap.top().first;
+        }
+    } else {
         // note that radius = 1 - ip -> radius - 1 = 0 - ip
         // the dist in heap is equal to 0 - ip
         // thus, we need to compare dist with radius - 1
@@ -459,15 +508,23 @@ MutableSindiTermDataCell::InsertHeapByTermLists(const MutableSINDIWindow& window
             if (heap.size() < n_candidate) {
                 for (; i < term_size; i++) {
                     id = one_term_ids[i];
-                    if (fill_heap_initial<type>(id,
-                                                dists[id],
-                                                cur_heap_top,
-                                                heap,
-                                                offset_id,
-                                                n_candidate,
-                                                filter,
-                                                param.distance_threshold,
-                                                param.enable_reorder)) {
+                    const bool heap_filled = fill_heap_initial<type>(id,
+                                                                     dists[id],
+                                                                     cur_heap_top,
+                                                                     heap,
+                                                                     offset_id,
+                                                                     n_candidate,
+                                                                     filter,
+                                                                     param.distance_threshold,
+                                                                     param.enable_reorder);
+                    if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
+                        if (filter_callback_remaining != nullptr and
+                            *filter_callback_remaining == 0) {
+                            computer->ResetTerm();
+                            return true;
+                        }
+                    }
+                    if (heap_filled) {
                         i++;
                         break;
                     }
@@ -492,24 +549,36 @@ MutableSindiTermDataCell::InsertHeapByTermLists(const MutableSINDIWindow& window
                                                    filter,
                                                    param.distance_threshold,
                                                    param.enable_reorder);
+            if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
+                if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
+                    computer->ResetTerm();
+                    return true;
+                }
+            }
         }
     }
     computer->ResetTerm();
+    return false;
 }
 
 template <InnerSearchMode mode, InnerSearchType type>
-void
+bool
 MutableSindiTermDataCell::InsertHeapByDists(float* dists,
                                             uint32_t dists_size,
                                             MaxHeap& heap,
                                             const InnerSearchParam& param,
-                                            uint32_t offset_id) const {
+                                            uint32_t offset_id,
+                                            const uint64_t* filter_callback_remaining) const {
     float cur_heap_top = std::numeric_limits<float>::max();
     auto n_candidate = param.ef;
     auto radius = param.radius;
     auto filter = param.is_inner_id_allowed;
 
-    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+        if (heap.size() == n_candidate) {
+            cur_heap_top = heap.top().first;
+        }
+    } else {
         cur_heap_top = radius - 1;
     }
 
@@ -517,15 +586,21 @@ MutableSindiTermDataCell::InsertHeapByDists(float* dists,
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
         if (heap.size() < n_candidate) {
             for (; id < dists_size; id++) {
-                if (fill_heap_initial<type>(id,
-                                            dists[id],
-                                            cur_heap_top,
-                                            heap,
-                                            offset_id,
-                                            n_candidate,
-                                            filter,
-                                            param.distance_threshold,
-                                            param.enable_reorder)) {
+                const bool heap_filled = fill_heap_initial<type>(id,
+                                                                 dists[id],
+                                                                 cur_heap_top,
+                                                                 heap,
+                                                                 offset_id,
+                                                                 n_candidate,
+                                                                 filter,
+                                                                 param.distance_threshold,
+                                                                 param.enable_reorder);
+                if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
+                    if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
+                        return true;
+                    }
+                }
+                if (heap_filled) {
                     id++;
                     break;
                 }
@@ -544,7 +619,13 @@ MutableSindiTermDataCell::InsertHeapByDists(float* dists,
                                                filter,
                                                param.distance_threshold,
                                                param.enable_reorder);
+        if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
+            if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
+                return true;
+            }
+        }
     }
+    return false;
 }
 
 void
@@ -584,6 +665,9 @@ MutableSindiTermDataCell::InsertVector(const SparseVector& sparse_base, uint32_t
 
         window->term_sizes_[term] += 1;
     }
+    if (sparse_base.len_ > 0) {
+        window->postings_sorted_ = false;
+    }
     total_count_ = std::max(total_count_, static_cast<int64_t>(doc_id) + 1);
 }
 
@@ -595,6 +679,10 @@ MutableSindiTermDataCell::SortByValue(uint32_t window_id) {
 
 void
 MutableSindiTermDataCell::SortByValue(MutableSINDIWindow& window) const {
+    if (window.postings_sorted_) {
+        return;
+    }
+
     Vector<uint32_t> order(allocator_);
     Vector<uint16_t> sorted_ids(allocator_);
     Vector<uint8_t> sorted_data(allocator_);
@@ -615,6 +703,7 @@ MutableSindiTermDataCell::SortByValue(MutableSINDIWindow& window) const {
                                                      sorted_ids,
                                                      sorted_data);
     }
+    window.postings_sorted_ = true;
 }
 
 void
@@ -920,6 +1009,7 @@ MutableSindiTermDataCell::DeserializeWindow(StreamReader& reader,
         }
     }
 
+    window.postings_sorted_ = postings_sorted;
     if (not postings_sorted) {
         this->SortByValue(window);
     }
@@ -941,73 +1031,81 @@ MutableSindiTermDataCell::Decode(const uint8_t* src, uint64_t size, float* dst) 
     }
 }
 
-template void
+template bool
 MutableSindiTermDataCell::InsertHeapByTermLists<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
     float* dists,
     const SparseTermComputerPtr& computer,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 MutableSindiTermDataCell::InsertHeapByTermLists<InnerSearchMode::KNN_SEARCH,
                                                 InnerSearchType::WITH_FILTER>(
     float* dists,
     const SparseTermComputerPtr& computer,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 MutableSindiTermDataCell::InsertHeapByTermLists<InnerSearchMode::RANGE_SEARCH,
                                                 InnerSearchType::PURE>(
     float* dists,
     const SparseTermComputerPtr& computer,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 MutableSindiTermDataCell::InsertHeapByTermLists<InnerSearchMode::RANGE_SEARCH,
                                                 InnerSearchType::WITH_FILTER>(
     float* dists,
     const SparseTermComputerPtr& computer,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 MutableSindiTermDataCell::InsertHeapByDists<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 MutableSindiTermDataCell::InsertHeapByDists<InnerSearchMode::KNN_SEARCH,
                                             InnerSearchType::WITH_FILTER>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 MutableSindiTermDataCell::InsertHeapByDists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::PURE>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 MutableSindiTermDataCell::InsertHeapByDists<InnerSearchMode::RANGE_SEARCH,
                                             InnerSearchType::WITH_FILTER>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
 }  // namespace vsag

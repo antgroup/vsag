@@ -258,7 +258,11 @@ TEST_CASE("SINDIV2 term prune keeps highest stored values after build", "[ut][SI
                                         result->GetIds() + static_cast<uint64_t>(result->GetDim()));
         REQUIRE(result_labels == std::set<int64_t>{11, 13});
         for (int64_t position = 0; position < result->GetDim(); ++position) {
-            REQUIRE(std::abs(result->GetDistances()[position] + 2.0F) < 0.02F);
+            if (quantization == SparseValueQuantizationType::SQ8) {
+                REQUIRE(result->GetDistances()[position] < -250.0F);
+            } else {
+                REQUIRE(std::abs(result->GetDistances()[position] + 2.0F) < 0.02F);
+            }
         }
     }
 }
@@ -1139,6 +1143,66 @@ TEST_CASE("SINDIV2 validates terms before document pruning", "[ut][SINDIV2]") {
             REQUIRE(failed_ids.size() == 1);
             REQUIRE(failed_ids[0] == label);
             REQUIRE(index.GetNumElements() == 0);
+        }
+    }
+}
+
+TEST_CASE("SINDIV2 SQ8 build validates labels without a redundant unique-label pass",
+          "[ut][SINDIV2]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 2;
+
+    uint32_t term_ids[] = {0};
+    float term_values[] = {1.0F};
+    SparseVector vectors[] = {
+        {1, term_ids, term_values}, {1, term_ids, term_values}, {1, term_ids, term_values}};
+
+    for (const bool immutable : {false, true}) {
+        DYNAMIC_SECTION("immutable=" << immutable) {
+            const auto make_index = [&]() {
+                auto parameter = std::make_shared<SINDIV2Parameter>();
+                parameter->FromJson(JsonType::Parse(fmt::format(R"({{
+                    "term_id_limit": 16,
+                    "window_size": 10000,
+                    "doc_prune_ratio": 0.0,
+                    "use_quantization": true,
+                    "use_reorder": false,
+                    "remap_term_ids": false,
+                    "immutable": {},
+                    "term_io": {{"type": "memory_io"}},
+                    "rerank_io": {{"type": "block_memory_io"}}
+                }})",
+                                                                immutable)));
+                return std::make_unique<SINDIV2>(parameter, common_param);
+            };
+
+            int64_t increasing_labels[] = {3, 4, 5};
+            auto increasing = Dataset::Make();
+            increasing->NumElements(3)
+                ->SparseVectors(vectors)
+                ->Ids(increasing_labels)
+                ->Owner(false);
+            auto increasing_index = make_index();
+            REQUIRE(increasing_index->Build(increasing).empty());
+            REQUIRE(increasing_index->GetNumElements() == 3);
+
+            int64_t unsorted_labels[] = {5, 3, 4};
+            auto unsorted = Dataset::Make();
+            unsorted->NumElements(3)->SparseVectors(vectors)->Ids(unsorted_labels)->Owner(false);
+            auto unsorted_index = make_index();
+            REQUIRE(unsorted_index->Build(unsorted).empty());
+            REQUIRE(unsorted_index->GetNumElements() == 3);
+
+            int64_t duplicate_labels[] = {7, 7, 8};
+            auto duplicates = Dataset::Make();
+            duplicates->NumElements(3)->SparseVectors(vectors)->Ids(duplicate_labels)->Owner(false);
+            auto duplicate_index = make_index();
+            const auto failed_ids = duplicate_index->Build(duplicates);
+            REQUIRE(failed_ids == std::vector<int64_t>{7});
+            REQUIRE(duplicate_index->GetNumElements() == 2);
         }
     }
 }

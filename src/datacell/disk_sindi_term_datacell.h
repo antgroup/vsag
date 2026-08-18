@@ -106,7 +106,7 @@ public:
                 bool use_term_lists_heap_insert,
                 SindiQueryContext& query_context) const override;
 
-    void
+    bool
     InsertHeapByWindow(float* dists,
                        uint32_t window_id,
                        const SparseTermComputerPtr& computer,
@@ -115,16 +115,18 @@ public:
                        uint32_t offset_id,
                        InnerSearchMode mode,
                        bool with_filter,
-                       const SindiQueryContext& query_context) const override;
+                       const SindiQueryContext& query_context,
+                       const uint64_t* filter_callback_remaining = nullptr) const override;
 
-    void
+    bool
     InsertHeapByDists(float* dists,
                       uint32_t dists_size,
                       MaxHeap& heap,
                       const InnerSearchParam& param,
                       uint32_t offset_id,
                       InnerSearchMode mode,
-                      bool with_filter) const override;
+                      bool with_filter,
+                      const uint64_t* filter_callback_remaining = nullptr) const override;
 
     void
     GetSparseVector(uint32_t inner_id,
@@ -143,7 +145,7 @@ private:
     const TermBuffer*
     GetTermBufferNoLock(uint32_t term_id, const QueryTermBuffers& query_term_buffers) const;
 
-    void
+    bool
     InsertHeapByWindowKnn(float* dists,
                           uint32_t window_id,
                           const SparseTermComputerPtr& computer,
@@ -151,33 +153,37 @@ private:
                           const InnerSearchParam& param,
                           uint32_t offset_id,
                           bool with_filter,
-                          const QueryTermBuffers& query_term_buffers) const;
+                          const QueryTermBuffers& query_term_buffers,
+                          const uint64_t* filter_callback_remaining) const;
 
-    void
+    bool
     InsertHeapByDistsKnn(float* dists,
                          uint32_t dists_size,
                          MaxHeap& heap,
                          const InnerSearchParam& param,
                          uint32_t offset_id,
-                         bool with_filter) const;
+                         bool with_filter,
+                         const uint64_t* filter_callback_remaining) const;
 
     template <InnerSearchMode mode, InnerSearchType type>
-    void
+    bool
     InsertHeapByWindow(float* dists,
                        uint32_t window_id,
                        const SparseTermComputerPtr& computer,
                        MaxHeap& heap,
                        const InnerSearchParam& param,
                        uint32_t offset_id,
-                       const QueryTermBuffers& query_term_buffers) const;
+                       const QueryTermBuffers& query_term_buffers,
+                       const uint64_t* filter_callback_remaining = nullptr) const;
 
     template <InnerSearchMode mode, InnerSearchType type>
-    void
+    bool
     InsertHeapByDists(float* dists,
                       uint32_t dists_size,
                       MaxHeap& heap,
                       const InnerSearchParam& param,
-                      uint32_t offset_id) const;
+                      uint32_t offset_id,
+                      const uint64_t* filter_callback_remaining = nullptr) const;
 
     template <InnerSearchMode mode, InnerSearchType type>
     void
@@ -207,6 +213,9 @@ private:
     void
     ValidateBoundLayout(uint64_t payload_size) const;
 
+    void
+    ValidateBoundPayloads() const;
+
 private:
     uint32_t term_id_limit_{0};
     Allocator* allocator_{nullptr};
@@ -222,6 +231,7 @@ private:
     uint32_t window_count_{0};
     uint64_t total_count_{0};
     uint64_t payload_size_{0};
+    bool payloads_validated_{false};
 };
 
 template <typename IOTmpl>

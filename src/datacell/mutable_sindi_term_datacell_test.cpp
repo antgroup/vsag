@@ -102,8 +102,11 @@ TEST_CASE("MutableSindiTermDataCell sorts postings by stored value",
             data_cell.InsertVector(vector, document);
         }
 
+        REQUIRE_FALSE(data_cell.GetWindow(0).postings_sorted_);
         data_cell.SortByValue(0);
+        REQUIRE(data_cell.GetWindow(0).postings_sorted_);
         data_cell.SortByValue(0);
+        REQUIRE(data_cell.GetWindow(0).postings_sorted_);
         const auto& window = data_cell.GetWindow(0);
         const std::array<uint16_t, 4> expected_ids = {1, 3, 2, 0};
         REQUIRE(
@@ -139,8 +142,10 @@ TEST_CASE("MutableSindiTermDataCell prunes sorted postings", "[ut][MutableSindiT
     SparseVector appended{1, &term, values.data() + 3};
     data_cell->InsertVector(appended, 3);
     REQUIRE(data_cell->GetWindow(0).term_sizes_[term] == 4);
+    REQUIRE_FALSE(data_cell->GetWindow(0).postings_sorted_);
 
     data_cell->SortByValue(0);
+    REQUIRE(data_cell->GetWindow(0).postings_sorted_);
 
     float query_value = 1.0F;
     SparseVector query{1, &term, &query_value};
@@ -222,7 +227,7 @@ TEST_CASE("MutableSindiTermDataCell Basic Test", "[ut][MutableSindiTermDataCell]
         // after_prune = [14:14, 15:15, 16:16, 17:17, 18:18]
         for (int d = 0; d < sparse_vectors[i].len_; d++) {
             sparse_vectors[i].ids_[d] = i + d;
-            sparse_vectors[i].vals_[d] = i + d + 1;
+            sparse_vectors[i].vals_[d] = i + d;
         }
     }
 
@@ -658,7 +663,7 @@ TEST_CASE("MutableSindiTermDataCell Last Term Test", "[ut][MutableSindiTermDataC
 
     {
         std::vector<uint32_t> ids0 = {1, 2};
-        std::vector<float> vals0 = {0.1f, 0.01f};
+        std::vector<float> vals0 = {0.1f, 0.0f};
         std::vector<uint32_t> ids1 = {1};
         std::vector<float> vals1 = {0.1f};
 

@@ -171,7 +171,7 @@ public:
                 bool use_term_lists_heap_insert,
                 SindiQueryContext& query_context) const = 0;
 
-    virtual void
+    virtual bool
     InsertHeapByWindow(float* dists,
                        uint32_t window_id,
                        const SparseTermComputerPtr& computer,
@@ -180,16 +180,18 @@ public:
                        uint32_t offset_id,
                        InnerSearchMode mode,
                        bool with_filter,
-                       const SindiQueryContext& query_context) const = 0;
+                       const SindiQueryContext& query_context,
+                       const uint64_t* filter_callback_remaining = nullptr) const = 0;
 
-    virtual void
+    virtual bool
     InsertHeapByDists(float* dists,
                       uint32_t dists_size,
                       MaxHeap& heap,
                       const InnerSearchParam& param,
                       uint32_t offset_id,
                       InnerSearchMode mode,
-                      bool with_filter) const = 0;
+                      bool with_filter,
+                      const uint64_t* filter_callback_remaining = nullptr) const = 0;
 
     virtual float
     CalcDistanceByInnerId(const SparseTermComputerPtr& computer,

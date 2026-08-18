@@ -180,6 +180,11 @@ DiskSindiTermDataCell<IOTmpl>::DeserializeTermLayout(StreamReader& reader,
     io_->Deserialize(reader);
     payload_size_ = io_->size_;
     this->ValidateBoundLayout(payload_size_);
+    payloads_validated_ = false;
+    if constexpr (not std::is_same_v<IOTmpl, ReaderIO>) {
+        this->ValidateBoundPayloads();
+        payloads_validated_ = true;
+    }
 }
 
 template <typename IOTmpl>
@@ -207,6 +212,7 @@ template <typename IOTmpl>
 void
 DiskSindiTermDataCell<IOTmpl>::SetIO(const std::shared_ptr<Reader>& reader) {
     if constexpr (std::is_same_v<IOTmpl, ReaderIO>) {
+        std::unique_lock lock(term_layout_mutex_);
         auto reader_param = std::make_shared<ReaderIOParameter>();
         reader_param->reader = reader;
         io_param_ = reader_param;
@@ -216,6 +222,8 @@ DiskSindiTermDataCell<IOTmpl>::SetIO(const std::shared_ptr<Reader>& reader) {
         io_->InitIO(reader_param);
         payload_size_ = io_->size_;
         this->ValidateBoundLayout(payload_size_);
+        this->ValidateBoundPayloads();
+        payloads_validated_ = true;
     }
 }
 
@@ -223,6 +231,54 @@ template <typename IOTmpl>
 void
 DiskSindiTermDataCell<IOTmpl>::ValidateBoundLayout(uint64_t payload_size) const {
     sindi_datacell_utils::ValidateTermDict(term_dict_, payload_size);
+}
+
+template <typename IOTmpl>
+void
+DiskSindiTermDataCell<IOTmpl>::ValidateBoundPayloads() const {
+    CHECK_ARGUMENT(io_ != nullptr, "SINDI_V2 term payload IO is not bound");
+    const auto value_code_size = sindi_datacell_utils::GetValueCodeSize(sparse_value_quant_type_);
+    Vector<uint8_t> payload(allocator_);
+    for (const auto& entry : term_dict_) {
+        if (entry.posting_count == 0) {
+            continue;
+        }
+
+        const uint8_t* payload_data = nullptr;
+        bool need_release = false;
+        if constexpr (std::is_same_v<IOTmpl, MMapIO>) {
+            payload_data =
+                io_->Read(entry.posting_payload_size, entry.posting_payload_offset, need_release);
+            CHECK_ARGUMENT(payload_data != nullptr,
+                           "failed to access mmap SINDI_V2 term payload during validation");
+        } else {
+            payload.resize(entry.posting_payload_size);
+            const bool read_succeeded =
+                io_->Read(entry.posting_payload_size, entry.posting_payload_offset, payload.data());
+            CHECK_ARGUMENT(read_succeeded,
+                           "failed to read SINDI_V2 term payload during validation");
+            payload_data = payload.data();
+        }
+
+        try {
+            (void)sindi_datacell_utils::ViewTermPayload(payload_data,
+                                                        entry.posting_payload_size,
+                                                        entry,
+                                                        window_count_,
+                                                        window_size_,
+                                                        total_count_,
+                                                        value_code_size,
+                                                        allocator_);
+        } catch (...) {
+            if (need_release) {
+                io_->Release(payload_data);
+            }
+            throw;
+        }
+        if (need_release) {
+            io_->Release(payload_data);
+        }
+    }
 }
 
 template <typename IOTmpl>
@@ -256,6 +312,7 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
         window_size = window_size_;
         total_count = total_count_;
         payload_size = payload_size_;
+        CHECK_ARGUMENT(payloads_validated_, "SINDI_V2 term payloads have not been validated");
         sparse_value_quant_type = sparse_value_quant_type_;
         for (uint32_t term_id : query_term_ids) {
             if (term_id >= term_dict_.size() || planned_terms.contains(term_id)) {
@@ -313,15 +370,15 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
 
             for (uint64_t i = 0; i < read_plans.size(); ++i) {
                 const auto& plan = read_plans[i];
-                auto term_buffer =
-                    sindi_datacell_utils::ParseTermPayload(payloads.data() + buffer_offsets[i],
-                                                           plan.entry.posting_payload_size,
-                                                           plan.entry,
-                                                           window_count,
-                                                           window_size,
-                                                           total_count,
-                                                           value_code_size,
-                                                           allocator);
+                auto term_buffer = sindi_datacell_utils::ParseTrustedTermPayload(
+                    payloads.data() + buffer_offsets[i],
+                    plan.entry.posting_payload_size,
+                    plan.entry,
+                    window_count,
+                    window_size,
+                    total_count,
+                    value_code_size,
+                    allocator);
                 query_term_buffers.emplace(plan.term_id, std::move(term_buffer));
             }
         }
@@ -339,14 +396,14 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
         CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
             payload_data != nullptr && not need_release,
             "failed to access mmap SINDI_V2 term payload");
-        auto term_buffer = sindi_datacell_utils::ViewTermPayload(payload_data,
-                                                                 entry.posting_payload_size,
-                                                                 entry,
-                                                                 window_count,
-                                                                 window_size,
-                                                                 total_count,
-                                                                 value_code_size,
-                                                                 allocator);
+        auto term_buffer = sindi_datacell_utils::ViewTrustedTermPayload(payload_data,
+                                                                        entry.posting_payload_size,
+                                                                        entry,
+                                                                        window_count,
+                                                                        window_size,
+                                                                        total_count,
+                                                                        value_code_size,
+                                                                        allocator);
 
         query_term_buffers.emplace(term_id, std::move(term_buffer));
     }
@@ -355,7 +412,7 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
 }
 
 template <typename IOTmpl>
-void
+bool
 DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindowKnn(
     float* dists,
     uint32_t window_id,
@@ -364,36 +421,55 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindowKnn(
     const InnerSearchParam& param,
     uint32_t offset_id,
     bool with_filter,
-    const QueryTermBuffers& query_term_buffers) const {
+    const QueryTermBuffers& query_term_buffers,
+    const uint64_t* filter_callback_remaining) const {
     if (with_filter) {
-        this->template InsertHeapByWindow<InnerSearchMode::KNN_SEARCH,
-                                          InnerSearchType::WITH_FILTER>(
-            dists, window_id, computer, heap, param, offset_id, query_term_buffers);
-    } else {
-        this->template InsertHeapByWindow<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
+        if (filter_callback_remaining != nullptr) {
+            return this->template InsertHeapByWindow<InnerSearchMode::KNN_SEARCH,
+                                                     InnerSearchType::WITH_FILTER_LIMIT>(
+                dists,
+                window_id,
+                computer,
+                heap,
+                param,
+                offset_id,
+                query_term_buffers,
+                filter_callback_remaining);
+        }
+        return this->template InsertHeapByWindow<InnerSearchMode::KNN_SEARCH,
+                                                 InnerSearchType::WITH_FILTER>(
             dists, window_id, computer, heap, param, offset_id, query_term_buffers);
     }
+    return this->template InsertHeapByWindow<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
+        dists, window_id, computer, heap, param, offset_id, query_term_buffers);
 }
 
 template <typename IOTmpl>
-void
-DiskSindiTermDataCell<IOTmpl>::InsertHeapByDistsKnn(float* dists,
-                                                    uint32_t dists_size,
-                                                    MaxHeap& heap,
-                                                    const InnerSearchParam& param,
-                                                    uint32_t offset_id,
-                                                    bool with_filter) const {
+bool
+DiskSindiTermDataCell<IOTmpl>::InsertHeapByDistsKnn(
+    float* dists,
+    uint32_t dists_size,
+    MaxHeap& heap,
+    const InnerSearchParam& param,
+    uint32_t offset_id,
+    bool with_filter,
+    const uint64_t* filter_callback_remaining) const {
     if (with_filter) {
-        this->template InsertHeapByDists<InnerSearchMode::KNN_SEARCH, InnerSearchType::WITH_FILTER>(
-            dists, dists_size, heap, param, offset_id);
-    } else {
-        this->template InsertHeapByDists<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
-            dists, dists_size, heap, param, offset_id);
+        if (filter_callback_remaining != nullptr) {
+            return this->template InsertHeapByDists<InnerSearchMode::KNN_SEARCH,
+                                                    InnerSearchType::WITH_FILTER_LIMIT>(
+                dists, dists_size, heap, param, offset_id, filter_callback_remaining);
+        }
+        return this
+            ->template InsertHeapByDists<InnerSearchMode::KNN_SEARCH, InnerSearchType::WITH_FILTER>(
+                dists, dists_size, heap, param, offset_id);
     }
+    return this->template InsertHeapByDists<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
+        dists, dists_size, heap, param, offset_id);
 }
 
 template <typename IOTmpl>
-void
+bool
 DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindow(float* dists,
                                                   uint32_t window_id,
                                                   const SparseTermComputerPtr& computer,
@@ -402,40 +478,67 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindow(float* dists,
                                                   uint32_t offset_id,
                                                   InnerSearchMode mode,
                                                   bool with_filter,
-                                                  const SindiQueryContext& query_context) const {
+                                                  const SindiQueryContext& query_context,
+                                                  const uint64_t* filter_callback_remaining) const {
     const auto& query_term_buffers = query_context.query_term_buffers;
     if (mode == InnerSearchMode::KNN_SEARCH) {
-        this->InsertHeapByWindowKnn(
-            dists, window_id, computer, heap, param, offset_id, with_filter, query_term_buffers);
-    } else if (with_filter) {
-        this->template InsertHeapByWindow<InnerSearchMode::RANGE_SEARCH,
-                                          InnerSearchType::WITH_FILTER>(
-            dists, window_id, computer, heap, param, offset_id, query_term_buffers);
-    } else {
-        this->template InsertHeapByWindow<InnerSearchMode::RANGE_SEARCH, InnerSearchType::PURE>(
+        return this->InsertHeapByWindowKnn(dists,
+                                           window_id,
+                                           computer,
+                                           heap,
+                                           param,
+                                           offset_id,
+                                           with_filter,
+                                           query_term_buffers,
+                                           filter_callback_remaining);
+    }
+    if (with_filter) {
+        if (filter_callback_remaining != nullptr) {
+            return this->template InsertHeapByWindow<InnerSearchMode::RANGE_SEARCH,
+                                                     InnerSearchType::WITH_FILTER_LIMIT>(
+                dists,
+                window_id,
+                computer,
+                heap,
+                param,
+                offset_id,
+                query_term_buffers,
+                filter_callback_remaining);
+        }
+        return this->template InsertHeapByWindow<InnerSearchMode::RANGE_SEARCH,
+                                                 InnerSearchType::WITH_FILTER>(
             dists, window_id, computer, heap, param, offset_id, query_term_buffers);
     }
+    return this->template InsertHeapByWindow<InnerSearchMode::RANGE_SEARCH, InnerSearchType::PURE>(
+        dists, window_id, computer, heap, param, offset_id, query_term_buffers);
 }
 
 template <typename IOTmpl>
-void
+bool
 DiskSindiTermDataCell<IOTmpl>::InsertHeapByDists(float* dists,
                                                  uint32_t dists_size,
                                                  MaxHeap& heap,
                                                  const InnerSearchParam& param,
                                                  uint32_t offset_id,
                                                  InnerSearchMode mode,
-                                                 bool with_filter) const {
+                                                 bool with_filter,
+                                                 const uint64_t* filter_callback_remaining) const {
     if (mode == InnerSearchMode::KNN_SEARCH) {
-        this->InsertHeapByDistsKnn(dists, dists_size, heap, param, offset_id, with_filter);
-    } else if (with_filter) {
-        this->template InsertHeapByDists<InnerSearchMode::RANGE_SEARCH,
-                                         InnerSearchType::WITH_FILTER>(
-            dists, dists_size, heap, param, offset_id);
-    } else {
-        this->template InsertHeapByDists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::PURE>(
+        return this->InsertHeapByDistsKnn(
+            dists, dists_size, heap, param, offset_id, with_filter, filter_callback_remaining);
+    }
+    if (with_filter) {
+        if (filter_callback_remaining != nullptr) {
+            return this->template InsertHeapByDists<InnerSearchMode::RANGE_SEARCH,
+                                                    InnerSearchType::WITH_FILTER_LIMIT>(
+                dists, dists_size, heap, param, offset_id, filter_callback_remaining);
+        }
+        return this->template InsertHeapByDists<InnerSearchMode::RANGE_SEARCH,
+                                                InnerSearchType::WITH_FILTER>(
             dists, dists_size, heap, param, offset_id);
     }
+    return this->template InsertHeapByDists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::PURE>(
+        dists, dists_size, heap, param, offset_id);
 }
 
 template <typename IOTmpl>
@@ -487,12 +590,8 @@ DiskSindiTermDataCell<IOTmpl>::QueryWindow(float* dists,
         query_context.evaluation_tracker.Mark(tb->IdsData() + start, count);
 
         if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
-            computer->ScanForAccumulateSQ8(it,
-                                           tb->IdsData() + start,
-                                           tb->ValuesData() + start,
-                                           count,
-                                           dists,
-                                           quantization_params_.get());
+            computer->ScanForAccumulateSQ8(
+                it, tb->IdsData() + start, tb->ValuesData() + start, count, dists);
         } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
             computer->ScanForAccumulateFP16Bytes(
                 it,
@@ -619,7 +718,7 @@ template class DiskSindiTermDataCell<ReaderIO>;
 template class DiskSindiTermDataCell<AsyncIO>;
 #endif
 
-template void
+template bool
 DiskSindiTermDataCell<MMapIO>::InsertHeapByWindow<InnerSearchMode::KNN_SEARCH,
                                                   InnerSearchType::PURE>(
     float* dists,
@@ -628,9 +727,10 @@ DiskSindiTermDataCell<MMapIO>::InsertHeapByWindow<InnerSearchMode::KNN_SEARCH,
     MaxHeap& heap,
     const InnerSearchParam& param,
     uint32_t offset_id,
-    const QueryTermBuffers& query_term_buffers) const;
+    const QueryTermBuffers& query_term_buffers,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<MMapIO>::InsertHeapByWindow<InnerSearchMode::KNN_SEARCH,
                                                   InnerSearchType::WITH_FILTER>(
     float* dists,
@@ -639,9 +739,10 @@ DiskSindiTermDataCell<MMapIO>::InsertHeapByWindow<InnerSearchMode::KNN_SEARCH,
     MaxHeap& heap,
     const InnerSearchParam& param,
     uint32_t offset_id,
-    const QueryTermBuffers& query_term_buffers) const;
+    const QueryTermBuffers& query_term_buffers,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<MMapIO>::InsertHeapByWindow<InnerSearchMode::RANGE_SEARCH,
                                                   InnerSearchType::PURE>(
     float* dists,
@@ -650,9 +751,10 @@ DiskSindiTermDataCell<MMapIO>::InsertHeapByWindow<InnerSearchMode::RANGE_SEARCH,
     MaxHeap& heap,
     const InnerSearchParam& param,
     uint32_t offset_id,
-    const QueryTermBuffers& query_term_buffers) const;
+    const QueryTermBuffers& query_term_buffers,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<MMapIO>::InsertHeapByWindow<InnerSearchMode::RANGE_SEARCH,
                                                   InnerSearchType::WITH_FILTER>(
     float* dists,
@@ -661,45 +763,50 @@ DiskSindiTermDataCell<MMapIO>::InsertHeapByWindow<InnerSearchMode::RANGE_SEARCH,
     MaxHeap& heap,
     const InnerSearchParam& param,
     uint32_t offset_id,
-    const QueryTermBuffers& query_term_buffers) const;
+    const QueryTermBuffers& query_term_buffers,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<MMapIO>::InsertHeapByDists<InnerSearchMode::KNN_SEARCH,
                                                  InnerSearchType::PURE>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<MMapIO>::InsertHeapByDists<InnerSearchMode::KNN_SEARCH,
                                                  InnerSearchType::WITH_FILTER>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<MMapIO>::InsertHeapByDists<InnerSearchMode::RANGE_SEARCH,
                                                  InnerSearchType::PURE>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<MMapIO>::InsertHeapByDists<InnerSearchMode::RANGE_SEARCH,
                                                  InnerSearchType::WITH_FILTER>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<BufferIO>::InsertHeapByWindow<InnerSearchMode::KNN_SEARCH,
                                                     InnerSearchType::PURE>(
     float* dists,
@@ -708,9 +815,10 @@ DiskSindiTermDataCell<BufferIO>::InsertHeapByWindow<InnerSearchMode::KNN_SEARCH,
     MaxHeap& heap,
     const InnerSearchParam& param,
     uint32_t offset_id,
-    const QueryTermBuffers& query_term_buffers) const;
+    const QueryTermBuffers& query_term_buffers,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<BufferIO>::InsertHeapByWindow<InnerSearchMode::KNN_SEARCH,
                                                     InnerSearchType::WITH_FILTER>(
     float* dists,
@@ -719,9 +827,10 @@ DiskSindiTermDataCell<BufferIO>::InsertHeapByWindow<InnerSearchMode::KNN_SEARCH,
     MaxHeap& heap,
     const InnerSearchParam& param,
     uint32_t offset_id,
-    const QueryTermBuffers& query_term_buffers) const;
+    const QueryTermBuffers& query_term_buffers,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<BufferIO>::InsertHeapByWindow<InnerSearchMode::RANGE_SEARCH,
                                                     InnerSearchType::PURE>(
     float* dists,
@@ -730,9 +839,10 @@ DiskSindiTermDataCell<BufferIO>::InsertHeapByWindow<InnerSearchMode::RANGE_SEARC
     MaxHeap& heap,
     const InnerSearchParam& param,
     uint32_t offset_id,
-    const QueryTermBuffers& query_term_buffers) const;
+    const QueryTermBuffers& query_term_buffers,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<BufferIO>::InsertHeapByWindow<InnerSearchMode::RANGE_SEARCH,
                                                     InnerSearchType::WITH_FILTER>(
     float* dists,
@@ -741,45 +851,50 @@ DiskSindiTermDataCell<BufferIO>::InsertHeapByWindow<InnerSearchMode::RANGE_SEARC
     MaxHeap& heap,
     const InnerSearchParam& param,
     uint32_t offset_id,
-    const QueryTermBuffers& query_term_buffers) const;
+    const QueryTermBuffers& query_term_buffers,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<BufferIO>::InsertHeapByDists<InnerSearchMode::KNN_SEARCH,
                                                    InnerSearchType::PURE>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<BufferIO>::InsertHeapByDists<InnerSearchMode::KNN_SEARCH,
                                                    InnerSearchType::WITH_FILTER>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<BufferIO>::InsertHeapByDists<InnerSearchMode::RANGE_SEARCH,
                                                    InnerSearchType::PURE>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<BufferIO>::InsertHeapByDists<InnerSearchMode::RANGE_SEARCH,
                                                    InnerSearchType::WITH_FILTER>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<ReaderIO>::InsertHeapByWindow<InnerSearchMode::KNN_SEARCH,
                                                     InnerSearchType::PURE>(
     float* dists,
@@ -788,9 +903,10 @@ DiskSindiTermDataCell<ReaderIO>::InsertHeapByWindow<InnerSearchMode::KNN_SEARCH,
     MaxHeap& heap,
     const InnerSearchParam& param,
     uint32_t offset_id,
-    const QueryTermBuffers& query_term_buffers) const;
+    const QueryTermBuffers& query_term_buffers,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<ReaderIO>::InsertHeapByWindow<InnerSearchMode::KNN_SEARCH,
                                                     InnerSearchType::WITH_FILTER>(
     float* dists,
@@ -799,9 +915,10 @@ DiskSindiTermDataCell<ReaderIO>::InsertHeapByWindow<InnerSearchMode::KNN_SEARCH,
     MaxHeap& heap,
     const InnerSearchParam& param,
     uint32_t offset_id,
-    const QueryTermBuffers& query_term_buffers) const;
+    const QueryTermBuffers& query_term_buffers,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<ReaderIO>::InsertHeapByWindow<InnerSearchMode::RANGE_SEARCH,
                                                     InnerSearchType::PURE>(
     float* dists,
@@ -810,9 +927,10 @@ DiskSindiTermDataCell<ReaderIO>::InsertHeapByWindow<InnerSearchMode::RANGE_SEARC
     MaxHeap& heap,
     const InnerSearchParam& param,
     uint32_t offset_id,
-    const QueryTermBuffers& query_term_buffers) const;
+    const QueryTermBuffers& query_term_buffers,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<ReaderIO>::InsertHeapByWindow<InnerSearchMode::RANGE_SEARCH,
                                                     InnerSearchType::WITH_FILTER>(
     float* dists,
@@ -821,42 +939,47 @@ DiskSindiTermDataCell<ReaderIO>::InsertHeapByWindow<InnerSearchMode::RANGE_SEARC
     MaxHeap& heap,
     const InnerSearchParam& param,
     uint32_t offset_id,
-    const QueryTermBuffers& query_term_buffers) const;
+    const QueryTermBuffers& query_term_buffers,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<ReaderIO>::InsertHeapByDists<InnerSearchMode::KNN_SEARCH,
                                                    InnerSearchType::PURE>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<ReaderIO>::InsertHeapByDists<InnerSearchMode::KNN_SEARCH,
                                                    InnerSearchType::WITH_FILTER>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<ReaderIO>::InsertHeapByDists<InnerSearchMode::RANGE_SEARCH,
                                                    InnerSearchType::PURE>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
-template void
+template bool
 DiskSindiTermDataCell<ReaderIO>::InsertHeapByDists<InnerSearchMode::RANGE_SEARCH,
                                                    InnerSearchType::WITH_FILTER>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_remaining) const;
 
 }  // namespace vsag

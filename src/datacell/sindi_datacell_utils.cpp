@@ -320,7 +320,8 @@ parse_term_payload_impl(const uint8_t* payload,
                         uint64_t total_count,
                         uint32_t value_code_size,
                         Allocator* allocator,
-                        bool view_payload) {
+                        bool view_payload,
+                        bool validate_payload) {
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
         entry.posting_count > 0 && entry.posting_payload_size == payload_size,
         "invalid SINDI_V2 term payload descriptor");
@@ -367,19 +368,21 @@ parse_term_payload_impl(const uint8_t* payload,
     const auto* ids = buffer.IdsData();
     const auto* values = buffer.ValuesData();
 
-    for (uint32_t posting = 0; posting < entry.posting_count; ++posting) {
-        const auto* encoded = values + static_cast<uint64_t>(posting) * value_code_size;
-        float value = 0.0F;
-        if (value_code_size == sizeof(float)) {
-            std::memcpy(&value, encoded, sizeof(value));
-        } else if (value_code_size == sizeof(uint16_t)) {
-            uint16_t fp16 = 0;
-            std::memcpy(&fp16, encoded, sizeof(fp16));
-            value = generic::FP16ToFloat(fp16);
+    if (validate_payload) {
+        for (uint32_t posting = 0; posting < entry.posting_count; ++posting) {
+            const auto* encoded = values + static_cast<uint64_t>(posting) * value_code_size;
+            float value = 0.0F;
+            if (value_code_size == sizeof(float)) {
+                std::memcpy(&value, encoded, sizeof(value));
+            } else if (value_code_size == sizeof(uint16_t)) {
+                uint16_t fp16 = 0;
+                std::memcpy(&fp16, encoded, sizeof(fp16));
+                value = generic::FP16ToFloat(fp16);
+            }
+            CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+                value_code_size == sizeof(uint8_t) || std::isfinite(value),
+                "SINDI_V2 posting payload contains a non-finite value");
         }
-        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
-            value_code_size == sizeof(uint8_t) || std::isfinite(value),
-            "SINDI_V2 posting payload contains a non-finite value");
     }
 
     uint32_t posting_count = 0;
@@ -405,17 +408,20 @@ parse_term_payload_impl(const uint8_t* payload,
         const auto window_start = static_cast<uint64_t>(meta.window_id) * window_size;
         const auto window_document_count = static_cast<uint32_t>(std::min<uint64_t>(
             window_size, total_count > window_start ? total_count - window_start : 0));
-        Vector<uint16_t> unique_ids(allocator);
-        unique_ids.reserve(meta.posting_count);
-        for (uint32_t posting = 0; posting < meta.posting_count; ++posting) {
-            const auto id = ids[posting_count + posting];
-            CHECK_ARGUMENT(id < window_document_count,
-                           "SINDI_V2 posting id exceeds its window document count");
-            unique_ids.push_back(id);
+        if (validate_payload) {
+            Vector<uint16_t> unique_ids(allocator);
+            unique_ids.reserve(meta.posting_count);
+            for (uint32_t posting = 0; posting < meta.posting_count; ++posting) {
+                const auto id = ids[posting_count + posting];
+                CHECK_ARGUMENT(id < window_document_count,
+                               "SINDI_V2 posting id exceeds its window document count");
+                unique_ids.push_back(id);
+            }
+            std::sort(unique_ids.begin(), unique_ids.end());
+            CHECK_ARGUMENT(
+                std::adjacent_find(unique_ids.begin(), unique_ids.end()) == unique_ids.end(),
+                "SINDI_V2 posting payload contains duplicate ids");
         }
-        std::sort(unique_ids.begin(), unique_ids.end());
-        CHECK_ARGUMENT(std::adjacent_find(unique_ids.begin(), unique_ids.end()) == unique_ids.end(),
-                       "SINDI_V2 posting payload contains duplicate ids");
         posting_count += meta.posting_count;
         previous_window = meta.window_id;
     }
@@ -446,6 +452,28 @@ ParseTermPayload(const uint8_t* payload,
                                    total_count,
                                    value_code_size,
                                    allocator,
+                                   false,
+                                   true);
+}
+
+SindiTermBuffer
+ParseTrustedTermPayload(const uint8_t* payload,
+                        uint64_t payload_size,
+                        const DiskTermEntry& entry,
+                        uint32_t window_count,
+                        uint32_t window_size,
+                        uint64_t total_count,
+                        uint32_t value_code_size,
+                        Allocator* allocator) {
+    return parse_term_payload_impl(payload,
+                                   payload_size,
+                                   entry,
+                                   window_count,
+                                   window_size,
+                                   total_count,
+                                   value_code_size,
+                                   allocator,
+                                   false,
                                    false);
 }
 
@@ -466,7 +494,29 @@ ViewTermPayload(const uint8_t* payload,
                                    total_count,
                                    value_code_size,
                                    allocator,
+                                   true,
                                    true);
+}
+
+SindiTermBuffer
+ViewTrustedTermPayload(const uint8_t* payload,
+                       uint64_t payload_size,
+                       const DiskTermEntry& entry,
+                       uint32_t window_count,
+                       uint32_t window_size,
+                       uint64_t total_count,
+                       uint32_t value_code_size,
+                       Allocator* allocator) {
+    return parse_term_payload_impl(payload,
+                                   payload_size,
+                                   entry,
+                                   window_count,
+                                   window_size,
+                                   total_count,
+                                   value_code_size,
+                                   allocator,
+                                   true,
+                                   false);
 }
 
 SindiTermBuffer
