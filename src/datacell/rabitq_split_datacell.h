@@ -118,11 +118,10 @@ public:
     class FastScan32Computer final : public ComputerInterface {
     public:
         FastScan32Computer(uint64_t lookup_size, Allocator* allocator)
-            : lookup_table_(lookup_size, allocator), exact_lookup_table_(lookup_size, allocator) {
+            : lookup_table_(lookup_size, allocator) {
         }
 
         ByteBuffer lookup_table_;
-        Vector<float> exact_lookup_table_;
         float deltas_[BottomQuantizer::FASTSCAN_MAX_FILTER_BITS]{};
         float sum_vls_[BottomQuantizer::FASTSCAN_MAX_FILTER_BITS]{};
         float query_sum_{0.0F};
@@ -149,8 +148,7 @@ public:
                                                         fastscan->lookup_table_.data,
                                                         fastscan->deltas_,
                                                         fastscan->sum_vls_,
-                                                        fastscan->query_sum_,
-                                                        fastscan->exact_lookup_table_.data());
+                                                        fastscan->query_sum_);
         return fastscan;
     }
 
@@ -223,8 +221,7 @@ public:
                                                             valid_size,
                                                             this->query_rabitq_error_rate(ctx),
                                                             lower_bounds,
-                                                            filter_inner_products,
-                                                            fastscan->exact_lookup_table_.data());
+                                                            filter_inner_products);
         this->add_filter_count(ctx, valid_size);
         this->add_distance_evaluations(ctx, valid_size);
     }

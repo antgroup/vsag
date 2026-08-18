@@ -145,10 +145,12 @@ IVF stores the `x`-bit filter record separately from the `y`-bit supplement.
 The bucket scan reads filter records only. By default it keeps
 `factor * topk` candidates, then reads supplement records only for those
 candidates. Set `rabitq_search_strategy: "heap"` for KNN search to keep full
-`x+y` distances in the result heap and read a supplement only when the x-bit
-lower bound is smaller than the heap maximum. The heap strategy saves the raw
-x-bit inner product during filtering and therefore does not rescan x bits or
-reverse the inner product from a distance hint.
+`x+y` RaBitQ distance estimates in the result heap and read a supplement only
+when the x-bit lower bound is smaller than the heap maximum. The heap strategy
+saves the byte-LUT-quantized x-bit inner product during filtering and reuses it
+for the final `x+y` estimate. It therefore does not rescan x bits or reconstruct
+the inner product from a distance hint, and both stages share the LUT
+quantization error.
 
 The split configuration requires `x >= 1`, `y >= 1`, `x + y <= 8`,
 `rabitq_bits_per_dim_query: 32`, `use_reorder: true`, and
@@ -168,7 +170,7 @@ Search-time parameters live under the `ivf` sub-object:
 | `disable_bucket_scan` | bool | `false` | Return bucket IDs and distances. Supports batch queries. |
 | `factor` | float | `2.0` | With reordering enabled, pulls `factor * topk` coarse candidates before the precise rescore. |
 | `enable_reorder` | bool | `true` | Set to `false` to skip the final reorder stage for this request even when the index was built with reorder enabled. |
-| `rabitq_search_strategy` | string | `"candidate_reorder"` | Split RaBitQ KNN strategy: `"candidate_reorder"` uses `factor * topk`; `"heap"` keeps exact `x+y` distances and conditionally loads supplements by lower bound. |
+| `rabitq_search_strategy` | string | `"candidate_reorder"` | See split-search behavior above. |
 | `parallelism` | int | `1` | Threads used to scan buckets in parallel for a single query. |
 | `timeout_ms` | double | `+∞` | Hard cap in milliseconds; partial results are returned once exceeded. |
 

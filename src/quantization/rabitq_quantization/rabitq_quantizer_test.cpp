@@ -703,16 +703,11 @@ TEST_CASE("RaBitQ FastScan32 Layout and Tail", "[ut][RaBitQuantizer]") {
         auto computer = quantizer.FactoryComputer();
         computer->SetQuery(vecs.data() + (count - 1) * dim);
         std::vector<uint8_t> lookup(quantizer.GetFastScan32LookupSize());
-        std::vector<float> exact_lookup(quantizer.GetFastScan32LookupSize());
         std::array<float, 3> deltas{};
         std::array<float, 3> sum_vls{};
         float query_sum = 0.0F;
-        quantizer.PrepareFastScan32Query(*computer,
-                                         lookup.data(),
-                                         deltas.data(),
-                                         sum_vls.data(),
-                                         query_sum,
-                                         exact_lookup.data());
+        quantizer.PrepareFastScan32Query(
+            *computer, lookup.data(), deltas.data(), sum_vls.data(), query_sum);
         if (filter_bits == 3) {
             REQUIRE(deltas[0] > 0.0F);
             REQUIRE(deltas[1] > 0.0F);
@@ -766,16 +761,21 @@ TEST_CASE("RaBitQ FastScan32 Layout and Tail", "[ut][RaBitQuantizer]") {
                                                  valid_size,
                                                  std::numeric_limits<float>::quiet_NaN(),
                                                  fastscan_lower_bounds.data(),
-                                                 fastscan_filter_inner_products.data(),
-                                                 exact_lookup.data());
+                                                 fastscan_filter_inner_products.data());
+            const uint64_t group_count = quantizer.GetFastScan32LookupSize() / 16;
+            const float inner_product_error_bound =
+                filter_bits == 3 ? 0.5F * static_cast<float>(group_count / filter_bits) *
+                                       (deltas[0] + deltas[1] + deltas[2])
+                                 : 0.5F * static_cast<float>(group_count) * deltas[0];
             for (uint64_t i = 0; i < valid_size; ++i) {
                 INFO("filter_bits=" << filter_bits << ", vector=" << begin + i << ", scalar="
                                     << scalar_dists[i] << ", fastscan=" << fastscan_dists[i]);
                 REQUIRE(computed[i]);
                 REQUIRE(std::abs(scalar_dists[i] - fastscan_dists[i]) <= 0.02F);
                 REQUIRE(std::abs(scalar_lower_bounds[i] - fastscan_lower_bounds[i]) <= 0.02F);
-                REQUIRE(std::abs(scalar_filter_inner_products[i] -
-                                 fastscan_filter_inner_products[i]) <= 1e-5F);
+                REQUIRE(
+                    std::abs(scalar_filter_inner_products[i] - fastscan_filter_inner_products[i]) <=
+                    inner_product_error_bound + 1e-5F);
             }
         }
     }

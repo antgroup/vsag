@@ -40,39 +40,9 @@ DECLARE_PQFS_FUNCTIONS(sve)
 
 #undef DECLARE_PQFS_FUNCTIONS
 
-namespace generic {
-void
-PQFastScanLookUp32Float(const float* lookup_table,
-                        const uint8_t* codes,
-                        uint64_t pq_dim,
-                        float* result);
-}  // namespace generic
-
-namespace avx2 {
-void
-PQFastScanLookUp32Float(const float* lookup_table,
-                        const uint8_t* codes,
-                        uint64_t pq_dim,
-                        float* result);
-}  // namespace avx2
-
-namespace avx512 {
-void
-PQFastScanLookUp32Float(const float* lookup_table,
-                        const uint8_t* codes,
-                        uint64_t pq_dim,
-                        float* result);
-}  // namespace avx512
-
 using PQFastScanLookUp32Type = void (*)(const uint8_t* RESTRICT lookup_table,
                                         const uint8_t* RESTRICT codes,
                                         uint64_t pq_dim,
                                         int32_t* RESTRICT result);
 extern PQFastScanLookUp32Type PQFastScanLookUp32;
-
-using PQFastScanLookUp32FloatType = void (*)(const float* lookup_table,
-                                             const uint8_t* codes,
-                                             uint64_t pq_dim,
-                                             float* result);
-extern PQFastScanLookUp32FloatType PQFastScanLookUp32Float;
 }  // namespace vsag
