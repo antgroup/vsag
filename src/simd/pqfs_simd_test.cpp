@@ -16,6 +16,7 @@
 #include "pqfs_simd.h"
 
 #include <catch2/benchmark/catch_benchmark.hpp>
+#include <cmath>
 
 #include "simd_status.h"
 #include "unittest.h"
@@ -101,6 +102,35 @@ TEST_CASE("PQFastScan SIMD Compute High Dim", "[ut][simd]") {
             fixtures::generate_uint8_codes(count, pq_dim * 16, fixtures::RandomValue(0, 9999));
         for (uint64_t i = 0; i < count; ++i) {
             TEST_ACCURACY(PQFastScanLookUp32);
+        }
+    }
+}
+
+TEST_CASE("PQFastScan Float SIMD Compute", "[ut][simd]") {
+    constexpr uint64_t count = 10;
+    for (const uint64_t pq_dim : {1, 15, 240, 720}) {
+        const uint64_t dim = pq_dim * 16;
+        auto lut = fixtures::generate_vectors(count, dim);
+        auto codes = fixtures::generate_uint8_codes(count, dim, fixtures::RandomValue(0, 9999));
+        for (uint64_t i = 0; i < count; ++i) {
+            std::vector<float> expected(32);
+            std::vector<float> actual(32);
+            generic::PQFastScanLookUp32Float(
+                lut.data() + i * dim, codes.data() + i * dim, pq_dim, expected.data());
+            if (SimdStatus::SupportAVX2()) {
+                avx2::PQFastScanLookUp32Float(
+                    lut.data() + i * dim, codes.data() + i * dim, pq_dim, actual.data());
+                for (uint64_t j = 0; j < 32; ++j) {
+                    REQUIRE(std::abs(actual[j] - expected[j]) <= 1e-5F);
+                }
+            }
+            if (SimdStatus::SupportAVX512()) {
+                avx512::PQFastScanLookUp32Float(
+                    lut.data() + i * dim, codes.data() + i * dim, pq_dim, actual.data());
+                for (uint64_t j = 0; j < 32; ++j) {
+                    REQUIRE(std::abs(actual[j] - expected[j]) <= 1e-5F);
+                }
+            }
         }
     }
 }

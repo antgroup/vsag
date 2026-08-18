@@ -36,6 +36,14 @@ public:
                    const BucketIdType& bucket_id,
                    QueryContext* ctx = nullptr) override;
 
+    void
+    ScanBucketWithDistanceLowerBound(float* result_dists,
+                                     float* lower_bounds,
+                                     float* filter_inner_products,
+                                     const ComputerInterfacePtr& computer,
+                                     const BucketIdType& bucket_id,
+                                     QueryContext* ctx = nullptr) override;
+
     float
     QueryOneById(const ComputerInterfacePtr& computer,
                  const BucketIdType& bucket_id,
@@ -45,6 +53,14 @@ public:
     SupportSplitCodeStorage() const override {
         return true;
     }
+
+    void
+    QueryWithFilterInnerProductByInnerId(float* result_dists,
+                                         const float* filter_inner_products,
+                                         const ComputerInterfacePtr& computer,
+                                         const InnerIdType* inner_ids,
+                                         InnerIdType id_count,
+                                         QueryContext* ctx = nullptr) override;
 
     void
     QueryWithDistanceHintByInnerId(float* result_dists,

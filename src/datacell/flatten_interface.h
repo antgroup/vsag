@@ -95,12 +95,36 @@ public:
     }
 
     virtual void
+    QueryWithDistanceLowerBoundAndFilterInnerProduct(float* result_dists,
+                                                     float* lower_bounds,
+                                                     float* filter_inner_products,
+                                                     const ComputerInterfacePtr& computer,
+                                                     const InnerIdType* idx,
+                                                     InnerIdType id_count,
+                                                     QueryContext* ctx = nullptr) {
+        this->QueryWithDistanceLowerBound(result_dists, lower_bounds, computer, idx, id_count, ctx);
+        std::fill(filter_inner_products,
+                  filter_inner_products + id_count,
+                  std::numeric_limits<float>::quiet_NaN());
+    }
+
+    virtual void
     QueryWithDistanceHint(float* result_dists,
                           const float* /*hint_dists*/,
                           const ComputerInterfacePtr& computer,
                           const InnerIdType* idx,
                           InnerIdType id_count,
                           QueryContext* ctx = nullptr) {
+        this->Query(result_dists, computer, idx, id_count, ctx);
+    }
+
+    virtual void
+    QueryWithFilterInnerProduct(float* result_dists,
+                                const float* /*filter_inner_products*/,
+                                const ComputerInterfacePtr& computer,
+                                const InnerIdType* idx,
+                                InnerIdType id_count,
+                                QueryContext* ctx = nullptr) {
         this->Query(result_dists, computer, idx, id_count, ctx);
     }
 
@@ -211,6 +235,25 @@ public:
                     QueryContext* /*ctx*/ = nullptr) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "32-vector FastScan query is not supported");
+    }
+
+    virtual void
+    QueryFastScan32WithDistanceLowerBoundAndFilterInnerProduct(
+        float* result_dists,
+        float* lower_bounds,
+        float* filter_inner_products,
+        bool* computed,
+        const ComputerInterfacePtr& computer,
+        const ComputerInterfacePtr& fastscan_computer,
+        const uint8_t* block,
+        InnerIdType valid_size,
+        QueryContext* ctx = nullptr) const {
+        this->QueryFastScan32(
+            result_dists, computed, computer, fastscan_computer, block, valid_size, ctx);
+        std::fill(lower_bounds, lower_bounds + valid_size, std::numeric_limits<float>::max());
+        std::fill(filter_inner_products,
+                  filter_inner_products + valid_size,
+                  std::numeric_limits<float>::quiet_NaN());
     }
 
     [[nodiscard]] virtual MetricType

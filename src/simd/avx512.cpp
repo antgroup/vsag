@@ -1094,6 +1094,39 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
 }
 
 void
+PQFastScanLookUp32Float(const float* lookup_table,
+                        const uint8_t* codes,
+                        uint64_t pq_dim,
+                        float* result) {
+#if defined(ENABLE_AVX512)
+    __m512 low_sum = _mm512_setzero_ps();
+    __m512 high_sum = _mm512_setzero_ps();
+    const __m128i nibble_mask = _mm_set1_epi8(0x0F);
+    for (uint64_t i = 0; i < pq_dim; ++i) {
+        const __m128i packed = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes + i * 16));
+        const __m128i low_codes = _mm_and_si128(packed, nibble_mask);
+        const __m128i high_codes = _mm_and_si128(_mm_srli_epi16(packed, 4), nibble_mask);
+        const float* dict = lookup_table + i * 16;
+        low_sum =
+            _mm512_add_ps(low_sum, _mm512_i32gather_ps(_mm512_cvtepu8_epi32(low_codes), dict, 4));
+        high_sum =
+            _mm512_add_ps(high_sum, _mm512_i32gather_ps(_mm512_cvtepu8_epi32(high_codes), dict, 4));
+    }
+    alignas(64) float low[16];
+    alignas(64) float high[16];
+    _mm512_store_ps(low, low_sum);
+    _mm512_store_ps(high, high_sum);
+    for (uint64_t j = 0; j < 16; ++j) {
+        const uint64_t lane = (j % 2) * 8 + j / 2;
+        result[lane] = low[j];
+        result[16 + lane] = high[j];
+    }
+#else
+    avx2::PQFastScanLookUp32Float(lookup_table, codes, pq_dim, result);
+#endif
+}
+
+void
 BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_AVX512)
     simd::BitAndImpl<simd::BitTraits<simd::AVX512_Bit_Tag>>(x, y, num_byte, result, &avx2::BitAnd);

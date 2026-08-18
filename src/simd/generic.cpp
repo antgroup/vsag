@@ -922,6 +922,23 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
 }
 
 void
+PQFastScanLookUp32Float(const float* lookup_table,
+                        const uint8_t* codes,
+                        uint64_t pq_dim,
+                        float* result) {
+    std::fill(result, result + 32, 0.0F);
+    for (uint64_t i = 0; i < pq_dim; ++i) {
+        const auto* dict = lookup_table + i * 16;
+        const auto* packed = codes + i * 16;
+        for (uint64_t j = 0; j < 16; ++j) {
+            const uint64_t lane = (j % 2) * 8 + j / 2;
+            result[lane] += dict[packed[j] & 0x0F];
+            result[16 + lane] += dict[packed[j] >> 4];
+        }
+    }
+}
+
+void
 BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
     for (uint64_t i = 0; i < num_byte; i++) {
         result[i] = x[i] & y[i];

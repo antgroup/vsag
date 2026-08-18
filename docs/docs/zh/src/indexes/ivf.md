@@ -133,9 +133,12 @@ auto loaded = vsag::Index::Load(stream, load_parameters).value();
 }
 ```
 
-IVF 会分别保存 `x` bit 过滤记录和 `y` bit 补充记录。扫描桶时只读取
-过滤记录，保留 `factor * topk` 个候选；精排只为这些候选读取补充记录，
-并复用粗排距离，不再保存一份独立的精排码。
+IVF 会分别保存 `x` bit 过滤记录和 `y` bit 补充记录。默认策略扫描桶时
+只读取过滤记录，保留 `factor * topk` 个候选，再为这些候选读取补充记录。
+KNN 搜索可设置 `rabitq_search_strategy: "heap"`，让结果堆始终保存完整
+`x+y` 距离，仅当 x-bit lower bound 小于堆顶时读取 supplement。heap 策略
+在过滤时直接保存 x-bit 原始内积，因此精算不重扫 x bits，也不从距离 hint
+反推内积。
 
 split 配置要求 `x >= 1`、`y >= 1`、`x + y <= 8`、
 `rabitq_bits_per_dim_query: 32`、`use_reorder: true` 和
@@ -155,6 +158,7 @@ split 配置要求 `x >= 1`、`y >= 1`、`x + y <= 8`、
 | `disable_bucket_scan` | bool | `false` | 返回桶 ID 及到桶中心距离，不扫描桶内向量。支持批量查询。 |
 | `factor` | float | `2.0` | 启用精排时，粗排阶段会预取 `factor * topk` 个候选再重打分 |
 | `enable_reorder` | bool | `true` | 即使索引构建时启用了 reorder，也可以在单次请求里设为 `false` 跳过最终精排 |
+| `rabitq_search_strategy` | string | `"candidate_reorder"` | Split RaBitQ KNN 策略：`"candidate_reorder"` 使用 `factor * topk`；`"heap"` 在精确 `x+y` 距离堆上按 lower bound 决定是否读取 supplement。 |
 | `parallelism` | int | `1` | 单次查询内扫描桶时使用的线程数 |
 | `timeout_ms` | double | `+∞` | 单次查询最长耗时（毫秒），超时会返回当前的部分结果 |
 
@@ -168,6 +172,10 @@ auto result = index->KnnSearch(
 auto fast_result = index->KnnSearch(
     query, topk,
     R"({"ivf": {"scan_buckets_count": 32, "factor": 2.0, "enable_reorder": false}})").value();
+
+auto heap_result = index->KnnSearch(
+    query, topk,
+    R"({"ivf": {"scan_buckets_count": 32, "rabitq_search_strategy": "heap"}})").value();
 ```
 
 ## 何时选择 IVF

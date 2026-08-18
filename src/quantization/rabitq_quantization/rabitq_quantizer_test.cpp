@@ -703,11 +703,16 @@ TEST_CASE("RaBitQ FastScan32 Layout and Tail", "[ut][RaBitQuantizer]") {
         auto computer = quantizer.FactoryComputer();
         computer->SetQuery(vecs.data() + (count - 1) * dim);
         std::vector<uint8_t> lookup(quantizer.GetFastScan32LookupSize());
+        std::vector<float> exact_lookup(quantizer.GetFastScan32LookupSize());
         std::array<float, 3> deltas{};
         std::array<float, 3> sum_vls{};
         float query_sum = 0.0F;
-        quantizer.PrepareFastScan32Query(
-            *computer, lookup.data(), deltas.data(), sum_vls.data(), query_sum);
+        quantizer.PrepareFastScan32Query(*computer,
+                                         lookup.data(),
+                                         deltas.data(),
+                                         sum_vls.data(),
+                                         query_sum,
+                                         exact_lookup.data());
         if (filter_bits == 3) {
             REQUIRE(deltas[0] > 0.0F);
             REQUIRE(deltas[1] > 0.0F);
@@ -725,7 +730,11 @@ TEST_CASE("RaBitQ FastScan32 Layout and Tail", "[ut][RaBitQuantizer]") {
         std::vector<uint8_t> supplement_code(quantizer.GetSupplementCodeSize());
         std::vector<uint8_t> block(quantizer.GetFastScan32BlockSize());
         std::array<float, 32> scalar_dists{};
+        std::array<float, 32> scalar_lower_bounds{};
+        std::array<float, 32> scalar_filter_inner_products{};
         std::array<float, 32> fastscan_dists{};
+        std::array<float, 32> fastscan_lower_bounds{};
+        std::array<float, 32> fastscan_filter_inner_products{};
         std::array<bool, 32> computed{};
 
         for (uint64_t begin = 0; begin < count; begin += 32) {
@@ -740,7 +749,9 @@ TEST_CASE("RaBitQ FastScan32 Layout and Tail", "[ut][RaBitQuantizer]") {
                     *computer,
                     one_bit_codes.data() + i * one_bit_size,
                     scalar_dists.data() + i,
-                    nullptr));
+                    scalar_lower_bounds.data() + i,
+                    std::numeric_limits<float>::quiet_NaN(),
+                    scalar_filter_inner_products.data() + i));
             }
 
             quantizer.PackageFastScan32(one_bit_codes.data(), valid_size, block.data());
@@ -752,12 +763,19 @@ TEST_CASE("RaBitQ FastScan32 Layout and Tail", "[ut][RaBitQuantizer]") {
                                                  query_sum,
                                                  fastscan_dists.data(),
                                                  computed.data(),
-                                                 valid_size);
+                                                 valid_size,
+                                                 std::numeric_limits<float>::quiet_NaN(),
+                                                 fastscan_lower_bounds.data(),
+                                                 fastscan_filter_inner_products.data(),
+                                                 exact_lookup.data());
             for (uint64_t i = 0; i < valid_size; ++i) {
                 INFO("filter_bits=" << filter_bits << ", vector=" << begin + i << ", scalar="
                                     << scalar_dists[i] << ", fastscan=" << fastscan_dists[i]);
                 REQUIRE(computed[i]);
                 REQUIRE(std::abs(scalar_dists[i] - fastscan_dists[i]) <= 0.02F);
+                REQUIRE(std::abs(scalar_lower_bounds[i] - fastscan_lower_bounds[i]) <= 0.02F);
+                REQUIRE(std::abs(scalar_filter_inner_products[i] -
+                                 fastscan_filter_inner_products[i]) <= 1e-5F);
             }
         }
     }
@@ -794,13 +812,18 @@ TEST_CASE("RaBitQ Split IP Batch4 and Reorder Hint", "[ut][RaBitQuantizer]") {
         4, std::vector<uint8_t>(quantizer.GetOneBitCodeSize()));
     float single_dists[4] = {};
     float single_lower_bounds[4] = {};
+    float filter_inner_products[4] = {};
 
     for (uint64_t i = 0; i < 4; ++i) {
         REQUIRE(quantizer.EncodeOne(vecs.data() + i * dim, full_code.data()));
         quantizer.SplitCode(full_code.data(), one_bit_codes[i].data(), supplement_code.data());
 
-        REQUIRE(quantizer.ComputeDistWithOneBitLowerBound(
-            *computer, one_bit_codes[i].data(), single_dists + i, single_lower_bounds + i));
+        REQUIRE(quantizer.ComputeDistWithOneBitLowerBound(*computer,
+                                                          one_bit_codes[i].data(),
+                                                          single_dists + i,
+                                                          single_lower_bounds + i,
+                                                          std::numeric_limits<float>::quiet_NaN(),
+                                                          filter_inner_products + i));
         float split_dist = 0.0F;
         REQUIRE(quantizer.ComputeDistWithSplitCode(
             *computer, one_bit_codes[i].data(), supplement_code.data(), &split_dist));
@@ -811,6 +834,13 @@ TEST_CASE("RaBitQ Split IP Batch4 and Reorder Hint", "[ut][RaBitQuantizer]") {
                                                                 single_dists[i],
                                                                 &hinted_split_dist));
         REQUIRE(std::abs(split_dist - hinted_split_dist) <= 1e-5F);
+
+        float inner_product_split_dist = 0.0F;
+        REQUIRE(quantizer.ComputeDistWithSplitCodeAndFilterInnerProduct(*computer,
+                                                                        supplement_code.data(),
+                                                                        filter_inner_products[i],
+                                                                        &inner_product_split_dist));
+        REQUIRE(std::abs(split_dist - inner_product_split_dist) <= 1e-5F);
     }
 
     float batch_dists[4] = {};

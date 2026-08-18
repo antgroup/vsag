@@ -118,10 +118,11 @@ public:
     class FastScan32Computer final : public ComputerInterface {
     public:
         FastScan32Computer(uint64_t lookup_size, Allocator* allocator)
-            : lookup_table_(lookup_size, allocator) {
+            : lookup_table_(lookup_size, allocator), exact_lookup_table_(lookup_size, allocator) {
         }
 
         ByteBuffer lookup_table_;
+        Vector<float> exact_lookup_table_;
         float deltas_[BottomQuantizer::FASTSCAN_MAX_FILTER_BITS]{};
         float sum_vls_[BottomQuantizer::FASTSCAN_MAX_FILTER_BITS]{};
         float query_sum_{0.0F};
@@ -148,7 +149,8 @@ public:
                                                         fastscan->lookup_table_.data,
                                                         fastscan->deltas_,
                                                         fastscan->sum_vls_,
-                                                        fastscan->query_sum_);
+                                                        fastscan->query_sum_,
+                                                        fastscan->exact_lookup_table_.data());
         return fastscan;
     }
 
@@ -193,6 +195,36 @@ public:
                                                             computed,
                                                             valid_size,
                                                             this->query_rabitq_error_rate(ctx));
+        this->add_filter_count(ctx, valid_size);
+        this->add_distance_evaluations(ctx, valid_size);
+    }
+
+    void
+    QueryFastScan32WithDistanceLowerBoundAndFilterInnerProduct(
+        float* result_dists,
+        float* lower_bounds,
+        float* filter_inner_products,
+        bool* computed,
+        const ComputerInterfacePtr& computer,
+        const ComputerInterfacePtr& fastscan_computer,
+        const uint8_t* block,
+        InnerIdType valid_size,
+        QueryContext* ctx = nullptr) const override {
+        const auto* fastscan = dynamic_cast<const FastScan32Computer*>(fastscan_computer.get());
+        CHECK_ARGUMENT(fastscan != nullptr, "invalid RaBitQ FastScan computer");
+        this->bottom_quantizer().ComputeDistsWithFastScan32(*this->get_bottom_computer(computer),
+                                                            block,
+                                                            fastscan->lookup_table_.data,
+                                                            fastscan->deltas_,
+                                                            fastscan->sum_vls_,
+                                                            fastscan->query_sum_,
+                                                            result_dists,
+                                                            computed,
+                                                            valid_size,
+                                                            this->query_rabitq_error_rate(ctx),
+                                                            lower_bounds,
+                                                            filter_inner_products,
+                                                            fastscan->exact_lookup_table_.data());
         this->add_filter_count(ctx, valid_size);
         this->add_distance_evaluations(ctx, valid_size);
     }
@@ -525,6 +557,116 @@ public:
                 throw;
             }
             this->release_one_bit_code(one_bit_code, one_bit_need_release);
+        }
+        this->add_distance_evaluations(ctx, id_count);
+    }
+
+    void
+    QueryWithDistanceLowerBoundAndFilterInnerProduct(float* result_dists,
+                                                     float* lower_bounds,
+                                                     float* filter_inner_products,
+                                                     const ComputerInterfacePtr& computer,
+                                                     const InnerIdType* idx,
+                                                     InnerIdType id_count,
+                                                     QueryContext* ctx = nullptr) override {
+        if (this->optimized_build_active_) {
+            this->query_optimized_build_codes(result_dists, computer, idx, id_count);
+            std::fill(
+                lower_bounds, lower_bounds + id_count, -std::numeric_limits<float>::infinity());
+            std::fill(filter_inner_products,
+                      filter_inner_products + id_count,
+                      std::numeric_limits<float>::quiet_NaN());
+            this->add_distance_evaluations(ctx, id_count);
+            return;
+        }
+
+        auto* comp = this->get_bottom_computer(computer);
+        this->add_filter_count(ctx, id_count);
+        for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
+            this->prefetch_one_bit(idx[i]);
+        }
+
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            if (i + this->prefetch_stride_code_ < id_count) {
+                this->prefetch_one_bit(idx[i + this->prefetch_stride_code_]);
+            }
+
+            bool one_bit_need_release = false;
+            const uint8_t* one_bit_code = this->get_one_bit_code(idx[i], one_bit_need_release);
+            bool computed = false;
+            try {
+                computed = this->bottom_quantizer().ComputeDistWithOneBitLowerBound(
+                    *comp,
+                    one_bit_code,
+                    result_dists + i,
+                    lower_bounds + i,
+                    this->query_rabitq_error_rate(ctx),
+                    filter_inner_products + i);
+                if (not computed) {
+                    this->add_filter_fallback_full_count(ctx, 1);
+                    this->compute_full_dist_after_one_bit_failure(
+                        idx[i], one_bit_code, comp, result_dists + i, nullptr, ctx);
+                    lower_bounds[i] = -std::numeric_limits<float>::infinity();
+                    filter_inner_products[i] = std::numeric_limits<float>::quiet_NaN();
+                }
+            } catch (...) {
+                this->release_one_bit_code(one_bit_code, one_bit_need_release);
+                throw;
+            }
+            this->release_one_bit_code(one_bit_code, one_bit_need_release);
+        }
+        this->add_distance_evaluations(ctx, id_count);
+    }
+
+    void
+    QueryWithFilterInnerProduct(float* result_dists,
+                                const float* filter_inner_products,
+                                const ComputerInterfacePtr& computer,
+                                const InnerIdType* idx,
+                                InnerIdType id_count,
+                                QueryContext* ctx = nullptr) override {
+        if (this->optimized_build_active_) {
+            this->query_optimized_build_codes(result_dists, computer, idx, id_count);
+            this->add_distance_evaluations(ctx, id_count);
+            return;
+        }
+
+        auto* comp = this->get_bottom_computer(computer);
+        for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
+            this->prefetch_supplement(idx[i]);
+        }
+
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            if (i + this->prefetch_stride_code_ < id_count) {
+                this->prefetch_supplement(idx[i + this->prefetch_stride_code_]);
+            }
+
+            bool computed = false;
+            const float filter_inner_product = filter_inner_products[i];
+            if (std::isfinite(filter_inner_product)) {
+                bool supplement_need_release = false;
+                const uint8_t* supplement_code = nullptr;
+                try {
+                    supplement_code = this->get_supplement_code(idx[i], supplement_need_release);
+                    computed =
+                        this->bottom_quantizer().ComputeDistWithSplitCodeAndFilterInnerProduct(
+                            *comp, supplement_code, filter_inner_product, result_dists + i);
+                } catch (...) {
+                    this->release_supplement_code(supplement_code, supplement_need_release);
+                    throw;
+                }
+                this->release_supplement_code(supplement_code, supplement_need_release);
+            }
+
+            if (computed) {
+                this->add_full_count(ctx, 1);
+                this->add_reorder_hint_full_count(ctx, 1);
+            } else {
+                if (std::isfinite(filter_inner_product)) {
+                    this->add_reorder_fallback_full_count(ctx, 1);
+                }
+                this->compute_full_dist(idx[i], comp, result_dists + i, ctx);
+            }
         }
         this->add_distance_evaluations(ctx, id_count);
     }
