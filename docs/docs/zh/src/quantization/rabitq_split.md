@@ -1,9 +1,10 @@
 # RaBitQ x+y Split
 
-RaBitQ x+y split 是 HGraph 和 Pyramid 面向低比特底库码的存储与搜索模式。每条向量拆成
+RaBitQ x+y split 是 HGraph、IVF 和 Pyramid 面向低比特底库码的存储与搜索模式。
+每条向量拆成
 两条记录：
 
-- 图遍历和 lower-bound 过滤只读取 `x` 个 filter bits。
+- 图遍历或 IVF 桶扫描只读取 `x` 个 filter bits。
 - 只有进入重排的候选才读取 `y` 个 supplement bits。
 - 最终重排距离使用完整的 `x+y` bits。
 
@@ -13,7 +14,7 @@ RaBitQ x+y split 是 HGraph 和 Pyramid 面向低比特底库码的存储与搜�
 ## 启用 split 模式
 
 当 base 和 precise 的量化类型都为 `rabitq`，并且配置了
-`rabitq_bits_per_dim_precise` 时，HGraph 和 Pyramid 自动选择 split 模式：
+`rabitq_bits_per_dim_precise` 时，HGraph、IVF 和 Pyramid 自动选择 split 模式：
 
 ```json
 {
@@ -54,7 +55,8 @@ RaBitQ x+y split 是 HGraph 和 Pyramid 面向低比特底库码的存储与搜�
 x + y <= 8
 ```
 
-如果不配置 `rabitq_bits_per_dim_precise`，HGraph 和 Pyramid 使用 standard RaBitQ 路径，
+如果不配置 `rabitq_bits_per_dim_precise`，HGraph、IVF 和 Pyramid 使用
+standard RaBitQ 路径，
 不会创建 split storage。
 
 使用以下搜索参数启用 filter/lower-bound 搜索路径：
@@ -75,20 +77,27 @@ x + y <= 8
 `hgraph.rabitq_error_rate` 可以为单次搜索覆盖索引默认值。record 中保存的是乘倍率前的
 几何误差尺度，因此 sweep 这个搜索参数不需要重建索引。
 
+IVF 桶扫描会自动使用配置的 `x` 个 filter bits，不需要
+`rabitq_one_bit_search` 开关。可通过 `ivf.factor` 控制进入 supplement
+重排的过滤阶段候选数（`factor * topk`）。
+
 ## 搜索流程
 
 split 搜索分为四个阶段：
 
 1. query 只做一次变换和归一化；对支持的 filter bit 数，还会为每个 query
    构建一次 byte lookup table。
-2. 图遍历只读取 filter record，为每个访问到的向量计算 x-bit 距离估计和
+2. 图遍历或 IVF 桶扫描只读取 filter record，为每个访问到的向量计算
+   x-bit 距离估计和
    保守的 lower bound。
-3. 重排先丢弃 lower bound 不可能进入结果集的候选，只为剩余候选读取 y-bit
+3. HGraph 可以丢弃 lower bound 不可能进入结果集的候选；IVF 则按 filter
+   distance 保留 `factor * topk` 个候选。重排只为剩余候选读取 y-bit
    supplement record。
 4. 最终距离把 filter contribution 与 supplement contribution 合成为
    `x+y`-bit RaBitQ 估计。
 
-因此，图搜索不会为每个访问到的向量都计算 `x+y` 距离并放入搜索堆。图遍历由
+因此，图搜索或 IVF 桶扫描不会为每个访问到的向量都计算 `x+y` 距离并放入
+搜索堆。过滤阶段由
 低成本的 x-bit 距离驱动，更精确的距离只在候选重排阶段计算。
 
 ## 编码和 bit-plane
@@ -220,6 +229,102 @@ LB = D_x
 lower bound 只用于安全地排除候选。`D_x` 是图遍历距离，最终排序使用完整的
 `x+y` 距离。
 
+## IVF 1-bit、2-bit 和 3-bit 的 32-vector FastScan 布局
+
+IVF split storage 使用 `x = 1..3` 时，`RaBitQSplitBucketDataCell` 会把每个桶
+按 32 个候选一组打包。标准 split record 仍用于按 ID 查询和 supplement 重排；
+桶内扫描块保存一份面向 SIMD 的 filter planes 和紧凑元数据。
+
+设 `G = ceil(d / 8) * 2`，即单个 bitplane 的四维分组数。每组为每个候选保存
+一个四位 mask，32 个 mask 转置为 16 bytes。低 nibble 表示候选 `0..15`，
+高 nibble 表示候选 `16..31`；两部分均采用 lane 顺序
+`0, 8, 1, 9, ..., 7, 15`。多个 bitplane 保持分离，并按 plane-major 顺序连续
+存放。
+
+对于 `x = 1`，每组构建一个 16 项子集和表：
+
+```text
+LUT_g[m] = sum(q_(4g+j) for j in [0, 3] when bit_j(m) is set)
+```
+
+对于 `x = 2` 或 `x = 3`，设 bitplane 0 为最高位，中心化 LUT 为：
+
+```text
+weight(x, p) = 2^(x - p - 2)
+LUT_(p,g)[m] = weight(x, p) * sum((2 * bit_j(m) - 1) * q_(4g+j))
+```
+
+2-bit 的 plane 权重是 `{1, 0.5}`，3-bit 是 `{2, 1, 0.5}`。超出 `d` 的坐标
+按零处理。
+
+1-bit 和 2-bit 扫描使用一个 query 级统一 uint8 quantizer。3-bit 扫描对每个
+plane 独立量化，避免低权重 plane 因最高 plane 的值域大四倍而损失有效精度：
+
+```text
+delta[p] = (v_max[p] - v_min[p]) / 255
+plane_sum[p] ~= G * v_min[p] + delta[p] * sum LUT_u8[p][code]
+centered_ip ~= plane_sum[0] + plane_sum[1] + plane_sum[2]
+```
+
+3-bit scanner 对三个连续 plane 分别调用一次 `PQFastScanLookUp32`。总 shuffle
+分组数和 packed-code 大小仍是 `3 * G`，与单次合并扫描相同，但可以使用独立
+反量化 scale。
+
+对于 1-bit，使用 `sum(q)` 和 `sqrt(d)` 把 lookup sum 转换为归一化二值内积。
+对于 2-bit 和 3-bit，lookup sum 已是中心化内积，再除以保存的 filter-code
+norm。随后所有路径都使用 RaBitQ norm 和 error 元数据恢复过滤阶段距离。
+
+packed filter planes 后紧跟 32 个候选的元数据。桶尾不足 32 条的 block 用零码
+补齐，扫描器只返回有效候选。运行时会分派到 generic、SSE、AVX2 或 AVX-512
+实现。LUT 标量量化只影响 IVF 过滤估计；supplement 重排仍使用保存的 `x+y`
+code。更宽的 filter 继续使用 bit-plane batch 路径。
+
+配置示例：
+
+```json
+{
+    "rabitq_bits_per_dim_base": 1,
+    "rabitq_bits_per_dim_precise": 7,
+    "rabitq_bits_per_dim_query": 32
+}
+```
+
+```json
+{
+    "rabitq_bits_per_dim_base": 2,
+    "rabitq_bits_per_dim_precise": 6,
+    "rabitq_bits_per_dim_query": 32
+}
+```
+
+```json
+{
+    "rabitq_bits_per_dim_base": 3,
+    "rabitq_bits_per_dim_precise": 5,
+    "rabitq_bits_per_dim_query": 32
+}
+```
+
+### GIST1M 对比实验
+
+下表对比传统 8-bit IVF RaBitQ 与 split 布局在
+`gist-960-euclidean.hdf5` 上的结果。数据集包含 1,000,000 条 960 维 L2
+base 向量；索引使用 1,024 个桶、100,000 条训练样本、16 个构建线程，并设置
+`rabitq_bits_per_dim_query = 32`。搜索使用单线程、扫描 32 个桶、`factor = 10`、
+top-10，共计时 5,000 次查询。split 搜索结果启用了上述 32-vector FastScan 布局。
+
+| 布局 | 构建时间（秒） | 构建 TPS | 索引内存（bytes） | 搜索 QPS | 平均延迟（ms） | Recall@10 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 传统 RaBitQ 8-bit | 150.742 | 6,633.840 | 1,284,595,208 | 17.767 | 56.280 | 0.9197 |
+| Split RaBitQ 1+7 | 551.701 | 1,812.576 | 1,450,355,304 | 118.333 | 8.447 | 0.9019 |
+| Split RaBitQ 2+6 | 509.431 | 1,962.974 | 1,582,237,512 | 74.786 | 13.368 | 0.9128 |
+| Split RaBitQ 3+5 | 496.873 | 2,012.589 | 1,702,580,248 | 67.892 | 14.726 | 0.9094 |
+
+这些数据用于单机方案对比，并非通用的性能承诺。split storage 需要构建两路编码，
+并在内存中保存一份桶级 FastScan 副本；作为交换，filter 扫描不再为每个候选读取
+完整 8-bit code。在该负载中，2+6 的召回最接近传统 8-bit RaBitQ，同时搜索吞吐
+约提升 4.2 倍；1+7 的吞吐最高，但召回损失也更明显。
+
 ## Query lookup table 和 SIMD
 
 当 `x = 2` 或 `x = 3` 时，query computer 会构建 FastScan 风格的 byte lookup
@@ -252,7 +357,8 @@ sum_i q_i * u_i
       + sum_i q_i * s_i
 ```
 
-对使用 x-bit lookup filter 的 L2 搜索，HGraph 和 Pyramid 会把之前计算的 filter distance
+对使用 x-bit lookup filter 的 L2 搜索，HGraph、IVF 和 Pyramid 会把之前计算的
+filter distance
 作为 hint 传给 reorder。`ComputeDistWithSplitCodeAndFilterDist` 从 hint 恢复第一项，
 只从 y 个 supplement planes 计算第二项：
 
@@ -342,7 +448,10 @@ x/y bit 数和 query bits。修改编码参数需要重建索引；只调整搜�
 
 ## 使用注意
 
-- split storage 当前可用于 HGraph 和 Pyramid，并且要求 fp32 query code。Pyramid 的 split 索引默认启用 one-bit split 搜索路径；如需强制使用普通搜索路径，可以在 `pyramid` 搜索参数下传 `rabitq_one_bit_search: false`。
+- split storage 当前可用于 HGraph、IVF 和 Pyramid，并且要求 fp32 query code。
+  Pyramid 的 split 索引默认启用 one-bit split 搜索路径；如需强制使用普通
+  搜索路径，
+  可以在 `pyramid` 搜索参数下传 `rabitq_one_bit_search: false`。
 - 支持 `l2`、`ip` 和 `cosine`；利用 filter hint 的 reorder 快速路径当前针对 L2。
 - 除非已经验证仅靠 x-bit 遍历距离能满足召回要求，否则应保持
   `use_reorder: true`。

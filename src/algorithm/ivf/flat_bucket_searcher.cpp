@@ -40,9 +40,9 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
         dist.resize(bucket_size);
     }
 
-    bucket->ScanBucketById(dist.data(), computer, bucket_id);
+    bucket->ScanBucketById(dist.data(), computer, bucket_id, param.query_context);
     if (param.query_context != nullptr and param.query_context->stats != nullptr and
-        bucket_size > 0) {
+        bucket_size > 0 and not bucket->SupportSplitCodeStorage()) {
         param.query_context->stats->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
                                                 bucket->backend_,
                                                 static_cast<uint64_t>(bucket_size));

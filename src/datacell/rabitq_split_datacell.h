@@ -204,6 +204,88 @@ public:
         this->refresh_code_sizes();
     }
 
+    class FastScan32Computer final : public ComputerInterface {
+    public:
+        FastScan32Computer(uint64_t lookup_size, Allocator* allocator)
+            : lookup_table_(lookup_size, allocator) {
+        }
+
+        ByteBuffer lookup_table_;
+        float deltas_[BottomQuantizer::FASTSCAN_MAX_FILTER_BITS]{};
+        float sum_vls_[BottomQuantizer::FASTSCAN_MAX_FILTER_BITS]{};
+        float query_sum_{0.0F};
+    };
+
+    [[nodiscard]] bool
+    SupportFastScan32() const override {
+        return this->bottom_quantizer().SupportFastScan32();
+    }
+
+    [[nodiscard]] uint64_t
+    GetFastScan32BlockSize() const override {
+        return this->bottom_quantizer().GetFastScan32BlockSize();
+    }
+
+    ComputerInterfacePtr
+    FactoryFastScan32Computer(const ComputerInterfacePtr& computer) const override {
+        if (not this->SupportFastScan32()) {
+            return nullptr;
+        }
+        auto fastscan = std::make_shared<FastScan32Computer>(
+            this->bottom_quantizer().GetFastScan32LookupSize(), this->allocator_);
+        this->bottom_quantizer().PrepareFastScan32Query(*this->get_bottom_computer(computer),
+                                                        fastscan->lookup_table_.data,
+                                                        fastscan->deltas_,
+                                                        fastscan->sum_vls_,
+                                                        fastscan->query_sum_);
+        return fastscan;
+    }
+
+    void
+    PackageFastScan32(const InnerIdType* ids,
+                      InnerIdType valid_size,
+                      uint8_t* block) const override {
+        CHECK_ARGUMENT(valid_size <= BottomQuantizer::FASTSCAN_BATCH_SIZE,
+                       "invalid FastScan batch size");
+        ByteBuffer one_bit_codes(this->one_bit_code_size_ * BottomQuantizer::FASTSCAN_BATCH_SIZE,
+                                 this->allocator_);
+        memset(
+            one_bit_codes.data, 0, this->one_bit_code_size_ * BottomQuantizer::FASTSCAN_BATCH_SIZE);
+        for (InnerIdType i = 0; i < valid_size; ++i) {
+            if (ids[i] == std::numeric_limits<InnerIdType>::max()) {
+                continue;
+            }
+            CHECK_ARGUMENT(
+                this->x_bit_cell_->Read(ids[i], one_bit_codes.data + i * this->one_bit_code_size_),
+                "failed to read RaBitQ filter code for FastScan packaging");
+        }
+        this->bottom_quantizer().PackageFastScan32(one_bit_codes.data, valid_size, block);
+    }
+
+    void
+    QueryFastScan32(float* result_dists,
+                    bool* computed,
+                    const ComputerInterfacePtr& computer,
+                    const ComputerInterfacePtr& fastscan_computer,
+                    const uint8_t* block,
+                    InnerIdType valid_size,
+                    QueryContext* ctx = nullptr) const override {
+        const auto* fastscan = dynamic_cast<const FastScan32Computer*>(fastscan_computer.get());
+        CHECK_ARGUMENT(fastscan != nullptr, "invalid RaBitQ FastScan computer");
+        this->bottom_quantizer().ComputeDistsWithFastScan32(*this->get_bottom_computer(computer),
+                                                            block,
+                                                            fastscan->lookup_table_.data,
+                                                            fastscan->deltas_,
+                                                            fastscan->sum_vls_,
+                                                            fastscan->query_sum_,
+                                                            result_dists,
+                                                            computed,
+                                                            valid_size,
+                                                            this->query_rabitq_error_rate(ctx));
+        this->add_filter_count(ctx, valid_size);
+        this->add_distance_evaluations(ctx, valid_size);
+    }
+
     void
     Query(float* result_dists,
           const ComputerInterfacePtr& computer,

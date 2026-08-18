@@ -16,6 +16,7 @@
 #include "rabitq_quantizer.h"
 
 #include <algorithm>
+#include <array>
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include <cmath>
 #include <cstring>
@@ -672,6 +673,91 @@ TEST_CASE("RaBitQ Split Code Storage", "[ut][RaBitQuantizer]") {
             for (uint32_t i = 0; i < 4; ++i) {
                 REQUIRE(std::abs(batch_dists[i] - single_dists[i]) <= 1e-5F);
                 REQUIRE(std::abs(batch_lower_bounds[i] - single_lower_bounds[i]) <= 1e-5F);
+            }
+        }
+    }
+}
+
+TEST_CASE("RaBitQ FastScan32 Layout and Tail", "[ut][RaBitQuantizer]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 70;
+    constexpr uint64_t count = 39;
+    constexpr uint64_t base_bits = 8;
+    auto vecs = fixtures::generate_vectors(count, dim);
+
+    for (const uint32_t filter_bits : {1U, 2U, 3U}) {
+        RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(
+            dim,
+            dim,
+            32,
+            base_bits,
+            false,
+            false,
+            allocator.get(),
+            RaBitQuantizerParameter::RABITQ_VERSION_SPLIT,
+            RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE,
+            filter_bits);
+        REQUIRE(quantizer.SupportFastScan32());
+        quantizer.TrainImpl(vecs.data(), count);
+
+        auto computer = quantizer.FactoryComputer();
+        computer->SetQuery(vecs.data() + (count - 1) * dim);
+        std::vector<uint8_t> lookup(quantizer.GetFastScan32LookupSize());
+        std::array<float, 3> deltas{};
+        std::array<float, 3> sum_vls{};
+        float query_sum = 0.0F;
+        quantizer.PrepareFastScan32Query(
+            *computer, lookup.data(), deltas.data(), sum_vls.data(), query_sum);
+        if (filter_bits == 3) {
+            REQUIRE(deltas[0] > 0.0F);
+            REQUIRE(deltas[1] > 0.0F);
+            REQUIRE(deltas[2] > 0.0F);
+            REQUIRE(std::abs(deltas[0] - 2.0F * deltas[1]) <= 1e-6F);
+            REQUIRE(std::abs(deltas[1] - 2.0F * deltas[2]) <= 1e-6F);
+        } else {
+            REQUIRE(deltas[1] == 0.0F);
+            REQUIRE(deltas[2] == 0.0F);
+        }
+
+        const uint64_t one_bit_size = quantizer.GetOneBitCodeSize();
+        std::vector<uint8_t> one_bit_codes(one_bit_size * 32);
+        std::vector<uint8_t> full_code(quantizer.GetCodeSize());
+        std::vector<uint8_t> supplement_code(quantizer.GetSupplementCodeSize());
+        std::vector<uint8_t> block(quantizer.GetFastScan32BlockSize());
+        std::array<float, 32> scalar_dists{};
+        std::array<float, 32> fastscan_dists{};
+        std::array<bool, 32> computed{};
+
+        for (uint64_t begin = 0; begin < count; begin += 32) {
+            const uint64_t valid_size = std::min<uint64_t>(32, count - begin);
+            std::fill(one_bit_codes.begin(), one_bit_codes.end(), 0);
+            for (uint64_t i = 0; i < valid_size; ++i) {
+                quantizer.EncodeOne(vecs.data() + (begin + i) * dim, full_code.data());
+                quantizer.SplitCode(full_code.data(),
+                                    one_bit_codes.data() + i * one_bit_size,
+                                    supplement_code.data());
+                REQUIRE(quantizer.ComputeDistWithOneBitLowerBound(
+                    *computer,
+                    one_bit_codes.data() + i * one_bit_size,
+                    scalar_dists.data() + i,
+                    nullptr));
+            }
+
+            quantizer.PackageFastScan32(one_bit_codes.data(), valid_size, block.data());
+            quantizer.ComputeDistsWithFastScan32(*computer,
+                                                 block.data(),
+                                                 lookup.data(),
+                                                 deltas.data(),
+                                                 sum_vls.data(),
+                                                 query_sum,
+                                                 fastscan_dists.data(),
+                                                 computed.data(),
+                                                 valid_size);
+            for (uint64_t i = 0; i < valid_size; ++i) {
+                INFO("filter_bits=" << filter_bits << ", vector=" << begin + i << ", scalar="
+                                    << scalar_dists[i] << ", fastscan=" << fastscan_dists[i]);
+                REQUIRE(computed[i]);
+                REQUIRE(std::abs(scalar_dists[i] - fastscan_dists[i]) <= 0.02F);
             }
         }
     }

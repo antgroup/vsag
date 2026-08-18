@@ -511,3 +511,86 @@ TEST_CASE("IVF maps fast RaBitQ to base and precise quantizers", "[ut][IVFParame
     REQUIRE_FALSE(precise_json["quantization_params"]["fast_encode_rabitq"].GetBool());
     REQUIRE(precise_json["quantization_params"]["fast_encode_rabitq_rounds"].GetInt() == 10);
 }
+
+TEST_CASE("IVF maps RaBitQ split storage parameters", "[ut][IVFParameter][rabitq_split]") {
+    auto external_param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "base_io_type": "block_memory_io",
+        "base_supplement_io_type": "async_io",
+        "base_file_path": "/tmp/ivf_rabitq_split",
+        "rabitq_bits_per_dim_query": 32,
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "use_reorder": true,
+        "buckets_count": 16,
+        "ivf_train_type": "random",
+        "train_sample_count": 512
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 64;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::IVF::CheckAndMappingExternalParam(external_param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::IVFParameter>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->use_reorder);
+    REQUIRE(typed_param->bucket_param->supplement_io_parameter != nullptr);
+    REQUIRE(typed_param->bucket_param->supplement_io_parameter->GetTypeName() == "async_io");
+    auto rabitq_param = std::dynamic_pointer_cast<vsag::RaBitQuantizerParameter>(
+        typed_param->bucket_param->quantizer_parameter);
+    REQUIRE(rabitq_param != nullptr);
+    REQUIRE(rabitq_param->rabitq_version_ == vsag::RaBitQuantizerParameter::RABITQ_VERSION_SPLIT);
+    REQUIRE(rabitq_param->num_bits_per_dim_query_ == 32);
+    REQUIRE(rabitq_param->num_bits_per_dim_filter_ == 3);
+    REQUIRE(rabitq_param->num_bits_per_dim_base_ == 8);
+}
+
+TEST_CASE("IVF rejects invalid RaBitQ split storage parameters",
+          "[ut][IVFParameter][rabitq_split]") {
+    const auto make_valid_param = []() {
+        return vsag::JsonType::Parse(R"({
+            "base_quantization_type": "rabitq",
+            "precise_quantization_type": "rabitq",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 3,
+            "rabitq_bits_per_dim_precise": 5,
+            "use_reorder": true
+        })");
+    };
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 64;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    SECTION("requires reorder") {
+        auto param = make_valid_param();
+        param["use_reorder"].SetBool(false);
+        REQUIRE_THROWS(vsag::IVF::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("requires RaBitQ precise quantization") {
+        auto param = make_valid_param();
+        param["precise_quantization_type"].SetString("fp32");
+        REQUIRE_THROWS(vsag::IVF::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("limits total stored bits") {
+        auto param = make_valid_param();
+        param["rabitq_bits_per_dim_base"].SetInt(4);
+        REQUIRE_THROWS(vsag::IVF::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("requires a 32-bit query") {
+        auto param = make_valid_param();
+        param["rabitq_bits_per_dim_query"].SetInt(4);
+        REQUIRE_THROWS(vsag::IVF::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("rejects multi-assignment") {
+        auto param = make_valid_param();
+        param["buckets_per_data"].SetInt(2);
+        REQUIRE_THROWS(vsag::IVF::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("rejects bucket graphs") {
+        auto param = make_valid_param();
+        param["graph_build_threshold"].SetInt(10);
+        REQUIRE_THROWS(vsag::IVF::CheckAndMappingExternalParam(param, common_param));
+    }
+}

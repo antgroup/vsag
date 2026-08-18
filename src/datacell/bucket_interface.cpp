@@ -18,6 +18,8 @@
 #include "bucket_interface_factory_impl.h"
 #include "inner_string_params.h"
 #include "io/io_headers.h"
+#include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
+#include "rabitq_split_bucket_datacell.h"
 
 namespace vsag {
 
@@ -26,6 +28,12 @@ BucketInterface::MakeInstance(const BucketDataCellParamPtr& param,
                               const IndexCommonParam& common_param) {
     if (!param || !param->io_parameter || !param->quantizer_parameter) {
         return nullptr;
+    }
+    if (const auto rabitq_param =
+            std::dynamic_pointer_cast<RaBitQuantizerParameter>(param->quantizer_parameter);
+        rabitq_param != nullptr and
+        RaBitQuantizerParameter::IsSplitVersion(rabitq_param->rabitq_version_)) {
+        return std::make_shared<RaBitQSplitBucketDataCell>(param, common_param);
     }
     auto io_type_name = param->io_parameter->GetTypeName();
     if (io_type_name == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
