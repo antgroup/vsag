@@ -1325,8 +1325,7 @@ RaBitQuantizer<metric>::PrepareFastScan32Query(Computer<RaBitQuantizer>& compute
                                                uint8_t* lookup_table,
                                                float* deltas,
                                                float* sum_vls,
-                                               float& query_sum,
-                                               float* exact_lookup_table) const {
+                                               float& query_sum) const {
     CHECK_ARGUMENT(SupportFastScan32(), "RaBitQ 32-vector FastScan is not supported");
 
     const auto* query = reinterpret_cast<const float*>(computer.buf_);
@@ -1361,10 +1360,6 @@ RaBitQuantizer<metric>::PrepareFastScan32Query(Computer<RaBitQuantizer>& compute
             }
             float_lut[group * 16 + mask] = value;
         }
-    }
-
-    if (exact_lookup_table != nullptr) {
-        std::copy(float_lut.begin(), float_lut.end(), exact_lookup_table);
     }
 
     std::fill(deltas, deltas + FASTSCAN_MAX_FILTER_BITS, 0.0F);
@@ -1407,8 +1402,7 @@ RaBitQuantizer<metric>::ComputeDistsWithFastScan32(Computer<RaBitQuantizer>& com
                                                    uint64_t valid_size,
                                                    float runtime_rabitq_error_rate,
                                                    float* lower_bounds,
-                                                   float* filter_inner_products,
-                                                   const float* exact_lookup_table) const {
+                                                   float* filter_inner_products) const {
     CHECK_ARGUMENT(valid_size <= FASTSCAN_BATCH_SIZE, "invalid FastScan batch size");
     float lookup_sums[FASTSCAN_BATCH_SIZE] = {};
     if (FilterBits() == 3) {
@@ -1432,12 +1426,6 @@ RaBitQuantizer<metric>::ComputeDistsWithFastScan32(Computer<RaBitQuantizer>& com
         for (uint64_t i = 0; i < valid_size; ++i) {
             lookup_sums[i] = deltas[0] * static_cast<float>(accumulators[i]) + sum_vls[0];
         }
-    }
-
-    float exact_lookup_sums[FASTSCAN_BATCH_SIZE] = {};
-    if (exact_lookup_table != nullptr) {
-        PQFastScanLookUp32Float(
-            exact_lookup_table, block, FilterPlanesSize() * 2, exact_lookup_sums);
     }
 
     const auto* query = computer.buf_;
@@ -1515,14 +1503,12 @@ RaBitQuantizer<metric>::ComputeDistsWithFastScan32(Computer<RaBitQuantizer>& com
             dists[i] = result;
             computed[i] = true;
             if (filter_inner_products != nullptr) {
-                const float inner_product_sum =
-                    exact_lookup_table == nullptr ? lookup_sum : exact_lookup_sums[i];
                 if (FilterBits() == 1) {
-                    filter_inner_products[i] = inner_product_sum;
+                    filter_inner_products[i] = lookup_sum;
                 } else {
                     const float filter_center =
                         0.5F * static_cast<float>((1U << FilterBits()) - 1U);
-                    filter_inner_products[i] = inner_product_sum + filter_center * query_sum;
+                    filter_inner_products[i] = lookup_sum + filter_center * query_sum;
                 }
             }
             if (lower_bounds != nullptr) {

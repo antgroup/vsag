@@ -247,8 +247,7 @@ public:
                            uint8_t* lookup_table,
                            float* deltas,
                            float* sum_vls,
-                           float& query_sum,
-                           float* exact_lookup_table = nullptr) const;
+                           float& query_sum) const;
 
     void
     ComputeDistsWithFastScan32(
@@ -263,8 +262,7 @@ public:
         uint64_t valid_size,
         float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN(),
         float* lower_bounds = nullptr,
-        float* filter_inner_products = nullptr,
-        const float* exact_lookup_table = nullptr) const;
+        float* filter_inner_products = nullptr) const;
 
     bool
     ComputeDistWithOneBitLowerBound(

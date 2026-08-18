@@ -3443,7 +3443,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
         const auto exact_distance =
             index.value()->CalcDistanceById(query->GetFloat32Vectors(), id, true);
         REQUIRE(exact_distance.has_value());
-        REQUIRE(std::abs(heap_result.value()->GetDistances()[i] - exact_distance.value()) < 1e-5F);
+        // The heap result reuses the byte-LUT-quantized x-bit inner product from the
+        // lower-bound scan and only adds the y-bit supplement. It should stay close to the
+        // canonical x+y RaBitQ distance without requiring a second float-LUT x-bit scan.
+        REQUIRE(std::abs(heap_result.value()->GetDistances()[i] - exact_distance.value()) < 0.02F);
     }
 
     auto heap_statistics = vsag::JsonType::Parse(heap_result.value()->GetStatistics());

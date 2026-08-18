@@ -19,21 +19,4 @@
 namespace vsag {
 
 VSAG_DEFINE_SIMD_DISPATCH(PQFastScanLookUp32, PQFastScanLookUp32Type);
-
-static PQFastScanLookUp32FloatType
-GetPQFastScanLookUp32Float() {
-    if (SimdStatus::SupportAVX512()) {
-#if defined(ENABLE_AVX512)
-        return avx512::PQFastScanLookUp32Float;
-#endif
-    }
-    if (SimdStatus::SupportAVX2()) {
-#if defined(ENABLE_AVX2)
-        return avx2::PQFastScanLookUp32Float;
-#endif
-    }
-    return generic::PQFastScanLookUp32Float;
-}
-
-PQFastScanLookUp32FloatType PQFastScanLookUp32Float = GetPQFastScanLookUp32Float();
 }  // namespace vsag

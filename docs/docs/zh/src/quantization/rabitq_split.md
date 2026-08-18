@@ -82,7 +82,7 @@ IVF 桶扫描会自动使用配置的 `x` 个 filter bits，不需要
 `rabitq_search_strategy: "candidate_reorder"` 通过 `ivf.factor` 控制进入
 supplement 重排的过滤阶段候选数（`factor * topk`）。
 
-IVF 还提供可选的精确距离堆策略：
+IVF 还提供可选的 lower-bound heap 策略：
 
 ```json
 {
@@ -94,13 +94,14 @@ IVF 还提供可选的精确距离堆策略：
 }
 ```
 
-该策略只支持 KNN，结果堆始终保存完整的 `x+y` 距离。仅当 x-bit lower
-bound 严格小于当前堆顶时，才读取 `y`-bit supplement；该策略不使用
+该策略只支持 KNN，结果堆始终保存完整的 `x+y` RaBitQ 距离估计。仅当 x-bit
+lower bound 严格小于当前堆顶时，才读取 `y`-bit supplement；该策略不使用
 `factor`。它要求 split storage、`use_reorder: true`，且本次搜索的
 `enable_reorder: true`。
-堆内元素是精确的 `x+y` RaBitQ 距离，但 lower bound 仍是由
-`rabitq_error_rate` 控制的概率界；更激进的剪枝可能以召回为代价减少
-supplement 读取。
+堆内元素复用 byte-LUT 量化后的 x-bit 内积，再加上 y-bit supplement
+贡献。因此 x-bit lower bound 和最终 `x+y` 估计共享同一个 LUT 量化误差。
+RaBitQ 误差项仍由 `rabitq_error_rate` 控制；更激进的剪枝可能以召回为代价
+减少 supplement 读取。
 
 ## 搜索流程
 
@@ -113,17 +114,17 @@ split 搜索分为四个阶段：
    保守的 lower bound。
 3. HGraph 可以丢弃 lower bound 不可能进入结果集的候选。IVF 可以按 filter
    distance 保留 `factor * topk` 个候选（默认策略），也可以让每个 lower
-   bound 与精确距离堆比较（可选的 `heap` 策略）。
+   bound 与 `x+y` 估计堆比较（可选的 `heap` 策略）。
 4. 最终距离把 filter contribution 与 supplement contribution 合成为
-   `x+y`-bit RaBitQ 估计。heap 搜索在计算 lower bound 时直接保存 x-bit
-   原始内积 `S_x`；精算只读取 y-bit record，不再从 filter distance 反推
-   内积。
+   `x+y`-bit RaBitQ 估计。heap 搜索在计算 lower bound 时直接保存 byte-LUT
+   量化后的 x-bit 内积 `S_x`；最终计算只读取 y-bit record，不再从 filter
+   distance 反推内积。
 
 IVF 的两种策略都使用桶级 32-vector FastScan 布局。heap 模式的一次 packed
-block 扫描会为每个 lane 同时输出 x-bit 估计、lower bound 和原始 x-bit 内积
-`S_x`。byte LUT 的 SIMD 结果用于估计和 lower bound；同一批 nibbles 还通过
-float-LUT SIMD 累加保存未量化的 `S_x`。因此 heap 路径不会重新读取 canonical
-x-bit record，候选通过 lower bound 后只读取对应的 y-bit supplement。
+block byte-LUT 扫描会为每个 lane 同时输出 x-bit 估计、lower bound 和反量化后
+的量化 x-bit 内积 `S_x`。最终距离使用 `2^y * S_x + S_y`，只有 `S_y` 需要
+读取 y-bit supplement。该路径不再执行配套的 float-LUT 扫描，也不会重新读取
+canonical x-bit record。
 
 因此，图搜索或 IVF 桶扫描不会为每个访问到的向量都计算 `x+y` 距离并放入
 搜索堆。过滤阶段由
@@ -305,10 +306,9 @@ norm。随后所有路径都使用 RaBitQ norm 和 error 元数据恢复过滤�
 
 packed filter planes 后紧跟 32 个候选的元数据。桶尾不足 32 条的 block 用零码
 补齐，扫描器只返回有效候选。运行时会分派到 generic、SSE、AVX2 或 AVX-512
-实现。LUT 标量量化只影响 IVF 过滤估计和 lower bound。heap 搜索还会通过
-generic、AVX2 或 AVX-512 的 float LUT 累加保存未量化的 `S_x`，最终距离只需
-把它与保存的 y-bit supplement 合并。更宽的 filter 继续使用 bit-plane batch
-路径。
+实现。heap 搜索会把 byte-LUT 反量化结果保存为 `S_x` 并在最终 `x+y` 估计中
+复用，因此过滤与重排共享同一个 LUT 量化误差。更宽的 filter 继续使用
+bit-plane batch 路径。
 
 配置示例：
 
@@ -364,19 +364,19 @@ top-10，共计时 5,000 次查询。split 搜索结果启用了上述 32-vector
 
 | 布局 | 策略 | 搜索 QPS | 平均延迟（ms） | Recall | 每查询 supplement 精算 |
 | --- | --- | ---: | ---: | ---: | ---: |
-| 1+7 | Candidate reorder | 100.945 | 9.903 | 0.8997 | 100.0 |
-| 1+7 | 精确距离 heap | 53.576 | 18.662 | 0.9160 | 792.4 |
-| 2+6 | Candidate reorder | 74.850 | 13.357 | 0.9128 | 100.0 |
-| 2+6 | 精确距离 heap | 39.148 | 25.541 | 0.9231 | 421.4 |
-| 3+5 | Candidate reorder | 66.640 | 15.003 | 0.9094 | 100.0 |
-| 3+5 | 精确距离 heap | 32.935 | 30.359 | 0.9151 | 199.5 |
+| 1+7 | Candidate reorder | 101.009 | 9.896 | 0.8997 | 100.0 |
+| 1+7 | 共用量化内积 heap | 66.826 | 14.961 | 0.9047 | 791.3 |
+| 2+6 | Candidate reorder | 75.641 | 13.217 | 0.9128 | 100.0 |
+| 2+6 | 共用量化内积 heap | 57.108 | 17.508 | 0.9145 | 421.2 |
+| 3+5 | Candidate reorder | 67.481 | 14.816 | 0.9094 | 100.0 |
+| 3+5 | 共用量化内积 heap | 53.983 | 18.521 | 0.9099 | 199.4 |
 
-heap 的所有 supplement 精算都直接使用已保存的 x-bit 内积，没有从距离 hint
-反推或发生 fallback。与相同配置下之前 canonical 逐向量 heap 扫描相比，packed
-SIMD heap 的 1+7、2+6 和 3+5 QPS 分别提升 44.3%、43.0% 和 38.5%，召回没有
-下降。在该内存负载中，概率 lower bound 提高了召回，但通过的候选多于固定
-`factor * topk` 池，因此 heap 策略仍以吞吐换召回。当 supplement I/O 成本较高，
-或目标召回需要很大的固定候选池时，该策略可能更有优势。
+heap 的所有 supplement 精算都直接使用已保存的量化 x-bit 内积，没有从距离
+hint 反推或发生 fallback。移除对所有扫描候选执行的 float-LUT 后，1+7、2+6
+和 3+5 heap QPS 相比原实现分别提升 24.7%、45.9% 和 63.9%。共享 LUT 量化
+误差会改变堆排序，召回也从原 float-LUT heap 的 0.9160、0.9231 和 0.9151
+下降到表中结果。在该内存负载中，heap 读取的 supplement 仍多于固定的
+`factor * topk` 池，因此仍慢于 candidate reorder，但吞吐差距已经明显缩小。
 
 ## Query lookup table 和 SIMD
 
@@ -495,7 +495,7 @@ x/y bit 数和 query bits。修改编码参数需要重建索引；只调整搜�
 | filter 距离和 lower bound | `ComputeDistWithOneBitLowerBound` |
 | 直接计算 split distance | `ComputeDistWithSplitCode` |
 | 使用 filter distance hint 的 reorder | `ComputeDistWithSplitCodeAndFilterDist` |
-| 使用已保存 x-bit 内积的 heap 精算 | `ComputeDistWithSplitCodeAndFilterInnerProduct` |
+| heap 复用量化 x-bit 内积 | `ComputeDistWithSplitCodeAndFilterInnerProduct` |
 | SIMD dispatch | `src/simd/rabitq_simd.cpp` |
 | AVX2 / AVX512 lookup kernel | `src/simd/avx2.cpp`、`src/simd/avx512.cpp` |
 | 内存/磁盘/混合 IO 示例 | `examples/cpp/323_index_hgraph_rabitq_split.cpp` |
@@ -507,7 +507,7 @@ x/y bit 数和 query bits。修改编码参数需要重建索引；只调整搜�
   搜索路径，
   可以在 `pyramid` 搜索参数下传 `rabitq_one_bit_search: false`。
 - 支持 `l2`、`ip` 和 `cosine`；IVF heap 搜索对三种 metric 都直接复用
-  已保存的 x-bit 内积。
+  已保存的量化 x-bit 内积。
 - 除非已经验证仅靠 x-bit 遍历距离能满足召回要求，否则应保持
   `use_reorder: true`。
 - 修改 x、y、metric 或 transform 参数后必须重建索引；在搜索参数中覆盖
