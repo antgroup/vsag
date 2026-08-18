@@ -61,6 +61,7 @@ public:
     bool disable_bucket_scan{false};
     float factor{2.0F};
     bool enable_reorder{true};
+    bool use_rabitq_heap_search{false};
     float first_order_scan_ratio{1.0F};
     std::optional<float> distance_threshold{std::nullopt};
     std::vector<ExecutorPtr> executors;

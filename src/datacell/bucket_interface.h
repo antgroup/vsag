@@ -44,6 +44,17 @@ public:
                    const BucketIdType& bucket_id,
                    QueryContext* ctx = nullptr) = 0;
 
+    virtual void
+    ScanBucketWithDistanceLowerBound(float* result_dists,
+                                     float* lower_bounds,
+                                     float* filter_inner_products,
+                                     const ComputerInterfacePtr& computer,
+                                     const BucketIdType& bucket_id,
+                                     QueryContext* ctx = nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "bucket lower-bound scan is not supported");
+    }
+
     virtual float
     QueryOneById(const ComputerInterfacePtr& computer,
                  const BucketIdType& bucket_id,
@@ -52,6 +63,17 @@ public:
     [[nodiscard]] virtual bool
     SupportSplitCodeStorage() const {
         return false;
+    }
+
+    virtual void
+    QueryWithFilterInnerProductByInnerId(float* result_dists,
+                                         const float* filter_inner_products,
+                                         const ComputerInterfacePtr& computer,
+                                         const InnerIdType* inner_ids,
+                                         InnerIdType id_count,
+                                         QueryContext* ctx = nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "bucket filter-inner-product query is not supported");
     }
 
     virtual void

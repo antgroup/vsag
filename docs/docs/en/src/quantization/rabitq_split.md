@@ -80,8 +80,30 @@ be swept without rebuilding because the stored record contains the geometric
 error scale before this multiplier is applied.
 
 IVF bucket scans use the configured `x` filter bits automatically; no
-`rabitq_one_bit_search` switch is needed. Use `ivf.factor` to control how many
-filter-stage candidates (`factor * topk`) proceed to supplement reranking.
+`rabitq_one_bit_search` switch is needed. The default
+`rabitq_search_strategy: "candidate_reorder"` uses `ivf.factor` to control
+how many filter-stage candidates (`factor * topk`) proceed to supplement
+reranking.
+
+IVF also provides an opt-in exact-distance heap strategy:
+
+```json
+{
+    "ivf": {
+        "scan_buckets_count": 32,
+        "rabitq_search_strategy": "heap",
+        "parallelism": 4
+    }
+}
+```
+
+This KNN-only strategy keeps full `x+y` distances in the result heap. It reads
+the `y`-bit supplement only when an x-bit lower bound is strictly smaller than
+the current heap maximum. `factor` is not used by this strategy. It requires
+split storage, `use_reorder: true`, and search-time `enable_reorder: true`.
+The heap entries are exact `x+y` RaBitQ distances, while the lower bound remains
+the probabilistic RaBitQ bound controlled by `rabitq_error_rate`; more aggressive
+pruning can therefore trade recall for fewer supplement reads.
 
 ## Search pipeline
 
@@ -92,11 +114,23 @@ The split search path has four stages:
 2. Graph traversal or IVF bucket scanning reads only the filter record. It computes
    an x-bit distance
    estimate and a conservative lower bound for each visited vector.
-3. HGraph can discard candidates whose lower bound cannot enter the result set;
-   IVF retains `factor * topk` candidates by filter distance. Reorder fetches the
-   y-bit supplement record only for the remaining candidates.
+3. HGraph can discard candidates whose lower bound cannot enter the result set.
+   IVF either retains `factor * topk` candidates by filter distance (the default)
+   or compares each lower bound with an exact-distance heap (the opt-in `heap`
+   strategy).
 4. The final distance combines the filter contribution and supplement
-   contribution into one `x+y`-bit RaBitQ estimate.
+   contribution into one `x+y`-bit RaBitQ estimate. Heap search saves the raw
+   x-bit inner product `S_x` while computing the lower bound, so the exact
+   calculation reads only the y-bit record and does not reconstruct the inner
+   product from the filter distance.
+
+Both IVF strategies use the bucket-local 32-vector FastScan layout. In heap
+mode, one packed-block scan emits the x-bit estimate, lower bound, and raw x-bit
+inner product `S_x` for every lane. The byte LUT drives the SIMD estimate and
+lower bound, while a companion float-LUT SIMD accumulation preserves an
+unquantized `S_x` from the same packed nibbles. The heap path therefore does not
+reread canonical x-bit records; an admitted candidate reads only its y-bit
+supplement.
 
 The traversal or bucket-scan heap is therefore not populated with an `x+y`
 distance for every
@@ -287,8 +321,10 @@ distance.
 The packed filter planes are followed by the metadata for all 32 candidates.
 A final bucket block with fewer than 32 vectors is zero-padded, while the
 scanner returns only valid candidates. Runtime dispatch selects generic, SSE,
-AVX2, or AVX-512 code. LUT quantization changes only the IVF filter estimate;
-supplement reranking still uses the stored `x+y` code. Wider filter widths
+AVX2, or AVX-512 code. LUT quantization changes only the IVF filter estimate and
+lower bound. Heap search additionally accumulates the float LUT with generic,
+AVX2, or AVX-512 dispatch to save an unquantized `S_x`; the final distance then
+combines that value with only the stored y-bit supplement. Wider filter widths
 continue to use the bit-plane batch paths.
 
 Example configurations are:
@@ -340,6 +376,33 @@ filter scan avoids reading the full 8-bit code for every candidate. On this
 workload, 2+6 provides the closest recall to traditional 8-bit RaBitQ while
 improving search throughput by about 4.2 times; 1+7 maximizes throughput with
 a larger recall trade-off.
+
+### Search strategy comparison
+
+The same in-memory split indexes were also searched with the default
+`candidate_reorder` strategy (`factor = 10`) and the opt-in `heap` strategy.
+The table reports 1,000 measured single-thread queries with the other settings
+unchanged. "Supplement probes" is the average number of y-bit records read per
+query.
+
+| Layout | Strategy | Search QPS | Avg latency (ms) | Recall | Supplement probes/query |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 1+7 | Candidate reorder | 100.945 | 9.903 | 0.8997 | 100.0 |
+| 1+7 | Exact-distance heap | 53.576 | 18.662 | 0.9160 | 792.4 |
+| 2+6 | Candidate reorder | 74.850 | 13.357 | 0.9128 | 100.0 |
+| 2+6 | Exact-distance heap | 39.148 | 25.541 | 0.9231 | 421.4 |
+| 3+5 | Candidate reorder | 66.640 | 15.003 | 0.9094 | 100.0 |
+| 3+5 | Exact-distance heap | 32.935 | 30.359 | 0.9151 | 199.5 |
+
+All heap supplement probes used the saved x-bit inner product directly; none
+fell back to reconstructing it from a distance hint. Compared with the previous
+canonical per-vector heap scan on the same setup, the packed SIMD heap improved
+QPS by 44.3%, 43.0%, and 38.5% for 1+7, 2+6, and 3+5 respectively, without
+reducing recall. On this in-memory workload, the probabilistic lower bound
+raised recall but admitted more than the fixed `factor * topk` pool, so heap
+search still traded throughput for recall. It can be more attractive when
+supplement I/O cost or the desired recall point makes a fixed candidate pool
+expensive.
 
 ## Query lookup table and SIMD
 
@@ -466,7 +529,8 @@ search-time `hgraph.rabitq_error_rate` does not.
 | Plane layout and code splitting | `RaBitQuantizer::StoredPlaneIndex`, `SplitCode` |
 | Filter estimate and lower bound | `ComputeDistWithOneBitLowerBound` |
 | Direct split distance | `ComputeDistWithSplitCode` |
-| Reorder using the filter hint | `ComputeDistWithSplitCodeAndFilterDist` |
+| Reorder using the filter-distance hint | `ComputeDistWithSplitCodeAndFilterDist` |
+| Heap exact distance using saved x-bit inner product | `ComputeDistWithSplitCodeAndFilterInnerProduct` |
 | SIMD dispatch | `src/simd/rabitq_simd.cpp` |
 | AVX2 / AVX512 lookup kernels | `src/simd/avx2.cpp`, `src/simd/avx512.cpp` |
 | Runnable memory/disk/hybrid example | `examples/cpp/323_index_hgraph_rabitq_split.cpp` |
@@ -477,8 +541,8 @@ search-time `hgraph.rabitq_error_rate` does not.
   fp32 query codes. Pyramid enables the one-bit split search path by default for
   split indexes; pass `rabitq_one_bit_search: false` under `pyramid` to force the
   standard search path.
-- `l2`, `ip`, and `cosine` are supported. The filter-hint reorder shortcut is
-  currently specialized for L2.
+- `l2`, `ip`, and `cosine` are supported. IVF heap search uses the saved
+  x-bit inner product for all three metrics.
 - Keep `use_reorder: true` unless x-bit traversal accuracy alone has been
   validated for the dataset.
 - Changing x, y, metric, or transform parameters requires rebuilding the

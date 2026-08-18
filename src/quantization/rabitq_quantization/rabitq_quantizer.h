@@ -247,7 +247,8 @@ public:
                            uint8_t* lookup_table,
                            float* deltas,
                            float* sum_vls,
-                           float& query_sum) const;
+                           float& query_sum,
+                           float* exact_lookup_table = nullptr) const;
 
     void
     ComputeDistsWithFastScan32(
@@ -260,7 +261,10 @@ public:
         float* dists,
         bool* computed,
         uint64_t valid_size,
-        float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN()) const;
+        float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN(),
+        float* lower_bounds = nullptr,
+        float* filter_inner_products = nullptr,
+        const float* exact_lookup_table = nullptr) const;
 
     bool
     ComputeDistWithOneBitLowerBound(
@@ -268,7 +272,8 @@ public:
         const uint8_t* one_bit_code,
         float* dists,
         float* lower_bound,
-        float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN()) const;
+        float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN(),
+        float* filter_inner_product = nullptr) const;
 
     void
     ComputeDistsWithOneBitLowerBoundBatch4(
@@ -296,6 +301,14 @@ public:
                              const uint8_t* one_bit_code,
                              const uint8_t* supplement_code,
                              float* dists) const;
+
+    // Computes the full x+y split distance from the raw x-bit inner product emitted by
+    // ComputeDistWithOneBitLowerBound(). Only the y-bit supplement record is required.
+    bool
+    ComputeDistWithSplitCodeAndFilterInnerProduct(Computer<RaBitQuantizer>& computer,
+                                                  const uint8_t* supplement_code,
+                                                  float filter_inner_product,
+                                                  float* dists) const;
 
     // Computes the full x+y split distance while reusing the filter-stage distance.
     // `filter_dist` is the x-bit distance already produced by

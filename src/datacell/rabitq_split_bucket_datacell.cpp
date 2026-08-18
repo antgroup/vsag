@@ -229,6 +229,122 @@ RaBitQSplitBucketDataCell::ScanBucketById(float* result_dists,
     }
 }
 
+void
+RaBitQSplitBucketDataCell::ScanBucketWithDistanceLowerBound(float* result_dists,
+                                                            float* lower_bounds,
+                                                            float* filter_inner_products,
+                                                            const ComputerInterfacePtr& computer,
+                                                            const BucketIdType& bucket_id,
+                                                            QueryContext* ctx) {
+    this->check_valid_bucket_id(bucket_id);
+    std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
+    const auto bucket_size = static_cast<InnerIdType>(this->inner_ids_[bucket_id].size());
+    const auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
+    const uint64_t block_count =
+        (static_cast<uint64_t>(bucket_size) + FASTSCAN_BATCH_SIZE - 1) / FASTSCAN_BATCH_SIZE;
+    if (bucket_computer.fastscan_ != nullptr and this->fastscan_block_size_ > 0 and
+        this->fastscan_blocks_[bucket_id].size() == block_count * this->fastscan_block_size_) {
+        Vector<InnerIdType> fallback_ids(this->allocator_);
+        Vector<InnerIdType> fallback_positions(this->allocator_);
+        fallback_ids.reserve(bucket_size);
+        fallback_positions.reserve(bucket_size);
+        bool computed[FASTSCAN_BATCH_SIZE] = {};
+        for (uint64_t block_index = 0; block_index < block_count; ++block_index) {
+            const auto begin = static_cast<InnerIdType>(block_index * FASTSCAN_BATCH_SIZE);
+            const InnerIdType valid_size =
+                std::min<InnerIdType>(FASTSCAN_BATCH_SIZE, bucket_size - begin);
+            this->codes_->QueryFastScan32WithDistanceLowerBoundAndFilterInnerProduct(
+                result_dists + begin,
+                lower_bounds + begin,
+                filter_inner_products + begin,
+                computed,
+                bucket_computer.inner_,
+                bucket_computer.fastscan_,
+                this->fastscan_blocks_[bucket_id].data() + block_index * this->fastscan_block_size_,
+                valid_size,
+                ctx);
+            for (InnerIdType i = 0; i < valid_size; ++i) {
+                const InnerIdType offset = begin + i;
+                const auto inner_id = this->inner_ids_[bucket_id][offset];
+                if (inner_id == EMPTY_INNER_ID) {
+                    result_dists[offset] = std::numeric_limits<float>::max();
+                    lower_bounds[offset] = std::numeric_limits<float>::max();
+                    filter_inner_products[offset] = std::numeric_limits<float>::quiet_NaN();
+                } else if (computed[i]) {
+                    const float adjustment =
+                        this->residual_adjustment(bucket_computer, bucket_id, offset);
+                    result_dists[offset] -= adjustment;
+                    lower_bounds[offset] -= adjustment;
+                } else {
+                    fallback_ids.push_back(inner_id);
+                    fallback_positions.push_back(offset);
+                }
+            }
+        }
+
+        if (not fallback_ids.empty()) {
+            Vector<float> fallback_dists(fallback_ids.size(), this->allocator_);
+            Vector<float> fallback_lower_bounds(fallback_ids.size(), this->allocator_);
+            Vector<float> fallback_filter_inner_products(fallback_ids.size(), this->allocator_);
+            this->codes_->QueryWithDistanceLowerBoundAndFilterInnerProduct(
+                fallback_dists.data(),
+                fallback_lower_bounds.data(),
+                fallback_filter_inner_products.data(),
+                bucket_computer.inner_,
+                fallback_ids.data(),
+                static_cast<InnerIdType>(fallback_ids.size()),
+                ctx);
+            for (uint64_t i = 0; i < fallback_ids.size(); ++i) {
+                const auto offset = fallback_positions[i];
+                const float adjustment =
+                    this->residual_adjustment(bucket_computer, bucket_id, offset);
+                result_dists[offset] = fallback_dists[i] - adjustment;
+                lower_bounds[offset] = fallback_lower_bounds[i] - adjustment;
+                filter_inner_products[offset] = fallback_filter_inner_products[i];
+            }
+        }
+        return;
+    }
+
+    Vector<InnerIdType> ids(this->allocator_);
+    Vector<InnerIdType> positions(this->allocator_);
+    ids.reserve(bucket_size);
+    positions.reserve(bucket_size);
+    for (InnerIdType offset = 0; offset < bucket_size; ++offset) {
+        const auto inner_id = this->inner_ids_[bucket_id][offset];
+        if (inner_id == EMPTY_INNER_ID) {
+            result_dists[offset] = std::numeric_limits<float>::max();
+            lower_bounds[offset] = std::numeric_limits<float>::max();
+            filter_inner_products[offset] = std::numeric_limits<float>::quiet_NaN();
+            continue;
+        }
+        ids.push_back(inner_id);
+        positions.push_back(offset);
+    }
+    if (ids.empty()) {
+        return;
+    }
+
+    Vector<float> compact_dists(ids.size(), this->allocator_);
+    Vector<float> compact_lower_bounds(ids.size(), this->allocator_);
+    Vector<float> compact_filter_inner_products(ids.size(), this->allocator_);
+    this->codes_->QueryWithDistanceLowerBoundAndFilterInnerProduct(
+        compact_dists.data(),
+        compact_lower_bounds.data(),
+        compact_filter_inner_products.data(),
+        bucket_computer.inner_,
+        ids.data(),
+        static_cast<InnerIdType>(ids.size()),
+        ctx);
+    for (uint64_t i = 0; i < ids.size(); ++i) {
+        const auto offset = positions[i];
+        const float adjustment = this->residual_adjustment(bucket_computer, bucket_id, offset);
+        result_dists[offset] = compact_dists[i] - adjustment;
+        lower_bounds[offset] = compact_lower_bounds[i] - adjustment;
+        filter_inner_products[offset] = compact_filter_inner_products[i];
+    }
+}
+
 float
 RaBitQSplitBucketDataCell::QueryOneById(const ComputerInterfacePtr& computer,
                                         const BucketIdType& bucket_id,
@@ -248,6 +364,28 @@ RaBitQSplitBucketDataCell::QueryOneById(const ComputerInterfacePtr& computer,
     return distance -
            this->residual_adjustment(
                RaBitQSplitBucketDataCell::get_bucket_computer(computer), bucket_id, offset_id);
+}
+
+void
+RaBitQSplitBucketDataCell::QueryWithFilterInnerProductByInnerId(
+    float* result_dists,
+    const float* filter_inner_products,
+    const ComputerInterfacePtr& computer,
+    const InnerIdType* inner_ids,
+    InnerIdType id_count,
+    QueryContext* ctx) {
+    Vector<float> adjustments(id_count, 0.0F, this->allocator_);
+    const auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
+    for (InnerIdType i = 0; i < id_count; ++i) {
+        const auto [bucket_id, offset_id] = this->get_location(inner_ids[i]);
+        std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
+        adjustments[i] = this->residual_adjustment(bucket_computer, bucket_id, offset_id);
+    }
+    this->codes_->QueryWithFilterInnerProduct(
+        result_dists, filter_inner_products, bucket_computer.inner_, inner_ids, id_count, ctx);
+    for (InnerIdType i = 0; i < id_count; ++i) {
+        result_dists[i] -= adjustments[i];
+    }
 }
 
 void

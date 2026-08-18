@@ -1325,7 +1325,8 @@ RaBitQuantizer<metric>::PrepareFastScan32Query(Computer<RaBitQuantizer>& compute
                                                uint8_t* lookup_table,
                                                float* deltas,
                                                float* sum_vls,
-                                               float& query_sum) const {
+                                               float& query_sum,
+                                               float* exact_lookup_table) const {
     CHECK_ARGUMENT(SupportFastScan32(), "RaBitQ 32-vector FastScan is not supported");
 
     const auto* query = reinterpret_cast<const float*>(computer.buf_);
@@ -1360,6 +1361,10 @@ RaBitQuantizer<metric>::PrepareFastScan32Query(Computer<RaBitQuantizer>& compute
             }
             float_lut[group * 16 + mask] = value;
         }
+    }
+
+    if (exact_lookup_table != nullptr) {
+        std::copy(float_lut.begin(), float_lut.end(), exact_lookup_table);
     }
 
     std::fill(deltas, deltas + FASTSCAN_MAX_FILTER_BITS, 0.0F);
@@ -1400,7 +1405,10 @@ RaBitQuantizer<metric>::ComputeDistsWithFastScan32(Computer<RaBitQuantizer>& com
                                                    float* dists,
                                                    bool* computed,
                                                    uint64_t valid_size,
-                                                   float /*runtime_rabitq_error_rate*/) const {
+                                                   float runtime_rabitq_error_rate,
+                                                   float* lower_bounds,
+                                                   float* filter_inner_products,
+                                                   const float* exact_lookup_table) const {
     CHECK_ARGUMENT(valid_size <= FASTSCAN_BATCH_SIZE, "invalid FastScan batch size");
     float lookup_sums[FASTSCAN_BATCH_SIZE] = {};
     if (FilterBits() == 3) {
@@ -1426,6 +1434,12 @@ RaBitQuantizer<metric>::ComputeDistsWithFastScan32(Computer<RaBitQuantizer>& com
         }
     }
 
+    float exact_lookup_sums[FASTSCAN_BATCH_SIZE] = {};
+    if (exact_lookup_table != nullptr) {
+        PQFastScanLookUp32Float(
+            exact_lookup_table, block, FilterPlanesSize() * 2, exact_lookup_sums);
+    }
+
     const auto* query = computer.buf_;
     const norm_type query_norm = *((norm_type*)(query + query_offset_norm_));
     norm_type query_raw_norm = 0.0F;
@@ -1444,6 +1458,12 @@ RaBitQuantizer<metric>::ComputeDistsWithFastScan32(Computer<RaBitQuantizer>& com
     for (uint64_t i = 0; i < valid_size; ++i) {
         computed[i] = false;
         dists[i] = std::numeric_limits<float>::max();
+        if (lower_bounds != nullptr) {
+            lower_bounds[i] = std::numeric_limits<float>::max();
+        }
+        if (filter_inner_products != nullptr) {
+            filter_inner_products[i] = std::numeric_limits<float>::quiet_NaN();
+        }
         const auto* record = metadata + i * metadata_size;
         auto read_metadata = [&](uint64_t offset) {
             float value = 0.0F;
@@ -1494,6 +1514,41 @@ RaBitQuantizer<metric>::ComputeDistsWithFastScan32(Computer<RaBitQuantizer>& com
         if (std::isfinite(result)) {
             dists[i] = result;
             computed[i] = true;
+            if (filter_inner_products != nullptr) {
+                const float inner_product_sum =
+                    exact_lookup_table == nullptr ? lookup_sum : exact_lookup_sums[i];
+                if (FilterBits() == 1) {
+                    filter_inner_products[i] = inner_product_sum;
+                } else {
+                    const float filter_center =
+                        0.5F * static_cast<float>((1U << FilterBits()) - 1U);
+                    filter_inner_products[i] = inner_product_sum + filter_center * query_sum;
+                }
+            }
+            if (lower_bounds != nullptr) {
+                const error_type low_bound_error = read_metadata(OneBitRecordLowBoundErrorOffset());
+                const float effective_error_rate =
+                    std::isfinite(runtime_rabitq_error_rate) and runtime_rabitq_error_rate > 0.0F
+                        ? runtime_rabitq_error_rate
+                        : rabitq_error_rate_;
+                float lower_bound_error_term = 2.0F * base_norm * query_norm *
+                                               effective_error_rate * low_bound_error /
+                                               one_bit_error;
+                if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+                    const norm_type base_raw_norm = read_metadata(OneBitRecordRawNormOffset());
+                    if (not is_approx_zero(query_raw_norm) and not is_approx_zero(base_raw_norm)) {
+                        lower_bound_error_term *= 0.5F / (query_raw_norm * base_raw_norm);
+                    }
+                }
+                if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+                    lower_bound_error_term *= 0.5F;
+                }
+                const float lower_bound_result = result - lower_bound_error_term;
+                if (std::isfinite(lower_bound_result)) {
+                    lower_bounds[i] =
+                        lower_bound_result - 1e-5F * std::max(1.0F, std::fabs(lower_bound_result));
+                }
+            }
         }
     }
 }
@@ -1504,9 +1559,13 @@ RaBitQuantizer<metric>::ComputeDistWithOneBitLowerBound(Computer<RaBitQuantizer>
                                                         const uint8_t* one_bit_code,
                                                         float* dists,
                                                         float* lower_bound,
-                                                        float runtime_rabitq_error_rate) const {
+                                                        float runtime_rabitq_error_rate,
+                                                        float* filter_inner_product) const {
     if (lower_bound != nullptr) {
         *lower_bound = std::numeric_limits<float>::max();
+    }
+    if (filter_inner_product != nullptr) {
+        *filter_inner_product = std::numeric_limits<float>::quiet_NaN();
     }
     if (not SupportSplitCodeStorage()) {
         return false;
@@ -1519,6 +1578,7 @@ RaBitQuantizer<metric>::ComputeDistWithOneBitLowerBound(Computer<RaBitQuantizer>
         return false;
     }
 
+    const sum_type query_raw_sum = *((sum_type*)(query + query_offset_sum_));
     float filter_ip_estimate = 0.0F;
     float filter_ip_yu_q = 0.0F;
     norm_type base_norm_code = 0.0F;
@@ -1526,7 +1586,6 @@ RaBitQuantizer<metric>::ComputeDistWithOneBitLowerBound(Computer<RaBitQuantizer>
         filter_ip_estimate = RaBitQFloatBinaryIP(
             reinterpret_cast<const float*>(query), one_bit_code, this->dim_, inv_sqrt_d_);
     } else {
-        sum_type query_raw_sum = *((sum_type*)(query + query_offset_sum_));
         memcpy(
             &base_norm_code, one_bit_code + OneBitRecordNormCodeOffset(), sizeof(base_norm_code));
         if (FilterBits() == 2) {
@@ -1585,6 +1644,17 @@ RaBitQuantizer<metric>::ComputeDistWithOneBitLowerBound(Computer<RaBitQuantizer>
 
     if (not std::isfinite(result)) {
         return false;
+    }
+
+    if (filter_inner_product != nullptr) {
+        if (FilterBits() == 1) {
+            *filter_inner_product = 0.5F * (filter_ip_estimate / inv_sqrt_d_ + query_raw_sum);
+        } else if (FilterBits() == 2 or FilterBits() == 3) {
+            const float filter_center = 0.5F * static_cast<float>((1U << FilterBits()) - 1U);
+            *filter_inner_product = filter_ip_yu_q + filter_center * query_raw_sum;
+        } else {
+            *filter_inner_product = filter_ip_yu_q;
+        }
     }
 
     *dists = result;
@@ -1903,6 +1973,92 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCode(Computer<RaBitQuantizer>& compu
         }
     }
 
+    *dists = result;
+    return true;
+}
+
+template <MetricType metric>
+bool
+RaBitQuantizer<metric>::ComputeDistWithSplitCodeAndFilterInnerProduct(
+    Computer<RaBitQuantizer>& computer,
+    const uint8_t* supplement_code,
+    float filter_inner_product,
+    float* dists) const {
+    if (not SupportSplitCodeStorage() or not std::isfinite(filter_inner_product)) {
+        return false;
+    }
+
+    const auto* query = computer.buf_;
+    const auto* split_meta = supplement_code + SupplementMetaOffset();
+    const auto code_meta_offset = CodeMetaOffset();
+    auto meta_field = [split_meta, code_meta_offset](uint64_t offset) {
+        return split_meta + (offset - code_meta_offset);
+    };
+
+    norm_type full_norm_code = 0.0F;
+    memcpy(&full_norm_code, meta_field(offset_norm_code_), sizeof(full_norm_code));
+    if (full_norm_code <= 0.0F) {
+        return false;
+    }
+
+    const sum_type query_raw_sum = *((sum_type*)(query + query_offset_sum_));
+    const float shifted_filter_inner_product =
+        filter_inner_product * static_cast<float>(1U << ReorderBits());
+    const float supplement_inner_product = RaBitQFloatSupplementCodeIP(
+        reinterpret_cast<const float*>(query), supplement_code, this->dim_, ReorderBits());
+    const float ip_bq_estimate = ip_obar_q(shifted_filter_inner_product + supplement_inner_product,
+                                           query_raw_sum,
+                                           full_norm_code,
+                                           num_bits_per_dim_base_);
+
+    const norm_type query_norm = *((norm_type*)(query + query_offset_norm_));
+    norm_type base_norm = 0.0F;
+    memcpy(&base_norm, meta_field(offset_norm_), sizeof(base_norm));
+
+    norm_type query_raw_norm = 0.0F;
+    norm_type base_raw_norm = 0.0F;
+    if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                  metric == MetricType::METRIC_TYPE_COSINE) {
+        query_raw_norm = *((norm_type*)(query + query_offset_raw_norm_));
+        memcpy(&base_raw_norm, meta_field(offset_raw_norm_), sizeof(base_raw_norm));
+    }
+
+    error_type base_error = 0.0F;
+    memcpy(&base_error, meta_field(offset_error_), sizeof(base_error));
+    if (std::abs(base_error) < 1e-5F) {
+        base_error = base_error >= 0.0F ? 1.0F : -1.0F;
+    }
+
+    float result = l2_ube(base_norm, query_norm, ip_bq_estimate / base_error);
+    if (pca_dim_ != this->original_dim_ and use_mrq_) {
+        const norm_type query_mrq_norm_sqr = *(norm_type*)(query + query_offset_mrq_norm_);
+        norm_type base_mrq_norm_sqr = 0.0F;
+        memcpy(&base_mrq_norm_sqr, meta_field(offset_mrq_norm_), sizeof(base_mrq_norm_sqr));
+        result += query_mrq_norm_sqr + base_mrq_norm_sqr;
+    }
+
+    if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+        if (is_approx_zero(query_raw_norm) or is_approx_zero(base_raw_norm)) {
+            result = 1.0F;
+        } else {
+            result =
+                1.0F - (query_raw_norm * query_raw_norm + base_raw_norm * base_raw_norm - result) *
+                           0.5F / (query_raw_norm * base_raw_norm);
+        }
+    }
+    if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+        if (is_approx_zero(query_raw_norm) or is_approx_zero(base_raw_norm)) {
+            result = 1.0F;
+        } else {
+            result =
+                1.0F -
+                (query_raw_norm * query_raw_norm + base_raw_norm * base_raw_norm - result) * 0.5F;
+        }
+    }
+
+    if (not std::isfinite(result)) {
+        return false;
+    }
     *dists = result;
     return true;
 }
