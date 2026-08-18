@@ -7,6 +7,7 @@
 - [Installation](guide/installation.md)
 - [Creating an Index](guide/create_index.md)
 - [k-Nearest Neighbor Search](guide/knn_search.md)
+- [C API](guide/c_api.md)
 - [pyvsag](guide/pyvsag.md)
 
 # Indexes
@@ -37,6 +38,7 @@
 # Developer Guide
 
 - [Code Structure](development/code_structure.md)
+- [New Index Integration Checklist](development/new_index_checklist.md)
 - [Building](development/building.md)
 - [Offline / Air-gapped Builds](development/offline_build.md)
 - [Running Tests](development/testing.md)
@@ -45,6 +47,7 @@
 # Advanced Features
 
 - [Build and Train](advanced/build_and_train.md)
+- [HGraph Build Cache](advanced/build_cache.md)
 - [Range Search](advanced/range_search.md)
 - [Calculate Distance by ID](advanced/calc_distance_by_id.md)
 - [Filtered Search](advanced/filtered_search.md)
@@ -59,6 +62,7 @@
 - [Graph Enhancement](advanced/enhance_graph.md)
 - [Extra Info](advanced/extra_info.md)
 - [Index Lifecycle Management](advanced/index_lifecycle.md)
+- [HGraph MCI Companion](advanced/hgraph_mci_companion.md)
 
 # API Reference
 
@@ -79,6 +83,8 @@
 - [Optimizer (Tune)](advanced/optimizer.md)
 - [Benchmarks](resources/performance.md)
 - [Evaluation Tool](resources/eval.md)
+- [AutoTune Tool](resources/autotune.md)
+  - [AutoTune V1 CLI JSON Contract](resources/autotune_api_v1.md)
 - [HDF5 Dataset Format](resources/dataset_format.md)
 - [Index Analysis Tool](resources/analyze_index.md)
 - [Compatibility Check Tool](resources/check_compatibility.md)
@@ -87,7 +93,8 @@
 
 - [FAQ](resources/faq.md)
 - [Release Notes](resources/release_notes.md)
-- [Roadmap](resources/roadmap_2025.md)
+  - [VSAG 1.0](resources/release_notes/v1.0.md)
+- [Roadmap (2025)](resources/roadmap_2025.md)
 - [Community](resources/community.md)
 - [Filing Issues with an AI Agent](resources/filing_issues_with_agent.md)
 - [Related Projects](resources/related_projects.md)

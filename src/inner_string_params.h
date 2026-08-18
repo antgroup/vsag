@@ -38,6 +38,9 @@ const char* const BUILD_THREAD_COUNT_KEY = "build_thread_count";
 const char* const LABEL_REMAP_TYPE_KEY = "label_remap_type";
 const char* const BASE_CODES_KEY = "base_codes";
 const char* const PRECISE_CODES_KEY = "precise_codes";
+const char* const PRECISE_CODES_LAYOUT_KEY = "precise_codes_layout";
+const char* const PRECISE_CODES_LAYOUT_VALUE_FLAT = "flat";
+const char* const PRECISE_CODES_LAYOUT_VALUE_BUCKET = "bucket";
 const char* const STORE_RAW_VECTOR_KEY = "store_raw_vector";
 const char* const RAW_VECTOR_KEY = "raw_vector";
 const char* const ATTR_HAS_BUCKETS_KEY = "has_buckets";
@@ -49,6 +52,13 @@ const char* const HGRAPH_IGNORE_REORDER_KEY = "ignore_reorder";
 const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY = "build_by_base";
 const char* const HGRAPH_USE_REVERSE_EDGES_KEY = "use_reverse_edges";
 const char* const HGRAPH_PERSIST_SOURCE_ID_KEY = "persist_source_id";
+const char* const HGRAPH_MCI_KEY = "mci";
+const char* const HGRAPH_MCI_SEED_COUNT_KEY = "mci_seed_count";
+const char* const HGRAPH_MCI_KNNG_PATH_KEY = "mci_knng_path";
+const char* const HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY =
+    "mci_incremental_join_ratio_threshold";
+const char* const HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY = "mci_incremental_added_mct";
+const char* const HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY = "mci_incremental_clique_max";
 const char* const LABEL_REMAP_TYPE_VALUE_ROBIN = "robin";
 const char* const LABEL_REMAP_TYPE_VALUE_PG = "pg";
 const char* const GRAPH_KEY = "graph";
@@ -62,11 +72,15 @@ const char* const IO_TYPE_VALUE_BUFFER_IO = "buffer_io";
 const char* const IO_TYPE_VALUE_MMAP_IO = "mmap_io";
 const char* const IO_TYPE_VALUE_READER_IO = "reader_io";
 const char* const IO_TYPE_VALUE_ASYNC_IO = "async_io";
+const char* const IO_TYPE_VALUE_URING_IO = "uring_io";
 const char* const IO_TYPE_VALUE_BLOCK_MEMORY_IO = "block_memory_io";
+const char* const READ_CACHE_TOTAL_CACHE_SIZE_KEY = "total_cache_size";
+const char* const READ_CACHE_ENABLED_KEY = "enable_read_cache";
 const char* const BLOCK_IO_BLOCK_SIZE_KEY = "block_size";
 
 // IO param for file
 const char* const IO_FILE_PATH_KEY = "file_path";
+const char* const IO_DIRECT_READ_KEY = "direct_read";
 const char* const DEFAULT_FILE_PATH_VALUE = "./default_file_path";
 
 // quantization params key
@@ -107,6 +121,8 @@ const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY = "rabitq_bits_per_
 const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY = "rabitq_bits_per_dim_base";
 const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY = "rabitq_bits_per_dim_filter";
 const char* const RABITQ_QUANTIZATION_ERROR_RATE_KEY = "rabitq_error_rate";
+const char* const FAST_ENCODE_RABITQ_KEY = "fast_encode_rabitq";
+const char* const FAST_ENCODE_RABITQ_ROUNDS_KEY = "fast_encode_rabitq_rounds";
 const char* const SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY = "sq4_uniform_trunc_rate";
 const char* const PRODUCT_QUANTIZATION_DIM_KEY = "pq_dim";
 const char* const PRODUCT_QUANTIZATION_BITS_KEY = "pq_bits";
@@ -116,6 +132,8 @@ const char* const SPARSE_NEED_SORT = "need_sort";
 const char* const SPARSE_QUERY_PRUNE_RATIO = "query_prune_ratio";
 const char* const SPARSE_DOC_PRUNE_RATIO = "doc_prune_ratio";
 const char* const SPARSE_TERM_PRUNE_RATIO = "term_prune_ratio";
+const char* const SPARSE_TERM_RETAIN_THRESHOLD = "term_retain_threshold";
+const char* const SPARSE_FILTER_CALLBACK_LIMIT = "filter_callback_limit";
 const char* const SPARSE_TERM_ID_LIMIT = "term_id_limit";
 const char* const SPARSE_WINDOW_SIZE = "window_size";
 const char* const SPARSE_DESERIALIZE_WITHOUT_FOOTER = "deserialize_without_footer";
@@ -153,6 +171,8 @@ const char* const IVF_PARTITION_STRATEGY_PARAMS_KEY = "partition_strategy";
 const char* const IVF_PARTITION_STRATEGY_TYPE_KEY = "partition_strategy_type";
 const char* const IVF_PARTITION_STRATEGY_TYPE_NEAREST = "ivf";
 const char* const IVF_PARTITION_STRATEGY_TYPE_GNO_IMI = "gno_imi";
+const char* const IVF_ROUTE_MAX_DEGREE_KEY = "route_max_degree";
+const char* const IVF_ROUTE_EF_CONSTRUCTION_KEY = "route_ef_construction";
 
 const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY = "first_order_buckets_count";
 const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY = "second_order_buckets_count";
@@ -173,6 +193,7 @@ const char* const GRAPH_SUPPORT_REMOVE = "support_remove";
 const char* const REMOVE_FLAG_BIT = "remove_flag_bit";
 const char* const HOLD_MOLDS = "hold_molds";
 const char* const SUPPORT_DUPLICATE = "support_duplicate";
+const char* const DEDUPLICATE_STORAGE = "deduplicate_storage";
 const char* const DUPLICATE_DISTANCE_THRESHOLD = "duplicate_distance_threshold";
 const char* const SUPPORT_FORCE_REMOVE = "support_force_remove";
 const char* const SUPPORT_AUTOTUNE = "support_autotune";
@@ -187,13 +208,15 @@ const char* const RABITQ_SPLIT_CODES = "rabitq_split";
 const char* const SPARSE_CODES = "sparse";
 
 const char* const IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT = "scan_buckets_count";
+const char* const IVF_SEARCH_PARAM_DISABLE_BUCKET_SCAN = "disable_bucket_scan";
 const char* const SEARCH_PARAM_FACTOR = "factor";
 const char* const SEARCH_PARAM_ENABLE_REORDER = "enable_reorder";
 const char* const SEARCH_PARALLELISM = "parallelism";
 const char* const SEARCH_MAX_TIME_COST_MS = "timeout_ms";
 const char* const SPARSE_N_CANDIDATE = "n_candidate";
 
-const char* const DISKANN_SUPPORT_CALC_DISTANCE_BY_ID = "support_calc_distance_by_id";
+const char* const GRAPH_BUILD_THRESHOLD_KEY = "graph_build_threshold";
+const char* const IVF_SEARCH_PARAM_EF_SEARCH = "ef_search";
 
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_HGRAPH", INDEX_TYPE_HGRAPH},
@@ -207,11 +230,17 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"GRAPH_KEY", GRAPH_KEY},
     {"BASE_CODES_KEY", BASE_CODES_KEY},
     {"PRECISE_CODES_KEY", PRECISE_CODES_KEY},
+    {"PRECISE_CODES_LAYOUT_KEY", PRECISE_CODES_LAYOUT_KEY},
+    {"PRECISE_CODES_LAYOUT_VALUE_FLAT", PRECISE_CODES_LAYOUT_VALUE_FLAT},
+    {"PRECISE_CODES_LAYOUT_VALUE_BUCKET", PRECISE_CODES_LAYOUT_VALUE_BUCKET},
     {"HGRAPH_SUPPORT_DUPLICATE", HGRAPH_SUPPORT_DUPLICATE},
+    {"HGRAPH_DEDUPLICATE_STORAGE", HGRAPH_DEDUPLICATE_STORAGE},
     {"HGRAPH_DUPLICATE_DISTANCE_THRESHOLD", HGRAPH_DUPLICATE_DISTANCE_THRESHOLD},
     {"IO_TYPE_VALUE_MEMORY_IO", IO_TYPE_VALUE_MEMORY_IO},
     {"IO_TYPE_VALUE_BLOCK_MEMORY_IO", IO_TYPE_VALUE_BLOCK_MEMORY_IO},
     {"IO_TYPE_VALUE_BUFFER_IO", IO_TYPE_VALUE_BUFFER_IO},
+    {"READ_CACHE_TOTAL_CACHE_SIZE_KEY", READ_CACHE_TOTAL_CACHE_SIZE_KEY},
+    {"READ_CACHE_ENABLED_KEY", READ_CACHE_ENABLED_KEY},
     {"IO_PARAMS_KEY", IO_PARAMS_KEY},
     {"BLOCK_IO_BLOCK_SIZE_KEY", BLOCK_IO_BLOCK_SIZE_KEY},
     {"QUANTIZATION_TYPE_VALUE_SQ8", QUANTIZATION_TYPE_VALUE_SQ8},
@@ -239,6 +268,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"BUCKETS_COUNT_KEY", BUCKETS_COUNT_KEY},
     {"BUCKET_PARAMS_KEY", BUCKET_PARAMS_KEY},
     {"IO_FILE_PATH_KEY", IO_FILE_PATH_KEY},
+    {"IO_DIRECT_READ_KEY", IO_DIRECT_READ_KEY},
     {"DEFAULT_FILE_PATH_VALUE", DEFAULT_FILE_PATH_VALUE},
     {"PRECISE_CODES_KEY", PRECISE_CODES_KEY},
     {"USE_REORDER_KEY", USE_REORDER_KEY},
@@ -246,6 +276,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY", SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY},
     {"PCA_DIM_KEY", PCA_DIM_KEY},
     {"IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT", IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT},
+    {"IVF_SEARCH_PARAM_DISABLE_BUCKET_SCAN", IVF_SEARCH_PARAM_DISABLE_BUCKET_SCAN},
     {"GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY", GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY},
     {"GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY", GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY},
     {"BUCKETS_COUNT_KEY", BUCKETS_COUNT_KEY},
@@ -263,6 +294,8 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"IVF_PARTITION_STRATEGY_PARAMS_KEY", IVF_PARTITION_STRATEGY_PARAMS_KEY},
     {"IVF_PARTITION_STRATEGY_TYPE_KEY", IVF_PARTITION_STRATEGY_TYPE_KEY},
     {"IVF_PARTITION_STRATEGY_TYPE_NEAREST", IVF_PARTITION_STRATEGY_TYPE_NEAREST},
+    {"IVF_ROUTE_MAX_DEGREE_KEY", IVF_ROUTE_MAX_DEGREE_KEY},
+    {"IVF_ROUTE_EF_CONSTRUCTION_KEY", IVF_ROUTE_EF_CONSTRUCTION_KEY},
     {"IVF_TRAIN_TYPE_KMEANS", IVF_TRAIN_TYPE_KMEANS},
     {"BUILD_THREAD_COUNT_KEY", BUILD_THREAD_COUNT_KEY},
     {"LABEL_REMAP_TYPE_KEY", LABEL_REMAP_TYPE_KEY},
@@ -272,6 +305,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"GRAPH_SUPPORT_REMOVE", GRAPH_SUPPORT_REMOVE},
     {"REMOVE_FLAG_BIT", REMOVE_FLAG_BIT},
     {"SUPPORT_DUPLICATE", SUPPORT_DUPLICATE},
+    {"DEDUPLICATE_STORAGE", DEDUPLICATE_STORAGE},
     {"HOLD_MOLDS", HOLD_MOLDS},
     {"HGRAPH_PERSIST_SOURCE_ID_KEY", HGRAPH_PERSIST_SOURCE_ID_KEY},
     {"IVF_PARTITION_STRATEGY_TYPE_GNO_IMI", IVF_PARTITION_STRATEGY_TYPE_GNO_IMI},
@@ -284,10 +318,16 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY", RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY},
     {"RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY", RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY},
     {"RABITQ_QUANTIZATION_ERROR_RATE_KEY", RABITQ_QUANTIZATION_ERROR_RATE_KEY},
+    {"FAST_ENCODE_RABITQ_KEY", FAST_ENCODE_RABITQ_KEY},
+    {"FAST_ENCODE_RABITQ_ROUNDS_KEY", FAST_ENCODE_RABITQ_ROUNDS_KEY},
     {"USE_FHT_KEY", USE_FHT_KEY},
     {"TQ_CHAIN_KEY", TQ_CHAIN_KEY},
     {"NO_BUILD_LEVELS", NO_BUILD_LEVELS},
     {"GRAPH_TYPE_KEY", GRAPH_TYPE_KEY},
-    {"SUPPORT_FORCE_REMOVE", SUPPORT_FORCE_REMOVE}};
+    {"SUPPORT_FORCE_REMOVE", SUPPORT_FORCE_REMOVE},
+    {"GRAPH_BUILD_THRESHOLD_KEY", GRAPH_BUILD_THRESHOLD_KEY},
+    {"RESIZE_INCREASE_COUNT_BIT", "resize_increase_count_bit"},
+    {"DEFAULT_RESIZE_INCREASE_COUNT_BIT", "10"},
+};
 
 }  // namespace vsag

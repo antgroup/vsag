@@ -115,10 +115,11 @@ SIMQ-specific build parameters live under `index_param`. The common fields
 | `rerank_k` | int | `100` | Default max rerank candidates at build time. |
 
 - **`dim`** — shared across all documents and queries.
-- **`base_io_type`** — supported values: `async_io`, `memory_io`,
-  `block_memory_io`, `buffer_io`, `mmap_io`, `reader_io`.
+- **`base_io_type`** — supported values: `async_io`, `uring_io`, `memory_io`,
+  `block_memory_io`, `buffer_io`, `mmap_io`, `reader_io`. Native `uring_io`
+  requires a build with liburing; otherwise it falls back to `buffer_io`.
 - **`base_file_path`** — the default is a placeholder; provide a real path
-  when using a disk-backed type (`async_io`, `buffer_io`, `mmap_io`).
+  when using a disk-backed type (`async_io`, `uring_io`, `buffer_io`, `mmap_io`).
 - **`init_cluster_ratio`** — range `(0, 1]`. Smaller values yield fewer,
   larger clusters; larger values produce more, finer-grained clusters.
 - **`max_cluster_size`** — must be > 1.
@@ -154,6 +155,31 @@ auto result = index->KnnSearch(
     query, topk,
     R"({"simq": {"coarse_k": 600, "rerank_k": 5000}})").value();
 ```
+
+## Search statistics
+
+`KnnSearch` and `RangeSearch` attach a JSON statistics object to the returned dataset. Read the
+complete object or request individual values:
+
+```cpp
+std::cout << result->GetStatistics() << '\n';
+auto values = result->GetStatistics(
+    {"simq_coarse_candidate_count", "simq_rerank_candidate_count"});
+```
+
+| Key | Meaning |
+|-----|---------|
+| `dist_cmp` | Exact MaxSim distance comparisons during reranking |
+| `simq_coarse_dist_cmp` | Distance comparisons performed by representative-graph searches |
+| `simq_coarse_probe_count` | Representative clusters probed across all query tokens |
+| `simq_coarse_candidate_count` | Unique document candidates produced by coarse search before applying `rerank_k` |
+| `simq_rerank_candidate_count` | Candidates retained after applying `rerank_k` |
+| `simq_filtered_candidate_count` | Rerank candidates rejected by the supplied filter |
+| `simq_result_count` | Results returned after reranking and range/top-k limits |
+| `simq_limited_size_applied` | Whether `RangeSearch` truncated matches to `limited_size` |
+
+These counters make it possible to distinguish a narrow coarse candidate pool from filtering,
+reranking, and output-limit effects when tuning recall and latency.
 
 ## When to use SIMQ
 

@@ -12,14 +12,55 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstring>
 #include <limits>
+#include <memory>
 #include <sstream>
+#include <string>
+#include <utility>
 
 #include "serialization.h"
 #include "serialization_tags.h"
 #include "tlv_section.h"
 #include "unittest.h"
 #include "vsag/options.h"
+#include "vsag_exception.h"
+
+namespace {
+
+class StringReader : public vsag::Reader {
+public:
+    explicit StringReader(std::string data) : data_(std::move(data)) {
+    }
+
+    void
+    Read(uint64_t offset, uint64_t len, void* dest) override {
+        if (offset > data_.size() or len > data_.size() - offset) {
+            throw vsag::VsagException(vsag::ErrorType::READ_ERROR, "read exceeds string");
+        }
+        std::memcpy(dest, data_.data() + offset, len);
+    }
+
+    void
+    AsyncRead(uint64_t offset, uint64_t len, void* dest, vsag::CallBack callback) override {
+        try {
+            Read(offset, len, dest);
+            callback(vsag::IOErrorCode::IO_SUCCESS, "success");
+        } catch (const std::exception& error) {
+            callback(vsag::IOErrorCode::IO_ERROR, error.what());
+        }
+    }
+
+    [[nodiscard]] uint64_t
+    Size() const override {
+        return data_.size();
+    }
+
+private:
+    std::string data_;
+};
+
+}  // namespace
 
 TEST_CASE("StreamHeader", "[ut][streaming_serialization]") {
     auto metadata = std::make_shared<vsag::Metadata>();
@@ -170,6 +211,28 @@ TEST_CASE("ReadSeekableBlockPayload rejects cursor past spilled payload",
         }));
 
     vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE("ReadExternalBlockPayload validates checksum before deserializing",
+          "[ut][streaming_serialization]") {
+    const std::string payload = "abcdefgh";
+    auto corrupted = payload;
+    corrupted[3] = 'x';
+    auto reader = std::make_shared<StringReader>(std::move(corrupted));
+    vsag::StreamBlockHeader header;
+    header.value_len = payload.size();
+    header.payload_checksum = vsag::StreamHeader::CalculateChecksum(payload);
+    bool deserialize_called = false;
+
+    try {
+        vsag::ReadExternalBlockPayload(reader, header, [&deserialize_called](vsag::StreamReader&) {
+            deserialize_called = true;
+        });
+        FAIL("corrupted external payload should be rejected");
+    } catch (const vsag::VsagException& error) {
+        REQUIRE(error.error_.type == vsag::ErrorType::INVALID_BINARY);
+    }
+    REQUIRE_FALSE(deserialize_called);
 }
 
 TEST_CASE("ValidateAndSkipBlockPayload", "[ut][streaming_serialization]") {

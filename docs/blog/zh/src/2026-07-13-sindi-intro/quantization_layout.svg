@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="590" viewBox="0 0 1080 590">
+  <defs>
+    <style>
+      .title { font: 700 24px Arial, "Microsoft YaHei", sans-serif; fill: #172033; }
+      .section { font: 700 18px Arial, "Microsoft YaHei", sans-serif; fill: #172033; }
+      .label { font: 700 13px Arial, "Microsoft YaHei", sans-serif; fill: #334155; }
+      .text { font: 13px Arial, "Microsoft YaHei", sans-serif; fill: #475569; }
+      .small { font: 12px Arial, "Microsoft YaHei", sans-serif; fill: #64748b; }
+      .mono { font: 12px Consolas, "SFMono-Regular", monospace; fill: #1f2937; }
+      .panel { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.4; rx: 8; }
+      .soft { fill: #f8fafc; stroke: #d7dee8; stroke-width: 1.1; rx: 6; }
+      .window { fill: #eef6ff; stroke: #87bdf8; stroke-width: 1.3; rx: 7; }
+      .term { fill: #ffffff; stroke: #9fc6f0; stroke-width: 1.1; rx: 5; }
+      .doc { fill: #e0f2fe; stroke: #38bdf8; stroke-width: 1.1; rx: 4; }
+      .value { fill: #fef3c7; stroke: #f59e0b; stroke-width: 1.1; rx: 4; }
+      .forward { fill: #ecfdf5; stroke: #34d399; stroke-width: 1.2; rx: 6; }
+      .termid { fill: #dbeafe; stroke: #60a5fa; stroke-width: 1.1; rx: 4; }
+      .dmq { fill: #eef2ff; stroke: #818cf8; stroke-width: 1.2; rx: 6; }
+      .arrow { stroke: #64748b; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .dash { stroke: #94a3b8; stroke-width: 1.5; stroke-dasharray: 5 5; fill: none; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect width="1080" height="590" fill="#ffffff"/>
+
+  <rect x="42" y="52" width="482" height="480" class="panel"/>
+  <text x="283" y="84" text-anchor="middle" class="section">倒排索引：window_term_list_</text>
+  <text x="283" y="108" text-anchor="middle" class="text">按窗口切分，每个窗口是一个 SparseTermDatacell</text>
+
+  <g transform="translate(70,136)">
+    <rect width="404" height="144" class="window"/>
+    <text x="18" y="26" class="label">Window 0 / SparseTermDatacell</text>
+    <text x="286" y="26" class="small">doc id 为窗口内编号</text>
+
+    <g transform="translate(20,44)">
+      <rect width="364" height="42" class="term"/>
+      <text x="13" y="25" class="mono">term 17</text>
+      <rect x="78" y="9" width="122" height="24" class="doc"/>
+      <text x="139" y="25" text-anchor="middle" class="mono">doc_id[]</text>
+      <rect x="214" y="9" width="122" height="24" class="value"/>
+      <text x="275" y="25" text-anchor="middle" class="mono">value[]</text>
+
+      <rect y="52" width="364" height="42" class="term"/>
+      <text x="13" y="77" class="mono">term 42</text>
+      <rect x="78" y="61" width="122" height="24" class="doc"/>
+      <text x="139" y="77" text-anchor="middle" class="mono">doc_id[]</text>
+      <rect x="214" y="61" width="122" height="24" class="value"/>
+      <text x="275" y="77" text-anchor="middle" class="mono">value[]</text>
+    </g>
+  </g>
+
+  <g transform="translate(70,290)">
+    <rect width="404" height="144" class="window"/>
+    <text x="18" y="26" class="label">Window 1 / SparseTermDatacell</text>
+    <text x="286" y="26" class="small">doc id 为窗口内编号</text>
+
+    <g transform="translate(20,44)">
+      <rect width="364" height="42" class="term"/>
+      <text x="13" y="25" class="mono">term 73</text>
+      <rect x="78" y="9" width="122" height="24" class="doc"/>
+      <text x="139" y="25" text-anchor="middle" class="mono">doc_id[]</text>
+      <rect x="214" y="9" width="122" height="24" class="value"/>
+      <text x="275" y="25" text-anchor="middle" class="mono">value[]</text>
+
+      <rect y="52" width="364" height="42" class="term"/>
+      <text x="13" y="77" class="mono">term 128</text>
+      <rect x="78" y="61" width="122" height="24" class="doc"/>
+      <text x="139" y="77" text-anchor="middle" class="mono">doc_id[]</text>
+      <rect x="214" y="61" width="122" height="24" class="value"/>
+      <text x="275" y="77" text-anchor="middle" class="mono">value[]</text>
+    </g>
+  </g>
+
+  <g transform="translate(86,452)">
+    <rect width="372" height="54" class="soft"/>
+    <text x="18" y="31" class="label">倒排量化 value</text>
+    <text x="243" y="14" text-anchor="middle" class="small">SQ8</text>
+    <path d="M 208 22 L 276 22" class="arrow"/>
+    <rect x="168" y="8" width="38" height="28" class="value"/>
+    <text x="187" y="27" text-anchor="middle" class="mono">f32</text>
+    <rect x="278" y="8" width="38" height="28" class="value"/>
+    <text x="297" y="27" text-anchor="middle" class="mono">u8</text>
+  </g>
+
+  <rect x="556" y="52" width="482" height="480" class="panel"/>
+  <text x="797" y="84" text-anchor="middle" class="section">正排数据：rerank sparse vectors</text>
+  <text x="797" y="108" text-anchor="middle" class="text">按 doc 组织，候选重排时重新计算稀疏向量内积</text>
+
+  <g transform="translate(584,138)">
+    <rect width="426" height="54" class="soft"/>
+    <text x="16" y="24" class="label">offset table</text>
+    <text x="16" y="43" class="small">doc id → sparse vector block offset</text>
+    <rect x="230" y="13" width="54" height="28" class="forward"/>
+    <text x="257" y="32" text-anchor="middle" class="mono">d0</text>
+    <rect x="292" y="13" width="54" height="28" class="forward"/>
+    <text x="319" y="32" text-anchor="middle" class="mono">d1</text>
+    <rect x="354" y="13" width="54" height="28" class="forward"/>
+    <text x="381" y="32" text-anchor="middle" class="mono">...</text>
+  </g>
+
+  <g transform="translate(584,210)">
+    <rect width="426" height="148" class="forward"/>
+    <text x="16" y="28" class="label">Sparse vector blocks</text>
+
+    <rect x="22" y="42" width="382" height="24" class="soft"/>
+    <text x="36" y="59" class="mono">doc 0:</text>
+    <text x="90" y="59" class="mono">len</text>
+    <text x="134" y="59" class="mono">term_id[]</text>
+    <text x="236" y="59" class="mono">value[]</text>
+
+    <rect x="22" y="70" width="382" height="24" class="soft"/>
+    <text x="36" y="87" class="mono">doc 1:</text>
+    <text x="90" y="87" class="mono">len</text>
+    <text x="134" y="87" class="mono">term_id[]</text>
+    <text x="236" y="87" class="mono">value[]</text>
+
+    <rect x="22" y="98" width="382" height="24" class="soft"/>
+    <text x="36" y="115" class="mono">doc 3:</text>
+    <text x="90" y="115" class="mono">len</text>
+    <text x="134" y="115" class="mono">term_id[]</text>
+    <text x="236" y="115" class="mono">value[]</text>
+
+    <text x="213" y="140" text-anchor="middle" class="mono">...</text>
+  </g>
+
+  <g transform="translate(584,376)">
+    <rect width="426" height="90" class="dmq"/>
+    <text x="16" y="28" class="label">DMQ 正排压缩</text>
+    <rect x="20" y="48" width="102" height="34" class="soft"/>
+    <text x="71" y="70" text-anchor="middle" class="mono">per vector</text>
+    <rect x="140" y="48" width="116" height="34" class="termid"/>
+    <text x="198" y="70" text-anchor="middle" class="mono">term id compact</text>
+    <rect x="274" y="48" width="112" height="34" class="value"/>
+    <text x="330" y="70" text-anchor="middle" class="mono">value: DMQ u8</text>
+  </g>
+
+  <path d="M 746 358 L 746 376" class="dash"/>
+  <path d="M 858 358 L 858 376" class="dash"/>
+
+  <g transform="translate(606,472)">
+    <rect width="382" height="30" fill="#ffffff" stroke="#c7d2fe" rx="5"/>
+    <text x="191" y="20" text-anchor="middle" class="small">倒排 SQ8 降低召回层内存；DMQ 进一步降低 rerank 正排副本内存</text>
+  </g>
+</svg>

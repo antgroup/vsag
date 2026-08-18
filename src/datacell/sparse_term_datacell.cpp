@@ -17,6 +17,8 @@
 
 #include <algorithm>
 #include <cstring>
+#include <numeric>
+#include <type_traits>
 
 #include "simd/fp16_simd.h"
 #include "utils/util_functions.h"
@@ -24,8 +26,96 @@
 #include "vsag_exception.h"
 namespace vsag {
 
+uint32_t
+SparseTermDataCell::GetSparseValueCodeSize(SparseValueQuantizationType type) {
+    switch (type) {
+        case SparseValueQuantizationType::FP32:
+            return sizeof(float);
+        case SparseValueQuantizationType::SQ8:
+            return sizeof(uint8_t);
+        case SparseValueQuantizationType::FP16:
+            return sizeof(uint16_t);
+        default:
+            CHECK_ARGUMENT(false, "unknown sparse value quantization type");
+    }
+    return sizeof(float);
+}
+
+void
+SparseTermDataCell::SortPostingListByValue(uint16_t* ids,
+                                           uint8_t* data,
+                                           uint32_t posting_count,
+                                           SparseValueQuantizationType quantization_type,
+                                           Vector<uint32_t>& order,
+                                           Vector<uint16_t>& sorted_ids,
+                                           Vector<uint8_t>& sorted_data) {
+    if (posting_count == 0) {
+        return;
+    }
+
+    order.resize(posting_count);
+    std::iota(order.begin(), order.end(), 0);
+    if (posting_count == 1) {
+        return;
+    }
+
+    const auto sort_by_code = [&order, ids, posting_count, &sorted_ids, &sorted_data](auto* codes) {
+        using CodeType = std::remove_pointer_t<decltype(codes)>;
+        const auto compare = [codes, ids](uint32_t left, uint32_t right) {
+            if (codes[left] != codes[right]) {
+                return codes[left] > codes[right];
+            }
+            return ids[left] < ids[right];
+        };
+        if (std::is_sorted(order.begin(), order.end(), compare)) {
+            return;
+        }
+        std::sort(order.begin(), order.end(), compare);
+
+        sorted_ids.resize(posting_count);
+        sorted_data.resize(static_cast<uint64_t>(posting_count) * sizeof(CodeType));
+        auto* sorted_codes = reinterpret_cast<CodeType*>(sorted_data.data());
+        for (uint32_t i = 0; i < posting_count; ++i) {
+            const auto source = order[i];
+            sorted_ids[i] = ids[source];
+            sorted_codes[i] = codes[source];
+        }
+        std::copy(sorted_ids.begin(), sorted_ids.end(), ids);
+        std::copy(sorted_codes, sorted_codes + posting_count, codes);
+    };
+    switch (quantization_type) {
+        case SparseValueQuantizationType::SQ8:
+            sort_by_code(data);
+            break;
+        case SparseValueQuantizationType::FP16:
+            sort_by_code(reinterpret_cast<uint16_t*>(data));
+            break;
+        case SparseValueQuantizationType::FP32:
+            sort_by_code(reinterpret_cast<float*>(data));
+            break;
+        default:
+            CHECK_ARGUMENT(false, "unknown sparse value quantization type");
+    }
+}
+
 void
 SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& computer) const {
+    query_impl(global_dists, computer, nullptr);
+}
+
+uint64_t
+SparseTermDataCell::Query(float* global_dists,
+                          const SparseTermComputerPtr& computer,
+                          SparseEvaluationTracker& evaluation_tracker) const {
+    evaluation_tracker.BeginWindow();
+    query_impl(global_dists, computer, &evaluation_tracker);
+    return evaluation_tracker.Count();
+}
+
+void
+SparseTermDataCell::query_impl(float* global_dists,
+                               const SparseTermComputerPtr& computer,
+                               SparseEvaluationTracker* evaluation_tracker) const {
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();
         auto term = computer->GetTerm(it);
@@ -41,18 +131,21 @@ SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& comp
             continue;
         }
 
-        auto term_size = static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
-                                               computer->term_retain_ratio_);
+        const auto posting_count = term_sizes_[term];
+        const auto term_count = computer->GetTermScanCount(posting_count);
+        const auto* term_ids = term_ids_[term]->data();
+        const auto* term_data = term_datas_[term]->data();
+        if (evaluation_tracker != nullptr) {
+            evaluation_tracker->Mark(term_ids, term_count);
+        }
 
         if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
-            computer->ScanForAccumulateSQ8(
-                it, term_ids_[term]->data(), term_datas_[term]->data(), term_size, global_dists);
+            computer->ScanForAccumulateSQ8(it, term_ids, term_data, term_count, global_dists);
         } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
-            computer->ScanForAccumulateFP16Bytes(
-                it, term_ids_[term]->data(), term_datas_[term]->data(), term_size, global_dists);
+            computer->ScanForAccumulateFP16Bytes(it, term_ids, term_data, term_count, global_dists);
         } else {
             computer->ScanForAccumulateFloatBytes(
-                it, term_ids_[term]->data(), term_datas_[term]->data(), term_size, global_dists);
+                it, term_ids, term_data, term_count, global_dists);
         }
     }
     computer->ResetTerm();
@@ -65,8 +158,23 @@ SparseTermDataCell::insert_candidate_into_heap(uint32_t id,
                                                float& cur_heap_top,
                                                MaxHeap& heap,
                                                uint32_t offset_id,
+                                               uint32_t n_candidate,
                                                float radius,
-                                               const FilterPtr& filter) const {
+                                               const FilterPtr& filter,
+                                               const std::optional<float>& threshold,
+                                               bool enable_reorder) const {
+    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+        if (dist == 0.0F) {
+            return;
+        }
+    }
+    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+        if (threshold.has_value() and
+            (not std::isfinite(dist) or (not enable_reorder and 1.0F + dist > threshold.value()))) {
+            dist = 0.0F;
+            return;
+        }
+    }
     if constexpr (type == InnerSearchType::WITH_FILTER) {
 #if __cplusplus >= 202002L
         if (dist > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
@@ -88,8 +196,11 @@ SparseTermDataCell::insert_candidate_into_heap(uint32_t id,
     }
     heap.emplace(dist, id + offset_id);
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-        heap.pop();
-        cur_heap_top = heap.top().first;
+        if (heap.size() > n_candidate) {
+            heap.pop();
+        }
+        cur_heap_top =
+            heap.size() == n_candidate ? heap.top().first : std::numeric_limits<float>::max();
     }
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
         cur_heap_top = radius - 1;
@@ -105,10 +216,18 @@ SparseTermDataCell::fill_heap_initial(uint32_t id,
                                       MaxHeap& heap,
                                       uint32_t offset_id,
                                       uint32_t n_candidate,
-                                      const FilterPtr& filter) const {
+                                      const FilterPtr& filter,
+                                      const std::optional<float>& threshold,
+                                      bool enable_reorder) const {
+    if (threshold.has_value() and
+        (not std::isfinite(dist) or (not enable_reorder and 1.0F + dist > threshold.value()))) {
+        dist = 0.0F;
+        return false;
+    }
     if (dist < 0) {
         if constexpr (type == InnerSearchType::WITH_FILTER) {
-            if (not filter->CheckValid(id + offset_id)) {
+            const bool valid = filter->CheckValid(id + offset_id);
+            if (not valid) {
                 dist = 0;
                 return false;
             }
@@ -122,17 +241,24 @@ SparseTermDataCell::fill_heap_initial(uint32_t id,
 }
 
 template <InnerSearchMode mode, InnerSearchType type>
-void
+bool
 SparseTermDataCell::InsertHeapByTermLists(float* dists,
                                           const SparseTermComputerPtr& computer,
                                           MaxHeap& heap,
                                           const InnerSearchParam& param,
-                                          uint32_t offset_id) const {
+                                          uint32_t offset_id,
+                                          const uint64_t* filter_callback_limit) const {
     uint32_t id = 0;
     float cur_heap_top = std::numeric_limits<float>::max();
     auto n_candidate = param.ef;
     auto radius = param.radius;
     auto filter = param.is_inner_id_allowed;
+
+    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+        if (heap.size() == n_candidate) {
+            cur_heap_top = heap.top().first;
+        }
+    }
 
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
         // note that radius = 1 - ip -> radius - 1 = 0 - ip
@@ -148,16 +274,31 @@ SparseTermDataCell::InsertHeapByTermLists(float* dists,
             continue;
         }
 
+        const auto posting_count = term_sizes_[term];
+        const auto term_count = computer->GetTermScanCount(posting_count);
         uint32_t i = 0;
-        auto term_size = static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
-                                               computer->term_retain_ratio_);
+        const auto term_end = term_count;
         auto& one_term_ids = *term_ids_[term];
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if (heap.size() < n_candidate) {
-                for (; i < term_size; i++) {
+                for (; i < term_end; i++) {
                     id = one_term_ids[i];
-                    if (fill_heap_initial<type>(
-                            id, dists[id], cur_heap_top, heap, offset_id, n_candidate, filter)) {
+                    const bool heap_filled = fill_heap_initial<type>(id,
+                                                                     dists[id],
+                                                                     cur_heap_top,
+                                                                     heap,
+                                                                     offset_id,
+                                                                     n_candidate,
+                                                                     filter,
+                                                                     param.distance_threshold,
+                                                                     param.enable_reorder);
+                    if constexpr (type == InnerSearchType::WITH_FILTER) {
+                        if (filter_callback_limit != nullptr and *filter_callback_limit == 0) {
+                            computer->ResetTerm();
+                            return true;
+                        }
+                    }
+                    if (heap_filled) {
                         i++;
                         break;
                     }
@@ -165,26 +306,48 @@ SparseTermDataCell::InsertHeapByTermLists(float* dists,
             }
         }
 
-        for (; i < term_size; i++) {
+        for (; i < term_end; i++) {
             id = one_term_ids[i];
-            insert_candidate_into_heap<mode, type>(
-                id, dists[id], cur_heap_top, heap, offset_id, radius, filter);
+            insert_candidate_into_heap<mode, type>(id,
+                                                   dists[id],
+                                                   cur_heap_top,
+                                                   heap,
+                                                   offset_id,
+                                                   n_candidate,
+                                                   radius,
+                                                   filter,
+                                                   param.distance_threshold,
+                                                   param.enable_reorder);
+            if constexpr (type == InnerSearchType::WITH_FILTER) {
+                if (filter_callback_limit != nullptr and *filter_callback_limit == 0) {
+                    computer->ResetTerm();
+                    return true;
+                }
+            }
         }
     }
     computer->ResetTerm();
+    return false;
 }
 
 template <InnerSearchMode mode, InnerSearchType type>
-void
+bool
 SparseTermDataCell::InsertHeapByDists(float* dists,
                                       uint32_t dists_size,
                                       MaxHeap& heap,
                                       const InnerSearchParam& param,
-                                      uint32_t offset_id) const {
+                                      uint32_t offset_id,
+                                      const uint64_t* filter_callback_limit) const {
     float cur_heap_top = std::numeric_limits<float>::max();
     auto n_candidate = param.ef;
     auto radius = param.radius;
     auto filter = param.is_inner_id_allowed;
+
+    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+        if (heap.size() == n_candidate) {
+            cur_heap_top = heap.top().first;
+        }
+    }
 
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
         cur_heap_top = radius - 1;
@@ -194,8 +357,21 @@ SparseTermDataCell::InsertHeapByDists(float* dists,
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
         if (heap.size() < n_candidate) {
             for (; id < total_count_; id++) {
-                if (fill_heap_initial<type>(
-                        id, dists[id], cur_heap_top, heap, offset_id, n_candidate, filter)) {
+                const bool heap_filled = fill_heap_initial<type>(id,
+                                                                 dists[id],
+                                                                 cur_heap_top,
+                                                                 heap,
+                                                                 offset_id,
+                                                                 n_candidate,
+                                                                 filter,
+                                                                 param.distance_threshold,
+                                                                 param.enable_reorder);
+                if constexpr (type == InnerSearchType::WITH_FILTER) {
+                    if (filter_callback_limit != nullptr and *filter_callback_limit == 0) {
+                        return true;
+                    }
+                }
+                if (heap_filled) {
                     id++;
                     break;
                 }
@@ -204,9 +380,23 @@ SparseTermDataCell::InsertHeapByDists(float* dists,
     }
 
     for (; id < total_count_; id++) {
-        insert_candidate_into_heap<mode, type>(
-            id, dists[id], cur_heap_top, heap, offset_id, radius, filter);
+        insert_candidate_into_heap<mode, type>(id,
+                                               dists[id],
+                                               cur_heap_top,
+                                               heap,
+                                               offset_id,
+                                               n_candidate,
+                                               radius,
+                                               filter,
+                                               param.distance_threshold,
+                                               param.enable_reorder);
+        if constexpr (type == InnerSearchType::WITH_FILTER) {
+            if (filter_callback_limit != nullptr and *filter_callback_limit == 0) {
+                return true;
+            }
+        }
     }
+    return false;
 }
 
 void
@@ -224,7 +414,7 @@ SparseTermDataCell::DocPrune(Vector<std::pair<uint32_t, float>>& sorted_base) co
     float temp_mass = 0.0F;
     int pruned_doc_len = 0;
 
-    while (temp_mass < part_mass) {
+    while (temp_mass < part_mass && pruned_doc_len < static_cast<int>(sorted_base.size())) {
         temp_mass += sorted_base[pruned_doc_len++].second;
     }
 
@@ -263,7 +453,6 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint16_t base_
             term_ids_[term] = std::make_unique<Vector<uint16_t>>(allocator_);
             term_datas_[term] = std::make_unique<Vector<uint8_t>>(allocator_);
         }
-
         term_ids_[term]->push_back(base_id);
 
         auto& data_vec = *term_datas_[term];
@@ -285,6 +474,30 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint16_t base_
         term_sizes_[term] += 1;
     }
     total_count_++;
+}
+
+void
+SparseTermDataCell::SortByValue() {
+    Vector<uint32_t> order(allocator_);
+    Vector<uint16_t> sorted_ids(allocator_);
+    Vector<uint8_t> sorted_data(allocator_);
+
+    for (uint32_t term = 0; term < term_sizes_.size(); ++term) {
+        const auto term_size = term_sizes_[term];
+        if (term_size == 0) {
+            continue;
+        }
+
+        auto& ids = *term_ids_[term];
+        auto& data = *term_datas_[term];
+        SortPostingListByValue(ids.data(),
+                               data.data(),
+                               term_size,
+                               sparse_value_quant_type_,
+                               order,
+                               sorted_ids,
+                               sorted_data);
+    }
 }
 
 void
@@ -499,7 +712,7 @@ SparseTermDataCell::Serialize(StreamWriter& writer) const {
 }
 
 void
-SparseTermDataCell::Deserialize(StreamReader& reader) {
+SparseTermDataCell::Deserialize(StreamReader& reader, bool postings_sorted) {
     uint32_t term_capacity;
     StreamReader::ReadObj(reader, term_capacity);
     ResizeTermList(term_capacity);
@@ -530,6 +743,9 @@ SparseTermDataCell::Deserialize(StreamReader& reader) {
         }
     }
 
+    if (not postings_sorted) {
+        SortByValue();
+    }
     Compact();
 
     // Restore total_count_ from compacted deserialized data (not serialized for compatibility).
@@ -557,70 +773,78 @@ SparseTermDataCell::Decode(const uint8_t* src, size_t size, float* dst) const {
     }
 }
 
-template void
+template bool
 SparseTermDataCell::InsertHeapByTermLists<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
     float* dists,
     const SparseTermComputerPtr& computer,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_limit) const;
 
-template void
+template bool
 SparseTermDataCell::InsertHeapByTermLists<InnerSearchMode::KNN_SEARCH,
                                           InnerSearchType::WITH_FILTER>(
     float* dists,
     const SparseTermComputerPtr& computer,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_limit) const;
 
-template void
+template bool
 SparseTermDataCell::InsertHeapByTermLists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::PURE>(
     float* dists,
     const SparseTermComputerPtr& computer,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_limit) const;
 
-template void
+template bool
 SparseTermDataCell::InsertHeapByTermLists<InnerSearchMode::RANGE_SEARCH,
                                           InnerSearchType::WITH_FILTER>(
     float* dists,
     const SparseTermComputerPtr& computer,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_limit) const;
 
-template void
+template bool
 SparseTermDataCell::InsertHeapByDists<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_limit) const;
 
-template void
+template bool
 SparseTermDataCell::InsertHeapByDists<InnerSearchMode::KNN_SEARCH, InnerSearchType::WITH_FILTER>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_limit) const;
 
-template void
+template bool
 SparseTermDataCell::InsertHeapByDists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::PURE>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_limit) const;
 
-template void
+template bool
 SparseTermDataCell::InsertHeapByDists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::WITH_FILTER>(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
-    uint32_t offset_id) const;
+    uint32_t offset_id,
+    const uint64_t* filter_callback_limit) const;
 
 }  // namespace vsag

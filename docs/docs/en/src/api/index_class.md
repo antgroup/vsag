@@ -1,7 +1,7 @@
 # Index
 
 `vsag::Index` (declared in `vsag/index.h`) is the central abstraction of the library. Every concrete
-index type — HGraph, IVF, DiskANN, BruteForce, SINDI, Pyramid, and so on — implements this
+index type — HGraph, IVF, BruteForce, SINDI, Pyramid, and so on — implements this
 interface. You never instantiate `Index` directly; obtain one from
 [`Factory::CreateIndex`](factory_engine.md#createindex) or [`Engine::CreateIndex`](factory_engine.md#createindex-1)
 and hold it through `IndexPtr` (`std::shared_ptr<Index>`).
@@ -34,7 +34,8 @@ Pointer/handle types used throughout this page: `DatasetPtr` ([Dataset](dataset.
 
 ```cpp
 enum class IndexType {
-    HNSW, DISKANN, HGRAPH, IVF, PYRAMID, BRUTEFORCE, SPARSE, SINDI, WARP, LAZY_HGRAPH, SIMQ
+    HGRAPH = 2, IVF = 3, PYRAMID = 4, BRUTEFORCE = 5, SPARSE = 6, SINDI = 7,
+    WARP = 8, LAZY_HGRAPH = 9, SIMQ = 10
 };
 ```
 
@@ -219,8 +220,9 @@ error). See [Range Search](../advanced/range_search.md) and `examples/cpp/302_fe
 |--------|-----------|-------|
 | `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const float* vector, int64_t id, bool calculate_precise_distance = true) const` | Distance from a dense query to the stored vector `id`. |
 | `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const DatasetPtr& vector, int64_t id, bool calculate_precise_distance = true) const` | Same, accepting a `DatasetPtr` (works for sparse indexes such as SINDI). |
-| `CalDistanceById` | `tl::expected<DatasetPtr, Error> CalDistanceById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | Batch variant; `-1` in the result marks an invalid distance. |
-| `CalDistanceById` | `tl::expected<DatasetPtr, Error> CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | Batch variant accepting a `DatasetPtr` query. |
+| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | Canonical batch variant; `topk > 0` returns sorted smallest distances with IDs, and invalid `-1` distances are ordered last. |
+| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const DatasetPtr& query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | Canonical DatasetPtr batch variant. For `query->GetNumElements() > 1`, indexes must advertise `SUPPORT_BATCH_CALC_DISTANCE_BY_ID`; `ids` contains `NumElements * count` row-major entries. With `topk > 0`, each query returns `min(topk, count)` sorted distances with matching IDs. |
+| `CalDistanceById` | Same signatures as `CalcDistancesById` | Deprecated compatibility alias; use `CalcDistancesById` for new code. |
 
 `calculate_precise_distance = true` may load full-precision vectors (possibly from disk) instead of
 quantized codes. See [Calculate Distance by ID](../advanced/calc_distance_by_id.md) and
@@ -284,6 +286,10 @@ and `examples/cpp/401_persistent_kv.cpp` / `402_persistent_streaming.cpp`.
 |--------|-----------|-------|
 | `ExportCache` | `tl::expected<void, Error> ExportCache(std::ostream& out_stream) const` | Writes a build-time cache (e.g. graph neighbors) that can accelerate a later `Build`. |
 | `ImportCache` | `tl::expected<void, Error> ImportCache(std::istream& in_stream)` | Loads a previously exported cache; the next `Build` reuses it. |
+
+HGraph matches cache entries by `Dataset::SourceID`. Import into an empty compatible index before
+`Build()`; see [HGraph Build Cache](../advanced/build_cache.md) for the complete workflow,
+`persist_source_id`, and hit-rate diagnostics.
 
 ## Statistics & introspection
 

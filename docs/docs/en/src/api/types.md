@@ -228,12 +228,12 @@ instead of raw string literals avoids typos. They fall into several groups:
 
 | Group | Examples |
 |-------|----------|
-| Index type names | `INDEX_HGRAPH`, `INDEX_IVF`, `INDEX_DISKANN`, `INDEX_BRUTE_FORCE`, `INDEX_SINDI`, `INDEX_PYRAMID` |
+| Index type names | `INDEX_HGRAPH`, `INDEX_IVF`, `INDEX_BRUTE_FORCE`, `INDEX_SINDI`, `INDEX_PYRAMID` |
 | Dataset field names | `DIM`, `NUM_ELEMENTS`, `IDS`, `DISTS`, `FLOAT32_VECTORS`, `SPARSE_VECTORS` |
 | Metric names | `METRIC_L2`, `METRIC_COSINE`, `METRIC_IP` |
 | Data type names | `DATATYPE_FLOAT32`, `DATATYPE_FLOAT16`, `DATATYPE_BFLOAT16`, `DATATYPE_INT8`, `DATATYPE_SPARSE` |
 | Top-level params | `PARAMETER_DTYPE`, `PARAMETER_DIM`, `PARAMETER_METRIC_TYPE`, `INDEX_PARAM` |
-| Per-index params | `HGRAPH_*`, `IVF_*`, `DISKANN_PARAMETER_*`, `PYRAMID_*`, `BRUTE_FORCE_*` |
+| Per-index params | `HGRAPH_*`, `IVF_*`, `PYRAMID_*`, `BRUTE_FORCE_*` |
 | Statistics keys | `STATSTIC_MEMORY`, `STATSTIC_KNN_TIME`, `STATSTIC_RANGE_TIME` |
 
 For the meaning of each parameter key, see [Index Parameters](../resources/index_parameters.md) and

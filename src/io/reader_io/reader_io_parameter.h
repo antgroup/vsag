@@ -34,6 +34,7 @@ public:
     ToJson() const override {
         JsonType json;
         json[TYPE_KEY].SetString(IO_TYPE_VALUE_READER_IO);
+        AppendReadCacheConfig(json);
         return json;
     }
 

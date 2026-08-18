@@ -26,6 +26,7 @@ public:
           sample_ids_(pyramid->allocator_),
           sample_datas_(pyramid->allocator_),
           subindex_stats_(pyramid->allocator_),
+          duplicate_computers_(pyramid->allocator_),
           ground_truth_(pyramid->allocator_),
           search_result_(pyramid->allocator_),
           low_recall_nodes_(pyramid->allocator_),
@@ -154,7 +155,21 @@ private:
     calculate_groundtruth(const Vector<float>& sample_datas,
                           const Vector<InnerIdType>& sample_ids,
                           UnorderedMap<InnerIdType, DistHeapPtr>& ground_truth,
-                          uint32_t sample_size);
+                          uint32_t sample_size,
+                          const std::string& hierarchy_name,
+                          const std::string* query_paths,
+                          const UnorderedSet<InnerIdType>& deleted_ids);
+
+    Vector<InnerIdType>
+    collect_search_scope_ids(const std::string& hierarchy_name,
+                             const std::string* query_path,
+                             const UnorderedSet<InnerIdType>& deleted_ids);
+
+    void
+    collect_searchable_node_ids(const IndexNode* node,
+                                const UnorderedSet<InnerIdType>& deleted_ids,
+                                UnorderedSet<InnerIdType>& seen_ids,
+                                Vector<InnerIdType>& ids);
 
     float
     get_avg_distance();
@@ -176,10 +191,13 @@ private:
                             const Vector<InnerIdType>& sample_ids,
                             UnorderedMap<InnerIdType, Vector<LabelType>>& search_result,
                             const std::string& search_param,
-                            uint32_t sample_size);
+                            uint32_t sample_size,
+                            const std::string& hierarchy_name,
+                            const std::string* query_paths);
 
     float
     get_search_recall(uint32_t sample_size,
+                      const Vector<float>& sample_datas,
                       const Vector<InnerIdType>& sample_ids,
                       const UnorderedMap<InnerIdType, DistHeapPtr>& ground_truth,
                       const UnorderedMap<InnerIdType, Vector<LabelType>>& search_result);
@@ -188,8 +206,11 @@ private:
     get_avg_distance_from_groundtruth(const Vector<InnerIdType>& sample_ids,
                                       const UnorderedMap<InnerIdType, DistHeapPtr>& ground_truth);
 
+    const Vector<ComputerInterfacePtr>&
+    get_duplicate_computers();
+
     float
-    get_node_duplicate_ratio(const IndexNode* node, const Vector<InnerIdType>& node_ids);
+    get_node_duplicate_ratio(const Vector<InnerIdType>& node_ids);
 
     bool
     check_entry_point_duplicate(const IndexNode* node,
@@ -202,6 +223,7 @@ private:
     Vector<float> sample_datas_;
     uint32_t sample_size_;
     Vector<SubIndexStats> subindex_stats_;
+    Vector<ComputerInterfacePtr> duplicate_computers_;
 
     UnorderedMap<InnerIdType, DistHeapPtr> ground_truth_;
     UnorderedMap<InnerIdType, Vector<LabelType>> search_result_;

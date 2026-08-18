@@ -369,7 +369,12 @@ TEST_CASE("SparseDataCell New Format Sentinel", "[ut][SparseDataCell]") {
     std::vector<InnerIdType> all_ids(base_count);
     std::iota(all_ids.begin(), all_ids.end(), 0);
     std::vector<float> dist(base_count);
-    reloaded->Query(dist.data(), computer, all_ids.data(), base_count);
+    SearchStatistics stats;
+    QueryContext ctx{.stats = &stats};
+    reloaded->Query(dist.data(), computer, all_ids.data(), base_count, &ctx);
+    JsonType statistics = JsonType::Parse(stats.Dump());
+    REQUIRE(statistics["distance_evaluations_by_backend"]["sparse_fp32"].GetUint64() == base_count);
+    REQUIRE(statistics["complete"].GetBool());
     for (uint32_t i = 0; i < base_count; ++i) {
         fixtures::dist_t expected =
             fixtures::GetSparseDistance(query_sparse_vectors[0], sparse_vectors[i]);

@@ -34,12 +34,84 @@ enum class SearchMode {
 
 | Field | Type | Default | Meaning |
 |-------|------|---------|---------|
-| `query_` | `DatasetPtr` | `nullptr` | The query. Exactly one query vector is allowed. |
+| `query_` | `DatasetPtr` | `nullptr` | The query. IVF KNN requests support multiple query vectors; other requests allow one. |
 | `mode_` | `SearchMode` | `KNN_SEARCH` | KNN vs. range search. |
 | `topk_` | `int64_t` | `10` | Neighbors to return (KNN mode). Must be positive. |
 | `radius_` | `float` | `0.5` | Distance threshold (range mode). Non-negative. |
 | `limited_size_` | `int64_t` | `-1` | Cap on range results; `-1` means no limit. |
 | `params_str_` | `std::string` | `""` | Algorithm-specific search params as JSON (e.g. `ef_search`). |
+
+### Custom query distance callback
+
+`distance_batch_func_` optionally supplies query-to-vector scores from application code. It receives
+stable external vector IDs, so a closure can keep the query and query-specific state outside VSAG:
+
+```cpp
+request.distance_batch_size_ = 32;
+request.distance_batch_func_ = [query](const int64_t* ids, uint64_t count, float* scores) {
+    for (uint64_t i = 0; i < count; ++i) {
+        scores[i] = Score(query, ids[i]);
+    }
+};
+```
+
+| Field | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `distance_batch_func_` | `SearchDistanceBatchFunc` | `nullptr` | Fills one score for each input external ID, in input order. Smaller finite scores are better. |
+| `distance_batch_size_` | `uint64_t` | `1` | Maximum IDs passed to one callback invocation. Set this to the scorer's efficient batch width for batched inference or external data access. Must be positive when a callback is set. |
+
+The callback is request-scoped and is not serialized. It may capture the query. `hgraph` permits a
+null `query_` in callback mode, while `ivf` still requires one query vector for bucket routing. The
+callback must be stable for one request, thread-safe if the caller enables parallel execution,
+non-throwing, and must write only finite scores.
+
+`brute_force` uses the callback for exact KNN and range search. `hgraph` supports KNN only; the
+callback drives graph traversal and final ordering, while the graph remains built with its configured
+built-in metric. Therefore recall under the callback score is not guaranteed. HGraph may score
+filtered traversal nodes to preserve graph connectivity, but filtered nodes are never returned.
+Callback HGraph does not support parallel search or `brute_force_threshold`; those configurations
+are rejected rather than silently changing search semantics.
+
+`ivf` supports callback KNN with a non-null single query vector. IVF uses its configured built-in
+metric to select `scan_buckets_count` buckets, then applies the callback to candidates in those
+buckets. The callback controls candidate ranking but cannot recover vectors outside the selected
+buckets; increase `scan_buckets_count` to improve recall. Callback IVF does not support range search,
+`disable_bucket_scan`, bucket-graph search, or parallel search. Those configurations are rejected.
+Reordering is automatically disabled in callback mode. Other indexes do not support the callback.
+
+### IVF bucket routing
+
+IVF accepts `{"ivf":{"scan_buckets_count":N,"disable_bucket_scan":true}}` through
+`params_str_`. This routing-only mode returns the `N` selected bucket IDs per query in the
+result `Dataset` instead of vector labels. `NumElements()` equals the number of queries,
+`Dim()` equals `scan_buckets_count`, `GetIds()` contains bucket IDs (with `-1` for empty
+slots), and `GetDistances()` has distances to bucket centroids. No vector scan is performed,
+so filters, `topk`, range limits, reordering, and reasoning options are ignored.
+
+### IVF bucket IDs bypass
+
+The `bucket_ids_` field allows callers to provide pre-selected bucket IDs, bypassing IVF's
+internal bucket routing (`ClassifyDatasForSearch`). When non-empty, the search skips centroid-based
+selection and scans only the specified buckets.
+
+| Field | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `bucket_ids_` | `std::vector<std::vector<int64_t>>` | `{}` | Pre-selected bucket IDs for bypassing IVF routing. |
+
+**Semantics:**
+- **Empty** (default): Use normal bucket routing via `ClassifyDatasForSearch`.
+- **Non-empty**: Skip routing and scan only the provided bucket IDs.
+- **Batch IVF KNN**: One outer `bucket_ids_` entry per query vector.
+  Result is rectangular: `NumElements()` is query count, `Dim()` is `topk_`.
+  Missing neighbors are `-1` with infinite distance.
+
+**Constraints:**
+- Batch IVF search supports KNN only; custom query distance and reasoning labels are unsupported.
+- A non-empty outer vector must contain exactly one non-empty entry per query vector.
+- Each bucket ID must be in range `[0, bucket_count)`.
+- Duplicate bucket IDs are rejected.
+- Incompatible with `disable_bucket_scan` mode.
+- Caller is responsible for ordering bucket IDs (no automatic sorting).
 
 ### Filtering fields
 

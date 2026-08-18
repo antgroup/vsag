@@ -69,7 +69,7 @@ public:
      *
      * If exist_file_ is false (file was newly created), the file is removed.
      */
-    ~BufferIO() override {
+    ~BufferIO() {
         close(this->fd_);
         // remove file
         if (not this->exist_file_) {

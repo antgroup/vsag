@@ -19,7 +19,6 @@
 #include <memory>
 #include <vector>
 
-#include "algorithm/hnswlib/hnswalg.h"
 #include "common.h"
 #include "dense_duplicate_tracker.h"
 #include "graph_datacell_parameter.h"
@@ -352,7 +351,7 @@ template <typename IOTmpl>
 void
 GraphDataCell<IOTmpl>::DeleteNeighborsById(vsag::InnerIdType id) {
     if (is_support_delete_) {
-        if (id <= max_capacity_) {
+        if (id < max_capacity_) {
             if (node_versions_[id] + 1 == 0) {
                 throw VsagException(
                     ErrorType::INTERNAL_ERROR,
@@ -373,7 +372,7 @@ template <typename IOTmpl>
 void
 GraphDataCell<IOTmpl>::RecoverDeleteNeighborsById(vsag::InnerIdType id) {
     if (is_support_delete_) {
-        if (id <= max_capacity_) {
+        if (id < max_capacity_) {
             if (node_versions_[id] == 0) {
                 throw VsagException(ErrorType::INTERNAL_ERROR,
                                     "recover remove point too many times in GraphDatacell");

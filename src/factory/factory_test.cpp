@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,43 +23,13 @@
 #include "unittest.h"
 #include "vsag/errors.h"
 
-TEST_CASE("Create Index with Full Parameters", "[ut][factory]") {
-    vsag::logger::set_level(vsag::logger::level::debug);
-
-    SECTION("hnsw") {
-        auto parameters = vsag::JsonType::Parse(R"(
-        {
-            "dtype": "float32",
-            "metric_type": "l2",
-            "dim": 512,
-            "hnsw": {
-                "max_degree": 16,
-                "ef_construction": 100
-            }
-        }
-        )");
-
-        auto index = vsag::Factory::CreateIndex("hnsw", parameters.Dump());
-        REQUIRE(index.has_value());
-    }
-
-    SECTION("diskann") {
-        auto parameters = vsag::JsonType::Parse(R"(
-        {
-            "dtype": "float32",
-            "metric_type": "l2",
-            "dim": 256,
-            "diskann": {
-                "ef_construction": 200,
-                "max_degree": 16,
-                "pq_dims": 32,
-                "pq_sample_rate": 0.5
-            }
-        }
-        )");
-
-        auto index = vsag::Factory::CreateIndex("diskann", parameters.Dump());
-        REQUIRE(index.has_value());
+TEST_CASE("Factory reports removed indexes as unsupported", "[ut][factory]") {
+    for (const auto* name : {"hnsw", "fresh_hnsw", "diskann"}) {
+        auto index =
+            vsag::Factory::CreateIndex(name, R"({"dtype":"float32","metric_type":"l2","dim":4})");
+        INFO(name);
+        REQUIRE_FALSE(index.has_value());
+        REQUIRE(index.error().type == vsag::ErrorType::UNSUPPORTED_INDEX);
     }
 }
 
@@ -123,136 +92,4 @@ TEST_CASE("Create Local File Reader", "[ut][factory]") {
         REQUIRE(reader2->Size() == 5);
     }
     std::remove(filename.c_str());
-}
-
-TEST_CASE("Create HNSW with Incomplete Parameters", "[ut][factory]") {
-    vsag::logger::set_level(vsag::logger::level::debug);
-
-    auto standard_parameters = vsag::JsonType::Parse(R"(
-            {
-                "dtype": "float32",
-                "metric_type": "l2",
-                "dim": 512,
-                "hnsw": {
-                    "max_degree": 16,
-                    "ef_construction": 100
-                }
-            }
-            )");
-
-    SECTION("dtype is not provided") {
-        standard_parameters.Erase("dtype");
-        auto index = vsag::Factory::CreateIndex("hnsw", standard_parameters.Dump());
-        REQUIRE_FALSE(index.has_value());
-        REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
-
-    SECTION("metric_type is not provided") {
-        standard_parameters.Erase("metric_type");
-        auto index = vsag::Factory::CreateIndex("hnsw", standard_parameters.Dump());
-        REQUIRE_FALSE(index.has_value());
-        REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
-
-    SECTION("dim is not provided") {
-        standard_parameters.Erase("dim");
-        auto index = vsag::Factory::CreateIndex("hnsw", standard_parameters.Dump());
-        REQUIRE_FALSE(index.has_value());
-        REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
-
-    SECTION("hnsw is not provided") {
-        standard_parameters.Erase("hnsw");
-        auto index = vsag::Factory::CreateIndex("hnsw", standard_parameters.Dump());
-        REQUIRE_FALSE(index.has_value());
-        REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
-
-    SECTION("max_degree is not provided") {
-        standard_parameters["hnsw"].Erase("max_degree");
-        auto index = vsag::Factory::CreateIndex("hnsw", standard_parameters.Dump());
-        REQUIRE_FALSE(index.has_value());
-        REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
-
-    SECTION("ef_construction is not provided") {
-        standard_parameters["hnsw"].Erase("ef_construction");
-        auto index = vsag::Factory::CreateIndex("hnsw", standard_parameters.Dump());
-        REQUIRE_FALSE(index.has_value());
-        REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
-}
-
-TEST_CASE("Create Diskann with Incomplete Parameters", "[ut][factory]") {
-    vsag::logger::set_level(vsag::logger::level::debug);
-
-    auto standard_parameters = vsag::JsonType::Parse(R"(
-            {
-                "dim": 256,
-                "dtype": "float32",
-                "metric_type": "l2",
-                "diskann": {
-                    "max_degree": 16,
-                    "ef_construction": 200,
-                    "pq_dims": 32,
-                    "pq_sample_rate": 0.5
-                }
-            }
-            )");
-
-    SECTION("dtype is not provided") {
-        standard_parameters.Erase("dtype");
-        auto index = vsag::Factory::CreateIndex("diskann", standard_parameters.Dump());
-        REQUIRE_FALSE(index.has_value());
-        REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
-
-    SECTION("metric_type is not provided") {
-        standard_parameters.Erase("metric_type");
-        auto index = vsag::Factory::CreateIndex("diskann", standard_parameters.Dump());
-        REQUIRE_FALSE(index.has_value());
-        REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
-
-    SECTION("dim is not provided") {
-        standard_parameters.Erase("dim");
-        auto index = vsag::Factory::CreateIndex("diskann", standard_parameters.Dump());
-        REQUIRE_FALSE(index.has_value());
-        REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
-
-    SECTION("diskann is not provided") {
-        standard_parameters.Erase("diskann");
-        auto index = vsag::Factory::CreateIndex("diskann", standard_parameters.Dump());
-        REQUIRE_FALSE(index.has_value());
-        REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
-
-    SECTION("max_degree is not provided") {
-        standard_parameters["diskann"].Erase("max_degree");
-        auto index = vsag::Factory::CreateIndex("diskann", standard_parameters.Dump());
-        REQUIRE_FALSE(index.has_value());
-        REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
-
-    SECTION("ef_construction is not provided") {
-        standard_parameters["diskann"].Erase("ef_construction");
-        auto index = vsag::Factory::CreateIndex("diskann", standard_parameters.Dump());
-        REQUIRE_FALSE(index.has_value());
-        REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
-
-    SECTION("pq_dims is not provided") {
-        standard_parameters["diskann"].Erase("pq_dims");
-        auto index = vsag::Factory::CreateIndex("diskann", standard_parameters.Dump());
-        REQUIRE_FALSE(index.has_value());
-        REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
-
-    SECTION("pq_sample_rate is not provided") {
-        standard_parameters["diskann"].Erase("pq_sample_rate");
-        auto index = vsag::Factory::CreateIndex("diskann", standard_parameters.Dump());
-        REQUIRE_FALSE(index.has_value());
-        REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
 }

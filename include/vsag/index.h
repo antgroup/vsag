@@ -53,17 +53,17 @@ struct MergeUnit {
 };
 
 enum class IndexType {
-    HNSW,
-    DISKANN,
-    HGRAPH,
-    IVF,
-    PYRAMID,
-    BRUTEFORCE,
-    SPARSE,
-    SINDI,
-    WARP,
-    LAZY_HGRAPH,
-    SIMQ
+    // Values 0 and 1 were assigned to the removed HNSW and DiskANN types. Do not reuse them:
+    // maintained index ordinals must remain stable for API and serialization compatibility.
+    HGRAPH = 2,
+    IVF = 3,
+    PYRAMID = 4,
+    BRUTEFORCE = 5,
+    SPARSE = 6,
+    SINDI = 7,
+    WARP = 8,
+    LAZY_HGRAPH = 9,
+    SIMQ = 10
 };
 
 #define DATA_FLAG_FLOAT32_VECTOR 0x01
@@ -498,9 +498,9 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID.
      *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * Suitable for dense vector indexes such as HGraph, BruteForce, IVF, and Pyramid.
      * The query must be a contiguous float32 array with dimension matching the index.
-      * For sparse vector indexes (SINDI), this overload is not applicable;
+     * For sparse vector indexes (SINDI), this overload is not applicable;
      * use CalcDistanceById(DatasetPtr, int64_t, bool) instead.
      *
      * @param vector The embedding of the query (float32 array for dense vectors).
@@ -522,11 +522,12 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID.
      *
-      * Suitable for sparse vector indexes (SINDI) where vectors
-     * cannot be represented as a simple float pointer. The Dataset should
-     * contain sparse vectors via GetSparseVectors().
-     * For dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW),
-     * this overload is also available and internally calls GetFloat32Vectors().
+     * Suitable for Dataset-backed query formats, especially sparse vector indexes
+     * (SINDI) where vectors cannot be represented as a simple float pointer.
+     * Dense DatasetPtr batch queries are supported by the batch overload below
+     * through Float32Vectors() when the index advertises the batch feature; for
+     * this single-ID overload, dense callers should prefer the const float* API
+     * unless the target implementation explicitly supports DatasetPtr distance.
      *
      * @param vector is the embedding of query (sparse or dense format via DatasetPtr).
      * @param id is the unique identifier of the vector to be calculated in the index.
@@ -547,9 +548,10 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID for batch.
      *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * Suitable for dense vector indexes. HGraph, BruteForce, IVF, and Pyramid support top-k
+     * output when they advertise the corresponding batch distance feature.
      * The query must be a contiguous float32 array. For sparse vector indexes
-      * (SINDI), this overload is not applicable; use
+     * (SINDI), this overload is not applicable; use
      * CalDistanceById(DatasetPtr, const int64_t*, int64_t, bool) instead.
      *
      * @param query is the embedding of query (float32 array for dense vectors).
@@ -559,40 +561,70 @@ public:
      *        vectors (e.g., full-precision float32) for distance computation, even if it requires
      *        loading data from disk, which may incur I/O overhead. If false, the implementation may
      *        use quantized or approximate representations for faster computation.
-     * @return result is valid distance of input ids. '-1' indicates an invalid distance.
+     * @param topk If -1 (default), returns all count distances without IDs and without sorting.
+     *        If positive, returns the top-k smallest distances in ascending order along with
+     *        matching IDs. The result Dim is min(topk, count). Invalid IDs (missing labels) are
+     *        ranked last and only appear if there are fewer than topk valid IDs.
+     * @return result is valid distance of input ids. If topk == -1, Dim() is count and the
+    *         distance buffer contains count entries. If topk is positive, Dim() is
+     *         min(topk, count), IDs are returned, and the distance/ID buffers contain Dim()
+     *         entries. '-1' indicates an invalid distance.
      */
-    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
+    [[deprecated(
+        "use CalcDistancesById instead")]] [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     CalDistanceById(const float* query,
                     const int64_t* ids,
                     int64_t count,
-                    bool calculate_precise_distance = true) const {
+                    bool calculate_precise_distance = true,
+                    int64_t topk = -1) const {
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                     "Index does not support get distance by id"));
     }
 
     /**
-     * @brief Calculate the distance between the query and the vector of the given ID for batch.
+     * @brief Calculate distances between query(queries) and vectors of given IDs for batch.
      *
-      * Suitable for sparse vector indexes (SINDI) where vectors
-     * cannot be represented as a simple float pointer. The Dataset should
-     * contain sparse vectors via GetSparseVectors().
-     * For dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW),
-     * this overload is also available and internally calls GetFloat32Vectors().
+     * Suitable for Dataset-backed batch query formats. Sparse vector indexes
+     * (SINDI) use GetSparseVectors(). Dense vector indexes that advertise
+     * SUPPORT_BATCH_CALC_DISTANCE_BY_ID can use Float32Vectors() through the
+     * default DatasetPtr batch implementation or an index-specific override.
      *
-     * @param query is the embedding of query (sparse or dense format via DatasetPtr).
-     * @param ids is the unique identifier of the vector to be calculated in the index.
-     * @param count is the count of ids
-     * @param calculate_precise_distance If true, the function will attempt to use high-precision
-     *        vectors (e.g., full-precision float32) for distance computation, even if it requires
-     *        loading data from disk, which may incur I/O overhead. If false, the implementation may
-     *        use quantized or approximate representations for faster computation.
-     * @return result is valid distance of input ids. '-1' indicates an invalid distance.
-     */
-    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
+     * When the query DatasetPtr contains multiple vectors (NumElements > 1),
+     * this method computes distances for each query against its own row of IDs.
+     * Callers should check SUPPORT_BATCH_CALC_DISTANCE_BY_ID before relying on
+     * multi-query behavior; unsupported indexes return an error. Both the input
+     * IDs and result distances use row-major layout with count IDs per query:
+     * ids[i * count + j] is the j-th ID for query i, and distances[i * count + j]
+     * is the distance from query i to that ID. '-1' indicates an invalid ID.
+     *
+     * @param query is the embedding of query(queries) (sparse or dense via DatasetPtr).
+     *        When NumElements() > 1, each element is a separate query.
+     * @param ids is the unique identifier matrix of vectors to be calculated. For
+     *        multiple queries, it must contain NumElements() * count IDs in row-major layout.
+     * @param count is the count of ids per query
+     * @param calculate_precise_distance If true, the function will attempt to use
+     *        high-precision vectors (e.g., full-precision float32) for distance
+     *        computation, even if it requires loading data from disk, which may
+     *        incur I/O overhead. If false, the implementation may use quantized
+     *        or approximate representations for faster computation.
+     * @param topk If -1 (default), returns all count distances per query without IDs
+     *        and without sorting. If positive, returns the top-k smallest distances
+     *        per query in ascending order along with matching IDs. The result Dim is
+     *        min(topk, count). Invalid IDs (missing labels) are ranked last per query
+     *        row and only appear if there are fewer than topk valid IDs in that row.
+     * @return result distances. Use result->GetDim() as the row stride. When topk == -1,
+     *         Dim() is count and the distance buffer contains NumElements() * count entries.
+     *         When topk is positive, Dim() is min(topk, count), IDs are returned, and the
+     *         distance/ID buffers contain NumElements() * Dim() entries in row-major layout.
+    *         '-1' indicates an invalid distance.
+    */
+    [[deprecated(
+        "use CalcDistancesById instead")]] [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     CalDistanceById(const DatasetPtr& query,
                     const int64_t* ids,
                     int64_t count,
-                    bool calculate_precise_distance = true) const {
+                    bool calculate_precise_distance = true,
+                    int64_t topk = -1) const {
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                     "Index does not support get distance by id"));
     }
@@ -1059,47 +1091,73 @@ public:
             Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support ImportCache"));
     }
 
+    /**
+     * @brief Rebuild per-bucket graphs for IVF indices after Add operations.
+     *
+     * When an IVF index is configured with graph_build_threshold > 0, large buckets
+     * get internal graphs for faster search. After Add() operations, these graphs
+     * become stale. This method explicitly rebuilds them using bucket-internal
+     * distance computation (no external dataset needed).
+     *
+     * Requirements:
+     * - Index must be IVF with graph_build_threshold > 0
+     * - Not safe for concurrent use with Add/Remove/Build/Serialize
+     *
+     * @return tl::expected<void, Error>; an Error is returned if the index does not
+     * support this operation or if graph_build_threshold was not configured.
+     */
+    virtual tl::expected<void, Error>
+    RebuildIVFBucketGraphs() {
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support RebuildIVFBucketGraphs"));
+    }
+
 public:
     virtual ~Index() = default;
+
+    // Keep this bridge nonvirtual: an old binary Index subclass has no corrected slot in its
+    // vtable. Dispatching through the pre-existing legacy virtuals keeps that ABI safe.
+    [[nodiscard]] tl::expected<DatasetPtr, Error>
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const {
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+        return this->CalDistanceById(query, ids, count, calculate_precise_distance, topk);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    }
+
+    [[nodiscard]] tl::expected<DatasetPtr, Error>
+    CalcDistancesById(const DatasetPtr& query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const {
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+        return this->CalDistanceById(query, ids, count, calculate_precise_distance, topk);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    }
 };
-
-/**
-  * @brief check if the build parameter is valid
-  *
-  * @return true if the parameter is valid, otherwise error with detail message.
-  */
-tl::expected<bool, Error>
-check_diskann_hnsw_build_parameters(const std::string& json_string);
-
-/**
-  * @brief check if the build parameter is valid
-  *
-  * @return true if the parameter is valid, otherwise error with detail message.
-  */
-tl::expected<bool, Error>
-check_diskann_hnsw_search_parameters(const std::string& json_string);
-
-/**
-  * @brief estimate search time for index
-  *
-  * @return the estimated search time in milliseconds.
-  */
-tl::expected<float, Error>
-estimate_search_time(const std::string& index_name,
-                     int64_t data_num,
-                     int64_t data_dim,
-                     const std::string& parameters);
-
-/**
-  * [experimental]
-  * @brief generate build index parameters from data size and dim
-  *
-  * @return the build parameter string
-  */
-tl::expected<std::string, Error>
-generate_build_parameters(std::string metric_type,
-                          int64_t num_elements,
-                          int64_t dim,
-                          bool use_conjugate_graph = false);
 
 }  // namespace vsag

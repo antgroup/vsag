@@ -220,8 +220,8 @@ SINDIAnalyzer::collect_coarse_candidates(const SparseVector& query,
     inner_param.ef = candidate_count;
     inner_param.topk = candidate_count;
     MaxHeap heap(sindi_->allocator_);
-    auto computer =
-        std::make_shared<SparseTermComputer>(effective_query, search_param, sindi_->allocator_);
+    auto computer = std::make_shared<SparseTermComputer>(
+        effective_query, search_param, sindi_->allocator_, sindi_->window_term_list_.size());
     const bool use_term_lists_heap_insert = sindi_->UseTermListsHeapInsert(search_param);
 
     Vector<float> dists(sindi_->window_size_, 0.0F, sindi_->allocator_);
@@ -271,8 +271,8 @@ SINDIAnalyzer::collect_doc_prune_candidates(const SparseVector& query,
     inner_param.ef = candidate_count;
     inner_param.topk = candidate_count;
     MaxHeap heap(sindi_->allocator_);
-    auto computer =
-        std::make_shared<SparseTermComputer>(effective_query, search_param, sindi_->allocator_);
+    auto computer = std::make_shared<SparseTermComputer>(
+        effective_query, search_param, sindi_->allocator_, sindi_->window_term_list_.size());
     const bool use_term_lists_heap_insert = sindi_->UseTermListsHeapInsert(search_param);
 
     Vector<float> dists(sindi_->window_size_, 0.0F, sindi_->allocator_);
@@ -284,40 +284,7 @@ SINDIAnalyzer::collect_doc_prune_candidates(const SparseVector& query,
             continue;
         }
         std::fill(dists.begin(), dists.end(), 0.0F);
-
-        while (computer->HasNextTerm()) {
-            auto term_idx = computer->NextTermIter();
-            auto term = computer->GetTerm(term_idx);
-            if (term >= term_list->term_sizes_.size() || term_list->term_sizes_[term] == 0) {
-                continue;
-            }
-            auto term_size = static_cast<uint32_t>(
-                static_cast<float>(term_list->term_sizes_[term]) * computer->term_retain_ratio_);
-            if (term_size == 0) {
-                continue;
-            }
-
-            if (is_sq8_value_quantization(term_list->sparse_value_quant_type_)) {
-                computer->ScanForAccumulateSQ8(term_idx,
-                                               term_list->term_ids_[term]->data(),
-                                               term_list->term_datas_[term]->data(),
-                                               term_size,
-                                               dists.data());
-            } else if (term_list->sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
-                computer->ScanForAccumulateFP16Bytes(term_idx,
-                                                     term_list->term_ids_[term]->data(),
-                                                     term_list->term_datas_[term]->data(),
-                                                     term_size,
-                                                     dists.data());
-            } else {
-                computer->ScanForAccumulateFloatBytes(term_idx,
-                                                      term_list->term_ids_[term]->data(),
-                                                      term_list->term_datas_[term]->data(),
-                                                      term_size,
-                                                      dists.data());
-            }
-        }
-        computer->ResetTerm();
+        term_list->Query(dists.data(), computer);
 
         if (use_term_lists_heap_insert) {
             term_list->InsertHeapByTermLists<KNN_SEARCH, PURE>(

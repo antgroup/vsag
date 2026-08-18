@@ -73,8 +73,8 @@ blocks. The parameters object can be built from a JSON string and can also carry
 with `SetReader`. Unsupported policies return an error instead of silently falling back. The API
 currently supports streaming BruteForce, HGraph, IVF, SINDI, and Pyramid indexes. BruteForce
 supports limited block placement policies. HGraph can bind `high_precision_codes` to an external
-reader through `precise_reader`. IVF, SINDI, and Pyramid currently load all emitted streaming
-blocks into memory.
+reader through `precise_reader`. IVF can do the same for either precise-code layout. SINDI and
+Pyramid currently load all emitted streaming blocks into memory.
 
 ## File Layout
 
@@ -177,11 +177,21 @@ IVF writes these streaming blocks in order:
 | `ivf_bucket` | bucket datacell payloads for inverted lists | yes |
 | `ivf_partition_strategy` | partition strategy state, such as trained centroids | yes |
 | `label_table` | external labels and label remap | yes |
-| `high_precision_codes` | reorder codes when IVF reorder is enabled | conditional |
+| `high_precision_codes` | flat reorder codes when IVF reorder uses the `flat` layout | conditional |
+| `ivf_precise_bucket` | bucket-aligned reorder codes when IVF uses the `bucket` layout | conditional |
 | `attribute_filter` | optional attribute filter index | conditional |
 
+`Load` can bind either precise-code block to an external reader. Set `precise_io_type` to
+`reader_io`, provide `precise_reader`, and make the reader expose exactly the
+`high_precision_codes` payload for `flat` or the `ivf_precise_bucket` payload for `bucket`. `Load`
+validates its size and checksum before the returned index can query it.
+`precise_enable_read_cache` and `precise_cache_total_size` configure the normal read cache for
+the remote precise codes.
+
 `DeserializeStreaming` restores the full in-memory IVF index. `Index::Load` can create the IVF
-index directly from streaming metadata and currently loads all emitted IVF blocks into memory.
+index directly from streaming metadata. It loads IVF blocks into memory by default; reader-backed
+precise codes remain external. The two precise-code blocks are mutually exclusive and are selected
+by `precise_codes_layout`.
 
 ## SINDI Blocks
 

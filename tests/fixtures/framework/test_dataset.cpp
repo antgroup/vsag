@@ -162,11 +162,12 @@ GenerateRandomDataset(uint64_t dim,
         auto vecs_int8 = fixtures::generate_int8_codes(count, dim, seed);
         if (not has_duplicate) {
             base->Float32Vectors(CopyVector(vecs))->Int8Vectors(CopyVector(vecs_int8));
-            base->SparseVectors(CopyVector(GenerateSparseVectors(count, dim)));
+            base->SparseVectors(CopyVector(GenerateSparseVectors(count, dim, 1000, 0.1F, 1.0F)));
         } else {
             base->Float32Vectors(DuplicateCopyVector(vecs))
                 ->Int8Vectors(DuplicateCopyVector(vecs_int8));
-            base->SparseVectors(DuplicateCopyVector(GenerateSparseVectors(count, dim)));
+            base->SparseVectors(
+                DuplicateCopyVector(GenerateSparseVectors(count, dim, 1000, 0.1F, 1.0F)));
         }
     } else if (vector_type == "multi") {
         auto [vector_lens, total_vector_len] = GenerateMultiVectorLens(count, seed + 2);

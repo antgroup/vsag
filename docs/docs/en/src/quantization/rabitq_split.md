@@ -1,6 +1,6 @@
 # RaBitQ x+y Split
 
-RaBitQ x+y split is an HGraph storage and search mode for low-bit base codes.
+RaBitQ x+y split is an HGraph and Pyramid storage and search mode for low-bit base codes.
 Each vector is divided into two records:
 
 - `x` filter bits are read during graph traversal and lower-bound filtering.
@@ -13,7 +13,7 @@ memory while the colder supplement record is stored on disk.
 
 ## Enable split mode
 
-HGraph selects split mode when both quantization types are `rabitq` and
+HGraph and Pyramid select split mode when both quantization types are `rabitq` and
 `rabitq_bits_per_dim_precise` is present:
 
 ```json
@@ -55,7 +55,7 @@ The constraints are:
 x + y <= 8
 ```
 
-If `rabitq_bits_per_dim_precise` is omitted, HGraph uses the standard RaBitQ
+If `rabitq_bits_per_dim_precise` is omitted, HGraph and Pyramid use the standard RaBitQ
 path instead of split storage.
 
 Enable the filter/lower-bound search path with:
@@ -90,7 +90,7 @@ The split search path has four stages:
 4. The final distance combines the filter contribution and supplement
    contribution into one `x+y`-bit RaBitQ estimate.
 
-The HGraph heap is therefore not populated with an `x+y` distance for every
+The graph-search heap is therefore not populated with an `x+y` distance for every
 visited vector. The inexpensive x-bit distance drives traversal; the more
 accurate distance is evaluated only during candidate reorder.
 
@@ -260,7 +260,7 @@ sum_i q_i * u_i
       + sum_i q_i * s_i
 ```
 
-For L2 with an x-bit lookup filter, HGraph passes the previously computed
+For L2 with an x-bit lookup filter, HGraph and Pyramid pass the previously computed
 filter distance to reorder as a hint. `ComputeDistWithSplitCodeAndFilterDist`
 recovers the first term from that hint and computes only the second term from
 the y supplement planes:
@@ -356,7 +356,7 @@ search-time `hgraph.rabitq_error_rate` does not.
 
 ## Operational notes
 
-- Split storage is currently an HGraph feature and requires fp32 query codes.
+- Split storage is currently available on HGraph and Pyramid and requires fp32 query codes. Pyramid enables the one-bit split search path by default for split indexes; pass `rabitq_one_bit_search: false` under `pyramid` to force the standard search path.
 - `l2`, `ip`, and `cosine` are supported. The filter-hint reorder shortcut is
   currently specialized for L2.
 - Keep `use_reorder: true` unless x-bit traversal accuracy alone has been
@@ -364,4 +364,4 @@ search-time `hgraph.rabitq_error_rate` does not.
 - Changing x, y, metric, or transform parameters requires rebuilding the
   index. A search-time `hgraph.rabitq_error_rate` override does not.
 - Use [RaBitQ](rabitq.md) for the general quantizer description and
-  [HGraph](../indexes/hgraph.md) for the complete index parameter table.
+  [HGraph](../indexes/hgraph.md) and [Pyramid](../indexes/pyramid.md) for the complete index parameter tables.

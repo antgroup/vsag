@@ -16,9 +16,11 @@
 #pragma once
 
 #include <algorithm>
+#include <cstring>
 #include <limits>
 #include <shared_mutex>
 #include <string>
+#include <vector>
 
 #include "basic_types.h"
 #include "flatten_datacell_parameter.h"
@@ -55,6 +57,19 @@ public:
           const InnerIdType* idx,
           InnerIdType id_count,
           QueryContext* ctx = nullptr) = 0;
+
+    virtual void
+    QueryById(float* result_dists,
+              InnerIdType query_id,
+              const InnerIdType* idx,
+              InnerIdType id_count,
+              QueryContext* /*ctx*/ = nullptr) {
+        // This fallback performs one pairwise call per ID. Datacells with a batched or
+        // storage-aware implementation should override it.
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            result_dists[i] = this->ComputePairVectors(query_id, idx[i]);
+        }
+    }
 
     virtual void
     QueryWithDistanceFilter(float* result_dists,
@@ -125,11 +140,38 @@ public:
         return result;
     }
 
+    virtual bool
+    CompareRawVectorWithId(const void* vector, InnerIdType id) {
+        if (vector == nullptr) {
+            return false;
+        }
+        std::vector<uint8_t> encoded(this->code_size_);
+        if (not this->Encode(static_cast<const float*>(vector), encoded.data())) {
+            return false;
+        }
+
+        bool need_release = false;
+        const auto* codes = this->GetCodesById(id, need_release);
+        if (codes == nullptr) {
+            return false;
+        }
+        bool result = (std::memcmp(encoded.data(), codes, this->code_size_) == 0);
+        if (need_release) {
+            this->Release(codes);
+        }
+        return result;
+    }
+
     virtual void
     Prefetch(InnerIdType id) = 0;
 
     [[nodiscard]] virtual std::string
     GetQuantizerName() = 0;
+
+    [[nodiscard]] virtual bool
+    SupportSplitCodeStorage() const {
+        return false;
+    }
 
     [[nodiscard]] virtual MetricType
     GetMetricType() = 0;
@@ -195,6 +237,17 @@ public:
     virtual bool
     GetCodesById(InnerIdType id, uint8_t* codes) const = 0;
 
+    // Optional fast path for algorithms that can consume a contiguous FP32 matrix directly.
+    // Implementations return nullptr when data is quantized, external, block-backed, or otherwise
+    // unavailable as a single stable buffer; callers must fall back to Query/GetCodesById.
+    [[nodiscard]] virtual const float*
+    TryGetContiguousRawFloatData(uint64_t* row_stride = nullptr) {
+        if (row_stride != nullptr) {
+            *row_stride = 0;
+        }
+        return nullptr;
+    }
+
     [[nodiscard]] virtual InnerIdType
     TotalCount() const {
         std::shared_lock lock(mutex_);
@@ -255,6 +308,7 @@ public:
     uint32_t code_size_{0};
     uint32_t prefetch_stride_code_{1};
     uint32_t prefetch_depth_code_{1};
+    DistanceEvaluationBackend backend_{DistanceEvaluationBackend::UNKNOWN};
 };
 
 }  // namespace vsag

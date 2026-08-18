@@ -62,6 +62,15 @@ TEST_CASE("Transform Quantizer Parameter CheckCompatibility", "[ut][TransformQua
     TEST_COMPATIBILITY_CASE("different length", param_pca_fp32, param_pca_fht_fp32, false);
     TEST_COMPATIBILITY_CASE(
         "different space", param_pca_fht_fp32_no_space, param_pca_fht_fp32, true);
+    TEST_COMPATIBILITY_CASE("different transform parameter",
+                            R"({"tq_chain":"mrle,rabitq","mrle_dim":64})",
+                            R"({"tq_chain":"mrle,rabitq","mrle_dim":32})",
+                            false);
+    TEST_COMPATIBILITY_CASE(
+        "different bottom parameter",
+        R"({"tq_chain":"mrle,rabitq","mrle_dim":64,"rabitq_bits_per_dim_base":3})",
+        R"({"tq_chain":"mrle,rabitq","mrle_dim":64,"rabitq_bits_per_dim_base":5})",
+        false);
 }
 
 TEST_CASE("TQ Parameter ToJson Test", "[ut][TransformQuantizerParameter]") {

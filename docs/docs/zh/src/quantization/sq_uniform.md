@@ -58,7 +58,7 @@ scale 与 offset**。这在热路径上带来三点收益：
 
 | Key | 类型 | 默认 | 适用 | 含义 |
 | --- | --- | --- | --- | --- |
-| `sq4_uniform_trunc_rate` | float | `0.05` | 仅 `sq4_uniform` | 对离群值的对称截断比例（`src/quantization/scalar_quantization/sq4_uniform_quantizer_parameter.h:39`）。值越大，越多极端坐标被截断，从而减少主体数据的范围浪费，代价是尾部被裁掉。 |
+| `sq4_uniform_trunc_rate` | float | `0.05` | 仅 `sq4_uniform` | 对离群值的有限对称截断比例，取值范围为闭区间 `[0.0, 0.5]`。值越大，越多极端坐标被截断，从而减少主体数据的范围浪费，代价是尾部被裁掉。 |
 
 `sq8_uniform` 没有量化器专属的 JSON 参数。
 

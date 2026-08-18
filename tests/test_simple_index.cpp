@@ -96,6 +96,78 @@ public:
     }
 };
 
+class LegacyBatchIndex : public SimpleIndex {
+public:
+    tl::expected<DatasetPtr, Error>
+    CalDistanceById(const float* query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true,
+                    int64_t topk = -1) const override {
+        (void)calculate_precise_distance;
+        (void)topk;
+        return Dataset::Make()->Owner(false)->Distances(const_cast<float*>(query));
+    }
+
+    tl::expected<DatasetPtr, Error>
+    CalDistanceById(const DatasetPtr& query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true,
+                    int64_t topk = -1) const override {
+        (void)ids;
+        (void)count;
+        (void)calculate_precise_distance;
+        (void)topk;
+        return Dataset::Make()->Owner(false)->Distances(query->GetFloat32Vectors());
+    }
+
+    // If the bridge were virtual, this shadow would be selected and the compatibility test would
+    // fail. An old binary subclass cannot provide a corrected vtable slot.
+    tl::expected<DatasetPtr, Error>
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const {
+        (void)query;
+        (void)ids;
+        (void)count;
+        (void)calculate_precise_distance;
+        (void)topk;
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "legacy subclass corrected shadow was called"));
+    }
+
+    tl::expected<DatasetPtr, Error>
+    CalcDistancesById(const DatasetPtr& query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const {
+        (void)query;
+        (void)ids;
+        (void)count;
+        (void)calculate_precise_distance;
+        (void)topk;
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "legacy subclass corrected shadow was called"));
+    }
+};
+
+TEST_CASE("Correct batch API dispatches to a legacy override", "[ft][simple_index]") {
+    IndexPtr index = std::make_shared<LegacyBatchIndex>();
+    const float distance = 1.0F;
+    auto result = index->CalcDistancesById(&distance, nullptr, 1);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDistances() == &distance);
+
+    auto query = Dataset::Make()->Owner(false)->NumElements(1)->Float32Vectors(&distance);
+    auto dataset_result = index->CalcDistancesById(query, nullptr, 1);
+    REQUIRE(dataset_result.has_value());
+    REQUIRE(dataset_result.value()->GetDistances() == &distance);
+}
+
 TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     IndexPtr index = std::make_shared<SimpleIndex>();
     auto pool = std::make_shared<fixtures::TestDatasetPool>();
@@ -127,7 +199,7 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     REQUIRE_FALSE(index->CalcDistanceById(dataset->base_->GetFloat32Vectors(), 1).has_value());
     REQUIRE_FALSE(index->CalcDistanceById(dataset->query_, 1).has_value());
     REQUIRE_FALSE(
-        index->CalDistanceById(dataset->base_->GetFloat32Vectors(), nullptr, 1).has_value());
+        index->CalcDistancesById(dataset->base_->GetFloat32Vectors(), nullptr, 1).has_value());
     REQUIRE_FALSE(index->GetMinAndMaxId().has_value());
     REQUIRE_FALSE(index->GetExtraInfoByIds(nullptr, 1, nullptr).has_value());
     REQUIRE_FALSE(index->UpdateExtraInfo(dataset->query_).has_value());

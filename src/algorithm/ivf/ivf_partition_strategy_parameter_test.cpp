@@ -33,6 +33,8 @@ TEST_CASE("IVF Partition Strategy Parameters Test", "[ut][IVFPartitionStrategyPa
     REQUIRE(param->partition_train_type == vsag::IVFNearestPartitionTrainerType::RandomTrainer);
     REQUIRE(param->gnoimi_param->first_order_buckets_count == 200);
     REQUIRE(param->gnoimi_param->second_order_buckets_count == 50);
+    REQUIRE(param->route_max_degree == 64);
+    REQUIRE(param->route_ef_construction == 300);
 
     vsag::ParameterTest::TestToJson(param);
 }
@@ -53,4 +55,49 @@ TEST_CASE("IVF Partition Strategy Parameters CheckCompatibility",
     REQUIRE(param->CheckCompatibility(param));
     auto other_type_param = std::make_shared<vsag::EmptyParameter>();
     REQUIRE_FALSE(param->CheckCompatibility(other_type_param));
+}
+
+TEST_CASE("IVF Partition Strategy Routing Parameters", "[ut][IVFPartitionStrategyParameters]") {
+    auto param = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+    param->FromString(R"(
+    {
+        "partition_strategy_type": "ivf",
+        "ivf_train_type": "kmeans",
+        "route_max_degree": 128,
+        "route_ef_construction": 512
+    })");
+
+    REQUIRE(param->route_max_degree == 128);
+    REQUIRE(param->route_ef_construction == 512);
+    vsag::ParameterTest::TestToJson(param);
+
+    auto incompatible = std::make_shared<vsag::IVFPartitionStrategyParameters>(*param);
+    incompatible->route_max_degree = 64;
+    REQUIRE_FALSE(param->CheckCompatibility(incompatible));
+
+    REQUIRE_THROWS(param->FromString(R"(
+    {
+        "partition_strategy_type": "ivf",
+        "ivf_train_type": "kmeans",
+        "route_max_degree": 0
+    })"));
+    REQUIRE_THROWS(param->FromString(R"(
+    {
+        "partition_strategy_type": "ivf",
+        "ivf_train_type": "kmeans",
+        "route_ef_construction": 0
+    })"));
+    REQUIRE_THROWS(param->FromString(R"(
+    {
+        "partition_strategy_type": "ivf",
+        "ivf_train_type": "kmeans",
+        "route_max_degree": 3
+    })"));
+    REQUIRE_THROWS(param->FromString(R"(
+    {
+        "partition_strategy_type": "ivf",
+        "ivf_train_type": "kmeans",
+        "route_max_degree": 512,
+        "route_ef_construction": 300
+    })"));
 }

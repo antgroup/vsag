@@ -15,9 +15,10 @@
 
 #include "./build_eval_case.h"
 
-#include <algorithm>
 #include <filesystem>
+#include <numeric>
 #include <utility>
+#include <vector>
 
 #include "../monitor/duration_monitor.h"
 #include "../monitor/memory_peak_monitor.h"
@@ -28,8 +29,10 @@ namespace vsag::eval {
 BuildEvalCase::BuildEvalCase(const std::string& dataset_path,
                              const std::string& index_path,
                              vsag::IndexPtr index,
-                             EvalConfig config)
-    : EvalCase(dataset_path, index_path, index), config_(std::move(config)) {
+                             EvalConfig config,
+                             EvalDatasetPtr dataset)
+    : EvalCase(dataset_path, index_path, std::move(index), std::move(dataset)),
+      config_(std::move(config)) {
     this->init_monitors();
 }
 
@@ -39,26 +42,35 @@ BuildEvalCase::init_monitors() {
         auto memory_peak_monitor = std::make_shared<MemoryPeakMonitor>("build");
         this->monitors_.emplace_back(std::move(memory_peak_monitor));
     }
-    if (config_.enable_tps) {
-        auto duration_monitor = std::make_shared<DurationMonitor>();
-        this->monitors_.emplace_back(std::move(duration_monitor));
-    }
+    auto duration_monitor = std::make_shared<DurationMonitor>();
+    this->monitors_.emplace_back(std::move(duration_monitor));
 }
 
 JsonType
 BuildEvalCase::Run() {
     this->do_build();
     this->serialize();
-    auto result = this->process_result();
-    return result;
+    return this->process_result();
 }
+
+JsonType
+BuildEvalCase::RunInMemory() {
+    this->do_build();
+    return this->process_result();
+}
+
 void
 BuildEvalCase::do_build() {
     auto base = vsag::Dataset::Make();
     int64_t total_base = this->dataset_ptr_->GetNumberOfBase();
-    std::vector<int64_t> ids(total_base);
-    std::iota(ids.begin(), ids.end(), 0);
-    base->NumElements(total_base)->Dim(this->dataset_ptr_->GetDim())->Ids(ids.data())->Owner(false);
+    const auto* train_ids = this->dataset_ptr_->GetTrainIds();
+    std::vector<int64_t> identity_ids;
+    if (train_ids == nullptr) {
+        identity_ids.resize(static_cast<uint64_t>(total_base));
+        std::iota(identity_ids.begin(), identity_ids.end(), int64_t{0});
+        train_ids = identity_ids.data();
+    }
+    base->NumElements(total_base)->Dim(this->dataset_ptr_->GetDim())->Ids(train_ids)->Owner(false);
     if (this->dataset_ptr_->GetVectorType() == DENSE_VECTORS) {
         if (this->dataset_ptr_->GetTrainDataType() == vsag::DATATYPE_FLOAT32) {
             base->Float32Vectors((const float*)this->dataset_ptr_->GetTrain());
@@ -67,6 +79,9 @@ BuildEvalCase::do_build() {
         }
     } else {
         base->SparseVectors((const SparseVector*)this->dataset_ptr_->GetTrain());
+    }
+    if (this->dataset_ptr_->GetTrainPaths() != nullptr) {
+        base->Paths(this->dataset_ptr_->GetTrainPaths());
     }
     for (auto& monitor : monitors_) {
         monitor->Start();
@@ -100,11 +115,16 @@ BuildEvalCase::process_result() {
         EvalCase::MergeJsonType(one_result, eval_result);
     }
     result = eval_result;
-    result["tps"] = double(this->dataset_ptr_->GetNumberOfBase()) / double(result["duration(s)"]);
+    if (config_.enable_tps) {
+        result["tps"] =
+            double(this->dataset_ptr_->GetNumberOfBase()) / double(result["duration(s)"]);
+    }
     EvalCase::MergeJsonType(this->basic_info_, result);
-    result["index_info"] = JsonType::parse(config_.build_param);
+    result["index_info"] =
+        config_.build_param.empty() ? JsonType::object() : JsonType::parse(config_.build_param);
     result["action"] = "build";
     result["index"] = config_.index_name;
+    result["index_memory(B)"] = this->index_->GetMemoryUsage();
     try {
         auto detail = this->index_->GetMemoryUsageDetail();
         for (const auto& [name, size] : detail) {

@@ -25,10 +25,11 @@ public:
     BuildSearchEvalCase(const std::string& dataset_path,
                         const std::string& index_path,
                         vsag::IndexPtr index,
-                        EvalConfig config)
-        : EvalCase(dataset_path, index_path, index) {
-        build_ = EvalCase::MakeInstance(config, "build");
-        search_ = EvalCase::MakeInstance(config, "search");
+                        EvalConfig config,
+                        EvalDatasetPtr dataset = nullptr)
+        : EvalCase(dataset_path, index_path, std::move(index), dataset) {
+        build_ = EvalCase::MakeInstance(config, "build", dataset);
+        search_ = EvalCase::MakeInstance(config, "search", dataset);
         config_ = std::move(config);
     }
 

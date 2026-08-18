@@ -14,17 +14,8 @@
 # limitations under the License.
 
 
-add_executable(101_index_hnsw 101_index_hnsw.cpp)
-target_link_libraries(101_index_hnsw vsag)
-
-add_executable(102_index_diskann 102_index_diskann.cpp)
-target_link_libraries(102_index_diskann vsag_static)
-
 add_executable (103_index_hgraph 103_index_hgraph.cpp)
 target_link_libraries (103_index_hgraph vsag)
-
-add_executable(104_index_fresh_hnsw 104_index_fresh_hnsw.cpp)
-target_link_libraries(104_index_fresh_hnsw vsag)
 
 add_executable (105_index_brute_force 105_index_brute_force.cpp)
 target_link_libraries (105_index_brute_force vsag)
@@ -50,6 +41,9 @@ target_link_libraries (111_index_lazy_hgraph vsag)
 add_executable (112_index_pyramid_multi_hierarchy 112_index_pyramid_multi_hierarchy.cpp)
 target_link_libraries (112_index_pyramid_multi_hierarchy vsag)
 
+add_executable (113_index_ivf_graph_bucket 113_index_ivf_graph_bucket.cpp)
+target_link_libraries (113_index_ivf_graph_bucket vsag)
+
 add_executable (201_custom_allocator 201_custom_allocator.cpp)
 target_link_libraries (201_custom_allocator vsag)
 
@@ -67,9 +61,6 @@ target_link_libraries(302_feature_range_search vsag)
 
 add_executable (303_feature_remove 303_feature_remove.cpp)
 target_link_libraries (303_feature_remove vsag)
-
-add_executable(304_feature_enhance_graph 304_feature_enhance_graph.cpp)
-target_link_libraries(304_feature_enhance_graph vsag)
 
 # add_executable(305_feature_update 305_feature_update.cpp)
 # target_link_libraries(305_feature_update vsag)
@@ -148,3 +139,31 @@ target_link_libraries(323_index_hgraph_rabitq_split vsag)
 
 add_executable(324_feature_lazy_hgraph_extra_info 324_feature_lazy_hgraph_extra_info.cpp)
 target_link_libraries(324_feature_lazy_hgraph_extra_info vsag)
+
+add_executable(325_feature_uring_io 325_feature_uring_io.cpp)
+target_link_libraries(325_feature_uring_io vsag)
+add_executable(324_feature_hgraph_mci_companion 324_feature_hgraph_mci_companion.cpp)
+target_link_libraries(324_feature_hgraph_mci_companion vsag)
+
+add_executable(406_feature_read_cache 406_feature_read_cache.cpp)
+target_link_libraries(406_feature_read_cache vsag)
+
+add_executable(407_feature_ivf_read_cache 407_feature_ivf_read_cache.cpp)
+target_link_libraries(407_feature_ivf_read_cache vsag)
+
+if (TARGET vsag::autotune)
+    add_executable (326_feature_create_index_with_constraints
+        326_feature_create_index_with_constraints.cpp)
+    target_link_libraries (326_feature_create_index_with_constraints vsag::autotune)
+
+    add_executable (327_feature_autotune_existing_index
+        327_feature_autotune_existing_index.cpp)
+    target_link_libraries (327_feature_autotune_existing_index vsag::autotune)
+
+    add_executable (328_feature_autotune_existing_pyramid
+        328_feature_autotune_existing_pyramid.cpp)
+    target_link_libraries (328_feature_autotune_existing_pyramid vsag::autotune)
+endif ()
+
+add_executable(329_feature_ivf_precise_bucket 329_feature_ivf_precise_bucket.cpp)
+target_link_libraries(329_feature_ivf_precise_bucket vsag)

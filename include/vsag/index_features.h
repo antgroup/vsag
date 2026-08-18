@@ -82,6 +82,11 @@ enum IndexFeature {
 
     SUPPORT_TUNE, /**< Supports support tune index */
 
+    SUPPORT_BATCH_CALC_DISTANCE_BY_ID, /**< Supports CalDistanceById(DatasetPtr, ids, count, ...)
+                                           with NumElements() > 1. IDs and distances are row-major:
+                                           distances[q * count + j] is query q vs ids[q * count + j],
+                                           and -1 indicates an invalid id. */
+
     INDEX_FEATURE_COUNT /** must be last one */
 };
 }  // namespace vsag

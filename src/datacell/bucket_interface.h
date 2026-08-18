@@ -21,6 +21,7 @@
 #include "bucket_datacell_parameter.h"
 #include "index_common_param.h"
 #include "quantization/computer.h"
+#include "query_context.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
@@ -47,6 +48,22 @@ public:
                  const BucketIdType& bucket_id,
                  const InnerIdType& offset_id) = 0;
 
+    virtual float
+    ComputePairVectors(BucketIdType bucket_id, InnerIdType id1, InnerIdType id2) = 0;
+
+    virtual void
+    Query(float* result_dists,
+          const ComputerInterfacePtr& computer,
+          const BucketIdType* bucket_ids,
+          const InnerIdType* offset_ids,
+          InnerIdType id_count,
+          QueryContext* ctx = nullptr) {
+        (void)ctx;
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            result_dists[i] = QueryOneById(computer, bucket_ids[i], offset_ids[i]);
+        }
+    }
+
     virtual ComputerInterfacePtr
     FactoryComputer(const void* query) = 0;
 
@@ -55,6 +72,24 @@ public:
 
     virtual InnerIdType
     InsertVector(const void* vector, BucketIdType bucket_id, InnerIdType inner_id) = 0;
+
+    virtual void
+    BatchInsertVector(const void* vectors,
+                      const BucketIdType* bucket_ids,
+                      const InnerIdType* inner_ids,
+                      InnerIdType count,
+                      InnerIdType* out_offsets) = 0;
+
+    // Fixed-offset inserts may create holes: GetBucketSize() includes reserved offsets and
+    // GetInnerIds() reports holes as InnerIdType::max(). Therefore inner_id must not be max.
+    virtual void
+    InsertVectorWithOffset(const void* vector,
+                           BucketIdType bucket_id,
+                           InnerIdType inner_id,
+                           InnerIdType offset_id) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "InsertVectorWithOffset not implemented");
+    }
 
     virtual InnerIdType*
     GetInnerIds(BucketIdType bucket_id) = 0;
@@ -114,6 +149,11 @@ public:
     }
 
     virtual void
+    InitIO(const IOParamPtr& io_param) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "InitIO not implemented in BucketInterface");
+    }
+
+    virtual void
     Package(){};
 
     virtual void
@@ -127,6 +167,7 @@ public:
     uint32_t code_size_{0};
     IVFPartitionStrategyPtr strategy_{nullptr};
     bool use_residual_{false};
+    DistanceEvaluationBackend backend_{DistanceEvaluationBackend::UNKNOWN};
 };
 
 }  // namespace vsag

@@ -92,6 +92,7 @@ public:
     void
     Deserialize(StreamReader& reader);
 
+    friend class Pyramid;
     friend class PyramidAnalyzer;
 
 public:
@@ -130,6 +131,9 @@ public:
           odescent_param_(pyramid_param->odescent_param),
           index_min_size_(pyramid_param->index_min_size),
           graph_type_(pyramid_param->graph_type),
+          default_rabitq_one_bit_search_(pyramid_param->use_reorder and
+                                         pyramid_param->base_codes_param->name ==
+                                             RABITQ_SPLIT_DATA_CELL),
           support_duplicate_(pyramid_param->support_duplicate) {
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
         if (pyramid_param->has_hierarchies) {
@@ -162,10 +166,17 @@ public:
         }
         points_mutex_ = std::make_shared<PointsMutex>(max_capacity_, allocator_);
         searcher_ = std::make_unique<BasicSearcher>(common_param, points_mutex_);
-        if (use_reorder_) {
+        if (has_precise_reorder()) {
             precise_codes_ =
                 FlattenInterface::MakeInstance(pyramid_param->precise_codes_param, common_param);
-            reorder_ = std::make_shared<FlattenReorder>(precise_codes_, allocator_);
+        }
+        if (use_reorder_) {
+            reorder_ = std::make_shared<FlattenReorder>(get_reorder_codes(), allocator_);
+        }
+        if (pyramid_param->store_raw_vector) {
+            raw_vector_ =
+                FlattenInterface::MakeInstance(pyramid_param->raw_vector_param, common_param);
+            has_raw_vector_ = true;
         }
     }
 
@@ -186,10 +197,17 @@ public:
                      bool calculate_precise_distance = true) const override;
 
     DatasetPtr
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true) const override;
+
+    DatasetPtr
     CalDistanceById(const float* query,
                     const int64_t* ids,
                     int64_t count,
-                    bool calculate_precise_distance = true) const override;
+                    bool calculate_precise_distance = true,
+                    int64_t topk = -1) const override;
 
     void
     Deserialize(StreamReader& reader) override;
@@ -223,6 +241,9 @@ public:
 
     std::string
     GetStats() const override;
+
+    std::string
+    AnalyzeIndexBySearch(const SearchRequest& request) override;
 
     void
     InitFeatures() override;
@@ -278,6 +299,30 @@ private:
     void
     deserialize_hierarchies(StreamReader& reader, const JsonType& basic_info);
 
+    // RAII guard that returns the VisitedList to the pool on scope exit,
+    // ensuring no leak if the search throws.
+    class VisitedListGuard {
+    public:
+        explicit VisitedListGuard(VisitedListPool* pool) : pool_(pool), vl_(pool->TakeOne()) {
+        }
+        ~VisitedListGuard() {
+            if (vl_ != nullptr) {
+                pool_->ReturnOne(vl_);
+            }
+        }
+        VisitedListGuard(const VisitedListGuard&) = delete;
+        VisitedListGuard&
+        operator=(const VisitedListGuard&) = delete;
+        [[nodiscard]] const VisitedListPtr&
+        get() const {
+            return vl_;
+        }
+
+    private:
+        VisitedListPool* pool_;
+        VisitedListPtr vl_;
+    };
+
     /// One named hierarchy with its own root IndexNode and build parameters.
     struct Hierarchy {
         std::string name;                          // hierarchy name (empty = default)
@@ -321,7 +366,9 @@ private:
     search_impl(const DatasetPtr& query,
                 const SearchFunc& search_func,
                 InnerSearchParam& search_param,
-                const std::string& hierarchy_name = "") const;
+                QueryContext& ctx,
+                const std::string& hierarchy_name,
+                const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
     /// Probabilistic check: should total_count trigger a new entry-point update?
     bool
@@ -351,13 +398,31 @@ private:
                 const DatasetPtr& query,
                 const FlattenInterfacePtr& codes,
                 QueryContext& ctx,
-                uint64_t subindex_ef_search) const;
+                uint64_t subindex_ef_search,
+                DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+
+    [[nodiscard]] bool
+    has_precise_reorder() const {
+        return use_reorder_ and not base_codes_->SupportSplitCodeStorage();
+    }
+
+    [[nodiscard]] FlattenInterfacePtr
+    get_reorder_codes() const {
+        return base_codes_->SupportSplitCodeStorage() ? base_codes_ : precise_codes_;
+    }
+
+    [[nodiscard]] FlattenInterfacePtr
+    decodable_codes() const {
+        return raw_vector_ != nullptr ? raw_vector_
+                                      : (has_precise_reorder() ? precise_codes_ : base_codes_);
+    }
 
 private:
     ODescentParameterPtr odescent_param_{nullptr};  // ODescent build parameters
     UnorderedMap<std::string, std::unique_ptr<Hierarchy>> hierarchies_;  // named hierarchies
     FlattenInterfacePtr base_codes_{nullptr};          // coarse codes for graph build/search
     FlattenInterfacePtr precise_codes_{nullptr};       // precise codes for reorder (if enabled)
+    FlattenInterfacePtr raw_vector_{nullptr};          // original vectors for decode-only paths
     std::unique_ptr<VisitedListPool> pool_ = nullptr;  // pool of visited-lists for search
 
     MutexArrayPtr points_mutex_{nullptr};                // per-point locks for concurrent access
@@ -370,6 +435,7 @@ private:
     mutable std::shared_mutex resize_mutex_;        // guards resize operations
     std::mutex cur_element_count_mutex_;            // guards cur_element_count_ updates
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};  // graph algorithm type
+    bool default_rabitq_one_bit_search_{false};     // default split lower-bound search
 
     std::mutex entry_point_mutex_;  // guards entry-point selection
     std::default_random_engine level_generator_{
@@ -377,7 +443,6 @@ private:
     ReorderInterfacePtr reorder_{nullptr};  // reorder helper (if use_reorder_)
 
     uint32_t index_min_size_{0};  // min node size before graph is built
-    bool immutable_{false};       // true after SetImmutable()
 };
 
 }  // namespace vsag

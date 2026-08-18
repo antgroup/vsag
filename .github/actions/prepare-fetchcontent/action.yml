@@ -1,0 +1,120 @@
+name: Prepare FetchContent sources
+description: Check out pinned third-party sources for offline CMake configuration.
+
+inputs:
+  include-tests:
+    description: Check out dependencies required by the C++ test targets.
+    required: false
+    default: "false"
+  include-tools:
+    description: Check out dependencies required by the C++ tools.
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    # Keep these revisions synchronized with the archives declared under extern/.
+    - name: Checkout nlohmann-json 3.11.3
+      uses: actions/checkout@v4
+      with:
+        repository: nlohmann/json
+        ref: 9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03
+        path: .ci-fetchcontent/nlohmann_json-src
+        fetch-depth: 1
+        persist-credentials: false
+
+    - name: Checkout cpuinfo ca678952
+      uses: actions/checkout@v4
+      with:
+        repository: pytorch/cpuinfo
+        ref: ca678952a9a8eaa6de112d154e8e104b22f9ab3f
+        path: .ci-fetchcontent/cpuinfo-src
+        fetch-depth: 1
+        persist-credentials: false
+
+    - name: Checkout fmt 10.2.1
+      uses: actions/checkout@v4
+      with:
+        repository: fmtlib/fmt
+        ref: e69e5f977d458f2650bb346dadf2ad30c5320281
+        path: .ci-fetchcontent/fmt-src
+        fetch-depth: 1
+        persist-credentials: false
+
+    - name: Checkout ThreadPool 3507796e
+      uses: actions/checkout@v4
+      with:
+        repository: log4cplus/ThreadPool
+        ref: 3507796e172d36555b47d6191f170823d9f6b12c
+        path: .ci-fetchcontent/thread_pool-src
+        fetch-depth: 1
+        persist-credentials: false
+
+    - name: Checkout robin-map 1.4.0
+      uses: actions/checkout@v4
+      with:
+        repository: Tessil/robin-map
+        ref: 4ec1bf19c6a96125ea22062f38c2cf5b958e448e
+        path: .ci-fetchcontent/tsl-src
+        fetch-depth: 1
+        persist-credentials: false
+
+    - name: Checkout CRoaring 3.0.1
+      uses: actions/checkout@v4
+      with:
+        repository: RoaringBitmap/CRoaring
+        ref: c501a95206dec8187aa63a053b1f1a8acb943f7c
+        path: .ci-fetchcontent/roaringbitmap-src
+        fetch-depth: 1
+        persist-credentials: false
+
+    - name: Checkout Catch2 3.7.1
+      if: ${{ inputs.include-tests == 'true' }}
+      uses: actions/checkout@v4
+      with:
+        repository: catchorg/Catch2
+        ref: fa43b77429ba76c462b1898d6cd2f2d7a9416b14
+        path: .ci-fetchcontent/catch2-src
+        fetch-depth: 1
+        persist-credentials: false
+
+    - name: Checkout argparse 3.1
+      if: ${{ inputs.include-tools == 'true' }}
+      uses: actions/checkout@v4
+      with:
+        repository: p-ranav/argparse
+        ref: 68fd0277eea5412aff9b91c0b70efc698359dae0
+        path: .ci-fetchcontent/argparse-src
+        fetch-depth: 1
+        persist-credentials: false
+
+    - name: Checkout yaml-cpp 0.9.0
+      if: ${{ inputs.include-tools == 'true' }}
+      uses: actions/checkout@v4
+      with:
+        repository: jbeder/yaml-cpp
+        ref: 56e3bb550c91fd7005566f19c079cb7a503223cf
+        path: .ci-fetchcontent/yaml-cpp-src
+        fetch-depth: 1
+        persist-credentials: false
+
+    - name: Checkout tabulate 3a583010
+      if: ${{ inputs.include-tools == 'true' }}
+      uses: actions/checkout@v4
+      with:
+        repository: p-ranav/tabulate
+        ref: 3a58301067bbc03da89ae5a51b3e05b7da719d38
+        path: .ci-fetchcontent/tabulate-src
+        fetch-depth: 1
+        persist-credentials: false
+
+    - name: Checkout cpp-httplib 0.35.0
+      if: ${{ inputs.include-tools == 'true' }}
+      uses: actions/checkout@v4
+      with:
+        repository: yhirose/cpp-httplib
+        ref: 85b18a9c6431877188a706ba3c61679fa9de3e27
+        path: .ci-fetchcontent/httplib-src
+        fetch-depth: 1
+        persist-credentials: false

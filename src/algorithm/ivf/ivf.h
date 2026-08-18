@@ -19,10 +19,13 @@
 #include "datacell/attribute_bucket_inverted_datacell.h"
 #include "datacell/bucket_datacell.h"
 #include "datacell/flatten_interface.h"
+#include "datacell/graph_interface.h"
+#include "datacell/graph_interface_parameter.h"
 #include "impl/heap/distance_heap.h"
 #include "impl/reorder/reorder.h"
 #include "impl/searcher/basic_searcher.h"
 #include "index_common_param.h"
+#include "ivf_bucket_searcher.h"
 #include "ivf_parameter.h"
 #include "ivf_partition_strategy.h"
 #include "query_context.h"
@@ -77,12 +80,21 @@ public:
 
     std::vector<int64_t>
     Build(const DatasetPtr& base) override;
+    void
+    RebuildBucketGraphs() override;
+
+    DatasetPtr
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true) const override;
 
     DatasetPtr
     CalDistanceById(const float* query,
                     const int64_t* ids,
                     int64_t count,
-                    bool calculate_precise_distance = true) const override;
+                    bool calculate_precise_distance = true,
+                    int64_t topk = -1) const override;
 
     float
     CalcDistanceById(const float* query,
@@ -180,6 +192,11 @@ private:
     InnerSearchParam
     create_search_param(const std::string& parameters, const FilterPtr& filter) const;
 
+    DatasetPtr
+    route_buckets_only(const DatasetPtr& query,
+                       const InnerSearchParam& param,
+                       QueryContext& ctx) const;
+
     /**
      * @brief Scan the selected buckets and return a distance heap.
      *
@@ -192,6 +209,13 @@ private:
            QueryContext& ctx,
            ReasoningContext* reasoning_ctx = nullptr) const;
 
+    DistHeapPtr
+    search_with_custom_distance(const DatasetPtr& query,
+                                const SearchRequest& request,
+                                const InnerSearchParam& param,
+                                QueryContext& ctx,
+                                ReasoningContext* reasoning_ctx = nullptr) const;
+
     /**
      * @brief Re-score the top candidates in @p input with high-precision
      *        codes and return the final result Dataset.
@@ -202,7 +226,8 @@ private:
             const float* query,
             const InnerSearchParam& param,
             QueryContext& ctx,
-            ReasoningContext* reasoning_ctx = nullptr) const;
+            ReasoningContext* reasoning_ctx = nullptr,
+            const std::optional<float>& distance_threshold = std::nullopt) const;
 
     void
     AttachReasoningReport(const DatasetPtr& dataset_results, ReasoningContext* reasoning_ctx) const;
@@ -218,6 +243,9 @@ private:
     /// Populate location_map_ after deserialization or merge.
     void
     fill_location_map();
+
+    void
+    build_bucket_graphs();
 
     /**
      * @brief Decode the packed (bucket_id, local_inner_id) pair from
@@ -241,7 +269,9 @@ private:
                         const LoadParameters& parameters) override;
 
     void
-    read_streaming_body(StreamReader& reader, const MetadataPtr& metadata);
+    read_streaming_body(StreamReader& reader,
+                        const MetadataPtr& metadata,
+                        const LoadParameters* load_parameters = nullptr);
 
     /// Recalculate and cache the memory-usage counter (throttled).
     void
@@ -249,6 +279,11 @@ private:
 
 private:
     BucketInterfacePtr bucket_{nullptr};  // bucket storage (raw or attribute-aware)
+    IVFBucketSearcherPtr bucket_searcher_{nullptr};
+    Vector<GraphInterfacePtr> bucket_graphs_;
+    GraphInterfaceParamPtr graph_param_{nullptr};
+    int64_t graph_build_threshold_{0};
+    IndexCommonParam common_param_;
 
     IVFPartitionStrategyPtr partition_strategy_{nullptr};  // centroid / partition logic
     BucketIdType buckets_per_data_;                        // buckets each vector is assigned to
@@ -256,8 +291,9 @@ private:
     int64_t total_elements_{0};  // total inserted (incl. deleted)
     bool is_trained_{false};     // true after Train() succeeds
 
-    FlattenInterfacePtr reorder_codes_{nullptr};  // high-precision codes for reranking
-    ReorderInterfacePtr reorder_{nullptr};        // reordering engine
+    FlattenInterfacePtr reorder_codes_{nullptr};  // legacy high-precision flat codes
+    BucketInterfacePtr precise_bucket_{nullptr};  // high-precision codes mirroring basic buckets
+    ReorderInterfacePtr reorder_{nullptr};        // high-precision reordering engine
 
     std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};  // for parallel bucket scans
 

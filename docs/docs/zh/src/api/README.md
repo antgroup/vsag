@@ -69,7 +69,7 @@ struct Error {
 | 行为 | `INDEX_EMPTY` | 索引为空，无法搜索或序列化。 |
 | 运行时 | `NO_ENOUGH_MEMORY` | 内存分配失败。 |
 | 运行时 | `READ_ERROR` | 从二进制读取失败。 |
-| 运行时 | `MISSING_FILE` | 缺少必需的文件（如 DiskANN 反序列化）。 |
+| 运行时 | `MISSING_FILE` | 反序列化时缺少必需的索引文件。 |
 | 运行时 | `INVALID_BINARY` | 序列化的二进制内容非法。 |
 
 由于大多数索引方法都是 `virtual`，其默认实现返回 `UNSUPPORTED_INDEX_OPERATION`，因此“不支持”是正常

@@ -1,6 +1,6 @@
 # Index
 
-`vsag::Index`（声明于 `vsag/index.h`）是本库的核心抽象。每一种具体索引 —— HGraph、IVF、DiskANN、
+`vsag::Index`（声明于 `vsag/index.h`）是本库的核心抽象。每一种具体索引 —— HGraph、IVF、
 BruteForce、SINDI、Pyramid 等 —— 都实现这一接口。你从不直接实例化 `Index`，而是通过
 [`Factory::CreateIndex`](factory_engine.md#createindex) 或
 [`Engine::CreateIndex`](factory_engine.md#createindex-1) 获取，并用 `IndexPtr`
@@ -32,7 +32,8 @@ using IndexPtr = std::shared_ptr<Index>;
 
 ```cpp
 enum class IndexType {
-    HNSW, DISKANN, HGRAPH, IVF, PYRAMID, BRUTEFORCE, SPARSE, SINDI, WARP, LAZY_HGRAPH, SIMQ
+    HGRAPH = 2, IVF = 3, PYRAMID = 4, BRUTEFORCE = 5, SPARSE = 6, SINDI = 7,
+    WARP = 8, LAZY_HGRAPH = 9, SIMQ = 10
 };
 ```
 
@@ -214,8 +215,9 @@ RangeSearch(const DatasetPtr& query, float radius, const std::string& parameters
 |------|------|------|
 | `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const float* vector, int64_t id, bool calculate_precise_distance = true) const` | 稠密查询到已存向量 `id` 的距离。 |
 | `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const DatasetPtr& vector, int64_t id, bool calculate_precise_distance = true) const` | 同上，接收 `DatasetPtr`（适用于 SINDI 等稀疏索引）。 |
-| `CalDistanceById` | `tl::expected<DatasetPtr, Error> CalDistanceById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | 批量版本；结果中的 `-1` 表示无效距离。 |
-| `CalDistanceById` | `tl::expected<DatasetPtr, Error> CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | 接收 `DatasetPtr` 查询的批量版本。 |
+| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | 规范的批量版本；`topk > 0` 时返回按距离升序排列的最小距离及对应 ID，无效 `-1` 距离排在最后。 |
+| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const DatasetPtr& query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | 规范的 `DatasetPtr` 查询批量版本。`query->GetNumElements() > 1` 时索引需声明 `SUPPORT_BATCH_CALC_DISTANCE_BY_ID`；`ids` 包含 `NumElements * count` 个 row-major 条目。`topk > 0` 时每个 query 返回 `min(topk, count)` 个排序距离及对应 ID。 |
+| `CalDistanceById` | 与 `CalcDistancesById` 相同的签名 | 已弃用的兼容别名；新代码请使用 `CalcDistancesById`。 |
 
 `calculate_precise_distance = true` 时可能会加载全精度向量（可能来自磁盘）而非量化编码。见
 [按 ID 计算距离](../advanced/calc_distance_by_id.md) 与
@@ -278,6 +280,9 @@ RangeSearch(const DatasetPtr& query, float radius, const std::string& parameters
 |------|------|------|
 | `ExportCache` | `tl::expected<void, Error> ExportCache(std::ostream& out_stream) const` | 写出构建期缓存（如图邻居），可加速后续的 `Build`。 |
 | `ImportCache` | `tl::expected<void, Error> ImportCache(std::istream& in_stream)` | 加载之前导出的缓存；下一次 `Build` 会复用它。 |
+
+HGraph 通过 `Dataset::SourceID` 匹配缓存条目。应在 `Build()` 前导入空的兼容索引；完整流程、
+`persist_source_id` 与命中率诊断见 [HGraph 构建缓存](../advanced/build_cache.md)。
 
 ## 统计与自省
 

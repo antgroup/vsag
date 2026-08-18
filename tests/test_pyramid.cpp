@@ -38,6 +38,8 @@ struct PyramidParam {
     std::string graph_type = "nsw";
     bool use_reorder = false;
     bool support_duplicate = false;
+    uint64_t rabitq_bits_per_dim_base = 1;
+    bool fast_encode_rabitq = true;
 };
 
 namespace fixtures {
@@ -71,7 +73,7 @@ public:
 };
 
 TestDatasetPool PyramidTestIndex::pool{};
-std::vector<int> PyramidTestIndex::dims = fixtures::get_common_used_dims(1, RandomValue(0, 999));
+std::vector<int> PyramidTestIndex::dims = fixtures::get_common_used_dims(1);
 std::vector<std::vector<int>> PyramidTestIndex::levels{{0, 1}, {0, 2}, {0, 1, 2}};
 std::string
 PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric_type,
@@ -90,6 +92,9 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
             "no_build_levels": [{}],
             "graph_type": "{}",
             "base_quantization_type": "{}",
+            "rabitq_bits_per_dim_base": {},
+            "fast_encode_rabitq": {},
+            "fast_encode_rabitq_rounds": 6,
             "precise_quantization_type": "{}",
             "use_reorder": {},
             "index_min_size": 28,
@@ -103,6 +108,8 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
                                             fmt::join(param.no_build_levels, ","),
                                             param.graph_type,
                                             param.base_quantization_type,
+                                            param.rabitq_bits_per_dim_base,
+                                            param.fast_encode_rabitq,
                                             param.precise_quantization_type,
                                             param.use_reorder,
                                             param.support_duplicate);
@@ -167,6 +174,18 @@ CollectIds(const vsag::DatasetPtr& result) -> std::set<int64_t> {
     return ids;
 }
 
+uint32_t
+SearchAndGetHops(const vsag::IndexPtr& index,
+                 const vsag::DatasetPtr& query,
+                 int64_t topk,
+                 const std::string& search_param) {
+    auto result = index->KnnSearch(query, topk, search_param);
+    REQUIRE(result.has_value());
+    const auto hops = result.value()->GetStatistics({"hops"});
+    REQUIRE(hops.size() == 1);
+    return static_cast<uint32_t>(std::stoul(hops.front()));
+}
+
 void
 RequireDistancesNearZero(const vsag::DatasetPtr& result, const std::set<int64_t>& expected_ids) {
     for (int64_t i = 0; i < result->GetDim(); ++i) {
@@ -220,9 +239,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     const std::string name = "pyramid";
     auto search_param = GeneratePyramidSearchParametersString(100);
     for (auto& dim : dims) {
-        INFO(fmt::format("metric_type={}, dim={}, use_reorder={}, immutable={}",
+        INFO(fmt::format("metric_type={}, dim={}, graph_type={}, use_reorder={}, immutable={}",
                          metric_type,
                          dim,
+                         pyramid_param.graph_type,
                          use_reorder,
                          immutable));
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
@@ -238,6 +258,201 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         TestRangeSearch(index, dataset, search_param, 0.94, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
     }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid RangeSearch Returns Empty Result",
+                             "[ft][pyramid]") {
+    PyramidParam pyramid_param;
+    const auto param = GeneratePyramidBuildParametersString("l2", 4, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+
+    auto base = MakeDenseDataset(
+        {{{1.0F, 0.0F, 0.0F, 0.0F}}, {{2.0F, 0.0F, 0.0F, 0.0F}}}, {1, 2}, {"a/d/f", "a/d/f"});
+    REQUIRE(index->Build(base).has_value());
+
+    auto query = MakeSingleQuery({10.0F, 0.0F, 0.0F, 0.0F}, "a/d/f");
+    auto result = index->RangeSearch(query, 0.0F, GeneratePyramidSearchParametersString(20));
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 0);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid Set Immutable",
+                             "[ft][immutable][pyramid]") {
+    const auto metric_type = "l2";
+    PyramidParam pyramid_param;
+    const auto param =
+        GeneratePyramidBuildParametersString(metric_type, dims.front(), pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+    auto dataset =
+        pool.GetDatasetAndCreate(dims.front(), base_count, metric_type, /*with_path=*/true);
+    TestBuildIndex(index, dataset, true);
+
+    REQUIRE(index->SetImmutable().has_value());
+    REQUIRE(index->SetImmutable().has_value());
+
+    auto add_result = index->Add(dataset->base_);
+    REQUIRE_FALSE(add_result.has_value());
+    REQUIRE(add_result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+
+    auto build_result = index->Build(dataset->base_);
+    REQUIRE_FALSE(build_result.has_value());
+    REQUIRE(build_result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+
+    std::vector<int64_t> ids{dataset->base_->GetIds()[0]};
+    auto remove_result = index->Remove(ids);
+    REQUIRE_FALSE(remove_result.has_value());
+    REQUIRE(remove_result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+
+    TestKnnSearch(index, dataset, GeneratePyramidSearchParametersString(100), 0.94, true);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid multi-bit RaBitQ fast encoding",
+                             "[ft][pyramid][rabitq]") {
+    constexpr int64_t dim = 64;
+    constexpr uint64_t count = 256;
+    const bool fast_encode = GENERATE(false, true);
+
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
+    pyramid_param.base_quantization_type = "rabitq";
+    pyramid_param.precise_quantization_type = "fp32";
+    pyramid_param.use_reorder = true;
+    pyramid_param.rabitq_bits_per_dim_base = 8;
+    pyramid_param.fast_encode_rabitq = fast_encode;
+
+    CAPTURE(fast_encode);
+    auto param = GeneratePyramidBuildParametersString("l2", dim, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+    auto dataset = pool.GetDatasetAndCreate(dim, count, "l2", /*with_path=*/true);
+    TestBuildIndex(index, dataset, true);
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    auto result = index->KnnSearch(query, 5, GeneratePyramidSearchParametersString(100));
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() > 0);
+    REQUIRE(result.value()->GetDim() <= 5);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid split RaBitQ builds with ODescent",
+                             "[ft][pyramid][rabitq]") {
+    constexpr int64_t dim = 64;
+    constexpr uint64_t count = 256;
+    constexpr auto parameter_temp = R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": {},
+        "index_param": {{
+            "max_degree": 32,
+            "ef_construction": 100,
+            "alpha": 1.2,
+            "graph_type": "odescent",
+            "graph_iter_turn": 3,
+            "neighbor_sample_rate": 0.2,
+            "no_build_levels": [0],
+            "base_quantization_type": "rabitq",
+            "rabitq_bits_per_dim_base": 3,
+            "precise_quantization_type": "rabitq",
+            "rabitq_bits_per_dim_precise": 5,
+            "use_reorder": true,
+            "index_min_size": 28
+        }}
+    }})";
+
+    auto index = TestFactory("pyramid", fmt::format(parameter_temp, dim), true);
+    auto dataset = pool.GetDatasetAndCreate(dim, count, "l2", /*with_path=*/true);
+    TestBuildIndex(index, dataset, true);
+
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    auto result = index->KnnSearch(query, 5, GeneratePyramidSearchParametersString(100));
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() > 0);
+    REQUIRE(result.value()->GetDim() <= 5);
+    REQUIRE_NOTHROW(index->GetStats());
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid split RaBitQ promotes without raw vectors",
+                             "[ft][pyramid][rabitq][add]") {
+    constexpr int64_t dim = 64;
+    constexpr uint64_t count = 128;
+    constexpr auto parameter_temp = R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": {},
+        "index_param": {{
+            "max_degree": 16,
+            "ef_construction": 50,
+            "alpha": 1.2,
+            "graph_type": "nsw",
+            "no_build_levels": [0],
+            "base_quantization_type": "rabitq",
+            "rabitq_bits_per_dim_base": 3,
+            "precise_quantization_type": "rabitq",
+            "rabitq_bits_per_dim_precise": 5,
+            "use_reorder": true,
+            "index_min_size": 8
+        }}
+    }})";
+
+    auto param = fmt::format(parameter_temp, dim);
+    auto index = TestFactory("pyramid", param, true);
+    auto dataset = pool.GetDatasetAndCreate(dim, count, "l2", /*with_path=*/true);
+    TestBuildIndex(index, dataset, true);
+
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    auto result = index->KnnSearch(query, 5, GeneratePyramidSearchParametersString(100));
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() > 0);
+    REQUIRE_NOTHROW(index->GetStats());
+
+    auto restored = TestFactory("pyramid", param, true);
+    TestSerializeBinarySet(
+        index, restored, dataset, GeneratePyramidSearchParametersString(100), true);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid MRLE RaBitQ Split",
+                             "[ft][pyramid][rabitq_split][MRLE]") {
+    constexpr int64_t dim = 64;
+    constexpr uint64_t count = 256;
+
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
+    pyramid_param.base_quantization_type = "tq";
+    pyramid_param.precise_quantization_type = "rabitq";
+    pyramid_param.use_reorder = true;
+    pyramid_param.rabitq_bits_per_dim_base = 3;
+
+    auto param_json =
+        vsag::JsonType::Parse(GeneratePyramidBuildParametersString("l2", dim, pyramid_param));
+    param_json["index_param"]["tq_chain"].SetString("mrle, rabitq");
+    param_json["index_param"]["mrle_dim"].SetInt(32);
+    param_json["index_param"]["rabitq_bits_per_dim_precise"].SetInt(5);
+
+    auto index = TestFactory("pyramid", param_json.Dump(), true);
+    auto dataset = pool.GetDatasetAndCreate(dim, count, "l2", /*with_path=*/true);
+    TestBuildIndex(index, dataset, true);
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    auto result = index->KnnSearch(query, 5, GeneratePyramidSearchParametersString(100));
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() > 0);
+    REQUIRE(result.value()->GetDim() <= 5);
+    REQUIRE_NOTHROW(index->GetStats());
+
+    auto restored = TestFactory("pyramid", param_json.Dump(), true);
+    TestSerializeBinarySet(
+        index, restored, dataset, GeneratePyramidSearchParametersString(100), true);
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    auto streamed = TestFactory("pyramid", param_json.Dump(), true);
+    REQUIRE(streamed->DeserializeStreaming(stream).has_value());
+    REQUIRE_NOTHROW(streamed->GetStats());
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
@@ -416,6 +631,38 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         index->KnnSearch(query, topk, GeneratePyramidSearchParametersString(ef_search));
     REQUIRE(search_result.has_value());
     REQUIRE(search_result.value()->GetDim() == topk);
+
+    auto threshold_result =
+        index->KnnSearch(query, topk, R"({"threshold": 0.0, "pyramid": {"ef_search": 5}})");
+    REQUIRE(threshold_result.has_value());
+    REQUIRE(threshold_result.value()->GetDim() == 1);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid threshold filters before flat-node pruning",
+                             "[ft][search][pyramid][threshold][nonfinite]") {
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {};
+    const auto param = GeneratePyramidBuildParametersString("ip", 4, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+
+    std::vector<std::array<float, 4>> vectors = {
+        {std::numeric_limits<float>::max(), 0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 0.0F, 0.0F}};
+    std::vector<int64_t> ids = {10, 20};
+    std::vector<std::string> paths = {"all", "all"};
+    REQUIRE(index->Build(MakeDenseDataset(vectors, ids, paths)).has_value());
+
+    std::array<float, 4> query_vector = {std::numeric_limits<float>::max(), 0.0F, 0.0F, 0.0F};
+    auto query = MakeSingleQuery(query_vector, "all");
+    auto ordinary = index->KnnSearch(query, 2, R"({"pyramid":{"ef_search":2}})");
+    REQUIRE(ordinary.has_value());
+    REQUIRE(ordinary.value()->GetDim() == 2);
+    CAPTURE(ordinary.value()->GetDistances()[0], ordinary.value()->GetDistances()[1]);
+    auto result = index->KnnSearch(query, 1, R"({"threshold":1.0,"pyramid":{"ef_search":1}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == 20);
+    REQUIRE(result.value()->GetDistances()[0] == 1.0F);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
@@ -438,6 +685,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         TestRangeSearch(index, dataset, search_param, 0.94, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
         TestCalcDistanceById(index, dataset, 1e-5, true);
+        TestMultiQueryBatchCalcDistanceById(index, dataset, 1e-5, true);
     }
 }
 
@@ -465,6 +713,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
             TestFilterSearch(index, dataset, search_param, 0.94, true);
             TestRangeSearch(index, dataset, search_param, 0.94, 10, true);
             TestCalcDistanceById(index, dataset, 1e-5, true);
+            TestMultiQueryBatchCalcDistanceById(index, dataset, 1e-5, true);
         }
     }
 }
@@ -476,6 +725,16 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     std::string base_quantization_str = GENERATE("fp32");
     const std::string name = "pyramid";
     auto search_param = GeneratePyramidSearchParametersString(100);
+    constexpr static const char* search_param_with_hops_limit =
+        R"({"pyramid":{"ef_search":100,"hops_limit":200}})";
+    constexpr static const char* search_param_invalid_hops_limit =
+        R"({"pyramid":{"ef_search":100,"hops_limit":50}})";
+    constexpr static const char* search_param_for_hops_statistics =
+        R"({"pyramid":{"ef_search":1,"hops_limit":2}})";
+    constexpr static const char* search_param_without_hops_limit_for_statistics =
+        R"({"pyramid":{"ef_search":1}})";
+    constexpr static const char* search_param_ignored_hops_limit_for_statistics =
+        R"({"pyramid":{"ef_search":1,"hops_limit":1}})";
     PyramidParam pyramid_param;
     std::vector<std::vector<int>> tmp_levels = {{1, 2}, {0, 1, 2}};
     for (auto& dim : dims) {
@@ -493,9 +752,25 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
             TestContinueAdd(index, dataset, true);
             auto has_root = level[0] != 0;
             TestKnnSearch(index, dataset, search_param, 0.94, has_root);
+            if (has_root) {
+                TestKnnSearch(index, dataset, search_param_with_hops_limit, 0.9, true);
+                TestKnnSearch(index, dataset, search_param_invalid_hops_limit, 0.94, true);
+
+                auto query = fixtures::get_one_query(dataset->query_, 0);
+                const auto unlimited_hops = SearchAndGetHops(
+                    index, query, dataset->top_k, search_param_without_hops_limit_for_statistics);
+                const auto limited_hops = SearchAndGetHops(
+                    index, query, dataset->top_k, search_param_for_hops_statistics);
+                const auto ignored_hops = SearchAndGetHops(
+                    index, query, dataset->top_k, search_param_ignored_hops_limit_for_statistics);
+                REQUIRE(unlimited_hops > limited_hops);
+                REQUIRE(limited_hops <= 2);
+                REQUIRE(ignored_hops == unlimited_hops);
+            }
             TestFilterSearch(index, dataset, search_param, 0.94, has_root);
             TestRangeSearch(index, dataset, search_param, 0.94, 10, has_root);
             TestCalcDistanceById(index, dataset, 1e-5, true);
+            TestMultiQueryBatchCalcDistanceById(index, dataset, 1e-5, true);
             dataset->query_->Paths(tmp_paths);
         }
     }
@@ -697,6 +972,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         TestConcurrentAdd(index, dataset, true);
         TestConcurrentKnnSearch(index, dataset, search_param, 0.94, true);
         TestCalcDistanceById(index, dataset, 1e-5, true);
+        TestMultiQueryBatchCalcDistanceById(index, dataset, 1e-5, true);
     }
     for (auto& dim : dims) {
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
@@ -833,6 +1109,57 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     }
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid AnalyzeIndexBySearch honors paths and removals",
+                             "[ft][pyramid][analyzer]") {
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
+
+    auto index =
+        TestFactory("pyramid", GeneratePyramidBuildParametersString("l2", 4, pyramid_param), true);
+    auto base = MakeDenseDataset({{{10.0F, 0.0F, 0.0F, 0.0F}},
+                                  {{1.0F, 0.0F, 0.0F, 0.0F}},
+                                  {{0.0F, 0.0F, 0.0F, 0.0F}},
+                                  {{100.0F, 0.0F, 0.0F, 0.0F}}},
+                                 {101, 102, 201, 202},
+                                 {"root/a/leaf", "root/a/leaf", "root/b/leaf", "root/b/leaf"});
+    REQUIRE(index->Build(base).has_value());
+
+    // The first query has an exact match in the other path. A global ground truth would therefore
+    // report only 50% recall for this batch, while path-scoped ground truth reports 100%.
+    auto query = MakeDenseDataset({{{0.0F, 0.0F, 0.0F, 0.0F}}, {{100.0F, 0.0F, 0.0F, 0.0F}}},
+                                  {0, 1},
+                                  {"root/a/leaf", "root/b/leaf"});
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 1;
+    request.params_str_ = GeneratePyramidSearchParametersString(20);
+
+    const auto analyze = [&]() {
+        const auto stats_string = index->AnalyzeIndexBySearch(request);
+        REQUIRE_FALSE(stats_string.empty());
+        auto stats = nlohmann::json::parse(stats_string);
+        REQUIRE(stats.contains("avg_distance_query"));
+        REQUIRE(stats.contains("recall_query"));
+        REQUIRE(stats.contains("time_cost_query"));
+        return stats;
+    };
+
+    const auto stats_before_remove = analyze();
+    REQUIRE(std::abs(stats_before_remove["recall_query"].get<float>() - 1.0F) <= 1e-6F);
+    REQUIRE(std::abs(stats_before_remove["avg_distance_query"].get<float>() - 0.5F) <= 1e-6F);
+
+    auto remove_result = index->Remove(std::vector<int64_t>{102}, vsag::RemoveMode::MARK_REMOVE);
+    REQUIRE(remove_result.has_value());
+    REQUIRE(remove_result.value() == 1);
+
+    // The removed vector was the nearest live candidate in root/a/leaf before removal. Ground
+    // truth must now use id 101, just as the actual path-scoped search does.
+    const auto stats_after_remove = analyze();
+    REQUIRE(std::abs(stats_after_remove["recall_query"].get<float>() - 1.0F) <= 1e-6F);
+    REQUIRE(std::abs(stats_after_remove["avg_distance_query"].get<float>() - 50.0F) <= 1e-6F);
+}
+
 // ============================================================================
 // Multi-Hierarchy Tests
 // ============================================================================
@@ -928,6 +1255,30 @@ struct MultiHierarchyFixture {
                base_q + R"(",
                 "use_reorder": )" +
                reorder_str + precise + R"(,
+                "index_min_size": 0, "support_duplicate": false,
+                "hierarchies": [
+                    {"name": "site", "no_build_levels": [0]},
+                    {"name": "cat", "no_build_levels": [0, 1]}
+                ]
+            }
+        })";
+    }
+
+    static std::string
+    build_reorder_stats_param(const std::string& precise_file_path) {
+        return R"({
+            "dtype": "float32", "metric_type": "l2", "dim": 4,
+            "index_param": {
+                "max_degree": 32, "alpha": 1.2,
+                "graph_type": "nsw",
+                "graph_iter_turn": 15, "neighbor_sample_rate": 0.2,
+                "base_quantization_type": "rabitq",
+                "base_io_type": "memory_io",
+                "use_reorder": true,
+                "precise_quantization_type": "fp32",
+                "precise_io_type": "buffer_io",
+                "precise_file_path": ")" +
+               precise_file_path + R"(",
                 "index_min_size": 0, "support_duplicate": false,
                 "hierarchies": [
                     {"name": "site", "no_build_levels": [0]},
@@ -1338,6 +1689,80 @@ TEST_CASE("Multi-Hierarchy: Per-hierarchy build params take effect",
     REQUIRE(cat_tech.count(101) == 1);
 }
 
+TEST_CASE("Multi-Hierarchy: AnalyzeIndexBySearch honors named query paths",
+          "[ft][pyramid][multi_hierarchy][analyzer]") {
+    MultiHierarchyFixture f;
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("odescent"));
+    REQUIRE(index.has_value());
+
+    auto* base_vectors = new float[16]{0.0F,
+                                       0.0F,
+                                       0.0F,
+                                       0.0F,
+                                       10.0F,
+                                       0.0F,
+                                       0.0F,
+                                       0.0F,
+                                       20.0F,
+                                       0.0F,
+                                       0.0F,
+                                       0.0F,
+                                       100.0F,
+                                       0.0F,
+                                       0.0F,
+                                       0.0F};
+    auto* base_ids = new int64_t[4]{100, 101, 102, 103};
+    auto* site_paths = new std::string[4]{"z", "x", "y", "z"};
+    auto* cat_paths = new std::string[4]{"z/zero", "y/leaf", "x/leaf", "z/hundred"};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(4)
+        ->Dim(4)
+        ->Float32Vectors(base_vectors)
+        ->Ids(base_ids)
+        ->Paths("site", site_paths)
+        ->Paths("cat", cat_paths)
+        ->Owner(true);
+    REQUIRE(index.value()->Build(base).has_value());
+
+    auto* query_vectors = new float[8]{0.0F, 0.0F, 0.0F, 0.0F, 100.0F, 0.0F, 0.0F, 0.0F};
+    auto* query_paths = new std::string[2]{"x", "y"};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(2)
+        ->Dim(4)
+        ->Float32Vectors(query_vectors)
+        ->Paths("cat", query_paths)
+        ->Owner(true);
+
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 1;
+    request.params_str_ = R"({"pyramid":{"ef_search":20,"hierarchies":["cat"]}})";
+
+    // Global GT is ids 100/103. If x/y were applied to site, its GT would be 101/102, while the
+    // selected cat hierarchy has GT 102/101. Only cat distances 400/8100 yield this average.
+    const auto stats = nlohmann::json::parse(index.value()->AnalyzeIndexBySearch(request));
+    REQUIRE(std::abs(stats["recall_query"].get<float>() - 1.0F) <= 1e-6F);
+    REQUIRE(std::abs(stats["avg_distance_query"].get<float>() - 4250.0F) <= 1e-6F);
+}
+
+TEST_CASE("Multi-Hierarchy: AnalyzeIndexBySearch topk one has finite quantization metrics",
+          "[ft][pyramid][multi_hierarchy][analyzer]") {
+    MultiHierarchyFixture f;
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw", true));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(f.make_base()).has_value());
+
+    vsag::SearchRequest request;
+    request.query_ = f.make_query("cat", "tech/ai");
+    request.topk_ = 1;
+    request.params_str_ = R"({"pyramid":{"ef_search":20,"hierarchies":["cat"]}})";
+
+    const auto stats = nlohmann::json::parse(index.value()->AnalyzeIndexBySearch(request));
+    REQUIRE(std::isfinite(stats["quantization_error_query"].get<float>()));
+    REQUIRE(std::isfinite(stats["quantization_inversion_ratio_query"].get<float>()));
+    REQUIRE(stats["quantization_inversion_ratio_query"].get<float>() == 0.0F);
+}
+
 TEST_CASE("Multi-Hierarchy: Analyzer output format - multi hierarchy",
           "[ft][pyramid][multi_hierarchy][analyzer]") {
     MultiHierarchyFixture f;
@@ -1465,6 +1890,36 @@ TEST_CASE("Multi-Hierarchy: Reorder with multi-hierarchy", "[ft][pyramid][multi_
     auto cat_tech = f.search_ids(index.value(), "cat", "tech");
     REQUIRE(cat_tech.count(100) == 1);
     REQUIRE(cat_tech.count(101) == 1);
+}
+
+TEST_CASE("Multi-Hierarchy: Reorder statistics include precise IO",
+          "[ft][pyramid][multi_hierarchy]") {
+    MultiHierarchyFixture f;
+    fixtures::TempDir temp_dir("pyramid_reorder_stats");
+    auto index = vsag::Factory::CreateIndex(
+        "pyramid", f.build_reorder_stats_param(temp_dir.GenerateRandomFile(false)));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(f.make_base()).has_value());
+
+    auto* qv = new float[4]{1.0f, 0.0f, 0.0f, 0.0f};
+    auto* qp = new std::string[1]{"www/news"};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(4)->Float32Vectors(qv)->Paths("site", qp)->Owner(true);
+
+    std::string sp = R"({"pyramid": {"ef_search": 100, "hierarchies": ["site"]}})";
+    auto knn_result = index.value()->KnnSearch(query, 2, sp);
+    REQUIRE(knn_result.has_value());
+    auto knn_stats = knn_result.value()->GetStatistics({"io_cnt", "reorder_distance_count"});
+    REQUIRE(knn_stats.size() == 2);
+    REQUIRE(std::stoul(knn_stats[0]) > 0);
+    REQUIRE(std::stoul(knn_stats[1]) > 0);
+
+    auto range_result = index.value()->RangeSearch(query, 2.0f, sp);
+    REQUIRE(range_result.has_value());
+    auto range_stats = range_result.value()->GetStatistics({"io_cnt", "reorder_distance_count"});
+    REQUIRE(range_stats.size() == 2);
+    REQUIRE(std::stoul(range_stats[0]) > 0);
+    REQUIRE(std::stoul(range_stats[1]) > 0);
 }
 
 TEST_CASE("Multi-Hierarchy: Single hierarchy in hierarchies config",

@@ -55,12 +55,46 @@ HGraph 把一个索引拆成若干个相互独立的 **cell（数据单元）**�
 | `buffer_io` | 磁盘（带缓冲 `pread`） | 是 | 通用磁盘读取，各平台可用 |
 | `mmap_io` | 磁盘（mmap + 页缓存） | 是 | 工作集能放入页缓存时接近内存速度 |
 | `async_io` | 磁盘（Linux libaio） | 是 | 高并发磁盘读；**仅限 Linux + libaio**，否则回退 `buffer_io` |
+| `uring_io` | 磁盘（Linux io_uring） | 是 | 可选 io_uring 后端；需以 `ENABLE_LIBURING=ON` 构建，否则回退 `buffer_io` |
 | `reader_io` | 自定义 `Reader` | 否 | 加载期通过用户 `ReaderSet` 读取（如远程 / 对象存储） |
 
 每个 cell 通过一组扁平参数配置：`graph_io_type` / `graph_file_path`、`base_io_type` /
 `base_file_path`、`precise_io_type` / `precise_file_path`，以及 `raw_vector_io_type` /
 `raw_vector_file_path`。当对应的 `*_io_type` 为磁盘型（`buffer_io`、`mmap_io`、`async_io`）时，
-`*_file_path` **必填**；内存型后端会忽略它。所有 cell 默认均为 `block_memory_io`（全内存）。
+`*_file_path` **必填**；这里的磁盘型后端包括 `buffer_io`、`mmap_io`、`async_io` 与
+`uring_io`。内存型后端会忽略路径。所有 cell 默认均为 `block_memory_io`（全内存）。
+
+### 启用 `uring_io`
+
+`uring_io` 是可选的 Linux 后端。安装 liburing，并在配置 CMake 时开启：
+
+```bash
+cmake -S . -B build-release \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DENABLE_LIBURING=ON \
+    -DENABLE_EXAMPLES=ON
+cmake --build build-release --target 325_feature_uring_io -j
+```
+
+它可以用于支持磁盘 IO 的 cell，例如：
+
+```json
+{
+    "index_param": {
+        "base_io_type": "uring_io",
+        "base_file_path": "/data/vsag/hgraph_base.data",
+        "base_direct_read": true
+    }
+}
+```
+
+HGraph 的 `base_direct_read` 与 `precise_direct_read` 默认都是 `false`。将对应参数设为
+`true`，可让 `uring_io` 通过 direct IO 打开文件并绕过页缓存。请确认目标文件系统支持
+direct IO，并针对实际负载对比两种模式。
+
+如果 VSAG 构建时没有找到 liburing，相同配置仍可加载，但会打印一次性告警并回退到
+`buffer_io`。回退后功能保持可用，但不具备 io_uring 的提交/完成批处理能力。完整加载示例见
+`examples/cpp/325_feature_uring_io.cpp`。
 
 ## 推荐配置：base 留内存，precise 落磁盘
 
@@ -106,6 +140,9 @@ HGraph 把一个索引拆成若干个相互独立的 **cell（数据单元）**�
   Makefile 也会自动传入 `VSAG_ENABLE_LIBAIO=ON`；只有当此前的构建关闭过 libaio 时，才需要用这些
   开关把它重新打开。当 libaio 缺失时（包括 macOS），`async_io` 会打印一次性告警并回退
   `buffer_io`，配置因此保持可移植但失去异步批量能力。生产吞吐场景请在 Linux 上编译进 libaio。
+- **`uring_io` 需要 Linux + liburing，且默认关闭。** 使用
+  `-DENABLE_LIBURING=ON` 开启；否则会回退到 `buffer_io`。请在目标内核、队列深度和 SSD
+  上实测 `uring_io` 与 `async_io`，不要假定其中一个始终更快。
 - **预热页缓存。** 对 `mmap_io` 的 cell，加载后先做一次预热（如顺序读一遍文件、或跑一轮预热
   查询），避免最初的查询承担冷未命中延迟。
 - **规划文件路径与生命周期。** 磁盘型 cell 会写入你提供的 `*_file_path`；请放在快速、专用、

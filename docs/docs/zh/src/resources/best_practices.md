@@ -32,7 +32,6 @@
 ## 调优
 
 - 使用 [`Tune`](../advanced/optimizer.md) 对真实查询分布进行调参；
-- 对尾部困难查询，启用 [共轭图](../advanced/enhance_graph.md)；
 - 使用 [`eval_performance`](eval.md) 做持续回归测试。
 
 ## 部署

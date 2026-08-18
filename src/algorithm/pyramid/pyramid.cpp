@@ -15,20 +15,25 @@
 
 #include "pyramid.h"
 
+#include <fmt/format.h>
+
 #include <chrono>
+#include <exception>
+#include <limits>
 
 #include "algorithm/inner_index_interface.h"
 #include "analyzer/analyzer.h"
 #include "datacell/flatten_interface.h"
+#include "impl/distance_provider_for_graph.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
-#include "io/memory_io/memory_io_parameter.h"
 #include "query_context.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
 #include "storage/tlv_section.h"
+#include "utils/search_threshold.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
 namespace vsag {
@@ -196,7 +201,12 @@ IndexNode::Search(const SearchFunc& search_func,
                   const VisitedListPtr& vl,
                   const DistHeapPtr& search_result,
                   uint64_t ef_search) const {
-    if (status_ != IndexNode::Status::NO_INDEX) {
+    bool has_index = false;
+    {
+        std::shared_lock lock(mutex_);
+        has_index = status_ != IndexNode::Status::NO_INDEX;
+    }
+    if (has_index) {
         auto self_search_result = search_func(this, vl);
         search_result->Merge(*self_search_result);
         while (search_result->Size() > ef_search) {
@@ -217,20 +227,33 @@ Pyramid::build_by_odescent(const DatasetPtr& base) {
     const auto* data_ids = base->GetIds();
 
     resize(data_num);
-    std::memcpy(label_table_->label_table_.data(), data_ids, sizeof(LabelType) * data_num);
+    for (InnerIdType inner_id = 0; inner_id < data_num; ++inner_id) {
+        label_table_->Insert(inner_id, data_ids[inner_id]);
+    }
 
     base_codes_->BatchInsertVector(data_vectors, data_num);
-    if (use_reorder_) {
+    if (has_precise_reorder()) {
         precise_codes_->BatchInsertVector(data_vectors, data_num);
     }
-    auto codes = use_reorder_ ? precise_codes_ : base_codes_;
+    if (raw_vector_ != nullptr) {
+        raw_vector_->BatchInsertVector(data_vectors, data_num);
+    }
+    auto codes = has_precise_reorder() ? precise_codes_ : base_codes_;
 
     if (thread_pool_ != nullptr && hierarchies_.size() > 1) {
+        auto build_flatten = ODescent::CreateBuildFlatten(codes, data_vectors, data_num);
         Vector<std::future<void>> futures(allocator_);
         for (const auto& [hname, h_ptr] : hierarchies_) {
             auto* root_ptr = h_ptr->root.get();
-            futures.push_back(thread_pool_->GeneralEnqueue([&, codes, root_ptr]() {
-                ODescent builder(odescent_param_, codes, allocator_, nullptr);
+            futures.push_back(thread_pool_->GeneralEnqueue([&, codes, build_flatten, root_ptr]() {
+                ODescent builder(odescent_param_,
+                                 codes,
+                                 allocator_,
+                                 nullptr,
+                                 true,
+                                 data_vectors,
+                                 data_num,
+                                 build_flatten);
                 root_ptr->Build(builder);
             }));
         }
@@ -238,7 +261,13 @@ Pyramid::build_by_odescent(const DatasetPtr& base) {
             f.get();
         }
     } else {
-        ODescent graph_builder(odescent_param_, codes, allocator_, this->thread_pool_.get());
+        ODescent graph_builder(odescent_param_,
+                               codes,
+                               allocator_,
+                               this->thread_pool_.get(),
+                               true,
+                               data_vectors,
+                               data_num);
         for (const auto& [hname, h_ptr] : hierarchies_) {
             h_ptr->root->Build(graph_builder);
         }
@@ -255,7 +284,9 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     SearchStatistics stats;
     QueryContext ctx{.stats = &stats};
 
+    const auto threshold = ParseSearchThreshold(parameters);
     auto parsed_param = PyramidSearchParameters::FromJson(parameters);
+    ctx.rabitq_error_rate = parsed_param.rabitq_error_rate;
     CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
     CHECK_ARGUMENT(parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::SINGLE,
                    "multi-hierarchy search (union/intersection) is not yet implemented");
@@ -268,9 +299,27 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     InnerSearchParam search_param;
     search_param.ef = std::max<uint64_t>(parsed_param.ef_search, static_cast<uint64_t>(k));
     search_param.radius = std::numeric_limits<float>::max();
-    search_param.topk = k;
+    search_param.topk = threshold.has_value() ? static_cast<int64_t>(search_param.ef) : k;
+    search_param.distance_threshold = threshold;
+    search_param.enable_reorder = use_reorder_;
     search_param.search_mode = KNN_SEARCH;
     search_param.parallel_search_thread_count = parsed_param.parallel_search_thread_count;
+    search_param.enable_rabitq_one_bit_search = parsed_param.has_rabitq_one_bit_search
+                                                    ? parsed_param.rabitq_one_bit_search
+                                                    : default_rabitq_one_bit_search_;
+
+    // Keep the same contract as HGraph: a useful hop cap must exceed ef_search.
+    if (static_cast<uint64_t>(parsed_param.hops_limit) <= parsed_param.ef_search) {
+        search_param.hops_limit = std::numeric_limits<uint32_t>::max();
+        if (parsed_param.hops_limit != std::numeric_limits<uint32_t>::max()) {
+            logger::warn(
+                fmt::format("hops_limit({}) is not greater than ef_search({}), ignoring hops_limit",
+                            parsed_param.hops_limit,
+                            parsed_param.ef_search));
+        }
+    } else {
+        search_param.hops_limit = parsed_param.hops_limit;
+    }
     if (this->support_duplicate_) {
         search_param.consider_duplicate = true;
     }
@@ -281,16 +330,41 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     }
 
     search_param.is_inner_id_allowed = this->create_search_filter(filter);
+    const bool collect_rabitq_lower_bounds = search_param.enable_rabitq_one_bit_search and
+                                             use_reorder_ and
+                                             base_codes_->SupportSplitCodeStorage();
+    DistanceRecordVector rabitq_lower_bound_candidates(allocator_);
+    std::mutex rabitq_lower_bound_mutex;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
-        return this->search_node(
-            node, vl, search_param, query, base_codes_, ctx, parsed_param.subindex_ef_search);
+        DistanceRecordVector local_candidates(allocator_);
+        auto* candidates = collect_rabitq_lower_bounds ? &local_candidates : nullptr;
+        auto result = this->search_node(node,
+                                        vl,
+                                        search_param,
+                                        query,
+                                        base_codes_,
+                                        ctx,
+                                        parsed_param.subindex_ef_search,
+                                        candidates);
+        if (candidates != nullptr and not candidates->empty()) {
+            std::lock_guard lock(rabitq_lower_bound_mutex);
+            rabitq_lower_bound_candidates.insert(
+                rabitq_lower_bound_candidates.end(), candidates->begin(), candidates->end());
+        }
+        return result;
     };
 
     std::string hierarchy_name =
         parsed_param.hierarchies.empty() ? "" : parsed_param.hierarchies[0];
-    auto result = this->search_impl(query, search_func, search_param, hierarchy_name);
+    auto result =
+        this->search_impl(query,
+                          search_func,
+                          search_param,
+                          ctx,
+                          hierarchy_name,
+                          collect_rabitq_lower_bounds ? &rabitq_lower_bound_candidates : nullptr);
     result->Statistics(stats.Dump());
-    return result;
+    return FilterDatasetByThreshold(result, threshold, allocator_, k);
 }
 
 DatasetPtr
@@ -305,6 +379,7 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     QueryContext ctx{.stats = &stats};
 
     auto parsed_param = PyramidSearchParameters::FromJson(parameters);
+    ctx.rabitq_error_rate = parsed_param.rabitq_error_rate;
     CHECK_ARGUMENT(parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::SINGLE,
                    "multi-hierarchy search (union/intersection) is not yet implemented");
     InnerSearchParam search_param;
@@ -312,6 +387,9 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     search_param.radius = radius * RADIUS_EPSILON;
     search_param.search_mode = RANGE_SEARCH;
     search_param.parallel_search_thread_count = parsed_param.parallel_search_thread_count;
+    search_param.enable_rabitq_one_bit_search = parsed_param.has_rabitq_one_bit_search
+                                                    ? parsed_param.rabitq_one_bit_search
+                                                    : default_rabitq_one_bit_search_;
     search_param.topk = limited_size == -1 ? std::numeric_limits<int64_t>::max() : limited_size;
 
     if (parsed_param.enable_time_record) {
@@ -324,14 +402,39 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     }
 
     search_param.is_inner_id_allowed = this->create_search_filter(filter);
+    const bool collect_rabitq_lower_bounds = search_param.enable_rabitq_one_bit_search and
+                                             use_reorder_ and
+                                             base_codes_->SupportSplitCodeStorage();
+    DistanceRecordVector rabitq_lower_bound_candidates(allocator_);
+    std::mutex rabitq_lower_bound_mutex;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
-        return this->search_node(
-            node, vl, search_param, query, base_codes_, ctx, parsed_param.subindex_ef_search);
+        DistanceRecordVector local_candidates(allocator_);
+        auto* candidates = collect_rabitq_lower_bounds ? &local_candidates : nullptr;
+        auto result = this->search_node(node,
+                                        vl,
+                                        search_param,
+                                        query,
+                                        base_codes_,
+                                        ctx,
+                                        parsed_param.subindex_ef_search,
+                                        candidates);
+        if (candidates != nullptr and not candidates->empty()) {
+            std::lock_guard lock(rabitq_lower_bound_mutex);
+            rabitq_lower_bound_candidates.insert(
+                rabitq_lower_bound_candidates.end(), candidates->begin(), candidates->end());
+        }
+        return result;
     };
 
     std::string hierarchy_name =
         parsed_param.hierarchies.empty() ? "" : parsed_param.hierarchies[0];
-    auto result = this->search_impl(query, search_func, search_param, hierarchy_name);
+    auto result =
+        this->search_impl(query,
+                          search_func,
+                          search_param,
+                          ctx,
+                          hierarchy_name,
+                          collect_rabitq_lower_bounds ? &rabitq_lower_bound_candidates : nullptr);
     result->Statistics(stats.Dump());
     return result;
 }
@@ -340,10 +443,9 @@ DatasetPtr
 Pyramid::search_impl(const DatasetPtr& query,
                      const SearchFunc& search_func,
                      InnerSearchParam& search_param,
-                     const std::string& hierarchy_name) const {
-    SearchStatistics stats;
-    QueryContext ctx{.stats = &stats};
-
+                     QueryContext& ctx,
+                     const std::string& hierarchy_name,
+                     const DistanceRecordVector* rabitq_lower_bound_candidates) const {
     auto h_iter = hierarchies_.find(hierarchy_name);
     CHECK_ARGUMENT(h_iter != hierarchies_.end(),
                    fmt::format("unknown hierarchy name: '{}'", hierarchy_name));
@@ -361,26 +463,30 @@ Pyramid::search_impl(const DatasetPtr& query,
     DistHeapPtr search_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
 
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
-    auto vl = pool_->TakeOne();
+    VisitedListGuard vl_guard(pool_.get());
+    const VisitedListPtr& vl = vl_guard.get();
     if (query_path != nullptr) {
         const std::string& current_path = query_path[0];
         search_hierarchy(h, search_func, vl, search_result, current_path, search_param);
     } else {
         h.root->Search(search_func, vl, search_result, search_param.ef);
     }
-    pool_->ReturnOne(vl);
 
     if (use_reorder_) {
-        search_result = this->reorder_->Reorder(
-            search_result, query->GetFloat32Vectors(), search_param.topk, ctx);
+        search_result = this->reorder_->Reorder(search_result,
+                                                query->GetFloat32Vectors(),
+                                                search_param.topk,
+                                                ctx,
+                                                nullptr,
+                                                rabitq_lower_bound_candidates);
     }
 
     if (search_result->Empty()) {
         return DatasetImpl::MakeEmptyDataset();
     }
 
-    while (search_result->Size() > search_param.topk ||
-           search_result->Top().first > search_param.radius) {
+    while (not search_result->Empty() && (search_result->Size() > search_param.topk ||
+                                          search_result->Top().first > search_param.radius)) {
         search_result->Pop();
     }
 
@@ -432,8 +538,11 @@ void
 Pyramid::Serialize(StreamWriter& writer) const {
     label_table_->Serialize(writer);
     base_codes_->Serialize(writer);
-    if (use_reorder_) {
+    if (has_precise_reorder()) {
         precise_codes_->Serialize(writer);
+    }
+    if (raw_vector_ != nullptr) {
+        raw_vector_->Serialize(writer);
     }
 
     auto pyramid_param = std::dynamic_pointer_cast<PyramidParameters>(create_param_ptr_);
@@ -482,8 +591,15 @@ Pyramid::collect_streaming_header() const {
                                  base_tag,
                                  StreamSerializationBlockCurrentVersion(base_tag),
                                  StreamSerializationTagCritical(base_tag));
-    if (this->use_reorder_) {
+    if (this->has_precise_reorder()) {
         auto tag = static_cast<uint32_t>(StreamSerializationTag::HIGH_PRECISION_CODES);
+        AppendStreamingManifestBlock(manifest,
+                                     tag,
+                                     StreamSerializationBlockCurrentVersion(tag),
+                                     StreamSerializationTagCritical(tag));
+    }
+    if (this->raw_vector_ != nullptr) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::RAW_VECTOR);
         AppendStreamingManifestBlock(manifest,
                                      tag,
                                      StreamSerializationBlockCurrentVersion(tag),
@@ -527,11 +643,18 @@ Pyramid::serialize_streaming_body(StreamWriter& writer) const {
         writer, base_tag, StreamSerializationTagCritical(base_tag), [this](StreamWriter& w) {
             this->base_codes_->Serialize(w);
         });
-    if (this->use_reorder_) {
+    if (this->has_precise_reorder()) {
         auto tag = static_cast<uint32_t>(StreamSerializationTag::HIGH_PRECISION_CODES);
         WriteStreamingBlock(
             writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& w) {
                 this->precise_codes_->Serialize(w);
+            });
+    }
+    if (this->raw_vector_ != nullptr) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::RAW_VECTOR);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& w) {
+                this->raw_vector_->Serialize(w);
             });
     }
     WriteStreamingBlock(writer,
@@ -598,6 +721,7 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
     bool loaded_label_table = false;
     bool loaded_base_codes = false;
     bool loaded_precise_codes = false;
+    bool loaded_raw_vector = false;
     bool loaded_hierarchies = false;
 
     while (true) {
@@ -641,12 +765,21 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
                 loaded_base_codes = true;
                 break;
             case StreamSerializationTag::HIGH_PRECISION_CODES:
-                if (this->use_reorder_) {
+                if (this->has_precise_reorder()) {
                     ReadSeekableBlockPayload(
                         block_reader, block_header, [this](StreamReader& block) {
                             this->precise_codes_->Deserialize(block);
                         });
                     loaded_precise_codes = true;
+                }
+                break;
+            case StreamSerializationTag::RAW_VECTOR:
+                if (this->raw_vector_ != nullptr) {
+                    ReadSeekableBlockPayload(
+                        block_reader, block_header, [this](StreamReader& block) {
+                            this->raw_vector_->Deserialize(block);
+                        });
+                    loaded_raw_vector = true;
                 }
                 break;
             case StreamSerializationTag::PYRAMID_HIERARCHIES:
@@ -678,9 +811,13 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
         throw VsagException(ErrorType::READ_ERROR,
                             "Pyramid streaming serialization required block is missing");
     }
-    if (this->use_reorder_ && !loaded_precise_codes) {
+    if (this->has_precise_reorder() && !loaded_precise_codes) {
         throw VsagException(ErrorType::READ_ERROR,
                             "Pyramid streaming serialization precise codes block is missing");
+    }
+    if (this->raw_vector_ != nullptr && !loaded_raw_vector) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "Pyramid streaming serialization raw vector block is missing");
     }
 
     resize(max_capacity);
@@ -703,8 +840,11 @@ Pyramid::Deserialize(StreamReader& reader) {
     delete_count_.store(static_cast<int64_t>(label_table_->GetAllDeletedIds().size()),
                         std::memory_order_relaxed);
     base_codes_->Deserialize(buffer_reader);
-    if (use_reorder_) {
+    if (has_precise_reorder()) {
         precise_codes_->Deserialize(buffer_reader);
+    }
+    if (raw_vector_ != nullptr) {
+        raw_vector_->Deserialize(buffer_reader);
     }
     cur_element_count_ = base_codes_->TotalCount();
 
@@ -743,12 +883,19 @@ Pyramid::ExportModel(const IndexCommonParam& param) const {
                             "Export model's pyramid reorder config mismatched");
     }
     this->base_codes_->ExportModel(index->base_codes_);
-    if (use_reorder_) {
+    if (has_precise_reorder()) {
         if (index->precise_codes_ == nullptr) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
                                 "Export model's pyramid precise codes is empty");
         }
         this->precise_codes_->ExportModel(index->precise_codes_);
+    }
+    if (raw_vector_ != nullptr) {
+        if (index->raw_vector_ == nullptr) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "Export model's pyramid raw vector is empty");
+        }
+        this->raw_vector_->ExportModel(index->raw_vector_);
     }
     index->current_memory_usage_ = index->CalSerializeSize();
     return index;
@@ -756,7 +903,7 @@ Pyramid::ExportModel(const IndexCommonParam& param) const {
 
 std::vector<int64_t>
 Pyramid::Add(const DatasetPtr& base) {
-    int64_t data_num = base->GetNumElements();
+    const int64_t data_num = base->GetNumElements();
     const auto* data_vectors = base->GetFloat32Vectors();
     const auto* data_ids = base->GetIds();
     std::vector<int64_t> failed_ids;
@@ -765,33 +912,110 @@ Pyramid::Add(const DatasetPtr& base) {
     {
         std::lock_guard lock(cur_element_count_mutex_);
         local_cur_element_count = cur_element_count_;
+        auto new_capacity = max_capacity_;
         if (max_capacity_ == 0) {
-            auto new_capacity = std::max(INIT_CAPACITY, data_num);
-            resize(new_capacity);
+            new_capacity = std::max(INIT_CAPACITY, data_num);
         } else if (max_capacity_ < data_num + cur_element_count_) {
-            auto new_capacity = std::min(MAX_CAPACITY_EXTEND, max_capacity_);
+            new_capacity = std::min(MAX_CAPACITY_EXTEND, max_capacity_);
             new_capacity = std::max(data_num + cur_element_count_ - max_capacity_, new_capacity) +
                            max_capacity_;
+        }
+        bool base_storage_resized = false;
+        bool precise_storage_resized = false;
+        bool raw_storage_resized = false;
+        if (new_capacity > max_capacity_) {
+            base_storage_resized = new_capacity > static_cast<int64_t>(base_codes_->max_capacity_);
+            precise_storage_resized =
+                not has_precise_reorder() ||
+                new_capacity > static_cast<int64_t>(precise_codes_->max_capacity_);
+            raw_storage_resized = raw_vector_ == nullptr ||
+                                  new_capacity > static_cast<int64_t>(raw_vector_->max_capacity_);
             resize(new_capacity);
         }
-        int64_t valid_id_count = 0;
+
+        data_biases.reserve(data_num);
         for (int64_t i = 0; i < data_num; ++i) {
             if (not label_table_->CheckLabel(data_ids[i])) {
-                label_table_->Insert(valid_id_count + local_cur_element_count, data_ids[i]);
-                base_codes_->InsertVector(data_vectors + dim_ * i,
-                                          valid_id_count + local_cur_element_count);
-                if (use_reorder_) {
-                    precise_codes_->InsertVector(data_vectors + dim_ * i,
-                                                 valid_id_count + local_cur_element_count);
-                }
-                valid_id_count++;
+                const auto inner_id =
+                    static_cast<InnerIdType>(local_cur_element_count + data_biases.size());
+                label_table_->Insert(inner_id, data_ids[i]);
                 data_biases.push_back(i);
             } else {
                 logger::warn("Label {} already exists, skip adding.", data_ids[i]);
                 failed_ids.push_back(data_ids[i]);
             }
         }
-        cur_element_count_ += valid_id_count;
+
+        if (local_cur_element_count == 0 and not data_biases.empty()) {
+            this->Train(base);
+        }
+
+        const auto encode_range = [this, data_vectors, local_cur_element_count, &data_biases](
+                                      uint64_t begin, uint64_t end) {
+            for (uint64_t offset = begin; offset < end; ++offset) {
+                const auto* vector = data_vectors + dim_ * data_biases[offset];
+                const auto inner_id = static_cast<InnerIdType>(local_cur_element_count + offset);
+                base_codes_->InsertVector(vector, inner_id);
+                if (has_precise_reorder()) {
+                    precise_codes_->InsertVector(vector, inner_id);
+                }
+                if (raw_vector_ != nullptr) {
+                    raw_vector_->InsertVector(vector, inner_id);
+                }
+            }
+        };
+        const auto supports_parallel_encode = [](const FlattenInterfacePtr& codes) {
+            const auto name = codes->GetQuantizerName();
+            return codes->InMemory() &&
+                   (name == QUANTIZATION_TYPE_VALUE_FP32 ||
+                    name == QUANTIZATION_TYPE_VALUE_RABITQ || name == QUANTIZATION_TYPE_VALUE_SQ8);
+        };
+        const bool use_parallel_encode =
+            local_cur_element_count == 0 && thread_pool_ != nullptr && build_thread_count_ > 1 &&
+            data_biases.size() > 1 && supports_parallel_encode(base_codes_) &&
+            (not has_precise_reorder() || supports_parallel_encode(precise_codes_)) &&
+            (raw_vector_ == nullptr || supports_parallel_encode(raw_vector_)) &&
+            base_storage_resized && precise_storage_resized && raw_storage_resized;
+        if (use_parallel_encode) {
+            const uint64_t worker_count =
+                std::min<uint64_t>(build_thread_count_, data_biases.size());
+            const uint64_t block_size = (data_biases.size() + worker_count - 1) / worker_count;
+            Vector<std::future<void>> futures(allocator_);
+            futures.reserve(worker_count);
+            const auto wait_futures = [&futures]() {
+                std::exception_ptr first_exception = nullptr;
+                for (auto& future : futures) {
+                    try {
+                        future.get();
+                    } catch (...) {
+                        if (not first_exception) {
+                            first_exception = std::current_exception();
+                        }
+                    }
+                }
+                if (first_exception) {
+                    std::rethrow_exception(first_exception);
+                }
+            };
+            try {
+                for (uint64_t begin = 0; begin < data_biases.size(); begin += block_size) {
+                    const uint64_t end = std::min<uint64_t>(begin + block_size, data_biases.size());
+                    futures.push_back(thread_pool_->GeneralEnqueue(
+                        [encode_range, begin, end]() { encode_range(begin, end); }));
+                }
+            } catch (...) {
+                const auto enqueue_exception = std::current_exception();
+                try {
+                    wait_futures();
+                } catch (...) {
+                }
+                std::rethrow_exception(enqueue_exception);
+            }
+            wait_futures();
+        } else {
+            encode_range(0, data_biases.size());
+        }
+        cur_element_count_ += static_cast<int64_t>(data_biases.size());
     }
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
 
@@ -813,8 +1037,11 @@ Pyramid::resize(int64_t new_max_capacity) {
     pool_ = std::make_unique<VisitedListPool>(1, allocator_, new_max_capacity, allocator_);
     label_table_->Resize(new_max_capacity);
     base_codes_->Resize(new_max_capacity);
-    if (use_reorder_) {
+    if (has_precise_reorder()) {
         precise_codes_->Resize(new_max_capacity);
+    }
+    if (raw_vector_ != nullptr) {
+        raw_vector_->Resize(new_max_capacity);
     }
     points_mutex_->Resize(new_max_capacity);
     max_capacity_ = new_max_capacity;
@@ -841,6 +1068,7 @@ Pyramid::InitFeatures() {
 
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
+        IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID,
     });
 
     // concurrency
@@ -863,6 +1091,9 @@ Pyramid::InitFeatures() {
         IndexFeature::SUPPORT_EXPORT_MODEL,
         IndexFeature::SUPPORT_GET_MEMORY_USAGE,
     });
+    if (has_raw_vector_) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
+    }
 
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_DELETE_BY_ID);
 }
@@ -900,7 +1131,13 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
                 "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
                 "{PCA_DIM_KEY}": 0,
+                "{MRLE_DIM_KEY}": 0,
+                "{RABITQ_QUANTIZATION_VERSION_KEY}": "standard",
                 "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}": 32,
+                "{RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY}": 1,
+                "{RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY}": 1,
+                "{FAST_ENCODE_RABITQ_KEY}": true,
+                "{FAST_ENCODE_RABITQ_ROUNDS_KEY}": 6,
                 "{TQ_CHAIN_KEY}": "",
                 "nbits": 8,
                 "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
@@ -917,8 +1154,22 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
                 "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
                 "{PCA_DIM_KEY}": 0,
+                "{FAST_ENCODE_RABITQ_KEY}": true,
+                "{FAST_ENCODE_RABITQ_ROUNDS_KEY}": 6,
                 "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
                 "{HOLD_MOLDS}": false
+            }
+        },
+        "{STORE_RAW_VECTOR_KEY}": false,
+        "{RAW_VECTOR_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{CODES_TYPE_KEY}": "flatten",
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{HOLD_MOLDS}": true
             }
         },
         "{BUILD_THREAD_COUNT_KEY}": 1,
@@ -935,26 +1186,47 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
         {PYRAMID_EF_CONSTRUCTION, {EF_CONSTRUCTION_KEY}},
         {PYRAMID_USE_REORDER, {USE_REORDER_KEY}},
         {PYRAMID_BASE_QUANTIZATION_TYPE, {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, TYPE_KEY}},
+        {INDEX_TQ_CHAIN, {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, TQ_CHAIN_KEY}},
+        {INDEX_MRLE_DIM, {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, MRLE_DIM_KEY}},
         {PYRAMID_RABITQ_BITS_PER_DIM_BASE,
          {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY}},
         {PYRAMID_RABITQ_BITS_PER_DIM_QUERY,
          {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}},
+        {PYRAMID_RABITQ_BITS_PER_DIM_PRECISE,
+         {PRECISE_CODES_KEY, QUANTIZATION_PARAMS_KEY, RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY}},
         {PYRAMID_RABITQ_PCA_DIM, {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, PCA_DIM_KEY}},
         {PYRAMID_RABITQ_USE_FHT, {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, USE_FHT_KEY}},
+        {RABITQ_ERROR_RATE,
+         {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, RABITQ_QUANTIZATION_ERROR_RATE_KEY}},
+        {RABITQ_ERROR_RATE,
+         {PRECISE_CODES_KEY, QUANTIZATION_PARAMS_KEY, RABITQ_QUANTIZATION_ERROR_RATE_KEY}},
+        {PYRAMID_FAST_ENCODE_RABITQ,
+         {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, FAST_ENCODE_RABITQ_KEY}},
+        {PYRAMID_FAST_ENCODE_RABITQ,
+         {PRECISE_CODES_KEY, QUANTIZATION_PARAMS_KEY, FAST_ENCODE_RABITQ_KEY}},
+        {PYRAMID_FAST_ENCODE_RABITQ_ROUNDS,
+         {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, FAST_ENCODE_RABITQ_ROUNDS_KEY}},
+        {PYRAMID_FAST_ENCODE_RABITQ_ROUNDS,
+         {PRECISE_CODES_KEY, QUANTIZATION_PARAMS_KEY, FAST_ENCODE_RABITQ_ROUNDS_KEY}},
         {PYRAMID_PRECISE_QUANTIZATION_TYPE, {PRECISE_CODES_KEY, QUANTIZATION_PARAMS_KEY, TYPE_KEY}},
         {PYRAMID_GRAPH_MAX_DEGREE, {GRAPH_KEY, GRAPH_PARAM_MAX_DEGREE_KEY}},
         {PYRAMID_BASE_IO_TYPE, {BASE_CODES_KEY, IO_PARAMS_KEY, TYPE_KEY}},
+        {PYRAMID_BASE_SUPPLEMENT_IO_TYPE, {BASE_CODES_KEY, SUPPLEMENT_IO_PARAMS_KEY, TYPE_KEY}},
+        {PYRAMID_BASE_SUPPLEMENT_FILE_PATH,
+         {BASE_CODES_KEY, SUPPLEMENT_IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
         {PYRAMID_BUILD_ALPHA, {GRAPH_KEY, ODESCENT_PARAMETER_ALPHA}},
         {PYRAMID_GRAPH_TYPE, {GRAPH_KEY, GRAPH_TYPE_KEY}},
         {PYRAMID_GRAPH_STORAGE_TYPE, {GRAPH_KEY, GRAPH_STORAGE_TYPE_KEY}},
         {PYRAMID_PRECISE_IO_TYPE, {PRECISE_CODES_KEY, IO_PARAMS_KEY, TYPE_KEY}},
         {PYRAMID_BUILD_THREAD_COUNT, {BUILD_THREAD_COUNT_KEY}},
+        {STORE_RAW_VECTOR, {STORE_RAW_VECTOR_KEY}},
         {PYRAMID_NO_BUILD_LEVELS, {NO_BUILD_LEVELS}},
         {PYRAMID_HIERARCHIES, {PYRAMID_HIERARCHIES}},
         {PYRAMID_BASE_PQ_DIM,
          {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, PRODUCT_QUANTIZATION_DIM_KEY}},
         {PYRAMID_BASE_FILE_PATH, {BASE_CODES_KEY, IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
         {PYRAMID_PRECISE_FILE_PATH, {PRECISE_CODES_KEY, IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
+        {STORE_RAW_VECTOR, {STORE_RAW_VECTOR_KEY}},
         {ODESCENT_PARAMETER_BUILD_BLOCK_SIZE, {GRAPH_KEY, ODESCENT_PARAMETER_BUILD_BLOCK_SIZE}},
         {ODESCENT_PARAMETER_MIN_IN_DEGREE, {GRAPH_KEY, ODESCENT_PARAMETER_MIN_IN_DEGREE}},
         {ODESCENT_PARAMETER_GRAPH_ITER_TURN, {GRAPH_KEY, ODESCENT_PARAMETER_GRAPH_ITER_TURN}},
@@ -967,6 +1239,12 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
     std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);
     auto inner_json = JsonType::Parse(str);
     mapping_external_param_to_inner(external_param, external_mapping, inner_json);
+    MapRaBitQSplitParam(external_param, inner_json);
+    ValidateMRLEDim(external_param, common_param.dim_);
+    if (RequiresRawVectorForTransformQuantizer(inner_json) and
+        not RequiresRawVectorForMRLERaBitQSplit(inner_json)) {
+        inner_json[STORE_RAW_VECTOR_KEY].SetBool(true);
+    }
     auto pyramid_params = std::make_shared<PyramidParameters>();
     pyramid_params->FromJson(inner_json);
     return pyramid_params;
@@ -975,8 +1253,11 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
 void
 Pyramid::Train(const DatasetPtr& base) {
     this->base_codes_->Train(base->GetFloat32Vectors(), base->GetNumElements());
-    if (use_reorder_) {
+    if (has_precise_reorder()) {
         this->precise_codes_->Train(base->GetFloat32Vectors(), base->GetNumElements());
+    }
+    if (raw_vector_ != nullptr) {
+        this->raw_vector_->Train(base->GetFloat32Vectors(), base->GetNumElements());
     }
 }
 std::vector<int64_t>
@@ -1032,6 +1313,43 @@ Pyramid::add_one_point(const Hierarchy& h,
 
     if (node->status_ == IndexNode::Status::FLAT) {
         node->ids_.push_back(inner_id);
+        if (node->ids_.size() < node->index_min_size_) {
+            return;
+        }
+
+        // Keep the FLAT node intact until the replacement graph is complete.
+        IndexNode graph_node(allocator_, node->graph_param_, node->index_min_size_);
+        graph_node.level_ = node->level_;
+        graph_node.ids_ = node->ids_;
+        graph_node.Init();
+
+        if (base_codes_->SupportSplitCodeStorage() and raw_vector_ == nullptr) {
+            for (const auto id : node->ids_) {
+                add_one_point(h, &graph_node, id, nullptr);
+            }
+        } else {
+            auto codes = decodable_codes();
+            Vector<float> decoded_vector(dim_, allocator_);
+            for (const auto id : node->ids_) {
+                bool need_release = false;
+                const auto* buffer = codes->GetCodesById(id, need_release);
+                const bool decoded = codes->Decode(buffer, decoded_vector.data());
+                if (need_release) {
+                    codes->Release(buffer);
+                }
+                if (not decoded) {
+                    throw VsagException(ErrorType::INTERNAL_ERROR,
+                                        "Pyramid graph promotion requires decodable vectors");
+                }
+                add_one_point(h, &graph_node, id, decoded_vector.data());
+            }
+        }
+
+        node->graph_ = std::move(graph_node.graph_);
+        node->graph_param_ = std::move(graph_node.graph_param_);
+        node->entry_point_ = graph_node.entry_point_;
+        node->status_ = IndexNode::Status::GRAPH;
+        Vector<InnerIdType>(allocator_).swap(node->ids_);
         return;
     }
 
@@ -1048,7 +1366,7 @@ Pyramid::add_one_point(const Hierarchy& h,
             search_param.find_duplicate = true;
             search_param.duplicate_query_id = inner_id;
         }
-        auto codes = use_reorder_ ? precise_codes_ : base_codes_;
+        auto codes = has_precise_reorder() ? precise_codes_ : base_codes_;
         bool update_entry_point;
         {
             std::scoped_lock<std::mutex> entry_point_lock(entry_point_mutex_);
@@ -1059,10 +1377,37 @@ Pyramid::add_one_point(const Hierarchy& h,
             graph_lock.unlock();
         }
 
-        auto vl = pool_->TakeOne();
-        auto results = searcher_->Search(
-            node->graph_, codes, vl, vector, search_param, (LabelTablePtr) nullptr, nullptr);
-        pool_->ReturnOne(vl);
+        VisitedListGuard vl_guard(pool_.get());
+        const VisitedListPtr& vl = vl_guard.get();
+        DistHeapPtr results;
+        if (vector != nullptr) {
+            results = searcher_->Search(
+                node->graph_, codes, vl, vector, search_param, (LabelTablePtr) nullptr, nullptr);
+        } else {
+            FlattenIdDistanceProvider distance_provider(base_codes_, inner_id);
+            results = searcher_->Search(
+                node->graph_, distance_provider, vl, search_param, nullptr, nullptr);
+            if (support_duplicate_ and not results->Empty()) {
+                // StandardHeap exposes heap storage rather than sorted output, so inspect every
+                // candidate to find the actual nearest neighbor for duplicate detection.
+                const auto* data = results->GetData();
+                auto min_distance = data[0].first;
+                auto min_index = data[0].second;
+                for (uint32_t i = 1; i < results->Size(); ++i) {
+                    if (data[i].first < min_distance) {
+                        min_distance = data[i].first;
+                        min_index = data[i].second;
+                    }
+                }
+                if (search_param.duplicate_distance_threshold > 0.0F) {
+                    if (min_distance <= search_param.duplicate_distance_threshold) {
+                        search_param.duplicate_id = min_index;
+                    }
+                } else if (codes->CompareVectors(inner_id, min_index)) {
+                    search_param.duplicate_id = min_index;
+                }
+            }
+        }
         if (this->support_duplicate_ && search_param.duplicate_id >= 0) {
             std::unique_lock lock(this->label_lookup_mutex_);
             node->graph_->SetDuplicateId(static_cast<InnerIdType>(search_param.duplicate_id),
@@ -1108,7 +1453,9 @@ Pyramid::add_to_hierarchy(Hierarchy& h,
         auto path_slices = split(current_path, PART_SLASH);
         IndexNode* node = h.root.get();
         auto inner_id = static_cast<InnerIdType>(i + local_cur_element_count);
-        const auto* vector = data_vectors + dim_ * data_bias;
+        const auto* vector = base_codes_->SupportSplitCodeStorage() and raw_vector_ == nullptr
+                                 ? nullptr
+                                 : data_vectors + dim_ * data_bias;
         int no_build_level_index = 0;
         for (int j = 0; j <= static_cast<int>(path_slices.size()); ++j) {
             IndexNode* new_node = nullptr;
@@ -1167,9 +1514,9 @@ Pyramid::search_hierarchy(const Hierarchy& h,
         if (valid) {
             if (thread_pool_ != nullptr && search_param.parallel_search_thread_count > 1) {
                 futures.push_back(thread_pool_->GeneralEnqueue([&, node, i]() -> void {
-                    auto local_vl = pool_->TakeOne();
+                    VisitedListGuard vl_guard(pool_.get());
+                    const VisitedListPtr& local_vl = vl_guard.get();
                     node->Search(search_func, local_vl, search_result_lists[i], search_param.ef);
-                    pool_->ReturnOne(local_vl);
                 }));
             } else {
                 node->Search(search_func, vl, search_result_lists[i], search_param.ef);
@@ -1208,7 +1555,8 @@ Pyramid::search_node(const IndexNode* node,
                      const DatasetPtr& query,
                      const FlattenInterfacePtr& codes,
                      QueryContext& ctx,
-                     uint64_t subindex_ef_search) const {
+                     uint64_t subindex_ef_search,
+                     DistanceRecordVector* rabitq_lower_bound_candidates) const {
     std::shared_lock lock(node->mutex_);
     DistHeapPtr results = nullptr;
 
@@ -1237,9 +1585,15 @@ Pyramid::search_node(const IndexNode* node,
 
         Vector<float> dists(id_count, allocator_);
         auto computer = codes->FactoryComputer(query->GetFloat32Vectors());
-        codes->Query(dists.data(), computer, ids_ptr, id_count);
+        codes->Query(dists.data(), computer, ids_ptr, id_count, &ctx);
 
         for (int i = 0; i < id_count; ++i) {
+            if (search_param.distance_threshold.has_value() and
+                (not std::isfinite(dists[i]) ||
+                 (not search_param.enable_reorder and
+                  dists[i] > search_param.distance_threshold.value()))) {
+                continue;
+            }
             results->Push(dists[i], ids_ptr[i]);
             if (results->Size() > search_param.ef) {
                 results->Pop();
@@ -1248,11 +1602,14 @@ Pyramid::search_node(const IndexNode* node,
     } else if (node->status_ == IndexNode::Status::GRAPH) {
         InnerSearchParam modified_param = search_param;
         modified_param.ep = node->entry_point_;
-        if (node->level_ != 0 && search_param.search_mode == KNN_SEARCH) {
-            modified_param.ef =
-                std::min(modified_param.ef,
-                         get_suitable_ef_search(
-                             search_param.topk, node->graph_->TotalCount(), subindex_ef_search));
+        if (node->level_ != 0) {
+            modified_param.hops_limit = std::numeric_limits<uint32_t>::max();
+            if (search_param.search_mode == KNN_SEARCH) {
+                modified_param.ef = std::min(
+                    modified_param.ef,
+                    get_suitable_ef_search(
+                        search_param.topk, node->graph_->TotalCount(), subindex_ef_search));
+            }
         }
         modified_param.topk = static_cast<int64_t>(modified_param.ef);
         results = searcher_->Search(node->graph_,
@@ -1261,55 +1618,80 @@ Pyramid::search_node(const IndexNode* node,
                                     query->GetFloat32Vectors(),
                                     modified_param,
                                     label_table_,
-                                    &ctx);
+                                    &ctx,
+                                    rabitq_lower_bound_candidates);
     }
 
     return results;
 }
 void
 Pyramid::SetImmutable() {
-    if (this->immutable_) {
+    if (this->immutable_.load(std::memory_order_acquire)) {
         return;
     }
     label_table_->SetImmutable();
     this->points_mutex_.reset();
     this->points_mutex_ = std::make_shared<EmptyMutex>();
     this->searcher_->SetMutexArray(this->points_mutex_);
-    immutable_ = true;
+    this->immutable_.store(true, std::memory_order_release);
 }
 
 float
 Pyramid::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance) const {
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     auto flat = this->base_codes_;
-    if (use_reorder_ && calculate_precise_distance) {
+    if (has_precise_reorder() && calculate_precise_distance) {
         flat = this->precise_codes_;
     }
+    if (raw_vector_ != nullptr && calculate_precise_distance) {
+        flat = this->raw_vector_;
+    }
     return InnerIndexInterface::calc_distance_by_id(query, id, flat);
+}
+
+DatasetPtr
+Pyramid::CalcDistancesById(const float* query,
+                           const int64_t* ids,
+                           int64_t count,
+                           bool calculate_precise_distance) const {
+    return this->CalDistanceById(query, ids, count, calculate_precise_distance);
 }
 
 DatasetPtr
 Pyramid::CalDistanceById(const float* query,
                          const int64_t* ids,
                          int64_t count,
-                         bool calculate_precise_distance) const {
+                         bool calculate_precise_distance,
+                         int64_t topk) const {
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     auto flat = this->base_codes_;
-    if (use_reorder_ && calculate_precise_distance) {
+    if (has_precise_reorder() && calculate_precise_distance) {
         flat = this->precise_codes_;
     }
-    return InnerIndexInterface::cal_distance_by_id(query, ids, count, flat);
+    if (raw_vector_ != nullptr && calculate_precise_distance) {
+        flat = this->raw_vector_;
+    }
+    std::vector<bool> validity;
+    auto result = InnerIndexInterface::cal_distance_by_id(query, ids, count, flat, &validity);
+    if (topk == -1) {
+        return result;
+    }
+    return ApplyTopkWithValidity(result->GetDistances(), ids, count, 1, topk, validity, allocator_);
 }
 
 void
 Pyramid::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
-    auto codes = (use_reorder_) ? precise_codes_ : base_codes_;
+    auto codes = decodable_codes();
     bool release = false;
     const auto* buffer = codes->GetCodesById(inner_id, release);
-    codes->Decode(buffer, data);
+    const bool decoded = codes->Decode(buffer, data);
     if (release) {
         codes->Release(buffer);
+    }
+    if (not decoded) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "Pyramid vector source does not support decode");
     }
 }
 
@@ -1322,6 +1704,27 @@ Pyramid::GetStats() const {
     auto analyzer = CreateAnalyzer(this, analyzer_param);
     JsonType stats = analyzer->GetStats();
     return stats.Dump(4);
+}
+
+std::string
+Pyramid::AnalyzeIndexBySearch(const SearchRequest& request) {
+    CHECK_ARGUMENT(request.mode_ == SearchMode::KNN_SEARCH,
+                   "Pyramid AnalyzeIndexBySearch only supports KNN search");
+    const bool is_supported_search =
+        not request.enable_filter_ && not request.enable_bitset_filter_ &&
+        not request.enable_attribute_filter_ && not request.enable_iterator_search_;
+    CHECK_ARGUMENT(is_supported_search,
+                   "Pyramid AnalyzeIndexBySearch does not support filtered or iterator search");
+    CHECK_ARGUMENT(request.topk_ > 0,
+                   fmt::format("topk({}) must be greater than 0", request.topk_));
+    CHECK_ARGUMENT(request.topk_ <= static_cast<int64_t>(std::numeric_limits<uint32_t>::max()),
+                   fmt::format("topk({}) exceeds the supported maximum", request.topk_));
+    CHECK_ARGUMENT(base_codes_->TotalCount() > 0,
+                   "Pyramid AnalyzeIndexBySearch requires a built index");
+    AnalyzerParam analyzer_param(allocator_);
+    analyzer_param.topk = request.topk_;
+    auto analyzer = CreateAnalyzer(this, analyzer_param);
+    return analyzer->AnalyzeIndexBySearch(request).Dump(4);
 }
 
 }  // namespace vsag

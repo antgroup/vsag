@@ -17,6 +17,9 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
+#include <limits>
+
 #include "inner_string_params.h"
 #include "utils/param_compat_macros.h"
 #include "vsag/constants.h"
@@ -26,8 +29,38 @@ void
 IVFParameter::FromJson(const JsonType& json) {
     InnerIndexParameter::FromJson(json);
 
+    this->precise_codes_layout = PRECISE_CODES_LAYOUT_VALUE_FLAT;
+    if (json.Contains(PRECISE_CODES_LAYOUT_KEY)) {
+        this->precise_codes_layout = json[PRECISE_CODES_LAYOUT_KEY].GetString();
+    }
+    CHECK_ARGUMENT(
+        this->precise_codes_layout == PRECISE_CODES_LAYOUT_VALUE_FLAT ||
+            this->precise_codes_layout == PRECISE_CODES_LAYOUT_VALUE_BUCKET,
+        fmt::format("invalid precise_codes_layout: {}, supported values are \"{}\" and \"{}\"",
+                    this->precise_codes_layout,
+                    PRECISE_CODES_LAYOUT_VALUE_FLAT,
+                    PRECISE_CODES_LAYOUT_VALUE_BUCKET));
+
     if (json.Contains(BUCKET_PER_DATA_KEY)) {
         this->buckets_per_data = static_cast<BucketIdType>(json[BUCKET_PER_DATA_KEY].GetInt());
+    }
+
+    if (this->precise_codes_layout == PRECISE_CODES_LAYOUT_VALUE_BUCKET) {
+        CHECK_ARGUMENT(this->use_reorder, "precise_codes_layout=bucket requires use_reorder=true");
+        CHECK_ARGUMENT(this->buckets_per_data == 1,
+                       "precise_codes_layout=bucket requires buckets_per_data=1");
+        CHECK_ARGUMENT(this->reorder_source == HGRAPH_REORDER_SOURCE_PRECISE,
+                       "precise_codes_layout=bucket requires reorder_source=precise");
+        CHECK_ARGUMENT(this->precise_codes_param != nullptr &&
+                           this->precise_codes_param->name == FLATTEN_DATA_CELL,
+                       "precise_codes_layout=bucket requires ordinary flatten precise_codes");
+        CHECK_ARGUMENT(this->precise_codes_param->quantizer_parameter->GetTypeName() !=
+                           QUANTIZATION_TYPE_VALUE_PQFS,
+                       "precise_codes_layout=bucket does not support pqfs precise quantization");
+        CHECK_ARGUMENT(
+            this->precise_codes_param->io_parameter == nullptr ||
+                this->precise_codes_param->io_parameter->GetTypeName() != IO_TYPE_VALUE_MMAP_IO,
+            "precise_codes_layout=bucket does not support mmap_io");
     }
 
     this->bucket_param = std::make_shared<BucketDataCellParameter>();
@@ -36,6 +69,9 @@ IVFParameter::FromJson(const JsonType& json) {
                    fmt::format("ivf parameters must contains {}", BUCKET_PARAMS_KEY));
 
     this->bucket_param->FromJson(json[BUCKET_PARAMS_KEY]);
+    CHECK_ARGUMENT(this->bucket_param->io_parameter == nullptr ||
+                       this->bucket_param->io_parameter->GetTypeName() != IO_TYPE_VALUE_READER_IO,
+                   "IVF base codes do not support reader_io");
 
     this->ivf_partition_strategy_parameter = std::make_shared<IVFPartitionStrategyParameters>();
     if (json.Contains(IVF_PARTITION_STRATEGY_PARAMS_KEY)) {
@@ -48,6 +84,38 @@ IVFParameter::FromJson(const JsonType& json) {
             this->ivf_partition_strategy_parameter->gnoimi_param->first_order_buckets_count *
             this->ivf_partition_strategy_parameter->gnoimi_param->second_order_buckets_count);
     }
+
+    // Automatically scale train_sample_count based on buckets_count if not explicitly set
+    if (not json.Contains(TRAIN_SAMPLE_COUNT_KEY)) {
+        constexpr int64_t samples_per_bucket = 64;
+        const auto max_train_sample_count = std::numeric_limits<int64_t>::max();
+        const auto bucket_sample_count =
+            this->bucket_param->buckets_count > max_train_sample_count / samples_per_bucket
+                ? max_train_sample_count
+                : this->bucket_param->buckets_count * samples_per_bucket;
+        this->train_sample_count =
+            std::max(static_cast<int64_t>(MAX_TRAIN_COUNT), bucket_sample_count);
+    }
+
+    if (json.Contains(GRAPH_BUILD_THRESHOLD_KEY)) {
+        this->graph_build_threshold = json[GRAPH_BUILD_THRESHOLD_KEY].GetInt();
+        if (this->graph_build_threshold < 0) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("graph_build_threshold must be non-negative, got {}",
+                                            this->graph_build_threshold));
+        }
+        if (this->graph_build_threshold > 0) {
+            auto graph_json = JsonType::Parse(R"({
+                "io_params": {"type": "memory_io"},
+                "graph_storage_type": "flat",
+                "max_degree": 64,
+                "init_capacity": 100,
+                "support_remove": false
+            })");
+            this->graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
+                GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT, graph_json);
+        }
+    }
 }
 
 JsonType
@@ -57,7 +125,9 @@ IVFParameter::ToJson() const {
     json[BUCKET_PARAMS_KEY].SetJson(this->bucket_param->ToJson());
     json[IVF_PARTITION_STRATEGY_PARAMS_KEY].SetJson(
         this->ivf_partition_strategy_parameter->ToJson());
+    json[PRECISE_CODES_LAYOUT_KEY].SetString(this->precise_codes_layout);
     json[BUCKET_PER_DATA_KEY].SetInt(this->buckets_per_data);
+    json[GRAPH_BUILD_THRESHOLD_KEY].SetInt(this->graph_build_threshold);
     return json;
 }
 bool
@@ -66,9 +136,14 @@ IVFParameter::CheckCompatibility(const ParamPtr& other) const {
         return false;
     }
     PARAM_CAST_OR_RETURN(IVFParameter, p, other);
+    CHECK_FIELD_EQ(*this, *p, precise_codes_layout);
     CHECK_FIELD_EQ(*this, *p, buckets_per_data);
+    CHECK_FIELD_EQ(*this, *p, graph_build_threshold);
     CHECK_SUB_PARAM(*this, *p, bucket_param);
     CHECK_SUB_PARAM(*this, *p, ivf_partition_strategy_parameter);
+    if (this->graph_build_threshold > 0) {
+        CHECK_SUB_PARAM(*this, *p, graph_param);
+    }
     return true;
 }
 
@@ -90,10 +165,22 @@ IVFSearchParameters::FromJson(const std::string& json_string) {
                                IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT));
     obj.scan_buckets_count = params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT].GetInt();
 
+    if (params[INDEX_TYPE_IVF].Contains(IVF_SEARCH_PARAM_DISABLE_BUCKET_SCAN)) {
+        obj.disable_bucket_scan =
+            params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_DISABLE_BUCKET_SCAN].GetBool();
+    }
+
     // set obj.first_order_scan_ratio
     if (params[INDEX_TYPE_IVF].Contains(GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO)) {
         obj.first_order_scan_ratio =
             params[INDEX_TYPE_IVF][GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO].GetFloat();
+    }
+
+    if (params[INDEX_TYPE_IVF].Contains(IVF_SEARCH_PARAM_EF_SEARCH)) {
+        auto ef_val = params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_EF_SEARCH].GetInt();
+        if (ef_val > 0) {
+            obj.ef_search = ef_val;
+        }
     }
 
     return obj;

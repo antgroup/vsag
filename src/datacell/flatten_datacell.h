@@ -20,12 +20,14 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <type_traits>
 
 #include "common.h"
 #include "flatten_interface.h"
 #include "index_common_param.h"
 #include "io/common/basic_io.h"
 #include "io/memory_block_io/memory_block_io.h"
+#include "io/memory_io/memory_io.h"
 #include "quantization/quantizer.h"
 #include "query_context.h"
 #include "utils/byte_buffer.h"
@@ -149,6 +151,24 @@ public:
     bool
     GetCodesById(InnerIdType id, uint8_t* codes) const override;
 
+    [[nodiscard]] const float*
+    TryGetContiguousRawFloatData(uint64_t* row_stride = nullptr) override {
+        if (row_stride != nullptr) {
+            *row_stride = 0;
+        }
+        if (this->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32) {
+            return nullptr;
+        }
+        if constexpr (std::is_same_v<IOTmpl, MemoryIO>) {
+            auto memory_io = std::static_pointer_cast<MemoryIO>(this->io_);
+            if (row_stride != nullptr) {
+                *row_stride = this->code_size_ / sizeof(float);
+            }
+            return reinterpret_cast<const float*>(memory_io->GetReadOnlyRawData());
+        }
+        return nullptr;
+    }
+
     void
     Serialize(StreamWriter& writer) override;
 
@@ -159,6 +179,8 @@ public:
     SetQuantizer(std::shared_ptr<Quantizer<QuantTmpl>> quantizer) {
         this->quantizer_ = quantizer;
         this->code_size_ = quantizer_->GetCodeSize();
+        this->backend_ =
+            QuantizerDistanceBackend<QuantTmpl>::Get(static_cast<const QuantTmpl&>(*quantizer_));
     }
 
     inline void
@@ -224,6 +246,8 @@ FlattenDataCell<QuantTmpl, IOTmpl>::FlattenDataCell(const QuantizerParamPtr& qua
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
     this->io_ = std::make_shared<IOTmpl>(io_param, common_param);
     this->code_size_ = quantizer_->GetCodeSize();
+    this->backend_ =
+        QuantizerDistanceBackend<QuantTmpl>::Get(static_cast<const QuantTmpl&>(*quantizer_));
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -347,7 +371,14 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
             }
 
             computer->ScanBatchDists(id_count, codes.data, result_dists);
+            if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations)
+                ctx->stats->AddDistance(ctx->distance_phase, backend_, id_count);
             return;
+        }
+
+        if (ctx != nullptr and ctx->stats != nullptr and id_count > 0) {
+            ctx->stats->io_cnt.fetch_add(static_cast<uint32_t>(id_count),
+                                         std::memory_order_relaxed);
         }
     }
 
@@ -416,6 +447,8 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
             this->io_->Release(codes);
         }
     }
+    if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations)
+        ctx->stats->AddDistance(ctx->distance_phase, backend_, static_cast<uint64_t>(id_count));
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -472,6 +505,8 @@ FlattenDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> r
     FlattenInterface::Deserialize(reader);
     this->io_->Deserialize(reader);
     this->quantizer_->Deserialize(reader);
+    this->backend_ =
+        QuantizerDistanceBackend<QuantTmpl>::Get(static_cast<const QuantTmpl&>(*this->quantizer_));
 }
 
 template <typename QuantTmpl, typename IOTmpl>

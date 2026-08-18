@@ -15,6 +15,7 @@
 
 #include "sparse_term_datacell.h"
 
+#include <set>
 #include <sstream>
 
 #include "impl/allocator/safe_allocator.h"
@@ -132,6 +133,16 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
 
     SECTION("test query") {
         std::vector<float> dists(count_base, 0);
+        SparseEvaluationTracker evaluation_tracker(count_base, allocator.get());
+        const auto evaluated = data_cell->Query(dists.data(), computer, evaluation_tracker);
+        REQUIRE(evaluated == count_base);
+        for (auto i = 0; i < dists.size(); i++) {
+            REQUIRE(std::abs(dists[i] - exp_dists[i]) < 1e-3);
+        }
+        std::fill(dists.begin(), dists.end(), 0.0F);
+        REQUIRE(data_cell->Query(dists.data(), computer, evaluation_tracker) == count_base);
+
+        std::fill(dists.begin(), dists.end(), 0.0F);
         data_cell->Query(dists.data(), computer);
         for (auto i = 0; i < dists.size(); i++) {
             REQUIRE(std::abs(dists[i] - exp_dists[i]) < 1e-3);
@@ -235,6 +246,26 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
             REQUIRE(std::abs(dists[i] - 0) < 1e-3);
         }
     }
+
+    SECTION("test zero distance is ignored in range search") {
+        InnerSearchParam inner_param;
+        inner_param.radius = 1.0F;
+        std::vector<float> dists(count_base, 0.0F);
+        dists[2] = -0.25F;
+        dists[7] = -0.5F;
+        MaxHeap heap(allocator.get());
+
+        data_cell->InsertHeapByDists<RANGE_SEARCH, PURE>(
+            dists.data(), dists.size(), heap, inner_param, 0);
+
+        REQUIRE(heap.size() == 2);
+        std::set<int64_t> result_ids;
+        while (not heap.empty()) {
+            result_ids.insert(heap.top().second);
+            heap.pop();
+        }
+        REQUIRE(result_ids == std::set<int64_t>{2, 7});
+    }
     // clean
     for (auto& item : sparse_vectors) {
         delete[] item.vals_;
@@ -291,6 +322,143 @@ TEST_CASE("SparseTermDatacell Encode/Decode Test", "[ut][SparseTermDatacell]") {
 
     allocator->Deallocate(retrieved_sv.ids_);
     allocator->Deallocate(retrieved_sv.vals_);
+}
+
+TEST_CASE("SparseTermDatacell Sorts Posting Lists By Value", "[ut][SparseTermDatacell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    const auto quantization_type = GENERATE(SparseValueQuantizationType::FP32,
+                                            SparseValueQuantizationType::FP16,
+                                            SparseValueQuantizationType::SQ8);
+    auto quantization_params = std::make_shared<QuantizationParams>();
+    quantization_params->min_val = 0.0F;
+    quantization_params->max_val = 4.0F;
+    quantization_params->diff = 4.0F;
+    SparseTermDataCell data_cell(
+        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), quantization_type, quantization_params);
+
+    std::vector<uint16_t> base_ids = {0, 2, 1, 3};
+    std::vector<float> values = {1.0F, 3.0F, 3.0F, 2.0F};
+    uint32_t term = 7;
+    for (uint64_t i = 0; i < base_ids.size(); ++i) {
+        SparseVector vector{1, &term, &values[i]};
+        data_cell.InsertVector(vector, base_ids[i]);
+    }
+
+    data_cell.SortByValue();
+    // Sorting an already normalized posting list should preserve the same order.
+    data_cell.SortByValue();
+
+    REQUIRE(*data_cell.term_ids_[term] == Vector<uint16_t>({1, 2, 3, 0}, allocator.get()));
+    std::vector<float> sorted_values(values.size());
+    const auto* data = data_cell.term_datas_[term]->data();
+    if (quantization_type == SparseValueQuantizationType::SQ8) {
+        data_cell.Decode(data, values.size(), sorted_values.data());
+    } else if (quantization_type == SparseValueQuantizationType::FP16) {
+        for (uint64_t i = 0; i < values.size(); ++i) {
+            uint16_t value = 0;
+            std::memcpy(&value, data + i * sizeof(value), sizeof(value));
+            sorted_values[i] = generic::FP16ToFloat(value);
+        }
+    } else {
+        std::memcpy(sorted_values.data(), data, values.size() * sizeof(float));
+    }
+    REQUIRE(std::abs(sorted_values[0] - 3.0F) < 0.02F);
+    REQUIRE(std::abs(sorted_values[1] - 3.0F) < 0.02F);
+    REQUIRE(std::abs(sorted_values[2] - 2.0F) < 0.02F);
+    REQUIRE(std::abs(sorted_values[3] - 1.0F) < 0.02F);
+
+    float appended_value = 4.0F;
+    SparseVector appended_vector{1, &term, &appended_value};
+    data_cell.InsertVector(appended_vector, 4);
+    data_cell.SortByValue();
+    REQUIRE(*data_cell.term_ids_[term] == Vector<uint16_t>({4, 1, 2, 3, 0}, allocator.get()));
+
+    float query_value = 1.0F;
+    SparseVector query{1, &term, &query_value};
+    SINDISearchParameter search_params;
+    search_params.term_prune_ratio = 0.5F;
+    auto computer = std::make_shared<SparseTermComputer>(query, search_params, allocator.get());
+    std::vector<float> dists(5, 0.0F);
+    SparseEvaluationTracker evaluation_tracker(dists.size(), allocator.get());
+    REQUIRE(data_cell.Query(dists.data(), computer, evaluation_tracker) == 2);
+    REQUIRE(dists[0] == 0.0F);
+    REQUIRE(dists[1] < 0.0F);
+    REQUIRE(dists[2] == 0.0F);
+    REQUIRE(dists[3] == 0.0F);
+    REQUIRE(dists[4] < dists[1]);
+}
+
+TEST_CASE("SparseTermDatacell Sorts Positive Posting Values", "[ut][SparseTermDatacell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    const auto quantization_type = GENERATE(SparseValueQuantizationType::FP32,
+                                            SparseValueQuantizationType::FP16,
+                                            SparseValueQuantizationType::SQ8);
+    auto quantization_params = std::make_shared<QuantizationParams>();
+    quantization_params->min_val = 1.0F;
+    quantization_params->max_val = 4.0F;
+    quantization_params->diff = 3.0F;
+    SparseTermDataCell data_cell(
+        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), quantization_type, quantization_params);
+
+    uint32_t term = 7;
+    std::array<float, 4> values = {1.0F, 4.0F, 3.0F, 2.0F};
+    for (uint16_t id = 0; id < values.size(); ++id) {
+        SparseVector vector{1, &term, &values[id]};
+        data_cell.InsertVector(vector, id);
+    }
+
+    data_cell.SortByValue();
+    REQUIRE(*data_cell.term_ids_[term] == Vector<uint16_t>({1, 2, 3, 0}, allocator.get()));
+}
+
+TEST_CASE("SparseTermDatacell Sorts Legacy Posting Lists On Deserialize",
+          "[ut][SparseTermDatacell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    SparseTermDataCell source(
+        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+
+    uint32_t term = 7;
+    std::vector<float> values = {1.0F, 4.0F};
+    for (uint16_t id = 0; id < values.size(); ++id) {
+        SparseVector vector{1, &term, &values[id]};
+        source.InsertVector(vector, id);
+    }
+
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    source.Serialize(writer);
+
+    SparseTermDataCell restored(
+        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+    IOStreamReader reader(stream);
+    restored.Deserialize(reader);
+
+    REQUIRE(*restored.term_ids_[term] == Vector<uint16_t>({1, 0}, allocator.get()));
+}
+
+TEST_CASE("SparseTermDatacell Trusts Versioned Posting Order", "[ut][SparseTermDatacell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    SparseTermDataCell source(
+        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+
+    uint32_t term = 7;
+    std::vector<float> values = {1.0F, 4.0F};
+    for (uint16_t id = 0; id < values.size(); ++id) {
+        SparseVector vector{1, &term, &values[id]};
+        source.InsertVector(vector, id);
+    }
+
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    source.Serialize(writer);
+
+    SparseTermDataCell restored(
+        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+    IOStreamReader reader(stream);
+    // Preserve insertion order to prove the version marker skips normalization.
+    restored.Deserialize(reader, true);
+
+    REQUIRE(*restored.term_ids_[term] == Vector<uint16_t>({0, 1}, allocator.get()));
 }
 
 TEST_CASE("SparseTermDatacell FP16 Roundtrip Test", "[ut][SparseTermDatacell]") {

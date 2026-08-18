@@ -25,11 +25,13 @@
 #include "io/memory_io/memory_io_parameter.h"
 #include "io/mmap_io/mmap_io_parameter.h"
 #include "io/reader_io/reader_io_parameter.h"
+#include "io/uring_io/uring_io_parameter.h"
 
 namespace vsag {
 
 namespace {
 std::once_flag async_io_fallback_warn_once;
+std::once_flag uring_io_fallback_warn_once;
 }  // namespace
 
 IOParamPtr
@@ -56,6 +58,20 @@ IOParameter::GetIOParameterByJson(const JsonType& json) {
             io_ptr = std::make_shared<BufferIOParameter>();
 #endif
             io_ptr->FromJson(json);
+        } else if (type_name == IO_TYPE_VALUE_URING_IO) {
+            // Validate uring_io-specific keys even in fallback builds
+            if (json.Contains(IO_DIRECT_READ_KEY)) {
+                CHECK_ARGUMENT(json[IO_DIRECT_READ_KEY].IsBool(), "direct_read must be a boolean");
+            }
+#if HAVE_LIBURING
+            io_ptr = std::make_shared<UringIOParameter>();
+#else
+            std::call_once(uring_io_fallback_warn_once, []() {
+                logger::warn("liburing is unavailable, uring_io is falling back to buffer_io");
+            });
+            io_ptr = std::make_shared<BufferIOParameter>();
+#endif
+            io_ptr->FromJson(json);
         } else if (type_name == IO_TYPE_VALUE_MMAP_IO) {
             io_ptr = std::make_shared<MMapIOParameter>();
             io_ptr->FromJson(json);
@@ -66,7 +82,32 @@ IOParameter::GetIOParameterByJson(const JsonType& json) {
     } catch (std::invalid_argument& error) {
         return nullptr;
     }
+    if (io_ptr != nullptr) {
+        io_ptr->LoadReadCacheConfig(json);
+    }
     return io_ptr;
+}
+
+void
+IOParameter::LoadReadCacheConfig(const JsonType& json) {
+    if (json.Contains(READ_CACHE_ENABLED_KEY)) {
+        CHECK_ARGUMENT(json[READ_CACHE_ENABLED_KEY].IsBool(),
+                       "enable_read_cache must be a boolean");
+        enable_read_cache_ = json[READ_CACHE_ENABLED_KEY].GetBool();
+    }
+    if (json.Contains(READ_CACHE_TOTAL_CACHE_SIZE_KEY)) {
+        const auto& val = json[READ_CACHE_TOTAL_CACHE_SIZE_KEY];
+        CHECK_ARGUMENT(val.IsNumberUnsigned(), "total_cache_size must be a non-negative integer");
+        read_cache_total_size_ = val.GetUint64();
+    }
+}
+
+void
+IOParameter::AppendReadCacheConfig(JsonType& json) const {
+    if (enable_read_cache_) {
+        json[READ_CACHE_ENABLED_KEY].SetBool(true);
+        json[READ_CACHE_TOTAL_CACHE_SIZE_KEY].SetUint64(read_cache_total_size_);
+    }
 }
 IOParameter::IOParameter(std::string name) : name_(std::move(name)) {
 }

@@ -58,7 +58,7 @@ public:
      * It returns a result which may either contain a shared pointer to the created `Index`
      * or an `Error` object indicating failure conditions.
      *
-     * @param name The name assigned to the index type, like "hnsw", "diskann", "hgraph" ...
+     * @param name The name assigned to the index type, like "hgraph", "ivf", or "sindi".
      * @param parameters A JSON-like string containing various parameters required for index creation.
      * @return tl::expected<std::shared_ptr<Index>, Error> An expected value that contains either
      * a shared pointer to the successfully created `Index` or an `Error` detailing

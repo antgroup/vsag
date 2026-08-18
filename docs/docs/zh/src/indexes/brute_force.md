@@ -6,7 +6,7 @@ BruteForce 是 VSAG 提供的**精确扁平索引**。查询时直接对语料�
 top-k —— 没有图遍历、没有倒排表、不做近似。它的主要用途是为 HGraph、IVF 等近似索引提供
 **ground truth 基准**，也适合用于小规模语料或对召回率有严格要求的生产场景。
 
-- 源码：`src/algorithm/brute_force.{h,cpp}`
+- 源码：`src/algorithm/bruteforce/bruteforce.{h,cpp}`
 - 示例：[`examples/cpp/105_index_brute_force.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/105_index_brute_force.cpp)
 
 ## 工作原理
@@ -61,6 +61,7 @@ auto result = index->KnnSearch(query, /*topk=*/10, "{}").value();
 |------|------|--------|------|
 | `base_quantization_type` | string | `"fp32"` | `fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq` —— 各量化器细节见[量化章节](../quantization/README.md) |
 | `use_attribute_filter` | bool | `false` | 启用属性过滤（参见 [属性过滤](../advanced/attribute_filter.md)） |
+| `resize_increase_count_bit` | int | `10` | 扩容批次 slot 数的 `log2`，取值范围为 `1` 到 `31`。`1` 表示每次按 2 个 slot 对齐，`10` 表示按 1024 个 slot 对齐。较小取值减少预分配，但可能增加重分配次数。 |
 
 > **关于 `store_raw_vector` 的说明。** `store_raw_vector` 字段会被共用的
 > `InnerIndexParameter` 解析，但 BruteForce **不会**根据它决定是否启用
@@ -109,6 +110,30 @@ auto r3 = index->RangeSearch(query, radius, R"({"parallelism": 8})").value();
 
 范围查询语义参见 [范围搜索](../advanced/range_search.md)。
 
+## 删除向量
+
+BruteForce 同时支持 `RemoveMode::MARK_REMOVE` 与 `RemoveMode::FORCE_REMOVE`；两种模式都不需要
+配置 HGraph 专用的 `support_force_remove`。
+
+- `MARK_REMOVE` 是默认模式。它只写入墓碑标记，后续搜索会过滤该 id，但向量存储仍保持已分配状态。
+  `GetNumElements()` 不计已标记的 id，`GetNumberRemoved()` 返回其数量。
+- `FORCE_REMOVE` 会物理删除请求的每条向量。必要时它用最后一个内部槽位覆盖被删除槽位，并保留被移动
+  向量的外部 id。成功的物理删除不会新增墓碑；之前已标记删除的数量仍由 `GetNumberRemoved()` 反映。
+
+```cpp
+index->Remove(std::vector<int64_t>{id1, id2}, vsag::RemoveMode::MARK_REMOVE);
+index->Remove(std::vector<int64_t>{id3, id4}, vsag::RemoveMode::FORCE_REMOVE);
+```
+
+物理删除是同步操作，开销高于标记删除。它会获取索引的全局独占锁，因此会等待进行中的搜索，并在
+槽位交换与删除完成前阻止新的搜索。应尽可能批量传入 id，避免在延迟敏感路径上执行物理删除。
+
+BruteForce 默认使用 `block_memory_io` 存储向量。每个成功的物理删除批次之后，逻辑大小会收缩到
+存活条目数，并释放末尾完整的内存块；最后一个未填满的块会保留。可选额外信息存储也遵循相同的块粒度
+回收行为。为避免反复复制整张标签表，标签表会在存活条目数不超过当前容量一半时回收其底层分配。
+之后 `GetMemoryUsage()` 会反映紧凑后的索引。它衡量的是索引分配量，不保证进程分配器会立即把内存归还
+操作系统，也不保证 RSS 立即下降。
+
 ## 索引能力
 
 BruteForce 声明的能力标志如下（参见 `BruteForce::InitFeatures`，
@@ -120,7 +145,7 @@ BruteForce 声明的能力标志如下（参见 `BruteForce::InitFeatures`，
 | `SUPPORT_ADD_FROM_EMPTY` | 仅在非训练型量化器（`fp32`、`fp16`、`bf16`）下可用。 |
 | `SUPPORT_KNN_SEARCH` / `SUPPORT_KNN_SEARCH_WITH_ID_FILTER` / `SUPPORT_SEARCH_CONCURRENT` | 标准 top-k 查询、id 列表过滤，以及并发搜索。 |
 | `SUPPORT_RANGE_SEARCH` / `SUPPORT_RANGE_SEARCH_WITH_ID_FILTER` | 仅在非训练型量化器（`fp32`、`fp16`、`bf16`）下可用。 |
-| `SUPPORT_DELETE_BY_ID` / `SUPPORT_DELETE_CONCURRENT` | 支持按 id 删除，且并发安全。 |
+| `SUPPORT_DELETE_BY_ID` / `SUPPORT_DELETE_CONCURRENT` | 支持按 id 删除。查询和删除操作会同步；`FORCE_REMOVE` 会获取独占锁。 |
 | `SUPPORT_CAL_DISTANCE_BY_ID` | 与已存储向量计算距离（仅非训练型量化器）。 |
 | `SUPPORT_GET_RAW_VECTOR_BY_IDS` | 仅当 `base_quantization_type = fp32`，且度量不是 `cosine` 或底层量化器持有向量范数（`hold_molds`）时才声明。量化的 BruteForce 索引**不会**声明该能力。 |
 | `SUPPORT_CHECK_ID_EXIST` / `SUPPORT_CLONE` / `SUPPORT_ESTIMATE_MEMORY` / `SUPPORT_GET_MEMORY_USAGE` | 标准的内省与生命周期接口。 |

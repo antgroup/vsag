@@ -1,7 +1,8 @@
 <!-- agent-hints
 canonical: docs/agents/contribution-workflow.md
-purpose: Branching, commits, DCO, Assisted-by, PR labels, doc sync rules
+purpose: Branching, fork-first PR pushes, commits, DCO, Assisted-by, PR labels, doc sync rules
 key-facts:
+  - Prefer pushing PR branches to a contributor fork, not antgroup/vsag
   - Use Conventional Commits with DCO sign-off; AI agents must NOT self-sign
   - AI agents: do NOT use `git commit -s` (it appends Signed-off-by last, with a blank line before it). Write both trailers manually in the commit body, deriving the human Signed-off-by from `git config user.name`/`user.email`
   - Trailer order: Signed-off-by first, Assisted-by immediately after, no blank line between them
@@ -10,7 +11,7 @@ key-facts:
 related:
   - ../../CONTRIBUTING.md
   - ../../.github/pull_request_template.md
-last-reviewed: 2026-05-12
+last-reviewed: 2026-08-13
 -->
 
 # Contribution Workflow
@@ -19,6 +20,11 @@ last-reviewed: 2026-05-12
 
 - Before modifying code, create and switch to a working branch from an
   up-to-date `main`.
+- When preparing a pull request, inspect the configured remotes and prefer the
+  contributor's fork as the push target. Treat `antgroup/vsag` as the upstream
+  repository, not the default destination for working branches.
+- Push a working branch directly to `antgroup/vsag` only when the task
+  explicitly requires it or the contributor has authorized it.
 - Keep changes scoped and reviewable.
 
 ## Commit messages

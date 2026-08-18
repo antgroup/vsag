@@ -15,10 +15,11 @@ SINDI（**S**parse **IN**verted **D**ense **I**ndex）是 VSAG 面向 **稀疏�
 1. **基于窗口的倒排表。** 文档按固定窗口大小（`window_size`）分组，每个窗口独立维护一套
    倒排表——即“词项 → `(doc_id, value)` 列表”的映射。
 2. **可选的剪枝与量化。** 构建时可通过 `doc_prune_ratio` 按文档粒度丢弃权重最低的词项；
-   通过 `use_quantization` 压缩词项权重以进一步节省内存。
+   `use_quantization: true` 使用 SQ8，`use_quantization: "fp16"` 使用半精度值。
 3. **打分。** 检索时，SINDI 遍历查询向量的非零项，按窗口访问对应的倒排表，使用大小为
-   `n_candidate` 的大顶堆聚合得分，最后取 top-k。启用 `use_reorder` 时，候选会在高精度
-   扁平副本上重打分。
+   `n_candidate` 的大顶堆聚合得分，最后取 top-k。启用 `use_reorder` 时，候选会在正排
+   存储上重打分。默认正排存储保留 fp32 值；设置 `rerank_type: "dmq8"` 时使用压缩的
+   DMQ 正排以降低重排内存。
 
 返回的距离为 `1 - inner_product`，使结果与稠密索引一样按升序排序。
 
@@ -68,15 +69,61 @@ auto result = index->KnnSearch(
 | `dim` | int | —（必填） | 单条稀疏向量允许的最大非零项数量，**不是** 词表大小 |
 | `term_id_limit` | int | `1000000` | 词项 ID 的上界（应 ≥ 最大词项 ID + 1，最高 50 000 000） |
 | `window_size` | int | `50000` | 每个窗口容纳的文档数（取值范围 10 000 – 60 000） |
-| `doc_prune_ratio` | float | `0.0` | 构建阶段按文档丢弃权重最低词项的比例（0.0 – 0.9） |
-| `use_quantization` | bool | `false` | 是否量化词项权重以降低内存；开启后使用 8-bit 标量量化（SQ8） |
-| `use_reorder` | bool | `false` | 是否保留一份高精度扁平副本用于精排（内存约翻倍） |
+| `doc_prune_ratio` | float | `0.0` | 构建阶段按文档丢弃权重最低词项的比例，取值范围为 `[0.0, 1.0)` |
+| `use_quantization` | bool 或 string | `false` | `false` 存 FP32，`true` 存 SQ8，`"fp16"` 存 FP16 |
+| `use_reorder` | bool | `false` | 是否保留一份正排存储，在 SINDI 粗排后对候选做精排 |
+| `rerank_type` | string | `"fp32"` | `use_reorder` 开启时使用的正排存储类型。`fp32` 保留精确值；`dmq8` 使用压缩的 8-bit DMQ 编码 |
+| `dmq_shared_codebook_threshold` | int | `1024` | `rerank_type: "dmq8"` 时，出现次数不超过该值的 term 共用一个 codebook；更高频的 term 保持独立 codebook。设为 `0` 可关闭共享 |
 | `remap_term_ids` | bool | `false` | 是否在建索引前重映射词项 ID，适用于词项 ID 很稀疏或存在大量空洞的词表 |
 | `avg_doc_term_length` | int | `100` | 仅用于内存估算 |
+| `immutable` | bool | `false` | 构建或加载紧凑的只读运行态；`Build()` 会逐窗口压缩以降低峰值内存，增量 `Add()` 会被拒绝 |
 
 > **`dim` 与 `term_id_limit` 的区别。** 对于稀疏向量 `{0:0.1, 2:0.5, 177:0.8}`，
 > `dim` 为 `3`（三个非零项），而 `term_id_limit` 至少应为 `178`（最大词项 ID + 1）。
 > `term_id_limit` 要按词表大小估计，这是使用时最常见的坑。
+
+### 稀疏值格式
+
+`use_quantization` 保留原有 bool 行为，同时新增一个字符串取值：
+
+| 取值 | 存储格式 | 取舍 |
+| --- | --- | --- |
+| `false` | FP32 | 词项权重精度最高，posting payload 最大 |
+| `true` | SQ8 | 权重存储最小；首次构建时学习量化范围 |
+| `"fp16"` | FP16 | 权重字节数为 FP32 的一半，不需要 SQ8 范围校准 |
+
+使用 `false` 或 `true` 构建的索引仍保留旧版序列化表示。旧版本 VSAG 无法解析使用新
+`"fp16"` 格式的 SINDI 索引；部署 FP16 产物前应先升级读取端。
+
+### 不可变低内存构建
+
+完成后的 SINDI 只读时，可以设置 `immutable: true`：
+
+```json
+{
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "dim": 1024,
+    "index_param": {
+        "term_id_limit": 30000,
+        "window_size": 50000,
+        "use_quantization": "fp16",
+        "remap_term_ids": true,
+        "immutable": true
+    }
+}
+```
+
+`Build()` 会把每个完成的可变窗口压缩成不可变 payload，并在继续构建前释放临时窗口。该功能
+提交时的 Sparse4M FP16 实测中，构建峰值内存从 27.03 GB 降到 6.08 GB（降低 77.51%），
+构建时间则从约 330 秒增加到 599 秒。这些数字是特定负载的实测证据，不是容量保证。
+
+不可变运行态支持 KNN、范围搜索以及旧版 `Serialize`/`Deserialize`。它不支持增量
+`Add`、`GetSparseVectorByInnerId`、`CalcDistanceById` 与 `CalDistanceById`。
+不可变 SINDI 不支持流式序列化；需要流式格式时应保持索引可变，或使用匹配的旧版序列化接口。
+反序列化时，新建 SINDI 的 `immutable` 设置必须与存储格式一致。
+新索引会记录有序倒排链格式版本，加载时可跳过归一化排序；缺少该标记的旧索引仍保持兼容，
+并在加载时完成排序归一化。
 
 ## 检索参数
 
@@ -85,8 +132,12 @@ auto result = index->KnnSearch(
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `n_candidate` | int | `0` | 候选堆大小。为 `0` 时自动取 `SPARSE_AMPLIFICATION_FACTOR · topk`（500 倍）；若显式设置，须满足 `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk` |
-| `query_prune_ratio` | float | `0.0` | 查询时丢弃权重最低查询项的比例（0.0 – 0.9） |
-| `term_prune_ratio` | float | `0.0` | 查询时丢弃倒排表中低权项的比例（0.0 – 0.9） |
+| `filter_callback_limit` | uint64 | `0` | 单次带过滤检索最多调用用户 `Filter::CheckValid` 回调的次数；`0` 表示不限制。删除 ID 过滤器等内部检查不计数。达到正数上限时，在正常处理最后一次回调结果后停止候选及后续窗口扫描，并返回已经通过过滤的候选，因此结果可能不完整。该限制同时适用于 KNN、范围检索以及常规 API 和 `SearchWithRequest` |
+| `query_prune_ratio` | float | `0.0` | 查询时丢弃权重最低查询项的比例，取值范围为 `[0.0, 1.0)` |
+| `term_prune_ratio` | float | `0.0` | 每条倒排链中按 value 丢弃低权 posting 的比例，取值范围为 `[0.0, 1.0)` |
+| `term_retain_threshold` | uint64 | `0` | 单个 term 在所有 window 中最多扫描的 posting 总数；`0` 表示关闭此限制，正数使每个 window 的非空 posting list 最多扫描 `max(1, floor(threshold / window_count))` 个 |
+
+合并 ratio 与 threshold 限制后，每条非空倒排链至少扫描一个 posting。
 
 SINDI 会根据构建阶段的 `doc_prune_ratio` 与检索阶段的 `query_prune_ratio`
 自动选择堆插入策略。按当前 `0.1` 阈值，当两个比例都 `<= 0.1` 时，SINDI 使用
@@ -96,18 +147,22 @@ SINDI 会根据构建阶段的 `doc_prune_ratio` 与检索阶段的 `query_prune
 ```cpp
 auto result = index->KnnSearch(
     query, topk,
-    R"({"sindi": {"n_candidate": 200, "query_prune_ratio": 0.1}})").value();
+    R"({"sindi": {"n_candidate": 200, "filter_callback_limit": 10000, "query_prune_ratio": 0.1}})").value();
 ```
 
 ## 何时选择 SINDI
 
 - 使用 BM25、SPLADE、uniCOIL 等学习稀疏编码器的稀疏检索场景。
 - 稠密 + 稀疏的混合检索管线：SINDI 负责稀疏一路，HGraph / IVF 负责稠密 embedding。
-- 稀疏语料的内存受限部署：`use_quantization: true` 大致能把内存减半，略损召回；
-  `use_reorder: true` 以内存换召回。
+- 稀疏语料的内存受限部署：`use_quantization: true` 选择 SQ8，`"fp16"` 把 FP32
+  权重字节数减半；
+  `use_reorder: true` 以正排内存换召回，`rerank_type: "dmq8"` 可降低这部分正排开销。
+- 需要降低构建峰值内存的只读快照：使用 `immutable: true`，接受更慢的构建和不能增量写入。
 
 SINDI **不支持** 稠密向量，只支持内积相似度。范围检索与基于 ID 的过滤均已支持，
 具体用法参见示例代码。
+当 `rerank_type` 为 `dmq8` 时，码本由首次构建固定，因此模型建立后的增量 `Add`
+和 `UpdateVector` 不受支持。
 
 ## 实践建议
 
@@ -128,10 +183,15 @@ SINDI **不支持** 稠密向量，只支持内积相似度。范围检索与基
 2. 剪枝高精索引。构建时剪掉大部分低权重词项（`doc_prune_ratio: 0.4`），保留正排索引
      用于重排（`use_reorder: true`），并开启量化减少倒排索引内存
      （`use_quantization: true`）。这是常见的精度与内存折中配置。
-3. 超大稀疏词表支持。对于词项 ID 在 `uint32` 范围内非常稀疏的场景，例如基于哈希的
+3. 压缩正排重排索引。在上一种配置基础上，设置 `rerank_type: "dmq8"`，与
+     `use_reorder: true` 一起使用，以降低正排重排内存。
+4. 超大稀疏词表支持。对于词项 ID 在 `uint32` 范围内非常稀疏的场景，例如基于哈希的
      分词器、外部词表 ID，或存在大量空白区间的词表，建议设置 `remap_term_ids: true`。
      这样可以避免管理大量空倒排列表带来的内存浪费，也能降低触达 `term_id_limit`
      上限的风险。
+5. 只读低内存构建。当构建峰值内存比构建速度更重要，且完成后不再增量写入时，增加
+     `immutable: true`，通常配合 `use_quantization: "fp16"` 与
+     `remap_term_ids: true` 使用。
 
 ## 标记删除
 

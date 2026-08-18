@@ -16,6 +16,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <shared_mutex>
 #include <unordered_map>
 #include <vector>
@@ -27,6 +28,7 @@
 #include "datacell/flatten_interface.h"
 #include "dataset_impl.h"
 #include "impl/heap/distance_heap.h"
+#include "impl/label_table/label_table.h"
 #include "inner_index_parameter.h"
 #include "json_types.h"
 #include "metric_type.h"
@@ -41,6 +43,18 @@
 #include "vsag/index.h"
 
 namespace vsag {
+
+// Apply top-k selection with structural validity mask per row.
+// validity has num_rows * per_row_count entries, row-major.
+// Invalid distances are ranked last.
+DatasetPtr
+ApplyTopkWithValidity(const float* distances,
+                      const int64_t* ids,
+                      int64_t per_row_count,
+                      int64_t num_rows,
+                      int64_t topk,
+                      const std::vector<bool>& validity,
+                      Allocator* allocator);
 
 DEFINE_POINTER2(InnerIndex, InnerIndexInterface);
 DEFINE_POINTER(LabelTable);
@@ -103,7 +117,7 @@ public:
     /**
      * @brief Calculate distance by ID using raw float pointer.
      *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * Suitable for dense vector indexes such as HGraph, BruteForce, IVF, and Pyramid.
      * The query must be a contiguous float32 array with dimension matching the index.
         * For sparse vector indexes (SINDI), this overload is not applicable.
      *
@@ -124,7 +138,7 @@ public:
     /**
      * @brief Calculate distances by IDs (batch) using raw float pointer.
      *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * Suitable for dense vector indexes such as HGraph, BruteForce, IVF, and Pyramid.
      * The query must be a contiguous float32 array. For sparse vector indexes,
      * this overload is not applicable.
      *
@@ -141,31 +155,57 @@ public:
     CalDistanceById(const float* query,
                     const int64_t* ids,
                     int64_t count,
-                    bool calculate_precise_distance = true) const;
+                    bool calculate_precise_distance = true,
+                    int64_t topk = -1) const;
 
     /**
-     * @brief Calculate distances by IDs (batch) using DatasetPtr.
+     * @brief Calculate distances by IDs (batch) using DatasetPtr, supports multi-query.
      *
-        * Suitable for sparse vector indexes (SINDI) where vectors
+     * Suitable for sparse vector indexes (SINDI) where vectors
      * cannot be represented as a simple float pointer. The Dataset should
      * contain sparse vectors via GetSparseVectors().
      * For dense vector indexes, this overload is also available via default
      * implementation that calls GetFloat32Vectors().
      *
-     * Default implementation loops through IDs calling CalcDistanceById.
+     * When the query DatasetPtr contains multiple vectors (NumElements > 1),
+     * this method computes distances for each query against its own row of IDs.
+     * Both the input IDs and result distances use row-major layout with count IDs
+     * per query: ids[i * count + j] is the j-th ID for query i, and
+     * distances[i * count + j] is the distance from query i to that ID.
+     * '-1' indicates an invalid ID.
+     *
+     * Default implementation loops through queries and IDs calling CalcDistanceById.
      * Sparse indexes must override for proper sparse vector handling.
      *
-     * @param query DatasetPtr containing the query vector (sparse or dense format).
+     * @param query DatasetPtr containing query vector(s) (sparse or dense format).
+     *        When NumElements() > 1, each element is a separate query.
      * @param ids Array of unique identifiers of vectors to be calculated.
      * @param count Number of IDs in the array.
-     * @param calculate_precise_distance If true, use high-precision vectors for computation.
-     * @return DatasetPtr containing distances. '-1' indicates an invalid ID.
+     * @param calculate_precise_distance If true, use high-precision vectors.
+     * @return DatasetPtr containing distances. Single query: size is count.
+     *         Multi-query (NumElements=N): size is N * count, row-major layout.
+     *         '-1' indicates an invalid ID.
      */
     virtual DatasetPtr
     CalDistanceById(const DatasetPtr& query,
                     const int64_t* ids,
                     int64_t count,
-                    bool calculate_precise_distance = true) const;
+                    bool calculate_precise_distance = true,
+                    int64_t topk = -1) const;
+
+    // The public Index bridge accepts topk and dispatches to its legacy virtual overload. These
+    // internal corrected helpers intentionally retain the historical no-topk fast path.
+    virtual DatasetPtr
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true) const;
+
+    virtual DatasetPtr
+    CalcDistancesById(const DatasetPtr& query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true) const;
 
     virtual uint64_t
     CalSerializeSize() const;
@@ -479,6 +519,12 @@ public:
     }
 
     virtual void
+    RebuildBucketGraphs() {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support RebuildBucketGraphs");
+    }
+
+    virtual void
     Train(const DatasetPtr& base){};
 
     virtual void
@@ -530,6 +576,54 @@ protected:
     virtual DetailDataPtr
     get_detail_data_by_info(const IndexDetailInfo& info) const;
 
+    template <typename CalcFn>
+    void
+    compute_distances_for_ids(CalcFn&& calc_fn,
+                              const int64_t* ids,
+                              int64_t count,
+                              float* distances,
+                              std::vector<bool>* validity = nullptr) const {
+        if (validity != nullptr) {
+            validity->assign(count, false);
+        }
+        auto set_missing_distance = [&](int64_t index) -> bool {
+            std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+            if (not this->label_table_->TryGetIdByLabel(ids[index]).first) {
+                distances[index] = -1.0F;
+                return true;
+            }
+            if (validity != nullptr) {
+                (*validity)[index] = true;
+            }
+            return false;
+        };
+        auto handle_exception = [&](int64_t index) {
+            if (set_missing_distance(index)) {
+                if (validity != nullptr) {
+                    (*validity)[index] = false;
+                }
+                return;
+            }
+            throw;
+        };
+        for (int64_t i = 0; i < count; ++i) {
+            if (set_missing_distance(i)) {
+                continue;
+            }
+            try {
+                distances[i] = calc_fn(ids[i]);
+                // If calc_fn returns -1.0F (e.g., due to concurrent removal), mark as invalid
+                if (distances[i] == -1.0F and validity != nullptr) {
+                    (*validity)[i] = false;
+                }
+            } catch (const VsagException&) {
+                handle_exception(i);
+            } catch (const std::exception&) {
+                handle_exception(i);
+            }
+        }
+    }
+
     float
     calc_distance_by_id(const float* query, int64_t id, const FlattenInterfacePtr& data) const;
 
@@ -537,7 +631,8 @@ protected:
     cal_distance_by_id(const float* query,
                        const int64_t* ids,
                        int64_t count,
-                       const FlattenInterfacePtr& data) const;
+                       const FlattenInterfacePtr& data,
+                       std::vector<bool>* validity = nullptr) const;
 
     // ========== Search Helper Methods ==========
     // Common filter composition: combines DeletedIdsFilter with user filter
@@ -578,6 +673,11 @@ protected:
     void
     validate_range_args(const DatasetPtr& query, float radius, int64_t limited_size) const;
 
+    static void
+    filter_search_result_by_threshold(DistHeapPtr& result,
+                                      const std::optional<float>& threshold,
+                                      Allocator* allocator);
+
 public:
     LabelTablePtr label_table_{nullptr};
     mutable std::shared_mutex label_lookup_mutex_{};  // lock for label_lookup_ & labels_
@@ -592,7 +692,7 @@ public:
 
     IndexFeatureListUPtr index_feature_list_{nullptr};
 
-    const InnerIndexParameterPtr create_param_ptr_{nullptr};
+    InnerIndexParameterPtr create_param_ptr_{nullptr};
     std::atomic<bool> immutable_{false};
 
 protected:

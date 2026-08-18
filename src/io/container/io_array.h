@@ -25,8 +25,8 @@ class Allocator;
  * @brief Container for managing multiple IO objects with delayed creation.
  *
  * This template class manages a dynamic array of IO objects, creating them
- * on-demand when the array is resized. It supports both in-memory and file-based
- * IO implementations, with special handling for non-continuous storage allocation.
+ * on-demand when the array is resized. It supports in-memory and read-only IO
+ * implementations directly, with special handling for writable file-based storage.
  *
  * @tparam IOTmpl The type of IO object to manage (e.g., MemoryIO, BufferIO).
  */
@@ -52,7 +52,7 @@ public:
         non_continuous_allocator_ = std::make_unique<NonContinuousAllocator>(allocator);
         using ArgsTuple = std::tuple<std::decay_t<Args>...>;
         ArgsTuple args_tuple(std::forward<Args>(args)...);
-        if constexpr (InMemory) {
+        if constexpr (InMemory or IOTmpl::SkipDeserialize) {
             io_create_func_ = [args_tuple =
                                    std::move(args_tuple)]() mutable -> std::shared_ptr<IOTmpl> {
                 return std::apply(

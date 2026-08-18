@@ -43,7 +43,7 @@ Creates an index of the given type.
 
 | Parameter | Description |
 |-----------|-------------|
-| `name` | Index type name, e.g. `"hgraph"`, `"ivf"`, `"diskann"`, `"brute_force"`, `"sindi"`, `"pyramid"`. |
+| `name` | Index type name, e.g. `"hgraph"`, `"ivf"`, `"brute_force"`, `"sindi"`, `"pyramid"`. Removed names such as `"hnsw"`, `"fresh_hnsw"`, and `"diskann"` return `UNSUPPORTED_INDEX`. |
 | `parameters` | A JSON string describing the index configuration (dtype, dim, metric, index-specific keys). See [Index Parameters](../resources/index_parameters.md). |
 | `allocator` | Optional custom [`Allocator`](resource.md#allocator). When `nullptr`, VSAG uses a built-in default allocator. The caller must keep the allocator alive for the whole lifetime of the returned index. |
 
@@ -120,52 +120,6 @@ engine's shared `Resource` (allocator and thread pool) instead of a per-call all
 See [Resource Management](resource.md) for how `Resource`, `Allocator`, and `ThreadPool` fit
 together, and `examples/cpp/201_custom_allocator.cpp` / `203_custom_thread_pool.cpp` for runnable
 samples.
-
-## Top-level helper functions
-
-These free functions (declared in `vsag/index.h`) help you generate and validate configuration
-strings before creating an index. All return `tl::expected<..., Error>`.
-
-### `generate_build_parameters`
-
-```cpp
-tl::expected<std::string, Error>
-generate_build_parameters(std::string metric_type,
-                          int64_t num_elements,
-                          int64_t dim,
-                          bool use_conjugate_graph = false);
-```
-
-*(Experimental.)* Produces a suggested build-parameter JSON string from the dataset shape
-(`metric_type`, `num_elements`, `dim`). Pass `use_conjugate_graph = true` to enable
-[conjugate-graph enhancement](../advanced/enhance_graph.md).
-
-### `estimate_search_time`
-
-```cpp
-tl::expected<float, Error>
-estimate_search_time(const std::string& index_name,
-                     int64_t data_num,
-                     int64_t data_dim,
-                     const std::string& parameters);
-```
-
-Estimates the per-query search time (in milliseconds) for the given index type and configuration.
-
-### `check_diskann_hnsw_build_parameters` / `check_diskann_hnsw_search_parameters`
-
-```cpp
-tl::expected<bool, Error>
-check_diskann_hnsw_build_parameters(const std::string& json_string);
-
-tl::expected<bool, Error>
-check_diskann_hnsw_search_parameters(const std::string& json_string);
-```
-
-Validate DiskANN/HNSW build and search parameter JSON respectively. On success the value is `true`;
-on failure the `Error` message explains what is wrong. See the
-[Compatibility Check Tool](../resources/check_compatibility.md) for a CLI wrapper around this kind of
-validation.
 
 ## See also
 

@@ -31,10 +31,12 @@
 #include "inner_string_params.h"
 #include "metric_type.h"
 #include "query_context.h"
+#include "simq_utils.h"
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
+#include "utils/search_threshold.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -70,16 +72,18 @@ dump_simq_statistics(const SearchStatistics& stats,
     return json.Dump();
 }
 
-uint64_t
-read_dist_cmp(const DatasetPtr& result_ds) {
+std::pair<uint64_t, uint64_t>
+read_coarse_statistics(const DatasetPtr& result_ds) {
     if (result_ds == nullptr) {
-        return 0;
+        return {0, 0};
     }
-    auto values = result_ds->GetStatistics({"dist_cmp"});
-    if (values.empty() || values[0].empty()) {
-        return 0;
-    }
-    return std::strtoull(values[0].c_str(), nullptr, 10);
+    auto values = result_ds->GetStatistics({"dist_cmp", "distance_evaluations"});
+    const auto read_value = [&values](uint64_t index) {
+        return index < values.size() and not values[index].empty()
+                   ? std::strtoull(values[index].c_str(), nullptr, 10)
+                   : 0;
+    };
+    return {read_value(0), read_value(1)};
 }
 
 class HGraphDynamicClustering {
@@ -642,7 +646,8 @@ SIMQ::coarse_search(const float* query_tokens,
                     uint32_t query_token_count,
                     int64_t coarse_k,
                     uint64_t* coarse_dist_cmp,
-                    uint64_t* coarse_probe_count) const {
+                    uint64_t* coarse_probe_count,
+                    uint64_t* coarse_distance_evaluations) const {
     // All buffers are local — safe for concurrent searches under shared_lock.
     std::unordered_map<InnerIdType, float> score_map;
     score_map.reserve(static_cast<uint64_t>(coarse_k) * static_cast<uint64_t>(max_cluster_size_));
@@ -665,8 +670,13 @@ SIMQ::coarse_search(const float* query_tokens,
         query_ds->NumElements(1)->Dim(dim_)->Float32Vectors(qt)->Owner(false);
         auto result_ds = rep_hgraph_->KnnSearch(
             query_ds, actual_coarse_k, R"({"hgraph": {"ef_search": 100}})", nullptr);
+        const auto [nested_dist_cmp, nested_distance_evaluations] =
+            read_coarse_statistics(result_ds);
         if (coarse_dist_cmp != nullptr) {
-            *coarse_dist_cmp += read_dist_cmp(result_ds);
+            *coarse_dist_cmp += nested_dist_cmp;
+        }
+        if (coarse_distance_evaluations != nullptr) {
+            *coarse_distance_evaluations += nested_distance_evaluations;
         }
 
         int64_t nres = result_ds->GetDim();
@@ -716,6 +726,7 @@ SIMQ::KnnSearch(const DatasetPtr& query,
                 const FilterPtr& filter) const {
     std::shared_lock lock(global_mutex_);
     SearchStatistics stats;
+    const auto threshold = ParseSearchThreshold(parameters);
 
     if (total_count_ == 0 || rep_hgraph_ == nullptr) {
         auto result = Dataset::Make();
@@ -738,38 +749,80 @@ SIMQ::KnnSearch(const DatasetPtr& query,
 
     uint64_t coarse_dist_cmp = 0;
     uint64_t coarse_probe_count = 0;
-    auto coarse_results = coarse_search(
-        query_mvs[0].vectors_, query_mvs[0].len_, coarse_k, &coarse_dist_cmp, &coarse_probe_count);
+    uint64_t coarse_distance_evaluations = 0;
+    auto coarse_results = coarse_search(query_mvs[0].vectors_,
+                                        query_mvs[0].len_,
+                                        coarse_k,
+                                        &coarse_dist_cmp,
+                                        &coarse_probe_count,
+                                        &coarse_distance_evaluations);
+    stats.AddDistance(SearchStatistics::DistancePhase::ROUTING,
+                      DistanceEvaluationBackend::FP32,
+                      coarse_distance_evaluations);
     uint64_t coarse_candidate_count = coarse_results.size();
     if (static_cast<int64_t>(coarse_results.size()) > rerank_k) {
         coarse_results.resize(rerank_k);
     }
     uint64_t rerank_candidate_count = coarse_results.size();
 
-    // Exact MaxSim rerank via MultiVectorDataCell
+    // Exact MaxSim rerank via MultiVectorDataCell (batched for async IO)
     auto computer = mv_codes_->FactoryComputer(&query_mvs[0]);
     std::vector<std::pair<float, InnerIdType>> reranked;
     reranked.reserve(coarse_results.size());
     uint64_t filtered_candidate_count = 0;
+
+    // Collect all valid doc_ids first
+    std::vector<InnerIdType> batch_ids;
+    batch_ids.reserve(coarse_results.size());
     for (auto& [doc_id, _] : coarse_results) {
         if (filter != nullptr && !filter->CheckValid(this->label_table_->GetLabelById(doc_id))) {
             ++filtered_candidate_count;
             continue;
         }
-        float dist = 0.0F;
-        mv_codes_->Query(&dist, computer, &doc_id, 1);
-        ++stats.dist_cmp;
-        reranked.emplace_back(dist, doc_id);
+        batch_ids.push_back(doc_id);
     }
-    std::sort(reranked.begin(), reranked.end(), [](const auto& a, const auto& b) {
-        return a.first < b.first;
-    });
 
-    int64_t result_count = std::min(k, static_cast<int64_t>(reranked.size()));
+    // Single batched Query call (enables MultiRead in MultiVectorDataCell)
+    if (!batch_ids.empty()) {
+        std::vector<float> batch_dists(batch_ids.size());
+        QueryContext query_context{.stats = &stats,
+                                   .distance_phase = DistanceEvaluationPhase::RERANK};
+        mv_codes_->Query(batch_dists.data(),
+                         computer,
+                         batch_ids.data(),
+                         static_cast<InnerIdType>(batch_ids.size()),
+                         &query_context);
+        stats.dist_cmp.fetch_add(static_cast<uint32_t>(batch_ids.size()),
+                                 std::memory_order_relaxed);
+        for (uint64_t i = 0; i < batch_ids.size(); i++) {
+            reranked.emplace_back(batch_dists[i], batch_ids[i]);
+        }
+    }
+    std::sort(reranked.begin(), reranked.end(), simq_distance_less);
+
+    int64_t result_count = 0;
+    for (const auto& [distance, _] : reranked) {
+        if (result_count >= k) {
+            break;
+        }
+        if (not threshold.has_value() or
+            (std::isfinite(distance) and distance <= threshold.value())) {
+            ++result_count;
+        }
+    }
     auto [result_ds, dists, ids] = create_fast_dataset(result_count, allocator_);
-    for (int64_t i = 0; i < result_count; ++i) {
-        dists[i] = reranked[i].first;
-        ids[i] = this->label_table_->GetLabelById(reranked[i].second);
+    int64_t result_index = 0;
+    for (const auto& [distance, inner_id] : reranked) {
+        if (result_index >= result_count) {
+            break;
+        }
+        if (threshold.has_value() and
+            (not std::isfinite(distance) or distance > threshold.value())) {
+            continue;
+        }
+        dists[result_index] = distance;
+        ids[result_index] = this->label_table_->GetLabelById(inner_id);
+        ++result_index;
     }
     result_ds->Statistics(dump_simq_statistics(stats,
                                                coarse_dist_cmp,
@@ -777,9 +830,9 @@ SIMQ::KnnSearch(const DatasetPtr& query,
                                                coarse_candidate_count,
                                                rerank_candidate_count,
                                                filtered_candidate_count,
-                                               static_cast<uint64_t>(result_count),
+                                               static_cast<uint64_t>(result_ds->GetDim()),
                                                false));
-    return std::move(result_ds);
+    return result_ds;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -817,8 +870,16 @@ SIMQ::RangeSearch(const DatasetPtr& query,
 
     uint64_t coarse_dist_cmp = 0;
     uint64_t coarse_probe_count = 0;
-    auto coarse_results = coarse_search(
-        query_mvs[0].vectors_, query_mvs[0].len_, coarse_k, &coarse_dist_cmp, &coarse_probe_count);
+    uint64_t coarse_distance_evaluations = 0;
+    auto coarse_results = coarse_search(query_mvs[0].vectors_,
+                                        query_mvs[0].len_,
+                                        coarse_k,
+                                        &coarse_dist_cmp,
+                                        &coarse_probe_count,
+                                        &coarse_distance_evaluations);
+    stats.AddDistance(SearchStatistics::DistancePhase::ROUTING,
+                      DistanceEvaluationBackend::FP32,
+                      coarse_distance_evaluations);
     uint64_t coarse_candidate_count = coarse_results.size();
     if (static_cast<int64_t>(coarse_results.size()) > rerank_k) {
         coarse_results.resize(rerank_k);
@@ -834,7 +895,9 @@ SIMQ::RangeSearch(const DatasetPtr& query,
             continue;
         }
         float dist = 0.0F;
-        mv_codes_->Query(&dist, computer, &doc_id, 1);
+        QueryContext query_context{.stats = &stats,
+                                   .distance_phase = DistanceEvaluationPhase::RERANK};
+        mv_codes_->Query(&dist, computer, &doc_id, 1, &query_context);
         ++stats.dist_cmp;
         if (dist <= radius) {
             in_range.emplace_back(dist, doc_id);

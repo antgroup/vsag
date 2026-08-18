@@ -3,7 +3,7 @@
 pids=()
 exit_codes=()
 logger_files=()
-parallel_tags="[diskann] [hnsw] [hgraph]"
+parallel_tags="[hgraph]"
 othertag=""
 
 rm -rf ./log

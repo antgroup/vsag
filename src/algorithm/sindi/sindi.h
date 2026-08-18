@@ -16,6 +16,7 @@
 #pragma once
 
 #include <optional>
+#include <string>
 
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sindi/term_id_mapper.h"
@@ -24,6 +25,8 @@
 #include "vsag/allocator.h"
 
 namespace vsag {
+
+class ReasoningContext;
 
 struct ImmutableSINDIWindow {
     explicit ImmutableSINDIWindow(Allocator* allocator)
@@ -92,9 +95,7 @@ public:
     InitFeatures() override;
 
     std::unordered_map<std::string, uint64_t>
-    GetMemoryUsageDetail() const override {
-        return {};
-    }
+    GetMemoryUsageDetail() const override;
 
     std::string
     GetStats() const override;
@@ -130,6 +131,9 @@ public:
                 const std::string& parameters,
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
+
+    DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const override;
 
     InnerIndexPtr
     Fork(const IndexCommonParam& param) override {
@@ -176,10 +180,17 @@ public:
                      bool calculate_precise_distance = true) const override;
 
     DatasetPtr
+    CalcDistancesById(const DatasetPtr& query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true) const override;
+
+    DatasetPtr
     CalDistanceById(const DatasetPtr& query,
                     const int64_t* ids,
                     int64_t count,
-                    bool calculate_precise_distance = true) const override;
+                    bool calculate_precise_distance = true,
+                    int64_t topk = -1) const override;
 
     std::pair<int64_t, int64_t>
     GetMinAndMaxId() const override;
@@ -208,7 +219,10 @@ private:
                 const InnerSearchParam& inner_param,
                 Allocator* allocator,
                 bool use_term_lists_heap_insert,
-                const SparseVector* original_query = nullptr) const;
+                const SparseVector* original_query = nullptr,
+                ReasoningContext* reasoning_ctx = nullptr,
+                SearchStatistics* statistics = nullptr,
+                const uint64_t* filter_callback_limit = nullptr) const;
 
     template <InnerSearchMode mode>
     DatasetPtr
@@ -216,10 +230,14 @@ private:
                           const InnerSearchParam& inner_param,
                           Allocator* allocator,
                           bool use_term_lists_heap_insert,
-                          const SparseVector* original_query = nullptr) const;
+                          const SparseVector* original_query = nullptr,
+                          ReasoningContext* reasoning_ctx = nullptr,
+                          SearchStatistics* statistics = nullptr,
+                          const uint64_t* filter_callback_limit = nullptr) const;
 
     bool
-    UseTermListsHeapInsert(const SINDISearchParameter& search_param) const;
+    UseTermListsHeapInsert(const SINDISearchParameter& search_param,
+                           const std::optional<float>& distance_threshold = std::nullopt) const;
 
 #ifdef VSAG_SINDI_TEST_ACCESS
     friend class SINDITestAccess;
@@ -253,13 +271,18 @@ private:
     serialize_windows(StreamWriter& writer) const;
 
     void
-    deserialize_windows(StreamReader& reader_ref);
+    deserialize_windows(StreamReader& reader_ref, bool postings_sorted);
 
     void
-    deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWindow& window) const;
+    trim_deserialized_trailing_windows();
 
     void
-    serialize_immutable_window(StreamWriter& writer, const ImmutableSINDIWindow& window) const;
+    deserialize_immutable_window(StreamReader& reader_ref,
+                                 ImmutableSINDIWindow& window,
+                                 bool postings_sorted = false) const;
+
+    static void
+    serialize_immutable_window(StreamWriter& writer, const ImmutableSINDIWindow& window);
 
     void
     compact_window_to_immutable(const SparseTermDataCell& term_list,
@@ -276,11 +299,12 @@ private:
                               const SparseTermComputerPtr& computer,
                               ImmutableMappedQueryTerms& mapped_terms) const;
 
-    void
+    uint64_t
     scan_immutable_window_by_mapped_terms(float* dists,
                                           const ImmutableSINDIWindow& window,
                                           const SparseTermComputerPtr& computer,
-                                          const ImmutableMappedQueryTerms& mapped_terms) const;
+                                          const ImmutableMappedQueryTerms& mapped_terms,
+                                          SparseEvaluationTracker& evaluation_tracker) const;
 
     template <InnerSearchMode mode, InnerSearchType type>
     void
@@ -289,9 +313,12 @@ private:
                                          float& cur_heap_top,
                                          MaxHeap& heap,
                                          uint32_t offset_id,
+                                         uint32_t n_candidate,
                                          float radius,
                                          int range_search_limit_size,
-                                         const FilterPtr& filter) const;
+                                         const FilterPtr& filter,
+                                         const std::optional<float>& threshold,
+                                         bool enable_reorder) const;
 
     template <InnerSearchType type>
     bool
@@ -301,25 +328,32 @@ private:
                                 MaxHeap& heap,
                                 uint32_t offset_id,
                                 uint32_t n_candidate,
-                                const FilterPtr& filter) const;
+                                const FilterPtr& filter,
+                                const std::optional<float>& threshold,
+                                bool enable_reorder) const;
 
     template <InnerSearchMode mode, InnerSearchType type>
-    void
+    bool
     immutable_insert_heap_by_mapped_terms(float* dists,
                                           const ImmutableSINDIWindow& window,
                                           const SparseTermComputerPtr& computer,
                                           const ImmutableMappedQueryTerms& mapped_terms,
                                           MaxHeap& heap,
                                           const InnerSearchParam& param,
-                                          uint32_t offset_id) const;
+                                          uint32_t offset_id,
+                                          const uint64_t* filter_callback_limit) const;
 
     template <InnerSearchMode mode, InnerSearchType type>
-    void
+    bool
     immutable_insert_heap_by_dists(float* dists,
                                    uint32_t dists_size,
                                    MaxHeap& heap,
                                    const InnerSearchParam& param,
-                                   uint32_t offset_id) const;
+                                   uint32_t offset_id,
+                                   const uint64_t* filter_callback_limit) const;
+
+    void
+    AttachReasoningReport(const DatasetPtr& dataset_results, ReasoningContext* reasoning_ctx) const;
 
     /// Recalculate and cache the memory-usage counter.
     void
@@ -359,9 +393,12 @@ private:
     float doc_prune_ratio_{0};   // ratio of docs pruned during build
     float doc_retain_ratio_{0};  // ratio of docs kept after pruning
 
-    FlattenInterfacePtr rerank_flat_{nullptr};  // re-rank back-end
+    FlattenInterfacePtr rerank_flat_{nullptr};  // re-rank datacell
 
     SparseValueQuantizationType sparse_value_quant_type_{SparseValueQuantizationType::FP32};
+
+    std::string rerank_type_{"fp32"};
+    uint32_t dmq_shared_codebook_threshold_{DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD};
 
     bool deserialize_without_footer_{false};  // backward-compat: old format lacks footer
     bool deserialize_without_buffer_{false};  // backward-compat: old format lacks buffer

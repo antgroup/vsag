@@ -15,6 +15,8 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -26,6 +28,9 @@
 
 namespace vsag {
 
+using SearchDistanceBatchFunc =
+    std::function<void(const int64_t* ids, uint64_t count, float* distances)>;
+
 enum class SearchMode {
     KNN_SEARCH = 1,
     RANGE_SEARCH = 2,
@@ -35,9 +40,10 @@ class SearchRequest {
 public:
     // basic params
     /** 
-     * @brief Query dataset containing the vector to search for
+     * @brief Query dataset containing the vector or vectors to search for
      * @details This DatasetPtr holds the query vector used for similarity search. 
-     *          Only one query vector is allowed.
+     *          IVF KNN requests and supported AnalyzeIndexBySearch implementations accept
+     *          multiple query vectors; other requests allow one.
      */
     DatasetPtr query_{nullptr};
 
@@ -82,6 +88,25 @@ public:
      *          Examples: ef_search, etc.
      */
     std::string params_str_{};
+
+    /**
+     * @brief Optional request-scoped callback for custom query scoring.
+     *
+     * Receives stable external IDs and writes one lower-is-better score per ID.
+     * When non-null, supported indexes use this callback for search traversal and
+     * result ordering instead of their built-in vector metric. Graph traversal can
+     * score filtered IDs to keep the graph connected, but filtered IDs are never
+     * returned as results.
+     */
+    SearchDistanceBatchFunc distance_batch_func_{nullptr};
+
+    /**
+     * @brief Maximum number of IDs submitted to distance_batch_func_ per invocation.
+     *
+     * Defaults to 1 for scalar scorers. Set this to the scorer's efficient batch
+     * width when it benefits from batched inference or data access.
+     */
+    uint64_t distance_batch_size_{1};
 
     // for attribute filter
     /**
@@ -183,6 +208,23 @@ public:
      *          Default is empty (no reasoning enabled).
      */
     std::vector<int64_t> expected_labels_{};
+
+    /**
+     * @brief Optional inclusive distance threshold for KNN search mode
+     * @details When set, at most topk_ results are returned and every returned
+     *          distance is less than or equal to this threshold. An unset value
+     *          preserves the default KNN behavior.
+     */
+    std::optional<float> threshold_{std::nullopt};
+
+    /**
+     * @brief Pre-selected bucket IDs for bypassing IVF bucket routing (ClassifyDatasForSearch)
+     * @details The outer vector contains one entry per query vector.
+     *          Inner vector contains ordered bucket IDs (caller is responsible for ordering).
+     *          When non-empty with at least one ID, skips ClassifyDatasForSearch and searches only
+     *          the specified buckets. Empty means "use default bucket routing".
+     */
+    std::vector<std::vector<int64_t>> bucket_ids_{};
 };
 
 }  // namespace vsag

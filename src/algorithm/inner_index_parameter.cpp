@@ -21,6 +21,8 @@
 #include "datacell/flatten_datacell_parameter.h"
 #include "impl/logger/logger.h"
 #include "inner_string_params.h"
+#include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
+#include "quantization/transform_quantization/transform_quantizer_parameter.h"
 #include "utils/param_compat_macros.h"
 #include "vsag/constants.h"
 
@@ -47,6 +49,136 @@ dump_label_remap_type(LabelRemapType remap_type) -> const char* {
 }
 
 }  // namespace
+
+void
+MapRaBitQSplitParam(const JsonType& external_json, JsonType& inner_json) {
+    if (not external_json.Contains(RABITQ_BITS_PER_DIM_PRECISE)) {
+        return;
+    }
+
+    CHECK_ARGUMENT(
+        external_json.Contains(RABITQ_BITS_PER_DIM_BASE),
+        fmt::format("{} requires {}", RABITQ_BITS_PER_DIM_PRECISE, RABITQ_BITS_PER_DIM_BASE));
+    CHECK_ARGUMENT(
+        external_json.Contains(HGRAPH_BASE_QUANTIZATION_TYPE),
+        fmt::format("{} requires {}", RABITQ_BITS_PER_DIM_PRECISE, HGRAPH_BASE_QUANTIZATION_TYPE));
+    CHECK_ARGUMENT(
+        external_json.Contains(HGRAPH_PRECISE_QUANTIZATION_TYPE),
+        fmt::format(
+            "{} requires {}", RABITQ_BITS_PER_DIM_PRECISE, HGRAPH_PRECISE_QUANTIZATION_TYPE));
+    CHECK_ARGUMENT(
+        external_json.Contains(USE_REORDER_KEY) and external_json[USE_REORDER_KEY].IsBool() and
+            external_json[USE_REORDER_KEY].GetBool(),
+        fmt::format("{} requires {}=true", RABITQ_BITS_PER_DIM_PRECISE, USE_REORDER_KEY));
+    CHECK_ARGUMENT(external_json[HGRAPH_BASE_QUANTIZATION_TYPE].IsString(),
+                   fmt::format("{} must be a string", HGRAPH_BASE_QUANTIZATION_TYPE));
+    CHECK_ARGUMENT(external_json[HGRAPH_PRECISE_QUANTIZATION_TYPE].IsString(),
+                   fmt::format("{} must be a string", HGRAPH_PRECISE_QUANTIZATION_TYPE));
+
+    const auto base_type = external_json[HGRAPH_BASE_QUANTIZATION_TYPE].GetString();
+    const auto precise_type = external_json[HGRAPH_PRECISE_QUANTIZATION_TYPE].GetString();
+    const bool is_direct = base_type == QUANTIZATION_TYPE_VALUE_RABITQ;
+    const bool is_mrle = base_type == QUANTIZATION_TYPE_VALUE_TQ;
+    CHECK_ARGUMENT(is_direct or is_mrle,
+                   fmt::format("{} requires {}={} or {}",
+                               RABITQ_BITS_PER_DIM_PRECISE,
+                               HGRAPH_BASE_QUANTIZATION_TYPE,
+                               QUANTIZATION_TYPE_VALUE_RABITQ,
+                               QUANTIZATION_TYPE_VALUE_TQ));
+    CHECK_ARGUMENT(precise_type == QUANTIZATION_TYPE_VALUE_RABITQ,
+                   fmt::format("{} requires {}={}",
+                               RABITQ_BITS_PER_DIM_PRECISE,
+                               HGRAPH_PRECISE_QUANTIZATION_TYPE,
+                               QUANTIZATION_TYPE_VALUE_RABITQ));
+    if (is_mrle) {
+        CHECK_ARGUMENT(external_json.Contains(INDEX_TQ_CHAIN),
+                       fmt::format("{}={} requires {}",
+                                   HGRAPH_BASE_QUANTIZATION_TYPE,
+                                   QUANTIZATION_TYPE_VALUE_TQ,
+                                   INDEX_TQ_CHAIN));
+        const auto chain =
+            TransformQuantizerParameter::SplitString(external_json[INDEX_TQ_CHAIN].GetString());
+        const std::vector<std::string> expected_chain{TRANSFORMER_TYPE_VALUE_MRLE,
+                                                      QUANTIZATION_TYPE_VALUE_RABITQ};
+        CHECK_ARGUMENT(chain == expected_chain,
+                       "rabitq split transform quantizer requires tq_chain=\"mrle, rabitq\"");
+    }
+
+    const int64_t filter_bits = external_json[RABITQ_BITS_PER_DIM_BASE].GetInt();
+    const int64_t supplement_bits = external_json[RABITQ_BITS_PER_DIM_PRECISE].GetInt();
+    const bool valid_filter_bits = filter_bits >= 1 and filter_bits <= 8;
+    CHECK_ARGUMENT(
+        valid_filter_bits,
+        fmt::format("{} must be in [1, 8], got {}", RABITQ_BITS_PER_DIM_BASE, filter_bits));
+    const bool valid_supplement_bits = supplement_bits >= 1 and supplement_bits <= 8;
+    CHECK_ARGUMENT(
+        valid_supplement_bits,
+        fmt::format("{} must be in [1, 8], got {}", RABITQ_BITS_PER_DIM_PRECISE, supplement_bits));
+    const int64_t total_bits = filter_bits + supplement_bits;
+    CHECK_ARGUMENT(total_bits <= 8,
+                   fmt::format("{} + {} must be no greater than 8, got {}",
+                               RABITQ_BITS_PER_DIM_BASE,
+                               RABITQ_BITS_PER_DIM_PRECISE,
+                               total_bits));
+    if (external_json.Contains(RABITQ_BITS_PER_DIM_QUERY)) {
+        const int64_t query_bits = external_json[RABITQ_BITS_PER_DIM_QUERY].GetInt();
+        CHECK_ARGUMENT(query_bits == 32,
+                       fmt::format("split storage requires {} to be 32, got {}",
+                                   RABITQ_BITS_PER_DIM_QUERY,
+                                   query_bits));
+    }
+
+    inner_json[REORDER_SOURCE_KEY].SetString(HGRAPH_REORDER_SOURCE_BASE);
+    inner_json[BASE_CODES_KEY][CODES_TYPE_KEY].SetString(RABITQ_SPLIT_CODES);
+    inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_VERSION_KEY].SetString(
+        RaBitQuantizerParameter::RABITQ_VERSION_SPLIT);
+    inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY]
+        .SetInt(32);
+    inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY]
+        .SetInt(filter_bits);
+    inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY]
+        .SetInt(total_bits);
+}
+
+void
+ValidateMRLEDim(const JsonType& external_json, uint64_t dim) {
+    if (not external_json.Contains(INDEX_MRLE_DIM)) {
+        return;
+    }
+    CHECK_ARGUMENT(
+        external_json[INDEX_MRLE_DIM].IsNumberInteger(),
+        fmt::format("mrle_dim must be an integer, got {}", external_json[INDEX_MRLE_DIM].Dump()));
+    const int64_t mrle_dim = external_json[INDEX_MRLE_DIM].GetInt();
+    const bool valid_mrle_dim = mrle_dim >= 0 and mrle_dim <= static_cast<int64_t>(dim);
+    CHECK_ARGUMENT(valid_mrle_dim,
+                   fmt::format("mrle_dim({}) must be in range [0, {}]", mrle_dim, dim));
+}
+
+bool
+RequiresRawVectorForTransformQuantizer(const JsonType& inner_json) {
+    const auto& base_type = inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY];
+    const bool is_transform_quantizer =
+        base_type.IsString() and base_type.GetString() == QUANTIZATION_TYPE_VALUE_TQ;
+    if (not is_transform_quantizer) {
+        return false;
+    }
+
+    const auto& use_reorder = inner_json[USE_REORDER_KEY];
+    // An omitted reorder_source uses InnerIndexParameter's default precise source.
+    const bool reorders_from_base =
+        inner_json.Contains(REORDER_SOURCE_KEY) and inner_json[REORDER_SOURCE_KEY].IsString() and
+        inner_json[REORDER_SOURCE_KEY].GetString() == HGRAPH_REORDER_SOURCE_BASE;
+    const bool has_precise_decode_source =
+        use_reorder.IsBool() and use_reorder.GetBool() and not reorders_from_base;
+    return not has_precise_decode_source;
+}
+
+bool
+RequiresRawVectorForMRLERaBitQSplit(const JsonType& inner_json) {
+    const auto& codes_type = inner_json[BASE_CODES_KEY][CODES_TYPE_KEY];
+    return codes_type.IsString() and codes_type.GetString() == RABITQ_SPLIT_CODES and
+           RequiresRawVectorForTransformQuantizer(inner_json);
+}
 
 void
 InnerIndexParameter::FromJson(const JsonType& json) {
@@ -109,10 +241,6 @@ InnerIndexParameter::FromJson(const JsonType& json) {
         CHECK_ARGUMENT(
             this->train_sample_count >= 512,
             fmt::format("train_sample_count must be greater than or equal to 512, got: {}",
-                        this->train_sample_count));
-        CHECK_ARGUMENT(
-            this->train_sample_count <= 65536L,
-            fmt::format("train_sample_count must be less than or equal to 65536, got: {}",
                         this->train_sample_count));
     }
 }

@@ -38,7 +38,7 @@ public:
      * It returns a result which may either contain a shared pointer to the created `Index`
      * or an `Error` object indicating failure conditions.
      *
-     * @param name The name assigned to the index type, like "hnsw", "diskann", "hgraph" ...
+     * @param name The name assigned to the index type, like "hgraph", "ivf", or "sindi".
      * @param parameters A string containing configuration parameters for the index. For details on the parameters,
      *  please refer to the example codes in: https://github.com/antgroup/vsag/tree/main/examples/cpp
      * @param allocator An optional allocator for memory management. If not provided, a default allocator will be used.

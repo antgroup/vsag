@@ -15,6 +15,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <limits>
+#include <numeric>
 
 #include "functest.h"
 #include "test_index.h"
@@ -95,12 +97,28 @@ TestDatasetPool SINDITestIndex::pool{};
 
 }  // namespace fixtures
 
+// RejectAllFilter for testing
+class RejectAllFilter : public vsag::Filter {
+public:
+    bool
+    CheckValid(int64_t) const override {
+        return false;
+    }
+    bool
+    CheckValid(const char*) const override {
+        return false;
+    }
+};
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
                              "Invalid Build and Search Parameter",
                              "[ft][build][search][sindi]") {
     SECTION("invalid doc_prune_ratio") {
         fixtures::SINDIParam param;
         param.doc_prune_ratio = 0.99;
+        REQUIRE_NOTHROW(
+            TestFactory("sindi", fixtures::SINDITestIndex::GenerateBuildParameter(param), true));
+        param.doc_prune_ratio = 1.0;
         REQUIRE_THROWS(
             TestFactory("sindi", fixtures::SINDITestIndex::GenerateBuildParameter(param), false));
         param.doc_prune_ratio = -0.1;
@@ -136,7 +154,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
         invalid_search_param = R"({
             "sindi":{
                 "n_candidate": 10,
-                "query_prune_ratio": 1.2,
+                "query_prune_ratio": 1.0,
                 "term_prune_ratio": 0.0
             }
         })";
@@ -202,10 +220,120 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     TestGetMinAndMaxId(index, dataset, true);
     TestCalcDistanceById(index, dataset, 1e-4, true, true);
     TestBatchCalcDistanceById(index, dataset, 1e-4, true, true);
+    TestMultiQueryBatchCalcDistanceById(index, dataset, 1e-4, true, true);
     TestUpdateVectorSparse(index, dataset, true);
     TestUpdateId(index, dataset, search_param, true);
     TestEstimateMemory("sindi", build_param, dataset);
     TestIndexStatus(index);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI threshold backfills after non-finite candidates",
+                             "[ft][search][sindi][threshold][nonfinite][pr]") {
+    fixtures::SINDIParam param;
+    param.use_reorder = GENERATE(false, true);
+    param.sparse_value_quant_type = "fp32";
+    auto index = TestFactory("sindi", GenerateBuildParameter(param), true);
+
+    std::vector<uint32_t> term_ids = {1};
+    std::vector<float> overflow_value = {std::numeric_limits<float>::max()};
+    std::vector<float> finite_value = {0.25F};
+    vsag::SparseVector base_vectors[2];
+    base_vectors[0] = {1, term_ids.data(), overflow_value.data()};
+    base_vectors[1] = {1, term_ids.data(), finite_value.data()};
+    int64_t ids[] = {10, 20};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->Ids(ids)->SparseVectors(base_vectors)->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+    if (GENERATE(false, true)) {
+        REQUIRE(index->SetImmutable().has_value());
+    }
+
+    std::vector<float> query_value = {2.0F};
+    vsag::SparseVector query_vector{1, term_ids.data(), query_value.data()};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+    auto result = index->KnnSearch(query,
+                                   1,
+                                   R"({"sindi":{"n_candidate":1,"query_prune_ratio":0.0,
+                                   "term_prune_ratio":0.0},"threshold":1.0})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == 20);
+    REQUIRE(result.value()->GetDistances()[0] == 0.5F);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI clears threshold-rejected scores between windows",
+                             "[ft][search][sindi][threshold][window][pr]") {
+    fixtures::SINDIParam param;
+    param.use_reorder = false;
+    param.sparse_value_quant_type = "fp32";
+    auto index = TestFactory("sindi", GenerateBuildParameter(param), true);
+
+    constexpr int64_t count = 10001;
+    uint32_t query_term = 1;
+    uint32_t other_term = 2;
+    float first_window_value = 0.1F;
+    float second_window_value = 0.4F;
+    float other_value = 0.1F;
+    std::vector<vsag::SparseVector> base_vectors(count,
+                                                 vsag::SparseVector{1, &other_term, &other_value});
+    base_vectors[0] = {1, &query_term, &first_window_value};
+    base_vectors[count - 1] = {1, &query_term, &second_window_value};
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto base = vsag::Dataset::Make();
+    base->NumElements(count)->Ids(ids.data())->SparseVectors(base_vectors.data())->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    float query_value = 1.0F;
+    vsag::SparseVector query_vector{1, &query_term, &query_value};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+    auto result = index->KnnSearch(query,
+                                   1,
+                                   R"({"sindi":{"n_candidate":1,"query_prune_ratio":0.0,
+                                   "term_prune_ratio":0.0},"threshold":0.5})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 0);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI threshold retains safe term-list insertion",
+                             "[ft][search][sindi][threshold][term-list][pr]") {
+    fixtures::SINDIParam param;
+    param.use_reorder = false;
+    param.doc_prune_ratio = 0.2F;
+    param.sparse_value_quant_type = "fp32";
+    auto index = TestFactory("sindi", GenerateBuildParameter(param), true);
+
+    uint32_t query_term = 1;
+    uint32_t other_term = 2;
+    float matching_value = 0.5F;
+    float other_value = 1.0F;
+    vsag::SparseVector base_vectors[] = {{1, &query_term, &matching_value},
+                                         {1, &other_term, &other_value}};
+    int64_t ids[] = {10, 20};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->Ids(ids)->SparseVectors(base_vectors)->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+    if (GENERATE(false, true)) {
+        REQUIRE(index->SetImmutable().has_value());
+    }
+
+    float query_value = 1.0F;
+    vsag::SparseVector query_vector{1, &query_term, &query_value};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+    auto result = index->KnnSearch(query,
+                                   2,
+                                   R"({"sindi":{"n_candidate":2,"query_prune_ratio":0.0,
+                                   "term_prune_ratio":0.0},"threshold":0.5})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == 10);
+    REQUIRE(result.value()->GetDistances()[0] == 0.5F);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Analyze", "[ft][analyze][sindi]") {
@@ -325,6 +453,24 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     TestKnnSearch(index, dataset, search_param, 0.99, true);
     TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
     TestFilterSearch(index, dataset, search_param, 0.99, true);
+
+    uint32_t unknown_term = 1'000'000;
+    float value = 1.0F;
+    vsag::SparseVector sparse_query{
+        .len_ = 1, .ids_ = &unknown_term, .vals_ = &value, .token_seq_len_ = 0};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(16)->SparseVectors(&sparse_query)->Owner(false);
+    auto result = index->KnnSearch(query, 1, search_param);
+    REQUIRE(result.has_value());
+    auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
+    REQUIRE(statistics["distance_evaluations"].GetUint64() == 0);
+    REQUIRE(statistics["complete"].GetBool());
+
+    auto range_result = index->RangeSearch(query, 1.0F, search_param, 10);
+    REQUIRE(range_result.has_value());
+    statistics = vsag::JsonType::Parse(range_result.value()->GetStatistics());
+    REQUIRE(statistics["distance_evaluations"].GetUint64() == 0);
+    REQUIRE(statistics["complete"].GetBool());
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Mark Remove", "[ft][remove][sindi]") {
@@ -368,4 +514,118 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Mark Remove", "[ft
             REQUIRE(search_result.value()->GetIds()[j] != ids[i]);
         }
     }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Reasoning Missed Target",
+                             "[ft][sindi][reasoning][pr]") {
+    fixtures::SINDIParam param;
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(dataset->base_->GetSparseVectors())->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = fixtures::SINDITestIndex::search_param;
+    req.query_ = query;
+    req.expected_labels_ = {99999999};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+    REQUIRE(result.value()->GetReasoning().find("missed_targets") != std::string::npos);
+    REQUIRE(result.value()->GetReasoning().find("bucket_selection") != std::string::npos);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Reasoning Found Target",
+                             "[ft][sindi][reasoning][pr]") {
+    fixtures::SINDIParam param;
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(dataset->base_->GetSparseVectors())->Owner(false);
+
+    vsag::SearchRequest req_no_reasoning;
+    req_no_reasoning.topk_ = 5;
+    req_no_reasoning.params_str_ = fixtures::SINDITestIndex::search_param;
+    req_no_reasoning.query_ = query;
+
+    auto result_no_reasoning = index->SearchWithRequest(req_no_reasoning);
+    REQUIRE(result_no_reasoning.has_value());
+    REQUIRE(result_no_reasoning.value()->GetNumElements() > 0);
+    REQUIRE(result_no_reasoning.value()->GetIds() != nullptr);
+
+    auto found_label = result_no_reasoning.value()->GetIds()[0];
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = fixtures::SINDITestIndex::search_param;
+    req.query_ = query;
+    req.expected_labels_ = {found_label};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+    REQUIRE(result.value()->GetReasoning().find("expected_analysis") != std::string::npos);
+    auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
+    REQUIRE(statistics["distance_evaluations"].GetUint64() > 0);
+    REQUIRE(statistics["distance_evaluations"].GetUint64() ==
+            statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() +
+                statistics["distance_evaluations_by_phase"]["rerank"].GetUint64());
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Reasoning Empty Labels No Overhead",
+                             "[ft][sindi][reasoning][pr]") {
+    fixtures::SINDIParam param;
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(dataset->base_->GetSparseVectors())->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = fixtures::SINDITestIndex::search_param;
+    req.query_ = query;
+    req.expected_labels_ = {};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetReasoning().find("expected_analysis") == std::string::npos);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Reasoning With Filter",
+                             "[ft][sindi][reasoning][pr]") {
+    fixtures::SINDIParam param;
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(dataset->base_->GetSparseVectors())->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = fixtures::SINDITestIndex::search_param;
+    req.query_ = query;
+    req.expected_labels_ = {dataset->base_->GetIds()[0]};
+    req.enable_filter_ = true;
+    req.filter_ = std::make_shared<RejectAllFilter>();
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
 }

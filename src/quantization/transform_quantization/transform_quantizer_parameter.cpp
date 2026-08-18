@@ -15,6 +15,7 @@
 
 #include "transform_quantizer_parameter.h"
 
+#include "impl/transform/vector_transformer_parameter.h"
 #include "utils/param_compat_macros.h"
 
 namespace vsag {
@@ -99,7 +100,18 @@ bool
 TransformQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
     PARAM_CAST_OR_RETURN(TransformQuantizerParameter, p, other);
     CHECK_FIELD_EQ(*this, *p, tq_chain_);
-    return this->base_quantizer_json_[TYPE_KEY].GetString() ==
-           p->base_quantizer_json_[TYPE_KEY].GetString();
+
+    auto transformer_param = std::make_shared<VectorTransformerParameter>();
+    transformer_param->FromJson(this->base_quantizer_json_);
+    auto other_transformer_param = std::make_shared<VectorTransformerParameter>();
+    other_transformer_param->FromJson(p->base_quantizer_json_);
+    if (not transformer_param->CheckCompatibility(other_transformer_param)) {
+        return false;
+    }
+
+    auto bottom_param = QuantizerParameter::GetQuantizerParameterByJson(this->base_quantizer_json_);
+    auto other_bottom_param =
+        QuantizerParameter::GetQuantizerParameterByJson(p->base_quantizer_json_);
+    return bottom_param->CheckCompatibility(other_bottom_param);
 }
 }  // namespace vsag

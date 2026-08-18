@@ -28,6 +28,7 @@ set (eval_srcs
     monitor/http_server_monitor.cpp
     eval_config.cpp
     eval_dataset.cpp
+    evaluator.cpp
     eval_job.cpp)
 
 add_library (vsag_eval_common INTERFACE)
@@ -67,8 +68,8 @@ if (ENABLE_TESTS)
     target_link_libraries (eval_dataset_test PRIVATE
         Catch2::Catch2WithMain
         eval_obj
-        simd
         vsag
+        simd
         vsag_eval_common
         ${HDF5_CPP_STATIC_LIBRARY}
         ${HDF5_C_STATIC_LIBRARY}

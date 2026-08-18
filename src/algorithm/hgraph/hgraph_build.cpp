@@ -26,6 +26,7 @@
 #include "datacell/flatten_datacell_parameter.h"
 #include "dataset_impl.h"
 #include "hgraph.h"  // IWYU pragma: keep
+#include "hgraph_fast_build.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
@@ -36,6 +37,7 @@
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/util_functions.h"
+#include "vsag/options.h"
 
 namespace vsag {
 
@@ -60,6 +62,29 @@ make_temporary_sq8_flatten(MetricType metric,
     return FlattenInterface::MakeInstance(sq8_param, common_param);
 }
 
+static FlattenInterfacePtr
+make_temporary_flatten_like(const FlattenInterfaceParamPtr& source_param,
+                            MetricType metric,
+                            DataTypes data_type,
+                            int64_t dim,
+                            int64_t extra_info_size,
+                            const std::shared_ptr<SafeThreadPool>& thread_pool,
+                            Allocator* allocator) {
+    auto temporary_param_json = source_param->ToJson();
+    temporary_param_json[IO_PARAMS_KEY].SetJson(MemoryIOParameter().ToJson());
+    temporary_param_json.Erase(SUPPLEMENT_IO_PARAMS_KEY);
+    auto temporary_param = CreateFlattenParam(temporary_param_json);
+
+    IndexCommonParam common_param;
+    common_param.metric_ = metric;
+    common_param.data_type_ = data_type;
+    common_param.dim_ = dim;
+    common_param.extra_info_size_ = extra_info_size;
+    common_param.thread_pool_ = thread_pool;
+    common_param.allocator_ = std::shared_ptr<Allocator>(allocator, [](Allocator*) {});
+    return FlattenInterface::MakeInstance(temporary_param, common_param);
+}
+
 static bool
 need_temporary_sq8_build_data(const FlattenInterfacePtr& basic_flatten_codes,
                               bool has_precise_reorder) {
@@ -67,13 +92,40 @@ need_temporary_sq8_build_data(const FlattenInterfacePtr& basic_flatten_codes,
            basic_flatten_codes->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ;
 }
 
+static void
+wait_all_futures(std::vector<std::future<void>>& futures) {
+    std::exception_ptr first_exception = nullptr;
+    for (auto& future : futures) {
+        if (not future.valid()) {
+            continue;
+        }
+        try {
+            future.get();
+        } catch (...) {
+            if (not first_exception) {
+                first_exception = std::current_exception();
+            }
+        }
+    }
+    if (first_exception) {
+        std::rethrow_exception(first_exception);
+    }
+}
+
 void
 HGraph::Train(const DatasetPtr& base) {
+    this->train_codes_with_dataset(this->sample_train_dataset(base));
+}
+
+DatasetPtr
+HGraph::sample_train_dataset(const DatasetPtr& base) const {
     int64_t total_elements = base->GetNumElements();
     int64_t dim = base->GetDim();
-    DatasetPtr train_data =
-        vsag::sample_train_data(base, total_elements, dim, train_sample_count_, allocator_);
+    return vsag::sample_train_data(base, total_elements, dim, train_sample_count_, allocator_);
+}
 
+void
+HGraph::train_codes_with_dataset(const DatasetPtr& train_data) {
     const auto* data_ptr = get_data(train_data);
     this->basic_flatten_codes_->Train(data_ptr, train_data->GetNumElements());
     if (has_precise_reorder()) {
@@ -91,25 +143,33 @@ HGraph::Build(const DatasetPtr& data) {
     this->build_cache_hit_rate_ = -1.0F;
     this->build_cache_hit_nodes_ = 0;
     this->build_cache_missed_nodes_ = 0;
-    if (this->has_loaded_cache()) {
+    std::vector<int64_t> ret;
+    const bool using_build_cache = this->has_loaded_cache();
+    if (using_build_cache) {
+        if (this->using_dedup_storage()) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "HGraph deduplicate_storage does not support build_with_cache");
+        }
         // A previously exported cache has been imported via ImportCache().
         // Take the accelerated build path that warm-starts neighbours from
         // the cache and refines them, instead of building from scratch.
-        auto ret = this->build_with_cache(data);
-        if (use_elp_optimizer_) {
-            elp_optimize();
-        }
-        return ret;
-    }
-    this->Train(data);
-    std::vector<int64_t> ret;
-    if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
-        ret = this->Add(data);
+        ret = this->build_with_cache(data);
     } else {
-        ret = this->build_by_odescent(data);
+        auto optimized_result = this->try_optimized_build(data);
+        if (optimized_result.has_value()) {
+            ret = std::move(optimized_result.value());
+        } else if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
+            ret = this->Add(data);
+        } else {
+            ret = this->build_by_odescent(data);
+        }
     }
     if (use_elp_optimizer_) {
         elp_optimize();
+    }
+    if (this->mci_parameters_.enabled and
+        (using_build_cache or graph_type_ != GRAPH_TYPE_VALUE_NSW)) {
+        this->build_mci_clique_index(ret.empty() ? this->get_data(data) : nullptr);
     }
     return ret;
 }
@@ -120,7 +180,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
 
     auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
-    const auto* vectors = data->GetFloat32Vectors();
+    const auto* vectors = get_data(data);
     const auto* extra_infos = data->GetExtraInfos();
     const auto* source_id = data->GetSourceID();
     Vector<int64_t> valid_indices(allocator_);
@@ -174,12 +234,12 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
             this->label_table_->InsertSourceId(inner_id, source_id[i]);
         }
         if (not defer_persistent_codes) {
-            this->insert_persistent_codes(vectors + dim_ * i, inner_id);
+            this->insert_persistent_codes(get_data(data, i), inner_id);
         } else {
             deferred_code_ids.emplace_back(inner_id, i);
         }
         if (temporary_sq8_build_data != nullptr) {
-            temporary_sq8_build_data->InsertVector(vectors + dim_ * i, inner_id);
+            temporary_sq8_build_data->InsertVector(get_data(data, i), inner_id);
         }
         auto level = this->get_random_level() - 1;
         if (level >= 0) {
@@ -220,7 +280,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         temporary_sq8_build_data.reset();
         this->Train(data);
         for (const auto& [inner_id, local_idx] : deferred_code_ids) {
-            this->insert_persistent_codes(vectors + dim_ * local_idx, inner_id);
+            this->insert_persistent_codes(get_data(data, local_idx), inner_id);
         }
     }
     return failed_ids;
@@ -228,90 +288,103 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
 
 std::vector<int64_t>
 HGraph::Add(const DatasetPtr& data) {
+    std::unique_lock<std::mutex> mci_add_lock(this->mci_add_mutex_, std::defer_lock);
+    if (this->mci_parameters_.enabled) {
+        mci_add_lock.lock();
+    }
+    const auto mci_start_total = this->total_count_.load();
+    const bool had_mci_clique_index = this->mci_parameters_.enabled and
+                                      this->mci_cliques_ != nullptr and
+                                      this->mci_cliques_->HasCliqueIndex(mci_start_total);
     std::shared_lock<std::shared_mutex> force_remove_rlock;
     if (this->support_force_remove()) {
         force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
     }
-    std::vector<int64_t> failed_ids;
+
+    this->validate_add_data(data);
+    auto context = this->prepare_add_context(data);
+    this->prepare_graph_read_codes(data, context);
+    auto batch = this->prepare_add_batch(data);
+    this->prepare_temporary_graph_read_codes(data, context, batch);
+    if (had_mci_clique_index) {
+        this->mci_cliques_->MarkUnavailable();
+    }
+    this->insert_add_batch(data, context, batch);
+    if (this->mci_parameters_.enabled) {
+        if (had_mci_clique_index) {
+            logger::info("hgraph mci incremental add started, added={}", batch.rows.size());
+            for (const auto& row : batch.rows) {
+                this->incremental_update_mci_clique(row.inner_id, get_data(data, row.input_idx));
+            }
+            this->mci_cliques_->MarkAvailable(this->total_count_.load());
+            logger::info("hgraph mci incremental add finished, total={}",
+                         this->total_count_.load());
+        } else {
+            const void* vectors = nullptr;
+            if (mci_start_total == 0 and batch.failed_ids.empty()) {
+                vectors = this->get_data(data);
+            }
+            this->build_mci_clique_index(vectors);
+        }
+        this->cal_memory_usage();
+    }
+    return batch.failed_ids;
+}
+
+void
+HGraph::validate_add_data(const DatasetPtr& data) const {
     auto base_dim = data->GetDim();
     if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
         CHECK_ARGUMENT(base_dim == dim_,
                        fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
     }
     CHECK_ARGUMENT(get_data(data) != nullptr, "base.float_vector is nullptr");
+}
 
-    auto need_sq8_build_data =
-        need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
-    CHECK_ARGUMENT(not(need_sq8_build_data and this->total_count_ != 0 and
-                       raw_vector_ == nullptr and temporary_build_flatten_codes_ == nullptr),
-                   "adding to a non-empty HGraph that needs temporary SQ8 build data requires "
-                   "raw vectors");
-    bool created_temporary_build_data = false;
-    if (need_sq8_build_data and this->total_count_ == 0 and raw_vector_ == nullptr and
-        temporary_build_flatten_codes_ == nullptr) {
-        temporary_build_flatten_codes_ =
-            make_temporary_sq8_flatten(this->metric_,
-                                       this->data_type_,
-                                       this->dim_,
-                                       static_cast<int64_t>(this->extra_info_size_),
-                                       this->thread_pool_,
-                                       this->allocator_);
-        temporary_build_flatten_codes_->Train(get_data(data), data->GetNumElements());
-        created_temporary_build_data = true;
+HGraph::AddContext
+HGraph::prepare_add_context(const DatasetPtr& data) {
+    AddContext context;
+    context.use_dedup_storage = this->using_dedup_storage();
+    context.need_temporary_sq8_build_data = this->need_temporary_sq8_build_data_for_add();
+    context.use_parallel_add = this->thread_pool_ != nullptr;
+
+    if (context.need_temporary_sq8_build_data and this->total_count_ != 0 and
+        raw_vector_ == nullptr) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            "adding to a non-empty HGraph that needs temporary SQ8 build data requires raw "
+            "vectors");
     }
-    struct temporary_build_flatten_guard {
-        HGraph* hgraph;
-        bool enabled;
-        ~temporary_build_flatten_guard() {
-            if (enabled) {
-                hgraph->temporary_build_flatten_codes_.reset();
-            }
-        }
-    } temporary_build_flatten_guard_instance{this, created_temporary_build_data};
-    bool defer_persistent_codes = created_temporary_build_data;
 
     {
         std::scoped_lock lock(this->add_mutex_);
-        if (this->total_count_ == 0 and not defer_persistent_codes) {
-            this->Train(data);
+        if (this->total_count_ == 0) {
+            context.train_data = this->sample_train_dataset(data);
+            this->train_codes_with_dataset(context.train_data);
         }
     }
+    context.first_empty_add = context.train_data != nullptr;
+    return context;
+}
 
-    auto add_func = [&](const void* data,
-                        int level,
-                        InnerIdType inner_id,
-                        const char* extra_info,
-                        const AttributeSet* attrs) -> void {
-        if (this->extra_infos_ != nullptr) {
-            this->extra_infos_->InsertExtraInfo(extra_info, inner_id);
-        }
-        if (attrs != nullptr and this->use_attribute_filter_) {
-            this->attr_filter_index_->Insert(*attrs, inner_id);
-        }
-        this->add_one_point(data, level, inner_id, not defer_persistent_codes);
-    };
+HGraph::AddBatch
+HGraph::prepare_add_batch(const DatasetPtr& data) {
+    AddBatch batch(this->allocator_);
 
-    std::vector<std::future<void>> futures;
     auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
     const auto* source_id = data->GetSourceID();
-    const auto* extra_infos = data->GetExtraInfos();
-    const auto* attr_sets = data->GetAttributeSets();
-    bool use_parallel_add = this->thread_pool_ != nullptr;
-    Vector<std::pair<InnerIdType, LabelType>> inner_ids(allocator_);
     for (int64_t j = 0; j < total; ++j) {
-        // Check if label already exists (skip removed IDs)
         {
             std::shared_lock label_lock(this->label_lookup_mutex_);
             auto [found, _] = this->label_table_->TryGetIdByLabel(labels[j]);
             if (found) {
-                failed_ids.emplace_back(labels[j]);
+                batch.failed_ids.emplace_back(labels[j]);
                 continue;
             }
         }
 
         InnerIdType inner_id;
-
         {
             std::scoped_lock lock(this->add_mutex_);
             inner_id = this->get_unique_inner_ids(1).at(0);
@@ -321,80 +394,121 @@ HGraph::Add(const DatasetPtr& data) {
             }
         }
 
+        AddRow row;
+        row.input_idx = j;
+        row.inner_id = inner_id;
         {
             std::scoped_lock label_lock(this->label_lookup_mutex_);
             this->label_table_->Insert(inner_id, labels[j]);
-            // NOTE: Dataset::GetSourceID() returns a pointer to an array of N
-            // source_id strings (one per row), matching the semantics already
-            // used by build_with_cache() at line ~1234. Use array indexing
-            // instead of dereferencing the head pointer.
+            // Same array-indexing semantics as build_with_cache().
             if (source_id != nullptr && not source_id[j].empty()) {
                 this->label_table_->InsertSourceId(inner_id, source_id[j]);
             }
-            inner_ids.emplace_back(inner_id, j);
+            row.level = this->get_random_level() - 1;
+            batch.rows.emplace_back(row);
         }
     }
-    if (temporary_build_flatten_codes_ != nullptr) {
-        for (const auto& [inner_id, local_idx] : inner_ids) {
-            temporary_build_flatten_codes_->InsertVector(get_data(data, local_idx), inner_id);
-        }
-    }
-    for (auto& [inner_id, local_idx] : inner_ids) {
-        int level;
-        {
-            std::scoped_lock label_lock(this->label_lookup_mutex_);
-            level = this->get_random_level() - 1;
-        }
-        const auto* extra_info = extra_infos + local_idx * extra_info_size_;
-        const AttributeSet* cur_attr_set = nullptr;
-        if (attr_sets != nullptr) {
-            cur_attr_set = attr_sets + local_idx;
-        }
-        if (use_parallel_add) {
-            auto future = this->thread_pool_->GeneralEnqueue(
-                add_func, get_data(data, local_idx), level, inner_id, extra_info, cur_attr_set);
-            futures.emplace_back(std::move(future));
-        } else {
-            add_func(get_data(data, local_idx), level, inner_id, extra_info, cur_attr_set);
-        }
-    }
-    if (use_parallel_add) {
-        for (auto& future : futures) {
-            future.get();
-        }
-    }
-    if (defer_persistent_codes) {
-        temporary_build_flatten_codes_.reset();
-        {
-            std::scoped_lock lock(this->add_mutex_);
-            this->Train(data);
-        }
-        futures.clear();
-        for (const auto& id_pair : inner_ids) {
-            auto inner_id = id_pair.first;
-            auto local_idx = id_pair.second;
-            if (use_parallel_add) {
-                auto future =
-                    this->thread_pool_->GeneralEnqueue([this, data, inner_id, local_idx]() {
-                        this->insert_persistent_codes(get_data(data, local_idx), inner_id);
-                    });
-                futures.emplace_back(std::move(future));
-            } else {
-                this->insert_persistent_codes(get_data(data, local_idx), inner_id);
-            }
-        }
-        if (use_parallel_add) {
-            for (auto& future : futures) {
-                future.get();
-            }
-        }
-    }
-    return failed_ids;
+
+    return batch;
 }
 
 void
-HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
-    this->add_one_point(data, level, inner_id, true);
+HGraph::prepare_graph_read_codes(const DatasetPtr& data, AddContext& context) {
+    context.graph_read_codes = this->basic_flatten_codes_;
+    if (context.need_temporary_sq8_build_data and context.first_empty_add and
+        raw_vector_ == nullptr) {
+        context.graph_read_codes =
+            make_temporary_sq8_flatten(this->metric_,
+                                       this->data_type_,
+                                       this->dim_,
+                                       static_cast<int64_t>(this->extra_info_size_),
+                                       this->thread_pool_,
+                                       this->allocator_);
+        context.graph_read_codes->Train(get_data(data), data->GetNumElements());
+    } else if (context.need_temporary_sq8_build_data and raw_vector_ != nullptr) {
+        context.graph_read_codes = raw_vector_;
+    } else if (has_precise_reorder() and not build_by_base_) {
+        context.graph_read_codes = high_precise_codes_;
+    } else if (context.use_dedup_storage and context.first_empty_add) {
+        // Keep a logical-id-indexed in-memory flatten during the first build. Using the
+        // persistent adapter here would add Resolve and mapped-id copying to the
+        // O(N * ef_construction) graph-construction hot path.
+        auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
+        CHECK_ARGUMENT(hgraph_param != nullptr, "HGraphParameter is required for temporary codes");
+        context.graph_read_codes =
+            make_temporary_flatten_like(hgraph_param->base_codes_param,
+                                        this->metric_,
+                                        this->data_type_,
+                                        this->dim_,
+                                        static_cast<int64_t>(this->extra_info_size_),
+                                        this->thread_pool_,
+                                        this->allocator_);
+        context.graph_read_codes->Train(get_data(context.train_data),
+                                        context.train_data->GetNumElements());
+    }
+}
+
+void
+HGraph::prepare_temporary_graph_read_codes(const DatasetPtr& data,
+                                           const AddContext& context,
+                                           const AddBatch& batch) {
+    if (not this->graph_read_codes_is_temporary(context)) {
+        return;
+    }
+    for (const auto& row : batch.rows) {
+        context.graph_read_codes->InsertVector(get_data(data, row.input_idx), row.inner_id);
+    }
+}
+
+void
+HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, const AddBatch& batch) {
+    std::vector<std::future<void>> futures;
+    HGraphBuildTaskGuard future_guard(
+        futures, context.use_parallel_add ? static_cast<uint64_t>(batch.rows.size()) : 0);
+    this->prepare_build_codes(data, batch.rows);
+
+    const auto* extra_infos = data->GetExtraInfos();
+    const auto* attr_sets = data->GetAttributeSets();
+
+    auto add_func = [&](const void* vector_data,
+                        AddRow row,
+                        const char* extra_info,
+                        const AttributeSet* attrs) -> void {
+        if (this->extra_infos_ != nullptr) {
+            this->extra_infos_->InsertExtraInfo(extra_info, row.inner_id);
+        }
+        if (attrs != nullptr and this->use_attribute_filter_) {
+            this->attr_filter_index_->Insert(*attrs, row.inner_id);
+        }
+        this->insert_one_logical_point(vector_data, row, context);
+    };
+
+    for (const auto& row : batch.rows) {
+        const auto* extra_info =
+            extra_infos == nullptr ? nullptr : extra_infos + row.input_idx * extra_info_size_;
+        const AttributeSet* cur_attr_set = nullptr;
+        if (attr_sets != nullptr) {
+            cur_attr_set = attr_sets + row.input_idx;
+        }
+        if (context.use_parallel_add) {
+            auto future = this->thread_pool_->GeneralEnqueue(
+                add_func, get_data(data, row.input_idx), row, extra_info, cur_attr_set);
+            futures.emplace_back(std::move(future));
+        } else {
+            add_func(get_data(data, row.input_idx), row, extra_info, cur_attr_set);
+        }
+    }
+    if (context.use_parallel_add) {
+        wait_all_futures(futures);
+    }
+}
+
+bool
+HGraph::graph_read_codes_is_temporary(const AddContext& context) const {
+    return context.graph_read_codes != nullptr and
+           context.graph_read_codes != basic_flatten_codes_ and
+           context.graph_read_codes != high_precise_codes_ and
+           context.graph_read_codes != raw_vector_;
 }
 
 void
@@ -403,6 +517,12 @@ HGraph::insert_persistent_codes(const void* data, InnerIdType inner_id) {
     if (not this->support_force_remove()) {
         add_lock = std::shared_lock<std::shared_mutex>(this->add_mutex_);
     }
+    std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+    this->insert_persistent_codes_unlocked(data, inner_id);
+}
+
+void
+HGraph::insert_persistent_codes_unlocked(const void* data, InnerIdType inner_id) {
     this->basic_flatten_codes_->InsertVector(data, inner_id);
     if (has_precise_reorder()) {
         this->high_precise_codes_->InsertVector(data, inner_id);
@@ -413,83 +533,207 @@ HGraph::insert_persistent_codes(const void* data, InnerIdType inner_id) {
 }
 
 void
-HGraph::add_one_point(const void* data, int level, InnerIdType inner_id, bool insert_codes) {
-    std::unique_lock<std::shared_mutex> add_lock(this->add_mutex_, std::defer_lock);
-    if (this->support_force_remove()) {
-        add_lock.lock();
+HGraph::insert_persistent_codes_to_slot(const void* data, CodeSlotIdType code_slot_id) {
+    InsertVectorToCodeSlot(this->basic_flatten_codes_, data, code_slot_id);
+    if (has_precise_reorder()) {
+        InsertVectorToCodeSlot(this->high_precise_codes_, data, code_slot_id);
     }
-    if (insert_codes) {
+    if (create_new_raw_vector_) {
+        InsertVectorToCodeSlot(this->raw_vector_, data, code_slot_id);
+    }
+}
+
+// Adding one logical point is split into probe and publish phases. The publish_* helpers commit
+// the probe result by binding deduplicated storage, updating duplicate tracking, or inserting a
+// unique point into the graph.
+bool
+HGraph::insert_one_logical_point(const void* data, const AddRow& row, const AddContext& context) {
+    const auto inner_id = row.inner_id;
+    const auto level = row.level;
+    this->prepare_codes_before_probe_if_needed(data, inner_id, context);
+
+    auto make_search_param = [&]() {
+        InnerSearchParam param;
+        param.topk = 1;
+        param.ep = this->entry_point_id_;
+        param.ef = 1;
+        param.is_inner_id_allowed = nullptr;
+        return param;
+    };
+
+    std::unique_lock<std::shared_mutex> add_lock(this->add_mutex_);
+    auto needs_update_structure = this->unique_add_needs_structure_update(level);
+    if (not needs_update_structure) {
+        add_lock.unlock();
+    }
+
+    auto rlock = this->acquire_global_read_lock();
+
+    auto param = make_search_param();
+    auto probe = this->probe_graph_for_add(data, level, inner_id, param, context.graph_read_codes);
+    if (this->publish_duplicate_if_found(probe, inner_id, context)) {
+        return false;
+    }
+
+    if (this->unique_add_needs_structure_update(level)) {
+        rlock.unlock();
+        std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
+        this->publish_unique_under_unique_global_lock(data, level, inner_id, param, probe, context);
+        return true;
+    }
+
+    this->publish_unique_under_shared_global_lock(
+        data, level, inner_id, param, probe, context, rlock);
+    return true;
+}
+
+void
+HGraph::prepare_codes_before_probe_if_needed(const void* data,
+                                             InnerIdType inner_id,
+                                             const AddContext& context) {
+    if (this->should_insert_codes_before_probe(context.use_dedup_storage)) {
         this->insert_persistent_codes(data, inner_id);
     }
-    if (not this->support_force_remove()) {
-        add_lock.lock();
-    }
-    if (level >= static_cast<int>(this->route_graphs_.size()) || bottom_graph_->TotalCount() == 0) {
-        std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
-        // level maybe a negative number(-1)
-        for (auto j = static_cast<int>(this->route_graphs_.size()); j <= level; ++j) {
-            this->route_graphs_.emplace_back(this->generate_one_route_graph());
-        }
-        auto insert_success = this->graph_add_one(data, level, inner_id);
-        if (insert_success) {
-            entry_point_id_ = inner_id;
-        } else {
-            this->route_graphs_.pop_back();
-        }
-        add_lock.unlock();
-    } else {
-        add_lock.unlock();
-        std::shared_lock rlock(this->global_mutex_);
-        this->graph_add_one(data, level, inner_id);
+}
+
+void
+HGraph::publish_duplicate_storage_if_needed(InnerIdType group_id,
+                                            InnerIdType duplicate_id,
+                                            const AddContext& context) {
+    if (context.use_dedup_storage) {
+        auto code_slot_id = this->code_slot_map_->Resolve(group_id);
+        this->code_slot_map_->PublishSlot(duplicate_id, code_slot_id);
     }
 }
 
 bool
-HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
-    DistHeapPtr result = nullptr;
-    InnerSearchParam param;
-    param.topk = 1;
-    param.ep = this->entry_point_id_;
-    param.ef = 1;
-    param.is_inner_id_allowed = nullptr;
-
-    auto flatten_codes = basic_flatten_codes_;
-    if (temporary_build_flatten_codes_ != nullptr) {
-        flatten_codes = temporary_build_flatten_codes_;
-    } else if (need_temporary_sq8_build_data(this->basic_flatten_codes_,
-                                             this->has_precise_reorder()) and
-               raw_vector_ != nullptr) {
-        flatten_codes = raw_vector_;
-    } else if (has_precise_reorder() and not build_by_base_) {
-        flatten_codes = high_precise_codes_;
+HGraph::publish_duplicate_if_found(const GraphAddProbeResult& probe,
+                                   InnerIdType inner_id,
+                                   const AddContext& context) {
+    if (probe.duplicate_id < 0) {
+        return false;
     }
+    auto group_id = static_cast<InnerIdType>(probe.duplicate_id);
+    auto duplicate_id = inner_id;
+    this->publish_duplicate_storage_if_needed(group_id, duplicate_id, context);
+    this->publish_duplicate_to_tracker(group_id, duplicate_id);
+    return true;
+}
 
-    for (auto j = this->route_graphs_.size() - 1; j > level; --j) {
-        result = search_one_graph(
-            data, route_graphs_[j], flatten_codes, param, (VisitedListPtr) nullptr, nullptr);
-        param.ep = result->Top().second;
+void
+HGraph::publish_unique_storage_if_needed(const void* data,
+                                         InnerIdType inner_id,
+                                         const AddContext& context) {
+    if (not context.use_dedup_storage) {
+        return;
+    }
+    auto code_slot_id = this->code_slot_map_->AllocateSlot();
+    this->ensure_physical_code_capacity_unlocked(code_slot_id + 1);
+    this->insert_persistent_codes_to_slot(data, code_slot_id);
+    this->code_slot_map_->PublishSlot(inner_id, code_slot_id);
+}
+
+void
+HGraph::publish_unique_storage_if_needed(const void* data,
+                                         InnerIdType inner_id,
+                                         const AddContext& context,
+                                         std::shared_lock<std::shared_mutex>& read_lock) {
+    if (not context.use_dedup_storage) {
+        return;
+    }
+    auto code_slot_id = this->code_slot_map_->AllocateSlot();
+    if (this->physical_code_capacity_.load(std::memory_order_acquire) < code_slot_id + 1) {
+        read_lock.unlock();
+        this->ensure_physical_code_capacity(code_slot_id + 1);
+        read_lock.lock();
+    }
+    this->insert_persistent_codes_to_slot(data, code_slot_id);
+    this->code_slot_map_->PublishSlot(inner_id, code_slot_id);
+}
+
+bool
+HGraph::unique_add_needs_structure_update(int level) const {
+    return this->bottom_graph_->TotalCount() == 0 ||
+           level >= static_cast<int>(this->route_graphs_.size());
+}
+
+void
+HGraph::ensure_route_graphs_for_level(int level) {
+    for (auto j = static_cast<int>(this->route_graphs_.size()); j <= level; ++j) {
+        this->route_graphs_.emplace_back(this->generate_one_route_graph());
+    }
+}
+
+void
+HGraph::publish_unique_under_shared_global_lock(const void* data,
+                                                int level,
+                                                InnerIdType inner_id,
+                                                InnerSearchParam& param,
+                                                const GraphAddProbeResult& probe,
+                                                const AddContext& context,
+                                                std::shared_lock<std::shared_mutex>& read_lock) {
+    this->publish_unique_storage_if_needed(data, inner_id, context, read_lock);
+    this->publish_unique_to_graphs(data, level, inner_id, param, probe, context);
+}
+
+void
+HGraph::publish_unique_under_unique_global_lock(const void* data,
+                                                int level,
+                                                InnerIdType inner_id,
+                                                InnerSearchParam& param,
+                                                const GraphAddProbeResult& probe,
+                                                const AddContext& context) {
+    auto should_update_entry_point = this->unique_add_needs_structure_update(level);
+    this->ensure_route_graphs_for_level(level);
+    this->publish_unique_storage_if_needed(data, inner_id, context);
+    this->publish_unique_to_graphs(data, level, inner_id, param, probe, context);
+    if (should_update_entry_point) {
+        this->entry_point_id_ = inner_id;
+    }
+}
+
+void
+HGraph::publish_unique_to_graphs(const void* data,
+                                 int level,
+                                 InnerIdType inner_id,
+                                 InnerSearchParam& param,
+                                 const GraphAddProbeResult& probe,
+                                 const AddContext& context) {
+    this->publish_unique_to_bottom_graph(inner_id, probe.neighbors, context.graph_read_codes);
+    this->publish_unique_to_route_graphs(data, level, inner_id, param, context.graph_read_codes);
+}
+
+HGraph::GraphAddProbeResult
+HGraph::probe_graph_for_add(const void* data,
+                            int level,
+                            InnerIdType inner_id,
+                            InnerSearchParam& param,
+                            const FlattenInterfacePtr& flatten_codes) const {
+    DistHeapPtr result = nullptr;
+    const auto build_computer = this->make_build_computer(data, inner_id);
+
+    for (auto j = static_cast<int64_t>(this->route_graphs_.size()) - 1; j > level; --j) {
+        result = this->search_graph_for_build(
+            data, route_graphs_[j], flatten_codes, param, build_computer);
+        if (not result->Empty()) {
+            param.ep = result->Top().second;
+        }
     }
 
     param.ef = this->ef_construct_;
     param.topk = static_cast<int64_t>(ef_construct_);
     if (this->support_duplicate_) {
         param.find_duplicate = true;
-        param.duplicate_query_id = inner_id;
+        param.duplicate_query_id =
+            this->using_dedup_storage() ? std::numeric_limits<InnerIdType>::max() : inner_id;
         param.duplicate_distance_threshold = this->duplicate_distance_threshold_;
     }
 
     if (bottom_graph_->TotalCount() != 0) {
-        result = search_one_graph(data,
-                                  this->bottom_graph_,
-                                  flatten_codes,
-                                  param,
-                                  // to specify which overloaded function to call
-                                  (VisitedListPtr) nullptr,
-                                  nullptr);
+        result = this->search_graph_for_build(
+            data, this->bottom_graph_, flatten_codes, param, build_computer);
         if (this->support_duplicate_ && param.duplicate_id >= 0) {
-            std::unique_lock lock(this->label_lookup_mutex_);
-            bottom_graph_->SetDuplicateId(static_cast<InnerIdType>(param.duplicate_id), inner_id);
-            return false;
+            return GraphAddProbeResult{nullptr, param.duplicate_id};
         }
         auto filtered_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
         while (not result->Empty()) {
@@ -499,28 +743,42 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
                 filtered_result->Push(dist, id);
             }
         }
-        LockGuard cur_lock(neighbors_mutex_, inner_id);
+        return GraphAddProbeResult{filtered_result, -1};
+    }
+    return GraphAddProbeResult{};
+}
+
+void
+HGraph::publish_unique_to_bottom_graph(InnerIdType inner_id,
+                                       const DistHeapPtr& neighbors,
+                                       const FlattenInterfacePtr& flatten_codes) {
+    LockGuard cur_lock(neighbors_mutex_, inner_id);
+    if (neighbors != nullptr and not neighbors->Empty()) {
         mutually_connect_new_element(inner_id,
-                                     filtered_result,
+                                     neighbors,
                                      this->bottom_graph_,
                                      flatten_codes,
                                      neighbors_mutex_,
                                      allocator_,
                                      alpha_);
-    } else {
-        LockGuard cur_lock(neighbors_mutex_, inner_id);
-        bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
+        return;
     }
+    bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
+}
+
+void
+HGraph::publish_unique_to_route_graphs(const void* data,
+                                       int level,
+                                       InnerIdType inner_id,
+                                       InnerSearchParam& param,
+                                       const FlattenInterfacePtr& flatten_codes) {
+    DistHeapPtr result = nullptr;
+    const auto build_computer = this->make_build_computer(data, inner_id);
 
     for (int64_t j = 0; j <= level; ++j) {
         if (route_graphs_[j]->TotalCount() != 0) {
-            result = search_one_graph(data,
-                                      route_graphs_[j],
-                                      flatten_codes,
-                                      param,
-                                      // to specify which overloaded function to call
-                                      (VisitedListPtr) nullptr,
-                                      nullptr);
+            result = this->search_graph_for_build(
+                data, route_graphs_[j], flatten_codes, param, build_computer);
             auto filtered_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
             while (not result->Empty()) {
                 auto [dist, id] = result->Top();
@@ -530,19 +788,73 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
                 }
             }
             LockGuard cur_lock(neighbors_mutex_, inner_id);
-            mutually_connect_new_element(inner_id,
-                                         filtered_result,
-                                         route_graphs_[j],
-                                         flatten_codes,
-                                         neighbors_mutex_,
-                                         allocator_,
-                                         alpha_);
+            if (not filtered_result->Empty()) {
+                mutually_connect_new_element(inner_id,
+                                             filtered_result,
+                                             route_graphs_[j],
+                                             flatten_codes,
+                                             neighbors_mutex_,
+                                             allocator_,
+                                             alpha_);
+            } else {
+                route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
+            }
         } else {
             LockGuard cur_lock(neighbors_mutex_, inner_id);
             route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         }
     }
-    return true;
+}
+
+void
+HGraph::ensure_physical_code_capacity(CodeSlotIdType required_capacity) {
+    if (not this->using_dedup_storage()) {
+        return;
+    }
+    if (this->physical_code_capacity_.load(std::memory_order_acquire) >= required_capacity) {
+        return;
+    }
+    std::scoped_lock resize_lock(this->physical_code_resize_mutex_);
+    if (this->physical_code_capacity_.load(std::memory_order_acquire) >= required_capacity) {
+        return;
+    }
+    this->physical_code_resize_pending_.store(true, std::memory_order_release);
+    struct pending_reset_guard {
+        std::atomic<bool>& pending;
+        ~pending_reset_guard() {
+            pending.store(false, std::memory_order_release);
+        }
+    } pending_reset{this->physical_code_resize_pending_};
+    std::scoped_lock lock(this->global_mutex_);
+    this->ensure_physical_code_capacity_unlocked(required_capacity);
+}
+
+void
+HGraph::ensure_physical_code_capacity_unlocked(CodeSlotIdType required_capacity) {
+    if (not this->using_dedup_storage()) {
+        return;
+    }
+    if (this->physical_code_capacity_.load(std::memory_order_acquire) >= required_capacity) {
+        return;
+    }
+
+    auto new_capacity = static_cast<InnerIdType>(
+        next_multiple_of_power_of_two(required_capacity, this->resize_increase_count_bit_));
+    GetCodeSlotPhysicalFlatten(this->basic_flatten_codes_)->Resize(new_capacity);
+    if (has_precise_reorder()) {
+        GetCodeSlotPhysicalFlatten(this->high_precise_codes_)->Resize(new_capacity);
+    }
+    if (create_new_raw_vector_) {
+        GetCodeSlotPhysicalFlatten(this->raw_vector_)->Resize(new_capacity);
+    }
+    this->physical_code_capacity_.store(new_capacity, std::memory_order_release);
+    this->cal_memory_usage();
+}
+
+void
+HGraph::publish_duplicate_to_tracker(InnerIdType group_id, InnerIdType duplicate_id) {
+    std::unique_lock lock(this->label_lookup_mutex_);
+    bottom_graph_->SetDuplicateId(group_id, duplicate_id);
 }
 
 void
@@ -560,12 +872,19 @@ HGraph::resize(uint64_t new_size) {
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size_power_2, allocator_);
         this->label_table_->Resize(new_size_power_2);
         bottom_graph_->Resize(new_size_power_2);
-        this->basic_flatten_codes_->Resize(new_size_power_2);
-        if (has_precise_reorder()) {
-            this->high_precise_codes_->Resize(new_size_power_2);
+        if (this->using_dedup_storage()) {
+            this->code_slot_map_->ReserveLogicalSize(static_cast<InnerIdType>(new_size_power_2));
         }
-        if (create_new_raw_vector_) {
-            this->raw_vector_->Resize(new_size_power_2);
+        if (not this->using_dedup_storage()) {
+            this->basic_flatten_codes_->Resize(new_size_power_2);
+            if (has_precise_reorder()) {
+                this->high_precise_codes_->Resize(new_size_power_2);
+            }
+            if (create_new_raw_vector_) {
+                this->raw_vector_->Resize(new_size_power_2);
+            }
+            this->physical_code_capacity_.store(static_cast<InnerIdType>(new_size_power_2),
+                                                std::memory_order_release);
         }
         if (this->extra_infos_ != nullptr) {
             this->extra_infos_->Resize(new_size_power_2);
@@ -582,8 +901,10 @@ HGraph::InitFeatures() {
         IndexFeature::SUPPORT_BUILD,
         IndexFeature::SUPPORT_BUILD_WITH_MULTI_THREAD,
         IndexFeature::SUPPORT_ADD_AFTER_BUILD,
-        IndexFeature::SUPPORT_MERGE_INDEX,
     });
+    if (not this->using_dedup_storage()) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_MERGE_INDEX);
+    }
     // search
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_KNN_SEARCH,
@@ -643,6 +964,7 @@ HGraph::InitFeatures() {
     }
     if (have_fp32) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID);
         if (metric_ != MetricType::METRIC_TYPE_COSINE || hold_molds) {
             this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
         }
@@ -689,7 +1011,8 @@ HGraph::reorder(const void* query,
                 int64_t k,
                 IteratorFilterContext* iter_ctx,
                 QueryContext& ctx,
-                const DistanceRecordVector* rabitq_lower_bound_candidates) const {
+                const DistanceRecordVector* rabitq_lower_bound_candidates,
+                const std::optional<float>& distance_threshold) const {
     uint64_t size = candidate_heap->Size();
     if (k <= 0) {
         k = static_cast<int64_t>(size);
@@ -703,7 +1026,8 @@ HGraph::reorder(const void* query,
                                               k,
                                               ctx,
                                               iter_ctx,
-                                              rabitq_lower_bound_candidates);
+                                              rabitq_lower_bound_candidates,
+                                              distance_threshold);
     candidate_heap = reorder_heap;
 }
 
@@ -919,7 +1243,7 @@ HGraph::refine_nodes_two_phase(
     const auto begin = build_cache_now_us();
 
     // Incremental refine: each node searches, then immediately writes back
-    // forward edges + reverse edges (like standard graph_add_one / mutually_connect_new_element).
+    // forward edges + reverse edges (like the standard add path / mutually_connect_new_element).
     // Later nodes see edges written by earlier nodes within the same round.
     // Parallelism is achieved via thread pool with per-node mutex protection.
     auto refine_one_node = [this,
@@ -1080,19 +1404,7 @@ HGraph::refine_nodes_two_phase(
                         }
                     }));
             }
-            std::exception_ptr ex = nullptr;
-            for (auto& future : futures) {
-                try {
-                    future.get();
-                } catch (...) {
-                    if (not ex) {
-                        ex = std::current_exception();
-                    }
-                }
-            }
-            if (ex) {
-                std::rethrow_exception(ex);
-            }
+            wait_all_futures(futures);
         }
 
         const auto round_elapsed = build_cache_now_us() - round_begin;

@@ -35,7 +35,8 @@ public:
             int64_t topk,
             QueryContext& ctx,
             IteratorFilterContext* iter_ctx = nullptr,
-            const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) override;
+            const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr,
+            const std::optional<float>& distance_threshold = std::nullopt) override;
 
 private:
     const FlattenInterfacePtr flatten_;

@@ -17,16 +17,19 @@
 
 #include <limits>
 #include <mutex>
+#include <optional>
 
 #include "typing.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/pointer_define.h"
 #include "utils/timer.h"
+#include "vsag/search_request.h"
 
 namespace vsag {
 
 DEFINE_POINTER(Filter);
 DEFINE_POINTER(Executor);
+struct QueryContext;
 
 enum InnerSearchMode { KNN_SEARCH = 1, RANGE_SEARCH = 2 };
 
@@ -50,13 +53,19 @@ public:
     int range_search_limit_size{-1};
     int64_t parallel_search_thread_count{1};
     bool enable_rabitq_one_bit_search{false};
+    SearchDistanceBatchFunc distance_batch_func{nullptr};
+    uint64_t distance_batch_size{1};
 
     // for ivf
     int scan_bucket_size{1};
+    bool disable_bucket_scan{false};
     float factor{2.0F};
     bool enable_reorder{true};
     float first_order_scan_ratio{1.0F};
+    std::optional<float> distance_threshold{std::nullopt};
     std::vector<ExecutorPtr> executors;
+    std::vector<int64_t> bucket_ids;
+    QueryContext* query_context{nullptr};
 
     // deal with duplicate ids
     mutable int64_t duplicate_id{-1};

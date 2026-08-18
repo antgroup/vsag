@@ -218,6 +218,14 @@ public:
                               bool is_sparse = false);
 
     static void
+    TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
+                                        const TestDatasetPtr& dataset,
+                                        float error = 1e-5,
+                                        bool expected_success = true,
+                                        bool is_sparse = false,
+                                        bool expect_all_missing_on_failure = false);
+
+    static void
     TestGetMinAndMaxId(const IndexPtr& index,
                        const TestDatasetPtr& dataset,
                        bool expected_success = true);
@@ -257,11 +265,6 @@ public:
                             const std::string& search_param,
                             float expected_recall = 0.99,
                             bool expected_success = true);
-    static void
-    TestConcurrentDestruct(TestIndex::IndexPtr& index,
-                           const TestDatasetPtr& dataset,
-                           const std::string& search_param);
-
     static IndexPtr
     TestMergeIndex(const std::string& name,
                    const std::string& build_param,

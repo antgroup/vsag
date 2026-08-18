@@ -8,13 +8,19 @@
 
 ## 通用参数
 
-所有索引在构建时都需要提供以下顶层字段：
+所有索引在构建时都接受以下顶层字段。其中 `dtype`、`metric_type` 必填，`repr` 可选。
+非稀疏数据必须提供 `dim`；`dtype: "sparse"` 省略 `dim` 时默认使用 `4096`：
 
 | 字段 | 取值 | 说明 |
 |------|------|------|
 | `dim` | 正整数 | 向量维度，构建后不可更改 |
-| `dtype` | `float32` / `fp16` / `bf16` / `int8` | 向量数据类型，决定索引内部表示 |
+| `dtype` | `float32` / `fp16` / `bf16` / `int8` / `sparse` | 标量值类型；`sparse` 为稀疏索引兼容取值 |
+| `repr` | `dense` / `sparse` / `multi_vector` | 可选的数据布局；省略时，`dtype: "sparse"` 推断为 `sparse`，其他类型推断为 `dense` |
 | `metric_type` | `l2` / `ip` / `cosine` | 距离度量 |
+
+`dtype` 与 `repr` 描述不同维度：前者是标量编码，后者是记录布局。显式设置 `repr` 时，
+`dtype: "sparse"` 要求 `repr: "sparse"`。受支持的多向量索引使用
+`repr: "multi_vector"`，并配合 `float32` 等标量 `dtype`。
 
 ## HGraph
 
@@ -39,12 +45,22 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 | `max_degree` | 16~48 | 每节点最大出边数 |
 | `ef_construction` | 200~500 | 构建阶段候选集大小，越大召回越高、构建越慢 |
 | `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq4` / `pq` | 主存储的量化策略 —— 支持的全部取值见[量化章节](../quantization/README.md) |
+| `use_reverse_edges` | `false` | 跟踪入边，实现 O(1) 反向邻居查找；边存储约翻倍，且压缩图存储不支持 |
+| `label_remap_type` | `pg` | label map 实现：默认 `pg`，或 `robin` |
+| `reorder_source` | `precise` | 从 `precise` 存储或直接从 `base` 重排；RaBitQ x+y split（包括 `tq_chain="mrle, rabitq"`）会自动选择 `base` |
+| `persist_source_id` | `false` | 序列化 HGraph 时保留 Source ID 元数据；适用于恢复索引后继续导出构建缓存 |
+| `mrle_dim` | `0` | MRLE 输出维度，范围 `[0, dim]`；`0` 表示输入维度 |
+| `fast_encode_rabitq` | `true` | 使用多 bit RaBitQ 快速编码；设为 `false` 恢复精确编码器 |
+| `fast_encode_rabitq_rounds` | `6` | 快速编码器微调轮数，范围 `[1, 32]` |
 
 搜索时：
 
 ```json
 {"hgraph": {"ef_search": 100}}
 ```
+
+`ef_search` 接受任意正的有符号 64 位整数，不再存在与 `topk` 相关的上限。非常大的取值会
+明显增加延迟和搜索前沿占用的内存。
 
 `hgraph` 搜索参数还接受 `brute_force_threshold`（`[0.0, 1.0]` 区间的 float，
 默认 `0.0`）。当取值 `> 0` 且当前请求的 filter 的 `ValidRatio()` 不超过该
@@ -109,28 +125,43 @@ LazyHGraph 只支持 `dtype: "float32"`。搜索参数使用 `hgraph` 对象，�
 
 ## Pyramid
 
-Pyramid 支持按 tag 组织多棵子图：
+Pyramid 构建参数同样放在 `index_param` 下：
 
 ```json
 {
-    "pyramid": {
-        "tag_dim": 1,
+    "dtype": "float32",
+    "metric_type": "l2",
+    "dim": 128,
+    "index_param": {
+        "base_quantization_type": "sq8",
         "max_degree": 24,
         "ef_construction": 300
     }
 }
 ```
 
+MRLE 与 split RaBitQ 组合使用 `base_quantization_type: "tq"`、
+`tq_chain: "mrle, rabitq"`、`mrle_dim`，以及
+`rabitq_bits_per_dim_base`/`rabitq_bits_per_dim_precise`。该配置会自动从 split base codes
+精排，并保留原始 FP32 向量供仅解码路径使用。完整配置及存储/召回权衡见
+[Pyramid 页面](../indexes/pyramid.md)。
+
 ## SINDI（稀疏向量）
 
 ```json
 {
-    "sindi": {
-        "top_k": 32,
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "dim": 1024,
+    "index_param": {
+        "term_id_limit": 30000,
         "doc_prune_ratio": 0.1
     }
 }
 ```
+
+`use_quantization`、不可变构建与 `n_candidate` 等搜索参数见
+[SINDI 页面](../indexes/sindi.md)。
 
 ## 运行期参数
 

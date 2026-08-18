@@ -284,6 +284,8 @@ public:
     /**
      * @brief Default implementation of ScanBatchDistImpl using loop.
      * Subclasses can override for optimized batch distance computation.
+     * Implementations must evaluate every input code and write exactly count distances; candidate
+     * filtering belongs to the caller and must not be performed inside this batch primitive.
      */
     void
     ScanBatchDistImpl(Computer<QuantT>& computer,

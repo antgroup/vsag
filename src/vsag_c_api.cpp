@@ -20,8 +20,14 @@
 #include <algorithm>
 #include <cstring>
 #include <fstream>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
 #include <streambuf>
+#include <string>
 #include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
 
 Error_t success = {VSAG_SUCCESS, "success"};
 
@@ -59,6 +65,120 @@ make_error(const std::string& msg) {
     snprintf(err.message, sizeof(err.message), "%s", msg.c_str());
     return err;
 }
+
+namespace {
+std::mutex statistics_mutex;
+std::unordered_set<const SearchResult_t*> statistics_requests;
+std::unordered_map<const SearchResult_t*, std::unique_ptr<std::string>> statistics_results;
+
+void
+cancel_statistics_request(SearchResult_t* search_result) noexcept {
+    if (search_result == nullptr) {
+        return;
+    }
+    try {
+        std::lock_guard lock(statistics_mutex);
+        if (statistics_requests.erase(search_result) != 0) {
+            search_result->other_result = nullptr;
+        }
+    } catch (...) {
+    }
+}
+}  // namespace
+
+Error_t
+vsag_search_result_enable_statistics(SearchResult_t* search_result) {
+    try {
+        if (search_result == nullptr) {
+            return make_error("search result is NULL");
+        }
+        std::lock_guard lock(statistics_mutex);
+        if (statistics_requests.count(search_result) != 0 ||
+            statistics_results.count(search_result) != 0) {
+            return make_error("search result statistics are already enabled");
+        }
+        statistics_requests.insert(search_result);
+        search_result->other_result = nullptr;
+        return success;
+    } catch (const std::exception& e) {
+        return make_error(e);
+    } catch (...) {
+        return make_error("unknown error while enabling search statistics");
+    }
+}
+
+const char*
+vsag_search_result_get_statistics(const SearchResult_t* search_result) {
+    try {
+        if (search_result == nullptr) {
+            return nullptr;
+        }
+        std::lock_guard lock(statistics_mutex);
+        auto it = statistics_results.find(search_result);
+        if (it == statistics_results.end()) {
+            return nullptr;
+        }
+        return it->second->c_str();
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+void
+vsag_search_result_destroy_statistics(SearchResult_t* search_result) {
+    try {
+        if (search_result != nullptr) {
+            std::lock_guard lock(statistics_mutex);
+            const bool registered = statistics_requests.erase(search_result) != 0 ||
+                                    statistics_results.erase(search_result) != 0;
+            if (registered) {
+                search_result->other_result = nullptr;
+            }
+        }
+    } catch (...) {
+    }
+}
+
+static void
+attach_statistics(SearchResult_t* search_result, const vsag::DatasetPtr& dataset) {
+    if (dataset == nullptr) {
+        throw std::invalid_argument("search result dataset is NULL");
+    }
+    std::lock_guard lock(statistics_mutex);
+    auto request = statistics_requests.find(search_result);
+    if (request == statistics_requests.end()) {
+        return;
+    }
+    auto statistics = std::make_unique<std::string>(dataset->GetStatistics());
+    auto [it, inserted] = statistics_results.emplace(search_result, std::move(statistics));
+    if (not inserted) {
+        throw std::runtime_error("search result statistics already exist");
+    }
+    search_result->other_result = it->second.get();
+    statistics_requests.erase(request);
+}
+
+class StatisticsRequestGuard {
+public:
+    explicit StatisticsRequestGuard(SearchResult_t* search_result) : search_result_(search_result) {
+    }
+
+    ~StatisticsRequestGuard() {
+        if (not consumed_) {
+            cancel_statistics_request(search_result_);
+        }
+    }
+
+    void
+    Attach(const vsag::DatasetPtr& dataset) {
+        attach_statistics(search_result_, dataset);
+        consumed_ = true;
+    }
+
+private:
+    SearchResult_t* search_result_{nullptr};
+    bool consumed_{false};
+};
 
 #define VSAG_CHECK_RESULT(expr)                    \
     do {                                           \
@@ -172,6 +292,10 @@ vsag_index_knn_search(vsag_index_t index,
                       const char* parameters,
                       SearchResult_t* search_result) {
     try {
+        if (search_result == nullptr) {
+            return make_error("search result is NULL");
+        }
+        StatisticsRequestGuard statistics_guard(search_result);
         auto* vsag_index = static_cast<VsagIndex*>(index);
         if (vsag_index != nullptr) {
             if (k <= 0) {
@@ -196,6 +320,7 @@ vsag_index_knn_search(vsag_index_t index,
                     search_result->dists[i] = dists_view[i];
                 }
                 search_result->count = to_write;
+                statistics_guard.Attach(result.value());
             } else {
                 return make_error(result.error());
             }
@@ -230,6 +355,10 @@ vsag_index_knn_search_with_filter(vsag_index_t index,
                                   FilterFunc_t filter,
                                   SearchResult_t* search_result) {
     try {
+        if (search_result == nullptr) {
+            return make_error("search result is NULL");
+        }
+        StatisticsRequestGuard statistics_guard(search_result);
         auto* vsag_index = static_cast<VsagIndex*>(index);
         if (vsag_index != nullptr) {
             if (k <= 0) {
@@ -255,6 +384,7 @@ vsag_index_knn_search_with_filter(vsag_index_t index,
                     search_result->dists[i] = dists_view[i];
                 }
                 search_result->count = to_write;
+                statistics_guard.Attach(result.value());
             } else {
                 return make_error(result.error());
             }
@@ -275,6 +405,10 @@ vsag_index_range_search(vsag_index_t index,
                         const char* parameters,
                         SearchResult_t* search_result) {
     try {
+        if (search_result == nullptr) {
+            return make_error("search result is NULL");
+        }
+        StatisticsRequestGuard statistics_guard(search_result);
         auto* vsag_index = static_cast<VsagIndex*>(index);
         if (vsag_index != nullptr) {
             if (k <= 0) {
@@ -302,6 +436,7 @@ vsag_index_range_search(vsag_index_t index,
                     search_result->dists[i] = dists_view[i];
                 }
                 search_result->count = to_write;
+                statistics_guard.Attach(result.value());
             } else {
                 return make_error(result.error());
             }
@@ -322,6 +457,10 @@ vsag_index_range_search_with_filter(vsag_index_t index,
                                     FilterFunc_t filter,
                                     SearchResult_t* search_result) {
     try {
+        if (search_result == nullptr) {
+            return make_error("search result is NULL");
+        }
+        StatisticsRequestGuard statistics_guard(search_result);
         auto* vsag_index = static_cast<VsagIndex*>(index);
         if (vsag_index != nullptr) {
             if (k <= 0) {
@@ -351,6 +490,7 @@ vsag_index_range_search_with_filter(vsag_index_t index,
                     search_result->dists[i] = dists_view[i];
                 }
                 search_result->count = to_write;
+                statistics_guard.Attach(result.value());
             } else {
                 return make_error(result.error());
             }
@@ -408,7 +548,7 @@ vsag_index_calculate_distance_by_ids(const vsag_index_t index,
         auto* vsag_index = static_cast<VsagIndex*>(index);
         if (vsag_index != nullptr) {
             auto dists2 =
-                vsag_index->index_->CalDistanceById(query, ids, static_cast<int64_t>(count));
+                vsag_index->index_->CalcDistancesById(query, ids, static_cast<int64_t>(count));
             if (dists2.has_value()) {
                 memcpy(dists, dists2.value()->GetDistances(), count * sizeof(float));
                 return success;

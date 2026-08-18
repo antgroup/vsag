@@ -16,9 +16,11 @@
 #include "util_functions.h"
 
 #include <iomanip>
+#include <limits>
 #include <nlohmann/json.hpp>
 #include <random>
 
+#include "common.h"
 #include "container_types.h"
 #include "dataset_impl.h"
 #include "impl/allocator/safe_allocator.h"
@@ -103,6 +105,8 @@ next_multiple_of_power_of_two(uint64_t x, uint64_t n) {
                             fmt::format("n is larger than 63, n is {}", n));
     }
     uint64_t y = uint64_t{1} << n;
+    CHECK_ARGUMENT(x <= std::numeric_limits<uint64_t>::max() - (y - 1),
+                   "next multiple of power of two exceeds uint64_t range");
     auto result = (x + y - 1) & ~(y - 1);
     return result;
 }
@@ -273,10 +277,8 @@ sample_train_data(const vsag::DatasetPtr& data,
                   int64_t train_sample_count,
                   Allocator* allocator) {
     const int64_t min_train_size = 512;
-    const int64_t max_train_size = 65536;
 
-    int64_t sample_count =
-        std::min({max_train_size, total_elements, std::max(min_train_size, train_sample_count)});
+    int64_t sample_count = std::min(total_elements, std::max(min_train_size, train_sample_count));
 
     // If no sampling is needed, return the original dataset
     if (sample_count >= total_elements) {

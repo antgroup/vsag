@@ -14,12 +14,26 @@ jobs:
     # runs-on: self-hosted
     container:
       image: vsaglib/vsag:ci-x86-openblas
+    env:
+      VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
+      VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
     concurrency:
       group: lint-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare FetchContent Sources
+        uses: ./.github/actions/prepare-fetchcontent
+      - name: Cache ExternalProject Archives
+        uses: actions/cache@v4
+        with:
+          path: .ci-downloads
+          key: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
+          restore-keys: |
+            external-${{ runner.os }}-${{ runner.arch }}-
       - name: Install clang-tidy 15
         run: sudo apt install clang-tidy-15 -y
       - name: Load Cache
@@ -32,4 +46,8 @@ jobs:
         # `make release` defaults to the OpenBLAS backend. Reuse the system
         # OpenBLAS shipped in the ci-x86-openblas image so lint doesn't have
         # to rebuild OpenBLAS from source on every run.
-        run: export CMAKE_GENERATOR="Ninja" EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON" && make release && make lint
+        run: |
+          export CMAKE_GENERATOR="Ninja"
+          export EXTRA_DEFINED="-DVSAG_USE_SYSTEM_OPENBLAS=ON"
+          make release
+          make lint

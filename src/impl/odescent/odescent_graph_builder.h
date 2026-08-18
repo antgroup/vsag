@@ -24,12 +24,10 @@
 #include "datacell/flatten_datacell.h"
 #include "datacell/graph_datacell.h"
 #include "datacell/sparse_graph_datacell.h"
-#include "diskann_logger.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/logger/logger.h"
 #include "odescent_graph_parameter.h"
 #include "simd/simd.h"
-#include "utils.h"
 #include "vsag/dataset.h"
 
 namespace vsag {
@@ -83,15 +81,26 @@ public:
              const FlattenInterfacePtr& flatten_interface,
              Allocator* allocator,
              SafeThreadPool* thread_pool,
-             bool pruning = true)
+             bool pruning = true,
+             const float* build_vectors = nullptr,
+             int64_t build_vector_count = 0,
+             FlattenInterfacePtr build_flatten_interface = nullptr)
         : odescent_param_(std::move(odescent_parameter)),
           flatten_interface_(flatten_interface),
           pruning_(pruning),
           allocator_(allocator),
           graph_(allocator),
           points_lock_(allocator),
-          thread_pool_(thread_pool) {
+          thread_pool_(thread_pool),
+          build_flatten_interface_(std::move(build_flatten_interface)),
+          build_vectors_(build_vectors),
+          build_vector_count_(build_vector_count) {
     }
+
+    static FlattenInterfacePtr
+    CreateBuildFlatten(const FlattenInterfacePtr& flatten_interface,
+                       const float* build_vectors,
+                       int64_t build_vector_count);
 
     bool
     Build(const GraphInterfacePtr& graph_storage = nullptr) {
@@ -117,9 +126,10 @@ private:
     inline float
     get_distance(uint32_t loc1, uint32_t loc2) {
         if (valid_ids_ != nullptr) {
-            return flatten_interface_->ComputePairVectors(valid_ids_[loc1], valid_ids_[loc2]);
+            return distance_flatten_interface_->ComputePairVectors(valid_ids_[loc1],
+                                                                   valid_ids_[loc2]);
         }
-        return flatten_interface_->ComputePairVectors(loc1, loc2);
+        return distance_flatten_interface_->ComputePairVectors(loc1, loc2);
     }
 
     void
@@ -131,6 +141,9 @@ private:
 
     void
     init_graph(const GraphInterfacePtr& graph_storage);
+
+    void
+    prepare_build_flatten();
 
     void
     update_neighbors(Vector<UnorderedSet<uint32_t>>& old_neighbors,
@@ -168,6 +181,14 @@ private:
     const ODescentParameterPtr odescent_param_;
 
     const FlattenInterfacePtr& flatten_interface_;
+
+    // Build() initializes this before the first parallelize_task() call and never mutates it
+    // afterward. Task enqueue publishes the initialized pointer to workers, and each parallel phase
+    // waits on all futures before continuing, so get_distance() only performs concurrent reads.
+    FlattenInterfacePtr build_flatten_interface_{nullptr};
+    FlattenInterface* distance_flatten_interface_{nullptr};
+    const float* build_vectors_{nullptr};
+    int64_t build_vector_count_{0};
 };
 
 }  // namespace vsag

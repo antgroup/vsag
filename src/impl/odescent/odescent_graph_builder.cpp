@@ -18,6 +18,10 @@
 #include <chrono>
 #include <ios>
 
+#include "datacell/flatten_datacell_parameter.h"
+#include "inner_string_params.h"
+#include "io/memory_io/memory_io_parameter.h"
+#include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
 #include "simd/simd.h"
 #include "utils/linear_congruential_generator.h"
 
@@ -40,6 +44,7 @@ ODescent::Build(const Vector<InnerIdType>& ids_sequence, const GraphInterfacePtr
         graph_.emplace_back(allocator_);
         return true;
     }
+    this->prepare_build_flatten();
     Vector<std::mutex>(data_num_, allocator_).swap(points_lock_);
     Vector<UnorderedSet<uint32_t>> old_neighbors(allocator_);
     Vector<UnorderedSet<uint32_t>> new_neighbors(allocator_);
@@ -62,6 +67,37 @@ ODescent::Build(const Vector<InnerIdType>& ids_sequence, const GraphInterfacePtr
         }
     }
     return true;
+}
+
+void
+ODescent::prepare_build_flatten() {
+    if (this->build_flatten_interface_ == nullptr) {
+        this->build_flatten_interface_ = CreateBuildFlatten(
+            this->flatten_interface_, this->build_vectors_, this->build_vector_count_);
+    }
+    this->distance_flatten_interface_ = this->build_flatten_interface_ == nullptr
+                                            ? this->flatten_interface_.get()
+                                            : this->build_flatten_interface_.get();
+}
+
+FlattenInterfacePtr
+ODescent::CreateBuildFlatten(const FlattenInterfacePtr& flatten_interface,
+                             const float* build_vectors,
+                             int64_t build_vector_count) {
+    if (build_vectors == nullptr or build_vector_count <= 0 or
+        not flatten_interface->SupportSplitCodeStorage()) {
+        return nullptr;
+    }
+
+    auto sq8_param = std::make_shared<FlattenDataCellParameter>();
+    sq8_param->quantizer_parameter = std::make_shared<ScalarQuantizerParameter<8>>();
+    sq8_param->io_parameter = std::make_shared<MemoryIOParameter>();
+
+    auto common_param = flatten_interface->ExportCommonParam();
+    auto build_flatten = FlattenInterface::MakeInstance(sq8_param, common_param);
+    build_flatten->Train(build_vectors, build_vector_count);
+    build_flatten->BatchInsertVector(build_vectors, build_vector_count);
+    return build_flatten;
 }
 
 void
@@ -259,6 +295,7 @@ ODescent::repair_no_in_edge() {
         auto& link = graph_[i].neighbors;
         int need_replace_loc = 0;
         while (in_edges_count[i] < min_in_degree &&
+               need_replace_loc < static_cast<int>(link.size()) &&
                need_replace_loc < odescent_param_->max_degree) {
             uint32_t need_replace_id = link[need_replace_loc].id;
             bool has_connect = false;
@@ -268,7 +305,15 @@ ODescent::repair_no_in_edge() {
                     break;
                 }
             }
-            if (replace_pos[need_replace_id] > 0 && not has_connect) {
+            if (replace_pos[need_replace_id] >=
+                static_cast<int>(graph_[need_replace_id].neighbors.size())) {
+                replace_pos[need_replace_id] =
+                    static_cast<int>(graph_[need_replace_id].neighbors.size()) - 1;
+            }
+            if (replace_pos[need_replace_id] > 0 &&
+                replace_pos[need_replace_id] <
+                    static_cast<int>(graph_[need_replace_id].neighbors.size()) &&
+                not has_connect) {
                 auto& replace_node =
                     graph_[need_replace_id].neighbors[replace_pos[need_replace_id]];
                 auto replace_id = replace_node.id;

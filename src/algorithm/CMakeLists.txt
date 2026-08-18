@@ -13,7 +13,6 @@
 # limitations under the License.
 
 
-add_subdirectory (hnswlib)
 add_subdirectory (sindi)
 add_subdirectory (hgraph)
 add_subdirectory (lazy_hgraph)
@@ -21,6 +20,7 @@ add_subdirectory (bruteforce)
 add_subdirectory (ivf)
 add_subdirectory (pyramid)
 add_subdirectory (simq)
+add_subdirectory (mci)
 
 file (GLOB ALGORITHM_SRCS "*.cpp")
 list (FILTER ALGORITHM_SRCS EXCLUDE REGEX "_test.cpp")
@@ -32,7 +32,6 @@ maybe_add_dependencies (algorithm antlr4)
 
 set (ALGORITHM_LIBS
         algorithm
-        hnswlib
         sindi
         hgraph
         lazy_hgraph
@@ -40,6 +39,7 @@ set (ALGORITHM_LIBS
         ivf
         pyramid
         simq
+        mci
         PARENT_SCOPE)
 
 if (ENABLE_TESTS)

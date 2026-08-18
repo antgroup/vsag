@@ -9,6 +9,10 @@ concurrency:
   group: pr-ci-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   changes:
     name: Detect Changes
@@ -27,11 +31,13 @@ jobs:
               - 'src/**'
               - 'include/**'
               - 'tests/**'
+              - 'tools/**'
               - 'CMakeLists.txt'
               - 'Makefile'
               - 'extern/**'
               - 'cmake/**'
               - 'examples/cpp/**'
+              - '.github/actions/**'
               - '.github/workflows/**'
               - 'scripts/**'
               - '.clang-tidy'
@@ -69,14 +75,34 @@ jobs:
     needs: [changes, format]
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
-    container:
-      image: vsaglib/vsag:ci-x86-openblas
-      volumes:
-        - /opt:/useless
+    env:
+      VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
+      VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
     steps:
       - name: Free Disk Space
-        run: rm -rf /useless/hostedtoolcache
+        run: sudo rm -rf /opt/hostedtoolcache
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare Host
+        run: |
+          sudo env VSAG_INSTALL_INTEL_MKL=OFF bash ./scripts/deps/install_deps_ubuntu.sh
+          sudo apt-get install -y clang-tidy-15
+          ninja --version
+          cmake --version
+          g++ --version
+      - name: Prepare FetchContent Sources
+        uses: ./.github/actions/prepare-fetchcontent
+        with:
+          include-tests: "true"
+          include-tools: "true"
+      - name: Cache ExternalProject Archives
+        uses: actions/cache@v4
+        with:
+          path: .ci-downloads
+          key: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
+          restore-keys: |
+            external-${{ runner.os }}-${{ runner.arch }}-
       - name: Load Cache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -84,25 +110,38 @@ jobs:
           save: ${{ github.event_name != 'pull_request' }}
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
-        # PR CI runs against the pre-installed system OpenBLAS shipped in the
-        # ci-x86-openblas image to keep iteration latency low. The
-        # build-from-source OpenBLAS path is exercised by the daily x86 ASan
-        # job in daily_test.yml.
-        run: export CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON"; make asan VSAG_ENABLE_EXAMPLES=ON VSAG_ENABLE_TOOLS=ON
-      - name: Install clang-tidy 15
-        run: sudo apt install clang-tidy-15 -y
+        # The source-build OpenBLAS path remains covered by daily_test.yml.
+        run: |
+          export CMAKE_GENERATOR="Ninja"
+          export CMAKE_EXPORT_COMPILE_COMMANDS=ON
+          export EXTRA_DEFINED="-DVSAG_USE_SYSTEM_OPENBLAS=ON"
+          make asan VSAG_ENABLE_EXAMPLES=ON VSAG_ENABLE_TOOLS=ON COMPILE_JOBS=3
       - name: Get changed source files
         id: changed-srcs
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch origin ${{ github.base_ref }} --depth=1
-          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}..HEAD -- 'src/**/*.cpp' ':(exclude)src/**/*_test.cpp')
+          if ! CHANGED=$(git diff --name-only origin/${{ github.base_ref }}..HEAD -- 'src/**/*.cpp' ':(exclude)src/**/*_test.cpp'); then
+            echo "Failed to determine changed source files" >&2
+            exit 1
+          fi
           PATTERN=""
           if [ -n "$CHANGED" ]; then
-            PATTERN=$(echo "$CHANGED" | while IFS= read -r f; do
-              escaped=$(printf '%s' "$f" | sed 's/[][.\*^$()+?{|}]/\\&/g')
-              printf '%s$|' "$escaped"
-            done | sed 's/|$//')
+            if ! PATTERN=$(CHANGED="$CHANGED" python3 - <<'PY'
+          import os
+          import re
+
+          changed = os.environ["CHANGED"].splitlines()
+          print("|".join(f"{re.escape(path)}$" for path in changed))
+          PY
+            ); then
+              echo "Failed to build changed-source lint filter" >&2
+              exit 1
+            fi
+            if [ -z "$PATTERN" ]; then
+              echo "Changed source files were found, but the lint filter is empty" >&2
+              exit 1
+            fi
           fi
           echo "pattern=$PATTERN" >> "$GITHUB_OUTPUT"
       - name: Run Lint
@@ -115,7 +154,6 @@ jobs:
           find ./build -type f -name "*.cpp" -exec rm -f {} +
           find ./build -type f -name "*.a" -exec rm -f {} +
           rm -rf ./build/hdf5
-          rm -rf ./build/boost
       - name: Save Build
         uses: actions/upload-artifact@v5
         with:
@@ -208,11 +246,15 @@ jobs:
           path: ./build
       - name: Run Unittests
         run: |
+          export LD_LIBRARY_PATH="$PWD/build/src:$PWD/build/tools/autotune"
           echo leak:libomp.so > omp.supp
           echo leak:libgomp.so >> omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
-          chmod +x ./build/tests/unittests
+          chmod +x ./build/tests/unittests ./build/tools/eval/eval_dataset_test \
+            ./build/tools/autotune/autotune_test
           ./scripts/testing/test_parallel_by_name.sh unittests
+          ./build/tools/eval/eval_dataset_test -d yes
+          ./build/tools/autotune/autotune_test -d yes
       - name: Upload Log
         uses: actions/upload-artifact@v5
         with:
@@ -227,6 +269,8 @@ jobs:
     needs: [changes, build-asan-x86]
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
+    env:
+      LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
       image: vsaglib/vsag:ci-x86-openblas
       volumes:
@@ -249,6 +293,8 @@ jobs:
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/functests
           ./scripts/testing/test_parallel_by_name.sh functests
+          chmod +x ./build/tests/eval_monitor_test
+          ./build/tests/eval_monitor_test -d yes
       - name: Upload Log
         uses: actions/upload-artifact@v5
         with:
@@ -281,6 +327,7 @@ jobs:
       - name: Run Examples
         shell: bash
         run: |
+          export LD_LIBRARY_PATH="$PWD/build/src:$PWD/build/tools/autotune"
           cd ./build/examples/cpp
           for example in ./*; do
             filename=$(basename "$example")
@@ -296,6 +343,8 @@ jobs:
     needs: [changes, build-asan-x86]
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
+    env:
+      LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
       image: vsaglib/vsag:ci-x86-openblas
       volumes:

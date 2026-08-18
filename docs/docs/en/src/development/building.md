@@ -4,11 +4,12 @@ This page documents how to build VSAG from source.
 
 ## Prerequisites
 
-- **OS**: Ubuntu 20.04+ or CentOS 7+
-- **Compiler**: GCC 9.4.0+ or Clang 13.0.0+
+- **OS**: Ubuntu 20.04+, CentOS 7+, or macOS 14+ on Apple Silicon
+- **Compiler**: GCC 9.4.0+, Clang 13.0.0+, or Apple Clang from Xcode Command Line Tools
 - **CMake**: 3.18.0+
 - **clang-format / clang-tidy**: exactly version 15 (enforced)
-- Optional: HDF5 (for `tools/eval/eval_performance`), libaio (for DiskANN async IO), Intel MKL.
+- Optional: HDF5 (for `tools/eval/eval_performance`), libaio (for the `async_io` data-cell backend),
+  liburing (for `uring_io` on Linux), Intel MKL.
 
 We recommend using the official Docker dev image, which already contains the matching toolchain:
 
@@ -44,8 +45,12 @@ clean       Remove build trees
 ```bash
 git clone https://github.com/antgroup/vsag.git
 cd vsag
+./scripts/deps/install_deps.sh
 make release
 ```
+
+The dependency script selects the matching Linux distribution or macOS installer. macOS support
+currently targets the arm64 C++ build; published archives and Python wheels remain Linux-focused.
 
 Resulting binaries from a plain `make release`:
 
@@ -63,9 +68,10 @@ cache options (`ENABLE_*`). Defaults below reflect a plain `make release`.
 | Makefile env var | CMake option | Default | Effect |
 |------------------|--------------|---------|--------|
 | `VSAG_ENABLE_INTEL_MKL` | `ENABLE_INTEL_MKL` | `OFF` | Use Intel MKL for BLAS kernels |
-| `VSAG_ENABLE_LIBAIO` | `ENABLE_LIBAIO` | `ON` on Linux | Enable DiskANN async IO via libaio |
+| `VSAG_ENABLE_LIBAIO` | `ENABLE_LIBAIO` | `ON` on Linux | Enable the `async_io` data-cell backend via libaio |
 | `VSAG_ENABLE_TOOLS` | `ENABLE_TOOLS` | `OFF` | Build utilities under `tools/` |
 | `VSAG_ENABLE_EXAMPLES` | `ENABLE_EXAMPLES` | `OFF` | Build sample programs under `examples/cpp/` |
+| n/a | `ENABLE_LIBURING` | `OFF` | Enable the Linux `uring_io` backend when liburing is installed |
 | n/a | `CMAKE_BUILD_TYPE` | driven by Makefile target | Debug / Release |
 
 When invoking CMake directly instead of using `make`, use the underlying CMake cache option names:
@@ -75,12 +81,16 @@ cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DENABLE_INTEL_MKL=ON
 cmake --build build-release -j
 ```
 
+To enable `io_uring`, install liburing and add `-DENABLE_LIBURING=ON`. On non-Linux systems or
+when liburing is unavailable, VSAG compiles without native `io_uring` support; a configuration
+that requests `uring_io` then logs a one-time warning and falls back to `buffer_io`.
+
 ## Offline / Air-gapped Builds
 
 VSAG downloads its third-party libraries at configure/build time. In offline or
 restricted-network environments, set the per-dependency `VSAG_THIRDPARTY_*`
 environment variables to fetch each archive from a local path or an internal
-mirror (internal HTTP server, OSS bucket, etc.). See
+mirror (internal HTTP server, object storage, etc.). See
 [Offline / Air-gapped Builds](offline_build.md) for the full list of variables
 and worked examples.
 

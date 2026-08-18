@@ -4,7 +4,7 @@ VSAG 提供三类自省 API，让调用方可以发现某个索引的能力、�
 索引的结构化信息，而无需重新执行一次搜索：
 
 - **`CheckFeature(IndexFeature)`** —— 运行时能力探测。
-- **`CalDistanceById(...)`** —— 计算 query 到已存入向量 id 的距离。
+- **`CalcDistancesById(...)`** —— 计算 query 到已存入向量 id 的距离。
 - **`GetIndexDetailInfos()` / `GetDetailDataByName(...)`** —— 读取索引各项结构化详情数据。
 
 这些 API 均为只读操作，可与搜索并发调用。
@@ -30,25 +30,28 @@ if (not index->CheckFeature(vsag::SUPPORT_DELETE_BY_ID)) {
 
 可运行示例：`examples/cpp/307_feature_check_features.cpp`。
 
-## 到已有 id 的距离 —— `CalDistanceById`
+## 到已有 id 的距离 —— `CalcDistancesById`
 
-`CalDistanceById` 计算 query 与索引中**已存在**的一个或多个向量之间的距离，**无需**执行一次
+`CalcDistancesById` 计算 query 与索引中**已存在**的一个或多个向量之间的距离，**无需**执行一次
 搜索。它适用于 re-rank、A/B 评估、ground-truth 校验，或对已知候选集合做成对距离计算。
 
 提供两个重载：
 
 ```cpp
 // 稠密向量索引（HGraph、BruteForce、IVF）
-auto r = index->CalDistanceById(query_ptr, ids, count, /*calculate_precise_distance=*/true);
+auto r = index->CalcDistancesById(query_ptr, ids, count, /*calculate_precise_distance=*/true);
 
 // 稀疏向量索引（SINDI）—— 用 Dataset 封装查询
 auto query_ds = vsag::Dataset::Make();
 query_ds->NumElements(1)->SparseVectors(/* ... */);
-auto r = index->CalDistanceById(query_ds, ids, count, /*calculate_precise_distance=*/true);
+auto r = index->CalcDistancesById(query_ds, ids, count, /*calculate_precise_distance=*/true);
 ```
 
-结果 `Dataset` 中 `GetDistances()` 持有 `count` 个距离。若某个 id 无效（不在索引中），对应位置
-返回 `-1.0F`。
+裸指针重载返回一行 `count` 个距离。对于公布 `SUPPORT_BATCH_CALC_DISTANCE_BY_ID` 能力的
+索引，`DatasetPtr` 重载可以处理多个 query，此时候选 ID 和距离是
+`NumElements() * count` 的 row-major 矩阵。无效 ID 对应 `-1.0F`。传入正数 `topk`
+时，每行会返回按距离排序的最近候选及其 ID。完整布局和支持矩阵见
+[按 ID 计算距离](calc_distance_by_id.md)。
 
 ### `calculate_precise_distance`
 
@@ -121,7 +124,7 @@ std::string dt = detail->GetDataScalarString();
 ## 注意事项与限制
 
 - `CheckFeature` 是常数时间复杂度。相比对不支持的调用做 `try` / `catch`，应优先使用它。
-- `CalDistanceById` 要求底层索引保留足够信息以重新计算距离。对于纯量化索引（不保留原始向量），
+- `CalcDistancesById` 要求底层索引保留足够信息以重新计算距离。对于纯量化索引（不保留原始向量），
   即使传入 `calculate_precise_distance = true`，也可能返回量化距离。
 - `GetIndexDetailInfos` 与 `GetDetailDataByName` 是只读快照。返回的数值反映调用瞬间的索引状态，
   并发修改可能使其失效。

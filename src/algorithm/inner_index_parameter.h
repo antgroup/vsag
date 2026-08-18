@@ -26,6 +26,18 @@ DEFINE_POINTER2(ExtraInfoDataCellParam, ExtraInfoDataCellParameter);
 DEFINE_POINTER2(FlattenInterfaceParam, FlattenInterfaceParameter);
 DEFINE_POINTER2(AttributeInvertedInterfaceParam, AttributeInvertedInterfaceParameter);
 
+void
+MapRaBitQSplitParam(const JsonType& external_json, JsonType& inner_json);
+
+void
+ValidateMRLEDim(const JsonType& external_json, uint64_t dim);
+
+bool
+RequiresRawVectorForTransformQuantizer(const JsonType& inner_json);
+
+bool
+RequiresRawVectorForMRLERaBitQSplit(const JsonType& inner_json);
+
 class InnerIndexParameter : public Parameter {
 public:
     explicit InnerIndexParameter() = default;

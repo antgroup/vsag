@@ -22,7 +22,7 @@
  *   - metric: inner product (ip)
  *
  * Search design (ColBERT-style two-phase retrieval):
- *   Phase 1 (coarse): each query token searches the cluster-center HNSW for
+ *   Phase 1 (coarse): each query token searches the cluster-center graph for
  *   coarse_k nearest cluster centers; their member docs form the candidate set.
  *   Phase 2 (rerank): exact MaxSim over the top-rerank_k candidates.
  *
@@ -55,6 +55,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "algorithm/simq/simq_utils.h"
 #include "framework/test_dataset.h"
 #include "framework/test_dataset_pool.h"
 #include "test_index.h"
@@ -63,6 +64,16 @@
 #include "vsag/vsag.h"
 
 using namespace vsag;
+
+TEST_CASE("SIMQ distance ordering places NaN after finite results", "[simq][threshold]") {
+    std::vector<std::pair<float, InnerIdType>> results = {
+        {2.0F, 0}, {0.0F, 1}, {std::numeric_limits<float>::quiet_NaN(), 2}, {1.0F, 3}};
+    std::sort(results.begin(), results.end(), simq_distance_less);
+    REQUIRE(results[0].first == 0.0F);
+    REQUIRE(results[1].first == 1.0F);
+    REQUIRE(results[2].first == 2.0F);
+    REQUIRE(std::isnan(results[3].first));
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -310,6 +321,50 @@ require_simq_search_stats(const vsag::DatasetPtr& result) {
     REQUIRE(stats.result_count == static_cast<uint64_t>(result->GetDim()));
 }
 
+TEST_CASE("SIMQ: one centroid counts nested HGraph entry point", "[simq][statistics]") {
+    TempFile tmp;
+    std::array<float, SIMQ_DIM> vector{};
+    vector[0] = 1.0F;
+    MultiVector base_mv{1, vector.data()};
+    int64_t id = 7;
+    auto base = Dataset::Make()
+                    ->NumElements(1)
+                    ->Dim(SIMQ_DIM)
+                    ->Ids(&id)
+                    ->MultiVectors(&base_mv)
+                    ->MultiVectorDim(SIMQ_DIM)
+                    ->Owner(false);
+
+    auto created = Factory::CreateIndex("simq", make_build_param(tmp.path, 1.0F, 4, 2, 1, 1));
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    REQUIRE(index->Build(base).has_value());
+
+    auto query = Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(SIMQ_DIM)
+                     ->MultiVectors(&base_mv)
+                     ->MultiVectorDim(SIMQ_DIM)
+                     ->Owner(false);
+    auto require_statistics = [](const DatasetPtr& result) {
+        auto statistics = JsonType::Parse(result->GetStatistics());
+        REQUIRE(statistics["simq_coarse_dist_cmp"].GetUint64() == 1);
+        REQUIRE(statistics["distance_evaluations_by_phase"]["routing"].GetUint64() == 1);
+        REQUIRE(statistics["distance_evaluations_by_phase"]["rerank"].GetUint64() == 1);
+        REQUIRE(statistics["distance_evaluations"].GetUint64() == 2);
+        REQUIRE(statistics["distance_evaluations_by_backend"]["fp32"].GetUint64() == 2);
+        REQUIRE(statistics["complete"].GetBool());
+    };
+
+    auto searched = index->KnnSearch(query, 1, make_search_param(1, 1), FilterPtr{});
+    REQUIRE(searched.has_value());
+    require_statistics(searched.value());
+
+    auto ranged = index->RangeSearch(query, 1.0F, make_search_param(1, 1), FilterPtr{});
+    REQUIRE(ranged.has_value());
+    require_statistics(ranged.value());
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Test cases
 // ─────────────────────────────────────────────────────────────────────────────
@@ -370,6 +425,20 @@ TEST_CASE("SIMQ: build and knn search recall", "[simq][build][search]") {
             index->KnnSearch(one_query, TOP_K, search_param, vsag::FilterPtr(nullptr));
         REQUIRE(search_result.has_value());
         require_simq_search_stats(search_result.value());
+
+        if (q == 0) {
+            auto zero_result = index->KnnSearch(one_query, 0, search_param);
+            REQUIRE(zero_result.has_value());
+            REQUIRE(zero_result.value()->GetDim() == 0);
+            REQUIRE(get_simq_search_stats(zero_result.value()).result_count == 0);
+
+            auto threshold_result = index->KnnSearch(
+                one_query, TOP_K, R"({"threshold": -1000000.0, "simq": {"coarse_k": 10}})");
+            REQUIRE(threshold_result.has_value());
+            REQUIRE(threshold_result.value()->GetDim() == 0);
+            auto threshold_stats = get_simq_search_stats(threshold_result.value());
+            REQUIRE(threshold_stats.result_count == 0);
+        }
 
         auto* ret_ids = search_result.value()->GetIds();
         float r = recall_at_k(ret_ids, TOP_K, ds.gt_ids[q].data(), static_cast<int64_t>(TOP_K));

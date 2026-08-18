@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,9 +14,14 @@
 
 #pragma once
 
+#include <nlohmann/json.hpp>
+#include <set>
+
 #include "algorithm/inner_index_interface.h"
 #include "common.h"
 #include "index_common_param.h"
+#include "query_context.h"
+#include "utils/search_threshold.h"
 #include "vsag/index.h"
 namespace vsag {
 
@@ -55,7 +59,7 @@ public:
 
 #define CHECK_QUERY_RETURN_EMPTY_DATASET(query) \
     if ((query)->GetNumElements() == 0) {       \
-        return DatasetImpl::MakeEmptyDataset(); \
+        return make_empty_search_result();      \
     }
 #define CHECK_IMMUTABLE_INDEX(operation_str)                                       \
     if (this->inner_index_->immutable_.load(std::memory_order_acquire)) {          \
@@ -120,18 +124,20 @@ public:
     CalDistanceById(const float* query,
                     const int64_t* ids,
                     int64_t count,
-                    bool calculate_precise_distance = true) const override {
+                    bool calculate_precise_distance = true,
+                    int64_t topk = -1) const override {
         SAFE_CALL(return this->inner_index_->CalDistanceById(
-            query, ids, count, calculate_precise_distance));
+            query, ids, count, calculate_precise_distance, topk));
     }
 
     tl::expected<DatasetPtr, Error>
     CalDistanceById(const DatasetPtr& query,
                     const int64_t* ids,
                     int64_t count,
-                    bool calculate_precise_distance = true) const override {
+                    bool calculate_precise_distance = true,
+                    int64_t topk = -1) const override {
         SAFE_CALL(return this->inner_index_->CalDistanceById(
-            query, ids, count, calculate_precise_distance));
+            query, ids, count, calculate_precise_distance, topk));
     }
 
     [[nodiscard]] bool
@@ -216,6 +222,11 @@ public:
         SAFE_CALL(this->inner_index_->ImportCache(in_stream));
     }
 
+    tl::expected<void, Error>
+    RebuildIVFBucketGraphs() override {
+        CHECK_IMMUTABLE_INDEX("rebuild bucket graphs");
+        SAFE_CALL(this->inner_index_->RebuildBucketGraphs());
+    }
     tl::expected<DatasetPtr, Error>
     GetDataByIds(const int64_t* ids, int64_t count) const override {
         SAFE_CALL(return this->inner_index_->GetDataByIds(ids, count));
@@ -299,8 +310,14 @@ public:
               int64_t k,
               const std::string& parameters,
               BitsetPtr invalid = nullptr) const override {
+        auto threshold_validation = ValidateThresholdParameters(parameters);
+        if (not threshold_validation.has_value()) {
+            return tl::unexpected(threshold_validation.error());
+        }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        CHECK_AND_RETURN_EMPTY_DATASET;
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+            return make_empty_search_result();
+        }
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, invalid));
     }
 
@@ -309,8 +326,14 @@ public:
               int64_t k,
               const std::string& parameters,
               const std::function<bool(int64_t)>& filter) const override {
+        auto threshold_validation = ValidateThresholdParameters(parameters);
+        if (not threshold_validation.has_value()) {
+            return tl::unexpected(threshold_validation.error());
+        }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        CHECK_AND_RETURN_EMPTY_DATASET;
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+            return make_empty_search_result();
+        }
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, filter));
     }
 
@@ -319,15 +342,27 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter) const override {
+        auto threshold_validation = ValidateThresholdParameters(parameters);
+        if (not threshold_validation.has_value()) {
+            return tl::unexpected(threshold_validation.error());
+        }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        CHECK_AND_RETURN_EMPTY_DATASET;
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+            return make_empty_search_result();
+        }
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, filter));
     }
 
     tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const override {
+        auto threshold_validation = ValidateThresholdParameters(search_param.parameters);
+        if (not threshold_validation.has_value()) {
+            return tl::unexpected(threshold_validation.error());
+        }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        CHECK_AND_RETURN_EMPTY_DATASET;
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(search_param.parameters)) {
+            return make_empty_search_result();
+        }
         if (search_param.is_iter_filter) {
             SAFE_CALL(return this->inner_index_->KnnSearch(query,
                                                            k,
@@ -349,8 +384,14 @@ public:
               const FilterPtr& filter,
               IteratorContext*& iter_ctx,
               bool is_last_filter) const override {
+        auto threshold_validation = ValidateThresholdParameters(parameters);
+        if (not threshold_validation.has_value()) {
+            return tl::unexpected(threshold_validation.error());
+        }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        CHECK_AND_RETURN_EMPTY_DATASET;
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+            return make_empty_search_result();
+        }
         SAFE_CALL(return this->inner_index_->KnnSearch(
             query, k, parameters, filter, nullptr, iter_ctx, is_last_filter));
     }
@@ -387,7 +428,9 @@ public:
                 const std::string& parameters,
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        CHECK_AND_RETURN_EMPTY_DATASET;
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+            return make_empty_search_result();
+        }
         SAFE_CALL(return this->inner_index_->RangeSearch(query, radius, parameters, limited_size));
     }
 
@@ -398,7 +441,9 @@ public:
                 BitsetPtr invalid,
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        CHECK_AND_RETURN_EMPTY_DATASET;
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+            return make_empty_search_result();
+        }
         SAFE_CALL(return this->inner_index_->RangeSearch(
             query, radius, parameters, invalid, limited_size));
     }
@@ -410,7 +455,9 @@ public:
                 const std::function<bool(int64_t)>& filter,
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        CHECK_AND_RETURN_EMPTY_DATASET;
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+            return make_empty_search_result();
+        }
         SAFE_CALL(return this->inner_index_->RangeSearch(
             query, radius, parameters, filter, limited_size));
     }
@@ -422,7 +469,9 @@ public:
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        CHECK_AND_RETURN_EMPTY_DATASET;
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+            return make_empty_search_result();
+        }
         SAFE_CALL(return this->inner_index_->RangeSearch(
             query, radius, parameters, filter, limited_size));
     }
@@ -455,8 +504,63 @@ public:
 
     [[nodiscard]] tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const override {
-        CHECK_AND_RETURN_EMPTY_DATASET;
-        SAFE_CALL(return this->inner_index_->SearchWithRequest(request));
+        // Validate bucket_ids_ structural constraints before empty-index early return
+        if (not request.bucket_ids_.empty()) {
+            if (request.query_ == nullptr) {
+                return tl::unexpected(Error(ErrorType::INVALID_ARGUMENT,
+                                            "query_ cannot be null when bucket_ids_ is set"));
+            }
+            if (request.bucket_ids_.size() !=
+                static_cast<size_t>(request.query_->GetNumElements())) {
+                return tl::unexpected(
+                    Error(ErrorType::INVALID_ARGUMENT,
+                          "bucket_ids_ size (" + std::to_string(request.bucket_ids_.size()) +
+                              ") must match the number of query vectors (" +
+                              std::to_string(request.query_->GetNumElements()) + ")"));
+            }
+            if (this->GetIndexType() != IndexType::IVF && request.bucket_ids_.size() != 1) {
+                return tl::unexpected(
+                    Error(ErrorType::INVALID_ARGUMENT,
+                          "bucket_ids_ supports multiple query vectors only for IVF indexes"));
+            }
+            for (uint64_t query_idx = 0; query_idx < request.bucket_ids_.size(); ++query_idx) {
+                const auto& ids = request.bucket_ids_[query_idx];
+                if (ids.empty()) {
+                    return tl::unexpected(
+                        Error(ErrorType::INVALID_ARGUMENT,
+                              "bucket_ids_[" + std::to_string(query_idx) +
+                                  "] must not be empty; use an empty outer vector "
+                                  "for default routing"));
+                }
+                std::set<int64_t> seen_ids;
+                for (auto id : ids) {
+                    if (id < 0) {
+                        return tl::unexpected(
+                            Error(ErrorType::INVALID_ARGUMENT,
+                                  "bucket_id " + std::to_string(id) + " is negative"));
+                    }
+                    if (not seen_ids.insert(id).second) {
+                        return tl::unexpected(Error(ErrorType::INVALID_ARGUMENT,
+                                                    "duplicate bucket_id " + std::to_string(id)));
+                    }
+                }
+            }
+            try {
+                auto json_params = nlohmann::json::parse(request.params_str_);
+                if (json_params.contains("ivf") and
+                    json_params["ivf"].contains("disable_bucket_scan") and
+                    json_params["ivf"]["disable_bucket_scan"].get<bool>()) {
+                    return tl::unexpected(
+                        Error(ErrorType::INVALID_ARGUMENT,
+                              "bucket_ids_ is incompatible with disable_bucket_scan mode"));
+                }
+            } catch (const nlohmann::json::exception&) {
+            }
+        }
+        SAFE_CALL(ValidateSearchThreshold(request.threshold_);
+                  if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(request.params_str_)) {
+                      return make_empty_search_result();
+                  } return this->inner_index_->SearchWithRequest(request));
     }
 
     tl::expected<void, Error>
@@ -534,6 +638,53 @@ private:
     }
 
 private:
+    tl::expected<void, Error>
+    ValidateThresholdParameters(const std::string& parameters) const {
+        try {
+            ParseSearchThreshold(parameters);
+            return {};
+        } catch (const VsagException& e) {
+            return tl::unexpected(e.error_);
+        } catch (const std::exception& e) {
+            return tl::unexpected(Error(ErrorType::UNKNOWN_ERROR, e.what()));
+        }
+    }
+
+    DatasetPtr
+    make_empty_search_result() const {
+        auto result = DatasetImpl::MakeEmptyDataset();
+        switch (GetIndexType()) {
+            case IndexType::HGRAPH:
+            case IndexType::IVF:
+            case IndexType::PYRAMID:
+            case IndexType::BRUTEFORCE:
+            case IndexType::SINDI:
+            case IndexType::SIMQ: {
+                SearchStatistics statistics;
+                result->Statistics(statistics.Dump());
+                break;
+            }
+            default:
+                break;
+        }
+        return result;
+    }
+
+    bool
+    ShouldSkipEmptyCheck(const std::string& params_str) const {
+        if (GetNumElements() != 0 || params_str.empty()) {
+            return false;
+        }
+        try {
+            auto params_json = nlohmann::json::parse(params_str);
+            return params_json.contains("ivf") &&
+                   params_json["ivf"].contains("disable_bucket_scan") &&
+                   params_json["ivf"]["disable_bucket_scan"].get<bool>();
+        } catch (const nlohmann::json::exception&) {
+            return false;
+        }
+    }
+
     InnerIndexPtr inner_index_{nullptr};
     IndexCommonParam common_param_{};
 };

@@ -21,6 +21,38 @@ VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PRE
 VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DENABLE_TESTS=${VSAG_ENABLE_TESTS} -DENABLE_PYBINDS=${VSAG_ENABLE_PYBINDS}
 VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DENABLE_TOOLS=${VSAG_ENABLE_TOOLS} -DENABLE_EXAMPLES=${VSAG_ENABLE_EXAMPLES}
 VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DENABLE_MOCKIMPL=${VSAG_ENABLE_MOCKIMPL}
+# CI checks out these sources before configuration. Explicit source overrides
+# prevent FetchContent from contacting the archive URLs declared under extern/.
+ifneq ($(strip ${VSAG_FETCHCONTENT_BASE_DIR}),)
+  VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} \
+    -DFETCHCONTENT_BASE_DIR=${VSAG_FETCHCONTENT_BASE_DIR}
+  VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} \
+    -DFETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON=${VSAG_FETCHCONTENT_BASE_DIR}/nlohmann_json-src
+  VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} \
+    -DFETCHCONTENT_SOURCE_DIR_CATCH2=${VSAG_FETCHCONTENT_BASE_DIR}/catch2-src
+  VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} \
+    -DFETCHCONTENT_SOURCE_DIR_CPUINFO=${VSAG_FETCHCONTENT_BASE_DIR}/cpuinfo-src
+  VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} \
+    -DFETCHCONTENT_SOURCE_DIR_FMT=${VSAG_FETCHCONTENT_BASE_DIR}/fmt-src
+  VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} \
+    -DFETCHCONTENT_SOURCE_DIR_THREAD_POOL=${VSAG_FETCHCONTENT_BASE_DIR}/thread_pool-src
+  VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} \
+    -DFETCHCONTENT_SOURCE_DIR_TSL=${VSAG_FETCHCONTENT_BASE_DIR}/tsl-src
+  VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} \
+    -DFETCHCONTENT_SOURCE_DIR_ROARINGBITMAP=${VSAG_FETCHCONTENT_BASE_DIR}/roaringbitmap-src
+  VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} \
+    -DFETCHCONTENT_SOURCE_DIR_ARGPARSE=${VSAG_FETCHCONTENT_BASE_DIR}/argparse-src
+  VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} \
+    -DFETCHCONTENT_SOURCE_DIR_YAML-CPP=${VSAG_FETCHCONTENT_BASE_DIR}/yaml-cpp-src
+  VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} \
+    -DFETCHCONTENT_SOURCE_DIR_TABULATE=${VSAG_FETCHCONTENT_BASE_DIR}/tabulate-src
+  VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} \
+    -DFETCHCONTENT_SOURCE_DIR_HTTPLIB=${VSAG_FETCHCONTENT_BASE_DIR}/httplib-src
+endif
+ifneq ($(strip ${VSAG_THIRDPARTY_DOWNLOAD_DIR}),)
+  VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} \
+    -DDOWNLOAD_DIR=${VSAG_THIRDPARTY_DOWNLOAD_DIR}
+endif
 ifdef EXTRA_DEFINED
   VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} ${EXTRA_DEFINED}
 endif
@@ -67,7 +99,12 @@ test:                    ## Build and run unit tests.
 	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS}
 	./build/tests/unittests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 	./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
+	./build/tests/eval_monitor_test -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
+
+.PHONY: test-cmake
+test-cmake:              ## Run focused CMake helper tests.
+	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/thirdparty_override_test.cmake
 
 .PHONY: asan
 asan:                    ## Build with AddressSanitizer option.
