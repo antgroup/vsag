@@ -83,6 +83,7 @@ Build-time parameters live under `index_param`. See
 | `rabitq_pca_dim` | int | `0` | Optional PCA preprocessing dimension for `base_quantization_type: "rabitq"` |
 | `rabitq_bits_per_dim_query` | int | `32` | Query bits for `rabitq`; allowed values are `4` or `32` |
 | `rabitq_bits_per_dim_base` | int | `1` | Stored-code bits for `rabitq`; allowed range is `[1, 8]` |
+| `rabitq_bits_per_dim_precise` | int | unset | Enables RaBitQ split storage and sets the supplement (`y`) bits; `rabitq_bits_per_dim_base` is the filter (`x`) bits and `x + y <= 8` |
 | `rabitq_version` | string | `"standard"` | `rabitq` layout: `"standard"` or `"split_1bit_7bit"` |
 | `rabitq_error_rate` | float | `1.9` | Positive error-budget parameter for `rabitq` encoding |
 | `rabitq_use_fht` | bool | `false` | Enable FHT rotation before `rabitq` binarization |
@@ -92,6 +93,8 @@ Build-time parameters live under `index_param`. See
 | `precise_quantization_type` | string | `"fp32"` | Quantizer used for reordering (with `use_reorder: true`) |
 | `precise_codes_layout` | string | `"flat"` | Storage layout for precise codes: `"flat"` keeps the legacy one-code-per-vector layout; `"bucket"` stores the precise code in the same bucket and offset as its basic posting |
 | `base_io_type` | string | `"memory_io"` | Storage backend for coarse codes; supports `uring_io` when built with liburing |
+| `base_supplement_io_type` | string | unset | Optional IO backend for RaBitQ split supplement codes |
+| `base_supplement_file_path` | string | derived | Optional file path for disk-backed RaBitQ supplement codes |
 | `precise_io_type` | string | `"block_memory_io"` | Storage backend for precise codes (`memory_io`, `block_memory_io`, `mmap_io`, `buffer_io`, `async_io`, `uring_io`, `reader_io`) |
 | `precise_file_path` | string | `""` | File path when the precise IO type is disk-backed |
 
@@ -121,6 +124,35 @@ serialize it, and then use the external reader when loading it for search.
 
 A rule of thumb for `buckets_count` is `sqrt(N)` to `4 * sqrt(N)` where `N` is the
 corpus size.
+
+## RaBitQ split storage
+
+Set both quantizers to `rabitq` and divide the stored precision into filter
+(`x`) and supplement (`y`) bits:
+
+```json
+{
+    "base_quantization_type": "rabitq",
+    "precise_quantization_type": "rabitq",
+    "rabitq_bits_per_dim_query": 32,
+    "rabitq_bits_per_dim_base": 3,
+    "rabitq_bits_per_dim_precise": 5,
+    "use_reorder": true
+}
+```
+
+IVF stores the `x`-bit filter record separately from the `y`-bit supplement.
+The bucket scan reads filter records only. It keeps `factor * topk` candidates,
+then reads supplement records only for those candidates and reuses the filter
+distance during reranking. This avoids a second independent precise-code copy.
+
+The split configuration requires `x >= 1`, `y >= 1`, `x + y <= 8`,
+`rabitq_bits_per_dim_query: 32`, `use_reorder: true`, and
+`buckets_per_data: 1`. Bucket-local graphs (`graph_build_threshold > 0`) are
+not supported with split storage. Supported homogeneous IO backends are
+`memory_io`, `block_memory_io`, `buffer_io`, `async_io`, `mmap_io`,
+and `reader_io`; the supported hybrid layout is filter
+`block_memory_io` plus supplement `async_io`.
 
 ## Search parameters
 

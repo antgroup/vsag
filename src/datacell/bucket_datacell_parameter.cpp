@@ -29,6 +29,18 @@ BucketDataCellParameter::FromJson(const JsonType& json) {
                    fmt::format("bucket interface parameters must contains {}", IO_PARAMS_KEY));
     this->io_parameter = IOParameter::GetIOParameterByJson(json[IO_PARAMS_KEY]);
 
+    if (json.Contains(SUPPLEMENT_IO_PARAMS_KEY)) {
+        auto supplement_json = json[SUPPLEMENT_IO_PARAMS_KEY];
+        if (not supplement_json.Contains(IO_FILE_PATH_KEY)) {
+            const auto& base_io_json = json[IO_PARAMS_KEY];
+            std::string base_path = base_io_json.Contains(IO_FILE_PATH_KEY)
+                                        ? base_io_json[IO_FILE_PATH_KEY].GetString()
+                                        : std::string(DEFAULT_FILE_PATH_VALUE);
+            supplement_json[IO_FILE_PATH_KEY].SetString(base_path + "_supplement");
+        }
+        this->supplement_io_parameter = IOParameter::GetIOParameterByJson(supplement_json);
+    }
+
     CHECK_ARGUMENT(
         json.Contains(QUANTIZATION_PARAMS_KEY),
         fmt::format("bucket interface parameters must contains {}", QUANTIZATION_PARAMS_KEY));
@@ -48,6 +60,9 @@ JsonType
 BucketDataCellParameter::ToJson() const {
     JsonType json;
     json[IO_PARAMS_KEY].SetJson(this->io_parameter->ToJson());
+    if (this->supplement_io_parameter != nullptr) {
+        json[SUPPLEMENT_IO_PARAMS_KEY].SetJson(this->supplement_io_parameter->ToJson());
+    }
     json[BUCKET_USE_RESIDUAL_KEY].SetBool(this->use_residual_);
     json[QUANTIZATION_PARAMS_KEY].SetJson(this->quantizer_parameter->ToJson());
     json[BUCKETS_COUNT_KEY].SetInt(this->buckets_count);

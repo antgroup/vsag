@@ -227,6 +227,41 @@ public:
                    const uint8_t* supplement_code,
                    uint8_t* full_code) const;
 
+    static constexpr uint64_t FASTSCAN_BATCH_SIZE = 32;
+    static constexpr uint64_t FASTSCAN_MAX_FILTER_BITS = 3;
+
+    [[nodiscard]] bool
+    SupportFastScan32() const;
+
+    [[nodiscard]] uint64_t
+    GetFastScan32BlockSize() const;
+
+    [[nodiscard]] uint64_t
+    GetFastScan32LookupSize() const;
+
+    void
+    PackageFastScan32(const uint8_t* one_bit_codes, uint64_t valid_size, uint8_t* block) const;
+
+    void
+    PrepareFastScan32Query(Computer<RaBitQuantizer>& computer,
+                           uint8_t* lookup_table,
+                           float* deltas,
+                           float* sum_vls,
+                           float& query_sum) const;
+
+    void
+    ComputeDistsWithFastScan32(
+        Computer<RaBitQuantizer>& computer,
+        const uint8_t* block,
+        const uint8_t* lookup_table,
+        const float* deltas,
+        const float* sum_vls,
+        float query_sum,
+        float* dists,
+        bool* computed,
+        uint64_t valid_size,
+        float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN()) const;
+
     bool
     ComputeDistWithOneBitLowerBound(
         Computer<RaBitQuantizer>& computer,

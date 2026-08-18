@@ -1,9 +1,10 @@
 # RaBitQ x+y Split
 
-RaBitQ x+y split is an HGraph and Pyramid storage and search mode for low-bit base codes.
+RaBitQ x+y split is an HGraph, IVF, and Pyramid storage and search mode for
+low-bit base codes.
 Each vector is divided into two records:
 
-- `x` filter bits are read during graph traversal and lower-bound filtering.
+- `x` filter bits are read during graph traversal or IVF bucket scanning.
 - `y` supplement bits are fetched only for candidates that reach reorder.
 - The final reorder distance uses all `x+y` bits.
 
@@ -13,7 +14,8 @@ memory while the colder supplement record is stored on disk.
 
 ## Enable split mode
 
-HGraph and Pyramid select split mode when both quantization types are `rabitq` and
+HGraph, IVF, and Pyramid select split mode when both quantization types are
+`rabitq` and
 `rabitq_bits_per_dim_precise` is present:
 
 ```json
@@ -55,7 +57,7 @@ The constraints are:
 x + y <= 8
 ```
 
-If `rabitq_bits_per_dim_precise` is omitted, HGraph and Pyramid use the standard RaBitQ
+If `rabitq_bits_per_dim_precise` is omitted, HGraph, IVF, and Pyramid use the standard RaBitQ
 path instead of split storage.
 
 Enable the filter/lower-bound search path with:
@@ -77,20 +79,27 @@ it uses all `x` filter bits configured by `rabitq_bits_per_dim_base`.
 be swept without rebuilding because the stored record contains the geometric
 error scale before this multiplier is applied.
 
+IVF bucket scans use the configured `x` filter bits automatically; no
+`rabitq_one_bit_search` switch is needed. Use `ivf.factor` to control how many
+filter-stage candidates (`factor * topk`) proceed to supplement reranking.
+
 ## Search pipeline
 
 The split search path has four stages:
 
 1. The query is transformed and normalized once. For supported filter widths,
    a byte lookup table is also built once per query.
-2. Graph traversal reads only the filter record. It computes an x-bit distance
+2. Graph traversal or IVF bucket scanning reads only the filter record. It computes
+   an x-bit distance
    estimate and a conservative lower bound for each visited vector.
-3. Reorder discards candidates whose lower bound cannot enter the result set.
-   It fetches the y-bit supplement record only for the remaining candidates.
+3. HGraph can discard candidates whose lower bound cannot enter the result set;
+   IVF retains `factor * topk` candidates by filter distance. Reorder fetches the
+   y-bit supplement record only for the remaining candidates.
 4. The final distance combines the filter contribution and supplement
    contribution into one `x+y`-bit RaBitQ estimate.
 
-The graph-search heap is therefore not populated with an `x+y` distance for every
+The traversal or bucket-scan heap is therefore not populated with an `x+y`
+distance for every
 visited vector. The inexpensive x-bit distance drives traversal; the more
 accurate distance is evaluated only during candidate reorder.
 
@@ -224,6 +233,114 @@ cosine apply the corresponding metric conversion to the error term.
 The lower bound is used only to reject candidates safely. `D_x` remains the
 traversal estimate, while the final ranking uses the `x+y` distance.
 
+## IVF 1-bit, 2-bit, and 3-bit 32-vector FastScan layout
+
+When IVF split storage uses `x` from 1 through 3, `RaBitQSplitBucketDataCell`
+packages each bucket in groups of 32 candidates. The canonical split records
+remain available for ID lookup and supplement reranking; the bucket-local scan
+blocks contain a SIMD-oriented copy of the filter planes and compact metadata.
+
+Let `G = ceil(d / 8) * 2` be the number of four-dimensional groups in one
+bitplane. Each group stores one four-bit mask per candidate. For every group,
+the 32 masks are transposed into 16 bytes. The low nibbles represent candidates
+`0..15`, the high nibbles represent candidates `16..31`, and both halves use
+the lane order `0, 8, 1, 9, ..., 7, 15`. Multiple bitplanes remain separate
+and contiguous in plane-major order.
+
+For `x = 1`, each group has the 16-entry subset-sum table:
+
+```text
+LUT_g[m] = sum(q_(4g+j) for j in [0, 3] when bit_j(m) is set)
+```
+
+For `x = 2` or `x = 3`, let bitplane zero be the most significant plane. The
+centered lookup table is:
+
+```text
+weight(x, p) = 2^(x - p - 2)
+LUT_(p,g)[m] = weight(x, p) * sum((2 * bit_j(m) - 1) * q_(4g+j))
+```
+
+The plane weights are `{1, 0.5}` for two bits and `{2, 1, 0.5}` for three
+bits. Coordinates beyond `d` are zero.
+
+One-bit and two-bit scans use one query-wide unsigned-byte quantizer. Three-bit
+scans quantize each plane independently, preventing the low-weight plane from
+losing effective precision to the four-times-wider range of the high plane:
+
+```text
+delta[p] = (v_max[p] - v_min[p]) / 255
+plane_sum[p] ~= G * v_min[p] + delta[p] * sum LUT_u8[p][code]
+centered_ip ~= plane_sum[0] + plane_sum[1] + plane_sum[2]
+```
+
+The three-bit scanner invokes `PQFastScanLookUp32` once for each contiguous
+plane. This keeps the same `3 * G` total shuffle groups and packed-code size as
+a single combined scan, while allowing separate dequantization scales.
+
+For one bit, the lookup sum is converted to the normalized binary inner
+product with `sum(q)` and `sqrt(d)`. For two and three bits, it is already the
+centered inner product and is divided by the stored filter-code norm. All paths
+then use the stored RaBitQ norm and error metadata to recover the filter-stage
+distance.
+
+The packed filter planes are followed by the metadata for all 32 candidates.
+A final bucket block with fewer than 32 vectors is zero-padded, while the
+scanner returns only valid candidates. Runtime dispatch selects generic, SSE,
+AVX2, or AVX-512 code. LUT quantization changes only the IVF filter estimate;
+supplement reranking still uses the stored `x+y` code. Wider filter widths
+continue to use the bit-plane batch paths.
+
+Example configurations are:
+
+```json
+{
+    "rabitq_bits_per_dim_base": 1,
+    "rabitq_bits_per_dim_precise": 7,
+    "rabitq_bits_per_dim_query": 32
+}
+```
+
+```json
+{
+    "rabitq_bits_per_dim_base": 2,
+    "rabitq_bits_per_dim_precise": 6,
+    "rabitq_bits_per_dim_query": 32
+}
+```
+
+```json
+{
+    "rabitq_bits_per_dim_base": 3,
+    "rabitq_bits_per_dim_precise": 5,
+    "rabitq_bits_per_dim_query": 32
+}
+```
+
+### GIST1M comparison
+
+The following results compare traditional 8-bit IVF RaBitQ with the split
+layouts on `gist-960-euclidean.hdf5` (1,000,000 base vectors, 960 dimensions,
+L2). The index used 1,024 buckets, 100,000 training samples, 16 build threads,
+and `rabitq_bits_per_dim_query = 32`. Search used one thread, 32 scanned
+buckets, `factor = 10`, top-10, and 5,000 measured queries. The split search
+results include the 32-vector FastScan layout described above.
+
+| Layout | Build time (s) | Build TPS | Index memory (bytes) | Search QPS | Avg latency (ms) | Recall@10 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Traditional RaBitQ 8-bit | 150.742 | 6,633.840 | 1,284,595,208 | 17.767 | 56.280 | 0.9197 |
+| Split RaBitQ 1+7 | 551.701 | 1,812.576 | 1,450,355,304 | 118.333 | 8.447 | 0.9019 |
+| Split RaBitQ 2+6 | 509.431 | 1,962.974 | 1,582,237,512 | 74.786 | 13.368 | 0.9128 |
+| Split RaBitQ 3+5 | 496.873 | 2,012.589 | 1,702,580,248 | 67.892 | 14.726 | 0.9094 |
+
+These numbers are a single-machine comparison rather than a universal
+performance guarantee. Split storage spends more time building two code
+streams and keeps a bucket-local FastScan copy in memory. In return, its
+filter scan avoids reading the full 8-bit code for every candidate. On this
+workload, 2+6 provides the closest recall to traditional 8-bit RaBitQ while
+improving search throughput by about 4.2 times; 1+7 maximizes throughput with
+a larger recall trade-off.
+
 ## Query lookup table and SIMD
 
 For `x = 2` and `x = 3`, the query computer builds a FastScan-style byte
@@ -260,7 +377,7 @@ sum_i q_i * u_i
       + sum_i q_i * s_i
 ```
 
-For L2 with an x-bit lookup filter, HGraph and Pyramid pass the previously computed
+For L2 with an x-bit lookup filter, HGraph, IVF, and Pyramid pass the previously computed
 filter distance to reorder as a hint. `ComputeDistWithSplitCodeAndFilterDist`
 recovers the first term from that hint and computes only the second term from
 the y supplement planes:
@@ -356,7 +473,10 @@ search-time `hgraph.rabitq_error_rate` does not.
 
 ## Operational notes
 
-- Split storage is currently available on HGraph and Pyramid and requires fp32 query codes. Pyramid enables the one-bit split search path by default for split indexes; pass `rabitq_one_bit_search: false` under `pyramid` to force the standard search path.
+- Split storage is currently available on HGraph, IVF, and Pyramid and requires
+  fp32 query codes. Pyramid enables the one-bit split search path by default for
+  split indexes; pass `rabitq_one_bit_search: false` under `pyramid` to force the
+  standard search path.
 - `l2`, `ip`, and `cosine` are supported. The filter-hint reorder shortcut is
   currently specialized for L2.
 - Keep `use_reorder: true` unless x-bit traversal accuracy alone has been

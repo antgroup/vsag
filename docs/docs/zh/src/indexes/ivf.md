@@ -77,6 +77,7 @@ auto result = index->KnnSearch(
 | `rabitq_pca_dim` | int | `0` | `base_quantization_type: "rabitq"` 时可选的 PCA 预处理维度 |
 | `rabitq_bits_per_dim_query` | int | `32` | `rabitq` 查询每维位数；允许值为 `4` 或 `32` |
 | `rabitq_bits_per_dim_base` | int | `1` | `rabitq` 底库存储码每维位数；允许范围为 `[1, 8]` |
+| `rabitq_bits_per_dim_precise` | int | 未设置 | 启用 RaBitQ split storage 并设置补充码（`y`）位数；`rabitq_bits_per_dim_base` 表示过滤码（`x`）位数，且 `x + y <= 8` |
 | `rabitq_version` | string | `"standard"` | `rabitq` 布局：`"standard"` 或 `"split_1bit_7bit"` |
 | `rabitq_error_rate` | float | `1.9` | `rabitq` 编码的正数误差预算参数 |
 | `rabitq_use_fht` | bool | `false` | `rabitq` 二值化前是否启用 FHT 旋转 |
@@ -86,6 +87,8 @@ auto result = index->KnnSearch(
 | `precise_quantization_type` | string | `"fp32"` | 精排量化类型（`use_reorder: true` 时使用） |
 | `precise_codes_layout` | string | `"flat"` | 精排 codes 的存储布局：`"flat"` 保持旧的一向量一码布局；`"bucket"` 在 basic posting 的相同 bucket 和 offset 保存高精度 code |
 | `base_io_type` | string | `"memory_io"` | 粗排向量的存储后端；以 liburing 构建时支持 `uring_io` |
+| `base_supplement_io_type` | string | 未设置 | RaBitQ split 补充码可选的 IO 后端 |
+| `base_supplement_file_path` | string | 自动派生 | 磁盘型 RaBitQ 补充码可选的文件路径 |
 | `precise_io_type` | string | `"block_memory_io"` | 精排向量的存储后端（`memory_io`、`block_memory_io`、`mmap_io`、`buffer_io`、`async_io`、`uring_io`、`reader_io`） |
 | `precise_file_path` | string | `""` | 当精排 IO 为磁盘后端时的文件路径 |
 
@@ -113,6 +116,34 @@ auto loaded = vsag::Index::Load(stream, load_parameters).value();
 再在查询服务加载索引时绑定外部 reader。
 
 `buckets_count` 的经验值一般为 `sqrt(N)` ~ `4 * sqrt(N)`，其中 `N` 是语料规模。
+
+## RaBitQ split storage
+
+将粗排和精排量化器都设为 `rabitq`，并把存储精度拆成过滤码
+（`x`）和补充码（`y`）：
+
+```json
+{
+    "base_quantization_type": "rabitq",
+    "precise_quantization_type": "rabitq",
+    "rabitq_bits_per_dim_query": 32,
+    "rabitq_bits_per_dim_base": 3,
+    "rabitq_bits_per_dim_precise": 5,
+    "use_reorder": true
+}
+```
+
+IVF 会分别保存 `x` bit 过滤记录和 `y` bit 补充记录。扫描桶时只读取
+过滤记录，保留 `factor * topk` 个候选；精排只为这些候选读取补充记录，
+并复用粗排距离，不再保存一份独立的精排码。
+
+split 配置要求 `x >= 1`、`y >= 1`、`x + y <= 8`、
+`rabitq_bits_per_dim_query: 32`、`use_reorder: true` 和
+`buckets_per_data: 1`。split storage 暂不支持桶内图
+（`graph_build_threshold > 0`）。同构 IO 支持 `memory_io`、
+`block_memory_io`、`buffer_io`、`async_io`、`mmap_io` 和
+`reader_io`；混合 IO 支持过滤码使用 `block_memory_io`、补充码使用
+`async_io`。
 
 ## 检索参数
 

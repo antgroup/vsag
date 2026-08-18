@@ -41,12 +41,29 @@ public:
     virtual void
     ScanBucketById(float* result_dists,
                    const ComputerInterfacePtr& computer,
-                   const BucketIdType& bucket_id) = 0;
+                   const BucketIdType& bucket_id,
+                   QueryContext* ctx = nullptr) = 0;
 
     virtual float
     QueryOneById(const ComputerInterfacePtr& computer,
                  const BucketIdType& bucket_id,
                  const InnerIdType& offset_id) = 0;
+
+    [[nodiscard]] virtual bool
+    SupportSplitCodeStorage() const {
+        return false;
+    }
+
+    virtual void
+    QueryWithDistanceHintByInnerId(float* result_dists,
+                                   const float* hint_dists,
+                                   const ComputerInterfacePtr& computer,
+                                   const InnerIdType* inner_ids,
+                                   InnerIdType id_count,
+                                   QueryContext* ctx = nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "bucket split-code reorder is not supported");
+    }
 
     virtual float
     ComputePairVectors(BucketIdType bucket_id, InnerIdType id1, InnerIdType id2) = 0;

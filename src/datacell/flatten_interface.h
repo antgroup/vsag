@@ -178,6 +178,41 @@ public:
         return false;
     }
 
+    [[nodiscard]] virtual bool
+    SupportFastScan32() const {
+        return false;
+    }
+
+    [[nodiscard]] virtual uint64_t
+    GetFastScan32BlockSize() const {
+        return 0;
+    }
+
+    virtual ComputerInterfacePtr
+    FactoryFastScan32Computer(const ComputerInterfacePtr& /*computer*/) const {
+        return nullptr;
+    }
+
+    virtual void
+    PackageFastScan32(const InnerIdType* /*ids*/,
+                      InnerIdType /*valid_size*/,
+                      uint8_t* /*block*/) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "32-vector FastScan packaging is not supported");
+    }
+
+    virtual void
+    QueryFastScan32(float* /*result_dists*/,
+                    bool* /*computed*/,
+                    const ComputerInterfacePtr& /*computer*/,
+                    const ComputerInterfacePtr& /*fastscan_computer*/,
+                    const uint8_t* /*block*/,
+                    InnerIdType /*valid_size*/,
+                    QueryContext* /*ctx*/ = nullptr) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "32-vector FastScan query is not supported");
+    }
+
     [[nodiscard]] virtual MetricType
     GetMetricType() = 0;
 
