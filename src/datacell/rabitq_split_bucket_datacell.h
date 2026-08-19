@@ -188,7 +188,36 @@ private:
     rebuild_locations();
 
     void
-    package_fastscan();
+    package_fastscan(bool force = false);
+
+    void
+    set_filter_code(Vector<uint8_t>& blocks,
+                    InnerIdType offset_id,
+                    const uint8_t* filter_code) const;
+
+    void
+    get_filter_code(BucketIdType bucket_id, InnerIdType offset_id, uint8_t* filter_code) const;
+
+    void
+    get_filter_code(const Vector<uint8_t>& blocks,
+                    InnerIdType offset_id,
+                    uint8_t* filter_code) const;
+
+    void
+    collect_filter_codes(const InnerIdType* inner_ids,
+                         InnerIdType id_count,
+                         Vector<uint8_t>& filter_codes,
+                         Vector<float>* adjustments,
+                         const SplitBucketComputer* computer) const;
+
+    [[nodiscard]] bool
+    packed_filter_codes_complete(BucketIdType bucket_id) const;
+
+    void
+    serialize_packed_filter_codes(StreamWriter& writer) const;
+
+    void
+    deserialize_packed_filter_codes(StreamReader& reader);
 
     static uint64_t
     pack_location(BucketIdType bucket_id, InnerIdType offset_id);
@@ -214,6 +243,8 @@ private:
 
     static constexpr uint64_t FASTSCAN_BATCH_SIZE = 32;
     static constexpr uint64_t LOCATION_SPLIT_BIT = 32;
+    static constexpr uint64_t PACKED_FILTER_STORAGE_MAGIC = 0x3154425346514252ULL;
+    static constexpr uint32_t PACKED_FILTER_STORAGE_VERSION = 1;
     static constexpr InnerIdType EMPTY_INNER_ID = std::numeric_limits<InnerIdType>::max();
     static constexpr uint64_t INVALID_LOCATION = std::numeric_limits<uint64_t>::max();
 };

@@ -249,17 +249,187 @@ public:
                        "invalid FastScan batch size");
         ByteBuffer one_bit_codes(this->one_bit_code_size_ * BottomQuantizer::FASTSCAN_BATCH_SIZE,
                                  this->allocator_);
+        ByteBuffer supplement_code(this->supplement_code_size_, this->allocator_);
         memset(
             one_bit_codes.data, 0, this->one_bit_code_size_ * BottomQuantizer::FASTSCAN_BATCH_SIZE);
         for (InnerIdType i = 0; i < valid_size; ++i) {
             if (ids[i] == std::numeric_limits<InnerIdType>::max()) {
                 continue;
             }
-            CHECK_ARGUMENT(
-                this->x_bit_cell_->Read(ids[i], one_bit_codes.data + i * this->one_bit_code_size_),
-                "failed to read RaBitQ filter code for FastScan packaging");
+            auto* one_bit_code = one_bit_codes.data + i * this->one_bit_code_size_;
+            if (this->optimized_build_active_) {
+                bool need_release = false;
+                const auto* scalar_code =
+                    this->optimized_build_scalar_codes_->Read(ids[i], need_release);
+                CHECK_ARGUMENT(scalar_code != nullptr,
+                               "failed to read scalar RaBitQ code for FastScan packaging");
+                this->bottom_quantizer().PackScalarCodeToSplitCode(
+                    scalar_code, one_bit_code, supplement_code.data);
+                if (need_release) {
+                    this->optimized_build_scalar_codes_->Release(scalar_code);
+                }
+            } else {
+                CHECK_ARGUMENT(this->x_bit_cell_->Read(ids[i], one_bit_code),
+                               "failed to read RaBitQ filter code for FastScan packaging");
+            }
         }
         this->bottom_quantizer().PackageFastScan32(one_bit_codes.data, valid_size, block);
+    }
+
+    void
+    EnableExternalFilterCodeStorage() override {
+        this->external_filter_code_storage_ = true;
+    }
+
+    [[nodiscard]] uint64_t
+    GetFilterCodeSize() const override {
+        return this->one_bit_code_size_;
+    }
+
+    void
+    SetFastScan32Code(const uint8_t* filter_code,
+                      InnerIdType index_in_block,
+                      uint8_t* block) const override {
+        this->bottom_quantizer().SetFastScan32Code(filter_code, index_in_block, block);
+    }
+
+    void
+    UnpackFastScan32Code(const uint8_t* block,
+                         InnerIdType index_in_block,
+                         uint8_t* filter_code) const override {
+        this->bottom_quantizer().UnpackFastScan32Code(block, index_in_block, filter_code);
+    }
+
+    void
+    InsertVectorWithFilterCode(const void* vector, InnerIdType idx, uint8_t* filter_code) override {
+        CHECK_ARGUMENT(not this->optimized_build_active_,
+                       "optimized build filter codes are packaged during finalization");
+        {
+            std::lock_guard lock(this->mutex_);
+            if (idx == std::numeric_limits<InnerIdType>::max()) {
+                idx = this->total_count_;
+            }
+            this->total_count_ = std::max(this->total_count_, idx + 1);
+        }
+        ByteBuffer full_code(this->code_size_, this->allocator_);
+        ByteBuffer supplement_code(this->supplement_code_size_, this->allocator_);
+        this->quantizer_->EncodeOne(static_cast<const float*>(vector), full_code.data);
+        this->bottom_quantizer().SplitCode(full_code.data, filter_code, supplement_code.data);
+        this->supplement_cell_->Write(supplement_code.data, idx);
+    }
+
+    void
+    QueryWithFilterCodes(float* result_dists,
+                         const float* hint_dists,
+                         const float* filter_inner_products,
+                         const ComputerInterfacePtr& computer,
+                         const InnerIdType* idx,
+                         const uint8_t* filter_codes,
+                         InnerIdType id_count,
+                         QueryContext* ctx = nullptr) const override {
+        auto* comp = this->get_bottom_computer(computer);
+        for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
+            this->prefetch_supplement(idx[i]);
+        }
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            if (i + this->prefetch_stride_code_ < id_count) {
+                this->prefetch_supplement(idx[i + this->prefetch_stride_code_]);
+            }
+            bool supplement_need_release = false;
+            const uint8_t* supplement_code = nullptr;
+            const auto* filter_code =
+                filter_codes + static_cast<uint64_t>(i) * this->one_bit_code_size_;
+            try {
+                supplement_code = this->get_supplement_code(idx[i], supplement_need_release);
+                bool computed = false;
+                if (filter_inner_products != nullptr and std::isfinite(filter_inner_products[i])) {
+                    computed =
+                        this->bottom_quantizer().ComputeDistWithSplitCodeAndFilterInnerProduct(
+                            *comp, supplement_code, filter_inner_products[i], result_dists + i);
+                    if (computed) {
+                        this->add_full_count(ctx, 1);
+                        this->add_reorder_hint_full_count(ctx, 1);
+                    } else {
+                        this->add_reorder_fallback_full_count(ctx, 1);
+                    }
+                }
+                if (not computed) {
+                    const float hint =
+                        hint_dists == nullptr ? std::numeric_limits<float>::max() : hint_dists[i];
+                    this->compute_full_dist(
+                        filter_code, supplement_code, comp, result_dists + i, ctx, hint);
+                }
+            } catch (...) {
+                this->release_supplement_code(supplement_code, supplement_need_release);
+                throw;
+            }
+            this->release_supplement_code(supplement_code, supplement_need_release);
+        }
+        this->add_distance_evaluations(ctx, id_count);
+    }
+
+    [[nodiscard]] bool
+    GetCodesByIdWithFilterCode(InnerIdType id,
+                               const uint8_t* filter_code,
+                               uint8_t* codes) const override {
+        ByteBuffer supplement_code(this->supplement_code_size_, this->allocator_);
+        if (not this->supplement_cell_->Read(id, supplement_code.data)) {
+            return false;
+        }
+        memset(codes, 0, this->code_size_);
+        this->bottom_quantizer().MergeSplitCode(filter_code, supplement_code.data, codes);
+        return true;
+    }
+
+    float
+    ComputePairVectorsWithFilterCodes(InnerIdType id1,
+                                      const uint8_t* filter_code1,
+                                      InnerIdType id2,
+                                      const uint8_t* filter_code2) override {
+        ByteBuffer codes1(this->code_size_, this->allocator_);
+        ByteBuffer codes2(this->code_size_, this->allocator_);
+        CHECK_ARGUMENT(this->GetCodesByIdWithFilterCode(id1, filter_code1, codes1.data),
+                       "failed to read first split RaBitQ code");
+        CHECK_ARGUMENT(this->GetCodesByIdWithFilterCode(id2, filter_code2, codes2.data),
+                       "failed to read second split RaBitQ code");
+        return this->bottom_quantizer().Compute(codes1.data, codes2.data);
+    }
+
+    void
+    PrefetchSupplement(InnerIdType id) override {
+        this->prefetch_supplement(id);
+    }
+
+    void
+    DiscardFilterCodes() override {
+        this->x_bit_cell_->Shrink(0);
+    }
+
+    [[nodiscard]] bool
+    HasFilterCodes() const override {
+        if (this->total_count_ == 0) {
+            return false;
+        }
+        ByteBuffer filter_code(this->one_bit_code_size_, this->allocator_);
+        return this->x_bit_cell_->Read(0, filter_code.data);
+    }
+
+    void
+    MergeSupplementCodes(const FlattenInterfacePtr& other, InnerIdType bias) override {
+        auto ptr = std::dynamic_pointer_cast<
+            RaBitQSplitDataCell<metric, OneBitIOTmpl, SupplementIOTmpl, QuantizerT>>(other);
+        CHECK_ARGUMENT(ptr != nullptr, "merge supplement codes datacell type mismatch");
+        const InnerIdType final_count = bias + ptr->total_count_;
+        const InnerIdType required_count = std::max(this->total_count_, final_count);
+        this->supplement_cell_->Resize(required_count);
+        ByteBuffer supplement_code(this->supplement_code_size_, this->allocator_);
+        for (InnerIdType id = 0; id < ptr->total_count_; ++id) {
+            CHECK_ARGUMENT(ptr->supplement_cell_->Read(id, supplement_code.data),
+                           "failed to read source supplement code");
+            this->supplement_cell_->Write(supplement_code.data, bias + id);
+        }
+        this->total_count_ = required_count;
+        this->max_capacity_ = std::max(this->max_capacity_, required_count);
     }
 
     void
@@ -818,7 +988,9 @@ public:
         // Finalize workers write disjoint IDs, but the backing IO must already be fully sized so
         // no worker enters a concurrent reallocation path.
         const InnerIdType final_capacity = std::max(this->max_capacity_, this->total_count_);
-        this->x_bit_cell_->Resize(final_capacity);
+        if (not this->external_filter_code_storage_) {
+            this->x_bit_cell_->Resize(final_capacity);
+        }
         this->supplement_cell_->Resize(final_capacity);
         this->max_capacity_ = final_capacity;
 
@@ -836,7 +1008,9 @@ public:
                 try {
                     this->bottom_quantizer().PackScalarCodeToSplitCode(
                         scalar_code, one_bit_code.data, supplement_code.data);
-                    this->x_bit_cell_->Write(one_bit_code.data, id);
+                    if (not this->external_filter_code_storage_) {
+                        this->x_bit_cell_->Write(one_bit_code.data, id);
+                    }
                     this->supplement_cell_->Write(supplement_code.data, id);
                 } catch (...) {
                     if (need_release) {
@@ -1014,7 +1188,9 @@ public:
         if (new_capacity <= this->max_capacity_) {
             return;
         }
-        this->x_bit_cell_->Resize(new_capacity);
+        if (not this->external_filter_code_storage_) {
+            this->x_bit_cell_->Resize(new_capacity);
+        }
         this->supplement_cell_->Resize(new_capacity);
         if (this->optimized_build_active_) {
             this->optimized_build_scalar_codes_->Resize(new_capacity);
@@ -1276,6 +1452,7 @@ public:
     std::string supplement_io_type_{};
     bool optimized_build_active_{false};
     uint64_t optimized_build_record_size_{0};
+    bool external_filter_code_storage_{false};
 
 private:
     BottomQuantizer&
@@ -1485,7 +1662,7 @@ private:
     }
 
     void
-    prefetch_supplement(InnerIdType id) {
+    prefetch_supplement(InnerIdType id) const {
         this->supplement_cell_->Prefetch(id, this->prefetch_depth_code_ * 64);
     }
 

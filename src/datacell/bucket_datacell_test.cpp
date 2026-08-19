@@ -1359,6 +1359,111 @@ TEST_CASE("RaBitQ split bucket rejects optimized build without fast encoding",
     REQUIRE(stored_count == count);
 }
 
+TEST_CASE("RaBitQ split bucket keeps only canonical packed filter codes",
+          "[ut][BucketDataCell][rabitq_split][fastscan][serialization]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 70;
+    constexpr InnerIdType count = 384;
+    constexpr BucketIdType bucket_count = 3;
+    auto vectors = fixtures::generate_vectors(count + 2, dim);
+    auto query = fixtures::generate_vectors(1, dim, false, 41);
+    constexpr const char* param_str = R"({
+        "io_params": { "type": "memory_io" },
+        "quantization_params": {
+            "type": "rabitq",
+            "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 1,
+            "fast_encode_rabitq": true
+        },
+        "buckets_count": 3
+    })";
+
+    auto make_bucket = [&](uint32_t filter_bits) {
+        auto json = JsonType::Parse(param_str);
+        json["quantization_params"]["rabitq_bits_per_dim_filter"].SetInt(filter_bits);
+        auto param = std::make_shared<BucketDataCellParameter>();
+        param->FromJson(json);
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.dim_ = dim;
+        common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+        return BucketInterface::MakeInstance(param, common_param);
+    };
+
+    std::array<uint64_t, 3> memory_usage{};
+    std::array<uint64_t, 3> serialized_size{};
+    BucketInterfacePtr packed_bucket = nullptr;
+    for (uint32_t filter_bits = 1; filter_bits <= 3; ++filter_bits) {
+        auto bucket = make_bucket(filter_bits);
+        bucket->Train(vectors.data(), count);
+        for (InnerIdType id = 0; id < count; ++id) {
+            bucket->InsertVector(vectors.data() + static_cast<uint64_t>(id) * dim,
+                                 static_cast<BucketIdType>(id % bucket_count),
+                                 id);
+        }
+        bucket->Package();
+        bucket->Unpack();
+        memory_usage[filter_bits - 1] = bucket->GetMemoryUsage();
+        CountingStreamWriter writer;
+        bucket->Serialize(writer);
+        serialized_size[filter_bits - 1] = writer.GetCursor();
+        if (filter_bits == 3) {
+            packed_bucket = std::move(bucket);
+        }
+    }
+    const auto [min_memory, max_memory] =
+        std::minmax_element(memory_usage.begin(), memory_usage.end());
+    const auto [min_size, max_size] =
+        std::minmax_element(serialized_size.begin(), serialized_size.end());
+    REQUIRE(*max_memory - *min_memory < 4096);
+    REQUIRE(*max_size - *min_size < 4096);
+
+    std::vector<std::vector<uint8_t>> expected_codes(
+        count, std::vector<uint8_t>(packed_bucket->code_size_));
+    for (InnerIdType id = 0; id < count; ++id) {
+        const auto bucket_id = static_cast<BucketIdType>(id % bucket_count);
+        const auto offset_id = static_cast<InnerIdType>(id / bucket_count);
+        packed_bucket->GetCodesById(bucket_id, offset_id, expected_codes[id].data());
+    }
+
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    packed_bucket->Serialize(writer);
+    stream.seekg(0, std::ios::beg);
+    IOStreamReader reader(stream);
+    auto restored = make_bucket(3);
+    restored->Deserialize(reader);
+    REQUIRE(reader.GetCursor() == writer.GetCursor());
+    for (InnerIdType id = 0; id < count; ++id) {
+        const auto bucket_id = static_cast<BucketIdType>(id % bucket_count);
+        const auto offset_id = static_cast<InnerIdType>(id / bucket_count);
+        std::vector<uint8_t> actual(restored->code_size_);
+        restored->GetCodesById(bucket_id, offset_id, actual.data());
+        REQUIRE(actual == expected_codes[id]);
+    }
+
+    constexpr BucketIdType added_bucket = 1;
+    const auto added_offset = restored->InsertVector(
+        vectors.data() + static_cast<uint64_t>(count) * dim, added_bucket, count);
+    auto computer = restored->FactoryComputer(query.data());
+    REQUIRE(std::isfinite(restored->QueryOneById(computer, added_bucket, added_offset)));
+
+    auto source = make_bucket(3);
+    restored->ExportModel(source);
+    constexpr BucketIdType merged_bucket = 2;
+    source->InsertVector(vectors.data() + static_cast<uint64_t>(count + 1) * dim, merged_bucket, 0);
+    source->Package();
+    std::vector<uint8_t> source_code(source->code_size_);
+    source->GetCodesById(merged_bucket, 0, source_code.data());
+    const auto old_bucket_size = restored->GetBucketSize(merged_bucket);
+    restored->MergeOther(source, count + 1);
+    std::vector<uint8_t> merged_code(restored->code_size_);
+    restored->GetCodesById(merged_bucket, old_bucket_size, merged_code.data());
+    REQUIRE(merged_code == source_code);
+}
+
 TEST_CASE("BucketDataCell InsertVectorWithOffset", "[ut][BucketDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr int64_t dim = 16;
