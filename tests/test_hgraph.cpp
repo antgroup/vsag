@@ -326,6 +326,54 @@ TEST_CASE("HGraph RangeSearch filters reranked distances", "[ft][hgraph][pr]") {
     REQUIRE(result.value()->GetIds()[0] == 0);
 }
 
+TEST_CASE("HGraph KNN accepts ef_search above topk limit", "[ft][hgraph][pr][ef_search]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t count = 16;
+    constexpr int64_t topk = 3;
+    std::vector<int64_t> ids(count);
+    std::vector<float> vectors(count * dim);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i;
+        std::fill(
+            vectors.begin() + i * dim, vectors.begin() + (i + 1) * dim, static_cast<float>(i));
+    }
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "fp32");
+    auto parameters = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, parameters, true);
+    auto base = vsag::Dataset::Make();
+    base->NumElements(count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    std::vector<float> query_vector(dim, 0.0F);
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
+
+    constexpr auto large_ef = R"({"hgraph": {"ef_search": 1001}})";
+    auto result = index->KnnSearch(query, topk, large_ef);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == topk);
+
+    vsag::IteratorContext* iter_ctx = nullptr;
+    auto iter_result = index->KnnSearch(query, topk, large_ef, nullptr, iter_ctx, false);
+    REQUIRE(iter_result.has_value());
+    REQUIRE(iter_result.value()->GetDim() == topk);
+    delete iter_ctx;
+
+    auto overflow_safe_hops =
+        index->KnnSearch(query, topk, R"({"hgraph": {"ef_search": 4294967296, "hops_limit": 1}})");
+    REQUIRE(overflow_safe_hops.has_value());
+    REQUIRE(overflow_safe_hops.value()->GetDim() == topk);
+
+    REQUIRE_FALSE(index->KnnSearch(query, topk, R"({"hgraph": {"ef_search": 0}})").has_value());
+    REQUIRE_FALSE(index->KnnSearch(query, topk, R"({"hgraph": {"ef_search": -1}})").has_value());
+    REQUIRE_FALSE(index->RangeSearch(query, 1.0F, large_ef, -1).has_value());
+}
+
 void
 HGraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
                              const TestDatasetPtr& dataset,

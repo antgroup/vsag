@@ -892,10 +892,9 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     auto params = HGraphSearchParameters::FromJson(parameters);
-    auto ef_search_threshold = std::max(AMPLIFICATION_FACTOR * k, 1000L);
     CHECK_ARGUMENT(  // NOLINT
-        (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
-        fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
+        params.ef_search >= 1,
+        fmt::format("ef_search({}) must be at least 1", params.ef_search));
 
     std::shared_lock shared_lock(this->global_mutex_);
     // check k
@@ -2165,10 +2164,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
     auto params = HGraphSearchParameters::FromJson(request.params_str_);
 
-    auto ef_search_threshold = std::max(AMPLIFICATION_FACTOR * k, 1000L);
     CHECK_ARGUMENT(  // NOLINT
-        (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
-        fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
+        params.ef_search >= 1,
+        fmt::format("ef_search({}) must be at least 1", params.ef_search));
 
     std::shared_lock shared_lock(this->global_mutex_);
     // check k
@@ -2231,7 +2229,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.min_distance = params.min_distance;
 
     // hops_limit only takes effect when it's greater than ef_search
-    if (params.hops_limit <= static_cast<uint32_t>(params.ef_search)) {
+    if (static_cast<uint64_t>(params.hops_limit) <= static_cast<uint64_t>(params.ef_search)) {
         search_param.hops_limit = std::numeric_limits<uint32_t>::max();
         if (params.hops_limit != std::numeric_limits<uint32_t>::max()) {
             logger::warn(

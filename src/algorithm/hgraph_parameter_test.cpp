@@ -17,6 +17,7 @@
 #include <fmt/format.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <limits>
 
 #include "hgraph.h"
 #include "parameter_test.h"
@@ -202,6 +203,24 @@ TEST_CASE("HGraph maps support_duplicate to graph parameter", "[ut][HGraphParame
     REQUIRE(typed_param != nullptr);
     REQUIRE(typed_param->support_duplicate);
     REQUIRE(typed_param->duplicate_distance_threshold == 0.25F);
+}
+
+TEST_CASE("HGraph Search Parameters validate ef_search integer",
+          "[ut][HGraphSearchParameters][ef_search]") {
+    SECTION("accept positive int64") {
+        auto params = vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 9223372036854775807}})");
+        REQUIRE(params.ef_search == std::numeric_limits<int64_t>::max());
+    }
+
+    SECTION("reject non-integer") {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(R"({"hgraph": {"ef_search": 1.5}})"));
+    }
+
+    SECTION("reject unsigned overflow") {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 9223372036854775808}})"));
+    }
 }
 
 TEST_CASE("HGraph maps label_remap_type to inner index parameter", "[ut][HGraphParameter]") {
