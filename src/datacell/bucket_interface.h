@@ -19,6 +19,7 @@
 
 #include "algorithm/ivf/ivf_partition_strategy.h"
 #include "bucket_datacell_parameter.h"
+#include "flatten_optimized_build_interface.h"
 #include "index_common_param.h"
 #include "quantization/computer.h"
 #include "query_context.h"
@@ -108,6 +109,28 @@ public:
 
     virtual void
     Train(const void* data, uint64_t count) = 0;
+
+    // Optional lifecycle for bulk builds. Implementations must pre-size any storage that is
+    // written concurrently and keep the normal InsertVector behavior when this returns false.
+    virtual bool
+    BeginOptimizedBuild(const FlattenOptimizedBuildContext& context, InnerIdType capacity) {
+        (void)context;
+        (void)capacity;
+        return false;
+    }
+
+    virtual void
+    FinalizeOptimizedBuild() {
+    }
+
+    virtual void
+    AbortOptimizedBuild() noexcept {
+    }
+
+    [[nodiscard]] virtual bool
+    IsOptimizedBuildActive() const {
+        return false;
+    }
 
     virtual InnerIdType
     InsertVector(const void* vector, BucketIdType bucket_id, InnerIdType inner_id) = 0;

@@ -3510,3 +3510,61 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() == 10);
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF RaBitQ optimized Build supports following Add",
+                             "[ft][ivf][rabitq_split][optimized_build]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t base_count = 512;
+    constexpr int64_t initial_count = base_count / 2;
+    constexpr auto params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 64,
+        "index_param": {
+            "buckets_count": 16,
+            "base_quantization_type": "rabitq",
+            "precise_quantization_type": "rabitq",
+            "base_io_type": "memory_io",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 2,
+            "rabitq_bits_per_dim_precise": 6,
+            "fast_encode_rabitq": true,
+            "fast_encode_rabitq_rounds": 12,
+            "use_reorder": true,
+            "use_residual": true,
+            "ivf_train_type": "random",
+            "train_sample_count": 512,
+            "thread_count": 4
+        }
+    })";
+
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, "l2");
+    auto initial = vsag::Dataset::Make()
+                       ->NumElements(initial_count)
+                       ->Dim(dim)
+                       ->Ids(dataset->base_->GetIds())
+                       ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+                       ->Owner(false);
+    auto added = vsag::Dataset::Make()
+                     ->NumElements(base_count - initial_count)
+                     ->Dim(dim)
+                     ->Ids(dataset->base_->GetIds() + initial_count)
+                     ->Float32Vectors(dataset->base_->GetFloat32Vectors() + initial_count * dim)
+                     ->Owner(false);
+
+    auto index = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, params, true);
+    REQUIRE(index->Build(initial).has_value());
+    REQUIRE(index->Add(added).has_value());
+    REQUIRE(index->GetNumElements() == base_count);
+
+    constexpr auto search_param =
+        R"({"ivf":{"scan_buckets_count":16,"factor":2.0,"parallelism":2}})";
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    auto result = index->KnnSearch(query, 10, search_param);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 10);
+
+    auto restored = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, params, true);
+    fixtures::TestIndex::TestSerializeBinarySet(index, restored, dataset, search_param, true);
+}

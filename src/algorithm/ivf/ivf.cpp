@@ -64,6 +64,38 @@ static constexpr BucketIdType INVALID_BUCKET_ID = static_cast<BucketIdType>(-1);
 
 namespace {
 
+class IVFBucketOptimizedBuildSession {
+public:
+    IVFBucketOptimizedBuildSession(BucketInterfacePtr bucket,
+                                   const FlattenOptimizedBuildContext& context,
+                                   InnerIdType capacity)
+        : bucket_(std::move(bucket)), active_(bucket_->BeginOptimizedBuild(context, capacity)) {
+    }
+
+    IVFBucketOptimizedBuildSession(const IVFBucketOptimizedBuildSession&) = delete;
+    IVFBucketOptimizedBuildSession&
+    operator=(const IVFBucketOptimizedBuildSession&) = delete;
+
+    ~IVFBucketOptimizedBuildSession() {
+        if (active_) {
+            bucket_->AbortOptimizedBuild();
+        }
+    }
+
+    void
+    Commit() {
+        if (not active_) {
+            return;
+        }
+        bucket_->FinalizeOptimizedBuild();
+        active_ = false;
+    }
+
+private:
+    BucketInterfacePtr bucket_{nullptr};
+    bool active_{false};
+};
+
 BucketDataCellParamPtr
 make_precise_bucket_param(const IVFParameterPtr& param) {
     auto precise_bucket_param = std::make_shared<BucketDataCellParameter>();
@@ -709,7 +741,7 @@ IVF::Build(const DatasetPtr& base) {
     }
     this->Train(base);
     // TODO(LHT): duplicate
-    auto result = this->Add(base);
+    auto result = this->add(base, true);
     if (graph_build_threshold_ > 0) {
         this->build_bucket_graphs();
     }
@@ -743,6 +775,11 @@ IVF::Train(const DatasetPtr& data) {
 
 std::vector<int64_t>
 IVF::Add(const DatasetPtr& base) {
+    return this->add(base, false);
+}
+
+std::vector<int64_t>
+IVF::add(const DatasetPtr& base, bool try_optimized_build) {
     // TODO(LHT): duplicate
     if (not partition_strategy_->is_trained_) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "ivf index add without train error");
@@ -792,6 +829,21 @@ IVF::Add(const DatasetPtr& base) {
             last_cal_memory_element_ = this->total_elements_;
         }
         location_map_.resize(this->total_elements_);
+    }
+
+    std::optional<IVFBucketOptimizedBuildSession> optimized_build_session;
+    // The scalar-code finalizer covers IDs [0, total_count), so only use it for a fresh Build.
+    // Online and incremental Add retain the existing fully-published x/y storage semantics.
+    if (try_optimized_build and current_num == 0 and this->thread_pool_ != nullptr and
+        this->build_thread_count_ > 1) {
+        const auto bucket_multiplier = static_cast<uint64_t>(this->buckets_per_data_);
+        const auto final_vector_count = static_cast<uint64_t>(this->total_elements_);
+        const uint64_t max_capacity = std::numeric_limits<InnerIdType>::max();
+        if (bucket_multiplier > 0 and final_vector_count <= max_capacity / bucket_multiplier) {
+            const auto capacity = static_cast<InnerIdType>(final_vector_count * bucket_multiplier);
+            FlattenOptimizedBuildContext context{this->thread_pool_, this->build_thread_count_};
+            optimized_build_session.emplace(this->bucket_, context, capacity);
+        }
     }
 
     Vector<InnerIdType> precise_offsets(allocator_);
@@ -866,6 +918,9 @@ IVF::Add(const DatasetPtr& base) {
     }
     if (first_exception != nullptr) {
         std::rethrow_exception(first_exception);
+    }
+    if (optimized_build_session.has_value()) {
+        optimized_build_session->Commit();
     }
     this->bucket_->Package();
     if (precise_bucket_ != nullptr) {
