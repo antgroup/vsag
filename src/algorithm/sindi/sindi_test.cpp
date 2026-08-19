@@ -18,6 +18,7 @@
 
 #include <array>
 #include <cstring>
+#include <map>
 #include <set>
 #include <sstream>
 #include <tuple>
@@ -441,6 +442,66 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
         delete[] item.vals_;
         delete[] item.ids_;
     }
+}
+
+TEST_CASE("SINDI range search ignores repeated zero-distance candidates", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 3;
+
+    const bool immutable = GENERATE(false, true);
+    const bool use_reorder = GENERATE(false, true);
+    auto index_param = std::make_shared<SINDIParameter>();
+    index_param->FromJson(JsonType::Parse(fmt::format(R"({{
+        "use_reorder": {},
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 60000,
+        "term_id_limit": 4000,
+        "immutable": {}
+    }})",
+                                                      use_reorder,
+                                                      immutable)));
+    SINDI index(index_param, common_param);
+
+    std::vector<std::vector<uint32_t>> indices = {{5, 100, 2000}, {5, 50, 2000}, {10, 100, 3000}};
+    std::vector<std::vector<float>> values = {
+        {0.5F, 0.8F, 0.6F}, {0.3F, 0.9F, 0.1F}, {0.7F, 0.4F, 0.5F}};
+    std::vector<SparseVector> sparse_vectors(indices.size());
+    for (uint64_t i = 0; i < sparse_vectors.size(); ++i) {
+        sparse_vectors[i] = {
+            static_cast<uint32_t>(indices[i].size()), indices[i].data(), values[i].data()};
+    }
+    std::vector<int64_t> ids = {1, 2, 3};
+    auto base = Dataset::Make();
+    base->NumElements(static_cast<int64_t>(ids.size()))
+        ->Ids(ids.data())
+        ->SparseVectors(sparse_vectors.data())
+        ->Owner(false);
+    REQUIRE(index.Build(base).empty());
+
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(sparse_vectors.data())->Owner(false);
+    // Force term-list heap insertion while retaining terms shared by multiple documents.
+    const std::string search_params =
+        R"({"sindi": {"query_prune_ratio": 0.2, "n_candidate": 100}})";
+    auto result = index.RangeSearch(query, 1.0F, search_params, nullptr);
+
+    REQUIRE(result->GetDim() == 3);
+    const std::map<int64_t, float> expected_results =
+        use_reorder ? std::map<int64_t, float>{{1, -0.25F}, {2, 0.79F}, {3, 0.68F}}
+                    : std::map<int64_t, float>{{1, 0.0F}, {2, 0.94F}, {3, 0.68F}};
+    std::set<int64_t> result_ids;
+    for (int64_t i = 0; i < result->GetDim(); ++i) {
+        const auto id = result->GetIds()[i];
+        const auto expected = expected_results.find(id);
+        REQUIRE(expected != expected_results.end());
+        REQUIRE(std::abs(result->GetDistances()[i] - expected->second) < 1e-5F);
+        result_ids.insert(id);
+    }
+    REQUIRE(result_ids == std::set<int64_t>{1, 2, 3});
 }
 
 TEST_CASE("SINDI Quantization Test", "[ut][SINDI]") {

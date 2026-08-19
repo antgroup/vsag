@@ -67,6 +67,11 @@ SparseTermDataCell::insert_candidate_into_heap(uint32_t id,
                                                uint32_t offset_id,
                                                float radius,
                                                const FilterPtr& filter) const {
+    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+        if (dist == 0.0F) {
+            return;
+        }
+    }
     if constexpr (type == InnerSearchType::WITH_FILTER) {
 #if __cplusplus >= 202002L
         if (dist > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
