@@ -212,17 +212,23 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReade
         for (InnerIdType i = 0; i < this->total_count_; ++i) {
             off_offs[i] = static_cast<uint64_t>(i) * sizeof(uint64_t);
         }
-        offset_io_->MultiRead(reinterpret_cast<uint8_t*>(offsets.data()),
-                              off_sizes.data(),
-                              off_offs.data(),
-                              static_cast<uint64_t>(this->total_count_));
+        if (not offset_io_->MultiRead(reinterpret_cast<uint8_t*>(offsets.data()),
+                                      off_sizes.data(),
+                                      off_offs.data(),
+                                      static_cast<uint64_t>(this->total_count_))) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "MultiVectorDataCell: failed to read offsets in Deserialize");
+        }
 
         token_counts_.resize(static_cast<uint64_t>(this->total_count_));
         std::vector<uint64_t> tc_sizes(static_cast<uint64_t>(this->total_count_), sizeof(uint32_t));
-        this->io_->MultiRead(reinterpret_cast<uint8_t*>(token_counts_.data()),
-                             tc_sizes.data(),
-                             offsets.data(),
-                             static_cast<uint64_t>(this->total_count_));
+        if (not this->io_->MultiRead(reinterpret_cast<uint8_t*>(token_counts_.data()),
+                                     tc_sizes.data(),
+                                     offsets.data(),
+                                     static_cast<uint64_t>(this->total_count_))) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "MultiVectorDataCell: failed to read token counts in Deserialize");
+        }
     }
 }
 
@@ -263,10 +269,13 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Query(float* result_dists,
     for (InnerIdType i = 0; i < id_count; ++i) {
         offset_offsets[i] = static_cast<uint64_t>(idx[i]) * sizeof(uint64_t);
     }
-    offset_io_->MultiRead(reinterpret_cast<uint8_t*>(offsets.data()),
-                          offset_sizes.data(),
-                          offset_offsets.data(),
-                          static_cast<uint64_t>(id_count));
+    if (not offset_io_->MultiRead(reinterpret_cast<uint8_t*>(offsets.data()),
+                                  offset_sizes.data(),
+                                  offset_offsets.data(),
+                                  static_cast<uint64_t>(id_count))) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "MultiVectorDataCell: failed to read offsets in Query");
+    }
 
     // Step 2: Look up token counts from in-memory cache (no disk IO)
     //         Populated by InsertVector (Build) or rebuilt in Deserialize.
@@ -301,10 +310,14 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Query(float* result_dists,
 
     // Step 3: Batch read all data via MultiRead (async IO, now in offset-sorted order)
     auto* all_codes = static_cast<uint8_t*>(this->allocator_->Allocate(total_size));
-    this->io_->MultiRead(all_codes,
-                         sorted_data_sizes.data(),
-                         sorted_offsets.data(),
-                         static_cast<uint64_t>(id_count));
+    if (not this->io_->MultiRead(all_codes,
+                                 sorted_data_sizes.data(),
+                                 sorted_offsets.data(),
+                                 static_cast<uint64_t>(id_count))) {
+        this->allocator_->Deallocate(all_codes);
+        throw VsagException(ErrorType::READ_ERROR,
+                            "MultiVectorDataCell: failed to read data in Query");
+    }
     double io_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_io_start)
             .count();

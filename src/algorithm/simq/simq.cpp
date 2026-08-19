@@ -918,7 +918,6 @@ SIMQ::flush_pending_splits() {
 
             SplitTask task;
             task.cluster_idx = cluster_idx;
-            task.new_cluster_idx = static_cast<InnerIdType>(num_clusters_ + tasks.size());
             tasks.push_back(std::move(task));
         } else {
             deferred.insert(cluster_idx);
@@ -968,6 +967,11 @@ SIMQ::flush_pending_splits() {
             tasks.begin(), tasks.end(), [](const SplitTask& t) { return t.tokens.size() < 2; }),
         tasks.end());
 
+    // Re-assign contiguous new cluster indices after filtering.
+    for (size_t i = 0; i < tasks.size(); ++i) {
+        tasks[i].new_cluster_idx = static_cast<InnerIdType>(num_clusters_ + i);
+    }
+
     if (not tasks.empty()) {
         prepare_and_execute_splits(tasks);
     }
@@ -989,8 +993,9 @@ SIMQ::prepare_and_execute_splits(std::vector<SplitTask>& tasks) {
         futures.reserve(tasks.size());
 
         for (const auto& task : tasks) {
+            const SplitTask* task_ptr = &task;
             futures.push_back(this->thread_pool_->GeneralEnqueue(
-                [this, &task]() { execute_split_parallel(task); }));
+                [this, task_ptr]() { execute_split_parallel(*task_ptr); }));
         }
 
         wait_all_futures(futures);
@@ -1713,7 +1718,6 @@ SIMQ::InitFeatures() {
         IndexFeature::SUPPORT_SERIALIZE_WRITE_FUNC,
         IndexFeature::SUPPORT_GET_MEMORY_USAGE,
         IndexFeature::SUPPORT_CHECK_ID_EXIST,
-        IndexFeature::SUPPORT_SEARCH_CONCURRENT,
     });
 }
 
@@ -1723,7 +1727,7 @@ static const std::string SIMQ_PARAMS_TEMPLATE =
         "{TYPE_KEY}": "{INDEX_SIMQ}",
         "{BASE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}",
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_ASYNC_IO}",
                 "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
             },
             "{CODES_TYPE_KEY}": "multi_vector"

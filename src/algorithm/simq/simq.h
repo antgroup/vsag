@@ -144,7 +144,7 @@ private:
     std::atomic<uint64_t> add_completed_tokens_{0};
     uint64_t add_total_docs_{0};
     uint64_t add_total_tokens_{0};
-    int last_reported_pct_{-1};
+    std::atomic<int> last_reported_pct_{-1};
 
     // Per-cluster doc-ID lists; mutable for incremental Add.
     Vector<Vector<InnerIdType>> cluster_lists_;
