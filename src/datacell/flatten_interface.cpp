@@ -91,7 +91,27 @@ template <MetricType metric, typename IOTemp>
 static FlattenInterfacePtr
 make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
     if (param->name == MULTI_VECTOR_DATA_CELL) {
-        return make_instance_multi_vector<FP32Quantizer<metric>, IOTemp>(param, common_param);
+        std::string quantization_string = param->quantizer_parameter->GetTypeName();
+        if (quantization_string == QUANTIZATION_TYPE_VALUE_FP32) {
+            return make_instance_multi_vector<FP32Quantizer<metric>, IOTemp>(param, common_param);
+        }
+        if (quantization_string == QUANTIZATION_TYPE_VALUE_FP16) {
+            return make_instance_multi_vector<FP16Quantizer<metric>, IOTemp>(param, common_param);
+        }
+        if (quantization_string == QUANTIZATION_TYPE_VALUE_BF16) {
+            return make_instance_multi_vector<BF16Quantizer<metric>, IOTemp>(param, common_param);
+        }
+        if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM) {
+            return make_instance_multi_vector<SQ8UniformQuantizer<metric>, IOTemp>(param,
+                                                                                   common_param);
+        }
+        if (quantization_string == QUANTIZATION_TYPE_VALUE_INT8) {
+            return make_instance_multi_vector<INT8Quantizer<metric>, IOTemp>(param, common_param);
+        }
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("multi-vector datacell does not support quantization type: {}",
+                        quantization_string));
     }
 
     std::string quantization_string = param->quantizer_parameter->GetTypeName();
