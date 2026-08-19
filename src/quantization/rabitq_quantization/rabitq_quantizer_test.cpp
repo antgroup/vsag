@@ -708,16 +708,9 @@ TEST_CASE("RaBitQ FastScan32 Layout and Tail", "[ut][RaBitQuantizer]") {
         float query_sum = 0.0F;
         quantizer.PrepareFastScan32Query(
             *computer, lookup.data(), deltas.data(), sum_vls.data(), query_sum);
-        if (filter_bits == 3) {
-            REQUIRE(deltas[0] > 0.0F);
-            REQUIRE(deltas[1] > 0.0F);
-            REQUIRE(deltas[2] > 0.0F);
-            REQUIRE(std::abs(deltas[0] - 2.0F * deltas[1]) <= 1e-6F);
-            REQUIRE(std::abs(deltas[1] - 2.0F * deltas[2]) <= 1e-6F);
-        } else {
-            REQUIRE(deltas[1] == 0.0F);
-            REQUIRE(deltas[2] == 0.0F);
-        }
+        REQUIRE(deltas[0] > 0.0F);
+        REQUIRE(deltas[1] == 0.0F);
+        REQUIRE(deltas[2] == 0.0F);
 
         const uint64_t one_bit_size = quantizer.GetOneBitCodeSize();
         std::vector<uint8_t> one_bit_codes(one_bit_size * 32);
@@ -750,6 +743,16 @@ TEST_CASE("RaBitQ FastScan32 Layout and Tail", "[ut][RaBitQuantizer]") {
             }
 
             quantizer.PackageFastScan32(one_bit_codes.data(), valid_size, block.data());
+            std::vector<uint8_t> incrementally_packed(block.size(), 0);
+            std::vector<uint8_t> unpacked(one_bit_size);
+            for (uint64_t i = 0; i < valid_size; ++i) {
+                quantizer.SetFastScan32Code(
+                    one_bit_codes.data() + i * one_bit_size, i, incrementally_packed.data());
+                quantizer.UnpackFastScan32Code(block.data(), i, unpacked.data());
+                REQUIRE(std::equal(
+                    unpacked.begin(), unpacked.end(), one_bit_codes.begin() + i * one_bit_size));
+            }
+            REQUIRE(incrementally_packed == block);
             quantizer.ComputeDistsWithFastScan32(*computer,
                                                  block.data(),
                                                  lookup.data(),
@@ -763,10 +766,9 @@ TEST_CASE("RaBitQ FastScan32 Layout and Tail", "[ut][RaBitQuantizer]") {
                                                  fastscan_lower_bounds.data(),
                                                  fastscan_filter_inner_products.data());
             const uint64_t group_count = quantizer.GetFastScan32LookupSize() / 16;
-            const float inner_product_error_bound =
-                filter_bits == 3 ? 0.5F * static_cast<float>(group_count / filter_bits) *
-                                       (deltas[0] + deltas[1] + deltas[2])
-                                 : 0.5F * static_cast<float>(group_count) * deltas[0];
+            const float inner_product_error_bound = 0.5F * static_cast<float>(group_count) *
+                                                    deltas[0] *
+                                                    static_cast<float>((1U << filter_bits) - 1U);
             for (uint64_t i = 0; i < valid_size; ++i) {
                 INFO("filter_bits=" << filter_bits << ", vector=" << begin + i << ", scalar="
                                     << scalar_dists[i] << ", fastscan=" << fastscan_dists[i]);

@@ -1269,7 +1269,7 @@ RaBitQuantizer<metric>::SupportFastScan32() const {
 template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::GetFastScan32LookupSize() const {
-    return FilterPlanesSize() * 2 * 16;
+    return PlaneBytes() * 2 * 16;
 }
 
 template <MetricType metric>
@@ -1321,6 +1321,62 @@ RaBitQuantizer<metric>::PackageFastScan32(const uint8_t* one_bit_codes,
 
 template <MetricType metric>
 void
+RaBitQuantizer<metric>::SetFastScan32Code(const uint8_t* one_bit_code,
+                                          uint64_t index_in_block,
+                                          uint8_t* block) const {
+    CHECK_ARGUMENT(SupportFastScan32(), "RaBitQ 32-vector FastScan is not supported");
+    CHECK_ARGUMENT(index_in_block < FASTSCAN_BATCH_SIZE, "invalid FastScan vector index");
+    constexpr uint8_t inverse_mapper[FASTSCAN_BATCH_SIZE] = {
+        0, 4, 8, 12, 16, 20, 24, 28, 2, 6, 10, 14, 18, 22, 26, 30,
+        1, 5, 9, 13, 17, 21, 25, 29, 3, 7, 11, 15, 19, 23, 27, 31};
+    const uint64_t packed_index = inverse_mapper[index_in_block];
+    const uint64_t group_count = FilterPlanesSize() * 2;
+    for (uint64_t group = 0; group < group_count; ++group) {
+        const uint8_t code_byte = one_bit_code[group >> 1];
+        const uint8_t nibble = (group & 1U) == 0U ? code_byte & 0x0FU : code_byte >> 4U;
+        auto& packed_byte = block[group * 16 + packed_index / 2];
+        const uint64_t shift = (packed_index & 1U) * 4U;
+        packed_byte = static_cast<uint8_t>((packed_byte & ~(0x0FU << shift)) | (nibble << shift));
+    }
+
+    const uint64_t packed_plane_size = FilterPlanesSize() * FASTSCAN_BATCH_SIZE;
+    const uint64_t metadata_offset = OneBitRecordNormOffset();
+    const uint64_t metadata_size = GetOneBitCodeSize() - metadata_offset;
+    memcpy(block + packed_plane_size + index_in_block * metadata_size,
+           one_bit_code + metadata_offset,
+           metadata_size);
+}
+
+template <MetricType metric>
+void
+RaBitQuantizer<metric>::UnpackFastScan32Code(const uint8_t* block,
+                                             uint64_t index_in_block,
+                                             uint8_t* one_bit_code) const {
+    CHECK_ARGUMENT(SupportFastScan32(), "RaBitQ 32-vector FastScan is not supported");
+    CHECK_ARGUMENT(index_in_block < FASTSCAN_BATCH_SIZE, "invalid FastScan vector index");
+    constexpr uint8_t inverse_mapper[FASTSCAN_BATCH_SIZE] = {
+        0, 4, 8, 12, 16, 20, 24, 28, 2, 6, 10, 14, 18, 22, 26, 30,
+        1, 5, 9, 13, 17, 21, 25, 29, 3, 7, 11, 15, 19, 23, 27, 31};
+    memset(one_bit_code, 0, GetOneBitCodeSize());
+    const uint64_t packed_index = inverse_mapper[index_in_block];
+    const uint64_t group_count = FilterPlanesSize() * 2;
+    for (uint64_t group = 0; group < group_count; ++group) {
+        const uint8_t packed_byte = block[group * 16 + packed_index / 2];
+        const auto nibble =
+            static_cast<uint8_t>((packed_byte >> ((packed_index & 1U) * 4U)) & 0x0FU);
+        one_bit_code[group >> 1] |= static_cast<uint8_t>(nibble << ((group & 1U) * 4U));
+    }
+
+    const uint64_t packed_plane_size = FilterPlanesSize() * FASTSCAN_BATCH_SIZE;
+    const uint64_t metadata_offset = OneBitRecordNormOffset();
+    const uint64_t metadata_size = GetOneBitCodeSize() - metadata_offset;
+    memcpy(one_bit_code + metadata_offset,
+           block + packed_plane_size + index_in_block * metadata_size,
+           metadata_size);
+}
+
+template <MetricType metric>
+void
 RaBitQuantizer<metric>::PrepareFastScan32Query(Computer<RaBitQuantizer>& computer,
                                                uint8_t* lookup_table,
                                                float* deltas,
@@ -1330,32 +1386,22 @@ RaBitQuantizer<metric>::PrepareFastScan32Query(Computer<RaBitQuantizer>& compute
 
     const auto* query = reinterpret_cast<const float*>(computer.buf_);
     const uint64_t groups_per_plane = PlaneBytes() * 2;
-    const uint64_t group_count = FilterPlanesSize() * 2;
     Vector<float> float_lut(GetFastScan32LookupSize(), this->allocator_);
     query_sum = 0.0F;
     for (uint64_t d = 0; d < this->dim_; ++d) {
         query_sum += query[d];
     }
 
-    for (uint64_t group = 0; group < group_count; ++group) {
-        const uint64_t plane = group / groups_per_plane;
-        const uint64_t group_in_plane = group % groups_per_plane;
-        const int exponent = static_cast<int>(FilterBits()) - static_cast<int>(plane) - 2;
-        const float centered_weight = std::ldexp(1.0F, exponent);
+    for (uint64_t group = 0; group < groups_per_plane; ++group) {
         for (uint64_t mask = 0; mask < 16; ++mask) {
             float value = 0.0F;
             for (uint64_t bit = 0; bit < 4; ++bit) {
-                const uint64_t dim = group_in_plane * 4 + bit;
+                const uint64_t dim = group * 4 + bit;
                 if (dim >= static_cast<uint64_t>(this->dim_)) {
                     continue;
                 }
-                const bool bit_set = (mask & (1U << bit)) != 0U;
-                if (FilterBits() == 1) {
-                    if (bit_set) {
-                        value += query[dim];
-                    }
-                } else {
-                    value += query[dim] * centered_weight * (bit_set ? 1.0F : -1.0F);
+                if ((mask & (1U << bit)) != 0U) {
+                    value += query[dim];
                 }
             }
             float_lut[group * 16 + mask] = value;
@@ -1364,28 +1410,20 @@ RaBitQuantizer<metric>::PrepareFastScan32Query(Computer<RaBitQuantizer>& compute
 
     std::fill(deltas, deltas + FASTSCAN_MAX_FILTER_BITS, 0.0F);
     std::fill(sum_vls, sum_vls + FASTSCAN_MAX_FILTER_BITS, 0.0F);
-    const uint64_t scale_count = FilterBits() == 3 ? FilterBits() : 1;
-    const uint64_t groups_per_scale = group_count / scale_count;
-    const uint64_t lookup_size_per_scale = groups_per_scale * 16;
-    for (uint64_t scale = 0; scale < scale_count; ++scale) {
-        const uint64_t offset = scale * lookup_size_per_scale;
-        const auto begin = float_lut.begin() + offset;
-        const auto end = begin + lookup_size_per_scale;
-        const auto [lower_iter, upper_iter] = std::minmax_element(begin, end);
-        const float lower = *lower_iter;
-        const float range = *upper_iter - lower;
-        sum_vls[scale] = lower * static_cast<float>(groups_per_scale);
-        if (range <= std::numeric_limits<float>::epsilon()) {
-            memset(lookup_table + offset, 0, lookup_size_per_scale);
-            continue;
-        }
+    const auto [lower_iter, upper_iter] = std::minmax_element(float_lut.begin(), float_lut.end());
+    const float lower = *lower_iter;
+    const float range = *upper_iter - lower;
+    sum_vls[0] = lower * static_cast<float>(groups_per_plane);
+    if (range <= std::numeric_limits<float>::epsilon()) {
+        memset(lookup_table, 0, GetFastScan32LookupSize());
+        return;
+    }
 
-        deltas[scale] = range / 255.0F;
-        for (uint64_t i = 0; i < lookup_size_per_scale; ++i) {
-            const auto quantized =
-                static_cast<int64_t>(std::lround((float_lut[offset + i] - lower) / deltas[scale]));
-            lookup_table[offset + i] = static_cast<uint8_t>(std::clamp<int64_t>(quantized, 0, 255));
-        }
+    deltas[0] = range / 255.0F;
+    for (uint64_t i = 0; i < GetFastScan32LookupSize(); ++i) {
+        const auto quantized =
+            static_cast<int64_t>(std::lround((float_lut[i] - lower) / deltas[0]));
+        lookup_table[i] = static_cast<uint8_t>(std::clamp<int64_t>(quantized, 0, 255));
     }
 }
 
@@ -1405,26 +1443,23 @@ RaBitQuantizer<metric>::ComputeDistsWithFastScan32(Computer<RaBitQuantizer>& com
                                                    float* filter_inner_products) const {
     CHECK_ARGUMENT(valid_size <= FASTSCAN_BATCH_SIZE, "invalid FastScan batch size");
     float lookup_sums[FASTSCAN_BATCH_SIZE] = {};
-    if (FilterBits() == 3) {
-        const uint64_t groups_per_plane = PlaneBytes() * 2;
-        const uint64_t lookup_size_per_plane = groups_per_plane * 16;
-        const uint64_t packed_size_per_plane = PlaneBytes() * FASTSCAN_BATCH_SIZE;
-        for (uint64_t plane = 0; plane < FilterBits(); ++plane) {
-            int32_t accumulators[FASTSCAN_BATCH_SIZE] = {};
-            PQFastScanLookUp32(lookup_table + plane * lookup_size_per_plane,
-                               block + plane * packed_size_per_plane,
-                               groups_per_plane,
-                               accumulators);
-            for (uint64_t i = 0; i < valid_size; ++i) {
-                lookup_sums[i] +=
-                    deltas[plane] * static_cast<float>(accumulators[i]) + sum_vls[plane];
-            }
-        }
-    } else {
+    const uint64_t groups_per_plane = PlaneBytes() * 2;
+    const uint64_t packed_size_per_plane = PlaneBytes() * FASTSCAN_BATCH_SIZE;
+    for (uint64_t plane = 0; plane < FilterBits(); ++plane) {
         int32_t accumulators[FASTSCAN_BATCH_SIZE] = {};
-        PQFastScanLookUp32(lookup_table, block, FilterPlanesSize() * 2, accumulators);
+        PQFastScanLookUp32(
+            lookup_table, block + plane * packed_size_per_plane, groups_per_plane, accumulators);
+        const auto weight =
+            std::ldexp(1.0F, static_cast<int>(FilterBits()) - static_cast<int>(plane) - 1);
         for (uint64_t i = 0; i < valid_size; ++i) {
-            lookup_sums[i] = deltas[0] * static_cast<float>(accumulators[i]) + sum_vls[0];
+            lookup_sums[i] +=
+                weight * (deltas[0] * static_cast<float>(accumulators[i]) + sum_vls[0]);
+        }
+    }
+    if (FilterBits() > 1) {
+        const float filter_center = 0.5F * static_cast<float>((1U << FilterBits()) - 1U);
+        for (uint64_t i = 0; i < valid_size; ++i) {
+            lookup_sums[i] -= filter_center * query_sum;
         }
     }
 

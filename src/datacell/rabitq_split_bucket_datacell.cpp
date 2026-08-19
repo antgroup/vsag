@@ -48,6 +48,7 @@ RaBitQSplitBucketDataCell::RaBitQSplitBucketDataCell(const BucketDataCellParamPt
     this->codes_ = FlattenInterface::MakeInstance(flatten_param, common_param);
     CHECK_ARGUMENT(this->codes_ != nullptr and this->codes_->SupportSplitCodeStorage(),
                    "failed to create RaBitQ split bucket codes");
+    this->codes_->EnableExternalFilterCodeStorage();
 
     this->bucket_count_ = static_cast<BucketIdType>(param->buckets_count);
     this->code_size_ = this->codes_->code_size_;
@@ -182,12 +183,22 @@ RaBitQSplitBucketDataCell::ScanBucketById(float* result_dists,
 
         if (not fallback_ids.empty()) {
             Vector<float> fallback_dists(fallback_ids.size(), this->allocator_);
-            this->codes_->QueryWithDistanceLowerBound(fallback_dists.data(),
-                                                      nullptr,
-                                                      bucket_computer.inner_,
-                                                      fallback_ids.data(),
-                                                      static_cast<InnerIdType>(fallback_ids.size()),
-                                                      ctx);
+            Vector<uint8_t> fallback_filter_codes(
+                fallback_ids.size() * this->codes_->GetFilterCodeSize(), this->allocator_);
+            for (uint64_t i = 0; i < fallback_positions.size(); ++i) {
+                this->get_filter_code(
+                    bucket_id,
+                    fallback_positions[i],
+                    fallback_filter_codes.data() + i * this->codes_->GetFilterCodeSize());
+            }
+            this->codes_->QueryWithFilterCodes(fallback_dists.data(),
+                                               nullptr,
+                                               nullptr,
+                                               bucket_computer.inner_,
+                                               fallback_ids.data(),
+                                               fallback_filter_codes.data(),
+                                               static_cast<InnerIdType>(fallback_ids.size()),
+                                               ctx);
             for (uint64_t i = 0; i < fallback_ids.size(); ++i) {
                 const auto offset = fallback_positions[i];
                 result_dists[offset] = fallback_dists[i] - this->residual_adjustment(
@@ -215,13 +226,19 @@ RaBitQSplitBucketDataCell::ScanBucketById(float* result_dists,
     }
 
     Vector<float> compact_dists(ids.size(), this->allocator_);
-    this->codes_->QueryWithDistanceLowerBound(
-        compact_dists.data(),
-        nullptr,
-        RaBitQSplitBucketDataCell::get_inner_computer(computer),
-        ids.data(),
-        static_cast<InnerIdType>(ids.size()),
-        ctx);
+    Vector<uint8_t> filter_codes(ids.size() * this->codes_->GetFilterCodeSize(), this->allocator_);
+    for (uint64_t i = 0; i < positions.size(); ++i) {
+        this->get_filter_code(
+            bucket_id, positions[i], filter_codes.data() + i * this->codes_->GetFilterCodeSize());
+    }
+    this->codes_->QueryWithFilterCodes(compact_dists.data(),
+                                       nullptr,
+                                       nullptr,
+                                       RaBitQSplitBucketDataCell::get_inner_computer(computer),
+                                       ids.data(),
+                                       filter_codes.data(),
+                                       static_cast<InnerIdType>(ids.size()),
+                                       ctx);
     for (uint64_t i = 0; i < ids.size(); ++i) {
         const auto offset = positions[i];
         result_dists[offset] =
@@ -284,23 +301,29 @@ RaBitQSplitBucketDataCell::ScanBucketWithDistanceLowerBound(float* result_dists,
 
         if (not fallback_ids.empty()) {
             Vector<float> fallback_dists(fallback_ids.size(), this->allocator_);
-            Vector<float> fallback_lower_bounds(fallback_ids.size(), this->allocator_);
-            Vector<float> fallback_filter_inner_products(fallback_ids.size(), this->allocator_);
-            this->codes_->QueryWithDistanceLowerBoundAndFilterInnerProduct(
-                fallback_dists.data(),
-                fallback_lower_bounds.data(),
-                fallback_filter_inner_products.data(),
-                bucket_computer.inner_,
-                fallback_ids.data(),
-                static_cast<InnerIdType>(fallback_ids.size()),
-                ctx);
+            Vector<uint8_t> fallback_filter_codes(
+                fallback_ids.size() * this->codes_->GetFilterCodeSize(), this->allocator_);
+            for (uint64_t i = 0; i < fallback_positions.size(); ++i) {
+                this->get_filter_code(
+                    bucket_id,
+                    fallback_positions[i],
+                    fallback_filter_codes.data() + i * this->codes_->GetFilterCodeSize());
+            }
+            this->codes_->QueryWithFilterCodes(fallback_dists.data(),
+                                               nullptr,
+                                               nullptr,
+                                               bucket_computer.inner_,
+                                               fallback_ids.data(),
+                                               fallback_filter_codes.data(),
+                                               static_cast<InnerIdType>(fallback_ids.size()),
+                                               ctx);
             for (uint64_t i = 0; i < fallback_ids.size(); ++i) {
                 const auto offset = fallback_positions[i];
                 const float adjustment =
                     this->residual_adjustment(bucket_computer, bucket_id, offset);
                 result_dists[offset] = fallback_dists[i] - adjustment;
-                lower_bounds[offset] = fallback_lower_bounds[i] - adjustment;
-                filter_inner_products[offset] = fallback_filter_inner_products[i];
+                lower_bounds[offset] = -std::numeric_limits<float>::infinity();
+                filter_inner_products[offset] = std::numeric_limits<float>::quiet_NaN();
             }
         }
         return;
@@ -326,22 +349,25 @@ RaBitQSplitBucketDataCell::ScanBucketWithDistanceLowerBound(float* result_dists,
     }
 
     Vector<float> compact_dists(ids.size(), this->allocator_);
-    Vector<float> compact_lower_bounds(ids.size(), this->allocator_);
-    Vector<float> compact_filter_inner_products(ids.size(), this->allocator_);
-    this->codes_->QueryWithDistanceLowerBoundAndFilterInnerProduct(
-        compact_dists.data(),
-        compact_lower_bounds.data(),
-        compact_filter_inner_products.data(),
-        bucket_computer.inner_,
-        ids.data(),
-        static_cast<InnerIdType>(ids.size()),
-        ctx);
+    Vector<uint8_t> filter_codes(ids.size() * this->codes_->GetFilterCodeSize(), this->allocator_);
+    for (uint64_t i = 0; i < positions.size(); ++i) {
+        this->get_filter_code(
+            bucket_id, positions[i], filter_codes.data() + i * this->codes_->GetFilterCodeSize());
+    }
+    this->codes_->QueryWithFilterCodes(compact_dists.data(),
+                                       nullptr,
+                                       nullptr,
+                                       bucket_computer.inner_,
+                                       ids.data(),
+                                       filter_codes.data(),
+                                       static_cast<InnerIdType>(ids.size()),
+                                       ctx);
     for (uint64_t i = 0; i < ids.size(); ++i) {
         const auto offset = positions[i];
         const float adjustment = this->residual_adjustment(bucket_computer, bucket_id, offset);
         result_dists[offset] = compact_dists[i] - adjustment;
-        lower_bounds[offset] = compact_lower_bounds[i] - adjustment;
-        filter_inner_products[offset] = compact_filter_inner_products[i];
+        lower_bounds[offset] = -std::numeric_limits<float>::infinity();
+        filter_inner_products[offset] = std::numeric_limits<float>::quiet_NaN();
     }
 }
 
@@ -353,14 +379,17 @@ RaBitQSplitBucketDataCell::QueryOneById(const ComputerInterfacePtr& computer,
     std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
     this->check_valid_offset(bucket_id, offset_id);
     const auto inner_id = this->inner_ids_[bucket_id][offset_id];
+    ByteBuffer filter_code(this->codes_->GetFilterCodeSize(), this->allocator_);
+    this->get_filter_code(bucket_id, offset_id, filter_code.data);
     float distance = 0.0F;
-    this->codes_->QueryWithDistanceLowerBound(
-        &distance,
-        nullptr,
-        RaBitQSplitBucketDataCell::get_inner_computer(computer),
-        &inner_id,
-        1,
-        nullptr);
+    this->codes_->QueryWithFilterCodes(&distance,
+                                       nullptr,
+                                       nullptr,
+                                       RaBitQSplitBucketDataCell::get_inner_computer(computer),
+                                       &inner_id,
+                                       filter_code.data,
+                                       1,
+                                       nullptr);
     return distance -
            this->residual_adjustment(
                RaBitQSplitBucketDataCell::get_bucket_computer(computer), bucket_id, offset_id);
@@ -375,14 +404,17 @@ RaBitQSplitBucketDataCell::QueryWithFilterInnerProductByInnerId(
     InnerIdType id_count,
     QueryContext* ctx) {
     Vector<float> adjustments(id_count, 0.0F, this->allocator_);
+    Vector<uint8_t> filter_codes(this->allocator_);
     const auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
-    for (InnerIdType i = 0; i < id_count; ++i) {
-        const auto [bucket_id, offset_id] = this->get_location(inner_ids[i]);
-        std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
-        adjustments[i] = this->residual_adjustment(bucket_computer, bucket_id, offset_id);
-    }
-    this->codes_->QueryWithFilterInnerProduct(
-        result_dists, filter_inner_products, bucket_computer.inner_, inner_ids, id_count, ctx);
+    this->collect_filter_codes(inner_ids, id_count, filter_codes, &adjustments, &bucket_computer);
+    this->codes_->QueryWithFilterCodes(result_dists,
+                                       nullptr,
+                                       filter_inner_products,
+                                       bucket_computer.inner_,
+                                       inner_ids,
+                                       filter_codes.data(),
+                                       id_count,
+                                       ctx);
     for (InnerIdType i = 0; i < id_count; ++i) {
         result_dists[i] -= adjustments[i];
     }
@@ -397,20 +429,21 @@ RaBitQSplitBucketDataCell::QueryWithDistanceHintByInnerId(float* result_dists,
                                                           QueryContext* ctx) {
     Vector<float> raw_hints(id_count, this->allocator_);
     Vector<float> adjustments(id_count, 0.0F, this->allocator_);
+    Vector<uint8_t> filter_codes(this->allocator_);
     const auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
+    this->collect_filter_codes(inner_ids, id_count, filter_codes, &adjustments, &bucket_computer);
     for (InnerIdType i = 0; i < id_count; ++i) {
-        const auto [bucket_id, offset_id] = this->get_location(inner_ids[i]);
-        std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
-        adjustments[i] = this->residual_adjustment(bucket_computer, bucket_id, offset_id);
         raw_hints[i] = hint_dists == nullptr ? std::numeric_limits<float>::max()
                                              : hint_dists[i] + adjustments[i];
     }
-    this->codes_->QueryWithDistanceHint(result_dists,
-                                        raw_hints.data(),
-                                        RaBitQSplitBucketDataCell::get_inner_computer(computer),
-                                        inner_ids,
-                                        id_count,
-                                        ctx);
+    this->codes_->QueryWithFilterCodes(result_dists,
+                                       raw_hints.data(),
+                                       nullptr,
+                                       RaBitQSplitBucketDataCell::get_inner_computer(computer),
+                                       inner_ids,
+                                       filter_codes.data(),
+                                       id_count,
+                                       ctx);
     for (InnerIdType i = 0; i < id_count; ++i) {
         result_dists[i] -= adjustments[i];
     }
@@ -424,8 +457,14 @@ RaBitQSplitBucketDataCell::ComputePairVectors(BucketIdType bucket_id,
     std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
     this->check_valid_offset(bucket_id, id1);
     this->check_valid_offset(bucket_id, id2);
-    return this->codes_->ComputePairVectors(this->inner_ids_[bucket_id][id1],
-                                            this->inner_ids_[bucket_id][id2]);
+    ByteBuffer filter_code1(this->codes_->GetFilterCodeSize(), this->allocator_);
+    ByteBuffer filter_code2(this->codes_->GetFilterCodeSize(), this->allocator_);
+    this->get_filter_code(bucket_id, id1, filter_code1.data);
+    this->get_filter_code(bucket_id, id2, filter_code2.data);
+    return this->codes_->ComputePairVectorsWithFilterCodes(this->inner_ids_[bucket_id][id1],
+                                                           filter_code1.data,
+                                                           this->inner_ids_[bucket_id][id2],
+                                                           filter_code2.data);
 }
 
 ComputerInterfacePtr
@@ -502,7 +541,17 @@ RaBitQSplitBucketDataCell::FinalizeOptimizedBuild() {
     if (this->optimized_build_codes_ == nullptr) {
         return;
     }
-    this->optimized_build_codes_->FinalizeOptimizedBuild();
+    try {
+        // Package while the temporary scalar build codes are still available. The lower data cell
+        // then materializes only the supplement bits and releases the temporary scalar codes.
+        this->package_fastscan(true);
+        this->optimized_build_codes_->FinalizeOptimizedBuild();
+        this->codes_->DiscardFilterCodes();
+    } catch (...) {
+        this->optimized_build_codes_->AbortOptimizedBuild();
+        this->optimized_build_codes_.reset();
+        throw;
+    }
     this->optimized_build_codes_.reset();
 }
 
@@ -536,10 +585,11 @@ RaBitQSplitBucketDataCell::InsertVector(const void* vector,
         // BeginOptimizedBuild pre-sizes scalar storage, and IVF assigns disjoint inner IDs.
         this->codes_->InsertVector(input, inner_id);
     } else {
+        ByteBuffer filter_code(this->codes_->GetFilterCodeSize(), this->allocator_);
         std::lock_guard codes_lock(this->codes_insert_mutex_);
-        this->codes_->InsertVector(input, inner_id);
+        this->codes_->InsertVectorWithFilterCode(input, inner_id, filter_code.data);
+        this->set_filter_code(this->fastscan_blocks_[bucket_id], offset_id, filter_code.data);
     }
-    this->fastscan_blocks_[bucket_id].clear();
     this->inner_ids_[bucket_id].push_back(inner_id);
     if (this->use_residual_ and this->metric_ == MetricType::METRIC_TYPE_L2SQR) {
         this->residual_bias_[bucket_id].push_back(bias);
@@ -596,10 +646,11 @@ RaBitQSplitBucketDataCell::InsertVectorWithOffset(const void* vector,
         // BeginOptimizedBuild pre-sizes scalar storage, and IVF assigns disjoint inner IDs.
         this->codes_->InsertVector(input, inner_id);
     } else {
+        ByteBuffer filter_code(this->codes_->GetFilterCodeSize(), this->allocator_);
         std::lock_guard codes_lock(this->codes_insert_mutex_);
-        this->codes_->InsertVector(input, inner_id);
+        this->codes_->InsertVectorWithFilterCode(input, inner_id, filter_code.data);
+        this->set_filter_code(this->fastscan_blocks_[bucket_id], offset_id, filter_code.data);
     }
-    this->fastscan_blocks_[bucket_id].clear();
     if (this->inner_ids_[bucket_id].size() <= offset_id) {
         this->inner_ids_[bucket_id].resize(static_cast<uint64_t>(offset_id) + 1, EMPTY_INNER_ID);
         if (this->use_residual_ and this->metric_ == MetricType::METRIC_TYPE_L2SQR) {
@@ -630,7 +681,7 @@ RaBitQSplitBucketDataCell::Prefetch(BucketIdType bucket_id, InnerIdType offset_i
     this->check_valid_bucket_id(bucket_id);
     std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
     this->check_valid_offset(bucket_id, offset_id);
-    this->codes_->Prefetch(this->inner_ids_[bucket_id][offset_id]);
+    this->codes_->PrefetchSupplement(this->inner_ids_[bucket_id][offset_id]);
 }
 
 void
@@ -640,7 +691,10 @@ RaBitQSplitBucketDataCell::GetCodesById(BucketIdType bucket_id,
     this->check_valid_bucket_id(bucket_id);
     std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
     this->check_valid_offset(bucket_id, offset_id);
-    CHECK_ARGUMENT(this->codes_->GetCodesById(this->inner_ids_[bucket_id][offset_id], data),
+    ByteBuffer filter_code(this->codes_->GetFilterCodeSize(), this->allocator_);
+    this->get_filter_code(bucket_id, offset_id, filter_code.data);
+    CHECK_ARGUMENT(this->codes_->GetCodesByIdWithFilterCode(
+                       this->inner_ids_[bucket_id][offset_id], filter_code.data, data),
                    "failed to read RaBitQ split bucket code");
 }
 
@@ -672,10 +726,32 @@ void
 RaBitQSplitBucketDataCell::MergeOther(const BucketInterfacePtr& other, InnerIdType bias) {
     auto source = std::dynamic_pointer_cast<RaBitQSplitBucketDataCell>(other);
     CHECK_ARGUMENT(source != nullptr, "merge RaBitQ split bucket datacell failed");
-    this->codes_->MergeOther(source->codes_, bias);
+    CHECK_ARGUMENT(source->bucket_count_ == this->bucket_count_,
+                   "merge RaBitQ split bucket count mismatch");
+    CHECK_ARGUMENT(source->fastscan_block_size_ == this->fastscan_block_size_,
+                   "merge RaBitQ split bucket FastScan layout mismatch");
+    this->codes_->MergeSupplementCodes(source->codes_, bias);
     for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
         std::scoped_lock lock(this->bucket_mutexes_[bucket_id], source->bucket_mutexes_[bucket_id]);
         const auto old_size = this->inner_ids_[bucket_id].size();
+        const auto source_size = source->inner_ids_[bucket_id].size();
+        Vector<uint8_t> merged_blocks(this->allocator_);
+        ByteBuffer filter_code(this->codes_->GetFilterCodeSize(), this->allocator_);
+        for (InnerIdType offset = 0; offset < old_size; ++offset) {
+            if (this->inner_ids_[bucket_id][offset] == EMPTY_INNER_ID) {
+                continue;
+            }
+            this->get_filter_code(this->fastscan_blocks_[bucket_id], offset, filter_code.data);
+            this->set_filter_code(merged_blocks, offset, filter_code.data);
+        }
+        for (InnerIdType offset = 0; offset < source_size; ++offset) {
+            if (source->inner_ids_[bucket_id][offset] == EMPTY_INNER_ID) {
+                continue;
+            }
+            source->get_filter_code(source->fastscan_blocks_[bucket_id], offset, filter_code.data);
+            this->set_filter_code(
+                merged_blocks, static_cast<InnerIdType>(old_size + offset), filter_code.data);
+        }
         this->inner_ids_[bucket_id].resize(old_size + source->inner_ids_[bucket_id].size(),
                                            EMPTY_INNER_ID);
         for (uint64_t i = 0; i < source->inner_ids_[bucket_id].size(); ++i) {
@@ -689,7 +765,7 @@ RaBitQSplitBucketDataCell::MergeOther(const BucketInterfacePtr& other, InnerIdTy
                                                    source->residual_bias_[bucket_id].begin(),
                                                    source->residual_bias_[bucket_id].end());
         }
-        this->fastscan_blocks_[bucket_id].clear();
+        this->fastscan_blocks_[bucket_id] = std::move(merged_blocks);
     }
     this->rebuild_locations();
 }
@@ -697,17 +773,17 @@ RaBitQSplitBucketDataCell::MergeOther(const BucketInterfacePtr& other, InnerIdTy
 void
 RaBitQSplitBucketDataCell::Package() {
     this->package_fastscan();
+    this->codes_->DiscardFilterCodes();
 }
 
 void
 RaBitQSplitBucketDataCell::Unpack() {
-    for (auto& blocks : this->fastscan_blocks_) {
-        blocks.clear();
-    }
+    // Packed 32-vector blocks are the canonical IVF filter-code storage. Keeping them packed also
+    // allows Add and search after Package without recreating a scalar x-bit copy.
 }
 
 void
-RaBitQSplitBucketDataCell::package_fastscan() {
+RaBitQSplitBucketDataCell::package_fastscan(bool force) {
     if (not this->codes_->SupportFastScan32()) {
         this->fastscan_block_size_ = 0;
         return;
@@ -716,6 +792,9 @@ RaBitQSplitBucketDataCell::package_fastscan() {
     this->fastscan_block_size_ = this->codes_->GetFastScan32BlockSize();
     for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
         std::unique_lock lock(this->bucket_mutexes_[bucket_id]);
+        if (not force and this->packed_filter_codes_complete(bucket_id)) {
+            continue;
+        }
         const auto bucket_size = static_cast<InnerIdType>(this->inner_ids_[bucket_id].size());
         const uint64_t block_count =
             (static_cast<uint64_t>(bucket_size) + FASTSCAN_BATCH_SIZE - 1) / FASTSCAN_BATCH_SIZE;
@@ -734,7 +813,116 @@ RaBitQSplitBucketDataCell::package_fastscan() {
 }
 
 void
+RaBitQSplitBucketDataCell::set_filter_code(Vector<uint8_t>& blocks,
+                                           InnerIdType offset_id,
+                                           const uint8_t* filter_code) const {
+    CHECK_ARGUMENT(this->fastscan_block_size_ > 0, "invalid FastScan block size");
+    const uint64_t block_index = static_cast<uint64_t>(offset_id) / FASTSCAN_BATCH_SIZE;
+    const auto index_in_block =
+        static_cast<InnerIdType>(static_cast<uint64_t>(offset_id) % FASTSCAN_BATCH_SIZE);
+    const uint64_t required_size = (block_index + 1) * this->fastscan_block_size_;
+    if (blocks.size() < required_size) {
+        blocks.resize(required_size, 0);
+    }
+    this->codes_->SetFastScan32Code(
+        filter_code, index_in_block, blocks.data() + block_index * this->fastscan_block_size_);
+}
+
+void
+RaBitQSplitBucketDataCell::get_filter_code(BucketIdType bucket_id,
+                                           InnerIdType offset_id,
+                                           uint8_t* filter_code) const {
+    this->get_filter_code(this->fastscan_blocks_[bucket_id], offset_id, filter_code);
+}
+
+void
+RaBitQSplitBucketDataCell::get_filter_code(const Vector<uint8_t>& blocks,
+                                           InnerIdType offset_id,
+                                           uint8_t* filter_code) const {
+    CHECK_ARGUMENT(this->fastscan_block_size_ > 0, "invalid FastScan block size");
+    const uint64_t block_index = static_cast<uint64_t>(offset_id) / FASTSCAN_BATCH_SIZE;
+    const auto index_in_block =
+        static_cast<InnerIdType>(static_cast<uint64_t>(offset_id) % FASTSCAN_BATCH_SIZE);
+    CHECK_ARGUMENT((block_index + 1) * this->fastscan_block_size_ <= blocks.size(),
+                   "missing packed RaBitQ filter code");
+    this->codes_->UnpackFastScan32Code(
+        blocks.data() + block_index * this->fastscan_block_size_, index_in_block, filter_code);
+}
+
+void
+RaBitQSplitBucketDataCell::collect_filter_codes(const InnerIdType* inner_ids,
+                                                InnerIdType id_count,
+                                                Vector<uint8_t>& filter_codes,
+                                                Vector<float>* adjustments,
+                                                const SplitBucketComputer* computer) const {
+    const uint64_t filter_code_size = this->codes_->GetFilterCodeSize();
+    filter_codes.resize(static_cast<uint64_t>(id_count) * filter_code_size);
+    if (adjustments != nullptr) {
+        CHECK_ARGUMENT(computer != nullptr, "residual adjustments require a bucket computer");
+        adjustments->resize(id_count, 0.0F);
+    }
+    for (InnerIdType i = 0; i < id_count; ++i) {
+        const auto [bucket_id, offset_id] = this->get_location(inner_ids[i]);
+        std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
+        this->check_valid_offset(bucket_id, offset_id);
+        this->get_filter_code(bucket_id,
+                              offset_id,
+                              filter_codes.data() + static_cast<uint64_t>(i) * filter_code_size);
+        if (adjustments != nullptr) {
+            (*adjustments)[i] = this->residual_adjustment(*computer, bucket_id, offset_id);
+        }
+    }
+}
+
+bool
+RaBitQSplitBucketDataCell::packed_filter_codes_complete(BucketIdType bucket_id) const {
+    const uint64_t bucket_size = this->inner_ids_[bucket_id].size();
+    const uint64_t block_count = (bucket_size + FASTSCAN_BATCH_SIZE - 1) / FASTSCAN_BATCH_SIZE;
+    return this->fastscan_blocks_[bucket_id].size() == block_count * this->fastscan_block_size_;
+}
+
+void
+RaBitQSplitBucketDataCell::serialize_packed_filter_codes(StreamWriter& writer) const {
+    StreamWriter::WriteObj(writer, PACKED_FILTER_STORAGE_MAGIC);
+    StreamWriter::WriteObj(writer, PACKED_FILTER_STORAGE_VERSION);
+    StreamWriter::WriteObj(writer, this->fastscan_block_size_);
+    const auto bucket_count = static_cast<uint64_t>(this->bucket_count_);
+    StreamWriter::WriteObj(writer, bucket_count);
+    for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
+        CHECK_ARGUMENT(this->packed_filter_codes_complete(bucket_id),
+                       "cannot serialize incomplete packed RaBitQ filter codes");
+        StreamWriter::WriteVector(writer, this->fastscan_blocks_[bucket_id]);
+    }
+}
+
+void
+RaBitQSplitBucketDataCell::deserialize_packed_filter_codes(StreamReader& reader) {
+    uint64_t magic = 0;
+    uint32_t version = 0;
+    uint64_t block_size = 0;
+    uint64_t bucket_count = 0;
+    StreamReader::ReadObj(reader, magic);
+    StreamReader::ReadObj(reader, version);
+    StreamReader::ReadObj(reader, block_size);
+    StreamReader::ReadObj(reader, bucket_count);
+    CHECK_ARGUMENT(magic == PACKED_FILTER_STORAGE_MAGIC,
+                   "invalid packed RaBitQ filter-code storage marker");
+    CHECK_ARGUMENT(version == PACKED_FILTER_STORAGE_VERSION,
+                   "unsupported packed RaBitQ filter-code storage version");
+    CHECK_ARGUMENT(block_size == this->fastscan_block_size_,
+                   "packed RaBitQ FastScan block size mismatch");
+    CHECK_ARGUMENT(bucket_count == static_cast<uint64_t>(this->bucket_count_),
+                   "packed RaBitQ filter-code bucket count mismatch");
+    for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
+        StreamReader::ReadVector(reader, this->fastscan_blocks_[bucket_id]);
+        CHECK_ARGUMENT(this->packed_filter_codes_complete(bucket_id),
+                       "invalid packed RaBitQ filter-code block count");
+    }
+}
+
+void
 RaBitQSplitBucketDataCell::Serialize(StreamWriter& writer) {
+    this->Package();
     BucketInterface::Serialize(writer);
     this->codes_->Serialize(writer);
     for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
@@ -743,6 +931,7 @@ RaBitQSplitBucketDataCell::Serialize(StreamWriter& writer) {
             StreamWriter::WriteVector(writer, this->residual_bias_[bucket_id]);
         }
     }
+    this->serialize_packed_filter_codes(writer);
 }
 
 void
@@ -758,9 +947,27 @@ RaBitQSplitBucketDataCell::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
             StreamReader::ReadVector(reader, this->residual_bias_[bucket_id]);
         }
     }
+    bool has_packed_filter_codes = false;
+    if (reader->GetCursor() + sizeof(PACKED_FILTER_STORAGE_MAGIC) <= reader->Length()) {
+        const uint64_t cursor = reader->GetCursor();
+        uint64_t magic = 0;
+        StreamReader::ReadObj(*reader, magic);
+        reader->Seek(cursor);
+        has_packed_filter_codes = magic == PACKED_FILTER_STORAGE_MAGIC;
+    }
+    if (has_packed_filter_codes) {
+        this->deserialize_packed_filter_codes(*reader);
+    } else {
+        // Legacy indexes stored scalar xbits in the lower datacell. Convert them once at load.
+        if (not this->codes_->HasFilterCodes() and this->codes_->TotalCount() != 0) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "serialized RaBitQ split bucket has no filter codes");
+        }
+        this->package_fastscan(true);
+    }
+    this->codes_->DiscardFilterCodes();
     this->backend_ = DistanceEvaluationBackend::RABITQ;
     this->rebuild_locations();
-    this->package_fastscan();
 }
 
 uint64_t

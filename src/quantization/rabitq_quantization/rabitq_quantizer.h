@@ -243,6 +243,14 @@ public:
     PackageFastScan32(const uint8_t* one_bit_codes, uint64_t valid_size, uint8_t* block) const;
 
     void
+    SetFastScan32Code(const uint8_t* one_bit_code, uint64_t index_in_block, uint8_t* block) const;
+
+    void
+    UnpackFastScan32Code(const uint8_t* block,
+                         uint64_t index_in_block,
+                         uint8_t* one_bit_code) const;
+
+    void
     PrepareFastScan32Query(Computer<RaBitQuantizer>& computer,
                            uint8_t* lookup_table,
                            float* deltas,

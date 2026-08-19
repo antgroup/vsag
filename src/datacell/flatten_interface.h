@@ -256,6 +256,88 @@ public:
                   std::numeric_limits<float>::quiet_NaN());
     }
 
+    virtual void
+    EnableExternalFilterCodeStorage() {
+    }
+
+    [[nodiscard]] virtual uint64_t
+    GetFilterCodeSize() const {
+        return 0;
+    }
+
+    virtual void
+    InsertVectorWithFilterCode(const void* /*vector*/,
+                               InnerIdType /*idx*/,
+                               uint8_t* /*filter_code*/) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "external filter-code insertion is not supported");
+    }
+
+    virtual void
+    SetFastScan32Code(const uint8_t* /*filter_code*/,
+                      InnerIdType /*index_in_block*/,
+                      uint8_t* /*block*/) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "32-vector FastScan code update is not supported");
+    }
+
+    virtual void
+    UnpackFastScan32Code(const uint8_t* /*block*/,
+                         InnerIdType /*index_in_block*/,
+                         uint8_t* /*filter_code*/) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "32-vector FastScan code unpacking is not supported");
+    }
+
+    virtual void
+    QueryWithFilterCodes(float* /*result_dists*/,
+                         const float* /*hint_dists*/,
+                         const float* /*filter_inner_products*/,
+                         const ComputerInterfacePtr& /*computer*/,
+                         const InnerIdType* /*idx*/,
+                         const uint8_t* /*filter_codes*/,
+                         InnerIdType /*id_count*/,
+                         QueryContext* /*ctx*/ = nullptr) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "query with external filter codes is not supported");
+    }
+
+    [[nodiscard]] virtual bool
+    GetCodesByIdWithFilterCode(InnerIdType /*id*/,
+                               const uint8_t* /*filter_code*/,
+                               uint8_t* /*codes*/) const {
+        return false;
+    }
+
+    virtual float
+    ComputePairVectorsWithFilterCodes(InnerIdType /*id1*/,
+                                      const uint8_t* /*filter_code1*/,
+                                      InnerIdType /*id2*/,
+                                      const uint8_t* /*filter_code2*/) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "pair distance with external filter codes is not supported");
+    }
+
+    virtual void
+    PrefetchSupplement(InnerIdType id) {
+        this->Prefetch(id);
+    }
+
+    virtual void
+    DiscardFilterCodes() {
+    }
+
+    [[nodiscard]] virtual bool
+    HasFilterCodes() const {
+        return true;
+    }
+
+    virtual void
+    MergeSupplementCodes(const FlattenInterfacePtr& /*other*/, InnerIdType /*bias*/) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "supplement-only merge is not supported");
+    }
+
     [[nodiscard]] virtual MetricType
     GetMetricType() = 0;
 
