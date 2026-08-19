@@ -17,6 +17,7 @@
 
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <set>
 
 #include "impl/allocator/safe_allocator.h"
 
@@ -225,6 +226,26 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
         for (auto i = 0; i < range_topk; i++) {
             REQUIRE(std::abs(dists[i] - 0) < 1e-3);
         }
+    }
+
+    SECTION("test zero distance is ignored in range search") {
+        InnerSearchParam inner_param;
+        inner_param.radius = 1.0F;
+        std::vector<float> dists(count_base, 0.0F);
+        dists[2] = -0.25F;
+        dists[7] = -0.5F;
+        MaxHeap heap(allocator.get());
+
+        data_cell->InsertHeapByDists<RANGE_SEARCH, PURE>(
+            dists.data(), dists.size(), heap, inner_param, 0);
+
+        REQUIRE(heap.size() == 2);
+        std::set<int64_t> result_ids;
+        while (not heap.empty()) {
+            result_ids.insert(heap.top().second);
+            heap.pop();
+        }
+        REQUIRE(result_ids == std::set<int64_t>{2, 7});
     }
     // clean
     for (auto& item : sparse_vectors) {
