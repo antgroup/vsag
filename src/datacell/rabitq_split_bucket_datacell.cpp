@@ -477,6 +477,50 @@ RaBitQSplitBucketDataCell::Train(const void* data, uint64_t count) {
     this->codes_->Train(train_data.data(), count);
 }
 
+bool
+RaBitQSplitBucketDataCell::BeginOptimizedBuild(const FlattenOptimizedBuildContext& context,
+                                               InnerIdType capacity) {
+    if (this->optimized_build_codes_ != nullptr) {
+        return false;
+    }
+    auto optimized_build = std::dynamic_pointer_cast<FlattenOptimizedBuildInterface>(this->codes_);
+    if (optimized_build == nullptr or not optimized_build->BeginOptimizedBuild(context)) {
+        return false;
+    }
+    try {
+        this->codes_->Resize(capacity);
+    } catch (...) {
+        optimized_build->AbortOptimizedBuild();
+        throw;
+    }
+    this->optimized_build_codes_ = std::move(optimized_build);
+    return true;
+}
+
+void
+RaBitQSplitBucketDataCell::FinalizeOptimizedBuild() {
+    if (this->optimized_build_codes_ == nullptr) {
+        return;
+    }
+    this->optimized_build_codes_->FinalizeOptimizedBuild();
+    this->optimized_build_codes_.reset();
+}
+
+void
+RaBitQSplitBucketDataCell::AbortOptimizedBuild() noexcept {
+    if (this->optimized_build_codes_ == nullptr) {
+        return;
+    }
+    this->optimized_build_codes_->AbortOptimizedBuild();
+    this->optimized_build_codes_.reset();
+}
+
+bool
+RaBitQSplitBucketDataCell::IsOptimizedBuildActive() const {
+    return this->optimized_build_codes_ != nullptr and
+           this->optimized_build_codes_->IsOptimizedBuildActive();
+}
+
 InnerIdType
 RaBitQSplitBucketDataCell::InsertVector(const void* vector,
                                         BucketIdType bucket_id,
@@ -488,7 +532,10 @@ RaBitQSplitBucketDataCell::InsertVector(const void* vector,
     const auto* input = this->prepare_vector(vector, bucket_id, prepared, bias);
     std::unique_lock lock(this->bucket_mutexes_[bucket_id]);
     const auto offset_id = static_cast<InnerIdType>(this->inner_ids_[bucket_id].size());
-    {
+    if (this->optimized_build_codes_ != nullptr) {
+        // BeginOptimizedBuild pre-sizes scalar storage, and IVF assigns disjoint inner IDs.
+        this->codes_->InsertVector(input, inner_id);
+    } else {
         std::lock_guard codes_lock(this->codes_insert_mutex_);
         this->codes_->InsertVector(input, inner_id);
     }
@@ -545,7 +592,10 @@ RaBitQSplitBucketDataCell::InsertVectorWithOffset(const void* vector,
     float bias = 0.0F;
     const auto* input = this->prepare_vector(vector, bucket_id, prepared, bias);
     std::unique_lock lock(this->bucket_mutexes_[bucket_id]);
-    {
+    if (this->optimized_build_codes_ != nullptr) {
+        // BeginOptimizedBuild pre-sizes scalar storage, and IVF assigns disjoint inner IDs.
+        this->codes_->InsertVector(input, inner_id);
+    } else {
         std::lock_guard codes_lock(this->codes_insert_mutex_);
         this->codes_->InsertVector(input, inner_id);
     }

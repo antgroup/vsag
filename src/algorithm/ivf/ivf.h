@@ -185,6 +185,9 @@ public:
     GetMemoryUsage() const override;
 
 private:
+    std::vector<int64_t>
+    add(const DatasetPtr& base, bool try_optimized_build);
+
     /**
      * @brief Parse the JSON search parameter string and populate an
      *        InnerSearchParam (nprobe, ef_search, etc.).

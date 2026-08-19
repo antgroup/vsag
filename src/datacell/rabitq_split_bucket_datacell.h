@@ -79,6 +79,18 @@ public:
     void
     Train(const void* data, uint64_t count) override;
 
+    bool
+    BeginOptimizedBuild(const FlattenOptimizedBuildContext& context, InnerIdType capacity) override;
+
+    void
+    FinalizeOptimizedBuild() override;
+
+    void
+    AbortOptimizedBuild() noexcept override;
+
+    [[nodiscard]] bool
+    IsOptimizedBuildActive() const override;
+
     InnerIdType
     InsertVector(const void* vector, BucketIdType bucket_id, InnerIdType inner_id) override;
 
@@ -198,6 +210,7 @@ private:
     Vector<uint64_t> locations_;
     mutable std::mutex locations_mutex_;
     std::mutex codes_insert_mutex_;
+    FlattenOptimizedBuildInterfacePtr optimized_build_codes_{nullptr};
 
     static constexpr uint64_t FASTSCAN_BATCH_SIZE = 32;
     static constexpr uint64_t LOCATION_SPLIT_BIT = 32;
