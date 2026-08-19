@@ -129,7 +129,6 @@ private:
     void
     flush_pending_splits();
 
-    // Parallel split execution
     void
     execute_split_parallel(const SplitTask& task);
 
@@ -184,14 +183,12 @@ private:
 
     uint64_t resize_increase_count_bit_{10};
 
-    // Scratch buffers for coarse_search (flat-array fast-path, mirroring v4's
-    // integer-scoring design). Mutable so const search methods can reuse them
-    // across calls without re-allocation.
+    // Scratch buffers for coarse_search (flat-array fast-path). Mutable so const
+    // search methods can reuse them across calls without re-allocation.
     //
     // NOTE: using member buffers means concurrent searches on the same SIMQ
-    // instance are NOT safe. This matches the v4 reference implementation
-    // (which also assumes single-threaded search per index). If concurrent
-    // search is needed, callers should use separate index instances.
+    // instance are NOT safe. If concurrent search is needed, callers should use
+    // separate index instances.
     mutable std::vector<float> coarse_score_buf_;
     mutable std::vector<bool> coarse_seen_buf_;
     mutable std::vector<InnerIdType> coarse_dirty_;
