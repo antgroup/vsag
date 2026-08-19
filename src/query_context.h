@@ -266,6 +266,11 @@ public:
     std::atomic<uint64_t> distance_evaluations{0};
     std::array<std::atomic<uint64_t>, 3> distance_evaluations_by_phase{};
     std::array<std::atomic<uint64_t>, 16> distance_evaluations_by_backend{};
+    // Multi-vector (SIMQ) fine-grained statistics
+    std::atomic<uint32_t> mv_io_time_ms{0};
+    std::atomic<uint32_t> mv_compute_time_ms{0};
+    std::atomic<uint32_t> mv_candidate_count{0};
+    std::atomic<uint64_t> mv_io_bytes{0};
     std::atomic<bool> complete{true};
 };
 

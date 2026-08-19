@@ -16,8 +16,10 @@
 #include "simq.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <future>
 #include <limits>
 #include <numeric>
 #include <random>
@@ -27,6 +29,8 @@
 #include <utility>
 
 #include "dataset_impl.h"
+#include "impl/logger/logger.h"
+#include "impl/thread_pool/safe_thread_pool.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"
 #include "metric_type.h"
@@ -41,9 +45,11 @@
 
 namespace vsag {
 
-// ─────────────────────────────────────────────────────────────────────────────
+// Forward declaration
+static void
+wait_all_futures(std::vector<std::future<void>>& futures);
+
 // Internal clustering helper
-// ─────────────────────────────────────────────────────────────────────────────
 
 namespace {
 
@@ -60,7 +66,13 @@ dump_simq_statistics(const SearchStatistics& stats,
                      uint64_t rerank_candidate_count,
                      uint64_t filtered_candidate_count,
                      uint64_t result_count,
-                     bool limited_size_applied) {
+                     bool limited_size_applied,
+                     double coarse_ms,
+                     double query_ms,
+                     double sort_ms,
+                     uint32_t mv_io_ms,
+                     uint32_t mv_compute_ms,
+                     uint32_t mv_candidates) {
     auto json = JsonType::Parse(stats.Dump());
     json["simq_coarse_dist_cmp"].SetUint64(coarse_dist_cmp);
     json["simq_coarse_probe_count"].SetUint64(coarse_probe_count);
@@ -69,21 +81,25 @@ dump_simq_statistics(const SearchStatistics& stats,
     json["simq_filtered_candidate_count"].SetUint64(filtered_candidate_count);
     json["simq_result_count"].SetUint64(result_count);
     json["simq_limited_size_applied"].SetBool(limited_size_applied);
+    json["simq_coarse_ms"].SetDouble(coarse_ms);
+    json["simq_query_ms"].SetDouble(query_ms);
+    json["simq_sort_ms"].SetDouble(sort_ms);
+    json["simq_mv_io_ms"].SetInt(static_cast<int>(mv_io_ms));
+    json["simq_mv_compute_ms"].SetInt(static_cast<int>(mv_compute_ms));
+    json["simq_mv_candidates"].SetInt(static_cast<int>(mv_candidates));
     return json.Dump();
 }
 
-std::pair<uint64_t, uint64_t>
-read_coarse_statistics(const DatasetPtr& result_ds) {
+uint64_t
+read_dist_cmp(const DatasetPtr& result_ds) {
     if (result_ds == nullptr) {
-        return {0, 0};
+        return 0;
     }
-    auto values = result_ds->GetStatistics({"dist_cmp", "distance_evaluations"});
-    const auto read_value = [&values](uint64_t index) {
-        return index < values.size() and not values[index].empty()
-                   ? std::strtoull(values[index].c_str(), nullptr, 10)
-                   : 0;
-    };
-    return {read_value(0), read_value(1)};
+    auto values = result_ds->GetStatistics({"dist_cmp"});
+    if (values.empty() || values[0].empty()) {
+        return 0;
+    }
+    return std::strtoull(values[0].c_str(), nullptr, 10);
 }
 
 class HGraphDynamicClustering {
@@ -92,12 +108,16 @@ public:
                             int64_t max_cluster_size,
                             int64_t split_start_idx,
                             int64_t random_seed,
-                            IndexCommonParam common_param)
+                            int64_t build_thread_count,
+                            IndexCommonParam common_param,
+                            std::shared_ptr<SafeThreadPool> thread_pool)
         : init_cluster_ratio_(init_cluster_ratio),
           max_cluster_size_(static_cast<int>(max_cluster_size)),
           split_start_idx_(static_cast<int>(split_start_idx)),
           random_seed_(static_cast<int>(random_seed)),
-          common_param_(std::move(common_param)) {
+          build_thread_count_(build_thread_count),
+          common_param_(std::move(common_param)),
+          thread_pool_(std::move(thread_pool)) {
     }
 
     ~HGraphDynamicClustering() = default;
@@ -129,7 +149,9 @@ private:
     int max_cluster_size_;
     int split_start_idx_;
     int random_seed_;
+    int64_t build_thread_count_;
     IndexCommonParam common_param_;
+    std::shared_ptr<SafeThreadPool> thread_pool_;
 
     const float* vecs_{nullptr};
     int64_t num_vecs_{0};
@@ -145,7 +167,8 @@ HGraphDynamicClustering::build_hgraph(const std::vector<int>& center_ids, int64_
     cp.data_type_ = DataTypes::DATA_TYPE_FLOAT;
     cp.dim_ = dim;
 
-    auto param = HGraph::CheckAndMappingExternalParam(JsonType::Parse("{}"), cp);
+    auto param = HGraph::CheckAndMappingExternalParam(
+        JsonType::Parse("{\"max_degree\":32,\"ef_construction\":50}"), cp);
     hgraph_ = std::make_shared<HGraph>(param, cp);
 
     auto n = static_cast<int64_t>(center_ids.size());
@@ -163,10 +186,37 @@ HGraphDynamicClustering::build_hgraph(const std::vector<int>& center_ids, int64_
 
 int
 HGraphDynamicClustering::find_nearest_cluster(int vec_id) const {
+    if (vec_id < 0 || vec_id >= num_vecs_) {
+        // Invalid vec_id, return first cluster as fallback
+        return cluster_centers_.empty() ? 0 : cluster_centers_[0];
+    }
+
     auto query_ds = Dataset::Make();
     query_ds->NumElements(1)->Dim(dim_)->Float32Vectors(vecs_ + vec_id * dim_)->Owner(false);
     auto result = hgraph_->KnnSearch(query_ds, 1, R"({"hgraph": {"ef_search": 100}})", nullptr);
-    return static_cast<int>(result->GetIds()[0]);
+
+    if (!result || result->GetIds() == nullptr || result->GetDim() == 0) {
+        // KnnSearch failed, return first cluster as fallback
+        return cluster_centers_.empty() ? 0 : cluster_centers_[0];
+    }
+
+    int nearest_id = static_cast<int>(result->GetIds()[0]);
+
+    // Verify the returned ID is a valid cluster center
+    bool found = false;
+    for (int cid : cluster_centers_) {
+        if (cid == nearest_id) {
+            found = true;
+            break;
+        }
+    }
+
+    if (!found) {
+        // Invalid cluster ID returned, return first cluster as fallback
+        return cluster_centers_.empty() ? 0 : cluster_centers_[0];
+    }
+
+    return nearest_id;
 }
 
 float
@@ -193,9 +243,23 @@ HGraphDynamicClustering::sorted_insert(std::vector<cluster_member_entry>& member
 
 void
 HGraphDynamicClustering::split_cluster(int old_center_id, int64_t /*dim*/) {
-    auto& cluster = clusters_[old_center_id];
+    auto it = clusters_.find(old_center_id);
+    if (it == clusters_.end()) {
+        return;  // Cluster not found
+    }
+    auto& cluster = it->second;
+
+    // Safety check: ensure cluster has enough elements to split
+    if (cluster.empty() || static_cast<int>(cluster.size()) < split_start_idx_) {
+        return;  // Not enough elements to split
+    }
 
     int new_center_id = static_cast<int>(cluster.back().vec_id);
+
+    // Verify new_center_id is valid
+    if (new_center_id < 0 || new_center_id >= num_vecs_) {
+        return;
+    }
 
     auto split_it = cluster.begin() + (split_start_idx_ - 1);
     std::vector<cluster_member_entry> to_move(split_it, cluster.end());
@@ -254,25 +318,87 @@ HGraphDynamicClustering::Fit(const float* vecs, int64_t num_vecs, int64_t dim) {
 
     build_hgraph(init_centers, dim);
 
-    for (auto it = all_indices.begin() + num_init; it != all_indices.end(); ++it) {
-        int vid = *it;
-        int nearest = find_nearest_cluster(vid);
-        float dist = ip_distance(vid, nearest);
+    // Batch parallel token assignment
+    const int64_t batch_size = 10000;  // Process 10k tokens per batch
+    const int64_t num_threads = build_thread_count_;
 
-        sorted_insert(clusters_[nearest], static_cast<InnerIdType>(vid), dist);
-        vec_to_cluster_[vid] = nearest;
+    auto remaining_it = all_indices.begin() + num_init;
 
-        if (static_cast<int>(clusters_[nearest].size()) > max_cluster_size_) {
-            split_cluster(nearest, dim);
+    while (remaining_it != all_indices.end()) {
+        // Determine batch range
+        auto batch_end = remaining_it;
+        int64_t count = 0;
+        while (batch_end != all_indices.end() && count < batch_size) {
+            ++batch_end;
+            ++count;
         }
+
+        if (count == 0)
+            break;
+
+        // Parallel phase: find nearest cluster for all tokens in batch
+        std::vector<std::pair<int, int>> batch_assignments(count);  // (vid, nearest_cid)
+
+        if (num_threads > 1 && count > 100 && thread_pool_) {
+            std::vector<std::future<void>> futures;
+            const int64_t chunk_size = (count + num_threads - 1) / num_threads;
+
+            for (int64_t t = 0; t < num_threads; ++t) {
+                const int64_t start = t * chunk_size;
+                const int64_t end = std::min(start + chunk_size, count);
+                if (start >= count)
+                    break;
+
+                futures.push_back(thread_pool_->GeneralEnqueue([&, t, start, end]() {
+                    for (int64_t i = start; i < end; ++i) {
+                        int vid = *(remaining_it + i);
+                        int nearest = find_nearest_cluster(vid);
+                        batch_assignments[i] = {vid, nearest};
+                    }
+                }));
+            }
+
+            for (auto& f : futures) {
+                f.get();
+            }
+        } else {
+            // Serial fallback for small batches
+            for (int64_t i = 0; i < count; ++i) {
+                int vid = *(remaining_it + i);
+                int nearest = find_nearest_cluster(vid);
+                batch_assignments[i] = {vid, nearest};
+            }
+        }
+
+        // Serial phase: apply assignments and check for splits
+        for (const auto& [vid, nearest] : batch_assignments) {
+            // Safety checks
+            if (vid < 0 || vid >= num_vecs_) {
+                continue;  // Invalid vector ID
+            }
+            if (nearest < 0 || nearest >= num_vecs_) {
+                continue;  // Invalid cluster ID
+            }
+            if (clusters_.find(nearest) == clusters_.end()) {
+                continue;  // Invalid cluster ID
+            }
+
+            float dist = ip_distance(vid, nearest);
+            sorted_insert(clusters_[nearest], static_cast<InnerIdType>(vid), dist);
+            vec_to_cluster_[vid] = nearest;
+
+            if (static_cast<int>(clusters_[nearest].size()) > max_cluster_size_) {
+                split_cluster(nearest, dim);
+            }
+        }
+
+        remaining_it = batch_end;
     }
 }
 
 }  // anonymous namespace
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Constructor / destructor
-// ─────────────────────────────────────────────────────────────────────────────
 
 SIMQ::SIMQ(const SIMQParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param),
@@ -290,14 +416,13 @@ SIMQ::SIMQ(const SIMQParameterPtr& param, const IndexCommonParam& common_param)
     random_seed_ = param->random_seed;
     default_coarse_k_ = param->coarse_k;
     default_rerank_k_ = param->rerank_k;
+    split_delay_seconds_ = param->split_delay_seconds;
     this->has_raw_vector_ = true;
 }
 
 SIMQ::~SIMQ() = default;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Build
-// ─────────────────────────────────────────────────────────────────────────────
 
 std::vector<int64_t>
 SIMQ::Build(const DatasetPtr& data) {
@@ -369,8 +494,13 @@ SIMQ::run_clustering(const float* flat_vecs,
                      const Vector<InnerIdType>& vec_to_doc,
                      int64_t num_vecs,
                      int64_t dim) {
-    HGraphDynamicClustering clustering(
-        init_cluster_ratio_, max_cluster_size_, split_start_idx_, random_seed_, common_param_);
+    HGraphDynamicClustering clustering(init_cluster_ratio_,
+                                       max_cluster_size_,
+                                       split_start_idx_,
+                                       random_seed_,
+                                       build_thread_count_,
+                                       common_param_,
+                                       this->thread_pool_);
     clustering.Fit(flat_vecs, num_vecs, dim);
 
     auto nc = static_cast<int64_t>(clustering.cluster_centers_.size());
@@ -418,48 +548,139 @@ SIMQ::run_clustering(const float* flat_vecs,
 
 void
 SIMQ::build_rep_hgraph(const float* flat_vecs, int64_t dim) {
-    // Build per-cluster token member lists
+    // Parallel token grouping
+
+    // Build per-cluster token member lists using per-thread buffers
     std::vector<std::vector<int>> cluster_token_members(static_cast<uint64_t>(num_clusters_));
-    for (int64_t v = 0; v < static_cast<int64_t>(vec_to_cluster_.size()); ++v) {
-        cluster_token_members[vec_to_cluster_[v]].push_back(static_cast<int>(v));
+
+    const int64_t num_tokens = static_cast<int64_t>(vec_to_cluster_.size());
+    const int64_t num_threads = static_cast<int64_t>(this->build_thread_count_);
+    const int64_t chunk_size = (num_tokens + num_threads - 1) / num_threads;
+
+    if (this->thread_pool_ && num_tokens > 1000) {
+        // Parallel path: partition tokens across threads
+        // Each thread collects tokens into its own local buffers
+        std::vector<std::vector<std::vector<int>>> per_thread_members(num_threads);
+        std::vector<std::future<void>> futures;
+
+        for (int64_t t = 0; t < num_threads; ++t) {
+            const int64_t start = t * chunk_size;
+            const int64_t end = std::min(start + chunk_size, num_tokens);
+            if (start >= num_tokens)
+                break;
+
+            futures.push_back(this->thread_pool_->GeneralEnqueue([&, t, start, end]() {
+                // Per-thread local buffers
+                per_thread_members[t].resize(static_cast<uint64_t>(num_clusters_));
+                for (int64_t v = start; v < end; ++v) {
+                    per_thread_members[t][vec_to_cluster_[v]].push_back(static_cast<int>(v));
+                }
+            }));
+        }
+        wait_all_futures(futures);
+
+        // Sequential merge: combine all per-thread buffers into global
+        for (int64_t t = 0; t < num_threads; ++t) {
+            for (int64_t c = 0; c < num_clusters_; ++c) {
+                auto& global = cluster_token_members[static_cast<uint64_t>(c)];
+                auto& local = per_thread_members[t][static_cast<uint64_t>(c)];
+                global.insert(global.end(), local.begin(), local.end());
+            }
+        }
+    } else {
+        // Serial fallback
+        for (int64_t v = 0; v < num_tokens; ++v) {
+            cluster_token_members[vec_to_cluster_[v]].push_back(static_cast<int>(v));
+        }
     }
+
+    // Parallel representative computation
 
     // For each cluster pick the token vector closest to the cluster centroid
     std::vector<float> rep_vecs(static_cast<uint64_t>(num_clusters_) * static_cast<uint64_t>(dim));
     std::vector<int64_t> labels(static_cast<uint64_t>(num_clusters_));
 
-    for (int64_t idx = 0; idx < num_clusters_; ++idx) {
-        auto& members = cluster_token_members[static_cast<uint64_t>(idx)];
-        auto* dst = rep_vecs.data() + idx * dim;
-        // Label is the sequential cluster index so coarse_search IDs map directly
-        labels[static_cast<uint64_t>(idx)] = idx;
+    if (this->thread_pool_ && num_clusters_ > 10) {
+        // Parallel path: process clusters concurrently
+        std::vector<std::future<void>> futures;
+        for (int64_t idx = 0; idx < num_clusters_; ++idx) {
+            futures.push_back(this->thread_pool_->GeneralEnqueue([&, idx]() {
+                auto& members = cluster_token_members[static_cast<uint64_t>(idx)];
+                auto* dst = rep_vecs.data() + idx * dim;
+                labels[static_cast<uint64_t>(idx)] = idx;
 
-        if (members.empty()) {
-            std::memset(dst, 0, static_cast<uint64_t>(dim) * sizeof(float));
-            continue;
-        }
+                if (members.empty()) {
+                    std::memset(dst, 0, static_cast<uint64_t>(dim) * sizeof(float));
+                    return;
+                }
 
-        std::vector<float> mean(static_cast<uint64_t>(dim), 0.0F);
-        for (int vid : members) {
-            const auto* v = flat_vecs + vid * dim;
-            for (int d = 0; d < dim; ++d) {
-                mean[static_cast<uint64_t>(d)] += v[d];
-            }
+                // Compute mean vector
+                std::vector<float> mean(static_cast<uint64_t>(dim), 0.0F);
+                for (int vid : members) {
+                    const auto* v = flat_vecs + vid * dim;
+                    for (int d = 0; d < dim; ++d) {
+                        mean[static_cast<uint64_t>(d)] += v[d];
+                    }
+                }
+                const float inv_count = 1.0F / static_cast<float>(members.size());
+                for (int d = 0; d < dim; ++d) {
+                    mean[static_cast<uint64_t>(d)] *= inv_count;
+                }
+
+                // Find best token (closest to mean)
+                float best_dot = -1e30F;
+                int best_vid = members[0];
+                for (int vid : members) {
+                    const auto* v = flat_vecs + vid * dim;
+                    float dot = 0.0F;
+                    for (int d = 0; d < dim; ++d) {
+                        dot += v[d] * mean[static_cast<uint64_t>(d)];
+                    }
+                    if (dot > best_dot) {
+                        best_dot = dot;
+                        best_vid = vid;
+                    }
+                }
+                std::memcpy(
+                    dst, flat_vecs + best_vid * dim, static_cast<uint64_t>(dim) * sizeof(float));
+            }));
         }
-        float best_dot = -1e30F;
-        int best_vid = members[0];
-        for (int vid : members) {
-            const auto* v = flat_vecs + vid * dim;
-            float dot = 0.0F;
-            for (int d = 0; d < dim; ++d) {
-                dot += v[d] * mean[static_cast<uint64_t>(d)];
+        wait_all_futures(futures);
+    } else {
+        // Serial fallback
+        for (int64_t idx = 0; idx < num_clusters_; ++idx) {
+            auto& members = cluster_token_members[static_cast<uint64_t>(idx)];
+            auto* dst = rep_vecs.data() + idx * dim;
+            labels[static_cast<uint64_t>(idx)] = idx;
+
+            if (members.empty()) {
+                std::memset(dst, 0, static_cast<uint64_t>(dim) * sizeof(float));
+                continue;
             }
-            if (dot > best_dot) {
-                best_dot = dot;
-                best_vid = vid;
+
+            std::vector<float> mean(static_cast<uint64_t>(dim), 0.0F);
+            for (int vid : members) {
+                const auto* v = flat_vecs + vid * dim;
+                for (int d = 0; d < dim; ++d) {
+                    mean[static_cast<uint64_t>(d)] += v[d];
+                }
             }
+            float best_dot = -1e30F;
+            int best_vid = members[0];
+            for (int vid : members) {
+                const auto* v = flat_vecs + vid * dim;
+                float dot = 0.0F;
+                for (int d = 0; d < dim; ++d) {
+                    dot += v[d] * mean[static_cast<uint64_t>(d)];
+                }
+                if (dot > best_dot) {
+                    best_dot = dot;
+                    best_vid = vid;
+                }
+            }
+            std::memcpy(
+                dst, flat_vecs + best_vid * dim, static_cast<uint64_t>(dim) * sizeof(float));
         }
-        std::memcpy(dst, flat_vecs + best_vid * dim, static_cast<uint64_t>(dim) * sizeof(float));
     }
 
     IndexCommonParam cp = common_param_;
@@ -467,7 +688,8 @@ SIMQ::build_rep_hgraph(const float* flat_vecs, int64_t dim) {
     cp.data_type_ = DataTypes::DATA_TYPE_FLOAT;
     cp.dim_ = dim;
 
-    auto param = HGraph::CheckAndMappingExternalParam(JsonType::Parse("{}"), cp);
+    auto param = HGraph::CheckAndMappingExternalParam(
+        JsonType::Parse("{\"max_degree\":32,\"ef_construction\":50}"), cp);
     rep_hgraph_ = std::make_shared<HGraph>(param, cp);
 
     auto ds = Dataset::Make();
@@ -479,9 +701,27 @@ SIMQ::build_rep_hgraph(const float* flat_vecs, int64_t dim) {
     rep_hgraph_->Build(ds);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Add
-// ─────────────────────────────────────────────────────────────────────────────
+
+static void
+wait_all_futures(std::vector<std::future<void>>& futures) {
+    std::exception_ptr first_exception = nullptr;
+    for (auto& future : futures) {
+        if (not future.valid()) {
+            continue;
+        }
+        try {
+            future.get();
+        } catch (...) {
+            if (not first_exception) {
+                first_exception = std::current_exception();
+            }
+        }
+    }
+    if (first_exception) {
+        std::rethrow_exception(first_exception);
+    }
+}
 
 std::vector<int64_t>
 SIMQ::Add(const DatasetPtr& data) {
@@ -499,44 +739,442 @@ SIMQ::Add(const DatasetPtr& data) {
     const int64_t* labels = data->GetIds();
     CHECK_ARGUMENT(labels != nullptr, "simq add: labels (ids) is nullptr");
 
+    // Phase 1: Serial pre-allocation
+
+    // Compute per-doc global token offsets and inner_ids
+    Vector<uint64_t> doc_token_offsets(num_docs + 1, allocator_);
+    doc_token_offsets[0] = 0;
+    uint64_t total_new_tokens = 0;
     for (int64_t i = 0; i < num_docs; ++i) {
-        auto inner_id = static_cast<InnerIdType>(total_count_);
-
-        mv_codes_->Resize(inner_id + 1);
-        mv_codes_->InsertVector(&mvs[i], inner_id);
-        this->label_table_->Insert(inner_id, labels[i]);
-
-        std::unordered_set<InnerIdType> clusters_seen;
-        for (uint32_t t = 0; t < mvs[i].len_; ++t) {
-            const auto* token_vec = mvs[i].vectors_ + t * static_cast<uint64_t>(dim_);
-
-            auto query_ds = Dataset::Make();
-            query_ds->NumElements(1)->Dim(dim_)->Float32Vectors(token_vec)->Owner(false);
-            auto result_ds =
-                rep_hgraph_->KnnSearch(query_ds, 1, R"({"hgraph": {"ef_search": 100}})", nullptr);
-
-            auto cluster_idx = static_cast<InnerIdType>(result_ds->GetIds()[0]);
-            float token_dist = result_ds->GetDistances()[0];
-
-            vec_to_cluster_.push_back(cluster_idx);
-            token_to_doc_.push_back(inner_id);
-            token_to_offset_.push_back(t);
-            token_to_dist_.push_back(token_dist);
-
-            if (clusters_seen.insert(cluster_idx).second) {
-                cluster_lists_[cluster_idx].push_back(inner_id);
-            }
-
-            ++cluster_token_counts_[cluster_idx];
-            if (static_cast<int64_t>(cluster_token_counts_[cluster_idx]) > max_cluster_size_) {
-                split_cluster_incremental(cluster_idx);
-            }
-        }
-
-        ++total_count_;
+        total_new_tokens += mvs[i].len_;
+        doc_token_offsets[i + 1] = total_new_tokens;
     }
 
+    auto base_inner_id = static_cast<InnerIdType>(total_count_);
+
+    // Pre-allocate all metadata vectors
+    uint64_t old_token_count = vec_to_cluster_.size();
+    uint64_t new_token_count = old_token_count + total_new_tokens;
+    vec_to_cluster_.resize(new_token_count);
+    token_to_doc_.resize(new_token_count);
+    token_to_offset_.resize(new_token_count);
+    token_to_dist_.resize(new_token_count, 0.0F);
+
+    // Resize mv_codes_ capacity for all new docs
+    mv_codes_->Resize(base_inner_id + static_cast<InnerIdType>(num_docs));
+
+    // Phase 2: Serial data insertion
+
+    // mv_codes_ and label_table_ have internal locks; inserting serially here
+    // avoids contention during the parallel phase.  With MemoryIO this is
+    // essentially free (memcpy).
+    for (int64_t i = 0; i < num_docs; ++i) {
+        auto inner_id = static_cast<InnerIdType>(base_inner_id + i);
+        mv_codes_->InsertVector(&mvs[i], inner_id);
+        this->label_table_->Insert(inner_id, labels[i]);
+    }
+
+    // Phase 3: Parallel KnnSearch + metadata write
+
+    // Each thread handles one doc: searches all its tokens on rep_hgraph_
+    // and writes directly to pre-allocated token slots (disjoint ranges, no
+    // cross-thread data race on the per-token vectors).
+    // Cluster-level structures (cluster_lists_, cluster_token_counts_) are
+    // collected per-thread and merged in Phase 4.
+    struct PerThreadClusterData {
+        // cluster_idx → list of inner_ids that touch it (unique per thread)
+        std::unordered_map<InnerIdType, std::vector<InnerIdType>> cluster_docs;
+        // cluster_idx → token count contribution
+        std::unordered_map<InnerIdType, uint64_t> cluster_token_contrib;
+    };
+
+    const uint64_t udim = static_cast<uint64_t>(dim_);
+    bool use_parallel = this->thread_pool_ != nullptr and num_docs > 1;
+
+    // Initialize progress tracking
+    add_completed_docs_.store(0, std::memory_order_relaxed);
+    add_completed_tokens_.store(0, std::memory_order_relaxed);
+    add_total_docs_ = static_cast<uint64_t>(num_docs);
+    add_total_tokens_ = total_new_tokens;
+    last_reported_pct_ = -1;
+
+    if (use_parallel) {
+        Vector<PerThreadClusterData> per_thread(num_docs, allocator_);
+        std::vector<std::future<void>> futures;
+        futures.reserve(num_docs);
+
+        for (int64_t i = 0; i < num_docs; ++i) {
+            futures.emplace_back(this->thread_pool_->GeneralEnqueue(
+                [this, i, mvs, &per_thread, &doc_token_offsets, base_inner_id, udim]() {
+                    auto inner_id = static_cast<InnerIdType>(base_inner_id + i);
+                    uint64_t tok_off = doc_token_offsets[i];
+                    auto& td = per_thread[i];
+
+                    std::unordered_set<InnerIdType> clusters_seen;
+                    for (uint32_t t = 0; t < mvs[i].len_; ++t) {
+                        // KnnSearch for this token
+                        const auto* token_vec = mvs[i].vectors_ + t * udim;
+                        auto query_ds = Dataset::Make();
+                        query_ds->NumElements(1)
+                            ->Dim(static_cast<int64_t>(udim))
+                            ->Float32Vectors(token_vec)
+                            ->Owner(false);
+                        auto result_ds = rep_hgraph_->KnnSearch(
+                            query_ds, 1, R"({"hgraph": {"ef_search": 100}})", nullptr);
+
+                        auto cluster_idx = static_cast<InnerIdType>(result_ds->GetIds()[0]);
+                        float token_dist = result_ds->GetDistances()[0];
+
+                        // Write to pre-allocated token slot (no race:
+                        // each thread owns a disjoint token range)
+                        uint64_t tid = tok_off + t;
+                        vec_to_cluster_[tid] = cluster_idx;
+                        token_to_doc_[tid] = inner_id;
+                        token_to_offset_[tid] = t;
+                        token_to_dist_[tid] = token_dist;
+
+                        // Collect per-thread cluster contributions
+                        if (clusters_seen.insert(cluster_idx).second) {
+                            td.cluster_docs[cluster_idx].push_back(inner_id);
+                        }
+                        td.cluster_token_contrib[cluster_idx]++;
+                    }
+
+                    // Update progress counters
+                    add_completed_docs_.fetch_add(1, std::memory_order_relaxed);
+                    add_completed_tokens_.fetch_add(mvs[i].len_, std::memory_order_relaxed);
+
+                    // Report progress at 10% intervals
+                    uint64_t completed = add_completed_docs_.load(std::memory_order_relaxed);
+                    int pct = static_cast<int>(100.0 * completed / add_total_docs_);
+                    if (pct > last_reported_pct_) {
+                        last_reported_pct_ = pct;
+                        logger::info("[SIMQ Add] Progress: {}% ({}/{} docs, {}/{} tokens)",
+                                     pct,
+                                     completed,
+                                     add_total_docs_,
+                                     add_completed_tokens_.load(std::memory_order_relaxed),
+                                     add_total_tokens_);
+                    }
+                }));
+        }
+
+        wait_all_futures(futures);
+
+        // Phase 4: Serial merge of cluster-level structures
+
+        for (int64_t i = 0; i < num_docs; ++i) {
+            auto& td = per_thread[i];
+            for (auto& [cluster_idx, doc_ids] : td.cluster_docs) {
+                auto& list = cluster_lists_[cluster_idx];
+                list.insert(list.end(), doc_ids.begin(), doc_ids.end());
+            }
+            for (auto& [cluster_idx, count] : td.cluster_token_contrib) {
+                cluster_token_counts_[cluster_idx] += count;
+                if (static_cast<int64_t>(cluster_token_counts_[cluster_idx]) > max_cluster_size_) {
+                    pending_splits_.insert(cluster_idx);
+                }
+            }
+        }
+    } else {
+        // Single-threaded fallback: KnnSearch + metadata in one pass
+        for (int64_t i = 0; i < num_docs; ++i) {
+            auto inner_id = static_cast<InnerIdType>(base_inner_id + i);
+            uint64_t tok_off = doc_token_offsets[i];
+
+            std::unordered_set<InnerIdType> clusters_seen;
+            for (uint32_t t = 0; t < mvs[i].len_; ++t) {
+                const auto* token_vec = mvs[i].vectors_ + t * udim;
+
+                auto query_ds = Dataset::Make();
+                query_ds->NumElements(1)
+                    ->Dim(static_cast<int64_t>(udim))
+                    ->Float32Vectors(token_vec)
+                    ->Owner(false);
+                auto result_ds = rep_hgraph_->KnnSearch(
+                    query_ds, 1, R"({"hgraph": {"ef_search": 100}})", nullptr);
+
+                auto cluster_idx = static_cast<InnerIdType>(result_ds->GetIds()[0]);
+                float token_dist = result_ds->GetDistances()[0];
+
+                uint64_t tid = tok_off + t;
+                vec_to_cluster_[tid] = cluster_idx;
+                token_to_doc_[tid] = inner_id;
+                token_to_offset_[tid] = t;
+                token_to_dist_[tid] = token_dist;
+
+                if (clusters_seen.insert(cluster_idx).second) {
+                    cluster_lists_[cluster_idx].push_back(inner_id);
+                }
+
+                ++cluster_token_counts_[cluster_idx];
+                if (static_cast<int64_t>(cluster_token_counts_[cluster_idx]) > max_cluster_size_) {
+                    pending_splits_.insert(cluster_idx);
+                }
+            }
+
+            // Update progress counters
+            add_completed_docs_.fetch_add(1, std::memory_order_relaxed);
+            add_completed_tokens_.fetch_add(mvs[i].len_, std::memory_order_relaxed);
+
+            // Report progress at 10% intervals
+            uint64_t completed = add_completed_docs_.load(std::memory_order_relaxed);
+            int pct = static_cast<int>(100.0 * completed / add_total_docs_);
+            if (pct > last_reported_pct_) {
+                last_reported_pct_ = pct;
+                logger::info("[SIMQ Add] Progress: {}% ({}/{} docs, {}/{} tokens)",
+                             pct,
+                             completed,
+                             add_total_docs_,
+                             add_completed_tokens_.load(std::memory_order_relaxed),
+                             add_total_tokens_);
+            }
+        }
+    }
+
+    total_count_ = base_inner_id + static_cast<uint64_t>(num_docs);
+
+    // Phase 5: Batch split
+
+    flush_pending_splits();
+
     return {};
+}
+
+void
+SIMQ::flush_pending_splits() {
+    // Three-phase parallel split:
+    // Phase 1 (serial): Determine which clusters to split, collect tokens in one pass O(N)
+    // Phase 2 (parallel): Execute splits concurrently (inter-cluster parallelism)
+    // Phase 3 (serial): Finalize counters and check for re-split
+
+    auto now = std::chrono::steady_clock::now();
+    const bool immediate = split_delay_seconds_ <= 0.0;
+    const auto delay = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::duration<double>(split_delay_seconds_));
+
+    // Phase 1: Serial preparation with O(N) token collection
+
+    // First, determine which clusters need splitting and assign new_cluster_idx
+    std::unordered_set<InnerIdType> clusters_to_split;
+    std::unordered_map<InnerIdType, int64_t> cluster_to_task_idx;
+    std::vector<SplitTask> tasks;
+
+    std::unordered_set<InnerIdType> deferred;
+    for (InnerIdType cluster_idx : pending_splits_) {
+        // Skip if the cluster has been invalidated
+        if (cluster_idx >= static_cast<InnerIdType>(cluster_token_counts_.size())) {
+            pending_split_first_overflow_.erase(cluster_idx);
+            continue;
+        }
+        if (static_cast<int64_t>(cluster_token_counts_[cluster_idx]) <= max_cluster_size_) {
+            pending_split_first_overflow_.erase(cluster_idx);
+            continue;
+        }
+
+        // Check delay timer
+        auto ts_it = pending_split_first_overflow_.find(cluster_idx);
+        if (ts_it == pending_split_first_overflow_.end()) {
+            pending_split_first_overflow_[cluster_idx] = now;
+            ts_it = pending_split_first_overflow_.find(cluster_idx);
+        }
+
+        if (immediate or (now - ts_it->second) >= delay) {
+            clusters_to_split.insert(cluster_idx);
+            cluster_to_task_idx[cluster_idx] = static_cast<int64_t>(tasks.size());
+
+            SplitTask task;
+            task.cluster_idx = cluster_idx;
+            task.new_cluster_idx = static_cast<InnerIdType>(num_clusters_ + tasks.size());
+            tasks.push_back(std::move(task));
+        } else {
+            deferred.insert(cluster_idx);
+        }
+    }
+
+    if (clusters_to_split.empty()) {
+        pending_splits_ = std::move(deferred);
+        return;
+    }
+
+    // One-pass token collection: O(N) instead of O(K*N)
+    const uint64_t total_tokens = vec_to_cluster_.size();
+    for (uint64_t ti = 0; ti < total_tokens; ++ti) {
+        InnerIdType cluster_idx = vec_to_cluster_[ti];
+        auto it = clusters_to_split.find(cluster_idx);
+        if (it != clusters_to_split.end()) {
+            int64_t task_idx = cluster_to_task_idx[cluster_idx];
+            tasks[task_idx].tokens.push_back(static_cast<InnerIdType>(ti));
+        }
+    }
+
+    // Sort and partition for each task
+    for (auto& task : tasks) {
+        uint64_t n = task.tokens.size();
+        if (n < 2) {
+            continue;  // Nothing to split
+        }
+
+        // Sort by distance (ascending = closer first)
+        std::sort(task.tokens.begin(), task.tokens.end(), [this](InnerIdType a, InnerIdType b) {
+            return token_to_dist_[a] < token_to_dist_[b];
+        });
+
+        task.half = n / 2;
+
+        // Partition docs into old/new sets
+        for (uint64_t rank = 0; rank < n; ++rank) {
+            InnerIdType tid = task.tokens[rank];
+            if (rank < task.half) {
+                task.old_docs.insert(token_to_doc_[tid]);
+            } else {
+                task.new_docs.insert(token_to_doc_[tid]);
+            }
+        }
+    }
+
+    // Remove tasks with nothing to split
+    tasks.erase(
+        std::remove_if(
+            tasks.begin(), tasks.end(), [](const SplitTask& t) { return t.tokens.size() < 2; }),
+        tasks.end());
+
+    // Phase 2: Parallel execution (inter-cluster parallelism)
+
+    if (not tasks.empty()) {
+        prepare_and_execute_splits(tasks);
+    }
+
+    pending_splits_ = std::move(deferred);
+}
+
+void
+SIMQ::prepare_and_execute_splits(std::vector<SplitTask>& tasks) {
+    // Pre-allocate space in cluster_lists_ and cluster_token_counts_
+    // Use push_back to add new slots (resize doesn't work with AllocatorWrapper)
+    const int64_t new_cluster_count = static_cast<int64_t>(tasks.size());
+    for (int64_t i = 0; i < new_cluster_count; ++i) {
+        cluster_lists_.push_back(Vector<InnerIdType>(allocator_));
+        cluster_token_counts_.push_back(0);
+    }
+
+    // Execute splits in parallel using thread pool
+    if (this->thread_pool_) {
+        std::vector<std::future<void>> futures;
+        futures.reserve(tasks.size());
+
+        for (const auto& task : tasks) {
+            futures.push_back(this->thread_pool_->GeneralEnqueue(
+                [this, &task]() { execute_split_parallel(task); }));
+        }
+
+        wait_all_futures(futures);
+    } else {
+        // Single-threaded fallback
+        for (const auto& task : tasks) {
+            execute_split_parallel(task);
+        }
+    }
+
+    // Phase 3: Serial finalization
+
+    // Update num_clusters_ once
+    num_clusters_ += new_cluster_count;
+
+    // Check if either half still exceeds limit and re-queue
+    for (const auto& task : tasks) {
+        // Clear overflow timestamp for split cluster
+        pending_split_first_overflow_.erase(task.cluster_idx);
+
+        // Check old cluster
+        if (cluster_token_counts_[task.cluster_idx] > static_cast<uint64_t>(max_cluster_size_)) {
+            pending_splits_.insert(task.cluster_idx);
+        }
+        // Check new cluster
+        if (cluster_token_counts_[task.new_cluster_idx] >
+            static_cast<uint64_t>(max_cluster_size_)) {
+            pending_splits_.insert(task.new_cluster_idx);
+        }
+    }
+}
+
+void
+SIMQ::execute_split_parallel(const SplitTask& task) {
+    // 1. Update vec_to_cluster_ for tokens moving to new cluster
+    for (uint64_t rank = task.half; rank < task.tokens.size(); ++rank) {
+        InnerIdType tid = task.tokens[rank];
+        vec_to_cluster_[tid] = task.new_cluster_idx;
+    }
+
+    // 2. Rebuild cluster_lists_ for old cluster
+    cluster_lists_[task.cluster_idx].clear();
+    for (InnerIdType doc_id : task.old_docs) {
+        cluster_lists_[task.cluster_idx].push_back(doc_id);
+    }
+
+    // 3. Build new cluster list (pre-allocated slot)
+    cluster_lists_[task.new_cluster_idx].clear();
+    for (InnerIdType doc_id : task.new_docs) {
+        cluster_lists_[task.new_cluster_idx].push_back(doc_id);
+    }
+
+    // 4. Update token counts
+    cluster_token_counts_[task.cluster_idx] = task.half;
+    cluster_token_counts_[task.new_cluster_idx] = task.tokens.size() - task.half;
+
+    // 5. Add new cluster representative to rep_hgraph_
+    // Use the farthest token (from old center) in the new half as new center
+    InnerIdType rep_tid = task.tokens[task.tokens.size() - 1];
+    InnerIdType rep_doc = token_to_doc_[rep_tid];
+    uint32_t rep_offset = token_to_offset_[rep_tid];
+
+    const auto udim = static_cast<uint64_t>(dim_);
+    const uint64_t code_size_per_token = mv_codes_->GetQuantizerCodeSize();
+    bool need_release = false;
+    const auto* codes = mv_codes_->GetCodesById(rep_doc, need_release);
+
+    std::vector<float> new_rep_vec(udim);
+    mv_codes_->Decode(
+        codes + sizeof(uint32_t) + static_cast<uint64_t>(rep_offset) * code_size_per_token,
+        new_rep_vec.data());
+
+    if (need_release) {
+        mv_codes_->Release(codes);
+    }
+
+    auto new_label = static_cast<int64_t>(task.new_cluster_idx);
+    auto new_ds = Dataset::Make();
+    new_ds->NumElements(1)
+        ->Dim(dim_)
+        ->Float32Vectors(new_rep_vec.data())
+        ->Ids(&new_label)
+        ->Owner(false);
+    rep_hgraph_->Add(new_ds);
+
+    // 6. Update token_to_dist_ for moved tokens (recompute distance to new representative)
+    // Serial computation (inter-cluster parallelism is handled in prepare_and_execute_splits)
+    std::vector<float> decoded_token(udim);
+    for (uint64_t rank = task.half; rank < task.tokens.size(); ++rank) {
+        InnerIdType tid = task.tokens[rank];
+        InnerIdType doc_id = token_to_doc_[tid];
+        uint32_t offset = token_to_offset_[tid];
+        bool nr = false;
+        const auto* c = mv_codes_->GetCodesById(doc_id, nr);
+        mv_codes_->Decode(
+            c + sizeof(uint32_t) + static_cast<uint64_t>(offset) * code_size_per_token,
+            decoded_token.data());
+
+        if (nr) {
+            mv_codes_->Release(c);
+        }
+
+        // Compute IP distance: 1 - dot(new_rep, token)
+        float dot = 0.0F;
+        for (uint64_t d = 0; d < udim; ++d) {
+            dot += new_rep_vec[d] * decoded_token[d];
+        }
+        token_to_dist_[tid] = 1.0F - dot;
+    }
 }
 
 void
@@ -591,6 +1229,17 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
     cluster_token_counts_[cluster_idx] = half;
     cluster_token_counts_.push_back(n - half);
 
+    // If either half still exceeds the limit, re-queue for another round.
+    // Clear the old timestamp so the timer starts fresh for the next split.
+    if (static_cast<int64_t>(half) > max_cluster_size_) {
+        pending_splits_.insert(cluster_idx);
+        pending_split_first_overflow_.erase(cluster_idx);
+    }
+    if (static_cast<int64_t>(n - half) > max_cluster_size_) {
+        pending_splits_.insert(new_cluster_idx);
+        pending_split_first_overflow_.erase(new_cluster_idx);
+    }
+
     // New cluster representative: the boundary token (closest to old center among new half)
     // Fetch its vector to register in rep_hgraph_
     InnerIdType rep_tid = cluster_tokens[half];
@@ -598,9 +1247,13 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
     uint32_t rep_offset = token_to_offset_[rep_tid];
     bool need_release = false;
     const auto* codes = mv_codes_->GetCodesById(rep_doc, need_release);
-    const auto* all_toks = reinterpret_cast<const float*>(codes + sizeof(uint32_t));
-    std::vector<float> new_rep_vec(all_toks + rep_offset * static_cast<uint64_t>(dim_),
-                                   all_toks + (rep_offset + 1) * static_cast<uint64_t>(dim_));
+    const uint64_t code_size_per_token = mv_codes_->GetQuantizerCodeSize();
+    const auto udim = static_cast<uint64_t>(dim_);
+    // Decode the representative token from (possibly quantized) storage
+    std::vector<float> new_rep_vec(udim);
+    mv_codes_->Decode(
+        codes + sizeof(uint32_t) + static_cast<uint64_t>(rep_offset) * code_size_per_token,
+        new_rep_vec.data());
     if (need_release) {
         mv_codes_->Release(codes);
     }
@@ -616,17 +1269,19 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
 
     // Update token_to_dist_ for tokens moved to new cluster so future splits
     // sort by distance to the new representative, not the old one.
-    const auto udim = static_cast<uint64_t>(dim_);
+    std::vector<float> decoded_token(udim);
     for (uint64_t rank = half; rank < n; ++rank) {
         InnerIdType tid = cluster_tokens[rank];
         InnerIdType doc_id = token_to_doc_[tid];
         uint32_t offset = token_to_offset_[tid];
         bool nr = false;
         const auto* c = mv_codes_->GetCodesById(doc_id, nr);
-        const auto* tv = reinterpret_cast<const float*>(c + sizeof(uint32_t)) + offset * udim;
+        mv_codes_->Decode(
+            c + sizeof(uint32_t) + static_cast<uint64_t>(offset) * code_size_per_token,
+            decoded_token.data());
         float dot = 0.0F;
         for (uint64_t d = 0; d < udim; ++d) {
-            dot += tv[d] * new_rep_vec[d];
+            dot += decoded_token[d] * new_rep_vec[d];
         }
         token_to_dist_[tid] = 1.0F - dot;
         if (nr) {
@@ -637,87 +1292,170 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
     ++num_clusters_;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Search helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
 std::vector<std::pair<InnerIdType, float>>
 SIMQ::coarse_search(const float* query_tokens,
                     uint32_t query_token_count,
                     int64_t coarse_k,
                     uint64_t* coarse_dist_cmp,
-                    uint64_t* coarse_probe_count,
-                    uint64_t* coarse_distance_evaluations) const {
-    // All buffers are local — safe for concurrent searches under shared_lock.
-    std::unordered_map<InnerIdType, float> score_map;
-    score_map.reserve(static_cast<uint64_t>(coarse_k) * static_cast<uint64_t>(max_cluster_size_));
-    std::unordered_set<InnerIdType> seen_this_token;
-    seen_this_token.reserve(static_cast<uint64_t>(coarse_k) *
-                            static_cast<uint64_t>(max_cluster_size_));
+                    uint64_t* coarse_probe_count) const {
+    // Flat-array fast-path (mirrors v4's integer scoring). Replaces the previous
+    // unordered_map<InnerIdType,float> score_map + unordered_set<InnerIdType>
+    // seen_this_token which dominated coarse-search latency (~50-100ns per op
+    // vs ~2ns for flat arrays).
+    //
+    // Buffers are reused across queries via mutable member state. Lazily grown
+    // to fit the current total_count_ on first call after Build/Add/Deserialize.
+    const auto n_docs = static_cast<size_t>(total_count_);
+    if (coarse_score_buf_.size() < n_docs) {
+        coarse_score_buf_.assign(n_docs, 0.0f);
+        coarse_seen_buf_.assign(n_docs, false);
+    }
+    coarse_dirty_.clear();
 
+    // Parallel KnnSearch for all query tokens
+
+    // Each query token's search is independent. We do all KnnSearch calls in
+    // parallel, then sequentially propagate scores (which is fast O(k) per token).
+    struct TokenSearchResult {
+        std::vector<std::pair<float, InnerIdType>> cscores;
+        int64_t actual_coarse_k{0};
+        uint64_t dist_cmp{0};
+    };
+    std::vector<TokenSearchResult> token_results(query_token_count);
+
+    if (this->thread_pool_ && query_token_count > 1) {
+        // Parallel path: search all tokens concurrently
+        std::vector<std::future<void>> futures;
+        futures.reserve(query_token_count);
+
+        for (uint32_t ti = 0; ti < query_token_count; ++ti) {
+            futures.push_back(this->thread_pool_->GeneralEnqueue([&, ti]() {
+                const auto* qt = query_tokens + ti * dim_;
+                auto& result = token_results[ti];
+
+                result.actual_coarse_k = std::min(coarse_k, num_clusters_);
+                if (result.actual_coarse_k <= 0) {
+                    return;
+                }
+
+                auto query_ds = Dataset::Make();
+                query_ds->NumElements(1)->Dim(dim_)->Float32Vectors(qt)->Owner(false);
+                auto result_ds = rep_hgraph_->KnnSearch(
+                    query_ds, result.actual_coarse_k, R"({"hgraph": {"ef_search": 100}})", nullptr);
+
+                if (coarse_dist_cmp != nullptr) {
+                    result.dist_cmp = read_dist_cmp(result_ds);
+                }
+
+                int64_t nres = result_ds->GetDim();
+                const auto* rdists = result_ds->GetDistances();
+                const int64_t* rids = result_ds->GetIds();
+
+                result.cscores.reserve(static_cast<uint64_t>(nres));
+                for (int64_t ri = 0; ri < nres; ++ri) {
+                    float cscore = 1.0F - rdists[ri];
+                    auto cidx = static_cast<InnerIdType>(rids[ri]);
+                    result.cscores.emplace_back(cscore, cidx);
+                }
+                std::sort(result.cscores.begin(),
+                          result.cscores.end(),
+                          [](const auto& a, const auto& b) { return a.first > b.first; });
+            }));
+        }
+        wait_all_futures(futures);
+    } else {
+        // Serial fallback
+        for (uint32_t ti = 0; ti < query_token_count; ++ti) {
+            const auto* qt = query_tokens + ti * dim_;
+            auto& result = token_results[ti];
+
+            result.actual_coarse_k = std::min(coarse_k, num_clusters_);
+            if (result.actual_coarse_k <= 0) {
+                continue;
+            }
+
+            auto query_ds = Dataset::Make();
+            query_ds->NumElements(1)->Dim(dim_)->Float32Vectors(qt)->Owner(false);
+            auto result_ds = rep_hgraph_->KnnSearch(
+                query_ds, result.actual_coarse_k, R"({"hgraph": {"ef_search": 100}})", nullptr);
+
+            if (coarse_dist_cmp != nullptr) {
+                result.dist_cmp = read_dist_cmp(result_ds);
+            }
+
+            int64_t nres = result_ds->GetDim();
+            const auto* rdists = result_ds->GetDistances();
+            const int64_t* rids = result_ds->GetIds();
+
+            result.cscores.reserve(static_cast<uint64_t>(nres));
+            for (int64_t ri = 0; ri < nres; ++ri) {
+                float cscore = 1.0F - rdists[ri];
+                auto cidx = static_cast<InnerIdType>(rids[ri]);
+                result.cscores.emplace_back(cscore, cidx);
+            }
+            std::sort(result.cscores.begin(),
+                      result.cscores.end(),
+                      [](const auto& a, const auto& b) { return a.first > b.first; });
+        }
+    }
+
+    // Sequential score propagation
+
+    // Now merge all per-token results into the shared score buffers.
     for (uint32_t ti = 0; ti < query_token_count; ++ti) {
-        const auto* qt = query_tokens + ti * dim_;
-
-        int64_t actual_coarse_k = std::min(coarse_k, num_clusters_);
-        if (actual_coarse_k <= 0) {
+        const auto& result = token_results[ti];
+        if (result.actual_coarse_k <= 0) {
             continue;
         }
         if (coarse_probe_count != nullptr) {
-            *coarse_probe_count += static_cast<uint64_t>(actual_coarse_k);
+            *coarse_probe_count += static_cast<uint64_t>(result.actual_coarse_k);
         }
-
-        auto query_ds = Dataset::Make();
-        query_ds->NumElements(1)->Dim(dim_)->Float32Vectors(qt)->Owner(false);
-        auto result_ds = rep_hgraph_->KnnSearch(
-            query_ds, actual_coarse_k, R"({"hgraph": {"ef_search": 100}})", nullptr);
-        const auto [nested_dist_cmp, nested_distance_evaluations] =
-            read_coarse_statistics(result_ds);
         if (coarse_dist_cmp != nullptr) {
-            *coarse_dist_cmp += nested_dist_cmp;
-        }
-        if (coarse_distance_evaluations != nullptr) {
-            *coarse_distance_evaluations += nested_distance_evaluations;
+            *coarse_dist_cmp += result.dist_cmp;
         }
 
-        int64_t nres = result_ds->GetDim();
-        const auto* rdists = result_ds->GetDistances();
-        const int64_t* rids = result_ds->GetIds();
-
-        std::vector<std::pair<float, InnerIdType>> cscores;
-        cscores.reserve(static_cast<uint64_t>(nres));
-        for (int64_t ri = 0; ri < nres; ++ri) {
-            float cscore = 1.0F - rdists[ri];
-            auto cidx = static_cast<InnerIdType>(rids[ri]);
-            cscores.emplace_back(cscore, cidx);
-        }
-        std::sort(cscores.begin(), cscores.end(), [](const auto& a, const auto& b) {
-            return a.first > b.first;
-        });
-
-        seen_this_token.clear();
-        for (auto& [cscore, cidx] : cscores) {
+        // Propagate cluster scores to docs via flat arrays (O(1) per doc).
+        coarse_seen_dirty_.clear();
+        for (const auto& [cscore, cidx] : result.cscores) {
             if (cidx >= static_cast<InnerIdType>(num_clusters_)) {
                 continue;
             }
             for (InnerIdType doc_id : cluster_lists_[cidx]) {
-                if (!seen_this_token.insert(doc_id).second) {
-                    continue;
+                if (coarse_seen_buf_[doc_id]) {
+                    continue;  // already scored for this token
                 }
-                score_map[doc_id] += cscore;
+                coarse_seen_buf_[doc_id] = true;
+                coarse_seen_dirty_.push_back(doc_id);
+                if (coarse_score_buf_[doc_id] == 0.0f) {
+                    coarse_dirty_.push_back(doc_id);
+                }
+                coarse_score_buf_[doc_id] += cscore;
             }
+        }
+        // Reset per-token seen flags
+        for (InnerIdType doc_id : coarse_seen_dirty_) {
+            coarse_seen_buf_[doc_id] = false;
         }
     }
 
-    std::vector<std::pair<InnerIdType, float>> ranked(score_map.begin(), score_map.end());
+    // Collect survivors and reset score buffer for the next query.
+    std::vector<std::pair<InnerIdType, float>> ranked;
+    ranked.reserve(coarse_dirty_.size());
+    for (InnerIdType doc_id : coarse_dirty_) {
+        ranked.emplace_back(doc_id, coarse_score_buf_[doc_id]);
+        coarse_score_buf_[doc_id] = 0.0f;  // reset for next query
+    }
+    coarse_dirty_.clear();
+
     std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
         return a.second > b.second;
     });
     return ranked;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // KnnSearch
-// ─────────────────────────────────────────────────────────────────────────────
 
 DatasetPtr
 SIMQ::KnnSearch(const DatasetPtr& query,
@@ -726,11 +1464,11 @@ SIMQ::KnnSearch(const DatasetPtr& query,
                 const FilterPtr& filter) const {
     std::shared_lock lock(global_mutex_);
     SearchStatistics stats;
-    const auto threshold = ParseSearchThreshold(parameters);
 
     if (total_count_ == 0 || rep_hgraph_ == nullptr) {
         auto result = Dataset::Make();
-        result->Statistics(dump_simq_statistics(stats, 0, 0, 0, 0, 0, 0, false));
+        result->Statistics(
+            dump_simq_statistics(stats, 0, 0, 0, 0, 0, 0, false, 0.0, 0.0, 0.0, 0, 0, 0));
         return result;
     }
 
@@ -746,19 +1484,16 @@ SIMQ::KnnSearch(const DatasetPtr& query,
     int64_t rerank_k = sp.rerank_k > 0 ? sp.rerank_k : default_rerank_k_;
     rerank_k = std::min(rerank_k, static_cast<int64_t>(total_count_));
     k = std::min(k, static_cast<int64_t>(total_count_));
+    const auto threshold = ParseSearchThreshold(parameters);
 
     uint64_t coarse_dist_cmp = 0;
     uint64_t coarse_probe_count = 0;
-    uint64_t coarse_distance_evaluations = 0;
-    auto coarse_results = coarse_search(query_mvs[0].vectors_,
-                                        query_mvs[0].len_,
-                                        coarse_k,
-                                        &coarse_dist_cmp,
-                                        &coarse_probe_count,
-                                        &coarse_distance_evaluations);
-    stats.AddDistance(SearchStatistics::DistancePhase::ROUTING,
-                      DistanceEvaluationBackend::FP32,
-                      coarse_distance_evaluations);
+    auto t_coarse_start = std::chrono::steady_clock::now();
+    auto coarse_results = coarse_search(
+        query_mvs[0].vectors_, query_mvs[0].len_, coarse_k, &coarse_dist_cmp, &coarse_probe_count);
+    double coarse_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_coarse_start)
+            .count();
     uint64_t coarse_candidate_count = coarse_results.size();
     if (static_cast<int64_t>(coarse_results.size()) > rerank_k) {
         coarse_results.resize(rerank_k);
@@ -783,8 +1518,14 @@ SIMQ::KnnSearch(const DatasetPtr& query,
     }
 
     // Single batched Query call (enables MultiRead in MultiVectorDataCell)
+    auto t_query_start = std::chrono::steady_clock::now();
+    uint32_t mv_io_ms = 0;
+    uint32_t mv_compute_ms = 0;
+    uint32_t mv_candidates = 0;
     if (!batch_ids.empty()) {
         std::vector<float> batch_dists(batch_ids.size());
+        // Use QueryContext so MultiVectorDataCell can report fine-grained timing
+        // back through SearchStatistics.
         QueryContext query_context{.stats = &stats,
                                    .distance_phase = DistanceEvaluationPhase::RERANK};
         mv_codes_->Query(batch_dists.data(),
@@ -797,9 +1538,22 @@ SIMQ::KnnSearch(const DatasetPtr& query,
         for (uint64_t i = 0; i < batch_ids.size(); i++) {
             reranked.emplace_back(batch_dists[i], batch_ids[i]);
         }
+        mv_io_ms = stats.mv_io_time_ms.load(std::memory_order_relaxed);
+        mv_compute_ms = stats.mv_compute_time_ms.load(std::memory_order_relaxed);
+        mv_candidates = stats.mv_candidate_count.load(std::memory_order_relaxed);
     }
-    std::sort(reranked.begin(), reranked.end(), simq_distance_less);
+    double query_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_query_start)
+            .count();
 
+    auto t_sort_start = std::chrono::steady_clock::now();
+    std::sort(reranked.begin(), reranked.end(), simq_distance_less);
+    double sort_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_sort_start)
+            .count();
+
+    // Two-pass result construction: first count valid results (respecting
+    // threshold and NaN/Inf filtering), then fill the output dataset.
     int64_t result_count = 0;
     for (const auto& [distance, _] : reranked) {
         if (result_count >= k) {
@@ -824,20 +1578,25 @@ SIMQ::KnnSearch(const DatasetPtr& query,
         ids[result_index] = this->label_table_->GetLabelById(inner_id);
         ++result_index;
     }
+    bool limited_size_applied = false;
     result_ds->Statistics(dump_simq_statistics(stats,
                                                coarse_dist_cmp,
                                                coarse_probe_count,
                                                coarse_candidate_count,
                                                rerank_candidate_count,
                                                filtered_candidate_count,
-                                               static_cast<uint64_t>(result_ds->GetDim()),
-                                               false));
-    return result_ds;
+                                               static_cast<uint64_t>(result_count),
+                                               limited_size_applied,
+                                               coarse_ms,
+                                               query_ms,
+                                               sort_ms,
+                                               mv_io_ms,
+                                               mv_compute_ms,
+                                               mv_candidates));
+    return std::move(result_ds);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // RangeSearch
-// ─────────────────────────────────────────────────────────────────────────────
 
 DatasetPtr
 SIMQ::RangeSearch(const DatasetPtr& query,
@@ -850,7 +1609,8 @@ SIMQ::RangeSearch(const DatasetPtr& query,
 
     if (total_count_ == 0 || rep_hgraph_ == nullptr) {
         auto result = Dataset::Make();
-        result->Statistics(dump_simq_statistics(stats, 0, 0, 0, 0, 0, 0, false));
+        result->Statistics(
+            dump_simq_statistics(stats, 0, 0, 0, 0, 0, 0, false, 0.0, 0.0, 0.0, 0, 0, 0));
         return result;
     }
 
@@ -870,16 +1630,12 @@ SIMQ::RangeSearch(const DatasetPtr& query,
 
     uint64_t coarse_dist_cmp = 0;
     uint64_t coarse_probe_count = 0;
-    uint64_t coarse_distance_evaluations = 0;
-    auto coarse_results = coarse_search(query_mvs[0].vectors_,
-                                        query_mvs[0].len_,
-                                        coarse_k,
-                                        &coarse_dist_cmp,
-                                        &coarse_probe_count,
-                                        &coarse_distance_evaluations);
-    stats.AddDistance(SearchStatistics::DistancePhase::ROUTING,
-                      DistanceEvaluationBackend::FP32,
-                      coarse_distance_evaluations);
+    auto t_coarse_start = std::chrono::steady_clock::now();
+    auto coarse_results = coarse_search(
+        query_mvs[0].vectors_, query_mvs[0].len_, coarse_k, &coarse_dist_cmp, &coarse_probe_count);
+    double coarse_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_coarse_start)
+            .count();
     uint64_t coarse_candidate_count = coarse_results.size();
     if (static_cast<int64_t>(coarse_results.size()) > rerank_k) {
         coarse_results.resize(rerank_k);
@@ -889,33 +1645,35 @@ SIMQ::RangeSearch(const DatasetPtr& query,
     auto computer = mv_codes_->FactoryComputer(&query_mvs[0]);
     std::vector<std::pair<float, InnerIdType>> in_range;
     uint64_t filtered_candidate_count = 0;
+    auto t_query_start = std::chrono::steady_clock::now();
     for (auto& [doc_id, _] : coarse_results) {
         if (filter != nullptr && !filter->CheckValid(this->label_table_->GetLabelById(doc_id))) {
             ++filtered_candidate_count;
             continue;
         }
         float dist = 0.0F;
-        QueryContext query_context{.stats = &stats,
-                                   .distance_phase = DistanceEvaluationPhase::RERANK};
-        mv_codes_->Query(&dist, computer, &doc_id, 1, &query_context);
-        ++stats.dist_cmp;
-        if (dist <= radius) {
+        mv_codes_->Query(&dist, computer, &doc_id, 1);
+        stats.dist_cmp.fetch_add(1, std::memory_order_relaxed);
+        if (std::isfinite(dist) and dist <= radius) {
             in_range.emplace_back(dist, doc_id);
         }
     }
+    double query_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_query_start)
+            .count();
 
     bool limited_size_applied = false;
     if (limited_size >= 0 && static_cast<int64_t>(in_range.size()) > limited_size) {
         limited_size_applied = true;
-        std::nth_element(in_range.begin(),
-                         in_range.begin() + limited_size,
-                         in_range.end(),
-                         [](const auto& a, const auto& b) { return a.first < b.first; });
+        std::nth_element(
+            in_range.begin(), in_range.begin() + limited_size, in_range.end(), simq_distance_less);
         in_range.resize(limited_size);
     }
-    std::sort(in_range.begin(), in_range.end(), [](const auto& a, const auto& b) {
-        return a.first < b.first;
-    });
+    auto t_sort_start = std::chrono::steady_clock::now();
+    std::sort(in_range.begin(), in_range.end(), simq_distance_less);
+    double sort_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_sort_start)
+            .count();
 
     auto [result_ds, dists, ids] =
         create_fast_dataset(static_cast<int64_t>(in_range.size()), allocator_);
@@ -930,13 +1688,17 @@ SIMQ::RangeSearch(const DatasetPtr& query,
                                                rerank_candidate_count,
                                                filtered_candidate_count,
                                                static_cast<uint64_t>(in_range.size()),
-                                               limited_size_applied));
+                                               limited_size_applied,
+                                               coarse_ms,
+                                               query_ms,
+                                               sort_ms,
+                                               0,
+                                               0,
+                                               0));
     return std::move(result_ds);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Serialize / Deserialize
-// ─────────────────────────────────────────────────────────────────────────────
 
 void
 SIMQ::serialize_rep_hgraph(StreamWriter& writer) const {
@@ -961,7 +1723,8 @@ SIMQ::deserialize_rep_hgraph(StreamReader& reader) {
     cp.data_type_ = DataTypes::DATA_TYPE_FLOAT;
     cp.dim_ = dim_;
 
-    auto param = HGraph::CheckAndMappingExternalParam(JsonType::Parse("{}"), cp);
+    auto param = HGraph::CheckAndMappingExternalParam(
+        JsonType::Parse("{\"max_degree\":32,\"ef_construction\":50}"), cp);
     rep_hgraph_ = std::make_shared<HGraph>(param, cp);
 
     // Use SliceStreamReader so HGraph's footer seeks within its own data only.
@@ -1027,6 +1790,7 @@ SIMQ::Deserialize(StreamReader& reader) {
         split_start_idx_ = tmp_param.split_start_idx;
         random_seed_ = tmp_param.random_seed;
         init_cluster_ratio_ = tmp_param.init_cluster_ratio;
+        split_delay_seconds_ = tmp_param.split_delay_seconds;
     }
 
     uint64_t total_count_val = 0;
@@ -1053,15 +1817,14 @@ SIMQ::Deserialize(StreamReader& reader) {
     this->label_table_->Deserialize(buf_reader);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // InitFeatures
-// ─────────────────────────────────────────────────────────────────────────────
 
 void
 SIMQ::InitFeatures() {
     index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_BUILD,
         IndexFeature::SUPPORT_ADD_AFTER_BUILD,
+        IndexFeature::SUPPORT_BATCH_ADD_WITH_MULTI_THREAD,
         IndexFeature::SUPPORT_KNN_SEARCH,
         IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
         IndexFeature::SUPPORT_RANGE_SEARCH,
@@ -1078,9 +1841,7 @@ SIMQ::InitFeatures() {
     });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // External parameter mapping
-// ─────────────────────────────────────────────────────────────────────────────
 
 static const std::string SIMQ_PARAMS_TEMPLATE =
     R"(
@@ -1088,7 +1849,7 @@ static const std::string SIMQ_PARAMS_TEMPLATE =
         "{TYPE_KEY}": "{INDEX_SIMQ}",
         "{BASE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_ASYNC_IO}",
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}",
                 "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
             },
             "{CODES_TYPE_KEY}": "multi_vector"
@@ -1107,6 +1868,9 @@ SIMQ::CheckAndMappingExternalParam(const JsonType& external_param,
         {"random_seed", {"random_seed"}},
         {"coarse_k", {"coarse_k"}},
         {"rerank_k", {"rerank_k"}},
+        {"quantization_type", {"quantization_type"}},
+        {BUILD_THREAD_COUNT_KEY, {BUILD_THREAD_COUNT_KEY}},
+        {"split_delay_seconds", {"split_delay_seconds"}},
     };
 
     if (common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {

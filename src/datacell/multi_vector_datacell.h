@@ -19,6 +19,7 @@
 #include "io/common/basic_io.h"
 #include "io/memory_block_io/memory_block_io.h"
 #include "quantization/multi_vector_computer.h"
+#include "typing.h"
 #include "vsag/dataset.h"
 
 namespace vsag {
@@ -85,6 +86,11 @@ public:
     [[nodiscard]] std::string
     GetQuantizerName() override;
 
+    [[nodiscard]] uint64_t
+    GetQuantizerCodeSize() const override {
+        return this->quantizer_->GetCodeSize();
+    }
+
     [[nodiscard]] MetricType
     GetMetricType() override;
 
@@ -123,6 +129,12 @@ private:
 
     uint32_t multi_vector_dim_{0};
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
+
+    // Per-doc token count cache, populated during InsertVector (Build / incremental Add)
+    // and rebuilt during Deserialize via batched MultiRead. Allows Query to skip the
+    // io_->MultiRead that would otherwise fetch the 4-byte token count from disk for
+    // every candidate, eliminating one io_submit + io_getevents round trip per query.
+    Vector<uint32_t> token_counts_{allocator_};
 };
 
 }  // namespace vsag

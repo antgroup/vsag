@@ -168,6 +168,11 @@ public:
     [[nodiscard]] virtual std::string
     GetQuantizerName() = 0;
 
+    [[nodiscard]] virtual uint64_t
+    GetQuantizerCodeSize() const {
+        return this->code_size_;
+    }
+
     [[nodiscard]] virtual bool
     SupportSplitCodeStorage() const {
         return false;

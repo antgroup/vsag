@@ -45,6 +45,16 @@ public:
     int64_t coarse_k{8};    // clusters searched per query token
     int64_t rerank_k{100};  // docs reranked with exact MaxSim
 
+    // Token-vector quantization: "fp32" (default), "fp16", "bf16",
+    // "sq8_uniform", or "int8".  Controls the storage format of multi-vector
+    // token data in MultiVectorDataCell; smaller formats reduce memory at the
+    // cost of some MaxSim precision.
+    std::string quantization_type{"fp32"};
+
+    // Split delay: wait this many seconds after first overflow before
+    // actually splitting.  0 = immediate split (original behaviour).
+    double split_delay_seconds{0.0};
+
     // Storage for doc token vectors (used during MaxSim rerank)
     FlattenInterfaceParamPtr base_codes_param{nullptr};
 };

@@ -167,3 +167,6 @@ endif ()
 
 add_executable(329_feature_ivf_precise_bucket 329_feature_ivf_precise_bucket.cpp)
 target_link_libraries(329_feature_ivf_precise_bucket vsag)
+
+add_executable(114_index_simq 114_index_simq.cpp)
+target_link_libraries(114_index_simq vsag)
