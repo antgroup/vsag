@@ -146,6 +146,25 @@ TEST_CASE("FlattenDataCell Basic Test", "[ut][FlattenDataCell] ") {
     }
 }
 
+TEST_CASE("FlattenDataCell only reports a stride for contiguous raw data",
+          "[ut][FlattenDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(JsonType::Parse(R"({
+        "io_params": {"type": "block_memory_io"},
+        "quantization_params": {"type": "fp32"}
+    })"));
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = 4;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+    auto flatten = FlattenInterface::MakeInstance(param, common_param);
+    uint64_t row_stride = 123;
+    REQUIRE(flatten->TryGetContiguousRawFloatData(&row_stride) == nullptr);
+    REQUIRE(row_stride == 0);
+}
+
 TEST_CASE("RaBitQSplitDataCell direct split compute", "[ut][RaBitQSplitDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr uint64_t dim = 64;

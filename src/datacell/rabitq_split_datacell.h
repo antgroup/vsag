@@ -38,6 +38,7 @@
 #include "io/memory_io/memory_io.h"
 #include "io/memory_io/memory_io_parameter.h"
 #include "io/mmap_io/mmap_io_parameter.h"
+#include "layout/fixed_layout.h"
 #include "quantization/bottom_quantizer_accessor.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer.h"
 #include "query_context.h"
@@ -50,96 +51,6 @@
 namespace vsag {
 
 class MMapIO;
-
-template <typename IOTmpl>
-class RaBitQSplitCodeStorage {
-public:
-    static constexpr bool InMemory = IOTmpl::InMemory;
-
-    RaBitQSplitCodeStorage(const IOParamPtr& io_param, const IndexCommonParam& common_param)
-        : io_(std::make_shared<IOTmpl>(io_param, common_param)) {
-    }
-
-    void
-    SetCodeSize(uint64_t code_size) {
-        code_size_ = code_size;
-    }
-
-    [[nodiscard]] uint64_t
-    GetCodeSize() const {
-        return code_size_;
-    }
-
-    void
-    Resize(uint64_t new_capacity) {
-        io_->Resize(new_capacity * code_size_);
-    }
-
-    void
-    Shrink(uint64_t new_capacity) {
-        io_->Shrink(new_capacity * code_size_);
-    }
-
-    void
-    Write(const uint8_t* code, InnerIdType id) {
-        io_->Write(code, code_size_, static_cast<uint64_t>(id) * code_size_);
-    }
-
-    bool
-    Read(InnerIdType id, uint8_t* dst) const {
-        return io_->Read(code_size_, static_cast<uint64_t>(id) * code_size_, dst);
-    }
-
-    [[nodiscard]] const uint8_t*
-    Read(InnerIdType id, bool& need_release) const {
-        return io_->Read(code_size_, static_cast<uint64_t>(id) * code_size_, need_release);
-    }
-
-    void
-    Release(const uint8_t* code) const {
-        if (code != nullptr) {
-            io_->Release(code);
-        }
-    }
-
-    void
-    Prefetch(InnerIdType id, uint64_t bytes) const {
-        io_->Prefetch(static_cast<uint64_t>(id) * code_size_,
-                      std::min<uint64_t>(bytes, code_size_));
-    }
-
-    void
-    MultiRead(uint8_t* dst, uint64_t* sizes, uint64_t* offsets, uint64_t count) const {
-        io_->MultiRead(dst, sizes, offsets, count);
-    }
-
-    void
-    InitIO(const IOParamPtr& io_param) {
-        io_->InitIO(io_param);
-    }
-
-    void
-    Serialize(StreamWriter& writer) {
-        io_->Serialize(writer);
-    }
-
-    void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) {
-        io_->Deserialize(reader);
-    }
-
-    [[nodiscard]] uint64_t
-    GetMemoryUsage() const {
-        if constexpr (IOTmpl::InMemory) {
-            return io_->GetMemoryUsage();
-        }
-        return 0;
-    }
-
-private:
-    std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
-    uint64_t code_size_{0};
-};
 
 template <MetricType metric,
           typename OneBitIOTmpl,
@@ -197,10 +108,10 @@ public:
         if (supplement_io_param != nullptr) {
             this->supplement_io_type_ = supplement_io_param->GetTypeName();
         }
-        this->x_bit_cell_ =
-            std::make_shared<RaBitQSplitCodeStorage<OneBitIOTmpl>>(one_bit_io_param, common_param);
-        this->supplement_cell_ =
-            std::make_shared<RaBitQSplitCodeStorage<SupplementIOTmpl>>(supp_io_param, common_param);
+        this->x_bit_layout_ =
+            std::make_shared<FixedLayout<OneBitIOTmpl>>(one_bit_io_param, common_param);
+        this->supplement_layout_ =
+            std::make_shared<FixedLayout<SupplementIOTmpl>>(supp_io_param, common_param);
         this->refresh_code_sizes();
     }
 
@@ -273,7 +184,7 @@ public:
         }
 
         bool need_release = false;
-        const auto* query_code = this->optimized_build_scalar_codes_->Read(query_id, need_release);
+        const auto* query_code = this->optimized_build_scalar_layout_->Read(query_id, need_release);
         if (query_code == nullptr) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
                                 "failed to read temporary scalar RaBitQ query code");
@@ -286,12 +197,12 @@ public:
                                                    id_count);
         } catch (...) {
             if (need_release) {
-                this->optimized_build_scalar_codes_->Release(query_code);
+                this->optimized_build_scalar_layout_->Release(query_code);
             }
             throw;
         }
         if (need_release) {
-            this->optimized_build_scalar_codes_->Release(query_code);
+            this->optimized_build_scalar_layout_->Release(query_code);
         }
         this->add_distance_evaluations(ctx, id_count);
     }
@@ -548,7 +459,7 @@ public:
         if (this->optimized_build_active_) {
             auto computer = std::make_shared<OptimizedBuildComputer>(
                 this->optimized_build_record_size_, this->allocator_);
-            if (not this->optimized_build_scalar_codes_->Read(id, computer->scalar_code_.data)) {
+            if (not this->optimized_build_scalar_layout_->Read(id, computer->scalar_code_.data)) {
                 throw VsagException(ErrorType::INTERNAL_ERROR,
                                     "failed to read scalar RaBitQ build query code");
             }
@@ -572,15 +483,14 @@ public:
             return false;
         }
         auto io_param = std::make_shared<MemoryIOParameter>();
-        auto build_codes =
-            std::make_shared<RaBitQSplitCodeStorage<MemoryIO>>(io_param, this->common_param_);
+        auto build_codes = std::make_shared<FixedLayout<MemoryIO>>(io_param, this->common_param_);
         build_codes->SetCodeSize(this->bottom_quantizer().GetScalarCodeSize());
         auto code_sums = std::make_unique<Vector<uint64_t>>(this->allocator_);
         if (this->max_capacity_ > 0) {
             build_codes->Resize(this->max_capacity_);
             code_sums->resize(this->max_capacity_, 0);
         }
-        this->optimized_build_scalar_codes_ = build_codes;
+        this->optimized_build_scalar_layout_ = build_codes;
         this->optimized_build_code_sums_ = std::move(code_sums);
         this->optimized_build_record_size_ = this->bottom_quantizer().GetScalarCodeSize();
         this->optimized_build_context_ = context;
@@ -597,8 +507,8 @@ public:
         // Finalize workers write disjoint IDs, but the backing IO must already be fully sized so
         // no worker enters a concurrent reallocation path.
         const InnerIdType final_capacity = std::max(this->max_capacity_, this->total_count_);
-        this->x_bit_cell_->Resize(final_capacity);
-        this->supplement_cell_->Resize(final_capacity);
+        this->x_bit_layout_->Resize(final_capacity);
+        this->supplement_layout_->Resize(final_capacity);
         this->max_capacity_ = final_capacity;
 
         auto finalize_range = [this](InnerIdType begin, InnerIdType end) {
@@ -607,7 +517,7 @@ public:
             for (InnerIdType id = begin; id < end; ++id) {
                 bool need_release = false;
                 const auto* scalar_code =
-                    this->optimized_build_scalar_codes_->Read(id, need_release);
+                    this->optimized_build_scalar_layout_->Read(id, need_release);
                 if (scalar_code == nullptr) {
                     throw VsagException(ErrorType::INTERNAL_ERROR,
                                         "failed to read temporary scalar RaBitQ build code");
@@ -615,16 +525,16 @@ public:
                 try {
                     this->bottom_quantizer().PackScalarCodeToSplitCode(
                         scalar_code, one_bit_code.data, supplement_code.data);
-                    this->x_bit_cell_->Write(one_bit_code.data, id);
-                    this->supplement_cell_->Write(supplement_code.data, id);
+                    this->x_bit_layout_->Write(id, one_bit_code.data);
+                    this->supplement_layout_->Write(id, supplement_code.data);
                 } catch (...) {
                     if (need_release) {
-                        this->optimized_build_scalar_codes_->Release(scalar_code);
+                        this->optimized_build_scalar_layout_->Release(scalar_code);
                     }
                     throw;
                 }
                 if (need_release) {
-                    this->optimized_build_scalar_codes_->Release(scalar_code);
+                    this->optimized_build_scalar_layout_->Release(scalar_code);
                 }
             }
         };
@@ -681,7 +591,7 @@ public:
         }
 
         this->optimized_build_active_ = false;
-        this->optimized_build_scalar_codes_.reset();
+        this->optimized_build_scalar_layout_.reset();
         this->optimized_build_code_sums_.reset();
         this->optimized_build_record_size_ = 0;
         this->optimized_build_context_ = {};
@@ -690,7 +600,7 @@ public:
     void
     AbortOptimizedBuild() noexcept override {
         this->optimized_build_active_ = false;
-        this->optimized_build_scalar_codes_.reset();
+        this->optimized_build_scalar_layout_.reset();
         this->optimized_build_code_sums_.reset();
         this->optimized_build_record_size_ = 0;
         this->optimized_build_context_ = {};
@@ -745,14 +655,14 @@ public:
         if (this->optimized_build_active_) {
             bool release1 = false;
             bool release2 = false;
-            const auto* codes1 = this->optimized_build_scalar_codes_->Read(id1, release1);
-            const auto* codes2 = this->optimized_build_scalar_codes_->Read(id2, release2);
+            const auto* codes1 = this->optimized_build_scalar_layout_->Read(id1, release1);
+            const auto* codes2 = this->optimized_build_scalar_layout_->Read(id2, release2);
             if (codes1 == nullptr or codes2 == nullptr) {
                 if (release1) {
-                    this->optimized_build_scalar_codes_->Release(codes1);
+                    this->optimized_build_scalar_layout_->Release(codes1);
                 }
                 if (release2) {
-                    this->optimized_build_scalar_codes_->Release(codes2);
+                    this->optimized_build_scalar_layout_->Release(codes2);
                 }
                 throw VsagException(ErrorType::INTERNAL_ERROR,
                                     "failed to read temporary scalar RaBitQ build codes");
@@ -766,18 +676,18 @@ public:
                     (*optimized_build_code_sums_)[id2]);
             } catch (...) {
                 if (release1) {
-                    this->optimized_build_scalar_codes_->Release(codes1);
+                    this->optimized_build_scalar_layout_->Release(codes1);
                 }
                 if (release2) {
-                    this->optimized_build_scalar_codes_->Release(codes2);
+                    this->optimized_build_scalar_layout_->Release(codes2);
                 }
                 throw;
             }
             if (release1) {
-                this->optimized_build_scalar_codes_->Release(codes1);
+                this->optimized_build_scalar_layout_->Release(codes1);
             }
             if (release2) {
-                this->optimized_build_scalar_codes_->Release(codes2);
+                this->optimized_build_scalar_layout_->Release(codes2);
             }
             return distance;
         }
@@ -793,10 +703,10 @@ public:
         if (new_capacity <= this->max_capacity_) {
             return;
         }
-        this->x_bit_cell_->Resize(new_capacity);
-        this->supplement_cell_->Resize(new_capacity);
+        this->x_bit_layout_->Resize(new_capacity);
+        this->supplement_layout_->Resize(new_capacity);
         if (this->optimized_build_active_) {
-            this->optimized_build_scalar_codes_->Resize(new_capacity);
+            this->optimized_build_scalar_layout_->Resize(new_capacity);
             this->optimized_build_code_sums_->resize(new_capacity, 0);
         }
         this->max_capacity_ = new_capacity;
@@ -805,7 +715,7 @@ public:
     void
     Prefetch(InnerIdType id) override {
         if (this->optimized_build_active_) {
-            this->optimized_build_scalar_codes_->Prefetch(id, this->optimized_build_record_size_);
+            this->optimized_build_scalar_layout_->Prefetch(id, this->optimized_build_record_size_);
             return;
         }
         this->prefetch_one_bit(id);
@@ -831,27 +741,27 @@ public:
     void
     InitIO(const IOParamPtr& io_param) override {
         const bool shares_io_param = this->supplement_io_type_.empty();
-        this->x_bit_cell_->InitIO(SuffixIOParam(io_param, "_onebit", shares_io_param));
+        this->x_bit_layout_->InitIO(SuffixIOParam(io_param, "_onebit", shares_io_param));
         // In hybrid mode (one-bit and supplement use different IO backends)
         // the caller-facing `io_param` is the one-bit IO parameter type and
-        // cannot be passed directly to `supplement_cell_`. Rebuild a fresh
+        // cannot be passed directly to `supplement_layout_`. Rebuild a fresh
         // IOParameter of the recorded supplement type so the underlying IO
         // implementation receives the correct parameter subclass.
-        this->supplement_cell_->InitIO(RebuildSupplementIOParam(io_param));
+        this->supplement_layout_->InitIO(RebuildSupplementIOParam(io_param));
     }
 
     void
     InitIO(const IOParamPtr& one_bit_io_param, const IOParamPtr& supplement_io_param) {
         const bool shares_io_param = supplement_io_param == nullptr;
-        this->x_bit_cell_->InitIO(SuffixIOParam(one_bit_io_param, "_onebit", shares_io_param));
+        this->x_bit_layout_->InitIO(SuffixIOParam(one_bit_io_param, "_onebit", shares_io_param));
         if (supplement_io_param != nullptr) {
             // Refresh the recorded supplement type so subsequent
             // single-parameter InitIO calls (e.g. from Deserialize) can
             // reconstruct the same IO subtype.
             this->supplement_io_type_ = supplement_io_param->GetTypeName();
-            this->supplement_cell_->InitIO(supplement_io_param);
+            this->supplement_layout_->InitIO(supplement_io_param);
         } else {
-            this->supplement_cell_->InitIO(RebuildSupplementIOParam(one_bit_io_param));
+            this->supplement_layout_->InitIO(RebuildSupplementIOParam(one_bit_io_param));
         }
     }
 
@@ -912,21 +822,21 @@ public:
     GetCodesById(InnerIdType id, uint8_t* codes) const override {
         if (this->optimized_build_active_) {
             bool need_release = false;
-            const auto* scalar_code = this->optimized_build_scalar_codes_->Read(id, need_release);
+            const auto* scalar_code = this->optimized_build_scalar_layout_->Read(id, need_release);
             if (scalar_code == nullptr) {
                 return false;
             }
             memset(codes, 0, this->code_size_);
             this->bottom_quantizer().PackScalarCode(scalar_code, codes);
             if (need_release) {
-                this->optimized_build_scalar_codes_->Release(scalar_code);
+                this->optimized_build_scalar_layout_->Release(scalar_code);
             }
             return true;
         }
         ByteBuffer one_bit(one_bit_code_size_, allocator_);
         ByteBuffer supplement(supplement_code_size_, allocator_);
-        bool one_bit_ok = this->x_bit_cell_->Read(id, one_bit.data);
-        bool supplement_ok = this->supplement_cell_->Read(id, supplement.data);
+        bool one_bit_ok = this->x_bit_layout_->Read(id, one_bit.data);
+        bool supplement_ok = this->supplement_layout_->Read(id, supplement.data);
         if (not one_bit_ok or not supplement_ok) {
             return false;
         }
@@ -951,8 +861,8 @@ public:
                        "cannot serialize RaBitQ split codes during optimized build");
         FlattenInterface::Serialize(writer);
         StreamWriter::WriteString(writer, this->supplement_io_type_);
-        this->x_bit_cell_->Serialize(writer);
-        this->supplement_cell_->Serialize(writer);
+        this->x_bit_layout_->Serialize(writer);
+        this->supplement_layout_->Serialize(writer);
         this->quantizer_->Serialize(writer);
     }
 
@@ -960,8 +870,8 @@ public:
     Deserialize(lvalue_or_rvalue<StreamReader> reader) override {
         FlattenInterface::Deserialize(reader);
         this->DeserializeSupplementIOType(reader);
-        this->x_bit_cell_->Deserialize(reader);
-        this->supplement_cell_->Deserialize(reader);
+        this->x_bit_layout_->Deserialize(reader);
+        this->supplement_layout_->Deserialize(reader);
         this->quantizer_->Deserialize(reader);
         this->refresh_code_sizes();
     }
@@ -978,11 +888,11 @@ public:
         for (InnerIdType i = 0; i < ptr->total_count_; ++i) {
             ByteBuffer one_bit(one_bit_code_size_, allocator_);
             ByteBuffer supplement(supplement_code_size_, allocator_);
-            ptr->x_bit_cell_->Read(i, one_bit.data);
-            ptr->supplement_cell_->Read(i, supplement.data);
+            ptr->x_bit_layout_->Read(i, one_bit.data);
+            ptr->supplement_layout_->Read(i, supplement.data);
             auto target_id = static_cast<InnerIdType>(bias + i);
-            this->x_bit_cell_->Write(one_bit.data, target_id);
-            this->supplement_cell_->Write(supplement.data, target_id);
+            this->x_bit_layout_->Write(target_id, one_bit.data);
+            this->supplement_layout_->Write(target_id, supplement.data);
         }
         this->total_count_ = std::max(this->total_count_, bias + ptr->total_count_);
     }
@@ -991,25 +901,25 @@ public:
     Move(InnerIdType from, InnerIdType to) override {
         if (this->optimized_build_active_) {
             ByteBuffer build_record(this->optimized_build_record_size_, allocator_);
-            this->optimized_build_scalar_codes_->Read(from, build_record.data);
-            this->optimized_build_scalar_codes_->Write(build_record.data, to);
+            this->optimized_build_scalar_layout_->Read(from, build_record.data);
+            this->optimized_build_scalar_layout_->Write(to, build_record.data);
             (*this->optimized_build_code_sums_)[to] = (*this->optimized_build_code_sums_)[from];
             return;
         }
         ByteBuffer one_bit(one_bit_code_size_, allocator_);
         ByteBuffer supplement(supplement_code_size_, allocator_);
-        this->x_bit_cell_->Read(from, one_bit.data);
-        this->supplement_cell_->Read(from, supplement.data);
-        this->x_bit_cell_->Write(one_bit.data, to);
-        this->supplement_cell_->Write(supplement.data, to);
+        this->x_bit_layout_->Read(from, one_bit.data);
+        this->supplement_layout_->Read(from, supplement.data);
+        this->x_bit_layout_->Write(to, one_bit.data);
+        this->supplement_layout_->Write(to, supplement.data);
     }
 
     void
     ShrinkToFit(InnerIdType capacity) override {
-        this->x_bit_cell_->Shrink(capacity);
-        this->supplement_cell_->Shrink(capacity);
+        this->x_bit_layout_->Shrink(capacity);
+        this->supplement_layout_->Shrink(capacity);
         if (this->optimized_build_active_) {
-            this->optimized_build_scalar_codes_->Shrink(capacity);
+            this->optimized_build_scalar_layout_->Shrink(capacity);
             this->optimized_build_code_sums_->resize(capacity);
             this->optimized_build_code_sums_->shrink_to_fit();
         }
@@ -1020,10 +930,10 @@ public:
     GetMemoryUsage() const override {
         uint64_t memory =
             sizeof(RaBitQSplitDataCell<metric, OneBitIOTmpl, SupplementIOTmpl, QuantizerT>);
-        memory += this->x_bit_cell_->GetMemoryUsage();
-        memory += this->supplement_cell_->GetMemoryUsage();
-        if (this->optimized_build_scalar_codes_ != nullptr) {
-            memory += this->optimized_build_scalar_codes_->GetMemoryUsage();
+        memory += this->x_bit_layout_->GetMemoryUsage();
+        memory += this->supplement_layout_->GetMemoryUsage();
+        if (this->optimized_build_scalar_layout_ != nullptr) {
+            memory += this->optimized_build_scalar_layout_->GetMemoryUsage();
         }
         if (this->optimized_build_code_sums_ != nullptr) {
             memory += this->optimized_build_code_sums_->capacity() * sizeof(uint64_t);
@@ -1035,9 +945,9 @@ public:
 public:
     IndexCommonParam common_param_;
     std::shared_ptr<QuantizerT> quantizer_{nullptr};
-    std::shared_ptr<RaBitQSplitCodeStorage<OneBitIOTmpl>> x_bit_cell_{nullptr};
-    std::shared_ptr<RaBitQSplitCodeStorage<SupplementIOTmpl>> supplement_cell_{nullptr};
-    std::shared_ptr<RaBitQSplitCodeStorage<MemoryIO>> optimized_build_scalar_codes_{nullptr};
+    std::shared_ptr<FixedLayout<OneBitIOTmpl>> x_bit_layout_{nullptr};
+    std::shared_ptr<FixedLayout<SupplementIOTmpl>> supplement_layout_{nullptr};
+    std::shared_ptr<FixedLayout<MemoryIO>> optimized_build_scalar_layout_{nullptr};
     std::unique_ptr<Vector<uint64_t>> optimized_build_code_sums_{nullptr};
     FlattenOptimizedBuildContext optimized_build_context_{};
 
@@ -1050,7 +960,7 @@ public:
     // storage" (the legacy single-IO behaviour). Recorded so that the
     // single-parameter `InitIO(const IOParamPtr&)` overload (e.g. invoked
     // from Deserialize) can rebuild a parameter of the correct concrete
-    // IOParameter subclass for `supplement_cell_` instead of feeding it the
+    // IOParameter subclass for `supplement_layout_` instead of feeding it the
     // mismatched one-bit IO parameter type.
     std::string supplement_io_type_{};
     bool optimized_build_active_{false};
@@ -1089,13 +999,13 @@ private:
         return IOParameter::GetIOParameterByJson(json);
     }
 
-    // Builds the IO parameter that should be handed to `supplement_cell_`
+    // Builds the IO parameter that should be handed to `supplement_layout_`
     // given the caller-supplied `io_param` (which is always typed for the
     // one-bit storage). If `supplement_io_type_` is empty the two storages
     // share the same IO type and we fall back to the legacy file-path-suffix
     // behaviour. Otherwise the JSON is cloned, its `type` field rewritten to
     // the recorded supplement type, the optional file path suffixed, and a
-    // new IOParameter is constructed via the factory so `supplement_cell_`
+    // new IOParameter is constructed via the factory so `supplement_layout_`
     // receives the IOParameter subclass it actually expects.
     IOParamPtr
     RebuildSupplementIOParam(const IOParamPtr& io_param) const {
@@ -1154,8 +1064,8 @@ private:
         this->code_size_ = static_cast<uint32_t>(quantizer_->GetCodeSize());
         this->one_bit_code_size_ = this->bottom_quantizer().GetOneBitCodeSize();
         this->supplement_code_size_ = this->bottom_quantizer().GetSupplementCodeSize();
-        this->x_bit_cell_->SetCodeSize(one_bit_code_size_);
-        this->supplement_cell_->SetCodeSize(supplement_code_size_);
+        this->x_bit_layout_->SetCodeSize(one_bit_code_size_);
+        this->supplement_layout_->SetCodeSize(supplement_code_size_);
     }
 
     void
@@ -1172,7 +1082,7 @@ private:
                                     "failed to encode temporary scalar RaBitQ build code");
             }
             (*this->optimized_build_code_sums_)[idx] = code_sum;
-            this->optimized_build_scalar_codes_->Write(scalar_code.data, idx);
+            this->optimized_build_scalar_layout_->Write(idx, scalar_code.data);
             return;
         }
         ByteBuffer full_code(this->code_size_, allocator_);
@@ -1180,8 +1090,8 @@ private:
         ByteBuffer one_bit_code(one_bit_code_size_, allocator_);
         ByteBuffer supplement_code(supplement_code_size_, allocator_);
         this->bottom_quantizer().SplitCode(full_code.data, one_bit_code.data, supplement_code.data);
-        this->x_bit_cell_->Write(one_bit_code.data, idx);
-        this->supplement_cell_->Write(supplement_code.data, idx);
+        this->x_bit_layout_->Write(idx, one_bit_code.data);
+        this->supplement_layout_->Write(idx, supplement_code.data);
     }
 
     void
@@ -1203,7 +1113,7 @@ private:
         for (InnerIdType i = 0; i < id_count; ++i) {
             bool need_release = false;
             const auto* scalar_code =
-                this->optimized_build_scalar_codes_->Read(idx[i], need_release);
+                this->optimized_build_scalar_layout_->Read(idx[i], need_release);
             if (scalar_code == nullptr) {
                 throw VsagException(ErrorType::INTERNAL_ERROR,
                                     "failed to read temporary scalar RaBitQ build code");
@@ -1213,12 +1123,12 @@ private:
                     *comp, scalar_code, result_dists + i);
             } catch (...) {
                 if (need_release) {
-                    this->optimized_build_scalar_codes_->Release(scalar_code);
+                    this->optimized_build_scalar_layout_->Release(scalar_code);
                 }
                 throw;
             }
             if (need_release) {
-                this->optimized_build_scalar_codes_->Release(scalar_code);
+                this->optimized_build_scalar_layout_->Release(scalar_code);
             }
         }
     }
@@ -1230,15 +1140,16 @@ private:
                                      const InnerIdType* idx,
                                      InnerIdType id_count) const {
         for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
-            this->optimized_build_scalar_codes_->Prefetch(idx[i], this->prefetch_depth_code_ * 64);
+            this->optimized_build_scalar_layout_->Prefetch(idx[i], this->prefetch_depth_code_ * 64);
         }
         for (InnerIdType i = 0; i < id_count; ++i) {
             if (i + this->prefetch_stride_code_ < id_count) {
-                this->optimized_build_scalar_codes_->Prefetch(idx[i + this->prefetch_stride_code_],
-                                                              this->prefetch_depth_code_ * 64);
+                this->optimized_build_scalar_layout_->Prefetch(idx[i + this->prefetch_stride_code_],
+                                                               this->prefetch_depth_code_ * 64);
             }
             bool need_release = false;
-            const auto* base_code = this->optimized_build_scalar_codes_->Read(idx[i], need_release);
+            const auto* base_code =
+                this->optimized_build_scalar_layout_->Read(idx[i], need_release);
             if (base_code == nullptr) {
                 throw VsagException(ErrorType::INTERNAL_ERROR,
                                     "failed to read temporary scalar RaBitQ build code");
@@ -1248,24 +1159,24 @@ private:
                     query_code, query_sum, base_code, (*this->optimized_build_code_sums_)[idx[i]]);
             } catch (...) {
                 if (need_release) {
-                    this->optimized_build_scalar_codes_->Release(base_code);
+                    this->optimized_build_scalar_layout_->Release(base_code);
                 }
                 throw;
             }
             if (need_release) {
-                this->optimized_build_scalar_codes_->Release(base_code);
+                this->optimized_build_scalar_layout_->Release(base_code);
             }
         }
     }
 
     void
     prefetch_one_bit(InnerIdType id) {
-        this->x_bit_cell_->Prefetch(id, this->prefetch_depth_code_ * 64);
+        this->x_bit_layout_->Prefetch(id, this->prefetch_depth_code_ * 64);
     }
 
     void
     prefetch_supplement(InnerIdType id) {
-        this->supplement_cell_->Prefetch(id, this->prefetch_depth_code_ * 64);
+        this->supplement_layout_->Prefetch(id, this->prefetch_depth_code_ * 64);
     }
 
     void
@@ -1276,25 +1187,25 @@ private:
 
     const uint8_t*
     get_one_bit_code(InnerIdType id, bool& need_release) const {
-        return this->x_bit_cell_->Read(id, need_release);
+        return this->x_bit_layout_->Read(id, need_release);
     }
 
     void
     release_one_bit_code(const uint8_t* code, bool need_release) const {
         if (need_release) {
-            this->x_bit_cell_->Release(code);
+            this->x_bit_layout_->Release(code);
         }
     }
 
     const uint8_t*
     get_supplement_code(InnerIdType id, bool& need_release) const {
-        return this->supplement_cell_->Read(id, need_release);
+        return this->supplement_layout_->Read(id, need_release);
     }
 
     void
     release_supplement_code(const uint8_t* code, bool need_release) const {
         if (need_release) {
-            this->supplement_cell_->Release(code);
+            this->supplement_layout_->Release(code);
         }
     }
 
@@ -1359,17 +1270,10 @@ private:
                                            QueryContext* ctx) const {
         Allocator* search_alloc = select_query_allocator(ctx, allocator_);
         ByteBuffer one_bit_codes(id_count * one_bit_code_size_, search_alloc);
-        Vector<uint64_t> sizes(id_count, one_bit_code_size_, search_alloc);
-        Vector<uint64_t> offsets(id_count, one_bit_code_size_, search_alloc);
-        for (InnerIdType i = 0; i < id_count; ++i) {
-            offsets[i] = static_cast<uint64_t>(idx[i]) * one_bit_code_size_;
-        }
-
         double io_cost_ms = 0.0F;
         {
             Timer timer(io_cost_ms);
-            this->x_bit_cell_->MultiRead(
-                one_bit_codes.data, sizes.data(), offsets.data(), id_count);
+            this->x_bit_layout_->MultiRead(idx, id_count, one_bit_codes.data, search_alloc);
         }
         if (ctx != nullptr and ctx->stats != nullptr) {
             ctx->stats->io_cnt.fetch_add(id_count, std::memory_order_relaxed);
@@ -1456,22 +1360,11 @@ private:
         Allocator* search_alloc = select_query_allocator(ctx, allocator_);
         ByteBuffer one_bit_codes(id_count * one_bit_code_size_, search_alloc);
         ByteBuffer supplement_codes(id_count * supplement_code_size_, search_alloc);
-        Vector<uint64_t> one_bit_sizes(id_count, one_bit_code_size_, search_alloc);
-        Vector<uint64_t> one_bit_offsets(id_count, 0, search_alloc);
-        Vector<uint64_t> supp_sizes(id_count, supplement_code_size_, search_alloc);
-        Vector<uint64_t> supp_offsets(id_count, 0, search_alloc);
-        for (InnerIdType i = 0; i < id_count; ++i) {
-            one_bit_offsets[i] = static_cast<uint64_t>(idx[i]) * one_bit_code_size_;
-            supp_offsets[i] = static_cast<uint64_t>(idx[i]) * supplement_code_size_;
-        }
-
         double io_cost_ms = 0.0F;
         {
             Timer timer(io_cost_ms);
-            this->x_bit_cell_->MultiRead(
-                one_bit_codes.data, one_bit_sizes.data(), one_bit_offsets.data(), id_count);
-            this->supplement_cell_->MultiRead(
-                supplement_codes.data, supp_sizes.data(), supp_offsets.data(), id_count);
+            this->x_bit_layout_->MultiRead(idx, id_count, one_bit_codes.data, search_alloc);
+            this->supplement_layout_->MultiRead(idx, id_count, supplement_codes.data, search_alloc);
         }
         if (ctx != nullptr and ctx->stats != nullptr) {
             ctx->stats->io_cnt.fetch_add(id_count * 2, std::memory_order_relaxed);
@@ -1498,17 +1391,10 @@ private:
                                             const float* hint_dists = nullptr) const {
         Allocator* search_alloc = select_query_allocator(ctx, allocator_);
         ByteBuffer supplement_codes(id_count * supplement_code_size_, search_alloc);
-        Vector<uint64_t> supp_sizes(id_count, supplement_code_size_, search_alloc);
-        Vector<uint64_t> supp_offsets(id_count, 0, search_alloc);
-        for (InnerIdType i = 0; i < id_count; ++i) {
-            supp_offsets[i] = static_cast<uint64_t>(idx[i]) * supplement_code_size_;
-        }
-
         double io_cost_ms = 0.0F;
         {
             Timer timer(io_cost_ms);
-            this->supplement_cell_->MultiRead(
-                supplement_codes.data, supp_sizes.data(), supp_offsets.data(), id_count);
+            this->supplement_layout_->MultiRead(idx, id_count, supplement_codes.data, search_alloc);
         }
         if (ctx != nullptr and ctx->stats != nullptr) {
             ctx->stats->io_cnt.fetch_add(id_count, std::memory_order_relaxed);

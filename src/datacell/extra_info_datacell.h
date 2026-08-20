@@ -17,21 +17,20 @@
 #include <algorithm>
 #include <limits>
 #include <memory>
+#include <utility>
 
 #include "extra_info_interface.h"
-#include "io/common/basic_io.h"
-#include "io/memory_block_io/memory_block_io.h"
-#include "quantization/quantizer.h"
-#include "utils/byte_buffer.h"
+#include "layout/fixed_layout.h"
 
 namespace vsag {
 /*
 * thread unsafe
 */
-template <typename IOTmpl>
+template <typename LayoutTmpl>
 class ExtraInfoDataCell : public ExtraInfoInterface {
 public:
-    ExtraInfoDataCell() = default;
+    ExtraInfoDataCell() : layout_(std::make_shared<LayoutTmpl>()) {
+    }
 
     explicit ExtraInfoDataCell(const IOParamPtr& io_param, const IndexCommonParam& common_param);
 
@@ -43,7 +42,7 @@ public:
 
     void
     Prefetch(InnerIdType id) override {
-        io_->Prefetch(id * extra_info_size_, extra_info_size_);
+        layout_->Prefetch(id, extra_info_size_);
     };
 
     void
@@ -51,9 +50,7 @@ public:
         if (new_capacity <= this->max_capacity_) {
             return;
         }
-        uint64_t io_size =
-            static_cast<uint64_t>(new_capacity) * static_cast<uint64_t>(extra_info_size_);
-        this->io_->Resize(io_size);
+        this->layout_->Resize(new_capacity);
         this->max_capacity_ = new_capacity;
     }
 
@@ -62,7 +59,7 @@ public:
         if (extra_info == nullptr) {
             return;
         }
-        io_->Release(reinterpret_cast<const uint8_t*>(extra_info));
+        layout_->Release(reinterpret_cast<const uint8_t*>(extra_info));
     }
 
     [[nodiscard]] bool
@@ -88,57 +85,49 @@ public:
 
     void
     ShrinkToFit(InnerIdType capacity) override {
-        uint64_t io_size =
-            static_cast<uint64_t>(capacity) * static_cast<uint64_t>(extra_info_size_);
-        this->io_->Shrink(io_size);
+        this->layout_->Shrink(capacity);
         this->max_capacity_ = capacity;
         this->total_count_ = std::min(this->total_count_, capacity);
     }
 
     inline void
-    SetIO(std::shared_ptr<BasicIO<IOTmpl>> io) {
-        this->io_ = io;
+    SetIO(std::shared_ptr<BasicIO<typename LayoutTmpl::IOType>> io) {
+        this->layout_->SetIO(std::move(io));
     }
 
 public:
-    std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
+    std::shared_ptr<LayoutTmpl> layout_{nullptr};
 
     Allocator* const allocator_{nullptr};
 };
 
-template <typename IOTmpl>
-ExtraInfoDataCell<IOTmpl>::ExtraInfoDataCell(const IOParamPtr& io_param,
-                                             const IndexCommonParam& common_param)
+template <typename LayoutTmpl>
+ExtraInfoDataCell<LayoutTmpl>::ExtraInfoDataCell(const IOParamPtr& io_param,
+                                                 const IndexCommonParam& common_param)
     : allocator_(common_param.allocator_.get()) {
     this->extra_info_size_ = common_param.extra_info_size_;
-    this->io_ = std::make_shared<IOTmpl>(io_param, common_param);
+    this->layout_ = std::make_shared<LayoutTmpl>(this->extra_info_size_, io_param, common_param);
 }
 
-template <typename IOTmpl>
+template <typename LayoutTmpl>
 void
-ExtraInfoDataCell<IOTmpl>::InsertExtraInfo(const char* extra_info, InnerIdType idx) {
+ExtraInfoDataCell<LayoutTmpl>::InsertExtraInfo(const char* extra_info, InnerIdType idx) {
     if (idx == std::numeric_limits<InnerIdType>::max()) {
         idx = total_count_;
         ++total_count_;
     } else {
         total_count_ = std::max(total_count_, idx + 1);
     }
-    io_->Write(reinterpret_cast<const uint8_t*>(extra_info),
-               extra_info_size_,
-               static_cast<uint64_t>(idx) * static_cast<uint64_t>(extra_info_size_));
+    layout_->Write(idx, reinterpret_cast<const uint8_t*>(extra_info));
 }
 
-template <typename IOTmpl>
+template <typename LayoutTmpl>
 void
-ExtraInfoDataCell<IOTmpl>::BatchInsertExtraInfo(const char* extra_infos,
-                                                InnerIdType count,
-                                                InnerIdType* idx) {
+ExtraInfoDataCell<LayoutTmpl>::BatchInsertExtraInfo(const char* extra_infos,
+                                                    InnerIdType count,
+                                                    InnerIdType* idx) {
     if (idx == nullptr) {
-        // length of extra info is fixed currently
-        io_->Write(reinterpret_cast<const uint8_t*>(extra_infos),
-                   static_cast<uint64_t>(count) * static_cast<uint64_t>(extra_info_size_),
-                   static_cast<uint64_t>(total_count_) * static_cast<uint64_t>(extra_info_size_));
-
+        layout_->WriteRange(total_count_, reinterpret_cast<const uint8_t*>(extra_infos), count);
         total_count_ += count;
     } else {
         for (int64_t i = 0; i < count; ++i) {
@@ -147,63 +136,52 @@ ExtraInfoDataCell<IOTmpl>::BatchInsertExtraInfo(const char* extra_infos,
     }
 }
 
-template <typename IOTmpl>
+template <typename LayoutTmpl>
 bool
-ExtraInfoDataCell<IOTmpl>::InMemory() const {
-    return IOTmpl::InMemory;
+ExtraInfoDataCell<LayoutTmpl>::InMemory() const {
+    return LayoutTmpl::InMemory;
 }
 
-template <typename IOTmpl>
+template <typename LayoutTmpl>
 bool
-ExtraInfoDataCell<IOTmpl>::GetExtraInfoById(InnerIdType id, char* extra_info) const {
-    return io_->Read(extra_info_size_,
-                     static_cast<uint64_t>(id) * static_cast<uint64_t>(extra_info_size_),
-                     reinterpret_cast<uint8_t*>(extra_info));
+ExtraInfoDataCell<LayoutTmpl>::GetExtraInfoById(InnerIdType id, char* extra_info) const {
+    return layout_->Read(id, reinterpret_cast<uint8_t*>(extra_info));
 }
 
-template <typename IOTmpl>
+template <typename LayoutTmpl>
 const char*
-ExtraInfoDataCell<IOTmpl>::GetExtraInfoById(InnerIdType id, bool& need_release) const {
-    return reinterpret_cast<const char*>(
-        io_->Read(extra_info_size_,
-                  static_cast<uint64_t>(id) * static_cast<uint64_t>(extra_info_size_),
-                  need_release));
+ExtraInfoDataCell<LayoutTmpl>::GetExtraInfoById(InnerIdType id, bool& need_release) const {
+    return reinterpret_cast<const char*>(layout_->Read(id, need_release));
 }
 
-template <typename IOTmpl>
+template <typename LayoutTmpl>
 void
-ExtraInfoDataCell<IOTmpl>::Serialize(StreamWriter& writer) {
+ExtraInfoDataCell<LayoutTmpl>::Serialize(StreamWriter& writer) {
     ExtraInfoInterface::Serialize(writer);
-    this->io_->Serialize(writer);
+    this->layout_->Serialize(writer);
 }
 
-template <typename IOTmpl>
+template <typename LayoutTmpl>
 void
-ExtraInfoDataCell<IOTmpl>::Deserialize(StreamReader& reader) {
+ExtraInfoDataCell<LayoutTmpl>::Deserialize(StreamReader& reader) {
     ExtraInfoInterface::Deserialize(reader);
-    this->io_->Deserialize(reader);
+    this->layout_->SetCodeSize(this->extra_info_size_);
+    this->layout_->Deserialize(reader);
 }
 
-template <typename IOTmpl>
+template <typename LayoutTmpl>
 uint64_t
-ExtraInfoDataCell<IOTmpl>::GetMemoryUsage() const {
-    uint64_t memory = sizeof(ExtraInfoDataCell<IOTmpl>);
-    if (IOTmpl::InMemory) {
-        memory += this->io_->GetMemoryUsage();
+ExtraInfoDataCell<LayoutTmpl>::GetMemoryUsage() const {
+    uint64_t memory = sizeof(ExtraInfoDataCell<LayoutTmpl>);
+    if (LayoutTmpl::InMemory) {
+        memory += this->layout_->GetMemoryUsage();
     }
     return memory;
 }
 
-template <typename IOTmpl>
+template <typename LayoutTmpl>
 void
-ExtraInfoDataCell<IOTmpl>::Move(InnerIdType from, InnerIdType to) {
-    bool need_release = false;
-    const char* extra_info = this->GetExtraInfoById(from, need_release);
-    this->io_->Write(reinterpret_cast<const uint8_t*>(extra_info),
-                     extra_info_size_,
-                     static_cast<uint64_t>(to) * static_cast<uint64_t>(extra_info_size_));
-    if (need_release) {
-        this->io_->Release(reinterpret_cast<const uint8_t*>(extra_info));
-    }
+ExtraInfoDataCell<LayoutTmpl>::Move(InnerIdType from, InnerIdType to) {
+    this->layout_->Move(from, to);
 }
 }  // namespace vsag

@@ -27,7 +27,7 @@ template <typename IOTemp>
 static ExtraInfoInterfacePtr
 make_instance(const ExtraInfoDataCellParamPtr& param, const IndexCommonParam& common_param) {
     auto& io_param = param->io_parameter;
-    return std::make_shared<ExtraInfoDataCell<IOTemp>>(io_param, common_param);
+    return std::make_shared<ExtraInfoDataCell<FixedLayout<IOTemp>>>(io_param, common_param);
 }
 
 ExtraInfoInterfacePtr

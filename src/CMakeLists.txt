@@ -16,6 +16,7 @@
 
 add_subdirectory (simd)
 add_subdirectory (io)
+add_subdirectory (layout)
 add_subdirectory (quantization)
 add_subdirectory (impl)
 add_subdirectory (storage)

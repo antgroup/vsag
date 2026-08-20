@@ -41,9 +41,9 @@ TEST_CASE("ParallelSearcher matches BasicSearcher on a generic graph", "[ut][Par
         JsonType::Parse(fmt::format(param_template, "fp32")));
     auto io_param = IOParameter::GetIOParameterByJson(
         JsonType::Parse(fmt::format(param_template, "memory_io")));
-    auto flatten =
-        std::make_shared<FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
-            quantizer_param, io_param, common);
+    auto flatten = std::make_shared<
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, FixedLayout<MemoryIO>>>(
+        quantizer_param, io_param, common);
     flatten->Train(base_vectors.data(), base_size);
     flatten->BatchInsertVector(base_vectors.data(), base_size, ids.data());
 
@@ -102,9 +102,9 @@ TEST_CASE("ParallelSearcher traverses through a non-finite-distance bridge",
         JsonType::Parse(fmt::format(param_temp, "fp32")));
     auto io_param =
         IOParameter::GetIOParameterByJson(JsonType::Parse(fmt::format(param_temp, "memory_io")));
-    auto flatten =
-        std::make_shared<FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
-            quantizer_param, io_param, common);
+    auto flatten = std::make_shared<
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, FixedLayout<MemoryIO>>>(
+        quantizer_param, io_param, common);
     flatten->SetQuantizer(
         std::make_shared<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>>(1, allocator.get()));
     flatten->SetIO(std::make_unique<MemoryIO>(allocator.get()));

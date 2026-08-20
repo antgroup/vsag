@@ -40,9 +40,9 @@ TEST_CASE("BasicSearcher supports KNN, range, filters, and empty data cells",
         JsonType::Parse(fmt::format(param_temp, "fp32")));
     auto io_param =
         IOParameter::GetIOParameterByJson(JsonType::Parse(fmt::format(param_temp, "memory_io")));
-    auto flatten =
-        std::make_shared<FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
-            quantizer_param, io_param, common);
+    auto flatten = std::make_shared<
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, FixedLayout<MemoryIO>>>(
+        quantizer_param, io_param, common);
     flatten->SetQuantizer(
         std::make_shared<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>>(1, allocator.get()));
     flatten->SetIO(std::make_unique<MemoryIO>(allocator.get()));
@@ -107,9 +107,9 @@ TEST_CASE("Search with stored vector ID", "[ut][BasicSearcher][DistanceProvider]
         JsonType::Parse(fmt::format(param_temp, "fp32")));
     auto io_param =
         IOParameter::GetIOParameterByJson(JsonType::Parse(fmt::format(param_temp, "memory_io")));
-    auto flatten =
-        std::make_shared<FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
-            fp32_param, io_param, common);
+    auto flatten = std::make_shared<
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, FixedLayout<MemoryIO>>>(
+        fp32_param, io_param, common);
 
     const std::vector<float> vectors = {
         0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
@@ -189,12 +189,13 @@ TEST_CASE("Optimize SQ4", "[ut][BasicOptimizer]") {
     FlattenInterfacePtr vector_data_cell;
     if (quantizer_type == std::string("sq4_uniform")) {
         vector_data_cell = std::make_shared<
-            FlattenDataCell<SQ4UniformQuantizer<vsag::MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
-            quantizer_param, io_param, common);
+            FlattenDataCell<SQ4UniformQuantizer<vsag::MetricType::METRIC_TYPE_L2SQR>,
+                            FixedLayout<MemoryIO>>>(quantizer_param, io_param, common);
     } else {
-        vector_data_cell = std::make_shared<
-            FlattenDataCell<FP32Quantizer<vsag::MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
-            quantizer_param, io_param, common);
+        vector_data_cell =
+            std::make_shared<FlattenDataCell<FP32Quantizer<vsag::MetricType::METRIC_TYPE_L2SQR>,
+                                             FixedLayout<MemoryIO>>>(
+                quantizer_param, io_param, common);
     }
 
     vector_data_cell->Train(base_vectors.data(), base_size);
@@ -243,7 +244,7 @@ TEST_CASE("BasicSearcher duplicate threshold keeps nearest owner",
         IOParameter::GetIOParameterByJson(JsonType::Parse(fmt::format(param_temp, "memory_io")));
 
     auto vector_data_cell = std::make_shared<
-        FlattenDataCell<FP32Quantizer<vsag::MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
+        FlattenDataCell<FP32Quantizer<vsag::MetricType::METRIC_TYPE_L2SQR>, FixedLayout<MemoryIO>>>(
         quantizer_param, io_param, common);
     vector_data_cell->SetQuantizer(
         std::make_shared<FP32Quantizer<vsag::MetricType::METRIC_TYPE_L2SQR>>(2, allocator.get()));
@@ -327,7 +328,7 @@ TEST_CASE("BasicSearcher iterator drain path handles sign and lower_bound correc
     common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
 
     auto vector_data_cell = std::make_shared<
-        FlattenDataCell<FP32Quantizer<vsag::MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
+        FlattenDataCell<FP32Quantizer<vsag::MetricType::METRIC_TYPE_L2SQR>, FixedLayout<MemoryIO>>>(
         fp32_param, io_param, common);
     vector_data_cell->SetQuantizer(
         std::make_shared<FP32Quantizer<vsag::MetricType::METRIC_TYPE_L2SQR>>(dim, allocator.get()));
@@ -416,9 +417,9 @@ TEST_CASE("BasicSearcher traverses through a non-finite-distance bridge",
         JsonType::Parse(fmt::format(param_temp, "fp32")));
     auto io_param =
         IOParameter::GetIOParameterByJson(JsonType::Parse(fmt::format(param_temp, "memory_io")));
-    auto flatten =
-        std::make_shared<FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
-            quantizer_param, io_param, common);
+    auto flatten = std::make_shared<
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, FixedLayout<MemoryIO>>>(
+        quantizer_param, io_param, common);
     flatten->SetQuantizer(
         std::make_shared<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>>(1, allocator.get()));
     flatten->SetIO(std::make_unique<MemoryIO>(allocator.get()));

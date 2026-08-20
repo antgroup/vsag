@@ -40,7 +40,7 @@ make_instance_flatten(const FlattenInterfaceParamPtr& param, const IndexCommonPa
     auto& io_param = param->io_parameter;
     auto& quantizer_param = param->quantizer_parameter;
     if (param->name == FLATTEN_DATA_CELL) {
-        return std::make_shared<FlattenDataCell<QuantTemp, IOTemp>>(
+        return std::make_shared<FlattenDataCell<QuantTemp, FixedLayout<IOTemp>>>(
             quantizer_param, io_param, common_param);
     }
     throw VsagException(ErrorType::INVALID_ARGUMENT,

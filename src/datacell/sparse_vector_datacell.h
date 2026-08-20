@@ -17,6 +17,7 @@
 
 #include <limits>
 
+#include "flatten_datacell.h"
 #include "flatten_interface.h"
 #include "io/common/basic_io.h"
 #include "io/memory_block_io/memory_block_io.h"
@@ -100,7 +101,8 @@ public:
         this->quantizer_->Serialize(writer);
         ss.seekg(0, std::ios::beg);
         IOStreamReader reader(ss);
-        auto ptr = std::dynamic_pointer_cast<FlattenDataCell<QuantTmpl, IOTmpl>>(other);
+        auto ptr =
+            std::dynamic_pointer_cast<FlattenDataCell<QuantTmpl, FixedLayout<IOTmpl>>>(other);
         if (ptr == nullptr) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
                                 "Export model's sparse flatten datacell failed");
