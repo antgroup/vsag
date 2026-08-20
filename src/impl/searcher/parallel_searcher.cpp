@@ -20,6 +20,7 @@
 
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/searcher/searcher_utils.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/spsc_queue.h"
 
@@ -139,7 +140,8 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         inner_search_param.skip_ratio);
 
     flatten->Query(&dist, computer, &ep, 1, ctx);
-    if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
+    if (is_result_distance_eligible(dist) and
+        (not is_id_allowed || is_id_allowed->CheckValid(ep))) {
         top_candidates->Push(dist, ep);
         lower_bound = top_candidates->Top().first;
     }
@@ -151,14 +153,15 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     if (dist < THRESHOLD_ERROR) {
         inner_search_param.duplicate_id = ep;
     }
-    candidate_set->Push(-dist, ep);
+    candidate_set->Push(traversal_priority(dist), ep);
     vl->Set(ep);
 
     if (inner_search_param.consider_duplicate && label_table &&
         label_table->CompressDuplicateData()) {
         const auto& duplicate_ids = label_table->GetDuplicateId(ep);
         for (const auto& item : duplicate_ids) {
-            if (not is_id_allowed || is_id_allowed->CheckValid(item)) {
+            if (is_result_distance_eligible(dist) and
+                (not is_id_allowed || is_id_allowed->CheckValid(item))) {
                 top_candidates->Push(dist, item);
             }
         }
@@ -264,10 +267,11 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
             if (dist < THRESHOLD_ERROR) {
                 inner_search_param.duplicate_id = to_be_visited_id[i];
             }
-            if (top_candidates->Size() < ef || lower_bound > dist ||
+            if (not std::isfinite(dist) || top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
-                candidate_set->Push(-dist, to_be_visited_id[i]);
-                if ((not is_id_allowed || is_id_allowed->CheckValid(to_be_visited_id[i])) &&
+                candidate_set->Push(traversal_priority(dist), to_be_visited_id[i]);
+                if (is_result_distance_eligible(dist) and
+                    (not is_id_allowed || is_id_allowed->CheckValid(to_be_visited_id[i])) &&
                     dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
                     top_candidates->Push(dist, to_be_visited_id[i]);
                 }
@@ -275,7 +279,8 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                     label_table->CompressDuplicateData()) {
                     const auto& duplicate_ids = label_table->GetDuplicateId(to_be_visited_id[i]);
                     for (const auto& item : duplicate_ids) {
-                        if (dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
+                        if (is_result_distance_eligible(dist) and
+                            dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
                             top_candidates->Push(dist, item);
                         }
                     }
