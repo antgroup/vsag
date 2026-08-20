@@ -546,7 +546,10 @@ RaBitQSplitBucketDataCell::FinalizeOptimizedBuild() {
         // then materializes only the supplement bits and releases the temporary scalar codes.
         this->package_fastscan(true);
         this->optimized_build_codes_->FinalizeOptimizedBuild();
-        this->codes_->DiscardFilterCodes();
+        {
+            std::lock_guard codes_lock(this->codes_insert_mutex_);
+            this->codes_->DiscardFilterCodes();
+        }
     } catch (...) {
         this->optimized_build_codes_->AbortOptimizedBuild();
         this->optimized_build_codes_.reset();
@@ -773,6 +776,7 @@ RaBitQSplitBucketDataCell::MergeOther(const BucketInterfacePtr& other, InnerIdTy
 void
 RaBitQSplitBucketDataCell::Package() {
     this->package_fastscan();
+    std::lock_guard codes_lock(this->codes_insert_mutex_);
     this->codes_->DiscardFilterCodes();
 }
 
@@ -785,11 +789,9 @@ RaBitQSplitBucketDataCell::Unpack() {
 void
 RaBitQSplitBucketDataCell::package_fastscan(bool force) {
     if (not this->codes_->SupportFastScan32()) {
-        this->fastscan_block_size_ = 0;
         return;
     }
 
-    this->fastscan_block_size_ = this->codes_->GetFastScan32BlockSize();
     for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
         std::unique_lock lock(this->bucket_mutexes_[bucket_id]);
         if (not force and this->packed_filter_codes_complete(bucket_id)) {
