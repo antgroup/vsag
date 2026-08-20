@@ -15,6 +15,7 @@
 
 #include "parallel_searcher.h"
 
+#include <future>
 #include <limits>
 #include <utility>
 
@@ -195,8 +196,10 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         }
     };
 
+    std::vector<std::future<void>> worker_tasks;
+    worker_tasks.reserve(num_threads);
     for (uint64_t i = 0; i < num_threads; i++) {
-        pool->GeneralEnqueue(task, i);
+        worker_tasks.emplace_back(pool->GeneralEnqueue(task, i));
     }
 
     while (not candidate_set->Empty()) {
@@ -317,6 +320,9 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
 
     for (uint64_t i = 0; i < num_threads; i++) {
         queues[i].Push({nullptr, nullptr, 0});
+    }
+    for (auto& worker_task : worker_tasks) {
+        worker_task.wait();
     }
 
     return top_candidates;
