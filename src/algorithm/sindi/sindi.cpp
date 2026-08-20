@@ -19,6 +19,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <shared_mutex>
 #include <unordered_map>
 #include <vector>
@@ -246,6 +247,25 @@ get_bits_for_term_id_limit(uint32_t term_id_limit) {
 ParamPtr
 SINDI::CheckAndMappingExternalParam(const JsonType& external_param,
                                     const IndexCommonParam& common_param) {
+    static const std::unordered_set<std::string> supported_keys = {
+        SPARSE_TERM_ID_LIMIT,
+        SPARSE_DOC_PRUNE_RATIO,
+        USE_REORDER_KEY,
+        USE_QUANTIZATION,
+        SPARSE_WINDOW_SIZE,
+        SPARSE_AVG_DOC_TERM_LENGTH,
+        SPARSE_DESERIALIZE_WITHOUT_FOOTER,
+        SPARSE_DESERIALIZE_WITHOUT_BUFFER,
+        SPARSE_REMAP_TERM_IDS,
+        SPARSE_RERANK_TYPE,
+        SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD,
+        SPARSE_IMMUTABLE,
+    };
+    for (const auto& [key, value] : external_param.GetInnerJson()->items()) {
+        (void)value;
+        CHECK_ARGUMENT(supported_keys.find(key) != supported_keys.end(),
+                       fmt::format("invalid config param: {}", key));
+    }
     auto ptr = std::make_shared<SINDIParameter>();
     ptr->FromJson(external_param);
     return ptr;

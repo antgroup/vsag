@@ -35,6 +35,14 @@ std::once_flag uring_io_fallback_warn_once;
 }  // namespace
 
 IOParamPtr
+IOParameter::CreateDefault(const std::string& type_name) {
+    JsonType json;
+    json[TYPE_KEY].SetString(type_name);
+    json[IO_FILE_PATH_KEY].SetString(DEFAULT_FILE_PATH_VALUE);
+    return GetIOParameterByJson(json);
+}
+
+IOParamPtr
 IOParameter::GetIOParameterByJson(const JsonType& json) {
     IOParamPtr io_ptr = nullptr;
     try {

@@ -23,6 +23,9 @@ namespace vsag {
 DEFINE_POINTER2(TransformQuantizerParam, TransformQuantizerParameter)
 class TransformQuantizerParameter : public QuantizerParameter {
 public:
+    static TransformQuantizerParamPtr
+    CreateDefault(const std::string& chain);
+
     TransformQuantizerParameter();
 
     ~TransformQuantizerParameter() override = default;

@@ -50,10 +50,11 @@ dump_label_remap_type(LabelRemapType remap_type) -> const char* {
 
 }  // namespace
 
-void
-MapRaBitQSplitParam(const JsonType& external_json, JsonType& inner_json) {
+RaBitQSplitConfig
+ParseRaBitQSplitConfig(const JsonType& external_json) {
+    RaBitQSplitConfig config;
     if (not external_json.Contains(RABITQ_BITS_PER_DIM_PRECISE)) {
-        return;
+        return config;
     }
 
     CHECK_ARGUMENT(
@@ -104,28 +105,38 @@ MapRaBitQSplitParam(const JsonType& external_json, JsonType& inner_json) {
                        "rabitq split transform quantizer requires tq_chain=\"mrle, rabitq\"");
     }
 
-    const int64_t filter_bits = external_json[RABITQ_BITS_PER_DIM_BASE].GetInt();
-    const int64_t supplement_bits = external_json[RABITQ_BITS_PER_DIM_PRECISE].GetInt();
-    const bool valid_filter_bits = filter_bits >= 1 and filter_bits <= 8;
+    config.enabled = true;
+    config.filter_bits = external_json[RABITQ_BITS_PER_DIM_BASE].GetInt();
+    config.supplement_bits = external_json[RABITQ_BITS_PER_DIM_PRECISE].GetInt();
+    const bool valid_filter_bits = config.filter_bits >= 1 and config.filter_bits <= 8;
     CHECK_ARGUMENT(
         valid_filter_bits,
-        fmt::format("{} must be in [1, 8], got {}", RABITQ_BITS_PER_DIM_BASE, filter_bits));
-    const bool valid_supplement_bits = supplement_bits >= 1 and supplement_bits <= 8;
+        fmt::format("{} must be in [1, 8], got {}", RABITQ_BITS_PER_DIM_BASE, config.filter_bits));
+    const bool valid_supplement_bits = config.supplement_bits >= 1 and config.supplement_bits <= 8;
     CHECK_ARGUMENT(
         valid_supplement_bits,
-        fmt::format("{} must be in [1, 8], got {}", RABITQ_BITS_PER_DIM_PRECISE, supplement_bits));
-    const int64_t total_bits = filter_bits + supplement_bits;
-    CHECK_ARGUMENT(total_bits <= 8,
+        fmt::format(
+            "{} must be in [1, 8], got {}", RABITQ_BITS_PER_DIM_PRECISE, config.supplement_bits));
+    CHECK_ARGUMENT(config.TotalBits() <= 8,
                    fmt::format("{} + {} must be no greater than 8, got {}",
                                RABITQ_BITS_PER_DIM_BASE,
                                RABITQ_BITS_PER_DIM_PRECISE,
-                               total_bits));
+                               config.TotalBits()));
     if (external_json.Contains(RABITQ_BITS_PER_DIM_QUERY)) {
         const int64_t query_bits = external_json[RABITQ_BITS_PER_DIM_QUERY].GetInt();
         CHECK_ARGUMENT(query_bits == 32,
                        fmt::format("split storage requires {} to be 32, got {}",
                                    RABITQ_BITS_PER_DIM_QUERY,
                                    query_bits));
+    }
+
+    return config;
+}
+
+void
+ApplyRaBitQSplitConfig(const RaBitQSplitConfig& config, JsonType& inner_json) {
+    if (not config.enabled) {
+        return;
     }
 
     inner_json[REORDER_SOURCE_KEY].SetString(HGRAPH_REORDER_SOURCE_BASE);
@@ -135,9 +146,9 @@ MapRaBitQSplitParam(const JsonType& external_json, JsonType& inner_json) {
     inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY]
         .SetInt(32);
     inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY]
-        .SetInt(filter_bits);
+        .SetInt(config.filter_bits);
     inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY]
-        .SetInt(total_bits);
+        .SetInt(config.TotalBits());
 }
 
 void

@@ -27,3 +27,39 @@ TEST_CASE("FP32 Quantizer Parameter ToJson Test", "[ut][FP32QuantizerParameter]"
     param->FromJson(param_json);
     ParameterTest::TestToJson(param);
 }
+
+namespace {
+class CompatibilityTestParameter : public Parameter {
+public:
+    explicit CompatibilityTestParameter(JsonType json) : json_(std::move(json)) {
+    }
+
+    void
+    FromJson(const JsonType& json) override {
+        json_ = json;
+    }
+
+    JsonType
+    ToJson() const override {
+        return json_;
+    }
+
+private:
+    JsonType json_;
+};
+}  // namespace
+
+TEST_CASE("CompatibilityReport collects all JSON differences", "[ut][CompatibilityReport]") {
+    auto left = std::make_shared<CompatibilityTestParameter>(
+        JsonType::Parse(R"({"same":1,"first":2,"nested":{"second":3}})"));
+    auto right = std::make_shared<CompatibilityTestParameter>(
+        JsonType::Parse(R"({"same":1,"first":4,"nested":{"second":5},"extra":6})"));
+
+    auto report = left->CollectCompatibilityIssues(right);
+    REQUIRE_FALSE(report.IsCompatible());
+    REQUIRE(report.issues.size() == 3);
+    REQUIRE(report.issues[0].path == "$.first");
+    REQUIRE(report.issues[1].path == "$.nested.second");
+    REQUIRE(report.issues[2].path == "$.extra");
+    REQUIRE_FALSE(left->CheckCompatibility(right));
+}
