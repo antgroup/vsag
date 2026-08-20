@@ -978,11 +978,10 @@ SIMQ::flush_pending_splits() {
         tasks[i].new_cluster_idx = static_cast<InnerIdType>(num_clusters_ + i);
     }
 
+    pending_splits_ = std::move(deferred);
     if (not tasks.empty()) {
         prepare_and_execute_splits(tasks);
     }
-
-    pending_splits_ = std::move(deferred);
 }
 
 void
@@ -1072,7 +1071,10 @@ SIMQ::execute_split_parallel(const SplitTask& task) {
         ->Float32Vectors(new_rep_vec.data())
         ->Ids(&new_label)
         ->Owner(false);
-    rep_hgraph_->Add(new_ds);
+    {
+        std::lock_guard<std::mutex> lock(rep_hgraph_mutex_);
+        rep_hgraph_->Add(new_ds);
+    }
 
     // Serial computation (inter-cluster parallelism is handled in prepare_and_execute_splits)
     std::vector<float> decoded_token(udim);
@@ -1179,7 +1181,10 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
         ->Float32Vectors(new_rep_vec.data())
         ->Ids(&new_label)
         ->Owner(false);
-    rep_hgraph_->Add(new_ds);
+    {
+        std::lock_guard<std::mutex> lock(rep_hgraph_mutex_);
+        rep_hgraph_->Add(new_ds);
+    }
 
     // Update token_to_dist_ for tokens moved to new cluster so future splits
     // sort by distance to the new representative, not the old one.
@@ -1359,7 +1364,7 @@ SIMQ::KnnSearch(const DatasetPtr& query,
                 int64_t k,
                 const std::string& parameters,
                 const FilterPtr& filter) const {
-    std::shared_lock lock(global_mutex_);
+    std::unique_lock lock(global_mutex_);
     SearchStatistics stats;
 
     if (total_count_ == 0 || rep_hgraph_ == nullptr) {
@@ -1495,7 +1500,7 @@ SIMQ::RangeSearch(const DatasetPtr& query,
                   const std::string& parameters,
                   const FilterPtr& filter,
                   int64_t limited_size) const {
-    std::shared_lock lock(global_mutex_);
+    std::unique_lock lock(global_mutex_);
     SearchStatistics stats;
 
     if (total_count_ == 0 || rep_hgraph_ == nullptr) {

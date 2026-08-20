@@ -195,6 +195,7 @@ private:
     mutable std::vector<InnerIdType> coarse_seen_dirty_;
 
     mutable std::shared_mutex global_mutex_;
+    mutable std::mutex rep_hgraph_mutex_;  // Protects rep_hgraph_ mutations in parallel splits
 };
 
 }  // namespace vsag

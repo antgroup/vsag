@@ -283,6 +283,11 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Query(float* result_dists,
     std::vector<uint64_t> data_sizes(id_count);
     uint64_t total_size = 0;
     for (InnerIdType i = 0; i < id_count; ++i) {
+        if (static_cast<uint64_t>(idx[i]) >= token_counts_.size()) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "MultiVectorDataCell: token_counts_ not populated for doc ID " +
+                                    std::to_string(idx[i]));
+        }
         const uint32_t token_count = token_counts_[idx[i]];
         data_sizes[i] = sizeof(uint32_t) + static_cast<uint64_t>(token_count) * code_size_per_token;
         total_size += data_sizes[i];
