@@ -170,7 +170,7 @@ Search-time parameters live under the `ivf` sub-object:
 | `disable_bucket_scan` | bool | `false` | Return bucket IDs and distances. Supports batch queries. |
 | `factor` | float | `2.0` | With reordering enabled, pulls `factor * topk` coarse candidates before the precise rescore. |
 | `enable_reorder` | bool | `true` | Set to `false` to skip the final reorder stage for this request even when the index was built with reorder enabled. |
-| `rabitq_search_strategy` | string | `"candidate_reorder"` | See split-search behavior above. |
+| `rabitq_search_strategy` | string | `"candidate_reorder"` | Supported values are `"candidate_reorder"` and `"heap"`. See split-search behavior above. |
 | `parallelism` | int | `1` | Threads used to scan buckets in parallel for a single query. |
 | `timeout_ms` | double | `+∞` | Hard cap in milliseconds; partial results are returned once exceeded. |
 

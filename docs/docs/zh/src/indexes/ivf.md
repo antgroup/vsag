@@ -159,7 +159,7 @@ split 配置要求 `x >= 1`、`y >= 1`、`x + y <= 8`、
 | `disable_bucket_scan` | bool | `false` | 返回桶 ID 及到桶中心距离，不扫描桶内向量。支持批量查询。 |
 | `factor` | float | `2.0` | 启用精排时，粗排阶段会预取 `factor * topk` 个候选再重打分 |
 | `enable_reorder` | bool | `true` | 即使索引构建时启用了 reorder，也可以在单次请求里设为 `false` 跳过最终精排 |
-| `rabitq_search_strategy` | string | `"candidate_reorder"` | 见上文 split 检索策略。 |
+| `rabitq_search_strategy` | string | `"candidate_reorder"` | 可选值为 `"candidate_reorder"` 和 `"heap"`，具体行为见上文 split 检索策略。 |
 | `parallelism` | int | `1` | 单次查询内扫描桶时使用的线程数 |
 | `timeout_ms` | double | `+∞` | 单次查询最长耗时（毫秒），超时会返回当前的部分结果 |
 
