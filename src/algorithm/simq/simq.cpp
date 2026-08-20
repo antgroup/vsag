@@ -310,7 +310,7 @@ HGraphDynamicClustering::Fit(const float* vecs, int64_t num_vecs, int64_t dim) {
     build_hgraph(init_centers, dim);
 
     const int64_t batch_size = 10000;  // Process 10k tokens per batch
-    const int64_t num_threads = build_thread_count_;
+    const int64_t num_threads = std::max<int64_t>(1, build_thread_count_);
 
     auto remaining_it = all_indices.begin() + num_init;
 
@@ -529,7 +529,8 @@ SIMQ::build_rep_hgraph(const float* flat_vecs, int64_t dim) {
     std::vector<std::vector<int>> cluster_token_members(static_cast<uint64_t>(num_clusters_));
 
     const auto num_tokens = static_cast<int64_t>(vec_to_cluster_.size());
-    const auto num_threads = static_cast<int64_t>(this->build_thread_count_);
+    const int64_t num_threads =
+        std::max<int64_t>(1, static_cast<int64_t>(this->build_thread_count_));
     const int64_t chunk_size = (num_tokens + num_threads - 1) / num_threads;
 
     if (this->thread_pool_ && num_tokens > 1000) {
@@ -795,7 +796,7 @@ SIMQ::Add(const DatasetPtr& data) {
 
                     uint64_t completed = add_completed_docs_.load(std::memory_order_relaxed);
                     int pct = static_cast<int>(100.0 * static_cast<double>(completed) /
-                                              static_cast<double>(add_total_docs_));
+                                               static_cast<double>(add_total_docs_));
                     if (pct > last_reported_pct_) {
                         last_reported_pct_ = pct;
                         logger::info("[SIMQ Add] Progress: {}% ({}/{} docs, {}/{} tokens)",
@@ -864,7 +865,7 @@ SIMQ::Add(const DatasetPtr& data) {
 
             uint64_t completed = add_completed_docs_.load(std::memory_order_relaxed);
             int pct = static_cast<int>(100.0 * static_cast<double>(completed) /
-                                      static_cast<double>(add_total_docs_));
+                                       static_cast<double>(add_total_docs_));
             if (pct > last_reported_pct_) {
                 last_reported_pct_ = pct;
                 logger::info("[SIMQ Add] Progress: {}% ({}/{} docs, {}/{} tokens)",
