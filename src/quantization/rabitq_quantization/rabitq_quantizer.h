@@ -92,6 +92,18 @@ public:
     void
     ProcessQueryImpl(const float* query, Computer<RaBitQuantizer>& computer) const;
 
+    [[nodiscard]] uint64_t
+    GetResidualQueryTransformSize() const {
+        return this->original_dim_;
+    }
+
+    void
+    TransformResidualQuery(const float* query, float* transformed_query) const;
+
+    void
+    ProcessTransformedResidualQuery(const float* transformed_query,
+                                    Computer<RaBitQuantizer>& computer) const;
+
     void
     ComputeDistImpl(Computer<RaBitQuantizer>& computer, const uint8_t* codes, float* dists) const;
 

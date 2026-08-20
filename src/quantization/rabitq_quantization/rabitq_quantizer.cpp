@@ -1386,33 +1386,34 @@ RaBitQuantizer<metric>::PrepareFastScan32Query(Computer<RaBitQuantizer>& compute
 
     const auto* query = reinterpret_cast<const float*>(computer.buf_);
     const uint64_t groups_per_plane = PlaneBytes() * 2;
-    Vector<float> float_lut(GetFastScan32LookupSize(), this->allocator_);
     query_sum = 0.0F;
     for (uint64_t d = 0; d < this->dim_; ++d) {
         query_sum += query[d];
     }
 
+    float lower = 0.0F;
+    float upper = 0.0F;
     for (uint64_t group = 0; group < groups_per_plane; ++group) {
-        for (uint64_t mask = 0; mask < 16; ++mask) {
-            float value = 0.0F;
-            for (uint64_t bit = 0; bit < 4; ++bit) {
-                const uint64_t dim = group * 4 + bit;
-                if (dim >= static_cast<uint64_t>(this->dim_)) {
-                    continue;
-                }
-                if ((mask & (1U << bit)) != 0U) {
-                    value += query[dim];
+        float group_lower = 0.0F;
+        float group_upper = 0.0F;
+        for (uint64_t bit = 0; bit < 4; ++bit) {
+            const uint64_t dim = group * 4 + bit;
+            if (dim < static_cast<uint64_t>(this->dim_)) {
+                const float value = query[dim];
+                if (value < 0.0F) {
+                    group_lower += value;
+                } else {
+                    group_upper += value;
                 }
             }
-            float_lut[group * 16 + mask] = value;
         }
+        lower = std::min(lower, group_lower);
+        upper = std::max(upper, group_upper);
     }
 
     std::fill(deltas, deltas + FASTSCAN_MAX_FILTER_BITS, 0.0F);
     std::fill(sum_vls, sum_vls + FASTSCAN_MAX_FILTER_BITS, 0.0F);
-    const auto [lower_iter, upper_iter] = std::minmax_element(float_lut.begin(), float_lut.end());
-    const float lower = *lower_iter;
-    const float range = *upper_iter - lower;
+    const float range = upper - lower;
     sum_vls[0] = lower * static_cast<float>(groups_per_plane);
     if (range <= std::numeric_limits<float>::epsilon()) {
         memset(lookup_table, 0, GetFastScan32LookupSize());
@@ -1420,10 +1421,27 @@ RaBitQuantizer<metric>::PrepareFastScan32Query(Computer<RaBitQuantizer>& compute
     }
 
     deltas[0] = range / 255.0F;
-    for (uint64_t i = 0; i < GetFastScan32LookupSize(); ++i) {
-        const auto quantized =
-            static_cast<int64_t>(std::lround((float_lut[i] - lower) / deltas[0]));
-        lookup_table[i] = static_cast<uint8_t>(std::clamp<int64_t>(quantized, 0, 255));
+    for (uint64_t group = 0; group < groups_per_plane; ++group) {
+        float values[4] = {};
+        for (uint64_t bit = 0; bit < 4; ++bit) {
+            const uint64_t dim = group * 4 + bit;
+            if (dim < static_cast<uint64_t>(this->dim_)) {
+                values[bit] = query[dim];
+            }
+        }
+        float group_lut[16] = {};
+        for (uint64_t bit = 0; bit < 4; ++bit) {
+            const uint64_t begin = 1ULL << bit;
+            for (uint64_t mask = 0; mask < begin; ++mask) {
+                group_lut[begin + mask] = group_lut[mask] + values[bit];
+            }
+        }
+        for (uint64_t mask = 0; mask < 16; ++mask) {
+            const auto quantized =
+                static_cast<int64_t>(std::lround((group_lut[mask] - lower) / deltas[0]));
+            lookup_table[group * 16 + mask] =
+                static_cast<uint8_t>(std::clamp<int64_t>(quantized, 0, 255));
+        }
     }
 }
 
@@ -2546,8 +2564,89 @@ RaBitQuantizer<metric>::RecoverOrderSQ(const uint8_t* output, uint8_t* input) co
 
 template <MetricType metric>
 void
+RaBitQuantizer<metric>::TransformResidualQuery(const float* query, float* transformed_query) const {
+    Vector<float> pca_data(this->original_dim_, 0, this->allocator_);
+    if (this->pca_dim_ != this->original_dim_) {
+        this->pca_->Transform(query, pca_data.data());
+    } else {
+        pca_data.assign(query, query + this->original_dim_);
+    }
+
+    std::fill(transformed_query, transformed_query + this->original_dim_, 0.0F);
+    this->rom_->Transform(pca_data.data(), transformed_query);
+    if (this->dim_ < this->original_dim_) {
+        std::copy(pca_data.data() + this->dim_,
+                  pca_data.data() + this->original_dim_,
+                  transformed_query + this->dim_);
+    }
+}
+
+template <MetricType metric>
+void
+RaBitQuantizer<metric>::ProcessTransformedResidualQuery(const float* transformed_query,
+                                                        Computer<RaBitQuantizer>& computer) const {
+    CHECK_ARGUMENT(metric == MetricType::METRIC_TYPE_L2SQR,
+                   "transformed residual queries are only supported for L2");
+    try {
+        if (computer.buf_ == nullptr) {
+            computer.buf_ =
+                reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->query_code_size_));
+        }
+        std::fill(computer.buf_, computer.buf_ + this->query_code_size_, 0);
+
+        if (this->pca_dim_ != this->original_dim_ and this->use_mrq_) {
+            const norm_type mrq_norm_sqr = FP32ComputeIP(transformed_query + this->dim_,
+                                                         transformed_query + this->dim_,
+                                                         this->original_dim_ - this->dim_);
+            std::memcpy(
+                computer.buf_ + this->query_offset_mrq_norm_, &mrq_norm_sqr, sizeof(mrq_norm_sqr));
+        }
+
+        Vector<float> quantized_query_scratch(
+            this->num_bits_per_dim_query_ == 4 ? this->dim_ : 0, 0, this->allocator_);
+        float* normed_data = this->num_bits_per_dim_query_ == 4
+                                 ? quantized_query_scratch.data()
+                                 : reinterpret_cast<float*>(computer.buf_);
+        const float query_norm = NormalizeWithCentroid(
+            transformed_query, this->centroid_.data(), normed_data, this->dim_);
+        if (this->num_bits_per_dim_query_ == 4) {
+            Vector<uint8_t> quantized_data(this->dim_, 0, this->allocator_);
+            float lower_bound = std::numeric_limits<float>::max();
+            float upper_bound = std::numeric_limits<float>::lowest();
+            float delta = 0.0F;
+            sum_type query_sum = 0;
+            EncodeSQ(
+                normed_data, quantized_data.data(), upper_bound, lower_bound, delta, query_sum);
+            ReOrderSQ(quantized_data.data(), computer.buf_);
+            std::memcpy(computer.buf_ + this->query_offset_lb_, &lower_bound, sizeof(lower_bound));
+            std::memcpy(computer.buf_ + this->query_offset_delta_, &delta, sizeof(delta));
+            std::memcpy(computer.buf_ + this->query_offset_sum_, &query_sum, sizeof(query_sum));
+        }
+
+        if (this->num_bits_per_dim_base_ != 1) {
+            sum_type query_sum = 0;
+            for (uint32_t d = 0; d < this->dim_; ++d) {
+                query_sum += normed_data[d];
+            }
+            std::memcpy(computer.buf_ + this->query_offset_sum_, &query_sum, sizeof(query_sum));
+        }
+        std::memcpy(computer.buf_ + this->query_offset_norm_, &query_norm, sizeof(query_norm));
+    } catch (const std::bad_alloc&) {
+        logger::error("bad alloc when init computer buf");
+        throw;
+    }
+}
+
+template <MetricType metric>
+void
 RaBitQuantizer<metric>::ProcessQueryImpl(const float* query,
                                          Computer<RaBitQuantizer>& computer) const {
+    if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+        Vector<float> transformed_query(this->original_dim_, 0, this->allocator_);
+        this->TransformResidualQuery(query, transformed_query.data());
+        this->ProcessTransformedResidualQuery(transformed_query.data(), computer);
+        return;
+    }
     try {
         if (computer.buf_ == nullptr) {
             computer.buf_ =

@@ -56,7 +56,8 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
                         QueryContext& ctx,
                         IteratorFilterContext* iter_ctx,
                         const DistanceRecordVector* rabitq_lower_bound_candidates,
-                        const std::optional<float>& distance_threshold) {
+                        const std::optional<float>& distance_threshold,
+                        const ComputerInterfacePtr& /*preset_computer*/) {
     // set query allocator
     Allocator* query_allocator = select_query_allocator(ctx.alloc, allocator_);
     auto is_distance_eligible = [&distance_threshold](float distance) {

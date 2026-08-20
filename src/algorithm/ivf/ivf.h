@@ -210,7 +210,8 @@ private:
     search(const DatasetPtr& query,
            const InnerSearchParam& param,
            QueryContext& ctx,
-           ReasoningContext* reasoning_ctx = nullptr) const;
+           ReasoningContext* reasoning_ctx = nullptr,
+           ComputerInterfacePtr* bucket_computer = nullptr) const;
 
     DistHeapPtr
     search_with_custom_distance(const DatasetPtr& query,
@@ -230,7 +231,8 @@ private:
             const InnerSearchParam& param,
             QueryContext& ctx,
             ReasoningContext* reasoning_ctx = nullptr,
-            const std::optional<float>& distance_threshold = std::nullopt) const;
+            const std::optional<float>& distance_threshold = std::nullopt,
+            const ComputerInterfacePtr& bucket_computer = nullptr) const;
 
     void
     AttachReasoningReport(const DatasetPtr& dataset_results, ReasoningContext* reasoning_ctx) const;

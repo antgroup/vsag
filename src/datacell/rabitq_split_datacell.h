@@ -934,6 +934,40 @@ public:
         return computer;
     }
 
+    [[nodiscard]] bool
+    SupportResidualQueryTransform() const override {
+        return metric == MetricType::METRIC_TYPE_L2SQR and
+               std::is_same_v<QuantizerT, BottomQuantizer>;
+    }
+
+    [[nodiscard]] uint64_t
+    GetResidualQueryTransformSize() const override {
+        if constexpr (std::is_same_v<QuantizerT, BottomQuantizer>) {
+            return this->bottom_quantizer().GetResidualQueryTransformSize();
+        }
+        return 0;
+    }
+
+    void
+    TransformResidualQuery(const float* query, float* transformed_query) const override {
+        if constexpr (std::is_same_v<QuantizerT, BottomQuantizer>) {
+            this->bottom_quantizer().TransformResidualQuery(query, transformed_query);
+            return;
+        }
+        FlattenInterface::TransformResidualQuery(query, transformed_query);
+    }
+
+    ComputerInterfacePtr
+    FactoryComputerFromResidualQuery(const float* transformed_query) override {
+        if constexpr (std::is_same_v<QuantizerT, BottomQuantizer>) {
+            auto computer = this->quantizer_->FactoryComputer();
+            this->bottom_quantizer().ProcessTransformedResidualQuery(
+                transformed_query, *this->get_bottom_computer(computer));
+            return computer;
+        }
+        return FlattenInterface::FactoryComputerFromResidualQuery(transformed_query);
+    }
+
     ComputerInterfacePtr
     FactoryComputerForBuild(const void* query, InnerIdType id) override {
         if (this->optimized_build_active_) {
