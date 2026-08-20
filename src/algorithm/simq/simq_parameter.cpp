@@ -78,7 +78,7 @@ SIMQParameter::FromJson(const JsonType& json) {
     auto base_json = json[BASE_CODES_KEY];
     if (quantization_type != "fp32") {
         JsonType quant_json;
-        quant_json[TYPE_KEY].SetString(quantization_type.c_str());
+        quant_json[TYPE_KEY].SetString(quantization_type);
         base_json[QUANTIZATION_PARAMS_KEY].SetJson(quant_json);
     }
     base_codes_param = CreateFlattenParam(base_json);
@@ -96,7 +96,7 @@ SIMQParameter::ToJson() const {
     json[SIMQ_COARSE_K].SetInt(coarse_k);
     json[SIMQ_RERANK_K].SetInt(rerank_k);
     json[SIMQ_SPLIT_DELAY_SECONDS].SetDouble(split_delay_seconds);
-    json[SIMQ_QUANTIZATION_TYPE].SetString(quantization_type.c_str());
+    json[SIMQ_QUANTIZATION_TYPE].SetString(quantization_type);
     json[BASE_CODES_KEY].SetJson(base_codes_param->ToJson());
     return json;
 }

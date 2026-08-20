@@ -165,7 +165,7 @@ HGraphDynamicClustering::build_hgraph(const std::vector<int>& center_ids, int64_
     cp.dim_ = dim;
 
     auto param = HGraph::CheckAndMappingExternalParam(
-        JsonType::Parse("{\"max_degree\":32,\"ef_construction\":50}"), cp);
+        JsonType::Parse(R"({"max_degree":32,"ef_construction":50})"), cp);
     hgraph_ = std::make_shared<HGraph>(param, cp);
 
     auto n = static_cast<int64_t>(center_ids.size());
@@ -322,8 +322,9 @@ HGraphDynamicClustering::Fit(const float* vecs, int64_t num_vecs, int64_t dim) {
             ++count;
         }
 
-        if (count == 0)
+        if (count == 0) {
             break;
+        }
 
         std::vector<std::pair<int, int>> batch_assignments(count);  // (vid, nearest_cid)
 
@@ -334,8 +335,9 @@ HGraphDynamicClustering::Fit(const float* vecs, int64_t num_vecs, int64_t dim) {
             for (int64_t t = 0; t < num_threads; ++t) {
                 const int64_t start = t * chunk_size;
                 const int64_t end = std::min(start + chunk_size, count);
-                if (start >= count)
+                if (start >= count) {
                     break;
+                }
 
                 futures.push_back(thread_pool_->GeneralEnqueue([&, t, start, end]() {
                     for (int64_t i = start; i < end; ++i) {
@@ -477,7 +479,7 @@ SIMQ::run_clustering(const float* flat_vecs,
                                        max_cluster_size_,
                                        split_start_idx_,
                                        random_seed_,
-                                       build_thread_count_,
+                                       static_cast<int64_t>(build_thread_count_),
                                        common_param_,
                                        this->thread_pool_);
     clustering.Fit(flat_vecs, num_vecs, dim);
@@ -526,8 +528,8 @@ void
 SIMQ::build_rep_hgraph(const float* flat_vecs, int64_t dim) {
     std::vector<std::vector<int>> cluster_token_members(static_cast<uint64_t>(num_clusters_));
 
-    const int64_t num_tokens = static_cast<int64_t>(vec_to_cluster_.size());
-    const int64_t num_threads = static_cast<int64_t>(this->build_thread_count_);
+    const auto num_tokens = static_cast<int64_t>(vec_to_cluster_.size());
+    const auto num_threads = static_cast<int64_t>(this->build_thread_count_);
     const int64_t chunk_size = (num_tokens + num_threads - 1) / num_threads;
 
     if (this->thread_pool_ && num_tokens > 1000) {
@@ -537,8 +539,9 @@ SIMQ::build_rep_hgraph(const float* flat_vecs, int64_t dim) {
         for (int64_t t = 0; t < num_threads; ++t) {
             const int64_t start = t * chunk_size;
             const int64_t end = std::min(start + chunk_size, num_tokens);
-            if (start >= num_tokens)
+            if (start >= num_tokens) {
                 break;
+            }
 
             futures.push_back(this->thread_pool_->GeneralEnqueue([&, t, start, end]() {
                 per_thread_members[t].resize(static_cast<uint64_t>(num_clusters_));
@@ -650,7 +653,7 @@ SIMQ::build_rep_hgraph(const float* flat_vecs, int64_t dim) {
     cp.dim_ = dim;
 
     auto param = HGraph::CheckAndMappingExternalParam(
-        JsonType::Parse("{\"max_degree\":32,\"ef_construction\":50}"), cp);
+        JsonType::Parse(R"({"max_degree":32,"ef_construction":50})"), cp);
     rep_hgraph_ = std::make_shared<HGraph>(param, cp);
 
     auto ds = Dataset::Make();
@@ -731,14 +734,14 @@ SIMQ::Add(const DatasetPtr& data) {
     // cross-thread data race on the per-token vectors).
     // Cluster-level structures (cluster_lists_, cluster_token_counts_) are
     // collected per-thread and merged in Phase 4.
-    struct PerThreadClusterData {
+    struct per_thread_cluster_data {
         // cluster_idx → list of inner_ids that touch it (unique per thread)
         std::unordered_map<InnerIdType, std::vector<InnerIdType>> cluster_docs;
         // cluster_idx → token count contribution
         std::unordered_map<InnerIdType, uint64_t> cluster_token_contrib;
     };
 
-    const uint64_t udim = static_cast<uint64_t>(dim_);
+    const auto udim = static_cast<uint64_t>(dim_);
     bool use_parallel = this->thread_pool_ != nullptr and num_docs > 1;
 
     add_completed_docs_.store(0, std::memory_order_relaxed);
@@ -748,7 +751,7 @@ SIMQ::Add(const DatasetPtr& data) {
     last_reported_pct_ = -1;
 
     if (use_parallel) {
-        Vector<PerThreadClusterData> per_thread(num_docs, allocator_);
+        Vector<per_thread_cluster_data> per_thread(num_docs, allocator_);
         std::vector<std::future<void>> futures;
         futures.reserve(num_docs);
 
@@ -791,7 +794,8 @@ SIMQ::Add(const DatasetPtr& data) {
                     add_completed_tokens_.fetch_add(mvs[i].len_, std::memory_order_relaxed);
 
                     uint64_t completed = add_completed_docs_.load(std::memory_order_relaxed);
-                    int pct = static_cast<int>(100.0 * completed / add_total_docs_);
+                    int pct = static_cast<int>(100.0 * static_cast<double>(completed) /
+                                              static_cast<double>(add_total_docs_));
                     if (pct > last_reported_pct_) {
                         last_reported_pct_ = pct;
                         logger::info("[SIMQ Add] Progress: {}% ({}/{} docs, {}/{} tokens)",
@@ -859,7 +863,8 @@ SIMQ::Add(const DatasetPtr& data) {
             add_completed_tokens_.fetch_add(mvs[i].len_, std::memory_order_relaxed);
 
             uint64_t completed = add_completed_docs_.load(std::memory_order_relaxed);
-            int pct = static_cast<int>(100.0 * completed / add_total_docs_);
+            int pct = static_cast<int>(100.0 * static_cast<double>(completed) /
+                                      static_cast<double>(add_total_docs_));
             if (pct > last_reported_pct_) {
                 last_reported_pct_ = pct;
                 logger::info("[SIMQ Add] Progress: {}% ({}/{} docs, {}/{} tokens)",
@@ -982,7 +987,7 @@ SIMQ::flush_pending_splits() {
 void
 SIMQ::prepare_and_execute_splits(std::vector<SplitTask>& tasks) {
     // Use push_back to add new slots (resize doesn't work with AllocatorWrapper)
-    const int64_t new_cluster_count = static_cast<int64_t>(tasks.size());
+    const auto new_cluster_count = static_cast<int64_t>(tasks.size());
     for (int64_t i = 0; i < new_cluster_count; ++i) {
         cluster_lists_.push_back(Vector<InnerIdType>(allocator_));
         cluster_token_counts_.push_back(0);
@@ -1212,19 +1217,19 @@ SIMQ::coarse_search(const float* query_tokens,
     // first call after Build/Add/Deserialize.
     const auto n_docs = static_cast<size_t>(total_count_);
     if (coarse_score_buf_.size() < n_docs) {
-        coarse_score_buf_.assign(n_docs, 0.0f);
+        coarse_score_buf_.assign(n_docs, 0.0F);
         coarse_seen_buf_.assign(n_docs, false);
     }
     coarse_dirty_.clear();
 
     // Each query token's search is independent. We do all KnnSearch calls in
     // parallel, then sequentially propagate scores (which is fast O(k) per token).
-    struct TokenSearchResult {
+    struct token_search_result {
         std::vector<std::pair<float, InnerIdType>> cscores;
         int64_t actual_coarse_k{0};
         uint64_t dist_cmp{0};
     };
-    std::vector<TokenSearchResult> token_results(query_token_count);
+    std::vector<token_search_result> token_results(query_token_count);
 
     if (this->thread_pool_ && query_token_count > 1) {
         std::vector<std::future<void>> futures;
@@ -1323,7 +1328,7 @@ SIMQ::coarse_search(const float* query_tokens,
                 }
                 coarse_seen_buf_[doc_id] = true;
                 coarse_seen_dirty_.push_back(doc_id);
-                if (coarse_score_buf_[doc_id] == 0.0f) {
+                if (coarse_score_buf_[doc_id] == 0.0F) {
                     coarse_dirty_.push_back(doc_id);
                 }
                 coarse_score_buf_[doc_id] += cscore;
@@ -1338,7 +1343,7 @@ SIMQ::coarse_search(const float* query_tokens,
     ranked.reserve(coarse_dirty_.size());
     for (InnerIdType doc_id : coarse_dirty_) {
         ranked.emplace_back(doc_id, coarse_score_buf_[doc_id]);
-        coarse_score_buf_[doc_id] = 0.0f;  // reset for next query
+        coarse_score_buf_[doc_id] = 0.0F;  // reset for next query
     }
     coarse_dirty_.clear();
 
@@ -1607,7 +1612,7 @@ SIMQ::deserialize_rep_hgraph(StreamReader& reader) {
     cp.dim_ = dim_;
 
     auto param = HGraph::CheckAndMappingExternalParam(
-        JsonType::Parse("{\"max_degree\":32,\"ef_construction\":50}"), cp);
+        JsonType::Parse(R"({"max_degree":32,"ef_construction":50})"), cp);
     rep_hgraph_ = std::make_shared<HGraph>(param, cp);
 
     // Use SliceStreamReader so HGraph's footer seeks within its own data only.
