@@ -539,7 +539,8 @@ public:
             QueryContext& ctx,
             IteratorFilterContext* /*iter_ctx*/,
             const DistanceRecordVector* /*records*/,
-            const std::optional<float>& distance_threshold) override {
+            const std::optional<float>& distance_threshold,
+            const ComputerInterfacePtr& preset_computer) override {
         const uint64_t candidate_count = input == nullptr ? 0 : input->Size();
         topk = std::min(topk, static_cast<int64_t>(candidate_count));
         auto result = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
@@ -560,7 +561,8 @@ public:
             ctx.stats->reorder_distance_count.fetch_add(static_cast<uint32_t>(candidate_count),
                                                         std::memory_order_relaxed);
         }
-        auto computer = this->bucket_->FactoryComputer(query);
+        auto computer =
+            preset_computer == nullptr ? this->bucket_->FactoryComputer(query) : preset_computer;
         {
             ScopedDistancePhase scoped(ctx, DistanceEvaluationPhase::RERANK);
             this->bucket_->QueryWithDistanceHintByInnerId(distances.data(),
@@ -1874,9 +1876,10 @@ IVF::reorder(int64_t topk,
              const InnerSearchParam& param,
              QueryContext& ctx,
              ReasoningContext* reasoning_ctx,
-             const std::optional<float>& distance_threshold) const {
-    auto reorder_heap =
-        reorder_->Reorder(input, query, topk, ctx, nullptr, nullptr, distance_threshold);
+             const std::optional<float>& distance_threshold,
+             const ComputerInterfacePtr& bucket_computer) const {
+    auto reorder_heap = reorder_->Reorder(
+        input, query, topk, ctx, nullptr, nullptr, distance_threshold, bucket_computer);
     auto dataset_results = this->pack_knn_result(reorder_heap, ctx.alloc);
 
     return dataset_results;
@@ -1901,7 +1904,8 @@ DistHeapPtr
 IVF::search(const DatasetPtr& query,
             const InnerSearchParam& param,
             QueryContext& ctx,
-            ReasoningContext* reasoning_ctx) const {
+            ReasoningContext* reasoning_ctx,
+            ComputerInterfacePtr* bucket_computer) const {
     const auto* query_data = query->GetFloat32Vectors();
     Vector<float> normalize_data(dim_, allocator_);
     Vector<BucketIdType> candidate_buckets(allocator_);
@@ -1917,6 +1921,9 @@ IVF::search(const DatasetPtr& query,
         reasoning_ctx->RecordBucketSelection(candidate_buckets);
     }
     auto computer = bucket_->FactoryComputer(query_data);
+    if (bucket_computer != nullptr) {
+        *bucket_computer = computer;
+    }
 
     int64_t topk = param.topk;
     if constexpr (mode == RANGE_SEARCH) {
@@ -2504,12 +2511,20 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             param.range_search_limit_size =
                 static_cast<int>(param.factor * static_cast<float>(request.limited_size_));
         }
-        auto search_result = this->search<RANGE_SEARCH>(query, param, ctx, reasoning_ctx.get());
+        ComputerInterfacePtr bucket_computer = nullptr;
+        auto search_result =
+            this->search<RANGE_SEARCH>(query, param, ctx, reasoning_ctx.get(), &bucket_computer);
         if (use_reorder_ and param.enable_reorder) {
             int64_t k = (request.limited_size_ > 0) ? request.limited_size_
                                                     : static_cast<int64_t>(search_result->Size());
-            auto result = reorder(
-                k, search_result, query->GetFloat32Vectors(), param, ctx, reasoning_ctx.get());
+            auto result = reorder(k,
+                                  search_result,
+                                  query->GetFloat32Vectors(),
+                                  param,
+                                  ctx,
+                                  reasoning_ctx.get(),
+                                  std::nullopt,
+                                  bucket_computer);
             result->Statistics(stats.Dump());
             this->AttachReasoningReport(result, reasoning_ctx.get());
             return result;
@@ -2538,7 +2553,9 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     // selection still needs threshold-mode state so non-finite approximations
     // cannot consume the rerank pool.
     param.distance_threshold = request.threshold_;
-    auto search_result = this->search<KNN_SEARCH>(query, param, ctx, reasoning_ctx.get());
+    ComputerInterfacePtr bucket_computer = nullptr;
+    auto search_result =
+        this->search<KNN_SEARCH>(query, param, ctx, reasoning_ctx.get(), &bucket_computer);
     if (reorder_enabled) {
         auto result = reorder(request.threshold_.has_value() ? param.topk : request.topk_,
                               search_result,
@@ -2546,7 +2563,8 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                               param,
                               ctx,
                               reasoning_ctx.get(),
-                              request.threshold_);
+                              request.threshold_,
+                              bucket_computer);
         result = FilterDatasetByThreshold(result, request.threshold_, ctx.alloc, request.topk_);
         AttachReasoningReport(result, reasoning_ctx.get());
         result->Statistics(stats.Dump());

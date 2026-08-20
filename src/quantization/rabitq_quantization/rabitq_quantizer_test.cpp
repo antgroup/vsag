@@ -103,6 +103,47 @@ TEST_CASE("Extend RaBitQ Basic Test", "[ut][RaBitQuantizer]") {
     }
 }
 
+TEST_CASE("RaBitQ transformed residual query matches direct query", "[ut][RaBitQuantizer]") {
+    constexpr uint64_t dim = 64;
+    constexpr uint64_t pca_dim = 32;
+    constexpr uint64_t count = 100;
+    const bool use_mrq = GENERATE(false, true);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto vecs = fixtures::generate_vectors(count, dim);
+    RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(
+        dim, pca_dim, 32, 8, false, use_mrq, allocator.get());
+    REQUIRE(quantizer.TrainImpl(vecs.data(), count));
+
+    std::vector<float> residual(dim);
+    for (uint64_t d = 0; d < dim; ++d) {
+        residual[d] = vecs[d] - vecs[dim + d];
+    }
+    auto direct_computer = quantizer.FactoryComputer();
+    direct_computer->SetQuery(residual.data());
+
+    const uint64_t transform_size = quantizer.GetResidualQueryTransformSize();
+    std::vector<float> query_transform(transform_size);
+    std::vector<float> centroid_transform(transform_size);
+    std::vector<float> zero_transform(transform_size);
+    std::vector<float> residual_transform(transform_size);
+    std::vector<float> zero(dim, 0.0F);
+    quantizer.TransformResidualQuery(vecs.data(), query_transform.data());
+    quantizer.TransformResidualQuery(vecs.data() + dim, centroid_transform.data());
+    quantizer.TransformResidualQuery(zero.data(), zero_transform.data());
+    for (uint64_t d = 0; d < transform_size; ++d) {
+        residual_transform[d] = query_transform[d] - centroid_transform[d] + zero_transform[d];
+    }
+    auto transformed_computer = quantizer.FactoryComputer();
+    quantizer.ProcessTransformedResidualQuery(residual_transform.data(), *transformed_computer);
+
+    std::vector<uint8_t> base_code(quantizer.GetCodeSize());
+    REQUIRE(quantizer.EncodeOne(vecs.data() + 2 * dim, base_code.data()));
+    const float direct_distance = quantizer.ComputeDist(*direct_computer, base_code.data());
+    const float transformed_distance =
+        quantizer.ComputeDist(*transformed_computer, base_code.data());
+    REQUIRE(std::abs(transformed_distance - direct_distance) <= 1e-4F);
+}
+
 TEST_CASE("Fast RaBitQ coordinate adjustment", "[ut][RaBitQuantizer]") {
     constexpr uint64_t dim = 64;
     const uint64_t base_bits = GENERATE(2, 4, 8);

@@ -131,6 +131,28 @@ public:
     virtual ComputerInterfacePtr
     FactoryComputer(const void* query) = 0;
 
+    [[nodiscard]] virtual bool
+    SupportResidualQueryTransform() const {
+        return false;
+    }
+
+    [[nodiscard]] virtual uint64_t
+    GetResidualQueryTransformSize() const {
+        return 0;
+    }
+
+    virtual void
+    TransformResidualQuery(const float* /*query*/, float* /*transformed_query*/) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "residual query transform is not supported");
+    }
+
+    virtual ComputerInterfacePtr
+    FactoryComputerFromResidualQuery(const float* /*transformed_query*/) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "transformed residual query is not supported");
+    }
+
     virtual void
     Train(const void* data, uint64_t count) = 0;
 

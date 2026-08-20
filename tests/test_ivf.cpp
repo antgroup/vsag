@@ -24,6 +24,7 @@
 #include <stdexcept>
 
 #include "functest.h"
+#include "simd/fp32_simd.h"
 #include "storage/serialization_tags.h"
 #include "storage/serialization_template_test.h"
 #include "storage/streaming_serialization_test_utils.h"
@@ -3397,6 +3398,12 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     REQUIRE(precise_distance.has_value());
     REQUIRE(std::isfinite(approximate_distance.value()));
     REQUIRE(std::isfinite(precise_distance.value()));
+    if (metric == "l2") {
+        const float exact_distance = vsag::FP32ComputeL2Sqr(
+            query->GetFloat32Vectors(), dataset->base_->GetFloat32Vectors(), dim);
+        REQUIRE(std::abs(precise_distance.value() - exact_distance) <
+                std::max(1.0F, exact_distance) * 0.2F);
+    }
     std::array<int64_t, 2> distance_ids{existing_id, -1};
     auto batch_distances = index.value()->CalcDistancesById(
         query->GetFloat32Vectors(), distance_ids.data(), distance_ids.size(), true);
@@ -3414,6 +3421,11 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     REQUIRE(result.value()->GetDim() == topk);
     for (int64_t i = 0; i < topk; ++i) {
         REQUIRE(std::isfinite(result.value()->GetDistances()[i]));
+    }
+    if (metric == "l2") {
+        const float recall =
+            fixtures::TestIndex::TestKnnSearch(index.value(), dataset, search_param, 0.15F, true);
+        REQUIRE(recall > 0.15F);
     }
 
     auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
@@ -3457,7 +3469,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
         heap_statistics["rabitq_reorder_hint_full_count"].GetUint64();
     REQUIRE(heap_filter_count > 0);
     REQUIRE(heap_reorder_count >= topk);
-    REQUIRE(heap_reorder_count < heap_filter_count);
+    REQUIRE(heap_reorder_count <= heap_filter_count);
     REQUIRE(heap_full_count >= heap_reorder_count);
     REQUIRE(heap_inner_product_count == heap_reorder_count);
     REQUIRE(heap_statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() ==

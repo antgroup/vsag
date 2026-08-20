@@ -151,14 +151,30 @@ private:
     public:
         SplitBucketComputer(ComputerInterfacePtr inner,
                             ComputerInterfacePtr fastscan,
-                            uint64_t dim,
+                            uint64_t raw_query_size,
+                            uint64_t adjustment_count,
+                            uint64_t bucket_computer_count,
+                            uint64_t residual_transform_size,
                             Allocator* allocator)
-            : inner_(std::move(inner)), fastscan_(std::move(fastscan)), raw_query_(dim, allocator) {
+            : inner_(std::move(inner)),
+              fastscan_(std::move(fastscan)),
+              raw_query_(raw_query_size, allocator),
+              query_centroid_adjustments_(adjustment_count, 0.0F, allocator),
+              transformed_query_(residual_transform_size, 0.0F, allocator),
+              residual_query_scratch_(residual_transform_size, 0.0F, allocator),
+              bucket_inner_computers_(bucket_computer_count, nullptr, allocator),
+              bucket_fastscan_computers_(bucket_computer_count, nullptr, allocator) {
         }
 
         ComputerInterfacePtr inner_{nullptr};
         ComputerInterfacePtr fastscan_{nullptr};
         Vector<float> raw_query_;
+        Vector<float> query_centroid_adjustments_;
+        Vector<float> transformed_query_;
+        mutable Vector<float> residual_query_scratch_;
+        mutable Vector<ComputerInterfacePtr> bucket_inner_computers_;
+        mutable Vector<ComputerInterfacePtr> bucket_fastscan_computers_;
+        mutable std::mutex bucket_computers_mutex_;
     };
 
     void
@@ -173,6 +189,18 @@ private:
     static const SplitBucketComputer&
     get_bucket_computer(const ComputerInterfacePtr& computer);
 
+    std::pair<ComputerInterfacePtr, ComputerInterfacePtr>
+    get_scan_computers(const SplitBucketComputer& computer, BucketIdType bucket_id);
+
+    [[nodiscard]] bool
+    use_l2_residual_query() const;
+
+    void
+    rebuild_residual_centroid_transforms();
+
+    void
+    ensure_residual_centroid_transforms();
+
     const float*
     prepare_vector(const void* vector,
                    BucketIdType bucket_id,
@@ -180,7 +208,10 @@ private:
                    float& residual_bias) const;
 
     float
-    residual_adjustment(const SplitBucketComputer& computer,
+    query_centroid_adjustment(const SplitBucketComputer& computer, BucketIdType bucket_id) const;
+
+    float
+    residual_adjustment(float query_centroid_adjustment,
                         BucketIdType bucket_id,
                         InnerIdType offset_id) const;
 
@@ -233,6 +264,9 @@ private:
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
     Vector<Vector<InnerIdType>> inner_ids_;
     Vector<Vector<float>> residual_bias_;
+    Vector<float> residual_centroid_transforms_;
+    uint64_t residual_transform_size_{0};
+    std::mutex residual_centroid_transforms_mutex_;
     Vector<Vector<uint8_t>> fastscan_blocks_;
     uint64_t fastscan_block_size_{0};
     mutable Vector<std::shared_mutex> bucket_mutexes_;
