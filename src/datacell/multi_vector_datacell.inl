@@ -315,6 +315,10 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Query(float* result_dists,
 
     // Step 3: Batch read all data via MultiRead (async IO, now in offset-sorted order)
     auto* all_codes = static_cast<uint8_t*>(this->allocator_->Allocate(total_size));
+    if (all_codes == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                            "MultiVectorDataCell: failed to allocate buffer for Query");
+    }
     if (not this->io_->MultiRead(all_codes,
                                  sorted_data_sizes.data(),
                                  sorted_offsets.data(),
