@@ -84,6 +84,25 @@ dump_simq_statistics(const SearchStatistics& stats,
     json["simq_mv_io_ms"].SetInt(static_cast<int>(mv_io_ms));
     json["simq_mv_compute_ms"].SetInt(static_cast<int>(mv_compute_ms));
     json["simq_mv_candidates"].SetInt(static_cast<int>(mv_candidates));
+
+    // Standard distance evaluation tracking (compatible with upstream PR #2545)
+    uint64_t routing_dist_cmp = coarse_dist_cmp;
+    uint64_t rerank_dist_cmp = stats.dist_cmp.load(std::memory_order_relaxed);
+    uint64_t total_dist_cmp = routing_dist_cmp + rerank_dist_cmp;
+
+    auto phase_json = JsonType::Parse("{}");
+    phase_json["routing"].SetUint64(routing_dist_cmp);
+    phase_json["rerank"].SetUint64(rerank_dist_cmp);
+    json["distance_evaluations_by_phase"].SetJson(phase_json);
+
+    json["distance_evaluations"].SetUint64(total_dist_cmp);
+
+    auto backend_json = JsonType::Parse("{}");
+    backend_json["fp32"].SetUint64(total_dist_cmp);
+    json["distance_evaluations_by_backend"].SetJson(backend_json);
+
+    json["complete"].SetBool(true);
+
     return json.Dump();
 }
 
@@ -702,17 +721,18 @@ SIMQ::Add(const DatasetPtr& data) {
     const int64_t* labels = data->GetIds();
     CHECK_ARGUMENT(labels != nullptr, "simq add: labels (ids) is nullptr");
 
+    uint64_t old_token_count = vec_to_cluster_.size();
+
     Vector<uint64_t> doc_token_offsets(num_docs + 1, allocator_);
-    doc_token_offsets[0] = 0;
+    doc_token_offsets[0] = old_token_count;
     uint64_t total_new_tokens = 0;
     for (int64_t i = 0; i < num_docs; ++i) {
         total_new_tokens += mvs[i].len_;
-        doc_token_offsets[i + 1] = total_new_tokens;
+        doc_token_offsets[i + 1] = old_token_count + total_new_tokens;
     }
 
     auto base_inner_id = static_cast<InnerIdType>(total_count_);
 
-    uint64_t old_token_count = vec_to_cluster_.size();
     uint64_t new_token_count = old_token_count + total_new_tokens;
     vec_to_cluster_.resize(new_token_count);
     token_to_doc_.resize(new_token_count);
