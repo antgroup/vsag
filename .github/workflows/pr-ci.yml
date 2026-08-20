@@ -57,7 +57,7 @@ jobs:
     name: Format Check
     needs: changes
     if: needs.changes.outputs.cpp == 'true' || needs.changes.outputs.python == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: [linux, self-hosted]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -74,7 +74,7 @@ jobs:
     name: ASan Build X86
     needs: [changes, format]
     if: needs.changes.outputs.cpp == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: [linux, self-hosted, X64]
     env:
       VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
       VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
@@ -161,7 +161,7 @@ jobs:
           name: build-x86-${{ github.run_id }}
           compression-level: 1
           retention-days: 1
-          overwrite: 'true'
+          overwrite: "true"
 
   build-asan-macos-arm64:
     name: ASan Build macOS arm64
@@ -194,10 +194,8 @@ jobs:
     name: Python Build X86
     needs: [changes, format]
     if: needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: [linux, self-hosted, X64]
     steps:
-      - name: Free Disk Space
-        run: rm -rf /opt/hostedtoolcache
       - uses: actions/checkout@v4
       - name: Prepare Env
         run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
@@ -222,13 +220,13 @@ jobs:
           name: wheelhouse-x86-${{ github.run_id }}
           compression-level: 1
           retention-days: 1
-          overwrite: 'true'
+          overwrite: "true"
 
   test-asan-x86-unittests:
     name: Test X86 Unittests
     needs: [changes, build-asan-x86]
     if: needs.changes.outputs.cpp == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: [linux, self-hosted, X64]
     container:
       image: vsaglib/vsag:ci-x86-openblas
       volumes:
@@ -262,13 +260,13 @@ jobs:
           name: log-x86-unittests-${{ github.run_id }}
           compression-level: 1
           retention-days: 3
-          overwrite: 'true'
+          overwrite: "true"
 
   test-asan-x86-functests:
     name: Test X86 Functests
     needs: [changes, build-asan-x86]
     if: needs.changes.outputs.cpp == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: [linux, self-hosted, X64]
     env:
       LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
@@ -302,13 +300,13 @@ jobs:
           name: log-x86-functests-${{ github.run_id }}
           compression-level: 1
           retention-days: 3
-          overwrite: 'true'
+          overwrite: "true"
 
   test-example-x86:
     name: Test Example X86
     needs: [changes, build-asan-x86]
     if: needs.changes.outputs.cpp == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: [linux, self-hosted, X64]
     container:
       image: vsaglib/vsag:ci-x86-openblas
       volumes:
@@ -342,7 +340,7 @@ jobs:
     name: Check Compatibility
     needs: [changes, build-asan-x86]
     if: needs.changes.outputs.cpp == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: [linux, self-hosted, X64]
     env:
       LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
@@ -393,7 +391,7 @@ jobs:
     name: Test Python X86
     needs: [changes, build-python-x86]
     if: needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: [linux, self-hosted, X64]
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
