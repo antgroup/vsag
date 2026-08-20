@@ -774,3 +774,17 @@ TEST_CASE("Pyramid exposes stored raw vectors", "[ut][pyramid][raw_vector]") {
     REQUIRE(distances.has_value());
     REQUIRE(distances.value()->GetDistances()[0] == 0.0F);
 }
+
+TEST_CASE("Pyramid rejects TQ-only fields for non-TQ quantizers", "[ut][pyramid]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto tq_chain = vsag::JsonType::Parse(R"({"base_quantization_type":"fp32",
+                                               "tq_chain":"mrle,fp32"})");
+    REQUIRE_THROWS(vsag::Pyramid::CheckAndMappingExternalParam(tq_chain, common_param));
+
+    auto mrle_dim = vsag::JsonType::Parse(R"({"base_quantization_type":"int8",
+                                               "mrle_dim":64})");
+    REQUIRE_THROWS(vsag::Pyramid::CheckAndMappingExternalParam(mrle_dim, common_param));
+}

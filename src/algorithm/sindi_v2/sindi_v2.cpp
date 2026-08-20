@@ -21,6 +21,7 @@
 #include <istream>
 #include <limits>
 #include <mutex>
+#include <nlohmann/json.hpp>
 #include <sstream>
 #include <unordered_set>
 #include <vector>
@@ -296,6 +297,26 @@ write_rerank_flat_with_layout(const FlattenInterfacePtr& rerank_flat,
 ParamPtr
 SINDIV2::CheckAndMappingExternalParam(const JsonType& external_param,
                                       const IndexCommonParam& common_param) {
+    static const std::unordered_set<std::string> supported_keys = {
+        SPARSE_TERM_ID_LIMIT,
+        SPARSE_DOC_PRUNE_RATIO,
+        USE_REORDER_KEY,
+        USE_QUANTIZATION,
+        SPARSE_WINDOW_SIZE,
+        SPARSE_AVG_DOC_TERM_LENGTH,
+        SPARSE_REMAP_TERM_IDS,
+        SPARSE_RERANK_TYPE,
+        SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD,
+        SPARSE_IMMUTABLE,
+        "rerank_layout",
+        "term_io",
+        "rerank_io",
+    };
+    for (const auto& [key, value] : external_param.GetInnerJson()->items()) {
+        (void)value;
+        CHECK_ARGUMENT(supported_keys.find(key) != supported_keys.end(),
+                       fmt::format("invalid config param: {}", key));
+    }
     auto ptr = std::make_shared<SINDIV2Parameter>();
     ptr->FromJson(external_param);
     return ptr;

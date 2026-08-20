@@ -950,3 +950,17 @@ TEST_CASE("HGraph maps MRLE RaBitQ split to base reorder", "[ut][HGraphParameter
     param["tq_chain"].SetString("pca, rabitq");
     REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
 }
+
+TEST_CASE("HGraph rejects TQ-only fields for non-TQ quantizers", "[ut][HGraphParameter]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto tq_chain = vsag::JsonType::Parse(R"({"base_quantization_type":"fp32",
+                                               "tq_chain":"mrle,fp32"})");
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(tq_chain, common_param));
+
+    auto mrle_dim = vsag::JsonType::Parse(R"({"base_quantization_type":"int8",
+                                               "mrle_dim":64})");
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(mrle_dim, common_param));
+}

@@ -21,9 +21,11 @@
 using namespace vsag;
 
 TEST_CASE("INT8 Quantizer Parameter ToJson Test", "[ut][INT8QuantizerParameter]") {
-    std::string param_str = "{}";
+    std::string param_str = R"({"hold_molds": true})";
     auto param = std::make_shared<INT8QuantizerParameter>();
     JsonType param_json = JsonType::Parse(param_str);
     param->FromJson(param_json);
+    REQUIRE(param->hold_molds);
+    REQUIRE(param->ToJson()[HOLD_MOLDS].GetBool());
     ParameterTest::TestToJson(param);
 }
