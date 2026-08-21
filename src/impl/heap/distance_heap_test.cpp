@@ -114,7 +114,11 @@ TEST_CASE_METHOD(TestDistanceHeap, "standard_heap test", "[ut][distance_heap]") 
 }
 
 TEST_CASE("standard_heap bounds initial reserve", "[ut][distance_heap]") {
-    constexpr uint64_t initial_capacity = 64;
+    // Since callers pass the expected frontier size (e.g. ef) as a reservation
+    // hint, the constructor clamps it into [64, 512]: small hints are raised so
+    // a single allocation covers typical searches, huge ones are capped.
+    constexpr uint64_t min_capacity = 64;
+    constexpr uint64_t max_capacity = 512;
     const auto expected_bytes = [](uint64_t capacity) {
         return capacity * sizeof(DistanceHeap::DistanceRecord);
     };
@@ -128,9 +132,10 @@ TEST_CASE("standard_heap bounds initial reserve", "[ut][distance_heap]") {
         REQUIRE(allocator.allocation_sizes.front() == expected_bytes(expected_capacity));
     };
 
-    check_initial_reserve(3, 3);
-    check_initial_reserve(std::numeric_limits<int64_t>::max(), initial_capacity);
-    check_initial_reserve(-1, initial_capacity);
+    check_initial_reserve(3, min_capacity);
+    check_initial_reserve(std::numeric_limits<int64_t>::max(), max_capacity);
+    check_initial_reserve(200, 200);
+    check_initial_reserve(-1, min_capacity);
 }
 
 TEST_CASE("standard_heap small fixed and dynamic behavior", "[ut][distance_heap]") {
