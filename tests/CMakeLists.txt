@@ -15,19 +15,32 @@
 
 # fixtures is already added by top-level CMakeLists.txt before src
 
+find_package (Threads REQUIRED)
 
 #  unittests
 add_executable (unittests
         test_main.cpp
+        ${PROJECT_SOURCE_DIR}/tools/eval/case/search_pass_runner.cpp
+        ${PROJECT_SOURCE_DIR}/tools/eval/case/search_pass_runner_test.cpp
+        ${PROJECT_SOURCE_DIR}/tools/eval/monitor/memory_peak_monitor_test.cpp
+        ${PROJECT_SOURCE_DIR}/tools/eval/monitor/memory_peak_monitor.cpp
+        ${PROJECT_SOURCE_DIR}/tools/eval/monitor/monitor.cpp
         $<TARGET_OBJECTS:fixtures_allocator>
         $<TARGET_OBJECTS:fixtures_core>
         $<TARGET_OBJECTS:fixtures_data>
         $<TARGET_OBJECTS:fixtures_framework>
 )
 
+target_include_directories (unittests PRIVATE
+        ${PROJECT_SOURCE_DIR}/tools/eval/case
+        ${PROJECT_SOURCE_DIR}/tools/eval/monitor
+)
+
 target_link_libraries (unittests
         PRIVATE
-        Catch2::Catch2 
+        Catch2::Catch2
+        Threads::Threads
+        nlohmann_json::nlohmann_json
         simd_test vsag_test algorithm_test factory_test attr_test
         datacell_test quantizer_test storage_test io_test utils_test impl_test
         vsag_static
