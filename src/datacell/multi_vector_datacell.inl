@@ -377,6 +377,13 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Query(float* result_dists,
                                             std::memory_order_relaxed);
         stats->mv_io_bytes.fetch_add(total_size, std::memory_order_relaxed);
     }
+
+    // Record distance evaluations for telemetry (compatible with upstream PR #2545)
+    if (ctx != nullptr and ctx->stats != nullptr) {
+        ctx->stats->AddDistance(DistanceEvaluationPhase::RERANK,
+                                this->quantizer_->Name(),
+                                static_cast<uint64_t>(id_count));
+    }
 }
 
 template <typename QuantTmpl, typename IOTmpl>
