@@ -1623,6 +1623,7 @@ IVF::read_streaming_body(StreamReader& reader,
         throw VsagException(ErrorType::READ_ERROR,
                             "IVF streaming serialization attribute filter block is missing");
     }
+    this->bucket_->FinalizeLoad();
     if (this->bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
         this->has_raw_vector_ = true;
     }
@@ -1767,6 +1768,7 @@ IVF::Deserialize(StreamReader& reader) {
             }
         }
     }
+    this->bucket_->FinalizeLoad();
     this->fill_location_map();
     this->cal_memory_usage();
 }
@@ -1920,7 +1922,8 @@ IVF::search(const DatasetPtr& query,
     if (reasoning_ctx != nullptr) {
         reasoning_ctx->RecordBucketSelection(candidate_buckets);
     }
-    auto computer = bucket_->FactoryComputer(query_data);
+    auto computer = bucket_->FactoryComputerForBuckets(
+        query_data, candidate_buckets.data(), candidate_buckets.size());
     if (bucket_computer != nullptr) {
         *bucket_computer = computer;
     }

@@ -84,7 +84,7 @@ RaBitQSplitBucketDataCell::get_inner_computer(const ComputerInterfacePtr& comput
     return RaBitQSplitBucketDataCell::get_bucket_computer(computer).inner_;
 }
 
-const RaBitQSplitBucketDataCell::SplitBucketComputer&
+RaBitQSplitBucketDataCell::SplitBucketComputer&
 RaBitQSplitBucketDataCell::get_bucket_computer(const ComputerInterfacePtr& computer) {
     auto* bucket_computer = dynamic_cast<SplitBucketComputer*>(computer.get());
     CHECK_ARGUMENT(bucket_computer != nullptr, "invalid RaBitQ split bucket computer");
@@ -98,43 +98,119 @@ RaBitQSplitBucketDataCell::use_l2_residual_query() const {
 }
 
 std::pair<ComputerInterfacePtr, ComputerInterfacePtr>
-RaBitQSplitBucketDataCell::get_scan_computers(const SplitBucketComputer& computer,
+RaBitQSplitBucketDataCell::get_scan_computers(SplitBucketComputer& computer,
                                               BucketIdType bucket_id) {
     if (not this->use_l2_residual_query()) {
         return {computer.inner_, computer.fastscan_};
     }
 
-    auto inner = std::atomic_load(&computer.bucket_inner_computers_[bucket_id]);
-    if (inner != nullptr) {
-        return {std::move(inner),
-                std::atomic_load(&computer.bucket_fastscan_computers_[bucket_id])};
+    if (computer.routed_buckets_prepared_) {
+        for (uint64_t i = 0; i < computer.bucket_ids_.size(); ++i) {
+            if (computer.bucket_ids_[i] == bucket_id) {
+                return {computer.bucket_inner_computers_[i],
+                        computer.bucket_fastscan_computers_[i]};
+            }
+        }
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "residual query computer was not prepared for the requested bucket");
     }
 
     std::lock_guard lock(computer.bucket_computers_mutex_);
-    inner = std::atomic_load(&computer.bucket_inner_computers_[bucket_id]);
-    if (inner == nullptr) {
-        CHECK_ARGUMENT(
-            this->residual_centroid_transforms_.size() ==
-                static_cast<uint64_t>(this->bucket_count_) * this->residual_transform_size_,
-            "missing transformed residual centroids");
+    for (uint64_t i = 0; i < computer.bucket_ids_.size(); ++i) {
+        if (computer.bucket_ids_[i] == bucket_id) {
+            return {computer.bucket_inner_computers_[i], computer.bucket_fastscan_computers_[i]};
+        }
+    }
+    this->append_scan_computer(computer, bucket_id);
+    return {computer.bucket_inner_computers_.back(), computer.bucket_fastscan_computers_.back()};
+}
+
+void
+RaBitQSplitBucketDataCell::prepare_scan_computers(SplitBucketComputer& computer,
+                                                  const BucketIdType* bucket_ids,
+                                                  uint64_t bucket_count) {
+    if (not this->use_l2_residual_query()) {
+        return;
+    }
+    if (bucket_count != 0 and bucket_ids == nullptr) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "bucket ids are required to prepare residual query computers");
+    }
+
+    std::lock_guard lock(computer.bucket_computers_mutex_);
+    CHECK_ARGUMENT(not computer.routed_buckets_prepared_,
+                   "residual query computers were already prepared");
+    computer.bucket_ids_.reserve(bucket_count);
+    computer.bucket_inner_computers_.reserve(bucket_count);
+    computer.bucket_fastscan_computers_.reserve(bucket_count);
+    CHECK_ARGUMENT(this->residual_centroid_transforms_.size() ==
+                       static_cast<uint64_t>(this->bucket_count_) * this->residual_transform_size_,
+                   "missing transformed residual centroids");
+    for (uint64_t i = 0; i < bucket_count; ++i) {
+        const auto bucket_id = bucket_ids[i];
+        if (bucket_id < 0) {
+            continue;
+        }
+        this->check_valid_bucket_id(bucket_id);
+        if (std::find(computer.bucket_ids_.begin(), computer.bucket_ids_.end(), bucket_id) !=
+            computer.bucket_ids_.end()) {
+            continue;
+        }
+        computer.bucket_ids_.push_back(bucket_id);
+    }
+
+    const uint64_t prepared_count = computer.bucket_ids_.size();
+    Vector<float> residual_queries(prepared_count * this->residual_transform_size_,
+                                   this->allocator_);
+    for (uint64_t i = 0; i < prepared_count; ++i) {
+        const auto bucket_id = computer.bucket_ids_[i];
         FP32Sub(computer.transformed_query_.data(),
                 this->residual_centroid_transforms_.data() +
                     static_cast<uint64_t>(bucket_id) * this->residual_transform_size_,
-                computer.residual_query_scratch_.data(),
+                residual_queries.data() + i * this->residual_transform_size_,
                 this->residual_transform_size_);
-        inner =
-            this->codes_->FactoryComputerFromResidualQuery(computer.residual_query_scratch_.data());
-        auto fastscan = this->codes_->FactoryFastScan32Computer(inner);
-        std::atomic_store(&computer.bucket_fastscan_computers_[bucket_id], fastscan);
-        std::atomic_store(&computer.bucket_inner_computers_[bucket_id], inner);
     }
-    return {std::move(inner), std::atomic_load(&computer.bucket_fastscan_computers_[bucket_id])};
+    computer.bucket_inner_computers_.resize(prepared_count);
+    computer.bucket_fastscan_computers_.resize(prepared_count);
+    if (prepared_count != 0) {
+        this->codes_->FactoryFastScan32ComputersFromResidualQueries(
+            residual_queries.data(),
+            prepared_count,
+            computer.bucket_inner_computers_.data(),
+            computer.bucket_fastscan_computers_.data());
+    }
+    computer.routed_buckets_prepared_ = true;
+}
+
+void
+RaBitQSplitBucketDataCell::append_scan_computer(SplitBucketComputer& computer,
+                                                BucketIdType bucket_id) {
+    CHECK_ARGUMENT(this->residual_centroid_transforms_.size() ==
+                       static_cast<uint64_t>(this->bucket_count_) * this->residual_transform_size_,
+                   "missing transformed residual centroids");
+    const uint64_t required_size = computer.bucket_ids_.size() + 1;
+    computer.bucket_ids_.reserve(required_size);
+    computer.bucket_inner_computers_.reserve(required_size);
+    computer.bucket_fastscan_computers_.reserve(required_size);
+    FP32Sub(computer.transformed_query_.data(),
+            this->residual_centroid_transforms_.data() +
+                static_cast<uint64_t>(bucket_id) * this->residual_transform_size_,
+            computer.residual_query_scratch_.data(),
+            this->residual_transform_size_);
+    auto inner =
+        this->codes_->FactoryComputerFromResidualQuery(computer.residual_query_scratch_.data());
+    auto fastscan = this->codes_->FactoryFastScan32Computer(inner);
+    computer.bucket_ids_.push_back(bucket_id);
+    computer.bucket_inner_computers_.push_back(std::move(inner));
+    computer.bucket_fastscan_computers_.push_back(std::move(fastscan));
 }
 
 void
 RaBitQSplitBucketDataCell::rebuild_residual_centroid_transforms() {
+    this->residual_centroid_transforms_ready_.store(false, std::memory_order_relaxed);
     if (not this->use_l2_residual_query()) {
         this->residual_centroid_transforms_.clear();
+        this->residual_centroid_transforms_ready_.store(true, std::memory_order_release);
         return;
     }
 
@@ -158,18 +234,18 @@ RaBitQSplitBucketDataCell::rebuild_residual_centroid_transforms() {
         for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
             transform_centroid(bucket_id);
         }
-        return;
+    } else {
+        std::vector<std::future<void>> futures;
+        futures.reserve(this->bucket_count_);
+        for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
+            futures.emplace_back(
+                this->common_param_.thread_pool_->GeneralEnqueue(transform_centroid, bucket_id));
+        }
+        for (auto& future : futures) {
+            future.get();
+        }
     }
-
-    std::vector<std::future<void>> futures;
-    futures.reserve(this->bucket_count_);
-    for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
-        futures.emplace_back(
-            this->common_param_.thread_pool_->GeneralEnqueue(transform_centroid, bucket_id));
-    }
-    for (auto& future : futures) {
-        future.get();
-    }
+    this->residual_centroid_transforms_ready_.store(true, std::memory_order_release);
 }
 
 void
@@ -177,10 +253,14 @@ RaBitQSplitBucketDataCell::ensure_residual_centroid_transforms() {
     if (not this->use_l2_residual_query()) {
         return;
     }
+    if (this->residual_centroid_transforms_ready_.load(std::memory_order_acquire)) {
+        return;
+    }
     const uint64_t expected_size =
         static_cast<uint64_t>(this->bucket_count_) * this->residual_transform_size_;
     std::lock_guard lock(this->residual_centroid_transforms_mutex_);
-    if (this->residual_centroid_transforms_.size() != expected_size) {
+    if (not this->residual_centroid_transforms_ready_.load(std::memory_order_relaxed) or
+        this->residual_centroid_transforms_.size() != expected_size) {
         this->rebuild_residual_centroid_transforms();
     }
 }
@@ -245,7 +325,7 @@ RaBitQSplitBucketDataCell::ScanBucketById(float* result_dists,
     this->check_valid_bucket_id(bucket_id);
     std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
     const auto bucket_size = static_cast<InnerIdType>(this->inner_ids_[bucket_id].size());
-    const auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
+    auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
     const auto [scan_inner, scan_fastscan] = this->get_scan_computers(bucket_computer, bucket_id);
     const float query_centroid_adjustment =
         this->use_l2_residual_query() ? 0.0F
@@ -369,7 +449,7 @@ RaBitQSplitBucketDataCell::ScanBucketWithDistanceLowerBound(float* result_dists,
     this->check_valid_bucket_id(bucket_id);
     std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
     const auto bucket_size = static_cast<InnerIdType>(this->inner_ids_[bucket_id].size());
-    const auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
+    auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
     const auto [scan_inner, scan_fastscan] = this->get_scan_computers(bucket_computer, bucket_id);
     const float query_centroid_adjustment =
         this->use_l2_residual_query() ? 0.0F
@@ -506,7 +586,7 @@ RaBitQSplitBucketDataCell::QueryOneById(const ComputerInterfacePtr& computer,
     ByteBuffer filter_code(this->codes_->GetFilterCodeSize(), this->allocator_);
     this->get_filter_code(bucket_id, offset_id, filter_code.data);
     float distance = 0.0F;
-    const auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
+    auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
     if (this->use_l2_residual_query()) {
         const auto scan_inner = this->get_scan_computers(bucket_computer, bucket_id).first;
         this->codes_->QueryWithFilterCodes(
@@ -534,26 +614,15 @@ RaBitQSplitBucketDataCell::QueryWithFilterInnerProductByInnerId(
     const InnerIdType* inner_ids,
     InnerIdType id_count,
     QueryContext* ctx) {
-    const auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
+    auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
     if (this->use_l2_residual_query()) {
-        ByteBuffer filter_code(this->codes_->GetFilterCodeSize(), this->allocator_);
-        for (InnerIdType i = 0; i < id_count; ++i) {
-            const auto [bucket_id, offset_id] = this->get_location(inner_ids[i]);
-            std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
-            this->check_valid_offset(bucket_id, offset_id);
-            this->get_filter_code(bucket_id, offset_id, filter_code.data);
-            const auto scan_inner = this->get_scan_computers(bucket_computer, bucket_id).first;
-            const float* filter_inner_product =
-                filter_inner_products == nullptr ? nullptr : filter_inner_products + i;
-            this->codes_->QueryWithFilterCodes(result_dists + i,
-                                               nullptr,
-                                               filter_inner_product,
-                                               scan_inner,
-                                               inner_ids + i,
-                                               filter_code.data,
-                                               1,
-                                               ctx);
-        }
+        this->query_residual_by_inner_ids(result_dists,
+                                          nullptr,
+                                          filter_inner_products,
+                                          bucket_computer,
+                                          inner_ids,
+                                          id_count,
+                                          ctx);
         return;
     }
 
@@ -580,25 +649,10 @@ RaBitQSplitBucketDataCell::QueryWithDistanceHintByInnerId(float* result_dists,
                                                           const InnerIdType* inner_ids,
                                                           InnerIdType id_count,
                                                           QueryContext* ctx) {
-    const auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
+    auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
     if (this->use_l2_residual_query()) {
-        ByteBuffer filter_code(this->codes_->GetFilterCodeSize(), this->allocator_);
-        for (InnerIdType i = 0; i < id_count; ++i) {
-            const auto [bucket_id, offset_id] = this->get_location(inner_ids[i]);
-            std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
-            this->check_valid_offset(bucket_id, offset_id);
-            this->get_filter_code(bucket_id, offset_id, filter_code.data);
-            const auto scan_inner = this->get_scan_computers(bucket_computer, bucket_id).first;
-            const float* hint = hint_dists == nullptr ? nullptr : hint_dists + i;
-            this->codes_->QueryWithFilterCodes(result_dists + i,
-                                               hint,
-                                               nullptr,
-                                               scan_inner,
-                                               inner_ids + i,
-                                               filter_code.data,
-                                               1,
-                                               ctx);
-        }
+        this->query_residual_by_inner_ids(
+            result_dists, hint_dists, nullptr, bucket_computer, inner_ids, id_count, ctx);
         return;
     }
 
@@ -623,6 +677,91 @@ RaBitQSplitBucketDataCell::QueryWithDistanceHintByInnerId(float* result_dists,
     }
 }
 
+void
+RaBitQSplitBucketDataCell::query_residual_by_inner_ids(float* result_dists,
+                                                       const float* hint_dists,
+                                                       const float* filter_inner_products,
+                                                       SplitBucketComputer& computer,
+                                                       const InnerIdType* inner_ids,
+                                                       InnerIdType id_count,
+                                                       QueryContext* ctx) {
+    struct reorder_entry {
+        BucketIdType bucket_id;
+        InnerIdType offset_id;
+        InnerIdType inner_id;
+        InnerIdType result_offset;
+    };
+
+    Vector<reorder_entry> entries(id_count, this->allocator_);
+    {
+        std::lock_guard lock(this->locations_mutex_);
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            CHECK_ARGUMENT(inner_ids[i] < this->locations_.size(),
+                           "invalid inner id for RaBitQ split bucket");
+            const uint64_t location = this->locations_[inner_ids[i]];
+            CHECK_ARGUMENT(location != INVALID_LOCATION,
+                           "invalid inner id for RaBitQ split bucket");
+            entries[i] = {static_cast<BucketIdType>(location >> LOCATION_SPLIT_BIT),
+                          static_cast<InnerIdType>(location & 0xFFFFFFFFULL),
+                          inner_ids[i],
+                          i};
+        }
+    }
+    std::sort(entries.begin(), entries.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.bucket_id < rhs.bucket_id;
+    });
+
+    const uint64_t filter_code_size = this->codes_->GetFilterCodeSize();
+    Vector<InnerIdType> sorted_ids(id_count, this->allocator_);
+    Vector<float> sorted_dists(id_count, this->allocator_);
+    Vector<float> sorted_hints(hint_dists == nullptr ? 0 : id_count, this->allocator_);
+    Vector<float> sorted_filter_inner_products(filter_inner_products == nullptr ? 0 : id_count,
+                                               this->allocator_);
+    Vector<uint8_t> filter_codes(static_cast<uint64_t>(id_count) * filter_code_size,
+                                 this->allocator_);
+    for (InnerIdType i = 0; i < id_count; ++i) {
+        sorted_ids[i] = entries[i].inner_id;
+        if (hint_dists != nullptr) {
+            sorted_hints[i] = hint_dists[entries[i].result_offset];
+        }
+        if (filter_inner_products != nullptr) {
+            sorted_filter_inner_products[i] = filter_inner_products[entries[i].result_offset];
+        }
+    }
+
+    InnerIdType group_begin = 0;
+    while (group_begin < id_count) {
+        const BucketIdType bucket_id = entries[group_begin].bucket_id;
+        InnerIdType group_end = group_begin + 1;
+        while (group_end < id_count and entries[group_end].bucket_id == bucket_id) {
+            ++group_end;
+        }
+        std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
+        for (InnerIdType i = group_begin; i < group_end; ++i) {
+            this->check_valid_offset(bucket_id, entries[i].offset_id);
+            this->get_filter_code(
+                bucket_id,
+                entries[i].offset_id,
+                filter_codes.data() + static_cast<uint64_t>(i) * filter_code_size);
+        }
+        const auto scan_inner = this->get_scan_computers(computer, bucket_id).first;
+        this->codes_->QueryWithFilterCodes(
+            sorted_dists.data() + group_begin,
+            hint_dists == nullptr ? nullptr : sorted_hints.data() + group_begin,
+            filter_inner_products == nullptr ? nullptr
+                                             : sorted_filter_inner_products.data() + group_begin,
+            scan_inner,
+            sorted_ids.data() + group_begin,
+            filter_codes.data() + static_cast<uint64_t>(group_begin) * filter_code_size,
+            group_end - group_begin,
+            ctx);
+        group_begin = group_end;
+    }
+    for (InnerIdType i = 0; i < id_count; ++i) {
+        result_dists[entries[i].result_offset] = sorted_dists[i];
+    }
+}
+
 float
 RaBitQSplitBucketDataCell::ComputePairVectors(BucketIdType bucket_id,
                                               InnerIdType id1,
@@ -643,6 +782,20 @@ RaBitQSplitBucketDataCell::ComputePairVectors(BucketIdType bucket_id,
 
 ComputerInterfacePtr
 RaBitQSplitBucketDataCell::FactoryComputer(const void* query) {
+    return this->factory_computer(query, nullptr, 0);
+}
+
+ComputerInterfacePtr
+RaBitQSplitBucketDataCell::FactoryComputerForBuckets(const void* query,
+                                                     const BucketIdType* bucket_ids,
+                                                     uint64_t bucket_count) {
+    return this->factory_computer(query, bucket_ids, bucket_count);
+}
+
+ComputerInterfacePtr
+RaBitQSplitBucketDataCell::factory_computer(const void* query,
+                                            const BucketIdType* bucket_ids,
+                                            uint64_t bucket_count) {
     const auto* input = static_cast<const float*>(query);
     this->ensure_residual_centroid_transforms();
     ComputerInterfacePtr inner = nullptr;
@@ -655,14 +808,13 @@ RaBitQSplitBucketDataCell::FactoryComputer(const void* query) {
     const uint64_t adjustment_count = this->use_residual_ and not use_l2_residual_query
                                           ? static_cast<uint64_t>(this->bucket_count_)
                                           : 0;
-    const uint64_t bucket_computer_count =
-        use_l2_residual_query ? static_cast<uint64_t>(this->bucket_count_) : 0;
+    const uint64_t bucket_computer_capacity = use_l2_residual_query ? bucket_count : 0;
     auto computer = std::make_shared<SplitBucketComputer>(
         std::move(inner),
         std::move(fastscan),
         use_l2_residual_query ? 0 : this->dim_,
         adjustment_count,
-        bucket_computer_count,
+        bucket_computer_capacity,
         use_l2_residual_query ? this->residual_transform_size_ : 0,
         this->allocator_);
     if (not use_l2_residual_query) {
@@ -674,6 +826,9 @@ RaBitQSplitBucketDataCell::FactoryComputer(const void* query) {
     }
     if (use_l2_residual_query) {
         this->codes_->TransformResidualQuery(input, computer->transformed_query_.data());
+        if (bucket_ids != nullptr or bucket_count != 0) {
+            this->prepare_scan_computers(*computer, bucket_ids, bucket_count);
+        }
     }
     if (this->use_residual_ and not use_l2_residual_query) {
         // A computer is shared by all scanned buckets for one query.  Precompute the query-only
@@ -1185,6 +1340,13 @@ RaBitQSplitBucketDataCell::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
     this->codes_->DiscardFilterCodes();
     this->backend_ = DistanceEvaluationBackend::RABITQ;
     this->rebuild_locations();
+    this->residual_centroid_transforms_.clear();
+    this->residual_centroid_transforms_ready_.store(false, std::memory_order_release);
+}
+
+void
+RaBitQSplitBucketDataCell::FinalizeLoad() {
+    this->rebuild_residual_centroid_transforms();
 }
 
 uint64_t

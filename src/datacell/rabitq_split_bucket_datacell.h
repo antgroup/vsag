@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <limits>
 #include <mutex>
 #include <shared_mutex>
@@ -75,6 +76,11 @@ public:
 
     ComputerInterfacePtr
     FactoryComputer(const void* query) override;
+
+    ComputerInterfacePtr
+    FactoryComputerForBuckets(const void* query,
+                              const BucketIdType* bucket_ids,
+                              uint64_t bucket_count) override;
 
     void
     Train(const void* data, uint64_t count) override;
@@ -138,6 +144,9 @@ public:
     Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
 
     void
+    FinalizeLoad() override;
+
+    void
     Package() override;
 
     void
@@ -153,7 +162,7 @@ private:
                             ComputerInterfacePtr fastscan,
                             uint64_t raw_query_size,
                             uint64_t adjustment_count,
-                            uint64_t bucket_computer_count,
+                            uint64_t bucket_computer_capacity,
                             uint64_t residual_transform_size,
                             Allocator* allocator)
             : inner_(std::move(inner)),
@@ -162,8 +171,12 @@ private:
               query_centroid_adjustments_(adjustment_count, 0.0F, allocator),
               transformed_query_(residual_transform_size, 0.0F, allocator),
               residual_query_scratch_(residual_transform_size, 0.0F, allocator),
-              bucket_inner_computers_(bucket_computer_count, nullptr, allocator),
-              bucket_fastscan_computers_(bucket_computer_count, nullptr, allocator) {
+              bucket_ids_(allocator),
+              bucket_inner_computers_(allocator),
+              bucket_fastscan_computers_(allocator) {
+            bucket_ids_.reserve(bucket_computer_capacity);
+            bucket_inner_computers_.reserve(bucket_computer_capacity);
+            bucket_fastscan_computers_.reserve(bucket_computer_capacity);
         }
 
         ComputerInterfacePtr inner_{nullptr};
@@ -172,9 +185,11 @@ private:
         Vector<float> query_centroid_adjustments_;
         Vector<float> transformed_query_;
         mutable Vector<float> residual_query_scratch_;
+        mutable Vector<BucketIdType> bucket_ids_;
         mutable Vector<ComputerInterfacePtr> bucket_inner_computers_;
         mutable Vector<ComputerInterfacePtr> bucket_fastscan_computers_;
         mutable std::mutex bucket_computers_mutex_;
+        bool routed_buckets_prepared_{false};
     };
 
     void
@@ -186,11 +201,31 @@ private:
     static const ComputerInterfacePtr&
     get_inner_computer(const ComputerInterfacePtr& computer);
 
-    static const SplitBucketComputer&
+    static SplitBucketComputer&
     get_bucket_computer(const ComputerInterfacePtr& computer);
 
     std::pair<ComputerInterfacePtr, ComputerInterfacePtr>
-    get_scan_computers(const SplitBucketComputer& computer, BucketIdType bucket_id);
+    get_scan_computers(SplitBucketComputer& computer, BucketIdType bucket_id);
+
+    void
+    prepare_scan_computers(SplitBucketComputer& computer,
+                           const BucketIdType* bucket_ids,
+                           uint64_t bucket_count);
+
+    void
+    append_scan_computer(SplitBucketComputer& computer, BucketIdType bucket_id);
+
+    void
+    query_residual_by_inner_ids(float* result_dists,
+                                const float* hint_dists,
+                                const float* filter_inner_products,
+                                SplitBucketComputer& computer,
+                                const InnerIdType* inner_ids,
+                                InnerIdType id_count,
+                                QueryContext* ctx);
+
+    ComputerInterfacePtr
+    factory_computer(const void* query, const BucketIdType* bucket_ids, uint64_t bucket_count);
 
     [[nodiscard]] bool
     use_l2_residual_query() const;
@@ -267,6 +302,7 @@ private:
     Vector<float> residual_centroid_transforms_;
     uint64_t residual_transform_size_{0};
     std::mutex residual_centroid_transforms_mutex_;
+    std::atomic<bool> residual_centroid_transforms_ready_{false};
     Vector<Vector<uint8_t>> fastscan_blocks_;
     uint64_t fastscan_block_size_{0};
     mutable Vector<std::shared_mutex> bucket_mutexes_;

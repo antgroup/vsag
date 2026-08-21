@@ -1437,8 +1437,11 @@ RaBitQuantizer<metric>::PrepareFastScan32Query(Computer<RaBitQuantizer>& compute
             }
         }
         for (uint64_t mask = 0; mask < 16; ++mask) {
-            const auto quantized =
-                static_cast<int64_t>(std::lround((group_lut[mask] - lower) / deltas[0]));
+            const float scaled = (group_lut[mask] - lower) / deltas[0];
+            // Every subset sum is in [lower, upper], so scaled is non-negative and truncating
+            // scaled + 0.5 is exactly the positive-domain equivalent of lround.
+            // NOLINTNEXTLINE(bugprone-incorrect-roundings)
+            const auto quantized = static_cast<int64_t>(scaled + 0.5F);
             lookup_table[group * 16 + mask] =
                 static_cast<uint8_t>(std::clamp<int64_t>(quantized, 0, 255));
         }

@@ -879,6 +879,45 @@ public:
         return FlattenInterface::FactoryComputerFromResidualQuery(transformed_query);
     }
 
+    void
+    FactoryFastScan32ComputersFromResidualQueries(
+        const float* transformed_queries,
+        uint64_t query_count,
+        ComputerInterfacePtr* computers,
+        ComputerInterfacePtr* fastscan_computers) override {
+        if constexpr (std::is_same_v<QuantizerT, BottomQuantizer>) {
+            CHECK_ARGUMENT(query_count == 0 or transformed_queries != nullptr,
+                           "transformed residual queries are required");
+            CHECK_ARGUMENT(query_count == 0 or computers != nullptr,
+                           "residual query computer output is required");
+            CHECK_ARGUMENT(query_count == 0 or fastscan_computers != nullptr,
+                           "FastScan computer output is required");
+            const uint64_t transform_size = this->GetResidualQueryTransformSize();
+            for (uint64_t i = 0; i < query_count; ++i) {
+                auto computer = this->quantizer_->FactoryComputer();
+                auto& bottom_computer = Accessor::GetComputer(*computer);
+                this->bottom_quantizer().ProcessTransformedResidualQuery(
+                    transformed_queries + i * transform_size, bottom_computer);
+                computers[i] = std::move(computer);
+                if (this->SupportFastScan32()) {
+                    auto fastscan = std::make_shared<FastScan32Computer>(
+                        this->bottom_quantizer().GetFastScan32LookupSize(), this->allocator_);
+                    this->bottom_quantizer().PrepareFastScan32Query(bottom_computer,
+                                                                    fastscan->lookup_table_.data,
+                                                                    fastscan->deltas_,
+                                                                    fastscan->sum_vls_,
+                                                                    fastscan->query_sum_);
+                    fastscan_computers[i] = std::move(fastscan);
+                } else {
+                    fastscan_computers[i] = nullptr;
+                }
+            }
+            return;
+        }
+        FlattenInterface::FactoryFastScan32ComputersFromResidualQueries(
+            transformed_queries, query_count, computers, fastscan_computers);
+    }
+
     ComputerInterfacePtr
     FactoryComputerForBuild(const void* query, InnerIdType id) override {
         if (this->optimized_build_active_) {

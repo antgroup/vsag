@@ -154,6 +154,25 @@ public:
     }
 
     virtual void
+    FactoryFastScan32ComputersFromResidualQueries(const float* transformed_queries,
+                                                  uint64_t query_count,
+                                                  ComputerInterfacePtr* computers,
+                                                  ComputerInterfacePtr* fastscan_computers) {
+        CHECK_ARGUMENT(query_count == 0 or transformed_queries != nullptr,
+                       "transformed residual queries are required");
+        CHECK_ARGUMENT(query_count == 0 or computers != nullptr,
+                       "residual query computer output is required");
+        CHECK_ARGUMENT(query_count == 0 or fastscan_computers != nullptr,
+                       "FastScan computer output is required");
+        const uint64_t transform_size = this->GetResidualQueryTransformSize();
+        for (uint64_t i = 0; i < query_count; ++i) {
+            computers[i] =
+                this->FactoryComputerFromResidualQuery(transformed_queries + i * transform_size);
+            fastscan_computers[i] = this->FactoryFastScan32Computer(computers[i]);
+        }
+    }
+
+    virtual void
     Train(const void* data, uint64_t count) = 0;
 
     virtual void
