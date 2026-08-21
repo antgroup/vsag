@@ -59,6 +59,26 @@ class FlattenOptimizedBuildInterface;
 class HGraphOptimizedBuildSession;
 class IteratorFilterContext;
 
+// Scalar MCI hybrid-search fields required to render search statistics.
+struct MCIHybridSearchFields {
+    MCIHybridSearchFields() = default;
+
+    MCIHybridSearchFields(float valid_ratio, float threshold, float seed_ratio)
+        : valid_ratio(valid_ratio), threshold(threshold), seed_ratio(seed_ratio) {
+    }
+
+    float valid_ratio{1.0F};
+    float threshold{0.0F};
+    float seed_ratio{0.0F};
+    std::string route{"disabled"};
+    uint64_t seed_count{0};
+    bool used_precise_float_csr{false};
+};
+
+// Render the full statistics JSON shared by the eager and deferred statistics paths.
+[[nodiscard]] JsonType
+MakeMCIStatistics(const SearchStatistics& stats, const MCIHybridSearchFields& fields);
+
 /**
  * @brief HGraph: hierarchical navigable graph index.
  *
@@ -790,19 +810,13 @@ private:
                            const FlattenInterfacePtr& flatten_codes,
                            const std::unordered_map<InnerIdType, uint32_t>& inner_id_to_input_idx);
 
-    struct MCIHybridSearchResult {
+    struct MCIHybridSearchResult : public MCIHybridSearchFields {
         MCIHybridSearchResult(const HGraphSearchParameters& params, const FilterPtr& filter);
 
         [[nodiscard]] JsonType
         MakeStatistics(const SearchStatistics& stats) const;
 
         DistHeapPtr result{nullptr};
-        float valid_ratio{1.0F};
-        float threshold{0.0F};
-        float seed_ratio{0.0F};
-        std::string route{"disabled"};
-        uint64_t seed_count{0};
-        bool used_precise_float_csr{false};
     };
 
     [[nodiscard]] MCIHybridSearchResult

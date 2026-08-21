@@ -504,21 +504,26 @@ run_local_ccr_mce(const Vector<InnerIdType>& local_nodes,
 
 HGraph::MCIHybridSearchResult::MCIHybridSearchResult(const HGraphSearchParameters& params,
                                                      const FilterPtr& filter)
-    : valid_ratio(filter != nullptr ? filter->ValidRatio() : 1.0F),
-      threshold(params.mci_hgraph_valid_ratio_threshold),
-      seed_ratio(params.mci_seed_ratio) {
+    : MCIHybridSearchFields(filter != nullptr ? filter->ValidRatio() : 1.0F,
+                            params.mci_hgraph_valid_ratio_threshold,
+                            params.mci_seed_ratio) {
+}
+
+JsonType
+MakeMCIStatistics(const SearchStatistics& stats, const MCIHybridSearchFields& fields) {
+    auto json = stats.ToJson();
+    json["mci_hybrid_route"].SetString(fields.route);
+    json["mci_hybrid_valid_ratio"].SetFloat(fields.valid_ratio);
+    json["mci_hybrid_threshold"].SetFloat(fields.threshold);
+    json["mci_seed_count"].SetInt(static_cast<int64_t>(fields.seed_count));
+    json["mci_seed_ratio"].SetFloat(fields.seed_ratio);
+    json["mci_raw_float_csr"].SetBool(fields.used_precise_float_csr);
+    return json;
 }
 
 JsonType
 HGraph::MCIHybridSearchResult::MakeStatistics(const SearchStatistics& stats) const {
-    auto json = stats.ToJson();
-    json["mci_hybrid_route"].SetString(this->route);
-    json["mci_hybrid_valid_ratio"].SetFloat(this->valid_ratio);
-    json["mci_hybrid_threshold"].SetFloat(this->threshold);
-    json["mci_seed_count"].SetInt(static_cast<int64_t>(this->seed_count));
-    json["mci_seed_ratio"].SetFloat(this->seed_ratio);
-    json["mci_raw_float_csr"].SetBool(this->used_precise_float_csr);
-    return json;
+    return MakeMCIStatistics(stats, *this);
 }
 
 HGraph::MCIHybridSearchResult

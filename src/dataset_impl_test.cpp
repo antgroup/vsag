@@ -15,10 +15,87 @@
 
 #include "dataset_impl.h"
 
+#include <atomic>
+#include <memory>
+#include <thread>
+#include <vector>
+
 #include "impl/allocator/default_allocator.h"
 #include "unittest.h"
 #include "vsag/dataset.h"
 #include "vsag/engine.h"
+
+namespace {
+
+class CountingLazyStatistics : public vsag::LazyStatistics {
+public:
+    std::string
+    Dump() const override {
+        ++this->calls;
+        return R"({"dist_cmp":42,"hops":7})";
+    }
+
+    mutable uint32_t calls{0};
+};
+
+}  // namespace
+
+TEST_CASE("Dataset Lazy Statistics Test", "[ut][dataset]") {
+    auto lazy_stats = std::make_shared<CountingLazyStatistics>();
+    auto* lazy_ptr = lazy_stats.get();
+    auto dataset = vsag::DatasetImpl::MakeEmptyDataset();
+
+    SECTION("materialize once") {
+        vsag::DatasetImpl::Statistics(dataset, lazy_stats);
+        CHECK(dataset->GetStatistics() == R"({"dist_cmp":42,"hops":7})");
+        CHECK(dataset->GetStatistics() == R"({"dist_cmp":42,"hops":7})");
+        CHECK(lazy_ptr->calls == 1);
+    }
+
+    SECTION("key access materializes") {
+        vsag::DatasetImpl::Statistics(dataset, lazy_stats);
+        auto values = dataset->GetStatistics({"dist_cmp", "missing_key"});
+        REQUIRE(values.size() == 2);
+        CHECK(values[0] == "42");
+        CHECK(values[1].empty());
+        CHECK(dataset->GetStatistics() == R"({"dist_cmp":42,"hops":7})");
+        CHECK(lazy_ptr->calls == 1);
+    }
+
+    SECTION("string setter clears lazy provider") {
+        vsag::DatasetImpl::Statistics(dataset, lazy_stats);
+        dataset->Statistics(R"({"dist_cmp":1})");
+        CHECK(dataset->GetStatistics() == R"({"dist_cmp":1})");
+        CHECK(lazy_ptr->calls == 0);
+    }
+
+    SECTION("default remains empty json") {
+        CHECK(dataset->GetStatistics() == "{}");
+        auto values = dataset->GetStatistics({"dist_cmp"});
+        REQUIRE(values.size() == 1);
+        CHECK(values[0].empty());
+        CHECK(lazy_ptr->calls == 0);
+    }
+
+    SECTION("concurrent reads materialize once") {
+        vsag::DatasetImpl::Statistics(dataset, lazy_stats);
+        std::vector<std::thread> threads;
+        std::atomic<uint32_t> mismatches{0};
+        for (int i = 0; i < 8; ++i) {
+            threads.emplace_back([&]() {
+                if (dataset->GetStatistics() != R"({"dist_cmp":42,"hops":7})") {
+                    mismatches.fetch_add(1);
+                }
+            });
+        }
+        for (auto& thread : threads) {
+            thread.join();
+        }
+        CHECK(mismatches.load() == 0);
+        CHECK(lazy_ptr->calls == 1);
+    }
+}
+
 TEST_CASE("Dataset Implement Test", "[ut][dataset]") {
     vsag::DefaultAllocator allocator;
     SECTION("allocator") {

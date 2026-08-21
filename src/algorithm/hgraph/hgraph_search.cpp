@@ -28,6 +28,29 @@
 
 namespace vsag {
 
+namespace {
+
+// Defers the statistics JSON rendering until GetStatistics() is first read; the
+// search timing path never pays for it.
+class HGraphLazyStatistics : public LazyStatistics {
+public:
+    HGraphLazyStatistics(std::shared_ptr<const SearchStatistics> stats,
+                         MCIHybridSearchFields mci_fields)
+        : stats_(std::move(stats)), mci_fields_(std::move(mci_fields)) {
+    }
+
+    std::string
+    Dump() const override {
+        return MakeMCIStatistics(*this->stats_, this->mci_fields_).Dump();
+    }
+
+private:
+    std::shared_ptr<const SearchStatistics> stats_;
+    MCIHybridSearchFields mci_fields_;
+};
+
+}  // namespace
+
 static DatasetPtr
 make_empty_dataset_with_stats(const SearchStatistics& stats) {
     auto dataset_result = DatasetImpl::MakeEmptyDataset();
@@ -418,8 +441,8 @@ HGraph::RangeSearch(const DatasetPtr& query,
 [[nodiscard]] DatasetPtr
 HGraph::SearchWithRequest(const SearchRequest& request) const {
     ValidateSearchThreshold(request.threshold_);
-    SearchStatistics stats;
-    QueryContext ctx{.alloc = this->allocator_, .stats = &stats};
+    auto stats = std::make_shared<SearchStatistics>();
+    QueryContext ctx{.alloc = this->allocator_, .stats = stats.get()};
     if (request.search_allocator_ != nullptr) {
         ctx.alloc = request.search_allocator_;
     }
@@ -513,8 +536,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                 const auto label = this->label_table_->GetLabelById(inner_id);
                 request.distance_batch_func_(&label, 1, &dist);
                 CHECK_ARGUMENT(std::isfinite(dist), "distance callback must return finite scores");
-                stats.AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
-                                  DistanceEvaluationBackend::UNKNOWN);
+                stats->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
+                                   DistanceEvaluationBackend::UNKNOWN);
             } else {
                 precise_flatten->Query(&dist, computer, &inner_id, 1, &ctx);
             }
@@ -606,7 +629,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         if (params.enable_time_record) {
             search_param.time_cost = std::make_shared<Timer>();
             search_param.time_cost->SetThreshold(params.timeout_ms);
-            stats.is_timeout.store(false, std::memory_order_relaxed);
+            stats->is_timeout.store(false, std::memory_order_relaxed);
         }
         search_param.parallel_search_thread_count = params.parallel_search_thread_count;
 
@@ -712,7 +735,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             }
         }
         auto result = this->pack_knn_result_with_extra_info(search_result, ctx.alloc);
-        result->Statistics(mci_result.MakeStatistics(stats).Dump());
+        DatasetImpl::Statistics(
+            result, std::make_shared<HGraphLazyStatistics>(stats, std::move(mci_result)));
         return result;
     }
 
@@ -751,7 +775,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     // return an empty dataset directly if searcher returns nothing
     if (search_result->Empty()) {
         auto dataset_result = DatasetImpl::MakeEmptyDataset();
-        dataset_result->Statistics(mci_result.MakeStatistics(stats).Dump());
+        DatasetImpl::Statistics(
+            dataset_result, std::make_shared<HGraphLazyStatistics>(stats, std::move(mci_result)));
         if (reasoning_ctx) {
             reasoning_ctx->DiagnoseExpectedTargets();
             dataset_result->Reasoning(reasoning_ctx->GenerateReport());
@@ -785,7 +810,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         }
         search_result->Pop();
     }
-    dataset_results->Statistics(mci_result.MakeStatistics(stats).Dump());
+    DatasetImpl::Statistics(
+        dataset_results, std::make_shared<HGraphLazyStatistics>(stats, std::move(mci_result)));
 
     // Generate reasoning report if reasoning context was created
     if (reasoning_ctx) {

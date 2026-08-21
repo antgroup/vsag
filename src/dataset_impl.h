@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -26,6 +27,20 @@
 #include "vsag/dataset.h"
 
 namespace vsag {
+
+// Internal helper that defers search-statistics serialization until first read.
+//
+// Rendering statistics as JSON costs dozens of allocations per query while most
+// callers never read them. Producers may hand a lazy provider to
+// DatasetImpl::Statistics(std::shared_ptr<LazyStatistics>) so the payload is
+// rendered only when GetStatistics() is first called.
+class LazyStatistics {
+public:
+    virtual ~LazyStatistics() = default;
+
+    virtual std::string
+    Dump() const = 0;
+};
 
 class DatasetImpl : public Dataset {
     using var = std::variant<int64_t,
@@ -269,8 +284,25 @@ public:
 
     DatasetPtr
     Statistics(const std::string& Statisticss) override {
+        this->lazy_statistics_ = nullptr;
         this->Statistics_ = Statisticss;
         return shared_from_this();
+    }
+
+    DatasetPtr
+    Statistics(std::shared_ptr<LazyStatistics> statistics) {
+        this->lazy_statistics_ = std::move(statistics);
+        return shared_from_this();
+    }
+
+    // Attach deferred statistics to an internally created (DatasetImpl-backed)
+    // dataset through its public DatasetPtr handle.
+    static DatasetPtr
+    Statistics(DatasetPtr dataset, std::shared_ptr<LazyStatistics> statistics) {
+        if (auto* impl = dynamic_cast<DatasetImpl*>(dataset.get()); impl != nullptr) {
+            impl->Statistics(std::move(statistics));
+        }
+        return dataset;
     }
 
     std::vector<std::string>
@@ -278,6 +310,7 @@ public:
 
     std::string
     GetStatistics() const override {
+        this->MaterializeStatistics();
         return this->Statistics_;
     }
 
@@ -352,6 +385,11 @@ public:
     MakeEmptyDataset();
 
 private:
+    // Render the deferred statistics payload into Statistics_ exactly once; safe
+    // under concurrent GetStatistics() calls.
+    void
+    MaterializeStatistics() const;
+
     static const std::string&
     HierarchyPathsPrefix() {
         static const std::string prefix = std::string(DATASET_PATHS) + ":";
@@ -380,6 +418,9 @@ private:
 
     std::string Statistics_{"{}"};
     std::string Reasoning_{"{}"};
+
+    mutable std::mutex statistics_mutex_;
+    std::shared_ptr<LazyStatistics> lazy_statistics_;
 };
 
 };  // namespace vsag
