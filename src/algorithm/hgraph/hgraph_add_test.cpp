@@ -15,8 +15,10 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <future>
 #include <initializer_list>
+#include <new>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -34,6 +36,38 @@
 #include "vsag/options.h"
 
 namespace {
+
+class ArmableRejectingThreadPool final : public vsag::ThreadPool {
+public:
+    void
+    WaitUntilEmpty() override {
+    }
+
+    void
+    SetQueueSizeLimit(uint64_t) override {
+    }
+
+    void
+    SetPoolSize(uint64_t) override {
+    }
+
+    std::future<void>
+    Enqueue(std::function<void(void)> task) override {
+        if (reject_submissions_.load(std::memory_order_acquire)) {
+            throw std::bad_alloc();
+        }
+        task();
+        return {};
+    }
+
+    void
+    SetRejectSubmissions(bool reject) {
+        reject_submissions_.store(reject, std::memory_order_release);
+    }
+
+private:
+    std::atomic<bool> reject_submissions_{false};
+};
 
 vsag::DatasetPtr
 MakeFloatDataset(std::vector<float>& vectors,
@@ -161,6 +195,62 @@ const std::string kBruteForceSearchParams =
     R"({"hgraph": {"ef_search": 32, "brute_force_threshold": 1.0}})";
 
 }  // namespace
+
+TEST_CASE("HGraph Tune accepts an incomplete source after Add failure",
+          "[ut][hgraph][add][hgraph_tune_incomplete_source]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t base_count = 2;
+
+    auto rejecting_pool = std::make_shared<ArmableRejectingThreadPool>();
+    auto common_param = MakeCommonParam(dim);
+    common_param.thread_pool_ = std::make_shared<vsag::SafeThreadPool>(rejecting_pool);
+    auto hgraph_json = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "sq8",
+        "max_degree": 8,
+        "ef_construction": 32,
+        "build_thread_count": 1,
+        "store_raw_vector": true
+    })");
+    auto index = MakeHGraphIndex(hgraph_json, common_param);
+
+    std::vector<float> base_vectors = {
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        1.0F,
+        1.0F,
+        1.0F,
+        1.0F,
+    };
+    std::vector<int64_t> base_ids = {10, 20};
+    auto base = MakeFloatDataset(base_vectors, base_ids, dim, base_count);
+    REQUIRE(index->Build(base).has_value());
+    REQUIRE(index->GetNumElements() == base_count);
+
+    std::vector<float> add_vectors = {2.0F, 2.0F, 2.0F, 2.0F};
+    std::vector<int64_t> add_ids = {30};
+    auto add = MakeFloatDataset(add_vectors, add_ids, dim, 1);
+
+    rejecting_pool->SetRejectSubmissions(true);
+    auto add_result = index->Add(add);
+    rejecting_pool->SetRejectSubmissions(false);
+
+    REQUIRE_FALSE(add_result.has_value());
+    REQUIRE(add_result.error().type == vsag::ErrorType::NO_ENOUGH_MEMORY);
+    REQUIRE(index->GetNumElements() == base_count + 1);
+    REQUIRE(index->CheckIdExist(add_ids[0]));
+
+    auto tune_result = index->Tune(R"({
+        "index_param": {
+            "base_quantization_type": "bf16",
+            "max_degree": 8,
+            "ef_construction": 32
+        }
+    })");
+    REQUIRE(tune_result.has_value());
+    CHECK(tune_result.value());
+}
 
 TEST_CASE("HGraph exact duplicate fallback supports every dense data type",
           "[ut][hgraph][duplicate][data_type]") {
