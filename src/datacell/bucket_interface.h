@@ -19,6 +19,7 @@
 
 #include "algorithm/ivf/ivf_partition_strategy.h"
 #include "bucket_datacell_parameter.h"
+#include "flatten_optimized_build_interface.h"
 #include "index_common_param.h"
 #include "quantization/computer.h"
 #include "query_context.h"
@@ -41,12 +42,51 @@ public:
     virtual void
     ScanBucketById(float* result_dists,
                    const ComputerInterfacePtr& computer,
-                   const BucketIdType& bucket_id) = 0;
+                   const BucketIdType& bucket_id,
+                   QueryContext* ctx = nullptr) = 0;
+
+    virtual void
+    ScanBucketWithDistanceLowerBound(float* result_dists,
+                                     float* lower_bounds,
+                                     float* filter_inner_products,
+                                     const ComputerInterfacePtr& computer,
+                                     const BucketIdType& bucket_id,
+                                     QueryContext* ctx = nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "bucket lower-bound scan is not supported");
+    }
 
     virtual float
     QueryOneById(const ComputerInterfacePtr& computer,
                  const BucketIdType& bucket_id,
                  const InnerIdType& offset_id) = 0;
+
+    [[nodiscard]] virtual bool
+    SupportSplitCodeStorage() const {
+        return false;
+    }
+
+    virtual void
+    QueryWithFilterInnerProductByInnerId(float* result_dists,
+                                         const float* filter_inner_products,
+                                         const ComputerInterfacePtr& computer,
+                                         const InnerIdType* inner_ids,
+                                         InnerIdType id_count,
+                                         QueryContext* ctx = nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "bucket filter-inner-product query is not supported");
+    }
+
+    virtual void
+    QueryWithDistanceHintByInnerId(float* result_dists,
+                                   const float* hint_dists,
+                                   const ComputerInterfacePtr& computer,
+                                   const InnerIdType* inner_ids,
+                                   InnerIdType id_count,
+                                   QueryContext* ctx = nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "bucket split-code reorder is not supported");
+    }
 
     virtual float
     ComputePairVectors(BucketIdType bucket_id, InnerIdType id1, InnerIdType id2) = 0;
@@ -69,6 +109,28 @@ public:
 
     virtual void
     Train(const void* data, uint64_t count) = 0;
+
+    // Optional lifecycle for bulk builds. Implementations must pre-size any storage that is
+    // written concurrently and keep the normal InsertVector behavior when this returns false.
+    virtual bool
+    BeginOptimizedBuild(const FlattenOptimizedBuildContext& context, InnerIdType capacity) {
+        (void)context;
+        (void)capacity;
+        return false;
+    }
+
+    virtual void
+    FinalizeOptimizedBuild() {
+    }
+
+    virtual void
+    AbortOptimizedBuild() noexcept {
+    }
+
+    [[nodiscard]] virtual bool
+    IsOptimizedBuildActive() const {
+        return false;
+    }
 
     virtual InnerIdType
     InsertVector(const void* vector, BucketIdType bucket_id, InnerIdType inner_id) = 0;

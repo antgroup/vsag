@@ -77,6 +77,7 @@ auto result = index->KnnSearch(
 | `rabitq_pca_dim` | int | `0` | `base_quantization_type: "rabitq"` 时可选的 PCA 预处理维度 |
 | `rabitq_bits_per_dim_query` | int | `32` | `rabitq` 查询每维位数；允许值为 `4` 或 `32` |
 | `rabitq_bits_per_dim_base` | int | `1` | `rabitq` 底库存储码每维位数；允许范围为 `[1, 8]` |
+| `rabitq_bits_per_dim_precise` | int | 未设置 | 启用 RaBitQ split storage 并设置补充码（`y`）位数；`rabitq_bits_per_dim_base` 表示过滤码（`x`）位数，且 `x + y <= 8` |
 | `rabitq_version` | string | `"standard"` | `rabitq` 布局：`"standard"` 或 `"split_1bit_7bit"` |
 | `rabitq_error_rate` | float | `1.9` | `rabitq` 编码的正数误差预算参数 |
 | `rabitq_use_fht` | bool | `false` | `rabitq` 二值化前是否启用 FHT 旋转 |
@@ -86,6 +87,8 @@ auto result = index->KnnSearch(
 | `precise_quantization_type` | string | `"fp32"` | 精排量化类型（`use_reorder: true` 时使用） |
 | `precise_codes_layout` | string | `"flat"` | 精排 codes 的存储布局：`"flat"` 保持旧的一向量一码布局；`"bucket"` 在 basic posting 的相同 bucket 和 offset 保存高精度 code |
 | `base_io_type` | string | `"memory_io"` | 粗排向量的存储后端；以 liburing 构建时支持 `uring_io` |
+| `base_supplement_io_type` | string | 未设置 | RaBitQ split 补充码可选的 IO 后端 |
+| `base_supplement_file_path` | string | 自动派生 | 磁盘型 RaBitQ 补充码可选的文件路径 |
 | `precise_io_type` | string | `"block_memory_io"` | 精排向量的存储后端（`memory_io`、`block_memory_io`、`mmap_io`、`buffer_io`、`async_io`、`uring_io`、`reader_io`） |
 | `precise_file_path` | string | `""` | 当精排 IO 为磁盘后端时的文件路径 |
 
@@ -114,6 +117,38 @@ auto loaded = vsag::Index::Load(stream, load_parameters).value();
 
 `buckets_count` 的经验值一般为 `sqrt(N)` ~ `4 * sqrt(N)`，其中 `N` 是语料规模。
 
+## RaBitQ split storage
+
+将粗排和精排量化器都设为 `rabitq`，并把存储精度拆成过滤码
+（`x`）和补充码（`y`）：
+
+```json
+{
+    "base_quantization_type": "rabitq",
+    "precise_quantization_type": "rabitq",
+    "rabitq_bits_per_dim_query": 32,
+    "rabitq_bits_per_dim_base": 3,
+    "rabitq_bits_per_dim_precise": 5,
+    "use_reorder": true
+}
+```
+
+IVF 会分别保存 `x` bit 过滤记录和 `y` bit 补充记录。默认策略扫描桶时
+只读取过滤记录，保留 `factor * topk` 个候选，再为这些候选读取补充记录。
+KNN 搜索可设置 `rabitq_search_strategy: "heap"`，让结果堆始终保存完整
+`x+y` RaBitQ 距离估计，仅当 x-bit lower bound 小于堆顶时读取 supplement。
+heap 策略在过滤时保存 byte-LUT 量化后的 x-bit 内积，并在最终 `x+y` 估计中
+直接复用，因此不重扫 x bits，也不从距离 hint 反推内积；两个阶段共享 LUT
+量化误差。
+
+split 配置要求 `x >= 1`、`y >= 1`、`x + y <= 8`、
+`rabitq_bits_per_dim_query: 32`、`use_reorder: true` 和
+`buckets_per_data: 1`。split storage 暂不支持桶内图
+（`graph_build_threshold > 0`）。同构 IO 支持 `memory_io`、
+`block_memory_io`、`buffer_io`、`async_io`、`mmap_io` 和
+`reader_io`；混合 IO 支持过滤码使用 `block_memory_io`、补充码使用
+`async_io`。
+
 ## 检索参数
 
 检索参数放在 `ivf` 子对象下：
@@ -124,6 +159,7 @@ auto loaded = vsag::Index::Load(stream, load_parameters).value();
 | `disable_bucket_scan` | bool | `false` | 返回桶 ID 及到桶中心距离，不扫描桶内向量。支持批量查询。 |
 | `factor` | float | `2.0` | 启用精排时，粗排阶段会预取 `factor * topk` 个候选再重打分 |
 | `enable_reorder` | bool | `true` | 即使索引构建时启用了 reorder，也可以在单次请求里设为 `false` 跳过最终精排 |
+| `rabitq_search_strategy` | string | `"candidate_reorder"` | 可选值为 `"candidate_reorder"` 和 `"heap"`，具体行为见上文 split 检索策略。 |
 | `parallelism` | int | `1` | 单次查询内扫描桶时使用的线程数 |
 | `timeout_ms` | double | `+∞` | 单次查询最长耗时（毫秒），超时会返回当前的部分结果 |
 
@@ -137,6 +173,10 @@ auto result = index->KnnSearch(
 auto fast_result = index->KnnSearch(
     query, topk,
     R"({"ivf": {"scan_buckets_count": 32, "factor": 2.0, "enable_reorder": false}})").value();
+
+auto heap_result = index->KnnSearch(
+    query, topk,
+    R"({"ivf": {"scan_buckets_count": 32, "rabitq_search_strategy": "heap"}})").value();
 ```
 
 ## 何时选择 IVF

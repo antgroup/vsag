@@ -50,7 +50,8 @@ GraphBucketSearcher::Search(BucketIdType bucket_id,
 
     bool graph_fresh = has_graph && bucket_graphs_[bucket_id]->TotalCount() ==
                                         static_cast<InnerIdType>(bucket_size);
-    if (graph_fresh && bucket_size >= graph_build_threshold_) {
+    if (graph_fresh and bucket_size >= graph_build_threshold_ and
+        not param.use_rabitq_heap_search) {
         search_graph(bucket_id,
                      bucket,
                      computer,

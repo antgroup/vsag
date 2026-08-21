@@ -32,7 +32,8 @@ BucketReorder::Reorder(const DistHeapPtr& input,
                        QueryContext& ctx,
                        IteratorFilterContext* iter_ctx,
                        const DistanceRecordVector* rabitq_lower_bound_candidates,
-                       const std::optional<float>& distance_threshold) {
+                       const std::optional<float>& distance_threshold,
+                       const ComputerInterfacePtr& /*preset_computer*/) {
     if (iter_ctx != nullptr) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "BucketReorder does not support iterator filtering");

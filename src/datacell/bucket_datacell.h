@@ -63,7 +63,8 @@ public:
     void
     ScanBucketById(float* result_dists,
                    const ComputerInterfacePtr& computer,
-                   const BucketIdType& bucket_id) override {
+                   const BucketIdType& bucket_id,
+                   QueryContext* = nullptr) override {
         auto comp = static_cast<Computer<QuantTmpl>*>(computer.get());
         return this->scan_bucket_by_id(result_dists, comp, bucket_id);
     }

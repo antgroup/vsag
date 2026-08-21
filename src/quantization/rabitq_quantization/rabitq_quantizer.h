@@ -92,6 +92,18 @@ public:
     void
     ProcessQueryImpl(const float* query, Computer<RaBitQuantizer>& computer) const;
 
+    [[nodiscard]] uint64_t
+    GetResidualQueryTransformSize() const {
+        return this->original_dim_;
+    }
+
+    void
+    TransformResidualQuery(const float* query, float* transformed_query) const;
+
+    void
+    ProcessTransformedResidualQuery(const float* transformed_query,
+                                    Computer<RaBitQuantizer>& computer) const;
+
     void
     ComputeDistImpl(Computer<RaBitQuantizer>& computer, const uint8_t* codes, float* dists) const;
 
@@ -227,13 +239,59 @@ public:
                    const uint8_t* supplement_code,
                    uint8_t* full_code) const;
 
+    static constexpr uint64_t FASTSCAN_BATCH_SIZE = 32;
+    static constexpr uint64_t FASTSCAN_MAX_FILTER_BITS = 3;
+
+    [[nodiscard]] bool
+    SupportFastScan32() const;
+
+    [[nodiscard]] uint64_t
+    GetFastScan32BlockSize() const;
+
+    [[nodiscard]] uint64_t
+    GetFastScan32LookupSize() const;
+
+    void
+    PackageFastScan32(const uint8_t* one_bit_codes, uint64_t valid_size, uint8_t* block) const;
+
+    void
+    SetFastScan32Code(const uint8_t* one_bit_code, uint64_t index_in_block, uint8_t* block) const;
+
+    void
+    UnpackFastScan32Code(const uint8_t* block,
+                         uint64_t index_in_block,
+                         uint8_t* one_bit_code) const;
+
+    void
+    PrepareFastScan32Query(Computer<RaBitQuantizer>& computer,
+                           uint8_t* lookup_table,
+                           float* deltas,
+                           float* sum_vls,
+                           float& query_sum) const;
+
+    void
+    ComputeDistsWithFastScan32(
+        Computer<RaBitQuantizer>& computer,
+        const uint8_t* block,
+        const uint8_t* lookup_table,
+        const float* deltas,
+        const float* sum_vls,
+        float query_sum,
+        float* dists,
+        bool* computed,
+        uint64_t valid_size,
+        float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN(),
+        float* lower_bounds = nullptr,
+        float* filter_inner_products = nullptr) const;
+
     bool
     ComputeDistWithOneBitLowerBound(
         Computer<RaBitQuantizer>& computer,
         const uint8_t* one_bit_code,
         float* dists,
         float* lower_bound,
-        float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN()) const;
+        float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN(),
+        float* filter_inner_product = nullptr) const;
 
     void
     ComputeDistsWithOneBitLowerBoundBatch4(
@@ -261,6 +319,14 @@ public:
                              const uint8_t* one_bit_code,
                              const uint8_t* supplement_code,
                              float* dists) const;
+
+    // Computes the full x+y split distance from the raw x-bit inner product emitted by
+    // ComputeDistWithOneBitLowerBound(). Only the y-bit supplement record is required.
+    bool
+    ComputeDistWithSplitCodeAndFilterInnerProduct(Computer<RaBitQuantizer>& computer,
+                                                  const uint8_t* supplement_code,
+                                                  float filter_inner_product,
+                                                  float* dists) const;
 
     // Computes the full x+y split distance while reusing the filter-stage distance.
     // `filter_dist` is the x-bit distance already produced by

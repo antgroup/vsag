@@ -16,6 +16,7 @@
 #include "pqfs_simd.h"
 
 #include <catch2/benchmark/catch_benchmark.hpp>
+#include <cmath>
 
 #include "simd_status.h"
 #include "unittest.h"

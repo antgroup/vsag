@@ -183,6 +183,20 @@ IVFSearchParameters::FromJson(const std::string& json_string) {
         }
     }
 
+    if (params[INDEX_TYPE_IVF].Contains(IVF_SEARCH_PARAM_RABITQ_SEARCH_STRATEGY)) {
+        const auto strategy =
+            params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_RABITQ_SEARCH_STRATEGY].GetString();
+        CHECK_ARGUMENT(
+            strategy == IVF_SEARCH_PARAM_RABITQ_SEARCH_STRATEGY_CANDIDATE_REORDER or
+                strategy == IVF_SEARCH_PARAM_RABITQ_SEARCH_STRATEGY_HEAP,
+            fmt::format("invalid rabitq_search_strategy: {}, supported values are \"{}\" and "
+                        "\"{}\"",
+                        strategy,
+                        IVF_SEARCH_PARAM_RABITQ_SEARCH_STRATEGY_CANDIDATE_REORDER,
+                        IVF_SEARCH_PARAM_RABITQ_SEARCH_STRATEGY_HEAP));
+        obj.use_rabitq_heap_search = strategy == IVF_SEARCH_PARAM_RABITQ_SEARCH_STRATEGY_HEAP;
+    }
+
     return obj;
 }
 }  // namespace vsag

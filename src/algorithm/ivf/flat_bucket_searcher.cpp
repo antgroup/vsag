@@ -20,6 +20,7 @@
 #include "attr/executor/executor.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "impl/searcher/basic_searcher.h"
+#include "query_context.h"
 
 namespace vsag {
 
@@ -36,16 +37,31 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                            ReasoningContext* reasoning_ctx) const {
     auto bucket_size = bucket->GetBucketSize(bucket_id);
     const auto* ids = bucket->GetInnerIds(bucket_id);
-    if (bucket_size > static_cast<int64_t>(dist.size())) {
-        dist.resize(bucket_size);
+    const uint64_t scratch_multiplier = param.use_rabitq_heap_search ? 3 : 1;
+    const uint64_t scratch_size = static_cast<uint64_t>(bucket_size) * scratch_multiplier;
+    if (scratch_size > dist.size()) {
+        dist.resize(scratch_size);
     }
 
-    bucket->ScanBucketById(dist.data(), computer, bucket_id);
-    if (param.query_context != nullptr and param.query_context->stats != nullptr and
-        bucket_size > 0) {
-        param.query_context->stats->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
-                                                bucket->backend_,
-                                                static_cast<uint64_t>(bucket_size));
+    float* lower_bounds = nullptr;
+    float* filter_inner_products = nullptr;
+    if (param.use_rabitq_heap_search) {
+        lower_bounds = dist.data() + bucket_size;
+        filter_inner_products = lower_bounds + bucket_size;
+        bucket->ScanBucketWithDistanceLowerBound(dist.data(),
+                                                 lower_bounds,
+                                                 filter_inner_products,
+                                                 computer,
+                                                 bucket_id,
+                                                 param.query_context);
+    } else {
+        bucket->ScanBucketById(dist.data(), computer, bucket_id, param.query_context);
+        if (param.query_context != nullptr and param.query_context->stats != nullptr and
+            bucket_size > 0 and not bucket->SupportSplitCodeStorage()) {
+            param.query_context->stats->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
+                                                    bucket->backend_,
+                                                    static_cast<uint64_t>(bucket_size));
+        }
     }
 
     Filter* attr_ft = nullptr;
@@ -63,6 +79,83 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
     auto cur_heap_top = std::numeric_limits<float>::max();
     if (not heap->Empty() and heap->Size() == topk_u) {
         cur_heap_top = heap->Top().first;
+    }
+
+    if (param.use_rabitq_heap_search) {
+        CHECK_ARGUMENT(param.search_mode == KNN_SEARCH,
+                       "RaBitQ heap search only supports KNN search");
+        for (int64_t j = 0; j < bucket_size; ++j) {
+            if (ids[j] == std::numeric_limits<InnerIdType>::max()) {
+                continue;
+            }
+            const auto origin_id = ids[j] / buckets_per_data;
+            if (reasoning_ctx != nullptr) {
+                reasoning_ctx->RecordVisit(origin_id, dist[j], 0);
+            }
+            if (attr_ft != nullptr and not attr_ft->CheckValid(j)) {
+                if (reasoning_ctx != nullptr) {
+                    reasoning_ctx->RecordFilterReject(origin_id);
+                }
+                continue;
+            }
+            if (ft != nullptr and not ft->CheckValid(origin_id)) {
+                if (reasoning_ctx != nullptr) {
+                    reasoning_ctx->RecordFilterReject(origin_id);
+                }
+                continue;
+            }
+
+            float distance_limit = cur_heap_top;
+            if (param.distance_threshold.has_value()) {
+                distance_limit = std::min(distance_limit, param.distance_threshold.value());
+            }
+            const float lower_bound = lower_bounds[j];
+            const bool has_usable_lower_bound =
+                std::isfinite(lower_bound) and lower_bound < std::numeric_limits<float>::max();
+            if (has_usable_lower_bound and not(lower_bound < distance_limit)) {
+                continue;
+            }
+
+            float exact_distance = std::numeric_limits<float>::max();
+            if (param.query_context != nullptr and param.query_context->stats != nullptr) {
+                param.query_context->stats->reorder_distance_count.fetch_add(
+                    1, std::memory_order_relaxed);
+            }
+            if (param.query_context != nullptr) {
+                QueryContext exact_context = *param.query_context;
+                ScopedDistancePhase scoped(exact_context, DistanceEvaluationPhase::RERANK);
+                bucket->QueryWithFilterInnerProductByInnerId(&exact_distance,
+                                                             filter_inner_products + j,
+                                                             computer,
+                                                             ids + j,
+                                                             1,
+                                                             &exact_context);
+            } else {
+                bucket->QueryWithFilterInnerProductByInnerId(
+                    &exact_distance, filter_inner_products + j, computer, ids + j, 1);
+            }
+            if (reasoning_ctx != nullptr) {
+                reasoning_ctx->RecordReorder(origin_id, dist[j], exact_distance);
+            }
+            if (not std::isfinite(exact_distance) or
+                (param.distance_threshold.has_value() and
+                 exact_distance > param.distance_threshold.value())) {
+                continue;
+            }
+            if (heap->Size() < topk_u or exact_distance < cur_heap_top) {
+                heap->Push(exact_distance, ids[j]);
+            }
+            while (heap->Size() > topk_u) {
+                if (reasoning_ctx != nullptr) {
+                    reasoning_ctx->RecordEviction(heap->Top().second / buckets_per_data, 0);
+                }
+                heap->Pop();
+            }
+            if (not heap->Empty() and heap->Size() == topk_u) {
+                cur_heap_top = heap->Top().first;
+            }
+        }
+        return;
     }
 
     if (param.search_mode == KNN_SEARCH) {

@@ -45,6 +45,7 @@
 #include "inner_string_params.h"
 #include "io/reader_io/reader_io_parameter.h"
 #include "ivf_nearest_partition.h"
+#include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "query_context.h"
 #include "simd/normalize.h"
 #include "storage/serialization.h"
@@ -62,6 +63,38 @@ namespace vsag {
 static constexpr BucketIdType INVALID_BUCKET_ID = static_cast<BucketIdType>(-1);
 
 namespace {
+
+class IVFBucketOptimizedBuildSession {
+public:
+    IVFBucketOptimizedBuildSession(BucketInterfacePtr bucket,
+                                   const FlattenOptimizedBuildContext& context,
+                                   InnerIdType capacity)
+        : bucket_(std::move(bucket)), active_(bucket_->BeginOptimizedBuild(context, capacity)) {
+    }
+
+    IVFBucketOptimizedBuildSession(const IVFBucketOptimizedBuildSession&) = delete;
+    IVFBucketOptimizedBuildSession&
+    operator=(const IVFBucketOptimizedBuildSession&) = delete;
+
+    ~IVFBucketOptimizedBuildSession() {
+        if (active_) {
+            bucket_->AbortOptimizedBuild();
+        }
+    }
+
+    void
+    Commit() {
+        if (not active_) {
+            return;
+        }
+        bucket_->FinalizeOptimizedBuild();
+        active_ = false;
+    }
+
+private:
+    BucketInterfacePtr bucket_{nullptr};
+    bool active_{false};
+};
 
 BucketDataCellParamPtr
 make_precise_bucket_param(const IVFParameterPtr& param) {
@@ -95,6 +128,7 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
                 "{RABITQ_QUANTIZATION_VERSION_KEY}": "standard",
                 "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}": 32,
                 "{RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY}": 1,
+                "{RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY}": 1,
                 "{RABITQ_QUANTIZATION_ERROR_RATE_KEY}": 1.9,
                 "{USE_FHT_KEY}": false,
                 "{FAST_ENCODE_RABITQ_KEY}": true,
@@ -159,6 +193,22 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             {
                 BUCKET_PARAMS_KEY,
                 IO_PARAMS_KEY,
+                IO_FILE_PATH_KEY,
+            },
+        },
+        {
+            HGRAPH_BASE_SUPPLEMENT_IO_TYPE,
+            {
+                BUCKET_PARAMS_KEY,
+                SUPPLEMENT_IO_PARAMS_KEY,
+                TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_BASE_SUPPLEMENT_FILE_PATH,
+            {
+                BUCKET_PARAMS_KEY,
+                SUPPLEMENT_IO_PARAMS_KEY,
                 IO_FILE_PATH_KEY,
             },
         },
@@ -303,6 +353,14 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             },
         },
         {
+            RABITQ_BITS_PER_DIM_PRECISE,
+            {
+                PRECISE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY,
+            },
+        },
+        {
             RABITQ_VERSION,
             {
                 BUCKET_PARAMS_KEY,
@@ -403,11 +461,142 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
     auto inner_json = JsonType::Parse(str);
     mapping_external_param_to_inner(external_param, external_mapping, inner_json);
 
+    if (external_param.Contains(RABITQ_BITS_PER_DIM_PRECISE)) {
+        CHECK_ARGUMENT(
+            external_param.Contains(RABITQ_BITS_PER_DIM_BASE),
+            fmt::format("{} requires {}", RABITQ_BITS_PER_DIM_PRECISE, RABITQ_BITS_PER_DIM_BASE));
+        CHECK_ARGUMENT(external_param.Contains(IVF_BASE_QUANTIZATION_TYPE) and
+                           external_param[IVF_BASE_QUANTIZATION_TYPE].GetString() ==
+                               QUANTIZATION_TYPE_VALUE_RABITQ,
+                       fmt::format("{} requires {}={}",
+                                   RABITQ_BITS_PER_DIM_PRECISE,
+                                   IVF_BASE_QUANTIZATION_TYPE,
+                                   QUANTIZATION_TYPE_VALUE_RABITQ));
+        CHECK_ARGUMENT(external_param.Contains(IVF_PRECISE_QUANTIZATION_TYPE) and
+                           external_param[IVF_PRECISE_QUANTIZATION_TYPE].GetString() ==
+                               QUANTIZATION_TYPE_VALUE_RABITQ,
+                       fmt::format("{} requires {}={}",
+                                   RABITQ_BITS_PER_DIM_PRECISE,
+                                   IVF_PRECISE_QUANTIZATION_TYPE,
+                                   QUANTIZATION_TYPE_VALUE_RABITQ));
+        CHECK_ARGUMENT(
+            external_param.Contains(IVF_USE_REORDER) and
+                external_param[IVF_USE_REORDER].IsBool() and
+                external_param[IVF_USE_REORDER].GetBool(),
+            fmt::format("{} requires {}=true", RABITQ_BITS_PER_DIM_PRECISE, IVF_USE_REORDER));
+
+        const int64_t filter_bits = external_param[RABITQ_BITS_PER_DIM_BASE].GetInt();
+        const int64_t supplement_bits = external_param[RABITQ_BITS_PER_DIM_PRECISE].GetInt();
+        const auto filter_bits_error =
+            fmt::format("{} must be in [1, 8], got {}", RABITQ_BITS_PER_DIM_BASE, filter_bits);
+        CHECK_ARGUMENT(filter_bits >= 1, filter_bits_error);
+        CHECK_ARGUMENT(filter_bits <= 8, filter_bits_error);
+        const auto supplement_bits_error = fmt::format(
+            "{} must be in [1, 8], got {}", RABITQ_BITS_PER_DIM_PRECISE, supplement_bits);
+        CHECK_ARGUMENT(supplement_bits >= 1, supplement_bits_error);
+        CHECK_ARGUMENT(supplement_bits <= 8, supplement_bits_error);
+        CHECK_ARGUMENT(filter_bits + supplement_bits <= 8,
+                       fmt::format("{} + {} must be no greater than 8, got {}",
+                                   RABITQ_BITS_PER_DIM_BASE,
+                                   RABITQ_BITS_PER_DIM_PRECISE,
+                                   filter_bits + supplement_bits));
+        if (external_param.Contains(RABITQ_BITS_PER_DIM_QUERY)) {
+            CHECK_ARGUMENT(
+                external_param[RABITQ_BITS_PER_DIM_QUERY].GetInt() == 32,
+                fmt::format("split storage requires {} to be 32", RABITQ_BITS_PER_DIM_QUERY));
+        }
+        CHECK_ARGUMENT(inner_json[BUCKET_PER_DATA_KEY].GetInt() == 1,
+                       "IVF RaBitQ split storage requires buckets_per_data=1");
+        CHECK_ARGUMENT(inner_json[GRAPH_BUILD_THRESHOLD_KEY].GetInt() == 0,
+                       "IVF RaBitQ split storage does not support bucket graphs");
+
+        auto quant_json = inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY];
+        quant_json[RABITQ_QUANTIZATION_VERSION_KEY].SetString(
+            RaBitQuantizerParameter::RABITQ_VERSION_SPLIT);
+        quant_json[RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY].SetInt(32);
+        quant_json[RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY].SetInt(filter_bits);
+        quant_json[RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY].SetInt(filter_bits + supplement_bits);
+    }
+
     auto ivf_parameter = std::make_shared<IVFParameter>();
     ivf_parameter->FromJson(inner_json);
 
     return ivf_parameter;
 }
+
+namespace {
+
+class SplitBucketReorder final : public ReorderInterface {
+public:
+    SplitBucketReorder(BucketInterfacePtr bucket, Allocator* allocator)
+        : bucket_(std::move(bucket)), allocator_(allocator) {
+    }
+
+    DistHeapPtr
+    Reorder(const DistHeapPtr& input,
+            const void* query,
+            int64_t topk,
+            QueryContext& ctx,
+            IteratorFilterContext* /*iter_ctx*/,
+            const DistanceRecordVector* /*records*/,
+            const std::optional<float>& distance_threshold,
+            const ComputerInterfacePtr& preset_computer) override {
+        const uint64_t candidate_count = input == nullptr ? 0 : input->Size();
+        topk = std::min(topk, static_cast<int64_t>(candidate_count));
+        auto result = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
+        if (candidate_count == 0 or topk == 0) {
+            return result;
+        }
+
+        Allocator* query_allocator = select_query_allocator(ctx.alloc, this->allocator_);
+        Vector<InnerIdType> ids(candidate_count, query_allocator);
+        Vector<float> hints(candidate_count, query_allocator);
+        Vector<float> distances(candidate_count, query_allocator);
+        const auto* candidates = input->GetData();
+        for (uint64_t i = 0; i < candidate_count; ++i) {
+            hints[i] = candidates[i].first;
+            ids[i] = candidates[i].second;
+        }
+        if (ctx.stats != nullptr) {
+            ctx.stats->reorder_distance_count.fetch_add(static_cast<uint32_t>(candidate_count),
+                                                        std::memory_order_relaxed);
+        }
+        auto computer =
+            preset_computer == nullptr ? this->bucket_->FactoryComputer(query) : preset_computer;
+        {
+            ScopedDistancePhase scoped(ctx, DistanceEvaluationPhase::RERANK);
+            this->bucket_->QueryWithDistanceHintByInnerId(distances.data(),
+                                                          hints.data(),
+                                                          computer,
+                                                          ids.data(),
+                                                          static_cast<InnerIdType>(candidate_count),
+                                                          &ctx);
+        }
+        for (uint64_t i = 0; i < candidate_count; ++i) {
+            if (ctx.reasoning_ctx != nullptr) {
+                ctx.reasoning_ctx->RecordReorder(ids[i], hints[i], distances[i]);
+            }
+            if (distance_threshold.has_value() and
+                (not std::isfinite(distances[i]) or distances[i] > *distance_threshold)) {
+                continue;
+            }
+            if (result->Size() < static_cast<uint64_t>(topk) or
+                distances[i] < result->Top().first) {
+                result->Push(distances[i], ids[i]);
+                if (result->Size() > static_cast<uint64_t>(topk)) {
+                    result->Pop();
+                }
+            }
+        }
+        return result;
+    }
+
+private:
+    BucketInterfacePtr bucket_{nullptr};
+    Allocator* allocator_{nullptr};
+};
+
+}  // namespace
 
 IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param),
@@ -442,7 +631,9 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
             modified_common_param, param->ivf_partition_strategy_parameter);
     }
     if (this->use_reorder_) {
-        if (param->precise_codes_layout == PRECISE_CODES_LAYOUT_VALUE_BUCKET) {
+        if (this->bucket_->SupportSplitCodeStorage()) {
+            this->reorder_ = std::make_shared<SplitBucketReorder>(this->bucket_, this->allocator_);
+        } else if (param->precise_codes_layout == PRECISE_CODES_LAYOUT_VALUE_BUCKET) {
             this->precise_bucket_ = BucketInterface::MakeInstance(make_precise_bucket_param(param),
                                                                   modified_common_param);
             CHECK_ARGUMENT(this->precise_bucket_ != nullptr,
@@ -454,7 +645,7 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
         } else {
             this->reorder_codes_ =
                 FlattenInterface::MakeInstance(param->precise_codes_param, modified_common_param);
-            reorder_ = std::make_shared<FlattenReorder>(this->reorder_codes_, allocator_);
+            this->reorder_ = std::make_shared<FlattenReorder>(this->reorder_codes_, allocator_);
         }
     }
     if (param->bucket_param->use_residual_) {
@@ -519,11 +710,10 @@ IVF::InitFeatures() {
     }
 
     bool has_fp32 = false;
-    if (use_reorder_) {
-        const auto precise_quantizer_name = precise_bucket_ != nullptr
-                                                ? precise_bucket_->GetQuantizerName()
-                                                : reorder_codes_->GetQuantizerName();
-        has_fp32 = precise_quantizer_name == QUANTIZATION_TYPE_VALUE_FP32;
+    if (precise_bucket_ != nullptr) {
+        has_fp32 = precise_bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32;
+    } else if (reorder_codes_ != nullptr) {
+        has_fp32 = reorder_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32;
     }
     if (name == QUANTIZATION_TYPE_VALUE_FP32 or has_fp32) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
@@ -553,7 +743,7 @@ IVF::Build(const DatasetPtr& base) {
     }
     this->Train(base);
     // TODO(LHT): duplicate
-    auto result = this->Add(base);
+    auto result = this->add(base, true);
     if (graph_build_threshold_ > 0) {
         this->build_bucket_graphs();
     }
@@ -577,18 +767,21 @@ IVF::Train(const DatasetPtr& data) {
 
     const auto* data_ptr = train_data->GetFloat32Vectors();
     this->bucket_->Train(data_ptr, sample_count);
-    if (use_reorder_) {
-        if (precise_bucket_ != nullptr) {
-            this->precise_bucket_->Train(data->GetFloat32Vectors(), data->GetNumElements());
-        } else {
-            this->reorder_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
-        }
+    if (precise_bucket_ != nullptr) {
+        this->precise_bucket_->Train(data->GetFloat32Vectors(), data->GetNumElements());
+    } else if (reorder_codes_ != nullptr) {
+        this->reorder_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
     }
     this->is_trained_ = true;
 }
 
 std::vector<int64_t>
 IVF::Add(const DatasetPtr& base) {
+    return this->add(base, false);
+}
+
+std::vector<int64_t>
+IVF::add(const DatasetPtr& base, bool try_optimized_build) {
     // TODO(LHT): duplicate
     if (not partition_strategy_->is_trained_) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "ivf index add without train error");
@@ -625,7 +818,7 @@ IVF::Add(const DatasetPtr& base) {
                                     "IVF precise bucket batch exceeds inner id capacity");
             }
         }
-        if (use_reorder_ and precise_bucket_ == nullptr) {
+        if (reorder_codes_ != nullptr) {
             this->reorder_codes_->BatchInsertVector(base->GetFloat32Vectors(),
                                                     base->GetNumElements());
         }
@@ -638,6 +831,21 @@ IVF::Add(const DatasetPtr& base) {
             last_cal_memory_element_ = this->total_elements_;
         }
         location_map_.resize(this->total_elements_);
+    }
+
+    std::optional<IVFBucketOptimizedBuildSession> optimized_build_session;
+    // The scalar-code finalizer covers IDs [0, total_count), so only use it for a fresh Build.
+    // Online and incremental Add retain the existing fully-published x/y storage semantics.
+    if (try_optimized_build and current_num == 0 and this->thread_pool_ != nullptr and
+        this->build_thread_count_ > 1) {
+        const auto bucket_multiplier = static_cast<uint64_t>(this->buckets_per_data_);
+        const auto final_vector_count = static_cast<uint64_t>(this->total_elements_);
+        const uint64_t max_capacity = std::numeric_limits<InnerIdType>::max();
+        if (bucket_multiplier > 0 and final_vector_count <= max_capacity / bucket_multiplier) {
+            const auto capacity = static_cast<InnerIdType>(final_vector_count * bucket_multiplier);
+            FlattenOptimizedBuildContext context{this->thread_pool_, this->build_thread_count_};
+            optimized_build_session.emplace(this->bucket_, context, capacity);
+        }
     }
 
     Vector<InnerIdType> precise_offsets(allocator_);
@@ -712,6 +920,9 @@ IVF::Add(const DatasetPtr& base) {
     }
     if (first_exception != nullptr) {
         std::rethrow_exception(first_exception);
+    }
+    if (optimized_build_session.has_value()) {
+        optimized_build_session->Commit();
     }
     this->bucket_->Package();
     if (precise_bucket_ != nullptr) {
@@ -997,12 +1208,10 @@ IVF::Serialize(StreamWriter& writer) const {
     WRITE_DATACELL_WITH_NAME(writer, "partition_strategy", partition_strategy_);
     WRITE_DATACELL_WITH_NAME(writer, "label_table", label_table_);
 
-    if (use_reorder_) {
-        if (precise_bucket_ != nullptr) {
-            WRITE_DATACELL_WITH_NAME(writer, "precise_bucket", precise_bucket_);
-        } else {
-            WRITE_DATACELL_WITH_NAME(writer, "reorder_codes", reorder_codes_);
-        }
+    if (precise_bucket_ != nullptr) {
+        WRITE_DATACELL_WITH_NAME(writer, "precise_bucket", precise_bucket_);
+    } else if (reorder_codes_ != nullptr) {
+        WRITE_DATACELL_WITH_NAME(writer, "reorder_codes", reorder_codes_);
     }
 
     if (use_attribute_filter_) {
@@ -1088,7 +1297,7 @@ IVF::collect_streaming_header() const {
                                  label_tag,
                                  StreamSerializationBlockCurrentVersion(label_tag),
                                  StreamSerializationTagCritical(label_tag));
-    if (this->use_reorder_) {
+    if (precise_bucket_ != nullptr or reorder_codes_ != nullptr) {
         auto tag = static_cast<uint32_t>(precise_bucket_ != nullptr
                                              ? StreamSerializationTag::IVF_PRECISE_BUCKET
                                              : StreamSerializationTag::HIGH_PRECISION_CODES);
@@ -1135,7 +1344,7 @@ IVF::serialize_streaming_body(StreamWriter& writer) const {
         writer, label_tag, StreamSerializationTagCritical(label_tag), [this](StreamWriter& w) {
             this->label_table_->Serialize(w);
         });
-    if (this->use_reorder_) {
+    if (precise_bucket_ != nullptr or reorder_codes_ != nullptr) {
         auto tag = static_cast<uint32_t>(precise_bucket_ != nullptr
                                              ? StreamSerializationTag::IVF_PRECISE_BUCKET
                                              : StreamSerializationTag::HIGH_PRECISION_CODES);
@@ -1295,7 +1504,7 @@ IVF::read_streaming_body(StreamReader& reader,
                 loaded_label_table = true;
                 break;
             case StreamSerializationTag::HIGH_PRECISION_CODES:
-                if (this->use_reorder_ and this->reorder_codes_ != nullptr) {
+                if (this->reorder_codes_ != nullptr) {
                     read_precise_block(
                         [this](StreamReader& block) { this->reorder_codes_->Deserialize(block); },
                         [this](const IOParamPtr& io_param) {
@@ -1405,7 +1614,8 @@ IVF::read_streaming_body(StreamReader& reader,
         throw VsagException(ErrorType::READ_ERROR,
                             "IVF streaming serialization required block is missing");
     }
-    if (this->use_reorder_ && !loaded_precise_codes) {
+    if ((this->reorder_codes_ != nullptr or this->precise_bucket_ != nullptr) and
+        not loaded_precise_codes) {
         throw VsagException(ErrorType::READ_ERROR,
                             "IVF streaming serialization reorder block is missing");
     }
@@ -1447,7 +1657,7 @@ IVF::Deserialize(StreamReader& reader) {
         this->bucket_->Deserialize(buffer_reader);
         this->partition_strategy_->Deserialize(buffer_reader);
         this->label_table_->Deserialize(buffer_reader);
-        if (use_reorder_) {
+        if (reorder_codes_ != nullptr) {
             this->reorder_codes_->Deserialize(buffer_reader);
         }
 
@@ -1455,7 +1665,8 @@ IVF::Deserialize(StreamReader& reader) {
             this->attr_filter_index_->Deserialize(buffer_reader);
             this->has_attribute_ = true;
         }
-    } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
+    } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in
+              // the future
         logger::debug("parse with new version format");
 
         auto metadata = footer->GetMetadata();
@@ -1492,12 +1703,10 @@ IVF::Deserialize(StreamReader& reader) {
         READ_DATACELL_WITH_NAME(buffer_reader, "bucket", this->bucket_);
         READ_DATACELL_WITH_NAME(buffer_reader, "partition_strategy", this->partition_strategy_);
         READ_DATACELL_WITH_NAME(buffer_reader, "label_table", this->label_table_);
-        if (use_reorder_) {
-            if (precise_bucket_ != nullptr) {
-                READ_DATACELL_WITH_NAME(buffer_reader, "precise_bucket", this->precise_bucket_);
-            } else {
-                READ_DATACELL_WITH_NAME(buffer_reader, "reorder_codes", this->reorder_codes_);
-            }
+        if (precise_bucket_ != nullptr) {
+            READ_DATACELL_WITH_NAME(buffer_reader, "precise_bucket", this->precise_bucket_);
+        } else if (reorder_codes_ != nullptr) {
+            READ_DATACELL_WITH_NAME(buffer_reader, "reorder_codes", this->reorder_codes_);
         }
         if (use_attribute_filter_) {
             READ_DATACELL_WITH_NAME(buffer_reader, "attr_filter_index", this->attr_filter_index_);
@@ -1534,9 +1743,9 @@ IVF::Deserialize(StreamReader& reader) {
                     }
                     for (InnerIdType nid = 0; nid < total; ++nid) {
                         if (graph->GetNeighborSize(nid) > graph->MaximumDegree()) {
-                            throw VsagException(
-                                ErrorType::INVALID_BINARY,
-                                "corrupt bucket graph: neighbor count exceeds maximum degree");
+                            throw VsagException(ErrorType::INVALID_BINARY,
+                                                "corrupt bucket graph: neighbor count "
+                                                "exceeds maximum degree");
                         }
                         Vector<InnerIdType> nbrs(allocator_);
                         graph->GetNeighbors(nid, nbrs);
@@ -1576,6 +1785,7 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
     param.disable_bucket_scan = search_param.disable_bucket_scan;
     param.factor = search_param.topk_factor;
     param.enable_reorder = search_param.enable_reorder;
+    param.use_rabitq_heap_search = search_param.use_rabitq_heap_search;
     param.first_order_scan_ratio = search_param.first_order_scan_ratio;
     param.parallel_search_thread_count = search_param.parallel_search_thread_count;
     param.ef = static_cast<uint64_t>(search_param.ef_search);
@@ -1666,9 +1876,10 @@ IVF::reorder(int64_t topk,
              const InnerSearchParam& param,
              QueryContext& ctx,
              ReasoningContext* reasoning_ctx,
-             const std::optional<float>& distance_threshold) const {
-    auto reorder_heap =
-        reorder_->Reorder(input, query, topk, ctx, nullptr, nullptr, distance_threshold);
+             const std::optional<float>& distance_threshold,
+             const ComputerInterfacePtr& bucket_computer) const {
+    auto reorder_heap = reorder_->Reorder(
+        input, query, topk, ctx, nullptr, nullptr, distance_threshold, bucket_computer);
     auto dataset_results = this->pack_knn_result(reorder_heap, ctx.alloc);
 
     return dataset_results;
@@ -1679,12 +1890,10 @@ IVF::ExportModel(const IndexCommonParam& param) const {
     auto index = std::make_shared<IVF>(this->create_param_ptr_, param);
     IVFPartitionStrategy::Clone(this->partition_strategy_, index->partition_strategy_);
     this->bucket_->ExportModel(index->bucket_);
-    if (use_reorder_) {
-        if (precise_bucket_ != nullptr) {
-            this->precise_bucket_->ExportModel(index->precise_bucket_);
-        } else {
-            this->reorder_codes_->ExportModel(index->reorder_codes_);
-        }
+    if (precise_bucket_ != nullptr) {
+        this->precise_bucket_->ExportModel(index->precise_bucket_);
+    } else if (reorder_codes_ != nullptr) {
+        this->reorder_codes_->ExportModel(index->reorder_codes_);
     }
     index->is_trained_ = this->is_trained_;
     return index;
@@ -1695,7 +1904,8 @@ DistHeapPtr
 IVF::search(const DatasetPtr& query,
             const InnerSearchParam& param,
             QueryContext& ctx,
-            ReasoningContext* reasoning_ctx) const {
+            ReasoningContext* reasoning_ctx,
+            ComputerInterfacePtr* bucket_computer) const {
     const auto* query_data = query->GetFloat32Vectors();
     Vector<float> normalize_data(dim_, allocator_);
     Vector<BucketIdType> candidate_buckets(allocator_);
@@ -1711,6 +1921,9 @@ IVF::search(const DatasetPtr& query,
         reasoning_ctx->RecordBucketSelection(candidate_buckets);
     }
     auto computer = bucket_->FactoryComputer(query_data);
+    if (bucket_computer != nullptr) {
+        *bucket_computer = computer;
+    }
 
     int64_t topk = param.topk;
     if constexpr (mode == RANGE_SEARCH) {
@@ -1719,7 +1932,8 @@ IVF::search(const DatasetPtr& query,
             topk = this->GetNumElements();
         }
     }
-    // Scale topk to ensure sufficient candidates after deduplication when buckets_per_data_ > 1
+    // Scale topk to ensure sufficient candidates after deduplication when
+    // buckets_per_data_ > 1
     int64_t origin_topk = topk;
     if (buckets_per_data_ > 1) {
         if (topk <= std::numeric_limits<int64_t>::max() / buckets_per_data_) {
@@ -1996,14 +2210,12 @@ IVF::merge_one_unit(const MergeUnit& unit) {
     this->bucket_->MergeOther(other_index->bucket_, bucket_bias);
     other_index->bucket_->Package();
 
-    if (this->use_reorder_) {
-        if (precise_bucket_ != nullptr) {
-            other_index->precise_bucket_->Unpack();
-            this->precise_bucket_->MergeOther(other_index->precise_bucket_, bucket_bias);
-            other_index->precise_bucket_->Package();
-        } else {
-            this->reorder_codes_->MergeOther(other_index->reorder_codes_, this->total_elements_);
-        }
+    if (precise_bucket_ != nullptr) {
+        other_index->precise_bucket_->Unpack();
+        this->precise_bucket_->MergeOther(other_index->precise_bucket_, bucket_bias);
+        other_index->precise_bucket_->Package();
+    } else if (reorder_codes_ != nullptr) {
+        this->reorder_codes_->MergeOther(other_index->reorder_codes_, this->total_elements_);
     }
     this->total_elements_ += other_index->total_elements_;
 }
@@ -2012,9 +2224,9 @@ void
 IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
     auto index = std::dynamic_pointer_cast<IndexImpl<IVF>>(unit.index);
     if (index == nullptr) {
-        throw VsagException(
-            ErrorType::INVALID_ARGUMENT,
-            "Merge Failed: index type not match, try to merge a non-ivf index to an IVF index");
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Merge Failed: index type not match, try to merge a "
+                            "non-ivf index to an IVF index");
     }
     auto other_ivf_index = std::dynamic_pointer_cast<IVF>(
         std::dynamic_pointer_cast<IndexImpl<IVF>>(unit.index)->GetInnerIndex());
@@ -2043,9 +2255,9 @@ IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
     other_model.reset();
 
     if (not check_equal_on_string_stream(ss1, ss2)) {
-        throw VsagException(
-            ErrorType::INVALID_ARGUMENT,
-            "Merge Failed: IVF model not match, try to merge a different model ivf index");
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Merge Failed: IVF model not match, try to merge a "
+                            "different model ivf index");
     }
 }
 
@@ -2069,6 +2281,15 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         CHECK_ARGUMENT(param.parallel_search_thread_count == 1,
                        "IVF custom query distance does not support parallel search");
         param.enable_reorder = false;
+    }
+    if (param.use_rabitq_heap_search) {
+        CHECK_ARGUMENT(not is_range, "rabitq_search_strategy=heap only supports KNN search");
+        CHECK_ARGUMENT(not use_custom_distance,
+                       "rabitq_search_strategy=heap does not support custom query distance");
+        CHECK_ARGUMENT(use_reorder_ and param.enable_reorder,
+                       "rabitq_search_strategy=heap requires reorder to be enabled");
+        CHECK_ARGUMENT(bucket_->SupportSplitCodeStorage(),
+                       "rabitq_search_strategy=heap requires IVF RaBitQ split storage");
     }
     param.query_context = &ctx;
 
@@ -2290,12 +2511,20 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             param.range_search_limit_size =
                 static_cast<int>(param.factor * static_cast<float>(request.limited_size_));
         }
-        auto search_result = this->search<RANGE_SEARCH>(query, param, ctx, reasoning_ctx.get());
+        ComputerInterfacePtr bucket_computer = nullptr;
+        auto search_result =
+            this->search<RANGE_SEARCH>(query, param, ctx, reasoning_ctx.get(), &bucket_computer);
         if (use_reorder_ and param.enable_reorder) {
             int64_t k = (request.limited_size_ > 0) ? request.limited_size_
                                                     : static_cast<int64_t>(search_result->Size());
-            auto result = reorder(
-                k, search_result, query->GetFloat32Vectors(), param, ctx, reasoning_ctx.get());
+            auto result = reorder(k,
+                                  search_result,
+                                  query->GetFloat32Vectors(),
+                                  param,
+                                  ctx,
+                                  reasoning_ctx.get(),
+                                  std::nullopt,
+                                  bucket_computer);
             result->Statistics(stats.Dump());
             this->AttachReasoningReport(result, reasoning_ctx.get());
             return result;
@@ -2309,7 +2538,7 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     // KNN mode
     param.search_mode = KNN_SEARCH;
     param.topk = request.topk_;
-    if (use_reorder_ and param.enable_reorder) {
+    if (use_reorder_ and param.enable_reorder and not param.use_rabitq_heap_search) {
         CHECK_ARGUMENT(
             param.factor > 0.0F,
             fmt::format("factor must be positive when use_reorder is true, got {}", param.factor));
@@ -2318,11 +2547,15 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             param.topk = std::max(param.topk, request.topk_);
         }
     }
-    const bool reorder_enabled = use_reorder_ and param.enable_reorder;
-    // Reordered searches defer the finite bound to exact distances, but bucket selection still
-    // needs threshold-mode state so non-finite approximations cannot consume the rerank pool.
+    const bool reorder_enabled =
+        use_reorder_ and param.enable_reorder and not param.use_rabitq_heap_search;
+    // Reordered searches defer the finite bound to exact distances, but bucket
+    // selection still needs threshold-mode state so non-finite approximations
+    // cannot consume the rerank pool.
     param.distance_threshold = request.threshold_;
-    auto search_result = this->search<KNN_SEARCH>(query, param, ctx, reasoning_ctx.get());
+    ComputerInterfacePtr bucket_computer = nullptr;
+    auto search_result =
+        this->search<KNN_SEARCH>(query, param, ctx, reasoning_ctx.get(), &bucket_computer);
     if (reorder_enabled) {
         auto result = reorder(request.threshold_.has_value() ? param.topk : request.topk_,
                               search_result,
@@ -2330,7 +2563,8 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                               param,
                               ctx,
                               reasoning_ctx.get(),
-                              request.threshold_);
+                              request.threshold_,
+                              bucket_computer);
         result = FilterDatasetByThreshold(result, request.threshold_, ctx.alloc, request.topk_);
         AttachReasoningReport(result, reasoning_ctx.get());
         result->Statistics(stats.Dump());
@@ -2459,7 +2693,32 @@ IVF::CalDistanceById(const float* query,
             }
         }
     }
-    if (this->use_reorder_ && calculate_precise_distance && reorder_codes_ != nullptr) {
+    if (this->bucket_->SupportSplitCodeStorage() and calculate_precise_distance) {
+        auto computer = this->bucket_->FactoryComputer(query);
+        Vector<InnerIdType> valid_inner_ids(allocator_);
+        Vector<int64_t> valid_offsets(allocator_);
+        valid_inner_ids.reserve(count);
+        valid_offsets.reserve(count);
+        for (int64_t i = 0; i < count; ++i) {
+            if (validity[i]) {
+                valid_inner_ids.push_back(inner_ids[i]);
+                valid_offsets.push_back(i);
+            }
+        }
+        if (not valid_inner_ids.empty()) {
+            Vector<float> valid_distances(valid_inner_ids.size(), allocator_);
+            this->bucket_->QueryWithDistanceHintByInnerId(
+                valid_distances.data(),
+                nullptr,
+                computer,
+                valid_inner_ids.data(),
+                static_cast<InnerIdType>(valid_inner_ids.size()),
+                nullptr);
+            for (uint64_t i = 0; i < valid_inner_ids.size(); ++i) {
+                distances[valid_offsets[i]] = valid_distances[i];
+            }
+        }
+    } else if (this->reorder_codes_ != nullptr and calculate_precise_distance) {
         auto computer = this->reorder_codes_->FactoryComputer(query);
         this->reorder_codes_->Query(distances, computer, inner_ids.data(), count);
     } else if (this->use_reorder_ && calculate_precise_distance && precise_bucket_ != nullptr) {
@@ -2514,7 +2773,14 @@ IVF::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_dis
     if (not success) {
         return -1.0F;
     }
-    if (this->use_reorder_ && calculate_precise_distance && reorder_codes_ != nullptr) {
+    if (this->bucket_->SupportSplitCodeStorage() and calculate_precise_distance) {
+        float dist = 0.0F;
+        auto computer = this->bucket_->FactoryComputer(query);
+        this->bucket_->QueryWithDistanceHintByInnerId(
+            &dist, nullptr, computer, &inner_id, 1, nullptr);
+        return dist;
+    }
+    if (this->reorder_codes_ != nullptr and calculate_precise_distance) {
         float dist = 0.0F;
         auto computer = this->reorder_codes_->FactoryComputer(query);
         this->reorder_codes_->Query(&dist, computer, &inner_id, 1);
@@ -2631,9 +2897,10 @@ void
 IVF::cal_memory_usage() {
     auto memory = sizeof(IVF);
     memory += this->bucket_->GetMemoryUsage();
-    if (use_reorder_) {
-        memory += precise_bucket_ != nullptr ? precise_bucket_->GetMemoryUsage()
-                                             : reorder_codes_->GetMemoryUsage();
+    if (precise_bucket_ != nullptr) {
+        memory += precise_bucket_->GetMemoryUsage();
+    } else if (reorder_codes_ != nullptr) {
+        memory += reorder_codes_->GetMemoryUsage();
     }
     if (this->extra_info_size_ > 0 and this->extra_infos_ != nullptr) {
         memory += this->extra_infos_->GetMemoryUsage();
@@ -2666,9 +2933,9 @@ IVF::GetMemoryUsage() const {
 void
 IVF::RebuildBucketGraphs() {
     if (graph_build_threshold_ <= 0) {
-        throw VsagException(
-            ErrorType::UNSUPPORTED_INDEX_OPERATION,
-            "RebuildIVFBucketGraphs: index was not configured with graph_build_threshold > 0");
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "RebuildIVFBucketGraphs: index was not configured with "
+                            "graph_build_threshold > 0");
     }
     if (common_param_.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
