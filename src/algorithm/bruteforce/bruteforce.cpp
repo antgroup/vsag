@@ -20,6 +20,7 @@
 #include <exception>
 #include <mutex>
 #include <new>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <tuple>
 
@@ -27,13 +28,16 @@
 #include "attr/executor/executor.h"
 #include "datacell/attribute_inverted_interface.h"
 #include "datacell/flatten_datacell.h"
+#include "datacell/flatten_datacell_parameter.h"
 #include "datacell/flatten_interface.h"
+#include "datacell/multi_vector_datacell_parameter.h"
 #include "fmt/chrono.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"
+#include "io/common/io_parameter.h"
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
 #include "storage/tlv_section.h"
@@ -1139,78 +1143,44 @@ BruteForce::InitFeatures() {
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT);
 }
 
-static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
-    R"(
-    {
-        "{TYPE_KEY}": "{INDEX_BRUTE_FORCE}",
-        "{USE_REORDER_KEY}": false,
-        "{RESIZE_INCREASE_COUNT_BIT}": {DEFAULT_RESIZE_INCREASE_COUNT_BIT},
-        "{BASE_CODES_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{CODES_TYPE_KEY}": "flatten",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
-                "{PCA_DIM_KEY}": 0,
-                "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}": 32,
-                "{TQ_CHAIN_KEY}": "",
-                "nbits": 8,
-                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
-                "{HOLD_MOLDS}": false
-            }
-        },
-        "{PRECISE_CODES_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{CODES_TYPE_KEY}": "flatten",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
-                "{PCA_DIM_KEY}": 0,
-                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
-                "{HOLD_MOLDS}": false
-            }
-        },
-        "{BUILD_THREAD_COUNT_KEY}": 1,
-        "{EXTRA_INFO_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            }
-        },
-        "{USE_ATTRIBUTE_FILTER_KEY}": false,
-        "{ATTR_PARAMS_KEY}": {
-            "{ATTR_HAS_BUCKETS_KEY}": true
-        }
-    })";
-
-static const std::string WARP_PARAMS_TEMPLATE =
-    R"(
-    {
-        "{TYPE_KEY}": "{INDEX_BRUTE_FORCE}",
-        "{USE_REORDER_KEY}": false,
-        "{RESIZE_INCREASE_COUNT_BIT}": {DEFAULT_RESIZE_INCREASE_COUNT_BIT},
-        "{BASE_CODES_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{CODES_TYPE_KEY}": "multi_vector",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}"
-            }
-        },
-        "{BUILD_THREAD_COUNT_KEY}": 1,
-        "{USE_ATTRIBUTE_FILTER_KEY}": false,
-        "{ATTR_PARAMS_KEY}": {
-            "{ATTR_HAS_BUCKETS_KEY}": true
-        }
-    })";
+JsonType
+build_default_brute_force_param(const JsonType& external_param, bool warp) {
+    const auto base_io_type = external_param.Contains(BRUTE_FORCE_BASE_IO_TYPE)
+                                  ? external_param[BRUTE_FORCE_BASE_IO_TYPE].GetString()
+                                  : IO_TYPE_VALUE_BLOCK_MEMORY_IO;
+    JsonType json;
+    json[TYPE_KEY].SetString(INDEX_BRUTE_FORCE);
+    json[USE_REORDER_KEY].SetBool(false);
+    json[RESIZE_INCREASE_COUNT_BIT].SetUint64(DEFAULT_RESIZE_INCREASE_COUNT_BIT);
+    if (warp) {
+        json[BASE_CODES_KEY].SetJson(
+            MultiVectorDataCellParameter::CreateDefault(base_io_type)->ToJson());
+    } else {
+        const auto base_quantization_type =
+            external_param.Contains(BRUTE_FORCE_BASE_QUANTIZATION_TYPE)
+                ? external_param[BRUTE_FORCE_BASE_QUANTIZATION_TYPE].GetString()
+                : QUANTIZATION_TYPE_VALUE_FP32;
+        const auto precise_quantization_type =
+            external_param.Contains(BRUTE_FORCE_PRECISE_QUANTIZATION_TYPE)
+                ? external_param[BRUTE_FORCE_PRECISE_QUANTIZATION_TYPE].GetString()
+                : QUANTIZATION_TYPE_VALUE_FP32;
+        const auto precise_io_type = external_param.Contains(BRUTE_FORCE_PRECISE_IO_TYPE)
+                                         ? external_param[BRUTE_FORCE_PRECISE_IO_TYPE].GetString()
+                                         : IO_TYPE_VALUE_BLOCK_MEMORY_IO;
+        json[BASE_CODES_KEY].SetJson(
+            FlattenDataCellParameter::CreateDefault(base_quantization_type, base_io_type)
+                ->ToJson());
+        json[PRECISE_CODES_KEY].SetJson(
+            FlattenDataCellParameter::CreateDefault(precise_quantization_type, precise_io_type)
+                ->ToJson());
+        json[EXTRA_INFO_KEY][IO_PARAMS_KEY].SetJson(
+            IOParameter::CreateDefault(IO_TYPE_VALUE_BLOCK_MEMORY_IO)->ToJson());
+    }
+    json[BUILD_THREAD_COUNT_KEY].SetInt(1);
+    json[USE_ATTRIBUTE_FILTER_KEY].SetBool(false);
+    json[ATTR_PARAMS_KEY][ATTR_HAS_BUCKETS_KEY].SetBool(true);
+    return json;
+}
 
 ParamPtr
 BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
@@ -1223,151 +1193,73 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
         JsonType warp_external_param = external_param;
         warp_external_param.Erase(WARP_MODE_MARKER);
 
-        const ConstParamMap external_mapping = {
-            {
-                RESIZE_INCREASE_COUNT_BIT,
-                {
-                    RESIZE_INCREASE_COUNT_BIT,
-                },
-            },
-            {
-                BRUTE_FORCE_BASE_QUANTIZATION_TYPE,
-                {
-                    BASE_CODES_KEY,
-                    QUANTIZATION_PARAMS_KEY,
-                    TYPE_KEY,
-                },
-            },
-            {
-                BRUTE_FORCE_BASE_IO_TYPE,
-                {
-                    BASE_CODES_KEY,
-                    IO_PARAMS_KEY,
-                    TYPE_KEY,
-                },
-            },
-            {
-                BRUTE_FORCE_BASE_FILE_PATH,
-                {
-                    BASE_CODES_KEY,
-                    IO_PARAMS_KEY,
-                    IO_FILE_PATH_KEY,
-                },
-            },
-        };
-
         if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                 fmt::format("WARP not support {} datatype", DATATYPE_INT8));
         }
 
-        std::string str = format_map(WARP_PARAMS_TEMPLATE, DEFAULT_MAP);
-        auto inner_json = JsonType::Parse(str);
-        mapping_external_param_to_inner(warp_external_param, external_mapping, inner_json);
+        auto inner_json = build_default_brute_force_param(warp_external_param, true);
+        for (const auto& [key, value] : warp_external_param.GetInnerJson()->items()) {
+            (void)value;
+            auto field = warp_external_param[key];
+            if (key == RESIZE_INCREASE_COUNT_BIT) {
+                inner_json[RESIZE_INCREASE_COUNT_BIT].SetJson(field);
+            } else if (key == BRUTE_FORCE_BASE_QUANTIZATION_TYPE) {
+                inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetJson(field);
+            } else if (key == BRUTE_FORCE_BASE_IO_TYPE) {
+                inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][TYPE_KEY].SetJson(field);
+            } else if (key == BRUTE_FORCE_BASE_FILE_PATH) {
+                inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(field);
+            } else {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    fmt::format("invalid config param: {}", key));
+            }
+        }
 
         auto brute_force_parameter = std::make_shared<BruteForceParameter>();
         brute_force_parameter->FromJson(inner_json);
         return brute_force_parameter;
     }
 
-    const ConstParamMap external_mapping = {
-        {
-            RESIZE_INCREASE_COUNT_BIT,
-            {
-                RESIZE_INCREASE_COUNT_BIT,
-            },
-        },
-        {
-            BRUTE_FORCE_BASE_QUANTIZATION_TYPE,
-            {
-                BASE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                TYPE_KEY,
-            },
-        },
-        {
-            BRUTE_FORCE_BASE_IO_TYPE,
-            {
-                BASE_CODES_KEY,
-                IO_PARAMS_KEY,
-                TYPE_KEY,
-            },
-        },
-        {
-            BRUTE_FORCE_BASE_PQ_DIM,
-            {
-                BASE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                PRODUCT_QUANTIZATION_DIM_KEY,
-            },
-        },
-        {
-            BRUTE_FORCE_BASE_FILE_PATH,
-            {
-                BASE_CODES_KEY,
-                IO_PARAMS_KEY,
-                IO_FILE_PATH_KEY,
-            },
-        },
-        {
-            BRUTE_FORCE_PRECISE_QUANTIZATION_TYPE,
-            {
-                PRECISE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                TYPE_KEY,
-            },
-        },
-        {
-            BRUTE_FORCE_PRECISE_IO_TYPE,
-            {
-                PRECISE_CODES_KEY,
-                IO_PARAMS_KEY,
-                TYPE_KEY,
-            },
-        },
-        {
-            BRUTE_FORCE_PRECISE_FILE_PATH,
-            {
-                PRECISE_CODES_KEY,
-                IO_PARAMS_KEY,
-                IO_FILE_PATH_KEY,
-            },
-        },
-        {
-            BRUTE_FORCE_THREAD_COUNT,
-            {
-                BUILD_THREAD_COUNT_KEY,
-            },
-        },
-        {
-            STORE_RAW_VECTOR,
-            {
-                QUANTIZATION_PARAMS_KEY,
-                HOLD_MOLDS,
-            },
-        },
-        {
-            USE_ATTRIBUTE_FILTER,
-            {
-                USE_ATTRIBUTE_FILTER_KEY,
-            },
-        },
-        {
-            BRUTE_FORCE_USE_RESIDUAL,
-            {
-                USE_REORDER_KEY,
-            },
-        },
-    };
-
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("BruteForce not support {} datatype", DATATYPE_INT8));
     }
 
-    std::string str = format_map(BRUTE_FORCE_PARAMS_TEMPLATE, DEFAULT_MAP);
-    auto inner_json = JsonType::Parse(str);
-    mapping_external_param_to_inner(external_param, external_mapping, inner_json);
+    auto inner_json = build_default_brute_force_param(external_param, false);
+    for (const auto& [key, value] : external_param.GetInnerJson()->items()) {
+        (void)value;
+        auto field = external_param[key];
+        if (key == RESIZE_INCREASE_COUNT_BIT) {
+            inner_json[RESIZE_INCREASE_COUNT_BIT].SetJson(field);
+        } else if (key == BRUTE_FORCE_BASE_QUANTIZATION_TYPE) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetJson(field);
+        } else if (key == BRUTE_FORCE_BASE_IO_TYPE) {
+            inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][TYPE_KEY].SetJson(field);
+        } else if (key == BRUTE_FORCE_BASE_PQ_DIM) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][PRODUCT_QUANTIZATION_DIM_KEY]
+                .SetJson(field);
+        } else if (key == BRUTE_FORCE_BASE_FILE_PATH) {
+            inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(field);
+        } else if (key == BRUTE_FORCE_PRECISE_QUANTIZATION_TYPE) {
+            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetJson(field);
+        } else if (key == BRUTE_FORCE_PRECISE_IO_TYPE) {
+            inner_json[PRECISE_CODES_KEY][IO_PARAMS_KEY][TYPE_KEY].SetJson(field);
+        } else if (key == BRUTE_FORCE_PRECISE_FILE_PATH) {
+            inner_json[PRECISE_CODES_KEY][IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(field);
+        } else if (key == BRUTE_FORCE_THREAD_COUNT) {
+            inner_json[BUILD_THREAD_COUNT_KEY].SetJson(field);
+        } else if (key == STORE_RAW_VECTOR) {
+            inner_json[QUANTIZATION_PARAMS_KEY][HOLD_MOLDS].SetJson(field);
+        } else if (key == USE_ATTRIBUTE_FILTER) {
+            inner_json[USE_ATTRIBUTE_FILTER_KEY].SetJson(field);
+        } else if (key == BRUTE_FORCE_USE_RESIDUAL) {
+            inner_json[USE_REORDER_KEY].SetJson(field);
+        } else {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("invalid config param: {}", key));
+        }
+    }
 
     auto brute_force_parameter = std::make_shared<BruteForceParameter>();
     brute_force_parameter->FromJson(inner_json);

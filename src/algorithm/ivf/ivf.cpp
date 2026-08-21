@@ -20,6 +20,7 @@
 #include <cmath>
 #include <exception>
 #include <limits>
+#include <nlohmann/json.hpp>
 #include <random>
 #include <set>
 #include <unordered_map>
@@ -27,6 +28,8 @@
 #include "algorithm/inner_index_interface.h"
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
+#include "datacell/bucket_datacell_parameter.h"
+#include "datacell/flatten_datacell_parameter.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_datacell_parameter.h"
 #include "datacell/graph_interface_parameter.h"
@@ -75,333 +78,156 @@ make_precise_bucket_param(const IVFParameterPtr& param) {
 
 }  // namespace
 
-static constexpr const char* IVF_PARAMS_TEMPLATE =
-    R"(
-    {
-        "{TYPE_KEY}": "{INDEX_TYPE_IVF}",
-        "{IVF_TRAIN_TYPE_KEY}": "{IVF_TRAIN_TYPE_KMEANS}",
-        "{USE_ATTRIBUTE_FILTER_KEY}": false,
-        "{USE_REORDER_KEY}": false,
-        "{BUILD_THREAD_COUNT_KEY}": 1,
-        "{BUCKET_PARAMS_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
-                "{PCA_DIM_KEY}": 0,
-                "{RABITQ_QUANTIZATION_VERSION_KEY}": "standard",
-                "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}": 32,
-                "{RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY}": 1,
-                "{RABITQ_QUANTIZATION_ERROR_RATE_KEY}": 1.9,
-                "{USE_FHT_KEY}": false,
-                "{FAST_ENCODE_RABITQ_KEY}": true,
-                "{FAST_ENCODE_RABITQ_ROUNDS_KEY}": 6,
-                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1
-            },
-            "{BUCKETS_COUNT_KEY}": 10,
-            "{BUCKET_USE_RESIDUAL_KEY}": false
-        },
-        "{IVF_PARTITION_STRATEGY_PARAMS_KEY}": {
-            "{IVF_PARTITION_STRATEGY_TYPE_KEY}": "{IVF_PARTITION_STRATEGY_TYPE_NEAREST}",
-            "{IVF_TRAIN_TYPE_KEY}": "{IVF_TRAIN_TYPE_KMEANS}",
-            "{IVF_PARTITION_STRATEGY_TYPE_GNO_IMI}": {
-                "{GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY}": 10,
-                "{GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY}": 10
-            }
-        },
-        "{BUCKET_PER_DATA_KEY}": 1,
-        "{USE_REORDER_KEY}": false,
-        "{PRECISE_CODES_LAYOUT_KEY}": "{PRECISE_CODES_LAYOUT_VALUE_FLAT}",
-        "{PRECISE_CODES_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "codes_type": "flatten_codes",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{FAST_ENCODE_RABITQ_KEY}": true,
-                "{FAST_ENCODE_RABITQ_ROUNDS_KEY}": 6,
-                "{PRODUCT_QUANTIZATION_DIM_KEY}": 0
-            }
-        },
-        "{ATTR_PARAMS_KEY}": {
-            "{ATTR_HAS_BUCKETS_KEY}": true
-        },
-        "{GRAPH_BUILD_THRESHOLD_KEY}": 0
-    })";
+JsonType
+build_default_ivf_param(const JsonType& external_param) {
+    const auto base_quantization_type = external_param.Contains(IVF_BASE_QUANTIZATION_TYPE)
+                                            ? external_param[IVF_BASE_QUANTIZATION_TYPE].GetString()
+                                            : QUANTIZATION_TYPE_VALUE_FP32;
+    const auto base_io_type = external_param.Contains(IVF_BASE_IO_TYPE)
+                                  ? external_param[IVF_BASE_IO_TYPE].GetString()
+                                  : IO_TYPE_VALUE_MEMORY_IO;
+    const auto precise_quantization_type =
+        external_param.Contains(IVF_PRECISE_QUANTIZATION_TYPE)
+            ? external_param[IVF_PRECISE_QUANTIZATION_TYPE].GetString()
+            : QUANTIZATION_TYPE_VALUE_FP32;
+    const auto precise_io_type = external_param.Contains(IVF_PRECISE_IO_TYPE)
+                                     ? external_param[IVF_PRECISE_IO_TYPE].GetString()
+                                     : IO_TYPE_VALUE_BLOCK_MEMORY_IO;
+    JsonType json;
+    json[TYPE_KEY].SetString(INDEX_TYPE_IVF);
+    json[IVF_TRAIN_TYPE_KEY].SetString(IVF_TRAIN_TYPE_KMEANS);
+    json[USE_ATTRIBUTE_FILTER_KEY].SetBool(false);
+    json[USE_REORDER_KEY].SetBool(false);
+    json[BUILD_THREAD_COUNT_KEY].SetInt(1);
+
+    auto bucket =
+        BucketDataCellParameter::CreateDefault(base_quantization_type, base_io_type)->ToJson();
+    bucket[BUCKETS_COUNT_KEY].SetInt(10);
+    bucket[BUCKET_USE_RESIDUAL_KEY].SetBool(false);
+    json[BUCKET_PARAMS_KEY].SetJson(bucket);
+
+    JsonType partition;
+    partition[IVF_PARTITION_STRATEGY_TYPE_KEY].SetString(IVF_PARTITION_STRATEGY_TYPE_NEAREST);
+    partition[IVF_TRAIN_TYPE_KEY].SetString(IVF_TRAIN_TYPE_KMEANS);
+    partition[IVF_PARTITION_STRATEGY_TYPE_GNO_IMI][GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY].SetInt(
+        10);
+    partition[IVF_PARTITION_STRATEGY_TYPE_GNO_IMI][GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY].SetInt(
+        10);
+    json[IVF_PARTITION_STRATEGY_PARAMS_KEY].SetJson(partition);
+    json[BUCKET_PER_DATA_KEY].SetInt(1);
+    json[PRECISE_CODES_LAYOUT_KEY].SetString(PRECISE_CODES_LAYOUT_VALUE_FLAT);
+
+    auto precise =
+        FlattenDataCellParameter::CreateDefault(precise_quantization_type, precise_io_type)
+            ->ToJson();
+    json[PRECISE_CODES_KEY].SetJson(precise);
+    json[ATTR_PARAMS_KEY][ATTR_HAS_BUCKETS_KEY].SetBool(true);
+    json[GRAPH_BUILD_THRESHOLD_KEY].SetInt(0);
+    return json;
+}
 
 ParamPtr
 IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                                   const IndexCommonParam& common_param) {
-    const ConstParamMap external_mapping = {
-        {
-            IVF_BASE_QUANTIZATION_TYPE,
-            {
-                BUCKET_PARAMS_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                TYPE_KEY,
-            },
-        },
-        {
-            IVF_BASE_IO_TYPE,
-            {
-                BUCKET_PARAMS_KEY,
-                IO_PARAMS_KEY,
-                TYPE_KEY,
-            },
-        },
-        {
-            IVF_BASE_FILE_PATH,
-            {
-                BUCKET_PARAMS_KEY,
-                IO_PARAMS_KEY,
-                IO_FILE_PATH_KEY,
-            },
-        },
-        {
-            IVF_BASE_CACHE_TOTAL_SIZE,
-            {
-                BUCKET_PARAMS_KEY,
-                IO_PARAMS_KEY,
-                READ_CACHE_TOTAL_CACHE_SIZE_KEY,
-            },
-        },
-        {
-            IVF_PRECISE_QUANTIZATION_TYPE,
-            {
-                PRECISE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                TYPE_KEY,
-            },
-        },
-        {
-            IVF_PRECISE_IO_TYPE,
-            {
-                PRECISE_CODES_KEY,
-                IO_PARAMS_KEY,
-                TYPE_KEY,
-            },
-        },
-        {
-            IVF_PRECISE_FILE_PATH,
-            {
-                PRECISE_CODES_KEY,
-                IO_PARAMS_KEY,
-                IO_FILE_PATH_KEY,
-            },
-        },
-        {
-            IVF_PRECISE_CACHE_TOTAL_SIZE,
-            {
-                PRECISE_CODES_KEY,
-                IO_PARAMS_KEY,
-                READ_CACHE_TOTAL_CACHE_SIZE_KEY,
-            },
-        },
-        {
-            IVF_BUCKETS_COUNT,
-            {
-                BUCKET_PARAMS_KEY,
-                BUCKETS_COUNT_KEY,
-            },
-        },
-        {
-            IVF_TRAIN_TYPE,
-            {
-                IVF_PARTITION_STRATEGY_PARAMS_KEY,
-                IVF_TRAIN_TYPE_KEY,
-            },
-        },
-        {
-            IVF_PARTITION_STRATEGY_TYPE_KEY,
-            {
-                IVF_PARTITION_STRATEGY_PARAMS_KEY,
-                IVF_PARTITION_STRATEGY_TYPE_KEY,
-            },
-        },
-        {
-            GNO_IMI_FIRST_ORDER_BUCKETS_COUNT,
-            {
-                IVF_PARTITION_STRATEGY_PARAMS_KEY,
-                IVF_PARTITION_STRATEGY_TYPE_GNO_IMI,
-                GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY,
-            },
-        },
-        {
-            GNO_IMI_SECOND_ORDER_BUCKETS_COUNT,
-            {
-                IVF_PARTITION_STRATEGY_PARAMS_KEY,
-                IVF_PARTITION_STRATEGY_TYPE_GNO_IMI,
-                GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY,
-            },
-        },
-        {
-            BUCKET_PER_DATA_KEY,
-            {
-                BUCKET_PER_DATA_KEY,
-            },
-        },
-        {
-            IVF_USE_REORDER,
-            {
-                USE_REORDER_KEY,
-            },
-        },
-        {
-            IVF_PRECISE_CODES_LAYOUT,
-            {
-                PRECISE_CODES_LAYOUT_KEY,
-            },
-        },
-        {
-            IVF_USE_RESIDUAL,
-            {
-                BUCKET_PARAMS_KEY,
-                BUCKET_USE_RESIDUAL_KEY,
-            },
-        },
-        {
-            USE_ATTRIBUTE_FILTER,
-            {
-                USE_ATTRIBUTE_FILTER_KEY,
-            },
-        },
-        {
-            IVF_BASE_PQ_DIM,
-            {
-                BUCKET_PARAMS_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                PRODUCT_QUANTIZATION_DIM_KEY,
-            },
-        },
-        {
-            RABITQ_PCA_DIM,
-            {
-                BUCKET_PARAMS_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                PCA_DIM_KEY,
-            },
-        },
-        {
-            RABITQ_BITS_PER_DIM_QUERY,
-            {
-                BUCKET_PARAMS_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY,
-            },
-        },
-        {
-            RABITQ_BITS_PER_DIM_BASE,
-            {
-                BUCKET_PARAMS_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY,
-            },
-        },
-        {
-            RABITQ_VERSION,
-            {
-                BUCKET_PARAMS_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                RABITQ_QUANTIZATION_VERSION_KEY,
-            },
-        },
-        {
-            RABITQ_ERROR_RATE,
-            {
-                BUCKET_PARAMS_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                RABITQ_QUANTIZATION_ERROR_RATE_KEY,
-            },
-        },
-        {
-            RABITQ_USE_FHT,
-            {
-                BUCKET_PARAMS_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                USE_FHT_KEY,
-            },
-        },
-        {
-            FAST_ENCODE_RABITQ,
-            {
-                BUCKET_PARAMS_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                FAST_ENCODE_RABITQ_KEY,
-            },
-        },
-        {
-            FAST_ENCODE_RABITQ,
-            {
-                PRECISE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                FAST_ENCODE_RABITQ_KEY,
-            },
-        },
-        {
-            FAST_ENCODE_RABITQ_ROUNDS,
-            {
-                BUCKET_PARAMS_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                FAST_ENCODE_RABITQ_ROUNDS_KEY,
-            },
-        },
-        {
-            FAST_ENCODE_RABITQ_ROUNDS,
-            {
-                PRECISE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                FAST_ENCODE_RABITQ_ROUNDS_KEY,
-            },
-        },
-        {
-            IVF_THREAD_COUNT,
-            {
-                BUILD_THREAD_COUNT_KEY,
-            },
-        },
-        {
-            TRAIN_SAMPLE_COUNT_KEY,
-            {
-                TRAIN_SAMPLE_COUNT_KEY,
-            },
-        },
-        {
-            GRAPH_BUILD_THRESHOLD_KEY,
-            {
-                GRAPH_BUILD_THRESHOLD_KEY,
-            },
-        },
-        {
-            IVF_BASE_ENABLE_READ_CACHE,
-            {
-                BUCKET_PARAMS_KEY,
-                IO_PARAMS_KEY,
-                READ_CACHE_ENABLED_KEY,
-            },
-        },
-        {
-            IVF_PRECISE_ENABLE_READ_CACHE,
-            {
-                PRECISE_CODES_KEY,
-                IO_PARAMS_KEY,
-                READ_CACHE_ENABLED_KEY,
-            },
-        },
-    };
-
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("IVF not support {} datatype", DATATYPE_INT8));
     }
 
-    std::string str = format_map(IVF_PARAMS_TEMPLATE, DEFAULT_MAP);
-    auto inner_json = JsonType::Parse(str);
-    mapping_external_param_to_inner(external_param, external_mapping, inner_json);
+    auto inner_json = build_default_ivf_param(external_param);
+    for (const auto& [key, ignored] : external_param.GetInnerJson()->items()) {
+        (void)ignored;
+        auto value = external_param[key];
+        if (key == IVF_BASE_QUANTIZATION_TYPE) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == IVF_BASE_IO_TYPE) {
+            inner_json[BUCKET_PARAMS_KEY][IO_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == IVF_BASE_FILE_PATH) {
+            inner_json[BUCKET_PARAMS_KEY][IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(value);
+        } else if (key == IVF_BASE_CACHE_TOTAL_SIZE) {
+            inner_json[BUCKET_PARAMS_KEY][IO_PARAMS_KEY][READ_CACHE_TOTAL_CACHE_SIZE_KEY].SetJson(
+                value);
+        } else if (key == IVF_PRECISE_QUANTIZATION_TYPE) {
+            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == IVF_PRECISE_IO_TYPE) {
+            inner_json[PRECISE_CODES_KEY][IO_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == IVF_PRECISE_FILE_PATH) {
+            inner_json[PRECISE_CODES_KEY][IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(value);
+        } else if (key == IVF_PRECISE_CACHE_TOTAL_SIZE) {
+            inner_json[PRECISE_CODES_KEY][IO_PARAMS_KEY][READ_CACHE_TOTAL_CACHE_SIZE_KEY].SetJson(
+                value);
+        } else if (key == IVF_BUCKETS_COUNT) {
+            inner_json[BUCKET_PARAMS_KEY][BUCKETS_COUNT_KEY].SetJson(value);
+        } else if (key == IVF_TRAIN_TYPE) {
+            inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_TRAIN_TYPE_KEY].SetJson(value);
+        } else if (key == IVF_PARTITION_STRATEGY_TYPE_KEY) {
+            inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_PARTITION_STRATEGY_TYPE_KEY].SetJson(
+                value);
+        } else if (key == GNO_IMI_FIRST_ORDER_BUCKETS_COUNT) {
+            inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_PARTITION_STRATEGY_TYPE_GNO_IMI]
+                      [GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY]
+                          .SetJson(value);
+        } else if (key == GNO_IMI_SECOND_ORDER_BUCKETS_COUNT) {
+            inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_PARTITION_STRATEGY_TYPE_GNO_IMI]
+                      [GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY]
+                          .SetJson(value);
+        } else if (key == BUCKET_PER_DATA_KEY) {
+            inner_json[BUCKET_PER_DATA_KEY].SetJson(value);
+        } else if (key == IVF_USE_REORDER) {
+            inner_json[USE_REORDER_KEY].SetJson(value);
+        } else if (key == IVF_PRECISE_CODES_LAYOUT) {
+            inner_json[PRECISE_CODES_LAYOUT_KEY].SetJson(value);
+        } else if (key == IVF_USE_RESIDUAL) {
+            inner_json[BUCKET_PARAMS_KEY][BUCKET_USE_RESIDUAL_KEY].SetJson(value);
+        } else if (key == USE_ATTRIBUTE_FILTER) {
+            inner_json[USE_ATTRIBUTE_FILTER_KEY].SetJson(value);
+        } else if (key == IVF_BASE_PQ_DIM) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][PRODUCT_QUANTIZATION_DIM_KEY]
+                .SetJson(value);
+        } else if (key == RABITQ_PCA_DIM) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][PCA_DIM_KEY].SetJson(value);
+        } else if (key == RABITQ_BITS_PER_DIM_QUERY) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY]
+                      [RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY]
+                          .SetJson(value);
+        } else if (key == RABITQ_BITS_PER_DIM_BASE) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY]
+                      [RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY]
+                          .SetJson(value);
+        } else if (key == RABITQ_VERSION) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_VERSION_KEY]
+                .SetJson(value);
+        } else if (key == RABITQ_ERROR_RATE) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY]
+                      [RABITQ_QUANTIZATION_ERROR_RATE_KEY]
+                          .SetJson(value);
+        } else if (key == RABITQ_USE_FHT) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][USE_FHT_KEY].SetJson(value);
+        } else if (key == FAST_ENCODE_RABITQ) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_KEY].SetJson(
+                value);
+            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_KEY].SetJson(
+                value);
+        } else if (key == FAST_ENCODE_RABITQ_ROUNDS) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_ROUNDS_KEY]
+                .SetJson(value);
+            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_ROUNDS_KEY]
+                .SetJson(value);
+        } else if (key == IVF_THREAD_COUNT) {
+            inner_json[BUILD_THREAD_COUNT_KEY].SetJson(value);
+        } else if (key == TRAIN_SAMPLE_COUNT_KEY) {
+            inner_json[TRAIN_SAMPLE_COUNT_KEY].SetJson(value);
+        } else if (key == GRAPH_BUILD_THRESHOLD_KEY) {
+            inner_json[GRAPH_BUILD_THRESHOLD_KEY].SetJson(value);
+        } else if (key == IVF_BASE_ENABLE_READ_CACHE) {
+            inner_json[BUCKET_PARAMS_KEY][IO_PARAMS_KEY][READ_CACHE_ENABLED_KEY].SetJson(value);
+        } else if (key == IVF_PRECISE_ENABLE_READ_CACHE) {
+            inner_json[PRECISE_CODES_KEY][IO_PARAMS_KEY][READ_CACHE_ENABLED_KEY].SetJson(value);
+        } else {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("invalid config param: {}", key));
+        }
+    }
 
     auto ivf_parameter = std::make_shared<IVFParameter>();
     ivf_parameter->FromJson(inner_json);

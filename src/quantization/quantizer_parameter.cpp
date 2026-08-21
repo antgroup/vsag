@@ -31,6 +31,13 @@
 
 namespace vsag {
 QuantizerParamPtr
+QuantizerParameter::CreateDefault(const std::string& type_name) {
+    JsonType json;
+    json[TYPE_KEY].SetString(type_name);
+    return GetQuantizerParameterByJson(json);
+}
+
+QuantizerParamPtr
 QuantizerParameter::GetQuantizerParameterByJson(const JsonType& json) {
     std::shared_ptr<QuantizerParameter> quantizer_param = nullptr;
 

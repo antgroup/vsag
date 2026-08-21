@@ -30,6 +30,9 @@ DEFINE_POINTER2(IOParam, IOParameter);
  */
 class IOParameter : public Parameter {
 public:
+    static IOParamPtr
+    CreateDefault(const std::string& type_name);
+
     /**
      * @brief Creates an IO parameter object from JSON configuration.
      *
