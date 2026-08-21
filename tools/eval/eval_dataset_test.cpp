@@ -18,6 +18,7 @@
 #include <H5Cpp.h>
 #include <omp.h>
 
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <cmath>
@@ -38,6 +39,32 @@ namespace {
 using vsag::SparseVector;
 using vsag::eval::EvalDataset;
 using vsag::eval::EvalDatasetPtr;
+
+class ParityFilter : public vsag::Filter {
+public:
+    explicit ParityFilter(int64_t parity) : parity_(parity) {
+    }
+
+    bool
+    CheckValid(int64_t id) const override {
+        checks_.fetch_add(1, std::memory_order_relaxed);
+        return id % 2 == parity_;
+    }
+
+    float
+    ValidRatio() const override {
+        return 0.5F;
+    }
+
+    uint64_t
+    Checks() const {
+        return checks_.load(std::memory_order_relaxed);
+    }
+
+private:
+    int64_t parity_;
+    mutable std::atomic<uint64_t> checks_{0};
+};
 
 EvalDatasetPtr
 BuildSparseDataset(bool with_token_sequences, bool all_empty = false) {
@@ -212,12 +239,29 @@ TEST_CASE("EvalDataset builds a query-only view for id recall", "[ut][eval_datas
     auto ground_truth =
         vsag::Dataset::Make()->NumElements(2)->Dim(2)->Ids(ground_truth_ids.data())->Owner(false);
 
-    auto dataset = EvalDataset::FromSearchDatasets(queries, ground_truth);
+    auto even_filter = std::make_shared<ParityFilter>(0);
+    std::vector<vsag::FilterPtr> filters{even_filter, nullptr};
+    auto dataset = EvalDataset::FromSearchDatasets(queries, ground_truth, filters);
     REQUIRE(dataset->GetTrain() == nullptr);
     REQUIRE(dataset->GetTest() == query_vectors.data());
     REQUIRE(dataset->GetNumberOfBase() == 0);
     REQUIRE(dataset->GetNumberOfQuery() == 2);
     REQUIRE(dataset->GetGroundTruthK() == 2);
+    REQUIRE(dataset->HasQueryFilters());
+    REQUIRE(dataset->GetFilteredQueryCount() == 1);
+    REQUIRE(dataset->GetQueryFilter(0) == even_filter);
+    REQUIRE(dataset->GetQueryFilter(1) == nullptr);
+    REQUIRE(dataset->GetQueryInvalidBitset(0) == nullptr);
+
+    auto invalid = vsag::Bitset::Make();
+    invalid->Set(20);
+    std::vector<vsag::BitsetPtr> bitsets{invalid, nullptr};
+    auto bitset_dataset = EvalDataset::FromSearchDatasets(queries, ground_truth, {}, bitsets);
+    REQUIRE(bitset_dataset->HasQueryFilters());
+    REQUIRE(bitset_dataset->GetFilteredQueryCount() == 1);
+    REQUIRE(bitset_dataset->GetQueryFilter(0) == nullptr);
+    REQUIRE(bitset_dataset->GetQueryInvalidBitset(0) == invalid);
+    REQUIRE(bitset_dataset->GetQueryInvalidBitset(1) == nullptr);
 
     int64_t result_ids[]{10, 99};
     vsag::eval::SearchRecord record{
@@ -229,6 +273,17 @@ TEST_CASE("EvalDataset builds a query-only view for id recall", "[ut][eval_datas
 
     REQUIRE_THROWS_WITH(EvalDataset::FromSearchDatasets(nullptr, ground_truth),
                         "queries dataset is required and must not be empty");
+    filters.pop_back();
+    REQUIRE_THROWS_WITH(EvalDataset::FromSearchDatasets(queries, ground_truth, filters),
+                        "query_filters must contain exactly one entry per query");
+    filters = {std::make_shared<ParityFilter>(1), nullptr};
+    REQUIRE_NOTHROW(EvalDataset::FromSearchDatasets(queries, ground_truth, filters));
+    bitsets.pop_back();
+    REQUIRE_THROWS_WITH(EvalDataset::FromSearchDatasets(queries, ground_truth, {}, bitsets),
+                        "query_invalid_bitsets must contain exactly one entry per query");
+    bitsets.push_back(nullptr);
+    REQUIRE_THROWS_WITH(EvalDataset::FromSearchDatasets(queries, ground_truth, filters, bitsets),
+                        "query_filters and query_invalid_bitsets are mutually exclusive");
 }
 
 TEST_CASE("EvalDataset rejects overflowing ground-truth ID counts", "[ut][eval_dataset]") {
@@ -430,7 +485,10 @@ TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][
     std::vector<int64_t> ground_truth_ids{0, 3};
     auto ground_truth = vsag::Dataset::Make();
     ground_truth->NumElements(2)->Dim(1)->Ids(ground_truth_ids.data())->Owner(false);
-    auto dataset = EvalDataset::FromDatasets(base, queries, ground_truth, "l2");
+    auto even_filter = std::make_shared<ParityFilter>(0);
+    auto odd_filter = std::make_shared<ParityFilter>(1);
+    std::vector<vsag::FilterPtr> filters{even_filter, odd_filter};
+    auto dataset = EvalDataset::FromDatasets(base, queries, ground_truth, "l2", filters);
 
     const std::string create_params = R"(
         {
@@ -478,6 +536,23 @@ TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][
     REQUIRE(qps_only["index_info"].is_object());
     REQUIRE(qps_only["index_info"].empty());
     REQUIRE(omp_get_max_threads() == caller_thread_count);
+    REQUIRE(even_filter->Checks() > 0);
+    REQUIRE(odd_filter->Checks() > 0);
+
+    auto first_invalid = vsag::Bitset::Make();
+    auto second_invalid = vsag::Bitset::Make();
+    for (const auto id : base_ids) {
+        first_invalid->Set(id, id != ground_truth_ids[0]);
+        second_invalid->Set(id, id != ground_truth_ids[1]);
+    }
+    std::vector<vsag::BitsetPtr> bitsets{first_invalid, second_invalid};
+    auto bitset_dataset = EvalDataset::FromDatasets(base, queries, ground_truth, "l2", {}, bitsets);
+    config.enable_qps = false;
+    config.enable_recall = true;
+    const auto bitset_result = vsag::eval::EvaluateSearch(index, bitset_dataset, config);
+    REQUIRE(bitset_result["recall_avg"].get<double>() == 1.0);
+    config.enable_recall = false;
+    config.enable_qps = true;
 
     config.search_param = R"({"hgraph":{"ef_search":0}})";
     REQUIRE_THROWS_WITH(

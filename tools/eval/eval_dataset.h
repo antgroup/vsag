@@ -15,16 +15,20 @@
 
 #pragma once
 
+#include <algorithm>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include "H5Cpp.h"
 #include "common.h"
 #include "nlohmann/json.hpp"
 #include "simd/basic_func.h"
+#include "vsag/bitset.h"
 #include "vsag/constants.h"
 #include "vsag/dataset.h"
+#include "vsag/filter.h"
 
 namespace vsag::eval {
 
@@ -47,10 +51,15 @@ public:
     FromDatasets(const vsag::DatasetPtr& base,
                  const vsag::DatasetPtr& queries,
                  const vsag::DatasetPtr& ground_truth,
-                 const std::string& metric_type);
+                 const std::string& metric_type,
+                 const std::vector<vsag::FilterPtr>& query_filters = {},
+                 const std::vector<vsag::BitsetPtr>& query_invalid_bitsets = {});
 
     static EvalDatasetPtr
-    FromSearchDatasets(const vsag::DatasetPtr& queries, const vsag::DatasetPtr& ground_truth);
+    FromSearchDatasets(const vsag::DatasetPtr& queries,
+                       const vsag::DatasetPtr& ground_truth,
+                       const std::vector<vsag::FilterPtr>& query_filters = {},
+                       const std::vector<vsag::BitsetPtr>& query_invalid_bitsets = {});
 
     static void
     Save(const EvalDatasetPtr& dataset, const std::string& filename);
@@ -186,6 +195,36 @@ public:
     [[nodiscard]] const std::string*
     GetTestPaths() const {
         return query_dataset_ == nullptr ? nullptr : query_dataset_->GetPaths();
+    }
+
+    [[nodiscard]] const vsag::FilterPtr&
+    GetQueryFilter(uint64_t query_id) const {
+        static const vsag::FilterPtr no_filter;
+        return query_filters_.empty() ? no_filter : query_filters_[query_id];
+    }
+
+    [[nodiscard]] const vsag::BitsetPtr&
+    GetQueryInvalidBitset(uint64_t query_id) const {
+        static const vsag::BitsetPtr no_bitset;
+        return query_invalid_bitsets_.empty() ? no_bitset : query_invalid_bitsets_[query_id];
+    }
+
+    [[nodiscard]] bool
+    HasQueryFilters() const {
+        return GetFilteredQueryCount() > 0;
+    }
+
+    [[nodiscard]] uint64_t
+    GetFilteredQueryCount() const {
+        const auto filter_count =
+            std::count_if(query_filters_.begin(), query_filters_.end(), [](const auto& filter) {
+                return filter != nullptr;
+            });
+        const auto bitset_count = std::count_if(
+            query_invalid_bitsets_.begin(), query_invalid_bitsets_.end(), [](const auto& bitset) {
+                return bitset != nullptr;
+            });
+        return static_cast<uint64_t>(filter_count + bitset_count);
     }
 
     [[nodiscard]] const void*
@@ -381,6 +420,8 @@ protected:
     vsag::DatasetPtr base_dataset_;
     vsag::DatasetPtr query_dataset_;
     vsag::DatasetPtr ground_truth_dataset_;
+    std::vector<vsag::FilterPtr> query_filters_;
+    std::vector<vsag::BitsetPtr> query_invalid_bitsets_;
     std::unordered_map<int64_t, int64_t> train_id_to_row_;
 
     std::vector<SparseVector> sparse_train_;

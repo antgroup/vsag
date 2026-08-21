@@ -189,6 +189,24 @@ validate_offsets(const std::vector<uint64_t>& offsets,
     }
 }
 
+void
+validate_query_filter_inputs(const vsag::DatasetPtr& queries,
+                             const std::vector<vsag::FilterPtr>& query_filters,
+                             const std::vector<vsag::BitsetPtr>& query_invalid_bitsets) {
+    if (not query_filters.empty() and not query_invalid_bitsets.empty()) {
+        throw std::invalid_argument(
+            "query_filters and query_invalid_bitsets are mutually exclusive");
+    }
+    const auto query_count = static_cast<uint64_t>(queries->GetNumElements());
+    if (not query_filters.empty() and query_filters.size() != query_count) {
+        throw std::invalid_argument("query_filters must contain exactly one entry per query");
+    }
+    if (not query_invalid_bitsets.empty() and query_invalid_bitsets.size() != query_count) {
+        throw std::invalid_argument(
+            "query_invalid_bitsets must contain exactly one entry per query");
+    }
+}
+
 }  // namespace
 
 float
@@ -241,7 +259,9 @@ EvalDatasetPtr
 EvalDataset::FromDatasets(const vsag::DatasetPtr& base,
                           const vsag::DatasetPtr& queries,
                           const vsag::DatasetPtr& ground_truth,
-                          const std::string& metric_type) {
+                          const std::string& metric_type,
+                          const std::vector<vsag::FilterPtr>& query_filters,
+                          const std::vector<vsag::BitsetPtr>& query_invalid_bitsets) {
     if (base == nullptr || queries == nullptr) {
         throw std::invalid_argument("base and queries datasets are required");
     }
@@ -260,11 +280,14 @@ EvalDataset::FromDatasets(const vsag::DatasetPtr& base,
         throw std::invalid_argument(
             "ground_truth must contain one non-empty id row for every query");
     }
+    validate_query_filter_inputs(queries, query_filters, query_invalid_bitsets);
 
     auto dataset = std::make_shared<EvalDataset>();
     dataset->base_dataset_ = base;
     dataset->query_dataset_ = queries;
     dataset->ground_truth_dataset_ = ground_truth;
+    dataset->query_filters_ = query_filters;
+    dataset->query_invalid_bitsets_ = query_invalid_bitsets;
     dataset->vector_type_ = DENSE_VECTORS;
     dataset->train_data_type_ = vsag::DATATYPE_FLOAT32;
     dataset->test_data_type_ = vsag::DATATYPE_FLOAT32;
@@ -319,7 +342,9 @@ EvalDataset::FromDatasets(const vsag::DatasetPtr& base,
 
 EvalDatasetPtr
 EvalDataset::FromSearchDatasets(const vsag::DatasetPtr& queries,
-                                const vsag::DatasetPtr& ground_truth) {
+                                const vsag::DatasetPtr& ground_truth,
+                                const std::vector<vsag::FilterPtr>& query_filters,
+                                const std::vector<vsag::BitsetPtr>& query_invalid_bitsets) {
     if (queries == nullptr || queries->GetNumElements() <= 0) {
         throw std::invalid_argument("queries dataset is required and must not be empty");
     }
@@ -333,10 +358,13 @@ EvalDataset::FromSearchDatasets(const vsag::DatasetPtr& queries,
         throw std::invalid_argument(
             "ground_truth must contain one non-empty id row for every query");
     }
+    validate_query_filter_inputs(queries, query_filters, query_invalid_bitsets);
 
     auto dataset = std::make_shared<EvalDataset>();
     dataset->query_dataset_ = queries;
     dataset->ground_truth_dataset_ = ground_truth;
+    dataset->query_filters_ = query_filters;
+    dataset->query_invalid_bitsets_ = query_invalid_bitsets;
     dataset->vector_type_ = DENSE_VECTORS;
     dataset->train_data_type_ = vsag::DATATYPE_FLOAT32;
     dataset->test_data_type_ = vsag::DATATYPE_FLOAT32;
