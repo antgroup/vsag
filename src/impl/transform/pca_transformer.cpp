@@ -17,6 +17,7 @@
 
 #include <fmt/format.h>
 
+#include <cstring>
 #include <random>
 
 #include "impl/blas/blas_function.h"
@@ -62,9 +63,8 @@ PCATransformer::Train(const float* data, uint64_t count) {
     PerformEigenDecomposition(covariance_matrix.data());
 }
 
-TransformerMetaPtr
-PCATransformer::Transform(const float* input_vec, float* output_vec) const {
-    auto meta = std::make_shared<PCAMeta>();
+void
+PCATransformer::Transform(const float* input_vec, float* output_vec, uint8_t* meta) const {
     vsag::Vector<float> centralized_vec(allocator_);
     centralized_vec.resize(input_dim_, 0.0F);
 
@@ -89,7 +89,12 @@ PCATransformer::Transform(const float* input_vec, float* output_vec) const {
                         output_vec,
                         1);
 
-    return meta;
+    if (meta != nullptr) {
+        // Preserve the existing serialized code layout and value. The metadata is
+        // currently not consumed by RecoveryDistance.
+        const float residual_norm = 0.0F;
+        std::memcpy(meta, &residual_norm, sizeof(residual_norm));
+    }
 }
 
 void
