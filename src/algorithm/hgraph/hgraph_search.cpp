@@ -718,20 +718,32 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
     // NaN is unordered and cannot be returned. Infinity remains a valid legacy result only when
     // threshold filtering is absent; the searcher has already kept it out of threshold heaps.
-    DistanceRecordVector finite_records(ctx.alloc);
-    finite_records.reserve(search_result->Size());
-    while (not search_result->Empty()) {
-        const auto record = search_result->Top();
-        search_result->Pop();
-        if (not std::isnan(record.first) and
-            (not request.threshold_.has_value() or std::isfinite(record.first))) {
-            finite_records.push_back(record);
+    bool needs_result_filter = request.threshold_.has_value();
+    if (not needs_result_filter) {
+        const auto* records = search_result->GetData();
+        for (uint64_t i = 0; i < search_result->Size(); ++i) {
+            if (std::isnan(records[i].first)) {
+                needs_result_filter = true;
+                break;
+            }
         }
     }
-    for (const auto& record : finite_records) {
-        search_result->Push(record);
+    if (needs_result_filter) {
+        DistanceRecordVector finite_records(ctx.alloc);
+        finite_records.reserve(search_result->Size());
+        while (not search_result->Empty()) {
+            const auto record = search_result->Top();
+            search_result->Pop();
+            if (not std::isnan(record.first) and
+                (not request.threshold_.has_value() or std::isfinite(record.first))) {
+                finite_records.push_back(record);
+            }
+        }
+        for (const auto& record : finite_records) {
+            search_result->Push(record);
+        }
+        filter_search_result_by_threshold(search_result, request.threshold_, ctx.alloc);
     }
-    filter_search_result_by_threshold(search_result, request.threshold_, ctx.alloc);
     while (search_result->Size() > static_cast<uint64_t>(k)) {
         search_result->Pop();
     }
