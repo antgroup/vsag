@@ -15,8 +15,6 @@
 
 #pragma once
 
-#include <queue>
-
 #include "distance_heap.h"
 
 namespace vsag {
@@ -36,14 +34,7 @@ public:
     }
 
     void
-    Pop() override {
-        if constexpr (max_heap) {
-            std::pop_heap(queue_.begin(), queue_.end(), CompareMax());
-        } else {
-            std::pop_heap(queue_.begin(), queue_.end(), CompareMin());
-        }
-        queue_.pop_back();
-    }
+    Pop() override;
 
     [[nodiscard]] uint64_t
     Size() const override {
@@ -61,6 +52,54 @@ public:
     }
 
 private:
+    // Hand-rolled sift operations: hoisting the moved record into a register
+    // and writing it once at its final slot beats the generic iterator-based
+    // std::push_heap / std::pop_heap on the per-neighbor hot path.
+    static constexpr bool kIsMaxHeap = max_heap;
+
+    static bool
+    higher_than(const DistanceRecord& a, const DistanceRecord& b) {
+        if constexpr (kIsMaxHeap) {
+            return CompareMax()(a, b);
+        } else {
+            return CompareMin()(a, b);
+        }
+    }
+
+    void
+    sift_up(uint64_t idx) {
+        const auto value = this->queue_[idx];
+        while (idx > 0) {
+            const auto parent = (idx - 1) / 2;
+            if (!higher_than(value, this->queue_[parent])) {
+                break;
+            }
+            this->queue_[idx] = this->queue_[parent];
+            idx = parent;
+        }
+        this->queue_[idx] = value;
+    }
+
+    void
+    sift_down(uint64_t idx, uint64_t size) {
+        const auto value = this->queue_[idx];
+        while (true) {
+            auto child = 2 * idx + 1;
+            if (child >= size) {
+                break;
+            }
+            if (child + 1 < size && higher_than(this->queue_[child + 1], this->queue_[child])) {
+                ++child;
+            }
+            if (!higher_than(this->queue_[child], value)) {
+                break;
+            }
+            this->queue_[idx] = this->queue_[child];
+            idx = child;
+        }
+        this->queue_[idx] = value;
+    }
+
     Vector<DistanceRecord> queue_;
 };
 }  // namespace vsag
