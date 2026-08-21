@@ -748,7 +748,10 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     }
     auto count = static_cast<const int64_t>(search_result->Size());
 
-    Vector<InnerIdType> result_inner_ids(static_cast<size_t>(count), this->allocator_);
+    Vector<InnerIdType> result_inner_ids(this->allocator_);
+    if (reasoning_ctx != nullptr) {
+        result_inner_ids.resize(static_cast<size_t>(count));
+    }
 
     auto [dataset_results, dists, ids] = create_fast_dataset(count, ctx.alloc);
     char* extra_infos = nullptr;
@@ -762,7 +765,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         const auto& top = search_result->Top();
         dists[j] = top.first;
         ids[j] = this->label_table_->GetLabelById(top.second);
-        result_inner_ids[j] = top.second;
+        if (reasoning_ctx != nullptr) {
+            result_inner_ids[j] = top.second;
+        }
         if (extra_infos != nullptr) {
             this->extra_infos_->GetExtraInfoById(top.second, extra_infos + extra_info_size_ * j);
         }
