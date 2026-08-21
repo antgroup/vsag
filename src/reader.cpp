@@ -21,6 +21,8 @@
 
 namespace vsag {
 
+MemoryUsageReader::~MemoryUsageReader() = default;
+
 bool
 Reader::MultiRead(uint8_t* dests, const uint64_t* lens, const uint64_t* offsets, uint64_t count) {
     std::atomic<bool> succeed(true);

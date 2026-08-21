@@ -1105,6 +1105,12 @@ HGraph::GetMemoryUsageDetail() const {
     if (this->mci_cliques_ != nullptr) {
         memory_usage["mci_cliques"] = this->mci_cliques_->GetMemoryUsage();
     }
+    if (this->reader_ != nullptr) {
+        memory_usage["reader"] = get_reader_memory_usage(this->reader_);
+    }
+    if (this->precise_reader_ != nullptr && this->precise_reader_.get() != this->reader_.get()) {
+        memory_usage["precise_reader"] = get_reader_memory_usage(this->precise_reader_);
+    }
     return memory_usage;
 }
 
