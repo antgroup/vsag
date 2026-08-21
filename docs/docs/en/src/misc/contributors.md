@@ -1,6 +1,6 @@
 # Contributors
 
-The following is the list of VSAG contributors (updated 2026-06-09), ordered by the date of their
+The following is the list of VSAG contributors (updated 2026-08-21), ordered by the date of their
 first contribution:
 
 - 2024-07-26 Xiangyu Wang ([wxyucs](https://github.com/wxyucs/)) from AntGroup
@@ -35,3 +35,6 @@ first contribution:
 - 2026-05-14 [LightWant](https://github.com/LightWant) from AntGroup
 - 2026-06-09 [mukejane](https://github.com/mukejane)
 - 2026-06-09 Jiangtian Feng ([jfeng18](https://github.com/jfeng18)) from Alibaba
+- 2026-06-29 Wen Huanzhi ([Sia-Sheerland](https://github.com/Sia-Sheerland))
+- 2026-08-04 Siyang Tang ([Hastyshell](https://github.com/Hastyshell)) from Xiaohongshu
+- 2026-08-16 Charles xu ([CharlesXu-HQ](https://github.com/CharlesXu-HQ)) from AntGroup
