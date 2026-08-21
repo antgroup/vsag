@@ -203,6 +203,15 @@ GNOIMIPartition::ClassifyDatas(const void* datas,
                                int64_t count,
                                BucketIdType buckets_per_data,
                                QueryContext* ctx) const {
+    Vector<float> norm_vectors(allocator_);
+    if (metric_type_ == MetricType::METRIC_TYPE_COSINE) {
+        norm_vectors.resize(count * dim_);
+        for (int64_t i = 0; i < count; ++i) {
+            Normalize(
+                static_cast<const float*>(datas) + i * dim_, norm_vectors.data() + i * dim_, dim_);
+        }
+        datas = norm_vectors.data();
+    }
     Vector<BucketIdType> result(buckets_per_data * count, this->allocator_);
     inner_joint_classify_datas(
         reinterpret_cast<const float*>(datas), count, buckets_per_data, result.data(), ctx);
