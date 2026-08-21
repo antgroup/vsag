@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <future>
+#include <limits>
 #include <numeric>
 #include <set>
 #include <sstream>
@@ -81,6 +82,18 @@ public:
 
 private:
     mutable std::atomic<uint64_t> check_count_{0};
+};
+
+class NaNRatioAllValidFilter : public HalfRatioAllValidFilter {
+public:
+    explicit NaNRatioAllValidFilter(const std::vector<int64_t>& ids)
+        : HalfRatioAllValidFilter(ids) {
+    }
+
+    float
+    ValidRatio() const override {
+        return std::numeric_limits<float>::quiet_NaN();
+    }
 };
 
 class CallbackOnlyFilter : public vsag::Filter {
@@ -314,6 +327,43 @@ TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][
         static_cast<uint64_t>(std::ceil(std::sqrt(static_cast<double>(total)) * 0.5));
     REQUIRE(std::stoull(result.value()->GetStatistics({"mci_seed_count"})[0]) ==
             expected_seed_count);
+
+    result = index.value()->KnnSearch(
+        query,
+        3,
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.5,)"
+        R"("hgraph_valid_ratio_threshold":1.0,"brute_force_threshold":0.3}})",
+        filter);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+
+    auto nan_ratio_filter = std::make_shared<NaNRatioAllValidFilter>(ids);
+    result =
+        index.value()->KnnSearch(query,
+                                 3,
+                                 R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.5,)"
+                                 R"("hgraph_valid_ratio_threshold":1.0}})",
+                                 nan_ratio_filter);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+
+    result = index.value()->KnnSearch(
+        query,
+        3,
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.5,)"
+        R"("hgraph_valid_ratio_threshold":1.0,"brute_force_threshold":0.5}})",
+        filter);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("brute_force")");
+
+    result = index.value()->RangeSearch(
+        query,
+        std::numeric_limits<float>::max(),
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.5,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})",
+        filter);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("hgraph")");
 
     result =
         index.value()->KnnSearch(query,
