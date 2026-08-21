@@ -63,16 +63,9 @@ ComputeBatch4Impl(const float* RESTRICT query,
                   float& r2,
                   float& r3,
                   float& r4,
-                  Batch4Fallback fallback = nullptr) {
+                  [[maybe_unused]] Batch4Fallback fallback = nullptr) {
     using V = typename T::FloatVec;
     constexpr int W = T::Width;
-
-    if constexpr (W > 1) {
-        if (dim < static_cast<uint64_t>(W)) {
-            fallback(query, dim, c1, c2, c3, c4, r1, r2, r3, r4);
-            return;
-        }
-    }
 
     V s1 = T::zero();
     V s2 = T::zero();
@@ -92,9 +85,26 @@ ComputeBatch4Impl(const float* RESTRICT query,
     r3 += T::reduce_add(s3);
     r4 += T::reduce_add(s4);
 
-    if constexpr (W > 1) {
-        if (dim > i) {
-            fallback(query + i, dim - i, c1 + i, c2 + i, c3 + i, c4 + i, r1, r2, r3, r4);
+    // The dim % W remainder is handled inline: falling back to narrower SIMD
+    // tiers costs two extra out-of-line calls per invocation on the search hot
+    // path (e.g. dim = 100 spilled a 4-wide tail from AVX512 down to SSE).
+    if constexpr (Kind == Batch4Kind::IP) {
+        for (; i < dim; ++i) {
+            r1 += query[i] * c1[i];
+            r2 += query[i] * c2[i];
+            r3 += query[i] * c3[i];
+            r4 += query[i] * c4[i];
+        }
+    } else {
+        for (; i < dim; ++i) {
+            const float d1 = query[i] - c1[i];
+            const float d2 = query[i] - c2[i];
+            const float d3 = query[i] - c3[i];
+            const float d4 = query[i] - c4[i];
+            r1 += d1 * d1;
+            r2 += d2 * d2;
+            r3 += d3 * d3;
+            r4 += d4 * d4;
         }
     }
 }
