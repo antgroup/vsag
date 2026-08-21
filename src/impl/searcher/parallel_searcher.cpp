@@ -121,11 +121,15 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     // set customize query alloctor
     Allocator* alloc = select_query_allocator(ctx, allocator_);
 
-    auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
-    auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
+    // Concrete-typed pointers: hot-path heap ops bypass the virtual
+    // DistanceHeap interface; the heaps stay coordinator-thread-local.
+    auto top_candidates_ptr = std::make_shared<StandardHeap<true, false>>(alloc, -1);
+    auto* top_candidates = top_candidates_ptr.get();
+    auto candidate_set_ptr = std::make_shared<StandardHeap<true, false>>(alloc, -1);
+    auto* candidate_set = candidate_set_ptr.get();
 
     if (not graph or not flatten) {
-        return top_candidates;
+        return top_candidates_ptr;
     }
 
     auto computer = flatten->FactoryComputer(query);
@@ -412,7 +416,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         future.get();
     }
 
-    return top_candidates;
+    return top_candidates_ptr;
 }
 
 void
