@@ -131,6 +131,43 @@ TEST_CASE("GNO-IMI Partition Basic Test", "[ut][GNOIMIPartition]") {
     std::cout << "match count(first_order_scan_ratio=1.0): " << match_count << std::endl;
 }
 
+TEST_CASE("GNO-IMI cosine build routing is scale invariant", "[ut][GNOIMIPartition]") {
+    constexpr int64_t dim = 32;
+    constexpr int64_t data_count = 512;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam param;
+    param.dim_ = dim;
+    param.metric_ = MetricType::METRIC_TYPE_COSINE;
+    param.allocator_ = allocator;
+    auto strategy_param = std::make_shared<IVFPartitionStrategyParameters>();
+    strategy_param->FromJson(JsonType::Parse(R"({
+        "partition_strategy_type": "gno_imi",
+        "ivf_train_type": "kmeans",
+        "gno_imi": {
+            "first_order_buckets_count": 4,
+            "second_order_buckets_count": 4
+        }
+    })"));
+    auto partition = std::make_unique<GNOIMIPartition>(param, strategy_param);
+
+    auto vectors = fixtures::generate_vectors(data_count, dim, false, 95);
+    auto dataset = Dataset::Make();
+    dataset->Float32Vectors(vectors.data())->Dim(dim)->NumElements(data_count)->Owner(false);
+    partition->Train(dataset);
+
+    auto normalized_vectors = vectors;
+    for (int64_t i = 0; i < data_count; ++i) {
+        Normalize(normalized_vectors.data() + i * dim, normalized_vectors.data() + i * dim, dim);
+    }
+    auto raw_result = partition->ClassifyDatas(vectors.data(), data_count, 1, nullptr);
+    auto normalized_result =
+        partition->ClassifyDatas(normalized_vectors.data(), data_count, 1, nullptr);
+    for (uint64_t i = 0; i < raw_result.size(); ++i) {
+        CAPTURE(i);
+        REQUIRE(raw_result[i] == normalized_result[i]);
+    }
+}
+
 TEST_CASE("GNO-IMI Partition Serialize Test", "[ut][GNOIMIPartition]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     int64_t dim = 128;
