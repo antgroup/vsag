@@ -129,7 +129,7 @@ public:
         StreamReader::ReadObj(reader, this->maximum_degree_);
 
         if (duplicate_tracker_) {
-            duplicate_tracker_->Deserialize(reader);
+            duplicate_tracker_->DeserializeBounded(reader, this->max_capacity_);
         }
     }
 

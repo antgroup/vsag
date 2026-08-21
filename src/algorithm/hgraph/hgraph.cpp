@@ -27,6 +27,8 @@
 #include "attr/argparse.h"
 #include "common.h"
 #include "datacell/flatten_interface.h"
+#include "datacell/hgraph_rabitq_fused_datacell.h"
+#include "datacell/rabitq_split_datacell.h"
 #include "datacell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
 #include "impl/filter/filter_headers.h"
@@ -36,6 +38,7 @@
 #include "impl/pruning_strategy.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "impl/reorder/flatten_reorder.h"
+#include "impl/searcher/hgraph_rabitq_searcher.h"
 #include "index/index_impl.h"
 #include "io/reader_io/reader_io_parameter.h"
 #include "typing.h"
@@ -46,6 +49,16 @@
 namespace vsag {
 
 class HGraphAnalyzer;
+
+void
+HGraph::check_fused_mutation_supported(std::string_view operation) const {
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        throw VsagException(
+            ErrorType::UNSUPPORTED_INDEX_OPERATION,
+            fmt::format("fused RaBitQ HGraph is build-once and read-only; {} is unsupported",
+                        operation));
+    }
+}
 
 HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonParam& common_param)
     : InnerIndexInterface(hgraph_param, common_param),
@@ -88,13 +101,32 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
             FlattenInterface::MakeInstance(hgraph_param->precise_codes_param, common_param);
     }
     this->searcher_ = std::make_shared<BasicSearcher>(common_param, neighbors_mutex_);
+    this->rabitq_fused_searcher_ =
+        std::make_shared<HGraphRaBitQSearcher>(common_param, neighbors_mutex_);
     this->mci_searcher_ = std::make_shared<MCISearcher>(common_param);
     if (this->mci_parameters_.enabled) {
         this->mci_cliques_ = std::make_shared<CliqueDataCell>(common_param.allocator_.get());
     }
 
-    this->bottom_graph_ =
-        GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
+    if (hgraph_param->rabitq_fused_datacell) {
+        auto split_codes =
+            std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(basic_flatten_codes_);
+        CHECK_ARGUMENT(split_codes != nullptr,
+                       "rabitq_fused_datacell requires in-memory RaBitQ split codes");
+        auto graph_param =
+            std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_param->bottom_graph_param);
+        CHECK_ARGUMENT(graph_param != nullptr, "rabitq_fused_datacell requires flat graph storage");
+        rabitq_fused_datacell_ =
+            std::make_shared<HGraphRaBitQFusedDataCell>(graph_param,
+                                                        split_codes->OneBitCodeSize(),
+                                                        split_codes->SupplementCodeSize(),
+                                                        common_param);
+        split_codes->AttachFusedCodeStorage(rabitq_fused_datacell_.get());
+        this->bottom_graph_ = rabitq_fused_datacell_;
+    } else {
+        this->bottom_graph_ =
+            GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
+    }
     if (this->support_duplicate_) {
         this->label_table_->SetDuplicateTracker(this->bottom_graph_->GetDuplicateTracker());
     }
@@ -132,6 +164,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
 
 bool
 HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
+    this->check_fused_mutation_supported("Tune");
     std::scoped_lock lock(this->add_mutex_);
     if (this->immutable_.load(std::memory_order_acquire) or
         not this->index_feature_list_->CheckFeature(IndexFeature::SUPPORT_TUNE)) {
@@ -333,15 +366,19 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
             static_cast<double>(block_size));
     };
 
-    if (this->basic_flatten_codes_->InMemory()) {
-        auto base_memory = this->basic_flatten_codes_->code_size_ * element_count;
-        estimate_memory += block_memory_ceil(base_memory, block_size);
-    }
-
-    if (bottom_graph_->InMemory()) {
-        auto bottom_graph_memory =
-            (this->bottom_graph_->maximum_degree_ + 1) * sizeof(InnerIdType) * element_count;
-        estimate_memory += block_memory_ceil(bottom_graph_memory, block_size);
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        const auto fused_memory = this->rabitq_fused_datacell_->RecordSize() * element_count;
+        estimate_memory += block_memory_ceil(fused_memory, block_size);
+    } else {
+        if (this->basic_flatten_codes_->InMemory()) {
+            auto base_memory = this->basic_flatten_codes_->code_size_ * element_count;
+            estimate_memory += block_memory_ceil(base_memory, block_size);
+        }
+        if (bottom_graph_->InMemory()) {
+            auto bottom_graph_memory =
+                (this->bottom_graph_->maximum_degree_ + 1) * sizeof(InnerIdType) * element_count;
+            estimate_memory += block_memory_ceil(bottom_graph_memory, block_size);
+        }
     }
 
     if (has_precise_reorder() && this->high_precise_codes_->InMemory() &&
@@ -398,7 +435,9 @@ HGraph::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_
     if (create_new_raw_vector_ && calculate_precise_distance) {
         flat = this->raw_vector_;
     }
-    if (lock.owns_lock() && not this->using_dedup_storage()) {
+    const bool reads_fused_codes =
+        this->rabitq_fused_datacell_ != nullptr and flat == this->basic_flatten_codes_;
+    if (lock.owns_lock() and not this->using_dedup_storage() and not reads_fused_codes) {
         lock.unlock();
     }
     return InnerIndexInterface::calc_distance_by_id(query, id, flat);
@@ -430,7 +469,9 @@ HGraph::CalDistanceById(const float* query,
     if (create_new_raw_vector_ && calculate_precise_distance) {
         flat = this->raw_vector_;
     }
-    if (lock.owns_lock() && not this->using_dedup_storage()) {
+    const bool reads_fused_codes =
+        this->rabitq_fused_datacell_ != nullptr and flat == this->basic_flatten_codes_;
+    if (lock.owns_lock() and not this->using_dedup_storage() and not reads_fused_codes) {
         lock.unlock();
     }
     std::vector<bool> validity;
@@ -462,6 +503,7 @@ HGraph::GetMinAndMaxId() const {
 
 InnerIndexPtr
 HGraph::ExportModel(const IndexCommonParam& param) const {
+    this->check_fused_mutation_supported("ExportModel");
     auto index = std::make_shared<HGraph>(this->create_param_ptr_, param);
     this->basic_flatten_codes_->ExportModel(index->basic_flatten_codes_);
     if (has_precise_reorder()) {
@@ -469,6 +511,13 @@ HGraph::ExportModel(const IndexCommonParam& param) const {
     }
     return index;
 }
+
+InnerIndexPtr
+HGraph::Clone(const IndexCommonParam& param) {
+    this->check_fused_mutation_supported("Clone");
+    return InnerIndexInterface::Clone(param);
+}
+
 void
 HGraph::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
     std::shared_lock<std::shared_mutex> lock;
@@ -480,15 +529,20 @@ HGraph::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
         return;
     }
 
-    if (has_precise_reorder()) {
-        high_precise_codes_->GetCodesById(inner_id, data);
-    } else {
-        basic_flatten_codes_->GetCodesById(inner_id, data);
+    if (this->has_precise_reorder()) {
+        this->high_precise_codes_->GetCodesById(inner_id, data);
+        return;
     }
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "fused RaBitQ codes do not expose a global merged code");
+    }
+    this->basic_flatten_codes_->GetCodesById(inner_id, data);
 }
 
 void
 HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
+    this->check_fused_mutation_supported("Merge");
     CHECK_ARGUMENT(not this->using_dedup_storage(),
                    "HGraph deduplicate_storage does not support Merge");
     int64_t total_count = this->GetNumElements();
@@ -569,6 +623,12 @@ HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     bool release;
     const auto* buffer = codes->GetCodesById(inner_id, release);
     if (buffer == nullptr) {
+        auto split_codes =
+            std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(basic_flatten_codes_);
+        if (rabitq_fused_datacell_ != nullptr and codes.get() == basic_flatten_codes_.get() and
+            split_codes != nullptr and split_codes->DecodeFusedById(inner_id, data)) {
+            return;
+        }
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             fmt::format("failed to get vector by inner id {}", inner_id));
     }
@@ -588,6 +648,7 @@ HGraph::SetImmutable() {
     auto empty_mutex = std::make_shared<EmptyMutex>();
     this->searcher_->SetMutexArray(empty_mutex);
     this->parallel_searcher_->SetMutexArray(empty_mutex);
+    this->rabitq_fused_searcher_->SetMutexArray(empty_mutex);
     this->neighbors_mutex_ = empty_mutex;
     this->immutable_.store(true, std::memory_order_release);
 }
@@ -667,7 +728,9 @@ void
 HGraph::init_resize_bit_and_reorder() {
     if (use_reorder_) {
         auto reorder_codes = this->get_reorder_codes();
-        reorder_ = std::make_shared<FlattenReorder>(reorder_codes, allocator_);
+        auto fused_graph =
+            reorder_codes.get() == basic_flatten_codes_.get() ? rabitq_fused_datacell_ : nullptr;
+        reorder_ = std::make_shared<FlattenReorder>(reorder_codes, allocator_, fused_graph);
     }
 }
 
@@ -720,6 +783,7 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
 
 bool
 HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
+    this->check_fused_mutation_supported("UpdateVector");
     std::shared_lock<std::shared_mutex> force_remove_rlock;
     if (this->support_force_remove()) {
         force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
@@ -735,15 +799,16 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     void* new_base_vec = nullptr;
     uint64_t data_size = 0;
     get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
-
     if (not force_update) {
         std::shared_lock label_lock(this->label_lookup_mutex_);
 
+        float self_dist = 0.0F;
         // 1. check whether vectors are same
         Vector<int8_t> base_data(data_size, allocator_);
-        GetVectorByInnerId(inner_id, (float*)base_data.data());
-        float old_self_dist = this->CalcDistanceById((float*)base_data.data(), id);
-        float self_dist = this->CalcDistanceById((float*)new_base_vec, id);
+        GetVectorByInnerId(inner_id, reinterpret_cast<float*>(base_data.data()));
+        const float old_self_dist =
+            this->CalcDistanceById(reinterpret_cast<float*>(base_data.data()), id);
+        self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
         if (std::abs(old_self_dist - self_dist) < 1e-3) {
             return true;
         }
@@ -783,6 +848,8 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
         }
     }
 
+    this->validate_fused_encoding_data(static_cast<const float*>(new_base_vec), 1);
+
     // note that only modify vector need to obtain unique lock
     // and the lock has been obtained inside datacell
     std::shared_lock<std::shared_mutex> map_lock;
@@ -795,6 +862,18 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
         update_status = update_status && high_precise_codes_->UpdateVector(new_base_vec, inner_id);
     }
     return update_status;
+}
+
+bool
+HGraph::UpdateId(int64_t old_id, int64_t new_id) {
+    this->check_fused_mutation_supported("UpdateId");
+    return InnerIndexInterface::UpdateId(old_id, new_id);
+}
+
+bool
+HGraph::UpdateExtraInfo(const DatasetPtr& new_base) {
+    this->check_fused_mutation_supported("UpdateExtraInfo");
+    return InnerIndexInterface::UpdateExtraInfo(new_base);
 }
 
 std::string

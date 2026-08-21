@@ -20,6 +20,115 @@
 
 namespace vsag::avx512vpopcntdq {
 
+uint64_t
+RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
+#if defined(ENABLE_AVX512VPOPCNTDQ)
+    const uint64_t num_bytes = (dim + 7) / 8;
+    __m512i base_acc = _mm512_setzero_si512();
+    __m512i inner_acc[4] = {_mm512_setzero_si512(),
+                            _mm512_setzero_si512(),
+                            _mm512_setzero_si512(),
+                            _mm512_setzero_si512()};
+    uint64_t offset = 0;
+    for (; offset + 64 <= num_bytes; offset += 64) {
+        const auto base = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(bits + offset));
+        base_acc = _mm512_add_epi64(base_acc, _mm512_popcnt_epi64(base));
+        for (uint32_t bit = 0; bit < 4; ++bit) {
+            const auto query = _mm512_loadu_si512(
+                reinterpret_cast<const __m512i*>(codes + bit * num_bytes + offset));
+            inner_acc[bit] = _mm512_add_epi64(inner_acc[bit],
+                                              _mm512_popcnt_epi64(_mm512_and_si512(query, base)));
+        }
+    }
+    uint32_t base_sum = static_cast<uint32_t>(_mm512_reduce_add_epi64(base_acc));
+    uint32_t inner_product = 0;
+    for (uint32_t bit = 0; bit < 4; ++bit) {
+        inner_product += static_cast<uint32_t>(_mm512_reduce_add_epi64(inner_acc[bit])) << bit;
+    }
+    for (; offset < num_bytes; ++offset) {
+        const auto base = bits[offset];
+        base_sum += static_cast<uint32_t>(__builtin_popcount(base));
+        for (uint32_t bit = 0; bit < 4; ++bit) {
+            inner_product +=
+                static_cast<uint32_t>(__builtin_popcount(codes[bit * num_bytes + offset] & base))
+                << bit;
+        }
+    }
+    return static_cast<uint64_t>(inner_product) | (static_cast<uint64_t>(base_sum) << 32U);
+#else
+    return avx2::RaBitQSQ4UBinaryIPWithBaseSum(codes, bits, dim);
+#endif
+}
+
+void
+RaBitQSQ4UBinaryIPWithBaseSumBatch4(const uint8_t* codes,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint64_t* results) {
+#if defined(ENABLE_AVX512VPOPCNTDQ)
+    const uint64_t num_bytes = (dim + 7) / 8;
+    const uint8_t* bases[4] = {bits1, bits2, bits3, bits4};
+    __m512i base_acc[4];
+    __m512i inner_acc[4][4];
+    for (uint32_t base_id = 0; base_id < 4; ++base_id) {
+        base_acc[base_id] = _mm512_setzero_si512();
+        for (uint32_t bit = 0; bit < 4; ++bit) {
+            inner_acc[base_id][bit] = _mm512_setzero_si512();
+        }
+    }
+
+    uint64_t offset = 0;
+    for (; offset + 64 <= num_bytes; offset += 64) {
+        __m512i base_values[4];
+        for (uint32_t base_id = 0; base_id < 4; ++base_id) {
+            base_values[base_id] =
+                _mm512_loadu_si512(reinterpret_cast<const __m512i*>(bases[base_id] + offset));
+            base_acc[base_id] =
+                _mm512_add_epi64(base_acc[base_id], _mm512_popcnt_epi64(base_values[base_id]));
+        }
+        for (uint32_t bit = 0; bit < 4; ++bit) {
+            const auto query = _mm512_loadu_si512(
+                reinterpret_cast<const __m512i*>(codes + bit * num_bytes + offset));
+            for (uint32_t base_id = 0; base_id < 4; ++base_id) {
+                inner_acc[base_id][bit] = _mm512_add_epi64(
+                    inner_acc[base_id][bit],
+                    _mm512_popcnt_epi64(_mm512_and_si512(query, base_values[base_id])));
+            }
+        }
+    }
+
+    uint32_t inner_products[4] = {0, 0, 0, 0};
+    uint32_t base_sums[4] = {0, 0, 0, 0};
+    for (uint32_t base_id = 0; base_id < 4; ++base_id) {
+        base_sums[base_id] = static_cast<uint32_t>(_mm512_reduce_add_epi64(base_acc[base_id]));
+        for (uint32_t bit = 0; bit < 4; ++bit) {
+            inner_products[base_id] +=
+                static_cast<uint32_t>(_mm512_reduce_add_epi64(inner_acc[base_id][bit])) << bit;
+        }
+    }
+    for (; offset < num_bytes; ++offset) {
+        for (uint32_t base_id = 0; base_id < 4; ++base_id) {
+            const auto base = bases[base_id][offset];
+            base_sums[base_id] += static_cast<uint32_t>(__builtin_popcount(base));
+            for (uint32_t bit = 0; bit < 4; ++bit) {
+                inner_products[base_id] += static_cast<uint32_t>(__builtin_popcount(
+                                               codes[bit * num_bytes + offset] & base))
+                                           << bit;
+            }
+        }
+    }
+    for (uint32_t i = 0; i < 4; ++i) {
+        results[i] =
+            static_cast<uint64_t>(inner_products[i]) | (static_cast<uint64_t>(base_sums[i]) << 32U);
+    }
+#else
+    avx2::RaBitQSQ4UBinaryIPWithBaseSumBatch4(codes, bits1, bits2, bits3, bits4, dim, results);
+#endif
+}
+
 uint32_t
 RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
     // require dim align with 512

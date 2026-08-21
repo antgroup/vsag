@@ -52,6 +52,11 @@ public:
     Deserialize(StreamReader& reader) = 0;
 
     virtual void
+    DeserializeBounded(StreamReader& reader, uint64_t /*max_size*/) {
+        this->Deserialize(reader);
+    }
+
+    virtual void
     DeserializeFromLegacyFormat(StreamReader& reader, size_t total_size) = 0;
 
     virtual void

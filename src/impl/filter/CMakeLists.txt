@@ -23,6 +23,7 @@ set (FILTER_SRC
         white_list_filter.h
         white_list_filter.cpp
         combined_filter.h
+        duplicate_group_filter.h
         iterator_filter.h
         iterator_filter.cpp
 )

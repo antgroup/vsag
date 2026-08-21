@@ -19,6 +19,7 @@
 #include <limits>
 
 #include "common.h"
+#include "datacell/rabitq_split_datacell.h"
 #include "datacell/sparse_graph_datacell.h"
 #include "hgraph.h"  // IWYU pragma: keep
 #include "impl/heap/standard_heap.h"
@@ -374,6 +375,11 @@ HGraph::Serialize(StreamWriter& writer) const {
         if (this->using_dedup_storage()) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                 "HGraph duplicate code slot mapping does not support v0.14 "
+                                "serialization");
+        }
+        if (this->rabitq_fused_datacell_ != nullptr) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "HGraph RaBitQ fused datacell does not support v0.14 "
                                 "serialization");
         }
         this->serialize_basic_info_v0_14(writer);
@@ -897,11 +903,15 @@ HGraph::read_streaming_body(StreamReader& reader,
     if (this->raw_vector_ != nullptr) {
         this->has_raw_vector_ = true;
     }
-    this->cal_memory_usage();
+    this->restore_fused_codec();
 
     if (use_elp_optimizer_) {
         elp_optimize();
     }
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        this->SetImmutable();
+    }
+    this->cal_memory_usage();
 }
 
 void
@@ -1069,12 +1079,43 @@ HGraph::Deserialize(StreamReader& reader) {
             (void)this->code_slot_map_->Resolve(inner_id);
         }
     }
-    this->cal_memory_usage();
+    this->restore_fused_codec();
 
     // post serialize procedure
     if (use_elp_optimizer_) {
         elp_optimize();
     }
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        this->SetImmutable();
+    }
+    this->cal_memory_usage();
+}
+
+void
+HGraph::restore_fused_codec() {
+    if (rabitq_fused_datacell_ == nullptr) {
+        return;
+    }
+    auto split_codes =
+        std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(basic_flatten_codes_);
+    CHECK_ARGUMENT(split_codes != nullptr, "fused HGraph lost its RaBitQ split codes");
+    CHECK_ARGUMENT(split_codes->UsesExternalFusedCodeStorage(),
+                   "fused HGraph split codes are not bound to the node slab");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        split_codes->OneBitCodeSize() == rabitq_fused_datacell_->OneBitCodeSize() and
+            split_codes->SupplementCodeSize() == rabitq_fused_datacell_->FusedSupplementCodeSize(),
+        "fused HGraph split-code sizes do not match the serialized node layout");
+    const auto base_count = basic_flatten_codes_->TotalCount();
+    const auto graph_count = rabitq_fused_datacell_->TotalCount();
+    CHECK_ARGUMENT(graph_count <= base_count,
+                   "fused HGraph node count exceeds its base-code count");
+    CHECK_ARGUMENT(rabitq_fused_datacell_->MaxCapacity() >= base_count,
+                   "fused HGraph node capacity is smaller than its base-code count");
+    if (rabitq_fused_datacell_->CodecModel().empty()) {
+        CHECK_ARGUMENT(base_count == 0, "non-empty fused HGraph is missing its codec model");
+        return;
+    }
+    split_codes->ImportFusedCodec(rabitq_fused_datacell_->CodecModel());
 }
 
 std::unordered_map<std::string, uint64_t>
