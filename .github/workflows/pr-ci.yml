@@ -16,7 +16,7 @@ permissions:
 jobs:
   changes:
     name: Detect Changes
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       cpp: ${{ steps.changes.outputs.cpp }}
       cmake: ${{ steps.changes.outputs.cmake }}
