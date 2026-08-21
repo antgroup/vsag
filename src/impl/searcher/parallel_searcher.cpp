@@ -123,7 +123,9 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
 
     // Concrete-typed pointers: hot-path heap ops bypass the virtual
     // DistanceHeap interface; the heaps stay coordinator-thread-local.
-    auto top_candidates_ptr = std::make_shared<StandardHeap<true, false>>(alloc, -1);
+    auto top_candidates_ptr =
+        std::make_shared<StandardHeap<true, false>>(alloc,
+                                                    std::max<int64_t>(inner_search_param.ef, 64));
     auto* top_candidates = top_candidates_ptr.get();
     auto candidate_set_ptr = std::make_shared<StandardHeap<true, false>>(alloc, -1);
     auto* candidate_set = candidate_set_ptr.get();
