@@ -65,7 +65,8 @@ if (result.has_value() && result->status == vsag::autotune::TuneStatus::SUCCESS)
 
 每个索引拥有不同的原生参数模式，因此 `IndexSpace::create_parameter_space` 和
 `search_parameter_space` 仍使用 JSON 字符串。`index_spaces` 为空时使用内置 HGraph 和
-IVF 候选；显式参数中的数组和 `$range` 与 CLI 契约语义相同。
+IVF 候选；显式参数中的 `$choices` 和 `$range` 与 CLI 契约语义相同，裸数组保持为索引
+原生参数值。
 
 返回值包括已加载的 `index`、`index_name`、完整具体 `create_parameters`、经过验证的
 `search_parameters`、metrics、artifact 路径和完整报告。`metrics` 和 `report` 都是
@@ -105,8 +106,8 @@ cmake --build build-release --target 326_feature_create_index_with_constraints -
       "name": "hgraph",
       "create_params": {
         "index_param": {
-          "base_quantization_type": ["fp32", "sq8_uniform"],
-          "max_degree": [16, 32],
+          "base_quantization_type": {"$choices": ["fp32", "sq8_uniform"]},
+          "max_degree": {"$choices": [16, 32]},
           "ef_construction": 200
         }
       },
@@ -144,12 +145,12 @@ cmake --build build-release --target 326_feature_create_index_with_constraints -
 ./build-release/tools/autotune/autotune request.json
 ```
 
-参数叶子可以是标量、数组，或带有 `start`、`stop`、`step` 的 `$range`。HGraph
-`ef_search` 还可以省略 `step`；AutoTune 会从 `start` 倍增，找到首个满足 `recall_at_k`
-约束的区间，再在该区间内二分查找最小通过值。该策略假设固定其他配置时 recall 不会随
-`ef_search` 增大而降低。每个实际评测点都使用全部 query。用户显式提供的值保持不变；
-对于缺失的调优字段，V1 会补充一小组 HGraph 或 IVF 内置候选。省略 `indexes` 时会同时
-评测这两种索引。
+离散候选使用 `{"$choices": [...]}`，连续候选使用包含 `start`、`stop`、`step` 的
+`$range`。其他 JSON 值（包括数组）会保持为索引原生参数值。HGraph `ef_search` 还可以省略
+`step`；AutoTune 会从 `start` 倍增，找到首个满足 `recall_at_k` 约束的区间，再在该区间内
+二分查找最小通过值。该策略假设固定其他配置时 recall 不会随 `ef_search` 增大而降低。每个
+实际评测点都使用全部 query。对于缺失的调优字段，V1 会补充一小组 HGraph 或 IVF 内置候选。
+省略 `indexes` 时会同时评测这两种索引。
 
 具体 create 参数相同的候选只构建一次；每组具体 search 参数仍然是独立 trial。自适应
 `ef_search` 范围只记录实际评测过的具体参数点。
@@ -166,7 +167,7 @@ cmake --build build-release --target 326_feature_create_index_with_constraints -
 vsag::autotune::SearchRequest request;
 request.index = existing_index;
 request.workload = {queries, ground_truth, 10, 48};
-request.parameter_space = R"({"hgraph":{"ef_search":[40,80,120]}})";
+request.parameter_space = R"({"hgraph":{"ef_search":{"$choices":[40,80,120]}}})";
 request.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 0.95}};
 request.objective = vsag::autotune::Metric::LATENCY_AVG_MS;
 

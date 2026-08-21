@@ -15,5 +15,6 @@ The command prints a compact summary. The complete report is written to
 
 This example expands six HGraph build configurations. For each build, AutoTune doubles
 `ef_search` from `40` until recall passes, then binary-searches that interval for the smallest
-passing value, capped at `1000`. Every evaluated point uses all queries. Add arrays or stepped
-`$range` expressions to other parameter leaves to change the tuning space.
+passing value, capped at `1000`. Every evaluated point uses all queries. Add `$choices` or stepped
+`$range` expressions to other parameter leaves to change the tuning space. Bare JSON arrays are
+passed through as native index parameter values.
