@@ -16,7 +16,6 @@
 #include "visited_list.h"
 
 #include <cstring>
-#include <limits>
 
 namespace vsag {
 VisitedList::VisitedList(InnerIdType max_size, Allocator* allocator)
@@ -26,28 +25,16 @@ VisitedList::VisitedList(InnerIdType max_size, Allocator* allocator)
         return;
     }
     const auto words_bytes = word_count_ * sizeof(WordType);
-    const auto tags_bytes = word_count_ * sizeof(TagType);
-    auto* buffer = static_cast<uint8_t*>(allocator_->Allocate(words_bytes + tags_bytes));
+    const auto touched_bytes = word_count_ * sizeof(TouchedIndexType);
+    auto* buffer = static_cast<uint8_t*>(allocator_->Allocate(words_bytes + touched_bytes));
     this->words_ = reinterpret_cast<WordType*>(buffer);
-    this->tags_ = reinterpret_cast<TagType*>(buffer + words_bytes);
-    memset(tags_, 0, tags_bytes);
+    this->touched_words_ = reinterpret_cast<TouchedIndexType*>(buffer + words_bytes);
+    memset(buffer, 0, words_bytes + touched_bytes);
 }
 
 VisitedList::~VisitedList() {
     if (words_ != nullptr) {
         allocator_->Deallocate(words_);
-    }
-}
-
-void
-VisitedList::Reset() {
-    if (tag_ == std::numeric_limits<TagType>::max()) {
-        if (word_count_ > 0) {
-            memset(tags_, 0, word_count_ * sizeof(TagType));
-        }
-        tag_ = 1;
-    } else {
-        ++tag_;
     }
 }
 }  // namespace vsag

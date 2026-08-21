@@ -104,14 +104,15 @@ TEST_CASE("VisitedList Basic Test", "[ut][VisitedList]") {
     SECTION("test memory usage") {
         const auto word_count = (static_cast<uint64_t>(size) + VisitedList::kBitsPerWord - 1) /
                                 VisitedList::kBitsPerWord;
-        const auto expected = sizeof(VisitedList) + word_count * (sizeof(VisitedList::WordType) +
-                                                                  sizeof(VisitedList::TagType));
+        const auto expected = sizeof(VisitedList) +
+                              word_count * (sizeof(VisitedList::WordType) +
+                                            sizeof(VisitedList::TouchedIndexType));
         REQUIRE(vl_ptr->GetMemoryUsage() == expected);
     }
 
-    SECTION("test tag overflow") {
+    SECTION("test repeated resets") {
         vl_ptr->Set(0);
-        for (uint64_t i = 0; i < std::numeric_limits<VisitedList::TagType>::max(); ++i) {
+        for (uint64_t i = 0; i < 100000; ++i) {
             vl_ptr->Reset();
         }
         REQUIRE_FALSE(vl_ptr->Get(0));
@@ -125,7 +126,7 @@ TEST_CASE("VisitedList Zero Size Test", "[ut][VisitedList]") {
     {
         VisitedList visited_list(0, &allocator);
         REQUIRE(visited_list.GetMemoryUsage() == sizeof(VisitedList));
-        for (uint64_t i = 0; i < std::numeric_limits<VisitedList::TagType>::max(); ++i) {
+        for (uint64_t i = 0; i < 100000; ++i) {
             visited_list.Reset();
         }
     }
