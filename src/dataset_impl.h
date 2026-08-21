@@ -416,7 +416,7 @@ private:
     std::unordered_map<std::string, var> data_;
     Allocator* allocator_ = nullptr;
 
-    std::string Statistics_{"{}"};
+    mutable std::string Statistics_{"{}"};
     std::string Reasoning_{"{}"};
 
     mutable std::mutex statistics_mutex_;
