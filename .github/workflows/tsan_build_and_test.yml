@@ -12,7 +12,7 @@ on:
 jobs:
   changes:
     name: Detect Changes
-    runs-on: ubuntu-latest
+    runs-on: [ linux, self-hosted ]
     outputs:
       non_markdown: ${{ steps.changes.outputs.non_markdown }}
     steps:
@@ -34,7 +34,7 @@ jobs:
     name: Build with TSAN
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.non_markdown == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: [ linux, self-hosted ]
     env:
       # TSan instruments VSAG, not third-party dependencies. The daily x86 ASan job
       # remains the dedicated guard for building bundled OpenBLAS from source.
@@ -75,7 +75,7 @@ jobs:
     name: Run TSAN Tests
     needs: [changes, build_tsan]
     if: github.event_name != 'pull_request' || needs.changes.outputs.non_markdown == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: [ linux, self-hosted, X64 ]
     concurrency:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
