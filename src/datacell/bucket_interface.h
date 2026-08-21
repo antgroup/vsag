@@ -107,6 +107,17 @@ public:
     virtual ComputerInterfacePtr
     FactoryComputer(const void* query) = 0;
 
+    // Optional query-computer specialization for callers that already know the complete set of
+    // buckets to visit. The default implementation preserves the generic per-query behavior.
+    virtual ComputerInterfacePtr
+    FactoryComputerForBuckets(const void* query,
+                              const BucketIdType* bucket_ids,
+                              uint64_t bucket_count) {
+        (void)bucket_ids;
+        (void)bucket_count;
+        return this->FactoryComputer(query);
+    }
+
     virtual void
     Train(const void* data, uint64_t count) = 0;
 
@@ -208,6 +219,10 @@ public:
     Deserialize(lvalue_or_rvalue<StreamReader> reader) {
         StreamReader::ReadObj(reader, this->bucket_count_);
         StreamReader::ReadObj(reader, this->code_size_);
+    }
+
+    virtual void
+    FinalizeLoad() {
     }
 
     virtual void

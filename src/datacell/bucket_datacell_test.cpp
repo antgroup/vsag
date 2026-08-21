@@ -16,6 +16,7 @@
 #include "bucket_datacell.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <exception>
@@ -57,10 +58,19 @@ public:
 
     void
     GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) override {
+        centroid_requests_.fetch_add(1, std::memory_order_relaxed);
         for (uint64_t i = 0; i < centroid.size(); ++i) {
             centroid[i] = static_cast<float>((bucket_id + 1) * (i + 1)) * 0.01F;
         }
     }
+
+    [[nodiscard]] uint64_t
+    GetCentroidRequestCount() const {
+        return centroid_requests_.load(std::memory_order_relaxed);
+    }
+
+private:
+    std::atomic<uint64_t> centroid_requests_{0};
 };
 
 class TrackingReader : public Reader {
@@ -1310,6 +1320,91 @@ TEST_CASE("RaBitQ split bucket supports optimized build",
     REQUIRE(optimized->BeginOptimizedBuild(context, count));
     optimized->AbortOptimizedBuild();
     REQUIRE_FALSE(optimized->IsOptimizedBuildActive());
+}
+
+TEST_CASE("RaBitQ split bucket prepares only routed residual computers",
+          "[ut][BucketDataCell][rabitq_split][residual][routed_query]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr InnerIdType count = 96;
+    constexpr BucketIdType bucket_count = 4;
+    auto vectors = fixtures::generate_vectors(count, dim);
+    auto query = fixtures::generate_vectors(1, dim, false, 71);
+    constexpr const char* param_str = R"({
+        "io_params": { "type": "memory_io" },
+        "quantization_params": {
+            "type": "rabitq",
+            "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 1,
+            "fast_encode_rabitq": true
+        },
+        "buckets_count": 4,
+        "use_residual": true
+    })";
+
+    auto param = std::make_shared<BucketDataCellParameter>();
+    param->FromJson(JsonType::Parse(param_str));
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    auto strategy = std::make_shared<FixedCentroidPartitionStrategy>(common_param, bucket_count);
+    bucket->SetStrategy(strategy);
+    bucket->Train(vectors.data(), count);
+    for (InnerIdType id = 0; id < count; ++id) {
+        const auto bucket_id = static_cast<BucketIdType>(id % bucket_count);
+        bucket->InsertVector(vectors.data() + static_cast<uint64_t>(id) * dim, bucket_id, id);
+    }
+    bucket->Package();
+
+    const uint64_t centroid_requests_before_finalize = strategy->GetCentroidRequestCount();
+    bucket->FinalizeLoad();
+    REQUIRE(strategy->GetCentroidRequestCount() ==
+            centroid_requests_before_finalize + bucket_count);
+
+    std::array<BucketIdType, 3> routed_buckets{3, 1, 3};
+    auto lazy_computer = bucket->FactoryComputer(query.data());
+    auto routed_computer = bucket->FactoryComputerForBuckets(
+        query.data(), routed_buckets.data(), routed_buckets.size());
+    for (const auto bucket_id : std::array<BucketIdType, 2>{1, 3}) {
+        const auto bucket_size = bucket->GetBucketSize(bucket_id);
+        std::vector<float> expected(bucket_size);
+        std::vector<float> actual(bucket_size);
+        bucket->ScanBucketById(expected.data(), lazy_computer, bucket_id);
+        bucket->ScanBucketById(actual.data(), routed_computer, bucket_id);
+        REQUIRE(actual == expected);
+    }
+
+    std::array<InnerIdType, 8> inner_ids{3, 1, 7, 5, 11, 9, 15, 13};
+    std::array<float, 8> expected{};
+    for (uint64_t i = 0; i < inner_ids.size(); ++i) {
+        const auto inner_id = inner_ids[i];
+        expected[i] =
+            bucket->QueryOneById(routed_computer, inner_id % bucket_count, inner_id / bucket_count);
+    }
+    std::array<float, 8> actual{};
+    bucket->QueryWithDistanceHintByInnerId(
+        actual.data(), nullptr, routed_computer, inner_ids.data(), inner_ids.size());
+    REQUIRE(actual == expected);
+    bucket->QueryWithFilterInnerProductByInnerId(
+        actual.data(), nullptr, routed_computer, inner_ids.data(), inner_ids.size());
+    REQUIRE(actual == expected);
+
+    const std::array<float, 8> hints{0.25F, 1.5F, 2.75F, 4.0F, 5.25F, 6.5F, 7.75F, 9.0F};
+    for (uint64_t i = 0; i < inner_ids.size(); ++i) {
+        bucket->QueryWithDistanceHintByInnerId(
+            expected.data() + i, hints.data() + i, routed_computer, inner_ids.data() + i, 1);
+    }
+    bucket->QueryWithDistanceHintByInnerId(
+        actual.data(), hints.data(), routed_computer, inner_ids.data(), inner_ids.size());
+    REQUIRE(actual == expected);
+    REQUIRE(strategy->GetCentroidRequestCount() ==
+            centroid_requests_before_finalize + bucket_count);
+
+    REQUIRE_THROWS(bucket->ScanBucketById(nullptr, routed_computer, 0));
 }
 
 TEST_CASE("RaBitQ split bucket rejects optimized build without fast encoding",
