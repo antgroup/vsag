@@ -17,7 +17,6 @@
 
 #include "io/common/basic_io.h"
 #include "io/memory_block_io/memory_block_io_parameter.h"
-#include "utils/prefetch.h"
 
 namespace vsag {
 class IndexCommonParam;
@@ -112,20 +111,7 @@ public:
      * @return A pointer to the read data.
      */
     [[nodiscard]] const uint8_t*
-    DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
-        if (check_valid_offset(size + offset)) {
-            if (check_in_one_block(offset, size + offset)) {
-                need_release = false;
-                return this->get_data_ptr(offset);
-            }
-            need_release = true;
-            auto* ptr =
-                static_cast<uint8_t*>(this->allocator_->Allocate(size));
-            this->ReadImpl(size, offset, ptr);
-            return ptr;
-        }
-        return nullptr;
-    }
+    DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const;
 
     /**
      * @brief Releases data previously read via DirectReadImpl.
@@ -157,11 +143,7 @@ public:
      * @param cache_line The size of the cache line to prefetch.
      */
     void
-    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64) {
-        // Inlined here so the per-neighbor search hot path avoids an
-        // out-of-line call through the CRTP wrapper.
-        PrefetchLines(this->get_data_ptr(offset), cache_line);
-    }
+    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64);
 
     void
     ShrinkImpl(uint64_t size);

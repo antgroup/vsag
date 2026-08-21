@@ -113,13 +113,7 @@ public:
      * @return True if the read operation was successful, false otherwise.
      */
     bool
-    ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
-        if (check_valid_offset(size + offset)) {
-            memcpy(data, buffer_ + offset, size);
-            return true;
-        }
-        return false;
-    }
+    ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const;
 
     /**
      * @brief Reads data directly from the memory buffer without copying.
@@ -130,13 +124,7 @@ public:
      * @return A pointer to the read data (direct pointer to internal buffer).
      */
     [[nodiscard]] const uint8_t*
-    DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
-        need_release = false;
-        if (check_valid_offset(size + offset)) {
-            return buffer_ + offset;
-        }
-        return nullptr;
-    }
+    DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const;
 
     /**
      * @brief Reads multiple blocks of data into a contiguous buffer.
@@ -151,14 +139,7 @@ public:
      * @return True if the read operation was successful, false otherwise.
      */
     bool
-    MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const {
-        bool ret = true;
-        for (uint64_t i = 0; i < count; ++i) {
-            ret &= this->ReadImpl(sizes[i], offsets[i], datas);
-            datas += sizes[i];
-        }
-        return ret;
-    }
+    MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const;
 
     /**
      * @brief Prefetches data from the memory buffer at a specified offset.
@@ -167,11 +148,7 @@ public:
      * @param cache_line The size of the cache line to prefetch.
      */
     void
-    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64) {
-        // Inlined here so the per-neighbor search hot path avoids an
-        // out-of-line call through the CRTP wrapper.
-        PrefetchLines(this->buffer_ + offset, cache_line);
-    }
+    PrefetchImpl(uint64_t offset, uint64_t cache_line = 64);
 
     // Exposes the owned contiguous buffer for internal read-only fast paths.
     // The returned pointer is invalidated by resize/reallocation or destruction.
