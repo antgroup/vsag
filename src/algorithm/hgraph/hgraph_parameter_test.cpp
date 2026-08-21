@@ -688,13 +688,17 @@ TEST_CASE("HGraph search parameter cache preserves validation semantics",
     REQUIRE_THROWS(vsag::ParseSearchThreshold(R"({"threshold":"invalid"})"));
 
     auto first_again = vsag::ParseSearchThreshold(first);
+    auto first_params_again = vsag::HGraphSearchParameters::FromJson(first);
     REQUIRE(first_again.has_value());
     REQUIRE(first_again.value() == 0.25F);
+    REQUIRE(first_params_again.ef_search == 32);
 
     const std::string first_copy = first;
     REQUIRE(vsag::GetCachedSearchParameters(first) == vsag::GetCachedSearchParameters(first_copy));
     REQUIRE_FALSE(vsag::ParseSearchThreshold("").has_value());
     REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(""));
+    auto first_after_invalid = vsag::HGraphSearchParameters::FromJson(first);
+    REQUIRE(first_after_invalid.ef_search == 32);
 
     const std::string oversized =
         std::string(R"({"hgraph":{"ef_search":32},"padding":")") + std::string(4070, 'x') + "\"}";
