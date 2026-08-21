@@ -49,8 +49,7 @@ HGraphOptimizedBuildSession::HGraphOptimizedBuildSession(HGraph& hgraph) : hgrap
     if (hgraph.using_dedup_storage()) {
         return;
     }
-    const bool build_uses_base_codes =
-        hgraph.has_precise_reorder() ? hgraph.build_by_base_ : hgraph.raw_vector_ == nullptr;
+    const bool build_uses_base_codes = not hgraph.has_precise_reorder() or hgraph.build_by_base_;
     if (not build_uses_base_codes) {
         return;
     }
