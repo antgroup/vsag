@@ -34,6 +34,17 @@ namespace vsag {
                                   uint64_t n_codes,              \
                                   uint64_t code_stride,          \
                                   float* RESTRICT out);          \
+    void                                                         \
+    SQ8UniformComputeCodesIPBatch4(const uint8_t* RESTRICT query, \
+                                   const uint8_t* RESTRICT code1, \
+                                   const uint8_t* RESTRICT code2, \
+                                   const uint8_t* RESTRICT code3, \
+                                   const uint8_t* RESTRICT code4, \
+                                   uint64_t dim,                  \
+                                   float& result1,                \
+                                   float& result2,                \
+                                   float& result3,                \
+                                   float& result4);               \
     }  // namespace ns
 DECLARE_SQ8_UNIFORM_FUNCTIONS(generic)
 DECLARE_SQ8_UNIFORM_FUNCTIONS(sse)

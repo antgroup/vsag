@@ -336,6 +336,24 @@ SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query,
 #endif
 }
 
+void
+SQ8UniformComputeCodesIPBatch4(const uint8_t* RESTRICT query,
+                               const uint8_t* RESTRICT code1,
+                               const uint8_t* RESTRICT code2,
+                               const uint8_t* RESTRICT code3,
+                               const uint8_t* RESTRICT code4,
+                               uint64_t dim,
+                               float& result1,
+                               float& result2,
+                               float& result3,
+                               float& result4) {
+    // AMX tile setup does not amortize for four codes; use the AVX-512 path.
+    result1 = avx512::SQ8UniformComputeCodesIP(query, code1, dim);
+    result2 = avx512::SQ8UniformComputeCodesIP(query, code2, dim);
+    result3 = avx512::SQ8UniformComputeCodesIP(query, code3, dim);
+    result4 = avx512::SQ8UniformComputeCodesIP(query, code4, dim);
+}
+
 // =============================================================================
 // AMX BF16 GEMM (Intel Sapphire Rapids / Granite Rapids AMX_BF16)
 // =============================================================================
