@@ -15,6 +15,8 @@
 
 #include "conjugate_graph.h"
 
+#include <limits>
+
 #include "vsag_exception.h"
 
 namespace vsag {
@@ -30,28 +32,29 @@ ConjugateGraph::AddNeighbor(int64_t from_tag_id, int64_t to_tag_id) {
         return false;
     }
 
-    std::shared_ptr<UnorderedSet<int64_t>> neighbor_set;
     auto search_key = conjugate_graph_.find(from_tag_id);
-    if (search_key == conjugate_graph_.end()) {
-        neighbor_set = std::make_shared<UnorderedSet<int64_t>>(allocator_);
+    const bool new_source = search_key == conjugate_graph_.end();
+    if (not new_source and (search_key->second->size() >= MAXIMUM_DEGREE or
+                            search_key->second->count(to_tag_id) > 0)) {
+        return false;
+    }
+
+    uint64_t added_bytes = sizeof(to_tag_id);
+    if (new_source) {
+        added_bytes += sizeof(from_tag_id) + sizeof(uint64_t);
+    }
+    if (added_bytes > std::numeric_limits<uint32_t>::max() - memory_usage_) {
+        return tl::unexpected(
+            Error(ErrorType::INVALID_ARGUMENT, "conjugate graph serialization size overflow"));
+    }
+
+    if (new_source) {
+        auto neighbor_set = std::make_shared<UnorderedSet<int64_t>>(allocator_);
         conjugate_graph_.emplace(from_tag_id, neighbor_set);
-    } else {
-        neighbor_set = search_key->second;
+        search_key = conjugate_graph_.find(from_tag_id);
     }
-
-    if (neighbor_set->size() >= MAXIMUM_DEGREE) {
-        return false;
-    }
-    auto insert_result = neighbor_set->insert(to_tag_id);
-    if (!insert_result.second) {
-        return false;
-    }
-
-    if (neighbor_set->size() == 1) {
-        memory_usage_ += sizeof(from_tag_id);
-        memory_usage_ += sizeof(neighbor_set->size());
-    }
-    memory_usage_ += sizeof(to_tag_id);
+    search_key->second->insert(to_tag_id);
+    memory_usage_ += static_cast<uint32_t>(added_bytes);
     return true;
 }
 
@@ -170,6 +173,23 @@ ConjugateGraph::Serialize(std::ostream& out_stream) const {
     footer_.Serialize(out_stream);
 
     return {};
+}
+
+void
+ConjugateGraph::Serialize(StreamWriter& out_stream) const {
+    StreamWriter::WriteObj(out_stream, memory_usage_);
+    for (const auto& [tag_id, neighbor_ptr] : conjugate_graph_) {
+        StreamWriter::WriteObj(out_stream, tag_id);
+        uint64_t neighbor_set_size = neighbor_ptr->size();
+        StreamWriter::WriteObj(out_stream, neighbor_set_size);
+        for (const auto neighbor_tag_id : *neighbor_ptr) {
+            StreamWriter::WriteObj(out_stream, neighbor_tag_id);
+        }
+    }
+    std::stringstream footer_stream(std::ios::in | std::ios::out | std::ios::binary);
+    footer_.Serialize(footer_stream);
+    const auto footer_data = footer_stream.str();
+    out_stream.Write(footer_data.data(), footer_data.size());
 }
 
 tl::expected<void, Error>

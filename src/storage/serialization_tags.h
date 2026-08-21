@@ -41,6 +41,7 @@ enum class StreamSerializationTag : uint32_t {
     CODE_SLOT_MAP = 15,
     IVF_BUCKET_GRAPH = 16,
     IVF_PRECISE_BUCKET = 17,
+    CONJUGATE_GRAPH = 18,
 };
 
 inline const char*
@@ -82,6 +83,8 @@ StreamSerializationTagName(uint32_t tag) {
             return "ivf_bucket_graph";
         case StreamSerializationTag::IVF_PRECISE_BUCKET:
             return "ivf_precise_bucket";
+        case StreamSerializationTag::CONJUGATE_GRAPH:
+            return "conjugate_graph";
     }
     return "unknown";
 }
@@ -109,6 +112,7 @@ StreamSerializationTagCritical(uint32_t tag) {
         case StreamSerializationTag::EXTRA_INFO:
         case StreamSerializationTag::RAW_VECTOR:
         case StreamSerializationTag::IVF_BUCKET_GRAPH:
+        case StreamSerializationTag::CONJUGATE_GRAPH:
             return false;
     }
     return false;
@@ -138,6 +142,7 @@ StreamSerializationBlockCurrentVersion(uint32_t tag) {
         case StreamSerializationTag::IVF_PRECISE_BUCKET:
             return kStreamSerializationBlockVersionV1;
         case StreamSerializationTag::IVF_BUCKET_GRAPH:
+        case StreamSerializationTag::CONJUGATE_GRAPH:
             return kStreamSerializationBlockVersionV1;
     }
     return kStreamSerializationBlockVersionV1;

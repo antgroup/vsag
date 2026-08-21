@@ -49,6 +49,7 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 | `label_remap_type` | `pg` | label map 实现：默认 `pg`，或 `robin` |
 | `reorder_source` | `precise` | 从 `precise` 存储或直接从 `base` 重排；RaBitQ x+y split（包括 `tq_chain="mrle, rabitq"`）会自动选择 `base` |
 | `persist_source_id` | `false` | 序列化 HGraph 时保留 Source ID 元数据；适用于恢复索引后继续导出构建缓存 |
+| `use_conjugate_graph` | `false` | 启用 HGraph 反馈/预训练并持久化辅助共轭图 |
 | `mrle_dim` | `0` | MRLE 输出维度，范围 `[0, dim]`；`0` 表示输入维度 |
 | `fast_encode_rabitq` | `true` | 使用多 bit RaBitQ 快速编码；设为 `false` 恢复精确编码器 |
 | `fast_encode_rabitq_rounds` | `6` | 快速编码器微调轮数，范围 `[1, 32]` |
@@ -61,6 +62,8 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 
 `ef_search` 接受任意正的有符号 64 位整数，不再存在与 `topk` 相关的上限。非常大的取值会
 明显增加延迟和搜索前沿占用的内存。
+`use_conjugate_graph_search` 为布尔值（默认 `true`）；当构建时设置
+`use_conjugate_graph: true` 后，它控制是否使用已学习的共轭边。
 
 `hgraph` 搜索参数还接受 `brute_force_threshold`（`[0.0, 1.0]` 区间的 float，
 默认 `0.0`）。当取值 `> 0` 且当前请求的 filter 的 `ValidRatio()` 不超过该

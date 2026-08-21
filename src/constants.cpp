@@ -71,6 +71,8 @@ const char* const PARAMETER_REPR = "repr";
 const char* const REPR_DENSE = "dense";
 const char* const REPR_SPARSE = "sparse";
 const char* const REPR_MULTI_VECTOR = "multi_vector";
+const char* const PARAMETER_USE_CONJUGATE_GRAPH = "use_conjugate_graph";
+const char* const PARAMETER_USE_CONJUGATE_GRAPH_SEARCH = "use_conjugate_graph_search";
 const char* const PARAMETER_USE_OLD_SERIAL_FORMAT = "use_old_serial_format";
 
 const char* const ODESCENT_PARAMETER_ALPHA = "alpha";

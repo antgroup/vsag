@@ -371,6 +371,10 @@ HGraph::Serialize(StreamWriter& writer) const {
 
     // FIXME(wxyu): this option is used for special purposes, like compatibility testing
     if (this->use_old_serial_format_) {
+        if (this->use_conjugate_graph_) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "HGraph conjugate graph does not support v0.14 serialization");
+        }
         if (this->using_dedup_storage()) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                 "HGraph duplicate code slot mapping does not support v0.14 "
@@ -418,6 +422,10 @@ HGraph::Serialize(StreamWriter& writer) const {
     if (this->mci_parameters_.enabled and this->mci_cliques_ != nullptr) {
         this->mci_cliques_->Serialize(writer);
     }
+    if (this->use_conjugate_graph_) {
+        std::shared_lock graph_lock(this->conjugate_graph_mutex_);
+        this->conjugate_graph_->Serialize(writer);
+    }
 
     // serialize footer (introduced since v0.15)
     auto jsonify_basic_info = this->serialize_basic_info();
@@ -426,6 +434,7 @@ HGraph::Serialize(StreamWriter& writer) const {
     if (this->support_duplicate_) {
         metadata->Set("duplicate_format_version", 1);
     }
+    metadata->Set("has_conjugate_graph", this->use_conjugate_graph_);
     logger::debug(jsonify_basic_info.Dump());
 
     auto footer = std::make_shared<Footer>(metadata);
@@ -483,6 +492,10 @@ HGraph::collect_streaming_header() const {
     }
     if (create_new_raw_vector_) {
         auto tag = static_cast<uint32_t>(StreamSerializationTag::RAW_VECTOR);
+        append_manifest(tag, StreamSerializationTagCritical(tag));
+    }
+    if (this->use_conjugate_graph_) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::CONJUGATE_GRAPH);
         append_manifest(tag, StreamSerializationTagCritical(tag));
     }
     metadata->Set("block_manifest", manifest);
@@ -556,6 +569,14 @@ HGraph::serialize_streaming_body(StreamWriter& writer) const {
         WriteStreamingBlock(
             writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& block_writer) {
                 this->raw_vector_->Serialize(block_writer);
+            });
+    }
+    if (this->use_conjugate_graph_) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::CONJUGATE_GRAPH);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& block_writer) {
+                std::shared_lock graph_lock(this->conjugate_graph_mutex_);
+                this->conjugate_graph_->Serialize(block_writer);
             });
     }
 }
@@ -655,6 +676,7 @@ HGraph::read_streaming_body(StreamReader& reader,
     bool loaded_extra_info = false;
     bool loaded_attribute_filter = false;
     bool loaded_raw_vector = false;
+    bool loaded_conjugate_graph = false;
 
     while (true) {
         auto block_header = StreamBlockHeader::Read(reader);
@@ -780,6 +802,21 @@ HGraph::read_streaming_body(StreamReader& reader,
                     loaded_raw_vector = true;
                 }
                 break;
+            case StreamSerializationTag::CONJUGATE_GRAPH:
+                if (not this->use_conjugate_graph_) {
+                    throw VsagException(
+                        ErrorType::INVALID_ARGUMENT,
+                        "serialized HGraph uses conjugate graph but the target does not");
+                }
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    std::unique_lock graph_lock(this->conjugate_graph_mutex_);
+                    auto result = this->conjugate_graph_->Deserialize(block);
+                    if (not result) {
+                        throw VsagException(result.error().type, result.error().message);
+                    }
+                });
+                loaded_conjugate_graph = true;
+                break;
             default:
                 if (block_header.IsCritical()) {
                     throw VsagException(
@@ -821,6 +858,10 @@ HGraph::read_streaming_body(StreamReader& reader,
     if (create_new_raw_vector_ && !loaded_raw_vector) {
         throw VsagException(ErrorType::READ_ERROR,
                             "HGraph streaming serialization raw vector block is missing");
+    }
+    if (this->use_conjugate_graph_ && !loaded_conjugate_graph) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "HGraph streaming serialization conjugate graph block is missing");
     }
 
     auto new_size = max_capacity_.load();
@@ -1039,6 +1080,16 @@ HGraph::Deserialize(StreamReader& reader) {
             }
             this->mci_cliques_->Deserialize(buffer_reader);
         }
+        if (metadata->Get("has_conjugate_graph").IsBool() &&
+            metadata->Get("has_conjugate_graph").GetBool()) {
+            CHECK_ARGUMENT(this->use_conjugate_graph_,
+                           "serialized HGraph uses conjugate graph but the target does not");
+            std::unique_lock graph_lock(this->conjugate_graph_mutex_);
+            auto result = this->conjugate_graph_->Deserialize(buffer_reader);
+            if (not result) {
+                throw VsagException(result.error().type, result.error().message);
+            }
+        }
         if (this->raw_vector_ != nullptr) {
             this->has_raw_vector_ = true;
         }
@@ -1104,6 +1155,10 @@ HGraph::GetMemoryUsageDetail() const {
     }
     if (this->mci_cliques_ != nullptr) {
         memory_usage["mci_cliques"] = this->mci_cliques_->GetMemoryUsage();
+    }
+    if (this->conjugate_graph_ != nullptr) {
+        std::shared_lock graph_lock(this->conjugate_graph_mutex_);
+        memory_usage["conjugate_graph"] = this->conjugate_graph_->GetMemoryUsage();
     }
     return memory_usage;
 }
