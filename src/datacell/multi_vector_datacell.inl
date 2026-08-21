@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 
 #include "common.h"
 #include "multi_vector_datacell.h"
@@ -24,6 +25,19 @@
 #include "vsag/options.h"
 
 namespace vsag {
+
+inline uint64_t
+GetMultiVectorCodeSize(uint32_t token_count, uint32_t dimension) {
+    constexpr uint64_t header_size = sizeof(uint32_t);
+    constexpr uint64_t value_size = sizeof(float);
+    const uint64_t values_per_token = static_cast<uint64_t>(dimension) * value_size;
+    if (values_per_token != 0 &&
+        token_count > (std::numeric_limits<uint64_t>::max() - header_size) / values_per_token) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "MultiVectorDataCell: record size overflow");
+    }
+    return header_size + static_cast<uint64_t>(token_count) * values_per_token;
+}
 
 template <typename QuantTmpl, typename IOTmpl>
 MultiVectorDataCell<QuantTmpl, IOTmpl>::MultiVectorDataCell(
@@ -36,9 +50,12 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::MultiVectorDataCell(
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
     this->backend_ =
         QuantizerDistanceBackend<QuantTmpl>::Get(static_cast<const QuantTmpl&>(*this->quantizer_));
-    this->io_ = std::make_shared<IOTmpl>(io_param, common_param);
-    this->offset_io_ =
+    auto io = std::make_shared<IOTmpl>(io_param, common_param);
+    auto offset_io =
         std::make_shared<MemoryBlockIO>(Options::Instance().block_size_limit(), allocator_);
+    layout_.SetIO(std::move(offset_io), std::move(io));
+    layout_.SetLocationPolicy(
+        HeaderLengthLocationPolicy{static_cast<uint64_t>(multi_vector_dim_) * sizeof(float)});
     this->max_capacity_ = 0;
     this->code_size_ = 0;
 }
@@ -68,23 +85,16 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerId
         }
     }
 
-    const uint64_t vector_bytes = static_cast<uint64_t>(multi_vector->len_) *
-                                  static_cast<uint64_t>(multi_vector_dim_) * sizeof(float);
-    const uint64_t code_size = sizeof(uint32_t) + vector_bytes;
+    const uint64_t code_size = GetMultiVectorCodeSize(multi_vector->len_, multi_vector_dim_);
+    const uint64_t vector_bytes = code_size - sizeof(uint32_t);
     ByteBuffer codes(code_size, allocator_);
     std::memcpy(codes.data, &multi_vector->len_, sizeof(uint32_t));
     std::memcpy(codes.data + sizeof(uint32_t), multi_vector->vectors_, vector_bytes);
 
-    uint64_t old_offset = 0;
     {
-        std::lock_guard lock(current_offset_mutex_);
-        old_offset = current_offset_;
-        current_offset_ += code_size;
+        std::lock_guard lock(mutex_);
+        layout_.Write(idx, codes.data, code_size);
     }
-    offset_io_->Write(reinterpret_cast<const uint8_t*>(&old_offset),
-                      sizeof(old_offset),
-                      static_cast<uint64_t>(idx) * sizeof(old_offset));
-    io_->Write(codes.data, code_size, old_offset);
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -116,7 +126,7 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Resize(InnerIdType new_capacity) {
     if (new_capacity <= this->max_capacity_) {
         return;
     }
-    this->offset_io_->Resize(static_cast<uint64_t>(new_capacity) * sizeof(uint64_t));
+    layout_.ResizeLocations(new_capacity);
     this->max_capacity_ = new_capacity;
 }
 
@@ -135,14 +145,24 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::GetMetricType() {
 template <typename QuantTmpl, typename IOTmpl>
 const uint8_t*
 MultiVectorDataCell<QuantTmpl, IOTmpl>::GetCodesById(InnerIdType id, bool& need_release) const {
-    uint64_t offset = 0;
-    offset_io_->Read(sizeof(offset), static_cast<uint64_t>(id) * sizeof(offset), (uint8_t*)&offset);
+    const uint64_t offset = layout_.ReadLocation(id);
     uint32_t len = 0;
-    io_->Read(sizeof(len), offset, (uint8_t*)&len);
-    uint64_t read_size =
-        sizeof(uint32_t) + static_cast<uint64_t>(len) * multi_vector_dim_ * sizeof(float);
+    if (not layout_.Payload().Read(offset, sizeof(len), reinterpret_cast<uint8_t*>(&len))) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "MultiVectorDataCell: failed to read token count");
+    }
+    const uint64_t read_size = GetMultiVectorCodeSize(len, multi_vector_dim_);
+    const uint64_t payload_size = layout_.Payload().GetByteSize();
+    if (offset > payload_size || read_size > payload_size - offset) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "MultiVectorDataCell: token data range exceeds payload");
+    }
     auto* codes = static_cast<uint8_t*>(allocator_->Allocate(read_size));
-    io_->Read(read_size, offset, codes);
+    if (not layout_.Payload().Read(offset, read_size, codes)) {
+        allocator_->Deallocate(codes);
+        throw VsagException(ErrorType::READ_ERROR,
+                            "MultiVectorDataCell: failed to read token data");
+    }
     need_release = true;
     return codes;
 }
@@ -164,9 +184,9 @@ void
 MultiVectorDataCell<QuantTmpl, IOTmpl>::Serialize(StreamWriter& writer) {
     FlattenInterface::Serialize(writer);
     StreamWriter::WriteObj(writer, multi_vector_dim_);
-    StreamWriter::WriteObj(writer, current_offset_);
-    this->offset_io_->Serialize(writer);
-    this->io_->Serialize(writer);
+    StreamWriter::WriteObj(writer, layout_.GetNextOffset());
+    layout_.Locations().Serialize(writer);
+    layout_.Payload().Serialize(writer);
     this->quantizer_->Serialize(writer);
 }
 
@@ -175,9 +195,11 @@ void
 MultiVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
     FlattenInterface::Deserialize(reader);
     StreamReader::ReadObj(reader, multi_vector_dim_);
-    StreamReader::ReadObj(reader, current_offset_);
-    this->offset_io_->Deserialize(reader);
-    this->io_->Deserialize(reader);
+    uint64_t current_offset = 0;
+    StreamReader::ReadObj(reader, current_offset);
+    layout_.SetNextOffset(current_offset);
+    layout_.Locations().Deserialize(reader);
+    layout_.Payload().Deserialize(reader);
     this->quantizer_->Deserialize(reader);
     this->backend_ =
         QuantizerDistanceBackend<QuantTmpl>::Get(static_cast<const QuantTmpl&>(*this->quantizer_));
@@ -213,19 +235,16 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Query(float* result_dists,
     // Step 1: Read all offsets (offset_io_ is MemoryBlockIO, in-memory, fast)
     std::vector<uint64_t> offsets(id_count);
     for (InnerIdType i = 0; i < id_count; ++i) {
-        bool ok = offset_io_->Read(sizeof(uint64_t),
-                                   static_cast<uint64_t>(idx[i]) * sizeof(uint64_t),
-                                   reinterpret_cast<uint8_t*>(&offsets[i]));
-        CHECK_ARGUMENT(ok, "MultiVectorDataCell: failed to read offset");
+        offsets[i] = layout_.ReadLocation(idx[i]);
     }
 
     // Step 2: Batch read all token counts via MultiRead (async IO)
     std::vector<uint32_t> lens(id_count);
     std::vector<uint64_t> len_sizes(id_count, sizeof(uint32_t));
-    if (!this->io_->MultiRead(reinterpret_cast<uint8_t*>(lens.data()),
-                              len_sizes.data(),
-                              offsets.data(),
-                              static_cast<uint64_t>(id_count))) {
+    if (!layout_.Payload().MultiRead(offsets.data(),
+                                     len_sizes.data(),
+                                     static_cast<uint64_t>(id_count),
+                                     reinterpret_cast<uint8_t*>(lens.data()))) {
         throw VsagException(ErrorType::READ_ERROR,
                             "MultiVectorDataCell: failed to read token counts");
     }
@@ -234,13 +253,21 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Query(float* result_dists,
     std::vector<uint64_t> data_sizes(id_count);
     uint64_t total_size = 0;
     for (InnerIdType i = 0; i < id_count; ++i) {
-        data_sizes[i] =
-            sizeof(uint32_t) + static_cast<uint64_t>(lens[i]) * multi_vector_dim_ * sizeof(float);
+        data_sizes[i] = GetMultiVectorCodeSize(lens[i], multi_vector_dim_);
+        const uint64_t payload_size = layout_.Payload().GetByteSize();
+        if (offsets[i] > payload_size || data_sizes[i] > payload_size - offsets[i]) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "MultiVectorDataCell: token data range exceeds payload");
+        }
+        if (data_sizes[i] > std::numeric_limits<uint64_t>::max() - total_size) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "MultiVectorDataCell: batch record size overflow");
+        }
         total_size += data_sizes[i];
     }
     ByteBuffer all_codes(total_size, this->allocator_);
-    if (!this->io_->MultiRead(
-            all_codes.data, data_sizes.data(), offsets.data(), static_cast<uint64_t>(id_count))) {
+    if (!layout_.Payload().MultiRead(
+            offsets.data(), data_sizes.data(), static_cast<uint64_t>(id_count), all_codes.data)) {
         throw VsagException(ErrorType::READ_ERROR,
                             "MultiVectorDataCell: failed to read token data");
     }
@@ -261,10 +288,7 @@ template <typename QuantTmpl, typename IOTmpl>
 uint64_t
 MultiVectorDataCell<QuantTmpl, IOTmpl>::GetMemoryUsage() const {
     uint64_t memory = sizeof(MultiVectorDataCell<QuantTmpl, IOTmpl>);
-    memory += this->offset_io_->size_;
-    if (IOTmpl::InMemory) {
-        memory += this->io_->GetMemoryUsage();
-    }
+    memory += layout_.GetMemoryUsage();
     memory += sizeof(QuantTmpl);
     return memory;
 }
