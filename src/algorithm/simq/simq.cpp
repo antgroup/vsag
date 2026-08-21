@@ -59,6 +59,7 @@ dump_simq_statistics(const SearchStatistics& stats,
                      uint64_t coarse_candidate_count,
                      uint64_t rerank_candidate_count,
                      uint64_t filtered_candidate_count,
+                     uint64_t rerank_batch_count,
                      uint64_t result_count,
                      bool limited_size_applied) {
     auto json = JsonType::Parse(stats.Dump());
@@ -67,6 +68,7 @@ dump_simq_statistics(const SearchStatistics& stats,
     json["simq_coarse_candidate_count"].SetUint64(coarse_candidate_count);
     json["simq_rerank_candidate_count"].SetUint64(rerank_candidate_count);
     json["simq_filtered_candidate_count"].SetUint64(filtered_candidate_count);
+    json["simq_rerank_batch_count"].SetUint64(rerank_batch_count);
     json["simq_result_count"].SetUint64(result_count);
     json["simq_limited_size_applied"].SetBool(limited_size_applied);
     return json.Dump();
@@ -730,7 +732,7 @@ SIMQ::KnnSearch(const DatasetPtr& query,
 
     if (total_count_ == 0 || rep_hgraph_ == nullptr) {
         auto result = Dataset::Make();
-        result->Statistics(dump_simq_statistics(stats, 0, 0, 0, 0, 0, 0, false));
+        result->Statistics(dump_simq_statistics(stats, 0, 0, 0, 0, 0, 0, 0, false));
         return result;
     }
 
@@ -782,6 +784,8 @@ SIMQ::KnnSearch(const DatasetPtr& query,
         batch_ids.push_back(doc_id);
     }
 
+    const uint64_t rerank_batch_count = batch_ids.empty() ? 0 : 1;
+
     // Single batched Query call (enables MultiRead in MultiVectorDataCell)
     if (!batch_ids.empty()) {
         std::vector<float> batch_dists(batch_ids.size());
@@ -830,6 +834,7 @@ SIMQ::KnnSearch(const DatasetPtr& query,
                                                coarse_candidate_count,
                                                rerank_candidate_count,
                                                filtered_candidate_count,
+                                               rerank_batch_count,
                                                static_cast<uint64_t>(result_ds->GetDim()),
                                                false));
     return result_ds;
@@ -850,7 +855,7 @@ SIMQ::RangeSearch(const DatasetPtr& query,
 
     if (total_count_ == 0 || rep_hgraph_ == nullptr) {
         auto result = Dataset::Make();
-        result->Statistics(dump_simq_statistics(stats, 0, 0, 0, 0, 0, 0, false));
+        result->Statistics(dump_simq_statistics(stats, 0, 0, 0, 0, 0, 0, 0, false));
         return result;
     }
 
@@ -889,18 +894,34 @@ SIMQ::RangeSearch(const DatasetPtr& query,
     auto computer = mv_codes_->FactoryComputer(&query_mvs[0]);
     std::vector<std::pair<float, InnerIdType>> in_range;
     uint64_t filtered_candidate_count = 0;
+
+    std::vector<InnerIdType> batch_ids;
+    batch_ids.reserve(coarse_results.size());
     for (auto& [doc_id, _] : coarse_results) {
         if (filter != nullptr && !filter->CheckValid(this->label_table_->GetLabelById(doc_id))) {
             ++filtered_candidate_count;
             continue;
         }
-        float dist = 0.0F;
+        batch_ids.push_back(doc_id);
+    }
+
+    const uint64_t rerank_batch_count = batch_ids.empty() ? 0 : 1;
+    if (!batch_ids.empty()) {
+        in_range.reserve(batch_ids.size());
+        std::vector<float> batch_dists(batch_ids.size());
         QueryContext query_context{.stats = &stats,
                                    .distance_phase = DistanceEvaluationPhase::RERANK};
-        mv_codes_->Query(&dist, computer, &doc_id, 1, &query_context);
-        ++stats.dist_cmp;
-        if (dist <= radius) {
-            in_range.emplace_back(dist, doc_id);
+        mv_codes_->Query(batch_dists.data(),
+                         computer,
+                         batch_ids.data(),
+                         static_cast<InnerIdType>(batch_ids.size()),
+                         &query_context);
+        stats.dist_cmp.fetch_add(static_cast<uint32_t>(batch_ids.size()),
+                                 std::memory_order_relaxed);
+        for (uint64_t i = 0; i < batch_ids.size(); ++i) {
+            if (batch_dists[i] <= radius) {
+                in_range.emplace_back(batch_dists[i], batch_ids[i]);
+            }
         }
     }
 
@@ -929,6 +950,7 @@ SIMQ::RangeSearch(const DatasetPtr& query,
                                                coarse_candidate_count,
                                                rerank_candidate_count,
                                                filtered_candidate_count,
+                                               rerank_batch_count,
                                                static_cast<uint64_t>(in_range.size()),
                                                limited_size_applied));
     return std::move(result_ds);

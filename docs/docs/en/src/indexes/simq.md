@@ -175,6 +175,7 @@ auto values = result->GetStatistics(
 | `simq_coarse_candidate_count` | Unique document candidates produced by coarse search before applying `rerank_k` |
 | `simq_rerank_candidate_count` | Candidates retained after applying `rerank_k` |
 | `simq_filtered_candidate_count` | Rerank candidates rejected by the supplied filter |
+| `simq_rerank_batch_count` | Number of batched exact-rerank calls issued after filtering |
 | `simq_result_count` | Results returned after reranking and range/top-k limits |
 | `simq_limited_size_applied` | Whether `RangeSearch` truncated matches to `limited_size` |
 

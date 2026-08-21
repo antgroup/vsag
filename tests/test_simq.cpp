@@ -43,6 +43,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <cmath>
@@ -275,6 +276,7 @@ struct SimqSearchStats {
     uint64_t coarse_candidate_count{0};
     uint64_t rerank_candidate_count{0};
     uint64_t filtered_candidate_count{0};
+    uint64_t rerank_batch_count{0};
     uint64_t result_count{0};
     std::string limited_size_applied;
 };
@@ -294,9 +296,10 @@ get_simq_search_stats(const vsag::DatasetPtr& result) {
                                          "simq_coarse_candidate_count",
                                          "simq_rerank_candidate_count",
                                          "simq_filtered_candidate_count",
+                                         "simq_rerank_batch_count",
                                          "simq_result_count",
                                          "simq_limited_size_applied"});
-    REQUIRE(values.size() == 8);
+    REQUIRE(values.size() == 9);
 
     SimqSearchStats stats;
     stats.dist_cmp = parse_u64(values[0]);
@@ -305,8 +308,9 @@ get_simq_search_stats(const vsag::DatasetPtr& result) {
     stats.coarse_candidate_count = parse_u64(values[3]);
     stats.rerank_candidate_count = parse_u64(values[4]);
     stats.filtered_candidate_count = parse_u64(values[5]);
-    stats.result_count = parse_u64(values[6]);
-    stats.limited_size_applied = values[7];
+    stats.rerank_batch_count = parse_u64(values[6]);
+    stats.result_count = parse_u64(values[7]);
+    stats.limited_size_applied = values[8];
     return stats;
 }
 
@@ -318,8 +322,26 @@ require_simq_search_stats(const vsag::DatasetPtr& result) {
     REQUIRE(stats.coarse_probe_count > 0);
     REQUIRE(stats.coarse_candidate_count >= stats.rerank_candidate_count);
     REQUIRE(stats.rerank_candidate_count >= stats.dist_cmp);
+    REQUIRE(stats.rerank_batch_count == 1);
     REQUIRE(stats.result_count == static_cast<uint64_t>(result->GetDim()));
 }
+
+class EvenLabelFilter : public vsag::Filter {
+public:
+    [[nodiscard]] bool
+    CheckValid(int64_t id) const override {
+        return id % 2 == 0;
+    }
+};
+
+class RejectAllFilter : public vsag::Filter {
+public:
+    [[nodiscard]] bool
+    CheckValid(int64_t id) const override {
+        (void)id;
+        return false;
+    }
+};
 
 TEST_CASE("SIMQ: one centroid counts nested HGraph entry point", "[simq][statistics]") {
     TempFile tmp;
@@ -559,6 +581,65 @@ TEST_CASE("SIMQ: range search", "[simq][range_search]") {
         REQUIRE(n <= limited);
         auto stats = get_simq_search_stats(rr.value());
         REQUIRE(stats.limited_size_applied == "true");
+    }
+
+    SECTION("matches thresholded KNN with filtering and limited_size") {
+        auto filter = std::make_shared<EvenLabelFilter>();
+        auto threshold_param = fmt::format(
+            R"({{"threshold": {}, "simq": {{"coarse_k": 10, "rerank_k": 1000}}}})", radius);
+        auto expected = index->KnnSearch(one_query, BASE_DOCS, threshold_param, filter);
+        REQUIRE(expected.has_value());
+
+        auto actual = index->RangeSearch(one_query, radius, search_param, filter);
+        REQUIRE(actual.has_value());
+        REQUIRE(actual.value()->GetDim() == expected.value()->GetDim());
+        for (int64_t i = 0; i < actual.value()->GetDim(); ++i) {
+            REQUIRE(actual.value()->GetIds()[i] == expected.value()->GetIds()[i]);
+            REQUIRE(actual.value()->GetDistances()[i] ==
+                    Catch::Approx(expected.value()->GetDistances()[i]).margin(1e-6F));
+        }
+
+        auto expected_stats = get_simq_search_stats(expected.value());
+        auto actual_stats = get_simq_search_stats(actual.value());
+        REQUIRE(actual_stats.coarse_candidate_count == expected_stats.coarse_candidate_count);
+        REQUIRE(actual_stats.rerank_candidate_count == expected_stats.rerank_candidate_count);
+        REQUIRE(actual_stats.filtered_candidate_count == expected_stats.filtered_candidate_count);
+        REQUIRE(actual_stats.dist_cmp == expected_stats.dist_cmp);
+        REQUIRE(actual_stats.rerank_batch_count == 1);
+
+        int64_t limited = std::min<int64_t>(3, expected.value()->GetDim());
+        auto limited_result = index->RangeSearch(one_query, radius, search_param, filter, limited);
+        REQUIRE(limited_result.has_value());
+        REQUIRE(limited_result.value()->GetDim() == limited);
+        for (int64_t i = 0; i < limited; ++i) {
+            REQUIRE(limited_result.value()->GetIds()[i] == expected.value()->GetIds()[i]);
+            REQUIRE(limited_result.value()->GetDistances()[i] ==
+                    Catch::Approx(expected.value()->GetDistances()[i]).margin(1e-6F));
+        }
+    }
+
+    SECTION("all-filtered candidates avoid rerank IO") {
+        auto result = index->RangeSearch(
+            one_query, radius, search_param, std::make_shared<RejectAllFilter>());
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 0);
+        auto stats = get_simq_search_stats(result.value());
+        REQUIRE(stats.rerank_candidate_count > 1);
+        REQUIRE(stats.filtered_candidate_count == stats.rerank_candidate_count);
+        REQUIRE(stats.dist_cmp == 0);
+        REQUIRE(stats.rerank_batch_count == 0);
+        REQUIRE(stats.result_count == 0);
+    }
+
+    SECTION("empty radius still reranks in one batch") {
+        auto result = index->RangeSearch(
+            one_query, -std::numeric_limits<float>::infinity(), search_param, FilterPtr{});
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 0);
+        auto stats = get_simq_search_stats(result.value());
+        REQUIRE(stats.dist_cmp > 1);
+        REQUIRE(stats.rerank_batch_count == 1);
+        REQUIRE(stats.result_count == 0);
     }
 }
 
