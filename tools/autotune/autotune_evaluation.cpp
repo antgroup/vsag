@@ -84,6 +84,28 @@ search_metrics(const JsonType& raw, double seconds) {
     return metrics;
 }
 
+MetricMap
+current_memory_metrics(const IndexPtr& index) {
+    MetricMap metrics;
+    try {
+        const auto memory = index->GetMemoryUsage();
+        if (memory > 0) {
+            metrics["index_memory_mb"] = static_cast<double>(memory) / BYTES_PER_MEBIBYTE;
+        }
+    } catch (const std::exception&) {
+        // An unavailable metric cannot prove that the candidate violates the constraint.
+    }
+    return metrics;
+}
+
+bool
+exceeds_memory_constraint(const RequestContext& request, const MetricMap& metrics) {
+    const auto limit = request.constraints.find("index_memory_mb");
+    const auto actual = metrics.find("index_memory_mb");
+    return limit != request.constraints.end() && actual != metrics.end() &&
+           actual->second > limit->second;
+}
+
 JsonType
 metrics_json(const MetricMap& metrics) {
     JsonType result = JsonType::object();
@@ -240,6 +262,9 @@ EvaluateCandidates(const IndexTuningRequest& tuning_request,
         build["elapsed_seconds"] = elapsed(build_start);
         evaluation.builds.emplace_back(build);
 
+        const auto prune_searches =
+            build["status"] == "success" && exceeds_memory_constraint(request, shared_metrics);
+
         const auto evaluate = [&](const Candidate& candidate) -> std::optional<double> {
             const auto trial_id = "trial-" + std::to_string(trial_number++);
             JsonType trial{{"trial_id", trial_id},
@@ -253,7 +278,9 @@ EvaluateCandidates(const IndexTuningRequest& tuning_request,
                            {"artifacts", build["artifacts"]}};
             std::optional<double> recall;
             const auto search_start = std::chrono::steady_clock::now();
-            if (build["status"] != "success") {
+            if (prune_searches) {
+                trial["status"] = "pruned";
+            } else if (build["status"] != "success") {
                 trial["failure"] =
                     Failure("search", "build_failed", "search skipped because build failed");
             } else {
@@ -309,29 +336,38 @@ EvaluateCandidates(const SearchTuningRequest& tuning_request,
     const auto& request = tuning_request.context;
     Evaluation evaluation;
     uint64_t trial_number = 0;
+    MetricMap shared_metrics;
+    if (request.constraints.find("index_memory_mb") != request.constraints.end()) {
+        shared_metrics = current_memory_metrics(tuning_request.index);
+    }
+    const auto prune_searches = exceeds_memory_constraint(request, shared_metrics);
 
     const auto evaluate = [&](const Candidate& candidate) -> std::optional<double> {
         JsonType trial{{"trial_id", "trial-" + std::to_string(trial_number++)},
                        {"index_name", candidate.index_name},
                        {"search_params", candidate.search_params},
                        {"status", "failed"},
-                       {"metrics", JsonType::object()},
+                       {"metrics", metrics_json(shared_metrics)},
                        {"failure", nullptr}};
         std::optional<double> recall;
         const auto start = std::chrono::steady_clock::now();
-        try {
-            const auto measured_start = std::chrono::steady_clock::now();
-            auto raw = eval::EvaluateSearch(
-                tuning_request.index, request.dataset, search_config(request, candidate));
-            const auto metrics = search_metrics(raw, elapsed(measured_start));
-            trial["metrics"] = metrics_json(metrics);
-            trial["status"] = "success";
-            recall = number(trial["metrics"], "recall_at_k");
-            if (request.include_raw_eval) {
-                trial["raw_eval_result"] = std::move(raw);
+        if (prune_searches) {
+            trial["status"] = "pruned";
+        } else {
+            try {
+                const auto measured_start = std::chrono::steady_clock::now();
+                auto raw = eval::EvaluateSearch(
+                    tuning_request.index, request.dataset, search_config(request, candidate));
+                const auto metrics = search_metrics(raw, elapsed(measured_start));
+                trial["metrics"] = metrics_json(metrics);
+                trial["status"] = "success";
+                recall = number(trial["metrics"], "recall_at_k");
+                if (request.include_raw_eval) {
+                    trial["raw_eval_result"] = std::move(raw);
+                }
+            } catch (const std::exception& error) {
+                trial["failure"] = Failure("search", "search_evaluation_failed", error.what());
             }
-        } catch (const std::exception& error) {
-            trial["failure"] = Failure("search", "search_evaluation_failed", error.what());
         }
         trial["elapsed_seconds"] = elapsed(start);
         evaluation.trials.emplace_back(std::move(trial));
