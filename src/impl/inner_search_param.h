@@ -76,6 +76,11 @@ public:
     // use in search process with duplicate ids
     bool consider_duplicate{false};
 
+    // Set when the caller holds an exclusive-vs-writers read grant (biased
+    // rwlock fast path): per-node neighbor locks can then be skipped because
+    // no graph mutation can run concurrently with this search.
+    bool skip_neighbor_locks{false};
+
     // time record
     std::shared_ptr<Timer> time_cost{nullptr};
 

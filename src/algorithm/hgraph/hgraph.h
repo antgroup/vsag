@@ -420,6 +420,11 @@ private:
             return this->kind_ != Kind::kNone;
         }
 
+        [[nodiscard]] bool
+        is_fast() const {
+            return this->kind_ == Kind::kFast;
+        }
+
         void
         lock();
 

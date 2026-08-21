@@ -165,6 +165,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
             search_param.ef = 1;
             search_param.is_inner_id_allowed = nullptr;
             search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
+            search_param.skip_neighbor_locks = shared_lock.is_fast();
             if (search_param.ep == INVALID_ENTRY_POINT) {
                 return make_empty_dataset_with_stats();
             }
@@ -548,6 +549,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
     InnerSearchParam search_param;
     search_param.ep = this->entry_point_id_;
+    // Fast-path readers are excluded from concurrent graph mutations by the
+    // biased lock's writer drain, so per-node neighbor locks can be skipped.
+    search_param.skip_neighbor_locks = shared_lock.is_fast();
     search_param.topk = 1;
     search_param.ef = 1;
     search_param.is_inner_id_allowed = nullptr;

@@ -675,7 +675,14 @@ HGraph::publish_unique_under_shared_global_lock(const void* data,
                                                 const AddContext& context,
                                                 GlobalReadGuard& read_lock) {
     this->publish_unique_storage_if_needed(data, inner_id, context, read_lock);
-    this->publish_unique_to_graphs(data, level, inner_id, param, probe, context);
+    // Graph mutation excludes lock-free readers: release this thread's read
+    // grant first (a held fast slot would deadlock the drain), then take the
+    // writer critical section. Slow-path readers stay safe through the
+    // per-node neighbor locks the publish path acquires.
+    read_lock.unlock();
+    this->global_lock_.WithWriterCriticalSection([&]() {
+        this->publish_unique_to_graphs(data, level, inner_id, param, probe, context);
+    });
 }
 
 void
