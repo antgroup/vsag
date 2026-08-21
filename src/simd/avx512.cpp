@@ -636,6 +636,26 @@ SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query,
     }
 }
 
+void
+SQ8UniformComputeCodesIPBatch4(const uint8_t* RESTRICT query,
+                               const uint8_t* RESTRICT code1,
+                               const uint8_t* RESTRICT code2,
+                               const uint8_t* RESTRICT code3,
+                               const uint8_t* RESTRICT code4,
+                               uint64_t dim,
+                               float& result1,
+                               float& result2,
+                               float& result3,
+                               float& result4) {
+#if defined(ENABLE_AVX512)
+    simd::SQ8UniformComputeCodesIPBatch4Impl<simd::UniformCodeTraits<simd::AVX512_Uniform_Tag>>(
+        query, code1, code2, code3, code4, dim, result1, result2, result3, result4);
+#else
+    avx2::SQ8UniformComputeCodesIPBatch4(
+        query, code1, code2, code3, code4, dim, result1, result2, result3, result4);
+#endif
+}
+
 float
 RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)

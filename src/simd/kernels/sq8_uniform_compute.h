@@ -17,6 +17,8 @@
 
 #include <cstdint>
 
+#include "simd_marco.h"
+
 namespace vsag::simd {
 
 // T must satisfy UniformCodeTraits: IntVec, ByteWidth, loadu, zero, set1_epi16,
@@ -56,6 +58,70 @@ SQ8UniformComputeCodesIPImpl(const uint8_t* codes1,
     }
 
     return static_cast<float>(result);
+}
+
+// Four-way batched variant: the query block is loaded and split into low/high
+// lanes once per iteration and shared across all four accumulators, instead of
+// four independent single-code passes. Integer accumulation order per code
+// matches SQ8UniformComputeCodesIPImpl exactly, so results are bit-identical.
+template <typename T>
+inline void
+SQ8UniformComputeCodesIPBatch4Impl(const uint8_t* RESTRICT query,
+                                   const uint8_t* RESTRICT code1,
+                                   const uint8_t* RESTRICT code2,
+                                   const uint8_t* RESTRICT code3,
+                                   const uint8_t* RESTRICT code4,
+                                   uint64_t dim,
+                                   float& result1,
+                                   float& result2,
+                                   float& result3,
+                                   float& result4) {
+    constexpr uint64_t kElemsPerIter = T::ByteWidth;
+    auto sum1 = T::zero();
+    auto sum2 = T::zero();
+    auto sum3 = T::zero();
+    auto sum4 = T::zero();
+    auto mask = T::set1_epi16(0xff);
+
+    uint64_t d = 0;
+    for (; d + kElemsPerIter - 1 < dim; d += kElemsPerIter) {
+        auto xx = T::loadu(query + d);
+        auto xx1 = T::and_si(xx, mask);
+        auto xx2 = T::srli_epi16(xx, 8);
+
+        auto yy = T::loadu(code1 + d);
+        sum1 = T::add_epi32(sum1, T::madd_epi16(xx1, T::and_si(yy, mask)));
+        sum1 = T::add_epi32(sum1, T::madd_epi16(xx2, T::srli_epi16(yy, 8)));
+
+        yy = T::loadu(code2 + d);
+        sum2 = T::add_epi32(sum2, T::madd_epi16(xx1, T::and_si(yy, mask)));
+        sum2 = T::add_epi32(sum2, T::madd_epi16(xx2, T::srli_epi16(yy, 8)));
+
+        yy = T::loadu(code3 + d);
+        sum3 = T::add_epi32(sum3, T::madd_epi16(xx1, T::and_si(yy, mask)));
+        sum3 = T::add_epi32(sum3, T::madd_epi16(xx2, T::srli_epi16(yy, 8)));
+
+        yy = T::loadu(code4 + d);
+        sum4 = T::add_epi32(sum4, T::madd_epi16(xx1, T::and_si(yy, mask)));
+        sum4 = T::add_epi32(sum4, T::madd_epi16(xx2, T::srli_epi16(yy, 8)));
+    }
+
+    int32_t tail1 = T::reduce_add_epi32(sum1);
+    int32_t tail2 = T::reduce_add_epi32(sum2);
+    int32_t tail3 = T::reduce_add_epi32(sum3);
+    int32_t tail4 = T::reduce_add_epi32(sum4);
+
+    for (; d < dim; ++d) {
+        tail1 += static_cast<int32_t>(query[d]) * static_cast<int32_t>(code1[d]);
+        tail2 += static_cast<int32_t>(query[d]) * static_cast<int32_t>(code2[d]);
+        tail3 += static_cast<int32_t>(query[d]) * static_cast<int32_t>(code3[d]);
+        tail4 += static_cast<int32_t>(query[d]) * static_cast<int32_t>(code4[d]);
+    }
+
+    result1 = static_cast<float>(tail1);
+    result2 = static_cast<float>(tail2);
+    result3 = static_cast<float>(tail3);
+    result4 = static_cast<float>(tail4);
 }
 
 }  // namespace vsag::simd

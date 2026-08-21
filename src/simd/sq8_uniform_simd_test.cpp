@@ -180,6 +180,55 @@ TEST_CASE("SQ8 Uniform SIMD Compute Codes Batch", "[ut][simd]") {
     }
 }
 
+TEST_CASE("SQ8 Uniform SIMD Compute Codes Batch4", "[ut][simd]") {
+    // Includes dims that exercise the scalar tail (not multiples of the widest
+    // vector width) and dims aligned to each tier's block size.
+    const std::vector<int64_t> dims = {1, 7, 16, 31, 32, 48, 64, 96, 100, 128, 200, 256, 384};
+
+    for (auto dim : dims) {
+        const uint32_t stride = static_cast<uint32_t>(dim) + 3;  // rows not adjacent
+        auto query = fixtures::generate_uint8_codes(1, dim, 61);
+        auto codes = fixtures::generate_uint8_codes(4 * 5, stride, 62);
+
+        for (int64_t base = 0; base + 3 < 20; base += 4) {
+            const auto* c1 = codes.data() + static_cast<uint64_t>(base + 0) * stride;
+            const auto* c2 = codes.data() + static_cast<uint64_t>(base + 1) * stride;
+            const auto* c3 = codes.data() + static_cast<uint64_t>(base + 2) * stride;
+            const auto* c4 = codes.data() + static_cast<uint64_t>(base + 3) * stride;
+
+            float gt1 = generic::SQ8UniformComputeCodesIP(query.data(), c1, dim);
+            float gt2 = generic::SQ8UniformComputeCodesIP(query.data(), c2, dim);
+            float gt3 = generic::SQ8UniformComputeCodesIP(query.data(), c3, dim);
+            float gt4 = generic::SQ8UniformComputeCodesIP(query.data(), c4, dim);
+
+#define TEST_BATCH4_NS(NS, Cond)                                                     \
+    if (Cond) {                                                                      \
+        float r1 = 0.F, r2 = 0.F, r3 = 0.F, r4 = 0.F;                                \
+        NS::SQ8UniformComputeCodesIPBatch4(                                          \
+            query.data(), c1, c2, c3, c4, dim, r1, r2, r3, r4);                      \
+        REQUIRE(fixtures::dist_t(gt1) == fixtures::dist_t(r1));                      \
+        REQUIRE(fixtures::dist_t(gt2) == fixtures::dist_t(r2));                      \
+        REQUIRE(fixtures::dist_t(gt3) == fixtures::dist_t(r3));                      \
+        REQUIRE(fixtures::dist_t(gt4) == fixtures::dist_t(r4));                      \
+    }
+            TEST_BATCH4_NS(generic, true);
+            TEST_BATCH4_NS(sse, SimdStatus::SupportSSE());
+            TEST_BATCH4_NS(avx, SimdStatus::SupportAVX());
+            TEST_BATCH4_NS(avx2, SimdStatus::SupportAVX2());
+            TEST_BATCH4_NS(avx512, SimdStatus::SupportAVX512());
+#undef TEST_BATCH4_NS
+
+            // And the dispatch entry point used by the quantizer.
+            float d1 = 0.F, d2 = 0.F, d3 = 0.F, d4 = 0.F;
+            SQ8UniformComputeCodesIPBatch4(query.data(), c1, c2, c3, c4, dim, d1, d2, d3, d4);
+            REQUIRE(fixtures::dist_t(gt1) == fixtures::dist_t(d1));
+            REQUIRE(fixtures::dist_t(gt2) == fixtures::dist_t(d2));
+            REQUIRE(fixtures::dist_t(gt3) == fixtures::dist_t(d3));
+            REQUIRE(fixtures::dist_t(gt4) == fixtures::dist_t(d4));
+        }
+    }
+}
+
 #define BENCHMARK_SIMD_BATCH(Simd)                                                      \
     BENCHMARK_ADVANCED(#Simd "SQ8UniformComputeCodesIPBatch") {                         \
         for (int q = 0; q < n_queries; ++q) {                                           \

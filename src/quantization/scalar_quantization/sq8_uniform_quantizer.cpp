@@ -260,14 +260,69 @@ SQ8UniformQuantizer<metric>::ComputeDistsBatch4Impl(Computer<SQ8UniformQuantizer
                                                     float& dists2,
                                                     float& dists3,
                                                     float& dists4) const {
-    // The 4 codes are not contiguous in memory (HGraph passes pointers
-    // from a neighbor list). Calling SQ8UniformComputeCodesIPBatch four
-    // times with n_codes=1 throws away the batching benefit, so for
-    // batch4 we just delegate to the per-pair ComputeImpl.
-    dists1 = this->ComputeImpl(computer.buf_, codes1);
-    dists2 = this->ComputeImpl(computer.buf_, codes2);
-    dists3 = this->ComputeImpl(computer.buf_, codes3);
-    dists4 = this->ComputeImpl(computer.buf_, codes4);
+    // The four codes are independently addressed (HGraph passes pointers from
+    // a neighbor list), so use the four-way kernel that shares query loads
+    // instead of four separate per-pair ComputeImpl passes.
+    if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+        SQ8UniformComputeCodesIPBatch4(computer.buf_,
+                                       codes1,
+                                       codes2,
+                                       codes3,
+                                       codes4,
+                                       this->dim_,
+                                       dists1,
+                                       dists2,
+                                       dists3,
+                                       dists4);
+
+        norm_type query_norm = 0;
+        std::memcpy(&query_norm, computer.buf_ + offset_norm_, sizeof(norm_type));
+        const auto query_norm_f = static_cast<float>(query_norm);
+        norm_type code_norm = 0;
+        std::memcpy(&code_norm, codes1 + offset_norm_, sizeof(norm_type));
+        dists1 =
+            (query_norm_f + static_cast<float>(code_norm) - 2.F * dists1) * scalar_rate_;
+        std::memcpy(&code_norm, codes2 + offset_norm_, sizeof(norm_type));
+        dists2 =
+            (query_norm_f + static_cast<float>(code_norm) - 2.F * dists2) * scalar_rate_;
+        std::memcpy(&code_norm, codes3 + offset_norm_, sizeof(norm_type));
+        dists3 =
+            (query_norm_f + static_cast<float>(code_norm) - 2.F * dists3) * scalar_rate_;
+        std::memcpy(&code_norm, codes4 + offset_norm_, sizeof(norm_type));
+        dists4 =
+            (query_norm_f + static_cast<float>(code_norm) - 2.F * dists4) * scalar_rate_;
+    } else if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                         metric == MetricType::METRIC_TYPE_COSINE) {
+        SQ8UniformComputeCodesIPBatch4(computer.buf_,
+                                       codes1,
+                                       codes2,
+                                       codes3,
+                                       codes4,
+                                       this->dim_,
+                                       dists1,
+                                       dists2,
+                                       dists3,
+                                       dists4);
+
+        sum_type query_sum = 0;
+        std::memcpy(&query_sum, computer.buf_ + offset_sum_, sizeof(sum_type));
+        const float lb = lower_bound_;
+        const float lb2 = lb * lb;
+        sum_type code_sum = 0;
+        std::memcpy(&code_sum, codes1 + offset_sum_, sizeof(sum_type));
+        dists1 = 1.F - (lb * (query_sum + code_sum) + scalar_rate_ * dists1 + lb2);
+        std::memcpy(&code_sum, codes2 + offset_sum_, sizeof(sum_type));
+        dists2 = 1.F - (lb * (query_sum + code_sum) + scalar_rate_ * dists2 + lb2);
+        std::memcpy(&code_sum, codes3 + offset_sum_, sizeof(sum_type));
+        dists3 = 1.F - (lb * (query_sum + code_sum) + scalar_rate_ * dists3 + lb2);
+        std::memcpy(&code_sum, codes4 + offset_sum_, sizeof(sum_type));
+        dists4 = 1.F - (lb * (query_sum + code_sum) + scalar_rate_ * dists4 + lb2);
+    } else {
+        dists1 = this->ComputeImpl(computer.buf_, codes1);
+        dists2 = this->ComputeImpl(computer.buf_, codes2);
+        dists3 = this->ComputeImpl(computer.buf_, codes3);
+        dists4 = this->ComputeImpl(computer.buf_, codes4);
+    }
 }
 
 template <MetricType metric>

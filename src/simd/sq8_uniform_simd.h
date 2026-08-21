@@ -65,4 +65,19 @@ using SQ8UniformComputeCodesIPBatchType = void (*)(const uint8_t* RESTRICT query
                                                    uint64_t code_stride,
                                                    float* RESTRICT out);
 extern SQ8UniformComputeCodesIPBatchType SQ8UniformComputeCodesIPBatch;
+
+// Four-way batched inner product: one query against four independently
+// addressed SQ8-uniform codes. The query block loads are shared across all
+// four accumulators, unlike four separate SQ8UniformComputeCodesIP calls.
+using SQ8UniformComputeCodesIPBatch4Type = void (*)(const uint8_t* RESTRICT query,
+                                                    const uint8_t* RESTRICT code1,
+                                                    const uint8_t* RESTRICT code2,
+                                                    const uint8_t* RESTRICT code3,
+                                                    const uint8_t* RESTRICT code4,
+                                                    uint64_t dim,
+                                                    float& result1,
+                                                    float& result2,
+                                                    float& result3,
+                                                    float& result4);
+extern SQ8UniformComputeCodesIPBatch4Type SQ8UniformComputeCodesIPBatch4;
 }  // namespace vsag
