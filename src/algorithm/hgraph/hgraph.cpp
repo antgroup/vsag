@@ -503,7 +503,7 @@ HGraph::CalDistanceById(const float* query,
                         bool calculate_precise_distance,
                         int64_t topk) const {
     FlattenInterfacePtr flat;
-    std::shared_lock<std::shared_mutex> lock;
+    GlobalReadGuard lock;
     if (!this->immutable_.load(std::memory_order_acquire)) {
         lock = this->acquire_global_read_lock();
     }
