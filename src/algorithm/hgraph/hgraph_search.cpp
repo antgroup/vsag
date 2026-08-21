@@ -115,7 +115,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         fmt::format("ef_search({}) must be at least 1", params.ef_search));
 
     std::shared_lock<std::shared_mutex> force_remove_rlock;
-    std::shared_lock<std::shared_mutex> shared_lock;
+    GlobalReadGuard shared_lock;
     if (!this->immutable_.load(std::memory_order_acquire)) {
         if (this->support_force_remove()) {
             force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
@@ -485,7 +485,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         fmt::format("ef_search({}) must be at least 1", params.ef_search));
 
     std::shared_lock<std::shared_mutex> force_remove_rlock;
-    std::shared_lock<std::shared_mutex> shared_lock;
+    GlobalReadGuard shared_lock;
     if (!this->immutable_.load(std::memory_order_acquire)) {
         if (this->support_force_remove()) {
             force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);

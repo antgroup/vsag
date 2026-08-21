@@ -48,6 +48,7 @@
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
+#include "utils/biased_rwlock.h"
 #include "utils/lock_strategy.h"
 #include "utils/util_functions.h"
 #include "utils/visited_list.h"
@@ -398,13 +399,59 @@ public:
                      DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
 private:
-    [[nodiscard]] std::shared_lock<std::shared_mutex>
-    acquire_global_read_lock() const {
-        if (not this->physical_code_resize_pending_.load(std::memory_order_acquire)) {
-            return std::shared_lock<std::shared_mutex>(this->global_mutex_);
+    // RAII guard for the reader side of global_lock_. Tracks per-thread
+    // nesting so recursive acquisitions on one thread (e.g. MCI's inner
+    // searches) never self-deadlock against a draining writer, and supports
+    // unlock()/lock() cycles around capacity-growth critical sections.
+    class GlobalReadGuard {
+    public:
+        GlobalReadGuard();
+        explicit GlobalReadGuard(const HGraph* owner);
+        ~GlobalReadGuard();
+        GlobalReadGuard(const GlobalReadGuard&) = delete;
+        GlobalReadGuard&
+        operator=(const GlobalReadGuard&) = delete;
+        GlobalReadGuard(GlobalReadGuard&& other) noexcept;
+        GlobalReadGuard&
+        operator=(GlobalReadGuard&& other) noexcept;
+
+        [[nodiscard]] bool
+        owns_lock() const {
+            return this->kind_ != Kind::kNone;
         }
-        std::scoped_lock resize_lock(this->physical_code_resize_mutex_);
-        return std::shared_lock<std::shared_mutex>(this->global_mutex_);
+
+        void
+        lock();
+
+        void
+        unlock();
+
+    private:
+        friend class HGraph;
+        enum class Kind { kNone, kFast, kSlow, kNested };
+        GlobalReadGuard(const HGraph* owner, Kind kind);
+        const HGraph* owner_{nullptr};
+        Kind kind_{Kind::kNone};
+    };
+
+    [[nodiscard]] GlobalReadGuard
+    acquire_global_read_lock() const;
+
+    struct ThreadLocalReadState {
+        const HGraph* owner{nullptr};
+        uint32_t depth{0};
+        uint32_t slot_index{0};
+    };
+
+    static ThreadLocalReadState&
+    tls_read_state();
+
+    uint32_t
+    reader_slot_index() const {
+        static std::atomic<uint32_t> next_slot{0};
+        thread_local uint32_t slot_index =
+            next_slot.fetch_add(1, std::memory_order_relaxed) % BiasedRwLock::kReaderSlots;
+        return slot_index;
     }
 
     MetadataPtr
@@ -533,7 +580,7 @@ private:
     publish_unique_storage_if_needed(const void* data,
                                      InnerIdType inner_id,
                                      const AddContext& context,
-                                     std::shared_lock<std::shared_mutex>& read_lock);
+                                     GlobalReadGuard& read_lock);
 
     [[nodiscard]] bool
     unique_add_needs_structure_update(int level) const;
@@ -548,7 +595,7 @@ private:
                                             InnerSearchParam& param,
                                             const GraphAddProbeResult& probe,
                                             const AddContext& context,
-                                            std::shared_lock<std::shared_mutex>& read_lock);
+                                            GlobalReadGuard& read_lock);
 
     void
     publish_unique_under_unique_global_lock(const void* data,
@@ -881,7 +928,10 @@ private:
 
     std::shared_ptr<VisitedListPool> pool_{nullptr};  // pool of visited-lists for search
 
-    mutable std::shared_mutex global_mutex_;            // guards total_count_, entry_point_id_
+    // Reader-biased global lock guarding total_count_ / entry_point_id_ and
+    // excluding unique writers (resize, tune, remove, immutable flip) from
+    // searches and shared-mode publishes.
+    mutable BiasedRwLock global_lock_;
     mutable std::shared_mutex persistent_codes_mutex_;  // pins flatten storage during MCI search
     mutable std::mutex mci_build_mutex_;                // serializes full MCI reconstruction
     mutable std::mutex mci_add_mutex_;                  // serializes MCI-enabled Add calls
