@@ -420,7 +420,7 @@ private:
     std::string Reasoning_{"{}"};
 
     mutable std::mutex statistics_mutex_;
-    std::shared_ptr<LazyStatistics> lazy_statistics_;
+    mutable std::shared_ptr<LazyStatistics> lazy_statistics_;
 };
 
 };  // namespace vsag
