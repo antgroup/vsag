@@ -17,7 +17,7 @@
 
 #include <cstdint>
 
-#include "simd_marco.h"
+#include "simd/simd_marco.h"
 
 namespace vsag::simd {
 
