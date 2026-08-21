@@ -232,6 +232,28 @@ MMapIO::ResizeImpl(uint64_t size) {
     this->size_ = new_size;
 }
 
+void
+MMapIO::ResizeForOverwriteImpl(uint64_t size) {
+    // reserve the blocks before the mapping grows: this extent is about to be
+    // filled concurrently, and on a sparse file a store into a page the
+    // filesystem can no longer back raises SIGBUS, which user space cannot
+    // recover from. Reserving up front turns that into an ENOSPC error here.
+    if (size > this->mapped_size_) {
+        const int ret = IOSyscall::Fallocate(this->fd_, size);
+        // a filesystem without fallocate support reports EOPNOTSUPP; losing the
+        // guarantee above is acceptable, so carry on with the plain grow
+        if (ret != 0 && ret != ENOTSUP && ret != EOPNOTSUPP) {
+            throw VsagException(
+                ErrorType::INTERNAL_ERROR,
+                fmt::format("fallocate(size={}) failed (errno={}): {}",
+                            size,
+                            ret,
+                            std::error_code(ret, std::system_category()).message()));
+        }
+    }
+    this->ResizeImpl(size);
+}
+
 bool
 MMapIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
     const auto total_size = this->size_.load(std::memory_order_acquire);

@@ -179,6 +179,21 @@ public:
     }
 
     [[nodiscard]] uint64_t
+    GetIOSize() const {
+        return io_->size_;
+    }
+
+    void
+    ResizeForOverwrite(uint64_t size) {
+        io_->ResizeForOverwrite(size);
+    }
+
+    void
+    WriteRaw(const uint8_t* data, uint64_t size, uint64_t offset) {
+        io_->Write(data, size, offset);
+    }
+
+    [[nodiscard]] uint64_t
     GetMemoryUsage() const {
         if constexpr (InMemory) {
             return static_cast<uint64_t>(io_->GetMemoryUsage());

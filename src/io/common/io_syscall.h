@@ -16,7 +16,11 @@
 
 #include <fcntl.h>
 #include <unistd.h>
+#ifndef __APPLE__
+#include <linux/falloc.h>
+#endif
 
+#include <cerrno>
 #include <cstdint>
 
 #ifdef _MSC_VER
@@ -55,6 +59,35 @@ public:
         return ftruncate(fd, static_cast<off_t>(length));
 #else
         return ftruncate64(fd, static_cast<int64_t>(length));
+#endif
+    }
+
+    /// Reserve blocks for [0, length) so a later store into a mapping of this
+    /// file cannot fail with SIGBUS once the filesystem is full, and so the
+    /// extent is allocated in one step instead of by scattered page faults.
+    /// The file size is left untouched, so the caller still sizes the file with
+    /// FTruncate. This does not change the fact that unwritten bytes read as
+    /// zero.
+    ///
+    /// Uses the raw fallocate(2) rather than posix_fallocate on purpose: glibc
+    /// emulates posix_fallocate by writing zeros block by block when the
+    /// filesystem lacks support, which silently turns a metadata-only
+    /// reservation into an O(length) write and never reports EOPNOTSUPP.
+    ///
+    /// Returns 0 on success or an errno value; EOPNOTSUPP (or ENOTSUP where the
+    /// platform has no equivalent at all) means the extent was not reserved,
+    /// which callers should treat as a missing guarantee rather than a failure.
+    static FORCEINLINE int
+    Fallocate(int fd, uint64_t length) {
+#ifdef __APPLE__
+        (void)fd;
+        (void)length;
+        return ENOTSUP;
+#else
+        if (fallocate(fd, FALLOC_FL_KEEP_SIZE, 0, static_cast<off_t>(length)) == 0) {
+            return 0;
+        }
+        return errno;
 #endif
     }
 };

@@ -56,6 +56,9 @@
 #include "vsag/index_features.h"
 
 namespace vsag {
+
+class ChunkedLayout;
+struct ComponentLayout;
 class FlattenOptimizedBuildInterface;
 class HGraphOptimizedBuildSession;
 class IteratorFilterContext;
@@ -230,6 +233,15 @@ public:
 
     void
     Serialize(StreamWriter& writer) const override;
+
+    void
+    Serialize(SerializeWriter& writer, uint64_t chunk_size) const override;
+
+    void
+    ParallelDeserialize(DeserializeReader& reader, ThreadPool& pool) override;
+
+    void
+    ParallelDeserialize(DeserializeReader& reader) override;
 
     /// Set the number of threads used during Build().
     void
@@ -596,6 +608,54 @@ private:
     /// Write label (external id) mappings to stream.
     void
     serialize_label_info(StreamWriter& writer) const;
+
+    /// shared post-deserialization steps (dedup validation, memory accounting)
+    void
+    finish_deserialize();
+
+    /// build the in-memory state after every component has been read
+    /// (capacity, mutexes, visited-list pool, dedup validation); shared by
+    /// Deserialize(StreamReader&) and the parallel deserialization paths
+    void
+    finalize_deserialized_state(uint64_t serialized_total_count);
+
+    /// restore basic info and duplicate-format flags from the footer
+    /// metadata and return the serialized total count; shared by
+    /// Deserialize(StreamReader&) and the parallel deserialization paths
+    uint64_t
+    apply_footer_metadata(const MetadataPtr& metadata);
+
+    /// Restore a whole component whose Deserialize seeks inside its own payload
+    /// (see requires_seekable_payload). The frame is buffered first, so the
+    /// component gets a seekable reader and the frame stays exactly consumed
+    /// even though the component's own cursor does not reach the end.
+    void
+    deserialize_seekable_whole_component(DeserializeReader& reader,
+                                         const ComponentLayout& comp,
+                                         bool compressed);
+
+    /// dispatch a whole component of the chunked layout to its sequential
+    /// Deserialize by name.
+    ///
+    /// Not internally synchronized. The layout path dispatches each whole
+    /// component as one pool task, so distinct components run concurrently:
+    /// every branch must touch only index members that no other branch
+    /// touches. Adding a branch that reads or writes shared state (a counter,
+    /// a capacity field) requires either moving that state out of here or
+    /// serializing the component on the calling thread.
+    void
+    deserialize_whole_component(const std::string& name, StreamReader& reader);
+
+    /// parallel body load driven by the layout recorded in the footer
+    void
+    parallel_deserialize_layout(DeserializeReader& reader,
+                                ThreadPool& pool,
+                                const ChunkedLayout& layout);
+
+    /// parallel load of an uncompressed body without a recorded layout:
+    /// probe the component extents sequentially, then fill io data in parallel
+    void
+    parallel_deserialize_probe(DeserializeReader& reader, ThreadPool& pool, uint64_t body_end);
 
     /// Read label (external id) mappings from stream.
     void

@@ -41,6 +41,7 @@
 #include "utils/pointer_define.h"
 #include "vsag/dataset.h"
 #include "vsag/index.h"
+#include "vsag/serialize_writer.h"
 
 namespace vsag {
 
@@ -238,6 +239,23 @@ public:
 
     virtual void
     Deserialize(std::istream& in_stream);
+
+    /// parallel deserialization from a positioned reader
+    /// (see Index::ParallelDeserialize)
+    virtual void
+    ParallelDeserialize(DeserializeReader& reader, ThreadPool& pool) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "index does not support parallel deserialization");
+    }
+
+    /// parallel deserialization using the thread pool bound to this index
+    /// (via Resource); implementations fall back to an internal default
+    /// pool when none is bound
+    virtual void
+    ParallelDeserialize(DeserializeReader& reader) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "index does not support parallel deserialization");
+    }
 
     virtual void
     DeserializeStreaming(std::istream& in_stream);
@@ -492,6 +510,13 @@ public:
 
     virtual void
     Serialize(StreamWriter& writer) const = 0;
+
+    /// serialize in the chunked format (see Index::Serialize(SerializeWriter&, uint64_t))
+    virtual void
+    Serialize(SerializeWriter& writer, uint64_t chunk_size) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "index does not support chunked serialization");
+    }
 
     [[nodiscard]] virtual BinarySet
     Serialize() const;

@@ -120,7 +120,7 @@ MemoryBlockIO::PrefetchImpl(uint64_t offset, uint64_t cache_line) {
 }
 
 void
-MemoryBlockIO::check_and_realloc(uint64_t size) {
+MemoryBlockIO::check_and_realloc(uint64_t size, bool zero_fill) {
     if (size <= (blocks_.size() << block_bit_)) {
         return;
     }
@@ -132,10 +132,48 @@ MemoryBlockIO::check_and_realloc(uint64_t size) {
         if (ptr == nullptr) {
             throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "MemoryBlockIO allocation failed");
         }
-        memset(ptr, 0, block_size_);
+        if (zero_fill) {
+            memset(ptr, 0, block_size_);
+        }
         this->blocks_.emplace_back(ptr);
         ++cur_block_size;
     }
+}
+
+void
+MemoryBlockIO::ResizeForOverwriteImpl(uint64_t size) {
+    if (size <= this->size_) {
+        this->size_ = size;
+        return;
+    }
+    const uint64_t old_size = this->size_;
+    check_and_realloc(size, /*zero_fill=*/false);
+    // the caller overwrites [0, size), but the last block extends past size;
+    // clear that unwritten tail so reads there stay deterministic even if the
+    // allocator handed back recycled dirty pages
+    const uint64_t tail_offset = size & in_block_mask_;
+    if (tail_offset != 0) {
+        auto block_no = size >> block_bit_;
+        memset(blocks_[block_no] + tail_offset, 0, block_size_ - tail_offset);
+    }
+#ifndef NDEBUG
+    // debug builds poison the grown range instead of leaving whatever the
+    // allocator returned. A caller that fails to overwrite every byte then
+    // reads back the poison byte rather than plausible recycled data, which is the
+    // point: zero-filling here would make the bug reproducible-looking and
+    // hide it, while release keeps the skip this method exists for.
+    constexpr uint8_t poison = 0xCD;
+    for (uint64_t pos = old_size; pos < size;) {
+        const uint64_t block_no = pos >> block_bit_;
+        const uint64_t in_block = pos & in_block_mask_;
+        const uint64_t span = std::min(block_size_ - in_block, size - pos);
+        memset(blocks_[block_no] + in_block, poison, span);
+        pos += span;
+    }
+#else
+    (void)old_size;
+#endif
+    this->size_ = size;
 }
 
 void

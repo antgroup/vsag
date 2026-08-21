@@ -172,6 +172,55 @@ public:
     void
     Serialize(StreamWriter& writer) override;
 
+    [[nodiscard]] uint64_t
+    GetIOSize() const override {
+        // any io whose Write persists the bytes (in-memory or file-backed)
+        // can be pre-allocated by ReserveIO and filled concurrently by
+        // WriteRaw; only SkipDeserialize ios (e.g. reader_io, whose Write is
+        // a no-op counter) opt out and fall back to the whole-component path
+        if constexpr (not LayoutTmpl::IOType::SkipDeserialize) {
+            return this->layout_->GetIOSize();
+        } else {
+            return 0;
+        }
+    }
+
+    uint64_t
+    ReserveIO(StreamReader& reader) override {
+        if constexpr (not LayoutTmpl::IOType::SkipDeserialize) {
+            FlattenInterface::Deserialize(reader);
+            uint64_t io_size = 0;
+            StreamReader::ReadObj(reader, io_size);
+            this->layout_->ResizeForOverwrite(io_size);
+            return io_size;
+        } else {
+            return FlattenInterface::ReserveIO(reader);
+        }
+    }
+
+    void
+    WriteRaw(const uint8_t* data, uint64_t size, uint64_t offset) override {
+        if constexpr (not LayoutTmpl::IOType::SkipDeserialize) {
+            this->layout_->WriteRaw(data, size, offset);
+        } else {
+            FlattenInterface::WriteRaw(data, size, offset);
+        }
+    }
+
+    void
+    DeserializeTail(StreamReader& reader) override {
+        if constexpr (not LayoutTmpl::IOType::SkipDeserialize) {
+            this->quantizer_->Deserialize(reader);
+            // mirror the sequential Deserialize path: refresh backend_ from the
+            // quantizer so the two stay consistent even if a future quantizer
+            // makes the backend depend on deserialized state
+            this->backend_ = QuantizerDistanceBackend<QuantTmpl>::Get(
+                static_cast<const QuantTmpl&>(*this->quantizer_));
+        } else {
+            FlattenInterface::DeserializeTail(reader);
+        }
+    }
+
     void
     Deserialize(LvalueOrRvalue<StreamReader> reader) override;
 

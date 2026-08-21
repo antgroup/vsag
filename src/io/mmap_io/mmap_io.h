@@ -90,6 +90,21 @@ public:
     ResizeImpl(uint64_t size);
 
     /**
+     * @brief Grows the mapping like ResizeImpl, for an extent the caller
+     * overwrites in full.
+     *
+     * In addition to growing the file it reserves the blocks up front, so a
+     * later concurrent store cannot hit SIGBUS once the filesystem is full and
+     * the extent is allocated in one step instead of through scattered page
+     * faults. The kernel still zero-fills each page on its first write fault;
+     * that cost is inherent to a file-backed mapping and is not removed here.
+     *
+     * @param size The new size of the mapped region.
+     */
+    void
+    ResizeForOverwriteImpl(uint64_t size);
+
+    /**
      * @brief Reads data from the mapped memory at a specified offset.
      *
      * @param size The size of the data to be read.

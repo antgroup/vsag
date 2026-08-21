@@ -122,6 +122,65 @@ public:
         }
     }
 
+    /**
+     * @brief Byte size of the underlying io data (io_->size_) written by
+     * Serialize between the interface fields and the tail.
+     *
+     * A positive value also signals that this implementation serializes in
+     * the strict head / io data / tail form, so chunked serialization can
+     * precompute the boundaries; the default 0 opts out.
+     */
+    [[nodiscard]] virtual uint64_t
+    GetIOSize() const {
+        return 0;
+    }
+
+    /**
+     * @brief Chunked-restore hooks: ReserveIO, WriteRaw and DeserializeTail.
+     *
+     * Implement all three or none. The parallel load probes only ReserveIO and
+     * treats UNSUPPORTED_INDEX_OPERATION as "this io keeps no deserialized
+     * bytes", falling back to consuming the component in place; it then assumes
+     * the other two are available. An implementation that provided two of the
+     * three would fail in the tail phase, after the chunk writes already landed.
+     * Both current implementations gate the three on one `if constexpr`, so they
+     * cannot come apart; keep it that way rather than relying on a runtime check.
+     */
+    /**
+     * @brief Read the head (interface fields + io size) and pre-allocate
+     * the io data extent, so that WriteRaw can fill it concurrently.
+     *
+     * The extent is overwritten in full right after this call, so the io
+     * backing it should provide ResizeForOverwriteImpl; without it the
+     * pre-allocation falls back to a zero-filling Resize, which is a
+     * measurable cost for large components.
+     *
+     * @return the io data size in bytes
+     */
+    virtual uint64_t
+    ReserveIO(StreamReader& reader) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "GraphInterface does not support ReserveIO");
+    }
+
+    /**
+     * @brief Write raw io data bytes into [offset, offset + size); the
+     * extent must be pre-allocated by ReserveIO. Callers may invoke this
+     * concurrently on non-overlapping ranges.
+     */
+    virtual void
+    WriteRaw(const uint8_t* data, uint64_t size, uint64_t offset) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "GraphInterface does not support WriteRaw");
+    }
+
+    /// Read the tail (e.g. code line size, node versions) following the io data.
+    virtual void
+    DeserializeTail(StreamReader& reader) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "GraphInterface does not support DeserializeTail");
+    }
+
     virtual void
     Deserialize(StreamReader& reader) {
         StreamReader::ReadObj(reader, this->total_count_);
