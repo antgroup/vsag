@@ -57,12 +57,15 @@ private:
     // std::push_heap / std::pop_heap on the per-neighbor hot path.
     static constexpr bool kIsMaxHeap = max_heap;
 
+    // "a ranks above b" = a sits closer to the root: the larger dist wins for
+    // max-heaps (top_candidates keeps the worst candidate on top for eviction)
+    // and the smaller dist wins for min-heaps.
     static bool
     higher_than(const DistanceRecord& a, const DistanceRecord& b) {
         if constexpr (kIsMaxHeap) {
-            return CompareMax()(a, b);
+            return CompareMax()(b, a);
         } else {
-            return CompareMin()(a, b);
+            return CompareMin()(b, a);
         }
     }
 
