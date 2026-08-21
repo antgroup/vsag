@@ -88,8 +88,16 @@ public:
      */
     void
     Prefetch(InnerIdType id, uint32_t neighbor_i) override {
-        io_->Prefetch(static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_) +
-                      sizeof(uint32_t) + neighbor_i * sizeof(InnerIdType));
+        // Cover the remaining neighbor list, not just its first line: the
+        // GetNeighbors copy on each hop's critical path reads every id, and
+        // wide lists (e.g. degree 96 = 388 bytes) otherwise stall on
+        // on-demand fetches past the first 64 bytes.
+        const auto offset = static_cast<uint64_t>(neighbor_i) * sizeof(InnerIdType);
+        const uint64_t list_bytes = this->code_line_size_ - sizeof(uint32_t);
+        const uint64_t base =
+            static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_) +
+            sizeof(uint32_t);
+        io_->Prefetch(base + offset, offset < list_bytes ? (list_bytes - offset) : 0);
     }
 
     void
