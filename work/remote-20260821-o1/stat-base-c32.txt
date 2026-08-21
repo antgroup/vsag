@@ -1,0 +1,21 @@
+# started on Fri Aug 21 21:24:17 2026
+
+
+ Performance counter stats for 'env LD_LIBRARY_PATH=/root/VSAG-baseline/build-release/src OMP_PROC_BIND=spread OMP_PLACES=cores OMP_DYNAMIC=FALSE /root/VSAG-baseline/build-release/tools/eval/eval_performance /root/vsag-work/perf-o1/sift-c32.yml':
+
+ 5,815,365,509,742      cycles                           #    3.387 GHz                       
+ 7,790,312,188,416      instructions                     #    1.34  insn per cycle            
+ 1,423,642,067,669      branches                         #  829.197 M/sec                     
+    13,795,258,653      branch-misses                    #    0.97% of all branches           
+   226,118,982,256      cache-references                 #  131.703 M/sec                     
+                 0      cache-misses                                                          
+         7,114,678      context-switches                 #    4.144 K/sec                     
+               457      cpu-migrations                   #    0.266 /sec                      
+      1,716,891.63 msec task-clock                       #   28.279 CPUs utilized             
+
+      60.713184432 seconds time elapsed
+
+    1381.595608000 seconds user
+     217.884011000 seconds sys
+
+
