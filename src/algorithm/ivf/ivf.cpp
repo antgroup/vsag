@@ -2141,12 +2141,22 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         CHECK_ARGUMENT(request.expected_labels_.empty(),
                        "IVF batch search does not support expected labels");
         CHECK_ARGUMENT(request.topk_ > 0, "topk must be greater than 0");
+        CHECK_ARGUMENT(!this->label_table_->HasActivePaddingLabel(),
+                       "batch KNN does not support an index containing external label -1");
         CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr,
                        "query float32 vectors cannot be null");
         CHECK_ARGUMENT(query->GetDim() == this->dim_, "query dimension must match index dimension");
 
         const auto num_queries = query->GetNumElements();
+        CHECK_ARGUMENT(
+            num_queries <= std::numeric_limits<int64_t>::max() / request.topk_,
+            fmt::format(
+                "num_queries({}) * topk({}) would overflow int64_t", num_queries, request.topk_));
         const auto total_slots = num_queries * request.topk_;
+        CHECK_ARGUMENT(total_slots <= std::numeric_limits<size_t>::max() / sizeof(int64_t),
+                       "batch result id allocation would overflow size_t");
+        CHECK_ARGUMENT(total_slots <= std::numeric_limits<size_t>::max() / sizeof(float),
+                       "batch result distance allocation would overflow size_t");
         auto* alloc = select_query_allocator(ctx.alloc, this->allocator_);
         auto* ids = static_cast<int64_t*>(alloc->Allocate(sizeof(int64_t) * total_slots));
         auto* distances = static_cast<float*>(alloc->Allocate(sizeof(float) * total_slots));
@@ -2219,6 +2229,14 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             param.executors.emplace_back(executor);
         }
     }
+    CHECK_ARGUMENT(query != nullptr, "query dataset cannot be null");
+    CHECK_ARGUMENT(query->GetNumElements() > 0, "query count must be greater than 0");
+    CHECK_ARGUMENT(query->GetDim() == this->dim_, "query dimension must match index dimension");
+    if (is_range) {
+        CHECK_ARGUMENT(query->GetNumElements() == 1,
+                       "IVF range search only supports a single query");
+    }
+
     std::shared_ptr<ReasoningContext> reasoning_ctx;
     if (not request.expected_labels_.empty()) {
         reasoning_ctx = std::make_shared<ReasoningContext>(this->allocator_);
@@ -2322,6 +2340,7 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     // Reordered searches defer the finite bound to exact distances, but bucket selection still
     // needs threshold-mode state so non-finite approximations cannot consume the rerank pool.
     param.distance_threshold = request.threshold_;
+
     auto search_result = this->search<KNN_SEARCH>(query, param, ctx, reasoning_ctx.get());
     if (reorder_enabled) {
         auto result = reorder(request.threshold_.has_value() ? param.topk : request.topk_,
