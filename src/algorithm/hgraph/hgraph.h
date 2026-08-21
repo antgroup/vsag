@@ -405,7 +405,7 @@ private:
     // unlock()/lock() cycles around capacity-growth critical sections.
     class GlobalReadGuard {
     public:
-        GlobalReadGuard();
+        GlobalReadGuard() = default;
         explicit GlobalReadGuard(const HGraph* owner);
         ~GlobalReadGuard();
         GlobalReadGuard(const GlobalReadGuard&) = delete;
