@@ -49,35 +49,4 @@ MemoryIO::ShrinkImpl(uint64_t size) {
     buffer_ = new_buffer;
     this->size_ = size;
 }
-
-bool
-MemoryIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
-    bool ret = check_valid_offset(size + offset);
-    if (ret) {
-        memcpy(data, buffer_ + offset, size);
-    }
-    return ret;
-}
-
-const uint8_t*
-MemoryIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
-    need_release = false;
-    if (check_valid_offset(size + offset)) {
-        return buffer_ + offset;
-    }
-    return nullptr;
-}
-bool
-MemoryIO::MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const {
-    bool ret = true;
-    for (uint64_t i = 0; i < count; ++i) {
-        ret &= this->ReadImpl(sizes[i], offsets[i], datas);
-        datas += sizes[i];
-    }
-    return ret;
-}
-void
-MemoryIO::PrefetchImpl(uint64_t offset, uint64_t cache_line) {
-    PrefetchLines(this->buffer_ + offset, cache_line);
-}
 }  // namespace vsag
