@@ -409,6 +409,7 @@ make_context(eval::EvalDatasetPtr dataset,
     RequestContext request;
     request.workspace_path =
         config.workspace_path.empty() ? "/tmp/vsag_autotune" : config.workspace_path;
+    request.allow_quantization_tune = config.allow_quantization_tune;
     request.keep_intermediate = config.keep_intermediate;
     request.include_raw_eval = config.include_raw_evaluation;
     request.max_trials = config.max_trials;
@@ -469,6 +470,7 @@ make_context(eval::EvalDatasetPtr dataset,
         {"objective", {{"metric", request.objective}}},
         {"config",
          {{"workspace_path", request.workspace_path},
+          {"allow_quantization_tune", request.allow_quantization_tune},
           {"keep_intermediate", request.keep_intermediate},
           {"max_trials", request.max_trials}}},
         {"output", {{"include_raw_evaluation", request.include_raw_eval}}}};
@@ -646,11 +648,17 @@ ParseRequest(const JsonType& input) {
         parse_metric(required_string(input["objective"], "metric", "request.objective"));
     if (input.contains("tuning_config")) {
         const auto& config = input["tuning_config"];
-        known_keys(
-            config, {"workspace_path", "keep_intermediate", "max_trials"}, "request.tuning_config");
+        known_keys(config,
+                   {"workspace_path", "allow_quantization_tune", "keep_intermediate", "max_trials"},
+                   "request.tuning_config");
         if (config.contains("workspace_path")) {
             typed.config.workspace_path =
                 required_string(config, "workspace_path", "request.tuning_config");
+        }
+        if (config.contains("allow_quantization_tune")) {
+            require(config["allow_quantization_tune"].is_boolean(),
+                    "request.tuning_config.allow_quantization_tune must be a boolean");
+            typed.config.allow_quantization_tune = config["allow_quantization_tune"].get<bool>();
         }
         if (config.contains("keep_intermediate")) {
             require(config["keep_intermediate"].is_boolean(),

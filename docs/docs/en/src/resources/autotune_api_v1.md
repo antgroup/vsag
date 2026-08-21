@@ -21,7 +21,7 @@ passed to the concrete VSAG index and are validated when that index is created o
 | `workload` | object | Yes | The KNN workload being optimized. |
 | `constraints` | object | Yes | Non-empty metric-to-threshold map. |
 | `objective` | object | Yes | Metric used to rank feasible candidates. |
-| `tuning_config` | object | No | Workspace, artifact retention, and trial limit. |
+| `tuning_config` | object | No | Workspace, artifact retention, trial limit, and HGraph reuse policy. |
 | `output` | object | No | Report path and raw-eval control. |
 
 ### Dataset Rules
@@ -144,6 +144,20 @@ Candidates with the same normalized index name and identical concrete `create_pa
 one build group. AutoTune builds that group once, serializes it once as evidence, and evaluates
 every associated search candidate against the same in-memory index instance.
 
+By default, HGraph create candidates that differ only in `max_degree` may share one native build
+at the largest degree within each `base_quantization_type`. AutoTune uses `Index::Tune` to derive a
+separate final artifact for each concrete degree candidate. Set
+`tuning_config.allow_quantization_tune` to `true` to additionally share one canonical fp32 build
+across `base_quantization_type` values. Unsupported or failed transformations fall back to native
+builds for the affected candidates. If `build_seconds` or `build_and_search_seconds` is a
+constraint or the objective, this reuse is disabled.
+
+The derived artifact is authoritative. It is not guaranteed to be graph-equivalent to a native
+build from the same `create_params`, because degree reduction inherits source topology. When
+quantization tuning is enabled, changing quantization also does not rebuild the graph. Metrics
+come from evaluating the final serialized artifact; consumers must deserialize that artifact
+rather than rebuild it from the reported parameters.
+
 ### Existing-Index Mode
 
 With `index_path`:
@@ -260,6 +274,7 @@ repeat runs when latency or QPS drives selection.
   "tuning_config": {
     "workspace_path": "/tmp/vsag_autotune",
     "keep_intermediate": false,
+    "allow_quantization_tune": false,
     "max_trials": 1000
   },
   "output": {
@@ -273,6 +288,7 @@ repeat runs when latency or QPS drives selection.
 | --- | --- | --- |
 | `tuning_config.workspace_path` | `/tmp/vsag_autotune` | Run artifacts and CLI default reports. |
 | `tuning_config.keep_intermediate` | `false` | Keep all generated indexes. |
+| `tuning_config.allow_quantization_tune` | `false` | Allow one fp32 HGraph build to derive other `base_quantization_type` candidates; no effect in search-only mode. |
 | `tuning_config.max_trials` | `1000` | Maximum planned worst-case trials; hard maximum `100000`. |
 | `output.result_path` | `<workspace>/run-<id>.json` | CLI full report path. |
 | `output.include_raw_eval` | `false` | Include native eval JSON in build and trial records. |
@@ -370,6 +386,9 @@ then by normalized violation magnitude. It is only explanatory.
 | `build_id` | Stable ID referenced by trials. |
 | `index_name` | Concrete index type. |
 | `create_params` | Concrete create parameters. |
+| `strategy` | `full_build` or `hgraph_tune`. |
+| `source_build_id` | Canonical HGraph source identifier; present only for `hgraph_tune`. |
+| `transform_seconds` | Cumulative transformation time; present only for `hgraph_tune`. |
 | `status` | `success` or `failed`. |
 | `metrics` | Available build-shared metrics. |
 | `artifacts` | `source`, `index_path`, `use_existing_index`, and `retained`. |
@@ -407,11 +426,16 @@ Search trials in one build group reuse the same loaded index instance. A generat
 once and serialized once. In search-only mode the caller's index, or the index deserialized by the
 CLI adapter, is reused directly for every trial.
 
+For `strategy=hgraph_tune`, `transform_seconds` measures the graph and quantization transformations
+attributed to the artifact. Its `metrics.build_seconds` is the canonical source build duration plus
+`transform_seconds`, not the duration of an independent native build of the candidate.
+
 ### Artifact Semantics
 
-Artifact fields appear only in build-and-search records in V1. `artifacts.source` is `generated`,
-and `artifacts.index_path` is evidence of where the evaluated index was stored, not a promise that
-the path still exists. Check `artifacts.retained`:
+Artifact fields appear only in build-and-search records in V1. `artifacts.source` is `generated`
+for a native build or `hgraph_tune` for a derived HGraph artifact. `artifacts.index_path` is
+evidence of where the evaluated index was stored, not a promise that the path still exists. Check
+`artifacts.retained`:
 
 - `true`: this is the selected artifact, or retention of all generated indexes was requested;
 - `false`: AutoTune planned to remove or already removed the generated artifact.

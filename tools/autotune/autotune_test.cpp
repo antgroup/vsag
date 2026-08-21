@@ -514,6 +514,14 @@ TEST_CASE("AutoTune validates typed requests and optional ground truth") {
     const auto parsed = vsag::autotune::internal::ParseRequest(input);
     REQUIRE(parsed.context.dataset->GetTrainIds()[0] == fixture.base_ids[0]);
     REQUIRE(parsed.context.dataset->GetTrainIds()[1] == fixture.base_ids[1]);
+    REQUIRE_FALSE(parsed.context.allow_quantization_tune);
+    REQUIRE(parsed.context.effective_request["config"]["allow_quantization_tune"] == false);
+
+    input.config.allow_quantization_tune = true;
+    const auto quantization_tune = vsag::autotune::internal::ParseRequest(input);
+    REQUIRE(quantization_tune.context.allow_quantization_tune);
+    REQUIRE(quantization_tune.context.effective_request["config"]["allow_quantization_tune"] ==
+            true);
 
     input.constraints = {{vsag::autotune::Metric::LATENCY_AVG_MS, 1000.0}};
     input.workload.ground_truth = nullptr;
@@ -620,6 +628,15 @@ TEST_CASE("AutoTune keeps normalized offline request metadata") {
     auto input = request(dataset.Get(), workspace.Get());
     input.erase("indexes");
 
+    const auto default_parsed = vsag::autotune::internal::ParseRequest(input);
+    const auto& default_request =
+        std::get<vsag::autotune::internal::IndexTuningRequest>(default_parsed);
+    REQUIRE_FALSE(default_request.context.allow_quantization_tune);
+    REQUIRE(default_request.context.effective_request["config"]["allow_quantization_tune"] ==
+            false);
+
+    input["tuning_config"]["allow_quantization_tune"] = true;
+
     const auto parsed = vsag::autotune::internal::ParseRequest(input);
     const auto& index_request = std::get<vsag::autotune::internal::IndexTuningRequest>(parsed);
     const auto& effective = index_request.context.effective_request;
@@ -640,8 +657,15 @@ TEST_CASE("AutoTune keeps normalized offline request metadata") {
         REQUIRE(space["create_parameter_space"]["metric_type"] == "l2");
     }
     REQUIRE(effective["workload"]["concurrency"] == 2);
+    REQUIRE(index_request.context.allow_quantization_tune);
+    REQUIRE(effective["config"]["allow_quantization_tune"] == true);
     REQUIRE(effective["config"]["keep_intermediate"] == true);
     REQUIRE_FALSE(effective.contains("tuning_config"));
+
+    input["tuning_config"]["allow_quantization_tune"] = 1;
+    REQUIRE_THROWS_WITH(vsag::autotune::internal::ParseRequest(input),
+                        Catch::Matchers::ContainsSubstring(
+                            "request.tuning_config.allow_quantization_tune must be a boolean"));
 }
 
 TEST_CASE("AutoTune rejects index artifacts that fail to flush") {
@@ -760,13 +784,16 @@ TEST_CASE("AutoTune builds once per create candidate and supports an existing in
     ScopedPath workspace(temp_path("autotune-workspace"));
     write_dataset(dataset.Get());
 
-    const auto result = vsag::autotune::RunAutoTune(request(dataset.Get(), workspace.Get()));
+    auto input = request(dataset.Get(), workspace.Get());
+    input["tuning_config"]["allow_quantization_tune"] = true;
+    const auto result = vsag::autotune::RunAutoTune(input);
     INFO(result.dump(2));
     REQUIRE(result["status"] == "success");
     REQUIRE(omp_get_max_threads() == 3);
     REQUIRE(result["builds"].size() == 2);
     REQUIRE(result["trials"].size() == 4);
     REQUIRE(result["recommendation"]["create_params"]["dim"] == 8);
+    REQUIRE(result["request"]["config"]["allow_quantization_tune"] == true);
     for (const auto& build : result["builds"]) {
         REQUIRE(build["status"] == "success");
         REQUIRE(build["metrics"].contains("build_seconds"));
@@ -805,6 +832,149 @@ TEST_CASE("AutoTune builds once per create candidate and supports an existing in
     REQUIRE(existing_result["request"]["create_params"]["dim"] == 8);
     REQUIRE(existing_result["request"]["create_params"]["dtype"] == "float32");
     REQUIRE(existing_result["request"]["create_params"]["metric_type"] == "l2");
+}
+
+TEST_CASE("AutoTune derives HGraph degree and quantization candidates from canonical builds") {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kOFF);
+    ScopedBlockSizeLimit block_size_limit(256UL * 1024);
+    ScopedPath workspace(temp_path("autotune-hgraph-reuse-workspace"));
+    MemoryFixture fixture;
+    auto input = fixture.Request(workspace.Get());
+    input.index_spaces[0].create_parameter_space =
+        R"({"index_param":{"base_quantization_type":["fp32","sq8_uniform"],)"
+        R"("max_degree":[8,12],"ef_construction":40,"build_thread_count":2,)"
+        R"("store_raw_vector":[false,true]}})";
+    input.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 0.0}};
+    input.objective = vsag::autotune::Metric::INDEX_SIZE_MB;
+    input.config.allow_quantization_tune = true;
+    input.config.keep_intermediate = true;
+    input.config.max_trials = 8;
+
+    const auto tuned = vsag::autotune::TuneIndex(input);
+    REQUIRE(tuned.has_value());
+    const auto& report = tuned->report;
+    INFO(report.dump(2));
+    REQUIRE(report["builds"].size() == 8);
+    REQUIRE(report["trials"].size() == 8);
+    REQUIRE(std::all_of(report["builds"].begin(), report["builds"].end(), [](const auto& build) {
+        return build["status"] == "success" && build["strategy"] == "hgraph_tune";
+    }));
+    REQUIRE(std::all_of(report["builds"].begin(), report["builds"].end(), [](const auto& build) {
+        return build.contains("source_build_id") && build.contains("transform_seconds");
+    }));
+    REQUIRE(count_index_artifacts(workspace.Get()) == 8);
+    std::vector<std::string> source_ids;
+    std::string keep_raw_source;
+    std::string discard_raw_source;
+    for (const auto& build : report["builds"]) {
+        const auto source_id = build["source_build_id"].get<std::string>();
+        source_ids.emplace_back(source_id);
+        const auto keep_raw = build["create_params"]["index_param"]["store_raw_vector"].get<bool>();
+        auto& expected_source = keep_raw ? keep_raw_source : discard_raw_source;
+        if (expected_source.empty()) {
+            expected_source = source_id;
+        } else {
+            REQUIRE(expected_source == source_id);
+        }
+    }
+    std::sort(source_ids.begin(), source_ids.end());
+    source_ids.erase(std::unique(source_ids.begin(), source_ids.end()), source_ids.end());
+    REQUIRE(source_ids.size() == 2);
+    REQUIRE(keep_raw_source != discard_raw_source);
+
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(MemoryFixture::DIM)
+                     ->Float32Vectors(fixture.test.data())
+                     ->Owner(false);
+    for (const auto& build : report["builds"]) {
+        const auto create_params = build["create_params"];
+        REQUIRE(create_params["index_param"]["store_raw_vector"].is_boolean());
+        auto restored = vsag::Factory::CreateIndex("hgraph", create_params.dump());
+        REQUIRE(restored.has_value());
+        std::ifstream artifact(build["artifacts"]["index_path"].get<std::string>(),
+                               std::ios::binary);
+        REQUIRE(artifact.good());
+        REQUIRE(restored.value()->Deserialize(artifact).has_value());
+        REQUIRE(
+            restored.value()->KnnSearch(query, 3, R"({"hgraph":{"ef_search":16}})").has_value());
+    }
+}
+
+TEST_CASE("AutoTune keeps HGraph quantization build families separate by default") {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kOFF);
+    ScopedBlockSizeLimit block_size_limit(256UL * 1024);
+    ScopedPath workspace(temp_path("autotune-hgraph-degree-reuse-workspace"));
+    MemoryFixture fixture;
+    auto input = fixture.Request(workspace.Get());
+    input.index_spaces[0].create_parameter_space =
+        R"({"index_param":{"base_quantization_type":["fp32","sq8_uniform"],)"
+        R"("max_degree":[8,12],"ef_construction":40,"build_thread_count":2}})";
+    input.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 0.0}};
+    input.objective = vsag::autotune::Metric::INDEX_SIZE_MB;
+    input.config.keep_intermediate = true;
+    input.config.max_trials = 4;
+
+    const auto tuned = vsag::autotune::TuneIndex(input);
+    REQUIRE(tuned.has_value());
+    const auto& report = tuned->report;
+    INFO(report.dump(2));
+    REQUIRE(report["request"]["config"]["allow_quantization_tune"] == false);
+    REQUIRE(report["builds"].size() == 4);
+    REQUIRE(report["trials"].size() == 4);
+
+    std::string fp32_source;
+    std::string sq8_source;
+    for (const auto& build : report["builds"]) {
+        REQUIRE(build["status"] == "success");
+        REQUIRE(build["strategy"] == "hgraph_tune");
+        const auto quantization =
+            build["create_params"]["index_param"]["base_quantization_type"].get<std::string>();
+        REQUIRE((quantization == "fp32" || quantization == "sq8_uniform"));
+        auto& source = quantization == "fp32" ? fp32_source : sq8_source;
+        const auto source_id = build["source_build_id"].get<std::string>();
+        if (source.empty()) {
+            source = source_id;
+        } else {
+            REQUIRE(source == source_id);
+        }
+    }
+    REQUIRE_FALSE(fp32_source.empty());
+    REQUIRE_FALSE(sq8_source.empty());
+    REQUIRE(fp32_source != sq8_source);
+}
+
+TEST_CASE("AutoTune disables HGraph build reuse for build-cost metrics") {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kOFF);
+    ScopedBlockSizeLimit block_size_limit(256UL * 1024);
+    ScopedPath workspace(temp_path("autotune-hgraph-native-build-workspace"));
+    MemoryFixture fixture;
+    auto input = fixture.Request(workspace.Get());
+    input.index_spaces[0].create_parameter_space =
+        R"({"index_param":{"base_quantization_type":["fp32","sq8_uniform"],)"
+        R"("max_degree":[8,12],"ef_construction":40,"build_thread_count":2}})";
+    input.config.keep_intermediate = true;
+    input.config.max_trials = 4;
+
+    const auto require_native_builds = [](const auto& tuned) {
+        REQUIRE(tuned.has_value());
+        const auto& report = tuned->report;
+        INFO(report.dump(2));
+        REQUIRE(report["builds"].size() == 4);
+        REQUIRE(std::all_of(report["builds"].begin(),
+                            report["builds"].end(),
+                            [](const auto& build) { return build["strategy"] == "full_build"; }));
+    };
+
+    SECTION("constraint") {
+        require_native_builds(vsag::autotune::TuneIndex(input));
+    }
+
+    SECTION("objective") {
+        input.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 0.0}};
+        input.objective = vsag::autotune::Metric::BUILD_SECONDS;
+        require_native_builds(vsag::autotune::TuneIndex(input));
+    }
 }
 
 TEST_CASE("AutoTune CLI keeps only the recommended artifact by default") {
