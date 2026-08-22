@@ -29,7 +29,6 @@ namespace vsag {
 void
 MutableSindiTermDataCell::Finalize() {
     for (auto& window : windows_) {
-        this->SortByValue(window);
         this->Compact(window);
     }
 }
@@ -210,6 +209,74 @@ MutableSindiTermDataCell::GetTermDictCount() const {
     return term_dict_count;
 }
 
+MutableSindiTermDataCell::PostingRunSelection
+MutableSindiTermDataCell::SelectPostingRuns(const MutableSINDIWindow& window,
+                                            uint32_t term,
+                                            uint32_t retained_count) const {
+    const auto posting_count = window.term_sizes_[term];
+    retained_count = std::min(retained_count, posting_count);
+    if (window.postings_sorted_) {
+        return {retained_count, posting_count, 0};
+    }
+    const auto dirty = window.dirty_posting_prefixes_.find(term);
+    if (dirty == window.dirty_posting_prefixes_.end()) {
+        return {retained_count, posting_count, 0};
+    }
+
+    const auto prefix_count = dirty->second;
+    const auto suffix_count = posting_count - prefix_count;
+    if (retained_count == 0) {
+        return {0, prefix_count, 0};
+    }
+    if (retained_count == posting_count) {
+        return {prefix_count, prefix_count, suffix_count};
+    }
+
+    uint32_t lower = retained_count > prefix_count ? retained_count - prefix_count : 0;
+    uint32_t upper = std::min(retained_count, suffix_count);
+    while (lower <= upper) {
+        const auto take_suffix = lower + (upper - lower) / 2;
+        const auto take_prefix = retained_count - take_suffix;
+        if (take_prefix > 0 && take_suffix < suffix_count &&
+            PostingEntryBefore(window, term, prefix_count + take_suffix, take_prefix - 1)) {
+            lower = take_suffix + 1;
+            continue;
+        }
+        if (take_suffix > 0 && take_prefix < prefix_count &&
+            PostingEntryBefore(window, term, take_prefix, prefix_count + take_suffix - 1)) {
+            upper = take_suffix - 1;
+            continue;
+        }
+        return {take_prefix, prefix_count, take_suffix};
+    }
+
+    CHECK_ARGUMENT(false, "failed to partition sorted posting runs");
+}
+
+void
+MutableSindiTermDataCell::ScanPostingRange(uint32_t term_iterator,
+                                           const SparseTermComputerPtr& computer,
+                                           const uint16_t* term_ids,
+                                           const uint8_t* term_data,
+                                           uint32_t term_count,
+                                           float* dists,
+                                           SparseEvaluationTracker* evaluation_tracker) const {
+    if (term_count == 0) {
+        return;
+    }
+    if (evaluation_tracker != nullptr) {
+        evaluation_tracker->Mark(term_ids, term_count);
+    }
+    if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
+        computer->ScanForAccumulateSQ8(term_iterator, term_ids, term_data, term_count, dists);
+    } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
+        computer->ScanForAccumulateFP16Bytes(term_iterator, term_ids, term_data, term_count, dists);
+    } else {
+        computer->ScanForAccumulateFloatBytes(
+            term_iterator, term_ids, term_data, term_count, dists);
+    }
+}
+
 void
 MutableSindiTermDataCell::QueryWindow(float* dists,
                                       uint32_t window_id,
@@ -237,26 +304,26 @@ MutableSindiTermDataCell::QueryWindow(float* dists,
 
         const auto posting_count = window.term_sizes_[term];
         const auto term_size = computer->GetTermScanCount(posting_count);
-        query_context.evaluation_tracker.Mark(window.term_ids_[term]->data(), term_size);
-
-        if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
-            computer->ScanForAccumulateSQ8(it,
-                                           window.term_ids_[term]->data(),
-                                           window.term_datas_[term]->data(),
-                                           term_size,
-                                           dists);
-        } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
-            computer->ScanForAccumulateFP16Bytes(it,
-                                                 window.term_ids_[term]->data(),
-                                                 window.term_datas_[term]->data(),
-                                                 term_size,
-                                                 dists);
-        } else {
-            computer->ScanForAccumulateFloatBytes(it,
-                                                  window.term_ids_[term]->data(),
-                                                  window.term_datas_[term]->data(),
-                                                  term_size,
-                                                  dists);
+        const auto selected = this->SelectPostingRuns(window, term, term_size);
+        const auto code_size = this->GetTermValueCodeSize();
+        const auto* term_ids = window.term_ids_[term]->data();
+        const auto* term_data = window.term_datas_[term]->data();
+        this->ScanPostingRange(it,
+                               computer,
+                               term_ids,
+                               term_data,
+                               selected.prefix_count,
+                               dists,
+                               &query_context.evaluation_tracker);
+        if (selected.suffix_count > 0) {
+            this->ScanPostingRange(
+                it,
+                computer,
+                term_ids + selected.suffix_offset,
+                term_data + static_cast<uint64_t>(selected.suffix_offset) * code_size,
+                selected.suffix_count,
+                dists,
+                &query_context.evaluation_tracker);
         }
     }
     computer->ResetTerm();
@@ -500,61 +567,110 @@ MutableSindiTermDataCell::InsertHeapByTermLists(const MutableSINDIWindow& window
             continue;
         }
 
-        uint32_t i = 0;
         const auto posting_count = window.term_sizes_[term];
         const auto term_size = computer->GetTermScanCount(posting_count);
-        auto& one_term_ids = *window.term_ids_[term];
-        if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-            if (heap.size() < n_candidate) {
-                for (; i < term_size; i++) {
-                    id = one_term_ids[i];
-                    const bool heap_filled = fill_heap_initial<type>(id,
-                                                                     dists[id],
-                                                                     cur_heap_top,
-                                                                     heap,
-                                                                     offset_id,
-                                                                     n_candidate,
-                                                                     filter,
-                                                                     param.distance_threshold,
-                                                                     param.enable_reorder);
-                    if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
-                        if (filter_callback_remaining != nullptr and
-                            *filter_callback_remaining == 0) {
-                            computer->ResetTerm();
-                            return true;
+        if (window.postings_sorted_) {
+            uint32_t i = 0;
+            const auto& term_ids = *window.term_ids_[term];
+            if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+                if (heap.size() < n_candidate) {
+                    for (; i < term_size; ++i) {
+                        id = term_ids[i];
+                        const bool heap_filled = fill_heap_initial<type>(id,
+                                                                         dists[id],
+                                                                         cur_heap_top,
+                                                                         heap,
+                                                                         offset_id,
+                                                                         n_candidate,
+                                                                         filter,
+                                                                         param.distance_threshold,
+                                                                         param.enable_reorder);
+                        if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
+                            if (filter_callback_remaining != nullptr &&
+                                *filter_callback_remaining == 0) {
+                                computer->ResetTerm();
+                                return true;
+                            }
+                        }
+                        if (heap_filled) {
+                            ++i;
+                            break;
                         }
                     }
-                    if (heap_filled) {
-                        i++;
-                        break;
+                }
+            }
+            for (; i < term_size; ++i) {
+                id = term_ids[i];
+                if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+                    if (candidate_tracker != nullptr && !candidate_tracker->MarkOne(id)) {
+                        continue;
+                    }
+                }
+                insert_candidate_into_heap<mode, type>(id,
+                                                       dists[id],
+                                                       cur_heap_top,
+                                                       heap,
+                                                       offset_id,
+                                                       n_candidate,
+                                                       radius,
+                                                       filter,
+                                                       param.distance_threshold,
+                                                       param.enable_reorder);
+                if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
+                    if (filter_callback_remaining != nullptr && *filter_callback_remaining == 0) {
+                        computer->ResetTerm();
+                        return true;
                     }
                 }
             }
+            continue;
         }
-
-        for (; i < term_size; i++) {
-            id = one_term_ids[i];
-            if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
-                if (candidate_tracker != nullptr && not candidate_tracker->MarkOne(id)) {
-                    continue;
+        const auto selected = this->SelectPostingRuns(window, term, term_size);
+        bool heap_initialized = heap.size() >= n_candidate;
+        const auto completed =
+            this->ForEachSelectedPosting(window, term, selected, [&](uint16_t selected_id) {
+                id = selected_id;
+                if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+                    if (candidate_tracker != nullptr && !candidate_tracker->MarkOne(id)) {
+                        return true;
+                    }
                 }
-            }
-            insert_candidate_into_heap<mode, type>(id,
-                                                   dists[id],
-                                                   cur_heap_top,
-                                                   heap,
-                                                   offset_id,
-                                                   n_candidate,
-                                                   radius,
-                                                   filter,
-                                                   param.distance_threshold,
-                                                   param.enable_reorder);
-            if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
-                if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
-                    computer->ResetTerm();
-                    return true;
+                if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+                    if (!heap_initialized) {
+                        heap_initialized = fill_heap_initial<type>(id,
+                                                                   dists[id],
+                                                                   cur_heap_top,
+                                                                   heap,
+                                                                   offset_id,
+                                                                   n_candidate,
+                                                                   filter,
+                                                                   param.distance_threshold,
+                                                                   param.enable_reorder);
+                        if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
+                            return filter_callback_remaining == nullptr ||
+                                   *filter_callback_remaining != 0;
+                        }
+                        return true;
+                    }
                 }
-            }
+                insert_candidate_into_heap<mode, type>(id,
+                                                       dists[id],
+                                                       cur_heap_top,
+                                                       heap,
+                                                       offset_id,
+                                                       n_candidate,
+                                                       radius,
+                                                       filter,
+                                                       param.distance_threshold,
+                                                       param.enable_reorder);
+                if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
+                    return filter_callback_remaining == nullptr || *filter_callback_remaining != 0;
+                }
+                return true;
+            });
+        if (!completed) {
+            computer->ResetTerm();
+            return true;
         }
     }
     computer->ResetTerm();
@@ -655,6 +771,7 @@ MutableSindiTermDataCell::InsertVector(const SparseVector& sparse_base, uint32_t
             window->term_datas_[term] = std::make_unique<Vector<uint8_t>>(allocator_);
         }
 
+        const auto old_term_size = window->term_sizes_[term];
         window->term_ids_[term]->push_back(window_local_id);
 
         auto& data_vec = *window->term_datas_[term];
@@ -664,6 +781,11 @@ MutableSindiTermDataCell::InsertVector(const SparseVector& sparse_base, uint32_t
             val, sparse_value_quant_type_, quantization_params_.get(), data_vec.data() + old_size);
 
         window->term_sizes_[term] += 1;
+        window->dirty_posting_prefixes_.try_emplace(term, old_term_size);
+        if (window->pending_posting_flags_[term] == 0) {
+            window->pending_posting_flags_[term] = 1;
+            window->pending_posting_terms_.push_back(term);
+        }
     }
     if (sparse_base.len_ > 0) {
         window->postings_sorted_ = false;
@@ -678,7 +800,7 @@ MutableSindiTermDataCell::SortByValue(uint32_t window_id) {
 }
 
 void
-MutableSindiTermDataCell::SortByValue(MutableSINDIWindow& window) const {
+MutableSindiTermDataCell::SortByValue(MutableSINDIWindow& window) {
     if (window.postings_sorted_) {
         return;
     }
@@ -703,7 +825,219 @@ MutableSindiTermDataCell::SortByValue(MutableSINDIWindow& window) const {
                                                      sorted_ids,
                                                      sorted_data);
     }
+    window.dirty_posting_prefixes_.clear();
+    window.dirty_posting_prefixes_.rehash(0);
+    for (uint32_t term : window.pending_posting_terms_) {
+        window.pending_posting_flags_[term] = 0;
+    }
+    window.pending_posting_terms_.clear();
     window.postings_sorted_ = true;
+    this->ReleaseNormalizationScratch();
+}
+
+bool
+MutableSindiTermDataCell::PostingEntryBefore(const MutableSINDIWindow& window,
+                                             uint32_t term,
+                                             uint32_t left,
+                                             uint32_t right) const {
+    const auto& ids = *window.term_ids_[term];
+    const auto& data = *window.term_datas_[term];
+    const auto compare = [&ids, &data, left, right](auto code_type) {
+        using CodeType = decltype(code_type);
+        CodeType left_code{};
+        CodeType right_code{};
+        std::memcpy(&left_code,
+                    data.data() + static_cast<uint64_t>(left) * sizeof(CodeType),
+                    sizeof(CodeType));
+        std::memcpy(&right_code,
+                    data.data() + static_cast<uint64_t>(right) * sizeof(CodeType),
+                    sizeof(CodeType));
+        if (left_code != right_code) {
+            return left_code > right_code;
+        }
+        return ids[left] < ids[right];
+    };
+
+    switch (sparse_value_quant_type_) {
+        case SparseValueQuantizationType::SQ8:
+            return compare(uint8_t{});
+        case SparseValueQuantizationType::FP16:
+            return compare(uint16_t{});
+        case SparseValueQuantizationType::FP32:
+            return compare(float{});
+        default:
+            CHECK_ARGUMENT(false, "unknown sparse value quantization type");
+    }
+}
+
+void
+MutableSindiTermDataCell::NormalizePosting(MutableSINDIWindow& window, uint32_t term) {
+    const auto dirty = window.dirty_posting_prefixes_.find(term);
+    if (dirty == window.dirty_posting_prefixes_.end()) {
+        return;
+    }
+
+    const auto prefix_count = dirty->second;
+    const auto posting_count = window.term_sizes_[term];
+    const auto code_size = this->GetTermValueCodeSize();
+    auto& ids = *window.term_ids_[term];
+    auto& data = *window.term_datas_[term];
+    normalization_ids_scratch_.resize(posting_count);
+    normalization_data_scratch_.resize(static_cast<uint64_t>(posting_count) * code_size);
+
+    uint32_t prefix = 0;
+    uint32_t suffix = prefix_count;
+    uint32_t output = 0;
+    while (prefix < prefix_count && suffix < posting_count) {
+        const auto source = PostingEntryBefore(window, term, prefix, suffix) ? prefix++ : suffix++;
+        normalization_ids_scratch_[output] = ids[source];
+        std::memcpy(normalization_data_scratch_.data() + static_cast<uint64_t>(output) * code_size,
+                    data.data() + static_cast<uint64_t>(source) * code_size,
+                    code_size);
+        ++output;
+    }
+    while (prefix < prefix_count) {
+        normalization_ids_scratch_[output] = ids[prefix];
+        std::memcpy(normalization_data_scratch_.data() + static_cast<uint64_t>(output) * code_size,
+                    data.data() + static_cast<uint64_t>(prefix) * code_size,
+                    code_size);
+        ++prefix;
+        ++output;
+    }
+    while (suffix < posting_count) {
+        normalization_ids_scratch_[output] = ids[suffix];
+        std::memcpy(normalization_data_scratch_.data() + static_cast<uint64_t>(output) * code_size,
+                    data.data() + static_cast<uint64_t>(suffix) * code_size,
+                    code_size);
+        ++suffix;
+        ++output;
+    }
+
+    std::copy(normalization_ids_scratch_.begin(), normalization_ids_scratch_.end(), ids.begin());
+    std::copy(normalization_data_scratch_.begin(), normalization_data_scratch_.end(), data.begin());
+    window.dirty_posting_prefixes_.erase(term);
+}
+
+bool
+MutableSindiTermDataCell::FinalizeInsertBatch(uint32_t window_id) {
+    CHECK_ARGUMENT(window_id < windows_.size(), "mutable SINDI window id out of range");
+    return this->FinalizeInsertBatch(windows_[window_id], true);
+}
+
+bool
+MutableSindiTermDataCell::FinalizeInsertBatch(MutableSINDIWindow& window, bool release_scratch) {
+    if (window.dirty_posting_prefixes_.empty()) {
+        return false;
+    }
+
+    struct posting_sort_scratch {
+        explicit posting_sort_scratch(Allocator* allocator)
+            : order(allocator), sorted_ids(allocator), sorted_data(allocator) {
+        }
+
+        Vector<uint32_t> order;
+        Vector<uint16_t> sorted_ids;
+        Vector<uint8_t> sorted_data;
+    };
+    std::optional<posting_sort_scratch> scratch;
+    bool posting_state_changed = false;
+    const auto code_size = this->GetTermValueCodeSize();
+    for (uint32_t term : window.pending_posting_terms_) {
+        window.pending_posting_flags_[term] = 0;
+        const auto dirty = window.dirty_posting_prefixes_.find(term);
+        if (dirty == window.dirty_posting_prefixes_.end()) {
+            continue;
+        }
+        if (!scratch.has_value()) {
+            scratch.emplace(allocator_);
+        }
+        auto& sort_scratch = scratch.value();
+        posting_state_changed = true;
+        const auto prefix_count = dirty->second;
+        const auto suffix_count = window.term_sizes_[term] - prefix_count;
+        auto& ids = *window.term_ids_[term];
+        auto& data = *window.term_datas_[term];
+        sindi_datacell_utils::SortPostingListByValue(
+            ids.data() + prefix_count,
+            data.data() + static_cast<uint64_t>(prefix_count) * code_size,
+            suffix_count,
+            sparse_value_quant_type_,
+            sort_scratch.order,
+            sort_scratch.sorted_ids,
+            sort_scratch.sorted_data);
+
+        if (prefix_count == 0) {
+            window.dirty_posting_prefixes_.erase(dirty);
+            continue;
+        }
+        const auto normalize_threshold =
+            std::clamp(prefix_count, MIN_DIRTY_POSTING_SIZE, MAX_DIRTY_POSTING_SIZE);
+        if (suffix_count >= normalize_threshold) {
+            this->NormalizePosting(window, term);
+        }
+    }
+    window.pending_posting_terms_.clear();
+    if (window.dirty_posting_prefixes_.empty()) {
+        window.dirty_posting_prefixes_.rehash(0);
+        window.postings_sorted_ = true;
+    } else {
+        window.postings_sorted_ = false;
+    }
+    if (release_scratch) {
+        this->ReleaseNormalizationScratch();
+    }
+    return posting_state_changed;
+}
+
+void
+MutableSindiTermDataCell::ReleaseNormalizationScratch() {
+    Vector<uint16_t> empty_ids(allocator_);
+    Vector<uint8_t> empty_data(allocator_);
+    normalization_ids_scratch_.swap(empty_ids);
+    normalization_data_scratch_.swap(empty_data);
+}
+
+bool
+MutableSindiTermDataCell::NormalizeDirtyPostings(uint32_t window_id) {
+    CHECK_ARGUMENT(window_id < windows_.size(), "mutable SINDI window id out of range");
+    return this->NormalizeDirtyPostings(windows_[window_id], true);
+}
+
+bool
+MutableSindiTermDataCell::NormalizeDirtyPostings() {
+    bool posting_state_changed = false;
+    for (auto& window : windows_) {
+        posting_state_changed |= this->NormalizeDirtyPostings(window, false);
+    }
+    this->ReleaseNormalizationScratch();
+    return posting_state_changed;
+}
+
+bool
+MutableSindiTermDataCell::NormalizeDirtyPostings(MutableSINDIWindow& window, bool release_scratch) {
+    const auto finalized = this->FinalizeInsertBatch(window, false);
+    if (window.dirty_posting_prefixes_.empty()) {
+        if (release_scratch) {
+            this->ReleaseNormalizationScratch();
+        }
+        return finalized;
+    }
+
+    Vector<uint32_t> dirty_terms(allocator_);
+    dirty_terms.reserve(window.dirty_posting_prefixes_.size());
+    for (const auto& item : window.dirty_posting_prefixes_) {
+        dirty_terms.push_back(item.first);
+    }
+    for (uint32_t term : dirty_terms) {
+        this->NormalizePosting(window, term);
+    }
+    window.dirty_posting_prefixes_.clear();
+    window.dirty_posting_prefixes_.rehash(0);
+    window.postings_sorted_ = true;
+    if (release_scratch) {
+        this->ReleaseNormalizationScratch();
+    }
+    return true;
 }
 
 void
@@ -729,14 +1063,19 @@ MutableSindiTermDataCell::ResizeTermList(MutableSINDIWindow& window,
     Vector<std::unique_ptr<Vector<uint16_t>>> new_ids(new_capacity, allocator_);
     Vector<std::unique_ptr<Vector<uint8_t>>> new_datas(new_capacity, allocator_);
     Vector<uint32_t> new_sizes(new_capacity, 0, allocator_);
+    Vector<uint8_t> new_pending_flags(new_capacity, 0, allocator_);
 
     std::move(window.term_ids_.begin(), window.term_ids_.end(), new_ids.begin());
     std::move(window.term_datas_.begin(), window.term_datas_.end(), new_datas.begin());
     std::copy(window.term_sizes_.begin(), window.term_sizes_.end(), new_sizes.begin());
+    std::copy(window.pending_posting_flags_.begin(),
+              window.pending_posting_flags_.end(),
+              new_pending_flags.begin());
 
     window.term_ids_.swap(new_ids);
     window.term_datas_.swap(new_datas);
     window.term_sizes_.swap(new_sizes);
+    window.pending_posting_flags_.swap(new_pending_flags);
     window.term_capacity_ = new_capacity;
 }
 
@@ -747,6 +1086,7 @@ MutableSindiTermDataCell::Compact() {
 
 void
 MutableSindiTermDataCell::Compact(MutableSINDIWindow& window) {
+    this->NormalizeDirtyPostings(window, true);
     uint32_t compact_term_capacity = 0;
     const uint64_t compactable_capacity =
         std::min(std::min(static_cast<uint64_t>(window.term_capacity_),
@@ -762,6 +1102,7 @@ MutableSindiTermDataCell::Compact(MutableSINDIWindow& window) {
     Vector<std::unique_ptr<Vector<uint16_t>>> compact_ids(compact_term_capacity, allocator_);
     Vector<std::unique_ptr<Vector<uint8_t>>> compact_datas(compact_term_capacity, allocator_);
     Vector<uint32_t> compact_sizes(compact_term_capacity, 0, allocator_);
+    Vector<uint8_t> compact_pending_flags(compact_term_capacity, 0, allocator_);
     for (uint32_t i = 0; i < compact_term_capacity; ++i) {
         compact_sizes[i] = window.term_sizes_[i];
         if (window.term_sizes_[i] != 0) {
@@ -777,6 +1118,7 @@ MutableSindiTermDataCell::Compact(MutableSINDIWindow& window) {
     window.term_ids_.swap(compact_ids);
     window.term_datas_.swap(compact_datas);
     window.term_sizes_.swap(compact_sizes);
+    window.pending_posting_flags_.swap(compact_pending_flags);
     window.term_capacity_ = compact_term_capacity;
 }
 
@@ -855,6 +1197,8 @@ MutableSindiTermDataCell::GetMemoryUsage() const {
         memory += MutableSindiTermDataCell::GetWindowMemoryUsage(window);
     }
     memory += sizeof(QuantizationParams);
+    memory += normalization_ids_scratch_.capacity() * sizeof(uint16_t);
+    memory += normalization_data_scratch_.capacity() * sizeof(uint8_t);
     return static_cast<uint64_t>(memory);
 }
 
@@ -876,6 +1220,10 @@ MutableSindiTermDataCell::GetWindowMemoryUsage(const MutableSINDIWindow& window)
         }
     }
     memory += window.term_sizes_.capacity() * sizeof(uint32_t);
+    memory += window.dirty_posting_prefixes_.bucket_count() * sizeof(void*);
+    memory += window.dirty_posting_prefixes_.size() * sizeof(std::pair<const uint32_t, uint32_t>);
+    memory += window.pending_posting_terms_.capacity() * sizeof(uint32_t);
+    memory += window.pending_posting_flags_.capacity() * sizeof(uint8_t);
     return memory;
 }
 

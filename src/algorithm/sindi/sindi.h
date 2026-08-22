@@ -269,7 +269,12 @@ private:
 
     /// Recalculate and cache the memory-usage counter.
     void
-    cal_memory_usage();
+    cal_memory_usage() const;
+
+    /// Canonicalize mutable posting runs before writing the sorted-posting format.
+    /// The caller must hold global_mutex_ exclusively.
+    void
+    normalize_dirty_postings_for_serialization() const;
 
     /**
      * @brief Compact a sparse vector's dim-ids into the remapped space
