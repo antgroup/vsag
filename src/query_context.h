@@ -242,6 +242,28 @@ public:
         AddDistance(phase, BackendFromName(backend), count);
     }
 
+    // Thread-private fast paths for the per-search counters; fall back to
+    // locked RMWs when the statistics object is concurrently mutated.
+    void
+    AddDistCmp(uint64_t count) {
+        if (parallel_.load(std::memory_order_relaxed)) {
+            dist_cmp.fetch_add(count, std::memory_order_relaxed);
+        } else {
+            dist_cmp.store(dist_cmp.load(std::memory_order_relaxed) + count,
+                           std::memory_order_relaxed);
+        }
+    }
+
+    void
+    AddHops(uint64_t count) {
+        if (parallel_.load(std::memory_order_relaxed)) {
+            hops.fetch_add(count, std::memory_order_relaxed);
+        } else {
+            hops.store(hops.load(std::memory_order_relaxed) + count,
+                       std::memory_order_relaxed);
+        }
+    }
+
     [[nodiscard]] JsonType
     ToJson() const {
         JsonType j;

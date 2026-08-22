@@ -317,8 +317,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         }
     }
     if (ctx != nullptr && ctx->stats != nullptr) {
-        ctx->stats->dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
-        ctx->stats->hops.fetch_add(hops, std::memory_order_relaxed);
+        ctx->stats->AddDistCmp(dist_cmp);
+        ctx->stats->AddHops(hops);
     }
     return top_candidates_ptr;
 }
@@ -944,9 +944,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     }
 
     if (ctx != nullptr and ctx->stats != nullptr) {
-        auto& stats = *ctx->stats;
-        stats.dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
-        stats.hops.fetch_add(hops, std::memory_order_relaxed);
+        ctx->stats->AddDistCmp(dist_cmp);
+        ctx->stats->AddHops(hops);
     }
 
     return top_candidates_ptr;
