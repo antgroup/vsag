@@ -44,6 +44,10 @@ BucketReorder::Reorder(const DistHeapPtr& input,
 
     Allocator* query_allocator = select_query_allocator(ctx.alloc, allocator_);
     const uint64_t candidate_count = input == nullptr ? 0 : input->Size();
+    if (ctx.stats != nullptr) {
+        ctx.stats->reorder_candidate_count.fetch_add(static_cast<uint32_t>(candidate_count),
+                                                     std::memory_order_relaxed);
+    }
     topk = std::min(topk, static_cast<int64_t>(candidate_count));
     auto reorder_heap = std::make_shared<StandardHeap<true, false>>(query_allocator, topk);
     if (candidate_count == 0 or topk == 0) {

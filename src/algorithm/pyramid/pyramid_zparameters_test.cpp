@@ -37,6 +37,7 @@ struct PyramidDefaultParam {
     std::string graph_type = "odescent";
     std::string graph_storage_type = "compressed";
     int build_thread_count = 8;
+    bool build_by_base = false;
     std::string precise_quantization_type = "fp32";
     int base_pq_dim = 0;
     std::string base_file_path = "base_path";
@@ -68,6 +69,7 @@ generate_pyramid(const PyramidDefaultParam& param) {
                 }}
             }},
             "build_thread_count": {},
+            "build_by_base": {},
             "ef_construction": {},
             "graph": {{
                 "alpha": {},
@@ -113,6 +115,7 @@ generate_pyramid(const PyramidDefaultParam& param) {
                        param.base_pq_dim,
                        param.base_quantization_type,
                        param.build_thread_count,
+                       param.build_by_base,
                        param.ef_construction,
                        param.alpha,
                        param.graph_storage_type,
@@ -291,6 +294,7 @@ TEST_CASE("Pyramid Parameters CheckCompatibility", "[ut][PyramidParameter][Check
 
     TEST_COMPATIBILITY_CASE("different graph type", graph_type, "odescent", "nsw", true);
     TEST_COMPATIBILITY_CASE("different build thread count", build_thread_count, 4, 8, true);
+    TEST_COMPATIBILITY_CASE("different build codes", build_by_base, false, true, false);
     TEST_COMPATIBILITY_CASE(
         "different precise quantization type", precise_quantization_type, "fp32", "fp16", false);
     TEST_COMPATIBILITY_CASE("different index min size", index_min_size, 500, 1500, false);
@@ -687,4 +691,99 @@ TEST_CASE("Pyramid parses hops limit search parameter", "[ut][PyramidParameters]
         R"({"pyramid":{"ef_search":100,"hops_limit":-1}})"));
     REQUIRE_THROWS(vsag::PyramidSearchParameters::FromJson(
         R"({"pyramid":{"ef_search":100,"hops_limit":4294967296}})"));
+}
+
+TEST_CASE("Pyramid validates root graph type and hierarchy overrides", "[ut][PyramidParameters]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto external = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "root_graph_type": "single_layer",
+        "hierarchies": [
+            {"name": "single"},
+            {"name": "multi", "root_graph_type": "multi_layer", "no_build_levels": []}
+        ]
+    })");
+    auto mapped = std::dynamic_pointer_cast<vsag::PyramidParameters>(
+        vsag::Pyramid::CheckAndMappingExternalParam(external, common_param));
+    REQUIRE(mapped->root_graph_type == vsag::PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER);
+    REQUIRE(mapped->hierarchies[0].root_graph_type == vsag::PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER);
+    REQUIRE(mapped->hierarchies[1].root_graph_type == vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER);
+
+    external[vsag::PYRAMID_ROOT_GRAPH_TYPE].SetString("unknown");
+    REQUIRE_THROWS(vsag::Pyramid::CheckAndMappingExternalParam(external, common_param));
+
+    auto unbuilt_root = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "root_graph_type": "multi_layer",
+        "no_build_levels": [0]
+    })");
+    REQUIRE_THROWS(vsag::Pyramid::CheckAndMappingExternalParam(unbuilt_root, common_param));
+
+    unbuilt_root = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "root_graph_type": "single_layer",
+        "no_build_levels": [0]
+    })");
+    REQUIRE_NOTHROW(vsag::Pyramid::CheckAndMappingExternalParam(unbuilt_root, common_param));
+
+    auto default_unbuilt_root = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "no_build_levels": [0]
+    })");
+    REQUIRE_NOTHROW(
+        vsag::Pyramid::CheckAndMappingExternalParam(default_unbuilt_root, common_param));
+
+    auto explicit_hierarchy_root = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "hierarchies": [
+            {
+                "name": "site",
+                "root_graph_type": "single_layer",
+                "no_build_levels": [0]
+            }
+        ]
+    })");
+    REQUIRE_NOTHROW(
+        vsag::Pyramid::CheckAndMappingExternalParam(explicit_hierarchy_root, common_param));
+}
+
+TEST_CASE("Pyramid maps the construction code source", "[ut][PyramidParameters]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto external = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "sq8",
+        "precise_quantization_type": "fp32",
+        "use_reorder": true,
+        "build_by_base": true
+    })");
+    auto mapped = std::dynamic_pointer_cast<vsag::PyramidParameters>(
+        vsag::Pyramid::CheckAndMappingExternalParam(external, common_param));
+    REQUIRE(mapped->build_by_base);
+    REQUIRE(mapped->ToJson()["build_by_base"].GetBool());
+
+    external[vsag::PYRAMID_BUILD_BY_BASE_QUANTIZATION].SetBool(false);
+    mapped = std::dynamic_pointer_cast<vsag::PyramidParameters>(
+        vsag::Pyramid::CheckAndMappingExternalParam(external, common_param));
+    REQUIRE_FALSE(mapped->build_by_base);
+}
+
+TEST_CASE("Pyramid validates explicit factor", "[ut][PyramidParameters]") {
+    auto absent = vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20}})");
+    REQUIRE_FALSE(absent.has_topk_factor);
+
+    auto present =
+        vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20,"factor":1.5}})");
+    REQUIRE(present.has_topk_factor);
+    REQUIRE(std::abs(present.topk_factor - 1.5F) < 1e-6F);
+    REQUIRE_THROWS(
+        vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20,"factor":0}})"));
+    REQUIRE_THROWS(
+        vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20,"factor":-1}})"));
+    REQUIRE_THROWS(
+        vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20,"factor":1e100}})"));
 }

@@ -28,6 +28,11 @@ public:
     ~StandardHeap() override = default;
 
     void
+    Reserve(uint64_t capacity) {
+        queue_.reserve(capacity);
+    }
+
+    void
     Push(float dist, InnerIdType id) override;
 
     [[nodiscard]] const DistanceRecord&

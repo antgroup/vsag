@@ -286,6 +286,13 @@ public:
         return true;
     }
 
+    // Concurrent InsertVector calls are only safe when the implementation explicitly opts in,
+    // storage has already been resized, and callers write distinct IDs.
+    [[nodiscard]] virtual bool
+    SupportConcurrentInsertAfterResize() const {
+        return false;
+    }
+
     [[nodiscard]] virtual bool
     HoldMolds() const {
         return false;

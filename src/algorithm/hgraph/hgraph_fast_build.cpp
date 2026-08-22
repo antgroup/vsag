@@ -131,38 +131,81 @@ HGraph::need_temporary_sq8_build_data_for_add() const {
            this->basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ;
 }
 
-void
-HGraph::prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows) {
-    if (this->optimized_build_codes_ == nullptr) {
-        return;
-    }
-
-    if (this->thread_pool_ == nullptr) {
-        for (const auto& row : rows) {
-            this->insert_persistent_codes(get_data(data, row.input_idx), row.inner_id);
+bool
+HGraph::prepare_build_codes(const DatasetPtr& data,
+                            const Vector<AddRow>& rows,
+                            const AddContext& context) {
+    if (this->optimized_build_codes_ != nullptr) {
+        if (this->thread_pool_ == nullptr) {
+            for (const auto& row : rows) {
+                this->insert_persistent_codes(get_data(data, row.input_idx), row.inner_id);
+            }
+            return true;
         }
-        return;
+
+        std::vector<std::future<void>> futures;
+        HGraphBuildTaskGuard task_guard(futures, static_cast<uint64_t>(rows.size()));
+        // Parallel graph insertion may probe rows from the same batch. Make every scalar code
+        // visible before any of those probes starts.
+        for (const auto& row : rows) {
+            const auto inner_id = row.inner_id;
+            const auto input_idx = row.input_idx;
+            futures.emplace_back(
+                this->thread_pool_->GeneralEnqueue([this, data, inner_id, input_idx]() {
+                    this->insert_persistent_codes(get_data(data, input_idx), inner_id);
+                }));
+        }
+        wait_all_futures(futures);
+        futures.clear();
+        return true;
     }
 
+    const auto supports_parallel_encode = [](const FlattenInterfacePtr& codes) {
+        return codes != nullptr and codes->SupportConcurrentInsertAfterResize() and
+               not codes->SupportSplitCodeStorage();
+    };
+    const bool use_parallel_encode =
+        context.first_empty_add and not context.use_dedup_storage and
+        not this->support_force_remove() and this->thread_pool_ != nullptr and
+        this->build_thread_count_ > 1 and rows.size() > 1 and
+        supports_parallel_encode(this->basic_flatten_codes_) and
+        (not this->has_precise_reorder() or supports_parallel_encode(this->high_precise_codes_)) and
+        (not this->create_new_raw_vector_ or supports_parallel_encode(this->raw_vector_));
+    if (not use_parallel_encode) {
+        return false;
+    }
+
+    const uint64_t worker_count =
+        std::min<uint64_t>(this->build_thread_count_, static_cast<uint64_t>(rows.size()));
+    const uint64_t block_size = (rows.size() + worker_count - 1) / worker_count;
     std::vector<std::future<void>> futures;
-    HGraphBuildTaskGuard task_guard(futures, static_cast<uint64_t>(rows.size()));
-    // Parallel graph insertion may probe rows from the same batch. Make every scalar code
-    // visible before any of those probes starts.
-    for (const auto& row : rows) {
-        const auto inner_id = row.inner_id;
-        const auto input_idx = row.input_idx;
-        futures.emplace_back(
-            this->thread_pool_->GeneralEnqueue([this, data, inner_id, input_idx]() {
-                this->insert_persistent_codes(get_data(data, input_idx), inner_id);
-            }));
+    futures.reserve(worker_count);
+
+    // Keep storage stable and exclude search/update while workers encode disjoint pre-sized IDs.
+    std::shared_lock<std::shared_mutex> add_lock(this->add_mutex_);
+    std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+    // The guard is declared after both locks so enqueue failures drain workers before releasing
+    // storage protection.
+    HGraphBuildTaskGuard task_guard(futures, 0);
+    for (uint64_t begin = 0; begin < rows.size(); begin += block_size) {
+        const uint64_t end = std::min<uint64_t>(begin + block_size, rows.size());
+        futures.emplace_back(this->thread_pool_->GeneralEnqueue([this, data, &rows, begin, end]() {
+            for (uint64_t offset = begin; offset < end; ++offset) {
+                const auto& row = rows[offset];
+                this->insert_persistent_codes_unlocked(get_data(data, row.input_idx), row.inner_id);
+            }
+        }));
     }
     wait_all_futures(futures);
     futures.clear();
+    return true;
 }
 
 bool
-HGraph::should_insert_codes_before_probe(bool use_dedup_storage) const {
-    return not use_dedup_storage and this->optimized_build_codes_ == nullptr;
+HGraph::should_insert_codes_before_probe(bool use_dedup_storage,
+                                         bool persistent_codes_prepared) const {
+    return not persistent_codes_prepared and not use_dedup_storage and
+           this->optimized_build_codes_ == nullptr;
 }
 
 ComputerInterfacePtr
@@ -180,8 +223,12 @@ HGraph::search_graph_for_build(const void* query,
                                InnerSearchParam& inner_search_param,
                                const ComputerInterfacePtr& computer) const {
     if (computer == nullptr) {
-        return this->search_one_graph(
-            query, graph, flatten, inner_search_param, (VisitedListPtr) nullptr, nullptr);
+        return this->search_one_graph(query,
+                                      graph,
+                                      flatten,
+                                      inner_search_param,
+                                      (VisitedListPtr) nullptr,
+                                      inner_search_param.query_context);
     }
 
     auto visited_list = this->pool_->TakeOne();
@@ -192,7 +239,7 @@ HGraph::search_graph_for_build(const void* query,
                                                                 query,
                                                                 inner_search_param,
                                                                 this->label_table_,
-                                                                nullptr,
+                                                                inner_search_param.query_context,
                                                                 nullptr,
                                                                 computer);
         this->pool_->ReturnOne(visited_list);

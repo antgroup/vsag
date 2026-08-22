@@ -18,13 +18,19 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <future>
 #include <numeric>
+#include <optional>
+#include <set>
+#include <sstream>
 #include <vector>
 
 #include "impl/allocator/safe_allocator.h"
 #include "index/index_impl.h"
 #include "index_common_param.h"
+#include "storage/serialization.h"
 #include "unittest.h"
+#include "vsag/options.h"
 
 namespace {
 
@@ -33,6 +39,21 @@ constexpr int64_t PYRAMID_TEST_DIM = 4;
 struct PyramidTestIndex {
     std::shared_ptr<vsag::Allocator> allocator;
     std::shared_ptr<vsag::Pyramid> index;
+};
+
+class BlockSizeLimitGuard {
+public:
+    explicit BlockSizeLimitGuard(uint64_t block_size_limit)
+        : previous_limit_(vsag::Options::Instance().block_size_limit()) {
+        vsag::Options::Instance().set_block_size_limit(block_size_limit);
+    }
+
+    ~BlockSizeLimitGuard() {
+        vsag::Options::Instance().set_block_size_limit(previous_limit_);
+    }
+
+private:
+    uint64_t previous_limit_;
 };
 
 PyramidTestIndex
@@ -107,6 +128,61 @@ MakePyramidIndex(uint32_t index_min_size,
     return result;
 }
 
+PyramidTestIndex
+MakeRootPyramidIndex(const std::string& root_graph_type,
+                     bool use_reorder = false,
+                     const std::string& graph_type = vsag::GRAPH_TYPE_VALUE_NSW,
+                     bool support_duplicate = false,
+                     bool build_by_base = false,
+                     uint64_t build_thread_count = 1,
+                     bool use_rabitq_with_sq8 = false) {
+    PyramidTestIndex result;
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = PYRAMID_TEST_DIM;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    result.allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    common_param.allocator_ = result.allocator;
+    auto external = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "precise_quantization_type": "fp32",
+        "base_io_type": "memory_io",
+        "precise_io_type": "memory_io",
+        "max_degree": 8,
+        "ef_construction": 32,
+        "alpha": 1.2,
+        "no_build_levels": [],
+        "index_min_size": 1,
+        "build_thread_count": 1
+    })");
+    external[vsag::PYRAMID_ROOT_GRAPH_TYPE].SetString(root_graph_type);
+    external[vsag::PYRAMID_GRAPH_TYPE].SetString(graph_type);
+    external[vsag::PYRAMID_USE_REORDER].SetBool(use_reorder || use_rabitq_with_sq8);
+    external[vsag::PYRAMID_SUPPORT_DUPLICATE].SetBool(support_duplicate);
+    external[vsag::PYRAMID_BUILD_BY_BASE_QUANTIZATION].SetBool(build_by_base);
+    external[vsag::PYRAMID_BUILD_THREAD_COUNT].SetUint64(build_thread_count);
+    if (use_rabitq_with_sq8) {
+        external[vsag::PYRAMID_BASE_QUANTIZATION_TYPE].SetString("rabitq");
+        external[vsag::PYRAMID_PRECISE_QUANTIZATION_TYPE].SetString("sq8");
+        external[vsag::PYRAMID_BASE_IO_TYPE].SetString("block_memory_io");
+        external[vsag::PYRAMID_PRECISE_IO_TYPE].SetString("block_memory_io");
+        external[vsag::PYRAMID_RABITQ_BITS_PER_DIM_BASE].SetUint64(3);
+    }
+    auto param = vsag::Pyramid::CheckAndMappingExternalParam(external, common_param);
+    result.index = std::make_shared<vsag::Pyramid>(param, common_param);
+    return result;
+}
+
+void
+FillRootVectors(std::vector<float>& vectors, int64_t count) {
+    for (int64_t i = 0; i < count; ++i) {
+        for (int64_t d = 0; d < PYRAMID_TEST_DIM; ++d) {
+            vectors[i * PYRAMID_TEST_DIM + d] =
+                static_cast<float>((i * (d + 3) + d * 17) % 997) / 997.0F;
+        }
+    }
+}
+
 vsag::DatasetPtr
 MakePyramidDataset(float* vectors, int64_t* ids, std::string* paths, int64_t count) {
     return vsag::Dataset::Make()
@@ -142,6 +218,58 @@ RequirePyramidSearchStatistics(const vsag::DatasetPtr& result, uint64_t approxim
     REQUIRE(statistics["distance_evaluations_by_backend"]["fp32"].GetUint64() ==
             statistics["distance_evaluations"].GetUint64());
     REQUIRE(statistics["complete"].GetBool());
+}
+
+std::string
+RewritePyramidFooterRootStorageVersion(const std::string& serialized,
+                                       const std::optional<int64_t>& version) {
+    std::stringstream input(serialized);
+    vsag::IOStreamReader reader(input);
+    auto footer = vsag::Footer::Parse(reader);
+    REQUIRE(footer != nullptr);
+    auto basic_info = footer->GetMetadata()->Get(vsag::BASIC_INFO);
+    constexpr const char* version_key = "pyramid_root_storage_format_version";
+    if (version.has_value()) {
+        basic_info[version_key].SetInt(version.value());
+    } else {
+        basic_info.Erase(version_key);
+    }
+
+    auto replacement_metadata = std::make_shared<vsag::Metadata>();
+    replacement_metadata->Set(vsag::BASIC_INFO, basic_info);
+    std::stringstream output;
+    vsag::IOStreamWriter writer(output);
+    const uint64_t body_size = serialized.size() - footer->Length();
+    writer.Write(serialized.data(), body_size);
+    vsag::Footer(replacement_metadata).Write(writer);
+    return output.str();
+}
+
+std::string
+RewritePyramidStreamingRootStorageVersion(const std::string& serialized,
+                                          const std::optional<int64_t>& version) {
+    std::stringstream input(serialized);
+    vsag::IOStreamReader reader(input);
+    auto header = vsag::StreamHeader::ReadRaw(reader);
+    auto metadata_json = vsag::JsonType::Parse(header.metadata_string);
+    auto basic_info = metadata_json[vsag::BASIC_INFO];
+    constexpr const char* version_key = "pyramid_root_storage_format_version";
+    if (version.has_value()) {
+        basic_info[version_key].SetInt(version.value());
+    } else {
+        basic_info.Erase(version_key);
+    }
+    metadata_json[vsag::BASIC_INFO].SetJson(basic_info);
+
+    auto replacement_metadata = std::make_shared<vsag::Metadata>(metadata_json);
+    std::stringstream output;
+    vsag::IOStreamWriter writer(output);
+    vsag::StreamHeader::Write(writer, replacement_metadata);
+    constexpr uint64_t fixed_header_size =
+        8 + sizeof(uint16_t) * 2 + sizeof(uint64_t) + sizeof(uint32_t);
+    const uint64_t body_offset = fixed_header_size + header.metadata_string.size();
+    writer.Write(serialized.data() + body_offset, serialized.size() - body_offset);
+    return output.str();
 }
 
 }  // namespace
@@ -456,7 +584,9 @@ TEST_CASE("Pyramid promotes flat node at index minimum size", "[ut][pyramid]") {
     const bool split_rabitq = GENERATE(false, true);
     const bool build_all_at_once = GENERATE(false, true);
     CAPTURE(split_rabitq, build_all_at_once);
-    auto test_index = MakePyramidIndex(3, 1, false, split_rabitq);
+    // Split RaBitQ does not opt in to concurrent InsertVector. Multiple build workers exercise
+    // the serial encoding fallback while graph construction may still run in parallel.
+    auto test_index = MakePyramidIndex(3, 4, false, split_rabitq);
     const auto& index = test_index.index;
     std::vector<float> vectors = {
         0.0F,
@@ -727,4 +857,501 @@ TEST_CASE("Pyramid exposes stored raw vectors", "[ut][pyramid][raw_vector]") {
     auto distances = index->CalcDistancesById(vectors.data(), ids.data(), count, true);
     REQUIRE(distances.has_value());
     REQUIRE(distances.value()->GetDistances()[0] == 0.0F);
+}
+
+TEST_CASE("Pyramid multi-layer root builds routes and survives serialization",
+          "[ut][pyramid][root_graph]") {
+    const auto graph_type =
+        GENERATE(std::string(vsag::GRAPH_TYPE_VALUE_NSW), std::string(vsag::GRAPH_TYPE_ODESCENT));
+    constexpr int64_t count = 512;
+    std::vector<float> vectors(count * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, count);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> paths(count, "");
+    auto source =
+        MakeRootPyramidIndex(vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER, false, graph_type);
+    REQUIRE(source.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count))
+                .empty());
+
+    auto stats = vsag::JsonType::Parse(source.index->GetStats());
+    auto root_stats = stats["root_graphs"]["default"];
+    REQUIRE(root_stats[vsag::PYRAMID_ROOT_GRAPH_TYPE].GetString() ==
+            vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER);
+    REQUIRE(root_stats["bottom_graph_storage_type"].GetString() == "flat");
+    REQUIRE(root_stats["bottom_graph_node_count"].GetUint64() == count);
+    REQUIRE(root_stats["bottom_graph_size"].GetUint64() > 0);
+    REQUIRE(root_stats["route_graph_count"].GetUint64() > 0);
+    REQUIRE(root_stats["route_node_counts"].GetVector().front() < count);
+    REQUIRE(source.index->GetMemoryUsageDetail().at("root_route_graphs") > 0);
+
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(PYRAMID_TEST_DIM)
+                     ->Float32Vectors(vectors.data() + 137 * PYRAMID_TEST_DIM)
+                     ->Owner(false);
+    const auto search_params = R"({"pyramid":{"ef_search":128,"hops_limit":256}})";
+    auto result = source.index->KnnSearch(query, 10, search_params, nullptr);
+    REQUIRE(result->GetDim() == 10);
+    auto search_stats = vsag::JsonType::Parse(result->GetStatistics());
+    REQUIRE(search_stats["distance_evaluations_by_phase"]["routing"].GetUint64() > 0);
+
+    constexpr int64_t added_count = 64;
+    std::vector<float> added_vectors(added_count * PYRAMID_TEST_DIM);
+    FillRootVectors(added_vectors, added_count);
+    std::vector<int64_t> added_ids(added_count);
+    std::iota(added_ids.begin(), added_ids.end(), count);
+    std::vector<std::string> added_paths(added_count, "");
+    REQUIRE(source.index
+                ->Add(MakePyramidDataset(
+                    added_vectors.data(), added_ids.data(), added_paths.data(), added_count))
+                .empty());
+    auto added_query = vsag::Dataset::Make()
+                           ->NumElements(1)
+                           ->Dim(PYRAMID_TEST_DIM)
+                           ->Float32Vectors(added_vectors.data())
+                           ->Owner(false);
+    REQUIRE(source.index->KnnSearch(added_query, 10, search_params, nullptr)->GetDim() == 10);
+
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    source.index->Serialize(writer);
+    auto restored =
+        MakeRootPyramidIndex(vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER, false, graph_type);
+    vsag::IOStreamReader reader(stream);
+    restored.index->Deserialize(reader);
+    auto restored_result = restored.index->KnnSearch(query, 10, search_params, nullptr);
+    const auto source_stats = vsag::JsonType::Parse(source.index->GetStats());
+    const auto restored_stats = vsag::JsonType::Parse(restored.index->GetStats());
+    const auto source_root_stats = source_stats["root_graphs"]["default"];
+    const auto restored_root_stats = restored_stats["root_graphs"]["default"];
+    REQUIRE(restored_root_stats["bottom_graph_node_count"].GetUint64() == count + added_count);
+    REQUIRE(restored_root_stats["route_graph_count"].GetUint64() ==
+            source_root_stats["route_graph_count"].GetUint64());
+    REQUIRE(restored_root_stats["route_node_counts"].GetVector() ==
+            source_root_stats["route_node_counts"].GetVector());
+    REQUIRE(restored_result->GetDim() == result->GetDim());
+    REQUIRE(std::equal(
+        result->GetIds(), result->GetIds() + result->GetDim(), restored_result->GetIds()));
+}
+
+TEST_CASE("Pyramid rejects ambiguous legacy multi-layer root storage",
+          "[ut][pyramid][root_graph][serialization]") {
+    constexpr int64_t count = 32;
+    std::vector<float> vectors(count * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, count);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> paths(count, "");
+
+    const auto serialize = [&](const std::string& root_graph_type, bool streaming) {
+        auto source = MakeRootPyramidIndex(root_graph_type);
+        REQUIRE(
+            source.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count))
+                .empty());
+        std::stringstream output;
+        if (streaming) {
+            source.index->SerializeStreaming(output);
+        } else {
+            vsag::IOStreamWriter writer(output);
+            source.index->Serialize(writer);
+        }
+        return output.str();
+    };
+
+    for (const bool streaming : {false, true}) {
+        const auto multi_layer = serialize(vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER, streaming);
+        const auto rewrite = [&](const std::optional<int64_t>& version) {
+            return streaming ? RewritePyramidStreamingRootStorageVersion(multi_layer, version)
+                             : RewritePyramidFooterRootStorageVersion(multi_layer, version);
+        };
+        for (const auto version : {std::optional<int64_t>{}, std::optional<int64_t>{99}}) {
+            CAPTURE(streaming, version.has_value(), version.value_or(0));
+            auto target = MakeRootPyramidIndex(vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER);
+            std::stringstream input(rewrite(version));
+            try {
+                if (streaming) {
+                    target.index->DeserializeStreaming(input);
+                } else {
+                    vsag::IOStreamReader reader(input);
+                    target.index->Deserialize(reader);
+                }
+                FAIL("ambiguous multi-layer root storage must be rejected");
+            } catch (const vsag::VsagException& error) {
+                REQUIRE(std::string(error.what()).find("root storage format") != std::string::npos);
+            }
+        }
+
+        const auto single_layer = serialize(vsag::PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER, streaming);
+        const auto legacy_single = streaming
+                                       ? RewritePyramidStreamingRootStorageVersion(single_layer, {})
+                                       : RewritePyramidFooterRootStorageVersion(single_layer, {});
+        auto target = MakeRootPyramidIndex(vsag::PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER);
+        std::stringstream input(legacy_single);
+        if (streaming) {
+            target.index->DeserializeStreaming(input);
+        } else {
+            vsag::IOStreamReader reader(input);
+            target.index->Deserialize(reader);
+        }
+        REQUIRE(target.index->GetNumElements() == count);
+    }
+}
+
+TEST_CASE("Pyramid NSW Build and empty Add share routed construction",
+          "[ut][pyramid][root_graph][build]") {
+    const bool build_by_base = GENERATE(false, true);
+    const bool use_rabitq_with_sq8 = not build_by_base;
+    constexpr int64_t count = 512;
+    std::vector<float> vectors(count * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, count);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> paths(count, "");
+
+    auto built = MakeRootPyramidIndex(vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER,
+                                      true,
+                                      vsag::GRAPH_TYPE_VALUE_NSW,
+                                      false,
+                                      build_by_base,
+                                      1,
+                                      use_rabitq_with_sq8);
+    auto added = MakeRootPyramidIndex(vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER,
+                                      true,
+                                      vsag::GRAPH_TYPE_VALUE_NSW,
+                                      false,
+                                      build_by_base,
+                                      1,
+                                      use_rabitq_with_sq8);
+    auto dataset = MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count);
+    REQUIRE(built.index->Build(dataset).empty());
+    REQUIRE(added.index->Add(dataset).empty());
+
+    const auto built_stats = vsag::JsonType::Parse(built.index->GetStats());
+    const auto added_stats = vsag::JsonType::Parse(added.index->GetStats());
+    const auto built_root = built_stats["root_graphs"]["default"];
+    const auto added_root = added_stats["root_graphs"]["default"];
+    REQUIRE(built_root["bottom_graph_node_count"].GetUint64() == count);
+    REQUIRE(added_root["bottom_graph_node_count"].GetUint64() == count);
+    REQUIRE(built_root["route_node_counts"].GetVector() ==
+            added_root["route_node_counts"].GetVector());
+
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(PYRAMID_TEST_DIM)
+                     ->Float32Vectors(vectors.data() + 137 * PYRAMID_TEST_DIM)
+                     ->Owner(false);
+    const auto search_params = R"({"pyramid":{"ef_search":128,"hops_limit":256}})";
+    const auto built_result = built.index->KnnSearch(query, 10, search_params, nullptr);
+    const auto added_result = added.index->KnnSearch(query, 10, search_params, nullptr);
+    REQUIRE(std::equal(built_result->GetIds(),
+                       built_result->GetIds() + built_result->GetDim(),
+                       added_result->GetIds()));
+}
+
+TEST_CASE("Pyramid flat routed root crosses memory blocks and resizes",
+          "[ut][pyramid][root_graph][parallel]") {
+    BlockSizeLimitGuard block_size_guard(256 * 1024);
+    constexpr int64_t initial_count = 8192;
+    constexpr int64_t added_count = 1024;
+    constexpr int64_t total_count = initial_count + added_count;
+    std::vector<float> vectors(total_count * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, total_count);
+    std::vector<int64_t> ids(total_count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> paths(total_count, "");
+
+    auto test_index = MakeRootPyramidIndex(vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER,
+                                           false,
+                                           vsag::GRAPH_TYPE_VALUE_NSW,
+                                           false,
+                                           false,
+                                           8);
+    REQUIRE(test_index.index
+                ->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), initial_count))
+                .empty());
+    REQUIRE(test_index.index
+                ->Add(MakePyramidDataset(vectors.data() + initial_count * PYRAMID_TEST_DIM,
+                                         ids.data() + initial_count,
+                                         paths.data() + initial_count,
+                                         added_count))
+                .empty());
+
+    const auto stats = vsag::JsonType::Parse(test_index.index->GetStats());
+    const auto root_stats = stats["root_graphs"]["default"];
+    REQUIRE(root_stats["bottom_graph_storage_type"].GetString() == "flat");
+    REQUIRE(root_stats["bottom_graph_node_count"].GetUint64() == total_count);
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(PYRAMID_TEST_DIM)
+                     ->Float32Vectors(vectors.data() + (total_count - 1) * PYRAMID_TEST_DIM)
+                     ->Owner(false);
+    const auto result =
+        test_index.index->KnnSearch(query, 10, R"({"pyramid":{"ef_search":128}})", nullptr);
+    // A directed approximate graph does not guarantee that every query reaches k nodes. Verify
+    // that traversal remains usable and that the vector appended after the block resize is intact.
+    REQUIRE(result->GetDim() > 0);
+    REQUIRE(result->GetDim() <= 10);
+    REQUIRE(result->GetDistances()[0] < 1e-6F);
+    REQUIRE(
+        std::abs(test_index.index->CalcDistanceById(
+            vectors.data() + (total_count - 1) * PYRAMID_TEST_DIM, ids[total_count - 1], false)) <
+        1e-6F);
+}
+
+TEST_CASE("Pyramid routed root supports concurrent Add and Search",
+          "[ut][pyramid][root_graph][concurrent]") {
+    constexpr int64_t initial_count = 512;
+    constexpr int64_t added_count = 128;
+    std::vector<float> initial_vectors(initial_count * PYRAMID_TEST_DIM);
+    std::vector<float> added_vectors(added_count * PYRAMID_TEST_DIM);
+    FillRootVectors(initial_vectors, initial_count);
+    FillRootVectors(added_vectors, added_count);
+    std::vector<int64_t> initial_ids(initial_count);
+    std::vector<int64_t> added_ids(added_count);
+    std::iota(initial_ids.begin(), initial_ids.end(), 0);
+    std::iota(added_ids.begin(), added_ids.end(), initial_count);
+    std::vector<std::string> initial_paths(initial_count, "");
+    std::vector<std::string> added_paths(added_count, "");
+
+    auto source = MakeRootPyramidIndex(vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER, true);
+    REQUIRE(
+        source.index
+            ->Build(MakePyramidDataset(
+                initial_vectors.data(), initial_ids.data(), initial_paths.data(), initial_count))
+            .empty());
+
+    auto add_future = std::async(std::launch::async, [&]() {
+        return source.index->Add(MakePyramidDataset(
+            added_vectors.data(), added_ids.data(), added_paths.data(), added_count));
+    });
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(PYRAMID_TEST_DIM)
+                     ->Float32Vectors(initial_vectors.data() + 137 * PYRAMID_TEST_DIM)
+                     ->Owner(false);
+    const auto search_params = R"({"pyramid":{"ef_search":128,"hops_limit":256}})";
+    for (uint64_t i = 0; i < 32; ++i) {
+        REQUIRE(source.index->KnnSearch(query, 10, search_params, nullptr)->GetDim() == 10);
+    }
+    REQUIRE(add_future.get().empty());
+    const auto stats = vsag::JsonType::Parse(source.index->GetStats());
+    REQUIRE(stats["root_graphs"]["default"]["bottom_graph_node_count"].GetUint64() ==
+            initial_count + added_count);
+}
+
+TEST_CASE("Pyramid factor controls reorder candidates without changing final topk",
+          "[ut][pyramid][factor]") {
+    const auto root_graph_type = GENERATE(std::string(vsag::PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER),
+                                          std::string(vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER));
+    constexpr int64_t count = 128;
+    std::vector<float> vectors(count * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, count);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> paths(count, "");
+    auto test_index = MakeRootPyramidIndex(root_graph_type, true);
+    REQUIRE(
+        test_index.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count))
+            .empty());
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(PYRAMID_TEST_DIM)
+                     ->Float32Vectors(vectors.data())
+                     ->Owner(false);
+    const std::array<std::pair<std::string, uint32_t>, 5> cases = {
+        std::pair{R"({"pyramid":{"ef_search":20}})", 20U},
+        std::pair{R"({"pyramid":{"ef_search":20,"factor":1.0}})", 20U},
+        std::pair{R"({"pyramid":{"ef_search":20,"factor":2.0}})", 10U},
+        std::pair{R"({"pyramid":{"ef_search":20,"factor":10.0}})", 20U},
+        std::pair{R"({"pyramid":{"ef_search":20,"factor":3.0e38}})", 20U}};
+    for (const auto& [params, expected_candidates] : cases) {
+        auto result = test_index.index->KnnSearch(query, 5, params, nullptr);
+        REQUIRE(result->GetDim() == 5);
+        auto stats = vsag::JsonType::Parse(result->GetStatistics());
+        REQUIRE(stats["reorder_candidate_count"].GetInt() == expected_candidates);
+        REQUIRE(stats["reorder_distance_count"].GetInt() == expected_candidates);
+    }
+
+    auto large_topk = test_index.index->KnnSearch(
+        query, 25, R"({"pyramid":{"ef_search":20,"factor":2.0}})", nullptr);
+    REQUIRE(large_topk->GetDim() == 25);
+    REQUIRE(
+        vsag::JsonType::Parse(large_topk->GetStatistics())["reorder_candidate_count"].GetInt() ==
+        25);
+
+    auto no_reorder = MakeRootPyramidIndex(root_graph_type, false);
+    REQUIRE(
+        no_reorder.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count))
+            .empty());
+    auto no_reorder_result = no_reorder.index->KnnSearch(
+        query, 5, R"({"pyramid":{"ef_search":20,"factor":2.0}})", nullptr);
+    REQUIRE(no_reorder_result->GetDim() == 5);
+    REQUIRE(vsag::JsonType::Parse(no_reorder_result->GetStatistics())["reorder_candidate_count"]
+                .GetInt() == 0);
+
+    REQUIRE_THROWS(test_index.index->KnnSearch(
+        query, 5, R"({"pyramid":{"ef_search":20,"factor":0.0}})", nullptr));
+    REQUIRE_THROWS(test_index.index->KnnSearch(
+        query, 5, R"({"pyramid":{"ef_search":20,"factor":-1.0}})", nullptr));
+}
+
+TEST_CASE("Pyramid factor supplies the requested leaf reorder candidates",
+          "[ut][pyramid][factor]") {
+    constexpr int64_t count = 512;
+    std::vector<float> vectors(count * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, count);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> paths(count, "tenant/leaf");
+    auto test_index = MakePyramidIndex(1, 1, false, false, false, false, true);
+    REQUIRE(
+        test_index.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count))
+            .empty());
+
+    std::string query_path = "tenant/leaf";
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(PYRAMID_TEST_DIM)
+                     ->Float32Vectors(vectors.data() + 137 * PYRAMID_TEST_DIM)
+                     ->Paths(&query_path)
+                     ->Owner(false);
+    const std::array<std::pair<std::string, uint32_t>, 3> cases = {
+        std::pair{R"({"pyramid":{"ef_search":100,"subindex_ef_search":1}})", 7U},
+        std::pair{R"({"pyramid":{"ef_search":100,"subindex_ef_search":1,"factor":1.0}})", 100U},
+        std::pair{R"({"pyramid":{"ef_search":100,"subindex_ef_search":1,"factor":2.0}})", 10U}};
+    for (const auto& [params, expected_candidates] : cases) {
+        const auto result = test_index.index->KnnSearch(query, 5, params, nullptr);
+        REQUIRE(result->GetDim() == 5);
+        const auto stats = vsag::JsonType::Parse(result->GetStatistics());
+        REQUIRE(stats["reorder_candidate_count"].GetUint64() == expected_candidates);
+    }
+
+    auto split_index = MakePyramidIndex(1, 1, false, true);
+    REQUIRE(split_index.index
+                ->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count))
+                .empty());
+    const auto no_factor = split_index.index->KnnSearch(
+        query,
+        5,
+        R"({"threshold":1e30,"pyramid":{"ef_search":100,"subindex_ef_search":1,"rabitq_one_bit_search":true,"rabitq_error_rate":1e-6}})",
+        nullptr);
+    const auto factor_one = split_index.index->KnnSearch(
+        query,
+        5,
+        R"({"threshold":1e30,"pyramid":{"ef_search":100,"subindex_ef_search":1,"rabitq_one_bit_search":true,"rabitq_error_rate":1e-6,"factor":1.0}})",
+        nullptr);
+    const auto no_factor_stats = vsag::JsonType::Parse(no_factor->GetStatistics());
+    const auto factor_one_stats = vsag::JsonType::Parse(factor_one->GetStatistics());
+    REQUIRE(no_factor->GetDim() == 5);
+    REQUIRE(factor_one->GetDim() == 5);
+    REQUIRE(no_factor_stats["reorder_candidate_count"].GetUint64() ==
+            factor_one_stats["reorder_candidate_count"].GetUint64());
+    REQUIRE(no_factor_stats["reorder_candidate_count"].GetUint64() >= 100);
+    REQUIRE(no_factor_stats["reorder_lower_bound_probe_count"].GetUint64() > 0);
+    REQUIRE(no_factor_stats["reorder_distance_count"].GetUint64() >= 100);
+    REQUIRE(factor_one_stats["reorder_distance_count"].GetUint64() <
+            no_factor_stats["reorder_distance_count"].GetUint64());
+}
+
+TEST_CASE("Pyramid legacy deserialization rejects incompatible root graph type",
+          "[ut][pyramid][root_graph][serialization]") {
+    constexpr int64_t count = 32;
+    std::vector<float> vectors(count * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, count);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> paths(count, "");
+
+    const std::array<std::pair<std::string, std::string>, 2> cases = {
+        std::pair{std::string(vsag::PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER),
+                  std::string(vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER)},
+        std::pair{std::string(vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER),
+                  std::string(vsag::PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER)}};
+    for (const auto& [serialized_type, configured_type] : cases) {
+        auto source = MakeRootPyramidIndex(serialized_type);
+        REQUIRE(source.index
+                    ->Build(MakePyramidDataset(
+                        vectors.data(), ids.data(), paths.data(), static_cast<int64_t>(ids.size())))
+                    .empty());
+        std::stringstream stream;
+        vsag::IOStreamWriter writer(stream);
+        source.index->Serialize(writer);
+
+        auto target = MakeRootPyramidIndex(configured_type);
+        vsag::IOStreamReader reader(stream);
+        try {
+            target.index->Deserialize(reader);
+            FAIL("incompatible root graph type must be rejected");
+        } catch (const vsag::VsagException& error) {
+            REQUIRE(std::string(error.what()).find("Pyramid index parameter not match") !=
+                    std::string::npos);
+        }
+    }
+}
+
+TEST_CASE("Pyramid multi-layer root routes duplicate representatives",
+          "[ut][pyramid][root_graph][duplicate]") {
+    constexpr int64_t count = 512;
+    std::vector<float> vectors(count * PYRAMID_TEST_DIM);
+    std::vector<int64_t> ids(count);
+    std::vector<std::string> paths(count, "");
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i;
+        const auto representative = i / 2;
+        for (int64_t d = 0; d < PYRAMID_TEST_DIM; ++d) {
+            vectors[i * PYRAMID_TEST_DIM + d] =
+                static_cast<float>((representative * (d + 3) + d * 17) % 997) / 997.0F;
+        }
+    }
+    auto test_index = MakeRootPyramidIndex(
+        vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER, false, vsag::GRAPH_TYPE_VALUE_NSW, true);
+    REQUIRE(
+        test_index.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count))
+            .empty());
+    const auto stats = vsag::JsonType::Parse(test_index.index->GetStats());
+    const auto bottom_count =
+        stats["root_graphs"]["default"]["bottom_graph_node_count"].GetUint64();
+    REQUIRE(bottom_count < count);
+    REQUIRE(stats["root_graphs"]["default"]["route_node_counts"].GetVector().front() <
+            bottom_count);
+
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(PYRAMID_TEST_DIM)
+                     ->Float32Vectors(vectors.data() + 200 * PYRAMID_TEST_DIM)
+                     ->Owner(false);
+    auto result = test_index.index->KnnSearch(
+        query, 10, R"({"pyramid":{"ef_search":256,"hops_limit":512}})", nullptr);
+    REQUIRE(result->GetDim() == 10);
+    std::set<int64_t> result_ids(result->GetIds(), result->GetIds() + result->GetDim());
+    REQUIRE(result_ids.count(200) == 1);
+}
+
+TEST_CASE("Pyramid applies hops limit to non-root graphs", "[ut][pyramid][hops_limit]") {
+    constexpr int64_t count = 512;
+    std::vector<float> vectors(count * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, count);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> paths(count, "tenant/leaf");
+    auto test_index = MakePyramidIndex(1);
+    REQUIRE(
+        test_index.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count))
+            .empty());
+    std::string query_path = "tenant/leaf";
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(PYRAMID_TEST_DIM)
+                     ->Float32Vectors(vectors.data() + 311 * PYRAMID_TEST_DIM)
+                     ->Paths(&query_path)
+                     ->Owner(false);
+    auto unlimited =
+        test_index.index->KnnSearch(query, 1, R"({"pyramid":{"ef_search":2}})", nullptr);
+    auto limited = test_index.index->KnnSearch(
+        query, 1, R"({"pyramid":{"ef_search":2,"hops_limit":3}})", nullptr);
+    const auto unlimited_stats = vsag::JsonType::Parse(unlimited->GetStatistics());
+    const auto limited_stats = vsag::JsonType::Parse(limited->GetStatistics());
+    REQUIRE(unlimited_stats["hops"].GetInt() > limited_stats["hops"].GetInt());
+    REQUIRE(limited_stats["hops"].GetInt() <= 3);
 }

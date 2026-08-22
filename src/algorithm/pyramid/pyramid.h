@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <functional>
+#include <limits>
 #include <memory>
 #include <utility>
 
@@ -28,6 +30,7 @@
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
+#include "index_common_param.h"
 #include "index_feature_list.h"
 #include "io/memory_io/memory_io_parameter.h"
 #include "pyramid_zparameters.h"
@@ -38,7 +41,8 @@
 namespace vsag {
 
 class IndexNode;
-using SearchFunc = std::function<DistHeapPtr(const IndexNode* node, const VisitedListPtr& vl)>;
+using SearchFunc = std::function<DistHeapPtr(
+    const IndexNode* node, const VisitedListPtr& vl, InnerIdType entry_point)>;
 
 std::vector<std::string>
 split(const std::string& str, char delimiter);
@@ -56,11 +60,19 @@ public:
     enum class Status { NO_INDEX = 0, GRAPH = 1, FLAT = 2 };
 
 public:
-    IndexNode(Allocator* allocator_, GraphInterfaceParamPtr graph_param, uint32_t index_min_size);
+    IndexNode(Allocator* allocator,
+              GraphInterfaceParamPtr graph_param,
+              uint32_t index_min_size,
+              const IndexCommonParam* common_param,
+              GraphInterfaceParamPtr child_graph_param = nullptr);
 
     /// Build the internal graph using ODescent over the stored ids.
     void
     Build(ODescent& odescent);
+
+    /// Build all descendants while leaving this node untouched.
+    void
+    BuildChildren(ODescent& odescent);
 
     /// Allocate the graph storage if not yet done.
     void
@@ -90,6 +102,9 @@ public:
     void
     Serialize(StreamWriter& writer) const;
 
+    uint64_t
+    GetMemoryUsage() const;
+
     void
     Deserialize(StreamReader& reader);
 
@@ -98,18 +113,57 @@ public:
 
 public:
     GraphInterfacePtr graph_{nullptr};  // graph over the ids in this node
-    InnerIdType entry_point_{0};        // entry point for graph search
-    uint32_t level_{0};                 // depth in the tree (root = 0)
-    mutable std::shared_mutex mutex_;   // per-node lock for concurrent add/search
+    // Bottom entry when no route exists; otherwise the highest route entry. A routed entry is also
+    // a physical member of the complete bottom graph.
+    InnerIdType entry_point_{0};
+    uint32_t level_{0};  // depth in the tree (root = 0)
+    // Guards node topology metadata: status, graph ownership, routing graph vector, and entry.
+    // Graph adjacency rows remain protected by Pyramid::points_mutex_.
+    mutable std::shared_mutex mutex_;
 
     Vector<InnerIdType> ids_;          // internal ids stored at this node
     uint32_t index_min_size_{0};       // threshold to trigger graph build
     Status status_{Status::NO_INDEX};  // current build state
 
 private:
+    class RoutingOverlay {
+    public:
+        RoutingOverlay(Allocator* allocator, GraphInterfaceParamPtr param)
+            : graphs(allocator), graph_param(std::move(param)) {
+        }
+
+        // The vector shape is guarded by the owning IndexNode::mutex_. Shared graph ownership lets
+        // readers search a snapshot after releasing the node lock.
+        Vector<GraphInterfacePtr> graphs;
+        GraphInterfaceParamPtr graph_param{nullptr};
+    };
+
+    void
+    enable_routing(GraphInterfaceParamPtr graph_param);
+
+    [[nodiscard]] bool
+    has_routing() const {
+        return routing_ != nullptr;
+    }
+
+    GraphInterfacePtr
+    make_route_graph() const;
+
+    void
+    serialize_routing_unlocked(StreamWriter& writer) const;
+
+    void
+    deserialize_routing_unlocked(StreamReader& reader);
+
+    std::pair<uint64_t, uint64_t>
+    get_memory_usage_detail() const;
+
     UnorderedMap<std::string, std::unique_ptr<IndexNode>> children_;  // keyed by path segment
     Allocator* allocator_{nullptr};
+    const IndexCommonParam* common_param_{nullptr};
     GraphInterfaceParamPtr graph_param_{nullptr};
+    GraphInterfaceParamPtr child_graph_param_{nullptr};
+    std::unique_ptr<RoutingOverlay> routing_{nullptr};
 };
 
 /**
@@ -128,6 +182,7 @@ public:
 public:
     Pyramid(const PyramidParamPtr& pyramid_param, const IndexCommonParam& common_param)
         : InnerIndexInterface(pyramid_param, common_param),
+          common_param_(common_param),
           hierarchies_(common_param.allocator_.get()),
           odescent_param_(pyramid_param->odescent_param),
           index_min_size_(pyramid_param->index_min_size),
@@ -136,9 +191,23 @@ public:
                                          pyramid_param->base_codes_param->name ==
                                              RABITQ_SPLIT_DATA_CELL),
           support_duplicate_(pyramid_param->support_duplicate),
+          build_by_base_(pyramid_param->build_by_base),
           persist_source_id_(pyramid_param->persist_source_id),
           cache_(std::make_unique<PyramidBuildCache>(common_param.allocator_.get())) {
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
+        auto make_root = [&](const GraphInterfaceParamPtr& child_graph_param,
+                             uint32_t index_min_size,
+                             const std::string& root_graph_type) {
+            const bool multi_layer = root_graph_type == PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER;
+            auto root_graph_param =
+                multi_layer ? make_root_graph_param(child_graph_param) : child_graph_param;
+            auto root = std::make_unique<IndexNode>(
+                allocator_, root_graph_param, index_min_size, &common_param_, child_graph_param);
+            if (multi_layer) {
+                root->enable_routing(make_route_graph_param(child_graph_param));
+            }
+            return root;
+        };
         if (pyramid_param->has_hierarchies) {
             for (const auto& h_param : pyramid_param->hierarchies) {
                 auto graph_param = pyramid_param->graph_param;
@@ -148,23 +217,24 @@ public:
                     new_gp->max_degree_ = h_param.max_degree;
                     graph_param = new_gp;
                 }
-                auto root =
-                    std::make_unique<IndexNode>(allocator_, graph_param, h_param.index_min_size);
+                auto root = make_root(graph_param, h_param.index_min_size, h_param.root_graph_type);
                 auto h = std::make_unique<Hierarchy>(h_param.name, std::move(root), allocator_);
                 h->no_build_levels.assign(h_param.no_build_levels.begin(),
                                           h_param.no_build_levels.end());
                 h->ef_construction = h_param.ef_construction;
                 h->alpha = h_param.alpha;
+                h->root_graph_type = h_param.root_graph_type;
                 hierarchies_.insert({h_param.name, std::move(h)});
             }
         } else {
-            auto root = std::make_unique<IndexNode>(
-                allocator_, pyramid_param->graph_param, index_min_size_);
+            auto root = make_root(
+                pyramid_param->graph_param, index_min_size_, pyramid_param->root_graph_type);
             auto h = std::make_unique<Hierarchy>("", std::move(root), allocator_);
             h->no_build_levels.assign(pyramid_param->no_build_levels.begin(),
                                       pyramid_param->no_build_levels.end());
             h->ef_construction = pyramid_param->ef_construction;
             h->alpha = pyramid_param->alpha;
+            h->root_graph_type = pyramid_param->root_graph_type;
             hierarchies_.insert({"", std::move(h)});
         }
         points_mutex_ = std::make_shared<PointsMutex>(max_capacity_, allocator_);
@@ -239,6 +309,12 @@ public:
     int64_t
     GetNumberRemoved() const override;
 
+    [[nodiscard]] uint64_t
+    GetMemoryUsage() const override;
+
+    [[nodiscard]] std::unordered_map<std::string, uint64_t>
+    GetMemoryUsageDetail() const override;
+
     uint32_t
     Remove(const std::vector<int64_t>& ids, RemoveMode mode) override;
 
@@ -308,6 +384,9 @@ private:
     void
     deserialize_hierarchies(StreamReader& reader, const JsonType& basic_info);
 
+    void
+    validate_root_storage_format(const JsonType& basic_info) const;
+
     // RAII guard that returns the VisitedList to the pool on scope exit,
     // ensuring no leak if the search throws.
     class VisitedListGuard {
@@ -344,6 +423,7 @@ private:
         Vector<int32_t> no_build_levels;           // depths where graph build is skipped
         uint64_t ef_construction{400};             // expansion factor during graph build
         float alpha{1.2F};  // Relative Neighborhood Graph pruning coefficient
+        std::string root_graph_type{PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER};
 
         Hierarchy(const std::string& n, std::unique_ptr<IndexNode> r, Allocator* alloc)
             : name(n), root(std::move(r)), no_build_levels(alloc) {
@@ -380,6 +460,10 @@ private:
     search_impl(const DatasetPtr& query,
                 const SearchFunc& search_func,
                 InnerSearchParam& search_param,
+                int64_t reorder_topk,
+                int64_t final_topk,
+                int64_t reorder_candidate_limit,
+                const ComputerInterfacePtr& base_computer,
                 QueryContext& ctx,
                 const std::string& hierarchy_name,
                 const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
@@ -396,6 +480,68 @@ private:
     std::vector<int64_t>
     build_by_odescent(const DatasetPtr& base);
 
+    std::vector<int64_t>
+    add_internal(const DatasetPtr& base);
+
+    static GraphInterfaceParamPtr
+    make_route_graph_param(const GraphInterfaceParamPtr& bottom_graph_param);
+
+    static GraphInterfaceParamPtr
+    make_root_graph_param(const GraphInterfaceParamPtr& child_graph_param);
+
+    int
+    sample_route_level(const IndexNode& node);
+
+    Vector<int>
+    sample_route_levels(const IndexNode& node, uint64_t count);
+
+    void
+    insert_route_graph_point(const Hierarchy& hierarchy,
+                             const GraphInterfacePtr& graph,
+                             const FlattenInterfacePtr& codes,
+                             InnerIdType& entry_point,
+                             InnerIdType inner_id,
+                             const float* vector);
+
+    DistHeapPtr
+    search_graph_for_add(const GraphInterfacePtr& graph,
+                         const FlattenInterfacePtr& codes,
+                         InnerIdType inner_id,
+                         const float* vector,
+                         InnerSearchParam& search_param);
+
+    void
+    connect_cached_graph_point(InnerIdType inner_id,
+                               const DistHeapPtr& candidates,
+                               const GraphInterfacePtr& graph,
+                               const FlattenInterfacePtr& codes,
+                               float alpha);
+
+    void
+    add_routed_point(const Hierarchy& hierarchy,
+                     IndexNode& node,
+                     InnerIdType inner_id,
+                     const float* vector,
+                     uint64_t ef_construction,
+                     bool use_self_as_entry,
+                     int sampled_level = std::numeric_limits<int>::min());
+
+    void
+    build_routed_root(const Hierarchy& hierarchy, const float* data_vectors);
+
+    void
+    run_parallel_blocks(uint64_t count,
+                        const std::function<void(uint64_t begin, uint64_t end)>& task);
+
+    InnerIdType
+    search_routes(const IndexNode& node,
+                  const VisitedListPtr& vl,
+                  const DatasetPtr& query,
+                  const FlattenInterfacePtr& codes,
+                  const ComputerInterfacePtr& computer,
+                  const InnerSearchParam& search_param,
+                  QueryContext& ctx) const;
+
     /// Recursively insert a single vector into the hierarchy tree.
     void
     add_one_point(const Hierarchy& h,
@@ -403,7 +549,8 @@ private:
                   InnerIdType inner_id,
                   const float* vector,
                   uint64_t ef_construction = 0,
-                  bool use_self_as_entry = false);
+                  bool use_self_as_entry = false,
+                  int sampled_route_level = std::numeric_limits<int>::min());
 
     /// Split a path string into its hierarchical segments.
     static std::vector<std::vector<std::string>>
@@ -418,7 +565,9 @@ private:
                 const FlattenInterfacePtr& codes,
                 QueryContext& ctx,
                 uint64_t subindex_ef_search,
-                DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+                InnerIdType entry_point,
+                DistanceRecordVector* rabitq_lower_bound_candidates = nullptr,
+                const ComputerInterfacePtr& preset_computer = nullptr) const;
 
     [[nodiscard]] bool
     has_precise_reorder() const {
@@ -428,6 +577,11 @@ private:
     [[nodiscard]] FlattenInterfacePtr
     get_reorder_codes() const {
         return base_codes_->SupportSplitCodeStorage() ? base_codes_ : precise_codes_;
+    }
+
+    [[nodiscard]] FlattenInterfacePtr
+    construction_codes() const {
+        return has_precise_reorder() and not build_by_base_ ? precise_codes_ : base_codes_;
     }
 
     [[nodiscard]] FlattenInterfacePtr
@@ -456,11 +610,12 @@ private:
     init_index_nodes_with_ids(IndexNode* node) const;
 
 private:
+    IndexCommonParam common_param_;
     ODescentParameterPtr odescent_param_{nullptr};  // ODescent build parameters
     UnorderedMap<std::string, std::unique_ptr<Hierarchy>> hierarchies_;  // named hierarchies
-    FlattenInterfacePtr base_codes_{nullptr};          // coarse codes for graph build/search
-    FlattenInterfacePtr precise_codes_{nullptr};       // precise codes for reorder (if enabled)
-    FlattenInterfacePtr raw_vector_{nullptr};          // original vectors for decode-only paths
+    FlattenInterfacePtr base_codes_{nullptr};     // coarse codes for online graph traversal
+    FlattenInterfacePtr precise_codes_{nullptr};  // default construction/reorder codes when present
+    FlattenInterfacePtr raw_vector_{nullptr};     // original vectors for decode-only paths
     std::unique_ptr<VisitedListPool> pool_ = nullptr;  // pool of visited-lists for search
 
     MutexArrayPtr points_mutex_{nullptr};                // per-point locks for concurrent access
@@ -469,6 +624,7 @@ private:
     int64_t cur_element_count_{0};                       // number of vectors currently stored
     std::atomic<int64_t> delete_count_{0};               // number of deleted vectors
     bool support_duplicate_{false};                      // whether to allow duplicate ids
+    bool build_by_base_{false};  // build bottom and route topology with base codes
 
     mutable std::shared_mutex resize_mutex_;        // guards resize operations
     std::mutex cur_element_count_mutex_;            // guards cur_element_count_ updates

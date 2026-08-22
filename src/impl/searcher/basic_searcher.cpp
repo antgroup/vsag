@@ -560,10 +560,10 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     // set customize query alloctor
     Allocator* alloc = select_query_allocator(ctx, allocator_);
 
-    auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
-    auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
-
     const bool use_custom_distance = inner_search_param.distance_batch_func != nullptr;
+    auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
+    StandardHeap<true, false> candidate_set(alloc, -1);
+
     if (not graph or (not flatten and not use_custom_distance)) {
         return top_candidates;
     }
@@ -586,7 +586,12 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
-    Vector<float> lower_bound_dists(graph->MaximumDegree(), alloc);
+    const bool needs_lower_bound_distances =
+        (use_custom_distance and inner_search_param.consider_duplicate) or
+        (inner_search_param.enable_rabitq_one_bit_search and
+         rabitq_lower_bound_candidates != nullptr);
+    const uint64_t lower_bound_capacity = needs_lower_bound_distances ? graph->MaximumDegree() : 0;
+    Vector<float> lower_bound_dists(lower_bound_capacity, alloc);
     const uint64_t custom_batch_capacity =
         use_custom_distance
             ? std::max<uint64_t>(1,
@@ -594,12 +599,13 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                                                     graph->MaximumDegree()))
             : 0;
     Vector<int64_t> custom_labels(custom_batch_capacity, alloc);
-    auto skip_strategy = create_filter_search_skip_strategy(
-        inner_search_param.skip_strategy_type,
-        inner_search_param.is_inner_id_allowed != nullptr
-            ? inner_search_param.is_inner_id_allowed->ValidRatio()
-            : 1.0F,
-        inner_search_param.skip_ratio);
+    FilterSearchSkipStrategyPtr skip_strategy = nullptr;
+    if (inner_search_param.is_inner_id_allowed != nullptr) {
+        skip_strategy =
+            create_filter_search_skip_strategy(inner_search_param.skip_strategy_type,
+                                               inner_search_param.is_inner_id_allowed->ValidRatio(),
+                                               inner_search_param.skip_ratio);
+    }
     if (rabitq_lower_bound_candidates != nullptr) {
         rabitq_lower_bound_candidates->clear();
     }
@@ -724,10 +730,10 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         const auto duplicate_ids = graph->GetDuplicateIds(ep);
         score_duplicates(duplicate_ids, hops);
     }
-    candidate_set->Push(traversal_priority(dist), ep);
+    candidate_set.Push(traversal_priority(dist), ep);
     vl->Set(ep);
 
-    while (not candidate_set->Empty()) {
+    while (not candidate_set.Empty()) {
         ++hops;
         if (hops >= inner_search_param.hops_limit) {
             if (reasoning != nullptr) {
@@ -738,7 +744,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         if (reasoning != nullptr) {
             reasoning->AddSearchHop();
         }
-        auto current_node_pair = candidate_set->Top();
+        auto current_node_pair = candidate_set.Top();
 
         if (inner_search_param.time_cost != nullptr and
             inner_search_param.time_cost->CheckOvertime()) {
@@ -759,10 +765,10 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 break;
             }
         }
-        candidate_set->Pop();
+        candidate_set.Pop();
 
-        if (not candidate_set->Empty()) {
-            graph->Prefetch(candidate_set->Top().second, 0);
+        if (not candidate_set.Empty()) {
+            graph->Prefetch(candidate_set.Top().second, 0);
         }
 
         count_no_visited = visit(graph,
@@ -809,7 +815,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 score_duplicates(duplicate_ids, hops);
             }
             if (not std::isfinite(dist)) {
-                candidate_set->Push(traversal_priority(dist), cur_id);
+                candidate_set.Push(traversal_priority(dist), cur_id);
                 auto push_result = [&](InnerIdType result_id) {
                     if (not is_result_distance_eligible<mode>(dist, inner_search_param) or
                         not check_func(result_id)) {
@@ -846,8 +852,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             }
             if (top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
-                candidate_set->Push(-dist, cur_id);
-                //                flatten->Prefetch(candidate_set->Top().second);
+                candidate_set.Push(-dist, cur_id);
+                //                flatten->Prefetch(candidate_set.Top().second);
                 if (check_func(cur_id)) {
                     top_candidates->Push(dist, cur_id);
                 } else if (reasoning != nullptr) {

@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <future>
 #include <initializer_list>
 #include <sstream>
@@ -1240,6 +1241,113 @@ TEST_CASE("HGraph deduplicate_storage rejects unsupported graph type",
     hgraph_json["graph_type"].SetString("odescent");
 
     REQUIRE_THROWS(MakeHGraphIndex(hgraph_json, common_param));
+}
+
+TEST_CASE("HGraph parallel cold build keeps RaBitQ and SQ8 codes valid across Add",
+          "[ut][hgraph][parallel][build]") {
+    constexpr int64_t dim = 32;
+    constexpr int64_t base_count = 2048;
+    constexpr int64_t add_count = 16;
+    constexpr uint64_t build_threads = 8;
+    BlockSizeLimitGuard block_size_limit_guard(256UL * 1024);
+
+    auto hgraph_json = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "sq8",
+        "rabitq_bits_per_dim_base": 3,
+        "use_reorder": true,
+        "build_by_base": false,
+        "max_degree": 8,
+        "ef_construction": 32,
+        "build_thread_count": 8,
+        "support_duplicate": false,
+        "deduplicate_storage": false
+    })");
+    auto index = MakeHGraphIndex(hgraph_json, MakeCommonParam(dim, build_threads));
+
+    std::vector<float> vectors(dim * base_count);
+    std::vector<int64_t> ids(base_count);
+    for (int64_t i = 0; i < base_count; ++i) {
+        ids[i] = 1'000'000 + (base_count - i) * 17;
+        for (int64_t d = 0; d < dim; ++d) {
+            const int64_t value =
+                ((i + 1) * (d + 3) * 7919 + i * i * 104729 + d * d * 1543) % 1000003;
+            vectors[i * dim + d] = static_cast<float>(value) / 1000003.0F;
+        }
+    }
+    auto base = MakeFloatDataset(vectors, ids, dim, base_count);
+    auto build_result = index->Build(base);
+    REQUIRE(build_result.has_value());
+    REQUIRE(build_result.value().empty());
+    REQUIRE(index->GetNumElements() == base_count);
+
+    const auto validate_base_codes_and_search = [&]() {
+        uint64_t checked_count = 0;
+        uint64_t searchable_count = 0;
+        for (int64_t i = 0; i < base_count; i += 257) {
+            REQUIRE(index->CheckIdExist(ids[i]));
+            const auto* query = vectors.data() + i * dim;
+            auto base_distance = index->CalcDistanceById(query, ids[i], false);
+            REQUIRE(base_distance.has_value());
+            REQUIRE(std::isfinite(base_distance.value()));
+            auto precise_distance = index->CalcDistanceById(query, ids[i], true);
+            REQUIRE(precise_distance.has_value());
+            REQUIRE(precise_distance.value() >= 0.0F);
+            REQUIRE(precise_distance.value() < 0.01F);
+
+            std::vector<float> query_vector(query, query + dim);
+            auto query_dataset = MakeFloatQuery(query_vector, dim);
+            auto result = index->KnnSearch(query_dataset, 10, R"({"hgraph": {"ef_search": 256}})");
+            REQUIRE(result.has_value());
+            if (ResultContainsId(result.value(), ids[i])) {
+                ++searchable_count;
+            }
+            ++checked_count;
+        }
+        return std::pair{checked_count, searchable_count};
+    };
+    const auto [checked_before_add, searchable_before_add] = validate_base_codes_and_search();
+    REQUIRE(searchable_before_add >= checked_before_add / 2);
+
+    std::vector<float> add_vectors(dim * add_count);
+    std::vector<int64_t> add_ids(add_count);
+    for (int64_t i = 0; i < add_count; ++i) {
+        add_ids[i] = 2'000'000 + i * 19;
+        for (int64_t d = 0; d < dim; ++d) {
+            const int64_t value =
+                ((i + 37) * (d + 11) * 65537 + i * i * 8191 + d * d * 31337) % 1000003;
+            add_vectors[i * dim + d] = static_cast<float>(value) / 1000003.0F;
+        }
+    }
+    auto added = MakeFloatDataset(add_vectors, add_ids, dim, add_count);
+    auto add_result = index->Add(added);
+    REQUIRE(add_result.has_value());
+    REQUIRE(add_result.value().empty());
+    REQUIRE(index->GetNumElements() == base_count + add_count);
+    uint64_t searchable_add_count = 0;
+    for (int64_t i = 0; i < add_count; ++i) {
+        REQUIRE(index->CheckIdExist(add_ids[i]));
+        const auto* query = add_vectors.data() + i * dim;
+        auto base_distance = index->CalcDistanceById(query, add_ids[i], false);
+        REQUIRE(base_distance.has_value());
+        REQUIRE(std::isfinite(base_distance.value()));
+        auto precise_distance = index->CalcDistanceById(query, add_ids[i], true);
+        REQUIRE(precise_distance.has_value());
+        REQUIRE(precise_distance.value() >= 0.0F);
+        REQUIRE(precise_distance.value() < 0.01F);
+
+        std::vector<float> query_vector(query, query + dim);
+        auto query_dataset = MakeFloatQuery(query_vector, dim);
+        auto result = index->KnnSearch(query_dataset, 10, R"({"hgraph": {"ef_search": 256}})");
+        REQUIRE(result.has_value());
+        if (ResultContainsId(result.value(), add_ids[i])) {
+            ++searchable_add_count;
+        }
+    }
+    REQUIRE(searchable_add_count >= static_cast<uint64_t>(add_count / 2));
+    const auto [checked_after_add, searchable_after_add] = validate_base_codes_and_search();
+    REQUIRE(checked_after_add == checked_before_add);
+    REQUIRE(searchable_after_add >= checked_after_add / 2);
 }
 
 TEST_CASE("HGraph optimized build accepts MRLE RaBitQ split with raw-vector storage",

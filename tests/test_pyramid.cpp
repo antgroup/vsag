@@ -42,6 +42,7 @@ struct PyramidParam {
     bool support_duplicate = false;
     uint64_t rabitq_bits_per_dim_base = 1;
     bool fast_encode_rabitq = true;
+    std::string root_graph_type = "single_layer";
 };
 
 namespace fixtures {
@@ -100,6 +101,7 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
             "precise_quantization_type": "{}",
             "use_reorder": {},
             "index_min_size": 28,
+            "root_graph_type": "{}",
             "support_duplicate": {}
         }}
     }}
@@ -114,6 +116,7 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
                                             param.fast_encode_rabitq,
                                             param.precise_quantization_type,
                                             param.use_reorder,
+                                            param.root_graph_type,
                                             param.support_duplicate);
     return build_parameters_str;
 }
@@ -837,6 +840,95 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         }
     }
     vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid multi-layer root streaming serialization",
+                             "[ft][pyramid][root_graph][streaming]") {
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {1, 2};
+    pyramid_param.root_graph_type = "multi_layer";
+    const auto param = GeneratePyramidBuildParametersString("l2", 16, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+    auto dataset = pool.GetDatasetAndCreate(16, 1000, "l2", /*with_path=*/true);
+    TestBuildIndex(index, dataset, true);
+    const auto search_param = GeneratePyramidSearchParametersString(100);
+
+    SECTION("binary set serialization") {
+        auto binary_set = index->Serialize();
+        REQUIRE(binary_set.has_value());
+        auto restored = TestFactory("pyramid", param, true);
+        REQUIRE(restored->Deserialize(binary_set.value()).has_value());
+        TestKnnSearch(restored, dataset, search_param, 0.94, true);
+    }
+
+    SECTION("streaming serialization and load") {
+        std::stringstream stream;
+        REQUIRE(index->SerializeStreaming(stream).has_value());
+        const auto bytes = stream.str();
+        auto restored = TestFactory("pyramid", param, true);
+        std::stringstream deserialize_stream(bytes);
+        REQUIRE(restored->DeserializeStreaming(deserialize_stream).has_value());
+        TestKnnSearch(restored, dataset, search_param, 0.94, true);
+
+        std::stringstream load_stream(bytes);
+        auto loaded = vsag::Index::Load(load_stream, "{}");
+        REQUIRE(loaded.has_value());
+        TestKnnSearch(loaded.value(), dataset, search_param, 0.94, true);
+    }
+}
+
+TEST_CASE("Pyramid applies root graph type per hierarchy",
+          "[ft][pyramid][root_graph][multi_hierarchy]") {
+    constexpr int64_t dim = 16;
+    constexpr int64_t count = 1000;
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> ids(count);
+    std::vector<std::string> paths(count, "");
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i;
+        vectors[i * dim] = static_cast<float>(i);
+    }
+    const std::string params = R"({
+        "dtype":"float32","metric_type":"l2","dim":16,
+        "index_param":{
+            "base_quantization_type":"fp32","use_reorder":false,
+            "graph_type":"nsw","max_degree":32,"ef_construction":100,
+            "build_thread_count":4,"index_min_size":1,"no_build_levels":[],
+            "hierarchies":[
+                {"name":"single","root_graph_type":"single_layer"},
+                {"name":"multi","root_graph_type":"multi_layer"}
+            ]
+        }
+    })";
+    auto index = vsag::Factory::CreateIndex("pyramid", params);
+    REQUIRE(index.has_value());
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(count)
+                    ->Dim(dim)
+                    ->Ids(ids.data())
+                    ->Float32Vectors(vectors.data())
+                    ->Paths("single", paths.data())
+                    ->Paths("multi", paths.data())
+                    ->Owner(false);
+    REQUIRE(index.value()->Build(base).has_value());
+
+    const auto stats = nlohmann::json::parse(index.value()->GetStats());
+    REQUIRE(stats["root_graphs"]["single"]["root_graph_type"] == "single_layer");
+    REQUIRE(stats["root_graphs"]["single"]["route_graph_count"] == 0);
+    REQUIRE(stats["root_graphs"]["multi"]["root_graph_type"] == "multi_layer");
+    REQUIRE(stats["root_graphs"]["multi"]["bottom_graph_node_count"] == count);
+    REQUIRE(stats["root_graphs"]["multi"]["route_graph_count"].get<uint64_t>() > 0);
+
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->Float32Vectors(vectors.data() + 321 * dim)
+                     ->Owner(false);
+    auto result = index.value()->KnnSearch(
+        query, 10, R"({"pyramid":{"ef_search":100,"hierarchies":["multi"]}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 10);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
@@ -2096,9 +2188,12 @@ TEST_CASE("Pyramid ExportCache + ImportCache + Build acceleration smoke test",
             "base_quantization_type": "fp32",
             "max_degree": 16,
             "ef_construction": 16,
-            "no_build_levels": [0, 1, 2],
+            "build_thread_count": 8,
+            "root_graph_type": "multi_layer",
+            "no_build_levels": [1, 2],
             "index_min_size": 28,
-            "persist_source_id": true
+            "persist_source_id": true,
+            "store_raw_vector": true
         }
     }
     )";
@@ -2113,9 +2208,8 @@ TEST_CASE("Pyramid ExportCache + ImportCache + Build acceleration smoke test",
     for (int64_t i = 0; i < TEST_COUNT; ++i) {
         ids[i] = i + 1;
     }
-    // All vectors share a deep path so they all land in the same leaf
-    // IndexNode (depth 3 with no_build_levels=[0,1,2]), making that leaf
-    // exceed index_min_size and become a GRAPH that fulfill_cache() walks.
+    // All vectors share a deep path. Levels 1 and 2 remain NO_INDEX, while the root and the
+    // depth-3 leaf exceed index_min_size and become GRAPH nodes that fulfill_cache() walks.
     std::vector<std::string> paths(TEST_COUNT, "a/b/c");
     std::vector<std::string> source_ids(TEST_COUNT);
     for (int64_t i = 0; i < TEST_COUNT; ++i) {
@@ -2154,6 +2248,11 @@ TEST_CASE("Pyramid ExportCache + ImportCache + Build acceleration smoke test",
     REQUIRE(warmed->GetNumElements() == TEST_COUNT);
     auto warm_stats = vsag::JsonType::Parse(warmed->GetStats());
     REQUIRE(warm_stats["build_cache_hit_nodes"].GetInt() > 0);
+    REQUIRE(warm_stats["root_graphs"]["default"]["route_graph_count"].GetInt() > 0);
+    auto restored_vectors = warmed->GetRawVectorByIds(ids.data(), TEST_COUNT);
+    REQUIRE(restored_vectors.has_value());
+    REQUIRE(
+        std::equal(vectors.begin(), vectors.end(), restored_vectors.value()->GetFloat32Vectors()));
     std::vector<float> query_vec(TEST_DIM);
     std::copy(vectors.begin(), vectors.begin() + TEST_DIM, query_vec.begin());
     // Pyramid navigates by path; the query must reference the same leaf.

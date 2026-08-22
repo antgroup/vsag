@@ -40,6 +40,14 @@ add_reorder_distance_count(QueryContext& ctx, uint64_t count) {
 }
 
 void
+add_reorder_candidate_count(QueryContext& ctx, uint64_t count) {
+    if (ctx.stats != nullptr) {
+        ctx.stats->reorder_candidate_count.fetch_add(static_cast<uint32_t>(count),
+                                                     std::memory_order_relaxed);
+    }
+}
+
+void
 add_reorder_lower_bound_probe_count(QueryContext& ctx, uint64_t count) {
     if (ctx.stats != nullptr) {
         ctx.stats->reorder_lower_bound_probe_count.fetch_add(static_cast<uint32_t>(count),
@@ -74,6 +82,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
     };
     const uint64_t heap_candidate_size = input == nullptr ? 0 : input->Size();
     if (rabitq_lower_bound_candidates == nullptr) {
+        add_reorder_candidate_count(ctx, heap_candidate_size);
         topk = std::min(topk, static_cast<int64_t>(heap_candidate_size));
         auto reorder_heap = std::make_shared<StandardHeap<true, false>>(query_allocator, topk);
         auto computer = flatten_->FactoryComputer(query);
@@ -160,6 +169,8 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
             }
         }
     }
+
+    add_reorder_candidate_count(ctx, candidate_size);
 
     topk = std::min(topk, static_cast<int64_t>(candidate_size));
     auto reorder_heap = std::make_shared<StandardHeap<true, false>>(query_allocator, topk);

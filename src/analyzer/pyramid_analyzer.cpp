@@ -644,7 +644,17 @@ PyramidAnalyzer::collect_searchable_node_ids(const IndexNode* node,
         if (node->status_ == IndexNode::Status::FLAT) {
             node_ids = node->ids_;
         } else if (node->graph_ != nullptr) {
-            node_ids = node->graph_->GetIds();
+            try {
+                node_ids = node->graph_->GetIds();
+            } catch (const std::exception&) {
+                const auto total_count = node->graph_->TotalCount();
+                node_ids.reserve(total_count);
+                for (InnerIdType id = 0; id < total_count; ++id) {
+                    if (node->graph_->CheckIdExists(id)) {
+                        node_ids.push_back(id);
+                    }
+                }
+            }
         }
         for (const auto id : node_ids) {
             if (deleted_ids.find(id) == deleted_ids.end() && seen_ids.insert(id).second) {
@@ -1070,10 +1080,21 @@ PyramidAnalyzer::search_single_node(const IndexNode* node,
         SearchStatistics stats;
         QueryContext ctx{.stats = &stats};
 
+        InnerIdType entry_point = 0;
+        {
+            std::shared_lock lock(node->mutex_);
+            entry_point = node->entry_point_;
+        }
         DistHeapPtr result;
         try {
-            result = pyramid_->search_node(
-                node, vl, inner_param, query_dataset, pyramid_->base_codes_, ctx, ef_search);
+            result = pyramid_->search_node(node,
+                                           vl,
+                                           inner_param,
+                                           query_dataset,
+                                           pyramid_->base_codes_,
+                                           ctx,
+                                           ef_search,
+                                           entry_point);
 
             if (pyramid_->use_reorder_ && result != nullptr && !result->Empty()) {
                 result = pyramid_->reorder_->Reorder(result, query, inner_param.topk, ctx);

@@ -224,6 +224,7 @@ const char* const PYRAMID_BUILD_ALPHA = "alpha";
 const char* const PYRAMID_GRAPH_TYPE = "graph_type";
 const char* const PYRAMID_GRAPH_STORAGE_TYPE = "graph_storage_type";
 const char* const PYRAMID_BUILD_THREAD_COUNT = "build_thread_count";
+const char* const PYRAMID_BUILD_BY_BASE_QUANTIZATION = "build_by_base";
 const char* const PYRAMID_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
 const char* const PYRAMID_RABITQ_BITS_PER_DIM_BASE = RABITQ_BITS_PER_DIM_BASE;
 const char* const PYRAMID_RABITQ_BITS_PER_DIM_QUERY = RABITQ_BITS_PER_DIM_QUERY;
@@ -251,6 +252,9 @@ const char* const PYRAMID_NO_BUILD_LEVELS = "no_build_levels";
 // so either can evolve independently without coupling the other context
 const char* const PYRAMID_HIERARCHIES = "hierarchies";
 const char* const PYRAMID_INDEX_MIN_SIZE = "index_min_size";
+const char* const PYRAMID_ROOT_GRAPH_TYPE = "root_graph_type";
+const char* const PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER = "single_layer";
+const char* const PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER = "multi_layer";
 
 const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT = "first_order_buckets_count";
 const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT = "second_order_buckets_count";

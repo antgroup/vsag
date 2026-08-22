@@ -94,6 +94,7 @@ extern const char* const PYRAMID_BUILD_ALPHA;
 extern const char* const PYRAMID_GRAPH_TYPE;
 extern const char* const PYRAMID_GRAPH_STORAGE_TYPE;
 extern const char* const PYRAMID_BUILD_THREAD_COUNT;
+extern const char* const PYRAMID_BUILD_BY_BASE_QUANTIZATION;
 extern const char* const PYRAMID_PRECISE_QUANTIZATION_TYPE;
 extern const char* const PYRAMID_RABITQ_BITS_PER_DIM_BASE;
 extern const char* const PYRAMID_RABITQ_BITS_PER_DIM_QUERY;
@@ -118,6 +119,9 @@ extern const char* const PYRAMID_PARAMETER_HIERARCHY_OP;
 extern const char* const PYRAMID_NO_BUILD_LEVELS;
 extern const char* const PYRAMID_HIERARCHIES;
 extern const char* const PYRAMID_INDEX_MIN_SIZE;
+extern const char* const PYRAMID_ROOT_GRAPH_TYPE;
+extern const char* const PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER;
+extern const char* const PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER;
 
 extern const char PART_SLASH;
 extern const char PART_BAR;

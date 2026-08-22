@@ -18,6 +18,7 @@
 #include <set>
 #include <vector>
 
+#include "datacell/flatten_datacell_parameter.h"
 #include "searcher_test.h"
 #include "unittest.h"
 
@@ -137,4 +138,44 @@ TEST_CASE("ParallelSearcher traverses through a non-finite-distance bridge",
         result->Pop();
     }
     REQUIRE(found_target);
+}
+
+TEST_CASE("ParallelSearcher honors hops limit", "[ut][ParallelSearcher][hops_limit]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.dim_ = 1;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    constexpr const char* param_temp = R"({{"type": "{}"}})";
+    auto quantizer_param = QuantizerParameter::GetQuantizerParameterByJson(
+        JsonType::Parse(fmt::format(param_temp, "fp32")));
+    auto io_param =
+        IOParameter::GetIOParameterByJson(JsonType::Parse(fmt::format(param_temp, "memory_io")));
+    auto flatten_param = std::make_shared<FlattenDataCellParameter>();
+    flatten_param->quantizer_parameter = quantizer_param;
+    flatten_param->io_parameter = io_param;
+    auto flatten = FlattenInterface::MakeInstance(flatten_param, common);
+    std::vector<float> vectors = {10.0F, 8.0F, 6.0F, 4.0F, 2.0F, 0.0F};
+    std::vector<InnerIdType> ids = {0, 1, 2, 3, 4, 5};
+    flatten->Train(vectors.data(), ids.size());
+    flatten->BatchInsertVector(vectors.data(), ids.size(), ids.data());
+    auto graph = std::make_shared<MockGraphDataCell>(
+        std::vector<std::vector<InnerIdType>>{{1}, {2}, {3}, {4}, {5}, {}});
+    auto pool = std::make_shared<VisitedListPool>(1, allocator.get(), ids.size(), allocator.get());
+    InnerSearchParam param;
+    param.ep = 0;
+    param.ef = 2;
+    param.topk = 1;
+    param.hops_limit = 2;
+    param.parallel_search_thread_count = 2;
+    float query = 0.0F;
+    SearchStatistics stats;
+    QueryContext context{.stats = &stats};
+    auto vl = pool->TakeOne();
+    auto result = ParallelSearcher(common, SafeThreadPool::FactoryDefaultThreadPool())
+                      .Search(graph, flatten, vl, &query, param, nullptr, &context);
+    pool->ReturnOne(vl);
+    REQUIRE(stats.hops.load() == param.hops_limit);
+    REQUIRE(stats.dist_cmp.load() == 2);
+    REQUIRE(result->Top().second != 5);
 }

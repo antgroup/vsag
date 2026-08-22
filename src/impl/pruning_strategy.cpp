@@ -67,6 +67,7 @@ select_edges_by_heuristic(Vector<InnerIdType>& neighbors,
                           float alpha) {
     PairwiseDistanceComputer pairwise_distance(distance_provider, allocator);
     auto edges = std::make_shared<StandardHeap<true, false>>(allocator, -1);
+    edges->Reserve(neighbors.size());
     for (const auto& neighbor : neighbors) {
         float dist = pairwise_distance.PairwiseDistance(node_id, neighbor);
         edges->Push(dist, neighbor);
@@ -91,21 +92,24 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
         return;
     }
 
-    auto queue_closest = std::make_shared<StandardHeap<true, false>>(allocator, -1);
+    const uint64_t candidate_count = edges->Size();
+    StandardHeap<true, false> queue_closest(allocator, -1);
+    queue_closest.Reserve(candidate_count);
     Vector<std::pair<float, InnerIdType>> return_list(allocator);
+    return_list.reserve(std::min<uint64_t>(candidate_count, max_size));
     PairwiseDistanceComputer pairwise_distance(distance_provider, allocator);
     while (not edges->Empty()) {
-        queue_closest->Push(-edges->Top().first, edges->Top().second);
+        queue_closest.Push(-edges->Top().first, edges->Top().second);
         edges->Pop();
     }
 
-    while (not queue_closest->Empty()) {
+    while (not queue_closest.Empty()) {
         if (return_list.size() >= max_size) {
             break;
         }
-        std::pair<float, InnerIdType> current_pair = queue_closest->Top();
+        std::pair<float, InnerIdType> current_pair = queue_closest.Top();
         float float_query = -current_pair.first;
-        queue_closest->Pop();
+        queue_closest.Pop();
         bool good = true;
 
         for (const auto& second_pair : return_list) {
@@ -163,6 +167,7 @@ mutually_connect_new_element(InnerIdType cur_c,
         LockGuard lock(neighbors_mutexes, selected_neighbor);
 
         Vector<InnerIdType> neighbors(allocator);
+        neighbors.reserve(max_size);
         graph->GetNeighbors(selected_neighbor, neighbors);
 
         uint64_t sz_link_list_other = neighbors.size();
@@ -179,6 +184,7 @@ mutually_connect_new_element(InnerIdType cur_c,
             float d_max = pairwise_distance.PairwiseDistance(selected_neighbor, cur_c);
 
             auto candidates = std::make_shared<StandardHeap<true, false>>(allocator, -1);
+            candidates->Reserve(max_size + 1);
             candidates->Push(d_max, cur_c);
 
             for (uint64_t j = 0; j < sz_link_list_other; j++) {
@@ -190,6 +196,7 @@ mutually_connect_new_element(InnerIdType cur_c,
             select_edges_by_heuristic(candidates, max_size, distance_provider, allocator, alpha);
 
             Vector<InnerIdType> cand_neighbors(allocator);
+            cand_neighbors.reserve(max_size);
             while (not candidates->Empty()) {
                 cand_neighbors.emplace_back(candidates->Top().second);
                 candidates->Pop();

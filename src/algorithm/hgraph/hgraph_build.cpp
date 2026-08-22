@@ -14,12 +14,16 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <future>
 #include <limits>
+#include <new>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -40,6 +44,115 @@
 #include "vsag/options.h"
 
 namespace vsag {
+
+namespace {
+
+class HGraphBuildScratchAllocator final : public Allocator {
+public:
+    explicit HGraphBuildScratchAllocator(Allocator* upstream) : upstream_(upstream) {
+    }
+
+    HGraphBuildScratchAllocator(const HGraphBuildScratchAllocator&) = delete;
+    HGraphBuildScratchAllocator&
+    operator=(const HGraphBuildScratchAllocator&) = delete;
+
+    ~HGraphBuildScratchAllocator() override {
+        this->Reset();
+        if (buffer_ != nullptr) {
+            upstream_->Deallocate(buffer_);
+        }
+    }
+
+    std::string
+    Name() override {
+        return "HGraphBuildScratchAllocator";
+    }
+
+    void*
+    Allocate(uint64_t size) override {
+        const uint64_t allocation_size = HGraphBuildScratchAllocator::allocation_size(size);
+        this->ensure_buffer();
+        allocation_header* header = nullptr;
+        if (allocation_size <= BUFFER_CAPACITY - offset_) {
+            header = ::new (buffer_ + offset_) allocation_header();
+            offset_ += allocation_size;
+        } else {
+            auto* allocation = upstream_->Allocate(allocation_size);
+            if (allocation == nullptr) {
+                throw std::bad_alloc();
+            }
+            header = ::new (allocation) allocation_header();
+            header->next = overflow_head_;
+            overflow_head_ = header;
+        }
+        header->size = std::max<uint64_t>(size, 1);
+        return header + 1;
+    }
+
+    void
+    Deallocate(void* /*pointer*/) override {
+    }
+
+    void*
+    Reallocate(void* pointer, uint64_t size) override {
+        if (pointer == nullptr) {
+            return this->Allocate(size);
+        }
+        auto* old_header = static_cast<allocation_header*>(pointer) - 1;
+        auto* result = this->Allocate(size);
+        std::memcpy(result, pointer, std::min<uint64_t>(old_header->size, size));
+        return result;
+    }
+
+    void
+    Reset() {
+        while (overflow_head_ != nullptr) {
+            auto* current = overflow_head_;
+            overflow_head_ = overflow_head_->next;
+            upstream_->Deallocate(current);
+        }
+        offset_ = 0;
+    }
+
+private:
+    struct alignas(std::max_align_t) allocation_header {
+        uint64_t size{0};
+        allocation_header* next{nullptr};
+    };
+
+    static constexpr uint64_t BUFFER_CAPACITY = 128ULL * 1024ULL;
+    static constexpr uint64_t ALIGNMENT = alignof(std::max_align_t);
+    static_assert((ALIGNMENT & (ALIGNMENT - 1)) == 0);
+
+    static uint64_t
+    allocation_size(uint64_t size) {
+        const uint64_t payload_size = std::max<uint64_t>(size, 1);
+        if (payload_size >
+            std::numeric_limits<uint64_t>::max() - sizeof(allocation_header) - (ALIGNMENT - 1)) {
+            throw std::bad_alloc();
+        }
+        const uint64_t unaligned_size = sizeof(allocation_header) + payload_size;
+        return (unaligned_size + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
+    }
+
+    void
+    ensure_buffer() {
+        if (buffer_ != nullptr) {
+            return;
+        }
+        buffer_ = static_cast<std::byte*>(upstream_->Allocate(BUFFER_CAPACITY));
+        if (buffer_ == nullptr) {
+            throw std::bad_alloc();
+        }
+    }
+
+    Allocator* upstream_{nullptr};
+    std::byte* buffer_{nullptr};
+    uint64_t offset_{0};
+    allocation_header* overflow_head_{nullptr};
+};
+
+}  // namespace
 
 static FlattenInterfacePtr
 make_temporary_sq8_flatten(MetricType metric,
@@ -462,10 +575,17 @@ HGraph::prepare_temporary_graph_read_codes(const DatasetPtr& data,
 
 void
 HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, const AddBatch& batch) {
+    const bool use_fixed_workers =
+        context.use_parallel_add and context.first_empty_add and not context.use_dedup_storage and
+        this->extra_infos_ == nullptr and this->build_thread_count_ > 1 and batch.rows.size() > 1;
+    const uint64_t future_count =
+        use_fixed_workers
+            ? std::min<uint64_t>(this->build_thread_count_, batch.rows.size())
+            : (context.use_parallel_add ? static_cast<uint64_t>(batch.rows.size()) : 0);
+    std::atomic<uint64_t> next_offset{0};
     std::vector<std::future<void>> futures;
-    HGraphBuildTaskGuard future_guard(
-        futures, context.use_parallel_add ? static_cast<uint64_t>(batch.rows.size()) : 0);
-    this->prepare_build_codes(data, batch.rows);
+    futures.reserve(future_count);
+    const bool persistent_codes_prepared = this->prepare_build_codes(data, batch.rows, context);
 
     const auto* extra_infos = data->GetExtraInfos();
     const auto* attr_sets = data->GetAttributeSets();
@@ -473,15 +593,55 @@ HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, cons
     auto add_func = [&](const void* vector_data,
                         AddRow row,
                         const char* extra_info,
-                        const AttributeSet* attrs) -> void {
+                        const AttributeSet* attrs,
+                        Allocator* search_allocator) -> void {
         if (this->extra_infos_ != nullptr) {
             this->extra_infos_->InsertExtraInfo(extra_info, row.inner_id);
         }
         if (attrs != nullptr and this->use_attribute_filter_) {
             this->attr_filter_index_->Insert(*attrs, row.inner_id);
         }
-        this->insert_one_logical_point(vector_data, row, context);
+        this->insert_one_logical_point(
+            vector_data, row, context, persistent_codes_prepared, search_allocator);
     };
+    // All state captured by build workers is declared before the guard, so an enqueue exception
+    // drains already-running tasks before their references leave scope.
+    HGraphBuildTaskGuard future_guard(futures, 0);
+
+    if (use_fixed_workers) {
+        constexpr uint64_t build_block_size = 64;
+        const uint64_t worker_count =
+            std::min<uint64_t>(this->build_thread_count_, batch.rows.size());
+        for (uint64_t worker = 0; worker < worker_count; ++worker) {
+            futures.emplace_back(this->thread_pool_->GeneralEnqueue([&]() {
+                HGraphBuildScratchAllocator search_allocator(this->allocator_);
+                while (true) {
+                    const uint64_t begin = next_offset.fetch_add(build_block_size);
+                    if (begin >= batch.rows.size()) {
+                        return;
+                    }
+                    const uint64_t end =
+                        std::min<uint64_t>(begin + build_block_size, batch.rows.size());
+                    for (uint64_t offset = begin; offset < end; ++offset) {
+                        const auto& row = batch.rows[offset];
+                        const auto* extra_info =
+                            extra_infos == nullptr ? nullptr
+                                                   : extra_infos + row.input_idx * extra_info_size_;
+                        const AttributeSet* cur_attr_set =
+                            attr_sets == nullptr ? nullptr : attr_sets + row.input_idx;
+                        add_func(get_data(data, row.input_idx),
+                                 row,
+                                 extra_info,
+                                 cur_attr_set,
+                                 &search_allocator);
+                        search_allocator.Reset();
+                    }
+                }
+            }));
+        }
+        wait_all_futures(futures);
+        return;
+    }
 
     for (const auto& row : batch.rows) {
         const auto* extra_info =
@@ -492,10 +652,10 @@ HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, cons
         }
         if (context.use_parallel_add) {
             auto future = this->thread_pool_->GeneralEnqueue(
-                add_func, get_data(data, row.input_idx), row, extra_info, cur_attr_set);
+                add_func, get_data(data, row.input_idx), row, extra_info, cur_attr_set, nullptr);
             futures.emplace_back(std::move(future));
         } else {
-            add_func(get_data(data, row.input_idx), row, extra_info, cur_attr_set);
+            add_func(get_data(data, row.input_idx), row, extra_info, cur_attr_set, nullptr);
         }
     }
     if (context.use_parallel_add) {
@@ -547,10 +707,17 @@ HGraph::insert_persistent_codes_to_slot(const void* data, CodeSlotIdType code_sl
 // the probe result by binding deduplicated storage, updating duplicate tracking, or inserting a
 // unique point into the graph.
 bool
-HGraph::insert_one_logical_point(const void* data, const AddRow& row, const AddContext& context) {
+HGraph::insert_one_logical_point(const void* data,
+                                 const AddRow& row,
+                                 const AddContext& context,
+                                 bool persistent_codes_prepared,
+                                 Allocator* search_allocator) {
     const auto inner_id = row.inner_id;
     const auto level = row.level;
-    this->prepare_codes_before_probe_if_needed(data, inner_id, context);
+    this->prepare_codes_before_probe_if_needed(data, inner_id, context, persistent_codes_prepared);
+
+    QueryContext build_query_context;
+    build_query_context.alloc = search_allocator;
 
     auto make_search_param = [&]() {
         InnerSearchParam param;
@@ -558,6 +725,7 @@ HGraph::insert_one_logical_point(const void* data, const AddRow& row, const AddC
         param.ep = this->entry_point_id_;
         param.ef = 1;
         param.is_inner_id_allowed = nullptr;
+        param.query_context = search_allocator == nullptr ? nullptr : &build_query_context;
         return param;
     };
 
@@ -590,8 +758,10 @@ HGraph::insert_one_logical_point(const void* data, const AddRow& row, const AddC
 void
 HGraph::prepare_codes_before_probe_if_needed(const void* data,
                                              InnerIdType inner_id,
-                                             const AddContext& context) {
-    if (this->should_insert_codes_before_probe(context.use_dedup_storage)) {
+                                             const AddContext& context,
+                                             bool persistent_codes_prepared) {
+    if (this->should_insert_codes_before_probe(context.use_dedup_storage,
+                                               persistent_codes_prepared)) {
         this->insert_persistent_codes(data, inner_id);
     }
 }
@@ -735,15 +905,20 @@ HGraph::probe_graph_for_add(const void* data,
         if (this->support_duplicate_ && param.duplicate_id >= 0) {
             return GraphAddProbeResult{nullptr, param.duplicate_id};
         }
-        auto filtered_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
-        while (not result->Empty()) {
-            auto [dist, id] = result->Top();
-            result->Pop();
-            if (id != inner_id) {
-                filtered_result->Push(dist, id);
+        // Force-remove can reuse a graph slot while entry_point_id_ still refers to that slot.
+        // Filter the reused ID before pruning; monotonic cold/add paths can pass the heap through.
+        if (this->support_force_remove()) {
+            auto filtered_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+            while (not result->Empty()) {
+                const auto [dist, id] = result->Top();
+                result->Pop();
+                if (id != inner_id) {
+                    filtered_result->Push(dist, id);
+                }
             }
+            return GraphAddProbeResult{filtered_result, -1};
         }
-        return GraphAddProbeResult{filtered_result, -1};
+        return GraphAddProbeResult{result, -1};
     }
     return GraphAddProbeResult{};
 }
@@ -779,18 +954,21 @@ HGraph::publish_unique_to_route_graphs(const void* data,
         if (route_graphs_[j]->TotalCount() != 0) {
             result = this->search_graph_for_build(
                 data, route_graphs_[j], flatten_codes, param, build_computer);
-            auto filtered_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
-            while (not result->Empty()) {
-                auto [dist, id] = result->Top();
-                result->Pop();
-                if (id != inner_id) {
-                    filtered_result->Push(dist, id);
+            if (this->support_force_remove()) {
+                auto filtered_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+                while (not result->Empty()) {
+                    const auto [dist, id] = result->Top();
+                    result->Pop();
+                    if (id != inner_id) {
+                        filtered_result->Push(dist, id);
+                    }
                 }
+                result = std::move(filtered_result);
             }
             LockGuard cur_lock(neighbors_mutex_, inner_id);
-            if (not filtered_result->Empty()) {
+            if (not result->Empty()) {
                 mutually_connect_new_element(inner_id,
-                                             filtered_result,
+                                             result,
                                              route_graphs_[j],
                                              flatten_codes,
                                              neighbors_mutex_,

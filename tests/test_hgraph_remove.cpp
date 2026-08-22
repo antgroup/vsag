@@ -109,6 +109,46 @@ TEST_CASE("HGraph Sequential Add and ForceRemove", "[ft][hgraph]") {
     }
 }
 
+TEST_CASE("HGraph reuses a removed route entry point without a self-edge", "[ft][hgraph]") {
+    fixtures::logger::LoggerReplacer _;
+
+    auto index = CreateHGraphIndex();
+    constexpr int64_t count = 5;
+    std::vector<int64_t> ids = {0, 1, 2, 3, 4};
+    std::vector<float> vectors(DIM * count);
+    std::mt19937 rng(47);
+    std::uniform_real_distribution<float> distrib(0.1F, 0.9F);
+    for (auto& value : vectors) {
+        value = distrib(rng);
+    }
+
+    for (int64_t i = 0; i < count; ++i) {
+        auto dataset = vsag::Dataset::Make();
+        dataset->Dim(DIM)
+            ->NumElements(1)
+            ->Ids(&ids[i])
+            ->Float32Vectors(&vectors[i * DIM])
+            ->Owner(false);
+        REQUIRE(index->Add(dataset).has_value());
+    }
+
+    REQUIRE(index->Remove(ids.back(), vsag::RemoveMode::FORCE_REMOVE).has_value());
+
+    int64_t replacement_id = 5;
+    std::vector<float> replacement(DIM);
+    for (auto& value : replacement) {
+        value = distrib(rng);
+    }
+    auto replacement_dataset = vsag::Dataset::Make();
+    replacement_dataset->Dim(DIM)
+        ->NumElements(1)
+        ->Ids(&replacement_id)
+        ->Float32Vectors(replacement.data())
+        ->Owner(false);
+    REQUIRE(index->Add(replacement_dataset).has_value());
+    REQUIRE(index->GetNumElements() == count);
+}
+
 TEST_CASE("HGraph Concurrent Add and ForceRemove", "[ft][hgraph][concurrent]") {
     fixtures::logger::LoggerReplacer _;
 

@@ -138,7 +138,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     auto lower_bound = std::numeric_limits<float>::max();
 
     uint32_t hops = 0;
-    uint32_t dist_cmp = 0;
+    uint32_t dist_cmp = 1;
     uint32_t count_no_visited = 0;
     uint64_t beam = 1;
     uint32_t vector_size = graph->MaximumDegree() * beam;
@@ -240,6 +240,9 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
 
     while (not candidate_set->Empty()) {
         hops++;
+        if (hops >= inner_search_param.hops_limit) {
+            break;
+        }
         auto num_explore_nodes = candidate_set->Size() < beam ? candidate_set->Size() : beam;
 
         auto current_first_node_pair = candidate_set->Top();
@@ -410,6 +413,11 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     }
     for (auto& future : futures) {
         future.get();
+    }
+
+    if (ctx != nullptr && ctx->stats != nullptr) {
+        ctx->stats->dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
+        ctx->stats->hops.fetch_add(hops, std::memory_order_relaxed);
     }
 
     return top_candidates;
