@@ -431,10 +431,11 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
         }
         release_batch();
     }
-    if (i < id_count) {
-        // Pad the partial tail to a full batch4 group (duplicate slots are
-        // computed and discarded): one batched call beats up to three
-        // single-vector computes on the hop hot path.
+    if (id_count - i >= 2) {
+        // Pad the 2-3 entry tail to a full batch4 group (duplicate slots are
+        // computed and discarded): one batched call beats two or three
+        // single-vector computes. A single leftover entry stays on the single
+        // path — padding it would quadruple the code traffic for nothing.
         InnerIdType padded[4];
         const auto remainder = static_cast<int64_t>(id_count - i);
         for (int64_t j = 0; j < 4; ++j) {
@@ -478,6 +479,22 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
             throw;
         }
         release_tail();
+    }
+    if (i < id_count) {
+        bool release = false;
+        const uint8_t* codes = nullptr;
+        try {
+            codes = this->GetCodesById(idx[i], release);
+            computer->ComputeDist(codes, result_dists + i);
+        } catch (...) {
+            if (release && codes) {
+                this->io_->Release(codes);
+            }
+            throw;
+        }
+        if (release && codes) {
+            this->io_->Release(codes);
+        }
     }
     if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations)
         ctx->stats->AddDistance(ctx->distance_phase, backend_, static_cast<uint64_t>(id_count));
