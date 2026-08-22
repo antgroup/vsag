@@ -20,6 +20,7 @@
 #include "algorithm/sindi/sindi_parameter.h"
 #include "datacell/sindi_datacell_utils.h"
 #include "datacell/sindi_search_term_datacell.h"
+#include "hash_types.h"
 #include "impl/searcher/basic_searcher.h"
 #include "quantization/sparse_quantization/sparse_term_computer.h"
 #include "storage/stream_reader.h"
@@ -32,13 +33,21 @@ namespace vsag {
 
 struct MutableSINDIWindow {
     explicit MutableSINDIWindow(Allocator* allocator = nullptr)
-        : term_ids_(allocator), term_datas_(allocator), term_sizes_(allocator) {
+        : term_ids_(allocator),
+          term_datas_(allocator),
+          term_sizes_(allocator),
+          dirty_posting_prefixes_(allocator),
+          pending_posting_terms_(allocator),
+          pending_posting_flags_(allocator) {
     }
 
     uint32_t term_capacity_{0};
     Vector<std::unique_ptr<Vector<uint16_t>>> term_ids_;
     Vector<std::unique_ptr<Vector<uint8_t>>> term_datas_;
     Vector<uint32_t> term_sizes_;
+    UnorderedMap<uint32_t, uint32_t> dirty_posting_prefixes_;
+    Vector<uint32_t> pending_posting_terms_;
+    Vector<uint8_t> pending_posting_flags_;
     bool postings_sorted_{true};
 };
 
@@ -60,7 +69,9 @@ public:
           sparse_value_quant_type_(sparse_value_quant_type),
           quantization_params_(std::move(quantization_params)),
           window_size_(window_size),
-          windows_(allocator) {
+          windows_(allocator),
+          normalization_ids_scratch_(allocator),
+          normalization_data_scratch_(allocator) {
     }
 
     void
@@ -166,6 +177,15 @@ public:
     void
     SortByValue(uint32_t window_id);
 
+    bool
+    FinalizeInsertBatch(uint32_t window_id);
+
+    bool
+    NormalizeDirtyPostings(uint32_t window_id);
+
+    bool
+    NormalizeDirtyPostings();
+
     void
     ResizeWindowCount(uint32_t window_count);
 
@@ -206,6 +226,16 @@ public:
     GetTermDictCount() const override;
 
 private:
+    struct PostingRunSelection {
+        uint32_t prefix_count{0};
+        uint32_t suffix_offset{0};
+        uint32_t suffix_count{0};
+    };
+
+    static constexpr uint32_t MIN_DIRTY_POSTING_SIZE = 32;
+
+    static constexpr uint32_t MAX_DIRTY_POSTING_SIZE = 256;
+
     [[nodiscard]] uint32_t
     GetTermValueCodeSize() const;
 
@@ -219,7 +249,70 @@ private:
     ResizeTermList(MutableSINDIWindow& window, InnerIdType new_term_capacity) const;
 
     void
-    SortByValue(MutableSINDIWindow& window) const;
+    SortByValue(MutableSINDIWindow& window);
+
+    [[nodiscard]] PostingRunSelection
+    SelectPostingRuns(const MutableSINDIWindow& window,
+                      uint32_t term,
+                      uint32_t retained_count) const;
+
+    [[nodiscard]] bool
+    PostingEntryBefore(const MutableSINDIWindow& window,
+                       uint32_t term,
+                       uint32_t left,
+                       uint32_t right) const;
+
+    void
+    NormalizePosting(MutableSINDIWindow& window, uint32_t term);
+
+    bool
+    FinalizeInsertBatch(MutableSINDIWindow& window, bool release_scratch);
+
+    bool
+    NormalizeDirtyPostings(MutableSINDIWindow& window, bool release_scratch);
+
+    void
+    ReleaseNormalizationScratch();
+
+    void
+    ScanPostingRange(uint32_t term_iterator,
+                     const SparseTermComputerPtr& computer,
+                     const uint16_t* term_ids,
+                     const uint8_t* term_data,
+                     uint32_t term_count,
+                     float* dists,
+                     SparseEvaluationTracker* evaluation_tracker) const;
+
+    template <typename Callback>
+    bool
+    ForEachSelectedPosting(const MutableSINDIWindow& window,
+                           uint32_t term,
+                           const PostingRunSelection& selected,
+                           Callback&& callback) const {
+        uint32_t prefix = 0;
+        uint32_t suffix = selected.suffix_offset;
+        const auto prefix_end = selected.prefix_count;
+        const auto suffix_end = selected.suffix_offset + selected.suffix_count;
+        const auto& ids = *window.term_ids_[term];
+        while (prefix < prefix_end && suffix < suffix_end) {
+            const auto posting =
+                PostingEntryBefore(window, term, prefix, suffix) ? prefix++ : suffix++;
+            if (!callback(ids[posting])) {
+                return false;
+            }
+        }
+        while (prefix < prefix_end) {
+            if (!callback(ids[prefix++])) {
+                return false;
+            }
+        }
+        while (suffix < suffix_end) {
+            if (!callback(ids[suffix++])) {
+                return false;
+            }
+        }
+        return true;
+    }
 
     void
     Compact(MutableSINDIWindow& window);
@@ -294,5 +387,9 @@ public:
     uint32_t window_size_{0};
 
     Vector<MutableSINDIWindow> windows_;
+
+    Vector<uint16_t> normalization_ids_scratch_;
+
+    Vector<uint8_t> normalization_data_scratch_;
 };
 }  // namespace vsag

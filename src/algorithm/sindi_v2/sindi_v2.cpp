@@ -514,8 +514,8 @@ SINDIV2::Add(const DatasetPtr& base) {
     Vector<uint32_t> pruned_ids(allocator_);
     Vector<float> pruned_vals(allocator_);
     Vector<uint32_t> remapped_ids(allocator_);
-    const auto first_affected_window = cur_element_count_ / window_size_;
-    int64_t last_affected_window = -1;
+    const auto first_affected_window = static_cast<uint32_t>(cur_element_count_ / window_size_);
+    std::optional<uint32_t> last_affected_window;
     std::vector<SparseVector> dmq_rerank_vectors;
     if (use_reorder_ && rerank_type_ == SPARSE_RERANK_TYPE_DMQ8) {
         dmq_rerank_vectors.reserve(data_num);
@@ -581,7 +581,7 @@ SINDIV2::Add(const DatasetPtr& base) {
                 {sparse_vectors + i, static_cast<InnerIdType>(cur_element_count_), {}});
         }
 
-        last_affected_window = cur_element_count_ / window_size_;
+        last_affected_window = static_cast<uint32_t>(cur_element_count_ / window_size_);
         cur_element_count_++;
     }
 
@@ -593,8 +593,20 @@ SINDIV2::Add(const DatasetPtr& base) {
         write_rerank_flat_with_layout(rerank_flat_, rerank_layout_records, rerank_layout_);
     }
 
-    for (int64_t window = first_affected_window; window <= last_affected_window; ++window) {
-        mutable_term_datacell->SortByValue(static_cast<uint32_t>(window));
+    if (last_affected_window.has_value()) {
+        const auto current_count = static_cast<uint64_t>(cur_element_count_);
+        for (uint32_t window = first_affected_window;; ++window) {
+            const auto window_end =
+                (static_cast<uint64_t>(window) + 1) * static_cast<uint64_t>(window_size_);
+            if (window_end <= current_count) {
+                mutable_term_datacell->NormalizeDirtyPostings(window);
+            } else {
+                mutable_term_datacell->FinalizeInsertBatch(window);
+            }
+            if (window == last_affected_window.value()) {
+                break;
+            }
+        }
     }
     this->cal_memory_usage();
     return failed_ids;
@@ -1063,7 +1075,7 @@ SINDIV2::UseTermListsHeapInsert(const SINDIV2SearchParameter& search_param) cons
 }
 
 void
-SINDIV2::cal_memory_usage() {
+SINDIV2::cal_memory_usage() const {
     auto memory = sizeof(SINDIV2);
     if (term_datacell_ != nullptr) {
         memory += term_datacell_->GetMemoryUsage();
@@ -1106,9 +1118,8 @@ SINDIV2::Serialize(StreamWriter& writer) const {
 
     if (term_datacell_ != nullptr &&
         std::dynamic_pointer_cast<MutableSindiTermDataCell>(term_datacell_) != nullptr) {
-        const auto mutable_datacell = this->get_mutable_term_datacell();
-        for (uint32_t window = 0; window < mutable_datacell->GetWindowCount(); ++window) {
-            mutable_datacell->SortByValue(window);
+        if (this->get_mutable_term_datacell()->NormalizeDirtyPostings()) {
+            this->cal_memory_usage();
         }
     }
 

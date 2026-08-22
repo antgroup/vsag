@@ -698,7 +698,7 @@ public:
 protected:
     std::atomic<uint64_t> total_count_{0};
 
-    std::atomic<uint64_t> current_memory_usage_{0};
+    mutable std::atomic<uint64_t> current_memory_usage_{0};
     mutable std::shared_mutex memory_usage_mutex_{};
 
     bool has_raw_vector_{false};

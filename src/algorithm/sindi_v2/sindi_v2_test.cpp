@@ -267,7 +267,7 @@ TEST_CASE("SINDIV2 term prune keeps highest stored values after build", "[ut][SI
     }
 }
 
-TEST_CASE("SINDIV2 sorts incremental partial windows", "[ut][SINDIV2]") {
+TEST_CASE("SINDIV2 defers incremental partial window normalization", "[ut][SINDIV2]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
@@ -305,7 +305,7 @@ TEST_CASE("SINDIV2 sorts incremental partial windows", "[ut][SINDIV2]") {
     auto appended = Dataset::Make();
     appended->NumElements(1)->SparseVectors(&appended_vector)->Ids(&appended_label)->Owner(false);
     REQUIRE(index.Add(appended).empty());
-    REQUIRE(SINDIV2TestAccess::MutableTermIsSorted(index, 0, term));
+    REQUIRE_FALSE(SINDIV2TestAccess::MutableTermIsSorted(index, 0, term));
 
     float query_value = 1.0F;
     SparseVector query_vector{1, &term, &query_value};

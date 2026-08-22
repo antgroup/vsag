@@ -500,7 +500,7 @@ TEST_CASE("SINDI term prune keeps highest stored values after build", "[ut][SIND
     }
 }
 
-TEST_CASE("SINDI sorts incremental partial windows", "[ut][SINDI]") {
+TEST_CASE("SINDI defers incremental partial window normalization", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
@@ -536,7 +536,7 @@ TEST_CASE("SINDI sorts incremental partial windows", "[ut][SINDI]") {
     auto appended = Dataset::Make();
     appended->NumElements(1)->SparseVectors(&appended_vector)->Ids(&appended_label)->Owner(false);
     REQUIRE(index.Add(appended).empty());
-    REQUIRE(SINDITestAccess::MutableTermIsSorted(index, 0, term));
+    REQUIRE_FALSE(SINDITestAccess::MutableTermIsSorted(index, 0, term));
 
     float query_value = 1.0F;
     SparseVector query_vector{1, &term, &query_value};
@@ -544,6 +544,11 @@ TEST_CASE("SINDI sorts incremental partial windows", "[ut][SINDI]") {
     query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
     const auto search_parameters = R"({"sindi": {"n_candidate": 1, "term_retain_threshold": 1}})";
     REQUIRE(index.KnnSearch(query, 1, search_parameters, nullptr)->GetIds()[0] == appended_label);
+
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    REQUIRE_NOTHROW(index.Serialize(writer));
+    REQUIRE(SINDITestAccess::MutableTermIsSorted(index, 0, term));
 
     appended_value = 3.0F;
     appended_label = 13;
