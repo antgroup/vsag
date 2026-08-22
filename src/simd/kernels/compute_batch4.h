@@ -73,6 +73,21 @@ ComputeBatch4Impl(const float* RESTRICT query,
     V s4 = T::zero();
 
     uint64_t i = 0;
+    // Two vector chunks per iteration: the eight code loads in flight overlap
+    // their latencies instead of serializing behind one query load. The
+    // accumulation order per code is unchanged, so results stay bit-identical.
+    for (; i + 2 * W <= dim; i += 2 * W) {
+        const V qa = T::load(query + i);
+        const V qb = T::load(query + i + W);
+        s1 = batch4_accumulate<T, Kind>(qa, T::load(c1 + i), s1);
+        s2 = batch4_accumulate<T, Kind>(qa, T::load(c2 + i), s2);
+        s3 = batch4_accumulate<T, Kind>(qa, T::load(c3 + i), s3);
+        s4 = batch4_accumulate<T, Kind>(qa, T::load(c4 + i), s4);
+        s1 = batch4_accumulate<T, Kind>(qb, T::load(c1 + i + W), s1);
+        s2 = batch4_accumulate<T, Kind>(qb, T::load(c2 + i + W), s2);
+        s3 = batch4_accumulate<T, Kind>(qb, T::load(c3 + i + W), s3);
+        s4 = batch4_accumulate<T, Kind>(qb, T::load(c4 + i + W), s4);
+    }
     for (; i + W <= dim; i += W) {
         V q = T::load(query + i);
         s1 = batch4_accumulate<T, Kind>(q, T::load(c1 + i), s1);
