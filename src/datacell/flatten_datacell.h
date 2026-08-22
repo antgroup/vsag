@@ -431,21 +431,53 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
         }
         release_batch();
     }
-    for (; i < id_count; ++i) {
-        bool release = false;
-        const uint8_t* codes = nullptr;
-        try {
-            codes = this->GetCodesById(idx[i], release);
-            computer->ComputeDist(codes, result_dists + i);
-        } catch (...) {
-            if (release && codes) {
-                this->io_->Release(codes);
+    if (i < id_count) {
+        // Pad the partial tail to a full batch4 group (duplicate slots are
+        // computed and discarded): one batched call beats up to three
+        // single-vector computes on the hop hot path.
+        InnerIdType padded[4];
+        const auto remainder = static_cast<int64_t>(id_count - i);
+        for (int64_t j = 0; j < 4; ++j) {
+            padded[j] = idx[i + std::min(j, remainder - 1)];
+        }
+        bool release1 = false, release2 = false, release3 = false, release4 = false;
+        const uint8_t* codes1 = nullptr;
+        const uint8_t* codes2 = nullptr;
+        const uint8_t* codes3 = nullptr;
+        const uint8_t* codes4 = nullptr;
+        auto release_tail = [&]() {
+            if (release1 && codes1) {
+                this->io_->Release(codes1);
             }
+            if (release2 && codes2) {
+                this->io_->Release(codes2);
+            }
+            if (release3 && codes3) {
+                this->io_->Release(codes3);
+            }
+            if (release4 && codes4) {
+                this->io_->Release(codes4);
+            }
+        };
+        try {
+            codes1 = this->GetCodesById(padded[0], release1);
+            codes2 = this->GetCodesById(padded[1], release2);
+            codes3 = this->GetCodesById(padded[2], release3);
+            codes4 = this->GetCodesById(padded[3], release4);
+            float tail1 = 0.F, tail2 = 0.F, tail3 = 0.F, tail4 = 0.F;
+            computer->ComputeDistsBatch4(codes1, codes2, codes3, codes4, tail1, tail2, tail3, tail4);
+            result_dists[i] = tail1;
+            if (remainder > 1) {
+                result_dists[i + 1] = tail2;
+            }
+            if (remainder > 2) {
+                result_dists[i + 2] = tail3;
+            }
+        } catch (...) {
+            release_tail();
             throw;
         }
-        if (release && codes) {
-            this->io_->Release(codes);
-        }
+        release_tail();
     }
     if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations)
         ctx->stats->AddDistance(ctx->distance_phase, backend_, static_cast<uint64_t>(id_count));
