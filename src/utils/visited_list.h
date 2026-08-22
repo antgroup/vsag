@@ -62,6 +62,24 @@ public:
         return (this->words_[word_id] & mask) != 0;
     }
 
+    // Marks id visited and returns whether it was previously unvisited.
+    // Fuses the visitor-side Get-then-Set pair into a single word access.
+    bool
+    TestSet(const InnerIdType& id) {
+        const auto word_id = static_cast<uint64_t>(id) / kBitsPerWord;
+        const auto mask = WordType{1} << (static_cast<uint64_t>(id) % kBitsPerWord);
+        auto& word = this->words_[word_id];
+        if ((word & mask) != 0) {
+            return false;
+        }
+        if (word == 0) {
+            this->touched_words_[this->touched_count_++] =
+                static_cast<TouchedIndexType>(word_id);
+        }
+        word |= mask;
+        return true;
+    }
+
     void
     Prefetch(const InnerIdType& id) {
         const auto word_id = static_cast<uint64_t>(id) / kBitsPerWord;

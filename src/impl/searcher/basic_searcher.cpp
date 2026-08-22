@@ -61,8 +61,7 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
         if (i + prefetch_stride_visit_ < neighbors.size()) {
             vl->Prefetch(neighbors[i + prefetch_stride_visit_]);
         }
-        if (not vl->Get(neighbors[i])) {
-            vl->Set(neighbors[i]);
+        if (vl->TestSet(neighbors[i])) {
             if (not filter || count_no_visited == 0 || skip_strategy == nullptr ||
                 skip_strategy->ShouldVisit() || filter->CheckValid(neighbors[i])) {
                 to_be_visited_id[count_no_visited] = neighbors[i];
