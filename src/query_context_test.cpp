@@ -7,6 +7,8 @@
 
 #include <limits>
 #include <stdexcept>
+#include <thread>
+#include <vector>
 
 #include "unittest.h"
 
@@ -68,6 +70,31 @@ TEST_CASE("SearchStatistics addition saturates", "[ut][search_statistics]") {
     json = vsag::JsonType::Parse(stats.Dump());
     CHECK(json["distance_evaluations_by_phase"]["routing"].GetUint64() == 0);
     CHECK(json["distance_evaluations_by_backend"]["sq8"].GetUint64() == 0);
+}
+
+TEST_CASE("SearchStatistics parallel path stays exact", "[ut][search_statistics]") {
+    vsag::SearchStatistics stats;
+    stats.parallel_.store(true);
+    constexpr uint32_t kThreads = 8;
+    constexpr uint64_t kPerThread = 10000;
+    std::vector<std::thread> threads;
+    for (uint32_t t = 0; t < kThreads; ++t) {
+        threads.emplace_back([&stats]() {
+            for (uint64_t i = 0; i < kPerThread; ++i) {
+                stats.AddDistance(
+                    vsag::SearchStatistics::DistancePhase::APPROXIMATE, "fp32", 1);
+            }
+        });
+    }
+    for (auto& thread : threads) {
+        thread.join();
+    }
+    auto json = vsag::JsonType::Parse(stats.Dump());
+    CHECK(json["distance_evaluations"].GetUint64() == kThreads * kPerThread);
+    CHECK(json["distance_evaluations_by_phase"]["approximate"].GetUint64() ==
+          kThreads * kPerThread);
+    CHECK(json["distance_evaluations_by_backend"]["fp32"].GetUint64() == kThreads * kPerThread);
+    CHECK(json["complete"].GetBool());
 }
 
 TEST_CASE("SearchStatistics classifies stable backend names", "[ut][search_statistics]") {

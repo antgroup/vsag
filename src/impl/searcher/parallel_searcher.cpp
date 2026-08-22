@@ -211,6 +211,12 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     candidate_set->Push(traversal_priority(dist), ep);
     vl->Set(ep);
 
+    // Workers mutate the shared statistics concurrently; select the locked
+    // counter path for the rest of this query.
+    if (ctx != nullptr and ctx->stats != nullptr) {
+        ctx->stats->parallel_.store(true, std::memory_order_relaxed);
+    }
+
     auto num_threads = inner_search_param.parallel_search_thread_count - 1;
 
     using SearchTask = std::tuple<float*, float*, InnerIdType*, uint64_t>;

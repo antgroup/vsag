@@ -181,19 +181,49 @@ public:
         }
     }
 
+    // Same clamping semantics as SaturatingAddAccepted, but with plain
+    // load/add/store: for a thread-private counter the locked RMW is pure
+    // overhead (~20-45 cycles vs ~3).
+    static uint64_t
+    PlainSaturatingAddAccepted(std::atomic<uint64_t>& value, uint64_t amount) {
+        if (amount == 0) {
+            return 0;
+        }
+        const auto current = value.load(std::memory_order_relaxed);
+        const auto accepted = std::min(amount, std::numeric_limits<uint64_t>::max() - current);
+        value.store(current + accepted, std::memory_order_relaxed);
+        return accepted;
+    }
+
     void
     AddDistance(DistancePhase phase, DistanceEvaluationBackend backend, uint64_t count = 1) {
         if (count == 0) {
             return;
         }
-        const auto accepted = SaturatingAddAccepted(distance_evaluations, count);
-        bool overflowed = accepted < count;
-        overflowed =
-            SaturatingAdd(distance_evaluations_by_phase[static_cast<size_t>(phase)], accepted) or
-            overflowed;
         auto backend_index = static_cast<uint8_t>(backend);
-        overflowed =
-            SaturatingAdd(distance_evaluations_by_backend[backend_index], accepted) or overflowed;
+        bool overflowed = false;
+        if (!parallel_.load(std::memory_order_relaxed)) {
+            // Thread-private statistics: skip the locked read-modify-writes.
+            const auto accepted =
+                PlainSaturatingAddAccepted(distance_evaluations, count);
+            overflowed = accepted < count;
+            overflowed = PlainSaturatingAddAccepted(
+                             distance_evaluations_by_phase[static_cast<size_t>(phase)], accepted) <
+                             accepted or
+                         overflowed;
+            overflowed = PlainSaturatingAddAccepted(
+                             distance_evaluations_by_backend[backend_index], accepted) < accepted or
+                         overflowed;
+        } else {
+            const auto accepted = SaturatingAddAccepted(distance_evaluations, count);
+            overflowed = accepted < count;
+            overflowed = SaturatingAdd(
+                             distance_evaluations_by_phase[static_cast<size_t>(phase)], accepted) or
+                         overflowed;
+            overflowed =
+                SaturatingAdd(distance_evaluations_by_backend[backend_index], accepted) or
+                overflowed;
+        }
         if (overflowed) {
             complete.store(false, std::memory_order_relaxed);
         }
@@ -251,6 +281,11 @@ public:
     }
 
 public:
+    // True while multiple threads mutate this statistics object concurrently
+    // (parallel search); selects the locked RMW path in AddDistance. Most
+    // searches are thread-private and take the plain path.
+    std::atomic<bool> parallel_{false};
+
     std::atomic<bool> is_timeout{false};
     std::atomic<uint32_t> dist_cmp{0};
     std::atomic<uint32_t> hops{0};
