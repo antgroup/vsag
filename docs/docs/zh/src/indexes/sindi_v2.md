@@ -102,6 +102,17 @@ SINDI_V2 保持自己的 term-first posting 存储。host 成员检查统一在 
 并支持 mutable `Add()` 产生的多个区间。缺失 host ID `0`、mutable `Add()` metadata、streaming
 序列化及仅支持 KNN 的规则均与 SINDI 相同。
 
+### 日期 bucket 过滤
+
+SINDI_V2 同样支持 [SINDI 的日期 bucket、闭区间输入与层级匹配约定](sindi.md#日期-bucket-过滤)。
+两个索引共用一个 metadata 过滤组件，统一处理仅日期、仅 host 以及日期与 host 组合的 KNN 路由；
+SINDI_V2 仍保留 term-first posting 布局和自己的旧版序列化格式。日期过滤支持 mutable 和
+immutable 索引以及 `use_reorder` 的任意设置，并由旧版与 streaming 序列化共同保存；范围搜索仍不
+参与过滤。mutable 日期 SINDI_V2 同样是 build-once：只允许通过初次 `Build()` 或空索引上的第一次
+`Add()` 写入日期数据，之后拒绝 `Add()`。为了执行精确 bucket 过滤，每个选中 window 都会关闭
+term 级 posting 剪枝，因此日期查询可能比仅 host 查询扫描更多 posting。在启用日期的索引上，仅
+host 查询也遵循 SINDI 所述的边界 window 行为。
+
 ## 检索参数
 
 检索参数放在 `{"sindi_v2": {...}}` 下。

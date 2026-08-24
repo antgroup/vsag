@@ -183,10 +183,13 @@ SINDI 按顺序写入以下 streaming blocks：
 | `sindi_rerank_index` | rerank 开启时的可选 rerank flat index | 条件必需 |
 | `sindi_term_id_mapper` | 可选 term-id remap 表 | 条件必需 |
 | `sindi_host_metadata` | 可选 host ID 及每个 host 的一个或多个 inner-ID 区间 | 条件必需 |
+| `sindi_date_metadata` | 可选编码日期 bucket 以及季度/host 区间目录 | 条件必需 |
 
 `DeserializeStreaming` 会恢复完整的内存 SINDI 索引。`Index::Load` 可以直接从 streaming metadata
 创建 SINDI 索引对象，当前会把写出的 SINDI blocks 都加载到内存中。mutable 与 immutable SINDI
-运行态均支持该 streaming 路径。旧版序列化格式保持不变，不保存 host metadata。
+运行态均支持该 streaming 路径。旧版序列化会保存 mutable 与 immutable 索引的独立 host metadata
+或日期路由 metadata。这两种顶层 payload 互斥；日期与 host 组合路由会把 host 目录保存在日期
+payload 内。恢复后的 mutable 日期索引会拒绝增量 `Add()`。
 
 ## SINDI_V2 Blocks
 
@@ -200,9 +203,12 @@ SINDI_V2 按顺序写入以下 streaming blocks：
 | `extra_info` | 可选逐文档 extra information | 条件必需 |
 | `sindi_term_id_mapper` | 可选 term-id remap 表 | 条件必需 |
 | `sindi_host_metadata` | 可选 host ID 及每个 host 的一个或多个 inner-ID 区间 | 条件必需 |
+| `sindi_date_metadata` | 可选编码日期 bucket 以及季度/host 区间目录 | 条件必需 |
 
 `DeserializeStreaming` 与 `Index::Load` 可以从这些 blocks 恢复 mutable 或 immutable SINDI_V2。
-旧版序列化格式保持不变，不保存 host metadata。
+旧版序列化会保存 mutable 与 immutable 索引的独立 host metadata 或日期路由 metadata。这两种顶层
+payload 互斥；日期与 host 组合路由会把 host 目录保存在日期 payload 内。恢复后的 mutable 日期索引
+会拒绝增量 `Add()`。
 
 ## Pyramid Blocks
 
