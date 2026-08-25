@@ -14,7 +14,6 @@
 
 #include "flat_bucket_searcher.h"
 
-#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -22,7 +21,6 @@
 #include "attr/executor/executor.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "impl/searcher/basic_searcher.h"
-#include "query_context.h"
 #include "simd/pqfs_simd.h"
 
 namespace vsag {
@@ -51,82 +49,27 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                            Vector<InnerIdType>& scanned_inner_ids,
                            ReasoningContext* reasoning_ctx) const {
     auto bucket_size = bucket->GetBucketScanCapacity(bucket_id);
-    const InnerIdType* ids = nullptr;
-    const bool collect_candidate_filter_inner_products =
-        param.search_mode == KNN_SEARCH and param.enable_reorder and
-        bucket->SupportSplitCodeStorage() and not param.use_rabitq_heap_search and
-        heap->StoresAuxiliary();
-
-    const uint64_t scratch_multiplier =
-        param.use_rabitq_heap_search ? 3 : (collect_candidate_filter_inner_products ? 2 : 1);
-    const uint64_t scratch_size = static_cast<uint64_t>(bucket_size) * scratch_multiplier;
-    if (scratch_size > dist.size()) {
-        dist.resize(scratch_size);
-    }
-    if ((collect_candidate_filter_inner_products or param.use_rabitq_heap_search) and
-        dist.empty()) {
-        // Keep valid output pointers when a bucket was empty at the capacity snapshot. A concurrent
-        // first append remains outside the bounded scan instead of writing past the scratch space.
-        dist.resize(1);
+    if (static_cast<uint64_t>(bucket_size) > dist.size()) {
+        dist.resize(bucket_size);
     }
 
-    float* lower_bounds = nullptr;
-    float* filter_inner_products = nullptr;
-    uint64_t candidate_source_version = std::numeric_limits<uint64_t>::max();
-    if (param.use_rabitq_heap_search) {
-        const InnerIdType scan_capacity = bucket_size;
-        lower_bounds = dist.data() + scan_capacity;
-        filter_inner_products = lower_bounds + scan_capacity;
-        scanned_inner_ids.resize(scan_capacity);
-        InnerIdType scanned_size = 0;
-        bucket->ScanBucketWithDistanceLowerBound(dist.data(),
-                                                 lower_bounds,
-                                                 filter_inner_products,
-                                                 computer,
-                                                 bucket_id,
-                                                 param.query_context,
-                                                 scanned_inner_ids.data(),
-                                                 scan_capacity,
-                                                 &scanned_size);
-        bucket_size = scanned_size;
-        ids = scanned_inner_ids.data();
-    } else {
-        if (collect_candidate_filter_inner_products) {
-            const InnerIdType scan_capacity = bucket_size;
-            filter_inner_products = dist.data() + scan_capacity;
-            scanned_inner_ids.resize(scan_capacity);
-            InnerIdType scanned_size = 0;
-            candidate_source_version =
-                bucket->ScanBucketWithFilterInnerProduct(dist.data(),
-                                                         filter_inner_products,
-                                                         computer,
-                                                         bucket_id,
-                                                         param.query_context,
-                                                         scanned_inner_ids.data(),
-                                                         scan_capacity,
-                                                         &scanned_size);
-            bucket_size = scanned_size;
-            ids = scanned_inner_ids.data();
-        } else {
-            const InnerIdType scan_capacity = bucket_size;
-            scanned_inner_ids.resize(scan_capacity);
-            InnerIdType scanned_size = 0;
-            bucket->ScanBucketById(dist.data(),
-                                   computer,
-                                   bucket_id,
-                                   param.query_context,
-                                   scanned_inner_ids.data(),
-                                   scan_capacity,
-                                   &scanned_size);
-            bucket_size = scanned_size;
-            ids = scanned_inner_ids.data();
-        }
-        if (param.query_context != nullptr and param.query_context->stats != nullptr and
-            bucket_size > 0 and not bucket->SupportSplitCodeStorage()) {
-            param.query_context->stats->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
-                                                    bucket->backend_,
-                                                    static_cast<uint64_t>(bucket_size));
-        }
+    const InnerIdType scan_capacity = bucket_size;
+    scanned_inner_ids.resize(scan_capacity);
+    InnerIdType scanned_size = 0;
+    bucket->ScanBucketById(dist.data(),
+                           computer,
+                           bucket_id,
+                           param.query_context,
+                           scanned_inner_ids.data(),
+                           scan_capacity,
+                           &scanned_size);
+    bucket_size = scanned_size;
+    const auto* ids = scanned_inner_ids.data();
+    if (param.query_context != nullptr and param.query_context->stats != nullptr &&
+        bucket_size > 0) {
+        param.query_context->stats->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
+                                                bucket->backend_,
+                                                static_cast<uint64_t>(bucket_size));
     }
 
     Filter* attr_ft = nullptr;
@@ -146,96 +89,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
         cur_heap_top = heap->Top().first;
     }
 
-    if (param.use_rabitq_heap_search) {
-        CHECK_ARGUMENT(param.search_mode == KNN_SEARCH,
-                       "RaBitQ heap search only supports KNN search");
-        for (int64_t j = 0; j < bucket_size; ++j) {
-            if (ids[j] == std::numeric_limits<InnerIdType>::max()) {
-                continue;
-            }
-            const auto origin_id = ids[j] / buckets_per_data;
-            if (reasoning_ctx != nullptr) {
-                reasoning_ctx->RecordVisit(origin_id, dist[j], 0);
-            }
-            if (attr_ft != nullptr and not attr_ft->CheckValid(j)) {
-                if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordFilterReject(origin_id);
-                }
-                continue;
-            }
-            if (ft != nullptr and not ft->CheckValid(origin_id)) {
-                if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordFilterReject(origin_id);
-                }
-                continue;
-            }
-
-            float distance_limit = cur_heap_top;
-            if (param.distance_threshold.has_value()) {
-                distance_limit = std::min(distance_limit, param.distance_threshold.value());
-            }
-            const float lower_bound = lower_bounds[j];
-            const bool has_usable_lower_bound =
-                std::isfinite(lower_bound) and lower_bound < std::numeric_limits<float>::max();
-            if (has_usable_lower_bound and not(lower_bound < distance_limit)) {
-                continue;
-            }
-
-            float exact_distance = std::numeric_limits<float>::max();
-            if (param.query_context != nullptr and param.query_context->stats != nullptr) {
-                param.query_context->stats->reorder_distance_count.fetch_add(
-                    1, std::memory_order_relaxed);
-            }
-            if (param.query_context != nullptr) {
-                QueryContext exact_context = *param.query_context;
-                ScopedDistancePhase scoped(exact_context, DistanceEvaluationPhase::RERANK);
-                bucket->QueryWithFilterInnerProductByInnerId(&exact_distance,
-                                                             filter_inner_products + j,
-                                                             computer,
-                                                             ids + j,
-                                                             1,
-                                                             &exact_context);
-            } else {
-                bucket->QueryWithFilterInnerProductByInnerId(
-                    &exact_distance, filter_inner_products + j, computer, ids + j, 1);
-            }
-            if (reasoning_ctx != nullptr) {
-                reasoning_ctx->RecordReorder(origin_id, dist[j], exact_distance);
-            }
-            if (not std::isfinite(exact_distance) or
-                (param.distance_threshold.has_value() and
-                 exact_distance > param.distance_threshold.value())) {
-                continue;
-            }
-            if (heap->Size() < topk_u or exact_distance < cur_heap_top) {
-                heap->Push(exact_distance, ids[j]);
-            }
-            while (heap->Size() > topk_u) {
-                if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordEviction(heap->Top().second / buckets_per_data, 0);
-                }
-                heap->Pop();
-            }
-            if (not heap->Empty() and heap->Size() == topk_u) {
-                cur_heap_top = heap->Top().first;
-            }
-        }
-        return;
-    }
-
     if (param.search_mode == KNN_SEARCH) {
-        auto push_to_heap = [&](float distance, InnerIdType id, int64_t offset) {
-            if (collect_candidate_filter_inner_products) {
-                heap->PushWithAuxiliary(distance,
-                                        id,
-                                        filter_inner_products[offset],
-                                        bucket_id,
-                                        static_cast<InnerIdType>(offset),
-                                        candidate_source_version);
-            } else {
-                heap->Push(distance, id);
-            }
-        };
         if (attr_ft == nullptr and ft == nullptr and reasoning_ctx == nullptr) {
             auto push_candidate = [&](int64_t offset) {
                 if (ids[offset] == std::numeric_limits<InnerIdType>::max()) {
@@ -248,7 +102,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                     return;
                 }
                 if (heap->Size() < topk_u or dist[offset] < cur_heap_top) {
-                    push_to_heap(dist[offset], ids[offset], offset);
+                    heap->Push(dist[offset], ids[offset]);
                 }
                 while (heap->Size() > topk_u) {
                     heap->Pop();
@@ -300,7 +154,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
             }
             if (ft == nullptr or ft->CheckValid(origin_id)) {
                 if (heap->Size() < topk_u or dist[j] < cur_heap_top) {
-                    push_to_heap(dist[j], ids[j], j);
+                    heap->Push(dist[j], ids[j]);
                 }
                 while (heap->Size() > topk_u) {
                     if (reasoning_ctx != nullptr) {
@@ -315,7 +169,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                 reasoning_ctx->RecordFilterReject(origin_id);
             }
         }
-    } else {  // RANGE_SEARCH
+    } else {
         for (int64_t j = 0; j < bucket_size; ++j) {
             if (ids[j] == std::numeric_limits<InnerIdType>::max()) {
                 continue;

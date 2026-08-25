@@ -25,6 +25,7 @@
 
 #include "impl/allocator/safe_allocator.h"
 #include "impl/reasoning/search_reasoning.h"
+#include "rabitq_split_bucket_searcher.h"
 #include "unittest.h"
 #include "vsag/filter.h"
 
@@ -394,8 +395,16 @@ RunFlatSearch(const std::vector<float>& distances,
         param.is_inner_id_allowed = std::make_shared<AllValidFilter>();
     }
 
-    FlatBucketSearcher searcher;
-    searcher.Search(
+    const bool use_split_searcher = param.use_rabitq_heap_search or auxiliary_values != nullptr or
+                                    auxiliary_records != nullptr or
+                                    not filter_inner_products.empty();
+    IVFBucketSearcherPtr searcher;
+    if (use_split_searcher) {
+        searcher = std::make_shared<RaBitQSplitBucketSearcher>();
+    } else {
+        searcher = std::make_shared<FlatBucketSearcher>();
+    }
+    searcher->Search(
         0, bucket, nullptr, param, -1, topk, 1, heap, scratch, scanned_inner_ids, reasoning_ctx);
 
     std::vector<DistanceRecord> result;
@@ -604,8 +613,8 @@ TEST_CASE("IVF FlatBucketSearcher normal scans remain bounded",
     }
 }
 
-TEST_CASE("IVF FlatBucketSearcher auxiliary heap tracks KNN survivors",
-          "[ut][ivf][flat_bucket_searcher][auxiliary]") {
+TEST_CASE("IVF RaBitQSplitBucketSearcher tracks KNN survivors",
+          "[ut][ivf][rabitq_split_bucket_searcher][auxiliary]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     std::vector<float> auxiliary_values;
     InnerSearchParam param;

@@ -47,6 +47,7 @@
 #include "ivf_nearest_partition.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "query_context.h"
+#include "rabitq_split_bucket_searcher.h"
 #include "simd/normalize.h"
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
@@ -636,11 +637,15 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
       buckets_per_data_(param->buckets_per_data),
       location_map_(common_param.allocator_.get()),
       bucket_graphs_(common_param.allocator_.get()),
-      common_param_(common_param),
-      bucket_searcher_(std::make_shared<FlatBucketSearcher>()) {
+      common_param_(common_param) {
     this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
     if (this->bucket_ == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bucket init error");
+    }
+    if (this->bucket_->SupportSplitCodeStorage()) {
+        this->bucket_searcher_ = std::make_shared<RaBitQSplitBucketSearcher>();
+    } else {
+        this->bucket_searcher_ = std::make_shared<FlatBucketSearcher>();
     }
 
     // Initialize thread pool before partition strategy construction
