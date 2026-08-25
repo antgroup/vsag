@@ -78,6 +78,10 @@ auto result = index->KnnSearch(
     R"({"pyramid": {"ef_search": 100}})").value();
 ```
 
+## Input data type
+
+The public `Build`, `Add`, and search paths currently accept FP32 vectors supplied with `Dataset::Float32Vectors`; set `dtype` to `"float32"`. `base_quantization_type` selects internal encoding and storage and does not by itself enable FP16, BF16, or INT8 input.
+
 ## Build parameters
 
 Build-time parameters live under `index_param`.

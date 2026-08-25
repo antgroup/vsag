@@ -59,6 +59,10 @@ auto result = index->KnnSearch(
     R"({"ivf": {"scan_buckets_count": 16}})").value();
 ```
 
+## 支持的输入数据类型
+
+当前公开的 `Build`、`Add` 和检索路径接收通过 `Dataset::Float32Vectors` 提供的 FP32 向量，`dtype` 应设为 `"float32"`。`base_quantization_type` 选择的是内部编码和存储，不会使 API 接受 FP16/BF16 输入。创建 IVF 索引时不支持 `dtype: "int8"`。
+
 ## 构建参数
 
 构建参数放在 `index_param` 下。完整列表请见 [索引参数](../resources/index_parameters.md)。

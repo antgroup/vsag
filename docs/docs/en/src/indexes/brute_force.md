@@ -54,6 +54,12 @@ auto result = index->KnnSearch(query, /*topk=*/10, "{}").value();
 A full runnable program is at
 [`examples/cpp/105_index_brute_force.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/105_index_brute_force.cpp).
 
+## Input data type
+
+The public `Build`, `Add`, `KnnSearch`, `RangeSearch`, and `UpdateVector` paths accept FP32 vectors only. At runtime, supply vectors via `Dataset::Float32Vectors`. At index creation, set `dtype` to `"float32"`; `dtype: "int8"` is not supported when creating a BruteForce index.
+
+The `base_quantization_type` parameter controls the index's internal encoding and storage, not the input type. Selecting an internal `fp16`, `bf16`, or other quantizer does not enable FP16/BF16 input.
+
 ## Build parameters
 
 The minimal config consists of the three top-level fields (`dtype`, `metric_type`, `dim`).
@@ -122,6 +128,8 @@ For range search semantics, see [Range Search](../advanced/range_search.md).
 BruteForce supports both `RemoveMode::MARK_REMOVE` and `RemoveMode::FORCE_REMOVE`; neither mode
 needs an HGraph-style `support_force_remove` setting.
 
+When `use_attribute_filter: true` is enabled, neither removal mode is available. Rebuild the index instead if attribute-filtered data must be deleted.
+
 - `MARK_REMOVE` is the default. It records a tombstone, so the id is excluded from later searches
   while its vector storage remains allocated. `GetNumElements()` excludes marked ids and
   `GetNumberRemoved()` reports their count.
@@ -161,14 +169,15 @@ BruteForce advertises the following capability flags (see `BruteForce::InitFeatu
 | `SUPPORT_RANGE_SEARCH` / `SUPPORT_RANGE_SEARCH_WITH_ID_FILTER` | Available with non-training quantizers (`fp32`, `fp16`, `bf16`). |
 | `SUPPORT_DELETE_BY_ID` / `SUPPORT_DELETE_CONCURRENT` | `Remove` by id is supported. Searches and delete operations are synchronized; `FORCE_REMOVE` takes an exclusive lock. |
 | `SUPPORT_CAL_DISTANCE_BY_ID` | Distance lookup against stored vectors (non-training quantizers only). |
+| `SUPPORT_UPDATE_VECTOR_CONCURRENT` | `UpdateVector` replaces an existing FP32 vector with the same dimension. BruteForce has no graph connectivity check, so `force_update` does not change its update behavior. |
 | `SUPPORT_GET_RAW_VECTOR_BY_IDS` | Available only when `base_quantization_type` is `fp32` and either the metric is not `cosine` or the underlying quantizer holds molds (`hold_molds`). Quantized BruteForce indexes do **not** advertise this flag. |
 | `SUPPORT_CHECK_ID_EXIST` / `SUPPORT_CLONE` / `SUPPORT_ESTIMATE_MEMORY` / `SUPPORT_GET_MEMORY_USAGE` | Standard introspection and lifecycle. |
 | `SUPPORT_SERIALIZE_BINARY_SET` / `SUPPORT_SERIALIZE_FILE` / `SUPPORT_SERIALIZE_WRITE_FUNC` | Full save surface. |
 | `SUPPORT_DESERIALIZE_BINARY_SET` / `SUPPORT_DESERIALIZE_FILE` / `SUPPORT_DESERIALIZE_READER_SET` | Full load surface. (There is no `DESERIALIZE_WRITE_FUNC` counterpart — read paths use `READER_SET` instead.) |
 | `NEED_TRAIN` | Set when `base_quantization_type` is one of `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`. |
 
-Notably **not** supported by BruteForce: `SUPPORT_UPDATE_VECTOR_CONCURRENT`,
-`SUPPORT_UPDATE_ID_CONCURRENT`, and `SUPPORT_EXPORT_MODEL`.
+Notably **not** supported by BruteForce: `SUPPORT_UPDATE_ID_CONCURRENT` and
+`SUPPORT_EXPORT_MODEL`.
 
 ## When to use BruteForce
 

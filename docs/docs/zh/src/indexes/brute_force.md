@@ -50,6 +50,12 @@ auto result = index->KnnSearch(query, /*topk=*/10, "{}").value();
 完整可运行示例见
 [`examples/cpp/105_index_brute_force.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/105_index_brute_force.cpp)。
 
+## 支持的输入数据类型
+
+当前公开的 `Build`、`Add`、`KnnSearch`、`RangeSearch` 与 `UpdateVector` 路径仅接受 FP32 向量。运行时通过 `Dataset::Float32Vectors` 传入向量；创建索引时 `dtype` 应设为 `"float32"`，不支持 `dtype: "int8"`。
+
+`base_quantization_type` 描述的是索引内部编码和存储，而非输入类型。选择内部 `fp16`、`bf16` 等量化器不会使 API 接受 FP16/BF16 输入。
+
 ## 构建参数
 
 最简配置只需要三个顶层字段（`dtype`、`metric_type`、`dim`）。大多数场景下不需要
@@ -115,6 +121,8 @@ auto r3 = index->RangeSearch(query, radius, R"({"parallelism": 8})").value();
 BruteForce 同时支持 `RemoveMode::MARK_REMOVE` 与 `RemoveMode::FORCE_REMOVE`；两种模式都不需要
 配置 HGraph 专用的 `support_force_remove`。
 
+启用 `use_attribute_filter: true` 时，BruteForce 不支持任一种删除模式；如需删除属性过滤数据，请重建索引。
+
 - `MARK_REMOVE` 是默认模式。它只写入墓碑标记，后续搜索会过滤该 id，但向量存储仍保持已分配状态。
   `GetNumElements()` 不计已标记的 id，`GetNumberRemoved()` 返回其数量。
 - `FORCE_REMOVE` 会物理删除请求的每条向量。必要时它用最后一个内部槽位覆盖被删除槽位，并保留被移动
@@ -147,14 +155,14 @@ BruteForce 声明的能力标志如下（参见 `BruteForce::InitFeatures`，
 | `SUPPORT_RANGE_SEARCH` / `SUPPORT_RANGE_SEARCH_WITH_ID_FILTER` | 仅在非训练型量化器（`fp32`、`fp16`、`bf16`）下可用。 |
 | `SUPPORT_DELETE_BY_ID` / `SUPPORT_DELETE_CONCURRENT` | 支持按 id 删除。查询和删除操作会同步；`FORCE_REMOVE` 会获取独占锁。 |
 | `SUPPORT_CAL_DISTANCE_BY_ID` | 与已存储向量计算距离（仅非训练型量化器）。 |
+| `SUPPORT_UPDATE_VECTOR_CONCURRENT` | 支持 `UpdateVector`：以维度相同的 FP32 向量替换已有向量。BruteForce 没有图连通性检查，因此 `force_update` 不改变更新行为。 |
 | `SUPPORT_GET_RAW_VECTOR_BY_IDS` | 仅当 `base_quantization_type = fp32`，且度量不是 `cosine` 或底层量化器持有向量范数（`hold_molds`）时才声明。量化的 BruteForce 索引**不会**声明该能力。 |
 | `SUPPORT_CHECK_ID_EXIST` / `SUPPORT_CLONE` / `SUPPORT_ESTIMATE_MEMORY` / `SUPPORT_GET_MEMORY_USAGE` | 标准的内省与生命周期接口。 |
 | `SUPPORT_SERIALIZE_BINARY_SET` / `SUPPORT_SERIALIZE_FILE` / `SUPPORT_SERIALIZE_WRITE_FUNC` | 完整的保存能力。 |
 | `SUPPORT_DESERIALIZE_BINARY_SET` / `SUPPORT_DESERIALIZE_FILE` / `SUPPORT_DESERIALIZE_READER_SET` | 完整的加载能力。（没有对应的 `DESERIALIZE_WRITE_FUNC`，读路径使用 `READER_SET` 形式。） |
 | `NEED_TRAIN` | 当 `base_quantization_type` 是 `sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq` 之一时声明。 |
 
-BruteForce **不支持** 的能力包括：`SUPPORT_UPDATE_VECTOR_CONCURRENT`、
-`SUPPORT_UPDATE_ID_CONCURRENT`、`SUPPORT_EXPORT_MODEL`。
+BruteForce **不支持** 的能力包括：`SUPPORT_UPDATE_ID_CONCURRENT`、`SUPPORT_EXPORT_MODEL`。
 
 ## 适用场景
 
