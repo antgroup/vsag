@@ -24,14 +24,14 @@ jobs:
         run: pip3 install -r ./scripts/perf_reports/requirements.txt
       - name: Download Datasets
         run: bash ./scripts/download_annbench_datasets.sh
-      - name: Build Release
+      - name: Build Performance Release
         # Performance benchmarks already run against OpenBLAS (the default
         # backend). Use the pre-installed system OpenBLAS so the BLAS build
         # itself doesn't eat into the daily perf window.
-        run: EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON" make release VSAG_ENABLE_TOOLS=ON
+        run: EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON" make release-perf VSAG_ENABLE_TOOLS=ON
       - name: Run Perf - Recall 90%, 95%, 99%
         run:  |
-          ./build-release/tools/eval/eval_performance .github/perf-mini.yml
+          ./build-release-perf/tools/eval/eval_performance .github/perf-mini.yml
       - name: Send Report
         run:  |
           python3 scripts/perf_reports/dingding.py /tmp/github-perf.json || echo "send report to dingding failed"

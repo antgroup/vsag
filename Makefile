@@ -5,6 +5,7 @@ CMAKE_INSTALL_PREFIX ?= "/usr/local/"
 COMPILE_JOBS ?= 6
 DEBUG_BUILD_DIR ?= "./build/"
 RELEASE_BUILD_DIR ?= "./build-release/"
+PERF_RELEASE_BUILD_DIR ?= "./build-release-perf/"
 VSAG_ENABLE_TESTS ?= OFF
 VSAG_ENABLE_PYBINDS ?= OFF
 VSAG_ENABLE_TOOLS ?= OFF
@@ -105,6 +106,7 @@ test:                    ## Build and run unit tests.
 .PHONY: test-cmake
 test-cmake:              ## Run focused CMake helper tests.
 	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/thirdparty_override_test.cmake
+	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/release_build_modes_test.cmake
 
 .PHONY: asan
 asan:                    ## Build with AddressSanitizer option.
@@ -170,10 +172,18 @@ test_tsan_parallel: tsan ## Run unit tests parallel with ThreadSanitizer option.
 
 ##
 ## ================ distribution ================
+release dist-pre-cxx11-abi dist-cxx11-abi dist-libcxx: VSAG_ENABLE_CCACHE ?= OFF
+
 .PHONY: release
-release:                 ## Build vsag with release options.
-	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release
+release:                 ## Build reproducible release/package output (ccache off by default).
+	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_CCACHE=${VSAG_ENABLE_CCACHE}
 	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
+
+.PHONY: release-perf
+release-perf: VSAG_ENABLE_CCACHE ?= ON
+release-perf:            ## Build optimized output for iteration/benchmarks (ccache on by default).
+	cmake ${VSAG_CMAKE_ARGS} -B${PERF_RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_CCACHE=${VSAG_ENABLE_CCACHE}
+	cmake --build ${PERF_RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
 .PHONY: run-dist-tests
 run-dist-tests:          ## Run distribution tests.
@@ -185,20 +195,20 @@ run-dist-tests:          ## Run distribution tests.
 .PHONY: dist-pre-cxx11-abi
 dist-pre-cxx11-abi:      ## Build vsag with distribution options.
 	echo "building dist-pre-cxx11-abi..."
-	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_INTEL_MKL=off -DENABLE_CXX11_ABI=off -DENABLE_LIBCXX=off -DENABLE_TESTS=ON -DENABLE_MOCKIMPL=ON
+	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_CCACHE=${VSAG_ENABLE_CCACHE} -DENABLE_INTEL_MKL=off -DENABLE_CXX11_ABI=off -DENABLE_LIBCXX=off -DENABLE_TESTS=ON -DENABLE_MOCKIMPL=ON
 	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
 	$(MAKE) run-dist-tests
 
 .PHONY: dist-cxx11-abi
 dist-cxx11-abi:          ## Build vsag with distribution options.
 	echo "building dist-cxx11-abi..."
-	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_INTEL_MKL=off -DENABLE_CXX11_ABI=on -DENABLE_LIBCXX=off -DENABLE_TESTS=ON -DENABLE_MOCKIMPL=ON
+	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_CCACHE=${VSAG_ENABLE_CCACHE} -DENABLE_INTEL_MKL=off -DENABLE_CXX11_ABI=on -DENABLE_LIBCXX=off -DENABLE_TESTS=ON -DENABLE_MOCKIMPL=ON
 	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
 	$(MAKE) run-dist-tests
 
 .PHONY: dist-libcxx
 dist-libcxx:             ## Build vsag using libc++.
-	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_LIBCXX=on
+	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_CCACHE=${VSAG_ENABLE_CCACHE} -DENABLE_LIBCXX=on
 	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
 PY_VERSION ?= 3.10
@@ -216,6 +226,10 @@ pyvsag-all:              ## Build wheels for all supported versions. Usage: make
 .PHONY: clean-release
 clean-release:           ## Clear build-release/ directory.
 	rm -rf ${RELEASE_BUILD_DIR} && mkdir -p ${RELEASE_BUILD_DIR}
+
+.PHONY: clean-release-perf
+clean-release-perf:      ## Clear build-release-perf/ directory.
+	rm -rf ${PERF_RELEASE_BUILD_DIR} && mkdir -p ${PERF_RELEASE_BUILD_DIR}
 
 .PHONY: install
 install:                 ## Build and install the release version of vsag.
