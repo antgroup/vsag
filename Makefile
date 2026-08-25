@@ -3,6 +3,7 @@
 CMAKE_GENERATOR ?= "Unix Makefiles"
 CMAKE_INSTALL_PREFIX ?= "/usr/local/"
 COMPILE_JOBS ?= 6
+CMAKE_BUILD_ARGS ?=
 DEBUG_BUILD_DIR ?= "./build/"
 RELEASE_BUILD_DIR ?= "./build-release/"
 VSAG_ENABLE_TESTS ?= OFF
@@ -106,10 +107,16 @@ test:                    ## Build and run unit tests.
 test-cmake:              ## Run focused CMake helper tests.
 	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/thirdparty_override_test.cmake
 
-.PHONY: asan
+.PHONY: asan configure-asan build-asan
 asan:                    ## Build with AddressSanitizer option.
+	$(MAKE) configure-asan
+	$(MAKE) build-asan
+
+configure-asan:
 	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Sanitize -DENABLE_ASAN=ON -DENABLE_TSAN=OFF -DENABLE_CCACHE=ON -DENABLE_TESTS=ON -DENABLE_MOCKIMPL=ON
-	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS}
+
+build-asan:
+	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS} -- ${CMAKE_BUILD_ARGS}
 
 .PHONY: test_asan
 test_asan: asan          ## Run unit tests with AddressSanitizer option.

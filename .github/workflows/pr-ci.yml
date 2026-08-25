@@ -87,10 +87,13 @@ jobs:
       - name: Prepare Host
         run: |
           sudo env VSAG_INSTALL_INTEL_MKL=OFF bash ./scripts/deps/install_deps_ubuntu.sh
-          sudo apt-get install -y clang-tidy-15
+          sudo apt-get install -y clang-tidy-15 time
           ninja --version
           cmake --version
           g++ --version
+      - name: Start Dependency Preparation Timer
+        id: dependency-preparation-start
+        run: echo "started_ns=$(date +%s%N)" >> "$GITHUB_OUTPUT"
       - name: Prepare FetchContent Sources
         uses: ./.github/actions/prepare-fetchcontent
         with:
@@ -103,19 +106,61 @@ jobs:
           key: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
           restore-keys: |
             external-${{ runner.os }}-${{ runner.arch }}-
-      - name: Load Cache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          max-size: "2G"
-          save: ${{ github.event_name != 'pull_request' }}
-          key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
-      - name: Make Asan
+      - name: Finish Dependency Preparation Timer
+        id: dependency-preparation
+        env:
+          STARTED_NS: ${{ steps.dependency-preparation-start.outputs.started_ns }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          import time
+
+          elapsed = (time.time_ns() - int(os.environ["STARTED_NS"])) / 1_000_000_000
+          print(f"seconds={elapsed:.3f}")
+          PY
+      - name: Make Asan and collect build metrics
         # The source-build OpenBLAS path remains covered by daily_test.yml.
+        env:
+          BUILD_BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+          CCACHE_DIR: ${{ github.workspace }}/.build-metrics-ccache
+          COMPILER_CACHE_KEY: build-metrics-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+          DEPENDENCY_CACHE_KEY: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
+          DEPENDENCY_PREPARATION_SECONDS: ${{ steps.dependency-preparation.outputs.seconds }}
         run: |
           export CMAKE_GENERATOR="Ninja"
           export CMAKE_EXPORT_COMPILE_COMMANDS=ON
           export EXTRA_DEFINED="-DVSAG_USE_SYSTEM_OPENBLAS=ON"
-          make asan VSAG_ENABLE_EXAMPLES=ON VSAG_ENABLE_TOOLS=ON COMPILE_JOBS=3
+          export VSAG_ENABLE_EXAMPLES=ON
+          export VSAG_ENABLE_TOOLS=ON
+          COMPILER=$(g++ -dumpfullversion -dumpversion)
+          python3 scripts/collect_build_metrics.py \
+            --base-sha "$BUILD_BASE_SHA" \
+            --commit-sha "$GITHUB_SHA" \
+            --compiler "gcc-$COMPILER" \
+            --compiler-cache-key "$COMPILER_CACHE_KEY-gcc-$COMPILER" \
+            --dependency-cache-key "$DEPENDENCY_CACHE_KEY" \
+            --dependency-preparation-seconds "$DEPENDENCY_PREPARATION_SECONDS" \
+            --jobs 3 \
+            --clear-ccache
+      - name: Append build metrics job summary
+        if: always()
+        run: |
+          if [ -f build-metrics/job-summary.md ]; then
+            cat build-metrics/job-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Build performance metrics" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "The collector failed before producing a report." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload build metrics
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./build-metrics
+          name: build-performance-metrics-${{ github.run_id }}
+          compression-level: 6
+          retention-days: 14
+          if-no-files-found: warn
       - name: Get changed source files
         id: changed-srcs
         run: |
