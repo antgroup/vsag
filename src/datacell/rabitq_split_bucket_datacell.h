@@ -54,18 +54,6 @@ public:
         InnerIdType max_scan_size = std::numeric_limits<InnerIdType>::max(),
         InnerIdType* scanned_size = nullptr) override;
 
-    void
-    ScanBucketWithDistanceLowerBound(
-        float* result_dists,
-        float* lower_bounds,
-        float* filter_inner_products,
-        const ComputerInterfacePtr& computer,
-        const BucketIdType& bucket_id,
-        QueryContext* ctx = nullptr,
-        InnerIdType* scanned_inner_ids = nullptr,
-        InnerIdType max_scan_size = std::numeric_limits<InnerIdType>::max(),
-        InnerIdType* scanned_size = nullptr) override;
-
     float
     QueryOneById(const ComputerInterfacePtr& computer,
                  const BucketIdType& bucket_id,
@@ -75,23 +63,6 @@ public:
     SupportSplitCodeStorage() const override {
         return true;
     }
-
-    void
-    QueryWithFilterInnerProductByInnerId(float* result_dists,
-                                         const float* filter_inner_products,
-                                         const ComputerInterfacePtr& computer,
-                                         const InnerIdType* inner_ids,
-                                         InnerIdType id_count,
-                                         QueryContext* ctx = nullptr) override;
-
-    void
-    QueryWithCandidateFilterInnerProductByInnerId(float* result_dists,
-                                                  const float* hint_dists,
-                                                  const float* filter_inner_products,
-                                                  const ComputerInterfacePtr& computer,
-                                                  const InnerIdType* inner_ids,
-                                                  InnerIdType id_count,
-                                                  QueryContext* ctx = nullptr) override;
 
     void
     QueryWithCandidateFilterInnerProductBySource(float* result_dists,
@@ -199,7 +170,6 @@ public:
 
 private:
     enum class FilterInnerProductMode : uint8_t {
-        EXPLICIT_HEAP,
         CANDIDATE_SCAN,
         CACHED,
     };
@@ -221,11 +191,6 @@ private:
               residual_query_scratch_(residual_transform_size, 0.0F, allocator),
               routed_bucket_ids_(allocator),
               routed_bucket_norm_sqrs_(allocator),
-              routed_filter_inner_products_(allocator),
-              routed_filter_cache_claimed_(allocator),
-              routed_filter_cache_versions_(allocator),
-              routed_candidate_scan_versions_(allocator),
-              routed_heap_scan_versions_(allocator),
               bucket_ids_(allocator),
               bucket_inner_computers_(allocator),
               bucket_fastscan_computers_(allocator) {
@@ -234,11 +199,6 @@ private:
             bucket_fastscan_computers_.reserve(bucket_computer_capacity);
             routed_bucket_ids_.reserve(bucket_computer_capacity);
             routed_bucket_norm_sqrs_.reserve(bucket_computer_capacity);
-            routed_filter_inner_products_.reserve(bucket_computer_capacity);
-            routed_filter_cache_claimed_.reserve(bucket_computer_capacity);
-            routed_filter_cache_versions_.reserve(bucket_computer_capacity);
-            routed_candidate_scan_versions_.reserve(bucket_computer_capacity);
-            routed_heap_scan_versions_.reserve(bucket_computer_capacity);
         }
 
         ComputerInterfacePtr inner_{nullptr};
@@ -249,11 +209,6 @@ private:
         mutable Vector<float> residual_query_scratch_;
         Vector<BucketIdType> routed_bucket_ids_;
         Vector<float> routed_bucket_norm_sqrs_;
-        Vector<Vector<float>> routed_filter_inner_products_;
-        Vector<uint8_t> routed_filter_cache_claimed_;
-        Vector<uint64_t> routed_filter_cache_versions_;
-        Vector<uint64_t> routed_candidate_scan_versions_;
-        Vector<uint64_t> routed_heap_scan_versions_;
         mutable Vector<BucketIdType> bucket_ids_;
         mutable Vector<ComputerInterfacePtr> bucket_inner_computers_;
         mutable Vector<ComputerInterfacePtr> bucket_fastscan_computers_;
@@ -284,36 +239,9 @@ private:
     [[nodiscard]] uint64_t
     get_routed_bucket_index(const SplitBucketComputer& computer, BucketIdType bucket_id) const;
 
-    float*
-    claim_filter_inner_product_cache(SplitBucketComputer& computer,
-                                     BucketIdType bucket_id,
-                                     InnerIdType bucket_size,
-                                     uint64_t& routed_bucket_index);
-
-    [[nodiscard]] bool
-    get_cached_filter_inner_product(const SplitBucketComputer& computer,
-                                    BucketIdType bucket_id,
-                                    InnerIdType offset_id,
-                                    InnerIdType inner_id,
-                                    float& filter_inner_product) const;
-
-    void
-    publish_candidate_scan_version(SplitBucketComputer& computer, BucketIdType bucket_id);
-
-    void
-    publish_heap_scan_version(SplitBucketComputer& computer, BucketIdType bucket_id);
-
-    [[nodiscard]] bool
-    candidate_scan_version_matches(const SplitBucketComputer& computer,
-                                   BucketIdType bucket_id) const;
-
-    [[nodiscard]] bool
-    heap_scan_version_matches(const SplitBucketComputer& computer, BucketIdType bucket_id) const;
-
     uint64_t
     scan_bucket_by_id(float* result_dists,
                       float* direct_filter_inner_products,
-                      bool use_dense_filter_inner_product_cache,
                       const ComputerInterfacePtr& computer,
                       const BucketIdType& bucket_id,
                       QueryContext* ctx,
@@ -333,7 +261,6 @@ private:
 
     void
     query_non_residual_by_inner_ids(float* result_dists,
-                                    const float* hint_dists,
                                     const float* filter_inner_products,
                                     FilterInnerProductMode filter_inner_product_mode,
                                     SplitBucketComputer& computer,
@@ -346,7 +273,6 @@ private:
 
     void
     query_residual_by_inner_ids(float* result_dists,
-                                const float* hint_dists,
                                 const float* filter_inner_products,
                                 FilterInnerProductMode filter_inner_product_mode,
                                 SplitBucketComputer& computer,

@@ -39,15 +39,6 @@ IsNaNBits(float value) {
     return (bits & 0x7F800000U) == 0x7F800000U and (bits & 0x007FFFFFU) != 0U;
 }
 
-class AllValidFilter final : public Filter {
-public:
-    [[nodiscard]] bool
-    CheckValid(int64_t id) const override {
-        (void)id;
-        return true;
-    }
-};
-
 class EvenIdFilter final : public Filter {
 public:
     [[nodiscard]] bool
@@ -76,18 +67,8 @@ public:
     }
 
     void
-    AppendOnNextHeapScan() {
-        append_on_next_heap_scan_ = true;
-    }
-
-    void
     ShrinkOnNextCandidateScan(InnerIdType size) {
         candidate_scan_size_override_ = size;
-    }
-
-    void
-    ShrinkOnNextHeapScan(InnerIdType size) {
-        heap_scan_size_override_ = size;
     }
 
     void
@@ -172,60 +153,6 @@ public:
             std::copy_n(ids_.begin(), scan_size, scanned_inner_ids);
         }
         return kSourceVersion;
-    }
-
-    void
-    ScanBucketWithDistanceLowerBound(
-        float* result_dists,
-        float* lower_bounds,
-        float* filter_inner_products,
-        const ComputerInterfacePtr& computer,
-        const BucketIdType& bucket_id,
-        QueryContext* ctx = nullptr,
-        InnerIdType* scanned_inner_ids = nullptr,
-        InnerIdType max_scan_size = std::numeric_limits<InnerIdType>::max(),
-        InnerIdType* scanned_size = nullptr) override {
-        (void)computer;
-        (void)bucket_id;
-        (void)ctx;
-        if (heap_scan_size_override_ != std::numeric_limits<InnerIdType>::max()) {
-            distances_.resize(heap_scan_size_override_);
-            filter_inner_products_.resize(heap_scan_size_override_);
-            ids_.resize(heap_scan_size_override_);
-            heap_scan_size_override_ = std::numeric_limits<InnerIdType>::max();
-        }
-        if (append_on_next_heap_scan_) {
-            const auto new_id = static_cast<InnerIdType>(ids_.size());
-            distances_.push_back(-1000.0F);
-            filter_inner_products_.push_back(2000.0F + static_cast<float>(new_id));
-            ids_.push_back(new_id);
-            append_on_next_heap_scan_ = false;
-        }
-        const auto scan_size = std::min<uint64_t>(distances_.size(), max_scan_size);
-        if (scanned_size != nullptr) {
-            *scanned_size = static_cast<InnerIdType>(scan_size);
-        }
-        std::copy_n(distances_.begin(), scan_size, result_dists);
-        std::fill_n(lower_bounds, scan_size, -std::numeric_limits<float>::infinity());
-        std::copy_n(filter_inner_products_.begin(), scan_size, filter_inner_products);
-        if (scanned_inner_ids != nullptr) {
-            std::copy_n(ids_.begin(), scan_size, scanned_inner_ids);
-        }
-    }
-
-    void
-    QueryWithFilterInnerProductByInnerId(float* result_dists,
-                                         const float* filter_inner_products,
-                                         const ComputerInterfacePtr& computer,
-                                         const InnerIdType* inner_ids,
-                                         InnerIdType id_count,
-                                         QueryContext* ctx = nullptr) override {
-        (void)filter_inner_products;
-        (void)computer;
-        (void)ctx;
-        for (InnerIdType i = 0; i < id_count; ++i) {
-            result_dists[i] = distances_.at(inner_ids[i]);
-        }
     }
 
     [[nodiscard]] bool
@@ -339,10 +266,8 @@ private:
     std::vector<float> filter_inner_products_;
     std::vector<InnerIdType> ids_;
     bool append_on_next_candidate_scan_{false};
-    bool append_on_next_heap_scan_{false};
     bool append_on_next_normal_scan_{false};
     InnerIdType candidate_scan_size_override_{std::numeric_limits<InnerIdType>::max()};
-    InnerIdType heap_scan_size_override_{std::numeric_limits<InnerIdType>::max()};
     InnerIdType normal_scan_size_override_{std::numeric_limits<InnerIdType>::max()};
 };
 
@@ -352,7 +277,6 @@ std::vector<DistanceRecord>
 RunFlatSearch(const std::vector<float>& distances,
               InnerSearchParam param,
               int64_t topk,
-              bool force_scalar,
               std::vector<float>* auxiliary_values = nullptr,
               const std::vector<float>& filter_inner_products = {},
               ReasoningContext* reasoning_ctx = nullptr,
@@ -363,21 +287,17 @@ RunFlatSearch(const std::vector<float>& distances,
     auto bucket = std::make_shared<StaticDistanceBucket>(distances, filter_inner_products);
     const bool collect_candidate_filter_inner_products =
         param.search_mode == KNN_SEARCH and param.enable_reorder and
-        bucket->SupportSplitCodeStorage() and not param.use_rabitq_heap_search and
+        bucket->SupportSplitCodeStorage() and
         (auxiliary_values != nullptr or auxiliary_records != nullptr);
     if (append_during_scan) {
-        if (param.use_rabitq_heap_search) {
-            bucket->AppendOnNextHeapScan();
-        } else if (collect_candidate_filter_inner_products) {
+        if (collect_candidate_filter_inner_products) {
             bucket->AppendOnNextCandidateScan();
         } else {
             bucket->AppendOnNextNormalScan();
         }
     }
     if (scan_size_override != std::numeric_limits<InnerIdType>::max()) {
-        if (param.use_rabitq_heap_search) {
-            bucket->ShrinkOnNextHeapScan(scan_size_override);
-        } else if (collect_candidate_filter_inner_products) {
+        if (collect_candidate_filter_inner_products) {
             bucket->ShrinkOnNextCandidateScan(scan_size_override);
         } else {
             bucket->ShrinkOnNextNormalScan(scan_size_override);
@@ -391,12 +311,7 @@ RunFlatSearch(const std::vector<float>& distances,
     }
     Vector<float> scratch(allocator.get());
     Vector<InnerIdType> scanned_inner_ids(allocator.get());
-    if (force_scalar and param.is_inner_id_allowed == nullptr) {
-        param.is_inner_id_allowed = std::make_shared<AllValidFilter>();
-    }
-
-    const bool use_split_searcher = param.use_rabitq_heap_search or auxiliary_values != nullptr or
-                                    auxiliary_records != nullptr or
+    const bool use_split_searcher = auxiliary_values != nullptr or auxiliary_records != nullptr or
                                     not filter_inner_products.empty();
     IVFBucketSearcherPtr searcher;
     if (use_split_searcher) {
@@ -431,20 +346,6 @@ RunFlatSearch(const std::vector<float>& distances,
     return result;
 }
 
-void
-RequireSameRecords(const std::vector<DistanceRecord>& fast,
-                   const std::vector<DistanceRecord>& scalar) {
-    REQUIRE(fast.size() == scalar.size());
-    for (uint64_t i = 0; i < fast.size(); ++i) {
-        REQUIRE(fast[i].second == scalar[i].second);
-        if (IsNaNBits(scalar[i].first)) {
-            REQUIRE(IsNaNBits(fast[i].first));
-        } else {
-            REQUIRE(fast[i].first == scalar[i].first);
-        }
-    }
-}
-
 std::vector<InnerIdType>
 SortedIds(const std::vector<DistanceRecord>& records) {
     std::vector<InnerIdType> result;
@@ -469,73 +370,6 @@ RequireAuxiliaryMatchesHeap(const std::vector<DistanceRecord>& records,
 
 }  // namespace
 
-TEST_CASE("IVF FlatBucketSearcher fast path matches scalar semantics",
-          "[ut][ivf][flat_bucket_searcher]") {
-    InnerSearchParam param;
-    param.search_mode = KNN_SEARCH;
-
-    SECTION("heap remains under capacity across a full block and tail") {
-        std::vector<float> distances(37);
-        for (uint64_t i = 0; i < distances.size(); ++i) {
-            distances[i] = static_cast<float>(distances.size() - i);
-        }
-
-        const auto fast = RunFlatSearch(distances, param, 64, false);
-        const auto scalar = RunFlatSearch(distances, param, 64, true);
-        RequireSameRecords(fast, scalar);
-        REQUIRE(fast.size() == distances.size());
-    }
-
-    SECTION("distance equal to threshold remains eligible") {
-        std::vector<float> distances(32, 20.0F);
-        distances[3] = 5.0F;
-        param.enable_reorder = false;
-        param.distance_threshold = 5.0F;
-
-        const auto fast = RunFlatSearch(distances, param, 64, false);
-        const auto scalar = RunFlatSearch(distances, param, 64, true);
-        RequireSameRecords(fast, scalar);
-        REQUIRE(SortedIds(fast) == std::vector<InnerIdType>{3});
-    }
-
-    SECTION("non-finite and maximum values are retained while heap is not full") {
-        std::vector<float> distances(37, 1.0F);
-        distances[2] = std::numeric_limits<float>::max();
-        distances[7] = std::numeric_limits<float>::quiet_NaN();
-        distances[15] = std::numeric_limits<float>::infinity();
-
-        const auto fast = RunFlatSearch(distances, param, 64, false);
-        const auto scalar = RunFlatSearch(distances, param, 64, true);
-        RequireSameRecords(fast, scalar);
-        REQUIRE(fast.size() == distances.size());
-    }
-
-    SECTION("reorder retains finite approximations above threshold") {
-        std::vector<float> distances(35, 20.0F);
-        distances[4] = std::numeric_limits<float>::infinity();
-        distances[33] = std::numeric_limits<float>::quiet_NaN();
-        param.enable_reorder = true;
-        param.distance_threshold = 5.0F;
-
-        const auto fast = RunFlatSearch(distances, param, 64, false);
-        const auto scalar = RunFlatSearch(distances, param, 64, true);
-        RequireSameRecords(fast, scalar);
-        const auto ids = SortedIds(fast);
-        REQUIRE(std::find(ids.begin(), ids.end(), 0) != ids.end());
-        REQUIRE(std::find(ids.begin(), ids.end(), 32) != ids.end());
-        REQUIRE(std::find(ids.begin(), ids.end(), 34) != ids.end());
-    }
-
-    SECTION("zero topk and a partial final block remain empty") {
-        std::vector<float> distances(35, 1.0F);
-
-        const auto fast = RunFlatSearch(distances, param, 0, false);
-        const auto scalar = RunFlatSearch(distances, param, 0, true);
-        RequireSameRecords(fast, scalar);
-        REQUIRE(fast.empty());
-    }
-}
-
 TEST_CASE("IVF FlatBucketSearcher normal scans remain bounded",
           "[ut][ivf][flat_bucket_searcher][bounded]") {
     std::vector<float> distances(37);
@@ -548,7 +382,7 @@ TEST_CASE("IVF FlatBucketSearcher normal scans remain bounded",
         param.search_mode = KNN_SEARCH;
         param.enable_reorder = true;
         const auto records =
-            RunFlatSearch(distances, param, 64, false, nullptr, {}, nullptr, nullptr, true);
+            RunFlatSearch(distances, param, 64, nullptr, {}, nullptr, nullptr, true);
 
         REQUIRE(records.size() == distances.size());
         REQUIRE(std::none_of(records.begin(), records.end(), [&](const auto& record) {
@@ -562,7 +396,7 @@ TEST_CASE("IVF FlatBucketSearcher normal scans remain bounded",
         param.enable_reorder = false;
         param.distance_threshold = 100.0F;
         const auto records =
-            RunFlatSearch(distances, param, 64, false, nullptr, {}, nullptr, nullptr, true);
+            RunFlatSearch(distances, param, 64, nullptr, {}, nullptr, nullptr, true);
 
         REQUIRE(records.size() == distances.size());
         REQUIRE(std::none_of(records.begin(), records.end(), [&](const auto& record) {
@@ -575,7 +409,7 @@ TEST_CASE("IVF FlatBucketSearcher normal scans remain bounded",
         param.search_mode = RANGE_SEARCH;
         param.radius = 100.0F;
         const auto records =
-            RunFlatSearch(distances, param, 64, false, nullptr, {}, nullptr, nullptr, true);
+            RunFlatSearch(distances, param, 64, nullptr, {}, nullptr, nullptr, true);
 
         REQUIRE(records.size() == distances.size());
         REQUIRE(std::none_of(records.begin(), records.end(), [&](const auto& record) {
@@ -587,7 +421,7 @@ TEST_CASE("IVF FlatBucketSearcher normal scans remain bounded",
         InnerSearchParam param;
         param.search_mode = KNN_SEARCH;
         const auto records =
-            RunFlatSearch(distances, param, 64, false, nullptr, {}, nullptr, nullptr, false, 5);
+            RunFlatSearch(distances, param, 64, nullptr, {}, nullptr, nullptr, false, 5);
 
         REQUIRE(records.size() == 5);
         REQUIRE(SortedIds(records) == std::vector<InnerIdType>{0, 1, 2, 3, 4});
@@ -598,7 +432,7 @@ TEST_CASE("IVF FlatBucketSearcher normal scans remain bounded",
         param.search_mode = RANGE_SEARCH;
         param.radius = 100.0F;
         const auto records =
-            RunFlatSearch(distances, param, 64, false, nullptr, {}, nullptr, nullptr, false, 0);
+            RunFlatSearch(distances, param, 64, nullptr, {}, nullptr, nullptr, false, 0);
 
         REQUIRE(records.empty());
     }
@@ -606,8 +440,7 @@ TEST_CASE("IVF FlatBucketSearcher normal scans remain bounded",
     SECTION("empty normal scan remains bounded when the first lane is appended") {
         InnerSearchParam param;
         param.search_mode = KNN_SEARCH;
-        const auto records =
-            RunFlatSearch({}, param, 5, false, nullptr, {}, nullptr, nullptr, true);
+        const auto records = RunFlatSearch({}, param, 5, nullptr, {}, nullptr, nullptr, true);
 
         REQUIRE(records.empty());
     }
@@ -633,7 +466,6 @@ TEST_CASE("IVF RaBitQSplitBucketSearcher tracks KNN survivors",
         const auto records = RunFlatSearch(distances,
                                            param,
                                            5,
-                                           false,
                                            &auxiliary_values,
                                            filter_inner_products,
                                            nullptr,
@@ -654,7 +486,6 @@ TEST_CASE("IVF RaBitQSplitBucketSearcher tracks KNN survivors",
         const auto records = RunFlatSearch(distances,
                                            param,
                                            64,
-                                           false,
                                            &auxiliary_values,
                                            filter_inner_products,
                                            nullptr,
@@ -677,7 +508,6 @@ TEST_CASE("IVF RaBitQSplitBucketSearcher tracks KNN survivors",
         const auto records = RunFlatSearch(distances,
                                            param,
                                            64,
-                                           false,
                                            &auxiliary_values,
                                            filter_inner_products,
                                            nullptr,
@@ -692,52 +522,16 @@ TEST_CASE("IVF RaBitQSplitBucketSearcher tracks KNN survivors",
 
     SECTION("empty candidate scan remains bounded when the first lane is appended") {
         const auto records =
-            RunFlatSearch({}, param, 5, false, &auxiliary_values, {}, nullptr, nullptr, true);
+            RunFlatSearch({}, param, 5, &auxiliary_values, {}, nullptr, nullptr, true);
 
         REQUIRE(records.empty());
         REQUIRE(auxiliary_values.empty());
     }
 
-    SECTION("heap scan bounds append and uses the locked id snapshot") {
-        param.use_rabitq_heap_search = true;
-        const auto records = RunFlatSearch(
-            distances, param, 64, false, nullptr, filter_inner_products, nullptr, nullptr, true);
-
-        REQUIRE(records.size() == distances.size());
-        REQUIRE(std::none_of(records.begin(), records.end(), [&](const auto& record) {
-            return record.second == distances.size();
-        }));
-    }
-
-    SECTION("heap scan consumes only the actual locked prefix after shrink") {
-        param.use_rabitq_heap_search = true;
-        const auto records = RunFlatSearch(distances,
-                                           param,
-                                           64,
-                                           false,
-                                           nullptr,
-                                           filter_inner_products,
-                                           nullptr,
-                                           nullptr,
-                                           false,
-                                           5);
-
-        REQUIRE(records.size() == 5);
-        REQUIRE(SortedIds(records) == std::vector<InnerIdType>{0, 1, 2, 3, 4});
-    }
-
-    SECTION("empty heap scan remains bounded when the first lane is appended") {
-        param.use_rabitq_heap_search = true;
-        const auto records =
-            RunFlatSearch({}, param, 5, false, nullptr, {}, nullptr, nullptr, true);
-
-        REQUIRE(records.empty());
-    }
-
     SECTION("filter scalar path keeps payloads for valid survivors") {
         param.is_inner_id_allowed = std::make_shared<EvenIdFilter>();
         const auto records =
-            RunFlatSearch(distances, param, 4, false, &auxiliary_values, filter_inner_products);
+            RunFlatSearch(distances, param, 4, &auxiliary_values, filter_inner_products);
 
         RequireAuxiliaryMatchesHeap(records, auxiliary_values, filter_inner_products);
         REQUIRE(SortedIds(records) == std::vector<InnerIdType>{30, 32, 34, 36});
@@ -746,7 +540,7 @@ TEST_CASE("IVF RaBitQSplitBucketSearcher tracks KNN survivors",
     SECTION("reasoning scalar path keeps payloads synchronized") {
         ReasoningContext reasoning_ctx(allocator.get());
         const auto records = RunFlatSearch(
-            distances, param, 3, false, &auxiliary_values, filter_inner_products, &reasoning_ctx);
+            distances, param, 3, &auxiliary_values, filter_inner_products, &reasoning_ctx);
 
         RequireAuxiliaryMatchesHeap(records, auxiliary_values, filter_inner_products);
         REQUIRE(SortedIds(records) == std::vector<InnerIdType>{34, 35, 36});
@@ -755,7 +549,7 @@ TEST_CASE("IVF RaBitQSplitBucketSearcher tracks KNN survivors",
     SECTION("reorder keeps payloads for approximate candidates above threshold") {
         param.distance_threshold = 0.5F;
         const auto records =
-            RunFlatSearch(distances, param, 3, false, &auxiliary_values, filter_inner_products);
+            RunFlatSearch(distances, param, 3, &auxiliary_values, filter_inner_products);
 
         RequireAuxiliaryMatchesHeap(records, auxiliary_values, filter_inner_products);
         REQUIRE(SortedIds(records) == std::vector<InnerIdType>{34, 35, 36});
@@ -772,7 +566,7 @@ TEST_CASE("IVF RaBitQSplitBucketSearcher tracks KNN survivors",
         distances[1] = 2.0F;
         distances[2] = 3.0F;
         const auto records =
-            RunFlatSearch(distances, param, 3, false, &auxiliary_values, filter_inner_products);
+            RunFlatSearch(distances, param, 3, &auxiliary_values, filter_inner_products);
 
         REQUIRE(SortedIds(records) == std::vector<InnerIdType>{0, 1, 2});
         REQUIRE(std::all_of(auxiliary_values.begin(), auxiliary_values.end(), [](float value) {
@@ -782,14 +576,14 @@ TEST_CASE("IVF RaBitQSplitBucketSearcher tracks KNN survivors",
 
     SECTION("zero topk removes every transient auxiliary entry") {
         const auto records =
-            RunFlatSearch(distances, param, 0, false, &auxiliary_values, filter_inner_products);
+            RunFlatSearch(distances, param, 0, &auxiliary_values, filter_inner_products);
 
         REQUIRE(records.empty());
         REQUIRE(auxiliary_values.empty());
     }
 
     SECTION("empty split bucket does not require auxiliary scratch") {
-        const auto records = RunFlatSearch({}, param, 5, false, &auxiliary_values, {});
+        const auto records = RunFlatSearch({}, param, 5, &auxiliary_values, {});
 
         REQUIRE(records.empty());
         REQUIRE(auxiliary_values.empty());

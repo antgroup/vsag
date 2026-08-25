@@ -160,31 +160,6 @@ TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
     REQUIRE(search_param.first_order_scan_ratio == 0.1f);
 }
 
-TEST_CASE("IVF RaBitQ search strategy parameter", "[ut][IVFParameter][rabitq_split][heap]") {
-    SECTION("defaults to candidate reorder") {
-        const auto param =
-            vsag::IVFSearchParameters::FromJson(R"({"ivf":{"scan_buckets_count":8}})");
-        REQUIRE_FALSE(param.use_rabitq_heap_search);
-    }
-
-    SECTION("enables exact-distance heap search") {
-        const auto param = vsag::IVFSearchParameters::FromJson(
-            R"({"ivf":{"scan_buckets_count":8,"rabitq_search_strategy":"heap"}})");
-        REQUIRE(param.use_rabitq_heap_search);
-    }
-
-    SECTION("accepts explicit candidate reorder") {
-        const auto param = vsag::IVFSearchParameters::FromJson(
-            R"({"ivf":{"scan_buckets_count":8,"rabitq_search_strategy":"candidate_reorder"}})");
-        REQUIRE_FALSE(param.use_rabitq_heap_search);
-    }
-
-    SECTION("rejects an unknown strategy") {
-        REQUIRE_THROWS(vsag::IVFSearchParameters::FromJson(
-            R"({"ivf":{"scan_buckets_count":8,"rabitq_search_strategy":"unknown"}})"));
-    }
-}
-
 TEST_CASE("IVF precise codes layout parameter", "[ut][IVFParameter]") {
     SECTION("missing layout defaults to flat") {
         IVFDefaultParam index_param;

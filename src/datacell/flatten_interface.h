@@ -95,20 +95,6 @@ public:
     }
 
     virtual void
-    QueryWithDistanceLowerBoundAndFilterInnerProduct(float* result_dists,
-                                                     float* lower_bounds,
-                                                     float* filter_inner_products,
-                                                     const ComputerInterfacePtr& computer,
-                                                     const InnerIdType* idx,
-                                                     InnerIdType id_count,
-                                                     QueryContext* ctx = nullptr) {
-        this->QueryWithDistanceLowerBound(result_dists, lower_bounds, computer, idx, id_count, ctx);
-        std::fill(filter_inner_products,
-                  filter_inner_products + id_count,
-                  std::numeric_limits<float>::quiet_NaN());
-    }
-
-    virtual void
     QueryWithDistanceHint(float* result_dists,
                           const float* /*hint_dists*/,
                           const ComputerInterfacePtr& computer,
@@ -159,25 +145,6 @@ public:
     virtual void
     ResetComputerFromResidualQuery(const float* transformed_query, ComputerInterfacePtr& computer) {
         computer = this->FactoryComputerFromResidualQuery(transformed_query);
-    }
-
-    virtual void
-    FactoryFastScan32ComputersFromResidualQueries(const float* transformed_queries,
-                                                  uint64_t query_count,
-                                                  ComputerInterfacePtr* computers,
-                                                  ComputerInterfacePtr* fastscan_computers) {
-        CHECK_ARGUMENT(query_count == 0 or transformed_queries != nullptr,
-                       "transformed residual queries are required");
-        CHECK_ARGUMENT(query_count == 0 or computers != nullptr,
-                       "residual query computer output is required");
-        CHECK_ARGUMENT(query_count == 0 or fastscan_computers != nullptr,
-                       "FastScan computer output is required");
-        const uint64_t transform_size = this->GetResidualQueryTransformSize();
-        for (uint64_t i = 0; i < query_count; ++i) {
-            computers[i] =
-                this->FactoryComputerFromResidualQuery(transformed_queries + i * transform_size);
-            fastscan_computers[i] = this->FactoryFastScan32Computer(computers[i]);
-        }
     }
 
     virtual void
@@ -284,106 +251,16 @@ public:
     }
 
     virtual void
-    QueryFastScan32(float* /*result_dists*/,
-                    bool* /*computed*/,
-                    const ComputerInterfacePtr& /*computer*/,
-                    const ComputerInterfacePtr& /*fastscan_computer*/,
-                    const uint8_t* /*block*/,
-                    InnerIdType /*valid_size*/,
-                    QueryContext* /*ctx*/ = nullptr) const {
+    QueryFastScan32Batch(float* /*result_dists*/,
+                         uint32_t* /*computed_masks*/,
+                         const ComputerInterfacePtr& /*computer*/,
+                         const ComputerInterfacePtr& /*fastscan_computer*/,
+                         const uint8_t* /*blocks*/,
+                         InnerIdType /*total_size*/,
+                         float* /*filter_inner_products*/ = nullptr,
+                         QueryContext* /*ctx*/ = nullptr) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "32-vector FastScan query is not supported");
-    }
-
-    virtual void
-    QueryFastScan32WithDistanceLowerBoundAndFilterInnerProduct(
-        float* result_dists,
-        float* lower_bounds,
-        float* filter_inner_products,
-        bool* computed,
-        const ComputerInterfacePtr& computer,
-        const ComputerInterfacePtr& fastscan_computer,
-        const uint8_t* block,
-        InnerIdType valid_size,
-        QueryContext* ctx = nullptr) const {
-        this->QueryFastScan32(
-            result_dists, computed, computer, fastscan_computer, block, valid_size, ctx);
-        std::fill(lower_bounds, lower_bounds + valid_size, std::numeric_limits<float>::max());
-        std::fill(filter_inner_products,
-                  filter_inner_products + valid_size,
-                  std::numeric_limits<float>::quiet_NaN());
-    }
-
-    virtual void
-    QueryFastScan32Batch(float* result_dists,
-                         uint32_t* computed_masks,
-                         const ComputerInterfacePtr& computer,
-                         const ComputerInterfacePtr& fastscan_computer,
-                         const uint8_t* blocks,
-                         InnerIdType total_size,
-                         float* filter_inner_products = nullptr,
-                         QueryContext* ctx = nullptr) const {
-        constexpr InnerIdType kBatchSize = 32;
-        if (filter_inner_products != nullptr) {
-            std::fill_n(filter_inner_products, total_size, std::numeric_limits<float>::quiet_NaN());
-        }
-        const uint64_t block_size = this->GetFastScan32BlockSize();
-        const uint64_t block_count =
-            (static_cast<uint64_t>(total_size) + kBatchSize - 1) / kBatchSize;
-        for (uint64_t block_index = 0; block_index < block_count; ++block_index) {
-            const auto begin = static_cast<InnerIdType>(block_index * kBatchSize);
-            const auto valid_size = std::min<InnerIdType>(kBatchSize, total_size - begin);
-            bool computed[kBatchSize] = {};
-            this->QueryFastScan32(result_dists + begin,
-                                  computed,
-                                  computer,
-                                  fastscan_computer,
-                                  blocks + block_index * block_size,
-                                  valid_size,
-                                  ctx);
-            uint32_t mask = 0;
-            for (InnerIdType i = 0; i < valid_size; ++i) {
-                mask |= static_cast<uint32_t>(computed[i]) << i;
-            }
-            computed_masks[block_index] = mask;
-        }
-    }
-
-    virtual void
-    QueryFastScan32BatchWithDistanceLowerBoundAndFilterInnerProduct(
-        float* result_dists,
-        float* lower_bounds,
-        float* filter_inner_products,
-        uint32_t* computed_masks,
-        const ComputerInterfacePtr& computer,
-        const ComputerInterfacePtr& fastscan_computer,
-        const uint8_t* blocks,
-        InnerIdType total_size,
-        QueryContext* ctx = nullptr) const {
-        constexpr InnerIdType kBatchSize = 32;
-        const uint64_t block_size = this->GetFastScan32BlockSize();
-        const uint64_t block_count =
-            (static_cast<uint64_t>(total_size) + kBatchSize - 1) / kBatchSize;
-        for (uint64_t block_index = 0; block_index < block_count; ++block_index) {
-            const auto begin = static_cast<InnerIdType>(block_index * kBatchSize);
-            const auto valid_size = std::min<InnerIdType>(kBatchSize, total_size - begin);
-            bool computed[kBatchSize] = {};
-            this->QueryFastScan32WithDistanceLowerBoundAndFilterInnerProduct(
-                result_dists + begin,
-                lower_bounds + begin,
-                filter_inner_products + begin,
-                computed,
-                computer,
-                fastscan_computer,
-                blocks + block_index * block_size,
-                valid_size,
-                ctx);
-            uint32_t mask = 0;
-            for (InnerIdType i = 0; i < valid_size; ++i) {
-                mask |= static_cast<uint32_t>(computed[i]) << i;
-            }
-            computed_masks[block_index] = mask;
-        }
+                            "batched 32-vector FastScan query is not supported");
     }
 
     virtual void
@@ -398,17 +275,6 @@ public:
                                        QueryContext* /*ctx*/ = nullptr) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "shared residual FastScan query is not supported");
-    }
-
-    [[nodiscard]] virtual bool
-    ConvertFastScan32SharedResidualFilterInnerProduct(
-        const ComputerInterfacePtr& /*shared_computer*/,
-        const ComputerInterfacePtr& /*residual_computer*/,
-        const uint8_t* /*block*/,
-        InnerIdType /*index_in_block*/,
-        float /*shared_filter_inner_product*/,
-        float* /*residual_filter_inner_product*/) const {
-        return false;
     }
 
     [[nodiscard]] virtual float

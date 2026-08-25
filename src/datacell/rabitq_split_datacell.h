@@ -164,38 +164,18 @@ public:
 
     class FastScan32Computer final : public ComputerInterface {
     public:
-        FastScan32Computer(uint64_t lookup_size,
-                           uint64_t high_acc_lookup_size,
+        FastScan32Computer(uint64_t high_acc_lookup_size,
                            Allocator* allocator,
                            ComputerInterfacePtr bound_computer,
                            BottomComputer* bound_bottom_computer,
                            const uint8_t* query,
                            uint64_t query_size)
-            : lookup_size_(lookup_size),
-              high_acc_lookup_size_(high_acc_lookup_size),
+            : high_acc_lookup_size_(high_acc_lookup_size),
               allocator_(allocator),
               bound_computer_(std::move(bound_computer)),
               bound_bottom_computer_(bound_bottom_computer) {
             const uint64_t query_seed = HashQuery(query, query_size);
-            low_acc_random_state_ = MixSeed(query_seed ^ kLowAccSeedDomain);
             high_acc_random_state_ = MixSeed(query_seed ^ kHighAccSeedDomain);
-        }
-
-        const uint8_t*
-        PrepareQuery(const BottomQuantizer& quantizer, BottomComputer& computer) {
-            CHECK_ARGUMENT(&computer == bound_bottom_computer_,
-                           "FastScan query computer does not match its factory computer");
-            std::call_once(query_once_, [&]() {
-                auto lookup_table = std::make_unique<ByteBuffer>(lookup_size_, allocator_);
-                quantizer.PrepareFastScan32Query(computer,
-                                                 lookup_table->data,
-                                                 deltas_,
-                                                 sum_vls_,
-                                                 query_sum_,
-                                                 &low_acc_random_state_);
-                lookup_table_ = std::move(lookup_table);
-            });
-            return lookup_table_->data;
         }
 
         const uint8_t*
@@ -216,7 +196,6 @@ public:
         }
 
     private:
-        static constexpr uint64_t kLowAccSeedDomain = 0x6C6F773846617374ULL;
         static constexpr uint64_t kHighAccSeedDomain = 0x686967684163634CULL;
 
         static uint64_t
@@ -239,22 +218,15 @@ public:
         }
 
     public:
-        uint64_t lookup_size_;
         uint64_t high_acc_lookup_size_;
         Allocator* allocator_;
         ComputerInterfacePtr bound_computer_;
         BottomComputer* bound_bottom_computer_;
-        std::unique_ptr<ByteBuffer> lookup_table_;
         std::unique_ptr<ByteBuffer> high_acc_lookup_table_;
-        float deltas_[BottomQuantizer::FASTSCAN_MAX_FILTER_BITS]{};
-        float sum_vls_[BottomQuantizer::FASTSCAN_MAX_FILTER_BITS]{};
-        float query_sum_{0.0F};
         float high_acc_deltas_[BottomQuantizer::FASTSCAN_MAX_FILTER_BITS]{};
         float high_acc_sum_vls_[BottomQuantizer::FASTSCAN_MAX_FILTER_BITS]{};
         float high_acc_query_sum_{0.0F};
-        uint64_t low_acc_random_state_{0};
         uint64_t high_acc_random_state_{0};
-        std::once_flag query_once_;
         std::once_flag high_acc_query_once_;
     };
 
@@ -275,7 +247,6 @@ public:
         }
         auto* bottom_computer = this->get_bottom_computer(computer);
         return std::make_shared<FastScan32Computer>(
-            this->bottom_quantizer().GetFastScan32LookupSize(),
             this->bottom_quantizer().GetFastScan32HighAccLookupSize(),
             this->allocator_,
             computer,
@@ -719,65 +690,6 @@ public:
     }
 
     void
-    QueryFastScan32(float* result_dists,
-                    bool* computed,
-                    const ComputerInterfacePtr& computer,
-                    const ComputerInterfacePtr& fastscan_computer,
-                    const uint8_t* block,
-                    InnerIdType valid_size,
-                    QueryContext* ctx = nullptr) const override {
-        auto* fastscan = dynamic_cast<FastScan32Computer*>(fastscan_computer.get());
-        CHECK_ARGUMENT(fastscan != nullptr, "invalid RaBitQ FastScan computer");
-        auto* bottom_computer = this->get_bottom_computer(computer);
-        const auto* lookup_table =
-            fastscan->PrepareQuery(this->bottom_quantizer(), *bottom_computer);
-        this->bottom_quantizer().ComputeDistsWithFastScan32(*bottom_computer,
-                                                            block,
-                                                            lookup_table,
-                                                            fastscan->deltas_,
-                                                            fastscan->sum_vls_,
-                                                            fastscan->query_sum_,
-                                                            result_dists,
-                                                            computed,
-                                                            valid_size,
-                                                            this->query_rabitq_error_rate(ctx));
-        this->add_filter_count(ctx, valid_size);
-        this->add_distance_evaluations(ctx, valid_size);
-    }
-
-    void
-    QueryFastScan32WithDistanceLowerBoundAndFilterInnerProduct(
-        float* result_dists,
-        float* lower_bounds,
-        float* filter_inner_products,
-        bool* computed,
-        const ComputerInterfacePtr& computer,
-        const ComputerInterfacePtr& fastscan_computer,
-        const uint8_t* block,
-        InnerIdType valid_size,
-        QueryContext* ctx = nullptr) const override {
-        auto* fastscan = dynamic_cast<FastScan32Computer*>(fastscan_computer.get());
-        CHECK_ARGUMENT(fastscan != nullptr, "invalid RaBitQ FastScan computer");
-        auto* bottom_computer = this->get_bottom_computer(computer);
-        const auto* lookup_table =
-            fastscan->PrepareQuery(this->bottom_quantizer(), *bottom_computer);
-        this->bottom_quantizer().ComputeDistsWithFastScan32(*bottom_computer,
-                                                            block,
-                                                            lookup_table,
-                                                            fastscan->deltas_,
-                                                            fastscan->sum_vls_,
-                                                            fastscan->query_sum_,
-                                                            result_dists,
-                                                            computed,
-                                                            valid_size,
-                                                            this->query_rabitq_error_rate(ctx),
-                                                            lower_bounds,
-                                                            filter_inner_products);
-        this->add_filter_count(ctx, valid_size);
-        this->add_distance_evaluations(ctx, valid_size);
-    }
-
-    void
     QueryFastScan32Batch(float* result_dists,
                          uint32_t* computed_masks,
                          const ComputerInterfacePtr& computer,
@@ -802,55 +714,6 @@ public:
             result_dists,
             computed_masks,
             filter_inner_products);
-        this->add_filter_count(ctx, total_size);
-        this->add_distance_evaluations(ctx, total_size);
-    }
-
-    void
-    QueryFastScan32BatchWithDistanceLowerBoundAndFilterInnerProduct(
-        float* result_dists,
-        float* lower_bounds,
-        float* filter_inner_products,
-        uint32_t* computed_masks,
-        const ComputerInterfacePtr& computer,
-        const ComputerInterfacePtr& fastscan_computer,
-        const uint8_t* blocks,
-        InnerIdType total_size,
-        QueryContext* ctx = nullptr) const override {
-        auto* fastscan = dynamic_cast<FastScan32Computer*>(fastscan_computer.get());
-        CHECK_ARGUMENT(fastscan != nullptr, "invalid RaBitQ FastScan computer");
-        auto* bottom_computer = this->get_bottom_computer(computer);
-        const auto* lookup_table =
-            fastscan->PrepareQuery(this->bottom_quantizer(), *bottom_computer);
-        const uint64_t block_size = this->GetFastScan32BlockSize();
-        const uint64_t block_count =
-            (static_cast<uint64_t>(total_size) + BottomQuantizer::FASTSCAN_BATCH_SIZE - 1) /
-            BottomQuantizer::FASTSCAN_BATCH_SIZE;
-        const float error_rate = this->query_rabitq_error_rate(ctx);
-        for (uint64_t block_index = 0; block_index < block_count; ++block_index) {
-            const auto begin =
-                static_cast<InnerIdType>(block_index * BottomQuantizer::FASTSCAN_BATCH_SIZE);
-            const auto valid_size =
-                std::min<InnerIdType>(BottomQuantizer::FASTSCAN_BATCH_SIZE, total_size - begin);
-            bool computed[BottomQuantizer::FASTSCAN_BATCH_SIZE] = {};
-            this->bottom_quantizer().ComputeDistsWithFastScan32(*bottom_computer,
-                                                                blocks + block_index * block_size,
-                                                                lookup_table,
-                                                                fastscan->deltas_,
-                                                                fastscan->sum_vls_,
-                                                                fastscan->query_sum_,
-                                                                result_dists + begin,
-                                                                computed,
-                                                                valid_size,
-                                                                error_rate,
-                                                                lower_bounds + begin,
-                                                                filter_inner_products + begin);
-            uint32_t mask = 0;
-            for (InnerIdType i = 0; i < valid_size; ++i) {
-                mask |= static_cast<uint32_t>(computed[i]) << i;
-            }
-            computed_masks[block_index] = mask;
-        }
         this->add_filter_count(ctx, total_size);
         this->add_distance_evaluations(ctx, total_size);
     }
@@ -886,22 +749,6 @@ public:
         this->add_distance_evaluations(ctx, total_size);
     }
 
-    [[nodiscard]] bool
-    ConvertFastScan32SharedResidualFilterInnerProduct(
-        const ComputerInterfacePtr& shared_computer,
-        const ComputerInterfacePtr& residual_computer,
-        const uint8_t* block,
-        InnerIdType index_in_block,
-        float shared_filter_inner_product,
-        float* residual_filter_inner_product) const override {
-        return this->bottom_quantizer().ConvertFastScan32SharedResidualFilterInnerProduct(
-            *this->get_bottom_computer(shared_computer),
-            *this->get_bottom_computer(residual_computer),
-            block,
-            index_in_block,
-            shared_filter_inner_product,
-            residual_filter_inner_product);
-    }
     [[nodiscard]] bool
     RecoverFastScan32OriginalQueryFilterInnerProduct(
         const ComputerInterfacePtr& computer,
@@ -1259,63 +1106,6 @@ public:
     }
 
     void
-    QueryWithDistanceLowerBoundAndFilterInnerProduct(float* result_dists,
-                                                     float* lower_bounds,
-                                                     float* filter_inner_products,
-                                                     const ComputerInterfacePtr& computer,
-                                                     const InnerIdType* idx,
-                                                     InnerIdType id_count,
-                                                     QueryContext* ctx = nullptr) override {
-        if (this->optimized_build_active_) {
-            this->query_optimized_build_codes(result_dists, computer, idx, id_count);
-            std::fill(
-                lower_bounds, lower_bounds + id_count, -std::numeric_limits<float>::infinity());
-            std::fill(filter_inner_products,
-                      filter_inner_products + id_count,
-                      std::numeric_limits<float>::quiet_NaN());
-            this->add_distance_evaluations(ctx, id_count);
-            return;
-        }
-
-        auto* comp = this->get_bottom_computer(computer);
-        this->add_filter_count(ctx, id_count);
-        for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
-            this->prefetch_one_bit(idx[i]);
-        }
-
-        for (InnerIdType i = 0; i < id_count; ++i) {
-            if (i + this->prefetch_stride_code_ < id_count) {
-                this->prefetch_one_bit(idx[i + this->prefetch_stride_code_]);
-            }
-
-            bool one_bit_need_release = false;
-            const uint8_t* one_bit_code = this->get_one_bit_code(idx[i], one_bit_need_release);
-            bool computed = false;
-            try {
-                computed = this->bottom_quantizer().ComputeDistWithOneBitLowerBound(
-                    *comp,
-                    one_bit_code,
-                    result_dists + i,
-                    lower_bounds + i,
-                    this->query_rabitq_error_rate(ctx),
-                    filter_inner_products + i);
-                if (not computed) {
-                    this->add_filter_fallback_full_count(ctx, 1);
-                    this->compute_full_dist_after_one_bit_failure(
-                        idx[i], one_bit_code, comp, result_dists + i, nullptr, ctx);
-                    lower_bounds[i] = -std::numeric_limits<float>::infinity();
-                    filter_inner_products[i] = std::numeric_limits<float>::quiet_NaN();
-                }
-            } catch (...) {
-                this->release_one_bit_code(one_bit_code, one_bit_need_release);
-                throw;
-            }
-            this->release_one_bit_code(one_bit_code, one_bit_need_release);
-        }
-        this->add_distance_evaluations(ctx, id_count);
-    }
-
-    void
     QueryWithFilterInnerProduct(float* result_dists,
                                 const float* filter_inner_products,
                                 const ComputerInterfacePtr& computer,
@@ -1421,34 +1211,6 @@ public:
             return;
         }
         FlattenInterface::ResetComputerFromResidualQuery(transformed_query, computer);
-    }
-
-    void
-    FactoryFastScan32ComputersFromResidualQueries(
-        const float* transformed_queries,
-        uint64_t query_count,
-        ComputerInterfacePtr* computers,
-        ComputerInterfacePtr* fastscan_computers) override {
-        if constexpr (std::is_same_v<QuantizerT, BottomQuantizer>) {
-            CHECK_ARGUMENT(query_count == 0 or transformed_queries != nullptr,
-                           "transformed residual queries are required");
-            CHECK_ARGUMENT(query_count == 0 or computers != nullptr,
-                           "residual query computer output is required");
-            CHECK_ARGUMENT(query_count == 0 or fastscan_computers != nullptr,
-                           "FastScan computer output is required");
-            const uint64_t transform_size = this->GetResidualQueryTransformSize();
-            for (uint64_t i = 0; i < query_count; ++i) {
-                auto computer = this->quantizer_->FactoryComputer();
-                auto& bottom_computer = Accessor::GetComputer(*computer);
-                this->bottom_quantizer().ProcessTransformedResidualQuery(
-                    transformed_queries + i * transform_size, bottom_computer);
-                computers[i] = std::move(computer);
-                fastscan_computers[i] = this->FactoryFastScan32Computer(computers[i]);
-            }
-            return;
-        }
-        FlattenInterface::FactoryFastScan32ComputersFromResidualQueries(
-            transformed_queries, query_count, computers, fastscan_computers);
     }
 
     ComputerInterfacePtr

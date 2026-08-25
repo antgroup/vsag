@@ -78,57 +78,20 @@ standard RaBitQ 路径，
 几何误差尺度，因此 sweep 这个搜索参数不需要重建索引。
 
 IVF 桶扫描会自动使用配置的 `x` 个 filter bits，不需要
-`rabitq_one_bit_search` 开关。默认的
-`rabitq_search_strategy: "candidate_reorder"` 通过 `ivf.factor` 控制进入
-supplement 重排的过滤阶段候选数（`factor * topk`）。
-
-IVF 还提供可选的 lower-bound heap 策略：
-
-```json
-{
-    "ivf": {
-        "scan_buckets_count": 32,
-        "rabitq_search_strategy": "heap",
-        "parallelism": 4
-    }
-}
-```
-
-该策略只支持 KNN，结果堆始终保存完整的 `x+y` RaBitQ 距离估计。仅当 x-bit
-lower bound 严格小于当前堆顶时，才读取 `y`-bit supplement；该策略不使用
-`factor`。它要求 split storage、`use_reorder: true`，且本次搜索的
-`enable_reorder: true`。
-堆内元素复用 byte-LUT 量化后的 x-bit 内积，再加上 y-bit supplement
-贡献。因此 x-bit lower bound 和最终 `x+y` 估计共享同一个 LUT 量化误差。
-RaBitQ 误差项仍由 `rabitq_error_rate` 控制；更激进的剪枝可能以召回为代价
-减少 supplement 读取。
-
+`rabitq_one_bit_search` 开关。`ivf.factor` 控制进入 supplement 重排的
+过滤阶段候选数（`factor * topk`）。
 ## 搜索流程
 
 split 搜索分为四个阶段：
 
-1. query 只做一次变换和归一化。非 residual 扫描以及 residual IVF 的
-   `candidate_reorder` 每个 query 只构建一份 byte lookup table；residual IVF
-   `heap` 为保持原 lower-bound 公式，仍构建 bucket-specific `q-c` LUT。
-2. 图遍历或 IVF 桶扫描只读取 filter record，计算 x-bit 距离估计；使用
-   lower bound 的路径还会计算保守的 lower bound。
-3. HGraph 可以丢弃 lower bound 不可能进入结果集的候选。IVF 可以按 filter
-   distance 保留 `factor * topk` 个候选（默认策略），也可以让每个 lower
-   bound 与 `x+y` 估计堆比较（可选的 `heap` 策略）。
-4. 最终距离把 filter contribution 与 supplement contribution 合成为
-   `x+y`-bit RaBitQ 估计。IVF 两种策略都会从过滤扫描携带 byte-LUT 量化后的
-   x-bit 内积 `S_x`；正常的最终距离计算只读取 y-bit record，不再从 filter
-   distance 反推内积。
-
-IVF 的两种策略都使用桶级 32-vector FastScan 布局。candidate 扫描输出 x-bit
-估计和可复用内积；heap 模式还会输出 lower bound。最终距离使用
-`2^y * S_x + S_y`，只有 `S_y` 需要读取 y-bit supplement。该路径不再执行
-配套的 float-LUT 扫描；只有候选无效或过期时的正确性 fallback 才重新读取
-packed x bits。
-
-因此，图搜索或 IVF 桶扫描不会为每个访问到的向量都计算 `x+y` 距离并放入
-搜索堆。过滤阶段由
-低成本的 x-bit 距离驱动，更精确的距离只在候选重排阶段计算。
+1. query 只做一次变换和归一化。residual IVF 使用原始变换 query 构建一份
+   共享的 HighAcc lookup table。
+2. IVF 桶扫描只读取 packed x-bit filter record，并输出距离估计及可复用的
+   量化 filter 内积。
+3. IVF 按 filter distance 保留 `factor * topk` 个候选；candidate heap 同时携带
+   source bucket、offset 和 version，用于在并发更新时校验保存的内积。
+4. 正常重排只读取 y-bit supplement，并与保存的 filter contribution 合并。只有
+   候选无效或过期时的正确性 fallback 才重新读取 packed x bits。
 
 ## 编码和 bit-plane
 
@@ -308,8 +271,8 @@ norm。随后所有路径都使用 RaBitQ norm 和 error 元数据恢复过滤�
 
 packed filter planes 后紧跟 32 个候选的元数据。桶尾不足 32 条的 block 用零码
 补齐，扫描器只返回有效候选。运行时会分派到 generic、SSE、AVX2 或 AVX-512
-实现。heap 搜索会把 byte-LUT 反量化结果保存为 `S_x` 并在最终 `x+y` 估计中
-复用，因此过滤与重排共享同一个 LUT 量化误差。更宽的 filter 继续使用
+实现。byte-LUT 反量化结果会保存为 `S_x` 并在最终 `x+y` 估计中复用，因此过滤与
+重排共享同一个 LUT 量化误差。更宽的 filter 继续使用
 bit-plane batch 路径。
 
 配置示例：
@@ -357,28 +320,6 @@ top-10，共计时 5,000 次查询。split 搜索结果启用了上述 32-vector
 并在内存中保存一份桶级 FastScan 副本；作为交换，filter 扫描不再为每个候选读取
 完整 8-bit code。在该负载中，2+6 的召回最接近传统 8-bit RaBitQ，同时搜索吞吐
 约提升 4.2 倍；1+7 的吞吐最高，但召回损失也更明显。
-
-### 搜索策略对比
-
-在相同的内存型 split 索引上，继续对比默认 `candidate_reorder`
-（`factor = 10`）与可选 `heap` 策略。其余配置不变，单线程计时 1,000 次
-查询；“每查询 supplement 精算”表示平均读取的 y-bit record 数。
-
-| 布局 | 策略 | 搜索 QPS | 平均延迟（ms） | Recall | 每查询 supplement 精算 |
-| --- | --- | ---: | ---: | ---: | ---: |
-| 1+7 | Candidate reorder | 101.009 | 9.896 | 0.8997 | 100.0 |
-| 1+7 | 共用量化内积 heap | 66.826 | 14.961 | 0.9047 | 791.3 |
-| 2+6 | Candidate reorder | 75.641 | 13.217 | 0.9128 | 100.0 |
-| 2+6 | 共用量化内积 heap | 57.108 | 17.508 | 0.9145 | 421.2 |
-| 3+5 | Candidate reorder | 67.481 | 14.816 | 0.9094 | 100.0 |
-| 3+5 | 共用量化内积 heap | 53.983 | 18.521 | 0.9099 | 199.4 |
-
-heap 的所有 supplement 精算都直接使用已保存的量化 x-bit 内积，没有从距离
-hint 反推或发生 fallback。移除对所有扫描候选执行的 float-LUT 后，1+7、2+6
-和 3+5 heap QPS 相比原实现分别提升 24.7%、45.9% 和 63.9%。共享 LUT 量化
-误差会改变堆排序，召回也从原 float-LUT heap 的 0.9160、0.9231 和 0.9151
-下降到表中结果。在该内存负载中，heap 读取的 supplement 仍多于固定的
-`factor * topk` 池，因此仍慢于 candidate reorder，但吞吐差距已经明显缩小。
 
 ## Query lookup table 和 SIMD
 
@@ -497,7 +438,6 @@ x/y bit 数和 query bits。修改编码参数需要重建索引；只调整搜�
 | filter 距离和 lower bound | `ComputeDistWithOneBitLowerBound` |
 | 直接计算 split distance | `ComputeDistWithSplitCode` |
 | 使用 filter distance hint 的 reorder | `ComputeDistWithSplitCodeAndFilterDist` |
-| heap 复用量化 x-bit 内积 | `ComputeDistWithSplitCodeAndFilterInnerProduct` |
 | SIMD dispatch | `src/simd/rabitq_simd.cpp` |
 | AVX2 / AVX512 lookup kernel | `src/simd/avx2.cpp`、`src/simd/avx512.cpp` |
 | 内存/磁盘/混合 IO 示例 | `examples/cpp/323_index_hgraph_rabitq_split.cpp` |
@@ -508,8 +448,7 @@ x/y bit 数和 query bits。修改编码参数需要重建索引；只调整搜�
   Pyramid 的 split 索引默认启用 one-bit split 搜索路径；如需强制使用普通
   搜索路径，
   可以在 `pyramid` 搜索参数下传 `rabitq_one_bit_search: false`。
-- 支持 `l2`、`ip` 和 `cosine`；IVF heap 搜索对三种 metric 都直接复用
-  已保存的量化 x-bit 内积。
+- 支持 `l2`、`ip` 和 `cosine`。
 - 除非已经验证仅靠 x-bit 遍历距离能满足召回要求，否则应保持
   `use_reorder: true`。
 - 修改 x、y、metric 或 transform 参数后必须重建索引；在搜索参数中覆盖

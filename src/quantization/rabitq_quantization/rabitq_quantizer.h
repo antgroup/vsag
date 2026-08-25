@@ -276,35 +276,12 @@ public:
                          uint8_t* one_bit_code) const;
 
     void
-    PrepareFastScan32Query(Computer<RaBitQuantizer>& computer,
-                           uint8_t* lookup_table,
-                           float* deltas,
-                           float* sum_vls,
-                           float& query_sum,
-                           uint64_t* random_state = nullptr) const;
-
-    void
     PrepareFastScan32HighAccQuery(Computer<RaBitQuantizer>& computer,
                                   uint8_t* lookup_table,
                                   float* deltas,
                                   float* sum_vls,
                                   float& query_sum,
                                   uint64_t* random_state = nullptr) const;
-
-    void
-    ComputeDistsWithFastScan32(
-        Computer<RaBitQuantizer>& computer,
-        const uint8_t* block,
-        const uint8_t* lookup_table,
-        const float* deltas,
-        const float* sum_vls,
-        float query_sum,
-        float* dists,
-        bool* computed,
-        uint64_t valid_size,
-        float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN(),
-        float* lower_bounds = nullptr,
-        float* filter_inner_products = nullptr) const;
 
     void
     ComputeDistsWithFastScan32HighAccBatch(Computer<RaBitQuantizer>& computer,
@@ -317,31 +294,6 @@ public:
                                            float* dists,
                                            uint32_t* computed_masks,
                                            float* filter_inner_products = nullptr) const;
-
-    uint32_t
-    ComputeDistsWithFastScan32SharedResidual(Computer<RaBitQuantizer>& computer,
-                                             const uint8_t* block,
-                                             const uint8_t* lookup_table,
-                                             const float* deltas,
-                                             const float* sum_vls,
-                                             float query_sum,
-                                             float query_bucket_norm_sqr,
-                                             float* dists,
-                                             uint64_t valid_size,
-                                             float* filter_inner_products = nullptr) const;
-
-    void
-    ComputeDistsWithFastScan32SharedResidualBatch(Computer<RaBitQuantizer>& computer,
-                                                  const uint8_t* blocks,
-                                                  uint64_t total_size,
-                                                  const uint8_t* lookup_table,
-                                                  const float* deltas,
-                                                  const float* sum_vls,
-                                                  float query_sum,
-                                                  float query_bucket_norm_sqr,
-                                                  float* dists,
-                                                  uint32_t* computed_masks,
-                                                  float* filter_inner_products = nullptr) const;
 
     void
     ComputeDistsWithFastScan32SharedResidualHighAccBatch(
@@ -356,14 +308,6 @@ public:
         float* dists,
         uint32_t* computed_masks,
         float* filter_inner_products = nullptr) const;
-
-    bool
-    ConvertFastScan32SharedResidualFilterInnerProduct(Computer<RaBitQuantizer>& shared_computer,
-                                                      Computer<RaBitQuantizer>& residual_computer,
-                                                      const uint8_t* block,
-                                                      uint64_t index_in_block,
-                                                      float shared_filter_inner_product,
-                                                      float* residual_filter_inner_product) const;
 
     bool
     RecoverFastScan32OriginalQueryFilterInnerProduct(Computer<RaBitQuantizer>& original_computer,

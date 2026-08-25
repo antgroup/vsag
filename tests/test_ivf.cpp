@@ -3441,44 +3441,6 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     REQUIRE(statistics["distance_evaluations_by_phase"]["rerank"].GetUint64() == reorder_count);
     REQUIRE(statistics["distance_evaluations_by_backend"]["rabitq"].GetUint64() > 0);
 
-    constexpr auto heap_search_param = R"({
-        "ivf": {
-            "scan_buckets_count": 16,
-            "factor": 100.0,
-            "parallelism": 2,
-            "rabitq_search_strategy": "heap"
-        }
-    })";
-    auto heap_result = index.value()->KnnSearch(query, topk, heap_search_param);
-    REQUIRE(heap_result.has_value());
-    REQUIRE(heap_result.value()->GetDim() == topk);
-    for (int64_t i = 0; i < topk; ++i) {
-        const auto id = heap_result.value()->GetIds()[i];
-        const auto exact_distance =
-            index.value()->CalcDistanceById(query->GetFloat32Vectors(), id, true);
-        REQUIRE(exact_distance.has_value());
-        // The heap result reuses the byte-LUT-quantized x-bit inner product from the
-        // lower-bound scan and only adds the y-bit supplement. It should stay close to the
-        // canonical x+y RaBitQ distance without requiring a second float-LUT x-bit scan.
-        REQUIRE(std::abs(heap_result.value()->GetDistances()[i] - exact_distance.value()) < 0.02F);
-    }
-
-    auto heap_statistics = vsag::JsonType::Parse(heap_result.value()->GetStatistics());
-    const auto heap_filter_count = heap_statistics["rabitq_filter_count"].GetUint64();
-    const auto heap_full_count = heap_statistics["rabitq_full_count"].GetUint64();
-    const auto heap_reorder_count = heap_statistics["reorder_distance_count"].GetUint64();
-    const auto heap_inner_product_count =
-        heap_statistics["rabitq_reorder_hint_full_count"].GetUint64();
-    REQUIRE(heap_filter_count > 0);
-    REQUIRE(heap_reorder_count >= topk);
-    REQUIRE(heap_reorder_count <= heap_filter_count);
-    REQUIRE(heap_full_count >= heap_reorder_count);
-    REQUIRE(heap_inner_product_count == heap_reorder_count);
-    REQUIRE(heap_statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() ==
-            heap_filter_count);
-    REQUIRE(heap_statistics["distance_evaluations_by_phase"]["rerank"].GetUint64() ==
-            heap_reorder_count);
-
     auto serialized = index.value()->Serialize();
     REQUIRE(serialized.has_value());
     auto restored = vsag::Factory::CreateIndex("ivf", params);

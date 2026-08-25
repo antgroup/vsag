@@ -1825,7 +1825,6 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
     param.disable_bucket_scan = search_param.disable_bucket_scan;
     param.factor = search_param.topk_factor;
     param.enable_reorder = search_param.enable_reorder;
-    param.use_rabitq_heap_search = search_param.use_rabitq_heap_search;
     param.first_order_scan_ratio = search_param.first_order_scan_ratio;
     param.parallel_search_thread_count = search_param.parallel_search_thread_count;
     param.ef = static_cast<uint64_t>(search_param.ef_search);
@@ -1992,8 +1991,7 @@ IVF::search(const DatasetPtr& query,
     }
     const bool collect_candidate_filter_inner_products =
         mode == KNN_SEARCH and use_reorder_ and param.enable_reorder and
-        not param.use_rabitq_heap_search and bucket_->SupportSplitCodeStorage() and
-        buckets_per_data_ == 1;
+        bucket_->SupportSplitCodeStorage() and buckets_per_data_ == 1;
     std::vector<DistHeapPtr> heaps(search_thread_count);
     std::atomic<uint64_t> cur_bucket_num(0);
     auto search_func = [&](int64_t thread_id) -> void {
@@ -2350,15 +2348,6 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                        "IVF custom query distance does not support parallel search");
         param.enable_reorder = false;
     }
-    if (param.use_rabitq_heap_search) {
-        CHECK_ARGUMENT(not is_range, "rabitq_search_strategy=heap only supports KNN search");
-        CHECK_ARGUMENT(not use_custom_distance,
-                       "rabitq_search_strategy=heap does not support custom query distance");
-        CHECK_ARGUMENT(use_reorder_ and param.enable_reorder,
-                       "rabitq_search_strategy=heap requires reorder to be enabled");
-        CHECK_ARGUMENT(bucket_->SupportSplitCodeStorage(),
-                       "rabitq_search_strategy=heap requires IVF RaBitQ split storage");
-    }
     param.query_context = &ctx;
 
     if (not request.bucket_ids_.empty()) {
@@ -2606,7 +2595,7 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     // KNN mode
     param.search_mode = KNN_SEARCH;
     param.topk = request.topk_;
-    if (use_reorder_ and param.enable_reorder and not param.use_rabitq_heap_search) {
+    if (use_reorder_ and param.enable_reorder) {
         CHECK_ARGUMENT(
             param.factor > 0.0F,
             fmt::format("factor must be positive when use_reorder is true, got {}", param.factor));
@@ -2615,8 +2604,7 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             param.topk = std::max(param.topk, request.topk_);
         }
     }
-    const bool reorder_enabled =
-        use_reorder_ and param.enable_reorder and not param.use_rabitq_heap_search;
+    const bool reorder_enabled = use_reorder_ and param.enable_reorder;
     // Reordered searches defer the finite bound to exact distances, but bucket
     // selection still needs threshold-mode state so non-finite approximations
     // cannot consume the rerank pool.

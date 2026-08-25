@@ -1339,18 +1339,20 @@ TEST_CASE("RaBitQ split bucket supports optimized build",
     std::vector<float> optimized_filter_inner_products(count);
     std::vector<InnerIdType> normal_ids(count);
     std::vector<InnerIdType> optimized_ids(count);
-    normal->ScanBucketWithFilterInnerProduct(normal_scan_dists.data(),
-                                             normal_filter_inner_products.data(),
-                                             normal_computer,
-                                             routed_bucket,
-                                             nullptr,
-                                             normal_ids.data());
-    optimized->ScanBucketWithFilterInnerProduct(optimized_scan_dists.data(),
-                                                optimized_filter_inner_products.data(),
-                                                optimized_computer,
-                                                routed_bucket,
-                                                nullptr,
-                                                optimized_ids.data());
+    const uint64_t normal_version =
+        normal->ScanBucketWithFilterInnerProduct(normal_scan_dists.data(),
+                                                 normal_filter_inner_products.data(),
+                                                 normal_computer,
+                                                 routed_bucket,
+                                                 nullptr,
+                                                 normal_ids.data());
+    const uint64_t optimized_version =
+        optimized->ScanBucketWithFilterInnerProduct(optimized_scan_dists.data(),
+                                                    optimized_filter_inner_products.data(),
+                                                    optimized_computer,
+                                                    routed_bucket,
+                                                    nullptr,
+                                                    optimized_ids.data());
     REQUIRE(normal_ids == optimized_ids);
     std::vector<float> normal_reorder_dists(count);
     std::vector<float> optimized_reorder_dists(count);
@@ -1358,20 +1360,31 @@ TEST_CASE("RaBitQ split bucket supports optimized build",
     SearchStatistics optimized_stats;
     QueryContext normal_ctx{nullptr, &normal_stats};
     QueryContext optimized_ctx{nullptr, &optimized_stats};
-    normal->QueryWithCandidateFilterInnerProductByInnerId(normal_reorder_dists.data(),
-                                                          nullptr,
-                                                          normal_filter_inner_products.data(),
-                                                          normal_computer,
-                                                          normal_ids.data(),
-                                                          count,
-                                                          &normal_ctx);
-    optimized->QueryWithCandidateFilterInnerProductByInnerId(optimized_reorder_dists.data(),
-                                                             nullptr,
-                                                             optimized_filter_inner_products.data(),
-                                                             optimized_computer,
-                                                             optimized_ids.data(),
-                                                             count,
-                                                             &optimized_ctx);
+    std::vector<BucketIdType> source_buckets(count, routed_bucket);
+    std::vector<InnerIdType> source_offsets(count);
+    std::iota(source_offsets.begin(), source_offsets.end(), 0);
+    std::vector<uint64_t> normal_versions(count, normal_version);
+    std::vector<uint64_t> optimized_versions(count, optimized_version);
+    normal->QueryWithCandidateFilterInnerProductBySource(normal_reorder_dists.data(),
+                                                         nullptr,
+                                                         normal_filter_inner_products.data(),
+                                                         source_buckets.data(),
+                                                         source_offsets.data(),
+                                                         normal_versions.data(),
+                                                         normal_computer,
+                                                         normal_ids.data(),
+                                                         count,
+                                                         &normal_ctx);
+    optimized->QueryWithCandidateFilterInnerProductBySource(optimized_reorder_dists.data(),
+                                                            nullptr,
+                                                            optimized_filter_inner_products.data(),
+                                                            source_buckets.data(),
+                                                            source_offsets.data(),
+                                                            optimized_versions.data(),
+                                                            optimized_computer,
+                                                            optimized_ids.data(),
+                                                            count,
+                                                            &optimized_ctx);
     REQUIRE(normal_stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) == count);
     REQUIRE(optimized_stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) ==
             count);
@@ -1432,14 +1445,15 @@ TEST_CASE("RaBitQ split bucket scan spills computed masks above 256 blocks",
     std::vector<float> filter_inner_products(count);
     std::vector<InnerIdType> scanned_ids(count);
     InnerIdType scanned_size = 0;
-    bucket->ScanBucketWithFilterInnerProduct(scan_dists.data(),
-                                             filter_inner_products.data(),
-                                             computer,
-                                             bucket_id,
-                                             nullptr,
-                                             scanned_ids.data(),
-                                             count,
-                                             &scanned_size);
+    const uint64_t source_version =
+        bucket->ScanBucketWithFilterInnerProduct(scan_dists.data(),
+                                                 filter_inner_products.data(),
+                                                 computer,
+                                                 bucket_id,
+                                                 nullptr,
+                                                 scanned_ids.data(),
+                                                 count,
+                                                 &scanned_size);
     REQUIRE(scanned_size == count);
     REQUIRE(std::all_of(
         scan_dists.begin(), scan_dists.end(), [](float value) { return std::isfinite(value); }));
@@ -1455,12 +1469,19 @@ TEST_CASE("RaBitQ split bucket scan spills computed masks above 256 blocks",
         selected_inner_products[i] = filter_inner_products[selected_offsets[i]];
     }
     std::array<float, selected_offsets.size()> reorder_dists{};
-    bucket->QueryWithCandidateFilterInnerProductByInnerId(reorder_dists.data(),
-                                                          nullptr,
-                                                          selected_inner_products.data(),
-                                                          computer,
-                                                          selected_ids.data(),
-                                                          selected_ids.size());
+    std::array<BucketIdType, selected_offsets.size()> source_buckets{};
+    std::array<uint64_t, selected_offsets.size()> source_versions{};
+    source_buckets.fill(bucket_id);
+    source_versions.fill(source_version);
+    bucket->QueryWithCandidateFilterInnerProductBySource(reorder_dists.data(),
+                                                         nullptr,
+                                                         selected_inner_products.data(),
+                                                         source_buckets.data(),
+                                                         selected_offsets.data(),
+                                                         source_versions.data(),
+                                                         computer,
+                                                         selected_ids.data(),
+                                                         selected_ids.size());
     for (uint64_t i = 0; i < selected_offsets.size(); ++i) {
         REQUIRE(selected_ids[i] == selected_offsets[i]);
         const float expected = bucket->QueryOneById(computer, bucket_id, selected_offsets[i]);
@@ -1552,21 +1573,6 @@ TEST_CASE("RaBitQ split bucket prepares only routed residual computers",
     std::array<float, 3> sparse_candidate_inner_products{published_candidate_inner_products[0],
                                                          published_candidate_inner_products[1],
                                                          std::numeric_limits<float>::quiet_NaN()};
-    std::array<float, 3> sparse_candidate_dists{};
-    SearchStatistics sparse_candidate_stats;
-    QueryContext sparse_candidate_ctx{nullptr, &sparse_candidate_stats};
-    bucket->QueryWithCandidateFilterInnerProductByInnerId(sparse_candidate_dists.data(),
-                                                          nullptr,
-                                                          sparse_candidate_inner_products.data(),
-                                                          candidate_computer,
-                                                          sparse_candidate_ids.data(),
-                                                          sparse_candidate_ids.size(),
-                                                          &sparse_candidate_ctx);
-    REQUIRE(std::all_of(sparse_candidate_dists.begin(),
-                        sparse_candidate_dists.end(),
-                        [](float value) { return std::isfinite(value); }));
-    REQUIRE(sparse_candidate_stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) ==
-            published_candidate_ids.size());
 
     std::array<BucketIdType, 3> sparse_source_buckets{1, 3, 1};
     std::array<InnerIdType, 3> sparse_source_offsets{0, 0, 1};
@@ -1586,7 +1592,9 @@ TEST_CASE("RaBitQ split bucket prepares only routed residual computers",
                                                          sparse_candidate_ids.data(),
                                                          sparse_candidate_ids.size(),
                                                          &source_candidate_ctx);
-    REQUIRE(source_candidate_dists == sparse_candidate_dists);
+    REQUIRE(std::all_of(source_candidate_dists.begin(),
+                        source_candidate_dists.end(),
+                        [](float value) { return std::isfinite(value); }));
     REQUIRE(source_candidate_stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) ==
             published_candidate_ids.size());
 
@@ -1655,16 +1663,12 @@ TEST_CASE("RaBitQ split bucket prepares only routed residual computers",
         expected.data(), nullptr, routed_computer, inner_ids.data(), inner_ids.size(), &ctx);
     REQUIRE(std::all_of(
         expected.begin(), expected.end(), [](float value) { return std::isfinite(value); }));
-    REQUIRE(stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) ==
-            inner_ids.size());
+    REQUIRE(stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) == 0);
 
     std::array<float, 8> actual{};
     bucket->QueryWithDistanceHintByInnerId(
         actual.data(), nullptr, routed_computer, inner_ids.data(), inner_ids.size());
     REQUIRE(actual == expected);
-    bucket->QueryWithFilterInnerProductByInnerId(
-        actual.data(), nullptr, routed_computer, inner_ids.data(), inner_ids.size());
-    REQUIRE(actual == scalar_expected);
 
     const std::array<float, 8> hints{0.25F, 1.5F, 2.75F, 4.0F, 5.25F, 6.5F, 7.75F, 9.0F};
     for (uint64_t i = 0; i < inner_ids.size(); ++i) {
@@ -1674,30 +1678,7 @@ TEST_CASE("RaBitQ split bucket prepares only routed residual computers",
     bucket->QueryWithDistanceHintByInnerId(
         actual.data(), hints.data(), routed_computer, inner_ids.data(), inner_ids.size());
     REQUIRE(actual == expected);
-    const auto heap_bucket_size = bucket->GetBucketSize(3);
-    std::vector<float> heap_scan_dists(heap_bucket_size);
-    std::vector<float> heap_lower_bounds(heap_bucket_size);
-    std::vector<float> heap_filter_inner_products(heap_bucket_size);
-    bucket->ScanBucketWithDistanceLowerBound(heap_scan_dists.data(),
-                                             heap_lower_bounds.data(),
-                                             heap_filter_inner_products.data(),
-                                             routed_computer,
-                                             3);
-    REQUIRE(std::isfinite(heap_filter_inner_products[0]));
     constexpr InnerIdType updated_inner_id = 3;
-    SearchStatistics heap_stats_before_update;
-    QueryContext heap_ctx_before_update{nullptr, &heap_stats_before_update};
-    float heap_actual_before_update = 0.0F;
-    bucket->QueryWithFilterInnerProductByInnerId(&heap_actual_before_update,
-                                                 heap_filter_inner_products.data(),
-                                                 routed_computer,
-                                                 &updated_inner_id,
-                                                 1,
-                                                 &heap_ctx_before_update);
-    REQUIRE(std::isfinite(heap_actual_before_update));
-    REQUIRE(heap_stats_before_update.rabitq_reorder_hint_full_count.load(
-                std::memory_order_relaxed) == 1);
-
     constexpr BucketIdType updated_bucket_id = 3;
     constexpr InnerIdType updated_offset_id = 0;
     bucket->InsertVectorWithOffset(
@@ -1708,21 +1689,6 @@ TEST_CASE("RaBitQ split bucket prepares only routed residual computers",
     bucket->QueryWithDistanceHintByInnerId(
         &updated_actual, nullptr, routed_computer, &updated_inner_id, 1);
     REQUIRE(std::abs(updated_actual - updated_expected) < 1e-5F);
-
-    SearchStatistics sparse_candidate_stats_after_update;
-    QueryContext sparse_candidate_ctx_after_update{nullptr, &sparse_candidate_stats_after_update};
-    float sparse_candidate_updated_actual = 0.0F;
-    bucket->QueryWithCandidateFilterInnerProductByInnerId(
-        &sparse_candidate_updated_actual,
-        nullptr,
-        published_candidate_inner_products.data() + 1,
-        candidate_computer,
-        &updated_inner_id,
-        1,
-        &sparse_candidate_ctx_after_update);
-    REQUIRE(std::abs(sparse_candidate_updated_actual - updated_expected) < 1e-5F);
-    REQUIRE(sparse_candidate_stats_after_update.rabitq_reorder_hint_full_count.load(
-                std::memory_order_relaxed) == 0);
 
     const BucketIdType stale_source_bucket = updated_bucket_id;
     const InnerIdType stale_source_offset = updated_offset_id;
@@ -1743,19 +1709,6 @@ TEST_CASE("RaBitQ split bucket prepares only routed residual computers",
         &stale_source_ctx);
     REQUIRE(std::abs(stale_source_actual - updated_expected) < 1e-5F);
     REQUIRE(stale_source_stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) == 0);
-
-    SearchStatistics heap_stats_after_update;
-    QueryContext heap_ctx_after_update{nullptr, &heap_stats_after_update};
-    float heap_updated_actual = 0.0F;
-    bucket->QueryWithFilterInnerProductByInnerId(&heap_updated_actual,
-                                                 heap_filter_inner_products.data(),
-                                                 routed_computer,
-                                                 &updated_inner_id,
-                                                 1,
-                                                 &heap_ctx_after_update);
-    REQUIRE(std::abs(heap_updated_actual - updated_expected) < 1e-5F);
-    REQUIRE(heap_stats_after_update.rabitq_reorder_hint_full_count.load(
-                std::memory_order_relaxed) == 0);
 
     REQUIRE_THROWS(bucket->ScanBucketById(nullptr, routed_computer, 0));
 }
@@ -1836,21 +1789,6 @@ TEST_CASE("RaBitQ split bucket reuses non-residual filter inner products",
     std::array<float, 3> sparse_candidate_inner_products{published_candidate_inner_products[0],
                                                          published_candidate_inner_products[1],
                                                          std::numeric_limits<float>::quiet_NaN()};
-    std::array<float, 3> sparse_candidate_dists{};
-    SearchStatistics sparse_candidate_stats;
-    QueryContext sparse_candidate_ctx{nullptr, &sparse_candidate_stats};
-    bucket->QueryWithCandidateFilterInnerProductByInnerId(sparse_candidate_dists.data(),
-                                                          nullptr,
-                                                          sparse_candidate_inner_products.data(),
-                                                          candidate_computer,
-                                                          sparse_candidate_ids.data(),
-                                                          sparse_candidate_ids.size(),
-                                                          &sparse_candidate_ctx);
-    REQUIRE(std::all_of(sparse_candidate_dists.begin(),
-                        sparse_candidate_dists.end(),
-                        [](float value) { return std::isfinite(value); }));
-    REQUIRE(sparse_candidate_stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) ==
-            published_candidate_ids.size());
 
     std::array<BucketIdType, 3> sparse_source_buckets{1, 0, 1};
     std::array<InnerIdType, 3> sparse_source_offsets{0, 0, 1};
@@ -1870,7 +1808,9 @@ TEST_CASE("RaBitQ split bucket reuses non-residual filter inner products",
                                                          sparse_candidate_ids.data(),
                                                          sparse_candidate_ids.size(),
                                                          &source_candidate_ctx);
-    REQUIRE(source_candidate_dists == sparse_candidate_dists);
+    REQUIRE(std::all_of(source_candidate_dists.begin(),
+                        source_candidate_dists.end(),
+                        [](float value) { return std::isfinite(value); }));
     REQUIRE(source_candidate_stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) ==
             published_candidate_ids.size());
 
@@ -1928,38 +1868,14 @@ TEST_CASE("RaBitQ split bucket reuses non-residual filter inner products",
         expected.data(), nullptr, routed_computer, inner_ids.data(), inner_ids.size(), &ctx);
     REQUIRE(std::all_of(
         expected.begin(), expected.end(), [](float value) { return std::isfinite(value); }));
-    REQUIRE(stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) ==
-            inner_ids.size());
+    REQUIRE(stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) == 0);
 
     std::array<float, 6> actual{};
     bucket->QueryWithDistanceHintByInnerId(
         actual.data(), nullptr, routed_computer, inner_ids.data(), inner_ids.size());
     REQUIRE(actual == expected);
 
-    const auto heap_bucket_size = bucket->GetBucketSize(0);
-    std::vector<float> heap_scan_dists(heap_bucket_size);
-    std::vector<float> heap_lower_bounds(heap_bucket_size);
-    std::vector<float> heap_filter_inner_products(heap_bucket_size);
-    bucket->ScanBucketWithDistanceLowerBound(heap_scan_dists.data(),
-                                             heap_lower_bounds.data(),
-                                             heap_filter_inner_products.data(),
-                                             routed_computer,
-                                             0);
-    REQUIRE(std::isfinite(heap_filter_inner_products[0]));
     constexpr InnerIdType updated_inner_id = 0;
-    SearchStatistics heap_stats_before_update;
-    QueryContext heap_ctx_before_update{nullptr, &heap_stats_before_update};
-    float heap_actual_before_update = 0.0F;
-    bucket->QueryWithFilterInnerProductByInnerId(&heap_actual_before_update,
-                                                 heap_filter_inner_products.data(),
-                                                 routed_computer,
-                                                 &updated_inner_id,
-                                                 1,
-                                                 &heap_ctx_before_update);
-    REQUIRE(std::isfinite(heap_actual_before_update));
-    REQUIRE(heap_stats_before_update.rabitq_reorder_hint_full_count.load(
-                std::memory_order_relaxed) == 1);
-
     constexpr InnerIdType updated_offset_id = 0;
     bucket->InsertVectorWithOffset(
         vectors.data() + 20 * dim, 0, updated_inner_id, updated_offset_id);
@@ -1969,21 +1885,6 @@ TEST_CASE("RaBitQ split bucket reuses non-residual filter inner products",
     bucket->QueryWithDistanceHintByInnerId(
         &candidate_updated_actual, nullptr, routed_computer, &updated_inner_id, 1);
     REQUIRE(std::abs(candidate_updated_actual - updated_expected) < 1e-5F);
-
-    SearchStatistics sparse_candidate_stats_after_update;
-    QueryContext sparse_candidate_ctx_after_update{nullptr, &sparse_candidate_stats_after_update};
-    float sparse_candidate_updated_actual = 0.0F;
-    bucket->QueryWithCandidateFilterInnerProductByInnerId(
-        &sparse_candidate_updated_actual,
-        nullptr,
-        published_candidate_inner_products.data() + 1,
-        candidate_computer,
-        &updated_inner_id,
-        1,
-        &sparse_candidate_ctx_after_update);
-    REQUIRE(std::abs(sparse_candidate_updated_actual - updated_expected) < 1e-5F);
-    REQUIRE(sparse_candidate_stats_after_update.rabitq_reorder_hint_full_count.load(
-                std::memory_order_relaxed) == 0);
 
     const BucketIdType stale_source_bucket = 0;
     const InnerIdType stale_source_offset = updated_offset_id;
@@ -2004,19 +1905,6 @@ TEST_CASE("RaBitQ split bucket reuses non-residual filter inner products",
         &stale_source_ctx);
     REQUIRE(std::abs(stale_source_actual - updated_expected) < 1e-5F);
     REQUIRE(stale_source_stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) == 0);
-
-    SearchStatistics heap_stats_after_update;
-    QueryContext heap_ctx_after_update{nullptr, &heap_stats_after_update};
-    float heap_updated_actual = 0.0F;
-    bucket->QueryWithFilterInnerProductByInnerId(&heap_updated_actual,
-                                                 heap_filter_inner_products.data(),
-                                                 routed_computer,
-                                                 &updated_inner_id,
-                                                 1,
-                                                 &heap_ctx_after_update);
-    REQUIRE(std::abs(heap_updated_actual - updated_expected) < 1e-5F);
-    REQUIRE(heap_stats_after_update.rabitq_reorder_hint_full_count.load(
-                std::memory_order_relaxed) == 0);
 }
 
 TEST_CASE("RaBitQ split bucket relocates existing inner IDs and invalidates provenance",
@@ -2386,11 +2274,19 @@ TEST_CASE("RaBitQ split bucket keeps only canonical packed filter codes",
         const auto bucket_size = bucket->GetBucketSize(bucket_id);
         std::vector<float> scan_dists(bucket_size);
         std::vector<float> filter_inner_products(bucket_size);
-        bucket->ScanBucketWithFilterInnerProduct(
+        const uint64_t source_version = bucket->ScanBucketWithFilterInnerProduct(
             scan_dists.data(), filter_inner_products.data(), computer, bucket_id);
         float result = 0.0F;
-        bucket->QueryWithCandidateFilterInnerProductByInnerId(
-            &result, nullptr, filter_inner_products.data() + offset_id, computer, &inner_id, 1);
+        bucket->QueryWithCandidateFilterInnerProductBySource(
+            &result,
+            nullptr,
+            filter_inner_products.data() + offset_id,
+            &bucket_id,
+            &offset_id,
+            &source_version,
+            computer,
+            &inner_id,
+            1);
         return result;
     };
     const float serialized_candidate = candidate_for_offset(packed_bucket, 1, 0, 1);

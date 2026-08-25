@@ -147,12 +147,6 @@ supplement contribution 合并，不重新读取或 unpack x-bit planes，也不
 或 factors 非法、source provenance 过期，或 FastScan lane 未产生有效结果时，
 正确性 fallback 才会 unpack x bits。
 
-KNN 搜索可设置 `rabitq_search_strategy: "heap"`，让结果堆始终保存完整
-`x+y` RaBitQ 距离估计，仅当 x-bit lower bound 小于堆顶时读取 supplement。
-该策略同样直接复用 lower-bound 扫描输出的 x-bit 内积。因此两种策略都会把
-过滤阶段的 x contribution 及其 LUT 量化误差延续到最终估计。heap 不使用
-`factor`。
-
 split 配置要求 `x >= 1`、`y >= 1`、`x + y <= 8`、
 `rabitq_bits_per_dim_query: 32`、`use_reorder: true` 和
 `buckets_per_data: 1`。split storage 暂不支持桶内图
@@ -171,7 +165,6 @@ split 配置要求 `x >= 1`、`y >= 1`、`x + y <= 8`、
 | `disable_bucket_scan` | bool | `false` | 返回桶 ID 及到桶中心距离，不扫描桶内向量。支持批量查询。 |
 | `factor` | float | `2.0` | 启用精排时，粗排阶段会预取 `factor * topk` 个候选再重打分 |
 | `enable_reorder` | bool | `true` | 即使索引构建时启用了 reorder，也可以在单次请求里设为 `false` 跳过最终精排 |
-| `rabitq_search_strategy` | string | `"candidate_reorder"` | `"candidate_reorder"` 按 filter distance 保留 `factor * topk` 个候选及其 x-bit 内积，只为幸存候选读取 y bits；仅支持 KNN 的 `"heap"` 用 lower bound 控制 y-bit 读取，维护 x+y 距离堆，并忽略 `factor`。 |
 | `parallelism` | int | `1` | 单次查询内扫描桶时使用的线程数 |
 | `timeout_ms` | double | `+∞` | 单次查询最长耗时（毫秒），超时会返回当前的部分结果 |
 
@@ -185,10 +178,6 @@ auto result = index->KnnSearch(
 auto fast_result = index->KnnSearch(
     query, topk,
     R"({"ivf": {"scan_buckets_count": 32, "factor": 2.0, "enable_reorder": false}})").value();
-
-auto heap_result = index->KnnSearch(
-    query, topk,
-    R"({"ivf": {"scan_buckets_count": 32, "rabitq_search_strategy": "heap"}})").value();
 ```
 
 ## 何时选择 IVF

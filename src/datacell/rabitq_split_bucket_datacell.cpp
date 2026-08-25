@@ -165,95 +165,6 @@ RaBitQSplitBucketDataCell::get_routed_bucket_index(const SplitBucketComputer& co
     return static_cast<uint64_t>(std::distance(computer.routed_bucket_ids_.begin(), it));
 }
 
-float*
-RaBitQSplitBucketDataCell::claim_filter_inner_product_cache(SplitBucketComputer& computer,
-                                                            BucketIdType bucket_id,
-                                                            InnerIdType bucket_size,
-                                                            uint64_t& routed_bucket_index) {
-    routed_bucket_index = this->get_routed_bucket_index(computer, bucket_id);
-    if (routed_bucket_index == INVALID_ROUTED_BUCKET_INDEX) {
-        return nullptr;
-    }
-
-    std::lock_guard lock(computer.bucket_computers_mutex_);
-    if (computer.routed_filter_cache_claimed_[routed_bucket_index] != 0U) {
-        return nullptr;
-    }
-    computer.routed_filter_cache_claimed_[routed_bucket_index] = 1U;
-    auto& cache = computer.routed_filter_inner_products_[routed_bucket_index];
-    cache.assign(bucket_size, std::numeric_limits<float>::quiet_NaN());
-    return cache.data();
-}
-
-bool
-RaBitQSplitBucketDataCell::get_cached_filter_inner_product(const SplitBucketComputer& computer,
-                                                           BucketIdType bucket_id,
-                                                           InnerIdType offset_id,
-                                                           InnerIdType inner_id,
-                                                           float& filter_inner_product) const {
-    const uint64_t routed_bucket_index = this->get_routed_bucket_index(computer, bucket_id);
-    std::lock_guard lock(computer.bucket_computers_mutex_);
-    if (routed_bucket_index == INVALID_ROUTED_BUCKET_INDEX or
-        computer.routed_filter_cache_claimed_[routed_bucket_index] == 0U or
-        computer.routed_filter_cache_versions_[routed_bucket_index] !=
-            this->bucket_versions_[bucket_id]) {
-        return false;
-    }
-    const auto& cache = computer.routed_filter_inner_products_[routed_bucket_index];
-    if (offset_id >= cache.size() or not IsFiniteFloat(cache[offset_id])) {
-        return false;
-    }
-    filter_inner_product = cache[offset_id];
-    return true;
-}
-
-void
-RaBitQSplitBucketDataCell::publish_candidate_scan_version(SplitBucketComputer& computer,
-                                                          BucketIdType bucket_id) {
-    const uint64_t routed_bucket_index = this->get_routed_bucket_index(computer, bucket_id);
-    if (routed_bucket_index == INVALID_ROUTED_BUCKET_INDEX) {
-        return;
-    }
-    std::lock_guard lock(computer.bucket_computers_mutex_);
-    computer.routed_candidate_scan_versions_[routed_bucket_index] =
-        this->bucket_versions_[bucket_id];
-}
-
-void
-RaBitQSplitBucketDataCell::publish_heap_scan_version(SplitBucketComputer& computer,
-                                                     BucketIdType bucket_id) {
-    const uint64_t routed_bucket_index = this->get_routed_bucket_index(computer, bucket_id);
-    if (routed_bucket_index == INVALID_ROUTED_BUCKET_INDEX) {
-        return;
-    }
-    std::lock_guard lock(computer.bucket_computers_mutex_);
-    computer.routed_heap_scan_versions_[routed_bucket_index] = this->bucket_versions_[bucket_id];
-}
-
-bool
-RaBitQSplitBucketDataCell::candidate_scan_version_matches(const SplitBucketComputer& computer,
-                                                          BucketIdType bucket_id) const {
-    const uint64_t routed_bucket_index = this->get_routed_bucket_index(computer, bucket_id);
-    if (routed_bucket_index == INVALID_ROUTED_BUCKET_INDEX) {
-        return false;
-    }
-    std::lock_guard lock(computer.bucket_computers_mutex_);
-    return computer.routed_candidate_scan_versions_[routed_bucket_index] ==
-           this->bucket_versions_[bucket_id];
-}
-
-bool
-RaBitQSplitBucketDataCell::heap_scan_version_matches(const SplitBucketComputer& computer,
-                                                     BucketIdType bucket_id) const {
-    const uint64_t routed_bucket_index = this->get_routed_bucket_index(computer, bucket_id);
-    if (routed_bucket_index == INVALID_ROUTED_BUCKET_INDEX) {
-        return not computer.routed_buckets_prepared_;
-    }
-    std::lock_guard lock(computer.bucket_computers_mutex_);
-    return computer.routed_heap_scan_versions_[routed_bucket_index] ==
-           this->bucket_versions_[bucket_id];
-}
-
 void
 RaBitQSplitBucketDataCell::prepare_scan_computers(SplitBucketComputer& computer,
                                                   const BucketIdType* bucket_ids,
@@ -291,11 +202,6 @@ RaBitQSplitBucketDataCell::prepare_scan_computers(SplitBucketComputer& computer,
                 this->codes_->ComputeTransformedResidualQueryNormSqr(residual_scratch.data());
         }
         computer.routed_bucket_norm_sqrs_.push_back(query_bucket_norm_sqr);
-        computer.routed_filter_inner_products_.emplace_back(this->allocator_);
-        computer.routed_filter_cache_claimed_.push_back(0U);
-        computer.routed_filter_cache_versions_.push_back(INVALID_CACHE_VERSION);
-        computer.routed_candidate_scan_versions_.push_back(INVALID_CACHE_VERSION);
-        computer.routed_heap_scan_versions_.push_back(INVALID_CACHE_VERSION);
     }
     computer.routed_buckets_prepared_ = true;
 }
@@ -446,7 +352,6 @@ RaBitQSplitBucketDataCell::ScanBucketById(float* result_dists,
                                           InnerIdType* scanned_size) {
     this->scan_bucket_by_id(result_dists,
                             nullptr,
-                            true,
                             computer,
                             bucket_id,
                             ctx,
@@ -468,7 +373,6 @@ RaBitQSplitBucketDataCell::ScanBucketWithFilterInnerProduct(float* result_dists,
                    "filter inner-product output is required for candidate scan");
     return this->scan_bucket_by_id(result_dists,
                                    filter_inner_products,
-                                   false,
                                    computer,
                                    bucket_id,
                                    ctx,
@@ -480,7 +384,6 @@ RaBitQSplitBucketDataCell::ScanBucketWithFilterInnerProduct(float* result_dists,
 uint64_t
 RaBitQSplitBucketDataCell::scan_bucket_by_id(float* result_dists,
                                              float* direct_filter_inner_products,
-                                             bool use_dense_filter_inner_product_cache,
                                              const ComputerInterfacePtr& computer,
                                              const BucketIdType& bucket_id,
                                              QueryContext* ctx,
@@ -526,29 +429,9 @@ RaBitQSplitBucketDataCell::scan_bucket_by_id(float* result_dists,
                                       : this->query_centroid_adjustment(bucket_computer, bucket_id);
     const uint64_t block_count =
         (static_cast<uint64_t>(bucket_size) + FASTSCAN_BATCH_SIZE - 1) / FASTSCAN_BATCH_SIZE;
-    auto publish_candidate_scan = [&]() {
-        if (direct_filter_inner_products != nullptr) {
-            this->publish_candidate_scan_version(bucket_computer, bucket_id);
-        }
-    };
     if (scan_fastscan != nullptr and this->fastscan_block_size_ > 0 and
         this->fastscan_blocks_[bucket_id].size() >= block_count * this->fastscan_block_size_) {
-        uint64_t cache_bucket_index = INVALID_ROUTED_BUCKET_INDEX;
-        float* dense_filter_inner_products = nullptr;
-        if (use_dense_filter_inner_product_cache) {
-            dense_filter_inner_products = this->claim_filter_inner_product_cache(
-                bucket_computer, bucket_id, bucket_size, cache_bucket_index);
-        }
-        float* scan_filter_inner_products = direct_filter_inner_products != nullptr
-                                                ? direct_filter_inner_products
-                                                : dense_filter_inner_products;
-        auto commit_filter_inner_product_cache = [&]() {
-            if (dense_filter_inner_products != nullptr) {
-                std::lock_guard computer_lock(bucket_computer.bucket_computers_mutex_);
-                bucket_computer.routed_filter_cache_versions_[cache_bucket_index] =
-                    this->bucket_versions_[bucket_id];
-            }
-        };
+        float* scan_filter_inner_products = direct_filter_inner_products;
         constexpr uint64_t kStackComputedMaskCount = 256;
         std::array<uint32_t, kStackComputedMaskCount> stack_computed_masks{};
         Vector<uint32_t> dynamic_computed_masks(this->allocator_);
@@ -590,8 +473,6 @@ RaBitQSplitBucketDataCell::scan_bucket_by_id(float* result_dists,
                 all_computed &= computed_masks[block_index] == expected_mask;
             }
             if (all_computed) {
-                commit_filter_inner_product_cache();
-                publish_candidate_scan();
                 return source_version;
             }
         }
@@ -658,8 +539,6 @@ RaBitQSplitBucketDataCell::scan_bucket_by_id(float* result_dists,
                 }
             }
         }
-        commit_filter_inner_product_cache();
-        publish_candidate_scan();
         return source_version;
     }
 
@@ -685,7 +564,6 @@ RaBitQSplitBucketDataCell::scan_bucket_by_id(float* result_dists,
         positions.push_back(offset);
     }
     if (ids.empty()) {
-        publish_candidate_scan();
         return source_version;
     }
 
@@ -711,158 +589,7 @@ RaBitQSplitBucketDataCell::scan_bucket_by_id(float* result_dists,
                 this->residual_adjustment(query_centroid_adjustment, bucket_id, offset);
         }
     }
-    publish_candidate_scan();
     return source_version;
-}
-
-void
-RaBitQSplitBucketDataCell::ScanBucketWithDistanceLowerBound(float* result_dists,
-                                                            float* lower_bounds,
-                                                            float* filter_inner_products,
-                                                            const ComputerInterfacePtr& computer,
-                                                            const BucketIdType& bucket_id,
-                                                            QueryContext* ctx,
-                                                            InnerIdType* scanned_inner_ids,
-                                                            InnerIdType max_scan_size,
-                                                            InnerIdType* scanned_size) {
-    this->check_valid_bucket_id(bucket_id);
-    std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
-    const auto stored_bucket_size = static_cast<InnerIdType>(this->inner_ids_[bucket_id].size());
-    const auto bucket_size = std::min(stored_bucket_size, max_scan_size);
-    if (scanned_size != nullptr) {
-        *scanned_size = bucket_size;
-    }
-    if (scanned_inner_ids != nullptr) {
-        std::copy_n(this->inner_ids_[bucket_id].begin(), bucket_size, scanned_inner_ids);
-    }
-    auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
-    const auto [scan_inner, scan_fastscan] =
-        this->get_scan_computers(bucket_computer, bucket_id, true);
-    const float query_centroid_adjustment =
-        this->use_l2_residual_query() ? 0.0F
-                                      : this->query_centroid_adjustment(bucket_computer, bucket_id);
-    const uint64_t block_count =
-        (static_cast<uint64_t>(bucket_size) + FASTSCAN_BATCH_SIZE - 1) / FASTSCAN_BATCH_SIZE;
-    if (scan_fastscan != nullptr and this->fastscan_block_size_ > 0 and
-        this->fastscan_blocks_[bucket_id].size() >= block_count * this->fastscan_block_size_) {
-        Vector<InnerIdType> fallback_ids(this->allocator_);
-        Vector<InnerIdType> fallback_positions(this->allocator_);
-        fallback_ids.reserve(bucket_size);
-        fallback_positions.reserve(bucket_size);
-        Vector<uint32_t> computed_masks(block_count, 0, this->allocator_);
-        this->codes_->QueryFastScan32BatchWithDistanceLowerBoundAndFilterInnerProduct(
-            result_dists,
-            lower_bounds,
-            filter_inner_products,
-            computed_masks.data(),
-            scan_inner,
-            scan_fastscan,
-            this->fastscan_blocks_[bucket_id].data(),
-            bucket_size,
-            ctx);
-        for (uint64_t block_index = 0; block_index < block_count; ++block_index) {
-            const auto begin = static_cast<InnerIdType>(block_index * FASTSCAN_BATCH_SIZE);
-            const InnerIdType valid_size =
-                std::min<InnerIdType>(FASTSCAN_BATCH_SIZE, bucket_size - begin);
-            for (InnerIdType i = 0; i < valid_size; ++i) {
-                const InnerIdType offset = begin + i;
-                const auto inner_id = this->inner_ids_[bucket_id][offset];
-                if (inner_id == EMPTY_INNER_ID) {
-                    result_dists[offset] = std::numeric_limits<float>::max();
-                    lower_bounds[offset] = std::numeric_limits<float>::max();
-                    filter_inner_products[offset] = std::numeric_limits<float>::quiet_NaN();
-                } else if ((computed_masks[block_index] & (1U << i)) != 0U) {
-                    if (not this->use_l2_residual_query()) {
-                        const float adjustment =
-                            this->residual_adjustment(query_centroid_adjustment, bucket_id, offset);
-                        result_dists[offset] -= adjustment;
-                        lower_bounds[offset] -= adjustment;
-                    }
-                } else {
-                    fallback_ids.push_back(inner_id);
-                    fallback_positions.push_back(offset);
-                }
-            }
-        }
-
-        if (not fallback_ids.empty()) {
-            Vector<float> fallback_dists(fallback_ids.size(), this->allocator_);
-            Vector<uint8_t> fallback_filter_codes(
-                fallback_ids.size() * this->codes_->GetFilterCodeSize(), this->allocator_);
-            for (uint64_t i = 0; i < fallback_positions.size(); ++i) {
-                this->get_filter_code(
-                    bucket_id,
-                    fallback_positions[i],
-                    fallback_filter_codes.data() + i * this->codes_->GetFilterCodeSize());
-            }
-            this->codes_->QueryWithFilterCodes(fallback_dists.data(),
-                                               nullptr,
-                                               nullptr,
-                                               scan_inner,
-                                               fallback_ids.data(),
-                                               fallback_filter_codes.data(),
-                                               static_cast<InnerIdType>(fallback_ids.size()),
-                                               ctx);
-            for (uint64_t i = 0; i < fallback_ids.size(); ++i) {
-                const auto offset = fallback_positions[i];
-                result_dists[offset] = fallback_dists[i];
-                if (not this->use_l2_residual_query()) {
-                    result_dists[offset] -=
-                        this->residual_adjustment(query_centroid_adjustment, bucket_id, offset);
-                }
-                lower_bounds[offset] = -std::numeric_limits<float>::infinity();
-                filter_inner_products[offset] = std::numeric_limits<float>::quiet_NaN();
-            }
-        }
-        this->publish_heap_scan_version(bucket_computer, bucket_id);
-        return;
-    }
-
-    Vector<InnerIdType> ids(this->allocator_);
-    Vector<InnerIdType> positions(this->allocator_);
-    ids.reserve(bucket_size);
-    positions.reserve(bucket_size);
-    for (InnerIdType offset = 0; offset < bucket_size; ++offset) {
-        const auto inner_id = this->inner_ids_[bucket_id][offset];
-        if (inner_id == EMPTY_INNER_ID) {
-            result_dists[offset] = std::numeric_limits<float>::max();
-            lower_bounds[offset] = std::numeric_limits<float>::max();
-            filter_inner_products[offset] = std::numeric_limits<float>::quiet_NaN();
-            continue;
-        }
-        ids.push_back(inner_id);
-        positions.push_back(offset);
-    }
-    if (ids.empty()) {
-        this->publish_heap_scan_version(bucket_computer, bucket_id);
-        return;
-    }
-
-    Vector<float> compact_dists(ids.size(), this->allocator_);
-    Vector<uint8_t> filter_codes(ids.size() * this->codes_->GetFilterCodeSize(), this->allocator_);
-    for (uint64_t i = 0; i < positions.size(); ++i) {
-        this->get_filter_code(
-            bucket_id, positions[i], filter_codes.data() + i * this->codes_->GetFilterCodeSize());
-    }
-    this->codes_->QueryWithFilterCodes(compact_dists.data(),
-                                       nullptr,
-                                       nullptr,
-                                       scan_inner,
-                                       ids.data(),
-                                       filter_codes.data(),
-                                       static_cast<InnerIdType>(ids.size()),
-                                       ctx);
-    for (uint64_t i = 0; i < ids.size(); ++i) {
-        const auto offset = positions[i];
-        result_dists[offset] = compact_dists[i];
-        if (not this->use_l2_residual_query()) {
-            result_dists[offset] -=
-                this->residual_adjustment(query_centroid_adjustment, bucket_id, offset);
-        }
-        lower_bounds[offset] = -std::numeric_limits<float>::infinity();
-        filter_inner_products[offset] = std::numeric_limits<float>::quiet_NaN();
-    }
-    this->publish_heap_scan_version(bucket_computer, bucket_id);
 }
 
 float
@@ -897,71 +624,6 @@ RaBitQSplitBucketDataCell::QueryOneById(const ComputerInterfacePtr& computer,
 }
 
 void
-RaBitQSplitBucketDataCell::QueryWithFilterInnerProductByInnerId(
-    float* result_dists,
-    const float* filter_inner_products,
-    const ComputerInterfacePtr& computer,
-    const InnerIdType* inner_ids,
-    InnerIdType id_count,
-    QueryContext* ctx) {
-    auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
-    if (this->use_l2_residual_query()) {
-        this->query_residual_by_inner_ids(result_dists,
-                                          nullptr,
-                                          filter_inner_products,
-                                          FilterInnerProductMode::EXPLICIT_HEAP,
-                                          bucket_computer,
-                                          inner_ids,
-                                          id_count,
-                                          ctx);
-        return;
-    }
-
-    this->query_non_residual_by_inner_ids(result_dists,
-                                          nullptr,
-                                          filter_inner_products,
-                                          FilterInnerProductMode::EXPLICIT_HEAP,
-                                          bucket_computer,
-                                          inner_ids,
-                                          id_count,
-                                          ctx);
-}
-
-void
-RaBitQSplitBucketDataCell::QueryWithCandidateFilterInnerProductByInnerId(
-    float* result_dists,
-    const float* hint_dists,
-    const float* filter_inner_products,
-    const ComputerInterfacePtr& computer,
-    const InnerIdType* inner_ids,
-    InnerIdType id_count,
-    QueryContext* ctx) {
-    CHECK_ARGUMENT(id_count == 0 or filter_inner_products != nullptr,
-                   "candidate filter inner products are required");
-    auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
-    if (this->use_l2_residual_query()) {
-        this->query_residual_by_inner_ids(result_dists,
-                                          hint_dists,
-                                          filter_inner_products,
-                                          FilterInnerProductMode::CANDIDATE_SCAN,
-                                          bucket_computer,
-                                          inner_ids,
-                                          id_count,
-                                          ctx);
-        return;
-    }
-
-    this->query_non_residual_by_inner_ids(result_dists,
-                                          hint_dists,
-                                          filter_inner_products,
-                                          FilterInnerProductMode::CANDIDATE_SCAN,
-                                          bucket_computer,
-                                          inner_ids,
-                                          id_count,
-                                          ctx);
-}
-
-void
 RaBitQSplitBucketDataCell::QueryWithCandidateFilterInnerProductBySource(
     float* result_dists,
     const float* hint_dists,
@@ -973,6 +635,7 @@ RaBitQSplitBucketDataCell::QueryWithCandidateFilterInnerProductBySource(
     const InnerIdType* inner_ids,
     InnerIdType id_count,
     QueryContext* ctx) {
+    (void)hint_dists;
     CHECK_ARGUMENT(
         id_count == 0 or (filter_inner_products != nullptr and source_bucket_ids != nullptr and
                           source_offset_ids != nullptr and source_versions != nullptr),
@@ -980,7 +643,6 @@ RaBitQSplitBucketDataCell::QueryWithCandidateFilterInnerProductBySource(
     auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
     if (this->use_l2_residual_query()) {
         this->query_residual_by_inner_ids(result_dists,
-                                          hint_dists,
                                           filter_inner_products,
                                           FilterInnerProductMode::CANDIDATE_SCAN,
                                           bucket_computer,
@@ -994,7 +656,6 @@ RaBitQSplitBucketDataCell::QueryWithCandidateFilterInnerProductBySource(
     }
 
     this->query_non_residual_by_inner_ids(result_dists,
-                                          hint_dists,
                                           filter_inner_products,
                                           FilterInnerProductMode::CANDIDATE_SCAN,
                                           bucket_computer,
@@ -1013,10 +674,10 @@ RaBitQSplitBucketDataCell::QueryWithDistanceHintByInnerId(float* result_dists,
                                                           const InnerIdType* inner_ids,
                                                           InnerIdType id_count,
                                                           QueryContext* ctx) {
+    (void)hint_dists;
     auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
     if (this->use_l2_residual_query()) {
         this->query_residual_by_inner_ids(result_dists,
-                                          hint_dists,
                                           nullptr,
                                           FilterInnerProductMode::CACHED,
                                           bucket_computer,
@@ -1027,7 +688,6 @@ RaBitQSplitBucketDataCell::QueryWithDistanceHintByInnerId(float* result_dists,
     }
 
     this->query_non_residual_by_inner_ids(result_dists,
-                                          hint_dists,
                                           nullptr,
                                           FilterInnerProductMode::CACHED,
                                           bucket_computer,
@@ -1118,7 +778,6 @@ RaBitQSplitBucketDataCell::query_current_by_inner_id(float& result_dist,
 void
 RaBitQSplitBucketDataCell::query_non_residual_by_inner_ids(
     float* result_dists,
-    const float* hint_dists,
     const float* filter_inner_products,
     FilterInnerProductMode filter_inner_product_mode,
     SplitBucketComputer& computer,
@@ -1128,6 +787,7 @@ RaBitQSplitBucketDataCell::query_non_residual_by_inner_ids(
     const BucketIdType* source_bucket_ids,
     const InnerIdType* source_offset_ids,
     const uint64_t* source_versions) {
+    (void)filter_inner_product_mode;
     struct ReorderEntry {
         BucketIdType bucket_id;
         InnerIdType offset_id;
@@ -1175,16 +835,12 @@ RaBitQSplitBucketDataCell::query_non_residual_by_inner_ids(
     const auto entry_count = static_cast<InnerIdType>(entries.size());
     Vector<InnerIdType> sorted_ids(entry_count, this->allocator_);
     Vector<float> sorted_dists(entry_count, this->allocator_);
-    Vector<float> sorted_hints(hint_dists == nullptr ? 0 : entry_count, this->allocator_);
     Vector<float> sorted_filter_inner_products(
         entry_count, std::numeric_limits<float>::quiet_NaN(), this->allocator_);
     Vector<float> adjustments(entry_count, 0.0F, this->allocator_);
     Vector<uint8_t> source_stale(entry_count, 0, this->allocator_);
     for (InnerIdType i = 0; i < entry_count; ++i) {
         sorted_ids[i] = entries[i].inner_id;
-        if (hint_dists != nullptr) {
-            sorted_hints[i] = hint_dists[entries[i].result_offset];
-        }
         if (filter_inner_products != nullptr) {
             sorted_filter_inner_products[i] = filter_inner_products[entries[i].result_offset];
         }
@@ -1198,7 +854,6 @@ RaBitQSplitBucketDataCell::query_non_residual_by_inner_ids(
     Vector<uint8_t> reusable_computed(entry_count, 0, this->allocator_);
     Vector<InnerIdType> fallback_ids(entry_count, this->allocator_);
     Vector<InnerIdType> fallback_positions(entry_count, this->allocator_);
-    Vector<float> fallback_hints(hint_dists == nullptr ? 0 : entry_count, this->allocator_);
     Vector<float> fallback_dists(entry_count, this->allocator_);
     Vector<uint8_t> fallback_filter_codes(static_cast<uint64_t>(entry_count) * filter_code_size,
                                           this->allocator_);
@@ -1212,11 +867,7 @@ RaBitQSplitBucketDataCell::query_non_residual_by_inner_ids(
         }
 
         std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
-        const bool direct_filter_inner_products_valid =
-            has_source_provenance or filter_inner_product_mode == FilterInnerProductMode::CACHED or
-            (filter_inner_product_mode == FilterInnerProductMode::EXPLICIT_HEAP
-                 ? this->heap_scan_version_matches(computer, bucket_id)
-                 : this->candidate_scan_version_matches(computer, bucket_id));
+        const bool direct_filter_inner_products_valid = has_source_provenance;
         const float query_centroid_adjustment =
             this->query_centroid_adjustment(computer, bucket_id);
         InnerIdType reusable_count = 0;
@@ -1250,13 +901,6 @@ RaBitQSplitBucketDataCell::query_non_residual_by_inner_ids(
                     reusable_inner_product = sorted_filter_inner_products[i];
                     reusable_inner_product_valid = IsFiniteFloat(reusable_inner_product);
                 }
-            } else if (filter_inner_product_mode == FilterInnerProductMode::CACHED) {
-                reusable_inner_product_valid =
-                    this->get_cached_filter_inner_product(computer,
-                                                          bucket_id,
-                                                          entries[i].offset_id,
-                                                          entries[i].inner_id,
-                                                          reusable_inner_product);
             }
             if (reusable_inner_product_valid) {
                 reusable_ids[reusable_count] = sorted_ids[i];
@@ -1266,11 +910,6 @@ RaBitQSplitBucketDataCell::query_non_residual_by_inner_ids(
             } else {
                 fallback_ids[fallback_count] = sorted_ids[i];
                 fallback_positions[fallback_count] = i;
-                if (hint_dists != nullptr and
-                    filter_inner_product_mode == FilterInnerProductMode::EXPLICIT_HEAP and
-                    direct_filter_inner_products_valid) {
-                    fallback_hints[fallback_count] = sorted_hints[i] + adjustments[i];
-                }
                 ++fallback_count;
             }
         }
@@ -1291,11 +930,6 @@ RaBitQSplitBucketDataCell::query_non_residual_by_inner_ids(
                 }
                 fallback_ids[fallback_count] = reusable_ids[i];
                 fallback_positions[fallback_count] = position;
-                if (hint_dists != nullptr and
-                    filter_inner_product_mode == FilterInnerProductMode::EXPLICIT_HEAP and
-                    direct_filter_inner_products_valid) {
-                    fallback_hints[fallback_count] = sorted_hints[position] + adjustments[position];
-                }
                 ++fallback_count;
             }
         }
@@ -1308,14 +942,8 @@ RaBitQSplitBucketDataCell::query_non_residual_by_inner_ids(
                 fallback_filter_codes.data() + static_cast<uint64_t>(i) * filter_code_size);
         }
         if (fallback_count != 0) {
-            const float* fallback_hint_data =
-                hint_dists != nullptr and
-                        filter_inner_product_mode == FilterInnerProductMode::EXPLICIT_HEAP and
-                        direct_filter_inner_products_valid
-                    ? fallback_hints.data()
-                    : nullptr;
             this->codes_->QueryWithFilterCodes(fallback_dists.data(),
-                                               fallback_hint_data,
+                                               nullptr,
                                                nullptr,
                                                computer.inner_,
                                                fallback_ids.data(),
@@ -1344,7 +972,6 @@ RaBitQSplitBucketDataCell::query_non_residual_by_inner_ids(
 void
 RaBitQSplitBucketDataCell::query_residual_by_inner_ids(
     float* result_dists,
-    const float* hint_dists,
     const float* filter_inner_products,
     FilterInnerProductMode filter_inner_product_mode,
     SplitBucketComputer& computer,
@@ -1422,7 +1049,6 @@ RaBitQSplitBucketDataCell::query_residual_by_inner_ids(
     Vector<uint8_t> reusable_computed(entry_count, 0, this->allocator_);
     Vector<InnerIdType> fallback_ids(this->allocator_);
     Vector<InnerIdType> fallback_positions(this->allocator_);
-    Vector<float> fallback_hints(this->allocator_);
     Vector<float> fallback_dists(this->allocator_);
     Vector<uint8_t> fallback_filter_codes(this->allocator_);
 
@@ -1465,11 +1091,7 @@ RaBitQSplitBucketDataCell::query_residual_by_inner_ids(
                     candidate_residual_query.data());
             }
         }
-        const bool direct_filter_inner_products_valid =
-            has_source_provenance or filter_inner_product_mode == FilterInnerProductMode::CACHED or
-            (filter_inner_product_mode == FilterInnerProductMode::EXPLICIT_HEAP
-                 ? this->heap_scan_version_matches(computer, bucket_id)
-                 : this->candidate_scan_version_matches(computer, bucket_id));
+        const bool direct_filter_inner_products_valid = has_source_provenance;
         InnerIdType reusable_count = 0;
         fallback_ids.clear();
         fallback_positions.clear();
@@ -1484,18 +1106,8 @@ RaBitQSplitBucketDataCell::query_residual_by_inner_ids(
                 static_cast<uint64_t>(entries[position].offset_id) % FASTSCAN_BATCH_SIZE);
             const uint8_t* block =
                 this->fastscan_blocks_[bucket_id].data() + block_index * this->fastscan_block_size_;
-            if (use_original_query) {
-                return residual_codes->RecoverFastScan32OriginalQueryFilterInnerProduct(
-                           computer.inner_,
-                           block,
-                           index_in_block,
-                           shared_filter_inner_product,
-                           sorted_filter_inner_products.data() + position) and
-                       IsFiniteFloat(sorted_filter_inner_products[position]);
-            }
-            return this->codes_->ConvertFastScan32SharedResidualFilterInnerProduct(
+            return residual_codes->RecoverFastScan32OriginalQueryFilterInnerProduct(
                        computer.inner_,
-                       scan_inner,
                        block,
                        index_in_block,
                        shared_filter_inner_product,
@@ -1524,21 +1136,8 @@ RaBitQSplitBucketDataCell::query_residual_by_inner_ids(
             bool reusable_inner_product_valid = false;
             if (filter_inner_products != nullptr) {
                 if (direct_filter_inner_products_valid and
-                    filter_inner_product_mode == FilterInnerProductMode::EXPLICIT_HEAP) {
-                    reusable_inner_product_valid = IsFiniteFloat(sorted_filter_inner_products[i]);
-                } else if (direct_filter_inner_products_valid and
-                           filter_inner_product_mode == FilterInnerProductMode::CANDIDATE_SCAN) {
+                    filter_inner_product_mode == FilterInnerProductMode::CANDIDATE_SCAN) {
                     const float shared_filter_inner_product = sorted_filter_inner_products[i];
-                    reusable_inner_product_valid =
-                        convert_shared_filter_inner_product(i, shared_filter_inner_product);
-                }
-            } else if (filter_inner_product_mode == FilterInnerProductMode::CACHED) {
-                float shared_filter_inner_product = 0.0F;
-                if (this->get_cached_filter_inner_product(computer,
-                                                          bucket_id,
-                                                          entries[i].offset_id,
-                                                          entries[i].inner_id,
-                                                          shared_filter_inner_product)) {
                     reusable_inner_product_valid =
                         convert_shared_filter_inner_product(i, shared_filter_inner_product);
                 }
@@ -1602,18 +1201,8 @@ RaBitQSplitBucketDataCell::query_residual_by_inner_ids(
             fallback_dists.resize(fallback_count);
             fallback_filter_codes.resize(static_cast<uint64_t>(fallback_count) * filter_code_size);
         }
-        const bool use_fallback_hints =
-            fallback_count != 0 and hint_dists != nullptr and
-            filter_inner_product_mode == FilterInnerProductMode::EXPLICIT_HEAP and
-            direct_filter_inner_products_valid;
-        if (use_fallback_hints) {
-            fallback_hints.resize(fallback_count);
-        }
         for (InnerIdType i = 0; i < fallback_count; ++i) {
             const InnerIdType position = fallback_positions[i];
-            if (use_fallback_hints) {
-                fallback_hints[i] = hint_dists[entries[position].result_offset];
-            }
             this->get_filter_code(
                 bucket_id,
                 entries[position].offset_id,
@@ -1627,7 +1216,7 @@ RaBitQSplitBucketDataCell::query_residual_by_inner_ids(
                 scan_inner = candidate_reorder_computer;
             }
             this->codes_->QueryWithFilterCodes(fallback_dists.data(),
-                                               use_fallback_hints ? fallback_hints.data() : nullptr,
+                                               nullptr,
                                                nullptr,
                                                scan_inner,
                                                fallback_ids.data(),

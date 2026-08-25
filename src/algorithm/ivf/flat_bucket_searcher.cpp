@@ -14,27 +14,14 @@
 
 #include "flat_bucket_searcher.h"
 
-#include <cstdint>
-#include <cstring>
+#include <cmath>
 #include <limits>
 
 #include "attr/executor/executor.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "impl/searcher/basic_searcher.h"
-#include "simd/pqfs_simd.h"
 
 namespace vsag {
-
-namespace {
-
-bool
-IsFiniteFloatBits(float value) {
-    uint32_t bits = 0;
-    std::memcpy(&bits, &value, sizeof(bits));
-    return (bits & 0x7F800000U) != 0x7F800000U;
-}
-
-}  // namespace
 
 void
 FlatBucketSearcher::Search(BucketIdType bucket_id,
@@ -90,49 +77,6 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
     }
 
     if (param.search_mode == KNN_SEARCH) {
-        if (attr_ft == nullptr and ft == nullptr and reasoning_ctx == nullptr) {
-            auto push_candidate = [&](int64_t offset) {
-                if (ids[offset] == std::numeric_limits<InnerIdType>::max()) {
-                    return;
-                }
-                if (param.distance_threshold.has_value() and
-                    (not IsFiniteFloatBits(dist[offset]) or
-                     (not param.enable_reorder and
-                      dist[offset] > param.distance_threshold.value()))) {
-                    return;
-                }
-                if (heap->Size() < topk_u or dist[offset] < cur_heap_top) {
-                    heap->Push(dist[offset], ids[offset]);
-                }
-                while (heap->Size() > topk_u) {
-                    heap->Pop();
-                }
-                if (not heap->Empty() and heap->Size() == topk_u) {
-                    cur_heap_top = heap->Top().first;
-                }
-            };
-
-            int64_t offset = 0;
-            for (; offset + 32 <= bucket_size; offset += 32) {
-                uint32_t mask = std::numeric_limits<uint32_t>::max();
-                if (heap->Size() >= topk_u) {
-                    mask = FP32LessThan32Mask(dist.data() + offset, cur_heap_top);
-                }
-                while (mask != 0U) {
-                    const auto lane = static_cast<int64_t>(__builtin_ctz(mask));
-                    const int64_t candidate_offset = offset + lane;
-                    if (heap->Size() < topk_u or dist[candidate_offset] < cur_heap_top) {
-                        push_candidate(candidate_offset);
-                    }
-                    mask &= mask - 1U;
-                }
-            }
-            for (; offset < bucket_size; ++offset) {
-                push_candidate(offset);
-            }
-            return;
-        }
-
         for (int64_t j = 0; j < bucket_size; ++j) {
             if (ids[j] == std::numeric_limits<InnerIdType>::max()) {
                 continue;
@@ -142,7 +86,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                 reasoning_ctx->RecordVisit(origin_id, dist[j], 0);
             }
             if (param.distance_threshold.has_value() and
-                (not IsFiniteFloatBits(dist[j]) or
+                (not std::isfinite(dist[j]) or
                  (not param.enable_reorder and dist[j] > param.distance_threshold.value()))) {
                 continue;
             }
@@ -169,7 +113,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                 reasoning_ctx->RecordFilterReject(origin_id);
             }
         }
-    } else {
+    } else {  // RANGE_SEARCH
         for (int64_t j = 0; j < bucket_size; ++j) {
             if (ids[j] == std::numeric_limits<InnerIdType>::max()) {
                 continue;

@@ -62,7 +62,6 @@ public:
     bool disable_bucket_scan{false};
     float first_order_scan_ratio{1.0F};
     int64_t ef_search{100};
-    bool use_rabitq_heap_search{false};
 
 private:
     IVFSearchParameters() {

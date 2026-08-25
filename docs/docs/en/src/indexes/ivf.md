@@ -158,13 +158,6 @@ normal reranking does not build a `q-c` computer. A correctness fallback may
 unpack x bits only when the saved value or factors are invalid, source
 provenance is stale, or a FastScan lane could not produce a valid result.
 
-Set `rabitq_search_strategy: "heap"` for KNN search to keep full `x+y` RaBitQ
-distance estimates in the result heap and read a supplement only when the
-x-bit lower bound is smaller than the heap maximum. This strategy also reuses
-the x-bit inner product emitted by the lower-bound scan. Both strategies
-therefore preserve the filter-stage x contribution and its LUT quantization
-error in the final estimate. The heap strategy does not use `factor`.
-
 The split configuration requires `x >= 1`, `y >= 1`, `x + y <= 8`,
 `rabitq_bits_per_dim_query: 32`, `use_reorder: true`, and
 `buckets_per_data: 1`. Bucket-local graphs (`graph_build_threshold > 0`) are
@@ -183,7 +176,6 @@ Search-time parameters live under the `ivf` sub-object:
 | `disable_bucket_scan` | bool | `false` | Return bucket IDs and distances. Supports batch queries. |
 | `factor` | float | `2.0` | With reordering enabled, pulls `factor * topk` coarse candidates before the precise rescore. |
 | `enable_reorder` | bool | `true` | Set to `false` to skip the final reorder stage for this request even when the index was built with reorder enabled. |
-| `rabitq_search_strategy` | string | `"candidate_reorder"` | `"candidate_reorder"` keeps `factor * topk` filter-distance candidates with their x-bit inner products, then reads y bits only for survivors. KNN-only `"heap"` uses lower bounds to control y-bit reads, maintains an x+y-distance heap, and ignores `factor`. |
 | `parallelism` | int | `1` | Threads used to scan buckets in parallel for a single query. |
 | `timeout_ms` | double | `+∞` | Hard cap in milliseconds; partial results are returned once exceeded. |
 
@@ -197,10 +189,6 @@ auto result = index->KnnSearch(
 auto fast_result = index->KnnSearch(
     query, topk,
     R"({"ivf": {"scan_buckets_count": 32, "factor": 2.0, "enable_reorder": false}})").value();
-
-auto heap_result = index->KnnSearch(
-    query, topk,
-    R"({"ivf": {"scan_buckets_count": 32, "rabitq_search_strategy": "heap"}})").value();
 ```
 
 ## When to use IVF
