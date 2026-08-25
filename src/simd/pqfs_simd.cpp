@@ -19,4 +19,10 @@
 namespace vsag {
 
 VSAG_DEFINE_SIMD_DISPATCH(PQFastScanLookUp32, PQFastScanLookUp32Type);
+VSAG_DEFINE_SIMD_DISPATCH(PQFastScanLookUp32HighAcc, PQFastScanLookUp32HighAccType);
+VSAG_DEFINE_SIMD_DISPATCH(PQFastScanLookUp32HighAccOverwrite,
+                          PQFastScanLookUp32HighAccOverwriteType);
+VSAG_DEFINE_SIMD_DISPATCH(FP32LessThan32Mask, FP32LessThan32MaskType);
+VSAG_DEFINE_SIMD_DISPATCH(RaBitQFastScan32ResidualPostprocess,
+                          RaBitQFastScan32ResidualPostprocessType);
 }  // namespace vsag

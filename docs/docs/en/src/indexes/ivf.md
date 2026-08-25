@@ -89,6 +89,7 @@ Build-time parameters live under `index_param`. See
 | `rabitq_use_fht` | bool | `false` | Enable FHT rotation before `rabitq` binarization |
 | `fast_encode_rabitq` | bool | `true` | Use CAQ fast construction for multi-bit `rabitq`; set to `false` for exact encoding |
 | `fast_encode_rabitq_rounds` | int | `6` | CAQ adjustment rounds; allowed range is `[1, 32]` |
+| `use_residual` | bool | `false` | Encode vectors relative to their IVF bucket centroid (`x-c`). |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse scan |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer used for reordering (with `use_reorder: true`) |
 | `precise_codes_layout` | string | `"flat"` | Storage layout for precise codes: `"flat"` keeps the legacy one-code-per-vector layout; `"bucket"` stores the precise code in the same bucket and offset as its basic posting |
@@ -141,16 +142,28 @@ Set both quantizers to `rabitq` and divide the stored precision into filter
 }
 ```
 
-IVF stores the `x`-bit filter record separately from the `y`-bit supplement.
-The bucket scan reads filter records only. By default it keeps
-`factor * topk` candidates, then reads supplement records only for those
-candidates. Set `rabitq_search_strategy: "heap"` for KNN search to keep full
-`x+y` RaBitQ distance estimates in the result heap and read a supplement only
-when the x-bit lower bound is smaller than the heap maximum. The heap strategy
-saves the byte-LUT-quantized x-bit inner product during filtering and reuses it
-for the final `x+y` estimate. It therefore does not rescan x bits or reconstruct
-the inner product from a distance hint, and both stages share the LUT
-quantization error.
+IVF stores the `x`-bit filter planes in bucket-local 32-vector packed blocks and
+stores the `y`-bit supplement separately. The default `candidate_reorder`
+strategy scans only the packed x bits, retains `factor * topk` candidates, and
+carries the byte-LUT-quantized x-bit inner product together with each
+candidate's source bucket, offset, and version. Normal reranking combines this
+saved inner product with the y-bit supplement contribution. It does not reread
+or unpack x-bit planes and does not reconstruct the inner product from a
+distance hint.
+
+For residual L2 candidate search, all routed buckets share one LUT built from
+the original transformed query. Per-lane factors recover the raw filter-code
+contribution and combine it with the supplement under the original query, so
+normal reranking does not build a `q-c` computer. A correctness fallback may
+unpack x bits only when the saved value or factors are invalid, source
+provenance is stale, or a FastScan lane could not produce a valid result.
+
+Set `rabitq_search_strategy: "heap"` for KNN search to keep full `x+y` RaBitQ
+distance estimates in the result heap and read a supplement only when the
+x-bit lower bound is smaller than the heap maximum. This strategy also reuses
+the x-bit inner product emitted by the lower-bound scan. Both strategies
+therefore preserve the filter-stage x contribution and its LUT quantization
+error in the final estimate. The heap strategy does not use `factor`.
 
 The split configuration requires `x >= 1`, `y >= 1`, `x + y <= 8`,
 `rabitq_bits_per_dim_query: 32`, `use_reorder: true`, and
@@ -170,7 +183,7 @@ Search-time parameters live under the `ivf` sub-object:
 | `disable_bucket_scan` | bool | `false` | Return bucket IDs and distances. Supports batch queries. |
 | `factor` | float | `2.0` | With reordering enabled, pulls `factor * topk` coarse candidates before the precise rescore. |
 | `enable_reorder` | bool | `true` | Set to `false` to skip the final reorder stage for this request even when the index was built with reorder enabled. |
-| `rabitq_search_strategy` | string | `"candidate_reorder"` | Supported values are `"candidate_reorder"` and `"heap"`. See split-search behavior above. |
+| `rabitq_search_strategy` | string | `"candidate_reorder"` | `"candidate_reorder"` keeps `factor * topk` filter-distance candidates with their x-bit inner products, then reads y bits only for survivors. KNN-only `"heap"` uses lower bounds to control y-bit reads, maintains an x+y-distance heap, and ignores `factor`. |
 | `parallelism` | int | `1` | Threads used to scan buckets in parallel for a single query. |
 | `timeout_ms` | double | `+∞` | Hard cap in milliseconds; partial results are returned once exceeded. |
 

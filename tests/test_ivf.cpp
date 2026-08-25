@@ -3432,9 +3432,11 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     const auto filter_count = statistics["rabitq_filter_count"].GetUint64();
     const auto full_count = statistics["rabitq_full_count"].GetUint64();
     const auto reorder_count = statistics["reorder_distance_count"].GetUint64();
+    const auto inner_product_count = statistics["rabitq_reorder_hint_full_count"].GetUint64();
     REQUIRE(filter_count > 0);
     REQUIRE(full_count >= reorder_count);
     REQUIRE(reorder_count == 2 * topk);
+    REQUIRE(inner_product_count == reorder_count);
     REQUIRE(statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() == filter_count);
     REQUIRE(statistics["distance_evaluations_by_phase"]["rerank"].GetUint64() == reorder_count);
     REQUIRE(statistics["distance_evaluations_by_backend"]["rabitq"].GetUint64() > 0);

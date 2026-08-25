@@ -22,9 +22,12 @@
 #include "bucket_interface.h"
 #include "flatten_datacell_parameter.h"
 #include "flatten_interface.h"
+#include "hash_types.h"
 #include "utils/byte_buffer.h"
 
 namespace vsag {
+
+class RaBitQSplitResidualOriginalQueryInterface;
 
 class RaBitQSplitBucketDataCell : public BucketInterface {
 public:
@@ -35,15 +38,33 @@ public:
     ScanBucketById(float* result_dists,
                    const ComputerInterfacePtr& computer,
                    const BucketIdType& bucket_id,
-                   QueryContext* ctx = nullptr) override;
+                   QueryContext* ctx = nullptr,
+                   InnerIdType* scanned_inner_ids = nullptr,
+                   InnerIdType max_scan_size = std::numeric_limits<InnerIdType>::max(),
+                   InnerIdType* scanned_size = nullptr) override;
+
+    uint64_t
+    ScanBucketWithFilterInnerProduct(
+        float* result_dists,
+        float* filter_inner_products,
+        const ComputerInterfacePtr& computer,
+        const BucketIdType& bucket_id,
+        QueryContext* ctx = nullptr,
+        InnerIdType* scanned_inner_ids = nullptr,
+        InnerIdType max_scan_size = std::numeric_limits<InnerIdType>::max(),
+        InnerIdType* scanned_size = nullptr) override;
 
     void
-    ScanBucketWithDistanceLowerBound(float* result_dists,
-                                     float* lower_bounds,
-                                     float* filter_inner_products,
-                                     const ComputerInterfacePtr& computer,
-                                     const BucketIdType& bucket_id,
-                                     QueryContext* ctx = nullptr) override;
+    ScanBucketWithDistanceLowerBound(
+        float* result_dists,
+        float* lower_bounds,
+        float* filter_inner_products,
+        const ComputerInterfacePtr& computer,
+        const BucketIdType& bucket_id,
+        QueryContext* ctx = nullptr,
+        InnerIdType* scanned_inner_ids = nullptr,
+        InnerIdType max_scan_size = std::numeric_limits<InnerIdType>::max(),
+        InnerIdType* scanned_size = nullptr) override;
 
     float
     QueryOneById(const ComputerInterfacePtr& computer,
@@ -62,6 +83,27 @@ public:
                                          const InnerIdType* inner_ids,
                                          InnerIdType id_count,
                                          QueryContext* ctx = nullptr) override;
+
+    void
+    QueryWithCandidateFilterInnerProductByInnerId(float* result_dists,
+                                                  const float* hint_dists,
+                                                  const float* filter_inner_products,
+                                                  const ComputerInterfacePtr& computer,
+                                                  const InnerIdType* inner_ids,
+                                                  InnerIdType id_count,
+                                                  QueryContext* ctx = nullptr) override;
+
+    void
+    QueryWithCandidateFilterInnerProductBySource(float* result_dists,
+                                                 const float* hint_dists,
+                                                 const float* filter_inner_products,
+                                                 const BucketIdType* source_bucket_ids,
+                                                 const InnerIdType* source_offset_ids,
+                                                 const uint64_t* source_versions,
+                                                 const ComputerInterfacePtr& computer,
+                                                 const InnerIdType* inner_ids,
+                                                 InnerIdType id_count,
+                                                 QueryContext* ctx = nullptr) override;
 
     void
     QueryWithDistanceHintByInnerId(float* result_dists,
@@ -156,6 +198,12 @@ public:
     GetMemoryUsage() const override;
 
 private:
+    enum class FilterInnerProductMode : uint8_t {
+        EXPLICIT_HEAP,
+        CANDIDATE_SCAN,
+        CACHED,
+    };
+
     class SplitBucketComputer final : public ComputerInterface {
     public:
         SplitBucketComputer(ComputerInterfacePtr inner,
@@ -171,12 +219,26 @@ private:
               query_centroid_adjustments_(adjustment_count, 0.0F, allocator),
               transformed_query_(residual_transform_size, 0.0F, allocator),
               residual_query_scratch_(residual_transform_size, 0.0F, allocator),
+              routed_bucket_ids_(allocator),
+              routed_bucket_norm_sqrs_(allocator),
+              routed_filter_inner_products_(allocator),
+              routed_filter_cache_claimed_(allocator),
+              routed_filter_cache_versions_(allocator),
+              routed_candidate_scan_versions_(allocator),
+              routed_heap_scan_versions_(allocator),
               bucket_ids_(allocator),
               bucket_inner_computers_(allocator),
               bucket_fastscan_computers_(allocator) {
             bucket_ids_.reserve(bucket_computer_capacity);
             bucket_inner_computers_.reserve(bucket_computer_capacity);
             bucket_fastscan_computers_.reserve(bucket_computer_capacity);
+            routed_bucket_ids_.reserve(bucket_computer_capacity);
+            routed_bucket_norm_sqrs_.reserve(bucket_computer_capacity);
+            routed_filter_inner_products_.reserve(bucket_computer_capacity);
+            routed_filter_cache_claimed_.reserve(bucket_computer_capacity);
+            routed_filter_cache_versions_.reserve(bucket_computer_capacity);
+            routed_candidate_scan_versions_.reserve(bucket_computer_capacity);
+            routed_heap_scan_versions_.reserve(bucket_computer_capacity);
         }
 
         ComputerInterfacePtr inner_{nullptr};
@@ -185,6 +247,13 @@ private:
         Vector<float> query_centroid_adjustments_;
         Vector<float> transformed_query_;
         mutable Vector<float> residual_query_scratch_;
+        Vector<BucketIdType> routed_bucket_ids_;
+        Vector<float> routed_bucket_norm_sqrs_;
+        Vector<Vector<float>> routed_filter_inner_products_;
+        Vector<uint8_t> routed_filter_cache_claimed_;
+        Vector<uint64_t> routed_filter_cache_versions_;
+        Vector<uint64_t> routed_candidate_scan_versions_;
+        Vector<uint64_t> routed_heap_scan_versions_;
         mutable Vector<BucketIdType> bucket_ids_;
         mutable Vector<ComputerInterfacePtr> bucket_inner_computers_;
         mutable Vector<ComputerInterfacePtr> bucket_fastscan_computers_;
@@ -205,7 +274,52 @@ private:
     get_bucket_computer(const ComputerInterfacePtr& computer);
 
     std::pair<ComputerInterfacePtr, ComputerInterfacePtr>
-    get_scan_computers(SplitBucketComputer& computer, BucketIdType bucket_id);
+    get_scan_computers(SplitBucketComputer& computer,
+                       BucketIdType bucket_id,
+                       bool require_fastscan = false);
+
+    void
+    check_routed_bucket(const SplitBucketComputer& computer, BucketIdType bucket_id) const;
+
+    [[nodiscard]] uint64_t
+    get_routed_bucket_index(const SplitBucketComputer& computer, BucketIdType bucket_id) const;
+
+    float*
+    claim_filter_inner_product_cache(SplitBucketComputer& computer,
+                                     BucketIdType bucket_id,
+                                     InnerIdType bucket_size,
+                                     uint64_t& routed_bucket_index);
+
+    [[nodiscard]] bool
+    get_cached_filter_inner_product(const SplitBucketComputer& computer,
+                                    BucketIdType bucket_id,
+                                    InnerIdType offset_id,
+                                    InnerIdType inner_id,
+                                    float& filter_inner_product) const;
+
+    void
+    publish_candidate_scan_version(SplitBucketComputer& computer, BucketIdType bucket_id);
+
+    void
+    publish_heap_scan_version(SplitBucketComputer& computer, BucketIdType bucket_id);
+
+    [[nodiscard]] bool
+    candidate_scan_version_matches(const SplitBucketComputer& computer,
+                                   BucketIdType bucket_id) const;
+
+    [[nodiscard]] bool
+    heap_scan_version_matches(const SplitBucketComputer& computer, BucketIdType bucket_id) const;
+
+    uint64_t
+    scan_bucket_by_id(float* result_dists,
+                      float* direct_filter_inner_products,
+                      bool use_dense_filter_inner_product_cache,
+                      const ComputerInterfacePtr& computer,
+                      const BucketIdType& bucket_id,
+                      QueryContext* ctx,
+                      InnerIdType* scanned_inner_ids,
+                      InnerIdType max_scan_size,
+                      InnerIdType* scanned_size);
 
     void
     prepare_scan_computers(SplitBucketComputer& computer,
@@ -213,16 +327,41 @@ private:
                            uint64_t bucket_count);
 
     void
-    append_scan_computer(SplitBucketComputer& computer, BucketIdType bucket_id);
+    append_scan_computer(SplitBucketComputer& computer,
+                         BucketIdType bucket_id,
+                         bool require_fastscan);
+
+    void
+    query_non_residual_by_inner_ids(float* result_dists,
+                                    const float* hint_dists,
+                                    const float* filter_inner_products,
+                                    FilterInnerProductMode filter_inner_product_mode,
+                                    SplitBucketComputer& computer,
+                                    const InnerIdType* inner_ids,
+                                    InnerIdType id_count,
+                                    QueryContext* ctx,
+                                    const BucketIdType* source_bucket_ids = nullptr,
+                                    const InnerIdType* source_offset_ids = nullptr,
+                                    const uint64_t* source_versions = nullptr);
 
     void
     query_residual_by_inner_ids(float* result_dists,
                                 const float* hint_dists,
                                 const float* filter_inner_products,
+                                FilterInnerProductMode filter_inner_product_mode,
                                 SplitBucketComputer& computer,
                                 const InnerIdType* inner_ids,
                                 InnerIdType id_count,
-                                QueryContext* ctx);
+                                QueryContext* ctx,
+                                const BucketIdType* source_bucket_ids = nullptr,
+                                const InnerIdType* source_offset_ids = nullptr,
+                                const uint64_t* source_versions = nullptr);
+
+    bool
+    query_current_by_inner_id(float& result_dist,
+                              SplitBucketComputer& computer,
+                              InnerIdType inner_id,
+                              QueryContext* ctx);
 
     ComputerInterfacePtr
     factory_computer(const void* query, const BucketIdType* bucket_ids, uint64_t bucket_count);
@@ -262,19 +401,17 @@ private:
                     const uint8_t* filter_code) const;
 
     void
+    set_residual_filter_code(BucketIdType bucket_id,
+                             InnerIdType offset_id,
+                             const uint8_t* filter_code);
+
+    void
     get_filter_code(BucketIdType bucket_id, InnerIdType offset_id, uint8_t* filter_code) const;
 
     void
     get_filter_code(const Vector<uint8_t>& blocks,
                     InnerIdType offset_id,
                     uint8_t* filter_code) const;
-
-    void
-    collect_filter_codes(const InnerIdType* inner_ids,
-                         InnerIdType id_count,
-                         Vector<uint8_t>& filter_codes,
-                         Vector<float>* adjustments,
-                         const SplitBucketComputer* computer) const;
 
     [[nodiscard]] bool
     packed_filter_codes_complete(BucketIdType bucket_id) const;
@@ -293,6 +430,7 @@ private:
 
 private:
     FlattenInterfacePtr codes_{nullptr};
+    RaBitQSplitResidualOriginalQueryInterface* residual_original_query_codes_{nullptr};
     IndexCommonParam common_param_;
     Allocator* allocator_{nullptr};
     uint64_t dim_{0};
@@ -306,6 +444,7 @@ private:
     Vector<Vector<uint8_t>> fastscan_blocks_;
     uint64_t fastscan_block_size_{0};
     mutable Vector<std::shared_mutex> bucket_mutexes_;
+    Vector<uint64_t> bucket_versions_;
     Vector<uint64_t> locations_;
     mutable std::mutex locations_mutex_;
     std::mutex codes_insert_mutex_;
@@ -314,7 +453,10 @@ private:
     static constexpr uint64_t FASTSCAN_BATCH_SIZE = 32;
     static constexpr uint64_t LOCATION_SPLIT_BIT = 32;
     static constexpr uint64_t PACKED_FILTER_STORAGE_MAGIC = 0x3154425346514252ULL;
-    static constexpr uint32_t PACKED_FILTER_STORAGE_VERSION = 1;
+    static constexpr uint32_t PACKED_FILTER_STORAGE_VERSION = 3;
+    static constexpr uint32_t PACKED_RESIDUAL_FULL_FACTOR_STORAGE_VERSION = 4;
+    static constexpr uint64_t INVALID_CACHE_VERSION = std::numeric_limits<uint64_t>::max();
+    static constexpr uint64_t INVALID_ROUTED_BUCKET_INDEX = std::numeric_limits<uint64_t>::max();
     static constexpr InnerIdType EMPTY_INNER_ID = std::numeric_limits<InnerIdType>::max();
     static constexpr uint64_t INVALID_LOCATION = std::numeric_limits<uint64_t>::max();
 };

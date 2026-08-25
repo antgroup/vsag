@@ -83,6 +83,7 @@ auto result = index->KnnSearch(
 | `rabitq_use_fht` | bool | `false` | `rabitq` 二值化前是否启用 FHT 旋转 |
 | `fast_encode_rabitq` | bool | `true` | 多 bit `rabitq` 是否使用 CAQ 快速构建；设为 `false` 时使用精确编码 |
 | `fast_encode_rabitq_rounds` | int | `6` | CAQ 微调轮数，允许范围 `[1, 32]` |
+| `use_residual` | bool | `false` | 是否相对所属 IVF bucket centroid 编码残差 `x-c`。 |
 | `use_reorder` | bool | `false` | 是否保留高精度副本用于精排 |
 | `precise_quantization_type` | string | `"fp32"` | 精排量化类型（`use_reorder: true` 时使用） |
 | `precise_codes_layout` | string | `"flat"` | 精排 codes 的存储布局：`"flat"` 保持旧的一向量一码布局；`"bucket"` 在 basic posting 的相同 bucket 和 offset 保存高精度 code |
@@ -133,13 +134,24 @@ auto loaded = vsag::Index::Load(stream, load_parameters).value();
 }
 ```
 
-IVF 会分别保存 `x` bit 过滤记录和 `y` bit 补充记录。默认策略扫描桶时
-只读取过滤记录，保留 `factor * topk` 个候选，再为这些候选读取补充记录。
+IVF 将 `x` bit filter planes 保存为 bucket-local 32-vector packed blocks，并单独
+保存 `y` bit supplement。默认 `candidate_reorder` 只扫描 packed x bits，保留
+`factor * topk` 个候选，同时携带 byte-LUT 量化得到的 x-bit 内积以及候选的
+source bucket、offset 和 version。正常重排直接把保存的 x-bit 内积与 y-bit
+supplement contribution 合并，不重新读取或 unpack x-bit planes，也不从距离 hint
+反推内积。
+
+对 residual L2 candidate 检索，所有已路由 bucket 共享一份由原始变换 query
+构建的 LUT。每个 lane 的 factors 用于恢复原始 filter-code contribution，并在
+原始 query 下与 supplement 合并；正常重排不再构建 `q-c` computer。只有保存值
+或 factors 非法、source provenance 过期，或 FastScan lane 未产生有效结果时，
+正确性 fallback 才会 unpack x bits。
+
 KNN 搜索可设置 `rabitq_search_strategy: "heap"`，让结果堆始终保存完整
 `x+y` RaBitQ 距离估计，仅当 x-bit lower bound 小于堆顶时读取 supplement。
-heap 策略在过滤时保存 byte-LUT 量化后的 x-bit 内积，并在最终 `x+y` 估计中
-直接复用，因此不重扫 x bits，也不从距离 hint 反推内积；两个阶段共享 LUT
-量化误差。
+该策略同样直接复用 lower-bound 扫描输出的 x-bit 内积。因此两种策略都会把
+过滤阶段的 x contribution 及其 LUT 量化误差延续到最终估计。heap 不使用
+`factor`。
 
 split 配置要求 `x >= 1`、`y >= 1`、`x + y <= 8`、
 `rabitq_bits_per_dim_query: 32`、`use_reorder: true` 和
@@ -159,7 +171,7 @@ split 配置要求 `x >= 1`、`y >= 1`、`x + y <= 8`、
 | `disable_bucket_scan` | bool | `false` | 返回桶 ID 及到桶中心距离，不扫描桶内向量。支持批量查询。 |
 | `factor` | float | `2.0` | 启用精排时，粗排阶段会预取 `factor * topk` 个候选再重打分 |
 | `enable_reorder` | bool | `true` | 即使索引构建时启用了 reorder，也可以在单次请求里设为 `false` 跳过最终精排 |
-| `rabitq_search_strategy` | string | `"candidate_reorder"` | 可选值为 `"candidate_reorder"` 和 `"heap"`，具体行为见上文 split 检索策略。 |
+| `rabitq_search_strategy` | string | `"candidate_reorder"` | `"candidate_reorder"` 按 filter distance 保留 `factor * topk` 个候选及其 x-bit 内积，只为幸存候选读取 y bits；仅支持 KNN 的 `"heap"` 用 lower bound 控制 y-bit 读取，维护 x+y 距离堆，并忽略 `factor`。 |
 | `parallelism` | int | `1` | 单次查询内扫描桶时使用的线程数 |
 | `timeout_ms` | double | `+∞` | 单次查询最长耗时（毫秒），超时会返回当前的部分结果 |
 

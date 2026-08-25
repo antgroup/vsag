@@ -64,9 +64,13 @@ public:
     ScanBucketById(float* result_dists,
                    const ComputerInterfacePtr& computer,
                    const BucketIdType& bucket_id,
-                   QueryContext* = nullptr) override {
+                   QueryContext* = nullptr,
+                   InnerIdType* scanned_inner_ids = nullptr,
+                   InnerIdType max_scan_size = std::numeric_limits<InnerIdType>::max(),
+                   InnerIdType* scanned_size = nullptr) override {
         auto comp = static_cast<Computer<QuantTmpl>*>(computer.get());
-        return this->scan_bucket_by_id(result_dists, comp, bucket_id);
+        return this->scan_bucket_by_id(
+            result_dists, comp, bucket_id, scanned_inner_ids, max_scan_size, scanned_size);
     }
 
     float
@@ -184,6 +188,13 @@ public:
         return this->bucket_sizes_[bucket_id];
     }
 
+    [[nodiscard]] InnerIdType
+    GetBucketScanCapacity(BucketIdType bucket_id) override {
+        check_valid_bucket_id(bucket_id);
+        std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
+        return this->bucket_sizes_[bucket_id];
+    }
+
     void
     GetCodesById(BucketIdType bucket_id, InnerIdType offset_id, uint8_t* data) const override;
 
@@ -252,7 +263,10 @@ private:
     inline void
     scan_bucket_by_id(float* result_dists,
                       Computer<QuantTmpl>* computer,
-                      const BucketIdType& bucket_id);
+                      const BucketIdType& bucket_id,
+                      InnerIdType* scanned_inner_ids,
+                      InnerIdType max_scan_size,
+                      InnerIdType* scanned_size);
 
     inline float
     query_one_by_id(const std::shared_ptr<Computer<QuantTmpl>>& computer,
@@ -528,7 +542,10 @@ template <typename QuantTmpl, typename IOTmpl>
 void
 BucketDataCell<QuantTmpl, IOTmpl>::scan_bucket_by_id(float* result_dists,
                                                      Computer<QuantTmpl>* computer,
-                                                     const BucketIdType& bucket_id) {
+                                                     const BucketIdType& bucket_id,
+                                                     InnerIdType* scanned_inner_ids,
+                                                     InnerIdType max_scan_size,
+                                                     InnerIdType* scanned_size) {
     if (bucket_id >= this->bucket_count_ or bucket_id < 0) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "visited invalid bucket id");
     }
@@ -536,7 +553,14 @@ BucketDataCell<QuantTmpl, IOTmpl>::scan_bucket_by_id(float* result_dists,
     constexpr InnerIdType scan_block_size = 32;
     InnerIdType offset = 0;
     this->check_valid_bucket_id(bucket_id);
-    auto data_count = this->bucket_sizes_[bucket_id];
+    const auto bucket_size = std::min(this->bucket_sizes_[bucket_id], max_scan_size);
+    if (scanned_size != nullptr) {
+        *scanned_size = bucket_size;
+    }
+    if (scanned_inner_ids != nullptr) {
+        std::copy_n(this->inner_ids_[bucket_id].begin(), bucket_size, scanned_inner_ids);
+    }
+    auto data_count = bucket_size;
     while (data_count > 0) {
         auto compute_count = std::min(data_count, scan_block_size);
         bool need_release = false;

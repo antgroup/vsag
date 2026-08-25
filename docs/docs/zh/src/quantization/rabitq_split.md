@@ -107,24 +107,24 @@ RaBitQ 误差项仍由 `rabitq_error_rate` 控制；更激进的剪枝可能以�
 
 split 搜索分为四个阶段：
 
-1. query 只做一次变换和归一化；对支持的 filter bit 数，还会为每个 query
-   构建一次 byte lookup table。
-2. 图遍历或 IVF 桶扫描只读取 filter record，为每个访问到的向量计算
-   x-bit 距离估计和
-   保守的 lower bound。
+1. query 只做一次变换和归一化。非 residual 扫描以及 residual IVF 的
+   `candidate_reorder` 每个 query 只构建一份 byte lookup table；residual IVF
+   `heap` 为保持原 lower-bound 公式，仍构建 bucket-specific `q-c` LUT。
+2. 图遍历或 IVF 桶扫描只读取 filter record，计算 x-bit 距离估计；使用
+   lower bound 的路径还会计算保守的 lower bound。
 3. HGraph 可以丢弃 lower bound 不可能进入结果集的候选。IVF 可以按 filter
    distance 保留 `factor * topk` 个候选（默认策略），也可以让每个 lower
    bound 与 `x+y` 估计堆比较（可选的 `heap` 策略）。
 4. 最终距离把 filter contribution 与 supplement contribution 合成为
-   `x+y`-bit RaBitQ 估计。heap 搜索在计算 lower bound 时直接保存 byte-LUT
-   量化后的 x-bit 内积 `S_x`；最终计算只读取 y-bit record，不再从 filter
+   `x+y`-bit RaBitQ 估计。IVF 两种策略都会从过滤扫描携带 byte-LUT 量化后的
+   x-bit 内积 `S_x`；正常的最终距离计算只读取 y-bit record，不再从 filter
    distance 反推内积。
 
-IVF 的两种策略都使用桶级 32-vector FastScan 布局。heap 模式的一次 packed
-block byte-LUT 扫描会为每个 lane 同时输出 x-bit 估计、lower bound 和反量化后
-的量化 x-bit 内积 `S_x`。最终距离使用 `2^y * S_x + S_y`，只有 `S_y` 需要
-读取 y-bit supplement。该路径不再执行配套的 float-LUT 扫描，也不会重新读取
-canonical x-bit record。
+IVF 的两种策略都使用桶级 32-vector FastScan 布局。candidate 扫描输出 x-bit
+估计和可复用内积；heap 模式还会输出 lower bound。最终距离使用
+`2^y * S_x + S_y`，只有 `S_y` 需要读取 y-bit supplement。该路径不再执行
+配套的 float-LUT 扫描；只有候选无效或过期时的正确性 fallback 才重新读取
+packed x bits。
 
 因此，图搜索或 IVF 桶扫描不会为每个访问到的向量都计算 `x+y` 距离并放入
 搜索堆。过滤阶段由
@@ -262,8 +262,10 @@ lower bound 只用于安全地排除候选。`D_x` 是图遍历距离，最终�
 ## IVF 1-bit、2-bit 和 3-bit 的 32-vector FastScan 布局
 
 IVF split storage 使用 `x = 1..3` 时，`RaBitQSplitBucketDataCell` 会把每个桶
-按 32 个候选一组打包。标准 split record 仍用于按 ID 查询和 supplement 重排；
-桶内扫描块保存一份面向 SIMD 的 filter planes 和紧凑元数据。
+按 32 个候选一组打包。桶内 packed blocks 是 filter code 唯一的持久化布局，
+其中保存面向 SIMD 的 filter planes 和紧凑元数据。只有正确性 fallback 或按 ID
+读取完整 code 时，才从 block 临时 unpack 单 lane x bits；正常 supplement 重排
+只读取独立的 y-bit record。
 
 设 `G = ceil(d / 8) * 2`，即单个 bitplane 的四维分组数。每组为每个候选保存
 一个四位 mask，32 个 mask 转置为 16 bytes。低 nibble 表示候选 `0..15`，

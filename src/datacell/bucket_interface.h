@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <limits>
 #include <string>
 
 #include "algorithm/ivf/ivf_partition_strategy.h"
@@ -43,15 +44,42 @@ public:
     ScanBucketById(float* result_dists,
                    const ComputerInterfacePtr& computer,
                    const BucketIdType& bucket_id,
-                   QueryContext* ctx = nullptr) = 0;
+                   QueryContext* ctx = nullptr,
+                   InnerIdType* scanned_inner_ids = nullptr,
+                   InnerIdType max_scan_size = std::numeric_limits<InnerIdType>::max(),
+                   InnerIdType* scanned_size = nullptr) = 0;
+
+    virtual uint64_t
+    ScanBucketWithFilterInnerProduct(
+        float* result_dists,
+        float* filter_inner_products,
+        const ComputerInterfacePtr& computer,
+        const BucketIdType& bucket_id,
+        QueryContext* ctx = nullptr,
+        InnerIdType* scanned_inner_ids = nullptr,
+        InnerIdType max_scan_size = std::numeric_limits<InnerIdType>::max(),
+        InnerIdType* scanned_size = nullptr) {
+        (void)scanned_inner_ids;
+        (void)max_scan_size;
+        (void)scanned_size;
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "bucket filter-inner-product scan is not supported");
+    }
 
     virtual void
-    ScanBucketWithDistanceLowerBound(float* result_dists,
-                                     float* lower_bounds,
-                                     float* filter_inner_products,
-                                     const ComputerInterfacePtr& computer,
-                                     const BucketIdType& bucket_id,
-                                     QueryContext* ctx = nullptr) {
+    ScanBucketWithDistanceLowerBound(
+        float* result_dists,
+        float* lower_bounds,
+        float* filter_inner_products,
+        const ComputerInterfacePtr& computer,
+        const BucketIdType& bucket_id,
+        QueryContext* ctx = nullptr,
+        InnerIdType* scanned_inner_ids = nullptr,
+        InnerIdType max_scan_size = std::numeric_limits<InnerIdType>::max(),
+        InnerIdType* scanned_size = nullptr) {
+        (void)scanned_inner_ids;
+        (void)max_scan_size;
+        (void)scanned_size;
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "bucket lower-bound scan is not supported");
     }
@@ -75,6 +103,37 @@ public:
                                          QueryContext* ctx = nullptr) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "bucket filter-inner-product query is not supported");
+    }
+
+    virtual void
+    QueryWithCandidateFilterInnerProductByInnerId(float* result_dists,
+                                                  const float* hint_dists,
+                                                  const float* filter_inner_products,
+                                                  const ComputerInterfacePtr& computer,
+                                                  const InnerIdType* inner_ids,
+                                                  InnerIdType id_count,
+                                                  QueryContext* ctx = nullptr) {
+        (void)filter_inner_products;
+        this->QueryWithDistanceHintByInnerId(
+            result_dists, hint_dists, computer, inner_ids, id_count, ctx);
+    }
+
+    virtual void
+    QueryWithCandidateFilterInnerProductBySource(float* result_dists,
+                                                 const float* hint_dists,
+                                                 const float* filter_inner_products,
+                                                 const BucketIdType* source_bucket_ids,
+                                                 const InnerIdType* source_offset_ids,
+                                                 const uint64_t* source_versions,
+                                                 const ComputerInterfacePtr& computer,
+                                                 const InnerIdType* inner_ids,
+                                                 InnerIdType id_count,
+                                                 QueryContext* ctx = nullptr) {
+        (void)source_bucket_ids;
+        (void)source_offset_ids;
+        (void)source_versions;
+        this->QueryWithCandidateFilterInnerProductByInnerId(
+            result_dists, hint_dists, filter_inner_products, computer, inner_ids, id_count, ctx);
     }
 
     virtual void
@@ -186,6 +245,11 @@ public:
 
     [[nodiscard]] virtual InnerIdType
     GetBucketSize(BucketIdType bucket_id) = 0;
+
+    [[nodiscard]] virtual InnerIdType
+    GetBucketScanCapacity(BucketIdType bucket_id) {
+        return this->GetBucketSize(bucket_id);
+    }
 
     virtual void
     ExportModel(const BucketInterfacePtr& other) const = 0;

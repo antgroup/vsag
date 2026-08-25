@@ -112,27 +112,29 @@ recall for fewer supplement reads.
 
 The split search path has four stages:
 
-1. The query is transformed and normalized once. For supported filter widths,
-   a byte lookup table is also built once per query.
-2. Graph traversal or IVF bucket scanning reads only the filter record. It computes
-   an x-bit distance
-   estimate and a conservative lower bound for each visited vector.
+1. The query is transformed and normalized once. Non-residual scans and
+   residual IVF `candidate_reorder` build one byte lookup table per query.
+   Residual IVF `heap` builds bucket-specific `q-c` lookup tables to preserve
+   its lower-bound formula.
+2. Graph traversal or IVF bucket scanning reads only the filter record. It
+   computes an x-bit distance estimate; lower-bound paths also compute a
+   conservative lower bound.
 3. HGraph can discard candidates whose lower bound cannot enter the result set.
    IVF either retains `factor * topk` candidates by filter distance (the default)
    or compares each lower bound with an `x+y`-estimate heap (the opt-in `heap`
    strategy).
 4. The final distance combines the filter contribution and supplement
-   contribution into one `x+y`-bit RaBitQ estimate. Heap search saves the
-   byte-LUT-quantized x-bit inner product `S_x` while computing the lower bound,
-   so the final calculation reads only the y-bit record and does not reconstruct
-   the inner product from the filter distance.
+   contribution into one `x+y`-bit RaBitQ estimate. Both IVF strategies carry
+   the byte-LUT-quantized x-bit inner product `S_x` from the filter scan, so
+   normal final-distance calculation reads only the y-bit record and does not
+   reconstruct the inner product from the filter distance.
 
-Both IVF strategies use the bucket-local 32-vector FastScan layout. In heap
-mode, one packed-block byte-LUT scan emits the x-bit estimate, lower bound, and
-dequantized quantized x-bit inner product `S_x` for every lane. The final
-distance uses `2^y * S_x + S_y`, where only `S_y` requires reading the y-bit
-supplement. There is no companion float-LUT pass and the heap path does not
-reread canonical x-bit records.
+Both IVF strategies use the bucket-local 32-vector FastScan layout. A
+candidate scan emits the x-bit estimate and the reusable inner product; heap
+mode additionally emits the lower bound. The final distance uses
+`2^y * S_x + S_y`, where only `S_y` requires reading the y-bit supplement.
+There is no companion float-LUT pass. Packed x bits are reread only by the
+correctness fallback for an invalid or stale candidate.
 
 The traversal or bucket-scan heap is therefore not populated with an `x+y`
 distance for every
@@ -272,9 +274,11 @@ traversal estimate, while the final ranking uses the `x+y` distance.
 ## IVF 1-bit, 2-bit, and 3-bit 32-vector FastScan layout
 
 When IVF split storage uses `x` from 1 through 3, `RaBitQSplitBucketDataCell`
-packages each bucket in groups of 32 candidates. The canonical split records
-remain available for ID lookup and supplement reranking; the bucket-local scan
-blocks contain a SIMD-oriented copy of the filter planes and compact metadata.
+packages each bucket in groups of 32 candidates. These bucket-local packed
+blocks are the only persistent filter-code layout and contain the SIMD-oriented
+filter planes plus compact metadata. Single-lane x bits are unpacked from the
+block only for correctness fallback or full-code access by ID. Supplement
+reranking normally reads only the separate y-bit record.
 
 Let `G = ceil(d / 8) * 2` be the number of four-dimensional groups in one
 bitplane. Each group stores one four-bit mask per candidate. For every group,

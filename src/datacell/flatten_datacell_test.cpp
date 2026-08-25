@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -234,6 +235,273 @@ TEST_CASE("RaBitQSplitDataCell direct split compute", "[ut][RaBitQSplitDataCell]
         }
     }
 }
+
+TEST_CASE("RaBitQSplitDataCell FastScan LUT is deterministic for the same query",
+          "[ut][RaBitQSplitDataCell][serialize][fastscan]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 65;
+    constexpr InnerIdType count = 32;
+    auto vectors = fixtures::generate_vectors(count, dim, 113);
+    auto query = fixtures::generate_vectors(1, dim, 127);
+
+    auto param_json = JsonType::Parse(R"({
+        "codes_type": "rabitq_split",
+        "io_params": { "type": "memory_io" },
+        "quantization_params": {
+            "type": "rabitq",
+            "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 1
+        }
+    })");
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(param_json);
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+    auto original = FlattenInterface::MakeInstance(param, common_param);
+    original->Train(vectors.data(), count);
+    original->BatchInsertVector(vectors.data(), count);
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    original->Serialize(writer);
+
+    auto restored = FlattenInterface::MakeInstance(param, common_param);
+    stream.seekg(0, std::ios::beg);
+    IOStreamReader reader(stream);
+    restored->Deserialize(reader);
+
+    std::array<InnerIdType, count> ids{};
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<uint8_t> original_block(original->GetFastScan32BlockSize());
+    std::vector<uint8_t> restored_block(restored->GetFastScan32BlockSize());
+    original->PackageFastScan32(ids.data(), count, original_block.data());
+    restored->PackageFastScan32(ids.data(), count, restored_block.data());
+    REQUIRE(original_block == restored_block);
+
+    auto original_computer = original->FactoryComputer(query.data());
+    auto restored_computer = restored->FactoryComputer(query.data());
+    auto original_fastscan = original->FactoryFastScan32Computer(original_computer);
+    auto restored_fastscan = restored->FactoryFastScan32Computer(restored_computer);
+
+    std::array<float, count> original_low{};
+    std::array<float, count> restored_low{};
+    std::array<float, count> original_high{};
+    std::array<float, count> restored_high{};
+    std::array<bool, count> original_computed{};
+    std::array<bool, count> restored_computed{};
+    std::array<uint32_t, 1> original_mask{};
+    std::array<uint32_t, 1> restored_mask{};
+
+    original->QueryFastScan32(original_low.data(),
+                              original_computed.data(),
+                              original_computer,
+                              original_fastscan,
+                              original_block.data(),
+                              count);
+    original->QueryFastScan32Batch(original_high.data(),
+                                   original_mask.data(),
+                                   original_computer,
+                                   original_fastscan,
+                                   original_block.data(),
+                                   count);
+    restored->QueryFastScan32Batch(restored_high.data(),
+                                   restored_mask.data(),
+                                   restored_computer,
+                                   restored_fastscan,
+                                   restored_block.data(),
+                                   count);
+    restored->QueryFastScan32(restored_low.data(),
+                              restored_computed.data(),
+                              restored_computer,
+                              restored_fastscan,
+                              restored_block.data(),
+                              count);
+
+    REQUIRE(original_computed == restored_computed);
+    REQUIRE(original_mask == restored_mask);
+    REQUIRE(original_low == restored_low);
+    REQUIRE(original_high == restored_high);
+}
+
+TEST_CASE("RaBitQSplitDataCell resets residual computers in place", "[ut][RaBitQSplitDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr InnerIdType count = 32;
+    constexpr uint64_t query_count = 3;
+    constexpr uint64_t bucket_count = 4;
+    auto vectors = fixtures::generate_vectors(count, dim, 101);
+    auto queries = fixtures::generate_vectors(query_count, dim, 103);
+    auto centroids = fixtures::generate_vectors(bucket_count, dim, 107);
+
+    auto param_json = JsonType::Parse(R"({
+        "codes_type": "rabitq_split",
+        "io_params": { "type": "memory_io" },
+        "quantization_params": {
+            "type": "rabitq",
+            "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 1
+        }
+    })");
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(param_json);
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+    auto flatten = FlattenInterface::MakeInstance(param, common_param);
+    flatten->Train(vectors.data(), count);
+    flatten->BatchInsertVector(vectors.data(), count);
+    REQUIRE(flatten->SupportResidualQueryTransform());
+
+    const uint64_t transform_size = flatten->GetResidualQueryTransformSize();
+    REQUIRE(transform_size >= dim);
+    std::vector<float> zero(dim, 0.0F);
+    std::vector<float> zero_transform(transform_size);
+    std::vector<float> query_transform(transform_size);
+    std::vector<float> centroid_transform(transform_size);
+    std::vector<float> residual_transform(transform_size);
+    flatten->TransformResidualQuery(zero.data(), zero_transform.data());
+
+    std::vector<InnerIdType> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> fresh_dists(count);
+    std::vector<float> reset_dists(count);
+    ComputerInterfacePtr reset_computer = nullptr;
+    ComputerInterface* reset_identity = nullptr;
+    uint8_t* reset_buffer = nullptr;
+    using Quantizer = RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>;
+
+    for (uint64_t query_id = 0; query_id < query_count; ++query_id) {
+        flatten->TransformResidualQuery(queries.data() + query_id * dim, query_transform.data());
+        for (uint64_t bucket_id = 0; bucket_id < bucket_count; ++bucket_id) {
+            flatten->TransformResidualQuery(centroids.data() + bucket_id * dim,
+                                            centroid_transform.data());
+            for (uint64_t d = 0; d < transform_size; ++d) {
+                residual_transform[d] =
+                    query_transform[d] - centroid_transform[d] + zero_transform[d];
+            }
+
+            auto fresh_computer =
+                flatten->FactoryComputerFromResidualQuery(residual_transform.data());
+            flatten->ResetComputerFromResidualQuery(residual_transform.data(), reset_computer);
+            auto* typed_reset = static_cast<Computer<Quantizer>*>(reset_computer.get());
+            if (reset_identity == nullptr) {
+                reset_identity = reset_computer.get();
+                reset_buffer = typed_reset->buf_;
+                REQUIRE(reset_buffer != nullptr);
+            } else {
+                REQUIRE(reset_computer.get() == reset_identity);
+                REQUIRE(typed_reset->buf_ == reset_buffer);
+            }
+
+            flatten->Query(fresh_dists.data(), fresh_computer, ids.data(), count);
+            flatten->Query(reset_dists.data(), reset_computer, ids.data(), count);
+            for (InnerIdType id = 0; id < count; ++id) {
+                INFO("query=" << query_id << ", bucket=" << bucket_id << ", id=" << id);
+                const float tolerance = 1e-6F * std::max(1.0F, std::abs(fresh_dists[id]));
+                REQUIRE(std::abs(reset_dists[id] - fresh_dists[id]) <= tolerance);
+            }
+        }
+    }
+}
+
+TEST_CASE("RaBitQSplitDataCell supplement-only tail and statistics", "[ut][RaBitQSplitDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 65;
+    constexpr InnerIdType count = 9;
+    constexpr float untouched = -5432.0F;
+    auto vectors = fixtures::generate_vectors(count + 1, dim, 93);
+
+    for (const uint64_t filter_bits : {1U, 2U, 3U}) {
+        auto param_json = JsonType::Parse(fmt::format(R"({{
+            "codes_type": "rabitq_split",
+            "io_params": {{ "type": "memory_io" }},
+            "quantization_params": {{
+                "type": "rabitq",
+                "rabitq_version": "split",
+                "rabitq_bits_per_dim_query": 32,
+                "rabitq_bits_per_dim_base": 8,
+                "rabitq_bits_per_dim_filter": {}
+            }}
+        }})",
+                                                      filter_bits));
+        auto param = std::make_shared<FlattenDataCellParameter>();
+        param->FromJson(param_json);
+
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.dim_ = dim;
+        common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+        auto flatten = FlattenInterface::MakeInstance(param, common_param);
+        flatten->Train(vectors.data(), count);
+        flatten->BatchInsertVector(vectors.data(), count);
+        auto computer = flatten->FactoryComputer(vectors.data() + count * dim);
+
+        std::vector<InnerIdType> ids(count);
+        std::iota(ids.begin(), ids.end(), 0);
+        std::vector<float> expected_dists(count);
+        flatten->Query(expected_dists.data(), computer, ids.data(), count);
+
+        std::vector<float> filter_dists(count);
+        std::vector<float> lower_bounds(count);
+        std::vector<float> filter_inner_products(count);
+        flatten->QueryWithDistanceLowerBoundAndFilterInnerProduct(filter_dists.data(),
+                                                                  lower_bounds.data(),
+                                                                  filter_inner_products.data(),
+                                                                  computer,
+                                                                  ids.data(),
+                                                                  count);
+        for (const float inner_product : filter_inner_products) {
+            REQUIRE(std::isfinite(inner_product));
+        }
+        filter_inner_products[3] = std::numeric_limits<float>::quiet_NaN();
+
+        std::vector<float> actual_dists(count, untouched);
+        std::vector<uint8_t> computed(count, 0U);
+        SearchStatistics stats;
+        QueryContext ctx{.stats = &stats};
+        flatten->QueryWithFilterInnerProducts(actual_dists.data(),
+                                              computed.data(),
+                                              filter_inner_products.data(),
+                                              computer,
+                                              ids.data(),
+                                              0,
+                                              &ctx);
+        flatten->QueryWithFilterInnerProducts(actual_dists.data(),
+                                              computed.data(),
+                                              filter_inner_products.data(),
+                                              computer,
+                                              ids.data(),
+                                              count,
+                                              &ctx);
+
+        for (InnerIdType id = 0; id < count; ++id) {
+            INFO("filter_bits=" << filter_bits << ", id=" << id);
+            if (id == 3) {
+                REQUIRE(computed[id] == 0U);
+                REQUIRE(actual_dists[id] == untouched);
+            } else {
+                REQUIRE(computed[id] == 1U);
+                const float tolerance = 1e-4F * std::max(1.0F, std::abs(expected_dists[id]));
+                REQUIRE(std::abs(actual_dists[id] - expected_dists[id]) <= tolerance);
+            }
+        }
+        REQUIRE(stats.rabitq_full_count.load(std::memory_order_relaxed) == count - 1);
+        REQUIRE(stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) == count - 1);
+        REQUIRE(stats.rabitq_reorder_fallback_full_count.load(std::memory_order_relaxed) == 1);
+        REQUIRE(stats.distance_evaluations.load(std::memory_order_relaxed) == count - 1);
+    }
+}
+
 TEST_CASE("RaBitQSplitDataCell supports MRLE transform quantizer",
           "[ut][RaBitQSplitDataCell][MRLE]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
@@ -383,6 +651,28 @@ TEST_CASE("RaBitQSplitDataCell serialize and methods", "[ut][RaBitQSplitDataCell
         for (InnerIdType i = 0; i < count; ++i) {
             REQUIRE(dists1[i] == dists2[i]);
         }
+    }
+
+    SECTION("Reject invalid supplement layout marker") {
+        flatten->BatchInsertVector(vectors.data(), count);
+
+        std::stringstream ss;
+        IOStreamWriter writer(ss);
+        flatten->Serialize(writer);
+        std::string serialized = ss.str();
+
+        constexpr uint64_t supplement_storage_magic = 0x3150505553514252ULL;
+        std::string encoded_magic(sizeof(supplement_storage_magic), '\0');
+        std::memcpy(
+            encoded_magic.data(), &supplement_storage_magic, sizeof(supplement_storage_magic));
+        const auto marker_offset = serialized.find(encoded_magic);
+        REQUIRE(marker_offset != std::string::npos);
+        serialized[marker_offset] ^= 1;
+
+        std::stringstream corrupted_stream(serialized);
+        IOStreamReader reader(corrupted_stream);
+        auto other = FlattenInterface::MakeInstance(param, common_param);
+        REQUIRE_THROWS(other->Deserialize(reader));
     }
 
     SECTION("GetCodesById") {
@@ -654,6 +944,54 @@ TEST_CASE("RaBitQSplitDataCell hybrid IO (1bit in memory, supplement on disk)",
             for (InnerIdType id = 0; id < count; ++id) {
                 REQUIRE(mem_dists[id] == hyb_dists[id]);
                 REQUIRE(mem_lb[id] == hyb_lb[id]);
+            }
+
+            if (split_case.base_bits > split_case.filter_bits) {
+                constexpr float untouched = -6543.0F;
+                std::vector<float> filter_inner_products(count);
+                mem_cell->QueryWithDistanceLowerBoundAndFilterInnerProduct(
+                    mem_dists.data(),
+                    mem_lb.data(),
+                    filter_inner_products.data(),
+                    mem_computer,
+                    idx.data(),
+                    count);
+                for (const float inner_product : filter_inner_products) {
+                    REQUIRE(std::isfinite(inner_product));
+                }
+                filter_inner_products[7] = std::numeric_limits<float>::quiet_NaN();
+
+                std::vector<float> mem_supplement_dists(count, untouched);
+                std::vector<float> hyb_supplement_dists(count, untouched);
+                std::vector<uint8_t> mem_computed(count, 0U);
+                std::vector<uint8_t> hyb_computed(count, 0U);
+                mem_cell->QueryWithFilterInnerProducts(mem_supplement_dists.data(),
+                                                       mem_computed.data(),
+                                                       filter_inner_products.data(),
+                                                       mem_computer,
+                                                       idx.data(),
+                                                       count);
+                hyb_cell->QueryWithFilterInnerProducts(hyb_supplement_dists.data(),
+                                                       hyb_computed.data(),
+                                                       filter_inner_products.data(),
+                                                       hyb_computer,
+                                                       idx.data(),
+                                                       count);
+
+                for (InnerIdType id = 0; id < count; ++id) {
+                    INFO("base_bits=" << split_case.base_bits << ", filter_bits="
+                                      << split_case.filter_bits << ", id=" << id);
+                    if (id == 7) {
+                        REQUIRE(mem_computed[id] == 0U);
+                        REQUIRE(hyb_computed[id] == 0U);
+                        REQUIRE(mem_supplement_dists[id] == untouched);
+                        REQUIRE(hyb_supplement_dists[id] == untouched);
+                    } else {
+                        REQUIRE(mem_computed[id] == 1U);
+                        REQUIRE(hyb_computed[id] == 1U);
+                        REQUIRE(mem_supplement_dists[id] == hyb_supplement_dists[id]);
+                    }
+                }
             }
 
             std::vector<float> mem_hint_dists(count);

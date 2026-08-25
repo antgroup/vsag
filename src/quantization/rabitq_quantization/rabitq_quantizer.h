@@ -251,11 +251,24 @@ public:
     [[nodiscard]] uint64_t
     GetFastScan32LookupSize() const;
 
+    [[nodiscard]] uint64_t
+    GetFastScan32HighAccLookupSize() const;
+
     void
     PackageFastScan32(const uint8_t* one_bit_codes, uint64_t valid_size, uint8_t* block) const;
+    void
+    PackageFastScan32Residual(const uint8_t* one_bit_codes,
+                              const float* transformed_centroid,
+                              uint64_t valid_size,
+                              uint8_t* block) const;
 
     void
     SetFastScan32Code(const uint8_t* one_bit_code, uint64_t index_in_block, uint8_t* block) const;
+    void
+    SetFastScan32ResidualCode(const uint8_t* one_bit_code,
+                              const float* transformed_centroid,
+                              uint64_t index_in_block,
+                              uint8_t* block) const;
 
     void
     UnpackFastScan32Code(const uint8_t* block,
@@ -267,7 +280,16 @@ public:
                            uint8_t* lookup_table,
                            float* deltas,
                            float* sum_vls,
-                           float& query_sum) const;
+                           float& query_sum,
+                           uint64_t* random_state = nullptr) const;
+
+    void
+    PrepareFastScan32HighAccQuery(Computer<RaBitQuantizer>& computer,
+                                  uint8_t* lookup_table,
+                                  float* deltas,
+                                  float* sum_vls,
+                                  float& query_sum,
+                                  uint64_t* random_state = nullptr) const;
 
     void
     ComputeDistsWithFastScan32(
@@ -283,6 +305,90 @@ public:
         float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN(),
         float* lower_bounds = nullptr,
         float* filter_inner_products = nullptr) const;
+
+    void
+    ComputeDistsWithFastScan32HighAccBatch(Computer<RaBitQuantizer>& computer,
+                                           const uint8_t* blocks,
+                                           uint64_t total_size,
+                                           const uint8_t* lookup_table,
+                                           const float* deltas,
+                                           const float* sum_vls,
+                                           float query_sum,
+                                           float* dists,
+                                           uint32_t* computed_masks,
+                                           float* filter_inner_products = nullptr) const;
+
+    uint32_t
+    ComputeDistsWithFastScan32SharedResidual(Computer<RaBitQuantizer>& computer,
+                                             const uint8_t* block,
+                                             const uint8_t* lookup_table,
+                                             const float* deltas,
+                                             const float* sum_vls,
+                                             float query_sum,
+                                             float query_bucket_norm_sqr,
+                                             float* dists,
+                                             uint64_t valid_size,
+                                             float* filter_inner_products = nullptr) const;
+
+    void
+    ComputeDistsWithFastScan32SharedResidualBatch(Computer<RaBitQuantizer>& computer,
+                                                  const uint8_t* blocks,
+                                                  uint64_t total_size,
+                                                  const uint8_t* lookup_table,
+                                                  const float* deltas,
+                                                  const float* sum_vls,
+                                                  float query_sum,
+                                                  float query_bucket_norm_sqr,
+                                                  float* dists,
+                                                  uint32_t* computed_masks,
+                                                  float* filter_inner_products = nullptr) const;
+
+    void
+    ComputeDistsWithFastScan32SharedResidualHighAccBatch(
+        Computer<RaBitQuantizer>& computer,
+        const uint8_t* blocks,
+        uint64_t total_size,
+        const uint8_t* lookup_table,
+        const float* deltas,
+        const float* sum_vls,
+        float query_sum,
+        float query_bucket_norm_sqr,
+        float* dists,
+        uint32_t* computed_masks,
+        float* filter_inner_products = nullptr) const;
+
+    bool
+    ConvertFastScan32SharedResidualFilterInnerProduct(Computer<RaBitQuantizer>& shared_computer,
+                                                      Computer<RaBitQuantizer>& residual_computer,
+                                                      const uint8_t* block,
+                                                      uint64_t index_in_block,
+                                                      float shared_filter_inner_product,
+                                                      float* residual_filter_inner_product) const;
+
+    bool
+    RecoverFastScan32OriginalQueryFilterInnerProduct(Computer<RaBitQuantizer>& original_computer,
+                                                     const uint8_t* block,
+                                                     uint64_t index_in_block,
+                                                     float shared_filter_inner_product,
+                                                     float* original_filter_inner_product) const;
+
+    bool
+    ComputeResidualFullFactor(const uint8_t* filter_code,
+                              const uint8_t* supplement_code,
+                              const float* transformed_centroid,
+                              float* full_add) const;
+
+    bool
+    ComputeDistWithSplitCodeAndOriginalQueryFilterInnerProduct(
+        Computer<RaBitQuantizer>& original_computer,
+        const uint8_t* supplement_code,
+        float original_filter_inner_product,
+        float full_add,
+        float query_bucket_norm_sqr,
+        float* dist) const;
+
+    [[nodiscard]] float
+    ComputeTransformedResidualQueryNormSqr(const float* transformed_query) const;
 
     bool
     ComputeDistWithOneBitLowerBound(
@@ -389,9 +495,67 @@ public:
     SupplementMetaOffset() const;
 
     [[nodiscard]] uint64_t
+    SupplementErrorOffset() const;
+
+    [[nodiscard]] uint64_t
     AlignCodeField(uint64_t size) const;
 
 private:
+    struct FastScan32Layout {
+        uint64_t packed_size{0};
+        uint64_t metadata_record_offset{0};
+        uint64_t metadata_record_size{0};
+
+        [[nodiscard]] uint64_t
+        BlockSize() const {
+            return packed_size + (metadata_record_size + 2 * sizeof(float)) * FASTSCAN_BATCH_SIZE;
+        }
+
+        [[nodiscard]] uint64_t
+        MetadataFieldOffset(uint64_t record_offset) const {
+            return ResidualScaleOffset() + sizeof(float) * FASTSCAN_BATCH_SIZE +
+                   (record_offset - metadata_record_offset) * FASTSCAN_BATCH_SIZE;
+        }
+
+        [[nodiscard]] uint64_t
+        ResidualAddOffset() const {
+            return packed_size;
+        }
+
+        [[nodiscard]] uint64_t
+        ResidualScaleOffset() const {
+            return ResidualAddOffset() + sizeof(float) * FASTSCAN_BATCH_SIZE;
+        }
+    };
+
+    [[nodiscard]] FastScan32Layout
+    GetFastScan32Layout() const;
+
+    void
+    ComputeFastScan32ResidualFactors(const uint8_t* one_bit_code,
+                                     const float* transformed_centroid,
+                                     float& f_add,
+                                     float& f_scale) const;
+
+    void
+    ComputeDistsWithFastScan32LookupSums(Computer<RaBitQuantizer>& computer,
+                                         const uint8_t* block,
+                                         const float* lookup_sums,
+                                         float query_sum,
+                                         float* dists,
+                                         bool* computed,
+                                         uint64_t valid_size,
+                                         float runtime_rabitq_error_rate,
+                                         float* lower_bounds,
+                                         float* filter_inner_products) const;
+
+    bool
+    FinalizeSplitCodeDistanceWithFilterInnerProduct(Computer<RaBitQuantizer>& computer,
+                                                    const uint8_t* supplement_code,
+                                                    float filter_inner_product,
+                                                    float supplement_inner_product,
+                                                    float* dists) const;
+
     bool
     EncodeOneInternal(const float* data,
                       uint8_t* codes,

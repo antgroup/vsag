@@ -552,10 +552,28 @@ public:
         Vector<InnerIdType> ids(candidate_count, query_allocator);
         Vector<float> hints(candidate_count, query_allocator);
         Vector<float> distances(candidate_count, query_allocator);
-        const auto* candidates = input->GetData();
+        const auto* candidates_with_auxiliary = input->GetDataWithAuxiliary();
+        const auto* candidates = candidates_with_auxiliary == nullptr ? input->GetData() : nullptr;
+        Vector<float> candidate_filter_inner_products(
+            candidates_with_auxiliary == nullptr ? 0 : candidate_count, query_allocator);
+        Vector<BucketIdType> candidate_source_bucket_ids(
+            candidates_with_auxiliary == nullptr ? 0 : candidate_count, query_allocator);
+        Vector<InnerIdType> candidate_source_offset_ids(
+            candidates_with_auxiliary == nullptr ? 0 : candidate_count, query_allocator);
+        Vector<uint64_t> candidate_source_versions(
+            candidates_with_auxiliary == nullptr ? 0 : candidate_count, query_allocator);
         for (uint64_t i = 0; i < candidate_count; ++i) {
-            hints[i] = candidates[i].first;
-            ids[i] = candidates[i].second;
+            const auto& record = candidates_with_auxiliary == nullptr
+                                     ? candidates[i]
+                                     : candidates_with_auxiliary[i].record;
+            hints[i] = record.first;
+            ids[i] = record.second;
+            if (candidates_with_auxiliary != nullptr) {
+                candidate_filter_inner_products[i] = candidates_with_auxiliary[i].auxiliary;
+                candidate_source_bucket_ids[i] = candidates_with_auxiliary[i].source_bucket_id;
+                candidate_source_offset_ids[i] = candidates_with_auxiliary[i].source_offset_id;
+                candidate_source_versions[i] = candidates_with_auxiliary[i].source_version;
+            }
         }
         if (ctx.stats != nullptr) {
             ctx.stats->reorder_distance_count.fetch_add(static_cast<uint32_t>(candidate_count),
@@ -565,12 +583,27 @@ public:
             preset_computer == nullptr ? this->bucket_->FactoryComputer(query) : preset_computer;
         {
             ScopedDistancePhase scoped(ctx, DistanceEvaluationPhase::RERANK);
-            this->bucket_->QueryWithDistanceHintByInnerId(distances.data(),
-                                                          hints.data(),
-                                                          computer,
-                                                          ids.data(),
-                                                          static_cast<InnerIdType>(candidate_count),
-                                                          &ctx);
+            if (candidates_with_auxiliary != nullptr) {
+                this->bucket_->QueryWithCandidateFilterInnerProductBySource(
+                    distances.data(),
+                    hints.data(),
+                    candidate_filter_inner_products.data(),
+                    candidate_source_bucket_ids.data(),
+                    candidate_source_offset_ids.data(),
+                    candidate_source_versions.data(),
+                    computer,
+                    ids.data(),
+                    static_cast<InnerIdType>(candidate_count),
+                    &ctx);
+            } else {
+                this->bucket_->QueryWithDistanceHintByInnerId(
+                    distances.data(),
+                    hints.data(),
+                    computer,
+                    ids.data(),
+                    static_cast<InnerIdType>(candidate_count),
+                    &ctx);
+            }
         }
         for (uint64_t i = 0; i < candidate_count; ++i) {
             if (ctx.reasoning_ctx != nullptr) {
@@ -1909,7 +1942,6 @@ IVF::search(const DatasetPtr& query,
             ReasoningContext* reasoning_ctx,
             ComputerInterfacePtr* bucket_computer) const {
     const auto* query_data = query->GetFloat32Vectors();
-    Vector<float> normalize_data(dim_, allocator_);
     Vector<BucketIdType> candidate_buckets(allocator_);
     if (not param.bucket_ids.empty()) {
         candidate_buckets.reserve(param.bucket_ids.size());
@@ -1953,12 +1985,23 @@ IVF::search(const DatasetPtr& query,
     if (this->thread_pool_ == nullptr) {
         search_thread_count = 1;
     }
+    const bool collect_candidate_filter_inner_products =
+        mode == KNN_SEARCH and use_reorder_ and param.enable_reorder and
+        not param.use_rabitq_heap_search and bucket_->SupportSplitCodeStorage() and
+        buckets_per_data_ == 1;
     std::vector<DistHeapPtr> heaps(search_thread_count);
     std::atomic<uint64_t> cur_bucket_num(0);
     auto search_func = [&](int64_t thread_id) -> void {
-        heaps[thread_id] = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
+        if (collect_candidate_filter_inner_products) {
+            heaps[thread_id] =
+                DistanceHeap::MakeInstanceBySizeWithAuxiliary<true, false>(this->allocator_, topk);
+        } else {
+            heaps[thread_id] =
+                DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
+        }
         auto& heap = heaps[thread_id];
         Vector<float> dist(allocator_);
+        Vector<InnerIdType> scanned_inner_ids(allocator_);
         uint64_t i = cur_bucket_num.fetch_add(1);
         for (; i < bucket_count; i = cur_bucket_num.fetch_add(1)) {
             if (param.time_cost != nullptr and param.time_cost->CheckOvertime() and
@@ -1979,6 +2022,7 @@ IVF::search(const DatasetPtr& query,
                                      buckets_per_data_,
                                      heap,
                                      dist,
+                                     scanned_inner_ids,
                                      reasoning_ctx);
         }
     };
@@ -1997,18 +2041,34 @@ IVF::search(const DatasetPtr& query,
         for (auto& future : futures) {
             future.get();
         }
-        search_result = DistanceHeap::MakeInstanceBySize<true, true>(this->allocator_, topk);
+        if (collect_candidate_filter_inner_products) {
+            search_result =
+                DistanceHeap::MakeInstanceBySizeWithAuxiliary<true, true>(this->allocator_, topk);
+        } else {
+            search_result = DistanceHeap::MakeInstanceBySize<true, true>(this->allocator_, topk);
+        }
         for (auto& heap : heaps) {
-            auto size = heap->Size();
-            const auto* data = heap->GetData();
-            for (int i = 0; i < size; ++i) {
+            const auto size = heap->Size();
+            const auto* auxiliary_data = heap->GetDataWithAuxiliary();
+            const auto* data = auxiliary_data == nullptr ? heap->GetData() : nullptr;
+            for (uint64_t i = 0; i < size; ++i) {
+                const auto& record = auxiliary_data == nullptr ? data[i] : auxiliary_data[i].record;
                 if (reasoning_ctx != nullptr and
                     search_result->Size() >= static_cast<uint64_t>(topk) and
-                    data[i].first < search_result->Top().first) {
+                    record.first < search_result->Top().first) {
                     reasoning_ctx->RecordEviction(search_result->Top().second / buckets_per_data_,
                                                   1);
                 }
-                search_result->Push(data[i]);
+                if (auxiliary_data == nullptr) {
+                    search_result->Push(record);
+                } else {
+                    search_result->PushWithAuxiliary(record.first,
+                                                     record.second,
+                                                     auxiliary_data[i].auxiliary,
+                                                     auxiliary_data[i].source_bucket_id,
+                                                     auxiliary_data[i].source_offset_id,
+                                                     auxiliary_data[i].source_version);
+                }
             }
         }
     }
