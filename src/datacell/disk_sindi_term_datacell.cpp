@@ -291,12 +291,12 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
         return query_term_buffers;
     }
 
-    struct query_term_read_plan {
+    struct QueryTermReadPlan {
         uint32_t term_id{0};
         DiskTermEntry entry{};
     };
 
-    Vector<query_term_read_plan> read_plans(allocator);
+    Vector<QueryTermReadPlan> read_plans(allocator);
     UnorderedSet<uint32_t> planned_terms(allocator);
     read_plans.reserve(query_term_ids.size());
     planned_terms.reserve(query_term_ids.size());
@@ -328,7 +328,7 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
         }
     }
 
-    const auto validate_entry = [payload_size](const query_term_read_plan& plan) {
+    const auto validate_entry = [payload_size](const QueryTermReadPlan& plan) {
         const auto& entry = plan.entry;
         const bool valid_entry =
             entry.posting_payload_offset <= payload_size &&

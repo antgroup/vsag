@@ -200,7 +200,7 @@ AttributeBucketInvertedDataCell::Serialize(StreamWriter& writer) {
 }
 
 void
-AttributeBucketInvertedDataCell::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+AttributeBucketInvertedDataCell::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     AttributeInvertedInterface::Deserialize(reader);
     uint64_t size;
     StreamReader::ReadObj(reader, size);

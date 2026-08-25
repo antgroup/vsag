@@ -173,7 +173,7 @@ public:
     Serialize(StreamWriter& writer) override;
 
     void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
+    Deserialize(LvalueOrRvalue<StreamReader> reader) override;
 
     inline void
     SetQuantizer(std::shared_ptr<Quantizer<QuantTmpl>> quantizer) {
@@ -487,7 +487,7 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::Serialize(StreamWriter& writer) {
 
 template <typename QuantTmpl, typename LayoutTmpl>
 void
-FlattenDataCell<QuantTmpl, LayoutTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+FlattenDataCell<QuantTmpl, LayoutTmpl>::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     FlattenInterface::Deserialize(reader);
     this->layout_->SetCodeSize(this->code_size_);
     this->layout_->Deserialize(reader);

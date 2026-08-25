@@ -50,7 +50,7 @@ wait_all_futures(std::vector<std::future<void>>& futures);
 
 namespace {
 
-struct cluster_member_entry {
+struct ClusterMemberEntry {
     InnerIdType vec_id;
     float distance;
 };
@@ -142,7 +142,7 @@ public:
     Fit(const float* vecs, int64_t num_vecs, int64_t dim);
 
     std::vector<int> cluster_centers_;
-    std::unordered_map<int, std::vector<cluster_member_entry>> clusters_;
+    std::unordered_map<int, std::vector<ClusterMemberEntry>> clusters_;
     std::vector<int> vec_to_cluster_;
 
 private:
@@ -156,7 +156,7 @@ private:
     ip_distance(int v1, int v2) const;
 
     static void
-    sorted_insert(std::vector<cluster_member_entry>& members, InnerIdType vec_id, float dist);
+    sorted_insert(std::vector<ClusterMemberEntry>& members, InnerIdType vec_id, float dist);
 
     void
     split_cluster(int old_center_id, int64_t dim);
@@ -243,11 +243,11 @@ HGraphDynamicClustering::ip_distance(int v1, int v2) const {
 }
 
 void
-HGraphDynamicClustering::sorted_insert(std::vector<cluster_member_entry>& members,
+HGraphDynamicClustering::sorted_insert(std::vector<ClusterMemberEntry>& members,
                                        InnerIdType vec_id,
                                        float dist) {
     auto it = std::lower_bound(
-        members.begin(), members.end(), dist, [](const cluster_member_entry& e, float val) {
+        members.begin(), members.end(), dist, [](const ClusterMemberEntry& e, float val) {
             return e.distance < val;
         });
     members.insert(it, {vec_id, dist});
@@ -272,10 +272,10 @@ HGraphDynamicClustering::split_cluster(int old_center_id, int64_t /*dim*/) {
     }
 
     auto split_it = cluster.begin() + (split_start_idx_ - 1);
-    std::vector<cluster_member_entry> to_move(split_it, cluster.end());
+    std::vector<ClusterMemberEntry> to_move(split_it, cluster.end());
     cluster.erase(split_it, cluster.end());
 
-    std::vector<cluster_member_entry> new_cluster;
+    std::vector<ClusterMemberEntry> new_cluster;
     new_cluster.push_back({static_cast<InnerIdType>(new_center_id), 0.0F});
     vec_to_cluster_[new_center_id] = new_center_id;
 
@@ -755,7 +755,7 @@ SIMQ::Add(const DatasetPtr& data) {
     // cross-thread data race on the per-token vectors).
     // Cluster-level structures (cluster_lists_, cluster_token_counts_) are
     // collected per-thread and merged in Phase 4.
-    struct per_thread_cluster_data {
+    struct PerThreadClusterData {
         // cluster_idx → list of inner_ids that touch it (unique per thread)
         std::unordered_map<InnerIdType, std::vector<InnerIdType>> cluster_docs;
         // cluster_idx → token count contribution
@@ -772,7 +772,7 @@ SIMQ::Add(const DatasetPtr& data) {
     last_reported_pct_ = -1;
 
     if (use_parallel) {
-        Vector<per_thread_cluster_data> per_thread(num_docs, allocator_);
+        Vector<PerThreadClusterData> per_thread(num_docs, allocator_);
         std::vector<std::future<void>> futures;
         futures.reserve(num_docs);
 
@@ -1250,12 +1250,12 @@ SIMQ::coarse_search(const float* query_tokens,
 
     // Each query token's search is independent. We do all KnnSearch calls in
     // parallel, then sequentially propagate scores (which is fast O(k) per token).
-    struct token_search_result {
+    struct TokenSearchResult {
         std::vector<std::pair<float, InnerIdType>> cscores;
         int64_t actual_coarse_k{0};
         uint64_t dist_cmp{0};
     };
-    std::vector<token_search_result> token_results(query_token_count);
+    std::vector<TokenSearchResult> token_results(query_token_count);
 
     if (this->thread_pool_ && query_token_count > 1) {
         std::vector<std::future<void>> futures;

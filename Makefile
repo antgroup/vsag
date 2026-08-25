@@ -155,6 +155,7 @@ cov:                     ## Build unit tests with code coverage enabled.
 
 .PHONEY: lint
 lint:                    ## Check coding styles defined in `.clang-tidy`.
+	@./scripts/linters/check-struct-names.py
 	@./scripts/linters/run-clang-tidy-15.sh -p build-release/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j ${COMPILE_JOBS}
 
 .PHONEY: fix-lint

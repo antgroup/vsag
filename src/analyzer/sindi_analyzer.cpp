@@ -43,7 +43,7 @@ is_sq8_value_quantization(SparseValueQuantizationType type) {
     return type == SparseValueQuantizationType::SQ8;
 }
 
-struct analyze_options {
+struct AnalyzeOptions {
     std::string base_path;
     std::string groundtruth_path;
     std::string save_groundtruth_path;
@@ -534,9 +534,9 @@ parse_sindi_search_json(const std::string& params_str) {
     return json;
 }
 
-analyze_options
+AnalyzeOptions
 parse_analyze_options(const JsonType& json) {
-    analyze_options options;
+    AnalyzeOptions options;
     if (not json.Contains("analyze")) {
         return options;
     }

@@ -158,7 +158,7 @@ public:
     }
 
     void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+    Deserialize(LvalueOrRvalue<StreamReader> reader) {
         io_->Deserialize(reader);
     }
 

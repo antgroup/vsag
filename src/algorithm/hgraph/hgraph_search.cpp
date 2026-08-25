@@ -541,7 +541,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         return make_empty_dataset_with_stats();
     }
 
-    struct visited_list_guard {
+    struct HGraphVisitedListGuard {
         std::shared_ptr<VisitedListPool> pool;
         VisitedListPtr visited_list;
 
@@ -553,11 +553,11 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             }
         }
 
-        ~visited_list_guard() {
+        ~HGraphVisitedListGuard() {
             Release();
         }
     };
-    visited_list_guard vt_guard{this->pool_, this->pool_->TakeOne()};
+    HGraphVisitedListGuard vt_guard{this->pool_, this->pool_->TakeOne()};
     auto& vt = vt_guard.visited_list;
 
     const auto* raw_query = use_custom_distance ? nullptr : get_data(query);

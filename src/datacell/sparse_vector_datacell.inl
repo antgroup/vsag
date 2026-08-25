@@ -162,7 +162,7 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
 }
 template <typename QuantTmpl, typename IOTmpl>
 void
-SparseVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+SparseVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     FlattenInterface::Deserialize(reader);
 
     uint32_t maybe_sentinel = 0;

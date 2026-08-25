@@ -80,7 +80,7 @@ public:
     }
 
     virtual void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+    Deserialize(LvalueOrRvalue<StreamReader> reader) {
         StreamReader::ReadObj(reader, this->is_trained_);
         StreamReader::ReadObj(reader, this->bucket_count_);
         StreamReader::ReadObj(reader, this->dim_);

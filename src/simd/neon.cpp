@@ -111,7 +111,7 @@ __inline float32x4_t __attribute__((__always_inline__)) vcvt_f32_half(const uint
 void
 PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result) {
 #if defined(ENABLE_NEON)
-    simd::PQDistanceFloat256Impl<simd::SimdTraits<simd::NEON_Tag>>(
+    simd::PQDistanceFloat256Impl<simd::SimdTraits<simd::NeonTag>>(
         single_dim_centers, single_dim_val, result, &generic::PQDistanceFloat256);
 #else
     return generic::PQDistanceFloat256(single_dim_centers, single_dim_val, result);
@@ -121,7 +121,7 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::ComputeIPImpl<simd::SimdTraits<simd::NEON_Tag>>(
+    return simd::ComputeIPImpl<simd::SimdTraits<simd::NeonTag>>(
         query, codes, dim, &generic::FP32ComputeIP);
 #else
     return generic::FP32ComputeIP(query, codes, dim);
@@ -131,7 +131,7 @@ FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
 float
 FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::ComputeL2SqrImpl<simd::SimdTraits<simd::NEON_Tag>>(
+    return simd::ComputeL2SqrImpl<simd::SimdTraits<simd::NeonTag>>(
         query, codes, dim, &generic::FP32ComputeL2Sqr);
 #else
     return vsag::generic::FP32ComputeL2Sqr(query, codes, dim);
@@ -159,7 +159,7 @@ FP32ComputeIPBatch4(const float* RESTRICT query,
                     float& result3,
                     float& result4) {
 #if defined(ENABLE_NEON)
-    simd::ComputeBatch4Impl<simd::SimdTraits<simd::NEON_Tag>, simd::Batch4Kind::IP>(
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::NeonTag>, simd::Batch4Kind::IP>(
         query,
         dim,
         codes1,
@@ -189,7 +189,7 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        float& result3,
                        float& result4) {
 #if defined(ENABLE_NEON)
-    simd::ComputeBatch4Impl<simd::SimdTraits<simd::NEON_Tag>, simd::Batch4Kind::L2>(
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::NeonTag>, simd::Batch4Kind::L2>(
         query,
         dim,
         codes1,
@@ -210,7 +210,7 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
 void
 FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    simd::BinaryOpImpl<simd::SimdTraits<simd::NEON_Tag>, simd::BinaryOp::Sub>(
+    simd::BinaryOpImpl<simd::SimdTraits<simd::NeonTag>, simd::BinaryOp::Sub>(
         x, y, z, dim, &generic::FP32Sub);
 #else
     return generic::FP32Sub(x, y, z, dim);
@@ -220,7 +220,7 @@ FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    simd::BinaryOpImpl<simd::SimdTraits<simd::NEON_Tag>, simd::BinaryOp::Add>(
+    simd::BinaryOpImpl<simd::SimdTraits<simd::NeonTag>, simd::BinaryOp::Add>(
         x, y, z, dim, &generic::FP32Add);
 #else
     return generic::FP32Add(x, y, z, dim);
@@ -230,7 +230,7 @@ FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    simd::BinaryOpImpl<simd::SimdTraits<simd::NEON_Tag>, simd::BinaryOp::Mul>(
+    simd::BinaryOpImpl<simd::SimdTraits<simd::NeonTag>, simd::BinaryOp::Mul>(
         x, y, z, dim, &generic::FP32Mul);
 #else
     return generic::FP32Mul(x, y, z, dim);
@@ -240,7 +240,7 @@ FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    simd::BinaryOpImpl<simd::SimdTraits<simd::NEON_Tag>, simd::BinaryOp::Div>(
+    simd::BinaryOpImpl<simd::SimdTraits<simd::NeonTag>, simd::BinaryOp::Div>(
         x, y, z, dim, &generic::FP32Div);
 #else
     return generic::FP32Div(x, y, z, dim);
@@ -250,7 +250,7 @@ FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
 float
 FP32ReduceAdd(const float* x, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::ReduceAddImpl<simd::SimdTraits<simd::NEON_Tag>>(x, dim, &generic::FP32ReduceAdd);
+    return simd::ReduceAddImpl<simd::SimdTraits<simd::NeonTag>>(x, dim, &generic::FP32ReduceAdd);
 #else
     return generic::FP32ReduceAdd(x, dim);
 #endif
@@ -266,7 +266,7 @@ __inline uint16x8_t __attribute__((__always_inline__)) load_4_short(const uint16
 float
 BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::HalfComputeIPImpl<simd::BF16Traits<simd::NEON_BF16_Tag>>(
+    return simd::HalfComputeIPImpl<simd::BF16Traits<simd::NeonBF16Tag>>(
         query, codes, dim, &generic::BF16ComputeIP);
 #else
     return generic::BF16ComputeIP(query, codes, dim);
@@ -276,7 +276,7 @@ BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint
 float
 BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::HalfComputeL2SqrImpl<simd::BF16Traits<simd::NEON_BF16_Tag>>(
+    return simd::HalfComputeL2SqrImpl<simd::BF16Traits<simd::NeonBF16Tag>>(
         query, codes, dim, &generic::BF16ComputeL2Sqr);
 #else
     return generic::BF16ComputeL2Sqr(query, codes, dim);
@@ -286,7 +286,7 @@ BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, u
 float
 FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::HalfComputeIPImpl<simd::FP16Traits<simd::NEON_FP16_Tag>>(
+    return simd::HalfComputeIPImpl<simd::FP16Traits<simd::NeonFP16Tag>>(
         query, codes, dim, &generic::FP16ComputeIP);
 #else
     return generic::FP16ComputeIP(query, codes, dim);
@@ -296,7 +296,7 @@ FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint
 float
 FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::HalfComputeL2SqrImpl<simd::FP16Traits<simd::NEON_FP16_Tag>>(
+    return simd::HalfComputeL2SqrImpl<simd::FP16Traits<simd::NeonFP16Tag>>(
         query, codes, dim, &generic::FP16ComputeL2Sqr);
 #else
     return generic::FP16ComputeL2Sqr(query, codes, dim);
@@ -364,7 +364,7 @@ load_12_uint8_to_float(const uint8_t* data, float32x4_t& f0, float32x4_t& f1, fl
 float
 INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::Int8ComputeL2SqrImpl<simd::Int8Traits<simd::NEON_Int8_Tag>>(
+    return simd::Int8ComputeL2SqrImpl<simd::Int8Traits<simd::NeonInt8Tag>>(
         query, codes, dim, &generic::INT8ComputeL2Sqr);
 #else
     return generic::INT8ComputeL2Sqr(query, codes, dim);
@@ -374,7 +374,7 @@ INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uin
 float
 INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::Int8ComputeIPImpl<simd::Int8Traits<simd::NEON_Int8_Tag>>(
+    return simd::Int8ComputeIPImpl<simd::Int8Traits<simd::NeonInt8Tag>>(
         query, codes, dim, &generic::INT8ComputeIP);
 #else
     return generic::INT8ComputeIP(query, codes, dim);
@@ -388,7 +388,7 @@ SQ8ComputeIP(const float* RESTRICT query,
              const float* RESTRICT diff,
              uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::SQ8ComputeIPImpl<simd::SQ8Traits<simd::NEON_SQ8_Tag>>(
+    return simd::SQ8ComputeIPImpl<simd::SQ8Traits<simd::NeonSQ8Tag>>(
         query, codes, lower_bound, diff, dim, &generic::SQ8ComputeIP);
 #else
     return generic::SQ8ComputeIP(query, codes, lower_bound, diff, dim);
@@ -402,7 +402,7 @@ SQ8ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT diff,
                 uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::SQ8ComputeL2SqrImpl<simd::SQ8Traits<simd::NEON_SQ8_Tag>>(
+    return simd::SQ8ComputeL2SqrImpl<simd::SQ8Traits<simd::NeonSQ8Tag>>(
         query, codes, lower_bound, diff, dim, &generic::SQ8ComputeL2Sqr);
 #else
     return generic::SQ8ComputeL2Sqr(query, codes, lower_bound, diff, dim);
@@ -416,7 +416,7 @@ SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT diff,
                   uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::SQ8ComputeCodesIPImpl<simd::SQ8Traits<simd::NEON_SQ8_Tag>>(
+    return simd::SQ8ComputeCodesIPImpl<simd::SQ8Traits<simd::NeonSQ8Tag>>(
         codes1, codes2, lower_bound, diff, dim, &generic::SQ8ComputeCodesIP);
 #else
     return generic::SQ8ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
@@ -430,7 +430,7 @@ SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT diff,
                      uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::SQ8ComputeCodesL2SqrImpl<simd::SQ8Traits<simd::NEON_SQ8_Tag>>(
+    return simd::SQ8ComputeCodesL2SqrImpl<simd::SQ8Traits<simd::NeonSQ8Tag>>(
         codes1, codes2, lower_bound, diff, dim, &generic::SQ8ComputeCodesL2Sqr);
 #else
     return generic::SQ8ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
@@ -453,7 +453,7 @@ SQ4ComputeIP(const float* RESTRICT query,
              const float* RESTRICT diff,
              uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::SQ4ComputeIPImpl<simd::SQ4Traits<simd::NEON_SQ4_Tag>>(
+    return simd::SQ4ComputeIPImpl<simd::SQ4Traits<simd::NeonSQ4Tag>>(
         query, codes, lower_bound, diff, dim, &generic::SQ4ComputeIP);
 #else
     return generic::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
@@ -467,7 +467,7 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT diff,
                 uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::SQ4ComputeL2SqrImpl<simd::SQ4Traits<simd::NEON_SQ4_Tag>>(
+    return simd::SQ4ComputeL2SqrImpl<simd::SQ4Traits<simd::NeonSQ4Tag>>(
         query, codes, lower_bound, diff, dim, &generic::SQ4ComputeL2Sqr);
 #else
     return generic::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
@@ -481,7 +481,7 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT diff,
                   uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::SQ4ComputeCodesIPImpl<simd::SQ4Traits<simd::NEON_SQ4_Tag>>(
+    return simd::SQ4ComputeCodesIPImpl<simd::SQ4Traits<simd::NeonSQ4Tag>>(
         codes1, codes2, lower_bound, diff, dim, &generic::SQ4ComputeCodesIP);
 #else
     return generic::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
@@ -495,7 +495,7 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT diff,
                      uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::SQ4ComputeCodesL2SqrImpl<simd::SQ4Traits<simd::NEON_SQ4_Tag>>(
+    return simd::SQ4ComputeCodesL2SqrImpl<simd::SQ4Traits<simd::NeonSQ4Tag>>(
         codes1, codes2, lower_bound, diff, dim, &generic::SQ4ComputeCodesL2Sqr);
 #else
     return generic::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
@@ -717,7 +717,7 @@ extract_4_bits_to_mask(const uint8_t* bits, uint64_t bit_offset) {
 float
 RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::RaBitQFloatScalarIPImpl<simd::SQ8Traits<simd::NEON_SQ8_Tag>>(
+    return simd::RaBitQFloatScalarIPImpl<simd::SQ8Traits<simd::NeonSQ8Tag>>(
         vector, codes, dim, &generic::RaBitQFloatSQIP);
 #else
     return generic::RaBitQFloatSQIP(vector, codes, dim);
@@ -976,7 +976,7 @@ RaBitQFloatSupplementCodeIP(const float* vector,
 void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
 #if defined(ENABLE_NEON)
-    simd::DivScalarImpl<simd::SimdTraits<simd::NEON_Tag>>(
+    simd::DivScalarImpl<simd::SimdTraits<simd::NeonTag>>(
         from, to, dim, scalar, &generic::DivScalar);
 #else
     generic::DivScalar(from, to, dim, scalar);
@@ -1064,7 +1064,7 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
 void
 BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_NEON)
-    simd::BitAndImpl<simd::BitTraits<simd::NEON_Bit_Tag>>(x, y, num_byte, result, &generic::BitAnd);
+    simd::BitAndImpl<simd::BitTraits<simd::NeonBitTag>>(x, y, num_byte, result, &generic::BitAnd);
 #else
     return generic::BitAnd(x, y, num_byte, result);
 #endif
@@ -1073,7 +1073,7 @@ BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* res
 void
 BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_NEON)
-    simd::BitOrImpl<simd::BitTraits<simd::NEON_Bit_Tag>>(x, y, num_byte, result, &generic::BitOr);
+    simd::BitOrImpl<simd::BitTraits<simd::NeonBitTag>>(x, y, num_byte, result, &generic::BitOr);
 #else
     return generic::BitOr(x, y, num_byte, result);
 #endif
@@ -1082,7 +1082,7 @@ BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* resu
 void
 BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_NEON)
-    simd::BitXorImpl<simd::BitTraits<simd::NEON_Bit_Tag>>(x, y, num_byte, result, &generic::BitXor);
+    simd::BitXorImpl<simd::BitTraits<simd::NeonBitTag>>(x, y, num_byte, result, &generic::BitXor);
 #else
     return generic::BitXor(x, y, num_byte, result);
 #endif
@@ -1091,7 +1091,7 @@ BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* res
 void
 BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_NEON)
-    simd::BitNotImpl<simd::BitTraits<simd::NEON_Bit_Tag>>(x, num_byte, result, &generic::BitNot);
+    simd::BitNotImpl<simd::BitTraits<simd::NeonBitTag>>(x, num_byte, result, &generic::BitNot);
 #else
     return generic::BitNot(x, num_byte, result);
 #endif
@@ -1099,7 +1099,7 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 void
 KacsWalk(float* data, uint64_t len) {
 #if defined(ENABLE_NEON)
-    simd::KacsWalkImpl<simd::SimdTraits<simd::NEON_Tag>>(data, len, &generic::KacsWalk);
+    simd::KacsWalkImpl<simd::SimdTraits<simd::NeonTag>>(data, len, &generic::KacsWalk);
 #else
     generic::KacsWalk(data, len);
 #endif
@@ -1144,7 +1144,7 @@ FlipSign(const uint8_t* flip, float* data, uint64_t dim) {
 void
 VecRescale(float* data, uint64_t dim, float val) {
 #if defined(ENABLE_NEON)
-    simd::VecRescaleImpl<simd::SimdTraits<simd::NEON_Tag>>(data, dim, val, &generic::VecRescale);
+    simd::VecRescaleImpl<simd::SimdTraits<simd::NeonTag>>(data, dim, val, &generic::VecRescale);
 #else
     generic::VecRescale(data, dim, val);
 #endif
@@ -1153,7 +1153,7 @@ VecRescale(float* data, uint64_t dim, float val) {
 void
 RotateOp(float* data, int idx, int dim_, int step) {
 #if defined(ENABLE_NEON)
-    simd::RotateOpImpl<simd::SimdTraits<simd::NEON_Tag>>(data, idx, dim_, step);
+    simd::RotateOpImpl<simd::SimdTraits<simd::NeonTag>>(data, idx, dim_, step);
 #else
     generic::RotateOp(data, idx, dim_, step);
 #endif
@@ -1180,7 +1180,7 @@ FHTRotate(float* data, uint64_t dim_) {
 float
 NormalizeWithCentroid(const float* from, const float* centroid, float* to, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::NormalizeWithCentroidImpl<simd::SimdTraits<simd::NEON_Tag>>(
+    return simd::NormalizeWithCentroidImpl<simd::SimdTraits<simd::NeonTag>>(
         from, centroid, to, dim, &generic::NormalizeWithCentroid);
 #else
     return generic::NormalizeWithCentroid(from, centroid, to, dim);
@@ -1191,7 +1191,7 @@ void
 InverseNormalizeWithCentroid(
     const float* from, const float* centroid, float* to, uint64_t dim, float norm) {
 #if defined(ENABLE_NEON)
-    simd::InverseNormalizeWithCentroidImpl<simd::SimdTraits<simd::NEON_Tag>>(
+    simd::InverseNormalizeWithCentroidImpl<simd::SimdTraits<simd::NeonTag>>(
         from, centroid, to, dim, norm, &generic::InverseNormalizeWithCentroid);
 #else
     generic::InverseNormalizeWithCentroid(from, centroid, to, dim, norm);

@@ -24,10 +24,10 @@
 
 namespace vsag::simd {
 
-struct NEON_Tag {};
+struct NeonTag {};
 
 template <>
-struct SimdTraits<NEON_Tag> {
+struct SimdTraits<NeonTag> {
     using FloatVec = float32x4_t;
     static constexpr int Width = 4;
 
@@ -83,9 +83,9 @@ struct SimdTraits<NEON_Tag> {
 };
 
 // --- Int8 traits for NEON ---
-struct NEON_Int8_Tag {};
+struct NeonInt8Tag {};
 template <>
-struct Int8Traits<NEON_Int8_Tag> {
+struct Int8Traits<NeonInt8Tag> {
     using Int8HalfVec = int8x8_t;
     using Int16Vec = int16x8_t;
     using Int32Vec = int32x4_t;
@@ -125,9 +125,9 @@ struct Int8Traits<NEON_Int8_Tag> {
 };
 
 // --- Bit operation traits for NEON ---
-struct NEON_Bit_Tag {};
+struct NeonBitTag {};
 template <>
-struct BitTraits<NEON_Bit_Tag> {
+struct BitTraits<NeonBitTag> {
     using IntVec = uint8x16_t;
     static constexpr int ByteWidth = 16;
 
@@ -158,9 +158,9 @@ struct BitTraits<NEON_Bit_Tag> {
 };
 
 // --- SQ8 traits for NEON ---
-struct NEON_SQ8_Tag {};
+struct NeonSQ8Tag {};
 template <>
-struct SQ8Traits<NEON_SQ8_Tag> : SimdTraits<NEON_Tag> {
+struct SQ8Traits<NeonSQ8Tag> : SimdTraits<NeonTag> {
     static inline __attribute__((always_inline)) FloatVec
     load_u8_as_float(const uint8_t* p) {
         uint32x4_t v32 = {p[0], p[1], p[2], p[3]};
@@ -169,9 +169,9 @@ struct SQ8Traits<NEON_SQ8_Tag> : SimdTraits<NEON_Tag> {
 };
 
 // --- SQ4Traits for NEON (Width=4, STEP=8 nibbles = 4 bytes per call) ---
-struct NEON_SQ4_Tag {};
+struct NeonSQ4Tag {};
 template <>
-struct SQ4Traits<NEON_SQ4_Tag> : SimdTraits<NEON_Tag> {
+struct SQ4Traits<NeonSQ4Tag> : SimdTraits<NeonTag> {
     static inline __attribute__((always_inline)) void
     load_nibbles_2x_as_float(const uint8_t* p, FloatVec& out0, FloatVec& out1) {
         constexpr float inv15 = 1.0f / 15.0f;
@@ -194,9 +194,9 @@ struct SQ4Traits<NEON_SQ4_Tag> : SimdTraits<NEON_Tag> {
 };
 
 // --- BF16Traits for NEON ---
-struct NEON_BF16_Tag {};
+struct NeonBF16Tag {};
 template <>
-struct BF16Traits<NEON_BF16_Tag> : SimdTraits<NEON_Tag> {
+struct BF16Traits<NeonBF16Tag> : SimdTraits<NeonTag> {
     static inline __attribute__((always_inline)) FloatVec
     load_half(const uint16_t* p) {
         uint16x4_t bf16 = vld1_u16(p);
@@ -206,9 +206,9 @@ struct BF16Traits<NEON_BF16_Tag> : SimdTraits<NEON_Tag> {
 };
 
 // --- FP16Traits for NEON ---
-struct NEON_FP16_Tag {};
+struct NeonFP16Tag {};
 template <>
-struct FP16Traits<NEON_FP16_Tag> : SimdTraits<NEON_Tag> {
+struct FP16Traits<NeonFP16Tag> : SimdTraits<NeonTag> {
     static inline __attribute__((always_inline)) FloatVec
     load_half(const uint16_t* p) {
         float16x4_t fp16 = vld1_f16(reinterpret_cast<const __fp16*>(p));

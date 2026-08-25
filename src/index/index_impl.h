@@ -33,7 +33,7 @@ GENERATE_HAS_STATIC_CLASS_FUNCTION(CheckAndMappingExternalParam,
 template <class T>
 class IndexImpl : public Index {
     static_assert(std::is_base_of<InnerIndexInterface, T>::value);
-    static_assert(has_static_CheckAndMappingExternalParam<T>::value);
+    static_assert(HasStaticCheckAndMappingExternalParam<T>::value);
 
 public:
     IndexImpl(const JsonType& external_param, const IndexCommonParam& common_param)

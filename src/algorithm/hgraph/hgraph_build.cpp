@@ -819,9 +819,9 @@ HGraph::ensure_physical_code_capacity(CodeSlotIdType required_capacity) {
         return;
     }
     this->physical_code_resize_pending_.store(true, std::memory_order_release);
-    struct pending_reset_guard {
+    struct PendingResetGuard {
         std::atomic<bool>& pending;
-        ~pending_reset_guard() {
+        ~PendingResetGuard() {
             pending.store(false, std::memory_order_release);
         }
     } pending_reset{this->physical_code_resize_pending_};

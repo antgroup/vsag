@@ -227,7 +227,7 @@ SparseDmqDataCell::Serialize(StreamWriter& writer) {
 }
 
 void
-SparseDmqDataCell::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+SparseDmqDataCell::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     std::unique_lock lock(this->mutex_);
     uint32_t magic = 0;
     StreamReader::ReadObj(reader, magic);

@@ -867,7 +867,7 @@ public:
     }
 
     void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) override {
+    Deserialize(LvalueOrRvalue<StreamReader> reader) override {
         FlattenInterface::Deserialize(reader);
         this->DeserializeSupplementIOType(reader);
         this->x_bit_layout_->Deserialize(reader);

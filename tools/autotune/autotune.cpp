@@ -214,7 +214,7 @@ metric_type(const std::string& dataset_metric) {
     throw std::invalid_argument("unsupported dataset distance: " + dataset_metric);
 }
 
-struct offline_dataset_owner {
+struct OfflineDatasetOwner {
     eval::EvalDatasetPtr source;
     std::vector<int64_t> identity_ids;
     DatasetPtr base;
@@ -232,7 +232,7 @@ attach_offline_dataset(IndexRequest& request,
                 dataset->GetTestDataType() == vsag::DATATYPE_FLOAT32,
             "AutoTune V1 supports only float32 datasets");
 
-    auto owner = std::make_shared<offline_dataset_owner>();
+    auto owner = std::make_shared<OfflineDatasetOwner>();
     owner->source = dataset;
     const auto base_count = dataset->GetNumberOfBase();
     const auto query_count = dataset->GetNumberOfQuery();

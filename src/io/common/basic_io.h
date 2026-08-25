@@ -92,7 +92,7 @@ public:
      */
     inline void
     Write(const uint8_t* data, uint64_t size, uint64_t offset) {
-        static_assert(has_WriteImpl<IOTmpl>::value);
+        static_assert(HasWriteImpl<IOTmpl>::value);
         cast().WriteImpl(data, size, offset);
         if constexpr (not InMemory) {
             InvalidateCacheRange(size, offset);
@@ -112,7 +112,7 @@ public:
      */
     inline bool
     Read(uint64_t size, uint64_t offset, uint8_t* data) const {
-        static_assert(has_ReadImpl<IOTmpl>::value);
+        static_assert(HasReadImpl<IOTmpl>::value);
         if constexpr (not InMemory) {
             const auto cache = GetReadCacheSnapshot();
             if (cache.cache != nullptr) {
@@ -135,7 +135,7 @@ public:
      */
     [[nodiscard]] inline const uint8_t*
     Read(uint64_t size, uint64_t offset, bool& need_release) const {
-        static_assert(has_DirectReadImpl<IOTmpl>::value);
+        static_assert(HasDirectReadImpl<IOTmpl>::value);
         if constexpr (not InMemory) {
             const auto cache = GetReadCacheSnapshot();
             if (cache.cache != nullptr) {
@@ -180,7 +180,7 @@ public:
      */
     inline bool
     MultiRead(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const {
-        static_assert(has_MultiReadImpl<IOTmpl>::value);
+        static_assert(HasMultiReadImpl<IOTmpl>::value);
         if constexpr (not InMemory) {
             const auto cache = GetReadCacheSnapshot();
             if (cache.cache != nullptr) {
@@ -295,7 +295,7 @@ public:
      */
     inline void
     Prefetch(uint64_t offset, uint64_t cache_line = 64) {
-        if constexpr (has_PrefetchImpl<IOTmpl>::value) {
+        if constexpr (HasPrefetchImpl<IOTmpl>::value) {
             return cast().PrefetchImpl(offset, cache_line);
         }
     }
@@ -336,7 +336,7 @@ public:
         } else {
             // Reset the logical and physical extent so a shorter deserialization
             // cannot retain stale bytes from a previously opened file.
-            if constexpr (has_ResizeImpl<IOTmpl>::value) {
+            if constexpr (HasResizeImpl<IOTmpl>::value) {
                 if (size > 0 or SupportsZeroSizeResize<IOTmpl>::value) {
                     Resize(size);
                 } else {
@@ -378,7 +378,7 @@ public:
                 return;
             }
         }
-        if constexpr (has_ReleaseImpl<IOTmpl>::value) {
+        if constexpr (HasReleaseImpl<IOTmpl>::value) {
             return cast().ReleaseImpl(data);
         }
     }
@@ -404,14 +404,14 @@ public:
                 ClearCache();
             }
         }
-        if constexpr (has_InitIOImpl<IOTmpl>::value) {
+        if constexpr (HasInitIOImpl<IOTmpl>::value) {
             return cast().InitIOImpl(io_param);
         }
     }
 
     inline void
     Resize(uint64_t size) {
-        if constexpr (has_ResizeImpl<IOTmpl>::value) {
+        if constexpr (HasResizeImpl<IOTmpl>::value) {
             cast().ResizeImpl(size);
         } else {
             const auto current_size = this->size_.load(std::memory_order_acquire);
@@ -434,7 +434,7 @@ public:
 
     inline void
     Shrink(uint64_t size) {
-        if constexpr (has_ShrinkImpl<IOTmpl>::value) {
+        if constexpr (HasShrinkImpl<IOTmpl>::value) {
             cast().ShrinkImpl(size);
         } else {
             if (size <= this->size_.load(std::memory_order_acquire)) {
@@ -448,7 +448,7 @@ public:
 
     inline int64_t
     GetMemoryUsage() const {
-        if constexpr (has_GetMemoryUsageImpl<IOTmpl>::value) {
+        if constexpr (HasGetMemoryUsageImpl<IOTmpl>::value) {
             return cast().GetMemoryUsageImpl();
         }
         return this->size_.load(std::memory_order_acquire);

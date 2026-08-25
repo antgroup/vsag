@@ -231,7 +231,7 @@ public:
     }
 
     void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) override {
+    Deserialize(LvalueOrRvalue<StreamReader> reader) override {
         base_->Deserialize(std::move(reader));
         this->refresh_metadata();
     }

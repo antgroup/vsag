@@ -115,19 +115,19 @@ parse_args(argparse::ArgumentParser& parser, int argc, char** argv) {
     }
 }
 
-vsag::eval::eval_job
+vsag::eval::EvalJob
 parse_yaml_file(const std::string& yaml_file) {
     using Node = YAML::Node;
     Node config_all = YAML::LoadFile(yaml_file);
 
-    vsag::eval::eval_job cac;
+    vsag::eval::EvalJob cac;
     try {
         if (config_all["global"]) {
             if (config_all["global"]["exporters"]) {
                 auto exporters_root = config_all["global"]["exporters"];
                 if (exporters_root.IsMap()) {
                     for (auto it = exporters_root.begin(); it != exporters_root.end(); ++it) {
-                        auto exporter = vsag::eval::exporter::Load(it->second);
+                        auto exporter = vsag::eval::ExporterConfig::Load(it->second);
                         cac.exporters.emplace_back(exporter);
                     }
                 }

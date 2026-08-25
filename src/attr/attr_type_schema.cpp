@@ -47,7 +47,7 @@ AttrTypeSchema::Serialize(StreamWriter& writer) {
 }
 
 void
-AttrTypeSchema::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+AttrTypeSchema::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     uint64_t size;
     StreamReader::ReadObj(reader, size);
     this->schema_.reserve(size);

@@ -26,10 +26,10 @@
 
 namespace vsag::simd {
 
-struct AVX_Tag {};
+struct AvxTag {};
 
 template <>
-struct SimdTraits<AVX_Tag> {
+struct SimdTraits<AvxTag> {
     using FloatVec = __m256;
     static constexpr int Width = 8;
 
@@ -89,9 +89,9 @@ struct SimdTraits<AVX_Tag> {
 };
 
 // --- Bit operation traits for AVX (uses float ops since AVX has no 256-bit integer) ---
-struct AVX_Bit_Tag {};
+struct AvxBitTag {};
 template <>
-struct BitTraits<AVX_Bit_Tag> {
+struct BitTraits<AvxBitTag> {
     using IntVec = __m256;  // reuse float vector for bitwise ops
     static constexpr int ByteWidth = 32;
 
@@ -122,9 +122,9 @@ struct BitTraits<AVX_Bit_Tag> {
 };
 
 // --- SQ8 traits for AVX ---
-struct AVX_SQ8_Tag {};
+struct AvxSQ8Tag {};
 template <>
-struct SQ8Traits<AVX_SQ8_Tag> : SimdTraits<AVX_Tag> {
+struct SQ8Traits<AvxSQ8Tag> : SimdTraits<AvxTag> {
     static inline __attribute__((always_inline)) FloatVec
     load_u8_as_float(const uint8_t* p) {
         int32_t lo_val, hi_val;
@@ -137,9 +137,9 @@ struct SQ8Traits<AVX_SQ8_Tag> : SimdTraits<AVX_Tag> {
 };
 
 // --- SQ4Traits for AVX (Width=8, STEP=16 nibbles = 8 bytes per call) ---
-struct AVX_SQ4_Tag {};
+struct AvxSQ4Tag {};
 template <>
-struct SQ4Traits<AVX_SQ4_Tag> : SimdTraits<AVX_Tag> {
+struct SQ4Traits<AvxSQ4Tag> : SimdTraits<AvxTag> {
     static inline __attribute__((always_inline)) void
     load_nibbles_2x_as_float(const uint8_t* p, FloatVec& out0, FloatVec& out1) {
         __m128i code0 = _mm_set_epi8(0,
@@ -192,9 +192,9 @@ struct SQ4Traits<AVX_SQ4_Tag> : SimdTraits<AVX_Tag> {
 };
 
 // --- BF16Traits for AVX ---
-struct AVX_BF16_Tag {};
+struct AvxBF16Tag {};
 template <>
-struct BF16Traits<AVX_BF16_Tag> : SimdTraits<AVX_Tag> {
+struct BF16Traits<AvxBF16Tag> : SimdTraits<AvxTag> {
     static inline __attribute__((always_inline)) FloatVec
     load_half(const uint16_t* p) {
         __m256i v = _mm256_set_epi16(static_cast<short>(p[7]),
@@ -218,9 +218,9 @@ struct BF16Traits<AVX_BF16_Tag> : SimdTraits<AVX_Tag> {
 };
 
 // --- FP16Traits for AVX (uses F16C: _mm256_cvtph_ps) ---
-struct AVX_FP16_Tag {};
+struct AvxFP16Tag {};
 template <>
-struct FP16Traits<AVX_FP16_Tag> : SimdTraits<AVX_Tag> {
+struct FP16Traits<AvxFP16Tag> : SimdTraits<AvxTag> {
     static inline __attribute__((always_inline)) FloatVec
     load_half(const uint16_t* p) {
         __m128i fp16 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(p));
@@ -229,9 +229,9 @@ struct FP16Traits<AVX_FP16_Tag> : SimdTraits<AVX_Tag> {
 };
 
 // --- RaBitQTraits for AVX (8-wide, no AVX2 integer ops) ---
-struct AVX_RaBitQ_Tag {};
+struct AvxRaBitQTag {};
 template <>
-struct RaBitQTraits<AVX_RaBitQ_Tag> : SimdTraits<AVX_Tag> {
+struct RaBitQTraits<AvxRaBitQTag> : SimdTraits<AvxTag> {
     static inline __attribute__((always_inline)) FloatVec
     bits_to_signed(const uint8_t* bit_ptr, FloatVec pos, FloatVec neg) {
         uint8_t byte = bit_ptr[0];

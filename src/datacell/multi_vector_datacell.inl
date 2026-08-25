@@ -219,7 +219,7 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Serialize(StreamWriter& writer) {
 
 template <typename QuantTmpl, typename IOTmpl>
 void
-MultiVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+MultiVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     FlattenInterface::Deserialize(reader);
     StreamReader::ReadObj(reader, multi_vector_dim_);
     uint64_t current_offset = 0;

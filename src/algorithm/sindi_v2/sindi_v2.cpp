@@ -264,7 +264,7 @@ make_top_terms_signature_key(const SparseVector& vector, uint32_t top_terms) {
     return {signature.begin(), signature.end()};
 }
 
-struct rerank_layout_record {
+struct RerankLayoutRecord {
     const SparseVector* vector{nullptr};
     InnerIdType inner_id{0};
     std::vector<uint64_t> signature;
@@ -272,7 +272,7 @@ struct rerank_layout_record {
 
 void
 write_rerank_flat_with_layout(const FlattenInterfacePtr& rerank_flat,
-                              std::vector<rerank_layout_record>& records,
+                              std::vector<RerankLayoutRecord>& records,
                               uint32_t rerank_layout) {
     if (rerank_layout > 0) {
         for (auto& record : records) {
@@ -520,7 +520,7 @@ SINDIV2::Add(const DatasetPtr& base) {
     if (use_reorder_ && rerank_type_ == SPARSE_RERANK_TYPE_DMQ8) {
         dmq_rerank_vectors.reserve(data_num);
     }
-    std::vector<rerank_layout_record> rerank_layout_records;
+    std::vector<RerankLayoutRecord> rerank_layout_records;
     if (use_reorder_ && rerank_layout_ > 0) {
         rerank_layout_records.reserve(data_num);
     }
@@ -654,7 +654,7 @@ SINDIV2::build_immutable(const DatasetPtr& base) {
     if (use_reorder_ && rerank_type_ == SPARSE_RERANK_TYPE_DMQ8) {
         dmq_rerank_vectors.reserve(data_num);
     }
-    std::vector<rerank_layout_record> rerank_layout_records;
+    std::vector<RerankLayoutRecord> rerank_layout_records;
     if (use_reorder_ && rerank_layout_ > 0) {
         rerank_layout_records.reserve(data_num);
     }

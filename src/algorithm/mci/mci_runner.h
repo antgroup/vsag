@@ -19,7 +19,7 @@ public:
     std::vector<bool> must_contain_nodes;
     // graph_mce g;
     mce mce_;
-    mce_stats last_stats;
+    MceStats last_stats;
 
     void
     re_id_and_build_csr_graph(std::vector<edge_type>& edge) {

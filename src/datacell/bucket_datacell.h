@@ -153,7 +153,7 @@ public:
     Serialize(StreamWriter& writer) override;
 
     void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
+    Deserialize(LvalueOrRvalue<StreamReader> reader) override;
 
     void
     InitIO(const IOParamPtr& io_param) override {
@@ -905,7 +905,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::Serialize(StreamWriter& writer) {
 
 template <typename QuantTmpl, typename IOTmpl>
 void
-BucketDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+BucketDataCell<QuantTmpl, IOTmpl>::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     BucketInterface::Deserialize(reader);
     quantizer_->Deserialize(reader);
     this->backend_ =
