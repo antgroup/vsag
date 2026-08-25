@@ -18,7 +18,8 @@
 
 namespace fixtures {
 
-TestReader::TestReader(vsag::Binary binary) : binary_(std::move(binary)) {
+TestReader::TestReader(vsag::Binary binary, uint64_t memory_usage)
+    : binary_(std::move(binary)), memory_usage_(memory_usage) {
 }
 
 void
@@ -35,6 +36,11 @@ TestReader::AsyncRead(uint64_t offset, uint64_t len, void* dest, vsag::CallBack 
 uint64_t
 TestReader::Size() const {
     return binary_.size;
+}
+
+uint64_t
+TestReader::GetMemoryUsage() const {
+    return memory_usage_;
 }
 
 }  // namespace fixtures

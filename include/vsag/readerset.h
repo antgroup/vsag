@@ -134,6 +134,27 @@ public:
 };
 
 /**
+ * @class MemoryUsageReader
+ * @brief Optional Reader extension for reporting reader-owned resident memory.
+ *
+ * Reader implementations with resident caches can derive from this class so indexes that retain
+ * the reader can include that memory in their usage statistics. Implementations must be
+ * thread-safe because GetMemoryUsage() may be called concurrently with reads.
+ */
+class MemoryUsageReader : public Reader {
+public:
+    ~MemoryUsageReader() override;
+
+    /**
+     * @brief Returns memory owned by the reader, excluding the underlying data source.
+     *
+     * @return Resident memory usage in bytes.
+     */
+    [[nodiscard]] virtual uint64_t
+    GetMemoryUsage() const = 0;
+};
+
+/**
  * @class ReaderSet
  * @brief A class for managing a collection of `Reader` objects.
  *
