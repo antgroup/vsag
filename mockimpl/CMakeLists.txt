@@ -26,13 +26,22 @@ set (MOCK_SRCS
   ../src/json_wrapper.cpp
 )
 
-add_library (vsag_mockimpl SHARED ${MOCK_SRCS})
-add_library (vsag_mockimpl_static STATIC ${MOCK_SRCS})
+add_library (vsag_mockimpl_objects OBJECT ${MOCK_SRCS})
+add_library (vsag_mockimpl SHARED $<TARGET_OBJECTS:vsag_mockimpl_objects>)
+add_library (vsag_mockimpl_static STATIC $<TARGET_OBJECTS:vsag_mockimpl_objects>)
 
+target_link_libraries (vsag_mockimpl_objects PRIVATE
+                       roaring fmt::fmt-header-only simd vsag_src_common)
 target_link_libraries (vsag_mockimpl PRIVATE roaring fmt::fmt-header-only simd vsag_src_common)
 target_link_libraries (vsag_mockimpl_static PRIVATE roaring fmt::fmt-header-only simd vsag_src_common)
+add_dependencies (vsag_mockimpl_objects version_mockimpl roaring)
 add_dependencies (vsag_mockimpl version_mockimpl roaring)
 add_dependencies (vsag_mockimpl_static version_mockimpl roaring)
+
+set_target_properties (vsag_mockimpl_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+# Match the definition CMake supplies when these sources belong directly to the shared target.
+# No mock implementation source branches on this internal definition.
+target_compile_definitions (vsag_mockimpl_objects PRIVATE vsag_mockimpl_EXPORTS)
 
 set_target_properties (vsag_mockimpl_static PROPERTIES OUTPUT_NAME "vsag_mockimpl")
 install (TARGETS vsag_mockimpl

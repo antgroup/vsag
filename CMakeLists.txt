@@ -65,6 +65,9 @@ if (ENABLE_EXAMPLES)
 endif ()
 if (ENABLE_TESTS)
     add_subdirectory (tests)
+    # Preserve the shared target's existing private definition and apply it to the common
+    # compilation. Production sources do not branch on ENABLE_TESTS.
+    target_compile_definitions (vsag_objects PRIVATE ENABLE_TESTS)
     target_compile_definitions (vsag PRIVATE ENABLE_TESTS)
 endif ()
 
