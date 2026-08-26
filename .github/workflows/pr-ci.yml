@@ -84,6 +84,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Test changed-source lint filter
+        run: python3 -m unittest discover -s scripts/linters -p 'test_changed_source_filter.py'
       - name: Prepare Host
         run: |
           sudo env VSAG_INSTALL_INTEL_MKL=OFF bash ./scripts/deps/install_deps_ubuntu.sh
@@ -118,36 +120,31 @@ jobs:
           make asan VSAG_ENABLE_EXAMPLES=ON VSAG_ENABLE_TOOLS=ON COMPILE_JOBS=3
       - name: Get changed source files
         id: changed-srcs
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git fetch origin ${{ github.base_ref }} --depth=1
-          if ! CHANGED=$(git diff --name-only origin/${{ github.base_ref }}..HEAD -- 'src/**/*.cpp' ':(exclude)src/**/*_test.cpp'); then
-            echo "Failed to determine changed source files" >&2
+          git fetch origin "$BASE_BRANCH" --depth=1
+          if ! PATTERN=$(python3 ./scripts/linters/changed_source_filter.py "origin/$BASE_BRANCH"); then
+            echo "Failed to build changed-source lint filter" >&2
             exit 1
-          fi
-          PATTERN=""
-          if [ -n "$CHANGED" ]; then
-            if ! PATTERN=$(CHANGED="$CHANGED" python3 - <<'PY'
-          import os
-          import re
-
-          changed = os.environ["CHANGED"].splitlines()
-          print("|".join(f"{re.escape(path)}$" for path in changed))
-          PY
-            ); then
-              echo "Failed to build changed-source lint filter" >&2
-              exit 1
-            fi
-            if [ -z "$PATTERN" ]; then
-              echo "Changed source files were found, but the lint filter is empty" >&2
-              exit 1
-            fi
           fi
           echo "pattern=$PATTERN" >> "$GITHUB_OUTPUT"
       - name: Run Lint
+        id: changed_source_lint
         if: steps.changed-srcs.outputs.pattern != ''
         run: |
           ./scripts/linters/run-clang-tidy-15.sh -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j 4 '${{ steps.changed-srcs.outputs.pattern }}'
+      - name: Verify changed-source lint execution
+        if: always() && steps.changed-srcs.outcome == 'success'
+        env:
+          LINT_PATTERN: ${{ steps.changed-srcs.outputs.pattern }}
+          LINT_OUTCOME: ${{ steps.changed_source_lint.outcome }}
+        run: |
+          if [ -n "$LINT_PATTERN" ] && [ "$LINT_OUTCOME" != "success" ]; then
+            echo "Changed sources were found, but lint outcome was: $LINT_OUTCOME" >&2
+            exit 1
+          fi
       - name: Clean
         run: |
           find ./build -type f -name "*.o" -exec rm -f {} +
