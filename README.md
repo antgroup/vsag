@@ -345,17 +345,17 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/inabao">
-                    <img src="https://avatars.githubusercontent.com/u/37021995?v=4" width="100" alt="inabao"/>
-                    <br />
-                    <sub><b>inabao</b></sub>
-                </a>
-            </td>
-            <td align="center">
                 <a href="https://github.com/wxyucs">
                     <img src="https://avatars.githubusercontent.com/u/12595343?v=4" width="100" alt="wxyucs"/>
                     <br />
                     <sub><b>Xiangyu Wang</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/inabao">
+                    <img src="https://avatars.githubusercontent.com/u/37021995?v=4" width="100" alt="inabao"/>
+                    <br />
+                    <sub><b>inabao</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -396,6 +396,13 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/vsag-bot">
+                    <img src="https://avatars.githubusercontent.com/u/276218163?v=4" width="100" alt="vsag-bot"/>
+                    <br />
+                    <sub><b>vsag-bot</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/Carrot-77">
                     <img src="https://avatars.githubusercontent.com/u/61344086?v=4" width="100" alt="Carrot-77"/>
                     <br />
@@ -416,20 +423,13 @@ VSAG referenced the following works during its implementation:
                     <sub><b>Deming Chu</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/shadowao">
                     <img src="https://avatars.githubusercontent.com/u/13804928?v=4" width="100" alt="shadowao"/>
                     <br />
                     <sub><b>azl</b></sub>
-                </a>
-            </td>
-        </tr>
-        <tr>
-            <td align="center">
-                <a href="https://github.com/vsag-bot">
-                    <img src="https://avatars.githubusercontent.com/u/276218163?v=4" width="100" alt="vsag-bot"/>
-                    <br />
-                    <sub><b>vsag-bot</b></sub>
                 </a>
             </td>
             <td align="center">
