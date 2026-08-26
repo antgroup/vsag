@@ -15,7 +15,7 @@ one, read it top-to-bottom, then adapt it to your data.
 ## Build
 
 Examples are gated behind `ENABLE_EXAMPLES=ON`. The shortest path is
-`make dev`, which enables tests, Python bindings, tools, mockimpl, and
+`make dev`, which enables tests, Python bindings, tools, and
 the examples in a single configure:
 
 ```bash

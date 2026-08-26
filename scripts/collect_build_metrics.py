@@ -78,8 +78,8 @@ def classify_edge(output: str, link_outputs: set[str] | None = None) -> str:
     if normalized.endswith((".o", ".obj")):
         if is_dependency_output(normalized):
             return "dependency_compile"
-        if normalized.startswith(("tests/", "mockimpl/")) or any(
-            part in normalized for part in ("/tests/", "test.dir/", "_test.dir/", "/mockimpl/")
+        if normalized.startswith("tests/") or any(
+            part in normalized for part in ("/tests/", "test.dir/", "_test.dir/")
         ):
             return "test_compile"
         if normalized.startswith("src/cmakefiles/") or "/src/cmakefiles/" in normalized:

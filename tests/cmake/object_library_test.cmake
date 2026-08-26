@@ -17,7 +17,6 @@ if (NOT VSAG_SOURCE_DIR)
 endif ()
 
 file (READ "${VSAG_SOURCE_DIR}/src/CMakeLists.txt" _vsag_cmake)
-file (READ "${VSAG_SOURCE_DIR}/mockimpl/CMakeLists.txt" _mock_cmake)
 
 function (require_text content text description)
     string (FIND "${content}" "${text}" _position)
@@ -45,18 +44,4 @@ reject_text ("${_vsag_cmake}" [=[add_library (vsag SHARED ${VSAG_SRCS})]=]
 reject_text ("${_vsag_cmake}" [=[add_library (vsag_static STATIC ${VSAG_SRCS})]=]
              "duplicate static VSAG source compilation")
 
-require_text ("${_mock_cmake}"
-              [=[add_library (vsag_mockimpl_objects OBJECT ${MOCK_SRCS})]=]
-              "single mock source-owning OBJECT target")
-require_text ("${_mock_cmake}"
-              [=[add_library (vsag_mockimpl SHARED $<TARGET_OBJECTS:vsag_mockimpl_objects>)]=]
-              "shared mock object consumption")
-require_text ("${_mock_cmake}"
-              [=[add_library (vsag_mockimpl_static STATIC $<TARGET_OBJECTS:vsag_mockimpl_objects>)]=]
-              "static mock object consumption")
-reject_text ("${_mock_cmake}" [=[add_library (vsag_mockimpl SHARED ${MOCK_SRCS})]=]
-             "duplicate shared mock source compilation")
-reject_text ("${_mock_cmake}" [=[add_library (vsag_mockimpl_static STATIC ${MOCK_SRCS})]=]
-             "duplicate static mock source compilation")
-
-message (STATUS "VSAG and mock source lists each have one object-library owner")
+message (STATUS "VSAG source list has one object-library owner")

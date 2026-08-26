@@ -11,7 +11,6 @@ VSAG_ENABLE_TESTS ?= OFF
 VSAG_ENABLE_PYBINDS ?= OFF
 VSAG_ENABLE_TOOLS ?= OFF
 VSAG_ENABLE_EXAMPLES ?= OFF
-VSAG_ENABLE_MOCKIMPL ?= OFF
 VSAG_ENABLE_INTEL_MKL ?= OFF
 VSAG_ENABLE_LIBAIO ?= ON
 VSAG_USE_SYSTEM_DEPS ?= AUTO
@@ -22,7 +21,6 @@ VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DVSAG_USE_SYSTEM_DEPS=${VSAG_USE_SYSTEM_D
 VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX} -DNUM_BUILDING_JOBS=${COMPILE_JOBS}
 VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DENABLE_TESTS=${VSAG_ENABLE_TESTS} -DENABLE_PYBINDS=${VSAG_ENABLE_PYBINDS}
 VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DENABLE_TOOLS=${VSAG_ENABLE_TOOLS} -DENABLE_EXAMPLES=${VSAG_ENABLE_EXAMPLES}
-VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DENABLE_MOCKIMPL=${VSAG_ENABLE_MOCKIMPL}
 # CI checks out these sources before configuration. Explicit source overrides
 # prevent FetchContent from contacting the archive URLs declared under extern/.
 ifneq ($(strip ${VSAG_FETCHCONTENT_BASE_DIR}),)
@@ -92,17 +90,16 @@ debug:                   ## Build vsag with debug options.
 
 .PHONY: dev
 dev:                     ## Build full developer configuration.
-	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=OFF -DENABLE_CCACHE=ON -DENABLE_TESTS=ON -DENABLE_PYBINDS=ON -DENABLE_TOOLS=ON -DENABLE_EXAMPLES=ON -DENABLE_MOCKIMPL=ON
+	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=OFF -DENABLE_CCACHE=ON -DENABLE_TESTS=ON -DENABLE_PYBINDS=ON -DENABLE_TOOLS=ON -DENABLE_EXAMPLES=ON
 	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
 .PHONY: test
 test:                    ## Build and run unit tests.
-	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=OFF -DENABLE_CCACHE=ON -DENABLE_TESTS=ON -DENABLE_MOCKIMPL=ON
+	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=OFF -DENABLE_CCACHE=ON -DENABLE_TESTS=ON
 	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS}
 	./build/tests/unittests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 	./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 	./build/tests/eval_monitor_test -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
-	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 
 .PHONY: test-cmake
 test-cmake:              ## Run focused CMake helper tests.
@@ -116,7 +113,7 @@ asan:                    ## Build with AddressSanitizer option.
 	$(MAKE) build-asan
 
 configure-asan:
-	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Sanitize -DENABLE_ASAN=ON -DENABLE_TSAN=OFF -DENABLE_CCACHE=ON -DENABLE_TESTS=ON -DENABLE_MOCKIMPL=ON
+	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Sanitize -DENABLE_ASAN=ON -DENABLE_TSAN=OFF -DENABLE_CCACHE=ON -DENABLE_TESTS=ON
 
 build-asan:
 	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS} -- ${CMAKE_BUILD_ARGS}
@@ -125,18 +122,16 @@ build-asan:
 test_asan: asan          ## Run unit tests with AddressSanitizer option.
 	./build/tests/unittests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 	./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
-	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 
 .PHONY: tsan
 tsan:                    ## Build with ThreadSanitizer option.
-	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Sanitize -DENABLE_ASAN=OFF -DENABLE_TSAN=ON -DENABLE_CCACHE=ON -DENABLE_TESTS=ON -DENABLE_MOCKIMPL=ON
+	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Sanitize -DENABLE_ASAN=OFF -DENABLE_TSAN=ON -DENABLE_CCACHE=ON -DENABLE_TESTS=ON
 	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
 .PHONY: test_tsan
 test_tsan: tsan          ## Run unit tests with ThreadSanitizer option.
 	./build/tests/unittests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 	./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
-	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 
 .PHONY: clean
 clean:                   ## Clear build/ directory.
@@ -150,7 +145,7 @@ fmt:                     ## Format codes.
 
 .PHONY: cov
 cov:                     ## Build unit tests with code coverage enabled.
-	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON -DENABLE_CCACHE=ON -DENABLE_ASAN=OFF -DENABLE_TESTS=ON -DENABLE_MOCKIMPL=ON
+	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON -DENABLE_CCACHE=ON -DENABLE_ASAN=OFF -DENABLE_TESTS=ON
 	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
 .PHONEY: lint
@@ -163,20 +158,17 @@ fix-lint:                ## Fix coding style issues in-place via clang-apply-rep
 
 .PHONY: test_parallel
 test_parallel:           ## Run all tests parallel (used in CI).
-	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Sanitize -DENABLE_ASAN=OFF -DENABLE_CCACHE=OFF -DENABLE_TESTS=ON -DENABLE_MOCKIMPL=ON
+	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Sanitize -DENABLE_ASAN=OFF -DENABLE_CCACHE=OFF -DENABLE_TESTS=ON
 	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS}
 	@./scripts/testing/test_parallel_bg.sh
-	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 
 .PHONY: test_asan_parallel
 test_asan_parallel: asan ## Run unit tests parallel with AddressSanitizer option.
 	@./scripts/testing/test_parallel_bg.sh
-	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 
 .PHONY: test_tsan_parallel
 test_tsan_parallel: tsan ## Run unit tests parallel with ThreadSanitizer option.
 	@./scripts/testing/test_parallel_bg.sh
-	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 
 ##
 ## ================ distribution ================
@@ -198,19 +190,18 @@ run-dist-tests:          ## Run distribution tests.
 	@echo "running tests..."
 	@${RELEASE_BUILD_DIR}/tests/unittests -d yes "~[daily]"
 	@${RELEASE_BUILD_DIR}/tests/functests -d yes "~[daily]"
-	@${RELEASE_BUILD_DIR}/mockimpl/tests_mockimpl -d yes "~[daily]"
 
 .PHONY: dist-pre-cxx11-abi
 dist-pre-cxx11-abi:      ## Build vsag with distribution options.
 	echo "building dist-pre-cxx11-abi..."
-	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_CCACHE=${VSAG_ENABLE_CCACHE} -DENABLE_INTEL_MKL=off -DENABLE_CXX11_ABI=off -DENABLE_LIBCXX=off -DENABLE_TESTS=ON -DENABLE_MOCKIMPL=ON
+	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_CCACHE=${VSAG_ENABLE_CCACHE} -DENABLE_INTEL_MKL=off -DENABLE_CXX11_ABI=off -DENABLE_LIBCXX=off -DENABLE_TESTS=ON
 	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
 	$(MAKE) run-dist-tests
 
 .PHONY: dist-cxx11-abi
 dist-cxx11-abi:          ## Build vsag with distribution options.
 	echo "building dist-cxx11-abi..."
-	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_CCACHE=${VSAG_ENABLE_CCACHE} -DENABLE_INTEL_MKL=off -DENABLE_CXX11_ABI=on -DENABLE_LIBCXX=off -DENABLE_TESTS=ON -DENABLE_MOCKIMPL=ON
+	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_CCACHE=${VSAG_ENABLE_CCACHE} -DENABLE_INTEL_MKL=off -DENABLE_CXX11_ABI=on -DENABLE_LIBCXX=off -DENABLE_TESTS=ON
 	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
 	$(MAKE) run-dist-tests
 

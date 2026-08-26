@@ -56,7 +56,7 @@ install:                 ## Build and install the release version of vsag.
 
 ## 编译 VSAG 库
 
-`make debug` 是我们开发中最常用的命令，它会以开发模式编译整个项目，禁用大多数优化（`-O0`）并生成调试信息（`-g`）。该目标默认关闭测试、示例、工具、Python 绑定与 `mockimpl`；如需同时启用它们，可使用 `make dev`。
+`make debug` 是我们开发中最常用的命令，它会以开发模式编译整个项目，禁用大多数优化（`-O0`）并生成调试信息（`-g`）。该目标默认关闭测试、示例、工具和 Python 绑定；如需同时启用它们，可使用 `make dev`。
 
 在默认设置下，开发模式的编译产物会生成在 `./build/` 目录中。可以通过如下命令运行单元测试：
 

@@ -89,9 +89,9 @@ install:                 ## Build and install the release version of vsag.
 
 Build target behavior:
 
-- `make debug` builds the default minimal configuration. It does not enable tests, examples, tools, Python bindings, or `mockimpl` unless they are explicitly turned on.
-- `make dev` builds the full developer configuration with tests, examples, tools, Python bindings, and `mockimpl` enabled.
-- `make test`, `make asan`, `make tsan`, and the related parallel test targets automatically enable tests and `mockimpl`.
+- `make debug` builds the default minimal configuration. It does not enable tests, examples, tools, or Python bindings unless they are explicitly turned on.
+- `make dev` builds the full developer configuration with tests, examples, tools, and Python bindings enabled.
+- `make test`, `make asan`, `make tsan`, and the related parallel test targets automatically enable tests.
 - `make release` is the reproducible release/package path. It uses the minimal configuration, Release optimization semantics, and disables ccache by default. Enable optional components explicitly when needed, for example `make release VSAG_ENABLE_TOOLS=ON`.
 - `make release-perf` uses the same Release optimization semantics and minimal configuration in `build-release-perf/`, but enables ccache by default for iterative development and benchmarking.
 - Override either cache default explicitly with `VSAG_ENABLE_CCACHE=ON` or `VSAG_ENABLE_CCACHE=OFF`.
@@ -191,9 +191,6 @@ source of truth for the exact upstream URL and expected checksum.
 - **`ENABLE_PYBINDS`** (default: `OFF`)
   - Build the `_pyvsag` Python extension module
 
-- **`ENABLE_MOCKIMPL`** (default: `OFF`)
-  - Build the `mockimpl` targets used by interface and compatibility-style testing
-
 For a complete list of build options, see the `option()` directives in `cmake/VSAGOptions.cmake`.
 
 ## Project Structure
@@ -203,7 +200,6 @@ For a complete list of build options, see the `option()` directives in `cmake/VS
 - `examples/`: cpp and python example codes
 - `extern/`: third-party libraries
 - `include/`: export header files
-- `mockimpl/`: the mock implementation that can be used in interface test
 - `python/`: the pyvsag package and setup tools
 - `python_bindings/`: the python bindings
 - `scripts/`: useful scripts
