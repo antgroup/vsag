@@ -99,6 +99,11 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
                 "{USE_FHT_KEY}": false,
                 "{FAST_ENCODE_RABITQ_KEY}": true,
                 "{FAST_ENCODE_RABITQ_ROUNDS_KEY}": 6,
+                "{SAQ_AVG_BITS_KEY}": 4.0,
+                "{SAQ_SEGMENT_COUNT_KEY}": 0,
+                "{SAQ_ADJUSTMENT_ROUNDS_KEY}": 6,
+                "{SAQ_USE_PCA_KEY}": true,
+                "{SAQ_RANDOM_ROTATION_KEY}": true,
                 "{PRODUCT_QUANTIZATION_DIM_KEY}": 1
             },
             "{BUCKETS_COUNT_KEY}": 10,
@@ -348,6 +353,46 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                 BUCKET_PARAMS_KEY,
                 QUANTIZATION_PARAMS_KEY,
                 FAST_ENCODE_RABITQ_ROUNDS_KEY,
+            },
+        },
+        {
+            SAQ_AVG_BITS,
+            {
+                BUCKET_PARAMS_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                SAQ_AVG_BITS_KEY,
+            },
+        },
+        {
+            SAQ_SEGMENT_COUNT,
+            {
+                BUCKET_PARAMS_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                SAQ_SEGMENT_COUNT_KEY,
+            },
+        },
+        {
+            SAQ_ADJUSTMENT_ROUNDS,
+            {
+                BUCKET_PARAMS_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                SAQ_ADJUSTMENT_ROUNDS_KEY,
+            },
+        },
+        {
+            SAQ_USE_PCA,
+            {
+                BUCKET_PARAMS_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                SAQ_USE_PCA_KEY,
+            },
+        },
+        {
+            SAQ_RANDOM_ROTATION,
+            {
+                BUCKET_PARAMS_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                SAQ_RANDOM_ROTATION_KEY,
             },
         },
         {

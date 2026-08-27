@@ -89,12 +89,11 @@ public:
     }
 
 public:
-    // make public for test
     void
-    CopyPCAMatrixForTest(float* out_pca_matrix) const;
+    CopyPCAMatrix(float* out_pca_matrix) const;
 
     void
-    CopyMeanForTest(float* out_mean) const;
+    CopyMean(float* out_mean) const;
 
     void
     SetMeanForTest(const float* input_mean);

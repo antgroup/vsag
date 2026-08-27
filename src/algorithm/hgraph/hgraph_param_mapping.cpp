@@ -420,6 +420,46 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            SAQ_AVG_BITS,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                SAQ_AVG_BITS_KEY,
+            },
+        },
+        {
+            SAQ_SEGMENT_COUNT,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                SAQ_SEGMENT_COUNT_KEY,
+            },
+        },
+        {
+            SAQ_ADJUSTMENT_ROUNDS,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                SAQ_ADJUSTMENT_ROUNDS_KEY,
+            },
+        },
+        {
+            SAQ_USE_PCA,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                SAQ_USE_PCA_KEY,
+            },
+        },
+        {
+            SAQ_RANDOM_ROTATION,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                SAQ_RANDOM_ROTATION_KEY,
+            },
+        },
+        {
             FAST_ENCODE_RABITQ_ROUNDS,
             {
                 PRECISE_CODES_KEY,
@@ -617,6 +657,11 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                 "{RABITQ_QUANTIZATION_ERROR_RATE_KEY}": 1.9,
                 "{FAST_ENCODE_RABITQ_KEY}": true,
                 "{FAST_ENCODE_RABITQ_ROUNDS_KEY}": 6,
+                "{SAQ_AVG_BITS_KEY}": 4.0,
+                "{SAQ_SEGMENT_COUNT_KEY}": 0,
+                "{SAQ_ADJUSTMENT_ROUNDS_KEY}": 6,
+                "{SAQ_USE_PCA_KEY}": true,
+                "{SAQ_RANDOM_ROTATION_KEY}": true,
                 "{TQ_CHAIN_KEY}": "",
                 "mrle_dim": 0,
                 "nbits": 8,

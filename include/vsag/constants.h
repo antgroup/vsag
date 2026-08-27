@@ -157,6 +157,11 @@ extern const char* const RABITQ_ERROR_RATE;
 extern const char* const RABITQ_USE_FHT;
 extern const char* const FAST_ENCODE_RABITQ;
 extern const char* const FAST_ENCODE_RABITQ_ROUNDS;
+extern const char* const SAQ_AVG_BITS;
+extern const char* const SAQ_SEGMENT_COUNT;
+extern const char* const SAQ_ADJUSTMENT_ROUNDS;
+extern const char* const SAQ_USE_PCA;
+extern const char* const SAQ_RANDOM_ROTATION;
 extern const char* const INDEX_TQ_CHAIN;
 extern const char* const INDEX_MRLE_DIM;
 
