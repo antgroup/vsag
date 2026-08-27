@@ -84,8 +84,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Trust exact workspace for Git tooling
+        run: ./scripts/ci/configure-git-safe-directory.sh
       - name: Test changed-source lint filter
-        run: python3 -m unittest discover -s scripts/linters -p 'test_changed_source_filter.py'
+        run: |
+          python3 -m unittest discover -s scripts/linters -p 'test_changed_source_filter.py'
+          python3 -m unittest tests/scripts/configure_git_safe_directory_test.py
       - name: Prepare Host
         run: |
           sudo env VSAG_INSTALL_INTEL_MKL=OFF bash ./scripts/deps/install_deps_ubuntu.sh
@@ -168,7 +172,6 @@ jobs:
         env:
           BASE_BRANCH: ${{ github.base_ref }}
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch origin "$BASE_BRANCH" --depth=1
           if ! PATTERN=$(python3 ./scripts/linters/changed_source_filter.py "origin/$BASE_BRANCH"); then
             echo "Failed to build changed-source lint filter" >&2
