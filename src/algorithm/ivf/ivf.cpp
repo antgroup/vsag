@@ -196,6 +196,19 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                 .SetJson(value);
             inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_ROUNDS_KEY]
                 .SetJson(value);
+        } else if (key == SAQ_AVG_BITS) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][SAQ_AVG_BITS_KEY].SetJson(value);
+        } else if (key == SAQ_SEGMENT_COUNT) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][SAQ_SEGMENT_COUNT_KEY].SetJson(
+                value);
+        } else if (key == SAQ_ADJUSTMENT_ROUNDS) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][SAQ_ADJUSTMENT_ROUNDS_KEY]
+                .SetJson(value);
+        } else if (key == SAQ_USE_PCA) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][SAQ_USE_PCA_KEY].SetJson(value);
+        } else if (key == SAQ_RANDOM_ROTATION) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][SAQ_RANDOM_ROTATION_KEY].SetJson(
+                value);
         } else if (key == IVF_THREAD_COUNT) {
             inner_json[BUILD_THREAD_COUNT_KEY].SetJson(value);
         } else if (key == TRAIN_SAMPLE_COUNT_KEY) {
