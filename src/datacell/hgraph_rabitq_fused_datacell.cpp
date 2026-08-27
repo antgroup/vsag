@@ -164,7 +164,6 @@ HGraphRaBitQFusedDataCell::GetClusterId(const uint8_t* record) const {
 void
 HGraphRaBitQFusedDataCell::InsertNeighborsById(InnerIdType id,
                                                const Vector<InnerIdType>& neighbor_ids) {
-    CheckMutable();
     CHECK_ARGUMENT(neighbor_ids.size() <= maximum_degree_,
                    "fused node neighbor count exceeds maximum degree");
     if (id >= max_capacity_) {
@@ -195,6 +194,12 @@ HGraphRaBitQFusedDataCell::SetNodeCodes(InnerIdType id,
     std::memcpy(MutableNodeRecord(id) + label_offset_, &label, sizeof(label));
 }
 
+void
+HGraphRaBitQFusedDataCell::SetLabel(InnerIdType id, LabelType label) {
+    CHECK_ARGUMENT(id < max_capacity_, "fused graph label id does not exist");
+    std::memcpy(MutableNodeRecord(id) + label_offset_, &label, sizeof(label));
+}
+
 bool
 HGraphRaBitQFusedDataCell::GetFusedCodeView(InnerIdType id, RaBitQFusedCodeView& view) const {
     // Logical duplicate aliases own encoded records but no graph edges, so their IDs may be
@@ -216,7 +221,6 @@ HGraphRaBitQFusedDataCell::SetFusedCodes(InnerIdType id,
                                          uint32_t cluster_id,
                                          const uint8_t* one_bit_code,
                                          const uint8_t* supplement_code) {
-    CheckMutable();
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
         one_bit_code != nullptr and supplement_code != nullptr,
         "fused RaBitQ codes must not be null");
@@ -279,7 +283,6 @@ HGraphRaBitQFusedDataCell::CheckIdExists(InnerIdType id) const {
 
 void
 HGraphRaBitQFusedDataCell::Resize(InnerIdType new_size) {
-    CheckMutable();
     std::unique_lock lock(storage_mutex_);
     if (new_size <= max_capacity_) {
         return;
@@ -428,7 +431,6 @@ HGraphRaBitQFusedDataCell::Deserialize(StreamReader& reader) {
     CHECK_ARGUMENT(
         reinterpret_cast<uintptr_t>(storage_.data() + aligned_offset_) % K_CACHE_LINE_SIZE == 0,
         "fused graph node slab is not cache-line aligned");
-    Seal();
 }
 
 uint64_t

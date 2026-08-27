@@ -190,10 +190,6 @@ HGraph::Build(const DatasetPtr& data) {
         (using_build_cache or graph_type_ != GRAPH_TYPE_VALUE_NSW)) {
         this->build_mci_clique_index(ret.empty() ? this->get_data(data) : nullptr);
     }
-    if (this->rabitq_fused_datacell_ != nullptr) {
-        this->rabitq_fused_datacell_->Seal();
-        this->SetImmutable();
-    }
     return ret;
 }
 
@@ -315,7 +311,6 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
 
 std::vector<int64_t>
 HGraph::Add(const DatasetPtr& data) {
-    this->check_fused_mutation_supported("Add");
     return this->add_impl(data);
 }
 
@@ -1117,15 +1112,9 @@ HGraph::InitFeatures() {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_TUNE, false);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CLONE, false);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_EXPORT_MODEL, false);
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_AFTER_BUILD, false);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_CONCURRENT, false);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_CONCURRENT, false);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_DELETE_CONCURRENT,
-                                              false);
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT,
-                                              false);
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_ID_CONCURRENT, false);
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT,
                                               false);
     }
 }

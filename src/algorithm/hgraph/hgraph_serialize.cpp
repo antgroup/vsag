@@ -908,9 +908,6 @@ HGraph::read_streaming_body(StreamReader& reader,
     if (use_elp_optimizer_) {
         elp_optimize();
     }
-    if (this->rabitq_fused_datacell_ != nullptr) {
-        this->SetImmutable();
-    }
     this->cal_memory_usage();
 }
 
@@ -1084,9 +1081,6 @@ HGraph::Deserialize(StreamReader& reader) {
     // post serialize procedure
     if (use_elp_optimizer_) {
         elp_optimize();
-    }
-    if (this->rabitq_fused_datacell_ != nullptr) {
-        this->SetImmutable();
     }
     this->cal_memory_usage();
 }

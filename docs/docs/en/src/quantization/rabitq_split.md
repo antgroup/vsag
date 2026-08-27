@@ -69,21 +69,27 @@ HGraph search loop reads the record directly and prefetches graph links and
 quantized codes together. The codec uses 16 reproducibly trained residual
 clusters.
 
-This option creates a build-once, read-only in-memory index. It supports one
-`Build`, search (including filters, iterators, range search, and concurrent
+This option creates an incrementally mutable in-memory index. After `Build` or
+Deserialize, it supports `Add`, mark remove, vector/id/attribute/extra-info
+updates, search (including filters, iterators, range search, and concurrent
 queries), distance-by-id, memory statistics, and serialization/deserialization.
-It rejects `Add`, both remove modes, vector/id/attribute/extra-info updates,
-merge, tune, clone, model export, and build-cache import/export. Ordinary
-non-fused HGraph keeps its incremental lifecycle. A successful `Build` or
-Deserialize automatically calls the HGraph immutable transition: global search
-locking is skipped and per-node locks are replaced with `EmptyMutex`. Calling
-`SetImmutable` again is safe but unnecessary.
+Force remove, merge, tune, clone, model export, and build-cache import/export
+remain unsupported. `Build` and Deserialize leave the index mutable and retain
+the search and per-node locks. Call `SetImmutable` explicitly when no more
+mutations are needed; this terminal transition removes those locks from the
+search path, and later mutations are rejected.
 
 Each record starts with a 4-byte neighbor count followed by plain
 `InnerIdType` neighbor IDs. There is no node version and no version encoding in
 neighbor IDs. Cluster id, aligned external label, filter code, and supplement
 follow; the record stride remains rounded up to a 64-byte boundary. Storage can
-grow while `Build` is running but is not moved or shrunk afterward.
+grow during `Build` and later `Add` operations.
+
+The optimized build uses temporary SQ8 scalar codes for symmetric base-to-base
+graph construction, then discards them. The completed index keeps only the
+fused RaBitQ records. Post-build `Add` decodes fused records on demand for
+pairwise graph updates, so it does not retain an SQ8 or raw-vector copy; batch
+adds are preferable when insertion throughput matters.
 
 The fused layout is opt-in and has stricter constraints than ordinary split
 storage:
@@ -433,8 +439,10 @@ second count-scaled copy of the split codes.
   for L2 and inner product. Other cases safely compute the full split distance.
 - The fused datacell supports only L2 and inner product and only the in-memory
   configuration described above.
-- Fused HGraph is a single-`Build`, read-only index. Serialize/deserialize and
-  query statistics remain available because they do not mutate index data.
+- Fused HGraph remains mutable after `Build` and deserialize. It supports
+  post-build `Add`, mark remove, and vector/id/attribute/extra-info updates, but
+  not force remove. Call `SetImmutable` explicitly for the lock-free read-only
+  search path.
 - With `support_duplicate: true`, duplicate build probes and alias-expanding
   queries use the canonical HGraph searcher; the fused slab remains the code
   and graph storage.

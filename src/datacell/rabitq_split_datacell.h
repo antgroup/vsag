@@ -924,11 +924,6 @@ public:
     void
     InsertVector(const void* vector,
                  InnerIdType idx = std::numeric_limits<InnerIdType>::max()) override {
-        if (this->fused_code_storage_ != nullptr and
-            this->fused_code_storage_->FusedStorageSealed()) {
-            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                "fused RaBitQ code storage is sealed after Build");
-        }
         {
             std::lock_guard lock(this->mutex_);
             if (idx == std::numeric_limits<InnerIdType>::max()) {
@@ -955,8 +950,7 @@ public:
             return false;
         }
         if (this->fused_code_storage_ != nullptr) {
-            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                "fused RaBitQ code storage is read-only after Build");
+            return true;
         }
         std::lock_guard lock(this->mutex_);
         this->write_encoded_vector(static_cast<const float*>(vector), idx);
@@ -975,9 +969,21 @@ public:
     float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) override {
         if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
-            throw VsagException(
-                ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                "pairwise distance is unavailable for cluster-residual fused RaBitQ codes");
+            Vector<float> vector1(this->common_param_.dim_, 0.0F, this->allocator_);
+            Vector<float> vector2(this->common_param_.dim_, 0.0F, this->allocator_);
+            CHECK_ARGUMENT(this->DecodeFusedById(id1, vector1.data()),
+                           "failed to decode the first fused RaBitQ vector");
+            CHECK_ARGUMENT(this->DecodeFusedById(id2, vector2.data()),
+                           "failed to decode the second fused RaBitQ vector");
+            const auto dim = static_cast<uint64_t>(this->common_param_.dim_);
+            if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+                return FP32ComputeL2Sqr(vector1.data(), vector2.data(), dim);
+            }
+            if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+                return 1.0F - FP32ComputeIP(vector1.data(), vector2.data(), dim);
+            }
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "fused RaBitQ pairwise distance does not support this metric");
         }
         if (this->optimized_build_active_) {
             bool release1 = false;

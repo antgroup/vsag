@@ -66,18 +66,24 @@ cluster id、label、x-bit code 和 y-bit supplement 会存入同一个 cache-li
 Pyramid 参数。HGraph 专用搜索循环直接读取该 record，并联合预取图邻居和
 量化码。codec 使用固定随机种子可复现训练的 16 个 residual clusters。
 
-该选项创建一次构建、构建后只读的内存索引。它支持一次 `Build`、检索（包括过滤、
-iterator、Range Search 和并发查询）、按 ID 计算距离、内存统计以及
-Serialize/Deserialize。`Add`、两种 Remove、向量/ID/属性/extra-info 更新、Merge、
-Tune、Clone、ExportModel 和 Build Cache 导入导出都会返回不支持。未启用 fused 的
-HGraph 保持原有增量生命周期。成功完成 `Build` 或 Deserialize 后，索引会自动执行
-HGraph immutable 状态切换：检索跳过 global lock，节点锁替换为 `EmptyMutex`。再次调用
-`SetImmutable` 是安全的，但没有必要。
+该选项创建支持增量修改的内存索引。完成 `Build` 或 Deserialize 后，仍支持
+`Add`、mark remove、向量/ID/属性/extra-info 更新、检索（包括过滤、iterator、
+Range Search 和并发查询）、按 ID 计算距离、内存统计以及 Serialize/Deserialize。
+force remove、Merge、
+Tune、Clone、ExportModel 和 Build Cache 导入导出仍不支持。`Build` 和 Deserialize
+默认保留 mutable 状态以及搜索锁和节点锁；确认不再修改后，可以显式调用
+`SetImmutable`，以终态切换移除搜索路径上的这些锁，之后的修改请求会被
+拒绝。
 
 每个 record 以 4-byte 邻居数量开头，随后是纯 `InnerIdType` 邻居 ID；节点不再有
 version，邻居 ID 也不编码 version。之后依次保存 cluster id、对齐后的 external
-label、filter code 和 supplement，record stride 仍向上对齐到 64-byte。存储只在
-`Build` 期间按需增长，构建结束后不再 move 或 shrink。
+label、filter code 和 supplement，record stride 仍向上对齐到 64-byte。存储可以在
+`Build` 以及后续 `Add` 期间按需增长。
+
+优化构建会临时使用 SQ8 scalar code 计算对称的 base-to-base 图距离，构建
+完成后立即释放；最终索引只保留 fused RaBitQ record。构建后的 `Add` 会按需
+解码 fused record 来更新图，不会常驻保存 SQ8 或原始向量副本；关注插入
+吞吐时建议使用批量 Add。
 
 融合布局是显式启用的，并且比普通 split storage 有更严格的约束：
 
@@ -406,8 +412,9 @@ bottom-graph slab 中序列化一次。普通和 streaming 往返都会保留该
   HGraph fused 路径会为 L2 和内积直接复用精确 filter inner product；其他情况
   会安全地计算完整 split distance。
 - fused datacell 只支持 L2、内积以及上文所述的纯内存配置。
-- HGraph fused 只允许一次 `Build`，随后只读；序列化、反序列化和查询统计不会修改
-  索引数据，因此仍然支持。
+- HGraph fused 在 `Build` 和反序列化后保持可变，支持构建后 `Add`、mark remove
+  以及向量/ID/属性/extra-info 更新，但不支持 force remove。需要无锁只读检索
+  路径时，显式调用 `SetImmutable`。
 - 启用 `support_duplicate: true` 时，重复向量 build probe 和展开 alias 的查询使用
   HGraph canonical searcher；fused slab 仍负责保存 code 和 graph。
 - 除非已经验证仅靠 x-bit 遍历距离能满足召回要求，否则应保持

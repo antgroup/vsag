@@ -88,11 +88,11 @@ TEST_CASE("HGraph RaBitQ fused node layout and serialization", "[ut][HGraphRaBit
     REQUIRE(graph->GetLabel(graph->GetNodeRecord(0)) == 42);
     graph->Resize(2);
     REQUIRE(graph->MaxCapacity() == 16);
-    graph->Seal();
-    REQUIRE(graph->FusedStorageSealed());
-    REQUIRE_THROWS(graph->Resize(32));
-    REQUIRE_THROWS(graph->InsertNeighborsById(0, neighbors));
-    REQUIRE_THROWS(graph->SetFusedCodes(0, 7, one_bit.data(), supplement.data()));
+    graph->SetLabel(0, 84);
+    REQUIRE(graph->GetLabel(graph->GetNodeRecord(0)) == 84);
+    REQUIRE_NOTHROW(graph->Resize(32));
+    REQUIRE_NOTHROW(graph->InsertNeighborsById(0, neighbors));
+    REQUIRE_NOTHROW(graph->SetFusedCodes(0, 7, one_bit.data(), supplement.data()));
 }
 
 TEST_CASE("HGraph RaBitQ fused deserialize validates its wire layout",

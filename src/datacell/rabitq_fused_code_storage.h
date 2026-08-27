@@ -54,9 +54,6 @@ public:
 
     [[nodiscard]] virtual uint64_t
     FusedSupplementCodeSize() const = 0;
-
-    [[nodiscard]] virtual bool
-    FusedStorageSealed() const = 0;
 };
 
 }  // namespace vsag

@@ -783,7 +783,6 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
 
 bool
 HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
-    this->check_fused_mutation_supported("UpdateVector");
     std::shared_lock<std::shared_mutex> force_remove_rlock;
     if (this->support_force_remove()) {
         force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
@@ -799,18 +798,28 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     void* new_base_vec = nullptr;
     uint64_t data_size = 0;
     get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        CHECK_ARGUMENT(new_base->GetDim() == dim_,
+                       "updated vector dimension must match the index dimension");
+        CHECK_ARGUMENT(new_base_vec != nullptr, "updated vector must not be null");
+        this->validate_fused_vector_data(static_cast<const float*>(new_base_vec), 1);
+    }
     if (not force_update) {
         std::shared_lock label_lock(this->label_lookup_mutex_);
 
         float self_dist = 0.0F;
-        // 1. check whether vectors are same
-        Vector<int8_t> base_data(data_size, allocator_);
-        GetVectorByInnerId(inner_id, reinterpret_cast<float*>(base_data.data()));
-        const float old_self_dist =
-            this->CalcDistanceById(reinterpret_cast<float*>(base_data.data()), id);
-        self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
-        if (std::abs(old_self_dist - self_dist) < 1e-3) {
-            return true;
+        if (this->rabitq_fused_datacell_ == nullptr) {
+            // 1. check whether vectors are same
+            Vector<int8_t> base_data(data_size, allocator_);
+            GetVectorByInnerId(inner_id, reinterpret_cast<float*>(base_data.data()));
+            const float old_self_dist =
+                this->CalcDistanceById(reinterpret_cast<float*>(base_data.data()), id);
+            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
+            if (std::abs(old_self_dist - self_dist) < 1e-3) {
+                return true;
+            }
+        } else {
+            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
         }
 
         // 2. check whether the neighborhood relationship is same
@@ -852,12 +861,18 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
     // note that only modify vector need to obtain unique lock
     // and the lock has been obtained inside datacell
+    std::unique_lock<std::shared_mutex> fused_write_lock;
     std::shared_lock<std::shared_mutex> map_lock;
-    if (this->using_dedup_storage() && !this->immutable_.load(std::memory_order_acquire)) {
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        fused_write_lock = std::unique_lock<std::shared_mutex>(this->global_mutex_);
+    } else if (this->using_dedup_storage() && !this->immutable_.load(std::memory_order_acquire)) {
         map_lock = this->acquire_global_read_lock();
     }
     std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
     bool update_status = basic_flatten_codes_->UpdateVector(new_base_vec, inner_id);
+    if (update_status and rabitq_fused_datacell_ != nullptr) {
+        this->sync_fused_node_codes(inner_id, new_base_vec);
+    }
     if (has_precise_reorder()) {
         update_status = update_status && high_precise_codes_->UpdateVector(new_base_vec, inner_id);
     }
@@ -866,13 +881,23 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
 bool
 HGraph::UpdateId(int64_t old_id, int64_t new_id) {
-    this->check_fused_mutation_supported("UpdateId");
-    return InnerIndexInterface::UpdateId(old_id, new_id);
+    if (old_id == new_id) {
+        return true;
+    }
+    if (rabitq_fused_datacell_ == nullptr) {
+        return InnerIndexInterface::UpdateId(old_id, new_id);
+    }
+    std::scoped_lock fused_write_lock(this->global_mutex_);
+    std::scoped_lock label_lock(this->label_lookup_mutex_);
+    auto [found, inner_id] = label_table_->TryGetIdByLabel(old_id, true);
+    CHECK_ARGUMENT(found, "old label does not exist");
+    label_table_->UpdateLabel(old_id, new_id);
+    rabitq_fused_datacell_->SetLabel(inner_id, new_id);
+    return true;
 }
 
 bool
 HGraph::UpdateExtraInfo(const DatasetPtr& new_base) {
-    this->check_fused_mutation_supported("UpdateExtraInfo");
     return InnerIndexInterface::UpdateExtraInfo(new_base);
 }
 

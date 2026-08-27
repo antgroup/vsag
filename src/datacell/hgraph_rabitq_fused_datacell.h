@@ -95,6 +95,9 @@ public:
                  const uint8_t* one_bit_code,
                  const uint8_t* supplement_code);
 
+    void
+    SetLabel(InnerIdType id, LabelType label);
+
     [[nodiscard]] bool
     GetFusedCodeView(InnerIdType id, RaBitQFusedCodeView& view) const override;
 
@@ -137,16 +140,6 @@ public:
     [[nodiscard]] uint64_t
     FusedSupplementCodeSize() const override {
         return supplement_code_size_;
-    }
-
-    [[nodiscard]] bool
-    FusedStorageSealed() const override {
-        return sealed_;
-    }
-
-    void
-    Seal() {
-        sealed_ = true;
     }
 
     void
@@ -251,14 +244,6 @@ public:
     }
 
 private:
-    void
-    CheckMutable() const {
-        if (sealed_) {
-            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                "fused RaBitQ graph is sealed after Build");
-        }
-    }
-
     static void
     PrefetchRange(const uint8_t* begin, uint64_t size, int locality) {
         constexpr uintptr_t cache_line_size = 64;
@@ -295,7 +280,6 @@ private:
     uint64_t one_bit_code_size_{0};
     uint64_t supplement_code_size_{0};
     int64_t dim_{0};
-    bool sealed_{false};
     std::string codec_model_;
     mutable std::shared_mutex storage_mutex_;
 };

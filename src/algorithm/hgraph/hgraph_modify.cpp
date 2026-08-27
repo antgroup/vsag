@@ -22,7 +22,6 @@ namespace vsag {
 
 uint32_t
 HGraph::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
-    this->check_fused_mutation_supported("Remove");
     uint32_t delete_count = 0;
     if (mode == RemoveMode::MARK_REMOVE) {
         std::scoped_lock label_lock(this->label_lookup_mutex_);
@@ -32,6 +31,11 @@ HGraph::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
     }
 
     if (mode == RemoveMode::FORCE_REMOVE) {
+        if (this->rabitq_fused_datacell_ != nullptr) {
+            throw VsagException(
+                ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                "fused RaBitQ HGraph without neighbor versions does not support force remove");
+        }
         CHECK_ARGUMENT(this->support_force_remove(),
                        "force remove requires index_param.support_force_remove to be true");
         std::unique_lock<std::shared_mutex> wlock(this->force_remove_mutex_);
@@ -228,7 +232,6 @@ HGraph::shrink_to_fit() {
 
 void
 HGraph::UpdateAttribute(int64_t id, const AttributeSet& new_attrs) {
-    this->check_fused_mutation_supported("UpdateAttribute");
     auto inner_id = this->label_table_->GetIdByLabel(id);
     this->attr_filter_index_->UpdateBitsetsByAttr(new_attrs, inner_id, 0);
 }
@@ -237,7 +240,6 @@ void
 HGraph::UpdateAttribute(int64_t id,
                         const AttributeSet& new_attrs,
                         const AttributeSet& origin_attrs) {
-    this->check_fused_mutation_supported("UpdateAttribute");
     auto inner_id = this->label_table_->GetIdByLabel(id);
     this->attr_filter_index_->UpdateBitsetsByAttr(new_attrs, inner_id, 0, origin_attrs);
 }
