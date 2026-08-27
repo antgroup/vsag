@@ -101,8 +101,6 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
             FlattenInterface::MakeInstance(hgraph_param->precise_codes_param, common_param);
     }
     this->searcher_ = std::make_shared<BasicSearcher>(common_param, neighbors_mutex_);
-    this->rabitq_fused_searcher_ =
-        std::make_shared<HGraphRaBitQSearcher>(common_param, neighbors_mutex_);
     this->mci_searcher_ = std::make_shared<MCISearcher>(common_param);
     if (this->mci_parameters_.enabled) {
         this->mci_cliques_ = std::make_shared<CliqueDataCell>(common_param.allocator_.get());
@@ -116,6 +114,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         auto graph_param =
             std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_param->bottom_graph_param);
         CHECK_ARGUMENT(graph_param != nullptr, "rabitq_fused_datacell requires flat graph storage");
+        rabitq_fused_searcher_ =
+            std::make_shared<HGraphRaBitQSearcher>(common_param, neighbors_mutex_);
         rabitq_fused_datacell_ =
             std::make_shared<HGraphRaBitQFusedDataCell>(graph_param,
                                                         split_codes->OneBitCodeSize(),
@@ -648,7 +648,9 @@ HGraph::SetImmutable() {
     auto empty_mutex = std::make_shared<EmptyMutex>();
     this->searcher_->SetMutexArray(empty_mutex);
     this->parallel_searcher_->SetMutexArray(empty_mutex);
-    this->rabitq_fused_searcher_->SetMutexArray(empty_mutex);
+    if (this->rabitq_fused_searcher_ != nullptr) {
+        this->rabitq_fused_searcher_->SetMutexArray(empty_mutex);
+    }
     this->neighbors_mutex_ = empty_mutex;
     this->immutable_.store(true, std::memory_order_release);
 }

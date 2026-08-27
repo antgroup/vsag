@@ -171,6 +171,25 @@ TEST_CASE("HGraph UpdateId preserves equal-label no-op", "[ut][hgraph][update]")
     REQUIRE(result.value());
 }
 
+TEST_CASE("HGraph non-fused SetImmutable does not require a fused searcher",
+          "[ut][hgraph][immutable]") {
+    constexpr int64_t dim = 8;
+    auto common_param = MakeCommonParam(dim);
+    auto index = MakeHGraphIndex(MakeFp32HGraphJson(false), common_param);
+    std::vector<float> vectors(static_cast<uint64_t>(dim) * 2, 0.0F);
+    vectors[dim] = 1.0F;
+    std::vector<int64_t> ids{10, 20};
+    auto base = MakeFloatDataset(vectors, ids, dim, 2);
+
+    REQUIRE(index->Build(base).has_value());
+    REQUIRE(index->SetImmutable().has_value());
+
+    auto query = MakeFloatQuery(vectors, dim);
+    auto result = index->KnnSearch(query, 1, kBruteForceSearchParams);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetIds()[0] == ids[0]);
+}
+
 TEST_CASE("HGraph exact duplicate fallback supports every dense data type",
           "[ut][hgraph][duplicate][data_type]") {
     constexpr int64_t dim = 8;
