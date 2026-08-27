@@ -1,0 +1,178 @@
+global:
+  num_threads_building: 16
+  num_threads_searching: 16
+  exporters:
+    stdout:
+      format: table
+      to: stdout
+    raw-json:
+      format: json
+      to: "file://@RESULT_JSON@"
+
+saq_build:
+  datapath: "@DATASET@"
+  type: build
+  index_name: hgraph
+  create_params: '{"dim":@DIM@,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"saq","saq_avg_bits":4,"saq_segment_count":0,"saq_adjustment_rounds":6,"saq_use_pca":true,"saq_random_rotation":true,"max_degree":32,"ef_construction":300,"build_thread_count":16,"use_reorder":false}}'
+  index_path: "@INDEX_ROOT@/saq.index"
+
+saq_ef40:
+  datapath: "@DATASET@"
+  type: search
+  index_name: hgraph
+  create_params: '{"dim":@DIM@,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"saq","saq_avg_bits":4,"saq_segment_count":0,"saq_adjustment_rounds":6,"saq_use_pca":true,"saq_random_rotation":true,"max_degree":32,"ef_construction":300,"build_thread_count":16,"use_reorder":false}}'
+  search_params: '{"hgraph":{"ef_search":40}}'
+  index_path: "@INDEX_ROOT@/saq.index"
+  search_mode: knn
+  search_query_count: 10000
+  topk: 10
+
+saq_ef80:
+  datapath: "@DATASET@"
+  type: search
+  index_name: hgraph
+  create_params: '{"dim":@DIM@,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"saq","saq_avg_bits":4,"saq_segment_count":0,"saq_adjustment_rounds":6,"saq_use_pca":true,"saq_random_rotation":true,"max_degree":32,"ef_construction":300,"build_thread_count":16,"use_reorder":false}}'
+  search_params: '{"hgraph":{"ef_search":80}}'
+  index_path: "@INDEX_ROOT@/saq.index"
+  search_mode: knn
+  search_query_count: 10000
+  topk: 10
+
+saq_ef120:
+  datapath: "@DATASET@"
+  type: search
+  index_name: hgraph
+  create_params: '{"dim":@DIM@,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"saq","saq_avg_bits":4,"saq_segment_count":0,"saq_adjustment_rounds":6,"saq_use_pca":true,"saq_random_rotation":true,"max_degree":32,"ef_construction":300,"build_thread_count":16,"use_reorder":false}}'
+  search_params: '{"hgraph":{"ef_search":120}}'
+  index_path: "@INDEX_ROOT@/saq.index"
+  search_mode: knn
+  search_query_count: 10000
+  topk: 10
+
+saq_ef200:
+  datapath: "@DATASET@"
+  type: search
+  index_name: hgraph
+  create_params: '{"dim":@DIM@,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"saq","saq_avg_bits":4,"saq_segment_count":0,"saq_adjustment_rounds":6,"saq_use_pca":true,"saq_random_rotation":true,"max_degree":32,"ef_construction":300,"build_thread_count":16,"use_reorder":false}}'
+  search_params: '{"hgraph":{"ef_search":200}}'
+  index_path: "@INDEX_ROOT@/saq.index"
+  search_mode: knn
+  search_query_count: 10000
+  topk: 10
+
+saq_ef400:
+  datapath: "@DATASET@"
+  type: search
+  index_name: hgraph
+  create_params: '{"dim":@DIM@,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"saq","saq_avg_bits":4,"saq_segment_count":0,"saq_adjustment_rounds":6,"saq_use_pca":true,"saq_random_rotation":true,"max_degree":32,"ef_construction":300,"build_thread_count":16,"use_reorder":false}}'
+  search_params: '{"hgraph":{"ef_search":400}}'
+  index_path: "@INDEX_ROOT@/saq.index"
+  search_mode: knn
+  search_query_count: 10000
+  topk: 10
+
+saq_ef800:
+  datapath: "@DATASET@"
+  type: search
+  index_name: hgraph
+  create_params: '{"dim":@DIM@,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"saq","saq_avg_bits":4,"saq_segment_count":0,"saq_adjustment_rounds":6,"saq_use_pca":true,"saq_random_rotation":true,"max_degree":32,"ef_construction":300,"build_thread_count":16,"use_reorder":false}}'
+  search_params: '{"hgraph":{"ef_search":800}}'
+  index_path: "@INDEX_ROOT@/saq.index"
+  search_mode: knn
+  search_query_count: 10000
+  topk: 10
+
+saq_ef1600:
+  datapath: "@DATASET@"
+  type: search
+  index_name: hgraph
+  create_params: '{"dim":@DIM@,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"saq","saq_avg_bits":4,"saq_segment_count":0,"saq_adjustment_rounds":6,"saq_use_pca":true,"saq_random_rotation":true,"max_degree":32,"ef_construction":300,"build_thread_count":16,"use_reorder":false}}'
+  search_params: '{"hgraph":{"ef_search":1600}}'
+  index_path: "@INDEX_ROOT@/saq.index"
+  search_mode: knn
+  search_query_count: 10000
+  topk: 10
+
+rabitq_build:
+  datapath: "@DATASET@"
+  type: build
+  index_name: hgraph
+  create_params: '{"dim":@DIM@,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"rabitq","rabitq_bits_per_dim_base":4,"rabitq_bits_per_dim_query":32,"rabitq_pca_dim":0,"fast_encode_rabitq":true,"fast_encode_rabitq_rounds":6,"max_degree":32,"ef_construction":300,"build_thread_count":16,"use_reorder":false}}'
+  index_path: "@INDEX_ROOT@/rabitq.index"
+
+rabitq_ef40:
+  datapath: "@DATASET@"
+  type: search
+  index_name: hgraph
+  create_params: '{"dim":@DIM@,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"rabitq","rabitq_bits_per_dim_base":4,"rabitq_bits_per_dim_query":32,"rabitq_pca_dim":0,"fast_encode_rabitq":true,"fast_encode_rabitq_rounds":6,"max_degree":32,"ef_construction":300,"build_thread_count":16,"use_reorder":false}}'
+  search_params: '{"hgraph":{"ef_search":40}}'
+  index_path: "@INDEX_ROOT@/rabitq.index"
+  search_mode: knn
+  search_query_count: 10000
+  topk: 10
+
+rabitq_ef80:
+  datapath: "@DATASET@"
+  type: search
+  index_name: hgraph
+  create_params: '{"dim":@DIM@,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"rabitq","rabitq_bits_per_dim_base":4,"rabitq_bits_per_dim_query":32,"rabitq_pca_dim":0,"fast_encode_rabitq":true,"fast_encode_rabitq_rounds":6,"max_degree":32,"ef_construction":300,"build_thread_count":16,"use_reorder":false}}'
+  search_params: '{"hgraph":{"ef_search":80}}'
+  index_path: "@INDEX_ROOT@/rabitq.index"
+  search_mode: knn
+  search_query_count: 10000
+  topk: 10
+
+rabitq_ef120:
+  datapath: "@DATASET@"
+  type: search
+  index_name: hgraph
+  create_params: '{"dim":@DIM@,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"rabitq","rabitq_bits_per_dim_base":4,"rabitq_bits_per_dim_query":32,"rabitq_pca_dim":0,"fast_encode_rabitq":true,"fast_encode_rabitq_rounds":6,"max_degree":32,"ef_construction":300,"build_thread_count":16,"use_reorder":false}}'
+  search_params: '{"hgraph":{"ef_search":120}}'
+  index_path: "@INDEX_ROOT@/rabitq.index"
+  search_mode: knn
+  search_query_count: 10000
+  topk: 10
+
+rabitq_ef200:
+  datapath: "@DATASET@"
+  type: search
+  index_name: hgraph
+  create_params: '{"dim":@DIM@,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"rabitq","rabitq_bits_per_dim_base":4,"rabitq_bits_per_dim_query":32,"rabitq_pca_dim":0,"fast_encode_rabitq":true,"fast_encode_rabitq_rounds":6,"max_degree":32,"ef_construction":300,"build_thread_count":16,"use_reorder":false}}'
+  search_params: '{"hgraph":{"ef_search":200}}'
+  index_path: "@INDEX_ROOT@/rabitq.index"
+  search_mode: knn
+  search_query_count: 10000
+  topk: 10
+
+rabitq_ef400:
+  datapath: "@DATASET@"
+  type: search
+  index_name: hgraph
+  create_params: '{"dim":@DIM@,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"rabitq","rabitq_bits_per_dim_base":4,"rabitq_bits_per_dim_query":32,"rabitq_pca_dim":0,"fast_encode_rabitq":true,"fast_encode_rabitq_rounds":6,"max_degree":32,"ef_construction":300,"build_thread_count":16,"use_reorder":false}}'
+  search_params: '{"hgraph":{"ef_search":400}}'
+  index_path: "@INDEX_ROOT@/rabitq.index"
+  search_mode: knn
+  search_query_count: 10000
+  topk: 10
+
+rabitq_ef800:
+  datapath: "@DATASET@"
+  type: search
+  index_name: hgraph
+  create_params: '{"dim":@DIM@,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"rabitq","rabitq_bits_per_dim_base":4,"rabitq_bits_per_dim_query":32,"rabitq_pca_dim":0,"fast_encode_rabitq":true,"fast_encode_rabitq_rounds":6,"max_degree":32,"ef_construction":300,"build_thread_count":16,"use_reorder":false}}'
+  search_params: '{"hgraph":{"ef_search":800}}'
+  index_path: "@INDEX_ROOT@/rabitq.index"
+  search_mode: knn
+  search_query_count: 10000
+  topk: 10
+
+rabitq_ef1600:
+  datapath: "@DATASET@"
+  type: search
+  index_name: hgraph
+  create_params: '{"dim":@DIM@,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"rabitq","rabitq_bits_per_dim_base":4,"rabitq_bits_per_dim_query":32,"rabitq_pca_dim":0,"fast_encode_rabitq":true,"fast_encode_rabitq_rounds":6,"max_degree":32,"ef_construction":300,"build_thread_count":16,"use_reorder":false}}'
+  search_params: '{"hgraph":{"ef_search":1600}}'
+  index_path: "@INDEX_ROOT@/rabitq.index"
+  search_mode: knn
+  search_query_count: 10000
+  topk: 10

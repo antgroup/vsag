@@ -1,0 +1,5 @@
+results/*
+!results/README.md
+!results/formal-final-20260825/
+!results/formal-final-20260825/**
+results/formal-final-20260825/**/indexes/

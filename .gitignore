@@ -169,6 +169,7 @@ flycheck_*.el
 _deps
 /build/
 /build_*/
+/build-*/
 .idea/
 .vscode/
 venv/
