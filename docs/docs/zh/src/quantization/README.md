@@ -20,7 +20,7 @@ true`）。本章介绍每一种受支持的量化器：它做什么、接受哪
                   |   基础量化器        |   fp32 / fp16 / bf16 /
                   |                     |   sq8 / sq4 / sq8_uniform /
                   |                     |   sq4_uniform / pq / pqfs /
-                  |                     |   rabitq
+                  |                     |   rabitq / saq
                   +----------+----------+
                              |
                              v
@@ -69,6 +69,7 @@ true`）。本章介绍每一种受支持的量化器：它做什么、接受哪
 | `pq` | ~`pq_bits` × `pq_dim` / `dim` | **是** | 否 | 基于码本，非常紧凑 |
 | `pqfs` | 4 × `pq_dim` / `dim` | **是** | 否 | PQ FastScan——SIMD 加速版 PQ |
 | `rabitq` | 1 或 HGraph x+y | **是** | 否 | 1 比特 / 低比特 split 二值量化，最强压缩 |
+| `saq` | 可配置 1–8 | **是** | 否 | PCA + 方差感知分段 CAQ，适合高精度低比特检索 |
 | `tq` | 取决于链路 | 取决于末端量化器 | 否 | [量化变换](../advanced/quantization_transform.md)：在另一个量化器之前串接旋转 / PCA |
 
 `int8` 与 `sparse` 不作为通用的 `base_quantization_type` 暴露：
@@ -112,6 +113,8 @@ true`）。本章介绍每一种受支持的量化器：它做什么、接受哪
    `pqfs`。
 6. **追求最强压缩（1 比特）并能承担重排代价？** 用 `rabitq`，最好搭配
    `rabitq_use_fht: true` 或 `tq` 链路。
+7. **需要更强的 2–8 位精度/编码速度权衡？** 用 `saq`，可从
+   `saq_avg_bits: 4` 和自动分段开始。
 
 对上述任何一种有损量化器，将 `use_reorder: true` 配合
 `precise_quantization_type: "fp32"` 是恢复召回的标准做法，代价是额外内存；
@@ -125,14 +128,16 @@ true`）。本章介绍每一种受支持的量化器：它做什么、接受哪
   `precise_quantization_type`、`use_reorder`、`base_pq_dim`、
   `rabitq_pca_dim`、`rabitq_bits_per_dim_query`、
   `rabitq_bits_per_dim_base`、`rabitq_bits_per_dim_precise`、
-  `rabitq_error_rate`、`rabitq_use_fht`、`sq4_uniform_trunc_rate`、`tq_chain`
+  `rabitq_error_rate`、`rabitq_use_fht`、`saq_avg_bits`、`saq_segment_count`、
+  `saq_adjustment_rounds`、`saq_use_pca`、`saq_random_rotation`、
+  `sq4_uniform_trunc_rate`、`tq_chain`
   （见 `src/algorithm/hgraph.cpp`）。
 - **IVF** 暴露 `base_quantization_type`、`base_pq_dim`、通用重排相关 key，
   以及 `rabitq_pca_dim`、`rabitq_bits_per_dim_query`、
   `rabitq_bits_per_dim_base`、`rabitq_version`、`rabitq_error_rate`、
-  `rabitq_use_fht` 这些 RabitQ 调参 key。
+  `rabitq_use_fht` 这些 RabitQ 调参 key，以及全部五个 `saq_*` key。
 - **Pyramid** 暴露 `base_quantization_type`、`base_pq_dim`、通用重排相关 key，
-  以及 RabitQ 的 PCA、底库/查询位数和 FHT 相关 key。
+  以及 RabitQ 的 PCA、底库/查询位数和 FHT 相关 key、全部五个 `saq_*` key。
 - **BruteForce** 暴露 `base_quantization_type` 与通用重排相关 key；部分可调项
   （如 `tq_chain`）目前在内部接好但未作为外部 key 暴露。
 
@@ -147,5 +152,6 @@ true`）。本章介绍每一种受支持的量化器：它做什么、接受哪
 - [乘积量化（PQ）](pq.md)
 - [PQ FastScan](pqfs.md)
 - [RaBitQ](rabitq.md)
+- [SAQ（分段码字调整量化）](saq.md)
 - [RaBitQ x+y Split](rabitq_split.md)
 - [量化变换（TQ）](../advanced/quantization_transform.md)

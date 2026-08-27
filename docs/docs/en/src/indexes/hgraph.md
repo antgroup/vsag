@@ -21,7 +21,7 @@ default.
    (`graph_type: "odescent"`).
 2. **Quantization.** The base storage is compressed with a configurable quantizer
    (`base_quantization_type` — `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`,
-   `pq`, `pqfs`, `rabitq`, `tq`). Optionally, a second high-precision copy is kept
+   `pq`, `pqfs`, `rabitq`, `saq`, `tq`). Optionally, a second high-precision copy is kept
    (`use_reorder: true` with `precise_quantization_type`) and used to re-rank the
    candidates returned by the coarse search.
 3. **Search.** Greedy beam search traverses the graph top-down, expanding the current
@@ -64,7 +64,7 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `base_quantization_type` | string | — (required) | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `tq` — see the [Quantization chapter](../quantization/README.md) for per-quantizer details |
+| `base_quantization_type` | string | — (required) | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `saq`, `tq` — see the [Quantization chapter](../quantization/README.md) for per-quantizer details |
 | `max_degree` | int | `64` | Maximum out-degree per graph node |
 | `ef_construction` | int | `400` | Candidate list size during build (higher = better recall, slower build) |
 | `graph_type` | string | `"nsw"` | Graph algorithm: `nsw` or `odescent` |
@@ -77,6 +77,11 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `mrle_dim` | int | `0` | Output dimension for an MRLE transform in `tq_chain`; allowed range `[0, dim]`, where `0` means the input dimension. |
 | `fast_encode_rabitq` | bool | `true` | Use the fast multi-bit RaBitQ encoder; set to `false` for the previous exact encoder. |
 | `fast_encode_rabitq_rounds` | int | `6` | Fast RaBitQ coordinate-refinement rounds, in `[1, 32]`. |
+| `saq_avg_bits` | float | `4.0` | SAQ average record bits per dimension, in `[1, 8]`. |
+| `saq_segment_count` | int | `0` | SAQ segment count; `0` selects boundaries dynamically. |
+| `saq_adjustment_rounds` | int | `6` | SAQ code-adjustment rounds, in `[0, 32]`. |
+| `saq_use_pca` | bool | `true` | Order dimensions with a full-dimensional PCA rotation. |
+| `saq_random_rotation` | bool | `true` | Apply an independent orthogonal rotation inside each SAQ segment. |
 | `build_thread_count` | int | `100` | Threads used to parallelise build |
 | `support_duplicate` | bool | `false` | Enable duplicate-ID detection on insert |
 | `deduplicate_storage` | bool | `false` | Share vector storage between duplicates; requires `support_duplicate: true` |

@@ -276,6 +276,9 @@ Thrive together in VSAG community with users and developers from all around the 
 
 - **Advanced Quantization Methods**
   - **RaBitQ (BQ)**: Extreme compression for minimal memory usage.
+  - **SAQ (Segmented Code Adjustment Quantization)**: Trained segmentation, dynamic bit
+    allocation, and code adjustment for low-bit dense-vector storage. See the
+    [SAQ guide](./docs/docs/en/src/quantization/saq.md).
   - **PQ (Product Quantization)**: Flexible compression for tuning the memory-recall trade-off.
   - **SQ4 & SQ8 (Scalar Quantization)**: Balanced performance with minimal recall loss for memory and speed gains.
 

@@ -79,7 +79,7 @@ auto result = index->KnnSearch(
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `base_quantization_type` | string | — | 底层量化类型（`fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`tq`）。各量化器细节见[量化章节](../quantization/README.md)。 |
+| `base_quantization_type` | string | — | 底层量化类型（`fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`saq`、`tq`）。各量化器细节见[量化章节](../quantization/README.md)。 |
 | `tq_chain` | string | — | `base_quantization_type` 为 `tq` 时使用的变换链，例如 `"mrle, rabitq"`。 |
 | `mrle_dim` | int | `0` | MRLE 保留的前缀维度；`0` 表示保持输入维度。 |
 | `max_degree` | int | `64` | 子图内节点的最大出度 |
@@ -95,6 +95,11 @@ auto result = index->KnnSearch(
 | `rabitq_bits_per_dim_precise` | int | 未设置 | RaBitQ split 的 `y` bits。和 `base_quantization_type: "rabitq"`、`precise_quantization_type: "rabitq"` 一起设置时，Pyramid 使用 split storage；`rabitq_bits_per_dim_base` 仍表示 `x`，且 `x + y <= 8`。 |
 | `fast_encode_rabitq` | bool | `true` | 对 RaBitQ 底层或精排存储使用多 bit 快速编码器；设为 `false` 使用精确编码器 |
 | `fast_encode_rabitq_rounds` | int | `6` | RaBitQ 快速编码的微调轮数，范围 `[1, 32]` |
+| `saq_avg_bits` | float | `4.0` | SAQ 每维平均记录位预算，范围 `[1, 8]` |
+| `saq_segment_count` | int | `0` | SAQ 分段数；`0` 表示动态选择边界 |
+| `saq_adjustment_rounds` | int | `6` | SAQ 码字调整轮数，范围 `[0, 32]` |
+| `saq_use_pca` | bool | `true` | 使用全维 PCA 旋转对维度排序 |
+| `saq_random_rotation` | bool | `true` | 在每个 SAQ 分段内使用独立正交旋转 |
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | 底层与精排存储后端；以 liburing 构建时可用 `uring_io` |
 | `base_file_path` / `precise_file_path` | string | — | `buffer_io`、`async_io`、`uring_io`、`mmap_io` 等磁盘存储必须设置 |
 | `store_raw_vector` | bool | `false` | 保留 FP32 原始向量，用于 `GetRawVectorByIds` 和精确的按 ID 距离计算 |

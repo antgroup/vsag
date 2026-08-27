@@ -78,7 +78,7 @@ Build-time parameters live under `index_param`. See
 | `ivf_train_type` | string | `"kmeans"` | Centroid training: `kmeans` or `random` |
 | `route_max_degree` | int | `64` | Routing HGraph maximum degree (effective for `ivf`) |
 | `route_ef_construction` | int | `300` | Routing HGraph construction search breadth (effective for `ivf`) |
-| `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` — see the [Quantization chapter](../quantization/README.md) for per-quantizer details |
+| `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `saq` — see the [Quantization chapter](../quantization/README.md) for per-quantizer details |
 | `base_pq_dim` | int | `1` | PQ subspaces (required with `pq` / `pqfs`) |
 | `rabitq_pca_dim` | int | `0` | Optional PCA preprocessing dimension for `base_quantization_type: "rabitq"` |
 | `rabitq_bits_per_dim_query` | int | `32` | Query bits for `rabitq`; allowed values are `4` or `32` |
@@ -88,6 +88,11 @@ Build-time parameters live under `index_param`. See
 | `rabitq_use_fht` | bool | `false` | Enable FHT rotation before `rabitq` binarization |
 | `fast_encode_rabitq` | bool | `true` | Use CAQ fast construction for multi-bit `rabitq`; set to `false` for exact encoding |
 | `fast_encode_rabitq_rounds` | int | `6` | CAQ adjustment rounds; allowed range is `[1, 32]` |
+| `saq_avg_bits` | float | `4.0` | SAQ average record bits per dimension, in `[1, 8]` |
+| `saq_segment_count` | int | `0` | SAQ segment count; `0` selects boundaries dynamically |
+| `saq_adjustment_rounds` | int | `6` | SAQ code-adjustment rounds, in `[0, 32]` |
+| `saq_use_pca` | bool | `true` | Order dimensions with a full-dimensional PCA rotation |
+| `saq_random_rotation` | bool | `true` | Apply an independent orthogonal rotation inside each SAQ segment |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse scan |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer used for reordering (with `use_reorder: true`) |
 | `precise_codes_layout` | string | `"flat"` | Storage layout for precise codes: `"flat"` keeps the legacy one-code-per-vector layout; `"bucket"` stores the precise code in the same bucket and offset as its basic posting |

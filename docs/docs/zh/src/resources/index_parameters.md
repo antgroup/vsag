@@ -44,7 +44,7 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 |------|-------|------|
 | `max_degree` | 16~48 | 每节点最大出边数 |
 | `ef_construction` | 200~500 | 构建阶段候选集大小，越大召回越高、构建越慢 |
-| `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq4` / `pq` | 主存储的量化策略 —— 支持的全部取值见[量化章节](../quantization/README.md) |
+| `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq4` / `pq` / `rabitq` / `saq` / `tq` | 主存储的量化策略；具体行为及各索引限制见[量化章节](../quantization/README.md) |
 | `use_reverse_edges` | `false` | 跟踪入边，实现 O(1) 反向邻居查找；边存储约翻倍，且压缩图存储不支持 |
 | `label_remap_type` | `pg` | label map 实现：默认 `pg`，或 `robin` |
 | `reorder_source` | `precise` | 从 `precise` 存储或直接从 `base` 重排；RaBitQ x+y split（包括 `tq_chain="mrle, rabitq"`）会自动选择 `base` |
@@ -53,6 +53,21 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 | `mrle_dim` | `0` | MRLE 输出维度，范围 `[0, dim]`；`0` 表示输入维度 |
 | `fast_encode_rabitq` | `true` | 使用多 bit RaBitQ 快速编码；设为 `false` 恢复精确编码器 |
 | `fast_encode_rabitq_rounds` | `6` | 快速编码器微调轮数，范围 `[1, 32]` |
+
+### SAQ 基础量化参数
+
+当 `base_quantization_type` 为 `saq` 时，HGraph、IVF 和 Pyramid 接受下列参数。它们属于
+构建期模型状态，因此加载或合并兼容索引状态时必须保持一致。
+
+| 字段 | 类型 | 默认值 | 有效取值 | 说明 |
+|------|------|--------|----------|------|
+| `saq_avg_bits` | float | `4.0` | `[1, 8]` | 每个输入维度的平均 payload 目标。完整记录预留与等长 multi-bit RaBitQ 相同的 12 字节额度；SAQ 的每段 8 字节元数据和字节对齐位平面均在该固定记录预算内计费。 |
+| `saq_segment_count` | 无符号整数 | `0` | `0` 或可行的正整数 | `0` 表示联合学习段数、64 维对齐边界和位宽；正数表示固定均匀分配的对齐边界并学习各段位宽。维度或记录预算无法容纳请求时训练失败。 |
+| `saq_adjustment_rounds` | 无符号整数 | `6` | `[0, 32]` | CAQ 坐标调整最大轮数；`0` 表示保留初始标量码。 |
+| `saq_use_pca` | 布尔值 | `true` | `true` / `false` | 学习并应用全维 PCA 旋转。L2 数据即使关闭 PCA 也保留均值中心化。 |
+| `saq_random_rotation` | 布尔值 | `true` | `true` / `false` | 在每段内应用确定性、可持久化的正交旋转。 |
+
+记录布局、度量语义、持久化方式和完整 HGraph 示例见 [SAQ 指南](../quantization/saq.md)。
 
 搜索时：
 

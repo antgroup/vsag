@@ -33,6 +33,7 @@
 - [Product Quantization (PQ)](quantization/pq.md)
 - [PQ FastScan](quantization/pqfs.md)
 - [RaBitQ](quantization/rabitq.md)
+- [SAQ](quantization/saq.md)
 - [RaBitQ x+y Split](quantization/rabitq_split.md)
 - [Transform Quantizer (TQ)](advanced/quantization_transform.md)
 
@@ -84,6 +85,7 @@
 - [Optimizer (Tune)](advanced/optimizer.md)
 - [Benchmarks](resources/performance.md)
 - [Evaluation Tool](resources/eval.md)
+- [SAQ Quantization Benchmark](resources/saq_quantization_benchmark.md)
 - [AutoTune Tool](resources/autotune.md)
   - [AutoTune V1 CLI JSON Contract](resources/autotune_api_v1.md)
 - [HDF5 Dataset Format](resources/dataset_format.md)
