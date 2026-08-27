@@ -48,7 +48,7 @@ HGraph places its build parameters under the generic `index_param` key (see
 | `max_degree` | 16–48 | Maximum out-degree per node |
 | `ef_construction` | 200–500 | Candidate set size during build; larger = higher recall, slower build |
 | `alpha` | `1.0` | Final robust-pruning factor; PiPNN requires a finite value at least `1.0` |
-| `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq4` / `pq` | Quantization of the base storage — see the [Quantization chapter](../quantization/) for all supported values |
+| `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq4` / `pq` / `rabitq` / `saq` / `tq` | Quantization of the base storage; see the [Quantization chapter](../quantization/) for behavior and per-index restrictions |
 | `use_reverse_edges` | `false` | Track incoming neighbors for O(1) reverse-edge lookup; roughly doubles edge storage and is unsupported with compressed graph storage |
 | `label_remap_type` | `pg` | Label-map implementation: `pg` (default) or `robin` |
 | `reorder_source` | `precise` | Reorder from the `precise` store or directly from `base`; RaBitQ x+y split, including `tq_chain="mrle, rabitq"`, selects `base` automatically |
@@ -57,6 +57,23 @@ HGraph places its build parameters under the generic `index_param` key (see
 | `mrle_dim` | `0` | MRLE output dimension in `[0, dim]`; `0` means input dimension |
 | `fast_encode_rabitq` | `true` | Use fast multi-bit RaBitQ encoding; `false` restores the exact encoder |
 | `fast_encode_rabitq_rounds` | `6` | Fast-encoder refinement rounds in `[1, 32]` |
+
+### SAQ base-quantizer parameters
+
+When `base_quantization_type` is `saq`, HGraph, IVF, and Pyramid accept the following parameters.
+They are part of the trained model state and must remain consistent when loading or merging
+compatible index states.
+
+| Field | Type | Default | Valid values | Description |
+|-------|------|---------|--------------|-------------|
+| `saq_avg_bits` | float | `4.0` | `[1, 8]` | Average payload target per input dimension. The complete record reserves the same 12-byte allowance as equal-length multi-bit RaBitQ; SAQ's 8-byte metadata per segment and byte-aligned bit planes are charged against that fixed record budget. |
+| `saq_segment_count` | unsigned integer | `0` | `0` or a feasible positive value | `0` jointly learns the segment count, 64-dimension-aligned boundaries, and bit widths. A positive value fixes evenly distributed aligned boundaries and still learns bit widths. Training rejects requests that cannot fit the dimension or record budget. |
+| `saq_adjustment_rounds` | unsigned integer | `6` | `[0, 32]` | Maximum CAQ coordinate-adjustment passes; `0` keeps the initial scalar codes. |
+| `saq_use_pca` | boolean | `true` | `true` / `false` | Learn and apply a full-dimensional PCA rotation. L2 data remains mean-centered even when PCA is disabled. |
+| `saq_random_rotation` | boolean | `true` | `true` / `false` | Apply a deterministic, persisted orthogonal rotation within every segment. |
+
+See the [SAQ guide](../quantization/saq.md) for record layout, metric semantics, persistence, and a
+complete HGraph example.
 
 ### PiPNN build parameters
 
