@@ -1229,6 +1229,63 @@ TEST_CASE("BucketDataCell supports RabitQ", "[ut][BucketDataCell]") {
     }
 }
 
+TEST_CASE("BucketDataCell supports SAQ", "[ut][BucketDataCell][SAQ]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr uint64_t base_count = 24;
+    constexpr BucketIdType bucket_count = 3;
+    auto vectors = fixtures::generate_vectors(base_count, dim);
+    auto queries = fixtures::generate_vectors(1, dim, 2026);
+
+    constexpr const char* param_str = R"(
+        {
+            "io_params": {
+                "type": "memory_io"
+            },
+            "quantization_params": {
+                "type": "saq",
+                "saq_avg_bits": 4,
+                "saq_adjustment_rounds": 2,
+                "saq_use_pca": true,
+                "saq_random_rotation": false
+            },
+            "buckets_count": 3
+        }
+        )";
+
+    MetricType metrics[3] = {
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
+    for (auto metric : metrics) {
+        auto param = std::make_shared<BucketDataCellParameter>();
+        param->FromJson(JsonType::Parse(param_str));
+
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.dim_ = dim;
+        common_param.metric_ = metric;
+
+        auto bucket = BucketInterface::MakeInstance(param, common_param);
+        REQUIRE(bucket != nullptr);
+        REQUIRE(bucket->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_SAQ);
+        bucket->Train(vectors.data(), base_count);
+        for (uint64_t i = 0; i < base_count; ++i) {
+            const auto bucket_id = static_cast<BucketIdType>(i % bucket_count);
+            bucket->InsertVector(vectors.data() + i * dim, bucket_id, static_cast<InnerIdType>(i));
+        }
+
+        auto computer = bucket->FactoryComputer(queries.data());
+        for (BucketIdType bucket_id = 0; bucket_id < bucket_count; ++bucket_id) {
+            const auto bucket_size = bucket->GetBucketSize(bucket_id);
+            std::vector<float> distances(bucket_size);
+            bucket->ScanBucketById(distances.data(), computer, bucket_id);
+            for (InnerIdType offset = 0; offset < bucket_size; ++offset) {
+                REQUIRE(std::isfinite(distances[offset]));
+                REQUIRE(std::isfinite(bucket->QueryOneById(computer, bucket_id, offset)));
+            }
+        }
+    }
+}
+
 TEST_CASE("BucketDataCell InsertVectorWithOffset", "[ut][BucketDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr int64_t dim = 16;

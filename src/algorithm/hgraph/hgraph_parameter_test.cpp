@@ -950,3 +950,30 @@ TEST_CASE("HGraph maps MRLE RaBitQ split to base reorder", "[ut][HGraphParameter
     param["tq_chain"].SetString("pca, rabitq");
     REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
 }
+
+TEST_CASE("HGraph maps SAQ parameters", "[ut][HGraphParameter][SAQ]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "saq",
+        "saq_avg_bits": 3.5,
+        "saq_segment_count": 2,
+        "saq_adjustment_rounds": 8,
+        "saq_use_pca": false,
+        "saq_random_rotation": false
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    const auto base_json = typed_param->base_codes_param->ToJson();
+    const auto quantization = base_json["quantization_params"];
+    REQUIRE(quantization["type"].GetString() == std::string("saq"));
+    REQUIRE(quantization["saq_avg_bits"].GetFloat() == 3.5F);
+    REQUIRE(quantization["saq_segment_count"].GetUint64() == 2);
+    REQUIRE(quantization["saq_adjustment_rounds"].GetUint64() == 8);
+    REQUIRE_FALSE(quantization["saq_use_pca"].GetBool());
+    REQUIRE_FALSE(quantization["saq_random_rotation"].GetBool());
+}

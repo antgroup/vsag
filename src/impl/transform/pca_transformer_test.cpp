@@ -35,7 +35,7 @@ TestCentralize(PCATransformer& pca, uint64_t dim) {
     }
 
     pca.ComputeColumnMean(vec.data(), count);
-    pca.CopyMeanForTest(mean.data());
+    pca.CopyMean(mean.data());
 
     for (uint64_t d = 0; d < dim; d++) {
         float expected_mean = d / 2.0;
@@ -76,7 +76,7 @@ TestPerformEigenDecomposition() {
 
     pca.PerformEigenDecomposition(covariance_matrix.data());
 
-    pca.CopyPCAMatrixForTest(pca_matrix.data());
+    pca.CopyPCAMatrix(pca_matrix.data());
 
     std::vector<float> expected_pca_matrix = {1.0f,
                                               0.0f,
@@ -87,6 +87,57 @@ TestPerformEigenDecomposition() {
 
     for (uint64_t i = 0; i < original_dim * target_dim; ++i) {
         REQUIRE(std::abs(pca_matrix[i] - expected_pca_matrix[i]) < 1e-5);
+    }
+}
+
+void
+TestPerformEigenDecompositionWithNonDiagonalCovariance() {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 3;
+    constexpr float inverse_sqrt_two = 0.7071067811865475F;
+    constexpr float inverse_sqrt_three = 0.5773502691896258F;
+    constexpr float inverse_sqrt_six = 0.4082482904638630F;
+    const std::vector<float> eigenvectors = {
+        inverse_sqrt_two,
+        -inverse_sqrt_six,
+        inverse_sqrt_three,
+        inverse_sqrt_two,
+        inverse_sqrt_six,
+        -inverse_sqrt_three,
+        0.0F,
+        2.0F * inverse_sqrt_six,
+        inverse_sqrt_three,
+    };
+    const std::vector<float> eigenvalues = {9.0F, 4.0F, 1.0F};
+    std::vector<float> covariance(dim * dim, 0.0F);
+    for (uint64_t row = 0; row < dim; ++row) {
+        for (uint64_t column = 0; column < dim; ++column) {
+            for (uint64_t component = 0; component < dim; ++component) {
+                covariance[row * dim + column] += eigenvectors[row * dim + component] *
+                                                  eigenvalues[component] *
+                                                  eigenvectors[column * dim + component];
+            }
+        }
+    }
+
+    PCATransformer pca(allocator.get(), dim, dim);
+    REQUIRE(pca.PerformEigenDecomposition(covariance.data()));
+    std::vector<float> projection(dim * dim, 0.0F);
+    pca.CopyPCAMatrix(projection.data());
+
+    for (uint64_t left = 0; left < dim; ++left) {
+        for (uint64_t right = 0; right < dim; ++right) {
+            float projected_covariance = 0.0F;
+            for (uint64_t row = 0; row < dim; ++row) {
+                for (uint64_t column = 0; column < dim; ++column) {
+                    projected_covariance += projection[left * dim + row] *
+                                            covariance[row * dim + column] *
+                                            projection[right * dim + column];
+                }
+            }
+            const float expected = left == right ? eigenvalues[left] : 0.0F;
+            REQUIRE(std::abs(projected_covariance - expected) < 1e-4F);
+        }
     }
 }
 
@@ -160,7 +211,7 @@ TestTrain() {
     pca.Train(data.data(), sample_count);
 
     std::vector<float> pca_matrix(target_dim * original_dim);
-    pca.CopyPCAMatrixForTest(pca_matrix.data());
+    pca.CopyPCAMatrix(pca_matrix.data());
     std::vector<float> expected = {1.0f, 0.0f};
 
     for (uint64_t i = 0; i < target_dim; i++) {
@@ -188,6 +239,7 @@ TEST_CASE("PCA Basic Test", "[ut][PCA]") {
     const auto dims = fixtures::get_common_used_dims();
 
     TestPerformEigenDecomposition();
+    TestPerformEigenDecompositionWithNonDiagonalCovariance();
     TestComputeCovarianceMatrix();
     TestTransform();
     TestTrain();
@@ -219,11 +271,11 @@ TEST_CASE("PCA Serialize / Deserialize Test", "[ut][PCA]") {
         std::vector<float> mean2(dim, 0);
         std::vector<float> pca_matrix1(target_dim * dim, 0);
         std::vector<float> pca_matrix2(target_dim * dim, 0);
-        pca1.CopyPCAMatrixForTest(pca_matrix1.data());
-        pca1.CopyMeanForTest(mean1.data());
+        pca1.CopyPCAMatrix(pca_matrix1.data());
+        pca1.CopyMean(mean1.data());
 
-        pca2.CopyPCAMatrixForTest(pca_matrix2.data());
-        pca2.CopyMeanForTest(mean2.data());
+        pca2.CopyPCAMatrix(pca_matrix2.data());
+        pca2.CopyMean(mean2.data());
 
         for (auto i = 0; i < pca_matrix1.size(); i++) {
             REQUIRE(std::abs(pca_matrix1[i] - pca_matrix2[i]) < 1e-5);
