@@ -785,6 +785,20 @@ TEST_CASE("HGraph fused RaBitQ split rejects non-finite base vectors",
     REQUIRE(index->GetNumElements() == count_before_overflow);
     REQUIRE_FALSE(index->CheckIdExist(overflowing_label));
 
+    auto overflowing_update = vsag::Dataset::Make();
+    overflowing_update->NumElements(1)
+        ->Dim(dim)
+        ->Ids(&existing_label)
+        ->Float32Vectors(overflowing_vector.data())
+        ->Owner(false);
+    auto overflow_update_result = index->UpdateVector(existing_label, overflowing_update, true);
+    REQUIRE_FALSE(overflow_update_result.has_value());
+    REQUIRE(overflow_update_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(index->GetNumElements() == base_count);
+    auto distance_after_overflow_update = index->CalcDistanceById(existing_vector, existing_label);
+    REQUIRE(distance_after_overflow_update.has_value());
+    REQUIRE(distance_after_overflow_update.value() == original_distance.value());
+
     std::vector<float> short_vector(existing_vector, existing_vector + dim - 1);
     auto wrong_dim_update = vsag::Dataset::Make();
     wrong_dim_update->NumElements(1)
