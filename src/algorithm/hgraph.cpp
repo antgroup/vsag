@@ -958,7 +958,9 @@ HGraph::KnnSearch(const DatasetPtr& query,
                                                      search_param,
                                                      (VisitedListPtr) nullptr,
                                                      &ctx);
-                search_param.ep = result->Top().second;
+                if (not result->Empty()) {
+                    search_param.ep = result->Top().second;
+                }
             }
         }
 
@@ -1169,7 +1171,9 @@ HGraph::RangeSearch(const DatasetPtr& query,
                                              search_param,
                                              (VisitedListPtr) nullptr,
                                              &ctx);
-        search_param.ep = result->Top().second;
+        if (not result->Empty()) {
+            search_param.ep = result->Top().second;
+        }
     }
 
     CHECK_ARGUMENT((1 <= params.ef_search) and (params.ef_search <= 1000),  // NOLINT
@@ -2195,7 +2199,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(
             raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param, vt, &ctx);
-        search_param.ep = result->Top().second;
+        if (not result->Empty()) {
+            search_param.ep = result->Top().second;
+        }
     }
 
     FilterPtr ft = nullptr;
