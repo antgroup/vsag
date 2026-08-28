@@ -373,6 +373,25 @@ public:
     GraphInterfacePtr
     generate_one_route_graph();
 
+    // Keep legacy RaBitQ candidates compact while allowing fused direct search to preserve hints.
+    // Only the buffer selected by search_one_graph allocates element storage.
+    struct RaBitQSearchCandidateBuffers {
+        explicit RaBitQSearchCandidateBuffers(Allocator* allocator)
+            : generic(allocator), fused(allocator) {
+        }
+
+        void
+        Reset() {
+            generic.clear();
+            fused.clear();
+            fused_search_used = false;
+        }
+
+        DistanceRecordVector generic;
+        RaBitQCandidateVector fused;
+        bool fused_search_used{false};
+    };
+
     /// Search a single graph layer, returning a candidate distance heap.
     /// @param ctx  may be nullptr during add (non-query) scenarios.
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
@@ -383,7 +402,7 @@ public:
                      InnerSearchParam& inner_search_param,
                      const VisitedListPtr& vt,
                      QueryContext* ctx,
-                     RaBitQCandidateVector* rabitq_lower_bound_candidates = nullptr,
+                     RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr,
                      bool* fused_search_finalized = nullptr) const;
 
     /// Overload that accepts an IteratorFilterContext for iterative search.
@@ -396,7 +415,7 @@ public:
                      IteratorFilterContext* iter_ctx,
                      // ctx can be nullptr in adding scenario
                      QueryContext* ctx,
-                     RaBitQCandidateVector* rabitq_lower_bound_candidates = nullptr) const;
+                     RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr) const;
 
 private:
     void
@@ -668,7 +687,7 @@ private:
             int64_t k,
             IteratorFilterContext* iter_ctx,
             QueryContext& ctx,
-            const RaBitQCandidateVector* rabitq_lower_bound_candidates = nullptr,
+            const RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr,
             const std::optional<float>& distance_threshold = std::nullopt) const;
 
     /// Run ELP (Edge-Link Pruning) optimizer on the bottom graph.

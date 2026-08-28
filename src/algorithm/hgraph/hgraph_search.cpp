@@ -176,12 +176,12 @@ HGraph::KnnSearch(const DatasetPtr& query,
             search_param.skip_ratio = params.skip_ratio;
             search_param.skip_strategy_type = params.skip_strategy_type;
 
-            RaBitQCandidateVector rabitq_lower_bound_candidates(ctx.alloc);
-            auto* rabitq_lower_bound_candidates_ptr =
-                search_param.enable_rabitq_one_bit_search and use_reorder_ and
-                        search_param.enable_reorder and reorder_by_base_
-                    ? &rabitq_lower_bound_candidates
-                    : nullptr;
+            RaBitQSearchCandidateBuffers rabitq_candidates(ctx.alloc);
+            auto* rabitq_candidates_ptr = search_param.enable_rabitq_one_bit_search and
+                                                  use_reorder_ and search_param.enable_reorder and
+                                                  reorder_by_base_
+                                              ? &rabitq_candidates
+                                              : nullptr;
 
             search_result = this->search_one_graph(query_data,
                                                    this->bottom_graph_,
@@ -189,7 +189,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
                                                    search_param,
                                                    iter_filter_ctx,
                                                    &ctx,
-                                                   rabitq_lower_bound_candidates_ptr);
+                                                   rabitq_candidates_ptr);
 
             if (use_reorder_ and search_param.enable_reorder) {
                 this->reorder(query_data,
@@ -198,7 +198,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
                               k,
                               iter_filter_ctx,
                               ctx,
-                              rabitq_lower_bound_candidates_ptr,
+                              rabitq_candidates_ptr,
                               threshold);
             } else if (search_param.enable_reorder and params.rabitq_one_bit_search) {
                 this->reorder(query_data,
@@ -277,7 +277,7 @@ HGraph::search_one_graph(const void* query,
                          InnerSearchParam& inner_search_param,
                          const VisitedListPtr& vt,
                          QueryContext* ctx,
-                         RaBitQCandidateVector* rabitq_lower_bound_candidates,
+                         RaBitQSearchCandidateBuffers* rabitq_candidates,
                          bool* fused_search_finalized) const {
     if (fused_search_finalized != nullptr) {
         *fused_search_finalized = false;
@@ -291,52 +291,47 @@ HGraph::search_one_graph(const void* query,
         visited_list->Reset();
     }
     DistHeapPtr result = nullptr;
-    Allocator* candidate_allocator =
-        ctx != nullptr and ctx->alloc != nullptr ? ctx->alloc : this->allocator_;
-    DistanceRecordVector generic_lower_bound_candidates(candidate_allocator);
-    auto* generic_lower_bound_candidates_ptr =
-        rabitq_lower_bound_candidates == nullptr ? nullptr : &generic_lower_bound_candidates;
+    if (rabitq_candidates != nullptr) {
+        rabitq_candidates->Reset();
+    }
     if (rabitq_fused_datacell_ != nullptr and graph.get() == rabitq_fused_datacell_.get() and
         flatten.get() == basic_flatten_codes_.get() and
         (inner_search_param.parallel_search_thread_count <= 1 or this->support_duplicate_) and
         not inner_search_param.find_duplicate) {
-        result = rabitq_fused_searcher_->Search(rabitq_fused_datacell_,
-                                                flatten,
-                                                visited_list,
-                                                query,
-                                                inner_search_param,
-                                                ctx,
-                                                rabitq_lower_bound_candidates,
-                                                fused_search_finalized);
+        result = rabitq_fused_searcher_->Search(
+            rabitq_fused_datacell_,
+            flatten,
+            visited_list,
+            query,
+            inner_search_param,
+            ctx,
+            rabitq_candidates == nullptr ? nullptr : &rabitq_candidates->fused,
+            fused_search_finalized);
+        if (result != nullptr and rabitq_candidates != nullptr) {
+            rabitq_candidates->fused_search_used = true;
+        }
     }
     if (result == nullptr and inner_search_param.parallel_search_thread_count > 1 and
         this->thread_pool_ != nullptr) {
-        result = this->parallel_searcher_->Search(graph,
-                                                  flatten,
-                                                  visited_list,
-                                                  query,
-                                                  inner_search_param,
-                                                  this->label_table_,
-                                                  ctx,
-                                                  generic_lower_bound_candidates_ptr);
+        result = this->parallel_searcher_->Search(
+            graph,
+            flatten,
+            visited_list,
+            query,
+            inner_search_param,
+            this->label_table_,
+            ctx,
+            rabitq_candidates == nullptr ? nullptr : &rabitq_candidates->generic);
     } else if (result == nullptr) {
-        result = this->searcher_->Search(graph,
-                                         flatten,
-                                         visited_list,
-                                         query,
-                                         inner_search_param,
-                                         this->label_table_,
-                                         ctx,
-                                         generic_lower_bound_candidates_ptr);
-    }
-    if (result != nullptr and rabitq_lower_bound_candidates != nullptr and
-        not generic_lower_bound_candidates.empty()) {
-        rabitq_lower_bound_candidates->clear();
-        rabitq_lower_bound_candidates->reserve(generic_lower_bound_candidates.size());
-        for (const auto& [lower_bound, id] : generic_lower_bound_candidates) {
-            rabitq_lower_bound_candidates->push_back(
-                {lower_bound, std::numeric_limits<float>::quiet_NaN(), id});
-        }
+        result = this->searcher_->Search(
+            graph,
+            flatten,
+            visited_list,
+            query,
+            inner_search_param,
+            this->label_table_,
+            ctx,
+            rabitq_candidates == nullptr ? nullptr : &rabitq_candidates->generic);
     }
     if (new_visited_list) {
         this->pool_->ReturnOne(visited_list);
@@ -352,11 +347,11 @@ HGraph::search_one_graph(const void* query,
                          InnerSearchParam& inner_search_param,
                          IteratorFilterContext* iter_ctx,
                          QueryContext* ctx,
-                         RaBitQCandidateVector* rabitq_lower_bound_candidates) const {
+                         RaBitQSearchCandidateBuffers* rabitq_candidates) const {
     auto visited_list = this->pool_->TakeOne();
-    Allocator* candidate_allocator =
-        ctx != nullptr and ctx->alloc != nullptr ? ctx->alloc : this->allocator_;
-    DistanceRecordVector generic_lower_bound_candidates(candidate_allocator);
+    if (rabitq_candidates != nullptr) {
+        rabitq_candidates->Reset();
+    }
     DistHeapPtr result = nullptr;
     if (iter_ctx->IsFirstUsed() and rabitq_fused_datacell_ != nullptr and
         graph.get() == rabitq_fused_datacell_.get() and
@@ -367,6 +362,9 @@ HGraph::search_one_graph(const void* query,
         fused_search_param.enable_reorder = false;
         result = rabitq_fused_searcher_->Search(
             rabitq_fused_datacell_, flatten, visited_list, query, fused_search_param, ctx, nullptr);
+        if (result != nullptr and rabitq_candidates != nullptr) {
+            rabitq_candidates->fused_search_used = true;
+        }
         while (result != nullptr and result->Size() > requested_count) {
             const auto discarded = result->Top();
             result->Pop();
@@ -382,15 +380,7 @@ HGraph::search_one_graph(const void* query,
             inner_search_param,
             iter_ctx,
             ctx,
-            rabitq_lower_bound_candidates == nullptr ? nullptr : &generic_lower_bound_candidates);
-    }
-    if (rabitq_lower_bound_candidates != nullptr) {
-        rabitq_lower_bound_candidates->clear();
-        rabitq_lower_bound_candidates->reserve(generic_lower_bound_candidates.size());
-        for (const auto& [lower_bound, id] : generic_lower_bound_candidates) {
-            rabitq_lower_bound_candidates->push_back(
-                {lower_bound, std::numeric_limits<float>::quiet_NaN(), id});
-        }
+            rabitq_candidates == nullptr ? nullptr : &rabitq_candidates->generic);
     }
     this->pool_->ReturnOne(visited_list);
     return result;
@@ -723,12 +713,12 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         (not use_reorder_ or not search_param.enable_reorder or reorder_by_base_);
     const bool fused_search_needs_candidates =
         fused_search_can_finalize and HGraphRaBitQSearcher::ShouldDeferRerank(search_param);
-    RaBitQCandidateVector rabitq_lower_bound_candidates(ctx.alloc);
-    auto* rabitq_lower_bound_candidates_ptr =
+    RaBitQSearchCandidateBuffers rabitq_candidates(ctx.alloc);
+    auto* rabitq_candidates_ptr =
         (not fused_search_can_finalize or fused_search_needs_candidates) and
                 search_param.enable_rabitq_one_bit_search and use_reorder_ and
                 search_param.enable_reorder and reorder_by_base_
-            ? &rabitq_lower_bound_candidates
+            ? &rabitq_candidates
             : nullptr;
 
     DistHeapPtr search_result;
@@ -758,7 +748,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                                                        search_param,
                                                        vt,
                                                        &ctx,
-                                                       rabitq_lower_bound_candidates_ptr,
+                                                       rabitq_candidates_ptr,
                                                        &fused_search_finalized);
             }
         }
@@ -769,7 +759,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                                                search_param,
                                                vt,
                                                &ctx,
-                                               rabitq_lower_bound_candidates_ptr,
+                                               rabitq_candidates_ptr,
                                                &fused_search_finalized);
     }
     vt_guard.Release();
@@ -789,7 +779,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                       limit,
                       nullptr,
                       ctx,
-                      rabitq_lower_bound_candidates_ptr,
+                      rabitq_candidates_ptr,
                       reorder_threshold);
     } else if (not fused_search_already_reranked and mci_result.route != "mci" and
                not brute_force_used and search_param.enable_reorder and

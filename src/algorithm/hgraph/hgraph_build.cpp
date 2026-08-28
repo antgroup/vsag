@@ -1140,7 +1140,7 @@ HGraph::reorder(const void* query,
                 int64_t k,
                 IteratorFilterContext* iter_ctx,
                 QueryContext& ctx,
-                const RaBitQCandidateVector* rabitq_lower_bound_candidates,
+                const RaBitQSearchCandidateBuffers* rabitq_candidates,
                 const std::optional<float>& distance_threshold) const {
     uint64_t size = candidate_heap->Size();
     if (k <= 0) {
@@ -1149,6 +1149,20 @@ HGraph::reorder(const void* query,
     const auto fused_graph =
         flatten.get() == basic_flatten_codes_.get() ? rabitq_fused_datacell_ : nullptr;
     if (fused_graph != nullptr) {
+        RaBitQCandidateVector adapted_candidates(select_query_allocator(ctx.alloc, allocator_));
+        const RaBitQCandidateVector* fused_candidates = nullptr;
+        if (rabitq_candidates != nullptr) {
+            if (rabitq_candidates->fused_search_used) {
+                fused_candidates = &rabitq_candidates->fused;
+            } else {
+                adapted_candidates.reserve(rabitq_candidates->generic.size());
+                for (const auto& [lower_bound, id] : rabitq_candidates->generic) {
+                    adapted_candidates.push_back(
+                        {lower_bound, std::numeric_limits<float>::quiet_NaN(), id});
+                }
+                fused_candidates = &adapted_candidates;
+            }
+        }
         auto fused_reorder = std::dynamic_pointer_cast<FlattenReorder>(reorder_);
         if (fused_reorder == nullptr) {
             fused_reorder = std::make_shared<FlattenReorder>(flatten, allocator_, fused_graph);
@@ -1158,20 +1172,13 @@ HGraph::reorder(const void* query,
                                                      k,
                                                      ctx,
                                                      iter_ctx,
-                                                     rabitq_lower_bound_candidates,
+                                                     fused_candidates,
                                                      distance_threshold);
         return;
     }
 
-    DistanceRecordVector generic_candidates(select_query_allocator(ctx.alloc, allocator_));
-    const DistanceRecordVector* generic_candidates_ptr = nullptr;
-    if (rabitq_lower_bound_candidates != nullptr) {
-        generic_candidates.reserve(rabitq_lower_bound_candidates->size());
-        for (const auto& candidate : *rabitq_lower_bound_candidates) {
-            generic_candidates.emplace_back(candidate.lower_bound, candidate.id);
-        }
-        generic_candidates_ptr = &generic_candidates;
-    }
+    const auto* generic_candidates =
+        rabitq_candidates == nullptr ? nullptr : &rabitq_candidates->generic;
     auto generic_reorder = reorder_;
     if (generic_reorder == nullptr) {
         generic_reorder = std::make_shared<FlattenReorder>(flatten, allocator_);
@@ -1181,7 +1188,7 @@ HGraph::reorder(const void* query,
                                               k,
                                               ctx,
                                               iter_ctx,
-                                              generic_candidates_ptr,
+                                              generic_candidates,
                                               distance_threshold);
 }
 
