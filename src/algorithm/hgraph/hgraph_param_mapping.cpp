@@ -323,6 +323,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            TRAIN_SAMPLE_COUNT_KEY,
+            {
+                TRAIN_SAMPLE_COUNT_KEY,
+            },
+        },
+        {
             SQ4_UNIFORM_TRUNC_RATE,
             {
                 BASE_CODES_KEY,

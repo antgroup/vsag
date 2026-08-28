@@ -255,6 +255,27 @@ TEST_CASE("HGraph maps resize increase count bit", "[ut][HGraphParameter]") {
         vsag::JsonType::Parse(R"({"resize_increase_count_bit": -1})"), common_param));
 }
 
+TEST_CASE("HGraph maps train sample count", "[ut][HGraphParameter][train_sample_count]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto default_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(
+        vsag::HGraph::CheckAndMappingExternalParam(vsag::JsonType::Parse("{}"), common_param));
+    REQUIRE(default_param != nullptr);
+    REQUIRE(default_param->train_sample_count == 65536L);
+
+    auto configured_param =
+        std::dynamic_pointer_cast<vsag::HGraphParameter>(vsag::HGraph::CheckAndMappingExternalParam(
+            vsag::JsonType::Parse(R"({"train_sample_count": 500000})"), common_param));
+    REQUIRE(configured_param != nullptr);
+    REQUIRE(configured_param->train_sample_count == 500000L);
+    REQUIRE(configured_param->ToJson()[vsag::TRAIN_SAMPLE_COUNT_KEY].GetInt() == 500000L);
+
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"train_sample_count": 511})"), common_param));
+}
+
 TEST_CASE("HGraph rejects deduplicate_storage without support_duplicate", "[ut][HGraphParameter]") {
     auto param = vsag::JsonType::Parse(R"({
         "base_quantization_type": "fp32",
