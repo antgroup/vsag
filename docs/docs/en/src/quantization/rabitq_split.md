@@ -47,6 +47,7 @@ The relevant parameters are:
 | `rabitq_error_rate` | Default positive multiplier applied to the lower-bound error term. |
 | `use_reorder` | Should be `true` so candidates are ranked with the `x+y` distance. |
 | `rabitq_fused_datacell` | HGraph only; enables fused graph/code layout. Default: `false`. |
+| `train_sample_count` | HGraph training sample size. Default: `65536`; set it to at least the dataset size to train the fused KMeans codec on all vectors. |
 
 The constraints are:
 
@@ -68,6 +69,11 @@ storage; `rabitq_fused_datacell` is not a Pyramid parameter. The specialized
 HGraph search loop reads the record directly and prefetches graph links and
 quantized codes together. The codec uses 16 reproducibly trained residual
 clusters.
+
+When the dataset is larger than `train_sample_count`, fused HGraph selects that many vectors
+with fixed-seed uniform reservoir sampling and trains the 16-cluster KMeans codec on the sample.
+Set `train_sample_count` to the dataset size (for example, `500000`) to use all vectors. Full-data
+training can improve cluster centroids but increases KMeans build time and working memory.
 
 This option creates an incrementally mutable in-memory index. After `Build` or
 Deserialize, it supports `Add`, mark remove, vector/id/attribute/extra-info

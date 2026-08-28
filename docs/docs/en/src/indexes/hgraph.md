@@ -77,6 +77,7 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `mrle_dim` | int | `0` | Output dimension for an MRLE transform in `tq_chain`; allowed range `[0, dim]`, where `0` means the input dimension. |
 | `fast_encode_rabitq` | bool | `true` | Use the fast multi-bit RaBitQ encoder; set to `false` for the previous exact encoder. |
 | `fast_encode_rabitq_rounds` | int | `6` | Fast RaBitQ coordinate-refinement rounds, in `[1, 32]`. |
+| `train_sample_count` | int | `65536` | Number of vectors sampled for quantizer training; must be at least `512`. Values at or above the dataset size use the full dataset. |
 | `build_thread_count` | int | `100` | Threads used to parallelise build |
 | `support_duplicate` | bool | `false` | Enable duplicate-ID detection on insert |
 | `deduplicate_storage` | bool | `false` | Share vector storage between duplicates; requires `support_duplicate: true` |

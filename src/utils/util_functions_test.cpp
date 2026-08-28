@@ -136,3 +136,18 @@ TEST_CASE("sample_train_data honors a fixed random seed", "[ut][UtilFunctions]")
                        first->GetFloat32Vectors() + sample_count * dim,
                        second->GetFloat32Vectors()));
 }
+
+TEST_CASE("sample_train_data honors configured counts above the default", "[ut][UtilFunctions]") {
+    constexpr int64_t dim = 1;
+    constexpr int64_t count = 65538;
+    constexpr int64_t sample_count = 65537;
+    std::vector<float> vectors(count);
+    std::iota(vectors.begin(), vectors.end(), 0.0F);
+    auto data = Dataset::Make();
+    data->NumElements(count)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
+    auto allocator = std::make_shared<DefaultAllocator>();
+
+    auto sampled = sample_train_data(data, count, dim, sample_count, allocator.get(), 0x52425131U);
+
+    REQUIRE(sampled->GetNumElements() == sample_count);
+}

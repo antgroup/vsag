@@ -71,6 +71,7 @@ auto result = index->KnnSearch(
 | `mrle_dim` | int | `0` | `tq_chain` 中 MRLE 的输出维度，范围 `[0, dim]`；`0` 表示输入维度 |
 | `fast_encode_rabitq` | bool | `true` | 使用多 bit RaBitQ 快速编码；设为 `false` 使用原有精确编码器 |
 | `fast_encode_rabitq_rounds` | int | `6` | RaBitQ 快速编码的坐标微调轮数，范围 `[1, 32]` |
+| `train_sample_count` | int | `65536` | 量化器训练的采样向量数，最小为 `512`；配置值大于等于数据集大小时使用全量数据 |
 | `build_thread_count` | int | `100` | 构建阶段并发线程数 |
 | `support_duplicate` | bool | `false` | 是否在插入时做重复 ID 检测 |
 | `deduplicate_storage` | bool | `false` | 让重复向量共享存储；需同时设置 `support_duplicate: true` |

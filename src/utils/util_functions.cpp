@@ -278,10 +278,8 @@ sample_train_data(const vsag::DatasetPtr& data,
                   Allocator* allocator,
                   std::optional<uint64_t> random_seed) {
     const int64_t min_train_size = 512;
-    const int64_t max_train_size = 65536;
 
-    int64_t sample_count =
-        std::min({max_train_size, total_elements, std::max(min_train_size, train_sample_count)});
+    int64_t sample_count = std::min(total_elements, std::max(min_train_size, train_sample_count));
 
     // If no sampling is needed, return the original dataset
     if (sample_count >= total_elements) {
