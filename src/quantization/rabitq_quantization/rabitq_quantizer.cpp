@@ -87,6 +87,10 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     // distance function related variable
     inv_sqrt_d_ = 1.0F / sqrt(this->dim_);
     rabitq_version_ = std::move(rabitq_version);
+    const bool support_split_code_storage =
+        RaBitQuantizerParameter::IsSplitVersion(rabitq_version_) && num_bits_per_dim_query_ == 32 &&
+        num_bits_per_dim_base_ >= 1 && num_bits_per_dim_filter_ >= 1 &&
+        num_bits_per_dim_filter_ <= num_bits_per_dim_base_;
     rabitq_error_rate_ = rabitq_error_rate;
     fast_encode_rabitq_ = fast_encode_rabitq;
     fast_encode_rabitq_rounds_ = fast_encode_rabitq_rounds;
@@ -175,13 +179,14 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
         this->query_code_size_ += ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;
     }
 
-    if (SupportSplitCodeStorage()) {
+    if (support_split_code_storage) {
         offset_low_bound_error_ = this->code_size_;
         this->code_size_ += ((sizeof(error_type) + align_size - 1) / align_size) * align_size;
 
         offset_one_bit_error_ = this->code_size_;
         this->code_size_ += ((sizeof(error_type) + align_size - 1) / align_size) * align_size;
     }
+    RefreshSplitLayout(support_split_code_storage);
 }
 
 template <MetricType metric>
@@ -298,7 +303,6 @@ RaBitQuantizer<metric>::ComputeFilterCodeNorm(const uint8_t* filter_code,
         return 1.0F;
     }
 
-    const uint64_t plane_bytes = PlaneBytes();
     const float center = 0.5F * static_cast<float>((1U << filter_bits) - 1U);
     double norm_sqr = 0.0;
     for (uint64_t d = 0; d < this->dim_; ++d) {
@@ -306,7 +310,7 @@ RaBitQuantizer<metric>::ComputeFilterCodeNorm(const uint8_t* filter_code,
         const auto bit_mask = static_cast<uint8_t>(1U << (d & 7));
         uint32_t code = 0;
         for (uint32_t bit = 0; bit < filter_bits; ++bit) {
-            const auto* plane = filter_code + static_cast<uint64_t>(bit) * plane_bytes;
+            const auto* plane = filter_code + split_layout_.sequential_plane_offsets[bit];
             if ((plane[byte_idx] & bit_mask) != 0U) {
                 code += 1U << (filter_bits - bit - 1);
             }
@@ -325,14 +329,7 @@ RaBitQuantizer<metric>::ComputeFilterCodeNorm(const uint8_t* filter_code,
 template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::StoredPlaneIndex(uint32_t logical_bit) const {
-    if (not SupportSplitCodeStorage()) {
-        return logical_bit;
-    }
-    const auto first_filter_bit = num_bits_per_dim_base_ - FilterBits();
-    if (logical_bit >= first_filter_bit) {
-        return static_cast<uint64_t>(num_bits_per_dim_base_ - 1 - logical_bit);
-    }
-    return static_cast<uint64_t>(FilterBits()) + logical_bit;
+    return split_layout_.stored_plane_indices[logical_bit];
 }
 
 template <MetricType metric>
@@ -340,7 +337,10 @@ const uint8_t*
 RaBitQuantizer<metric>::GetStoredPlane(const uint8_t* planes,
                                        uint32_t logical_bit,
                                        uint64_t plane_bytes) const {
-    return planes + StoredPlaneIndex(logical_bit) * plane_bytes;
+    const auto plane_offset = plane_bytes == split_layout_.plane_bytes
+                                  ? split_layout_.stored_plane_offsets[logical_bit]
+                                  : split_layout_.stored_plane_indices[logical_bit] * plane_bytes;
+    return planes + plane_offset;
 }
 
 template <MetricType metric>
@@ -348,7 +348,10 @@ uint8_t*
 RaBitQuantizer<metric>::GetStoredPlane(uint8_t* planes,
                                        uint32_t logical_bit,
                                        uint64_t plane_bytes) const {
-    return planes + StoredPlaneIndex(logical_bit) * plane_bytes;
+    const auto plane_offset = plane_bytes == split_layout_.plane_bytes
+                                  ? split_layout_.stored_plane_offsets[logical_bit]
+                                  : split_layout_.stored_plane_indices[logical_bit] * plane_bytes;
+    return planes + plane_offset;
 }
 
 template <MetricType metric>
@@ -356,7 +359,7 @@ float
 RaBitQuantizer<metric>::RaBitQFloatSQIPByPlanes(const float* query,
                                                 const uint8_t* planes,
                                                 float query_sum) const {
-    uint64_t plane_bytes = (this->dim_ + 7) / 8;
+    const uint64_t plane_bytes = PlaneBytes();
     const auto filter_bits = SupportSplitCodeStorage() ? FilterBits() : static_cast<uint32_t>(1);
     const auto supplement_bits = SupportSplitCodeStorage()
                                      ? ReorderBits()
@@ -393,7 +396,6 @@ RaBitQuantizer<metric>::RaBitQFloatSQIPBySplitCode(const float* query,
         return 0.0F;
     }
 
-    const uint64_t plane_bytes = PlaneBytes();
     if (filter_bits == 2 or filter_bits == 3) {
         const float centered_filter_ip =
             filter_bits == 2 ? RaBitQFloatTwoBitCenteredIP(query, filter_code, this->dim_)
@@ -410,14 +412,14 @@ RaBitQuantizer<metric>::RaBitQFloatSQIPBySplitCode(const float* query,
         const auto bit_mask = static_cast<uint8_t>(1U << (d & 7));
         uint32_t code = 0;
         for (uint32_t bit = 0; bit < filter_bits; ++bit) {
-            const auto* plane = filter_code + static_cast<uint64_t>(bit) * plane_bytes;
+            const auto* plane = filter_code + split_layout_.sequential_plane_offsets[bit];
             if ((plane[byte_idx] & bit_mask) != 0) {
                 code += 1U << (supplement_bits + filter_bits - bit - 1);
             }
         }
         if (supplement_code != nullptr) {
             for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
-                const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
+                const auto* plane = supplement_code + split_layout_.sequential_plane_offsets[bit];
                 if ((plane[byte_idx] & bit_mask) != 0) {
                     code += 1U << bit;
                 }
@@ -431,7 +433,7 @@ RaBitQuantizer<metric>::RaBitQFloatSQIPBySplitCode(const float* query,
 template <MetricType metric>
 void
 RaBitQuantizer<metric>::PackIntoPlanes(const uint8_t* src, uint8_t* dst) const {
-    uint64_t plane_size = (this->dim_ + 7) / 8;
+    const uint64_t plane_size = PlaneBytes();
     memset(dst, 0, plane_size * num_bits_per_dim_base_);
 
     const uint8_t mask_n =
@@ -946,21 +948,97 @@ RaBitQuantizer<metric>::AlignCodeField(uint64_t size) const {
 }
 
 template <MetricType metric>
+void
+RaBitQuantizer<metric>::RefreshSplitLayout(bool is_split) {
+    SplitLayout layout;
+    layout.is_split = is_split;
+    layout.filter_bits = layout.is_split ? num_bits_per_dim_filter_ : 1;
+    layout.reorder_bits = layout.is_split ? num_bits_per_dim_base_ - layout.filter_bits : 0;
+    layout.has_multi_bit_filter =
+        layout.is_split && layout.filter_bits > 1 && num_bits_per_dim_base_ > 1;
+
+    layout.plane_bytes = (this->dim_ + 7) / 8;
+    layout.code_planes_size = AlignCodeField(layout.plane_bytes * num_bits_per_dim_base_);
+    layout.code_meta_offset = offset_code_ + layout.code_planes_size;
+    layout.code_meta_size = this->code_size_ - layout.code_meta_offset;
+    layout.filter_planes_size = layout.plane_bytes * layout.filter_bits;
+    layout.supplement_planes_size = layout.plane_bytes * layout.reorder_bits;
+    layout.supplement_meta_offset = layout.supplement_planes_size;
+
+    const auto aligned_norm_size = AlignCodeField(sizeof(norm_type));
+    const auto aligned_error_size = AlignCodeField(sizeof(error_type));
+    layout.one_bit_record_norm_offset = AlignCodeField(layout.filter_planes_size);
+    uint64_t one_bit_record_offset = layout.one_bit_record_norm_offset + aligned_norm_size;
+    layout.one_bit_record_norm_code_offset = one_bit_record_offset;
+    if (layout.has_multi_bit_filter) {
+        one_bit_record_offset += aligned_norm_size;
+    }
+    layout.one_bit_record_mrq_norm_offset = one_bit_record_offset;
+    if (pca_dim_ != original_dim_ && use_mrq_) {
+        one_bit_record_offset += aligned_norm_size;
+    }
+    layout.one_bit_record_raw_norm_offset = one_bit_record_offset;
+    if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                  metric == MetricType::METRIC_TYPE_COSINE) {
+        one_bit_record_offset += aligned_norm_size;
+    }
+    layout.one_bit_record_low_bound_error_offset = one_bit_record_offset;
+    layout.one_bit_record_one_bit_error_offset = one_bit_record_offset + aligned_error_size;
+    layout.one_bit_record_size = layout.one_bit_record_one_bit_error_offset + aligned_error_size;
+    layout.one_bit_code_size = layout.is_split ? layout.one_bit_record_size : this->code_size_;
+    layout.supplement_code_size =
+        layout.is_split ? layout.supplement_meta_offset + layout.code_meta_size : 0;
+
+    for (uint32_t bit = 0; bit < layout.sequential_plane_offsets.size(); ++bit) {
+        layout.sequential_plane_offsets[bit] = static_cast<uint64_t>(bit) * layout.plane_bytes;
+    }
+    for (uint32_t logical_bit = 0; logical_bit < num_bits_per_dim_base_; ++logical_bit) {
+        uint64_t stored_plane_index = logical_bit;
+        if (layout.is_split) {
+            const auto first_filter_bit = num_bits_per_dim_base_ - layout.filter_bits;
+            stored_plane_index = logical_bit >= first_filter_bit
+                                     ? num_bits_per_dim_base_ - 1 - logical_bit
+                                     : layout.filter_bits + logical_bit;
+        }
+        layout.stored_plane_indices[logical_bit] = stored_plane_index;
+        layout.stored_plane_offsets[logical_bit] = stored_plane_index * layout.plane_bytes;
+    }
+
+    auto supplement_field_offset = [&layout](uint64_t full_code_offset) {
+        return layout.supplement_meta_offset + full_code_offset - layout.code_meta_offset;
+    };
+    if (num_bits_per_dim_base_ != 1) {
+        layout.supplement_norm_code_offset = supplement_field_offset(offset_norm_code_);
+    }
+    layout.supplement_norm_offset = supplement_field_offset(offset_norm_);
+    layout.supplement_error_offset = supplement_field_offset(offset_error_);
+    if (pca_dim_ != original_dim_ && use_mrq_) {
+        layout.supplement_mrq_norm_offset = supplement_field_offset(offset_mrq_norm_);
+    }
+    if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                  metric == MetricType::METRIC_TYPE_COSINE) {
+        layout.supplement_raw_norm_offset = supplement_field_offset(offset_raw_norm_);
+    }
+
+    split_layout_ = layout;
+}
+
+template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::PlaneBytes() const {
-    return (this->dim_ + 7) / 8;
+    return split_layout_.plane_bytes;
 }
 
 template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::CodePlanesSize() const {
-    return AlignCodeField(PlaneBytes() * num_bits_per_dim_base_);
+    return split_layout_.code_planes_size;
 }
 
 template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::CodeMetaOffset() const {
-    return offset_code_ + CodePlanesSize();
+    return split_layout_.code_meta_offset;
 }
 
 template <MetricType metric>
@@ -1067,133 +1145,97 @@ RaBitQuantizer<metric>::UnpackScalarCode(const uint8_t* codes, uint8_t* scalar_c
 template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::SupplementPlanesSize() const {
-    if (ReorderBits() == 0) {
-        return 0;
-    }
-    return PlaneBytes() * ReorderBits();
+    return split_layout_.supplement_planes_size;
 }
 
 template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::SupplementMetaOffset() const {
-    return SupplementPlanesSize();
+    return split_layout_.supplement_meta_offset;
 }
 
 template <MetricType metric>
 bool
 RaBitQuantizer<metric>::SupportSplitCodeStorage() const {
-    return RaBitQuantizerParameter::IsSplitVersion(rabitq_version_) &&
-           num_bits_per_dim_query_ == 32 && num_bits_per_dim_base_ >= 1 &&
-           num_bits_per_dim_filter_ >= 1 && num_bits_per_dim_filter_ <= num_bits_per_dim_base_;
+    return split_layout_.is_split;
 }
 
 template <MetricType metric>
 uint32_t
 RaBitQuantizer<metric>::FilterBits() const {
-    return SupportSplitCodeStorage() ? num_bits_per_dim_filter_ : 1;
+    return split_layout_.filter_bits;
 }
 
 template <MetricType metric>
 uint32_t
 RaBitQuantizer<metric>::ReorderBits() const {
-    if (not SupportSplitCodeStorage()) {
-        return 0;
-    }
-    return num_bits_per_dim_base_ - num_bits_per_dim_filter_;
+    return split_layout_.reorder_bits;
 }
 
 template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::FilterPlanesSize() const {
-    return PlaneBytes() * FilterBits();
+    return split_layout_.filter_planes_size;
 }
 
 template <MetricType metric>
 bool
 RaBitQuantizer<metric>::HasMultiBitFilter() const {
-    return SupportSplitCodeStorage() && FilterBits() > 1 && num_bits_per_dim_base_ > 1;
+    return split_layout_.has_multi_bit_filter;
 }
 
 template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::OneBitRecordNormOffset() const {
-    return AlignCodeField(FilterPlanesSize());
+    return split_layout_.one_bit_record_norm_offset;
 }
 
 template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::OneBitRecordNormCodeOffset() const {
-    return OneBitRecordNormOffset() + AlignCodeField(sizeof(norm_type));
+    return split_layout_.one_bit_record_norm_code_offset;
 }
 
 template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::OneBitRecordMrqNormOffset() const {
-    uint64_t offset = OneBitRecordNormOffset() + AlignCodeField(sizeof(norm_type));
-    if (HasMultiBitFilter()) {
-        offset += AlignCodeField(sizeof(norm_type));
-    }
-    return offset;
+    return split_layout_.one_bit_record_mrq_norm_offset;
 }
 
 template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::OneBitRecordRawNormOffset() const {
-    uint64_t offset = OneBitRecordNormOffset() + AlignCodeField(sizeof(norm_type));
-    if (HasMultiBitFilter()) {
-        offset += AlignCodeField(sizeof(norm_type));
-    }
-    if (pca_dim_ != original_dim_ && use_mrq_) {
-        offset += AlignCodeField(sizeof(norm_type));
-    }
-    return offset;
+    return split_layout_.one_bit_record_raw_norm_offset;
 }
 
 template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::OneBitRecordLowBoundErrorOffset() const {
-    uint64_t offset = OneBitRecordNormOffset() + AlignCodeField(sizeof(norm_type));
-    if (HasMultiBitFilter()) {
-        offset += AlignCodeField(sizeof(norm_type));
-    }
-    if (pca_dim_ != original_dim_ && use_mrq_) {
-        offset += AlignCodeField(sizeof(norm_type));
-    }
-    if constexpr (metric == MetricType::METRIC_TYPE_IP or
-                  metric == MetricType::METRIC_TYPE_COSINE) {
-        offset += AlignCodeField(sizeof(norm_type));
-    }
-    return offset;
+    return split_layout_.one_bit_record_low_bound_error_offset;
 }
 
 template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::OneBitRecordOneBitErrorOffset() const {
-    return OneBitRecordLowBoundErrorOffset() + AlignCodeField(sizeof(error_type));
+    return split_layout_.one_bit_record_one_bit_error_offset;
 }
 
 template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::OneBitRecordSize() const {
-    return OneBitRecordOneBitErrorOffset() + AlignCodeField(sizeof(error_type));
+    return split_layout_.one_bit_record_size;
 }
 
 template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::GetOneBitCodeSize() const {
-    if (not SupportSplitCodeStorage()) {
-        return this->code_size_;
-    }
-    return OneBitRecordSize();
+    return split_layout_.one_bit_code_size;
 }
 
 template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::GetSupplementCodeSize() const {
-    if (not SupportSplitCodeStorage()) {
-        return 0;
-    }
-    return SupplementMetaOffset() + (this->code_size_ - CodeMetaOffset());
+    return split_layout_.supplement_code_size;
 }
 
 template <MetricType metric>
@@ -1568,11 +1610,6 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCode(Computer<RaBitQuantizer>& compu
     }
 
     const auto* query = computer.buf_;
-    const auto* split_meta = supplement_code + SupplementMetaOffset();
-    const auto code_meta_offset = CodeMetaOffset();
-    auto meta_field = [split_meta, code_meta_offset](uint64_t offset) {
-        return split_meta + (offset - code_meta_offset);
-    };
 
     float ip_bq_estimate = 0.0F;
     if (num_bits_per_dim_base_ == 1) {
@@ -1587,7 +1624,9 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCode(Computer<RaBitQuantizer>& compu
                                                ReorderBits());
 
         norm_type base_norm_code = 0;
-        memcpy(&base_norm_code, meta_field(offset_norm_code_), sizeof(base_norm_code));
+        memcpy(&base_norm_code,
+               supplement_code + split_layout_.supplement_norm_code_offset,
+               sizeof(base_norm_code));
         ip_bq_estimate = ip_obar_q(ip_yu_q, query_raw_sum, base_norm_code, num_bits_per_dim_base_);
     } else {
         sum_type query_raw_sum = *((sum_type*)(query + query_offset_sum_));
@@ -1613,24 +1652,29 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCode(Computer<RaBitQuantizer>& compu
         }
 
         norm_type base_norm_code = 0;
-        memcpy(&base_norm_code, meta_field(offset_norm_code_), sizeof(base_norm_code));
+        memcpy(&base_norm_code,
+               supplement_code + split_layout_.supplement_norm_code_offset,
+               sizeof(base_norm_code));
         ip_bq_estimate = ip_obar_q(ip_yu_q, query_raw_sum, base_norm_code, num_bits_per_dim_base_);
     }
 
     norm_type query_norm = *((norm_type*)(query + query_offset_norm_));
     norm_type base_norm = 0;
-    memcpy(&base_norm, meta_field(offset_norm_), sizeof(base_norm));
+    memcpy(&base_norm, supplement_code + split_layout_.supplement_norm_offset, sizeof(base_norm));
 
     norm_type query_raw_norm = 0;
     norm_type base_raw_norm = 0;
     if constexpr (metric == MetricType::METRIC_TYPE_IP or
                   metric == MetricType::METRIC_TYPE_COSINE) {
         query_raw_norm = *((norm_type*)(query + query_offset_raw_norm_));
-        memcpy(&base_raw_norm, meta_field(offset_raw_norm_), sizeof(base_raw_norm));
+        memcpy(&base_raw_norm,
+               supplement_code + split_layout_.supplement_raw_norm_offset,
+               sizeof(base_raw_norm));
     }
 
     error_type base_error = 0;
-    memcpy(&base_error, meta_field(offset_error_), sizeof(base_error));
+    memcpy(
+        &base_error, supplement_code + split_layout_.supplement_error_offset, sizeof(base_error));
     if (std::abs(base_error) < 1e-5) {
         base_error = (base_error >= 0) ? 1.0F : -1.0F;
     }
@@ -1641,7 +1685,9 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCode(Computer<RaBitQuantizer>& compu
     if (pca_dim_ != this->original_dim_ and use_mrq_) {
         norm_type query_mrq_norm_sqr = *(norm_type*)(query + query_offset_mrq_norm_);
         norm_type base_mrq_norm_sqr = 0;
-        memcpy(&base_mrq_norm_sqr, meta_field(offset_mrq_norm_), sizeof(base_mrq_norm_sqr));
+        memcpy(&base_mrq_norm_sqr,
+               supplement_code + split_layout_.supplement_mrq_norm_offset,
+               sizeof(base_mrq_norm_sqr));
         result += (query_mrq_norm_sqr + base_mrq_norm_sqr);
     }
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
@@ -1684,11 +1730,6 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCodeAndFilterDist(Computer<RaBitQuan
     }
 
     const auto* query = computer.buf_;
-    const auto* split_meta = supplement_code + SupplementMetaOffset();
-    const auto code_meta_offset = CodeMetaOffset();
-    auto meta_field = [split_meta, code_meta_offset](uint64_t offset) {
-        return split_meta + (offset - code_meta_offset);
-    };
 
     const norm_type query_norm = *((norm_type*)(query + query_offset_norm_));
     const norm_type base_norm = *((norm_type*)(one_bit_code + OneBitRecordNormOffset()));
@@ -1730,7 +1771,9 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCodeAndFilterDist(Computer<RaBitQuan
     }
 
     norm_type full_norm_code = 0;
-    memcpy(&full_norm_code, meta_field(offset_norm_code_), sizeof(full_norm_code));
+    memcpy(&full_norm_code,
+           supplement_code + split_layout_.supplement_norm_code_offset,
+           sizeof(full_norm_code));
     if (full_norm_code <= 0.0F) {
         return false;
     }
@@ -1747,7 +1790,8 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCodeAndFilterDist(Computer<RaBitQuan
                                            num_bits_per_dim_base_);
 
     error_type base_error = 0;
-    memcpy(&base_error, meta_field(offset_error_), sizeof(base_error));
+    memcpy(
+        &base_error, supplement_code + split_layout_.supplement_error_offset, sizeof(base_error));
     if (std::abs(base_error) < 1e-5F) {
         base_error = (base_error >= 0) ? 1.0F : -1.0F;
     }
@@ -1756,7 +1800,9 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCodeAndFilterDist(Computer<RaBitQuan
     if (pca_dim_ != this->original_dim_ and use_mrq_) {
         const norm_type query_mrq_norm_sqr = *(norm_type*)(query + query_offset_mrq_norm_);
         norm_type base_mrq_norm_sqr = 0;
-        memcpy(&base_mrq_norm_sqr, meta_field(offset_mrq_norm_), sizeof(base_mrq_norm_sqr));
+        memcpy(&base_mrq_norm_sqr,
+               supplement_code + split_layout_.supplement_mrq_norm_offset,
+               sizeof(base_mrq_norm_sqr));
         result += query_mrq_norm_sqr + base_mrq_norm_sqr;
     }
 
@@ -2260,6 +2306,10 @@ RaBitQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
     if (pca_dim_ != this->original_dim_) {
         this->pca_->Deserialize(reader);
     }
+    RefreshSplitLayout(RaBitQuantizerParameter::IsSplitVersion(rabitq_version_) &&
+                       num_bits_per_dim_query_ == 32 && num_bits_per_dim_base_ >= 1 &&
+                       num_bits_per_dim_filter_ >= 1 &&
+                       num_bits_per_dim_filter_ <= num_bits_per_dim_base_);
 }
 
 TEMPLATE_QUANTIZER(RaBitQuantizer)
