@@ -128,8 +128,6 @@ public:
                                  norm_type mrq_norm_sqr,
                                  Computer<RaBitQuantizer>& computer) const;
 
-    // RaBitQ-Library HNSW-compatible fused traversal helpers. These intentionally
-    // quantize the rotated query once, without subtracting a cluster centroid.
     void
     PrepareHnswFourBitQuery(const float* transformed_query,
                             Vector<uint8_t>& query_planes,

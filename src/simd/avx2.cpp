@@ -1306,7 +1306,6 @@ RaBitQFloatSupplementCodeIP(const float* vector,
 #endif
 }
 
-// Ported from RaBitQ-Library's Apache-2.0 ip64_fxu7_avx2 kernel.
 float
 RaBitQFloatExCode7IP(const float* vector, const uint8_t* compact_code, uint64_t dim) {
 #if defined(ENABLE_AVX2)

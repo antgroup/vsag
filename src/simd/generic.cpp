@@ -862,7 +862,6 @@ RaBitQFloatSupplementCodeIP(const float* vector,
     return result;
 }
 
-// Ported from RaBitQ-Library's Apache-2.0 7-bit ExData layout.
 float
 RaBitQFloatExCode7IP(const float* vector, const uint8_t* compact_code, uint64_t dim) {
     if ((dim & 63U) != 0U) {

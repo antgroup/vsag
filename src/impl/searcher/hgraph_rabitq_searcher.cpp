@@ -83,12 +83,6 @@ struct bounded_result_record {
 
 static_assert(sizeof(bounded_result_record) == 16);
 
-/**
- * Fixed-capacity sorted result buffer matching RaBitQ-Library's BoundedKNN.
- *
- * Keeping this concrete avoids virtual heap operations in the per-neighbor hot loop.  The exact
- * x-bit inner product travels with a deferred candidate, so 2/3/4+y rerank never rescans x.
- */
 class BoundedResults {
 public:
     BoundedResults(uint64_t capacity, Allocator* allocator)
@@ -523,11 +517,6 @@ private:
     std::array<float, K_FUSED_CLUSTER_COUNT> scaled_cluster_g_error_{};
 };
 
-/**
- * Sorted linear beam buffer ported from RaBitQ-Library's SearchBuffer
- * (Apache-2.0). VSAG keeps the checked flag separate because InnerIdType is
- * also used by remove-version encoding.
- */
 class SearchBuffer {
 public:
     SearchBuffer(uint64_t capacity, Allocator* allocator)
@@ -760,7 +749,6 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         return std::make_shared<StandardHeap<true, false>>(allocator, -1);
     }
     const bool entry_allowed = is_allowed(search_param.ep);
-    // RaBitQ-Library inserts the bottom-layer entry point with its full distance.
     if (should_rerank and not entry_full_distance_available) {
         if (not refine_node(entry_node, entry_filter_ip, &entry_distance)) {
             return std::make_shared<StandardHeap<true, false>>(allocator, -1);
@@ -1454,10 +1442,6 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
     const auto refine_node = [&](InnerIdType id, float, float* distance) {
         const auto node = graph->GetCodeView(id);
         ++rabitq_full_count;
-        // RaBitQ-Library's HNSW adaptive-rerank path calls
-        // split_single_fulldist_direct(), which recomputes the x-bit/query inner product
-        // from the float query. Reusing the 4-bit traversal estimate here changes that
-        // reference behavior and materially degrades recall on GIST1M.
         ++rabitq_reorder_fallback_full_count;
         return split_codes->ComputeFusedFull(
             computer, node.cluster_id, node.one_bit_code, node.supplement_code, distance, nullptr);

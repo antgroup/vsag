@@ -28,14 +28,6 @@
 
 namespace vsag {
 
-/**
- * Bottom-layer HGraph storage specialized for fused RaBitQ split codes.
- *
- * The fixed-size, cache-line-aligned record follows the locality strategy used
- * by RaBitQ-Library's HNSW implementation: links, cluster id, external label,
- * x-bit code and y-bit supplement are addressed from one node pointer. The code sizes are fixed for
- * an index and support filter widths from one through four bits.
- */
 class HGraphRaBitQFusedDataCell final : public GraphInterface, public RabitQFusedInterface {
 public:
     struct NodeView {

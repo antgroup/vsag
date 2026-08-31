@@ -2296,10 +2296,6 @@ RaBitQuantizer<metric>::PrepareFourBitTraversalQuery(const float* normalized_que
     const uint64_t plane_bytes = PlaneBytes();
     computer.auxiliary_codes_.assign(k_query_bits * plane_bytes, 0);
 
-    // Port of RaBitQ-Library's 4-bit SplitSingleQuery quantization. The original
-    // implementation obtains this dimension-dependent constant by averaging 100
-    // fixed-seed Gaussian vectors. For a normalized Gaussian vector and 3
-    // supplement bits, the fitted factor is 3.21 * sqrt(dim) (99.5 at dim=960).
     const float query_scale = 3.21F * std::sqrt(static_cast<float>(this->dim_));
     float reconstruction_ip = 0.0F;
     float reconstruction_norm_sqr = 0.0F;
@@ -2528,7 +2524,6 @@ RaBitQuantizer<metric>::EncodeHnswSupplement(const float* data, uint8_t* supplem
 
     std::fill(supplement_code, supplement_code + SupplementPlanesSize(), 0);
     if ((this->dim_ & 63U) == 0U) {
-        // Apache-2.0 RaBitQ-Library ExData packing_7bit_excode layout.
         auto* output = supplement_code;
         for (uint64_t block = 0; block < this->dim_; block += 64) {
             const auto* input = ex_codes.data() + block;
