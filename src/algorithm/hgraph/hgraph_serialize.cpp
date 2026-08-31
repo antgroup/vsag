@@ -1136,14 +1136,13 @@ HGraph::restore_fused_codec() {
     if (rabitq_fused_datacell_ == nullptr) {
         return;
     }
-    auto split_codes =
-        std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(basic_flatten_codes_);
-    CHECK_ARGUMENT(split_codes != nullptr, "fused HGraph lost its RaBitQ split codes");
-    CHECK_ARGUMENT(split_codes->UsesExternalFusedCodeStorage(),
+    CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
+    CHECK_ARGUMENT(rabitq_split_codes_->UsesExternalFusedCodeStorage(),
                    "fused HGraph split codes are not bound to the node slab");
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
-        split_codes->OneBitCodeSize() == rabitq_fused_datacell_->OneBitCodeSize() and
-            split_codes->SupplementCodeSize() == rabitq_fused_datacell_->FusedSupplementCodeSize(),
+        rabitq_split_codes_->OneBitCodeSize() == rabitq_fused_datacell_->OneBitCodeSize() and
+            rabitq_split_codes_->SupplementCodeSize() ==
+                rabitq_fused_datacell_->FusedSupplementCodeSize(),
         "fused HGraph split-code sizes do not match the serialized node layout");
     const auto base_count = basic_flatten_codes_->TotalCount();
     const auto graph_count = rabitq_fused_datacell_->TotalCount();
@@ -1155,7 +1154,7 @@ HGraph::restore_fused_codec() {
         CHECK_ARGUMENT(base_count == 0, "non-empty fused HGraph is missing its codec model");
         return;
     }
-    split_codes->ImportFusedCodec(rabitq_fused_datacell_->CodecModel());
+    rabitq_split_codes_->ImportFusedCodec(rabitq_fused_datacell_->CodecModel());
 }
 
 std::unordered_map<std::string, uint64_t>

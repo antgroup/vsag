@@ -32,6 +32,9 @@ public:
     auto
     GetDuplicateIds(InnerIdType id) const -> std::vector<InnerIdType> override;
 
+    [[nodiscard]] bool
+    AnyDuplicateId(InnerIdType id, const DuplicateIdPredicate& predicate) const override;
+
     [[nodiscard]] auto
     GetGroupId(InnerIdType id) const -> InnerIdType override;
 

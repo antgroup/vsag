@@ -136,13 +136,11 @@ HGraph::train_codes_with_dataset(const DatasetPtr& train_data) {
     const auto* data_ptr = get_data(train_data);
     this->basic_flatten_codes_->Train(data_ptr, train_data->GetNumElements());
     if (rabitq_fused_datacell_ != nullptr) {
-        auto split_codes =
-            std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(basic_flatten_codes_);
-        CHECK_ARGUMENT(split_codes != nullptr, "fused HGraph lost its RaBitQ split codes");
-        split_codes->TrainFusedCodec(static_cast<const float*>(data_ptr),
-                                     train_data->GetNumElements(),
-                                     K_FUSED_CLUSTER_COUNT);
-        rabitq_fused_datacell_->SetCodecModel(split_codes->ExportFusedCodec());
+        CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
+        rabitq_split_codes_->TrainFusedCodec(static_cast<const float*>(data_ptr),
+                                             train_data->GetNumElements(),
+                                             K_FUSED_CLUSTER_COUNT);
+        rabitq_fused_datacell_->SetCodecModel(rabitq_split_codes_->ExportFusedCodec());
     }
     if (has_precise_reorder()) {
         this->high_precise_codes_->Train(data_ptr, train_data->GetNumElements());
@@ -384,17 +382,15 @@ HGraph::validate_fused_encoding_data(const float* data, uint64_t count) const {
     if (this->rabitq_fused_datacell_ == nullptr or this->optimized_build_codes_ != nullptr) {
         return;
     }
-    auto split_codes =
-        std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(basic_flatten_codes_);
-    CHECK_ARGUMENT(split_codes != nullptr, "fused HGraph lost its RaBitQ split codes");
-    ByteBuffer one_bit(split_codes->OneBitCodeSize(), allocator_);
-    ByteBuffer supplement(split_codes->SupplementCodeSize(), allocator_);
+    CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
+    ByteBuffer one_bit(rabitq_split_codes_->OneBitCodeSize(), allocator_);
+    ByteBuffer supplement(rabitq_split_codes_->SupplementCodeSize(), allocator_);
     const auto dim = static_cast<uint64_t>(this->dim_);
     for (uint64_t row = 0; row < count; ++row) {
         uint32_t cluster_id = 0;
-        CHECK_ARGUMENT(
-            split_codes->EncodeFused(data + row * dim, one_bit.data, supplement.data, &cluster_id),
-            "failed to encode fused RaBitQ node codes");
+        CHECK_ARGUMENT(rabitq_split_codes_->EncodeFused(
+                           data + row * dim, one_bit.data, supplement.data, &cluster_id),
+                       "failed to encode fused RaBitQ node codes");
     }
 }
 
@@ -634,14 +630,12 @@ HGraph::sync_fused_node_codes(InnerIdType inner_id, const void* data) {
     if (rabitq_fused_datacell_ == nullptr) {
         return;
     }
-    auto split_codes =
-        std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(basic_flatten_codes_);
-    CHECK_ARGUMENT(split_codes != nullptr, "fused HGraph lost its RaBitQ split codes");
+    CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
     const auto label = label_table_->GetLabelById(inner_id);
-    ByteBuffer one_bit(split_codes->OneBitCodeSize(), allocator_);
-    ByteBuffer supplement(split_codes->SupplementCodeSize(), allocator_);
+    ByteBuffer one_bit(rabitq_split_codes_->OneBitCodeSize(), allocator_);
+    ByteBuffer supplement(rabitq_split_codes_->SupplementCodeSize(), allocator_);
     uint32_t cluster_id = 0;
-    CHECK_ARGUMENT(split_codes->EncodeFused(
+    CHECK_ARGUMENT(rabitq_split_codes_->EncodeFused(
                        static_cast<const float*>(data), one_bit.data, supplement.data, &cluster_id),
                    "failed to encode fused RaBitQ node codes");
     rabitq_fused_datacell_->SetNodeCodes(

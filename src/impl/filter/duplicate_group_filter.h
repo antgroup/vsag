@@ -33,12 +33,9 @@ public:
         if (filter_->CheckValid(group_id)) {
             return true;
         }
-        for (const auto duplicate_id : graph_->GetDuplicateIds(group_id)) {
-            if (filter_->CheckValid(duplicate_id)) {
-                return true;
-            }
-        }
-        return false;
+        return graph_->AnyDuplicateId(group_id, [this](InnerIdType duplicate_id) {
+            return filter_->CheckValid(duplicate_id);
+        });
     }
 
     [[nodiscard]] float

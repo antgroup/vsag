@@ -411,8 +411,9 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
                              const RaBitQCandidateVector* rabitq_lower_bound_candidates,
                              const std::optional<float>& distance_threshold) {
     auto* split_codes = dynamic_cast<RaBitQSplitDataCellInterface*>(flatten_.get());
-    CHECK_ARGUMENT(fused_graph_ != nullptr and split_codes != nullptr,
-                   "fused reorder requires fused graph and RaBitQ split codes");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        fused_graph_ != nullptr and split_codes != nullptr,
+        "fused reorder requires fused graph and RaBitQ split codes");
     // set query allocator
     Allocator* query_allocator = select_query_allocator(ctx.alloc, allocator_);
     auto is_distance_eligible = [&distance_threshold](float distance) {

@@ -61,6 +61,7 @@ class HGraphRaBitQFusedDataCell;
 class HGraphRaBitQSearcher;
 class HGraphOptimizedBuildSession;
 class IteratorFilterContext;
+class RaBitQSplitDataCellInterface;
 
 /**
  * @brief HGraph: hierarchical navigable graph index.
@@ -904,6 +905,7 @@ private:
     Vector<GraphInterfacePtr> route_graphs_;   // upper-layer route graphs
     GraphInterfacePtr bottom_graph_{nullptr};  // base-level graph (all vectors)
     std::shared_ptr<HGraphRaBitQFusedDataCell> rabitq_fused_datacell_{nullptr};
+    std::shared_ptr<RaBitQSplitDataCellInterface> rabitq_split_codes_{nullptr};
     std::shared_ptr<HGraphRaBitQSearcher> rabitq_fused_searcher_{nullptr};
     SparseGraphDatacellParamPtr hierarchical_datacell_param_{nullptr};  // params for route graphs
 

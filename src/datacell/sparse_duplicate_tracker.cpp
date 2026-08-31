@@ -138,6 +138,26 @@ SparseDuplicateTracker::GetDuplicateIds(InnerIdType id) const -> std::vector<Inn
     return result;
 }
 
+bool
+SparseDuplicateTracker::AnyDuplicateId(InnerIdType id,
+                                       const DuplicateIdPredicate& predicate) const {
+    std::shared_lock lock(mutex_);
+
+    auto iter = next_ids_.find(id);
+    if (iter == next_ids_.end()) {
+        return false;
+    }
+
+    auto current_id = iter->second;
+    while (current_id != id) {
+        if (predicate(current_id)) {
+            return true;
+        }
+        current_id = next_ids_.at(current_id);
+    }
+    return false;
+}
+
 auto
 SparseDuplicateTracker::GetGroupId(InnerIdType id) const -> InnerIdType {
     std::shared_lock lock(mutex_);

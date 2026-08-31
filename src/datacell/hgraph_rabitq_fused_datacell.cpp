@@ -30,7 +30,7 @@ constexpr uint64_t K_COUNT_OFFSET = 0;
 constexpr uint64_t K_HEADER_SIZE = sizeof(uint32_t);
 constexpr uint32_t K_SERIALIZATION_VERSION = 2;
 
-struct fused_wire_layout {
+struct FusedWireLayout {
     uint64_t record_size{0};
     uint64_t neighbors_offset{0};
     uint64_t cluster_id_offset{0};
@@ -319,14 +319,14 @@ HGraphRaBitQFusedDataCell::Serialize(StreamWriter& writer) {
 void
 HGraphRaBitQFusedDataCell::Deserialize(StreamReader& reader) {
     const auto expected_maximum_degree = maximum_degree_;
-    const fused_wire_layout expected_layout{record_size_,
-                                            neighbors_offset_,
-                                            cluster_id_offset_,
-                                            label_offset_,
-                                            one_bit_offset_,
-                                            supplement_offset_,
-                                            one_bit_code_size_,
-                                            supplement_code_size_};
+    const FusedWireLayout expected_layout{record_size_,
+                                          neighbors_offset_,
+                                          cluster_id_offset_,
+                                          label_offset_,
+                                          one_bit_offset_,
+                                          supplement_offset_,
+                                          one_bit_code_size_,
+                                          supplement_code_size_};
 
     GraphInterface::Deserialize(reader);
     uint32_t version = 0;
@@ -334,7 +334,7 @@ HGraphRaBitQFusedDataCell::Deserialize(StreamReader& reader) {
     CHECK_ARGUMENT(version == K_SERIALIZATION_VERSION,
                    "unsupported fused graph serialization version");
 
-    fused_wire_layout layout;
+    FusedWireLayout layout;
     StreamReader::ReadObj(reader, layout.record_size);
     StreamReader::ReadObj(reader, layout.neighbors_offset);
     StreamReader::ReadObj(reader, layout.cluster_id_offset);

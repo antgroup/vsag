@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -28,6 +29,8 @@ DEFINE_POINTER(DuplicateInterface);
 
 class DuplicateInterface {
 public:
+    using DuplicateIdPredicate = std::function<bool(InnerIdType)>;
+
     virtual ~DuplicateInterface() = default;
 
     virtual void
@@ -35,6 +38,16 @@ public:
 
     [[nodiscard]] virtual auto
     GetDuplicateIds(InnerIdType id) const -> std::vector<InnerIdType> = 0;
+
+    [[nodiscard]] virtual bool
+    AnyDuplicateId(InnerIdType id, const DuplicateIdPredicate& predicate) const {
+        for (const auto duplicate_id : this->GetDuplicateIds(id)) {
+            if (predicate(duplicate_id)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     [[nodiscard]] virtual auto
     GetGroupId(InnerIdType id) const -> InnerIdType = 0;

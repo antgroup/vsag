@@ -115,6 +115,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
             std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(basic_flatten_codes_);
         CHECK_ARGUMENT(split_codes != nullptr,
                        "rabitq_fused_datacell requires in-memory RaBitQ split codes");
+        rabitq_split_codes_ = split_codes;
         auto graph_param =
             std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_param->bottom_graph_param);
         CHECK_ARGUMENT(graph_param != nullptr, "rabitq_fused_datacell requires flat graph storage");
@@ -631,10 +632,9 @@ HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     bool release;
     const auto* buffer = codes->GetCodesById(inner_id, release);
     if (buffer == nullptr) {
-        auto split_codes =
-            std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(basic_flatten_codes_);
         if (rabitq_fused_datacell_ != nullptr and codes.get() == basic_flatten_codes_.get() and
-            split_codes != nullptr and split_codes->DecodeFusedById(inner_id, data)) {
+            rabitq_split_codes_ != nullptr and
+            rabitq_split_codes_->DecodeFusedById(inner_id, data)) {
             return;
         }
         throw VsagException(ErrorType::INTERNAL_ERROR,
