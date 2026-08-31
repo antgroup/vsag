@@ -53,7 +53,6 @@ private:
     InnerIdType id_;
 };
 
-constexpr uint32_t K_FUSED_CLUSTER_COUNT = 16;
 constexpr uint32_t K_FULL_DISTANCE_AVAILABLE = 1U << 31U;
 constexpr uint32_t K_CANDIDATE_INDEX_MASK = K_FULL_DISTANCE_AVAILABLE - 1U;
 constexpr uint32_t K_INVALID_CANDIDATE_INDEX = K_CANDIDATE_INDEX_MASK;

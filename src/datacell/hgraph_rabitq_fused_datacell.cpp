@@ -29,7 +29,6 @@ constexpr uint64_t K_CACHE_LINE_SIZE = 64;
 constexpr uint64_t K_COUNT_OFFSET = 0;
 constexpr uint64_t K_HEADER_SIZE = sizeof(uint32_t);
 constexpr uint32_t K_SERIALIZATION_VERSION = 2;
-constexpr uint64_t K_FUSED_CLUSTER_COUNT = 16;
 
 struct fused_wire_layout {
     uint64_t record_size{0};
@@ -46,7 +45,8 @@ uint64_t
 fused_codec_model_size(int64_t dim) {
     CHECK_ARGUMENT(dim > 0, "invalid fused RaBitQ dimension");
     constexpr uint64_t fixed_size = sizeof(uint32_t) + sizeof(uint64_t) + sizeof(uint32_t);
-    constexpr uint64_t bytes_per_dimension = K_FUSED_CLUSTER_COUNT * sizeof(float);
+    constexpr uint64_t bytes_per_dimension =
+        static_cast<uint64_t>(K_FUSED_CLUSTER_COUNT) * sizeof(float);
     const auto unsigned_dim = static_cast<uint64_t>(dim);
     CHECK_ARGUMENT(
         unsigned_dim <= (std::numeric_limits<uint64_t>::max() - fixed_size) / bytes_per_dimension,

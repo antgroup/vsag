@@ -361,7 +361,13 @@ HGraph::search_one_graph(const void* query,
         fused_search_param.rerank_topk = fused_search_param.topk;
         fused_search_param.enable_reorder = false;
         result = rabitq_fused_searcher_->Search(
-            rabitq_fused_datacell_, flatten, visited_list, query, fused_search_param, ctx, nullptr);
+            rabitq_fused_datacell_,
+            flatten,
+            visited_list,
+            query,
+            fused_search_param,
+            ctx,
+            rabitq_candidates == nullptr ? nullptr : &rabitq_candidates->fused);
         if (result != nullptr and rabitq_candidates != nullptr) {
             rabitq_candidates->fused_search_used = true;
         }

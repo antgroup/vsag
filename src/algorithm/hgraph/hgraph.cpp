@@ -441,6 +441,8 @@ HGraph::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_
     }
     const bool reads_fused_codes =
         this->rabitq_fused_datacell_ != nullptr and flat == this->basic_flatten_codes_;
+    // The split-code computer dereferences the fused node slab. Keep the graph-wide read lock
+    // until distance evaluation completes so a concurrent slab resize cannot invalidate its view.
     if (lock.owns_lock() and not this->using_dedup_storage() and not reads_fused_codes) {
         lock.unlock();
     }
@@ -475,6 +477,8 @@ HGraph::CalDistanceById(const float* query,
     }
     const bool reads_fused_codes =
         this->rabitq_fused_datacell_ != nullptr and flat == this->basic_flatten_codes_;
+    // The split-code computer dereferences the fused node slab. Keep the graph-wide read lock
+    // until distance evaluation completes so a concurrent slab resize cannot invalidate its view.
     if (lock.owns_lock() and not this->using_dedup_storage() and not reads_fused_codes) {
         lock.unlock();
     }

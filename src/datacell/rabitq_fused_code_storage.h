@@ -20,6 +20,8 @@
 
 namespace vsag {
 
+inline constexpr uint32_t K_FUSED_CLUSTER_COUNT = 16;
+
 struct RaBitQFusedCodeView {
     const uint8_t* one_bit_code{nullptr};
     const uint8_t* supplement_code{nullptr};

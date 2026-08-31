@@ -139,8 +139,9 @@ HGraph::train_codes_with_dataset(const DatasetPtr& train_data) {
         auto split_codes =
             std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(basic_flatten_codes_);
         CHECK_ARGUMENT(split_codes != nullptr, "fused HGraph lost its RaBitQ split codes");
-        split_codes->TrainFusedCodec(
-            static_cast<const float*>(data_ptr), train_data->GetNumElements(), 16);
+        split_codes->TrainFusedCodec(static_cast<const float*>(data_ptr),
+                                     train_data->GetNumElements(),
+                                     K_FUSED_CLUSTER_COUNT);
         rabitq_fused_datacell_->SetCodecModel(split_codes->ExportFusedCodec());
     }
     if (has_precise_reorder()) {
