@@ -23,13 +23,18 @@
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
 #include "sindi.h"
+#include "storage/serialization_tags.h"
 #include "storage/serialization_template_test.h"
+#include "storage/streaming_serialization_test_utils.h"
 #include "unittest.h"
 #include "utils/search_threshold.h"
 
 using namespace vsag;
 
 namespace {
+
+using vsag::test::EraseStreamingBlock;
+using vsag::test::SetStreamingBlockVersion;
 
 struct SmallDmqDataset {
     explicit SmallDmqDataset(uint32_t term_id_offset) {
@@ -126,22 +131,6 @@ private:
 
 }  // namespace
 
-TEST_CASE("SINDI direct host search rejects missing rerank data", "[ut][SINDI][host_filter]") {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    const SindiHostSearchRoute route{SindiHostRouteKind::DIRECT, 0, 1};
-    const SparseVector query{};
-
-    REQUIRE_THROWS(SindiHostFilter::SearchDirect(route,
-                                                 query,
-                                                 1,
-                                                 nullptr,
-                                                 std::nullopt,
-                                                 FlattenInterfacePtr{},
-                                                 LabelTablePtr{},
-                                                 allocator.get(),
-                                                 nullptr));
-}
-
 TEST_CASE("SINDI immutable host filter routes", "[ut][SINDI][host_filter]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
@@ -153,17 +142,16 @@ TEST_CASE("SINDI immutable host filter routes", "[ut][SINDI][host_filter]") {
     std::array<uint32_t, 4> host_ids = {sparse_host_id, 1, sparse_host_id, 1};
     auto base = data.Base()->UInt32Metadata("host_id", host_ids.data());
     auto parameter = CreateDmqParameter(true, false);
-    parameter->host_filter_threshold = 1;
     auto index = std::make_unique<SINDI>(parameter, common_param);
     REQUIRE(index->Build(base) == std::vector<int64_t>{40});
 
     uint32_t host_id = 1;
     auto query = data.Query()->UInt32Metadata("host_id", &host_id);
-    auto direct_result = index->KnnSearch(query, 2, kDmqSearchParameters, nullptr);
-    REQUIRE(direct_result->GetDim() == 1);
-    REQUIRE(direct_result->GetIds()[0] == 30);
+    auto host_result = index->KnnSearch(query, 2, kDmqSearchParameters, nullptr);
+    REQUIRE(host_result->GetDim() == 1);
+    REQUIRE(host_result->GetIds()[0] == 30);
     auto null_allocator_result = index->KnnSearch(query, 2, kDmqSearchParameters, nullptr, nullptr);
-    RequireSameResults(direct_result, null_allocator_result);
+    RequireSameResults(host_result, null_allocator_result);
     SearchRequest request;
     request.query_ = query;
     request.topk_ = 2;
@@ -172,11 +160,11 @@ TEST_CASE("SINDI immutable host filter routes", "[ut][SINDI][host_filter]") {
     REQUIRE(request_result->GetDim() == 1);
     REQUIRE(request_result->GetIds()[0] == 30);
     auto threshold_parameters = JsonType::Parse(kDmqSearchParameters);
-    threshold_parameters[SEARCH_THRESHOLD].SetFloat(direct_result->GetDistances()[0]);
+    threshold_parameters[SEARCH_THRESHOLD].SetFloat(host_result->GetDistances()[0]);
     request.params_str_ = threshold_parameters.Dump();
     REQUIRE(index->SearchWithRequest(request)->GetDim() == 1);
     threshold_parameters[SEARCH_THRESHOLD].SetFloat(
-        std::nextafter(direct_result->GetDistances()[0], -std::numeric_limits<float>::infinity()));
+        std::nextafter(host_result->GetDistances()[0], -std::numeric_limits<float>::infinity()));
     request.params_str_ = threshold_parameters.Dump();
     REQUIRE(index->SearchWithRequest(request)->GetDim() == 0);
     auto allow_twenty = std::make_shared<AllowLabelFilter>(20);
@@ -240,7 +228,6 @@ TEST_CASE("SINDI host filter spans immutable windows", "[ut][SINDI][host_filter]
                     ->UInt32Metadata("host_id", host_ids.data())
                     ->Owner(false);
     auto parameter = CreateDmqParameter(true, false);
-    parameter->host_filter_threshold = 0;
     auto index = std::make_unique<SINDI>(parameter, common_param);
     REQUIRE(index->Build(base).empty());
 
@@ -279,7 +266,6 @@ TEST_CASE("SINDI host filter preserves term prune candidates at window boundarie
                     ->Owner(false);
     auto parameter = CreateDmqParameter(true, false);
     parameter->window_size = 4;
-    parameter->host_filter_threshold = 0;
     SINDI index(parameter, common_param);
     REQUIRE(index.Build(base).empty());
 
@@ -302,20 +288,52 @@ TEST_CASE("SINDI host filter preserves term prune candidates at window boundarie
     REQUIRE(result->GetIds()[1] == 21);
 }
 
-TEST_CASE("SINDI host metadata rejects unsupported configurations", "[ut][SINDI][host_filter]") {
+TEST_CASE("SINDI host metadata accepts missing host ID zero", "[ut][SINDI][host_filter]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
     common_param.metric_ = MetricType::METRIC_TYPE_IP;
 
     SmallDmqDataset data(0);
-    std::array<uint32_t, 4> host_ids = {1, 1, 2, 2};
+    std::array<uint32_t, 4> host_ids = {0, 1, 2, 0};
     auto base = data.Base()->UInt32Metadata("host_id", host_ids.data());
 
-    host_ids[0] = 0;
-    auto valid_parameter = CreateDmqParameter(true, false);
-    SINDI invalid_host_index(valid_parameter, common_param);
-    REQUIRE_THROWS(invalid_host_index.Build(base));
+    auto parameter = CreateDmqParameter(true, false);
+    SINDI index(parameter, common_param);
+    REQUIRE(index.Build(base) == std::vector<int64_t>{40});
+
+    uint32_t host_id = 0;
+    auto query = data.Query()->UInt32Metadata("host_id", &host_id);
+    auto result = index.KnnSearch(query, 2, kDmqSearchParameters, nullptr);
+    REQUIRE(result->GetDim() == 2);
+    REQUIRE(result->GetIds()[0] == 10);
+    REQUIRE(result->GetIds()[1] == 30);
+}
+
+TEST_CASE("SINDI host metadata rejects invalid serialized ranges",
+          "[ut][SINDI][host_filter][streaming]") {
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    const uint64_t host_count = 1;
+    const uint32_t host_id = 0;
+    const uint64_t offset_count = 2;
+    const std::array<uint32_t, 2> offsets{0, 1};
+    const uint64_t range_count = 1;
+    const SindiHostRange invalid_range{0, 2};
+    StreamWriter::WriteObj(writer, host_count);
+    StreamWriter::WriteObj(writer, host_id);
+    StreamWriter::WriteObj(writer, offset_count);
+    for (const auto offset : offsets) {
+        StreamWriter::WriteObj(writer, offset);
+    }
+    StreamWriter::WriteObj(writer, range_count);
+    StreamWriter::WriteObj(writer, invalid_range.begin);
+    StreamWriter::WriteObj(writer, invalid_range.end);
+
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    SindiHostFilter host_filter(allocator.get());
+    IOStreamReader reader(stream);
+    REQUIRE_THROWS(host_filter.Deserialize(reader, 1));
 }
 
 TEST_CASE("SINDI host filter supports mutable immutable and reorder modes",
@@ -329,16 +347,15 @@ TEST_CASE("SINDI host filter supports mutable immutable and reorder modes",
         common_param.metric_ = MetricType::METRIC_TYPE_IP;
 
         SmallDmqDataset data(0);
-        std::array<uint32_t, 4> host_ids = {2, 1, 2, 1};
+        std::array<uint32_t, 4> host_ids = {2, 0, 2, 0};
         auto base = data.Base()->UInt32Metadata("host_id", host_ids.data());
         auto parameter = CreateDmqParameter(immutable, false);
         parameter->use_reorder = use_reorder;
         parameter->rerank_type = SPARSE_RERANK_TYPE_FP32;
-        parameter->host_filter_threshold = 1;
         SINDI index(parameter, common_param);
         REQUIRE(index.Build(base) == std::vector<int64_t>{40});
 
-        uint32_t host_id = 1;
+        uint32_t host_id = 0;
         auto query = data.Query()->UInt32Metadata("host_id", &host_id);
         auto result = index.KnnSearch(query, 2, kDmqSearchParameters, nullptr);
         REQUIRE(result->GetDim() == 1);
@@ -353,9 +370,15 @@ TEST_CASE("SINDI host filter supports mutable immutable and reorder modes",
 
         if (not immutable) {
             std::array<int64_t, 2> added_labels{50, 60};
-            std::array<uint32_t, 2> added_hosts{1, 2};
+            std::array<uint32_t, 2> added_hosts{0, 2};
             std::array<SparseVector, 2> added_vectors{data.sparse_vectors[0],
                                                       data.sparse_vectors[0]};
+            auto missing_host_metadata = Dataset::Make()
+                                             ->NumElements(added_vectors.size())
+                                             ->SparseVectors(added_vectors.data())
+                                             ->Ids(added_labels.data())
+                                             ->Owner(false);
+            REQUIRE_THROWS(index.Add(missing_host_metadata));
             auto added = Dataset::Make()
                              ->NumElements(added_vectors.size())
                              ->SparseVectors(added_vectors.data())
@@ -363,7 +386,7 @@ TEST_CASE("SINDI host filter supports mutable immutable and reorder modes",
                              ->UInt32Metadata("host_id", added_hosts.data())
                              ->Owner(false);
             REQUIRE(index.Add(added).empty());
-            host_id = 1;
+            host_id = 0;
             result = index.KnnSearch(query, 2, kDmqSearchParameters, nullptr);
             REQUIRE(result->GetDim() == 2);
             REQUIRE(result->GetIds()[0] == 50);
@@ -372,7 +395,7 @@ TEST_CASE("SINDI host filter supports mutable immutable and reorder modes",
     }
 }
 
-TEST_CASE("SINDI small host uses direct FP32 rerank", "[ut][SINDI][host_filter]") {
+TEST_CASE("SINDI small host uses posting scan", "[ut][SINDI][host_filter]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
@@ -383,7 +406,6 @@ TEST_CASE("SINDI small host uses direct FP32 rerank", "[ut][SINDI][host_filter]"
     auto base = data.Base()->UInt32Metadata("host_id", host_ids.data());
     auto parameter = CreateDmqParameter(true, false);
     parameter->rerank_type = SPARSE_RERANK_TYPE_FP32;
-    parameter->host_filter_threshold = 1;
     auto index = std::make_unique<SINDI>(parameter, common_param);
     REQUIRE(index->Build(base) == std::vector<int64_t>{40});
 
@@ -666,4 +688,81 @@ TEST_CASE("SINDI DMQ Streaming Serialization Test", "[ut][SINDI][streaming]") {
     auto loaded_result = loaded.value()->KnnSearch(query, 3, kDmqSearchParameters).value();
     RequireSameResults(expected, restored_result);
     RequireSameResults(expected, loaded_result);
+}
+
+TEST_CASE("SINDI host streaming supports mutable and immutable",
+          "[ut][SINDI][host_filter][streaming]") {
+    const bool immutable = GENERATE(false, true);
+    DYNAMIC_SECTION("immutable=" << immutable) {
+        SmallDmqDataset data(0);
+        auto allocator = SafeAllocator::FactoryDefaultAllocator();
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+        std::array<uint32_t, 4> host_ids{2, 0, 2, 0};
+        auto base = data.Base()->UInt32Metadata("host_id", host_ids.data());
+        auto parameter = CreateDmqParameter(immutable, false);
+        parameter->use_reorder = false;
+        parameter->rerank_type = SPARSE_RERANK_TYPE_FP32;
+        SINDI index(parameter, common_param);
+        REQUIRE(index.Build(base) == std::vector<int64_t>{40});
+
+        if (!immutable) {
+            std::array<int64_t, 2> added_labels{50, 60};
+            std::array<uint32_t, 2> added_hosts{0, 2};
+            std::array<SparseVector, 2> added_vectors{data.sparse_vectors[0],
+                                                      data.sparse_vectors[0]};
+            auto added = Dataset::Make()
+                             ->NumElements(added_vectors.size())
+                             ->SparseVectors(added_vectors.data())
+                             ->Ids(added_labels.data())
+                             ->UInt32Metadata("host_id", added_hosts.data())
+                             ->Owner(false);
+            REQUIRE(index.Add(added).empty());
+        }
+
+        uint32_t host_id = 0;
+        auto query = data.Query()->UInt32Metadata("host_id", &host_id);
+        auto expected = index.KnnSearch(query, 3, kDmqSearchParameters, nullptr);
+
+        std::stringstream stream;
+        REQUIRE_NOTHROW(index.SerializeStreaming(stream));
+        const auto bytes = stream.str();
+
+        SINDI restored(parameter, common_param);
+        std::stringstream deserialize_stream(bytes);
+        REQUIRE_NOTHROW(restored.DeserializeStreaming(deserialize_stream));
+        RequireSameResults(expected, restored.KnnSearch(query, 3, kDmqSearchParameters, nullptr));
+
+        std::stringstream load_stream(bytes);
+        auto loaded = Index::Load(load_stream, "{}");
+        REQUIRE(loaded.has_value());
+        auto loaded_result = loaded.value()->KnnSearch(query, 3, kDmqSearchParameters).value();
+        RequireSameResults(expected, loaded_result);
+
+        if (!immutable) {
+            int64_t added_label = 70;
+            uint32_t added_host = 0;
+            auto added = Dataset::Make()
+                             ->NumElements(1)
+                             ->SparseVectors(&data.sparse_vectors[0])
+                             ->Ids(&added_label)
+                             ->UInt32Metadata("host_id", &added_host)
+                             ->Owner(false);
+            REQUIRE(restored.Add(added).empty());
+            REQUIRE(restored.KnnSearch(query, 4, kDmqSearchParameters, nullptr)->GetDim() == 3);
+        }
+
+        auto missing_host = EraseStreamingBlock(bytes, StreamSerializationTag::SINDI_HOST_METADATA);
+        SINDI missing_restored(parameter, common_param);
+        std::stringstream missing_stream(missing_host);
+        REQUIRE_THROWS(missing_restored.DeserializeStreaming(missing_stream));
+
+        auto unsupported_host =
+            SetStreamingBlockVersion(bytes, StreamSerializationTag::SINDI_HOST_METADATA, 2);
+        SINDI unsupported_restored(parameter, common_param);
+        std::stringstream unsupported_stream(unsupported_host);
+        REQUIRE_THROWS(unsupported_restored.DeserializeStreaming(unsupported_stream));
+    }
 }

@@ -34,6 +34,8 @@
 #include "index_common_param.h"
 #include "io/memory_block_io/memory_block_io_parameter.h"
 #include "io/memory_io/memory_io_parameter.h"
+#include "storage/serialization_tags.h"
+#include "storage/streaming_serialization_test_utils.h"
 #include "unittest.h"
 
 using namespace vsag;
@@ -94,6 +96,9 @@ public:
 }  // namespace vsag
 
 namespace {
+
+using vsag::test::EraseStreamingBlock;
+using vsag::test::SetStreamingBlockVersion;
 
 class FooterReadCountingBuffer : public std::stringbuf {
 public:
@@ -196,7 +201,6 @@ TEST_CASE("SINDIV2 immutable host filter routes", "[ut][SINDIV2][host_filter]") 
     parameter->window_size = 10000;
     parameter->use_reorder = true;
     parameter->immutable = true;
-    parameter->host_filter_threshold = 1;
     parameter->term_io_parameter = std::make_shared<MemoryIOParameter>();
     parameter->rerank_io_parameter = std::make_shared<MemoryBlockIOParameter>();
     SINDIV2 index(parameter, common_param);
@@ -212,9 +216,9 @@ TEST_CASE("SINDIV2 immutable host filter routes", "[ut][SINDIV2][host_filter]") 
                      ->Owner(false);
     const std::string search_parameters = R"({"sindi_v2": {"n_candidate": 3}})";
 
-    auto direct_result = index.KnnSearch(query, 2, search_parameters, nullptr);
-    REQUIRE(direct_result->GetDim() == 1);
-    REQUIRE(direct_result->GetIds()[0] == 30);
+    auto host_result = index.KnnSearch(query, 2, search_parameters, nullptr);
+    REQUIRE(host_result->GetDim() == 1);
+    REQUIRE(host_result->GetIds()[0] == 30);
     REQUIRE(index.KnnSearch(query, 2, search_parameters, std::make_shared<AllowLabelFilter>(20))
                 ->GetDim() == 0);
 
@@ -240,7 +244,7 @@ TEST_CASE("SINDIV2 host filter supports mutable immutable and reorder modes",
         uint32_t term = 1;
         std::array<float, 4> values{4.0F, 0.0F, 2.0F, 3.0F};
         std::array<int64_t, 4> labels{10, 40, 20, 30};
-        std::array<uint32_t, 4> host_ids{2, 1, 2, 1};
+        std::array<uint32_t, 4> host_ids{2, 0, 2, 0};
         std::array<SparseVector, 4> vectors{};
         vectors[0] = SparseVector{1, &term, &values[0]};
         vectors[2] = SparseVector{1, &term, &values[2]};
@@ -257,7 +261,6 @@ TEST_CASE("SINDIV2 host filter supports mutable immutable and reorder modes",
         parameter->window_size = 10000;
         parameter->use_reorder = use_reorder;
         parameter->immutable = immutable;
-        parameter->host_filter_threshold = 1;
         parameter->term_io_parameter = std::make_shared<MemoryIOParameter>();
         parameter->rerank_io_parameter = std::make_shared<MemoryBlockIOParameter>();
         SINDIV2 index(parameter, common_param);
@@ -265,7 +268,7 @@ TEST_CASE("SINDIV2 host filter supports mutable immutable and reorder modes",
 
         float query_value = 1.0F;
         SparseVector query_vector{1, &term, &query_value};
-        uint32_t query_host_id = 1;
+        uint32_t query_host_id = 0;
         auto query = Dataset::Make()
                          ->NumElements(1)
                          ->SparseVectors(&query_vector)
@@ -287,7 +290,13 @@ TEST_CASE("SINDIV2 host filter supports mutable immutable and reorder modes",
             std::array<SparseVector, 2> added_vectors{SparseVector{1, &term, &added_values[0]},
                                                       SparseVector{1, &term, &added_values[1]}};
             std::array<int64_t, 2> added_labels{50, 60};
-            std::array<uint32_t, 2> added_hosts{1, 2};
+            std::array<uint32_t, 2> added_hosts{0, 2};
+            auto missing_host_metadata = Dataset::Make()
+                                             ->NumElements(added_vectors.size())
+                                             ->SparseVectors(added_vectors.data())
+                                             ->Ids(added_labels.data())
+                                             ->Owner(false);
+            REQUIRE_THROWS(index.Add(missing_host_metadata));
             auto added = Dataset::Make()
                              ->NumElements(added_vectors.size())
                              ->SparseVectors(added_vectors.data())
@@ -295,12 +304,124 @@ TEST_CASE("SINDIV2 host filter supports mutable immutable and reorder modes",
                              ->UInt32Metadata("host_id", added_hosts.data())
                              ->Owner(false);
             REQUIRE(index.Add(added).empty());
-            query_host_id = 1;
+            query_host_id = 0;
             result = index.KnnSearch(query, 2, search_parameters, nullptr);
             REQUIRE(result->GetDim() == 2);
             REQUIRE(result->GetIds()[0] == 50);
             REQUIRE(result->GetIds()[1] == 30);
         }
+    }
+}
+
+TEST_CASE("SINDIV2 host streaming supports mutable and immutable",
+          "[ut][SINDIV2][host_filter][streaming]") {
+    const bool immutable = GENERATE(false, true);
+    DYNAMIC_SECTION("immutable=" << immutable) {
+        auto allocator = SafeAllocator::FactoryDefaultAllocator();
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.metric_ = MetricType::METRIC_TYPE_IP;
+        common_param.dim_ = 8;
+
+        uint32_t term = 1;
+        std::array<float, 4> values{4.0F, 0.0F, 2.0F, 3.0F};
+        std::array<int64_t, 4> labels{10, 40, 20, 30};
+        std::array<uint32_t, 4> host_ids{2, 0, 2, 0};
+        std::array<SparseVector, 4> vectors{};
+        vectors[0] = SparseVector{1, &term, &values[0]};
+        vectors[2] = SparseVector{1, &term, &values[2]};
+        vectors[3] = SparseVector{1, &term, &values[3]};
+        auto base = Dataset::Make()
+                        ->NumElements(vectors.size())
+                        ->SparseVectors(vectors.data())
+                        ->Ids(labels.data())
+                        ->UInt32Metadata("host_id", host_ids.data())
+                        ->Owner(false);
+
+        auto parameter = std::make_shared<SINDIV2Parameter>();
+        parameter->term_id_limit = 8;
+        parameter->window_size = 10000;
+        parameter->immutable = immutable;
+        parameter->term_io_parameter = std::make_shared<MemoryIOParameter>();
+        parameter->rerank_io_parameter = std::make_shared<MemoryBlockIOParameter>();
+        SINDIV2 index(parameter, common_param);
+        REQUIRE(index.Build(base) == std::vector<int64_t>{40});
+
+        if (!immutable) {
+            std::array<float, 2> added_values{5.0F, 6.0F};
+            std::array<SparseVector, 2> added_vectors{SparseVector{1, &term, &added_values[0]},
+                                                      SparseVector{1, &term, &added_values[1]}};
+            std::array<int64_t, 2> added_labels{50, 60};
+            std::array<uint32_t, 2> added_hosts{0, 2};
+            auto added = Dataset::Make()
+                             ->NumElements(added_vectors.size())
+                             ->SparseVectors(added_vectors.data())
+                             ->Ids(added_labels.data())
+                             ->UInt32Metadata("host_id", added_hosts.data())
+                             ->Owner(false);
+            REQUIRE(index.Add(added).empty());
+        }
+
+        float query_value = 1.0F;
+        SparseVector query_vector{1, &term, &query_value};
+        uint32_t query_host_id = 0;
+        auto query = Dataset::Make()
+                         ->NumElements(1)
+                         ->SparseVectors(&query_vector)
+                         ->UInt32Metadata("host_id", &query_host_id)
+                         ->Owner(false);
+        const std::string search_parameters = R"({"sindi_v2": {"n_candidate": 4}})";
+        auto expected = index.KnnSearch(query, 4, search_parameters, nullptr);
+
+        std::stringstream stream;
+        REQUIRE_NOTHROW(index.SerializeStreaming(stream));
+        const auto bytes = stream.str();
+
+        SINDIV2 restored(parameter, common_param);
+        std::stringstream deserialize_stream(bytes);
+        REQUIRE_NOTHROW(restored.DeserializeStreaming(deserialize_stream));
+        auto restored_result = restored.KnnSearch(query, 4, search_parameters, nullptr);
+        REQUIRE(restored_result->GetDim() == expected->GetDim());
+        for (int64_t i = 0; i < expected->GetDim(); ++i) {
+            REQUIRE(restored_result->GetIds()[i] == expected->GetIds()[i]);
+            REQUIRE(restored_result->GetDistances()[i] == expected->GetDistances()[i]);
+        }
+
+        std::stringstream load_stream(bytes);
+        auto loaded = Index::Load(load_stream, "{}");
+        REQUIRE(loaded.has_value());
+        auto loaded_result = loaded.value()->KnnSearch(query, 4, search_parameters).value();
+        REQUIRE(loaded_result->GetDim() == expected->GetDim());
+        for (int64_t i = 0; i < expected->GetDim(); ++i) {
+            REQUIRE(loaded_result->GetIds()[i] == expected->GetIds()[i]);
+            REQUIRE(loaded_result->GetDistances()[i] == expected->GetDistances()[i]);
+        }
+
+        if (!immutable) {
+            float added_value = 7.0F;
+            SparseVector added_vector{1, &term, &added_value};
+            int64_t added_label = 70;
+            uint32_t added_host = 0;
+            auto added = Dataset::Make()
+                             ->NumElements(1)
+                             ->SparseVectors(&added_vector)
+                             ->Ids(&added_label)
+                             ->UInt32Metadata("host_id", &added_host)
+                             ->Owner(false);
+            REQUIRE(restored.Add(added).empty());
+            REQUIRE(restored.KnnSearch(query, 4, search_parameters, nullptr)->GetIds()[0] == 70);
+        }
+
+        auto missing_host = EraseStreamingBlock(bytes, StreamSerializationTag::SINDI_HOST_METADATA);
+        SINDIV2 missing_restored(parameter, common_param);
+        std::stringstream missing_stream(missing_host);
+        REQUIRE_THROWS(missing_restored.DeserializeStreaming(missing_stream));
+
+        auto unsupported_layout =
+            SetStreamingBlockVersion(bytes, StreamSerializationTag::SINDI_V2_TERM_LAYOUT, 2);
+        SINDIV2 unsupported_restored(parameter, common_param);
+        std::stringstream unsupported_stream(unsupported_layout);
+        REQUIRE_THROWS(unsupported_restored.DeserializeStreaming(unsupported_stream));
     }
 }
 
@@ -331,7 +452,6 @@ TEST_CASE("SINDIV2 host filter preserves term prune candidates at window boundar
     parameter->window_size = 4;
     parameter->use_reorder = true;
     parameter->immutable = true;
-    parameter->host_filter_threshold = 0;
     parameter->term_io_parameter = std::make_shared<MemoryIOParameter>();
     parameter->rerank_io_parameter = std::make_shared<MemoryBlockIOParameter>();
     SINDIV2 index(parameter, common_param);
