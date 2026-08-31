@@ -63,7 +63,7 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
     if (ivf_partition_strategy_param_->partition_train_type ==
         IVFNearestPartitionTrainerType::KMeansTrainer) {
         constexpr int32_t kmeans_iter_count = 25;
-        KMeansCluster cls(static_cast<int32_t>(dim), this->allocator_);
+        KMeansCluster cls(static_cast<int32_t>(dim), this->allocator_, this->thread_pool_);
         cls.Run(this->bucket_count_,
                 dataset->GetFloat32Vectors(),
                 dataset->GetNumElements(),
@@ -125,7 +125,7 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
                                     std::strtoull(route_stats[1].c_str(), nullptr, 10));
         }
     };
-    if (thread_pool_ == nullptr) {
+    if (thread_pool_ == nullptr or count == 1) {
         for (int64_t i = 0; i < count; ++i) {
             task(i);
         }
@@ -152,7 +152,7 @@ IVFNearestPartition::Serialize(StreamWriter& writer) {
     this->route_index_ptr_->Serialize(writer);
 }
 void
-IVFNearestPartition::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+IVFNearestPartition::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     IVFPartitionStrategy::Deserialize(reader);
     this->route_index_ptr_->Deserialize(reader);
 }
@@ -161,8 +161,8 @@ IVFNearestPartition::factory_router_index(const IndexCommonParam& common_param) 
     ParamPtr param_ptr;
     JsonType hgraph_json;
     hgraph_json["base_quantization_type"].SetString("fp32");
-    hgraph_json["max_degree"].SetInt(64);
-    hgraph_json["ef_construction"].SetInt(300);
+    hgraph_json["max_degree"].SetInt(ivf_partition_strategy_param_->route_max_degree);
+    hgraph_json["ef_construction"].SetInt(ivf_partition_strategy_param_->route_ef_construction);
 
     param_ptr = HGraph::CheckAndMappingExternalParam(hgraph_json, common_param);
     this->route_index_ptr_ = std::make_shared<HGraph>(param_ptr, common_param);

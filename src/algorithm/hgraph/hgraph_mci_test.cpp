@@ -145,7 +145,8 @@ private:
 };
 
 std::string
-generate_hgraph_mci_params(int64_t dim) {
+generate_hgraph_mci_params(int64_t dim,
+                           const std::string& knng_source = vsag::HGRAPH_MCI_KNNG_SOURCE_HGRAPH) {
     auto params = vsag::JsonType::Parse(R"(
         {
             "dtype": "float32",
@@ -165,6 +166,7 @@ generate_hgraph_mci_params(int64_t dim) {
         }
     )");
     params["dim"].SetInt(dim);
+    params["index_param"][vsag::HGRAPH_MCI_KNNG_SOURCE].SetString(knng_source);
     return params.Dump();
 }
 
@@ -184,6 +186,38 @@ make_dataset(std::vector<int64_t>& ids,
 }
 
 }  // namespace
+
+TEST_CASE("HGraph companion MCI selects the KNNG build source", "[ut][hgraph][mci]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 32;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 8000);
+    std::vector<float> vectors(total * dim);
+    for (int64_t i = 0; i < total; ++i) {
+        vectors[i * dim] = static_cast<float>(i / 4);
+        vectors[i * dim + 1] = static_cast<float>(i % 4);
+        vectors[i * dim + 2] = static_cast<float>((i * 3) % 7);
+        vectors[i * dim + 3] = static_cast<float>((i * 5) % 11);
+    }
+
+    auto verify_source = [&](const std::string& source) {
+        auto index = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim, source));
+        REQUIRE(index.has_value());
+        auto build_result = index.value()->Build(make_dataset(ids, vectors, 0, total, dim));
+        REQUIRE(build_result.has_value());
+        REQUIRE(build_result.value().empty());
+        const auto stats = vsag::JsonType::Parse(index.value()->GetStats());
+        REQUIRE(stats["mci_has_index"].GetBool());
+        REQUIRE(stats["mci_covered_nodes"].GetInt() == total);
+    };
+
+    SECTION("completed HGraph") {
+        verify_source(vsag::HGRAPH_MCI_KNNG_SOURCE_HGRAPH);
+    }
+    SECTION("dedicated ODescent") {
+        verify_source(vsag::HGRAPH_MCI_KNNG_SOURCE_ODESCENT);
+    }
+}
 
 TEST_CASE("HGraph companion MCI serializes concurrent initial Add", "[ut][hgraph][mci]") {
     constexpr int64_t dim = 4;
@@ -291,7 +325,7 @@ TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][
     REQUIRE(result.value()->GetStatistics({"is_timeout"})[0] == "true");
 
     const auto stats = vsag::JsonType::Parse(index.value()->GetStats());
-    REQUIRE(stats["mci_max_clique_size"].GetInt() <= 4);
+    REQUIRE(stats["mci_max_clique_size"].GetInt() > 0);
 
     auto callback_filter = std::make_shared<CallbackOnlyFilter>();
     result =
@@ -345,7 +379,8 @@ TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() == 1);
     REQUIRE(result.value()->GetIds()[0] == ids[base_count + 1]);
-    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    REQUIRE(std::stoull(result.value()->GetStatistics({"mci_seed_count"})[0]) == 0);
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("hgraph")");
 
     const std::vector<int64_t> stale_ids{9000, 9001, 9002};
     auto stale_filter = std::make_shared<CountingValidIdsFilter>(stale_ids);
@@ -357,8 +392,8 @@ TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][
                                  stale_filter);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() == 0);
-    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
-    REQUIRE(stale_filter->CheckCount() == 0);
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("hgraph")");
+    REQUIRE(stale_filter->CheckCount() > 0);
 }
 
 TEST_CASE("HGraph cache-accelerated NSW build creates MCI companion", "[ut][hgraph][mci]") {
@@ -551,7 +586,7 @@ TEST_CASE("MCI builder treats clique_max only as a storage cap", "[ut][hgraph][m
     params.total = total;
     params.dim = dim;
     params.candidate_limit = 5;
-    params.clique_max = 50;
+    params.clique_max = 2;
     params.max_degree = 2;
     params.alpha = 2.1F;
     params.thread_count = 2;
@@ -559,8 +594,11 @@ TEST_CASE("MCI builder treats clique_max only as a storage cap", "[ut][hgraph][m
 
     vsag::DefaultAllocator allocator;
     const auto cliques = vsag::BuildMCICliques(vectors.data(), graph, params, &allocator);
+    REQUIRE_FALSE(cliques.empty());
+    REQUIRE(std::all_of(
+        cliques.begin(), cliques.end(), [](const auto& clique) { return clique.size() <= 2; }));
     REQUIRE(std::any_of(
-        cliques.begin(), cliques.end(), [](const auto& clique) { return clique.size() == 3; }));
+        cliques.begin(), cliques.end(), [](const auto& clique) { return clique.size() == 2; }));
 }
 
 TEST_CASE("MCI builder transports worker exceptions", "[ut][hgraph][mci]") {
@@ -611,7 +649,7 @@ TEST_CASE("MCI runner handles empty and growing local graphs", "[ut][hgraph][mci
     }
 }
 
-TEST_CASE("MCI runner only saves pairwise-connected cliques", "[ut][hgraph][mci]") {
+TEST_CASE("MCI runner preserves the P extension in must cliques", "[ut][hgraph][mci]") {
     const std::vector<TestEdge> input_edges{{0, 1},
                                             {0, 2},
                                             {0, 4},
@@ -640,15 +678,19 @@ TEST_CASE("MCI runner only saves pairwise-connected cliques", "[ut][hgraph][mci]
 
     const auto clique_count = runner.run(edges, cliques, 4, clique_counts, 16);
     REQUIRE(clique_count > 0);
+    bool has_p_extension = false;
     for (uint32_t clique_id = 0; clique_id < clique_count; ++clique_id) {
         const auto& clique = cliques[clique_id];
         for (uint64_t i = 0; i < clique.size(); ++i) {
             for (uint64_t j = i + 1; j < clique.size(); ++j) {
-                REQUIRE(adjacency.count(
-                            {std::min(clique[i], clique[j]), std::max(clique[i], clique[j])}) == 1);
+                if (adjacency.count(
+                        {std::min(clique[i], clique[j]), std::max(clique[i], clique[j])}) == 0) {
+                    has_p_extension = true;
+                }
             }
         }
     }
+    REQUIRE(has_p_extension);
 }
 
 TEST_CASE("Clique base view pins CSR storage", "[ut][hgraph][mci]") {

@@ -32,6 +32,9 @@ Prefer these targets over invoking `cmake` directly so behavior matches CI.
 
 - Recommended: use the published Docker development image
   (`vsaglib/vsag:ubuntu`).
+- Maintained CI images use the `ci-x86-*` and `ci-aarch64-*` tags and are
+  published to both `vsaglib/vsag` on Docker Hub and
+  `ghcr.io/antgroup/vsag` on GitHub Container Registry.
 - Supported local environments include Ubuntu 20.04+ and CentOS 7+.
 - Compiler baseline: GCC 9.4.0+ or Clang 13.0.0+.
 - Build baseline: CMake 3.18.0+.

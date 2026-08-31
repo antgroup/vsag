@@ -20,9 +20,7 @@
 #include <limits>
 #include <memory>
 #include <shared_mutex>
-#include <tuple>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include "analyzer/analyzer.h"
@@ -32,7 +30,6 @@
 #include "impl/reasoning/search_reasoning.h"
 #include "index_feature_list.h"
 #include "io/memory_block_io/memory_block_io_parameter.h"
-#include "quantization/sparse_quantization/sparse_quantizer.h"
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
 #include "simd/fp16_simd.h"
 #include "storage/serialization.h"
@@ -54,6 +51,51 @@ constexpr int64_t SINDI_RERANK_FLAT_FORMAT_DATACELL = 2;
 constexpr int64_t SINDI_RERANK_FLAT_FORMAT_DMQ = 3;
 constexpr const char* SINDI_POSTING_LIST_FORMAT_VERSION_KEY = "sindi_posting_list_format_version";
 constexpr int64_t SINDI_SORTED_POSTING_LIST_FORMAT_VERSION = 1;
+
+class FilterCallbackLimiter : public Filter {
+public:
+    FilterCallbackLimiter(FilterPtr filter, std::shared_ptr<uint64_t> remaining)
+        : filter_(std::move(filter)), remaining_(std::move(remaining)) {
+    }
+
+    [[nodiscard]] bool
+    CheckValid(int64_t id) const override {
+        if (*remaining_ == 0) {
+            return false;
+        }
+        const bool valid = filter_->CheckValid(id);
+        --(*remaining_);
+        return valid;
+    }
+
+    [[nodiscard]] float
+    ValidRatio() const override {
+        return filter_->ValidRatio();
+    }
+
+    [[nodiscard]] Distribution
+    FilterDistribution() const override {
+        return filter_->FilterDistribution();
+    }
+
+    void
+    GetValidIds(const int64_t** valid_ids, int64_t& count) const override {
+        filter_->GetValidIds(valid_ids, count);
+    }
+
+private:
+    FilterPtr filter_;
+    std::shared_ptr<uint64_t> remaining_;
+};
+
+FilterPtr
+create_filter_callback_limiter(const FilterPtr& filter,
+                               const std::shared_ptr<uint64_t>& remaining) {
+    if (filter == nullptr or remaining == nullptr) {
+        return filter;
+    }
+    return std::make_shared<FilterCallbackLimiter>(filter, remaining);
+}
 
 bool
 has_sorted_posting_lists(const JsonType& basic_info) {
@@ -218,14 +260,30 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
       term_id_limit_(param->term_id_limit),
       window_size_(param->window_size),
       doc_prune_ratio_(param->doc_prune_ratio),
-      doc_retain_ratio_(1.0F - param->doc_prune_ratio),
-      window_term_list_(common_param.allocator_.get()),
       deserialize_without_footer_(param->deserialize_without_footer),
       deserialize_without_buffer_(param->deserialize_without_buffer),
       quantization_params_(std::make_shared<QuantizationParams>()),
       avg_doc_term_length_(param->avg_doc_term_length),
       remap_term_ids_(param->remap_term_ids),
       immutable_enabled_(param->immutable) {
+    if (immutable_enabled_) {
+        immutable_term_datacell_ =
+            std::make_shared<ImmutableSindiTermDataCell>(term_id_limit_,
+                                                         window_size_,
+                                                         remap_term_ids_,
+                                                         sparse_value_quant_type_,
+                                                         quantization_params_,
+                                                         allocator_);
+        term_datacell_ = immutable_term_datacell_;
+    } else {
+        mutable_term_datacell_ =
+            std::make_shared<MutableSindiTermDataCell>(term_id_limit_,
+                                                       window_size_,
+                                                       allocator_,
+                                                       sparse_value_quant_type_,
+                                                       quantization_params_);
+        term_datacell_ = mutable_term_datacell_;
+    }
     if (remap_term_ids_) {
         term_id_mapper_ =
             std::make_shared<TermIdMapper>(term_id_limit_, common_param.allocator_.get());
@@ -277,16 +335,107 @@ SINDI::AnalyzeIndexBySearch(const SearchRequest& request) {
     return stats.Dump(4);
 }
 
+SparseVector
+SINDI::sort_and_prune_sparse_vector_for_build(const SparseVector& input,
+                                              Vector<std::pair<uint32_t, float>>& sorted_terms,
+                                              Vector<uint32_t>& pruned_ids,
+                                              Vector<float>& pruned_vals) const {
+    if (not remap_term_ids_) {
+        for (uint32_t index = 0; index < input.len_; ++index) {
+            CHECK_ARGUMENT(
+                input.ids_[index] <= term_id_limit_,
+                fmt::format("term id of sparse vector {} is greater than term id limit {}",
+                            input.ids_[index],
+                            term_id_limit_));
+        }
+    }
+
+    if (doc_prune_ratio_ == 0.0F) {
+        return input;
+    }
+
+    sorted_terms.clear();
+    sorted_terms.reserve(input.len_);
+    for (uint32_t index = 0; index < input.len_; ++index) {
+        sorted_terms.emplace_back(input.ids_[index], input.vals_[index]);
+    }
+    std::sort(sorted_terms.begin(), sorted_terms.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.second != rhs.second) {
+            return lhs.second > rhs.second;
+        }
+        return lhs.first < rhs.first;
+    });
+
+    auto retained_count = static_cast<uint32_t>(sorted_terms.size());
+    if (sorted_terms.size() > 1) {
+        float total_mass = 0.0F;
+        for (const auto& [_, value] : sorted_terms) {
+            total_mass += value;
+        }
+        const float retained_mass = total_mass * (1.0F - doc_prune_ratio_);
+        float current_mass = 0.0F;
+        retained_count = 0;
+        while (current_mass < retained_mass && retained_count < sorted_terms.size()) {
+            current_mass += sorted_terms[retained_count].second;
+            ++retained_count;
+        }
+    }
+
+    pruned_ids.resize(retained_count);
+    pruned_vals.resize(retained_count);
+    for (uint32_t index = 0; index < retained_count; ++index) {
+        pruned_ids[index] = sorted_terms[index].first;
+        pruned_vals[index] = sorted_terms[index].second;
+    }
+    return {retained_count, pruned_ids.data(), pruned_vals.data()};
+}
+
+void
+SINDI::init_quantization_params_from_vectors(const DatasetPtr& base) {
+    float min_val = std::numeric_limits<float>::max();
+    float max_val = std::numeric_limits<float>::lowest();
+    bool has_value = false;
+    const auto* sparse_vectors = base->GetSparseVectors();
+    for (int64_t document = 0; document < base->GetNumElements(); ++document) {
+        const auto& sparse_vector = sparse_vectors[document];
+        for (uint32_t term = 0; term < sparse_vector.len_; ++term) {
+            min_val = std::min(min_val, sparse_vector.vals_[term]);
+            max_val = std::max(max_val, sparse_vector.vals_[term]);
+            has_value = true;
+        }
+    }
+    if (not has_value) {
+        min_val = 0.0F;
+        max_val = 0.0F;
+    }
+    quantization_params_->min_val = min_val;
+    quantization_params_->max_val = max_val;
+    quantization_params_->diff = max_val - min_val;
+    if (quantization_params_->diff < 1e-6F) {
+        quantization_params_->diff = 1.0F;
+    }
+}
+
 std::vector<int64_t>
 SINDI::Add(const DatasetPtr& base) {
     std::scoped_lock wlock(this->global_mutex_);
-    const bool mutable_runtime = not immutable_enabled_ and immutable_data_ == nullptr;
-    CHECK_ARGUMENT(mutable_runtime, "immutable SINDI runtime does not support Add");
+    CHECK_ARGUMENT(not immutable_enabled_, "immutable SINDI runtime does not support Add");
     if (rerank_type_ == SPARSE_RERANK_TYPE_DMQ8 and
         cur_element_count_.load(std::memory_order_relaxed) != 0) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "SINDI DMQ rerank does not support incremental Add");
     }
+    const auto previous_window_count = mutable_term_datacell_->GetWindowCount();
+    auto failed_ids = this->add(base, true);
+    if (mutable_term_datacell_->GetWindowCount() != previous_window_count) {
+        this->cal_memory_usage();
+    }
+    return failed_ids;
+}
+
+std::vector<int64_t>
+SINDI::add(const DatasetPtr& base, bool sort_affected_windows) {
+    CHECK_ARGUMENT(mutable_term_datacell_ != nullptr, "mutable SINDI data cell is not initialized");
     std::vector<int64_t> failed_ids;
 
     auto data_num = base->GetNumElements();
@@ -298,53 +447,22 @@ SINDI::Add(const DatasetPtr& base) {
     const auto extra_info_size = base->GetExtraInfoSize();
 
     if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8 && cur_element_count_ == 0) {
-        float min_val = std::numeric_limits<float>::max();
-        float max_val = std::numeric_limits<float>::lowest();
-        for (int64_t i = 0; i < data_num; ++i) {
-            const auto& vec = sparse_vectors[i];
-            for (int j = 0; j < vec.len_; ++j) {
-                float val = vec.vals_[j];
-                if (val < min_val) {
-                    min_val = val;
-                }
-                if (val > max_val) {
-                    max_val = val;
-                }
-            }
-        }
-        quantization_params_->min_val = min_val;
-        quantization_params_->max_val = max_val;
-        quantization_params_->diff = max_val - min_val;
-        if (quantization_params_->diff < 1e-6) {
-            quantization_params_->diff = 1.0F;
-        }
-    }
-
-    // adjust window
-    int64_t final_add_window = align_up(cur_element_count_ + data_num, window_size_) / window_size_;
-    bool window_changed = false;
-    while (window_term_list_.size() < final_add_window) {
-        window_term_list_.emplace_back(
-            std::make_shared<SparseTermDataCell>(doc_retain_ratio_,
-                                                 term_id_limit_,
-                                                 allocator_,
-                                                 sparse_value_quant_type_,
-                                                 quantization_params_));
-        window_changed = true;
+        this->init_quantization_params_from_vectors(base);
     }
 
     // add process
+    Vector<std::pair<uint32_t, float>> sorted_terms(allocator_);
+    Vector<uint32_t> pruned_ids(allocator_);
+    Vector<float> pruned_vals(allocator_);
+    Vector<uint32_t> remapped_ids(allocator_);
     const auto first_affected_window = cur_element_count_ / window_size_;
     // This remains -1 when every input vector is rejected, so post-insert loops are no-ops.
     int64_t last_affected_window = -1;
-    Vector<uint32_t> tmp_ids(allocator_);
     std::vector<SparseVector> rerank_vectors;
     if (use_reorder_) {
         rerank_vectors.reserve(data_num);
     }
     for (uint32_t i = 0; i < data_num; ++i) {
-        auto cur_window = cur_element_count_ / window_size_;
-        auto window_start_id = cur_window * window_size_;
         const auto& sparse_vector = sparse_vectors[i];
         if (label_table_->CheckLabel(ids[i])) {
             failed_ids.push_back(ids[i]);
@@ -358,14 +476,14 @@ SINDI::Add(const DatasetPtr& base) {
             continue;
         }
 
-        auto inner_id = static_cast<uint16_t>(cur_element_count_ - window_start_id);
-
         try {
+            const auto pruned = this->sort_and_prune_sparse_vector_for_build(
+                sparse_vector, sorted_terms, pruned_ids, pruned_vals);
             if (remap_term_ids_) {
-                auto remapped = remap_sparse_vector_for_build(sparse_vector, tmp_ids);
-                window_term_list_[cur_window]->InsertVector(remapped, inner_id);
+                auto remapped = remap_sparse_vector_for_build(pruned, remapped_ids);
+                mutable_term_datacell_->InsertVector(remapped, cur_element_count_);
             } else {
-                window_term_list_[cur_window]->InsertVector(sparse_vector, inner_id);
+                mutable_term_datacell_->InsertVector(pruned, cur_element_count_);
             }
         } catch (const std::runtime_error& e) {
             failed_ids.push_back(ids[i]);
@@ -376,9 +494,8 @@ SINDI::Add(const DatasetPtr& base) {
             logger::warn("vsag exception: {}", e.what());
             continue;
         } catch (const std::bad_alloc& e) {
-            failed_ids.push_back(ids[i]);
             logger::warn("memory allocation failed: {}", e.what());
-            continue;
+            throw;
         }
 
         label_table_->Insert(cur_element_count_, ids[i]);  // todo(zxy): check id exists
@@ -387,28 +504,20 @@ SINDI::Add(const DatasetPtr& base) {
             extra_infos_->InsertExtraInfo(extra_info + i * extra_info_size, cur_element_count_);
         }
 
-        cur_element_count_++;
-        last_affected_window = cur_window;
-
-        // high precision part
         if (use_reorder_) {
             rerank_vectors.push_back(sparse_vectors[i]);
         }
+        last_affected_window = cur_element_count_ / window_size_;
+        cur_element_count_++;
     }
     if (not rerank_vectors.empty()) {
         rerank_flat_->BatchInsertVector(rerank_vectors.data(),
                                         static_cast<InnerIdType>(rerank_vectors.size()));
     }
-    const auto populated_window_count =
-        static_cast<uint64_t>(align_up(cur_element_count_.load(), window_size_) / window_size_);
-    if (window_term_list_.size() > populated_window_count) {
-        window_term_list_.resize(populated_window_count);
-    }
-    for (int64_t window = first_affected_window; window <= last_affected_window; ++window) {
-        window_term_list_[window]->SortByValue();
-    }
-    if (window_changed) {
-        this->cal_memory_usage();
+    if (sort_affected_windows) {
+        for (int64_t window = first_affected_window; window <= last_affected_window; ++window) {
+            mutable_term_datacell_->SortByValue(static_cast<uint32_t>(window));
+        }
     }
     return failed_ids;
 }
@@ -418,73 +527,57 @@ SINDI::Build(const DatasetPtr& base) {
     if (immutable_enabled_) {
         return this->build_immutable(base);
     }
-
-    // note that there's a wlock in Add()
-    auto failed_ids = this->Add(base);
-    {
-        std::scoped_lock wlock(this->global_mutex_);
-        for (auto& window : window_term_list_) {
-            window->Compact();
-        }
-        this->cal_memory_usage();
-    }
+    std::scoped_lock wlock(this->global_mutex_);
+    CHECK_ARGUMENT(base->GetNumElements() > 0, "data_num is zero when add vectors");
+    auto failed_ids = this->add(base, false);
+    mutable_term_datacell_->Finalize();
+    this->cal_memory_usage();
     return failed_ids;
 }
 
 std::vector<int64_t>
 SINDI::build_immutable(const DatasetPtr& base) {
     std::scoped_lock wlock(this->global_mutex_);
-    CHECK_ARGUMENT(immutable_data_ == nullptr, "immutable SINDI has already been built");
-    std::vector<int64_t> failed_ids;
+    CHECK_ARGUMENT(immutable_enabled_, "mutable SINDI cannot use immutable build");
+    CHECK_ARGUMENT(not immutable_build_started_, "immutable SINDI has already been built");
 
-    auto data_num = base->GetNumElements();
-    CHECK_ARGUMENT(data_num > 0, "data_num is zero when add vectors");
-
+    const auto data_num = base->GetNumElements();
+    CHECK_ARGUMENT(data_num > 0, "data_num is zero when build immutable SINDI");
     const auto* sparse_vectors = base->GetSparseVectors();
     const auto* ids = base->GetIds();
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
 
-    if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8 && cur_element_count_ == 0) {
-        float min_val = std::numeric_limits<float>::max();
-        float max_val = std::numeric_limits<float>::lowest();
-        for (int64_t i = 0; i < data_num; ++i) {
-            const auto& vec = sparse_vectors[i];
-            for (int j = 0; j < vec.len_; ++j) {
-                float val = vec.vals_[j];
-                min_val = std::min(min_val, val);
-                max_val = std::max(max_val, val);
-            }
-        }
-        quantization_params_->min_val = min_val;
-        quantization_params_->max_val = max_val;
-        quantization_params_->diff = max_val - min_val;
-        if (quantization_params_->diff < 1e-6) {
-            quantization_params_->diff = 1.0F;
-        }
+    if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
+        this->init_quantization_params_from_vectors(base);
     }
 
-    immutable_data_ = std::make_unique<ImmutableSINDIData>(allocator_);
-    immutable_data_->sparse_value_quant_type = sparse_value_quant_type_;
-    immutable_data_->value_code_size =
-        SparseTermDataCell::GetSparseValueCodeSize(sparse_value_quant_type_);
-    immutable_data_->windows.reserve(align_up(data_num, window_size_) / window_size_);
+    CHECK_ARGUMENT(immutable_term_datacell_ != nullptr,
+                   "immutable SINDI data cell is not initialized");
+    immutable_build_started_ = true;
+    immutable_term_datacell_->Reserve(align_up(data_num, window_size_) / window_size_);
 
-    SparseTermDataCellPtr current_window = nullptr;
-    Vector<uint32_t> tmp_ids(allocator_);
+    std::vector<int64_t> failed_ids;
+    Vector<std::pair<uint32_t, float>> sorted_terms(allocator_);
+    Vector<uint32_t> pruned_ids(allocator_);
+    Vector<float> pruned_vals(allocator_);
+    Vector<uint32_t> remapped_ids(allocator_);
     std::vector<SparseVector> rerank_vectors;
+    auto mutable_term_datacell = std::make_shared<MutableSindiTermDataCell>(
+        term_id_limit_, window_size_, allocator_, sparse_value_quant_type_, quantization_params_);
+    auto flush_staging_window = [&]() {
+        mutable_term_datacell->SortByValue(0);
+        immutable_term_datacell_->AppendWindow(mutable_term_datacell->GetWindow(0));
+        mutable_term_datacell = std::make_shared<MutableSindiTermDataCell>(term_id_limit_,
+                                                                           window_size_,
+                                                                           allocator_,
+                                                                           sparse_value_quant_type_,
+                                                                           quantization_params_);
+    };
     if (use_reorder_) {
         rerank_vectors.reserve(data_num);
     }
     for (int64_t i = 0; i < data_num; ++i) {
-        if (current_window == nullptr) {
-            current_window = std::make_shared<SparseTermDataCell>(doc_retain_ratio_,
-                                                                  term_id_limit_,
-                                                                  allocator_,
-                                                                  sparse_value_quant_type_,
-                                                                  quantization_params_);
-        }
-
         const auto& sparse_vector = sparse_vectors[i];
         if (label_table_->CheckLabel(ids[i])) {
             failed_ids.push_back(ids[i]);
@@ -498,21 +591,15 @@ SINDI::build_immutable(const DatasetPtr& base) {
             continue;
         }
 
-        const auto window_start_id =
-            static_cast<int64_t>(immutable_data_->windows.size()) * window_size_;
-        const auto window_inner_id = cur_element_count_ - window_start_id;
-        if (window_inner_id < 0 or window_inner_id > std::numeric_limits<uint16_t>::max()) {
-            throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                "immutable SINDI window-local doc id overflows uint16_t");
-        }
-        auto inner_id = static_cast<uint16_t>(window_inner_id);
-
         try {
+            const auto local_id = static_cast<uint32_t>(cur_element_count_ % window_size_);
+            const auto pruned = this->sort_and_prune_sparse_vector_for_build(
+                sparse_vector, sorted_terms, pruned_ids, pruned_vals);
             if (remap_term_ids_) {
-                auto remapped = remap_sparse_vector_for_build(sparse_vector, tmp_ids);
-                current_window->InsertVector(remapped, inner_id);
+                const auto remapped = remap_sparse_vector_for_build(pruned, remapped_ids);
+                mutable_term_datacell->InsertVector(remapped, local_id);
             } else {
-                current_window->InsertVector(sparse_vector, inner_id);
+                mutable_term_datacell->InsertVector(pruned, local_id);
             }
         } catch (const std::runtime_error& e) {
             failed_ids.push_back(ids[i]);
@@ -523,44 +610,30 @@ SINDI::build_immutable(const DatasetPtr& base) {
             logger::warn("vsag exception: {}", e.what());
             continue;
         } catch (const std::bad_alloc& e) {
-            failed_ids.push_back(ids[i]);
             logger::warn("memory allocation failed: {}", e.what());
-            continue;
+            throw;
         }
 
         label_table_->Insert(cur_element_count_, ids[i]);
-
         if (extra_info_size > 0) {
             extra_infos_->InsertExtraInfo(extra_info + i * extra_info_size, cur_element_count_);
         }
-
-        cur_element_count_++;
-
         if (use_reorder_) {
             rerank_vectors.push_back(sparse_vectors[i]);
         }
+        ++cur_element_count_;
 
         if (cur_element_count_ % window_size_ == 0) {
-            current_window->SortByValue();
-            immutable_data_->windows.emplace_back(allocator_);
-            compact_window_to_immutable(*current_window, immutable_data_->windows.back());
-            current_window.reset();
+            flush_staging_window();
         }
     }
-
+    if (mutable_term_datacell->total_count_ > 0) {
+        flush_staging_window();
+    }
     if (not rerank_vectors.empty()) {
         rerank_flat_->BatchInsertVector(rerank_vectors.data(),
                                         static_cast<InnerIdType>(rerank_vectors.size()));
     }
-
-    if (current_window != nullptr && current_window->total_count_ > 0) {
-        current_window->SortByValue();
-        immutable_data_->windows.emplace_back(allocator_);
-        compact_window_to_immutable(*current_window, immutable_data_->windows.back());
-    }
-    current_window.reset();
-    window_term_list_.clear();
-    window_term_list_.shrink_to_fit();
     this->cal_memory_usage();
     return failed_ids;
 }
@@ -594,11 +667,10 @@ SINDI::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     };
 
     if (use_reorder_) {
-        auto get_reorder_vector =
-            [this](InnerIdType inner_id, SparseVector* data, Allocator* allocator) {
-                rerank_flat_->GetSparseVectorByInnerId(inner_id, data, allocator);
-            };
-        if (not check_and_cleanup(get_reorder_vector)) {
+        if (not check_and_cleanup(
+                [this](InnerIdType inner_id, SparseVector* data, Allocator* allocator) {
+                    rerank_flat_->GetSparseVectorByInnerId(inner_id, data, allocator);
+                })) {
             return false;
         }
     }
@@ -625,8 +697,6 @@ SINDI::KnnSearch(const DatasetPtr& query,
                  vsag::Allocator* allocator) const {
     std::shared_lock rlock(this->global_mutex_);
 
-    // Due to concerns about the performance of this index
-    // We have not yet implemented search with filtering capabilities
     const auto* sparse_vectors = query->GetSparseVectors();
     CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
     auto sparse_query = sparse_vectors[0];
@@ -649,7 +719,13 @@ SINDI::KnnSearch(const DatasetPtr& query,
     inner_param.distance_threshold = threshold;
     inner_param.enable_reorder = use_reorder_;
 
-    inner_param.is_inner_id_allowed = this->create_search_filter(filter);
+    auto filter_callback_remaining =
+        filter != nullptr and search_param.filter_callback_limit > 0
+            ? std::make_shared<uint64_t>(search_param.filter_callback_limit)
+            : nullptr;
+    const uint64_t* filter_callback_remaining_ptr = filter_callback_remaining.get();
+    inner_param.is_inner_id_allowed = this->create_search_filter(
+        create_filter_callback_limiter(filter, filter_callback_remaining));
 
     SearchStatistics statistics;
     SparseVector effective_query = sparse_query;
@@ -664,491 +740,19 @@ SINDI::KnnSearch(const DatasetPtr& query,
         }
     }
 
-    const auto window_num =
-        immutable_data_ != nullptr ? immutable_data_->windows.size() : window_term_list_.size();
-    auto computer =
-        std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_, window_num);
+    auto computer = std::make_shared<SparseTermComputer>(
+        effective_query, search_param, allocator_, term_datacell_->GetWindowCount());
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
-    DatasetPtr result;
-    const bool use_term_lists_heap_insert = UseTermListsHeapInsert(search_param, threshold);
-    if (immutable_data_ != nullptr) {
-        result = immutable_search_impl<KNN_SEARCH>(computer,
-                                                   inner_param,
-                                                   allocator,
-                                                   use_term_lists_heap_insert,
-                                                   rerank_query,
-                                                   nullptr,
-                                                   &statistics);
-    } else {
-        result = search_impl<KNN_SEARCH>(computer,
-                                         inner_param,
-                                         allocator,
-                                         use_term_lists_heap_insert,
-                                         rerank_query,
-                                         nullptr,
-                                         &statistics);
-    }
+    auto result = search_impl<KNN_SEARCH>(computer,
+                                          inner_param,
+                                          allocator,
+                                          UseTermListsHeapInsert(search_param, threshold),
+                                          rerank_query,
+                                          nullptr,
+                                          &statistics,
+                                          filter_callback_remaining_ptr);
     result->Statistics(statistics.Dump());
     return FilterDatasetByThreshold(result, threshold, allocator, k);
-}
-
-std::optional<uint32_t>
-SINDI::get_immutable_local_term(const ImmutableSINDIWindow& window, uint32_t term) const {
-    if (remap_term_ids_) {
-        auto it = std::lower_bound(
-            window.sorted_global_terms.begin(), window.sorted_global_terms.end(), term);
-        if (it == window.sorted_global_terms.end() || *it != term) {
-            return std::nullopt;
-        }
-        return static_cast<uint32_t>(it - window.sorted_global_terms.begin());
-    }
-    if (term >= window.offsets.size()) {
-        return std::nullopt;
-    }
-    return term;
-}
-
-void
-SINDI::map_immutable_query_terms(const ImmutableSINDIWindow& window,
-                                 const SparseTermComputerPtr& computer,
-                                 ImmutableMappedQueryTerms& mapped_terms) const {
-    mapped_terms.clear();
-    mapped_terms.reserve(computer->pruned_len_);
-    for (uint32_t it = 0; it < computer->pruned_len_; ++it) {
-        auto local_term = get_immutable_local_term(window, computer->GetTerm(it));
-        if (not local_term.has_value()) {
-            continue;
-        }
-        const auto term = local_term.value();
-        if (term + 1 >= window.offsets.size()) {
-            continue;
-        }
-        if (window.offsets[term + 1] == window.offsets[term]) {
-            continue;
-        }
-        mapped_terms.emplace_back(term, it);
-    }
-}
-
-uint64_t
-SINDI::scan_immutable_window_by_mapped_terms(float* dists,
-                                             const ImmutableSINDIWindow& window,
-                                             const SparseTermComputerPtr& computer,
-                                             const ImmutableMappedQueryTerms& mapped_terms,
-                                             SparseEvaluationTracker& evaluation_tracker) const {
-    const auto value_code_size = immutable_data_->value_code_size;
-    evaluation_tracker.BeginWindow();
-    for (uint32_t pos = 0; pos < mapped_terms.size(); ++pos) {
-        const auto term_index = mapped_terms[pos].first;
-        const auto it = mapped_terms[pos].second;
-        if (pos + 1 < mapped_terms.size()) {
-            const auto next_term = mapped_terms[pos + 1].first;
-            const auto next_begin = window.offsets[next_term];
-            __builtin_prefetch(window.id_payloads.data() + next_begin, 0, 3);
-            __builtin_prefetch(
-                window.value_payloads.data() + static_cast<uint64_t>(next_begin) * value_code_size,
-                0,
-                3);
-        }
-        const auto begin_doc = window.offsets[term_index];
-        const auto end_doc = window.offsets[term_index + 1];
-        const auto doc_count = end_doc - begin_doc;
-        if (doc_count == 0) {
-            continue;
-        }
-        const auto term_count = computer->GetTermScanCount(doc_count);
-        const auto* ids = window.id_payloads.data() + begin_doc;
-        evaluation_tracker.Mark(ids, term_count);
-        const auto* values =
-            window.value_payloads.data() + static_cast<uint64_t>(begin_doc) * value_code_size;
-        if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
-            computer->ScanForAccumulateSQ8(it, ids, values, term_count, dists);
-        } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
-            computer->ScanForAccumulateFP16Bytes(it, ids, values, term_count, dists);
-        } else {
-            computer->ScanForAccumulateFloatBytes(it, ids, values, term_count, dists);
-        }
-    }
-    computer->ResetTerm();
-    return evaluation_tracker.Count();
-}
-
-template <InnerSearchMode mode, InnerSearchType type>
-void
-SINDI::immutable_insert_candidate_into_heap(uint32_t id,
-                                            float& dist,
-                                            float& cur_heap_top,
-                                            MaxHeap& heap,
-                                            uint32_t offset_id,
-                                            uint32_t n_candidate,
-                                            float radius,
-                                            int range_search_limit_size,
-                                            const FilterPtr& filter,
-                                            const std::optional<float>& threshold,
-                                            bool enable_reorder) const {
-    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-        if (threshold.has_value() and
-            (not std::isfinite(dist) or (not enable_reorder and 1.0F + dist > threshold.value()))) {
-            return;
-        }
-    }
-    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
-        if (range_search_limit_size == 0) {
-            dist = 0;
-            return;
-        }
-    }
-
-    if constexpr (type == InnerSearchType::WITH_FILTER) {
-#if __cplusplus >= 202002L
-        if (dist > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
-#else
-        if (__builtin_expect(dist > cur_heap_top or not filter->CheckValid(id + offset_id), 1)) {
-#endif
-            dist = 0;
-            return;
-        }
-    } else {
-#if __cplusplus >= 202002L
-        if (dist > cur_heap_top) [[likely]] {
-#else
-        if (__builtin_expect(dist > cur_heap_top, 1)) {
-#endif
-            dist = 0;
-            return;
-        }
-    }
-    heap.emplace(dist, id + offset_id);
-    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-        if (heap.size() > n_candidate) {
-            heap.pop();
-        }
-        cur_heap_top =
-            heap.size() == n_candidate ? heap.top().first : std::numeric_limits<float>::max();
-    }
-    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
-        if (range_search_limit_size > 0 and
-            heap.size() > static_cast<uint32_t>(range_search_limit_size)) {
-            heap.pop();
-        }
-        cur_heap_top = range_search_limit_size > 0 and
-                               heap.size() == static_cast<uint32_t>(range_search_limit_size)
-                           ? heap.top().first
-                           : radius - 1;
-    }
-    dist = 0;
-}
-
-template <InnerSearchType type>
-bool
-SINDI::immutable_fill_heap_initial(uint32_t id,
-                                   float& dist,
-                                   float& cur_heap_top,
-                                   MaxHeap& heap,
-                                   uint32_t offset_id,
-                                   uint32_t n_candidate,
-                                   const FilterPtr& filter,
-                                   const std::optional<float>& threshold,
-                                   bool enable_reorder) const {
-    if (threshold.has_value() and
-        (not std::isfinite(dist) or (not enable_reorder and 1.0F + dist > threshold.value()))) {
-        return false;
-    }
-    if (dist < 0) {
-        if constexpr (type == InnerSearchType::WITH_FILTER) {
-            if (not filter->CheckValid(id + offset_id)) {
-                dist = 0;
-                return false;
-            }
-        }
-        heap.emplace(dist, id + offset_id);
-        cur_heap_top = heap.top().first;
-        dist = 0;
-        return heap.size() == n_candidate;
-    }
-    return false;
-}
-
-template <InnerSearchMode mode, InnerSearchType type>
-void
-SINDI::immutable_insert_heap_by_mapped_terms(float* dists,
-                                             const ImmutableSINDIWindow& window,
-                                             const SparseTermComputerPtr& computer,
-                                             const ImmutableMappedQueryTerms& mapped_terms,
-                                             MaxHeap& heap,
-                                             const InnerSearchParam& param,
-                                             uint32_t offset_id) const {
-    uint32_t id = 0;
-    float cur_heap_top = std::numeric_limits<float>::max();
-    auto n_candidate = param.ef;
-    auto radius = param.radius;
-    auto range_search_limit_size = param.range_search_limit_size;
-    auto filter = param.is_inner_id_allowed;
-
-    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
-        cur_heap_top = radius - 1;
-    }
-
-    for (const auto& [term, term_iterator] : mapped_terms) {
-        (void)term_iterator;
-        const auto begin_doc = window.offsets[term];
-        const auto end_doc = window.offsets[term + 1];
-        const auto doc_count = end_doc - begin_doc;
-        const auto term_count = computer->GetTermScanCount(doc_count);
-        const auto* ids = window.id_payloads.data() + begin_doc;
-        uint32_t i = 0;
-        if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-            if (heap.size() < n_candidate) {
-                for (; i < term_count; ++i) {
-                    id = ids[i];
-                    if (immutable_fill_heap_initial<type>(id,
-                                                          dists[id],
-                                                          cur_heap_top,
-                                                          heap,
-                                                          offset_id,
-                                                          n_candidate,
-                                                          filter,
-                                                          param.distance_threshold,
-                                                          param.enable_reorder)) {
-                        ++i;
-                        break;
-                    }
-                }
-            }
-        }
-
-        for (; i < term_count; ++i) {
-            id = ids[i];
-            immutable_insert_candidate_into_heap<mode, type>(id,
-                                                             dists[id],
-                                                             cur_heap_top,
-                                                             heap,
-                                                             offset_id,
-                                                             n_candidate,
-                                                             radius,
-                                                             range_search_limit_size,
-                                                             filter,
-                                                             param.distance_threshold,
-                                                             param.enable_reorder);
-        }
-    }
-}
-
-template <InnerSearchMode mode, InnerSearchType type>
-void
-SINDI::immutable_insert_heap_by_dists(float* dists,
-                                      uint32_t dists_size,
-                                      MaxHeap& heap,
-                                      const InnerSearchParam& param,
-                                      uint32_t offset_id) const {
-    float cur_heap_top = std::numeric_limits<float>::max();
-    auto n_candidate = param.ef;
-    auto radius = param.radius;
-    auto range_search_limit_size = param.range_search_limit_size;
-    auto filter = param.is_inner_id_allowed;
-
-    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
-        cur_heap_top = radius - 1;
-    }
-
-    uint32_t id = 0;
-    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-        if (heap.size() < n_candidate) {
-            for (; id < dists_size; ++id) {
-                if (immutable_fill_heap_initial<type>(id,
-                                                      dists[id],
-                                                      cur_heap_top,
-                                                      heap,
-                                                      offset_id,
-                                                      n_candidate,
-                                                      filter,
-                                                      param.distance_threshold,
-                                                      param.enable_reorder)) {
-                    ++id;
-                    break;
-                }
-            }
-        }
-    }
-
-    for (; id < dists_size; ++id) {
-        immutable_insert_candidate_into_heap<mode, type>(id,
-                                                         dists[id],
-                                                         cur_heap_top,
-                                                         heap,
-                                                         offset_id,
-                                                         n_candidate,
-                                                         radius,
-                                                         range_search_limit_size,
-                                                         filter,
-                                                         param.distance_threshold,
-                                                         param.enable_reorder);
-    }
-}
-
-template <InnerSearchMode mode>
-DatasetPtr
-SINDI::immutable_search_impl(const SparseTermComputerPtr& computer,
-                             const InnerSearchParam& inner_param,
-                             Allocator* allocator,
-                             bool use_term_lists_heap_insert,
-                             const SparseVector* original_query,
-                             ReasoningContext* reasoning_ctx,
-                             SearchStatistics* statistics) const {
-    Allocator* search_allocator = allocator != nullptr ? allocator : allocator_;
-    MaxHeap heap(search_allocator);
-    int64_t k = 0;
-    if constexpr (mode == KNN_SEARCH) {
-        k = inner_param.topk;
-    }
-
-    Vector<float> dists(window_size_, 0.0F, search_allocator);
-    SparseEvaluationTracker evaluation_tracker(window_size_, search_allocator);
-    ImmutableMappedQueryTerms mapped_terms(search_allocator);
-    auto filter = inner_param.is_inner_id_allowed;
-    const auto [min_window_id, max_window_id] = this->get_min_max_window_id(filter);
-    auto selected_buckets = reasoning_ctx != nullptr
-                                ? std::make_unique<Vector<BucketIdType>>(search_allocator)
-                                : nullptr;
-    for (auto cur = min_window_id; cur <= max_window_id; cur++) {
-        const auto& window = immutable_data_->windows[static_cast<uint32_t>(cur)];
-        const auto window_start_id = static_cast<uint32_t>(cur) * window_size_;
-        map_immutable_query_terms(window, computer, mapped_terms);
-        std::fill(dists.begin(), dists.end(), 0.0F);
-        const auto evaluated = scan_immutable_window_by_mapped_terms(
-            dists.data(), window, computer, mapped_terms, evaluation_tracker);
-        if (statistics != nullptr) {
-            statistics->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
-                                    sparse_backend(sparse_value_quant_type_),
-                                    evaluated);
-        }
-
-        if (reasoning_ctx != nullptr) {
-            selected_buckets->push_back(static_cast<BucketIdType>(cur));
-            auto doc_count = static_cast<uint32_t>(std::min<int64_t>(
-                window_size_, cur_element_count_ - static_cast<int64_t>(window_start_id)));
-            for (uint32_t i = 0; i < doc_count; ++i) {
-                if (dists[i] != 0.0F) {
-                    auto inner_id = window_start_id + i;
-                    reasoning_ctx->RecordVisit(inner_id, 1.0F + dists[i], 0);
-                    if (filter and not filter->CheckValid(inner_id)) {
-                        reasoning_ctx->RecordFilterReject(inner_id);
-                    }
-                }
-            }
-        }
-
-        if (use_term_lists_heap_insert) {
-            if (inner_param.is_inner_id_allowed) {
-                immutable_insert_heap_by_mapped_terms<mode, WITH_FILTER>(dists.data(),
-                                                                         window,
-                                                                         computer,
-                                                                         mapped_terms,
-                                                                         heap,
-                                                                         inner_param,
-                                                                         window_start_id);
-            } else {
-                immutable_insert_heap_by_mapped_terms<mode, PURE>(dists.data(),
-                                                                  window,
-                                                                  computer,
-                                                                  mapped_terms,
-                                                                  heap,
-                                                                  inner_param,
-                                                                  window_start_id);
-            }
-        } else {
-            const auto window_doc_count = static_cast<uint32_t>(std::min<int64_t>(
-                window_size_, cur_element_count_ - static_cast<int64_t>(window_start_id)));
-            if (inner_param.is_inner_id_allowed) {
-                immutable_insert_heap_by_dists<mode, WITH_FILTER>(
-                    dists.data(), window_doc_count, heap, inner_param, window_start_id);
-            } else {
-                immutable_insert_heap_by_dists<mode, PURE>(
-                    dists.data(), window_doc_count, heap, inner_param, window_start_id);
-            }
-        }
-    }
-
-    if (selected_buckets != nullptr and not selected_buckets->empty()) {
-        reasoning_ctx->RecordBucketSelection(*selected_buckets);
-    }
-
-    if (use_reorder_) {
-        float cur_heap_top = std::numeric_limits<float>::max();
-        auto candidate_size = heap.size();
-        auto high_precise_heap = std::make_shared<StandardHeap<true, false>>(search_allocator, -1);
-        const auto& rerank_query = original_query ? *original_query : computer->raw_query_;
-        auto rerank_computer = rerank_flat_->FactoryComputer(&rerank_query);
-        for (auto i = 0; i < candidate_size; i++) {
-            auto inner_id = heap.top().second;
-            float high_precise_distance = 0.0F;
-            QueryContext query_context{.stats = statistics,
-                                       .distance_phase = DistanceEvaluationPhase::RERANK};
-            rerank_flat_->Query(
-                &high_precise_distance, rerank_computer, &inner_id, 1, &query_context);
-            auto label = label_table_->GetLabelById(inner_id);
-            if (reasoning_ctx != nullptr) {
-                reasoning_ctx->RecordReorder(
-                    inner_id, 1.0F + heap.top().first, high_precise_distance);
-            }
-            if constexpr (mode == KNN_SEARCH) {
-                const bool eligible =
-                    not inner_param.distance_threshold.has_value() or
-                    (std::isfinite(high_precise_distance) and
-                     high_precise_distance <= inner_param.distance_threshold.value());
-                if (eligible and
-                    (high_precise_distance < cur_heap_top or high_precise_heap->Size() < k)) {
-                    high_precise_heap->Push(high_precise_distance, label);
-                    if (high_precise_heap->Size() > k) {
-                        if (reasoning_ctx != nullptr) {
-                            auto evicted_label = high_precise_heap->Top().second;
-                            auto evicted_inner_id = this->label_table_->GetIdByLabel(evicted_label);
-                            reasoning_ctx->RecordReorderEviction(evicted_inner_id, 0);
-                        }
-                        high_precise_heap->Pop();
-                    }
-                    cur_heap_top = high_precise_heap->Top().first;
-                }
-            }
-            if constexpr (mode == RANGE_SEARCH) {
-                if (high_precise_distance <= inner_param.radius) {
-                    high_precise_heap->Push(high_precise_distance, label);
-                }
-                if (inner_param.range_search_limit_size != -1 and
-                    high_precise_heap->Size() > inner_param.range_search_limit_size) {
-                    if (reasoning_ctx != nullptr) {
-                        auto evicted_label = high_precise_heap->Top().second;
-                        auto evicted_inner_id = this->label_table_->GetIdByLabel(evicted_label);
-                        reasoning_ctx->RecordReorderEviction(evicted_inner_id, 0);
-                    }
-                    high_precise_heap->Pop();
-                }
-            }
-            heap.pop();
-        }
-        return collect_heap_results(high_precise_heap, search_allocator);
-    }
-
-    if constexpr (mode == RANGE_SEARCH) {
-        k = static_cast<int64_t>(heap.size());
-        if (inner_param.range_search_limit_size != -1) {
-            k = inner_param.range_search_limit_size;
-        }
-    }
-    int64_t cur_size = std::min(static_cast<int64_t>(heap.size()), k);
-    auto [results, ret_dists, ret_ids] = create_fast_dataset(cur_size, search_allocator);
-    if (cur_size == 0) {
-        return results;
-    }
-    while (heap.size() > k) {
-        heap.pop();
-    }
-    for (auto j = cur_size - 1; j >= 0; j--) {
-        ret_dists[j] = 1 + heap.top().first;
-        ret_ids[j] = label_table_->GetLabelById(heap.top().second);
-        heap.pop();
-    }
-    return results;
 }
 
 template <InnerSearchMode mode>
@@ -1159,9 +763,11 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                    bool use_term_lists_heap_insert,
                    const SparseVector* original_query,
                    ReasoningContext* reasoning_ctx,
-                   SearchStatistics* statistics) const {
+                   SearchStatistics* statistics,
+                   const uint64_t* filter_callback_remaining) const {
+    auto* search_allocator = allocator != nullptr ? allocator : allocator_;
     // computer and heap
-    MaxHeap heap(allocator);
+    MaxHeap heap(search_allocator);
     int64_t k = 0;
 
     if constexpr (mode == KNN_SEARCH) {
@@ -1169,22 +775,25 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
     }
 
     // window iteration
-    Vector<float> dists(window_size_, 0.0, allocator);
-    SparseEvaluationTracker evaluation_tracker(window_size_, allocator);
+    Vector<float> dists(window_size_, 0.0F, search_allocator);
     auto filter = inner_param.is_inner_id_allowed;
     const auto [min_window_id, max_window_id] = this->get_min_max_window_id(filter);
-    auto selected_buckets =
-        reasoning_ctx != nullptr ? std::make_unique<Vector<BucketIdType>>(allocator) : nullptr;
+    auto selected_buckets = reasoning_ctx != nullptr
+                                ? std::make_unique<Vector<BucketIdType>>(search_allocator)
+                                : nullptr;
+    SindiQueryContext query_context(search_allocator);
     for (auto cur = min_window_id; cur <= max_window_id; cur++) {
-        auto window_start_id = cur * window_size_;
-        auto term_list = this->window_term_list_[cur];
-
+        const auto window_start_id = static_cast<uint32_t>(cur) * window_size_;
         // compute
-        const auto evaluated = term_list->Query(dists.data(), computer, evaluation_tracker);
+        term_datacell_->QueryWindow(dists.data(),
+                                    static_cast<uint32_t>(cur),
+                                    computer,
+                                    use_term_lists_heap_insert,
+                                    query_context);
         if (statistics != nullptr) {
             statistics->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
                                     sparse_backend(sparse_value_quant_type_),
-                                    evaluated);
+                                    query_context.evaluation_tracker.Count());
         }
 
         if (reasoning_ctx != nullptr) {
@@ -1195,7 +804,8 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                 if (dists[i] != 0.0F) {
                     auto inner_id = window_start_id + i;
                     reasoning_ctx->RecordVisit(inner_id, 1.0F + dists[i], 0);
-                    if (filter and not filter->CheckValid(inner_id)) {
+                    if (filter_callback_remaining == nullptr and filter and
+                        not filter->CheckValid(inner_id)) {
                         reasoning_ctx->RecordFilterReject(inner_id);
                     }
                 }
@@ -1203,22 +813,36 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         }
 
         // insert heap
+        bool filter_callback_limit_reached = false;
         if (use_term_lists_heap_insert) {
-            if (inner_param.is_inner_id_allowed) {
-                term_list->InsertHeapByTermLists<mode, WITH_FILTER>(
-                    dists.data(), computer, heap, inner_param, window_start_id);
-            } else {
-                term_list->InsertHeapByTermLists<mode, PURE>(
-                    dists.data(), computer, heap, inner_param, window_start_id);
-            }
+            filter_callback_limit_reached =
+                term_datacell_->InsertHeapByWindow(dists.data(),
+                                                   static_cast<uint32_t>(cur),
+                                                   computer,
+                                                   heap,
+                                                   inner_param,
+                                                   window_start_id,
+                                                   mode,
+                                                   inner_param.is_inner_id_allowed != nullptr,
+                                                   query_context,
+                                                   filter_callback_remaining);
         } else {
-            if (inner_param.is_inner_id_allowed) {
-                term_list->InsertHeapByDists<mode, WITH_FILTER>(
-                    dists.data(), dists.size(), heap, inner_param, window_start_id);
-            } else {
-                term_list->InsertHeapByDists<mode, PURE>(
-                    dists.data(), dists.size(), heap, inner_param, window_start_id);
-            }
+            const auto remaining_count =
+                static_cast<uint64_t>(cur_element_count_.load()) - window_start_id;
+            const auto window_document_count =
+                static_cast<uint32_t>(std::min<uint64_t>(window_size_, remaining_count));
+            filter_callback_limit_reached =
+                term_datacell_->InsertHeapByDists(dists.data(),
+                                                  window_document_count,
+                                                  heap,
+                                                  inner_param,
+                                                  window_start_id,
+                                                  mode,
+                                                  inner_param.is_inner_id_allowed != nullptr,
+                                                  filter_callback_remaining);
+        }
+        if (filter_callback_limit_reached) {
+            break;
         }
     }
 
@@ -1231,15 +855,16 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         // high precision
         float cur_heap_top = std::numeric_limits<float>::max();
         auto candidate_size = heap.size();
-        auto high_precise_heap = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+        auto high_precise_heap = std::make_shared<StandardHeap<true, false>>(search_allocator, -1);
         const auto& rerank_query = original_query ? *original_query : computer->raw_query_;
-        auto rerank_computer = rerank_flat_->FactoryComputer(&rerank_query);
+        auto* rerank_datacell = rerank_flat_.get();
+        auto rerank_computer = rerank_datacell->FactoryComputer(&rerank_query);
         for (auto i = 0; i < candidate_size; i++) {
             auto inner_id = heap.top().second;
             float high_precise_distance = 0.0F;
             QueryContext query_context{.stats = statistics,
                                        .distance_phase = DistanceEvaluationPhase::RERANK};
-            rerank_flat_->Query(
+            rerank_datacell->Query(
                 &high_precise_distance, rerank_computer, &inner_id, 1, &query_context);
             auto label = label_table_->GetLabelById(inner_id);
             if (reasoning_ctx != nullptr) {
@@ -1282,7 +907,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
             heap.pop();
         }
 
-        return collect_heap_results(high_precise_heap, allocator);
+        return collect_heap_results(high_precise_heap, search_allocator);
     }
 
     // low precision
@@ -1295,7 +920,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
 
     int64_t cur_size = std::min(static_cast<int64_t>(heap.size()), k);
 
-    auto [results, ret_dists, ret_ids] = create_fast_dataset(cur_size, allocator_);
+    auto [results, ret_dists, ret_ids] = create_fast_dataset(cur_size, search_allocator);
     if (cur_size == 0) {
         return results;
     }
@@ -1321,8 +946,6 @@ SINDI::RangeSearch(const DatasetPtr& query,
                    int64_t limited_size) const {
     std::shared_lock rlock(this->global_mutex_);
 
-    // Due to concerns about the performance of this index
-    // We have not yet implemented search with filtering capabilities
     const auto* sparse_vectors = query->GetSparseVectors();
     CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
     auto sparse_query = sparse_vectors[0];
@@ -1338,7 +961,13 @@ SINDI::RangeSearch(const DatasetPtr& query,
     inner_param.range_search_limit_size = static_cast<int>(limited_size);
     inner_param.radius = radius;
 
-    inner_param.is_inner_id_allowed = this->create_search_filter(filter);
+    auto filter_callback_remaining =
+        filter != nullptr and search_param.filter_callback_limit > 0
+            ? std::make_shared<uint64_t>(search_param.filter_callback_limit)
+            : nullptr;
+    const uint64_t* filter_callback_remaining_ptr = filter_callback_remaining.get();
+    inner_param.is_inner_id_allowed = this->create_search_filter(
+        create_filter_callback_limiter(filter, filter_callback_remaining));
 
     SearchStatistics statistics;
     SparseVector effective_query = sparse_query;
@@ -1353,29 +982,17 @@ SINDI::RangeSearch(const DatasetPtr& query,
         }
     }
 
-    const auto window_num =
-        immutable_data_ != nullptr ? immutable_data_->windows.size() : window_term_list_.size();
-    auto computer =
-        std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_, window_num);
+    auto computer = std::make_shared<SparseTermComputer>(
+        effective_query, search_param, allocator_, term_datacell_->GetWindowCount());
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
-    if (immutable_data_ != nullptr) {
-        auto result = immutable_search_impl<RANGE_SEARCH>(computer,
-                                                          inner_param,
-                                                          allocator_,
-                                                          UseTermListsHeapInsert(search_param),
-                                                          rerank_query,
-                                                          nullptr,
-                                                          &statistics);
-        result->Statistics(statistics.Dump());
-        return result;
-    }
     auto result = search_impl<RANGE_SEARCH>(computer,
                                             inner_param,
                                             allocator_,
                                             UseTermListsHeapInsert(search_param),
                                             rerank_query,
                                             nullptr,
-                                            &statistics);
+                                            &statistics,
+                                            filter_callback_remaining_ptr);
     result->Statistics(statistics.Dump());
     return result;
 }
@@ -1402,8 +1019,15 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
 
     InnerSearchParam inner_param;
     const bool filter_enabled = request.enable_filter_ and request.filter_ != nullptr;
-    inner_param.is_inner_id_allowed =
-        filter_enabled ? this->create_search_filter(request.filter_) : nullptr;
+    auto filter_callback_remaining =
+        filter_enabled and search_param.filter_callback_limit > 0
+            ? std::make_shared<uint64_t>(search_param.filter_callback_limit)
+            : nullptr;
+    const uint64_t* filter_callback_remaining_ptr = filter_callback_remaining.get();
+    const auto user_filter =
+        filter_enabled ? create_filter_callback_limiter(request.filter_, filter_callback_remaining)
+                       : nullptr;
+    inner_param.is_inner_id_allowed = this->create_search_filter(user_filter);
 
     std::shared_ptr<ReasoningContext> reasoning_ctx;
     if (not request.expected_labels_.empty()) {
@@ -1442,30 +1066,22 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
         }
     }
 
-    auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator);
+    auto computer = std::make_shared<SparseTermComputer>(
+        effective_query, search_param, allocator, term_datacell_->GetWindowCount());
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
 
     DatasetPtr result;
     if (is_range) {
         inner_param.range_search_limit_size = static_cast<int>(request.limited_size_);
         inner_param.radius = request.radius_;
-        if (immutable_data_ != nullptr) {
-            result = immutable_search_impl<RANGE_SEARCH>(computer,
-                                                         inner_param,
-                                                         allocator,
-                                                         UseTermListsHeapInsert(search_param),
-                                                         rerank_query,
-                                                         reasoning_ctx.get(),
-                                                         &statistics);
-        } else {
-            result = search_impl<RANGE_SEARCH>(computer,
-                                               inner_param,
-                                               allocator,
-                                               UseTermListsHeapInsert(search_param),
-                                               rerank_query,
-                                               reasoning_ctx.get(),
-                                               &statistics);
-        }
+        result = search_impl<RANGE_SEARCH>(computer,
+                                           inner_param,
+                                           allocator,
+                                           UseTermListsHeapInsert(search_param),
+                                           rerank_query,
+                                           reasoning_ctx.get(),
+                                           &statistics,
+                                           filter_callback_remaining_ptr);
     } else {
         CHECK_ARGUMENT(search_param.n_candidate <= SPARSE_AMPLIFICATION_FACTOR * request.topk_,
                        fmt::format("n_candidate ({}) should be less than {} * k ({})",
@@ -1474,23 +1090,14 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
                                    request.topk_));
         inner_param.ef = std::max(static_cast<int64_t>(search_param.n_candidate), request.topk_);
         inner_param.topk = request.topk_;
-        if (immutable_data_ != nullptr) {
-            result = immutable_search_impl<KNN_SEARCH>(computer,
-                                                       inner_param,
-                                                       allocator,
-                                                       UseTermListsHeapInsert(search_param),
-                                                       rerank_query,
-                                                       reasoning_ctx.get(),
-                                                       &statistics);
-        } else {
-            result = search_impl<KNN_SEARCH>(computer,
-                                             inner_param,
-                                             allocator,
-                                             UseTermListsHeapInsert(search_param),
-                                             rerank_query,
-                                             reasoning_ctx.get(),
-                                             &statistics);
-        }
+        result = search_impl<KNN_SEARCH>(computer,
+                                         inner_param,
+                                         allocator,
+                                         UseTermListsHeapInsert(search_param),
+                                         rerank_query,
+                                         reasoning_ctx.get(),
+                                         &statistics,
+                                         filter_callback_remaining_ptr);
     }
 
     result->Statistics(statistics.Dump());
@@ -1539,24 +1146,12 @@ SINDI::UseTermListsHeapInsert(const SINDISearchParameter& search_param,
 void
 SINDI::cal_memory_usage() {
     auto memory = sizeof(SINDI);
-    if (immutable_data_ != nullptr) {
-        memory += sizeof(ImmutableSINDIData);
-        memory += immutable_data_->windows.size() * sizeof(ImmutableSINDIWindow);
-        for (const auto& window : immutable_data_->windows) {
-            memory += window.sorted_global_terms.size() * sizeof(uint32_t);
-            memory += window.offsets.size() * sizeof(uint32_t);
-            memory += window.id_payloads.size() * sizeof(uint16_t);
-            memory += window.value_payloads.size() * sizeof(uint8_t);
-        }
-    } else {
-        memory += window_term_list_.size() * sizeof(SparseTermDataCellPtr);
-        for (auto& window : window_term_list_) {
-            memory += window->GetMemoryUsage();
-        }
+    if (term_datacell_ != nullptr) {
+        memory += term_datacell_->GetMemoryUsage();
     }
     memory += label_table_->GetMemoryUsage();
-    if (this->rerank_flat_ != nullptr) {
-        memory += this->rerank_flat_->GetMemoryUsage();
+    if (rerank_flat_ != nullptr) {
+        memory += rerank_flat_->GetMemoryUsage();
     }
     memory += sizeof(QuantizationParams);
     if (remap_term_ids_ && term_id_mapper_) {
@@ -1565,7 +1160,7 @@ SINDI::cal_memory_usage() {
     }
 
     std::unique_lock lock(this->memory_usage_mutex_);
-    this->current_memory_usage_.store(memory);
+    this->current_memory_usage_.store(static_cast<int64_t>(memory));
 }
 
 void
@@ -1573,7 +1168,7 @@ SINDI::Serialize(StreamWriter& writer) const {
     std::shared_lock rlock(this->global_mutex_);
 
     if (cur_element_count_ == 0) {
-        auto cur_element_count = cur_element_count_.load();
+        const auto cur_element_count = cur_element_count_.load();
         StreamWriter::WriteObj(writer, cur_element_count);
         if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
             StreamWriter::WriteObj(writer, quantization_params_->min_val);
@@ -1591,7 +1186,7 @@ SINDI::Serialize(StreamWriter& writer) const {
         return;
     }
 
-    auto cur_element_count = cur_element_count_.load();
+    const auto cur_element_count = cur_element_count_.load();
     StreamWriter::WriteObj(writer, cur_element_count);
 
     if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
@@ -1600,17 +1195,12 @@ SINDI::Serialize(StreamWriter& writer) const {
         StreamWriter::WriteObj(writer, quantization_params_->diff);
     }
 
-    uint32_t window_term_list_size =
-        immutable_data_ != nullptr ? immutable_data_->windows.size() : window_term_list_.size();
+    uint32_t window_term_list_size = term_datacell_->GetWindowCount();
     StreamWriter::WriteObj(writer, window_term_list_size);
-    if (immutable_data_ != nullptr) {
-        for (const auto& window : immutable_data_->windows) {
-            serialize_immutable_window(writer, window);
-        }
+    if (immutable_term_datacell_ != nullptr) {
+        immutable_term_datacell_->SerializeWindows(writer);
     } else {
-        for (const auto& window : window_term_list_) {
-            window->Serialize(writer);
-        }
+        mutable_term_datacell_->SerializeWindows(writer);
     }
 
     label_table_->Serialize(writer);
@@ -1701,18 +1291,21 @@ SINDI::serialize_windows(StreamWriter& writer) const {
         StreamWriter::WriteObj(writer, quantization_params_->diff);
     }
 
-    uint32_t window_term_list_size = window_term_list_.size();
+    const uint32_t window_term_list_size =
+        term_datacell_ == nullptr ? 0 : term_datacell_->GetWindowCount();
     StreamWriter::WriteObj(writer, window_term_list_size);
-    for (const auto& window : window_term_list_) {
-        window->Serialize(writer);
+    if (immutable_term_datacell_ != nullptr) {
+        immutable_term_datacell_->SerializeWindows(writer);
+    } else if (mutable_term_datacell_ != nullptr) {
+        mutable_term_datacell_->SerializeWindows(writer);
     }
 }
 
 void
 SINDI::serialize_streaming_body(StreamWriter& writer) const {
     std::shared_lock rlock(this->global_mutex_);
-    const bool mutable_runtime = not immutable_enabled_ and immutable_data_ == nullptr;
-    CHECK_ARGUMENT(mutable_runtime, "immutable SINDI runtime does not support SerializeStreaming");
+    CHECK_ARGUMENT(not immutable_enabled_,
+                   "immutable SINDI runtime does not support SerializeStreaming");
 
     auto windows_tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_WINDOWS);
     auto label_tag = static_cast<uint32_t>(StreamSerializationTag::LABEL_TABLE);
@@ -1757,30 +1350,29 @@ SINDI::deserialize_windows(StreamReader& reader_ref, bool postings_sorted) {
     uint32_t window_term_list_size = 0;
     StreamReader::ReadObj(reader_ref, window_term_list_size);
     if (immutable_enabled_) {
-        immutable_data_ = std::make_unique<ImmutableSINDIData>(allocator_);
-        immutable_data_->sparse_value_quant_type = sparse_value_quant_type_;
-        immutable_data_->value_code_size =
-            SparseTermDataCell::GetSparseValueCodeSize(sparse_value_quant_type_);
-        immutable_data_->windows.reserve(window_term_list_size);
-        for (uint32_t i = 0; i < window_term_list_size; ++i) {
-            immutable_data_->windows.emplace_back(allocator_);
-            deserialize_immutable_window(
-                reader_ref, immutable_data_->windows.back(), postings_sorted);
-        }
-        window_term_list_.clear();
-        window_term_list_.shrink_to_fit();
+        auto immutable = std::make_shared<ImmutableSindiTermDataCell>(term_id_limit_,
+                                                                      window_size_,
+                                                                      remap_term_ids_,
+                                                                      sparse_value_quant_type_,
+                                                                      quantization_params_,
+                                                                      allocator_);
+        immutable->DeserializeWindows(reader_ref, window_term_list_size, postings_sorted);
+        immutable_term_datacell_ = std::move(immutable);
+        mutable_term_datacell_.reset();
+        term_datacell_ = immutable_term_datacell_;
+        immutable_build_started_ = true;
     } else {
-        window_term_list_.resize(window_term_list_size);
-        for (auto& window : window_term_list_) {
-            window = std::make_shared<SparseTermDataCell>(doc_retain_ratio_,
-                                                          term_id_limit_,
-                                                          allocator_,
-                                                          sparse_value_quant_type_,
-                                                          quantization_params_);
-            window->Deserialize(reader_ref, postings_sorted);
-        }
+        auto mutable_datacell = std::make_shared<MutableSindiTermDataCell>(term_id_limit_,
+                                                                           window_size_,
+                                                                           allocator_,
+                                                                           sparse_value_quant_type_,
+                                                                           quantization_params_);
+        mutable_datacell->DeserializeWindows(reader_ref, window_term_list_size, postings_sorted);
+        mutable_term_datacell_ = std::move(mutable_datacell);
+        immutable_term_datacell_.reset();
+        term_datacell_ = mutable_term_datacell_;
     }
-    trim_deserialized_trailing_windows();
+    this->trim_deserialized_trailing_windows();
 }
 
 void
@@ -1789,16 +1381,13 @@ SINDI::trim_deserialized_trailing_windows() {
     const auto populated_window_count =
         element_count / window_size_ + static_cast<uint64_t>(element_count % window_size_ != 0);
     const auto serialized_window_count =
-        immutable_data_ != nullptr ? immutable_data_->windows.size() : window_term_list_.size();
+        term_datacell_ == nullptr ? 0 : term_datacell_->GetWindowCount();
     CHECK_ARGUMENT(serialized_window_count >= populated_window_count,
                    "serialized SINDI has fewer windows than its element count requires");
-    if (immutable_data_ != nullptr) {
-        const auto first_trailing =
-            immutable_data_->windows.begin() +
-            static_cast<Vector<ImmutableSINDIWindow>::difference_type>(populated_window_count);
-        immutable_data_->windows.erase(first_trailing, immutable_data_->windows.end());
-    } else {
-        window_term_list_.resize(populated_window_count);
+    if (immutable_term_datacell_ != nullptr) {
+        immutable_term_datacell_->ResizeWindowCount(static_cast<uint32_t>(populated_window_count));
+    } else if (mutable_term_datacell_ != nullptr) {
+        mutable_term_datacell_->ResizeWindowCount(static_cast<uint32_t>(populated_window_count));
     }
 }
 
@@ -1980,10 +1569,10 @@ SINDI::Deserialize(StreamReader& reader) {
                         throw VsagException(ErrorType::INVALID_ARGUMENT, message);
                     }
                     doc_prune_ratio_ = index_param->doc_prune_ratio;
-                    doc_retain_ratio_ = 1.0F - doc_prune_ratio_;
                 }
                 if (jsonify_basic_info.Contains(SINDI_RERANK_FLAT_FORMAT_KEY)) {
-                    auto rerank_format = jsonify_basic_info[SINDI_RERANK_FLAT_FORMAT_KEY].GetInt();
+                    const auto rerank_format =
+                        jsonify_basic_info[SINDI_RERANK_FLAT_FORMAT_KEY].GetInt();
                     has_datacell_rerank_format = rerank_format == SINDI_RERANK_FLAT_FORMAT_DATACELL;
                     has_dmq_rerank_format = rerank_format == SINDI_RERANK_FLAT_FORMAT_DMQ;
                 }
@@ -1997,10 +1586,10 @@ SINDI::Deserialize(StreamReader& reader) {
             throw;
         }
     }
-    const bool valid_footer = not immutable_enabled_ or has_footer;
-    CHECK_ARGUMENT(valid_footer,
-                   "cannot deserialize SINDI storage without immutable format metadata into "
-                   "immutable runtime");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        has_footer || not immutable_enabled_,
+        "cannot deserialize SINDI storage without immutable format metadata into "
+        "immutable runtime");
     auto* reader_ptr = &reader;
 
     BufferStreamReader buffer_reader(
@@ -2025,30 +1614,29 @@ SINDI::Deserialize(StreamReader& reader) {
     uint32_t window_term_list_size = 0;
     StreamReader::ReadObj(reader_ref, window_term_list_size);
     if (immutable_enabled_) {
-        immutable_data_ = std::make_unique<ImmutableSINDIData>(allocator_);
-        immutable_data_->sparse_value_quant_type = sparse_value_quant_type_;
-        immutable_data_->value_code_size =
-            SparseTermDataCell::GetSparseValueCodeSize(sparse_value_quant_type_);
-        immutable_data_->windows.reserve(window_term_list_size);
-        for (uint32_t i = 0; i < window_term_list_size; ++i) {
-            immutable_data_->windows.emplace_back(allocator_);
-            deserialize_immutable_window(
-                reader_ref, immutable_data_->windows.back(), postings_sorted);
-        }
-        window_term_list_.clear();
-        window_term_list_.shrink_to_fit();
+        auto immutable = std::make_shared<ImmutableSindiTermDataCell>(term_id_limit_,
+                                                                      window_size_,
+                                                                      remap_term_ids_,
+                                                                      sparse_value_quant_type_,
+                                                                      quantization_params_,
+                                                                      allocator_);
+        immutable->DeserializeWindows(reader_ref, window_term_list_size, postings_sorted);
+        immutable_term_datacell_ = std::move(immutable);
+        mutable_term_datacell_.reset();
+        term_datacell_ = immutable_term_datacell_;
+        immutable_build_started_ = true;
     } else {
-        window_term_list_.resize(window_term_list_size);
-        for (auto& window : window_term_list_) {
-            window = std::make_shared<SparseTermDataCell>(doc_retain_ratio_,
-                                                          term_id_limit_,
-                                                          allocator_,
-                                                          sparse_value_quant_type_,
-                                                          quantization_params_);
-            window->Deserialize(reader_ref, postings_sorted);
-        }
+        auto mutable_datacell = std::make_shared<MutableSindiTermDataCell>(term_id_limit_,
+                                                                           window_size_,
+                                                                           allocator_,
+                                                                           sparse_value_quant_type_,
+                                                                           quantization_params_);
+        mutable_datacell->DeserializeWindows(reader_ref, window_term_list_size, postings_sorted);
+        mutable_term_datacell_ = std::move(mutable_datacell);
+        immutable_term_datacell_.reset();
+        term_datacell_ = mutable_term_datacell_;
     }
-    trim_deserialized_trailing_windows();
+    this->trim_deserialized_trailing_windows();
 
     label_table_->Deserialize(reader_ref);
     delete_count_.store(static_cast<int64_t>(label_table_->GetAllDeletedIds().size()),
@@ -2077,164 +1665,27 @@ SINDI::Deserialize(StreamReader& reader) {
 }
 
 void
-SINDI::compact_window_to_immutable(const SparseTermDataCell& term_list,
-                                   ImmutableSINDIWindow& window) const {
-    const auto value_code_size =
-        SparseTermDataCell::GetSparseValueCodeSize(sparse_value_quant_type_);
-    uint64_t total_posting_count = 0;
-    window.offsets.clear();
-    window.id_payloads.clear();
-    window.value_payloads.clear();
-    window.sorted_global_terms.clear();
-
-    if (not remap_term_ids_) {
-        window.offsets.reserve(static_cast<uint64_t>(term_list.term_capacity_) + 1);
-    }
-    window.offsets.push_back(0);
-
-    for (uint32_t term = 0; term < term_list.term_capacity_; ++term) {
-        const auto posting_count = term_list.term_sizes_[term];
-        if (posting_count == 0) {
-            if (not remap_term_ids_) {
-                window.offsets.push_back(static_cast<uint32_t>(total_posting_count));
-            }
-            continue;
-        }
-
-        if (total_posting_count >
-            std::numeric_limits<uint32_t>::max() - static_cast<uint64_t>(posting_count)) {
-            throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                "immutable SINDI posting offset overflows uint32_t");
-        }
-        if (remap_term_ids_) {
-            window.sorted_global_terms.push_back(term);
-        }
-
-        const auto old_id_size = window.id_payloads.size();
-        window.id_payloads.resize(old_id_size + posting_count);
-        const auto old_id_position =
-            static_cast<decltype(window.id_payloads)::difference_type>(old_id_size);
-        std::copy(term_list.term_ids_[term]->begin(),
-                  term_list.term_ids_[term]->end(),
-                  window.id_payloads.begin() + old_id_position);
-
-        const auto payload_bytes = static_cast<uint64_t>(posting_count) * value_code_size;
-        const auto old_value_size = window.value_payloads.size();
-        window.value_payloads.resize(old_value_size + payload_bytes);
-        std::memcpy(window.value_payloads.data() + old_value_size,
-                    term_list.term_datas_[term]->data(),
-                    payload_bytes);
-
-        total_posting_count += posting_count;
-        window.offsets.push_back(static_cast<uint32_t>(total_posting_count));
-    }
-}
-
-void
-SINDI::serialize_immutable_window(StreamWriter& writer, const ImmutableSINDIWindow& window) {
-    StreamWriter::WriteVector(writer, window.sorted_global_terms);
-    StreamWriter::WriteVector(writer, window.offsets);
-    StreamWriter::WriteVector(writer, window.id_payloads);
-    StreamWriter::WriteVector(writer, window.value_payloads);
+SINDI::serialize_immutable_window(StreamWriter& writer, const ImmutableSINDIWindow& window) const {
+    ImmutableSindiTermDataCell adapter(term_id_limit_,
+                                       window_size_,
+                                       remap_term_ids_,
+                                       sparse_value_quant_type_,
+                                       quantization_params_,
+                                       allocator_);
+    ImmutableSindiTermDataCell::SerializeWindow(writer, window);
 }
 
 void
 SINDI::deserialize_immutable_window(StreamReader& reader_ref,
                                     ImmutableSINDIWindow& window,
                                     bool postings_sorted) const {
-    const auto value_code_size =
-        SparseTermDataCell::GetSparseValueCodeSize(sparse_value_quant_type_);
-    const auto read_vector = [&reader_ref](auto& values, uint64_t max_size, const char* message) {
-        uint64_t size = 0;
-        StreamReader::ReadObj(reader_ref, size);
-        const auto max_value_size = static_cast<uint64_t>(values.max_size());
-        const bool valid_size = size <= max_size and size <= max_value_size;
-        CHECK_ARGUMENT(valid_size, message);
-        values.resize(size);
-        reader_ref.Read(reinterpret_cast<char*>(values.data()),
-                        size * sizeof(typename std::decay_t<decltype(values)>::value_type));
-    };
-
-    read_vector(window.sorted_global_terms,
-                remap_term_ids_ ? term_id_limit_ : 0,
-                remap_term_ids_ ? "immutable SINDI remapped term count exceeds term_id_limit"
-                                : "immutable SINDI terms require remap_term_ids");
-    uint64_t offset_count = 0;
-    StreamReader::ReadObj(reader_ref, offset_count);
-    const auto max_offset_count = remap_term_ids_ ? static_cast<uint64_t>(term_id_limit_) + 1
-                                                  : static_cast<uint64_t>(term_id_limit_) * 2 + 1;
-    const auto max_offset_capacity = static_cast<uint64_t>(window.offsets.max_size());
-    const bool valid_offset_count =
-        offset_count <= max_offset_count and offset_count <= max_offset_capacity;
-    CHECK_ARGUMENT(valid_offset_count, "immutable SINDI offset count exceeds capacity bound");
-    if (remap_term_ids_) {
-        CHECK_ARGUMENT(offset_count == static_cast<uint64_t>(window.sorted_global_terms.size()) + 1,
-                       "immutable SINDI term and offset counts do not match");
-    }
-    window.offsets.resize(offset_count);
-    reader_ref.Read(reinterpret_cast<char*>(window.offsets.data()),
-                    offset_count * sizeof(uint32_t));
-
-    CHECK_ARGUMENT(not window.offsets.empty(), "immutable SINDI offsets must not be empty");
-    CHECK_ARGUMENT(window.offsets.front() == 0, "immutable SINDI offsets must start at zero");
-    CHECK_ARGUMENT(std::is_sorted(window.offsets.begin(), window.offsets.end()),
-                   "immutable SINDI offsets must be sorted");
-    if (remap_term_ids_) {
-        CHECK_ARGUMENT(
-            std::adjacent_find(window.sorted_global_terms.begin(),
-                               window.sorted_global_terms.end(),
-                               std::greater_equal<>()) == window.sorted_global_terms.end(),
-            "immutable SINDI remapped terms must be strictly increasing");
-    } else {
-        CHECK_ARGUMENT(window.sorted_global_terms.empty(),
-                       "immutable SINDI dense window must not contain remapped terms");
-        CHECK_ARGUMENT(window.offsets.size() <= static_cast<uint64_t>(term_id_limit_) * 2 + 1,
-                       "immutable SINDI term capacity exceeds capacity bound");
-    }
-    for (uint64_t i = 1; i < window.offsets.size(); ++i) {
-        CHECK_ARGUMENT(window.offsets[i] - window.offsets[i - 1] <= window_size_,
-                       "immutable SINDI posting count exceeds window size");
-    }
-
-    const auto posting_count = static_cast<uint64_t>(window.offsets.back());
-    read_vector(
-        window.id_payloads, posting_count, "immutable SINDI id payload count exceeds offsets");
-    CHECK_ARGUMENT(window.id_payloads.size() == posting_count,
-                   "immutable SINDI id payload size does not match offsets");
-    CHECK_ARGUMENT(posting_count <= std::numeric_limits<uint64_t>::max() /
-                                        static_cast<uint64_t>(value_code_size),
-                   "immutable SINDI value payload size overflows uint64_t");
-    read_vector(window.value_payloads,
-                posting_count * value_code_size,
-                "immutable SINDI value payload count exceeds offsets");
-    CHECK_ARGUMENT(window.value_payloads.size() == posting_count * value_code_size,
-                   "immutable SINDI value payload size does not match offsets");
-    for (const auto id : window.id_payloads) {
-        CHECK_ARGUMENT(id < window_size_,
-                       "immutable SINDI window-local doc id exceeds window size");
-    }
-
-    if (postings_sorted) {
-        return;
-    }
-
-    // Older serialized windows did not record posting-list ordering. Normalize them on load so
-    // value-aware pruning remains compatible with indexes written before the format version.
-    Vector<uint32_t> order(allocator_);
-    Vector<uint16_t> sorted_ids(allocator_);
-    Vector<uint8_t> sorted_data(allocator_);
-    for (uint64_t term = 1; term < window.offsets.size(); ++term) {
-        const auto begin = window.offsets[term - 1];
-        const auto count = window.offsets[term] - begin;
-        SparseTermDataCell::SortPostingListByValue(
-            window.id_payloads.data() + begin,
-            window.value_payloads.data() + static_cast<uint64_t>(begin) * value_code_size,
-            count,
-            sparse_value_quant_type_,
-            order,
-            sorted_ids,
-            sorted_data);
-    }
+    ImmutableSindiTermDataCell adapter(term_id_limit_,
+                                       window_size_,
+                                       remap_term_ids_,
+                                       sparse_value_quant_type_,
+                                       quantization_params_,
+                                       allocator_);
+    adapter.DeserializeWindow(reader_ref, window, postings_sorted);
 }
 
 std::pair<int64_t, int64_t>
@@ -2263,9 +1714,8 @@ SINDI::EstimateMemory(uint64_t num_elements) const {
     mem += 2 * sizeof(int64_t) * num_elements;
 
     // size of term id + term data
-    mem +=
-        avg_doc_term_length_ * num_elements *
-        (SparseTermDataCell::GetSparseValueCodeSize(sparse_value_quant_type_) + sizeof(uint16_t));
+    mem += avg_doc_term_length_ * num_elements *
+           (sparse_value_code_size(sparse_value_quant_type_) + sizeof(uint16_t));
 
     if (use_reorder_) {
         uint64_t total_sparse_values = static_cast<uint64_t>(avg_doc_term_length_) * num_elements;
@@ -2313,18 +1763,14 @@ SINDI::GetSparseVectorByInnerId(InnerIdType inner_id,
                                 SparseVector* data,
                                 Allocator* specified_allocator) const {
     std::shared_lock rlock(this->global_mutex_);
-    CHECK_ARGUMENT(immutable_data_ == nullptr,
+    CHECK_ARGUMENT(immutable_term_datacell_ == nullptr,
                    "immutable SINDI runtime does not support GetSparseVectorByInnerId");
 
     if (use_reorder_) {
-        return this->rerank_flat_->GetSparseVectorByInnerId(inner_id, data, specified_allocator);
+        return rerank_flat_->GetSparseVectorByInnerId(inner_id, data, specified_allocator);
     }
 
-    auto cur_window = inner_id / window_size_;
-    auto window_start_id = cur_window * window_size_;
-    auto term_list = this->window_term_list_[cur_window];
-
-    term_list->GetSparseVector(inner_id - window_start_id, data, specified_allocator);
+    term_datacell_->GetSparseVector(inner_id, data, specified_allocator);
 
     // Reverse map compact IDs back to original term IDs
     if (remap_term_ids_ && term_id_mapper_) {
@@ -2339,7 +1785,7 @@ SINDI::CalcDistanceById(const DatasetPtr& vector,
                         int64_t id,
                         bool calculate_precise_distance) const {
     std::shared_lock rlock(this->global_mutex_);
-    CHECK_ARGUMENT(immutable_data_ == nullptr,
+    CHECK_ARGUMENT(immutable_term_datacell_ == nullptr,
                    "immutable SINDI runtime does not support CalcDistanceById");
 
     if (vector == nullptr || vector->GetNumElements() == 0 ||
@@ -2348,21 +1794,18 @@ SINDI::CalcDistanceById(const DatasetPtr& vector,
     }
 
     if (use_reorder_ && calculate_precise_distance) {
-        auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
+        const auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
         if (not success) {
             return -1.0F;
         }
-        auto computer = rerank_flat_->FactoryComputer(vector->GetSparseVectors());
+        auto* rerank_datacell = rerank_flat_.get();
+        auto computer = rerank_datacell->FactoryComputer(vector->GetSparseVectors());
         float distance = 0.0F;
-        rerank_flat_->Query(&distance, computer, &inner_id, 1);
+        rerank_datacell->Query(&distance, computer, &inner_id, 1);
         return distance;
     }
 
-    auto inner_id = this->label_table_->GetIdByLabel(id);
-    auto cur_window = inner_id / window_size_;
-    auto window_start_id = cur_window * window_size_;
-    auto term_list = this->window_term_list_[cur_window];
-
+    const auto inner_id = this->label_table_->GetIdByLabel(id);
     auto sparse_query = vector->GetSparseVectors()[0];
     Vector<uint32_t> tmp_ids(allocator_);
     Vector<float> tmp_vals(allocator_);
@@ -2372,8 +1815,8 @@ SINDI::CalcDistanceById(const DatasetPtr& vector,
     SINDISearchParameter search_param;
     search_param.query_prune_ratio = 0;
     auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
-    return term_list->CalcDistanceByInnerId(computer,
-                                            static_cast<uint16_t>(inner_id - window_start_id));
+    const QueryTermBuffers query_term_buffers(allocator_);
+    return term_datacell_->CalcDistanceByInnerId(computer, inner_id, query_term_buffers);
 }
 
 DatasetPtr
@@ -2390,121 +1833,115 @@ SINDI::CalDistanceById(const DatasetPtr& query,
                        int64_t count,
                        bool calculate_precise_distance,
                        int64_t topk) const {
-    const bool invalid_topk = topk != -1 && topk <= 0;
-    CHECK_ARGUMENT(not invalid_topk, "CalDistanceById topk must be -1 or positive");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        topk == -1 || topk > 0,
+        "CalDistanceById topk must be -1 or positive");
     CHECK_ARGUMENT(query != nullptr, "CalDistanceById query must not be null");
-    const int64_t num_queries = query->GetNumElements();
     CHECK_ARGUMENT(count >= 0, "CalDistanceById count must be non-negative");
     if (count > 0) {
         CHECK_ARGUMENT(ids != nullptr, "CalDistanceById ids must not be null");
     }
+    const int64_t num_queries = query->GetNumElements();
     CHECK_ARGUMENT(num_queries > 0, "CalDistanceById query count must be positive");
     CHECK_ARGUMENT(query->GetSparseVectors() != nullptr,
                    "CalDistanceById query sparse vectors must not be null");
+
     const auto count_size = static_cast<uint64_t>(count);
     const auto num_queries_size = static_cast<uint64_t>(num_queries);
     const auto max_distance_count = std::numeric_limits<uint64_t>::max() / sizeof(float);
-    const bool distance_count_overflows =
-        count_size != 0 && num_queries_size > max_distance_count / count_size;
-    CHECK_ARGUMENT(not distance_count_overflows, "CalDistanceById distance buffer size overflows");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        count_size == 0 || num_queries_size <= max_distance_count / count_size,
+        "CalDistanceById distance buffer size overflows");
 
     auto result = Dataset::Make();
     result->NumElements(num_queries)->Dim(count)->Owner(true, allocator_);
     if (count == 0) {
         return result;
     }
+
     auto* distances =
         static_cast<float*>(allocator_->Allocate(sizeof(float) * num_queries_size * count_size));
     CHECK_ARGUMENT(distances != nullptr, "Failed to allocate SINDI multi-query distance buffer");
     result->Distances(distances);
 
     std::shared_lock rlock(this->global_mutex_);
-    CHECK_ARGUMENT(immutable_data_ == nullptr,
+    CHECK_ARGUMENT(immutable_term_datacell_ == nullptr,
                    "immutable SINDI runtime does not support CalDistanceById");
 
     Vector<int64_t> inner_ids(count, -1, allocator_);
     std::unordered_map<int64_t, std::vector<int64_t>> window_positions;
-    Vector<float> window_dists(window_size_, 0.0, allocator_);
+    Vector<float> window_dists(window_size_, 0.0F, allocator_);
     std::vector<bool> validity(num_queries_size * count_size, false);
-    auto calc_row =
-        [this, calculate_precise_distance, &inner_ids, &window_positions, &window_dists, &validity](
-            const SparseVector& sparse_query,
-            const int64_t* row_ids,
-            int64_t row_count,
-            float* row_distances,
-            uint64_t validity_offset) {
-            if (use_reorder_ && calculate_precise_distance) {
-                auto computer = rerank_flat_->FactoryComputer(&sparse_query);
-                for (int64_t i = 0; i < row_count; ++i) {
-                    auto [success, inner_id] = this->label_table_->TryGetIdByLabel(row_ids[i]);
-                    if (success) {
-                        validity[validity_offset + static_cast<uint64_t>(i)] = true;
-                        rerank_flat_->Query(row_distances + i, computer, &inner_id, 1);
-                    } else {
-                        row_distances[i] = -1.0F;
-                    }
-                }
-                return;
-            }
+    for (int64_t query_index = 0; query_index < num_queries; ++query_index) {
+        const auto& sparse_query = query->GetSparseVectors()[query_index];
+        const auto* row_ids = ids + query_index * count;
+        auto* row_distances = distances + query_index * count;
+        const auto validity_offset = static_cast<uint64_t>(query_index) * count_size;
 
-            auto mapped_query = sparse_query;
-            Vector<uint32_t> tmp_ids(allocator_);
-            Vector<float> tmp_vals(allocator_);
-            if (remap_term_ids_) {
-                mapped_query = remap_sparse_vector_for_query(mapped_query, tmp_ids, tmp_vals);
-            }
-            window_positions.clear();
-            SINDISearchParameter search_param;
-            search_param.query_prune_ratio = 0;
-            auto computer =
-                std::make_shared<SparseTermComputer>(mapped_query, search_param, allocator_);
-            for (int64_t i = 0; i < row_count; ++i) {
-                inner_ids[i] = -1;
-                auto [success, inner_id] = this->label_table_->TryGetIdByLabel(row_ids[i]);
-                if (success) {
-                    inner_ids[i] = inner_id;
-                    validity[validity_offset + static_cast<uint64_t>(i)] = true;
-                    window_positions[inner_id / window_size_].push_back(i);
-                } else {
-                    row_distances[i] = -1.0F;
+        if (use_reorder_ && calculate_precise_distance) {
+            auto* rerank_datacell = rerank_flat_.get();
+            auto computer = rerank_datacell->FactoryComputer(&sparse_query);
+            for (int64_t index = 0; index < count; ++index) {
+                const auto [success, inner_id] =
+                    this->label_table_->TryGetIdByLabel(row_ids[index]);
+                if (not success) {
+                    row_distances[index] = -1.0F;
+                    continue;
                 }
+                validity[validity_offset + static_cast<uint64_t>(index)] = true;
+                rerank_datacell->Query(row_distances + index, computer, &inner_id, 1);
             }
-            // For SQ8, use CalcDistanceByInnerId to ensure decoded values are used
-            // (Query uses raw uint8 which gives different results)
-            if (this->sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
-                for (int64_t i = 0; i < row_count; ++i) {
-                    if (inner_ids[i] < 0) {
-                        continue;
-                    }
-                    auto cur_window = inner_ids[i] / window_size_;
-                    auto window_start_id = cur_window * window_size_;
-                    auto term_list = this->window_term_list_[cur_window];
-                    auto inner_offset = static_cast<uint16_t>(inner_ids[i] - window_start_id);
-                    row_distances[i] = term_list->CalcDistanceByInnerId(computer, inner_offset);
-                }
-            } else {
-                for (const auto& [cur_window, positions] : window_positions) {
-                    auto window_start_id = cur_window * window_size_;
-                    auto term_list = this->window_term_list_[cur_window];
-                    std::fill(window_dists.data(), window_dists.data() + window_size_, 0.0F);
-                    term_list->Query(window_dists.data(), computer);
-                    for (const auto position : positions) {
-                        row_distances[position] =
-                            1.0F + window_dists[inner_ids[position] - window_start_id];
-                    }
-                }
-            }
-        };
+            continue;
+        }
 
-    for (int64_t q = 0; q < num_queries; ++q) {
-        const auto& sparse_query = query->GetSparseVectors()[q];
-        const int64_t* row_ids = ids + q * count;
-        auto* row = distances + q * count;
-        calc_row(sparse_query,
-                 row_ids,
-                 count,
-                 row,
-                 static_cast<uint64_t>(q) * static_cast<uint64_t>(count));
+        auto mapped_query = sparse_query;
+        Vector<uint32_t> tmp_ids(allocator_);
+        Vector<float> tmp_vals(allocator_);
+        if (remap_term_ids_) {
+            mapped_query = remap_sparse_vector_for_query(mapped_query, tmp_ids, tmp_vals);
+        }
+        SINDISearchParameter search_param;
+        search_param.query_prune_ratio = 0;
+        auto computer =
+            std::make_shared<SparseTermComputer>(mapped_query, search_param, allocator_);
+        const QueryTermBuffers query_term_buffers(allocator_);
+        window_positions.clear();
+        for (int64_t index = 0; index < count; ++index) {
+            const auto [success, inner_id] = this->label_table_->TryGetIdByLabel(row_ids[index]);
+            if (not success) {
+                inner_ids[index] = -1;
+                row_distances[index] = -1.0F;
+                continue;
+            }
+            inner_ids[index] = inner_id;
+            validity[validity_offset + static_cast<uint64_t>(index)] = true;
+            window_positions[inner_id / window_size_].push_back(index);
+        }
+
+        if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
+            for (int64_t index = 0; index < count; ++index) {
+                if (inner_ids[index] < 0) {
+                    continue;
+                }
+                row_distances[index] = term_datacell_->CalcDistanceByInnerId(
+                    computer, static_cast<uint32_t>(inner_ids[index]), query_term_buffers);
+            }
+        } else {
+            SindiQueryContext query_context(allocator_);
+            for (const auto& [window_id, positions] : window_positions) {
+                std::fill(window_dists.begin(), window_dists.end(), 0.0F);
+                term_datacell_->QueryWindow(window_dists.data(),
+                                            static_cast<uint32_t>(window_id),
+                                            computer,
+                                            false,
+                                            query_context);
+                const auto window_start_id = window_id * window_size_;
+                for (const auto position : positions) {
+                    row_distances[position] =
+                        1.0F + window_dists[inner_ids[position] - window_start_id];
+                }
+            }
+        }
     }
 
     if (topk == -1) {
@@ -2567,8 +2004,7 @@ SINDI::InitFeatures() {
 std::pair<int64_t, int64_t>
 SINDI::get_min_max_window_id(const FilterPtr& filter) const {
     int64_t min_window_id = 0;
-    auto num_windows =
-        immutable_data_ != nullptr ? immutable_data_->windows.size() : window_term_list_.size();
+    auto num_windows = term_datacell_ == nullptr ? 0 : term_datacell_->GetWindowCount();
     auto max_window_id = static_cast<int64_t>(num_windows) - 1;
 
     // get min and max window id
@@ -2622,6 +2058,26 @@ SINDI::remap_sparse_vector_for_query(const SparseVector& input,
 
 SparseVector
 SINDI::remap_sparse_vector_for_build(const SparseVector& input, Vector<uint32_t>& tmp_ids) {
+    if (doc_prune_ratio_ != 0.0F) {
+        tmp_ids.clear();
+        tmp_ids.reserve(input.len_);
+        for (uint32_t index = 0; index < input.len_; ++index) {
+            if (not term_id_mapper_->TryMap(input.ids_[index]).has_value()) {
+                tmp_ids.push_back(input.ids_[index]);
+            }
+        }
+        std::sort(tmp_ids.begin(), tmp_ids.end());
+        tmp_ids.erase(std::unique(tmp_ids.begin(), tmp_ids.end()), tmp_ids.end());
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            term_id_mapper_->Size() <= term_id_limit_ &&
+                tmp_ids.size() <= static_cast<uint64_t>(term_id_limit_ - term_id_mapper_->Size()),
+            fmt::format("term id mapper is full: mapper size ({}) + new terms ({}) exceeds "
+                        "term_id_limit ({})",
+                        term_id_mapper_->Size(),
+                        tmp_ids.size(),
+                        term_id_limit_));
+    }
+
     tmp_ids.resize(input.len_);
     for (uint32_t i = 0; i < input.len_; ++i) {
         tmp_ids[i] = term_id_mapper_->Map(input.ids_[i]);

@@ -40,9 +40,10 @@ class SearchRequest {
 public:
     // basic params
     /** 
-     * @brief Query dataset containing the vector to search for
+     * @brief Query dataset containing the vector or vectors to search for
      * @details This DatasetPtr holds the query vector used for similarity search. 
-     *          Only one query vector is allowed.
+     *          IVF KNN requests and supported AnalyzeIndexBySearch implementations accept
+     *          multiple query vectors; other requests allow one.
      */
     DatasetPtr query_{nullptr};
 
@@ -218,7 +219,7 @@ public:
 
     /**
      * @brief Pre-selected bucket IDs for bypassing IVF bucket routing (ClassifyDatasForSearch)
-     * @details Currently only single-query is supported; outer vector must contain exactly one entry.
+     * @details The outer vector contains one entry per query vector.
      *          Inner vector contains ordered bucket IDs (caller is responsible for ordering).
      *          When non-empty with at least one ID, skips ClassifyDatasForSearch and searches only
      *          the specified buckets. Empty means "use default bucket routing".

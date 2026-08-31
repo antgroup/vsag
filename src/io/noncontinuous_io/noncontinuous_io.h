@@ -98,9 +98,7 @@ public:
                 start_offset = start_area->first.offset;
             }
         }
-        if (offset + size > this->size_) {
-            this->size_ = offset + size;
-        }
+        this->PublishSize(offset + size);
     }
 
     /**
@@ -173,12 +171,61 @@ public:
      */
     bool
     MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const {
-        bool ret = true;
-        for (uint64_t i = 0; i < count; i++) {
-            ret &= this->ReadImpl(sizes[i], offsets[i], datas);
-            datas += sizes[i];
+        if (count == 0) {
+            return true;
         }
-        return ret;
+        if (sizes == nullptr or offsets == nullptr) {
+            return false;
+        }
+
+        bool has_data = false;
+        for (uint64_t i = 0; i < count; ++i) {
+            if (offsets[i] > this->size_ or sizes[i] > this->size_ - offsets[i]) {
+                return false;
+            }
+            has_data |= sizes[i] > 0;
+        }
+        if (not has_data) {
+            return true;
+        }
+        if (datas == nullptr) {
+            return false;
+        }
+
+        std::vector<uint64_t> physical_sizes;
+        std::vector<uint64_t> physical_offsets;
+        physical_sizes.reserve(count);
+        physical_offsets.reserve(count);
+        for (uint64_t i = 0; i < count; ++i) {
+            uint64_t remaining_size = sizes[i];
+            uint64_t logical_offset = offsets[i];
+            if (remaining_size == 0) {
+                continue;
+            }
+
+            auto area_it = this->get_area(logical_offset);
+            while (remaining_size > 0) {
+                if (area_it == areas_.end()) {
+                    return false;
+                }
+                const auto& area = area_it->first;
+                uint64_t logical_area_start = area_it->second - area.size;
+                if (logical_offset < logical_area_start or logical_offset >= area_it->second) {
+                    return false;
+                }
+                uint64_t fragment_size = std::min(remaining_size, area_it->second - logical_offset);
+                physical_sizes.emplace_back(fragment_size);
+                physical_offsets.emplace_back(area.offset + logical_offset - logical_area_start);
+                logical_offset += fragment_size;
+                remaining_size -= fragment_size;
+                ++area_it;
+            }
+        }
+
+        return inner_io_->MultiRead(datas,
+                                    physical_sizes.data(),
+                                    physical_offsets.data(),
+                                    static_cast<uint64_t>(physical_sizes.size()));
     }
 
     /**

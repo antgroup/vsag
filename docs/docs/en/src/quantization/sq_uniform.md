@@ -66,7 +66,7 @@ the same recall.
 
 | Key | Type | Default | Applies to | Meaning |
 | --- | --- | --- | --- | --- |
-| `sq4_uniform_trunc_rate` | float | `0.05` | `sq4_uniform` only | Symmetric truncation rate for outliers (`src/quantization/scalar_quantization/sq4_uniform_quantizer_parameter.h:39`). Higher values clip more extreme coordinates, reducing range loss for the bulk of the data at the cost of clipping the tails. |
+| `sq4_uniform_trunc_rate` | float | `0.05` | `sq4_uniform` only | Finite symmetric truncation rate for outliers in the inclusive range `[0.0, 0.5]`. Higher values clip more extreme coordinates, reducing range loss for the bulk of the data at the cost of clipping the tails. |
 
 `sq8_uniform` has no quantizer-specific JSON parameters.
 

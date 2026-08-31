@@ -53,25 +53,26 @@ struct MergeUnit {
 };
 
 enum class IndexType {
-    HNSW,
-    DISKANN,
-    HGRAPH,
-    IVF,
-    PYRAMID,
-    BRUTEFORCE,
-    SPARSE,
-    SINDI,
-    WARP,
-    LAZY_HGRAPH,
-    SIMQ
+    // Values 0 and 1 were assigned to the removed HNSW and DiskANN types. Do not reuse them:
+    // maintained index ordinals must remain stable for API and serialization compatibility.
+    HGRAPH = 2,
+    IVF = 3,
+    PYRAMID = 4,
+    BRUTEFORCE = 5,
+    SPARSE = 6,
+    SINDI = 7,
+    WARP = 8,
+    LAZY_HGRAPH = 9,
+    SIMQ = 10,
+    SINDI_V2 = 11
 };
-
 #define DATA_FLAG_FLOAT32_VECTOR 0x01
 #define DATA_FLAG_INT8_VECTOR 0x02
 #define DATA_FLAG_SPARSE_VECTOR 0x04
 #define DATA_FLAG_EXTRA_INFO 0x10
 #define DATA_FLAG_ATTRIBUTE 0x20
 #define DATA_FLAG_ID 0x40
+#define DATA_FLAG_PATH 0x80
 
 using OffsetType = uint64_t;
 using SizeType = uint64_t;
@@ -498,9 +499,9 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID.
      *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * Suitable for dense vector indexes such as HGraph, BruteForce, IVF, and Pyramid.
      * The query must be a contiguous float32 array with dimension matching the index.
-     * For sparse vector indexes (SINDI), this overload is not applicable;
+     * For sparse vector indexes (SINDI, SINDI_V2), this overload is not applicable;
      * use CalcDistanceById(DatasetPtr, int64_t, bool) instead.
      *
      * @param vector The embedding of the query (float32 array for dense vectors).
@@ -523,7 +524,7 @@ public:
      * @brief Calculate the distance between the query and the vector of the given ID.
      *
      * Suitable for Dataset-backed query formats, especially sparse vector indexes
-     * (SINDI) where vectors cannot be represented as a simple float pointer.
+     * (SINDI, SINDI_V2) where vectors cannot be represented as a simple float pointer.
      * Dense DatasetPtr batch queries are supported by the batch overload below
      * through Float32Vectors() when the index advertises the batch feature; for
      * this single-ID overload, dense callers should prefer the const float* API
@@ -548,11 +549,10 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID for batch.
      *
-     * Suitable for dense vector indexes. HGraph, BruteForce, IVF, and Pyramid support
-     * top-k output when they advertise the corresponding batch distance feature; DiskANN and
-     * HNSW only support the default topk == -1 behavior and reject positive topk values.
+     * Suitable for dense vector indexes. HGraph, BruteForce, IVF, and Pyramid support top-k
+     * output when they advertise the corresponding batch distance feature.
      * The query must be a contiguous float32 array. For sparse vector indexes
-     * (SINDI), this overload is not applicable; use
+     * (SINDI, SINDI_V2), this overload is not applicable; use
      * CalDistanceById(DatasetPtr, const int64_t*, int64_t, bool) instead.
      *
      * @param query is the embedding of query (float32 array for dense vectors).
@@ -586,7 +586,7 @@ public:
      * @brief Calculate distances between query(queries) and vectors of given IDs for batch.
      *
      * Suitable for Dataset-backed batch query formats. Sparse vector indexes
-     * (SINDI) use GetSparseVectors(). Dense vector indexes that advertise
+     * (SINDI, SINDI_V2) use GetSparseVectors(). Dense vector indexes that advertise
      * SUPPORT_BATCH_CALC_DISTANCE_BY_ID can use Float32Vectors() through the
      * default DatasetPtr batch implementation or an index-specific override.
      *
@@ -701,7 +701,7 @@ public:
     }
 
     /**
-     * @brief Retrieve all data associated with vectors identified by given IDs.
+     * @brief Retrieve selected data associated with vectors identified by given IDs.
      *
      * This method fetches data stored with the vectors in the index
      * (e.g., attributes, labels, or extra infos).
@@ -710,7 +710,7 @@ public:
      * @param count Number of IDs in the 'ids' array.
      * @param selected_data_flag selected data flag, set with DATA_FLAG_*
      * @return tl::expected<DatasetPtr, Error>
-     *         - On success: A DatasetPtr containing the extra data, attribute and vector
+     *         - On success: A DatasetPtr containing the selected supported fields
      *         - On failure: An error object (e.g., invalid ID, out of memory).
      * @note The default base-class implementation returns tl::unexpected(ErrorType::UNSUPPORTED_INDEX_OPERATION) If the index implementation does not support this operation
      *            (default behavior for base class).
@@ -757,7 +757,7 @@ public:
     }
 
     /**
-     * @brief Retrieve all data associated with vectors identified by given IDs.
+     * @brief Retrieve the default data fields associated with vectors identified by given IDs.
      *
      * This method fetches data stored with the vectors in the index
      * (e.g., attributes, labels, or extra infos).
@@ -765,11 +765,11 @@ public:
      * @param ids Array of vector IDs for which extra information is requested.
      * @param count Number of IDs in the 'ids' array.
      * @return tl::expected<DatasetPtr, Error>
-     *         - On success: A DatasetPtr containing the extra data, attribute and vector
+     *         - On success: A DatasetPtr containing the implementation's default fields
      *         - On failure: An error object (e.g., invalid ID, out of memory).
      * @note The default base-class implementation returns tl::unexpected(ErrorType::UNSUPPORTED_INDEX_OPERATION) If the index implementation does not support this operation
      *            (default behavior for base class).
-     * @note The default implementation returns all data which in current index
+     * @note Optional fields may require explicit selection through GetDataByIdsWithFlag.
      */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     GetDataByIds(const int64_t* ids, int64_t count) const {
@@ -1092,6 +1092,27 @@ public:
             Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support ImportCache"));
     }
 
+    /**
+     * @brief Rebuild per-bucket graphs for IVF indices after Add operations.
+     *
+     * When an IVF index is configured with graph_build_threshold > 0, large buckets
+     * get internal graphs for faster search. After Add() operations, these graphs
+     * become stale. This method explicitly rebuilds them using bucket-internal
+     * distance computation (no external dataset needed).
+     *
+     * Requirements:
+     * - Index must be IVF with graph_build_threshold > 0
+     * - Not safe for concurrent use with Add/Remove/Build/Serialize
+     *
+     * @return tl::expected<void, Error>; an Error is returned if the index does not
+     * support this operation or if graph_build_threshold was not configured.
+     */
+    virtual tl::expected<void, Error>
+    RebuildIVFBucketGraphs() {
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support RebuildIVFBucketGraphs"));
+    }
+
 public:
     virtual ~Index() = default;
 
@@ -1139,44 +1160,5 @@ public:
 #endif
     }
 };
-
-/**
-  * @brief check if the build parameter is valid
-  *
-  * @return true if the parameter is valid, otherwise error with detail message.
-  */
-tl::expected<bool, Error>
-check_diskann_hnsw_build_parameters(const std::string& json_string);
-
-/**
-  * @brief check if the build parameter is valid
-  *
-  * @return true if the parameter is valid, otherwise error with detail message.
-  */
-tl::expected<bool, Error>
-check_diskann_hnsw_search_parameters(const std::string& json_string);
-
-/**
-  * @brief estimate search time for index
-  *
-  * @return the estimated search time in milliseconds.
-  */
-tl::expected<float, Error>
-estimate_search_time(const std::string& index_name,
-                     int64_t data_num,
-                     int64_t data_dim,
-                     const std::string& parameters);
-
-/**
-  * [experimental]
-  * @brief generate build index parameters from data size and dim
-  *
-  * @return the build parameter string
-  */
-tl::expected<std::string, Error>
-generate_build_parameters(std::string metric_type,
-                          int64_t num_elements,
-                          int64_t dim,
-                          bool use_conjugate_graph = false);
 
 }  // namespace vsag

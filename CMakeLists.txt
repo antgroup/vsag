@@ -54,17 +54,17 @@ if (ENABLE_TESTS)
 endif ()
 
 add_subdirectory (src)
-if (ENABLE_MOCKIMPL)
-    add_subdirectory (mockimpl)
+if (ENABLE_TOOLS AND ENABLE_CXX11_ABI)
+    add_subdirectory (tools)
 endif ()
 if (ENABLE_EXAMPLES)
     add_subdirectory (examples/cpp)
 endif ()
-if (ENABLE_TOOLS AND ENABLE_CXX11_ABI)
-    add_subdirectory (tools)
-endif ()
 if (ENABLE_TESTS)
     add_subdirectory (tests)
+    # Preserve the shared target's existing private definition and apply it to the common
+    # compilation. Production sources do not branch on ENABLE_TESTS.
+    target_compile_definitions (vsag_objects PRIVATE ENABLE_TESTS)
     target_compile_definitions (vsag PRIVATE ENABLE_TESTS)
 endif ()
 

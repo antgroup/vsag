@@ -36,14 +36,6 @@ namespace vsag {
 
 static constexpr BucketIdType INVALID_BUCKET_ID = static_cast<BucketIdType>(-1);
 
-static constexpr const char* SEARCH_PARAM_TEMPLATE_STR = R"(
-{{
-    "hnsw": {{
-        "ef_search": {}
-    }}
-}}
-)";
-
 // C = A * B^T
 void
 matmul(const float* A, const float* B, float* C, int64_t M, int64_t N, int64_t K) {
@@ -211,6 +203,15 @@ GNOIMIPartition::ClassifyDatas(const void* datas,
                                int64_t count,
                                BucketIdType buckets_per_data,
                                QueryContext* ctx) const {
+    Vector<float> norm_vectors(allocator_);
+    if (metric_type_ == MetricType::METRIC_TYPE_COSINE) {
+        norm_vectors.resize(count * dim_);
+        for (int64_t i = 0; i < count; ++i) {
+            Normalize(
+                static_cast<const float*>(datas) + i * dim_, norm_vectors.data() + i * dim_, dim_);
+        }
+        datas = norm_vectors.data();
+    }
     Vector<BucketIdType> result(buckets_per_data * count, this->allocator_);
     inner_joint_classify_datas(
         reinterpret_cast<const float*>(datas), count, buckets_per_data, result.data(), ctx);
@@ -331,7 +332,7 @@ GNOIMIPartition::Serialize(StreamWriter& writer) {
     StreamWriter::WriteVector(writer, this->precomputed_terms_st_);
 }
 void
-GNOIMIPartition::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+GNOIMIPartition::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     IVFPartitionStrategy::Deserialize(reader);
     StreamReader::ReadObj<BucketIdType>(reader, this->bucket_count_s_);
     StreamReader::ReadObj<BucketIdType>(reader, this->bucket_count_t_);
@@ -352,11 +353,8 @@ GNOIMIPartition::inner_classify_datas(BruteForce& route_index, const float* data
             ->Float32Vectors(datas + i * this->dim_)
             ->NumElements(1)
             ->Owner(false);
-        auto search_param =
-            fmt::format(SEARCH_PARAM_TEMPLATE_STR,
-                        std::max<int64_t>(10, static_cast<int64_t>(buckets_per_data * 1.2)));
         FilterPtr filter = nullptr;
-        auto search_result = route_index.KnnSearch(query, buckets_per_data, search_param, filter);
+        auto search_result = route_index.KnnSearch(query, buckets_per_data, "{}", filter);
         const auto* result_ids = search_result->GetIds();
 
         for (int64_t j = 0; j < buckets_per_data; ++j) {

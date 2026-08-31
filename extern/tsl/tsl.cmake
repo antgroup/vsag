@@ -3,12 +3,8 @@ include (FetchContent)
 
 set (tsl_urls
     https://github.com/Tessil/robin-map/archive/refs/tags/v1.4.0.tar.gz
-    https://vsagcache.oss-rg-china-mainland.aliyuncs.com/robin-map/v1.4.0.tar.gz
 )
-if (DEFINED ENV{VSAG_THIRDPARTY_TSL})
-    message (STATUS "Using local path for tsl: $ENV{VSAG_THIRDPARTY_TSL}")
-    list (PREPEND tsl_urls "$ENV{VSAG_THIRDPARTY_TSL}")
-endif ()
+vsag_resolve_thirdparty_override (TSL v1.4.0 tsl_urls)
 FetchContent_Declare (
     tsl
     URL ${tsl_urls}

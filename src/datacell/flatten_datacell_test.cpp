@@ -157,6 +157,25 @@ TEST_CASE("FlattenDataCell Basic Test", "[ut][FlattenDataCell] ") {
     }
 }
 
+TEST_CASE("FlattenDataCell only reports a stride for contiguous raw data",
+          "[ut][FlattenDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(JsonType::Parse(R"({
+        "io_params": {"type": "block_memory_io"},
+        "quantization_params": {"type": "fp32"}
+    })"));
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = 4;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+    auto flatten = FlattenInterface::MakeInstance(param, common_param);
+    uint64_t row_stride = 123;
+    REQUIRE(flatten->TryGetContiguousRawFloatData(&row_stride) == nullptr);
+    REQUIRE(row_stride == 0);
+}
+
 TEST_CASE("RaBitQSplitDataCell direct split compute", "[ut][RaBitQSplitDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr uint64_t dim = 64;
@@ -928,8 +947,8 @@ TEST_CASE("RaBitQSplitDataCell fused model-only serialization",
         RaBitQSplitDataCell<MetricType::METRIC_TYPE_L2SQR, MemoryIO, MemoryIO>;
     auto legacy_memory_split = std::dynamic_pointer_cast<MemorySplitDataCell>(legacy_flatten);
     REQUIRE(legacy_memory_split != nullptr);
-    REQUIRE(legacy_memory_split->x_bit_cell_->GetMemoryUsage() == 0);
-    REQUIRE(legacy_memory_split->supplement_cell_->GetMemoryUsage() == 0);
+    REQUIRE(legacy_memory_split->x_bit_layout_->GetMemoryUsage() == 0);
+    REQUIRE(legacy_memory_split->supplement_layout_->GetMemoryUsage() == 0);
     REQUIRE(legacy_flatten->GetMemoryUsage() == model_flatten->GetMemoryUsage());
     const auto legacy_distances = query_all(legacy_flatten);
     for (InnerIdType id = 0; id < count; ++id) {
@@ -1440,6 +1459,16 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
     for (InnerIdType id = 0; id < count; ++id) {
         REQUIRE(std::abs(pair_dists[id] - flatten->ComputePairVectors(0, id)) <= 1e-6F);
     }
+    std::vector<float> id_dists(count);
+    SearchStatistics stats;
+    QueryContext ctx{.stats = &stats};
+    flatten->QueryById(id_dists.data(), 0, build_ids.data(), count, &ctx);
+    auto statistics = JsonType::Parse(stats.Dump());
+    REQUIRE(statistics["distance_evaluations_by_backend"]["rabitq"].GetUint64() == count);
+    for (InnerIdType id = 0; id < count; ++id) {
+        REQUIRE(std::abs(id_dists[id] - pair_dists[id]) <= 1e-6F);
+    }
+
     flatten->Resize(count + 8);
     flatten->Move(1, 2);
     std::memcpy(expected_codes.data() + 2 * flatten->code_size_,
@@ -1472,6 +1501,13 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
     optimized_build->FinalizeOptimizedBuild();
     REQUIRE_FALSE(optimized_build->IsOptimizedBuildActive());
     REQUIRE(std::abs(flatten->ComputePairVectors(0, 2) - build_pair_distance) <= 1e-5F);
+    flatten->QueryById(id_dists.data(), 0, build_ids.data(), count, &ctx);
+    statistics = JsonType::Parse(stats.Dump());
+    REQUIRE(statistics["distance_evaluations_by_backend"]["rabitq"].GetUint64() == 2 * count);
+    for (InnerIdType id = 0; id < count; ++id) {
+        REQUIRE(std::abs(id_dists[id] - flatten->ComputePairVectors(0, id)) <= 1e-5F);
+    }
+
     std::vector<float> split_dists(count);
     flatten->Query(split_dists.data(), computer, ids.data(), count);
     for (InnerIdType id = 0; id < count; ++id) {

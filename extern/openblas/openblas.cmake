@@ -175,15 +175,19 @@ if (NOT OPENBLAS_FOUND)
         https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.24/OpenBLAS-0.3.24.tar.gz
         https://sourceforge.net/projects/openblas/files/v0.3.24/OpenBLAS-0.3.24.tar.gz/download
     )
-    if (DEFINED ENV{VSAG_THIRDPARTY_OPENBLAS})
-        message (STATUS "Using local path for openblas: $ENV{VSAG_THIRDPARTY_OPENBLAS}")
-        list (PREPEND openblas_urls "$ENV{VSAG_THIRDPARTY_OPENBLAS}")
-    endif ()
+    vsag_resolve_thirdparty_override (OPENBLAS v0.3.24 openblas_urls)
 
     # OpenBLAS build tools (getarch) require strict FP semantics; -Ofast
     # (which implies -ffast-math) breaks CPU detection. Replace with -O2.
     string (REPLACE "-Ofast" "-O2" _openblas_c_flags "${VSAG_THIRDPARTY_C_FLAGS}")
     string (REPLACE "-ffast-math" "" _openblas_c_flags "${_openblas_c_flags}")
+    # GCC 15 defaults to GNU C23, where an empty parameter list means that a function takes
+    # no arguments. OpenBLAS' f2c-generated LAPACK sources use empty parameter lists with the
+    # pre-C23 "unspecified arguments" meaning, so compile the bundled release as GNU C17.
+    if (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL 15)
+        string (APPEND _openblas_c_flags
+                " -std=gnu17 -Wno-error=incompatible-pointer-types")
+    endif ()
     string (REPLACE "-Ofast" "-O2" _openblas_cxx_flags "${VSAG_THIRDPARTY_CXX_FLAGS}")
     string (REPLACE "-ffast-math" "" _openblas_cxx_flags "${_openblas_cxx_flags}")
     string (STRIP "${_openblas_c_flags}" _openblas_c_flags)

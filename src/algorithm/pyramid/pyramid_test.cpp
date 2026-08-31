@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "impl/allocator/safe_allocator.h"
+#include "index/index_impl.h"
 #include "index_common_param.h"
 #include "unittest.h"
 
@@ -41,7 +42,8 @@ MakePyramidIndex(uint32_t index_min_size,
                  bool split_rabitq = false,
                  bool use_mrle_split = false,
                  bool use_mrle_fp32 = false,
-                 bool use_reorder = false) {
+                 bool use_reorder = false,
+                 bool store_raw_vector = false) {
     PyramidTestIndex result;
     vsag::IndexCommonParam common_param;
     common_param.dim_ = PYRAMID_TEST_DIM;
@@ -87,6 +89,7 @@ MakePyramidIndex(uint32_t index_min_size,
     }
     external_param[vsag::PYRAMID_INDEX_MIN_SIZE].SetInt(index_min_size);
     external_param[vsag::PYRAMID_BUILD_THREAD_COUNT].SetUint64(build_thread_count);
+    external_param[vsag::STORE_RAW_VECTOR].SetBool(store_raw_vector);
     external_param[vsag::PYRAMID_USE_REORDER].SetBool(use_rabitq_with_sq8 or split_rabitq or
                                                       use_mrle_split or use_reorder);
     if (use_rabitq_with_sq8) {
@@ -207,6 +210,248 @@ TEST_CASE("Pyramid stats count duplicates within each leaf", "[ut][pyramid][anal
     REQUIRE(std::abs(GetPyramidDuplicateRatio(index) - 2.0F / static_cast<float>(count)) < 1e-6F);
 }
 
+TEST_CASE("Pyramid query analyzer honors paths and removals", "[ut][pyramid][analyzer]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = PYRAMID_TEST_DIM;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto external_param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "max_degree": 4,
+        "ef_construction": 8,
+        "graph_type": "nsw",
+        "no_build_levels": [0, 1, 2],
+        "index_min_size": 28
+    })");
+    auto param = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
+    auto index = std::make_shared<vsag::Pyramid>(param, common_param);
+
+    std::array<float, PYRAMID_TEST_DIM* 4> vectors = {10.0F,
+                                                      0.0F,
+                                                      0.0F,
+                                                      0.0F,
+                                                      1.0F,
+                                                      0.0F,
+                                                      0.0F,
+                                                      0.0F,
+                                                      0.0F,
+                                                      0.0F,
+                                                      0.0F,
+                                                      0.0F,
+                                                      100.0F,
+                                                      0.0F,
+                                                      0.0F,
+                                                      0.0F};
+    std::array<int64_t, 4> ids = {101, 102, 201, 202};
+    std::array<std::string, 4> paths = {"root/a/leaf", "root/a/leaf", "root/b/leaf", "root/b/leaf"};
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(4)
+                    ->Dim(PYRAMID_TEST_DIM)
+                    ->Float32Vectors(vectors.data())
+                    ->Ids(ids.data())
+                    ->Paths(paths.data())
+                    ->Owner(false);
+    REQUIRE(index->Build(base).empty());
+
+    std::array<float, PYRAMID_TEST_DIM* 2> query_vectors = {
+        0.0F, 0.0F, 0.0F, 0.0F, 100.0F, 0.0F, 0.0F, 0.0F};
+    std::array<std::string, 2> query_paths = {"root/a/leaf", "root/b/leaf"};
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(2)
+                     ->Dim(PYRAMID_TEST_DIM)
+                     ->Float32Vectors(query_vectors.data())
+                     ->Paths(query_paths.data())
+                     ->Owner(false);
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 1;
+    request.params_str_ = R"({"pyramid":{"ef_search":20}})";
+
+    auto stats = vsag::JsonType::Parse(index->AnalyzeIndexBySearch(request));
+    REQUIRE(std::abs(stats["recall_query"].GetFloat() - 1.0F) < 1e-6F);
+    REQUIRE(std::abs(stats["avg_distance_query"].GetFloat() - 0.5F) < 1e-6F);
+
+    REQUIRE(index->Remove(std::vector<int64_t>{102}, vsag::RemoveMode::MARK_REMOVE) == 1);
+    stats = vsag::JsonType::Parse(index->AnalyzeIndexBySearch(request));
+    REQUIRE(std::abs(stats["recall_query"].GetFloat() - 1.0F) < 1e-6F);
+    REQUIRE(std::abs(stats["avg_distance_query"].GetFloat() - 50.0F) < 1e-6F);
+
+    request.mode_ = vsag::SearchMode::RANGE_SEARCH;
+    REQUIRE_THROWS(index->AnalyzeIndexBySearch(request));
+}
+
+TEST_CASE("Pyramid query analyzer includes graph duplicates in path ground truth",
+          "[ut][pyramid][analyzer]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = PYRAMID_TEST_DIM;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto external_param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "max_degree": 4,
+        "ef_construction": 8,
+        "graph_type": "nsw",
+        "no_build_levels": [0],
+        "index_min_size": 1,
+        "support_duplicate": true
+    })");
+    auto param = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
+    auto index = std::make_shared<vsag::Pyramid>(param, common_param);
+
+    std::array<float, PYRAMID_TEST_DIM* 4> vectors = {1.0F,
+                                                      2.0F,
+                                                      3.0F,
+                                                      4.0F,
+                                                      1.0F,
+                                                      2.0F,
+                                                      3.0F,
+                                                      4.0F,
+                                                      1.0F,
+                                                      2.0F,
+                                                      3.0F,
+                                                      4.0F,
+                                                      9.0F,
+                                                      8.0F,
+                                                      7.0F,
+                                                      6.0F};
+    std::array<int64_t, 4> ids = {100, 101, 102, 103};
+    std::array<std::string, 4> paths = {"tenant", "tenant", "tenant", "tenant"};
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(4)
+                    ->Dim(PYRAMID_TEST_DIM)
+                    ->Float32Vectors(vectors.data())
+                    ->Ids(ids.data())
+                    ->Paths(paths.data())
+                    ->Owner(false);
+    REQUIRE(index->Build(base).empty());
+    REQUIRE(index->Remove(std::vector<int64_t>{100}, vsag::RemoveMode::MARK_REMOVE) == 1);
+
+    auto query = MakePyramidDataset(vectors.data(), nullptr, paths.data(), 1);
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 1;
+    request.params_str_ = R"({"pyramid":{"ef_search":10}})";
+
+    auto stats = vsag::JsonType::Parse(index->AnalyzeIndexBySearch(request));
+    REQUIRE(std::abs(stats["recall_query"].GetFloat() - 1.0F) < 1e-6F);
+    REQUIRE(std::abs(stats["avg_distance_query"].GetFloat()) < 1e-6F);
+}
+
+TEST_CASE("Pyramid query analyzer supports a built root without query paths",
+          "[ut][pyramid][analyzer]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = PYRAMID_TEST_DIM;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto external_param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "max_degree": 4,
+        "ef_construction": 8,
+        "graph_type": "odescent",
+        "no_build_levels": [],
+        "index_min_size": 100
+    })");
+    auto param = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
+    auto index = std::make_shared<vsag::Pyramid>(param, common_param);
+
+    std::array<float, PYRAMID_TEST_DIM* 2> vectors = {
+        0.0F, 0.0F, 0.0F, 0.0F, 10.0F, 0.0F, 0.0F, 0.0F};
+    std::array<int64_t, 2> ids = {100, 101};
+    std::array<std::string, 2> paths = {"", ""};
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(2)
+                    ->Dim(PYRAMID_TEST_DIM)
+                    ->Float32Vectors(vectors.data())
+                    ->Ids(ids.data())
+                    ->Paths(paths.data())
+                    ->Owner(false);
+    REQUIRE(index->Build(base).empty());
+
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(PYRAMID_TEST_DIM)
+                     ->Float32Vectors(vectors.data())
+                     ->Owner(false);
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 1;
+    request.params_str_ = R"({"pyramid":{"ef_search":10}})";
+
+    auto stats = vsag::JsonType::Parse(index->AnalyzeIndexBySearch(request));
+    REQUIRE(std::abs(stats["recall_query"].GetFloat() - 1.0F) < 1e-6F);
+    REQUIRE(std::abs(stats["avg_distance_query"].GetFloat()) < 1e-6F);
+}
+
+TEST_CASE("Pyramid query analyzer selects an available ground truth code source",
+          "[ut][pyramid][raw_vector][analyzer]") {
+    const bool store_raw_vector = GENERATE(false, true);
+    CAPTURE(store_raw_vector);
+    constexpr int64_t dim = 4;
+    std::array<float, dim* 3> vectors = {
+        0.0F, 0.0F, 0.0F, 0.0F, 0.123456F, 0.234567F, 0.345678F, 0.456789F, 1.0F, 1.0F, 1.0F, 1.0F};
+    std::array<int64_t, 3> ids = {10, 11, 12};
+    std::array<std::string, 3> paths = {"leaf", "leaf", "leaf"};
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto external_param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "tq",
+        "precise_quantization_type": "rabitq",
+        "use_reorder": true,
+        "tq_chain": "mrle, rabitq",
+        "mrle_dim": 2,
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "max_degree": 4,
+        "ef_construction": 8,
+        "index_min_size": 4,
+        "no_build_levels": [0]
+    })");
+    external_param[vsag::STORE_RAW_VECTOR].SetBool(store_raw_vector);
+    auto param = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
+    auto pyramid_param = std::dynamic_pointer_cast<vsag::PyramidParameters>(param);
+    REQUIRE(pyramid_param != nullptr);
+    REQUIRE(pyramid_param->store_raw_vector == store_raw_vector);
+    REQUIRE((pyramid_param->raw_vector_param != nullptr) == store_raw_vector);
+    REQUIRE(pyramid_param->precise_codes_param == nullptr);
+    REQUIRE(pyramid_param->base_codes_param != nullptr);
+    REQUIRE(pyramid_param->base_codes_param->name == vsag::RABITQ_SPLIT_DATA_CELL);
+    auto index = std::make_shared<vsag::Pyramid>(param, common_param);
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(3)
+                    ->Dim(dim)
+                    ->Float32Vectors(vectors.data())
+                    ->Ids(ids.data())
+                    ->Paths(paths.data())
+                    ->Owner(false);
+    REQUIRE(index->Build(base).empty());
+
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->Float32Vectors(vectors.data() + dim)
+                     ->Paths(paths.data() + 1)
+                     ->Owner(false);
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 1;
+    request.params_str_ = R"({"pyramid":{"ef_search":10}})";
+
+    auto stats = vsag::JsonType::Parse(index->AnalyzeIndexBySearch(request));
+    REQUIRE(std::abs(stats["recall_query"].GetFloat() - 1.0F) < 1e-6F);
+    const auto avg_distance = stats["avg_distance_query"].GetFloat();
+    REQUIRE(std::isfinite(avg_distance));
+    if (store_raw_vector) {
+        REQUIRE(std::abs(avg_distance) < 1e-12F);
+    }
+}
+
 TEST_CASE("Pyramid promotes flat node at index minimum size", "[ut][pyramid]") {
     const bool split_rabitq = GENERATE(false, true);
     const bool build_all_at_once = GENERATE(false, true);
@@ -263,7 +508,53 @@ TEST_CASE("Pyramid promotes flat node at index minimum size", "[ut][pyramid]") {
     }
 }
 
-TEST_CASE("Pyramid MRLE split retains vectors for flat node promotion", "[ut][pyramid][MRLE]") {
+TEST_CASE("Pyramid SearchWithRequest reports reasoning for expected labels",
+          "[ut][pyramid][reasoning]") {
+    auto test_index = MakePyramidIndex(100);
+    const auto& index = test_index.index;
+    std::array<float, PYRAMID_TEST_DIM* 2> vectors = {
+        0.0F, 0.0F, 0.0F, 0.0F, 10.0F, 0.0F, 0.0F, 0.0F};
+    std::array<int64_t, 2> ids = {100, 101};
+    std::array<std::string, 2> paths = {"tenant", "tenant"};
+    REQUIRE(index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), 2)).empty());
+
+    auto query = MakePyramidDataset(vectors.data(), nullptr, paths.data(), 1);
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 1;
+    request.params_str_ = R"({"pyramid":{"ef_search":10}})";
+    request.expected_labels_ = {ids[0]};
+
+    auto result = index->SearchWithRequest(request);
+    REQUIRE(result != nullptr);
+    REQUIRE(result->GetIds()[0] == ids[0]);
+    REQUIRE(result->GetReasoning().find("1/1 expected labels found") != std::string::npos);
+    REQUIRE(result->GetReasoning().find("0 missed") != std::string::npos);
+
+    request.topk_ = 2;
+    request.expected_labels_ = {ids[0], ids[1]};
+    auto multi_result = index->SearchWithRequest(request);
+    REQUIRE(multi_result != nullptr);
+    REQUIRE(multi_result->GetDim() == 2);
+    REQUIRE(multi_result->GetReasoning().find("2/2 expected labels found") != std::string::npos);
+
+    request.threshold_ = 1.0F;
+    request.expected_labels_ = {ids[0]};
+    auto threshold_result = index->SearchWithRequest(request);
+    REQUIRE(threshold_result != nullptr);
+    REQUIRE(threshold_result->GetDim() == 1);
+    REQUIRE(threshold_result->GetIds()[0] == ids[0]);
+
+    request.expected_labels_.clear();
+    request.threshold_ = std::nullopt;
+    auto result_without_reasoning = index->SearchWithRequest(request);
+    REQUIRE(result_without_reasoning != nullptr);
+    REQUIRE(result_without_reasoning->GetIds()[0] == ids[0]);
+    REQUIRE(result_without_reasoning->GetReasoning().find("expected_analysis") ==
+            std::string::npos);
+}
+
+TEST_CASE("Pyramid MRLE split promotes flat nodes without raw vectors", "[ut][pyramid][MRLE]") {
     auto test_index = MakePyramidIndex(3, 4, false, false, true);
     const auto& index = test_index.index;
     std::vector<float> vectors = {
@@ -290,6 +581,42 @@ TEST_CASE("Pyramid MRLE split retains vectors for flat node promotion", "[ut][py
                 .empty());
 
     REQUIRE(GetPyramidSubindexCount(index, "graph_subindexes") == 1);
+    auto stats = vsag::JsonType::Parse(index->GetStats());
+    REQUIRE_FALSE(stats["sample_metrics_available"].GetBool());
+    REQUIRE(stats.Contains("sample_metrics_unavailable_reason"));
+    for (int64_t i = 0; i < 3; ++i) {
+        auto query =
+            MakePyramidDataset(vectors.data() + i * PYRAMID_TEST_DIM, nullptr, paths.data() + i, 1);
+        auto result =
+            index->KnnSearch(query, 1, R"({"pyramid":{"ef_search":10}})", vsag::FilterPtr{});
+        REQUIRE(result->GetDim() == 1);
+        REQUIRE(result->GetIds()[0] == ids[i]);
+    }
+}
+
+TEST_CASE("Pyramid MRLE split stores raw vectors when enabled", "[ut][pyramid][MRLE]") {
+    auto test_index = MakePyramidIndex(3, 1, false, false, true, false, false, true);
+    const auto& index = test_index.index;
+    std::vector<float> vectors = {
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        1.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        1.0F,
+        0.0F,
+        0.0F,
+    };
+    std::vector<int64_t> ids = {100, 101, 102};
+    std::vector<std::string> paths(3, "tenant");
+
+    REQUIRE(index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), 3)).empty());
+    auto stats = vsag::JsonType::Parse(index->GetStats());
+    REQUIRE(stats["sample_metrics_available"].GetBool());
     for (int64_t i = 0; i < 3; ++i) {
         std::array<float, PYRAMID_TEST_DIM> decoded{};
         index->GetVectorByInnerId(i, decoded.data());
@@ -394,4 +721,56 @@ TEST_CASE("Pyramid reports statistics for flat and graph leaves", "[ut][pyramid]
     REQUIRE(graph_statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() > 0);
     RequirePyramidSearchStatistics(
         graph_result, graph_statistics["distance_evaluations_by_phase"]["approximate"].GetUint64());
+}
+
+TEST_CASE("Pyramid exposes stored raw vectors", "[ut][pyramid][raw_vector]") {
+    constexpr int64_t count = 3;
+    const auto graph_type = GENERATE("nsw", "odescent");
+    std::array<float, count* PYRAMID_TEST_DIM> vectors = {
+        0.123456F,
+        0.234567F,
+        0.345678F,
+        0.456789F,
+        1.0F,
+        2.0F,
+        3.0F,
+        4.0F,
+        5.0F,
+        6.0F,
+        7.0F,
+        8.0F,
+    };
+    std::array<int64_t, count> ids = {10, 42, 1001};
+    std::array<std::string, count> paths = {"a", "b", "c"};
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = PYRAMID_TEST_DIM;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+
+    auto external_param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "sq8",
+        "store_raw_vector": true,
+        "max_degree": 4,
+        "ef_construction": 8,
+        "no_build_levels": [0, 1]
+    })");
+    external_param[vsag::PYRAMID_GRAPH_TYPE].SetString(graph_type);
+    auto index = std::make_shared<vsag::IndexImpl<vsag::Pyramid>>(external_param, common_param);
+    auto dataset = MakePyramidDataset(
+        vectors.data(), ids.data(), paths.data(), static_cast<int64_t>(ids.size()));
+
+    REQUIRE(index->Build(dataset).has_value());
+    auto restored = index->GetRawVectorByIds(ids.data(), count, nullptr);
+    REQUIRE(restored.has_value());
+    REQUIRE(std::equal(vectors.begin(), vectors.end(), restored.value()->GetFloat32Vectors()));
+
+    auto distance = index->CalcDistanceById(vectors.data(), ids[0], true);
+    REQUIRE(distance.has_value());
+    REQUIRE(distance.value() == 0.0F);
+
+    auto distances = index->CalcDistancesById(vectors.data(), ids.data(), count, true);
+    REQUIRE(distances.has_value());
+    REQUIRE(distances.value()->GetDistances()[0] == 0.0F);
 }

@@ -27,7 +27,7 @@ public:
     Load(argparse::ArgumentParser& parser);
 
     static EvalConfig
-    Load(YAML::Node& yaml_node, const eval_job& global_options);
+    Load(YAML::Node& yaml_node, const EvalJob& global_options);
 
     static void
     CheckKeyAndType(YAML::Node& yaml_node);
@@ -56,6 +56,7 @@ public:
     bool enable_memory{true};
     bool enable_latency{true};
     bool enable_percent_latency{true};
+    bool use_id_based_recall{false};
 
     EvalConfig() = default;
 };

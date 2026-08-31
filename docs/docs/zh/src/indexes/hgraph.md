@@ -85,6 +85,7 @@ auto result = index->KnnSearch(
 | `base_direct_read` / `precise_direct_read` | bool | `false` | 使用 `uring_io` 时，以 direct IO 打开对应文件而非经过页缓存 |
 | `hgraph_init_capacity` | int | `100` | 初始容量提示（不会限制最终规模） |
 | `persist_source_id` | bool | `false` | 序列化时保留 Source ID 元数据，使恢复后的索引仍可导出可复用的构建缓存 |
+| `use_conjugate_graph` | bool | `false` | 启用 `Feedback`/`Pretrain` 图增强；详见[图索引增强](../advanced/enhance_graph.md) |
 | `resize_increase_count_bit` | int | `10` | 扩容批次 slot 数的 `log2`，取值范围为 `1` 到 `31`。`1` 表示每次按 2 个 slot 对齐，`10` 表示按 1024 个 slot 对齐。较小取值减少预分配，但可能增加重分配次数。 |
 
 `use_reverse_edges` 面向需要快速检查入邻居、图分析或图维护算法的负载。维护反向邻接表会让边
@@ -97,7 +98,7 @@ auto result = index->KnnSearch(
 
 同时设置 `support_duplicate: true` 和 `deduplicate_storage: true` 后，重复向量会共享
 同一个物理编码槽位，但仍保留各自的标签。该选项目前仅支持使用 `graph_type: "nsw"` 的
-稠密向量 HGraph 索引；独立的 HNSW 索引以及 `graph_type: "odescent"` 均不支持。
+稠密向量 HGraph 索引；`graph_type: "odescent"` 不支持。
 
 启用存储去重后，暂不支持以下操作和配置：
 

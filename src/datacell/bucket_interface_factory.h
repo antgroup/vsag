@@ -37,4 +37,7 @@ MakeUringBucketDataCell(const BucketDataCellParamPtr& param, const IndexCommonPa
 BucketInterfacePtr
 MakeBufferBucketDataCell(const BucketDataCellParamPtr& param, const IndexCommonParam& common_param);
 
+BucketInterfacePtr
+MakeReaderBucketDataCell(const BucketDataCellParamPtr& param, const IndexCommonParam& common_param);
+
 }  // namespace vsag

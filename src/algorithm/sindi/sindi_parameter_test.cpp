@@ -103,7 +103,8 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
             "query_prune_ratio": 0.2,
             "n_candidate": 20,
             "term_prune_ratio": 0.1,
-            "term_retain_threshold": 100
+            "term_retain_threshold": 100,
+            "filter_callback_limit": 1000
         }
     })";
     auto search_param = std::make_shared<vsag::SINDISearchParameter>();
@@ -111,9 +112,11 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     search_param->FromJson(search_param_json);
     REQUIRE(search_param->term_prune_ratio == 0.1F);
     REQUIRE(search_param->term_retain_threshold == 100);
+    REQUIRE(search_param->filter_callback_limit == 1000);
     vsag::ParameterTest::TestToJson(search_param);
     REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("term_prune_ratio"));
     REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("term_retain_threshold"));
+    REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("filter_callback_limit"));
     REQUIRE_FALSE(search_param->ToJson()[INDEX_SINDI].Contains("term_prune"));
     REQUIRE_FALSE(search_param->ToJson()[INDEX_SINDI].Contains("use_term_lists_heap_insert"));
 
@@ -129,6 +132,35 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     legacy_search_param->FromJson(vsag::JsonType::Parse(legacy_search_param_str));
     REQUIRE_FALSE(
         legacy_search_param->ToJson()[INDEX_SINDI].Contains("use_term_lists_heap_insert"));
+}
+
+TEST_CASE("SINDI Filter Callback Limit Parameters", "[ut][SINDIParameter]") {
+    SECTION("uses unlimited default") {
+        SINDISearchParameter param;
+        param.FromJson(JsonType::Parse(R"({"sindi": {}})"));
+        REQUIRE(param.filter_callback_limit == DEFAULT_FILTER_CALLBACK_LIMIT);
+        REQUIRE(param.ToJson()[INDEX_SINDI][SPARSE_FILTER_CALLBACK_LIMIT].GetUint64() == 0);
+    }
+
+    SECTION("accepts zero and uint64 max") {
+        SINDISearchParameter param;
+        param.FromJson(JsonType::Parse(R"({"sindi": {"filter_callback_limit": 0}})"));
+        REQUIRE(param.filter_callback_limit == 0);
+
+        param.FromJson(
+            JsonType::Parse(R"({"sindi": {"filter_callback_limit": 18446744073709551615}})"));
+        REQUIRE(param.filter_callback_limit == std::numeric_limits<uint64_t>::max());
+    }
+
+    SECTION("rejects invalid values") {
+        for (const auto& invalid_param :
+             {R"({"sindi": {"filter_callback_limit": -1}})",
+              R"({"sindi": {"filter_callback_limit": 1.5}})",
+              R"({"sindi": {"filter_callback_limit": 18446744073709551616}})"}) {
+            SINDISearchParameter param;
+            REQUIRE_THROWS(param.FromJson(JsonType::Parse(invalid_param)));
+        }
+    }
 }
 
 TEST_CASE("SINDI Term Prune Parameters", "[ut][SINDIParameter]") {

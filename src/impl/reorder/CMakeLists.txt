@@ -15,6 +15,8 @@
 
 
 set (REORDER_SRC
+        bucket_reorder.cpp
+        bucket_reorder.h
         flatten_reorder.cpp
         flatten_reorder.h
         reorder.h

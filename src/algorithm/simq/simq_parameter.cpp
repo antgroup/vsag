@@ -29,6 +29,8 @@ static constexpr const char* SIMQ_SPLIT_START_IDX = "split_start_idx";
 static constexpr const char* SIMQ_RANDOM_SEED = "random_seed";
 static constexpr const char* SIMQ_COARSE_K = "coarse_k";
 static constexpr const char* SIMQ_RERANK_K = "rerank_k";
+static constexpr const char* SIMQ_SPLIT_DELAY_SECONDS = "split_delay_seconds";
+static constexpr const char* SIMQ_QUANTIZATION_TYPE = "quantization_type";
 
 void
 SIMQParameter::FromJson(const JsonType& json) {
@@ -52,6 +54,12 @@ SIMQParameter::FromJson(const JsonType& json) {
     if (json.Contains(SIMQ_RERANK_K)) {
         rerank_k = json[SIMQ_RERANK_K].GetInt();
     }
+    if (json.Contains(SIMQ_SPLIT_DELAY_SECONDS)) {
+        split_delay_seconds = json[SIMQ_SPLIT_DELAY_SECONDS].GetFloat();
+    }
+    if (json.Contains(SIMQ_QUANTIZATION_TYPE)) {
+        quantization_type = json[SIMQ_QUANTIZATION_TYPE].GetString();
+    }
 
     bool valid_init_cluster_ratio = init_cluster_ratio > 0.0F and init_cluster_ratio <= 1.0F;
     CHECK_ARGUMENT(valid_init_cluster_ratio, "simq: init_cluster_ratio must be in (0, 1]");
@@ -60,10 +68,20 @@ SIMQParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(valid_split_start_idx, "simq: split_start_idx must be in (1, max_cluster_size)");
     CHECK_ARGUMENT(coarse_k > 0, "simq: coarse_k must be > 0");
     CHECK_ARGUMENT(rerank_k > 0, "simq: rerank_k must be > 0");
+    CHECK_ARGUMENT(split_delay_seconds >= 0.0, "simq: split_delay_seconds must be >= 0");
 
     CHECK_ARGUMENT(json.Contains(BASE_CODES_KEY),
                    fmt::format("simq parameters must contain {}", BASE_CODES_KEY));
-    base_codes_param = CreateFlattenParam(json[BASE_CODES_KEY]);
+
+    // Inject quantization_type into base_codes JSON so MultiVectorDataCell
+    // picks up the right quantizer (defaults to fp32 if not specified).
+    auto base_json = json[BASE_CODES_KEY];
+    if (quantization_type != "fp32") {
+        JsonType quant_json;
+        quant_json[TYPE_KEY].SetString(quantization_type);
+        base_json[QUANTIZATION_PARAMS_KEY].SetJson(quant_json);
+    }
+    base_codes_param = CreateFlattenParam(base_json);
 }
 
 JsonType
@@ -77,6 +95,8 @@ SIMQParameter::ToJson() const {
     json[SIMQ_RANDOM_SEED].SetInt(random_seed);
     json[SIMQ_COARSE_K].SetInt(coarse_k);
     json[SIMQ_RERANK_K].SetInt(rerank_k);
+    json[SIMQ_SPLIT_DELAY_SECONDS].SetDouble(split_delay_seconds);
+    json[SIMQ_QUANTIZATION_TYPE].SetString(quantization_type);
     json[BASE_CODES_KEY].SetJson(base_codes_param->ToJson());
     return json;
 }

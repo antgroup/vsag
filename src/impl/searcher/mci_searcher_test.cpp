@@ -31,9 +31,9 @@ TEST_CASE("MCISearcher threshold results backfill past non-finite traversal seed
         JsonType::Parse(fmt::format(param_template, "fp32")));
     auto io_param = IOParameter::GetIOParameterByJson(
         JsonType::Parse(fmt::format(param_template, "memory_io")));
-    auto flatten =
-        std::make_shared<FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_IP>, MemoryIO>>(
-            quantizer_param, io_param, common);
+    auto flatten = std::make_shared<
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_IP>, FixedLayout<MemoryIO>>>(
+        quantizer_param, io_param, common);
     flatten->SetQuantizer(
         std::make_shared<FP32Quantizer<MetricType::METRIC_TYPE_IP>>(1, allocator.get()));
     flatten->SetIO(std::make_unique<MemoryIO>(allocator.get()));

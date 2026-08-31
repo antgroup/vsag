@@ -20,6 +20,39 @@
 
 namespace vsag {
 
+float
+FlattenIdDistanceProvider::QueryDistance(InnerIdType id, QueryContext* ctx) const {
+    float distance = 0.0F;
+    flatten_->QueryById(&distance, query_id_, &id, 1, ctx);
+    return distance;
+}
+
+void
+FlattenIdDistanceProvider::BatchQueryDistance(float* distances,
+                                              const InnerIdType* ids,
+                                              InnerIdType count,
+                                              QueryContext* ctx) const {
+    flatten_->QueryById(distances, query_id_, ids, count, ctx);
+}
+
+float
+FlattenIdDistanceProvider::PairwiseDistance(InnerIdType id1,
+                                            InnerIdType id2,
+                                            const ComputerInterfacePtr& /*computer*/) const {
+    return flatten_->ComputePairVectors(id1, id2);
+}
+
+ComputerInterfacePtr
+FlattenIdDistanceProvider::FactoryComputerById(InnerIdType /*id*/) const {
+    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                        "FlattenIdDistanceProvider cannot create a computer by vector ID");
+}
+
+void
+FlattenIdDistanceProvider::Prefetch(InnerIdType id) const {
+    flatten_->Prefetch(id);
+}
+
 BucketDistanceProvider::BucketDistanceProvider(std::shared_ptr<BucketInterface> bucket,
                                                BucketIdType bucket_id,
                                                ComputerInterfacePtr computer,

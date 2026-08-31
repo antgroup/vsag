@@ -38,6 +38,9 @@ const char* const BUILD_THREAD_COUNT_KEY = "build_thread_count";
 const char* const LABEL_REMAP_TYPE_KEY = "label_remap_type";
 const char* const BASE_CODES_KEY = "base_codes";
 const char* const PRECISE_CODES_KEY = "precise_codes";
+const char* const PRECISE_CODES_LAYOUT_KEY = "precise_codes_layout";
+const char* const PRECISE_CODES_LAYOUT_VALUE_FLAT = "flat";
+const char* const PRECISE_CODES_LAYOUT_VALUE_BUCKET = "bucket";
 const char* const STORE_RAW_VECTOR_KEY = "store_raw_vector";
 const char* const RAW_VECTOR_KEY = "raw_vector";
 const char* const ATTR_HAS_BUCKETS_KEY = "has_buckets";
@@ -57,6 +60,8 @@ const char* const HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY =
     "mci_incremental_join_ratio_threshold";
 const char* const HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY = "mci_incremental_added_mct";
 const char* const HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY = "mci_incremental_clique_max";
+const char* const PYRAMID_PERSIST_SOURCE_ID_KEY = "persist_source_id";
+const char* const PYRAMID_STORE_PATHS_KEY = "store_paths";
 const char* const LABEL_REMAP_TYPE_VALUE_ROBIN = "robin";
 const char* const LABEL_REMAP_TYPE_VALUE_PG = "pg";
 const char* const GRAPH_KEY = "graph";
@@ -131,6 +136,7 @@ const char* const SPARSE_QUERY_PRUNE_RATIO = "query_prune_ratio";
 const char* const SPARSE_DOC_PRUNE_RATIO = "doc_prune_ratio";
 const char* const SPARSE_TERM_PRUNE_RATIO = "term_prune_ratio";
 const char* const SPARSE_TERM_RETAIN_THRESHOLD = "term_retain_threshold";
+const char* const SPARSE_FILTER_CALLBACK_LIMIT = "filter_callback_limit";
 const char* const SPARSE_TERM_ID_LIMIT = "term_id_limit";
 const char* const SPARSE_WINDOW_SIZE = "window_size";
 const char* const SPARSE_DESERIALIZE_WITHOUT_FOOTER = "deserialize_without_footer";
@@ -168,6 +174,8 @@ const char* const IVF_PARTITION_STRATEGY_PARAMS_KEY = "partition_strategy";
 const char* const IVF_PARTITION_STRATEGY_TYPE_KEY = "partition_strategy_type";
 const char* const IVF_PARTITION_STRATEGY_TYPE_NEAREST = "ivf";
 const char* const IVF_PARTITION_STRATEGY_TYPE_GNO_IMI = "gno_imi";
+const char* const IVF_ROUTE_MAX_DEGREE_KEY = "route_max_degree";
+const char* const IVF_ROUTE_EF_CONSTRUCTION_KEY = "route_ef_construction";
 
 const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY = "first_order_buckets_count";
 const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY = "second_order_buckets_count";
@@ -213,8 +221,6 @@ const char* const SPARSE_N_CANDIDATE = "n_candidate";
 const char* const GRAPH_BUILD_THRESHOLD_KEY = "graph_build_threshold";
 const char* const IVF_SEARCH_PARAM_EF_SEARCH = "ef_search";
 
-const char* const DISKANN_SUPPORT_CALC_DISTANCE_BY_ID = "support_calc_distance_by_id";
-
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_HGRAPH", INDEX_TYPE_HGRAPH},
     {"INDEX_TYPE_IVF", INDEX_TYPE_IVF},
@@ -228,6 +234,9 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"GRAPH_KEY", GRAPH_KEY},
     {"BASE_CODES_KEY", BASE_CODES_KEY},
     {"PRECISE_CODES_KEY", PRECISE_CODES_KEY},
+    {"PRECISE_CODES_LAYOUT_KEY", PRECISE_CODES_LAYOUT_KEY},
+    {"PRECISE_CODES_LAYOUT_VALUE_FLAT", PRECISE_CODES_LAYOUT_VALUE_FLAT},
+    {"PRECISE_CODES_LAYOUT_VALUE_BUCKET", PRECISE_CODES_LAYOUT_VALUE_BUCKET},
     {"HGRAPH_SUPPORT_DUPLICATE", HGRAPH_SUPPORT_DUPLICATE},
     {"HGRAPH_DEDUPLICATE_STORAGE", HGRAPH_DEDUPLICATE_STORAGE},
     {"HGRAPH_DUPLICATE_DISTANCE_THRESHOLD", HGRAPH_DUPLICATE_DISTANCE_THRESHOLD},
@@ -289,6 +298,8 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"IVF_PARTITION_STRATEGY_PARAMS_KEY", IVF_PARTITION_STRATEGY_PARAMS_KEY},
     {"IVF_PARTITION_STRATEGY_TYPE_KEY", IVF_PARTITION_STRATEGY_TYPE_KEY},
     {"IVF_PARTITION_STRATEGY_TYPE_NEAREST", IVF_PARTITION_STRATEGY_TYPE_NEAREST},
+    {"IVF_ROUTE_MAX_DEGREE_KEY", IVF_ROUTE_MAX_DEGREE_KEY},
+    {"IVF_ROUTE_EF_CONSTRUCTION_KEY", IVF_ROUTE_EF_CONSTRUCTION_KEY},
     {"IVF_TRAIN_TYPE_KMEANS", IVF_TRAIN_TYPE_KMEANS},
     {"BUILD_THREAD_COUNT_KEY", BUILD_THREAD_COUNT_KEY},
     {"LABEL_REMAP_TYPE_KEY", LABEL_REMAP_TYPE_KEY},
@@ -301,6 +312,8 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"DEDUPLICATE_STORAGE", DEDUPLICATE_STORAGE},
     {"HOLD_MOLDS", HOLD_MOLDS},
     {"HGRAPH_PERSIST_SOURCE_ID_KEY", HGRAPH_PERSIST_SOURCE_ID_KEY},
+    {"PYRAMID_PERSIST_SOURCE_ID_KEY", PYRAMID_PERSIST_SOURCE_ID_KEY},
+    {"PYRAMID_STORE_PATHS_KEY", PYRAMID_STORE_PATHS_KEY},
     {"IVF_PARTITION_STRATEGY_TYPE_GNO_IMI", IVF_PARTITION_STRATEGY_TYPE_GNO_IMI},
     {"STORE_RAW_VECTOR_KEY", STORE_RAW_VECTOR_KEY},
     {"RAW_VECTOR_KEY", RAW_VECTOR_KEY},

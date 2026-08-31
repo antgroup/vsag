@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include <iostream>
+#include <mutex>
 
 #include "nlohmann/json.hpp"
 #include "vsag/logger.h"
@@ -31,17 +32,26 @@ public:
     Allocate(uint64_t size) override {
         vsag::Options::Instance().logger()->Debug("allocate " + std::to_string(size) + " bytes.");
         auto addr = (void*)malloc(size);
-        sizes_[addr] = size;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            sizes_[addr] = size;
+        }
         return addr;
     }
 
     void
     Deallocate(void* p) override {
-        if (sizes_.find(p) == sizes_.end())
-            return;
-        vsag::Options::Instance().logger()->Debug("deallocate " + std::to_string(sizes_[p]) +
-                                                  " bytes.");
-        sizes_.erase(p);
+        uint64_t size = 0;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            auto iter = sizes_.find(p);
+            if (iter == sizes_.end()) {
+                return;
+            }
+            size = iter->second;
+            sizes_.erase(iter);
+        }
+        vsag::Options::Instance().logger()->Debug("deallocate " + std::to_string(size) + " bytes.");
         return free(p);
     }
 
@@ -49,12 +59,16 @@ public:
     Reallocate(void* p, uint64_t size) override {
         vsag::Options::Instance().logger()->Debug("reallocate " + std::to_string(size) + " bytes.");
         auto addr = (void*)realloc(p, size);
-        sizes_.erase(p);
-        sizes_[addr] = size;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            sizes_.erase(p);
+            sizes_[addr] = size;
+        }
         return addr;
     }
 
 private:
+    std::mutex mutex_;
     std::unordered_map<void*, uint64_t> sizes_;
 };
 

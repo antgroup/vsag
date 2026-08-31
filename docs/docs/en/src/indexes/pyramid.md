@@ -102,6 +102,8 @@ Build-time parameters live under `index_param`.
 | `fast_encode_rabitq_rounds` | int | `6` | Fast RaBitQ refinement rounds in `[1, 32]`. |
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | Base and reorder storage backends; `uring_io` is available in builds with liburing. |
 | `base_file_path` / `precise_file_path` | string | — | Required for disk-backed storage such as `buffer_io`, `async_io`, `uring_io`, or `mmap_io`. |
+| `store_raw_vector` | bool | `false` | Preserve an FP32 copy for `GetRawVectorByIds` and precise distance-by-id calculations. |
+| `store_paths` | bool | `false` | Top-level switch that preserves the original paths supplied to `Build` and `Add` so `GetDataByIdsWithFlag` can return them when `DATA_FLAG_PATH` is selected. It applies to every configured hierarchy and cannot be overridden per hierarchy. |
 | `index_min_size` | int | `0` | Minimum sub-index size; smaller groups fall back to scan. |
 | `support_duplicate` | bool | `false` | Allow duplicate ids. |
 | `build_thread_count` | int | `1` | Threads used for parallel build. |
@@ -121,9 +123,9 @@ Set all five parameters together to enable RaBitQ x+y split storage and reorderi
 }
 ```
 
-Because split codes cannot be decoded back to the input vector, Pyramid also retains an internal
-FP32 copy for incremental flat-to-graph promotion and analyzer sampling. Search distances still use
-the split codes; the FP32 copy adds `count * dim * sizeof(float)` bytes of vector storage.
+Pyramid uses split-code code-to-code distances for incremental flat-to-graph promotion, so it does
+not retain an internal FP32 copy by default. Set `store_raw_vector` to `true` at build time when
+raw-vector access and complete analyzer metrics are required.
 
 ### MRLE with split RaBitQ
 
@@ -143,10 +145,14 @@ them as split RaBitQ codes:
 ```
 
 The 3-bit filter planes are used for graph traversal and the 5-bit supplement planes for
-reordering; both encode the same truncated vector. Pyramid reorders from the split base datacell
-and retains original FP32 vectors for graph promotion and statistics. The raw-vector copy adds
-storage, and truncation can reduce recall unless the embedding model was trained for prefix
-dimensions.
+reordering; both encode the same truncated vector. Pyramid uses split code-to-code distances for
+graph promotion and does not retain the original FP32 vectors. Metrics that require decodable
+vectors are marked unavailable unless `store_raw_vector` was enabled at build time. Truncation can
+reduce recall unless the embedding model was trained for prefix dimensions.
+
+## Build cache
+
+`ExportCache` captures per-hierarchy, per-node NSW graph seeds and `ImportCache` makes them available to a later `Build`. Cache data uses the index cache payload format, not the streaming index serialization format. Set `persist_source_id: true` before footer-serializing an index whose cache will be reused, and provide a unique `Dataset::SourceID` for every vector in both builds. Cache warm builds apply only to `graph_type: "nsw"`; ODescent, duplicate-ID mode, missing source IDs, and duplicate source IDs automatically fall back to a normal cold build. `ef_construction` is not an eligibility condition for the cache path. Fully restored cached graph rows are retained, while cache misses are constructed from the current vectors.
 
 ## Search parameters
 
@@ -155,6 +161,7 @@ Search-time parameters live under the `pyramid` sub-object:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `ef_search` | int | `100` | Candidate list size for the leaf-level graph search. |
+| `hops_limit` | int | unlimited | Hard cap on hops for root-graph KNN search; ignored when it is not greater than `ef_search`. |
 | `subindex_ef_search` | int | `50` | Candidate list size used when traversing intermediate sub-graphs on the path. |
 | `hierarchies` | string[] | `[]` | Select which hierarchy to search. Empty means use the default (unnamed) hierarchy. |
 | `hierarchy_op` | string | `"single"` | How to combine results across hierarchies: `single` (search one hierarchy), `union`, or `intersection`. **Note:** `union` and `intersection` are not yet implemented — setting them will cause `KnnSearch`/`RangeSearch` to return an error. |
@@ -230,6 +237,29 @@ base->NumElements(n)
 index->Build(base);
 ```
 
+### Retrieving paths by ID
+
+Set the top-level build parameter `store_paths` to `true` to retain the original paths for ID-based
+retrieval. Select `DATA_FLAG_PATH` in `GetDataByIdsWithFlag`; the returned paths follow the requested
+ID order. Use `GetPaths()` for the default unnamed hierarchy and `GetPaths(hierarchy_name)` for a
+named hierarchy:
+
+```cpp
+int64_t requested_ids[] = {product_id_b, product_id_a};
+auto data = index->GetDataByIdsWithFlag(
+    requested_ids, 2, DATA_FLAG_ID | DATA_FLAG_PATH).value();
+
+const std::string* site_paths = data->GetPaths("site");
+const std::string* category_paths = data->GetPaths("category");
+```
+
+`GetDataByIds` and `GetDataByIdsWithFlag` calls without `DATA_FLAG_PATH` do not attach path arrays.
+Selecting `DATA_FLAG_PATH` while `store_paths` is `false` returns an invalid-argument error. When
+path storage is enabled, a hierarchy is included only if every requested ID has a recorded path in
+that hierarchy. If even one requested ID was built or added without that hierarchy's path, its
+getter returns `nullptr`; other hierarchies whose requested paths are complete are still returned.
+In single-hierarchy mode, the same completeness rule applies to `GetPaths()`.
+
 ### Searching a specific hierarchy
 
 Specify which hierarchy to search via `"hierarchies"` in the search parameters.
@@ -276,8 +306,11 @@ auto result = index->RangeSearch(
 
 ### Serialize & Deserialize
 
-Multi-hierarchy indexes serialize and deserialize transparently. The serialized
-format includes all hierarchy names and their graph structures:
+Multi-hierarchy indexes serialize and deserialize transparently. The serialized format includes
+all hierarchy names and their graph structures. With `store_paths: true`, both regular and
+streaming serialization also persist the retained original paths, making them available through
+`GetDataByIdsWithFlag` after deserialization. With the default `false`, the graph hierarchy is
+persisted but the original per-ID paths are not:
 
 ```cpp
 // Serialize
@@ -301,8 +334,12 @@ If you don't need path-based scoping, [HGraph](hgraph.md) is simpler and general
 faster.
 
 Use [Index Analysis](../resources/analyze_index.md) to inspect Pyramid tree structure,
-per-subindex quality, sampled base recall, and duplicate ratios reported by `GetStats()`. Pyramid
-does not currently expose query-driven metrics through `AnalyzeIndexBySearch`.
+per-subindex quality, sampled base recall, and duplicate ratios reported by `GetStats()`.
+`AnalyzeIndexBySearch` also reports path-scoped query recall, distance, latency, and, when reorder
+is enabled, quantization metrics. Its query dataset must carry the same default or named-hierarchy
+paths required by `KnnSearch`; when paths are required or supplied for a batched dataset, provide
+one path per query. The `analyze_index` tool cannot currently load hierarchy paths from its dense
+query file, so use the C++ API for path-scoped dynamic analysis.
 
 ## Mark remove
 

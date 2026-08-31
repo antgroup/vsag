@@ -76,6 +76,8 @@ Build-time parameters live under `index_param`. See
 | `first_order_buckets_count` | int | `10` | First-level count (effective for `gno_imi`) |
 | `second_order_buckets_count` | int | `10` | Second-level count (effective for `gno_imi`) |
 | `ivf_train_type` | string | `"kmeans"` | Centroid training: `kmeans` or `random` |
+| `route_max_degree` | int | `64` | Routing HGraph maximum degree (effective for `ivf`) |
+| `route_ef_construction` | int | `300` | Routing HGraph construction search breadth (effective for `ivf`) |
 | `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` — see the [Quantization chapter](../quantization/README.md) for per-quantizer details |
 | `base_pq_dim` | int | `1` | PQ subspaces (required with `pq` / `pqfs`) |
 | `rabitq_pca_dim` | int | `0` | Optional PCA preprocessing dimension for `base_quantization_type: "rabitq"` |
@@ -88,9 +90,34 @@ Build-time parameters live under `index_param`. See
 | `fast_encode_rabitq_rounds` | int | `6` | CAQ adjustment rounds; allowed range is `[1, 32]` |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse scan |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer used for reordering (with `use_reorder: true`) |
+| `precise_codes_layout` | string | `"flat"` | Storage layout for precise codes: `"flat"` keeps the legacy one-code-per-vector layout; `"bucket"` stores the precise code in the same bucket and offset as its basic posting |
 | `base_io_type` | string | `"memory_io"` | Storage backend for coarse codes; supports `uring_io` when built with liburing |
 | `precise_io_type` | string | `"block_memory_io"` | Storage backend for precise codes (`memory_io`, `block_memory_io`, `mmap_io`, `buffer_io`, `async_io`, `uring_io`, `reader_io`) |
 | `precise_file_path` | string | `""` | File path when the precise IO type is disk-backed |
+
+`precise_codes_layout: "bucket"` requires `use_reorder: true`. It supports
+`memory_io`, `block_memory_io`, `buffer_io`, `async_io`, and `uring_io`
+(when io_uring is available).
+`mmap_io` and `pqfs` precise quantization are not supported. The bucket layout currently requires
+`buckets_per_data: 1`; configurations that assign one vector to multiple buckets are rejected.
+
+For both `flat` and `bucket` layouts, serialized precise codes can be loaded read-only from an
+external `Reader`. Pass `precise_io_type: "reader_io"` and `precise_reader` to `Index::Load`.
+The reader must expose exactly the `high_precision_codes` block payload for `flat`, or the
+`ivf_precise_bucket` block payload for `bucket`. `reader_io` uses the normal read cache when
+`precise_enable_read_cache` is enabled.
+
+```cpp
+vsag::LoadParameters load_parameters;
+load_parameters.Set("precise_io_type", "reader_io")
+    .Set("precise_enable_read_cache", true)
+    .Set("precise_cache_total_size", 256ULL * 1024 * 1024)
+    .SetReader("precise_reader", precise_codes_reader);
+auto loaded = vsag::Index::Load(stream, load_parameters).value();
+```
+
+`reader_io` is a load-and-query placement policy. Build the index with a writable precise IO,
+serialize it, and then use the external reader when loading it for search.
 
 A rule of thumb for `buckets_count` is `sqrt(N)` to `4 * sqrt(N)` where `N` is the
 corpus size.

@@ -54,9 +54,7 @@ BufferIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             fmt::format("write bytes {} less than {}", ret, size));
     }
-    if (size + offset > this->size_) {
-        this->size_ = size + offset;
-    }
+    this->PublishSize(size + offset);
 }
 
 void

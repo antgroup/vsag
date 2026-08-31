@@ -46,6 +46,9 @@ BucketInterface::MakeInstance(const BucketDataCellParamPtr& param,
     if (io_type_name == IO_TYPE_VALUE_BUFFER_IO) {
         return MakeBufferBucketDataCell(param, common_param);
     }
+    if (io_type_name == IO_TYPE_VALUE_READER_IO) {
+        return MakeReaderBucketDataCell(param, common_param);
+    }
     return nullptr;
 }
 }  // namespace vsag

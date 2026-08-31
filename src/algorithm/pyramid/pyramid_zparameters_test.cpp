@@ -146,6 +146,35 @@ ParsePyramidWithHierarchies(const nlohmann::json& hierarchies) {
     return param;
 }
 
+TEST_CASE("Pyramid persist_source_id parameter", "[ut][PyramidParameters]") {
+    PyramidDefaultParam default_param;
+    auto param_json = vsag::JsonType::Parse(generate_pyramid(default_param));
+    auto param = std::make_shared<vsag::PyramidParameters>();
+    param->FromJson(param_json);
+    REQUIRE_FALSE(param->persist_source_id);
+
+    param_json["persist_source_id"].SetBool(true);
+    param->FromJson(param_json);
+    REQUIRE(param->persist_source_id);
+    REQUIRE(param->ToJson()["persist_source_id"].GetBool());
+}
+
+TEST_CASE("Pyramid store_paths parameter", "[ut][PyramidParameters]") {
+    PyramidDefaultParam default_param;
+    auto param_json = vsag::JsonType::Parse(generate_pyramid(default_param));
+    auto param = std::make_shared<vsag::PyramidParameters>();
+    param->FromJson(param_json);
+
+    REQUIRE_FALSE(param->store_paths);
+    REQUIRE_FALSE(param->ToJson()["store_paths"].GetBool());
+
+    param_json["store_paths"].SetBool(true);
+    param->FromJson(param_json);
+
+    REQUIRE(param->store_paths);
+    REQUIRE(param->ToJson()["store_paths"].GetBool());
+}
+
 TEST_CASE("Pyramid Hierarchy Parameters Test", "[ut][PyramidParameters][hierarchy]") {
     SECTION("parse string and object hierarchy definitions") {
         auto param = ParsePyramidWithHierarchies(
@@ -283,6 +312,18 @@ TEST_CASE("Pyramid Parameters CheckCompatibility", "[ut][PyramidParameter][Check
     TEST_COMPATIBILITY_CASE("different index min size", index_min_size, 500, 1500, false);
     TEST_COMPATIBILITY_CASE("different support duplicate", support_duplicate, false, true, false);
 
+    SECTION("different store_paths") {
+        PyramidDefaultParam default_param;
+        auto param1 = std::make_shared<vsag::PyramidParameters>();
+        auto param2 = std::make_shared<vsag::PyramidParameters>();
+        param1->FromString(generate_pyramid(default_param));
+        param2->FromString(generate_pyramid(default_param));
+        param2->store_paths = true;
+
+        REQUIRE_FALSE(param1->CheckCompatibility(param2));
+        REQUIRE_FALSE(param2->CheckCompatibility(param1));
+    }
+
     SECTION("same hierarchies in different order") {
         auto param1 = ParsePyramidWithHierarchies(
             nlohmann::json::array({{{"name", "site"}, {"no_build_levels", {0, 1}}},
@@ -388,7 +429,7 @@ TEST_CASE("Pyramid Search Hierarchy Parameters Test",
     }
 }
 
-TEST_CASE("Pyramid maps support_duplicate to graph parameter", "[ut][PyramidParameters]") {
+TEST_CASE("Pyramid maps external parameters", "[ut][PyramidParameters]") {
     auto param = vsag::JsonType::Parse(R"({
         "base_quantization_type": "fp32",
         "base_io_type": "memory_io",
@@ -402,6 +443,8 @@ TEST_CASE("Pyramid maps support_duplicate to graph parameter", "[ut][PyramidPara
         "ef_construction": 100,
         "index_min_size": 0,
         "support_duplicate": true,
+        "persist_source_id": true,
+        "store_paths": true,
         "hierarchies": [
             "site",
             {"name": "taxonomy", "no_build_levels": [0, 2]}
@@ -417,6 +460,8 @@ TEST_CASE("Pyramid maps support_duplicate to graph parameter", "[ut][PyramidPara
 
     REQUIRE(typed_param != nullptr);
     REQUIRE(typed_param->support_duplicate);
+    REQUIRE(typed_param->persist_source_id);
+    REQUIRE(typed_param->store_paths);
     REQUIRE(typed_param->graph_param->support_duplicate_);
     REQUIRE(typed_param->has_hierarchies);
     REQUIRE(typed_param->hierarchies.size() == 2);
@@ -476,8 +521,8 @@ TEST_CASE("Pyramid maps RaBitQ x+y split params", "[ut][PyramidParameters]") {
     REQUIRE(typed_param->use_reorder);
     REQUIRE(typed_param->reorder_source == std::string("base"));
     REQUIRE(typed_param->precise_codes_param == nullptr);
-    REQUIRE(typed_param->store_raw_vector);
-    REQUIRE(typed_param->raw_vector_param != nullptr);
+    REQUIRE_FALSE(typed_param->store_raw_vector);
+    REQUIRE(typed_param->raw_vector_param == nullptr);
     const auto base_json = typed_param->base_codes_param->ToJson();
     REQUIRE(base_json["codes_type"].GetString() == std::string("rabitq_split"));
     REQUIRE(base_json["io_params"]["type"].GetString() == std::string("block_memory_io"));
@@ -515,16 +560,40 @@ TEST_CASE("Pyramid maps MRLE RaBitQ split to base reorder", "[ut][PyramidParamet
     REQUIRE(typed_param != nullptr);
     REQUIRE(typed_param->reorder_source == std::string("base"));
     REQUIRE(typed_param->precise_codes_param == nullptr);
-    REQUIRE(typed_param->store_raw_vector);
-    REQUIRE(typed_param->raw_vector_param != nullptr);
+    REQUIRE_FALSE(typed_param->store_raw_vector);
+    REQUIRE(typed_param->raw_vector_param == nullptr);
     const auto base_json = typed_param->base_codes_param->ToJson();
-    const auto raw_json = typed_param->raw_vector_param->ToJson();
     REQUIRE(base_json["codes_type"].GetString() == std::string("rabitq_split"));
     REQUIRE(base_json["quantization_params"]["type"].GetString() == std::string("tq"));
     REQUIRE(base_json["quantization_params"]["tq_chain"].GetString() == std::string("mrle,rabitq"));
     REQUIRE(base_json["quantization_params"]["mrle_dim"].GetInt() == 64);
     REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_filter"].GetInt() == 3);
     REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_base"].GetInt() == 8);
+}
+
+TEST_CASE("Pyramid maps explicit raw-vector storage for MRLE RaBitQ split",
+          "[ut][PyramidParameters][MRLE]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "tq",
+        "tq_chain": "mrle, rabitq",
+        "mrle_dim": 64,
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "use_reorder": true,
+        "store_raw_vector": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::PyramidParameters>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->store_raw_vector);
+    REQUIRE(typed_param->raw_vector_param != nullptr);
+    const auto raw_json = typed_param->raw_vector_param->ToJson();
     REQUIRE(raw_json["quantization_params"]["type"].GetString() == std::string("fp32"));
 }
 
@@ -633,4 +702,19 @@ TEST_CASE("Pyramid parses RaBitQ split search parameters", "[ut][PyramidParamete
             "rabitq_error_rate": 0.0
         }
     })"));
+}
+
+TEST_CASE("Pyramid parses hops limit search parameter", "[ut][PyramidParameters]") {
+    auto default_params =
+        vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":100}})");
+    REQUIRE(default_params.hops_limit == std::numeric_limits<uint32_t>::max());
+
+    auto explicit_params = vsag::PyramidSearchParameters::FromJson(
+        R"({"pyramid":{"ef_search":100,"hops_limit":200}})");
+    REQUIRE(explicit_params.hops_limit == 200);
+
+    REQUIRE_THROWS(vsag::PyramidSearchParameters::FromJson(
+        R"({"pyramid":{"ef_search":100,"hops_limit":-1}})"));
+    REQUIRE_THROWS(vsag::PyramidSearchParameters::FromJson(
+        R"({"pyramid":{"ef_search":100,"hops_limit":4294967296}})"));
 }

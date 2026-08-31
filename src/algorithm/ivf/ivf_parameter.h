@@ -46,8 +46,8 @@ public:
 public:
     BucketDataCellParamPtr bucket_param{nullptr};
     IVFPartitionStrategyParametersPtr ivf_partition_strategy_parameter{nullptr};
+    std::string precise_codes_layout{PRECISE_CODES_LAYOUT_VALUE_FLAT};
     BucketIdType buckets_per_data{1};
-    int64_t train_sample_count{65536L};
     GraphInterfaceParamPtr graph_param{nullptr};
     int64_t graph_build_threshold{0};
 };

@@ -142,7 +142,10 @@ TestIndex::TestContinueAddIgnoreRequire(const TestIndex::IndexPtr& index,
         ->Paths(dataset->base_->GetPaths())
         ->Float32Vectors(dataset->base_->GetFloat32Vectors())
         ->Owner(false);
-    index->Build(temp_dataset);
+    auto build_result = index->Build(temp_dataset);
+    if (not build_result.has_value()) {
+        return;
+    }
     for (uint64_t j = temp_count; j < base_count; ++j) {
         auto data_one = vsag::Dataset::Make();
         data_one->Dim(dim)
@@ -152,6 +155,9 @@ TestIndex::TestContinueAddIgnoreRequire(const TestIndex::IndexPtr& index,
             ->Float32Vectors(dataset->base_->GetFloat32Vectors() + j * dim)
             ->Owner(false);
         auto add_index = index->Add(data_one);
+        if (not add_index.has_value()) {
+            return;
+        }
     }
 }
 

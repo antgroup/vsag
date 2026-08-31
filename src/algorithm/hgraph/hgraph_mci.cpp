@@ -23,9 +23,14 @@
 #include <vector>
 
 #include "../mci/mci_builder.h"
+#include "datacell/graph_interface.h"
+#include "datacell/sparse_graph_datacell_parameter.h"
 #include "hgraph.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/logger/logger.h"
+#include "impl/odescent/odescent_graph_builder.h"
+#include "impl/odescent/odescent_graph_parameter.h"
+#include "index_common_param.h"
 
 namespace vsag {
 namespace {
@@ -51,23 +56,14 @@ collect_seed_inner_ids(const FilterPtr& filter,
         return inner_ids;
     }
 
-    const auto target_count = std::min<uint64_t>(seed_count, static_cast<uint64_t>(valid_count));
-    inner_ids.reserve(target_count);
-    UnorderedSet<InnerIdType> selected_ids(allocator);
-    selected_ids.reserve(target_count);
-    auto try_add_label = [&](uint64_t offset) {
+    const auto sampled_count = std::min<uint64_t>(seed_count, static_cast<uint64_t>(valid_count));
+    inner_ids.reserve(sampled_count);
+    for (uint64_t i = 0; i < sampled_count; ++i) {
+        const auto offset = i * static_cast<uint64_t>(valid_count) / sampled_count;
         auto [found, inner_id] = label_table->TryGetIdByLabel(valid_labels[offset]);
-        if (found and selected_ids.emplace(inner_id).second) {
+        if (found) {
             inner_ids.push_back(inner_id);
         }
-    };
-    for (uint64_t i = 0; i < target_count; ++i) {
-        try_add_label(i * static_cast<uint64_t>(valid_count) / target_count);
-    }
-    for (uint64_t offset = 0;
-         offset < static_cast<uint64_t>(valid_count) and inner_ids.size() < target_count;
-         ++offset) {
-        try_add_label(offset);
     }
     std::sort(inner_ids.begin(), inner_ids.end());
     inner_ids.erase(std::unique(inner_ids.begin(), inner_ids.end()), inner_ids.end());
@@ -569,7 +565,7 @@ HGraph::try_mci_search(const SearchRequest& request,
     result.seed_count = seed_inner_ids.size();
     mci_param.seed_count = result.seed_count;
     mci_param.seed_inner_ids = &seed_inner_ids;
-    if (bitset_seed_source and seed_inner_ids.empty()) {
+    if (seed_inner_ids.empty()) {
         return result;
     }
 
@@ -682,6 +678,64 @@ build_mci_knn_graph(uint64_t total,
     return graph;
 }
 
+// Build the MCI KNN candidate graph with a dedicated ODescent graph.
+MCIKNNGraph
+build_mci_knn_graph_by_odescent(const FlattenInterfacePtr& build_codes,
+                                uint64_t total,
+                                uint64_t mcs,
+                                float alpha,
+                                MetricType metric,
+                                DataTypes data_type,
+                                int64_t dim,
+                                int64_t extra_info_size,
+                                const std::shared_ptr<SafeThreadPool>& thread_pool,
+                                Allocator* allocator) {
+    MCIKNNGraph graph(allocator);
+    graph.total = total;
+    if (total <= 1) {
+        return graph;
+    }
+
+    const auto candidate_limit = std::min<uint64_t>(mcs, total - 1);
+    auto graph_param = std::make_shared<SparseGraphDatacellParameter>();
+    graph_param->max_degree_ = candidate_limit;
+    graph_param->support_delete_ = false;
+    graph.row_stride = candidate_limit;
+    graph.neighbors.assign(total * candidate_limit, total);
+    graph.counts.assign(total, 0);
+
+    IndexCommonParam graph_common_param;
+    graph_common_param.metric_ = metric;
+    graph_common_param.data_type_ = data_type;
+    graph_common_param.dim_ = dim;
+    graph_common_param.extra_info_size_ = extra_info_size;
+    graph_common_param.thread_pool_ = thread_pool;
+    graph_common_param.allocator_ = std::shared_ptr<Allocator>(allocator, [](Allocator*) {});
+    auto graph_storage = GraphInterface::MakeInstance(graph_param, graph_common_param);
+
+    auto odescent_param = std::make_shared<ODescentParameter>();
+    odescent_param->max_degree = static_cast<int64_t>(candidate_limit);
+    odescent_param->alpha = alpha;
+    odescent_param->sample_rate = 0.2F;
+    odescent_param->turn = 30;
+    odescent_param->min_in_degree = 1;
+    ODescent odescent_builder(odescent_param, build_codes, allocator, thread_pool.get());
+    odescent_builder.Build();
+    odescent_builder.SaveGraph(graph_storage);
+
+    for (InnerIdType inner_id = 0; inner_id < total; ++inner_id) {
+        Vector<InnerIdType> neighbors(allocator);
+        graph_storage->GetNeighbors(inner_id, neighbors);
+        std::sort(neighbors.begin(), neighbors.end());
+        neighbors.erase(std::unique(neighbors.begin(), neighbors.end()), neighbors.end());
+        const auto count = std::min<uint64_t>(neighbors.size(), candidate_limit);
+        graph.counts[inner_id] = static_cast<uint32_t>(count);
+        auto* row = graph.neighbors.data() + static_cast<uint64_t>(inner_id) * graph.row_stride;
+        std::copy_n(neighbors.data(), count, row);
+    }
+    return graph;
+}
+
 // Convert selected cliques into the compact clique-member and node-to-clique layout.
 void
 // NOLINTNEXTLINE(readability-identifier-naming)
@@ -735,18 +789,21 @@ HGraph::build_mci_clique_index(const void* vectors) {
         return;
     }
 
-    logger::info("hgraph mci knn graph build started, total={}, mcs={}, knng_path={}",
+    logger::info("hgraph mci knn graph build started, total={}, mcs={}, source={}, knng_path={}",
                  total,
                  mci_parameters_.mcs,
+                 mci_parameters_.knng_source,
                  mci_parameters_.knng_path);
     const auto precise_codes = this->get_precise_codes();
     CHECK_ARGUMENT(precise_codes != nullptr, "hgraph mci requires available vector codes");
+    const bool use_hgraph_knng = mci_parameters_.knng_path.empty() and
+                                 mci_parameters_.knng_source == HGRAPH_MCI_KNNG_SOURCE_HGRAPH;
     const auto worker_count = std::max<uint64_t>(
         1, std::min<uint64_t>(static_cast<uint64_t>(this->build_thread_count_), total));
     Vector<Vector<float>> decoded_queries(this->allocator_);
     const float* contiguous_vectors = nullptr;
     uint64_t contiguous_stride = 0;
-    if (mci_parameters_.knng_path.empty()) {
+    if (use_hgraph_knng) {
         if (vectors == nullptr) {
             CHECK_ARGUMENT(this->data_type_ == DataTypes::DATA_TYPE_FLOAT,
                            "hgraph mci requires source vectors for non-float input");
@@ -792,12 +849,27 @@ HGraph::build_mci_clique_index(const void* vectors) {
         CHECK_ARGUMENT(query != nullptr, "failed to prepare hgraph mci query vector");
         return this->search_mci_knn(inner_id, query, total);
     };
-    auto graph = build_mci_knn_graph(total,
-                                     this->mci_parameters_.mcs,
-                                     this->mci_parameters_.knng_path,
-                                     worker_count,
-                                     this->allocator_,
-                                     search_neighbors);
+    MCIKNNGraph graph(this->allocator_);
+    if (this->mci_parameters_.knng_path.empty() and
+        this->mci_parameters_.knng_source == HGRAPH_MCI_KNNG_SOURCE_ODESCENT) {
+        graph = build_mci_knn_graph_by_odescent(this->basic_flatten_codes_,
+                                                total,
+                                                this->mci_parameters_.mcs,
+                                                this->mci_parameters_.alpha,
+                                                this->metric_,
+                                                this->data_type_,
+                                                this->dim_,
+                                                static_cast<int64_t>(this->extra_info_size_),
+                                                this->thread_pool_,
+                                                this->allocator_);
+    } else {
+        graph = build_mci_knn_graph(total,
+                                    this->mci_parameters_.mcs,
+                                    this->mci_parameters_.knng_path,
+                                    worker_count,
+                                    this->allocator_,
+                                    search_neighbors);
+    }
     logger::info("hgraph mci knn graph build finished, total={}, row_stride={}, candidate_count={}",
                  total,
                  graph.row_stride,

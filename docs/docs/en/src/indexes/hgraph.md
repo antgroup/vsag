@@ -91,6 +91,7 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `base_direct_read` / `precise_direct_read` | bool | `false` | With `uring_io`, open the corresponding file using direct IO instead of the page cache. |
 | `hgraph_init_capacity` | int | `100` | Initial capacity hint (doesn't cap the final size) |
 | `persist_source_id` | bool | `false` | Persist source-ID metadata during serialization so a restored index can later export a reusable build cache. |
+| `use_conjugate_graph` | bool | `false` | Enable `Feedback`/`Pretrain` graph enhancement; see [Graph Index Enhancement](../advanced/enhance_graph.md). |
 | `resize_increase_count_bit` | int | `10` | `log2` of the slot-growth batch. Valid range is `1` to `31`; `1` grows in 2-slot batches and `10` in 1,024-slot batches. Smaller values reduce preallocation but can increase reallocations. |
 
 `use_reverse_edges` is intended for workloads that need fast incoming-neighbor inspection, graph
@@ -106,7 +107,7 @@ before changing it.
 Set both `support_duplicate: true` and `deduplicate_storage: true` to let duplicate
 vectors share one physical code slot while retaining their individual labels. This option
 currently supports only dense-vector HGraph indexes using `graph_type: "nsw"`; it is not
-available for the separate HNSW index or for `graph_type: "odescent"`.
+available for `graph_type: "odescent"`.
 
 The following operations and configurations are not supported while storage deduplication
 is enabled:

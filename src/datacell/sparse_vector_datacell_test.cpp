@@ -13,10 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <atomic>
+#include <cmath>
+#include <cstring>
+
 #include "datacell/sparse_vector_datacell_parameter.h"
 #include "framework/test_thread_pool.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
+#include "io/reader_io/reader_io_parameter.h"
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
 #include "storage/serialization_template_test.h"
 #include "unittest.h"
@@ -64,6 +69,7 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
     data_cell->BatchInsertVector(sparse_vectors.data() + half_count + half_count / 2,
                                  half_count / 2,
                                  idx.data() + half_count + half_count / 2);
+    REQUIRE_NOTHROW(data_cell->Resize(base_count - 1));
 
     for (int i = 0; i < base_count - 1; ++i) {
         fixtures::dist_t distance = data_cell->ComputePairVectors(idx[i], idx[i + 1]);
@@ -196,6 +202,80 @@ TEST_CASE("SparseDataCell Concurrent Test", "[ut][SparseDataCell][concurrent] ")
 
 namespace {
 
+class CountingReader : public Reader {
+public:
+    explicit CountingReader(std::string bytes) : bytes_(std::move(bytes)) {
+    }
+
+    void
+    Read(uint64_t offset, uint64_t len, void* dest) override {
+        std::memcpy(dest, bytes_.data() + offset, len);
+    }
+
+    void
+    AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
+        async_read_count_.fetch_add(1, std::memory_order_relaxed);
+        Read(offset, len, dest);
+        callback(IOErrorCode::IO_SUCCESS, "success");
+    }
+
+    [[nodiscard]] uint64_t
+    Size() const override {
+        return bytes_.size();
+    }
+
+    void
+    ResetCount() {
+        async_read_count_.store(0, std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] uint64_t
+    GetAsyncReadCount() const {
+        return async_read_count_.load(std::memory_order_relaxed);
+    }
+
+private:
+    std::string bytes_;
+    std::atomic<uint64_t> async_read_count_{0};
+};
+
+FlattenInterfacePtr
+make_sparse_data_cell(const std::string& io_type,
+                      uint64_t dim,
+                      const IndexCommonParam& common_param) {
+    const auto param_json = fmt::format(R"({{
+        "io_params": {{"type": "{}"}},
+        "quantization_params": {{"type": "sparse"}}
+    }})",
+                                        io_type);
+    auto param = std::make_shared<SparseVectorDataCellParameter>();
+    param->FromJson(JsonType::Parse(param_json));
+    auto cell_param = common_param;
+    cell_param.dim_ = dim;
+    return FlattenInterface::MakeInstance(param, cell_param);
+}
+
+FlattenInterfacePtr
+load_sparse_data_cell_with_reader(const FlattenInterfacePtr& source,
+                                  uint64_t dim,
+                                  const IndexCommonParam& common_param,
+                                  std::shared_ptr<CountingReader>& counting_reader) {
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    source->Serialize(writer);
+    const auto serialized = stream.str();
+
+    auto loaded = make_sparse_data_cell(IO_TYPE_VALUE_READER_IO, dim, common_param);
+    IOStreamReader stream_reader(stream);
+    loaded->Deserialize(stream_reader);
+
+    counting_reader = std::make_shared<CountingReader>(serialized);
+    auto reader_param = std::make_shared<ReaderIOParameter>();
+    reader_param->reader = counting_reader;
+    loaded->InitIO(reader_param);
+    return loaded;
+}
+
 // Rebuilds the byte layout produced by SparseVectorDataCell::Serialize before
 // the 64-bit offset fix landed (the v1 layout):
 //   [FlattenInterface header: total_count, max_capacity, code_size]
@@ -237,6 +317,117 @@ write_legacy_format(std::stringstream& legacy_stream,
 }
 
 }  // namespace
+
+TEST_CASE("SparseDataCell Query Merges Physical IO", "[ut][SparseDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    constexpr uint64_t vector_length = 40'000;
+    constexpr uint32_t base_count = 4;
+    std::vector<uint32_t> term_ids(vector_length);
+    std::iota(term_ids.begin(), term_ids.end(), 0);
+    std::vector<float> values(vector_length, 1.0F);
+    std::vector<SparseVector> sparse_vectors(base_count);
+    for (auto& vector : sparse_vectors) {
+        vector.len_ = vector_length;
+        vector.ids_ = term_ids.data();
+        vector.vals_ = values.data();
+    }
+
+    auto source = make_sparse_data_cell("memory_io", vector_length, common_param);
+    source->Train(sparse_vectors.data(), base_count);
+    for (uint32_t i = 0; i < base_count; ++i) {
+        source->InsertVector(sparse_vectors.data() + i, i);
+    }
+
+    std::shared_ptr<CountingReader> counting_reader;
+    auto loaded =
+        load_sparse_data_cell_with_reader(source, vector_length, common_param, counting_reader);
+    auto computer = loaded->FactoryComputer(sparse_vectors.data());
+
+    const auto query = [&](const std::vector<InnerIdType>& ids) {
+        Vector<float> distances(ids.size(), allocator.get());
+        QueryContext context;
+        context.alloc = allocator.get();
+        loaded->Query(
+            distances.data(), computer, ids.data(), static_cast<InnerIdType>(ids.size()), &context);
+        for (const auto distance : distances) {
+            REQUIRE(distance == 1.0F - static_cast<float>(vector_length));
+        }
+    };
+
+    SECTION("unordered contiguous payloads merge by physical offset") {
+        const std::vector<InnerIdType> ids = {2, 1, 0};
+        counting_reader->ResetCount();
+        query(ids);
+        REQUIRE(counting_reader->GetAsyncReadCount() == 1);
+    }
+
+    SECTION("one MiB limit splits a large contiguous range") {
+        const std::vector<InnerIdType> ids = {3, 2, 1, 0};
+        counting_reader->ResetCount();
+        query(ids);
+        REQUIRE(counting_reader->GetAsyncReadCount() == 2);
+    }
+
+    SECTION("a gap beyond the direct IO alignment is not merged") {
+        const std::vector<InnerIdType> ids = {3, 0};
+        counting_reader->ResetCount();
+        query(ids);
+        REQUIRE(counting_reader->GetAsyncReadCount() == 2);
+    }
+
+    SECTION("duplicate ids share one physical read") {
+        const std::vector<InnerIdType> ids = {0, 0};
+        counting_reader->ResetCount();
+        query(ids);
+        REQUIRE(counting_reader->GetAsyncReadCount() == 1);
+    }
+}
+
+TEST_CASE("SparseDataCell MMap Query", "[ut][SparseDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    constexpr uint64_t dim = 100;
+    constexpr uint32_t base_count = 16;
+    fixtures::TempDir dir("sparse_datacell_mmap_query");
+    const auto file_path = dir.GenerateRandomFile(false);
+    const auto param_json = fmt::format(R"({{
+        "io_params": {{"type": "mmap_io", "file_path": "{}"}},
+        "quantization_params": {{"type": "sparse"}}
+    }})",
+                                        file_path);
+    auto param = std::make_shared<SparseVectorDataCellParameter>();
+    param->FromJson(JsonType::Parse(param_json));
+    common_param.dim_ = dim;
+    auto data_cell = FlattenInterface::MakeInstance(param, common_param);
+
+    auto sparse_vectors = fixtures::GenerateSparseVectors(base_count, dim);
+    data_cell->Train(sparse_vectors.data(), base_count);
+    for (uint32_t i = 0; i < base_count; ++i) {
+        data_cell->InsertVector(sparse_vectors.data() + i, i);
+    }
+
+    auto computer = data_cell->FactoryComputer(sparse_vectors.data());
+    const std::vector<InnerIdType> ids = {15, 2, 8, 0, 2};
+    std::vector<float> distances(ids.size());
+    data_cell->Query(distances.data(), computer, ids.data(), static_cast<InnerIdType>(ids.size()));
+    for (uint64_t i = 0; i < ids.size(); ++i) {
+        const auto expected =
+            fixtures::GetSparseDistance(sparse_vectors[0], sparse_vectors[ids[i]]);
+        REQUIRE(std::abs(distances[i] - expected) < 1e-5F);
+    }
+
+    for (auto& item : sparse_vectors) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
 
 TEST_CASE("SparseDataCell Backward Compat Deserialize", "[ut][SparseDataCell]") {
     constexpr const char* param_str = R"({
@@ -389,6 +580,33 @@ TEST_CASE("SparseDataCell New Format Sentinel", "[ut][SparseDataCell]") {
         delete[] item.vals_;
         delete[] item.ids_;
     }
+}
+
+TEST_CASE("SparseDataCell rejects undersized legacy location tables", "[ut][SparseDataCell]") {
+    constexpr const char* param_str = R"({
+        "io_params": {"type": "memory_io"},
+        "quantization_params": {"type": "sparse"}
+    })";
+    JsonType parsed_json = JsonType::Parse(param_str);
+    auto param = std::make_shared<SparseVectorDataCellParameter>();
+    param->FromJson(parsed_json);
+    IndexCommonParam common_param;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 100;
+
+    std::stringstream legacy_ss;
+    write_legacy_format(legacy_ss,
+                        /*total_count=*/2,
+                        /*max_capacity=*/2,
+                        /*code_size=*/0,
+                        /*io_bytes=*/{},
+                        /*legacy_entries=*/{{0, 0}},
+                        /*quantizer_bytes=*/{});
+
+    auto loaded = FlattenInterface::MakeInstance(param, common_param);
+    IOStreamReader reader(legacy_ss);
+    REQUIRE_THROWS_AS(loaded->Deserialize(reader), VsagException);
 }
 
 }  // namespace vsag

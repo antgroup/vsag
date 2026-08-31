@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <random>
 #include <set>
@@ -36,11 +37,13 @@
 #include "impl/inner_search_param.h"
 #include "impl/pruning_strategy.h"
 #include "impl/reasoning/search_reasoning.h"
+#include "impl/reorder/bucket_reorder.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
 #include "index/index_impl.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"
+#include "io/reader_io/reader_io_parameter.h"
 #include "ivf_nearest_partition.h"
 #include "query_context.h"
 #include "simd/normalize.h"
@@ -57,6 +60,20 @@
 namespace vsag {
 
 static constexpr BucketIdType INVALID_BUCKET_ID = static_cast<BucketIdType>(-1);
+
+namespace {
+
+BucketDataCellParamPtr
+make_precise_bucket_param(const IVFParameterPtr& param) {
+    auto precise_bucket_param = std::make_shared<BucketDataCellParameter>();
+    precise_bucket_param->io_parameter = param->precise_codes_param->io_parameter;
+    precise_bucket_param->quantizer_parameter = param->precise_codes_param->quantizer_parameter;
+    precise_bucket_param->buckets_count = param->bucket_param->buckets_count;
+    precise_bucket_param->use_residual_ = false;
+    return precise_bucket_param;
+}
+
+}  // namespace
 
 static constexpr const char* IVF_PARAMS_TEMPLATE =
     R"(
@@ -97,6 +114,7 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
         },
         "{BUCKET_PER_DATA_KEY}": 1,
         "{USE_REORDER_KEY}": false,
+        "{PRECISE_CODES_LAYOUT_KEY}": "{PRECISE_CODES_LAYOUT_VALUE_FLAT}",
         "{PRECISE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -231,6 +249,12 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             IVF_USE_REORDER,
             {
                 USE_REORDER_KEY,
+            },
+        },
+        {
+            IVF_PRECISE_CODES_LAYOUT,
+            {
+                PRECISE_CODES_LAYOUT_KEY,
             },
         },
         {
@@ -396,27 +420,45 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     if (this->bucket_ == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bucket init error");
     }
-    if (param->ivf_partition_strategy_parameter->partition_strategy_type ==
-        IVFPartitionStrategyType::IVF) {
-        this->partition_strategy_ = std::make_shared<IVFNearestPartition>(
-            bucket_->bucket_count_, common_param, param->ivf_partition_strategy_parameter);
-    } else if (param->ivf_partition_strategy_parameter->partition_strategy_type ==
-               IVFPartitionStrategyType::GNO_IMI) {
-        this->partition_strategy_ = std::make_shared<GNOIMIPartition>(
-            common_param, param->ivf_partition_strategy_parameter);
-    }
-    if (this->use_reorder_) {
-        this->reorder_codes_ =
-            FlattenInterface::MakeInstance(param->precise_codes_param, common_param);
-        reorder_ = std::make_shared<FlattenReorder>(this->reorder_codes_, allocator_);
-    }
-    if (param->bucket_param->use_residual_) {
-        this->bucket_->SetStrategy(partition_strategy_);
-    }
+
+    // Initialize thread pool before partition strategy construction
     this->thread_pool_ = common_param.thread_pool_;
     if (param->build_thread_count > 1 and this->thread_pool_ == nullptr) {
         this->thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
         this->thread_pool_->SetPoolSize(param->build_thread_count);
+    }
+
+    // Create modified common_param with the initialized thread_pool_
+    IndexCommonParam modified_common_param = common_param;
+    modified_common_param.thread_pool_ = this->thread_pool_;
+
+    if (param->ivf_partition_strategy_parameter->partition_strategy_type ==
+        IVFPartitionStrategyType::IVF) {
+        this->partition_strategy_ = std::make_shared<IVFNearestPartition>(
+            bucket_->bucket_count_, modified_common_param, param->ivf_partition_strategy_parameter);
+    } else if (param->ivf_partition_strategy_parameter->partition_strategy_type ==
+               IVFPartitionStrategyType::GNO_IMI) {
+        this->partition_strategy_ = std::make_shared<GNOIMIPartition>(
+            modified_common_param, param->ivf_partition_strategy_parameter);
+    }
+    if (this->use_reorder_) {
+        if (param->precise_codes_layout == PRECISE_CODES_LAYOUT_VALUE_BUCKET) {
+            this->precise_bucket_ = BucketInterface::MakeInstance(make_precise_bucket_param(param),
+                                                                  modified_common_param);
+            CHECK_ARGUMENT(this->precise_bucket_ != nullptr,
+                           "unsupported IO or quantizer for IVF precise bucket");
+            this->reorder_ = std::make_shared<BucketReorder>(
+                this->precise_bucket_,
+                [this](InnerIdType inner_id) { return this->get_location(inner_id); },
+                allocator_);
+        } else {
+            this->reorder_codes_ =
+                FlattenInterface::MakeInstance(param->precise_codes_param, modified_common_param);
+            reorder_ = std::make_shared<FlattenReorder>(this->reorder_codes_, allocator_);
+        }
+    }
+    if (param->bucket_param->use_residual_) {
+        this->bucket_->SetStrategy(partition_strategy_);
     }
 
     this->graph_param_ = param->graph_param;
@@ -477,8 +519,11 @@ IVF::InitFeatures() {
     }
 
     bool has_fp32 = false;
-    if (use_reorder_ && reorder_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
-        has_fp32 = true;
+    if (use_reorder_) {
+        const auto precise_quantizer_name = precise_bucket_ != nullptr
+                                                ? precise_bucket_->GetQuantizerName()
+                                                : reorder_codes_->GetQuantizerName();
+        has_fp32 = precise_quantizer_name == QUANTIZATION_TYPE_VALUE_FP32;
     }
     if (name == QUANTIZATION_TYPE_VALUE_FP32 or has_fp32) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
@@ -495,7 +540,6 @@ IVF::InitFeatures() {
                                             IndexFeature::SUPPORT_EXPORT_MODEL,
                                             IndexFeature::SUPPORT_GET_MEMORY_USAGE,
                                             IndexFeature::SUPPORT_MERGE_INDEX});
-
     if (this->bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_AFTER_BUILD, false);
     }
@@ -511,7 +555,7 @@ IVF::Build(const DatasetPtr& base) {
     // TODO(LHT): duplicate
     auto result = this->Add(base);
     if (graph_build_threshold_ > 0) {
-        this->build_bucket_graphs(base);
+        this->build_bucket_graphs();
     }
     this->cal_memory_usage();
     return result;
@@ -534,7 +578,11 @@ IVF::Train(const DatasetPtr& data) {
     const auto* data_ptr = train_data->GetFloat32Vectors();
     this->bucket_->Train(data_ptr, sample_count);
     if (use_reorder_) {
-        this->reorder_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
+        if (precise_bucket_ != nullptr) {
+            this->precise_bucket_->Train(data->GetFloat32Vectors(), data->GetNumElements());
+        } else {
+            this->reorder_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
+        }
     }
     this->is_trained_ = true;
 }
@@ -546,6 +594,9 @@ IVF::Add(const DatasetPtr& base) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "ivf index add without train error");
     }
     this->bucket_->Unpack();
+    if (precise_bucket_ != nullptr) {
+        this->precise_bucket_->Unpack();
+    }
     auto num_element = base->GetNumElements();
     const auto* ids = base->GetIds();
     const auto* vectors = base->GetFloat32Vectors();
@@ -559,14 +610,28 @@ IVF::Add(const DatasetPtr& base) {
     bool need_cal_memory_usage = false;
     {
         std::lock_guard lock(label_lookup_mutex_);
-        if (use_reorder_) {
+        current_num = this->total_elements_;
+        if (precise_bucket_ != nullptr) {
+            if (num_element < 0 or current_num < 0) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "invalid IVF precise bucket element count");
+            }
+            const auto posting_count = static_cast<uint64_t>(num_element);
+            const auto current_count = static_cast<uint64_t>(current_num);
+            const auto max_inner_id =
+                static_cast<uint64_t>(std::numeric_limits<InnerIdType>::max());
+            if (posting_count > max_inner_id or current_count > max_inner_id - posting_count) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "IVF precise bucket batch exceeds inner id capacity");
+            }
+        }
+        if (use_reorder_ and precise_bucket_ == nullptr) {
             this->reorder_codes_->BatchInsertVector(base->GetFloat32Vectors(),
                                                     base->GetNumElements());
         }
         for (int64_t i = 0; i < num_element; ++i) {
             this->label_table_->Insert(i + total_elements_, ids[i]);
         }
-        current_num = this->total_elements_;
         this->total_elements_ += num_element;
         if (this->total_elements_ - last_cal_memory_element_ >= cal_memory_element_interval_) {
             need_cal_memory_usage = true;
@@ -575,12 +640,34 @@ IVF::Add(const DatasetPtr& base) {
         location_map_.resize(this->total_elements_);
     }
 
+    Vector<InnerIdType> precise_offsets(allocator_);
+    if (precise_bucket_ != nullptr) {
+        const auto posting_count = static_cast<uint64_t>(num_element);
+        Vector<InnerIdType> posting_ids(posting_count, allocator_);
+        precise_offsets.resize(posting_count);
+        for (uint64_t i = 0; i < posting_count; ++i) {
+            posting_ids[i] = static_cast<InnerIdType>(i + static_cast<uint64_t>(current_num));
+        }
+        precise_bucket_->BatchInsertVector(vectors,
+                                           buckets.data(),
+                                           posting_ids.data(),
+                                           static_cast<InnerIdType>(posting_count),
+                                           precise_offsets.data());
+    }
+
     auto add_func = [&](int64_t i) -> void {
         for (int64_t j = 0; j < buckets_per_data_; ++j) {
             const auto* data_ptr = vectors + i * dim_;
             auto idx = i * buckets_per_data_ + j;
-            InnerIdType offset_id = bucket_->InsertVector(
-                data_ptr, buckets[idx], idx + current_num * buckets_per_data_);
+            auto posting_id = static_cast<InnerIdType>(idx + current_num * buckets_per_data_);
+            InnerIdType offset_id;
+            if (precise_bucket_ != nullptr) {
+                // Publish the basic posting only after its precise mirror is ready.
+                offset_id = precise_offsets[idx];
+                bucket_->InsertVectorWithOffset(data_ptr, buckets[idx], posting_id, offset_id);
+            } else {
+                offset_id = bucket_->InsertVector(data_ptr, buckets[idx], posting_id);
+            }
             if (j == 0) {
                 std::lock_guard lock(label_lookup_mutex_);
                 location_map_[i + current_num] =
@@ -599,49 +686,41 @@ IVF::Add(const DatasetPtr& base) {
         }
     };
     std::vector<std::future<void>> futures;
-    for (int64_t i = 0; i < num_element; ++i) {
-        if (this->thread_pool_ != nullptr) {
-            auto future = thread_pool_->GeneralEnqueue(add_func, i);
-            futures.emplace_back(std::move(future));
-        } else {
-            add_func(i);
+    std::exception_ptr first_exception = nullptr;
+    try {
+        for (int64_t i = 0; i < num_element; ++i) {
+            if (this->thread_pool_ != nullptr) {
+                futures.emplace_back(thread_pool_->GeneralEnqueue(add_func, i));
+            } else {
+                add_func(i);
+            }
         }
+    } catch (...) {
+        first_exception = std::current_exception();
     }
 
     if (this->thread_pool_ != nullptr) {
         for (auto& future : futures) {
-            future.get();
+            try {
+                future.get();
+            } catch (...) {
+                if (first_exception == nullptr) {
+                    first_exception = std::current_exception();
+                }
+            }
         }
     }
+    if (first_exception != nullptr) {
+        std::rethrow_exception(first_exception);
+    }
     this->bucket_->Package();
+    if (precise_bucket_ != nullptr) {
+        this->precise_bucket_->Package();
+    }
     if (need_cal_memory_usage) {
         this->cal_memory_usage();
     }
     return {};
-}
-
-static const void*
-get_ivf_graph_build_data(const DatasetPtr& dataset,
-                         DataTypes data_type,
-                         uint64_t index,
-                         uint64_t dim) {
-    if (data_type == DataTypes::DATA_TYPE_FLOAT) {
-        const auto* ptr = dataset->GetFloat32Vectors();
-        return ptr != nullptr ? ptr + index * dim : nullptr;
-    }
-    if (data_type == DataTypes::DATA_TYPE_INT8) {
-        const auto* ptr = dataset->GetInt8Vectors();
-        return ptr != nullptr ? ptr + index * dim : nullptr;
-    }
-    if (data_type == DataTypes::DATA_TYPE_FP16 || data_type == DataTypes::DATA_TYPE_BF16) {
-        const auto* ptr = dataset->GetFloat16Vectors();
-        return ptr != nullptr ? ptr + index * dim : nullptr;
-    }
-    if (data_type == DataTypes::DATA_TYPE_SPARSE) {
-        const auto* ptr = dataset->GetSparseVectors();
-        return ptr != nullptr ? ptr + index : nullptr;
-    }
-    throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid data type for IVF graph build");
 }
 
 static GraphInterfaceParamPtr
@@ -687,12 +766,51 @@ has_any_fresh_bucket_graph(const BucketInterfacePtr& bucket,
     return false;
 }
 
-void
-IVF::build_bucket_graphs(const DatasetPtr& base) {
-    if (graph_build_threshold_ <= 0) {
-        return;
+class PairwiseBucketDistanceProvider final : public DistanceProviderForGraph {
+public:
+    PairwiseBucketDistanceProvider(std::shared_ptr<BucketInterface> bucket,
+                                   BucketIdType bucket_id,
+                                   InnerIdType query_id)
+        : bucket_(std::move(bucket)), bucket_id_(bucket_id), query_id_(query_id) {
     }
-    if (common_param_.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+
+    [[nodiscard]] float
+    QueryDistance(InnerIdType id, QueryContext* ctx = nullptr) const override {
+        return bucket_->ComputePairVectors(bucket_id_, query_id_, id);
+    }
+
+    void
+    BatchQueryDistance(float* distances,
+                       const InnerIdType* ids,
+                       InnerIdType count,
+                       QueryContext* ctx = nullptr) const override {
+        for (InnerIdType i = 0; i < count; ++i) {
+            distances[i] = bucket_->ComputePairVectors(bucket_id_, query_id_, ids[i]);
+        }
+    }
+
+    [[nodiscard]] float
+    PairwiseDistance(InnerIdType id1,
+                     InnerIdType id2,
+                     const ComputerInterfacePtr& computer = nullptr) const override {
+        return bucket_->ComputePairVectors(bucket_id_, id1, id2);
+    }
+
+    [[nodiscard]] ComputerInterfacePtr
+    FactoryComputerById(InnerIdType id) const override {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "PairwiseBucketDistanceProvider does not support FactoryComputerById");
+    }
+
+private:
+    std::shared_ptr<BucketInterface> bucket_;
+    InnerIdType query_id_;
+    BucketIdType bucket_id_;
+};
+
+void
+IVF::build_bucket_graphs() {
+    if (graph_build_threshold_ <= 0) {
         return;
     }
     if (graph_param_ == nullptr) {
@@ -704,10 +822,10 @@ IVF::build_bucket_graphs(const DatasetPtr& base) {
     const auto bucket_count = bucket_->bucket_count_;
     bucket_graphs_.resize(bucket_count);
 
-    for (BucketIdType b = 0; b < bucket_count; ++b) {
+    auto build_one_bucket = [&](BucketIdType b) {
         const auto bucket_size = bucket_->GetBucketSize(b);
         if (bucket_size < graph_build_threshold_) {
-            continue;
+            return;
         }
 
         const auto* inner_ids = bucket_->GetInnerIds(b);
@@ -719,13 +837,13 @@ IVF::build_bucket_graphs(const DatasetPtr& base) {
             }
         }
         if (valid_ids.size() < static_cast<uint64_t>(graph_build_threshold_)) {
-            continue;
+            return;
         }
 
         const auto effective_degree =
             std::min(max_degree, static_cast<int64_t>(valid_ids.size()) - 1);
         if (effective_degree <= 0) {
-            continue;
+            return;
         }
 
         auto graph = GraphInterface::MakeInstance(graph_param_, this->common_param_);
@@ -733,13 +851,6 @@ IVF::build_bucket_graphs(const DatasetPtr& base) {
         graph->SetTotalCount(bucket_size);
         graph->SetMaximumDegree(static_cast<uint32_t>(effective_degree));
 
-        auto make_computer = [&](InnerIdType local_id) {
-            const auto orig_idx = static_cast<uint64_t>(inner_ids[local_id]) / buckets_per_data_;
-            const auto* query =
-                get_ivf_graph_build_data(base, common_param_.data_type_, orig_idx, this->dim_);
-            CHECK_ARGUMENT(query != nullptr, "base dataset has no graph build vector data");
-            return bucket_->FactoryComputer(query);
-        };
         auto mutexes = std::make_shared<EmptyMutex>();
         BasicSearcher searcher(common_param_);
 
@@ -752,8 +863,7 @@ IVF::build_bucket_graphs(const DatasetPtr& base) {
             search_param.ep = entry;
             search_param.ef = std::min(ef_construction, node_pos);
             search_param.topk = static_cast<int64_t>(search_param.ef);
-            BucketDistanceProvider distance_provider(
-                bucket_, b, make_computer(node), make_computer, inner_ids, buckets_per_data_);
+            PairwiseBucketDistanceProvider distance_provider(bucket_, b, node);
             visited->Reset();
             auto candidates =
                 searcher.Search(graph, distance_provider, visited, search_param, nullptr, nullptr);
@@ -762,6 +872,21 @@ IVF::build_bucket_graphs(const DatasetPtr& base) {
         }
 
         bucket_graphs_[b] = std::move(graph);
+    };
+
+    if (this->thread_pool_ != nullptr) {
+        std::vector<std::future<void>> futures;
+        futures.reserve(bucket_count);
+        for (BucketIdType b = 0; b < bucket_count; ++b) {
+            futures.emplace_back(this->thread_pool_->GeneralEnqueue(build_one_bucket, b));
+        }
+        for (auto& future : futures) {
+            future.get();
+        }
+    } else {
+        for (BucketIdType b = 0; b < bucket_count; ++b) {
+            build_one_bucket(b);
+        }
     }
 }
 DatasetPtr
@@ -807,11 +932,17 @@ IVF::GetNumElements() const {
 void
 IVF::Merge(const std::vector<MergeUnit>& merge_units) {
     this->bucket_->Unpack();
+    if (precise_bucket_ != nullptr) {
+        this->precise_bucket_->Unpack();
+    }
     for (const auto& unit : merge_units) {
         this->merge_one_unit(unit);
     }
     this->fill_location_map();
     this->bucket_->Package();
+    if (precise_bucket_ != nullptr) {
+        this->precise_bucket_->Package();
+    }
 }
 
 std::pair<BucketIdType, InnerIdType>
@@ -867,7 +998,11 @@ IVF::Serialize(StreamWriter& writer) const {
     WRITE_DATACELL_WITH_NAME(writer, "label_table", label_table_);
 
     if (use_reorder_) {
-        WRITE_DATACELL_WITH_NAME(writer, "reorder_codes", reorder_codes_);
+        if (precise_bucket_ != nullptr) {
+            WRITE_DATACELL_WITH_NAME(writer, "precise_bucket", precise_bucket_);
+        } else {
+            WRITE_DATACELL_WITH_NAME(writer, "reorder_codes", reorder_codes_);
+        }
     }
 
     if (use_attribute_filter_) {
@@ -954,7 +1089,9 @@ IVF::collect_streaming_header() const {
                                  StreamSerializationBlockCurrentVersion(label_tag),
                                  StreamSerializationTagCritical(label_tag));
     if (this->use_reorder_) {
-        auto tag = static_cast<uint32_t>(StreamSerializationTag::HIGH_PRECISION_CODES);
+        auto tag = static_cast<uint32_t>(precise_bucket_ != nullptr
+                                             ? StreamSerializationTag::IVF_PRECISE_BUCKET
+                                             : StreamSerializationTag::HIGH_PRECISION_CODES);
         AppendStreamingManifestBlock(manifest,
                                      tag,
                                      StreamSerializationBlockCurrentVersion(tag),
@@ -999,10 +1136,16 @@ IVF::serialize_streaming_body(StreamWriter& writer) const {
             this->label_table_->Serialize(w);
         });
     if (this->use_reorder_) {
-        auto tag = static_cast<uint32_t>(StreamSerializationTag::HIGH_PRECISION_CODES);
+        auto tag = static_cast<uint32_t>(precise_bucket_ != nullptr
+                                             ? StreamSerializationTag::IVF_PRECISE_BUCKET
+                                             : StreamSerializationTag::HIGH_PRECISION_CODES);
         WriteStreamingBlock(
             writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& w) {
-                this->reorder_codes_->Serialize(w);
+                if (this->precise_bucket_ != nullptr) {
+                    this->precise_bucket_->Serialize(w);
+                } else {
+                    this->reorder_codes_->Serialize(w);
+                }
             });
     }
     if (this->use_attribute_filter_) {
@@ -1044,16 +1187,21 @@ void
 IVF::load_streaming_body(StreamReader& reader,
                          const MetadataPtr& metadata,
                          const LoadParameters& parameters) {
-    (void)parameters;
-    this->read_streaming_body(reader, metadata);
+    this->read_streaming_body(reader, metadata, &parameters);
 }
 
 void
-IVF::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
+IVF::read_streaming_body(StreamReader& reader,
+                         const MetadataPtr& metadata,
+                         const LoadParameters* load_parameters) {
     auto basic_info = metadata->Get(BASIC_INFO);
     this->total_elements_ = basic_info["total_elements"].GetInt();
     this->use_reorder_ = basic_info["use_reorder"].GetBool();
     this->is_trained_ = basic_info["is_trained"].GetBool();
+    if (precise_bucket_ != nullptr and not basic_info.Contains(INDEX_PARAM)) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "IVF precise bucket requires persisted index parameters");
+    }
     if (basic_info.Contains(INDEX_PARAM)) {
         auto index_param = std::make_shared<IVFParameter>();
         index_param->FromString(basic_info[INDEX_PARAM].GetString());
@@ -1069,8 +1217,31 @@ IVF::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
     bool loaded_bucket = false;
     bool loaded_partition = false;
     bool loaded_label_table = false;
-    bool loaded_reorder_codes = false;
+    bool loaded_precise_codes = false;
     bool loaded_attribute_filter = false;
+
+    ReaderIOParamPtr precise_reader_param = nullptr;
+    auto ivf_param = std::dynamic_pointer_cast<IVFParameter>(create_param_ptr_);
+    if (ivf_param != nullptr && ivf_param->precise_codes_param != nullptr &&
+        ivf_param->precise_codes_param->io_parameter != nullptr &&
+        ivf_param->precise_codes_param->io_parameter->GetTypeName() == IO_TYPE_VALUE_READER_IO) {
+        constexpr const char* precise_reader_key = "precise_reader";
+        if (load_parameters == nullptr or not load_parameters->HasReader(precise_reader_key)) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "reader-backed IVF precise codes require precise_reader");
+        }
+        auto precise_reader = load_parameters->GetReader(precise_reader_key);
+        if (precise_reader == nullptr) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "precise_reader is null");
+        }
+        precise_reader_param = std::dynamic_pointer_cast<ReaderIOParameter>(
+            ivf_param->precise_codes_param->io_parameter);
+        if (precise_reader_param == nullptr) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "IVF precise reader IO parameter is invalid");
+        }
+        precise_reader_param->reader = std::move(precise_reader);
+    }
 
     while (true) {
         auto block_header = StreamBlockHeader::Read(reader);
@@ -1094,6 +1265,16 @@ IVF::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
             continue;
         }
 
+        auto read_precise_block = [&](const auto& deserialize, const auto& init_io) {
+            if (precise_reader_param == nullptr) {
+                ReadSeekableBlockPayload(block_reader, block_header, deserialize);
+                return;
+            }
+            block_reader.SkipRemaining();
+            ReadExternalBlockPayload(precise_reader_param->reader, block_header, deserialize);
+            init_io(precise_reader_param);
+        };
+
         switch (static_cast<StreamSerializationTag>(block_header.tag)) {
             case StreamSerializationTag::IVF_BUCKET:
                 ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
@@ -1114,12 +1295,23 @@ IVF::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
                 loaded_label_table = true;
                 break;
             case StreamSerializationTag::HIGH_PRECISION_CODES:
-                if (this->use_reorder_) {
-                    ReadSeekableBlockPayload(
-                        block_reader, block_header, [this](StreamReader& block) {
-                            this->reorder_codes_->Deserialize(block);
+                if (this->use_reorder_ and this->reorder_codes_ != nullptr) {
+                    read_precise_block(
+                        [this](StreamReader& block) { this->reorder_codes_->Deserialize(block); },
+                        [this](const IOParamPtr& io_param) {
+                            this->reorder_codes_->InitIO(io_param);
                         });
-                    loaded_reorder_codes = true;
+                    loaded_precise_codes = true;
+                }
+                break;
+            case StreamSerializationTag::IVF_PRECISE_BUCKET:
+                if (this->use_reorder_ and this->precise_bucket_ != nullptr) {
+                    read_precise_block(
+                        [this](StreamReader& block) { this->precise_bucket_->Deserialize(block); },
+                        [this](const IOParamPtr& io_param) {
+                            this->precise_bucket_->InitIO(io_param);
+                        });
+                    loaded_precise_codes = true;
                 }
                 break;
             case StreamSerializationTag::ATTRIBUTE_FILTER:
@@ -1213,7 +1405,7 @@ IVF::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
         throw VsagException(ErrorType::READ_ERROR,
                             "IVF streaming serialization required block is missing");
     }
-    if (this->use_reorder_ && !loaded_reorder_codes) {
+    if (this->use_reorder_ && !loaded_precise_codes) {
         throw VsagException(ErrorType::READ_ERROR,
                             "IVF streaming serialization reorder block is missing");
     }
@@ -1242,6 +1434,10 @@ IVF::Deserialize(StreamReader& reader) {
         &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
 
     if (footer == nullptr) {  // old format, DON'T EDIT, remove in the future
+        if (precise_bucket_ != nullptr) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "legacy IVF serialization does not support precise bucket");
+        }
         logger::debug("parse with v0.14 version format");
 
         StreamReader::ReadObj(buffer_reader, this->total_elements_);
@@ -1271,6 +1467,10 @@ IVF::Deserialize(StreamReader& reader) {
         this->total_elements_ = basic_info["total_elements"].GetInt();
         this->use_reorder_ = basic_info["use_reorder"].GetBool();
         this->is_trained_ = basic_info["is_trained"].GetBool();
+        if (precise_bucket_ != nullptr and not basic_info.Contains(INDEX_PARAM)) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "IVF precise bucket requires persisted index parameters");
+        }
         if (basic_info.Contains(INDEX_PARAM)) {
             auto param_str = basic_info[INDEX_PARAM].GetString();
             auto index_param = std::make_shared<IVFParameter>();
@@ -1293,7 +1493,11 @@ IVF::Deserialize(StreamReader& reader) {
         READ_DATACELL_WITH_NAME(buffer_reader, "partition_strategy", this->partition_strategy_);
         READ_DATACELL_WITH_NAME(buffer_reader, "label_table", this->label_table_);
         if (use_reorder_) {
-            READ_DATACELL_WITH_NAME(buffer_reader, "reorder_codes", this->reorder_codes_);
+            if (precise_bucket_ != nullptr) {
+                READ_DATACELL_WITH_NAME(buffer_reader, "precise_bucket", this->precise_bucket_);
+            } else {
+                READ_DATACELL_WITH_NAME(buffer_reader, "reorder_codes", this->reorder_codes_);
+            }
         }
         if (use_attribute_filter_) {
             READ_DATACELL_WITH_NAME(buffer_reader, "attr_filter_index", this->attr_filter_index_);
@@ -1476,7 +1680,11 @@ IVF::ExportModel(const IndexCommonParam& param) const {
     IVFPartitionStrategy::Clone(this->partition_strategy_, index->partition_strategy_);
     this->bucket_->ExportModel(index->bucket_);
     if (use_reorder_) {
-        this->reorder_codes_->ExportModel(index->reorder_codes_);
+        if (precise_bucket_ != nullptr) {
+            this->precise_bucket_->ExportModel(index->precise_bucket_);
+        } else {
+            this->reorder_codes_->ExportModel(index->reorder_codes_);
+        }
     }
     index->is_trained_ = this->is_trained_;
     return index;
@@ -1789,7 +1997,13 @@ IVF::merge_one_unit(const MergeUnit& unit) {
     other_index->bucket_->Package();
 
     if (this->use_reorder_) {
-        this->reorder_codes_->MergeOther(other_index->reorder_codes_, this->total_elements_);
+        if (precise_bucket_ != nullptr) {
+            other_index->precise_bucket_->Unpack();
+            this->precise_bucket_->MergeOther(other_index->precise_bucket_, bucket_bias);
+            other_index->precise_bucket_->Package();
+        } else {
+            this->reorder_codes_->MergeOther(other_index->reorder_codes_, this->total_elements_);
+        }
     }
     this->total_elements_ += other_index->total_elements_;
 }
@@ -1810,6 +2024,10 @@ IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
                                         "index is {}, other index is {}",
                                         this->use_reorder_,
                                         other_ivf_index->use_reorder_));
+    }
+    if ((other_ivf_index->precise_bucket_ == nullptr) != (this->precise_bucket_ == nullptr)) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Merge Failed: IVF precise codes layout does not match");
     }
     auto cur_model = this->ExportModel(index->GetCommonParam());
     std::stringstream ss1;
@@ -1855,31 +2073,12 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     param.query_context = &ctx;
 
     if (not request.bucket_ids_.empty()) {
-        CHECK_ARGUMENT(request.bucket_ids_.size() == 1,
-                       fmt::format("bucket_ids_ currently supports only single-query mode; "
-                                   "expected size 1, got {}",
-                                   request.bucket_ids_.size()));
-        const auto& ids = request.bucket_ids_[0];
-        CHECK_ARGUMENT(not ids.empty(),
-                       "bucket_ids_[0] must not be empty; "
-                       "use empty outer vector for default routing");
-        std::set<int64_t> seen_ids;
-        param.bucket_ids.reserve(ids.size());
-        for (auto id : ids) {
-            CHECK_ARGUMENT(
-                id >= 0,
-                fmt::format("bucket_id {} out of range [0, {})", id, this->bucket_->bucket_count_));
-            CHECK_ARGUMENT(
-                id < static_cast<int64_t>(this->bucket_->bucket_count_),
-                fmt::format("bucket_id {} out of range [0, {})", id, this->bucket_->bucket_count_));
-            CHECK_ARGUMENT(seen_ids.insert(id).second, fmt::format("duplicate bucket_id {}", id));
-            param.bucket_ids.push_back(id);
-        }
         auto query_check = request.query_;
         CHECK_ARGUMENT(query_check != nullptr, "query dataset cannot be null");
-        CHECK_ARGUMENT(query_check->GetNumElements() == 1,
-                       fmt::format("bucket_ids_ currently supports only single-query mode; "
-                                   "expected 1 query, got {}",
+        CHECK_ARGUMENT(request.bucket_ids_.size() == query_check->GetNumElements(),
+                       fmt::format("bucket_ids_ size must match the number of query vectors; "
+                                   "got {} bucket lists for {} queries",
+                                   request.bucket_ids_.size(),
                                    query_check->GetNumElements()));
         CHECK_ARGUMENT(query_check->GetFloat32Vectors() != nullptr,
                        "query float32 vectors cannot be null");
@@ -1887,6 +2086,29 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                        "query dimension must match index dimension");
         CHECK_ARGUMENT(not param.disable_bucket_scan,
                        "bucket_ids_ is incompatible with disable_bucket_scan mode");
+        for (uint64_t query_idx = 0; query_idx < request.bucket_ids_.size(); ++query_idx) {
+            const auto& ids = request.bucket_ids_[query_idx];
+            CHECK_ARGUMENT(not ids.empty(),
+                           fmt::format("bucket_ids_[{}] must not be empty; "
+                                       "use empty outer vector for default routing",
+                                       query_idx));
+            std::set<int64_t> seen_ids;
+            for (auto id : ids) {
+                CHECK_ARGUMENT(
+                    id >= 0,
+                    fmt::format(
+                        "bucket_id {} out of range [0, {})", id, this->bucket_->bucket_count_));
+                CHECK_ARGUMENT(
+                    id < static_cast<int64_t>(this->bucket_->bucket_count_),
+                    fmt::format(
+                        "bucket_id {} out of range [0, {})", id, this->bucket_->bucket_count_));
+                CHECK_ARGUMENT(seen_ids.insert(id).second,
+                               fmt::format("duplicate bucket_id {}", id));
+            }
+        }
+        if (query_check->GetNumElements() == 1) {
+            param.bucket_ids.assign(request.bucket_ids_[0].begin(), request.bucket_ids_[0].end());
+        }
     }
 
     auto query = request.query_;
@@ -1908,6 +2130,81 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         CHECK_ARGUMENT(not request.threshold_.has_value(),
                        "threshold filtering is not supported with disable_bucket_scan");
         auto result = this->route_buckets_only(query, param, ctx);
+        result->Statistics(stats.Dump());
+        return result;
+    }
+
+    if (query != nullptr && query->GetNumElements() > 1) {
+        CHECK_ARGUMENT(not is_range, "IVF batch search only supports KNN search");
+        CHECK_ARGUMENT(not use_custom_distance,
+                       "IVF batch search does not support custom query distance");
+        CHECK_ARGUMENT(request.expected_labels_.empty(),
+                       "IVF batch search does not support expected labels");
+        CHECK_ARGUMENT(request.topk_ > 0, "topk must be greater than 0");
+        CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr,
+                       "query float32 vectors cannot be null");
+        CHECK_ARGUMENT(query->GetDim() == this->dim_, "query dimension must match index dimension");
+
+        const auto num_queries = query->GetNumElements();
+        const auto total_slots = num_queries * request.topk_;
+        auto* alloc = select_query_allocator(ctx.alloc, this->allocator_);
+        auto* ids = static_cast<int64_t*>(alloc->Allocate(sizeof(int64_t) * total_slots));
+        auto* distances = static_cast<float*>(alloc->Allocate(sizeof(float) * total_slots));
+        std::fill_n(ids, total_slots, -1);
+        std::fill_n(distances, total_slots, std::numeric_limits<float>::infinity());
+
+        const auto* query_data = query->GetFloat32Vectors();
+        auto base_request = request;
+        base_request.expected_labels_.clear();
+        if (not request.bucket_ids_.empty()) {
+            base_request.bucket_ids_.clear();
+        }
+        auto search_func = [&](int64_t query_idx) -> void {
+            auto one_query = Dataset::Make();
+            one_query->NumElements(1)
+                ->Dim(query->GetDim())
+                ->Float32Vectors(query_data + query_idx * query->GetDim())
+                ->Owner(false);
+
+            auto one_request = base_request;
+            one_request.query_ = one_query;
+            if (not request.bucket_ids_.empty()) {
+                one_request.bucket_ids_ = {request.bucket_ids_[query_idx]};
+            }
+            JsonType json = JsonType::Parse(base_request.params_str_);
+            if (json.Contains("ivf")) {
+                json["ivf"]["parallelism"].SetInt64(1);
+            }
+            one_request.params_str_ = json.Dump();
+            auto one_result = this->SearchWithRequest(one_request);
+            const auto count = std::min(request.topk_, one_result->GetDim());
+            if (count > 0) {
+                std::copy_n(one_result->GetIds(), count, ids + query_idx * request.topk_);
+                std::copy_n(
+                    one_result->GetDistances(), count, distances + query_idx * request.topk_);
+            }
+        };
+
+        if (this->thread_pool_ != nullptr and param.parallel_search_thread_count > 1) {
+            std::vector<std::future<void>> futures;
+            for (int64_t query_idx = 0; query_idx < num_queries; ++query_idx) {
+                auto future = this->thread_pool_->GeneralEnqueue(search_func, query_idx);
+                futures.emplace_back(std::move(future));
+            }
+            for (auto& future : futures) {
+                future.get();
+            }
+        } else {
+            for (int64_t query_idx = 0; query_idx < num_queries; ++query_idx) {
+                search_func(query_idx);
+            }
+        }
+        auto result = Dataset::Make()
+                          ->NumElements(num_queries)
+                          ->Dim(request.topk_)
+                          ->Ids(ids)
+                          ->Distances(distances)
+                          ->Owner(true, alloc);
         result->Statistics(stats.Dump());
         return result;
     }
@@ -2082,10 +2379,27 @@ void
 IVF::fill_location_map() {
     this->location_map_.resize(this->total_elements_ * buckets_per_data_);
     auto bucket_count = this->bucket_->bucket_count_;
+    if (precise_bucket_ != nullptr and precise_bucket_->GetBucketCount() != bucket_count) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "basic and precise bucket counts do not match");
+    }
     for (BucketIdType i = 0; i < bucket_count; ++i) {
         auto* ids = this->bucket_->GetInnerIds(i);
         auto bucket_size = this->bucket_->GetBucketSize(i);
+        InnerIdType* precise_ids = nullptr;
+        if (precise_bucket_ != nullptr) {
+            auto precise_bucket_size = precise_bucket_->GetBucketSize(i);
+            if (precise_bucket_size != bucket_size) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "basic and precise bucket sizes do not match");
+            }
+            precise_ids = precise_bucket_->GetInnerIds(i);
+        }
         for (uint64_t j = 0; j < bucket_size; ++j) {
+            if (precise_ids != nullptr and precise_ids[j] != ids[j]) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "basic and precise bucket inner ids do not match");
+            }
             if (ids[j] == std::numeric_limits<InnerIdType>::max()) {
                 continue;
             }
@@ -2145,9 +2459,34 @@ IVF::CalDistanceById(const float* query,
             }
         }
     }
-    if (this->use_reorder_ && calculate_precise_distance) {
+    if (this->use_reorder_ && calculate_precise_distance && reorder_codes_ != nullptr) {
         auto computer = this->reorder_codes_->FactoryComputer(query);
         this->reorder_codes_->Query(distances, computer, inner_ids.data(), count);
+    } else if (this->use_reorder_ && calculate_precise_distance && precise_bucket_ != nullptr) {
+        auto computer = this->precise_bucket_->FactoryComputer(query);
+        Vector<BucketIdType> bucket_ids(allocator_);
+        Vector<InnerIdType> offset_ids(allocator_);
+        Vector<int64_t> result_indices(allocator_);
+        bucket_ids.reserve(count);
+        offset_ids.reserve(count);
+        result_indices.reserve(count);
+        for (int64_t i = 0; i < count; ++i) {
+            if (validity[i]) {
+                auto [bucket_id, offset_id] = this->get_location(inner_ids[i]);
+                bucket_ids.emplace_back(bucket_id);
+                offset_ids.emplace_back(offset_id);
+                result_indices.emplace_back(i);
+            }
+        }
+        Vector<float> valid_distances(result_indices.size(), allocator_);
+        this->precise_bucket_->Query(valid_distances.data(),
+                                     computer,
+                                     bucket_ids.data(),
+                                     offset_ids.data(),
+                                     static_cast<InnerIdType>(result_indices.size()));
+        for (uint64_t i = 0; i < result_indices.size(); ++i) {
+            distances[result_indices[i]] = valid_distances[i];
+        }
     } else {
         auto computer = this->bucket_->FactoryComputer(query);
         for (int64_t i = 0; i < count; ++i) {
@@ -2175,15 +2514,16 @@ IVF::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_dis
     if (not success) {
         return -1.0F;
     }
-    if (this->use_reorder_ && calculate_precise_distance) {
+    if (this->use_reorder_ && calculate_precise_distance && reorder_codes_ != nullptr) {
         float dist = 0.0F;
         auto computer = this->reorder_codes_->FactoryComputer(query);
         this->reorder_codes_->Query(&dist, computer, &inner_id, 1);
         return dist;
     }
-    auto computer = this->bucket_->FactoryComputer(query);
+    auto codes = this->use_reorder_ && calculate_precise_distance ? precise_bucket_ : bucket_;
+    auto computer = codes->FactoryComputer(query);
     auto [bucket_id, offset_id] = this->get_location(inner_id);
-    return this->bucket_->QueryOneById(computer, bucket_id, offset_id);
+    return codes->QueryOneById(computer, bucket_id, offset_id);
 }
 
 void
@@ -2292,7 +2632,8 @@ IVF::cal_memory_usage() {
     auto memory = sizeof(IVF);
     memory += this->bucket_->GetMemoryUsage();
     if (use_reorder_) {
-        memory += this->reorder_codes_->GetMemoryUsage();
+        memory += precise_bucket_ != nullptr ? precise_bucket_->GetMemoryUsage()
+                                             : reorder_codes_->GetMemoryUsage();
     }
     if (this->extra_info_size_ > 0 and this->extra_infos_ != nullptr) {
         memory += this->extra_infos_->GetMemoryUsage();
@@ -2322,4 +2663,29 @@ IVF::GetMemoryUsage() const {
     return memory;
 }
 
+void
+IVF::RebuildBucketGraphs() {
+    if (graph_build_threshold_ <= 0) {
+        throw VsagException(
+            ErrorType::UNSUPPORTED_INDEX_OPERATION,
+            "RebuildIVFBucketGraphs: index was not configured with graph_build_threshold > 0");
+    }
+    if (common_param_.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "RebuildIVFBucketGraphs: only supports float32 data type");
+    }
+
+    // Build new graphs in temp storage first (exception safety)
+    auto old_graphs = std::move(bucket_graphs_);
+    bucket_graphs_.resize(old_graphs.size(), nullptr);
+
+    try {
+        this->build_bucket_graphs();
+        this->cal_memory_usage();
+    } catch (...) {
+        // Restore old graphs on failure
+        bucket_graphs_ = std::move(old_graphs);
+        throw;
+    }
+}
 }  // namespace vsag

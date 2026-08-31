@@ -14,9 +14,13 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
+#include <filesystem>
 #include <limits>
+#include <nlohmann/json.hpp>
 #include <sstream>
+#include <stdexcept>
 
 #include "functest.h"
 #include "storage/serialization_tags.h"
@@ -191,7 +195,175 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
 namespace {
 
 using vsag::test::EraseStreamingBlock;
+using vsag::test::FindStreamingBlock;
 using vsag::test::InsertUnknownStreamingBlock;
+
+class BlockSizeLimitGuard {
+public:
+    explicit BlockSizeLimitGuard(uint64_t block_size_limit)
+        : origin_size_(vsag::Options::Instance().block_size_limit()) {
+        vsag::Options::Instance().set_block_size_limit(block_size_limit);
+    }
+
+    ~BlockSizeLimitGuard() {
+        vsag::Options::Instance().set_block_size_limit(origin_size_);
+    }
+
+private:
+    uint64_t origin_size_;
+};
+
+class CountingMemoryReader : public vsag::Reader {
+public:
+    explicit CountingMemoryReader(std::string bytes, bool fail_reads = false)
+        : bytes_(std::move(bytes)), fail_reads_(fail_reads) {
+    }
+
+    void
+    Read(uint64_t offset, uint64_t len, void* dest) override {
+        read_calls_.fetch_add(1, std::memory_order_relaxed);
+        read_bytes_.fetch_add(len, std::memory_order_relaxed);
+        this->CheckRead(offset, len);
+        std::memcpy(dest, bytes_.data() + offset, len);
+    }
+
+    void
+    AsyncRead(uint64_t offset, uint64_t len, void* dest, const vsag::CallBack callback) override {
+        try {
+            this->Read(offset, len, dest);
+            callback(vsag::IOErrorCode::IO_SUCCESS, "success");
+        } catch (const std::exception& error) {
+            callback(vsag::IOErrorCode::IO_ERROR, error.what());
+        }
+    }
+
+    bool
+    MultiRead(uint8_t* dests,
+              const uint64_t* lens,
+              const uint64_t* offsets,
+              uint64_t count) override {
+        multi_read_calls_.fetch_add(1, std::memory_order_relaxed);
+        auto* dest = dests;
+        for (uint64_t i = 0; i < count; ++i) {
+            read_bytes_.fetch_add(lens[i], std::memory_order_relaxed);
+            this->CheckRead(offsets[i], lens[i]);
+            std::memcpy(dest, bytes_.data() + offsets[i], lens[i]);
+            dest += lens[i];
+        }
+        return true;
+    }
+
+    [[nodiscard]] uint64_t
+    Size() const override {
+        return bytes_.size();
+    }
+
+    void
+    ResetCounters() {
+        read_calls_.store(0, std::memory_order_relaxed);
+        multi_read_calls_.store(0, std::memory_order_relaxed);
+        read_bytes_.store(0, std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] uint64_t
+    ReadCalls() const {
+        return read_calls_.load(std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] uint64_t
+    MultiReadCalls() const {
+        return multi_read_calls_.load(std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] uint64_t
+    ReadBytes() const {
+        return read_bytes_.load(std::memory_order_relaxed);
+    }
+
+private:
+    void
+    CheckRead(uint64_t offset, uint64_t len) const {
+        if (fail_reads_) {
+            throw std::runtime_error("injected remote reader failure");
+        }
+        if (offset > bytes_.size() || len > bytes_.size() - offset) {
+            throw std::out_of_range("remote reader range is out of bounds");
+        }
+    }
+
+    const std::string bytes_;
+    const bool fail_reads_;
+    std::atomic<uint64_t> read_calls_{0};
+    std::atomic<uint64_t> multi_read_calls_{0};
+    std::atomic<uint64_t> read_bytes_{0};
+};
+
+std::string
+ExtractPreciseCodesPayload(const std::string& bytes, const std::string& precise_codes_layout) {
+    const auto tag = precise_codes_layout == "bucket"
+                         ? vsag::StreamSerializationTag::IVF_PRECISE_BUCKET
+                         : vsag::StreamSerializationTag::HIGH_PRECISION_CODES;
+    const auto block = FindStreamingBlock(bytes, tag);
+    REQUIRE(block.payload_size > 0);
+    return bytes.substr(block.payload_offset, block.payload_size);
+}
+
+std::string
+GenerateBucketPreciseParameters(const std::string& precise_io_type = "block_memory_io",
+                                const std::string& precise_file_path = "",
+                                int thread_count = 1,
+                                bool enable_read_cache = false) {
+    auto params = nlohmann::json::parse(IVFTestIndex::GenerateIVFBuildParametersString(
+        "l2", 16, "sq8,fp32", 16, "random", false, 1, false, thread_count));
+    params["index_param"]["precise_codes_layout"] = "bucket";
+    params["index_param"]["precise_io_type"] = precise_io_type;
+    params["index_param"]["precise_file_path"] = precise_file_path;
+    if (enable_read_cache) {
+        params["index_param"]["precise_enable_read_cache"] = true;
+        // BucketDataCell divides the cache budget across the 16 buckets. Allocate one
+        // 128-KiB cache page per bucket so this case exercises the read-cache path.
+        params["index_param"]["precise_cache_total_size"] = 16 * 128 * 1024;
+    }
+    return params.dump();
+}
+
+std::string
+GeneratePreciseParameters(const std::string& precise_codes_layout) {
+    if (precise_codes_layout == "bucket") {
+        return GenerateBucketPreciseParameters();
+    }
+    return IVFTestIndex::GenerateIVFBuildParametersString(
+        "l2", 16, "sq8,fp32", 16, "random", false, 1, false, 1);
+}
+
+void
+CheckBucketPreciseIndex(const TestIndex::IndexPtr& index,
+                        const TestDatasetPtr& dataset,
+                        const std::string& search_param) {
+    constexpr int64_t query_id = 3;
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors() + query_id * dataset->base_->GetDim())
+        ->Owner(false);
+
+    auto result = index->KnnSearch(query, 1, search_param);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == dataset->base_->GetIds()[query_id]);
+    REQUIRE(std::abs(result.value()->GetDistances()[0]) < 2e-6F);
+
+    auto threshold_search_param = nlohmann::json::parse(search_param);
+    threshold_search_param["threshold"] = -1.0F;
+    auto threshold_result = index->KnnSearch(query, 1, threshold_search_param.dump());
+    REQUIRE(threshold_result.has_value());
+    REQUIRE(threshold_result.value()->GetDim() == 0);
+
+    auto distance =
+        index->CalcDistanceById(query->GetFloat32Vectors(), dataset->base_->GetIds()[query_id]);
+    REQUIRE(distance.has_value());
+    REQUIRE(std::abs(distance.value()) < 2e-6F);
+}
 
 }  // namespace
 
@@ -312,7 +484,7 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
     auto origin_size = vsag::Options::Instance().block_size_limit();
     vsag::Options::Instance().set_block_size_limit(1024 * 1024 * 2);
 
-    auto param = IVFTestIndex::GenerateIVFBuildParametersString("l2", 16, "sq8", 32, "random");
+    auto param = IVFTestIndex::GenerateIVFBuildParametersString("l2", 16, "sq8,fp32", 32, "random");
     auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
     auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(16, 200, "l2");
     TestIndex::TestBuildIndex(index, dataset, true);
@@ -356,6 +528,408 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
     }
 
     vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE("IVF bucket precise rejects multiple postings per data", "[ft][ivf][reorder][pr]") {
+    auto params = nlohmann::json::parse(GenerateBucketPreciseParameters());
+    params["index_param"]["buckets_per_data"] = 2;
+
+    auto result = vsag::Factory::CreateIndex(IVFTestIndex::name, params.dump());
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(result.error().message.find(
+                "precise_codes_layout=bucket requires buckets_per_data=1") != std::string::npos);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
+                             "IVF bucket precise mirrors basic postings",
+                             "[ft][ivf][reorder][serialize][pr]") {
+    BlockSizeLimitGuard block_size_limit_guard(2ULL * 1024 * 1024);
+    constexpr int64_t dim = 16;
+    constexpr int64_t base_count = 128;
+    constexpr int64_t buckets_count = 16;
+    const auto precise_io_type = GENERATE("block_memory_io", "buffer_io");
+    const bool enable_read_cache = precise_io_type == std::string("buffer_io");
+    INFO(fmt::format("precise_io_type: {}", precise_io_type));
+    INFO(fmt::format("enable_read_cache: {}", enable_read_cache));
+
+    const auto precise_file_path =
+        precise_io_type == std::string("buffer_io") ? dir.GenerateRandomFile(false) : std::string();
+    const auto params =
+        GenerateBucketPreciseParameters(precise_io_type, precise_file_path, 1, enable_read_cache);
+    const auto search_param = fmt::format(search_param_tmp, buckets_count);
+    auto dataset = pool.GetDatasetAndCreate(dim, base_count, "l2");
+    auto index = TestFactory(name, params, true);
+
+    constexpr int64_t first_batch_count = base_count / 2;
+    auto first_batch = vsag::Dataset::Make()
+                           ->NumElements(first_batch_count)
+                           ->Dim(dim)
+                           ->Ids(dataset->base_->GetIds())
+                           ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+                           ->Owner(false);
+    auto second_batch =
+        vsag::Dataset::Make()
+            ->NumElements(base_count - first_batch_count)
+            ->Dim(dim)
+            ->Ids(dataset->base_->GetIds() + first_batch_count)
+            ->Float32Vectors(dataset->base_->GetFloat32Vectors() + first_batch_count * dim)
+            ->Owner(false);
+    REQUIRE(index->Build(first_batch).has_value());
+    REQUIRE(index->Add(second_batch).has_value());
+    REQUIRE(index->GetNumElements() == base_count);
+    CheckBucketPreciseIndex(index, dataset, search_param);
+    TestCalcDistanceById(index, dataset, 2e-6F, true);
+    TestBatchCalcDistanceById(index, dataset, 2e-6F, true);
+    TestMultiQueryBatchCalcDistanceById(index, dataset, 2e-6F, true);
+
+    const auto restored_file_path =
+        precise_io_type == std::string("buffer_io") ? dir.GenerateRandomFile(false) : std::string();
+    const auto restored_params =
+        GenerateBucketPreciseParameters(precise_io_type, restored_file_path, 1, enable_read_cache);
+    auto restored = TestFactory(name, restored_params, true);
+    TestSerializeBinarySet(index, restored, dataset, search_param, true);
+    CheckBucketPreciseIndex(restored, dataset, search_param);
+    TestCalcDistanceById(restored, dataset, 2e-6F, true);
+    TestBatchCalcDistanceById(restored, dataset, 2e-6F, true);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
+                             "IVF bucket precise streaming",
+                             "[ft][ivf][reorder][serialize][streaming][pr]") {
+    BlockSizeLimitGuard block_size_limit_guard(2ULL * 1024 * 1024);
+    constexpr int64_t dim = 16;
+    constexpr int64_t base_count = 128;
+    constexpr int64_t buckets_count = 16;
+    const auto params = GenerateBucketPreciseParameters("block_memory_io", "", 4);
+    const auto search_param = fmt::format(search_param_tmp, buckets_count);
+    auto dataset = pool.GetDatasetAndCreate(dim, base_count, "l2");
+    auto index = TestFactory(name, params, true);
+    TestBuildIndex(index, dataset, true);
+    REQUIRE(index->ExportModel().has_value());
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    const auto bytes = stream.str();
+
+    auto restored = TestFactory(name, params, true);
+    std::stringstream deserialize_stream(bytes);
+    REQUIRE(restored->DeserializeStreaming(deserialize_stream).has_value());
+    CheckBucketPreciseIndex(restored, dataset, search_param);
+    TestBatchCalcDistanceById(restored, dataset, 2e-6F, true);
+
+    std::stringstream load_stream(bytes);
+    auto loaded = vsag::Index::Load(load_stream, "{}");
+    REQUIRE(loaded.has_value());
+    CheckBucketPreciseIndex(loaded.value(), dataset, search_param);
+    TestBatchCalcDistanceById(loaded.value(), dataset, 2e-6F, true);
+
+    auto missing_precise =
+        EraseStreamingBlock(bytes, vsag::StreamSerializationTag::IVF_PRECISE_BUCKET);
+    auto invalid_restored = TestFactory(name, params, true);
+    std::stringstream missing_deserialize_stream(missing_precise);
+    REQUIRE_FALSE(invalid_restored->DeserializeStreaming(missing_deserialize_stream).has_value());
+    std::stringstream missing_load_stream(missing_precise);
+    REQUIRE_FALSE(vsag::Index::Load(missing_load_stream, "{}").has_value());
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
+                             "IVF precise codes load from an external reader",
+                             "[ft][ivf][reorder][serialize][streaming][reader_io][pr]") {
+    BlockSizeLimitGuard block_size_limit_guard(2ULL * 1024 * 1024);
+    constexpr int64_t dim = 16;
+    constexpr int64_t base_count = 128;
+    constexpr int64_t buckets_count = 16;
+    constexpr int64_t query_id = 3;
+    constexpr int64_t batch_count = 8;
+    constexpr uint64_t precise_cache_total_size = 16ULL * 128 * 1024;
+    const auto precise_codes_layout = GENERATE(std::string("flat"), std::string("bucket"));
+    const bool enable_read_cache = GENERATE(false, true);
+    CAPTURE(precise_codes_layout);
+    CAPTURE(enable_read_cache);
+
+    const auto params = GeneratePreciseParameters(precise_codes_layout);
+    const auto search_param = fmt::format(search_param_tmp, buckets_count);
+    auto dataset = pool.GetDatasetAndCreate(dim, base_count, "l2");
+    auto index = TestFactory(name, params, true);
+    TestBuildIndex(index, dataset, true);
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    const auto bytes = stream.str();
+    const auto precise_payload = ExtractPreciseCodesPayload(bytes, precise_codes_layout);
+    auto load_with_reader = [&](const std::shared_ptr<CountingMemoryReader>& reader) {
+        vsag::LoadParameters load_parameters;
+        load_parameters.Set("precise_io_type", "reader_io")
+            .Set("precise_enable_read_cache", enable_read_cache)
+            .Set("precise_cache_total_size", precise_cache_total_size)
+            .SetReader("precise_reader", reader);
+        std::stringstream load_stream(bytes);
+        return vsag::Index::Load(load_stream, load_parameters);
+    };
+    auto precise_reader = std::make_shared<CountingMemoryReader>(precise_payload);
+    auto loaded = load_with_reader(precise_reader);
+    REQUIRE(loaded.has_value());
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dim)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors() + query_id * dim)
+        ->Owner(false);
+    auto expected_search = index->KnnSearch(query, 1, search_param);
+    REQUIRE(expected_search.has_value());
+
+    // Loading validates the external block checksum through the Reader. Clear those accesses so
+    // the following count proves that querying, rather than loading, reads remote precise codes.
+    precise_reader->ResetCounters();
+    auto actual_search = loaded.value()->KnnSearch(query, 1, search_param);
+    REQUIRE(actual_search.has_value());
+    REQUIRE(actual_search.value()->GetDim() == expected_search.value()->GetDim());
+    REQUIRE(actual_search.value()->GetIds()[0] == expected_search.value()->GetIds()[0]);
+    REQUIRE(std::abs(actual_search.value()->GetDistances()[0] -
+                     expected_search.value()->GetDistances()[0]) < 2e-6F);
+    REQUIRE(precise_reader->ReadBytes() > 0);
+    if (enable_read_cache) {
+        REQUIRE(precise_reader->ReadCalls() + precise_reader->MultiReadCalls() > 0);
+        precise_reader->ResetCounters();
+        auto cached_search = loaded.value()->KnnSearch(query, 1, search_param);
+        REQUIRE(cached_search.has_value());
+        REQUIRE(precise_reader->ReadCalls() == 0);
+        REQUIRE(precise_reader->MultiReadCalls() == 0);
+        REQUIRE(precise_reader->ReadBytes() == 0);
+    } else {
+        REQUIRE(precise_reader->MultiReadCalls() > 0);
+    }
+
+    const auto* query_vector = query->GetFloat32Vectors();
+    const auto* ids = dataset->base_->GetIds();
+    auto expected_distances = index->CalcDistancesById(query_vector, ids, batch_count);
+    auto actual_distances = loaded.value()->CalcDistancesById(query_vector, ids, batch_count);
+    REQUIRE(expected_distances.has_value());
+    REQUIRE(actual_distances.has_value());
+    REQUIRE(actual_distances.value()->GetDim() == expected_distances.value()->GetDim());
+    for (int64_t i = 0; i < batch_count; ++i) {
+        REQUIRE(std::abs(actual_distances.value()->GetDistances()[i] -
+                         expected_distances.value()->GetDistances()[i]) < 2e-6F);
+    }
+
+    if (precise_codes_layout == "bucket" && enable_read_cache) {
+        auto fresh_reader = std::make_shared<CountingMemoryReader>(precise_payload);
+        auto fresh_loaded = load_with_reader(fresh_reader);
+        REQUIRE(fresh_loaded.has_value());
+
+        fresh_reader->ResetCounters();
+        auto first_distances =
+            fresh_loaded.value()->CalcDistancesById(query_vector, ids, batch_count);
+        REQUIRE(first_distances.has_value());
+        REQUIRE(fresh_reader->ReadCalls() + fresh_reader->MultiReadCalls() > 0);
+        REQUIRE(fresh_reader->ReadBytes() > 0);
+        for (int64_t i = 0; i < batch_count; ++i) {
+            REQUIRE(std::abs(first_distances.value()->GetDistances()[i] -
+                             expected_distances.value()->GetDistances()[i]) < 2e-6F);
+        }
+
+        fresh_reader->ResetCounters();
+        auto cached_distances =
+            fresh_loaded.value()->CalcDistancesById(query_vector, ids, batch_count);
+        REQUIRE(cached_distances.has_value());
+        REQUIRE(fresh_reader->ReadCalls() == 0);
+        REQUIRE(fresh_reader->MultiReadCalls() == 0);
+        REQUIRE(fresh_reader->ReadBytes() == 0);
+        for (int64_t i = 0; i < batch_count; ++i) {
+            REQUIRE(std::abs(cached_distances.value()->GetDistances()[i] -
+                             expected_distances.value()->GetDistances()[i]) < 2e-6F);
+        }
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
+                             "IVF precise codes validate their external reader",
+                             "[ft][ivf][reorder][serialize][streaming][reader_io][pr]") {
+    BlockSizeLimitGuard block_size_limit_guard(2ULL * 1024 * 1024);
+    const auto precise_codes_layout = GENERATE(std::string("flat"), std::string("bucket"));
+    CAPTURE(precise_codes_layout);
+    const auto params = GeneratePreciseParameters(precise_codes_layout);
+    auto dataset = pool.GetDatasetAndCreate(16, 128, "l2");
+    auto index = TestFactory(name, params, true);
+    TestBuildIndex(index, dataset, true);
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    const auto bytes = stream.str();
+    const auto precise_payload = ExtractPreciseCodesPayload(bytes, precise_codes_layout);
+
+    auto load_with_reader = [&bytes](const vsag::ReaderPtr& reader,
+                                     const std::string& precise_io_type = "reader_io") {
+        vsag::LoadParameters load_parameters;
+        if (not precise_io_type.empty()) {
+            load_parameters.Set("precise_io_type", precise_io_type);
+        }
+        load_parameters.SetReader("precise_reader", reader);
+        std::stringstream load_stream(bytes);
+        return vsag::Index::Load(load_stream, load_parameters);
+    };
+
+    SECTION("rejects a precise reader without an explicit reader io type") {
+        auto reader = std::make_shared<CountingMemoryReader>(precise_payload);
+        auto result = load_with_reader(reader, "");
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+
+    SECTION("rejects a precise reader combined with another io type") {
+        auto reader = std::make_shared<CountingMemoryReader>(precise_payload);
+        auto result = load_with_reader(reader, "memory_io");
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+
+    SECTION("rejects reader io without a precise reader") {
+        vsag::LoadParameters load_parameters;
+        load_parameters.Set("precise_io_type", "reader_io");
+        std::stringstream load_stream(bytes);
+        auto result = vsag::Index::Load(load_stream, load_parameters);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+
+    SECTION("validates precise reader load parameter types") {
+        const std::vector<std::string> invalid_parameters{
+            R"({"precise_io_type": 1})",
+            R"({"precise_io_type": "unknown_io"})",
+            R"({"precise_io_type": "reader_io", "precise_enable_read_cache": "true"})",
+            R"({"precise_io_type": "reader_io", "precise_cache_total_size": -1})",
+        };
+        for (const auto& parameters : invalid_parameters) {
+            vsag::LoadParameters load_parameters(parameters);
+            load_parameters.SetReader("precise_reader",
+                                      std::make_shared<CountingMemoryReader>(precise_payload));
+            std::stringstream load_stream(bytes);
+            auto result = vsag::Index::Load(load_stream, load_parameters);
+            REQUIRE_FALSE(result.has_value());
+            REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+        }
+    }
+
+    SECTION("rejects an invalid precise IO override without a reader") {
+        for (const auto& parameters :
+             {R"({"precise_io_type": 1})", R"({"precise_io_type": "unknown_io"})"}) {
+            std::stringstream load_stream(bytes);
+            auto result = vsag::Index::Load(load_stream, parameters);
+            REQUIRE_FALSE(result.has_value());
+            REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+        }
+    }
+
+    SECTION("rejects a null precise reader") {
+        auto result = load_with_reader(nullptr);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+
+    SECTION("rejects a precise reader with the wrong payload size") {
+        REQUIRE(precise_payload.size() > 1);
+        auto reader = std::make_shared<CountingMemoryReader>(
+            precise_payload.substr(0, precise_payload.size() - 1));
+        auto result = load_with_reader(reader);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+
+    SECTION("rejects a precise reader with a corrupted payload") {
+        REQUIRE_FALSE(precise_payload.empty());
+        auto corrupted_payload = precise_payload;
+        corrupted_payload[corrupted_payload.size() / 2] ^= 1;
+        auto reader = std::make_shared<CountingMemoryReader>(std::move(corrupted_payload));
+        auto result = load_with_reader(reader);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_BINARY);
+    }
+
+    SECTION("propagates a precise reader failure") {
+        auto reader = std::make_shared<CountingMemoryReader>(precise_payload, true);
+        auto result = load_with_reader(reader);
+        REQUIRE_FALSE(result.has_value());
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
+                             "IVF rejects a precise reader without precise codes",
+                             "[ft][ivf][reader_io][pr]") {
+    const auto params = GenerateIVFBuildParametersString("l2", 16, "sq8", 16, "random");
+    auto dataset = pool.GetDatasetAndCreate(16, 128, "l2");
+    auto index = TestFactory(name, params, true);
+    TestBuildIndex(index, dataset, true);
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    vsag::LoadParameters load_parameters;
+    load_parameters.Set("precise_io_type", "reader_io")
+        .SetReader("precise_reader", std::make_shared<CountingMemoryReader>(""));
+    std::stringstream load_stream(stream.str());
+    auto result = vsag::Index::Load(load_stream, load_parameters);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
+                             "IVF disk bucket precise",
+                             "[ft][ivf][reorder][serialize][streaming][pr]") {
+    BlockSizeLimitGuard block_size_limit_guard(2ULL * 1024 * 1024);
+    constexpr int64_t dim = 16;
+    constexpr int64_t base_count = 128;
+    const auto precise_file_path = dir.GenerateRandomFile(false);
+    const auto params = GenerateBucketPreciseParameters("buffer_io", precise_file_path);
+    auto dataset = pool.GetDatasetAndCreate(dim, base_count, "l2");
+    auto index = TestFactory(name, params, true);
+    TestBuildIndex(index, dataset, true);
+
+    SECTION("rejects mmap before creating the precise file") {
+        const auto mmap_file_path = dir.GenerateRandomFile(false);
+        const auto mmap_params = GenerateBucketPreciseParameters("mmap_io", mmap_file_path);
+        auto result = vsag::Factory::CreateIndex(name, mmap_params);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+        REQUIRE_FALSE(std::filesystem::exists(mmap_file_path));
+    }
+
+    SECTION("allows streaming deserialize into an independent precise file") {
+        std::stringstream stream;
+        REQUIRE(index->SerializeStreaming(stream).has_value());
+        const auto restored_file_path = dir.GenerateRandomFile(false);
+        const auto restored_params =
+            GenerateBucketPreciseParameters("buffer_io", restored_file_path);
+        auto restored = TestFactory(name, restored_params, true);
+        std::stringstream deserialize_stream(stream.str());
+        REQUIRE(restored->DeserializeStreaming(deserialize_stream).has_value());
+        const auto search_param = fmt::format(search_param_tmp, 16);
+        CheckBucketPreciseIndex(restored, dataset, search_param);
+        TestBatchCalcDistanceById(restored, dataset, 2e-6F, true);
+    }
+
+    const auto search_param = fmt::format(search_param_tmp, 16);
+    CheckBucketPreciseIndex(index, dataset, search_param);
+    TestBatchCalcDistanceById(index, dataset, 2e-6F, true);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
+                             "IVF bucket precise merge",
+                             "[ft][ivf][reorder][merge][pr]") {
+    BlockSizeLimitGuard block_size_limit_guard(2ULL * 1024 * 1024);
+    constexpr int64_t dim = 16;
+    constexpr int64_t base_count = 128;
+    constexpr int64_t buckets_count = 16;
+    const auto params = GenerateBucketPreciseParameters();
+    const auto search_param = fmt::format(search_param_tmp, buckets_count);
+    auto dataset = pool.GetDatasetAndCreate(dim, base_count, "l2");
+    auto model = TestFactory(name, params, true);
+    REQUIRE(model->Train(dataset->base_).has_value());
+
+    auto merged = TestMergeIndexWithSameModel(model, dataset, 3, true);
+    CheckBucketPreciseIndex(merged, dataset, search_param);
+    TestCalcDistanceById(merged, dataset, 2e-6F, true);
+    TestBatchCalcDistanceById(merged, dataset, 2e-6F, true);
 }
 }  // namespace fixtures
 
@@ -1386,7 +1960,9 @@ IVF_PR_DAILY_CASE("IVF Clone", "[ft][clone][ivf]", TestIVFClone)
 
 static void
 TestIVFRandomAllocator(const fixtures::IVFResourcePtr& resource) {
-    auto allocator = std::make_shared<fixtures::RandomAllocator>();
+    constexpr uint32_t allocator_seed = 1544291908U;
+    auto allocator = std::make_shared<fixtures::RandomAllocator>(allocator_seed);
+    INFO(fmt::format("allocator_seed: {}", allocator_seed));
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
@@ -2272,6 +2848,55 @@ TEST_CASE("IVF GraphBucketSearcher Add After Build Falls Back To Flat", "[ft][iv
     REQUIRE(result.value()->GetIds()[0] == dataset->base_->GetIds()[base_count - 1]);
 }
 
+TEST_CASE("IVF RebuildBucketGraphs Restores Graph After Add", "[ft][ivf][graph]") {
+    auto dim = 32;
+    auto metric = "l2";
+    auto base_count = 1000;
+    auto buckets_count = 10;
+    auto threshold = 30;
+    auto param = GenerateIVFGraphBuildParametersString(metric, dim, buckets_count, threshold);
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric);
+
+    auto index = vsag::Factory::CreateIndex("ivf", param);
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(dataset->base_).has_value());
+
+    auto add_count = 100;
+    auto added_dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, add_count, metric);
+    REQUIRE(index.value()->Add(added_dataset->base_).has_value());
+
+    auto rebuild_result = index.value()->RebuildIVFBucketGraphs();
+    REQUIRE(rebuild_result.has_value());
+
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    auto search_param = GenerateIVFGraphSearchParametersString(buckets_count, 100);
+    auto result = index.value()->KnnSearch(query, 10, search_param);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 10);
+
+    // Verify graph search was actually used (check statistics)
+    auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
+    REQUIRE(statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() > 0);
+}
+
+TEST_CASE("IVF RebuildBucketGraphs Disabled Threshold Rejected", "[ft][ivf][graph]") {
+    auto dim = 32;
+    auto metric = "l2";
+    auto base_count = 100;
+    auto buckets_count = 10;
+    auto param = fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
+        metric, dim, "fp32", buckets_count);
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric);
+
+    auto index = vsag::Factory::CreateIndex("ivf", param);
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(dataset->base_).has_value());
+
+    auto rebuild_result = index.value()->RebuildIVFBucketGraphs();
+    REQUIRE_FALSE(rebuild_result.has_value());
+    REQUIRE(rebuild_result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+}
+
 TEST_CASE("IVF GraphBucketSearcher Serialization", "[ft][ivf][graph][serialize]") {
     auto dim = 32;
     auto metric = "l2";
@@ -2428,6 +3053,12 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
                                     dataset->base_->GetFloat32Vectors() + dim);
     auto query = vsag::Dataset::Make();
     query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
+    std::vector<float> batch_query_vectors(query_vector.begin(), query_vector.end());
+    batch_query_vectors.insert(batch_query_vectors.end(),
+                               dataset->base_->GetFloat32Vectors() + dim,
+                               dataset->base_->GetFloat32Vectors() + 2 * dim);
+    auto batch_query = vsag::Dataset::Make();
+    batch_query->NumElements(2)->Dim(dim)->Float32Vectors(batch_query_vectors.data())->Owner(false);
 
     auto param = IVFTestIndex::GenerateIVFBuildParametersString("l2", dim, "fp32", buckets_count);
     auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
@@ -2539,12 +3170,92 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
         REQUIRE_FALSE(result.has_value());
     }
 
-    SECTION("reject multiple query entries") {
+    SECTION("batch queries use corresponding bucket ID lists") {
+        std::vector<int64_t> all_bucket_ids;
+        for (int64_t i = 0; i < buckets_count; ++i) {
+            all_bucket_ids.push_back(i);
+        }
         vsag::SearchRequest request;
-        request.query_ = query;
+        request.query_ = batch_query;
+        request.topk_ = 10;
+        request.params_str_ = search_param_all;
+        request.bucket_ids_ = {all_bucket_ids, all_bucket_ids};
+        auto batch_result = index->SearchWithRequest(request);
+        REQUIRE(batch_result.has_value());
+        REQUIRE(batch_result.value()->GetNumElements() == 2);
+        REQUIRE(batch_result.value()->GetDim() == request.topk_);
+
+        vsag::SearchRequest first_request = request;
+        first_request.query_ = query;
+        first_request.bucket_ids_ = {all_bucket_ids};
+        auto first_result = index->SearchWithRequest(first_request);
+        REQUIRE(first_result.has_value());
+
+        auto second_query = vsag::Dataset::Make();
+        second_query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(batch_query_vectors.data() + dim)
+            ->Owner(false);
+        vsag::SearchRequest second_request = first_request;
+        second_request.query_ = second_query;
+        auto second_result = index->SearchWithRequest(second_request);
+        REQUIRE(second_result.has_value());
+
+        const auto* batch_ids = batch_result.value()->GetIds();
+        const auto* batch_dists = batch_result.value()->GetDistances();
+        for (int64_t i = 0; i < request.topk_; ++i) {
+            REQUIRE(batch_ids[i] == first_result.value()->GetIds()[i]);
+            REQUIRE(batch_dists[i] == first_result.value()->GetDistances()[i]);
+            REQUIRE(batch_ids[request.topk_ + i] == second_result.value()->GetIds()[i]);
+            REQUIRE(batch_dists[request.topk_ + i] == second_result.value()->GetDistances()[i]);
+        }
+    }
+
+    SECTION("batch queries with default routing (no bucket_ids)") {
+        vsag::SearchRequest request;
+        request.query_ = batch_query;
+        request.topk_ = 10;
+        request.params_str_ = search_param_all;
+        auto batch_result = index->SearchWithRequest(request);
+        REQUIRE(batch_result.has_value());
+        REQUIRE(batch_result.value()->GetNumElements() == 2);
+        REQUIRE(batch_result.value()->GetDim() == request.topk_);
+
+        vsag::SearchRequest single_req;
+        single_req.query_ = query;
+        single_req.topk_ = 10;
+        single_req.params_str_ = search_param_all;
+        auto first_result = index->SearchWithRequest(single_req);
+        REQUIRE(first_result.has_value());
+
+        auto second_query = vsag::Dataset::Make();
+        second_query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(batch_query_vectors.data() + dim)
+            ->Owner(false);
+        vsag::SearchRequest second_req;
+        second_req.query_ = second_query;
+        second_req.topk_ = 10;
+        second_req.params_str_ = search_param_all;
+        auto second_result = index->SearchWithRequest(second_req);
+        REQUIRE(second_result.has_value());
+
+        const auto* batch_ids = batch_result.value()->GetIds();
+        const auto* batch_dists = batch_result.value()->GetDistances();
+        for (int64_t i = 0; i < request.topk_; ++i) {
+            REQUIRE(batch_ids[i] == first_result.value()->GetIds()[i]);
+            REQUIRE(batch_dists[i] == first_result.value()->GetDistances()[i]);
+            REQUIRE(batch_ids[request.topk_ + i] == second_result.value()->GetIds()[i]);
+            REQUIRE(batch_dists[request.topk_ + i] == second_result.value()->GetDistances()[i]);
+        }
+    }
+
+    SECTION("reject bucket ID lists that do not match query count") {
+        vsag::SearchRequest request;
+        request.query_ = batch_query;
         request.topk_ = 10;
         request.params_str_ = search_param;
-        request.bucket_ids_ = {{0}, {1}};
+        request.bucket_ids_ = {{0}};
         auto result = index->SearchWithRequest(request);
         REQUIRE_FALSE(result.has_value());
     }
@@ -2566,5 +3277,65 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
         request.bucket_ids_ = {{0}};
         auto result = index->SearchWithRequest(request);
         REQUIRE_FALSE(result.has_value());
+    }
+}
+
+TEST_CASE("IVF Batch Search Parallel", "[ft][ivf][pr]") {
+    constexpr auto dim = 32;
+    constexpr auto buckets_count = 10;
+    constexpr auto base_count = 200;
+    constexpr auto num_queries = 4;
+
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, "l2");
+
+    auto param = fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
+        "l2", dim, "fp32", buckets_count, "kmeans", false, 1, false, 2);
+    auto index = vsag::Factory::CreateIndex("ivf", param);
+    REQUIRE(index.has_value());
+    auto build_result = index.value()->Build(dataset->base_);
+    REQUIRE(build_result.has_value());
+
+    std::vector<float> batch_query_vectors;
+    for (int64_t i = 0; i < num_queries; ++i) {
+        batch_query_vectors.insert(batch_query_vectors.end(),
+                                   dataset->base_->GetFloat32Vectors() + i * dim,
+                                   dataset->base_->GetFloat32Vectors() + (i + 1) * dim);
+    }
+    auto batch_query = vsag::Dataset::Make();
+    batch_query->NumElements(num_queries)
+        ->Dim(dim)
+        ->Float32Vectors(batch_query_vectors.data())
+        ->Owner(false);
+
+    auto search_param_serial = R"({"ivf":{"scan_buckets_count":5,"parallelism":1}})";
+    auto search_param_parallel = R"({"ivf":{"scan_buckets_count":5,"parallelism":2}})";
+
+    vsag::SearchRequest serial_request;
+    serial_request.query_ = batch_query;
+    serial_request.topk_ = 10;
+    serial_request.params_str_ = search_param_serial;
+    auto serial_result = index.value()->SearchWithRequest(serial_request);
+    REQUIRE(serial_result.has_value());
+
+    vsag::SearchRequest parallel_request;
+    parallel_request.query_ = batch_query;
+    parallel_request.topk_ = 10;
+    parallel_request.params_str_ = search_param_parallel;
+    auto parallel_result = index.value()->SearchWithRequest(parallel_request);
+    REQUIRE(parallel_result.has_value());
+
+    REQUIRE(serial_result.value()->GetNumElements() == num_queries);
+    REQUIRE(parallel_result.value()->GetNumElements() == num_queries);
+    REQUIRE(serial_result.value()->GetDim() == 10);
+    REQUIRE(parallel_result.value()->GetDim() == 10);
+
+    const auto* serial_ids = serial_result.value()->GetIds();
+    const auto* serial_dists = serial_result.value()->GetDistances();
+    const auto* parallel_ids = parallel_result.value()->GetIds();
+    const auto* parallel_dists = parallel_result.value()->GetDistances();
+
+    for (int64_t i = 0; i < num_queries * 10; ++i) {
+        REQUIRE(serial_ids[i] == parallel_ids[i]);
+        REQUIRE(serial_dists[i] == parallel_dists[i]);
     }
 }

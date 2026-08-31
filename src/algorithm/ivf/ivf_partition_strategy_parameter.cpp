@@ -41,6 +41,18 @@ IVFPartitionStrategyParameters::FromJson(const JsonType& json) {
                IVF_PARTITION_STRATEGY_TYPE_GNO_IMI) {
         this->partition_strategy_type = IVFPartitionStrategyType::GNO_IMI;
     }
+    if (json.Contains(IVF_ROUTE_MAX_DEGREE_KEY)) {
+        this->route_max_degree = static_cast<int32_t>(json[IVF_ROUTE_MAX_DEGREE_KEY].GetInt());
+        CHECK_ARGUMENT(this->route_max_degree > 0, "route_max_degree must be positive");
+    }
+    if (json.Contains(IVF_ROUTE_EF_CONSTRUCTION_KEY)) {
+        this->route_ef_construction =
+            static_cast<int32_t>(json[IVF_ROUTE_EF_CONSTRUCTION_KEY].GetInt());
+        CHECK_ARGUMENT(this->route_ef_construction > 0, "route_ef_construction must be positive");
+    }
+    CHECK_ARGUMENT(this->route_max_degree >= 4, "route_max_degree must be at least 4");
+    CHECK_ARGUMENT(this->route_ef_construction >= this->route_max_degree,
+                   "route_ef_construction must be no less than route_max_degree");
 
     this->gnoimi_param = std::make_shared<GNOIMIParameter>();
     if (this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI) {
@@ -67,6 +79,8 @@ IVFPartitionStrategyParameters::ToJson() const {
     } else if (this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI) {
         json[IVF_PARTITION_STRATEGY_TYPE_KEY].SetString(IVF_PARTITION_STRATEGY_TYPE_GNO_IMI);
     }
+    json[IVF_ROUTE_MAX_DEGREE_KEY].SetInt(this->route_max_degree);
+    json[IVF_ROUTE_EF_CONSTRUCTION_KEY].SetInt(this->route_ef_construction);
     if (this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI) {
         json[IVF_PARTITION_STRATEGY_TYPE_GNO_IMI].SetJson(this->gnoimi_param->ToJson());
     }
@@ -77,6 +91,8 @@ bool
 IVFPartitionStrategyParameters::CheckCompatibility(const ParamPtr& other) const {
     PARAM_CAST_OR_RETURN(IVFPartitionStrategyParameters, p, other);
     CHECK_FIELD_EQ(*this, *p, partition_strategy_type);
+    CHECK_FIELD_EQ(*this, *p, route_max_degree);
+    CHECK_FIELD_EQ(*this, *p, route_ef_construction);
     CHECK_SUB_PARAM(*this, *p, gnoimi_param);
     return true;
 }

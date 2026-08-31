@@ -35,7 +35,6 @@ jobs:
           find ./build -type f -name "*.cpp" -exec rm -f {} +
           find ./build -type f -name "*.a" -exec rm -f {} +
           rm -rf ./build/hdf5
-          rm -rf ./build/boost
           rm -rf ./build/tools
       - name: Save Test
         uses: actions/upload-artifact@v5
@@ -113,7 +112,6 @@ jobs:
           find ./build -type f -name "*.a" -exec rm -f {} +
           find ./build -type d -name "*.dSYM" -prune -exec rm -rf {} +
           rm -rf ./build/hdf5
-          rm -rf ./build/boost
           rm -rf ./build/tools
       - name: Save Test
         uses: actions/upload-artifact@v5

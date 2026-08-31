@@ -81,7 +81,7 @@ jobs:
           cd ${GITHUB_WORKSPACE}/vsag_tag
           
           files=()
-          for algo in hgraph hnsw; do
+          for algo in hgraph; do
             for ext in index build.json search.json; do
               file="${VERSION}_${algo}_${ext}"
               if [ -f "$file" ]; then

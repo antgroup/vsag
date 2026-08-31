@@ -69,12 +69,15 @@ mce::clear_must_node(uint32_t u, std::vector<bool>& must_contain_nodes) {
 }
 
 bool
-mce::try_save_must_clique(uint32_t ER, uint32_t EC, std::vector<bool>& must_contain_nodes) {
+mce::try_save_must_clique(uint32_t ER,
+                          uint32_t EC,
+                          uint32_t EP,
+                          std::vector<bool>& must_contain_nodes) {
     if (should_stop_mce())
         return false;
     if (1 + EC + ER < threshold)
         return false;
-    if (!state_has_must(ER, EC, 0, must_contain_nodes))
+    if (!state_has_must(ER, EC, EP, must_contain_nodes))
         return false;
     if (max_clique_cnt_save >= max_clique_cnt_limit) {
         stop_search = true;
@@ -96,11 +99,19 @@ mce::try_save_must_clique(uint32_t ER, uint32_t EC, std::vector<bool>& must_cont
         uint32_t u = g.p_edge[g.p_idx[now_u] + r_v3[i]];
         (*max_cliques)[max_clique_cnt_save].push_back(g.mp[u]);
     }
+    for (uint32_t i = 0; i < EP; i++) {
+        uint32_t u = g.p_edge[g.p_idx[now_u] + p_v3[i]];
+        (*max_cliques)[max_clique_cnt_save].push_back(g.mp[u]);
+    }
+
     for (uint32_t i = 0; i < EC; i++) {
         clear_must_node(g.p_edge[g.p_idx[now_u] + c_v3[i]], must_contain_nodes);
     }
     for (uint32_t i = 0; i < ER; i++) {
         clear_must_node(g.p_edge[g.p_idx[now_u] + r_v3[i]], must_contain_nodes);
+    }
+    for (uint32_t i = 0; i < EP; i++) {
+        clear_must_node(g.p_edge[g.p_idx[now_u] + p_v3[i]], must_contain_nodes);
     }
     max_clique_cnt_save++;
     stats.saved_cliques++;
@@ -487,7 +498,7 @@ mce::bk_tomita_rec_ccr_v3_must_contain(uint32_t deep,
         // for(uint32_t i = 0; i < ER; i++) printf("%u ", g.p_edge[g.p_idx[now_u]+r_v3[i]]);
         // printf("\n");
 
-        try_save_must_clique(ER, EC, must_contain_nodes);
+        try_save_must_clique(ER, EC, EP, must_contain_nodes);
 
         // }
         cnt++;
@@ -725,7 +736,7 @@ mce::bk_tomita_rec_ccr_v3_must_contain(uint32_t deep,
             // for(uint32_t i = 0; i < ER; i++) printf("%u ", g.p_edge[g.p_idx[now_u]+r_v3[i]]);
             // printf("\n");
 
-            try_save_must_clique(ER, EC, must_contain_nodes);
+            try_save_must_clique(ER, EC, EP, must_contain_nodes);
             // }
             cnt++;
             if (stop_search)

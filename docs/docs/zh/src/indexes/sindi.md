@@ -4,8 +4,8 @@
 
 SINDI（**S**parse **IN**verted **D**ense **I**ndex）是 VSAG 面向 **稀疏向量** 的索引——
 例如 BM25、SPLADE 以及其他学习稀疏（learned sparse）编码器产出的向量。与稠密索引
-（HGraph、IVF）不同，SINDI 直接在“词项-权重”对上工作，是 VSAG 中唯一接受
-`dtype: "sparse"` 的索引。
+（HGraph、IVF）不同，SINDI 直接在“词项-权重”对上工作，是 VSAG 中接受
+`dtype: "sparse"` 的索引之一。
 
 - 源码：`src/algorithm/sindi/`
 - 示例：[`examples/cpp/109_index_sindi.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/109_index_sindi.cpp)
@@ -22,6 +22,8 @@ SINDI（**S**parse **IN**verted **D**ense **I**ndex）是 VSAG 面向 **稀疏�
    DMQ 正排以降低重排内存。
 
 返回的距离为 `1 - inner_product`，使结果与稠密索引一样按升序排序。
+
+需要同时支持内存与磁盘 I/O 时，请选择 [SINDI_V2](sindi_v2.md)。
 
 ## 快速开始
 
@@ -132,12 +134,16 @@ auto result = index->KnnSearch(
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `n_candidate` | int | `0` | 候选堆大小。为 `0` 时自动取 `SPARSE_AMPLIFICATION_FACTOR · topk`（500 倍）；若显式设置，须满足 `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk` |
+| `filter_callback_limit` | uint64 | `0` | 单次带过滤检索最多调用用户 `Filter::CheckValid` 回调的次数；`0` 表示不限制。删除 ID 过滤器等内部检查不计数。达到正数上限时，在正常处理最后一次回调结果后停止候选及后续窗口扫描，并返回已经通过过滤的候选，因此结果可能不完整。该限制同时适用于 KNN、范围检索以及常规 API 和 `SearchWithRequest` |
 | `query_prune_ratio` | float | `0.0` | 查询时丢弃权重最低查询项的比例，取值范围为 `[0.0, 1.0)` |
 | `term_prune_ratio` | float | `0.0` | 每条倒排链中按 value 丢弃低权 posting 的比例，取值范围为 `[0.0, 1.0)` |
 | `term_retain_threshold` | uint64 | `0` | 单个 term 在所有 window 中最多扫描的 posting 总数；`0` 表示关闭此限制，正数使每个 window 的非空 posting list 最多扫描 `max(1, floor(threshold / window_count))` 个 |
 
 合并 ratio 与 threshold 限制后，每条非空倒排链至少扫描一个 posting。
 
+同一 window 内的单 term posting 先按实际存储值降序排列，值相同时按内部 doc id
+升序排列。ratio 和 threshold 同时生效时，实际扫描
+`floor(list_size · (1 - ratio))` 与 `floor(threshold / window_count)` 中的较小值。
 SINDI 会根据构建阶段的 `doc_prune_ratio` 与检索阶段的 `query_prune_ratio`
 自动选择堆插入策略。按当前 `0.1` 阈值，当两个比例都 `<= 0.1` 时，SINDI 使用
 基于距离数组的入堆路径；只要任一比例大于 `0.1`，就使用基于 term-list 的入堆路径。
@@ -146,7 +152,7 @@ SINDI 会根据构建阶段的 `doc_prune_ratio` 与检索阶段的 `query_prune
 ```cpp
 auto result = index->KnnSearch(
     query, topk,
-    R"({"sindi": {"n_candidate": 200, "query_prune_ratio": 0.1}})").value();
+    R"({"sindi": {"n_candidate": 200, "filter_callback_limit": 10000, "query_prune_ratio": 0.1}})").value();
 ```
 
 ## 何时选择 SINDI

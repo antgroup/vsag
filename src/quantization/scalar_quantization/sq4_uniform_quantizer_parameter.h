@@ -35,6 +35,9 @@ public:
     bool
     CheckCompatibility(const vsag::ParamPtr& other) const override;
 
+    static void
+    ValidateTruncRate(float trunc_rate);
+
 public:
     float trunc_rate_{0.05F};
 };

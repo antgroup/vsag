@@ -92,7 +92,7 @@ public:
     /**
      * @brief Calculate distance by ID using DatasetPtr.
      *
-        * Suitable for sparse vector indexes (SINDI) where vectors
+     * Suitable for sparse vector indexes (SINDI, SINDI_V2) where vectors
      * cannot be represented as a simple float pointer. The Dataset should
      * contain sparse vectors via GetSparseVectors().
      * For dense vector indexes, this overload is also available via default
@@ -117,9 +117,9 @@ public:
     /**
      * @brief Calculate distance by ID using raw float pointer.
      *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * Suitable for dense vector indexes such as HGraph, BruteForce, IVF, and Pyramid.
      * The query must be a contiguous float32 array with dimension matching the index.
-        * For sparse vector indexes (SINDI), this overload is not applicable.
+     * For sparse vector indexes (SINDI, SINDI_V2), this overload is not applicable.
      *
      * Default implementation throws exception; dense indexes must override.
      *
@@ -138,7 +138,7 @@ public:
     /**
      * @brief Calculate distances by IDs (batch) using raw float pointer.
      *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * Suitable for dense vector indexes such as HGraph, BruteForce, IVF, and Pyramid.
      * The query must be a contiguous float32 array. For sparse vector indexes,
      * this overload is not applicable.
      *
@@ -161,7 +161,7 @@ public:
     /**
      * @brief Calculate distances by IDs (batch) using DatasetPtr, supports multi-query.
      *
-     * Suitable for sparse vector indexes (SINDI) where vectors
+     * Suitable for sparse vector indexes (SINDI, SINDI_V2) where vectors
      * cannot be represented as a simple float pointer. The Dataset should
      * contain sparse vectors via GetSparseVectors().
      * For dense vector indexes, this overload is also available via default
@@ -519,6 +519,12 @@ public:
     }
 
     virtual void
+    RebuildBucketGraphs() {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support RebuildBucketGraphs");
+    }
+
+    virtual void
     Train(const DatasetPtr& base){};
 
     virtual void
@@ -546,6 +552,12 @@ public:
     }
 
 protected:
+    DatasetPtr
+    get_data_by_ids_with_flag(const int64_t* ids,
+                              int64_t count,
+                              uint64_t selected_data_flag,
+                              Vector<InnerIdType>& inner_ids) const;
+
     virtual MetadataPtr
     collect_streaming_header() const;
 

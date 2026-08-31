@@ -65,8 +65,9 @@ auto loaded = vsag::Index::Load(in, load_parameters).value();
 parameters 用来控制已支持 block 的加载策略；参数对象既可以从 JSON 字符串构造，也可以通过
 `SetReader` 携带 reader 对象。不支持的策略会返回错误，不会静默 fallback。当前该 API 支持 streaming
 BruteForce、HGraph、IVF、SINDI 和 Pyramid 索引。其中 BruteForce 支持有限的 block placement 策略；
-HGraph 支持通过 `precise_reader` 将 `high_precision_codes` 绑定到外部 reader；IVF、SINDI 和 Pyramid
-目前会把写出的 streaming blocks 加载到内存。
+HGraph 支持通过 `precise_reader` 将 `high_precision_codes` 绑定到外部 reader；IVF 的两种
+精排 codes 布局也都支持外部 reader；SINDI 和 Pyramid 目前会把写出的 streaming blocks
+加载到内存。
 
 ## 文件布局
 
@@ -157,11 +158,19 @@ IVF 按顺序写入以下 streaming blocks：
 | `ivf_bucket` | 倒排列表使用的 bucket datacell 数据 | 是 |
 | `ivf_partition_strategy` | partition strategy 状态，例如已训练的中心点 | 是 |
 | `label_table` | 外部 label 和 label remap | 是 |
-| `high_precision_codes` | IVF reorder 开启时的 reorder codes | 条件必需 |
+| `high_precision_codes` | IVF reorder 使用 `flat` 布局时的精排 codes | 条件必需 |
+| `ivf_precise_bucket` | IVF 使用 `bucket` 布局时与倒排桶对齐的精排 codes | 条件必需 |
 | `attribute_filter` | 开启属性过滤时写入的可选属性过滤索引 | 条件必需 |
 
+`Load` 可以把任一种精排 codes block 绑定到外部 reader。设置
+`precise_io_type: "reader_io"` 并提供 `precise_reader`；`flat` 布局的 reader 必须恰好
+对应 `high_precision_codes` payload，`bucket` 布局则对应 `ivf_precise_bucket` payload。
+`Load` 会先校验 reader 的大小和 checksum，再返回可查询的索引。
+`precise_enable_read_cache` 和 `precise_cache_total_size` 用于配置远程精排 codes 的通用读缓存。
+
 `DeserializeStreaming` 会恢复完整的内存 IVF 索引。`Index::Load` 可以直接从 streaming metadata
-创建 IVF 索引对象，当前会把写出的 IVF blocks 都加载到内存中。
+创建 IVF 索引对象。默认情况下会把 IVF blocks 加载到内存；使用 reader 的精排 codes
+会保留在外部。两种精排 codes block 互斥，由 `precise_codes_layout` 选择。
 
 ## SINDI Blocks
 

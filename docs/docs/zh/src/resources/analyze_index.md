@@ -16,16 +16,21 @@ AnalyzeIndexBySearch(const SearchRequest& request);
 
 - **输入**：`SearchRequest`（查询数据集 + `topk` + 搜索参数 JSON）。
 - **输出**：JSON 字符串，包含基于查询的动态指标。
-- **支持的索引类型**：当前支持 `HGraph`、`IVF` 与 `SINDI`。未实现该接口的
+- **支持的索引类型**：当前支持 `HGraph`、`IVF`、`Pyramid` 与 `SINDI`。未实现该接口的
   索引在调用时会抛出异常。
 
 该接口与 `Index::GetStats()` 互为补充：后者无需查询数据，只输出索引的静态结构指标。
 对于基于图的索引，度分布、入口点质量、子索引召回率以及低召回热点节点等图健康度信息，
 通过 `GetStats()` 而非 `AnalyzeIndexBySearch` 输出。
 
-Pyramid 只通过 `GetStats()` 暴露其 analyzer，目前没有覆写
-`AnalyzeIndexBySearch`。因此对 Pyramid 索引调用该接口，或使用
-`analyze_index --query_path`，都会抛出 `UNSUPPORTED_INDEX_OPERATION`。
+Pyramid 的查询分析遵循与 `KnnSearch` 相同的路径限定语义。对于默认 hierarchy，
+使用 `Dataset::Paths` 为每条 query 设置路径；对于命名 hierarchy，使用
+`Dataset::Paths(hierarchy_name, paths)` 设置路径，并在 Pyramid 搜索参数中选择该
+hierarchy。当选中 hierarchy 的根节点为 `NO_INDEX` 时必须提供路径。批量 query
+数据集在需要或提供路径时，必须为每条 query 提供对应路径。Pyramid 只在每条 query 的
+hierarchy 和路径所允许的向量中计算真值集，并排除已标记删除的向量。Pyramid 查询分析
+目前只支持 KNN 请求，并使用 `SearchRequest` 中的 `query_`、`topk_` 和 `params_str_`；不支持
+带过滤条件或 iterator 的请求。分析期间应保持索引稳定，不要并发执行 add 或 remove。
 
 ### `GetStats()` 输出的静态指标
 
@@ -101,6 +106,16 @@ Pyramid 只通过 `GetStats()` 暴露其 analyzer，目前没有覆写
 | `quantization_bias_ratio_query` | 查询阶段观察到的量化距离偏差 |
 | `quantization_inversion_count_rate_query` | 查询阶段量化导致的距离顺序倒置率 |
 
+#### Pyramid 指标
+
+| 指标 | 含义 |
+| --- | --- |
+| `recall_query` | 搜索结果相对每条 query 所选 hierarchy 和路径内精确真值集的召回率 |
+| `avg_distance_query` | 路径范围内精确真值邻居的平均距离 |
+| `time_cost_query` | 平均单次查询耗时，单位毫秒 |
+| `quantization_error_query` | base 量化引入的查询距离误差；开启 reorder 时输出 |
+| `quantization_inversion_ratio_query` | base 量化引入的查询顺序倒置率；开启 reorder 时输出 |
+
 #### SINDI 指标
 
 | 指标 | 含义 |
@@ -134,6 +149,9 @@ SINDI 动态召回和距离质量指标需要真值集。可通过 `groundtruth_
 | `HGraph` | `quantization_inversion_count_rate_query` | 搜索阶段量化引起的距离顺序倒置率 |
 | `IVF` | `quantization_bias_ratio` | 搜索阶段观察到的量化偏差（仅在 `use_reorder_` 启用时输出） |
 | `IVF` | `quantization_inversion_count_rate` | 搜索阶段量化引起的距离顺序倒置率（仅在 `use_reorder_` 启用时输出） |
+| `Pyramid` | `quantization_error_query` | 搜索阶段的量化距离误差（仅在开启 reorder 时输出） |
+| `Pyramid` | `quantization_inversion_ratio_query` | 搜索阶段量化引起的顺序倒置率（仅在开启 reorder 时输出） |
+
 静态结构和健康度信息（包括度分布、入口点分析与 Pyramid 子索引质量）请查看
 `GetStats()` 的 JSON 输出。
 
@@ -162,7 +180,7 @@ cmake --build build-release -j
 | --- | --- | --- | --- |
 | `--index_path` | `-i` | **是** | 待分析的 VSAG 索引文件路径。 |
 | `--build_parameter` | `-bp` | 否 | 加载索引时使用的构建参数（JSON）。默认使用索引文件内嵌的原始参数。 |
-| `--query_path` | `-qp` | 否 | 查询数据集路径。如果未提供，则只进行静态分析。 |
+| `--query_path` | `-qp` | 否 | 查询向量数据集的文件路径，不是 Pyramid hierarchy 路径元数据。如果未提供，则只进行静态分析。 |
 | `--query_data_type` | | 否 | 查询数据类型：`auto`、`dense` 或 `sparse`。`auto` 会对 SINDI 使用 sparse 加载。 |
 | `--base_path` | | 否 | SINDI 分析可选的 sparse CSR 原始 base 数据集路径。 |
 | `--groundtruth_path` | | 否 | SINDI 可选的 `.dev.gt` 真值集路径；提供后直接复用。 |
@@ -172,6 +190,11 @@ cmake --build build-release -j
 
 查询文件格式为 `tools/analyze_index/analyze_index.cpp` 中 `load_query()` 所读取的简单二进制
 布局：`(uint32 rows, uint32 cols, float32 data...)`。
+
+该 dense query 格式只包含向量。当前工具无法向加载后的 `Dataset` 附加默认或命名
+Pyramid hierarchy 路径。因此，工具无法表达按路径限定的 Pyramid query，也无法在选中
+hierarchy 的根节点为 `NO_INDEX` 时运行动态分析。通过 `GetStats()` 执行的 Pyramid 静态分析
+仍可正常使用。如需按路径执行动态分析，请调用 C++ 接口并为 query 数据集设置路径。
 
 SINDI 的 query/base 数据使用 CSR sparse 二进制布局：`int64 nrow, int64 ncol, int64 nnz`，
 随后是 `int64 indptr[nrow + 1]`、`int32 indices[nnz]` 和 `float32 data[nnz]`。SINDI 真值集

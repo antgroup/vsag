@@ -85,6 +85,7 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
         if (not expected_success) {
             return;
         }
+        REQUIRE(result.has_value());
         for (auto j = 0; j < gt_topK; ++j) {
             REQUIRE(std::abs(gts->GetDistances()[i * gt_topK + j] -
                              result.value()->GetDistances()[j]) < error);

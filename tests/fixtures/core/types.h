@@ -25,41 +25,41 @@
 namespace fixtures {
 
 /**
- * @struct comparable_float_t
+ * @struct ComparableFloatT
  * @brief Float wrapper that compares values with tolerance for relative error.
  * Useful for comparing distances, recall values, and timing measurements in tests.
  */
-struct comparable_float_t {
+struct ComparableFloatT {
     /**
-     * @brief Constructs a comparable_float_t from a float value.
+     * @brief Constructs a ComparableFloatT from a float value.
      * @param val The float value to wrap.
      */
-    comparable_float_t(float val);
+    ComparableFloatT(float val);
 
     /**
-     * @brief Compares two comparable_float_t values with tolerance.
+     * @brief Compares two ComparableFloatT values with tolerance.
      * @param d The other value to compare against.
      * @return True if values are within epsilon tolerance.
      */
     bool
-    operator==(const comparable_float_t& d) const;
+    operator==(const ComparableFloatT& d) const;
 
     /**
      * @brief Outputs the value to a stream.
      * @param os The output stream.
-     * @param obj The comparable_float_t to output.
+     * @param obj The ComparableFloatT to output.
      * @return Reference to the output stream.
      */
     friend std::ostream&
-    operator<<(std::ostream& os, const comparable_float_t& obj);
+    operator<<(std::ostream& os, const ComparableFloatT& obj);
 
     float value;                  // The wrapped float value.
     const double epsilon = 2e-6;  // Tolerance for comparison.
 };
 
-using dist_t = comparable_float_t;
-using time_t = comparable_float_t;
-using recall_t = comparable_float_t;
+using dist_t = ComparableFloatT;
+using time_t = ComparableFloatT;
+using recall_t = ComparableFloatT;
 
 /**
  * @struct IOItem

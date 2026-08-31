@@ -155,7 +155,21 @@ private:
     calculate_groundtruth(const Vector<float>& sample_datas,
                           const Vector<InnerIdType>& sample_ids,
                           UnorderedMap<InnerIdType, DistHeapPtr>& ground_truth,
-                          uint32_t sample_size);
+                          uint32_t sample_size,
+                          const std::string& hierarchy_name,
+                          const std::string* query_paths,
+                          const UnorderedSet<InnerIdType>& deleted_ids);
+
+    Vector<InnerIdType>
+    collect_search_scope_ids(const std::string& hierarchy_name,
+                             const std::string* query_path,
+                             const UnorderedSet<InnerIdType>& deleted_ids);
+
+    void
+    collect_searchable_node_ids(const IndexNode* node,
+                                const UnorderedSet<InnerIdType>& deleted_ids,
+                                UnorderedSet<InnerIdType>& seen_ids,
+                                Vector<InnerIdType>& ids);
 
     float
     get_avg_distance();
@@ -177,10 +191,13 @@ private:
                             const Vector<InnerIdType>& sample_ids,
                             UnorderedMap<InnerIdType, Vector<LabelType>>& search_result,
                             const std::string& search_param,
-                            uint32_t sample_size);
+                            uint32_t sample_size,
+                            const std::string& hierarchy_name,
+                            const std::string* query_paths);
 
     float
     get_search_recall(uint32_t sample_size,
+                      const Vector<float>& sample_datas,
                       const Vector<InnerIdType>& sample_ids,
                       const UnorderedMap<InnerIdType, DistHeapPtr>& ground_truth,
                       const UnorderedMap<InnerIdType, Vector<LabelType>>& search_result);

@@ -3,9 +3,9 @@
 VSAG 采用 [Catch2](https://github.com/catchorg/Catch2) 作为测试框架，测试分为两类：
 
 - **单元测试**：与源码同目录，位于 `src/` 下，聚焦单个类/函数的行为。
-- **功能测试**：位于 `tests/` 目录，覆盖跨模块、端到端的索引行为。典型用例包括 `test_hnsw.cpp`、
-  `test_hgraph.cpp`、`test_diskann.cpp`、`test_ivf.cpp`、`test_pyramid.cpp`、`test_sindi.cpp`、
-  `test_brute_force.cpp`、`test_multi_thread.cpp`、`test_memleak.cpp` 等。
+- **功能测试**：位于 `tests/` 目录，覆盖跨模块、端到端的索引行为。典型用例包括
+  `test_hgraph.cpp`、`test_ivf.cpp`、`test_pyramid.cpp`、`test_sindi.cpp`、
+  `test_brute_force.cpp`、`test_memleak.cpp` 等。
 
 ## 构建并运行全部测试
 
@@ -28,7 +28,7 @@ make test
 
 ```bash
 ./build-debug/tests/functional_tests "[hgraph]"
-./build-debug/tests/functional_tests "[hnsw][concurrent]"
+./build-debug/tests/functional_tests "[hgraph][concurrent]"
 ```
 
 Catch2 支持按名字、tag、通配符等方式筛选用例，详见 `--help`。
@@ -48,7 +48,8 @@ make cov
 ## 内存泄漏与多线程
 
 - `test_memleak.cpp`：基于 AddressSanitizer / LeakSanitizer，对索引的构造/销毁路径进行验证。
-- `test_multi_thread.cpp`：验证并发 `Build` / `KnnSearch` / `RangeSearch` 下的正确性。
+- `test_index/test_index_concurrent.cpp`：对声明了相应 feature flag 的在维护索引，
+  验证共享的并发添加与搜索行为。
 
 ## Python 测试
 

@@ -394,6 +394,7 @@ HGraph::brute_force_search(const void* query,
                            float radius,
                            QueryContext* ctx,
                            const std::optional<float>& threshold) const {
+    std::shared_lock codes_lock(this->persistent_codes_mutex_);
     Allocator* alloc = (ctx != nullptr && ctx->alloc != nullptr) ? ctx->alloc : this->allocator_;
 
     auto flatten = this->basic_flatten_codes_;
@@ -414,7 +415,10 @@ HGraph::brute_force_search(const void* query,
         return result;
     }
 
-    auto total = static_cast<InnerIdType>(this->total_count_.load());
+    // Add reserves logical ids before their code slots are published.
+    auto total =
+        this->using_dedup_storage() ? this->GetCodeStorageCounts().first : flatten->TotalCount();
+    total = std::min(total, static_cast<InnerIdType>(this->total_count_.load()));
     if (total == 0) {
         return result;
     }
@@ -453,6 +457,22 @@ HGraph::brute_force_search(const void* query,
     }
     return result;
 }
+
+template DistHeapPtr
+HGraph::brute_force_search<InnerSearchMode::KNN_SEARCH>(const void*,
+                                                        const FilterPtr&,
+                                                        int64_t,
+                                                        float,
+                                                        QueryContext*,
+                                                        const std::optional<float>&) const;
+
+template DistHeapPtr
+HGraph::brute_force_search<InnerSearchMode::RANGE_SEARCH>(const void*,
+                                                          const FilterPtr&,
+                                                          int64_t,
+                                                          float,
+                                                          QueryContext*,
+                                                          const std::optional<float>&) const;
 
 DatasetPtr
 HGraph::RangeSearch(const DatasetPtr& query,
@@ -595,7 +615,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         return make_empty_dataset_with_stats();
     }
 
-    struct visited_list_guard {
+    struct HGraphVisitedListGuard {
         std::shared_ptr<VisitedListPool> pool;
         VisitedListPtr visited_list;
 
@@ -607,11 +627,11 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             }
         }
 
-        ~visited_list_guard() {
+        ~HGraphVisitedListGuard() {
             Release();
         }
     };
-    visited_list_guard vt_guard{this->pool_, this->pool_->TakeOne()};
+    HGraphVisitedListGuard vt_guard{this->pool_, this->pool_->TakeOne()};
     auto& vt = vt_guard.visited_list;
 
     const auto* raw_query = use_custom_distance ? nullptr : get_data(query);
@@ -667,6 +687,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             use_custom_distance ? false : params.rabitq_one_bit_search;
     } else {
         search_param.ef = std::max(params.ef_search, k);
+        if (this->use_conjugate_graph_ and params.use_conjugate_graph_search) {
+            search_param.ef = std::max(search_param.ef, static_cast<uint64_t>(LOOK_AT_K));
+        }
         search_param.is_inner_id_allowed = ft;
         search_param.distance_threshold = request.threshold_;
         search_param.topk = static_cast<int64_t>(search_param.ef);
@@ -675,6 +698,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             search_param.topk =
                 std::min(search_param.topk,
                          static_cast<int64_t>(static_cast<float>(k) * params.topk_factor));
+        }
+        if (this->use_conjugate_graph_ and params.use_conjugate_graph_search) {
+            search_param.topk = std::max(search_param.topk, LOOK_AT_K);
         }
         search_param.enable_reorder = use_custom_distance ? false : params.enable_reorder;
         search_param.consider_duplicate = this->support_duplicate_;
@@ -772,6 +798,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     if (not fused_search_already_reranked and mci_result.route != "mci" and not brute_force_used and
         use_reorder_ and search_param.enable_reorder) {
         auto limit = is_range ? request.limited_size_ : k;
+        if (not is_range and this->use_conjugate_graph_ and params.use_conjugate_graph_search) {
+            limit = std::max(limit, LOOK_AT_K);
+        }
         auto reorder_threshold = is_range ? std::nullopt : request.threshold_;
         this->reorder(raw_query,
                       this->get_reorder_codes(),
@@ -785,6 +814,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                not brute_force_used and search_param.enable_reorder and
                params.rabitq_one_bit_search) {
         auto limit = is_range ? request.limited_size_ : k;
+        if (not is_range and this->use_conjugate_graph_ and params.use_conjugate_graph_search) {
+            limit = std::max(limit, LOOK_AT_K);
+        }
         auto reorder_threshold = is_range ? std::nullopt : request.threshold_;
         this->reorder(raw_query,
                       this->basic_flatten_codes_,
@@ -794,6 +826,57 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                       ctx,
                       nullptr,
                       reorder_threshold);
+    }
+
+    if (not is_range and this->use_conjugate_graph_ and params.use_conjugate_graph_search and
+        not search_result->Empty()) {
+        std::priority_queue<std::pair<float, LabelType>> label_results;
+        std::shared_lock label_lock(this->label_lookup_mutex_);
+        while (not search_result->Empty()) {
+            const auto record = search_result->Top();
+            search_result->Pop();
+            label_results.emplace(record.first, this->label_table_->GetLabelById(record.second));
+        }
+
+        const auto flatten = use_custom_distance ? nullptr : this->get_precise_codes();
+        const auto computer = use_custom_distance ? nullptr : flatten->FactoryComputer(raw_query);
+        Filter* attribute_filter = nullptr;
+        if (not search_param.executors.empty() and search_param.executors[0] != nullptr) {
+            search_param.executors[0]->Clear();
+            attribute_filter = search_param.executors[0]->Run();
+        }
+        const auto is_allowed = [&](InnerIdType inner_id) {
+            return (ft == nullptr or ft->CheckValid(inner_id)) and
+                   (attribute_filter == nullptr or attribute_filter->CheckValid(inner_id));
+        };
+        const auto distance_of_label = [&](int64_t label) {
+            const auto [found, inner_id] = this->label_table_->TryGetIdByLabel(label, true);
+            if (not found or not is_allowed(inner_id)) {
+                return std::numeric_limits<float>::max();
+            }
+            float distance = std::numeric_limits<float>::max();
+            if (use_custom_distance) {
+                request.distance_batch_func_(&label, 1, &distance);
+            } else {
+                flatten->Query(&distance, computer, &inner_id, 1, &ctx);
+            }
+            if (request.threshold_.has_value() and distance > request.threshold_.value()) {
+                return std::numeric_limits<float>::max();
+            }
+            return distance;
+        };
+        {
+            std::shared_lock graph_lock(this->conjugate_graph_mutex_);
+            (void)this->conjugate_graph_->EnhanceResult(label_results, distance_of_label);
+        }
+        while (not label_results.empty()) {
+            const auto record = label_results.top();
+            label_results.pop();
+            const auto [found, inner_id] = this->label_table_->TryGetIdByLabel(record.second, true);
+            if (found and is_allowed(inner_id)) {
+                search_result->Push(record.first, inner_id);
+            }
+        }
     }
 
     // Trim and pack results

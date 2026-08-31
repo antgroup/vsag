@@ -258,7 +258,8 @@ BruteForceResourcePtr
 BruteForceTestIndex::GetResource(bool sample) {
     auto resource = std::make_shared<BruteForceTestResource>();
     if (sample) {
-        resource->dims = fixtures::get_common_used_dims(1, RandomValue(0, 999));
+        // RandomValue uses random_device here, outside Catch2's reproducible RNG seed.
+        resource->dims = fixtures::get_common_used_dims(/*count=*/1);
         resource->test_cases = fixtures::RandomSelect(BruteForceTestIndex::all_test_cases, 3);
         resource->metric_types = fixtures::RandomSelect<std::string>({"ip", "l2", "cosine"}, 1);
         resource->base_count = BruteForceTestIndex::base_count;

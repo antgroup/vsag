@@ -49,6 +49,7 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 | `label_remap_type` | `pg` | label map 实现：默认 `pg`，或 `robin` |
 | `reorder_source` | `precise` | 从 `precise` 存储或直接从 `base` 重排；RaBitQ x+y split（包括 `tq_chain="mrle, rabitq"`）会自动选择 `base` |
 | `persist_source_id` | `false` | 序列化 HGraph 时保留 Source ID 元数据；适用于恢复索引后继续导出构建缓存 |
+| `use_conjugate_graph` | `false` | 启用 HGraph 反馈/预训练并持久化辅助共轭图 |
 | `mrle_dim` | `0` | MRLE 输出维度，范围 `[0, dim]`；`0` 表示输入维度 |
 | `fast_encode_rabitq` | `true` | 使用多 bit RaBitQ 快速编码；设为 `false` 恢复精确编码器 |
 | `fast_encode_rabitq_rounds` | `6` | 快速编码器微调轮数，范围 `[1, 32]` |
@@ -61,6 +62,8 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 
 `ef_search` 接受任意正的有符号 64 位整数，不再存在与 `topk` 相关的上限。非常大的取值会
 明显增加延迟和搜索前沿占用的内存。
+`use_conjugate_graph_search` 为布尔值（默认 `true`）；当构建时设置
+`use_conjugate_graph: true` 后，它控制是否使用已学习的共轭边。
 
 `hgraph` 搜索参数还接受 `brute_force_threshold`（`[0.0, 1.0]` 区间的 float，
 默认 `0.0`）。当取值 `> 0` 且当前请求的 filter 的 `ValidRatio()` 不超过该
@@ -135,10 +138,15 @@ Pyramid 构建参数同样放在 `index_param` 下：
     "index_param": {
         "base_quantization_type": "sq8",
         "max_degree": 24,
-        "ef_construction": 300
+        "ef_construction": 300,
+        "store_paths": true
     }
 }
 ```
+
+`store_paths` 是 Pyramid 顶层构建参数，默认值为 `false`。需要通过
+`GetDataByIdsWithFlag` 和 `DATA_FLAG_PATH` 返回默认或命名 hierarchy 的原始路径时应启用它；路径完整性与持久化语义见
+[Pyramid 参数表](../indexes/pyramid.md#构建参数)。
 
 MRLE 与 split RaBitQ 组合使用 `base_quantization_type: "tq"`、
 `tq_chain: "mrle, rabitq"`、`mrle_dim`，以及
@@ -162,6 +170,32 @@ MRLE 与 split RaBitQ 组合使用 `base_quantization_type: "tq"`、
 
 `use_quantization`、不可变构建与 `n_candidate` 等搜索参数见
 [SINDI 页面](../indexes/sindi.md)。
+
+## SINDI_V2（稀疏向量）
+
+SINDI_V2 兼容 SINDI 的全部功能，并支持内存与磁盘 I/O。
+
+```json
+{
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "dim": 1024,
+    "index_param": {
+        "term_id_limit": 30000,
+        "use_reorder": true,
+        "term_io": {
+            "type": "async_io",
+            "file_path": "/path/to/sindi_v2.terms"
+        },
+        "rerank_io": {
+            "type": "async_io",
+            "file_path": "/path/to/sindi_v2.rerank"
+        }
+    }
+}
+```
+
+详情见 [SINDI_V2 页面](../indexes/sindi_v2.md)。
 
 ## 运行期参数
 

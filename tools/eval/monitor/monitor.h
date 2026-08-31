@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
@@ -23,6 +24,17 @@
 #include <vector>
 
 namespace vsag::eval {
+
+class EvalDataset;
+
+struct SearchRecord {
+    const int64_t* neighbors{nullptr};
+    const int64_t* ground_truth_neighbors{nullptr};
+    EvalDataset* dataset{nullptr};
+    const void* query_data{nullptr};
+    uint64_t result_count{0};
+    uint64_t requested_top_k{0};
+};
 
 class Monitor {
 public:

@@ -138,13 +138,13 @@ matching `IndexFeature` values in `InitFeatures()` and add focused tests.
     `GetDataByIds()`, `GetIndexDetailInfos()`, or `GetDetailDataByName()` only when the backing
     storage supports them.
 
-- [ ] Model export, clone, merge, tune, feedback, and cache import/export.
+- [ ] Model export, clone, merge, tune, and cache import/export.
   - Implement `Clone()` and `ExportModel()` when the index can be copied without sharing mutable
     storage incorrectly.
   - Implement `Merge()` only when parameter compatibility, ID remapping, and deletion semantics are
     clear.
-  - Implement `Tune()`, `Feedback()`, `ExportCache()`, and `ImportCache()` only with explicit
-    parameter parsing and tests.
+  - Implement `Tune()`, `ExportCache()`, and `ImportCache()` only with explicit parameter parsing
+    and tests.
 
 - [ ] Bindings, examples, benchmarks, and docs.
   - Python bindings usually need updates only when the public API surface changes; current

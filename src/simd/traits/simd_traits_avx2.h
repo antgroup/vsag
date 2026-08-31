@@ -16,17 +16,17 @@
 #pragma once
 
 // AVX2 traits (Width = 8, __m256, with FMA). MUST only be included from
-// a TU compiled with -mavx2 -mfma. Inherits SimdTraits<AVX_Tag> and
+// a TU compiled with -mavx2 -mfma. Inherits SimdTraits<AvxTag> and
 // overrides fmadd to use the real FMA instruction.
 
 #include "simd_traits_avx.h"
 
 namespace vsag::simd {
 
-struct AVX2_Tag {};
+struct Avx2Tag {};
 
 template <>
-struct SimdTraits<AVX2_Tag> : SimdTraits<AVX_Tag> {
+struct SimdTraits<Avx2Tag> : SimdTraits<AvxTag> {
     // Override: AVX2 + FMA gives us a single fused mul-add.
     static inline __attribute__((always_inline)) FloatVec
     fmadd(FloatVec a, FloatVec b, FloatVec c) {
@@ -35,9 +35,9 @@ struct SimdTraits<AVX2_Tag> : SimdTraits<AVX_Tag> {
 };
 
 // --- Int8 traits for AVX2 ---
-struct AVX2_Int8_Tag {};
+struct Avx2Int8Tag {};
 template <>
-struct Int8Traits<AVX2_Int8_Tag> {
+struct Int8Traits<Avx2Int8Tag> {
     using Int8HalfVec = __m128i;
     using Int16Vec = __m256i;
     using Int32Vec = __m256i;
@@ -78,9 +78,9 @@ struct Int8Traits<AVX2_Int8_Tag> {
 };
 
 // --- Bit operation traits for AVX2 ---
-struct AVX2_Bit_Tag {};
+struct Avx2BitTag {};
 template <>
-struct BitTraits<AVX2_Bit_Tag> {
+struct BitTraits<Avx2BitTag> {
     using IntVec = __m256i;
     static constexpr int ByteWidth = 32;
 
@@ -111,9 +111,9 @@ struct BitTraits<AVX2_Bit_Tag> {
 };
 
 // --- SQ8 traits for AVX2 ---
-struct AVX2_SQ8_Tag {};
+struct Avx2SQ8Tag {};
 template <>
-struct SQ8Traits<AVX2_SQ8_Tag> : SimdTraits<AVX2_Tag> {
+struct SQ8Traits<Avx2SQ8Tag> : SimdTraits<Avx2Tag> {
     static inline __attribute__((always_inline)) FloatVec
     load_u8_as_float(const uint8_t* p) {
         __m128i v = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(p));
@@ -122,9 +122,9 @@ struct SQ8Traits<AVX2_SQ8_Tag> : SimdTraits<AVX2_Tag> {
 };
 
 // --- SQ4Traits for AVX2 (Width=8, STEP=16 nibbles = 8 bytes per call) ---
-struct AVX2_SQ4_Tag {};
+struct Avx2SQ4Tag {};
 template <>
-struct SQ4Traits<AVX2_SQ4_Tag> : SimdTraits<AVX2_Tag> {
+struct SQ4Traits<Avx2SQ4Tag> : SimdTraits<Avx2Tag> {
     static inline __attribute__((always_inline)) void
     load_nibbles_2x_as_float(const uint8_t* p, FloatVec& out0, FloatVec& out1) {
         __m128i code = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(p));
@@ -141,9 +141,9 @@ struct SQ4Traits<AVX2_SQ4_Tag> : SimdTraits<AVX2_Tag> {
 };
 
 // --- BF16Traits for AVX2 ---
-struct AVX2_BF16_Tag {};
+struct Avx2BF16Tag {};
 template <>
-struct BF16Traits<AVX2_BF16_Tag> : SimdTraits<AVX2_Tag> {
+struct BF16Traits<Avx2BF16Tag> : SimdTraits<Avx2Tag> {
     static inline __attribute__((always_inline)) FloatVec
     load_half(const uint16_t* p) {
         __m128i bf16 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(p));
@@ -153,9 +153,9 @@ struct BF16Traits<AVX2_BF16_Tag> : SimdTraits<AVX2_Tag> {
 };
 
 // --- FP16Traits for AVX2 ---
-struct AVX2_FP16_Tag {};
+struct Avx2FP16Tag {};
 template <>
-struct FP16Traits<AVX2_FP16_Tag> : SimdTraits<AVX2_Tag> {
+struct FP16Traits<Avx2FP16Tag> : SimdTraits<Avx2Tag> {
     static inline __attribute__((always_inline)) FloatVec
     load_half(const uint16_t* p) {
         __m128i fp16 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(p));
@@ -164,9 +164,9 @@ struct FP16Traits<AVX2_FP16_Tag> : SimdTraits<AVX2_Tag> {
 };
 
 // --- UniformCodeTraits for AVX2 (32-byte integer vectors) ---
-struct AVX2_Uniform_Tag {};
+struct Avx2UniformTag {};
 template <>
-struct UniformCodeTraits<AVX2_Uniform_Tag> {
+struct UniformCodeTraits<Avx2UniformTag> {
     using IntVec = __m256i;
     static constexpr int ByteWidth = 32;
 
@@ -229,9 +229,9 @@ struct UniformCodeTraits<AVX2_Uniform_Tag> {
 };
 
 // --- RaBitQTraits for AVX2 (8-wide, uses AVX2 integer ops for bit decode) ---
-struct AVX2_RaBitQ_Tag {};
+struct Avx2RaBitQTag {};
 template <>
-struct RaBitQTraits<AVX2_RaBitQ_Tag> : SimdTraits<AVX2_Tag> {
+struct RaBitQTraits<Avx2RaBitQTag> : SimdTraits<Avx2Tag> {
     static inline __attribute__((always_inline)) FloatVec
     bits_to_signed(const uint8_t* bit_ptr, FloatVec pos, FloatVec neg) {
         const __m256i bit_masks = _mm256_setr_epi32(0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80);

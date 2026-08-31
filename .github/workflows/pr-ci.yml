@@ -84,13 +84,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Trust exact workspace for Git tooling
+        run: ./scripts/ci/configure-git-safe-directory.sh
+      - name: Test changed-source lint filter
+        run: |
+          python3 -m unittest discover -s scripts/linters -p 'test_changed_source_filter.py'
+          python3 -m unittest tests/scripts/configure_git_safe_directory_test.py
       - name: Prepare Host
         run: |
           sudo env VSAG_INSTALL_INTEL_MKL=OFF bash ./scripts/deps/install_deps_ubuntu.sh
-          sudo apt-get install -y clang-tidy-15
+          sudo apt-get install -y clang-tidy-15 time
           ninja --version
           cmake --version
           g++ --version
+      - name: Start Dependency Preparation Timer
+        id: dependency-preparation-start
+        run: echo "started_ns=$(date +%s%N)" >> "$GITHUB_OUTPUT"
       - name: Prepare FetchContent Sources
         uses: ./.github/actions/prepare-fetchcontent
         with:
@@ -103,58 +112,93 @@ jobs:
           key: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
           restore-keys: |
             external-${{ runner.os }}-${{ runner.arch }}-
-      - name: Load Cache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          max-size: "2G"
-          save: ${{ github.event_name != 'pull_request' }}
-          key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
-      - name: Make Asan
+      - name: Finish Dependency Preparation Timer
+        id: dependency-preparation
+        env:
+          STARTED_NS: ${{ steps.dependency-preparation-start.outputs.started_ns }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          import time
+
+          elapsed = (time.time_ns() - int(os.environ["STARTED_NS"])) / 1_000_000_000
+          print(f"seconds={elapsed:.3f}")
+          PY
+      - name: Make Asan and collect build metrics
         # The source-build OpenBLAS path remains covered by daily_test.yml.
+        env:
+          BUILD_BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+          CCACHE_DIR: ${{ github.workspace }}/.build-metrics-ccache
+          COMPILER_CACHE_KEY: build-metrics-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+          DEPENDENCY_CACHE_KEY: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
+          DEPENDENCY_PREPARATION_SECONDS: ${{ steps.dependency-preparation.outputs.seconds }}
         run: |
           export CMAKE_GENERATOR="Ninja"
           export CMAKE_EXPORT_COMPILE_COMMANDS=ON
           export EXTRA_DEFINED="-DVSAG_USE_SYSTEM_OPENBLAS=ON"
-          make asan VSAG_ENABLE_EXAMPLES=ON VSAG_ENABLE_TOOLS=ON COMPILE_JOBS=3
+          export VSAG_ENABLE_EXAMPLES=ON
+          export VSAG_ENABLE_TOOLS=ON
+          COMPILER=$(g++ -dumpfullversion -dumpversion)
+          python3 scripts/collect_build_metrics.py \
+            --base-sha "$BUILD_BASE_SHA" \
+            --commit-sha "$GITHUB_SHA" \
+            --compiler "gcc-$COMPILER" \
+            --compiler-cache-key "$COMPILER_CACHE_KEY-gcc-$COMPILER" \
+            --dependency-cache-key "$DEPENDENCY_CACHE_KEY" \
+            --dependency-preparation-seconds "$DEPENDENCY_PREPARATION_SECONDS" \
+            --jobs 3 \
+            --clear-ccache
+      - name: Append build metrics job summary
+        if: always()
+        run: |
+          if [ -f build-metrics/job-summary.md ]; then
+            cat build-metrics/job-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Build performance metrics" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "The collector failed before producing a report." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload build metrics
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./build-metrics
+          name: build-performance-metrics-${{ github.run_id }}
+          compression-level: 6
+          retention-days: 14
+          if-no-files-found: warn
       - name: Get changed source files
         id: changed-srcs
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git fetch origin ${{ github.base_ref }} --depth=1
-          if ! CHANGED=$(git diff --name-only origin/${{ github.base_ref }}..HEAD -- 'src/**/*.cpp' ':(exclude)src/**/*_test.cpp'); then
-            echo "Failed to determine changed source files" >&2
+          git fetch origin "$BASE_BRANCH" --depth=1
+          if ! PATTERN=$(python3 ./scripts/linters/changed_source_filter.py "origin/$BASE_BRANCH"); then
+            echo "Failed to build changed-source lint filter" >&2
             exit 1
-          fi
-          PATTERN=""
-          if [ -n "$CHANGED" ]; then
-            if ! PATTERN=$(CHANGED="$CHANGED" python3 - <<'PY'
-          import os
-          import re
-
-          changed = os.environ["CHANGED"].splitlines()
-          print("|".join(f"{re.escape(path)}$" for path in changed))
-          PY
-            ); then
-              echo "Failed to build changed-source lint filter" >&2
-              exit 1
-            fi
-            if [ -z "$PATTERN" ]; then
-              echo "Changed source files were found, but the lint filter is empty" >&2
-              exit 1
-            fi
           fi
           echo "pattern=$PATTERN" >> "$GITHUB_OUTPUT"
       - name: Run Lint
+        id: changed_source_lint
         if: steps.changed-srcs.outputs.pattern != ''
         run: |
           ./scripts/linters/run-clang-tidy-15.sh -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j 4 '${{ steps.changed-srcs.outputs.pattern }}'
+      - name: Verify changed-source lint execution
+        if: always() && steps.changed-srcs.outcome == 'success'
+        env:
+          LINT_PATTERN: ${{ steps.changed-srcs.outputs.pattern }}
+          LINT_OUTCOME: ${{ steps.changed_source_lint.outcome }}
+        run: |
+          if [ -n "$LINT_PATTERN" ] && [ "$LINT_OUTCOME" != "success" ]; then
+            echo "Changed sources were found, but lint outcome was: $LINT_OUTCOME" >&2
+            exit 1
+          fi
       - name: Clean
         run: |
           find ./build -type f -name "*.o" -exec rm -f {} +
           find ./build -type f -name "*.cpp" -exec rm -f {} +
           find ./build -type f -name "*.a" -exec rm -f {} +
           rm -rf ./build/hdf5
-          rm -rf ./build/boost
       - name: Save Build
         uses: actions/upload-artifact@v5
         with:
@@ -247,11 +291,15 @@ jobs:
           path: ./build
       - name: Run Unittests
         run: |
+          export LD_LIBRARY_PATH="$PWD/build/src:$PWD/build/tools/autotune"
           echo leak:libomp.so > omp.supp
           echo leak:libgomp.so >> omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
-          chmod +x ./build/tests/unittests
+          chmod +x ./build/tests/unittests ./build/tools/eval/eval_dataset_test \
+            ./build/tools/autotune/autotune_test
           ./scripts/testing/test_parallel_by_name.sh unittests
+          ./build/tools/eval/eval_dataset_test -d yes
+          ./build/tools/autotune/autotune_test -d yes
       - name: Upload Log
         uses: actions/upload-artifact@v5
         with:
@@ -306,8 +354,6 @@ jobs:
     needs: [changes, build-asan-x86]
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
-    env:
-      LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
       image: vsaglib/vsag:ci-x86-openblas
       volumes:
@@ -326,6 +372,7 @@ jobs:
       - name: Run Examples
         shell: bash
         run: |
+          export LD_LIBRARY_PATH="$PWD/build/src:$PWD/build/tools/autotune"
           cd ./build/examples/cpp
           for example in ./*; do
             filename=$(basename "$example")

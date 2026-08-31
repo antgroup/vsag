@@ -101,8 +101,8 @@ MMapIO::MMapIO(std::string filename, Allocator* allocator)
                         saved_errno,
                         std::error_code(saved_errno, std::system_category()).message()));
     }
-    auto mmap_size = this->size_;
-    if (this->size_ == 0) {
+    auto mmap_size = this->size_.load(std::memory_order_relaxed);
+    if (mmap_size == 0) {
         mmap_size = DEFAULT_INIT_MMAP_SIZE;
         auto ret = IOSyscall::FTruncate(this->fd_, mmap_size);
         if (ret == -1) {
@@ -177,8 +177,8 @@ MMapIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
 #endif
         this->mapped_size_ = new_size;
     }
-    this->size_ = std::max(this->size_, new_size);
     memcpy(this->mapped_ptr_ + offset, data, size);
+    this->PublishSize(new_size);
 }
 
 void
@@ -234,10 +234,11 @@ MMapIO::ResizeImpl(uint64_t size) {
 
 bool
 MMapIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
-    if (offset + size > this->size_) {
+    const auto total_size = this->size_.load(std::memory_order_acquire);
+    if (offset + size > total_size) {
         throw VsagException(
             ErrorType::INTERNAL_ERROR,
-            fmt::format("read offset {} + size {} > size {}", offset, size, this->size_));
+            fmt::format("read offset {} + size {} > size {}", offset, size, total_size));
     }
     memcpy(data, this->mapped_ptr_ + offset, size);
     return true;

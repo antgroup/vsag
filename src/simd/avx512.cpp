@@ -71,7 +71,7 @@ INT8InnerProductDistance(const void* pVect1v, const void* pVect2v, const void* q
 void
 PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result) {
 #if defined(ENABLE_AVX512)
-    simd::PQDistanceFloat256Impl<simd::SimdTraits<simd::AVX512_Tag>>(
+    simd::PQDistanceFloat256Impl<simd::SimdTraits<simd::Avx512Tag>>(
         single_dim_centers, single_dim_val, result, &avx2::PQDistanceFloat256);
 #else
     return avx2::PQDistanceFloat256(single_dim_centers, single_dim_val, result);
@@ -86,7 +86,7 @@ Prefetch(const void* data) {
 float
 FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::ComputeIPImpl<simd::SimdTraits<simd::AVX512_Tag>, /*Unroll=*/4>(
+    return simd::ComputeIPImpl<simd::SimdTraits<simd::Avx512Tag>, /*Unroll=*/4>(
         query, codes, dim, &avx2::FP32ComputeIP);
 #else
     return avx2::FP32ComputeIP(query, codes, dim);
@@ -96,7 +96,7 @@ FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t
 float
 FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::ComputeL2SqrImpl<simd::SimdTraits<simd::AVX512_Tag>, /*Unroll=*/4>(
+    return simd::ComputeL2SqrImpl<simd::SimdTraits<simd::Avx512Tag>, /*Unroll=*/4>(
         query, codes, dim, &avx2::FP32ComputeL2Sqr);
 #else
     return avx2::FP32ComputeL2Sqr(query, codes, dim);
@@ -173,7 +173,7 @@ FP32ComputeIPBatch4(const float* RESTRICT query,
                     float& result3,
                     float& result4) {
 #if defined(ENABLE_AVX512)
-    simd::ComputeBatch4Impl<simd::SimdTraits<simd::AVX512_Tag>, simd::Batch4Kind::IP>(
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::Avx512Tag>, simd::Batch4Kind::IP>(
         query,
         dim,
         codes1,
@@ -203,7 +203,7 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        float& result3,
                        float& result4) {
 #if defined(ENABLE_AVX512)
-    simd::ComputeBatch4Impl<simd::SimdTraits<simd::AVX512_Tag>, simd::Batch4Kind::L2>(
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::Avx512Tag>, simd::Batch4Kind::L2>(
         query,
         dim,
         codes1,
@@ -224,7 +224,7 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
 void
 FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    simd::BinaryOpImpl<simd::SimdTraits<simd::AVX512_Tag>, simd::BinaryOp::Sub>(
+    simd::BinaryOpImpl<simd::SimdTraits<simd::Avx512Tag>, simd::BinaryOp::Sub>(
         x, y, z, dim, &avx2::FP32Sub);
 #else
     return avx2::FP32Sub(x, y, z, dim);
@@ -234,7 +234,7 @@ FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    simd::BinaryOpImpl<simd::SimdTraits<simd::AVX512_Tag>, simd::BinaryOp::Add>(
+    simd::BinaryOpImpl<simd::SimdTraits<simd::Avx512Tag>, simd::BinaryOp::Add>(
         x, y, z, dim, &avx2::FP32Add);
 #else
     return avx2::FP32Add(x, y, z, dim);
@@ -244,7 +244,7 @@ FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    simd::BinaryOpImpl<simd::SimdTraits<simd::AVX512_Tag>, simd::BinaryOp::Mul>(
+    simd::BinaryOpImpl<simd::SimdTraits<simd::Avx512Tag>, simd::BinaryOp::Mul>(
         x, y, z, dim, &avx2::FP32Mul);
 #else
     return avx2::FP32Mul(x, y, z, dim);
@@ -254,7 +254,7 @@ FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    simd::BinaryOpImpl<simd::SimdTraits<simd::AVX512_Tag>, simd::BinaryOp::Div>(
+    simd::BinaryOpImpl<simd::SimdTraits<simd::Avx512Tag>, simd::BinaryOp::Div>(
         x, y, z, dim, &avx2::FP32Div);
 #else
     return avx2::FP32Div(x, y, z, dim);
@@ -264,7 +264,7 @@ FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
 float
 FP32ReduceAdd(const float* x, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::ReduceAddImpl<simd::SimdTraits<simd::AVX512_Tag>>(x, dim, &avx2::FP32ReduceAdd);
+    return simd::ReduceAddImpl<simd::SimdTraits<simd::Avx512Tag>>(x, dim, &avx2::FP32ReduceAdd);
 #else
     return sse::FP32ReduceAdd(x, dim);
 #endif
@@ -281,7 +281,7 @@ __inline __m512i __attribute__((__always_inline__)) load_16_short(const uint16_t
 float
 INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::Int8ComputeIPImpl<simd::Int8Traits<simd::AVX512_Int8_Tag>>(
+    return simd::Int8ComputeIPImpl<simd::Int8Traits<simd::Avx512Int8Tag>>(
         query, codes, dim, &avx2::INT8ComputeIP);
 #else
     return avx2::INT8ComputeIP(query, codes, dim);
@@ -291,7 +291,7 @@ INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, ui
 float
 INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::Int8ComputeL2SqrImpl<simd::Int8Traits<simd::AVX512_Int8_Tag>>(
+    return simd::Int8ComputeL2SqrImpl<simd::Int8Traits<simd::Avx512Int8Tag>>(
         query, codes, dim, &avx2::INT8ComputeL2Sqr);
 #else
     return avx2::INT8ComputeL2Sqr(query, codes, dim);
@@ -301,7 +301,7 @@ INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uin
 float
 BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::HalfComputeIPImpl<simd::BF16Traits<simd::AVX512_BF16_Tag>>(
+    return simd::HalfComputeIPImpl<simd::BF16Traits<simd::Avx512BF16Tag>>(
         query, codes, dim, &avx2::BF16ComputeIP);
 #else
     return avx2::BF16ComputeIP(query, codes, dim);
@@ -311,7 +311,7 @@ BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint
 float
 BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::HalfComputeL2SqrImpl<simd::BF16Traits<simd::AVX512_BF16_Tag>>(
+    return simd::HalfComputeL2SqrImpl<simd::BF16Traits<simd::Avx512BF16Tag>>(
         query, codes, dim, &avx2::BF16ComputeL2Sqr);
 #else
     return avx2::BF16ComputeL2Sqr(query, codes, dim);
@@ -321,7 +321,7 @@ BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, u
 float
 FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::HalfComputeIPImpl<simd::FP16Traits<simd::AVX512_FP16_Tag>>(
+    return simd::HalfComputeIPImpl<simd::FP16Traits<simd::Avx512FP16Tag>>(
         query, codes, dim, &avx2::FP16ComputeIP);
 #else
     return avx2::FP16ComputeIP(query, codes, dim);
@@ -331,7 +331,7 @@ FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint
 float
 FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::HalfComputeL2SqrImpl<simd::FP16Traits<simd::AVX512_FP16_Tag>>(
+    return simd::HalfComputeL2SqrImpl<simd::FP16Traits<simd::Avx512FP16Tag>>(
         query, codes, dim, &avx2::FP16ComputeL2Sqr);
 #else
     return avx2::FP16ComputeL2Sqr(query, codes, dim);
@@ -406,7 +406,7 @@ SQ8ComputeIP(const float* RESTRICT query,
              const float* RESTRICT diff,
              uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::SQ8ComputeIPImpl<simd::SQ8Traits<simd::AVX512_SQ8_Tag>>(
+    return simd::SQ8ComputeIPImpl<simd::SQ8Traits<simd::Avx512SQ8Tag>>(
         query, codes, lower_bound, diff, dim, &avx2::SQ8ComputeIP);
 #else
     return avx2::SQ8ComputeIP(query, codes, lower_bound, diff, dim);
@@ -420,7 +420,7 @@ SQ8ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT diff,
                 uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::SQ8ComputeL2SqrImpl<simd::SQ8Traits<simd::AVX512_SQ8_Tag>>(
+    return simd::SQ8ComputeL2SqrImpl<simd::SQ8Traits<simd::Avx512SQ8Tag>>(
         query, codes, lower_bound, diff, dim, &avx2::SQ8ComputeL2Sqr);
 #else
     return avx2::SQ8ComputeL2Sqr(query, codes, lower_bound, diff, dim);
@@ -434,7 +434,7 @@ SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT diff,
                   uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::SQ8ComputeCodesIPImpl<simd::SQ8Traits<simd::AVX512_SQ8_Tag>>(
+    return simd::SQ8ComputeCodesIPImpl<simd::SQ8Traits<simd::Avx512SQ8Tag>>(
         codes1, codes2, lower_bound, diff, dim, &avx2::SQ8ComputeCodesIP);
 #else
     return avx2::SQ8ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
@@ -448,7 +448,7 @@ SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT diff,
                      uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::SQ8ComputeCodesL2SqrImpl<simd::SQ8Traits<simd::AVX512_SQ8_Tag>>(
+    return simd::SQ8ComputeCodesL2SqrImpl<simd::SQ8Traits<simd::Avx512SQ8Tag>>(
         codes1, codes2, lower_bound, diff, dim, &avx2::SQ8ComputeCodesL2Sqr);
 #else
     return avx2::SQ8ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
@@ -551,7 +551,7 @@ SQ4ComputeIP(const float* RESTRICT query,
              const float* RESTRICT diff,
              uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::SQ4ComputeIPImpl<simd::SQ4Traits<simd::AVX512_SQ4_Tag>>(
+    return simd::SQ4ComputeIPImpl<simd::SQ4Traits<simd::Avx512SQ4Tag>>(
         query, codes, lower_bound, diff, dim, &avx2::SQ4ComputeIP);
 #else
     return avx2::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
@@ -565,7 +565,7 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT diff,
                 uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::SQ4ComputeL2SqrImpl<simd::SQ4Traits<simd::AVX512_SQ4_Tag>>(
+    return simd::SQ4ComputeL2SqrImpl<simd::SQ4Traits<simd::Avx512SQ4Tag>>(
         query, codes, lower_bound, diff, dim, &avx2::SQ4ComputeL2Sqr);
 #else
     return avx2::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
@@ -579,7 +579,7 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT diff,
                   uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::SQ4ComputeCodesIPImpl<simd::SQ4Traits<simd::AVX512_SQ4_Tag>>(
+    return simd::SQ4ComputeCodesIPImpl<simd::SQ4Traits<simd::Avx512SQ4Tag>>(
         codes1, codes2, lower_bound, diff, dim, &avx2::SQ4ComputeCodesIP);
 #else
     return avx2::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
@@ -593,7 +593,7 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT diff,
                      uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::SQ4ComputeCodesL2SqrImpl<simd::SQ4Traits<simd::AVX512_SQ4_Tag>>(
+    return simd::SQ4ComputeCodesL2SqrImpl<simd::SQ4Traits<simd::Avx512SQ4Tag>>(
         codes1, codes2, lower_bound, diff, dim, &avx2::SQ4ComputeCodesL2Sqr);
 #else
     return avx2::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
@@ -605,7 +605,7 @@ SQ4UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
                          const uint8_t* RESTRICT codes2,
                          uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::SQ4UniformComputeCodesIPImpl<simd::UniformCodeTraits<simd::AVX512_Uniform_Tag>>(
+    return simd::SQ4UniformComputeCodesIPImpl<simd::UniformCodeTraits<simd::Avx512UniformTag>>(
         codes1, codes2, dim, &avx2::SQ4UniformComputeCodesIP);
 #else
     return avx2::SQ4UniformComputeCodesIP(codes1, codes2, dim);
@@ -617,7 +617,7 @@ SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
                          const uint8_t* RESTRICT codes2,
                          uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::SQ8UniformComputeCodesIPImpl<simd::UniformCodeTraits<simd::AVX512_Uniform_Tag>>(
+    return simd::SQ8UniformComputeCodesIPImpl<simd::UniformCodeTraits<simd::Avx512UniformTag>>(
         codes1, codes2, dim, &avx2::SQ8UniformComputeCodesIP);
 #else
     return avx2::SQ8UniformComputeCodesIP(codes1, codes2, dim);
@@ -639,7 +639,7 @@ SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query,
 float
 RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::RaBitQFloatScalarIPImpl<simd::SQ8Traits<simd::AVX512_SQ8_Tag>>(
+    return simd::RaBitQFloatScalarIPImpl<simd::SQ8Traits<simd::Avx512SQ8Tag>>(
         vector, codes, dim, &avx2::RaBitQFloatSQIP);
 #else
     return avx2::RaBitQFloatSQIP(vector, codes, dim);
@@ -649,7 +649,7 @@ RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim) {
 uint64_t
 RaBitQCodeCodeIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::RaBitQScalarCodesIPImpl<simd::UniformCodeTraits<simd::AVX512_Uniform_Tag>>(
+    return simd::RaBitQScalarCodesIPImpl<simd::UniformCodeTraits<simd::Avx512UniformTag>>(
         codes1, codes2, dim, &avx2::RaBitQCodeCodeIP);
 #else
     return avx2::RaBitQCodeCodeIP(codes1, codes2, dim);
@@ -690,7 +690,7 @@ RaBitQPackScalarToSplitPlanes(const uint8_t* scalar_codes,
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
 #if defined(ENABLE_AVX512)
-    return simd::RaBitQFloatBinaryIPImpl<simd::RaBitQTraits<simd::AVX512_RaBitQ_Tag>>(
+    return simd::RaBitQFloatBinaryIPImpl<simd::RaBitQTraits<simd::Avx512RaBitQTag>>(
         vector, bits, dim, inv_sqrt_d, &avx2::RaBitQFloatBinaryIP);
 #else
     return avx2::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
@@ -707,7 +707,7 @@ RaBitQFloatBinaryIPBatch4(const float* vector,
                           float inv_sqrt_d,
                           float* results) {
 #if defined(ENABLE_AVX512)
-    simd::RaBitQFloatBinaryIPBatch4Impl<simd::RaBitQTraits<simd::AVX512_RaBitQ_Tag>>(
+    simd::RaBitQFloatBinaryIPBatch4Impl<simd::RaBitQTraits<simd::Avx512RaBitQTag>>(
         vector,
         bits1,
         bits2,
@@ -738,7 +738,7 @@ RaBitQFloatThreeBitIPBatch4(const float* vector,
 float
 RaBitQFloatTwoBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::RaBitQFloatTwoBitCenteredIPImpl<simd::RaBitQTraits<simd::AVX512_RaBitQ_Tag>>(
+    return simd::RaBitQFloatTwoBitCenteredIPImpl<simd::RaBitQTraits<simd::Avx512RaBitQTag>>(
         vector, bits, dim, &generic::RaBitQFloatTwoBitCenteredIP);
 #else
     return avx2::RaBitQFloatTwoBitCenteredIP(vector, bits, dim);
@@ -754,7 +754,7 @@ RaBitQFloatTwoBitCenteredIPBatch4(const float* vector,
                                   uint64_t dim,
                                   float* results) {
 #if defined(ENABLE_AVX512)
-    simd::RaBitQFloatTwoBitCenteredIPBatch4Impl<simd::RaBitQTraits<simd::AVX512_RaBitQ_Tag>>(
+    simd::RaBitQFloatTwoBitCenteredIPBatch4Impl<simd::RaBitQTraits<simd::Avx512RaBitQTag>>(
         vector,
         bits1,
         bits2,
@@ -771,7 +771,7 @@ RaBitQFloatTwoBitCenteredIPBatch4(const float* vector,
 float
 RaBitQFloatThreeBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::RaBitQFloatThreeBitCenteredIPImpl<simd::RaBitQTraits<simd::AVX512_RaBitQ_Tag>>(
+    return simd::RaBitQFloatThreeBitCenteredIPImpl<simd::RaBitQTraits<simd::Avx512RaBitQTag>>(
         vector, bits, dim, &generic::RaBitQFloatThreeBitCenteredIP);
 #else
     return avx2::RaBitQFloatThreeBitCenteredIP(vector, bits, dim);
@@ -787,7 +787,7 @@ RaBitQFloatThreeBitCenteredIPBatch4(const float* vector,
                                     uint64_t dim,
                                     float* results) {
 #if defined(ENABLE_AVX512)
-    simd::RaBitQFloatThreeBitCenteredIPBatch4Impl<simd::RaBitQTraits<simd::AVX512_RaBitQ_Tag>>(
+    simd::RaBitQFloatThreeBitCenteredIPBatch4Impl<simd::RaBitQTraits<simd::Avx512RaBitQTag>>(
         vector,
         bits1,
         bits2,
@@ -804,7 +804,7 @@ RaBitQFloatThreeBitCenteredIPBatch4(const float* vector,
 float
 RaBitQFloatFourBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::RaBitQFloatFourBitCenteredIPImpl<simd::RaBitQTraits<simd::AVX512_RaBitQ_Tag>>(
+    return simd::RaBitQFloatFourBitCenteredIPImpl<simd::RaBitQTraits<simd::Avx512RaBitQTag>>(
         vector, bits, dim, &generic::RaBitQFloatFourBitCenteredIP);
 #else
     return avx2::RaBitQFloatFourBitCenteredIP(vector, bits, dim);
@@ -820,7 +820,7 @@ RaBitQFloatFourBitCenteredIPBatch4(const float* vector,
                                    uint64_t dim,
                                    float* results) {
 #if defined(ENABLE_AVX512)
-    simd::RaBitQFloatFourBitCenteredIPBatch4Impl<simd::RaBitQTraits<simd::AVX512_RaBitQ_Tag>>(
+    simd::RaBitQFloatFourBitCenteredIPBatch4Impl<simd::RaBitQTraits<simd::Avx512RaBitQTag>>(
         vector,
         bits1,
         bits2,
@@ -961,7 +961,7 @@ RaBitQFloatSplitCodeIP(const float* vector,
                        uint64_t dim,
                        uint32_t supplement_bits) {
 #if defined(ENABLE_AVX512)
-    return simd::RaBitQFloatSplitCodeIPImpl<simd::RaBitQTraits<simd::AVX512_RaBitQ_Tag>>(
+    return simd::RaBitQFloatSplitCodeIPImpl<simd::RaBitQTraits<simd::Avx512RaBitQTag>>(
         vector, one_bit_code, supplement_code, dim, supplement_bits);
 #else
     return avx2::RaBitQFloatSplitCodeIP(
@@ -1049,7 +1049,7 @@ RaBitQFloatSupplementCodeIP(const float* vector,
                             uint64_t dim,
                             uint32_t supplement_bits) {
 #if defined(ENABLE_AVX512)
-    return simd::RaBitQFloatSupplementCodeIPImpl<simd::RaBitQTraits<simd::AVX512_RaBitQ_Tag>>(
+    return simd::RaBitQFloatSupplementCodeIPImpl<simd::RaBitQTraits<simd::Avx512RaBitQTag>>(
         vector, supplement_code, dim, supplement_bits);
 #else
     return avx2::RaBitQFloatSupplementCodeIP(vector, supplement_code, dim, supplement_bits);
@@ -1059,8 +1059,7 @@ RaBitQFloatSupplementCodeIP(const float* vector,
 void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
 #if defined(ENABLE_AVX512)
-    simd::DivScalarImpl<simd::SimdTraits<simd::AVX512_Tag>>(
-        from, to, dim, scalar, &avx2::DivScalar);
+    simd::DivScalarImpl<simd::SimdTraits<simd::Avx512Tag>>(from, to, dim, scalar, &avx2::DivScalar);
 #else
     avx2::DivScalar(from, to, dim, scalar);
 #endif
@@ -1134,7 +1133,7 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
 void
 BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_AVX512)
-    simd::BitAndImpl<simd::BitTraits<simd::AVX512_Bit_Tag>>(x, y, num_byte, result, &avx2::BitAnd);
+    simd::BitAndImpl<simd::BitTraits<simd::Avx512BitTag>>(x, y, num_byte, result, &avx2::BitAnd);
 #else
     return avx2::BitAnd(x, y, num_byte, result);
 #endif
@@ -1143,7 +1142,7 @@ BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* res
 void
 BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_AVX512)
-    simd::BitOrImpl<simd::BitTraits<simd::AVX512_Bit_Tag>>(x, y, num_byte, result, &avx2::BitOr);
+    simd::BitOrImpl<simd::BitTraits<simd::Avx512BitTag>>(x, y, num_byte, result, &avx2::BitOr);
 #else
     return avx2::BitOr(x, y, num_byte, result);
 #endif
@@ -1152,7 +1151,7 @@ BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* resu
 void
 BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_AVX512)
-    simd::BitXorImpl<simd::BitTraits<simd::AVX512_Bit_Tag>>(x, y, num_byte, result, &avx2::BitXor);
+    simd::BitXorImpl<simd::BitTraits<simd::Avx512BitTag>>(x, y, num_byte, result, &avx2::BitXor);
 #else
     return avx2::BitXor(x, y, num_byte, result);
 #endif
@@ -1161,7 +1160,7 @@ BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* res
 void
 BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_AVX512)
-    simd::BitNotImpl<simd::BitTraits<simd::AVX512_Bit_Tag>>(x, num_byte, result, &avx2::BitNot);
+    simd::BitNotImpl<simd::BitTraits<simd::Avx512BitTag>>(x, num_byte, result, &avx2::BitNot);
 #else
     return avx2::BitNot(x, num_byte, result);
 #endif
@@ -1170,7 +1169,7 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 void
 KacsWalk(float* data, uint64_t len) {
 #if defined(ENABLE_AVX512)
-    simd::KacsWalkImpl<simd::SimdTraits<simd::AVX512_Tag>>(data, len, &avx2::KacsWalk);
+    simd::KacsWalkImpl<simd::SimdTraits<simd::Avx512Tag>>(data, len, &avx2::KacsWalk);
 #else
     avx2::KacsWalk(data, len);
 #endif
@@ -1226,7 +1225,7 @@ FlipSign(const uint8_t* flip, float* data, uint64_t dim) {
 void
 VecRescale(float* data, uint64_t dim, float val) {
 #if defined(ENABLE_AVX512)
-    simd::VecRescaleImpl<simd::SimdTraits<simd::AVX512_Tag>>(data, dim, val, &avx2::VecRescale);
+    simd::VecRescaleImpl<simd::SimdTraits<simd::Avx512Tag>>(data, dim, val, &avx2::VecRescale);
 #else
     avx2::VecRescale(data, dim, val);
 #endif
@@ -1235,7 +1234,7 @@ VecRescale(float* data, uint64_t dim, float val) {
 void
 RotateOp(float* data, int idx, int dim_, int step) {
 #if defined(ENABLE_AVX512)
-    simd::RotateOpImpl<simd::SimdTraits<simd::AVX512_Tag>>(data, idx, dim_, step);
+    simd::RotateOpImpl<simd::SimdTraits<simd::Avx512Tag>>(data, idx, dim_, step);
 #else
     avx2::RotateOp(data, idx, dim_, step);
 #endif
@@ -1266,7 +1265,7 @@ FHTRotate(float* data, uint64_t dim_) {
 float
 NormalizeWithCentroid(const float* from, const float* centroid, float* to, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::NormalizeWithCentroidImpl<simd::SimdTraits<simd::AVX512_Tag>>(
+    return simd::NormalizeWithCentroidImpl<simd::SimdTraits<simd::Avx512Tag>>(
         from, centroid, to, dim, &avx2::NormalizeWithCentroid);
 #else
     return avx2::NormalizeWithCentroid(from, centroid, to, dim);
@@ -1277,7 +1276,7 @@ void
 InverseNormalizeWithCentroid(
     const float* from, const float* centroid, float* to, uint64_t dim, float norm) {
 #if defined(ENABLE_AVX512)
-    simd::InverseNormalizeWithCentroidImpl<simd::SimdTraits<simd::AVX512_Tag>>(
+    simd::InverseNormalizeWithCentroidImpl<simd::SimdTraits<simd::Avx512Tag>>(
         from, centroid, to, dim, norm, &avx2::InverseNormalizeWithCentroid);
 #else
     avx2::InverseNormalizeWithCentroid(from, centroid, to, dim, norm);

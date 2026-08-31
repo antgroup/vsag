@@ -20,11 +20,9 @@ namespace vsag {
 
 const char* const INDEX_HGRAPH = "hgraph";
 const char* const INDEX_LAZY_HGRAPH = "lazy_hgraph";
-const char* const INDEX_DISKANN = "diskann";
-const char* const INDEX_HNSW = "hnsw";
-const char* const INDEX_FRESH_HNSW = "fresh_hnsw";
 const char* const INDEX_PYRAMID = "pyramid";
 const char* const INDEX_SINDI = "sindi";
+const char* const INDEX_SINDI_V2 = "sindi_v2";
 const char* const INDEX_BRUTE_FORCE = "brute_force";
 const char* const INDEX_IVF = "ivf";
 const char* const INDEX_GNO_IMI = "gno_imi";
@@ -48,13 +46,6 @@ const char* const MULTI_VECTORS = "multi_vectors";
 const char* const MULTI_VECTOR_DIM = "multi_vector_dim";
 const char* const SOURCE_ID = "source_id";
 
-const char* const HNSW_DATA = "hnsw_data";
-const char* const CONJUGATE_GRAPH_DATA = "conjugate_graph_data";
-const char* const DISKANN_PQ = "diskann_qp";
-const char* const DISKANN_COMPRESSED_VECTOR = "diskann_compressed_vector";
-const char* const DISKANN_LAYOUT_FILE = "diskann_layout_file";
-const char* const DISKANN_TAG_FILE = "diskann_tag_file";
-const char* const DISKANN_GRAPH = "diskann_graph";
 const char* const SIMPLEFLAT_VECTORS = "simpleflat_vectors";
 const char* const SIMPLEFLAT_IDS = "simpleflat_ids";
 const char* const METRIC_L2 = "l2";
@@ -84,37 +75,14 @@ const char* const PARAMETER_USE_CONJUGATE_GRAPH = "use_conjugate_graph";
 const char* const PARAMETER_USE_CONJUGATE_GRAPH_SEARCH = "use_conjugate_graph_search";
 const char* const PARAMETER_USE_OLD_SERIAL_FORMAT = "use_old_serial_format";
 
-const char* const DISKANN_PARAMETER_L = "ef_construction";
-const char* const DISKANN_PARAMETER_R = "max_degree";
-const char* const DISKANN_PARAMETER_P_VAL = "pq_sample_rate";
-const char* const DISKANN_PARAMETER_DISK_PQ_DIMS = "pq_dims";
-const char* const DISKANN_PARAMETER_PRELOAD = "use_pq_search";
-const char* const DISKANN_PARAMETER_USE_REFERENCE = "use_reference";
-const char* const DISKANN_PARAMETER_USE_OPQ = "use_opq";
-const char* const DISKANN_PARAMETER_USE_ASYNC_IO = "use_async_io";
-const char* const DISKANN_PARAMETER_USE_BSA = "use_bsa";
-
-const char* const DISKANN_PARAMETER_BEAM_SEARCH = "beam_search";
-const char* const DISKANN_PARAMETER_IO_LIMIT = "io_limit";
-const char* const DISKANN_PARAMETER_EF_SEARCH = "ef_search";
-const char* const DISKANN_PARAMETER_REORDER = "use_reorder";
-const char* const DISKANN_PARAMETER_GRAPH_TYPE = "graph_type";
 const char* const ODESCENT_PARAMETER_ALPHA = "alpha";
 const char* const ODESCENT_PARAMETER_GRAPH_ITER_TURN = "graph_iter_turn";
 const char* const ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE = "neighbor_sample_rate";
 const char* const ODESCENT_PARAMETER_MIN_IN_DEGREE = "min_in_degree";
 const char* const ODESCENT_PARAMETER_BUILD_BLOCK_SIZE = "build_block_size";
 
-const char* const DISKANN_GRAPH_TYPE_VAMANA = "vamana";
 const char* const GRAPH_TYPE_ODESCENT = "odescent";
 const char* const GRAPH_TYPE_NSW = "nsw";
-
-const char* const HNSW_PARAMETER_EF_RUNTIME = "ef_search";
-const char* const HNSW_PARAMETER_M = "max_degree";
-const char* const HNSW_PARAMETER_CONSTRUCTION = "ef_construction";
-const char* const HNSW_PARAMETER_REVERSED_EDGES = "use_reversed_edges";
-const char* const HNSW_PARAMETER_SKIP_RATIO = "skip_ratio";
-const char* const HNSW_PARAMETER_SKIP_STRATEGY = "skip_strategy";
 
 const char* const INDEX_PARAM = "index_param";
 
@@ -204,10 +172,15 @@ const char* const HGRAPH_PARAMETER_HOPS_LIMIT = "hops_limit";
 const char* const HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH = "rabitq_one_bit_search";
 const char* const HGRAPH_RABITQ_FUSED_DATACELL = "rabitq_fused_datacell";
 const char* const HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD = "brute_force_threshold";
+const char* const HGRAPH_PARAMETER_SKIP_RATIO = "skip_ratio";
+const char* const HGRAPH_PARAMETER_SKIP_STRATEGY = "skip_strategy";
 const char* const HGRAPH_USE_MCI = "use_mci";
 const char* const HGRAPH_MCI_MCS = "mci_mcs";
 const char* const HGRAPH_MCI_CLIQUE_MAX = "mci_clique_max";
 const char* const HGRAPH_MCI_ALPHA = "mci_alpha";
+const char* const HGRAPH_MCI_KNNG_SOURCE = "mci_knng_source";
+const char* const HGRAPH_MCI_KNNG_SOURCE_HGRAPH = "hgraph";
+const char* const HGRAPH_MCI_KNNG_SOURCE_ODESCENT = "odescent";
 const char* const HGRAPH_MCI_SEED_RATIO = "mci_seed_ratio";
 const char* const HGRAPH_MCI_HGRAPH_VALID_RATIO_THRESHOLD = "hgraph_valid_ratio_threshold";
 const char* const HGRAPH_EXTRA_INFO_SIZE = "extra_info_size";
@@ -220,6 +193,7 @@ const char* const STORE_RAW_VECTOR = "store_raw_vector";
 const char* const RAW_VECTOR_IO_TYPE = "raw_vector_io_type";
 const char* const RAW_VECTOR_FILE_PATH = "raw_vector_file_path";
 const char* const HGRAPH_PERSIST_SOURCE_ID = "persist_source_id";
+const char* const PYRAMID_PERSIST_SOURCE_ID = HGRAPH_PERSIST_SOURCE_ID;
 
 const char* const BRUTE_FORCE_BASE_QUANTIZATION_TYPE = "base_quantization_type";
 const char* const BRUTE_FORCE_BASE_IO_TYPE = "base_io_type";
@@ -270,6 +244,7 @@ const char* const PYRAMID_PRECISE_IO_TYPE = "precise_io_type";
 const char* const PYRAMID_PRECISE_FILE_PATH = "precise_file_path";
 const char* const PYRAMID_PARAMETER_EF_SEARCH = "ef_search";
 const char* const PYRAMID_PARAMETER_SUBINDEX_EF_SEARCH = "subindex_ef_search";
+const char* const PYRAMID_PARAMETER_HOPS_LIMIT = "hops_limit";
 const char* const PYRAMID_PARAMETER_RABITQ_ONE_BIT_SEARCH = "rabitq_one_bit_search";
 // search-time param key (in search JSON under "pyramid")
 const char* const PYRAMID_PARAMETER_HIERARCHIES = "hierarchies";
@@ -279,6 +254,7 @@ const char* const PYRAMID_NO_BUILD_LEVELS = "no_build_levels";
 // so either can evolve independently without coupling the other context
 const char* const PYRAMID_HIERARCHIES = "hierarchies";
 const char* const PYRAMID_INDEX_MIN_SIZE = "index_min_size";
+const char* const PYRAMID_STORE_PATHS = "store_paths";
 
 const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT = "first_order_buckets_count";
 const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT = "second_order_buckets_count";
@@ -286,6 +262,9 @@ const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT = "second_order_buckets_cou
 const char* const IVF_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
 const char* const IVF_PRECISE_IO_TYPE = "precise_io_type";
 const char* const IVF_PRECISE_FILE_PATH = "precise_file_path";
+const char* const IVF_PRECISE_CODES_LAYOUT = "precise_codes_layout";
+const char* const IVF_PRECISE_CODES_LAYOUT_FLAT = "flat";
+const char* const IVF_PRECISE_CODES_LAYOUT_BUCKET = "bucket";
 const char* const USE_ATTRIBUTE_FILTER = "use_attribute_filter";
 const char* const IVF_THREAD_COUNT = "thread_count";
 

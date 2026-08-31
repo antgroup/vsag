@@ -19,7 +19,8 @@
 
 #pragma once
 
-#include <memory>
+#include <cstdint>
+#include <mutex>
 #include <random>
 
 #include "vsag/allocator.h"
@@ -47,6 +48,11 @@ public:
     RandomAllocator();
 
     /**
+     * @brief Constructs a RandomAllocator with a reproducible seed.
+     */
+    explicit RandomAllocator(uint32_t seed);
+
+    /**
      * @brief Attempts allocation, may randomly return nullptr.
      * @param size The number of bytes to allocate.
      * @return Pointer to allocated memory or nullptr (randomly).
@@ -71,10 +77,13 @@ public:
     Reallocate(void* p, uint64_t size) override;
 
 private:
-    std::shared_ptr<std::random_device> rd_;  // Random device for seeding.
-    std::shared_ptr<std::mt19937> gen_;       // Mersenne twister generator.
-    std::uniform_real_distribution<> dis_;    // Uniform distribution for randomness.
-    float error_ratio_ = 0.0f;                // Probability of allocation failure.
+    bool
+    ShouldFail();
+
+    std::mutex mutex_;
+    std::mt19937 gen_;
+    std::uniform_real_distribution<> dis_;
+    float error_ratio_ = 0.025F;
 };
 
 }  // namespace fixtures

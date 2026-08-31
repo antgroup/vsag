@@ -19,6 +19,7 @@
 
 #include "impl/logger/logger.h"
 #include "storage/footer.h"
+#include "storage/stream_writer.h"
 #include "typing.h"
 #include "vsag/index.h"
 
@@ -47,6 +48,9 @@ public:
 
     tl::expected<void, Error>
     Serialize(std::ostream& out_stream) const;
+
+    void
+    Serialize(StreamWriter& out_stream) const;
 
     tl::expected<void, Error>
     Deserialize(const Binary& binary);

@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "hgraph.h"
+#include "hgraph_fast_build.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index/index_impl.h"
@@ -1512,4 +1513,27 @@ TEST_CASE("HGraph deduplicate_storage rejects unsupported graph type",
     hgraph_json["graph_type"].SetString("odescent");
 
     REQUIRE_THROWS(MakeHGraphIndex(hgraph_json, common_param));
+}
+
+TEST_CASE("HGraph optimized build accepts MRLE RaBitQ split with raw-vector storage",
+          "[ut][hgraph][optimized_build][MRLE]") {
+    constexpr int64_t dim = 64;
+    auto hgraph_json = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "tq",
+        "tq_chain": "mrle, rabitq",
+        "mrle_dim": 32,
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "use_reorder": true,
+        "build_by_base": false,
+        "max_degree": 8,
+        "ef_construction": 32
+    })");
+    auto index = MakeHGraphIndex(hgraph_json, MakeCommonParam(dim, 2));
+    auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
+    REQUIRE(hgraph != nullptr);
+
+    vsag::HGraphOptimizedBuildSession session(*hgraph);
+    REQUIRE(session.Active());
 }

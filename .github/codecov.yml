@@ -26,9 +26,6 @@ coverage:
         threshold: 0%
         if_ci_failed: error
 
-ignore:
-  - "mockimpl/**"
-
 comment:
   layout: "header, diff, flags, components, footer"
   behavior: default
@@ -60,7 +57,6 @@ component_management:
       paths:
         - src/index/**
         - src/algorithm/**
-        - extern/diskann/**
     - component_id: module_simd
       name: simd
       paths:

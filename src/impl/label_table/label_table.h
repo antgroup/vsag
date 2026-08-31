@@ -183,7 +183,7 @@ public:
     }
 
     void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+    Deserialize(LvalueOrRvalue<StreamReader> reader) {
         StreamReader::ReadVector(reader, label_table_);
         if (use_reverse_map_) {
             this->label_remap_.Clear();

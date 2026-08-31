@@ -15,7 +15,13 @@
 
 #pragma once
 
+#include <atomic>
+#include <chrono>
+#include <mutex>
 #include <shared_mutex>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include "algorithm/hgraph/hgraph.h"
 #include "algorithm/hgraph/hgraph_parameter.h"
@@ -27,6 +33,16 @@
 #include "utils/pointer_define.h"
 
 namespace vsag {
+
+// Pre-allocated split task for parallel execution
+struct SplitTask {
+    InnerIdType cluster_idx;                   // Cluster to split
+    InnerIdType new_cluster_idx;               // Pre-assigned new cluster index
+    std::vector<InnerIdType> tokens;           // All tokens in the cluster (sorted by distance)
+    uint64_t half;                             // Median split position
+    std::unordered_set<InnerIdType> old_docs;  // Docs staying in old cluster
+    std::unordered_set<InnerIdType> new_docs;  // Docs moving to new cluster
+};
 
 class SIMQ : public InnerIndexInterface {
 public:
@@ -100,8 +116,7 @@ private:
                   uint32_t query_token_count,
                   int64_t coarse_k,
                   uint64_t* coarse_dist_cmp = nullptr,
-                  uint64_t* coarse_probe_count = nullptr,
-                  uint64_t* coarse_distance_evaluations = nullptr) const;
+                  uint64_t* coarse_probe_count = nullptr) const;
 
     void
     serialize_rep_hgraph(StreamWriter& writer) const;
@@ -112,9 +127,25 @@ private:
     void
     split_cluster_incremental(InnerIdType cluster_idx);
 
+    void
+    flush_pending_splits();
+
+    void
+    execute_split_parallel(const SplitTask& task);
+
+    void
+    prepare_and_execute_splits(std::vector<SplitTask>& tasks);
+
 private:
     IndexCommonParam common_param_;
     int64_t num_clusters_{0};
+
+    // Progress tracking for Add() operation
+    std::atomic<uint64_t> add_completed_docs_{0};
+    std::atomic<uint64_t> add_completed_tokens_{0};
+    uint64_t add_total_docs_{0};
+    uint64_t add_total_tokens_{0};
+    std::atomic<int> last_reported_pct_{-1};
 
     // Per-cluster doc-ID lists; mutable for incremental Add.
     Vector<Vector<InnerIdType>> cluster_lists_;
@@ -133,6 +164,17 @@ private:
     // Per-cluster token count for O(1) split threshold check during Add
     Vector<uint64_t> cluster_token_counts_;
 
+    // Clusters that exceeded max_cluster_size_ but haven't been split yet.
+    // Accumulated during Add() and processed in batch by flush_pending_splits().
+    std::unordered_set<InnerIdType> pending_splits_;
+
+    // For each cluster in pending_splits_, the time point at which it first
+    // exceeded the threshold (used together with split_delay_seconds_).
+    std::unordered_map<InnerIdType, std::chrono::steady_clock::time_point>
+        pending_split_first_overflow_;
+
+    double split_delay_seconds_{0.0};
+
     float init_cluster_ratio_{0.2f};
     int64_t max_cluster_size_{64};
     int64_t split_start_idx_{32};
@@ -142,7 +184,19 @@ private:
 
     uint64_t resize_increase_count_bit_{10};
 
+    // Scratch buffers for coarse_search (flat-array fast-path). Mutable so const
+    // search methods can reuse them across calls without re-allocation.
+    //
+    // NOTE: using member buffers means concurrent searches on the same SIMQ
+    // instance are NOT safe. If concurrent search is needed, callers should use
+    // separate index instances.
+    mutable std::vector<float> coarse_score_buf_;
+    mutable std::vector<bool> coarse_seen_buf_;
+    mutable std::vector<InnerIdType> coarse_dirty_;
+    mutable std::vector<InnerIdType> coarse_seen_dirty_;
+
     mutable std::shared_mutex global_mutex_;
+    mutable std::mutex rep_hgraph_mutex_;  // Protects rep_hgraph_ mutations in parallel splits
 };
 
 }  // namespace vsag

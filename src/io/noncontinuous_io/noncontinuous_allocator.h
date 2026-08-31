@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 
 namespace vsag {
@@ -83,8 +84,8 @@ public:
     Require(uint64_t size) {
         // 4k align
         size = (size + ALOGN_SIZE - 1) & ~(ALOGN_SIZE - 1);
-        NonContinuousArea area{last_offset_, size};
-        last_offset_ += size;
+        auto offset = last_offset_.fetch_add(size, std::memory_order_relaxed);
+        NonContinuousArea area{offset, size};
         return area;
     }
 
@@ -93,7 +94,7 @@ private:
     Allocator* const allocator_{nullptr};
 
     /// Last allocated offset for tracking non-overlapping areas.
-    uint64_t last_offset_{0};
+    std::atomic<uint64_t> last_offset_{0};
 
     /// Alignment size for area allocation (4KB).
     static constexpr uint64_t ALOGN_SIZE = 4096;

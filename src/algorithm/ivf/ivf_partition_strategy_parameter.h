@@ -51,6 +51,8 @@ public:
     IVFNearestPartitionTrainerType partition_train_type{
         IVFNearestPartitionTrainerType::KMeansTrainer};
     IVFPartitionStrategyType partition_strategy_type{IVFPartitionStrategyType::IVF};
+    int32_t route_max_degree{64};
+    int32_t route_ef_construction{300};
     GNOIMIParameterPtr gnoimi_param{nullptr};
 };
 

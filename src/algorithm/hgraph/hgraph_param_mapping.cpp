@@ -486,6 +486,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            PARAMETER_USE_CONJUGATE_GRAPH,
+            {
+                PARAMETER_USE_CONJUGATE_GRAPH,
+            },
+        },
+        {
             HGRAPH_LABEL_REMAP_TYPE,
             {
                 LABEL_REMAP_TYPE_KEY,
@@ -513,6 +519,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             HGRAPH_MCI_ALPHA,
             {
                 HGRAPH_MCI_ALPHA,
+            },
+        },
+        {
+            HGRAPH_MCI_KNNG_SOURCE,
+            {
+                HGRAPH_MCI_KNNG_SOURCE,
             },
         },
         {

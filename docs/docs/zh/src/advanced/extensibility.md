@@ -82,8 +82,8 @@ per-stream 的 `Reader` 从任意存储后端（本地文件、对象存储、�
 可选的，当底层支持批量 IO 时能显著提升吞吐。`vsag::Factory::CreateLocalFileReader`
 是本地文件的参考实现。
 
-可运行示例：`examples/cpp/102_index_diskann.cpp`（DiskANN 的反序列化基于
-`ReaderSet`）。完整的序列化/反序列化矩阵见 [序列化](serialization.md)。
+如何构造 `ReaderSet` 见 [序列化类型](../api/serialization.md#readerset)；完整的
+序列化/反序列化矩阵见 [序列化](serialization.md)。
 
 ## Logger
 
@@ -107,7 +107,6 @@ logger 指针的所有权 **不** 归 VSAG —— 必须在所有 VSAG 调用期
 
 | 接口 | 默认值 | 备注 |
 |---|---|---|
-| `set_num_threads_io(n)` | `8` | 搜索时磁盘索引的 IO 线程数，取值范围 `[1, 200]`。 |
 | `set_num_threads_building(n)` | `4` | 构建磁盘索引使用的线程数。 |
 | `set_block_size_limit(bytes)` | `128 MiB` | 单次分配 block 的最大值，必须 ≥ 256 KiB（见 `src/options.cpp:53-57`）。 |
 | `set_direct_IO_object_align_bit(bits)` | `9` | Direct-IO 对齐位数，必须 ≤ 21（见 `src/options.cpp:40-46`）。 |
@@ -141,4 +140,4 @@ C++ 应用应直接使用标准的 `vsag::Index` API。
 - `examples/cpp/202_custom_logger.cpp`
 - `examples/cpp/203_custom_thread_pool.cpp`
 - `examples/cpp/301_feature_filter.cpp`
-- `examples/cpp/102_index_diskann.cpp`
+- `examples/cpp/401_persistent_kv.cpp`

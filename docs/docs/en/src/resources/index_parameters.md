@@ -52,6 +52,7 @@ HGraph places its build parameters under the generic `index_param` key (see
 | `label_remap_type` | `pg` | Label-map implementation: `pg` (default) or `robin` |
 | `reorder_source` | `precise` | Reorder from the `precise` store or directly from `base`; RaBitQ x+y split, including `tq_chain="mrle, rabitq"`, selects `base` automatically |
 | `persist_source_id` | `false` | Include HGraph source-ID metadata in serialization; useful when a restored index must later export a build cache |
+| `use_conjugate_graph` | `false` | Enable HGraph feedback/pretraining and persist the auxiliary conjugate graph |
 | `mrle_dim` | `0` | MRLE output dimension in `[0, dim]`; `0` means input dimension |
 | `fast_encode_rabitq` | `true` | Use fast multi-bit RaBitQ encoding; `false` restores the exact encoder |
 | `fast_encode_rabitq_rounds` | `6` | Fast-encoder refinement rounds in `[1, 32]` |
@@ -64,6 +65,8 @@ At search time:
 
 `ef_search` accepts any positive signed 64-bit integer. It is no longer capped relative to
 `topk`; very large values can substantially increase latency and memory used by the frontier.
+`use_conjugate_graph_search` is a boolean (default `true`) that uses learned conjugate edges when
+the index was built with `use_conjugate_graph: true`.
 
 The `hgraph` search-param object also accepts `brute_force_threshold` (a float
 in `[0.0, 1.0]`, default `0.0`). When set above zero and the request carries a
@@ -142,10 +145,17 @@ Pyramid build parameters also live under `index_param`:
     "index_param": {
         "base_quantization_type": "sq8",
         "max_degree": 24,
-        "ef_construction": 300
+        "ef_construction": 300,
+        "store_paths": true
     }
 }
 ```
+
+`store_paths` is a top-level Pyramid build parameter and defaults to `false`. Enable it when
+`GetDataByIdsWithFlag` must return the original default or named-hierarchy paths with
+`DATA_FLAG_PATH`; see the
+[Pyramid parameter table](../indexes/pyramid.md#build-parameters) for its completeness and
+persistence semantics.
 
 MRLE with split RaBitQ uses `base_quantization_type: "tq"`,
 `tq_chain: "mrle, rabitq"`, `mrle_dim`, and the
@@ -170,6 +180,32 @@ storage/recall tradeoffs.
 
 See the [SINDI page](../indexes/sindi.md) for `use_quantization`, immutable builds, and search
 parameters such as `n_candidate`.
+
+## SINDI_V2 (sparse vectors)
+
+SINDI_V2 supports all SINDI features with both in-memory and disk-based I/O.
+
+```json
+{
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "dim": 1024,
+    "index_param": {
+        "term_id_limit": 30000,
+        "use_reorder": true,
+        "term_io": {
+            "type": "async_io",
+            "file_path": "/path/to/sindi_v2.terms"
+        },
+        "rerank_io": {
+            "type": "async_io",
+            "file_path": "/path/to/sindi_v2.rerank"
+        }
+    }
+}
+```
+
+See the [SINDI_V2 page](../indexes/sindi_v2.md) for details.
 
 ## Runtime Parameters
 

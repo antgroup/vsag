@@ -39,23 +39,26 @@ main(int argc, char** argv) {
         ->Float32Vectors(vectors.data())
         ->Owner(false);
 
-    /******************* Create HNSW Index *****************/
-    auto hnsw_build_paramesters = R"(
+    /******************* Create HGraph Index *****************/
+    auto hgraph_build_parameters = R"(
     {
         "dtype": "float32",
         "metric_type": "l2",
         "dim": 64,
-        "hnsw": {
+        "index_param": {
+            "base_quantization_type": "fp32",
             "max_degree": 16,
-            "ef_construction": 100
+            "ef_construction": 100,
+            "alpha": 1.2
         }
     }
     )";
-    auto index = vsag::Factory::CreateIndex("hnsw", hnsw_build_paramesters).value();
+    auto index = vsag::Factory::CreateIndex("hgraph", hgraph_build_parameters).value();
 
-    /******************* Build HNSW Index *****************/
+    /******************* Build HGraph Index *****************/
     if (auto build_result = index->Build(base); build_result.has_value()) {
-        std::cout << "After Build(), Index Hnsw contains: " << index->GetNumElements() << std::endl;
+        std::cout << "After Build(), Index HGraph contains: " << index->GetNumElements()
+                  << std::endl;
     } else {
         std::cerr << "Failed to build index: " << build_result.error().message << std::endl;
         exit(-1);
@@ -118,7 +121,7 @@ main(int argc, char** argv) {
     query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Owner(false);
     auto search_parameters = R"(
     {
-        "hnsw": {
+        "hgraph": {
             "ef_search": 100
         }
     }

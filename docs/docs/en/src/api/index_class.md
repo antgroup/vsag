@@ -1,7 +1,7 @@
 # Index
 
 `vsag::Index` (declared in `vsag/index.h`) is the central abstraction of the library. Every concrete
-index type — HGraph, IVF, DiskANN, BruteForce, SINDI, Pyramid, and so on — implements this
+index type — HGraph, IVF, BruteForce, SINDI, Pyramid, and so on — implements this
 interface. You never instantiate `Index` directly; obtain one from
 [`Factory::CreateIndex`](factory_engine.md#createindex) or [`Engine::CreateIndex`](factory_engine.md#createindex-1)
 and hold it through `IndexPtr` (`std::shared_ptr<Index>`).
@@ -34,7 +34,8 @@ Pointer/handle types used throughout this page: `DatasetPtr` ([Dataset](dataset.
 
 ```cpp
 enum class IndexType {
-    HNSW, DISKANN, HGRAPH, IVF, PYRAMID, BRUTEFORCE, SPARSE, SINDI, WARP, LAZY_HGRAPH, SIMQ
+    HGRAPH = 2, IVF = 3, PYRAMID = 4, BRUTEFORCE = 5, SPARSE = 6, SINDI = 7,
+    WARP = 8, LAZY_HGRAPH = 9, SIMQ = 10
 };
 ```
 
@@ -88,6 +89,7 @@ Bit flags for [`GetDataByIdsWithFlag`](#getdatabyidswithflag), combined with bit
 | `DATA_FLAG_EXTRA_INFO` | `0x10` | extra info blobs |
 | `DATA_FLAG_ATTRIBUTE` | `0x20` | attributes |
 | `DATA_FLAG_ID` | `0x40` | ids |
+| `DATA_FLAG_PATH` | `0x80` | Pyramid paths retained with `store_paths` |
 
 ### `WriteFuncType`
 
@@ -243,8 +245,8 @@ See [Graph Enhancement](../advanced/enhance_graph.md).
 | `GetMinAndMaxId` | `tl::expected<std::pair<int64_t, int64_t>, Error> GetMinAndMaxId() const` | Smallest and largest ids in the index. |
 | `GetExtraInfoByIds` | `tl::expected<void, Error> GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const` | Copies extra-info blobs for `ids` into a caller-provided buffer. |
 | `GetRawVectorByIds` | `tl::expected<DatasetPtr, Error> GetRawVectorByIds(const int64_t* ids, int64_t count, Allocator* specified_allocator = nullptr) const` | Returns stored vectors. Values are *close to* the originals but not guaranteed bit-identical (quantization/precision). |
-| `GetDataByIds` | `tl::expected<DatasetPtr, Error> GetDataByIds(const int64_t* ids, int64_t count) const` | Returns all stored data (vectors, attributes, extra info) for `ids`. |
-| `GetDataByIdsWithFlag` | `tl::expected<DatasetPtr, Error> GetDataByIdsWithFlag(const int64_t* ids, int64_t count, uint64_t selected_data_flag) const` | Like `GetDataByIds` but selects fields via [`DATA_FLAG_*`](#data-selection-flags). |
+| `GetDataByIds` | `tl::expected<DatasetPtr, Error> GetDataByIds(const int64_t* ids, int64_t count) const` | Returns the implementation's default stored fields for `ids`; optional fields may require explicit selection. |
+| `GetDataByIdsWithFlag` | `tl::expected<DatasetPtr, Error> GetDataByIdsWithFlag(const int64_t* ids, int64_t count, uint64_t selected_data_flag) const` | Selects supported fields via [`DATA_FLAG_*`](#data-selection-flags). Pyramid paths require `store_paths: true` and `DATA_FLAG_PATH`. |
 | `GetIndexDetailInfos` | `tl::expected<std::vector<IndexDetailInfo>, Error> GetIndexDetailInfos() const` | Lists the introspectable detail fields. See [`IndexDetailInfo`](types.md#index-detail-info). |
 | `GetDetailDataByName` | `tl::expected<DetailDataPtr, Error> GetDetailDataByName(const std::string& name, IndexDetailInfo& info) const` | Fetches one detail-data payload by name. |
 

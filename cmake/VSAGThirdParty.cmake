@@ -15,11 +15,11 @@
 include_guard (GLOBAL)
 
 include (cmake/CheckSIMDCompilerFlag.cmake)
+include (cmake/VSAGThirdPartyOverride.cmake)
 include (ExternalProject)
 
 include (extern/json/json.cmake)
 include (extern/antlr4/antlr4.cmake)
-include (extern/boost/boost.cmake)
 
 set (VSAG_BLAS_BACKEND "openblas")
 if (VSAG_TARGET_PROCESSOR STREQUAL "x86_64" AND ENABLE_INTEL_MKL)
@@ -34,7 +34,6 @@ else ()
     include (extern/openblas/openblas.cmake)
 endif ()
 
-include (extern/diskann/diskann.cmake)
 if (ENABLE_TESTS)
     include (extern/catch2/catch2.cmake)
 endif ()

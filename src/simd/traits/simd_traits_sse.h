@@ -28,10 +28,10 @@
 
 namespace vsag::simd {
 
-struct SSE_Tag {};
+struct SseTag {};
 
 template <>
-struct SimdTraits<SSE_Tag> {
+struct SimdTraits<SseTag> {
     using FloatVec = __m128;
     static constexpr int Width = 4;
 
@@ -98,9 +98,9 @@ struct SimdTraits<SSE_Tag> {
 };
 
 // --- Int8 traits for SSE ---
-struct SSE_Int8_Tag {};
+struct SseInt8Tag {};
 template <>
-struct Int8Traits<SSE_Int8_Tag> {
+struct Int8Traits<SseInt8Tag> {
     using Int8HalfVec = __m128i;  // only lower 64 bits used
     using Int16Vec = __m128i;
     using Int32Vec = __m128i;
@@ -139,9 +139,9 @@ struct Int8Traits<SSE_Int8_Tag> {
 };
 
 // --- Bit operation traits for SSE ---
-struct SSE_Bit_Tag {};
+struct SseBitTag {};
 template <>
-struct BitTraits<SSE_Bit_Tag> {
+struct BitTraits<SseBitTag> {
     using IntVec = __m128i;
     static constexpr int ByteWidth = 16;
 
@@ -172,9 +172,9 @@ struct BitTraits<SSE_Bit_Tag> {
 };
 
 // --- SQ8 traits for SSE ---
-struct SSE_SQ8_Tag {};
+struct SseSQ8Tag {};
 template <>
-struct SQ8Traits<SSE_SQ8_Tag> : SimdTraits<SSE_Tag> {
+struct SQ8Traits<SseSQ8Tag> : SimdTraits<SseTag> {
     static inline __attribute__((always_inline)) FloatVec
     load_u8_as_float(const uint8_t* p) {
         __m128i v = _mm_set_epi8(0,
@@ -198,9 +198,9 @@ struct SQ8Traits<SSE_SQ8_Tag> : SimdTraits<SSE_Tag> {
 };
 
 // --- SQ4Traits for SSE (Width=4, STEP=8 nibbles = 4 bytes per call) ---
-struct SSE_SQ4_Tag {};
+struct SseSQ4Tag {};
 template <>
-struct SQ4Traits<SSE_SQ4_Tag> : SimdTraits<SSE_Tag> {
+struct SQ4Traits<SseSQ4Tag> : SimdTraits<SseTag> {
     static inline __attribute__((always_inline)) void
     load_nibbles_2x_as_float(const uint8_t* p, FloatVec& out0, FloatVec& out1) {
         __m128i code_vec = _mm_set_epi8(0,
@@ -231,9 +231,9 @@ struct SQ4Traits<SSE_SQ4_Tag> : SimdTraits<SSE_Tag> {
 };
 
 // --- BF16Traits for SSE ---
-struct SSE_BF16_Tag {};
+struct SseBF16Tag {};
 template <>
-struct BF16Traits<SSE_BF16_Tag> : SimdTraits<SSE_Tag> {
+struct BF16Traits<SseBF16Tag> : SimdTraits<SseTag> {
     static inline __attribute__((always_inline)) FloatVec
     load_half(const uint16_t* p) {
         __m128i v = _mm_set_epi16(static_cast<short>(p[3]),
@@ -249,9 +249,9 @@ struct BF16Traits<SSE_BF16_Tag> : SimdTraits<SSE_Tag> {
 };
 
 // --- UniformCodeTraits for SSE (16-byte integer vectors) ---
-struct SSE_Uniform_Tag {};
+struct SseUniformTag {};
 template <>
-struct UniformCodeTraits<SSE_Uniform_Tag> {
+struct UniformCodeTraits<SseUniformTag> {
     using IntVec = __m128i;
     static constexpr int ByteWidth = 16;
 

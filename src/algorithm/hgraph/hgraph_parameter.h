@@ -38,6 +38,7 @@ struct HGraphMCIParameters {
     uint64_t mcs{200};
     uint64_t clique_max{50};
     float alpha{1.2F};
+    std::string knng_source{HGRAPH_MCI_KNNG_SOURCE_HGRAPH};
     std::string knng_path{};
     float incremental_join_ratio_threshold{0.6F};
     uint64_t incremental_added_mct{3};
@@ -82,6 +83,7 @@ public:
     bool support_force_remove{false};
 
     bool persist_source_id{false};
+    bool use_conjugate_graph{false};
 
     HGraphMCIParameters mci_parameters{};
 
@@ -102,6 +104,7 @@ public:
     bool use_extra_info_filter{false};
     bool rabitq_one_bit_search{false};
     bool use_mci{true};
+    bool use_conjugate_graph_search{true};
     float mci_seed_ratio{0.1F};
     float mci_hgraph_valid_ratio_threshold{0.05F};
     // If > 0 and the active filter's ValidRatio() <= brute_force_threshold,

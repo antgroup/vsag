@@ -17,7 +17,7 @@ AnalyzeIndexBySearch(const SearchRequest& request);
 
 - **Input**: a `SearchRequest` (query dataset + `topk` + search parameter JSON).
 - **Output**: a JSON-formatted string containing dynamic, query-driven metrics.
-- **Supported indexes**: currently `HGraph`, `IVF`, and `SINDI`. Indexes that do not
+- **Supported indexes**: currently `HGraph`, `IVF`, `Pyramid`, and `SINDI`. Indexes that do not
   implement this API will throw an exception when called.
 
 It is complementary to `Index::GetStats()`, which reports static structural properties of the
@@ -25,9 +25,15 @@ index without needing query data. For graph-based indexes, additional graph-heal
 as degree distribution, entry-point quality, sub-index recall and low-recall hot-spots are
 exposed through `GetStats()` rather than through `AnalyzeIndexBySearch`.
 
-Pyramid exposes its analyzer only through `GetStats()`. It does not currently override
-`AnalyzeIndexBySearch`, so calling that API—or using `analyze_index --query_path` with a Pyramid
-index—throws `UNSUPPORTED_INDEX_OPERATION`.
+Pyramid query analysis follows the same path-scoping rules as `KnnSearch`. For the default
+hierarchy, attach one path per query with `Dataset::Paths`. For a named hierarchy, attach paths
+with `Dataset::Paths(hierarchy_name, paths)` and select that hierarchy in the Pyramid search
+parameters. A path is required when the selected hierarchy's root is `NO_INDEX`. Batched query
+datasets must provide a corresponding path for every query when paths are required or supplied.
+Pyramid calculates ground truth only from vectors eligible for each query's hierarchy and path,
+excluding mark-removed vectors. Pyramid query analysis currently supports KNN requests only and
+uses `query_`, `topk_`, and `params_str_` from `SearchRequest`; filtered and iterator requests are
+not supported. Run analysis against a stable index without concurrent add or remove operations.
 
 ### Static metrics from `GetStats()`
 
@@ -103,6 +109,16 @@ SINDI `base_path` through the analyze parameters or the command-line option desc
 | `quantization_bias_ratio_query` | Quantization bias observed during query search |
 | `quantization_inversion_count_rate_query` | Query-time ordering errors introduced by quantization |
 
+#### Pyramid metrics
+
+| Metric | Meaning |
+| --- | --- |
+| `recall_query` | Recall against exact ground truth within each query's selected hierarchy and path |
+| `avg_distance_query` | Average distance of the path-scoped exact ground-truth neighbors |
+| `time_cost_query` | Average per-query latency in milliseconds |
+| `quantization_error_query` | Query-time distance error introduced by base quantization; emitted when reorder is enabled |
+| `quantization_inversion_ratio_query` | Query-time ordering inversion ratio introduced by base quantization; emitted when reorder is enabled |
+
 #### SINDI metrics
 
 | Metric | Meaning |
@@ -137,6 +153,9 @@ Quantization-related fields differ by index type — they are not unified across
 | `HGraph` | `quantization_inversion_count_rate_query` | Quantization-induced ordering errors during search |
 | `IVF` | `quantization_bias_ratio` | Quantization bias observed during search (only when `use_reorder_` is enabled) |
 | `IVF` | `quantization_inversion_count_rate` | Quantization-induced ordering errors during search (only when `use_reorder_` is enabled) |
+| `Pyramid` | `quantization_error_query` | Quantization distance error during search (only when reorder is enabled) |
+| `Pyramid` | `quantization_inversion_ratio_query` | Quantization-induced ordering inversions during search (only when reorder is enabled) |
+
 For static structure and health information, including degree distributions, entry-point
 analysis, and Pyramid subindex quality, use the `GetStats()` JSON.
 
@@ -166,7 +185,7 @@ cmake --build build-release -j
 | --- | --- | --- | --- |
 | `--index_path` | `-i` | **Yes** | Path to the serialized VSAG index file. |
 | `--build_parameter` | `-bp` | No | Build parameters (JSON) used when reloading the index. Defaults to the parameters embedded in the index file. |
-| `--query_path` | `-qp` | No | Binary query dataset path. If omitted, only static analysis is performed. |
+| `--query_path` | `-qp` | No | Binary query vector dataset path. This is not Pyramid hierarchy-path metadata. If omitted, only static analysis is performed. |
 | `--query_data_type` | | No | Query dataset type: `auto`, `dense`, or `sparse`. `auto` uses sparse loading for SINDI. |
 | `--base_path` | | No | Optional sparse CSR base dataset for SINDI analysis and ground-truth generation. |
 | `--groundtruth_path` | | No | Optional SINDI `.dev.gt` ground-truth file. If present, it is reused. |
@@ -176,6 +195,12 @@ cmake --build build-release -j
 
 The query file format is the simple binary `(uint32 rows, uint32 cols, float32 data...)` layout
 consumed by `load_query()` in `tools/analyze_index/analyze_index.cpp`.
+
+The dense query format contains vectors only. The tool does not currently provide a way to attach
+default or named Pyramid hierarchy paths to the loaded `Dataset`. Therefore it cannot express
+path-scoped Pyramid queries or run dynamic analysis when the selected hierarchy's root is
+`NO_INDEX`. Static Pyramid analysis through `GetStats()` remains available. For path-scoped
+dynamic analysis, call the C++ API and attach the paths to the query dataset.
 
 For SINDI, query and base datasets use CSR sparse binary layout:
 `int64 nrow, int64 ncol, int64 nnz`, followed by `int64 indptr[nrow + 1]`,

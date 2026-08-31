@@ -38,7 +38,7 @@ public:
     Serialize(StreamWriter& writer);
 
     void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader);
+    Deserialize(LvalueOrRvalue<StreamReader> reader);
 
 private:
     UnorderedMap<std::string, AttrValueType> schema_;

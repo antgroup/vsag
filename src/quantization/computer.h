@@ -115,7 +115,10 @@ template <typename QuantImpl, MetricType metric>
 class Computer<TransformQuantizer<QuantImpl, metric>> : public ComputerInterface {
 public:
     explicit Computer(const TransformQuantizer<QuantImpl, metric>* quantizer, Allocator* allocator)
-        : quantizer_(quantizer), allocator_(allocator) {
+        : quantizer_(quantizer),
+          allocator_(allocator),
+          primary_scratch_(allocator),
+          secondary_scratch_(allocator) {
         inner_computer_ = new Computer<QuantImpl>(quantizer_->quantizer_.get(), allocator);
     }
 
@@ -177,6 +180,8 @@ public:
     const TransformQuantizer<QuantImpl, metric>* quantizer_{nullptr};
     uint8_t* buf_{nullptr};
     Computer<QuantImpl>* inner_computer_{nullptr};
+    Vector<float> primary_scratch_;
+    Vector<float> secondary_scratch_;
 };
 
 }  // namespace vsag

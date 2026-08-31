@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <stdexcept>

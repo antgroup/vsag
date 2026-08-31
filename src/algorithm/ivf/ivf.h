@@ -80,6 +80,8 @@ public:
 
     std::vector<int64_t>
     Build(const DatasetPtr& base) override;
+    void
+    RebuildBucketGraphs() override;
 
     DatasetPtr
     CalcDistancesById(const float* query,
@@ -243,7 +245,7 @@ private:
     fill_location_map();
 
     void
-    build_bucket_graphs(const DatasetPtr& base);
+    build_bucket_graphs();
 
     /**
      * @brief Decode the packed (bucket_id, local_inner_id) pair from
@@ -267,7 +269,9 @@ private:
                         const LoadParameters& parameters) override;
 
     void
-    read_streaming_body(StreamReader& reader, const MetadataPtr& metadata);
+    read_streaming_body(StreamReader& reader,
+                        const MetadataPtr& metadata,
+                        const LoadParameters* load_parameters = nullptr);
 
     /// Recalculate and cache the memory-usage counter (throttled).
     void
@@ -287,8 +291,9 @@ private:
     int64_t total_elements_{0};  // total inserted (incl. deleted)
     bool is_trained_{false};     // true after Train() succeeds
 
-    FlattenInterfacePtr reorder_codes_{nullptr};  // high-precision codes for reranking
-    ReorderInterfacePtr reorder_{nullptr};        // reordering engine
+    FlattenInterfacePtr reorder_codes_{nullptr};  // legacy high-precision flat codes
+    BucketInterfacePtr precise_bucket_{nullptr};  // high-precision codes mirroring basic buckets
+    ReorderInterfacePtr reorder_{nullptr};        // high-precision reordering engine
 
     std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};  // for parallel bucket scans
 

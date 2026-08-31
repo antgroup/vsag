@@ -14,17 +14,8 @@
 # limitations under the License.
 
 
-add_executable(101_index_hnsw 101_index_hnsw.cpp)
-target_link_libraries(101_index_hnsw vsag)
-
-add_executable(102_index_diskann 102_index_diskann.cpp)
-target_link_libraries(102_index_diskann vsag_static)
-
 add_executable (103_index_hgraph 103_index_hgraph.cpp)
 target_link_libraries (103_index_hgraph vsag)
-
-add_executable(104_index_fresh_hnsw 104_index_fresh_hnsw.cpp)
-target_link_libraries(104_index_fresh_hnsw vsag)
 
 add_executable (105_index_brute_force 105_index_brute_force.cpp)
 target_link_libraries (105_index_brute_force vsag)
@@ -162,3 +153,23 @@ target_link_libraries(406_feature_read_cache vsag)
 
 add_executable(407_feature_ivf_read_cache 407_feature_ivf_read_cache.cpp)
 target_link_libraries(407_feature_ivf_read_cache vsag)
+
+if (TARGET vsag::autotune)
+    add_executable (326_feature_create_index_with_constraints
+        326_feature_create_index_with_constraints.cpp)
+    target_link_libraries (326_feature_create_index_with_constraints vsag::autotune)
+
+    add_executable (327_feature_autotune_existing_index
+        327_feature_autotune_existing_index.cpp)
+    target_link_libraries (327_feature_autotune_existing_index vsag::autotune)
+
+    add_executable (328_feature_autotune_existing_pyramid
+        328_feature_autotune_existing_pyramid.cpp)
+    target_link_libraries (328_feature_autotune_existing_pyramid vsag::autotune)
+endif ()
+
+add_executable(329_feature_ivf_precise_bucket 329_feature_ivf_precise_bucket.cpp)
+target_link_libraries(329_feature_ivf_precise_bucket vsag)
+
+add_executable(114_index_simq 114_index_simq.cpp)
+target_link_libraries(114_index_simq vsag)

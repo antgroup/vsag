@@ -41,9 +41,10 @@ a single search call. The `search_allocator_` field is optional — when left at
 index falls back to the allocator that was attached to its owning `Resource`.
 
 > **Availability.** `Index::SearchWithRequest` has a default implementation that returns an
-> *unsupported* error. Only HGraph, IVF, BruteForce and WARP implement it today
-> (`src/algorithm/{hgraph,ivf,brute_force,warp}.cpp`). For indexes that do not yet override
-> `SearchWithRequest` (HNSW, DiskANN, SINDI, Pyramid), use the legacy `SearchParam`
+> *unsupported* error. HGraph, IVF, BruteForce, WARP, SINDI and Pyramid implement it today.
+> Pyramid supports KNN request searches, including `expected_labels_` reasoning reports; range
+> requests with expected labels are not supported. For indexes that do not yet override
+> `SearchWithRequest` (SINDI_V2), use the legacy `SearchParam`
 > path described below.
 
 ## Legacy API — `SearchParam::allocator` *(deprecated)*

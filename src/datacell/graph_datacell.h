@@ -19,7 +19,6 @@
 #include <memory>
 #include <vector>
 
-#include "algorithm/hnswlib/hnswalg.h"
 #include "common.h"
 #include "dense_duplicate_tracker.h"
 #include "graph_datacell_parameter.h"

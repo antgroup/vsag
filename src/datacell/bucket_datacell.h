@@ -23,10 +23,13 @@
 #include "bucket_interface.h"
 #include "impl/inner_search_param.h"
 #include "io/container/io_array.h"
+#include "io/read_cache/lru_page_cache.h"
 #include "io/read_cache/page.h"
+#include "io/reader_io/reader_io_parameter.h"
 #include "quantization/product_quantization/pq_fastscan_quantizer.h"
 #include "simd/fp32_simd.h"
 #include "utils/byte_buffer.h"
+#include "utils/timer.h"
 
 namespace vsag {
 
@@ -39,7 +42,13 @@ AdjustBucketReadCacheParam(const IOParamPtr& io_param, BucketIdType bucket_count
     uint64_t total_pages = io_param->read_cache_total_size_ / Page::DEFAULT_PAGE_SIZE;
     uint64_t pages_per_bucket = total_pages / bucket_count;
     json[READ_CACHE_TOTAL_CACHE_SIZE_KEY].SetUint64(pages_per_bucket * Page::DEFAULT_PAGE_SIZE);
-    return IOParameter::GetIOParameterByJson(json);
+    auto adjusted_io_param = IOParameter::GetIOParameterByJson(json);
+    auto source_reader_param = std::dynamic_pointer_cast<ReaderIOParameter>(io_param);
+    auto adjusted_reader_param = std::dynamic_pointer_cast<ReaderIOParameter>(adjusted_io_param);
+    if (source_reader_param != nullptr and adjusted_reader_param != nullptr) {
+        adjusted_reader_param->reader = source_reader_param->reader;
+    }
+    return adjusted_io_param;
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -67,6 +76,25 @@ public:
         return this->query_one_by_id(comp, bucket_id, offset_id);
     }
 
+    float
+    ComputePairVectors(BucketIdType bucket_id, InnerIdType id1, InnerIdType id2) override;
+
+    void
+    Query(float* result_dists,
+          const ComputerInterfacePtr& computer,
+          const BucketIdType* bucket_ids,
+          const InnerIdType* offset_ids,
+          InnerIdType id_count,
+          QueryContext* ctx = nullptr) override {
+        if (id_count > 0 and GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "PQFastScan doesn't support ComputeDist, only support "
+                                "ComputeBatchDist");
+        }
+        auto comp = static_cast<Computer<QuantTmpl>*>(computer.get());
+        this->query(result_dists, comp, bucket_ids, offset_ids, id_count, ctx);
+    }
+
     ComputerInterfacePtr
     FactoryComputer(const void* query) override;
 
@@ -75,6 +103,13 @@ public:
 
     InnerIdType
     InsertVector(const void* vector, BucketIdType bucket_id, InnerIdType inner_id) override;
+
+    void
+    BatchInsertVector(const void* vectors,
+                      const BucketIdType* bucket_ids,
+                      const InnerIdType* inner_ids,
+                      InnerIdType count,
+                      InnerIdType* out_offsets) override;
 
     void
     InsertVectorWithOffset(const void* vector,
@@ -118,7 +153,19 @@ public:
     Serialize(StreamWriter& writer) override;
 
     void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
+    Deserialize(LvalueOrRvalue<StreamReader> reader) override;
+
+    void
+    InitIO(const IOParamPtr& io_param) override {
+        if constexpr (IOTmpl::SkipDeserialize) {
+            this->init_shared_read_cache_io(io_param);
+            return;
+        }
+        auto adjusted_io_param = AdjustBucketReadCacheParam(io_param, this->bucket_count_);
+        for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
+            this->datas_[bucket_id].InitIO(adjusted_io_param);
+        }
+    }
 
     [[nodiscard]] std::string
     GetQuantizerName() override {
@@ -152,6 +199,48 @@ public:
     }
 
 private:
+    void
+    init_shared_read_cache_io(const IOParamPtr& io_param) {
+        for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
+            this->datas_[bucket_id].SetReadCache(nullptr);
+        }
+        for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
+            this->datas_[bucket_id].InitIO(io_param);
+        }
+
+        if (io_param == nullptr or not io_param->enable_read_cache_) {
+            return;
+        }
+        uint64_t cache_page_count = io_param->read_cache_total_size_ / Page::DEFAULT_PAGE_SIZE;
+        if (cache_page_count == 0) {
+            return;
+        }
+
+        uint64_t page_id_base = 0;
+        for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
+            uint64_t bucket_page_count = get_page_count(this->datas_[bucket_id].size_);
+            if (bucket_page_count > UINT64_MAX - page_id_base) {
+                throw VsagException(ErrorType::INVALID_BINARY,
+                                    "bucket read cache page id overflow");
+            }
+            page_id_base += bucket_page_count;
+        }
+
+        auto shared_cache = std::make_shared<LRUPageCache>(cache_page_count);
+        page_id_base = 0;
+        for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
+            uint64_t bucket_page_count = get_page_count(this->datas_[bucket_id].size_);
+            this->datas_[bucket_id].SetReadCache(shared_cache, page_id_base);
+            page_id_base += bucket_page_count;
+        }
+    }
+
+    static uint64_t
+    get_page_count(uint64_t data_size) {
+        return data_size / Page::DEFAULT_PAGE_SIZE +
+               static_cast<uint64_t>(data_size % Page::DEFAULT_PAGE_SIZE != 0);
+    }
+
     inline void
     check_valid_bucket_id(BucketIdType bucket_id) {
         if (bucket_id >= this->bucket_count_ or bucket_id < 0) {
@@ -170,7 +259,15 @@ private:
                     const InnerIdType& offset_id);
 
     inline void
-    encode_vector(const void* vector, BucketIdType bucket_id, ByteBuffer& codes, float& res_score);
+    query(float* result_dists,
+          Computer<QuantTmpl>* computer,
+          const BucketIdType* bucket_ids,
+          const InnerIdType* offset_ids,
+          InnerIdType id_count,
+          QueryContext* ctx);
+
+    inline void
+    encode_vector(const void* vector, BucketIdType bucket_id, uint8_t* codes, float& res_score);
 
     inline void
     check_valid_bucket_capacity(uint64_t next_size, bool need_resize);
@@ -197,6 +294,8 @@ private:
     Vector<Vector<float>> residual_bias_;
 
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
+
+    uint64_t input_dim_{0};
 
     static constexpr InnerIdType EMPTY_INNER_ID = std::numeric_limits<InnerIdType>::max();
 
@@ -226,7 +325,8 @@ BucketDataCell<QuantTmpl, IOTmpl>::BucketDataCell(const QuantizerParamPtr& quant
       bucket_mutexes_(bucket_count, common_param.allocator_.get()),
       allocator_(common_param.allocator_.get()),
       residual_bias_(bucket_count, Vector<float>(allocator_), allocator_),
-      metric_(common_param.metric_) {
+      metric_(common_param.metric_),
+      input_dim_(common_param.dim_) {
     this->bucket_count_ = bucket_count;
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
     this->code_size_ = quantizer_->GetCodeSize();
@@ -279,6 +379,148 @@ BucketDataCell<QuantTmpl, IOTmpl>::query_one_by_id(
         ret -= ip_distance;
     }
     return ret;
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+BucketDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
+                                         Computer<QuantTmpl>* computer,
+                                         const BucketIdType* bucket_ids,
+                                         const InnerIdType* offset_ids,
+                                         InnerIdType id_count,
+                                         QueryContext* ctx) {
+    if (id_count == 0) {
+        return;
+    }
+
+    struct QueryRequest {
+        BucketIdType bucket_id;
+        InnerIdType offset_id;
+        InnerIdType result_index;
+    };
+
+    Allocator* search_alloc = select_query_allocator(ctx, allocator_);
+    Vector<QueryRequest> requests(search_alloc);
+    requests.reserve(id_count);
+    for (InnerIdType i = 0; i < id_count; ++i) {
+        check_valid_bucket_id(bucket_ids[i]);
+        requests.emplace_back(QueryRequest{bucket_ids[i], offset_ids[i], i});
+    }
+    std::sort(requests.begin(), requests.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.bucket_id != rhs.bucket_id) {
+            return lhs.bucket_id < rhs.bucket_id;
+        }
+        if (lhs.offset_id != rhs.offset_id) {
+            return lhs.offset_id < rhs.offset_id;
+        }
+        return lhs.result_index < rhs.result_index;
+    });
+
+    uint64_t io_count = 0;
+    double io_cost_ms = 0.0F;
+    Vector<InnerIdType> unique_offsets(search_alloc);
+    Vector<uint64_t> read_sizes(search_alloc);
+    Vector<uint64_t> read_offsets(search_alloc);
+    unique_offsets.reserve(id_count);
+    read_sizes.reserve(id_count);
+    read_offsets.reserve(id_count);
+    ByteBuffer codes(static_cast<uint64_t>(id_count) * code_size_, search_alloc);
+    Vector<float> unique_dists(id_count, 0.0F, search_alloc);
+    uint64_t group_begin = 0;
+    while (group_begin < requests.size()) {
+        const auto bucket_id = requests[group_begin].bucket_id;
+        uint64_t group_end = group_begin + 1;
+        while (group_end < requests.size() and requests[group_end].bucket_id == bucket_id) {
+            ++group_end;
+        }
+
+        std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
+        for (uint64_t i = group_begin; i < group_end; ++i) {
+            const auto offset_id = requests[i].offset_id;
+            if (offset_id >= this->bucket_sizes_[bucket_id]) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid offset id for bucket");
+            }
+            if (this->inner_ids_[bucket_id][offset_id] == EMPTY_INNER_ID) {
+                throw VsagException(
+                    ErrorType::INVALID_ARGUMENT,
+                    fmt::format("visited empty offset in bucket: bucket_id={}, offset_id={}",
+                                bucket_id,
+                                offset_id));
+            }
+        }
+
+        unique_offsets.clear();
+        for (uint64_t i = group_begin; i < group_end; ++i) {
+            const auto offset_id = requests[i].offset_id;
+            if (unique_offsets.empty() or unique_offsets.back() != offset_id) {
+                unique_offsets.emplace_back(offset_id);
+            }
+        }
+
+        read_sizes.clear();
+        read_offsets.clear();
+        for (const auto offset_id : unique_offsets) {
+            if (not read_offsets.empty() and
+                read_offsets.back() + read_sizes.back() ==
+                    static_cast<uint64_t>(offset_id) * code_size_ and
+                code_size_ <= static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) and
+                read_sizes.back() <=
+                    static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) - code_size_) {
+                read_sizes.back() += code_size_;
+            } else {
+                read_sizes.emplace_back(code_size_);
+                read_offsets.emplace_back(static_cast<uint64_t>(offset_id) * code_size_);
+            }
+        }
+
+        bool read_success = false;
+        double group_io_cost_ms = 0.0F;
+        {
+            Timer timer(group_io_cost_ms);
+            read_success = this->datas_[bucket_id].MultiRead(
+                codes.data, read_sizes.data(), read_offsets.data(), read_sizes.size());
+        }
+        if (not read_success) {
+            throw VsagException(ErrorType::READ_ERROR, "failed to batch read bucket data");
+        }
+        io_count += read_sizes.size();
+        io_cost_ms += group_io_cost_ms;
+
+        computer->ScanBatchDists(unique_offsets.size(), codes.data, unique_dists.data());
+        if (use_residual_) {
+            Vector<float> centroid(this->quantizer_->GetDim(), search_alloc);
+            strategy_->GetCentroid(bucket_id, centroid);
+            auto ip_distance = FP32ComputeIP(
+                computer->raw_query_.data(), centroid.data(), this->quantizer_->GetDim());
+            if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
+                ip_distance *= 2;
+                for (uint64_t i = 0; i < unique_offsets.size(); ++i) {
+                    unique_dists[i] -= residual_bias_[bucket_id][unique_offsets[i]];
+                }
+            }
+            for (uint64_t i = 0; i < unique_offsets.size(); ++i) {
+                unique_dists[i] -= ip_distance;
+            }
+        }
+
+        uint64_t unique_index = 0;
+        for (uint64_t i = group_begin; i < group_end; ++i) {
+            if (i > group_begin and requests[i].offset_id != requests[i - 1].offset_id) {
+                ++unique_index;
+            }
+            result_dists[requests[i].result_index] = unique_dists[unique_index];
+        }
+        group_begin = group_end;
+    }
+
+    if constexpr (not IOTmpl::InMemory) {
+        if (ctx != nullptr and ctx->stats != nullptr) {
+            ctx->stats->io_cnt.fetch_add(static_cast<uint32_t>(io_count),
+                                         std::memory_order_relaxed);
+            ctx->stats->io_time_ms.fetch_add(static_cast<uint32_t>(io_cost_ms),
+                                             std::memory_order_relaxed);
+        }
+    }
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -380,25 +622,28 @@ template <typename QuantTmpl, typename IOTmpl>
 void
 BucketDataCell<QuantTmpl, IOTmpl>::encode_vector(const void* vector,
                                                  BucketIdType bucket_id,
-                                                 ByteBuffer& codes,
+                                                 uint8_t* codes,
                                                  float& res_score) {
+    auto vector_ptr = static_cast<const float*>(vector);
+    res_score = 0.0F;
+    if (not use_residual_) {
+        this->quantizer_->EncodeOne(vector_ptr, codes);
+        return;
+    }
+
     Vector<float> centroid(this->quantizer_->GetDim(), this->allocator_);
     Vector<float> sub_data(this->quantizer_->GetDim(), this->allocator_);
     Vector<float> normalize_data(this->quantizer_->GetDim(), this->allocator_);
-    res_score = 0.0F;
-    auto vector_ptr = static_cast<const float*>(vector);
-    if (use_residual_) {
-        strategy_->GetCentroid(bucket_id, centroid);
-        if (metric_ == MetricType::METRIC_TYPE_COSINE) {
-            Normalize(vector_ptr, normalize_data.data(), quantizer_->GetDim());
-            vector_ptr = normalize_data.data();
-        }
-        FP32Sub(vector_ptr, centroid.data(), sub_data.data(), quantizer_->GetDim());
-        vector_ptr = sub_data.data();
+    strategy_->GetCentroid(bucket_id, centroid);
+    if (metric_ == MetricType::METRIC_TYPE_COSINE) {
+        Normalize(vector_ptr, normalize_data.data(), quantizer_->GetDim());
+        vector_ptr = normalize_data.data();
     }
-    this->quantizer_->EncodeOne(static_cast<const float*>(vector_ptr), codes.data);
-    if (use_residual_ && metric_ == MetricType::METRIC_TYPE_L2SQR) {
-        this->quantizer_->DecodeOne(codes.data, normalize_data.data());
+    FP32Sub(vector_ptr, centroid.data(), sub_data.data(), quantizer_->GetDim());
+    vector_ptr = sub_data.data();
+    this->quantizer_->EncodeOne(vector_ptr, codes);
+    if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
+        this->quantizer_->DecodeOne(codes, normalize_data.data());
         res_score =
             -2 * FP32ComputeIP(centroid.data(), normalize_data.data(), this->quantizer_->GetDim()) -
             FP32ComputeIP(centroid.data(), centroid.data(), this->quantizer_->GetDim());
@@ -433,7 +678,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector,
     InnerIdType offset_id;
     float res_score = 0.0F;
     ByteBuffer codes(static_cast<uint64_t>(code_size_), this->allocator_);
-    encode_vector(vector, bucket_id, codes, res_score);
+    encode_vector(vector, bucket_id, codes.data, res_score);
     {
         std::unique_lock lock(this->bucket_mutexes_[bucket_id]);
         offset_id = this->bucket_sizes_[bucket_id];
@@ -465,6 +710,121 @@ BucketDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector,
 
 template <typename QuantTmpl, typename IOTmpl>
 void
+BucketDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
+                                                     const BucketIdType* bucket_ids,
+                                                     const InnerIdType* inner_ids,
+                                                     InnerIdType count,
+                                                     InnerIdType* out_offsets) {
+    if (count == 0) {
+        return;
+    }
+    if (vectors == nullptr or bucket_ids == nullptr or inner_ids == nullptr or
+        out_offsets == nullptr) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "batch bucket insert requires non-null inputs and output");
+    }
+    if (this->bucket_count_ <= 0 or input_dim_ == 0 or code_size_ == 0 or
+        (use_residual_ and strategy_ == nullptr)) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid batch bucket insert size");
+    }
+    const auto bucket_count = static_cast<uint64_t>(this->bucket_count_);
+    const auto batch_count = static_cast<uint64_t>(count);
+    const auto max_allocation_size = std::numeric_limits<size_t>::max();
+    if (bucket_count == std::numeric_limits<uint64_t>::max() or
+        bucket_count + 1 > max_allocation_size / sizeof(uint64_t) or
+        batch_count > max_allocation_size / sizeof(uint64_t) or
+        batch_count > max_allocation_size / sizeof(InnerIdType) or
+        batch_count > max_allocation_size / sizeof(float) / input_dim_) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid batch bucket insert size");
+    }
+
+    Vector<uint64_t> bucket_counts(bucket_count, 0, this->allocator_);
+    for (uint64_t i = 0; i < batch_count; ++i) {
+        check_valid_bucket_id(bucket_ids[i]);
+        if (inner_ids[i] == EMPTY_INNER_ID) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid inner id for bucket");
+        }
+        ++bucket_counts[bucket_ids[i]];
+    }
+
+    Vector<uint64_t> bucket_begins(bucket_count + 1, 0, this->allocator_);
+    for (uint64_t bucket_id = 0; bucket_id < bucket_count; ++bucket_id) {
+        bucket_begins[bucket_id + 1] = bucket_begins[bucket_id] + bucket_counts[bucket_id];
+    }
+    Vector<uint64_t> next_positions(
+        bucket_begins.begin(), bucket_begins.end() - 1, this->allocator_);
+    Vector<InnerIdType> order(batch_count, 0, this->allocator_);
+    for (uint64_t i = 0; i < batch_count; ++i) {
+        const auto position = next_positions[bucket_ids[i]]++;
+        order[position] = static_cast<InnerIdType>(i);
+    }
+
+    const auto* float_vectors = static_cast<const float*>(vectors);
+    for (uint64_t bucket_id = 0; bucket_id < bucket_count; ++bucket_id) {
+        const auto bucket_insert_count = bucket_counts[bucket_id];
+        if (bucket_insert_count == 0) {
+            continue;
+        }
+        if (bucket_insert_count > max_allocation_size / static_cast<uint64_t>(code_size_)) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid batch bucket insert size");
+        }
+
+        const auto group_begin = bucket_begins[bucket_id];
+        ByteBuffer codes(bucket_insert_count * static_cast<uint64_t>(code_size_), this->allocator_);
+        Vector<float> residual_scores(this->allocator_);
+        if (use_residual_ and metric_ == MetricType::METRIC_TYPE_L2SQR) {
+            residual_scores.resize(bucket_insert_count);
+        }
+        for (uint64_t local_index = 0; local_index < bucket_insert_count; ++local_index) {
+            const auto position = group_begin + local_index;
+            const auto input_index = order[position];
+            float residual_score = 0.0F;
+            encode_vector(float_vectors + input_index * input_dim_,
+                          static_cast<BucketIdType>(bucket_id),
+                          codes.data + local_index * static_cast<uint64_t>(code_size_),
+                          residual_score);
+            if (not residual_scores.empty()) {
+                residual_scores[local_index] = residual_score;
+            }
+        }
+
+        std::unique_lock lock(this->bucket_mutexes_[bucket_id]);
+        const auto append_begin = static_cast<uint64_t>(this->bucket_sizes_[bucket_id]);
+        if (bucket_insert_count >
+            static_cast<uint64_t>(std::numeric_limits<InnerIdType>::max()) - append_begin) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid offset id for bucket");
+        }
+        const auto next_size = append_begin + bucket_insert_count;
+        if (next_size > std::numeric_limits<uint64_t>::max() / static_cast<uint64_t>(code_size_)) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid offset id for bucket");
+        }
+        check_valid_bucket_capacity(next_size, this->inner_ids_[bucket_id].size() < next_size);
+        this->datas_[bucket_id].Write(codes.data,
+                                      bucket_insert_count * static_cast<uint64_t>(code_size_),
+                                      append_begin * static_cast<uint64_t>(code_size_));
+        if (this->inner_ids_[bucket_id].size() < next_size) {
+            this->inner_ids_[bucket_id].resize(next_size, EMPTY_INNER_ID);
+        }
+        if (not residual_scores.empty() and this->residual_bias_[bucket_id].size() < next_size) {
+            this->residual_bias_[bucket_id].resize(next_size, 0.0F);
+        }
+        for (uint64_t local_index = 0; local_index < bucket_insert_count; ++local_index) {
+            const auto position = group_begin + local_index;
+            const auto input_index = order[position];
+            const auto offset = append_begin + local_index;
+            this->inner_ids_[bucket_id][offset] = inner_ids[input_index];
+            if (not residual_scores.empty()) {
+                this->residual_bias_[bucket_id][offset] = residual_scores[local_index];
+            }
+            out_offsets[input_index] = static_cast<InnerIdType>(offset);
+        }
+        this->bucket_sizes_[bucket_id] =
+            static_cast<InnerIdType>(append_begin + bucket_insert_count);
+    }
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
 BucketDataCell<QuantTmpl, IOTmpl>::InsertVectorWithOffset(const void* vector,
                                                           BucketIdType bucket_id,
                                                           InnerIdType inner_id,
@@ -486,7 +846,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::InsertVectorWithOffset(const void* vector,
 
     float res_score = 0.0F;
     ByteBuffer codes(static_cast<uint64_t>(code_size_), this->allocator_);
-    encode_vector(vector, bucket_id, codes, res_score);
+    encode_vector(vector, bucket_id, codes.data, res_score);
     {
         std::unique_lock lock(this->bucket_mutexes_[bucket_id]);
         auto next_size = static_cast<uint64_t>(offset_id) + 1;
@@ -545,7 +905,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::Serialize(StreamWriter& writer) {
 
 template <typename QuantTmpl, typename IOTmpl>
 void
-BucketDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+BucketDataCell<QuantTmpl, IOTmpl>::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     BucketInterface::Deserialize(reader);
     quantizer_->Deserialize(reader);
     this->backend_ =
@@ -558,6 +918,25 @@ BucketDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> re
         }
     }
     StreamReader::ReadVector(reader, this->bucket_sizes_);
+    if (this->bucket_sizes_.size() != static_cast<uint64_t>(this->bucket_count_)) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            "serialized bucket size vector does not match bucket count");
+    }
+    for (BucketIdType i = 0; i < this->bucket_count_; ++i) {
+        const auto bucket_size = static_cast<uint64_t>(this->bucket_sizes_[i]);
+        if (this->inner_ids_[i].size() < bucket_size) {
+            throw VsagException(
+                ErrorType::INVALID_BINARY,
+                fmt::format("serialized bucket {} inner id count is smaller than bucket size", i));
+        }
+        if (this->use_residual_ and this->metric_ == MetricType::METRIC_TYPE_L2SQR and
+            this->residual_bias_[i].size() < bucket_size) {
+            throw VsagException(
+                ErrorType::INVALID_BINARY,
+                fmt::format("serialized bucket {} residual bias count is smaller than bucket size",
+                            i));
+        }
+    }
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -672,4 +1051,46 @@ BucketDataCell<QuantTmpl, IOTmpl>::GetCodesById(BucketIdType bucket_id,
     this->datas_[bucket_id].Read(this->code_size_, offset_id * this->code_size_, data);
 }
 
+template <typename QuantTmpl, typename IOTmpl>
+float
+BucketDataCell<QuantTmpl, IOTmpl>::ComputePairVectors(BucketIdType bucket_id,
+                                                      InnerIdType id1,
+                                                      InnerIdType id2) {
+    if (bucket_id >= this->bucket_count_) {
+        throw VsagException(
+            ErrorType::INTERNAL_ERROR,
+            fmt::format("ComputePairVectors failed: bucket id ({}) is invalid", bucket_id));
+    }
+    if (id1 >= this->bucket_sizes_[bucket_id] || id2 >= this->bucket_sizes_[bucket_id]) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("ComputePairVectors failed: offset id is invalid"));
+    }
+    if (this->inner_ids_[bucket_id][id1] == EMPTY_INNER_ID ||
+        this->inner_ids_[bucket_id][id2] == EMPTY_INNER_ID) {
+        throw VsagException(
+            ErrorType::INTERNAL_ERROR,
+            "ComputePairVectors failed: cannot compute distance for deleted vector");
+    }
+    std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
+    constexpr size_t kStackThreshold = 256;
+    uint8_t stack_buf1[kStackThreshold];
+    uint8_t stack_buf2[kStackThreshold];
+
+    uint8_t *code1_ptr, *code2_ptr;
+    std::vector<uint8_t> heap_buf1, heap_buf2;
+
+    if (this->code_size_ <= kStackThreshold) {
+        code1_ptr = stack_buf1;
+        code2_ptr = stack_buf2;
+    } else {
+        heap_buf1.resize(this->code_size_);
+        heap_buf2.resize(this->code_size_);
+        code1_ptr = heap_buf1.data();
+        code2_ptr = heap_buf2.data();
+    }
+
+    this->datas_[bucket_id].Read(this->code_size_, id1 * this->code_size_, code1_ptr);
+    this->datas_[bucket_id].Read(this->code_size_, id2 * this->code_size_, code2_ptr);
+    return this->quantizer_->Compute(code1_ptr, code2_ptr);
+}
 }  // namespace vsag

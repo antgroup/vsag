@@ -51,28 +51,25 @@ main() {
     auto base = vsag::Dataset::Make();
     base->NumElements(num_vectors)->Dim(dim)->Ids(ids)->Float32Vectors(vectors);
 
-    /******************* Create DiskANN Index *****************/
-    auto diskann_build_paramesters = R"(
+    /******************* Create HGraph Index *****************/
+    auto hgraph_build_parameters = R"(
     {
         "dtype": "float32",
         "metric_type": "l2",
         "dim": 128,
-        "diskann": {
+        "index_param": {
+            "base_quantization_type": "fp32",
             "max_degree": 16,
             "ef_construction": 200,
-            "pq_sample_rate": 0.5,
-            "pq_dims": 9,
-            "use_pq_search": true,
-            "use_async_io": false,
-            "use_bsa": true
+            "alpha": 1.2
         }
     }
     )";
-    auto index = engine.CreateIndex("diskann", diskann_build_paramesters).value();
+    auto index = engine.CreateIndex("hgraph", hgraph_build_parameters).value();
 
-    /******************* Build DiskANN Index *****************/
+    /******************* Build HGraph Index *****************/
     if (auto build_result = index->Build(base); build_result.has_value()) {
-        std::cout << "After Build(), Index DiskANN contains: " << index->GetNumElements()
+        std::cout << "After Build(), Index HGraph contains: " << index->GetNumElements()
                   << std::endl;
     } else if (build_result.error().type == vsag::ErrorType::INTERNAL_ERROR) {
         std::cerr << "Failed to build index: internalError" << std::endl;

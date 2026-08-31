@@ -24,7 +24,6 @@
 
 #include "common.h"
 #include "impl/logger/logger.h"
-#include "index/diskann_zparameters.h"
 #include "io/memory_io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "utils/param_compat_macros.h"
@@ -190,6 +189,14 @@ PyramidParameters::FromJson(const JsonType& json) {
         this->index_min_size = json[INDEX_MIN_SIZE].GetInt();
     }
 
+    if (json.Contains(PYRAMID_PERSIST_SOURCE_ID_KEY)) {
+        this->persist_source_id = json[PYRAMID_PERSIST_SOURCE_ID_KEY].GetBool();
+    }
+
+    if (json.Contains(PYRAMID_STORE_PATHS_KEY)) {
+        this->store_paths = json[PYRAMID_STORE_PATHS_KEY].GetBool();
+    }
+
     if (json.Contains(SUPPORT_DUPLICATE)) {
         this->support_duplicate = json[SUPPORT_DUPLICATE].GetBool();
     }
@@ -239,6 +246,8 @@ PyramidParameters::ToJson() const {
     json[USE_REORDER_KEY].SetBool(this->use_reorder);
     json[INDEX_MIN_SIZE].SetInt(index_min_size);
     json[SUPPORT_DUPLICATE].SetBool(support_duplicate);
+    json[PYRAMID_PERSIST_SOURCE_ID_KEY].SetBool(persist_source_id);
+    json[PYRAMID_STORE_PATHS_KEY].SetBool(store_paths);
     if (this->use_reorder && this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
         json[PRECISE_CODES_KEY].SetJson(precise_codes_param->ToJson());
     }
@@ -308,6 +317,7 @@ PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
     }
     CHECK_FIELD_EQ(*this, *p, index_min_size);
     CHECK_FIELD_EQ(*this, *p, support_duplicate);
+    CHECK_FIELD_EQ(*this, *p, store_paths);
     return true;
 }
 
@@ -329,6 +339,15 @@ PyramidSearchParameters::FromJson(const std::string& json_string) {
     if (params[INDEX_PYRAMID].Contains(PYRAMID_PARAMETER_SUBINDEX_EF_SEARCH)) {
         obj.subindex_ef_search =
             params[INDEX_PYRAMID][PYRAMID_PARAMETER_SUBINDEX_EF_SEARCH].GetInt();
+    }
+    if (params[INDEX_PYRAMID].Contains(PYRAMID_PARAMETER_HOPS_LIMIT)) {
+        const auto hops_limit = params[INDEX_PYRAMID][PYRAMID_PARAMETER_HOPS_LIMIT].GetInt();
+        CHECK_ARGUMENT(hops_limit >= 0 && static_cast<uint64_t>(hops_limit) <=
+                                              std::numeric_limits<uint32_t>::max(),
+                       fmt::format("hops_limit({}) must be in range[0, {}]",
+                                   hops_limit,
+                                   std::numeric_limits<uint32_t>::max()));
+        obj.hops_limit = static_cast<uint32_t>(hops_limit);
     }
     if (params[INDEX_PYRAMID].Contains(PYRAMID_PARAMETER_RABITQ_ONE_BIT_SEARCH)) {
         obj.has_rabitq_one_bit_search = true;

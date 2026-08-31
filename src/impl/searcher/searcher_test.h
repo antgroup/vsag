@@ -20,9 +20,8 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <utility>
 
-#include "algorithm/hnswlib/hnswalg.h"
-#include "algorithm/hnswlib/space_l2.h"
 #include "datacell/flatten_datacell.h"
+#include "datacell/graph_interface.h"
 #include "framework/test_logger.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/basic_optimizer.h"
@@ -85,49 +84,33 @@ private:
     std::vector<std::vector<InnerIdType>> neighbors_;
 };
 
-class AdaptGraphDataCell : public GraphInterface {
-public:
-    AdaptGraphDataCell(std::shared_ptr<hnswlib::HierarchicalNSW> alg_hnsw) : alg_hnsw_(alg_hnsw){};
-
-    void
-    InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) override {
-        return;
-    };
-
-    void
-    Resize(InnerIdType new_size) override {
-        return;
-    };
-
-    void
-    GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const override {
-        alg_hnsw_->getNeighborsInternalId(id, neighbor_ids);
+inline GraphInterfacePtr
+MakeRingGraph(uint32_t count, uint32_t degree) {
+    std::vector<std::vector<InnerIdType>> neighbors(count);
+    for (uint32_t id = 0; id < count; ++id) {
+        for (uint32_t offset = 1; offset <= degree; ++offset) {
+            neighbors[id].push_back(static_cast<InnerIdType>((id + offset) % count));
+        }
     }
+    return std::make_shared<MockGraphDataCell>(std::move(neighbors));
+}
 
-    uint32_t
-    GetNeighborSize(InnerIdType id) const override {
-        int* data = (int*)alg_hnsw_->get_linklist0(id);
-        return alg_hnsw_->getListCount((hnswlib::linklistsizeint*)data);
+inline GraphInterfacePtr
+MakeIrregularGraph(uint32_t count) {
+    std::vector<std::vector<InnerIdType>> neighbors(count);
+    for (uint32_t id = 0; id < count; ++id) {
+        neighbors[id].push_back(static_cast<InnerIdType>((id + 1) % count));
+        if (id % 2 == 0) {
+            neighbors[id].push_back(static_cast<InnerIdType>((id + 7) % count));
+        }
+        if (id % 3 == 0) {
+            neighbors[id].push_back(static_cast<InnerIdType>((id + 31) % count));
+        }
+        if (id % 5 == 0) {
+            neighbors[id].push_back(static_cast<InnerIdType>((id + 97) % count));
+        }
     }
-
-    [[nodiscard]] bool
-    CheckIdExists(InnerIdType id) const override {
-        return id < alg_hnsw_->getCurrentElementCount();
-    }
-
-    void
-    Prefetch(InnerIdType id, InnerIdType neighbor_i) override {
-        int* data = (int*)alg_hnsw_->get_linklist0(id);
-        vsag::Prefetch(data + neighbor_i + 1);
-    }
-
-    InnerIdType
-    MaximumDegree() const override {
-        return alg_hnsw_->getMaxDegree();
-    }
-
-private:
-    std::shared_ptr<hnswlib::HierarchicalNSW> alg_hnsw_;
-};
+    return std::make_shared<MockGraphDataCell>(std::move(neighbors));
+}
 
 }  // namespace vsag
