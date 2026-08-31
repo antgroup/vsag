@@ -17,11 +17,10 @@
 #include <fmt/format.h>
 
 #include <algorithm>
-#include <cmath>
 #include <limits>
 #include <numeric>
 
-#include "impl/heap/standard_heap.h"
+#include "common.h"
 #include "utils/util_functions.h"
 #include "vsag_exception.h"
 
@@ -67,47 +66,7 @@ private:
     FilterPtr filter_;
 };
 
-DatasetPtr
-collect_results(const DistHeapPtr& results, Allocator* allocator) {
-    auto [result, distances, ids] =
-        create_fast_dataset(static_cast<int64_t>(results->Size()), allocator);
-    if (results->Empty()) {
-        result->Dim(0)->NumElements(1);
-        return result;
-    }
-    for (auto i = static_cast<int64_t>(results->Size()) - 1; i >= 0; --i) {
-        distances[i] = results->Top().first;
-        ids[i] = results->Top().second;
-        results->Pop();
-    }
-    return result;
-}
-
 }  // namespace
-
-uint32_t
-ParseSindiHostFilterThreshold(const JsonType& json) {
-    if (not json.Contains(SPARSE_HOST_FILTER_THRESHOLD)) {
-        return DEFAULT_SPARSE_HOST_FILTER_THRESHOLD;
-    }
-    const auto value = json[SPARSE_HOST_FILTER_THRESHOLD];
-    CHECK_ARGUMENT(value.IsNumberInteger(), "host_filter_threshold must be a non-negative integer");
-    uint64_t threshold = 0;
-    if (value.IsNumberUnsigned()) {
-        threshold = value.GetUint64();
-    } else {
-        const auto signed_threshold = value.GetInt();
-        CHECK_ARGUMENT(
-            signed_threshold >= 0,
-            fmt::format("host_filter_threshold must be non-negative, got {}", signed_threshold));
-        threshold = static_cast<uint64_t>(signed_threshold);
-    }
-    CHECK_ARGUMENT(threshold <= std::numeric_limits<uint32_t>::max(),
-                   fmt::format("host_filter_threshold must be in [0, {}], got {}",
-                               std::numeric_limits<uint32_t>::max(),
-                               threshold));
-    return static_cast<uint32_t>(threshold);
-}
 
 SindiHostBuildPlan::SindiHostBuildPlan(Allocator* allocator)
     : order_(allocator),
@@ -128,11 +87,8 @@ SindiHostBuildPlan::RecordSuccess(uint32_t ordered_position) {
     ++successful_counts_[successful_host_cursor_];
 }
 
-SindiHostFilter::SindiHostFilter(uint32_t direct_search_threshold, Allocator* allocator)
-    : direct_search_threshold_(direct_search_threshold),
-      host_ids_(allocator),
-      host_range_offsets_(allocator),
-      host_ranges_(allocator) {
+SindiHostFilter::SindiHostFilter(Allocator* allocator)
+    : host_ids_(allocator), host_range_offsets_(allocator), host_ranges_(allocator) {
 }
 
 SindiHostBuildPlan
@@ -156,9 +112,6 @@ SindiHostFilter::PrepareBuild(const DatasetPtr& base, uint64_t current_element_c
     plan.enabled_ = true;
     plan.order_.resize(static_cast<uint64_t>(data_num));
     std::iota(plan.order_.begin(), plan.order_.end(), 0);
-    for (int64_t i = 0; i < data_num; ++i) {
-        CHECK_ARGUMENT(source_host_ids[i] != 0, "SINDI host_id must be greater than zero");
-    }
     std::sort(
         plan.order_.begin(), plan.order_.end(), [source_host_ids](uint32_t lhs, uint32_t rhs) {
             if (source_host_ids[lhs] != source_host_ids[rhs]) {
@@ -268,7 +221,7 @@ SindiHostFilter::Clear() {
 }
 
 SindiHostSearchRoute
-SindiHostFilter::Classify(const DatasetPtr& query, bool direct_search_available) const {
+SindiHostFilter::Classify(const DatasetPtr& query) const {
     const auto* query_host_id = query->GetUInt32Metadata(SINDI_HOST_ID_METADATA_NAME);
     if (host_ids_.empty() or query_host_id == nullptr) {
         return {};
@@ -280,75 +233,21 @@ SindiHostFilter::Classify(const DatasetPtr& query, bool direct_search_available)
     const auto host_index = static_cast<uint32_t>(host - host_ids_.begin());
     const auto range_begin = host_range_offsets_[host_index];
     const auto range_end = host_range_offsets_[host_index + 1];
-    uint64_t document_count = 0;
-    for (auto i = range_begin; i < range_end; ++i) {
-        document_count += host_ranges_[i].end - host_ranges_[i].begin;
-    }
-    const auto kind = direct_search_available && document_count <= direct_search_threshold_
-                          ? SindiHostRouteKind::DIRECT
-                          : SindiHostRouteKind::WINDOW;
-    return {kind, host_ranges_[range_begin].begin, host_ranges_[range_end - 1].end, host_index};
+    return {SindiHostRouteKind::WINDOW,
+            host_ranges_[range_begin].begin,
+            host_ranges_[range_end - 1].end,
+            host_index};
 }
 
 void
 SindiHostFilter::ApplyFilter(const SindiHostSearchRoute& route, FilterPtr& filter) const {
-    if (route.kind != SindiHostRouteKind::DIRECT && route.kind != SindiHostRouteKind::WINDOW) {
+    if (route.kind != SindiHostRouteKind::WINDOW) {
         return;
     }
     filter = std::make_shared<InnerIdHostFilter>(&host_ranges_,
                                                  host_range_offsets_[route.host_index],
                                                  host_range_offsets_[route.host_index + 1],
                                                  std::move(filter));
-}
-
-DatasetPtr
-SindiHostFilter::SearchDirect(const SindiHostSearchRoute& route,
-                              const SparseVector& query,
-                              int64_t k,
-                              const FilterPtr& filter,
-                              const std::optional<float>& distance_threshold,
-                              const FlattenInterfacePtr& rerank_flat,
-                              const LabelTablePtr& label_table,
-                              Allocator* allocator,
-                              SearchStatistics* statistics) {
-    CHECK_ARGUMENT(route.kind == SindiHostRouteKind::DIRECT,
-                   "direct host search requires a direct route");
-    CHECK_ARGUMENT(rerank_flat != nullptr, "direct host search requires a rerank data cell");
-    Vector<InnerIdType> inner_ids(allocator);
-    inner_ids.reserve(route.end - route.begin);
-    for (uint32_t inner_id = route.begin; inner_id < route.end; ++inner_id) {
-        if (filter == nullptr or filter->CheckValid(inner_id)) {
-            inner_ids.push_back(inner_id);
-        }
-    }
-    if (inner_ids.empty()) {
-        return collect_results(std::make_shared<StandardHeap<true, false>>(allocator, -1),
-                               allocator);
-    }
-
-    Vector<float> distances(inner_ids.size(), allocator);
-    const auto computer = rerank_flat->FactoryComputer(&query);
-    QueryContext context{
-        .alloc = allocator, .stats = statistics, .distance_phase = DistanceEvaluationPhase::RERANK};
-    rerank_flat->Query(distances.data(),
-                       computer,
-                       inner_ids.data(),
-                       static_cast<InnerIdType>(inner_ids.size()),
-                       &context);
-
-    auto results = std::make_shared<StandardHeap<true, false>>(allocator, -1);
-    for (uint64_t i = 0; i < inner_ids.size(); ++i) {
-        const auto distance = distances[i];
-        if (not std::isfinite(distance) or
-            (distance_threshold.has_value() and distance > distance_threshold.value())) {
-            continue;
-        }
-        results->Push(distance, label_table->GetLabelById(inner_ids[i]));
-        if (results->Size() > static_cast<uint64_t>(k)) {
-            results->Pop();
-        }
-    }
-    return collect_results(results, allocator);
 }
 
 void
@@ -384,6 +283,99 @@ SindiHostFilter::RequiresFullTermScan(const SindiHostSearchRoute& route,
     }
     const auto& candidate = *std::prev(range);
     return candidate.begin > window_begin or candidate.end < window_end;
+}
+
+void
+SindiHostFilter::Serialize(StreamWriter& writer) const {
+    StreamWriter::WriteVector(writer, host_ids_);
+    StreamWriter::WriteVector(writer, host_range_offsets_);
+    const uint64_t range_count = host_ranges_.size();
+    StreamWriter::WriteObj(writer, range_count);
+    for (const auto& range : host_ranges_) {
+        StreamWriter::WriteObj(writer, range.begin);
+        StreamWriter::WriteObj(writer, range.end);
+    }
+}
+
+void
+SindiHostFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        element_count > 0 && element_count <= std::numeric_limits<uint32_t>::max(),
+        "serialized SINDI host metadata element count is invalid");
+
+    auto* allocator = host_ids_.get_allocator().allocator_;
+    Vector<uint32_t> host_ids(allocator);
+    Vector<uint32_t> range_offsets(allocator);
+    Vector<SindiHostRange> ranges(allocator);
+
+    uint64_t host_count = 0;
+    StreamReader::ReadObj(reader, host_count);
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        host_count > 0 && host_count <= SINDI_MAX_HOST_COUNT && host_count <= element_count,
+        "serialized SINDI host count is invalid");
+    host_ids.resize(host_count);
+    reader.Read(reinterpret_cast<char*>(host_ids.data()), host_count * sizeof(uint32_t));
+    CHECK_ARGUMENT(
+        std::adjacent_find(host_ids.begin(),
+                           host_ids.end(),
+                           [](uint32_t lhs, uint32_t rhs) { return lhs >= rhs; }) == host_ids.end(),
+        "serialized SINDI host IDs must be strictly ordered");
+
+    uint64_t offset_count = 0;
+    StreamReader::ReadObj(reader, offset_count);
+    CHECK_ARGUMENT(offset_count == host_count + 1,
+                   "serialized SINDI host range offset count is invalid");
+    range_offsets.resize(offset_count);
+    reader.Read(reinterpret_cast<char*>(range_offsets.data()), offset_count * sizeof(uint32_t));
+
+    uint64_t range_count = 0;
+    StreamReader::ReadObj(reader, range_count);
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        range_count >= host_count && range_count <= element_count,
+        "serialized SINDI host range count is invalid");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        range_offsets.front() == 0 && range_offsets.back() == range_count,
+        "serialized SINDI host range offsets are invalid");
+    CHECK_ARGUMENT(std::adjacent_find(range_offsets.begin(),
+                                      range_offsets.end(),
+                                      [](uint32_t lhs, uint32_t rhs) { return lhs >= rhs; }) ==
+                       range_offsets.end(),
+                   "serialized SINDI host range offsets must be strictly ordered");
+
+    ranges.resize(range_count);
+    for (auto& range : ranges) {
+        StreamReader::ReadObj(reader, range.begin);
+        StreamReader::ReadObj(reader, range.end);
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            range.begin < range.end && range.end <= element_count,
+            "serialized SINDI host range is invalid");
+    }
+    for (uint64_t host = 0; host < host_count; ++host) {
+        const auto begin = range_offsets[host];
+        const auto end = range_offsets[host + 1];
+        for (uint32_t range = begin + 1; range < end; ++range) {
+            CHECK_ARGUMENT(ranges[range - 1].end < ranges[range].begin,
+                           "serialized SINDI ranges for one host must be ordered and disjoint");
+        }
+    }
+
+    Vector<SindiHostRange> ranges_by_inner_id(ranges, allocator);
+    std::sort(
+        ranges_by_inner_id.begin(),
+        ranges_by_inner_id.end(),
+        [](const SindiHostRange& lhs, const SindiHostRange& rhs) { return lhs.begin < rhs.begin; });
+    uint32_t next_inner_id = 0;
+    for (const auto& range : ranges_by_inner_id) {
+        CHECK_ARGUMENT(range.begin == next_inner_id,
+                       "serialized SINDI host ranges must cover every document exactly once");
+        next_inner_id = range.end;
+    }
+    CHECK_ARGUMENT(next_inner_id == element_count,
+                   "serialized SINDI host ranges must cover every document exactly once");
+
+    host_ids_ = std::move(host_ids);
+    host_range_offsets_ = std::move(range_offsets);
+    host_ranges_ = std::move(ranges);
 }
 
 }  // namespace vsag

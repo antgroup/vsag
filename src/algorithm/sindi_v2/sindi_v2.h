@@ -194,6 +194,29 @@ private:
     void
     serialize_term_layout(StreamWriter& writer) const;
 
+    MetadataPtr
+    collect_streaming_header() const override;
+
+    void
+    serialize_streaming_body(StreamWriter& writer) const override;
+
+    void
+    deserialize_streaming_body(StreamReader& reader, const MetadataPtr& metadata) override;
+
+    void
+    load_streaming_body(StreamReader& reader,
+                        const MetadataPtr& metadata,
+                        const LoadParameters& parameters) override;
+
+    void
+    read_streaming_body(StreamReader& reader, const MetadataPtr& metadata);
+
+    void
+    serialize_streaming_term_layout(StreamWriter& writer) const;
+
+    void
+    deserialize_streaming_term_layout(StreamReader& reader);
+
 private:
     mutable std::shared_mutex global_mutex_;
 

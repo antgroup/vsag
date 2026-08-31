@@ -281,7 +281,7 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
       sparse_value_quant_type_(param->sparse_value_quant_type),
       rerank_type_(param->rerank_type),
       dmq_shared_codebook_threshold_(param->dmq_shared_codebook_threshold),
-      host_filter_(param->host_filter_threshold, common_param.allocator_.get()),
+      host_filter_(common_param.allocator_.get()),
       deserialize_without_footer_(param->deserialize_without_footer),
       deserialize_without_buffer_(param->deserialize_without_buffer),
       quantization_params_(std::make_shared<QuantizationParams>()),
@@ -768,26 +768,13 @@ SINDI::KnnSearch(const DatasetPtr& query,
         create_filter_callback_limiter(filter, filter_callback_remaining));
 
     SearchStatistics statistics;
-    const auto host_route = host_filter_.Classify(query, rerank_flat_ != nullptr);
+    const auto host_route = host_filter_.Classify(query);
     if (host_route.kind == SindiHostRouteKind::EMPTY) {
         auto result = make_empty_result();
         result->Statistics(statistics.Dump());
         return result;
     }
     host_filter_.ApplyFilter(host_route, inner_param.is_inner_id_allowed);
-    if (host_route.kind == SindiHostRouteKind::DIRECT) {
-        auto result = SindiHostFilter::SearchDirect(host_route,
-                                                    sparse_query,
-                                                    k,
-                                                    inner_param.is_inner_id_allowed,
-                                                    threshold,
-                                                    rerank_flat_,
-                                                    label_table_,
-                                                    search_allocator,
-                                                    &statistics);
-        result->Statistics(statistics.Dump());
-        return result;
-    }
     SparseVector effective_query = sparse_query;
     Vector<uint32_t> tmp_ids(search_allocator);
     Vector<float> tmp_vals(search_allocator);
@@ -1120,9 +1107,8 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
         reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
     }
 
-    const auto host_route = is_range
-                                ? SindiHostSearchRoute{}
-                                : host_filter_.Classify(request.query_, rerank_flat_ != nullptr);
+    const auto host_route =
+        is_range ? SindiHostSearchRoute{} : host_filter_.Classify(request.query_);
     if (host_route.kind == SindiHostRouteKind::EMPTY) {
         auto result = make_empty_result();
         result->Statistics(statistics.Dump());
@@ -1130,20 +1116,6 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
         return result;
     }
     host_filter_.ApplyFilter(host_route, inner_param.is_inner_id_allowed);
-    if (host_route.kind == SindiHostRouteKind::DIRECT) {
-        auto result = SindiHostFilter::SearchDirect(host_route,
-                                                    sparse_query,
-                                                    request.topk_,
-                                                    inner_param.is_inner_id_allowed,
-                                                    threshold,
-                                                    rerank_flat_,
-                                                    label_table_,
-                                                    allocator,
-                                                    &statistics);
-        result->Statistics(statistics.Dump());
-        this->AttachReasoningReport(result, reasoning_ctx.get());
-        return result;
-    }
 
     SparseVector effective_query = sparse_query;
     Vector<uint32_t> tmp_ids(allocator);
@@ -1344,6 +1316,9 @@ SINDI::collect_streaming_header() const {
                                        : SINDI_RERANK_FLAT_FORMAT_DATACELL;
         basic_info[SINDI_RERANK_FLAT_FORMAT_KEY].SetInt(rerank_format);
     }
+    if (host_filter_.HasMetadata()) {
+        basic_info[SINDI_HAS_HOST_METADATA_KEY].SetBool(true);
+    }
     metadata->Set(BASIC_INFO, basic_info);
 
     JsonType manifest;
@@ -1366,6 +1341,13 @@ SINDI::collect_streaming_header() const {
     }
     if (this->remap_term_ids_ && this->term_id_mapper_) {
         auto tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_TERM_ID_MAPPER);
+        AppendStreamingManifestBlock(manifest,
+                                     tag,
+                                     StreamSerializationBlockCurrentVersion(tag),
+                                     StreamSerializationTagCritical(tag));
+    }
+    if (host_filter_.HasMetadata()) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_HOST_METADATA);
         AppendStreamingManifestBlock(manifest,
                                      tag,
                                      StreamSerializationBlockCurrentVersion(tag),
@@ -1400,8 +1382,6 @@ SINDI::serialize_windows(StreamWriter& writer) const {
 void
 SINDI::serialize_streaming_body(StreamWriter& writer) const {
     std::shared_lock rlock(this->global_mutex_);
-    CHECK_ARGUMENT(not immutable_enabled_,
-                   "immutable SINDI runtime does not support SerializeStreaming");
 
     auto windows_tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_WINDOWS);
     auto label_tag = static_cast<uint32_t>(StreamSerializationTag::LABEL_TABLE);
@@ -1425,6 +1405,13 @@ SINDI::serialize_streaming_body(StreamWriter& writer) const {
         WriteStreamingBlock(
             writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& w) {
                 this->term_id_mapper_->Serialize(w);
+            });
+    }
+    if (host_filter_.HasMetadata()) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_HOST_METADATA);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& block) {
+                host_filter_.Serialize(block);
             });
     }
 }
@@ -1506,6 +1493,8 @@ SINDI::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
 
     auto basic_info = metadata->Get(BASIC_INFO);
     const auto postings_sorted = has_sorted_posting_lists(basic_info);
+    const bool expects_host_metadata = basic_info.Contains(SINDI_HAS_HOST_METADATA_KEY) &&
+                                       basic_info[SINDI_HAS_HOST_METADATA_KEY].GetBool();
     if (basic_info.Contains(INDEX_PARAM)) {
         auto index_param = std::make_shared<SINDIParameter>();
         index_param->FromString(basic_info[INDEX_PARAM].GetString());
@@ -1522,6 +1511,7 @@ SINDI::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
     bool loaded_label_table = false;
     bool loaded_rerank = false;
     bool loaded_term_mapper = false;
+    bool loaded_host_metadata = false;
 
     bool has_dmq_rerank_format = false;
     if (this->use_reorder_) {
@@ -1600,6 +1590,18 @@ SINDI::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
                     loaded_term_mapper = true;
                 }
                 break;
+            case StreamSerializationTag::SINDI_HOST_METADATA:
+                CHECK_ARGUMENT(expects_host_metadata,
+                               "unexpected SINDI streaming host metadata block");
+                CHECK_ARGUMENT(not loaded_host_metadata,
+                               "duplicate SINDI streaming host metadata block");
+                CHECK_ARGUMENT(loaded_windows, "SINDI streaming host metadata must follow windows");
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    host_filter_.Deserialize(block,
+                                             static_cast<uint64_t>(cur_element_count_.load()));
+                });
+                loaded_host_metadata = true;
+                break;
             default:
                 if (block_header.IsCritical()) {
                     throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
@@ -1628,6 +1630,13 @@ SINDI::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
     if (this->remap_term_ids_ && this->term_id_mapper_ && !loaded_term_mapper) {
         throw VsagException(ErrorType::READ_ERROR,
                             "SINDI streaming serialization term mapper block is missing");
+    }
+    if (expects_host_metadata && !loaded_host_metadata) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "SINDI streaming serialization host metadata block is missing");
+    }
+    if (!loaded_host_metadata) {
+        host_filter_.Clear();
     }
     this->cal_memory_usage();
 }

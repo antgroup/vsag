@@ -15,30 +15,23 @@
 #pragma once
 
 #include <cstdint>
-#include <optional>
 #include <utility>
 
 #include "container_types.h"
-#include "datacell/flatten_interface.h"
-#include "impl/label_table/label_table.h"
 #include "json_types.h"
-#include "query_context.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "vsag/dataset.h"
 #include "vsag/filter.h"
 
 namespace vsag {
 
-inline constexpr const char* SPARSE_HOST_FILTER_THRESHOLD = "host_filter_threshold";
-inline constexpr uint32_t DEFAULT_SPARSE_HOST_FILTER_THRESHOLD = 40;
 inline constexpr const char* SINDI_HOST_ID_METADATA_NAME = "host_id";
-
-uint32_t
-ParseSindiHostFilterThreshold(const JsonType& json);
+inline constexpr const char* SINDI_HAS_HOST_METADATA_KEY = "has_host_metadata";
 
 enum class SindiHostRouteKind : uint8_t {
     UNFILTERED,
     EMPTY,
-    DIRECT,
     WINDOW,
 };
 
@@ -84,7 +77,7 @@ private:
 
 class SindiHostFilter {
 public:
-    SindiHostFilter(uint32_t direct_search_threshold, Allocator* allocator);
+    explicit SindiHostFilter(Allocator* allocator);
 
     SindiHostBuildPlan
     PrepareBuild(const DatasetPtr& base, uint64_t current_element_count) const;
@@ -107,21 +100,10 @@ public:
     }
 
     [[nodiscard]] SindiHostSearchRoute
-    Classify(const DatasetPtr& query, bool direct_search_available) const;
+    Classify(const DatasetPtr& query) const;
 
     void
     ApplyFilter(const SindiHostSearchRoute& route, FilterPtr& filter) const;
-
-    static DatasetPtr
-    SearchDirect(const SindiHostSearchRoute& route,
-                 const SparseVector& query,
-                 int64_t k,
-                 const FilterPtr& filter,
-                 const std::optional<float>& distance_threshold,
-                 const FlattenInterfacePtr& rerank_flat,
-                 const LabelTablePtr& label_table,
-                 Allocator* allocator,
-                 SearchStatistics* statistics);
 
     static void
     ApplyWindowRoute(const SindiHostSearchRoute& route,
@@ -134,8 +116,13 @@ public:
                          uint32_t window_id,
                          uint32_t window_size) const;
 
+    void
+    Serialize(StreamWriter& writer) const;
+
+    void
+    Deserialize(StreamReader& reader, uint64_t element_count);
+
 private:
-    uint32_t direct_search_threshold_{DEFAULT_SPARSE_HOST_FILTER_THRESHOLD};
     Vector<uint32_t> host_ids_;
     Vector<uint32_t> host_range_offsets_;
     Vector<SindiHostRange> host_ranges_;

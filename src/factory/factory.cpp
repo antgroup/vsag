@@ -42,6 +42,8 @@
 #include "algorithm/pyramid/pyramid_zparameters.h"
 #include "algorithm/sindi/sindi.h"
 #include "algorithm/sindi/sindi_parameter.h"
+#include "algorithm/sindi_v2/sindi_v2.h"
+#include "algorithm/sindi_v2/sindi_v2_parameter.h"
 #include "common.h"
 #include "data_type.h"
 #include "impl/thread_pool/safe_thread_pool.h"
@@ -293,6 +295,9 @@ create_streaming_index_from_metadata(const MetadataPtr& metadata,
     }
     if (index_name == INDEX_SINDI) {
         return create_streaming_index<SINDI, SINDIParameter>(index_param, common_param);
+    }
+    if (index_name == INDEX_SINDI_V2) {
+        return create_streaming_index<SINDIV2, SINDIV2Parameter>(index_param, common_param);
     }
 
     LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,

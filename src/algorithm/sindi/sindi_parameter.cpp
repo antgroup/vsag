@@ -166,8 +166,6 @@ SINDIParameter::FromJson(const JsonType& json) {
         dmq_shared_codebook_threshold = DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD;
     }
 
-    host_filter_threshold = ParseSindiHostFilterThreshold(json);
-
     if (json.Contains(SPARSE_IMMUTABLE)) {
         immutable = json[SPARSE_IMMUTABLE].GetBool();
     }
@@ -195,7 +193,6 @@ SINDIParameter::ToJson() const {
         json[SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD].SetInt(
             static_cast<int64_t>(dmq_shared_codebook_threshold));
     }
-    json[SPARSE_HOST_FILTER_THRESHOLD].SetInt(static_cast<int64_t>(host_filter_threshold));
     return json;
 }
 

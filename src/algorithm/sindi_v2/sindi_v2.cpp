@@ -37,6 +37,8 @@
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
+#include "storage/serialization_tags.h"
+#include "storage/tlv_section.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
 #include "vsag/options.h"
@@ -330,7 +332,7 @@ SINDIV2::SINDIV2(const SINDIV2ParameterPtr& param, const IndexCommonParam& commo
       sparse_value_quant_type_(param->sparse_value_quant_type),
       rerank_type_(param->rerank_type),
       dmq_shared_codebook_threshold_(param->dmq_shared_codebook_threshold),
-      host_filter_(param->host_filter_threshold, common_param.allocator_.get()),
+      host_filter_(common_param.allocator_.get()),
       doc_prune_ratio_(param->doc_prune_ratio),
       quantization_params_(std::make_shared<QuantizationParams>()),
       avg_doc_term_length_(param->avg_doc_term_length),
@@ -828,7 +830,7 @@ SINDIV2::KnnSearch(const DatasetPtr& query,
     }
     inner_param.is_inner_id_allowed = ft;
 
-    const auto host_route = host_filter_.Classify(query, rerank_flat_ != nullptr);
+    const auto host_route = host_filter_.Classify(query);
     if (host_route.kind == SindiHostRouteKind::EMPTY) {
         auto result = collect_results(
             std::make_shared<StandardHeap<true, false>>(search_allocator, -1), search_allocator);
@@ -836,19 +838,6 @@ SINDIV2::KnnSearch(const DatasetPtr& query,
         return result;
     }
     host_filter_.ApplyFilter(host_route, inner_param.is_inner_id_allowed);
-    if (host_route.kind == SindiHostRouteKind::DIRECT) {
-        auto result = SindiHostFilter::SearchDirect(host_route,
-                                                    sparse_query,
-                                                    k,
-                                                    inner_param.is_inner_id_allowed,
-                                                    std::nullopt,
-                                                    rerank_flat_,
-                                                    label_table_,
-                                                    search_allocator,
-                                                    &statistics);
-        result->Statistics(statistics.Dump());
-        return result;
-    }
 
     SparseVector effective_query = sparse_query;
     Vector<uint32_t> tmp_ids(search_allocator);
@@ -1165,6 +1154,307 @@ SINDIV2::serialize_term_layout(StreamWriter& writer) const {
     const auto term_dict_count = this->get_term_dict_count();
     CHECK_ARGUMENT(term_datacell_ != nullptr, "SINDIV2 has no term data cell to serialize");
     term_datacell_->SerializeTermLayout(writer, term_dict_count);
+}
+
+MetadataPtr
+SINDIV2::collect_streaming_header() const {
+    auto metadata = std::make_shared<Metadata>();
+    metadata->Set("format", "vsag_stream_v1");
+    metadata->Set("index_name", this->GetName());
+
+    JsonType basic_info;
+    basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
+    basic_info["dim"].SetInt(dim_);
+    basic_info["metric"].SetInt(static_cast<int64_t>(metric_));
+    basic_info["data_type"].SetInt(static_cast<int64_t>(data_type_));
+    basic_info["extra_info_size"].SetInt(static_cast<int64_t>(extra_info_size_));
+    basic_info["cur_element_count"].SetInt(cur_element_count_);
+    basic_info["use_reorder"].SetBool(use_reorder_);
+    basic_info["remap_term_ids"].SetBool(remap_term_ids_);
+    basic_info[SINDI_V2_TERM_LAYOUT_VERSION_KEY].SetInt(SINDI_V2_TERM_LAYOUT_VERSION);
+    basic_info[SINDI_V2_TERM_LAYOUT_KIND_KEY].SetString(SINDI_V2_TERM_LAYOUT_KIND);
+    if (host_filter_.HasMetadata()) {
+        basic_info[SINDI_HAS_HOST_METADATA_KEY].SetBool(true);
+    }
+    metadata->Set(BASIC_INFO, basic_info);
+
+    JsonType manifest;
+    const auto append_block = [&manifest](StreamSerializationTag stream_tag) {
+        const auto tag = static_cast<uint32_t>(stream_tag);
+        AppendStreamingManifestBlock(manifest,
+                                     tag,
+                                     StreamSerializationBlockCurrentVersion(tag),
+                                     StreamSerializationTagCritical(tag));
+    };
+    append_block(StreamSerializationTag::SINDI_V2_TERM_LAYOUT);
+    append_block(StreamSerializationTag::LABEL_TABLE);
+    if (use_reorder_) {
+        append_block(StreamSerializationTag::SINDI_RERANK_INDEX);
+    }
+    if (extra_info_size_ > 0 && extra_infos_ != nullptr) {
+        append_block(StreamSerializationTag::EXTRA_INFO);
+    }
+    if (remap_term_ids_ && term_id_mapper_ != nullptr) {
+        append_block(StreamSerializationTag::SINDI_TERM_ID_MAPPER);
+    }
+    if (host_filter_.HasMetadata()) {
+        append_block(StreamSerializationTag::SINDI_HOST_METADATA);
+    }
+    metadata->Set("block_manifest", manifest);
+    metadata->SetEmptyIndex(cur_element_count_ == 0);
+    return metadata;
+}
+
+void
+SINDIV2::serialize_streaming_term_layout(StreamWriter& writer) const {
+    StreamWriter::WriteObj(writer, cur_element_count_);
+    if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
+        StreamWriter::WriteObj(writer, quantization_params_->min_val);
+        StreamWriter::WriteObj(writer, quantization_params_->max_val);
+        StreamWriter::WriteObj(writer, quantization_params_->diff);
+    }
+    this->serialize_term_layout(writer);
+}
+
+void
+SINDIV2::serialize_streaming_body(StreamWriter& writer) const {
+    std::shared_lock lock(this->global_mutex_);
+    const auto write_block = [&writer](StreamSerializationTag stream_tag, const auto& serialize) {
+        const auto tag = static_cast<uint32_t>(stream_tag);
+        WriteStreamingBlock(writer, tag, StreamSerializationTagCritical(tag), serialize);
+    };
+    write_block(StreamSerializationTag::SINDI_V2_TERM_LAYOUT,
+                [this](StreamWriter& block) { this->serialize_streaming_term_layout(block); });
+    write_block(StreamSerializationTag::LABEL_TABLE,
+                [this](StreamWriter& block) { label_table_->Serialize(block); });
+    if (use_reorder_) {
+        write_block(StreamSerializationTag::SINDI_RERANK_INDEX,
+                    [this](StreamWriter& block) { rerank_flat_->Serialize(block); });
+    }
+    if (extra_info_size_ > 0 && extra_infos_ != nullptr) {
+        write_block(StreamSerializationTag::EXTRA_INFO,
+                    [this](StreamWriter& block) { extra_infos_->Serialize(block); });
+    }
+    if (remap_term_ids_ && term_id_mapper_ != nullptr) {
+        write_block(StreamSerializationTag::SINDI_TERM_ID_MAPPER,
+                    [this](StreamWriter& block) { term_id_mapper_->Serialize(block); });
+    }
+    if (host_filter_.HasMetadata()) {
+        write_block(StreamSerializationTag::SINDI_HOST_METADATA,
+                    [this](StreamWriter& block) { host_filter_.Serialize(block); });
+    }
+}
+
+void
+SINDIV2::deserialize_streaming_term_layout(StreamReader& reader) {
+    StreamReader::ReadObj(reader, cur_element_count_);
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        cur_element_count_ > 0 &&
+            static_cast<uint64_t>(cur_element_count_) <= std::numeric_limits<InnerIdType>::max(),
+        "SINDI_V2 streaming element count is invalid");
+    if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
+        StreamReader::ReadObj(reader, quantization_params_->min_val);
+        StreamReader::ReadObj(reader, quantization_params_->max_val);
+        StreamReader::ReadObj(reader, quantization_params_->diff);
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            std::isfinite(quantization_params_->min_val) &&
+                std::isfinite(quantization_params_->max_val) &&
+                std::isfinite(quantization_params_->diff) &&
+                quantization_params_->min_val <= quantization_params_->max_val &&
+                quantization_params_->diff > 0.0F,
+            "SINDI_V2 streaming SQ8 calibration is invalid");
+    }
+
+    const auto window_count =
+        static_cast<uint32_t>(align_up(cur_element_count_, window_size_) / window_size_);
+    if (immutable_enabled_) {
+        auto immutable = std::make_shared<ImmutableSindiTermDataCell>(term_id_limit_,
+                                                                      window_size_,
+                                                                      remap_term_ids_,
+                                                                      sparse_value_quant_type_,
+                                                                      quantization_params_,
+                                                                      allocator_);
+        immutable->DeserializeTermLayout(reader, window_count, cur_element_count_);
+        term_datacell_ = std::move(immutable);
+    } else {
+        auto mutable_datacell = std::make_shared<MutableSindiTermDataCell>(term_id_limit_,
+                                                                           window_size_,
+                                                                           allocator_,
+                                                                           sparse_value_quant_type_,
+                                                                           quantization_params_);
+        mutable_datacell->DeserializeTermLayout(reader, window_count, cur_element_count_);
+        term_datacell_ = std::move(mutable_datacell);
+    }
+}
+
+void
+SINDIV2::deserialize_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
+    this->read_streaming_body(reader, metadata);
+}
+
+void
+SINDIV2::load_streaming_body(StreamReader& reader,
+                             const MetadataPtr& metadata,
+                             const LoadParameters& parameters) {
+    (void)parameters;
+    this->read_streaming_body(reader, metadata);
+}
+
+void
+SINDIV2::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
+    std::scoped_lock lock(this->global_mutex_);
+    const auto basic_info = metadata->Get(BASIC_INFO);
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        basic_info.Contains(SINDI_V2_TERM_LAYOUT_VERSION_KEY) &&
+            basic_info[SINDI_V2_TERM_LAYOUT_VERSION_KEY].GetInt() == SINDI_V2_TERM_LAYOUT_VERSION,
+        "unsupported SINDI_V2 streaming term layout version");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        basic_info.Contains(SINDI_V2_TERM_LAYOUT_KIND_KEY) &&
+            basic_info[SINDI_V2_TERM_LAYOUT_KIND_KEY].GetString() == SINDI_V2_TERM_LAYOUT_KIND,
+        "invalid SINDI_V2 streaming term layout kind");
+    if (basic_info.Contains(INDEX_PARAM)) {
+        auto serialized_param = std::make_shared<SINDIV2Parameter>();
+        serialized_param->FromString(basic_info[INDEX_PARAM].GetString());
+        CHECK_ARGUMENT(this->create_param_ptr_->CheckCompatibility(serialized_param),
+                       "SINDI_V2 streaming index parameter does not match runtime");
+    }
+    const bool expects_host_metadata = basic_info.Contains(SINDI_HAS_HOST_METADATA_KEY) &&
+                                       basic_info[SINDI_HAS_HOST_METADATA_KEY].GetBool();
+
+    bool loaded_term_layout = false;
+    bool loaded_labels = false;
+    bool loaded_rerank = false;
+    bool loaded_extra_info = false;
+    bool loaded_term_mapper = false;
+    bool loaded_host_metadata = false;
+    while (true) {
+        const auto block_header = StreamBlockHeader::Read(reader);
+        if (block_header.IsSectionEnd()) {
+            break;
+        }
+        BoundedForwardReader block_reader(&reader, block_header.value_len);
+        if (!StreamSerializationBlockVersionSupported(block_header.tag,
+                                                      block_header.block_version)) {
+            if (block_header.IsCritical()) {
+                throw VsagException(
+                    ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                    fmt::format("unsupported SINDI_V2 streaming block version: tag={}, "
+                                "name={}, version={}",
+                                block_header.tag,
+                                StreamSerializationTagName(block_header.tag),
+                                block_header.block_version));
+            }
+            block_reader.SkipRemaining();
+            continue;
+        }
+
+        switch (static_cast<StreamSerializationTag>(block_header.tag)) {
+            case StreamSerializationTag::SINDI_V2_TERM_LAYOUT:
+                CHECK_ARGUMENT(!loaded_term_layout,
+                               "duplicate SINDI_V2 streaming term layout block");
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    this->deserialize_streaming_term_layout(block);
+                });
+                loaded_term_layout = true;
+                break;
+            case StreamSerializationTag::LABEL_TABLE:
+                CHECK_ARGUMENT(!loaded_labels, "duplicate SINDI_V2 streaming label block");
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    label_table_->Deserialize(block);
+                });
+                loaded_labels = true;
+                break;
+            case StreamSerializationTag::SINDI_RERANK_INDEX:
+                CHECK_ARGUMENT(use_reorder_, "unexpected SINDI_V2 streaming rerank block");
+                CHECK_ARGUMENT(!loaded_rerank, "duplicate SINDI_V2 streaming rerank block");
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    rerank_flat_->Deserialize(block);
+                });
+                loaded_rerank = true;
+                break;
+            case StreamSerializationTag::EXTRA_INFO:
+                CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+                    extra_info_size_ > 0 && extra_infos_ != nullptr,
+                    "unexpected SINDI_V2 streaming extra-info block");
+                CHECK_ARGUMENT(!loaded_extra_info, "duplicate SINDI_V2 streaming extra-info block");
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    extra_infos_->Deserialize(block);
+                });
+                loaded_extra_info = true;
+                break;
+            case StreamSerializationTag::SINDI_TERM_ID_MAPPER:
+                CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+                    remap_term_ids_ && term_id_mapper_ != nullptr,
+                    "unexpected SINDI_V2 streaming term mapper block");
+                CHECK_ARGUMENT(!loaded_term_mapper,
+                               "duplicate SINDI_V2 streaming term mapper block");
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    term_id_mapper_->Deserialize(block);
+                });
+                loaded_term_mapper = true;
+                break;
+            case StreamSerializationTag::SINDI_HOST_METADATA:
+                CHECK_ARGUMENT(expects_host_metadata,
+                               "unexpected SINDI_V2 streaming host metadata block");
+                CHECK_ARGUMENT(!loaded_host_metadata,
+                               "duplicate SINDI_V2 streaming host metadata block");
+                CHECK_ARGUMENT(loaded_term_layout,
+                               "SINDI_V2 streaming host metadata must follow term layout");
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    host_filter_.Deserialize(block, static_cast<uint64_t>(cur_element_count_));
+                });
+                loaded_host_metadata = true;
+                break;
+            default:
+                if (block_header.IsCritical()) {
+                    throw VsagException(
+                        ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                        fmt::format("unknown SINDI_V2 streaming serialization block: tag={}, "
+                                    "name={}, version={}",
+                                    block_header.tag,
+                                    StreamSerializationTagName(block_header.tag),
+                                    block_header.block_version));
+                }
+                break;
+        }
+        block_reader.SkipRemaining();
+    }
+
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        loaded_term_layout && loaded_labels,
+        "SINDI_V2 streaming required block is missing");
+    CHECK_ARGUMENT(label_table_->GetTotalCount() == cur_element_count_,
+                   "SINDI_V2 streaming label count does not match element count");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        !use_reorder_ || loaded_rerank,
+        "SINDI_V2 streaming rerank block is missing");
+    if (use_reorder_) {
+        CHECK_ARGUMENT(rerank_flat_->TotalCount() == static_cast<InnerIdType>(cur_element_count_),
+                       "SINDI_V2 streaming rerank count does not match element count");
+    }
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        extra_info_size_ == 0 || loaded_extra_info,
+        "SINDI_V2 streaming extra-info block is missing");
+    if (extra_info_size_ > 0) {
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            extra_infos_->TotalCount() == static_cast<InnerIdType>(cur_element_count_) &&
+                extra_infos_->ExtraInfoSize() == extra_info_size_,
+            "SINDI_V2 streaming extra-info does not match index configuration");
+    }
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        !remap_term_ids_ || loaded_term_mapper,
+        "SINDI_V2 streaming term mapper block is missing");
+    if (remap_term_ids_) {
+        CHECK_ARGUMENT(term_id_mapper_->Size() == term_datacell_->GetTermDictCount(),
+                       "SINDI_V2 streaming term mapper size does not match term layout");
+    }
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        !expects_host_metadata || loaded_host_metadata,
+        "SINDI_V2 streaming host metadata block is missing");
+    if (!loaded_host_metadata) {
+        host_filter_.Clear();
+    }
+    this->cal_memory_usage();
 }
 
 void
