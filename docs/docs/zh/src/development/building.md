@@ -16,6 +16,10 @@ arm64 核心 C++ 构建，预编译 C++ 包与 Python wheel 仍以 Linux 为主�
 `-DENABLE_LIBURING=ON`。默认值为 `OFF`；在非 Linux 平台或未找到 liburing 时，
 请求 `uring_io` 的配置会打印一次性告警并回退到 `buffer_io`。
 
+如果需要构建可选的 CUDA 后端，请安装 NVIDIA 工具链（`nvcc` 在 `PATH` 中或设置
+`CMAKE_CUDA_COMPILER`），并在直接配置 CMake 时添加 `-DENABLE_CUDA=ON`。默认值为 `OFF`；
+关闭时会编译一份导出相同符号的空实现，调用方无条件链接、在运行时判断是否有设备。
+
 在 CMake 配置中，有许多参数和编译目标。为了方便使用，我们将常用的编译目标（或命令）写到了 Makefile 中，以避免记忆各种配置或者从命令行输入大段参数。当存在可用的 `ninja` 且 CMake 支持 Ninja 生成器时，这些目标会优先使用 Ninja；否则会回退到 Unix Makefiles。显式设置的 `CMAKE_GENERATOR` 始终优先，例如可以使用 `make debug CMAKE_GENERATOR='Unix Makefiles'` 直接指定回退生成器。由于 CMake 构建目录与生成器绑定，更换现有构建目录的生成器前应先运行对应的清理目标。这些编译目标（或命令）可以通过在项目根目录运行 `make help` 查看：
 
 ```bash
