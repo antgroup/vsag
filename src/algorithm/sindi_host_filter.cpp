@@ -27,8 +27,6 @@
 namespace vsag {
 namespace {
 
-constexpr uint32_t SINDI_MAX_HOST_COUNT = 50'000'000;
-
 class InnerIdHostFilter : public Filter {
 public:
     InnerIdHostFilter(const Vector<SindiHostRange>* ranges,
@@ -51,12 +49,29 @@ public:
         const auto range_end = ranges_->begin() + range_end_;
         const auto range = std::upper_bound(
             range_begin, range_end, inner_id, [](uint64_t value, const SindiHostRange& candidate) {
-                return value < candidate.begin;
+                return value < static_cast<uint64_t>(candidate.begin);
             });
         if (range == range_begin or inner_id >= std::prev(range)->end) {
             return false;
         }
         return filter_ == nullptr or filter_->CheckValid(id);
+    }
+
+    void
+    GetValidIds(const int64_t** valid_ids, int64_t& count) const override {
+        if (filter_ != nullptr) {
+            filter_->GetValidIds(valid_ids, count);
+        }
+    }
+
+    [[nodiscard]] float
+    ValidRatio() const override {
+        return filter_ == nullptr ? 1.0F : filter_->ValidRatio();
+    }
+
+    [[nodiscard]] Distribution
+    FilterDistribution() const override {
+        return filter_ == nullptr ? Distribution::NONE : filter_->FilterDistribution();
     }
 
 private:
@@ -80,8 +95,10 @@ SindiHostBuildPlan::RecordSuccess(uint32_t ordered_position) {
     if (not enabled_) {
         return;
     }
-    while (successful_host_cursor_ + 1 < input_offsets_.size() and
-           ordered_position >= input_offsets_[successful_host_cursor_ + 1]) {
+    // Advance to the host group that contains this position in the sorted input batch.
+    while (static_cast<uint64_t>(successful_host_cursor_) + 1 <
+               static_cast<uint64_t>(input_offsets_.size()) and
+           ordered_position >= input_offsets_[static_cast<uint64_t>(successful_host_cursor_) + 1]) {
         ++successful_host_cursor_;
     }
     ++successful_counts_[successful_host_cursor_];
@@ -127,14 +144,6 @@ SindiHostFilter::PrepareBuild(const DatasetPtr& base, uint64_t current_element_c
             plan.input_offsets_.push_back(position);
         }
     }
-    uint64_t combined_host_count = host_ids_.size();
-    for (const auto host_id : plan.host_ids_) {
-        if (not std::binary_search(host_ids_.begin(), host_ids_.end(), host_id)) {
-            ++combined_host_count;
-        }
-    }
-    CHECK_ARGUMENT(combined_host_count <= SINDI_MAX_HOST_COUNT,
-                   fmt::format("SINDI unique host count must not exceed {}", SINDI_MAX_HOST_COUNT));
     plan.input_offsets_.push_back(static_cast<uint32_t>(data_num));
     plan.successful_counts_.resize(plan.host_ids_.size(), 0);
     return plan;
@@ -215,9 +224,10 @@ SindiHostFilter::CommitBuild(SindiHostBuildPlan&& plan,
 
 void
 SindiHostFilter::Clear() {
-    host_ids_.clear();
-    host_range_offsets_.clear();
-    host_ranges_.clear();
+    auto* allocator = host_ids_.get_allocator().allocator_;
+    Vector<uint32_t>(allocator).swap(host_ids_);
+    Vector<uint32_t>(allocator).swap(host_range_offsets_);
+    Vector<SindiHostRange>(allocator).swap(host_ranges_);
 }
 
 SindiHostSearchRoute
@@ -262,6 +272,35 @@ SindiHostFilter::ApplyWindowRoute(const SindiHostSearchRoute& route,
     max_window_id = std::min<int64_t>(max_window_id, (route.end - 1) / window_size);
 }
 
+int64_t
+SindiHostFilter::NextMatchingWindow(const SindiHostSearchRoute& route,
+                                    uint32_t window_size,
+                                    int64_t current_window_id,
+                                    int64_t max_window_id) const {
+    if (route.kind != SindiHostRouteKind::WINDOW) {
+        return current_window_id;
+    }
+
+    const auto range_begin = host_range_offsets_[route.host_index];
+    const auto range_end = host_range_offsets_[route.host_index + 1];
+    const auto first = host_ranges_.begin() + range_begin;
+    const auto last = host_ranges_.begin() + range_end;
+    const auto window_begin = static_cast<uint64_t>(current_window_id) * window_size;
+    const auto range = std::upper_bound(
+        first, last, window_begin, [](uint64_t value, const SindiHostRange& candidate) {
+            return value < static_cast<uint64_t>(candidate.begin);
+        });
+    if (range != first and std::prev(range)->end > window_begin) {
+        return current_window_id;
+    }
+    if (range == last) {
+        return max_window_id + 1;
+    }
+    const auto next_window_id = static_cast<int64_t>(range->begin / window_size);
+    return next_window_id <= max_window_id ? std::max(current_window_id, next_window_id)
+                                           : max_window_id + 1;
+}
+
 bool
 SindiHostFilter::RequiresFullTermScan(const SindiHostSearchRoute& route,
                                       uint32_t window_id,
@@ -273,11 +312,12 @@ SindiHostFilter::RequiresFullTermScan(const SindiHostSearchRoute& route,
     const auto window_end = window_begin + window_size;
     const auto range_begin = host_range_offsets_[route.host_index];
     const auto range_end = host_range_offsets_[route.host_index + 1];
-    const auto range = std::upper_bound(
-        host_ranges_.begin() + range_begin,
-        host_ranges_.begin() + range_end,
-        window_begin,
-        [](uint64_t value, const SindiHostRange& candidate) { return value < candidate.begin; });
+    const auto range = std::upper_bound(host_ranges_.begin() + range_begin,
+                                        host_ranges_.begin() + range_end,
+                                        window_begin,
+                                        [](uint64_t value, const SindiHostRange& candidate) {
+                                            return value < static_cast<uint64_t>(candidate.begin);
+                                        });
     if (range == host_ranges_.begin() + range_begin) {
         return true;
     }
@@ -301,7 +341,9 @@ void
 SindiHostFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
         element_count > 0 && element_count <= std::numeric_limits<uint32_t>::max(),
-        "serialized SINDI host metadata element count is invalid");
+        fmt::format("serialized SINDI host metadata element count must be in [1, {}], got {}",
+                    std::numeric_limits<uint32_t>::max(),
+                    element_count));
 
     auto* allocator = host_ids_.get_allocator().allocator_;
     Vector<uint32_t> host_ids(allocator);
@@ -311,8 +353,9 @@ SindiHostFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
     uint64_t host_count = 0;
     StreamReader::ReadObj(reader, host_count);
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
-        host_count > 0 && host_count <= SINDI_MAX_HOST_COUNT && host_count <= element_count,
-        "serialized SINDI host count is invalid");
+        host_count > 0 && host_count <= element_count,
+        fmt::format(
+            "serialized SINDI host count must be in [1, {}], got {}", element_count, host_count));
     host_ids.resize(host_count);
     reader.Read(reinterpret_cast<char*>(host_ids.data()), host_count * sizeof(uint32_t));
     CHECK_ARGUMENT(
@@ -324,7 +367,9 @@ SindiHostFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
     uint64_t offset_count = 0;
     StreamReader::ReadObj(reader, offset_count);
     CHECK_ARGUMENT(offset_count == host_count + 1,
-                   "serialized SINDI host range offset count is invalid");
+                   fmt::format("serialized SINDI host range offset count must be {}, got {}",
+                               host_count + 1,
+                               offset_count));
     range_offsets.resize(offset_count);
     reader.Read(reinterpret_cast<char*>(range_offsets.data()), offset_count * sizeof(uint32_t));
 
@@ -332,10 +377,17 @@ SindiHostFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
     StreamReader::ReadObj(reader, range_count);
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
         range_count >= host_count && range_count <= element_count,
-        "serialized SINDI host range count is invalid");
+        fmt::format("serialized SINDI host range count must be in [{}, {}], got {}",
+                    host_count,
+                    element_count,
+                    range_count));
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
         range_offsets.front() == 0 && range_offsets.back() == range_count,
-        "serialized SINDI host range offsets are invalid");
+        fmt::format("serialized SINDI host range offsets must start at 0 and end at {}, got [{}, "
+                    "{}]",
+                    range_count,
+                    range_offsets.front(),
+                    range_offsets.back()));
     CHECK_ARGUMENT(std::adjacent_find(range_offsets.begin(),
                                       range_offsets.end(),
                                       [](uint32_t lhs, uint32_t rhs) { return lhs >= rhs; }) ==
@@ -348,7 +400,10 @@ SindiHostFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
         StreamReader::ReadObj(reader, range.end);
         CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
             range.begin < range.end && range.end <= element_count,
-            "serialized SINDI host range is invalid");
+            fmt::format("serialized SINDI host range [{}, {}) is invalid for {} elements",
+                        range.begin,
+                        range.end,
+                        element_count));
     }
     for (uint64_t host = 0; host < host_count; ++host) {
         const auto begin = range_offsets[host];
@@ -367,11 +422,15 @@ SindiHostFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
     uint32_t next_inner_id = 0;
     for (const auto& range : ranges_by_inner_id) {
         CHECK_ARGUMENT(range.begin == next_inner_id,
-                       "serialized SINDI host ranges must cover every document exactly once");
+                       fmt::format("serialized SINDI host ranges expected next inner ID {}, got {}",
+                                   next_inner_id,
+                                   range.begin));
         next_inner_id = range.end;
     }
     CHECK_ARGUMENT(next_inner_id == element_count,
-                   "serialized SINDI host ranges must cover every document exactly once");
+                   fmt::format("serialized SINDI host ranges must cover {} elements, covered {}",
+                               element_count,
+                               next_inner_id));
 
     host_ids_ = std::move(host_ids);
     host_range_offsets_ = std::move(range_offsets);

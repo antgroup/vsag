@@ -16,7 +16,6 @@
 
 #include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
-#include <limits>
 
 #include "inner_string_params.h"
 #include "sindi_v2.h"

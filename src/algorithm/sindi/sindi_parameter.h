@@ -19,7 +19,6 @@
 #include <string>
 
 #include "algorithm/inner_index_parameter.h"
-#include "algorithm/sindi_host_filter.h"
 #include "index_common_param.h"
 #include "utils/pointer_define.h"
 

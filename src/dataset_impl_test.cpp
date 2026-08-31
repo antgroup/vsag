@@ -584,6 +584,11 @@ TEST_CASE("Dataset Named UInt32 Metadata Test", "[ut][dataset]") {
 
     auto missing_metadata = vsag::Dataset::Make()->NumElements(1)->Dim(1)->Owner(false);
     REQUIRE_THROWS(first->Append(missing_metadata));
+
+    auto null_metadata = vsag::Dataset::Make();
+    null_metadata->NumElements(2)->UInt32Metadata("host_id", nullptr)->Owner(true);
+    auto null_metadata_copy = null_metadata->DeepCopy();
+    REQUIRE(null_metadata_copy->GetUInt32Metadata("host_id") == nullptr);
 }
 
 TEST_CASE("Dataset MultiVector Basic Test", "[ut][dataset]") {

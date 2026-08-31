@@ -165,13 +165,13 @@ host's one or more internal-ID ranges. Repeated mutable `Add()` calls may append
 the same host. Tombstones and an additional user `Filter` are applied together with host membership.
 
 Host ID `0` is the missing-host bucket; values from `1` through `UINT32_MAX` identify normal hosts.
-One index may contain at most 50,000,000 distinct host IDs, including `0`. Once a mutable index
-contains host metadata, every later `Add()` must provide a complete `host_id` array; host metadata
-cannot be introduced after host-unaware documents. A query with `host_id: 0` searches only missing-
-host documents, while omitting `host_id` preserves full-index KNN behavior. A host with no indexed
-documents returns an empty result. Indexes built without base host metadata ignore query host
-metadata and retain their previous behavior. Host filtering currently applies only to KNN; range
-search keeps its existing full-index behavior.
+The number of distinct hosts cannot exceed the number of successfully indexed documents. Once a
+mutable index contains host metadata, every later `Add()` must provide a complete `host_id` array;
+host metadata cannot be introduced after host-unaware documents. A query with `host_id: 0` searches
+only missing-host documents, while omitting `host_id` preserves full-index KNN behavior. A host with
+no indexed documents returns an empty result. Indexes built without base host metadata ignore query
+host metadata and retain their previous behavior. Host filtering currently applies only to KNN;
+range search keeps its existing full-index behavior.
 
 ## Search parameters
 

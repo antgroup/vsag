@@ -154,11 +154,11 @@ query->NumElements(1)
 精确成员检查。多次 mutable `Add()` 可以为同一 host 追加互不连续的区间；删除标记和额外的
 用户 `Filter` 会与 host 成员检查共同生效。
 
-host ID `0` 是缺失 host 分组，`1` 到 `UINT32_MAX` 表示普通 host；单个索引最多包含
-50,000,000 个不同 host ID（包含 `0`）。mutable 索引一旦包含 host metadata，后续每次
-`Add()` 都必须提供完整的 `host_id` 数组；已有 host-unaware 文档后不能再引入 host metadata。
-查询 `host_id: 0` 时只检索缺失 host 的文档，不提供 `host_id` 时保留全索引 KNN 行为；查询
-没有已索引文档的 host 返回空结果。构建时没有 base host metadata 的索引会忽略查询 host
+host ID `0` 是缺失 host 分组，`1` 到 `UINT32_MAX` 表示普通 host；不同 host 的数量不能超过
+成功写入索引的文档数。mutable 索引一旦包含 host metadata，后续每次 `Add()` 都必须提供
+完整的 `host_id` 数组；已有 host-unaware 文档后不能再引入 host metadata。查询
+`host_id: 0` 时只检索缺失 host 的文档，不提供 `host_id` 时保留全索引 KNN 行为；查询没有
+已索引文档的 host 返回空结果。构建时没有 base host metadata 的索引会忽略查询 host
 metadata，行为保持不变。host 过滤当前仅适用于 KNN；范围搜索仍使用原有全索引路径。
 
 ## 检索参数

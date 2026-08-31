@@ -111,6 +111,12 @@ public:
                      int64_t& min_window_id,
                      int64_t& max_window_id);
 
+    [[nodiscard]] int64_t
+    NextMatchingWindow(const SindiHostSearchRoute& route,
+                       uint32_t window_size,
+                       int64_t current_window_id,
+                       int64_t max_window_id) const;
+
     [[nodiscard]] bool
     RequiresFullTermScan(const SindiHostSearchRoute& route,
                          uint32_t window_id,

@@ -882,19 +882,22 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                      const SindiHostSearchRoute& host_route) const {
     MaxHeap heap(allocator);
     int64_t k = 0;
-    auto effective_inner_param = inner_param;
 
     if constexpr (mode == KNN_SEARCH) {
-        k = effective_inner_param.topk;
+        k = inner_param.topk;
     }
 
     Vector<float> dists(window_size_, 0.0, allocator);
-    auto& filter = effective_inner_param.is_inner_id_allowed;
+    auto filter = inner_param.is_inner_id_allowed;
     auto [min_window_id, max_window_id] = this->get_min_max_window_id(filter);
     SindiHostFilter::ApplyWindowRoute(host_route, window_size_, min_window_id, max_window_id);
     const bool has_effective_query_terms = not computer->sorted_query_.empty();
 
-    for (auto cur = min_window_id; cur <= max_window_id; cur++) {
+    for (auto cur = min_window_id; cur <= max_window_id; ++cur) {
+        cur = host_filter_.NextMatchingWindow(host_route, window_size_, cur, max_window_id);
+        if (cur > max_window_id) {
+            break;
+        }
         const auto window_id = static_cast<uint32_t>(cur);
         const auto window_start_id = window_id * window_size_;
         computer->SetTermPruneEnabled(
@@ -920,24 +923,22 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                 if (filter != nullptr && not filter->CheckValid(inner_id)) {
                     continue;
                 }
-                if (effective_inner_param.distance_threshold.has_value() &&
-                    not effective_inner_param.enable_reorder &&
-                    1.0F > effective_inner_param.distance_threshold.value()) {
+                if (inner_param.distance_threshold.has_value() && not inner_param.enable_reorder &&
+                    1.0F > inner_param.distance_threshold.value()) {
                     continue;
                 }
                 if constexpr (mode == KNN_SEARCH) {
                     heap.emplace(0.0F, inner_id);
-                    if (heap.size() > effective_inner_param.ef) {
+                    if (heap.size() > inner_param.ef) {
                         heap.pop();
                     }
                 } else {
-                    if (1.0F > effective_inner_param.radius) {
+                    if (1.0F > inner_param.radius) {
                         continue;
                     }
                     heap.emplace(0.0F, inner_id);
-                    if (effective_inner_param.range_search_limit_size != -1 &&
-                        heap.size() >
-                            static_cast<uint64_t>(effective_inner_param.range_search_limit_size)) {
+                    if (inner_param.range_search_limit_size != -1 &&
+                        heap.size() > static_cast<uint64_t>(inner_param.range_search_limit_size)) {
                         heap.pop();
                     }
                 }
@@ -947,10 +948,10 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                                                window_id,
                                                computer,
                                                heap,
-                                               effective_inner_param,
+                                               inner_param,
                                                window_start_id,
                                                mode,
-                                               effective_inner_param.is_inner_id_allowed != nullptr,
+                                               inner_param.is_inner_id_allowed != nullptr,
                                                query_context);
         } else {
             uint32_t valid_window_size = 0;
@@ -962,10 +963,10 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
             term_datacell_->InsertHeapByDists(dists.data(),
                                               valid_window_size,
                                               heap,
-                                              effective_inner_param,
+                                              inner_param,
                                               window_start_id,
                                               mode,
-                                              effective_inner_param.is_inner_id_allowed != nullptr);
+                                              inner_param.is_inner_id_allowed != nullptr);
         }
     }
 
@@ -993,12 +994,12 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                 cur_heap_top = high_precise_heap->Top().first;
             }
             if constexpr (mode == RANGE_SEARCH) {
-                if (high_precise_distance <= effective_inner_param.radius) {
+                if (high_precise_distance <= inner_param.radius) {
                     high_precise_heap->Push(high_precise_distance, label);
                 }
-                if (effective_inner_param.range_search_limit_size != -1 and
+                if (inner_param.range_search_limit_size != -1 and
                     high_precise_heap->Size() >
-                        static_cast<uint64_t>(effective_inner_param.range_search_limit_size)) {
+                        static_cast<uint64_t>(inner_param.range_search_limit_size)) {
                     high_precise_heap->Pop();
                 }
             }
@@ -1031,8 +1032,8 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
     // low precision
     if constexpr (mode == RANGE_SEARCH) {
         k = static_cast<int64_t>(heap.size());
-        if (effective_inner_param.range_search_limit_size != -1) {
-            k = effective_inner_param.range_search_limit_size;
+        if (inner_param.range_search_limit_size != -1) {
+            k = inner_param.range_search_limit_size;
         }
     }
 
@@ -1667,6 +1668,8 @@ SINDIV2::Deserialize(StreamReader& reader) {
         CHECK_ARGUMENT(term_id_mapper_->Size() == term_datacell_->GetTermDictCount(),
                        "SINDIV2 remapped term dict count does not match mapper size");
     }
+
+    host_filter_.Clear();
     this->cal_memory_usage();
 }
 

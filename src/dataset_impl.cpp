@@ -219,20 +219,23 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
     }
 
     auto release_uint32_metadata = [this](const uint32_t* vector_counts, auto release) {
-        std::unordered_set<const uint32_t*> released_values;
-        if (vector_counts != nullptr) {
-            released_values.insert(vector_counts);
-        }
-        for (const auto& [key, value] : this->data_) {
-            if (not IsUInt32MetadataKey(key)) {
+        for (auto iter = this->data_.cbegin(); iter != this->data_.cend(); ++iter) {
+            if (not IsUInt32MetadataKey(iter->first)) {
                 continue;
             }
-            const auto* stored_values = std::get_if<const uint32_t*>(&value);
+            const auto* stored_values = std::get_if<const uint32_t*>(&iter->second);
             if (stored_values == nullptr) {
                 continue;
             }
             const auto* values = *stored_values;
-            if (values != nullptr and released_values.insert(values).second) {
+            bool already_released = values == nullptr or values == vector_counts;
+            for (auto previous = this->data_.cbegin(); not already_released and previous != iter;
+                 ++previous) {
+                const auto* previous_values = std::get_if<const uint32_t*>(&previous->second);
+                already_released = IsUInt32MetadataKey(previous->first) and
+                                   previous_values != nullptr and *previous_values == values;
+            }
+            if (not already_released) {
                 release(values);
             }
         }
@@ -390,7 +393,7 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
     }
     for (const auto& [key, value] : this->data_) {
         const auto* values = std::get_if<const uint32_t*>(&value);
-        if (IsUInt32MetadataKey(key) and values != nullptr) {
+        if (IsUInt32MetadataKey(key) and values != nullptr and *values != nullptr) {
             copy_dataset->UInt32Metadata(UInt32MetadataNameFromKey(key),
                                          allocate_and_copy(*values, num_elements, allocator_ref));
         }

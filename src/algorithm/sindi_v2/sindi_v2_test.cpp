@@ -309,7 +309,87 @@ TEST_CASE("SINDIV2 host filter supports mutable immutable and reorder modes",
             REQUIRE(result->GetDim() == 2);
             REQUIRE(result->GetIds()[0] == 50);
             REQUIRE(result->GetIds()[1] == 30);
+
+            std::array<float, 2> second_added_values{7.0F, 8.0F};
+            std::array<SparseVector, 2> second_added_vectors{
+                SparseVector{1, &term, &second_added_values[0]},
+                SparseVector{1, &term, &second_added_values[1]}};
+            std::array<int64_t, 2> second_added_labels{70, 80};
+            std::array<uint32_t, 2> second_added_hosts{2, 0};
+            auto second_added = Dataset::Make()
+                                    ->NumElements(second_added_vectors.size())
+                                    ->SparseVectors(second_added_vectors.data())
+                                    ->Ids(second_added_labels.data())
+                                    ->UInt32Metadata("host_id", second_added_hosts.data())
+                                    ->Owner(false);
+            REQUIRE(index.Add(second_added).empty());
+            result = index.KnnSearch(query, 3, search_parameters, nullptr);
+            REQUIRE(result->GetDim() == 3);
+            REQUIRE(result->GetIds()[0] == 80);
+            REQUIRE(result->GetIds()[1] == 50);
+            REQUIRE(result->GetIds()[2] == 30);
         }
+    }
+}
+
+TEST_CASE("SINDIV2 legacy deserialize clears host metadata",
+          "[ut][SINDIV2][host_filter][serialization]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 8;
+
+    auto parameter = std::make_shared<SINDIV2Parameter>();
+    parameter->term_id_limit = 8;
+    parameter->window_size = 10000;
+    parameter->term_io_parameter = std::make_shared<MemoryIOParameter>();
+    parameter->rerank_io_parameter = std::make_shared<MemoryBlockIOParameter>();
+
+    uint32_t term = 1;
+    std::array<float, 3> values{3.0F, 2.0F, 1.0F};
+    std::array<int64_t, 3> labels{10, 20, 30};
+    std::array<SparseVector, 3> vectors{};
+    for (uint64_t i = 0; i < vectors.size(); ++i) {
+        vectors[i] = SparseVector{1, &term, &values[i]};
+    }
+    auto base = Dataset::Make()
+                    ->NumElements(vectors.size())
+                    ->SparseVectors(vectors.data())
+                    ->Ids(labels.data())
+                    ->Owner(false);
+
+    SINDIV2 legacy_source(parameter, common_param);
+    REQUIRE(legacy_source.Build(base).empty());
+    uint32_t query_host_id = 99;
+    float query_value = 1.0F;
+    SparseVector query_vector{1, &term, &query_value};
+    auto query = Dataset::Make()
+                     ->NumElements(1)
+                     ->SparseVectors(&query_vector)
+                     ->UInt32Metadata("host_id", &query_host_id)
+                     ->Owner(false);
+    const std::string search_parameters = R"({"sindi_v2": {"n_candidate": 3}})";
+    auto expected = legacy_source.KnnSearch(query, 3, search_parameters, nullptr);
+    REQUIRE(expected->GetDim() == 3);
+
+    std::stringstream legacy_stream;
+    IOStreamWriter legacy_writer(legacy_stream);
+    legacy_source.Serialize(legacy_writer);
+
+    std::array<uint32_t, 3> host_ids{1, 2, 1};
+    SINDIV2 restored(parameter, common_param);
+    REQUIRE(restored.Build(base->UInt32Metadata("host_id", host_ids.data())).empty());
+    REQUIRE(restored.KnnSearch(query, 3, search_parameters, nullptr)->GetDim() == 0);
+
+    legacy_stream.seekg(0, std::ios::beg);
+    IOStreamReader legacy_reader(legacy_stream);
+    REQUIRE_NOTHROW(restored.Deserialize(legacy_reader));
+    auto actual = restored.KnnSearch(query, 3, search_parameters, nullptr);
+    REQUIRE(actual->GetDim() == expected->GetDim());
+    for (int64_t i = 0; i < expected->GetDim(); ++i) {
+        REQUIRE(actual->GetIds()[i] == expected->GetIds()[i]);
+        REQUIRE(actual->GetDistances()[i] == expected->GetDistances()[i]);
     }
 }
 
