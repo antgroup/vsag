@@ -82,7 +82,6 @@ and `metric_type` **must** be `"ip"`.
 | `use_reorder` | bool | `false` | Keep a forward store and rescore candidates after coarse SINDI scoring. |
 | `rerank_type` | string | `"fp32"` | Forward-store type used when `use_reorder` is enabled. `fp32` keeps exact values; `dmq8` stores compressed 8-bit DMQ codes. |
 | `dmq_shared_codebook_threshold` | int | `1024` | With `rerank_type: "dmq8"`, terms occurring at most this many times share one codebook; more frequent terms keep independent codebooks. Set to `0` to disable sharing. |
-| `host_filter_threshold` | int | `40` | When `use_reorder` is enabled, hosts with at most this many documents use direct forward-store scoring; other host searches use posting windows. |
 | `remap_term_ids` | bool | `false` | Remap term IDs before indexing; useful when term IDs are sparse or have large gaps. |
 | `avg_doc_term_length` | int | `100` | Hint for memory estimation only. |
 | `immutable` | bool | `false` | Build or load the compact read-only runtime. `Build()` compacts completed windows as it proceeds to reduce peak memory; incremental `Add()` is rejected. |
@@ -133,8 +132,8 @@ evidence, not a capacity guarantee.
 
 The immutable runtime supports KNN and range search plus legacy `Serialize`/`Deserialize`.
 It rejects incremental `Add`, `GetSparseVectorByInnerId`, `CalcDistanceById`, and
-`CalDistanceById`. Streaming serialization is not supported for immutable SINDI; use the matching
-legacy serialization APIs or keep the index mutable when the streaming format is required.
+`CalDistanceById`. Mutable and immutable runtimes both support `SerializeStreaming`,
+`DeserializeStreaming`, and `Index::Load`.
 The serialized index must be loaded into a SINDI created with the same `immutable` setting.
 New indexes record the sorted posting-list format version and skip normalization when loaded.
 Indexes written without this marker remain compatible and are normalized during loading.
@@ -142,10 +141,8 @@ Indexes written without this marker remain compatible and are normalized during 
 ### Host filtering
 
 Mutable and immutable SINDI and [SINDI_V2](sindi_v2.md) indexes can group documents by a single
-numeric host and avoid returning documents from other hosts. The feature does not require
-`immutable: true` or `use_reorder: true`. When reranking is enabled, both
-`rerank_type: "fp32"` and `rerank_type: "dmq8"` are supported. Attach one non-zero `uint32_t`
-`host_id` per base document:
+numeric host and avoid returning documents from other hosts. Attach a complete `uint32_t` `host_id`
+array to a host-aware `Build()` or mutable `Add()` batch. Use `0` for a document with no host:
 
 ```cpp
 base->NumElements(n)
@@ -163,19 +160,18 @@ query->NumElements(1)
 ```
 
 Each `Build()` or mutable `Add()` batch groups internal IDs by host while preserving external
-labels. With `use_reorder: true`, a host with at most `host_filter_threshold` successfully inserted
-documents is scored directly by the configured FP32 or DMQ forward store. Larger hosts, and all
-hosts when `use_reorder: false`, use posting-window search with exact membership checks over the
-host's one or more internal-ID ranges. Tombstones and an additional user `Filter` are applied on
-both paths.
+labels. Host queries scan the relevant posting windows and apply exact membership checks over the
+host's one or more internal-ID ranges. Repeated mutable `Add()` calls may append disjoint ranges for
+the same host. Tombstones and an additional user `Filter` are applied together with host membership.
 
-Host IDs may be any non-zero `uint32_t` value; one index may contain at most 50,000,000 distinct
-hosts. An invalid build host rejects the build; an absent query host or a host with no indexed
-documents returns an empty result. Once a mutable index contains host metadata, every later
-`Add()` must also provide `host_id`; host metadata cannot be introduced after host-unaware
-documents. Omitting `host_id` from a query preserves full-index KNN behavior. Indexes built without
-base host metadata ignore query host metadata and retain their previous behavior. Host filtering
-currently applies only to KNN; range search keeps its existing full-index behavior.
+Host ID `0` is the missing-host bucket; values from `1` through `UINT32_MAX` identify normal hosts.
+One index may contain at most 50,000,000 distinct host IDs, including `0`. Once a mutable index
+contains host metadata, every later `Add()` must provide a complete `host_id` array; host metadata
+cannot be introduced after host-unaware documents. A query with `host_id: 0` searches only missing-
+host documents, while omitting `host_id` preserves full-index KNN behavior. A host with no indexed
+documents returns an empty result. Indexes built without base host metadata ignore query host
+metadata and retain their previous behavior. Host filtering currently applies only to KNN; range
+search keeps its existing full-index behavior.
 
 ## Search parameters
 

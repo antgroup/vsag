@@ -182,10 +182,27 @@ SINDI 按顺序写入以下 streaming blocks：
 | `label_table` | 外部 label 和 label remap | 是 |
 | `sindi_rerank_index` | rerank 开启时的可选 rerank flat index | 条件必需 |
 | `sindi_term_id_mapper` | 可选 term-id remap 表 | 条件必需 |
+| `sindi_host_metadata` | 可选 host ID 及每个 host 的一个或多个 inner-ID 区间 | 条件必需 |
 
 `DeserializeStreaming` 会恢复完整的内存 SINDI 索引。`Index::Load` 可以直接从 streaming metadata
-创建 SINDI 索引对象，当前会把写出的 SINDI blocks 都加载到内存中。immutable SINDI runtime 暂不支持
-该 streaming 序列化路径。
+创建 SINDI 索引对象，当前会把写出的 SINDI blocks 都加载到内存中。mutable 与 immutable SINDI
+运行态均支持该 streaming 路径。旧版序列化格式保持不变，不保存 host metadata。
+
+## SINDI_V2 Blocks
+
+SINDI_V2 按顺序写入以下 streaming blocks：
+
+| Block | 内容 | 是否必需 |
+| --- | --- | --- |
+| `sindi_v2_term_layout` | term-first posting 布局、文档数量和量化状态 | 是 |
+| `label_table` | 外部 label 和 label remap | 是 |
+| `sindi_rerank_index` | rerank 开启时的可选 rerank index | 条件必需 |
+| `extra_info` | 可选逐文档 extra information | 条件必需 |
+| `sindi_term_id_mapper` | 可选 term-id remap 表 | 条件必需 |
+| `sindi_host_metadata` | 可选 host ID 及每个 host 的一个或多个 inner-ID 区间 | 条件必需 |
+
+`DeserializeStreaming` 与 `Index::Load` 可以从这些 blocks 恢复 mutable 或 immutable SINDI_V2。
+旧版序列化格式保持不变，不保存 host metadata。
 
 ## Pyramid Blocks
 
