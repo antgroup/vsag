@@ -523,8 +523,9 @@ SINDIV2::Add(const DatasetPtr& base) {
 
     auto data_num = base->GetNumElements();
     CHECK_ARGUMENT(data_num > 0, "data_num is zero when add vectors");
-    const auto first_inner_id = static_cast<uint32_t>(cur_element_count_);
-    auto host_build = host_filter_.PrepareBuild(base, first_inner_id);
+    const auto current_element_count = cur_element_count_;
+    auto host_build = host_filter_.PrepareBuild(base, current_element_count);
+    const auto first_inner_id = static_cast<uint32_t>(current_element_count);
 
     const auto* sparse_vectors = base->GetSparseVectors();
     const auto* ids = base->GetIds();
