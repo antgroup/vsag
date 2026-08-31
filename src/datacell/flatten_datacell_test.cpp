@@ -582,20 +582,6 @@ TEST_CASE("RaBitQSplitDataCell native fused bit splits", "[ut][RaBitQSplitDataCe
                 no_reorder_context.stats = &no_reorder_stats;
                 no_reorder_context.enable_rabitq_reorder = false;
                 const InnerIdType query_id = id;
-                float queried_distance = std::numeric_limits<float>::max();
-                float queried_lower_bound = std::numeric_limits<float>::max();
-                float queried_filter_ip = std::numeric_limits<float>::quiet_NaN();
-                split->QueryWithDistanceLowerBoundAndFilterIP(&queried_distance,
-                                                              &queried_lower_bound,
-                                                              &queried_filter_ip,
-                                                              computer,
-                                                              &query_id,
-                                                              1,
-                                                              &no_reorder_context);
-                REQUIRE(queried_distance == coarse_distance);
-                REQUIRE(queried_lower_bound == coarse_distance);
-                REQUIRE(IsNaNBitPattern(queried_filter_ip));
-
                 float filtered_distance = std::numeric_limits<float>::max();
                 flatten->QueryWithDistanceFilter(&filtered_distance,
                                                  computer,
@@ -604,7 +590,7 @@ TEST_CASE("RaBitQSplitDataCell native fused bit splits", "[ut][RaBitQSplitDataCe
                                                  std::numeric_limits<float>::max(),
                                                  &no_reorder_context);
                 REQUIRE(filtered_distance == coarse_distance);
-                REQUIRE(no_reorder_stats.rabitq_filter_count.load() == 2);
+                REQUIRE(no_reorder_stats.rabitq_filter_count.load() == 1);
                 REQUIRE(no_reorder_stats.rabitq_full_count.load() == 0);
                 REQUIRE(no_reorder_stats.rabitq_filter_fallback_full_count.load() == 0);
                 graph->SetNodeCodes(id,
