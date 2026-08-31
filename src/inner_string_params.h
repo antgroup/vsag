@@ -99,6 +99,7 @@ const char* const QUANTIZATION_TYPE_VALUE_INT8 = "int8";
 const char* const QUANTIZATION_TYPE_VALUE_PQ = "pq";
 const char* const QUANTIZATION_TYPE_VALUE_PQFS = "pqfs";
 const char* const QUANTIZATION_TYPE_VALUE_RABITQ = "rabitq";
+const char* const QUANTIZATION_TYPE_VALUE_SAQ = "saq";
 const char* const QUANTIZATION_TYPE_VALUE_SPARSE = "sparse";
 const char* const QUANTIZATION_TYPE_VALUE_TQ = "tq";
 
@@ -125,6 +126,11 @@ const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY = "rabitq_bits_per
 const char* const RABITQ_QUANTIZATION_ERROR_RATE_KEY = "rabitq_error_rate";
 const char* const FAST_ENCODE_RABITQ_KEY = "fast_encode_rabitq";
 const char* const FAST_ENCODE_RABITQ_ROUNDS_KEY = "fast_encode_rabitq_rounds";
+const char* const SAQ_AVG_BITS_KEY = "saq_avg_bits";
+const char* const SAQ_SEGMENT_COUNT_KEY = "saq_segment_count";
+const char* const SAQ_ADJUSTMENT_ROUNDS_KEY = "saq_adjustment_rounds";
+const char* const SAQ_USE_PCA_KEY = "saq_use_pca";
+const char* const SAQ_RANDOM_ROTATION_KEY = "saq_random_rotation";
 const char* const SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY = "sq4_uniform_trunc_rate";
 const char* const PRODUCT_QUANTIZATION_DIM_KEY = "pq_dim";
 const char* const PRODUCT_QUANTIZATION_BITS_KEY = "pq_bits";
@@ -255,6 +261,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"QUANTIZATION_TYPE_VALUE_FP16", QUANTIZATION_TYPE_VALUE_FP16},
     {"QUANTIZATION_TYPE_VALUE_BF16", QUANTIZATION_TYPE_VALUE_BF16},
     {"QUANTIZATION_TYPE_VALUE_RABITQ", QUANTIZATION_TYPE_VALUE_RABITQ},
+    {"QUANTIZATION_TYPE_VALUE_SAQ", QUANTIZATION_TYPE_VALUE_SAQ},
     {"PRODUCT_QUANTIZATION_DIM_KEY", PRODUCT_QUANTIZATION_DIM_KEY},
     {"PRODUCT_QUANTIZATION_BITS_KEY", PRODUCT_QUANTIZATION_BITS_KEY},
     {"GRAPH_TYPE_VALUE_NSW", GRAPH_TYPE_VALUE_NSW},
@@ -324,6 +331,11 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"RABITQ_QUANTIZATION_ERROR_RATE_KEY", RABITQ_QUANTIZATION_ERROR_RATE_KEY},
     {"FAST_ENCODE_RABITQ_KEY", FAST_ENCODE_RABITQ_KEY},
     {"FAST_ENCODE_RABITQ_ROUNDS_KEY", FAST_ENCODE_RABITQ_ROUNDS_KEY},
+    {"SAQ_AVG_BITS_KEY", SAQ_AVG_BITS_KEY},
+    {"SAQ_SEGMENT_COUNT_KEY", SAQ_SEGMENT_COUNT_KEY},
+    {"SAQ_ADJUSTMENT_ROUNDS_KEY", SAQ_ADJUSTMENT_ROUNDS_KEY},
+    {"SAQ_USE_PCA_KEY", SAQ_USE_PCA_KEY},
+    {"SAQ_RANDOM_ROTATION_KEY", SAQ_RANDOM_ROTATION_KEY},
     {"USE_FHT_KEY", USE_FHT_KEY},
     {"TQ_CHAIN_KEY", TQ_CHAIN_KEY},
     {"NO_BUILD_LEVELS", NO_BUILD_LEVELS},

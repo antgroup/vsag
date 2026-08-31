@@ -33,6 +33,7 @@
 - [乘积量化（PQ）](quantization/pq.md)
 - [PQ FastScan](quantization/pqfs.md)
 - [RaBitQ](quantization/rabitq.md)
+- [SAQ（分段码字调整量化）](quantization/saq.md)
 - [RaBitQ x+y Split](quantization/rabitq_split.md)
 - [量化变换（TQ）](advanced/quantization_transform.md)
 
@@ -84,6 +85,7 @@
 - [优化器](advanced/optimizer.md)
 - [标准环境性能参考](resources/performance.md)
 - [性能评估工具](resources/eval.md)
+- [SAQ 量化基准工具](resources/saq_quantization_benchmark.md)
 - [AutoTune 工具](resources/autotune.md)
   - [AutoTune V1 CLI JSON 契约](resources/autotune_api_v1.md)
 - [HDF5 数据集格式](resources/dataset_format.md)

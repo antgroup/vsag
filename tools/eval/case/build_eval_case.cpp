@@ -125,6 +125,9 @@ BuildEvalCase::process_result() {
     result["action"] = "build";
     result["index"] = config_.index_name;
     result["index_memory(B)"] = this->index_->GetMemoryUsage();
+    if (not index_path_.empty() and std::filesystem::is_regular_file(index_path_)) {
+        result["index_serialized_size(B)"] = std::filesystem::file_size(index_path_);
+    }
     try {
         auto detail = this->index_->GetMemoryUsageDetail();
         for (const auto& [name, size] : detail) {

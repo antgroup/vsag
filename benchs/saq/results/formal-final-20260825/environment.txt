@@ -1,0 +1,127 @@
+run_started=2026-08-25T16:15:47+08:00
+git_branch=feat/saq-quantization
+git_tracked_status_begin
+ M benchs/saq/DESIGN.md
+ M benchs/saq/configs/hgraph_l2_4bit.yaml.in
+ M benchs/saq/run.sh
+ M benchs/saq/run_ablations.sh
+ M benchs/saq/summarize.py
+ M docs/docs/en/src/quantization/saq.md
+ M docs/docs/zh/src/quantization/saq.md
+ M src/impl/transform/pca_transformer.cpp
+ M src/impl/transform/pca_transformer_test.cpp
+ M src/impl/transform/random_orthogonal_transformer.cpp
+ M src/impl/transform/random_orthogonal_transformer.h
+ M src/quantization/saq_quantization/saq_quantizer.cpp
+ M src/quantization/saq_quantization/saq_quantizer.h
+ M src/quantization/saq_quantization/saq_quantizer_parameter.h
+ M src/quantization/saq_quantization/saq_quantizer_test.cpp
+ M tools/saq_quantization_benchmark/main.cpp
+git_tracked_status_end
+data_root=/tmp/vsag-saq-data
+result_root=/home/iscas/ospp-vsag-saq/vsag/benchs/saq/results/formal-final-20260825
+build_dir=/home/iscas/ospp-vsag-saq/vsag/build-release
+build_jobs=2
+train_count=65536
+encode_count=1000000
+exact_rabitq=1
+target_recall=0.95
+extra_c_flags=-Wno-error=stringop-overflow
+extra_cxx_flags=-Wno-error=stringop-overflow
+cmake_build_type=Release
+hgraph_max_degree=32
+hgraph_ef_construction=300
+hgraph_threads=16
+ef_search=40,80,120,200,400,800,1600
+topk=10
+search_query_count=10000
+average_bits_per_dimension=4
+saq_adjustment_rounds=6
+saq_use_pca=true
+saq_random_rotation=true
+saq_random_rotation_seed=20260825
+saq_segment_count=0
+reconstruction_count_limit=10000
+Linux iscas-Super-Server 6.17.0-35-generic #35~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Tue May 26 19:30:42 UTC 2 x86_64 x86_64 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 24.04.4 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+VERSION="24.04.4 LTS (Noble Numbat)"
+VERSION_CODENAME=noble
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=noble
+LOGO=ubuntu-logo
+cmake version 3.28.3
+
+CMake suite maintained and supported by Kitware (kitware.com/cmake).
+c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+Copyright (C) 2023 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+Architecture:                            x86_64
+CPU op-mode(s):                          32-bit, 64-bit
+Address sizes:                           46 bits physical, 57 bits virtual
+Byte Order:                              Little Endian
+CPU(s):                                  128
+On-line CPU(s) list:                     0-127
+Vendor ID:                               GenuineIntel
+Model name:                              Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz
+CPU family:                              6
+Model:                                   106
+Thread(s) per core:                      2
+Core(s) per socket:                      32
+Socket(s):                               2
+Stepping:                                6
+CPU(s) scaling MHz:                      100%
+CPU max MHz:                             3500.0000
+CPU min MHz:                             800.0000
+BogoMIPS:                                5800.00
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx pdpe1gb rdtscp lm constant_tsc art arch_perfmon pebs bts rep_good nopl xtopology nonstop_tsc cpuid aperfmperf pni pclmulqdq dtes64 monitor ds_cpl vmx smx est tm2 ssse3 sdbg fma cx16 xtpr pdcm pcid dca sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand lahf_lm abm 3dnowprefetch cpuid_fault epb cat_l3 ssbd mba ibrs ibpb stibp ibrs_enhanced tpr_shadow flexpriority ept vpid ept_ad fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb intel_pt avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local split_lock_detect wbnoinvd dtherm ida arat pln pts vnmi avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq la57 rdpid fsrm md_clear pconfig flush_l1d arch_capabilities
+Virtualization:                          VT-x
+L1d cache:                               3 MiB (64 instances)
+L1i cache:                               2 MiB (64 instances)
+L2 cache:                                80 MiB (64 instances)
+L3 cache:                                108 MiB (2 instances)
+NUMA node(s):                            2
+NUMA node0 CPU(s):                       0-31,64-95
+NUMA node1 CPU(s):                       32-63,96-127
+Vulnerability Gather data sampling:      Vulnerable
+Vulnerability Ghostwrite:                Not affected
+Vulnerability Indirect target selection: Mitigation; Aligned branch/return thunks
+Vulnerability Itlb multihit:             Not affected
+Vulnerability L1tf:                      Not affected
+Vulnerability Mds:                       Not affected
+Vulnerability Meltdown:                  Not affected
+Vulnerability Mmio stale data:           Mitigation; Clear CPU buffers; SMT vulnerable
+Vulnerability Old microcode:             Not affected
+Vulnerability Reg file data sampling:    Not affected
+Vulnerability Retbleed:                  Not affected
+Vulnerability Spec rstack overflow:      Not affected
+Vulnerability Spec store bypass:         Mitigation; Speculative Store Bypass disabled via prctl
+Vulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization
+Vulnerability Spectre v2:                Mitigation; Enhanced / Automatic IBRS; IBPB conditional; PBRSB-eIBRS SW sequence; BHI SW loop, KVM SW loop
+Vulnerability Srbds:                     Not affected
+Vulnerability Tsa:                       Not affected
+Vulnerability Tsx async abort:           Not affected
+Vulnerability Vmscape:                   Not affected
+               total        used        free      shared  buff/cache   available
+Mem:           251Gi        13Gi        19Gi        72Mi       221Gi       238Gi
+Swap:          7.6Gi       300Ki       7.6Gi
+	linux-vdso.so.1 (0x0000766e98227000)
+	libvsag.so.0.0 => /home/iscas/ospp-vsag-saq/vsag/build-release/src/libvsag.so.0.0 (0x0000766e94388000)
+	libz.so.1 => /lib/x86_64-linux-gnu/libz.so.1 (0x0000766e981f2000)
+	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x0000766e9429f000)
+	libgomp.so.1 => /lib/x86_64-linux-gnu/libgomp.so.1 (0x0000766e9819c000)
+	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x0000766e9816e000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x0000766e94000000)
+	/lib64/ld-linux-x86-64.so.2 (0x0000766e98229000)
+	libaio.so.1t64 => /lib/x86_64-linux-gnu/libaio.so.1t64 (0x0000766e98167000)
+run_finished=2026-08-25T17:02:05+08:00
+run_exit_status=0
+run_elapsed_seconds=2784

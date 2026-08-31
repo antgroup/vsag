@@ -123,6 +123,11 @@ const char* const RABITQ_ERROR_RATE = "rabitq_error_rate";
 const char* const RABITQ_USE_FHT = "rabitq_use_fht";
 const char* const FAST_ENCODE_RABITQ = "fast_encode_rabitq";
 const char* const FAST_ENCODE_RABITQ_ROUNDS = "fast_encode_rabitq_rounds";
+const char* const SAQ_AVG_BITS = "saq_avg_bits";
+const char* const SAQ_SEGMENT_COUNT = "saq_segment_count";
+const char* const SAQ_ADJUSTMENT_ROUNDS = "saq_adjustment_rounds";
+const char* const SAQ_USE_PCA = "saq_use_pca";
+const char* const SAQ_RANDOM_ROTATION = "saq_random_rotation";
 const char* const INDEX_TQ_CHAIN = "tq_chain";
 const char* const INDEX_MRLE_DIM = "mrle_dim";
 

@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include "vector_transformer.h"
 
 namespace vsag {
@@ -25,7 +27,8 @@ class RandomOrthogonalMatrix : public VectorTransformer {
 public:
     explicit RandomOrthogonalMatrix(Allocator* allocator,
                                     int64_t dim,
-                                    uint64_t retries = MAX_RETRIES);
+                                    uint64_t retries = MAX_RETRIES,
+                                    std::optional<uint64_t> seed = std::nullopt);
 
     ~RandomOrthogonalMatrix() override = default;
 
@@ -63,8 +66,15 @@ public:
     static constexpr uint64_t MAX_RETRIES = 3;
 
 private:
+    bool
+    GenerateRandomOrthogonalMatrix(uint64_t seed);
+
+    bool
+    OrthogonalizeRandomMatrix();
+
     Vector<float> orthogonal_matrix_;
     const uint64_t generate_retries_{0};
+    const std::optional<uint64_t> seed_;
 };
 
 }  // namespace vsag

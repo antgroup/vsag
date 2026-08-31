@@ -22,7 +22,7 @@ it.
                  |   base quantizer    |   fp32 / fp16 / bf16 /
                  |                     |   sq8 / sq4 / sq8_uniform /
                  |                     |   sq4_uniform / pq / pqfs /
-                 |                     |   rabitq
+                 |                     |   rabitq / saq
                  +----------+----------+
                             |
                             v
@@ -71,6 +71,7 @@ the concrete quantizer based on the JSON `type` field.
 | `pq` | ~`pq_bits` × `pq_dim` / `dim` | **yes** | no | Codebook-based, very compact |
 | `pqfs` | 4 × `pq_dim` / `dim` | **yes** | no | PQ FastScan — SIMD-accelerated PQ |
 | `rabitq` | 1 or HGraph x+y | **yes** | no | 1-bit / low-bit split binary quantization, strongest compression |
+| `saq` | configurable 1–8 | **yes** | no | PCA + variance-aware segmented CAQ for high-accuracy low-bit search |
 | `tq` | depends on chain | depends on terminal quantizer | no | [Transform Quantizer](../advanced/quantization_transform.md): prepend rotations / PCA before another quantizer |
 
 `int8` and `sparse` are not exposed as general-purpose
@@ -121,6 +122,8 @@ A pragmatic decision tree:
    or `pqfs` when the platform supports the SIMD path.
 6. **Maximum compression (1-bit) and willing to pay reorder cost?** Use
    `rabitq`, ideally with `rabitq_use_fht: true` or a `tq` chain.
+7. **Need a stronger 2–8 bit accuracy/encoding trade-off?** Use `saq`; start
+   with `saq_avg_bits: 4` and automatic segmentation.
 
 For every lossy quantizer above, enabling `use_reorder: true` with
 `precise_quantization_type: "fp32"` is the standard way to recover recall at
@@ -135,14 +138,16 @@ Not every index exposes every parameter as an external key. As of today:
   `precise_quantization_type`, `use_reorder`, `base_pq_dim`,
   `rabitq_pca_dim`, `rabitq_bits_per_dim_query`,
   `rabitq_bits_per_dim_base`, `rabitq_bits_per_dim_precise`,
-  `rabitq_error_rate`, `rabitq_use_fht`, `sq4_uniform_trunc_rate`, `tq_chain`
+  `rabitq_error_rate`, `rabitq_use_fht`, `saq_avg_bits`, `saq_segment_count`,
+  `saq_adjustment_rounds`, `saq_use_pca`, `saq_random_rotation`,
+  `sq4_uniform_trunc_rate`, `tq_chain`
   (see `src/algorithm/hgraph.cpp`).
 - **IVF** exposes `base_quantization_type`, `base_pq_dim`, the common reorder
   keys, and the RabitQ tuning keys `rabitq_pca_dim`,
   `rabitq_bits_per_dim_query`, `rabitq_bits_per_dim_base`, `rabitq_version`,
-  `rabitq_error_rate`, and `rabitq_use_fht`.
+  `rabitq_error_rate`, and `rabitq_use_fht`, plus all five `saq_*` keys.
 - **Pyramid** exposes `base_quantization_type`, `base_pq_dim`, the common
-  reorder keys, and the RabitQ PCA, base/query bit, and FHT keys.
+  reorder keys, the RabitQ PCA, base/query bit, and FHT keys, and all five `saq_*` keys.
 - **BruteForce** exposes `base_quantization_type` and the common reorder keys;
   some tunables (e.g. `tq_chain`) are wired internally but not exposed as
   external keys today.
@@ -158,5 +163,6 @@ Refer to each index page for its full parameter list.
 - [Product Quantization (PQ)](pq.md)
 - [PQ FastScan](pqfs.md)
 - [RaBitQ](rabitq.md)
+- [SAQ](saq.md)
 - [RaBitQ x+y Split](rabitq_split.md)
 - [Transform Quantizer (TQ)](../advanced/quantization_transform.md)

@@ -20,6 +20,7 @@ published documentation.
 | New serialization | [docs/docs/en/src/advanced/new_serialization.md](docs/en/src/advanced/new_serialization.md) | <https://vsag.io/docs/advanced/new_serialization.html> |
 | Memory management | [docs/docs/en/src/advanced/memory.md](docs/en/src/advanced/memory.md) | <https://vsag.io/docs/advanced/memory.html> |
 | Evaluation tool | [docs/docs/en/src/resources/eval.md](docs/en/src/resources/eval.md) | <https://vsag.io/docs/resources/eval.html> |
+| SAQ quantization benchmark | [docs/docs/en/src/resources/saq_quantization_benchmark.md](docs/en/src/resources/saq_quantization_benchmark.md) | <https://vsag.io/docs/resources/saq_quantization_benchmark.html> |
 | HDF5 dataset format | [docs/docs/en/src/resources/dataset_format.md](docs/en/src/resources/dataset_format.md) | <https://vsag.io/docs/resources/dataset_format.html> |
 | Index analysis | [docs/docs/en/src/resources/analyze_index.md](docs/en/src/resources/analyze_index.md) | <https://vsag.io/docs/resources/analyze_index.html> |
 | Compatibility check | [docs/docs/en/src/resources/check_compatibility.md](docs/en/src/resources/check_compatibility.md) | <https://vsag.io/docs/resources/check_compatibility.html> |
@@ -38,6 +39,7 @@ published documentation.
 | 新序列化格式 | [docs/docs/zh/src/advanced/new_serialization.md](docs/zh/src/advanced/new_serialization.md) | <https://vsag.io/docs/zh/advanced/new_serialization.html> |
 | Memory management | [docs/docs/zh/src/advanced/memory.md](docs/zh/src/advanced/memory.md) | <https://vsag.io/docs/zh/advanced/memory.html> |
 | Evaluation tool | [docs/docs/zh/src/resources/eval.md](docs/zh/src/resources/eval.md) | <https://vsag.io/docs/zh/resources/eval.html> |
+| SAQ 量化基准工具 | [docs/docs/zh/src/resources/saq_quantization_benchmark.md](docs/zh/src/resources/saq_quantization_benchmark.md) | <https://vsag.io/docs/zh/resources/saq_quantization_benchmark.html> |
 | HDF5 dataset format | [docs/docs/zh/src/resources/dataset_format.md](docs/zh/src/resources/dataset_format.md) | <https://vsag.io/docs/zh/resources/dataset_format.html> |
 | Index analysis | [docs/docs/zh/src/resources/analyze_index.md](docs/zh/src/resources/analyze_index.md) | <https://vsag.io/docs/zh/resources/analyze_index.html> |
 | 兼容性检查工具 | [docs/docs/zh/src/resources/check_compatibility.md](docs/zh/src/resources/check_compatibility.md) | <https://vsag.io/docs/zh/resources/check_compatibility.html> |

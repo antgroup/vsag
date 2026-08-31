@@ -511,3 +511,31 @@ TEST_CASE("IVF maps fast RaBitQ to base and precise quantizers", "[ut][IVFParame
     REQUIRE_FALSE(precise_json["quantization_params"]["fast_encode_rabitq"].GetBool());
     REQUIRE(precise_json["quantization_params"]["fast_encode_rabitq_rounds"].GetInt() == 10);
 }
+
+TEST_CASE("IVF maps SAQ parameters", "[ut][IVFParameter][SAQ]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "saq",
+        "saq_avg_bits": 5,
+        "saq_segment_count": 2,
+        "saq_adjustment_rounds": 7,
+        "saq_use_pca": true,
+        "saq_random_rotation": false,
+        "buckets_count": 8
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::IVF::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::IVFParameter>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    const auto bucket_json = typed_param->bucket_param->ToJson();
+    const auto quantization = bucket_json["quantization_params"];
+    REQUIRE(quantization["type"].GetString() == std::string("saq"));
+    REQUIRE(quantization["saq_avg_bits"].GetFloat() == 5.0F);
+    REQUIRE(quantization["saq_segment_count"].GetUint64() == 2);
+    REQUIRE(quantization["saq_adjustment_rounds"].GetUint64() == 7);
+    REQUIRE(quantization["saq_use_pca"].GetBool());
+    REQUIRE_FALSE(quantization["saq_random_rotation"].GetBool());
+}

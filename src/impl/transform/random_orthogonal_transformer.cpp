@@ -16,14 +16,24 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
+#include <cmath>
 #include <random>
 
+#include "common.h"
 #include "impl/blas/blas_function.h"
 #include "impl/logger/logger.h"
+#include "vsag_exception.h"
 
 namespace vsag {
-RandomOrthogonalMatrix::RandomOrthogonalMatrix(Allocator* allocator, int64_t dim, uint64_t retries)
-    : VectorTransformer(allocator, dim), orthogonal_matrix_(allocator), generate_retries_(retries) {
+RandomOrthogonalMatrix::RandomOrthogonalMatrix(Allocator* allocator,
+                                               int64_t dim,
+                                               uint64_t retries,
+                                               std::optional<uint64_t> seed)
+    : VectorTransformer(allocator, dim),
+      orthogonal_matrix_(allocator),
+      generate_retries_(retries),
+      seed_(seed) {
     orthogonal_matrix_.resize(dim * dim);
     this->type_ = VectorTransformerType::RANDOM_ORTHOGONAL;
 }
@@ -40,7 +50,8 @@ RandomOrthogonalMatrix::Train(const float* data, uint64_t count) {
     double det = ComputeDeterminant();
     if (std::fabs(det - 1) > delta) {
         for (uint64_t i = 0; i < retries; i++) {
-            successful_gen = GenerateRandomOrthogonalMatrix();
+            successful_gen = seed_.has_value() ? GenerateRandomOrthogonalMatrix(*seed_ + i + 1)
+                                               : GenerateRandomOrthogonalMatrix();
             if (successful_gen) {
                 break;
             }
@@ -95,15 +106,32 @@ RandomOrthogonalMatrix::InverseTransform(const float* transformed_vec, float* or
 
 bool
 RandomOrthogonalMatrix::GenerateRandomOrthogonalMatrix() {
-    auto dim = static_cast<uint64_t>(this->input_dim_);
-    // generate a random matrix with elements following a standard normal distribution
     std::random_device rd;
     std::mt19937 gen(rd());
     std::normal_distribution<float> dist(0.0, 1.0);
 
+    auto dim = static_cast<uint64_t>(this->input_dim_);
     for (uint64_t i = 0; i < dim * dim; ++i) {
         orthogonal_matrix_[i] = dist(gen);
     }
+    return OrthogonalizeRandomMatrix();
+}
+
+bool
+RandomOrthogonalMatrix::GenerateRandomOrthogonalMatrix(uint64_t seed) {
+    std::mt19937 gen(static_cast<uint32_t>(seed));
+    std::normal_distribution<float> dist(0.0, 1.0);
+
+    auto dim = static_cast<uint64_t>(this->input_dim_);
+    for (uint64_t i = 0; i < dim * dim; ++i) {
+        orthogonal_matrix_[i] = dist(gen);
+    }
+    return OrthogonalizeRandomMatrix();
+}
+
+bool
+RandomOrthogonalMatrix::OrthogonalizeRandomMatrix() {
+    auto dim = static_cast<uint64_t>(this->input_dim_);
 
     // QR decomposition with LAPACK
     std::vector<float> tau(dim, 0.0);
@@ -149,7 +177,8 @@ RandomOrthogonalMatrix::GenerateRandomOrthogonalMatrix() {
 void
 RandomOrthogonalMatrix::GenerateRandomOrthogonalMatrixWithRetry() {
     for (uint64_t i = 0; i < generate_retries_; i++) {
-        bool result_gen = GenerateRandomOrthogonalMatrix();
+        const bool result_gen = seed_.has_value() ? GenerateRandomOrthogonalMatrix(*seed_ + i)
+                                                  : GenerateRandomOrthogonalMatrix();
         if (result_gen) {
             break;
         }
@@ -196,7 +225,17 @@ RandomOrthogonalMatrix::Serialize(StreamWriter& writer) const {
 
 void
 RandomOrthogonalMatrix::Deserialize(StreamReader& reader) {
-    StreamReader::ReadVector(reader, this->orthogonal_matrix_);
+    Vector<float> matrix(this->allocator_);
+    StreamReader::ReadVector(reader, matrix);
+    const uint64_t expected_size = this->input_dim_ * this->output_dim_;
+    CHECK_ARGUMENT(matrix.size() == expected_size,
+                   fmt::format("serialized random orthogonal matrix has {} elements; expected {}",
+                               matrix.size(),
+                               expected_size));
+    CHECK_ARGUMENT(
+        std::all_of(matrix.begin(), matrix.end(), [](float value) { return std::isfinite(value); }),
+        "serialized random orthogonal matrix contains a non-finite value");
+    this->orthogonal_matrix_ = std::move(matrix);
 }
 
 }  // namespace vsag

@@ -36,6 +36,7 @@
 #include "impl/allocator/safe_allocator.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
+#include "inner_string_params.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer.h"
 #include "quantization/transform_quantization/transform_quantizer.h"
 #include "unittest.h"
@@ -163,6 +164,52 @@ TEST_CASE("FlattenDataCell only reports a stride for contiguous raw data",
     uint64_t row_stride = 123;
     REQUIRE(flatten->TryGetContiguousRawFloatData(&row_stride) == nullptr);
     REQUIRE(row_stride == 0);
+}
+
+TEST_CASE("FlattenDataCell supports SAQ", "[ut][FlattenDataCell][SAQ]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr InnerIdType count = 24;
+    auto vectors = fixtures::generate_vectors(count, dim, false, 2026);
+    auto query = fixtures::generate_vectors(1, dim, false, 83);
+
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(JsonType::Parse(R"({
+        "io_params": {"type": "memory_io"},
+        "quantization_params": {
+            "type": "saq",
+            "saq_avg_bits": 4,
+            "saq_segment_count": 0,
+            "saq_adjustment_rounds": 2,
+            "saq_use_pca": false,
+            "saq_random_rotation": false
+        }
+    })"));
+
+    const std::vector<MetricType> metrics = {
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP, MetricType::METRIC_TYPE_COSINE};
+    for (const auto metric : metrics) {
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.dim_ = dim;
+        common_param.metric_ = metric;
+
+        auto flatten = FlattenInterface::MakeInstance(param, common_param);
+        REQUIRE(flatten != nullptr);
+        REQUIRE(flatten->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_SAQ);
+        flatten->Train(vectors.data(), count);
+        flatten->Resize(count);
+        flatten->BatchInsertVector(vectors.data(), count);
+
+        std::vector<InnerIdType> ids(count);
+        std::iota(ids.begin(), ids.end(), 0);
+        std::vector<float> distances(count);
+        auto computer = flatten->FactoryComputer(query.data());
+        flatten->Query(distances.data(), computer, ids.data(), count);
+        REQUIRE(std::all_of(distances.begin(), distances.end(), [](float distance) {
+            return std::isfinite(distance);
+        }));
+    }
 }
 
 TEST_CASE("RaBitQSplitDataCell direct split compute", "[ut][RaBitQSplitDataCell]") {

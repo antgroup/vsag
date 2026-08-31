@@ -847,4 +847,13 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     return std::move(dataset_results);
 }
 
+template DistHeapPtr
+HGraph::brute_force_search<InnerSearchMode::KNN_SEARCH>(
+    const void* query,
+    const FilterPtr& filter,
+    int64_t topk,
+    float radius,
+    QueryContext* ctx,
+    const std::optional<float>& threshold) const;
+
 }  // namespace vsag

@@ -15,6 +15,7 @@
 
 
 add_subdirectory (eval)
+add_subdirectory (saq_quantization_benchmark)
 add_subdirectory (autotune)
 add_subdirectory (check_compatibility)
 add_subdirectory (analyze_index)
