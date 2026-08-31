@@ -156,7 +156,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
     Allocator* query_allocator = select_query_allocator(ctx.alloc, allocator_);
     auto is_distance_eligible = [&distance_threshold](float distance) {
         return not distance_threshold.has_value() or
-               (std::isfinite(distance) and distance <= distance_threshold.value());
+               (IsFiniteRaBitQValue(distance) and distance <= distance_threshold.value());
     };
     auto consume_if_ineligible = [&](float distance, InnerIdType id) {
         if (is_distance_eligible(distance)) {
@@ -263,7 +263,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
     }
 
     auto has_valid_lower_bound = [](float lower_bound) {
-        return std::isfinite(lower_bound) and lower_bound < std::numeric_limits<float>::max();
+        return IsFiniteRaBitQValue(lower_bound) and lower_bound < std::numeric_limits<float>::max();
     };
     bool lower_bounds_available = true;
     for (uint64_t i = 0; i < candidate_size; ++i) {
@@ -417,7 +417,7 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
     Allocator* query_allocator = select_query_allocator(ctx.alloc, allocator_);
     auto is_distance_eligible = [&distance_threshold](float distance) {
         return not distance_threshold.has_value() or
-               (std::isfinite(distance) and distance <= distance_threshold.value());
+               (IsFiniteRaBitQValue(distance) and distance <= distance_threshold.value());
     };
     auto consume_if_ineligible = [&](float distance, InnerIdType id) {
         if (is_distance_eligible(distance)) {
