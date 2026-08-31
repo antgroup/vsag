@@ -104,8 +104,48 @@ public:
         this->Query(result_dists, computer, idx, id_count, ctx);
     }
 
+    virtual void
+    QueryWithFilterInnerProduct(float* result_dists,
+                                const float* /*filter_inner_products*/,
+                                const ComputerInterfacePtr& computer,
+                                const InnerIdType* idx,
+                                InnerIdType id_count,
+                                QueryContext* ctx = nullptr) {
+        this->Query(result_dists, computer, idx, id_count, ctx);
+    }
+
     virtual ComputerInterfacePtr
     FactoryComputer(const void* query) = 0;
+
+    [[nodiscard]] virtual bool
+    SupportResidualQueryTransform() const {
+        return false;
+    }
+
+    [[nodiscard]] virtual uint64_t
+    GetResidualQueryTransformSize() const {
+        return 0;
+    }
+
+    virtual void
+    TransformResidualQuery(const float* /*query*/, float* /*transformed_query*/) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "residual query transform is not supported");
+    }
+
+    virtual ComputerInterfacePtr
+    FactoryComputerFromResidualQuery(const float* /*transformed_query*/) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "transformed residual query is not supported");
+    }
+
+    // Reinitializes a regular query computer from transformed residual data. Implementations may
+    // reuse the existing computer allocation. Any query-derived computer created from its previous
+    // state, such as a FastScan computer, must not be reused after this call.
+    virtual void
+    ResetComputerFromResidualQuery(const float* transformed_query, ComputerInterfacePtr& computer) {
+        computer = this->FactoryComputerFromResidualQuery(transformed_query);
+    }
 
     virtual void
     Train(const void* data, uint64_t count) = 0;
@@ -176,6 +216,173 @@ public:
     [[nodiscard]] virtual bool
     SupportSplitCodeStorage() const {
         return false;
+    }
+
+    [[nodiscard]] virtual bool
+    SupportFastScan32() const {
+        return false;
+    }
+
+    [[nodiscard]] virtual uint64_t
+    GetFastScan32BlockSize() const {
+        return 0;
+    }
+
+    virtual ComputerInterfacePtr
+    FactoryFastScan32Computer(const ComputerInterfacePtr& /*computer*/) const {
+        return nullptr;
+    }
+
+    virtual void
+    PackageFastScan32(const InnerIdType* /*ids*/,
+                      InnerIdType /*valid_size*/,
+                      uint8_t* /*block*/) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "32-vector FastScan packaging is not supported");
+    }
+
+    virtual void
+    PackageFastScan32Residual(const InnerIdType* /*ids*/,
+                              InnerIdType /*valid_size*/,
+                              const float* /*transformed_centroid*/,
+                              uint8_t* /*block*/) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "residual 32-vector FastScan packaging is not supported");
+    }
+
+    virtual void
+    QueryFastScan32Batch(float* /*result_dists*/,
+                         uint32_t* /*computed_masks*/,
+                         const ComputerInterfacePtr& /*computer*/,
+                         const ComputerInterfacePtr& /*fastscan_computer*/,
+                         const uint8_t* /*blocks*/,
+                         InnerIdType /*total_size*/,
+                         float* /*filter_inner_products*/ = nullptr,
+                         QueryContext* /*ctx*/ = nullptr) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "batched 32-vector FastScan query is not supported");
+    }
+
+    virtual void
+    QueryFastScan32BatchSharedResidual(float* /*result_dists*/,
+                                       uint32_t* /*computed_masks*/,
+                                       const ComputerInterfacePtr& /*computer*/,
+                                       const ComputerInterfacePtr& /*fastscan_computer*/,
+                                       const uint8_t* /*blocks*/,
+                                       InnerIdType /*total_size*/,
+                                       float /*query_bucket_norm_sqr*/,
+                                       float* /*filter_inner_products*/ = nullptr,
+                                       QueryContext* /*ctx*/ = nullptr) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "shared residual FastScan query is not supported");
+    }
+
+    [[nodiscard]] virtual float
+    ComputeTransformedResidualQueryNormSqr(const float* /*transformed_query*/) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "transformed residual query norm is not supported");
+    }
+    virtual void
+    EnableExternalFilterCodeStorage() {
+    }
+
+    [[nodiscard]] virtual uint64_t
+    GetFilterCodeSize() const {
+        return 0;
+    }
+
+    virtual void
+    InsertVectorWithFilterCode(const void* /*vector*/,
+                               InnerIdType /*idx*/,
+                               uint8_t* /*filter_code*/) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "external filter-code insertion is not supported");
+    }
+
+    virtual void
+    SetFastScan32Code(const uint8_t* /*filter_code*/,
+                      InnerIdType /*index_in_block*/,
+                      uint8_t* /*block*/) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "32-vector FastScan code update is not supported");
+    }
+
+    virtual void
+    UnpackFastScan32Code(const uint8_t* /*block*/,
+                         InnerIdType /*index_in_block*/,
+                         uint8_t* /*filter_code*/) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "32-vector FastScan code unpacking is not supported");
+    }
+
+    virtual void
+    SetFastScan32ResidualCode(const uint8_t* /*filter_code*/,
+                              const float* /*transformed_centroid*/,
+                              InnerIdType /*index_in_block*/,
+                              uint8_t* /*block*/) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "residual 32-vector FastScan code update is not supported");
+    }
+
+    virtual void
+    QueryWithFilterCodes(float* /*result_dists*/,
+                         const float* /*hint_dists*/,
+                         const float* /*filter_inner_products*/,
+                         const ComputerInterfacePtr& /*computer*/,
+                         const InnerIdType* /*idx*/,
+                         const uint8_t* /*filter_codes*/,
+                         InnerIdType /*id_count*/,
+                         QueryContext* /*ctx*/ = nullptr) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "query with external filter codes is not supported");
+    }
+
+    virtual void
+    QueryWithFilterInnerProducts(float* /*result_dists*/,
+                                 uint8_t* /*computed*/,
+                                 const float* /*filter_inner_products*/,
+                                 const ComputerInterfacePtr& /*computer*/,
+                                 const InnerIdType* /*idx*/,
+                                 InnerIdType /*id_count*/,
+                                 QueryContext* /*ctx*/ = nullptr) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "supplement-only query is not supported");
+    }
+
+    [[nodiscard]] virtual bool
+    GetCodesByIdWithFilterCode(InnerIdType /*id*/,
+                               const uint8_t* /*filter_code*/,
+                               uint8_t* /*codes*/) const {
+        return false;
+    }
+
+    virtual float
+    ComputePairVectorsWithFilterCodes(InnerIdType /*id1*/,
+                                      const uint8_t* /*filter_code1*/,
+                                      InnerIdType /*id2*/,
+                                      const uint8_t* /*filter_code2*/) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "pair distance with external filter codes is not supported");
+    }
+
+    virtual void
+    PrefetchSupplement(InnerIdType id) {
+        this->Prefetch(id);
+    }
+
+    virtual void
+    DiscardFilterCodes() {
+    }
+
+    [[nodiscard]] virtual bool
+    HasFilterCodes() const {
+        return true;
+    }
+
+    virtual void
+    MergeSupplementCodes(const FlattenInterfacePtr& /*other*/, InnerIdType /*bias*/) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "supplement-only merge is not supported");
     }
 
     [[nodiscard]] virtual MetricType

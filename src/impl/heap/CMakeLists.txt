@@ -15,6 +15,7 @@
 
 
 set (HEAP_SRC
+        auxiliary_standard_heap.cpp
         distance_heap.cpp
         memmove_heap.cpp
         standard_heap.cpp

@@ -139,7 +139,8 @@ Not every index exposes every parameter as an external key. As of today:
   (see `src/algorithm/hgraph.cpp`).
 - **IVF** exposes `base_quantization_type`, `base_pq_dim`, the common reorder
   keys, and the RabitQ tuning keys `rabitq_pca_dim`,
-  `rabitq_bits_per_dim_query`, `rabitq_bits_per_dim_base`, `rabitq_version`,
+  `rabitq_bits_per_dim_query`, `rabitq_bits_per_dim_base`,
+  `rabitq_bits_per_dim_precise`, `rabitq_version`,
   `rabitq_error_rate`, and `rabitq_use_fht`.
 - **Pyramid** exposes `base_quantization_type`, `base_pq_dim`, the common
   reorder keys, and the RabitQ PCA, base/query bit, and FHT keys.

@@ -21,13 +21,42 @@
 
 namespace vsag {
 
-#define DECLARE_PQFS_FUNCTIONS(ns)                           \
-    namespace ns {                                           \
-    void                                                     \
-    PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table, \
-                       const uint8_t* RESTRICT codes,        \
-                       uint64_t pq_dim,                      \
-                       int32_t* RESTRICT result);            \
+#define DECLARE_PQFS_FUNCTIONS(ns)                                                \
+    namespace ns {                                                                \
+    void                                                                          \
+    PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,                      \
+                       const uint8_t* RESTRICT codes,                             \
+                       uint64_t pq_dim,                                           \
+                       int32_t* RESTRICT result);                                 \
+    void                                                                          \
+    PQFastScanLookUp32HighAcc(const uint8_t* RESTRICT low_lookup_table,           \
+                              const uint8_t* RESTRICT high_lookup_table,          \
+                              const uint8_t* RESTRICT codes,                      \
+                              uint64_t pq_dim,                                    \
+                              int32_t* RESTRICT result);                          \
+    void                                                                          \
+    PQFastScanLookUp32HighAccOverwrite(const uint8_t* RESTRICT low_lookup_table,  \
+                                       const uint8_t* RESTRICT high_lookup_table, \
+                                       const uint8_t* RESTRICT codes,             \
+                                       uint64_t pq_dim,                           \
+                                       int32_t* RESTRICT result);                 \
+    uint32_t                                                                      \
+    FP32LessThan32Mask(const float* values, float limit);                         \
+    uint32_t                                                                      \
+    RaBitQFastScan32ResidualPostprocess(const int32_t* accumulators,              \
+                                        uint32_t filter_bits,                     \
+                                        float delta,                              \
+                                        float sum_vl,                             \
+                                        float query_sum,                          \
+                                        float query_norm,                         \
+                                        float query_bucket_norm_sqr,              \
+                                        float inv_sqrt_d,                         \
+                                        const float* f_add,                       \
+                                        const float* f_scale,                     \
+                                        const float* filter_norm_codes,           \
+                                        uint32_t valid_size,                      \
+                                        float* dists,                             \
+                                        float* filter_inner_products);            \
     }  // namespace ns
 
 DECLARE_PQFS_FUNCTIONS(generic)
@@ -45,4 +74,30 @@ using PQFastScanLookUp32Type = void (*)(const uint8_t* RESTRICT lookup_table,
                                         uint64_t pq_dim,
                                         int32_t* RESTRICT result);
 extern PQFastScanLookUp32Type PQFastScanLookUp32;
+using PQFastScanLookUp32HighAccType = void (*)(const uint8_t* RESTRICT low_lookup_table,
+                                               const uint8_t* RESTRICT high_lookup_table,
+                                               const uint8_t* RESTRICT codes,
+                                               uint64_t pq_dim,
+                                               int32_t* RESTRICT result);
+extern PQFastScanLookUp32HighAccType PQFastScanLookUp32HighAcc;
+using PQFastScanLookUp32HighAccOverwriteType = PQFastScanLookUp32HighAccType;
+extern PQFastScanLookUp32HighAccOverwriteType PQFastScanLookUp32HighAccOverwrite;
+using FP32LessThan32MaskType = uint32_t (*)(const float* values, float limit);
+extern FP32LessThan32MaskType FP32LessThan32Mask;
+using RaBitQFastScan32ResidualPostprocessType = uint32_t (*)(const int32_t* accumulators,
+                                                             uint32_t filter_bits,
+                                                             float delta,
+                                                             float sum_vl,
+                                                             float query_sum,
+                                                             float query_norm,
+                                                             float query_bucket_norm_sqr,
+                                                             float inv_sqrt_d,
+                                                             const float* f_add,
+                                                             const float* f_scale,
+                                                             const float* filter_norm_codes,
+                                                             uint32_t valid_size,
+                                                             float* dists,
+                                                             float* filter_inner_products);
+extern RaBitQFastScan32ResidualPostprocessType RaBitQFastScan32ResidualPostprocess;
+
 }  // namespace vsag

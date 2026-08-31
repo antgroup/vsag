@@ -16,9 +16,11 @@
 #include "bucket_datacell.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <exception>
+#include <future>
 #include <limits>
 #include <sstream>
 #include <thread>
@@ -26,6 +28,7 @@
 
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
 #include "io/reader_io/reader_io_parameter.h"
 #include "quantization/fp32_quantizer.h"
@@ -39,8 +42,10 @@ namespace {
 
 class FixedCentroidPartitionStrategy : public IVFPartitionStrategy {
 public:
-    FixedCentroidPartitionStrategy(const IndexCommonParam& common_param, BucketIdType bucket_count)
-        : IVFPartitionStrategy(common_param, bucket_count) {
+    FixedCentroidPartitionStrategy(const IndexCommonParam& common_param,
+                                   BucketIdType bucket_count,
+                                   float centroid_scale = 1.0F)
+        : IVFPartitionStrategy(common_param, bucket_count), centroid_scale_(centroid_scale) {
     }
 
     void
@@ -55,10 +60,20 @@ public:
 
     void
     GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) override {
+        centroid_requests_.fetch_add(1, std::memory_order_relaxed);
         for (uint64_t i = 0; i < centroid.size(); ++i) {
-            centroid[i] = static_cast<float>((bucket_id + 1) * (i + 1)) * 0.01F;
+            centroid[i] = static_cast<float>((bucket_id + 1) * (i + 1)) * 0.01F * centroid_scale_;
         }
     }
+
+    [[nodiscard]] uint64_t
+    GetCentroidRequestCount() const {
+        return centroid_requests_.load(std::memory_order_relaxed);
+    }
+
+private:
+    std::atomic<uint64_t> centroid_requests_{0};
+    float centroid_scale_{1.0F};
 };
 
 class TrackingReader : public Reader {
@@ -1227,6 +1242,1097 @@ TEST_CASE("BucketDataCell supports RabitQ", "[ut][BucketDataCell]") {
             }
         }
     }
+}
+
+TEST_CASE("RaBitQ split bucket supports optimized build",
+          "[ut][BucketDataCell][rabitq_split][optimized_build]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    const InnerIdType count = GENERATE(1, 31, 33);
+    constexpr uint64_t training_count = 64;
+    const uint32_t filter_bits = GENERATE(1U, 2U, 3U);
+    constexpr BucketIdType bucket_count = 1;
+    INFO("count=" << count << ", filter_bits=" << filter_bits);
+    auto vectors = fixtures::generate_vectors(training_count, dim);
+    auto query = fixtures::generate_vectors(1, dim, false, 113);
+    constexpr const char* param_str = R"({
+        "io_params": { "type": "memory_io" },
+        "quantization_params": {
+            "type": "rabitq",
+            "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 2,
+            "fast_encode_rabitq": true
+        },
+        "buckets_count": 1,
+        "use_residual": true
+    })";
+
+    auto make_bucket = [&]() {
+        auto json = JsonType::Parse(param_str);
+        json["quantization_params"]["rabitq_bits_per_dim_filter"].SetInt(filter_bits);
+        auto param = std::make_shared<BucketDataCellParameter>();
+        param->FromJson(json);
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.dim_ = dim;
+        common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+        auto bucket = BucketInterface::MakeInstance(param, common_param);
+        bucket->SetStrategy(
+            std::make_shared<FixedCentroidPartitionStrategy>(common_param, bucket_count));
+        return bucket;
+    };
+
+    auto normal = make_bucket();
+    auto optimized = make_bucket();
+    normal->Train(vectors.data(), training_count);
+    normal->ExportModel(optimized);
+    for (InnerIdType id = 0; id < count; ++id) {
+        const auto bucket_id = static_cast<BucketIdType>(id % bucket_count);
+        const auto offset_id = static_cast<InnerIdType>(id / bucket_count);
+        normal->InsertVectorWithOffset(
+            vectors.data() + static_cast<uint64_t>(id) * dim, bucket_id, id, offset_id);
+    }
+
+    auto thread_pool = SafeThreadPool::FactoryDefaultThreadPool();
+    thread_pool->SetPoolSize(4);
+    FlattenOptimizedBuildContext context{thread_pool, 4};
+    REQUIRE(optimized->BeginOptimizedBuild(context, count));
+    REQUIRE(optimized->IsOptimizedBuildActive());
+    REQUIRE_FALSE(optimized->BeginOptimizedBuild(context, count));
+    std::vector<std::future<void>> futures;
+    futures.reserve(count);
+    for (InnerIdType id = 0; id < count; ++id) {
+        futures.emplace_back(thread_pool->GeneralEnqueue([&, id]() {
+            const auto bucket_id = static_cast<BucketIdType>(id % bucket_count);
+            const auto offset_id = static_cast<InnerIdType>(id / bucket_count);
+            optimized->InsertVectorWithOffset(
+                vectors.data() + static_cast<uint64_t>(id) * dim, bucket_id, id, offset_id);
+        }));
+    }
+    for (auto& future : futures) {
+        future.get();
+    }
+    optimized->FinalizeOptimizedBuild();
+    REQUIRE_FALSE(optimized->IsOptimizedBuildActive());
+    normal->Package();
+    optimized->Package();
+
+    std::vector<uint8_t> normal_code(normal->code_size_);
+    std::vector<uint8_t> optimized_code(optimized->code_size_);
+    for (InnerIdType id = 0; id < count; ++id) {
+        const auto bucket_id = static_cast<BucketIdType>(id % bucket_count);
+        const auto offset_id = static_cast<InnerIdType>(id / bucket_count);
+        REQUIRE(optimized->GetInnerIds(bucket_id)[offset_id] == id);
+        normal->GetCodesById(bucket_id, offset_id, normal_code.data());
+        optimized->GetCodesById(bucket_id, offset_id, optimized_code.data());
+        REQUIRE(normal_code == optimized_code);
+    }
+
+    const BucketIdType routed_bucket = 0;
+    auto normal_computer = normal->FactoryComputerForBuckets(query.data(), &routed_bucket, 1);
+    auto optimized_computer = optimized->FactoryComputerForBuckets(query.data(), &routed_bucket, 1);
+    std::vector<float> normal_scan_dists(count);
+    std::vector<float> optimized_scan_dists(count);
+    std::vector<float> normal_filter_inner_products(count);
+    std::vector<float> optimized_filter_inner_products(count);
+    std::vector<InnerIdType> normal_ids(count);
+    std::vector<InnerIdType> optimized_ids(count);
+    const uint64_t normal_version =
+        normal->ScanBucketWithFilterInnerProduct(normal_scan_dists.data(),
+                                                 normal_filter_inner_products.data(),
+                                                 normal_computer,
+                                                 routed_bucket,
+                                                 nullptr,
+                                                 normal_ids.data());
+    const uint64_t optimized_version =
+        optimized->ScanBucketWithFilterInnerProduct(optimized_scan_dists.data(),
+                                                    optimized_filter_inner_products.data(),
+                                                    optimized_computer,
+                                                    routed_bucket,
+                                                    nullptr,
+                                                    optimized_ids.data());
+    REQUIRE(normal_ids == optimized_ids);
+    std::vector<float> normal_reorder_dists(count);
+    std::vector<float> optimized_reorder_dists(count);
+    SearchStatistics normal_stats;
+    SearchStatistics optimized_stats;
+    QueryContext normal_ctx{nullptr, &normal_stats};
+    QueryContext optimized_ctx{nullptr, &optimized_stats};
+    std::vector<BucketIdType> source_buckets(count, routed_bucket);
+    std::vector<InnerIdType> source_offsets(count);
+    std::iota(source_offsets.begin(), source_offsets.end(), 0);
+    std::vector<uint64_t> normal_versions(count, normal_version);
+    std::vector<uint64_t> optimized_versions(count, optimized_version);
+    normal->QueryWithCandidateFilterInnerProductBySource(normal_reorder_dists.data(),
+                                                         nullptr,
+                                                         normal_filter_inner_products.data(),
+                                                         source_buckets.data(),
+                                                         source_offsets.data(),
+                                                         normal_versions.data(),
+                                                         normal_computer,
+                                                         normal_ids.data(),
+                                                         count,
+                                                         &normal_ctx);
+    optimized->QueryWithCandidateFilterInnerProductBySource(optimized_reorder_dists.data(),
+                                                            nullptr,
+                                                            optimized_filter_inner_products.data(),
+                                                            source_buckets.data(),
+                                                            source_offsets.data(),
+                                                            optimized_versions.data(),
+                                                            optimized_computer,
+                                                            optimized_ids.data(),
+                                                            count,
+                                                            &optimized_ctx);
+    REQUIRE(normal_stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) == count);
+    REQUIRE(optimized_stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) ==
+            count);
+    REQUIRE(normal_stats.rabitq_reorder_fallback_full_count.load(std::memory_order_relaxed) == 0);
+    REQUIRE(optimized_stats.rabitq_reorder_fallback_full_count.load(std::memory_order_relaxed) ==
+            0);
+
+    for (InnerIdType id = 0; id < count; ++id) {
+        REQUIRE(std::isfinite(normal_reorder_dists[id]));
+        REQUIRE(std::abs(normal_reorder_dists[id] - optimized_reorder_dists[id]) < 1e-4F);
+    }
+
+    REQUIRE(optimized->BeginOptimizedBuild(context, count));
+    optimized->AbortOptimizedBuild();
+    REQUIRE_FALSE(optimized->IsOptimizedBuildActive());
+}
+
+TEST_CASE("RaBitQ split bucket scan spills computed masks above 256 blocks",
+          "[ut][BucketDataCell][rabitq_split][residual]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 16;
+    constexpr InnerIdType training_count = 64;
+    constexpr InnerIdType count = 8193;
+    constexpr BucketIdType bucket_id = 0;
+    auto vectors = fixtures::generate_vectors(training_count, dim);
+    auto query = fixtures::generate_vectors(1, dim, false, 127);
+    constexpr const char* param_str = R"({
+        "io_params": { "type": "memory_io" },
+        "quantization_params": {
+            "type": "rabitq",
+            "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 1,
+            "fast_encode_rabitq": true
+        },
+        "buckets_count": 1,
+        "use_residual": true
+    })";
+
+    auto param = std::make_shared<BucketDataCellParameter>();
+    param->FromJson(JsonType::Parse(param_str));
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    bucket->SetStrategy(std::make_shared<FixedCentroidPartitionStrategy>(common_param, 1));
+    bucket->Train(vectors.data(), training_count);
+    for (InnerIdType id = 0; id < count; ++id) {
+        const uint64_t training_id = static_cast<uint64_t>(id) % training_count;
+        bucket->InsertVector(vectors.data() + training_id * dim, bucket_id, id);
+    }
+    bucket->Package();
+
+    auto computer = bucket->FactoryComputerForBuckets(query.data(), &bucket_id, 1);
+    std::vector<float> scan_dists(count);
+    std::vector<float> filter_inner_products(count);
+    std::vector<InnerIdType> scanned_ids(count);
+    InnerIdType scanned_size = 0;
+    const uint64_t source_version =
+        bucket->ScanBucketWithFilterInnerProduct(scan_dists.data(),
+                                                 filter_inner_products.data(),
+                                                 computer,
+                                                 bucket_id,
+                                                 nullptr,
+                                                 scanned_ids.data(),
+                                                 count,
+                                                 &scanned_size);
+    REQUIRE(scanned_size == count);
+    REQUIRE(std::all_of(
+        scan_dists.begin(), scan_dists.end(), [](float value) { return std::isfinite(value); }));
+    REQUIRE(std::all_of(filter_inner_products.begin(),
+                        filter_inner_products.end(),
+                        [](float value) { return std::isfinite(value); }));
+
+    constexpr std::array<InnerIdType, 5> selected_offsets{0, 31, 32, 8191, 8192};
+    std::array<InnerIdType, selected_offsets.size()> selected_ids{};
+    std::array<float, selected_offsets.size()> selected_inner_products{};
+    for (uint64_t i = 0; i < selected_offsets.size(); ++i) {
+        selected_ids[i] = scanned_ids[selected_offsets[i]];
+        selected_inner_products[i] = filter_inner_products[selected_offsets[i]];
+    }
+    std::array<float, selected_offsets.size()> reorder_dists{};
+    std::array<BucketIdType, selected_offsets.size()> source_buckets{};
+    std::array<uint64_t, selected_offsets.size()> source_versions{};
+    source_buckets.fill(bucket_id);
+    source_versions.fill(source_version);
+    bucket->QueryWithCandidateFilterInnerProductBySource(reorder_dists.data(),
+                                                         nullptr,
+                                                         selected_inner_products.data(),
+                                                         source_buckets.data(),
+                                                         selected_offsets.data(),
+                                                         source_versions.data(),
+                                                         computer,
+                                                         selected_ids.data(),
+                                                         selected_ids.size());
+    for (uint64_t i = 0; i < selected_offsets.size(); ++i) {
+        REQUIRE(selected_ids[i] == selected_offsets[i]);
+        const float expected = bucket->QueryOneById(computer, bucket_id, selected_offsets[i]);
+        REQUIRE(std::abs(reorder_dists[i] - expected) < 1e-4F);
+    }
+}
+
+TEST_CASE("RaBitQ split bucket prepares only routed residual computers",
+          "[ut][BucketDataCell][rabitq_split][residual][routed_query]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr InnerIdType count = 96;
+    constexpr BucketIdType bucket_count = 4;
+    const uint32_t filter_bits = GENERATE(1U, 2U, 3U);
+    INFO("filter_bits=" << filter_bits);
+    auto vectors = fixtures::generate_vectors(count, dim);
+    auto query = fixtures::generate_vectors(1, dim, false, 71);
+    constexpr const char* param_str = R"({
+        "io_params": { "type": "memory_io" },
+        "quantization_params": {
+            "type": "rabitq",
+            "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 1,
+            "fast_encode_rabitq": true
+        },
+        "buckets_count": 4,
+        "use_residual": true
+    })";
+
+    auto param = std::make_shared<BucketDataCellParameter>();
+    auto json = JsonType::Parse(param_str);
+    json["quantization_params"]["rabitq_bits_per_dim_filter"].SetInt(filter_bits);
+    param->FromJson(json);
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    auto strategy = std::make_shared<FixedCentroidPartitionStrategy>(common_param, bucket_count);
+    bucket->SetStrategy(strategy);
+    bucket->Train(vectors.data(), count);
+    for (InnerIdType id = 0; id < count; ++id) {
+        const auto bucket_id = static_cast<BucketIdType>(id % bucket_count);
+        bucket->InsertVector(vectors.data() + static_cast<uint64_t>(id) * dim, bucket_id, id);
+    }
+    bucket->Package();
+
+    const uint64_t centroid_requests_before_finalize = strategy->GetCentroidRequestCount();
+    bucket->FinalizeLoad();
+    REQUIRE(strategy->GetCentroidRequestCount() ==
+            centroid_requests_before_finalize + bucket_count);
+
+    std::array<BucketIdType, 3> routed_buckets{3, 1, 3};
+    auto routed_computer = bucket->FactoryComputerForBuckets(
+        query.data(), routed_buckets.data(), routed_buckets.size());
+    auto candidate_computer = bucket->FactoryComputerForBuckets(
+        query.data(), routed_buckets.data(), routed_buckets.size());
+
+    std::array<InnerIdType, 2> published_candidate_ids{1, 3};
+    std::array<float, 2> published_candidate_inner_products{};
+    std::array<uint64_t, 2> published_candidate_versions{};
+    for (uint64_t i = 0; i < published_candidate_ids.size(); ++i) {
+        const auto bucket_id = static_cast<BucketIdType>(published_candidate_ids[i] % bucket_count);
+        const auto bucket_size = bucket->GetBucketSize(bucket_id);
+        std::vector<float> candidate_scan_dists(bucket_size);
+        std::vector<float> candidate_scan_inner_products(bucket_size);
+        std::vector<InnerIdType> candidate_scan_ids(bucket_size);
+        InnerIdType candidate_scan_size = 0;
+        published_candidate_versions[i] =
+            bucket->ScanBucketWithFilterInnerProduct(candidate_scan_dists.data(),
+                                                     candidate_scan_inner_products.data(),
+                                                     candidate_computer,
+                                                     bucket_id,
+                                                     nullptr,
+                                                     candidate_scan_ids.data(),
+                                                     bucket_size,
+                                                     &candidate_scan_size);
+        REQUIRE(candidate_scan_size == bucket_size);
+        REQUIRE(candidate_scan_ids[0] == published_candidate_ids[i]);
+        REQUIRE(std::all_of(candidate_scan_dists.begin(),
+                            candidate_scan_dists.end(),
+                            [](float value) { return std::isfinite(value); }));
+        REQUIRE(std::isfinite(candidate_scan_inner_products[0]));
+        published_candidate_inner_products[i] = candidate_scan_inner_products[0];
+    }
+    std::array<InnerIdType, 3> sparse_candidate_ids{1, 3, 5};
+    std::array<float, 3> sparse_candidate_inner_products{published_candidate_inner_products[0],
+                                                         published_candidate_inner_products[1],
+                                                         std::numeric_limits<float>::quiet_NaN()};
+
+    std::array<BucketIdType, 3> sparse_source_buckets{1, 3, 1};
+    std::array<InnerIdType, 3> sparse_source_offsets{0, 0, 1};
+    std::array<uint64_t, 3> sparse_source_versions{published_candidate_versions[0],
+                                                   published_candidate_versions[1],
+                                                   published_candidate_versions[0]};
+    std::array<float, 3> source_candidate_dists{};
+    SearchStatistics source_candidate_stats;
+    QueryContext source_candidate_ctx{nullptr, &source_candidate_stats};
+    bucket->QueryWithCandidateFilterInnerProductBySource(source_candidate_dists.data(),
+                                                         nullptr,
+                                                         sparse_candidate_inner_products.data(),
+                                                         sparse_source_buckets.data(),
+                                                         sparse_source_offsets.data(),
+                                                         sparse_source_versions.data(),
+                                                         candidate_computer,
+                                                         sparse_candidate_ids.data(),
+                                                         sparse_candidate_ids.size(),
+                                                         &source_candidate_ctx);
+    REQUIRE(std::all_of(source_candidate_dists.begin(),
+                        source_candidate_dists.end(),
+                        [](float value) { return std::isfinite(value); }));
+    REQUIRE(source_candidate_stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) ==
+            published_candidate_ids.size());
+
+    const InnerIdType wrong_source_id = 1;
+    const BucketIdType wrong_source_bucket = 1;
+    const InnerIdType wrong_source_offset = 1;
+    const uint64_t wrong_source_version = published_candidate_versions[0];
+    const float wrong_source_expected = bucket->QueryOneById(candidate_computer, 1, 0);
+    float wrong_source_actual = 0.0F;
+    SearchStatistics wrong_source_stats;
+    QueryContext wrong_source_ctx{nullptr, &wrong_source_stats};
+    bucket->QueryWithCandidateFilterInnerProductBySource(&wrong_source_actual,
+                                                         nullptr,
+                                                         published_candidate_inner_products.data(),
+                                                         &wrong_source_bucket,
+                                                         &wrong_source_offset,
+                                                         &wrong_source_version,
+                                                         candidate_computer,
+                                                         &wrong_source_id,
+                                                         1,
+                                                         &wrong_source_ctx);
+    REQUIRE(std::abs(wrong_source_actual - wrong_source_expected) < 1e-5F);
+    REQUIRE(wrong_source_stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) == 0);
+
+    const BucketIdType wrong_bucket_source_bucket = 3;
+    const InnerIdType wrong_bucket_source_offset = 0;
+    const uint64_t wrong_bucket_source_version = published_candidate_versions[1];
+    float wrong_bucket_source_actual = 0.0F;
+    SearchStatistics wrong_bucket_source_stats;
+    QueryContext wrong_bucket_source_ctx{nullptr, &wrong_bucket_source_stats};
+    bucket->QueryWithCandidateFilterInnerProductBySource(&wrong_bucket_source_actual,
+                                                         nullptr,
+                                                         published_candidate_inner_products.data(),
+                                                         &wrong_bucket_source_bucket,
+                                                         &wrong_bucket_source_offset,
+                                                         &wrong_bucket_source_version,
+                                                         candidate_computer,
+                                                         &wrong_source_id,
+                                                         1,
+                                                         &wrong_bucket_source_ctx);
+    REQUIRE(std::abs(wrong_bucket_source_actual - wrong_source_expected) < 1e-5F);
+    REQUIRE(wrong_bucket_source_stats.rabitq_reorder_hint_full_count.load(
+                std::memory_order_relaxed) == 0);
+
+    for (const auto bucket_id : std::array<BucketIdType, 2>{1, 3}) {
+        const auto bucket_size = bucket->GetBucketSize(bucket_id);
+        std::vector<float> expected(bucket_size);
+        std::vector<float> actual(bucket_size);
+        bucket->ScanBucketById(expected.data(), routed_computer, bucket_id);
+        bucket->ScanBucketById(actual.data(), routed_computer, bucket_id);
+        REQUIRE(actual == expected);
+    }
+
+    std::array<InnerIdType, 8> inner_ids{3, 1, 7, 5, 11, 9, 15, 13};
+    std::array<float, 8> scalar_expected{};
+    for (uint64_t i = 0; i < inner_ids.size(); ++i) {
+        const auto inner_id = inner_ids[i];
+        scalar_expected[i] =
+            bucket->QueryOneById(routed_computer, inner_id % bucket_count, inner_id / bucket_count);
+    }
+
+    SearchStatistics stats;
+    QueryContext ctx{nullptr, &stats};
+    std::array<float, 8> expected{};
+    bucket->QueryWithDistanceHintByInnerId(
+        expected.data(), nullptr, routed_computer, inner_ids.data(), inner_ids.size(), &ctx);
+    REQUIRE(std::all_of(
+        expected.begin(), expected.end(), [](float value) { return std::isfinite(value); }));
+    REQUIRE(stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) == 0);
+
+    std::array<float, 8> actual{};
+    bucket->QueryWithDistanceHintByInnerId(
+        actual.data(), nullptr, routed_computer, inner_ids.data(), inner_ids.size());
+    REQUIRE(actual == expected);
+
+    const std::array<float, 8> hints{0.25F, 1.5F, 2.75F, 4.0F, 5.25F, 6.5F, 7.75F, 9.0F};
+    for (uint64_t i = 0; i < inner_ids.size(); ++i) {
+        bucket->QueryWithDistanceHintByInnerId(
+            expected.data() + i, hints.data() + i, routed_computer, inner_ids.data() + i, 1);
+    }
+    bucket->QueryWithDistanceHintByInnerId(
+        actual.data(), hints.data(), routed_computer, inner_ids.data(), inner_ids.size());
+    REQUIRE(actual == expected);
+    constexpr InnerIdType updated_inner_id = 3;
+    constexpr BucketIdType updated_bucket_id = 3;
+    constexpr InnerIdType updated_offset_id = 0;
+    bucket->InsertVectorWithOffset(
+        vectors.data() + 20 * dim, updated_bucket_id, updated_inner_id, updated_offset_id);
+    const float updated_expected =
+        bucket->QueryOneById(routed_computer, updated_bucket_id, updated_offset_id);
+    float updated_actual = 0.0F;
+    bucket->QueryWithDistanceHintByInnerId(
+        &updated_actual, nullptr, routed_computer, &updated_inner_id, 1);
+    REQUIRE(std::abs(updated_actual - updated_expected) < 1e-5F);
+
+    const BucketIdType stale_source_bucket = updated_bucket_id;
+    const InnerIdType stale_source_offset = updated_offset_id;
+    const uint64_t stale_source_version = published_candidate_versions[1];
+    float stale_source_actual = 0.0F;
+    SearchStatistics stale_source_stats;
+    QueryContext stale_source_ctx{nullptr, &stale_source_stats};
+    bucket->QueryWithCandidateFilterInnerProductBySource(
+        &stale_source_actual,
+        nullptr,
+        published_candidate_inner_products.data() + 1,
+        &stale_source_bucket,
+        &stale_source_offset,
+        &stale_source_version,
+        candidate_computer,
+        &updated_inner_id,
+        1,
+        &stale_source_ctx);
+    REQUIRE(std::abs(stale_source_actual - updated_expected) < 1e-5F);
+    REQUIRE(stale_source_stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) == 0);
+
+    REQUIRE_THROWS(bucket->ScanBucketById(nullptr, routed_computer, 0));
+}
+
+TEST_CASE("RaBitQ split bucket reuses non-residual filter inner products",
+          "[ut][BucketDataCell][rabitq_split][routed_query]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr InnerIdType count = 64;
+    constexpr BucketIdType bucket_count = 2;
+    const uint32_t filter_bits = GENERATE(1U, 2U, 3U);
+    INFO("filter_bits=" << filter_bits);
+    auto vectors = fixtures::generate_vectors(count, dim);
+    auto query = fixtures::generate_vectors(1, dim, false, 79);
+    constexpr const char* param_str = R"({
+        "io_params": { "type": "memory_io" },
+        "quantization_params": {
+            "type": "rabitq",
+            "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 1,
+            "fast_encode_rabitq": true
+        },
+        "buckets_count": 2,
+        "use_residual": false
+    })";
+
+    auto param = std::make_shared<BucketDataCellParameter>();
+    auto json = JsonType::Parse(param_str);
+    json["quantization_params"]["rabitq_bits_per_dim_filter"].SetInt(filter_bits);
+    param->FromJson(json);
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    bucket->Train(vectors.data(), count);
+    for (InnerIdType id = 0; id < count; ++id) {
+        bucket->InsertVector(
+            vectors.data() + static_cast<uint64_t>(id) * dim, id % bucket_count, id);
+    }
+    bucket->Package();
+
+    std::array<BucketIdType, 2> routed_buckets{1, 0};
+    auto routed_computer = bucket->FactoryComputerForBuckets(
+        query.data(), routed_buckets.data(), routed_buckets.size());
+    auto candidate_computer = bucket->FactoryComputerForBuckets(
+        query.data(), routed_buckets.data(), routed_buckets.size());
+    std::array<InnerIdType, 2> published_candidate_ids{1, 0};
+    std::array<float, 2> published_candidate_inner_products{};
+    std::array<uint64_t, 2> published_candidate_versions{};
+    for (uint64_t i = 0; i < published_candidate_ids.size(); ++i) {
+        const auto bucket_id = static_cast<BucketIdType>(published_candidate_ids[i] % bucket_count);
+        const auto bucket_size = bucket->GetBucketSize(bucket_id);
+        std::vector<float> candidate_scan_dists(bucket_size);
+        std::vector<float> candidate_scan_inner_products(bucket_size);
+        std::vector<InnerIdType> candidate_scan_ids(bucket_size);
+        InnerIdType candidate_scan_size = 0;
+        published_candidate_versions[i] =
+            bucket->ScanBucketWithFilterInnerProduct(candidate_scan_dists.data(),
+                                                     candidate_scan_inner_products.data(),
+                                                     candidate_computer,
+                                                     bucket_id,
+                                                     nullptr,
+                                                     candidate_scan_ids.data(),
+                                                     bucket_size,
+                                                     &candidate_scan_size);
+        REQUIRE(candidate_scan_size == bucket_size);
+        REQUIRE(candidate_scan_ids[0] == published_candidate_ids[i]);
+        REQUIRE(std::all_of(candidate_scan_dists.begin(),
+                            candidate_scan_dists.end(),
+                            [](float value) { return std::isfinite(value); }));
+        REQUIRE(std::isfinite(candidate_scan_inner_products[0]));
+        published_candidate_inner_products[i] = candidate_scan_inner_products[0];
+    }
+    std::array<InnerIdType, 3> sparse_candidate_ids{1, 0, 3};
+    std::array<float, 3> sparse_candidate_inner_products{published_candidate_inner_products[0],
+                                                         published_candidate_inner_products[1],
+                                                         std::numeric_limits<float>::quiet_NaN()};
+
+    std::array<BucketIdType, 3> sparse_source_buckets{1, 0, 1};
+    std::array<InnerIdType, 3> sparse_source_offsets{0, 0, 1};
+    std::array<uint64_t, 3> sparse_source_versions{published_candidate_versions[0],
+                                                   published_candidate_versions[1],
+                                                   published_candidate_versions[0]};
+    std::array<float, 3> source_candidate_dists{};
+    SearchStatistics source_candidate_stats;
+    QueryContext source_candidate_ctx{nullptr, &source_candidate_stats};
+    bucket->QueryWithCandidateFilterInnerProductBySource(source_candidate_dists.data(),
+                                                         nullptr,
+                                                         sparse_candidate_inner_products.data(),
+                                                         sparse_source_buckets.data(),
+                                                         sparse_source_offsets.data(),
+                                                         sparse_source_versions.data(),
+                                                         candidate_computer,
+                                                         sparse_candidate_ids.data(),
+                                                         sparse_candidate_ids.size(),
+                                                         &source_candidate_ctx);
+    REQUIRE(std::all_of(source_candidate_dists.begin(),
+                        source_candidate_dists.end(),
+                        [](float value) { return std::isfinite(value); }));
+    REQUIRE(source_candidate_stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) ==
+            published_candidate_ids.size());
+
+    const InnerIdType wrong_source_id = 1;
+    const BucketIdType wrong_source_bucket = 1;
+    const InnerIdType wrong_source_offset = 1;
+    const uint64_t wrong_source_version = published_candidate_versions[0];
+    const float wrong_source_expected = bucket->QueryOneById(candidate_computer, 1, 0);
+    float wrong_source_actual = 0.0F;
+    SearchStatistics wrong_source_stats;
+    QueryContext wrong_source_ctx{nullptr, &wrong_source_stats};
+    bucket->QueryWithCandidateFilterInnerProductBySource(&wrong_source_actual,
+                                                         nullptr,
+                                                         published_candidate_inner_products.data(),
+                                                         &wrong_source_bucket,
+                                                         &wrong_source_offset,
+                                                         &wrong_source_version,
+                                                         candidate_computer,
+                                                         &wrong_source_id,
+                                                         1,
+                                                         &wrong_source_ctx);
+    REQUIRE(std::abs(wrong_source_actual - wrong_source_expected) < 1e-5F);
+    REQUIRE(wrong_source_stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) == 0);
+
+    const BucketIdType wrong_bucket_source_bucket = 0;
+    const InnerIdType wrong_bucket_source_offset = 0;
+    const uint64_t wrong_bucket_source_version = published_candidate_versions[1];
+    float wrong_bucket_source_actual = 0.0F;
+    SearchStatistics wrong_bucket_source_stats;
+    QueryContext wrong_bucket_source_ctx{nullptr, &wrong_bucket_source_stats};
+    bucket->QueryWithCandidateFilterInnerProductBySource(&wrong_bucket_source_actual,
+                                                         nullptr,
+                                                         published_candidate_inner_products.data(),
+                                                         &wrong_bucket_source_bucket,
+                                                         &wrong_bucket_source_offset,
+                                                         &wrong_bucket_source_version,
+                                                         candidate_computer,
+                                                         &wrong_source_id,
+                                                         1,
+                                                         &wrong_bucket_source_ctx);
+    REQUIRE(std::abs(wrong_bucket_source_actual - wrong_source_expected) < 1e-5F);
+    REQUIRE(wrong_bucket_source_stats.rabitq_reorder_hint_full_count.load(
+                std::memory_order_relaxed) == 0);
+
+    for (const auto bucket_id : routed_buckets) {
+        std::vector<float> scan_dists(bucket->GetBucketSize(bucket_id));
+        bucket->ScanBucketById(scan_dists.data(), routed_computer, bucket_id);
+    }
+
+    std::array<InnerIdType, 6> inner_ids{7, 0, 5, 2, 9, 4};
+    SearchStatistics stats;
+    QueryContext ctx{nullptr, &stats};
+    std::array<float, 6> expected{};
+    bucket->QueryWithDistanceHintByInnerId(
+        expected.data(), nullptr, routed_computer, inner_ids.data(), inner_ids.size(), &ctx);
+    REQUIRE(std::all_of(
+        expected.begin(), expected.end(), [](float value) { return std::isfinite(value); }));
+    REQUIRE(stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) == 0);
+
+    std::array<float, 6> actual{};
+    bucket->QueryWithDistanceHintByInnerId(
+        actual.data(), nullptr, routed_computer, inner_ids.data(), inner_ids.size());
+    REQUIRE(actual == expected);
+
+    constexpr InnerIdType updated_inner_id = 0;
+    constexpr InnerIdType updated_offset_id = 0;
+    bucket->InsertVectorWithOffset(
+        vectors.data() + 20 * dim, 0, updated_inner_id, updated_offset_id);
+    const float updated_expected = bucket->QueryOneById(routed_computer, 0, updated_offset_id);
+
+    float candidate_updated_actual = 0.0F;
+    bucket->QueryWithDistanceHintByInnerId(
+        &candidate_updated_actual, nullptr, routed_computer, &updated_inner_id, 1);
+    REQUIRE(std::abs(candidate_updated_actual - updated_expected) < 1e-5F);
+
+    const BucketIdType stale_source_bucket = 0;
+    const InnerIdType stale_source_offset = updated_offset_id;
+    const uint64_t stale_source_version = published_candidate_versions[1];
+    float stale_source_actual = 0.0F;
+    SearchStatistics stale_source_stats;
+    QueryContext stale_source_ctx{nullptr, &stale_source_stats};
+    bucket->QueryWithCandidateFilterInnerProductBySource(
+        &stale_source_actual,
+        nullptr,
+        published_candidate_inner_products.data() + 1,
+        &stale_source_bucket,
+        &stale_source_offset,
+        &stale_source_version,
+        candidate_computer,
+        &updated_inner_id,
+        1,
+        &stale_source_ctx);
+    REQUIRE(std::abs(stale_source_actual - updated_expected) < 1e-5F);
+    REQUIRE(stale_source_stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) == 0);
+}
+
+TEST_CASE("RaBitQ split bucket relocates existing inner IDs and invalidates provenance",
+          "[ut][BucketDataCell][rabitq_split][relocation]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr InnerIdType train_count = 32;
+    constexpr BucketIdType bucket_count = 2;
+    const bool use_residual = GENERATE(false, true);
+    const uint32_t filter_bits = GENERATE(1U, 2U, 3U);
+    INFO("use_residual=" << use_residual << ", filter_bits=" << filter_bits);
+
+    auto vectors = fixtures::generate_vectors(train_count, dim);
+    auto query = fixtures::generate_vectors(1, dim, false, 97);
+    constexpr const char* param_str = R"({
+        "io_params": { "type": "memory_io" },
+        "quantization_params": {
+            "type": "rabitq",
+            "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 1,
+            "fast_encode_rabitq": true
+        },
+        "buckets_count": 2,
+        "use_residual": false
+    })";
+
+    auto json = JsonType::Parse(param_str);
+    json["quantization_params"]["rabitq_bits_per_dim_filter"].SetInt(filter_bits);
+    json["use_residual"].SetBool(use_residual);
+    auto param = std::make_shared<BucketDataCellParameter>();
+    param->FromJson(json);
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    auto strategy = std::make_shared<FixedCentroidPartitionStrategy>(common_param, bucket_count);
+    bucket->SetStrategy(strategy);
+    bucket->Train(vectors.data(), train_count);
+
+    constexpr InnerIdType fixed_source_id = 0;
+    constexpr InnerIdType append_source_id = 2;
+    constexpr InnerIdType displaced_id = 1;
+    bucket->InsertVector(vectors.data(), 0, fixed_source_id);
+    bucket->InsertVector(vectors.data() + dim, 0, append_source_id);
+    bucket->InsertVector(vectors.data() + 2 * dim, 1, displaced_id);
+    bucket->Package();
+
+    std::array<BucketIdType, 2> routed_buckets{0, 1};
+    auto computer = bucket->FactoryComputerForBuckets(
+        query.data(), routed_buckets.data(), routed_buckets.size());
+
+    std::array<float, 2> old_source_dists{};
+    std::array<float, 2> old_source_inner_products{};
+    std::array<InnerIdType, 2> old_source_ids{};
+    InnerIdType old_source_size = 0;
+    const uint64_t old_source_version =
+        bucket->ScanBucketWithFilterInnerProduct(old_source_dists.data(),
+                                                 old_source_inner_products.data(),
+                                                 computer,
+                                                 0,
+                                                 nullptr,
+                                                 old_source_ids.data(),
+                                                 old_source_ids.size(),
+                                                 &old_source_size);
+    REQUIRE(old_source_size == old_source_ids.size());
+    REQUIRE(old_source_ids[0] == fixed_source_id);
+    REQUIRE(old_source_ids[1] == append_source_id);
+
+    float displaced_source_dist = 0.0F;
+    float displaced_source_inner_product = 0.0F;
+    InnerIdType displaced_source_scanned_id = std::numeric_limits<InnerIdType>::max();
+    InnerIdType displaced_source_size = 0;
+    const uint64_t displaced_source_version =
+        bucket->ScanBucketWithFilterInnerProduct(&displaced_source_dist,
+                                                 &displaced_source_inner_product,
+                                                 computer,
+                                                 1,
+                                                 nullptr,
+                                                 &displaced_source_scanned_id,
+                                                 1,
+                                                 &displaced_source_size);
+    REQUIRE(displaced_source_size == 1);
+    REQUIRE(displaced_source_scanned_id == displaced_id);
+
+    bucket->InsertVectorWithOffset(vectors.data() + 3 * dim, 1, fixed_source_id, 0);
+
+    std::array<float, 1> target_dists{};
+    std::array<float, 1> target_inner_products{};
+    std::array<InnerIdType, 1> target_ids{};
+    InnerIdType target_size = 0;
+    const uint64_t target_version =
+        bucket->ScanBucketWithFilterInnerProduct(target_dists.data(),
+                                                 target_inner_products.data(),
+                                                 computer,
+                                                 1,
+                                                 nullptr,
+                                                 target_ids.data(),
+                                                 target_ids.size(),
+                                                 &target_size);
+    REQUIRE(target_size == 1);
+    REQUIRE(target_ids[0] == fixed_source_id);
+    REQUIRE(target_version > 0);
+    REQUIRE(std::isfinite(target_inner_products[0]));
+
+    const float fixed_expected = bucket->QueryOneById(computer, 1, 0);
+    float fixed_actual = 0.0F;
+    const BucketIdType old_bucket_id = 0;
+    const InnerIdType old_offset_id = 0;
+    SearchStatistics fixed_stats;
+    QueryContext fixed_ctx{nullptr, &fixed_stats};
+    bucket->QueryWithCandidateFilterInnerProductBySource(&fixed_actual,
+                                                         nullptr,
+                                                         old_source_inner_products.data(),
+                                                         &old_bucket_id,
+                                                         &old_offset_id,
+                                                         &old_source_version,
+                                                         computer,
+                                                         &fixed_source_id,
+                                                         1,
+                                                         &fixed_ctx);
+    REQUIRE(std::abs(fixed_actual - fixed_expected) < 1e-5F);
+    REQUIRE(fixed_stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) == 0);
+
+    float displaced_dist = 0.0F;
+    REQUIRE_THROWS(bucket->QueryWithDistanceHintByInnerId(
+        &displaced_dist, nullptr, computer, &displaced_id, 1));
+
+    float displaced_candidate_dist = 0.0F;
+    const BucketIdType displaced_source_bucket = 1;
+    const InnerIdType displaced_source_offset = 0;
+    REQUIRE_NOTHROW(
+        bucket->QueryWithCandidateFilterInnerProductBySource(&displaced_candidate_dist,
+                                                             nullptr,
+                                                             &displaced_source_inner_product,
+                                                             &displaced_source_bucket,
+                                                             &displaced_source_offset,
+                                                             &displaced_source_version,
+                                                             computer,
+                                                             &displaced_id,
+                                                             1));
+    REQUIRE(displaced_candidate_dist == std::numeric_limits<float>::max());
+
+    std::array<float, 2> source_after_fixed_dists{};
+    std::array<float, 2> source_after_fixed_inner_products{};
+    std::array<InnerIdType, 2> source_after_fixed_ids{};
+    InnerIdType source_after_fixed_size = 0;
+    const uint64_t source_after_fixed_version =
+        bucket->ScanBucketWithFilterInnerProduct(source_after_fixed_dists.data(),
+                                                 source_after_fixed_inner_products.data(),
+                                                 computer,
+                                                 0,
+                                                 nullptr,
+                                                 source_after_fixed_ids.data(),
+                                                 source_after_fixed_ids.size(),
+                                                 &source_after_fixed_size);
+    REQUIRE(source_after_fixed_size == source_after_fixed_ids.size());
+    REQUIRE(source_after_fixed_version != old_source_version);
+    REQUIRE(source_after_fixed_ids[0] == std::numeric_limits<InnerIdType>::max());
+    REQUIRE(source_after_fixed_ids[1] == append_source_id);
+    REQUIRE(source_after_fixed_dists[0] == std::numeric_limits<float>::max());
+    uint32_t empty_inner_product_bits = 0;
+    std::memcpy(&empty_inner_product_bits,
+                source_after_fixed_inner_products.data(),
+                sizeof(empty_inner_product_bits));
+    REQUIRE((empty_inner_product_bits & 0x7F800000U) == 0x7F800000U);
+    REQUIRE((empty_inner_product_bits & 0x007FFFFFU) != 0U);
+
+    const InnerIdType appended_offset =
+        bucket->InsertVector(vectors.data() + 4 * dim, 1, append_source_id);
+    REQUIRE(appended_offset == 1);
+    REQUIRE(bucket->GetInnerIds(0)[1] == std::numeric_limits<InnerIdType>::max());
+
+    const float append_expected = bucket->QueryOneById(computer, 1, appended_offset);
+    float append_actual = 0.0F;
+    const InnerIdType append_old_offset = 1;
+    SearchStatistics append_stats;
+    QueryContext append_ctx{nullptr, &append_stats};
+    bucket->QueryWithCandidateFilterInnerProductBySource(
+        &append_actual,
+        nullptr,
+        source_after_fixed_inner_products.data() + 1,
+        &old_bucket_id,
+        &append_old_offset,
+        &source_after_fixed_version,
+        computer,
+        &append_source_id,
+        1,
+        &append_ctx);
+    REQUIRE(std::abs(append_actual - append_expected) < 1e-5F);
+    REQUIRE(append_stats.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed) == 0);
+
+    constexpr InnerIdType concurrent_id = 7;
+    const float* concurrent_vector0 = vectors.data() + 5 * dim;
+    const float* concurrent_vector1 = vectors.data() + 6 * dim;
+    const InnerIdType concurrent_offset0 =
+        bucket->InsertVector(concurrent_vector0, 0, concurrent_id);
+    const float concurrent_expected0 = bucket->QueryOneById(computer, 0, concurrent_offset0);
+    const InnerIdType concurrent_offset1 =
+        bucket->InsertVector(concurrent_vector1, 1, concurrent_id);
+    const float concurrent_expected1 = bucket->QueryOneById(computer, 1, concurrent_offset1);
+    bucket->InsertVector(concurrent_vector0, 0, concurrent_id);
+
+    std::atomic<bool> start_relocation{false};
+    constexpr uint32_t relocation_count = 256;
+    auto relocation = std::async(std::launch::async, [&]() {
+        while (not start_relocation.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        for (uint32_t i = 0; i < relocation_count; ++i) {
+            const BucketIdType target_bucket = (i & 1U) == 0U ? 1 : 0;
+            const float* target_vector =
+                target_bucket == 0 ? concurrent_vector0 : concurrent_vector1;
+            bucket->InsertVector(target_vector, target_bucket, concurrent_id);
+            std::this_thread::yield();
+        }
+    });
+
+    start_relocation.store(true, std::memory_order_release);
+    for (uint32_t i = 0; i < relocation_count; ++i) {
+        float concurrent_actual = 0.0F;
+        REQUIRE_NOTHROW(
+            bucket->QueryWithCandidateFilterInnerProductBySource(&concurrent_actual,
+                                                                 nullptr,
+                                                                 old_source_inner_products.data(),
+                                                                 &old_bucket_id,
+                                                                 &old_offset_id,
+                                                                 &old_source_version,
+                                                                 computer,
+                                                                 &concurrent_id,
+                                                                 1));
+        const bool is_complete_old = std::abs(concurrent_actual - concurrent_expected0) < 1e-5F;
+        const bool is_complete_new = std::abs(concurrent_actual - concurrent_expected1) < 1e-5F;
+        const bool is_unavailable = concurrent_actual == std::numeric_limits<float>::max();
+        REQUIRE((is_complete_old or is_complete_new or is_unavailable));
+    }
+    REQUIRE_NOTHROW(relocation.get());
+}
+
+TEST_CASE("RaBitQ split bucket rejects optimized build without fast encoding",
+          "[ut][BucketDataCell][rabitq_split][optimized_build]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr InnerIdType count = 8;
+    constexpr BucketIdType bucket_count = 2;
+    auto vectors = fixtures::generate_vectors(count, dim);
+    constexpr const char* param_str = R"({
+        "io_params": { "type": "memory_io" },
+        "quantization_params": {
+            "type": "rabitq",
+            "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 2,
+            "fast_encode_rabitq": false
+        },
+        "buckets_count": 2
+    })";
+
+    auto param = std::make_shared<BucketDataCellParameter>();
+    param->FromJson(JsonType::Parse(param_str));
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    bucket->Train(vectors.data(), count);
+
+    auto thread_pool = SafeThreadPool::FactoryDefaultThreadPool();
+    thread_pool->SetPoolSize(2);
+    FlattenOptimizedBuildContext context{thread_pool, 2};
+    REQUIRE_FALSE(bucket->BeginOptimizedBuild(context, count));
+    REQUIRE_FALSE(bucket->IsOptimizedBuildActive());
+
+    for (InnerIdType id = 0; id < count; ++id) {
+        const auto bucket_id = static_cast<BucketIdType>(id % bucket_count);
+        bucket->InsertVector(vectors.data() + static_cast<uint64_t>(id) * dim, bucket_id, id);
+    }
+    bucket->Package();
+    InnerIdType stored_count = 0;
+    for (BucketIdType bucket_id = 0; bucket_id < bucket_count; ++bucket_id) {
+        stored_count += bucket->GetBucketSize(bucket_id);
+    }
+    REQUIRE(stored_count == count);
+}
+
+TEST_CASE("RaBitQ split bucket keeps only canonical packed filter codes",
+          "[ut][BucketDataCell][rabitq_split][fastscan][serialization]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 70;
+    constexpr InnerIdType count = 384;
+    constexpr BucketIdType bucket_count = 3;
+    auto vectors = fixtures::generate_vectors(count + 2, dim);
+    auto query = fixtures::generate_vectors(1, dim, false, 41);
+    constexpr const char* param_str = R"({
+        "io_params": { "type": "memory_io" },
+        "quantization_params": {
+            "type": "rabitq",
+            "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 1,
+            "fast_encode_rabitq": true
+        },
+        "buckets_count": 3,
+        "use_residual": true
+    })";
+
+    auto make_bucket = [&](uint32_t filter_bits, float centroid_scale = 1.0F) {
+        auto json = JsonType::Parse(param_str);
+        json["quantization_params"]["rabitq_bits_per_dim_filter"].SetInt(filter_bits);
+        auto param = std::make_shared<BucketDataCellParameter>();
+        param->FromJson(json);
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.dim_ = dim;
+        common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+        auto bucket = BucketInterface::MakeInstance(param, common_param);
+        bucket->SetStrategy(std::make_shared<FixedCentroidPartitionStrategy>(
+            common_param, bucket_count, centroid_scale));
+        return bucket;
+    };
+
+    std::array<uint64_t, 3> memory_usage{};
+    std::array<uint64_t, 3> serialized_size{};
+    BucketInterfacePtr packed_bucket = nullptr;
+    for (uint32_t filter_bits = 1; filter_bits <= 3; ++filter_bits) {
+        auto bucket = make_bucket(filter_bits);
+        bucket->Train(vectors.data(), count);
+        for (InnerIdType id = 0; id < count; ++id) {
+            bucket->InsertVector(vectors.data() + static_cast<uint64_t>(id) * dim,
+                                 static_cast<BucketIdType>(id % bucket_count),
+                                 id);
+        }
+        bucket->Package();
+        bucket->Unpack();
+        memory_usage[filter_bits - 1] = bucket->GetMemoryUsage();
+        CountingStreamWriter writer;
+        bucket->Serialize(writer);
+        serialized_size[filter_bits - 1] = writer.GetCursor();
+        if (filter_bits == 3) {
+            packed_bucket = std::move(bucket);
+        }
+    }
+    const auto [min_memory, max_memory] =
+        std::minmax_element(memory_usage.begin(), memory_usage.end());
+    const auto [min_size, max_size] =
+        std::minmax_element(serialized_size.begin(), serialized_size.end());
+    REQUIRE(*max_memory - *min_memory < 4096);
+    REQUIRE(*max_size - *min_size < 4096);
+
+    std::vector<std::vector<uint8_t>> expected_codes(
+        count, std::vector<uint8_t>(packed_bucket->code_size_));
+    for (InnerIdType id = 0; id < count; ++id) {
+        const auto bucket_id = static_cast<BucketIdType>(id % bucket_count);
+        const auto offset_id = static_cast<InnerIdType>(id / bucket_count);
+        packed_bucket->GetCodesById(bucket_id, offset_id, expected_codes[id].data());
+    }
+
+    auto candidate_for_offset = [&](const BucketInterfacePtr& bucket,
+                                    BucketIdType bucket_id,
+                                    InnerIdType offset_id,
+                                    InnerIdType inner_id) {
+        auto computer = bucket->FactoryComputerForBuckets(query.data(), &bucket_id, 1);
+        const auto bucket_size = bucket->GetBucketSize(bucket_id);
+        std::vector<float> scan_dists(bucket_size);
+        std::vector<float> filter_inner_products(bucket_size);
+        const uint64_t source_version = bucket->ScanBucketWithFilterInnerProduct(
+            scan_dists.data(), filter_inner_products.data(), computer, bucket_id);
+        float result = 0.0F;
+        bucket->QueryWithCandidateFilterInnerProductBySource(
+            &result,
+            nullptr,
+            filter_inner_products.data() + offset_id,
+            &bucket_id,
+            &offset_id,
+            &source_version,
+            computer,
+            &inner_id,
+            1);
+        return result;
+    };
+    const float serialized_candidate = candidate_for_offset(packed_bucket, 1, 0, 1);
+
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    packed_bucket->Serialize(writer);
+    stream.seekg(0, std::ios::beg);
+    IOStreamReader reader(stream);
+    auto restored = make_bucket(3);
+    restored->Deserialize(reader);
+    REQUIRE(reader.GetCursor() == writer.GetCursor());
+    for (InnerIdType id = 0; id < count; ++id) {
+        const auto bucket_id = static_cast<BucketIdType>(id % bucket_count);
+        const auto offset_id = static_cast<InnerIdType>(id / bucket_count);
+        std::vector<uint8_t> actual(restored->code_size_);
+        restored->GetCodesById(bucket_id, offset_id, actual.data());
+        REQUIRE(actual == expected_codes[id]);
+    }
+    REQUIRE(std::abs(candidate_for_offset(restored, 1, 0, 1) - serialized_candidate) < 1e-5F);
+
+    constexpr BucketIdType added_bucket = 1;
+    const auto added_offset = restored->InsertVector(
+        vectors.data() + static_cast<uint64_t>(count) * dim, added_bucket, count);
+    auto computer = restored->FactoryComputer(query.data());
+    REQUIRE(std::isfinite(restored->QueryOneById(computer, added_bucket, added_offset)));
+
+    auto source = make_bucket(3, 2.0F);
+    restored->ExportModel(source);
+    constexpr BucketIdType merged_bucket = 2;
+    source->InsertVector(vectors.data() + static_cast<uint64_t>(count + 1) * dim, merged_bucket, 0);
+    source->Package();
+    std::vector<uint8_t> source_code(source->code_size_);
+    source->GetCodesById(merged_bucket, 0, source_code.data());
+    const auto old_bucket_size = restored->GetBucketSize(merged_bucket);
+    restored->MergeOther(source, count + 1);
+    std::vector<uint8_t> merged_code(restored->code_size_);
+    restored->GetCodesById(merged_bucket, old_bucket_size, merged_code.data());
+    REQUIRE(merged_code == source_code);
+    const float merged_candidate =
+        candidate_for_offset(restored, merged_bucket, old_bucket_size, count + 1);
+    auto merged_computer = restored->FactoryComputerForBuckets(query.data(), &merged_bucket, 1);
+    const float merged_expected =
+        restored->QueryOneById(merged_computer, merged_bucket, old_bucket_size);
+    REQUIRE(std::abs(merged_candidate - merged_expected) <=
+            0.02F * std::max({1.0F, std::abs(merged_candidate), std::abs(merged_expected)}));
 }
 
 TEST_CASE("BucketDataCell InsertVectorWithOffset", "[ut][BucketDataCell]") {

@@ -39,6 +39,8 @@ public:
 
     IOParamPtr io_parameter{nullptr};
 
+    IOParamPtr supplement_io_parameter{nullptr};
+
     bool use_residual_{false};
 
     int64_t buckets_count{1};

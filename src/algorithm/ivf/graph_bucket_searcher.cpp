@@ -43,6 +43,7 @@ GraphBucketSearcher::Search(BucketIdType bucket_id,
                             BucketIdType buckets_per_data,
                             DistHeapPtr& heap,
                             Vector<float>& dist,
+                            Vector<InnerIdType>& scanned_inner_ids,
                             ReasoningContext* reasoning_ctx) const {
     auto bucket_size = bucket->GetBucketSize(bucket_id);
     bool has_graph = (bucket_id < static_cast<BucketIdType>(bucket_graphs_.size()) &&
@@ -70,6 +71,7 @@ GraphBucketSearcher::Search(BucketIdType bucket_id,
                                buckets_per_data,
                                heap,
                                dist,
+                               scanned_inner_ids,
                                reasoning_ctx);
     }
 }

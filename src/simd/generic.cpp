@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstring>
+
 #include "simd.h"
 #include "simd/int8_simd.h"
 #include "simd/kernels/kernels.h"
@@ -20,6 +22,17 @@
 #include "simd/traits/simd_traits_generic.h"
 
 namespace vsag::generic {
+
+namespace {
+
+bool
+IsFiniteFloatBits(float value) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return (bits & 0x7F800000U) != 0x7F800000U;
+}
+
+}  // namespace
 
 float
 L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
@@ -797,6 +810,38 @@ RaBitQFloatSupplementCodeIP(const float* vector,
 }
 
 float
+RaBitQFloatPackedSupplementCodeIP(const float* vector,
+                                  const uint8_t* packed_supplement_code,
+                                  uint64_t dim,
+                                  uint32_t supplement_bits) {
+    const simd::RaBitQPackedSupplementLayout layout{dim, supplement_bits};
+    if (layout.PackedSize() == 0U) {
+        return 0.0F;
+    }
+    float result = 0.0F;
+    for (uint64_t chunk = 0; chunk < layout.FullChunkCount(); ++chunk) {
+        uint8_t values[simd::RaBitQPackedSupplementLayout::CHUNK_DIM];
+        simd::RaBitQUnpackCompactSupplementChunk(
+            packed_supplement_code + chunk * layout.ChunkBytes(), values, supplement_bits);
+        const uint64_t begin = chunk * simd::RaBitQPackedSupplementLayout::CHUNK_DIM;
+        for (uint64_t lane = 0; lane < simd::RaBitQPackedSupplementLayout::CHUNK_DIM; ++lane) {
+            result += vector[begin + lane] * static_cast<float>(values[lane]);
+        }
+    }
+
+    const auto* tail = packed_supplement_code + layout.FullChunksSize();
+    for (uint64_t lane = 0; lane < layout.TailDimension(); ++lane) {
+        uint32_t value = 0;
+        for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
+            const auto* plane = tail + static_cast<uint64_t>(bit) * layout.TailPlaneBytes();
+            value |= static_cast<uint32_t>((plane[lane / 8U] >> (lane % 8U)) & 1U) << bit;
+        }
+        result += vector[layout.FullDimension() + lane] * static_cast<float>(value);
+    }
+    return result;
+}
+
+float
 RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim) {
     if (dim == 0) {
         return 0.0f;
@@ -827,6 +872,99 @@ RaBitQPackScalarToSplitPlanes(const uint8_t* scalar_codes,
                               uint32_t filter_bits) {
     simd::RaBitQPackScalarToSplitPlanesTail(
         scalar_codes, filter_planes, supplement_planes, dim, total_bits, filter_bits, 0);
+}
+
+void
+RaBitQPackScalarToSplitCode(const uint8_t* scalar_codes,
+                            uint8_t* filter_planes,
+                            uint8_t* packed_supplement_code,
+                            uint64_t dim,
+                            uint32_t total_bits,
+                            uint32_t filter_bits) {
+    const uint64_t plane_bytes = (dim + 7U) / 8U;
+    if (plane_bytes != 0U and filter_bits != 0U) {
+        std::memset(filter_planes, 0, plane_bytes * static_cast<uint64_t>(filter_bits));
+    }
+    simd::RaBitQPackScalarFilterPlanesTail(
+        scalar_codes, filter_planes, dim, total_bits, filter_bits, 0);
+    simd::RaBitQPackScalarSupplementCode(
+        scalar_codes, packed_supplement_code, dim, total_bits - filter_bits);
+}
+
+void
+RaBitQPackSupplementPlanes(const uint8_t* supplement_planes,
+                           uint8_t* packed_supplement_code,
+                           uint64_t dim,
+                           uint32_t supplement_bits) {
+    const simd::RaBitQPackedSupplementLayout layout{dim, supplement_bits};
+    if (layout.PackedSize() == 0U) {
+        return;
+    }
+    std::memset(packed_supplement_code, 0, layout.PackedSize());
+
+    for (uint64_t chunk = 0; chunk < layout.FullChunkCount(); ++chunk) {
+        uint8_t values[simd::RaBitQPackedSupplementLayout::CHUNK_DIM];
+        const uint64_t begin = chunk * simd::RaBitQPackedSupplementLayout::CHUNK_DIM;
+        for (uint64_t lane = 0; lane < simd::RaBitQPackedSupplementLayout::CHUNK_DIM; ++lane) {
+            const uint64_t d = begin + lane;
+            uint8_t value = 0;
+            for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
+                const auto* plane =
+                    supplement_planes + static_cast<uint64_t>(bit) * layout.PlaneBytes();
+                value |= static_cast<uint8_t>(((plane[d / 8U] >> (d % 8U)) & 1U) << bit);
+            }
+            values[lane] = value;
+        }
+        simd::RaBitQPackCompactSupplementChunk(
+            values, packed_supplement_code + chunk * layout.ChunkBytes(), supplement_bits);
+    }
+
+    auto* tail = packed_supplement_code + layout.FullChunksSize();
+    for (uint64_t lane = 0; lane < layout.TailDimension(); ++lane) {
+        const uint64_t d = layout.FullDimension() + lane;
+        for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
+            const auto* source_plane =
+                supplement_planes + static_cast<uint64_t>(bit) * layout.PlaneBytes();
+            tail[static_cast<uint64_t>(bit) * layout.TailPlaneBytes() + lane / 8U] |=
+                static_cast<uint8_t>(((source_plane[d / 8U] >> (d % 8U)) & 1U) << (lane % 8U));
+        }
+    }
+}
+
+void
+RaBitQUnpackSupplementPlanes(const uint8_t* packed_supplement_code,
+                             uint8_t* supplement_planes,
+                             uint64_t dim,
+                             uint32_t supplement_bits) {
+    const simd::RaBitQPackedSupplementLayout layout{dim, supplement_bits};
+    if (layout.PackedSize() == 0U) {
+        return;
+    }
+    std::memset(supplement_planes, 0, layout.PackedSize());
+
+    for (uint64_t chunk = 0; chunk < layout.FullChunkCount(); ++chunk) {
+        uint8_t values[simd::RaBitQPackedSupplementLayout::CHUNK_DIM];
+        simd::RaBitQUnpackCompactSupplementChunk(
+            packed_supplement_code + chunk * layout.ChunkBytes(), values, supplement_bits);
+        const uint64_t begin = chunk * simd::RaBitQPackedSupplementLayout::CHUNK_DIM;
+        for (uint64_t lane = 0; lane < simd::RaBitQPackedSupplementLayout::CHUNK_DIM; ++lane) {
+            const uint64_t d = begin + lane;
+            for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
+                supplement_planes[static_cast<uint64_t>(bit) * layout.PlaneBytes() + d / 8U] |=
+                    static_cast<uint8_t>(((values[lane] >> bit) & 1U) << (d % 8U));
+            }
+        }
+    }
+
+    const auto* tail = packed_supplement_code + layout.FullChunksSize();
+    for (uint64_t lane = 0; lane < layout.TailDimension(); ++lane) {
+        const uint64_t d = layout.FullDimension() + lane;
+        for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
+            const auto* source_plane = tail + static_cast<uint64_t>(bit) * layout.TailPlaneBytes();
+            supplement_planes[static_cast<uint64_t>(bit) * layout.PlaneBytes() + d / 8U] |=
+                static_cast<uint8_t>(((source_plane[lane / 8U] >> (lane % 8U)) & 1U) << (d % 8U));
+        }
+    }
 }
 
 uint32_t
@@ -919,6 +1057,139 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
             }
         }
     }
+}
+
+void
+PQFastScanLookUp32HighAcc(const uint8_t* RESTRICT low_lookup_table,
+                          const uint8_t* RESTRICT high_lookup_table,
+                          const uint8_t* RESTRICT codes,
+                          uint64_t pq_dim,
+                          int32_t* RESTRICT result) {
+    for (uint64_t i = 0; i < pq_dim; ++i) {
+        const auto* low_dict = low_lookup_table;
+        const auto* high_dict = high_lookup_table;
+        low_lookup_table += 16;
+        high_lookup_table += 16;
+        const auto* code = codes;
+        codes += 16;
+        for (uint64_t j = 0; j < 16; ++j) {
+            const uint8_t low_code = code[j] & 0x0FU;
+            const uint8_t high_code = code[j] >> 4U;
+            const int32_t low_value = static_cast<int32_t>(low_dict[low_code]) |
+                                      (static_cast<int32_t>(high_dict[low_code]) << 8U);
+            const int32_t high_value = static_cast<int32_t>(low_dict[high_code]) |
+                                       (static_cast<int32_t>(high_dict[high_code]) << 8U);
+            if (j % 2 == 0) {
+                result[j / 2] += low_value;
+                result[16 + j / 2] += high_value;
+            } else {
+                result[8 + j / 2] += low_value;
+                result[24 + j / 2] += high_value;
+            }
+        }
+    }
+}
+
+void
+PQFastScanLookUp32HighAccOverwrite(const uint8_t* RESTRICT low_lookup_table,
+                                   const uint8_t* RESTRICT high_lookup_table,
+                                   const uint8_t* RESTRICT codes,
+                                   uint64_t pq_dim,
+                                   int32_t* RESTRICT result) {
+    for (uint64_t lane = 0; lane < 32; ++lane) {
+        result[lane] = 0;
+    }
+    PQFastScanLookUp32HighAcc(low_lookup_table, high_lookup_table, codes, pq_dim, result);
+}
+
+uint32_t
+FP32LessThan32Mask(const float* values, float limit) {
+    uint32_t mask = 0;
+    for (uint64_t i = 0; i < 32; ++i) {
+        if (values[i] < limit) {
+            mask |= 1U << i;
+        }
+    }
+    return mask;
+}
+
+uint32_t
+RaBitQFastScan32ResidualPostprocess(const int32_t* accumulators,
+                                    uint32_t filter_bits,
+                                    float delta,
+                                    float sum_vl,
+                                    float query_sum,
+                                    float query_norm,
+                                    float query_bucket_norm_sqr,
+                                    float inv_sqrt_d,
+                                    const float* f_add,
+                                    const float* f_scale,
+                                    const float* filter_norm_codes,
+                                    uint32_t valid_size,
+                                    float* dists,
+                                    float* filter_inner_products) {
+    uint32_t computed_mask = 0;
+    if (filter_bits == 1) {
+        for (uint32_t i = 0; i < valid_size; ++i) {
+            if (filter_inner_products != nullptr) {
+                filter_inner_products[i] = std::numeric_limits<float>::quiet_NaN();
+            }
+            if (!IsFiniteFloatBits(f_add[i]) || !IsFiniteFloatBits(f_scale[i]) ||
+                std::abs(f_scale[i]) <= std::numeric_limits<float>::epsilon()) {
+                dists[i] = std::numeric_limits<float>::max();
+                continue;
+            }
+            const float lookup_sum = delta * static_cast<float>(accumulators[i]) + sum_vl;
+            const float filter_ip = (2.0F * lookup_sum - query_sum) * inv_sqrt_d;
+            const float result =
+                f_add[i] + query_bucket_norm_sqr + f_scale[i] * query_norm * filter_ip;
+            if (IsFiniteFloatBits(result)) {
+                dists[i] = result;
+                computed_mask |= 1U << i;
+                if (filter_inner_products != nullptr) {
+                    filter_inner_products[i] = filter_ip;
+                }
+            } else {
+                dists[i] = std::numeric_limits<float>::max();
+            }
+        }
+        return computed_mask;
+    }
+
+    const float filter_center = 0.5F * static_cast<float>((1U << filter_bits) - 1U);
+    for (uint32_t i = 0; i < valid_size; ++i) {
+        if (filter_inner_products != nullptr) {
+            filter_inner_products[i] = std::numeric_limits<float>::quiet_NaN();
+        }
+        if (!IsFiniteFloatBits(f_add[i]) || !IsFiniteFloatBits(f_scale[i]) ||
+            std::abs(f_scale[i]) <= std::numeric_limits<float>::epsilon()) {
+            dists[i] = std::numeric_limits<float>::max();
+            continue;
+        }
+        float lookup_sum = 0.0F;
+        for (uint32_t plane = 0; plane < filter_bits; ++plane) {
+            const float weight = static_cast<float>(1U << (filter_bits - plane - 1));
+            lookup_sum +=
+                weight * (delta * static_cast<float>(accumulators[plane * 32 + i]) + sum_vl);
+        }
+        lookup_sum -= filter_center * query_sum;
+        if (filter_norm_codes[i] <= 0.0F) {
+            dists[i] = std::numeric_limits<float>::max();
+            continue;
+        }
+        const float filter_ip = lookup_sum / filter_norm_codes[i];
+        const float result = f_add[i] + query_bucket_norm_sqr + f_scale[i] * query_norm * filter_ip;
+        if (IsFiniteFloatBits(result)) {
+            dists[i] = result;
+            computed_mask |= 1U << i;
+            if (filter_inner_products != nullptr) {
+                filter_inner_products[i] = filter_ip;
+            }
+        } else {
+            dists[i] = std::numeric_limits<float>::max();
+        }
+    }
+    return computed_mask;
 }
 
 void
