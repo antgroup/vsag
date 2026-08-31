@@ -24,6 +24,8 @@
 #include "utils/pointer_define.h"
 
 namespace vsag {
+class RaBitQSplitDataCellInterface;
+
 class FlattenReorder : public ReorderInterface {
 public:
     FlattenReorder(const FlattenInterfacePtr& flatten,
@@ -52,21 +54,23 @@ public:
 
 private:
     void
-    QueryLowerBound(float* distances,
-                    float* lower_bounds,
-                    float* filter_inner_products,
-                    const ComputerInterfacePtr& computer,
-                    const InnerIdType* ids,
-                    uint64_t count,
-                    QueryContext* ctx) const;
+    QueryFusedLowerBound(float* distances,
+                         float* lower_bounds,
+                         float* filter_inner_products,
+                         RaBitQSplitDataCellInterface* split_codes,
+                         const ComputerInterfacePtr& computer,
+                         const InnerIdType* ids,
+                         uint64_t count,
+                         QueryContext* ctx) const;
 
     void
-    QueryFullWithHint(float* distances,
-                      const float* filter_inner_products,
-                      const ComputerInterfacePtr& computer,
-                      const InnerIdType* ids,
-                      uint64_t count,
-                      QueryContext* ctx) const;
+    QueryFusedFullWithHint(float* distances,
+                           const float* filter_inner_products,
+                           RaBitQSplitDataCellInterface* split_codes,
+                           const ComputerInterfacePtr& computer,
+                           const InnerIdType* ids,
+                           uint64_t count,
+                           QueryContext* ctx) const;
 
     const FlattenInterfacePtr flatten_;
     Allocator* allocator_{nullptr};

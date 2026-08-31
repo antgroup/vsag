@@ -31,29 +31,14 @@
 namespace vsag {
 
 void
-FlattenReorder::QueryLowerBound(float* distances,
-                                float* lower_bounds,
-                                float* filter_inner_products,
-                                const ComputerInterfacePtr& computer,
-                                const InnerIdType* ids,
-                                uint64_t count,
-                                QueryContext* ctx) const {
-    auto* split_codes = dynamic_cast<RaBitQSplitDataCellInterface*>(flatten_.get());
-    if (fused_graph_ == nullptr or split_codes == nullptr) {
-        if (split_codes != nullptr) {
-            split_codes->QueryWithDistanceLowerBoundAndFilterIP(
-                distances, lower_bounds, filter_inner_products, computer, ids, count, ctx);
-        } else {
-            flatten_->QueryWithDistanceLowerBound(
-                distances, lower_bounds, computer, ids, count, ctx);
-            if (filter_inner_products != nullptr) {
-                std::fill(filter_inner_products,
-                          filter_inner_products + count,
-                          std::numeric_limits<float>::quiet_NaN());
-            }
-        }
-        return;
-    }
+FlattenReorder::QueryFusedLowerBound(float* distances,
+                                     float* lower_bounds,
+                                     float* filter_inner_products,
+                                     RaBitQSplitDataCellInterface* split_codes,
+                                     const ComputerInterfacePtr& computer,
+                                     const InnerIdType* ids,
+                                     uint64_t count,
+                                     QueryContext* ctx) const {
     uint32_t fallback_count = 0;
     QueryContext rate_context;
     QueryContext* rate_context_ptr = nullptr;
@@ -62,11 +47,11 @@ FlattenReorder::QueryLowerBound(float* distances,
         rate_context_ptr = &rate_context;
     }
     for (uint64_t i = 0; i < count; ++i) {
-        const auto node = fused_graph_->GetNodeView(ids[i]);
+        const auto code = fused_graph_->GetCodeView(ids[i]);
         if (not split_codes->ComputeFusedOneBitWithFilterIP(computer,
-                                                            node.cluster_id,
-                                                            node.one_bit_code,
-                                                            node.supplement_code,
+                                                            code.cluster_id,
+                                                            code.one_bit_code,
+                                                            code.supplement_code,
                                                             distances + i,
                                                             lower_bounds + i,
                                                             filter_inner_products + i,
@@ -89,50 +74,37 @@ FlattenReorder::QueryLowerBound(float* distances,
 }
 
 void
-FlattenReorder::QueryFullWithHint(float* distances,
-                                  const float* filter_inner_products,
-                                  const ComputerInterfacePtr& computer,
-                                  const InnerIdType* ids,
-                                  uint64_t count,
-                                  QueryContext* ctx) const {
-    auto* split_codes = dynamic_cast<RaBitQSplitDataCellInterface*>(flatten_.get());
-    if (fused_graph_ == nullptr or split_codes == nullptr) {
-        if (split_codes != nullptr) {
-            split_codes->QueryWithFilterIPHint(
-                distances, filter_inner_products, computer, ids, count, ctx);
-        } else {
-            flatten_->Query(distances, computer, ids, count, ctx);
-        }
-        return;
-    }
+FlattenReorder::QueryFusedFullWithHint(float* distances,
+                                       const float* filter_inner_products,
+                                       RaBitQSplitDataCellInterface* split_codes,
+                                       const ComputerInterfacePtr& computer,
+                                       const InnerIdType* ids,
+                                       uint64_t count,
+                                       QueryContext* ctx) const {
     uint32_t hint_full_count = 0;
     uint32_t fallback_full_count = 0;
-    uint32_t full_count = 0;
     const bool exact_filter_ip_hint =
         split_codes->FusedFilterBits() >= 2 and not split_codes->UsesLegacyHnswFusedCodec();
     for (uint64_t i = 0; i < count; ++i) {
-        const auto* record = fused_graph_->GetNodeRecord(ids[i]);
-        const auto cluster_id = fused_graph_->GetClusterId(record);
-        ++full_count;
+        const auto code = fused_graph_->GetCodeView(ids[i]);
         bool used_hint = false;
         if (exact_filter_ip_hint and IsFiniteRaBitQValue(filter_inner_products[i])) {
-            used_hint =
-                split_codes->ComputeFusedFullWithFilterIP(computer,
-                                                          cluster_id,
-                                                          fused_graph_->GetOneBitCode(record),
-                                                          fused_graph_->GetSupplementCode(record),
-                                                          filter_inner_products[i],
-                                                          distances + i,
-                                                          nullptr);
+            used_hint = split_codes->ComputeFusedFullWithFilterIP(computer,
+                                                                  code.cluster_id,
+                                                                  code.one_bit_code,
+                                                                  code.supplement_code,
+                                                                  filter_inner_products[i],
+                                                                  distances + i,
+                                                                  nullptr);
         }
         if (used_hint) {
             ++hint_full_count;
         } else {
             ++fallback_full_count;
             if (not split_codes->ComputeFusedFull(computer,
-                                                  cluster_id,
-                                                  fused_graph_->GetOneBitCode(record),
-                                                  fused_graph_->GetSupplementCode(record),
+                                                  code.cluster_id,
+                                                  code.one_bit_code,
+                                                  code.supplement_code,
                                                   distances + i,
                                                   nullptr)) {
                 distances[i] = std::numeric_limits<float>::max();
@@ -143,7 +115,8 @@ FlattenReorder::QueryFullWithHint(float* distances,
         if (ctx->track_distance_evaluations and count > 0) {
             ctx->stats->AddDistance(ctx->distance_phase, DistanceEvaluationBackend::RABITQ, count);
         }
-        ctx->stats->rabitq_full_count.fetch_add(full_count, std::memory_order_relaxed);
+        ctx->stats->rabitq_full_count.fetch_add(static_cast<uint32_t>(count),
+                                                std::memory_order_relaxed);
         ctx->stats->rabitq_reorder_hint_full_count.fetch_add(hint_full_count,
                                                              std::memory_order_relaxed);
         ctx->stats->rabitq_reorder_fallback_full_count.fetch_add(fallback_full_count,
@@ -437,6 +410,9 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
                              IteratorFilterContext* iter_ctx,
                              const RaBitQCandidateVector* rabitq_lower_bound_candidates,
                              const std::optional<float>& distance_threshold) {
+    auto* split_codes = dynamic_cast<RaBitQSplitDataCellInterface*>(flatten_.get());
+    CHECK_ARGUMENT(fused_graph_ != nullptr and split_codes != nullptr,
+                   "fused reorder requires fused graph and RaBitQ split codes");
     // set query allocator
     Allocator* query_allocator = select_query_allocator(ctx.alloc, allocator_);
     auto is_distance_eligible = [&distance_threshold](float distance) {
@@ -464,10 +440,7 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
     if (rabitq_lower_bound_candidates == nullptr) {
         topk = std::min(topk, static_cast<int64_t>(heap_candidate_size));
         auto reorder_heap = std::make_shared<StandardHeap<true, false>>(query_allocator, topk);
-        auto* split_codes = dynamic_cast<RaBitQSplitDataCellInterface*>(flatten_.get());
-        auto computer = fused_graph_ != nullptr and split_codes != nullptr
-                            ? split_codes->FactoryFusedComputer(query)
-                            : flatten_->FactoryComputer(query);
+        auto computer = split_codes->FactoryFusedComputer(query);
         Vector<InnerIdType> ids(heap_candidate_size, query_allocator);
         Vector<float> dists(heap_candidate_size, query_allocator);
         const auto* candidate_result = input == nullptr ? nullptr : input->GetData();
@@ -477,20 +450,16 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
         add_reorder_distance_count(ctx, heap_candidate_size);
         {
             ScopedDistancePhase scoped(ctx, DistanceEvaluationPhase::RERANK);
-            if (fused_graph_ != nullptr and split_codes != nullptr) {
-                for (uint64_t i = 0; i < heap_candidate_size; ++i) {
-                    const auto* record = fused_graph_->GetNodeRecord(ids[i]);
-                    if (not split_codes->ComputeFusedFull(computer,
-                                                          fused_graph_->GetClusterId(record),
-                                                          fused_graph_->GetOneBitCode(record),
-                                                          fused_graph_->GetSupplementCode(record),
-                                                          dists.data() + i,
-                                                          &ctx)) {
-                        dists[i] = std::numeric_limits<float>::max();
-                    }
+            for (uint64_t i = 0; i < heap_candidate_size; ++i) {
+                const auto code = fused_graph_->GetCodeView(ids[i]);
+                if (not split_codes->ComputeFusedFull(computer,
+                                                      code.cluster_id,
+                                                      code.one_bit_code,
+                                                      code.supplement_code,
+                                                      dists.data() + i,
+                                                      &ctx)) {
+                    dists[i] = std::numeric_limits<float>::max();
                 }
-            } else {
-                flatten_->Query(dists.data(), computer, ids.data(), heap_candidate_size, &ctx);
             }
         }
         for (uint64_t i = 0; i < heap_candidate_size; ++i) {
@@ -521,8 +490,7 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
         return reorder_heap;
     }
 
-    const uint64_t rabitq_candidate_size =
-        rabitq_lower_bound_candidates == nullptr ? 0 : rabitq_lower_bound_candidates->size();
+    const uint64_t rabitq_candidate_size = rabitq_lower_bound_candidates->size();
     const uint64_t max_candidate_size = heap_candidate_size + rabitq_candidate_size;
     if (topk <= 0) {
         topk = static_cast<int64_t>(max_candidate_size);
@@ -531,8 +499,6 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
         return std::make_shared<StandardHeap<true, false>>(query_allocator, 0);
     }
 
-    auto* split_codes = dynamic_cast<RaBitQSplitDataCellInterface*>(flatten_.get());
-    const bool accepts_full_distance_hints = fused_graph_ != nullptr and split_codes != nullptr;
     Vector<InnerIdType> all_ids(max_candidate_size, query_allocator);
     Vector<float> lower_bound_probe_dists(max_candidate_size, query_allocator);
     Vector<float> lower_bounds(max_candidate_size, query_allocator);
@@ -540,54 +506,35 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
         max_candidate_size, std::numeric_limits<float>::quiet_NaN(), query_allocator);
     Vector<float> full_distances(
         max_candidate_size, std::numeric_limits<float>::quiet_NaN(), query_allocator);
-    UnorderedMap<InnerIdType, uint64_t> fused_merged_ids(query_allocator);
-    UnorderedSet<InnerIdType> legacy_merged_ids(query_allocator);
-    if (accepts_full_distance_hints) {
-        fused_merged_ids.reserve(max_candidate_size);
-    } else {
-        legacy_merged_ids.reserve(max_candidate_size);
-    }
+    UnorderedMap<InnerIdType, uint64_t> merged_ids(query_allocator);
+    merged_ids.reserve(max_candidate_size);
 
     uint64_t candidate_size = 0;
-    if (rabitq_lower_bound_candidates != nullptr) {
-        for (const auto& item : *rabitq_lower_bound_candidates) {
-            if (not accepts_full_distance_hints) {
-                if (legacy_merged_ids.insert(item.id).second) {
-                    all_ids[candidate_size] = item.id;
-                    lower_bound_probe_dists[candidate_size] = item.lower_bound;
-                    lower_bounds[candidate_size] = item.lower_bound;
-                    filter_inner_products[candidate_size] = item.filter_inner_product;
-                    ++candidate_size;
-                }
-                continue;
-            }
+    for (const auto& item : *rabitq_lower_bound_candidates) {
+        const auto [iter, inserted] = merged_ids.emplace(item.id, candidate_size);
+        if (inserted) {
+            all_ids[candidate_size] = item.id;
+            lower_bound_probe_dists[candidate_size] = item.lower_bound;
+            lower_bounds[candidate_size] = item.lower_bound;
+            filter_inner_products[candidate_size] = item.filter_inner_product;
+            full_distances[candidate_size] = item.full_distance;
+            ++candidate_size;
+            continue;
+        }
 
-            const auto [iter, inserted] = fused_merged_ids.emplace(item.id, candidate_size);
-            if (inserted) {
-                all_ids[candidate_size] = item.id;
-                lower_bound_probe_dists[candidate_size] = item.lower_bound;
-                lower_bounds[candidate_size] = item.lower_bound;
-                filter_inner_products[candidate_size] = item.filter_inner_product;
-                full_distances[candidate_size] = item.full_distance;
-                ++candidate_size;
-                continue;
-            }
-
-            const auto idx = iter->second;
-            if (has_valid_distance(item.lower_bound) and
-                (not has_valid_distance(lower_bounds[idx]) or
-                 item.lower_bound < lower_bounds[idx])) {
-                lower_bound_probe_dists[idx] = item.lower_bound;
-                lower_bounds[idx] = item.lower_bound;
-            }
-            if (not IsFiniteRaBitQValue(filter_inner_products[idx]) and
-                IsFiniteRaBitQValue(item.filter_inner_product)) {
-                filter_inner_products[idx] = item.filter_inner_product;
-            }
-            if (not has_valid_distance(full_distances[idx]) and
-                has_valid_distance(item.full_distance)) {
-                full_distances[idx] = item.full_distance;
-            }
+        const auto idx = iter->second;
+        if (has_valid_distance(item.lower_bound) and
+            (not has_valid_distance(lower_bounds[idx]) or item.lower_bound < lower_bounds[idx])) {
+            lower_bound_probe_dists[idx] = item.lower_bound;
+            lower_bounds[idx] = item.lower_bound;
+        }
+        if (not IsFiniteRaBitQValue(filter_inner_products[idx]) and
+            IsFiniteRaBitQValue(item.filter_inner_product)) {
+            filter_inner_products[idx] = item.filter_inner_product;
+        }
+        if (not has_valid_distance(full_distances[idx]) and
+            has_valid_distance(item.full_distance)) {
+            full_distances[idx] = item.full_distance;
         }
     }
     const uint64_t hinted_candidate_size = candidate_size;
@@ -595,10 +542,7 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
     const auto* candidate_result = input == nullptr ? nullptr : input->GetData();
     for (uint64_t i = 0; i < heap_candidate_size; ++i) {
         const auto id = candidate_result[i].second;
-        const bool inserted = accepts_full_distance_hints
-                                  ? fused_merged_ids.emplace(id, candidate_size).second
-                                  : legacy_merged_ids.insert(id).second;
-        if (inserted) {
+        if (merged_ids.emplace(id, candidate_size).second) {
             all_ids[candidate_size++] = id;
         }
     }
@@ -606,9 +550,7 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
     ComputerInterfacePtr computer{nullptr};
     const auto ensure_computer = [&]() -> const ComputerInterfacePtr& {
         if (computer == nullptr) {
-            computer = fused_graph_ != nullptr and split_codes != nullptr
-                           ? split_codes->FactoryFusedComputer(query)
-                           : flatten_->FactoryComputer(query);
+            computer = split_codes->FactoryFusedComputer(query);
         }
         return computer;
     };
@@ -617,13 +559,14 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
     if (unhinted_candidate_size > 0) {
         add_reorder_lower_bound_probe_count(ctx, unhinted_candidate_size);
         ScopedDistancePhase scoped_phase(ctx, DistanceEvaluationPhase::RERANK);
-        QueryLowerBound(lower_bound_probe_dists.data() + hinted_candidate_size,
-                        lower_bounds.data() + hinted_candidate_size,
-                        filter_inner_products.data() + hinted_candidate_size,
-                        ensure_computer(),
-                        all_ids.data() + hinted_candidate_size,
-                        unhinted_candidate_size,
-                        &ctx);
+        QueryFusedLowerBound(lower_bound_probe_dists.data() + hinted_candidate_size,
+                             lower_bounds.data() + hinted_candidate_size,
+                             filter_inner_products.data() + hinted_candidate_size,
+                             split_codes,
+                             ensure_computer(),
+                             all_ids.data() + hinted_candidate_size,
+                             unhinted_candidate_size,
+                             &ctx);
     }
 
     topk = std::min(topk, static_cast<int64_t>(candidate_size));
@@ -679,36 +622,51 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
         }
     }
 
-    if (not lower_bounds_available) {
-        Vector<InnerIdType> missing_ids(candidate_size, query_allocator);
-        Vector<float> missing_hints(candidate_size, query_allocator);
-        Vector<float> missing_dists(candidate_size, query_allocator);
-        Vector<uint64_t> missing_indices(candidate_size, query_allocator);
-        uint64_t missing_count = 0;
-        for (uint64_t i = 0; i < candidate_size; ++i) {
-            if (has_valid_distance(full_distances[i])) {
-                continue;
+    constexpr uint64_t batch_size = 256;
+    const uint64_t missing_buffer_size = lower_bounds_available ? batch_size : candidate_size;
+    Vector<InnerIdType> missing_ids(missing_buffer_size, query_allocator);
+    Vector<float> missing_hints(missing_buffer_size, query_allocator);
+    Vector<float> missing_dists(missing_buffer_size, query_allocator);
+    Vector<uint64_t> missing_positions(missing_buffer_size, query_allocator);
+
+    const auto compute_missing_full_distances =
+        [&](const uint64_t* indices, uint64_t count, float* output) {
+            uint64_t missing_count = 0;
+            for (uint64_t i = 0; i < count; ++i) {
+                const auto idx = indices == nullptr ? i : indices[i];
+                if (has_valid_distance(full_distances[idx])) {
+                    output[i] = full_distances[idx];
+                    continue;
+                }
+                missing_ids[missing_count] = all_ids[idx];
+                missing_hints[missing_count] = filter_inner_products[idx];
+                missing_positions[missing_count] = i;
+                ++missing_count;
             }
-            missing_ids[missing_count] = all_ids[i];
-            missing_hints[missing_count] = filter_inner_products[i];
-            missing_indices[missing_count] = i;
-            ++missing_count;
-        }
-        if (missing_count > 0) {
+            if (missing_count == 0) {
+                return;
+            }
             add_reorder_distance_count(ctx, missing_count);
             {
                 ScopedDistancePhase scoped(ctx, DistanceEvaluationPhase::RERANK);
-                QueryFullWithHint(missing_dists.data(),
-                                  missing_hints.data(),
-                                  ensure_computer(),
-                                  missing_ids.data(),
-                                  missing_count,
-                                  &ctx);
+                QueryFusedFullWithHint(missing_dists.data(),
+                                       missing_hints.data(),
+                                       split_codes,
+                                       ensure_computer(),
+                                       missing_ids.data(),
+                                       missing_count,
+                                       &ctx);
             }
             for (uint64_t i = 0; i < missing_count; ++i) {
-                full_distances[missing_indices[i]] = missing_dists[i];
+                const auto position = missing_positions[i];
+                const auto idx = indices == nullptr ? position : indices[position];
+                output[position] = missing_dists[i];
+                full_distances[idx] = missing_dists[i];
             }
-        }
+        };
+
+    if (not lower_bounds_available) {
+        compute_missing_full_distances(nullptr, candidate_size, full_distances.data());
         for (uint64_t i = 0; i < candidate_size; ++i) {
             push_full_distance(i, full_distances[i]);
         }
@@ -721,47 +679,8 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
         return lower_bounds[lhs] < lower_bounds[rhs];
     });
 
-    constexpr uint64_t batch_size = 256;
     Vector<float> batch_dists(batch_size, query_allocator);
     Vector<uint64_t> batch_indices(batch_size, query_allocator);
-    Vector<InnerIdType> missing_ids(batch_size, query_allocator);
-    Vector<float> missing_hints(batch_size, query_allocator);
-    Vector<float> missing_dists(batch_size, query_allocator);
-    Vector<uint64_t> missing_positions(batch_size, query_allocator);
-
-    const auto compute_missing_full_distances = [&](uint64_t batch_count) {
-        uint64_t missing_count = 0;
-        for (uint64_t i = 0; i < batch_count; ++i) {
-            const auto idx = batch_indices[i];
-            if (has_valid_distance(full_distances[idx])) {
-                batch_dists[i] = full_distances[idx];
-                continue;
-            }
-            missing_ids[missing_count] = all_ids[idx];
-            missing_hints[missing_count] = filter_inner_products[idx];
-            missing_positions[missing_count] = i;
-            ++missing_count;
-        }
-        if (missing_count == 0) {
-            return;
-        }
-        add_reorder_distance_count(ctx, missing_count);
-        {
-            ScopedDistancePhase scoped(ctx, DistanceEvaluationPhase::RERANK);
-            QueryFullWithHint(missing_dists.data(),
-                              missing_hints.data(),
-                              ensure_computer(),
-                              missing_ids.data(),
-                              missing_count,
-                              &ctx);
-        }
-        for (uint64_t i = 0; i < missing_count; ++i) {
-            const auto position = missing_positions[i];
-            const auto idx = batch_indices[position];
-            batch_dists[position] = missing_dists[i];
-            full_distances[idx] = missing_dists[i];
-        }
-    };
 
     // Seed the exact threshold with every full distance produced during traversal.  Missing
     // candidates then load their supplement only while their lower bound can still enter top-k.
@@ -807,7 +726,7 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
             break;
         }
 
-        compute_missing_full_distances(batch_count);
+        compute_missing_full_distances(batch_indices.data(), batch_count, batch_dists.data());
         for (uint64_t i = 0; i < batch_count; ++i) {
             push_full_distance(batch_indices[i], batch_dists[i]);
         }
@@ -826,7 +745,7 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
             if (batch_count == 0) {
                 continue;
             }
-            compute_missing_full_distances(batch_count);
+            compute_missing_full_distances(batch_indices.data(), batch_count, batch_dists.data());
             for (uint64_t i = 0; i < batch_count; ++i) {
                 const auto idx = batch_indices[i];
                 if (ctx.reasoning_ctx != nullptr) {
