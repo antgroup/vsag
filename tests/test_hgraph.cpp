@@ -1702,6 +1702,39 @@ HGRAPH_PR_DAILY_CASE("HGraph Search with Dirty Vector",
                      "[ft][search][hgraph]",
                      TestHGraphSearchWithDirtyVector)
 
+TEST_CASE("HGraph build tolerates empty non-finite graph probes",
+          "[ft][hgraph][build][nonfinite]") {
+    const auto params = R"({
+        "dtype":"float32", "metric_type":"l2", "dim":64,
+        "index_param":{"base_quantization_type":"fp32","max_degree":16,
+        "ef_construction":32,"use_reorder":false}
+    })";
+    auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+    constexpr int64_t count = 128;
+    std::vector<float> vectors(count * 64, std::numeric_limits<float>::quiet_NaN());
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto base = vsag::Dataset::Make();
+    base->NumElements(count)
+        ->Dim(64)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    std::iota(ids.begin(), ids.end(), count);
+    REQUIRE(index->Add(base).has_value());
+
+    std::vector<float> query_vector(64, 0.0F);
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(64)->Float32Vectors(query_vector.data())->Owner(false);
+    for (uint64_t i = 0; i < 4; ++i) {
+        auto result = index->KnnSearch(query, 1, R"({"hgraph":{"ef_search":8}})");
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 0);
+    }
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
                              "HGraph Search with Sparse Vector",
                              "[ft][concurrent][hgraph]") {

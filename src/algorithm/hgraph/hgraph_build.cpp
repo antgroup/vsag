@@ -467,7 +467,9 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     for (auto j = this->route_graphs_.size() - 1; j > level; --j) {
         result = search_one_graph(
             data, route_graphs_[j], flatten_codes, param, (VisitedListPtr) nullptr, nullptr);
-        param.ep = result->Top().second;
+        if (not result->Empty()) {
+            param.ep = result->Top().second;
+        }
     }
 
     param.ef = this->ef_construct_;
@@ -500,13 +502,17 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
             }
         }
         LockGuard cur_lock(neighbors_mutex_, inner_id);
-        mutually_connect_new_element(inner_id,
-                                     filtered_result,
-                                     this->bottom_graph_,
-                                     flatten_codes,
-                                     neighbors_mutex_,
-                                     allocator_,
-                                     alpha_);
+        if (not filtered_result->Empty()) {
+            mutually_connect_new_element(inner_id,
+                                         filtered_result,
+                                         this->bottom_graph_,
+                                         flatten_codes,
+                                         neighbors_mutex_,
+                                         allocator_,
+                                         alpha_);
+        } else {
+            bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
+        }
     } else {
         LockGuard cur_lock(neighbors_mutex_, inner_id);
         bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
@@ -530,13 +536,17 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
                 }
             }
             LockGuard cur_lock(neighbors_mutex_, inner_id);
-            mutually_connect_new_element(inner_id,
-                                         filtered_result,
-                                         route_graphs_[j],
-                                         flatten_codes,
-                                         neighbors_mutex_,
-                                         allocator_,
-                                         alpha_);
+            if (not filtered_result->Empty()) {
+                mutually_connect_new_element(inner_id,
+                                             filtered_result,
+                                             route_graphs_[j],
+                                             flatten_codes,
+                                             neighbors_mutex_,
+                                             allocator_,
+                                             alpha_);
+            } else {
+                route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
+            }
         } else {
             LockGuard cur_lock(neighbors_mutex_, inner_id);
             route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
