@@ -40,8 +40,18 @@ FlattenReorder::QueryLowerBound(float* distances,
                                 QueryContext* ctx) const {
     auto* split_codes = dynamic_cast<RaBitQSplitDataCellInterface*>(flatten_.get());
     if (fused_graph_ == nullptr or split_codes == nullptr) {
-        flatten_->QueryWithDistanceLowerBoundAndFilterIP(
-            distances, lower_bounds, filter_inner_products, computer, ids, count, ctx);
+        if (split_codes != nullptr) {
+            split_codes->QueryWithDistanceLowerBoundAndFilterIP(
+                distances, lower_bounds, filter_inner_products, computer, ids, count, ctx);
+        } else {
+            flatten_->QueryWithDistanceLowerBound(
+                distances, lower_bounds, computer, ids, count, ctx);
+            if (filter_inner_products != nullptr) {
+                std::fill(filter_inner_products,
+                          filter_inner_products + count,
+                          std::numeric_limits<float>::quiet_NaN());
+            }
+        }
         return;
     }
     uint32_t fallback_count = 0;
@@ -87,8 +97,12 @@ FlattenReorder::QueryFullWithHint(float* distances,
                                   QueryContext* ctx) const {
     auto* split_codes = dynamic_cast<RaBitQSplitDataCellInterface*>(flatten_.get());
     if (fused_graph_ == nullptr or split_codes == nullptr) {
-        flatten_->QueryWithFilterIPHint(
-            distances, filter_inner_products, computer, ids, count, ctx);
+        if (split_codes != nullptr) {
+            split_codes->QueryWithFilterIPHint(
+                distances, filter_inner_products, computer, ids, count, ctx);
+        } else {
+            flatten_->Query(distances, computer, ids, count, ctx);
+        }
         return;
     }
     uint32_t hint_full_count = 0;

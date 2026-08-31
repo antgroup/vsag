@@ -103,6 +103,23 @@ public:
     virtual bool
     DecodeFusedById(InnerIdType id, float* data) const = 0;
 
+    virtual void
+    QueryWithDistanceLowerBoundAndFilterIP(float* result_dists,
+                                           float* lower_bounds,
+                                           float* filter_inner_products,
+                                           const ComputerInterfacePtr& computer,
+                                           const InnerIdType* idx,
+                                           InnerIdType id_count,
+                                           QueryContext* ctx = nullptr) = 0;
+
+    virtual void
+    QueryWithFilterIPHint(float* result_dists,
+                          const float* filter_inner_products,
+                          const ComputerInterfacePtr& computer,
+                          const InnerIdType* idx,
+                          InnerIdType id_count,
+                          QueryContext* ctx = nullptr) = 0;
+
     virtual bool
     ComputeOneBitWithFilterIP(const ComputerInterfacePtr& computer,
                               const uint8_t* one_bit_code,

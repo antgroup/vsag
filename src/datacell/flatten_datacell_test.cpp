@@ -585,13 +585,13 @@ TEST_CASE("RaBitQSplitDataCell native fused bit splits", "[ut][RaBitQSplitDataCe
                 float queried_distance = std::numeric_limits<float>::max();
                 float queried_lower_bound = std::numeric_limits<float>::max();
                 float queried_filter_ip = std::numeric_limits<float>::quiet_NaN();
-                flatten->QueryWithDistanceLowerBoundAndFilterIP(&queried_distance,
-                                                                &queried_lower_bound,
-                                                                &queried_filter_ip,
-                                                                computer,
-                                                                &query_id,
-                                                                1,
-                                                                &no_reorder_context);
+                split->QueryWithDistanceLowerBoundAndFilterIP(&queried_distance,
+                                                              &queried_lower_bound,
+                                                              &queried_filter_ip,
+                                                              computer,
+                                                              &query_id,
+                                                              1,
+                                                              &no_reorder_context);
                 REQUIRE(queried_distance == coarse_distance);
                 REQUIRE(queried_lower_bound == coarse_distance);
                 REQUIRE(IsNaNBitPattern(queried_filter_ip));
