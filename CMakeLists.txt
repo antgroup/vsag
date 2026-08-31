@@ -40,7 +40,7 @@ include (cmake/VSAGCompilerConfig.cmake)        # Compiler, ABI, sanitizer, and 
 include (cmake/VSAGSystemDeps.cmake)            # System dependency discovery.
 include (cmake/DarwinDep.cmake)                 # macOS-specific dependency handling.
 include (cmake/VSAGExternalProjectConfig.cmake) # Shared ExternalProject flags and env.
-include (cmake/VSAGThirdParty.cmake)            # Third-party dependency declarations.
+vsag_include_without_directory_options (cmake/VSAGThirdParty.cmake) # Third-party dependencies.
 include (cmake/VSAGDependencyTargets.cmake)     # Shared interface/header dependency targets.
 include (cmake/VSAGVersion.cmake)               # Resolve VSAG_VERSION_{MAJOR,MINOR,PATCH}.
 
