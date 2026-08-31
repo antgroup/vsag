@@ -68,6 +68,10 @@ PyramidParameters::FromJson(const JsonType& json) {
     if (json.Contains(SUPPORT_DUPLICATE)) {
         this->support_duplicate = json[SUPPORT_DUPLICATE].GetBool();
     }
+
+    if (json.Contains(PYRAMID_STORE_PATHS_KEY)) {
+        this->store_paths = json[PYRAMID_STORE_PATHS_KEY].GetBool();
+    }
 }
 JsonType
 PyramidParameters::ToJson() const {
@@ -87,6 +91,7 @@ PyramidParameters::ToJson() const {
     json[USE_REORDER_KEY].SetBool(this->use_reorder);
     json[INDEX_MIN_SIZE].SetInt(index_min_size);
     json[SUPPORT_DUPLICATE].SetBool(support_duplicate);
+    json[PYRAMID_STORE_PATHS_KEY].SetBool(store_paths);
     if (this->use_reorder) {
         json[PRECISE_CODES_KEY].SetJson(precise_codes_param->ToJson());
     }
@@ -141,6 +146,11 @@ PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
     if (this->support_duplicate != pyramid_param->support_duplicate) {
         logger::error(
             "PyramidParameters::CheckCompatibility: support_duplicate are not compatible");
+        return false;
+    }
+
+    if (this->store_paths != pyramid_param->store_paths) {
+        logger::error("PyramidParameters::CheckCompatibility: store_paths are not compatible");
         return false;
     }
 

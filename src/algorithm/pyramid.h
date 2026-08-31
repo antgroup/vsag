@@ -27,6 +27,7 @@
 #include "index_feature_list.h"
 #include "inner_index_interface.h"
 #include "io/memory_io_parameter.h"
+#include "pyramid_path_store.h"
 #include "pyramid_zparameters.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "query_context.h"
@@ -103,11 +104,15 @@ public:
           ef_construction_(pyramid_param->ef_construction),
           max_degree_(pyramid_param->max_degree),
           index_min_size_(pyramid_param->index_min_size),
-          graph_type_(pyramid_param->graph_type) {
+          graph_type_(pyramid_param->graph_type),
+          store_paths_(pyramid_param->store_paths) {
         label_table_->compress_duplicate_data_ = pyramid_param->support_duplicate;
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
         root_ =
             std::make_shared<IndexNode>(allocator_, pyramid_param->graph_param, index_min_size_);
+        if (store_paths_) {
+            path_store_ = std::make_unique<PyramidPathStore>(allocator_);
+        }
         points_mutex_ = std::make_shared<PointsMutex>(max_capacity_, allocator_);
         searcher_ = std::make_unique<BasicSearcher>(common_param, points_mutex_);
         no_build_levels_.assign(pyramid_param->no_build_levels.begin(),
@@ -136,6 +141,11 @@ public:
 
     DatasetPtr
     CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override;
+
+    DatasetPtr
+    GetDataByIdsWithFlag(const int64_t* ids,
+                         int64_t count,
+                         uint64_t selected_data_flag) const override;
 
     void
     Deserialize(StreamReader& reader) override;
@@ -193,6 +203,12 @@ private:
     void
     check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_param,
                               const IndexCommonParam& common_param);
+
+    void
+    serialize_paths(StreamWriter& writer) const;
+
+    void
+    deserialize_paths(StreamReader& reader, uint64_t expected_count);
 
     void
     resize(int64_t new_max_capacity);
@@ -258,6 +274,8 @@ private:
     // static
     uint32_t index_min_size_{0};
     bool immutable_{false};
+    bool store_paths_{false};  // whether to retain paths for ID-based retrieval
+    std::unique_ptr<PyramidPathStore> path_store_{nullptr};
 };
 
 }  // namespace vsag

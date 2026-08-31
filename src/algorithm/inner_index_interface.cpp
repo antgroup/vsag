@@ -463,15 +463,25 @@ DatasetPtr
 InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
                                           int64_t count,
                                           uint64_t selected_data_flag) const {
+    Vector<InnerIdType> inner_ids(allocator_);
+    return this->get_data_by_ids_with_flag(ids, count, selected_data_flag, inner_ids);
+}
+
+DatasetPtr
+InnerIndexInterface::get_data_by_ids_with_flag(const int64_t* ids,
+                                               int64_t count,
+                                               uint64_t selected_data_flag,
+                                               Vector<InnerIdType>& inner_ids) const {
     if ((selected_data_flag & DATA_FLAG_FLOAT32_VECTOR) != 0U && not this->has_raw_vector_) {
         throw VsagException(ErrorType::INVALID_ARGUMENT, "has_raw_vector_ is false");
     }
-    auto* inner_ids =
-        reinterpret_cast<InnerIdType*>(this->allocator_->Allocate(count * sizeof(InnerIdType)));
+    CHECK_ARGUMENT(count >= 0, "count must not be negative");
+    inner_ids.clear();
+    inner_ids.reserve(static_cast<uint64_t>(count));
     {
         std::shared_lock lock(this->label_lookup_mutex_);
         for (int64_t i = 0; i < count; ++i) {
-            inner_ids[i] = this->label_table_->GetIdByLabel(ids[i]);
+            inner_ids.emplace_back(this->label_table_->GetIdByLabel(ids[i]));
         }
     }
     auto thread_count = static_cast<int64_t>(this->build_thread_count_);
@@ -484,8 +494,7 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
         dataset->Float32Vectors(fp32_data);
         auto get_vec_func = [&](int64_t begin, int64_t end) {
             for (int64_t i = begin; i < end; ++i) {
-                auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
-                this->GetVectorByInnerId(inner_id, fp32_data + i * this->dim_);
+                this->GetVectorByInnerId(inner_ids[i], fp32_data + i * this->dim_);
             }
         };
         if (this->thread_pool_ != nullptr) {
@@ -511,8 +520,7 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
         dataset->AttributeSets(attribute_data);
         auto get_attr_func = [&](int64_t begin, int64_t end) {
             for (int64_t i = begin; i < end; ++i) {
-                auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
-                this->GetAttributeSetByInnerId(inner_id, attribute_data + i);
+                this->GetAttributeSetByInnerId(inner_ids[i], attribute_data + i);
             }
         };
         if (this->thread_pool_ != nullptr) {
@@ -539,8 +547,8 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
         dataset->ExtraInfos(extra_info);
         auto get_extra_info_func = [&](int64_t begin, int64_t end) {
             for (int64_t i = begin; i < end; ++i) {
-                auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
-                this->extra_infos_->GetExtraInfoById(inner_id, extra_info + i * extra_info_size_);
+                this->extra_infos_->GetExtraInfoById(inner_ids[i],
+                                                     extra_info + i * extra_info_size_);
             }
         };
         if (this->thread_pool_ != nullptr) {
@@ -564,7 +572,6 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
         memcpy(new_ids, ids, count * sizeof(int64_t));
         dataset->Ids(new_ids);
     }
-    this->allocator_->Deallocate(inner_ids);
     return dataset;
 }
 

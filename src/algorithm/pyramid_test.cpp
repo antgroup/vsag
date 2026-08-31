@@ -211,11 +211,11 @@ TEST_CASE("Pyramid raw-vector capability does not imply stored raw data",
                        data_result.value()->GetIds() + requested_ids.size(),
                        requested_ids.begin()));
     REQUIRE(data_result.value()->GetFloat32Vectors() == nullptr);
-    REQUIRE_FALSE(index
-                      ->GetDataByIdsWithFlag(requested_ids.data(),
-                                             requested_ids.size(),
-                                             DATA_FLAG_ID | DATA_FLAG_FLOAT32_VECTOR)
-                      .has_value());
+    auto unavailable_raw = index->GetDataByIdsWithFlag(
+        requested_ids.data(), requested_ids.size(), DATA_FLAG_ID | DATA_FLAG_FLOAT32_VECTOR);
+    REQUIRE_FALSE(unavailable_raw.has_value());
+    REQUIRE(unavailable_raw.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(unavailable_raw.error().message == "has_raw_vector_ is false");
 
     std::array<float, PYRAMID_RAW_VECTOR_TEST_DIM> added_vector = {8.0F, 6.0F, 4.0F, 2.0F};
     std::array<int64_t, 1> added_id = {77};

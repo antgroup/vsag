@@ -51,6 +51,7 @@ enum class IndexType { HNSW, DISKANN, HGRAPH, IVF, PYRAMID, BRUTEFORCE, SPARSE, 
 #define DATA_FLAG_EXTRA_INFO 0x10
 #define DATA_FLAG_ATTRIBUTE 0x20
 #define DATA_FLAG_ID 0x40
+#define DATA_FLAG_PATH 0x80
 
 using OffsetType = uint64_t;
 using SizeType = uint64_t;
@@ -532,16 +533,17 @@ public:
     };
 
     /**
-     * @brief Retrieve all data associated with vectors identified by given IDs.
+     * @brief Retrieve selected data associated with vectors identified by given IDs.
      *
-     * This method fetches data stored with the vectors in the index
-     * (e.g., attributes, labels, or extra infos).
+     * This method fetches selected data stored with the vectors in the index
+     * (e.g., vectors, attributes, extra infos, IDs, or retained paths).
      *
      * @param ids Array of vector IDs for which extra information is requested.
      * @param count Number of IDs in the 'ids' array.
-     * @param selected_data_flag selected data flag, set with DATA_FLAG_*
+     * @param selected_data_flag Selected data flags, set with DATA_FLAG_*.
+     *        DATA_FLAG_PATH requests retained paths from indexes that support them.
      * @return tl::expected<DatasetPtr, Error>
-     *         - On success: A DatasetPtr containing the extra data, attribute and vector
+     *         - On success: A DatasetPtr containing the selected data fields
      *         - On failure: An error object (e.g., invalid ID, out of memory).
      * @throws std::runtime_error If the index implementation does not support this operation
      *            (default behavior for base class).
@@ -585,7 +587,7 @@ public:
     };
 
     /**
-     * @brief Retrieve all data associated with vectors identified by given IDs.
+     * @brief Retrieve the default data fields associated with vectors identified by given IDs.
      *
      * This method fetches data stored with the vectors in the index
      * (e.g., attributes, labels, or extra infos).
@@ -593,11 +595,12 @@ public:
      * @param ids Array of vector IDs for which extra information is requested.
      * @param count Number of IDs in the 'ids' array.
      * @return tl::expected<DatasetPtr, Error>
-     *         - On success: A DatasetPtr containing the extra data, attribute and vector
+     *         - On success: A DatasetPtr containing the implementation's default fields
      *         - On failure: An error object (e.g., invalid ID, out of memory).
      * @throws std::runtime_error If the index implementation does not support this operation
      *            (default behavior for base class).
-     * @note The default implementation returns all data which in current index
+     * @note The default implementation returns the standard data fields supported by the index.
+     *       Optional fields such as retained paths require an explicit data flag.
      */
     virtual tl::expected<DatasetPtr, Error>
     GetDataByIds(const int64_t* ids, int64_t count) const {

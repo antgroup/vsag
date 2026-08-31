@@ -97,6 +97,7 @@ main(int argc, char** argv) {
     // - "precise_quantization_type": The precise quantization codes
     // - "index_min_size": The minimum size required to build the index
     // - "support_duplicate": support for duplicate data in the index
+    // - "store_paths": retain paths for DATA_FLAG_PATH retrieval (disabled by default)
     auto pyramid_build_paramesters = R"(
     {
         "dtype": "float32",
@@ -109,6 +110,7 @@ main(int argc, char** argv) {
             "graph_iter_turn": 15,
             "neighbor_sample_rate": 0.2,
             "no_build_levels": [0, 1],
+            "store_paths": true,
             "use_reorder": true,
             "graph_type": "odescent",
             "build_thread_count": 16
@@ -125,6 +127,11 @@ main(int argc, char** argv) {
         std::cerr << "Failed to build index: " << build_result.error().message << std::endl;
         exit(-1);
     }
+
+    int64_t requested_ids[] = {1, 0};
+    auto restored = index->GetDataByIdsWithFlag(requested_ids, 2, DATA_FLAG_PATH).value();
+    std::cout << "Paths by id: " << restored->GetPaths()[0] << ", " << restored->GetPaths()[1]
+              << std::endl;
 
     /******************* KnnSearch For Pyramid Index *****************/
     auto query_path = new std::string[1];

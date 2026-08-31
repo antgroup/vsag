@@ -126,6 +126,7 @@ extern const char* const PYRAMID_PARAMETER_EF_SEARCH;
 extern const char* const PYRAMID_PARAMETER_SUBINDEX_EF_SEARCH;
 extern const char* const PYRAMID_NO_BUILD_LEVELS;
 extern const char* const PYRAMID_INDEX_MIN_SIZE;
+extern const char* const PYRAMID_STORE_PATHS;
 
 extern const char PART_SLASH;
 extern const char PART_BAR;

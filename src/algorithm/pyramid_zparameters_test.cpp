@@ -37,6 +37,7 @@ struct PyramidDefaultParam {
     std::string precise_file_path = "precise_path";
     uint32_t index_min_size = 1000;
     bool support_duplicate = false;
+    bool store_paths = false;
 };
 
 std::string
@@ -97,7 +98,8 @@ generate_pyramid(const PyramidDefaultParam& param) {
             "type": "pyramid",
             "use_reorder": {},
             "index_min_size": {},
-            "support_duplicate": {}
+            "support_duplicate": {},
+            "store_paths": {}
         }}
     )";
     return fmt::format(param_str,
@@ -117,7 +119,8 @@ generate_pyramid(const PyramidDefaultParam& param) {
                        param.precise_quantization_type,
                        param.use_reorder,
                        param.index_min_size,
-                       param.support_duplicate);
+                       param.support_duplicate,
+                       param.store_paths);
 }
 
 TEST_CASE("Pyramid Parameters Test", "[ut][PyramidParameters]") {
@@ -127,6 +130,12 @@ TEST_CASE("Pyramid Parameters Test", "[ut][PyramidParameters]") {
     auto param = std::make_shared<vsag::PyramidParameters>();
     param->FromJson(param_json);
     vsag::ParameterTest::TestToJson(param);
+    REQUIRE_FALSE(param->store_paths);
+
+    param_json["store_paths"].SetBool(true);
+    param->FromJson(param_json);
+    REQUIRE(param->store_paths);
+    REQUIRE(param->ToJson()["store_paths"].GetBool());
 }
 
 #define TEST_COMPATIBILITY_CASE(section_name, param_member, val1, val2, expect_compatible) \
@@ -178,4 +187,5 @@ TEST_CASE("Pyramid Parameters CheckCompatibility", "[ut][PyramidParameter][Check
         "different precise quantization type", precise_quantization_type, "fp32", "fp16", false);
     TEST_COMPATIBILITY_CASE("different index min size", index_min_size, 500, 1500, false);
     TEST_COMPATIBILITY_CASE("different support duplicate", support_duplicate, false, true, false);
+    TEST_COMPATIBILITY_CASE("different store paths", store_paths, false, true, false);
 }

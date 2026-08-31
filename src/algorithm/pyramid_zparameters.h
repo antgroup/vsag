@@ -56,6 +56,7 @@ public:
     uint32_t index_min_size{0};
 
     bool support_duplicate{false};
+    bool store_paths{false};
 };
 
 class PyramidSearchParameters : public IndexSearchParameter {

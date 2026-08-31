@@ -225,6 +225,13 @@ Pyramid::build_by_odescent(const DatasetPtr& base) {
     if (create_new_raw_vector_) {
         raw_vector_->BatchInsertVector(data_vectors, data_num);
     }
+    if (store_paths_) {
+        auto writer = path_store_->AcquireWriter();
+        writer.EnsureSlots(static_cast<uint64_t>(data_num));
+        for (uint64_t offset = 0; offset < static_cast<uint64_t>(data_num); ++offset) {
+            writer.Insert(static_cast<InnerIdType>(offset), path[offset]);
+        }
+    }
     auto codes = use_reorder_ ? precise_codes_ : base_codes_;
 
     ODescent graph_builder(odescent_param_, codes, allocator_, this->thread_pool_.get());
@@ -433,9 +440,16 @@ Pyramid::Serialize(StreamWriter& writer) const {
     }
     root_->Serialize(writer);
 
+    if (store_paths_) {
+        serialize_paths(writer);
+    }
+
     // serialize footer (introduced since v0.15)
     JsonType basic_info;
     basic_info["max_capacity"].SetInt(max_capacity_);
+    if (store_paths_) {
+        basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
+    }
     auto metadata = std::make_shared<Metadata>();
     metadata->Set(BASIC_INFO, basic_info);
     auto footer = std::make_shared<Footer>(metadata);
@@ -449,6 +463,16 @@ Pyramid::Deserialize(StreamReader& reader) {
     auto metadata = footer->GetMetadata();
     auto basic_info = metadata->Get(BASIC_INFO);
     auto max_capacity = basic_info["max_capacity"].GetInt();
+    bool serialized_store_paths = false;
+    if (basic_info.Contains(INDEX_PARAM)) {
+        const auto param_json = JsonType::Parse(basic_info[INDEX_PARAM].GetString());
+        serialized_store_paths = param_json.Contains(PYRAMID_STORE_PATHS_KEY) &&
+                                 param_json[PYRAMID_STORE_PATHS_KEY].GetBool();
+    }
+    if (serialized_store_paths != store_paths_) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "serialized Pyramid store_paths does not match config");
+    }
 
     BufferStreamReader buffer_reader(
         &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
@@ -463,6 +487,10 @@ Pyramid::Deserialize(StreamReader& reader) {
     }
     cur_element_count_ = base_codes_->TotalCount();
     root_->Deserialize(buffer_reader);
+
+    if (store_paths_) {
+        deserialize_paths(buffer_reader, static_cast<uint64_t>(cur_element_count_));
+    }
     resize(max_capacity);
     this->current_memory_usage_ = static_cast<int64_t>(this->CalSerializeSize());
 }
@@ -495,6 +523,7 @@ Pyramid::Add(const DatasetPtr& base) {
     const auto* data_ids = base->GetIds();
     std::vector<int64_t> failed_ids;
     Vector<int64_t> data_biases(allocator_);
+    Vector<InnerIdType> accepted_inner_ids(allocator_);
     int64_t local_cur_element_count = 0;
     {
         std::lock_guard lock(cur_element_count_mutex_);
@@ -509,21 +538,26 @@ Pyramid::Add(const DatasetPtr& base) {
             resize(new_capacity);
         }
         int64_t valid_id_count = 0;
+        if (store_paths_) {
+            accepted_inner_ids.reserve(data_num);
+        }
         for (int64_t i = 0; i < data_num; ++i) {
             if (not label_table_->CheckLabel(data_ids[i])) {
-                label_table_->Insert(valid_id_count + local_cur_element_count, data_ids[i]);
-                base_codes_->InsertVector(data_vectors + dim_ * i,
-                                          valid_id_count + local_cur_element_count);
+                const auto inner_id =
+                    static_cast<InnerIdType>(valid_id_count + local_cur_element_count);
+                label_table_->Insert(inner_id, data_ids[i]);
+                base_codes_->InsertVector(data_vectors + dim_ * i, inner_id);
                 if (use_reorder_) {
-                    precise_codes_->InsertVector(data_vectors + dim_ * i,
-                                                 valid_id_count + local_cur_element_count);
+                    precise_codes_->InsertVector(data_vectors + dim_ * i, inner_id);
                 }
                 if (create_new_raw_vector_) {
-                    raw_vector_->InsertVector(data_vectors + dim_ * i,
-                                              valid_id_count + local_cur_element_count);
+                    raw_vector_->InsertVector(data_vectors + dim_ * i, inner_id);
                 }
                 valid_id_count++;
                 data_biases.push_back(i);
+                if (store_paths_) {
+                    accepted_inner_ids.push_back(inner_id);
+                }
             } else {
                 logger::warn("Label {} already exists, skip adding.", data_ids[i]);
                 failed_ids.push_back(data_ids[i]);
@@ -568,6 +602,13 @@ Pyramid::Add(const DatasetPtr& base) {
     if (this->thread_pool_ != nullptr) {
         for (auto& future : futures) {
             future.get();
+        }
+    }
+    if (store_paths_ && not accepted_inner_ids.empty()) {
+        auto writer = path_store_->AcquireWriter();
+        writer.EnsureSlots(static_cast<uint64_t>(accepted_inner_ids.back()) + 1);
+        for (uint64_t offset = 0; offset < data_biases.size(); ++offset) {
+            writer.Insert(accepted_inner_ids[offset], path[data_biases[offset]]);
         }
     }
     return failed_ids;
@@ -642,6 +683,9 @@ Pyramid::InitFeatures() {
     if (can_decode_exact_vector || raw_vector_ != nullptr) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
     }
+    if (store_paths_) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_DATA_BY_IDS);
+    }
 }
 
 static const std::string HGRAPH_PARAMS_TEMPLATE =
@@ -713,7 +757,8 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         "{EF_CONSTRUCTION_KEY}": 400,
         "{NO_BUILD_LEVELS}":[],
         "{INDEX_MIN_SIZE}": 0,
-        "{SUPPORT_DUPLICATE}": false
+        "{SUPPORT_DUPLICATE}": false,
+        "{PYRAMID_STORE_PATHS_KEY}": false
     })";
 
 ParamPtr
@@ -751,7 +796,8 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
         {ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
          {GRAPH_KEY, ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE}},
         {PYRAMID_INDEX_MIN_SIZE, {INDEX_MIN_SIZE}},
-        {PYRAMID_SUPPORT_DUPLICATE, {SUPPORT_DUPLICATE}}};
+        {PYRAMID_SUPPORT_DUPLICATE, {SUPPORT_DUPLICATE}},
+        {PYRAMID_STORE_PATHS, {PYRAMID_STORE_PATHS_KEY}}};
 
     std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);
     auto inner_json = JsonType::Parse(str);
