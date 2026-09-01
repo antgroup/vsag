@@ -1343,22 +1343,8 @@ RaBitQuantizer<metric>::ComputeDistWithOneBitLowerBoundAndFilterIP(
     float filter_ip_yu_q = 0.0F;
     norm_type base_norm_code = 0.0F;
     if (FilterBits() == 1) {
-        if (HasFourBitTraversalQuery(computer)) {
-            const auto packed_ip = RaBitQSQ4UBinaryIPWithBaseSum(
-                computer.auxiliary_codes_.data(), one_bit_code, this->dim_);
-            const auto raw_ip = static_cast<uint32_t>(packed_ip);
-            const auto base_sum = static_cast<uint32_t>(packed_ip >> 32U);
-            filter_ip_estimate = recover_dist_between_sq4u_and_fp32(raw_ip,
-                                                                    static_cast<float>(base_sum),
-                                                                    computer.auxiliary_sum_,
-                                                                    computer.auxiliary_lower_bound_,
-                                                                    computer.auxiliary_delta_,
-                                                                    inv_sqrt_d_,
-                                                                    this->dim_);
-        } else {
-            filter_ip_estimate = RaBitQFloatBinaryIP(
-                reinterpret_cast<const float*>(query), one_bit_code, this->dim_, inv_sqrt_d_);
-        }
+        filter_ip_estimate = RaBitQFloatBinaryIP(
+            reinterpret_cast<const float*>(query), one_bit_code, this->dim_, inv_sqrt_d_);
     } else {
         sum_type query_raw_sum = *((sum_type*)(query + query_offset_sum_));
         memcpy(
@@ -1386,8 +1372,7 @@ RaBitQuantizer<metric>::ComputeDistWithOneBitLowerBoundAndFilterIP(
                 ip_obar_q(filter_ip_yu_q, query_raw_sum, base_norm_code, FilterBits());
         }
     }
-    // The x=1 traversal value may come from the SQ4 coarse kernel. This API does not carry a
-    // precision tag, so never expose an x=1 value as a reusable exact inner-product hint.
+    // The x=1 path does not expose a reusable inner-product hint.
     if (filter_inner_product != nullptr and FilterBits() >= 2) {
         *filter_inner_product = filter_ip_estimate;
     }
@@ -1505,18 +1490,6 @@ RaBitQuantizer<metric>::ComputeDistsWithOneBitLowerBoundBatch4(
             computer, one_bit_code4, &dist4, lower_bound4, runtime_rabitq_error_rate);
         return;
     }
-    if (FilterBits() == 1 and HasFourBitTraversalQuery(computer)) {
-        computed1 = this->ComputeDistWithOneBitLowerBound(
-            computer, one_bit_code1, &dist1, lower_bound1, runtime_rabitq_error_rate);
-        computed2 = this->ComputeDistWithOneBitLowerBound(
-            computer, one_bit_code2, &dist2, lower_bound2, runtime_rabitq_error_rate);
-        computed3 = this->ComputeDistWithOneBitLowerBound(
-            computer, one_bit_code3, &dist3, lower_bound3, runtime_rabitq_error_rate);
-        computed4 = this->ComputeDistWithOneBitLowerBound(
-            computer, one_bit_code4, &dist4, lower_bound4, runtime_rabitq_error_rate);
-        return;
-    }
-
     const auto* query = computer.buf_;
     const auto* query_data = reinterpret_cast<const float*>(query);
     const norm_type query_norm = *((norm_type*)(query + query_offset_norm_));
@@ -2283,55 +2256,6 @@ RaBitQuantizer<metric>::RecoverOrderSQ(const uint8_t* output, uint8_t* input) co
             input[input_byte_i] |= (bit_value << input_bit_i);
         }
     }
-}
-
-template <MetricType metric>
-void
-RaBitQuantizer<metric>::PrepareFourBitTraversalQuery(const float* normalized_query,
-                                                     Computer<RaBitQuantizer>& computer) const {
-    constexpr uint32_t k_query_bits = 4;
-    constexpr uint32_t k_ex_bits = k_query_bits - 1;
-    constexpr uint32_t k_ex_mask = (1U << k_ex_bits) - 1U;
-    constexpr float k_center = 7.5F;
-    const uint64_t plane_bytes = PlaneBytes();
-    computer.auxiliary_codes_.assign(k_query_bits * plane_bytes, 0);
-
-    const float query_scale = 3.21F * std::sqrt(static_cast<float>(this->dim_));
-    float reconstruction_ip = 0.0F;
-    float reconstruction_norm_sqr = 0.0F;
-    float query_sum = 0.0F;
-    for (uint64_t i = 0; i < this->dim_; ++i) {
-        CHECK_ARGUMENT(IsFiniteRaBitQValue(normalized_query[i]),
-                       "RaBitQ query must contain only finite values");
-        auto magnitude =
-            static_cast<uint32_t>(query_scale * std::fabs(normalized_query[i]) + 1e-5F);
-        magnitude = std::min(magnitude, k_ex_mask);
-        const auto supplement = normalized_query[i] < 0.0F ? k_ex_mask - magnitude : magnitude;
-        const auto quantized = static_cast<uint8_t>(
-            supplement | (static_cast<uint32_t>(normalized_query[i] > 0.0F) << k_ex_bits));
-        const float centered = static_cast<float>(quantized) - k_center;
-        reconstruction_ip += normalized_query[i] * centered;
-        reconstruction_norm_sqr += centered * centered;
-        query_sum += static_cast<float>(quantized);
-        for (uint32_t bit = 0; bit < k_query_bits; ++bit) {
-            if ((quantized & (1U << bit)) != 0U) {
-                computer.auxiliary_codes_[static_cast<uint64_t>(bit) * plane_bytes + i / 8] |=
-                    static_cast<uint8_t>(1U << (i & 7));
-            }
-        }
-    }
-    const float delta =
-        reconstruction_norm_sqr > 0.0F ? reconstruction_ip / reconstruction_norm_sqr : 0.0F;
-    computer.auxiliary_lower_bound_ = -k_center * delta;
-    computer.auxiliary_delta_ = delta;
-    computer.auxiliary_sum_ = query_sum;
-}
-
-template <MetricType metric>
-bool
-RaBitQuantizer<metric>::HasFourBitTraversalQuery(const Computer<RaBitQuantizer>& computer) const {
-    return FilterBits() == 1 and num_bits_per_dim_query_ == 32 and
-           computer.auxiliary_codes_.size() == 4 * PlaneBytes();
 }
 
 template <MetricType metric>
@@ -3143,12 +3067,6 @@ RaBitQuantizer<metric>::ProcessTransformedFusedQuery(const float* transformed_qu
     Vector<float> normed_data(this->dim_, 0, this->allocator_);
     const float query_norm =
         NormalizeWithCentroid(transformed_query, centroid_.data(), normed_data.data(), this->dim_);
-
-    if (SupportSplitCodeStorage() and FilterBits() == 1 and num_bits_per_dim_query_ == 32) {
-        PrepareFourBitTraversalQuery(normed_data.data(), computer);
-    } else {
-        computer.auxiliary_codes_.clear();
-    }
 
     if (num_bits_per_dim_query_ == 4) {
         Vector<uint8_t> quantized_data(this->dim_, 0, this->allocator_);

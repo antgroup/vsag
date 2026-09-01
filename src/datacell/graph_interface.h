@@ -225,12 +225,6 @@ public:
         return {};
     }
 
-    [[nodiscard]] bool
-    AnyDuplicateId(InnerIdType id,
-                   const DuplicateInterface::DuplicateIdPredicate& predicate) const {
-        return duplicate_tracker_ != nullptr and duplicate_tracker_->AnyDuplicateId(id, predicate);
-    }
-
     [[nodiscard]] InnerIdType
     GetGroupId(InnerIdType id) const {
         if (duplicate_tracker_) {

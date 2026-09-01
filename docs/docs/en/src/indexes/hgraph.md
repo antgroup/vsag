@@ -78,7 +78,7 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `fast_encode_rabitq` | bool | `true` | Use the fast multi-bit RaBitQ encoder; set to `false` for the previous exact encoder. |
 | `fast_encode_rabitq_rounds` | int | `6` | Fast RaBitQ coordinate-refinement rounds, in `[1, 32]`. |
 | `rabitq_fused_datacell` | bool | `false` | Fuse the bottom HGraph node and RaBitQ split codes into one in-memory record. Requires L2/IP, flat in-memory graph storage, RaBitQ x+y split codes with x in `[1, 4]`, and the other constraints described in [RaBitQ x+y split](../quantization/rabitq_split.md). |
-| `train_sample_count` | int | all vectors | Maximum number of vectors sampled for quantizer training; must be at least `512` when set explicitly. By default, the full dataset is used. |
+| `train_sample_count` | int | `65536` | Maximum number of vectors sampled for quantizer training; must be at least `512` when set explicitly. |
 | `build_thread_count` | int | `100` | Threads used to parallelise build |
 | `support_duplicate` | bool | `false` | Enable duplicate-ID detection on insert |
 | `deduplicate_storage` | bool | `false` | Share vector storage between duplicates; requires `support_duplicate: true` |

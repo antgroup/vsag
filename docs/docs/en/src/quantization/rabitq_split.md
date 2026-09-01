@@ -47,7 +47,7 @@ The relevant parameters are:
 | `rabitq_error_rate` | Default positive multiplier applied to the lower-bound error term. |
 | `use_reorder` | Should be `true` so candidates are ranked with the `x+y` distance. |
 | `rabitq_fused_datacell` | HGraph only; enables fused graph/code layout. Default: `false`. |
-| `train_sample_count` | Maximum HGraph training sample size. The default uses all vectors; set a smaller value (at least `512`) to bound fused KMeans training cost. |
+| `train_sample_count` | Maximum HGraph training sample size. The default is `65536`; the minimum explicit value is `512`. |
 
 The constraints are:
 
@@ -70,10 +70,11 @@ HGraph search loop reads the record directly and prefetches graph links and
 quantized codes together. The codec uses 16 reproducibly trained residual
 clusters.
 
-By default, fused HGraph trains the base RaBitQ quantizer and fused KMeans codec on all vectors.
-When an explicit `train_sample_count` is smaller than the dataset, it selects that many vectors
-using fixed-seed uniform reservoir sampling. Reducing the value bounds build time and temporary
-training memory, but may reduce cluster-centroid quality.
+By default, fused HGraph trains the base RaBitQ quantizer and fused KMeans codec on at most 65,536
+vectors. When `train_sample_count` is smaller than the dataset, it selects that many vectors using
+fixed-seed uniform reservoir sampling. Increasing the value can improve cluster-centroid quality at
+the cost of build time and temporary training memory; set it to at least the dataset size to train
+on all vectors.
 
 This option creates an incrementally mutable in-memory index. After `Build` or
 Deserialize, it supports `Add`, mark remove, vector/id/attribute/extra-info

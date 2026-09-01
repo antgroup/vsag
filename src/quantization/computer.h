@@ -37,10 +37,7 @@ template <typename T>
 class Computer : public ComputerInterface {
 public:
     explicit Computer(const T* quantizer, Allocator* allocator)
-        : quantizer_(quantizer),
-          allocator_(allocator),
-          raw_query_(allocator),
-          auxiliary_codes_(allocator){};
+        : quantizer_(quantizer), allocator_(allocator), raw_query_(allocator){};
 
     ~Computer() override {
         if (quantizer_) {
@@ -99,13 +96,6 @@ public:
     const T* quantizer_{nullptr};
     uint8_t* buf_{nullptr};
     Vector<float> raw_query_;
-    // Optional query-side representation used by quantizers that keep the
-    // primary FP32 query for precise scoring while traversing with a compact
-    // bit-plane representation.
-    Vector<uint8_t> auxiliary_codes_;
-    float auxiliary_lower_bound_{0.0F};
-    float auxiliary_delta_{0.0F};
-    float auxiliary_sum_{0.0F};
 };
 
 template <typename QuantImpl, MetricType metric>

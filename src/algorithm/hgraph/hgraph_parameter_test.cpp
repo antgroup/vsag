@@ -18,7 +18,6 @@
 #include <fmt/format.h>
 
 #include <cmath>
-#include <limits>
 
 #include "hgraph.h"
 #include "index_common_param.h"
@@ -296,7 +295,7 @@ TEST_CASE("HGraph maps train sample count", "[ut][HGraphParameter][train_sample_
     auto default_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(
         vsag::HGraph::CheckAndMappingExternalParam(vsag::JsonType::Parse("{}"), common_param));
     REQUIRE(default_param != nullptr);
-    REQUIRE(default_param->train_sample_count == std::numeric_limits<int64_t>::max());
+    REQUIRE(default_param->train_sample_count == 65536L);
     REQUIRE(std::string(vsag::HGRAPH_TRAIN_SAMPLE_COUNT) == "train_sample_count");
 
     auto configured_param =

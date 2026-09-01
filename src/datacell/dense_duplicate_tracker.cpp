@@ -64,24 +64,6 @@ DenseDuplicateTracker::GetDuplicateIds(InnerIdType id) const -> std::vector<Inne
     return ids;
 }
 
-bool
-DenseDuplicateTracker::AnyDuplicateId(InnerIdType id, const DuplicateIdPredicate& predicate) const {
-    std::shared_lock lock(mutex_);
-
-    if (id >= duplicate_ids_.size()) {
-        return false;
-    }
-
-    auto current_id = id;
-    while (duplicate_ids_[current_id] != id) {
-        current_id = duplicate_ids_[current_id];
-        if (predicate(current_id)) {
-            return true;
-        }
-    }
-    return false;
-}
-
 auto
 DenseDuplicateTracker::GetGroupId(InnerIdType id) const -> InnerIdType {
     std::shared_lock lock(mutex_);

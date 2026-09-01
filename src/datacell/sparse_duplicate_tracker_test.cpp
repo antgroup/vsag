@@ -44,9 +44,6 @@ TEST_CASE("SparseDuplicateTracker tracks duplicate groups", "[ut][SparseDuplicat
     REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(0)) == std::vector<InnerIdType>{1, 2, 3});
     REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(1)) == std::vector<InnerIdType>{0, 2, 3});
     REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(2)) == std::vector<InnerIdType>{0, 1, 3});
-    REQUIRE(tracker.AnyDuplicateId(0, [](InnerIdType id) { return id == 2; }));
-    REQUIRE_FALSE(tracker.AnyDuplicateId(0, [](InnerIdType id) { return id == 4; }));
-    REQUIRE_FALSE(tracker.AnyDuplicateId(6, [](InnerIdType) { return true; }));
     REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(3)) == std::vector<InnerIdType>{0, 1, 2});
     REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(4)) == std::vector<InnerIdType>{5});
     REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(5)) == std::vector<InnerIdType>{4});

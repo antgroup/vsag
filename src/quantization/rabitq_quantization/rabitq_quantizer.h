@@ -474,18 +474,11 @@ public:
     [[nodiscard]] uint64_t
     AlignCodeField(uint64_t size) const;
 
-    [[nodiscard]] bool
-    HasFourBitTraversalQuery(const Computer<RaBitQuantizer>& computer) const;
-
 private:
     bool
     ComputeFusedExactCenteredFilterIP(const float* transformed_query,
                                       const uint8_t* one_bit_code,
                                       float* centered_filter_inner_product) const;
-
-    void
-    PrepareFourBitTraversalQuery(const float* normalized_query,
-                                 Computer<RaBitQuantizer>& computer) const;
 
     bool
     EncodeOneInternal(const float* data,
