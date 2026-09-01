@@ -53,10 +53,17 @@ public:
         if (use_reverse_map_) {
             label_remap_.InsertOrAssign(label, id);
         }
+        std::scoped_lock wlock(delete_ids_mutex_);
+        const bool was_padding_label = id < label_table_.size() && label_table_[id] == -1;
         if (id + 1 > label_table_.size()) {
             label_table_.resize(id + 1);
         }
         label_table_[id] = label;
+        if (label == -1 && deleted_ids_.count(id) == 0) {
+            active_padding_label_ids_.insert(id);
+        } else if (was_padding_label) {
+            active_padding_label_ids_.erase(id);
+        }
         total_count_++;
     }
 
@@ -98,7 +105,9 @@ public:
     void
     EraseFromDeletedIds(InnerIdType id) {
         std::scoped_lock wlock(delete_ids_mutex_);
-        deleted_ids_.erase(id);
+        if (id < label_table_.size() && deleted_ids_.erase(id) > 0 && label_table_[id] == -1) {
+            active_padding_label_ids_.insert(id);
+        }
     }
 
     /**
@@ -128,6 +137,23 @@ public:
     bool
     CheckLabel(LabelType label) const;
 
+    bool
+    HasActivePaddingLabel() const {
+        std::shared_lock rlock(delete_ids_mutex_);
+        return !active_padding_label_ids_.empty();
+    }
+
+    void
+    RebuildActivePaddingLabelIds() {
+        std::scoped_lock wlock(delete_ids_mutex_);
+        active_padding_label_ids_.clear();
+        for (InnerIdType id = 0; id < label_table_.size(); ++id) {
+            if (label_table_[id] == -1 && deleted_ids_.count(id) == 0) {
+                active_padding_label_ids_.insert(id);
+            }
+        }
+    }
+
     void
     UpdateLabel(LabelType old_label, LabelType new_label) {
         // 1. check whether new_label is occupied
@@ -142,6 +168,16 @@ public:
         for (size_t i = 0; i < label_table_.size(); ++i) {
             if (label_table_[i] == old_label) {
                 label_table_[i] = new_label;
+                if (old_label == -1 || new_label == -1) {
+                    std::scoped_lock wlock(delete_ids_mutex_);
+                    if (deleted_ids_.count(static_cast<InnerIdType>(i)) == 0) {
+                        if (new_label == -1) {
+                            active_padding_label_ids_.insert(static_cast<InnerIdType>(i));
+                        } else {
+                            active_padding_label_ids_.erase(static_cast<InnerIdType>(i));
+                        }
+                    }
+                }
                 found = true;
             }
         }
@@ -185,6 +221,7 @@ public:
     void
     Deserialize(LvalueOrRvalue<StreamReader> reader) {
         StreamReader::ReadVector(reader, label_table_);
+        RebuildActivePaddingLabelIds();
         if (use_reverse_map_) {
             this->label_remap_.Clear();
             this->label_remap_.Reserve(label_table_.size());
@@ -349,8 +386,12 @@ public:
             std::scoped_lock wlock(delete_ids_mutex_);
             from_removed = deleted_ids_.erase(from) > 0;
             deleted_ids_.erase(to);
+            active_padding_label_ids_.erase(from);
+            active_padding_label_ids_.erase(to);
             if (from_removed) {
                 deleted_ids_.insert(to);
+            } else if (label_table_[from] == -1) {
+                active_padding_label_ids_.insert(to);
             }
         }
 
@@ -365,6 +406,17 @@ public:
 
     void
     ShrinkToFit(InnerIdType capacity) {
+        {
+            std::scoped_lock wlock(delete_ids_mutex_);
+            for (auto it = active_padding_label_ids_.begin();
+                 it != active_padding_label_ids_.end();) {
+                if (*it >= capacity) {
+                    it = active_padding_label_ids_.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
         // Avoid a full-table copy for small removals; vector storage is still compacted by BruteForce.
         if (capacity <= label_table_.capacity() / 2) {
             try {
@@ -391,13 +443,15 @@ public:
         }
         {
             std::scoped_lock wlock(delete_ids_mutex_);
+            active_padding_label_ids_.erase(inner_id);
             deleted_ids_.erase(inner_id);
         }
         total_count_.fetch_sub(1);
     }
 
 private:
-    UnorderedSet<InnerIdType> deleted_ids_;       // Record deleted ids.
+    UnorderedSet<InnerIdType> deleted_ids_;  // Record deleted ids.
+    UnorderedSet<InnerIdType> active_padding_label_ids_;
     FilterPtr deleted_ids_filter_{nullptr};       // Filter to filter out deleted ids.
     mutable std::shared_mutex delete_ids_mutex_;  // Mutex to protect deleted_ids_.
 
