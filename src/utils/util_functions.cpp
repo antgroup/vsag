@@ -17,7 +17,6 @@
 
 #include <iomanip>
 #include <limits>
-#include <nlohmann/json.hpp>
 #include <random>
 
 #include "common.h"
@@ -26,44 +25,6 @@
 #include "impl/allocator/safe_allocator.h"
 #include "vsag_exception.h"
 namespace vsag {
-
-std::string
-format_map(const std::string& str, const std::unordered_map<std::string, std::string>& mappings) {
-    std::string result = str;
-
-    for (const auto& [key, value] : mappings) {
-        uint64_t pos = result.find("{" + key + "}");
-        while (pos != std::string::npos) {
-            result.replace(pos, key.length() + 2, value);
-            pos = result.find("{" + key + "}");
-        }
-    }
-    return result;
-}
-
-void
-mapping_external_param_to_inner(const JsonType& external_json,
-                                ConstParamMap& param_map,
-                                JsonType& inner_json) {
-    auto* external_raw_json = external_json.GetInnerJson();
-    auto* inner_raw_json = inner_json.GetInnerJson();
-    for (const auto& [key, value] : external_raw_json->items()) {
-        auto ranges = param_map.equal_range(key);
-        if (ranges.first == ranges.second) {
-            // key not found in param_map
-            throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                fmt::format("invalid config param: {}", key));
-        }
-        for (auto iter = ranges.first; iter != ranges.second; ++iter) {
-            const auto& vec = iter->second;
-            auto* json = inner_raw_json;
-            for (const auto& str : vec) {
-                json = &(json->operator[](str));
-            }
-            *json = value;
-        }
-    }
-}
 
 std::tuple<DatasetPtr, float*, int64_t*>
 create_fast_dataset(int64_t dim, Allocator* allocator) {
