@@ -36,6 +36,7 @@ HGraphParameter::HGraphParameter(const JsonType& json) : HGraphParameter() {
 }
 
 HGraphParameter::HGraphParameter() : name(INDEX_TYPE_HGRAPH) {
+    this->train_sample_count = std::numeric_limits<int64_t>::max();
 }
 
 void

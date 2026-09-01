@@ -186,6 +186,7 @@ extern const char* const HGRAPH_GRAPH_STORAGE_TYPE;
 extern const char* const HGRAPH_GRAPH_IO_TYPE;
 extern const char* const HGRAPH_GRAPH_FILE_PATH;
 extern const char* const HGRAPH_BUILD_THREAD_COUNT;
+extern const char* const HGRAPH_TRAIN_SAMPLE_COUNT;
 extern const char* const HGRAPH_PRECISE_QUANTIZATION_TYPE;
 extern const char* const HGRAPH_BASE_IO_TYPE;
 extern const char* const HGRAPH_BASE_SUPPLEMENT_IO_TYPE;

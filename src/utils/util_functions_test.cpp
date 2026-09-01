@@ -151,3 +151,18 @@ TEST_CASE("sample_train_data honors configured counts above the default", "[ut][
 
     REQUIRE(sampled->GetNumElements() == sample_count);
 }
+
+TEST_CASE("sample_train_data uses all vectors for an unbounded count", "[ut][UtilFunctions]") {
+    constexpr int64_t dim = 2;
+    constexpr int64_t count = 1024;
+    std::vector<float> vectors(count * dim);
+    auto data = Dataset::Make();
+    data->NumElements(count)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
+    auto allocator = std::make_shared<DefaultAllocator>();
+
+    auto sampled =
+        sample_train_data(data, count, dim, std::numeric_limits<int64_t>::max(), allocator.get());
+
+    REQUIRE(sampled == data);
+    REQUIRE(sampled->GetNumElements() == count);
+}

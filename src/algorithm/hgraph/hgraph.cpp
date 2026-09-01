@@ -53,10 +53,8 @@ class HGraphAnalyzer;
 void
 HGraph::check_fused_mutation_supported(std::string_view operation) const {
     if (this->rabitq_fused_datacell_ != nullptr) {
-        throw VsagException(
-            ErrorType::UNSUPPORTED_INDEX_OPERATION,
-            fmt::format("fused RaBitQ HGraph is build-once and read-only; {} is unsupported",
-                        operation));
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            fmt::format("fused RaBitQ HGraph does not support {}", operation));
     }
 }
 

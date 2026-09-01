@@ -18,6 +18,7 @@
 #include <fmt/format.h>
 
 #include <cmath>
+#include <limits>
 
 #include "hgraph.h"
 #include "index_common_param.h"
@@ -295,7 +296,8 @@ TEST_CASE("HGraph maps train sample count", "[ut][HGraphParameter][train_sample_
     auto default_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(
         vsag::HGraph::CheckAndMappingExternalParam(vsag::JsonType::Parse("{}"), common_param));
     REQUIRE(default_param != nullptr);
-    REQUIRE(default_param->train_sample_count == 65536L);
+    REQUIRE(default_param->train_sample_count == std::numeric_limits<int64_t>::max());
+    REQUIRE(std::string(vsag::HGRAPH_TRAIN_SAMPLE_COUNT) == "train_sample_count");
 
     auto configured_param =
         std::dynamic_pointer_cast<vsag::HGraphParameter>(vsag::HGraph::CheckAndMappingExternalParam(
@@ -818,6 +820,18 @@ TEST_CASE("HGraph maps and validates fused RaBitQ split datacell", "[ut][HGraphP
     REQUIRE_FALSE(typed_param->mci_parameters.enabled);
     REQUIRE(typed_param->base_codes_param->name == std::string(vsag::RABITQ_SPLIT_DATA_CELL));
 
+    auto require_invalid_argument = [&](vsag::JsonType param, const std::string& message) {
+        bool rejected = false;
+        try {
+            static_cast<void>(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+        } catch (const vsag::VsagException& exception) {
+            rejected = true;
+            REQUIRE(exception.error_.type == vsag::ErrorType::INVALID_ARGUMENT);
+            REQUIRE(std::string(exception.what()) == message);
+        }
+        REQUIRE(rejected);
+    };
+
     SECTION("accept filter widths one through four") {
         for (int32_t filter_bits = 1; filter_bits <= 4; ++filter_bits) {
             auto param = make_param();
@@ -845,6 +859,40 @@ TEST_CASE("HGraph maps and validates fused RaBitQ split datacell", "[ut][HGraphP
         auto param = make_param();
         param["base_supplement_io_type"].SetString("mmap_io");
         REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+
+    SECTION("reject non-memory graph IO") {
+        auto param = make_param();
+        param[vsag::HGRAPH_GRAPH_IO_TYPE].SetString("mmap_io");
+        param[vsag::HGRAPH_GRAPH_FILE_PATH].SetString("/tmp/vsag_fused_graph");
+        require_invalid_argument(param, "rabitq_fused_datacell only supports an in-memory graph");
+    }
+
+    SECTION("reject non-memory base IO") {
+        auto param = make_param();
+        param[vsag::HGRAPH_BASE_IO_TYPE].SetString("mmap_io");
+        param[vsag::HGRAPH_BASE_FILE_PATH].SetString("/tmp/vsag_fused_base");
+        require_invalid_argument(param, "rabitq_fused_datacell only supports memory IO");
+    }
+
+    SECTION("reject compressed graph") {
+        auto param = make_param();
+        param[vsag::HGRAPH_GRAPH_STORAGE_TYPE].SetString("compressed");
+        require_invalid_argument(param, "rabitq_fused_datacell requires flat graph storage");
+    }
+
+    SECTION("reject deduplicate storage") {
+        auto param = make_param();
+        param[vsag::HGRAPH_SUPPORT_DUPLICATE].SetBool(true);
+        param[vsag::HGRAPH_DEDUPLICATE_STORAGE].SetBool(true);
+        require_invalid_argument(param,
+                                 "rabitq_fused_datacell does not support deduplicate_storage");
+    }
+
+    SECTION("reject force remove") {
+        auto param = make_param();
+        param[vsag::HGRAPH_SUPPORT_FORCE_REMOVE].SetBool(true);
+        require_invalid_argument(param, "rabitq_fused_datacell does not support force remove");
     }
 
     SECTION("reject cosine") {

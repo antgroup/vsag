@@ -46,7 +46,7 @@ RaBitQ x+y split 是 HGraph 和 Pyramid 面向低比特底库码的存储与搜�
 | `rabitq_error_rate` | lower-bound 误差项的默认正数倍率。 |
 | `use_reorder` | 建议设为 `true`，使用 `x+y` 距离排序候选。 |
 | `rabitq_fused_datacell` | 仅用于 HGraph；启用融合布局，默认值为 `false`。 |
-| `train_sample_count` | HGraph 训练采样数，默认 `65536`；设为不小于数据集大小时，fused KMeans 使用全部向量训练。 |
+| `train_sample_count` | HGraph 最大训练采样数，默认使用全部向量；可设为较小的值（至少 `512`）以限制 fused KMeans 的训练开销。 |
 
 参数约束为：
 
@@ -67,10 +67,10 @@ cluster id、label、x-bit code 和 y-bit supplement 会存入同一个 cache-li
 Pyramid 参数。HGraph 专用搜索循环直接读取该 record，并联合预取图邻居和
 量化码。codec 使用固定随机种子可复现训练的 16 个 residual clusters。
 
-当数据集大于 `train_sample_count` 时，fused HGraph 使用固定 seed 的均匀 reservoir
-sampling 选择指定数量的向量，并在样本上训练 16-cluster KMeans codec。将
-`train_sample_count` 设置为数据集大小（例如 `500000`）即可使用全部向量训练。
-全量训练可能改善 cluster centroid，但会增加 KMeans 构建时间和工作内存。
+默认情况下，fused HGraph 使用全部向量训练基础 RaBitQ 量化器和 fused KMeans codec。
+显式设置的 `train_sample_count` 小于数据集大小时，使用固定 seed 的均匀 reservoir
+sampling 选择相应数量的向量。减小该值可以限制构建时间和训练阶段的临时内存，
+但可能降低 cluster centroid 的质量。
 
 该选项创建支持增量修改的内存索引。完成 `Build` 或 Deserialize 后，仍支持
 `Add`、mark remove、向量/ID/属性/extra-info 更新、检索（包括过滤、iterator、

@@ -1002,7 +1002,9 @@ TEST_CASE("HGraph fused RaBitQ remains mutable after fast build and deserialize"
         CAPTURE(result.error().message);
         REQUIRE(result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
     };
-    require_unsupported(index->Train(base));
+    auto train_result = index->Train(base);
+    require_unsupported(train_result);
+    REQUIRE(train_result.error().message == "fused RaBitQ HGraph does not support Train");
     require_unsupported(index->Remove(remove_ids, vsag::RemoveMode::FORCE_REMOVE));
     require_unsupported(index->Tune("{}"));
     require_unsupported(index->Merge({}));

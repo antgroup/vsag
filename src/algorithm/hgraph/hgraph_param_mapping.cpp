@@ -235,7 +235,7 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             inner_json[GRAPH_KEY][ODESCENT_PARAMETER_BUILD_BLOCK_SIZE].SetJson(value);
         } else if (key == HGRAPH_BUILD_THREAD_COUNT) {
             inner_json[BUILD_THREAD_COUNT_KEY].SetJson(value);
-        } else if (key == TRAIN_SAMPLE_COUNT_KEY) {
+        } else if (key == HGRAPH_TRAIN_SAMPLE_COUNT) {
             inner_json[TRAIN_SAMPLE_COUNT_KEY].SetJson(value);
         } else if (key == SQ4_UNIFORM_TRUNC_RATE) {
             inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY]
