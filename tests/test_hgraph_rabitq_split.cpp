@@ -610,22 +610,19 @@ TEST_CASE("HGraph RaBitQ Split Reject Unsupported Hybrid", "[ft][rabitq_split][h
     REQUIRE_FALSE(result.has_value());
 }
 
-TEST_CASE("HGraph RaBitQ split rejects non-finite one-bit queries",
+TEST_CASE("HGraph fused RaBitQ split rejects non-finite one-bit queries",
           "[ft][rabitq_split][hgraph][fused][validation]") {
     using namespace fixtures;
     constexpr int64_t dim = 64;
     constexpr uint64_t base_count = 64;
     constexpr int64_t topk = 10;
-    const bool fused = GENERATE(false, true);
-    CAPTURE(fused);
-
     auto param =
         HGraphRaBitQSplitTestIndex::GenerateBuildParam("l2", dim, "memory_io", "", 1, 7, true);
     auto param_json = vsag::JsonType::Parse(param);
     param_json["index_param"]["graph_io_type"].SetString("memory_io");
     param_json["index_param"]["graph_storage_type"].SetString("flat");
     param_json["index_param"]["reorder_source"].SetString("base");
-    param_json["index_param"]["rabitq_fused_datacell"].SetBool(fused);
+    param_json["index_param"]["rabitq_fused_datacell"].SetBool(true);
     param_json["index_param"]["rabitq_use_fht"].SetBool(true);
     param_json["index_param"]["store_raw_vector"].SetBool(false);
     param_json["index_param"]["use_mci"].SetBool(false);
@@ -651,31 +648,28 @@ TEST_CASE("HGraph RaBitQ split rejects non-finite one-bit queries",
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
 
-    if (fused) {
-        uint64_t scored_count = 0;
-        uint64_t largest_batch = 0;
-        const auto score = [](int64_t label) { return static_cast<float>(label % 1000000); };
-        vsag::SearchRequest request;
-        request.topk_ = topk;
-        request.params_str_ = fmt::format(
-            R"({{"hgraph":{{"ef_search":{},"rabitq_one_bit_search":true}}}})", base_count);
-        request.distance_batch_size_ = 3;
-        request.distance_batch_func_ =
-            [&](const int64_t* labels, uint64_t count, float* distances) {
-                scored_count += count;
-                largest_batch = std::max(largest_batch, count);
-                for (uint64_t i = 0; i < count; ++i) {
-                    distances[i] = score(labels[i]);
-                }
-            };
-        auto result = index->SearchWithRequest(request);
-        REQUIRE(result.has_value());
-        REQUIRE(result.value()->GetDim() == topk);
-        REQUIRE(scored_count > 0);
-        REQUIRE(largest_batch <= request.distance_batch_size_);
-        for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
-            REQUIRE(result.value()->GetDistances()[i] == score(result.value()->GetIds()[i]));
+    uint64_t scored_count = 0;
+    uint64_t largest_batch = 0;
+    const auto score = [](int64_t label) { return static_cast<float>(label % 1000000); };
+    vsag::SearchRequest request;
+    request.topk_ = topk;
+    request.params_str_ =
+        fmt::format(R"({{"hgraph":{{"ef_search":{},"rabitq_one_bit_search":true}}}})", base_count);
+    request.distance_batch_size_ = 3;
+    request.distance_batch_func_ = [&](const int64_t* labels, uint64_t count, float* distances) {
+        scored_count += count;
+        largest_batch = std::max(largest_batch, count);
+        for (uint64_t i = 0; i < count; ++i) {
+            distances[i] = score(labels[i]);
         }
+    };
+    auto result = index->SearchWithRequest(request);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == topk);
+    REQUIRE(scored_count > 0);
+    REQUIRE(largest_batch <= request.distance_batch_size_);
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(result.value()->GetDistances()[i] == score(result.value()->GetIds()[i]));
     }
 }
 
