@@ -52,6 +52,7 @@ enum class DistanceEvaluationBackend : uint8_t {
 
 class SearchStatistics;
 class ReasoningContext;
+class QueryComputerPool;
 template <typename QuantTmpl, MetricType metric>
 class TransformQuantizer;
 
@@ -62,6 +63,7 @@ struct QueryContext {
     float rabitq_error_rate = std::numeric_limits<float>::quiet_NaN();
     DistanceEvaluationPhase distance_phase = DistanceEvaluationPhase::APPROXIMATE;
     bool track_distance_evaluations = true;
+    QueryComputerPool* computer_pool = nullptr;
 };
 
 class ScopedDistancePhase {
@@ -231,6 +233,9 @@ public:
             rabitq_reorder_hint_full_count.load(std::memory_order_relaxed));
         j["rabitq_reorder_fallback_full_count"].SetInt(
             rabitq_reorder_fallback_full_count.load(std::memory_order_relaxed));
+        j["query_computer_count"].SetInt(query_computer_count.load(std::memory_order_relaxed));
+        j["parallel_search_fallback_count"].SetInt(
+            parallel_search_fallback_count.load(std::memory_order_relaxed));
         j["distance_evaluations"].SetUint64(distance_evaluations.load(std::memory_order_relaxed));
         for (size_t i = 0; i < 3; ++i) {
             j["distance_evaluations_by_phase"][PhaseName(static_cast<DistancePhase>(i))].SetUint64(
@@ -263,6 +268,8 @@ public:
     std::atomic<uint32_t> rabitq_filter_fallback_full_count{0};
     std::atomic<uint32_t> rabitq_reorder_hint_full_count{0};
     std::atomic<uint32_t> rabitq_reorder_fallback_full_count{0};
+    std::atomic<uint32_t> query_computer_count{0};
+    std::atomic<uint32_t> parallel_search_fallback_count{0};
     std::atomic<uint64_t> distance_evaluations{0};
     std::array<std::atomic<uint64_t>, 3> distance_evaluations_by_phase{};
     std::array<std::atomic<uint64_t>, 16> distance_evaluations_by_backend{};

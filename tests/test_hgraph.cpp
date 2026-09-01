@@ -23,6 +23,7 @@
 #include <random>
 #include <sstream>
 #include <thread>
+#include <vector>
 
 #include "functest.h"
 #include "impl/filter/iterator_filter.h"
@@ -802,6 +803,24 @@ TEST_CASE("HGraph conjugate graph does not widen range reorder",
     REQUIRE(statistics["distance_evaluations_by_phase"]["rerank"].GetUint64() == 2);
 }
 
+std::string
+MakeHGraphQueryComputerCountParam(const std::string& quantization,
+                                  const std::string& reorder_source,
+                                  bool store_raw_vector = false,
+                                  int build_thread_count = 4) {
+    using namespace fixtures;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, quantization);
+    build_param.thread_count = build_thread_count;
+    build_param.graph_io_type = "memory_io";
+    build_param.store_raw_vector = store_raw_vector;
+
+    auto param =
+        vsag::JsonType::Parse(HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
+    param["index_param"]["use_reorder"].SetBool(true);
+    param["index_param"]["reorder_source"].SetString(reorder_source);
+    return param.Dump();
+}
+
 #define HGRAPH_PR_DAILY_CASE(title, tags, helper)                        \
     TEST_CASE("(PR) " title, tags "[pr]") {                              \
         auto test_index = std::make_shared<fixtures::HGraphTestIndex>(); \
@@ -815,6 +834,230 @@ TEST_CASE("HGraph conjugate graph does not widen range reorder",
     }
 
 }  // namespace
+
+TEST_CASE("(PR) HGraph query computer count follows cell identity",
+          "[ft][hgraph][query_computer][pr]") {
+    using namespace fixtures;
+    constexpr int64_t kDim = 16;
+    // HGraph's fixed level RNG samples route-layer nodes within this prefix.
+    constexpr uint64_t kBaseCount = 200;
+    constexpr int64_t kResultSize = 10;
+    const bool precise_reorder = GENERATE(false, true);
+    INFO(fmt::format("reorder_source={}", precise_reorder ? "precise" : "base"));
+
+    auto param = MakeHGraphQueryComputerCountParam(precise_reorder ? "fp32,fp32,memory_io" : "fp32",
+                                                   precise_reorder ? "precise" : "base");
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(kDim, kBaseCount, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+
+    constexpr const char* kSearchParam = R"({
+        "hgraph": {
+            "ef_search": 32,
+            "parallelism": 1,
+            "enable_reorder": true,
+            "brute_force_threshold": 0.0
+        }
+    })";
+    constexpr const char* kParallelSearchParam = R"({
+        "hgraph": {
+            "ef_search": 32,
+            "parallelism": 4,
+            "enable_reorder": true,
+            "brute_force_threshold": 0.0
+        }
+    })";
+    constexpr const char* kBruteForceSearchParam = R"({
+        "hgraph": {
+            "ef_search": 32,
+            "parallelism": 1,
+            "enable_reorder": true,
+            "brute_force_threshold": 1.0
+        }
+    })";
+    const uint64_t expected_count = precise_reorder ? 2 : 1;
+    auto require_count = [](const auto& result, uint64_t expected) {
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() > 0);
+        auto values = result.value()->GetStatistics({"query_computer_count"});
+        REQUIRE(values.size() == 1);
+        REQUIRE(std::stoull(values.front()) == expected);
+    };
+
+    auto knn_result = index->KnnSearch(query, kResultSize, kSearchParam);
+    require_count(knn_result, expected_count);
+
+    auto range_result =
+        index->RangeSearch(query, std::numeric_limits<float>::max(), kSearchParam, kResultSize);
+    require_count(range_result, expected_count);
+
+    auto parallel_knn_result = index->KnnSearch(query, kResultSize, kParallelSearchParam);
+    require_count(parallel_knn_result, precise_reorder ? 5 : 4);
+    auto parallel_stats = vsag::JsonType::Parse(parallel_knn_result.value()->GetStatistics());
+    REQUIRE(parallel_stats["parallel_search_fallback_count"].GetInt() == 0);
+
+    auto brute_force_result = index->KnnSearch(query, kResultSize, kBruteForceSearchParam);
+    require_count(brute_force_result, expected_count);
+
+    vsag::SearchRequest reasoning_request;
+    reasoning_request.topk_ = kResultSize;
+    reasoning_request.params_str_ = kSearchParam;
+    reasoning_request.query_ = query;
+    reasoning_request.expected_labels_ = {dataset->base_->GetIds()[0]};
+    auto reasoning_result = index->SearchWithRequest(reasoning_request);
+    require_count(reasoning_result, expected_count);
+    REQUIRE_FALSE(reasoning_result.value()->GetReasoning().empty());
+
+    vsag::FilterPtr filter = nullptr;
+    vsag::IteratorContext* iter_ctx = nullptr;
+    auto first_page = index->KnnSearch(query, kResultSize, kSearchParam, filter, iter_ctx, false);
+    require_count(first_page, expected_count);
+    auto second_page = index->KnnSearch(query, kResultSize, kSearchParam, filter, iter_ctx, false);
+    require_count(second_page, expected_count);
+    delete iter_ctx;
+
+    auto reject_all_filter = std::make_shared<RejectAllFilter>();
+    vsag::IteratorContext* empty_iter_ctx = nullptr;
+    auto empty_page = index->KnnSearch(
+        query, kResultSize, kSearchParam, reject_all_filter, empty_iter_ctx, false);
+    REQUIRE(empty_page.has_value());
+    REQUIRE(empty_page.value()->GetDim() == 0);
+    auto empty_page_stats = vsag::JsonType::Parse(empty_page.value()->GetStatistics());
+    REQUIRE(empty_page_stats.Contains("query_computer_count"));
+    REQUIRE(empty_page_stats["query_computer_count"].GetInt() ==
+            static_cast<int64_t>(expected_count));
+    delete empty_iter_ctx;
+}
+
+TEST_CASE("(PR) HGraph reasoning query computer count follows raw cell identity",
+          "[ft][hgraph][query_computer][reasoning][pr]") {
+    using namespace fixtures;
+    constexpr int64_t kDim = 16;
+    constexpr uint64_t kBaseCount = 200;
+    constexpr int64_t kResultSize = 10;
+    constexpr const char* kSearchParam = R"({
+        "hgraph": {
+            "ef_search": 32,
+            "parallelism": 1,
+            "enable_reorder": true,
+            "brute_force_threshold": 0.0
+        }
+    })";
+
+    struct TestCase {
+        const char* quantization;
+        const char* reorder_source;
+        uint64_t expected_count;
+    };
+    const TestCase test_cases[] = {
+        {"sq8", "base", 2},
+        {"sq8,sq8,memory_io", "precise", 3},
+        {"sq8,fp32,memory_io", "precise", 2},
+    };
+
+    for (const auto& test_case : test_cases) {
+        DYNAMIC_SECTION("quantization=" << test_case.quantization
+                                        << ", reorder_source=" << test_case.reorder_source) {
+            auto param = MakeHGraphQueryComputerCountParam(
+                test_case.quantization, test_case.reorder_source, true);
+            auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+            auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(kDim, kBaseCount, "l2");
+            TestIndex::TestBuildIndex(index, dataset, true);
+            auto query = fixtures::get_one_query(dataset->query_, 0);
+
+            vsag::SearchRequest request;
+            request.topk_ = kResultSize;
+            request.params_str_ = kSearchParam;
+            request.query_ = query;
+            request.expected_labels_ = {dataset->base_->GetIds()[0]};
+
+            auto result = index->SearchWithRequest(request);
+            REQUIRE(result.has_value());
+            REQUIRE(result.value()->GetDim() > 0);
+            REQUIRE_FALSE(result.value()->GetReasoning().empty());
+            auto values = result.value()->GetStatistics({"query_computer_count"});
+            REQUIRE(values.size() == 1);
+            REQUIRE(std::stoull(values.front()) == test_case.expected_count);
+        }
+    }
+}
+
+TEST_CASE("(PR) HGraph parallel search falls back without an executor",
+          "[ft][hgraph][parallel_fallback][pr]") {
+    using namespace fixtures;
+    constexpr int64_t kDim = 16;
+    constexpr uint64_t kBaseCount = 200;
+    constexpr int64_t kResultSize = 10;
+    const bool precise_reorder = GENERATE(false, true);
+    INFO(fmt::format("reorder_source={}", precise_reorder ? "precise" : "base"));
+
+    auto param = MakeHGraphQueryComputerCountParam(precise_reorder ? "fp32,fp32,memory_io" : "fp32",
+                                                   precise_reorder ? "precise" : "base",
+                                                   false,
+                                                   1);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(kDim, kBaseCount, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+
+    constexpr const char* kSerialSearchParam = R"({
+        "hgraph": {
+            "ef_search": 32,
+            "parallelism": 1,
+            "enable_reorder": true,
+            "brute_force_threshold": 0.0
+        }
+    })";
+    constexpr const char* kParallelSearchParam = R"({
+        "hgraph": {
+            "ef_search": 32,
+            "parallelism": 4,
+            "enable_reorder": true,
+            "brute_force_threshold": 0.0
+        }
+    })";
+    const uint64_t expected_computer_count = precise_reorder ? 2 : 1;
+    auto require_fallback = [expected_computer_count](const auto& result) {
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() > 0);
+        auto values = result.value()->GetStatistics(
+            {"parallel_search_fallback_count", "query_computer_count"});
+        REQUIRE(values.size() == 2);
+        REQUIRE(std::stoull(values[0]) == 1);
+        REQUIRE(std::stoull(values[1]) == expected_computer_count);
+    };
+
+    auto serial_result = index->KnnSearch(query, kResultSize, kSerialSearchParam);
+    auto fallback_result = index->KnnSearch(query, kResultSize, kParallelSearchParam);
+    require_fallback(fallback_result);
+    REQUIRE(serial_result.has_value());
+    REQUIRE(serial_result.value()->GetDim() == fallback_result.value()->GetDim());
+    for (int64_t i = 0; i < serial_result.value()->GetDim(); ++i) {
+        REQUIRE(serial_result.value()->GetIds()[i] == fallback_result.value()->GetIds()[i]);
+        REQUIRE(serial_result.value()->GetDistances()[i] ==
+                fallback_result.value()->GetDistances()[i]);
+    }
+
+    auto range_result = index->RangeSearch(
+        query, std::numeric_limits<float>::max(), kParallelSearchParam, kResultSize);
+    require_fallback(range_result);
+
+    vsag::FilterPtr filter = nullptr;
+    vsag::IteratorContext* iter_ctx = nullptr;
+    auto iterator_result =
+        index->KnnSearch(query, kResultSize, kParallelSearchParam, filter, iter_ctx, false);
+    require_fallback(iterator_result);
+    delete iter_ctx;
+
+    auto binary_set = index->Serialize();
+    REQUIRE(binary_set.has_value());
+    auto reloaded = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto deserialize_result = reloaded->Deserialize(binary_set.value());
+    REQUIRE(deserialize_result.has_value());
+    auto reloaded_result = reloaded->KnnSearch(query, kResultSize, kParallelSearchParam);
+    require_fallback(reloaded_result);
+}
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
                              "HGraph Factory Test With Exceptions",

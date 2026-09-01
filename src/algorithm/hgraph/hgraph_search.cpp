@@ -22,6 +22,7 @@
 #include "hgraph.h"  // IWYU pragma: keep
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/query_computer_pool.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "utils/search_threshold.h"
 #include "utils/util_functions.h"
@@ -33,12 +34,6 @@ make_empty_dataset_with_stats(const SearchStatistics& stats) {
     auto dataset_result = DatasetImpl::MakeEmptyDataset();
     dataset_result->Statistics(stats.Dump());
     return dataset_result;
-}
-
-static DatasetPtr
-make_empty_dataset_with_stats() {
-    SearchStatistics stats;
-    return make_empty_dataset_with_stats(stats);
 }
 
 DatasetPtr
@@ -80,7 +75,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     if (GetNumElements() == 0) {
-        return DatasetImpl::MakeEmptyDataset();
+        return make_empty_dataset_with_stats(stats);
     }
     this->validate_knn_args(query, k);
 
@@ -107,7 +102,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         auto cur_count = this->total_count_.load();
 
         if (cur_count == 0) {
-            return make_empty_dataset_with_stats();
+            return make_empty_dataset_with_stats(stats);
         }
         auto* new_ctx = new IteratorFilterContext();
         if (auto ret = new_ctx->init(cur_count, params.ef_search, ctx.alloc); not ret.has_value()) {
@@ -120,6 +115,8 @@ HGraph::KnnSearch(const DatasetPtr& query,
 
     auto* iter_filter_ctx = static_cast<IteratorFilterContext*>(iter_ctx);
     const auto* query_data = get_data(query);
+    QueryComputerPool query_computer_pool(query_data, &stats);
+    ctx.computer_pool = &query_computer_pool;
     // Note: brute_force_threshold is intentionally not applied here. The
     // iterator KnnSearch API pages results across multiple calls via
     // iter_filter_ctx; a single brute-force sweep would either need to drive
@@ -143,7 +140,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
             search_param.is_inner_id_allowed = nullptr;
             search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
             if (search_param.ep == INVALID_ENTRY_POINT) {
-                return make_empty_dataset_with_stats();
+                return make_empty_dataset_with_stats(stats);
             }
             if (iter_filter_ctx->IsFirstUsed()) {
                 ScopedDistancePhase routing_phase(ctx, DistanceEvaluationPhase::ROUTING);
@@ -282,7 +279,10 @@ HGraph::search_one_graph(const void* query,
         visited_list->Reset();
     }
     DistHeapPtr result = nullptr;
-    if (inner_search_param.parallel_search_thread_count > 1) {
+    const bool parallel_search_requested = inner_search_param.parallel_search_thread_count > 1;
+    const bool has_parallel_search_executor =
+        this->thread_pool_ != nullptr and this->parallel_searcher_ != nullptr;
+    if (parallel_search_requested and has_parallel_search_executor) {
         result = this->parallel_searcher_->Search(graph,
                                                   flatten,
                                                   visited_list,
@@ -292,6 +292,9 @@ HGraph::search_one_graph(const void* query,
                                                   ctx,
                                                   rabitq_lower_bound_candidates);
     } else {
+        if (parallel_search_requested and ctx != nullptr and ctx->stats != nullptr) {
+            ctx->stats->parallel_search_fallback_count.fetch_add(1, std::memory_order_relaxed);
+        }
         result = this->searcher_->Search(graph,
                                          flatten,
                                          visited_list,
@@ -317,6 +320,10 @@ HGraph::search_one_graph(const void* query,
                          QueryContext* ctx,
                          DistanceRecordVector* rabitq_lower_bound_candidates) const {
     auto visited_list = this->pool_->TakeOne();
+    if (inner_search_param.parallel_search_thread_count > 1 and ctx != nullptr and
+        ctx->stats != nullptr) {
+        ctx->stats->parallel_search_fallback_count.fetch_add(1, std::memory_order_relaxed);
+    }
     auto result = this->searcher_->Search(graph,
                                           flatten,
                                           visited_list,
@@ -366,7 +373,8 @@ HGraph::brute_force_search(const void* query,
         return result;
     }
 
-    auto computer = flatten->FactoryComputer(query);
+    auto computer_lease = AcquireQueryComputer(flatten, query, ctx);
+    const auto& computer = computer_lease.computer;
 
     constexpr InnerIdType brute_force_batch_size = 64;
     Vector<InnerIdType> batch_ids(brute_force_batch_size, alloc);
@@ -475,9 +483,17 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     }
     const auto element_count = GetNumElements();
     if (element_count == 0) {
-        return make_empty_dataset_with_stats();
+        return make_empty_dataset_with_stats(stats);
     }
     k = std::min(k, element_count);
+    const auto* raw_query = use_custom_distance ? nullptr : get_data(query);
+    QueryComputerPool query_computer_pool(raw_query, &stats);
+    if (not use_custom_distance) {
+        ctx.computer_pool = &query_computer_pool;
+    }
+    if (this->entry_point_id_ == INVALID_ENTRY_POINT) {
+        return make_empty_dataset_with_stats(stats);
+    }
 
     // Setup reasoning context (KNN only)
     std::shared_ptr<ReasoningContext> reasoning_ctx;
@@ -499,16 +515,12 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
 
         FlattenInterfacePtr precise_flatten = nullptr;
+        ComputerLease computer_lease;
         ComputerInterfacePtr computer = nullptr;
         if (not use_custom_distance) {
-            precise_flatten = this->basic_flatten_codes_;
-            if (use_reorder_) {
-                precise_flatten = this->high_precise_codes_;
-            }
-            if (create_new_raw_vector_) {
-                precise_flatten = this->raw_vector_;
-            }
-            computer = precise_flatten->FactoryComputer(get_data(query));
+            precise_flatten = this->get_precise_codes();
+            computer_lease = AcquireQueryComputer(precise_flatten, raw_query, &ctx);
+            computer = computer_lease.computer;
         }
         for (const auto& pair : label_to_inner_id) {
             float dist = 0.0F;
@@ -537,10 +549,6 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.distance_batch_func = request.distance_batch_func_;
     search_param.distance_batch_size = request.distance_batch_size_;
 
-    if (search_param.ep == INVALID_ENTRY_POINT) {
-        return make_empty_dataset_with_stats();
-    }
-
     struct HGraphVisitedListGuard {
         std::shared_ptr<VisitedListPool> pool;
         VisitedListPtr visited_list;
@@ -560,7 +568,6 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     HGraphVisitedListGuard vt_guard{this->pool_, this->pool_->TakeOne()};
     auto& vt = vt_guard.visited_list;
 
-    const auto* raw_query = use_custom_distance ? nullptr : get_data(query);
     ctx.distance_phase = DistanceEvaluationPhase::ROUTING;
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(
@@ -727,7 +734,12 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         }
 
         const auto flatten = use_custom_distance ? nullptr : this->get_precise_codes();
-        const auto computer = use_custom_distance ? nullptr : flatten->FactoryComputer(raw_query);
+        ComputerLease computer_lease;
+        ComputerInterfacePtr computer = nullptr;
+        if (not use_custom_distance) {
+            computer_lease = AcquireQueryComputer(flatten, raw_query, &ctx);
+            computer = computer_lease.computer;
+        }
         Filter* attribute_filter = nullptr;
         if (not search_param.executors.empty() and search_param.executors[0] != nullptr) {
             search_param.executors[0]->Clear();

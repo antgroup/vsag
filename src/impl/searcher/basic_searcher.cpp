@@ -24,6 +24,7 @@
 #include "datacell/flatten_interface.h"
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/query_computer_pool.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "impl/searcher/searcher_utils.h"
 #include "utils/filter_search_skip_strategy.h"
@@ -337,7 +338,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         return top_candidates;
     }
 
-    auto computer = flatten->FactoryComputer(query);
+    auto computer_lease = AcquireQueryComputer(flatten, query, ctx);
+    const auto& computer = computer_lease.computer;
 
     auto is_id_allowed = inner_search_param.is_inner_id_allowed;
     auto ep = inner_search_param.ep;
@@ -469,7 +471,6 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             flatten->Query(
                 line_dists.data(), computer, to_be_visited_id.data(), count_no_visited, ctx);
         }
-
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
             const auto cur_id = to_be_visited_id[i];
@@ -568,9 +569,11 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         return top_candidates;
     }
 
-    ComputerInterfacePtr computer = nullptr;
-    if (not use_custom_distance) {
-        computer = preset_computer != nullptr ? preset_computer : flatten->FactoryComputer(query);
+    ComputerLease computer_lease;
+    ComputerInterfacePtr computer = preset_computer;
+    if (not use_custom_distance and computer == nullptr) {
+        computer_lease = AcquireQueryComputer(flatten, query, ctx);
+        computer = computer_lease.computer;
     }
 
     auto is_id_allowed = inner_search_param.is_inner_id_allowed;
