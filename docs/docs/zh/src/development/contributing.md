@@ -91,26 +91,8 @@ Assisted-by: OpenCode:claude-opus-4.7
 
 ### 编码风格
 
-VSAG 项目编码风格基于 [Google C++ 风格指南](https://google.github.io/styleguide/cppguide.html) 做了一些修改，包括缩进、命名规则、行宽等，具体可以参考以下两个配置文件：
-
-- clang-format：https://github.com/antgroup/vsag/blob/main/.clang-format
-- clang-tidy：https://github.com/antgroup/vsag/blob/main/.clang-tidy
-
-> clang-tidy 是一个静态代码分析的工具，配置文件中不仅定义了函数/变量的命名标准，定义了一些编码风格的检查，例如 Magic Number 使用的检查等。
-
-VSAG 项目通过 Makefile 提供了格式化代码的命令，需要安装 clang-format 和 clang-tidy。
-
-运行命令可以直接格式化代码：
-
-```bash
-make fmt
-```
-
-运行命令会静态代码检查，需要根据提示手动修复：
-
-```bash
-make lint
-```
+修改 C++ 代码前，请阅读 [C++ 编码指南](coding_style.md)。其中说明了 VSAG 要求的
+clang-format 15 和 clang-tidy 15 规则、命名约定、诊断抑制方式以及本地检查命令。
 
 ### 本地测试
 
@@ -119,4 +101,3 @@ VSAG 项目使用 Makefile 提供了方便运行所有测试的命令，请执�
 ```bash
 make test
 ```
-
