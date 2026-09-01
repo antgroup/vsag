@@ -30,7 +30,6 @@
 namespace vsag {
 
 namespace {
-std::once_flag async_io_fallback_warn_once;
 std::once_flag uring_io_fallback_warn_once;
 }  // namespace
 
@@ -49,45 +48,48 @@ IOParameter::GetIOParameterByJson(const JsonType& json) {
     IOParamPtr io_ptr = nullptr;
     try {
         auto type_name = Parameter::TryToParseType(json);
-        if (type_name == IO_TYPE_VALUE_MEMORY_IO) {
-            io_ptr = std::make_shared<MemoryIOParameter>();
-            io_ptr->FromJson(json);
-        } else if (type_name == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
-            io_ptr = std::make_shared<MemoryBlockIOParameter>();
-            io_ptr->FromJson(json);
-        } else if (type_name == IO_TYPE_VALUE_BUFFER_IO) {
-            io_ptr = std::make_shared<BufferIOParameter>();
-            io_ptr->FromJson(json);
-        } else if (type_name == IO_TYPE_VALUE_ASYNC_IO) {
-#if HAVE_LIBAIO
-            io_ptr = std::make_shared<AsyncIOParameter>();
-#else
-            std::call_once(async_io_fallback_warn_once, []() {
-                logger::warn("libaio is unavailable, async_io is falling back to buffer_io");
-            });
-            io_ptr = std::make_shared<BufferIOParameter>();
+        switch (KindFromName(type_name)) {
+            case IOKind::MEMORY:
+                io_ptr = std::make_shared<MemoryIOParameter>();
+                io_ptr->FromJson(json);
+                break;
+            case IOKind::BLOCK_MEMORY:
+                io_ptr = std::make_shared<MemoryBlockIOParameter>();
+                io_ptr->FromJson(json);
+                break;
+            case IOKind::BUFFER:
+                io_ptr = std::make_shared<BufferIOParameter>();
+                io_ptr->FromJson(json);
+                break;
+            case IOKind::ASYNC:
+                io_ptr = std::make_shared<AsyncIOParameter>();
+                io_ptr->FromJson(json);
+                break;
+            case IOKind::URING:
+                // Validate uring_io-specific keys even in fallback builds
+                if (json.Contains(IO_DIRECT_READ_KEY)) {
+                    CHECK_ARGUMENT(json[IO_DIRECT_READ_KEY].IsBool(),
+                                   "direct_read must be a boolean");
+                }
+#if !HAVE_LIBURING
+                std::call_once(uring_io_fallback_warn_once, []() {
+                    logger::warn(
+                        "liburing is unavailable, uring_io is using its buffered fallback backend");
+                });
 #endif
-            io_ptr->FromJson(json);
-        } else if (type_name == IO_TYPE_VALUE_URING_IO) {
-            // Validate uring_io-specific keys even in fallback builds
-            if (json.Contains(IO_DIRECT_READ_KEY)) {
-                CHECK_ARGUMENT(json[IO_DIRECT_READ_KEY].IsBool(), "direct_read must be a boolean");
-            }
-#if HAVE_LIBURING
-            io_ptr = std::make_shared<UringIOParameter>();
-#else
-            std::call_once(uring_io_fallback_warn_once, []() {
-                logger::warn("liburing is unavailable, uring_io is falling back to buffer_io");
-            });
-            io_ptr = std::make_shared<BufferIOParameter>();
-#endif
-            io_ptr->FromJson(json);
-        } else if (type_name == IO_TYPE_VALUE_MMAP_IO) {
-            io_ptr = std::make_shared<MMapIOParameter>();
-            io_ptr->FromJson(json);
-        } else if (type_name == IO_TYPE_VALUE_READER_IO) {
-            io_ptr = std::make_shared<ReaderIOParameter>();
-            io_ptr->FromJson(json);
+                io_ptr = std::make_shared<UringIOParameter>();
+                io_ptr->FromJson(json);
+                break;
+            case IOKind::MMAP:
+                io_ptr = std::make_shared<MMapIOParameter>();
+                io_ptr->FromJson(json);
+                break;
+            case IOKind::READER:
+                io_ptr = std::make_shared<ReaderIOParameter>();
+                io_ptr->FromJson(json);
+                break;
+            case IOKind::UNKNOWN:
+                break;
         }
     } catch (std::invalid_argument& error) {
         return nullptr;
@@ -119,6 +121,38 @@ IOParameter::AppendReadCacheConfig(JsonType& json) const {
         json[READ_CACHE_TOTAL_CACHE_SIZE_KEY].SetUint64(read_cache_total_size_);
     }
 }
+
+IOKind
+IOParameter::KindFromName(std::string_view name) {
+    if (name == IO_TYPE_VALUE_MEMORY_IO) {
+        return IOKind::MEMORY;
+    }
+    if (name == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
+        return IOKind::BLOCK_MEMORY;
+    }
+    if (name == IO_TYPE_VALUE_MMAP_IO) {
+        return IOKind::MMAP;
+    }
+    if (name == IO_TYPE_VALUE_BUFFER_IO) {
+        return IOKind::BUFFER;
+    }
+    if (name == IO_TYPE_VALUE_ASYNC_IO) {
+        return IOKind::ASYNC;
+    }
+    if (name == IO_TYPE_VALUE_URING_IO) {
+        return IOKind::URING;
+    }
+    if (name == IO_TYPE_VALUE_READER_IO) {
+        return IOKind::READER;
+    }
+    return IOKind::UNKNOWN;
+}
+
+IOKind
+IOParameter::Kind() const {
+    return KindFromName(name_);
+}
+
 IOParameter::IOParameter(std::string name) : name_(std::move(name)) {
 }
 }  // namespace vsag

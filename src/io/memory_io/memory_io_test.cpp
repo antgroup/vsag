@@ -18,7 +18,7 @@
 #include <memory>
 
 #include "impl/allocator/safe_allocator.h"
-#include "io/common/basic_io_test.h"
+#include "io/common/io_contract_test.h"
 #include "unittest.h"
 
 using namespace vsag;

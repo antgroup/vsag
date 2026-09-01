@@ -16,12 +16,13 @@
 #pragma once
 
 #include <limits>
+#include <type_traits>
 
 #include "flatten_datacell.h"
 #include "flatten_interface.h"
 #include "inner_string_params.h"
-#include "io/common/basic_io.h"
 #include "io/memory_block_io/memory_block_io.h"
+#include "io/mmap_io/mmap_io.h"
 #include "layout/variable_record_layout.h"
 #include "quantization/sparse_quantization/sparse_quantizer.h"
 #include "vsag/dataset.h"
@@ -31,6 +32,8 @@ namespace vsag {
 template <typename QuantTmpl, typename IOTmpl>
 class SparseVectorDataCell : public FlattenInterface {
 public:
+    using ReadLease = typename IOTmpl::Lease;
+
     SparseVectorDataCell() = default;
 
     SparseVectorDataCell(const QuantizerParamPtr& quantization_param,
@@ -157,7 +160,7 @@ public:
     }
 
     inline void
-    SetIO(std::shared_ptr<BasicIO<IOTmpl>> io) {
+    SetIO(std::shared_ptr<IOTmpl> io) {
         layout_.Payload().SetIO(std::move(io));
     }
 
@@ -192,6 +195,9 @@ private:
 
     const uint8_t*
     get_codes_by_id_no_lock(InnerIdType id, bool& need_release) const;
+
+    [[nodiscard]] ReadLease
+    acquire_codes_by_id_no_lock(InnerIdType id) const;
 
 private:
     // Packed so each entry is exactly 12 bytes on disk and in the layout location table. The

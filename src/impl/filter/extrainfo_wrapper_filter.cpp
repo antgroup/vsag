@@ -19,12 +19,7 @@ namespace vsag {
 
 bool
 ExtraInfoWrapperFilter::CheckValid(int64_t id) const {
-    bool need_release = false;
-    const char* extra_info = extra_infos_->GetExtraInfoById(id, need_release);
-    bool valid = filter_impl_->CheckValid(extra_info);
-    if (need_release) {
-        extra_infos_->Release(extra_info);
-    }
-    return valid;
+    auto extra_info = extra_infos_->AcquireExtraInfoById(id);
+    return extra_info and filter_impl_->CheckValid(extra_info.Data());
 }
 }  // namespace vsag

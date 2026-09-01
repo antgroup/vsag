@@ -20,7 +20,7 @@
 #include <utility>
 
 #include "index_common_param.h"
-#include "io/common/basic_io.h"
+#include "io/common/io_parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "vsag_exception.h"
@@ -32,6 +32,7 @@ template <typename IOTmpl>
 class ByteRangeLayout {
 public:
     using IOType = IOTmpl;
+    using Lease = typename IOTmpl::Lease;
     static constexpr bool InMemory = IOTmpl::InMemory;
 
     ByteRangeLayout() = default;
@@ -41,7 +42,7 @@ public:
     }
 
     void
-    SetIO(std::shared_ptr<BasicIO<IOTmpl>> io) {
+    SetIO(std::shared_ptr<IOTmpl> io) {
         io_ = std::move(io);
     }
 
@@ -72,6 +73,14 @@ public:
             return nullptr;
         }
         return io_->Read(length, offset, need_release);
+    }
+
+    [[nodiscard]] Lease
+    Acquire(uint64_t offset, uint64_t length) const {
+        if (not IsValidRange(offset, length)) {
+            return {};
+        }
+        return io_->Acquire(offset, length);
     }
 
     bool
@@ -141,7 +150,7 @@ public:
 
     [[nodiscard]] uint64_t
     GetByteSize() const {
-        return io_->size_;
+        return io_->Size();
     }
 
 private:
@@ -151,7 +160,7 @@ private:
         return offset <= byte_size && length <= byte_size - offset;
     }
 
-    std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
+    std::shared_ptr<IOTmpl> io_{nullptr};
 };
 
 }  // namespace vsag

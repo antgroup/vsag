@@ -1246,17 +1246,13 @@ PyramidAnalyzer::get_node_neighbor_recall(const IndexNode* node,
             continue;
         }
 
-        bool need_release = false;
-        const auto* code = codes->GetCodesById(sample_id, need_release);
-        if (code == nullptr) {
+        auto code = codes->AcquireCodesById(sample_id);
+        if (not code) {
             continue;
         }
 
         Vector<float> query(dim_, allocator_);
-        codes->Decode(code, query.data());
-        if (need_release) {
-            codes->Release(code);
-        }
+        codes->Decode(code.Data(), query.data());
 
         Vector<float> distances(node_ids.size(), allocator_);
         auto computer = codes->FactoryComputer(query.data());

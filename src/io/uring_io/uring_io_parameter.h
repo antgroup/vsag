@@ -15,8 +15,6 @@
 
 #pragma once
 
-#if HAVE_LIBURING
-
 #include <string>
 
 #include "io/common/io_parameter.h"
@@ -40,11 +38,3 @@ public:
     bool direct_read_{false};
 };
 }  // namespace vsag
-
-#else
-#include "io/buffer_io/buffer_io_parameter.h"
-namespace vsag {
-using UringIOParameter = BufferIOParameter;
-using UringIOParameterPtr = std::shared_ptr<UringIOParameter>;
-}  // namespace vsag
-#endif  // HAVE_LIBURING

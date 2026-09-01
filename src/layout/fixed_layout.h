@@ -18,12 +18,10 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
-#include <type_traits>
 
 #include "common.h"
 #include "index_common_param.h"
-#include "io/common/basic_io.h"
-#include "io/memory_io/memory_io.h"
+#include "io/common/io_parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "vsag_exception.h"
@@ -31,7 +29,7 @@
 namespace vsag {
 
 /**
- * A fixed-size record layout backed by a concrete CRTP IO type.
+ * A fixed-size record layout backed by a concrete byte IO type.
  *
  * FixedLayout maps a logical record ID to the byte range
  * `[id * code_size, (id + 1) * code_size)`. It only organizes and transports
@@ -41,6 +39,7 @@ template <typename IOTmpl>
 class FixedLayout {
 public:
     using IOType = IOTmpl;
+    using Lease = typename IOTmpl::Lease;
     static constexpr bool InMemory = IOTmpl::InMemory;
 
     FixedLayout() = default;
@@ -66,7 +65,7 @@ public:
     }
 
     void
-    SetIO(std::shared_ptr<BasicIO<IOTmpl>> io) {
+    SetIO(std::shared_ptr<IOTmpl> io) {
         io_ = std::move(io);
     }
 
@@ -103,6 +102,16 @@ public:
     [[nodiscard]] const uint8_t*
     ReadRange(InnerIdType begin_id, uint64_t count, bool& need_release) const {
         return io_->Read(GetByteSize(count), GetOffset(begin_id), need_release);
+    }
+
+    [[nodiscard]] Lease
+    Acquire(InnerIdType id) const {
+        return io_->Acquire(GetOffset(id), code_size_);
+    }
+
+    [[nodiscard]] Lease
+    AcquireRange(InnerIdType begin_id, uint64_t count) const {
+        return io_->Acquire(GetOffset(begin_id), GetByteSize(count));
     }
 
     bool
@@ -145,22 +154,11 @@ public:
 
     void
     Move(InnerIdType from, InnerIdType to) {
-        bool need_release = false;
-        const auto* code = Read(from, need_release);
-        if (code == nullptr) {
+        auto lease = Acquire(from);
+        if (not lease) {
             throw VsagException(ErrorType::READ_ERROR, "failed to read fixed layout record");
         }
-        try {
-            Write(to, code);
-        } catch (...) {
-            if (need_release and code != nullptr) {
-                Release(code);
-            }
-            throw;
-        }
-        if (need_release and code != nullptr) {
-            Release(code);
-        }
+        Write(to, lease.Data());
     }
 
     void
@@ -188,10 +186,7 @@ public:
 
     [[nodiscard]] const uint8_t*
     TryGetContiguousData() const {
-        if constexpr (std::is_same_v<IOTmpl, MemoryIO>) {
-            return std::static_pointer_cast<MemoryIO>(io_)->GetReadOnlyRawData();
-        }
-        return nullptr;
+        return io_->GetReadOnlyRawData();
     }
 
 private:
@@ -226,7 +221,7 @@ private:
     }
 
     uint64_t code_size_{0};
-    std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
+    std::shared_ptr<IOTmpl> io_{nullptr};
 };
 
 }  // namespace vsag

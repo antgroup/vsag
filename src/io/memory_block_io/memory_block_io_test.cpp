@@ -18,7 +18,7 @@
 #include <memory>
 
 #include "impl/allocator/safe_allocator.h"
-#include "io/common/basic_io_test.h"
+#include "io/common/io_contract_test.h"
 #include "unittest.h"
 
 using namespace vsag;
@@ -27,6 +27,7 @@ auto block_memory_io_block_sizes = {1023, 4096, 123123, 1024 * 1024};
 
 TEST_CASE("MemoryBlockIO Read and Write Test", "[ut][MemoryBlockIO]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    REQUIRE_THROWS_AS(MemoryBlockIO(0, allocator.get()), VsagException);
     for (auto block_size : block_memory_io_block_sizes) {
         auto io = std::make_unique<MemoryBlockIO>(block_size, allocator.get());
         TestBasicReadWrite(*io);
@@ -49,18 +50,18 @@ TEST_CASE("MemoryBlockIO Shrink Test", "[ut][MemoryBlockIO]") {
 
     std::vector<uint8_t> data(10000, 0xAB);
     io->Write(data.data(), data.size(), 0);
-    REQUIRE(io->size_ == data.size());
+    REQUIRE(io->Size() == data.size());
 
     io->Shrink(5000);
-    REQUIRE(io->size_ == 5000);
+    REQUIRE(io->Size() == 5000);
 
     std::vector<uint8_t> read_data(5000);
     io->Read(5000, 0, read_data.data());
     REQUIRE(memcmp(read_data.data(), data.data(), 5000) == 0);
 
     io->Shrink(1000);
-    REQUIRE(io->size_ == 1000);
+    REQUIRE(io->Size() == 1000);
 
     io->Shrink(2000);
-    REQUIRE(io->size_ == 1000);
+    REQUIRE(io->Size() == 1000);
 }
