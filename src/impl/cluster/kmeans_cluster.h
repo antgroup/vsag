@@ -51,14 +51,6 @@ public:
 
 private:
     double
-    find_nearest_one_with_blas(const float* query,
-                               const uint64_t query_count,
-                               const uint64_t k,
-                               float* y_sqr,
-                               float* distances,
-                               Vector<int32_t>& labels);
-
-    double
     find_nearest_one_with_hgraph(const float* query,
                                  const uint64_t query_count,
                                  const uint64_t k,
@@ -84,8 +76,6 @@ private:
     const int32_t dim_{0};
 
     static constexpr uint64_t THRESHOLD_FOR_HGRAPH = 10000ULL;
-
-    static constexpr uint64_t QUERY_BS = 65536ULL;
 };
 
 }  // namespace vsag

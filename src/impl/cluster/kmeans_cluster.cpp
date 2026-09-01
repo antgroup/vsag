@@ -22,13 +22,15 @@
 #include "algorithm/inner_index_interface.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/blas/blas_function.h"
-#include "simd/amx_bf16_matmul.h"
+#include "nearest_centroid_assign.h"
 #include "simd/fp32_simd.h"
-#include "simd/simd_status.h"
-#include "utils/byte_buffer.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
+namespace {
+constexpr uint64_t QUERY_BS = 65536ULL;
+}  // namespace
+
 KMeansCluster::KMeansCluster(int32_t dim, Allocator* allocator, SafeThreadPoolPtr thread_pool)
     : dim_(dim), allocator_(allocator), thread_pool_(std::move(thread_pool)) {
     if (thread_pool_ == nullptr) {
@@ -85,10 +87,6 @@ KMeansCluster::Run(uint32_t k,
     double last_err = std::numeric_limits<double>::max();
     Vector<int32_t> labels(count, -1, this->allocator_);
     std::vector<std::future<void>> futures;
-    ByteBuffer y_sqr_buffer(static_cast<uint64_t>(k) * sizeof(float), allocator_);
-    ByteBuffer distances_buffer(static_cast<uint64_t>(k) * QUERY_BS * sizeof(float), allocator_);
-    auto* y_sqr = reinterpret_cast<float*>(y_sqr_buffer.data);
-    auto* distances = reinterpret_cast<float*>(distances_buffer.data);
 
     logger::trace("KMeansCluster::Run k: {}, count: {}, iter: {}", k, count, iter);
     if (k < THRESHOLD_FOR_HGRAPH) {
@@ -99,7 +97,14 @@ KMeansCluster::Run(uint32_t k,
 
     for (int it = 0; it < iter; ++it) {
         if (k < THRESHOLD_FOR_HGRAPH) {
-            total_err = this->find_nearest_one_with_blas(datas, count, k, y_sqr, distances, labels);
+            total_err = NearestCentroidAssign(k_centroids_,
+                                              k,
+                                              datas,
+                                              count,
+                                              static_cast<uint64_t>(dim_),
+                                              thread_pool_,
+                                              allocator_,
+                                              labels.data());
         } else {
             total_err = this->find_nearest_one_with_hgraph(datas, count, k, labels);
         }
@@ -187,121 +192,6 @@ KMeansCluster::Run(uint32_t k,
         *err = total_err;
     }
     return labels;
-}
-
-double
-KMeansCluster::find_nearest_one_with_blas(const float* query,
-                                          const uint64_t query_count,
-                                          const uint64_t k,
-                                          float* y_sqr,
-                                          float* distances,
-                                          Vector<int32_t>& labels) {
-    double error = 0.0;
-    std::mutex error_mutex;
-    if (k_centroids_ == nullptr) {
-        throw VsagException(ErrorType::INTERNAL_ERROR, "k_centroids_ is nullptr");
-    }
-
-    auto& thread_pool = this->thread_pool_;
-    auto bs = 1024;
-    std::vector<std::future<void>> futures;
-
-    auto wait_futures_and_clear = [&]() {
-        for (auto& future : futures) {
-            future.wait();
-        }
-        futures.clear();
-    };
-
-    auto compute_ip_func = [&](uint64_t start, uint64_t end) -> void {
-        for (uint64_t i = start; i < end; ++i) {
-            y_sqr[i] = FP32ComputeIP(k_centroids_ + i * dim_, k_centroids_ + i * dim_, dim_);
-        }
-    };
-    for (uint64_t i = 0; i < static_cast<uint64_t>(k); i += bs) {
-        futures.emplace_back(thread_pool->GeneralEnqueue(
-            compute_ip_func, i, std::min(i + bs, static_cast<uint64_t>(k))));
-    }
-    wait_futures_and_clear();
-
-    for (uint64_t i = 0; i < query_count; i += QUERY_BS) {
-        auto end = std::min(i + QUERY_BS, query_count);
-        auto cur_query_count = end - i;
-        auto* cur_label = labels.data() + i;
-
-        // Try the AMX BF16 GEMM fast path first.  It returns false if
-        // AMX-BF16 isn't available at runtime; in that case (or when the
-        // shape is too small to amortize tile-config / packing overhead)
-        // fall back to the BLAS SGEMM path.
-        //
-        // Math equivalence:
-        //   SGEMM(ColMajor, Trans, NoTrans, M=k, N=cur_query_count, K=dim,
-        //         alpha=-2, A=k_centroids_ (lda=dim), B=query+i*dim (ldb=dim),
-        //         beta=0, C=distances (ldc=k))
-        //   produces  distances[m + n*k] = -2 * < centroid_m, query_{i+n} >
-        // The AMX kernel takes the same inputs interpreted as row-major
-        // (k x dim) and (cur_query_count x dim) and writes the same
-        // column-major output.
-        constexpr uint64_t amx_bf16_min_dim = 32;
-        constexpr uint64_t amx_bf16_min_m = 16;
-        constexpr uint64_t amx_bf16_min_n = 16;
-        bool used_amx = false;
-        if (static_cast<uint64_t>(dim_) >= amx_bf16_min_dim &&
-            static_cast<uint64_t>(k) >= amx_bf16_min_m && cur_query_count >= amx_bf16_min_n &&
-            SimdStatus::SupportAMXBF16()) {
-            used_amx = amx::SgemmBF16IPColMajorOut(static_cast<int64_t>(k),
-                                                   static_cast<int64_t>(cur_query_count),
-                                                   static_cast<int64_t>(dim_),
-                                                   -2.0F,
-                                                   k_centroids_,
-                                                   query + i * dim_,
-                                                   distances,
-                                                   static_cast<int64_t>(k));
-        }
-        if (!used_amx) {
-            BlasFunction::Sgemm(BlasFunction::ColMajor,
-                                BlasFunction::Trans,
-                                BlasFunction::NoTrans,
-                                static_cast<int32_t>(k),
-                                static_cast<int32_t>(cur_query_count),
-                                dim_,
-                                -2.0F,
-                                k_centroids_,
-                                dim_,
-                                query + i * dim_,
-                                dim_,
-                                0.0F,
-                                distances,
-                                static_cast<int32_t>(k));
-        }
-
-        auto batch_offset = i;
-        auto assign_labels_func = [&, batch_offset](uint64_t start, uint64_t end) -> void {
-            omp_set_num_threads(1);
-            double thread_local_error = 0.0;
-            for (uint64_t i = start; i < end; ++i) {
-                BlasFunction::Saxpy(static_cast<int32_t>(k), 1.0, y_sqr, 1, distances + i * k, 1);
-                auto* min_elem = std::min_element(distances + i * k, distances + i * k + k);
-                auto x_sqr = FP32ComputeIP(
-                    query + (batch_offset + i) * dim_, query + (batch_offset + i) * dim_, dim_);
-                auto min_index = std::distance(distances + i * k, min_elem);
-                thread_local_error += static_cast<double>(*min_elem + x_sqr);
-                if (min_index != cur_label[i]) {
-                    cur_label[i] = static_cast<int>(min_index);
-                }
-            }
-            {
-                std::lock_guard<std::mutex> lock(error_mutex);
-                error += thread_local_error;
-            }
-        };
-        for (uint64_t j = 0; j < cur_query_count; j += bs) {
-            futures.emplace_back(thread_pool->GeneralEnqueue(
-                assign_labels_func, j, std::min(j + bs, cur_query_count)));
-        }
-        wait_futures_and_clear();
-    }
-    return error / static_cast<float>(query_count);
 }
 
 double
