@@ -33,6 +33,7 @@ JsonType
 INT8QuantizerParameter::ToJson() const {
     JsonType json;
     json[TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_INT8);
+    json[HOLD_MOLDS].SetBool(hold_molds);
     return json;
 }
 }  // namespace vsag

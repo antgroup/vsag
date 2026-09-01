@@ -95,6 +95,19 @@ TEST_CASE("TQ parameter Split Merge String Test", "[ut][TransformQuantizerParame
     REQUIRE(str == recover_str);
 }
 
+TEST_CASE("Generic quantizer CreateDefault rejects TQ without a chain",
+          "[ut][TransformQuantizerParameter]") {
+    REQUIRE_THROWS(QuantizerParameter::CreateDefault(QUANTIZATION_TYPE_VALUE_TQ));
+}
+
+TEST_CASE("TQ CreateDefault normalizes chain whitespace", "[ut][TransformQuantizerParameter]") {
+    const auto compact = TransformQuantizerParameter::CreateDefault("mrle,rabitq")->ToJson();
+    const auto spaced = TransformQuantizerParameter::CreateDefault(" mrle, rabitq ")->ToJson();
+    REQUIRE(spaced[TQ_CHAIN_KEY].GetString() == "mrle,rabitq");
+    REQUIRE(spaced[TYPE_KEY].GetString() == QUANTIZATION_TYPE_VALUE_TQ);
+    REQUIRE(spaced.Dump() == compact.Dump());
+}
+
 TEST_CASE("Invalid Cases Test", "[ut][TransformQuantizerParameter]") {
     static constexpr const char* param_template = R"(
         {{

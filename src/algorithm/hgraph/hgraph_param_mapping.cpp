@@ -14,680 +14,311 @@
 
 #include <fmt/format.h>
 
+#include <nlohmann/json.hpp>
+
 #include "common.h"
 #include "datacell/graph_datacell_parameter.h"
 #include "hgraph.h"  // IWYU pragma: keep
 #include "hgraph_parameter.h"
+#include "io/common/io_parameter.h"
+#include "quantization/transform_quantization/transform_quantizer_parameter.h"
 
 namespace vsag {
+
+namespace {
+
+JsonType
+build_default_io_param(const std::string& io_type = IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
+    return IOParameter::CreateDefault(io_type)->ToJson();
+}
+
+JsonType
+build_default_flatten_param(const std::string& quantization_type,
+                            const std::string& io_type,
+                            const std::string& tq_chain = "",
+                            bool hold_molds = false) {
+    auto parameter = FlattenDataCellParameter::CreateDefault(
+        quantization_type == QUANTIZATION_TYPE_VALUE_TQ ? QUANTIZATION_TYPE_VALUE_FP32
+                                                        : quantization_type,
+        io_type,
+        hold_molds);
+    if (quantization_type == QUANTIZATION_TYPE_VALUE_TQ) {
+        parameter->quantizer_parameter = TransformQuantizerParameter::CreateDefault(tq_chain);
+    }
+    auto json = parameter->ToJson();
+    json[QUANTIZATION_PARAMS_KEY].SetJson(
+        ApplyHoldMoldsToQuantizer(json[QUANTIZATION_PARAMS_KEY], hold_molds));
+    return json;
+}
+
+JsonType
+build_default_hgraph_inner_param(const JsonType& external_json) {
+    const auto base_quantization_type =
+        external_json.Contains(HGRAPH_BASE_QUANTIZATION_TYPE)
+            ? external_json[HGRAPH_BASE_QUANTIZATION_TYPE].GetString()
+            : std::string(QUANTIZATION_TYPE_VALUE_FP32);
+    const auto precise_quantization_type =
+        external_json.Contains(HGRAPH_PRECISE_QUANTIZATION_TYPE)
+            ? external_json[HGRAPH_PRECISE_QUANTIZATION_TYPE].GetString()
+            : std::string(QUANTIZATION_TYPE_VALUE_FP32);
+    const auto base_io_type = external_json.Contains(HGRAPH_BASE_IO_TYPE)
+                                  ? external_json[HGRAPH_BASE_IO_TYPE].GetString()
+                                  : std::string(IO_TYPE_VALUE_BLOCK_MEMORY_IO);
+    const auto precise_io_type = external_json.Contains(HGRAPH_PRECISE_IO_TYPE)
+                                     ? external_json[HGRAPH_PRECISE_IO_TYPE].GetString()
+                                     : std::string(IO_TYPE_VALUE_BLOCK_MEMORY_IO);
+    const auto graph_io_type = external_json.Contains(HGRAPH_GRAPH_IO_TYPE)
+                                   ? external_json[HGRAPH_GRAPH_IO_TYPE].GetString()
+                                   : std::string(IO_TYPE_VALUE_BLOCK_MEMORY_IO);
+    const auto tq_chain = external_json.Contains(INDEX_TQ_CHAIN)
+                              ? external_json[INDEX_TQ_CHAIN].GetString()
+                              : std::string();
+    JsonType json;
+    json[TYPE_KEY].SetString(INDEX_TYPE_HGRAPH);
+    json[USE_REORDER_KEY].SetBool(false);
+    json[HGRAPH_USE_ELP_OPTIMIZER_KEY].SetBool(false);
+    json[HGRAPH_IGNORE_REORDER_KEY].SetBool(false);
+    json[HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY].SetBool(false);
+    json[HGRAPH_RABITQ_FUSED_DATACELL_KEY].SetBool(false);
+    json[RESIZE_INCREASE_COUNT_BIT].SetUint64(DEFAULT_RESIZE_INCREASE_COUNT_BIT);
+    json[USE_ATTRIBUTE_FILTER_KEY].SetBool(false);
+
+    JsonType graph;
+    graph[IO_PARAMS_KEY].SetJson(build_default_io_param(graph_io_type));
+    graph[HGRAPH_USE_REVERSE_EDGES_KEY].SetBool(false);
+    graph[GRAPH_TYPE_KEY].SetString(GRAPH_TYPE_VALUE_NSW);
+    graph[GRAPH_STORAGE_TYPE_KEY].SetString(GRAPH_STORAGE_TYPE_VALUE_FLAT);
+    graph[ODESCENT_PARAMETER_BUILD_BLOCK_SIZE].SetInt(10000);
+    graph[ODESCENT_PARAMETER_MIN_IN_DEGREE].SetInt(1);
+    graph[ODESCENT_PARAMETER_ALPHA].SetFloat(1.2F);
+    graph[ODESCENT_PARAMETER_GRAPH_ITER_TURN].SetInt(30);
+    graph[ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE].SetFloat(0.2F);
+    graph[GRAPH_PARAM_MAX_DEGREE_KEY].SetInt(64);
+    graph[GRAPH_PARAM_INIT_MAX_CAPACITY_KEY].SetInt(100);
+    graph[GRAPH_SUPPORT_REMOVE].SetBool(false);
+    graph[REMOVE_FLAG_BIT].SetInt(8);
+    graph[SUPPORT_DUPLICATE].SetBool(false);
+    json[GRAPH_KEY].SetJson(graph);
+
+    json[BASE_CODES_KEY].SetJson(
+        build_default_flatten_param(base_quantization_type, base_io_type, tq_chain));
+    json[PRECISE_CODES_KEY].SetJson(
+        build_default_flatten_param(precise_quantization_type, precise_io_type));
+    json[RAW_VECTOR_KEY].SetJson(build_default_flatten_param(
+        QUANTIZATION_TYPE_VALUE_FP32, IO_TYPE_VALUE_BLOCK_MEMORY_IO, "", true));
+    json[STORE_RAW_VECTOR_KEY].SetBool(false);
+    json[LABEL_REMAP_TYPE_KEY].SetString(LABEL_REMAP_TYPE_VALUE_PG);
+    json[BUILD_THREAD_COUNT_KEY].SetInt(100);
+
+    JsonType extra_info;
+    extra_info[IO_PARAMS_KEY].SetJson(build_default_io_param());
+    json[EXTRA_INFO_KEY].SetJson(extra_info);
+    JsonType attr;
+    attr[ATTR_HAS_BUCKETS_KEY].SetBool(false);
+    json[ATTR_PARAMS_KEY].SetJson(attr);
+
+    json[SUPPORT_DUPLICATE].SetBool(false);
+    json[DEDUPLICATE_STORAGE].SetBool(false);
+    json[SUPPORT_FORCE_REMOVE].SetBool(false);
+    json[HGRAPH_PERSIST_SOURCE_ID_KEY].SetBool(false);
+    json[EF_CONSTRUCTION_KEY].SetInt(400);
+    return json;
+}
+
+}  // namespace
 
 JsonType
 HGraph::map_hgraph_param(const JsonType& hgraph_json) {
     CHECK_ARGUMENT(not hgraph_json.Contains(HGRAPH_MCI_KEY),
                    "nested hgraph mci parameters are not supported; use flat mci_* parameters");
-    static const ConstParamMap external_mapping = {
-        {
-            HGRAPH_USE_REORDER,
-            {
-                USE_REORDER_KEY,
-            },
-        },
-        {
-            HGRAPH_REORDER_SOURCE,
-            {
-                REORDER_SOURCE_KEY,
-            },
-        },
-        {
-            HGRAPH_USE_ELP_OPTIMIZER,
-            {
-                HGRAPH_USE_ELP_OPTIMIZER_KEY,
-            },
-        },
-        {
-            HGRAPH_USE_REVERSE_EDGES,
-            {
-                GRAPH_KEY,
-                HGRAPH_USE_REVERSE_EDGES_KEY,
-            },
-        },
-        {
-            HGRAPH_IGNORE_REORDER,
-            {
-                HGRAPH_IGNORE_REORDER_KEY,
-            },
-        },
-        {
-            HGRAPH_BUILD_BY_BASE_QUANTIZATION,
-            {
-                HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY,
-            },
-        },
-        {
-            HGRAPH_RABITQ_FUSED_DATACELL,
-            {
-                HGRAPH_RABITQ_FUSED_DATACELL_KEY,
-            },
-        },
-        {
-            USE_ATTRIBUTE_FILTER,
-            {
-                USE_ATTRIBUTE_FILTER_KEY,
-            },
-        },
-        {
-            HGRAPH_BASE_QUANTIZATION_TYPE,
-            {
-                BASE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                TYPE_KEY,
-            },
-        },
-        {
-            STORE_RAW_VECTOR,
-            {
-                BASE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                HOLD_MOLDS,
-            },
-        },
-        {
-            HGRAPH_BASE_IO_TYPE,
-            {
-                BASE_CODES_KEY,
-                IO_PARAMS_KEY,
-                TYPE_KEY,
-            },
-        },
-        {
-            HGRAPH_BASE_SUPPLEMENT_IO_TYPE,
-            {
-                BASE_CODES_KEY,
-                SUPPLEMENT_IO_PARAMS_KEY,
-                TYPE_KEY,
-            },
-        },
-        {
-            HGRAPH_BASE_SUPPLEMENT_FILE_PATH,
-            {
-                BASE_CODES_KEY,
-                SUPPLEMENT_IO_PARAMS_KEY,
-                IO_FILE_PATH_KEY,
-            },
-        },
-        {
-            HGRAPH_PRECISE_IO_TYPE,
-            {
-                PRECISE_CODES_KEY,
-                IO_PARAMS_KEY,
-                TYPE_KEY,
-            },
-        },
-        {
-            HGRAPH_BASE_FILE_PATH,
-            {
-                BASE_CODES_KEY,
-                IO_PARAMS_KEY,
-                IO_FILE_PATH_KEY,
-            },
-        },
-        // clang-format off
-        {
-            HGRAPH_BASE_DIRECT_READ,
-            {
-                BASE_CODES_KEY,
-                IO_PARAMS_KEY,
-                IO_DIRECT_READ_KEY,
-            },
-        },
-        {
-            HGRAPH_BASE_CACHE_TOTAL_SIZE,
-            {
-                BASE_CODES_KEY,
-                IO_PARAMS_KEY,
-                READ_CACHE_TOTAL_CACHE_SIZE_KEY,
-            },
-        },
-        {
-            HGRAPH_PRECISE_FILE_PATH,
-            {
-                PRECISE_CODES_KEY,
-                IO_PARAMS_KEY,
-                IO_FILE_PATH_KEY,
-            },
-        },
-        {
-            HGRAPH_PRECISE_DIRECT_READ,
-            {
-                PRECISE_CODES_KEY,
-                IO_PARAMS_KEY,
-                IO_DIRECT_READ_KEY,
-            },
-        },
-        {
-            HGRAPH_PRECISE_CACHE_TOTAL_SIZE,
-            {
-                PRECISE_CODES_KEY,
-                IO_PARAMS_KEY,
-                READ_CACHE_TOTAL_CACHE_SIZE_KEY,
-            },
-        },
-        // clang-format on
-        {
-            HGRAPH_PRECISE_QUANTIZATION_TYPE,
-            {
-                PRECISE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                TYPE_KEY,
-            },
-        },
-        {
-            HGRAPH_GRAPH_IO_TYPE,
-            {
-                GRAPH_KEY,
-                IO_PARAMS_KEY,
-                TYPE_KEY,
-            },
-        },
-        {
-            HGRAPH_GRAPH_FILE_PATH,
-            {
-                GRAPH_KEY,
-                IO_PARAMS_KEY,
-                IO_FILE_PATH_KEY,
-            },
-        },
-        {
-            HGRAPH_GRAPH_CACHE_TOTAL_SIZE,
-            {
-                GRAPH_KEY,
-                IO_PARAMS_KEY,
-                READ_CACHE_TOTAL_CACHE_SIZE_KEY,
-            },
-        },
-        {
-            STORE_RAW_VECTOR,
-            {
-                PRECISE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                HOLD_MOLDS,
-            },
-        },
-        {
-            STORE_RAW_VECTOR,
-            {
-                STORE_RAW_VECTOR_KEY,
-            },
-        },
-        {
-            RAW_VECTOR_IO_TYPE,
-            {
-                RAW_VECTOR_KEY,
-                IO_PARAMS_KEY,
-                TYPE_KEY,
-            },
-        },
-        {
-            RAW_VECTOR_FILE_PATH,
-            {
-                RAW_VECTOR_KEY,
-                IO_PARAMS_KEY,
-                IO_FILE_PATH_KEY,
-            },
-        },
-        {
-            HGRAPH_GRAPH_MAX_DEGREE,
-            {
-                GRAPH_KEY,
-                GRAPH_PARAM_MAX_DEGREE_KEY,
-            },
-        },
-        {
-            HGRAPH_BUILD_EF_CONSTRUCTION,
-            {
-                EF_CONSTRUCTION_KEY,
-            },
-        },
-        {
-            HGRAPH_BUILD_ALPHA,
-            {
-                ALPHA_KEY,
-            },
-        },
-        {
-            HGRAPH_INIT_CAPACITY,
-            {
-                GRAPH_KEY,
-                GRAPH_PARAM_INIT_MAX_CAPACITY_KEY,
-            },
-        },
-        {
-            RESIZE_INCREASE_COUNT_BIT,
-            {
-                RESIZE_INCREASE_COUNT_BIT,
-            },
-        },
-        {
-            HGRAPH_GRAPH_TYPE,
-            {
-                GRAPH_KEY,
-                GRAPH_TYPE_KEY,
-            },
-        },
-        {
-            HGRAPH_GRAPH_STORAGE_TYPE,
-            {
-                GRAPH_KEY,
-                GRAPH_STORAGE_TYPE_KEY,
-            },
-        },
-        {
-            ODESCENT_PARAMETER_ALPHA,
-            {
-                GRAPH_KEY,
-                ODESCENT_PARAMETER_ALPHA,
-            },
-        },
-        {
-            ODESCENT_PARAMETER_GRAPH_ITER_TURN,
-            {
-                GRAPH_KEY,
-                ODESCENT_PARAMETER_GRAPH_ITER_TURN,
-            },
-        },
-        {
-            ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
-            {
-                GRAPH_KEY,
-                ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
-            },
-        },
-        {
-            ODESCENT_PARAMETER_MIN_IN_DEGREE,
-            {
-                GRAPH_KEY,
-                ODESCENT_PARAMETER_MIN_IN_DEGREE,
-            },
-        },
-        {
-            ODESCENT_PARAMETER_BUILD_BLOCK_SIZE,
-            {
-                GRAPH_KEY,
-                ODESCENT_PARAMETER_BUILD_BLOCK_SIZE,
-            },
-        },
-        {
-            HGRAPH_BUILD_THREAD_COUNT,
-            {
-                BUILD_THREAD_COUNT_KEY,
-            },
-        },
-        {
-            TRAIN_SAMPLE_COUNT_KEY,
-            {
-                TRAIN_SAMPLE_COUNT_KEY,
-            },
-        },
-        {
-            SQ4_UNIFORM_TRUNC_RATE,
-            {
-                BASE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY,
-            },
-        },
-        {
-            RABITQ_PCA_DIM,
-            {
-                BASE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                PCA_DIM_KEY,
-            },
-        },
-        {
-            INDEX_TQ_CHAIN,
-            {
-                BASE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                TQ_CHAIN_KEY,
-            },
-        },
-        {
-            INDEX_MRLE_DIM,
-            {
-                BASE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                MRLE_DIM_KEY,
-            },
-        },
-        {
-            RABITQ_BITS_PER_DIM_QUERY,
-            {
-                BASE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY,
-            },
-        },
-        {
-            RABITQ_BITS_PER_DIM_BASE,
-            {
-                BASE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY,
-            },
-        },
-        {
-            RABITQ_BITS_PER_DIM_PRECISE,
-            {
-                PRECISE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY,
-            },
-        },
-        {
-            RABITQ_ERROR_RATE,
-            {
-                BASE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                RABITQ_QUANTIZATION_ERROR_RATE_KEY,
-            },
-        },
-        {
-            HGRAPH_BASE_PQ_DIM,
-            {
-                BASE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                PRODUCT_QUANTIZATION_DIM_KEY,
-            },
-        },
-        {
-            RABITQ_USE_FHT,
-            {
-                BASE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                USE_FHT_KEY,
-            },
-        },
-        {
-            FAST_ENCODE_RABITQ,
-            {
-                BASE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                FAST_ENCODE_RABITQ_KEY,
-            },
-        },
-        {
-            FAST_ENCODE_RABITQ,
-            {
-                PRECISE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                FAST_ENCODE_RABITQ_KEY,
-            },
-        },
-        {
-            FAST_ENCODE_RABITQ_ROUNDS,
-            {
-                BASE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                FAST_ENCODE_RABITQ_ROUNDS_KEY,
-            },
-        },
-        {
-            FAST_ENCODE_RABITQ_ROUNDS,
-            {
-                PRECISE_CODES_KEY,
-                QUANTIZATION_PARAMS_KEY,
-                FAST_ENCODE_RABITQ_ROUNDS_KEY,
-            },
-        },
-        {
-            HGRAPH_SUPPORT_REMOVE,
-            {GRAPH_KEY, GRAPH_SUPPORT_REMOVE},
-        },
-        {
-            HGRAPH_SUPPORT_FORCE_REMOVE,
-            {
-                SUPPORT_FORCE_REMOVE,
-            },
-        },
-        {
-            HGRAPH_REMOVE_FLAG_BIT,
-            {GRAPH_KEY, REMOVE_FLAG_BIT},
-        },
-        {
-            HGRAPH_SUPPORT_DUPLICATE,
-            {
-                SUPPORT_DUPLICATE,
-            },
-        },
-        {
-            HGRAPH_DEDUPLICATE_STORAGE,
-            {
-                DEDUPLICATE_STORAGE,
-            },
-        },
-        {
-            HGRAPH_DUPLICATE_DISTANCE_THRESHOLD,
-            {
-                DUPLICATE_DISTANCE_THRESHOLD,
-            },
-        },
-        {
-            HGRAPH_SUPPORT_DUPLICATE,
-            {
-                GRAPH_KEY,
-                SUPPORT_DUPLICATE,
-            },
-        },
-        {
-            HGRAPH_PERSIST_SOURCE_ID,
-            {
-                HGRAPH_PERSIST_SOURCE_ID_KEY,
-            },
-        },
-        {
-            PARAMETER_USE_CONJUGATE_GRAPH,
-            {
-                PARAMETER_USE_CONJUGATE_GRAPH,
-            },
-        },
-        {
-            HGRAPH_LABEL_REMAP_TYPE,
-            {
-                LABEL_REMAP_TYPE_KEY,
-            },
-        },
-        {
-            HGRAPH_USE_MCI,
-            {
-                HGRAPH_USE_MCI,
-            },
-        },
-        {
-            HGRAPH_MCI_MCS,
-            {
-                HGRAPH_MCI_MCS,
-            },
-        },
-        {
-            HGRAPH_MCI_CLIQUE_MAX,
-            {
-                HGRAPH_MCI_CLIQUE_MAX,
-            },
-        },
-        {
-            HGRAPH_MCI_ALPHA,
-            {
-                HGRAPH_MCI_ALPHA,
-            },
-        },
-        {
-            HGRAPH_MCI_KNNG_SOURCE,
-            {
-                HGRAPH_MCI_KNNG_SOURCE,
-            },
-        },
-        {
-            HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY,
-            {
-                HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY,
-            },
-        },
-        {
-            HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY,
-            {
-                HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY,
-            },
-        },
-        {
-            HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY,
-            {
-                HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY,
-            },
-        },
-        {
-            HGRAPH_BASE_ENABLE_READ_CACHE,
-            {
-                BASE_CODES_KEY,
-                IO_PARAMS_KEY,
-                READ_CACHE_ENABLED_KEY,
-            },
-        },
-        {
-            HGRAPH_PRECISE_ENABLE_READ_CACHE,
-            {
-                PRECISE_CODES_KEY,
-                IO_PARAMS_KEY,
-                READ_CACHE_ENABLED_KEY,
-            },
-        },
-        {
-            HGRAPH_GRAPH_ENABLE_READ_CACHE,
-            {
-                GRAPH_KEY,
-                IO_PARAMS_KEY,
-                READ_CACHE_ENABLED_KEY,
-            },
-        },
-        {
-            HGRAPH_RAW_VECTOR_ENABLE_READ_CACHE,
-            {
-                RAW_VECTOR_KEY,
-                IO_PARAMS_KEY,
-                READ_CACHE_ENABLED_KEY,
-            },
-        },
-        {
-            HGRAPH_RAW_VECTOR_CACHE_TOTAL_SIZE,
-            {
-                RAW_VECTOR_KEY,
-                IO_PARAMS_KEY,
-                READ_CACHE_TOTAL_CACHE_SIZE_KEY,
-            },
-        }};
-    const std::string hgraph_params_template =
-        R"(
-    {
-        "{TYPE_KEY}": "{INDEX_TYPE_HGRAPH}",
-        "{USE_REORDER_KEY}": false,
-        "{HGRAPH_USE_ENV_OPTIMIZER}": false,
-        "{HGRAPH_IGNORE_REORDER_KEY}": false,
-        "{HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY}": false,
-        "{HGRAPH_RABITQ_FUSED_DATACELL_KEY}": false,
-        "{RESIZE_INCREASE_COUNT_BIT}": {DEFAULT_RESIZE_INCREASE_COUNT_BIT},
-        "{HGRAPH_USE_ATTRIBUTE_FILTER_KEY}": false,
-        "{GRAPH_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{HGRAPH_USE_REVERSE_EDGES_KEY}": false,
-            "{GRAPH_TYPE_KEY}": "{GRAPH_TYPE_VALUE_NSW}",
-            "{GRAPH_STORAGE_TYPE_KEY}": "{GRAPH_STORAGE_TYPE_VALUE_FLAT}",
-            "{ODESCENT_PARAMETER_BUILD_BLOCK_SIZE}": 10000,
-            "{ODESCENT_PARAMETER_MIN_IN_DEGREE}": 1,
-            "{ODESCENT_PARAMETER_ALPHA}": 1.2,
-            "{ODESCENT_PARAMETER_GRAPH_ITER_TURN}": 30,
-            "{ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE}": 0.2,
-            "{GRAPH_PARAM_MAX_DEGREE_KEY}": 64,
-            "{GRAPH_PARAM_INIT_MAX_CAPACITY_KEY}": 100,
-            "{GRAPH_SUPPORT_REMOVE}": false,
-            "{REMOVE_FLAG_BIT}": 8,
-            "{SUPPORT_DUPLICATE}": false
-        },
-        "{BASE_CODES_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{CODES_TYPE_KEY}": "flatten",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
-                "{PCA_DIM_KEY}": 0,
-                "{RABITQ_QUANTIZATION_VERSION_KEY}": "standard",
-                "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}": 32,
-                "{RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY}": 1,
-                "{RABITQ_QUANTIZATION_ERROR_RATE_KEY}": 1.9,
-                "{FAST_ENCODE_RABITQ_KEY}": true,
-                "{FAST_ENCODE_RABITQ_ROUNDS_KEY}": 6,
-                "{TQ_CHAIN_KEY}": "",
-                "mrle_dim": 0,
-                "nbits": 8,
-                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
-                "{HOLD_MOLDS}": false
-            }
-        },
-        "{PRECISE_CODES_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{CODES_TYPE_KEY}": "flatten",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
-                "{FAST_ENCODE_RABITQ_KEY}": true,
-                "{FAST_ENCODE_RABITQ_ROUNDS_KEY}": 6,
-                "{PCA_DIM_KEY}": 0,
-                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
-                "{HOLD_MOLDS}": false
-            }
-        },
-        "{STORE_RAW_VECTOR_KEY}": false,
-        "{LABEL_REMAP_TYPE_KEY}": "{LABEL_REMAP_TYPE_VALUE_PG}",
-        "{RAW_VECTOR_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{CODES_TYPE_KEY}": "flatten",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{HOLD_MOLDS}": true
-            }
-        },
-        "{BUILD_THREAD_COUNT_KEY}": 100,
-        "{EXTRA_INFO_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            }
-        },
-        "{ATTR_PARAMS_KEY}": {
-            "{ATTR_HAS_BUCKETS_KEY}": false
-        },
-        "{HGRAPH_SUPPORT_DUPLICATE}": false,
-        "{HGRAPH_DEDUPLICATE_STORAGE}": false,
-        "{SUPPORT_FORCE_REMOVE}": false,
-        "{HGRAPH_PERSIST_SOURCE_ID_KEY}": false,
-        "{EF_CONSTRUCTION_KEY}": 400
-    })";
-
-    std::string str = format_map(hgraph_params_template, DEFAULT_MAP);
-    auto inner_json = JsonType::Parse(str);
-    mapping_external_param_to_inner(hgraph_json, external_mapping, inner_json);
-    MapRaBitQSplitParam(hgraph_json, inner_json);
+    const auto base_quantization_type = hgraph_json.Contains(HGRAPH_BASE_QUANTIZATION_TYPE)
+                                            ? hgraph_json[HGRAPH_BASE_QUANTIZATION_TYPE].GetString()
+                                            : std::string(QUANTIZATION_TYPE_VALUE_FP32);
+    if (base_quantization_type != QUANTIZATION_TYPE_VALUE_TQ) {
+        CHECK_ARGUMENT(not hgraph_json.Contains(INDEX_TQ_CHAIN),
+                       fmt::format("{} requires {}={}",
+                                   INDEX_TQ_CHAIN,
+                                   HGRAPH_BASE_QUANTIZATION_TYPE,
+                                   QUANTIZATION_TYPE_VALUE_TQ));
+        CHECK_ARGUMENT(not hgraph_json.Contains(INDEX_MRLE_DIM),
+                       fmt::format("{} requires {}={}",
+                                   INDEX_MRLE_DIM,
+                                   HGRAPH_BASE_QUANTIZATION_TYPE,
+                                   QUANTIZATION_TYPE_VALUE_TQ));
+    }
+    auto inner_json = build_default_hgraph_inner_param(hgraph_json);
+    for (const auto& [key, ignored] : hgraph_json.GetInnerJson()->items()) {
+        (void)ignored;
+        auto value = hgraph_json[key];
+        if (key == HGRAPH_USE_REORDER) {
+            inner_json[USE_REORDER_KEY].SetJson(value);
+        } else if (key == HGRAPH_REORDER_SOURCE) {
+            inner_json[REORDER_SOURCE_KEY].SetJson(value);
+        } else if (key == HGRAPH_USE_ELP_OPTIMIZER) {
+            inner_json[HGRAPH_USE_ELP_OPTIMIZER_KEY].SetJson(value);
+        } else if (key == HGRAPH_USE_REVERSE_EDGES) {
+            inner_json[GRAPH_KEY][HGRAPH_USE_REVERSE_EDGES_KEY].SetJson(value);
+        } else if (key == HGRAPH_IGNORE_REORDER) {
+            inner_json[HGRAPH_IGNORE_REORDER_KEY].SetJson(value);
+        } else if (key == HGRAPH_BUILD_BY_BASE_QUANTIZATION) {
+            inner_json[HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY].SetJson(value);
+        } else if (key == HGRAPH_RABITQ_FUSED_DATACELL) {
+            inner_json[HGRAPH_RABITQ_FUSED_DATACELL_KEY].SetJson(value);
+        } else if (key == USE_ATTRIBUTE_FILTER) {
+            inner_json[USE_ATTRIBUTE_FILTER_KEY].SetJson(value);
+        } else if (key == HGRAPH_BASE_QUANTIZATION_TYPE) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == STORE_RAW_VECTOR) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY].SetJson(ApplyHoldMoldsToQuantizer(
+                inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY], value.GetBool()));
+            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY].SetJson(
+                ApplyHoldMoldsToQuantizer(inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY],
+                                          value.GetBool()));
+            inner_json[STORE_RAW_VECTOR_KEY].SetJson(value);
+        } else if (key == HGRAPH_BASE_IO_TYPE) {
+            inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == HGRAPH_BASE_SUPPLEMENT_IO_TYPE) {
+            inner_json[BASE_CODES_KEY][SUPPLEMENT_IO_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == HGRAPH_BASE_SUPPLEMENT_FILE_PATH) {
+            inner_json[BASE_CODES_KEY][SUPPLEMENT_IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(value);
+        } else if (key == HGRAPH_PRECISE_IO_TYPE) {
+            inner_json[PRECISE_CODES_KEY][IO_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == HGRAPH_BASE_FILE_PATH) {
+            inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(value);
+        } else if (key == HGRAPH_BASE_DIRECT_READ) {
+            inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][IO_DIRECT_READ_KEY].SetJson(value);
+        } else if (key == HGRAPH_BASE_CACHE_TOTAL_SIZE) {
+            inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][READ_CACHE_TOTAL_CACHE_SIZE_KEY].SetJson(
+                value);
+        } else if (key == HGRAPH_PRECISE_FILE_PATH) {
+            inner_json[PRECISE_CODES_KEY][IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(value);
+        } else if (key == HGRAPH_PRECISE_DIRECT_READ) {
+            inner_json[PRECISE_CODES_KEY][IO_PARAMS_KEY][IO_DIRECT_READ_KEY].SetJson(value);
+        } else if (key == HGRAPH_PRECISE_CACHE_TOTAL_SIZE) {
+            inner_json[PRECISE_CODES_KEY][IO_PARAMS_KEY][READ_CACHE_TOTAL_CACHE_SIZE_KEY].SetJson(
+                value);
+        } else if (key == HGRAPH_PRECISE_QUANTIZATION_TYPE) {
+            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == HGRAPH_GRAPH_IO_TYPE) {
+            inner_json[GRAPH_KEY][IO_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == HGRAPH_GRAPH_FILE_PATH) {
+            inner_json[GRAPH_KEY][IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(value);
+        } else if (key == HGRAPH_GRAPH_CACHE_TOTAL_SIZE) {
+            inner_json[GRAPH_KEY][IO_PARAMS_KEY][READ_CACHE_TOTAL_CACHE_SIZE_KEY].SetJson(value);
+        } else if (key == RAW_VECTOR_IO_TYPE) {
+            inner_json[RAW_VECTOR_KEY][IO_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == RAW_VECTOR_FILE_PATH) {
+            inner_json[RAW_VECTOR_KEY][IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(value);
+        } else if (key == HGRAPH_GRAPH_MAX_DEGREE) {
+            inner_json[GRAPH_KEY][GRAPH_PARAM_MAX_DEGREE_KEY].SetJson(value);
+        } else if (key == HGRAPH_BUILD_EF_CONSTRUCTION) {
+            inner_json[EF_CONSTRUCTION_KEY].SetJson(value);
+        } else if (key == HGRAPH_BUILD_ALPHA) {
+            inner_json[ALPHA_KEY].SetJson(value);
+        } else if (key == HGRAPH_INIT_CAPACITY) {
+            inner_json[GRAPH_KEY][GRAPH_PARAM_INIT_MAX_CAPACITY_KEY].SetJson(value);
+        } else if (key == RESIZE_INCREASE_COUNT_BIT) {
+            inner_json[RESIZE_INCREASE_COUNT_BIT].SetJson(value);
+        } else if (key == HGRAPH_GRAPH_TYPE) {
+            inner_json[GRAPH_KEY][GRAPH_TYPE_KEY].SetJson(value);
+        } else if (key == HGRAPH_GRAPH_STORAGE_TYPE) {
+            inner_json[GRAPH_KEY][GRAPH_STORAGE_TYPE_KEY].SetJson(value);
+        } else if (key == ODESCENT_PARAMETER_ALPHA) {
+            inner_json[GRAPH_KEY][ODESCENT_PARAMETER_ALPHA].SetJson(value);
+        } else if (key == ODESCENT_PARAMETER_GRAPH_ITER_TURN) {
+            inner_json[GRAPH_KEY][ODESCENT_PARAMETER_GRAPH_ITER_TURN].SetJson(value);
+        } else if (key == ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE) {
+            inner_json[GRAPH_KEY][ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE].SetJson(value);
+        } else if (key == ODESCENT_PARAMETER_MIN_IN_DEGREE) {
+            inner_json[GRAPH_KEY][ODESCENT_PARAMETER_MIN_IN_DEGREE].SetJson(value);
+        } else if (key == ODESCENT_PARAMETER_BUILD_BLOCK_SIZE) {
+            inner_json[GRAPH_KEY][ODESCENT_PARAMETER_BUILD_BLOCK_SIZE].SetJson(value);
+        } else if (key == HGRAPH_BUILD_THREAD_COUNT) {
+            inner_json[BUILD_THREAD_COUNT_KEY].SetJson(value);
+        } else if (key == TRAIN_SAMPLE_COUNT_KEY) {
+            inner_json[TRAIN_SAMPLE_COUNT_KEY].SetJson(value);
+        } else if (key == SQ4_UNIFORM_TRUNC_RATE) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY]
+                      [SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY]
+                          .SetJson(value);
+        } else if (key == RABITQ_PCA_DIM) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][PCA_DIM_KEY].SetJson(value);
+        } else if (key == INDEX_TQ_CHAIN) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TQ_CHAIN_KEY].SetJson(value);
+        } else if (key == INDEX_MRLE_DIM) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][MRLE_DIM_KEY].SetJson(value);
+        } else if (key == RABITQ_BITS_PER_DIM_QUERY) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY]
+                      [RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY]
+                          .SetJson(value);
+        } else if (key == RABITQ_BITS_PER_DIM_BASE) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY]
+                      [RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY]
+                          .SetJson(value);
+        } else if (key == RABITQ_BITS_PER_DIM_PRECISE) {
+            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY]
+                      [RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY]
+                          .SetJson(value);
+        } else if (key == RABITQ_ERROR_RATE) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_ERROR_RATE_KEY]
+                .SetJson(value);
+        } else if (key == HGRAPH_BASE_PQ_DIM) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][PRODUCT_QUANTIZATION_DIM_KEY]
+                .SetJson(value);
+        } else if (key == RABITQ_USE_FHT) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][USE_FHT_KEY].SetJson(value);
+        } else if (key == FAST_ENCODE_RABITQ) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_KEY].SetJson(
+                value);
+            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_KEY].SetJson(
+                value);
+        } else if (key == FAST_ENCODE_RABITQ_ROUNDS) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_ROUNDS_KEY]
+                .SetJson(value);
+            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_ROUNDS_KEY]
+                .SetJson(value);
+        } else if (key == HGRAPH_SUPPORT_REMOVE) {
+            inner_json[GRAPH_KEY][GRAPH_SUPPORT_REMOVE].SetJson(value);
+        } else if (key == HGRAPH_SUPPORT_FORCE_REMOVE) {
+            inner_json[SUPPORT_FORCE_REMOVE].SetJson(value);
+        } else if (key == HGRAPH_REMOVE_FLAG_BIT) {
+            inner_json[GRAPH_KEY][REMOVE_FLAG_BIT].SetJson(value);
+        } else if (key == HGRAPH_SUPPORT_DUPLICATE) {
+            inner_json[SUPPORT_DUPLICATE].SetJson(value);
+            inner_json[GRAPH_KEY][SUPPORT_DUPLICATE].SetJson(value);
+        } else if (key == HGRAPH_DEDUPLICATE_STORAGE) {
+            inner_json[DEDUPLICATE_STORAGE].SetJson(value);
+        } else if (key == HGRAPH_DUPLICATE_DISTANCE_THRESHOLD) {
+            inner_json[DUPLICATE_DISTANCE_THRESHOLD].SetJson(value);
+        } else if (key == HGRAPH_PERSIST_SOURCE_ID) {
+            inner_json[HGRAPH_PERSIST_SOURCE_ID_KEY].SetJson(value);
+        } else if (key == PARAMETER_USE_CONJUGATE_GRAPH) {
+            inner_json[PARAMETER_USE_CONJUGATE_GRAPH].SetJson(value);
+        } else if (key == HGRAPH_LABEL_REMAP_TYPE) {
+            inner_json[LABEL_REMAP_TYPE_KEY].SetJson(value);
+        } else if (key == HGRAPH_USE_MCI || key == HGRAPH_MCI_MCS || key == HGRAPH_MCI_CLIQUE_MAX ||
+                   key == HGRAPH_MCI_ALPHA || key == HGRAPH_MCI_KNNG_SOURCE ||
+                   key == HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY ||
+                   key == HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY ||
+                   key == HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY) {
+            inner_json[key].SetJson(value);
+        } else if (key == HGRAPH_BASE_ENABLE_READ_CACHE) {
+            inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][READ_CACHE_ENABLED_KEY].SetJson(value);
+        } else if (key == HGRAPH_PRECISE_ENABLE_READ_CACHE) {
+            inner_json[PRECISE_CODES_KEY][IO_PARAMS_KEY][READ_CACHE_ENABLED_KEY].SetJson(value);
+        } else if (key == HGRAPH_GRAPH_ENABLE_READ_CACHE) {
+            inner_json[GRAPH_KEY][IO_PARAMS_KEY][READ_CACHE_ENABLED_KEY].SetJson(value);
+        } else if (key == HGRAPH_RAW_VECTOR_ENABLE_READ_CACHE) {
+            inner_json[RAW_VECTOR_KEY][IO_PARAMS_KEY][READ_CACHE_ENABLED_KEY].SetJson(value);
+        } else if (key == HGRAPH_RAW_VECTOR_CACHE_TOTAL_SIZE) {
+            inner_json[RAW_VECTOR_KEY][IO_PARAMS_KEY][READ_CACHE_TOTAL_CACHE_SIZE_KEY].SetJson(
+                value);
+        } else {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("invalid config param: {}", key));
+        }
+    }
+    ApplyRaBitQSplitConfig(ParseRaBitQSplitConfig(hgraph_json), inner_json);
     return inner_json;
 }
 

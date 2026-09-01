@@ -20,17 +20,19 @@
 #include <chrono>
 #include <exception>
 #include <limits>
+#include <nlohmann/json.hpp>
 
 #include "algorithm/inner_index_interface.h"
 #include "analyzer/analyzer.h"
+#include "datacell/flatten_datacell_parameter.h"
 #include "datacell/flatten_interface.h"
 #include "impl/distance_provider_for_graph.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "impl/reasoning/search_reasoning.h"
-#include "io/memory_io/memory_io_parameter.h"
-#include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
+#include "io/common/io_parameter.h"
+#include "quantization/transform_quantization/transform_quantizer_parameter.h"
 #include "query_context.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
@@ -1286,151 +1288,202 @@ Pyramid::InitFeatures() {
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_DELETE_BY_ID);
 }
 
-static const std::string HGRAPH_PARAMS_TEMPLATE =
-    R"(
-    {
-        "{TYPE_KEY}": "{INDEX_TYPE_PYRAMID}",
-        "{USE_REORDER_KEY}": false,
-        "{GRAPH_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{GRAPH_TYPE_KEY}": "{GRAPH_TYPE_VALUE_NSW}",
-            "{GRAPH_STORAGE_TYPE_KEY}": "{GRAPH_STORAGE_TYPE_VALUE_FLAT}",
-            "{ODESCENT_PARAMETER_BUILD_BLOCK_SIZE}": 10000,
-            "{ODESCENT_PARAMETER_MIN_IN_DEGREE}": 1,
-            "{ODESCENT_PARAMETER_ALPHA}": 1.2,
-            "{ODESCENT_PARAMETER_GRAPH_ITER_TURN}": 30,
-            "{ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE}": 0.2,
-            "{GRAPH_PARAM_MAX_DEGREE_KEY}": 64,
-            "{GRAPH_PARAM_INIT_MAX_CAPACITY_KEY}": 100,
-            "{GRAPH_SUPPORT_REMOVE}": false,
-            "{REMOVE_FLAG_BIT}": 8,
-            "{SUPPORT_DUPLICATE}": false
-        },
-        "{BASE_CODES_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{CODES_TYPE_KEY}": "flatten",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
-                "{PCA_DIM_KEY}": 0,
-                "{MRLE_DIM_KEY}": 0,
-                "{RABITQ_QUANTIZATION_VERSION_KEY}": "standard",
-                "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}": 32,
-                "{RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY}": 1,
-                "{RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY}": 1,
-                "{FAST_ENCODE_RABITQ_KEY}": true,
-                "{FAST_ENCODE_RABITQ_ROUNDS_KEY}": 6,
-                "{TQ_CHAIN_KEY}": "",
-                "nbits": 8,
-                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
-                "{HOLD_MOLDS}": false
-            }
-        },
-        "{PRECISE_CODES_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{CODES_TYPE_KEY}": "flatten",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
-                "{PCA_DIM_KEY}": 0,
-                "{FAST_ENCODE_RABITQ_KEY}": true,
-                "{FAST_ENCODE_RABITQ_ROUNDS_KEY}": 6,
-                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
-                "{HOLD_MOLDS}": false
-            }
-        },
-        "{STORE_RAW_VECTOR_KEY}": false,
-        "{RAW_VECTOR_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{CODES_TYPE_KEY}": "flatten",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{HOLD_MOLDS}": true
-            }
-        },
-        "{BUILD_THREAD_COUNT_KEY}": 1,
-        "{EF_CONSTRUCTION_KEY}": 400,
-        "{NO_BUILD_LEVELS}":[],
-        "{INDEX_MIN_SIZE}": 0,
-        "{SUPPORT_DUPLICATE}": false,
-        "{PYRAMID_STORE_PATHS_KEY}": false
-    })";
+JsonType
+build_default_pyramid_param(const JsonType& external_param) {
+    const auto base_quantization_type =
+        external_param.Contains(PYRAMID_BASE_QUANTIZATION_TYPE)
+            ? external_param[PYRAMID_BASE_QUANTIZATION_TYPE].GetString()
+            : std::string(QUANTIZATION_TYPE_VALUE_FP32);
+    const auto precise_quantization_type =
+        external_param.Contains(PYRAMID_PRECISE_QUANTIZATION_TYPE)
+            ? external_param[PYRAMID_PRECISE_QUANTIZATION_TYPE].GetString()
+            : std::string(QUANTIZATION_TYPE_VALUE_FP32);
+    const auto base_io_type = external_param.Contains(PYRAMID_BASE_IO_TYPE)
+                                  ? external_param[PYRAMID_BASE_IO_TYPE].GetString()
+                                  : std::string(IO_TYPE_VALUE_BLOCK_MEMORY_IO);
+    const auto precise_io_type = external_param.Contains(PYRAMID_PRECISE_IO_TYPE)
+                                     ? external_param[PYRAMID_PRECISE_IO_TYPE].GetString()
+                                     : std::string(IO_TYPE_VALUE_BLOCK_MEMORY_IO);
+    const auto tq_chain = external_param.Contains(INDEX_TQ_CHAIN)
+                              ? external_param[INDEX_TQ_CHAIN].GetString()
+                              : std::string();
+    auto build_flatten = [](const std::string& quantization_type,
+                            const std::string& io_type,
+                            const std::string& chain,
+                            bool hold_molds) {
+        auto parameter = FlattenDataCellParameter::CreateDefault(
+            quantization_type == QUANTIZATION_TYPE_VALUE_TQ ? QUANTIZATION_TYPE_VALUE_FP32
+                                                            : quantization_type,
+            io_type,
+            hold_molds);
+        if (quantization_type == QUANTIZATION_TYPE_VALUE_TQ) {
+            parameter->quantizer_parameter = TransformQuantizerParameter::CreateDefault(chain);
+        }
+        auto json = parameter->ToJson();
+        json[QUANTIZATION_PARAMS_KEY].SetJson(
+            ApplyHoldMoldsToQuantizer(json[QUANTIZATION_PARAMS_KEY], hold_molds));
+        return json;
+    };
+
+    JsonType json;
+    json[TYPE_KEY].SetString(INDEX_TYPE_PYRAMID);
+    json[USE_REORDER_KEY].SetBool(false);
+    json[GRAPH_KEY][IO_PARAMS_KEY].SetJson(
+        IOParameter::CreateDefault(IO_TYPE_VALUE_BLOCK_MEMORY_IO)->ToJson());
+    json[GRAPH_KEY][GRAPH_TYPE_KEY].SetString(GRAPH_TYPE_VALUE_NSW);
+    json[GRAPH_KEY][GRAPH_STORAGE_TYPE_KEY].SetString(GRAPH_STORAGE_TYPE_VALUE_FLAT);
+    json[GRAPH_KEY][ODESCENT_PARAMETER_BUILD_BLOCK_SIZE].SetInt(10000);
+    json[GRAPH_KEY][ODESCENT_PARAMETER_MIN_IN_DEGREE].SetInt(1);
+    json[GRAPH_KEY][ODESCENT_PARAMETER_ALPHA].SetFloat(1.2F);
+    json[GRAPH_KEY][ODESCENT_PARAMETER_GRAPH_ITER_TURN].SetInt(30);
+    json[GRAPH_KEY][ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE].SetFloat(0.2F);
+    json[GRAPH_KEY][GRAPH_PARAM_MAX_DEGREE_KEY].SetInt(64);
+    json[GRAPH_KEY][GRAPH_PARAM_INIT_MAX_CAPACITY_KEY].SetInt(100);
+    json[GRAPH_KEY][GRAPH_SUPPORT_REMOVE].SetBool(false);
+    json[GRAPH_KEY][REMOVE_FLAG_BIT].SetInt(8);
+    json[GRAPH_KEY][SUPPORT_DUPLICATE].SetBool(false);
+    json[BASE_CODES_KEY].SetJson(
+        build_flatten(base_quantization_type, base_io_type, tq_chain, false));
+    json[PRECISE_CODES_KEY].SetJson(
+        build_flatten(precise_quantization_type, precise_io_type, "", false));
+    json[STORE_RAW_VECTOR_KEY].SetBool(false);
+    json[RAW_VECTOR_KEY].SetJson(
+        build_flatten(QUANTIZATION_TYPE_VALUE_FP32, IO_TYPE_VALUE_BLOCK_MEMORY_IO, "", true));
+    json[BUILD_THREAD_COUNT_KEY].SetInt(1);
+    json[EF_CONSTRUCTION_KEY].SetInt(400);
+    json[NO_BUILD_LEVELS].SetJson(JsonType::Parse("[]"));
+    json[INDEX_MIN_SIZE].SetInt(0);
+    json[SUPPORT_DUPLICATE].SetBool(false);
+    json[PYRAMID_STORE_PATHS_KEY].SetBool(false);
+    return json;
+}
 
 ParamPtr
 Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
                                       const IndexCommonParam& common_param) {
-    const ConstParamMap external_mapping = {
-        {PYRAMID_EF_CONSTRUCTION, {EF_CONSTRUCTION_KEY}},
-        {PYRAMID_USE_REORDER, {USE_REORDER_KEY}},
-        {PYRAMID_BASE_QUANTIZATION_TYPE, {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, TYPE_KEY}},
-        {INDEX_TQ_CHAIN, {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, TQ_CHAIN_KEY}},
-        {INDEX_MRLE_DIM, {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, MRLE_DIM_KEY}},
-        {PYRAMID_RABITQ_BITS_PER_DIM_BASE,
-         {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY}},
-        {PYRAMID_RABITQ_BITS_PER_DIM_QUERY,
-         {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}},
-        {PYRAMID_RABITQ_BITS_PER_DIM_PRECISE,
-         {PRECISE_CODES_KEY, QUANTIZATION_PARAMS_KEY, RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY}},
-        {PYRAMID_RABITQ_PCA_DIM, {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, PCA_DIM_KEY}},
-        {PYRAMID_RABITQ_USE_FHT, {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, USE_FHT_KEY}},
-        {RABITQ_ERROR_RATE,
-         {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, RABITQ_QUANTIZATION_ERROR_RATE_KEY}},
-        {RABITQ_ERROR_RATE,
-         {PRECISE_CODES_KEY, QUANTIZATION_PARAMS_KEY, RABITQ_QUANTIZATION_ERROR_RATE_KEY}},
-        {PYRAMID_FAST_ENCODE_RABITQ,
-         {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, FAST_ENCODE_RABITQ_KEY}},
-        {PYRAMID_FAST_ENCODE_RABITQ,
-         {PRECISE_CODES_KEY, QUANTIZATION_PARAMS_KEY, FAST_ENCODE_RABITQ_KEY}},
-        {PYRAMID_FAST_ENCODE_RABITQ_ROUNDS,
-         {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, FAST_ENCODE_RABITQ_ROUNDS_KEY}},
-        {PYRAMID_FAST_ENCODE_RABITQ_ROUNDS,
-         {PRECISE_CODES_KEY, QUANTIZATION_PARAMS_KEY, FAST_ENCODE_RABITQ_ROUNDS_KEY}},
-        {PYRAMID_PRECISE_QUANTIZATION_TYPE, {PRECISE_CODES_KEY, QUANTIZATION_PARAMS_KEY, TYPE_KEY}},
-        {PYRAMID_GRAPH_MAX_DEGREE, {GRAPH_KEY, GRAPH_PARAM_MAX_DEGREE_KEY}},
-        {PYRAMID_BASE_IO_TYPE, {BASE_CODES_KEY, IO_PARAMS_KEY, TYPE_KEY}},
-        {PYRAMID_BASE_SUPPLEMENT_IO_TYPE, {BASE_CODES_KEY, SUPPLEMENT_IO_PARAMS_KEY, TYPE_KEY}},
-        {PYRAMID_BASE_SUPPLEMENT_FILE_PATH,
-         {BASE_CODES_KEY, SUPPLEMENT_IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
-        {PYRAMID_BUILD_ALPHA, {GRAPH_KEY, ODESCENT_PARAMETER_ALPHA}},
-        {PYRAMID_GRAPH_TYPE, {GRAPH_KEY, GRAPH_TYPE_KEY}},
-        {PYRAMID_GRAPH_STORAGE_TYPE, {GRAPH_KEY, GRAPH_STORAGE_TYPE_KEY}},
-        {PYRAMID_PRECISE_IO_TYPE, {PRECISE_CODES_KEY, IO_PARAMS_KEY, TYPE_KEY}},
-        {PYRAMID_BUILD_THREAD_COUNT, {BUILD_THREAD_COUNT_KEY}},
-        {STORE_RAW_VECTOR, {STORE_RAW_VECTOR_KEY}},
-        {PYRAMID_NO_BUILD_LEVELS, {NO_BUILD_LEVELS}},
-        {PYRAMID_HIERARCHIES, {PYRAMID_HIERARCHIES}},
-        {PYRAMID_PERSIST_SOURCE_ID, {PYRAMID_PERSIST_SOURCE_ID_KEY}},
-        {PYRAMID_STORE_PATHS, {PYRAMID_STORE_PATHS_KEY}},
-        {PYRAMID_BASE_PQ_DIM,
-         {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, PRODUCT_QUANTIZATION_DIM_KEY}},
-        {PYRAMID_BASE_FILE_PATH, {BASE_CODES_KEY, IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
-        {PYRAMID_PRECISE_FILE_PATH, {PRECISE_CODES_KEY, IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
-        {STORE_RAW_VECTOR, {STORE_RAW_VECTOR_KEY}},
-        {ODESCENT_PARAMETER_BUILD_BLOCK_SIZE, {GRAPH_KEY, ODESCENT_PARAMETER_BUILD_BLOCK_SIZE}},
-        {ODESCENT_PARAMETER_MIN_IN_DEGREE, {GRAPH_KEY, ODESCENT_PARAMETER_MIN_IN_DEGREE}},
-        {ODESCENT_PARAMETER_GRAPH_ITER_TURN, {GRAPH_KEY, ODESCENT_PARAMETER_GRAPH_ITER_TURN}},
-        {ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
-         {GRAPH_KEY, ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE}},
-        {PYRAMID_INDEX_MIN_SIZE, {INDEX_MIN_SIZE}},
-        {PYRAMID_SUPPORT_DUPLICATE, {SUPPORT_DUPLICATE}},
-        {PYRAMID_SUPPORT_DUPLICATE, {GRAPH_KEY, SUPPORT_DUPLICATE}}};
-
-    std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);
-    auto inner_json = JsonType::Parse(str);
-    mapping_external_param_to_inner(external_param, external_mapping, inner_json);
-    MapRaBitQSplitParam(external_param, inner_json);
+    const auto base_quantization_type =
+        external_param.Contains(PYRAMID_BASE_QUANTIZATION_TYPE)
+            ? external_param[PYRAMID_BASE_QUANTIZATION_TYPE].GetString()
+            : std::string(QUANTIZATION_TYPE_VALUE_FP32);
+    if (base_quantization_type != QUANTIZATION_TYPE_VALUE_TQ) {
+        CHECK_ARGUMENT(not external_param.Contains(INDEX_TQ_CHAIN),
+                       fmt::format("{} requires {}={}",
+                                   INDEX_TQ_CHAIN,
+                                   PYRAMID_BASE_QUANTIZATION_TYPE,
+                                   QUANTIZATION_TYPE_VALUE_TQ));
+        CHECK_ARGUMENT(not external_param.Contains(INDEX_MRLE_DIM),
+                       fmt::format("{} requires {}={}",
+                                   INDEX_MRLE_DIM,
+                                   PYRAMID_BASE_QUANTIZATION_TYPE,
+                                   QUANTIZATION_TYPE_VALUE_TQ));
+    }
+    auto inner_json = build_default_pyramid_param(external_param);
+    for (const auto& [key, ignored] : external_param.GetInnerJson()->items()) {
+        (void)ignored;
+        auto value = external_param[key];
+        if (key == PYRAMID_EF_CONSTRUCTION) {
+            inner_json[EF_CONSTRUCTION_KEY].SetJson(value);
+        } else if (key == PYRAMID_USE_REORDER) {
+            inner_json[USE_REORDER_KEY].SetJson(value);
+        } else if (key == PYRAMID_BASE_QUANTIZATION_TYPE) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == INDEX_TQ_CHAIN) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TQ_CHAIN_KEY].SetJson(value);
+        } else if (key == INDEX_MRLE_DIM) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][MRLE_DIM_KEY].SetJson(value);
+        } else if (key == PYRAMID_RABITQ_BITS_PER_DIM_BASE) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY]
+                      [RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY]
+                          .SetJson(value);
+        } else if (key == PYRAMID_RABITQ_BITS_PER_DIM_QUERY) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY]
+                      [RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY]
+                          .SetJson(value);
+        } else if (key == PYRAMID_RABITQ_BITS_PER_DIM_PRECISE) {
+            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY]
+                      [RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY]
+                          .SetJson(value);
+        } else if (key == PYRAMID_RABITQ_PCA_DIM) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][PCA_DIM_KEY].SetJson(value);
+        } else if (key == PYRAMID_RABITQ_USE_FHT) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][USE_FHT_KEY].SetJson(value);
+        } else if (key == RABITQ_ERROR_RATE) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_ERROR_RATE_KEY]
+                .SetJson(value);
+            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY]
+                      [RABITQ_QUANTIZATION_ERROR_RATE_KEY]
+                          .SetJson(value);
+        } else if (key == PYRAMID_FAST_ENCODE_RABITQ) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_KEY].SetJson(
+                value);
+            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_KEY].SetJson(
+                value);
+        } else if (key == PYRAMID_FAST_ENCODE_RABITQ_ROUNDS) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_ROUNDS_KEY]
+                .SetJson(value);
+            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_ROUNDS_KEY]
+                .SetJson(value);
+        } else if (key == PYRAMID_PRECISE_QUANTIZATION_TYPE) {
+            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == PYRAMID_GRAPH_MAX_DEGREE) {
+            inner_json[GRAPH_KEY][GRAPH_PARAM_MAX_DEGREE_KEY].SetJson(value);
+        } else if (key == PYRAMID_BASE_IO_TYPE) {
+            inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == PYRAMID_BASE_SUPPLEMENT_IO_TYPE) {
+            inner_json[BASE_CODES_KEY][SUPPLEMENT_IO_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == PYRAMID_BASE_SUPPLEMENT_FILE_PATH) {
+            inner_json[BASE_CODES_KEY][SUPPLEMENT_IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(value);
+        } else if (key == PYRAMID_BUILD_ALPHA) {
+            inner_json[GRAPH_KEY][ODESCENT_PARAMETER_ALPHA].SetJson(value);
+        } else if (key == PYRAMID_GRAPH_TYPE) {
+            inner_json[GRAPH_KEY][GRAPH_TYPE_KEY].SetJson(value);
+        } else if (key == PYRAMID_GRAPH_STORAGE_TYPE) {
+            inner_json[GRAPH_KEY][GRAPH_STORAGE_TYPE_KEY].SetJson(value);
+        } else if (key == PYRAMID_PRECISE_IO_TYPE) {
+            inner_json[PRECISE_CODES_KEY][IO_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == PYRAMID_BUILD_THREAD_COUNT) {
+            inner_json[BUILD_THREAD_COUNT_KEY].SetJson(value);
+        } else if (key == STORE_RAW_VECTOR) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY].SetJson(ApplyHoldMoldsToQuantizer(
+                inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY], value.GetBool()));
+            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY].SetJson(
+                ApplyHoldMoldsToQuantizer(inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY],
+                                          value.GetBool()));
+            inner_json[STORE_RAW_VECTOR_KEY].SetJson(value);
+        } else if (key == PYRAMID_NO_BUILD_LEVELS) {
+            inner_json[NO_BUILD_LEVELS].SetJson(value);
+        } else if (key == PYRAMID_HIERARCHIES) {
+            inner_json[PYRAMID_HIERARCHIES].SetJson(value);
+        } else if (key == PYRAMID_PERSIST_SOURCE_ID) {
+            inner_json[PYRAMID_PERSIST_SOURCE_ID_KEY].SetJson(value);
+        } else if (key == PYRAMID_STORE_PATHS) {
+            inner_json[PYRAMID_STORE_PATHS_KEY].SetJson(value);
+        } else if (key == PYRAMID_BASE_PQ_DIM) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][PRODUCT_QUANTIZATION_DIM_KEY]
+                .SetJson(value);
+        } else if (key == PYRAMID_BASE_FILE_PATH) {
+            inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(value);
+        } else if (key == PYRAMID_PRECISE_FILE_PATH) {
+            inner_json[PRECISE_CODES_KEY][IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(value);
+        } else if (key == ODESCENT_PARAMETER_BUILD_BLOCK_SIZE) {
+            inner_json[GRAPH_KEY][ODESCENT_PARAMETER_BUILD_BLOCK_SIZE].SetJson(value);
+        } else if (key == ODESCENT_PARAMETER_MIN_IN_DEGREE) {
+            inner_json[GRAPH_KEY][ODESCENT_PARAMETER_MIN_IN_DEGREE].SetJson(value);
+        } else if (key == ODESCENT_PARAMETER_GRAPH_ITER_TURN) {
+            inner_json[GRAPH_KEY][ODESCENT_PARAMETER_GRAPH_ITER_TURN].SetJson(value);
+        } else if (key == ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE) {
+            inner_json[GRAPH_KEY][ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE].SetJson(value);
+        } else if (key == PYRAMID_INDEX_MIN_SIZE) {
+            inner_json[INDEX_MIN_SIZE].SetJson(value);
+        } else if (key == PYRAMID_SUPPORT_DUPLICATE) {
+            inner_json[SUPPORT_DUPLICATE].SetJson(value);
+            inner_json[GRAPH_KEY][SUPPORT_DUPLICATE].SetJson(value);
+        } else {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("invalid config param: {}", key));
+        }
+    }
+    ApplyRaBitQSplitConfig(ParseRaBitQSplitConfig(external_param), inner_json);
     ValidateMRLEDim(external_param, common_param.dim_);
     if (RequiresRawVectorForTransformQuantizer(inner_json) and
         not RequiresRawVectorForMRLERaBitQSplit(inner_json)) {

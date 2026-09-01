@@ -23,6 +23,9 @@ DEFINE_POINTER2(QuantizerParam, QuantizerParameter);
 class QuantizerParameter : public Parameter {
 public:
     static QuantizerParamPtr
+    CreateDefault(const std::string& type_name);
+
+    static QuantizerParamPtr
     GetQuantizerParameterByJson(const JsonType& json);
 
 public:

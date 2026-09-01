@@ -21,6 +21,7 @@
 #include <cstring>
 #include <future>
 #include <limits>
+#include <nlohmann/json.hpp>
 #include <numeric>
 #include <random>
 #include <sstream>
@@ -28,6 +29,7 @@
 #include <unordered_set>
 #include <utility>
 
+#include "datacell/multi_vector_datacell_parameter.h"
 #include "dataset_impl.h"
 #include "impl/logger/logger.h"
 #include "impl/thread_pool/safe_thread_pool.h"
@@ -1752,36 +1754,20 @@ SIMQ::InitFeatures() {
     });
 }
 
-static const std::string SIMQ_PARAMS_TEMPLATE =
-    R"(
-    {
-        "{TYPE_KEY}": "{INDEX_SIMQ}",
-        "{BASE_CODES_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_ASYNC_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{CODES_TYPE_KEY}": "multi_vector"
-        }
-    })";
+JsonType
+build_default_simq_param(const JsonType& external_param) {
+    const auto io_type = external_param.Contains(BRUTE_FORCE_BASE_IO_TYPE)
+                             ? external_param[BRUTE_FORCE_BASE_IO_TYPE].GetString()
+                             : IO_TYPE_VALUE_ASYNC_IO;
+    JsonType json;
+    json[TYPE_KEY].SetString(INDEX_SIMQ);
+    json[BASE_CODES_KEY].SetJson(MultiVectorDataCellParameter::CreateDefault(io_type)->ToJson());
+    return json;
+}
 
 ParamPtr
 SIMQ::CheckAndMappingExternalParam(const JsonType& external_param,
                                    const IndexCommonParam& common_param) {
-    const ConstParamMap external_mapping = {
-        {BRUTE_FORCE_BASE_IO_TYPE, {BASE_CODES_KEY, IO_PARAMS_KEY, TYPE_KEY}},
-        {BRUTE_FORCE_BASE_FILE_PATH, {BASE_CODES_KEY, IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
-        {"init_cluster_ratio", {"init_cluster_ratio"}},
-        {"max_cluster_size", {"max_cluster_size"}},
-        {"split_start_idx", {"split_start_idx"}},
-        {"random_seed", {"random_seed"}},
-        {"coarse_k", {"coarse_k"}},
-        {"rerank_k", {"rerank_k"}},
-        {"quantization_type", {"quantization_type"}},
-        {BUILD_THREAD_COUNT_KEY, {BUILD_THREAD_COUNT_KEY}},
-        {"split_delay_seconds", {"split_delay_seconds"}},
-    };
-
     if (common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
         throw VsagException(ErrorType::INVALID_ARGUMENT, "simq only supports float32 datatype");
     }
@@ -1789,9 +1775,24 @@ SIMQ::CheckAndMappingExternalParam(const JsonType& external_param,
         throw VsagException(ErrorType::INVALID_ARGUMENT, "simq only supports ip metric type");
     }
 
-    std::string str = format_map(SIMQ_PARAMS_TEMPLATE, DEFAULT_MAP);
-    auto inner_json = JsonType::Parse(str);
-    mapping_external_param_to_inner(external_param, external_mapping, inner_json);
+    auto inner_json = build_default_simq_param(external_param);
+    for (const auto& [key, ignored] : external_param.GetInnerJson()->items()) {
+        (void)ignored;
+        auto value = external_param[key];
+        if (key == BRUTE_FORCE_BASE_IO_TYPE) {
+            inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == BRUTE_FORCE_BASE_FILE_PATH) {
+            inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(value);
+        } else if (key == "init_cluster_ratio" || key == "max_cluster_size" ||
+                   key == "split_start_idx" || key == "random_seed" || key == "coarse_k" ||
+                   key == "rerank_k" || key == "quantization_type" ||
+                   key == BUILD_THREAD_COUNT_KEY || key == "split_delay_seconds") {
+            inner_json[key].SetJson(value);
+        } else {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("invalid config param: {}", key));
+        }
+    }
 
     auto simq_param = std::make_shared<SIMQParameter>();
     simq_param->FromJson(inner_json);

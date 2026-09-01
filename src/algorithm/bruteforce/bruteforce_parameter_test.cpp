@@ -21,7 +21,7 @@
 
 TEST_CASE("BruteForce Parameters CheckCompatibility",
           "[ut][BruteForceParameter][CheckCompatibility]") {
-    auto param_str = R"({
+    const auto* param_str = R"({
         "base_codes": {
             "codes_type": "flatten_codes",
             "io_params": {
@@ -69,4 +69,21 @@ TEST_CASE("BruteForce maps resize increase count bit", "[ut][BruteForceParameter
         vsag::JsonType::Parse(R"({"resize_increase_count_bit": 1.5})"), common_param));
     REQUIRE_THROWS(vsag::BruteForce::CheckAndMappingExternalParam(
         vsag::JsonType::Parse(R"({"resize_increase_count_bit": -1})"), common_param));
+}
+
+TEST_CASE("BruteForce maps store raw vector to flatten quantizers", "[ut][BruteForceParameter]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto parameter = std::dynamic_pointer_cast<vsag::BruteForceParameter>(
+        vsag::BruteForce::CheckAndMappingExternalParam(
+            vsag::JsonType::Parse(R"({"store_raw_vector": true, "use_residual": true})"),
+            common_param));
+    REQUIRE(parameter != nullptr);
+    const auto json = parameter->ToJson();
+    REQUIRE(json[vsag::BASE_CODES_KEY][vsag::QUANTIZATION_PARAMS_KEY][vsag::HOLD_MOLDS].GetBool());
+    REQUIRE(
+        json[vsag::PRECISE_CODES_KEY][vsag::QUANTIZATION_PARAMS_KEY][vsag::HOLD_MOLDS].GetBool());
+    REQUIRE_FALSE(json.Contains(vsag::QUANTIZATION_PARAMS_KEY));
 }

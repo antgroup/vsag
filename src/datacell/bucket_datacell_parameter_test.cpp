@@ -15,10 +15,58 @@
 
 #include "bucket_datacell_parameter.h"
 
+#include "flatten_datacell_parameter.h"
+#include "multi_vector_datacell_parameter.h"
 #include "parameter_test.h"
+#include "quantization/int8_quantizer_parameter.h"
+#include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
+#include "quantization/transform_quantization/transform_quantizer_parameter.h"
 #include "unittest.h"
 
 using namespace vsag;
+
+TEST_CASE("DataCell default factories", "[ut][DataCellParameter][CreateDefault]") {
+    SECTION("bucket owns IO and quantizer defaults") {
+        auto parameter = BucketDataCellParameter::CreateDefault(QUANTIZATION_TYPE_VALUE_RABITQ,
+                                                                IO_TYPE_VALUE_BLOCK_MEMORY_IO);
+        auto json = parameter->ToJson();
+        REQUIRE(json[IO_PARAMS_KEY][TYPE_KEY].GetString() == IO_TYPE_VALUE_BLOCK_MEMORY_IO);
+        REQUIRE(json[QUANTIZATION_PARAMS_KEY][TYPE_KEY].GetString() ==
+                QUANTIZATION_TYPE_VALUE_RABITQ);
+        REQUIRE(json[QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_ERROR_RATE_KEY].GetFloat() ==
+                RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE);
+    }
+
+    SECTION("flatten owns hold molds") {
+        auto fp32_parameter = FlattenDataCellParameter::CreateDefault(
+            QUANTIZATION_TYPE_VALUE_FP32, IO_TYPE_VALUE_BLOCK_MEMORY_IO, true);
+        REQUIRE(fp32_parameter->ToJson()[QUANTIZATION_PARAMS_KEY][HOLD_MOLDS].GetBool());
+
+        auto int8_parameter = FlattenDataCellParameter::CreateDefault(
+            QUANTIZATION_TYPE_VALUE_INT8, IO_TYPE_VALUE_BLOCK_MEMORY_IO, true);
+        REQUIRE(int8_parameter->quantizer_parameter->GetTypeName() == QUANTIZATION_TYPE_VALUE_INT8);
+        auto int8 =
+            std::dynamic_pointer_cast<INT8QuantizerParameter>(int8_parameter->quantizer_parameter);
+        REQUIRE(int8 != nullptr);
+        REQUIRE(int8->hold_molds);
+    }
+
+    SECTION("multi-vector owns IO defaults") {
+        auto parameter = MultiVectorDataCellParameter::CreateDefault(IO_TYPE_VALUE_BLOCK_MEMORY_IO);
+        auto json = parameter->ToJson();
+        REQUIRE(json[CODES_TYPE_KEY].GetString() == MULTI_VECTOR_CODES);
+        REQUIRE(json[IO_PARAMS_KEY][TYPE_KEY].GetString() == IO_TYPE_VALUE_BLOCK_MEMORY_IO);
+    }
+
+    SECTION("transform quantizer owns transformer and bottom defaults") {
+        auto json = TransformQuantizerParameter::CreateDefault(" mrle, rabitq ")->ToJson();
+        REQUIRE(json[TQ_CHAIN_KEY].GetString() == "mrle,rabitq");
+        REQUIRE(json[MRLE_DIM_KEY].GetInt() == 0);
+        REQUIRE(json[TYPE_KEY].GetString() == QUANTIZATION_TYPE_VALUE_TQ);
+        REQUIRE(json[RABITQ_QUANTIZATION_ERROR_RATE_KEY].GetFloat() ==
+                RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE);
+    }
+}
 
 TEST_CASE("BucketDataCellParameter ToJson Test", "[ut][BucketDataCellParameter]") {
     std::string param_str = R"(

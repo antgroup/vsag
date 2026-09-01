@@ -32,6 +32,14 @@ public:
     explicit MultiVectorDataCellParameter() : FlattenInterfaceParameter(MULTI_VECTOR_DATA_CELL) {
     }
 
+    static MultiVectorDataCellParamPtr
+    CreateDefault(const std::string& io_type) {
+        auto parameter = std::make_shared<MultiVectorDataCellParameter>();
+        parameter->io_parameter = IOParameter::CreateDefault(io_type);
+        parameter->quantizer_parameter = std::make_shared<FP32QuantizerParameter>();
+        return parameter;
+    }
+
     void
     FromJson(const JsonType& json) override {
         CHECK_ARGUMENT(

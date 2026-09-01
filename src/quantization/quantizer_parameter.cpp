@@ -31,6 +31,16 @@
 
 namespace vsag {
 QuantizerParamPtr
+QuantizerParameter::CreateDefault(const std::string& type_name) {
+    CHECK_ARGUMENT(type_name != QUANTIZATION_TYPE_VALUE_TQ,
+                   "tq requires a transform chain; use "
+                   "TransformQuantizerParameter::CreateDefault(chain)");
+    JsonType json;
+    json[TYPE_KEY].SetString(type_name);
+    return GetQuantizerParameterByJson(json);
+}
+
+QuantizerParamPtr
 QuantizerParameter::GetQuantizerParameterByJson(const JsonType& json) {
     std::shared_ptr<QuantizerParameter> quantizer_param = nullptr;
 
