@@ -306,6 +306,21 @@ TEST_CASE("Pyramid Parameters CheckCompatibility", "[ut][PyramidParameter][Check
         "different base io type", base_io_type, "memory_io", "block_memory_io", true);
 
     TEST_COMPATIBILITY_CASE("different graph type", graph_type, "odescent", "nsw", true);
+    SECTION("root graph storage matters only for multi-layer roots") {
+        PyramidDefaultParam flat_param;
+        PyramidDefaultParam compressed_param;
+        flat_param.graph_storage_type = "flat";
+        compressed_param.graph_storage_type = "compressed";
+        auto flat = std::make_shared<vsag::PyramidParameters>();
+        auto compressed = std::make_shared<vsag::PyramidParameters>();
+        flat->FromString(generate_pyramid(flat_param));
+        compressed->FromString(generate_pyramid(compressed_param));
+
+        REQUIRE(flat->CheckCompatibility(compressed));
+        flat->root_graph_type = vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER;
+        compressed->root_graph_type = vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER;
+        REQUIRE_FALSE(flat->CheckCompatibility(compressed));
+    }
     TEST_COMPATIBILITY_CASE("different build thread count", build_thread_count, 4, 8, true);
     TEST_COMPATIBILITY_CASE(
         "different precise quantization type", precise_quantization_type, "fp32", "fp16", false);
@@ -717,4 +732,134 @@ TEST_CASE("Pyramid parses hops limit search parameter", "[ut][PyramidParameters]
         R"({"pyramid":{"ef_search":100,"hops_limit":-1}})"));
     REQUIRE_THROWS(vsag::PyramidSearchParameters::FromJson(
         R"({"pyramid":{"ef_search":100,"hops_limit":4294967296}})"));
+}
+
+TEST_CASE("Pyramid validates root graph type and hierarchy overrides", "[ut][PyramidParameters]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto external = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "root_graph_type": "single_layer",
+        "hierarchies": [
+            {"name": "single"},
+            {"name": "multi", "root_graph_type": "multi_layer", "no_build_levels": []}
+        ]
+    })");
+    auto mapped = std::dynamic_pointer_cast<vsag::PyramidParameters>(
+        vsag::Pyramid::CheckAndMappingExternalParam(external, common_param));
+    REQUIRE(mapped->root_graph_type == vsag::PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER);
+    REQUIRE(mapped->root_graph_storage_type ==
+            vsag::GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT);
+    REQUIRE(mapped->hierarchies[0].root_graph_type == vsag::PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER);
+    REQUIRE(mapped->hierarchies[1].root_graph_type == vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER);
+
+    external[vsag::PYRAMID_GRAPH_STORAGE_TYPE].SetString(vsag::GRAPH_STORAGE_TYPE_VALUE_COMPRESSED);
+    mapped = std::dynamic_pointer_cast<vsag::PyramidParameters>(
+        vsag::Pyramid::CheckAndMappingExternalParam(external, common_param));
+    REQUIRE(mapped->root_graph_storage_type ==
+            vsag::GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_COMPRESSED);
+    REQUIRE(mapped->ToJson()[vsag::GRAPH_KEY][vsag::GRAPH_STORAGE_TYPE_KEY].GetString() ==
+            vsag::GRAPH_STORAGE_TYPE_VALUE_COMPRESSED);
+
+    external[vsag::PYRAMID_GRAPH_STORAGE_TYPE].SetString("unknown");
+    REQUIRE_THROWS(vsag::Pyramid::CheckAndMappingExternalParam(external, common_param));
+    external[vsag::PYRAMID_GRAPH_STORAGE_TYPE].SetString(vsag::GRAPH_STORAGE_TYPE_VALUE_FLAT);
+
+    external[vsag::PYRAMID_ROOT_GRAPH_TYPE].SetString("unknown");
+    REQUIRE_THROWS(vsag::Pyramid::CheckAndMappingExternalParam(external, common_param));
+
+    auto unbuilt_root = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "root_graph_type": "multi_layer",
+        "no_build_levels": [0]
+    })");
+    REQUIRE_THROWS(vsag::Pyramid::CheckAndMappingExternalParam(unbuilt_root, common_param));
+
+    unbuilt_root = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "root_graph_type": "single_layer",
+        "no_build_levels": [0]
+    })");
+    REQUIRE_THROWS(vsag::Pyramid::CheckAndMappingExternalParam(unbuilt_root, common_param));
+
+    auto default_unbuilt_root = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "no_build_levels": [0]
+    })");
+    REQUIRE_NOTHROW(
+        vsag::Pyramid::CheckAndMappingExternalParam(default_unbuilt_root, common_param));
+
+    auto explicit_hierarchy_root = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "hierarchies": [
+            {
+                "name": "site",
+                "root_graph_type": "single_layer",
+                "no_build_levels": [0]
+            }
+        ]
+    })");
+    REQUIRE_THROWS(
+        vsag::Pyramid::CheckAndMappingExternalParam(explicit_hierarchy_root, common_param));
+
+    auto inherited_explicit_root = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "root_graph_type": "single_layer",
+        "no_build_levels": [0],
+        "hierarchies": ["site"]
+    })");
+    REQUIRE_THROWS(
+        vsag::Pyramid::CheckAndMappingExternalParam(inherited_explicit_root, common_param));
+
+    auto odescent_multi_layer = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "graph_type": "odescent",
+        "root_graph_type": "multi_layer",
+        "max_degree": 8,
+        "ef_construction": 17
+    })");
+    REQUIRE_THROWS(vsag::Pyramid::CheckAndMappingExternalParam(odescent_multi_layer, common_param));
+
+    odescent_multi_layer[vsag::PYRAMID_ROOT_GRAPH_TYPE].SetString(
+        vsag::PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER);
+    REQUIRE_NOTHROW(
+        vsag::Pyramid::CheckAndMappingExternalParam(odescent_multi_layer, common_param));
+
+    auto odescent_hierarchy_multi_layer = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "graph_type": "odescent",
+        "root_graph_type": "single_layer",
+        "hierarchies": [
+            {"name": "site", "root_graph_type": "multi_layer"}
+        ]
+    })");
+    REQUIRE_THROWS(
+        vsag::Pyramid::CheckAndMappingExternalParam(odescent_hierarchy_multi_layer, common_param));
+
+    auto invalid_hierarchy_degree = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "max_degree": 8,
+        "hierarchies": [
+            {"name": "site", "root_graph_type": "multi_layer", "max_degree": 1}
+        ]
+    })");
+    REQUIRE_THROWS(
+        vsag::Pyramid::CheckAndMappingExternalParam(invalid_hierarchy_degree, common_param));
+}
+
+TEST_CASE("Pyramid validates explicit factor", "[ut][PyramidParameters]") {
+    auto absent = vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20}})");
+    REQUIRE(absent.topk_factor == 0.0F);
+
+    auto present =
+        vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20,"factor":1.5}})");
+    REQUIRE(std::abs(present.topk_factor - 1.5F) < 1e-6F);
+    REQUIRE_THROWS(
+        vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20,"factor":0}})"));
+    REQUIRE_THROWS(
+        vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20,"factor":-1}})"));
+    REQUIRE_THROWS(
+        vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20,"factor":1e100}})"));
 }

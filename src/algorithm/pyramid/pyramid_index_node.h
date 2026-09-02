@@ -23,6 +23,7 @@
 #include "impl/allocator/safe_allocator.h"
 #include "impl/heap/distance_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
+#include "index_common_param.h"
 #include "utils/lock_strategy.h"
 #include "utils/visited_list.h"
 
@@ -45,7 +46,11 @@ public:
     enum class Status { NO_INDEX = 0, GRAPH = 1, FLAT = 2 };
 
 public:
-    IndexNode(Allocator* allocator_, GraphInterfaceParamPtr graph_param, uint32_t index_min_size);
+    IndexNode(Allocator* allocator,
+              GraphInterfaceParamPtr graph_param,
+              uint32_t index_min_size,
+              const IndexCommonParam& common_param,
+              GraphInterfaceParamPtr child_graph_param);
 
     /// Build the internal graph using ODescent over the stored ids.
     void
@@ -88,18 +93,65 @@ public:
 
 public:
     GraphInterfacePtr graph_{nullptr};  // graph over the ids in this node
-    InnerIdType entry_point_{0};        // entry point for graph search
-    uint32_t level_{0};                 // depth in the tree (root = 0)
-    mutable std::shared_mutex mutex_;   // per-node lock for concurrent add/search
+    // Bottom entry when no route exists; otherwise the highest route entry. A routed entry is also
+    // a physical member of the complete bottom graph.
+    InnerIdType entry_point_{0};
+    uint32_t level_{0};  // depth in the tree (root = 0)
+    // Guards node topology metadata: status, graph ownership, routing graph vector, and entry.
+    // Graph adjacency rows remain protected by Pyramid::points_mutex_.
+    mutable std::shared_mutex mutex_;
 
     Vector<InnerIdType> ids_;          // internal ids stored at this node
     uint32_t index_min_size_{0};       // threshold to trigger graph build
     Status status_{Status::NO_INDEX};  // current build state
 
 private:
+    class RoutingOverlay {
+    public:
+        RoutingOverlay(Allocator* allocator, GraphInterfaceParamPtr param)
+            : graphs(allocator), graph_param(std::move(param)) {
+        }
+
+        Vector<GraphInterfacePtr> graphs;
+        GraphInterfaceParamPtr graph_param{nullptr};
+    };
+
+    void
+    enable_routing(GraphInterfaceParamPtr graph_param);
+
+    [[nodiscard]] bool
+    has_routing() const {
+        return routing_ != nullptr;
+    }
+
+    GraphInterfacePtr
+    make_route_graph() const;
+
+    void
+    serialize_routing_unlocked(StreamWriter& writer) const;
+
+    void
+    deserialize_routing_unlocked(StreamReader& reader);
+
+    std::pair<uint64_t, uint64_t>
+    get_memory_usage_detail() const;
+
+    JsonType
+    get_graph_stats() const;
+
+    Vector<InnerIdType>
+    get_ids_unlocked() const;
+
+    void
+    resize_graph(InnerIdType new_capacity);
+
     UnorderedMap<std::string, std::unique_ptr<IndexNode>> children_;  // keyed by path segment
     Allocator* allocator_{nullptr};
+    const IndexCommonParam& common_param_;
     GraphInterfaceParamPtr graph_param_{nullptr};
+    GraphInterfaceParamPtr child_graph_param_{nullptr};
+    InnerIdType graph_capacity_{0};
+    std::unique_ptr<RoutingOverlay> routing_{nullptr};
 };
 
 }  // namespace vsag
