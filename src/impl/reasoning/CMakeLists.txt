@@ -14,8 +14,12 @@
 
 
 set (REASONING_SRC
-        search_reasoning.cpp
-        search_reasoning.h
+        reasoning_capability.cpp
+        reasoning_capability.h
+        reasoning_types.cpp
+        reasoning_types.h
+        reasoning_context.cpp
+        reasoning_context.h
 )
 
 add_library (reasoning OBJECT ${REASONING_SRC})

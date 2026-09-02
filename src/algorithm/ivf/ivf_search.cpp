@@ -34,7 +34,7 @@
 #include "dataset_impl.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/inner_search_param.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/reorder/bucket_reorder.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "inner_string_params.h"
@@ -212,6 +212,7 @@ IVF::search(const DatasetPtr& query,
         candidate_buckets = partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, &ctx);
     }
     if (reasoning_ctx != nullptr) {
+        // [reasoning] RecordBucketSelection
         reasoning_ctx->RecordBucketSelection(candidate_buckets);
     }
     auto computer = bucket_->FactoryComputer(query_data);
@@ -348,6 +349,7 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
         candidate_buckets = partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, &ctx);
     }
     if (reasoning_ctx != nullptr) {
+        // [reasoning] RecordBucketSelection
         reasoning_ctx->RecordBucketSelection(candidate_buckets);
     }
 
@@ -402,16 +404,19 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
             const auto origin_id = candidate_ids[i] / buckets_per_data_;
             if (filter != nullptr and not filter->CheckValid(origin_id)) {
                 if (reasoning_ctx != nullptr) {
+                    // [reasoning] RecordFilterReject
                     reasoning_ctx->RecordFilterReject(origin_id);
                 }
                 continue;
             }
             if (reasoning_ctx != nullptr) {
+                // [reasoning] RecordVisit
                 reasoning_ctx->RecordVisit(origin_id, scores[i], 0);
             }
             search_result->Push(scores[i], candidate_ids[i]);
             while (search_result->Size() > static_cast<uint64_t>(topk)) {
                 if (reasoning_ctx != nullptr) {
+                    // [reasoning] RecordEviction
                     reasoning_ctx->RecordEviction(search_result->Top().second / buckets_per_data_,
                                                   0);
                 }
@@ -446,6 +451,7 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
             const auto origin_id = inner_id / buckets_per_data_;
             if (attr_filter != nullptr and not attr_filter->CheckValid(offset)) {
                 if (reasoning_ctx != nullptr) {
+                    // [reasoning] RecordFilterReject
                     reasoning_ctx->RecordFilterReject(origin_id);
                 }
                 continue;
@@ -663,7 +669,7 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     if (not request.expected_labels_.empty()) {
         reasoning_ctx = std::make_shared<ReasoningContext>(this->allocator_);
         reasoning_ctx->SetSearchParams(
-            request.topk_, "IVF", use_reorder_, request.filter_ != nullptr);
+            request.topk_, "IVF", use_reorder_, request.filter_ != nullptr, is_range);
 
         UnorderedMap<int64_t, InnerIdType> label_to_inner_id(this->allocator_);
         std::vector<std::tuple<InnerIdType, BucketIdType, InnerIdType>> locations;
@@ -695,6 +701,7 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                 ctx.stats->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
                                        this->bucket_->backend_);
             }
+            // [reasoning] SetTrueDistance
             reasoning_ctx->SetTrueDistance(inner_id, dist);
         }
         ctx.reasoning_ctx = reasoning_ctx.get();

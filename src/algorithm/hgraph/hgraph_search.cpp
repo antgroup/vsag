@@ -23,7 +23,7 @@
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/query_computer_pool.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "utils/search_threshold.h"
 #include "utils/util_functions.h"
 
@@ -440,6 +440,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     bool is_range = (request.mode_ == SearchMode::RANGE_SEARCH);
     auto k = request.topk_;
     const bool use_custom_distance = request.distance_batch_func_ != nullptr;
+    const bool reasoning_requested = not request.expected_labels_.empty();
 
     if (use_custom_distance) {
         CHECK_ARGUMENT(request.distance_batch_size_ > 0,
@@ -534,6 +535,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             } else {
                 precise_flatten->Query(&dist, computer, &inner_id, 1, &ctx);
             }
+            // [reasoning] SetTrueDistance
             reasoning_ctx->SetTrueDistance(inner_id, dist);
         }
         ctx.reasoning_ctx = reasoning_ctx.get();
@@ -792,6 +794,13 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         }
         auto result = this->pack_knn_result_with_extra_info(search_result, ctx.alloc);
         result->Statistics(mci_result.MakeStatistics(stats).Dump());
+        if (reasoning_requested) {
+            // [reasoning] HGraph range search does not build a reasoning context;
+            // attach a minimal status report so callers can distinguish "skipped"
+            // from "ok".
+            result->Reasoning(ReasoningContext::MakeStatusReport(
+                ReasoningReportStatus::kSkippedRangeSearch, "HGraph"));
+        }
         return result;
     }
 

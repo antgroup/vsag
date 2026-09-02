@@ -621,6 +621,15 @@ TEST_CASE("Pyramid SearchWithRequest reports reasoning for expected labels",
     REQUIRE(threshold_result->GetDim() == 1);
     REQUIRE(threshold_result->GetIds()[0] == ids[0]);
 
+    request.mode_ = vsag::SearchMode::RANGE_SEARCH;
+    request.radius_ = 100.0F;
+    request.limited_size_ = 2;
+    request.expected_labels_ = {ids[0]};
+    auto range_result = index->SearchWithRequest(request);
+    REQUIRE(range_result != nullptr);
+    REQUIRE(range_result->GetReasoning().find("skipped_range_search") != std::string::npos);
+
+    request.mode_ = vsag::SearchMode::KNN_SEARCH;
     request.expected_labels_.clear();
     request.threshold_ = std::nullopt;
     auto result_without_reasoning = index->SearchWithRequest(request);

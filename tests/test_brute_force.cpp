@@ -1333,7 +1333,17 @@ TEST_CASE("(PR) BruteForce SearchWithRequest Reasoning", "[ft][bruteforce][reaso
     REQUIRE_FALSE(result.value()->GetReasoning().empty());
     REQUIRE(result.value()->GetReasoning().find("expected_analysis") != std::string::npos);
     REQUIRE(result.value()->GetReasoning().find("missed_targets") != std::string::npos);
+    REQUIRE(result.value()->GetReasoning().find("\"search_mode\":\"knn\"") != std::string::npos);
 
+    req.mode_ = vsag::SearchMode::RANGE_SEARCH;
+    req.radius_ = std::numeric_limits<float>::max();
+    req.limited_size_ = 5;
+    auto range_result = index->SearchWithRequest(req);
+    REQUIRE(range_result.has_value());
+    REQUIRE(range_result.value()->GetReasoning().find("\"search_mode\":\"range\"") !=
+            std::string::npos);
+
+    req.mode_ = vsag::SearchMode::KNN_SEARCH;
     // With RejectAll filter, expected label should be diagnosed as filter_rejected
     req.enable_filter_ = true;
     req.filter_ = std::make_shared<RejectAllFilter>();

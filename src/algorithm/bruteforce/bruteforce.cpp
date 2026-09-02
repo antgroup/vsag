@@ -33,7 +33,7 @@
 #include "datacell/multi_vector_datacell_parameter.h"
 #include "fmt/chrono.h"
 #include "impl/heap/standard_heap.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"
@@ -439,8 +439,11 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
     std::shared_ptr<ReasoningContext> reasoning_ctx;
     if (not request.expected_labels_.empty()) {
         reasoning_ctx = std::make_shared<ReasoningContext>(this->allocator_);
-        reasoning_ctx->SetSearchParams(
-            request.topk_, is_multi_vector_ ? "WARP" : "BruteForce", false, ft != nullptr);
+        reasoning_ctx->SetSearchParams(request.topk_,
+                                       is_multi_vector_ ? "WARP" : "BruteForce",
+                                       false,
+                                       ft != nullptr,
+                                       is_range);
 
         UnorderedMap<int64_t, InnerIdType> label_to_inner_id(this->allocator_);
         for (const auto& label : request.expected_labels_) {
@@ -469,6 +472,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
             } else {
                 this->inner_codes_->Query(&dist, computer, &inner_id, 1, &query_context);
             }
+            // [reasoning] SetTrueDistance
             reasoning_ctx->SetTrueDistance(inner_id, dist);
         }
     }
@@ -505,6 +509,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
                 const float dist = custom_dists[j];
                 CHECK_ARGUMENT(std::isfinite(dist), "distance callback must return finite scores");
                 if (reasoning != nullptr) {
+                    // [reasoning] RecordVisit
                     reasoning->RecordVisit(custom_inner_ids[j], dist, 0);
                 }
                 if (not is_range || dist <= radius) {
@@ -522,6 +527,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         for (InnerIdType i = start; i < end; ++i) {
             if (attr_filter != nullptr and not attr_filter->CheckValid(i)) {
                 if (reasoning != nullptr) {
+                    // [reasoning] RecordFilterReject
                     reasoning->RecordFilterReject(i);
                 }
                 continue;
@@ -538,6 +544,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
                     inner_codes_->Query(&dist, computer, &i, 1, &local_query_context);
                     ++dist_cmp_local;
                     if (reasoning != nullptr) {
+                        // [reasoning] RecordVisit
                         reasoning->RecordVisit(i, dist, 0);
                     }
                     if (is_range and dist > radius) {
@@ -549,6 +556,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
                 }
             } else {
                 if (reasoning != nullptr) {
+                    // [reasoning] RecordFilterReject
                     reasoning->RecordFilterReject(i);
                 }
             }
@@ -626,7 +634,8 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         if (not result_inner_ids.empty()) {
             reasoning_ctx->MarkResult(result_inner_ids);
         }
-        reasoning_ctx->SetTermination(ReasoningContext::kTerminationLowerBoundReached);
+        // [reasoning] precise scan exhausted: heap lower bound reached
+        reasoning_ctx->SetTermination(ReasoningTermination::kLowerBoundReached);
         reasoning_ctx->DiagnoseExpectedTargets();
         result->Reasoning(reasoning_ctx->GenerateReport());
     }

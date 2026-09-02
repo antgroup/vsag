@@ -28,6 +28,8 @@
 
 namespace vsag {
 
+class ReasoningContext;
+
 class SINDIV2 : public InnerIndexInterface {
 public:
     static ParamPtr
@@ -135,6 +137,9 @@ public:
     void
     SetIO(const std::shared_ptr<Reader> reader) override;
 
+    DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const override;
+
     InnerIndexPtr
     Clone(const IndexCommonParam& param) override;
 
@@ -154,10 +159,16 @@ private:
                 SindiQueryContext& query_context,
                 const SparseVector* original_query = nullptr,
                 SearchStatistics* statistics = nullptr,
-                const SindiHostSearchRoute& host_route = {}) const;
+                const SindiHostSearchRoute& host_route = {},
+                ReasoningContext* reasoning_ctx = nullptr) const;
 
     bool
     UseTermListsHeapInsert(const SINDIV2SearchParameter& search_param) const;
+
+    /// [reasoning] translate result labels back to inner ids, mark results and
+    /// attach the generated report to the result dataset.
+    void
+    AttachReasoningReport(const DatasetPtr& dataset_results, ReasoningContext* reasoning_ctx) const;
 
     std::pair<int64_t, int64_t>
     get_min_max_window_id(const FilterPtr& filter) const;

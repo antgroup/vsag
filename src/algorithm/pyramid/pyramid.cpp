@@ -32,7 +32,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "io/common/io_parameter.h"
 #include "io/memory_block_io/memory_block_io_parameter.h"
 #include "quantization/transform_quantization/transform_quantizer_parameter.h"
@@ -796,8 +796,6 @@ Pyramid::SearchWithRequest(const SearchRequest& request) const {
     } else {
         CHECK_ARGUMENT(request.mode_ == SearchMode::RANGE_SEARCH, "unsupported search mode");
         this->validate_range_args(query, request.radius_, request.limited_size_);
-        CHECK_ARGUMENT(request.expected_labels_.empty(),
-                       "Pyramid reasoning only supports KNN search requests");
     }
     CHECK_ARGUMENT(not request.enable_attribute_filter_,
                    "Pyramid SearchWithRequest does not support attribute filters");
@@ -868,6 +866,7 @@ Pyramid::SearchWithRequest(const SearchRequest& request) const {
                                    static_cast<InnerIdType>(expected_inner_ids.size()),
                                    &ctx);
             for (uint64_t i = 0; i < expected_inner_ids.size(); ++i) {
+                // [reasoning] SetTrueDistance
                 reasoning_ctx->SetTrueDistance(expected_inner_ids[i], true_dists[i]);
             }
         }
@@ -919,7 +918,12 @@ Pyramid::SearchWithRequest(const SearchRequest& request) const {
     }
     result->Statistics(stats.Dump());
 
-    if (reasoning_ctx) {
+    if (not is_knn and not request.expected_labels_.empty()) {
+        // [reasoning] Pyramid range search does not collect reasoning events;
+        // attach a minimal status report instead of silently omitting reasoning.
+        result->Reasoning(ReasoningContext::MakeStatusReport(
+            ReasoningReportStatus::kSkippedRangeSearch, "Pyramid"));
+    } else if (reasoning_ctx) {
         Vector<InnerIdType> result_inner_ids(ctx.alloc);
         const auto* result_ids = result->GetIds();
         const auto num_results = result->GetDim();
@@ -2374,6 +2378,7 @@ Pyramid::search_node(const IndexNode* node,
                 if (inner_filter->CheckValid(ids_ptr[i])) {
                     valid_ids.push_back(ids_ptr[i]);
                 } else if (ctx.reasoning_ctx != nullptr) {
+                    // [reasoning] RecordFilterReject
                     ctx.reasoning_ctx->RecordFilterReject(ids_ptr[i]);
                 }
             }
@@ -2386,6 +2391,7 @@ Pyramid::search_node(const IndexNode* node,
 
         for (uint64_t i = 0; i < id_count; ++i) {
             if (ctx.reasoning_ctx != nullptr) {
+                // [reasoning] RecordVisit
                 ctx.reasoning_ctx->RecordVisit(ids_ptr[i], dists[i], 0);
             }
             if (search_param.distance_threshold.has_value() and
@@ -2397,6 +2403,7 @@ Pyramid::search_node(const IndexNode* node,
             results->Push(dists[i], ids_ptr[i]);
             if (results->Size() > search_param.ef) {
                 if (ctx.reasoning_ctx != nullptr) {
+                    // [reasoning] RecordEviction
                     ctx.reasoning_ctx->RecordEviction(results->Top().second, 0);
                 }
                 results->Pop();

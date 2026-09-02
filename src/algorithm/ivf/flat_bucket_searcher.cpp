@@ -18,7 +18,7 @@
 #include <limits>
 
 #include "attr/executor/executor.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/searcher/basic_searcher.h"
 
 namespace vsag {
@@ -72,6 +72,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
             }
             auto origin_id = ids[j] / buckets_per_data;
             if (reasoning_ctx != nullptr) {
+                // [reasoning] RecordVisit
                 reasoning_ctx->RecordVisit(origin_id, dist[j], 0);
             }
             if (param.distance_threshold.has_value() and
@@ -81,6 +82,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
             }
             if (attr_ft != nullptr and not attr_ft->CheckValid(j)) {
                 if (reasoning_ctx != nullptr) {
+                    // [reasoning] RecordFilterReject
                     reasoning_ctx->RecordFilterReject(origin_id);
                 }
                 continue;
@@ -91,6 +93,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                 }
                 while (heap->Size() > topk_u) {
                     if (reasoning_ctx != nullptr) {
+                        // [reasoning] RecordEviction
                         reasoning_ctx->RecordEviction(heap->Top().second / buckets_per_data, 0);
                     }
                     heap->Pop();
@@ -99,6 +102,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                     cur_heap_top = heap->Top().first;
                 }
             } else if (reasoning_ctx != nullptr) {
+                // [reasoning] RecordFilterReject
                 reasoning_ctx->RecordFilterReject(origin_id);
             }
         }
@@ -109,10 +113,12 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
             }
             auto origin_id = ids[j] / buckets_per_data;
             if (reasoning_ctx != nullptr) {
+                // [reasoning] RecordVisit
                 reasoning_ctx->RecordVisit(origin_id, dist[j], 0);
             }
             if (attr_ft != nullptr and not attr_ft->CheckValid(j)) {
                 if (reasoning_ctx != nullptr) {
+                    // [reasoning] RecordFilterReject
                     reasoning_ctx->RecordFilterReject(origin_id);
                 }
                 continue;
@@ -123,6 +129,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                 }
                 while (heap->Size() > topk_u) {
                     if (reasoning_ctx != nullptr) {
+                        // [reasoning] RecordEviction
                         reasoning_ctx->RecordEviction(heap->Top().second / buckets_per_data, 0);
                     }
                     heap->Pop();
@@ -131,6 +138,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                     cur_heap_top = heap->Top().first;
                 }
             } else if (reasoning_ctx != nullptr) {
+                // [reasoning] RecordFilterReject
                 reasoning_ctx->RecordFilterReject(origin_id);
             }
         }

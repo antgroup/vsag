@@ -25,7 +25,7 @@
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/query_computer_pool.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "query_context.h"
 
 namespace vsag {
@@ -101,6 +101,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
         }
         for (uint64_t i = 0; i < heap_candidate_size; ++i) {
             if (ctx.reasoning_ctx != nullptr) {
+                // [reasoning] RecordReorder
                 ctx.reasoning_ctx->RecordReorder(
                     candidate_result[i].second, candidate_result[i].first, dists[i]);
             }
@@ -115,6 +116,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
                         iter_ctx->AddDiscardNode(curr.first, curr.second);
                     }
                     if (ctx.reasoning_ctx != nullptr) {
+                        // [reasoning] RecordReorderEviction
                         ctx.reasoning_ctx->RecordReorderEviction(reorder_heap->Top().second, 0);
                     }
                     reorder_heap->Pop();
@@ -201,6 +203,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
         }
         for (uint64_t i = 0; i < candidate_size; ++i) {
             if (ctx.reasoning_ctx != nullptr) {
+                // [reasoning] RecordReorder
                 ctx.reasoning_ctx->RecordReorder(
                     all_ids[i], lower_bounds[i], lower_bound_probe_dists[i]);
             }
@@ -216,6 +219,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
                         iter_ctx->AddDiscardNode(curr.first, curr.second);
                     }
                     if (ctx.reasoning_ctx != nullptr) {
+                        // [reasoning] RecordReorderEviction
                         ctx.reasoning_ctx->RecordReorderEviction(reorder_heap->Top().second, 0);
                     }
                     reorder_heap->Pop();
@@ -254,6 +258,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
     for (uint64_t i = 0; i < bootstrap_size; ++i) {
         if (ctx.reasoning_ctx != nullptr) {
             const auto idx = order[i];
+            // [reasoning] RecordReorder
             ctx.reasoning_ctx->RecordReorder(ids[i], lower_bound_probe_dists[idx], dists[i]);
         }
         if (not consume_if_ineligible(dists[i], ids[i])) {
@@ -297,6 +302,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
         }
         for (uint64_t i = 0; i < batch_count; ++i) {
             if (ctx.reasoning_ctx != nullptr) {
+                // [reasoning] RecordReorder
                 ctx.reasoning_ctx->RecordReorder(
                     ids[i], lower_bound_probe_dists[batch_indices[i]], dists[i]);
             }
@@ -311,6 +317,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
                         iter_ctx->AddDiscardNode(curr.first, curr.second);
                     }
                     if (ctx.reasoning_ctx != nullptr) {
+                        // [reasoning] RecordReorderEviction
                         ctx.reasoning_ctx->RecordReorderEviction(reorder_heap->Top().second, 0);
                     }
                     reorder_heap->Pop();

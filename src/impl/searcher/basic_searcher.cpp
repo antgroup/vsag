@@ -25,7 +25,7 @@
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/query_computer_pool.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/searcher/searcher_utils.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "vsag/allocator.h"
@@ -198,6 +198,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     uint32_t hops = 0;
     uint32_t dist_cmp = 1;
     if (reasoning != nullptr) {
+        // [reasoning] RecordVisit
         reasoning->RecordVisit(distance_provider.OriginalId(ep), dist, 0);
     }
     if (check_func(ep)) {
@@ -205,6 +206,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             top_candidates->Push(dist, ep);
         }
     } else if (reasoning != nullptr) {
+        // [reasoning] RecordFilterReject
         reasoning->RecordFilterReject(distance_provider.OriginalId(ep));
     }
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
@@ -246,6 +248,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 continue;
             }
             if (reasoning != nullptr) {
+                // [reasoning] RecordVisit
                 reasoning->RecordVisit(distance_provider.OriginalId(id), dist, hops);
             }
             if (not std::isfinite(dist)) {
@@ -256,6 +259,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
                         if (top_candidates->Size() > ef) {
                             if (reasoning != nullptr) {
+                                // [reasoning] RecordEviction
                                 reasoning->RecordEviction(
                                     distance_provider.OriginalId(top_candidates->Top().second),
                                     hops);
@@ -279,11 +283,13 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 if (check_func(id)) {
                     top_candidates->Push(dist, id);
                 } else if (reasoning != nullptr) {
+                    // [reasoning] RecordFilterReject
                     reasoning->RecordFilterReject(distance_provider.OriginalId(id));
                 }
                 if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
                     if (top_candidates->Size() > ef) {
                         if (reasoning != nullptr) {
+                            // [reasoning] RecordEviction
                             reasoning->RecordEviction(
                                 distance_provider.OriginalId(top_candidates->Top().second), hops);
                         }
@@ -429,7 +435,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if ((-current_node_pair.first) > lower_bound && top_candidates->Size() >= ef) {
                 if (reasoning != nullptr) {
-                    reasoning->SetTermination(ReasoningContext::kTerminationLowerBoundReached);
+                    // [reasoning] traversal exhausted: heap lower bound reached
+                    reasoning->SetTermination(ReasoningTermination::kLowerBoundReached);
                 }
                 break;
             }
@@ -660,6 +667,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             dist_cmp += duplicate_count;
             for (uint64_t i = 0; i < duplicate_count; ++i) {
                 if (reasoning != nullptr) {
+                    // [reasoning] RecordVisit
                     reasoning->RecordVisit(neighbors[i], lower_bound_dists[i], duplicate_hops);
                 }
                 top_candidates->Push(lower_bound_dists[i], neighbors[i]);
@@ -681,6 +689,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         if constexpr (mode == KNN_SEARCH) {
             while (top_candidates->Size() > ef) {
                 if (reasoning != nullptr) {
+                    // [reasoning] RecordEviction
                     reasoning->RecordEviction(top_candidates->Top().second, duplicate_hops);
                 }
                 top_candidates->Pop();
@@ -734,7 +743,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         ++hops;
         if (hops >= inner_search_param.hops_limit) {
             if (reasoning != nullptr) {
-                reasoning->SetTermination(ReasoningContext::kTerminationHopsLimitReached);
+                // [reasoning] hop budget exhausted
+                reasoning->SetTermination(ReasoningTermination::kHopsLimitReached);
             }
             break;
         }
@@ -749,7 +759,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 ctx->stats->is_timeout.store(true, std::memory_order_relaxed);
             }
             if (reasoning != nullptr) {
-                reasoning->SetTermination(ReasoningContext::kTerminationTimeout);
+                // [reasoning] time budget exhausted
+                reasoning->SetTermination(ReasoningTermination::kTimeout);
             }
             break;
         }
@@ -757,7 +768,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if ((-current_node_pair.first) > lower_bound && top_candidates->Size() >= ef) {
                 if (reasoning != nullptr) {
-                    reasoning->SetTermination(ReasoningContext::kTerminationLowerBoundReached);
+                    // [reasoning] traversal exhausted: heap lower bound reached
+                    reasoning->SetTermination(ReasoningTermination::kLowerBoundReached);
                 }
                 break;
             }
@@ -805,6 +817,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             dist = line_dists[i];
             const auto cur_id = to_be_visited_id[i];
             if (reasoning != nullptr) {
+                // [reasoning] RecordVisit
                 reasoning->RecordVisit(cur_id, dist, hops);
             }
             if (use_custom_distance and inner_search_param.consider_duplicate) {
@@ -822,6 +835,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                     if constexpr (mode == KNN_SEARCH) {
                         while (top_candidates->Size() > ef) {
                             if (reasoning != nullptr) {
+                                // [reasoning] RecordEviction
                                 reasoning->RecordEviction(top_candidates->Top().second, hops);
                             }
                             top_candidates->Pop();
@@ -854,6 +868,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 if (check_func(cur_id)) {
                     top_candidates->Push(dist, cur_id);
                 } else if (reasoning != nullptr) {
+                    // [reasoning] RecordFilterReject
                     reasoning->RecordFilterReject(cur_id);
                 }
                 if (inner_search_param.consider_duplicate and not use_custom_distance) {
@@ -868,6 +883,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 if constexpr (mode == KNN_SEARCH) {
                     if (top_candidates->Size() > ef) {
                         if (reasoning != nullptr) {
+                            // [reasoning] RecordEviction
                             reasoning->RecordEviction(top_candidates->Top().second, hops);
                         }
                         top_candidates->Pop();
