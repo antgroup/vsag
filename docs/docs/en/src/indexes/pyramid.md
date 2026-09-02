@@ -94,6 +94,7 @@ Build-time parameters live under `index_param`.
 | `no_build_levels` | int[] | `[]` | Tree levels that skip graph construction (0-indexed from the root). |
 | `use_reorder` | bool | `false` | Keep a high-precision copy for rescoring. |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer for reordering. |
+| `store_paths` | bool | `false` | Top-level switch that preserves the original paths supplied to `Build` and `Add` so `GetDataByIdsWithFlag` can return them when `DATA_FLAG_PATH` is selected. It applies to every configured hierarchy and cannot be overridden per hierarchy. |
 | `index_min_size` | int | `0` | Minimum sub-index size; smaller groups fall back to scan. |
 | `support_duplicate` | bool | `false` | Allow duplicate ids. |
 | `build_thread_count` | int | `1` | Threads used for parallel build. |
@@ -180,6 +181,29 @@ base->NumElements(n)
 index->Build(base);
 ```
 
+### Retrieving paths by ID
+
+Set the top-level build parameter `store_paths` to `true` to retain the original paths for ID-based
+retrieval. Select `DATA_FLAG_PATH` in `GetDataByIdsWithFlag`; the returned paths follow the requested
+ID order. Use `GetPaths()` for the default unnamed hierarchy and `GetPaths(hierarchy_name)` for a
+named hierarchy:
+
+```cpp
+int64_t requested_ids[] = {product_id_b, product_id_a};
+auto data = index->GetDataByIdsWithFlag(
+    requested_ids, 2, DATA_FLAG_ID | DATA_FLAG_PATH).value();
+
+const std::string* site_paths = data->GetPaths("site");
+const std::string* category_paths = data->GetPaths("category");
+```
+
+`GetDataByIds` and `GetDataByIdsWithFlag` calls without `DATA_FLAG_PATH` do not attach path arrays.
+Selecting `DATA_FLAG_PATH` while `store_paths` is `false` returns an invalid-argument error. When
+path storage is enabled, a hierarchy is included only if every requested ID has a recorded path in
+that hierarchy. If even one requested ID was built or added without that hierarchy's path, its
+getter returns `nullptr`; other hierarchies whose requested paths are complete are still returned.
+In single-hierarchy mode, the same completeness rule applies to `GetPaths()`.
+
 ### Searching a specific hierarchy
 
 Specify which hierarchy to search via `"hierarchies"` in the search parameters.
@@ -226,8 +250,11 @@ auto result = index->RangeSearch(
 
 ### Serialize & Deserialize
 
-Multi-hierarchy indexes serialize and deserialize transparently. The serialized
-format includes all hierarchy names and their graph structures:
+Multi-hierarchy indexes serialize and deserialize transparently. The serialized format includes
+all hierarchy names and their graph structures. With `store_paths: true`, both regular and
+streaming serialization also persist the retained original paths, making them available through
+`GetDataByIdsWithFlag` after deserialization. With the default `false`, the graph hierarchy is
+persisted but the original per-ID paths are not:
 
 ```cpp
 // Serialize

@@ -159,6 +159,22 @@ ParsePyramidWithHierarchies(const nlohmann::json& hierarchies) {
     return param;
 }
 
+TEST_CASE("Pyramid store_paths parameter", "[ut][PyramidParameters]") {
+    PyramidDefaultParam default_param;
+    auto param_json = vsag::JsonType::Parse(generate_pyramid(default_param));
+    auto param = std::make_shared<vsag::PyramidParameters>();
+    param->FromJson(param_json);
+
+    REQUIRE_FALSE(param->store_paths);
+    REQUIRE_FALSE(param->ToJson()["store_paths"].GetBool());
+
+    param_json["store_paths"].SetBool(true);
+    param->FromJson(param_json);
+
+    REQUIRE(param->store_paths);
+    REQUIRE(param->ToJson()["store_paths"].GetBool());
+}
+
 TEST_CASE("Pyramid Hierarchy Parameters Test", "[ut][PyramidParameters][hierarchy]") {
     SECTION("parse string and object hierarchy definitions") {
         auto param = ParsePyramidWithHierarchies(
@@ -311,6 +327,18 @@ TEST_CASE("Pyramid Parameters CheckCompatibility", "[ut][PyramidParameter][Check
         REQUIRE_FALSE(pyramid_param1->CheckCompatibility(pyramid_param2));
     }
 
+    SECTION("different store_paths") {
+        PyramidDefaultParam default_param;
+        auto param1 = std::make_shared<vsag::PyramidParameters>();
+        auto param2 = std::make_shared<vsag::PyramidParameters>();
+        param1->FromString(generate_pyramid(default_param));
+        param2->FromString(generate_pyramid(default_param));
+        param2->store_paths = true;
+
+        REQUIRE_FALSE(param1->CheckCompatibility(param2));
+        REQUIRE_FALSE(param2->CheckCompatibility(param1));
+    }
+
     SECTION("same hierarchies in different order") {
         auto param1 = ParsePyramidWithHierarchies(
             nlohmann::json::array({{{"name", "site"}, {"no_build_levels", {0, 1}}},
@@ -416,7 +444,7 @@ TEST_CASE("Pyramid Search Hierarchy Parameters Test",
     }
 }
 
-TEST_CASE("Pyramid maps support_duplicate to graph parameter", "[ut][PyramidParameters]") {
+TEST_CASE("Pyramid maps external parameters", "[ut][PyramidParameters]") {
     auto param = vsag::JsonType::Parse(R"({
         "base_quantization_type": "fp32",
         "base_io_type": "memory_io",
@@ -430,6 +458,7 @@ TEST_CASE("Pyramid maps support_duplicate to graph parameter", "[ut][PyramidPara
         "ef_construction": 100,
         "index_min_size": 0,
         "support_duplicate": true,
+        "store_paths": true,
         "hierarchies": [
             "site",
             {"name": "taxonomy", "no_build_levels": [0, 2]}
@@ -445,6 +474,7 @@ TEST_CASE("Pyramid maps support_duplicate to graph parameter", "[ut][PyramidPara
 
     REQUIRE(typed_param != nullptr);
     REQUIRE(typed_param->support_duplicate);
+    REQUIRE(typed_param->store_paths);
     REQUIRE(typed_param->graph_param->support_duplicate_);
     REQUIRE(typed_param->has_hierarchies);
     REQUIRE(typed_param->hierarchies.size() == 2);

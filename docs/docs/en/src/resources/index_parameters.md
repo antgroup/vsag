@@ -121,10 +121,17 @@ Pyramid supports organising multiple subgraphs by tag:
     "pyramid": {
         "tag_dim": 1,
         "max_degree": 24,
-        "ef_construction": 300
+        "ef_construction": 300,
+        "store_paths": true
     }
 }
 ```
+
+`store_paths` is a top-level Pyramid build parameter and defaults to `false`. Enable it when
+`GetDataByIdsWithFlag` must return the original default or named-hierarchy paths with
+`DATA_FLAG_PATH`; see the
+[Pyramid parameter table](../indexes/pyramid.md#build-parameters) for its completeness and
+persistence semantics.
 
 ## SINDI (sparse vectors)
 

@@ -86,6 +86,7 @@ struct Index::Checkpoint {
 | `DATA_FLAG_EXTRA_INFO` | `0x10` | extra info 数据块 |
 | `DATA_FLAG_ATTRIBUTE` | `0x20` | 属性 |
 | `DATA_FLAG_ID` | `0x40` | id |
+| `DATA_FLAG_PATH` | `0x80` | Pyramid 通过 `store_paths` 保留的路径 |
 
 ### `WriteFuncType`
 
@@ -237,8 +238,8 @@ RangeSearch(const DatasetPtr& query, float radius, const std::string& parameters
 | `GetMinAndMaxId` | `tl::expected<std::pair<int64_t, int64_t>, Error> GetMinAndMaxId() const` | 索引中最小与最大的 id。 |
 | `GetExtraInfoByIds` | `tl::expected<void, Error> GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const` | 把 `ids` 的 extra-info 数据块拷贝到调用方提供的缓冲区。 |
 | `GetRawVectorByIds` | `tl::expected<DatasetPtr, Error> GetRawVectorByIds(const int64_t* ids, int64_t count, Allocator* specified_allocator = nullptr) const` | 返回已存向量。其值*接近*原始值，但不保证逐位一致（量化/精度）。 |
-| `GetDataByIds` | `tl::expected<DatasetPtr, Error> GetDataByIds(const int64_t* ids, int64_t count) const` | 返回 `ids` 的全部已存数据（向量、属性、extra info）。 |
-| `GetDataByIdsWithFlag` | `tl::expected<DatasetPtr, Error> GetDataByIdsWithFlag(const int64_t* ids, int64_t count, uint64_t selected_data_flag) const` | 类似 `GetDataByIds`，但通过 [`DATA_FLAG_*`](#数据选择标志) 选择字段。 |
+| `GetDataByIds` | `tl::expected<DatasetPtr, Error> GetDataByIds(const int64_t* ids, int64_t count) const` | 返回实现默认提供的已存字段；可选字段可能需要显式选择。 |
+| `GetDataByIdsWithFlag` | `tl::expected<DatasetPtr, Error> GetDataByIdsWithFlag(const int64_t* ids, int64_t count, uint64_t selected_data_flag) const` | 通过 [`DATA_FLAG_*`](#数据选择标志) 选择支持的字段。Pyramid 路径需要同时设置 `store_paths: true` 和 `DATA_FLAG_PATH`。 |
 | `GetIndexDetailInfos` | `tl::expected<std::vector<IndexDetailInfo>, Error> GetIndexDetailInfos() const` | 列出可自省的细节字段。见 [`IndexDetailInfo`](types.md#索引细节信息)。 |
 | `GetDetailDataByName` | `tl::expected<DetailDataPtr, Error> GetDetailDataByName(const std::string& name, IndexDetailInfo& info) const` | 按名称获取一份细节数据负载。 |
 

@@ -116,10 +116,15 @@ Pyramid 支持按 tag 组织多棵子图：
     "pyramid": {
         "tag_dim": 1,
         "max_degree": 24,
-        "ef_construction": 300
+        "ef_construction": 300,
+        "store_paths": true
     }
 }
 ```
+
+`store_paths` 是 Pyramid 顶层构建参数，默认值为 `false`。需要通过
+`GetDataByIdsWithFlag` 和 `DATA_FLAG_PATH` 返回默认或命名 hierarchy 的原始路径时应启用它；路径完整性与持久化语义见
+[Pyramid 参数表](../indexes/pyramid.md#构建参数)。
 
 ## SINDI（稀疏向量）
 

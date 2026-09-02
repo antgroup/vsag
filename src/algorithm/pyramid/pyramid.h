@@ -16,9 +16,11 @@
 #pragma once
 
 #include <memory>
+#include <shared_mutex>
 #include <utility>
 
 #include "algorithm/inner_index_interface.h"
+#include "algorithm/pyramid/pyramid_path_store.h"
 #include "datacell/graph_interface.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
 #include "impl/allocator/safe_allocator.h"
@@ -130,7 +132,8 @@ public:
           odescent_param_(pyramid_param->odescent_param),
           index_min_size_(pyramid_param->index_min_size),
           graph_type_(pyramid_param->graph_type),
-          support_duplicate_(pyramid_param->support_duplicate) {
+          support_duplicate_(pyramid_param->support_duplicate),
+          store_paths_(pyramid_param->store_paths) {
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
         if (pyramid_param->has_hierarchies) {
             for (const auto& h_param : pyramid_param->hierarchies) {
@@ -148,6 +151,9 @@ public:
                                           h_param.no_build_levels.end());
                 h->ef_construction = h_param.ef_construction;
                 h->alpha = h_param.alpha;
+                if (store_paths_) {
+                    h->path_store = std::make_unique<PyramidPathStore>(allocator_);
+                }
                 hierarchies_.insert({h_param.name, std::move(h)});
             }
         } else {
@@ -158,6 +164,9 @@ public:
                                       pyramid_param->no_build_levels.end());
             h->ef_construction = pyramid_param->ef_construction;
             h->alpha = pyramid_param->alpha;
+            if (store_paths_) {
+                h->path_store = std::make_unique<PyramidPathStore>(allocator_);
+            }
             hierarchies_.insert({"", std::move(h)});
         }
         points_mutex_ = std::make_shared<PointsMutex>(max_capacity_, allocator_);
@@ -191,6 +200,11 @@ public:
                     const int64_t* ids,
                     int64_t count,
                     bool calculate_precise_distance = true) const override;
+
+    DatasetPtr
+    GetDataByIdsWithFlag(const int64_t* ids,
+                         int64_t count,
+                         uint64_t selected_data_flag) const override;
 
     void
     Deserialize(StreamReader& reader) override;
@@ -283,6 +297,12 @@ private:
     void
     deserialize_hierarchies(StreamReader& reader, const JsonType& basic_info);
 
+    void
+    serialize_paths(StreamWriter& writer) const;
+
+    void
+    deserialize_paths(StreamReader& reader, uint64_t max_count);
+
     /// One named hierarchy with its own root IndexNode and build parameters.
     struct Hierarchy {
         std::string name;                          // hierarchy name (empty = default)
@@ -290,6 +310,7 @@ private:
         Vector<int32_t> no_build_levels;           // depths where graph build is skipped
         uint64_t ef_construction{400};             // expansion factor during graph build
         float alpha{1.2F};  // Relative Neighborhood Graph pruning coefficient
+        std::unique_ptr<PyramidPathStore> path_store{nullptr};
 
         Hierarchy(const std::string& n, std::unique_ptr<IndexNode> r, Allocator* alloc)
             : name(n), root(std::move(r)), no_build_levels(alloc) {
@@ -385,6 +406,7 @@ private:
 
     uint32_t index_min_size_{0};  // min node size before graph is built
     bool immutable_{false};       // true after SetImmutable()
+    bool store_paths_{false};     // whether to retain paths for ID-based retrieval
 };
 
 }  // namespace vsag
