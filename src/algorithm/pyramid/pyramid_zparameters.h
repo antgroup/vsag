@@ -53,6 +53,7 @@ public:
     uint64_t ef_construction{400};
     float alpha{1.2F};
     uint32_t index_min_size{0};
+    std::string root_graph_type{PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER};
 };
 
 struct PyramidParameters : public InnerIndexParameter {
@@ -78,6 +79,8 @@ public:
     std::string graph_type{GRAPH_TYPE_VALUE_NSW};
     float alpha{1.2F};
     uint32_t index_min_size{0};
+    std::string root_graph_type{PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER};
+    GraphStorageTypes root_graph_storage_type{GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT};
 
     bool support_duplicate{false};
     bool has_hierarchies{false};
@@ -112,4 +115,9 @@ public:
 private:
     PyramidSearchParameters() = default;
 };
+
+void
+validate_pyramid_external_root_graph_config(const JsonType& external_param,
+                                            const PyramidParameters& params);
+
 }  // namespace vsag
