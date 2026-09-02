@@ -96,3 +96,42 @@ TEST_CASE("IVF Nearest Partition Serialize Test", "[ut][IVFNearestPartition]") {
     auto restored_class_result = partition2->ClassifyDatas(vec.data(), data_count, 1, nullptr);
     REQUIRE(restored_class_result == class_result);
 }
+
+TEST_CASE("IVF Nearest Partition Routing Statistics Test", "[ut][IVFNearestPartition]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto thread_pool = SafeThreadPool::FactoryDefaultThreadPool();
+    std::vector<SafeThreadPoolPtr> pools{thread_pool, nullptr};
+    int64_t dim = 128;
+    int64_t bucket_count = 20;
+    for (auto& tp : pools) {
+        IndexCommonParam param;
+        param.dim_ = dim;
+        param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+        param.allocator_ = allocator;
+        param.thread_pool_ = tp;
+
+        IVFPartitionStrategyParametersPtr strategy_param =
+            std::make_shared<IVFPartitionStrategyParameters>();
+        auto partition = std::make_unique<IVFNearestPartition>(bucket_count, param, strategy_param);
+
+        auto dataset = Dataset::Make();
+        int64_t data_count = 1000L;
+        auto vec = fixtures::generate_vectors(data_count, dim, true, 95);
+        dataset->Float32Vectors(vec.data())->Dim(dim)->NumElements(data_count)->Owner(false);
+
+        partition->Train(dataset);
+        auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1, nullptr);
+
+        // The search path accumulates routing statistics through a non-null QueryContext. The
+        // statistics parsing must produce the same bucket assignment and non-zero routing stats
+        // (the parse now runs outside the reduce lock).
+        SearchStatistics stats;
+        QueryContext ctx;
+        ctx.stats = &stats;
+        auto stats_result = partition->ClassifyDatas(vec.data(), data_count, 1, &ctx);
+        REQUIRE(stats_result == class_result);
+        REQUIRE(stats.dist_cmp.load() > 0);
+        auto dumped = JsonType::Parse(stats.Dump());
+        REQUIRE(dumped["distance_evaluations_by_phase"]["routing"].GetUint64() > 0);
+    }
+}
