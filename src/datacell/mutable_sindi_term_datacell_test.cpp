@@ -27,6 +27,20 @@ using namespace vsag;
 
 namespace {
 
+class ModuloFilter final : public Filter {
+public:
+    explicit ModuloFilter(uint32_t divisor) : divisor_(divisor) {
+    }
+
+    bool
+    CheckValid(int64_t id) const override {
+        return id % divisor_ == 0;
+    }
+
+private:
+    uint32_t divisor_;
+};
+
 uint64_t
 QueryFirstWindow(const MutableSindiTermDataCellPtr& data_cell,
                  float* dists,
@@ -35,6 +49,57 @@ QueryFirstWindow(const MutableSindiTermDataCellPtr& data_cell,
     SindiQueryContext query_context(allocator);
     data_cell->QueryWindow(dists, 0, computer, false, query_context);
     return query_context.evaluation_tracker.Count();
+}
+
+template <InnerSearchMode mode, InnerSearchType type>
+void
+RequireHeapEquivalence(const MutableSindiTermDataCellPtr& data_cell,
+                       const SparseTermComputerPtr& computer,
+                       uint32_t posting_count,
+                       const FilterPtr& filter,
+                       Allocator* allocator) {
+    std::vector<float> term_list_distances(posting_count, 0.0F);
+    std::vector<float> full_scan_distances(posting_count, 0.0F);
+    QueryFirstWindow(data_cell, term_list_distances.data(), computer, allocator);
+    QueryFirstWindow(data_cell, full_scan_distances.data(), computer, allocator);
+
+    InnerSearchParam search_param;
+    search_param.ef = 20;
+    search_param.radius = 0.99F;
+    search_param.is_inner_id_allowed = filter;
+    MaxHeap term_list_heap(allocator);
+    MaxHeap full_scan_heap(allocator);
+    REQUIRE_FALSE(data_cell->InsertHeapByTermLists<mode, type>(
+        term_list_distances.data(), computer, term_list_heap, search_param, 0));
+    REQUIRE_FALSE(data_cell->InsertHeapByDists<mode, type>(
+        full_scan_distances.data(), full_scan_distances.size(), full_scan_heap, search_param, 0));
+
+    std::vector<std::pair<float, InnerIdType>> term_list_results;
+    std::vector<std::pair<float, InnerIdType>> full_scan_results;
+    while (!term_list_heap.empty()) {
+        term_list_results.push_back(term_list_heap.top());
+        term_list_heap.pop();
+    }
+    while (!full_scan_heap.empty()) {
+        full_scan_results.push_back(full_scan_heap.top());
+        full_scan_heap.pop();
+    }
+    const auto by_distance_and_id = [](const auto& left, const auto& right) {
+        return left.first == right.first ? left.second < right.second : left.first < right.first;
+    };
+    std::sort(term_list_results.begin(), term_list_results.end(), by_distance_and_id);
+    std::sort(full_scan_results.begin(), full_scan_results.end(), by_distance_and_id);
+    REQUIRE(term_list_results.size() == full_scan_results.size());
+    for (uint32_t i = 0; i < term_list_results.size(); ++i) {
+        REQUIRE(term_list_results[i].first == full_scan_results[i].first);
+        const auto distance = term_list_results[i].first;
+        const bool unique_distance =
+            (i == 0 || term_list_results[i - 1].first != distance) &&
+            (i + 1 == term_list_results.size() || term_list_results[i + 1].first != distance);
+        if (unique_distance) {
+            REQUIRE(term_list_results[i].second == full_scan_results[i].second);
+        }
+    }
 }
 
 }  // namespace
@@ -125,7 +190,8 @@ TEST_CASE("MutableSindiTermDataCell sorts postings by stored value",
     }
 }
 
-TEST_CASE("MutableSindiTermDataCell prunes sorted postings", "[ut][MutableSindiTermDataCell]") {
+TEST_CASE("MutableSindiTermDataCell prunes incrementally appended postings",
+          "[ut][MutableSindiTermDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto quantization_params = std::make_shared<QuantizationParams>();
     auto data_cell = std::make_shared<MutableSindiTermDataCell>(
@@ -144,9 +210,6 @@ TEST_CASE("MutableSindiTermDataCell prunes sorted postings", "[ut][MutableSindiT
     REQUIRE(data_cell->GetWindow(0).term_sizes_[term] == 4);
     REQUIRE_FALSE(data_cell->GetWindow(0).postings_sorted_);
 
-    data_cell->SortByValue(0);
-    REQUIRE(data_cell->GetWindow(0).postings_sorted_);
-
     float query_value = 1.0F;
     SparseVector query{1, &term, &query_value};
     SINDISearchParameter search_parameter;
@@ -158,6 +221,130 @@ TEST_CASE("MutableSindiTermDataCell prunes sorted postings", "[ut][MutableSindiT
     REQUIRE(sorted_distances[0] == 0.0F);
     REQUIRE(sorted_distances[1] == 0.0F);
     REQUIRE(sorted_distances[2] == 0.0F);
+}
+
+TEST_CASE("MutableSindiTermDataCell two-run search matches eager normalization",
+          "[ut][MutableSindiTermDataCell]") {
+    const auto quantization = GENERATE(SparseValueQuantizationType::FP32,
+                                       SparseValueQuantizationType::FP16,
+                                       SparseValueQuantizationType::SQ8);
+    DYNAMIC_SECTION("quantization=" << static_cast<int>(quantization)) {
+        auto allocator = SafeAllocator::FactoryDefaultAllocator();
+        auto quantization_params = std::make_shared<QuantizationParams>();
+        quantization_params->min_val = 0.0F;
+        quantization_params->max_val = 1024.0F;
+        quantization_params->diff = 1024.0F;
+        uint32_t term = 9;
+        constexpr uint32_t prefix_count = 300;
+        constexpr uint32_t posting_count = 340;
+        auto split = std::make_shared<MutableSindiTermDataCell>(
+            16, 512, allocator.get(), quantization, quantization_params);
+        auto eager = std::make_shared<MutableSindiTermDataCell>(
+            16, 512, allocator.get(), quantization, quantization_params);
+
+        std::array<float, posting_count> values{};
+        for (uint32_t id = 0; id < posting_count; ++id) {
+            values[id] = static_cast<float>((id * 43U) % 401U + 25U);
+            if (id == prefix_count) {
+                values[id] = 1000.0F;
+            }
+            SparseVector vector{1, &term, values.data() + id};
+            split->InsertVector(vector, id);
+            eager->InsertVector(vector, id);
+            if (id + 1 == prefix_count) {
+                split->SortByValue(0);
+            }
+        }
+        REQUIRE(split->FinalizeInsertBatch(0));
+        eager->SortByValue(0);
+        REQUIRE(split->GetWindow(0).dirty_posting_prefixes_.at(term) == prefix_count);
+
+        const std::array<uint32_t, 6> retained_counts{1, 31, 32, 255, 256, posting_count};
+        for (const auto retained_count : retained_counts) {
+            CAPTURE(quantization, retained_count);
+            float query_value = 1.0F;
+            SparseVector query{1, &term, &query_value};
+            SINDISearchParameter search_parameter;
+            search_parameter.term_retain_threshold = retained_count;
+            auto split_computer =
+                std::make_shared<SparseTermComputer>(query, search_parameter, allocator.get());
+            auto eager_computer =
+                std::make_shared<SparseTermComputer>(query, search_parameter, allocator.get());
+            std::array<float, posting_count> split_distances{};
+            std::array<float, posting_count> eager_distances{};
+            REQUIRE(
+                QueryFirstWindow(split, split_distances.data(), split_computer, allocator.get()) ==
+                retained_count);
+            REQUIRE(
+                QueryFirstWindow(eager, eager_distances.data(), eager_computer, allocator.get()) ==
+                retained_count);
+            REQUIRE(split_distances == eager_distances);
+        }
+
+        float query_value = 1.0F;
+        SparseVector query{1, &term, &query_value};
+        SINDISearchParameter search_parameter;
+        search_parameter.term_retain_threshold = 256;
+        auto computer =
+            std::make_shared<SparseTermComputer>(query, search_parameter, allocator.get());
+        RequireHeapEquivalence<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
+            split, computer, posting_count, nullptr, allocator.get());
+        RequireHeapEquivalence<InnerSearchMode::RANGE_SEARCH, InnerSearchType::PURE>(
+            split, computer, posting_count, nullptr, allocator.get());
+        auto filter = std::make_shared<ModuloFilter>(3);
+        RequireHeapEquivalence<InnerSearchMode::KNN_SEARCH, InnerSearchType::WITH_FILTER>(
+            split, computer, posting_count, filter, allocator.get());
+        RequireHeapEquivalence<InnerSearchMode::RANGE_SEARCH, InnerSearchType::WITH_FILTER>(
+            split, computer, posting_count, filter, allocator.get());
+
+        REQUIRE(split->NormalizeDirtyPostings(0));
+        REQUIRE_FALSE(split->NormalizeDirtyPostings(0));
+        REQUIRE(*split->GetWindow(0).term_ids_[term] == *eager->GetWindow(0).term_ids_[term]);
+        REQUIRE(*split->GetWindow(0).term_datas_[term] == *eager->GetWindow(0).term_datas_[term]);
+        REQUIRE(split->normalization_ids_scratch_.capacity() == 0);
+        REQUIRE(split->normalization_data_scratch_.capacity() == 0);
+    }
+}
+
+TEST_CASE("MutableSindiTermDataCell bounds dirty posting runs", "[ut][MutableSindiTermDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto data_cell = std::make_shared<MutableSindiTermDataCell>(
+        16, 1024, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+    uint32_t term = 7;
+    std::array<float, 556> values{};
+    for (uint32_t id = 0; id < 300; ++id) {
+        values[id] = static_cast<float>((id * 37U) % 113U + 1U);
+        SparseVector vector{1, &term, values.data() + id};
+        data_cell->InsertVector(vector, id);
+    }
+    REQUIRE(data_cell->FinalizeInsertBatch(0));
+    REQUIRE(data_cell->GetWindow(0).dirty_posting_prefixes_.empty());
+
+    for (uint32_t id = 300; id < 555; ++id) {
+        values[id] = static_cast<float>((id * 37U) % 113U + 1U);
+        SparseVector vector{1, &term, values.data() + id};
+        data_cell->InsertVector(vector, id);
+        REQUIRE(data_cell->FinalizeInsertBatch(0));
+    }
+    REQUIRE(data_cell->GetWindow(0).dirty_posting_prefixes_.at(term) == 300);
+
+    values[555] = 1000.0F;
+    SparseVector vector{1, &term, values.data() + 555};
+    data_cell->InsertVector(vector, 555);
+    REQUIRE(data_cell->FinalizeInsertBatch(0));
+    REQUIRE(data_cell->GetWindow(0).dirty_posting_prefixes_.empty());
+    REQUIRE(data_cell->GetWindow(0).postings_sorted_);
+
+    values[100] = 2000.0F;
+    SparseVector appended{1, &term, values.data() + 100};
+    data_cell->InsertVector(appended, 556);
+    REQUIRE(data_cell->FinalizeInsertBatch(0));
+    REQUIRE_FALSE(data_cell->GetWindow(0).dirty_posting_prefixes_.empty());
+    data_cell->Compact();
+    REQUIRE(data_cell->GetWindow(0).dirty_posting_prefixes_.empty());
+    REQUIRE(data_cell->GetWindow(0).postings_sorted_);
+    REQUIRE(data_cell->normalization_ids_scratch_.capacity() == 0);
+    REQUIRE(data_cell->normalization_data_scratch_.capacity() == 0);
 }
 
 TEST_CASE("MutableSindiTermDataCell normalizes legacy posting order on deserialize",

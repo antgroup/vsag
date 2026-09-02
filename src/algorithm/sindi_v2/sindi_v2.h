@@ -161,7 +161,7 @@ private:
     get_min_max_window_id(const FilterPtr& filter) const;
 
     void
-    cal_memory_usage();
+    cal_memory_usage() const;
 
     SparseVector
     sort_and_prune_sparse_vector_for_build(const SparseVector& input,
