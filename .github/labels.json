@@ -1,0 +1,120 @@
+[
+  {
+    "name": "area/bindings-node",
+    "color": "D4C5F9",
+    "description": "Node.js and TypeScript bindings Node.js 与 TypeScript 绑定"
+  },
+  {
+    "name": "area/bindings-python",
+    "color": "D4C5F9",
+    "description": "Python package and bindings Python 包与绑定"
+  },
+  {
+    "name": "area/ci",
+    "color": "D4C5F9",
+    "description": "CI/CD, build configuration, and automation CI/CD、构建配置与自动化"
+  },
+  {
+    "name": "area/dependencies",
+    "color": "D4C5F9",
+    "description": "Vendored and external dependencies 内置及外部依赖"
+  },
+  {
+    "name": "area/docker",
+    "color": "D4C5F9",
+    "description": "Container images and Docker environments 容器镜像与 Docker 环境"
+  },
+  {
+    "name": "area/docs",
+    "color": "D4C5F9",
+    "description": "Website and repository documentation 网站与仓库文档"
+  },
+  {
+    "name": "area/examples",
+    "color": "D4C5F9",
+    "description": "C++, Python, and TypeScript examples C++、Python 与 TypeScript 示例"
+  },
+  {
+    "name": "area/testing",
+    "color": "D4C5F9",
+    "description": "Tests, fixtures, and test infrastructure 测试、夹具与测试基础设施"
+  },
+  {
+    "name": "area/tools",
+    "color": "D4C5F9",
+    "description": "Command-line, evaluation, and developer tools 命令行、评测与开发工具"
+  },
+  {
+    "name": "module/api",
+    "color": "402BFA",
+    "description": "Public C++ API and headers 公共 C++ API 与头文件"
+  },
+  {
+    "name": "module/attr",
+    "color": "1CC88E",
+    "description": "Attribute filtering and expressions 属性过滤与表达式"
+  },
+  {
+    "name": "module/cicd",
+    "color": "0E8A16",
+    "description": "Legacy; use area/ci 已弃用；请使用 area/ci",
+    "legacy": true
+  },
+  {
+    "name": "module/datacell",
+    "color": "3C966A",
+    "description": "Data cells, vector I/O, and quantization 数据单元、向量 I/O 与量化"
+  },
+  {
+    "name": "module/docker",
+    "color": "5F5997",
+    "description": "Legacy; use area/docker 已弃用；请使用 area/docker",
+    "legacy": true
+  },
+  {
+    "name": "module/docs",
+    "color": "43C818",
+    "description": "Legacy; use area/docs 已弃用；请使用 area/docs",
+    "legacy": true
+  },
+  {
+    "name": "module/example",
+    "color": "47E1CB",
+    "description": "Legacy; use area/examples 已弃用；请使用 area/examples",
+    "legacy": true
+  },
+  {
+    "name": "module/index",
+    "color": "335514",
+    "description": "Index algorithms and implementations 索引算法与实现"
+  },
+  {
+    "name": "module/python",
+    "color": "45194C",
+    "description": "Legacy; use area/bindings-python 已弃用；请使用 area/bindings-python",
+    "legacy": true
+  },
+  {
+    "name": "module/simd",
+    "color": "C5DEF5",
+    "description": "SIMD dispatch and optimized kernels SIMD 分派与优化内核"
+  },
+  {
+    "name": "module/testing",
+    "color": "4C9330",
+    "description": "Legacy; use area/testing 已弃用；请使用 area/testing",
+    "legacy": true
+  },
+  {
+    "name": "module/thirdparty",
+    "color": "B2CAEA",
+    "description": "Legacy; use area/dependencies 已弃用；请使用 area/dependencies",
+    "legacy": true
+  },
+  {
+    "name": "module/tools",
+    "color": "A49C89",
+    "description": "Legacy; use area/tools 已弃用；请使用 area/tools",
+    "legacy": true
+  }
+]

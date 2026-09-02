@@ -1,45 +1,48 @@
 pull_request_rules:
-  - name: add module/cicd label
+  - name: add area/ci label
     conditions:
-      - files~=^\.circleci/.*$
-      - files~=^\.github/.*$
-      - files~=^\scripts/.*$
+      - or:
+          - files~=^\.circleci/.*$
+          - files~=^\.github/.*$
+          - files~=^scripts/.*$
+          - files~=^cmake/.*$
+          - files~=^CMakeLists\.txt$
     actions:
       label:
         add:
-          - module/cicd
+          - area/ci
 
-  - name: add module/docker label
+  - name: add area/docker label
     conditions:
       - files~=^docker/.*$
     actions:
       label:
         add:
-          - module/docker
+          - area/docker
 
-  - name: add module/docs label
+  - name: add area/docs label
     conditions:
       - files~=^docs/.*$
     actions:
       label:
         add:
-          - module/docs
+          - area/docs
 
-  - name: add module/example label
+  - name: add area/examples label
     conditions:
       - files~=^examples/.*$
     actions:
       label:
         add:
-          - module/example
+          - area/examples
 
-  - name: add module/thirdparty label
+  - name: add area/dependencies label
     conditions:
       - files~=^extern/.*$
     actions:
       label:
         add:
-          - module/thirdparty
+          - area/dependencies
 
   - name: add module/api label
     conditions:
@@ -59,9 +62,10 @@ pull_request_rules:
 
   - name: add module/datacell label
     conditions:
-      - files~=^src/datacell/.*$
-      - files~=^src/io/.*$
-      - files~=^src/quantization/.*$
+      - or:
+          - files~=^src/datacell/.*$
+          - files~=^src/io/.*$
+          - files~=^src/quantization/.*$
     actions:
       label:
         add:
@@ -69,7 +73,9 @@ pull_request_rules:
 
   - name: add module/index label
     conditions:
-      - files~=^src/index/.*$
+      - or:
+          - files~=^src/index/.*$
+          - files~=^src/algorithm/.*$
     actions:
       label:
         add:
@@ -83,30 +89,41 @@ pull_request_rules:
         add:
           - module/simd
 
-  - name: add module/pyvsag label
+  - name: add area/bindings-python label
     conditions:
-      - files~=^python/.*$
-      - files~=^python_bindings/.*$
+      - or:
+          - files~=^python/.*$
+          - files~=^python_bindings/.*$
     actions:
       label:
         add:
-          - module/pyvsag
+          - area/bindings-python
 
-  - name: add module/tools label
+  - name: add area/bindings-node label
+    conditions:
+      - or:
+          - files~=^node_bindings/.*$
+          - files~=^typescript/.*$
+    actions:
+      label:
+        add:
+          - area/bindings-node
+
+  - name: add area/tools label
     conditions:
       - files~=^tools/.*$
     actions:
       label:
         add:
-          - module/tools
+          - area/tools
 
-  - name: add module/testing label
+  - name: add area/testing label
     conditions:
       - files~=^tests/.*$
     actions:
       label:
         add:
-          - module/testing
+          - area/testing
 merge_protections:
   - name: Require kind label
     if:
