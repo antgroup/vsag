@@ -24,6 +24,7 @@
 
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/searcher/searcher_utils.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/spsc_queue.h"
 
@@ -176,7 +177,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     } else {
         flatten->Query(&dist, computer, &ep, 1, ctx);
     }
-    if (check_func(ep)) {
+    if (is_result_distance_eligible(dist) and check_func(ep)) {
         top_candidates->Push(dist, ep);
         lower_bound = top_candidates->Top().first;
     }
@@ -188,7 +189,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     if (dist < THRESHOLD_ERROR) {
         inner_search_param.duplicate_id = ep;
     }
-    candidate_set->Push(-dist, ep);
+    candidate_set->Push(traversal_priority(dist), ep);
     vl->Set(ep);
 
     auto num_threads = inner_search_param.parallel_search_thread_count - 1;
@@ -320,16 +321,16 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
             if (dist < THRESHOLD_ERROR) {
                 inner_search_param.duplicate_id = cur_id;
             }
-            if (top_candidates->Size() < ef || lower_bound > dist ||
+            if (not std::isfinite(dist) || top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
-                candidate_set->Push(-dist, cur_id);
-                if (check_func(cur_id)) {
+                candidate_set->Push(traversal_priority(dist), cur_id);
+                if (is_result_distance_eligible(dist) and check_func(cur_id)) {
                     top_candidates->Push(dist, cur_id);
                 }
                 if (inner_search_param.consider_duplicate) {
                     const auto duplicate_ids = graph->GetDuplicateIds(cur_id);
                     for (const auto& item : duplicate_ids) {
-                        if (check_func(item)) {
+                        if (is_result_distance_eligible(dist) and check_func(item)) {
                             top_candidates->Push(dist, item);
                         }
                     }

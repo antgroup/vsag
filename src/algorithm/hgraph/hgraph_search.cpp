@@ -454,7 +454,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(
             raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param, vt, &ctx);
-        search_param.ep = result->Top().second;
+        if (not result->Empty()) {
+            search_param.ep = result->Top().second;
+        }
     }
 
     FilterPtr ft = this->create_search_filter(request.filter_, params.use_extra_info_filter);
