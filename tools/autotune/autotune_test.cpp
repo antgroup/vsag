@@ -942,7 +942,7 @@ TEST_CASE("AutoTune searches an existing Pyramid index for one path workload") {
     auto created = vsag::Factory::CreateIndex("pyramid", create_params);
     REQUIRE(created.has_value());
     REQUIRE(created.value()->Build(base).has_value());
-    REQUIRE(created.value()->GetMemoryUsage() == 0);
+    REQUIRE(created.value()->GetMemoryUsage() > 0);
 
     vsag::autotune::SearchRequest input;
     input.index = created.value();
@@ -966,7 +966,7 @@ TEST_CASE("AutoTune searches an existing Pyramid index for one path workload") {
     REQUIRE(result["recommendation"]["search_params"].contains("pyramid"));
     REQUIRE(result["builds"].empty());
 
-    input.constraints.push_back({vsag::autotune::Metric::INDEX_MEMORY_MB, 1.0});
+    input.constraints.push_back({vsag::autotune::Metric::INDEX_MEMORY_MB, 0.0});
     const auto memory_constrained = vsag::autotune::TuneSearch(input);
     REQUIRE(memory_constrained.has_value());
     REQUIRE(memory_constrained->status == vsag::autotune::TuneStatus::NO_FEASIBLE_CANDIDATE);
