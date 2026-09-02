@@ -247,6 +247,7 @@ extern const char* const BRUTE_FORCE_USE_RESIDUAL;
 extern const char* const IVF_USE_RESIDUAL;
 extern const char* const IVF_USE_REORDER;
 extern const char* const IVF_TRAIN_TYPE;
+extern const char* const IVF_USE_ROUTE_GRAPH;
 extern const char* const IVF_BUCKETS_COUNT;
 extern const char* const IVF_BASE_QUANTIZATION_TYPE;
 extern const char* const IVF_BASE_IO_TYPE;

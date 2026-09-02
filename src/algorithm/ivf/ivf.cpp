@@ -89,6 +89,7 @@ build_default_ivf_param(const JsonType& external_param) {
     JsonType partition;
     partition[IVF_PARTITION_STRATEGY_TYPE_KEY].SetString(IVF_PARTITION_STRATEGY_TYPE_NEAREST);
     partition[IVF_TRAIN_TYPE_KEY].SetString(IVF_TRAIN_TYPE_KMEANS);
+    partition[IVF_USE_ROUTE_GRAPH_KEY].SetBool(true);
     partition[IVF_PARTITION_STRATEGY_TYPE_GNO_IMI][GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY].SetInt(
         10);
     partition[IVF_PARTITION_STRATEGY_TYPE_GNO_IMI][GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY].SetInt(
@@ -143,6 +144,8 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
         } else if (key == IVF_PARTITION_STRATEGY_TYPE_KEY) {
             inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_PARTITION_STRATEGY_TYPE_KEY].SetJson(
                 value);
+        } else if (key == IVF_USE_ROUTE_GRAPH) {
+            inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_USE_ROUTE_GRAPH_KEY].SetJson(value);
         } else if (key == GNO_IMI_FIRST_ORDER_BUCKETS_COUNT) {
             inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_PARTITION_STRATEGY_TYPE_GNO_IMI]
                       [GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY]

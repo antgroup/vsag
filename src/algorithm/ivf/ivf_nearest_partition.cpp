@@ -19,17 +19,54 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <limits>
 
 #include "algorithm/hgraph/hgraph.h"
 #include "algorithm/inner_index_interface.h"
+#include "container_types.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/blas/blas_function.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "inner_string_params.h"
 #include "query_context.h"
+#include "simd/fp32_simd.h"
 #include "utils/util_functions.h"
 #include "vsag_exception.h"
 
 namespace vsag {
+
+namespace {
+
+constexpr uint64_t K_CENTROID_SCAN_LAYOUT_MARKER = 0x565341475343414EULL;  // "VSAGSCAN"
+
+constexpr BucketIdType INVALID_BUCKET_ID = static_cast<BucketIdType>(-1);
+
+// Max-heap used to keep the k smallest routing keys: the largest retained key is at top() and
+// is discarded when a better candidate arrives. bucket_id provides a deterministic tie-break.
+using ScanRouteHeap = std::priority_queue<std::pair<float, InnerIdType>,
+                                          Vector<std::pair<float, InnerIdType>>,
+                                          std::less<>>;
+
+// C = A * B^T (same shape as GNOIMIPartition's batched centroid routing).
+void
+compute_centroid_dots(const float* A, const float* B, float* C, int64_t M, int64_t N, int64_t K) {
+    BlasFunction::Sgemm(BlasFunction::ColMajor,
+                        BlasFunction::Trans,
+                        BlasFunction::NoTrans,
+                        static_cast<int32_t>(N),
+                        static_cast<int32_t>(M),
+                        static_cast<int32_t>(K),
+                        1.0F,
+                        B,
+                        static_cast<int32_t>(K),
+                        A,
+                        static_cast<int32_t>(K),
+                        0.0F,
+                        C,
+                        static_cast<int32_t>(N));
+}
+
+}  // namespace
 
 static constexpr const char* SEARCH_PARAM_TEMPLATE_STR = R"(
 {{
@@ -43,8 +80,12 @@ IVFNearestPartition::IVFNearestPartition(BucketIdType bucket_count,
                                          const IndexCommonParam& common_param,
                                          IVFPartitionStrategyParametersPtr param)
     : IVFPartitionStrategy(common_param, bucket_count),
-      ivf_partition_strategy_param_(std::move(param)) {
-    this->factory_router_index(common_param);
+      ivf_partition_strategy_param_(std::move(param)),
+      use_route_graph_(this->ivf_partition_strategy_param_->use_route_graph),
+      common_param_(common_param) {
+    if (this->use_route_graph_) {
+        this->factory_router_index(common_param);
+    }
 }
 
 void
@@ -84,7 +125,32 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
         }
     }
 
-    auto build_result = this->route_index_ptr_->Build(centroids);
+    if (this->use_route_graph_) {
+        const auto failed_ids = this->route_index_ptr_->Build(centroids);
+        if (not failed_ids.empty()) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "failed to build all IVF routing centroids");
+        }
+    } else {
+        // Persist the trained centroids (normalized for cosine) so the scan routing path can
+        // assign buckets without creating a routing HGraph.
+        this->centroids_.resize(this->bucket_count_ * this->dim_);
+        memcpy(
+            this->centroids_.data(), data.data(), this->bucket_count_ * this->dim_ * sizeof(float));
+        this->norms_.resize(this->bucket_count_);
+        if (metric_type_ == MetricType::METRIC_TYPE_L2SQR) {
+            for (int i = 0; i < bucket_count_; ++i) {
+                this->norms_[i] = FP32ComputeIP(this->centroids_.data() + i * dim_,
+                                                this->centroids_.data() + i * dim_,
+                                                dim_) /
+                                  2.0F;
+            }
+        } else {
+            // IP/COSINE distances are defined as `1 - dot`; with normalized cosine centroids
+            // the constant term is 1.0 for every centroid.
+            std::fill(this->norms_.begin(), this->norms_.end(), 1.0F);
+        }
+    }
     this->is_trained_ = true;
 }
 
@@ -93,9 +159,12 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
                                    int64_t count,
                                    BucketIdType buckets_per_data,
                                    QueryContext* ctx) const {
+    if (not this->use_route_graph_) {
+        return this->classify_datas_by_scan(datas, count, buckets_per_data, ctx);
+    }
     std::mutex dist_cmp_reduce_mutex;
     uint32_t dist_cmp = 0;
-    Vector<BucketIdType> result(buckets_per_data * count, -1, this->allocator_);
+    Vector<BucketIdType> result(buckets_per_data * count, INVALID_BUCKET_ID, this->allocator_);
     auto task = [&](int64_t i) {
         auto query = Dataset::Make();
         query->Dim(this->dim_)
@@ -158,12 +227,50 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
 void
 IVFNearestPartition::Serialize(StreamWriter& writer) {
     IVFPartitionStrategy::Serialize(writer);
-    this->route_index_ptr_->Serialize(writer);
+    if (this->use_route_graph_) {
+        // Keep the route-graph layout byte-for-byte compatible with the legacy format.
+        this->route_index_ptr_->Serialize(writer);
+    } else {
+        StreamWriter::WriteObj(writer, K_CENTROID_SCAN_LAYOUT_MARKER);
+        StreamWriter::WriteVector(writer, this->centroids_);
+        StreamWriter::WriteVector(writer, this->norms_);
+    }
 }
 void
 IVFNearestPartition::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     IVFPartitionStrategy::Deserialize(reader);
-    this->route_index_ptr_->Deserialize(reader);
+    // Peek the layout marker without consuming bytes so legacy (marker-less) route-graph
+    // indices remain loadable with any reader configuration.
+    const auto cursor = reader->GetCursor();
+    uint64_t layout = 0;
+    StreamReader::ReadObj(reader, layout);
+    reader->Seek(cursor);
+    if (layout == K_CENTROID_SCAN_LAYOUT_MARKER) {
+        StreamReader::ReadObj(reader, layout);
+        StreamReader::ReadVector(reader, this->centroids_);
+        StreamReader::ReadVector(reader, this->norms_);
+        const bool invalid_trained_layout =
+            this->is_trained_ and (this->centroids_.size() != this->bucket_count_ * this->dim_ or
+                                   this->norms_.size() != this->bucket_count_);
+        const bool invalid_untrained_layout =
+            not this->is_trained_ and (not this->centroids_.empty() or not this->norms_.empty());
+        if (invalid_trained_layout or invalid_untrained_layout) {
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                "invalid IVF centroid scan routing layout");
+        }
+        this->route_index_ptr_.reset();
+        this->use_route_graph_ = false;
+    } else {
+        // Route-graph layout (the legacy marker-less format). Lazily create the routing HGraph
+        // when the reader was configured with use_route_graph=false.
+        if (this->route_index_ptr_ == nullptr) {
+            this->factory_router_index(this->common_param_);
+        }
+        this->route_index_ptr_->Deserialize(reader);
+        this->centroids_.clear();
+        this->norms_.clear();
+        this->use_route_graph_ = true;
+    }
 }
 void
 IVFNearestPartition::factory_router_index(const IndexCommonParam& common_param) {
@@ -184,12 +291,102 @@ IVFNearestPartition::GetCentroid(BucketIdType bucket_id, Vector<float>& centroid
     if (bucket_id >= bucket_count_) {
         throw VsagException(ErrorType::INVALID_ARGUMENT, "Invalid bucket_id");
     }
-    this->route_index_ptr_->GetCodeByInnerId(bucket_id, (uint8_t*)centroid.data());
+    if (this->use_route_graph_) {
+        this->route_index_ptr_->GetCodeByInnerId(bucket_id, (uint8_t*)centroid.data());
+    } else {
+        memcpy(centroid.data(),
+               this->centroids_.data() + bucket_id * this->dim_,
+               this->dim_ * sizeof(float));
+    }
 }
 
 [[nodiscard]] uint64_t
 IVFNearestPartition::GetMemoryUsage() const {
-    return static_cast<uint64_t>(sizeof(IVFNearestPartition) +
-                                 this->route_index_ptr_->GetMemoryUsage());
+    auto memory = static_cast<uint64_t>(sizeof(IVFNearestPartition));
+    if (this->use_route_graph_) {
+        memory += this->route_index_ptr_->GetMemoryUsage();
+    }
+    memory += this->centroids_.size() * sizeof(float);
+    memory += this->norms_.size() * sizeof(float);
+    return memory;
 }
+Vector<BucketIdType>
+IVFNearestPartition::classify_datas_by_scan(const void* datas,
+                                            int64_t count,
+                                            BucketIdType buckets_per_data,
+                                            QueryContext* ctx) const {
+    Vector<BucketIdType> result(buckets_per_data * count, INVALID_BUCKET_ID, this->allocator_);
+    // Centroids only exist after Train(). An untrained index must not route: leave every slot
+    // at INVALID_BUCKET_ID (mirrors the untrained route-graph behavior).
+    if (not this->is_trained_ or this->bucket_count_ == 0 or count == 0) {
+        return result;
+    }
+
+    const auto k = std::min<BucketIdType>(buckets_per_data, bucket_count_);
+    if (k == 0) {
+        return result;
+    }
+
+    Vector<float> norm_vectors(allocator_);
+    const auto* query_data = static_cast<const float*>(datas);
+    if (metric_type_ == MetricType::METRIC_TYPE_COSINE) {
+        norm_vectors.resize(count * dim_);
+        for (int64_t i = 0; i < count; ++i) {
+            Normalize(query_data + i * dim_, norm_vectors.data() + i * dim_, dim_);
+        }
+        query_data = norm_vectors.data();
+    }
+
+    // Batch dot products query x centroids^T via Sgemm (same shape as GNOIMIPartition).
+    Vector<float> dots(count * bucket_count_, allocator_);
+    compute_centroid_dots(
+        query_data, this->centroids_.data(), dots.data(), count, bucket_count_, dim_);
+
+    auto task = [&](int64_t i) {
+        Vector<std::pair<float, InnerIdType>> heap_storage(this->allocator_);
+        heap_storage.reserve(k);
+        ScanRouteHeap heap(std::less<>{}, std::move(heap_storage));
+        const auto* dots_i = dots.data() + i * bucket_count_;
+        for (BucketIdType b = 0; b < bucket_count_; ++b) {
+            const std::pair<float, InnerIdType> candidate{this->norms_[b] - dots_i[b],
+                                                          static_cast<InnerIdType>(b)};
+            if (heap.size() < k || candidate < heap.top()) {
+                heap.push(candidate);
+            }
+            if (heap.size() > k) {
+                heap.pop();
+            }
+        }
+        for (BucketIdType j = k; j > 0; --j) {
+            result[i * buckets_per_data + j - 1] = static_cast<BucketIdType>(heap.top().second);
+            heap.pop();
+        }
+    };
+    if (thread_pool_ == nullptr or count == 1) {
+        for (int64_t i = 0; i < count; ++i) {
+            task(i);
+        }
+    } else {
+        Vector<std::future<void>> futures(allocator_);
+        for (int64_t i = 0; i < count; ++i) {
+            futures.push_back(thread_pool_->GeneralEnqueue(task, i));
+        }
+        for (auto& item : futures) {
+            item.get();
+        }
+    }
+
+    if (ctx != nullptr and ctx->stats != nullptr) {
+        const auto distance_evaluations =
+            static_cast<uint64_t>(count) * static_cast<uint64_t>(bucket_count_);
+        const auto dist_cmp_increment = static_cast<uint32_t>(
+            std::min<uint64_t>(distance_evaluations, std::numeric_limits<uint32_t>::max()));
+        ctx->stats->dist_cmp.fetch_add(dist_cmp_increment, std::memory_order_relaxed);
+        ctx->stats->AddDistance(SearchStatistics::DistancePhase::ROUTING,
+                                DistanceEvaluationBackend::FP32,
+                                distance_evaluations);
+    }
+    return result;
+}
+
 }  // namespace vsag
