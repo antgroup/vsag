@@ -8,18 +8,19 @@ produce a new index derived from it. This page documents the full lifecycle surf
 - `Clone` — produce a deep copy of an existing index.
 - `ExportModel` — extract the trained model as an empty index for reuse.
 
-Each operation is optional and is exposed only when the underlying index advertises the matching
-capability flag via `index->CheckFeature(...)`.
+Each operation is optional. For operations with a dedicated capability flag, check it through
+`index->CheckFeature(...)`; `Remove` has no dedicated flag and must be checked by index type and
+`RemoveMode`.
 
 ## Capability Flags
 
-| Operation         | Capability Flag                          | HGraph | IVF | SINDI |
-|-------------------|------------------------------------------|:------:|:---:|:-----:|
-| `Remove`          | _(no dedicated flag — see below)_        |   Yes  |  —  |   —   |
-| `UpdateVector`    | `SUPPORT_UPDATE_VECTOR_CONCURRENT`       |   Yes  |  —  |  Yes  |
-| `UpdateId`        | `SUPPORT_UPDATE_ID_CONCURRENT`           |   Yes  |  —  |  Yes  |
-| `Clone`           | `SUPPORT_CLONE`                          |   Yes  | Yes |   —   |
-| `ExportModel`     | `SUPPORT_EXPORT_MODEL`                   |   Yes  | Yes |   —   |
+| Operation | Capability Flag | HGraph | Pyramid | IVF | BruteForce | SINDI |
+|---|---|:---:|:---:|:---:|:---:|:---:|
+| `Remove` | _(no dedicated flag — see below)_ | Yes | `RemoveMode::MARK_REMOVE` only | `RemoveMode::MARK_REMOVE` only | Yes | `RemoveMode::MARK_REMOVE` only |
+| `UpdateVector` | `SUPPORT_UPDATE_VECTOR_CONCURRENT` | Yes | — | — | Yes | Yes |
+| `UpdateId` | `SUPPORT_UPDATE_ID_CONCURRENT` | Yes | — | — | — | Yes |
+| `Clone` | `SUPPORT_CLONE` | Yes | Yes | Yes | Yes | — |
+| `ExportModel` | `SUPPORT_EXPORT_MODEL` | Yes | Yes | Yes | — | — |
 
 For the flag-gated operations, check at runtime with `index->CheckFeature(vsag::SUPPORT_*)` before
 calling; unsupported indexes return `UNSUPPORTED_INDEX_OPERATION`. `Remove` does not currently
@@ -88,12 +89,22 @@ silently skipped and not counted.
 
 A runnable example is available at `examples/cpp/303_feature_remove.cpp`.
 
+### Pyramid and IVF Deletion
+
+Pyramid and IVF support `RemoveMode::MARK_REMOVE` only. The operation writes tombstones, excludes
+the ids from later searches, and does not physically reclaim vector storage. `FORCE_REMOVE` is not
+supported for either index.
+
 ### BruteForce Deletion
 
 BruteForce also supports both modes, but it does **not** use HGraph's
 `support_force_remove` setting. `MARK_REMOVE` writes a tombstone and keeps vector storage.
 `FORCE_REMOVE` needs no extra configuration: it physically removes entries, moving the final
 internal slot when necessary while keeping external ids intact.
+
+When BruteForce is not in multi-vector mode and `use_attribute_filter: true` is enabled, neither removal mode is available; rebuild the index instead if attribute-filtered data must be deleted.
+
+In multi-vector mode, BruteForce supports `RemoveMode::MARK_REMOVE` only; `FORCE_REMOVE` is not available, including when `use_attribute_filter: true` is enabled.
 
 BruteForce uses `block_memory_io` by default. Every successful force-removal batch reduces its
 logical vector and optional extra-information storage to the live entry count and releases trailing
@@ -135,6 +146,10 @@ if (status.has_value() && *status) {
 Setting `force_update = true` skips the check and always applies the update; use with caution as
 it may degrade recall.
 
+This connectivity check applies to HGraph. BruteForce also supports `UpdateVector` for a
+same-dimension FP32 replacement, but it has no graph connectivity check and therefore does not
+give `force_update` a separate effect. Pyramid and IVF do not support `UpdateVector`.
+
 ### `UpdateId`
 
 `UpdateId(old_id, new_id)` renames an existing id without touching the underlying vector.
@@ -146,6 +161,10 @@ index->UpdateId(123, 456);
 
 A runnable example combining `UpdateVector`, `Remove`, and `Add` is available at
 `examples/cpp/305_feature_update.cpp`.
+
+`UpdateId` is implemented through a shared label-table path on several indexes, but only indexes
+that advertise `SUPPORT_UPDATE_ID_CONCURRENT` promise the corresponding concurrent-update
+semantics.
 
 ## Cloning an Index
 

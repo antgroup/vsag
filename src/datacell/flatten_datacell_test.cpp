@@ -176,6 +176,52 @@ TEST_CASE("FlattenDataCell only reports a stride for contiguous raw data",
     REQUIRE(row_stride == 0);
 }
 
+TEST_CASE("RaBitQSplitDataCell adapts prefetch bytes to split record sizes",
+          "[ut][RaBitQSplitDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(JsonType::Parse(R"({
+        "codes_type": "rabitq_split",
+        "io_params": {"type": "memory_io"},
+        "quantization_params": {
+            "type": "rabitq",
+            "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 1
+        }
+    })"));
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = 960;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+    auto flatten = FlattenInterface::MakeInstance(param, common_param);
+    using SplitCell = RaBitQSplitDataCell<MetricType::METRIC_TYPE_L2SQR, MemoryIO, MemoryIO>;
+    auto split_cell = std::dynamic_pointer_cast<SplitCell>(flatten);
+    REQUIRE(split_cell != nullptr);
+    REQUIRE(split_cell->one_bit_code_size_ == 132);
+    REQUIRE(split_cell->supplement_code_size_ == 860);
+    REQUIRE(split_cell->GetOneBitPrefetchBytes() == 64);
+    REQUIRE(split_cell->GetSupplementPrefetchBytes() == 64);
+
+    UnorderedMap<std::string, float> runtime_params(allocator.get());
+    runtime_params[PREFETCH_DEPTH_CODE] = 16;
+    REQUIRE(split_cell->SetRuntimeParameters(runtime_params));
+    REQUIRE(split_cell->GetOneBitPrefetchBytes() == 3 * 64);
+    REQUIRE(split_cell->GetSupplementPrefetchBytes() == 14 * 64);
+
+    runtime_params[PREFETCH_DEPTH_CODE] = 2;
+    REQUIRE(split_cell->SetRuntimeParameters(runtime_params));
+    REQUIRE(split_cell->GetOneBitPrefetchBytes() == 2 * 64);
+    REQUIRE(split_cell->GetSupplementPrefetchBytes() == 2 * 64);
+
+    runtime_params[PREFETCH_DEPTH_CODE] = 0;
+    REQUIRE(split_cell->SetRuntimeParameters(runtime_params));
+    REQUIRE(split_cell->GetOneBitPrefetchBytes() == 0);
+    REQUIRE(split_cell->GetSupplementPrefetchBytes() == 0);
+}
+
 TEST_CASE("RaBitQSplitDataCell direct split compute", "[ut][RaBitQSplitDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr uint64_t dim = 64;

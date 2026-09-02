@@ -76,6 +76,11 @@ public:
     }
 
     void
+    WriteAt(InnerIdType id, uint64_t offset_in_record, const uint8_t* data, uint64_t length) {
+        io_->Write(data, length, GetOffsetAt(id, offset_in_record, length));
+    }
+
+    void
     WriteRange(InnerIdType begin_id, const uint8_t* codes, uint64_t count) {
         io_->Write(codes, GetByteSize(count), GetOffset(begin_id));
     }
@@ -83,6 +88,11 @@ public:
     bool
     Read(InnerIdType id, uint8_t* code) const {
         return io_->Read(code_size_, GetOffset(id), code);
+    }
+
+    bool
+    ReadAt(InnerIdType id, uint64_t offset_in_record, uint64_t length, uint8_t* data) const {
+        return io_->Read(length, GetOffsetAt(id, offset_in_record, length), data);
     }
 
     [[nodiscard]] const uint8_t*
@@ -115,6 +125,12 @@ public:
     void
     Prefetch(InnerIdType id, uint64_t bytes) {
         io_->Prefetch(GetOffset(id), bytes);
+    }
+
+    /** Prefetches from a record-relative offset; hints may start or span beyond one record. */
+    void
+    PrefetchAt(InnerIdType id, uint64_t offset_in_record, uint64_t bytes) {
+        io_->Prefetch(AddOffset(GetOffset(id), offset_in_record), bytes);
     }
 
     void
@@ -182,6 +198,23 @@ private:
     [[nodiscard]] uint64_t
     GetOffset(InnerIdType id) const {
         return GetByteSize(static_cast<uint64_t>(id));
+    }
+
+    [[nodiscard]] uint64_t
+    GetOffsetAt(InnerIdType id, uint64_t offset_in_record, uint64_t length) const {
+        if (offset_in_record > code_size_ or length > code_size_ - offset_in_record) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "fixed layout range exceeds record boundary");
+        }
+        return AddOffset(GetOffset(id), offset_in_record);
+    }
+
+    [[nodiscard]] uint64_t
+    AddOffset(uint64_t offset, uint64_t delta) const {
+        if (delta > std::numeric_limits<uint64_t>::max() - offset) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "fixed layout offset overflow");
+        }
+        return offset + delta;
     }
 
     [[nodiscard]] uint64_t

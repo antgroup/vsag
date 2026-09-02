@@ -56,6 +56,25 @@ public:
     }
 };
 
+class PrefetchReviewIO : public BasicIO<PrefetchReviewIO> {
+public:
+    static constexpr bool InMemory = true;
+    static constexpr bool SkipDeserialize = false;
+
+    PrefetchReviewIO(const IOParamPtr&, const IndexCommonParam& common_param)
+        : BasicIO<PrefetchReviewIO>(common_param.allocator_.get()) {
+    }
+
+    void
+    PrefetchImpl(uint64_t offset, uint64_t bytes) {
+        prefetch_offset_ = offset;
+        prefetch_bytes_ = bytes;
+    }
+
+    uint64_t prefetch_offset_{0};
+    uint64_t prefetch_bytes_{0};
+};
+
 IndexCommonParam
 MakeCommonParam() {
     IndexCommonParam common_param;
@@ -85,6 +104,56 @@ TEST_CASE("FixedLayout maps ids to fixed records", "[ut][FixedLayout]") {
     layout.Write(1, replacement.data());
     REQUIRE(layout.Read(1, output.data()));
     REQUIRE(output == replacement);
+}
+
+TEST_CASE("FixedLayout supports record-local reads and writes", "[ut][FixedLayout]") {
+    auto common_param = MakeCommonParam();
+    FixedLayout<MemoryIO> layout(6, nullptr, common_param);
+    layout.Resize(3);
+
+    const std::array<uint8_t, 18> records{
+        1, 2, 3, 4, 5, 6, 11, 12, 13, 14, 15, 16, 21, 22, 23, 24, 25, 26};
+    layout.WriteRange(0, records.data(), 3);
+
+    const std::array<uint8_t, 3> replacement{31, 32, 33};
+    layout.WriteAt(1, 2, replacement.data(), replacement.size());
+
+    std::array<uint8_t, 3> output{};
+    REQUIRE(layout.ReadAt(1, 2, output.size(), output.data()));
+    REQUIRE(output == replacement);
+
+    std::array<uint8_t, 6> first{};
+    std::array<uint8_t, 6> second{};
+    std::array<uint8_t, 6> third{};
+    REQUIRE(layout.Read(0, first.data()));
+    REQUIRE(layout.Read(1, second.data()));
+    REQUIRE(layout.Read(2, third.data()));
+    REQUIRE(first == std::array<uint8_t, 6>{1, 2, 3, 4, 5, 6});
+    REQUIRE(second == std::array<uint8_t, 6>{11, 12, 31, 32, 33, 16});
+    REQUIRE(third == std::array<uint8_t, 6>{21, 22, 23, 24, 25, 26});
+
+    REQUIRE_NOTHROW(layout.WriteAt(0, layout.GetCodeSize(), replacement.data(), 0));
+    REQUIRE(layout.ReadAt(0, layout.GetCodeSize(), 0, output.data()));
+    REQUIRE_THROWS_AS(layout.WriteAt(0, 7, replacement.data(), 0), VsagException);
+    REQUIRE_THROWS_AS(layout.WriteAt(0, 5, replacement.data(), 2), VsagException);
+    REQUIRE_THROWS_AS(layout.ReadAt(0, 7, 0, output.data()), VsagException);
+    REQUIRE_THROWS_AS(layout.ReadAt(0, 5, 2, output.data()), VsagException);
+}
+
+TEST_CASE("FixedLayout prefetches from a record-local offset", "[ut][FixedLayout]") {
+    auto common_param = MakeCommonParam();
+    auto io = std::make_shared<PrefetchReviewIO>(nullptr, common_param);
+    FixedLayout<PrefetchReviewIO> layout;
+    layout.SetCodeSize(16);
+    layout.SetIO(io);
+
+    layout.PrefetchAt(3, 5, 64);
+    REQUIRE(io->prefetch_offset_ == 53);
+    REQUIRE(io->prefetch_bytes_ == 64);
+
+    layout.PrefetchAt(3, 17, 64);
+    REQUIRE(io->prefetch_offset_ == 65);
+    REQUIRE(io->prefetch_bytes_ == 64);
 }
 
 TEST_CASE("FixedLayout supports ranges and id batch reads", "[ut][FixedLayout]") {

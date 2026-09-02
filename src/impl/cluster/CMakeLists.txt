@@ -14,5 +14,5 @@
 # limitations under the License.
 
 
-add_library (cluster OBJECT kmeans_cluster.cpp)
+add_library (cluster OBJECT kmeans_cluster.cpp nearest_centroid_assign.cpp kmedoids_cluster.cpp)
 target_link_libraries (cluster PRIVATE vsag_src_common)

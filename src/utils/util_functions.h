@@ -57,14 +57,6 @@ align_up(const int64_t& value, int64_t base) {
     return ((value + base - 1) / base) * base;
 }
 
-std::string
-format_map(const std::string& str, const std::unordered_map<std::string, std::string>& mappings);
-
-void
-mapping_external_param_to_inner(const JsonType& external_json,
-                                ConstParamMap& param_map,
-                                JsonType& inner_json);
-
 std::tuple<DatasetPtr, float*, int64_t*>
 create_fast_dataset(int64_t dim, Allocator* allocator);
 

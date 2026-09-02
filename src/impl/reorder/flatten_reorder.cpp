@@ -25,6 +25,7 @@
 #include "datacell/rabitq_split_datacell.h"
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/query_computer_pool.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "query_context.h"
 
@@ -171,7 +172,8 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
     if (rabitq_lower_bound_candidates == nullptr) {
         topk = std::min(topk, static_cast<int64_t>(heap_candidate_size));
         auto reorder_heap = std::make_shared<StandardHeap<true, false>>(query_allocator, topk);
-        auto computer = flatten_->FactoryComputer(query);
+        auto computer_lease = AcquireQueryComputer(flatten_, query, &ctx);
+        const auto& computer = computer_lease.computer;
         Vector<InnerIdType> ids(heap_candidate_size, query_allocator);
         Vector<float> dists(heap_candidate_size, query_allocator);
         const auto* candidate_result = input == nullptr ? nullptr : input->GetData();
@@ -214,7 +216,8 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
     if (topk <= 0) {
         topk = static_cast<int64_t>(max_candidate_size);
     }
-    auto computer = flatten_->FactoryComputer(query);
+    auto computer_lease = AcquireQueryComputer(flatten_, query, &ctx);
+    const auto& computer = computer_lease.computer;
     if (topk == 0 || max_candidate_size == 0) {
         return std::make_shared<StandardHeap<true, false>>(query_allocator, 0);
     }

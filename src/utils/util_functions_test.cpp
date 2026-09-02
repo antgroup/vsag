@@ -19,7 +19,6 @@
 #include <limits>
 #include <numeric>
 #include <sstream>
-#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -29,12 +28,6 @@
 using namespace vsag;
 
 TEST_CASE("UtilFunctions Basic", "[ut][UtilFunctions]") {
-    SECTION("format map") {
-        std::unordered_map<std::string, std::string> mappings{{"name", "vsag"}, {"v", "1.0"}};
-        std::string formatted = format_map("{name}-{v}", mappings);
-        REQUIRE(formatted == "vsag-1.0");
-    }
-
     SECTION("split string") {
         auto parts = split_string("a,,b", ',');
         REQUIRE(parts.size() == 3);

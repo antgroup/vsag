@@ -73,6 +73,10 @@ auto result = index->KnnSearch(
     R"({"pyramid": {"ef_search": 100}})").value();
 ```
 
+## 支持的输入数据类型
+
+当前公开的 `Build`、`Add` 和检索路径接收通过 `Dataset::Float32Vectors` 提供的 FP32 向量，`dtype` 应设为 `"float32"`。`base_quantization_type` 选择的是内部编码和存储，本身不会使 API 接受 FP16、BF16 或 INT8 输入。
+
 ## 构建参数
 
 构建参数放在 `index_param` 下。

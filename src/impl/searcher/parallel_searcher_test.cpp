@@ -82,6 +82,47 @@ TEST_CASE("ParallelSearcher matches BasicSearcher on a generic graph", "[ut][Par
         REQUIRE(run_search(parallel, graph) == run_search(basic, graph));
     }
 
+    SECTION("a missing executor is valid only for serial search") {
+        const auto graph = MakeRingGraph(base_size, 8);
+        auto no_executor = std::make_shared<ParallelSearcher>(common, nullptr);
+        auto serial_param = search_param;
+        serial_param.parallel_search_thread_count = 1;
+
+        auto visited_list = pool->TakeOne();
+        auto serial_result =
+            no_executor->Search(graph, flatten, visited_list, base_vectors.data(), serial_param);
+        pool->ReturnOne(visited_list);
+        REQUIRE(not serial_result->Empty());
+
+        for (const int64_t invalid_parallelism : {0, -1}) {
+            auto invalid_param = search_param;
+            invalid_param.parallel_search_thread_count = invalid_parallelism;
+            visited_list = pool->TakeOne();
+            REQUIRE_THROWS_AS(no_executor->Search(
+                                  graph, flatten, visited_list, base_vectors.data(), invalid_param),
+                              VsagException);
+            pool->ReturnOne(visited_list);
+        }
+
+        visited_list = pool->TakeOne();
+        auto missing_flatten =
+            no_executor->Search(graph, nullptr, visited_list, base_vectors.data(), search_param);
+        pool->ReturnOne(visited_list);
+        REQUIRE(missing_flatten->Empty());
+
+        visited_list = pool->TakeOne();
+        auto missing_graph =
+            no_executor->Search(nullptr, flatten, visited_list, base_vectors.data(), search_param);
+        pool->ReturnOne(visited_list);
+        REQUIRE(missing_graph->Empty());
+
+        visited_list = pool->TakeOne();
+        REQUIRE_THROWS_AS(
+            no_executor->Search(graph, flatten, visited_list, base_vectors.data(), search_param),
+            VsagException);
+        pool->ReturnOne(visited_list);
+    }
+
     auto visited_list = pool->TakeOne();
     auto empty_result =
         parallel->Search(nullptr, flatten, visited_list, base_vectors.data(), search_param);

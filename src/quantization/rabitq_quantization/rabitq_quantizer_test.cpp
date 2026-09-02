@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <cstring>
 #include <numeric>
+#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -52,6 +53,129 @@ TEST_CASE("RaBitQ finite guard survives fast math", "[ut][RaBitQuantizer][rabitq
     REQUIRE_FALSE(IsFiniteRaBitQValue(std::numeric_limits<float>::quiet_NaN()));
     REQUIRE_FALSE(IsFiniteRaBitQValue(std::numeric_limits<float>::infinity()));
     REQUIRE_FALSE(IsFiniteRaBitQValue(-std::numeric_limits<float>::infinity()));
+}
+
+template <MetricType metric>
+void
+TestRaBitQSplitLayoutCacheRoundTrip(uint64_t pca_dim, bool use_mrq) {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr uint64_t count = 32;
+    constexpr uint64_t base_bits = 8;
+    constexpr uint64_t filter_bits = 3;
+    auto vecs = fixtures::generate_vectors(count, dim);
+
+    auto make_quantizer = [&]() {
+        return RaBitQuantizer<metric>(dim,
+                                      pca_dim,
+                                      32,
+                                      base_bits,
+                                      false,
+                                      use_mrq,
+                                      allocator.get(),
+                                      RaBitQuantizerParameter::RABITQ_VERSION_SPLIT,
+                                      RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE,
+                                      filter_bits);
+    };
+    auto source = make_quantizer();
+    auto restored = make_quantizer();
+    REQUIRE(source.TrainImpl(vecs.data(), count));
+
+    auto require_same_layout = [](const auto& expected, const auto& actual) {
+        REQUIRE(actual.SupportSplitCodeStorage() == expected.SupportSplitCodeStorage());
+        REQUIRE(actual.FilterBits() == expected.FilterBits());
+        REQUIRE(actual.ReorderBits() == expected.ReorderBits());
+        REQUIRE(actual.HasMultiBitFilter() == expected.HasMultiBitFilter());
+        REQUIRE(actual.PlaneBytes() == expected.PlaneBytes());
+        REQUIRE(actual.CodePlanesSize() == expected.CodePlanesSize());
+        REQUIRE(actual.CodeMetaOffset() == expected.CodeMetaOffset());
+        REQUIRE(actual.FilterPlanesSize() == expected.FilterPlanesSize());
+        REQUIRE(actual.SupplementPlanesSize() == expected.SupplementPlanesSize());
+        REQUIRE(actual.SupplementMetaOffset() == expected.SupplementMetaOffset());
+        REQUIRE(actual.OneBitRecordNormOffset() == expected.OneBitRecordNormOffset());
+        REQUIRE(actual.OneBitRecordNormCodeOffset() == expected.OneBitRecordNormCodeOffset());
+        REQUIRE(actual.OneBitRecordMrqNormOffset() == expected.OneBitRecordMrqNormOffset());
+        REQUIRE(actual.OneBitRecordRawNormOffset() == expected.OneBitRecordRawNormOffset());
+        REQUIRE(actual.OneBitRecordLowBoundErrorOffset() ==
+                expected.OneBitRecordLowBoundErrorOffset());
+        REQUIRE(actual.OneBitRecordOneBitErrorOffset() == expected.OneBitRecordOneBitErrorOffset());
+        REQUIRE(actual.OneBitRecordSize() == expected.OneBitRecordSize());
+        REQUIRE(actual.GetOneBitCodeSize() == expected.GetOneBitCodeSize());
+        REQUIRE(actual.GetSupplementCodeSize() == expected.GetSupplementCodeSize());
+
+        std::vector<uint8_t> planes(expected.CodePlanesSize());
+        for (uint32_t logical_bit = 0; logical_bit < base_bits; ++logical_bit) {
+            REQUIRE(actual.StoredPlaneIndex(logical_bit) == expected.StoredPlaneIndex(logical_bit));
+            const auto actual_offset = static_cast<uint64_t>(
+                actual.GetStoredPlane(planes.data(), logical_bit, actual.PlaneBytes()) -
+                planes.data());
+            REQUIRE(actual_offset == actual.StoredPlaneIndex(logical_bit) * actual.PlaneBytes());
+        }
+    };
+
+    std::stringstream serialized;
+    IOStreamWriter writer(serialized);
+    source.Serialize(writer);
+    const auto serialized_bytes = serialized.str();
+    IOStreamReader reader(serialized);
+    restored.Deserialize(reader);
+    require_same_layout(source, restored);
+
+    std::stringstream reserialized;
+    IOStreamWriter restored_writer(reserialized);
+    restored.Serialize(restored_writer);
+    REQUIRE(reserialized.str() == serialized_bytes);
+
+    std::vector<uint8_t> source_full(source.GetCodeSize());
+    std::vector<uint8_t> source_filter(source.GetOneBitCodeSize());
+    std::vector<uint8_t> source_supplement(source.GetSupplementCodeSize());
+    std::vector<uint8_t> restored_full(restored.GetCodeSize());
+    std::vector<uint8_t> restored_filter(restored.GetOneBitCodeSize());
+    std::vector<uint8_t> restored_supplement(restored.GetSupplementCodeSize());
+    REQUIRE(source.EncodeOne(vecs.data(), source_full.data()));
+    REQUIRE(restored.EncodeOne(vecs.data(), restored_full.data()));
+    source.SplitCode(source_full.data(), source_filter.data(), source_supplement.data());
+    restored.SplitCode(restored_full.data(), restored_filter.data(), restored_supplement.data());
+    REQUIRE(restored_full == source_full);
+    REQUIRE(restored_filter == source_filter);
+    REQUIRE(restored_supplement == source_supplement);
+
+    struct DistanceSnapshot {
+        float full{0.0F};
+        float filter{0.0F};
+        float lower_bound{0.0F};
+        float split{0.0F};
+        float hinted{0.0F};
+    };
+    auto evaluate = [&](auto& quantizer,
+                        const auto& full_code,
+                        const auto& filter_code,
+                        const auto& supplement_code) {
+        DistanceSnapshot snapshot;
+        auto computer = quantizer.FactoryComputer();
+        computer->SetQuery(vecs.data() + 8 * dim);
+        snapshot.full = quantizer.ComputeDist(*computer, full_code.data());
+        REQUIRE(quantizer.ComputeDistWithOneBitLowerBound(
+            *computer, filter_code.data(), &snapshot.filter, &snapshot.lower_bound));
+        REQUIRE(quantizer.ComputeDistWithSplitCode(
+            *computer, filter_code.data(), supplement_code.data(), &snapshot.split));
+        REQUIRE(quantizer.ComputeDistWithSplitCodeAndFilterDist(*computer,
+                                                                filter_code.data(),
+                                                                supplement_code.data(),
+                                                                snapshot.filter,
+                                                                &snapshot.hinted));
+        return snapshot;
+    };
+    const auto source_distances = evaluate(source, source_full, source_filter, source_supplement);
+    const auto restored_distances =
+        evaluate(restored, restored_full, restored_filter, restored_supplement);
+    REQUIRE(std::abs(source_distances.full - restored_distances.full) <= 1e-6F);
+    REQUIRE(std::abs(source_distances.filter - restored_distances.filter) <= 1e-6F);
+    REQUIRE(std::abs(source_distances.lower_bound - restored_distances.lower_bound) <= 1e-6F);
+    REQUIRE(std::abs(source_distances.split - restored_distances.split) <= 1e-6F);
+    REQUIRE(std::abs(source_distances.hinted - restored_distances.hinted) <= 1e-6F);
+    REQUIRE(std::abs(restored_distances.full - restored_distances.split) <= 1e-6F);
+    REQUIRE(std::abs(restored_distances.split - restored_distances.hinted) <= 1e-5F);
 }
 
 TEST_CASE("RaBitQ Basic Test", "[ut][RaBitQuantizer]") {
@@ -722,6 +846,18 @@ TEST_CASE("RaBitQ Split Code Storage", "[ut][RaBitQuantizer]") {
                 REQUIRE(std::abs(batch_lower_bounds[i] - single_lower_bounds[i]) <= 1e-5F);
             }
         }
+    }
+}
+
+TEST_CASE("RaBitQ Split Layout Cache Round Trip", "[ut][RaBitQuantizer][split_layout]") {
+    SECTION("L2") {
+        TestRaBitQSplitLayoutCacheRoundTrip<MetricType::METRIC_TYPE_L2SQR>(64, false);
+    }
+    SECTION("IP") {
+        TestRaBitQSplitLayoutCacheRoundTrip<MetricType::METRIC_TYPE_IP>(64, false);
+    }
+    SECTION("L2 with MRQ") {
+        TestRaBitQSplitLayoutCacheRoundTrip<MetricType::METRIC_TYPE_L2SQR>(32, true);
     }
 }
 

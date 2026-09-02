@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -489,6 +490,40 @@ private:
     uint64_t
     UnpackScalarCode(const uint8_t* codes, uint8_t* scalar_code) const;
 
+    struct SplitLayout {
+        bool is_split{false};
+        bool has_multi_bit_filter{false};
+        uint32_t filter_bits{1};
+        uint32_t reorder_bits{0};
+        uint64_t plane_bytes{0};
+        uint64_t code_planes_size{0};
+        uint64_t code_meta_offset{0};
+        uint64_t code_meta_size{0};
+        uint64_t filter_planes_size{0};
+        uint64_t supplement_planes_size{0};
+        uint64_t supplement_meta_offset{0};
+        uint64_t one_bit_record_norm_offset{0};
+        uint64_t one_bit_record_norm_code_offset{0};
+        uint64_t one_bit_record_mrq_norm_offset{0};
+        uint64_t one_bit_record_raw_norm_offset{0};
+        uint64_t one_bit_record_low_bound_error_offset{0};
+        uint64_t one_bit_record_one_bit_error_offset{0};
+        uint64_t one_bit_record_size{0};
+        uint64_t one_bit_code_size{0};
+        uint64_t supplement_code_size{0};
+        uint64_t supplement_norm_code_offset{0};
+        uint64_t supplement_norm_offset{0};
+        uint64_t supplement_error_offset{0};
+        uint64_t supplement_mrq_norm_offset{0};
+        uint64_t supplement_raw_norm_offset{0};
+        std::array<uint64_t, 8> sequential_plane_offsets{};
+        std::array<uint64_t, 8> stored_plane_indices{};
+        std::array<uint64_t, 8> stored_plane_offsets{};
+    };
+
+    void
+    RefreshSplitLayout(bool is_split);
+
     [[nodiscard]] norm_type
     ComputeScalarCodeNorm(const uint8_t* scalar_codes,
                           uint32_t code_bits,
@@ -542,6 +577,7 @@ private:
     uint64_t offset_raw_norm_{0};
     uint64_t offset_low_bound_error_{0};
     uint64_t offset_one_bit_error_{0};
+    SplitLayout split_layout_{};
 };
 
 }  // namespace vsag

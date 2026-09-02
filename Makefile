@@ -106,6 +106,7 @@ test-cmake:              ## Run focused CMake helper tests.
 	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/thirdparty_override_test.cmake
 	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/release_build_modes_test.cmake
 	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/object_library_test.cmake
+	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/compile_flag_scope_test.cmake
 
 .PHONY: asan configure-asan build-asan
 asan:                    ## Build with AddressSanitizer option.

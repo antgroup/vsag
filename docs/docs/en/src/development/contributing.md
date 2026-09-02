@@ -104,37 +104,9 @@ compliance, and taking full responsibility for the contribution.
 
 ## Coding Style
 
-VSAG follows the
-[Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html) with project-specific
-tweaks covering indentation, naming, and line width. The authoritative configuration lives in the
-repository:
-
-- clang-format: <https://github.com/antgroup/vsag/blob/main/.clang-format>
-- clang-tidy: <https://github.com/antgroup/vsag/blob/main/.clang-tidy>
-
-> `clang-tidy` enforces not only naming conventions but also style checks such as magic-number
-> usage.
-
-The Makefile exposes formatting targets; `clang-format` and `clang-tidy` (both version 15) must be
-installed.
-
-Format code:
-
-```bash
-make fmt
-```
-
-Run static analysis (fix the reported issues manually):
-
-```bash
-make lint
-```
-
-Some clang-tidy findings can be auto-fixed:
-
-```bash
-make fix-lint
-```
+Read the [C++ Coding Guide](coding_style.md) before changing C++ code. It documents the exact
+clang-format 15 and clang-tidy 15 rules, naming conventions, diagnostic suppressions, and local
+commands required by VSAG.
 
 ## Local Testing
 

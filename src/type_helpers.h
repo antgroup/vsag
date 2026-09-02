@@ -17,7 +17,6 @@
 #include <functional>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -33,8 +32,6 @@ inline auto
 AllocateShared(Allocator* allocator, Args&&... args) {
     return std::allocate_shared<T>(AllocatorWrapper<T>(allocator), std::forward<Args>(args)...);
 }
-
-using ConstParamMap = const std::unordered_multimap<std::string, std::vector<std::string>>;
 
 using IdFilterFuncType = std::function<bool(LabelType)>;
 

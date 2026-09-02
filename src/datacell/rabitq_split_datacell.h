@@ -765,6 +765,7 @@ public:
         this->optimized_build_scalar_layout_ = build_codes;
         this->optimized_build_code_sums_ = std::move(code_sums);
         this->optimized_build_record_size_ = this->bottom_quantizer().GetScalarCodeSize();
+        this->refresh_prefetch_bytes();
         this->optimized_build_context_ = context;
         this->optimized_build_active_ = true;
         return true;
@@ -874,6 +875,7 @@ public:
         this->optimized_build_scalar_layout_.reset();
         this->optimized_build_code_sums_.reset();
         this->optimized_build_record_size_ = 0;
+        this->refresh_prefetch_bytes();
         this->optimized_build_context_ = {};
     }
 
@@ -883,6 +885,7 @@ public:
         this->optimized_build_scalar_layout_.reset();
         this->optimized_build_code_sums_.reset();
         this->optimized_build_record_size_ = 0;
+        this->refresh_prefetch_bytes();
         this->optimized_build_context_ = {};
     }
 
@@ -1030,10 +1033,30 @@ public:
             return;
         }
         if (this->optimized_build_active_) {
-            this->optimized_build_scalar_layout_->Prefetch(id, this->optimized_build_record_size_);
+            this->optimized_build_scalar_layout_->Prefetch(id,
+                                                           this->optimized_build_prefetch_bytes_);
             return;
         }
         this->prefetch_one_bit(id);
+    }
+
+    bool
+    SetRuntimeParameters(const UnorderedMap<std::string, float>& new_params) override {
+        const bool changed = FlattenInterface::SetRuntimeParameters(new_params);
+        if (new_params.find(PREFETCH_DEPTH_CODE) != new_params.end()) {
+            this->refresh_prefetch_bytes();
+        }
+        return changed;
+    }
+
+    [[nodiscard]] uint64_t
+    GetOneBitPrefetchBytes() const {
+        return this->one_bit_prefetch_bytes_;
+    }
+
+    [[nodiscard]] uint64_t
+    GetSupplementPrefetchBytes() const {
+        return this->supplement_prefetch_bytes_;
     }
 
     void
@@ -1876,6 +1899,9 @@ public:
     bool optimized_build_active_{false};
     uint64_t optimized_build_record_size_{0};
     RabitQFusedInterface* fused_code_storage_{nullptr};
+    uint64_t one_bit_prefetch_bytes_{0};
+    uint64_t supplement_prefetch_bytes_{0};
+    uint64_t optimized_build_prefetch_bytes_{0};
 
 private:
     BottomQuantizer&
@@ -2018,6 +2044,26 @@ private:
         this->supplement_code_size_ = this->bottom_quantizer().GetSupplementCodeSize();
         this->x_bit_layout_->SetCodeSize(one_bit_code_size_);
         this->supplement_layout_->SetCodeSize(supplement_code_size_);
+        this->refresh_prefetch_bytes();
+    }
+
+    [[nodiscard]] static uint64_t
+    calculate_prefetch_bytes(uint64_t record_size, uint32_t max_cache_lines) {
+        constexpr uint64_t cache_line_size = 64;
+        const uint64_t record_cache_lines =
+            record_size / cache_line_size +
+            static_cast<uint64_t>(record_size % cache_line_size != 0);
+        return std::min<uint64_t>(record_cache_lines, max_cache_lines) * cache_line_size;
+    }
+
+    void
+    refresh_prefetch_bytes() {
+        this->one_bit_prefetch_bytes_ =
+            calculate_prefetch_bytes(this->one_bit_code_size_, this->prefetch_depth_code_);
+        this->supplement_prefetch_bytes_ =
+            calculate_prefetch_bytes(this->supplement_code_size_, this->prefetch_depth_code_);
+        this->optimized_build_prefetch_bytes_ = calculate_prefetch_bytes(
+            this->optimized_build_record_size_, this->prefetch_depth_code_);
     }
 
     void
@@ -2266,12 +2312,13 @@ private:
                                      const InnerIdType* idx,
                                      InnerIdType id_count) const {
         for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
-            this->optimized_build_scalar_layout_->Prefetch(idx[i], this->prefetch_depth_code_ * 64);
+            this->optimized_build_scalar_layout_->Prefetch(idx[i],
+                                                           this->optimized_build_prefetch_bytes_);
         }
         for (InnerIdType i = 0; i < id_count; ++i) {
             if (i + this->prefetch_stride_code_ < id_count) {
-                this->optimized_build_scalar_layout_->Prefetch(idx[i + this->prefetch_stride_code_],
-                                                               this->prefetch_depth_code_ * 64);
+                this->optimized_build_scalar_layout_->Prefetch(
+                    idx[i + this->prefetch_stride_code_], this->optimized_build_prefetch_bytes_);
             }
             bool need_release = false;
             const auto* base_code =
@@ -2297,12 +2344,12 @@ private:
 
     void
     prefetch_one_bit(InnerIdType id) {
-        this->x_bit_layout_->Prefetch(id, this->prefetch_depth_code_ * 64);
+        this->x_bit_layout_->Prefetch(id, this->one_bit_prefetch_bytes_);
     }
 
     void
     prefetch_supplement(InnerIdType id) {
-        this->supplement_layout_->Prefetch(id, this->prefetch_depth_code_ * 64);
+        this->supplement_layout_->Prefetch(id, this->supplement_prefetch_bytes_);
     }
 
     void
