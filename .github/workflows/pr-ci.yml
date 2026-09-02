@@ -86,10 +86,11 @@ jobs:
           persist-credentials: false
       - name: Trust exact workspace for Git tooling
         run: ./scripts/ci/configure-git-safe-directory.sh
-      - name: Test changed-source lint filter
+      - name: Test CI helper scripts
         run: |
           python3 -m unittest discover -s scripts/linters -p 'test_changed_source_filter.py'
           python3 -m unittest tests/scripts/configure_git_safe_directory_test.py
+          python3 -m unittest tests/scripts/coverage_diagnostics_test.py
       - name: Prepare Host
         run: |
           sudo env VSAG_INSTALL_INTEL_MKL=OFF bash ./scripts/deps/install_deps_ubuntu.sh
