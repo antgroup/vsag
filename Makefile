@@ -1,6 +1,13 @@
 
 # Personal Configurations, Disable Some Options via Env Vars to Accelerate Building
-CMAKE_GENERATOR ?= "Unix Makefiles"
+# Respect an explicit generator; otherwise prefer a usable Ninja installation.
+ifeq ($(origin CMAKE_GENERATOR), undefined)
+  ifneq ($(shell ninja --version >/dev/null 2>&1 && echo available),)
+    CMAKE_GENERATOR := Ninja
+  else
+    CMAKE_GENERATOR := Unix Makefiles
+  endif
+endif
 CMAKE_INSTALL_PREFIX ?= "/usr/local/"
 COMPILE_JOBS ?= 6
 CMAKE_BUILD_ARGS ?=
@@ -56,7 +63,7 @@ endif
 ifdef EXTRA_DEFINED
   VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} ${EXTRA_DEFINED}
 endif
-VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -G ${CMAKE_GENERATOR} -S.
+VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -G "${CMAKE_GENERATOR}" -S.
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
@@ -103,6 +110,7 @@ test:                    ## Build and run unit tests.
 
 .PHONY: test-cmake
 test-cmake:              ## Run focused CMake helper tests.
+	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/generator_selection_test.cmake
 	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/thirdparty_override_test.cmake
 	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/release_build_modes_test.cmake
 	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/object_library_test.cmake

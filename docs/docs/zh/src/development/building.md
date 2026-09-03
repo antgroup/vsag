@@ -16,7 +16,7 @@ arm64 核心 C++ 构建，预编译 C++ 包与 Python wheel 仍以 Linux 为主�
 `-DENABLE_LIBURING=ON`。默认值为 `OFF`；在非 Linux 平台或未找到 liburing 时，
 请求 `uring_io` 的配置会打印一次性告警并回退到 `buffer_io`。
 
-在 CMake 配置中，有许多参数和编译目标。为了方便使用，我们将常用的编译目标（或命令）写到了 Makefile 中，使用 Unix Makefiles 进行管理，已避免记忆各种配置或者从命令行输入大段参数。这些编译目标（或命令）可以通过在项目根目录运行 `make help` 查看：
+在 CMake 配置中，有许多参数和编译目标。为了方便使用，我们将常用的编译目标（或命令）写到了 Makefile 中，以避免记忆各种配置或者从命令行输入大段参数。当存在可用的 `ninja` 且 CMake 支持 Ninja 生成器时，这些目标会优先使用 Ninja；否则会回退到 Unix Makefiles。显式设置的 `CMAKE_GENERATOR` 始终优先，例如可以使用 `make debug CMAKE_GENERATOR='Unix Makefiles'` 直接指定回退生成器。由于 CMake 构建目录与生成器绑定，更换现有构建目录的生成器前应先运行对应的清理目标。这些编译目标（或命令）可以通过在项目根目录运行 `make help` 查看：
 
 ```bash
 Usage: make <target>
@@ -144,7 +144,7 @@ make pyvsag-all
 
 环境变量说明如下：
 
-- `CMAKE_GENERATOR`：CMake 内部使用什么来编译项目，默认是 `"Unix Makefiles"`，其他可选值请参考 [CMake Generators](https://cmake.org/cmake/help/latest/manual/cmake-generators.7.html)；
+- `CMAKE_GENERATOR`：显式指定 CMake 使用的生成器；未设置时优先选择可用的 Ninja，否则回退到 Unix Makefiles。其他可选值请参考 [CMake Generators](https://cmake.org/cmake/help/latest/manual/cmake-generators.7.html)；
 - `CMAKE_INSTALL_PREFIX`：安装路径，即运行 `make install` 后头文件和库文件会被安装到哪里，一般不需要修改；
 - `COMPILE_JOBS`：编译并行度，默认是 6 并行编译，建议设置成你的 CPU 核数以提高编译速度；
 - `DEBUG_BUILD_DIR`：开发模式产物目录，非必要不修改；
