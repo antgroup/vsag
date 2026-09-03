@@ -58,6 +58,7 @@ help:                    ## Show the help.
 debug:                   ## Build vsag with debug options.
 dev:                     ## Build full developer configuration.
 test:                    ## Build and run unit tests.
+test-module:             ## Build and run one unit-test module. Usage: make test-module MODULE=datacell
 asan:                    ## Build with AddressSanitizer option.
 test_asan: asan          ## Run unit tests with AddressSanitizer option.
 tsan:                    ## Build with ThreadSanitizer option.
@@ -92,6 +93,7 @@ Build target behavior:
 - `make debug` builds the default minimal configuration. It does not enable tests, examples, tools, or Python bindings unless they are explicitly turned on.
 - `make dev` builds the full developer configuration with tests, examples, tools, and Python bindings enabled.
 - `make test`, `make asan`, `make tsan`, and the related parallel test targets automatically enable tests.
+- `make test-module MODULE=<name>` builds and runs one unit-test subsystem without building the other unit-test modules. `CASE=<filter>` applies the usual Catch2 runtime filter; run `make test` for full validation.
 - `make release` is the reproducible release/package path. It uses the minimal configuration, Release optimization semantics, and disables ccache by default. Enable optional components explicitly when needed, for example `make release VSAG_ENABLE_TOOLS=ON`.
 - `make release-perf` uses the same Release optimization semantics and minimal configuration in `build-release-perf/`, but enables ccache by default for iterative development and benchmarking.
 - Override either cache default explicitly with `VSAG_ENABLE_CCACHE=ON` or `VSAG_ENABLE_CCACHE=OFF`.
