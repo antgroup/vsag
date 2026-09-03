@@ -55,33 +55,9 @@
     "description": "Attribute filtering and expressions 属性过滤与表达式"
   },
   {
-    "name": "module/cicd",
-    "color": "0E8A16",
-    "description": "Legacy; use area/ci 已弃用；请使用 area/ci",
-    "legacy": true
-  },
-  {
     "name": "module/datacell",
     "color": "3C966A",
     "description": "Data cells, vector I/O, and quantization 数据单元、向量 I/O 与量化"
-  },
-  {
-    "name": "module/docker",
-    "color": "5F5997",
-    "description": "Legacy; use area/docker 已弃用；请使用 area/docker",
-    "legacy": true
-  },
-  {
-    "name": "module/docs",
-    "color": "43C818",
-    "description": "Legacy; use area/docs 已弃用；请使用 area/docs",
-    "legacy": true
-  },
-  {
-    "name": "module/example",
-    "color": "47E1CB",
-    "description": "Legacy; use area/examples 已弃用；请使用 area/examples",
-    "legacy": true
   },
   {
     "name": "module/index",
@@ -89,32 +65,8 @@
     "description": "Index algorithms and implementations 索引算法与实现"
   },
   {
-    "name": "module/python",
-    "color": "45194C",
-    "description": "Legacy; use area/bindings-python 已弃用；请使用 area/bindings-python",
-    "legacy": true
-  },
-  {
     "name": "module/simd",
     "color": "C5DEF5",
     "description": "SIMD dispatch and optimized kernels SIMD 分派与优化内核"
-  },
-  {
-    "name": "module/testing",
-    "color": "4C9330",
-    "description": "Legacy; use area/testing 已弃用；请使用 area/testing",
-    "legacy": true
-  },
-  {
-    "name": "module/thirdparty",
-    "color": "B2CAEA",
-    "description": "Legacy; use area/dependencies 已弃用；请使用 area/dependencies",
-    "legacy": true
-  },
-  {
-    "name": "module/tools",
-    "color": "A49C89",
-    "description": "Legacy; use area/tools 已弃用；请使用 area/tools",
-    "legacy": true
   }
 ]
