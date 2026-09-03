@@ -16,12 +16,44 @@ AnalyzeIndexBySearch(const SearchRequest& request);
 
 - **输入**：`SearchRequest`（查询数据集 + `topk` + 搜索参数 JSON）。
 - **输出**：JSON 字符串，包含基于查询的动态指标。
-- **支持的索引类型**：当前支持 `HGraph`、`IVF`、`Pyramid` 与 `SINDI`。未实现该接口的
-  索引在调用时会抛出异常。
+- **支持的索引类型**：工厂注册的全部索引，即 `HGraph`、`IVF`、`Pyramid`、`SINDI`、
+  `SINDI_V2`、`SIMQ`、`BruteForce`、`WARP` 与 `LazyHGraph`。
 
 该接口与 `Index::GetStats()` 互为补充：后者无需查询数据，只输出索引的静态结构指标。
 对于基于图的索引，度分布、入口点质量、子索引召回率以及低召回热点节点等图健康度信息，
 通过 `GetStats()` 而非 `AnalyzeIndexBySearch` 输出。
+
+### 公共输出契约
+
+每次成功的静态或动态分析都会返回 JSON 对象，并包含 `_analysis` 成员：
+
+```json
+{
+  "_analysis": {
+    "schema_version": 1,
+    "index_type": "brute_force",
+    "analysis_type": "search",
+    "status": "partial",
+    "sample_count": 10,
+    "topk": 10,
+    "consistency": "weak_snapshot",
+    "skipped": { "recall_query": "ground truth was not requested" }
+  }
+}
+```
+
+为保持兼容，已有索引专属字段继续位于 JSON 根节点。全部适用指标均已计算时 `status` 为
+`complete`；部分指标因依赖不足而位于 `skipped` 时为 `partial`；请求合法但无法计算任何指标
+（例如对空索引执行搜索分析）时为 `not_applicable`。非法参数和执行失败仍然抛出异常。
+
+`BruteForce` 与 `WARP` 提供精确搜索基线计数及耗时；`SINDI_V2` 与 `SIMQ` 提供基线计数和
+查询耗时，并将尚无真值的专属质量指标标记为 skipped。`LazyHGraph` 委托当前 BruteForce 或
+HGraph 后端，并追加 `phase` 与 `transition_threshold`；其 `index_type` 始终为 `lazy_hgraph`。
+
+Analysis 是同步、面向离线诊断的操作，可能扫描大量索引数据，专用 Analyzer 还可能计算精确
+真值。Analysis 不修改搜索或序列化配置，可与只读 Search 并发执行。除非索引提供更强的加锁
+快照，否则 `_analysis.consistency` 为 `weak_snapshot`；不要让 Analysis 与 Add、Remove、Update
+或 phase transition 并发执行。
 
 Pyramid 的查询分析遵循与 `KnnSearch` 相同的路径限定语义。对于默认 hierarchy，
 使用 `Dataset::Paths` 为每条 query 设置路径；对于命名 hierarchy，使用

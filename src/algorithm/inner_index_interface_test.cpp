@@ -210,7 +210,11 @@ TEST_CASE("InnerIndexInterface NOT Implemented", "[ut][InnerIndexInterface]") {
     REQUIRE_THROWS(empty_index->EstimateMemory(1000));
     REQUIRE_THROWS(empty_index->EstimateBuildMemory(1000));
     REQUIRE_THROWS(empty_index->Feedback(nullptr, 10, ""));
-    REQUIRE_THROWS(empty_index->GetStats());
+    const auto stats = JsonType::Parse(empty_index->GetStats());
+    REQUIRE(stats["_analysis"]["schema_version"].GetInt() == 1);
+    REQUIRE(stats["_analysis"]["index_type"].GetString() == "EmptyInnerIndex");
+    REQUIRE(stats["_analysis"]["analysis_type"].GetString() == "stats");
+    REQUIRE(stats["_analysis"]["status"].GetString() == "partial");
     REQUIRE_THROWS(empty_index->UpdateId(0, 1));
     REQUIRE_THROWS(empty_index->UpdateVector(0, nullptr));
     REQUIRE_THROWS(empty_index->UpdateExtraInfo(nullptr));

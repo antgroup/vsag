@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "analyzer/analyzer.h"
+#include "analyzer/sindi_analyzer.h"
 #include "datacell/sparse_dmq_datacell.h"
 #include "datacell/sparse_vector_datacell_parameter.h"
 #include "impl/heap/standard_heap.h"
@@ -333,27 +334,62 @@ SINDI::GetMemoryUsageDetail() const {
 
 std::string
 SINDI::GetStats() const {
+    if (GetNumElements() == 0) {
+        JsonType stats;
+        stats["total_count"].SetInt64(0);
+        stats["live_count"].SetInt64(0);
+        stats["deleted_count"].SetInt64(GetNumberRemoved());
+        stats["_analysis"]["skipped"]["structure"].SetString("index is empty");
+        AddAnalysisMetadata(stats, GetName(), "stats", "partial");
+        return stats.Dump(4);
+    }
     AnalyzerParam analyzer_param(allocator_);
     analyzer_param.topk = K_ANALYZE_DEFAULT_TOPK;
     analyzer_param.base_sample_size =
         std::min<uint64_t>(K_ANALYZE_BASE_SAMPLE_SIZE, cur_element_count_);
     analyzer_param.search_params =
         R"({"sindi": {"query_prune_ratio": 0, "term_prune_ratio": 0, "n_candidate": 500}})";
-    auto analyzer = CreateAnalyzer(this, analyzer_param);
+    auto analyzer = CreateAnalyzer(analyzer_param);
     JsonType stats = analyzer->GetStats();
+    AddAnalysisMetadata(stats, GetName(), "stats", "complete");
     return stats.Dump(4);
+}
+
+AnalyzerBasePtr
+SINDI::CreateAnalyzer(const AnalyzerParam& param) const {
+    return std::make_shared<SINDIAnalyzer>(this, param);
 }
 
 std::string
 SINDI::AnalyzeIndexBySearch(const SearchRequest& request) {
+    if (request.query_ != nullptr) {
+        CHECK_ARGUMENT(request.topk_ > 0, "analysis topk must be greater than 0");
+        if (GetNumElements() == 0) {
+            JsonType stats;
+            stats["_analysis"]["skipped"]["search"].SetString("index is empty");
+            AddAnalysisMetadata(stats,
+                                GetName(),
+                                "search",
+                                "not_applicable",
+                                request.query_->GetNumElements(),
+                                request.topk_);
+            return stats.Dump(4);
+        }
+    }
     AnalyzerParam analyzer_param(allocator_);
     analyzer_param.topk = request.topk_;
     analyzer_param.base_sample_size =
         std::min<uint64_t>(K_ANALYZE_BASE_SAMPLE_SIZE, cur_element_count_);
     analyzer_param.search_params = request.params_str_;
-    auto analyzer = CreateAnalyzer(this, analyzer_param);
+    auto analyzer = CreateAnalyzer(analyzer_param);
     JsonType stats =
         request.query_ == nullptr ? analyzer->GetStats() : analyzer->AnalyzeIndexBySearch(request);
+    AddAnalysisMetadata(stats,
+                        GetName(),
+                        request.query_ == nullptr ? "stats" : "search",
+                        "complete",
+                        request.query_ == nullptr ? 0 : request.query_->GetNumElements(),
+                        request.topk_);
     return stats.Dump(4);
 }
 

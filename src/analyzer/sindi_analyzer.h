@@ -23,7 +23,7 @@ namespace vsag {
 
 class SINDIAnalyzer : public AnalyzerBase {
 public:
-    SINDIAnalyzer(SINDI* sindi, const AnalyzerParam& param)
+    SINDIAnalyzer(const SINDI* sindi, const AnalyzerParam& param)
         : AnalyzerBase(sindi->allocator_, static_cast<uint32_t>(sindi->GetNumElements())),
           sindi_(sindi),
           topk_(param.topk),
@@ -110,7 +110,7 @@ private:
                           const DatasetPtr& base_dataset = nullptr) const;
 
 private:
-    SINDI* sindi_{nullptr};
+    const SINDI* sindi_{nullptr};
     int64_t topk_{10};
     uint64_t base_sample_size_{10};
     std::string search_params_;
