@@ -1,7 +1,7 @@
 name: Feature request
 description: Propose a new capability or public API for VSAG.
 title: "[feat](<scope>): <short imperative summary>"
-labels: ["kind/feature", "enhancement"]
+labels: ["kind/feature"]
 assignees: ["wxyucs"]
 body:
   - type: markdown

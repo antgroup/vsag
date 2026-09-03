@@ -1,7 +1,7 @@
 name: Bug report
 description: Report a defect or unexpected behavior in VSAG.
 title: "[bug](<scope>): <short imperative summary>"
-labels: ["kind/bug", "bug"]
+labels: ["kind/bug"]
 assignees: ["wxyucs"]
 body:
   - type: markdown
