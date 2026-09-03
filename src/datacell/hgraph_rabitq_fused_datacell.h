@@ -273,6 +273,9 @@ private:
     uint64_t supplement_code_size_{0};
     int64_t dim_{0};
     std::string codec_model_;
+    // Guards build-time slab resize/reallocation. Mutable HGraph searches hold the owning
+    // HGraph's global read lock while resize takes its global write lock; after SetImmutable,
+    // the slab cannot be resized and read-path access is lock-free.
     mutable std::shared_mutex storage_mutex_;
 };
 

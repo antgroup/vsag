@@ -34,6 +34,8 @@ IsFiniteRaBitQValue(float value) {
     uint32_t bits = 0;
     std::memcpy(&bits, &value, sizeof(bits));
     constexpr uint32_t k_exponent_mask = 0x7F800000U;
+    // Exponent zero (including subnormal values) is finite. Only the all-ones exponent used by
+    // infinities and NaNs is rejected; use bits because release builds enable fast-math.
     return (bits & k_exponent_mask) != k_exponent_mask;
 }
 
