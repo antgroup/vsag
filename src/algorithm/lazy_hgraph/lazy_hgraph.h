@@ -129,6 +129,12 @@ public:
     [[nodiscard]] uint64_t
     GetMemoryUsage() const override;
 
+    [[nodiscard]] std::string
+    GetStats() const override;
+
+    std::string
+    AnalyzeIndexBySearch(const SearchRequest& request) override;
+
     void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 

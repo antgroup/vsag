@@ -17,7 +17,6 @@
 
 #include <memory>
 
-#include "algorithm/hgraph/hgraph.h"
 #include "algorithm/inner_index_interface.h"
 #include "utils/pointer_define.h"
 #include "vsag/allocator.h"
@@ -57,7 +56,26 @@ public:
     std::string search_params;
 };
 
-AnalyzerBasePtr
-CreateAnalyzer(const InnerIndexInterface* index, const AnalyzerParam& param);
+void
+AddAnalysisMetadata(JsonType& stats,
+                    const std::string& index_type,
+                    const std::string& analysis_type,
+                    const std::string& status,
+                    uint64_t sample_count = 0,
+                    int64_t topk = 0);
+
+class BasicIndexAnalyzer : public AnalyzerBase {
+public:
+    BasicIndexAnalyzer(const InnerIndexInterface* index, const AnalyzerParam& param);
+
+    JsonType
+    GetStats() override;
+
+    JsonType
+    AnalyzeIndexBySearch(const SearchRequest& request) override;
+
+private:
+    const InnerIndexInterface* index_;
+};
 
 }  // namespace vsag
