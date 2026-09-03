@@ -54,6 +54,21 @@ if (ENABLE_TESTS)
 endif ()
 
 add_subdirectory (src)
+if (ENABLE_TESTS AND NOT CMAKE_DISABLE_PRECOMPILE_HEADERS)
+    # Keep the PCH target-local: compile options and definitions differ for OpenMP, SIMD, and
+    # platform-specific configurations. These high-fan-out targets amortize the extra PCH object.
+    foreach (_target IN ITEMS
+            algorithm_test
+            datacell_test
+            impl_test
+            io_test
+            quantizer_test
+            simd_test)
+        target_precompile_headers (${_target} PRIVATE
+            "$<$<COMPILE_LANGUAGE:CXX>:${PROJECT_SOURCE_DIR}/tests/fixtures/unittest.h>")
+    endforeach ()
+    unset (_target)
+endif ()
 if (ENABLE_TOOLS AND ENABLE_CXX11_ABI)
     add_subdirectory (tools)
 endif ()
