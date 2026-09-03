@@ -442,7 +442,7 @@ public:
      */
     inline void
     ResizeForOverwrite(uint64_t size) {
-        if constexpr (has_ResizeForOverwriteImpl<IOTmpl>::value) {
+        if constexpr (HasResizeForOverwriteImpl<IOTmpl>::value) {
             cast().ResizeForOverwriteImpl(size);
             if constexpr (not InMemory) {
                 ClearCache();

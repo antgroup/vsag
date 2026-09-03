@@ -99,16 +99,16 @@ require_component_enabled(const std::string& name, bool enabled) {
 
 // three-part hooks of one chunked component, type-erased over
 // FlattenInterface / GraphInterface
-struct chunked_target {
+struct ChunkedTarget {
     std::function<uint64_t(StreamReader&)> reserve_io;
     WriteRawFunc write_raw;
     std::function<void(StreamReader&)> deserialize_tail;
 };
 
 template <typename ComponentPtr>
-chunked_target
+ChunkedTarget
 make_chunked_target(const ComponentPtr& component) {
-    return chunked_target{
+    return ChunkedTarget{
         [component](StreamReader& reader) { return component->ReserveIO(reader); },
         [component](const uint8_t* data, uint64_t size, uint64_t offset) {
             component->WriteRaw(data, size, offset);
@@ -121,8 +121,8 @@ make_chunked_target(const ComponentPtr& component) {
 // checked the granularity, so a missing entry is a slip in this file rather
 // than bad input; say so instead of letting an empty std::function surface as
 // bad_function_call somewhere further down.
-chunked_target&
-require_target(std::optional<chunked_target>& target, const std::string& name) {
+ChunkedTarget&
+require_target(std::optional<ChunkedTarget>& target, const std::string& name) {
     if (!target.has_value()) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             fmt::format("no chunked target resolved for component {}", name));
@@ -202,7 +202,7 @@ HGraph::parallel_deserialize_layout(DeserializeReader& reader,
         reader.Read(offset, len, dest);
     };
 
-    auto resolve_chunked_target = [this](const std::string& name) -> chunked_target {
+    auto resolve_chunked_target = [this](const std::string& name) -> ChunkedTarget {
         if (name == COMPONENT_BASE_CODES) {
             return make_chunked_target(this->basic_flatten_codes_);
         }
@@ -249,7 +249,7 @@ HGraph::parallel_deserialize_layout(DeserializeReader& reader,
     // check trips on the optional instead of on an empty std::function.
     // Read through require_target so that slip names the component instead of
     // surfacing as bad_function_call
-    std::vector<std::optional<chunked_target>> targets(layout.components_.size());
+    std::vector<std::optional<ChunkedTarget>> targets(layout.components_.size());
     // components consumed in place during pass 1 (io without the parallel
     // hooks, e.g. reader_io); they get no chunk tasks and no tail pass
     std::vector<bool> consumed(layout.components_.size(), false);
@@ -569,12 +569,12 @@ HGraph::parallel_deserialize_probe(DeserializeReader& reader, ThreadPool& pool, 
     };
     ReadFuncStreamReader body(read_func, 0, body_end);
 
-    struct io_extent {
+    struct IoExtent {
         WriteRawFunc write_raw;
         uint64_t file_offset;
         uint64_t io_size;
     };
-    std::vector<io_extent> extents;
+    std::vector<IoExtent> extents;
 
     // probe one potentially three-part component: implementations without the
     // hooks throw UNSUPPORTED before consuming any byte (so no extent has
@@ -583,9 +583,9 @@ HGraph::parallel_deserialize_probe(DeserializeReader& reader, ThreadPool& pool, 
     auto probe_component = [&](const auto& component) {
         const auto start = body.GetCursor();
         try {
-            chunked_target target = make_chunked_target(component);
+            ChunkedTarget target = make_chunked_target(component);
             const auto io_size = target.reserve_io(body);
-            extents.push_back(io_extent{target.write_raw, body.GetCursor(), io_size});
+            extents.push_back(IoExtent{target.write_raw, body.GetCursor(), io_size});
             body.Seek(body.GetCursor() + io_size);
             target.deserialize_tail(body);
         } catch (const VsagException& e) {

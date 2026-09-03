@@ -104,7 +104,7 @@ public:
         // WriteRaw; only SkipDeserialize ios (e.g. reader_io, whose Write is
         // a no-op counter) opt out and fall back to the whole-component path
         if constexpr (not IOTmpl::SkipDeserialize) {
-            return this->io_->size_;
+            return this->layout_.GetIOSize();
         } else {
             return 0;
         }
@@ -116,7 +116,7 @@ public:
             GraphInterface::Deserialize(reader);
             uint64_t io_size = 0;
             StreamReader::ReadObj(reader, io_size);
-            this->io_->ResizeForOverwrite(io_size);
+            this->layout_.ResizeForOverwrite(io_size);
             return io_size;
         } else {
             return GraphInterface::ReserveIO(reader);
@@ -126,7 +126,7 @@ public:
     void
     WriteRaw(const uint8_t* data, uint64_t size, uint64_t offset) override {
         if constexpr (not IOTmpl::SkipDeserialize) {
-            this->io_->Write(data, size, offset);
+            this->layout_.WriteRaw(data, size, offset);
         } else {
             GraphInterface::WriteRaw(data, size, offset);
         }
