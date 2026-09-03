@@ -16,11 +16,11 @@ file an issue against [`antgroup/vsag`](https://github.com/antgroup/vsag).
 ## Title format
 
 ```
-[<prefix>](<area>): <short imperative summary>
+[<prefix>](<scope>): <short imperative summary>
 ```
 
 * `prefix`: `bug` / `feat` / `improve` / `docs` / `q`
-* `area`:   `hgraph` | `ivf` | `sindi` | `pyvsag` | `eval_performance` | `build` | `docs` | `other`
+* `scope`: a short lowercase subsystem name such as `hgraph`, `ivf`, `pyramid`, `sindi`, `pyvsag`, `eval`, `build`, `docs`, or `api`
 * Summary: imperative mood, lowercase, no trailing period.
 
 Good:
@@ -66,8 +66,13 @@ do not need a `kind/*` value.
 
 Maintainers may additionally add during triage:
 
-* `area/<name>` — mirrors the `area` field.
+* `module/<name>` — mirrors the **Affected module** field.
+* `area/<name>` — mirrors the **Affected area** field.
 * `version/<x.y>` — target release line.
+
+The module and area dropdown values use complete label names. Do not add a label for
+`not applicable` or `other`; choose the closest valid label during triage when the
+reported scope becomes clear.
 
 ## Drafting with an AI agent
 

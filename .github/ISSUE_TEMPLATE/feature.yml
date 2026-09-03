@@ -1,6 +1,6 @@
 name: Feature request
 description: Propose a new capability or public API for VSAG.
-title: "[feat](<area>): <short imperative summary>"
+title: "[feat](<scope>): <short imperative summary>"
 labels: ["kind/feature", "enhancement"]
 assignees: ["wxyucs"]
 body:
@@ -11,17 +11,37 @@ body:
         [docs](https://vsag.io/docs) and the existing issues to avoid duplicates.
 
   - type: dropdown
+    id: module
+    attributes:
+      label: Affected module
+      description: Select the primary product module, or not applicable for a cross-cutting issue.
+      options:
+        - module/api
+        - module/attr
+        - module/datacell
+        - module/index
+        - module/simd
+        - not applicable
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
     id: area
     attributes:
       label: Affected area
+      description: Select the primary cross-cutting area, or not applicable if none applies.
       options:
-        - hgraph
-        - ivf
-        - sindi
-        - pyvsag
-        - eval_performance
-        - build
-        - docs
+        - area/bindings-node
+        - area/bindings-python
+        - area/ci
+        - area/dependencies
+        - area/docker
+        - area/docs
+        - area/examples
+        - area/testing
+        - area/tools
+        - not applicable
         - other
     validations:
       required: true

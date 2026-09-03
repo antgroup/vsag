@@ -1,6 +1,6 @@
 name: Question / usage help
 description: Ask how to use VSAG. For long discussions, prefer GitHub Discussions.
-title: "[q](<area>): <short summary>"
+title: "[q](<scope>): <short summary>"
 labels: ["question"]
 assignees: ["wxyucs"]
 body:
@@ -13,17 +13,37 @@ body:
         >   if the topic is open-ended.
 
   - type: dropdown
+    id: module
+    attributes:
+      label: Affected module
+      description: Select the primary product module, or not applicable for a cross-cutting question.
+      options:
+        - module/api
+        - module/attr
+        - module/datacell
+        - module/index
+        - module/simd
+        - not applicable
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
     id: area
     attributes:
       label: Affected area
+      description: Select the primary cross-cutting area, or not applicable if none applies.
       options:
-        - hgraph
-        - ivf
-        - sindi
-        - pyvsag
-        - eval_performance
-        - build
-        - docs
+        - area/bindings-node
+        - area/bindings-python
+        - area/ci
+        - area/dependencies
+        - area/docker
+        - area/docs
+        - area/examples
+        - area/testing
+        - area/tools
+        - not applicable
         - other
     validations:
       required: true

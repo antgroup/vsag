@@ -38,10 +38,10 @@ project's templates and labelling policy, then submit it via `gh`.
    required form field to a value. If a value is genuinely unknown, write
    `// TODO` rather than inventing one.
 4. Compose the **title** as
-   `[<prefix>](<area>): <short imperative summary>` where `prefix` is one of
-   `bug` / `feat` / `improve` / `docs` / `q` and `area` is one of
-   `hgraph` / `ivf` / `sindi` / `pyvsag` / `eval_performance` / `build` /
-   `docs` / `other`.
+   `[<prefix>](<scope>): <short imperative summary>` where `prefix` is one of
+   `bug` / `feat` / `improve` / `docs` / `q` and `scope` is a short lowercase
+   subsystem name such as `hgraph`, `ivf`, `pyramid`, `sindi`, `pyvsag`,
+   `eval`, `build`, `docs`, or `api`.
 5. Run a duplicate scan:
 
    ```bash
@@ -80,7 +80,8 @@ project's templates and labelling policy, then submit it via `gh`.
     ```
 
     Labels come from the chosen template's front matter (e.g. `kind/bug,bug`).
-    Add `area/<area>` if such a label exists in the repo; otherwise omit.
+    Add the selected `module/*` and `area/*` values when those labels exist.
+    Do not add labels for `not applicable` or `other`.
     On `gh` failure, fall back to `gh issue create --web --title ... --body-file ...`
     so the user can finish in a browser.
 
@@ -111,8 +112,11 @@ Title: `[bug](hgraph): build throughput regressed 3x on gist-960 in v0.18.0`
 Body skeleton:
 
 ```
+### Affected module
+module/index
+
 ### Affected area
-hgraph
+not applicable
 
 ### Interface
 cpp

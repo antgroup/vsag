@@ -1,6 +1,6 @@
 name: Bug report
 description: Report a defect or unexpected behavior in VSAG.
-title: "[bug](<area>): <short imperative summary>"
+title: "[bug](<scope>): <short imperative summary>"
 labels: ["kind/bug", "bug"]
 assignees: ["wxyucs"]
 body:
@@ -16,18 +16,37 @@ body:
         `/create-issue` inside Claude Code, OpenCode or Codex.
 
   - type: dropdown
+    id: module
+    attributes:
+      label: Affected module
+      description: Select the primary product module, or not applicable for a cross-cutting issue.
+      options:
+        - module/api
+        - module/attr
+        - module/datacell
+        - module/index
+        - module/simd
+        - not applicable
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
     id: area
     attributes:
       label: Affected area
-      description: Which subsystem does this bug touch?
+      description: Select the primary cross-cutting area, or not applicable if none applies.
       options:
-        - hgraph
-        - ivf
-        - sindi
-        - pyvsag
-        - eval_performance
-        - build
-        - docs
+        - area/bindings-node
+        - area/bindings-python
+        - area/ci
+        - area/dependencies
+        - area/docker
+        - area/docs
+        - area/examples
+        - area/testing
+        - area/tools
+        - not applicable
         - other
     validations:
       required: true

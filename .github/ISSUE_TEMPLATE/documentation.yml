@@ -1,7 +1,7 @@
 name: Documentation issue
 description: Report incorrect, missing, or unclear documentation.
-title: "[docs](<area>): <short imperative summary>"
-labels: ["kind/documentation"]
+title: "[docs](<scope>): <short imperative summary>"
+labels: ["kind/documentation", "area/docs"]
 assignees: ["wxyucs"]
 body:
   - type: dropdown
@@ -26,17 +26,36 @@ body:
       required: true
 
   - type: dropdown
+    id: module
+    attributes:
+      label: Affected module
+      description: Select the primary documented product module, or not applicable.
+      options:
+        - module/api
+        - module/attr
+        - module/datacell
+        - module/index
+        - module/simd
+        - not applicable
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
     id: area
     attributes:
       label: Affected area
+      description: Select an additional cross-cutting area, or not applicable if none applies.
       options:
-        - hgraph
-        - ivf
-        - sindi
-        - pyvsag
-        - eval_performance
-        - build
-        - docs
+        - area/bindings-node
+        - area/bindings-python
+        - area/ci
+        - area/dependencies
+        - area/docker
+        - area/examples
+        - area/testing
+        - area/tools
+        - not applicable
         - other
     validations:
       required: true
