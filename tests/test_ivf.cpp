@@ -408,6 +408,11 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF GetStatus", "[ft][ivf]
                 auto raw_num = dataset->query_->GetNumElements();
                 dataset->query_->NumElements(10);
                 INFO(index->AnalyzeIndexBySearch(request));
+                request.params_str_ = "default";
+                const auto default_analysis =
+                    vsag::JsonType::Parse(index->AnalyzeIndexBySearch(request));
+                REQUIRE(default_analysis["_analysis"]["analysis_type"].GetString() == "search");
+                REQUIRE(default_analysis["_analysis"]["sample_count"].GetInt() == 10);
                 dataset->query_->NumElements(raw_num);
             }
         }
