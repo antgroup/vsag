@@ -27,6 +27,7 @@
 #include <unordered_map>
 
 #include "algorithm/inner_index_interface.h"
+#include "analyzer/analyzer.h"
 #include "datacell/bucket_datacell_parameter.h"
 #include "datacell/flatten_datacell_parameter.h"
 #include "datacell/flatten_interface.h"
@@ -595,21 +596,56 @@ IVF::GetStats() const {
         bucket_radius.push_back(max_distance);
     }
     // bucket_count_std
-    stats["bucket_num"].SetJson(get_data_stats(bucket_counts));
+    if (not bucket_counts.empty()) {
+        stats["bucket_num"].SetJson(get_data_stats(bucket_counts));
+    } else {
+        stats["_analysis"]["skipped"]["bucket_num"].SetString("index has no buckets");
+    }
     // bucket_radius
-    stats["bucket_radius"].SetJson(get_data_stats(bucket_radius));
+    if (not bucket_radius.empty()) {
+        stats["bucket_radius"].SetJson(get_data_stats(bucket_radius));
+    } else {
+        stats["_analysis"]["skipped"]["bucket_radius"].SetString("index has no non-empty buckets");
+    }
+    AddAnalysisMetadata(stats, GetName(), "stats", bucket_radius.empty() ? "partial" : "complete");
     return stats.Dump(4);
 }
 
 std::string
 IVF::AnalyzeIndexBySearch(const SearchRequest& request) {
+    CHECK_ARGUMENT(request.query_ != nullptr, "analysis query cannot be null");
+    CHECK_ARGUMENT(request.topk_ > 0, "analysis topk must be greater than 0");
     JsonType stats;
     auto querys = request.query_;
+    CHECK_ARGUMENT(querys->GetNumElements() > 0, "analysis query must contain at least one vector");
+    CHECK_ARGUMENT(querys->GetFloat32Vectors() != nullptr,
+                   "IVF analysis requires float32 query vectors");
+    CHECK_ARGUMENT(querys->GetDim() == dim_, "analysis query dimension mismatch");
     auto topk = std::min(request.topk_, GetNumElements());
     auto num_elements = querys->GetNumElements();
     auto param_str = request.params_str_;
+    if (param_str.empty() || param_str == "default") {
+        JsonType default_param;
+        default_param[GetName()][IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT].SetInt(
+            IVFSearchParameters::DEFAULT_SCAN_BUCKETS_COUNT);
+        param_str = default_param.Dump();
+    }
     // quantization error
+    if (GetNumElements() == 0) {
+        stats["quantization_bias_ratio"]["skipped_reason"].SetString("index is empty");
+        stats["quantization_inversion_count_rate"]["skipped_reason"].SetString("index is empty");
+        AddAnalysisMetadata(
+            stats, GetName(), "search", "not_applicable", num_elements, request.topk_);
+        return stats.Dump(4);
+    }
     this->analyze_quantizer(stats, querys->GetFloat32Vectors(), num_elements, topk, param_str);
+    const auto* const status = use_reorder_ ? "complete" : "partial";
+    if (not use_reorder_) {
+        stats["quantization_bias_ratio"]["skipped_reason"].SetString("reorder is disabled");
+        stats["quantization_inversion_count_rate"]["skipped_reason"].SetString(
+            "reorder is disabled");
+    }
+    AddAnalysisMetadata(stats, GetName(), "search", status, num_elements, request.topk_);
     return stats.Dump(4);
 }
 

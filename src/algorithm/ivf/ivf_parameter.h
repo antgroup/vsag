@@ -58,7 +58,9 @@ public:
     FromJson(const std::string& json_string);
 
 public:
-    int64_t scan_buckets_count{30};
+    static constexpr int64_t DEFAULT_SCAN_BUCKETS_COUNT = 30;
+
+    int64_t scan_buckets_count{DEFAULT_SCAN_BUCKETS_COUNT};
     bool disable_bucket_scan{false};
     float first_order_scan_ratio{1.0F};
     int64_t ef_search{100};
