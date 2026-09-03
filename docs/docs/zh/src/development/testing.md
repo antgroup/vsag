@@ -15,6 +15,27 @@ VSAG 采用 [Catch2](https://github.com/catchorg/Catch2) 作为测试框架，�
 make test
 ```
 
+## 构建并运行单个单元测试模块
+
+为了缩短编辑、构建和测试周期，可以只构建并运行一个仍在维护的单元测试子系统：
+
+```bash
+make test-module MODULE=datacell
+make test-module MODULE=algorithm CASE='[ut][sample_train_data]'
+```
+
+可用模块名为 `simd`、`common`、`algorithm`、`factory`、`attr`、`datacell`、`layout`、
+`quantization`、`storage`、`io`、`utils` 和 `impl`。每条命令都会构建共享的生产代码与测试夹具依赖，
+但只编译所选模块的测试源码。对应的 CMake 目标和可执行文件名为 `unittests_<module>`：
+
+```bash
+cmake -S . -B build -DENABLE_TESTS=ON
+cmake --build build --target unittests_datacell
+./build/tests/unittests_datacell '[ut][AttributeInvertedInterfaceParameter]'
+```
+
+模块目标仅用于加速本地开发。完整验证仍应运行 `make test`；其中聚合的 `unittests` 可执行文件包含所有模块。
+
 说明：
 
 1. 运行 `src/` 下的单元测试；

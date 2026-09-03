@@ -79,6 +79,7 @@ UT_SHARD = ""
 ifdef SHARD
   UT_SHARD = $(SHARD)
 endif
+UNITTEST_MODULES := simd common algorithm factory attr datacell layout quantization storage io utils impl
 
 
 .PHONY: help
@@ -108,6 +109,18 @@ test:                    ## Build and run unit tests.
 	./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 	./build/tests/eval_monitor_test -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 
+.PHONY: test-module
+test-module: VSAG_ENABLE_ASAN ?= OFF
+test-module: VSAG_ENABLE_CCACHE ?= ON
+test-module:             ## Build and run one unit-test module. Usage: make test-module MODULE=datacell
+	@if [ "$(words $(MODULE))" -ne 1 ] || [ "$(filter $(UNITTEST_MODULES),$(MODULE))" != "$(MODULE)" ]; then \
+		echo "MODULE must be exactly one of: $(UNITTEST_MODULES)"; \
+		exit 2; \
+	fi
+	cmake ${VSAG_CMAKE_ARGS} -B${DEBUG_BUILD_DIR} -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=${VSAG_ENABLE_ASAN} -DENABLE_CCACHE=${VSAG_ENABLE_CCACHE} -DENABLE_TESTS=ON
+	cmake --build ${DEBUG_BUILD_DIR} --target unittests_${MODULE} --parallel ${COMPILE_JOBS}
+	${DEBUG_BUILD_DIR}/tests/unittests_${MODULE} -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
+
 .PHONY: test-cmake
 test-cmake:              ## Run focused CMake helper tests.
 	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/generator_selection_test.cmake
@@ -116,6 +129,7 @@ test-cmake:              ## Run focused CMake helper tests.
 	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/object_library_test.cmake
 	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/compile_flag_scope_test.cmake
 	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/precompiled_header_scope_test.cmake
+	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/module_test_targets_test.cmake
 
 .PHONY: asan configure-asan build-asan
 asan:                    ## Build with AddressSanitizer option.
