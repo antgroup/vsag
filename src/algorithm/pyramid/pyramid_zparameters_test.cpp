@@ -136,6 +136,18 @@ TEST_CASE("Pyramid Parameters Test", "[ut][PyramidParameters]") {
     vsag::ParameterTest::TestToJson(param);
 }
 
+TEST_CASE("Pyramid accepts PiPNN as a batch graph builder", "[ut][PyramidParameters][pipnn]") {
+    PyramidDefaultParam index_param;
+    index_param.graph_type = vsag::GRAPH_TYPE_VALUE_PIPNN;
+    auto param = std::make_shared<vsag::PyramidParameters>();
+    REQUIRE_NOTHROW(param->FromJson(vsag::JsonType::Parse(generate_pyramid(index_param))));
+    REQUIRE(param->graph_type == vsag::GRAPH_TYPE_VALUE_PIPNN);
+    REQUIRE(param->odescent_param != nullptr);
+
+    index_param.graph_type = "unknown";
+    REQUIRE_THROWS(param->FromJson(vsag::JsonType::Parse(generate_pyramid(index_param))));
+}
+
 std::shared_ptr<vsag::PyramidParameters>
 ParsePyramidWithHierarchies(const nlohmann::json& hierarchies) {
     PyramidDefaultParam index_param;

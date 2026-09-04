@@ -339,6 +339,13 @@ public:
     /// Build all graphs (bottom + route) via ODescent in batch mode.
     std::vector<int64_t>
     build_by_odescent(const DatasetPtr& data);
+    /// Build the bottom graph via PiPNN and route graphs via ODescent.
+    std::vector<int64_t>
+    build_by_pipnn(const DatasetPtr& data);
+
+    /// Shared batch-build orchestration for ODescent and PiPNN.
+    std::vector<int64_t>
+    build_by_batch_graph(const DatasetPtr& data, bool use_pipnn);
 
     /// Write codes for inner_id into the persistent flatten storage.
     void

@@ -135,7 +135,11 @@ HGraphParameter::FromJson(const JsonType& json) {
 
     if (graph_json.Contains(GRAPH_TYPE_KEY)) {
         graph_type = graph_json[GRAPH_TYPE_KEY].GetString();
-        if (graph_type == GRAPH_TYPE_VALUE_ODESCENT) {
+        CHECK_ARGUMENT(graph_type == GRAPH_TYPE_VALUE_NSW or
+                           graph_type == GRAPH_TYPE_VALUE_ODESCENT or
+                           graph_type == GRAPH_TYPE_VALUE_PIPNN,
+                       fmt::format("invalid graph_type: {}", graph_type));
+        if (graph_type == GRAPH_TYPE_VALUE_ODESCENT or graph_type == GRAPH_TYPE_VALUE_PIPNN) {
             odescent_param = std::make_shared<ODescentParameter>();
             odescent_param->FromJson(graph_json);
         }

@@ -17,8 +17,8 @@ default.
 1. **Graph construction.** Vectors are organised in a layered proximity graph; upper
    layers act as navigation aids, the bottom layer connects every data point to its
    nearest neighbours within a `max_degree` budget. The construction algorithm can be
-   either NSW-style insertion (`graph_type: "nsw"`, the default) or ODescent
-   (`graph_type: "odescent"`).
+   NSW-style insertion (`graph_type: "nsw"`, the default), ODescent
+   (`graph_type: "odescent"`), or PiPNN (`graph_type: "pipnn"`).
 2. **Quantization.** The base storage is compressed with a configurable quantizer
    (`base_quantization_type` — `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`,
    `pq`, `pqfs`, `rabitq`, `tq`). Optionally, a second high-precision copy is kept
@@ -67,7 +67,7 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `base_quantization_type` | string | — (required) | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `tq` — see the [Quantization chapter](../quantization/README.md) for per-quantizer details |
 | `max_degree` | int | `64` | Maximum out-degree per graph node |
 | `ef_construction` | int | `400` | Candidate list size during build (higher = better recall, slower build) |
-| `graph_type` | string | `"nsw"` | Graph algorithm: `nsw` or `odescent` |
+| `graph_type` | string | `"nsw"` | Graph algorithm: `nsw`, `odescent`, or `pipnn` |
 | `use_reverse_edges` | bool | `false` | Track incoming neighbors for O(1) reverse-edge lookup. Roughly doubles edge storage and is unsupported with `graph_storage_type: "compressed"`. |
 | `label_remap_type` | string | `"pg"` | Label-to-inner-ID map implementation: `"pg"` or `"robin"`. Keep the same value when restoring or combining compatible indexes. |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse search |
@@ -101,12 +101,27 @@ the reverse adjacency approximately doubles edge storage.
 `"robin"` selects the alternate robin-map implementation. Benchmark the target ID distribution
 before changing it.
 
+### PiPNN build boundary
+
+Set `graph_type: "pipnn"` to use [PiPNN](https://arxiv.org/abs/2602.21247) for the initial,
+full `Build`. The PiPNN builder accepts dense `float32` input with `metric_type: "l2"`. It
+builds the bottom graph from the original build vectors, then reuses HGraph's route layers,
+storage, search, filtering, reordering, incremental `Add`, removal, and serialization paths.
+The persistent base storage may use a supported quantizer such as `sq8`, including RaBitQ with
+SQ8 reorder. Cache-assisted build and deduplicated vector storage are not supported with PiPNN.
+PiPNN tuning values are currently internal; `ef_construction` does not tune this builder.
+
+`build_thread_count` parallelizes vector preparation, partitioning, candidate generation, and
+final pruning. Keep `OPENBLAS_NUM_THREADS=1` when benchmarking so BLAS threads do not obscure
+builder scaling. The reproducible `tools/eval/pipnn_parallel.yaml` workload compares NSW,
+ODescent, and PiPNN at a matched Recall@10 target on SIFT1M and query-validates every graph.
+
 ### Deduplicating vector storage
 
 Set both `support_duplicate: true` and `deduplicate_storage: true` to let duplicate
 vectors share one physical code slot while retaining their individual labels. This option
 currently supports only dense-vector HGraph indexes using `graph_type: "nsw"`; it is not
-available for `graph_type: "odescent"`.
+available for `graph_type: "odescent"` or `graph_type: "pipnn"`.
 
 The following operations and configurations are not supported while storage deduplication
 is enabled:

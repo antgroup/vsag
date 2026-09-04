@@ -92,7 +92,7 @@ Build-time parameters live under `index_param`.
 | `tq_chain` | string | — | Transform chain used when `base_quantization_type` is `tq`, for example `"mrle, rabitq"`. |
 | `mrle_dim` | int | `0` | Prefix dimension retained by MRLE; `0` keeps the input dimension. |
 | `max_degree` | int | `64` | Maximum out-degree per node within a sub-graph. |
-| `graph_type` | string | `"nsw"` | `nsw` or `odescent`. |
+| `graph_type` | string | `"nsw"` | `nsw`, `odescent`, or `pipnn`. PiPNN builds hierarchy roots; descendants normally use ODescent. With duplicate support enabled, descendant graphs use the shared PiPNN builder to preserve duplicate groups. |
 | `graph_storage_type` | string | `"flat"` | Bottom-graph storage for a `multi_layer` root: `flat` favors construction and search speed, while `compressed` reduces graph memory. Compressed storage requires `max_degree <= 255`. Single-layer roots, routing graphs, and child graphs remain sparse. |
 | `ef_construction` | int | `400` | Candidate list size for `nsw` builds. |
 | `alpha` | float | `1.2` | Pruning factor during graph construction. |
@@ -110,10 +110,18 @@ Build-time parameters live under `index_param`.
 | `store_raw_vector` | bool | `false` | Preserve an FP32 copy for `GetRawVectorByIds` and precise distance-by-id calculations. |
 | `store_paths` | bool | `false` | Top-level switch that preserves the original paths supplied to `Build` and `Add` so `GetDataByIdsWithFlag` can return them when `DATA_FLAG_PATH` is selected. It applies to every configured hierarchy and cannot be overridden per hierarchy. |
 | `index_min_size` | int | `0` | Minimum sub-index size; smaller groups fall back to scan. |
-| `root_graph_type` | string | `"single_layer"` | Root graph layout: `single_layer` preserves the original sparse bottom graph; `multi_layer` uses a preallocated Flat or Compressed bottom graph with HGraph-style sparse routing layers and joint construction. `multi_layer` requires `graph_type: "nsw"`. Do not specify this option when `no_build_levels` disables level 0. |
+| `root_graph_type` | string | `"single_layer"` | Root graph layout: `single_layer` preserves the original sparse bottom graph; `multi_layer` uses a preallocated Flat or Compressed bottom graph with HGraph-style sparse routing layers and joint construction. `multi_layer` supports `graph_type: "nsw"` and `"pipnn"`. Do not specify this option when `no_build_levels` disables level 0. |
 | `support_duplicate` | bool | `false` | Allow duplicate ids. |
 | `build_thread_count` | int | `1` | Threads used for parallel build. |
 | `hierarchies` | array | `[]` | Named hierarchy definitions. Each element is either a string (inherits all top-level params) or an object with `name` and optional overrides (`max_degree`, `ef_construction`, `alpha`, `no_build_levels`, `index_min_size`, `root_graph_type`). When present, multi-hierarchy mode is activated and each hierarchy maintains its own independent path tree. |
+
+PiPNN supports Pyramid builds with `dtype: "float32"` and `metric_type: "l2"`. It builds level 0
+of each hierarchy with the shared PiPNN builder; with `root_graph_type: "multi_layer"`, PiPNN also
+batch-builds every root routing layer. Descendant path-node graphs continue to use ODescent.
+When `support_duplicate` is enabled, descendant graph construction also uses the shared PiPNN
+builder so duplicate groups retain the standard path visibility semantics. Search, incremental
+`Add`, removal, reorder, and serialization retain the standard Pyramid behavior. Levels in
+`no_build_levels` are still skipped.
 
 ### RaBitQ split configuration
 
@@ -206,10 +214,10 @@ Overridable per-hierarchy parameters: `max_degree`, `ef_construction`, `alpha`,
 `root_graph_type: "multi_layer"` changes only the selected hierarchy's root. Its bottom graph uses
 the top-level `graph_storage_type`: Flat by default, or Compressed to trade construction and search
 speed for lower graph memory. Sparse routing graphs choose a better entry point before the bottom
-search; child graphs remain sparse. Bulk Build and incremental Add jointly construct the route and
-bottom layers with the same HGraph-style insertion protocol. This layout requires
-`graph_type: "nsw"`; combining `multi_layer` with `odescent` is rejected during parameter
-validation. Bottom and routing edges use the precise codes when an independent precise store
+search; child graphs remain sparse. NSW Build and incremental Add jointly construct the route and
+bottom layers with the same HGraph-style insertion protocol. PiPNN Build batch-constructs both
+layers. Combining `multi_layer` with `odescent` is rejected during parameter validation. Bottom
+and routing edges use the precise codes when an independent precise store
 exists, otherwise they use the base codes. Query traversal continues to use the base codes, and
 final reordering uses the configured reorder source.
 

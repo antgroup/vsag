@@ -108,6 +108,11 @@ HGraphBuildTaskGuard::~HGraphBuildTaskGuard() {
 
 std::optional<std::vector<int64_t>>
 HGraph::try_optimized_build(const DatasetPtr& data) {
+    if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        // PiPNN owns a one-shot parallel graph build and uses the normal flatten build path.
+        return std::nullopt;
+    }
+
     // Start the session before training so unsupported configurations fall through without
     // changing the training behavior of the normal build path.
     HGraphOptimizedBuildSession session(*this);
@@ -118,8 +123,11 @@ HGraph::try_optimized_build(const DatasetPtr& data) {
     std::vector<int64_t> result;
     if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
         result = this->Add(data);
-    } else {
+    } else if (graph_type_ == GRAPH_TYPE_VALUE_ODESCENT) {
         result = this->build_by_odescent(data);
+    } else {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "optimized HGraph build received an unknown graph_type");
     }
     session.Commit();
     return result;

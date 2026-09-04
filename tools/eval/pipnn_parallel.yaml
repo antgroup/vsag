@@ -1,0 +1,313 @@
+# Fixed-quality build-thread scaling on SIFT1M (1M base / 10K query / 128 dimensions).
+# Builder parameters and ef_search are tuned independently for Recall@10 >= 0.993.
+# Runs 8, 16, 32, 48, and 96 build threads; every built graph has a matching search case.
+# Keep OPENBLAS_NUM_THREADS=1 so BLAS parallelism does not contaminate build_thread_count.
+global:
+    num_threads_searching: 1
+    exporters:
+      print-directly:
+        format: "table"
+        to: "stdout"
+      save-to-file:
+        format: "json"
+        to: "file:///tmp/vsag_pipnn_parallel.json"
+
+build_nsw_t32:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"nsw","max_degree":32,"ef_construction":300,"build_thread_count":32}}'
+    index_path: "/tmp/vsag_pipnn_parallel/nsw_t32.index"
+    num_threads_building: 32
+    disable_memory: true
+
+build_odescent_t32:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"odescent","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":32}}'
+    index_path: "/tmp/vsag_pipnn_parallel/odescent_t32.index"
+    num_threads_building: 32
+    disable_memory: true
+
+build_pipnn_t32:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"pipnn","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":32}}'
+    index_path: "/tmp/vsag_pipnn_parallel/pipnn_t32.index"
+    num_threads_building: 32
+    disable_memory: true
+
+build_nsw_t8:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"nsw","max_degree":32,"ef_construction":300,"build_thread_count":8}}'
+    index_path: "/tmp/vsag_pipnn_parallel/nsw_t8.index"
+    num_threads_building: 8
+    disable_memory: true
+
+build_odescent_t8:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"odescent","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":8}}'
+    index_path: "/tmp/vsag_pipnn_parallel/odescent_t8.index"
+    num_threads_building: 8
+    disable_memory: true
+
+build_pipnn_t8:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"pipnn","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":8}}'
+    index_path: "/tmp/vsag_pipnn_parallel/pipnn_t8.index"
+    num_threads_building: 8
+    disable_memory: true
+
+build_nsw_t16:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"nsw","max_degree":32,"ef_construction":300,"build_thread_count":16}}'
+    index_path: "/tmp/vsag_pipnn_parallel/nsw_t16.index"
+    num_threads_building: 16
+    disable_memory: true
+
+build_odescent_t16:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"odescent","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":16}}'
+    index_path: "/tmp/vsag_pipnn_parallel/odescent_t16.index"
+    num_threads_building: 16
+    disable_memory: true
+
+build_pipnn_t16:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"pipnn","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":16}}'
+    index_path: "/tmp/vsag_pipnn_parallel/pipnn_t16.index"
+    num_threads_building: 16
+    disable_memory: true
+
+build_nsw_t48:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"nsw","max_degree":32,"ef_construction":300,"build_thread_count":48}}'
+    index_path: "/tmp/vsag_pipnn_parallel/nsw_t48.index"
+    num_threads_building: 48
+    disable_memory: true
+
+build_odescent_t48:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"odescent","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":48}}'
+    index_path: "/tmp/vsag_pipnn_parallel/odescent_t48.index"
+    num_threads_building: 48
+    disable_memory: true
+
+build_pipnn_t48:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"pipnn","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":48}}'
+    index_path: "/tmp/vsag_pipnn_parallel/pipnn_t48.index"
+    num_threads_building: 48
+    disable_memory: true
+
+build_nsw_t96:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"nsw","max_degree":32,"ef_construction":300,"build_thread_count":96}}'
+    index_path: "/tmp/vsag_pipnn_parallel/nsw_t96.index"
+    num_threads_building: 96
+    disable_memory: true
+
+build_odescent_t96:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"odescent","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":96}}'
+    index_path: "/tmp/vsag_pipnn_parallel/odescent_t96.index"
+    num_threads_building: 96
+    disable_memory: true
+
+build_pipnn_t96:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"pipnn","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":96}}'
+    index_path: "/tmp/vsag_pipnn_parallel/pipnn_t96.index"
+    num_threads_building: 96
+    disable_memory: true
+
+search_nsw_t32_ef128:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "search"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"nsw","max_degree":32,"ef_construction":300,"build_thread_count":32}}'
+    search_params: '{"hgraph":{"ef_search":128}}'
+    index_path: "/tmp/vsag_pipnn_parallel/nsw_t32.index"
+    search_query_count: 10000
+    topk: 10
+    disable_memory: true
+
+search_odescent_t32_ef224:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "search"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"odescent","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":32}}'
+    search_params: '{"hgraph":{"ef_search":224}}'
+    index_path: "/tmp/vsag_pipnn_parallel/odescent_t32.index"
+    search_query_count: 10000
+    topk: 10
+    disable_memory: true
+
+search_pipnn_t32_ef128:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "search"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"pipnn","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":32}}'
+    search_params: '{"hgraph":{"ef_search":128}}'
+    index_path: "/tmp/vsag_pipnn_parallel/pipnn_t32.index"
+    search_query_count: 10000
+    topk: 10
+    disable_memory: true
+
+search_nsw_t8_ef128:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "search"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"nsw","max_degree":32,"ef_construction":300,"build_thread_count":8}}'
+    search_params: '{"hgraph":{"ef_search":128}}'
+    index_path: "/tmp/vsag_pipnn_parallel/nsw_t8.index"
+    search_query_count: 10000
+    topk: 10
+    disable_memory: true
+
+search_odescent_t8_ef224:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "search"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"odescent","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":8}}'
+    search_params: '{"hgraph":{"ef_search":224}}'
+    index_path: "/tmp/vsag_pipnn_parallel/odescent_t8.index"
+    search_query_count: 10000
+    topk: 10
+    disable_memory: true
+
+search_pipnn_t8_ef128:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "search"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"pipnn","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":8}}'
+    search_params: '{"hgraph":{"ef_search":128}}'
+    index_path: "/tmp/vsag_pipnn_parallel/pipnn_t8.index"
+    search_query_count: 10000
+    topk: 10
+    disable_memory: true
+
+search_nsw_t16_ef128:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "search"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"nsw","max_degree":32,"ef_construction":300,"build_thread_count":16}}'
+    search_params: '{"hgraph":{"ef_search":128}}'
+    index_path: "/tmp/vsag_pipnn_parallel/nsw_t16.index"
+    search_query_count: 10000
+    topk: 10
+    disable_memory: true
+
+search_odescent_t16_ef232:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "search"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"odescent","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":16}}'
+    search_params: '{"hgraph":{"ef_search":232}}'
+    index_path: "/tmp/vsag_pipnn_parallel/odescent_t16.index"
+    search_query_count: 10000
+    topk: 10
+    disable_memory: true
+
+search_pipnn_t16_ef128:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "search"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"pipnn","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":16}}'
+    search_params: '{"hgraph":{"ef_search":128}}'
+    index_path: "/tmp/vsag_pipnn_parallel/pipnn_t16.index"
+    search_query_count: 10000
+    topk: 10
+    disable_memory: true
+
+search_nsw_t48_ef128:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "search"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"nsw","max_degree":32,"ef_construction":300,"build_thread_count":48}}'
+    search_params: '{"hgraph":{"ef_search":128}}'
+    index_path: "/tmp/vsag_pipnn_parallel/nsw_t48.index"
+    search_query_count: 10000
+    topk: 10
+    disable_memory: true
+
+search_odescent_t48_ef224:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "search"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"odescent","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":48}}'
+    search_params: '{"hgraph":{"ef_search":224}}'
+    index_path: "/tmp/vsag_pipnn_parallel/odescent_t48.index"
+    search_query_count: 10000
+    topk: 10
+    disable_memory: true
+
+search_pipnn_t48_ef128:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "search"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"pipnn","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":48}}'
+    search_params: '{"hgraph":{"ef_search":128}}'
+    index_path: "/tmp/vsag_pipnn_parallel/pipnn_t48.index"
+    search_query_count: 10000
+    topk: 10
+    disable_memory: true
+
+search_nsw_t96_ef128:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "search"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"nsw","max_degree":32,"ef_construction":300,"build_thread_count":96}}'
+    search_params: '{"hgraph":{"ef_search":128}}'
+    index_path: "/tmp/vsag_pipnn_parallel/nsw_t96.index"
+    search_query_count: 10000
+    topk: 10
+    disable_memory: true
+
+search_odescent_t96_ef224:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "search"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"odescent","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":96}}'
+    search_params: '{"hgraph":{"ef_search":224}}'
+    index_path: "/tmp/vsag_pipnn_parallel/odescent_t96.index"
+    search_query_count: 10000
+    topk: 10
+    disable_memory: true
+
+search_pipnn_t96_ef128:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "search"
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"pipnn","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":96}}'
+    search_params: '{"hgraph":{"ef_search":128}}'
+    index_path: "/tmp/vsag_pipnn_parallel/pipnn_t96.index"
+    search_query_count: 10000
+    topk: 10
+    disable_memory: true
