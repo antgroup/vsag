@@ -25,6 +25,7 @@
 #include "basic_types.h"
 #include "flatten_datacell_parameter.h"
 #include "flatten_interface_parameter.h"
+#include "flatten_optimized_build_interface.h"
 #include "hash_types.h"
 #include "impl/runtime_parameter.h"
 #include "index_common_param_fwd.h"
@@ -106,6 +107,24 @@ public:
 
     virtual ComputerInterfacePtr
     FactoryComputer(const void* query) = 0;
+
+    // Starts an optional temporary build-code representation. The returned session aborts on
+    // destruction unless Commit() succeeds. While it is alive, all regular distance APIs are
+    // required to address the temporary representation transparently.
+    virtual FlattenBuildSessionPtr
+    CreateOptimizedBuildSession(const FlattenOptimizedBuildContext&) {
+        return nullptr;
+    }
+
+    [[nodiscard]] virtual bool
+    IsOptimizedBuildActive() const {
+        return false;
+    }
+
+    virtual ComputerInterfacePtr
+    FactoryComputerForBuild(const void* query, InnerIdType) {
+        return this->FactoryComputer(query);
+    }
 
     virtual void
     Train(const void* data, uint64_t count) = 0;

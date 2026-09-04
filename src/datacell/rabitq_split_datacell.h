@@ -75,6 +75,29 @@ public:
         uint64_t code_sum_{0};
     };
 
+    class BuildSession final : public FlattenBuildSession {
+    public:
+        explicit BuildSession(RaBitQSplitDataCell* owner) : owner_(owner) {
+        }
+
+        ~BuildSession() override {
+            if (owner_ != nullptr) {
+                owner_->AbortOptimizedBuild();
+            }
+        }
+
+        void
+        Commit() override {
+            if (owner_ != nullptr) {
+                owner_->FinalizeOptimizedBuild();
+                owner_ = nullptr;
+            }
+        }
+
+    private:
+        RaBitQSplitDataCell* owner_;
+    };
+
     RaBitQSplitDataCell() = default;
 
     explicit RaBitQSplitDataCell(const QuantizerParamPtr& quantization_param,
@@ -469,6 +492,14 @@ public:
         return this->FactoryComputer(query);
     }
 
+    FlattenBuildSessionPtr
+    CreateOptimizedBuildSession(const FlattenOptimizedBuildContext& context) override {
+        if (not this->BeginOptimizedBuild(context)) {
+            return nullptr;
+        }
+        return std::make_unique<BuildSession>(this);
+    }
+
     void
     Train(const void* data, uint64_t count) override {
         if (this->quantizer_) {
@@ -489,6 +520,23 @@ public:
         if (this->max_capacity_ > 0) {
             build_codes->Resize(this->max_capacity_);
             code_sums->resize(this->max_capacity_, 0);
+        }
+
+        // A session may also be used for a non-empty incremental build. Rehydrate the scalar
+        // representation from persisted split codes so old and new IDs share exactly the same
+        // pairwise-distance path without requiring raw vectors.
+        if (this->total_count_ > 0) {
+            ByteBuffer full_code(this->code_size_, this->allocator_);
+            ByteBuffer scalar_code(this->bottom_quantizer().GetScalarCodeSize(), this->allocator_);
+            for (InnerIdType id = 0; id < this->total_count_; ++id) {
+                if (not this->GetCodesById(id, full_code.data)) {
+                    throw VsagException(ErrorType::INTERNAL_ERROR,
+                                        "failed to read persisted split RaBitQ build code");
+                }
+                (*code_sums)[id] =
+                    this->bottom_quantizer().UnpackScalarCode(full_code.data, scalar_code.data);
+                build_codes->Write(id, scalar_code.data);
+            }
         }
         this->optimized_build_scalar_layout_ = build_codes;
         this->optimized_build_code_sums_ = std::move(code_sums);
