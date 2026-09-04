@@ -36,6 +36,12 @@ endif ()
 
 message (STATUS "CPU ARCH: ${Yellow}${VSAG_TARGET_PROCESSOR}${CR}")
 
+if (ENABLE_CUDA)
+    find_package (CUDAToolkit REQUIRED)
+    enable_language (CUDA)
+    message (STATUS "CUDA backend: ${Yellow}ON${CR} (toolkit ${CUDAToolkit_VERSION}, arch ${VSAG_CUDA_ARCHITECTURES})")
+endif ()
+
 include (cmake/VSAGCompilerConfig.cmake)        # Compiler, ABI, sanitizer, and linker setup.
 include (cmake/VSAGSystemDeps.cmake)            # System dependency discovery.
 include (cmake/DarwinDep.cmake)                 # macOS-specific dependency handling.
