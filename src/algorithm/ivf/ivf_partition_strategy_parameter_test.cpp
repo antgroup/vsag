@@ -64,12 +64,19 @@ TEST_CASE("IVF Partition Strategy Routing Parameters", "[ut][IVFPartitionStrateg
         "partition_strategy_type": "ivf",
         "ivf_train_type": "kmeans",
         "route_max_degree": 128,
-        "route_ef_construction": 512
+        "route_ef_construction": 512,
+        "use_route_graph": false
     })");
 
     REQUIRE(param->route_max_degree == 128);
     REQUIRE(param->route_ef_construction == 512);
+    REQUIRE_FALSE(param->use_route_graph);
     vsag::ParameterTest::TestToJson(param);
+
+    auto compatible_layout_preference =
+        std::make_shared<vsag::IVFPartitionStrategyParameters>(*param);
+    compatible_layout_preference->use_route_graph = true;
+    REQUIRE(param->CheckCompatibility(compatible_layout_preference));
 
     auto incompatible = std::make_shared<vsag::IVFPartitionStrategyParameters>(*param);
     incompatible->route_max_degree = 64;

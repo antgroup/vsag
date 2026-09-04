@@ -54,6 +54,10 @@ IVFPartitionStrategyParameters::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(this->route_ef_construction >= this->route_max_degree,
                    "route_ef_construction must be no less than route_max_degree");
 
+    if (json.Contains(IVF_USE_ROUTE_GRAPH_KEY)) {
+        this->use_route_graph = json[IVF_USE_ROUTE_GRAPH_KEY].GetBool();
+    }
+
     this->gnoimi_param = std::make_shared<GNOIMIParameter>();
     if (this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI) {
         CHECK_ARGUMENT(
@@ -81,6 +85,7 @@ IVFPartitionStrategyParameters::ToJson() const {
     }
     json[IVF_ROUTE_MAX_DEGREE_KEY].SetInt(this->route_max_degree);
     json[IVF_ROUTE_EF_CONSTRUCTION_KEY].SetInt(this->route_ef_construction);
+    json[IVF_USE_ROUTE_GRAPH_KEY].SetBool(this->use_route_graph);
     if (this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI) {
         json[IVF_PARTITION_STRATEGY_TYPE_GNO_IMI].SetJson(this->gnoimi_param->ToJson());
     }
@@ -93,6 +98,8 @@ IVFPartitionStrategyParameters::CheckCompatibility(const ParamPtr& other) const 
     CHECK_FIELD_EQ(*this, *p, partition_strategy_type);
     CHECK_FIELD_EQ(*this, *p, route_max_degree);
     CHECK_FIELD_EQ(*this, *p, route_ef_construction);
+    // use_route_graph selects the layout only when a new index is trained. Serialized partitions
+    // are self-describing and must remain loadable by readers created with either setting.
     CHECK_SUB_PARAM(*this, *p, gnoimi_param);
     return true;
 }

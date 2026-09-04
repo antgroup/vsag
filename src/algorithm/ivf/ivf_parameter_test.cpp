@@ -285,6 +285,23 @@ TEST_CASE("IVF rejects reader IO for base codes", "[ut][IVFParameter]") {
     }
 }
 
+TEST_CASE("IVF maps use_route_graph external parameter", "[ut][IVFParameter]") {
+    REQUIRE(std::string(vsag::IVF_USE_ROUTE_GRAPH) == "use_route_graph");
+    auto external_param = vsag::JsonType::Parse(R"({
+        "partition_strategy_type": "ivf",
+        "use_route_graph": false
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 64;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto param = vsag::IVF::CheckAndMappingExternalParam(external_param, common_param);
+    auto ivf_param = std::dynamic_pointer_cast<vsag::IVFParameter>(param);
+    REQUIRE(ivf_param != nullptr);
+    REQUIRE_FALSE(ivf_param->ivf_partition_strategy_parameter->use_route_graph);
+}
+
 TEST_CASE("IVF maps RabitQ external parameters", "[ut][IVFParameter]") {
     auto external_param = vsag::JsonType::Parse(R"({
         "base_quantization_type": "rabitq",

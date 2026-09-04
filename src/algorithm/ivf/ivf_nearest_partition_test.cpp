@@ -15,10 +15,15 @@
 
 #include "ivf_nearest_partition.h"
 
+#include <algorithm>
+#include <vector>
+
 #include "algorithm/inner_index_interface.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/inner_search_param.h"
 #include "impl/thread_pool/safe_thread_pool.h"
+#include "simd/fp32_simd.h"
+#include "simd/normalize.h"
 #include "storage/serialization_template_test.h"
 #include "unittest.h"
 using namespace vsag;
@@ -134,4 +139,115 @@ TEST_CASE("IVF Nearest Partition Routing Statistics Test", "[ut][IVFNearestParti
         auto dumped = JsonType::Parse(stats.Dump());
         REQUIRE(dumped["distance_evaluations_by_phase"]["routing"].GetUint64() > 0);
     }
+}
+
+TEST_CASE("IVF Nearest Partition Centroid Scan Test", "[ut][IVFNearestPartition]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 32;
+    constexpr BucketIdType bucket_count = 16;
+    constexpr int64_t data_count = 256;
+    constexpr BucketIdType buckets_per_data = 4;
+    const std::vector<MetricType> metrics{
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP, MetricType::METRIC_TYPE_COSINE};
+
+    for (const auto metric : metrics) {
+        IndexCommonParam common_param;
+        common_param.dim_ = dim;
+        common_param.metric_ = metric;
+        common_param.allocator_ = allocator;
+
+        auto strategy_param = std::make_shared<IVFPartitionStrategyParameters>();
+        strategy_param->use_route_graph = false;
+        auto partition =
+            std::make_unique<IVFNearestPartition>(bucket_count, common_param, strategy_param);
+        REQUIRE(partition->route_index_ptr_ == nullptr);
+
+        const auto untrained_result =
+            partition->ClassifyDatas(nullptr, 1, buckets_per_data, nullptr);
+        REQUIRE(untrained_result == Vector<BucketIdType>(buckets_per_data,
+                                                         static_cast<BucketIdType>(-1),
+                                                         allocator.get()));
+        auto untrained_restored =
+            std::make_unique<IVFNearestPartition>(bucket_count, common_param, strategy_param);
+        test_serializion(*partition, *untrained_restored);
+        REQUIRE(untrained_restored->ClassifyDatas(nullptr, 1, buckets_per_data, nullptr) ==
+                untrained_result);
+
+        auto vectors = fixtures::generate_vectors(data_count, dim, true, 95);
+        auto dataset = Dataset::Make();
+        dataset->Float32Vectors(vectors.data())->Dim(dim)->NumElements(data_count)->Owner(false);
+        partition->Train(dataset);
+        REQUIRE(partition->route_index_ptr_ == nullptr);
+
+        auto actual =
+            partition->ClassifyDatas(vectors.data(), data_count, buckets_per_data, nullptr);
+        REQUIRE(actual.size() == static_cast<uint64_t>(data_count * buckets_per_data));
+
+        Vector<float> centroid(dim, allocator.get());
+        Vector<float> normalized_query(dim, allocator.get());
+        Vector<std::pair<float, BucketIdType>> expected(bucket_count, allocator.get());
+        for (int64_t i = 0; i < data_count; ++i) {
+            const auto* query = vectors.data() + i * dim;
+            if (metric == MetricType::METRIC_TYPE_COSINE) {
+                Normalize(query, normalized_query.data(), dim);
+                query = normalized_query.data();
+            }
+            for (BucketIdType b = 0; b < bucket_count; ++b) {
+                partition->GetCentroid(b, centroid);
+                float distance = 0.0F;
+                if (metric == MetricType::METRIC_TYPE_L2SQR) {
+                    distance = FP32ComputeL2Sqr(query, centroid.data(), dim);
+                } else {
+                    distance = 1.0F - FP32ComputeIP(query, centroid.data(), dim);
+                }
+                expected[b] = {distance, b};
+            }
+            std::sort(expected.begin(), expected.end());
+            for (BucketIdType j = 0; j < buckets_per_data; ++j) {
+                REQUIRE(actual[i * buckets_per_data + j] == expected[j].second);
+            }
+        }
+
+        auto graph_config_param = std::make_shared<IVFPartitionStrategyParameters>();
+        graph_config_param->use_route_graph = true;
+        auto restored =
+            std::make_unique<IVFNearestPartition>(bucket_count, common_param, graph_config_param);
+        test_serializion(*partition, *restored);
+        REQUIRE(restored->route_index_ptr_ == nullptr);
+        REQUIRE(restored->ClassifyDatas(vectors.data(), data_count, buckets_per_data, nullptr) ==
+                actual);
+    }
+}
+
+TEST_CASE("IVF Nearest Partition Route Graph Layout Cross Config Test",
+          "[ut][IVFNearestPartition]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 32;
+    constexpr BucketIdType bucket_count = 16;
+    constexpr int64_t data_count = 256;
+
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = allocator;
+
+    auto graph_param = std::make_shared<IVFPartitionStrategyParameters>();
+    graph_param->use_route_graph = true;
+    auto graph_partition =
+        std::make_unique<IVFNearestPartition>(bucket_count, common_param, graph_param);
+
+    auto vectors = fixtures::generate_vectors(data_count, dim, true, 95);
+    auto dataset = Dataset::Make();
+    dataset->Float32Vectors(vectors.data())->Dim(dim)->NumElements(data_count)->Owner(false);
+    graph_partition->Train(dataset);
+    auto expected = graph_partition->ClassifyDatas(vectors.data(), data_count, 1, nullptr);
+
+    auto scan_config_param = std::make_shared<IVFPartitionStrategyParameters>();
+    scan_config_param->use_route_graph = false;
+    auto restored =
+        std::make_unique<IVFNearestPartition>(bucket_count, common_param, scan_config_param);
+    REQUIRE(restored->route_index_ptr_ == nullptr);
+    test_serializion(*graph_partition, *restored);
+    REQUIRE(restored->route_index_ptr_ != nullptr);
+    REQUIRE(restored->ClassifyDatas(vectors.data(), data_count, 1, nullptr) == expected);
 }
