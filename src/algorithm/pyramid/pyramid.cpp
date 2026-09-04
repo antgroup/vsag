@@ -593,6 +593,10 @@ Pyramid::build_by_odescent(const DatasetPtr& base) {
         }
     }
 
+    auto codes = construction_codes();
+    FlattenOptimizedBuildContext build_context{thread_pool_, build_thread_count_};
+    auto build_session = codes->CreateOptimizedBuildSession(build_context);
+
     base_codes_->BatchInsertVector(data_vectors, data_num);
     if (has_precise_reorder()) {
         precise_codes_->BatchInsertVector(data_vectors, data_num);
@@ -612,22 +616,12 @@ Pyramid::build_by_odescent(const DatasetPtr& base) {
             }
         }
     }
-    auto codes = construction_codes();
-
     if (thread_pool_ != nullptr && hierarchies_.size() > 1) {
-        auto build_flatten = ODescent::CreateBuildFlatten(codes, data_vectors, data_num);
         Vector<std::future<void>> futures(allocator_);
         for (const auto& [hname, h_ptr] : hierarchies_) {
             auto* hierarchy = h_ptr.get();
-            futures.push_back(thread_pool_->GeneralEnqueue([&, codes, build_flatten, hierarchy]() {
-                ODescent builder(odescent_param_,
-                                 codes,
-                                 allocator_,
-                                 nullptr,
-                                 true,
-                                 data_vectors,
-                                 data_num,
-                                 build_flatten);
+            futures.push_back(thread_pool_->GeneralEnqueue([&, codes, hierarchy]() {
+                ODescent builder(odescent_param_, codes, allocator_, nullptr, true);
                 hierarchy->root->Build(builder);
             }));
         }
@@ -635,16 +629,13 @@ Pyramid::build_by_odescent(const DatasetPtr& base) {
             f.get();
         }
     } else {
-        ODescent graph_builder(odescent_param_,
-                               codes,
-                               allocator_,
-                               this->thread_pool_.get(),
-                               true,
-                               data_vectors,
-                               data_num);
+        ODescent graph_builder(odescent_param_, codes, allocator_, this->thread_pool_.get(), true);
         for (const auto& [hname, h_ptr] : hierarchies_) {
             h_ptr->root->Build(graph_builder);
         }
+    }
+    if (build_session != nullptr) {
+        build_session->Commit();
     }
     cur_element_count_ = data_num;
     return {};
@@ -1543,8 +1534,14 @@ Pyramid::ExportModel(const IndexCommonParam& param) const {
 
 std::vector<int64_t>
 Pyramid::Add(const DatasetPtr& base) {
+    auto codes = construction_codes();
+    FlattenOptimizedBuildContext build_context{thread_pool_, build_thread_count_};
+    auto build_session = codes->CreateOptimizedBuildSession(build_context);
     auto batch = prepare_add_batch(base);
     insert_add_batch(base, batch);
+    if (build_session != nullptr) {
+        build_session->Commit();
+    }
     return batch.failed_ids;
 }
 

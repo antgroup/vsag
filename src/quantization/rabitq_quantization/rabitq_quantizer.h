@@ -203,6 +203,10 @@ public:
                               uint8_t* one_bit_code,
                               uint8_t* supplement_code) const;
 
+    // Restores the scalar build representation from a persisted full code.
+    [[nodiscard]] uint64_t
+    UnpackScalarCode(const uint8_t* codes, uint8_t* scalar_code) const;
+
     void
     ComputeDistWithScalarCode(Computer<RaBitQuantizer>& computer,
                               const uint8_t* scalar_code,
@@ -332,9 +336,6 @@ private:
                       uint8_t* codes,
                       uint8_t* scalar_code,
                       uint64_t* code_sum) const;
-
-    uint64_t
-    UnpackScalarCode(const uint8_t* codes, uint8_t* scalar_code) const;
 
     struct SplitLayout {
         bool is_split{false};

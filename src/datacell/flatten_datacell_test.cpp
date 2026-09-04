@@ -755,8 +755,6 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
     common_param.metric_ = metric;
 
     auto flatten = FlattenInterface::MakeInstance(param, common_param);
-    auto optimized_build = std::dynamic_pointer_cast<FlattenOptimizedBuildInterface>(flatten);
-    REQUIRE(optimized_build != nullptr);
     flatten->Train(vectors.data(), count);
     std::vector<uint8_t> expected_codes(flatten->code_size_ * count);
     for (InnerIdType id = 0; id < count; ++id) {
@@ -768,15 +766,16 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
     auto finalize_pool = SafeThreadPool::FactoryDefaultThreadPool();
     finalize_pool->SetPoolSize(4);
     FlattenOptimizedBuildContext build_context{finalize_pool, 4};
-    REQUIRE(optimized_build->BeginOptimizedBuild(build_context));
-    REQUIRE(optimized_build->IsOptimizedBuildActive());
+    auto build_session = flatten->CreateOptimizedBuildSession(build_context);
+    REQUIRE(build_session != nullptr);
+    REQUIRE(flatten->IsOptimizedBuildActive());
     flatten->ShrinkToFit(0);
     REQUIRE_THROWS(flatten->InsertVector(vectors.data()));
     REQUIRE(flatten->TotalCount() == 0);
     flatten->Resize(count);
     flatten->BatchInsertVector(vectors.data(), count);
     REQUIRE(std::isfinite(flatten->ComputePairVectors(0, 1)));
-    auto build_computer = optimized_build->FactoryComputerForBuild(vectors.data(), 0);
+    auto build_computer = flatten->FactoryComputerForBuild(vectors.data(), 0);
     std::vector<InnerIdType> build_ids(count);
     std::iota(build_ids.begin(), build_ids.end(), 0);
     std::vector<float> pair_dists(count);
@@ -823,8 +822,8 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
 
     const float build_pair_distance = flatten->ComputePairVectors(0, 2);
 
-    optimized_build->FinalizeOptimizedBuild();
-    REQUIRE_FALSE(optimized_build->IsOptimizedBuildActive());
+    build_session->Commit();
+    REQUIRE_FALSE(flatten->IsOptimizedBuildActive());
     REQUIRE(std::abs(flatten->ComputePairVectors(0, 2) - build_pair_distance) <= 1e-5F);
     flatten->QueryById(id_dists.data(), 0, build_ids.data(), count, &ctx);
     statistics = JsonType::Parse(stats.Dump());
@@ -847,11 +846,23 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
     const uint64_t memory_after_finalize = flatten->GetMemoryUsage();
     REQUIRE(memory_after_finalize >=
             static_cast<uint64_t>(flatten->max_capacity_) * flatten->code_size_);
-    REQUIRE(optimized_build->BeginOptimizedBuild(build_context));
-    REQUIRE(flatten->GetMemoryUsage() > memory_after_finalize);
-    optimized_build->AbortOptimizedBuild();
-    REQUIRE_FALSE(optimized_build->IsOptimizedBuildActive());
+    {
+        auto abort_session = flatten->CreateOptimizedBuildSession(build_context);
+        REQUIRE(abort_session != nullptr);
+        REQUIRE(flatten->GetMemoryUsage() > memory_after_finalize);
+    }
+    REQUIRE_FALSE(flatten->IsOptimizedBuildActive());
     REQUIRE(flatten->GetMemoryUsage() == memory_after_finalize);
+
+    // A non-empty session rehydrates old split codes, then mixes them with a newly encoded row.
+    auto incremental_session = flatten->CreateOptimizedBuildSession(build_context);
+    REQUIRE(incremental_session != nullptr);
+    const float active_old_distance = flatten->ComputePairVectors(0, 1);
+    flatten->InsertVector(query.data(), count);
+    const float active_new_distance = flatten->ComputePairVectors(0, count);
+    incremental_session->Commit();
+    REQUIRE(std::abs(flatten->ComputePairVectors(0, 1) - active_old_distance) <= 1e-5F);
+    REQUIRE(std::abs(flatten->ComputePairVectors(0, count) - active_new_distance) <= 1e-5F);
 }
 
 TEST_CASE("RaBitQSplitDataCell waits submitted finalize tasks after enqueue failure",
