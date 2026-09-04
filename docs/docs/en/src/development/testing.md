@@ -16,6 +16,29 @@ suite:
 make test
 ```
 
+## Build and Run One Unit-Test Module
+
+For a shorter edit-build-test cycle, build and run one maintained unit-test subsystem:
+
+```bash
+make test-module MODULE=datacell
+make test-module MODULE=algorithm CASE='[ut][sample_train_data]'
+```
+
+The available module names are `simd`, `common`, `algorithm`, `factory`, `attr`, `datacell`,
+`layout`, `quantization`, `storage`, `io`, `utils`, and `impl`. Each command builds the shared
+production and fixture dependencies plus only the selected module's test sources. The corresponding
+CMake target and executable are named `unittests_<module>`:
+
+```bash
+cmake -S . -B build -DENABLE_TESTS=ON
+cmake --build build --target unittests_datacell
+./build/tests/unittests_datacell '[ut][AttributeInvertedInterfaceParameter]'
+```
+
+These module targets are a local acceleration path. Continue to run `make test`, whose aggregate
+`unittests` executable contains every module, for full validation.
+
 Note: `make test` does not enable coverage instrumentation. To produce a coverage report, use
 `make cov` — it configures the build with `ENABLE_COVERAGE=ON`; run the test binaries afterwards
 to collect and aggregate coverage data:

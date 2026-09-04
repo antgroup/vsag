@@ -18,6 +18,7 @@ last-reviewed: 2026-05-12
 ```bash
 make debug
 make test
+make test-module MODULE=datacell
 make fmt
 make lint
 make fix-lint
@@ -27,6 +28,8 @@ make pyvsag
 ```
 
 Prefer these targets over invoking `cmake` directly so behavior matches CI.
+
+`make test-module MODULE=<name>` is the local acceleration path for one unit-test subsystem. The maintained module names are `simd`, `common`, `algorithm`, `factory`, `attr`, `datacell`, `layout`, `quantization`, `storage`, `io`, `utils`, and `impl`. It accepts the same `CASE` and `SHARD` runtime arguments as `make test`; use the aggregate `make test` path before submitting changes.
 
 ## Development environment
 
