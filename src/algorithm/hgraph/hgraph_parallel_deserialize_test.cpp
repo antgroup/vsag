@@ -29,7 +29,7 @@
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index/index_impl.h"
 #include "index_common_param.h"
-#include "storage/chunked_layout.h"
+#include "storage/chunked_manifest.h"
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
@@ -106,7 +106,7 @@ public:
         // called from worker threads: Catch2 assertions are not thread-safe;
         // bounds check written the way the base-class doc recommends, so the
         // wrap-around of offset + len cannot slip through
-        if (len > buffer_.size() || offset > buffer_.size() - len) {
+        if (len > buffer_.size() or offset > buffer_.size() - len) {
             throw std::out_of_range("read beyond the in-memory file");
         }
         std::memcpy(dest, buffer_.data() + offset, len);
@@ -175,8 +175,8 @@ private:
 // rewrite the chunked layout recorded in a serialized index footer, so a
 // tampered layout can be fed to ParallelDeserialize
 std::string
-RewriteChunkedLayout(const std::string& buffer,
-                     const std::function<void(nlohmann::json&)>& mutate) {
+RewriteChunkedManifest(const std::string& buffer,
+                       const std::function<void(nlohmann::json&)>& mutate) {
     auto read_func = [&buffer](uint64_t offset, uint64_t len, void* dest) {
         std::memcpy(dest, buffer.data() + offset, len);
     };
@@ -270,7 +270,7 @@ MakeIoTypeHGraphJson(const std::string& io_type, const std::string& tag) {
     hgraph_json["base_io_type"].SetString(io_type);
     hgraph_json["graph_io_type"].SetString(io_type);
     hgraph_json["precise_io_type"].SetString(io_type);
-    if (io_type != "block_memory_io" && io_type != "memory_io") {
+    if (io_type != "block_memory_io" and io_type != "memory_io") {
         const std::string prefix =
             "/tmp/vsag_ut_iotype_" + std::to_string(::getpid()) + "_" + tag + "_" + io_type;
         hgraph_json["base_file_path"].SetString(prefix + "_base");
@@ -387,6 +387,31 @@ TEST_CASE("HGraph ParallelDeserialize Compressed Chunked Round-Trip",
 
     auto pool = MakeThreadPool(threads);
     auto loaded = MakeHGraphIndex(MakeCommonParam(data.dim, pool));
+    REQUIRE(loaded->ParallelDeserialize(reader).has_value());
+    REQUIRE(loaded->GetNumElements() == data.count);
+    RequireSameKnnResults(index, loaded, data);
+}
+
+TEST_CASE("HGraph ParallelDeserialize Compressed Source IDs",
+          "[ut][hgraph][parallel_deserialize]") {
+    auto data = MakeTestData(32, 300);
+    std::vector<std::string> source_ids(data.count);
+    for (int64_t i = 0; i < data.count; ++i) {
+        source_ids[i] = "source-" + std::to_string(i);
+    }
+    auto dataset = MakeDataset(data);
+    dataset->SourceID(source_ids.data());
+
+    auto hgraph_json = MakeHGraphJson();
+    hgraph_json["persist_source_id"].SetBool(true);
+    auto index = MakeHGraphIndex(MakeCommonParam(data.dim), hgraph_json);
+    REQUIRE(index->Build(dataset).has_value());
+
+    FrameSerializeWriter writer;
+    REQUIRE(index->Serialize(writer, /*chunk_size=*/4096).has_value());
+    FrameMemoryReader reader(writer.buffer_);
+
+    auto loaded = MakeHGraphIndex(MakeCommonParam(data.dim, MakeThreadPool(4)), hgraph_json);
     REQUIRE(loaded->ParallelDeserialize(reader).has_value());
     REQUIRE(loaded->GetNumElements() == data.count);
     RequireSameKnnResults(index, loaded, data);
@@ -600,7 +625,7 @@ TEST_CASE("HGraph ParallelDeserialize Rejects Tampered Component Granularity",
     auto pool = MakeThreadPool(4);
 
     SECTION("whole-only component claims chunked granularity") {
-        auto tampered = RewriteChunkedLayout(writer.buffer_, [](nlohmann::json& layout) {
+        auto tampered = RewriteChunkedManifest(writer.buffer_, [](nlohmann::json& layout) {
             for (auto& comp : layout.at("components")) {
                 if (comp.at("name").get<std::string>() != "label_table") {
                     continue;
@@ -623,7 +648,7 @@ TEST_CASE("HGraph ParallelDeserialize Rejects Tampered Component Granularity",
     }
 
     SECTION("unknown component name") {
-        auto tampered = RewriteChunkedLayout(writer.buffer_, [](nlohmann::json& layout) {
+        auto tampered = RewriteChunkedManifest(writer.buffer_, [](nlohmann::json& layout) {
             nlohmann::json bogus;
             bogus["name"] = "bogus_component";
             bogus["type"] = "whole";
@@ -732,7 +757,7 @@ TEST_CASE("HGraph ParallelDeserialize Reports Configuration Mismatch",
     // either the serialized-parameter comparison or the component-level
     // guard must surface a configuration error, never an unknown component
     REQUIRE_THAT(result.error().message,
-                 Catch::Matchers::ContainsSubstring("not match") ||
+                 Catch::Matchers::ContainsSubstring("not match") or
                      Catch::Matchers::ContainsSubstring("does not enable it"));
 }
 
@@ -843,7 +868,7 @@ TEST_CASE("HGraph ParallelDeserialize Conjugate Graph Round-Trip",
         auto result = loaded->ParallelDeserialize(reader);
         REQUIRE_FALSE(result.has_value());
         REQUIRE_THAT(result.error().message,
-                     Catch::Matchers::ContainsSubstring("not match") ||
+                     Catch::Matchers::ContainsSubstring("not match") or
                          Catch::Matchers::ContainsSubstring("does not enable it"));
     }
 }

@@ -16,7 +16,7 @@
 
 #include <string>
 
-#include "chunked_layout.h"
+#include "chunked_manifest.h"
 #include "stream_writer.h"
 #include "vsag/serialize_writer.h"
 
@@ -58,9 +58,9 @@ public:
         return physical_cursor_;
     }
 
-    [[nodiscard]] const ChunkedLayout&
-    GetLayout() const {
-        return layout_;
+    [[nodiscard]] const ChunkedManifest&
+    GetManifest() const {
+        return manifest_;
     }
 
 private:
@@ -79,11 +79,11 @@ private:
     close_frame();
 
     vsag::SerializeWriter& writer_;
-    ChunkedLayout layout_;
+    ChunkedManifest manifest_;
     const bool compress_;
 
     Stage stage_{Stage::OUTSIDE};
-    ComponentLayout* cur_{nullptr};
+    ComponentManifestEntry* cur_{nullptr};
     uint64_t head_remaining_{0};
     uint64_t io_remaining_{0};
     bool frame_open_{false};

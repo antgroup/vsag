@@ -106,10 +106,10 @@ TEST_CASE("ChunkedStreamWriter Plain Writer Passthrough", "[ut][chunked_stream_w
     REQUIRE(writer.GetPhysicalCursor() == sink.buffer_.size());
     REQUIRE(writer.GetCursor() == head.size() + io_data.size() + tail.size() + outside.size());
 
-    const auto& layout = writer.GetLayout();
-    REQUIRE(layout.codec_ == "none");
-    REQUIRE(layout.chunk_size_ == 4);
-    const auto* comp = layout.FindComponent("comp");
+    const auto& manifest = writer.GetManifest();
+    REQUIRE(manifest.codec_ == "none");
+    REQUIRE(manifest.chunk_size_ == 4);
+    const auto* comp = manifest.FindComponent("comp");
     REQUIRE(comp != nullptr);
     REQUIRE(comp->granularity == vsag::ComponentGranularity::Byte);
     REQUIRE(comp->head_offset == 0);
@@ -143,11 +143,11 @@ TEST_CASE("ChunkedStreamWriter Compressed Frames", "[ut][chunked_stream_writer]"
     write_in_pieces(writer, head + io_data + tail, 5);
     writer.EndComponent();
 
-    const auto& layout = writer.GetLayout();
-    REQUIRE(layout.codec_ == "mock");
+    const auto& manifest = writer.GetManifest();
+    REQUIRE(manifest.codec_ == "mock");
 
     // whole component: single frame at offset 0, csize = 9 + 8
-    const auto* whole = layout.FindComponent("whole");
+    const auto* whole = manifest.FindComponent("whole");
     REQUIRE(whole != nullptr);
     REQUIRE(whole->granularity == vsag::ComponentGranularity::Whole);
     REQUIRE(whole->offset == 0);
@@ -155,7 +155,7 @@ TEST_CASE("ChunkedStreamWriter Compressed Frames", "[ut][chunked_stream_writer]"
     REQUIRE(whole->logical_size == 9);
 
     // chunked component: head plain, then 3 frames, then tail plain
-    const auto* comp = layout.FindComponent("comp");
+    const auto* comp = manifest.FindComponent("comp");
     REQUIRE(comp != nullptr);
     REQUIRE(comp->head_offset == 17);
     REQUIRE(comp->head_size == 2);
@@ -189,7 +189,7 @@ TEST_CASE("ChunkedStreamWriter Boundary Cases", "[ut][chunked_stream_writer]") {
         std::string bytes = "H0123456789";
         writer.Write(bytes.data(), bytes.size());
         writer.EndComponent();
-        REQUIRE(writer.GetLayout().FindComponent("comp")->chunks.size() == 2);
+        REQUIRE(writer.GetManifest().FindComponent("comp")->chunks.size() == 2);
     }
 
     SECTION("empty io data") {
@@ -198,7 +198,7 @@ TEST_CASE("ChunkedStreamWriter Boundary Cases", "[ut][chunked_stream_writer]") {
         writer.BeginChunkedComponent("comp", 2, 0);
         writer.Write("HDTAIL", 6);
         writer.EndComponent();
-        const auto* comp = writer.GetLayout().FindComponent("comp");
+        const auto* comp = writer.GetManifest().FindComponent("comp");
         REQUIRE(comp->chunks.empty());
         REQUIRE(comp->tail_offset == 2);
         REQUIRE(comp->tail_size == 4);

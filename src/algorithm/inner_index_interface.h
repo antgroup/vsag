@@ -240,14 +240,6 @@ public:
     virtual void
     Deserialize(std::istream& in_stream);
 
-    /// parallel deserialization from a positioned reader
-    /// (see Index::ParallelDeserialize)
-    virtual void
-    ParallelDeserialize(DeserializeReader& reader, ThreadPool& pool) {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "index does not support parallel deserialization");
-    }
-
     /// parallel deserialization using the thread pool bound to this index
     /// (via Resource); implementations fall back to an internal default
     /// pool when none is bound

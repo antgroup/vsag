@@ -25,7 +25,7 @@
 #include "hgraph.h"
 #include "hgraph_component_names.h"  // IWYU pragma: keep
 #include "impl/thread_pool/safe_thread_pool.h"
-#include "storage/chunked_layout.h"
+#include "storage/chunked_manifest.h"
 #include "storage/parallel_deserialize_utils.h"
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
@@ -49,8 +49,8 @@ constexpr uint64_t PROBE_FILL_SPLIT_SIZE = 128ULL * 1024 * 1024;
 // tampered with
 bool
 supports_chunked_granularity(const std::string& name) {
-    return name == COMPONENT_BASE_CODES || name == COMPONENT_BOTTOM_GRAPH ||
-           name == COMPONENT_PRECISE_CODES || name == COMPONENT_RAW_VECTOR;
+    return name == COMPONENT_BASE_CODES or name == COMPONENT_BOTTOM_GRAPH or
+           name == COMPONENT_PRECISE_CODES or name == COMPONENT_RAW_VECTOR;
 }
 
 // adding a component means touching three places here: is_known_component (so
@@ -61,10 +61,10 @@ supports_chunked_granularity(const std::string& name) {
 // is rejected by the pre-validation, and both dispatches end in a throw.
 bool
 is_known_component(const std::string& name) {
-    return supports_chunked_granularity(name) || name == COMPONENT_LABEL_TABLE ||
-           name == COMPONENT_CODE_SLOT_MAP || name == COMPONENT_ROUTE_GRAPHS ||
-           name == COMPONENT_EXTRA_INFOS || name == COMPONENT_ATTR_FILTER ||
-           name == COMPONENT_MCI_CLIQUES || name == COMPONENT_CONJUGATE_GRAPH;
+    return supports_chunked_granularity(name) or name == COMPONENT_LABEL_TABLE or
+           name == COMPONENT_CODE_SLOT_MAP or name == COMPONENT_ROUTE_GRAPHS or
+           name == COMPONENT_EXTRA_INFOS or name == COMPONENT_ATTR_FILTER or
+           name == COMPONENT_MCI_CLIQUES or name == COMPONENT_CONJUGATE_GRAPH;
 }
 
 // components whose Deserialize seeks inside its own payload rather than reading
@@ -89,7 +89,7 @@ requires_seekable_payload(const std::string& name) {
 // whole dispatch so the two cannot drift
 void
 require_component_enabled(const std::string& name, bool enabled) {
-    if (!enabled) {
+    if (not enabled) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("file contains component {} but the index configuration "
                                         "does not enable it",
@@ -123,7 +123,7 @@ make_chunked_target(const ComponentPtr& component) {
 // bad_function_call somewhere further down.
 ChunkedTarget&
 require_target(std::optional<ChunkedTarget>& target, const std::string& name) {
-    if (!target.has_value()) {
+    if (not target.has_value()) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             fmt::format("no chunked target resolved for component {}", name));
     }
@@ -134,18 +134,15 @@ require_target(std::optional<ChunkedTarget>& target, const std::string& name) {
 
 void
 HGraph::ParallelDeserialize(DeserializeReader& reader) {
-    if (this->thread_pool_ != nullptr) {
-        this->ParallelDeserialize(reader, *this->thread_pool_);
-        return;
+    // Engine-created indexes carry the Resource-managed pool in thread_pool_.
+    // Keep an owned fallback only for direct construction without a Resource;
+    // it must outlive every task dispatched below.
+    auto pool_owner = this->thread_pool_;
+    if (pool_owner == nullptr) {
+        pool_owner = SafeThreadPool::FactoryDefaultThreadPool();
     }
-    // the two-argument overload only borrows the pool, so hold the fallback in
-    // a local shared_ptr: it must outlive every task it dispatches
-    auto default_pool = SafeThreadPool::FactoryDefaultThreadPool();
-    this->ParallelDeserialize(reader, *default_pool);
-}
+    ThreadPool& pool = *pool_owner;
 
-void
-HGraph::ParallelDeserialize(DeserializeReader& reader, ThreadPool& pool) {
     auto read_func = [&reader](uint64_t offset, uint64_t len, void* dest) {
         reader.Read(offset, len, dest);
     };
@@ -160,44 +157,52 @@ HGraph::ParallelDeserialize(DeserializeReader& reader, ThreadPool& pool) {
 
     auto layout_json = metadata->Get(CHUNKED_LAYOUT_KEY);
     if (layout_json.IsObject()) {
-        auto layout = ChunkedLayout::FromJson(layout_json);
+        auto chunked_manifest = ChunkedManifest::FromJson(layout_json);
         // FromJson only checks JSON shape; validate the physical layout
         // against the body extent before dispatching concurrent writers, so
         // a tampered footer cannot alias frames or escape the body bounds
         const uint64_t physical_body = reader.Size() - footer->Length();
-        layout.Validate(physical_body);
-        this->parallel_deserialize_layout(reader, pool, layout);
+        chunked_manifest.Validate(physical_body);
+        this->parallel_deserialize_manifest(reader, pool, chunked_manifest);
     } else {
         // no recorded layout: probe an uncompressed sequential body
         const uint64_t physical_body = reader.Size() - footer->Length();
         this->parallel_deserialize_probe(reader, pool, physical_body);
     }
 
-    this->finalize_deserialized_state(serialized_total_count);
+    this->validate_and_publish_dedup_state(serialized_total_count);
+    this->publish_physical_code_capacity();
+    this->initialize_deserialized_runtime_state();
+    if (not this->using_dedup_storage()) {
+        this->total_count_ = this->basic_flatten_codes_->TotalCount();
+    }
+    if (this->raw_vector_ != nullptr) {
+        this->has_raw_vector_ = true;
+    }
     this->finish_deserialize();
 }
 
 void
-HGraph::parallel_deserialize_layout(DeserializeReader& reader,
-                                    ThreadPool& pool,
-                                    const ChunkedLayout& layout) {
+HGraph::parallel_deserialize_manifest(DeserializeReader& reader,
+                                      ThreadPool& pool,
+                                      const ChunkedManifest& chunked_manifest) {
     // Validate() proves the physical invariants but does not know which
     // components can be restored frame by frame; reject a tampered
     // granularity here, before any extent is reserved or task dispatched
-    for (const auto& comp : layout.components_) {
-        if (!is_known_component(comp.name)) {
+    for (const auto& comp : chunked_manifest.components_) {
+        if (not is_known_component(comp.name)) {
             throw VsagException(ErrorType::INVALID_BINARY,
                                 fmt::format("unknown component in chunked layout: {}", comp.name));
         }
-        if (comp.granularity == ComponentGranularity::Byte &&
-            !supports_chunked_granularity(comp.name)) {
+        if (comp.granularity == ComponentGranularity::Byte and
+            not supports_chunked_granularity(comp.name)) {
             throw VsagException(
                 ErrorType::INVALID_BINARY,
                 fmt::format("component {} cannot be deserialized in chunked form", comp.name));
         }
     }
 
-    const bool compressed = (layout.codec_ != "none");
+    const bool compressed = (chunked_manifest.codec_ != "none");
     auto read_func = [&reader](uint64_t offset, uint64_t len, void* dest) {
         reader.Read(offset, len, dest);
     };
@@ -217,7 +222,7 @@ HGraph::parallel_deserialize_layout(DeserializeReader& reader,
             require_component_enabled(name, this->raw_vector_ != nullptr);
             return make_chunked_target(this->raw_vector_);
         }
-        // unreachable under the current pre-validation: parallel_deserialize_layout
+        // unreachable under the current pre-validation: parallel_deserialize_manifest
         // already rejects an unknown name or a non-chunkable component with Byte
         // granularity, and the caller only invokes this for Byte components, so
         // every name reaching here is handled by a branch above. Kept as
@@ -249,17 +254,17 @@ HGraph::parallel_deserialize_layout(DeserializeReader& reader,
     // check trips on the optional instead of on an empty std::function.
     // Read through require_target so that slip names the component instead of
     // surfacing as bad_function_call
-    std::vector<std::optional<ChunkedTarget>> targets(layout.components_.size());
+    std::vector<std::optional<ChunkedTarget>> targets(chunked_manifest.components_.size());
     // components consumed in place during pass 1 (io without the parallel
     // hooks, e.g. reader_io); they get no chunk tasks and no tail pass
-    std::vector<bool> consumed(layout.components_.size(), false);
-    for (size_t i = 0; i < layout.components_.size(); ++i) {
-        const auto& comp = layout.components_[i];
+    std::vector<bool> consumed(chunked_manifest.components_.size(), false);
+    for (size_t i = 0; i < chunked_manifest.components_.size(); ++i) {
+        const auto& comp = chunked_manifest.components_[i];
         if (comp.granularity != ComponentGranularity::Byte) {
             continue;
         }
         // the chunk list is already proven to cover the whole io extent by
-        // ChunkedLayout::Validate(), which runs before any extent is reserved
+        // ChunkedManifest::Validate(), which runs before any extent is reserved
         targets[i] = resolve_chunked_target(comp.name);
         ReadFuncStreamReader head_reader(
             read_func, comp.head_offset, comp.head_offset + comp.head_size);
@@ -303,20 +308,20 @@ HGraph::parallel_deserialize_layout(DeserializeReader& reader,
 
     // pass 2: one task per chunk / whole component
     size_t task_count = 0;
-    for (size_t i = 0; i < layout.components_.size(); ++i) {
-        const auto& comp = layout.components_[i];
+    for (size_t i = 0; i < chunked_manifest.components_.size(); ++i) {
+        const auto& comp = chunked_manifest.components_[i];
         task_count += comp.granularity == ComponentGranularity::Byte
                           ? (consumed[i] ? 0 : comp.chunks.size())
                           : 1;
     }
     {
         // every task below captures by reference into this frame: reader and
-        // pool are the caller's, targets / consumed / layout live until the
+        // pool are the caller's, targets / consumed / chunked_manifest live until the
         // closing brace. TaskBatch joins in Run() and again in its destructor,
         // so no task can outlive any of them.
         TaskBatch batch(pool, task_count);
-        for (size_t i = 0; i < layout.components_.size(); ++i) {
-            const auto& comp = layout.components_[i];
+        for (size_t i = 0; i < chunked_manifest.components_.size(); ++i) {
+            const auto& comp = chunked_manifest.components_[i];
             if (comp.granularity == ComponentGranularity::Byte) {
                 if (consumed[i]) {
                     continue;
@@ -325,7 +330,7 @@ HGraph::parallel_deserialize_layout(DeserializeReader& reader,
                 uint64_t logical_offset = 0;
                 for (const auto& chunk : comp.chunks) {
                     const auto logical =
-                        std::min(layout.chunk_size_, comp.io_size - logical_offset);
+                        std::min(chunked_manifest.chunk_size_, comp.io_size - logical_offset);
                     if (compressed) {
                         batch.Submit([&reader,
                                       &write_raw,
@@ -406,9 +411,9 @@ HGraph::parallel_deserialize_layout(DeserializeReader& reader,
     }
 
     // read the tails after all io data landed
-    for (size_t i = 0; i < layout.components_.size(); ++i) {
-        const auto& comp = layout.components_[i];
-        if (comp.granularity != ComponentGranularity::Byte || consumed[i]) {
+    for (size_t i = 0; i < chunked_manifest.components_.size(); ++i) {
+        const auto& comp = chunked_manifest.components_[i];
+        if (comp.granularity != ComponentGranularity::Byte or consumed[i]) {
             continue;
         }
         ReadFuncStreamReader tail_reader(
@@ -424,7 +429,7 @@ HGraph::parallel_deserialize_layout(DeserializeReader& reader,
 
 void
 HGraph::deserialize_seekable_whole_component(DeserializeReader& reader,
-                                             const ComponentLayout& comp,
+                                             const ComponentManifestEntry& comp,
                                              bool compressed) {
     // Whatever the source, the component gets a reader it can seek in and its
     // own cursor is not used as the consumption check: a component that seeks
@@ -434,7 +439,7 @@ HGraph::deserialize_seekable_whole_component(DeserializeReader& reader,
         // already random access. Read straight through it, no staging copy.
         auto frame_read = [&reader, base = comp.offset, size = comp.logical_size](
                               uint64_t offset, uint64_t len, void* dest) {
-            if (offset > size || len > size - offset) {
+            if (offset > size or len > size - offset) {
                 throw VsagException(ErrorType::INVALID_BINARY,
                                     "seekable component reader exceeds its frame");
             }
@@ -481,7 +486,7 @@ HGraph::deserialize_seekable_whole_component(DeserializeReader& reader,
     }
 
     auto payload_read = [&payload](uint64_t offset, uint64_t len, void* dest) {
-        if (offset > payload.size() || len > payload.size() - offset) {
+        if (offset > payload.size() or len > payload.size() - offset) {
             throw VsagException(ErrorType::INVALID_BINARY,
                                 "seekable component reader exceeds its frame");
         }
@@ -524,7 +529,7 @@ HGraph::deserialize_whole_component(const std::string& name, StreamReader& reade
     } else if (name == COMPONENT_MCI_CLIQUES) {
         require_enabled(this->mci_parameters_.enabled);
         // single-writer: each whole component is dispatched as exactly one task
-        // (see parallel_deserialize_layout), so this lazy shared_ptr assignment
+        // (see parallel_deserialize_manifest), so this lazy shared_ptr assignment
         // has no concurrent writer. Preserve that invariant if mci_cliques is
         // ever moved to chunked dispatch or duplicated across tasks.
         if (this->mci_cliques_ == nullptr) {
@@ -538,7 +543,7 @@ HGraph::deserialize_whole_component(const std::string& name, StreamReader& reade
         // conjugate graph, so there is no contention here
         std::unique_lock graph_lock(this->conjugate_graph_mutex_);
         auto result = this->conjugate_graph_->Deserialize(reader);
-        if (!result) {
+        if (not result) {
             throw VsagException(result.error().type, result.error().message);
         }
     } else {
@@ -610,10 +615,10 @@ HGraph::parallel_deserialize_probe(DeserializeReader& reader, ThreadPool& pool, 
     for (auto& route_graph : this->route_graphs_) {
         route_graph->Deserialize(body);
     }
-    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+    if (this->extra_info_size_ > 0 and this->extra_infos_ != nullptr) {
         this->extra_infos_->Deserialize(body);
     }
-    if (this->use_attribute_filter_ && this->attr_filter_index_ != nullptr) {
+    if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
         this->attr_filter_index_->Deserialize(body);
     }
     if (this->create_new_raw_vector_) {
@@ -642,7 +647,7 @@ HGraph::parallel_deserialize_probe(DeserializeReader& reader, ThreadPool& pool, 
         {
             std::unique_lock graph_lock(this->conjugate_graph_mutex_);
             auto result = this->conjugate_graph_->Deserialize(body);
-            if (!result) {
+            if (not result) {
                 throw VsagException(result.error().type, result.error().message);
             }
         }

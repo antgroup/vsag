@@ -40,8 +40,8 @@ enum class ComponentGranularity : uint8_t {
             // split at fixed byte boundaries (JSON tag: "chunked")
 };
 
-/// Layout of a single serialized component inside the body.
-struct ComponentLayout {
+/// Manifest entry for one serialized component inside the body.
+struct ComponentManifestEntry {
     std::string name;
     ComponentGranularity granularity{ComponentGranularity::Whole};
 
@@ -59,19 +59,19 @@ struct ComponentLayout {
     uint64_t tail_size{0};
 };
 
-/// In-memory form of the "chunked_layout" footer metadata key: the codec
-/// name, the logical chunk granularity and the per-component physical
-/// layout, recorded while writing the chunked format.
-class ChunkedLayout {
+/// In-memory manifest stored under the "chunked_layout" footer metadata key:
+/// the codec name, logical chunk granularity, and physical frame entries
+/// recorded while writing the chunked format.
+class ChunkedManifest {
 public:
     static constexpr int64_t VERSION = 1;
 
-    ChunkedLayout() = default;
+    ChunkedManifest() = default;
 
     [[nodiscard]] JsonType
     ToJson() const;
 
-    static ChunkedLayout
+    static ChunkedManifest
     FromJson(const JsonType& json);
 
     /// FromJson only checks the JSON shape; Validate enforces the semantic
@@ -83,13 +83,13 @@ public:
     void
     Validate(uint64_t body_end) const;
 
-    [[nodiscard]] const ComponentLayout*
+    [[nodiscard]] const ComponentManifestEntry*
     FindComponent(const std::string& name) const;
 
 public:
     std::string codec_{"none"};
     uint64_t chunk_size_{0};
-    std::vector<ComponentLayout> components_;
+    std::vector<ComponentManifestEntry> components_;
 };
 
 }  // namespace vsag

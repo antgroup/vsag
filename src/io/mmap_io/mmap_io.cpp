@@ -242,7 +242,7 @@ MMapIO::ResizeForOverwriteImpl(uint64_t size) {
         const int ret = IOSyscall::Fallocate(this->fd_, size);
         // a filesystem without fallocate support reports EOPNOTSUPP; losing the
         // guarantee above is acceptable, so carry on with the plain grow
-        if (ret != 0 && ret != ENOTSUP && ret != EOPNOTSUPP) {
+        if (ret != 0 and ret != ENOTSUP and ret != EOPNOTSUPP) {
             throw VsagException(
                 ErrorType::INTERNAL_ERROR,
                 fmt::format("fallocate(size={}) failed (errno={}): {}",

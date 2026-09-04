@@ -28,12 +28,12 @@ ChunkedStreamWriter::ChunkedStreamWriter(vsag::SerializeWriter& writer, uint64_t
         throw VsagException(ErrorType::INVALID_ARGUMENT, "chunk_size must be positive");
     }
     // the codec name is persisted verbatim into the footer and read back by
-    // ChunkedLayout::FromJson, so a SerializeWriter must return a stable
+    // ChunkedManifest::FromJson, so a SerializeWriter must return a stable
     // string that the matching reader recognizes. Any name other than "none"
     // marks every frame as compressed, which makes the body loadable only
     // through ParallelDeserialize.
-    layout_.codec_ = writer.GetCompressorName();
-    layout_.chunk_size_ = chunk_size;
+    manifest_.codec_ = writer.GetCompressorName();
+    manifest_.chunk_size_ = chunk_size;
 }
 
 void
@@ -45,7 +45,7 @@ ChunkedStreamWriter::write_plain(const char* data, uint64_t size) {
 void
 ChunkedStreamWriter::write_framed(const char* data, uint64_t size) {
     writer_.Write(data, size);
-    if (!compress_) {
+    if (not compress_) {
         // plain writer: frame bytes hit the sink verbatim right away
         physical_cursor_ += size;
     }
@@ -56,7 +56,7 @@ void
 ChunkedStreamWriter::open_frame() {
     frame_start_ = physical_cursor_;
     frame_logical_ = 0;
-    frame_remaining_ = std::min(layout_.chunk_size_, io_remaining_);
+    frame_remaining_ = std::min(manifest_.chunk_size_, io_remaining_);
     if (compress_) {
         writer_.BeginCompressedFrame();
     }
@@ -112,7 +112,7 @@ ChunkedStreamWriter::Write(const char* data, uint64_t size) {
                     cur_->tail_offset = physical_cursor_;
                     break;
                 }
-                if (!frame_open_) {
+                if (not frame_open_) {
                     open_frame();
                 }
                 auto take = std::min(size, frame_remaining_);
@@ -137,8 +137,8 @@ ChunkedStreamWriter::BeginChunkedComponent(const std::string& name,
     if (stage_ != Stage::OUTSIDE) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "previous component is not finished");
     }
-    layout_.components_.emplace_back();
-    cur_ = &layout_.components_.back();
+    manifest_.components_.emplace_back();
+    cur_ = &manifest_.components_.back();
     cur_->name = name;
     cur_->granularity = ComponentGranularity::Byte;
     cur_->head_offset = physical_cursor_;
@@ -154,8 +154,8 @@ ChunkedStreamWriter::BeginWholeComponent(const std::string& name) {
     if (stage_ != Stage::OUTSIDE) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "previous component is not finished");
     }
-    layout_.components_.emplace_back();
-    cur_ = &layout_.components_.back();
+    manifest_.components_.emplace_back();
+    cur_ = &manifest_.components_.back();
     cur_->name = name;
     cur_->granularity = ComponentGranularity::Whole;
     cur_->offset = physical_cursor_;
@@ -179,14 +179,14 @@ ChunkedStreamWriter::EndComponent() {
     } else {
         // an io_size == 0 component may still sit in IO_DATA here; the
         // TAIL transition then never ran inside Write
-        if (stage_ == Stage::IO_DATA && io_remaining_ == 0 && !frame_open_) {
+        if (stage_ == Stage::IO_DATA and io_remaining_ == 0 and not frame_open_) {
             stage_ = Stage::TAIL;
             cur_->tail_offset = physical_cursor_;
         }
         // cursor check: the declared head/io extents must be fully written,
         // otherwise the precomputed boundaries diverged from the actual
         // byte stream (e.g. upstream added a field)
-        if (stage_ != Stage::TAIL || head_remaining_ != 0 || io_remaining_ != 0) {
+        if (stage_ != Stage::TAIL or head_remaining_ != 0 or io_remaining_ != 0) {
             throw VsagException(
                 ErrorType::INTERNAL_ERROR,
                 fmt::format("component {} byte stream diverged from the declared layout "

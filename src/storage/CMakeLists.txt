@@ -15,7 +15,7 @@
 
 
 set (STORAGE_SRC
-  chunked_layout.cpp
+  chunked_manifest.cpp
   chunked_stream_writer.cpp
   footer.cpp
   serialization.cpp

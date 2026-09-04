@@ -57,8 +57,8 @@
 
 namespace vsag {
 
-class ChunkedLayout;
-struct ComponentLayout;
+class ChunkedManifest;
+struct ComponentManifestEntry;
 class FlattenOptimizedBuildInterface;
 class HGraphOptimizedBuildSession;
 class IteratorFilterContext;
@@ -236,9 +236,6 @@ public:
 
     void
     Serialize(SerializeWriter& writer, uint64_t chunk_size) const override;
-
-    void
-    ParallelDeserialize(DeserializeReader& reader, ThreadPool& pool) override;
 
     void
     ParallelDeserialize(DeserializeReader& reader) override;
@@ -613,11 +610,17 @@ private:
     void
     finish_deserialize();
 
-    /// build the in-memory state after every component has been read
-    /// (capacity, mutexes, visited-list pool, dedup validation); shared by
-    /// Deserialize(StreamReader&) and the parallel deserialization paths
+    /// validate and publish the logical state derived from the code-slot map
     void
-    finalize_deserialized_state(uint64_t serialized_total_count);
+    validate_and_publish_dedup_state(uint64_t serialized_total_count);
+
+    /// publish the physical code capacity after the code components are ready
+    void
+    publish_physical_code_capacity();
+
+    /// initialize runtime capacity shared by search and subsequent mutations
+    void
+    initialize_deserialized_runtime_state();
 
     /// restore basic info and duplicate-format flags from the footer
     /// metadata and return the serialized total count; shared by
@@ -631,13 +634,13 @@ private:
     /// even though the component's own cursor does not reach the end.
     void
     deserialize_seekable_whole_component(DeserializeReader& reader,
-                                         const ComponentLayout& comp,
+                                         const ComponentManifestEntry& comp,
                                          bool compressed);
 
-    /// dispatch a whole component of the chunked layout to its sequential
+    /// dispatch a whole component of the chunked manifest to its sequential
     /// Deserialize by name.
     ///
-    /// Not internally synchronized. The layout path dispatches each whole
+    /// Not internally synchronized. The manifest path dispatches each whole
     /// component as one pool task, so distinct components run concurrently:
     /// every branch must touch only index members that no other branch
     /// touches. Adding a branch that reads or writes shared state (a counter,
@@ -646,13 +649,13 @@ private:
     void
     deserialize_whole_component(const std::string& name, StreamReader& reader);
 
-    /// parallel body load driven by the layout recorded in the footer
+    /// parallel body load driven by the manifest recorded in the footer
     void
-    parallel_deserialize_layout(DeserializeReader& reader,
-                                ThreadPool& pool,
-                                const ChunkedLayout& layout);
+    parallel_deserialize_manifest(DeserializeReader& reader,
+                                  ThreadPool& pool,
+                                  const ChunkedManifest& chunked_manifest);
 
-    /// parallel load of an uncompressed body without a recorded layout:
+    /// parallel load of an uncompressed body without a recorded manifest:
     /// probe the component extents sequentially, then fill io data in parallel
     void
     parallel_deserialize_probe(DeserializeReader& reader, ThreadPool& pool, uint64_t body_end);

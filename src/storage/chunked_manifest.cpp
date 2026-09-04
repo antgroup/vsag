@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "chunked_layout.h"
+#include "chunked_manifest.h"
 
 #include <fmt/format.h>
 
@@ -25,7 +25,7 @@
 namespace vsag {
 
 JsonType
-ChunkedLayout::ToJson() const {
+ChunkedManifest::ToJson() const {
     nlohmann::json json;
     json["version"] = VERSION;
     json["codec"] = codec_;
@@ -62,21 +62,21 @@ ChunkedLayout::ToJson() const {
     return result;
 }
 
-ChunkedLayout
-ChunkedLayout::FromJson(const JsonType& json_wrapper) {
+ChunkedManifest
+ChunkedManifest::FromJson(const JsonType& json_wrapper) {
     const auto& json = *json_wrapper.GetInnerJson();
-    if (!json.contains("version") || !json["version"].is_number_integer() ||
+    if (not json.contains("version") or not json["version"].is_number_integer() or
         json["version"].get<int64_t>() != VERSION) {
         throw VsagException(ErrorType::INVALID_BINARY, "unsupported chunked_layout version");
     }
     // a missing key or a type mismatch below throws a raw json exception;
     // map it to the same error class as any other malformed binary input
     try {
-        ChunkedLayout layout;
-        layout.codec_ = json.at("codec").get<std::string>();
-        layout.chunk_size_ = json.at("chunk_size").get<uint64_t>();
+        ChunkedManifest manifest;
+        manifest.codec_ = json.at("codec").get<std::string>();
+        manifest.chunk_size_ = json.at("chunk_size").get<uint64_t>();
         for (const auto& comp_json : json.at("components")) {
-            ComponentLayout comp;
+            ComponentManifestEntry comp;
             comp.name = comp_json.at("name").get<std::string>();
             const auto type = comp_json.at("type").get<std::string>();
             if (type == "chunked") {
@@ -103,9 +103,9 @@ ChunkedLayout::FromJson(const JsonType& json_wrapper) {
                 throw VsagException(ErrorType::INVALID_BINARY,
                                     "unsupported component type: " + type);
             }
-            layout.components_.push_back(std::move(comp));
+            manifest.components_.push_back(std::move(comp));
         }
-        return layout;
+        return manifest;
     } catch (const VsagException&) {
         throw;
     } catch (const std::exception& e) {
@@ -115,7 +115,7 @@ ChunkedLayout::FromJson(const JsonType& json_wrapper) {
 }
 
 void
-ChunkedLayout::Validate(uint64_t body_end) const {
+ChunkedManifest::Validate(uint64_t body_end) const {
     // collected non-empty physical extents; checked for mutual overlap below
     std::vector<std::pair<uint64_t, uint64_t>> frames;
     frames.reserve(components_.size());
@@ -134,7 +134,7 @@ ChunkedLayout::Validate(uint64_t body_end) const {
         }
         // offset + size must not overflow and must stay within the body;
         // check size first so body_end - size cannot underflow
-        if (size > body_end || offset > body_end - size) {
+        if (size > body_end or offset > body_end - size) {
             throw VsagException(ErrorType::INVALID_BINARY,
                                 fmt::format("chunked layout {} extent [{}, {}+{}) exceeds body "
                                             "end {}",
@@ -151,7 +151,7 @@ ChunkedLayout::Validate(uint64_t body_end) const {
     std::unordered_set<std::string> seen_names;
 
     for (const auto& comp : components_) {
-        if (!seen_names.insert(comp.name).second) {
+        if (not seen_names.insert(comp.name).second) {
             throw VsagException(
                 ErrorType::INVALID_BINARY,
                 fmt::format("chunked layout has duplicate component {}", comp.name));
@@ -160,7 +160,7 @@ ChunkedLayout::Validate(uint64_t body_end) const {
         if (comp.granularity == ComponentGranularity::Whole) {
             add_frame(
                 comp.offset, comp.compressed_size, fmt::format("component {} frame", comp.name));
-            if (uncompressed && comp.compressed_size != comp.logical_size) {
+            if (uncompressed and comp.compressed_size != comp.logical_size) {
                 throw VsagException(
                     ErrorType::INVALID_BINARY,
                     fmt::format("uncompressed component {} physical size {} != logical size {}",
@@ -177,7 +177,7 @@ ChunkedLayout::Validate(uint64_t body_end) const {
             // must stay ahead of the round-up guard below: it is what keeps a
             // zeroed chunk_size from carrying an arbitrary io_size past the
             // overflow check, which only runs when chunk_size_ > 0
-            if (comp.io_size > 0 && chunk_size_ == 0) {
+            if (comp.io_size > 0 and chunk_size_ == 0) {
                 throw VsagException(ErrorType::INVALID_BINARY,
                                     fmt::format("component {} has io size {} but zero chunk size",
                                                 comp.name,
@@ -185,7 +185,7 @@ ChunkedLayout::Validate(uint64_t body_end) const {
             }
             // the round-up below would wrap for an io size close to the
             // unsigned maximum, which would yield a bogus expected count
-            if (chunk_size_ > 0 &&
+            if (chunk_size_ > 0 and
                 comp.io_size > std::numeric_limits<uint64_t>::max() - (chunk_size_ - 1)) {
                 throw VsagException(
                     ErrorType::INVALID_BINARY,
@@ -236,7 +236,7 @@ ChunkedLayout::Validate(uint64_t body_end) const {
         if (frames[i].first == expected_start) {
             continue;
         }
-        if (i > 0 && frames[i].first < frames[i - 1].second) {
+        if (i > 0 and frames[i].first < frames[i - 1].second) {
             throw VsagException(
                 ErrorType::INVALID_BINARY,
                 fmt::format("chunked layout has overlapping frames: [{}, {}) and [{}, {})",
@@ -264,8 +264,8 @@ ChunkedLayout::Validate(uint64_t body_end) const {
     }
 }
 
-const ComponentLayout*
-ChunkedLayout::FindComponent(const std::string& name) const {
+const ComponentManifestEntry*
+ChunkedManifest::FindComponent(const std::string& name) const {
     for (const auto& comp : components_) {
         if (comp.name == name) {
             return &comp;
