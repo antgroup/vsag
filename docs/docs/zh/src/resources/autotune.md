@@ -182,6 +182,31 @@ if (result.has_value() && result->status == vsag::autotune::TuneStatus::SUCCESS)
 返回结果和 ground truth 前 `top_k` 个 ID 的交集大小除以 `top_k`，最终指标是所有 query
 的平均值。recall 既不是约束也不是目标时，ground truth 可省略。
 
+typed HGraph 请求可以为每条 query 提供一个 `FilterPtr`，或者一个表示排除集合的
+`BitsetPtr`，以复现带过滤的 workload：
+
+```cpp
+request.workload = {queries, filtered_ground_truth, 10, 48};
+request.workload.query_filters = query_filters;
+// 或：request.workload.query_invalid_bitsets = query_invalid_bitsets;
+```
+
+两种 vector 互斥。vector 为空表示未使用该种过滤方式；否则数量必须与 query 数量相同，
+其中空指针表示该 query 不做过滤。`query_invalid_bitsets` 中置位的 bit 表示排除对应的索引
+外部 ID。调优期间不能修改 bitset，并且其中应只包含待评测索引中的 ID。
+
+每个非空 `FilterPtr` 会跨候选重复使用，并且可能被并发调用，因此必须确定、可重复使用且
+线程安全。`ValidRatio()` 必须能代表该 query 的实际选择率，因为 HGraph 会用它选择搜索路径。
+本版本使用 `CheckValid(int64_t)` 并拒绝 `use_extra_info_filter=true`；`CheckValid` 收到的 ID
+是索引的外部 label。
+
+每条 query 必须至少允许 `top_k` 个 ID 通过，ground truth 必须使用对应 filter 或 bitset
+生成；推荐参数应继续用于具有同类代表性过滤分布的 workload。`TuneIndex` 同样支持这种
+HGraph workload；存在任一种过滤输入且省略 `index_spaces` 时只生成 HGraph 候选。filter 和
+bitset 都不会保存到索引中，调用方在最终的每次 `KnnSearch` 中仍需传入对应值。调用方提供的
+过滤输入只支持 typed API，不会写入 CLI 请求或报告。本版本不支持 IVF 和 Pyramid 的
+filtered tuning。
+
 CLI 的 `index_path` 仍是离线适配：它先使用具体 create 参数创建并反序列化 Index，再进入
 同一条 search-only 流程。
 
@@ -192,14 +217,17 @@ Pyramid 原生的默认/root 搜索。typed 请求直接从 `workload.queries->G
 发起一次 typed AutoTune 请求，并提供与该 path 对应的 ground truth。V1 不把多个 path 的
 推荐聚合成一条结果。
 
-完整示例见
-[`examples/cpp/327_feature_autotune_existing_index.cpp`][existing-index-example]。
+`FilterPtr` 完整示例见
+[`examples/cpp/327_feature_autotune_existing_index.cpp`][existing-index-example]；直接传入每条
+query 的排除 bitset 见
+[`examples/cpp/330_feature_autotune_existing_index_bitset.cpp`][bitset-example]。
 Pyramid path 调优示例见
 [`examples/cpp/328_feature_autotune_existing_pyramid.cpp`][pyramid-example]。
 它对同一个 Pyramid 索引中的 512-vector 和 4096-vector 叶子子图使用相同 recall 目标分别
 调优，用于展示不同 path 可能需要不同的 `ef_search`。
 
 [existing-index-example]: https://github.com/antgroup/vsag/blob/main/examples/cpp/327_feature_autotune_existing_index.cpp
+[bitset-example]: https://github.com/antgroup/vsag/blob/main/examples/cpp/330_feature_autotune_existing_index_bitset.cpp
 [pyramid-example]: https://github.com/antgroup/vsag/blob/main/examples/cpp/328_feature_autotune_existing_pyramid.cpp
 
 ## 指标
@@ -245,5 +273,5 @@ typed `TuneIndex` 和 `TuneSearch` 绝不会写报告文件，而是通过返回
 ## V1 边界
 
 V1 评测一个 KNN workload；除已支持的 HGraph `ef_search` 自适应搜索外，其他候选仍完整遍历。
-它暂不支持过滤或范围查询 workload、query sampling、跨请求 build cache，以及基于模型的
-候选生成。
+typed API 支持 HGraph 的逐 query ID filter；CLI 和其他索引类型暂不支持 filtered workload。
+V1 仍不支持范围查询 workload、query sampling、跨请求 build cache，以及基于模型的候选生成。

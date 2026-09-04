@@ -419,6 +419,7 @@ make_context(eval::EvalDatasetPtr dataset,
     request.base_count = base_count;
     request.query_count = static_cast<uint64_t>(request.dataset->GetNumberOfQuery());
     request.ground_truth_k = request.dataset->GetGroundTruthK();
+    request.has_query_filters = request.dataset->HasQueryFilters();
     require(request.top_k > 0, "request.workload.top_k must be positive");
     require(request.top_k <= static_cast<uint64_t>(std::numeric_limits<int>::max()),
             "request.workload.top_k is too large");
@@ -472,6 +473,10 @@ make_context(eval::EvalDatasetPtr dataset,
           {"keep_intermediate", request.keep_intermediate},
           {"max_trials", request.max_trials}}},
         {"output", {{"include_raw_evaluation", request.include_raw_eval}}}};
+    if (request.has_query_filters) {
+        request.effective_request["workload"]["filtered_query_count"] =
+            request.dataset->GetFilteredQueryCount();
+    }
     for (const auto& [name, value] : request.constraints) {
         request.effective_request["constraints"][name] = value;
     }
@@ -524,8 +529,12 @@ ParseRequest(const IndexRequest& input) {
     const auto metric = normalize(input.metric_type);
     require(metric == "l2" || metric == "ip" || metric == "cosine",
             "request.metric_type must be l2, ip, or cosine");
-    auto dataset = eval::EvalDataset::FromDatasets(
-        input.base, input.workload.queries, input.workload.ground_truth, metric);
+    auto dataset = eval::EvalDataset::FromDatasets(input.base,
+                                                   input.workload.queries,
+                                                   input.workload.ground_truth,
+                                                   metric,
+                                                   input.workload.query_filters,
+                                                   input.workload.query_invalid_bitsets);
     IndexTuningRequest request;
     request.context = make_context(std::move(dataset),
                                    static_cast<uint64_t>(input.base->GetNumElements()),
@@ -536,7 +545,9 @@ ParseRequest(const IndexRequest& input) {
                                    input.config,
                                    false);
     if (input.index_spaces.empty()) {
-        request.indexes = {{"hgraph"}, {"ivf"}};
+        request.indexes = request.context.has_query_filters
+                              ? std::vector<IndexInput>{{"hgraph"}}
+                              : std::vector<IndexInput>{{"hgraph"}, {"ivf"}};
     } else {
         for (uint64_t i = 0; i < input.index_spaces.size(); ++i) {
             request.indexes.emplace_back(parse_index_space(input.index_spaces[i], i, false));
@@ -544,6 +555,8 @@ ParseRequest(const IndexRequest& input) {
     }
     const auto dim = static_cast<uint64_t>(request.context.dataset->GetDim());
     for (auto& index : request.indexes) {
+        require(not request.context.has_query_filters || index.name == "hgraph",
+                "filtered workloads currently support only hgraph");
         merge_dataset_field(index.create_params, "dim", dim, index.name);
         merge_dataset_field(index.create_params, "dtype", vsag::DATATYPE_FLOAT32, index.name);
         merge_dataset_field(index.create_params, "metric_type", metric, index.name);
@@ -560,8 +573,13 @@ ParseRequest(const SearchRequest& input) {
     require(input.index != nullptr, "request.index is required");
     const auto element_count = input.index->GetNumElements();
     require(element_count > 0, "request.index must not be empty");
-    auto dataset =
-        eval::EvalDataset::FromSearchDatasets(input.workload.queries, input.workload.ground_truth);
+    const auto concrete_index_name = index_name(input.index);
+    auto dataset = eval::EvalDataset::FromSearchDatasets(input.workload.queries,
+                                                         input.workload.ground_truth,
+                                                         input.workload.query_filters,
+                                                         input.workload.query_invalid_bitsets);
+    require(not dataset->HasQueryFilters() || concrete_index_name == "hgraph",
+            "filtered workloads currently support only hgraph");
     SearchTuningRequest request;
     request.context = make_context(std::move(dataset),
                                    static_cast<uint64_t>(element_count),
@@ -572,7 +590,7 @@ ParseRequest(const SearchRequest& input) {
                                    input.config,
                                    true);
     IndexSpace space;
-    space.name = index_name(input.index);
+    space.name = concrete_index_name;
     space.search_parameter_space = input.parameter_space;
     request.index_input = parse_index_space(space, 0, true);
     request.index = input.index;

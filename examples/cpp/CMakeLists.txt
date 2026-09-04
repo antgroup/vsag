@@ -166,6 +166,10 @@ if (TARGET vsag::autotune)
     add_executable (328_feature_autotune_existing_pyramid
         328_feature_autotune_existing_pyramid.cpp)
     target_link_libraries (328_feature_autotune_existing_pyramid vsag::autotune)
+
+    add_executable (330_feature_autotune_existing_index_bitset
+        330_feature_autotune_existing_index_bitset.cpp)
+    target_link_libraries (330_feature_autotune_existing_index_bitset vsag::autotune)
 endif ()
 
 add_executable(329_feature_ivf_precise_bucket 329_feature_ivf_precise_bucket.cpp)

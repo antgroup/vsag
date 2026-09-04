@@ -26,6 +26,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <string>
 #include <thread>
 #include <utility>
@@ -307,6 +308,67 @@ struct MemoryFixture {
     vsag::DatasetPtr queries;
     vsag::DatasetPtr ground_truth;
 };
+
+class CountingAllowListFilter : public vsag::Filter {
+public:
+    CountingAllowListFilter(std::vector<int64_t> valid_ids, float valid_ratio)
+        : valid_ids_(std::move(valid_ids)), valid_ratio_(valid_ratio) {
+    }
+
+    bool
+    CheckValid(int64_t id) const override {
+        checks_.fetch_add(1, std::memory_order_relaxed);
+        return std::find(valid_ids_.begin(), valid_ids_.end(), id) != valid_ids_.end();
+    }
+
+    float
+    ValidRatio() const override {
+        return valid_ratio_;
+    }
+
+    uint64_t
+    Checks() const {
+        return checks_.load(std::memory_order_relaxed);
+    }
+
+private:
+    std::vector<int64_t> valid_ids_;
+    float valid_ratio_;
+    mutable std::atomic<uint64_t> checks_{0};
+};
+
+std::vector<std::shared_ptr<CountingAllowListFilter>>
+make_query_filters(const MemoryFixture& fixture, uint64_t first_rank, uint64_t count) {
+    std::vector<std::shared_ptr<CountingAllowListFilter>> filters;
+    filters.reserve(MemoryFixture::QUERY_COUNT);
+    for (int64_t query = 0; query < MemoryFixture::QUERY_COUNT; ++query) {
+        const auto begin = fixture.neighbors.begin() + query * MemoryFixture::GROUND_TRUTH_K +
+                           static_cast<int64_t>(first_rank);
+        filters.emplace_back(std::make_shared<CountingAllowListFilter>(
+            std::vector<int64_t>(begin, begin + static_cast<int64_t>(count)),
+            static_cast<float>(count) / static_cast<float>(MemoryFixture::BASE_COUNT)));
+    }
+    return filters;
+}
+
+std::vector<vsag::BitsetPtr>
+make_query_invalid_bitsets(const MemoryFixture& fixture, uint64_t first_rank, uint64_t count) {
+    std::vector<vsag::BitsetPtr> bitsets;
+    bitsets.reserve(MemoryFixture::QUERY_COUNT);
+    for (int64_t query = 0; query < MemoryFixture::QUERY_COUNT; ++query) {
+        auto invalid = vsag::Bitset::Make();
+        for (const auto id : fixture.base_ids) {
+            invalid->Set(id);
+        }
+        const auto begin = fixture.neighbors.begin() + query * MemoryFixture::GROUND_TRUTH_K +
+                           static_cast<int64_t>(first_rank);
+        for (uint64_t i = 0; i < count; ++i) {
+            invalid->Set(begin[static_cast<int64_t>(i)], false);
+        }
+        bitsets.emplace_back(std::move(invalid));
+    }
+    return bitsets;
+}
 
 }  // namespace
 
@@ -885,6 +947,122 @@ TEST_CASE("AutoTune searches an in-memory existing index") {
         Catch::Matchers::ContainsSubstring("search_parameter_space.ivf is unsupported"));
 }
 
+TEST_CASE("AutoTune evaluates per-query filters and bitsets for HGraph") {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kOFF);
+    ScopedBlockSizeLimit block_size_limit(256UL * 1024);
+    ScopedPath search_workspace(temp_path("autotune-filtered-search-workspace"));
+    ScopedPath index_workspace(temp_path("autotune-filtered-index-workspace"));
+    MemoryFixture fixture;
+    constexpr uint64_t TOP_K = 3;
+    constexpr uint64_t FIRST_FILTERED_RANK = 3;
+    std::vector<int64_t> filtered_ground_truth_ids;
+    filtered_ground_truth_ids.reserve(MemoryFixture::QUERY_COUNT * TOP_K);
+    for (int64_t query = 0; query < MemoryFixture::QUERY_COUNT; ++query) {
+        const auto begin =
+            fixture.neighbors.begin() + query * MemoryFixture::GROUND_TRUTH_K + FIRST_FILTERED_RANK;
+        filtered_ground_truth_ids.insert(
+            filtered_ground_truth_ids.end(), begin, begin + static_cast<int64_t>(TOP_K));
+    }
+    auto filtered_ground_truth = vsag::Dataset::Make()
+                                     ->NumElements(MemoryFixture::QUERY_COUNT)
+                                     ->Dim(TOP_K)
+                                     ->Ids(filtered_ground_truth_ids.data())
+                                     ->Owner(false);
+    auto filters = make_query_filters(fixture, FIRST_FILTERED_RANK, TOP_K);
+    std::vector<vsag::FilterPtr> query_filters(filters.begin(), filters.end());
+
+    const std::string create_params =
+        R"({"dim":8,"dtype":"float32","metric_type":"l2","index_param":{)"
+        R"("base_quantization_type":"fp32","max_degree":8,"ef_construction":40,)"
+        R"("build_thread_count":2}})";
+    auto created = vsag::Factory::CreateIndex("hgraph", create_params);
+    REQUIRE(created.has_value());
+    REQUIRE(created.value()->Build(fixture.base).has_value());
+
+    vsag::autotune::SearchRequest search_request;
+    search_request.index = created.value();
+    search_request.workload = {fixture.queries, filtered_ground_truth, TOP_K, 2};
+    search_request.workload.query_filters = query_filters;
+    search_request.parameter_space = R"({"hgraph":{"ef_search":8,"brute_force_threshold":1.0}})";
+    search_request.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 1.0}};
+    search_request.objective = vsag::autotune::Metric::LATENCY_AVG_MS;
+    search_request.config.workspace_path = search_workspace.Get();
+    search_request.config.max_trials = 1;
+
+    const auto search_result = vsag::autotune::TuneSearch(search_request);
+    REQUIRE(search_result.has_value());
+    REQUIRE(search_result->status == vsag::autotune::TuneStatus::SUCCESS);
+    REQUIRE(search_result->metrics["recall_at_k"] == 1.0);
+    REQUIRE(search_result->report["request"]["workload"]["filtered_query_count"] ==
+            MemoryFixture::QUERY_COUNT);
+    for (const auto& filter : filters) {
+        REQUIRE(filter->Checks() > TOP_K);
+    }
+
+    const auto query_invalid_bitsets =
+        make_query_invalid_bitsets(fixture, FIRST_FILTERED_RANK, TOP_K);
+    search_request.workload.query_filters.clear();
+    search_request.workload.query_invalid_bitsets = query_invalid_bitsets;
+    const auto bitset_search_result = vsag::autotune::TuneSearch(search_request);
+    REQUIRE(bitset_search_result.has_value());
+    REQUIRE(bitset_search_result->status == vsag::autotune::TuneStatus::SUCCESS);
+    REQUIRE(bitset_search_result->metrics["recall_at_k"] == 1.0);
+    REQUIRE(bitset_search_result->report["request"]["workload"]["filtered_query_count"] ==
+            MemoryFixture::QUERY_COUNT);
+
+    auto extra_info_request = search_request;
+    extra_info_request.parameter_space =
+        R"({"hgraph":{"ef_search":8,"use_extra_info_filter":true}})";
+    const auto extra_info_result = vsag::autotune::TuneSearch(extra_info_request);
+    REQUIRE_FALSE(extra_info_result.has_value());
+    REQUIRE(extra_info_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(extra_info_result.error().message ==
+            "filtered workloads currently support only ID filters; "
+            "hgraph.use_extra_info_filter must be false");
+
+    auto index_request = fixture.Request(index_workspace.Get());
+    index_request.workload.ground_truth = filtered_ground_truth;
+    index_request.workload.query_invalid_bitsets = query_invalid_bitsets;
+    index_request.index_spaces[0].create_parameter_space =
+        R"({"index_param":{"base_quantization_type":"fp32","max_degree":8,)"
+        R"("ef_construction":40,"build_thread_count":2}})";
+    index_request.index_spaces[0].search_parameter_space = search_request.parameter_space;
+    index_request.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 1.0},
+                                 {vsag::autotune::Metric::BUILD_SECONDS, 1000.0}};
+    index_request.config.max_trials = 1;
+
+    const auto index_result = vsag::autotune::TuneIndex(index_request);
+    REQUIRE(index_result.has_value());
+    REQUIRE(index_result->status == vsag::autotune::TuneStatus::SUCCESS);
+    REQUIRE(index_result->metrics["recall_at_k"] == 1.0);
+    REQUIRE(index_result->report["request"]["workload"]["filtered_query_count"] ==
+            MemoryFixture::QUERY_COUNT);
+
+    auto default_spaces = index_request;
+    default_spaces.index_spaces.clear();
+    const auto parsed = vsag::autotune::internal::ParseRequest(default_spaces);
+    REQUIRE(parsed.indexes.size() == 1);
+    REQUIRE(parsed.indexes[0].name == "hgraph");
+
+    default_spaces.index_spaces = {{"ivf", "{}", "{}"}};
+    REQUIRE_THROWS_WITH(vsag::autotune::internal::ParseRequest(default_spaces),
+                        "filtered workloads currently support only hgraph");
+
+    search_request.workload.query_invalid_bitsets.pop_back();
+    REQUIRE_THROWS_WITH(vsag::autotune::internal::ParseRequest(search_request),
+                        "query_invalid_bitsets must contain exactly one entry per query");
+
+    search_request.workload.query_invalid_bitsets = query_invalid_bitsets;
+    search_request.workload.query_filters = query_filters;
+    REQUIRE_THROWS_WITH(vsag::autotune::internal::ParseRequest(search_request),
+                        "query_filters and query_invalid_bitsets are mutually exclusive");
+
+    search_request.workload.query_invalid_bitsets.clear();
+    search_request.workload.query_filters.pop_back();
+    REQUIRE_THROWS_WITH(vsag::autotune::internal::ParseRequest(search_request),
+                        "query_filters must contain exactly one entry per query");
+}
+
 TEST_CASE("AutoTune uses default candidates for an in-memory IVF index") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kOFF);
     ScopedBlockSizeLimit block_size_limit(256UL * 1024);
@@ -975,6 +1153,11 @@ TEST_CASE("AutoTune searches an existing Pyramid index for one path workload") {
     input.constraints.pop_back();
     input.workload.queries = fixture.queries;
     REQUIRE_NOTHROW(vsag::autotune::internal::ParseRequest(input));
+
+    auto filters = make_query_filters(fixture, 0, 3);
+    input.workload.query_filters.assign(filters.begin(), filters.end());
+    REQUIRE_THROWS_WITH(vsag::autotune::internal::ParseRequest(input),
+                        "filtered workloads currently support only hgraph");
 }
 
 TEST_CASE("AutoTune writes concrete trials for an adaptive ef_search range") {
