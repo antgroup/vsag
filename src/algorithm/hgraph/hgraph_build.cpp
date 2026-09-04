@@ -465,7 +465,7 @@ HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, cons
     std::vector<std::future<void>> futures;
     HGraphBuildTaskGuard future_guard(
         futures, context.use_parallel_add ? static_cast<uint64_t>(batch.rows.size()) : 0);
-    this->prepare_build_codes(data, batch.rows);
+    const bool persistent_codes_prepared = this->prepare_build_codes(data, batch.rows, context);
 
     const auto* extra_infos = data->GetExtraInfos();
     const auto* attr_sets = data->GetAttributeSets();
@@ -480,7 +480,7 @@ HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, cons
         if (attrs != nullptr and this->use_attribute_filter_) {
             this->attr_filter_index_->Insert(*attrs, row.inner_id);
         }
-        this->insert_one_logical_point(vector_data, row, context);
+        this->insert_one_logical_point(vector_data, row, context, persistent_codes_prepared);
     };
 
     for (const auto& row : batch.rows) {
@@ -547,10 +547,15 @@ HGraph::insert_persistent_codes_to_slot(const void* data, CodeSlotIdType code_sl
 // the probe result by binding deduplicated storage, updating duplicate tracking, or inserting a
 // unique point into the graph.
 bool
-HGraph::insert_one_logical_point(const void* data, const AddRow& row, const AddContext& context) {
+HGraph::insert_one_logical_point(const void* data,
+                                 const AddRow& row,
+                                 const AddContext& context,
+                                 bool persistent_codes_prepared) {
     const auto inner_id = row.inner_id;
     const auto level = row.level;
-    this->prepare_codes_before_probe_if_needed(data, inner_id, context);
+    if (not persistent_codes_prepared) {
+        this->prepare_codes_before_probe_if_needed(data, inner_id, context);
+    }
 
     auto make_search_param = [&]() {
         InnerSearchParam param;

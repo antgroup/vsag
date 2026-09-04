@@ -131,33 +131,69 @@ HGraph::need_temporary_sq8_build_data_for_add() const {
            this->basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ;
 }
 
-void
-HGraph::prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows) {
-    if (this->optimized_build_codes_ == nullptr) {
-        return;
-    }
-
-    if (this->thread_pool_ == nullptr) {
-        for (const auto& row : rows) {
-            this->insert_persistent_codes(get_data(data, row.input_idx), row.inner_id);
+bool
+HGraph::prepare_build_codes(const DatasetPtr& data,
+                            const Vector<AddRow>& rows,
+                            const AddContext& context) {
+    if (this->optimized_build_codes_ != nullptr) {
+        if (this->thread_pool_ == nullptr) {
+            for (const auto& row : rows) {
+                this->insert_persistent_codes(get_data(data, row.input_idx), row.inner_id);
+            }
+            return true;
         }
-        return;
+
+        std::vector<std::future<void>> futures;
+        HGraphBuildTaskGuard task_guard(futures, static_cast<uint64_t>(rows.size()));
+        // Parallel graph insertion may probe rows from the same batch. Make every scalar code
+        // visible before any of those probes starts.
+        for (const auto& row : rows) {
+            const auto inner_id = row.inner_id;
+            const auto input_idx = row.input_idx;
+            futures.emplace_back(
+                this->thread_pool_->GeneralEnqueue([this, data, inner_id, input_idx]() {
+                    this->insert_persistent_codes(get_data(data, input_idx), inner_id);
+                }));
+        }
+        wait_all_futures(futures);
+        futures.clear();
+        return true;
     }
 
+    const auto row_count = static_cast<uint64_t>(rows.size());
+    const bool use_parallel_encode =
+        context.first_empty_add && not context.use_dedup_storage &&
+        not this->support_force_remove() && this->thread_pool_ != nullptr &&
+        this->build_thread_count_ > 1 && row_count > 1 && this->has_precise_reorder() &&
+        not this->build_by_base_ && not this->create_new_raw_vector_ &&
+        this->basic_flatten_codes_->InMemory() && this->high_precise_codes_->InMemory() &&
+        this->basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ &&
+        this->high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_SQ8;
+    if (not use_parallel_encode) {
+        return false;
+    }
+
+    const uint64_t worker_count = std::min(this->build_thread_count_, row_count);
+    const uint64_t block_size = (row_count + worker_count - 1) / worker_count;
     std::vector<std::future<void>> futures;
-    HGraphBuildTaskGuard task_guard(futures, static_cast<uint64_t>(rows.size()));
-    // Parallel graph insertion may probe rows from the same batch. Make every scalar code
-    // visible before any of those probes starts.
-    for (const auto& row : rows) {
-        const auto inner_id = row.inner_id;
-        const auto input_idx = row.input_idx;
-        futures.emplace_back(
-            this->thread_pool_->GeneralEnqueue([this, data, inner_id, input_idx]() {
-                this->insert_persistent_codes(get_data(data, input_idx), inner_id);
-            }));
+    HGraphBuildTaskGuard task_guard(futures, worker_count);
+
+    // prepare_add_batch() already resized both layouts. The workers only encode disjoint IDs;
+    // these outer locks keep storage stable until every worker finishes.
+    std::shared_lock<std::shared_mutex> add_lock(this->add_mutex_);
+    std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+    for (uint64_t begin = 0; begin < row_count; begin += block_size) {
+        const uint64_t end = std::min(begin + block_size, row_count);
+        futures.emplace_back(this->thread_pool_->GeneralEnqueue([this, data, &rows, begin, end]() {
+            for (uint64_t offset = begin; offset < end; ++offset) {
+                const auto& row = rows[offset];
+                this->insert_persistent_codes_unlocked(get_data(data, row.input_idx), row.inner_id);
+            }
+        }));
     }
     wait_all_futures(futures);
     futures.clear();
+    return true;
 }
 
 bool
