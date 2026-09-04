@@ -24,6 +24,8 @@
 #include <unordered_set>
 
 #include "datacell/flatten_datacell_parameter.h"
+#include "datacell/hgraph_rabitq_fused_datacell.h"
+#include "datacell/rabitq_split_datacell.h"
 #include "dataset_impl.h"
 #include "hgraph.h"  // IWYU pragma: keep
 #include "hgraph_fast_build.h"
@@ -114,6 +116,7 @@ wait_all_futures(std::vector<std::future<void>>& futures) {
 
 void
 HGraph::Train(const DatasetPtr& base) {
+    this->check_fused_mutation_supported("Train");
     this->train_codes_with_dataset(this->sample_train_dataset(base));
 }
 
@@ -121,6 +124,10 @@ DatasetPtr
 HGraph::sample_train_dataset(const DatasetPtr& base) const {
     int64_t total_elements = base->GetNumElements();
     int64_t dim = base->GetDim();
+    if (rabitq_fused_datacell_ != nullptr) {
+        return vsag::sample_train_data(
+            base, total_elements, dim, train_sample_count_, allocator_, 0x52425131U);
+    }
     return vsag::sample_train_data(base, total_elements, dim, train_sample_count_, allocator_);
 }
 
@@ -128,6 +135,13 @@ void
 HGraph::train_codes_with_dataset(const DatasetPtr& train_data) {
     const auto* data_ptr = get_data(train_data);
     this->basic_flatten_codes_->Train(data_ptr, train_data->GetNumElements());
+    if (rabitq_fused_datacell_ != nullptr) {
+        CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
+        rabitq_split_codes_->TrainFusedCodec(static_cast<const float*>(data_ptr),
+                                             train_data->GetNumElements(),
+                                             K_FUSED_CLUSTER_COUNT);
+        rabitq_fused_datacell_->SetCodecModel(rabitq_split_codes_->ExportFusedCodec());
+    }
     if (has_precise_reorder()) {
         this->high_precise_codes_->Train(data_ptr, train_data->GetNumElements());
     }
@@ -140,12 +154,16 @@ HGraph::train_codes_with_dataset(const DatasetPtr& train_data) {
 std::vector<int64_t>
 HGraph::Build(const DatasetPtr& data) {
     CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        this->validate_add_data(data);
+    }
     this->build_cache_hit_rate_ = -1.0F;
     this->build_cache_hit_nodes_ = 0;
     this->build_cache_missed_nodes_ = 0;
     std::vector<int64_t> ret;
     const bool using_build_cache = this->has_loaded_cache();
     if (using_build_cache) {
+        this->check_fused_mutation_supported("Build with imported cache");
         if (this->using_dedup_storage()) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                 "HGraph deduplicate_storage does not support build_with_cache");
@@ -159,7 +177,7 @@ HGraph::Build(const DatasetPtr& data) {
         if (optimized_result.has_value()) {
             ret = std::move(optimized_result.value());
         } else if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
-            ret = this->Add(data);
+            ret = this->add_impl(data);
         } else {
             ret = this->build_by_odescent(data);
         }
@@ -202,8 +220,6 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
             ++new_ids_count;
         }
     }
-    this->resize(current_count + new_ids_count);
-    this->total_count_ += new_ids_count;
     Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
     auto need_sq8_build_data =
         need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
@@ -219,9 +235,13 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         temporary_sq8_build_data->Train(vectors, total);
     }
     bool defer_persistent_codes = temporary_sq8_build_data != nullptr;
-    if (not defer_persistent_codes) {
-        this->Train(data);
+    if (not defer_persistent_codes or this->rabitq_fused_datacell_ != nullptr) {
+        this->train_codes_with_dataset(this->sample_train_dataset(data));
     }
+    this->validate_fused_encoding_data(static_cast<const float*>(vectors),
+                                       static_cast<uint64_t>(total));
+    this->resize(current_count + new_ids_count);
+    this->total_count_ += new_ids_count;
     Vector<std::pair<InnerIdType, int64_t>> deferred_code_ids(allocator_);
     for (InnerIdType cur_size = 0; cur_size < valid_indices.size(); ++cur_size) {
         auto i = valid_indices[cur_size];
@@ -278,7 +298,9 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
     if (defer_persistent_codes) {
         build_data.reset();
         temporary_sq8_build_data.reset();
-        this->Train(data);
+        if (this->rabitq_fused_datacell_ == nullptr) {
+            this->train_codes_with_dataset(this->sample_train_dataset(data));
+        }
         for (const auto& [inner_id, local_idx] : deferred_code_ids) {
             this->insert_persistent_codes(get_data(data, local_idx), inner_id);
         }
@@ -288,6 +310,11 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
 
 std::vector<int64_t>
 HGraph::Add(const DatasetPtr& data) {
+    return this->add_impl(data);
+}
+
+std::vector<int64_t>
+HGraph::add_impl(const DatasetPtr& data) {
     std::unique_lock<std::mutex> mci_add_lock(this->mci_add_mutex_, std::defer_lock);
     if (this->mci_parameters_.enabled) {
         mci_add_lock.lock();
@@ -303,6 +330,8 @@ HGraph::Add(const DatasetPtr& data) {
 
     this->validate_add_data(data);
     auto context = this->prepare_add_context(data);
+    this->validate_fused_encoding_data(static_cast<const float*>(get_data(data)),
+                                       static_cast<uint64_t>(data->GetNumElements()));
     this->prepare_graph_read_codes(data, context);
     auto batch = this->prepare_add_batch(data);
     this->prepare_temporary_graph_read_codes(data, context, batch);
@@ -332,13 +361,50 @@ HGraph::Add(const DatasetPtr& data) {
 }
 
 void
+HGraph::validate_fused_vector_data(const float* data, uint64_t count) const {
+    if (this->rabitq_fused_datacell_ == nullptr) {
+        return;
+    }
+    CHECK_ARGUMENT(data != nullptr, "fused RaBitQ base vectors must not be null");
+    const auto dim = static_cast<uint64_t>(this->dim_);
+    for (uint64_t row = 0; row < count; ++row) {
+        for (uint64_t d = 0; d < dim; ++d, ++data) {
+            if (not IsFiniteRaBitQValue(*data)) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "fused RaBitQ base vectors must contain only finite values");
+            }
+        }
+    }
+}
+
+void
+HGraph::validate_fused_encoding_data(const float* data, uint64_t count) const {
+    if (this->rabitq_fused_datacell_ == nullptr or this->optimized_build_codes_ != nullptr) {
+        return;
+    }
+    CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
+    ByteBuffer one_bit(rabitq_split_codes_->OneBitCodeSize(), allocator_);
+    ByteBuffer supplement(rabitq_split_codes_->SupplementCodeSize(), allocator_);
+    const auto dim = static_cast<uint64_t>(this->dim_);
+    for (uint64_t row = 0; row < count; ++row) {
+        uint32_t cluster_id = 0;
+        CHECK_ARGUMENT(rabitq_split_codes_->EncodeFused(
+                           data + row * dim, one_bit.data, supplement.data, &cluster_id),
+                       "failed to encode fused RaBitQ node codes");
+    }
+}
+
+void
 HGraph::validate_add_data(const DatasetPtr& data) const {
     auto base_dim = data->GetDim();
     if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
         CHECK_ARGUMENT(base_dim == dim_,
                        fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
     }
-    CHECK_ARGUMENT(get_data(data) != nullptr, "base.float_vector is nullptr");
+    const auto* base_data = get_data(data);
+    CHECK_ARGUMENT(base_data != nullptr, "base.float_vector is nullptr");
+    this->validate_fused_vector_data(static_cast<const float*>(base_data),
+                                     static_cast<uint64_t>(data->GetNumElements()));
 }
 
 HGraph::AddContext
@@ -359,8 +425,14 @@ HGraph::prepare_add_context(const DatasetPtr& data) {
     {
         std::scoped_lock lock(this->add_mutex_);
         if (this->total_count_ == 0) {
-            context.train_data = this->sample_train_dataset(data);
-            this->train_codes_with_dataset(context.train_data);
+            const bool reuse_fused_codec = this->rabitq_fused_datacell_ != nullptr and
+                                           not this->rabitq_fused_datacell_->CodecModel().empty();
+            if (reuse_fused_codec) {
+                context.train_data = data;
+            } else {
+                context.train_data = this->sample_train_dataset(data);
+                this->train_codes_with_dataset(context.train_data);
+            }
         }
     }
     context.first_empty_add = context.train_data != nullptr;
@@ -524,12 +596,50 @@ HGraph::insert_persistent_codes(const void* data, InnerIdType inner_id) {
 void
 HGraph::insert_persistent_codes_unlocked(const void* data, InnerIdType inner_id) {
     this->basic_flatten_codes_->InsertVector(data, inner_id);
+    this->sync_fused_node_codes(inner_id, data);
     if (has_precise_reorder()) {
         this->high_precise_codes_->InsertVector(data, inner_id);
     }
     if (create_new_raw_vector_) {
         raw_vector_->InsertVector(data, inner_id);
     }
+}
+void
+HGraph::insert_fused_optimized_build_codes(const void* data, InnerIdType inner_id) {
+    CHECK_ARGUMENT(
+        this->rabitq_fused_datacell_ != nullptr and this->optimized_build_codes_ != nullptr,
+        "fused optimized build is not active");
+    this->basic_flatten_codes_->InsertVector(data, inner_id);
+    this->sync_fused_node_codes(inner_id, data);
+
+    // Fused HGraph always reorders from the base code. Keep the fallback guarded so an internal
+    // parameter configuration cannot silently skip auxiliary storage.
+    if (has_precise_reorder() or create_new_raw_vector_) {
+        std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+        if (has_precise_reorder()) {
+            this->high_precise_codes_->InsertVector(data, inner_id);
+        }
+        if (create_new_raw_vector_) {
+            this->raw_vector_->InsertVector(data, inner_id);
+        }
+    }
+}
+
+void
+HGraph::sync_fused_node_codes(InnerIdType inner_id, const void* data) {
+    if (rabitq_fused_datacell_ == nullptr) {
+        return;
+    }
+    CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
+    const auto label = label_table_->GetLabelById(inner_id);
+    ByteBuffer one_bit(rabitq_split_codes_->OneBitCodeSize(), allocator_);
+    ByteBuffer supplement(rabitq_split_codes_->SupplementCodeSize(), allocator_);
+    uint32_t cluster_id = 0;
+    CHECK_ARGUMENT(rabitq_split_codes_->EncodeFused(
+                       static_cast<const float*>(data), one_bit.data, supplement.data, &cluster_id),
+                   "failed to encode fused RaBitQ node codes");
+    rabitq_fused_datacell_->SetNodeCodes(
+        inner_id, label, cluster_id, one_bit.data, supplement.data);
 }
 
 void
@@ -725,7 +835,9 @@ HGraph::probe_graph_for_add(const void* data,
     if (this->support_duplicate_) {
         param.find_duplicate = true;
         param.duplicate_query_id =
-            this->using_dedup_storage() ? std::numeric_limits<InnerIdType>::max() : inner_id;
+            this->using_dedup_storage() or this->rabitq_fused_datacell_ != nullptr
+                ? std::numeric_limits<InnerIdType>::max()
+                : inner_id;
         param.duplicate_distance_threshold = this->duplicate_distance_threshold_;
     }
 
@@ -988,6 +1100,18 @@ HGraph::InitFeatures() {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_KNN_SEARCH_WITH_EX_FILTER);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT);
     }
+
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN, false);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_MERGE_INDEX, false);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_TUNE, false);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CLONE, false);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_EXPORT_MODEL, false);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_CONCURRENT, false);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_CONCURRENT, false);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_DELETE_CONCURRENT,
+                                              false);
+    }
 }
 
 void
@@ -1011,28 +1135,61 @@ HGraph::reorder(const void* query,
                 int64_t k,
                 IteratorFilterContext* iter_ctx,
                 QueryContext& ctx,
-                const DistanceRecordVector* rabitq_lower_bound_candidates,
+                const RaBitQSearchCandidateBuffers* rabitq_candidates,
                 const std::optional<float>& distance_threshold) const {
     uint64_t size = candidate_heap->Size();
     if (k <= 0) {
         k = static_cast<int64_t>(size);
     }
-    auto reorder_impl = reorder_;
-    if (reorder_impl == nullptr) {
-        reorder_impl = std::make_shared<FlattenReorder>(flatten, allocator_);
+    const auto fused_graph =
+        flatten.get() == basic_flatten_codes_.get() ? rabitq_fused_datacell_ : nullptr;
+    if (fused_graph != nullptr) {
+        RaBitQCandidateVector adapted_candidates(select_query_allocator(ctx.alloc, allocator_));
+        const RaBitQCandidateVector* fused_candidates = nullptr;
+        if (rabitq_candidates != nullptr) {
+            if (rabitq_candidates->fused_search_used) {
+                fused_candidates = &rabitq_candidates->fused;
+            } else {
+                adapted_candidates.reserve(rabitq_candidates->generic.size());
+                for (const auto& [lower_bound, id] : rabitq_candidates->generic) {
+                    adapted_candidates.push_back(
+                        {lower_bound, std::numeric_limits<float>::quiet_NaN(), id});
+                }
+                fused_candidates = &adapted_candidates;
+            }
+        }
+        auto fused_reorder = std::dynamic_pointer_cast<FlattenReorder>(reorder_);
+        if (fused_reorder == nullptr) {
+            fused_reorder = std::make_shared<FlattenReorder>(flatten, allocator_, fused_graph);
+        }
+        candidate_heap = fused_reorder->ReorderFused(candidate_heap,
+                                                     static_cast<const float*>(query),
+                                                     k,
+                                                     ctx,
+                                                     iter_ctx,
+                                                     fused_candidates,
+                                                     distance_threshold);
+        return;
     }
-    auto reorder_heap = reorder_impl->Reorder(candidate_heap,
+
+    const auto* generic_candidates =
+        rabitq_candidates == nullptr ? nullptr : &rabitq_candidates->generic;
+    auto generic_reorder = reorder_;
+    if (generic_reorder == nullptr) {
+        generic_reorder = std::make_shared<FlattenReorder>(flatten, allocator_);
+    }
+    candidate_heap = generic_reorder->Reorder(candidate_heap,
                                               static_cast<const float*>(query),
                                               k,
                                               ctx,
                                               iter_ctx,
-                                              rabitq_lower_bound_candidates,
+                                              generic_candidates,
                                               distance_threshold);
-    candidate_heap = reorder_heap;
 }
 
 void
 HGraph::ExportCache(std::ostream& out_stream) const {
+    this->check_fused_mutation_supported("ExportCache");
     IOStreamWriter writer(out_stream);
     this->fullfill_cache();
     this->cache_->Serialize(writer);
@@ -1040,6 +1197,7 @@ HGraph::ExportCache(std::ostream& out_stream) const {
 
 void
 HGraph::ImportCache(std::istream& in_stream) {
+    this->check_fused_mutation_supported("ImportCache");
     IOStreamReader reader(in_stream);
     this->cache_->Deserialize(reader);
 }

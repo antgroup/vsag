@@ -21,6 +21,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <future>
@@ -32,10 +33,12 @@
 
 #include "flatten_interface_test.h"
 #include "flatten_optimized_build_interface.h"
+#include "hgraph_rabitq_fused_datacell.h"
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
+#include "io/memory_io/memory_io_parameter.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer.h"
 #include "quantization/transform_quantization/transform_quantizer.h"
 #include "rabitq_split_datacell.h"
@@ -44,6 +47,13 @@
 using namespace vsag;
 
 namespace {
+
+bool
+IsNaNBitPattern(float value) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return (bits & 0x7FFFFFFFU) > 0x7F800000U;
+}
 
 class RejectSecondThreadPool final : public ThreadPool {
 public:
@@ -281,6 +291,717 @@ TEST_CASE("RaBitQSplitDataCell direct split compute", "[ut][RaBitQSplitDataCell]
         }
     }
 }
+TEST_CASE("RaBitQSplitDataCell fused residual clusters", "[ut][RaBitQSplitDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr uint64_t cluster_count = 16;
+    constexpr uint64_t vectors_per_cluster = 20;
+    constexpr uint64_t count = cluster_count * vectors_per_cluster;
+    Vector<float> vectors(count * dim, 0.0F, allocator.get());
+    for (uint64_t cluster = 0; cluster < cluster_count; ++cluster) {
+        for (uint64_t row = 0; row < vectors_per_cluster; ++row) {
+            auto* vector = vectors.data() + (cluster * vectors_per_cluster + row) * dim;
+            vector[cluster] = 100.0F;
+            vector[(cluster + 17) % dim] = static_cast<float>(row) * 0.001F;
+        }
+    }
+
+    auto param_json = JsonType::Parse(R"({
+        "codes_type": "rabitq_split",
+        "io_params": {"type": "memory_io"},
+        "quantization_params": {
+            "type": "rabitq",
+            "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 1,
+            "use_fht": true
+        }
+    })");
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(param_json);
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+    auto flatten = FlattenInterface::MakeInstance(param, common_param);
+    flatten->Train(vectors.data(), count);
+    auto split = std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(flatten);
+    REQUIRE(split != nullptr);
+    REQUIRE(split->FusedFilterBits() == 1);
+    REQUIRE(split->FusedSupplementBits() == 7);
+    REQUIRE(split->UsesLegacyHnswFusedCodec());
+    split->TrainFusedCodec(vectors.data(), count, cluster_count);
+    const auto codec_model = split->ExportFusedCodec();
+    REQUIRE_FALSE(codec_model.empty());
+
+    auto invalid_centroid_count = codec_model;
+    const uint64_t oversized_count = std::numeric_limits<uint64_t>::max();
+    std::memcpy(invalid_centroid_count.data() + sizeof(uint32_t),
+                &oversized_count,
+                sizeof(oversized_count));
+    REQUIRE_THROWS(split->ImportFusedCodec(invalid_centroid_count));
+
+    auto trailing_codec_model = codec_model;
+    trailing_codec_model.push_back('\0');
+    REQUIRE_THROWS(split->ImportFusedCodec(trailing_codec_model));
+
+    Vector<uint8_t> one_bit(split->OneBitCodeSize(), allocator.get());
+    Vector<uint8_t> supplement(split->SupplementCodeSize(), allocator.get());
+    const float invalid_values[] = {std::numeric_limits<float>::quiet_NaN(),
+                                    std::numeric_limits<float>::infinity(),
+                                    -std::numeric_limits<float>::infinity()};
+    constexpr uint8_t output_sentinel = 0xA5;
+    for (const float invalid_value : invalid_values) {
+        CAPTURE(invalid_value);
+        std::vector<float> invalid_training(vectors.data(), vectors.data() + vectors.size());
+        invalid_training[0] = invalid_value;
+        REQUIRE_THROWS(split->TrainFusedCodec(invalid_training.data(), count, cluster_count));
+        REQUIRE(split->ExportFusedCodec() == codec_model);
+
+        std::vector<float> invalid_vector(vectors.data(), vectors.data() + dim);
+        invalid_vector[0] = invalid_value;
+        std::fill(one_bit.begin(), one_bit.end(), output_sentinel);
+        std::fill(supplement.begin(), supplement.end(), output_sentinel);
+        uint32_t invalid_cluster_id = cluster_count;
+        REQUIRE_FALSE(split->EncodeFused(
+            invalid_vector.data(), one_bit.data(), supplement.data(), &invalid_cluster_id));
+        REQUIRE(invalid_cluster_id == cluster_count);
+        REQUIRE(std::all_of(one_bit.begin(), one_bit.end(), [](uint8_t value) {
+            return value == output_sentinel;
+        }));
+        REQUIRE(std::all_of(supplement.begin(), supplement.end(), [](uint8_t value) {
+            return value == output_sentinel;
+        }));
+    }
+
+    UnorderedSet<uint32_t> assigned_clusters(allocator.get());
+    for (uint64_t cluster = 0; cluster < cluster_count; ++cluster) {
+        uint32_t cluster_id = 0;
+        REQUIRE(split->EncodeFused(vectors.data() + cluster * vectors_per_cluster * dim,
+                                   one_bit.data(),
+                                   supplement.data(),
+                                   &cluster_id));
+        assigned_clusters.insert(cluster_id);
+    }
+    REQUIRE(assigned_clusters.size() == cluster_count);
+
+    auto computer = split->FactoryFusedComputer(vectors.data());
+    uint32_t cluster_id = 0;
+    REQUIRE(split->EncodeFused(vectors.data(), one_bit.data(), supplement.data(), &cluster_id));
+    float coarse_distance = 0.0F;
+    float lower_bound = 0.0F;
+    float filter_inner_product = 0.0F;
+    REQUIRE(split->ComputeFusedOneBitWithFilterIP(computer,
+                                                  cluster_id,
+                                                  one_bit.data(),
+                                                  supplement.data(),
+                                                  &coarse_distance,
+                                                  &lower_bound,
+                                                  &filter_inner_product,
+                                                  nullptr));
+    REQUIRE(IsNaNBitPattern(filter_inner_product));
+    float full_distance = 0.0F;
+    REQUIRE_FALSE(split->ComputeFusedFullWithFilterIP(
+        computer, cluster_id, one_bit.data(), supplement.data(), 0.0F, &full_distance, nullptr));
+    REQUIRE(split->ComputeFusedFull(
+        computer, cluster_id, one_bit.data(), supplement.data(), &full_distance, nullptr));
+    REQUIRE(std::isfinite(coarse_distance));
+    REQUIRE(std::isfinite(lower_bound));
+    REQUIRE(std::isfinite(full_distance));
+
+    QueryContext narrow_context;
+    narrow_context.rabitq_error_rate = 0.95F;
+    QueryContext wide_context;
+    wide_context.rabitq_error_rate = 3.8F;
+    float narrow_distance = 0.0F;
+    float narrow_lower_bound = 0.0F;
+    float wide_distance = 0.0F;
+    float wide_lower_bound = 0.0F;
+    REQUIRE(split->ComputeFusedOneBitWithFilterIP(computer,
+                                                  cluster_id,
+                                                  one_bit.data(),
+                                                  supplement.data(),
+                                                  &narrow_distance,
+                                                  &narrow_lower_bound,
+                                                  nullptr,
+                                                  &narrow_context));
+    REQUIRE(split->ComputeFusedOneBitWithFilterIP(computer,
+                                                  cluster_id,
+                                                  one_bit.data(),
+                                                  supplement.data(),
+                                                  &wide_distance,
+                                                  &wide_lower_bound,
+                                                  nullptr,
+                                                  &wide_context));
+    REQUIRE(std::abs(coarse_distance - narrow_distance) <= 1e-6F);
+    REQUIRE(std::abs(coarse_distance - wide_distance) <= 1e-6F);
+    const float default_gap = coarse_distance - lower_bound;
+    const float narrow_gap = narrow_distance - narrow_lower_bound;
+    const float wide_gap = wide_distance - wide_lower_bound;
+    REQUIRE(default_gap > 1e-6F);
+    REQUIRE(std::abs(narrow_gap - 0.5F * default_gap) <= 1e-4F * default_gap + 1e-6F);
+    REQUIRE(std::abs(wide_gap - 2.0F * default_gap) <= 1e-4F * default_gap + 1e-6F);
+}
+
+TEST_CASE("RaBitQSplitDataCell native fused bit splits", "[ut][RaBitQSplitDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint32_t cluster_count = 16;
+    constexpr InnerIdType count = 64;
+    struct FusedSplitCase {
+        uint32_t filter_bits;
+        uint32_t supplement_bits;
+        uint64_t dim;
+    };
+    const FusedSplitCase cases[] = {
+        {1, 3, 65},
+        {2, 6, 960},
+        {3, 5, 65},
+        {4, 4, 960},
+    };
+
+    constexpr const char* param_template = R"(
+        {{
+            "codes_type": "rabitq_split",
+            "io_params": {{
+                "type": "memory_io"
+            }},
+            "quantization_params": {{
+                "type": "rabitq",
+                "rabitq_version": "split",
+                "rabitq_bits_per_dim_query": 32,
+                "rabitq_bits_per_dim_base": {},
+                "rabitq_bits_per_dim_filter": {},
+                "use_fht": true
+            }}
+        }}
+    )";
+
+    for (const auto& split_case : cases) {
+        CAPTURE(split_case.filter_bits, split_case.supplement_bits, split_case.dim);
+        const uint32_t base_bits = split_case.filter_bits + split_case.supplement_bits;
+        auto param_json =
+            JsonType::Parse(fmt::format(param_template, base_bits, split_case.filter_bits));
+        auto param = std::make_shared<FlattenDataCellParameter>();
+        param->FromJson(param_json);
+
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.dim_ = split_case.dim;
+        common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+        auto vectors = fixtures::generate_vectors(
+            count, split_case.dim, false, 31 + static_cast<int>(split_case.filter_bits));
+        auto query = fixtures::generate_vectors(
+            1, split_case.dim, false, 71 + static_cast<int>(split_case.filter_bits));
+        auto encoded_vectors = fixtures::generate_vectors(
+            3, split_case.dim, false, 51 + static_cast<int>(split_case.filter_bits));
+        auto flatten = FlattenInterface::MakeInstance(param, common_param);
+        flatten->Train(vectors.data(), count);
+        auto split = std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(flatten);
+        REQUIRE(split != nullptr);
+        REQUIRE(split->FusedFilterBits() == split_case.filter_bits);
+        REQUIRE(split->FusedSupplementBits() == split_case.supplement_bits);
+        REQUIRE_FALSE(split->UsesLegacyHnswFusedCodec());
+
+        split->TrainFusedCodec(vectors.data(), count, cluster_count);
+        auto graph_param = std::make_shared<GraphDataCellParameter>();
+        graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+        graph_param->max_degree_ = 8;
+        graph_param->init_max_capacity_ = 4;
+        auto graph = std::make_shared<HGraphRaBitQFusedDataCell>(
+            graph_param, split->OneBitCodeSize(), split->SupplementCodeSize(), common_param);
+        split->AttachFusedCodeStorage(graph.get());
+        auto optimized_build = std::dynamic_pointer_cast<FlattenOptimizedBuildInterface>(flatten);
+        REQUIRE(optimized_build != nullptr);
+        auto build_pool = SafeThreadPool::FactoryDefaultThreadPool();
+        build_pool->SetPoolSize(4);
+        flatten->Resize(4);
+        REQUIRE(optimized_build->BeginOptimizedBuild({build_pool, 4}));
+        Vector<uint8_t> filter_code(split->OneBitCodeSize(), allocator.get());
+        for (InnerIdType id = 0; id < 4; ++id) {
+            flatten->InsertVector(
+                encoded_vectors.data() + static_cast<uint64_t>(id % 3) * split_case.dim, id);
+        }
+        REQUIRE(std::isfinite(flatten->ComputePairVectors(0, 3)));
+        optimized_build->FinalizeOptimizedBuild();
+        REQUIRE_FALSE(optimized_build->IsOptimizedBuildActive());
+        Vector<uint8_t> supplement_code(split->SupplementCodeSize(), allocator.get());
+        auto computer = split->FactoryFusedComputer(query.data());
+        REQUIRE(computer != nullptr);
+
+        for (InnerIdType id = 0; id < 3; ++id) {
+            const auto* encoded_vector =
+                encoded_vectors.data() + static_cast<uint64_t>(id) * split_case.dim;
+            flatten->InsertVector(encoded_vector, id);
+            uint32_t cluster_id = cluster_count;
+            REQUIRE(split->EncodeFused(
+                encoded_vector, filter_code.data(), supplement_code.data(), &cluster_id));
+            REQUIRE(cluster_id < cluster_count);
+            graph->SetNodeCodes(id,
+                                static_cast<LabelType>(id),
+                                cluster_id,
+                                filter_code.data(),
+                                supplement_code.data());
+
+            float coarse_distance = 0.0F;
+            float lower_bound = 0.0F;
+            float filter_inner_product = 0.0F;
+            REQUIRE(split->ComputeFusedOneBitWithFilterIP(computer,
+                                                          cluster_id,
+                                                          filter_code.data(),
+                                                          supplement_code.data(),
+                                                          &coarse_distance,
+                                                          &lower_bound,
+                                                          &filter_inner_product,
+                                                          nullptr));
+            REQUIRE(std::isfinite(coarse_distance));
+            REQUIRE(std::isfinite(lower_bound));
+            if (split_case.filter_bits == 1) {
+                REQUIRE(IsNaNBitPattern(filter_inner_product));
+            } else {
+                REQUIRE(std::isfinite(filter_inner_product));
+            }
+
+            float direct_full_distance = 0.0F;
+            REQUIRE(split->ComputeFusedFull(computer,
+                                            cluster_id,
+                                            filter_code.data(),
+                                            supplement_code.data(),
+                                            &direct_full_distance,
+                                            nullptr));
+            REQUIRE(std::isfinite(direct_full_distance));
+
+            if (split_case.filter_bits >= 2) {
+                float hinted_full_distance = 0.0F;
+                REQUIRE(split->ComputeFusedFullWithFilterIP(computer,
+                                                            cluster_id,
+                                                            filter_code.data(),
+                                                            supplement_code.data(),
+                                                            filter_inner_product,
+                                                            &hinted_full_distance,
+                                                            nullptr));
+                REQUIRE(std::isfinite(hinted_full_distance));
+                const float tolerance = 2e-4F * std::max({1.0F,
+                                                          std::abs(direct_full_distance),
+                                                          std::abs(hinted_full_distance)});
+                REQUIRE(std::abs(direct_full_distance - hinted_full_distance) <= tolerance);
+                REQUIRE_FALSE(
+                    split->ComputeFusedFullWithFilterIP(computer,
+                                                        cluster_id,
+                                                        filter_code.data(),
+                                                        supplement_code.data(),
+                                                        std::numeric_limits<float>::quiet_NaN(),
+                                                        &hinted_full_distance,
+                                                        nullptr));
+
+                RaBitQFusedTraversalQuery traversal_query;
+                REQUIRE(split->GetFusedTraversalQuery(computer, &traversal_query));
+                std::vector<uint8_t> invalid_filter_code(filter_code.begin(), filter_code.end());
+                const float invalid_metadata = std::numeric_limits<float>::quiet_NaN();
+                std::memcpy(invalid_filter_code.data() + traversal_query.one_bit_metadata_offset,
+                            &invalid_metadata,
+                            sizeof(invalid_metadata));
+                REQUIRE_FALSE(split->ComputeFusedOneBitWithFilterIP(computer,
+                                                                    cluster_id,
+                                                                    invalid_filter_code.data(),
+                                                                    supplement_code.data(),
+                                                                    &coarse_distance,
+                                                                    &lower_bound,
+                                                                    &filter_inner_product,
+                                                                    nullptr));
+                REQUIRE(split->ComputeFusedFull(computer,
+                                                cluster_id,
+                                                invalid_filter_code.data(),
+                                                supplement_code.data(),
+                                                &direct_full_distance,
+                                                nullptr));
+
+                auto invalid_bound_code =
+                    std::vector<uint8_t>(filter_code.begin(), filter_code.end());
+                const float overflowing_error_unit = std::numeric_limits<float>::max();
+                std::memcpy(invalid_bound_code.data() + traversal_query.one_bit_metadata_offset +
+                                2U * sizeof(float),
+                            &overflowing_error_unit,
+                            sizeof(overflowing_error_unit));
+                coarse_distance = std::numeric_limits<float>::max();
+                REQUIRE_FALSE(split->ComputeFusedOneBitWithFilterIP(computer,
+                                                                    cluster_id,
+                                                                    invalid_bound_code.data(),
+                                                                    supplement_code.data(),
+                                                                    &coarse_distance,
+                                                                    &lower_bound,
+                                                                    &filter_inner_product,
+                                                                    nullptr));
+                REQUIRE(std::isfinite(coarse_distance));
+                REQUIRE(coarse_distance < std::numeric_limits<float>::max());
+
+                graph->SetNodeCodes(id,
+                                    static_cast<LabelType>(id),
+                                    cluster_id,
+                                    invalid_bound_code.data(),
+                                    supplement_code.data());
+                SearchStatistics no_reorder_stats;
+                QueryContext no_reorder_context;
+                no_reorder_context.stats = &no_reorder_stats;
+                no_reorder_context.enable_rabitq_reorder = false;
+                const InnerIdType query_id = id;
+                float filtered_distance = std::numeric_limits<float>::max();
+                flatten->QueryWithDistanceFilter(&filtered_distance,
+                                                 computer,
+                                                 &query_id,
+                                                 1,
+                                                 std::numeric_limits<float>::max(),
+                                                 &no_reorder_context);
+                REQUIRE(filtered_distance == coarse_distance);
+                REQUIRE(no_reorder_stats.rabitq_filter_count.load() == 1);
+                REQUIRE(no_reorder_stats.rabitq_full_count.load() == 0);
+                REQUIRE(no_reorder_stats.rabitq_filter_fallback_full_count.load() == 0);
+                graph->SetNodeCodes(id,
+                                    static_cast<LabelType>(id),
+                                    cluster_id,
+                                    filter_code.data(),
+                                    supplement_code.data());
+            } else {
+                float hinted_full_distance = 0.0F;
+                REQUIRE_FALSE(split->ComputeFusedFullWithFilterIP(computer,
+                                                                  cluster_id,
+                                                                  filter_code.data(),
+                                                                  supplement_code.data(),
+                                                                  0.0F,
+                                                                  &hinted_full_distance,
+                                                                  nullptr));
+            }
+        }
+
+        constexpr InnerIdType alias_id = 3;
+        flatten->InsertVector(encoded_vectors.data(), alias_id);
+        uint32_t alias_cluster_id = cluster_count;
+        REQUIRE(split->EncodeFused(
+            encoded_vectors.data(), filter_code.data(), supplement_code.data(), &alias_cluster_id));
+        graph->SetNodeCodes(alias_id,
+                            static_cast<LabelType>(alias_id),
+                            alias_cluster_id,
+                            filter_code.data(),
+                            supplement_code.data());
+
+        Vector<float> decoded(split_case.dim, 0.0F, allocator.get());
+        Vector<float> decoded_alias(split_case.dim, 0.0F, allocator.get());
+        REQUIRE(split->DecodeFusedById(0, decoded.data()));
+        REQUIRE(split->DecodeFusedById(alias_id, decoded_alias.data()));
+        float source_norm_sqr = 0.0F;
+        float decode_error_sqr = 0.0F;
+        for (uint64_t d = 0; d < split_case.dim; ++d) {
+            REQUIRE(std::isfinite(decoded[d]));
+            REQUIRE(std::abs(decoded[d] - decoded_alias[d]) <= 1e-6F);
+            source_norm_sqr += encoded_vectors[d] * encoded_vectors[d];
+            const float error = decoded[d] - encoded_vectors[d];
+            decode_error_sqr += error * error;
+        }
+        REQUIRE(decode_error_sqr < source_norm_sqr);
+        REQUIRE_FALSE(split->DecodeFusedById(alias_id + 1, decoded.data()));
+        REQUIRE_FALSE(split->DecodeFusedById(0, nullptr));
+    }
+}
+
+TEST_CASE("RaBitQSplitDataCell fused zero residual metadata",
+          "[ut][RaBitQSplitDataCell][fused_zero_residual]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr InnerIdType count = 32;
+    constexpr uint32_t cluster_count = 16;
+    constexpr const char* param_template = R"(
+        {{
+            "codes_type": "rabitq_split",
+            "io_params": {{
+                "type": "memory_io"
+            }},
+            "quantization_params": {{
+                "type": "rabitq",
+                "rabitq_version": "split",
+                "rabitq_bits_per_dim_query": 32,
+                "rabitq_bits_per_dim_base": {},
+                "rabitq_bits_per_dim_filter": {},
+                "use_fht": true
+            }}
+        }}
+    )";
+
+    Vector<float> vectors(static_cast<uint64_t>(count) * dim, 0.0F, allocator.get());
+    for (uint64_t d = 0; d < dim; ++d) {
+        const float value = static_cast<float>(static_cast<int64_t>(d % 13) - 6) * 0.125F;
+        for (InnerIdType row = 0; row < count; ++row) {
+            vectors[static_cast<uint64_t>(row) * dim + d] = value;
+        }
+    }
+    Vector<float> queries(2 * dim, 0.0F, allocator.get());
+    std::copy_n(vectors.data(), dim, queries.data());
+    for (uint64_t d = 0; d < dim; ++d) {
+        queries[dim + d] = vectors[d] + static_cast<float>(static_cast<int64_t>(d % 7) - 3) * 0.05F;
+    }
+
+    for (const auto metric : {MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP}) {
+        for (uint32_t filter_bits = 1; filter_bits <= 4; ++filter_bits) {
+            CAPTURE(static_cast<int>(metric), filter_bits);
+            const uint32_t supplement_bits = filter_bits == 1 ? 3 : 8 - filter_bits;
+            const uint32_t base_bits = filter_bits + supplement_bits;
+            auto param_json = JsonType::Parse(fmt::format(param_template, base_bits, filter_bits));
+            auto param = std::make_shared<FlattenDataCellParameter>();
+            param->FromJson(param_json);
+
+            IndexCommonParam common_param;
+            common_param.allocator_ = allocator;
+            common_param.dim_ = dim;
+            common_param.metric_ = metric;
+            auto flatten = FlattenInterface::MakeInstance(param, common_param);
+            flatten->Train(vectors.data(), count);
+            auto split = std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(flatten);
+            REQUIRE(split != nullptr);
+            REQUIRE_FALSE(split->UsesLegacyHnswFusedCodec());
+            split->TrainFusedCodec(vectors.data(), count, cluster_count);
+
+            Vector<uint8_t> one_bit(split->OneBitCodeSize(), allocator.get());
+            Vector<uint8_t> supplement(split->SupplementCodeSize(), allocator.get());
+            uint32_t cluster_id = cluster_count;
+            REQUIRE(
+                split->EncodeFused(vectors.data(), one_bit.data(), supplement.data(), &cluster_id));
+            REQUIRE(cluster_id < cluster_count);
+
+            auto first_computer = split->FactoryFusedComputer(queries.data());
+            RaBitQFusedTraversalQuery traversal_query;
+            REQUIRE(split->GetFusedTraversalQuery(first_computer, &traversal_query));
+            float filter_add = std::numeric_limits<float>::quiet_NaN();
+            float filter_rescale = std::numeric_limits<float>::quiet_NaN();
+            float filter_error_unit = std::numeric_limits<float>::quiet_NaN();
+            const auto* metadata = one_bit.data() + traversal_query.one_bit_metadata_offset;
+            std::memcpy(&filter_add, metadata, sizeof(filter_add));
+            std::memcpy(&filter_rescale, metadata + sizeof(float), sizeof(filter_rescale));
+            std::memcpy(
+                &filter_error_unit, metadata + 2U * sizeof(float), sizeof(filter_error_unit));
+            REQUIRE(std::isfinite(filter_add));
+            REQUIRE(filter_rescale == 0.0F);
+            REQUIRE(filter_error_unit == 0.0F);
+
+            for (uint64_t query_id = 0; query_id < 2; ++query_id) {
+                auto computer = split->FactoryFusedComputer(queries.data() + query_id * dim);
+                float coarse_distance = std::numeric_limits<float>::max();
+                float lower_bound = std::numeric_limits<float>::max();
+                float filter_inner_product = std::numeric_limits<float>::quiet_NaN();
+                REQUIRE(split->ComputeFusedOneBitWithFilterIP(computer,
+                                                              cluster_id,
+                                                              one_bit.data(),
+                                                              supplement.data(),
+                                                              &coarse_distance,
+                                                              &lower_bound,
+                                                              &filter_inner_product,
+                                                              nullptr));
+                REQUIRE(std::isfinite(coarse_distance));
+                REQUIRE(coarse_distance < std::numeric_limits<float>::max());
+                REQUIRE(std::isfinite(lower_bound));
+                REQUIRE(lower_bound <= coarse_distance + 1e-5F);
+                double expected_distance = metric == MetricType::METRIC_TYPE_IP ? 1.0 : 0.0;
+                for (uint64_t d = 0; d < dim; ++d) {
+                    const double base = vectors[d];
+                    const double query = queries[query_id * dim + d];
+                    if (metric == MetricType::METRIC_TYPE_IP) {
+                        expected_distance -= base * query;
+                    } else {
+                        const double difference = base - query;
+                        expected_distance += difference * difference;
+                    }
+                }
+                const float expected = static_cast<float>(expected_distance);
+                const float expected_tolerance = 5e-4F * std::max(1.0F, std::fabs(expected));
+                REQUIRE(std::fabs(coarse_distance - expected) <= expected_tolerance);
+
+                float full_distance = std::numeric_limits<float>::max();
+                REQUIRE(split->ComputeFusedFull(computer,
+                                                cluster_id,
+                                                one_bit.data(),
+                                                supplement.data(),
+                                                &full_distance,
+                                                nullptr));
+                REQUIRE(std::isfinite(full_distance));
+                REQUIRE(full_distance < std::numeric_limits<float>::max());
+                const float tolerance =
+                    1e-5F * std::max({1.0F, std::fabs(coarse_distance), std::fabs(full_distance)});
+                REQUIRE(std::fabs(full_distance - coarse_distance) <= tolerance);
+            }
+        }
+    }
+}
+
+TEST_CASE("RaBitQSplitDataCell fused model-only serialization",
+          "[ut][RaBitQSplitDataCell][serialize]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr uint32_t cluster_count = 16;
+    constexpr InnerIdType count = 128;
+    constexpr uint64_t vectors_per_cluster = count / cluster_count;
+    Vector<float> vectors(static_cast<uint64_t>(count) * dim, 0.0F, allocator.get());
+    for (uint32_t cluster = 0; cluster < cluster_count; ++cluster) {
+        for (uint64_t row = 0; row < vectors_per_cluster; ++row) {
+            auto* vector =
+                vectors.data() + (static_cast<uint64_t>(cluster) * vectors_per_cluster + row) * dim;
+            vector[cluster] = 100.0F;
+            vector[(cluster + 17) % dim] = static_cast<float>(row) * 0.01F;
+        }
+    }
+
+    auto param_json = JsonType::Parse(R"({
+        "codes_type": "rabitq_split",
+        "io_params": {"type": "memory_io"},
+        "quantization_params": {
+            "type": "rabitq",
+            "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 1,
+            "use_fht": true
+        }
+    })");
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(param_json);
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+    auto graph_param = std::make_shared<GraphDataCellParameter>();
+    graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+    graph_param->max_degree_ = 32;
+    graph_param->init_max_capacity_ = count;
+
+    auto serialize_flatten = [](const FlattenInterfacePtr& value) {
+        std::stringstream stream;
+        IOStreamWriter writer(stream);
+        value->Serialize(writer);
+        return stream.str();
+    };
+    auto serialize_graph = [](const HGraphRaBitQFusedDataCellPtr& value) {
+        std::stringstream stream;
+        IOStreamWriter writer(stream);
+        value->Serialize(writer);
+        return stream.str();
+    };
+    auto deserialize_flatten = [](const FlattenInterfacePtr& value, const std::string& payload) {
+        std::stringstream stream(payload);
+        IOStreamReader reader(stream);
+        value->Deserialize(reader);
+    };
+    auto deserialize_graph = [](const HGraphRaBitQFusedDataCellPtr& value,
+                                const std::string& payload) {
+        std::stringstream stream(payload);
+        IOStreamReader reader(stream);
+        value->Deserialize(reader);
+    };
+
+    auto flatten = FlattenInterface::MakeInstance(param, common_param);
+    flatten->Train(vectors.data(), count);
+    flatten->BatchInsertVector(vectors.data(), count);
+    auto split = std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(flatten);
+    REQUIRE(split != nullptr);
+    split->TrainFusedCodec(vectors.data(), count, cluster_count);
+
+    const auto legacy_payload = serialize_flatten(flatten);
+    const uint64_t memory_with_split_codes = flatten->GetMemoryUsage();
+    const uint64_t code_payload_size =
+        static_cast<uint64_t>(count) * (split->OneBitCodeSize() + split->SupplementCodeSize());
+
+    auto graph = std::make_shared<HGraphRaBitQFusedDataCell>(
+        graph_param, split->OneBitCodeSize(), split->SupplementCodeSize(), common_param);
+    Vector<uint8_t> one_bit(split->OneBitCodeSize(), allocator.get());
+    Vector<uint8_t> supplement(split->SupplementCodeSize(), allocator.get());
+    Vector<InnerIdType> empty_neighbors(allocator.get());
+    for (InnerIdType id = 0; id < count; ++id) {
+        uint32_t cluster_id = 0;
+        REQUIRE(split->EncodeFused(vectors.data() + static_cast<uint64_t>(id) * dim,
+                                   one_bit.data(),
+                                   supplement.data(),
+                                   &cluster_id));
+        graph->SetNodeCodes(
+            id, static_cast<LabelType>(id), cluster_id, one_bit.data(), supplement.data());
+        graph->InsertNeighborsById(id, empty_neighbors);
+    }
+    graph->SetCodecModel(split->ExportFusedCodec());
+    split->AttachFusedCodeStorage(graph.get());
+
+    Vector<float> decoded(dim, 0.0F, allocator.get());
+    REQUIRE(split->DecodeFusedById(0, decoded.data()));
+    for (const float value : decoded) {
+        REQUIRE(std::isfinite(value));
+    }
+    REQUIRE_FALSE(split->DecodeFusedById(count, decoded.data()));
+    REQUIRE_FALSE(split->DecodeFusedById(0, nullptr));
+    const auto expected_decoded = decoded;
+
+    const auto model_payload = serialize_flatten(flatten);
+    const auto graph_payload = serialize_graph(graph);
+    REQUIRE(memory_with_split_codes == flatten->GetMemoryUsage() + code_payload_size);
+    REQUIRE(static_cast<uint64_t>(legacy_payload.size()) + sizeof(uint32_t) ==
+            static_cast<uint64_t>(model_payload.size()) + code_payload_size);
+
+    auto make_attached_pair = [&]() {
+        auto restored_flatten = FlattenInterface::MakeInstance(param, common_param);
+        auto restored_split =
+            std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(restored_flatten);
+        REQUIRE(restored_split != nullptr);
+        auto restored_graph =
+            std::make_shared<HGraphRaBitQFusedDataCell>(graph_param,
+                                                        restored_split->OneBitCodeSize(),
+                                                        restored_split->SupplementCodeSize(),
+                                                        common_param);
+        restored_split->AttachFusedCodeStorage(restored_graph.get());
+        return std::make_tuple(restored_flatten, restored_split, restored_graph);
+    };
+
+    auto [model_flatten, model_split, model_graph] = make_attached_pair();
+    deserialize_flatten(model_flatten, model_payload);
+    deserialize_graph(model_graph, graph_payload);
+    model_split->ImportFusedCodec(model_graph->CodecModel());
+    REQUIRE(model_split->DecodeFusedById(0, decoded.data()));
+    for (uint64_t d = 0; d < dim; ++d) {
+        REQUIRE(std::abs(decoded[d] - expected_decoded[d]) <= 1e-6F);
+    }
+
+    auto query = fixtures::generate_vectors(1, dim, 97);
+    std::vector<InnerIdType> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto query_all = [&](const FlattenInterfacePtr& value) {
+        auto computer = value->FactoryComputer(query.data());
+        std::vector<float> distances(count);
+        value->Query(distances.data(), computer, ids.data(), count);
+        return distances;
+    };
+    const auto expected_distances = query_all(flatten);
+    const auto model_distances = query_all(model_flatten);
+    for (InnerIdType id = 0; id < count; ++id) {
+        REQUIRE(std::abs(expected_distances[id] - model_distances[id]) <= 1e-6F);
+    }
+
+    auto [legacy_flatten, legacy_split, legacy_graph] = make_attached_pair();
+    deserialize_flatten(legacy_flatten, legacy_payload);
+    deserialize_graph(legacy_graph, graph_payload);
+    legacy_split->ImportFusedCodec(legacy_graph->CodecModel());
+    REQUIRE(legacy_split->DecodeFusedById(0, decoded.data()));
+    for (uint64_t d = 0; d < dim; ++d) {
+        REQUIRE(std::abs(decoded[d] - expected_decoded[d]) <= 1e-6F);
+    }
+    REQUIRE(legacy_split->UsesExternalFusedCodeStorage());
+    using MemorySplitDataCell =
+        RaBitQSplitDataCell<MetricType::METRIC_TYPE_L2SQR, MemoryIO, MemoryIO>;
+    auto legacy_memory_split = std::dynamic_pointer_cast<MemorySplitDataCell>(legacy_flatten);
+    REQUIRE(legacy_memory_split != nullptr);
+    REQUIRE(legacy_memory_split->x_bit_layout_->GetMemoryUsage() == 0);
+    REQUIRE(legacy_memory_split->supplement_layout_->GetMemoryUsage() == 0);
+    REQUIRE(legacy_flatten->GetMemoryUsage() == model_flatten->GetMemoryUsage());
+    const auto legacy_distances = query_all(legacy_flatten);
+    for (InnerIdType id = 0; id < count; ++id) {
+        REQUIRE(std::abs(expected_distances[id] - legacy_distances[id]) <= 1e-6F);
+    }
+}
+
 TEST_CASE("RaBitQSplitDataCell supports MRLE transform quantizer",
           "[ut][RaBitQSplitDataCell][MRLE]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();

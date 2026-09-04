@@ -53,7 +53,9 @@ KMeansCluster::Run(uint32_t k,
                    double* err,
                    bool use_mse_for_convergence,
                    float threshold,
-                   KMeansInitMethod init_method) {
+                   KMeansInitMethod init_method,
+                   std::optional<uint32_t> random_seed,
+                   bool deterministic_reduction) {
     if (k == 0) {
         throw VsagException(ErrorType::INVALID_ARGUMENT, "k must be positive");
     }
@@ -75,7 +77,7 @@ KMeansCluster::Run(uint32_t k,
     k_centroids_ = static_cast<float*>(allocator_->Allocate(size));
 
     std::random_device rd;
-    std::mt19937 gen(rd());
+    std::mt19937 gen(random_seed.has_value() ? *random_seed : rd());
 
     if (init_method == KMeansInitMethod::KMEANS_PLUS_PLUS) {
         select_initial_centroids_kmeans_plus_plus(datas, count, k, gen);
@@ -112,12 +114,20 @@ KMeansCluster::Run(uint32_t k,
 
         Vector<int> counts(k, 0, allocator_);
         Vector<float> new_centroids(static_cast<uint64_t>(k) * dim_, 0.0F, allocator_);
+        const uint64_t block_count = (count + bs - 1) / bs;
+        const uint64_t centroid_values = static_cast<uint64_t>(k) * dim_;
+        Vector<int> block_counts(allocator_);
+        Vector<float> block_centroids(allocator_);
+        if (deterministic_reduction) {
+            block_counts.resize(block_count * k, 0);
+            block_centroids.resize(block_count * centroid_values, 0.0F);
+        }
         std::mutex merge_mutex;
 
-        auto update_centroids_func = [&](uint64_t start, uint64_t end) {
+        auto update_centroids_func = [&](uint64_t block_id, uint64_t start, uint64_t end) {
             omp_set_num_threads(1);
             Vector<int> local_counts(k, 0, allocator_);
-            Vector<float> local_centroids(static_cast<uint64_t>(k) * dim_, 0.0F, allocator_);
+            Vector<float> local_centroids(centroid_values, 0.0F, allocator_);
 
             for (uint64_t i = start; i < end; ++i) {
                 int32_t label = labels[i];
@@ -133,7 +143,13 @@ KMeansCluster::Run(uint32_t k,
                 }
             }
 
-            {
+            if (deterministic_reduction) {
+                std::copy(
+                    local_counts.begin(), local_counts.end(), block_counts.data() + block_id * k);
+                std::copy(local_centroids.begin(),
+                          local_centroids.end(),
+                          block_centroids.data() + block_id * centroid_values);
+            } else {
                 std::lock_guard<std::mutex> lock(merge_mutex);
                 for (uint32_t j = 0; j < k; ++j) {
                     if (local_counts[j] > 0) {
@@ -150,13 +166,30 @@ KMeansCluster::Run(uint32_t k,
             }
         };
         for (uint64_t i = 0; i < count; i += bs) {
-            futures.emplace_back(
-                thread_pool_->GeneralEnqueue(update_centroids_func, i, std::min(i + bs, count)));
+            futures.emplace_back(thread_pool_->GeneralEnqueue(
+                update_centroids_func, i / bs, i, std::min(i + bs, count)));
         }
         for (auto& future : futures) {
             future.wait();
         }
         futures.clear();
+        if (deterministic_reduction) {
+            for (uint64_t block_id = 0; block_id < block_count; ++block_id) {
+                for (uint32_t j = 0; j < k; ++j) {
+                    const auto count_offset = block_id * k + j;
+                    if (block_counts[count_offset] > 0) {
+                        counts[j] += block_counts[count_offset];
+                        BlasFunction::Saxpy(dim_,
+                                            1.0F,
+                                            block_centroids.data() + block_id * centroid_values +
+                                                static_cast<uint64_t>(j) * dim_,
+                                            1,
+                                            new_centroids.data() + static_cast<uint64_t>(j) * dim_,
+                                            1);
+                    }
+                }
+            }
+        }
 
         std::uniform_int_distribution<uint64_t> dis(0, count - 1);
         for (int j = 0; j < k; ++j) {

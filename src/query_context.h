@@ -63,6 +63,7 @@ struct QueryContext {
     float rabitq_error_rate = std::numeric_limits<float>::quiet_NaN();
     DistanceEvaluationPhase distance_phase = DistanceEvaluationPhase::APPROXIMATE;
     bool track_distance_evaluations = true;
+    bool enable_rabitq_reorder = true;
     QueryComputerPool* computer_pool = nullptr;
 };
 

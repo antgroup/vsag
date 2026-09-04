@@ -18,15 +18,20 @@
 #include <memory>
 
 #include "datacell/flatten_interface.h"
+#include "datacell/hgraph_rabitq_fused_datacell.h"
 #include "impl/heap/distance_heap.h"
 #include "impl/reorder/reorder.h"
 #include "utils/pointer_define.h"
 
 namespace vsag {
+class RaBitQSplitDataCellInterface;
+
 class FlattenReorder : public ReorderInterface {
 public:
-    FlattenReorder(const FlattenInterfacePtr& flatten, Allocator* allocator)
-        : flatten_(flatten), allocator_(allocator) {
+    FlattenReorder(const FlattenInterfacePtr& flatten,
+                   Allocator* allocator,
+                   HGraphRaBitQFusedDataCellPtr fused_graph = nullptr)
+        : flatten_(flatten), allocator_(allocator), fused_graph_(std::move(fused_graph)) {
     }
 
     DistHeapPtr
@@ -38,8 +43,37 @@ public:
             const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr,
             const std::optional<float>& distance_threshold = std::nullopt) override;
 
+    DistHeapPtr
+    ReorderFused(const DistHeapPtr& input,
+                 const void* query,
+                 int64_t topk,
+                 QueryContext& ctx,
+                 IteratorFilterContext* iter_ctx = nullptr,
+                 const RaBitQCandidateVector* rabitq_lower_bound_candidates = nullptr,
+                 const std::optional<float>& distance_threshold = std::nullopt);
+
 private:
+    void
+    QueryFusedLowerBound(float* distances,
+                         float* lower_bounds,
+                         float* filter_inner_products,
+                         RaBitQSplitDataCellInterface* split_codes,
+                         const ComputerInterfacePtr& computer,
+                         const InnerIdType* ids,
+                         uint64_t count,
+                         QueryContext* ctx) const;
+
+    void
+    QueryFusedFullWithHint(float* distances,
+                           const float* filter_inner_products,
+                           RaBitQSplitDataCellInterface* split_codes,
+                           const ComputerInterfacePtr& computer,
+                           const InnerIdType* ids,
+                           uint64_t count,
+                           QueryContext* ctx) const;
+
     const FlattenInterfacePtr flatten_;
     Allocator* allocator_{nullptr};
+    HGraphRaBitQFusedDataCellPtr fused_graph_{nullptr};
 };
 }  // namespace vsag

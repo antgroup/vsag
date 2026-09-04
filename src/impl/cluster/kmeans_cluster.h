@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <optional>
 #include <random>
 
 #include "impl/thread_pool/safe_thread_pool.h"
@@ -44,7 +45,9 @@ public:
         double* err = nullptr,
         bool use_mse_for_convergence = false,
         float threshold = 1e-6F,
-        KMeansInitMethod init_method = KMeansInitMethod::KMEANS_PLUS_PLUS);
+        KMeansInitMethod init_method = KMeansInitMethod::KMEANS_PLUS_PLUS,
+        std::optional<uint32_t> random_seed = std::nullopt,
+        bool deterministic_reduction = false);
 
 public:
     float* k_centroids_{nullptr};

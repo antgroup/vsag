@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cmath>
+#include <optional>
 #include <string>
 
 #include "index_common_param.h"
@@ -128,6 +129,7 @@ sample_train_data(const DatasetPtr& data,
                   int64_t total_elements,
                   int64_t dim,
                   int64_t train_sample_count,
-                  Allocator* allocator = nullptr);
+                  Allocator* allocator = nullptr,
+                  std::optional<uint64_t> random_seed = std::nullopt);
 
 }  // namespace vsag

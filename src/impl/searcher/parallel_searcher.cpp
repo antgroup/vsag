@@ -189,7 +189,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     if (check_func(ep) and is_result_distance_eligible<mode>(dist, inner_search_param)) {
         top_candidates->Push(dist, ep);
     }
-    if (not std::isfinite(dist) and inner_search_param.consider_duplicate and
+    if (not is_finite_distance(dist) and inner_search_param.consider_duplicate and
         is_result_distance_eligible<mode>(dist, inner_search_param)) {
         for (const auto duplicate_id : graph->GetDuplicateIds(ep)) {
             if (check_func(duplicate_id)) {
@@ -337,7 +337,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         for (uint64_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
             const auto cur_id = to_be_visited_id[i];
-            if (not std::isfinite(dist)) {
+            if (not is_finite_distance(dist)) {
                 auto push_result = [&](InnerIdType result_id) {
                     if (not is_result_distance_eligible<mode>(dist, inner_search_param) or
                         not check_func(result_id)) {

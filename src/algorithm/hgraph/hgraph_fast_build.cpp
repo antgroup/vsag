@@ -117,7 +117,7 @@ HGraph::try_optimized_build(const DatasetPtr& data) {
 
     std::vector<int64_t> result;
     if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
-        result = this->Add(data);
+        result = this->add_impl(data);
     } else {
         result = this->build_by_odescent(data);
     }
@@ -127,7 +127,8 @@ HGraph::try_optimized_build(const DatasetPtr& data) {
 
 bool
 HGraph::need_temporary_sq8_build_data_for_add() const {
-    return this->optimized_build_codes_ == nullptr and not this->has_precise_reorder() and
+    return this->rabitq_fused_datacell_ == nullptr and this->optimized_build_codes_ == nullptr and
+           not this->has_precise_reorder() and
            this->basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ;
 }
 
@@ -139,7 +140,12 @@ HGraph::prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows) 
 
     if (this->thread_pool_ == nullptr) {
         for (const auto& row : rows) {
-            this->insert_persistent_codes(get_data(data, row.input_idx), row.inner_id);
+            if (this->rabitq_fused_datacell_ != nullptr) {
+                this->insert_fused_optimized_build_codes(get_data(data, row.input_idx),
+                                                         row.inner_id);
+            } else {
+                this->insert_persistent_codes(get_data(data, row.input_idx), row.inner_id);
+            }
         }
         return;
     }
@@ -153,7 +159,11 @@ HGraph::prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows) 
         const auto input_idx = row.input_idx;
         futures.emplace_back(
             this->thread_pool_->GeneralEnqueue([this, data, inner_id, input_idx]() {
-                this->insert_persistent_codes(get_data(data, input_idx), inner_id);
+                if (this->rabitq_fused_datacell_ != nullptr) {
+                    this->insert_fused_optimized_build_codes(get_data(data, input_idx), inner_id);
+                } else {
+                    this->insert_persistent_codes(get_data(data, input_idx), inner_id);
+                }
             }));
     }
     wait_all_futures(futures);

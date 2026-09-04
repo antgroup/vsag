@@ -163,6 +163,34 @@ const std::string kBruteForceSearchParams =
 
 }  // namespace
 
+TEST_CASE("HGraph UpdateId preserves equal-label no-op", "[ut][hgraph][update]") {
+    auto common_param = MakeCommonParam(8);
+    auto index = MakeHGraphIndex(MakeFp32HGraphJson(false), common_param);
+
+    auto result = index->UpdateId(404, 404);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value());
+}
+
+TEST_CASE("HGraph non-fused SetImmutable does not require a fused searcher",
+          "[ut][hgraph][immutable]") {
+    constexpr int64_t dim = 8;
+    auto common_param = MakeCommonParam(dim);
+    auto index = MakeHGraphIndex(MakeFp32HGraphJson(false), common_param);
+    std::vector<float> vectors(static_cast<uint64_t>(dim) * 2, 0.0F);
+    vectors[dim] = 1.0F;
+    std::vector<int64_t> ids{10, 20};
+    auto base = MakeFloatDataset(vectors, ids, dim, 2);
+
+    REQUIRE(index->Build(base).has_value());
+    REQUIRE(index->SetImmutable().has_value());
+
+    auto query = MakeFloatQuery(vectors, dim);
+    auto result = index->KnnSearch(query, 1, kBruteForceSearchParams);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetIds()[0] == ids[0]);
+}
+
 TEST_CASE("HGraph exact duplicate fallback supports every dense data type",
           "[ut][hgraph][duplicate][data_type]") {
     constexpr int64_t dim = 8;
@@ -743,6 +771,253 @@ TEST_CASE("HGraph deduplicate_storage rejects v0.14 serialization",
     REQUIRE_FALSE(binary.has_value());
     REQUIRE(binary.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     REQUIRE(binary.error().message.find("v0.14") != std::string::npos);
+}
+
+TEST_CASE("HGraph fused RaBitQ rejects v0.14 serialization",
+          "[ut][hgraph][rabitq_split][fused][serialize]") {
+    constexpr int64_t dim = 64;
+    auto common_param = MakeCommonParam(dim);
+    common_param.use_old_serial_format_ = true;
+    auto hgraph_json = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "base_io_type": "memory_io",
+        "base_supplement_io_type": "memory_io",
+        "rabitq_bits_per_dim_base": 2,
+        "rabitq_bits_per_dim_precise": 6,
+        "graph_io_type": "memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 8,
+        "ef_construction": 32,
+        "use_reorder": true,
+        "reorder_source": "base",
+        "rabitq_fused_datacell": true
+    })");
+    auto index = MakeHGraphIndex(hgraph_json, common_param);
+
+    auto binary = index->Serialize();
+    REQUIRE_FALSE(binary.has_value());
+    REQUIRE(binary.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(binary.error().message.find("v0.14") != std::string::npos);
+}
+
+TEST_CASE("HGraph fused RaBitQ GetStats decodes vectors from node records",
+          "[ut][hgraph][rabitq_split][fused][stats]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 32;
+    auto common_param = MakeCommonParam(dim);
+    auto hgraph_json = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "base_io_type": "memory_io",
+        "base_supplement_io_type": "memory_io",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "rabitq_use_fht": true,
+        "graph_io_type": "memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 8,
+        "ef_construction": 32,
+        "build_thread_count": 1,
+        "use_reorder": true,
+        "reorder_source": "base",
+        "store_raw_vector": false,
+        "use_mci": false,
+        "support_duplicate": true,
+        "rabitq_fused_datacell": true
+    })");
+    auto index = MakeHGraphIndex(hgraph_json, common_param);
+
+    std::vector<float> vectors(static_cast<uint64_t>(count) * dim);
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = 1000 + i;
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[static_cast<uint64_t>(i) * dim + d] =
+                0.1F + static_cast<float>((i * 17 + d * 13) % 79) / 100.0F;
+        }
+    }
+    std::copy_n(vectors.data(), dim, vectors.data() + static_cast<uint64_t>(count - 1) * dim);
+    auto base = MakeFloatDataset(vectors, ids, dim, count);
+    REQUIRE(index->Build(base).has_value());
+
+    std::string stats;
+    REQUIRE_NOTHROW(stats = index->GetStats());
+    REQUIRE_FALSE(stats.empty());
+    const auto parsed_stats = vsag::JsonType::Parse(stats);
+    REQUIRE(parsed_stats["duplicate_ratio"].GetFloat() > 0.0F);
+
+    const std::vector<int64_t> fetch_ids = {ids.front(), ids.back()};
+    auto fetched = index->GetInnerIndex()->GetVectorByIds(
+        fetch_ids.data(), static_cast<int64_t>(fetch_ids.size()), nullptr);
+    REQUIRE(fetched != nullptr);
+    REQUIRE(fetched->GetNumElements() == static_cast<int64_t>(fetch_ids.size()));
+    REQUIRE(fetched->GetDim() == dim);
+    const auto* fetched_vectors = fetched->GetFloat32Vectors();
+    REQUIRE(fetched_vectors != nullptr);
+    for (uint64_t i = 0; i < static_cast<uint64_t>(fetch_ids.size()) * dim; ++i) {
+        REQUIRE(std::isfinite(fetched_vectors[i]));
+    }
+}
+
+TEST_CASE("HGraph fused RaBitQ remains mutable after fast build and deserialize",
+          "[ut][hgraph][rabitq_split][fused][lifecycle]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 32;
+    constexpr int64_t extra_info_size = 4;
+    auto common_param = MakeCommonParam(dim);
+    common_param.extra_info_size_ = extra_info_size;
+    auto hgraph_json = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "base_io_type": "memory_io",
+        "base_supplement_io_type": "memory_io",
+        "rabitq_bits_per_dim_base": 2,
+        "rabitq_bits_per_dim_precise": 6,
+        "graph_io_type": "memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "odescent",
+        "max_degree": 8,
+        "ef_construction": 32,
+        "build_thread_count": 1,
+        "use_reorder": true,
+        "reorder_source": "base",
+        "use_attribute_filter": true,
+        "rabitq_fused_datacell": true
+    })");
+    auto index = MakeHGraphIndex(hgraph_json, common_param);
+
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_ADD_AFTER_BUILD));
+    REQUIRE_FALSE(index->CheckFeature(vsag::IndexFeature::SUPPORT_MERGE_INDEX));
+    REQUIRE_FALSE(index->CheckFeature(vsag::IndexFeature::SUPPORT_CLONE));
+    REQUIRE_FALSE(index->CheckFeature(vsag::IndexFeature::SUPPORT_EXPORT_MODEL));
+    REQUIRE_FALSE(index->CheckFeature(vsag::IndexFeature::SUPPORT_TUNE));
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT));
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_UPDATE_ID_CONCURRENT));
+
+    std::vector<float> vectors(static_cast<uint64_t>(count) * dim);
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i + 100;
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[static_cast<uint64_t>(i) * dim + d] =
+                static_cast<float>((i * 17 + d * 13) % 101) / 101.0F;
+        }
+    }
+    auto base = MakeFloatDataset(vectors, ids, dim, count);
+    std::vector<char> base_extra_infos(count * extra_info_size, 'a');
+    base->ExtraInfos(base_extra_infos.data())->ExtraInfoSize(extra_info_size);
+    std::vector<vsag::AttributeValue<int64_t>> base_attributes(count);
+    std::vector<vsag::AttributeSet> base_attribute_sets(count);
+    for (int64_t i = 0; i < count; ++i) {
+        base_attributes[static_cast<uint64_t>(i)].name_ = "tenant";
+        base_attributes[static_cast<uint64_t>(i)].GetValue().push_back(1);
+        base_attribute_sets[static_cast<uint64_t>(i)].attrs_.push_back(
+            &base_attributes[static_cast<uint64_t>(i)]);
+    }
+    base->AttributeSets(base_attribute_sets.data());
+    REQUIRE(index->Build(base).has_value());
+
+    std::vector<float> add_vector(dim, 2.0F);
+    std::vector<int64_t> add_id{1000};
+    auto add = MakeFloatDataset(add_vector, add_id, dim, 1);
+    std::vector<char> add_extra_info(extra_info_size, 'b');
+    add->ExtraInfos(add_extra_info.data())->ExtraInfoSize(extra_info_size);
+    vsag::AttributeValue<int64_t> add_attribute;
+    add_attribute.name_ = "tenant";
+    add_attribute.GetValue().push_back(1);
+    vsag::AttributeSet add_attribute_set;
+    add_attribute_set.attrs_.push_back(&add_attribute);
+    add->AttributeSets(&add_attribute_set);
+    auto add_result = index->Add(add);
+    REQUIRE(add_result.has_value());
+    REQUIRE(add_result.value().empty());
+    REQUIRE(index->CheckIdExist(add_id.front()));
+
+    std::vector<float> updated_vector(dim, 3.0F);
+    std::vector<int64_t> updated_id{ids.front()};
+    auto update = MakeFloatDataset(updated_vector, updated_id, dim, 1);
+    auto update_result = index->UpdateVector(updated_id.front(), update, true);
+    REQUIRE(update_result.has_value());
+    REQUIRE(update_result.value());
+
+    constexpr int64_t renamed_id = 2000;
+    auto update_id_result = index->UpdateId(updated_id.front(), renamed_id);
+    REQUIRE(update_id_result.has_value());
+    REQUIRE(update_id_result.value());
+    REQUIRE_FALSE(index->CheckIdExist(updated_id.front()));
+    REQUIRE(index->CheckIdExist(renamed_id));
+
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = MakeHGraphIndex(hgraph_json, common_param);
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    REQUIRE(restored->CheckIdExist(renamed_id));
+
+    std::vector<float> restored_add_vector(dim, 4.0F);
+    std::vector<int64_t> restored_add_id{3000};
+    auto restored_add = MakeFloatDataset(restored_add_vector, restored_add_id, dim, 1);
+    std::vector<char> restored_add_extra_info(extra_info_size, 'c');
+    restored_add->ExtraInfos(restored_add_extra_info.data())->ExtraInfoSize(extra_info_size);
+    vsag::AttributeValue<int64_t> restored_add_attribute;
+    restored_add_attribute.name_ = "tenant";
+    restored_add_attribute.GetValue().push_back(1);
+    vsag::AttributeSet restored_add_attribute_set;
+    restored_add_attribute_set.attrs_.push_back(&restored_add_attribute);
+    restored_add->AttributeSets(&restored_add_attribute_set);
+    REQUIRE(restored->Add(restored_add).has_value());
+    REQUIRE(restored->CheckIdExist(restored_add_id.front()));
+
+    vsag::AttributeValue<int64_t> updated_attribute;
+    updated_attribute.name_ = "tenant";
+    updated_attribute.GetValue().push_back(2);
+    vsag::AttributeSet updated_attribute_set;
+    updated_attribute_set.attrs_.push_back(&updated_attribute);
+    REQUIRE(restored->UpdateAttribute(renamed_id, updated_attribute_set).has_value());
+
+    std::vector<char> updated_extra_info(extra_info_size, 'd');
+    auto extra_info_update = vsag::Dataset::Make();
+    extra_info_update->NumElements(1)
+        ->Ids(&renamed_id)
+        ->ExtraInfos(updated_extra_info.data())
+        ->ExtraInfoSize(extra_info_size)
+        ->Owner(false);
+    auto extra_info_result = restored->UpdateExtraInfo(extra_info_update);
+    REQUIRE(extra_info_result.has_value());
+    REQUIRE(extra_info_result.value());
+    std::vector<char> fetched_extra_info(extra_info_size);
+    REQUIRE(restored->GetExtraInfoByIds(&renamed_id, 1, fetched_extra_info.data()).has_value());
+    REQUIRE(fetched_extra_info == updated_extra_info);
+
+    const std::vector<int64_t> remove_ids{add_id.front()};
+    auto remove_result = restored->Remove(remove_ids, vsag::RemoveMode::MARK_REMOVE);
+    REQUIRE(remove_result.has_value());
+    REQUIRE(remove_result.value() == 1);
+    REQUIRE_FALSE(restored->CheckIdExist(add_id.front()));
+
+    auto require_unsupported = [](const auto& result) {
+        REQUIRE_FALSE(result.has_value());
+        CAPTURE(result.error().message);
+        REQUIRE(result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+    };
+    auto train_result = index->Train(base);
+    require_unsupported(train_result);
+    REQUIRE(train_result.error().message == "fused RaBitQ HGraph does not support Train");
+    require_unsupported(index->Remove(remove_ids, vsag::RemoveMode::FORCE_REMOVE));
+    require_unsupported(index->Tune("{}"));
+    require_unsupported(index->Merge({}));
+    require_unsupported(index->Clone());
+    require_unsupported(index->ExportModel());
+
+    std::stringstream cache;
+    require_unsupported(index->ExportCache(cache));
+    require_unsupported(index->ImportCache(cache));
+
+    REQUIRE(restored->SetImmutable().has_value());
+    require_unsupported(restored->Add(restored_add));
+    require_unsupported(restored->UpdateVector(renamed_id, update, true));
 }
 
 TEST_CASE("HGraph deduplicate_storage supports precise reorder code path",

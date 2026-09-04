@@ -47,6 +47,7 @@ const char* const ATTR_PARAMS_KEY = "attr_params";
 const char* const HGRAPH_USE_ELP_OPTIMIZER_KEY = "use_elp_optimizer";
 const char* const HGRAPH_IGNORE_REORDER_KEY = "ignore_reorder";
 const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY = "build_by_base";
+const char* const HGRAPH_RABITQ_FUSED_DATACELL_KEY = "rabitq_fused_datacell";
 const char* const HGRAPH_USE_REVERSE_EDGES_KEY = "use_reverse_edges";
 const char* const HGRAPH_PERSIST_SOURCE_ID_KEY = "persist_source_id";
 const char* const HGRAPH_MCI_KEY = "mci";

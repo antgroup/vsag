@@ -145,7 +145,22 @@ HGraph::Pretrain(const std::vector<int64_t>& base_tag_ids,
 
 bool
 HGraph::UpdateId(int64_t old_id, int64_t new_id) {
-    const auto updated = InnerIndexInterface::UpdateId(old_id, new_id);
+    if (old_id == new_id) {
+        return true;
+    }
+
+    bool updated = false;
+    if (this->rabitq_fused_datacell_ == nullptr) {
+        updated = InnerIndexInterface::UpdateId(old_id, new_id);
+    } else {
+        std::scoped_lock fused_write_lock(this->global_mutex_);
+        std::scoped_lock label_lock(this->label_lookup_mutex_);
+        const auto [found, inner_id] = this->label_table_->TryGetIdByLabel(old_id, true);
+        CHECK_ARGUMENT(found, "old label does not exist");
+        this->label_table_->UpdateLabel(old_id, new_id);
+        this->rabitq_fused_datacell_->SetLabel(inner_id, new_id);
+        updated = true;
+    }
     if (updated and this->use_conjugate_graph_) {
         std::unique_lock graph_lock(this->conjugate_graph_mutex_);
         (void)this->conjugate_graph_->UpdateId(old_id, new_id);

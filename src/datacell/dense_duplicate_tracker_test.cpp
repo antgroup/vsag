@@ -90,6 +90,21 @@ TEST_CASE("DenseDuplicateTracker serialize and deserialize", "[ut][DenseDuplicat
     REQUIRE(restored.GetGroupId(5) == 4);
 }
 
+TEST_CASE("DenseDuplicateTracker bounds serialized capacity before allocation",
+          "[ut][DenseDuplicateTracker]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    std::stringstream ss;
+    IOStreamWriter writer(ss);
+    const size_t duplicate_count = 0;
+    const size_t serialized_size = 1024;
+    StreamWriter::WriteObj(writer, duplicate_count);
+    StreamWriter::WriteObj(writer, serialized_size);
+
+    DenseDuplicateTracker tracker(allocator.get());
+    IOStreamReader reader(ss);
+    REQUIRE_THROWS_AS(tracker.DeserializeBounded(reader, 8), VsagException);
+}
+
 TEST_CASE("DenseDuplicateTracker resize initializes new ids", "[ut][DenseDuplicateTracker]") {
     auto allocator = std::make_shared<DefaultAllocator>();
     DenseDuplicateTracker tracker(allocator.get());

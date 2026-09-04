@@ -57,8 +57,11 @@
 
 namespace vsag {
 class FlattenOptimizedBuildInterface;
+class HGraphRaBitQFusedDataCell;
+class HGraphRaBitQSearcher;
 class HGraphOptimizedBuildSession;
 class IteratorFilterContext;
+class RaBitQSplitDataCellInterface;
 
 /**
  * @brief HGraph: hierarchical navigable graph index.
@@ -119,6 +122,9 @@ public:
 
     InnerIndexPtr
     ExportModel(const IndexCommonParam& param) const override;
+
+    InnerIndexPtr
+    Clone(const IndexCommonParam& param) override;
 
     uint64_t
     EstimateMemory(uint64_t num_elements) const override;
@@ -265,6 +271,9 @@ public:
     void
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override;
 
+    bool
+    UpdateExtraInfo(const DatasetPtr& new_base) override;
+
     void
     UpdateAttribute(int64_t id,
                     const AttributeSet& new_attrs,
@@ -348,9 +357,18 @@ public:
     void
     insert_persistent_codes_unlocked(const void* data, InnerIdType inner_id);
 
+    void
+    insert_fused_optimized_build_codes(const void* data, InnerIdType inner_id);
+
     /// Write codes to a physical code slot when deduplicated storage is enabled.
     void
     insert_persistent_codes_to_slot(const void* data, CodeSlotIdType code_slot_id);
+
+    void
+    sync_fused_node_codes(InnerIdType inner_id, const void* data);
+
+    void
+    restore_fused_codec();
 
     /// Ensure physical code storage can hold required_capacity physical slots.
     void
@@ -368,6 +386,25 @@ public:
     GraphInterfacePtr
     generate_one_route_graph();
 
+    // Keep legacy RaBitQ candidates compact while allowing fused direct search to preserve hints.
+    // Only the buffer selected by search_one_graph allocates element storage.
+    struct RaBitQSearchCandidateBuffers {
+        explicit RaBitQSearchCandidateBuffers(Allocator* allocator)
+            : generic(allocator), fused(allocator) {
+        }
+
+        void
+        Reset() {
+            generic.clear();
+            fused.clear();
+            fused_search_used = false;
+        }
+
+        DistanceRecordVector generic;
+        RaBitQCandidateVector fused;
+        bool fused_search_used{false};
+    };
+
     /// Search a single graph layer, returning a candidate distance heap.
     /// @param ctx  may be nullptr during add (non-query) scenarios.
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
@@ -378,7 +415,8 @@ public:
                      InnerSearchParam& inner_search_param,
                      const VisitedListPtr& vt,
                      QueryContext* ctx,
-                     DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+                     RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr,
+                     bool* fused_search_finalized = nullptr) const;
 
     /// Overload that accepts an IteratorFilterContext for iterative search.
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
@@ -390,9 +428,15 @@ public:
                      IteratorFilterContext* iter_ctx,
                      // ctx can be nullptr in adding scenario
                      QueryContext* ctx,
-                     DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+                     RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr) const;
 
 private:
+    void
+    check_fused_mutation_supported(std::string_view operation) const;
+
+    std::vector<int64_t>
+    add_impl(const DatasetPtr& data);
+
     [[nodiscard]] std::shared_lock<std::shared_mutex>
     acquire_global_read_lock() const {
         if (not this->physical_code_resize_pending_.load(std::memory_order_acquire)) {
@@ -482,6 +526,12 @@ private:
 
     void
     validate_add_data(const DatasetPtr& data) const;
+
+    void
+    validate_fused_vector_data(const float* data, uint64_t count) const;
+
+    void
+    validate_fused_encoding_data(const float* data, uint64_t count) const;
 
     AddContext
     prepare_add_context(const DatasetPtr& data);
@@ -650,7 +700,7 @@ private:
             int64_t k,
             IteratorFilterContext* iter_ctx,
             QueryContext& ctx,
-            const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr,
+            const RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr,
             const std::optional<float>& distance_threshold = std::nullopt) const;
 
     /// Run ELP (Edge-Link Pruning) optimizer on the bottom graph.
@@ -854,6 +904,9 @@ private:
 
     Vector<GraphInterfacePtr> route_graphs_;   // upper-layer route graphs
     GraphInterfacePtr bottom_graph_{nullptr};  // base-level graph (all vectors)
+    std::shared_ptr<HGraphRaBitQFusedDataCell> rabitq_fused_datacell_{nullptr};
+    std::shared_ptr<RaBitQSplitDataCellInterface> rabitq_split_codes_{nullptr};
+    std::shared_ptr<HGraphRaBitQSearcher> rabitq_fused_searcher_{nullptr};
     SparseGraphDatacellParamPtr hierarchical_datacell_param_{nullptr};  // params for route graphs
 
     bool use_elp_optimizer_{false};  // enable ELP edge-link pruning

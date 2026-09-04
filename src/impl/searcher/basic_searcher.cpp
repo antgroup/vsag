@@ -248,7 +248,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             if (reasoning != nullptr) {
                 reasoning->RecordVisit(distance_provider.OriginalId(id), dist, hops);
             }
-            if (not std::isfinite(dist)) {
+            if (not is_finite_distance(dist)) {
                 candidate_set->Push(traversal_priority(dist), id);
                 if (check_func(id) and
                     is_result_distance_eligible<mode>(dist, inner_search_param)) {
@@ -474,7 +474,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
             const auto cur_id = to_be_visited_id[i];
-            if (not std::isfinite(dist)) {
+            if (not is_finite_distance(dist)) {
                 if (is_result_distance_eligible<mode>(dist, inner_search_param) and
                     (not is_id_allowed || is_id_allowed->CheckValid(cur_id))) {
                     top_candidates->Push(dist, cur_id);
@@ -641,7 +641,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                     ctx->distance_phase, DistanceEvaluationBackend::UNKNOWN, batch_count);
             }
             for (uint64_t i = 0; i < batch_count; ++i) {
-                CHECK_ARGUMENT(std::isfinite(scores[offset + i]),
+                CHECK_ARGUMENT(is_finite_distance(scores[offset + i]),
                                "distance callback must return finite scores");
             }
         }
@@ -702,7 +702,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     if (check_func(ep) and is_result_distance_eligible<mode>(dist, inner_search_param)) {
         top_candidates->Push(dist, ep);
     }
-    if (not std::isfinite(dist) and inner_search_param.consider_duplicate and
+    if (not is_finite_distance(dist) and inner_search_param.consider_duplicate and
         not use_custom_distance and is_result_distance_eligible<mode>(dist, inner_search_param)) {
         for (const auto duplicate_id : graph->GetDuplicateIds(ep)) {
             if (check_func(duplicate_id)) {
@@ -811,7 +811,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 const auto duplicate_ids = graph->GetDuplicateIds(cur_id);
                 score_duplicates(duplicate_ids, hops);
             }
-            if (not std::isfinite(dist)) {
+            if (not is_finite_distance(dist)) {
                 candidate_set->Push(traversal_priority(dist), cur_id);
                 auto push_result = [&](InnerIdType result_id) {
                     if (not is_result_distance_eligible<mode>(dist, inner_search_param) or

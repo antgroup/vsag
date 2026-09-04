@@ -25,6 +25,7 @@
 #include "datacell/sparse_vector_datacell_parameter.h"
 #include "impl/odescent/odescent_graph_parameter.h"
 #include "inner_string_params.h"
+#include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "utils/param_compat_macros.h"
 #include "vsag/constants.h"
 
@@ -69,6 +70,9 @@ HGraphParameter::FromJson(const JsonType& json) {
 
     if (json.Contains(HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY)) {
         this->build_by_base = json[HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY].GetBool();
+    }
+    if (json.Contains(HGRAPH_RABITQ_FUSED_DATACELL_KEY)) {
+        this->rabitq_fused_datacell = json[HGRAPH_RABITQ_FUSED_DATACELL_KEY].GetBool();
     }
 
     CHECK_ARGUMENT(json.Contains(BASE_CODES_KEY),
@@ -238,6 +242,40 @@ HGraphParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
         not(this->mci_parameters.enabled and this->support_force_remove),
         "hgraph mci does not support force remove");
+    if (this->rabitq_fused_datacell) {
+        CHECK_ARGUMENT(not this->mci_parameters.enabled,
+                       "rabitq_fused_datacell does not support MCI");
+        CHECK_ARGUMENT(not this->deduplicate_storage,
+                       "rabitq_fused_datacell does not support deduplicate_storage");
+        CHECK_ARGUMENT(not this->support_force_remove,
+                       "rabitq_fused_datacell does not support force remove");
+        CHECK_ARGUMENT(this->base_codes_param->name == RABITQ_SPLIT_DATA_CELL,
+                       "rabitq_fused_datacell requires RaBitQ split codes");
+        const auto rabitq_param = std::dynamic_pointer_cast<RaBitQuantizerParameter>(
+            this->base_codes_param->quantizer_parameter);
+        CHECK_ARGUMENT(rabitq_param != nullptr,
+                       "rabitq_fused_datacell requires RaBitQ quantization");
+        CHECK_ARGUMENT(rabitq_param->pca_dim_ == 0,
+                       "rabitq_fused_datacell v1 does not support PCA; "
+                       "rabitq_pca_dim must be omitted or set to 0");
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            rabitq_param->num_bits_per_dim_filter_ >= 1 and
+                rabitq_param->num_bits_per_dim_filter_ <= 4 and
+                rabitq_param->num_bits_per_dim_base_ > rabitq_param->num_bits_per_dim_filter_ and
+                rabitq_param->num_bits_per_dim_base_ <= 8,
+            "rabitq_fused_datacell requires split x+y with x in [1, 4], y >= 1, "
+            "and x+y <= 8");
+        const auto io_type = this->base_codes_param->io_parameter->GetTypeName();
+        CHECK_ARGUMENT(
+            io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO or io_type == IO_TYPE_VALUE_MEMORY_IO,
+            "rabitq_fused_datacell only supports memory IO");
+        const auto supplement_io = this->base_codes_param->supplement_io_parameter;
+        const auto supplement_io_type =
+            supplement_io == nullptr ? io_type : supplement_io->GetTypeName();
+        CHECK_ARGUMENT(supplement_io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO or
+                           supplement_io_type == IO_TYPE_VALUE_MEMORY_IO,
+                       "rabitq_fused_datacell only supports in-memory supplement IO");
+    }
 }
 
 JsonType
@@ -247,6 +285,7 @@ HGraphParameter::ToJson() const {
 
     json[HGRAPH_USE_ELP_OPTIMIZER_KEY].SetBool(this->use_elp_optimizer);
     json[HGRAPH_IGNORE_REORDER_KEY].SetBool(this->ignore_reorder);
+    json[HGRAPH_RABITQ_FUSED_DATACELL_KEY].SetBool(this->rabitq_fused_datacell);
     json[REORDER_SOURCE_KEY].SetString(this->reorder_source);
     json[BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
     json[GRAPH_KEY].SetJson(this->bottom_graph_param->ToJson());
@@ -307,6 +346,7 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, deduplicate_storage);
     CHECK_FIELD_EQ(*this, *p, duplicate_distance_threshold);
     CHECK_FIELD_EQ(*this, *p, support_force_remove);
+    CHECK_FIELD_EQ(*this, *p, rabitq_fused_datacell);
     // A conjugate-enabled reader can load an older index without the optional graph and start
     // with an empty one. The reverse direction would discard serialized enhancement data.
     if (not this->use_conjugate_graph and p->use_conjugate_graph) {

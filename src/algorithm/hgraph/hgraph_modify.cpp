@@ -31,6 +31,11 @@ HGraph::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
     }
 
     if (mode == RemoveMode::FORCE_REMOVE) {
+        if (this->rabitq_fused_datacell_ != nullptr) {
+            throw VsagException(
+                ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                "fused RaBitQ HGraph without neighbor versions does not support force remove");
+        }
         CHECK_ARGUMENT(this->support_force_remove(),
                        "force remove requires index_param.support_force_remove to be true");
         std::unique_lock<std::shared_mutex> wlock(this->force_remove_mutex_);

@@ -17,6 +17,7 @@
 #include <nlohmann/json.hpp>
 
 #include "common.h"
+#include "datacell/graph_datacell_parameter.h"
 #include "hgraph.h"  // IWYU pragma: keep
 #include "hgraph_parameter.h"
 #include "io/common/io_parameter.h"
@@ -78,6 +79,7 @@ build_default_hgraph_inner_param(const JsonType& external_json) {
     json[HGRAPH_USE_ELP_OPTIMIZER_KEY].SetBool(false);
     json[HGRAPH_IGNORE_REORDER_KEY].SetBool(false);
     json[HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY].SetBool(false);
+    json[HGRAPH_RABITQ_FUSED_DATACELL_KEY].SetBool(false);
     json[RESIZE_INCREASE_COUNT_BIT].SetUint64(DEFAULT_RESIZE_INCREASE_COUNT_BIT);
     json[USE_ATTRIBUTE_FILTER_KEY].SetBool(false);
 
@@ -160,6 +162,8 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             inner_json[HGRAPH_IGNORE_REORDER_KEY].SetJson(value);
         } else if (key == HGRAPH_BUILD_BY_BASE_QUANTIZATION) {
             inner_json[HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY].SetJson(value);
+        } else if (key == HGRAPH_RABITQ_FUSED_DATACELL) {
+            inner_json[HGRAPH_RABITQ_FUSED_DATACELL_KEY].SetJson(value);
         } else if (key == USE_ATTRIBUTE_FILTER) {
             inner_json[USE_ATTRIBUTE_FILTER_KEY].SetJson(value);
         } else if (key == HGRAPH_BASE_QUANTIZATION_TYPE) {
@@ -231,6 +235,8 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             inner_json[GRAPH_KEY][ODESCENT_PARAMETER_BUILD_BLOCK_SIZE].SetJson(value);
         } else if (key == HGRAPH_BUILD_THREAD_COUNT) {
             inner_json[BUILD_THREAD_COUNT_KEY].SetJson(value);
+        } else if (key == HGRAPH_TRAIN_SAMPLE_COUNT) {
+            inner_json[TRAIN_SAMPLE_COUNT_KEY].SetJson(value);
         } else if (key == SQ4_UNIFORM_TRUNC_RATE) {
             inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY]
                       [SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY]
@@ -334,6 +340,19 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     auto hgraph_parameter = std::make_shared<HGraphParameter>();
     hgraph_parameter->data_type = common_param.data_type_;
     hgraph_parameter->FromJson(inner_json);
+    if (hgraph_parameter->rabitq_fused_datacell) {
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            common_param.metric_ == MetricType::METRIC_TYPE_L2SQR or
+                common_param.metric_ == MetricType::METRIC_TYPE_IP,
+            "rabitq_fused_datacell only supports L2 and inner product");
+        const auto graph_param =
+            std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_parameter->bottom_graph_param);
+        CHECK_ARGUMENT(graph_param != nullptr, "rabitq_fused_datacell requires flat graph storage");
+        const auto graph_io_type = graph_param->io_parameter_->GetTypeName();
+        CHECK_ARGUMENT(graph_io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO or
+                           graph_io_type == IO_TYPE_VALUE_MEMORY_IO,
+                       "rabitq_fused_datacell only supports an in-memory graph");
+    }
     uint64_t max_degree = hgraph_parameter->bottom_graph_param->max_degree_;
 
     auto max_degree_threshold = std::max<int64_t>(common_param.dim_, 128);
