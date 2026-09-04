@@ -19,6 +19,7 @@
 #include <limits>
 #include <random>
 
+#include "dataset_impl.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/logger/logger.h"
 #include "impl/searcher/basic_searcher.h"
@@ -123,14 +124,40 @@ PyramidAnalyzer::AnalyzeIndexBySearch(const SearchRequest& request) {
     CHECK_ARGUMENT(h_iter != pyramid_->hierarchies_.end(),
                    fmt::format("unknown hierarchy name: '{}'", hierarchy_name));
 
-    const auto* query_paths = query->GetPaths(hierarchy_name);
-    if (query_paths == nullptr) {
-        query_paths = query->GetPaths();
+    ParsedQueryPathList parsed_query_paths;
+    const auto load_query_paths = [&](const std::string& name) {
+        if (const auto* legacy_paths = query->GetPaths(name)) {
+            parsed_query_paths.reserve(query_count);
+            for (uint32_t i = 0; i < query_count; ++i) {
+                parsed_query_paths.push_back(Pyramid::parse_path(legacy_paths[i]));
+            }
+            return true;
+        }
+
+        uint64_t path_count = 0;
+        if (GetDatasetPaths(*query, name, 0, path_count) == nullptr) {
+            return false;
+        }
+        parsed_query_paths.resize(query_count);
+        for (uint32_t i = 0; i < query_count; ++i) {
+            const auto* paths = GetDatasetPaths(*query, name, i, path_count);
+            CHECK_ARGUMENT(paths != nullptr,
+                           "query paths must use one representation for the whole hierarchy");
+            parsed_query_paths[i].reserve(path_count);
+            for (uint64_t j = 0; j < path_count; ++j) {
+                parsed_query_paths[i].push_back(Pyramid::parse_atomic_path(paths[j]));
+            }
+        }
+        return true;
+    };
+    bool has_query_paths = load_query_paths(hierarchy_name);
+    if (not has_query_paths && not hierarchy_name.empty()) {
+        has_query_paths = load_query_paths("");
     }
     // NOLINTNEXTLINE(readability-simplify-boolean-expr)
-    CHECK_ARGUMENT(
-        query_paths != nullptr || h_iter->second->root->status_ != IndexNode::Status::NO_INDEX,
-        "query_path is required when level0 is not built");
+    CHECK_ARGUMENT(has_query_paths || h_iter->second->root->status_ != IndexNode::Status::NO_INDEX,
+                   "query_path is required when level0 is not built");
+    const auto* query_paths = has_query_paths ? &parsed_query_paths : nullptr;
 
     Vector<InnerIdType> query_ids(allocator_);
     query_ids.resize(query_count);
@@ -561,7 +588,7 @@ PyramidAnalyzer::calculate_groundtruth(const Vector<float>& sample_datas,
                                        UnorderedMap<InnerIdType, DistHeapPtr>& ground_truth,
                                        uint32_t sample_size,
                                        const std::string& hierarchy_name,
-                                       const std::string* query_paths,
+                                       const ParsedQueryPathList* query_paths,
                                        const UnorderedSet<InnerIdType>& deleted_ids) {
     if (not ground_truth.empty()) {
         return;
@@ -574,8 +601,8 @@ PyramidAnalyzer::calculate_groundtruth(const Vector<float>& sample_datas,
             logger::info("[calculate_groundtruth] Processing sample {} of {}", i, sample_size);
         }
 
-        const auto* query_path = query_paths == nullptr ? nullptr : query_paths + i;
-        auto ids_array = collect_search_scope_ids(hierarchy_name, query_path, deleted_ids);
+        const auto* current_paths = query_paths == nullptr ? nullptr : &(*query_paths)[i];
+        auto ids_array = collect_search_scope_ids(hierarchy_name, current_paths, deleted_ids);
         Vector<float> distances_array(ids_array.size(), allocator_);
         auto comp = codes->FactoryComputer(sample_datas.data() + static_cast<size_t>(i) * dim_);
         if (not ids_array.empty()) {
@@ -600,18 +627,18 @@ PyramidAnalyzer::calculate_groundtruth(const Vector<float>& sample_datas,
 
 Vector<InnerIdType>
 PyramidAnalyzer::collect_search_scope_ids(const std::string& hierarchy_name,
-                                          const std::string* query_path,
+                                          const ParsedPathList* query_paths,
                                           const UnorderedSet<InnerIdType>& deleted_ids) {
     Vector<InnerIdType> ids(allocator_);
     UnorderedSet<InnerIdType> seen_ids(allocator_);
     const auto& hierarchy = *pyramid_->hierarchies_.at(hierarchy_name);
 
-    if (query_path == nullptr) {
+    if (query_paths == nullptr) {
         collect_searchable_node_ids(hierarchy.root.get(), deleted_ids, seen_ids, ids);
         return ids;
     }
 
-    for (const auto& one_path : Pyramid::parse_path(*query_path)) {
+    for (const auto& one_path : *query_paths) {
         const IndexNode* node = hierarchy.root.get();
         for (const auto& item : one_path) {
             std::shared_lock lock(node->mutex_);
@@ -791,7 +818,7 @@ PyramidAnalyzer::calculate_search_result(
     const std::string& search_param,
     uint32_t sample_size,
     const std::string& hierarchy_name,
-    const std::string* query_paths) {
+    const ParsedQueryPathList* query_paths) {
     float total_time = 0.0F;
     auto start_time = std::chrono::steady_clock::now();
 
@@ -819,7 +846,21 @@ PyramidAnalyzer::calculate_search_result(
         query->Dim(dim_)->NumElements(1)->Owner(false)->Float32Vectors(
             sample_datas.data() + static_cast<size_t>(i) * dim_);
         if (query_paths != nullptr) {
-            query->Paths(hierarchy_name, query_paths + i);
+            std::vector<std::string> atomic_paths;
+            atomic_paths.reserve((*query_paths)[i].size());
+            for (const auto& parsed_path : (*query_paths)[i]) {
+                std::string path;
+                for (uint64_t j = 0; j < parsed_path.size(); ++j) {
+                    if (j != 0) {
+                        path.push_back(PART_SLASH);
+                    }
+                    path.append(parsed_path[j]);
+                }
+                atomic_paths.push_back(std::move(path));
+            }
+            std::vector<std::vector<std::string>> structured_paths;
+            structured_paths.push_back(std::move(atomic_paths));
+            query->Paths(hierarchy_name, std::move(structured_paths));
         }
 
         double single_query_time = 0.0;

@@ -15,8 +15,11 @@
 
 #include "dataset_impl.h"
 
+#include <algorithm>
 #include <cstring>
+#include <memory>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "typing.h"
@@ -27,6 +30,215 @@ namespace vsag {
 DatasetPtr
 Dataset::Make() {
     return std::make_shared<DatasetImpl>();
+}
+
+DatasetPtr
+Dataset::Paths(const std::string& hierarchy_name, std::vector<std::vector<std::string>> paths) {
+    auto* dataset = dynamic_cast<DatasetImpl*>(this);
+    if (dataset == nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "This Dataset implementation does not support multiple paths");
+    }
+    return dataset->Paths(hierarchy_name, std::move(paths));
+}
+
+bool
+Dataset::GetPaths(const std::string& hierarchy_name,
+                  std::vector<std::vector<std::string>>& paths) const {
+    if (const auto* dataset = dynamic_cast<const DatasetImpl*>(this)) {
+        return dataset->CopyPaths(hierarchy_name, paths);
+    }
+
+    paths.clear();
+    const auto* legacy_paths = GetPaths(hierarchy_name);
+    if (legacy_paths == nullptr) {
+        return false;
+    }
+    const auto num_elements = GetNumElements();
+    if (num_elements < 0) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "NumElements() must not be negative");
+    }
+    paths.reserve(static_cast<uint64_t>(num_elements));
+    for (int64_t i = 0; i < num_elements; ++i) {
+        paths.push_back({legacy_paths[i]});
+    }
+    return true;
+}
+
+const std::string*
+GetDatasetPaths(const Dataset& dataset,
+                const std::string& hierarchy_name,
+                uint64_t element_index,
+                uint64_t& path_count) {
+    if (const auto* dataset_impl = dynamic_cast<const DatasetImpl*>(&dataset)) {
+        return dataset_impl->GetPaths(hierarchy_name, element_index, path_count);
+    }
+
+    path_count = 0;
+    const auto* paths = dataset.GetPaths(hierarchy_name);
+    if (paths == nullptr) {
+        return nullptr;
+    }
+    if (dataset.GetNumElements() < 0 ||
+        element_index >= static_cast<uint64_t>(dataset.GetNumElements())) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Path element index is outside NumElements()");
+    }
+    path_count = 1;
+    return paths + element_index;
+}
+
+DatasetPtr
+DatasetImpl::NumElements(int64_t num_elements) {
+    const auto count_iter = data_.find(NUM_ELEMENTS);
+    const bool is_count_update =
+        count_iter != data_.end() && std::get<int64_t>(count_iter->second) != num_elements;
+    for (const auto& [key, value] : data_) {
+        if (not IsPathsKey(key)) {
+            continue;
+        }
+        if (const auto* paths = std::get_if<MultiPaths>(&value)) {
+            if (num_elements < 0 ||
+                (not is_count_update && paths->size() != static_cast<uint64_t>(num_elements))) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "The multi-path outer vector must match NumElements()");
+            }
+        }
+    }
+    data_[NUM_ELEMENTS] = num_elements;
+    return shared_from_this();
+}
+
+DatasetPtr
+DatasetImpl::Paths(const std::string* paths) {
+    ReplacePaths(DATASET_PATHS, paths);
+    return shared_from_this();
+}
+
+DatasetPtr
+DatasetImpl::Paths(const std::string& hierarchy_name, const std::string* paths) {
+    const auto key = hierarchy_name.empty() ? DATASET_PATHS : HierarchyPathsKey(hierarchy_name);
+    ReplacePaths(key, paths);
+    return shared_from_this();
+}
+
+void
+DatasetImpl::ReplacePaths(const std::string& key, var paths) {
+    auto iter = data_.find(key);
+    if (iter == data_.end()) {
+        data_.emplace(key, std::move(paths));
+        return;
+    }
+
+    const auto* old_paths = std::get_if<const std::string*>(&iter->second);
+    const auto* new_paths = std::get_if<const std::string*>(&paths);
+    if (old_paths != nullptr && *old_paths != nullptr &&
+        (new_paths == nullptr || *old_paths != *new_paths)) {
+        retired_paths_.push_back(*old_paths);
+    }
+    iter->second = std::move(paths);
+}
+
+DatasetPtr
+DatasetImpl::Paths(const std::string& hierarchy_name, MultiPaths paths) {
+    for (const auto& element_paths : paths) {
+        if (element_paths.empty()) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Each element must have at least one hierarchy path");
+        }
+    }
+    if (auto iter = data_.find(NUM_ELEMENTS); iter != data_.end()) {
+        const auto num_elements = std::get<int64_t>(iter->second);
+        if (num_elements < 0 || paths.size() != static_cast<uint64_t>(num_elements)) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "The multi-path outer vector must match NumElements()");
+        }
+    }
+
+    const auto key = hierarchy_name.empty() ? DATASET_PATHS : HierarchyPathsKey(hierarchy_name);
+    ReplacePaths(key, std::move(paths));
+    return shared_from_this();
+}
+
+const std::string*
+DatasetImpl::GetPaths(const std::string& hierarchy_name,
+                      uint64_t element_index,
+                      uint64_t& path_count) const {
+    path_count = 0;
+    const auto* value = FindPaths(hierarchy_name);
+    if (value == nullptr) {
+        return nullptr;
+    }
+
+    if (const auto* paths = std::get_if<const std::string*>(value)) {
+        if (*paths == nullptr) {
+            return nullptr;
+        }
+        if (GetNumElements() < 0 || element_index >= static_cast<uint64_t>(GetNumElements())) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Path element index is outside NumElements()");
+        }
+        path_count = 1;
+        return *paths + element_index;
+    }
+
+    const auto& paths = std::get<MultiPaths>(*value);
+    if (GetNumElements() < 0 || paths.size() != static_cast<uint64_t>(GetNumElements())) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "The multi-path outer vector must match NumElements()");
+    }
+    if (element_index >= paths.size()) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Path element index is outside NumElements()");
+    }
+
+    const auto& element_paths = paths[element_index];
+    path_count = element_paths.size();
+    return element_paths.data();
+}
+
+bool
+DatasetImpl::HasPaths(const std::string& hierarchy_name) const {
+    const auto* value = FindPaths(hierarchy_name);
+    if (value == nullptr) {
+        return false;
+    }
+    if (const auto* paths = std::get_if<const std::string*>(value)) {
+        return *paths != nullptr;
+    }
+    return true;
+}
+
+bool
+DatasetImpl::CopyPaths(const std::string& hierarchy_name, MultiPaths& paths) const {
+    paths.clear();
+    const auto* value = FindPaths(hierarchy_name);
+    if (value == nullptr) {
+        return false;
+    }
+    if (const auto* legacy_paths = std::get_if<const std::string*>(value)) {
+        if (*legacy_paths == nullptr) {
+            return false;
+        }
+        const auto num_elements = GetNumElements();
+        if (num_elements < 0) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "NumElements() must not be negative");
+        }
+        paths.reserve(static_cast<uint64_t>(num_elements));
+        for (int64_t i = 0; i < num_elements; ++i) {
+            paths.push_back({(*legacy_paths)[i]});
+        }
+        return true;
+    }
+
+    const auto& multi_paths = std::get<MultiPaths>(*value);
+    const auto num_elements = GetNumElements();
+    if (num_elements < 0 || multi_paths.size() != static_cast<uint64_t>(num_elements)) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "The multi-path outer vector must match NumElements()");
+    }
+    paths = multi_paths;
+    return true;
 }
 
 DatasetPtr
@@ -311,11 +523,15 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
             delete[] paths;
         }
     };
-    release_paths(DatasetImpl::GetPaths());
     for (const auto& [key, value] : this->data_) {
-        if (IsHierarchyPathsKey(key)) {
-            release_paths(std::get<const std::string*>(value));
+        if (IsPathsKey(key)) {
+            if (const auto* paths = std::get_if<const std::string*>(&value)) {
+                release_paths(*paths);
+            }
         }
+    }
+    for (const auto* paths : retired_paths_) {
+        release_paths(paths);
     }
     delete[] DatasetImpl::GetSourceID();
     if (DatasetImpl::GetAttributeSets() != nullptr) {
@@ -380,15 +596,25 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
         copy_dataset->MultiVectors(allocate_and_copy_multi_vectors(
             this->GetMultiVectors(), num_elements, mv_dim, allocator_ref));
     }
-    if (this->GetPaths() != nullptr) {
-        copy_dataset->Paths(
-            allocate_and_copy_paths(this->GetPaths(), static_cast<uint64_t>(num_elements)));
-    }
     for (const auto& [key, value] : this->data_) {
-        if (IsHierarchyPathsKey(key)) {
-            copy_dataset->Paths(HierarchyNameFromPathsKey(key),
-                                allocate_and_copy_paths(std::get<const std::string*>(value),
-                                                        static_cast<uint64_t>(num_elements)));
+        if (not IsPathsKey(key)) {
+            continue;
+        }
+        const auto hierarchy_name =
+            key == DATASET_PATHS ? std::string{} : HierarchyNameFromPathsKey(key);
+        if (const auto* paths = std::get_if<const std::string*>(&value)) {
+            if (*paths == nullptr) {
+                continue;
+            }
+            auto* copied_paths =
+                allocate_and_copy_paths(*paths, static_cast<uint64_t>(num_elements));
+            if (hierarchy_name.empty()) {
+                copy_dataset->Paths(copied_paths);
+            } else {
+                copy_dataset->Paths(hierarchy_name, copied_paths);
+            }
+        } else {
+            copy_dataset->Paths(hierarchy_name, std::get<MultiPaths>(value));
         }
     }
     for (const auto& [key, value] : this->data_) {
@@ -455,45 +681,54 @@ DatasetImpl::Append(const DatasetPtr& other) {
     auto dim = this->GetDim();
 
     // check paths
-    if (this->data_.find(DATASET_PATHS) != this->data_.end() && other->GetPaths() == nullptr) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            "Cannot append dataset without paths to dataset with paths");
-    }
-    std::vector<std::string> hierarchy_path_keys;
+    const auto dataset_has_paths = [](const DatasetPtr& dataset,
+                                      const std::string& hierarchy_name) {
+        if (const auto impl = std::dynamic_pointer_cast<DatasetImpl>(dataset)) {
+            return impl->HasPaths(hierarchy_name);
+        }
+        if (dataset->GetPaths(hierarchy_name) != nullptr) {
+            return true;
+        }
+        if (dataset->GetNumElements() <= 0) {
+            return false;
+        }
+        uint64_t path_count = 0;
+        return GetDatasetPaths(*dataset, hierarchy_name, 0, path_count) != nullptr;
+    };
+    std::vector<std::string> path_keys;
     for (const auto& [key, value] : this->data_) {
-        if (not IsHierarchyPathsKey(key)) {
+        if (not IsPathsKey(key)) {
             continue;
         }
-        const auto* paths = std::get<const std::string*>(value);
-        if (paths == nullptr) {
+        const auto hierarchy_name =
+            key == DATASET_PATHS ? std::string{} : HierarchyNameFromPathsKey(key);
+        if (not HasPaths(hierarchy_name)) {
             continue;
         }
-        const auto hierarchy_name = HierarchyNameFromPathsKey(key);
-        if (other->GetPaths(hierarchy_name) == nullptr) {
-            std::string error_message = "Cannot append dataset without paths for hierarchy ";
-            error_message.append(hierarchy_name)
-                .append(" to dataset with paths for hierarchy ")
-                .append(hierarchy_name);
-            throw VsagException(ErrorType::INVALID_ARGUMENT, error_message);
+        if (not dataset_has_paths(other, hierarchy_name)) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Cannot append dataset without paths for hierarchy '",
+                                hierarchy_name,
+                                "' to dataset with paths for that hierarchy");
         }
-        hierarchy_path_keys.push_back(key);
+        path_keys.push_back(key);
     }
     auto other_impl = std::dynamic_pointer_cast<DatasetImpl>(other);
     if (other_impl != nullptr) {
         for (const auto& [key, value] : other_impl->data_) {
-            if (not IsHierarchyPathsKey(key)) {
+            if (not IsPathsKey(key)) {
                 continue;
             }
-            if (std::get<const std::string*>(value) == nullptr) {
+            const auto hierarchy_name =
+                key == DATASET_PATHS ? std::string{} : HierarchyNameFromPathsKey(key);
+            if (not other_impl->HasPaths(hierarchy_name)) {
                 continue;
             }
-            const auto hierarchy_name = HierarchyNameFromPathsKey(key);
-            if (this->GetPaths(hierarchy_name) == nullptr) {
-                std::string error_message = "Cannot append dataset with paths for hierarchy ";
-                error_message.append(hierarchy_name)
-                    .append(" to dataset without paths for hierarchy ")
-                    .append(hierarchy_name);
-                throw VsagException(ErrorType::INVALID_ARGUMENT, error_message);
+            if (not HasPaths(hierarchy_name)) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "Cannot append dataset with paths for hierarchy '",
+                                    hierarchy_name,
+                                    "' to dataset without paths for that hierarchy");
             }
         }
     }
@@ -596,31 +831,90 @@ DatasetImpl::Append(const DatasetPtr& other) {
     }
 
     // append paths
-    std::unordered_set<const std::string*> replaced_paths;
-    auto append_paths = [&](const std::string* current_paths, const std::string* other_paths) {
-        auto* paths_copy = new std::string[old_num_elements + new_num_elements];
+    auto append_legacy_paths = [&](const std::string* current_paths,
+                                   const std::string* other_paths) {
+        auto paths_copy = std::make_unique<std::string[]>(old_num_elements + new_num_elements);
         for (int64_t i = 0; i < old_num_elements; ++i) {
             paths_copy[i] = current_paths[i];
         }
         for (int64_t i = 0; i < new_num_elements; ++i) {
             paths_copy[old_num_elements + i] = other_paths[i];
         }
-        replaced_paths.insert(current_paths);
         return paths_copy;
     };
-    if (auto iter = this->data_.find(DATASET_PATHS); iter != this->data_.end()) {
-        this->Paths(append_paths(std::get<const std::string*>(iter->second), other->GetPaths()));
-    }
-    for (const auto& key : hierarchy_path_keys) {
+
+    const auto append_path_rows = [](const Dataset& dataset,
+                                     const std::string& hierarchy_name,
+                                     int64_t count,
+                                     MultiPaths& result) {
+        for (uint64_t i = 0; i < static_cast<uint64_t>(count); ++i) {
+            uint64_t path_count = 0;
+            const auto* paths = GetDatasetPaths(dataset, hierarchy_name, i, path_count);
+            if (paths == nullptr) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "Cannot append a dataset without the required hierarchy paths");
+            }
+            if (path_count == 0) {
+                result.emplace_back();
+            } else {
+                result.emplace_back(paths, paths + path_count);
+            }
+        }
+    };
+
+    struct PendingPathAppend {
+        std::string key;
+        std::unique_ptr<std::string[]> legacy_paths;
+        MultiPaths multi_paths;
+        const std::string* replaced_paths{nullptr};
+    };
+    std::vector<PendingPathAppend> pending_paths;
+    pending_paths.reserve(path_keys.size());
+    for (const auto& key : path_keys) {
         auto iter = this->data_.find(key);
         if (iter == this->data_.end()) {
             continue;
         }
-        auto hierarchy_name = HierarchyNameFromPathsKey(key);
-        this->Paths(hierarchy_name,
-                    append_paths(std::get<const std::string*>(iter->second),
-                                 other->GetPaths(hierarchy_name)));
+        const auto hierarchy_name =
+            key == DATASET_PATHS ? std::string{} : HierarchyNameFromPathsKey(key);
+        const auto* current_legacy = std::get_if<const std::string*>(&iter->second);
+        const auto* other_legacy = other->GetPaths(hierarchy_name);
+        PendingPathAppend pending;
+        pending.key = key;
+        pending.replaced_paths = current_legacy == nullptr ? nullptr : *current_legacy;
+        if (current_legacy != nullptr && other_legacy != nullptr) {
+            pending.legacy_paths = append_legacy_paths(*current_legacy, other_legacy);
+            pending_paths.push_back(std::move(pending));
+            continue;
+        }
+
+        pending.multi_paths.reserve(static_cast<uint64_t>(old_num_elements + new_num_elements));
+        append_path_rows(*this, hierarchy_name, old_num_elements, pending.multi_paths);
+        append_path_rows(*other, hierarchy_name, new_num_elements, pending.multi_paths);
+        pending_paths.push_back(std::move(pending));
     }
+
+    std::unordered_set<const std::string*> replaced_paths;
+    replaced_paths.reserve(pending_paths.size());
+    for (const auto& pending : pending_paths) {
+        if (pending.replaced_paths != nullptr) {
+            replaced_paths.insert(pending.replaced_paths);
+        }
+    }
+    for (auto& pending : pending_paths) {
+        auto iter = data_.find(pending.key);
+        if (pending.legacy_paths != nullptr) {
+            iter->second = static_cast<const std::string*>(pending.legacy_paths.release());
+        } else {
+            iter->second = std::move(pending.multi_paths);
+        }
+    }
+    retired_paths_.erase(std::remove_if(retired_paths_.begin(),
+                                        retired_paths_.end(),
+                                        [&replaced_paths](const std::string* paths) {
+                                            return replaced_paths.count(paths) != 0;
+                                        }),
+                         retired_paths_.end());
     for (const auto* paths : replaced_paths) {
         delete[] paths;
     }

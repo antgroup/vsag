@@ -10,7 +10,8 @@ using DatasetPtr = std::shared_ptr<Dataset>;
 ## Builder 模式
 
 `Dataset` 采用流式 builder：`Make()` 创建实例，每个 setter 都返回同一个 `DatasetPtr`，因此调用可以链式
-书写。setter 只存储指针/值 —— 它们**不会**拷贝你的缓冲区。
+书写。指针 setter 只保存传入的缓冲区，不会复制；按值传入的 setter（例如 Pyramid 的结构化路径重载）
+会在 Dataset 内保存自己的值。
 
 ```cpp
 auto base = vsag::Dataset::Make()
@@ -87,7 +88,17 @@ DatasetPtr DeepCopy(Allocator* allocator = nullptr) const;  // 独立副本
 | `ExtraInfoSize(int64_t)` | `GetExtraInfoSize()` | `int64_t` | 每个 extra-info 数据块的字节数。 |
 | `Paths(const std::string*)` | `GetPaths()` | `const std::string*` | 层级路径（Pyramid）。默认层级。 |
 | `Paths(const std::string& hierarchy, const std::string*)` | `GetPaths(const std::string& hierarchy)` | `const std::string*` | 命名层级的路径。 |
+| `Paths(const std::string& hierarchy, std::vector<std::vector<std::string>>)` | `GetPaths(const std::string& hierarchy, std::vector<std::vector<std::string>>& paths)` | 结构化路径 | 每个元素在 Pyramid 层级中的一条或多条路径。 |
 | `SourceID(const std::string*)` | `GetSourceID()` | `const std::string*` | 每个元素可选的稳定来源标识；HGraph 用它跨快照匹配构建缓存条目。 |
+
+结构化 `Paths` 重载的外层 vector 必须正好包含 `NumElements()` 个条目，每个内层 vector
+必须列出至少一条对应元素的独立路径。空的内层 vector 非法；只包含一个空字符串（`{""}`）
+的内层 vector 表示将元素挂到层级根节点。重复路径或共享前缀不会让同一向量在节点或搜索
+结果中重复出现。
+
+结构化容器会被复制或移动到 `Dataset` 内，因此其生命周期不受 `Owner()` 控制。结构化
+`GetPaths` 重载会将旧表示或新表示复制到输出容器；hierarchy 不存在时会清空输出并返回
+`false`。
 
 见 [属性过滤（混合搜索）](../advanced/attribute_filter.md)、
 [Extra Info（附加信息）](../advanced/extra_info.md)与

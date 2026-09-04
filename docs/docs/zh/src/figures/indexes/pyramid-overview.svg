@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 560" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12">
   <title>Pyramid 索引概览</title>
-  <desc>Pyramid 为每个向量绑定一个路径字符串（如 "a/d/f"），并为路径树的每个节点构建一个邻近子图。查询带有路径前缀；搜索沿树下行到最具体的匹配子图，再在叶子图内执行 ef_search。no_build_levels 中列出的层级是透传容器，回退到线性扫描。</desc>
+  <desc>Pyramid 为每个向量绑定一条或多条路径（如 "a/d/f"），并为路径树的每个节点构建一个邻近子图。查询带有路径前缀；搜索沿树下行到最具体的匹配子图，再在叶子图内执行 ef_search。no_build_levels 中列出的层级是透传容器，回退到线性扫描。</desc>
 
   <defs>
     <marker id="arrow-search" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">

@@ -47,6 +47,10 @@ public:
     GetDuplicateRatio(IndexNode* root);
 
 private:
+    using ParsedPath = std::vector<std::string>;
+    using ParsedPathList = std::vector<ParsedPath>;
+    using ParsedQueryPathList = std::vector<ParsedPathList>;
+
     struct SubIndexStats {
         SubIndexStats(Allocator* allocator) : ids(allocator) {
         }
@@ -157,12 +161,12 @@ private:
                           UnorderedMap<InnerIdType, DistHeapPtr>& ground_truth,
                           uint32_t sample_size,
                           const std::string& hierarchy_name,
-                          const std::string* query_paths,
+                          const ParsedQueryPathList* query_paths,
                           const UnorderedSet<InnerIdType>& deleted_ids);
 
     Vector<InnerIdType>
     collect_search_scope_ids(const std::string& hierarchy_name,
-                             const std::string* query_path,
+                             const ParsedPathList* query_paths,
                              const UnorderedSet<InnerIdType>& deleted_ids);
 
     void
@@ -193,7 +197,7 @@ private:
                             const std::string& search_param,
                             uint32_t sample_size,
                             const std::string& hierarchy_name,
-                            const std::string* query_paths);
+                            const ParsedQueryPathList* query_paths);
 
     float
     get_search_recall(uint32_t sample_size,

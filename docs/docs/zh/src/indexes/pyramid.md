@@ -1,10 +1,10 @@
 # Pyramid
 
-![Pyramid：以路径字符串为键的"每节点一个邻近子图"的树形结构；搜索沿查询路径前缀下行到叶子子图后再执行 ef_search](../figures/indexes/pyramid-overview.svg)
+![Pyramid：以路径字符串为键的“每节点一个邻近子图”树形结构；向量可以属于多条路径，搜索沿指定路径前缀执行](../figures/indexes/pyramid-overview.svg)
 
-Pyramid 是 VSAG 的 **层级路径分区** 图索引。每条向量都附带一个路径字符串（例如
-`"a/d/f"`），Pyramid 会按路径树为每个节点构建一个子图；查询时提供一个路径前缀，
-检索即被限定在相应的子树内。
+Pyramid 是 VSAG 的 **层级路径分区** 图索引。每条向量可以附带零个、一个或多个路径字符串
+（例如 `"a/d/f"`），Pyramid 会按这些路径树为每个节点构建一个子图；查询时提供一个或
+多个路径前缀，检索即被限定在相应的子树内。
 
 这种设计非常适合多租户部署、标签分区的物料库，或者任何“一个逻辑索引服务多个群体、
 群体之间不允许结果交叉”的场景。
@@ -15,9 +15,9 @@ Pyramid 是 VSAG 的 **层级路径分区** 图索引。每条向量都附带一
 
 ## 工作原理
 
-1. **路径树。** 每条向量在 ID 之外还携带一个 `path`，分隔符为 `/`
+1. **路径树。** 每条向量在 ID 之外还可以携带多条独立路径，分隔符为 `/`
    （例如 `"tenant_a/lang_en/topic_news"`）。Pyramid 会为构建期间出现过的每个路径前缀
-   维护一个子索引。
+   维护一个子索引。即使向量属于多条路径，向量数据和 ID 也只保存一次。
 2. **按层构建子图。** 默认情况下每一层都会独立构建一张近邻图。可以用 `no_build_levels`
    跳过那些太小或太粗、不适合构图的层级——这些层级仍作为透传容器存在，但检索会退化为
    线性扫描。
@@ -228,7 +228,7 @@ storage 时，底图和路由图的边统一使用 precise codes 构建，否则
 ### 命名层级的 Dataset API
 
 使用重载方法 `Paths(hierarchy_name, paths)` 为每个层级设置路径。所有层级共享同一份
-`Ids()` 和 `Float32Vectors()`：
+`Ids()` 和 `Float32Vectors()`。指针重载保留原有的“每条向量一条路径”形式：
 
 ```cpp
 auto base = vsag::Dataset::Make();
@@ -260,10 +260,44 @@ const std::string* category_paths = data->GetPaths("category");
 
 `GetDataByIds` 以及未选择 `DATA_FLAG_PATH` 的 `GetDataByIdsWithFlag` 都不会附带路径
 数组。`store_paths` 为 `false` 时选择 `DATA_FLAG_PATH` 会返回参数错误。开启路径存储
-后，只有当所有请求 ID 在某个 hierarchy 中都有已记录的路径，结果才会包含该
-hierarchy。只要其中一个 ID 在构建或追加时没有提供该 hierarchy 的路径，对应 getter
-就返回 `nullptr`；其他路径完整的 hierarchy 仍会正常返回。单 hierarchy 模式下，
-`GetPaths()` 遵循相同的完整性规则。
+后，只有当所有请求 ID 在某个 hierarchy 中都恰好有一条已记录路径时，这些旧 getter
+才会返回该 hierarchy。只要其中一个 ID 没有已记录路径或有多条路径，对应 getter 就返回
+`nullptr`；其他路径完整的 hierarchy 仍会正常返回。单 hierarchy 模式下，
+`GetPaths()` 遵循相同规则。
+
+使用结构化重载可以统一取回旧表示或新表示中的全部路径：
+
+```cpp
+std::vector<std::vector<std::string>> tag_paths;
+if (data->GetPaths("tag", tag_paths)) {
+    // tag_paths[i] 包含 requested_ids[i] 的全部路径。
+}
+```
+
+若要让同一条向量在同一个层级中属于多条独立路径，请传入嵌套 vector。外层 vector
+与 dataset 元素一一对应，每个内层 vector 可以包含一条或多条路径：
+
+```cpp
+std::vector<std::vector<std::string>> tag_paths = {
+    {"technology", "military"}, // 向量 0 同时属于两条路径
+    {"sports"},                  // 向量 1 属于一条路径
+    {""},                        // 向量 2 属于层级根节点
+};
+
+auto base = vsag::Dataset::Make();
+base->NumElements(3)
+    ->Dim(128)
+    ->Ids(ids)
+    ->Float32Vectors(data)
+    ->Paths("tag", std::move(tag_paths))
+    ->Paths("site", site_paths) // 可与旧指针形式共存
+    ->Owner(false);
+index->Build(base);
+```
+
+空的内层 vector 非法；只包含 `""` 的内层 vector 表示挂到根节点。
+重复路径和共享前缀在同一个树节点内只插入一次。`Add()` 支持相同形式，序列化会保留
+最终形成的全部路径归属。
 
 ### 检索指定层级
 
@@ -283,9 +317,23 @@ auto result = index->KnnSearch(
     R"({"pyramid": {"ef_search": 100, "hierarchies": ["site"]}})").value();
 ```
 
+旧查询形式用 `|` 表示多条候选路径的并集，例如 `"technology|military"`；同一向量即使
+同时可由两条路径到达，在结果中也只出现一次。旧字符串形式中的 `|` 是保留分隔符，
+目前没有转义语法。结构化查询不依赖这个分隔约定，也允许路径段中包含字面量 `|`：
+
+```cpp
+auto query = vsag::Dataset::Make();
+query->NumElements(1)
+    ->Dim(128)
+    ->Float32Vectors(q)
+    ->Paths("tag", std::vector<std::vector<std::string>>{{"technology", "military"}})
+    ->Owner(false);
+```
+
 ### 增量插入 (Add)
 
-`Add()` 的用法与 `Build()` 一致——提供命名路径，索引会自动插入到所有匹配的层级：
+`Add()` 的用法与 `Build()` 一致——可以提供单路径或结构化命名路径，每条通过校验的向量
+都会插入到所有匹配路径：
 
 ```cpp
 auto new_data = vsag::Dataset::Make();
@@ -339,9 +387,10 @@ new_index->Deserialize(binary_set);
 `bottom_graph_size`、`route_graph_count`、`route_node_counts` 和 `route_graph_size`。
 `AnalyzeIndexBySearch` 还会输出按路径限定的
 query 召回率、距离、耗时，以及开启 reorder 时的量化指标。query 数据集必须包含与
-`KnnSearch` 相同的默认或命名 hierarchy 路径；批量数据集在需要或提供路径时，应为每条 query
-提供一条路径。`analyze_index` 工具当前无法从 dense query 文件加载 hierarchy 路径，因此
-按路径执行动态分析时请使用 C++ 接口。
+`KnnSearch` 相同的默认或命名 hierarchy 路径。对于批量数据集，外层路径集合的每一行对应
+一条 query：旧重载每行提供一个路径字符串（并用 `|` 表示并集），结构化重载则可为每行提供
+一条或多条原子路径，并允许路径中包含字面量 `|`。`analyze_index` 工具当前无法从
+dense query 文件加载 hierarchy 路径，因此按路径执行动态分析时请使用 C++ 接口。
 
 ## 标记删除
 

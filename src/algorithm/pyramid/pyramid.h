@@ -339,7 +339,14 @@ private:
 
     /// Pre-create the IndexNode tree structure from the path labels.
     static void
-    populate_path_tree(Hierarchy& h, const std::string* paths, int64_t count);
+    populate_path_tree(Hierarchy& h,
+                       const DatasetPtr& dataset,
+                       const std::string& hierarchy_name,
+                       int64_t count);
+
+    /// Resolve path strings to unique tree nodes, preserving first-seen order.
+    static std::vector<IndexNode*>
+    collect_path_nodes(Hierarchy& h, const std::string* paths, uint64_t path_count);
 
     void
     populate_hierarchy_trees(const DatasetPtr& base);
@@ -348,16 +355,10 @@ private:
     void
     add_to_hierarchy(Hierarchy& h,
                      const float* data_vectors,
-                     const std::string* paths,
+                     const DatasetPtr& dataset,
+                     const std::string& hierarchy_name,
                      const Vector<int64_t>& input_indices,
                      int64_t first_inner_id);
-
-    void
-    add_to_path(Hierarchy& hierarchy,
-                const std::string& path,
-                InnerIdType inner_id,
-                const float* vector,
-                int sampled_root_level);
 
     /// Search a single hierarchy along a path prefix, accumulating candidates.
     void
@@ -365,7 +366,7 @@ private:
                      const SearchFunc& search_func,
                      const VisitedListPtr& vl,
                      DistHeapPtr& search_result,
-                     const std::string& path,
+                     const std::vector<std::vector<std::string>>& parsed_paths,
                      const InnerSearchParam& search_param,
                      ReasoningContext* reasoning_ctx) const;
 
@@ -494,7 +495,11 @@ private:
                   bool use_self_as_entry = false,
                   int sampled_route_level = std::numeric_limits<int>::min());
 
-    /// Split a path string into its hierarchical segments.
+    /// Split one atomic path string into its hierarchical segments.
+    static std::vector<std::string>
+    parse_atomic_path(const std::string& path);
+
+    /// Split a legacy path string into independent paths and hierarchical segments.
     static std::vector<std::vector<std::string>>
     parse_path(const std::string& path);
 

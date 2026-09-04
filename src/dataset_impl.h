@@ -21,7 +21,9 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <variant>
+#include <vector>
 
 #include "vsag/allocator.h"
 #include "vsag/dataset.h"
@@ -29,6 +31,8 @@
 namespace vsag {
 
 class DatasetImpl : public Dataset {
+    using MultiPaths = std::vector<std::vector<std::string>>;
+
     using var = std::variant<int64_t,
                              const float*,
                              const char*,
@@ -39,7 +43,8 @@ class DatasetImpl : public Dataset {
                              const SparseVector*,
                              const AttributeSet*,
                              const uint32_t*,
-                             const MultiVector*>;
+                             const MultiVector*,
+                             MultiPaths>;
 
 public:
     DatasetImpl() = default;
@@ -53,8 +58,11 @@ public:
     DatasetImpl(DatasetImpl&& other) noexcept {
         this->owner_ = other.owner_;
         other.owner_ = false;
-        this->data_ = other.data_;
+        this->allocator_ = other.allocator_;
+        this->data_ = std::move(other.data_);
+        this->retired_paths_ = std::move(other.retired_paths_);
         other.data_.clear();
+        other.retired_paths_.clear();
     }
 
     DatasetPtr
@@ -72,10 +80,7 @@ public:
 
 public:
     DatasetPtr
-    NumElements(int64_t num_elements) override {
-        this->data_[NUM_ELEMENTS] = num_elements;
-        return shared_from_this();
-    }
+    NumElements(int64_t num_elements) override;
 
     int64_t
     GetNumElements() const override {
@@ -206,24 +211,20 @@ public:
     }
 
     DatasetPtr
-    Paths(const std::string* paths) override {
-        this->data_[DATASET_PATHS] = paths;
-        return shared_from_this();
-    }
+    Paths(const std::string* paths) override;
 
     DatasetPtr
-    Paths(const std::string& hierarchy_name, const std::string* paths) override {
-        if (hierarchy_name.empty()) {
-            return Paths(paths);
-        }
-        this->data_[HierarchyPathsKey(hierarchy_name)] = paths;
-        return shared_from_this();
-    }
+    Paths(const std::string& hierarchy_name, const std::string* paths) override;
+
+    DatasetPtr
+    Paths(const std::string& hierarchy_name, MultiPaths paths);
 
     const std::string*
     GetPaths() const override {
         if (auto iter = this->data_.find(DATASET_PATHS); iter != this->data_.end()) {
-            return std::get<const std::string*>(iter->second);
+            if (const auto* paths = std::get_if<const std::string*>(&iter->second)) {
+                return *paths;
+            }
         }
         return nullptr;
     }
@@ -235,10 +236,18 @@ public:
         }
         if (auto iter = this->data_.find(HierarchyPathsKey(hierarchy_name));
             iter != this->data_.end()) {
-            return std::get<const std::string*>(iter->second);
+            if (const auto* paths = std::get_if<const std::string*>(&iter->second)) {
+                return *paths;
+            }
         }
         return nullptr;
     }
+
+    const std::string*
+    GetPaths(const std::string& hierarchy_name, uint64_t element_index, uint64_t& path_count) const;
+
+    bool
+    CopyPaths(const std::string& hierarchy_name, MultiPaths& paths) const;
 
     DatasetPtr
     UInt32Metadata(const std::string& name, const uint32_t* values) override {
@@ -408,13 +417,40 @@ private:
         return key.substr(UInt32MetadataPrefix().size());
     }
 
+    static bool
+    IsPathsKey(const std::string& key) {
+        return key == DATASET_PATHS || IsHierarchyPathsKey(key);
+    }
+
+    const var*
+    FindPaths(const std::string& hierarchy_name) const {
+        const auto key = hierarchy_name.empty() ? DATASET_PATHS : HierarchyPathsKey(hierarchy_name);
+        if (auto iter = data_.find(key); iter != data_.end()) {
+            return &iter->second;
+        }
+        return nullptr;
+    }
+
+    bool
+    HasPaths(const std::string& hierarchy_name) const;
+
+    void
+    ReplacePaths(const std::string& key, var paths);
+
 private:
     bool owner_{true};
     std::unordered_map<std::string, var> data_;
+    std::vector<const std::string*> retired_paths_;
     Allocator* allocator_ = nullptr;
 
     std::string Statistics_{"{}"};
     std::string Reasoning_{"{}"};
 };
+
+const std::string*
+GetDatasetPaths(const Dataset& dataset,
+                const std::string& hierarchy_name,
+                uint64_t element_index,
+                uint64_t& path_count);
 
 };  // namespace vsag
