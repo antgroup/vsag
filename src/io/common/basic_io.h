@@ -432,6 +432,26 @@ public:
         }
     }
 
+    /**
+     * @brief Grow the storage to size without zero-filling the freshly
+     * allocated region, for callers that guarantee they overwrite the whole
+     * [0, size) range afterwards (e.g. parallel deserialization).
+     *
+     * Falls back to Resize when the concrete IO has no dedicated
+     * implementation, so it is always safe to call.
+     */
+    inline void
+    ResizeForOverwrite(uint64_t size) {
+        if constexpr (HasResizeForOverwriteImpl<IOTmpl>::value) {
+            cast().ResizeForOverwriteImpl(size);
+            if constexpr (not InMemory) {
+                ClearCache();
+            }
+        } else {
+            Resize(size);
+        }
+    }
+
     inline void
     Shrink(uint64_t size) {
         if constexpr (HasShrinkImpl<IOTmpl>::value) {
@@ -922,6 +942,7 @@ private:
     GENERATE_HAS_MEMBER_FUNCTION(ReleaseImpl, void, std::declval<const uint8_t*>())
     GENERATE_HAS_MEMBER_FUNCTION(InitIOImpl, void, std::declval<const IOParamPtr&>())
     GENERATE_HAS_MEMBER_FUNCTION(ResizeImpl, void, std::declval<uint64_t>())
+    GENERATE_HAS_MEMBER_FUNCTION(ResizeForOverwriteImpl, void, std::declval<uint64_t>())
     GENERATE_HAS_MEMBER_FUNCTION(ShrinkImpl, void, std::declval<uint64_t>())
     GENERATE_HAS_MEMBER_FUNCTION(GetMemoryUsageImpl, int64_t)
 };

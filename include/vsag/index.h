@@ -30,6 +30,7 @@
 #include "vsag/binaryset.h"
 #include "vsag/bitset.h"
 #include "vsag/dataset.h"
+#include "vsag/deserialize_reader.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
 #include "vsag/filter.h"
@@ -40,6 +41,7 @@
 #include "vsag/readerset.h"
 #include "vsag/search_param.h"
 #include "vsag/search_request.h"
+#include "vsag/serialize_writer.h"
 
 namespace vsag {
 
@@ -912,6 +914,24 @@ public:
     }
 
     /**
+      * @brief Serialize index through the given writer in the chunked format.
+      *
+      * The io data of large components is split into independently
+      * decompressible frames of chunk_size logical bytes, and the physical
+      * layout of every component is recorded in the index footer. Whether
+      * the frames are compressed is decided solely by the injected writer;
+      * with a plain writer the body bytes are written verbatim.
+      *
+      * @param writer is the byte sink (optionally compressing) for the serialized index
+      * @param chunk_size is the logical granularity of one compressed frame in bytes
+      */
+    virtual tl::expected<void, Error>
+    Serialize(SerializeWriter& writer, uint64_t chunk_size = DEFAULT_SERIALIZE_CHUNK_SIZE) {
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support chunked serialize"));
+    }
+
+    /**
       * @brief Serialize the full index to the header-first streaming format.
       *
       * The stream starts with the VSAG streaming magic/version header, followed by metadata and
@@ -935,6 +955,30 @@ public:
     Deserialize(std::istream& in_stream) {
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                     "Index does not support deserialize from a file stream"));
+    }
+
+    /**
+      * @brief Deserialize index in parallel from a positioned reader.
+      *
+      * The reader provides positioned reads (and decompression for
+      * compressed frames) over an index file written in the chunked format;
+      * the physical layout is taken from the index footer. Uncompressed
+      * files without a recorded layout are probed and loaded in parallel
+      * as well. The chunk granularity is decided at serialization time.
+      *
+      * Concurrency is driven by the thread pool bound to the Engine at
+      * creation time (see Resource); when the Engine has no thread pool
+      * bound, the implementation falls back to an internal default pool.
+      *
+      * Note: the index allocator is invoked concurrently by the worker
+      * threads, so a custom allocator must be thread-safe.
+      *
+      * @param reader is the positioned-read (optionally decompressing) data source
+      */
+    virtual tl::expected<void, Error>
+    ParallelDeserialize(DeserializeReader& reader) {
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support parallel deserialization"));
     }
 
     /**

@@ -57,6 +57,8 @@
 - [Attribute Filter (Hybrid Search)](advanced/attribute_filter.md)
 - [Serialization](advanced/serialization.md)
 - [New Serialization](advanced/new_serialization.md)
+- [Chunked Serialization](advanced/chunked_serialization.md)
+- [Parallel Deserialization](advanced/parallel_deserialization.md)
 - [Memory Management](advanced/memory.md)
 - [Per-Search Allocator](advanced/search_allocator.md)
 - [Index Introspection](advanced/introspection.md)

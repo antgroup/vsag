@@ -92,6 +92,16 @@ public:
     ResizeImpl(uint64_t size);
 
     /**
+     * @brief Grows to size without zero-filling the newly allocated blocks;
+     * only the unwritten tail of the last block is cleared. For callers that
+     * overwrite the whole [0, size) range afterwards.
+     *
+     * @param size The new total size of the storage.
+     */
+    void
+    ResizeForOverwriteImpl(uint64_t size);
+
+    /**
      * @brief Reads data from the blocks at a specified offset.
      *
      * @param size The size of the data to be read.
@@ -161,7 +171,7 @@ private:
      * @param size The required size for the storage.
      */
     void
-    check_and_realloc(uint64_t size);
+    check_and_realloc(uint64_t size, bool zero_fill = true);
 
     /**
      * @brief Gets the pointer to data at a specified offset within blocks.

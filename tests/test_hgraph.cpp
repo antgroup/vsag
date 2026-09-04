@@ -19,6 +19,7 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <chrono>
 #include <cstring>
+#include <future>
 #include <limits>
 #include <random>
 #include <sstream>
@@ -32,9 +33,13 @@
 #include "storage/streaming_serialization_test_utils.h"
 #include "test_index.h"
 #include "typing.h"
+#include "vsag/deserialize_reader.h"
+#include "vsag/engine.h"
 #include "vsag/filter.h"
 #include "vsag/options.h"
+#include "vsag/resource.h"
 #include "vsag/search_request.h"
+#include "vsag/serialize_writer.h"
 
 namespace fixtures {
 
@@ -416,6 +421,137 @@ ForEachHGraphCase(const fixtures::HGraphResourcePtr& resource, const Cases& test
     }
 }
 
+class CountingThreadPool : public vsag::ThreadPool {
+public:
+    explicit CountingThreadPool(std::shared_ptr<vsag::ThreadPool> delegate)
+        : delegate_(std::move(delegate)) {
+    }
+
+    void
+    WaitUntilEmpty() override {
+        delegate_->WaitUntilEmpty();
+    }
+
+    void
+    SetQueueSizeLimit(uint64_t limit) override {
+        delegate_->SetQueueSizeLimit(limit);
+    }
+
+    void
+    SetPoolSize(uint64_t limit) override {
+        delegate_->SetPoolSize(limit);
+    }
+
+    std::future<void>
+    Enqueue(std::function<void(void)> task) override {
+        submissions_.fetch_add(1, std::memory_order_relaxed);
+        return delegate_->Enqueue(std::move(task));
+    }
+
+    [[nodiscard]] uint64_t
+    Submissions() const {
+        return submissions_.load(std::memory_order_relaxed);
+    }
+
+private:
+    std::shared_ptr<vsag::ThreadPool> delegate_;
+    std::atomic<uint64_t> submissions_{0};
+};
+
+class ChunkedBufferWriter : public vsag::SerializeWriter {
+public:
+    void
+    Write(const char* data, uint64_t size) override {
+        bytes_.append(data, size);
+    }
+
+    std::string bytes_;
+};
+
+class FramedChunkedBufferWriter : public vsag::SerializeWriter {
+public:
+    void
+    Write(const char* data, uint64_t size) override {
+        if (in_frame_) {
+            frame_.append(data, size);
+        } else {
+            bytes_.append(data, size);
+        }
+    }
+
+    [[nodiscard]] std::string
+    GetCompressorName() const override {
+        return "test-frame";
+    }
+
+    void
+    BeginCompressedFrame() override {
+        REQUIRE(not in_frame_);
+        in_frame_ = true;
+        frame_.clear();
+    }
+
+    uint64_t
+    EndCompressedFrame() override {
+        REQUIRE(in_frame_);
+        in_frame_ = false;
+        const uint64_t payload_size = frame_.size();
+        bytes_.append(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+        bytes_.append(frame_);
+        ++frame_count_;
+        return sizeof(payload_size) + payload_size;
+    }
+
+    std::string bytes_;
+    uint64_t frame_count_{0};
+
+private:
+    bool in_frame_{false};
+    std::string frame_;
+};
+
+class ChunkedBufferReader : public vsag::DeserializeReader {
+public:
+    explicit ChunkedBufferReader(std::string bytes) : bytes_(std::move(bytes)) {
+    }
+
+    [[nodiscard]] uint64_t
+    Size() const override {
+        return bytes_.size();
+    }
+
+    void
+    Read(uint64_t offset, uint64_t len, void* dest) override {
+        if (len > bytes_.size() or offset > bytes_.size() - len) {
+            throw std::runtime_error("chunked functional-test read is out of range");
+        }
+        std::memcpy(dest, bytes_.data() + offset, len);
+    }
+
+protected:
+    const std::string bytes_;
+};
+
+class FramedChunkedBufferReader : public ChunkedBufferReader {
+public:
+    using ChunkedBufferReader::ChunkedBufferReader;
+
+    void
+    ReadDecompressed(uint64_t offset,
+                     uint64_t compressed_size,
+                     const std::function<void(std::istream&)>& consume) override {
+        uint64_t payload_size = 0;
+        Read(offset, sizeof(payload_size), &payload_size);
+        if (compressed_size != sizeof(payload_size) + payload_size) {
+            throw std::runtime_error("compressed frame size does not match its header");
+        }
+        std::string payload(payload_size, '\0');
+        Read(offset + sizeof(payload_size), payload_size, payload.data());
+        std::istringstream stream(payload, std::ios::in | std::ios::binary);
+        consume(stream);
+    }
+};
+
 using vsag::test::EraseStreamingBlock;
 using vsag::test::InsertUnknownStreamingBlock;
 using vsag::test::SetStreamingBlockVersion;
@@ -560,9 +696,9 @@ RequireHGraphStreamingDeserializeFails(const std::string& param, const std::stri
 }
 
 void
-RequireHGraphStreamingSearchMatches(const fixtures::TestIndex::IndexPtr& expected,
-                                    const fixtures::TestIndex::IndexPtr& actual,
-                                    const fixtures::TestDatasetPtr& dataset) {
+RequireHGraphSearchMatches(const fixtures::TestIndex::IndexPtr& expected,
+                           const fixtures::TestIndex::IndexPtr& actual,
+                           const fixtures::TestDatasetPtr& dataset) {
     auto query = fixtures::get_one_query(dataset->query_, 0);
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     auto expected_result = expected->KnnSearch(query, 10, search_param);
@@ -2707,6 +2843,58 @@ HGRAPH_PR_DAILY_CASE("HGraph Serialize File",
                      "[ft][serialize][hgraph][serialization]",
                      TestHGraphSerialize)
 
+TEST_CASE("HGraph Chunked Serialize And Parallel Deserialize",
+          "[ft][serialize][parallel_deserialize][hgraph][pr]") {
+    using namespace fixtures;
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    build_param.thread_count = 4;
+    const auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    const auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 100, "l2");
+
+    auto delegate = vsag::Engine::CreateThreadPool(4);
+    REQUIRE(delegate.has_value());
+    auto counting_pool = std::make_shared<CountingThreadPool>(delegate.value());
+    auto allocator = vsag::Engine::CreateDefaultAllocator();
+    vsag::Resource resource(allocator, counting_pool);
+    vsag::Engine engine(&resource);
+
+    auto index = engine.CreateIndex(HGraphTestIndex::name, param);
+    REQUIRE(index.has_value());
+    TestIndex::TestBuildIndex(index.value(), dataset, true);
+
+    constexpr uint64_t chunk_size = 512;
+
+    SECTION("plain frames") {
+        ChunkedBufferWriter writer;
+        REQUIRE(index.value()->Serialize(writer, chunk_size).has_value());
+
+        auto restored = engine.CreateIndex(HGraphTestIndex::name, param);
+        REQUIRE(restored.has_value());
+        ChunkedBufferReader reader(std::move(writer.bytes_));
+        const auto submissions_before = counting_pool->Submissions();
+        REQUIRE(restored.value()->ParallelDeserialize(reader).has_value());
+        REQUIRE(counting_pool->Submissions() > submissions_before);
+        REQUIRE(restored.value()->GetNumElements() == index.value()->GetNumElements());
+        RequireHGraphSearchMatches(index.value(), restored.value(), dataset);
+    }
+
+    SECTION("compressed frames") {
+        FramedChunkedBufferWriter writer;
+        REQUIRE(index.value()->Serialize(writer, chunk_size).has_value());
+        REQUIRE(writer.frame_count_ > 10);
+
+        auto restored = engine.CreateIndex(HGraphTestIndex::name, param);
+        REQUIRE(restored.has_value());
+        FramedChunkedBufferReader reader(std::move(writer.bytes_));
+        const auto submissions_before = counting_pool->Submissions();
+        REQUIRE(restored.value()->ParallelDeserialize(reader).has_value());
+        REQUIRE(counting_pool->Submissions() > submissions_before);
+        REQUIRE(restored.value()->GetNumElements() == index.value()->GetNumElements());
+        RequireHGraphSearchMatches(index.value(), restored.value(), dataset);
+    }
+}
+
 TEST_CASE("HGraph Serialize Streaming", "[ft][serialize][hgraph][streaming]") {
     using namespace fixtures;
     HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
@@ -2784,7 +2972,7 @@ TEST_CASE("HGraph streaming serialization compatibility",
         auto fixture = MakeHGraphStreamingFixture();
         auto bytes = SetStreamingMinorVersion(fixture.bytes, 7);
         auto restored = DeserializeHGraphStreamingBytes(fixture.param, bytes);
-        RequireHGraphStreamingSearchMatches(fixture.index, restored, fixture.dataset);
+        RequireHGraphSearchMatches(fixture.index, restored, fixture.dataset);
     }
 
     SECTION("rejects unsupported major version") {
@@ -2797,14 +2985,14 @@ TEST_CASE("HGraph streaming serialization compatibility",
         auto fixture = MakeHGraphStreamingFixture();
         auto bytes = InsertUnknownStreamingBlock(fixture.bytes, false);
         auto restored = DeserializeHGraphStreamingBytes(fixture.param, bytes);
-        RequireHGraphStreamingSearchMatches(fixture.index, restored, fixture.dataset);
+        RequireHGraphSearchMatches(fixture.index, restored, fixture.dataset);
     }
 
     SECTION("skips unknown non-critical block with unsupported version") {
         auto fixture = MakeHGraphStreamingFixture();
         auto bytes = InsertUnknownStreamingBlock(fixture.bytes, false, 99);
         auto restored = DeserializeHGraphStreamingBytes(fixture.param, bytes);
-        RequireHGraphStreamingSearchMatches(fixture.index, restored, fixture.dataset);
+        RequireHGraphSearchMatches(fixture.index, restored, fixture.dataset);
     }
 
     SECTION("rejects unknown critical block") {
