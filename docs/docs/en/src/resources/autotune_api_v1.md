@@ -104,8 +104,9 @@ recall only; latency and QPS remain measured metrics used by final constraint ev
 selection. This strategy assumes that recall does not decrease as `ef_search` increases while all
 other parameters and the workload remain fixed.
 
-Every probe evaluates the full query workload. If a probe fails to execute or does not produce
-recall, AutoTune stops that adaptive range because it cannot choose the next interval safely.
+Every executed probe evaluates the full query workload. If a probe is pruned, fails to execute, or
+does not produce recall, AutoTune stops that adaptive range because it cannot choose the next
+interval safely.
 
 V1 treats every JSON array and stepped range in these parameter objects as candidate choices. It
 computes their full Cartesian product and removes identical complete candidates. A no-step range
@@ -312,9 +313,9 @@ A completed evaluation returns this top-level shape. The CLI also writes it to d
 | `version` | Report contract version, always `1`. |
 | `status` | `success`, `no_feasible_candidate`, or `failed`. |
 | `recommendation` | Best feasible trial, otherwise `null`. |
-| `best_effort` | Closest successful trial when constraints are infeasible, otherwise `null`. |
+| `best_effort` | Closest successful or pruned trial when constraints are infeasible, otherwise `null`. |
 | `builds` | One record per concrete generated build group; empty in search-only mode. |
-| `trials` | One record per executed concrete search candidate. |
+| `trials` | One record per executed or constraint-pruned concrete search candidate. |
 | `request` | Effective normalized request used by the tuning engine. |
 | `elapsed_seconds` | AutoTune wall time through artifact cleanup; excludes final report writing. |
 | `report_path` | Persisted full report path; CLI/JSON adapter only. |
@@ -333,11 +334,11 @@ present, `index_path` as top-level fields inside this normalized object.
 ### Status Semantics
 
 - `success`: at least one successful trial satisfies every constraint; `recommendation` is set.
-- `no_feasible_candidate`: successful trials exist, but none satisfies every constraint;
-  `best_effort` is set for explanation and is not a valid recommendation. Typed calls return a
-  value with `TuneStatus::NO_FEASIBLE_CANDIDATE`, not an error.
+- `no_feasible_candidate`: evaluated or constraint-pruned trials exist, but none satisfies every
+  constraint; `best_effort` is set for explanation and is not a valid recommendation. Typed calls
+  return a value with `TuneStatus::NO_FEASIBLE_CANDIDATE`, not an error.
 - `failed`: the request is invalid, execution/reporting fails, or no trial can be evaluated
-  successfully with the objective metric.
+  successfully with the objective metric and no pruned trial can explain infeasibility.
 
 ### Recommendation and Best Effort
 
@@ -358,8 +359,11 @@ In build-and-search mode, `recommendation` contains:
 In search-only mode, `create_params`, `artifacts`, and `evidence.build_id` are omitted; the
 recommendation contains the concrete search parameters, workload, metrics, and
 `evidence.trial_id`. `best_effort` has the same mode-specific fields plus
-`constraint_evaluation`. It is selected first by the number of violated or missing constraints,
-then by normalized violation magnitude. It is only explanatory.
+`constraint_evaluation`. AutoTune prefers fully evaluated successful trials; only when none exists
+does it select from pruned trials. Within that pool, it first compares the number of violated or
+missing constraints, then normalized violation magnitude. It is only explanatory. When every
+candidate is pruned before search, it contains only the available shared metrics; missing search
+metrics remain missing constraint violations.
 
 ### Build Records
 
@@ -388,17 +392,17 @@ Each `trials[]` item contains:
 | `index_name` | Concrete index type. |
 | `create_params` | Concrete create parameters; build-and-search mode only. |
 | `search_params` | Concrete search parameters. |
-| `status` | `success` or `failed`. |
+| `status` | `success`, `failed`, or `pruned`. |
 | `metrics` | Available metrics used by constraint evaluation and selection. |
 | `constraint_evaluation` | `satisfied` plus a `violations` array. |
 | `artifacts` | Artifact evidence copied from the build group; build-and-search mode only. |
 | `failure` | Structured failure or `null`. |
-| `elapsed_seconds` | Search trial wall time. |
+| `elapsed_seconds` | Trial evaluation wall time; a pruned trial does not run search. |
 | `raw_eval_result` | Present only when requested and native search eval succeeded. |
 
 For an adaptive HGraph `ef_search` range, the report contains one trial for each point actually
 evaluated. Every recorded `search_params` value is concrete; the `$range` expression remains only
-in the normalized request. Every recorded trial evaluates the full query workload.
+in the normalized request. Every successful trial evaluates the full query workload.
 
 A constraint violation contains `metric`, `comparison`, `expected`, and `actual`. `actual` is
 `null` when the required metric is missing or non-finite.
@@ -406,6 +410,11 @@ A constraint violation contains `metric`, `comparison`, `expected`, and `actual`
 Search trials in one build group reuse the same loaded index instance. A generated index is built
 once and serialized once. In search-only mode the caller's index, or the index deserialized by the
 CLI adapter, is reused directly for every trial.
+
+When a positive `GetMemoryUsage()` value already exceeds an `index_memory_mb` constraint,
+AutoTune records the affected trials as `pruned` and skips their searches automatically. The
+optimization requires no tuning configuration. A zero or unavailable memory value cannot prove a
+violation and therefore does not trigger pruning.
 
 ### Artifact Semantics
 

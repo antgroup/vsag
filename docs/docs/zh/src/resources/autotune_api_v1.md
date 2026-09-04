@@ -99,8 +99,8 @@ HGraph `ef_search` 还支持一种特殊写法：
 latency 和 QPS 仍作为实测指标参与最终约束过滤和结果选择。该策略假设其他参数和 workload
 固定时，recall 不会随 `ef_search` 增大而降低。
 
-每个探测点都会评测完整 query workload。如果某个评测点执行失败或没有 recall，AutoTune
-会停止该自适应范围，因为此时无法安全选择下一个区间。
+每个实际执行的探测点都会评测完整 query workload。如果某个探测点被剪枝、执行失败
+或没有 recall，AutoTune 会停止该自适应范围，因为此时无法安全选择下一个区间。
 
 V1 会把参数对象中的所有 JSON 数组和带 `step` 的范围解释成候选集合，计算完整笛卡尔积
 并去除完全相同的候选。其他参数不接受省略 `step` 的范围。
@@ -293,9 +293,9 @@ artifact，因此 `workspace_path` 和 `keep_intermediate` 对它没有影响。
 | `version` | 报告契约版本，固定为 `1`。 |
 | `status` | `success`、`no_feasible_candidate` 或 `failed`。 |
 | `recommendation` | 最优可行 trial；不存在时为 `null`。 |
-| `best_effort` | 约束不可行时最接近的成功 trial，否则为 `null`。 |
+| `best_effort` | 约束不可行时最接近的成功或已剪枝 trial，否则为 `null`。 |
 | `builds` | 每组具体生成 build 一条记录；search-only 模式为空数组。 |
-| `trials` | 每组已执行的具体 search 候选一条记录。 |
+| `trials` | 每组已执行或因约束被剪枝的具体 search 候选一条记录。 |
 | `request` | 调优引擎实际使用的有效规范化请求。 |
 | `elapsed_seconds` | AutoTune 墙钟时间包含 artifact 清理，不含最终报告写入。 |
 | `report_path` | 持久化完整报告路径；只在 CLI/JSON 适配器中存在。 |
@@ -313,10 +313,11 @@ config 和 output。build-and-search 模式还包含 `index_spaces`；search-onl
 ### Status 语义
 
 - `success`：至少一个成功 trial 满足全部约束，设置 `recommendation`。
-- `no_feasible_candidate`：存在成功 trial，但没有任何一个满足全部约束；设置
-  `best_effort` 用于解释，它不是有效推荐。typed 调用会返回带
+- `no_feasible_candidate`：存在已评测或因约束被剪枝的 trial，但没有任何一个满足全部
+  约束；设置 `best_effort` 用于解释，它不是有效推荐。typed 调用会返回带
   `TuneStatus::NO_FEASIBLE_CANDIDATE` 的值，而不是 error。
-- `failed`：请求非法、执行或报告阶段失败，或者没有成功且带目标指标的 trial。
+- `failed`：请求非法、执行或报告阶段失败，或者没有成功且带目标指标的 trial，同时也没有
+  可用于解释不可行性的已剪枝 trial。
 
 ### Recommendation 和 Best Effort
 
@@ -336,8 +337,10 @@ build-and-search 模式下，`recommendation` 包含：
 
 search-only 模式会省略 `create_params`、`artifacts` 和 `evidence.build_id`，只包含具体
 查询参数、workload、metrics 和 `evidence.trial_id`。`best_effort` 使用相同的模式相关
-字段，并额外包含 `constraint_evaluation`。它首先按违反或缺失约束数量选择，再比较归一化
-violation 大小，只用于解释。
+字段，并额外包含 `constraint_evaluation`。AutoTune 优先从完整评测成功的 trial 中选择；
+只有不存在这类 trial 时，才会从已剪枝 trial 中选择。在该范围内，它先按违反或缺失
+约束数量选择，再比较归一化 violation 大小，只用于解释。如果全部候选都在 search 前被剪枝，
+它只包含已有的共享指标；缺失的 search 指标仍会记录为 missing constraint violation。
 
 ### Build 记录
 
@@ -366,17 +369,17 @@ search-only 模式的 `builds` 为空。build-and-search 模式下，每个 `bui
 | `index_name` | 具体索引类型。 |
 | `create_params` | 具体创建参数；仅 build-and-search 模式存在。 |
 | `search_params` | 具体查询参数。 |
-| `status` | `success` 或 `failed`。 |
+| `status` | `success`、`failed` 或 `pruned`。 |
 | `metrics` | 用于约束评估和选择的可用指标。 |
 | `constraint_evaluation` | `satisfied` 和 `violations` 数组。 |
 | `artifacts` | 从 build group 复制的产物证据；仅 build-and-search 模式存在。 |
 | `failure` | 结构化失败或 `null`。 |
-| `elapsed_seconds` | search trial 墙钟时间。 |
+| `elapsed_seconds` | trial 评测墙钟时间；`pruned` trial 不执行 search。 |
 | `raw_eval_result` | 请求原始输出且原生 search eval 成功时出现。 |
 
 对于自适应 HGraph `ef_search` 范围，报告会为每个实际评测点记录一条 trial。每条记录中的
-`search_params` 都是具体值；`$range` 表达式只保留在规范化请求中。每条记录都会评测完整
-query workload。
+`search_params` 都是具体值；`$range` 表达式只保留在规范化请求中。每个成功 trial 都会评测
+完整 query workload。
 
 每条 constraint violation 包含 `metric`、`comparison`、`expected` 和 `actual`。指标缺失或
 非有限数时，`actual` 为 `null`。
@@ -384,6 +387,10 @@ query workload。
 同一 build group 的 search trial 复用同一个已加载索引实例。新生成的索引只构建和序列化
 一次。search-only 模式直接为所有 trial 复用调用方索引，或复用 CLI 适配器反序列化得到的
 索引。
+
+如果大于零的 `GetMemoryUsage()` 已经超过 `index_memory_mb` 约束，AutoTune 会自动把相关
+trial 记录为 `pruned` 并跳过 search，不需要任何额外调优配置。内存值为零或不可用时不能
+证明候选违反约束，因此不会触发剪枝。
 
 ### Artifact 语义
 
