@@ -42,6 +42,7 @@
 - [C++ Coding Guide](development/coding_style.md)
 - [New Index Integration Checklist](development/new_index_checklist.md)
 - [Building](development/building.md)
+- [VSAG Lite](development/lite_build.md)
 - [Offline / Air-gapped Builds](development/offline_build.md)
 - [Running Tests](development/testing.md)
 - [Contributing](development/contributing.md)

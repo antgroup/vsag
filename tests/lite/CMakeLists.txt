@@ -1,4 +1,3 @@
-
 # Copyright 2024-present the vsag project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,18 +13,6 @@
 # limitations under the License.
 
 
-set (ANALYZER_SRC
-        hgraph_analyzer.cpp
-        hgraph_analyzer.h
-        analyzer.cpp
-        analyzer.h
-)
-
-if (NOT ENABLE_LITE)
-    list (APPEND ANALYZER_SRC
-        pyramid_analyzer.cpp pyramid_analyzer.h
-        sindi_analyzer.cpp sindi_analyzer.h)
-endif ()
-
-add_library (analyzer OBJECT ${ANALYZER_SRC})
-target_link_libraries (analyzer PRIVATE vsag_src_common)
+add_executable (vsag_lite_smoke_test lite_smoke_test.cpp)
+target_link_libraries (vsag_lite_smoke_test PRIVATE vsag_static)
+add_test (NAME vsag_lite_smoke_test COMMAND vsag_lite_smoke_test)

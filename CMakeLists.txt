@@ -34,6 +34,11 @@ if (NOT VSAG_TARGET_PROCESSOR)
     set (VSAG_TARGET_PROCESSOR "${CMAKE_HOST_SYSTEM_PROCESSOR}")
 endif ()
 
+if (ENABLE_LITE)
+    add_compile_definitions (VSAG_LITE)
+    message (STATUS "VSAG Lite: BruteForce, HGraph, LazyHGraph, and WARP enabled")
+endif ()
+
 message (STATUS "CPU ARCH: ${Yellow}${VSAG_TARGET_PROCESSOR}${CR}")
 
 include (cmake/VSAGCompilerConfig.cmake)        # Compiler, ABI, sanitizer, and linker setup.
@@ -66,6 +71,14 @@ if (ENABLE_TESTS)
     # compilation. Production sources do not branch on ENABLE_TESTS.
     target_compile_definitions (vsag_objects PRIVATE ENABLE_TESTS)
     target_compile_definitions (vsag PRIVATE ENABLE_TESTS)
+endif ()
+
+if (ENABLE_LITE_TESTS)
+    enable_testing ()
+    add_subdirectory (tests/lite)
+endif ()
+if (ENABLE_LITE_BENCHMARK)
+    add_subdirectory (benchs/lite)
 endif ()
 
 include (cmake/VSAGPythonBindings.cmake)  # Optional Python bindings.

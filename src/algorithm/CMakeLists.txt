@@ -13,15 +13,18 @@
 # limitations under the License.
 
 
-add_subdirectory (sindi)
-add_subdirectory (sindi_v2)
 add_subdirectory (hgraph)
 add_subdirectory (lazy_hgraph)
 add_subdirectory (bruteforce)
-add_subdirectory (ivf)
-add_subdirectory (pyramid)
-add_subdirectory (simq)
 add_subdirectory (mci)
+
+if (NOT ENABLE_LITE)
+    add_subdirectory (sindi)
+    add_subdirectory (sindi_v2)
+    add_subdirectory (ivf)
+    add_subdirectory (pyramid)
+    add_subdirectory (simq)
+endif ()
 
 file (GLOB ALGORITHM_SRCS "*.cpp")
 list (FILTER ALGORITHM_SRCS EXCLUDE REGEX "_test.cpp")
@@ -31,18 +34,11 @@ target_link_libraries (algorithm PRIVATE coverage_config vsag_src_common)
 maybe_add_dependencies (algorithm antlr4)
 
 
-set (ALGORITHM_LIBS
-        algorithm
-        sindi
-        sindi_v2
-        hgraph
-        lazy_hgraph
-        bruteforce
-        ivf
-        pyramid
-        simq
-        mci
-        PARENT_SCOPE)
+set (ALGORITHM_LIBS algorithm hgraph lazy_hgraph bruteforce mci)
+if (NOT ENABLE_LITE)
+    list (APPEND ALGORITHM_LIBS sindi sindi_v2 ivf pyramid simq)
+endif ()
+set (ALGORITHM_LIBS ${ALGORITHM_LIBS} PARENT_SCOPE)
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE ALGORITHM_TESTS "*_test.cpp")

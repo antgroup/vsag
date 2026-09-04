@@ -284,6 +284,21 @@ public:
         return std::vector<InnerIdType>(deleted_ids_.begin(), deleted_ids_.end());
     }
 
+    uint64_t
+    RestoreDeletedIds(const std::vector<InnerIdType>& deleted_ids, uint64_t valid_count) {
+        std::scoped_lock wlock(delete_ids_mutex_);
+        deleted_ids_.clear();
+        for (const auto id : deleted_ids) {
+            if (id >= valid_count || id >= label_table_.size()) {
+                throw VsagException(
+                    ErrorType::INVALID_BINARY,
+                    fmt::format("deleted inner id {} exceeds valid count {}", id, valid_count));
+            }
+            deleted_ids_.insert(id);
+        }
+        return deleted_ids_.size();
+    }
+
 private:
     InnerIdType
     get_id_by_label_with_reverse_map(LabelType label) const noexcept;

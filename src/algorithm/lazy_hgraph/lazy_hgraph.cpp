@@ -381,6 +381,12 @@ LazyHGraph::UpdateExtraInfo(const DatasetPtr& new_base) {
 }
 
 bool
+LazyHGraph::UpdateId(int64_t old_id, int64_t new_id) {
+    std::shared_lock lock(this->phase_mutex_);
+    return ActiveIndex()->UpdateId(old_id, new_id);
+}
+
+bool
 LazyHGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     std::shared_lock lock(this->phase_mutex_);
     return ActiveIndex()->UpdateVector(id, new_base, force_update);

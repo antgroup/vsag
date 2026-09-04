@@ -16,8 +16,10 @@
 #include "analyzer.h"
 
 #include "hgraph_analyzer.h"
+#ifndef VSAG_LITE
 #include "pyramid_analyzer.h"
 #include "sindi_analyzer.h"
+#endif
 
 namespace vsag {
 
@@ -32,6 +34,7 @@ CreateAnalyzer(const InnerIndexInterface* index, const AnalyzerParam& param) {
         auto* hgraph = dynamic_cast<HGraph*>(index_no_const);
         return std::make_shared<HGraphAnalyzer>(hgraph, param);
     }
+#ifndef VSAG_LITE
     if (dynamic_cast<Pyramid*>(index_no_const) != nullptr) {
         auto* pyramid = dynamic_cast<Pyramid*>(index_no_const);
         return std::make_shared<PyramidAnalyzer>(pyramid, param);
@@ -40,6 +43,7 @@ CreateAnalyzer(const InnerIndexInterface* index, const AnalyzerParam& param) {
         auto* sindi = dynamic_cast<SINDI*>(index_no_const);
         return std::make_shared<SINDIAnalyzer>(sindi, param);
     }
+#endif
     throw VsagException(
         ErrorType::UNSUPPORTED_INDEX_OPERATION,
         fmt::format("Unsupported index type ({}) for analyzer creation", index->GetName()));

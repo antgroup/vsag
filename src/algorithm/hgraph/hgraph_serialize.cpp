@@ -281,6 +281,37 @@ HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
 // enabling backward-compatible Deserialize against legacy index files written
 // before source_id_table_ persistence was implemented.
 static constexpr uint64_t SOURCE_ID_TABLE_MAGIC = 0x534F555243454944ULL;  // "SOURCEID"
+static constexpr uint64_t DELETED_IDS_MAGIC = 0x44454C4554454449ULL;      // "DELETEDI"
+
+void
+deserialize_deleted_ids(StreamReader& reader, const LabelTablePtr& label_table) {
+    const uint64_t cursor = reader.GetCursor();
+    if (reader.Length() < cursor + sizeof(uint64_t)) {
+        return;
+    }
+
+    uint64_t magic = 0;
+    StreamReader::ReadObj(reader, magic);
+    if (magic != DELETED_IDS_MAGIC) {
+        reader.Seek(cursor);
+        return;
+    }
+
+    uint64_t deleted_count = 0;
+    StreamReader::ReadObj(reader, deleted_count);
+    const auto valid_count = label_table->label_table_.size();
+    if (deleted_count > valid_count) {
+        throw VsagException(ErrorType::INVALID_BINARY, "deleted id count exceeds label table size");
+    }
+    std::vector<InnerIdType> deleted_ids;
+    deleted_ids.reserve(deleted_count);
+    for (uint64_t i = 0; i < deleted_count; ++i) {
+        InnerIdType id = 0;
+        StreamReader::ReadObj(reader, id);
+        deleted_ids.push_back(id);
+    }
+    label_table->RestoreDeletedIds(deleted_ids, valid_count);
+}
 
 void
 HGraph::serialize_label_info(StreamWriter& writer) const {
@@ -309,6 +340,12 @@ HGraph::serialize_label_info(StreamWriter& writer) const {
             StreamWriter::WriteString(writer, sid_table[i]);
         }
     }
+    const auto deleted_ids = this->label_table_->GetAllDeletedIds();
+    StreamWriter::WriteObj(writer, DELETED_IDS_MAGIC);
+    StreamWriter::WriteObj(writer, static_cast<uint64_t>(deleted_ids.size()));
+    for (const auto id : deleted_ids) {
+        StreamWriter::WriteObj(writer, id);
+    }
 }
 
 void
@@ -329,7 +366,6 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
         }
         this->label_table_->total_count_.store(static_cast<int64_t>(size));
     }
-
     // Optional source_id_table_ block. If the next 8 bytes don't match
     // SOURCE_ID_TABLE_MAGIC, the stream is from a legacy writer; rewind so
     // the parent reader can continue with the next field.
@@ -361,6 +397,7 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
             reader.Seek(cursor_before);
         }
     }
+    deserialize_deleted_ids(reader, this->label_table_);
 }
 
 void
@@ -599,7 +636,6 @@ HGraph::deserialize_label_info_streaming(StreamReader& reader) const {
         }
         this->label_table_->total_count_.store(static_cast<int64_t>(size));
     }
-
     if (this->persist_source_id_) {
         uint64_t magic = 0;
         StreamReader::ReadObj(reader, magic);
@@ -622,6 +658,7 @@ HGraph::deserialize_label_info_streaming(StreamReader& reader) const {
         }
         this->label_table_->ReplaceSourceIdTable(std::move(sid_table));
     }
+    deserialize_deleted_ids(reader, this->label_table_);
 }
 
 void
@@ -930,6 +967,8 @@ HGraph::read_streaming_body(StreamReader& reader,
     if (not this->using_dedup_storage()) {
         this->total_count_ = this->basic_flatten_codes_->TotalCount();
     }
+    this->delete_count_.store(static_cast<int64_t>(this->label_table_->GetAllDeletedIds().size()),
+                              std::memory_order_release);
     if (this->raw_vector_ != nullptr) {
         this->has_raw_vector_ = true;
     }
@@ -977,6 +1016,9 @@ HGraph::Deserialize(StreamReader& reader) {
             this->extra_infos_->Deserialize(reader);
         }
         this->total_count_ = this->basic_flatten_codes_->TotalCount();
+        this->delete_count_.store(
+            static_cast<int64_t>(this->label_table_->GetAllDeletedIds().size()),
+            std::memory_order_release);
 
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Deserialize(reader);
@@ -1013,6 +1055,9 @@ HGraph::Deserialize(StreamReader& reader) {
         this->label_table_->is_legacy_duplicate_format_ = (dup_version == 0);
 
         this->deserialize_label_info(buffer_reader);
+        this->delete_count_.store(
+            static_cast<int64_t>(this->label_table_->GetAllDeletedIds().size()),
+            std::memory_order_release);
         if (this->using_dedup_storage()) {
             this->code_slot_map_->Deserialize(buffer_reader);
             auto logical_count = this->code_slot_map_->PublishedLogicalCount();

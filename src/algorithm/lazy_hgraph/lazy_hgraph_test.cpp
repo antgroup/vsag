@@ -318,6 +318,32 @@ TEST_CASE("LazyHGraph transitions to graph and accepts more data", "[ut][lazy_hg
     REQUIRE(result->GetIds()[0] == 300);
 }
 
+TEST_CASE("LazyHGraph updates ids in both phases", "[ut][lazy_hgraph]") {
+    auto index = MakeLazyIndex(4);
+    std::vector<float> vectors;
+    std::vector<int64_t> ids;
+    auto data = MakeDataset(3, 310, vectors, ids);
+    REQUIRE(index->Add(data).empty());
+    REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::FLAT);
+
+    REQUIRE(index->UpdateId(310, 410));
+    REQUIRE_FALSE(index->CheckIdExist(310));
+    REQUIRE(index->CheckIdExist(410));
+
+    std::vector<float> more_vectors;
+    std::vector<int64_t> more_ids;
+    auto more = MakeDataset(1, 320, more_vectors, more_ids);
+    REQUIRE(index->Add(more).empty());
+    REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::GRAPH);
+
+    REQUIRE(index->UpdateId(311, 411));
+    REQUIRE_FALSE(index->CheckIdExist(311));
+    REQUIRE(index->CheckIdExist(411));
+    auto result =
+        index->KnnSearch(MakeQuery(vectors, 1), 1, R"({"hgraph":{"ef_search":40}})", nullptr);
+    REQUIRE(result->GetIds()[0] == 411);
+}
+
 TEST_CASE("LazyHGraph updates vectors in flat phase", "[ut][lazy_hgraph]") {
     auto index = MakeLazyIndex(10);
     REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT));

@@ -17,6 +17,11 @@
 file (GLOB DATACELL_SRCS "*.cpp")
 list (FILTER DATACELL_SRCS EXCLUDE REGEX "_test.cpp")
 
+if (ENABLE_LITE)
+    list (FILTER DATACELL_SRCS EXCLUDE REGEX
+          "(^|/)(disk_sindi|immutable_sindi|mutable_sindi|sindi_|sparse_dmq|sparse_vector).*\\.cpp$")
+endif ()
+
 set (RABITQ_SPLIT_FACTORY_SRCS
      "${CMAKE_CURRENT_SOURCE_DIR}/rabitq_split_datacell_factory_l2.cpp"
      "${CMAKE_CURRENT_SOURCE_DIR}/rabitq_split_datacell_factory_ip.cpp"

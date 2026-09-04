@@ -6,6 +6,8 @@ COMPILE_JOBS ?= 6
 CMAKE_BUILD_ARGS ?=
 DEBUG_BUILD_DIR ?= "./build/"
 RELEASE_BUILD_DIR ?= "./build-release/"
+LITE_BUILD_DIR ?= "./build-lite/"
+LITE_RELEASE_BUILD_DIR ?= "./build-lite-release/"
 PERF_RELEASE_BUILD_DIR ?= "./build-release-perf/"
 VSAG_ENABLE_TESTS ?= OFF
 VSAG_ENABLE_PYBINDS ?= OFF
@@ -100,6 +102,22 @@ test:                    ## Build and run unit tests.
 	./build/tests/unittests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 	./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 	./build/tests/eval_monitor_test -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
+
+.PHONY: lite
+lite:                    ## Build the reduced VSAG Lite library.
+	cmake ${VSAG_CMAKE_ARGS} -B${LITE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_LITE=ON -DENABLE_CCACHE=ON
+	cmake --build ${LITE_BUILD_DIR} --parallel ${COMPILE_JOBS}
+
+.PHONY: test-lite
+test-lite:               ## Build and run the VSAG Lite smoke tests.
+	cmake ${VSAG_CMAKE_ARGS} -B${LITE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Debug -DENABLE_LITE=ON -DENABLE_LITE_TESTS=ON -DENABLE_CCACHE=ON
+	cmake --build ${LITE_BUILD_DIR} --target vsag_lite_smoke_test --parallel ${COMPILE_JOBS}
+	ctest --test-dir ${LITE_BUILD_DIR} --output-on-failure
+
+.PHONY: benchmark-lite
+benchmark-lite:          ## Build the VSAG Lite benchmark executable.
+	cmake ${VSAG_CMAKE_ARGS} -B${LITE_RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_LITE=ON -DENABLE_LITE_BENCHMARK=ON -DENABLE_CCACHE=ON
+	cmake --build ${LITE_RELEASE_BUILD_DIR} --target vsag_lite_benchmark --parallel ${COMPILE_JOBS}
 
 .PHONY: test-cmake
 test-cmake:              ## Run focused CMake helper tests.
