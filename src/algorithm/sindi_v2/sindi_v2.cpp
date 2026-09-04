@@ -26,6 +26,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "analyzer/analyzer.h"
 #include "datacell/sparse_dmq_datacell.h"
 #include "datacell/sparse_vector_datacell_parameter.h"
 #include "impl/filter/inner_id_wrapper_filter.h"
@@ -392,7 +393,15 @@ SINDIV2::GetMemoryUsageDetail() const {
 
 std::string
 SINDIV2::GetStats() const {
-    return "";
+    JsonType stats;
+    stats["total_count"].SetInt64(GetNumElements());
+    stats["window_size"].SetUint64(window_size_);
+    stats["term_id_limit"].SetUint64(term_id_limit_);
+    stats["doc_prune_ratio"].SetFloat(doc_prune_ratio_);
+    stats["use_reorder"].SetBool(use_reorder_);
+    stats["immutable"].SetBool(immutable_enabled_);
+    AddAnalysisMetadata(stats, GetName(), "stats", "complete");
+    return stats.Dump(4);
 }
 
 SparseVector

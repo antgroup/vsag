@@ -29,12 +29,14 @@
 
 #include "algorithm/bruteforce/bruteforce.h"
 #include "algorithm/hgraph/hgraph.h"
+#include "analyzer/analyzer.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/label_table/label_table.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
 #include "index_detail_data.h"
 #include "index_feature_list.h"
+#include "inner_string_params.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
 #include "storage/tlv_section.h"
@@ -72,6 +74,8 @@ InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_par
         std::make_shared<LabelTable>(allocator_, true, false, index_param->label_remap_type);
     this->index_feature_list_ = std::make_unique<IndexFeatureList>();
     this->index_feature_list_->SetFeature(SUPPORT_EXPORT_IDS);
+    this->index_feature_list_->SetFeature(SUPPORT_GET_STATS);
+    this->index_feature_list_->SetFeature(SUPPORT_ANALYZE_INDEX_BY_SEARCH);
     this->extra_info_size_ = common_param.extra_info_size_;
     if (this->extra_info_size_ > 0) {
         this->extra_infos_ =
@@ -92,6 +96,25 @@ InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_par
 }
 
 InnerIndexInterface::~InnerIndexInterface() = default;
+
+AnalyzerBasePtr
+InnerIndexInterface::CreateAnalyzer(const AnalyzerParam& param) const {
+    return std::make_shared<BasicIndexAnalyzer>(this, param);
+}
+
+std::string
+InnerIndexInterface::GetStats() const {
+    AnalyzerParam param(allocator_);
+    return CreateAnalyzer(param)->GetStats().Dump(4);
+}
+
+std::string
+InnerIndexInterface::AnalyzeIndexBySearch(const SearchRequest& request) {
+    AnalyzerParam param(allocator_);
+    param.topk = request.topk_;
+    param.search_params = request.params_str_;
+    return CreateAnalyzer(param)->AnalyzeIndexBySearch(request).Dump(4);
+}
 
 std::vector<int64_t>
 InnerIndexInterface::Build(const DatasetPtr& base) {
@@ -985,24 +1008,27 @@ InnerIndexInterface::analyze_quantizer(JsonType& stats,
         for (uint64_t i = 0; i < sample_data_size; ++i) {
             float tmp_bias_ratio = 0.0F;
             float tmp_inversion_count_rate = 0.0F;
-            this->use_reorder_ = false;
             const auto* query_data = data + i * dim_;
             auto query = Dataset::Make();
             FilterPtr filter = nullptr;
             query->Owner(false)->NumElements(1)->Float32Vectors(query_data)->Dim(dim_);
-            auto search_result = this->KnnSearch(query, topk, search_param, filter);
-            this->use_reorder_ = true;
+            auto coarse_param = JsonType::Parse(search_param);
+            coarse_param[this->GetName()][SEARCH_PARAM_ENABLE_REORDER].SetBool(false);
+            auto search_result = this->KnnSearch(query, topk, coarse_param.Dump(), filter);
             auto distance_result = this->CalcDistancesById(
                 query_data, search_result->GetIds(), search_result->GetDim());
             const auto* ground_distances = distance_result->GetDistances();
             const auto* approximate_distances = search_result->GetDistances();
-            for (int64_t j = 0; j < topk; ++j) {
+            const auto result_count = search_result->GetDim();
+            CHECK_ARGUMENT(result_count > 0,
+                           "analysis search returned no candidates for a non-empty index");
+            for (int64_t j = 0; j < result_count; ++j) {
                 if (ground_distances[j] > 0) {
                     tmp_bias_ratio += std::abs(approximate_distances[j] - ground_distances[j]) /
                                       ground_distances[j];
                 }
             }
-            tmp_bias_ratio /= static_cast<float>(topk);
+            tmp_bias_ratio /= static_cast<float>(result_count);
             bias_ratio += tmp_bias_ratio;
             // calculate inversion count rate
             int64_t inversion_count = 0;
@@ -1013,10 +1039,11 @@ InnerIndexInterface::analyze_quantizer(JsonType& stats,
                     }
                 }
             }
-            int64_t search_count = search_result->GetDim();
-            tmp_inversion_count_rate =
-                static_cast<float>(inversion_count) /
-                (static_cast<float>(search_count * (search_count - 1)) / 2.0F);
+            if (result_count > 1) {
+                tmp_inversion_count_rate =
+                    static_cast<float>(inversion_count) /
+                    (static_cast<float>(result_count * (result_count - 1)) / 2.0F);
+            }
             inversion_count_rate += tmp_inversion_count_rate;
         }
         stats["quantization_bias_ratio"].SetFloat(bias_ratio /

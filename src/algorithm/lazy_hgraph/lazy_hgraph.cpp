@@ -21,6 +21,7 @@
 #include <mutex>
 #include <vector>
 
+#include "analyzer/analyzer.h"
 #include "dataset_impl.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
@@ -29,6 +30,15 @@
 #include "vsag/constants.h"
 
 namespace vsag {
+
+namespace {
+
+const char*
+phase_to_string(LazyHGraph::Phase phase) {
+    return phase == LazyHGraph::Phase::FLAT ? "flat" : "graph";
+}
+
+}  // namespace
 
 namespace {
 
@@ -349,6 +359,33 @@ uint64_t
 LazyHGraph::GetMemoryUsage() const {
     std::shared_lock lock(this->phase_mutex_);
     return ActiveIndex()->GetMemoryUsage();
+}
+
+std::string
+LazyHGraph::GetStats() const {
+    std::shared_lock lock(phase_mutex_);
+    auto stats = JsonType::Parse(ActiveIndex()->GetStats());
+    const auto status = stats["_analysis"]["status"].GetString();
+    AddAnalysisMetadata(stats, GetName(), "stats", status);
+    stats["_analysis"]["phase"].SetString(phase_to_string(GetPhase()));
+    stats["_analysis"]["transition_threshold"].SetUint64(transition_threshold_);
+    return stats.Dump(4);
+}
+
+std::string
+LazyHGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
+    std::shared_lock lock(phase_mutex_);
+    auto stats = JsonType::Parse(ActiveIndex()->AnalyzeIndexBySearch(request));
+    const auto status = stats["_analysis"]["status"].GetString();
+    AddAnalysisMetadata(stats,
+                        GetName(),
+                        "search",
+                        status,
+                        request.query_ == nullptr ? 0 : request.query_->GetNumElements(),
+                        request.topk_);
+    stats["_analysis"]["phase"].SetString(phase_to_string(GetPhase()));
+    stats["_analysis"]["transition_threshold"].SetUint64(transition_threshold_);
+    return stats.Dump(4);
 }
 
 DatasetPtr

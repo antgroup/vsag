@@ -24,6 +24,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "analyzer/analyzer.h"
+#include "analyzer/hgraph_analyzer.h"
 #include "attr/argparse.h"
 #include "common.h"
 #include "datacell/flatten_interface.h"
@@ -617,14 +618,28 @@ HGraph::SetPreciseCodesIO(const std::shared_ptr<Reader>& reader) {
 const static uint64_t QUERY_SAMPLE_SIZE = 10;
 const static int64_t DEFAULT_TOPK = 100;
 
+AnalyzerBasePtr
+HGraph::CreateAnalyzer(const AnalyzerParam& param) const {
+    return std::make_shared<HGraphAnalyzer>(this, param);
+}
+
 std::string
 HGraph::GetStats() const {
+    if (GetNumElements() == 0) {
+        JsonType stats;
+        stats["total_count"].SetInt64(0);
+        stats["live_count"].SetInt64(0);
+        stats["deleted_count"].SetInt64(GetNumberRemoved());
+        stats["_analysis"]["skipped"]["structure"].SetString("index is empty");
+        AddAnalysisMetadata(stats, GetName(), "stats", "partial");
+        return stats.Dump(4);
+    }
     AnalyzerParam analyzer_param(allocator_);
     analyzer_param.topk = DEFAULT_TOPK;
     analyzer_param.base_sample_size = std::min(QUERY_SAMPLE_SIZE, this->total_count_.load());
     analyzer_param.search_params =
         fmt::format(R"({{"hgraph": {{"ef_search": {}}}}})", ef_construct_);
-    auto analyzer = CreateAnalyzer(this, analyzer_param);
+    auto analyzer = CreateAnalyzer(analyzer_param);
     JsonType stats = analyzer->GetStats();
     // Build-time cache hit-rate is a transient property of the
     // build_with_cache() path (taken only after ImportCache()), so it lives on
@@ -664,6 +679,7 @@ HGraph::GetStats() const {
         stats["mci_memory_usage"].SetInt(
             static_cast<int64_t>(this->mci_cliques_->GetMemoryUsage()));
     }
+    AddAnalysisMetadata(stats, GetName(), "stats", "complete");
     return stats.Dump(4);
 }
 
@@ -803,10 +819,29 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
 std::string
 HGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
+    CHECK_ARGUMENT(request.query_ != nullptr, "analysis query cannot be null");
+    CHECK_ARGUMENT(request.topk_ > 0, "analysis topk must be greater than 0");
+    if (GetNumElements() == 0) {
+        JsonType stats;
+        stats["_analysis"]["skipped"]["search"].SetString("index is empty");
+        AddAnalysisMetadata(stats,
+                            GetName(),
+                            "search",
+                            "not_applicable",
+                            request.query_->GetNumElements(),
+                            request.topk_);
+        return stats.Dump(4);
+    }
     AnalyzerParam analyzer_param(allocator_);
     analyzer_param.topk = request.topk_;
-    auto analyzer = CreateAnalyzer(this, analyzer_param);
+    auto analyzer = CreateAnalyzer(analyzer_param);
     JsonType stats = analyzer->AnalyzeIndexBySearch(request);
+    AddAnalysisMetadata(stats,
+                        GetName(),
+                        "search",
+                        "complete",
+                        request.query_ == nullptr ? 0 : request.query_->GetNumElements(),
+                        request.topk_);
     return stats.Dump(4);
 }
 

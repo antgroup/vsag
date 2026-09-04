@@ -24,6 +24,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "analyzer/analyzer.h"
+#include "analyzer/pyramid_analyzer.h"
 #include "datacell/compressed_graph_datacell_parameter.h"
 #include "datacell/flatten_datacell_parameter.h"
 #include "datacell/flatten_interface.h"
@@ -2501,11 +2502,20 @@ Pyramid::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
 
 std::string
 Pyramid::GetStats() const {
+    if (GetNumElements() == 0) {
+        JsonType stats;
+        stats["total_count"].SetInt64(0);
+        stats["live_count"].SetInt64(0);
+        stats["deleted_count"].SetInt64(GetNumberRemoved());
+        stats["_analysis"]["skipped"]["structure"].SetString("index is empty");
+        AddAnalysisMetadata(stats, GetName(), "stats", "partial");
+        return stats.Dump(4);
+    }
     AnalyzerParam analyzer_param(allocator_);
     analyzer_param.topk = 10;
     analyzer_param.base_sample_size = std::min<uint64_t>(10, this->GetNumElements());
     analyzer_param.search_params = R"({"pyramid": {"ef_search": 500}})";
-    auto analyzer = CreateAnalyzer(this, analyzer_param);
+    auto analyzer = CreateAnalyzer(analyzer_param);
     JsonType stats = analyzer->GetStats();
     if (build_cache_hit_rate_ >= 0.0F) {
         stats["build_cache_hit_rate"].SetFloat(build_cache_hit_rate_);
@@ -2522,7 +2532,13 @@ Pyramid::GetStats() const {
         total_route_graph_size += root_stats["route_graph_size"].GetUint64();
     }
     stats["total_route_graph_size"].SetUint64(total_route_graph_size);
+    AddAnalysisMetadata(stats, GetName(), "stats", "complete");
     return stats.Dump(4);
+}
+
+AnalyzerBasePtr
+Pyramid::CreateAnalyzer(const AnalyzerParam& param) const {
+    return std::make_shared<PyramidAnalyzer>(this, param);
 }
 void
 Pyramid::collect_graph_nodes(IndexNode* node,
@@ -2871,12 +2887,29 @@ Pyramid::AnalyzeIndexBySearch(const SearchRequest& request) {
                    fmt::format("topk({}) must be greater than 0", request.topk_));
     CHECK_ARGUMENT(request.topk_ <= static_cast<int64_t>(std::numeric_limits<uint32_t>::max()),
                    fmt::format("topk({}) exceeds the supported maximum", request.topk_));
-    CHECK_ARGUMENT(base_codes_->TotalCount() > 0,
-                   "Pyramid AnalyzeIndexBySearch requires a built index");
+    CHECK_ARGUMENT(request.query_ != nullptr, "analysis query cannot be null");
+    if (base_codes_->TotalCount() == 0) {
+        JsonType stats;
+        stats["_analysis"]["skipped"]["search"].SetString("index is empty");
+        AddAnalysisMetadata(stats,
+                            GetName(),
+                            "search",
+                            "not_applicable",
+                            request.query_->GetNumElements(),
+                            request.topk_);
+        return stats.Dump(4);
+    }
     AnalyzerParam analyzer_param(allocator_);
     analyzer_param.topk = request.topk_;
-    auto analyzer = CreateAnalyzer(this, analyzer_param);
-    return analyzer->AnalyzeIndexBySearch(request).Dump(4);
+    auto analyzer = CreateAnalyzer(analyzer_param);
+    auto stats = analyzer->AnalyzeIndexBySearch(request);
+    AddAnalysisMetadata(stats,
+                        GetName(),
+                        "search",
+                        "complete",
+                        request.query_ == nullptr ? 0 : request.query_->GetNumElements(),
+                        request.topk_);
+    return stats.Dump(4);
 }
 
 }  // namespace vsag

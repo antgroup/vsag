@@ -21,14 +21,9 @@
 #include <iostream>
 #include <memory>
 
-#include "algorithm/hgraph/hgraph.h"
-#include "algorithm/ivf/ivf.h"
-#include "algorithm/pyramid/pyramid.h"
-#include "algorithm/pyramid/pyramid_zparameters.h"
-#include "algorithm/sindi/sindi.h"
-#include "algorithm/sindi/sindi_parameter.h"
-#include "index/index_impl.h"
+#include "data_type.h"
 #include "inner_string_params.h"
+#include "metric_type.h"
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
 
@@ -56,12 +51,20 @@ is_sindi_inner_param(const JsonType& params) {
            params.Contains(USE_QUANTIZATION) || params.Contains(SPARSE_REMAP_TERM_IDS);
 }
 
+bool
+is_sindi_v2_inner_param(const JsonType& params) {
+    return params.Contains("term_io") || params.Contains("rerank_layout");
+}
+
 std::string
 infer_index_name_from_build_param(const JsonType& params) {
     if (params.Contains(TYPE_KEY)) {
         return params[TYPE_KEY].GetString();
     }
     if (is_sparse_build_param(params)) {
+        if (params.Contains(INDEX_PARAM) && is_sindi_v2_inner_param(params[INDEX_PARAM])) {
+            return INDEX_SINDI_V2;
+        }
         return INDEX_SINDI;
     }
     if (params.Contains(INDEX_PARAM)) {
@@ -72,6 +75,9 @@ infer_index_name_from_build_param(const JsonType& params) {
         if (index_param.Contains("base_quantization_type") ||
             index_param.Contains("index_min_size")) {
             return INDEX_PYRAMID;
+        }
+        if (is_sindi_v2_inner_param(index_param)) {
+            return INDEX_SINDI_V2;
         }
         if (is_sindi_inner_param(index_param)) {
             return INDEX_SINDI;
@@ -98,11 +104,13 @@ std::string
 DataTypesToString(DataTypes type) {
     switch (type) {
         case DataTypes::DATA_TYPE_FLOAT:
-            return "float";
+            return "float32";
         case DataTypes::DATA_TYPE_INT8:
             return "int8";
         case DataTypes::DATA_TYPE_FP16:
-            return "fp16";
+            return "float16";
+        case DataTypes::DATA_TYPE_BF16:
+            return "bfloat16";
         case DataTypes::DATA_TYPE_SPARSE:
             return "sparse";
         default:
@@ -288,7 +296,8 @@ public:
             }
             return true;
         }
-        return create_index_without_param(index_name_, reader);
+        std::fstream new_stream(index_path_, std::ios::binary | std::ios::in);
+        return create_index_without_param(index_name_, new_stream);
     }
 
     void
@@ -304,6 +313,10 @@ public:
         }
         if (not query_dataset) {
             logger::error("Query dataset is null");
+            return;
+        }
+        if (not index_->CheckFeature(IndexFeature::SUPPORT_ANALYZE_INDEX_BY_SEARCH)) {
+            logger::error("Index {} does not support search analysis", index_name_);
             return;
         }
         SearchRequest query_request;
@@ -332,6 +345,10 @@ public:
 
     void
     ShowIndexProperty(const std::string& search_param, const std::string& base_path) const {
+        if (not index_->CheckFeature(IndexFeature::SUPPORT_GET_STATS)) {
+            logger::error("Index {} does not support static analysis", index_name_);
+            return;
+        }
         if (base_path.empty() || index_name_ != INDEX_SINDI) {
             logger::info("index inner property: {}", index_->GetStats());
             return;
@@ -394,6 +411,9 @@ private:
         std::string inner_param = basic_info[INDEX_PARAM].GetString();
         index_param_ = JsonType::Parse(inner_param);
         index_name_ = infer_index_name_from_build_param(index_param_);
+        if (basic_info.Contains("is_multi_vector") && basic_info["is_multi_vector"].GetBool()) {
+            index_name_ = INDEX_WARP;
+        }
         if (index_name_.empty()) {
             index_name_ = infer_index_name_from_build_param(basic_info);
         }
@@ -408,14 +428,16 @@ private:
         if (basic_info.Contains("data_type")) {
             data_type_ = static_cast<DataTypes>(basic_info["data_type"].GetInt());
         } else {
-            data_type_ = index_name_ == INDEX_SINDI ? DataTypes::DATA_TYPE_SPARSE
-                                                    : DataTypes::DATA_TYPE_FLOAT;
+            data_type_ = index_name_ == INDEX_SINDI || index_name_ == INDEX_SINDI_V2
+                             ? DataTypes::DATA_TYPE_SPARSE
+                             : DataTypes::DATA_TYPE_FLOAT;
         }
         if (basic_info.Contains("metric")) {
             metric_type_ = static_cast<MetricType>(basic_info["metric"].GetInt());
         } else {
-            metric_type_ = index_name_ == INDEX_SINDI ? MetricType::METRIC_TYPE_IP
-                                                      : MetricType::METRIC_TYPE_L2SQR;
+            metric_type_ = index_name_ == INDEX_SINDI || index_name_ == INDEX_SINDI_V2
+                               ? MetricType::METRIC_TYPE_IP
+                               : MetricType::METRIC_TYPE_L2SQR;
         }
         if (not basic_info.Contains(DIM) || not basic_info.Contains("extra_info_size") ||
             not basic_info.Contains("data_type") || not basic_info.Contains("metric")) {
@@ -449,48 +471,33 @@ private:
     }
 
     bool
-    create_index_without_param(const std::string& index_name, StreamReader& reader) {
-        // create index common parameters
-        IndexCommonParam index_common_params;
-        index_common_params.dim_ = dim_;
-        index_common_params.metric_ = metric_type_;
-        index_common_params.allocator_ = Engine::CreateDefaultAllocator();
-        index_common_params.data_type_ = data_type_;
-        index_common_params.extra_info_size_ = extra_info_size_;
-        // create index and deserialize
-        if (index_name_ == INDEX_HGRAPH) {
-            auto hgraph_parameter = std::make_shared<HGraphParameter>();
-            hgraph_parameter->FromJson(index_param_);
-            hgraph_parameter->data_type = data_type_;
-            auto inner_index = std::make_shared<HGraph>(hgraph_parameter, index_common_params);
-            inner_index->Deserialize(reader);
-            index_ = std::make_shared<IndexImpl<HGraph>>(inner_index, index_common_params);
-            return true;
-        } else if (index_name_ == INDEX_IVF) {
-            auto ivf_parameter = std::make_shared<IVFParameter>();
-            ivf_parameter->FromJson(index_param_);
-            auto inner_index = std::make_shared<IVF>(ivf_parameter, index_common_params);
-            inner_index->Deserialize(reader);
-            index_ = std::make_shared<IndexImpl<IVF>>(inner_index, index_common_params);
-            return true;
-        } else if (index_name_ == INDEX_PYRAMID) {
-            auto pyramid_parameter = std::make_shared<PyramidParameters>();
-            pyramid_parameter->FromJson(index_param_);
-            auto inner_index = std::make_shared<Pyramid>(pyramid_parameter, index_common_params);
-            inner_index->Deserialize(reader);
-            index_ = std::make_shared<IndexImpl<Pyramid>>(inner_index, index_common_params);
-            return true;
-        } else if (index_name_ == INDEX_SINDI) {
-            auto sindi_parameter = std::make_shared<SINDIParameter>();
-            sindi_parameter->FromJson(index_param_);
-            auto inner_index = std::make_shared<SINDI>(sindi_parameter, index_common_params);
-            inner_index->Deserialize(reader);
-            index_ = std::make_shared<IndexImpl<SINDI>>(inner_index, index_common_params);
-            return true;
-        } else {
-            logger::error("Index type {} not supported", index_name_);
+    create_index_without_param(const std::string& index_name, std::istream& in_stream) {
+        JsonType build_param;
+        build_param["dtype"].SetString(DataTypesToString(data_type_));
+        build_param["metric_type"].SetString(MetricTypeToString(metric_type_));
+        if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
+            build_param["dim"].SetInt64(dim_);
+        }
+        if (extra_info_size_ > 0) {
+            build_param["extra_info_size"].SetInt64(extra_info_size_);
+        }
+        build_param[INDEX_PARAM].SetJson(index_param_);
+
+        auto create_result = Factory::CreateIndex(index_name, build_param.Dump());
+        if (not create_result.has_value()) {
+            logger::error("Failed to create index {} from serialized metadata: {}",
+                          index_name,
+                          create_result.error().message);
             return false;
         }
+        index_ = create_result.value();
+        auto deserialize_result = index_->Deserialize(in_stream);
+        if (not deserialize_result.has_value()) {
+            logger::error("Failed to deserialize index from file: {}",
+                          deserialize_result.error().message);
+            return false;
+        }
+        return true;
     }
 
 private:

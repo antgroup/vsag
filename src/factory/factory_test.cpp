@@ -55,6 +55,36 @@ TEST_CASE("Factory creates SINDI V2", "[ut][factory]") {
     auto index = vsag::Factory::CreateIndex("sindi_v2", parameters.Dump());
     REQUIRE(index.has_value());
     REQUIRE(index.value()->GetIndexType() == vsag::IndexType::SINDI_V2);
+    REQUIRE(index.value()->CheckFeature(vsag::IndexFeature::SUPPORT_GET_STATS));
+    REQUIRE(index.value()->CheckFeature(vsag::IndexFeature::SUPPORT_ANALYZE_INDEX_BY_SEARCH));
+    const auto stats = vsag::JsonType::Parse(index.value()->GetStats());
+    REQUIRE(stats["_analysis"]["schema_version"].GetInt() == 1);
+    REQUIRE(stats["_analysis"]["index_type"].GetString() == "sindi_v2");
+    REQUIRE(stats["_analysis"]["analysis_type"].GetString() == "stats");
+    REQUIRE_FALSE(index.value()->GetStats().empty());
+}
+
+TEST_CASE("Factory indexes expose baseline analysis metadata", "[ut][factory]") {
+    auto index = vsag::Factory::CreateIndex("brute_force",
+                                            R"({"dtype":"float32","metric_type":"l2","dim":4})");
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->CheckFeature(vsag::IndexFeature::SUPPORT_GET_STATS));
+    REQUIRE(index.value()->CheckFeature(vsag::IndexFeature::SUPPORT_ANALYZE_INDEX_BY_SEARCH));
+
+    const auto stats = vsag::JsonType::Parse(index.value()->GetStats());
+    REQUIRE(stats["_analysis"]["index_type"].GetString() == "brute_force");
+    REQUIRE(stats["_analysis"]["status"].GetString() == "complete");
+    REQUIRE(stats["live_count"].GetInt() == 0);
+
+    float query_data[4] = {0.0F, 0.0F, 0.0F, 0.0F};
+    auto query =
+        vsag::Dataset::Make()->NumElements(1)->Dim(4)->Float32Vectors(query_data)->Owner(false);
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 1;
+    const auto analysis = vsag::JsonType::Parse(index.value()->AnalyzeIndexBySearch(request));
+    REQUIRE(analysis["_analysis"]["analysis_type"].GetString() == "search");
+    REQUIRE(analysis["_analysis"]["status"].GetString() == "not_applicable");
 }
 
 TEST_CASE("Create Local File Reader", "[ut][factory]") {
