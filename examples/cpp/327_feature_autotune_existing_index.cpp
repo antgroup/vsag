@@ -84,7 +84,7 @@ main() {
     vsag::autotune::SearchRequest request;
     request.index = index;
     request.workload = {queries, ground_truth, 1, 1};
-    request.parameter_space = R"({"hgraph":{"ef_search":[4,8,16]}})";
+    request.parameter_space = R"({"hgraph":{"ef_search":{"$choices":[4,8,16]}}})";
     request.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 1.0}};
     request.objective = vsag::autotune::Metric::LATENCY_AVG_MS;
     request.config.max_trials = 3;

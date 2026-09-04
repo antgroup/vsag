@@ -98,7 +98,7 @@ TunePath(const vsag::IndexPtr& index, const PathWorkload& workload) {
     vsag::autotune::SearchRequest request;
     request.index = index;
     request.workload = {workload.queries, workload.ground_truth, TOP_K, 1};
-    request.parameter_space = R"({"pyramid":{"ef_search":[10,20,40,80,160]}})";
+    request.parameter_space = R"({"pyramid":{"ef_search":{"$choices":[10,20,40,80,160]}}})";
     request.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 0.80}};
     request.objective = vsag::autotune::Metric::LATENCY_AVG_MS;
     request.config.max_trials = 5;

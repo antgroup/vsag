@@ -48,7 +48,7 @@ Each `indexes[]` item has the following shape:
   "name": "hgraph",
   "create_params": {
     "index_param": {
-      "max_degree": [16, 32]
+      "max_degree": {"$choices": [16, 32]}
     }
   },
   "search_params": {
@@ -71,10 +71,10 @@ Pyramid is accepted only with an existing in-memory or serialized index.
 
 ### Candidate Expressions
 
-Every leaf in `create_params` and `search_params` can be written as:
+Every field in `create_params` and `search_params` can be written as:
 
-- a scalar, which fixes that value;
-- a non-empty array, which provides discrete candidate values;
+- a concrete JSON value, including an array, which fixes that exact value;
+- a `$choices` object containing a non-empty array of discrete candidate values;
 - an inclusive `$range` containing exactly `start`, `stop`, and non-zero `step`.
 
 Examples:
@@ -82,11 +82,16 @@ Examples:
 ```json
 {
   "fixed": 32,
-  "choices": [16, 32, 48],
+  "literal_array": [0, 1],
+  "choices": {"$choices": [16, 32, 48]},
+  "array_choices": {"$choices": [[], [0], [0, 1]]},
   "integer_range": {"$range": {"start": 40, "stop": 120, "step": 40}},
   "float_range": {"$range": {"start": 0.1, "stop": 0.3, "step": 0.1}}
 }
 ```
+
+Each `$choices` item is one complete literal value; candidate expressions are not interpreted
+inside it. Duplicate items are removed. `$choices` cannot be empty or mixed with other keys.
 
 HGraph `ef_search` has one additional form:
 
@@ -107,9 +112,9 @@ other parameters and the workload remain fixed.
 Every probe evaluates the full query workload. If a probe fails to execute or does not produce
 recall, AutoTune stops that adaptive range because it cannot choose the next interval safely.
 
-V1 treats every JSON array and stepped range in these parameter objects as candidate choices. It
-computes their full Cartesian product and removes identical complete candidates. A no-step range
-is not accepted for other parameters.
+V1 treats every `$choices` and stepped range in these parameter objects as a candidate expression.
+It computes their full Cartesian product and removes identical complete candidates. Bare JSON
+arrays remain native parameter values. A no-step range is not accepted for other parameters.
 
 The request is rejected when the planned worst-case evaluation count exceeds
 `tuning_config.max_trials`. A normal concrete candidate costs one trial. An adaptive `ef_search`

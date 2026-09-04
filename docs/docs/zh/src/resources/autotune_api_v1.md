@@ -45,7 +45,7 @@ AutoTune 从数据集读取 `dim`、`dtype` 和 `metric_type`，并注入每组�
   "name": "hgraph",
   "create_params": {
     "index_param": {
-      "max_degree": [16, 32]
+      "max_degree": {"$choices": [16, 32]}
     }
   },
   "search_params": {
@@ -68,10 +68,10 @@ Pyramid 只接受已有的内存索引或序列化索引。
 
 ### 候选表达式
 
-`create_params` 和 `search_params` 中的每个叶子都可以写成：
+`create_params` 和 `search_params` 中的每个字段都可以写成：
 
-- 标量：固定该值；
-- 非空数组：提供离散候选值；
+- 具体 JSON 值（包括数组）：固定为该完整值；
+- `$choices` 对象：其中包含非空数组，用于提供离散候选值；
 - `$range`：必须且只能包含 `start`、`stop` 和非零 `step`，范围包含端点。
 
 示例：
@@ -79,11 +79,16 @@ Pyramid 只接受已有的内存索引或序列化索引。
 ```json
 {
   "fixed": 32,
-  "choices": [16, 32, 48],
+  "literal_array": [0, 1],
+  "choices": {"$choices": [16, 32, 48]},
+  "array_choices": {"$choices": [[], [0], [0, 1]]},
   "integer_range": {"$range": {"start": 40, "stop": 120, "step": 40}},
   "float_range": {"$range": {"start": 0.1, "stop": 0.3, "step": 0.1}}
 }
 ```
+
+`$choices` 中的每一项都是一个完整的具体值，其中不再解释嵌套的候选表达式。重复项会被
+去除；`$choices` 不能为空，也不能和其他 key 混用。
 
 HGraph `ef_search` 还支持一种特殊写法：
 
@@ -102,8 +107,9 @@ latency 和 QPS 仍作为实测指标参与最终约束过滤和结果选择。�
 每个探测点都会评测完整 query workload。如果某个评测点执行失败或没有 recall，AutoTune
 会停止该自适应范围，因为此时无法安全选择下一个区间。
 
-V1 会把参数对象中的所有 JSON 数组和带 `step` 的范围解释成候选集合，计算完整笛卡尔积
-并去除完全相同的候选。其他参数不接受省略 `step` 的范围。
+V1 会把参数对象中的所有 `$choices` 和带 `step` 的范围解释成候选集合，计算完整笛卡尔积
+并去除完全相同的候选。裸 JSON 数组会保持为索引原生参数值。其他参数不接受省略 `step`
+的范围。
 
 计划的最坏评测次数超过 `tuning_config.max_trials` 时，请求失败。普通具体候选占一个
 trial；自适应 `ef_search` 在 `start == stop` 时占一个。否则，planner 会为每个可能的首次
