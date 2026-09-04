@@ -7,6 +7,7 @@ This page documents how to build VSAG from source.
 - **OS**: Ubuntu 20.04+, CentOS 7+, or macOS 14+ on Apple Silicon
 - **Compiler**: GCC 9.4.0+, Clang 13.0.0+, or Apple Clang from Xcode Command Line Tools
 - **CMake**: 3.18.0+
+- **Ninja**: preferred when available; Unix Makefiles are used as the fallback
 - **clang-format / clang-tidy**: exactly version 15 (enforced)
 - Optional: HDF5 (for `tools/eval/eval_performance`), libaio (for the `async_io` data-cell backend),
   liburing (for `uring_io` on Linux), Intel MKL.
@@ -39,6 +40,12 @@ dist-cxx11-abi      Build redistributable tarball (C++11 ABI)
 dist-libcxx         Build redistributable tarball (libc++)
 clean       Remove build trees
 ```
+
+These targets prefer Ninja when a usable `ninja` executable is available. Otherwise they fall back
+to Unix Makefiles. An explicit generator always wins; for example, use
+`make debug CMAKE_GENERATOR='Unix Makefiles'` to request the fallback directly. Because CMake build
+trees are generator-specific, run the matching clean target before changing the generator for an
+existing build directory.
 
 ## Step-by-Step
 

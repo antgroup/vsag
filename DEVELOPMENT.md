@@ -30,6 +30,7 @@ docker pull vsaglib/vsag:ubuntu
   - or Clang version 13.0.0 or later
 - Build Tools: 
   - CMake version 3.18.0 or later
+  - Ninja (preferred when available; Unix Makefiles remain the compatibility fallback)
   - clang-tidy version 15 EXACTLY (not higher, not lower - required for consistent lint diagnostics)
   - clang-format version 15 EXACTLY (not higher, not lower - required for consistent formatting)
 - Additional Dependencies:
@@ -47,7 +48,7 @@ $ ./scripts/deps/install_deps_macos.sh
 ```
 
 ## VSAG Build Tool
-VSAG project use the Unix Makefiles to compile, package and install the library. Here is the commands below:
+VSAG uses CMake to compile, package, and install the library through the commands below. The Makefile prefers Ninja when a usable installation is available and otherwise falls back to Unix Makefiles. Set `CMAKE_GENERATOR` explicitly to use another supported generator; explicit values always take precedence.
 ```bash
 Usage: make <target>
 
