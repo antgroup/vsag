@@ -283,7 +283,7 @@ HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
 static constexpr uint64_t SOURCE_ID_TABLE_MAGIC = 0x534F555243454944ULL;  // "SOURCEID"
 static constexpr uint64_t DELETED_IDS_MAGIC = 0x44454C4554454449ULL;      // "DELETEDI"
 
-void
+static void
 deserialize_deleted_ids(StreamReader& reader, const LabelTablePtr& label_table) {
     const uint64_t cursor = reader.GetCursor();
     if (reader.Length() < cursor + sizeof(uint64_t)) {
@@ -299,7 +299,7 @@ deserialize_deleted_ids(StreamReader& reader, const LabelTablePtr& label_table) 
 
     uint64_t deleted_count = 0;
     StreamReader::ReadObj(reader, deleted_count);
-    const auto valid_count = label_table->label_table_.size();
+    const auto valid_count = label_table->GetLabelTableSize();
     if (deleted_count > valid_count) {
         throw VsagException(ErrorType::INVALID_BINARY, "deleted id count exceeds label table size");
     }
@@ -341,10 +341,12 @@ HGraph::serialize_label_info(StreamWriter& writer) const {
         }
     }
     const auto deleted_ids = this->label_table_->GetAllDeletedIds();
-    StreamWriter::WriteObj(writer, DELETED_IDS_MAGIC);
-    StreamWriter::WriteObj(writer, static_cast<uint64_t>(deleted_ids.size()));
-    for (const auto id : deleted_ids) {
-        StreamWriter::WriteObj(writer, id);
+    if (not deleted_ids.empty()) {
+        StreamWriter::WriteObj(writer, DELETED_IDS_MAGIC);
+        StreamWriter::WriteObj(writer, static_cast<uint64_t>(deleted_ids.size()));
+        for (const auto id : deleted_ids) {
+            StreamWriter::WriteObj(writer, id);
+        }
     }
 }
 
@@ -398,6 +400,12 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
         }
     }
     deserialize_deleted_ids(reader, this->label_table_);
+}
+
+void
+HGraph::sync_delete_count_from_label_table() {
+    this->delete_count_.store(static_cast<int64_t>(this->label_table_->GetAllDeletedIds().size()),
+                              std::memory_order_release);
 }
 
 void
@@ -967,8 +975,7 @@ HGraph::read_streaming_body(StreamReader& reader,
     if (not this->using_dedup_storage()) {
         this->total_count_ = this->basic_flatten_codes_->TotalCount();
     }
-    this->delete_count_.store(static_cast<int64_t>(this->label_table_->GetAllDeletedIds().size()),
-                              std::memory_order_release);
+    this->sync_delete_count_from_label_table();
     if (this->raw_vector_ != nullptr) {
         this->has_raw_vector_ = true;
     }
@@ -1016,10 +1023,6 @@ HGraph::Deserialize(StreamReader& reader) {
             this->extra_infos_->Deserialize(reader);
         }
         this->total_count_ = this->basic_flatten_codes_->TotalCount();
-        this->delete_count_.store(
-            static_cast<int64_t>(this->label_table_->GetAllDeletedIds().size()),
-            std::memory_order_release);
-
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Deserialize(reader);
         }
@@ -1055,9 +1058,7 @@ HGraph::Deserialize(StreamReader& reader) {
         this->label_table_->is_legacy_duplicate_format_ = (dup_version == 0);
 
         this->deserialize_label_info(buffer_reader);
-        this->delete_count_.store(
-            static_cast<int64_t>(this->label_table_->GetAllDeletedIds().size()),
-            std::memory_order_release);
+        this->sync_delete_count_from_label_table();
         if (this->using_dedup_storage()) {
             this->code_slot_map_->Deserialize(buffer_reader);
             auto logical_count = this->code_slot_map_->PublishedLogicalCount();

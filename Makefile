@@ -10,6 +10,7 @@ LITE_BUILD_DIR ?= "./build-lite/"
 LITE_RELEASE_BUILD_DIR ?= "./build-lite-release/"
 PERF_RELEASE_BUILD_DIR ?= "./build-release-perf/"
 VSAG_ENABLE_TESTS ?= OFF
+VSAG_ENABLE_LITE ?= OFF
 VSAG_ENABLE_PYBINDS ?= OFF
 VSAG_ENABLE_TOOLS ?= OFF
 VSAG_ENABLE_EXAMPLES ?= OFF
@@ -22,6 +23,7 @@ VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DENABLE_LIBAIO=${VSAG_ENABLE_LIBAIO}
 VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DVSAG_USE_SYSTEM_DEPS=${VSAG_USE_SYSTEM_DEPS}
 VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX} -DNUM_BUILDING_JOBS=${COMPILE_JOBS}
 VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DENABLE_TESTS=${VSAG_ENABLE_TESTS} -DENABLE_PYBINDS=${VSAG_ENABLE_PYBINDS}
+VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DENABLE_LITE=${VSAG_ENABLE_LITE}
 VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DENABLE_TOOLS=${VSAG_ENABLE_TOOLS} -DENABLE_EXAMPLES=${VSAG_ENABLE_EXAMPLES}
 # CI checks out these sources before configuration. Explicit source overrides
 # prevent FetchContent from contacting the archive URLs declared under extern/.
@@ -110,14 +112,11 @@ lite:                    ## Build the reduced VSAG Lite library.
 
 .PHONY: test-lite
 test-lite:               ## Build and run the VSAG Lite smoke tests.
-	cmake ${VSAG_CMAKE_ARGS} -B${LITE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Debug -DENABLE_LITE=ON -DENABLE_LITE_TESTS=ON -DENABLE_CCACHE=ON
-	cmake --build ${LITE_BUILD_DIR} --target vsag_lite_smoke_test --parallel ${COMPILE_JOBS}
-	ctest --test-dir ${LITE_BUILD_DIR} --output-on-failure
-
-.PHONY: benchmark-lite
-benchmark-lite:          ## Build the VSAG Lite benchmark executable.
-	cmake ${VSAG_CMAKE_ARGS} -B${LITE_RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_LITE=ON -DENABLE_LITE_BENCHMARK=ON -DENABLE_CCACHE=ON
-	cmake --build ${LITE_RELEASE_BUILD_DIR} --target vsag_lite_benchmark --parallel ${COMPILE_JOBS}
+	cmake ${VSAG_CMAKE_ARGS} -B${LITE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Debug -DENABLE_LITE=ON -DENABLE_TESTS=ON -DENABLE_CCACHE=ON
+	cmake --build ${LITE_BUILD_DIR} --parallel ${COMPILE_JOBS}
+	${LITE_BUILD_DIR}/tests/unittests "[lite]" -d yes --allow-running-no-tests ${UT_SHARD}
+	${LITE_BUILD_DIR}/tests/functests "[lite]" -d yes --allow-running-no-tests ${UT_SHARD}
+	${LITE_BUILD_DIR}/tests/eval_monitor_test -d yes --allow-running-no-tests ${UT_SHARD}
 
 .PHONY: test-cmake
 test-cmake:              ## Run focused CMake helper tests.

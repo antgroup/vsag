@@ -31,8 +31,6 @@ option (ENABLE_TOOLS "Whether compile vsag tools" OFF)
 option (ENABLE_EXAMPLES "Whether compile examples" OFF)
 option (ENABLE_TESTS "Whether compile vsag tests" OFF)
 option (ENABLE_LITE "Build the reduced-footprint VSAG Lite variant" OFF)
-option (ENABLE_LITE_TESTS "Build the standalone VSAG Lite smoke test" OFF)
-option (ENABLE_LITE_BENCHMARK "Build the Full/Lite comparison benchmark" OFF)
 option (ENABLE_PYBINDS "Whether compile Python bindings" OFF)
 option (ENABLE_NODE_BINDS "Whether compile Node.js bindings" OFF)
 option (ENABLE_LIBAIO "Whether to enable libaio support" ON)
@@ -46,15 +44,6 @@ option (DISABLE_AVX512VPOPCNTDQ_FORCE "Force disable avx512vpopcntdq instruction
 option (DISABLE_AMX_FORCE "Force disable Intel AMX instructions" OFF)
 option (DISABLE_NEON_FORCE "Force disable neon instructions" OFF)
 option (DISABLE_SVE_FORCE "Force disable sve instructions" OFF)
-
-if (ENABLE_LITE_TESTS AND NOT ENABLE_LITE)
-    message (FATAL_ERROR "ENABLE_LITE_TESTS requires ENABLE_LITE=ON")
-endif ()
-if (ENABLE_LITE AND ENABLE_TESTS)
-    message (FATAL_ERROR "ENABLE_TESTS requires a Full build; use ENABLE_LITE_TESTS for Lite")
-endif ()
-
-
 
 set (NUM_BUILDING_JOBS "4" CACHE STRING "Default compilation parallelism for third-party builds.")
 set (BUILD_INFO_DIR "${CMAKE_BINARY_DIR}/.vsag-build-info" CACHE PATH "Metadata directory for ExternalProject state.")

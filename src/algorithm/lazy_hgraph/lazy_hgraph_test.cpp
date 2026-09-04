@@ -318,7 +318,7 @@ TEST_CASE("LazyHGraph transitions to graph and accepts more data", "[ut][lazy_hg
     REQUIRE(result->GetIds()[0] == 300);
 }
 
-TEST_CASE("LazyHGraph updates ids in both phases", "[ut][lazy_hgraph]") {
+TEST_CASE("LazyHGraph updates ids in both phases", "[ut][lazy_hgraph][lite]") {
     auto index = MakeLazyIndex(4);
     std::vector<float> vectors;
     std::vector<int64_t> ids;

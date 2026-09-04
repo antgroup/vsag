@@ -285,18 +285,26 @@ public:
     }
 
     uint64_t
+    GetLabelTableSize() const {
+        return label_table_.size();
+    }
+
+    /**
+     * Restore marked-deletion state for an already deserialized label table.
+     * This does not change the label table or its total element count.
+     */
+    void
     RestoreDeletedIds(const std::vector<InnerIdType>& deleted_ids, uint64_t valid_count) {
         std::scoped_lock wlock(delete_ids_mutex_);
         deleted_ids_.clear();
         for (const auto id : deleted_ids) {
-            if (id >= valid_count || id >= label_table_.size()) {
+            if (id >= valid_count) {
                 throw VsagException(
                     ErrorType::INVALID_BINARY,
                     fmt::format("deleted inner id {} exceeds valid count {}", id, valid_count));
             }
             deleted_ids_.insert(id);
         }
-        return deleted_ids_.size();
     }
 
 private:

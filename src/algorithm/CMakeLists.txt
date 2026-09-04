@@ -28,6 +28,9 @@ endif ()
 
 file (GLOB ALGORITHM_SRCS "*.cpp")
 list (FILTER ALGORITHM_SRCS EXCLUDE REGEX "_test.cpp")
+if (ENABLE_LITE)
+    list (FILTER ALGORITHM_SRCS EXCLUDE REGEX "/sindi_host_filter\\.cpp$")
+endif ()
 
 add_library (algorithm OBJECT ${ALGORITHM_SRCS})
 target_link_libraries (algorithm PRIVATE coverage_config vsag_src_common)
@@ -42,6 +45,10 @@ set (ALGORITHM_LIBS ${ALGORITHM_LIBS} PARENT_SCOPE)
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE ALGORITHM_TESTS "*_test.cpp")
+    if (ENABLE_LITE)
+        list (FILTER ALGORITHM_TESTS EXCLUDE REGEX
+              "/(ivf|pyramid|simq|sindi|sindi_v2)/|/sindi_host_filter_test\\.cpp$")
+    endif ()
     add_library (algorithm_test STATIC ${ALGORITHM_TESTS})
     target_link_libraries (algorithm_test PRIVATE Catch2::Catch2 vsag_static unittest_deps)
     vsag_link_openmp_private (algorithm_test)

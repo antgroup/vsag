@@ -70,6 +70,42 @@ jobs:
       - name: Run Clang format check
         run: ./scripts/format/check_format.sh
 
+  lite-build-test:
+    name: Lite Build and Test X86
+    needs: [changes, format]
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-22.04
+    env:
+      VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
+      VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare Host
+        run: |
+          sudo env VSAG_INSTALL_INTEL_MKL=OFF bash ./scripts/deps/install_deps_ubuntu.sh
+          ninja --version
+          cmake --version
+          g++ --version
+      - name: Prepare FetchContent Sources
+        uses: ./.github/actions/prepare-fetchcontent
+        with:
+          include-tests: "true"
+          include-tools: "true"
+      - name: Build and test Lite
+        run: |
+          export CMAKE_GENERATOR="Ninja"
+          make test-lite VSAG_ENABLE_TOOLS=ON COMPILE_JOBS=3
+          test -x build-lite/tools/eval/eval_performance
+      - name: Audit excluded index symbols
+        run: |
+          if nm -C --defined-only build-lite/src/libvsag.so \
+              | grep -E 'vsag::(IVF|Pyramid|SINDI|SINDIV2|SIMQ)::'; then
+            echo "Lite library contains an excluded index implementation" >&2
+            exit 1
+          fi
+
   build-asan-x86:
     name: ASan Build X86
     needs: [changes, format]

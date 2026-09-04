@@ -33,7 +33,7 @@ TEST_CASE("Factory reports removed indexes as unsupported", "[ut][factory]") {
     }
 }
 
-TEST_CASE("Factory creates SINDI V2", "[ut][factory]") {
+TEST_CASE("Factory handles SINDI V2 availability", "[ut][factory]") {
     auto parameters = vsag::JsonType::Parse(R"(
         {
             "dtype": "sparse",
@@ -53,8 +53,13 @@ TEST_CASE("Factory creates SINDI V2", "[ut][factory]") {
         )");
 
     auto index = vsag::Factory::CreateIndex("sindi_v2", parameters.Dump());
+#ifdef VSAG_LITE
+    REQUIRE_FALSE(index.has_value());
+    REQUIRE(index.error().type == vsag::ErrorType::UNSUPPORTED_INDEX);
+#else
     REQUIRE(index.has_value());
     REQUIRE(index.value()->GetIndexType() == vsag::IndexType::SINDI_V2);
+#endif
 }
 
 TEST_CASE("Create Local File Reader", "[ut][factory]") {

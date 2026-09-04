@@ -73,14 +73,6 @@ if (ENABLE_TESTS)
     target_compile_definitions (vsag PRIVATE ENABLE_TESTS)
 endif ()
 
-if (ENABLE_LITE_TESTS)
-    enable_testing ()
-    add_subdirectory (tests/lite)
-endif ()
-if (ENABLE_LITE_BENCHMARK)
-    add_subdirectory (benchs/lite)
-endif ()
-
 include (cmake/VSAGPythonBindings.cmake)  # Optional Python bindings.
 include (cmake/VSAGNodeBindings.cmake)    # Optional Node.js bindings.
 include (cmake/VSAGInstall.cmake)         # Install rules and CMake package config.

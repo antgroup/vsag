@@ -44,6 +44,10 @@ target_link_libraries (datacell PRIVATE transform quantizer io attr coverage_con
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE DATACELL_TESTS "*_test.cpp")
+    if (ENABLE_LITE)
+        list (FILTER DATACELL_TESTS EXCLUDE REGEX
+              "(^|/)(bucket_datacell|disk_sindi|immutable_sindi|mutable_sindi|sindi_|sparse_dmq|sparse_vector).*_test\\.cpp$")
+    endif ()
     add_library (datacell_test STATIC ${DATACELL_TESTS})
     target_link_libraries (datacell_test PRIVATE Catch2::Catch2 vsag_static unittest_deps)
     add_dependencies (datacell_test Catch2)

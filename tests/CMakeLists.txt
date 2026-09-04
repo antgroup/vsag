@@ -81,6 +81,10 @@ add_dependencies (eval_monitor_test Catch2)
 # function tests
 file (GLOB FUNCTION_TESTS "test_*.cpp")
 file (GLOB FUNCTION_TEST_INDEX_SOURCES "test_index/*.cpp")
+if (ENABLE_LITE)
+        list (FILTER FUNCTION_TESTS EXCLUDE REGEX
+                "/test_(ivf|pyramid|pyramid_path_serialization|pyramid_paths|simq|sindi)\\.cpp$")
+endif ()
 add_executable (functests
         ${FUNCTION_TESTS}
         ${FUNCTION_TEST_INDEX_SOURCES}

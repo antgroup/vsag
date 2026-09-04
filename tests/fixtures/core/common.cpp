@@ -24,7 +24,6 @@
 #include <string>
 #include <unordered_set>
 
-#include "algorithm/pyramid/pyramid.h"
 #include "data/vector_generator.h"
 #include "fmt/format.h"
 
@@ -72,7 +71,7 @@ get_index_test_dims(uint64_t count, int seed, int limited_dim) {
 
 bool
 is_path_belong_to(const std::string& a, const std::string& b) {
-    auto paths = vsag::split(a, '|');
+    auto paths = SplitString(a, '|');
     for (const auto& path : paths) {
         if (b.compare(0, path.size(), path) == 0) {
             return true;
