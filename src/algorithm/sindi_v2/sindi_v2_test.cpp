@@ -30,6 +30,7 @@
 #include <sstream>
 
 #include "datacell/extra_info_datacell_parameter.h"
+#include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
 #include "io/memory_block_io/memory_block_io_parameter.h"
@@ -1712,4 +1713,185 @@ TEST_CASE("SINDIV2 optimized DMQ and batch distance end-to-end", "[ut][SINDIV2]"
             REQUIRE_THROWS(built.Add(base));
         }
     }
+}
+
+TEST_CASE("SINDIV2 SearchWithRequest KNN and reasoning report", "[ut][SINDIV2][reasoning]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    const uint32_t num_base = 200;
+    const int64_t max_dim = 64;
+    const uint32_t term_id_limit = 5000;
+    common_param.dim_ = max_dim;
+
+    std::vector<int64_t> ids(num_base);
+    std::iota(ids.begin(), ids.end(), 0);
+
+    auto sv_base = fixtures::GenerateSparseVectors(
+        num_base, max_dim, /*max_id=*/term_id_limit - 1, 0.1F, 1.0F);
+    auto base = Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    fixtures::TempDir dir("sindi_v2_search_with_request");
+    const std::string term_path = dir.GenerateRandomFile(false);
+    auto param = create_sindi_v2_param(term_id_limit, term_path);
+    auto index = std::make_unique<SINDIV2>(param, common_param);
+    REQUIRE(index->Build(base).empty());
+
+    const std::string search_param = R"({
+        "sindi_v2": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 50
+        }
+    })";
+
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(sv_base.data())->Owner(false);
+
+    SECTION("search without expected labels returns no reasoning report") {
+        SearchRequest req;
+        req.query_ = query;
+        req.topk_ = 10;
+        req.params_str_ = search_param;
+        auto result = index->SearchWithRequest(req);
+
+        REQUIRE(result->GetDim() == 10);
+        REQUIRE(result->GetReasoning() == "{}");
+    }
+
+    SECTION("expected labels produce a reasoning report") {
+        SearchRequest req;
+        req.query_ = query;
+        req.topk_ = 10;
+        req.params_str_ = search_param;
+        req.expected_labels_ = {0};
+        auto result = index->SearchWithRequest(req);
+
+        const auto& reasoning = result->GetReasoning();
+        REQUIRE_FALSE(reasoning.empty());
+        REQUIRE(reasoning.find("expected_analysis") != std::string::npos);
+        REQUIRE(reasoning.find("1/1") != std::string::npos);
+        REQUIRE(reasoning.find("\"status\":\"ok\"") != std::string::npos);
+        REQUIRE(reasoning.find("SINDI_V2") != std::string::npos);
+        REQUIRE(reasoning.find("bucket_selection") != std::string::npos);
+    }
+
+    SECTION("reasoning honors the per-search allocator") {
+        DefaultAllocator search_allocator;
+        SearchRequest req;
+        req.query_ = query;
+        req.topk_ = 10;
+        req.params_str_ = search_param;
+        req.expected_labels_ = {0};
+        req.search_allocator_ = &search_allocator;
+        auto result = index->SearchWithRequest(req);
+
+        REQUIRE(result->GetDim() == 10);
+        REQUIRE(result->GetReasoning().find("\"status\":\"ok\"") != std::string::npos);
+    }
+
+    SECTION("range search with expected labels returns reasoning report") {
+        SearchRequest req;
+        req.query_ = query;
+        req.mode_ = SearchMode::RANGE_SEARCH;
+        req.radius_ = 100.0F;
+        req.params_str_ = search_param;
+        req.expected_labels_ = {0};
+        auto baseline = index->RangeSearch(query, 100.0F, search_param, nullptr, -1);
+        auto result = index->SearchWithRequest(req);
+
+        REQUIRE(result->GetReasoning().find("expected_analysis") != std::string::npos);
+        REQUIRE(result->GetDim() == baseline->GetDim());
+        for (int64_t i = 0; i < baseline->GetDim(); ++i) {
+            REQUIRE(result->GetIds()[i] == baseline->GetIds()[i]);
+            REQUIRE(std::abs(result->GetDistances()[i] - baseline->GetDistances()[i]) < 1e-6F);
+        }
+    }
+
+    SECTION("filter rejection is diagnosed") {
+        class RejectZeroFilter : public Filter {
+        public:
+            [[nodiscard]] bool
+            CheckValid(int64_t label) const override {
+                return label != 0;
+            }
+        };
+
+        SearchRequest req;
+        req.query_ = query;
+        req.topk_ = 10;
+        req.params_str_ = search_param;
+        req.enable_filter_ = true;
+        req.filter_ = std::make_shared<RejectZeroFilter>();
+        req.expected_labels_ = {0};
+        auto baseline = index->KnnSearch(query, 10, search_param, req.filter_);
+        auto result = index->SearchWithRequest(req);
+        REQUIRE(result->GetReasoning().find("filter_rejected") != std::string::npos);
+        REQUIRE(result->GetReasoning().find("\"was_visited\":true") != std::string::npos);
+        REQUIRE(result->GetDim() == baseline->GetDim());
+        for (int64_t i = 0; i < baseline->GetDim(); ++i) {
+            REQUIRE(result->GetIds()[i] == baseline->GetIds()[i]);
+            REQUIRE(std::abs(result->GetDistances()[i] - baseline->GetDistances()[i]) < 1e-6F);
+        }
+    }
+
+    SECTION("reasoning does not change search results") {
+        auto baseline = index->KnnSearch(query, 10, search_param, nullptr);
+        REQUIRE(baseline->GetDim() == 10);
+
+        SearchRequest req;
+        req.query_ = query;
+        req.topk_ = 10;
+        req.params_str_ = search_param;
+        req.expected_labels_ = {0};
+        auto with_request = index->SearchWithRequest(req);
+
+        REQUIRE(with_request->GetDim() == baseline->GetDim());
+        for (int64_t i = 0; i < baseline->GetDim(); ++i) {
+            REQUIRE(with_request->GetIds()[i] == baseline->GetIds()[i]);
+            REQUIRE(std::abs(with_request->GetDistances()[i] - baseline->GetDistances()[i]) <
+                    1e-6F);
+        }
+    }
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+    index.reset();
+}
+
+TEST_CASE("SINDIV2 SearchWithRequest reports empty-index reasoning status",
+          "[ut][SINDIV2][reasoning]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 8;
+
+    auto param = std::make_shared<SINDIV2Parameter>();
+    param->term_id_limit = 32;
+    param->window_size = 16;
+    param->doc_prune_ratio = 0.0F;
+    param->term_io_parameter = std::make_shared<MemoryIOParameter>();
+    param->rerank_io_parameter = std::make_shared<MemoryBlockIOParameter>();
+    SINDIV2 index(param, common_param);
+
+    uint32_t term = 1;
+    float value = 1.0F;
+    SparseVector sparse_query{1, &term, &value};
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&sparse_query)->Owner(false);
+
+    SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 1;
+    request.params_str_ = R"({"sindi_v2":{"n_candidate":1}})";
+    request.expected_labels_ = {42};
+    auto result = index.SearchWithRequest(request);
+    REQUIRE(result->GetDim() == 0);
+    REQUIRE(result->GetReasoning().find("empty_index") != std::string::npos);
 }

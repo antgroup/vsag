@@ -12,9 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "search_reasoning.h"
+#include "reasoning_context.h"
+
+#include "reasoning_capability.h"
 
 namespace vsag {
+
+namespace {
+
+constexpr ReasoningDiagnosis K_ALL_DIAGNOSES[] = {
+    ReasoningDiagnosis::kSuccess,
+    ReasoningDiagnosis::kNotReachable,
+    ReasoningDiagnosis::kFilterRejected,
+    ReasoningDiagnosis::kQuantizationError,
+    ReasoningDiagnosis::kEfTooSmall,
+    ReasoningDiagnosis::kReorderEvicted,
+    ReasoningDiagnosis::kUnknown,
+};
+
+constexpr ReasoningEvent K_ALL_EVENTS[] = {
+    ReasoningEvent::kVisit,
+    ReasoningEvent::kEviction,
+    ReasoningEvent::kFilterReject,
+    ReasoningEvent::kReorder,
+    ReasoningEvent::kReorderEviction,
+    ReasoningEvent::kBucketSelection,
+};
+
+}  // namespace
 
 ReasoningContext::ReasoningContext(Allocator* allocator)
     : allocator_(allocator),
@@ -126,9 +151,9 @@ ReasoningContext::RecordReorderEviction(InnerIdType id, uint32_t hop) {
 }
 
 void
-ReasoningContext::SetTermination(const std::string& reason) {
+ReasoningContext::SetTermination(ReasoningTermination termination) {
     std::lock_guard<std::mutex> guard(mutex_);
-    termination_reason_ = reason;
+    termination_ = termination;
 }
 
 void
@@ -156,33 +181,33 @@ ReasoningContext::DiagnoseExpectedTargets() {
     }
 }
 
-std::string
+ReasoningDiagnosis
 ReasoningContext::DiagnoseTarget(const ExpectedTargetTrace& trace) {
     if (!trace.was_visited) {
-        return "not_reachable";
+        return ReasoningDiagnosis::kNotReachable;
     }
 
     if (trace.filter_rejected) {
-        return "filter_rejected";
+        return ReasoningDiagnosis::kFilterRejected;
     }
 
     if (trace.quantized_distance > trace.true_distance * 1.5F && trace.true_distance > 0.0F) {
-        return "quantization_error";
+        return ReasoningDiagnosis::kQuantizationError;
     }
 
     if (trace.was_evicted && !trace.was_in_result_set) {
-        return "ef_too_small";
+        return ReasoningDiagnosis::kEfTooSmall;
     }
 
     if (trace.reorder_evicted && !trace.was_in_result_set) {
-        return "reorder_evicted";
+        return ReasoningDiagnosis::kReorderEvicted;
     }
 
     if (!trace.was_in_result_set) {
-        return "unknown";
+        return ReasoningDiagnosis::kUnknown;
     }
 
-    return "success";
+    return ReasoningDiagnosis::kSuccess;
 }
 
 std::string
@@ -202,13 +227,13 @@ ReasoningContext::GenerateReport() const {
             missed_count++;
 
             JsonType detail;
-            detail["label"].SetJson(JsonType::Parse(std::to_string(trace.label)));
-            detail["inner_id"].SetJson(JsonType::Parse(std::to_string(trace.inner_id)));
-            detail["diagnosis"].SetString(trace.diagnosis);
+            detail["label"].SetInt64(trace.label);
+            detail["inner_id"].SetInt64(static_cast<int64_t>(trace.inner_id));
+            detail["diagnosis"].SetString(ToString(trace.diagnosis));
             detail["true_distance"].SetFloat(trace.true_distance);
             detail["quantized_distance"].SetFloat(trace.quantized_distance);
             detail["was_visited"].SetBool(trace.was_visited);
-            detail["visited_at_hop"].SetJson(JsonType::Parse(std::to_string(trace.visited_at_hop)));
+            detail["visited_at_hop"].SetInt(static_cast<int64_t>(trace.visited_at_hop));
             detail["was_evicted"].SetBool(trace.was_evicted);
             detail["filter_rejected"].SetBool(trace.filter_rejected);
             detail["reorder_evicted"].SetBool(trace.reorder_evicted);
@@ -222,6 +247,41 @@ ReasoningContext::GenerateReport() const {
 
     report["expected_analysis"]["summary"].SetString(summary);
     report["expected_analysis"]["missed_targets"].SetJson(missed_targets);
+
+    // [reasoning] meta section: report context + collected-but-undisclosed stats.
+    report["meta"]["schema_version"].SetInt(1);
+    report["meta"]["status"].SetString(ToString(ReasoningReportStatus::kOk));
+    report["meta"]["index_type"].SetString(index_type_);
+    report["meta"]["search_mode"].SetString(is_range_ ? "range" : "knn");
+    report["meta"]["topk"].SetInt(topk_);
+    report["meta"]["use_reorder"].SetBool(use_reorder_);
+    report["meta"]["filter_active"].SetBool(filter_active_);
+    report["meta"]["termination_reason"].SetString(ToString(termination_));
+    report["meta"]["total_hops"].SetInt(static_cast<int64_t>(total_hops_));
+    report["meta"]["total_distance_computations"].SetInt(
+        static_cast<int64_t>(total_dist_computations_));
+
+    JsonType available_diagnoses = JsonType::Parse("[]");
+    for (const auto& diagnosis : K_ALL_DIAGNOSES) {
+        JsonType item;
+        item.SetString(ToString(diagnosis));
+        available_diagnoses.AppendJson(item);
+    }
+    report["meta"]["available_diagnoses"].SetJson(available_diagnoses);
+
+    const auto* capability = GetReasoningCapability(index_type_);
+    if (capability != nullptr) {
+        JsonType available_events = JsonType::Parse("[]");
+        for (const auto event : K_ALL_EVENTS) {
+            if (HasReasoningEvent(capability->event_mask, event)) {
+                JsonType item;
+                item.SetString(ToString(event));
+                available_events.AppendJson(item);
+            }
+        }
+        report["meta"]["available_events"].SetJson(available_events);
+        report["meta"]["supports_range"].SetBool(capability->supports_range);
+    }
 
     if (not selected_buckets_.empty()) {
         JsonType bucket_array = JsonType::Parse("[]");
@@ -238,16 +298,27 @@ ReasoningContext::GenerateReport() const {
     return report.Dump();
 }
 
+std::string
+ReasoningContext::MakeStatusReport(ReasoningReportStatus status, const std::string& index_type) {
+    JsonType report;
+    report["meta"]["schema_version"].SetInt(1);
+    report["meta"]["status"].SetString(ToString(status));
+    report["meta"]["index_type"].SetString(index_type);
+    return report.Dump();
+}
+
 void
 ReasoningContext::SetSearchParams(int64_t topk,
                                   const std::string& index_type,
                                   bool use_reorder,
-                                  bool filter_active) {
+                                  bool filter_active,
+                                  bool is_range) {
     std::lock_guard<std::mutex> guard(mutex_);
     topk_ = topk;
     index_type_ = index_type;
     use_reorder_ = use_reorder;
     filter_active_ = filter_active;
+    is_range_ = is_range;
 }
 
 void

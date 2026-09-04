@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "search_reasoning.h"
+#include "reasoning_context.h"
 
 #include <catch2/catch_test_macros.hpp>
-#include <string_view>
 
 #include "impl/allocator/default_allocator.h"
 
@@ -37,6 +36,11 @@ TEST_CASE("ReasoningContext basic operations", "[reasoning]") {
         REQUIRE(ctx.index_type_ == "hgraph");
         REQUIRE(ctx.use_reorder_ == true);
         REQUIRE(ctx.filter_active_ == false);
+        REQUIRE(ctx.is_range_ == false);
+
+        ctx.SetSearchParams(5, "IVF", false, true, true);
+        REQUIRE(ctx.topk_ == 5);
+        REQUIRE(ctx.is_range_ == true);
     }
 
     SECTION("AddSearchHop and AddDistanceComputation") {
@@ -179,7 +183,7 @@ TEST_CASE("ReasoningContext diagnosis logic", "[reasoning]") {
         ctx.DiagnoseExpectedTargets();
         auto it = ctx.expected_traces_.find(4);
         REQUIRE(it != ctx.expected_traces_.end());
-        REQUIRE(it.value().diagnosis == "not_reachable");
+        REQUIRE(it.value().diagnosis == ReasoningDiagnosis::kNotReachable);
     }
 
     SECTION("Diagnose: filter_rejected") {
@@ -187,7 +191,7 @@ TEST_CASE("ReasoningContext diagnosis logic", "[reasoning]") {
         ctx.DiagnoseExpectedTargets();
         auto it = ctx.expected_traces_.find(2);
         REQUIRE(it != ctx.expected_traces_.end());
-        REQUIRE(it.value().diagnosis == "filter_rejected");
+        REQUIRE(it.value().diagnosis == ReasoningDiagnosis::kFilterRejected);
     }
 
     SECTION("Diagnose: ef_too_small") {
@@ -196,7 +200,7 @@ TEST_CASE("ReasoningContext diagnosis logic", "[reasoning]") {
         ctx.DiagnoseExpectedTargets();
         auto it = ctx.expected_traces_.find(3);
         REQUIRE(it != ctx.expected_traces_.end());
-        REQUIRE(it.value().diagnosis == "ef_too_small");
+        REQUIRE(it.value().diagnosis == ReasoningDiagnosis::kEfTooSmall);
     }
 
     SECTION("Diagnose: quantization_error") {
@@ -206,7 +210,7 @@ TEST_CASE("ReasoningContext diagnosis logic", "[reasoning]") {
         it.value().quantized_distance = 1.0F;
         it.value().was_visited = true;
         ctx.DiagnoseExpectedTargets();
-        REQUIRE(it.value().diagnosis == "quantization_error");
+        REQUIRE(it.value().diagnosis == ReasoningDiagnosis::kQuantizationError);
     }
 
     SECTION("Diagnose: reorder_evicted") {
@@ -216,7 +220,7 @@ TEST_CASE("ReasoningContext diagnosis logic", "[reasoning]") {
         ctx.DiagnoseExpectedTargets();
         auto it = ctx.expected_traces_.find(6);
         REQUIRE(it != ctx.expected_traces_.end());
-        REQUIRE(it.value().diagnosis == "reorder_evicted");
+        REQUIRE(it.value().diagnosis == ReasoningDiagnosis::kReorderEvicted);
     }
 
     SECTION("Diagnose: success") {
@@ -227,7 +231,7 @@ TEST_CASE("ReasoningContext diagnosis logic", "[reasoning]") {
         ctx.DiagnoseExpectedTargets();
         auto it = ctx.expected_traces_.find(0);
         REQUIRE(it != ctx.expected_traces_.end());
-        REQUIRE(it.value().diagnosis == "success");
+        REQUIRE(it.value().diagnosis == ReasoningDiagnosis::kSuccess);
     }
 }
 
@@ -243,6 +247,7 @@ TEST_CASE("ReasoningContext GenerateReport", "[reasoning]") {
     label_to_inner_id[100] = 0;
     label_to_inner_id[200] = 1;
 
+    ctx.SetSearchParams(2, "HGraph", false, false);
     ctx.InitializeExpectedTargets(labels, label_to_inner_id);
     ctx.SetTrueDistance(0, 0.0F);
     ctx.SetTrueDistance(1, 1.4142135F);
@@ -261,14 +266,40 @@ TEST_CASE("ReasoningContext GenerateReport", "[reasoning]") {
     REQUIRE(report.find("missed_targets") != std::string::npos);
     REQUIRE(report.find("not_reachable") != std::string::npos);
     REQUIRE(report.find("1.4142135") != std::string::npos);
+
+    SECTION("Report carries meta section") {
+        REQUIRE(report.find("meta") != std::string::npos);
+        REQUIRE(report.find("\"schema_version\"") != std::string::npos);
+        REQUIRE(report.find("\"status\":\"ok\"") != std::string::npos);
+        REQUIRE(report.find("\"search_mode\":\"knn\"") != std::string::npos);
+        REQUIRE(report.find("termination_reason") != std::string::npos);
+        REQUIRE(report.find("total_hops") != std::string::npos);
+        REQUIRE(report.find("total_distance_computations") != std::string::npos);
+        REQUIRE(report.find("available_diagnoses") != std::string::npos);
+        REQUIRE(report.find("available_events") != std::string::npos);
+    }
 }
 
-TEST_CASE("ReasoningContext termination reasons are centralized", "[reasoning]") {
-    REQUIRE(std::string_view(ReasoningContext::kTerminationLowerBoundReached) ==
-            "lower_bound_reached");
-    REQUIRE(std::string_view(ReasoningContext::kTerminationHopsLimitReached) ==
-            "hops_limit_reached");
-    REQUIRE(std::string_view(ReasoningContext::kTerminationTimeout) == "timeout");
+TEST_CASE("ReasoningContext MakeStatusReport", "[reasoning]") {
+    SECTION("Skipped range search") {
+        auto report = ReasoningContext::MakeStatusReport(ReasoningReportStatus::kSkippedRangeSearch,
+                                                         "HGraph");
+        REQUIRE(report.find("\"status\":\"skipped_range_search\"") != std::string::npos);
+        REQUIRE(report.find("\"index_type\":\"HGraph\"") != std::string::npos);
+        REQUIRE(report.find("expected_analysis") == std::string::npos);
+    }
+
+    SECTION("Unsupported index") {
+        auto report = ReasoningContext::MakeStatusReport(ReasoningReportStatus::kUnsupportedByIndex,
+                                                         "SINDI_V2");
+        REQUIRE(report.find("\"status\":\"unsupported_by_index\"") != std::string::npos);
+    }
+
+    SECTION("Empty index") {
+        auto report =
+            ReasoningContext::MakeStatusReport(ReasoningReportStatus::kEmptyIndex, "SINDI_V2");
+        REQUIRE(report.find("\"status\":\"empty_index\"") != std::string::npos);
+    }
 }
 
 TEST_CASE("ReasoningContext SetTermination", "[reasoning]") {
@@ -276,16 +307,16 @@ TEST_CASE("ReasoningContext SetTermination", "[reasoning]") {
     ReasoningContext ctx(&allocator);
 
     SECTION("SetTermination stores reason") {
-        REQUIRE(ctx.termination_reason_.empty());
-        ctx.SetTermination(ReasoningContext::kTerminationLowerBoundReached);
-        REQUIRE(ctx.termination_reason_ == "lower_bound_reached");
+        REQUIRE(ctx.termination_ == ReasoningTermination::kNone);
+        ctx.SetTermination(ReasoningTermination::kLowerBoundReached);
+        REQUIRE(ctx.termination_ == ReasoningTermination::kLowerBoundReached);
     }
 
     SECTION("SetTermination can be overwritten") {
-        ctx.SetTermination(ReasoningContext::kTerminationHopsLimitReached);
-        REQUIRE(ctx.termination_reason_ == "hops_limit_reached");
-        ctx.SetTermination(ReasoningContext::kTerminationTimeout);
-        REQUIRE(ctx.termination_reason_ == "timeout");
+        ctx.SetTermination(ReasoningTermination::kHopsLimitReached);
+        REQUIRE(ctx.termination_ == ReasoningTermination::kHopsLimitReached);
+        ctx.SetTermination(ReasoningTermination::kTimeout);
+        REQUIRE(ctx.termination_ == ReasoningTermination::kTimeout);
     }
 }
 

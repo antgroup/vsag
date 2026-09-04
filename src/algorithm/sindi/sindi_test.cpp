@@ -281,6 +281,12 @@ TEST_CASE("SINDI Filter Callback Limit", "[ut][SINDI]") {
     auto limited_filter = std::make_shared<CountingFilter>(2);
     auto limited_result = search(limited_parameters, limited_filter);
 
+    if (use_search_request) {
+        const auto expected_mode = search_mode == SearchMode::RANGE_SEARCH
+                                       ? "\"search_mode\":\"range\""
+                                       : "\"search_mode\":\"knn\"";
+        REQUIRE(limited_result->GetReasoning().find(expected_mode) != std::string::npos);
+    }
     REQUIRE(limited_filter->Count() == 3);
     REQUIRE(limited_result->GetDim() == 1);
     REQUIRE(limited_result->GetIds()[0] == 2);

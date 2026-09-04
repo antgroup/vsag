@@ -60,6 +60,7 @@
 - [Memory Management](advanced/memory.md)
 - [Per-Search Allocator](advanced/search_allocator.md)
 - [Index Introspection](advanced/introspection.md)
+- [Search Reasoning](advanced/search_reasoning.md)
 - [Extensibility](advanced/extensibility.md)
 - [Graph Enhancement](advanced/enhance_graph.md)
 - [Extra Info](advanced/extra_info.md)

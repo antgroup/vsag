@@ -4769,3 +4769,33 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
     TestIndex::TestBuildIndex(cache_index, dataset, true);
     HGraphTestIndex::TestGeneral(cache_index, dataset, search_param, 0.98f);
 }
+
+TEST_CASE("HGraph Reasoning Range Search Status Report", "[ft][hgraph][reasoning]") {
+    using namespace fixtures;
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    vsag::SearchRequest req;
+    req.query_ = query;
+    req.mode_ = vsag::SearchMode::RANGE_SEARCH;
+    req.radius_ = 1e9F;
+    req.params_str_ = fmt::format(fixtures::search_param_tmp, 32, false);
+    req.expected_labels_ = {dataset->base_->GetIds()[0]};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    const auto& reasoning = result.value()->GetReasoning();
+    REQUIRE(reasoning.find("skipped_range_search") != std::string::npos);
+    REQUIRE(reasoning.find("expected_analysis") == std::string::npos);
+}

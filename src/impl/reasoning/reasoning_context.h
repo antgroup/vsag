@@ -20,31 +20,43 @@
 
 #include "impl/allocator/allocator_wrapper.h"
 #include "json_wrapper.h"
+#include "reasoning_types.h"
 #include "typing.h"
 
 namespace vsag {
 
-struct ExpectedTargetTrace {
-    int64_t label{0};
-    InnerIdType inner_id{0};
-    float true_distance{0.0F};
-    float quantized_distance{0.0F};
-    bool was_visited{false};
-    int32_t visited_at_hop{-1};
-    bool was_in_result_set{false};
-    bool was_evicted{false};
-    bool filter_rejected{false};
-    bool reorder_evicted{false};
-    std::string diagnosis{};
-
-    ExpectedTargetTrace() = default;
-};
-
-struct ReorderRecord {
-    InnerIdType id{0};
-    float dist_before{0.0F};
-    float dist_after{0.0F};
-};
+// ============================================================================
+// Search Reasoning: per-query recall diagnostics.
+//
+// A search enables reasoning by filling SearchRequest::expected_labels_ and
+// calling SearchWithRequest. The index creates a per-query ReasoningContext,
+// records events during traversal, and attaches a JSON report to the result
+// dataset (Dataset::Reasoning). The report explains why each expected target
+// was or was not recalled.
+//
+// Quick answers:
+//   * What can a diagnosis be?   See ReasoningDiagnosis in reasoning_types.h.
+//   * Why did the search stop?   See ReasoningTermination in reasoning_types.h.
+//   * What does an index record? GetReasoningCapability(index_type) - the
+//     single support matrix, see reasoning_capability.cpp.
+//   * Where are the hooks?       Every instrumentation site is tagged with a
+//     "// [reasoning]" comment; `grep -rn "\[reasoning\]" src/` lists them all.
+//
+// How to add a new diagnosis:
+//   1. add a value to ReasoningDiagnosis in reasoning_types.h
+//   2. map it in ToString(ReasoningDiagnosis) (reasoning_types.cpp)
+//   3. add a rule in DiagnoseTarget (rule order = causal chain priority,
+//      first match wins)
+//   4. add a SECTION in reasoning_context_test.cpp
+//   5. add a row in docs/docs/{en,zh}/src/advanced/search-reasoning.md
+//
+// How to add a new event type:
+//   1. add a value to ReasoningEvent in reasoning_types.h
+//   2. add a RecordXxx method on ReasoningContext
+//   3. update reasoning_capability.cpp for every index that emits it
+//   4. tag the instrumentation site with "// [reasoning]"
+//   5. add a row in the docs event table
+// ============================================================================
 
 class ReasoningContext {
 public:
@@ -75,24 +87,32 @@ public:
     RecordReorderEviction(InnerIdType id, uint32_t hop);
 
     void
-    SetTermination(const std::string& reason);
+    SetTermination(ReasoningTermination termination);
 
     void
     MarkResult(const Vector<InnerIdType>& result_ids);
 
     void
     DiagnoseExpectedTargets();
+
     void
     RecordBucketSelection(const Vector<BucketIdType>& buckets);
 
     std::string
     GenerateReport() const;
 
+    /// Builds a minimal report for searches where reasoning did not run
+    /// (e.g. expected_labels set on an unsupported index or a skipped mode).
+    /// The returned JSON carries only the meta section.
+    static std::string
+    MakeStatusReport(ReasoningReportStatus status, const std::string& index_type);
+
     void
     SetSearchParams(int64_t topk,
                     const std::string& index_type,
                     bool use_reorder,
-                    bool filter_active);
+                    bool filter_active,
+                    bool is_range = false);
 
     void
     AddSearchHop();
@@ -100,19 +120,16 @@ public:
     void
     AddDistanceComputation(uint32_t count = 1);
 
-    static constexpr const char* kTerminationLowerBoundReached = "lower_bound_reached";
-    static constexpr const char* kTerminationHopsLimitReached = "hops_limit_reached";
-    static constexpr const char* kTerminationTimeout = "timeout";
-
 public:
     int64_t topk_{0};
     std::string index_type_{};
     bool use_reorder_{false};
     bool filter_active_{false};
+    bool is_range_{false};
 
     uint32_t total_hops_{0};
     uint32_t total_dist_computations_{0};
-    std::string termination_reason_{};
+    ReasoningTermination termination_{ReasoningTermination::kNone};
 
     UnorderedSet<InnerIdType> expected_inner_ids_;
     UnorderedMap<InnerIdType, ExpectedTargetTrace> expected_traces_;
@@ -123,7 +140,7 @@ private:
     Allocator* allocator_{nullptr};
     mutable std::mutex mutex_;
 
-    static std::string
+    static ReasoningDiagnosis
     DiagnoseTarget(const ExpectedTargetTrace& trace);
 };
 

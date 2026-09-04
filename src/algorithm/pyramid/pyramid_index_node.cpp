@@ -18,7 +18,7 @@
 
 #include "datacell/graph_datacell_parameter.h"
 #include "datacell/sparse_graph_datacell.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "storage/serialization.h"
 #include "vsag/constants.h"
 
@@ -336,6 +336,7 @@ IndexNode::Search(const SearchFunc& search_func,
         search_result->Merge(*self_search_result);
         while (search_result->Size() > ef_search) {
             if (reasoning_ctx != nullptr) {
+                // [reasoning] RecordEviction
                 reasoning_ctx->RecordEviction(search_result->Top().second, level_);
             }
             search_result->Pop();
