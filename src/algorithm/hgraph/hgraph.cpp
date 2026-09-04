@@ -201,15 +201,18 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
 
     FlattenInterfacePtr tune_source;
     if (is_tune_base_code or is_tune_precise_code or is_tune_raw_code) {
-        if (covers_active_ids(raw_vector_)) {
-            tune_source = raw_vector_;
-        } else if (covers_active_ids(high_precise_codes_) and
-                   high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        tune_source = raw_vector_;
+        if ((tune_source == nullptr or tune_source->TotalCount() == 0) and
+            high_precise_codes_ != nullptr and
+            high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
             tune_source = high_precise_codes_;
-        } else if (covers_active_ids(basic_flatten_codes_) and
-                   basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        }
+        if ((tune_source == nullptr or tune_source->TotalCount() == 0) and
+            basic_flatten_codes_ != nullptr and
+            basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
             tune_source = basic_flatten_codes_;
-        } else {
+        }
+        if (tune_source == nullptr) {
             return false;
         }
     }
@@ -265,7 +268,7 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
             new_code->Train(train_data.data(), train_count);
 
             Vector<float> insert_buffer(dim_, 0, allocator_);
-            for (int64_t i = 0; i < total_count_; ++i) {
+            for (int64_t i = 0; i < current_count; ++i) {
                 decode_tune_source(i, insert_buffer.data());
                 new_code->InsertVector(static_cast<const void*>(insert_buffer.data()), i);
             }
