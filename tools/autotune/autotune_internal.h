@@ -57,6 +57,7 @@ struct RequestContext {
     bool enable_recall{false};
     bool keep_intermediate{false};
     bool include_raw_eval{false};
+    bool allow_quantization_tune{false};
 };
 
 struct IndexTuningRequest {

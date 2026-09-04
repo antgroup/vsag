@@ -1,6 +1,7 @@
 set(HGRAPH_SRCS
     hgraph.cpp
     hgraph_build.cpp
+    hgraph_degree_reduction.cpp
     hgraph_fast_build.cpp
     hgraph_modify.cpp
     hgraph_mci.cpp

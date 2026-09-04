@@ -148,6 +148,7 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     if (parsed_params.Contains(INDEX_PARAM)) {
         hgraph_json = parsed_params[INDEX_PARAM];
     }
+    const bool has_max_degree = hgraph_json.Contains(HGRAPH_GRAPH_MAX_DEGREE);
 
     // map
     auto inner_json = map_hgraph_param(hgraph_json);
@@ -162,6 +163,20 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     hgraph_parameter->FromJson(inner_json);
     auto inner_parameter = std::make_shared<InnerIndexParameter>();
     inner_parameter->FromJson(inner_json);
+    const bool keep_raw_vector = hgraph_parameter->store_raw_vector;
+
+    const auto current_max_degree = this->bottom_graph_->MaximumDegree();
+    const auto target_max_degree = hgraph_parameter->bottom_graph_param->max_degree_;
+    if (has_max_degree and target_max_degree > current_max_degree) {
+        return false;
+    }
+    const bool reduce_max_degree = has_max_degree and target_max_degree < current_max_degree;
+    if (reduce_max_degree) {
+        std::shared_lock<std::shared_mutex> rlock(this->global_mutex_);
+        if (not this->can_reduce_max_degree_unlocked()) {
+            return false;
+        }
+    }
 
     // init new_basic_code obj
     auto common_param = this->basic_flatten_codes_->ExportCommonParam();
@@ -183,7 +198,7 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     // Check which codes need to be rebuilt.
     bool is_tune_base_code = false;
     bool is_tune_precise_code = false;
-    const bool is_tune_raw_code = requires_raw_vector and not covers_active_ids(raw_vector_);
+    const bool is_tune_raw_code = keep_raw_vector and not covers_active_ids(raw_vector_);
     FlattenInterfacePtr new_raw_code;
     if (is_tune_raw_code) {
         new_raw_code =
@@ -281,6 +296,11 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     // preventing concurrent searches from accessing partially updated state.
     {
         std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
+        if (reduce_max_degree) {
+            this->prepare_degree_reduction_unlocked();
+            this->reduce_max_degree_unlocked(static_cast<uint32_t>(target_max_degree));
+        }
+
         auto param = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
         basic_flatten_codes_ = new_basic;
         if (drop_precise_codes) {
@@ -300,10 +320,11 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
         param->use_reorder = new_use_reorder;
         param->reorder_source = inner_parameter->reorder_source;
 
-        if (requires_raw_vector) {
+        if (keep_raw_vector) {
             raw_vector_ = new_raw;
-            has_raw_vector_ = true;
-            create_new_raw_vector_ = true;
+            has_raw_vector_ = raw_vector_ != nullptr;
+            create_new_raw_vector_ =
+                raw_vector_ != basic_flatten_codes_ and raw_vector_ != high_precise_codes_;
             param->store_raw_vector = true;
             param->raw_vector_param = hgraph_parameter->raw_vector_param;
         } else {
@@ -314,12 +335,14 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
         // set status
         if (disable_future_tuning) {
             this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_TUNE, false);
-            if (not requires_raw_vector) {
+            if (not keep_raw_vector) {
                 this->raw_vector_.reset();
                 has_raw_vector_ = false;
                 create_new_raw_vector_ = false;
+                param->store_raw_vector = false;
             }
         }
+        this->cal_memory_usage();
     }
     return true;
 }
@@ -495,6 +518,7 @@ void
 HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
     CHECK_ARGUMENT(not this->using_dedup_storage(),
                    "HGraph deduplicate_storage does not support Merge");
+    this->degree_reduction_prepared_.store(false, std::memory_order_release);
     int64_t total_count = this->GetNumElements();
     for (const auto& unit : merge_units) {
         total_count += unit.index->GetNumElements();
@@ -794,6 +818,7 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
         map_lock = this->acquire_global_read_lock();
     }
     std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+    this->degree_reduction_prepared_.store(false, std::memory_order_release);
     bool update_status = basic_flatten_codes_->UpdateVector(new_base_vec, inner_id);
     if (has_precise_reorder()) {
         update_status = update_status && high_precise_codes_->UpdateVector(new_base_vec, inner_id);

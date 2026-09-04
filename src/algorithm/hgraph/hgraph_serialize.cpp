@@ -942,6 +942,7 @@ HGraph::read_streaming_body(StreamReader& reader,
 
 void
 HGraph::Deserialize(StreamReader& reader) {
+    this->degree_reduction_prepared_.store(false, std::memory_order_release);
     // try to deserialize footer (only in new version)
     auto footer = Footer::Parse(reader);
 

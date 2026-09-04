@@ -671,6 +671,18 @@ private:
     void
     cal_memory_usage();
 
+    [[nodiscard]] bool
+    can_reduce_max_degree_unlocked() const;
+
+    void
+    prepare_degree_reduction_unlocked();
+
+    void
+    reduce_max_degree_unlocked(uint32_t max_degree);
+
+    [[nodiscard]] FlattenInterfacePtr
+    get_degree_reduction_codes() const;
+
     /// True when reorder uses a separate high-precision flatten (not base codes).
     [[nodiscard]] bool
     has_precise_reorder() const {
@@ -925,5 +937,7 @@ private:
     float build_cache_hit_rate_{-1.0F};     // cache hit rate from last cache-based build
     uint64_t build_cache_hit_nodes_{0};     // number of nodes with cache hit
     uint64_t build_cache_missed_nodes_{0};  // number of nodes without cache hit
+
+    std::atomic<bool> degree_reduction_prepared_{false};
 };
 }  // namespace vsag

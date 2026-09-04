@@ -562,6 +562,7 @@ HGraph::insert_one_logical_point(const void* data, const AddRow& row, const AddC
     };
 
     std::unique_lock<std::shared_mutex> add_lock(this->add_mutex_);
+    this->degree_reduction_prepared_.store(false, std::memory_order_release);
     auto needs_update_structure = this->unique_add_needs_structure_update(level);
     if (not needs_update_structure) {
         add_lock.unlock();
