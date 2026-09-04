@@ -139,6 +139,11 @@ public:
         return 0;
     }
 
+    [[nodiscard]] bool
+    IsBound() const {
+        return io_ != nullptr;
+    }
+
     [[nodiscard]] uint64_t
     GetByteSize() const {
         return io_->size_;
