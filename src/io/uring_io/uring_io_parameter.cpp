@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#if HAVE_LIBURING
-
 #include "io/uring_io/uring_io_parameter.h"
 
 #include <fmt/format.h>
@@ -53,4 +51,3 @@ UringIOParameter::ToJson() const {
     return json;
 }
 }  // namespace vsag
-#endif  // HAVE_LIBURING

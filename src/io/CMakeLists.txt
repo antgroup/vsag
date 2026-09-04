@@ -15,22 +15,18 @@
 
 
 set (IO_SRC
+        backend/mmap_region.cpp
+        backend/posix_file.cpp
+        policy/libaio_batch_read.cpp
+        policy/uring_batch_read.cpp
         common/io_parameter.cpp
-        memory_io/memory_io.cpp
         memory_io/memory_io_parameter.cpp
         memory_block_io/memory_block_io_parameter.cpp
         buffer_io/buffer_io_parameter.cpp
-        buffer_io/buffer_io.cpp
         async_io/async_io_parameter.cpp
-        async_io/async_io.cpp
         uring_io/uring_io_parameter.cpp
         uring_io/uring_io_context.cpp
-        uring_io/uring_io_context_guard.cpp
-        uring_io/uring_io_read_object.cpp
-        uring_io/uring_io.cpp
         mmap_io/mmap_io_parameter.cpp
-        mmap_io/mmap_io.cpp
-        memory_block_io/memory_block_io.cpp
         reader_io/reader_io.cpp
         reader_io/reader_io_parameter.cpp
         read_cache/page_cache.cpp

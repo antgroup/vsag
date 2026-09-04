@@ -49,23 +49,12 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
     std::shared_lock lock(mutex_);
 
     const auto compute_direct = [&](const DocLocation& location, InnerIdType result_index) {
-        bool need_release = false;
-        const auto* codes = layout_.Read(location, need_release);
-        if (codes == nullptr) {
+        auto lease = layout_.Acquire(location);
+        if (not lease) {
             throw VsagException(ErrorType::READ_ERROR,
                                 "SparseVectorDataCell failed to read vector codes");
         }
-        try {
-            computer->ComputeDist(codes, result_dists + result_index);
-        } catch (...) {
-            if (need_release) {
-                this->Release(codes);
-            }
-            throw;
-        }
-        if (need_release) {
-            this->Release(codes);
-        }
+        computer->ComputeDist(lease.Data(), result_dists + result_index);
     };
 
     if (query_io_strategy_ == QueryIOStrategy::DIRECT_READ) {
@@ -320,6 +309,17 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::get_codes_by_id_no_lock(InnerIdType id,
 }
 
 template <typename QuantTmpl, typename IOTmpl>
+typename SparseVectorDataCell<QuantTmpl, IOTmpl>::ReadLease
+SparseVectorDataCell<QuantTmpl, IOTmpl>::acquire_codes_by_id_no_lock(InnerIdType id) const {
+    auto lease = layout_.Acquire(id);
+    if (not lease) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "SparseVectorDataCell failed to read vector codes");
+    }
+    return lease;
+}
+
+template <typename QuantTmpl, typename IOTmpl>
 void
 SparseVectorDataCell<QuantTmpl, IOTmpl>::GetSparseVectorByInnerId(
     InnerIdType inner_id, SparseVector* data, Allocator* specified_allocator) const {
@@ -327,16 +327,13 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::GetSparseVectorByInnerId(
 
     std::shared_lock lock(mutex_);
 
-    bool need_release{false};
-    const auto* codes = this->get_codes_by_id_no_lock(inner_id, need_release);
+    auto lease = this->acquire_codes_by_id_no_lock(inner_id);
+    const auto* codes = lease.Data();
     data->len_ = *reinterpret_cast<const uint32_t*>(codes);
     const auto* entries = reinterpret_cast<const BufferEntry*>(codes + sizeof(uint32_t));
     if (data->len_ == 0) {
         data->ids_ = nullptr;
         data->vals_ = nullptr;
-        if (need_release) {
-            this->Release(codes);
-        }
         return;
     }
     data->ids_ = static_cast<uint32_t*>(allocator->Allocate(sizeof(uint32_t) * data->len_));
@@ -345,17 +342,11 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::GetSparseVectorByInnerId(
     } catch (...) {
         allocator->Deallocate(data->ids_);
         data->ids_ = nullptr;
-        if (need_release) {
-            this->Release(codes);
-        }
         throw;
     }
     for (uint32_t i = 0; i < data->len_; ++i) {
         data->ids_[i] = entries[i].id;
         data->vals_[i] = entries[i].val;
-    }
-    if (need_release) {
-        this->Release(codes);
     }
 }
 
@@ -387,29 +378,9 @@ template <typename QuantTmpl, typename IOTmpl>
 float
 SparseVectorDataCell<QuantTmpl, IOTmpl>::ComputePairVectors(InnerIdType id1, InnerIdType id2) {
     std::shared_lock lock(mutex_);
-    bool release1 = false, release2 = false;
-    const uint8_t* codes1 = nullptr;
-    const uint8_t* codes2 = nullptr;
-    try {
-        codes1 = this->get_codes_by_id_no_lock(id1, release1);
-        codes2 = this->get_codes_by_id_no_lock(id2, release2);
-        auto result = this->quantizer_->Compute(codes1, codes2);
-        if (release1) {
-            this->Release(codes1);
-        }
-        if (release2) {
-            this->Release(codes2);
-        }
-        return result;
-    } catch (...) {
-        if (codes1 && release1) {
-            this->Release(codes1);
-        }
-        if (codes2 && release2) {
-            this->Release(codes2);
-        }
-        throw;
-    }
+    auto lease1 = this->acquire_codes_by_id_no_lock(id1);
+    auto lease2 = this->acquire_codes_by_id_no_lock(id2);
+    return this->quantizer_->Compute(lease1.Data(), lease2.Data());
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -422,10 +393,9 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::SparseVectorDataCell(
     this->backend_ =
         QuantizerDistanceBackend<QuantTmpl>::Get(static_cast<const QuantTmpl&>(*this->quantizer_));
     auto io = std::make_shared<IOTmpl>(io_param, common_param);
-    const auto& io_type = io_param->GetTypeName();
-    if (io_type == IO_TYPE_VALUE_MEMORY_IO || io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
+    if constexpr (IOTmpl::InMemory) {
         this->query_io_strategy_ = QueryIOStrategy::DIRECT_READ;
-    } else if (io_type == IO_TYPE_VALUE_MMAP_IO) {
+    } else if constexpr (std::is_same_v<IOTmpl, MMapIO>) {
         this->query_io_strategy_ = QueryIOStrategy::SORTED_DIRECT_READ;
     } else {
         this->query_io_strategy_ = QueryIOStrategy::MULTI_READ;

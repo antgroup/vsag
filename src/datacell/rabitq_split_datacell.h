@@ -33,10 +33,10 @@
 #include "inner_string_params.h"
 #include "io/async_io/async_io_parameter.h"
 #include "io/buffer_io/buffer_io_parameter.h"
-#include "io/common/basic_io.h"
 #include "io/common/io_parameter.h"
 #include "io/memory_io/memory_io.h"
 #include "io/memory_io/memory_io_parameter.h"
+#include "io/mmap_io/mmap_io.h"
 #include "io/mmap_io/mmap_io_parameter.h"
 #include "layout/fixed_layout.h"
 #include "quantization/bottom_quantizer_accessor.h"
@@ -49,8 +49,6 @@
 #include "utils/timer.h"
 
 namespace vsag {
-
-class MMapIO;
 
 template <MetricType metric,
           typename OneBitIOTmpl,
@@ -183,27 +181,16 @@ public:
             return;
         }
 
-        bool need_release = false;
-        const auto* query_code = this->optimized_build_scalar_layout_->Read(query_id, need_release);
-        if (query_code == nullptr) {
+        auto query_lease = this->optimized_build_scalar_layout_->Acquire(query_id);
+        if (not query_lease) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
                                 "failed to read temporary scalar RaBitQ query code");
         }
-        try {
-            this->query_optimized_build_code_pairs(result_dists,
-                                                   query_code,
-                                                   (*this->optimized_build_code_sums_)[query_id],
-                                                   idx,
-                                                   id_count);
-        } catch (...) {
-            if (need_release) {
-                this->optimized_build_scalar_layout_->Release(query_code);
-            }
-            throw;
-        }
-        if (need_release) {
-            this->optimized_build_scalar_layout_->Release(query_code);
-        }
+        this->query_optimized_build_code_pairs(result_dists,
+                                               query_lease.Data(),
+                                               (*this->optimized_build_code_sums_)[query_id],
+                                               idx,
+                                               id_count);
         this->add_distance_evaluations(ctx, id_count);
     }
 
@@ -272,41 +259,26 @@ public:
                 this->prefetch_full_code(idx[i + this->prefetch_stride_code_]);
             }
 
-            bool one_bit_need_release = false;
-            const uint8_t* one_bit_code = this->get_one_bit_code(idx[i], one_bit_need_release);
+            auto one_bit_lease = this->x_bit_layout_->Acquire(idx[i]);
+            const auto* one_bit_code = one_bit_lease.Data();
             float one_bit_dist = 0.0F;
             float lower_bound = std::numeric_limits<float>::max();
             bool computed = false;
-            try {
-                computed = this->bottom_quantizer().ComputeDistWithOneBitLowerBound(
-                    *comp,
-                    one_bit_code,
-                    &one_bit_dist,
-                    &lower_bound,
-                    this->query_rabitq_error_rate(ctx));
-            } catch (...) {
-                this->release_one_bit_code(one_bit_code, one_bit_need_release);
-                throw;
-            }
+            computed = this->bottom_quantizer().ComputeDistWithOneBitLowerBound(
+                *comp,
+                one_bit_code,
+                &one_bit_dist,
+                &lower_bound,
+                this->query_rabitq_error_rate(ctx));
 
             if (computed and std::isfinite(lower_bound) and lower_bound >= threshold) {
-                this->release_one_bit_code(one_bit_code, one_bit_need_release);
                 result_dists[i] = threshold;
                 continue;
             }
 
-            bool supplement_need_release = false;
-            const uint8_t* supplement_code = nullptr;
-            try {
-                supplement_code = this->get_supplement_code(idx[i], supplement_need_release);
-                this->compute_full_dist(one_bit_code, supplement_code, comp, result_dists + i, ctx);
-            } catch (...) {
-                this->release_one_bit_code(one_bit_code, one_bit_need_release);
-                this->release_supplement_code(supplement_code, supplement_need_release);
-                throw;
-            }
-            this->release_one_bit_code(one_bit_code, one_bit_need_release);
-            this->release_supplement_code(supplement_code, supplement_need_release);
+            auto supplement_lease = this->supplement_layout_->Acquire(idx[i]);
+            this->compute_full_dist(
+                one_bit_code, supplement_lease.Data(), comp, result_dists + i, ctx);
         }
         this->add_distance_evaluations(ctx, id_count);
     }
@@ -349,23 +321,15 @@ public:
                 }
             }
 
-            bool release1 = false, release2 = false, release3 = false, release4 = false;
-            const uint8_t* code1 = nullptr;
-            const uint8_t* code2 = nullptr;
-            const uint8_t* code3 = nullptr;
-            const uint8_t* code4 = nullptr;
-            auto release_batch = [&]() {
-                this->release_one_bit_code(code1, release1);
-                this->release_one_bit_code(code2, release2);
-                this->release_one_bit_code(code3, release3);
-                this->release_one_bit_code(code4, release4);
-            };
-
-            try {
-                code1 = this->get_one_bit_code(idx[i], release1);
-                code2 = this->get_one_bit_code(idx[i + 1], release2);
-                code3 = this->get_one_bit_code(idx[i + 2], release3);
-                code4 = this->get_one_bit_code(idx[i + 3], release4);
+            auto lease1 = this->x_bit_layout_->Acquire(idx[i]);
+            auto lease2 = this->x_bit_layout_->Acquire(idx[i + 1]);
+            auto lease3 = this->x_bit_layout_->Acquire(idx[i + 2]);
+            auto lease4 = this->x_bit_layout_->Acquire(idx[i + 3]);
+            const auto* code1 = lease1.Data();
+            const auto* code2 = lease2.Data();
+            const auto* code3 = lease3.Data();
+            const auto* code4 = lease4.Data();
+            {
                 bool computed1 = false, computed2 = false, computed3 = false, computed4 = false;
                 auto* lower_bound1 = lower_bounds == nullptr ? nullptr : lower_bounds + i;
                 auto* lower_bound2 = lower_bounds == nullptr ? nullptr : lower_bounds + i + 1;
@@ -410,11 +374,7 @@ public:
                     this->compute_full_dist_after_one_bit_failure(
                         idx[i + 3], code4, comp, result_dists + i + 3, lower_bound4, ctx);
                 }
-            } catch (...) {
-                release_batch();
-                throw;
             }
-            release_batch();
         }
 
         for (; i < id_count; ++i) {
@@ -422,27 +382,21 @@ public:
                 this->prefetch_one_bit(idx[i + this->prefetch_stride_code_]);
             }
 
-            bool one_bit_need_release = false;
-            const uint8_t* one_bit_code = this->get_one_bit_code(idx[i], one_bit_need_release);
+            auto one_bit_lease = this->x_bit_layout_->Acquire(idx[i]);
+            const auto* one_bit_code = one_bit_lease.Data();
             auto* lower_bound = lower_bounds == nullptr ? nullptr : lower_bounds + i;
             bool computed = false;
-            try {
-                computed = this->bottom_quantizer().ComputeDistWithOneBitLowerBound(
-                    *comp,
-                    one_bit_code,
-                    result_dists + i,
-                    lower_bound,
-                    this->query_rabitq_error_rate(ctx));
-                if (not computed) {
-                    this->add_filter_fallback_full_count(ctx, 1);
-                    this->compute_full_dist_after_one_bit_failure(
-                        idx[i], one_bit_code, comp, result_dists + i, lower_bound, ctx);
-                }
-            } catch (...) {
-                this->release_one_bit_code(one_bit_code, one_bit_need_release);
-                throw;
+            computed = this->bottom_quantizer().ComputeDistWithOneBitLowerBound(
+                *comp,
+                one_bit_code,
+                result_dists + i,
+                lower_bound,
+                this->query_rabitq_error_rate(ctx));
+            if (not computed) {
+                this->add_filter_fallback_full_count(ctx, 1);
+                this->compute_full_dist_after_one_bit_failure(
+                    idx[i], one_bit_code, comp, result_dists + i, lower_bound, ctx);
             }
-            this->release_one_bit_code(one_bit_code, one_bit_need_release);
         }
         this->add_distance_evaluations(ctx, id_count);
     }
@@ -516,27 +470,15 @@ public:
             ByteBuffer one_bit_code(this->one_bit_code_size_, allocator_);
             ByteBuffer supplement_code(this->supplement_code_size_, allocator_);
             for (InnerIdType id = begin; id < end; ++id) {
-                bool need_release = false;
-                const auto* scalar_code =
-                    this->optimized_build_scalar_layout_->Read(id, need_release);
-                if (scalar_code == nullptr) {
+                auto scalar_lease = this->optimized_build_scalar_layout_->Acquire(id);
+                if (not scalar_lease) {
                     throw VsagException(ErrorType::INTERNAL_ERROR,
                                         "failed to read temporary scalar RaBitQ build code");
                 }
-                try {
-                    this->bottom_quantizer().PackScalarCodeToSplitCode(
-                        scalar_code, one_bit_code.data, supplement_code.data);
-                    this->x_bit_layout_->Write(id, one_bit_code.data);
-                    this->supplement_layout_->Write(id, supplement_code.data);
-                } catch (...) {
-                    if (need_release) {
-                        this->optimized_build_scalar_layout_->Release(scalar_code);
-                    }
-                    throw;
-                }
-                if (need_release) {
-                    this->optimized_build_scalar_layout_->Release(scalar_code);
-                }
+                this->bottom_quantizer().PackScalarCodeToSplitCode(
+                    scalar_lease.Data(), one_bit_code.data, supplement_code.data);
+                this->x_bit_layout_->Write(id, one_bit_code.data);
+                this->supplement_layout_->Write(id, supplement_code.data);
             }
         };
 
@@ -545,8 +487,8 @@ public:
             this->optimized_build_context_.thread_count, static_cast<uint64_t>(this->total_count_));
         constexpr bool supports_parallel_finalize = not std::is_same_v<OneBitIOTmpl, MMapIO> and
                                                     not std::is_same_v<SupplementIOTmpl, MMapIO>;
-        // MMapIO::WriteImpl updates its shared size_ even after Resize, so disjoint writes are not
-        // thread-safe for that backend.
+        // MMapIO writes update shared logical size state even after Resize, so disjoint writes are
+        // not thread-safe for that backend.
         if (thread_pool != nullptr and worker_count > 1 and supports_parallel_finalize) {
             const uint64_t block_size =
                 (static_cast<uint64_t>(this->total_count_) + worker_count - 1) / worker_count;
@@ -656,43 +598,17 @@ public:
     float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) override {
         if (this->optimized_build_active_) {
-            bool release1 = false;
-            bool release2 = false;
-            const auto* codes1 = this->optimized_build_scalar_layout_->Read(id1, release1);
-            const auto* codes2 = this->optimized_build_scalar_layout_->Read(id2, release2);
-            if (codes1 == nullptr or codes2 == nullptr) {
-                if (release1) {
-                    this->optimized_build_scalar_layout_->Release(codes1);
-                }
-                if (release2) {
-                    this->optimized_build_scalar_layout_->Release(codes2);
-                }
+            auto lease1 = this->optimized_build_scalar_layout_->Acquire(id1);
+            auto lease2 = this->optimized_build_scalar_layout_->Acquire(id2);
+            if (not lease1 or not lease2) {
                 throw VsagException(ErrorType::INTERNAL_ERROR,
                                     "failed to read temporary scalar RaBitQ build codes");
             }
-            float distance = 0.0F;
-            try {
-                distance = this->bottom_quantizer().ComputeScalarCodesDistance(
-                    codes1,
-                    (*optimized_build_code_sums_)[id1],
-                    codes2,
-                    (*optimized_build_code_sums_)[id2]);
-            } catch (...) {
-                if (release1) {
-                    this->optimized_build_scalar_layout_->Release(codes1);
-                }
-                if (release2) {
-                    this->optimized_build_scalar_layout_->Release(codes2);
-                }
-                throw;
-            }
-            if (release1) {
-                this->optimized_build_scalar_layout_->Release(codes1);
-            }
-            if (release2) {
-                this->optimized_build_scalar_layout_->Release(codes2);
-            }
-            return distance;
+            return this->bottom_quantizer().ComputeScalarCodesDistance(
+                lease1.Data(),
+                (*optimized_build_code_sums_)[id1],
+                lease2.Data(),
+                (*optimized_build_code_sums_)[id2]);
         }
         ByteBuffer codes1(this->code_size_, allocator_);
         ByteBuffer codes2(this->code_size_, allocator_);
@@ -844,16 +760,12 @@ public:
     bool
     GetCodesById(InnerIdType id, uint8_t* codes) const override {
         if (this->optimized_build_active_) {
-            bool need_release = false;
-            const auto* scalar_code = this->optimized_build_scalar_layout_->Read(id, need_release);
-            if (scalar_code == nullptr) {
+            auto scalar_lease = this->optimized_build_scalar_layout_->Acquire(id);
+            if (not scalar_lease) {
                 return false;
             }
             memset(codes, 0, this->code_size_);
-            this->bottom_quantizer().PackScalarCode(scalar_code, codes);
-            if (need_release) {
-                this->optimized_build_scalar_layout_->Release(scalar_code);
-            }
+            this->bottom_quantizer().PackScalarCode(scalar_lease.Data(), codes);
             return true;
         }
         ByteBuffer one_bit(one_bit_code_size_, allocator_);
@@ -1052,10 +964,7 @@ private:
 
     static bool
     IsKnownIOType(const std::string& io_type) {
-        return io_type == IO_TYPE_VALUE_MEMORY_IO or io_type == IO_TYPE_VALUE_BUFFER_IO or
-               io_type == IO_TYPE_VALUE_MMAP_IO or io_type == IO_TYPE_VALUE_READER_IO or
-               io_type == IO_TYPE_VALUE_ASYNC_IO or io_type == IO_TYPE_VALUE_URING_IO or
-               io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO;
+        return IOParameter::KindFromName(io_type) != IOKind::UNKNOWN;
     }
 
     void
@@ -1157,25 +1066,13 @@ private:
         }
         auto* comp = this->get_bottom_computer(computer);
         for (InnerIdType i = 0; i < id_count; ++i) {
-            bool need_release = false;
-            const auto* scalar_code =
-                this->optimized_build_scalar_layout_->Read(idx[i], need_release);
-            if (scalar_code == nullptr) {
+            auto scalar_lease = this->optimized_build_scalar_layout_->Acquire(idx[i]);
+            if (not scalar_lease) {
                 throw VsagException(ErrorType::INTERNAL_ERROR,
                                     "failed to read temporary scalar RaBitQ build code");
             }
-            try {
-                this->bottom_quantizer().ComputeDistWithScalarCode(
-                    *comp, scalar_code, result_dists + i);
-            } catch (...) {
-                if (need_release) {
-                    this->optimized_build_scalar_layout_->Release(scalar_code);
-                }
-                throw;
-            }
-            if (need_release) {
-                this->optimized_build_scalar_layout_->Release(scalar_code);
-            }
+            this->bottom_quantizer().ComputeDistWithScalarCode(
+                *comp, scalar_lease.Data(), result_dists + i);
         }
     }
 
@@ -1194,25 +1091,16 @@ private:
                 this->optimized_build_scalar_layout_->Prefetch(
                     idx[i + this->prefetch_stride_code_], this->optimized_build_prefetch_bytes_);
             }
-            bool need_release = false;
-            const auto* base_code =
-                this->optimized_build_scalar_layout_->Read(idx[i], need_release);
-            if (base_code == nullptr) {
+            auto base_lease = this->optimized_build_scalar_layout_->Acquire(idx[i]);
+            if (not base_lease) {
                 throw VsagException(ErrorType::INTERNAL_ERROR,
                                     "failed to read temporary scalar RaBitQ build code");
             }
-            try {
-                result_dists[i] = this->bottom_quantizer().ComputeScalarCodesDistance(
-                    query_code, query_sum, base_code, (*this->optimized_build_code_sums_)[idx[i]]);
-            } catch (...) {
-                if (need_release) {
-                    this->optimized_build_scalar_layout_->Release(base_code);
-                }
-                throw;
-            }
-            if (need_release) {
-                this->optimized_build_scalar_layout_->Release(base_code);
-            }
+            result_dists[i] = this->bottom_quantizer().ComputeScalarCodesDistance(
+                query_code,
+                query_sum,
+                base_lease.Data(),
+                (*this->optimized_build_code_sums_)[idx[i]]);
         }
     }
 
@@ -1230,30 +1118,6 @@ private:
     prefetch_full_code(InnerIdType id) {
         this->prefetch_one_bit(id);
         this->prefetch_supplement(id);
-    }
-
-    const uint8_t*
-    get_one_bit_code(InnerIdType id, bool& need_release) const {
-        return this->x_bit_layout_->Read(id, need_release);
-    }
-
-    void
-    release_one_bit_code(const uint8_t* code, bool need_release) const {
-        if (need_release) {
-            this->x_bit_layout_->Release(code);
-        }
-    }
-
-    const uint8_t*
-    get_supplement_code(InnerIdType id, bool& need_release) const {
-        return this->supplement_layout_->Read(id, need_release);
-    }
-
-    void
-    release_supplement_code(const uint8_t* code, bool need_release) const {
-        if (need_release) {
-            this->supplement_layout_->Release(code);
-        }
     }
 
     [[nodiscard]] static float
@@ -1450,19 +1314,12 @@ private:
         }
 
         for (InnerIdType i = 0; i < id_count; ++i) {
-            bool one_bit_need_release = false;
-            const auto* one_bit_code = this->get_one_bit_code(idx[i], one_bit_need_release);
+            auto one_bit_lease = this->x_bit_layout_->Acquire(idx[i]);
             const auto* supplement_code = supplement_codes.data + i * supplement_code_size_;
             const float hint =
                 hint_dists == nullptr ? std::numeric_limits<float>::max() : hint_dists[i];
-            try {
-                this->compute_full_dist(
-                    one_bit_code, supplement_code, computer, result_dists + i, ctx, hint);
-            } catch (...) {
-                this->release_one_bit_code(one_bit_code, one_bit_need_release);
-                throw;
-            }
-            this->release_one_bit_code(one_bit_code, one_bit_need_release);
+            this->compute_full_dist(
+                one_bit_lease.Data(), supplement_code, computer, result_dists + i, ctx, hint);
         }
     }
 
@@ -1473,19 +1330,11 @@ private:
                                             float* result_dist,
                                             float* lower_bound,
                                             QueryContext* ctx) const {
-        bool supplement_need_release = false;
-        const uint8_t* supplement_code = nullptr;
-        try {
-            supplement_code = this->get_supplement_code(id, supplement_need_release);
-            this->compute_full_dist(one_bit_code, supplement_code, computer, result_dist, ctx);
-            if (lower_bound != nullptr) {
-                *lower_bound = std::numeric_limits<float>::max();
-            }
-        } catch (...) {
-            this->release_supplement_code(supplement_code, supplement_need_release);
-            throw;
+        auto supplement_lease = this->supplement_layout_->Acquire(id);
+        this->compute_full_dist(one_bit_code, supplement_lease.Data(), computer, result_dist, ctx);
+        if (lower_bound != nullptr) {
+            *lower_bound = std::numeric_limits<float>::max();
         }
-        this->release_supplement_code(supplement_code, supplement_need_release);
     }
 
     void
@@ -1522,20 +1371,10 @@ private:
                       float* result_dist,
                       QueryContext* ctx = nullptr,
                       float hint_dist = std::numeric_limits<float>::max()) const {
-        bool one_bit_need_release = false;
-        bool supplement_need_release = false;
-        const auto* one_bit_code = this->get_one_bit_code(id, one_bit_need_release);
-        const auto* supplement_code = this->get_supplement_code(id, supplement_need_release);
-        try {
-            this->compute_full_dist(
-                one_bit_code, supplement_code, computer, result_dist, ctx, hint_dist);
-        } catch (...) {
-            this->release_one_bit_code(one_bit_code, one_bit_need_release);
-            this->release_supplement_code(supplement_code, supplement_need_release);
-            throw;
-        }
-        this->release_one_bit_code(one_bit_code, one_bit_need_release);
-        this->release_supplement_code(supplement_code, supplement_need_release);
+        auto one_bit_lease = this->x_bit_layout_->Acquire(id);
+        auto supplement_lease = this->supplement_layout_->Acquire(id);
+        this->compute_full_dist(
+            one_bit_lease.Data(), supplement_lease.Data(), computer, result_dist, ctx, hint_dist);
     }
 };
 

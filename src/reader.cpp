@@ -35,7 +35,7 @@ Reader::MultiRead(uint8_t* dests, const uint64_t* lens, const uint64_t* offsets,
         uint64_t size = lens[i];
         if (size + offset > Size()) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
-                                fmt::format("ReaderIO MultiReadImpl size mismatch: "
+                                fmt::format("Reader MultiRead size mismatch: "
                                             "offset {}, size {}, total size {}",
                                             offset,
                                             size,

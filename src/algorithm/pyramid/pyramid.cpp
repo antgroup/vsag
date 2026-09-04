@@ -2150,12 +2150,8 @@ Pyramid::add_one_point(const Hierarchy& hierarchy,
             auto codes = decodable_codes();
             Vector<float> decoded_vector(dim_, allocator_);
             for (const auto id : node->ids_) {
-                bool need_release = false;
-                const auto* buffer = codes->GetCodesById(id, need_release);
-                const bool decoded = codes->Decode(buffer, decoded_vector.data());
-                if (need_release) {
-                    codes->Release(buffer);
-                }
+                auto buffer = codes->AcquireCodesById(id);
+                const bool decoded = buffer and codes->Decode(buffer.Data(), decoded_vector.data());
                 if (not decoded) {
                     throw VsagException(ErrorType::INTERNAL_ERROR,
                                         "Pyramid graph promotion requires decodable vectors");
@@ -2487,12 +2483,8 @@ void
 Pyramid::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     auto codes = decodable_codes();
-    bool release = false;
-    const auto* buffer = codes->GetCodesById(inner_id, release);
-    const bool decoded = codes->Decode(buffer, data);
-    if (release) {
-        codes->Release(buffer);
-    }
+    auto buffer = codes->AcquireCodesById(inner_id);
+    const bool decoded = buffer and codes->Decode(buffer.Data(), data);
     if (not decoded) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             "Pyramid vector source does not support decode");

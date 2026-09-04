@@ -1320,21 +1320,17 @@ BruteForce::add_one(const float* data, InnerIdType inner_id) {
 void
 BruteForce::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     if (is_multi_vector_) {
-        bool need_release = false;
-        const uint8_t* codes = inner_codes_->GetCodesById(inner_id, need_release);
-        if (codes == nullptr) {
+        auto codes = inner_codes_->AcquireCodesById(inner_id);
+        if (not codes) {
             std::memset(data, 0, dim_ * sizeof(float));
             return;
         }
         uint32_t token_count = 0;
-        std::memcpy(&token_count, codes, sizeof(uint32_t));
+        std::memcpy(&token_count, codes.Data(), sizeof(uint32_t));
         if (token_count > 0) {
-            std::memcpy(data, codes + sizeof(uint32_t), dim_ * sizeof(float));
+            std::memcpy(data, codes.Data() + sizeof(uint32_t), dim_ * sizeof(float));
         } else {
             std::memset(data, 0, dim_ * sizeof(float));
-        }
-        if (need_release) {
-            inner_codes_->Release(codes);
         }
     } else {
         Vector<uint8_t> codes(inner_codes_->code_size_, allocator_);

@@ -215,23 +215,12 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     }
 
     auto decode_tune_source = [&](InnerIdType inner_id, float* data) {
-        bool need_release = false;
-        const auto* buffer = tune_source->GetCodesById(inner_id, need_release);
-        if (buffer == nullptr) {
+        auto buffer = tune_source->AcquireCodesById(inner_id);
+        if (not buffer) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
                                 fmt::format("failed to get vector by inner id {}", inner_id));
         }
-        try {
-            tune_source->Decode(buffer, data);
-        } catch (...) {
-            if (need_release) {
-                tune_source->Release(buffer);
-            }
-            throw;
-        }
-        if (need_release) {
-            tune_source->Release(buffer);
-        }
+        tune_source->Decode(buffer.Data(), data);
     };
 
     auto train_count = std::min(this->train_sample_count_, this->GetNumElements());
@@ -570,16 +559,12 @@ HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     }
     auto codes = (has_precise_reorder()) ? high_precise_codes_ : basic_flatten_codes_;
     codes = (create_new_raw_vector_) ? raw_vector_ : codes;
-    bool release;
-    const auto* buffer = codes->GetCodesById(inner_id, release);
-    if (buffer == nullptr) {
+    auto buffer = codes->AcquireCodesById(inner_id);
+    if (not buffer) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             fmt::format("failed to get vector by inner id {}", inner_id));
     }
-    codes->Decode(buffer, data);
-    if (release) {
-        codes->Release(buffer);
-    }
+    codes->Decode(buffer.Data(), data);
 }
 
 void

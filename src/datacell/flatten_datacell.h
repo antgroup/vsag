@@ -185,7 +185,7 @@ public:
     }
 
     inline void
-    SetIO(std::shared_ptr<BasicIO<typename LayoutTmpl::IOType>> io) {
+    SetIO(std::shared_ptr<typename LayoutTmpl::IOType> io) {
         this->layout_->SetIO(std::move(io));
     }
 
@@ -381,59 +381,22 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
                                         this->prefetch_depth_code_ * 64);
             }
         }
-        bool release1 = false, release2 = false, release3 = false, release4 = false;
-        const uint8_t* codes1 = nullptr;
-        const uint8_t* codes2 = nullptr;
-        const uint8_t* codes3 = nullptr;
-        const uint8_t* codes4 = nullptr;
-        auto release_batch = [&]() {
-            if (release1 && codes1) {
-                this->layout_->Release(codes1);
-            }
-            if (release2 && codes2) {
-                this->layout_->Release(codes2);
-            }
-            if (release3 && codes3) {
-                this->layout_->Release(codes3);
-            }
-            if (release4 && codes4) {
-                this->layout_->Release(codes4);
-            }
-        };
-        try {
-            codes1 = this->GetCodesById(idx[i], release1);
-            codes2 = this->GetCodesById(idx[i + 1], release2);
-            codes3 = this->GetCodesById(idx[i + 2], release3);
-            codes4 = this->GetCodesById(idx[i + 3], release4);
-            computer->ComputeDistsBatch4(codes1,
-                                         codes2,
-                                         codes3,
-                                         codes4,
-                                         result_dists[i],
-                                         result_dists[i + 1],
-                                         result_dists[i + 2],
-                                         result_dists[i + 3]);
-        } catch (...) {
-            release_batch();
-            throw;
-        }
-        release_batch();
+        auto lease1 = this->layout_->Acquire(idx[i]);
+        auto lease2 = this->layout_->Acquire(idx[i + 1]);
+        auto lease3 = this->layout_->Acquire(idx[i + 2]);
+        auto lease4 = this->layout_->Acquire(idx[i + 3]);
+        computer->ComputeDistsBatch4(lease1.Data(),
+                                     lease2.Data(),
+                                     lease3.Data(),
+                                     lease4.Data(),
+                                     result_dists[i],
+                                     result_dists[i + 1],
+                                     result_dists[i + 2],
+                                     result_dists[i + 3]);
     }
     for (; i < id_count; ++i) {
-        bool release = false;
-        const uint8_t* codes = nullptr;
-        try {
-            codes = this->GetCodesById(idx[i], release);
-            computer->ComputeDist(codes, result_dists + i);
-        } catch (...) {
-            if (release && codes) {
-                this->layout_->Release(codes);
-            }
-            throw;
-        }
-        if (release && codes) {
-            this->layout_->Release(codes);
-        }
+        auto lease = this->layout_->Acquire(idx[i]);
+        computer->ComputeDist(lease.Data(), result_dists + i);
     }
     if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations)
         ctx->stats->AddDistance(ctx->distance_phase, backend_, static_cast<uint64_t>(id_count));
@@ -442,27 +405,9 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
 template <typename QuantTmpl, typename LayoutTmpl>
 float
 FlattenDataCell<QuantTmpl, LayoutTmpl>::ComputePairVectors(InnerIdType id1, InnerIdType id2) {
-    bool release1 = false, release2 = false;
-    const uint8_t* codes1 = nullptr;
-    const uint8_t* codes2 = nullptr;
-    auto release_pair = [&]() {
-        if (release1 && codes1) {
-            this->layout_->Release(codes1);
-        }
-        if (release2 && codes2) {
-            this->layout_->Release(codes2);
-        }
-    };
-    try {
-        codes1 = this->GetCodesById(id1, release1);
-        codes2 = this->GetCodesById(id2, release2);
-        auto result = this->quantizer_->Compute(codes1, codes2);
-        release_pair();
-        return result;
-    } catch (...) {
-        release_pair();
-        throw;
-    }
+    auto lease1 = this->layout_->Acquire(id1);
+    auto lease2 = this->layout_->Acquire(id2);
+    return this->quantizer_->Compute(lease1.Data(), lease2.Data());
 }
 
 template <typename QuantTmpl, typename LayoutTmpl>
@@ -509,13 +454,13 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::MergeOther(const FlattenInterfacePtr& ot
     uint64_t total_count = ptr->total_count_;
     uint64_t read_count = 0;
     while (read_count < total_count) {
-        bool need_release = false;
         uint64_t count = std::min(BUFFER_SIZE / this->code_size_, total_count - read_count);
-        auto* buffer = ptr->layout_->ReadRange(read_count, count, need_release);
-        this->layout_->WriteRange(bias + read_count, buffer, count);
-        if (need_release) {
-            ptr->layout_->Release(buffer);
+        auto lease = ptr->layout_->AcquireRange(read_count, count);
+        if (not lease) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "failed to acquire source records while merging datacell");
         }
+        this->layout_->WriteRange(bias + read_count, lease.Data(), count);
         read_count += count;
     }
     this->total_count_ += total_count;

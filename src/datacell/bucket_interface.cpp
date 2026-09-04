@@ -17,7 +17,7 @@
 #include "bucket_interface_factory.h"
 #include "bucket_interface_factory_impl.h"
 #include "inner_string_params.h"
-#include "io/io_headers.h"
+#include "io/common/io_type_dispatch.h"
 
 namespace vsag {
 
@@ -27,28 +27,25 @@ BucketInterface::MakeInstance(const BucketDataCellParamPtr& param,
     if (!param || !param->io_parameter || !param->quantizer_parameter) {
         return nullptr;
     }
-    auto io_type_name = param->io_parameter->GetTypeName();
-    if (io_type_name == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
-        return MakeMemoryBlockBucketDataCell(param, common_param);
-    }
-    if (io_type_name == IO_TYPE_VALUE_MEMORY_IO) {
-        return MakeMemoryBucketDataCell(param, common_param);
-    }
-    if (io_type_name == IO_TYPE_VALUE_MMAP_IO) {
-        return MakeMMapBucketDataCell(param, common_param);
-    }
-    if (io_type_name == IO_TYPE_VALUE_ASYNC_IO) {
-        return MakeAsyncBucketDataCell(param, common_param);
-    }
-    if (io_type_name == IO_TYPE_VALUE_URING_IO) {
-        return MakeUringBucketDataCell(param, common_param);
-    }
-    if (io_type_name == IO_TYPE_VALUE_BUFFER_IO) {
-        return MakeBufferBucketDataCell(param, common_param);
-    }
-    if (io_type_name == IO_TYPE_VALUE_READER_IO) {
-        return MakeReaderBucketDataCell(param, common_param);
-    }
-    return nullptr;
+    return VisitIOKind(param->io_parameter->Kind(), [&](auto tag) -> BucketInterfacePtr {
+        using IO = typename decltype(tag)::Type;
+        if constexpr (std::is_same_v<IO, MemoryBlockIO>) {
+            return MakeMemoryBlockBucketDataCell(param, common_param);
+        } else if constexpr (std::is_same_v<IO, MemoryIO>) {
+            return MakeMemoryBucketDataCell(param, common_param);
+        } else if constexpr (std::is_same_v<IO, MMapIO>) {
+            return MakeMMapBucketDataCell(param, common_param);
+        } else if constexpr (std::is_same_v<IO, AsyncIO>) {
+            return MakeAsyncBucketDataCell(param, common_param);
+        } else if constexpr (std::is_same_v<IO, UringIO>) {
+            return MakeUringBucketDataCell(param, common_param);
+        } else if constexpr (std::is_same_v<IO, BufferIO>) {
+            return MakeBufferBucketDataCell(param, common_param);
+        } else if constexpr (std::is_same_v<IO, ReaderIO>) {
+            return MakeReaderBucketDataCell(param, common_param);
+        } else {
+            return nullptr;
+        }
+    });
 }
 }  // namespace vsag

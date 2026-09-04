@@ -836,13 +836,10 @@ HGraph::build_mci_clique_index(const void* vectors) {
         } else if (contiguous_vectors != nullptr) {
             query = contiguous_vectors + static_cast<uint64_t>(inner_id) * contiguous_stride;
         } else {
-            bool need_release = false;
-            const auto* codes = precise_codes->GetCodesById(inner_id, need_release);
-            CHECK_ARGUMENT(codes != nullptr, "failed to read hgraph mci query vector");
-            const auto decoded = precise_codes->Decode(codes, decoded_queries[worker_id].data());
-            if (need_release) {
-                precise_codes->Release(codes);
-            }
+            auto codes = precise_codes->AcquireCodesById(inner_id);
+            CHECK_ARGUMENT(codes, "failed to read hgraph mci query vector");
+            const auto decoded =
+                precise_codes->Decode(codes.Data(), decoded_queries[worker_id].data());
             CHECK_ARGUMENT(decoded, "failed to decode hgraph mci query vector");
             query = decoded_queries[worker_id].data();
         }

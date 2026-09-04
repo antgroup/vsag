@@ -55,7 +55,7 @@ public:
     }
 
     void
-    Release(const char* extra_info) override {
+    Release(const char* extra_info) const override {
         if (extra_info == nullptr) {
             return;
         }
@@ -91,7 +91,7 @@ public:
     }
 
     inline void
-    SetIO(std::shared_ptr<BasicIO<typename LayoutTmpl::IOType>> io) {
+    SetIO(std::shared_ptr<typename LayoutTmpl::IOType> io) {
         this->layout_->SetIO(std::move(io));
     }
 

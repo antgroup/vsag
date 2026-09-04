@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,34 +14,34 @@
 
 #pragma once
 
-#if HAVE_LIBURING
+#include <unistd.h>
 
-#include <memory>
+#include <cerrno>
 
-#include "io/uring_io/uring_io_context.h"
+#include "fmt/format.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
-class UringIOContextGuard {
-public:
-    explicit UringIOContextGuard(std::shared_ptr<UringIOContext> ctx);
-
-    ~UringIOContextGuard();
-
-    UringIOContextGuard(const UringIOContextGuard&) = delete;
-    UringIOContextGuard&
-    operator=(const UringIOContextGuard&) = delete;
-
+struct NoFlush {
     void
-    Abandon();
+    AfterWrite(int) const {
+    }
+};
 
+struct FsyncAfterWrite {
     void
-    Drop();
-
-private:
-    std::shared_ptr<UringIOContext> ctx_{nullptr};
+    AfterWrite(int fd) const {
+        int result;
+        do {
+            result = fsync(fd);
+        } while (result != 0 and errno == EINTR);
+        if (result != 0) {
+            const int error = errno;
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("fsync failed: fd={}, errno={}", fd, error));
+        }
+    }
 };
 
 }  // namespace vsag
-
-#endif  // HAVE_LIBURING

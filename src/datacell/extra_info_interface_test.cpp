@@ -57,13 +57,20 @@ ExtraInfoInterfaceTest::BasicTest(uint64_t base_count) {
     }
 
     for (InnerIdType i = first_one; i <= last_one; ++i) {
-        bool need_release = false;
         extra_info_->Prefetch(i);
-        const char* ex_info = extra_info_->GetExtraInfoById(i, need_release);
-        REQUIRE(ex_info != nullptr);
-        if (need_release) {
-            extra_info_->Release(ex_info);
-        }
+        auto ex_info = extra_info_->AcquireExtraInfoById(i);
+        REQUIRE(ex_info);
+    }
+
+    const auto& const_extra_info = *extra_info_;
+    auto const_lease = const_extra_info.AcquireExtraInfoById(first_one);
+    REQUIRE(const_lease);
+
+    bool need_release = false;
+    const char* legacy_extra_info = extra_info_->GetExtraInfoById(first_one, need_release);
+    REQUIRE(legacy_extra_info != nullptr);
+    if (need_release) {
+        extra_info_->Release(legacy_extra_info);
     }
 
     // test SetMaxCapacity and GetMaxCapacity
@@ -97,13 +104,9 @@ ExtraInfoInterfaceTest::TestForceInMemory(uint64_t force_count) {
     }
 
     for (InnerIdType i = first_one; i <= last_one; ++i) {
-        bool need_release = false;
         extra_info_->Prefetch(i);
-        const char* ex_info = extra_info_->GetExtraInfoById(i, need_release);
-        REQUIRE(ex_info != nullptr);
-        if (need_release) {
-            extra_info_->Release(ex_info);
-        }
+        auto ex_info = extra_info_->AcquireExtraInfoById(i);
+        REQUIRE(ex_info);
     }
 
     extra_info_->DisableForceInMemory();
