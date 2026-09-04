@@ -20,6 +20,7 @@
 #include "io/memory_block_io/memory_block_io.h"
 #include "layout/variable_record_layout.h"
 #include "quantization/multi_vector_computer.h"
+#include "quantization/quantizer.h"
 #include "typing.h"
 #include "vsag/dataset.h"
 
