@@ -36,6 +36,7 @@
 #include "algorithm/bruteforce/bruteforce_parameter.h"
 #include "algorithm/hgraph/hgraph.h"
 #include "algorithm/hgraph/hgraph_parameter.h"
+#ifndef VSAG_LITE
 #include "algorithm/ivf/ivf.h"
 #include "algorithm/ivf/ivf_parameter.h"
 #include "algorithm/pyramid/pyramid.h"
@@ -44,6 +45,7 @@
 #include "algorithm/sindi/sindi_parameter.h"
 #include "algorithm/sindi_v2/sindi_v2.h"
 #include "algorithm/sindi_v2/sindi_v2_parameter.h"
+#endif
 #include "common.h"
 #include "data_type.h"
 #include "impl/thread_pool/safe_thread_pool.h"
@@ -186,6 +188,7 @@ apply_hgraph_streaming_load_parameters(JsonType& index_param, const std::string&
     }
 }
 
+#ifndef VSAG_LITE
 void
 apply_ivf_streaming_load_parameters(JsonType& index_param, const LoadParameters& parameters) {
     constexpr const char* precise_reader_key = "precise_reader";
@@ -225,6 +228,7 @@ apply_ivf_streaming_load_parameters(JsonType& index_param, const LoadParameters&
             load_json[IVF_PRECISE_CACHE_TOTAL_SIZE].GetUint64());
     }
 }
+#endif
 
 struct StreamingIndexLoadTarget {
     IndexPtr index;
@@ -286,6 +290,7 @@ create_streaming_index_from_metadata(const MetadataPtr& metadata,
         apply_hgraph_streaming_load_parameters(index_param, parameters.Dump());
         return create_streaming_index<HGraph, HGraphParameter>(index_param, common_param);
     }
+#ifndef VSAG_LITE
     if (index_name == INDEX_IVF) {
         apply_ivf_streaming_load_parameters(index_param, parameters);
         return create_streaming_index<IVF, IVFParameter>(index_param, common_param);
@@ -299,6 +304,7 @@ create_streaming_index_from_metadata(const MetadataPtr& metadata,
     if (index_name == INDEX_SINDI_V2) {
         return create_streaming_index<SINDIV2, SINDIV2Parameter>(index_param, common_param);
     }
+#endif
 
     LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                           "streaming load does not support index type: ",

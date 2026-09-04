@@ -17,13 +17,15 @@
 set (ANALYZER_SRC
         hgraph_analyzer.cpp
         hgraph_analyzer.h
-        pyramid_analyzer.cpp
-        pyramid_analyzer.h
-        sindi_analyzer.cpp
-        sindi_analyzer.h
         analyzer.cpp
         analyzer.h
 )
+
+if (NOT ENABLE_LITE)
+    list (APPEND ANALYZER_SRC
+        pyramid_analyzer.cpp pyramid_analyzer.h
+        sindi_analyzer.cpp sindi_analyzer.h)
+endif ()
 
 add_library (analyzer OBJECT ${ANALYZER_SRC})
 target_link_libraries (analyzer PRIVATE vsag_src_common)

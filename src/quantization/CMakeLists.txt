@@ -44,6 +44,10 @@ target_link_libraries (quantizer PRIVATE coverage_config vsag_src_common)
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE QUANTIZER_TESTS "*_test.cpp")
+    if (ENABLE_LITE)
+        list (FILTER QUANTIZER_TESTS EXCLUDE REGEX
+              "/sparse_quantization/sparse_term_computer_test\\.cpp$")
+    endif ()
     add_library (quantizer_test STATIC ${QUANTIZER_TESTS})
     target_link_libraries (quantizer_test PRIVATE Catch2::Catch2 vsag_static unittest_deps)
     add_dependencies (quantizer_test Catch2)

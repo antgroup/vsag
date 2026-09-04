@@ -42,6 +42,7 @@
 - [C++ 编码指南](development/coding_style.md)
 - [新索引接入检查清单](development/new_index_checklist.md)
 - [编译构建](development/building.md)
+- [VSAG Lite](development/lite_build.md)
 - [离线 / 内网环境构建](development/offline_build.md)
 - [运行测试](development/testing.md)
 - [贡献到 VSAG](development/contributing.md)

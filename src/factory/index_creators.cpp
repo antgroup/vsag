@@ -20,13 +20,15 @@
 
 #include "algorithm/bruteforce/bruteforce.h"
 #include "algorithm/hgraph/hgraph.h"
-#include "algorithm/ivf/ivf.h"
 #include "algorithm/lazy_hgraph/lazy_hgraph.h"
+#ifndef VSAG_LITE
+#include "algorithm/ivf/ivf.h"
 #include "algorithm/pyramid/pyramid.h"
 #include "algorithm/pyramid/pyramid_zparameters.h"
 #include "algorithm/simq/simq.h"
 #include "algorithm/sindi/sindi.h"
 #include "algorithm/sindi_v2/sindi_v2.h"
+#endif
 #include "common.h"
 #include "index/index_impl.h"
 #include "index_registry.h"
@@ -63,6 +65,7 @@ create_index_impl_with_param_log(const char* log_message,
                                            index_common_params)};
 }
 
+#ifndef VSAG_LITE
 tl::expected<std::shared_ptr<Index>, Error>
 create_pyramid_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
     CHECK_ARGUMENT(parsed_params.Contains(INDEX_PARAM),
@@ -70,6 +73,7 @@ create_pyramid_index(JsonType& parsed_params, const IndexCommonParam& index_comm
     logger::debug("created a pyramid index");
     return {std::make_shared<IndexImpl<Pyramid>>(parsed_params[INDEX_PARAM], index_common_params)};
 }
+#endif
 
 tl::expected<std::shared_ptr<Index>, Error>
 create_hgraph_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
@@ -86,6 +90,7 @@ create_lazy_hgraph_index(JsonType& parsed_params, const IndexCommonParam& index_
     return {std::make_shared<IndexImpl<LazyHGraph>>(lazy_hgraph_param, index_common_params)};
 }
 
+#ifndef VSAG_LITE
 tl::expected<std::shared_ptr<Index>, Error>
 create_ivf_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
     return create_index_impl_with_param_log<IVF>(
@@ -103,6 +108,7 @@ create_sindi_v2_index(JsonType& parsed_params, const IndexCommonParam& index_com
     return create_index_impl_with_param_log<SINDIV2>(
         "created a sindi_v2 index", parsed_params, index_common_params);
 }
+#endif
 
 tl::expected<std::shared_ptr<Index>, Error>
 create_warp_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
@@ -114,11 +120,13 @@ create_warp_index(JsonType& parsed_params, const IndexCommonParam& index_common_
     return {std::make_shared<IndexImpl<BruteForce>>(index_param, index_common_params)};
 }
 
+#ifndef VSAG_LITE
 tl::expected<std::shared_ptr<Index>, Error>
 create_simq_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
     return create_index_impl_with_param_log<SIMQ>(
         "created a simq index", parsed_params, index_common_params);
 }
+#endif
 
 }  // namespace
 
@@ -129,12 +137,16 @@ register_all_index_creators() {
         register_index_creator(INDEX_BRUTE_FORCE, &create_brute_force_index);
         register_index_creator(INDEX_HGRAPH, &create_hgraph_index);
         register_index_creator(INDEX_LAZY_HGRAPH, &create_lazy_hgraph_index);
+#ifndef VSAG_LITE
         register_index_creator(INDEX_IVF, &create_ivf_index);
         register_index_creator(INDEX_PYRAMID, &create_pyramid_index);
         register_index_creator(INDEX_SINDI, &create_sindi_index);
         register_index_creator(INDEX_SINDI_V2, &create_sindi_v2_index);
+#endif
         register_index_creator(INDEX_WARP, &create_warp_index);
+#ifndef VSAG_LITE
         register_index_creator(INDEX_SIMQ, &create_simq_index);
+#endif
     });
 }
 

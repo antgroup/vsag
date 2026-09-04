@@ -164,6 +164,9 @@ public:
     UpdateExtraInfo(const DatasetPtr& new_base) override;
 
     bool
+    UpdateId(int64_t old_id, int64_t new_id) override;
+
+    bool
     UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override;
 
     /**

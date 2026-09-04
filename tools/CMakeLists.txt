@@ -17,5 +17,7 @@
 add_subdirectory (eval)
 add_subdirectory (autotune)
 add_subdirectory (check_compatibility)
-add_subdirectory (analyze_index)
 add_subdirectory (visualize_index)
+if (NOT ENABLE_LITE)
+    add_subdirectory (analyze_index)
+endif ()

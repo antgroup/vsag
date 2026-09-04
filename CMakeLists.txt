@@ -34,6 +34,11 @@ if (NOT VSAG_TARGET_PROCESSOR)
     set (VSAG_TARGET_PROCESSOR "${CMAKE_HOST_SYSTEM_PROCESSOR}")
 endif ()
 
+if (ENABLE_LITE)
+    add_compile_definitions (VSAG_LITE)
+    message (STATUS "VSAG Lite: BruteForce, HGraph, LazyHGraph, and WARP enabled")
+endif ()
+
 message (STATUS "CPU ARCH: ${Yellow}${VSAG_TARGET_PROCESSOR}${CR}")
 
 include (cmake/VSAGCompilerConfig.cmake)        # Compiler, ABI, sanitizer, and linker setup.

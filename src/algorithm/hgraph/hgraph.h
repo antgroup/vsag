@@ -601,6 +601,10 @@ private:
     void
     deserialize_label_info(StreamReader& reader) const;
 
+    /// Synchronize the cached deleted count after restoring the label table.
+    void
+    sync_delete_count_from_label_table();
+
     /// Legacy serialize for version [0.12.*, 0.14.*].
     void
     serialize_basic_info_v0_14(StreamWriter& writer) const;
