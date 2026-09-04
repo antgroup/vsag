@@ -3,12 +3,12 @@ name: Daily Build & Test
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 14 * * *' 
+    - cron: '0 14 * * *'
 
 jobs:
   daily_build_asan_x86:
     name: Asan Build X86
-    runs-on: ubuntu-22.04
+    runs-on: [ linux, self-hosted, X64 ]
     container:
       image: vsaglib/vsag:ci-x86-openblas
       volumes:
@@ -86,7 +86,7 @@ jobs:
   daily_test_asan_x86:
     name: Test X86
     needs: daily_build_asan_x86
-    runs-on: ubuntu-22.04
+    runs-on: [ linux, self-hosted, X64 ]
     concurrency:
       group: daily_test_x86-${{ matrix.test_type }}
       cancel-in-progress: true
@@ -196,7 +196,7 @@ jobs:
 
   daily_build_simd:
     name: Asan Build Simd
-    runs-on: ubuntu-22.04
+    runs-on: [ linux, self-hosted, X64 ]
     container:
       image: vsaglib/vsag:ci-x86-mkl
       volumes:
@@ -240,7 +240,7 @@ jobs:
   daily_test_asan_simd:
     name: Unit Test Simd
     needs: daily_build_simd
-    runs-on: ubuntu-22.04
+    runs-on: [ linux, self-hosted ]
     strategy:
       matrix:
         test_type: [ unittests, functests ]
@@ -303,7 +303,7 @@ jobs:
 
   daily_build_tsan:
     name: Daily Build with TSAN
-    runs-on: ubuntu-22.04
+    runs-on: [ linux, self-hosted, X64 ]
     concurrency:
       group: daily_build_tsan_x86
       cancel-in-progress: true
@@ -336,7 +336,7 @@ jobs:
   daily_test_tsan:
     name: Daily Run TSAN Tests
     needs: daily_build_tsan
-    runs-on: ubuntu-22.04
+    runs-on: [ linux, self-hosted, X64 ]
     concurrency:
       group: daily_test_tsan_x86
       cancel-in-progress: true
