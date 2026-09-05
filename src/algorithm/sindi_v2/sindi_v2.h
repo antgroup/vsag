@@ -17,7 +17,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sindi/term_id_mapper.h"
-#include "algorithm/sindi_host_filter.h"
+#include "algorithm/sindi_metadata_filter.h"
 #include "algorithm/sindi_v2/sindi_v2_parameter.h"
 #include "datacell/disk_sindi_term_datacell.h"
 #include "datacell/flatten_interface.h"
@@ -154,7 +154,7 @@ private:
                 SindiQueryContext& query_context,
                 const SparseVector* original_query = nullptr,
                 SearchStatistics* statistics = nullptr,
-                const SindiHostSearchRoute& host_route = {}) const;
+                const SindiMetadataSearchRoute& metadata_route = {}) const;
 
     bool
     UseTermListsHeapInsert(const SINDIV2SearchParameter& search_param) const;
@@ -232,7 +232,7 @@ private:
     SparseValueQuantizationType sparse_value_quant_type_{SparseValueQuantizationType::FP32};
     std::string rerank_type_{SPARSE_RERANK_TYPE_FP32};
     uint32_t dmq_shared_codebook_threshold_{DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD};
-    SindiHostFilter host_filter_;
+    SindiMetadataFilter metadata_filter_;
     float doc_prune_ratio_{0};
 
     FlattenInterfacePtr rerank_flat_{nullptr};

@@ -105,6 +105,19 @@ Host membership is enforced during posting-window search, including multiple ran
 mutable `Add()`. Missing host ID `0`, mutable `Add()` metadata rules, streaming serialization, and
 the KNN-only scope are the same as SINDI.
 
+### Date-bucket filtering
+
+SINDI_V2 also supports the [SINDI date-bucket, inclusive range, and hierarchical matching
+contract](sindi.md#date-bucket-filtering). The two indexes share one metadata filtering
+component for date-only, host-only, and combined date-and-host KNN routing. SINDI_V2 retains its
+term-first posting layout and legacy serialization format. Date filtering supports mutable and
+immutable indexes with either `use_reorder` setting and is preserved by both legacy and streaming
+serialization; range search remains unfiltered. A mutable date-aware SINDI_V2 is build-once and
+follows the same initial `Build()` or first-`Add()` and later-`Add()` rejection rules as SINDI.
+Exact bucket filtering disables term-level posting pruning in each selected window, so date queries
+may scan more postings than host-only queries. Host-only queries on date-enabled indexes share the
+boundary-window behavior documented for SINDI.
+
 ## Search parameters
 
 Search parameters live under `{"sindi_v2": {...}}`.

@@ -161,6 +161,53 @@ host ID `0` 是缺失 host 分组，`1` 到 `UINT32_MAX` 表示普通 host；不
 已索引文档的 host 返回空结果。构建时没有 base host metadata 的索引会忽略查询 host
 metadata，行为保持不变。host 过滤当前仅适用于 KNN；范围搜索仍使用原有全索引路径。
 
+### 日期 bucket 过滤
+
+mutable 和 immutable SINDI 无论是否开启 rerank，都可以按日历层级 bucket 过滤 KNN 查询。
+构建时为每篇文档附加一个规范字符串 bucket：
+
+```cpp
+std::string base_dates[] = {"2026", "2026/05", "2026/05/01"};
+base->Paths("date", base_dates);
+
+std::string query_date = "2026/05";
+query->Paths("date", &query_date)->Owner(false);
+
+std::string date_begin = "2025/11/20";
+std::string date_end = "2026/02";
+query->Paths("date_begin", &date_begin)
+    ->Paths("date_end", &date_end)
+    ->Owner(false);
+```
+
+接受 `YYYY`、`YYYY/MM` 和 `YYYY/MM/DD` 三种格式；月份和日期必须补齐两位并符合实际日历。
+匹配只向下进行：`2026` 匹配 2026 年的年、月、日 base bucket；`2026/05` 匹配
+`2026/05` 及其下所有日；`2026/05/01` 只匹配该日。更精确的查询不会匹配更粗粒度的 base bucket。
+
+闭区间查询必须同时提供 `date_begin` 和 `date_end`。开始端的年或月扩展到该周期第一天，结束端
+的年或月扩展到该周期最后一天。例如 `2025/11/20` 到 `2026/02` 表示包含首尾的
+`2025/11/20` 至 `2026/02/28`。只有完整日历周期都落在查询范围内的 base bucket 才会命中；
+因此结束于 `2026/08/01` 的范围可以命中 8 月 1 日的日 bucket，但不能命中较粗的
+`2026/08` bucket。两个端点缺一不可，扩展后必须保持正序，并且不能与单值 `date` 同时使用。
+
+日期构建按自然季度排序；同时提供 `host_id` 时，再在每个季度内按 host 排序。mutable 索引只能在
+索引为空时通过 `Build()` 或第一次 `Add()` 提供日期 metadata。索引已有文档后不能再引入日期
+metadata，已经包含日期 metadata 的 mutable 索引会拒绝之后的所有 `Add()`，从而避免增量维护季度
+分区。仅使用 host 的 mutable 索引仍保留原有的增量 `Add()` 能力。
+
+仅包含年份的 base bucket 锚定到该年第一季度并且只存储一次。原有固定大小 window 布局保持不变。
+日期查询先选择相关季度分区，再在候选进入 heap 前执行精确层级 bucket 或范围判断。查询字符串只在
+路由阶段解析一次，候选判断仅比较压缩后的整数 bucket。日期、host、删除标记和用户 `Filter` 使用
+AND 语义。
+
+不提供 `date`、`date_begin` 或 `date_end` 时搜索全部季度；仅提供 host 时会从每个季度选择该 host。
+所有选中 window 共用一个候选堆，并在开启 `use_reorder` 时共用一次 rerank。日期过滤支持 mutable
+和 immutable 索引以及 `use_reorder` 的任意设置，仅作用于 KNN，并由旧版与 streaming 序列化共同
+保存。反序列化恢复的 mutable 日期索引仍保持 build-once，并拒绝 `Add()`。为了执行精确 bucket 或
+范围过滤，每个选中 window 都会关闭 term 级 posting 剪枝，因此日期查询可能比仅 host 查询扫描更多
+posting，较宽的范围也会选择更多 window。在启用日期的索引上，仅 host 查询遇到跨季度或 host 边界
+的 window 时也可能需要完整扫描。
+
 ## 检索参数
 
 检索参数放在 `sindi` 子对象下：
