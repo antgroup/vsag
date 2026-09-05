@@ -51,6 +51,7 @@ validate(const IndexPtr& index, const EvalDatasetPtr& dataset) {
 
 void
 validate_search(const EvalDatasetPtr& dataset, const EvalConfig& config) {
+    config.Validate();
     if (config.search_mode != "knn") {
         throw std::invalid_argument("in-memory evaluation supports only knn search mode");
     }
@@ -69,7 +70,7 @@ validate_search(const EvalDatasetPtr& dataset, const EvalConfig& config) {
     if (config.search_query_count > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
         throw std::invalid_argument("evaluation search query count exceeds the supported range");
     }
-    if (config.enable_recall or config.enable_percent_recall) {
+    if (config.enable_recall or config.enable_percent_recall or config.recall_target.has_value()) {
         const auto requested_top_k = static_cast<uint64_t>(config.top_k);
         if (dataset->GetGroundTruthK() < requested_top_k || dataset->GetNeighbors(0) == nullptr) {
             throw std::invalid_argument(

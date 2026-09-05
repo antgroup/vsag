@@ -466,17 +466,22 @@ TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][
     config.num_threads_searching = caller_thread_count == 1 ? 2 : 1;
     config.enable_recall = false;
     config.enable_percent_recall = false;
+    config.recall_target = 1.0;
     config.enable_qps = true;
     config.enable_tps = false;
     config.enable_memory = false;
     config.enable_latency = false;
     config.enable_percent_latency = false;
 
-    const auto qps_only = vsag::eval::EvaluateSearch(index, dataset, config);
-    REQUIRE(qps_only.contains("qps"));
-    REQUIRE(qps_only["measurement_sample_count"].get<uint64_t>() == 2);
-    REQUIRE(qps_only["index_info"].is_object());
-    REQUIRE(qps_only["index_info"].empty());
+    const auto coverage_result = vsag::eval::EvaluateSearch(index, dataset, config);
+    REQUIRE(coverage_result.contains("qps"));
+    REQUIRE(coverage_result["measurement_sample_count"].get<uint64_t>() == 2);
+    REQUIRE(coverage_result["query_coverage"]["recall_target"].get<double>() == 1.0);
+    REQUIRE(coverage_result["query_coverage"]["reached_queries"].get<uint64_t>() == 2);
+    REQUIRE(coverage_result["query_coverage"]["query_count"].get<uint64_t>() == 2);
+    REQUIRE(coverage_result["query_coverage"]["rate"].get<double>() == 1.0);
+    REQUIRE(coverage_result["index_info"].is_object());
+    REQUIRE(coverage_result["index_info"].empty());
     REQUIRE(omp_get_max_threads() == caller_thread_count);
 
     config.search_param = R"({"hgraph":{"ef_search":0}})";
@@ -497,6 +502,7 @@ TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][
                         "evaluation top_k must be positive");
 
     config.top_k = 1;
+    config.recall_target.reset();
     config.search_mode = "range";
     REQUIRE_THROWS_WITH(vsag::eval::EvaluateSearch(index, dataset, config),
                         "in-memory evaluation supports only knn search mode");
@@ -562,6 +568,7 @@ TEST_CASE("EvalCase builds and searches an in-memory dataset with original ids",
     })";
     config.top_k = 1;
     config.search_query_count = 1;
+    config.recall_target = 1.0;
     config.enable_memory = false;
     std::remove(config.index_path.c_str());
 
@@ -571,6 +578,8 @@ TEST_CASE("EvalCase builds and searches an in-memory dataset with original ids",
     const auto result = search->Run();
     REQUIRE(result["action"] == "search");
     REQUIRE(result["recall_avg"].get<double>() == 1.0);
+    REQUIRE(result["query_coverage"]["reached_queries"].get<uint64_t>() == 1);
+    REQUIRE(result["query_coverage"]["query_count"].get<uint64_t>() == 1);
     REQUIRE(result["statistics_query_count"].get<uint64_t>() == 1);
     REQUIRE(std::isfinite(result["qps"].get<double>()));
     REQUIRE(std::isfinite(result["latency_avg(ms)"].get<double>()));
@@ -590,13 +599,16 @@ TEST_CASE("EvalCase builds and searches an in-memory dataset with original ids",
         ->Owner(false);
     auto concurrent_dataset =
         EvalDataset::FromDatasets(base, concurrent_queries, concurrent_ground_truth, "l2");
-    config.search_query_count = 2;
+    config.search_query_count = 4;
     config.num_threads_searching = 2;
     auto concurrent_search =
         vsag::eval::EvalCase::MakeInstance(config, "search", concurrent_dataset);
     const auto concurrent_result = concurrent_search->Run();
     REQUIRE(concurrent_result["recall_avg"].get<double>() == 1.0);
-    REQUIRE(concurrent_result["statistics_query_count"].get<uint64_t>() == 2);
+    REQUIRE(concurrent_result["query_coverage"]["reached_queries"].get<uint64_t>() == 4);
+    REQUIRE(concurrent_result["query_coverage"]["query_count"].get<uint64_t>() == 4);
+    REQUIRE(concurrent_result["query_coverage"]["rate"].get<double>() == 1.0);
+    REQUIRE(concurrent_result["statistics_query_count"].get<uint64_t>() == 4);
     REQUIRE(std::isfinite(concurrent_result["qps"].get<double>()));
     REQUIRE(std::isfinite(concurrent_result["latency_avg(ms)"].get<double>()));
     REQUIRE(std::isfinite(concurrent_result["latency_detail(ms)"]["p99"].get<double>()));

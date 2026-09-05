@@ -16,9 +16,11 @@
 #include "recall_monitor.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <mutex>
 #include <numeric>
+#include <stdexcept>
 #include <unordered_set>
 #include <vector>
 
@@ -61,8 +63,17 @@ get_id_recall(const int64_t* neighbors,
     return static_cast<double>(count) / static_cast<double>(top_k);
 }
 
-RecallMonitor::RecallMonitor(uint64_t max_record_counts, bool use_id_based_recall)
-    : Monitor("recall_monitor"), use_id_based_recall_(use_id_based_recall) {
+RecallMonitor::RecallMonitor(uint64_t max_record_counts,
+                             bool use_id_based_recall,
+                             std::optional<double> recall_target)
+    : Monitor("recall_monitor"),
+      use_id_based_recall_(use_id_based_recall),
+      recall_target_(recall_target) {
+    if (recall_target_.has_value() &&
+        (not std::isfinite(recall_target_.value()) || recall_target_.value() < 0.0 ||
+         recall_target_.value() > 1.0)) {
+        throw std::invalid_argument("recall_target must be finite and in [0, 1]");
+    }
     if (max_record_counts > 0) {
         this->recall_records_.reserve(max_record_counts);
     }
@@ -81,6 +92,16 @@ RecallMonitor::GetResult() {
     for (auto& metric : metrics_) {
         this->cal_and_set_result(metric, result);
     }
+    if (recall_target_.has_value()) {
+        const auto query_count = static_cast<uint64_t>(recall_records_.size());
+        const double rate = query_count == 0 ? 0.0
+                                             : static_cast<double>(reached_queries_) /
+                                                   static_cast<double>(query_count);
+        result["query_coverage"] = {{"recall_target", recall_target_.value()},
+                                    {"reached_queries", reached_queries_},
+                                    {"query_count", query_count},
+                                    {"rate", rate}};
+    }
     return result;
 }
 void
@@ -95,12 +116,11 @@ RecallMonitor::Record(void* input) {
     const auto requested_top_k = record.requested_top_k;
     const auto result_count = std::min(record.result_count, requested_top_k);
     if (requested_top_k == 0) {
-        this->recall_records_.emplace_back(0.0);
+        this->record_recall(0.0);
         return;
     }
     if (use_id_based_recall_) {
-        this->recall_records_.emplace_back(
-            get_id_recall(neighbors, gt_neighbors, result_count, requested_top_k));
+        this->record_recall(get_id_recall(neighbors, gt_neighbors, result_count, requested_top_k));
         return;
     }
     uint64_t dim = dataset->GetDim();
@@ -119,9 +139,8 @@ RecallMonitor::Record(void* input) {
                               : distance_func(query_data, ground_truth_vector, &dim);
     }
 
-    const double val =
-        get_recall(distances.data(), gt_distances.data(), result_count, requested_top_k);
-    this->recall_records_.emplace_back(val);
+    this->record_recall(
+        get_recall(distances.data(), gt_distances.data(), result_count, requested_top_k));
 }
 void
 RecallMonitor::SetMetrics(std::string metric) {
@@ -154,5 +173,13 @@ RecallMonitor::cal_recall_rate(double rate) {
     std::sort(this->recall_records_.begin(), this->recall_records_.end());
     auto pos = static_cast<uint64_t>(rate * static_cast<double>(this->recall_records_.size() - 1));
     return recall_records_[pos];
+}
+
+void
+RecallMonitor::record_recall(double recall) {
+    recall_records_.emplace_back(recall);
+    if (recall_target_.has_value() && recall >= recall_target_.value()) {
+        ++reached_queries_;
+    }
 }
 }  // namespace vsag::eval
