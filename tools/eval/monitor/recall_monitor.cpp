@@ -16,11 +16,9 @@
 #include "recall_monitor.h"
 
 #include <algorithm>
-#include <cmath>
 #include <limits>
 #include <mutex>
 #include <numeric>
-#include <stdexcept>
 #include <unordered_set>
 #include <vector>
 
@@ -69,11 +67,6 @@ RecallMonitor::RecallMonitor(uint64_t max_record_counts,
     : Monitor("recall_monitor"),
       use_id_based_recall_(use_id_based_recall),
       recall_target_(recall_target) {
-    if (recall_target_.has_value() &&
-        (not std::isfinite(recall_target_.value()) || recall_target_.value() < 0.0 ||
-         recall_target_.value() > 1.0)) {
-        throw std::invalid_argument("recall_target must be finite and in [0, 1]");
-    }
     if (max_record_counts > 0) {
         this->recall_records_.reserve(max_record_counts);
     }

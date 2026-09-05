@@ -51,7 +51,6 @@ validate(const IndexPtr& index, const EvalDatasetPtr& dataset) {
 
 void
 validate_search(const EvalDatasetPtr& dataset, const EvalConfig& config) {
-    config.Validate();
     if (config.search_mode != "knn") {
         throw std::invalid_argument("in-memory evaluation supports only knn search mode");
     }
