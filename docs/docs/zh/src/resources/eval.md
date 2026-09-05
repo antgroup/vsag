@@ -35,8 +35,9 @@ cmake --build build-release -j
 ```
 
 常用参数还包括 `--search_mode`（`knn` / `range` / `knn_filter` / `range_filter`）、
-`--search-query-count`、`--delete-index-after-search`，以及一系列用于关闭单项指标的
-`--disable_*` 开关。参考模板 `tools/eval/eval_template.yaml` 展示了完整的 YAML 结构。
+`--search-query-count`、`--recall_target`、`--delete-index-after-search`，以及一系列用于
+关闭单项指标的 `--disable_*` 开关。参考模板 `tools/eval/eval_template.yaml` 展示了完整的
+YAML 结构。
 
 ### 2. 配置文件模式（适合批量对比）
 
@@ -71,6 +72,7 @@ eval_case1:
   search_params: '{"hgraph":{"ef_search":60}}'
   index_path: /tmp/vsag_eval/hgraph_fp32
   topk: 10
+  recall_target: 0.9
 ```
 
 注意：`global.exporters` 下每一项都是**具名**的导出器（即 YAML map），并不是数组。
@@ -78,9 +80,41 @@ eval_case1:
 ## 支持的评估维度
 
 - **效率**：QPS、TPS
-- **效果**：平均召回率、分位召回率（P0/P10/P50/P90...）
+- **效果**：平均召回率、分位召回率（P0/P10/P50/P90...）与可选的单查询召回覆盖率
 - **延迟**：平均延迟、P50/P95/P99 延迟
 - **资源**：峰值内存占用
+
+### 单查询召回覆盖率
+
+通过可选的 YAML 字段 `recall_target` 或 CLI 参数 `--recall_target` 设置 `[0, 1]` 范围内
+的有限数值。工具会输出单次 `recall@k` 达到目标的查询执行占比：
+
+```text
+query_coverage(R) = reached_queries / query_count
+```
+
+`recall_target` 仅支持当前能够产生逐查询 `recall@k` 的 `knn` 与 `knn_filter` 搜索模式；
+与 `range` 或 `range_filter` 组合时会拒绝该配置。
+
+当 `topk: k` 时，目标 `R` 要求单次查询至少有 `ceil(R * k)` 个正确结果。单查询结果沿用
+当前评估所选的基于距离或基于 ID 的 recall 语义。`query_count` 统计 recall monitor 阶段的
+查询执行次数；当 `search_query_count` 大于数据集查询数时，重复执行也会计入，因此它不是
+去重后的 query ID 数量。
+
+JSON 导出会新增以下对象：
+
+```json
+{
+  "query_coverage": {
+    "recall_target": 0.9,
+    "reached_queries": 950,
+    "query_count": 1000,
+    "rate": 0.95
+  }
+}
+```
+
+未配置 target 时不会输出 `query_coverage`，原有输出保持不变。
 
 ### 搜索指标计量语义
 

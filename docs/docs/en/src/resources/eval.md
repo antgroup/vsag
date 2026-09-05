@@ -38,9 +38,9 @@ HDF5 must be installed on the system (Ubuntu: `apt install libhdf5-dev`; CentOS:
 ```
 
 Useful flags include `--search_mode` (`knn` / `range` / `knn_filter` / `range_filter`),
-`--search-query-count`, `--delete-index-after-search`, and the various `--disable_*` switches that
-turn off individual metrics. The reference template at `tools/eval/eval_template.yaml` shows the
-complete YAML shape.
+`--search-query-count`, `--recall_target`, `--delete-index-after-search`, and the various
+`--disable_*` switches that turn off individual metrics. The reference template at
+`tools/eval/eval_template.yaml` shows the complete YAML shape.
 
 ### 2. Config-file mode (batch comparisons)
 
@@ -76,6 +76,7 @@ eval_case1:
   search_params: '{"hgraph":{"ef_search":60}}'
   index_path: /tmp/vsag_eval/hgraph_fp32
   topk: 10
+  recall_target: 0.9
 ```
 
 Note: under `global.exporters`, each entry is a **named** exporter (a YAML map), not a list item.
@@ -83,9 +84,45 @@ Note: under `global.exporters`, each entry is a **named** exporter (a YAML map),
 ## Supported Dimensions
 
 - **Efficiency**: QPS, TPS
-- **Quality**: average recall and quantile recall (P0/P10/P50/P90...)
+- **Quality**: average recall, quantile recall (P0/P10/P50/P90...), and optional query-level recall
+  coverage
 - **Latency**: average, P50/P95/P99
 - **Resource**: peak memory usage
+
+### Query-level Recall Coverage
+
+Set the optional `recall_target` YAML field or `--recall_target` CLI option to a finite value in
+`[0, 1]`. The tool then reports the fraction of recorded query executions whose individual
+`recall@k` reaches the target:
+
+```text
+query_coverage(R) = reached_queries / query_count
+```
+
+`recall_target` is supported only for `knn` and `knn_filter`, the search modes that currently
+produce per-query `recall@k`. Configurations that combine it with `range` or `range_filter` are
+rejected.
+
+For a search with `topk: k`, reaching target `R` requires at least `ceil(R * k)` correct results.
+The per-query result follows the same distance-based or ID-based recall semantics selected for the
+evaluation. `query_count` counts executions in the recall-monitor pass, including repeated dataset
+queries when `search_query_count` exceeds the dataset query count; it is not a count of distinct
+query IDs.
+
+JSON exporters add the following object:
+
+```json
+{
+  "query_coverage": {
+    "recall_target": 0.9,
+    "reached_queries": 950,
+    "query_count": 1000,
+    "rate": 0.95
+  }
+}
+```
+
+If the target is omitted, `query_coverage` is omitted and existing output remains unchanged.
 
 ### Search Measurement Semantics
 
