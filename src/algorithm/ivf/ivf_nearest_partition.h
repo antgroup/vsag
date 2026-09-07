@@ -58,6 +58,27 @@ public:
 private:
     void
     factory_router_index(const IndexCommonParam& common_param);
+
+    Vector<BucketIdType>
+    classify_datas_by_scan(const void* datas,
+                           int64_t count,
+                           BucketIdType buckets_per_data,
+                           QueryContext* ctx) const;
+
+private:
+    bool use_route_graph_{true};
+
+    // centroids_ stores the trained centroids (normalized for cosine), and norms_ stores the
+    // per-centroid constant term used by the scan routing key :
+    //   - L2SQR: norms_[b] = |c_b|^2 / 2
+    //   - IP/COSINE: norms_[b] = 1.0 (distance is defined as 1 - dot, and cosine centroids are
+    //     normalized during training)
+    Vector<float> centroids_{allocator_};
+    Vector<float> norms_{allocator_};
+
+    // Copied common param, used to lazily create the routing HGraph when a route-graph-layout
+    // index is deserialized by a reader configured with use_route_graph=false.
+    IndexCommonParam common_param_;
 };
 
 }  // namespace vsag

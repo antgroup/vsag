@@ -207,6 +207,7 @@ const char* const BRUTE_FORCE_USE_RESIDUAL = "use_residual";
 const char* const IVF_USE_RESIDUAL = "use_residual";
 const char* const IVF_USE_REORDER = "use_reorder";
 const char* const IVF_TRAIN_TYPE = "ivf_train_type";
+const char* const IVF_USE_ROUTE_GRAPH = "use_route_graph";
 const char* const IVF_BUCKETS_COUNT = "buckets_count";
 const char* const IVF_BASE_QUANTIZATION_TYPE = "base_quantization_type";
 const char* const IVF_BASE_IO_TYPE = "base_io_type";

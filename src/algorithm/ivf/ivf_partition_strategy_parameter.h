@@ -53,6 +53,7 @@ public:
     IVFPartitionStrategyType partition_strategy_type{IVFPartitionStrategyType::IVF};
     int32_t route_max_degree{64};
     int32_t route_ef_construction{300};
+    bool use_route_graph{true};
     GNOIMIParameterPtr gnoimi_param{nullptr};
 };
 
