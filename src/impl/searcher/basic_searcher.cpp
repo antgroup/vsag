@@ -702,7 +702,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     if (check_func(ep) and is_result_distance_eligible<mode>(dist, inner_search_param)) {
         top_candidates->Push(dist, ep);
     }
-    if (not std::isfinite(dist) and inner_search_param.consider_duplicate and
+    if (std::isfinite(dist) and inner_search_param.consider_duplicate and
         not use_custom_distance and is_result_distance_eligible<mode>(dist, inner_search_param)) {
         for (const auto duplicate_id : graph->GetDuplicateIds(ep)) {
             if (check_func(duplicate_id)) {

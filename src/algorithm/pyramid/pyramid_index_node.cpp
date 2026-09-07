@@ -82,6 +82,22 @@ IndexNode::Build(ODescent& odescent) {
 }
 
 void
+IndexNode::Build(const GraphBuildFunc& build_graph) {
+    std::unique_lock lock(mutex_);
+    if (not ids_.empty()) {
+        Init();
+    }
+    if (status_ == Status::GRAPH) {
+        entry_point_ = ids_[0];
+        build_graph(graph_, ids_, level_);
+        Vector<InnerIdType>(allocator_).swap(ids_);
+    }
+    for (const auto& item : children_) {
+        item.second->Build(build_graph);
+    }
+}
+
+void
 IndexNode::AddChild(const std::string& key) {
     // AddChild is not thread-safe; ensure thread safety in calls to it.
     children_[key] = std::make_unique<IndexNode>(

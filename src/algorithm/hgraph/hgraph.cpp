@@ -73,6 +73,13 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             "HGraph deduplicate_storage only supports dense vectors");
     }
+    if (this->graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        if (common_param.repr_ != RecordRepr::DENSE or
+            common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "HGraph PiPNN only supports dense float32 indexes");
+        }
+    }
     if (this->deduplicate_storage_ && this->graph_type_ != GRAPH_TYPE_VALUE_NSW) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             "HGraph deduplicate_storage only supports nsw graph");

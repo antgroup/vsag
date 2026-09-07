@@ -270,7 +270,12 @@ PyramidParameters::FromJson(const JsonType& json) {
     this->max_degree = graph_json[GRAPH_PARAM_MAX_DEGREE_KEY].GetInt();
 
     this->graph_type = graph_json[GRAPH_TYPE_KEY].GetString();
-    if (this->graph_type == GRAPH_TYPE_ODESCENT) {
+    CHECK_ARGUMENT(this->graph_type == GRAPH_TYPE_VALUE_NSW or
+                       this->graph_type == GRAPH_TYPE_VALUE_ODESCENT or
+                       this->graph_type == GRAPH_TYPE_VALUE_PIPNN,
+                   fmt::format("invalid graph_type: {}", this->graph_type));
+    if (this->graph_type == GRAPH_TYPE_VALUE_ODESCENT or
+        this->graph_type == GRAPH_TYPE_VALUE_PIPNN) {
         this->odescent_param = std::make_shared<ODescentParameter>();
         this->odescent_param->FromJson(graph_json);
     } else if (json.Contains(EF_CONSTRUCTION_KEY)) {
@@ -364,7 +369,8 @@ PyramidParameters::ToJson() const {
         root_graph_storage_type_to_string(this->root_graph_storage_type));
     graph_json[ALPHA_KEY].SetFloat(this->alpha);
     graph_json[GRAPH_TYPE_KEY].SetString(this->graph_type);
-    if (this->graph_type == GRAPH_TYPE_ODESCENT) {
+    if (this->graph_type == GRAPH_TYPE_VALUE_ODESCENT or
+        this->graph_type == GRAPH_TYPE_VALUE_PIPNN) {
         graph_json.UpdateJson(odescent_param->ToJson());
     } else {
         json[EF_CONSTRUCTION_KEY].SetUint64(this->ef_construction);
