@@ -126,6 +126,22 @@ function (vsag_fail_missing_system_dep dep package hint)
              "or set VSAG_USE_SYSTEM_${dep}=OFF to use the bundled copy.")
 endfunction ()
 
+# Translate the OpenBLAS CPU baseline override into one validated make argument.
+function (vsag_get_openblas_target_arg out_var)
+    set (_target_arg "")
+    if (DEFINED ENV{VSAG_OPENBLAS_TARGET}
+            AND NOT "$ENV{VSAG_OPENBLAS_TARGET}" STREQUAL "")
+        string (STRIP "$ENV{VSAG_OPENBLAS_TARGET}" _openblas_target)
+        if (NOT _openblas_target MATCHES "^[A-Za-z0-9_]+$")
+            message (FATAL_ERROR
+                     "VSAG_OPENBLAS_TARGET must contain only letters, digits, or underscores; "
+                     "got '$ENV{VSAG_OPENBLAS_TARGET}'.")
+        endif ()
+        set (_target_arg "TARGET=${_openblas_target}")
+    endif ()
+    set (${out_var} "${_target_arg}" PARENT_SCOPE)
+endfunction ()
+
 # Return TRUE when ${target}'s declared include directories contain ${header}.
 function (vsag_target_has_header target header out_var)
     set (_include_dirs "")

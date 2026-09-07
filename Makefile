@@ -72,6 +72,7 @@ test:                    ## Build and run unit tests.
 .PHONY: test-cmake
 test-cmake:              ## Run focused CMake helper tests.
 	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/thirdparty_override_test.cmake
+	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/openblas_target_test.cmake
 
 .PHONY: asan
 asan:                    ## Build with AddressSanitizer option.
