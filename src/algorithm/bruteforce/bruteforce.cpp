@@ -33,7 +33,7 @@
 #include "datacell/multi_vector_datacell_parameter.h"
 #include "fmt/chrono.h"
 #include "impl/heap/standard_heap.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"
@@ -452,7 +452,8 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
 
         Vector<int64_t> expected_labels_vec(
             request.expected_labels_.begin(), request.expected_labels_.end(), this->allocator_);
-        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
+        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec,
+                                                 label_to_inner_id);  // [reasoning]
 
         // Compute true distances for expected targets.
         // BruteForce uses inner_codes_ directly; for multi-vector, this is the
@@ -469,7 +470,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
             } else {
                 this->inner_codes_->Query(&dist, computer, &inner_id, 1, &query_context);
             }
-            reasoning_ctx->SetTrueDistance(inner_id, dist);
+            reasoning_ctx->SetTrueDistance(inner_id, dist);  // [reasoning]
         }
     }
 
@@ -505,7 +506,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
                 const float dist = custom_dists[j];
                 CHECK_ARGUMENT(std::isfinite(dist), "distance callback must return finite scores");
                 if (reasoning != nullptr) {
-                    reasoning->RecordVisit(custom_inner_ids[j], dist, 0);
+                    reasoning->RecordVisit(custom_inner_ids[j], dist, 0);  // [reasoning]
                 }
                 if (not is_range || dist <= radius) {
                     cur_heap->Push(dist, custom_inner_ids[j]);
@@ -522,7 +523,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         for (InnerIdType i = start; i < end; ++i) {
             if (attr_filter != nullptr and not attr_filter->CheckValid(i)) {
                 if (reasoning != nullptr) {
-                    reasoning->RecordFilterReject(i);
+                    reasoning->RecordFilterReject(i);  // [reasoning]
                 }
                 continue;
             }
@@ -538,7 +539,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
                     inner_codes_->Query(&dist, computer, &i, 1, &local_query_context);
                     ++dist_cmp_local;
                     if (reasoning != nullptr) {
-                        reasoning->RecordVisit(i, dist, 0);
+                        reasoning->RecordVisit(i, dist, 0);  // [reasoning]
                     }
                     if (is_range and dist > radius) {
                         continue;
@@ -549,7 +550,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
                 }
             } else {
                 if (reasoning != nullptr) {
-                    reasoning->RecordFilterReject(i);
+                    reasoning->RecordFilterReject(i);  // [reasoning]
                 }
             }
         }
@@ -624,11 +625,11 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
     // Generate reasoning report if reasoning context was created.
     if (reasoning_ctx) {
         if (not result_inner_ids.empty()) {
-            reasoning_ctx->MarkResult(result_inner_ids);
+            reasoning_ctx->MarkResult(result_inner_ids);  // [reasoning]
         }
-        reasoning_ctx->SetTermination(ReasoningContext::kTerminationLowerBoundReached);
-        reasoning_ctx->DiagnoseExpectedTargets();
-        result->Reasoning(reasoning_ctx->GenerateReport());
+        reasoning_ctx->SetTermination(ReasoningTermination::kLowerBoundReached);  // [reasoning]
+        reasoning_ctx->DiagnoseExpectedTargets();                                 // [reasoning]
+        result->Reasoning(reasoning_ctx->GenerateReport());                       // [reasoning]
     }
 
     auto stats = JsonType::Parse(statistics.Dump());

@@ -47,6 +47,7 @@
 - [Contributing](development/contributing.md)
 
 # Advanced Features
+- [Search Reasoning](./search_reasoning.md)
 
 - [Build and Train](advanced/build_and_train.md)
 - [HGraph Build Cache](advanced/build_cache.md)

@@ -47,6 +47,7 @@
 - [贡献到 VSAG](development/contributing.md)
 
 # 高级功能
+- [搜索归因分析](./search_reasoning.md)
 
 - [索引构建与训练](advanced/build_and_train.md)
 - [HGraph 构建缓存](advanced/build_cache.md)

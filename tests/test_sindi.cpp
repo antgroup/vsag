@@ -630,3 +630,97 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     REQUIRE(result.has_value());
     REQUIRE_FALSE(result.value()->GetReasoning().empty());
 }
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI_V2 Reasoning Basic",
+                             "[ft][sindi_v2][reasoning][pr]") {
+    auto build_param = R"({
+        "dim": 16,
+        "dtype": "sparse",
+        "metric_type": "ip",
+        "index_param": {
+            "use_reorder": true,
+            "doc_prune_ratio": 0.0,
+            "window_size": 10000,
+            "term_id_limit": 2000,
+            "use_quantization": false,
+            "remap_term_ids": false
+        }
+    })";
+    auto index = TestFactory("sindi_v2", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(dataset->base_->GetSparseVectors())->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = R"({
+        "sindi_v2": {
+            "n_candidate": 20,
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0
+        }
+    })";
+    req.query_ = query;
+    req.expected_labels_ = {99999999};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+    REQUIRE(result.value()->GetReasoning().find("sindi_v2") != std::string::npos);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI_V2 Reasoning Parity",
+                             "[ft][sindi_v2][reasoning][pr]") {
+    auto build_param = R"({
+        "dim": 16,
+        "dtype": "sparse",
+        "metric_type": "ip",
+        "index_param": {
+            "use_reorder": true,
+            "doc_prune_ratio": 0.0,
+            "window_size": 10000,
+            "term_id_limit": 2000,
+            "use_quantization": false,
+            "remap_term_ids": false
+        }
+    })";
+    auto index = TestFactory("sindi_v2", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(dataset->base_->GetSparseVectors())->Owner(false);
+
+    vsag::SearchRequest req_no_reasoning;
+    req_no_reasoning.topk_ = 5;
+    req_no_reasoning.params_str_ = R"({
+        "sindi_v2": {
+            "n_candidate": 20,
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0
+        }
+    })";
+    req_no_reasoning.query_ = query;
+
+    auto result_no_reasoning = index->SearchWithRequest(req_no_reasoning);
+    REQUIRE(result_no_reasoning.has_value());
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = R"({
+        "sindi_v2": {
+            "n_candidate": 20,
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0
+        }
+    })";
+    req.query_ = query;
+    req.expected_labels_ = {result_no_reasoning.value()->GetIds()[0]};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+}

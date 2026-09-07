@@ -18,7 +18,7 @@
 #include <limits>
 
 #include "attr/executor/executor.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/searcher/basic_searcher.h"
 #include "vsag_exception.h"
 

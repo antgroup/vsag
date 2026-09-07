@@ -78,6 +78,9 @@ public:
               Allocator* allocator) const override;
 
     DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const override;
+
+    DatasetPtr
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
@@ -154,10 +157,14 @@ private:
                 SindiQueryContext& query_context,
                 const SparseVector* original_query = nullptr,
                 SearchStatistics* statistics = nullptr,
-                const SindiMetadataSearchRoute& metadata_route = {}) const;
+                const SindiMetadataSearchRoute& metadata_route = {},
+                ReasoningContext* reasoning_ctx = nullptr) const;
 
     bool
     UseTermListsHeapInsert(const SINDIV2SearchParameter& search_param) const;
+
+    void
+    AttachReasoningReport(const DatasetPtr& dataset_results, ReasoningContext* reasoning_ctx) const;
 
     std::pair<int64_t, int64_t>
     get_min_max_window_id(const FilterPtr& filter) const;

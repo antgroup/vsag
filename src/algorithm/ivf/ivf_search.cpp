@@ -34,7 +34,7 @@
 #include "dataset_impl.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/inner_search_param.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/reorder/bucket_reorder.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "inner_string_params.h"
@@ -212,7 +212,7 @@ IVF::search(const DatasetPtr& query,
         candidate_buckets = partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, &ctx);
     }
     if (reasoning_ctx != nullptr) {
-        reasoning_ctx->RecordBucketSelection(candidate_buckets);
+        reasoning_ctx->RecordBucketSelection(candidate_buckets);  // [reasoning]
     }
     auto computer = bucket_->FactoryComputer(query_data);
 
@@ -348,7 +348,7 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
         candidate_buckets = partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, &ctx);
     }
     if (reasoning_ctx != nullptr) {
-        reasoning_ctx->RecordBucketSelection(candidate_buckets);
+        reasoning_ctx->RecordBucketSelection(candidate_buckets);  // [reasoning]
     }
 
     int64_t topk = request.topk_;
@@ -402,12 +402,12 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
             const auto origin_id = candidate_ids[i] / buckets_per_data_;
             if (filter != nullptr and not filter->CheckValid(origin_id)) {
                 if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordFilterReject(origin_id);
+                    reasoning_ctx->RecordFilterReject(origin_id);  // [reasoning]
                 }
                 continue;
             }
             if (reasoning_ctx != nullptr) {
-                reasoning_ctx->RecordVisit(origin_id, scores[i], 0);
+                reasoning_ctx->RecordVisit(origin_id, scores[i], 0);  // [reasoning]
             }
             search_result->Push(scores[i], candidate_ids[i]);
             while (search_result->Size() > static_cast<uint64_t>(topk)) {
@@ -446,7 +446,7 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
             const auto origin_id = inner_id / buckets_per_data_;
             if (attr_filter != nullptr and not attr_filter->CheckValid(offset)) {
                 if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordFilterReject(origin_id);
+                    reasoning_ctx->RecordFilterReject(origin_id);  // [reasoning]
                 }
                 continue;
             }
@@ -685,7 +685,8 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         for (const auto& label : request.expected_labels_) {
             expected_labels_vec.push_back(label);
         }
-        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
+        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec,
+                                                 label_to_inner_id);  // [reasoning]
 
         const auto* query_data = query->GetFloat32Vectors();
         auto computer = this->bucket_->FactoryComputer(query_data);
@@ -695,7 +696,7 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                 ctx.stats->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
                                        this->bucket_->backend_);
             }
-            reasoning_ctx->SetTrueDistance(inner_id, dist);
+            reasoning_ctx->SetTrueDistance(inner_id, dist);  // [reasoning]
         }
         ctx.reasoning_ctx = reasoning_ctx.get();
     }
@@ -809,9 +810,9 @@ IVF::AttachReasoningReport(const DatasetPtr& dataset_results,
                     this->label_table_->GetIdByLabel(dataset_results->GetIds()[i]);
             }
         }
-        reasoning_ctx->MarkResult(result_inner_ids);
+        reasoning_ctx->MarkResult(result_inner_ids);  // [reasoning]
     }
-    reasoning_ctx->DiagnoseExpectedTargets();
-    dataset_results->Reasoning(reasoning_ctx->GenerateReport());
+    reasoning_ctx->DiagnoseExpectedTargets();                     // [reasoning]
+    dataset_results->Reasoning(reasoning_ctx->GenerateReport());  // [reasoning]
 }
 }  // namespace vsag
