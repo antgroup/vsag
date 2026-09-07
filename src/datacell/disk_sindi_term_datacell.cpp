@@ -145,12 +145,12 @@ DiskSindiTermDataCell<IOTmpl>::SerializeTermLayout(StreamWriter& writer,
     CHECK_ARGUMENT(term_dict_count == term_dict_.size(),
                    "SINDI_V2 term dict count does not match disk data cell");
     StreamWriter::WriteVector(writer, term_dict_);
-    if (io_ == nullptr) {
+    if (not payload_layout_.IsBound()) {
         CHECK_ARGUMENT(term_dict_.empty(), "SINDIV2 term data cell is not bound to IO");
         StreamWriter::WriteObj(writer, uint64_t{0});
         return;
     }
-    io_->Serialize(writer);
+    payload_layout_.Serialize(writer);
 }
 
 template <typename IOTmpl>
@@ -163,9 +163,9 @@ DiskSindiTermDataCell<IOTmpl>::DeserializeTermLayout(StreamReader& reader,
     total_count_ = total_count;
     term_dict_ = sindi_datacell_utils::DeserializeTermDictionary(reader, term_id_limit_);
     this->InitIO(io_param_);
-    CHECK_ARGUMENT(io_ != nullptr, "SINDIV2 term data cell has no IO");
-    io_->Deserialize(reader);
-    payload_size_ = io_->Size();
+    CHECK_ARGUMENT(payload_layout_.IsBound(), "SINDIV2 term data cell has no IO");
+    payload_layout_.Deserialize(reader);
+    payload_size_ = payload_layout_.GetByteSize();
     this->ValidateBoundLayout(payload_size_);
     payloads_validated_ = false;
     if constexpr (not std::is_same_v<IOTmpl, ReaderIO>) {
@@ -180,10 +180,17 @@ DiskSindiTermDataCell<IOTmpl>::InitIO(const IOParamPtr& io_param) {
     if (io_param != nullptr) {
         io_param_ = io_param;
     }
-    if (io_ == nullptr && io_param_ != nullptr) {
-        io_ = std::make_shared<IOTmpl>(io_param_, common_param_);
-    }
-    if (io_ == nullptr) {
+    if (not payload_layout_.IsBound() && io_param_ != nullptr) {
+        auto io = std::make_shared<IOTmpl>(io_param_, common_param_);
+        if constexpr (std::is_same_v<IOTmpl, ReaderIO>) {
+            const auto reader_param = std::dynamic_pointer_cast<ReaderIOParameter>(io_param_);
+            if (reader_param != nullptr && reader_param->reader != nullptr) {
+                io->InitIO(io_param_);
+            }
+        } else {
+            io->InitIO(io_param_);
+        }
+        payload_layout_.SetIO(std::move(io));
         return;
     }
     if constexpr (std::is_same_v<IOTmpl, ReaderIO>) {
@@ -192,7 +199,9 @@ DiskSindiTermDataCell<IOTmpl>::InitIO(const IOParamPtr& io_param) {
             return;
         }
     }
-    io_->InitIO(io_param_);
+    if (payload_layout_.IsBound()) {
+        payload_layout_.InitIO(io_param_);
+    }
 }
 
 template <typename IOTmpl>
@@ -203,11 +212,14 @@ DiskSindiTermDataCell<IOTmpl>::SetIO(const std::shared_ptr<Reader>& reader) {
         auto reader_param = std::make_shared<ReaderIOParameter>();
         reader_param->reader = reader;
         io_param_ = reader_param;
-        if (io_ == nullptr) {
-            io_ = std::make_shared<ReaderIO>(allocator_);
+        if (not payload_layout_.IsBound()) {
+            auto io = std::make_shared<ReaderIO>(allocator_);
+            io->InitIO(reader_param);
+            payload_layout_.SetIO(std::move(io));
+        } else {
+            payload_layout_.InitIO(reader_param);
         }
-        io_->InitIO(reader_param);
-        payload_size_ = io_->Size();
+        payload_size_ = payload_layout_.GetByteSize();
         this->ValidateBoundLayout(payload_size_);
         this->ValidateBoundPayloads();
         payloads_validated_ = true;
@@ -223,7 +235,7 @@ DiskSindiTermDataCell<IOTmpl>::ValidateBoundLayout(uint64_t payload_size) const 
 template <typename IOTmpl>
 void
 DiskSindiTermDataCell<IOTmpl>::ValidateBoundPayloads() const {
-    CHECK_ARGUMENT(io_ != nullptr, "SINDI_V2 term payload IO is not bound");
+    CHECK_ARGUMENT(payload_layout_.IsBound(), "SINDI_V2 term payload IO is not bound");
     const auto value_code_size = sindi_datacell_utils::GetValueCodeSize(sparse_value_quant_type_);
     Vector<uint8_t> payload(allocator_);
     for (const auto& entry : term_dict_) {
@@ -232,7 +244,8 @@ DiskSindiTermDataCell<IOTmpl>::ValidateBoundPayloads() const {
         }
 
         if constexpr (std::is_same_v<IOTmpl, MMapIO>) {
-            auto lease = io_->Acquire(entry.posting_payload_offset, entry.posting_payload_size);
+            auto lease =
+                payload_layout_.Acquire(entry.posting_payload_offset, entry.posting_payload_size);
             CHECK_ARGUMENT(static_cast<bool>(lease),
                            "failed to access mmap SINDI_V2 term payload during validation");
             (void)sindi_datacell_utils::ViewTermPayload(lease.Data(),
@@ -245,8 +258,8 @@ DiskSindiTermDataCell<IOTmpl>::ValidateBoundPayloads() const {
                                                         allocator_);
         } else {
             payload.resize(entry.posting_payload_size);
-            const bool read_succeeded =
-                io_->Read(entry.posting_payload_size, entry.posting_payload_offset, payload.data());
+            const bool read_succeeded = payload_layout_.Read(
+                entry.posting_payload_offset, entry.posting_payload_size, payload.data());
             CHECK_ARGUMENT(read_succeeded,
                            "failed to read SINDI_V2 term payload during validation");
             (void)sindi_datacell_utils::ViewTermPayload(payload.data(),
@@ -267,7 +280,7 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
                                                     Allocator* query_allocator) const {
     auto* allocator = query_allocator == nullptr ? allocator_ : query_allocator;
     QueryTermBuffers query_term_buffers(allocator);
-    if (io_ == nullptr) {
+    if (not payload_layout_.IsBound()) {
         return query_term_buffers;
     }
 
@@ -330,6 +343,7 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
         uint64_t total_payload_size = 0;
         for (const auto& plan : read_plans) {
             validate_entry(plan);
+
             CHECK_ARGUMENT(plan.entry.posting_payload_size <=
                                std::numeric_limits<uint64_t>::max() - total_payload_size,
                            "SINDI_V2 query term payload size overflow");
@@ -341,8 +355,8 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
 
         if (not read_plans.empty()) {
             Vector<uint8_t> payloads(total_payload_size, 0, allocator);
-            const bool read_succeeded =
-                io_->MultiRead(payloads.data(), sizes.data(), offsets.data(), read_plans.size());
+            const bool read_succeeded = payload_layout_.MultiRead(
+                offsets.data(), sizes.data(), read_plans.size(), payloads.data());
             if (not read_succeeded) {
                 throw VsagException(ErrorType::INTERNAL_ERROR,
                                     "failed to batch read SINDI_V2 term payloads");
@@ -366,11 +380,11 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
     }
 
     for (const auto& plan : read_plans) {
+        validate_entry(plan);
         const auto term_id = plan.term_id;
         const auto& entry = plan.entry;
-        validate_entry(plan);
-
-        auto lease = io_->Acquire(entry.posting_payload_offset, entry.posting_payload_size);
+        auto lease =
+            payload_layout_.Acquire(entry.posting_payload_offset, entry.posting_payload_size);
         CHECK_ARGUMENT(static_cast<bool>(lease), "failed to access mmap SINDI_V2 term payload");
         auto term_buffer = sindi_datacell_utils::ViewTrustedTermPayload(lease.Data(),
                                                                         entry.posting_payload_size,
