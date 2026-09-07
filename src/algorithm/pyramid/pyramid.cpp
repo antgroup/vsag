@@ -2241,19 +2241,23 @@ Pyramid::add_to_path(Hierarchy& hierarchy,
         if (depth != static_cast<int>(path_slices.size())) {
             child = node->GetChild(path_slices[depth], true);
         }
-        if (no_build_level_index < static_cast<int>(hierarchy.no_build_levels.size()) &&
-            depth == hierarchy.no_build_levels[no_build_level_index]) {
-            node = child;
+        const bool skip_level =
+            no_build_level_index < static_cast<int>(hierarchy.no_build_levels.size()) &&
+            depth == hierarchy.no_build_levels[no_build_level_index];
+        if (skip_level) {
             ++no_build_level_index;
-            continue;
+        } else {
+            add_one_point(hierarchy,
+                          node,
+                          inner_id,
+                          vector,
+                          0,
+                          false,
+                          depth == 0 ? sampled_root_level : std::numeric_limits<int>::min());
         }
-        add_one_point(hierarchy,
-                      node,
-                      inner_id,
-                      vector,
-                      0,
-                      false,
-                      depth == 0 ? sampled_root_level : std::numeric_limits<int>::min());
+        if (child == nullptr) {
+            break;
+        }
         node = child;
     }
 }
