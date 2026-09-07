@@ -196,7 +196,8 @@ private:
                                float radius,
                                const FilterPtr& filter,
                                const std::optional<float>& threshold,
-                               bool enable_reorder) const;
+                               bool enable_reorder,
+                               ReasoningContext* reasoning_ctx = nullptr) const;
 
     template <InnerSearchType type>
     bool
@@ -208,7 +209,8 @@ private:
                       uint32_t n_candidate,
                       const FilterPtr& filter,
                       const std::optional<float>& threshold,
-                      bool enable_reorder) const;
+                      bool enable_reorder,
+                      ReasoningContext* reasoning_ctx = nullptr) const;
 
     void
     ValidateBoundLayout(uint64_t payload_size) const;

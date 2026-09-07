@@ -18,7 +18,7 @@
 #include <limits>
 
 #include "attr/executor/executor.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/searcher/basic_searcher.h"
 #include "utils/float_utils.h"
 
@@ -84,7 +84,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
             }
             auto origin_id = ids[j] / buckets_per_data;
             if (reasoning_ctx != nullptr) {
-                reasoning_ctx->RecordVisit(origin_id, dist[j], 0);
+                reasoning_ctx->RecordVisit(origin_id, dist[j], 0);  // [reasoning]
             }
             if (param.distance_threshold.has_value() and
                 (not IsFiniteFloatBits(dist[j]) or
@@ -93,7 +93,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
             }
             if (attr_ft != nullptr and not attr_ft->CheckValid(j)) {
                 if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordFilterReject(origin_id);
+                    reasoning_ctx->RecordFilterReject(origin_id);  // [reasoning]
                 }
                 continue;
             }
@@ -103,7 +103,8 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                 }
                 while (heap->Size() > topk_u) {
                     if (reasoning_ctx != nullptr) {
-                        reasoning_ctx->RecordEviction(heap->Top().second / buckets_per_data, 0);
+                        reasoning_ctx->RecordEviction(heap->Top().second / buckets_per_data,
+                                                      0);  // [reasoning]
                     }
                     heap->Pop();
                 }
@@ -111,7 +112,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                     cur_heap_top = heap->Top().first;
                 }
             } else if (reasoning_ctx != nullptr) {
-                reasoning_ctx->RecordFilterReject(origin_id);
+                reasoning_ctx->RecordFilterReject(origin_id);  // [reasoning]
             }
         }
     } else {  // RANGE_SEARCH
@@ -121,11 +122,11 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
             }
             auto origin_id = ids[j] / buckets_per_data;
             if (reasoning_ctx != nullptr) {
-                reasoning_ctx->RecordVisit(origin_id, dist[j], 0);
+                reasoning_ctx->RecordVisit(origin_id, dist[j], 0);  // [reasoning]
             }
             if (attr_ft != nullptr and not attr_ft->CheckValid(j)) {
                 if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordFilterReject(origin_id);
+                    reasoning_ctx->RecordFilterReject(origin_id);  // [reasoning]
                 }
                 continue;
             }
@@ -135,7 +136,8 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                 }
                 while (heap->Size() > topk_u) {
                     if (reasoning_ctx != nullptr) {
-                        reasoning_ctx->RecordEviction(heap->Top().second / buckets_per_data, 0);
+                        reasoning_ctx->RecordEviction(heap->Top().second / buckets_per_data,
+                                                      0);  // [reasoning]
                     }
                     heap->Pop();
                 }
@@ -143,7 +145,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                     cur_heap_top = heap->Top().first;
                 }
             } else if (reasoning_ctx != nullptr) {
-                reasoning_ctx->RecordFilterReject(origin_id);
+                reasoning_ctx->RecordFilterReject(origin_id);  // [reasoning]
             }
         }
     }
