@@ -24,7 +24,7 @@
 #include "attr/executor/executor.h"
 #include "datacell/rabitq_split_datacell.h"
 #include "impl/heap/standard_heap.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "index_common_param.h"
 #include "simd/rabitq_simd.h"
 #include "vsag/allocator.h"
@@ -807,7 +807,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                                          bool full_distance_available) {
         ++distance_computations;
         if (reasoning != nullptr) {
-            reasoning->RecordVisit(neighbor, distance, hops);
+            reasoning->RecordVisit(neighbor, distance, hops);  // [reasoning]
         }
 
         const bool allowed = is_allowed(neighbor);
@@ -830,7 +830,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                                    candidate_index);
                 }
             } else if (reasoning != nullptr) {
-                reasoning->RecordFilterReject(neighbor);
+                reasoning->RecordFilterReject(neighbor);  // [reasoning]
             }
             insert_duplicates(neighbor);
             prefetch_next_candidate();
@@ -866,7 +866,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         if (promising and allowed and result_eligible(distance)) {
             results.Insert(neighbor, distance, filter_inner_product, full_distance_available);
         } else if (not allowed and reasoning != nullptr) {
-            reasoning->RecordFilterReject(neighbor);
+            reasoning->RecordFilterReject(neighbor);  // [reasoning]
         }
         if (promising) {
             insert_duplicates(neighbor);
@@ -878,7 +878,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         ++hops;
         if (hops >= search_param.hops_limit) {
             if (reasoning != nullptr) {
-                reasoning->SetTermination(ReasoningContext::kTerminationHopsLimitReached);
+                reasoning->SetTermination(ReasoningTermination::kHopsLimitReached);  // [reasoning]
             }
             break;
         }
@@ -887,12 +887,12 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                 ctx->stats->is_timeout.store(true, std::memory_order_relaxed);
             }
             if (reasoning != nullptr) {
-                reasoning->SetTermination(ReasoningContext::kTerminationTimeout);
+                reasoning->SetTermination(ReasoningTermination::kTimeout);  // [reasoning]
             }
             break;
         }
         if (reasoning != nullptr) {
-            reasoning->AddSearchHop();
+            reasoning->AddSearchHop();  // [reasoning]
         }
 
         const auto current_id = candidate_set.Pop();
@@ -1033,14 +1033,15 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
             const auto insert_refined = [&](const RaBitQCandidateRecord& candidate,
                                             float full_distance) {
                 if (reasoning != nullptr) {
-                    reasoning->RecordReorder(candidate.id, candidate.lower_bound, full_distance);
+                    reasoning->RecordReorder(
+                        candidate.id, candidate.lower_bound, full_distance);  // [reasoning]
                 }
                 const bool will_evict =
                     refined.Size() == rerank_topk and full_distance <= refined.WorstDistance();
                 const auto evicted_id = will_evict ? refined.WorstId() : 0;
                 refined.Insert(candidate.id, full_distance, candidate.filter_inner_product, true);
                 if (will_evict and reasoning != nullptr) {
-                    reasoning->RecordReorderEviction(evicted_id, 0);
+                    reasoning->RecordReorderEviction(evicted_id, 0);  // [reasoning]
                 }
             };
             // Establish an exact kth threshold from every full distance already computed for the
@@ -1547,7 +1548,7 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
         ++hops;
         if (hops >= search_param.hops_limit) {
             if (reasoning != nullptr) {
-                reasoning->SetTermination(ReasoningContext::kTerminationHopsLimitReached);
+                reasoning->SetTermination(ReasoningTermination::kHopsLimitReached);  // [reasoning]
             }
             break;
         }
@@ -1556,12 +1557,12 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
                 ctx->stats->is_timeout.store(true, std::memory_order_relaxed);
             }
             if (reasoning != nullptr) {
-                reasoning->SetTermination(ReasoningContext::kTerminationTimeout);
+                reasoning->SetTermination(ReasoningTermination::kTimeout);  // [reasoning]
             }
             break;
         }
         if (reasoning != nullptr) {
-            reasoning->AddSearchHop();
+            reasoning->AddSearchHop();  // [reasoning]
         }
 
         const auto current_id = candidate_set.Pop();
@@ -1602,7 +1603,7 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
             }
             ++distance_computations;
             if (reasoning != nullptr) {
-                reasoning->RecordVisit(neighbor, distance, hops);
+                reasoning->RecordVisit(neighbor, distance, hops);  // [reasoning]
             }
 
             const bool allowed = is_allowed(neighbor);
@@ -1616,7 +1617,7 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
                         result->Pop();
                     }
                 } else if (reasoning != nullptr) {
-                    reasoning->RecordFilterReject(neighbor);
+                    reasoning->RecordFilterReject(neighbor);  // [reasoning]
                 }
                 if (candidate_set.HasNext()) {
                     prefetch_graph_l2(candidate_set.NextId());
@@ -1648,7 +1649,7 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
                     result->Pop();
                 }
             } else if (not allowed and reasoning != nullptr) {
-                reasoning->RecordFilterReject(neighbor);
+                reasoning->RecordFilterReject(neighbor);  // [reasoning]
             }
             if (promising) {
                 push_duplicates(neighbor);

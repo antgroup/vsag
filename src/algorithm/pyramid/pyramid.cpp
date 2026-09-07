@@ -36,7 +36,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "io/common/io_parameter.h"
 #include "io/memory_block_io/memory_block_io_parameter.h"
 #include "quantization/transform_quantization/transform_quantizer_parameter.h"
@@ -835,8 +835,10 @@ Pyramid::RangeSearch(const DatasetPtr& query,
                           ctx,
                           hierarchy_name,
                           collect_rabitq_lower_bounds ? &rabitq_lower_bound_candidates : nullptr);
-    result->Statistics(stats.Dump());
-    return result;
+    auto filtered = FilterDatasetByThreshold(result, radius, allocator_);
+    // Keep traversal slack internal, including after precise reorder.
+    filtered->Statistics(stats.Dump());
+    return filtered;
 }
 
 DatasetPtr
@@ -919,7 +921,8 @@ Pyramid::SearchWithRequest(const SearchRequest& request) const {
 
         Vector<int64_t> expected_labels_vec(
             request.expected_labels_.begin(), request.expected_labels_.end(), ctx.alloc);
-        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
+        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec,
+                                                 label_to_inner_id);  // [reasoning]
         auto precise_flatten = raw_vector_ != nullptr ? raw_vector_ : precise_codes_;
         if (precise_flatten != nullptr && not expected_inner_ids.empty()) {
             auto computer = precise_flatten->FactoryComputer(query->GetFloat32Vectors());
@@ -930,7 +933,8 @@ Pyramid::SearchWithRequest(const SearchRequest& request) const {
                                    static_cast<InnerIdType>(expected_inner_ids.size()),
                                    &ctx);
             for (uint64_t i = 0; i < expected_inner_ids.size(); ++i) {
-                reasoning_ctx->SetTrueDistance(expected_inner_ids[i], true_dists[i]);
+                reasoning_ctx->SetTrueDistance(expected_inner_ids[i],
+                                               true_dists[i]);  // [reasoning]
             }
         }
         ctx.reasoning_ctx = reasoning_ctx.get();
@@ -978,9 +982,9 @@ Pyramid::SearchWithRequest(const SearchRequest& request) const {
                           collect_rabitq_lower_bounds ? &rabitq_lower_bound_candidates : nullptr);
     if (is_knn) {
         result = FilterDatasetByThreshold(result, request.threshold_, ctx.alloc, request.topk_);
+    } else {
+        result = FilterDatasetByThreshold(result, request.radius_, ctx.alloc);
     }
-    result->Statistics(stats.Dump());
-
     if (reasoning_ctx) {
         Vector<InnerIdType> result_inner_ids(ctx.alloc);
         const auto* result_ids = result->GetIds();
@@ -996,11 +1000,12 @@ Pyramid::SearchWithRequest(const SearchRequest& request) const {
                 }
             }
         }
-        reasoning_ctx->MarkResult(result_inner_ids);
-        reasoning_ctx->DiagnoseExpectedTargets();
-        result->Reasoning(reasoning_ctx->GenerateReport());
+        reasoning_ctx->MarkResult(result_inner_ids);         // [reasoning]
+        reasoning_ctx->DiagnoseExpectedTargets();            // [reasoning]
+        result->Reasoning(reasoning_ctx->GenerateReport());  // [reasoning]
     }
 
+    result->Statistics(stats.Dump());
     return result;
 }
 
@@ -2551,7 +2556,7 @@ Pyramid::search_node(const IndexNode* node,
                 if (inner_filter->CheckValid(ids_ptr[i])) {
                     valid_ids.push_back(ids_ptr[i]);
                 } else if (ctx.reasoning_ctx != nullptr) {
-                    ctx.reasoning_ctx->RecordFilterReject(ids_ptr[i]);
+                    ctx.reasoning_ctx->RecordFilterReject(ids_ptr[i]);  // [reasoning]
                 }
             }
             ids_ptr = valid_ids.data();
@@ -2563,7 +2568,7 @@ Pyramid::search_node(const IndexNode* node,
 
         for (uint64_t i = 0; i < id_count; ++i) {
             if (ctx.reasoning_ctx != nullptr) {
-                ctx.reasoning_ctx->RecordVisit(ids_ptr[i], dists[i], 0);
+                ctx.reasoning_ctx->RecordVisit(ids_ptr[i], dists[i], 0);  // [reasoning]
             }
             if (search_param.distance_threshold.has_value() and
                 (not std::isfinite(dists[i]) ||
@@ -2574,7 +2579,7 @@ Pyramid::search_node(const IndexNode* node,
             results->Push(dists[i], ids_ptr[i]);
             if (results->Size() > search_param.ef) {
                 if (ctx.reasoning_ctx != nullptr) {
-                    ctx.reasoning_ctx->RecordEviction(results->Top().second, 0);
+                    ctx.reasoning_ctx->RecordEviction(results->Top().second, 0);  // [reasoning]
                 }
                 results->Pop();
             }
