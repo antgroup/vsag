@@ -541,12 +541,10 @@ TEST_CASE("Pyramid maps RaBitQ x+y split params", "[ut][PyramidParameters]") {
     const auto base_json = typed_param->base_codes_param->ToJson();
     REQUIRE(base_json["codes_type"].GetString() == std::string("rabitq_split"));
     REQUIRE(base_json["io_params"]["type"].GetString() == std::string("block_memory_io"));
-#if HAVE_LIBAIO
-    const std::string expected_supplement_io_type = "async_io";
-#else
-    const std::string expected_supplement_io_type = "buffer_io";
-#endif
-    REQUIRE(base_json["supplement_io_params"]["type"].GetString() == expected_supplement_io_type);
+    REQUIRE(typed_param->base_codes_param->supplement_io_parameter != nullptr);
+    REQUIRE(typed_param->base_codes_param->supplement_io_parameter->GetTypeName() ==
+            std::string("async_io"));
+    REQUIRE(base_json["supplement_io_params"]["type"].GetString() == std::string("async_io"));
     REQUIRE(base_json["supplement_io_params"]["file_path"].GetString() ==
             std::string("/tmp/vsag_pyramid_rabitq_split_supplement"));
     REQUIRE(base_json["quantization_params"]["rabitq_version"].GetString() == std::string("split"));
