@@ -320,7 +320,6 @@ ImmutableSindiTermDataCell::QueryWindow(float* dists,
                                         SindiQueryContext& query_context) const {
     CHECK_ARGUMENT(window_id < windows_.size(), "immutable SINDI window id out of range");
     const auto& window = windows_[window_id];
-    query_context.evaluation_tracker.BeginWindow(window_size_);
     auto& mapped_terms = query_context.mapped_query_terms;
     this->map_query_terms(window, computer, mapped_terms);
     for (uint32_t pos = 0; pos < mapped_terms.size(); ++pos) {
@@ -336,10 +335,10 @@ ImmutableSindiTermDataCell::QueryWindow(float* dists,
         }
         const auto begin = window.offsets[local_term];
         const auto count = computer->GetTermScanCount(window.offsets[local_term + 1] - begin);
+        query_context.has_untracked_approximate_evaluations |= count > 0;
         const auto* ids = window.id_payloads.data() + begin;
         const auto* values =
             window.value_payloads.data() + static_cast<uint64_t>(begin) * value_code_size_;
-        query_context.evaluation_tracker.Mark(ids, count);
         if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
             computer->ScanForAccumulateSQ8(query_term, ids, values, count, dists);
         } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {

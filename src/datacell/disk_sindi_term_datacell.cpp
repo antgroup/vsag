@@ -546,7 +546,6 @@ DiskSindiTermDataCell<IOTmpl>::QueryWindow(float* dists,
                                            SindiQueryContext& query_context) const {
     (void)use_term_lists_heap_insert;
     const auto& query_term_buffers = query_context.query_term_buffers;
-    query_context.evaluation_tracker.BeginWindow(window_size_);
     std::shared_lock lock(term_layout_mutex_);
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();
@@ -563,7 +562,7 @@ DiskSindiTermDataCell<IOTmpl>::QueryWindow(float* dists,
         if (count == 0) {
             continue;
         }
-        query_context.evaluation_tracker.Mark(tb->IdsData() + start, count);
+        query_context.has_untracked_approximate_evaluations = true;
 
         if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
             computer->ScanForAccumulateSQ8(

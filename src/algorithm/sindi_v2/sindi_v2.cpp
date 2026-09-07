@@ -54,19 +54,6 @@ constexpr const char* SINDI_V2_TERM_LAYOUT_KIND_KEY = "sindi_v2_term_layout_kind
 constexpr const char* SINDI_V2_TERM_LAYOUT_KIND = "term";
 constexpr uint64_t TERM_ID_MAPPER_ENTRY_MEMORY_BYTES = 54;
 
-DistanceEvaluationBackend
-sparse_backend(SparseValueQuantizationType quant_type) {
-    switch (quant_type) {
-        case SparseValueQuantizationType::FP16:
-            return DistanceEvaluationBackend::SPARSE_FP16;
-        case SparseValueQuantizationType::SQ8:
-            return DistanceEvaluationBackend::SPARSE_SQ8;
-        case SparseValueQuantizationType::FP32:
-        default:
-            return DistanceEvaluationBackend::SPARSE_FP32;
-    }
-}
-
 class BinaryReader : public Reader {
 public:
     explicit BinaryReader(Binary binary) : binary_(std::move(binary)) {
@@ -906,11 +893,6 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
             not metadata_filter_.RequiresFullTermScan(metadata_route, window_id, window_size_));
         term_datacell_->QueryWindow(
             dists.data(), window_id, computer, use_term_lists_heap_insert, query_context);
-        if (statistics != nullptr) {
-            statistics->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
-                                    sparse_backend(sparse_value_quant_type_),
-                                    query_context.evaluation_tracker.Count());
-        }
 
         if (not has_effective_query_terms) {
             uint32_t valid_window_size = 0;
@@ -970,6 +952,10 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                                               mode,
                                               inner_param.is_inner_id_allowed != nullptr);
         }
+    }
+
+    if (statistics != nullptr and query_context.has_untracked_approximate_evaluations) {
+        statistics->complete.store(false, std::memory_order_relaxed);
     }
 
     // rerank
