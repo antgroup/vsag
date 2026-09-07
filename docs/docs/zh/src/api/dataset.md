@@ -149,8 +149,9 @@ struct MultiVector {
 ## 命名 metadata
 
 `UInt32Metadata(name, values)` 为每个 dataset 元素附加一个无符号整数，
-`GetUInt32Metadata` 返回对应命名数组，不存在时返回 `nullptr`。SINDI 和 SINDI_V2 使用
-`host_id` metadata 实现 host 过滤。日期过滤复用现有命名字符串 path API，通过
+`GetUInt32Metadata` 返回对应命名数组，不存在时返回 `nullptr`。`StringMetadata(name, values)`
+和 `GetStringMetadata(name)` 提供对应的通用命名字符串数组。SINDI 和 SINDI_V2 使用名为
+`host` 的字符串 metadata 实现 host 过滤。日期过滤复用现有命名字符串 path API，通过
 `Paths("date", values)` 和 `GetPaths("date")` 传递日期 bucket。单元素查询 Dataset 的日期范围
 使用独立的 `date_begin` 和 `date_end` 命名 path；两者各指向一个规范的 `YYYY`、`YYYY/MM` 或
 `YYYY/MM/DD` 字符串。这些数组遵循 Dataset 通用的 ownership、深拷贝和 Append 规则。

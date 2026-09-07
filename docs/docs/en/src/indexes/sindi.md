@@ -140,22 +140,22 @@ Indexes written without this marker remain compatible and are normalized during 
 
 ### Host filtering
 
-Mutable and immutable SINDI and [SINDI_V2](sindi_v2.md) indexes can group documents by a single
-numeric host and avoid returning documents from other hosts. Attach a complete `uint32_t` `host_id`
-array to a host-aware `Build()` or mutable `Add()` batch. Use `0` for a document with no host:
+Mutable and immutable SINDI and [SINDI_V2](sindi_v2.md) indexes can group documents by their source
+host and avoid returning documents from other hosts. Attach a complete string `host` array to a
+host-aware `Build()` or mutable `Add()` batch. Use an empty string for a document with no host:
 
 ```cpp
 base->NumElements(n)
     ->SparseVectors(sparse_vectors)
     ->Ids(ids)
-    ->UInt32Metadata("host_id", base_host_ids)
+    ->StringMetadata("host", base_hosts)
     ->Owner(false);
 index->Build(base);
 
-uint32_t query_host_id = 42;
+std::string query_host = "example.com";
 query->NumElements(1)
     ->SparseVectors(&query_vec)
-    ->UInt32Metadata("host_id", &query_host_id)
+    ->StringMetadata("host", &query_host)
     ->Owner(false);
 ```
 
@@ -164,14 +164,15 @@ labels. Host queries scan the relevant posting windows and apply exact membershi
 host's one or more internal-ID ranges. Repeated mutable `Add()` calls may append disjoint ranges for
 the same host. Tombstones and an additional user `Filter` are applied together with host membership.
 
-Host ID `0` is the missing-host bucket; values from `1` through `UINT32_MAX` identify normal hosts.
-The number of distinct hosts cannot exceed the number of successfully indexed documents. Once a
-mutable index contains host metadata, every later `Add()` must provide a complete `host_id` array;
-host metadata cannot be introduced after host-unaware documents. A query with `host_id: 0` searches
-only missing-host documents, while omitting `host_id` preserves full-index KNN behavior. A host with
-no indexed documents returns an empty result. Indexes built without base host metadata ignore query
-host metadata and retain their previous behavior. Host filtering currently applies only to KNN;
-range search keeps its existing full-index behavior.
+Host strings are matched byte for byte without case folding or URL normalization. VSAG assigns
+compact internal IDs and persists the string-to-ID dictionary with the index; callers never provide
+those IDs. The empty string is the missing-host bucket. Once a mutable index contains host metadata,
+every later `Add()` must provide a complete `host` array; host metadata cannot be introduced after
+host-unaware documents. An empty-string query searches only missing-host documents, while omitting
+`host` preserves full-index KNN behavior. An unknown host returns an empty result. Indexes built
+without base host metadata ignore query host metadata and retain their previous behavior. The old
+numeric `host_id` input is rejected. Host filtering currently applies only to KNN; range search keeps
+its existing full-index behavior.
 
 ### Date-bucket filtering
 
@@ -205,7 +206,7 @@ range ending at `2026/08/01` can match a base day bucket on August 1, but not th
 `2026/08` bucket. The two range endpoints are required together, must be ordered after expansion,
 and cannot be combined with the single `date` selector.
 
-The date-aware build orders documents by calendar quarter and, when `host_id` is present, by host
+The date-aware build orders documents by calendar quarter and, when `host` is present, by host
 inside each quarter. For a mutable index, date metadata can be supplied by `Build()` or the first
 `Add()` while the index is empty. Once the index contains documents, date metadata cannot be
 introduced, and a date-aware mutable index rejects every later `Add()`. This build-once restriction

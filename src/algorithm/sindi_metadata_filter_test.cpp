@@ -165,10 +165,10 @@ TEST_CASE("SINDI date bucket and host filters route and serialize",
     common_param.metric_ = MetricType::METRIC_TYPE_IP;
 
     SmallSindiDataset data(0);
-    std::array<uint32_t, 4> host_ids = {2, 1, 2, 1};
+    std::array<std::string, 4> hosts = {"host-b", "host-a", "host-b", "host-a"};
     std::array<std::string, 4> date_buckets = {"2026", "2026/05", "2026/05/01", "2026/08"};
     auto base = data.Base()
-                    ->UInt32Metadata(SINDI_HOST_ID_METADATA_NAME, host_ids.data())
+                    ->StringMetadata(SINDI_HOST_METADATA_NAME, hosts.data())
                     ->Paths(SINDI_DATE_PATH_NAME, date_buckets.data());
     const bool immutable = GENERATE(false, true);
     auto parameter = CreateSindiParameter(immutable, false);
@@ -177,21 +177,21 @@ TEST_CASE("SINDI date bucket and host filters route and serialize",
     REQUIRE(index->Build(base) == std::vector<int64_t>{40});
 
     int64_t added_label = 50;
-    uint32_t added_host = 2;
+    std::string added_host = "host-b";
     std::string added_date = "2026/09";
     auto added_vector = data.sparse_vectors[0];
     auto dated_add = Dataset::Make()
                          ->NumElements(1)
                          ->SparseVectors(&added_vector)
                          ->Ids(&added_label)
-                         ->UInt32Metadata(SINDI_HOST_ID_METADATA_NAME, &added_host)
+                         ->StringMetadata(SINDI_HOST_METADATA_NAME, &added_host)
                          ->Paths(SINDI_DATE_PATH_NAME, &added_date)
                          ->Owner(false);
     auto undated_add = Dataset::Make()
                            ->NumElements(1)
                            ->SparseVectors(&added_vector)
                            ->Ids(&added_label)
-                           ->UInt32Metadata(SINDI_HOST_ID_METADATA_NAME, &added_host)
+                           ->StringMetadata(SINDI_HOST_METADATA_NAME, &added_host)
                            ->Owner(false);
     if (not immutable) {
         REQUIRE_THROWS_WITH(index->Add(dated_add),
@@ -260,8 +260,8 @@ TEST_CASE("SINDI date bucket and host filters route and serialize",
 
     query_date_begin = "2026/05/01";
     query_date_end = "2026/08";
-    uint32_t range_host_id = 2;
-    range_query->UInt32Metadata(SINDI_HOST_ID_METADATA_NAME, &range_host_id);
+    std::string range_host = "host-b";
+    range_query->StringMetadata(SINDI_HOST_METADATA_NAME, &range_host);
     auto host_range = index->KnnSearch(range_query, 3, kSindiSearchParameters, nullptr);
     REQUIRE(host_range->GetDim() == 1);
     REQUIRE(host_range->GetIds()[0] == 20);
@@ -270,8 +270,8 @@ TEST_CASE("SINDI date bucket and host filters route and serialize",
                     range_query, 3, kSindiSearchParameters, std::make_shared<AllowLabelFilter>(30))
                 ->GetDim() == 0);
 
-    uint32_t host_id = 2;
-    query->UInt32Metadata(SINDI_HOST_ID_METADATA_NAME, &host_id);
+    std::string host = "host-b";
+    query->StringMetadata(SINDI_HOST_METADATA_NAME, &host);
     auto combined = index->KnnSearch(query, 3, kSindiSearchParameters, nullptr);
     REQUIRE(combined->GetDim() == 2);
     REQUIRE(combined->GetIds()[0] == 10);
@@ -406,15 +406,14 @@ TEST_CASE("SINDI immutable host filter routes", "[ut][SINDI][host_filter]") {
     common_param.metric_ = MetricType::METRIC_TYPE_IP;
 
     SmallSindiDataset data(0);
-    constexpr uint32_t sparse_host_id = std::numeric_limits<uint32_t>::max();
-    std::array<uint32_t, 4> host_ids = {sparse_host_id, 1, sparse_host_id, 1};
-    auto base = data.Base()->UInt32Metadata("host_id", host_ids.data());
+    std::array<std::string, 4> hosts = {"sparse.example", "host-a", "sparse.example", "host-a"};
+    auto base = data.Base()->StringMetadata("host", hosts.data());
     auto parameter = CreateSindiParameter(true, false);
     auto index = std::make_unique<SINDI>(parameter, common_param);
     REQUIRE(index->Build(base) == std::vector<int64_t>{40});
 
-    uint32_t host_id = 1;
-    auto query = data.Query()->UInt32Metadata("host_id", &host_id);
+    std::string host = "host-a";
+    auto query = data.Query()->StringMetadata("host", &host);
     auto host_result = index->KnnSearch(query, 2, kSindiSearchParameters, nullptr);
     REQUIRE(host_result->GetDim() == 1);
     REQUIRE(host_result->GetIds()[0] == 30);
@@ -430,7 +429,7 @@ TEST_CASE("SINDI immutable host filter routes", "[ut][SINDI][host_filter]") {
     REQUIRE(index->Remove({30}, RemoveMode::MARK_REMOVE) == 1);
     REQUIRE(index->KnnSearch(query, 2, kSindiSearchParameters, nullptr)->GetDim() == 0);
 
-    host_id = sparse_host_id;
+    host = "sparse.example";
     auto window_result = index->KnnSearch(query, 2, kSindiSearchParameters, nullptr);
     REQUIRE(window_result->GetDim() == 2);
     REQUIRE(window_result->GetIds()[0] == 10);
@@ -448,9 +447,11 @@ TEST_CASE("SINDI immutable host filter routes", "[ut][SINDI][host_filter]") {
     REQUIRE(deleted_result->GetDim() == 1);
     REQUIRE(deleted_result->GetIds()[0] == 20);
 
-    host_id = 0;
+    host = "";
     REQUIRE(index->KnnSearch(query, 2, kSindiSearchParameters, nullptr)->GetDim() == 0);
-    host_id = 2;
+    host = "unknown.example";
+    REQUIRE(index->KnnSearch(query, 2, kSindiSearchParameters, nullptr)->GetDim() == 0);
+    host = "SPARSE.EXAMPLE";
     REQUIRE(index->KnnSearch(query, 2, kSindiSearchParameters, nullptr)->GetDim() == 0);
 
     auto no_host_query = data.Query();
@@ -467,13 +468,13 @@ TEST_CASE("SINDI host filter spans immutable windows", "[ut][SINDI][host_filter]
     common_param.metric_ = MetricType::METRIC_TYPE_IP;
 
     std::vector<int64_t> labels(num_elements);
-    std::vector<uint32_t> host_ids(num_elements);
+    std::vector<std::string> hosts(num_elements);
     std::vector<float> values(num_elements, 1.0F);
     std::vector<SparseVector> sparse_vectors(num_elements);
     uint32_t term_id = 1;
     for (uint32_t i = 0; i < num_elements; ++i) {
         labels[i] = static_cast<int64_t>(i + 1);
-        host_ids[i] = i < host_two_count ? 2 : 1;
+        hosts[i] = i < host_two_count ? "host-b" : "host-a";
         sparse_vectors[i].len_ = 1;
         sparse_vectors[i].ids_ = &term_id;
         sparse_vectors[i].vals_ = &values[i];
@@ -484,18 +485,18 @@ TEST_CASE("SINDI host filter spans immutable windows", "[ut][SINDI][host_filter]
                     ->NumElements(num_elements)
                     ->SparseVectors(sparse_vectors.data())
                     ->Ids(labels.data())
-                    ->UInt32Metadata("host_id", host_ids.data())
+                    ->StringMetadata("host", hosts.data())
                     ->Owner(false);
     auto parameter = CreateSindiParameter(true, false);
     auto index = std::make_unique<SINDI>(parameter, common_param);
     REQUIRE(index->Build(base).empty());
 
     SparseVector query_vector{1, &term_id, values.data()};
-    uint32_t host_id = 2;
+    std::string host = "host-b";
     auto query = Dataset::Make()
                      ->NumElements(1)
                      ->SparseVectors(&query_vector)
-                     ->UInt32Metadata("host_id", &host_id)
+                     ->StringMetadata("host", &host)
                      ->Owner(false);
     auto result = index->KnnSearch(query, 1, kSindiSearchParameters, nullptr);
     REQUIRE(result->GetDim() == 1);
@@ -512,7 +513,7 @@ TEST_CASE("SINDI host filter preserves term prune candidates at window boundarie
     uint32_t term_id = 1;
     std::array<float, 4> values{10.0F, 9.0F, 2.0F, 1.0F};
     std::array<int64_t, 4> labels{10, 11, 20, 21};
-    std::array<uint32_t, 4> host_ids{1, 1, 2, 2};
+    std::array<std::string, 4> hosts{"host-a", "host-a", "host-b", "host-b"};
     std::array<SparseVector, 4> vectors;
     for (uint32_t i = 0; i < vectors.size(); ++i) {
         vectors[i] = SparseVector{1, &term_id, &values[i]};
@@ -521,7 +522,7 @@ TEST_CASE("SINDI host filter preserves term prune candidates at window boundarie
                     ->NumElements(vectors.size())
                     ->SparseVectors(vectors.data())
                     ->Ids(labels.data())
-                    ->UInt32Metadata("host_id", host_ids.data())
+                    ->StringMetadata("host", hosts.data())
                     ->Owner(false);
     auto parameter = CreateSindiParameter(true, false);
     parameter->window_size = 4;
@@ -530,11 +531,11 @@ TEST_CASE("SINDI host filter preserves term prune candidates at window boundarie
 
     float query_value = 1.0F;
     SparseVector query_vector{1, &term_id, &query_value};
-    uint32_t query_host_id = 2;
+    std::string query_host = "host-b";
     auto query = Dataset::Make()
                      ->NumElements(1)
                      ->SparseVectors(&query_vector)
-                     ->UInt32Metadata("host_id", &query_host_id)
+                     ->StringMetadata("host", &query_host)
                      ->Owner(false);
     const auto query_prune_ratio = GENERATE(0.0F, 0.2F);
     auto search_parameters = JsonType::Parse(kSindiSearchParameters);
@@ -547,32 +548,63 @@ TEST_CASE("SINDI host filter preserves term prune candidates at window boundarie
     REQUIRE(result->GetIds()[1] == 21);
 }
 
-TEST_CASE("SINDI host metadata accepts missing host ID zero", "[ut][SINDI][host_filter]") {
+TEST_CASE("SINDI host metadata accepts an empty missing host", "[ut][SINDI][host_filter]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
     common_param.metric_ = MetricType::METRIC_TYPE_IP;
 
     SmallSindiDataset data(0);
-    std::array<uint32_t, 4> host_ids = {0, 1, 2, 0};
-    auto base = data.Base()->UInt32Metadata("host_id", host_ids.data());
+    std::array<std::string, 4> hosts = {"", "host-a", "host-b", ""};
+    auto base = data.Base()->StringMetadata("host", hosts.data());
 
     auto parameter = CreateSindiParameter(true, false);
     SINDI index(parameter, common_param);
     REQUIRE(index.Build(base) == std::vector<int64_t>{40});
 
-    uint32_t host_id = 0;
-    auto query = data.Query()->UInt32Metadata("host_id", &host_id);
+    std::string host;
+    auto query = data.Query()->StringMetadata("host", &host);
     auto result = index.KnnSearch(query, 2, kSindiSearchParameters, nullptr);
     REQUIRE(result->GetDim() == 2);
     REQUIRE(result->GetIds()[0] == 10);
     REQUIRE(result->GetIds()[1] == 30);
 }
 
+TEST_CASE("SINDI rejects numeric host metadata", "[ut][SINDI][host_filter]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    SmallSindiDataset data(0);
+    std::array<uint32_t, 4> host_ids{1, 2, 1, 2};
+    auto parameter = CreateSindiParameter(true, false);
+    SINDI index(parameter, common_param);
+    REQUIRE_THROWS_WITH(
+        index.Build(data.Base()->UInt32Metadata("host_id", host_ids.data())),
+        Catch::Matchers::ContainsSubstring("numeric SINDI host_id metadata is unsupported"));
+
+    std::array<std::string, 4> hosts{"host-a", "host-b", "host-a", "host-b"};
+    REQUIRE(index.Build(data.Base()->StringMetadata("host", hosts.data())) ==
+            std::vector<int64_t>{40});
+    uint32_t query_host_id = 1;
+    REQUIRE_THROWS_WITH(
+        index.KnnSearch(data.Query()->UInt32Metadata("host_id", &query_host_id),
+                        2,
+                        kSindiSearchParameters,
+                        nullptr),
+        Catch::Matchers::ContainsSubstring("numeric SINDI host_id metadata is unsupported"));
+}
+
 TEST_CASE("SINDI host metadata rejects invalid serialized ranges",
           "[ut][SINDI][host_filter][streaming]") {
     std::stringstream stream;
     IOStreamWriter writer(stream);
+    StreamWriter::WriteObj(writer, SINDI_HOST_METADATA_MAGIC);
+    StreamWriter::WriteObj(writer, SINDI_HOST_METADATA_FORMAT_VERSION);
+    const std::vector<uint64_t> dictionary_offsets{0, 0};
+    StreamWriter::WriteVector(writer, dictionary_offsets);
+    StreamWriter::WriteVector(writer, std::vector<char>{});
     const uint64_t host_count = 1;
     const uint32_t host_id = 0;
     const uint64_t offset_count = 2;
@@ -595,6 +627,36 @@ TEST_CASE("SINDI host metadata rejects invalid serialized ranges",
     REQUIRE_THROWS(host_filter.Deserialize(reader, 1));
 }
 
+TEST_CASE("SINDI host metadata rejects numeric and duplicate dictionaries",
+          "[ut][SINDI][host_filter][serialization]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+
+    SECTION("numeric host payload") {
+        std::stringstream stream;
+        IOStreamWriter writer(stream);
+        StreamWriter::WriteVector(writer, std::vector<uint32_t>{1});
+        SindiHostFilter host_filter(allocator.get());
+        IOStreamReader reader(stream);
+        REQUIRE_THROWS_WITH(host_filter.Deserialize(reader, 1),
+                            Catch::Matchers::ContainsSubstring("unsupported numeric format"));
+    }
+
+    SECTION("duplicate host strings") {
+        std::stringstream stream;
+        IOStreamWriter writer(stream);
+        StreamWriter::WriteObj(writer, SINDI_HOST_METADATA_MAGIC);
+        StreamWriter::WriteObj(writer, SINDI_HOST_METADATA_FORMAT_VERSION);
+        StreamWriter::WriteVector(writer, std::vector<uint64_t>{0, 0, 6, 12});
+        StreamWriter::WriteVector(
+            writer, std::vector<char>{'h', 'o', 's', 't', '-', 'a', 'h', 'o', 's', 't', '-', 'a'});
+        SindiHostFilter host_filter(allocator.get());
+        IOStreamReader reader(stream);
+        REQUIRE_THROWS_WITH(
+            host_filter.Deserialize(reader, 1),
+            Catch::Matchers::ContainsSubstring("host dictionary entries must be unique"));
+    }
+}
+
 TEST_CASE("SINDI date metadata rejects invalid element counts",
           "[ut][SINDI][metadata_filter][date_filter][serialization]") {
     const uint64_t element_count =
@@ -611,7 +673,14 @@ TEST_CASE("SINDI date metadata rejects invalid element counts",
 TEST_CASE("SINDI host route skips windows between disjoint ranges", "[ut][SINDI][host_filter]") {
     std::stringstream stream;
     IOStreamWriter writer(stream);
-    const std::array<uint32_t, 2> host_ids{7, 8};
+    StreamWriter::WriteObj(writer, SINDI_HOST_METADATA_MAGIC);
+    StreamWriter::WriteObj(writer, SINDI_HOST_METADATA_FORMAT_VERSION);
+    const std::vector<uint64_t> dictionary_offsets{0, 0, 6, 12};
+    const std::vector<char> dictionary_bytes{
+        'h', 'o', 's', 't', '-', 'a', 'h', 'o', 's', 't', '-', 'b'};
+    StreamWriter::WriteVector(writer, dictionary_offsets);
+    StreamWriter::WriteVector(writer, dictionary_bytes);
+    const std::array<uint32_t, 2> host_ids{1, 2};
     const std::array<uint32_t, 3> offsets{0, 2, 3};
     const std::array<SindiHostRange, 3> ranges{
         SindiHostRange{0, 2}, SindiHostRange{10, 12}, SindiHostRange{2, 10}};
@@ -634,9 +703,8 @@ TEST_CASE("SINDI host route skips windows between disjoint ranges", "[ut][SINDI]
     IOStreamReader reader(stream);
     host_filter.Deserialize(reader, 12);
 
-    uint32_t query_host_id = 7;
-    auto query =
-        Dataset::Make()->NumElements(1)->UInt32Metadata("host_id", &query_host_id)->Owner(false);
+    std::string query_host = "host-a";
+    auto query = Dataset::Make()->NumElements(1)->StringMetadata("host", &query_host)->Owner(false);
     const auto route = host_filter.Classify(query);
     REQUIRE(route.kind == SindiHostRouteKind::WINDOW);
 
@@ -668,21 +736,21 @@ TEST_CASE("SINDI host filter supports mutable immutable and reorder modes",
         common_param.metric_ = MetricType::METRIC_TYPE_IP;
 
         SmallSindiDataset data(0);
-        std::array<uint32_t, 4> host_ids = {2, 0, 2, 0};
-        auto base = data.Base()->UInt32Metadata("host_id", host_ids.data());
+        std::array<std::string, 4> hosts = {"host-b", "", "host-b", ""};
+        auto base = data.Base()->StringMetadata("host", hosts.data());
         auto parameter = CreateSindiParameter(immutable, false);
         parameter->use_reorder = use_reorder;
         parameter->rerank_type = SPARSE_RERANK_TYPE_FP32;
         SINDI index(parameter, common_param);
         REQUIRE(index.Build(base) == std::vector<int64_t>{40});
 
-        uint32_t host_id = 0;
-        auto query = data.Query()->UInt32Metadata("host_id", &host_id);
+        std::string host;
+        auto query = data.Query()->StringMetadata("host", &host);
         auto result = index.KnnSearch(query, 2, kSindiSearchParameters, nullptr);
         REQUIRE(result->GetDim() == 1);
         REQUIRE(result->GetIds()[0] == 30);
 
-        host_id = 2;
+        host = "host-b";
         result = index.KnnSearch(query, 2, kSindiSearchParameters, nullptr);
         REQUIRE(result->GetDim() == 2);
         for (int64_t i = 0; i < result->GetDim(); ++i) {
@@ -691,7 +759,7 @@ TEST_CASE("SINDI host filter supports mutable immutable and reorder modes",
 
         if (not immutable) {
             std::array<int64_t, 2> added_labels{50, 60};
-            std::array<uint32_t, 2> added_hosts{0, 2};
+            std::array<std::string, 2> added_hosts{"", "host-b"};
             std::array<SparseVector, 2> added_vectors{data.sparse_vectors[0],
                                                       data.sparse_vectors[0]};
             auto missing_host_metadata = Dataset::Make()
@@ -704,22 +772,22 @@ TEST_CASE("SINDI host filter supports mutable immutable and reorder modes",
                              ->NumElements(added_vectors.size())
                              ->SparseVectors(added_vectors.data())
                              ->Ids(added_labels.data())
-                             ->UInt32Metadata("host_id", added_hosts.data())
+                             ->StringMetadata("host", added_hosts.data())
                              ->Owner(false);
             REQUIRE(index.Add(added).empty());
-            host_id = 0;
+            host = "";
             result = index.KnnSearch(query, 2, kSindiSearchParameters, nullptr);
             REQUIRE(result->GetDim() == 2);
             REQUIRE(result->GetIds()[0] == 50);
             REQUIRE(result->GetIds()[1] == 30);
 
             std::array<int64_t, 2> second_added_labels{70, 80};
-            std::array<uint32_t, 2> second_added_hosts{2, 0};
+            std::array<std::string, 2> second_added_hosts{"host-b", ""};
             auto second_added = Dataset::Make()
                                     ->NumElements(added_vectors.size())
                                     ->SparseVectors(added_vectors.data())
                                     ->Ids(second_added_labels.data())
-                                    ->UInt32Metadata("host_id", second_added_hosts.data())
+                                    ->StringMetadata("host", second_added_hosts.data())
                                     ->Owner(false);
             REQUIRE(index.Add(second_added).empty());
             result = index.KnnSearch(query, 3, kSindiSearchParameters, nullptr);
@@ -737,15 +805,15 @@ TEST_CASE("SINDI small host uses posting scan", "[ut][SINDI][host_filter]") {
     common_param.metric_ = MetricType::METRIC_TYPE_IP;
 
     SmallSindiDataset data(0);
-    std::array<uint32_t, 4> host_ids = {2, 1, 2, 1};
-    auto base = data.Base()->UInt32Metadata("host_id", host_ids.data());
+    std::array<std::string, 4> hosts = {"host-b", "host-a", "host-b", "host-a"};
+    auto base = data.Base()->StringMetadata("host", hosts.data());
     auto parameter = CreateSindiParameter(true, false);
     parameter->rerank_type = SPARSE_RERANK_TYPE_FP32;
     auto index = std::make_unique<SINDI>(parameter, common_param);
     REQUIRE(index->Build(base) == std::vector<int64_t>{40});
 
-    uint32_t host_id = 1;
-    auto query = data.Query()->UInt32Metadata("host_id", &host_id);
+    std::string host = "host-a";
+    auto query = data.Query()->StringMetadata("host", &host);
     auto result = index->KnnSearch(query, 2, kSindiSearchParameters, nullptr);
     REQUIRE(result->GetDim() == 1);
     REQUIRE(result->GetIds()[0] == 30);
@@ -768,8 +836,8 @@ TEST_CASE("SINDI legacy deserialize clears host metadata",
     SINDI legacy_source(parameter, common_param);
     REQUIRE(legacy_source.Build(data.Base()) == std::vector<int64_t>{40});
 
-    uint32_t query_host_id = 99;
-    auto query = data.Query()->UInt32Metadata("host_id", &query_host_id);
+    std::string query_host = "unknown.example";
+    auto query = data.Query()->StringMetadata("host", &query_host);
     auto expected = legacy_source.KnnSearch(query, 3, kSindiSearchParameters, nullptr);
     REQUIRE(expected->GetDim() == 3);
 
@@ -777,9 +845,9 @@ TEST_CASE("SINDI legacy deserialize clears host metadata",
     IOStreamWriter legacy_writer(legacy_stream);
     legacy_source.Serialize(legacy_writer);
 
-    std::array<uint32_t, 4> host_ids{2, 0, 2, 0};
+    std::array<std::string, 4> hosts{"host-b", "", "host-b", ""};
     SINDI restored(parameter, common_param);
-    REQUIRE(restored.Build(data.Base()->UInt32Metadata("host_id", host_ids.data())) ==
+    REQUIRE(restored.Build(data.Base()->StringMetadata("host", hosts.data())) ==
             std::vector<int64_t>{40});
     REQUIRE(restored.KnnSearch(query, 3, kSindiSearchParameters, nullptr)->GetDim() == 0);
 
@@ -799,8 +867,8 @@ TEST_CASE("SINDI host serialization supports mutable and immutable",
         common_param.allocator_ = allocator;
         common_param.metric_ = MetricType::METRIC_TYPE_IP;
 
-        std::array<uint32_t, 4> host_ids{2, 0, 2, 0};
-        auto base = data.Base()->UInt32Metadata("host_id", host_ids.data());
+        std::array<std::string, 4> hosts{"host-b", "", "host-b", ""};
+        auto base = data.Base()->StringMetadata("host", hosts.data());
         auto parameter = CreateSindiParameter(immutable, false);
         parameter->use_reorder = false;
         parameter->rerank_type = SPARSE_RERANK_TYPE_FP32;
@@ -809,20 +877,20 @@ TEST_CASE("SINDI host serialization supports mutable and immutable",
 
         if (!immutable) {
             std::array<int64_t, 2> added_labels{50, 60};
-            std::array<uint32_t, 2> added_hosts{0, 2};
+            std::array<std::string, 2> added_hosts{"host-new", "host-b"};
             std::array<SparseVector, 2> added_vectors{data.sparse_vectors[0],
                                                       data.sparse_vectors[0]};
             auto added = Dataset::Make()
                              ->NumElements(added_vectors.size())
                              ->SparseVectors(added_vectors.data())
                              ->Ids(added_labels.data())
-                             ->UInt32Metadata("host_id", added_hosts.data())
+                             ->StringMetadata("host", added_hosts.data())
                              ->Owner(false);
             REQUIRE(index.Add(added).empty());
         }
 
-        uint32_t host_id = 0;
-        auto query = data.Query()->UInt32Metadata("host_id", &host_id);
+        std::string host = immutable ? "host-b" : "host-new";
+        auto query = data.Query()->StringMetadata("host", &host);
         auto expected = index.KnnSearch(query, 3, kSindiSearchParameters, nullptr);
 
         std::stringstream legacy_stream;
@@ -852,15 +920,18 @@ TEST_CASE("SINDI host serialization supports mutable and immutable",
 
         if (!immutable) {
             int64_t added_label = 70;
-            uint32_t added_host = 0;
+            std::string added_host = "host-after-restore";
             auto added = Dataset::Make()
                              ->NumElements(1)
                              ->SparseVectors(&data.sparse_vectors[0])
                              ->Ids(&added_label)
-                             ->UInt32Metadata("host_id", &added_host)
+                             ->StringMetadata("host", &added_host)
                              ->Owner(false);
             REQUIRE(restored.Add(added).empty());
-            REQUIRE(restored.KnnSearch(query, 4, kSindiSearchParameters, nullptr)->GetDim() == 3);
+            host = added_host;
+            auto added_result = restored.KnnSearch(query, 4, kSindiSearchParameters, nullptr);
+            REQUIRE(added_result->GetDim() == 1);
+            REQUIRE(added_result->GetIds()[0] == added_label);
         }
 
         auto missing_host = EraseStreamingBlock(bytes, StreamSerializationTag::SINDI_HOST_METADATA);

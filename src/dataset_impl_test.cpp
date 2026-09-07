@@ -591,6 +591,56 @@ TEST_CASE("Dataset Named UInt32 Metadata Test", "[ut][dataset]") {
     REQUIRE(null_metadata_copy->GetUInt32Metadata("host_id") == nullptr);
 }
 
+TEST_CASE("Dataset Named String Metadata Test", "[ut][dataset]") {
+    {
+        auto* shared_metadata = new std::string[2]{"a.example", "b.example"};
+        auto aliased = vsag::Dataset::Make();
+        aliased->NumElements(2)
+            ->Dim(1)
+            ->Paths(shared_metadata)
+            ->StringMetadata("host", shared_metadata)
+            ->StringMetadata("tenant", shared_metadata)
+            ->SourceID(shared_metadata)
+            ->Owner(true);
+    }
+
+    auto* first_hosts = new std::string[2]{"a.example", "b.example"};
+    auto first = vsag::Dataset::Make();
+    first->NumElements(2)->Dim(1)->StringMetadata("host", first_hosts)->Owner(true);
+
+    REQUIRE(first->GetStringMetadata("host") == first_hosts);
+    REQUIRE(first->GetStringMetadata("missing") == nullptr);
+
+    auto copy = first->DeepCopy();
+    REQUIRE(copy->GetStringMetadata("host") != first_hosts);
+    REQUIRE(copy->GetStringMetadata("host")[0] == "a.example");
+    REQUIRE(copy->GetStringMetadata("host")[1] == "b.example");
+
+    auto* appended_hosts = new std::string[2]{"c.example", ""};
+    auto appended = vsag::Dataset::Make();
+    appended->NumElements(2)->Dim(1)->StringMetadata("host", appended_hosts)->Owner(true);
+    first->Append(appended);
+    REQUIRE(first->GetNumElements() == 4);
+    REQUIRE(first->GetStringMetadata("host")[2] == "c.example");
+    REQUIRE(first->GetStringMetadata("host")[3].empty());
+
+    auto slice = vsag::Dataset::Make();
+    slice->NumElements(2)
+        ->Dim(1)
+        ->StringMetadata("host", first->GetStringMetadata("host") + 1)
+        ->Owner(false);
+    REQUIRE(slice->GetStringMetadata("host")[0] == "b.example");
+    REQUIRE(slice->GetStringMetadata("host")[1] == "c.example");
+
+    auto missing_metadata = vsag::Dataset::Make()->NumElements(1)->Dim(1)->Owner(false);
+    REQUIRE_THROWS(first->Append(missing_metadata));
+
+    auto null_metadata = vsag::Dataset::Make();
+    null_metadata->NumElements(2)->StringMetadata("host", nullptr)->Owner(true);
+    auto null_metadata_copy = null_metadata->DeepCopy();
+    REQUIRE(null_metadata_copy->GetStringMetadata("host") == nullptr);
+}
+
 TEST_CASE("Dataset MultiVector Basic Test", "[ut][dataset]") {
     SECTION("MultiVectorDim default is 0") {
         auto dataset = vsag::Dataset::Make();

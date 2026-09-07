@@ -1526,8 +1526,8 @@ SINDI::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
                                        basic_info[SINDI_HAS_HOST_METADATA_KEY].GetBool();
     const bool expects_date_metadata = basic_info.Contains(SINDI_DATE_METADATA_FORMAT_VERSION_KEY);
     if (expects_date_metadata) {
-        CHECK_ARGUMENT(basic_info[SINDI_DATE_METADATA_FORMAT_VERSION_KEY].GetInt() ==
-                           SINDI_DATE_METADATA_FORMAT_VERSION,
+        CHECK_ARGUMENT(IsSupportedSindiDateMetadataVersion(
+                           basic_info[SINDI_DATE_METADATA_FORMAT_VERSION_KEY].GetInt()),
                        "unsupported SINDI streaming date metadata version");
     }
     CHECK_ARGUMENT(not(expects_host_metadata and expects_date_metadata),
@@ -1742,8 +1742,8 @@ SINDI::Deserialize(StreamReader& reader) {
                 }
                 if (jsonify_basic_info.Contains(SINDI_DATE_METADATA_FORMAT_VERSION_KEY)) {
                     CHECK_ARGUMENT(
-                        jsonify_basic_info[SINDI_DATE_METADATA_FORMAT_VERSION_KEY].GetInt() ==
-                            SINDI_DATE_METADATA_FORMAT_VERSION,
+                        IsSupportedSindiDateMetadataVersion(
+                            jsonify_basic_info[SINDI_DATE_METADATA_FORMAT_VERSION_KEY].GetInt()),
                         "unsupported SINDI date metadata version");
                     has_date_metadata = true;
                 }

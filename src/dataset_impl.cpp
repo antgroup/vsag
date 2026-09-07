@@ -162,7 +162,7 @@ allocate_and_copy_multi_vectors(const MultiVector* src,
 }
 
 static std::string*
-allocate_and_copy_paths(const std::string* src, uint64_t count) {
+allocate_and_copy_strings(const std::string* src, uint64_t count) {
     if (src == nullptr) {
         return nullptr;
     }
@@ -305,19 +305,19 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
             delete[] DatasetImpl::GetMultiVectors();
         }
     }
-    std::unordered_set<const std::string*> released_paths;
-    auto release_paths = [&released_paths](const std::string* paths) {
-        if (paths != nullptr && released_paths.insert(paths).second) {
-            delete[] paths;
+    std::unordered_set<const std::string*> released_strings;
+    auto release_strings = [&released_strings](const std::string* values) {
+        if (values != nullptr && released_strings.insert(values).second) {
+            delete[] values;
         }
     };
-    release_paths(DatasetImpl::GetPaths());
+    release_strings(DatasetImpl::GetPaths());
     for (const auto& [key, value] : this->data_) {
-        if (IsHierarchyPathsKey(key)) {
-            release_paths(std::get<const std::string*>(value));
+        if (IsHierarchyPathsKey(key) or IsStringMetadataKey(key)) {
+            release_strings(std::get<const std::string*>(value));
         }
     }
-    delete[] DatasetImpl::GetSourceID();
+    release_strings(DatasetImpl::GetSourceID());
     if (DatasetImpl::GetAttributeSets() != nullptr) {
         const auto* attrsets = DatasetImpl::GetAttributeSets();
         for (int i = 0; i < DatasetImpl::GetNumElements(); ++i) {
@@ -382,13 +382,13 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
     }
     if (this->GetPaths() != nullptr) {
         copy_dataset->Paths(
-            allocate_and_copy_paths(this->GetPaths(), static_cast<uint64_t>(num_elements)));
+            allocate_and_copy_strings(this->GetPaths(), static_cast<uint64_t>(num_elements)));
     }
     for (const auto& [key, value] : this->data_) {
         if (IsHierarchyPathsKey(key)) {
             copy_dataset->Paths(HierarchyNameFromPathsKey(key),
-                                allocate_and_copy_paths(std::get<const std::string*>(value),
-                                                        static_cast<uint64_t>(num_elements)));
+                                allocate_and_copy_strings(std::get<const std::string*>(value),
+                                                          static_cast<uint64_t>(num_elements)));
         }
     }
     for (const auto& [key, value] : this->data_) {
@@ -396,6 +396,14 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
         if (IsUInt32MetadataKey(key) and values != nullptr and *values != nullptr) {
             copy_dataset->UInt32Metadata(UInt32MetadataNameFromKey(key),
                                          allocate_and_copy(*values, num_elements, allocator_ref));
+        }
+    }
+    for (const auto& [key, value] : this->data_) {
+        const auto* values = std::get_if<const std::string*>(&value);
+        if (IsStringMetadataKey(key) and values != nullptr and *values != nullptr) {
+            copy_dataset->StringMetadata(
+                StringMetadataNameFromKey(key),
+                allocate_and_copy_strings(*values, static_cast<uint64_t>(num_elements)));
         }
     }
 
@@ -498,6 +506,32 @@ DatasetImpl::Append(const DatasetPtr& other) {
         }
     }
 
+    std::vector<std::string> string_metadata_keys;
+    for (const auto& [key, value] : this->data_) {
+        if (not IsStringMetadataKey(key) || std::get<const std::string*>(value) == nullptr) {
+            continue;
+        }
+        const auto name = StringMetadataNameFromKey(key);
+        if (other->GetStringMetadata(name) == nullptr) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Cannot append dataset without string metadata " + name);
+        }
+        string_metadata_keys.push_back(key);
+    }
+    if (other_impl != nullptr) {
+        for (const auto& [key, value] : other_impl->data_) {
+            if (not IsStringMetadataKey(key) || std::get<const std::string*>(value) == nullptr) {
+                continue;
+            }
+            const auto name = StringMetadataNameFromKey(key);
+            if (this->GetStringMetadata(name) == nullptr) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "Cannot append dataset with string metadata " + name +
+                                        " to dataset without it");
+            }
+        }
+    }
+
     std::vector<std::string> uint32_metadata_keys;
     for (const auto& [key, value] : this->data_) {
         if (not IsUInt32MetadataKey(key) || std::get<const uint32_t*>(value) == nullptr) {
@@ -596,20 +630,20 @@ DatasetImpl::Append(const DatasetPtr& other) {
     }
 
     // append paths
-    std::unordered_set<const std::string*> replaced_paths;
-    auto append_paths = [&](const std::string* current_paths, const std::string* other_paths) {
+    std::unordered_set<const std::string*> replaced_strings;
+    auto append_strings = [&](const std::string* current_values, const std::string* other_values) {
         auto* paths_copy = new std::string[old_num_elements + new_num_elements];
         for (int64_t i = 0; i < old_num_elements; ++i) {
-            paths_copy[i] = current_paths[i];
+            paths_copy[i] = current_values[i];
         }
         for (int64_t i = 0; i < new_num_elements; ++i) {
-            paths_copy[old_num_elements + i] = other_paths[i];
+            paths_copy[old_num_elements + i] = other_values[i];
         }
-        replaced_paths.insert(current_paths);
+        replaced_strings.insert(current_values);
         return paths_copy;
     };
     if (auto iter = this->data_.find(DATASET_PATHS); iter != this->data_.end()) {
-        this->Paths(append_paths(std::get<const std::string*>(iter->second), other->GetPaths()));
+        this->Paths(append_strings(std::get<const std::string*>(iter->second), other->GetPaths()));
     }
     for (const auto& key : hierarchy_path_keys) {
         auto iter = this->data_.find(key);
@@ -618,25 +652,24 @@ DatasetImpl::Append(const DatasetPtr& other) {
         }
         auto hierarchy_name = HierarchyNameFromPathsKey(key);
         this->Paths(hierarchy_name,
-                    append_paths(std::get<const std::string*>(iter->second),
-                                 other->GetPaths(hierarchy_name)));
+                    append_strings(std::get<const std::string*>(iter->second),
+                                   other->GetPaths(hierarchy_name)));
     }
-    for (const auto* paths : replaced_paths) {
-        delete[] paths;
+    for (const auto& key : string_metadata_keys) {
+        auto iter = this->data_.find(key);
+        const auto name = StringMetadataNameFromKey(key);
+        this->StringMetadata(name,
+                             append_strings(std::get<const std::string*>(iter->second),
+                                            other->GetStringMetadata(name)));
     }
 
     // append source-id
     if (auto iter = this->data_.find(SOURCE_ID); iter != this->data_.end()) {
         auto* ptr = const_cast<std::string*>(std::get<const std::string*>(iter->second));
-        auto* source_id_copy = new std::string[old_num_elements + new_num_elements];
-        for (int i = 0; i < old_num_elements; ++i) {
-            source_id_copy[i] = ptr[i];
-        }
-        for (int i = 0; i < new_num_elements; ++i) {
-            source_id_copy[old_num_elements + i] = other->GetSourceID()[i];
-        }
-        this->SourceID(source_id_copy);
-        delete[] ptr;
+        this->SourceID(append_strings(ptr, other->GetSourceID()));
+    }
+    for (const auto* values : replaced_strings) {
+        delete[] values;
     }
 
     // append sparse-vectors

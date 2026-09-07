@@ -255,6 +255,20 @@ public:
     }
 
     DatasetPtr
+    StringMetadata(const std::string& name, const std::string* values) override {
+        this->data_[StringMetadataKey(name)] = values;
+        return shared_from_this();
+    }
+
+    const std::string*
+    GetStringMetadata(const std::string& name) const override {
+        if (auto iter = this->data_.find(StringMetadataKey(name)); iter != this->data_.end()) {
+            return std::get<const std::string*>(iter->second);
+        }
+        return nullptr;
+    }
+
+    DatasetPtr
     ExtraInfos(const char* extra_info) override {
         this->data_[EXTRA_INFOS] = extra_info;
         return shared_from_this();
@@ -406,6 +420,26 @@ private:
     static std::string
     UInt32MetadataNameFromKey(const std::string& key) {
         return key.substr(UInt32MetadataPrefix().size());
+    }
+
+    static constexpr std::string_view
+    StringMetadataPrefix() {
+        return "string_metadata:";
+    }
+
+    static std::string
+    StringMetadataKey(const std::string& name) {
+        return std::string(StringMetadataPrefix()) + name;
+    }
+
+    static bool
+    IsStringMetadataKey(const std::string& key) {
+        return key.rfind(StringMetadataPrefix(), 0) == 0;
+    }
+
+    static std::string
+    StringMetadataNameFromKey(const std::string& key) {
+        return key.substr(StringMetadataPrefix().size());
     }
 
 private:

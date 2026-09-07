@@ -15,6 +15,9 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -27,8 +30,59 @@
 
 namespace vsag {
 
-inline constexpr const char* SINDI_HOST_ID_METADATA_NAME = "host_id";
+inline constexpr const char* SINDI_HOST_METADATA_NAME = "host";
+inline constexpr const char* SINDI_LEGACY_HOST_METADATA_NAME = "host_id";
 inline constexpr const char* SINDI_HAS_HOST_METADATA_KEY = "has_host_metadata";
+inline constexpr uint32_t SINDI_HOST_METADATA_MAGIC = 0x48535452;
+inline constexpr uint32_t SINDI_HOST_METADATA_FORMAT_VERSION = 1;
+
+class SindiHostDictionary {
+public:
+    explicit SindiHostDictionary(Allocator* allocator);
+
+    void
+    Encode(const std::string* hosts,
+           uint64_t count,
+           Vector<uint32_t>& host_ids,
+           std::vector<std::string_view>& new_hosts) const;
+
+    void
+    Commit(const std::vector<std::string_view>& new_hosts);
+
+    [[nodiscard]] bool
+    Lookup(std::string_view host, uint32_t& host_id) const;
+
+    [[nodiscard]] bool
+    Contains(uint32_t host_id) const {
+        return host_id < this->Size();
+    }
+
+    [[nodiscard]] uint64_t
+    GetMemoryUsage() const;
+
+    void
+    Clear();
+
+    void
+    Serialize(StreamWriter& writer) const;
+
+    void
+    Deserialize(StreamReader& reader, uint64_t element_count);
+
+private:
+    void
+    RebuildLookup();
+
+    [[nodiscard]] uint64_t
+    Size() const {
+        return host_offsets_.empty() ? 0 : host_offsets_.size() - 1;
+    }
+
+    Allocator* allocator_{nullptr};
+    Vector<char> host_bytes_;
+    Vector<uint64_t> host_offsets_;
+    std::unordered_map<std::string_view, uint32_t> host_lookup_;
+};
 
 enum class SindiHostRouteKind : uint8_t {
     UNFILTERED,
@@ -71,9 +125,11 @@ private:
     bool enabled_{false};
     uint32_t successful_host_cursor_{0};
     Vector<uint32_t> order_;
+    Vector<uint32_t> source_host_ids_;
     Vector<uint32_t> host_ids_;
     Vector<uint32_t> input_offsets_;
     Vector<uint32_t> successful_counts_;
+    std::vector<std::string_view> new_hosts_;
 };
 
 class SindiHostFilter {
@@ -96,7 +152,8 @@ public:
 
     [[nodiscard]] uint64_t
     GetMemoryUsage() const {
-        return (host_ids_.size() + host_range_offsets_.size()) * sizeof(uint32_t) +
+        return host_dictionary_.GetMemoryUsage() +
+               (host_ids_.size() + host_range_offsets_.size()) * sizeof(uint32_t) +
                host_ranges_.size() * sizeof(SindiHostRange);
     }
 
@@ -130,6 +187,7 @@ public:
     Deserialize(StreamReader& reader, uint64_t element_count);
 
 private:
+    SindiHostDictionary host_dictionary_;
     Vector<uint32_t> host_ids_;
     Vector<uint32_t> host_range_offsets_;
     Vector<SindiHostRange> host_ranges_;
@@ -140,7 +198,14 @@ inline constexpr const char* SINDI_DATE_BEGIN_PATH_NAME = "date_begin";
 inline constexpr const char* SINDI_DATE_END_PATH_NAME = "date_end";
 inline constexpr const char* SINDI_DATE_METADATA_FORMAT_VERSION_KEY =
     "sindi_date_metadata_format_version";
-inline constexpr uint32_t SINDI_DATE_METADATA_FORMAT_VERSION = 1;
+inline constexpr uint32_t SINDI_DATE_METADATA_FORMAT_VERSION = 2;
+inline constexpr uint32_t SINDI_DATE_METADATA_LEGACY_FORMAT_VERSION = 1;
+
+inline bool
+IsSupportedSindiDateMetadataVersion(int64_t version) {
+    return version == SINDI_DATE_METADATA_LEGACY_FORMAT_VERSION ||
+           version == SINDI_DATE_METADATA_FORMAT_VERSION;
+}
 
 class SindiDateBuildPlan {
 public:
@@ -167,11 +232,13 @@ private:
     uint32_t successful_group_cursor_{0};
     Vector<uint32_t> order_;
     Vector<uint32_t> source_buckets_;
+    Vector<uint32_t> source_host_ids_;
     Vector<uint32_t> group_quarters_;
     Vector<uint32_t> group_hosts_;
     Vector<uint32_t> input_offsets_;
     Vector<uint32_t> successful_counts_;
     Vector<uint32_t> successful_buckets_;
+    std::vector<std::string_view> new_hosts_;
 };
 
 struct SindiDateSearchRoute {
@@ -254,6 +321,7 @@ private:
 
     Allocator* allocator_{nullptr};
     bool has_host_metadata_{false};
+    SindiHostDictionary host_dictionary_;
     Vector<uint32_t> document_buckets_;
     Vector<Partition> partitions_;
 };

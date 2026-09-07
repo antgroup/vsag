@@ -84,8 +84,160 @@ private:
 
 }  // namespace
 
+SindiHostDictionary::SindiHostDictionary(Allocator* allocator)
+    : allocator_(allocator), host_bytes_(allocator), host_offsets_(allocator) {
+}
+
+void
+SindiHostDictionary::Encode(const std::string* hosts,
+                            uint64_t count,
+                            Vector<uint32_t>& host_ids,
+                            std::vector<std::string_view>& new_hosts) const {
+    CHECK_ARGUMENT(hosts != nullptr, "SINDI host metadata must not be null");
+    host_ids.resize(count);
+    new_hosts.clear();
+    std::unordered_map<std::string_view, uint32_t> new_host_lookup;
+    // Host ID zero is reserved for the empty-string sentinel even before the dictionary is
+    // committed and Size() starts reporting it.
+    const uint64_t existing_count = host_offsets_.empty() ? 1 : this->Size();
+    for (uint64_t i = 0; i < count; ++i) {
+        const auto& host = hosts[i];
+        if (host.empty()) {
+            host_ids[i] = 0;
+            continue;
+        }
+        uint32_t host_id = 0;
+        if (this->Lookup(host, host_id)) {
+            host_ids[i] = host_id;
+            continue;
+        }
+        const auto new_host = new_host_lookup.find(host);
+        if (new_host != new_host_lookup.end()) {
+            host_ids[i] = new_host->second;
+            continue;
+        }
+        const auto next_id = existing_count + new_hosts.size();
+        CHECK_ARGUMENT(next_id <= std::numeric_limits<uint32_t>::max(),
+                       "SINDI host dictionary exceeds uint32_t capacity");
+        host_id = static_cast<uint32_t>(next_id);
+        new_host_lookup.emplace(host, host_id);
+        new_hosts.push_back(host);
+        host_ids[i] = host_id;
+    }
+}
+
+void
+SindiHostDictionary::Commit(const std::vector<std::string_view>& new_hosts) {
+    if (host_offsets_.empty()) {
+        host_offsets_.push_back(0);
+        host_offsets_.push_back(0);
+    }
+    for (const auto& host : new_hosts) {
+        CHECK_ARGUMENT(not host.empty(), "SINDI nonzero host dictionary entry must not be empty");
+        host_bytes_.insert(host_bytes_.end(), host.begin(), host.end());
+        host_offsets_.push_back(host_bytes_.size());
+    }
+    this->RebuildLookup();
+}
+
+bool
+SindiHostDictionary::Lookup(std::string_view host, uint32_t& host_id) const {
+    if (host.empty()) {
+        // An empty host maps to the reserved missing-host ID only after a dictionary exists.
+        host_id = 0;
+        return not host_offsets_.empty();
+    }
+    const auto found = host_lookup_.find(host);
+    if (found == host_lookup_.end()) {
+        return false;
+    }
+    host_id = found->second;
+    return true;
+}
+
+uint64_t
+SindiHostDictionary::GetMemoryUsage() const {
+    return host_bytes_.size() * sizeof(char) + host_offsets_.size() * sizeof(uint64_t) +
+           host_lookup_.size() *
+               (sizeof(std::pair<const std::string_view, uint32_t>) + sizeof(void*));
+}
+
+void
+SindiHostDictionary::Clear() {
+    Vector<char>(allocator_).swap(host_bytes_);
+    Vector<uint64_t>(allocator_).swap(host_offsets_);
+    host_lookup_.clear();
+    host_lookup_.rehash(0);
+}
+
+void
+SindiHostDictionary::RebuildLookup() {
+    host_lookup_.clear();
+    if (host_offsets_.empty()) {
+        return;
+    }
+    host_lookup_.reserve(this->Size());
+    for (uint64_t host_index = 0; host_index < this->Size(); ++host_index) {
+        const auto host_id = static_cast<uint32_t>(host_index);
+        const auto begin = host_offsets_[host_index];
+        const auto end = host_offsets_[host_index + 1];
+        const std::string_view host =
+            host_id == 0 ? std::string_view{}
+                         : std::string_view(host_bytes_.data() + begin, end - begin);
+        const auto [unused, inserted] = host_lookup_.emplace(host, host_id);
+        CHECK_ARGUMENT(inserted, "SINDI host dictionary entries must be unique");
+    }
+}
+
+void
+SindiHostDictionary::Serialize(StreamWriter& writer) const {
+    StreamWriter::WriteVector(writer, host_offsets_);
+    StreamWriter::WriteVector(writer, host_bytes_);
+}
+
+void
+SindiHostDictionary::Deserialize(StreamReader& reader, uint64_t element_count) {
+    (void)element_count;
+    uint64_t offset_count = 0;
+    StreamReader::ReadObj(reader, offset_count);
+    CHECK_ARGUMENT(reader.GetCursor() <= reader.Length(),
+                   "serialized SINDI host dictionary offset position is invalid");
+    const uint64_t remaining_offset_bytes = reader.Length() - reader.GetCursor();
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        offset_count >= 2 &&
+            offset_count <= static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) + 2 &&
+            offset_count <= remaining_offset_bytes / sizeof(uint64_t),
+        "serialized SINDI host dictionary offset count is invalid");
+    Vector<uint64_t> host_offsets(offset_count, allocator_);
+    reader.Read(reinterpret_cast<char*>(host_offsets.data()), offset_count * sizeof(uint64_t));
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        host_offsets[0] == 0 && host_offsets[1] == 0,
+        "serialized SINDI host dictionary must reserve ID zero for empty host");
+    CHECK_ARGUMENT(std::is_sorted(host_offsets.begin(), host_offsets.end()),
+                   "serialized SINDI host dictionary offsets must be ordered");
+
+    uint64_t byte_count = 0;
+    StreamReader::ReadObj(reader, byte_count);
+    CHECK_ARGUMENT(byte_count == host_offsets.back(),
+                   "serialized SINDI host dictionary byte count does not match offsets");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        reader.GetCursor() <= reader.Length() && byte_count <= reader.Length() - reader.GetCursor(),
+        "serialized SINDI host dictionary exceeds the metadata payload");
+    Vector<char> host_bytes(byte_count, allocator_);
+    reader.Read(host_bytes.data(), byte_count);
+    for (uint64_t host_id = 1; host_id + 1 < host_offsets.size(); ++host_id) {
+        CHECK_ARGUMENT(host_offsets[host_id] < host_offsets[host_id + 1],
+                       "serialized SINDI nonzero host dictionary entry must not be empty");
+    }
+
+    host_offsets_ = std::move(host_offsets);
+    host_bytes_ = std::move(host_bytes);
+    this->RebuildLookup();
+}
+
 SindiHostBuildPlan::SindiHostBuildPlan(Allocator* allocator)
     : order_(allocator),
+      source_host_ids_(allocator),
       host_ids_(allocator),
       input_offsets_(allocator),
       successful_counts_(allocator) {
@@ -106,15 +258,20 @@ SindiHostBuildPlan::RecordSuccess(uint32_t ordered_position) {
 }
 
 SindiHostFilter::SindiHostFilter(Allocator* allocator)
-    : host_ids_(allocator), host_range_offsets_(allocator), host_ranges_(allocator) {
+    : host_dictionary_(allocator),
+      host_ids_(allocator),
+      host_range_offsets_(allocator),
+      host_ranges_(allocator) {
 }
 
 SindiHostBuildPlan
 SindiHostFilter::PrepareBuild(const DatasetPtr& base, uint64_t current_element_count) const {
     SindiHostBuildPlan plan(host_ids_.get_allocator().allocator_);
-    const auto* source_host_ids = base->GetUInt32Metadata(SINDI_HOST_ID_METADATA_NAME);
-    if (source_host_ids == nullptr) {
-        CHECK_ARGUMENT(not this->HasMetadata(), "SINDI host-aware Add requires host_id metadata");
+    CHECK_ARGUMENT(base->GetUInt32Metadata(SINDI_LEGACY_HOST_METADATA_NAME) == nullptr,
+                   "numeric SINDI host_id metadata is unsupported; use string metadata host");
+    const auto* source_hosts = base->GetStringMetadata(SINDI_HOST_METADATA_NAME);
+    if (source_hosts == nullptr) {
+        CHECK_ARGUMENT(not this->HasMetadata(), "SINDI host-aware Add requires host metadata");
         return plan;
     }
 
@@ -128,6 +285,9 @@ SindiHostFilter::PrepareBuild(const DatasetPtr& base, uint64_t current_element_c
                    "SINDI host-filtered build exceeds uint32_t document capacity");
 
     plan.enabled_ = true;
+    host_dictionary_.Encode(
+        source_hosts, static_cast<uint64_t>(data_num), plan.source_host_ids_, plan.new_hosts_);
+    const auto* source_host_ids = plan.source_host_ids_.data();
     plan.order_.resize(static_cast<uint64_t>(data_num));
     std::iota(plan.order_.begin(), plan.order_.end(), 0);
     std::sort(
@@ -168,6 +328,8 @@ SindiHostFilter::CommitBuild(SindiHostBuildPlan&& plan,
     }
     CHECK_ARGUMENT(next_inner_id == end_inner_id,
                    "SINDI host metadata count does not match inserted documents");
+
+    host_dictionary_.Commit(plan.new_hosts_);
 
     Vector<uint32_t> merged_host_ids(host_ids_.get_allocator().allocator_);
     Vector<uint32_t> merged_range_offsets(host_ids_.get_allocator().allocator_);
@@ -225,6 +387,7 @@ SindiHostFilter::CommitBuild(SindiHostBuildPlan&& plan,
 
 void
 SindiHostFilter::Clear() {
+    host_dictionary_.Clear();
     auto* allocator = host_ids_.get_allocator().allocator_;
     Vector<uint32_t>(allocator).swap(host_ids_);
     Vector<uint32_t>(allocator).swap(host_range_offsets_);
@@ -233,12 +396,18 @@ SindiHostFilter::Clear() {
 
 SindiHostSearchRoute
 SindiHostFilter::Classify(const DatasetPtr& query) const {
-    const auto* query_host_id = query->GetUInt32Metadata(SINDI_HOST_ID_METADATA_NAME);
-    if (host_ids_.empty() or query_host_id == nullptr) {
+    CHECK_ARGUMENT(query->GetUInt32Metadata(SINDI_LEGACY_HOST_METADATA_NAME) == nullptr,
+                   "numeric SINDI host_id metadata is unsupported; use string metadata host");
+    const auto* query_host = query->GetStringMetadata(SINDI_HOST_METADATA_NAME);
+    if (host_ids_.empty() or query_host == nullptr) {
         return {};
     }
-    const auto host = std::lower_bound(host_ids_.begin(), host_ids_.end(), query_host_id[0]);
-    if (host == host_ids_.end() or *host != query_host_id[0]) {
+    uint32_t query_host_id = 0;
+    if (not host_dictionary_.Lookup(query_host[0], query_host_id)) {
+        return {SindiHostRouteKind::EMPTY, 0, 0};
+    }
+    const auto host = std::lower_bound(host_ids_.begin(), host_ids_.end(), query_host_id);
+    if (host == host_ids_.end() or *host != query_host_id) {
         return {SindiHostRouteKind::EMPTY, 0, 0};
     }
     const auto host_index = static_cast<uint32_t>(host - host_ids_.begin());
@@ -328,6 +497,9 @@ SindiHostFilter::RequiresFullTermScan(const SindiHostSearchRoute& route,
 
 void
 SindiHostFilter::Serialize(StreamWriter& writer) const {
+    StreamWriter::WriteObj(writer, SINDI_HOST_METADATA_MAGIC);
+    StreamWriter::WriteObj(writer, SINDI_HOST_METADATA_FORMAT_VERSION);
+    host_dictionary_.Serialize(writer);
     StreamWriter::WriteVector(writer, host_ids_);
     StreamWriter::WriteVector(writer, host_range_offsets_);
     const uint64_t range_count = host_ranges_.size();
@@ -347,6 +519,16 @@ SindiHostFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
                     element_count));
 
     auto* allocator = host_ids_.get_allocator().allocator_;
+    uint32_t magic = 0;
+    uint32_t version = 0;
+    StreamReader::ReadObj(reader, magic);
+    StreamReader::ReadObj(reader, version);
+    CHECK_ARGUMENT(magic == SINDI_HOST_METADATA_MAGIC,
+                   "serialized SINDI host metadata uses the unsupported numeric format");
+    CHECK_ARGUMENT(version == SINDI_HOST_METADATA_FORMAT_VERSION,
+                   fmt::format("unsupported SINDI host metadata version {}", version));
+    SindiHostDictionary host_dictionary(allocator);
+    host_dictionary.Deserialize(reader, element_count);
     Vector<uint32_t> host_ids(allocator);
     Vector<uint32_t> range_offsets(allocator);
     Vector<SindiHostRange> ranges(allocator);
@@ -364,6 +546,8 @@ SindiHostFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
                            host_ids.end(),
                            [](uint32_t lhs, uint32_t rhs) { return lhs >= rhs; }) == host_ids.end(),
         "serialized SINDI host IDs must be strictly ordered");
+    CHECK_ARGUMENT(host_dictionary.Contains(host_ids.back()),
+                   "serialized SINDI host ID exceeds the host dictionary");
 
     uint64_t offset_count = 0;
     StreamReader::ReadObj(reader, offset_count);
@@ -433,6 +617,7 @@ SindiHostFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
                                element_count,
                                next_inner_id));
 
+    host_dictionary_ = std::move(host_dictionary);
     host_ids_ = std::move(host_ids);
     host_range_offsets_ = std::move(range_offsets);
     host_ranges_ = std::move(ranges);
@@ -679,6 +864,7 @@ read_vector(StreamReader& reader, Vector<T>& values, uint64_t max_count, const c
 SindiDateBuildPlan::SindiDateBuildPlan(Allocator* allocator)
     : order_(allocator),
       source_buckets_(allocator),
+      source_host_ids_(allocator),
       group_quarters_(allocator),
       group_hosts_(allocator),
       input_offsets_(allocator),
@@ -701,12 +887,17 @@ SindiDateBuildPlan::RecordSuccess(uint32_t ordered_position) {
 }
 
 SindiDateFilter::SindiDateFilter(Allocator* allocator)
-    : allocator_(allocator), document_buckets_(allocator), partitions_(allocator) {
+    : allocator_(allocator),
+      host_dictionary_(allocator),
+      document_buckets_(allocator),
+      partitions_(allocator) {
 }
 
 SindiDateBuildPlan
 SindiDateFilter::PrepareBuild(const DatasetPtr& base) const {
     SindiDateBuildPlan plan(allocator_);
+    CHECK_ARGUMENT(base->GetUInt32Metadata(SINDI_LEGACY_HOST_METADATA_NAME) == nullptr,
+                   "numeric SINDI host_id metadata is unsupported; use string metadata host");
     const auto* date_buckets = base->GetPaths(SINDI_DATE_PATH_NAME);
     if (date_buckets == nullptr) {
         return plan;
@@ -716,9 +907,14 @@ SindiDateFilter::PrepareBuild(const DatasetPtr& base) const {
     CHECK_ARGUMENT(data_num <= static_cast<int64_t>(std::numeric_limits<uint32_t>::max()),
                    "SINDI date-filtered build exceeds uint32_t document capacity");
 
-    const auto* source_host_ids = base->GetUInt32Metadata(SINDI_HOST_ID_METADATA_NAME);
+    const auto* source_hosts = base->GetStringMetadata(SINDI_HOST_METADATA_NAME);
     plan.enabled_ = true;
-    plan.has_host_metadata_ = source_host_ids != nullptr;
+    plan.has_host_metadata_ = source_hosts != nullptr;
+    if (source_hosts != nullptr) {
+        host_dictionary_.Encode(
+            source_hosts, static_cast<uint64_t>(data_num), plan.source_host_ids_, plan.new_hosts_);
+    }
+    const auto* source_host_ids = plan.has_host_metadata_ ? plan.source_host_ids_.data() : nullptr;
     plan.order_.resize(static_cast<uint64_t>(data_num));
     plan.source_buckets_.resize(static_cast<uint64_t>(data_num));
     Vector<uint32_t> source_quarters(static_cast<uint64_t>(data_num), allocator_);
@@ -765,6 +961,9 @@ SindiDateFilter::CommitBuild(SindiDateBuildPlan&& plan, uint64_t element_count) 
                    "SINDI successful date bucket count does not match element count");
 
     has_host_metadata_ = plan.has_host_metadata_;
+    if (has_host_metadata_) {
+        host_dictionary_.Commit(plan.new_hosts_);
+    }
     document_buckets_ = std::move(plan.successful_buckets_);
     uint32_t inner_cursor = 0;
     for (uint64_t group_begin = 0; group_begin < plan.group_quarters_.size();) {
@@ -806,6 +1005,7 @@ SindiDateFilter::CommitBuild(SindiDateBuildPlan&& plan, uint64_t element_count) 
 
 void
 SindiDateFilter::Clear() {
+    host_dictionary_.Clear();
     Vector<uint32_t>(allocator_).swap(document_buckets_);
     Vector<Partition>(allocator_).swap(partitions_);
     has_host_metadata_ = false;
@@ -813,7 +1013,8 @@ SindiDateFilter::Clear() {
 
 uint64_t
 SindiDateFilter::GetMemoryUsage() const {
-    uint64_t memory = document_buckets_.size() * sizeof(uint32_t);
+    uint64_t memory = host_dictionary_.GetMemoryUsage();
+    memory += document_buckets_.size() * sizeof(uint32_t);
     memory += partitions_.size() * sizeof(Partition);
     for (const auto& partition : partitions_) {
         memory += (partition.host_ids.size() + partition.host_offsets.size()) * sizeof(uint32_t);
@@ -823,6 +1024,8 @@ SindiDateFilter::GetMemoryUsage() const {
 
 SindiDateSearchRoute
 SindiDateFilter::Classify(const DatasetPtr& query, uint32_t window_size) const {
+    CHECK_ARGUMENT(query->GetUInt32Metadata(SINDI_LEGACY_HOST_METADATA_NAME) == nullptr,
+                   "numeric SINDI host_id metadata is unsupported; use string metadata host");
     SindiDateSearchRoute route;
     if (partitions_.empty()) {
         return route;
@@ -855,8 +1058,13 @@ SindiDateFilter::Classify(const DatasetPtr& query, uint32_t window_size) const {
         end_quarter = date_bucket_to_quarter(route.query_end);
     }
 
-    const auto* query_host_id = query->GetUInt32Metadata(SINDI_HOST_ID_METADATA_NAME);
-    const bool use_host = has_host_metadata_ and query_host_id != nullptr;
+    const auto* query_host = query->GetStringMetadata(SINDI_HOST_METADATA_NAME);
+    const bool use_host = has_host_metadata_ and query_host != nullptr;
+    uint32_t query_host_id = 0;
+    if (use_host and not host_dictionary_.Lookup(query_host[0], query_host_id)) {
+        route.kind = SindiHostRouteKind::EMPTY;
+        return route;
+    }
     if (not route.has_date_bucket and not route.has_date_range and not use_host) {
         return route;
     }
@@ -874,8 +1082,8 @@ SindiDateFilter::Classify(const DatasetPtr& query, uint32_t window_size) const {
         uint32_t end = partition.end;
         if (use_host) {
             const auto host = std::lower_bound(
-                partition.host_ids.begin(), partition.host_ids.end(), query_host_id[0]);
-            if (host == partition.host_ids.end() or *host != query_host_id[0]) {
+                partition.host_ids.begin(), partition.host_ids.end(), query_host_id);
+            if (host == partition.host_ids.end() or *host != query_host_id) {
                 continue;
             }
             const auto host_index = static_cast<uint64_t>(host - partition.host_ids.begin());
@@ -973,6 +1181,9 @@ void
 SindiDateFilter::Serialize(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, SINDI_DATE_METADATA_FORMAT_VERSION);
     StreamWriter::WriteObj(writer, static_cast<uint32_t>(has_host_metadata_));
+    if (has_host_metadata_) {
+        host_dictionary_.Serialize(writer);
+    }
     StreamWriter::WriteVector(writer, document_buckets_);
     StreamWriter::WriteObj(writer, static_cast<uint64_t>(partitions_.size()));
     for (const auto& partition : partitions_) {
@@ -996,9 +1207,16 @@ SindiDateFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
     uint32_t has_host = 0;
     StreamReader::ReadObj(reader, version);
     StreamReader::ReadObj(reader, has_host);
-    CHECK_ARGUMENT(version == SINDI_DATE_METADATA_FORMAT_VERSION,
-                   fmt::format("unsupported SINDI date metadata version {}", version));
     CHECK_ARGUMENT(has_host <= 1, "serialized SINDI date host flag is invalid");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        version == SINDI_DATE_METADATA_FORMAT_VERSION ||
+            (version == SINDI_DATE_METADATA_LEGACY_FORMAT_VERSION && has_host == 0),
+        fmt::format("unsupported SINDI date metadata version {}", version));
+
+    SindiHostDictionary host_dictionary(allocator_);
+    if (has_host != 0) {
+        host_dictionary.Deserialize(reader, element_count);
+    }
 
     Vector<uint32_t> document_buckets(allocator_);
     read_vector(reader, document_buckets, element_count, "document date bucket");
@@ -1043,6 +1261,8 @@ SindiDateFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
                                                   return lhs >= rhs;
                                               }) == partition.host_ids.end(),
                            "serialized SINDI partition host IDs must be strictly ordered");
+            CHECK_ARGUMENT(host_dictionary.Contains(partition.host_ids.back()),
+                           "serialized SINDI partition host ID exceeds the host dictionary");
             CHECK_ARGUMENT(partition.host_offsets.front() == 0,
                            "serialized SINDI partition host offsets must start at zero");
             CHECK_ARGUMENT(std::adjacent_find(partition.host_offsets.begin(),
@@ -1070,6 +1290,7 @@ SindiDateFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
                    "serialized SINDI date partitions do not cover every indexed document");
 
     has_host_metadata_ = has_host != 0;
+    host_dictionary_ = std::move(host_dictionary);
     document_buckets_ = std::move(document_buckets);
     partitions_ = std::move(partitions);
 }

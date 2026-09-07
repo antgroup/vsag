@@ -130,22 +130,22 @@ mutable 和 immutable 运行态均支持 `SerializeStreaming`、`DeserializeStre
 
 ### Host 过滤
 
-mutable 和 immutable SINDI 及 [SINDI_V2](sindi_v2.md) 索引都可以按单值数值 host 对文档
+mutable 和 immutable SINDI 及 [SINDI_V2](sindi_v2.md) 索引都可以按来源 host 对文档
 分组，避免返回其他 host 的文档。host-aware `Build()` 或 mutable `Add()` 批次需要提供完整的
-`uint32_t` `host_id` 数组；没有 host 的文档使用 `0`：
+字符串 `host` 数组；没有 host 的文档使用空字符串：
 
 ```cpp
 base->NumElements(n)
     ->SparseVectors(sparse_vectors)
     ->Ids(ids)
-    ->UInt32Metadata("host_id", base_host_ids)
+    ->StringMetadata("host", base_hosts)
     ->Owner(false);
 index->Build(base);
 
-uint32_t query_host_id = 42;
+std::string query_host = "example.com";
 query->NumElements(1)
     ->SparseVectors(&query_vec)
-    ->UInt32Metadata("host_id", &query_host_id)
+    ->StringMetadata("host", &query_host)
     ->Owner(false);
 ```
 
@@ -154,12 +154,13 @@ query->NumElements(1)
 精确成员检查。多次 mutable `Add()` 可以为同一 host 追加互不连续的区间；删除标记和额外的
 用户 `Filter` 会与 host 成员检查共同生效。
 
-host ID `0` 是缺失 host 分组，`1` 到 `UINT32_MAX` 表示普通 host；不同 host 的数量不能超过
-成功写入索引的文档数。mutable 索引一旦包含 host metadata，后续每次 `Add()` 都必须提供
-完整的 `host_id` 数组；已有 host-unaware 文档后不能再引入 host metadata。查询
-`host_id: 0` 时只检索缺失 host 的文档，不提供 `host_id` 时保留全索引 KNN 行为；查询没有
-已索引文档的 host 返回空结果。构建时没有 base host metadata 的索引会忽略查询 host
-metadata，行为保持不变。host 过滤当前仅适用于 KNN；范围搜索仍使用原有全索引路径。
+host 字符串按字节精确匹配，不做大小写折叠或 URL 归一化。VSAG 在内部为字符串分配紧凑 ID，
+并将字符串到 ID 的字典随索引落盘；调用方不需要接触这些 ID。空字符串是缺失 host 分组。
+mutable 索引一旦包含 host metadata，后续每次 `Add()` 都必须提供完整的 `host` 数组；已有
+host-unaware 文档后不能再引入 host metadata。空字符串查询只检索缺失 host 的文档，不提供
+`host` 时保留全索引 KNN 行为；未知 host 返回空结果。构建时没有 base host metadata 的索引会
+忽略查询 host metadata，行为保持不变。旧的数值 `host_id` 输入会被拒绝。host 过滤当前仅适用于
+KNN；范围搜索仍使用原有全索引路径。
 
 ### 日期 bucket 过滤
 
@@ -190,7 +191,7 @@ query->Paths("date_begin", &date_begin)
 因此结束于 `2026/08/01` 的范围可以命中 8 月 1 日的日 bucket，但不能命中较粗的
 `2026/08` bucket。两个端点缺一不可，扩展后必须保持正序，并且不能与单值 `date` 同时使用。
 
-日期构建按自然季度排序；同时提供 `host_id` 时，再在每个季度内按 host 排序。mutable 索引只能在
+日期构建按自然季度排序；同时提供 `host` 时，再在每个季度内按 host 排序。mutable 索引只能在
 索引为空时通过 `Build()` 或第一次 `Add()` 提供日期 metadata。索引已有文档后不能再引入日期
 metadata，已经包含日期 metadata 的 mutable 索引会拒绝之后的所有 `Add()`，从而避免增量维护季度
 分区。仅使用 host 的 mutable 索引仍保留原有的增量 `Add()` 能力。
