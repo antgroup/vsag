@@ -334,6 +334,44 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid RangeSearch Preserves Caller Radius",
+                             "[ft][search][pyramid][range_radius]") {
+    const auto use_reorder = GENERATE(true, false);
+    CAPTURE(use_reorder);
+    PyramidParam pyramid_param;
+    pyramid_param.use_reorder = use_reorder;
+    // Both code stores are fp32; three points are below index_min_size, so no graph is built.
+    const auto param = GeneratePyramidBuildParametersString("l2", 4, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+    auto base = MakeDenseDataset({{{std::sqrt(1.05F), 0.0F, 0.0F, 0.0F}},
+                                  {{0.5F, 0.5F, 0.0F, 0.0F}},
+                                  {{1.0F, 0.0F, 0.0F, 0.0F}}},
+                                 {105, 50, 100},
+                                 {"a/d/f", "a/d/f", "a/d/f"});
+    REQUIRE(index->Build(base).has_value());
+    auto query = MakeSingleQuery({0.0F, 0.0F, 0.0F, 0.0F}, "a/d/f");
+    constexpr float radius = 1.0F;
+    const auto use_request = GENERATE(true, false);
+    CAPTURE(use_request);
+    vsag::SearchRequest request;
+    request.mode_ = vsag::SearchMode::RANGE_SEARCH;
+    request.query_ = query;
+    request.radius_ = radius;
+    request.params_str_ = GeneratePyramidSearchParametersString(20);
+    auto result = use_request ? index->SearchWithRequest(request)
+                              : index->RangeSearch(query, radius, request.params_str_);
+    REQUIRE(result.has_value());
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        CAPTURE(result.value()->GetIds()[i]);
+        CHECK(result.value()->GetDistances()[i] <= radius);
+    }
+    REQUIRE(result.value()->GetDim() == 2);
+    REQUIRE(CollectIds(result.value()) == std::set<int64_t>{50, 100});
+    REQUIRE(result.value()->GetDistances()[0] == 0.5F);
+    REQUIRE(result.value()->GetDistances()[1] == radius);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Set Immutable",
                              "[ft][immutable][pyramid][pipnn]") {
     const auto metric_type = "l2";

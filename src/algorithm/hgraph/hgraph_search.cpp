@@ -24,7 +24,7 @@
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/query_computer_pool.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/searcher/hgraph_rabitq_searcher.h"
 #include "utils/search_threshold.h"
 #include "utils/util_functions.h"
@@ -802,7 +802,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
         Vector<int64_t> expected_labels_vec(
             request.expected_labels_.begin(), request.expected_labels_.end(), this->allocator_);
-        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
+        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec,
+                                                 label_to_inner_id);  // [reasoning]
 
         FlattenInterfacePtr precise_flatten = nullptr;
         ComputerLease computer_lease;
@@ -824,7 +825,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             } else {
                 precise_flatten->Query(&dist, computer, &inner_id, 1, &ctx);
             }
-            reasoning_ctx->SetTrueDistance(inner_id, dist);
+            reasoning_ctx->SetTrueDistance(inner_id, dist);  // [reasoning]
         }
 
         ctx.reasoning_ctx = reasoning_ctx.get();
