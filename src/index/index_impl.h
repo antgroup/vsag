@@ -19,6 +19,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "common.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "index_common_param.h"
 #include "query_context.h"
 #include "utils/search_threshold.h"
@@ -559,7 +560,12 @@ public:
         }
         SAFE_CALL(ValidateSearchThreshold(request.threshold_);
                   if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(request.params_str_)) {
-                      return make_empty_search_result();
+                      auto result = make_empty_search_result();
+                      if (!request.expected_labels_.empty()) {
+                          result->Reasoning(ReasoningContext::MakeStatusReport(
+                              ReasoningReportStatus::kEmptyIndex, this->inner_index_->GetName()));
+                      }
+                      return result;
                   } return this->inner_index_->SearchWithRequest(request));
     }
 

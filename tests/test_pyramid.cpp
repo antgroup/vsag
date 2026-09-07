@@ -2527,3 +2527,77 @@ TEST_CASE("Pyramid GetStats reports build cache hit-rate", "[ft][pyramid][cache]
     const auto missed_nodes = warm_parsed["build_cache_missed_nodes"].GetInt();
     REQUIRE(hit_nodes + missed_nodes == TEST_COUNT);
 }
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid SearchWithRequest Reasoning",
+                             "[ft][pyramid][reasoning][pr]") {
+    PyramidParam pyramid_param;
+    const auto param = GeneratePyramidBuildParametersString("l2", 4, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+
+    auto dataset = pool.GetDatasetAndCreate(4, 100, "l2", /*with_path=*/true);
+    auto build_result = index->Build(dataset->base_);
+    REQUIRE(build_result.has_value());
+    REQUIRE(build_result.value().empty());
+    index->SetImmutable();
+
+    auto search_param = GeneratePyramidSearchParametersString(100);
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+
+    vsag::SearchRequest req;
+    req.topk_ = 10;
+    req.params_str_ = search_param;
+    req.query_ = query;
+    req.expected_labels_ = {dataset->base_->GetIds()[0]};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+    REQUIRE(result.value()->GetReasoning().find("Pyramid") != std::string::npos);
+    REQUIRE(result.value()->GetReasoning().find("expected_analysis") != std::string::npos);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid SearchWithRequest Parity",
+                             "[ft][pyramid][reasoning][pr]") {
+    PyramidParam pyramid_param;
+    const auto param = GeneratePyramidBuildParametersString("l2", 4, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+
+    auto dataset = pool.GetDatasetAndCreate(4, 100, "l2", /*with_path=*/true);
+    auto build_result = index->Build(dataset->base_);
+    REQUIRE(build_result.has_value());
+    REQUIRE(build_result.value().empty());
+    // Compare reasoning on/off within the same state, covering both index modes.
+    const bool immutable = GENERATE(false, true);
+    if (immutable) {
+        index->SetImmutable();
+    }
+
+    auto search_param = GeneratePyramidSearchParametersString(100);
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+
+    vsag::SearchRequest req_no;
+    req_no.topk_ = 10;
+    req_no.params_str_ = search_param;
+    req_no.query_ = query;
+
+    auto result_no = index->SearchWithRequest(req_no);
+    REQUIRE(result_no.has_value());
+    REQUIRE(result_no.value()->GetDim() > 0);
+    REQUIRE(result_no.value()->GetReasoning() == "{}");
+
+    vsag::SearchRequest req;
+    req.topk_ = 10;
+    req.params_str_ = search_param;
+    req.query_ = query;
+    req.expected_labels_ = {result_no.value()->GetIds()[0]};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+    REQUIRE(result.value()->GetDim() == result_no.value()->GetDim());
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(result.value()->GetIds()[i] == result_no.value()->GetIds()[i]);
+        REQUIRE(result.value()->GetDistances()[i] == result_no.value()->GetDistances()[i]);
+    }
+}

@@ -16,6 +16,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <limits>
+#include <nlohmann/json.hpp>
 #include <numeric>
 
 #include "functest.h"
@@ -563,24 +564,44 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     REQUIRE(result_no_reasoning.value()->GetNumElements() > 0);
     REQUIRE(result_no_reasoning.value()->GetIds() != nullptr);
 
-    auto found_label = result_no_reasoning.value()->GetIds()[0];
+    REQUIRE(result_no_reasoning.value()->GetDim() == 5);
 
     vsag::SearchRequest req;
     req.topk_ = 5;
     req.params_str_ = fixtures::SINDITestIndex::search_param;
     req.query_ = query;
-    req.expected_labels_ = {found_label};
+    req.expected_labels_.assign(result_no_reasoning.value()->GetIds(),
+                                result_no_reasoning.value()->GetIds() + 5);
 
     auto result = index->SearchWithRequest(req);
     REQUIRE(result.has_value());
     REQUIRE_FALSE(result.value()->GetReasoning().empty());
-    REQUIRE(result.value()->GetReasoning().find("expected_analysis") != std::string::npos);
+    REQUIRE(result.value()->GetDim() == 5);
+    for (int64_t i = 0; i < 5; ++i) {
+        REQUIRE(result.value()->GetIds()[i] == result_no_reasoning.value()->GetIds()[i]);
+        REQUIRE(result.value()->GetDistances()[i] ==
+                result_no_reasoning.value()->GetDistances()[i]);
+    }
+    auto report = vsag::JsonType::Parse(result.value()->GetReasoning());
+    REQUIRE(report["expected_analysis"]["summary"].GetString() ==
+            "5/5 expected labels found, 0 missed");
     auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
     REQUIRE(statistics["distance_evaluations"].GetUint64() > 0);
     REQUIRE(statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() == 0);
     REQUIRE(statistics["distance_evaluations"].GetUint64() ==
             statistics["distance_evaluations_by_phase"]["rerank"].GetUint64());
     REQUIRE_FALSE(statistics["complete"].GetBool());
+    SECTION("Range reasoning metadata matches request") {
+        req.mode_ = vsag::SearchMode::RANGE_SEARCH;
+        req.radius_ = 100.0F;
+        req.limited_size_ = 10;
+        auto range_result = index->SearchWithRequest(req);
+        REQUIRE(range_result.has_value());
+        REQUIRE(range_result.value()->GetDim() > 0);
+        auto report = vsag::JsonType::Parse(range_result.value()->GetReasoning());
+        REQUIRE(report["meta"]["search_mode"].GetString() == "range");
+        REQUIRE(report["meta"]["topk"].GetInt() == -1);
+    }
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
@@ -629,4 +650,226 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     auto result = index->SearchWithRequest(req);
     REQUIRE(result.has_value());
     REQUIRE_FALSE(result.value()->GetReasoning().empty());
+}
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI_V2 Reasoning Basic",
+                             "[ft][sindi_v2][reasoning][pr]") {
+    auto build_param = R"({
+        "dim": 16,
+        "dtype": "sparse",
+        "metric_type": "ip",
+        "index_param": {
+            "use_reorder": true,
+            "doc_prune_ratio": 0.0,
+            "window_size": 10000,
+            "term_id_limit": 2000,
+            "use_quantization": false,
+            "remap_term_ids": false
+        }
+    })";
+    auto index = TestFactory("sindi_v2", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(10001, 128, 0.8);
+    TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(dataset->base_->GetSparseVectors())->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = R"({
+        "sindi_v2": {
+            "n_candidate": 20,
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0
+        }
+    })";
+    req.query_ = query;
+    req.expected_labels_ = {99999999};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+    REQUIRE(result.value()->GetReasoning().find("SINDI_V2") != std::string::npos);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI_V2 Reasoning Parity",
+                             "[ft][sindi_v2][reasoning][pr]") {
+    auto build_param = R"({
+        "dim": 16,
+        "dtype": "sparse",
+        "metric_type": "ip",
+        "index_param": {
+            "use_reorder": true,
+            "doc_prune_ratio": 0.0,
+            "window_size": 10000,
+            "term_id_limit": 2000,
+            "use_quantization": false,
+            "remap_term_ids": false
+        }
+    })";
+    auto index = TestFactory("sindi_v2", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(10001, 128, 0.8);
+    TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(dataset->base_->GetSparseVectors())->Owner(false);
+
+    vsag::SearchRequest req_no_reasoning;
+    req_no_reasoning.topk_ = 5;
+    req_no_reasoning.params_str_ = R"({
+        "sindi_v2": {
+            "n_candidate": 20,
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0
+        }
+    })";
+    req_no_reasoning.query_ = query;
+
+    auto result_no_reasoning = index->SearchWithRequest(req_no_reasoning);
+    REQUIRE(result_no_reasoning.has_value());
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = R"({
+        "sindi_v2": {
+            "n_candidate": 20,
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0
+        }
+    })";
+    req.query_ = query;
+    REQUIRE(result_no_reasoning.value()->GetDim() == 5);
+    req.expected_labels_.assign(result_no_reasoning.value()->GetIds(),
+                                result_no_reasoning.value()->GetIds() + 5);
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == result_no_reasoning.value()->GetDim());
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(result.value()->GetIds()[i] == result_no_reasoning.value()->GetIds()[i]);
+        REQUIRE(result.value()->GetDistances()[i] ==
+                result_no_reasoning.value()->GetDistances()[i]);
+    }
+    auto report = vsag::JsonType::Parse(result.value()->GetReasoning());
+    REQUIRE(report["expected_analysis"]["summary"].GetString() ==
+            "5/5 expected labels found, 0 missed");
+    REQUIRE(report["meta"]["supports_range"].GetBool());
+    REQUIRE(report["bucket_selection"]["selected_bucket_count"].GetInt() > 1);
+    REQUIRE(report["meta"]["total_distance_computations"].GetInt() > 0);
+
+    SECTION("Unknown remapped terms record zero-IP heap evictions") {
+        auto remap_param = nlohmann::json::parse(build_param);
+        remap_param["index_param"]["remap_term_ids"] = true;
+        remap_param["index_param"]["use_reorder"] = false;
+        auto remapped_index = TestFactory("sindi_v2", remap_param.dump(), true);
+        TestBuildIndex(remapped_index, dataset, true);
+        uint32_t term = 1000000;
+        float value = 1.0F;
+        vsag::SparseVector unknown;
+        unknown.len_ = 1;
+        unknown.ids_ = &term;
+        unknown.vals_ = &value;
+        auto unknown_query = vsag::Dataset::Make();
+        unknown_query->NumElements(1)->SparseVectors(&unknown)->Owner(false);
+        req.query_ = unknown_query;
+        req.topk_ = 1;
+        req.expected_labels_.assign(dataset->base_->GetIds(), dataset->base_->GetIds() + 10001);
+        auto result = remapped_index->SearchWithRequest(req);
+        REQUIRE(result.has_value());
+        auto report = nlohmann::json::parse(result.value()->GetReasoning());
+        const auto& missed = report.at("expected_analysis").at("missed_targets");
+        REQUIRE(missed.size() == 10000);
+        uint64_t evicted_count = 0;
+        for (const auto& target : missed) {
+            REQUIRE(target.at("was_visited").get<bool>());
+            REQUIRE(target.at("quantized_distance").get<float>() == 1.0F);
+            evicted_count += target.at("was_evicted").get<bool>() ? 1 : 0;
+        }
+        REQUIRE(evicted_count > 0);
+    }
+    SECTION("Rerank truncation records actual visited candidates") {
+        req.topk_ = 1;
+        auto truncated = index->SearchWithRequest(req);
+        REQUIRE(truncated.has_value());
+        REQUIRE(truncated.value()->GetDim() == 1);
+        auto truncated_report = nlohmann::json::parse(truncated.value()->GetReasoning());
+        const auto& missed = truncated_report.at("expected_analysis").at("missed_targets");
+        REQUIRE(missed.size() == 4);
+        for (const auto& target : missed) {
+            REQUIRE(target.at("was_visited").get<bool>());
+            REQUIRE(target.at("reorder_evicted").get<bool>());
+        }
+    }
+    SECTION("Empty public index returns status report") {
+        auto empty_index = TestFactory("sindi_v2", build_param, true);
+        auto empty_result = empty_index->SearchWithRequest(req);
+        REQUIRE(empty_result.has_value());
+        REQUIRE(empty_result.value()->GetDim() == 0);
+        auto empty_report = vsag::JsonType::Parse(empty_result.value()->GetReasoning());
+        REQUIRE(empty_report["meta"]["status"].GetString() == "empty_index");
+        req.expected_labels_.clear();
+        auto disabled = empty_index->SearchWithRequest(req);
+        REQUIRE(disabled.has_value());
+        REQUIRE(disabled.value()->GetReasoning() == "{}");
+    }
+    SECTION("Null filter is disabled safely") {
+        req.enable_filter_ = true;
+        req.filter_ = nullptr;
+        auto without_filter = index->SearchWithRequest(req);
+        REQUIRE(without_filter.has_value());
+        REQUIRE(without_filter.value()->GetDim() == 5);
+    }
+    SECTION("External label filters match KnnSearch") {
+        class AllowLabel final : public vsag::Filter {
+        public:
+            explicit AllowLabel(int64_t label) : label_(label) {
+            }
+            bool
+            CheckValid(int64_t id) const override {
+                ++calls_;
+                return id == label_;
+            }
+
+            mutable uint64_t calls_{0};
+
+        private:
+            int64_t label_;
+        };
+        auto filter = std::make_shared<AllowLabel>(result_no_reasoning.value()->GetIds()[0]);
+        auto baseline = index->KnnSearch(query, req.topk_, req.params_str_, filter);
+        REQUIRE(baseline.has_value());
+        REQUIRE(baseline.value()->GetDim() == 1);
+        const auto baseline_calls = filter->calls_;
+        filter->calls_ = 0;
+        req.enable_filter_ = true;
+        req.filter_ = filter;
+        auto filtered = index->SearchWithRequest(req);
+        REQUIRE(filtered.has_value());
+        REQUIRE(filtered.value()->GetDim() == baseline.value()->GetDim());
+        REQUIRE(filtered.value()->GetIds()[0] == baseline.value()->GetIds()[0]);
+        REQUIRE(filter->calls_ == baseline_calls);
+        auto filtered_report = nlohmann::json::parse(filtered.value()->GetReasoning());
+        const auto& missed = filtered_report.at("expected_analysis").at("missed_targets");
+        REQUIRE(missed.size() == 4);
+        for (const auto& target : missed) {
+            REQUIRE(target.at("was_visited").get<bool>());
+            REQUIRE(target.at("filter_rejected").get<bool>());
+            REQUIRE(target.at("diagnosis").get<std::string>() == "filter_rejected");
+        }
+    }
+    SECTION("Invalid requests return errors") {
+        auto invalid = req;
+        invalid.query_ = nullptr;
+        REQUIRE_FALSE(index->SearchWithRequest(invalid).has_value());
+        invalid = req;
+        invalid.topk_ = 0;
+        REQUIRE_FALSE(index->SearchWithRequest(invalid).has_value());
+        invalid.topk_ = std::numeric_limits<int64_t>::max();
+        REQUIRE_FALSE(index->SearchWithRequest(invalid).has_value());
+        invalid = req;
+        invalid.mode_ = vsag::SearchMode::RANGE_SEARCH;
+        invalid.limited_size_ = std::numeric_limits<int64_t>::max();
+        REQUIRE_FALSE(index->SearchWithRequest(invalid).has_value());
+    }
 }
