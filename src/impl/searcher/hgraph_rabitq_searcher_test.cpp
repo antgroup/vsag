@@ -26,7 +26,7 @@
 #include "impl/allocator/safe_allocator.h"
 #include "impl/filter/white_list_filter.h"
 #include "impl/heap/standard_heap.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "index_common_param.h"
 #include "io/memory_io/memory_io_parameter.h"
