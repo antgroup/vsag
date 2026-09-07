@@ -30,7 +30,7 @@
 #include "datacell/sparse_vector_datacell_parameter.h"
 #include "impl/filter/filter_callback_limiter.h"
 #include "impl/heap/standard_heap.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "index_feature_list.h"
 #include "io/memory_block_io/memory_block_io_parameter.h"
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
@@ -817,10 +817,10 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
             for (uint32_t i = 0; i < doc_count; ++i) {
                 if (dists[i] != 0.0F) {
                     auto inner_id = window_start_id + i;
-                    reasoning_ctx->RecordVisit(inner_id, 1.0F + dists[i], 0);
+                    reasoning_ctx->RecordVisit(inner_id, 1.0F + dists[i], 0);  // [reasoning]
                     if (filter_callback_remaining == nullptr and filter and
                         not filter->CheckValid(inner_id)) {
-                        reasoning_ctx->RecordFilterReject(inner_id);
+                        reasoning_ctx->RecordFilterReject(inner_id);  // [reasoning]
                     }
                 }
             }
@@ -871,7 +871,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
     }
 
     if (selected_buckets != nullptr and not selected_buckets->empty()) {
-        reasoning_ctx->RecordBucketSelection(*selected_buckets);
+        reasoning_ctx->RecordBucketSelection(*selected_buckets);  // [reasoning]
     }
 
     // rerank
@@ -907,7 +907,8 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                         if (reasoning_ctx != nullptr) {
                             auto evicted_label = high_precise_heap->Top().second;
                             auto evicted_inner_id = this->label_table_->GetIdByLabel(evicted_label);
-                            reasoning_ctx->RecordReorderEviction(evicted_inner_id, 0);
+                            reasoning_ctx->RecordReorderEviction(evicted_inner_id,
+                                                                 0);  // [reasoning]
                         }
                         high_precise_heap->Pop();
                     }
@@ -923,7 +924,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                     if (reasoning_ctx != nullptr) {
                         auto evicted_label = high_precise_heap->Top().second;
                         auto evicted_inner_id = this->label_table_->GetIdByLabel(evicted_label);
-                        reasoning_ctx->RecordReorderEviction(evicted_inner_id, 0);
+                        reasoning_ctx->RecordReorderEviction(evicted_inner_id, 0);  // [reasoning]
                     }
                     high_precise_heap->Pop();
                 }
@@ -1063,10 +1064,15 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
 
     std::shared_ptr<ReasoningContext> reasoning_ctx;
     if (not request.expected_labels_.empty()) {
-        reasoning_ctx = std::make_shared<ReasoningContext>(this->allocator_);
-        reasoning_ctx->SetSearchParams(request.topk_, "SINDI", use_reorder_, filter_enabled);
+        reasoning_ctx = std::make_shared<ReasoningContext>(allocator);
+        reasoning_ctx->SetSearchParams(
+            request.mode_ == SearchMode::RANGE_SEARCH ? -1 : request.topk_,
+            "SINDI",
+            use_reorder_,
+            filter_enabled,
+            request.mode_ == SearchMode::RANGE_SEARCH);  // [reasoning]
 
-        UnorderedMap<int64_t, InnerIdType> label_to_inner_id(this->allocator_);
+        UnorderedMap<int64_t, InnerIdType> label_to_inner_id(allocator);
         {
             std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
             for (const auto& label : request.expected_labels_) {
@@ -1077,12 +1083,13 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
             }
         }
 
-        Vector<int64_t> expected_labels_vec(this->allocator_);
+        Vector<int64_t> expected_labels_vec(allocator);
         expected_labels_vec.reserve(request.expected_labels_.size());
         for (const auto& label : request.expected_labels_) {
             expected_labels_vec.push_back(label);
         }
-        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
+        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec,
+                                                 label_to_inner_id);  // [reasoning]
     }
 
     const auto metadata_route = is_range ? SindiMetadataSearchRoute{}
@@ -1154,9 +1161,10 @@ SINDI::AttachReasoningReport(const DatasetPtr& dataset_results,
     if (reasoning_ctx == nullptr or dataset_results == nullptr) {
         return;
     }
-    auto count = dataset_results->GetNumElements();
+    auto count = dataset_results->GetDim();
     if (count > 0 and dataset_results->GetIds() != nullptr) {
-        Vector<InnerIdType> result_inner_ids(static_cast<uint64_t>(count), this->allocator_);
+        Vector<InnerIdType> result_inner_ids(static_cast<uint64_t>(count),
+                                             reasoning_ctx->GetAllocator());
         {
             std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
             for (int64_t i = 0; i < count; ++i) {
@@ -1164,10 +1172,10 @@ SINDI::AttachReasoningReport(const DatasetPtr& dataset_results,
                     this->label_table_->GetIdByLabel(dataset_results->GetIds()[i]);
             }
         }
-        reasoning_ctx->MarkResult(result_inner_ids);
+        reasoning_ctx->MarkResult(result_inner_ids);  // [reasoning]
     }
-    reasoning_ctx->DiagnoseExpectedTargets();
-    dataset_results->Reasoning(reasoning_ctx->GenerateReport());
+    reasoning_ctx->DiagnoseExpectedTargets();                     // [reasoning]
+    dataset_results->Reasoning(reasoning_ctx->GenerateReport());  // [reasoning]
 }
 
 bool

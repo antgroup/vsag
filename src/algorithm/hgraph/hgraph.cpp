@@ -36,7 +36,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/hgraph_rabitq_searcher.h"
 #include "index/index_impl.h"
