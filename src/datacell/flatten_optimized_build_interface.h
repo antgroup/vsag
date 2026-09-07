@@ -30,6 +30,16 @@ struct FlattenOptimizedBuildContext {
     uint64_t thread_count{1};
 };
 
+class FlattenBuildSession {
+public:
+    virtual ~FlattenBuildSession() = default;
+
+    virtual void
+    Commit() = 0;
+};
+
+using FlattenBuildSessionPtr = std::unique_ptr<FlattenBuildSession>;
+
 DEFINE_POINTER(FlattenOptimizedBuildInterface);
 
 class FlattenOptimizedBuildInterface {

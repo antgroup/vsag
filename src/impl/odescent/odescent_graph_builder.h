@@ -81,26 +81,15 @@ public:
              const FlattenInterfacePtr& flatten_interface,
              Allocator* allocator,
              SafeThreadPool* thread_pool,
-             bool pruning = true,
-             const float* build_vectors = nullptr,
-             int64_t build_vector_count = 0,
-             FlattenInterfacePtr build_flatten_interface = nullptr)
+             bool pruning = true)
         : odescent_param_(std::move(odescent_parameter)),
           flatten_interface_(flatten_interface),
           pruning_(pruning),
           allocator_(allocator),
           graph_(allocator),
           points_lock_(allocator),
-          thread_pool_(thread_pool),
-          build_flatten_interface_(std::move(build_flatten_interface)),
-          build_vectors_(build_vectors),
-          build_vector_count_(build_vector_count) {
+          thread_pool_(thread_pool) {
     }
-
-    static FlattenInterfacePtr
-    CreateBuildFlatten(const FlattenInterfacePtr& flatten_interface,
-                       const float* build_vectors,
-                       int64_t build_vector_count);
 
     bool
     Build(const GraphInterfacePtr& graph_storage = nullptr) {
@@ -182,13 +171,7 @@ private:
 
     const FlattenInterfacePtr& flatten_interface_;
 
-    // Build() initializes this before the first parallelize_task() call and never mutates it
-    // afterward. Task enqueue publishes the initialized pointer to workers, and each parallel phase
-    // waits on all futures before continuing, so get_distance() only performs concurrent reads.
-    FlattenInterfacePtr build_flatten_interface_{nullptr};
     FlattenInterface* distance_flatten_interface_{nullptr};
-    const float* build_vectors_{nullptr};
-    int64_t build_vector_count_{0};
 };
 
 }  // namespace vsag
