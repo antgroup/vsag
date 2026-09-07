@@ -459,8 +459,10 @@ private:
     [[nodiscard]] bool
     need_temporary_sq8_build_data_for_add() const;
 
-    void
-    prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows);
+    [[nodiscard]] bool
+    prepare_build_codes(const DatasetPtr& data,
+                        const Vector<AddRow>& rows,
+                        const AddContext& context);
 
     [[nodiscard]] bool
     should_insert_codes_before_probe(bool use_dedup_storage) const;
@@ -504,7 +506,10 @@ private:
     graph_read_codes_is_temporary(const AddContext& context) const;
 
     bool
-    insert_one_logical_point(const void* data, const AddRow& row, const AddContext& context);
+    insert_one_logical_point(const void* data,
+                             const AddRow& row,
+                             const AddContext& context,
+                             bool persistent_codes_prepared);
 
     void
     prepare_codes_before_probe_if_needed(const void* data,

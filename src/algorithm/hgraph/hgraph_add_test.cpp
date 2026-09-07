@@ -1242,6 +1242,49 @@ TEST_CASE("HGraph deduplicate_storage rejects unsupported graph type",
     REQUIRE_THROWS(MakeHGraphIndex(hgraph_json, common_param));
 }
 
+TEST_CASE("HGraph parallel cold build keeps RaBitQ and SQ8 codes searchable",
+          "[ut][hgraph][parallel][build]") {
+    constexpr int64_t dim = 32;
+    constexpr int64_t count = 2048;
+    constexpr uint64_t build_threads = 8;
+
+    auto hgraph_json = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "sq8",
+        "rabitq_bits_per_dim_base": 3,
+        "use_reorder": true,
+        "build_by_base": false,
+        "max_degree": 8,
+        "ef_construction": 32,
+        "build_thread_count": 8
+    })");
+    auto index = MakeHGraphIndex(hgraph_json, MakeCommonParam(dim, build_threads));
+
+    std::vector<float> vectors(dim * count);
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i;
+        for (int64_t d = 0; d < dim; ++d) {
+            const int64_t value =
+                ((i + 1) * (d + 3) * 7919 + i * i * 104729 + d * d * 1543) % 1000003;
+            vectors[i * dim + d] = static_cast<float>(value) / 1000003.0F;
+        }
+    }
+
+    auto base = MakeFloatDataset(vectors, ids, dim, count);
+    auto build_result = index->Build(base);
+    REQUIRE(build_result.has_value());
+    REQUIRE(build_result.value().empty());
+
+    for (int64_t i = 0; i < count; i += 257) {
+        std::vector<float> query_vector(vectors.begin() + i * dim, vectors.begin() + (i + 1) * dim);
+        auto result = index->KnnSearch(
+            MakeFloatQuery(query_vector, dim), 1, R"({"hgraph": {"ef_search": 128}})");
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetIds()[0] == ids[i]);
+    }
+}
+
 TEST_CASE("HGraph optimized build accepts MRLE RaBitQ split with raw-vector storage",
           "[ut][hgraph][optimized_build][MRLE]") {
     constexpr int64_t dim = 64;
