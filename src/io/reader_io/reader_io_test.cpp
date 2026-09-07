@@ -15,47 +15,13 @@
 
 #include "io/reader_io/reader_io.h"
 
-#include <algorithm>
 #include <memory>
 #include <sstream>
 
 #include "index_common_param.h"
-#include "io/common/basic_io_test.h"
+#include "io/common/io_contract_test.h"
 #include "io/reader_io/reader_io_parameter.h"
 #include "unittest.h"
-
-namespace {
-
-class TestSkipDeserializeIO : public vsag::BasicIO<TestSkipDeserializeIO> {
-public:
-    static constexpr bool InMemory = true;
-    static constexpr bool SkipDeserialize = true;
-
-    explicit TestSkipDeserializeIO(vsag::Allocator* allocator)
-        : vsag::BasicIO<TestSkipDeserializeIO>(allocator) {
-    }
-
-    void
-    WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
-        ++write_count_;
-        REQUIRE(data != nullptr);
-        this->PublishSize(offset + size);
-    }
-
-    uint64_t
-    Start() const {
-        return this->start_;
-    }
-
-    uint64_t
-    Size() const {
-        return this->size_;
-    }
-
-    uint64_t write_count_{0};
-};
-
-}  // namespace
 
 class TestReader : public vsag::Reader {
 public:
@@ -96,57 +62,58 @@ TEST_CASE("ReaderIO Read Test", "[ut][ReaderIO]") {
     reader_param->reader = std::make_shared<TestReader>(all_data.data(), all_data.size());
     IOParamPtr io_param = reader_param;
 
-    ReaderIO reader_io(io_param, common_param);
-    reader_io.InitIOImpl(io_param);
-    reader_io.start_ = 0;
-    reader_io.size_ = kTestSize;
+    ReaderIO reader_io(reader_param, common_param);
+    REQUIRE(reader_io.Size() == kTestSize);
 
-    SECTION("Test ReadImpl normal case") {
+    ReaderIO generic_reader_io(io_param, common_param);
+    REQUIRE(generic_reader_io.Size() == kTestSize);
+
+    SECTION("Test Read normal case") {
         const uint64_t offset = 100;
         const uint64_t size = 256;
         std::vector<uint8_t> buffer(size);
-        bool result = reader_io.ReadImpl(size, offset, buffer.data());
+        bool result = reader_io.Read(size, offset, buffer.data());
         REQUIRE(result == true);
         for (uint64_t i = 0; i < size; ++i) {
             REQUIRE(buffer[i] == all_data[offset + i]);
         }
     }
 
-    SECTION("Test ReadImpl out of bounds") {
+    SECTION("Test Read out of bounds") {
         const uint64_t offset = kTestSize;
         const uint64_t size = 1;
         std::vector<uint8_t> buffer(size);
-        bool result = reader_io.ReadImpl(size, offset, buffer.data());
+        bool result = reader_io.Read(size, offset, buffer.data());
         REQUIRE(result == false);
     }
 
-    SECTION("Test DirectReadImpl normal case") {
+    SECTION("Test direct Read normal case") {
         const uint64_t offset = 100;
         const uint64_t size = 256;
         bool need_release = false;
-        const uint8_t* data = reader_io.DirectReadImpl(size, offset, need_release);
+        const uint8_t* data = reader_io.Read(size, offset, need_release);
         REQUIRE(need_release == true);
         REQUIRE(data != nullptr);
         for (uint64_t i = 0; i < size; ++i) {
             REQUIRE(data[i] == all_data[offset + i]);
         }
-        reader_io.ReleaseImpl(data);  // 释放内存
+        reader_io.Release(data);
     }
 
-    SECTION("Test DirectReadImpl out of bounds") {
+    SECTION("Test direct Read out of bounds") {
         const uint64_t offset = kTestSize;
         const uint64_t size = 1;
         bool need_release = false;
-        const uint8_t* data = reader_io.DirectReadImpl(size, offset, need_release);
+        const uint8_t* data = reader_io.Read(size, offset, need_release);
         REQUIRE(data == nullptr);
     }
 
-    SECTION("Test MultiReadImpl multiple reads") {
+    SECTION("Test MultiRead multiple reads") {
         const uint64_t count = 2;
         uint64_t offsets[] = {100, 200};
         uint64_t sizes[] = {256, 256};
         std::vector<uint8_t> buffer(sizes[0] + sizes[1]);
-        bool result = reader_io.MultiReadImpl(buffer.data(), sizes, offsets, count);
+        bool result = reader_io.MultiRead(buffer.data(), sizes, offsets, count);
         REQUIRE(result == true);
 
         for (uint64_t i = 0; i < sizes[0]; ++i) {
@@ -157,12 +124,22 @@ TEST_CASE("ReaderIO Read Test", "[ut][ReaderIO]") {
         }
     }
 
-    SECTION("Test MultiReadImpl with error") {
+    SECTION("Test MultiRead with error") {
         const uint64_t count = 1;
         uint64_t offsets[] = {kTestSize};
         uint64_t sizes[] = {1};
         std::vector<uint8_t> buffer(1);
-        REQUIRE_THROWS(reader_io.MultiReadImpl(buffer.data(), sizes, offsets, count));
+        REQUIRE_THROWS(reader_io.MultiRead(buffer.data(), sizes, offsets, count));
+    }
+
+    SECTION("Test cached MultiRead with error") {
+        reader_param->enable_read_cache_ = true;
+        reader_io.EnableReadCache(reader_param);
+        const uint64_t count = 1;
+        uint64_t offsets[] = {kTestSize};
+        uint64_t sizes[] = {1};
+        std::vector<uint8_t> buffer(1);
+        REQUIRE_FALSE(reader_io.MultiRead(buffer.data(), sizes, offsets, count));
     }
 }
 
@@ -181,12 +158,10 @@ TEST_CASE("SkipDeserialize updates size without writing null data", "[ut][Reader
 
     vsag::IOStreamReader reader(ss);
     auto allocator = vsag::Engine::CreateDefaultAllocator();
-    TestSkipDeserializeIO io(allocator.get());
+    ReaderIO io(allocator.get());
 
     io.Deserialize(reader);
 
-    REQUIRE(io.write_count_ == 0);
-    REQUIRE(io.Start() == sizeof(kTestSize));
     REQUIRE(io.Size() == kTestSize);
     REQUIRE(reader.GetCursor() == sizeof(kTestSize) + kTestSize);
 }

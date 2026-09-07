@@ -1,11 +1,10 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,66 +14,91 @@
 
 #pragma once
 
-#if HAVE_LIBURING
+#include <string>
+#include <utility>
+
 #include "index_common_param.h"
-#include "io/common/basic_io.h"
-#include "io/uring_io/uring_io_context.h"
+#include "io/backend/posix_file_backend.h"
+#include "io/cache/optional_page_cache.h"
+#include "io/core/byte_io.h"
+#include "io/core/io_environment.h"
+#include "io/policy/configurable_single_read.h"
+#include "io/policy/durability_policy.h"
+#include "io/policy/uring_batch_read.h"
 #include "io/uring_io/uring_io_parameter.h"
+
 namespace vsag {
 
-class UringIO : public BasicIO<UringIO> {
+#if HAVE_LIBURING
+using UringFileBackend = PosixFileBackend<ConfigurableSingleRead, PlatformUringBatchRead, NoFlush>;
+#else
+// Without liburing, UringIO historically aliases BufferIO. Preserve BufferIO's compatibility
+// Read/MultiRead behavior while canonical ReadAt/ReadMany keep strict logical range validation.
+using UringFileBackend =
+    PosixFileBackend<ConfigurableSingleRead, PlatformUringBatchRead, NoFlush, true>;
+#endif
+
+class UringIO : public ByteIO<UringFileBackend, OptionalPageCache> {
 public:
-    static constexpr bool InMemory = false;
-    static constexpr bool SkipDeserialize = false;
+    using Base = ByteIO<UringFileBackend, OptionalPageCache>;
 
-public:
-    explicit UringIO(std::string filename, Allocator* allocator, bool direct_read = false);
+    UringIO(std::string filename, Allocator* allocator, bool direct_read = false)
+        : UringIO(std::move(filename), MakeEnvironment(allocator, direct_read)) {
+    }
 
-    explicit UringIO(const UringIOParameterPtr& io_param, const IndexCommonParam& common_param);
+    UringIO(std::string filename, IOEnvironment environment)
+        : Base(MakeOptions(filename, EffectiveDirectRead(environment.direct_read)),
+               NormalizeEnvironment(environment)) {
+    }
 
-    explicit UringIO(const IOParamPtr& param, const IndexCommonParam& common_param);
+    UringIO(const UringIOParameterPtr& param, const IndexCommonParam& common_param)
+        : UringIO(param->path_, common_param.allocator_.get(), ParamDirectRead(param)) {
+    }
 
-    ~UringIO();
-
-public:
-    void
-    WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset);
-
-    void
-    ResizeImpl(uint64_t size);
-
-    bool
-    ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const;
-
-    [[nodiscard]] const uint8_t*
-    DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const;
-
-    void
-    ReleaseImpl(const uint8_t* data) const;
-
-    bool
-    MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const;
-
-public:
-    static std::unique_ptr<UringIOContextPool> io_context_pool;
+    UringIO(const IOParamPtr& param, const IndexCommonParam& common_param)
+        : UringIO(std::dynamic_pointer_cast<UringIOParameter>(param), common_param) {
+        EnableReadCache(param);
+    }
 
 private:
-    std::string filepath_{};
+    [[nodiscard]] static bool
+    ParamDirectRead(const UringIOParameterPtr& param) {
+#if HAVE_LIBURING
+        return param->direct_read_;
+#else
+        (void)param;
+        return false;
+#endif
+    }
 
-    int rfd_{-1};
+    [[nodiscard]] static bool
+    EffectiveDirectRead(bool direct_read) {
+#if HAVE_LIBURING
+        return direct_read;
+#else
+        (void)direct_read;
+        return false;
+#endif
+    }
 
-    int wfd_{-1};
+    [[nodiscard]] static IOEnvironment
+    MakeEnvironment(Allocator* allocator, bool direct_read) {
+        IOEnvironment environment = MakeDefaultIOEnvironment(allocator);
+        environment.direct_read = EffectiveDirectRead(direct_read);
+        return environment;
+    }
 
-    bool exist_file_{false};
+    [[nodiscard]] static IOEnvironment
+    NormalizeEnvironment(IOEnvironment environment) {
+        environment.direct_read = EffectiveDirectRead(environment.direct_read);
+        return environment;
+    }
 
-    bool direct_read_{false};
+    [[nodiscard]] static FileOpenOptions
+    MakeOptions(const std::string& path, bool direct_read) {
+        const auto ownership = OwnershipForPath(path);
+        return FileOpenOptions{path, true, direct_read, true, ownership};
+    }
 };
 
 }  // namespace vsag
-
-#else
-#include "io/buffer_io/buffer_io.h"
-namespace vsag {
-using UringIO = BufferIO;
-}  // namespace vsag
-#endif  // HAVE_LIBURING

@@ -78,17 +78,21 @@ TEST_CASE("ByteRangeLayout rejects invalid read ranges", "[ut][ByteRangeLayout]"
     ByteRangeLayout<MemoryIO> layout(nullptr, common_param);
     layout.Resize(16);
 
-    std::array<uint8_t, 2> output{};
-    REQUIRE_FALSE(layout.Read(15, output.size(), output.data()));
-    REQUIRE_FALSE(layout.Read(std::numeric_limits<uint64_t>::max(), output.size(), output.data()));
+    std::array<uint8_t, 3> output{};
+    output.fill(0xA5);
+    const auto expected_output = output;
+    constexpr uint64_t invalid_length = 2;
+    REQUIRE_FALSE(layout.Read(15, invalid_length, output.data()));
+    REQUIRE_FALSE(layout.Read(std::numeric_limits<uint64_t>::max(), invalid_length, output.data()));
 
     bool need_release = true;
-    REQUIRE(layout.Read(15, output.size(), need_release) == nullptr);
+    REQUIRE(layout.Read(15, invalid_length, need_release) == nullptr);
     REQUIRE_FALSE(need_release);
 
     std::array<uint64_t, 2> offsets{0, 15};
     std::array<uint64_t, 2> lengths{1, 2};
     REQUIRE_FALSE(layout.MultiRead(offsets.data(), lengths.data(), offsets.size(), output.data()));
+    REQUIRE(output == expected_output);
 
     offsets = {0, 1};
     lengths = {1, 1};

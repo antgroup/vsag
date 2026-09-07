@@ -149,6 +149,16 @@ struct MultiVector {
 When `Owner(true)` is set, each element's `vectors_` must be independently allocated, because the
 destructor frees each `vectors_` separately.
 
+## Named metadata
+
+`UInt32Metadata(name, values)` attaches one unsigned integer per dataset element, and
+`GetUInt32Metadata` returns the named array or `nullptr`. SINDI and SINDI_V2 use `host_id` metadata
+for host filtering. Date filtering uses the existing named string-path API with
+`Paths("date", values)` and `GetPaths("date")`. A date range on a one-element query dataset uses
+the separate named paths `date_begin` and `date_end`; each points to one canonical `YYYY`,
+`YYYY/MM`, or `YYYY/MM/DD` string. These arrays follow the normal Dataset ownership, deep-copy, and
+append rules.
+
 ## See also
 
 - [Index](index_class.md) — the methods that consume and return datasets.

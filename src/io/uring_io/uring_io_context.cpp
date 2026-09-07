@@ -36,21 +36,23 @@ UringIOContext::UringIOContext() {
         ring_ = nullptr;
         int err = -ret;
         std::string err_name;
-        if (err == ENOSYS)
+        if (err == ENOSYS) {
             err_name = "ENOSYS";
-        else if (err == EPERM)
+        } else if (err == EPERM) {
             err_name = "EPERM";
-        else if (err == EACCES)
+        } else if (err == EACCES) {
             err_name = "EACCES";
-        else if (err == ENOMEM)
+        } else if (err == ENOMEM) {
             err_name = "ENOMEM";
-        else if (err == EMFILE)
+        } else if (err == EMFILE) {
             err_name = "EMFILE";
-        else if (err == EAGAIN)
+        } else if (err == EAGAIN) {
             err_name = "EAGAIN";
-        else
+        } else {
             err_name = "errno_" + std::to_string(err);
-        throw VsagException(
+        }
+        throw UringSetupException(
+            err,
             ErrorType::INTERNAL_ERROR,
             fmt::format("io_uring_queue_init failed: {} ({})", strerror(err), err_name));
     }

@@ -1074,17 +1074,13 @@ SIMQ::execute_split_parallel(const SplitTask& task) {
 
     const auto udim = static_cast<uint64_t>(dim_);
     const uint64_t code_size_per_token = mv_codes_->GetQuantizerCodeSize();
-    bool need_release = false;
-    const auto* codes = mv_codes_->GetCodesById(rep_doc, need_release);
+    auto codes = mv_codes_->AcquireCodesById(rep_doc);
+    CHECK_ARGUMENT(codes, "failed to read simq representative vector");
 
     std::vector<float> new_rep_vec(udim);
     mv_codes_->Decode(
-        codes + sizeof(uint32_t) + static_cast<uint64_t>(rep_offset) * code_size_per_token,
+        codes.Data() + sizeof(uint32_t) + static_cast<uint64_t>(rep_offset) * code_size_per_token,
         new_rep_vec.data());
-
-    if (need_release) {
-        mv_codes_->Release(codes);
-    }
 
     auto new_label = static_cast<int64_t>(task.new_cluster_idx);
     auto new_ds = Dataset::Make();
@@ -1104,15 +1100,11 @@ SIMQ::execute_split_parallel(const SplitTask& task) {
         InnerIdType tid = task.tokens[rank];
         InnerIdType doc_id = token_to_doc_[tid];
         uint32_t offset = token_to_offset_[tid];
-        bool nr = false;
-        const auto* c = mv_codes_->GetCodesById(doc_id, nr);
+        auto codes = mv_codes_->AcquireCodesById(doc_id);
+        CHECK_ARGUMENT(codes, "failed to read simq split vector");
         mv_codes_->Decode(
-            c + sizeof(uint32_t) + static_cast<uint64_t>(offset) * code_size_per_token,
+            codes.Data() + sizeof(uint32_t) + static_cast<uint64_t>(offset) * code_size_per_token,
             decoded_token.data());
-
-        if (nr) {
-            mv_codes_->Release(c);
-        }
 
         float dot = 0.0F;
         for (uint64_t d = 0; d < udim; ++d) {
@@ -1184,17 +1176,14 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
     InnerIdType rep_tid = cluster_tokens[half];
     InnerIdType rep_doc = token_to_doc_[rep_tid];
     uint32_t rep_offset = token_to_offset_[rep_tid];
-    bool need_release = false;
-    const auto* codes = mv_codes_->GetCodesById(rep_doc, need_release);
+    auto codes = mv_codes_->AcquireCodesById(rep_doc);
+    CHECK_ARGUMENT(codes, "failed to read simq representative vector");
     const uint64_t code_size_per_token = mv_codes_->GetQuantizerCodeSize();
     const auto udim = static_cast<uint64_t>(dim_);
     std::vector<float> new_rep_vec(udim);
     mv_codes_->Decode(
-        codes + sizeof(uint32_t) + static_cast<uint64_t>(rep_offset) * code_size_per_token,
+        codes.Data() + sizeof(uint32_t) + static_cast<uint64_t>(rep_offset) * code_size_per_token,
         new_rep_vec.data());
-    if (need_release) {
-        mv_codes_->Release(codes);
-    }
 
     auto new_label = static_cast<int64_t>(new_cluster_idx);
     auto new_ds = Dataset::Make();
@@ -1215,19 +1204,16 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
         InnerIdType tid = cluster_tokens[rank];
         InnerIdType doc_id = token_to_doc_[tid];
         uint32_t offset = token_to_offset_[tid];
-        bool nr = false;
-        const auto* c = mv_codes_->GetCodesById(doc_id, nr);
+        auto codes = mv_codes_->AcquireCodesById(doc_id);
+        CHECK_ARGUMENT(codes, "failed to read simq split vector");
         mv_codes_->Decode(
-            c + sizeof(uint32_t) + static_cast<uint64_t>(offset) * code_size_per_token,
+            codes.Data() + sizeof(uint32_t) + static_cast<uint64_t>(offset) * code_size_per_token,
             decoded_token.data());
         float dot = 0.0F;
         for (uint64_t d = 0; d < udim; ++d) {
             dot += decoded_token[d] * new_rep_vec[d];
         }
         token_to_dist_[tid] = 1.0F - dot;
-        if (nr) {
-            mv_codes_->Release(c);
-        }
     }
 
     ++num_clusters_;

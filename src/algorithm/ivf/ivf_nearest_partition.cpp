@@ -114,15 +114,24 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
             result[i * buckets_per_data + j] = static_cast<BucketIdType>(result_ids[j]);
         }
 
-        std::scoped_lock lock(dist_cmp_reduce_mutex);
-        // the return value of GetStatistics always has the same length as the input keys, and
-        // atoi("") returns a `0`.
-        auto route_stats = search_result->GetStatistics({"dist_cmp", "distance_evaluations"});
-        dist_cmp += std::atoi(route_stats[0].c_str());
-        if (ctx != nullptr and ctx->stats != nullptr and route_stats.size() > 1) {
+        if (ctx != nullptr and ctx->stats != nullptr) {
+            // GetStatistics re-parses the routing statistics JSON and re-dumps it to strings,
+            // which is allocation-heavy; it must not run inside the reduce lock. Only the two
+            // integer accumulations below are serialized. The return value always has the same
+            // length as the input keys, and atoi("") returns a `0`.
+            auto route_stats = search_result->GetStatistics({"dist_cmp", "distance_evaluations"});
+            const uint32_t local_dist_cmp = std::atoi(route_stats[0].c_str());
+            uint64_t eval_count = 0;
+            if (route_stats.size() > 1) {
+                eval_count = std::strtoull(route_stats[1].c_str(), nullptr, 10);
+            }
+            {
+                std::scoped_lock lock(dist_cmp_reduce_mutex);
+                dist_cmp += local_dist_cmp;
+            }
             ctx->stats->AddDistance(SearchStatistics::DistancePhase::ROUTING,
                                     DistanceEvaluationBackend::FP32,
-                                    std::strtoull(route_stats[1].c_str(), nullptr, 10));
+                                    eval_count);
         }
     };
     if (thread_pool_ == nullptr or count == 1) {

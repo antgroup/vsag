@@ -93,6 +93,7 @@ Build-time parameters live under `index_param`.
 | `mrle_dim` | int | `0` | Prefix dimension retained by MRLE; `0` keeps the input dimension. |
 | `max_degree` | int | `64` | Maximum out-degree per node within a sub-graph. |
 | `graph_type` | string | `"nsw"` | `nsw` or `odescent`. |
+| `graph_storage_type` | string | `"flat"` | Bottom-graph storage for a `multi_layer` root: `flat` favors construction and search speed, while `compressed` reduces graph memory. Compressed storage requires `max_degree <= 255`. Single-layer roots, routing graphs, and child graphs remain sparse. |
 | `ef_construction` | int | `400` | Candidate list size for `nsw` builds. |
 | `alpha` | float | `1.2` | Pruning factor during graph construction. |
 | `graph_iter_turn` | int | — | ODescent iterations (effective with `graph_type: "odescent"`). |
@@ -109,9 +110,10 @@ Build-time parameters live under `index_param`.
 | `store_raw_vector` | bool | `false` | Preserve an FP32 copy for `GetRawVectorByIds` and precise distance-by-id calculations. |
 | `store_paths` | bool | `false` | Top-level switch that preserves the original paths supplied to `Build` and `Add` so `GetDataByIdsWithFlag` can return them when `DATA_FLAG_PATH` is selected. It applies to every configured hierarchy and cannot be overridden per hierarchy. |
 | `index_min_size` | int | `0` | Minimum sub-index size; smaller groups fall back to scan. |
+| `root_graph_type` | string | `"single_layer"` | Root graph layout: `single_layer` preserves the original sparse bottom graph; `multi_layer` uses a preallocated Flat or Compressed bottom graph with HGraph-style sparse routing layers and joint construction. `multi_layer` requires `graph_type: "nsw"`. Do not specify this option when `no_build_levels` disables level 0. |
 | `support_duplicate` | bool | `false` | Allow duplicate ids. |
 | `build_thread_count` | int | `1` | Threads used for parallel build. |
-| `hierarchies` | array | `[]` | Named hierarchy definitions. Each element is either a string (inherits all top-level params) or an object with `name` and optional overrides (`max_degree`, `ef_construction`, `alpha`, `no_build_levels`, `index_min_size`). When present, multi-hierarchy mode is activated and each hierarchy maintains its own independent path tree. |
+| `hierarchies` | array | `[]` | Named hierarchy definitions. Each element is either a string (inherits all top-level params) or an object with `name` and optional overrides (`max_degree`, `ef_construction`, `alpha`, `no_build_levels`, `index_min_size`, `root_graph_type`). When present, multi-hierarchy mode is activated and each hierarchy maintains its own independent path tree. |
 
 ### RaBitQ split configuration
 
@@ -165,7 +167,8 @@ Search-time parameters live under the `pyramid` sub-object:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `ef_search` | int | `100` | Candidate list size for the leaf-level graph search. |
-| `hops_limit` | int | unlimited | Hard cap on hops for root-graph KNN search; ignored when it is not greater than `ef_search`. |
+| `factor` | float | unset | KNN reorder candidate multiplier. Values `<= 1` add no limit. When greater than `1`, Pyramid first completes the unchanged subgraph searches and merges their results, then sends at most `min(max(ef_search, topk), floor(topk * factor))` main-graph candidates to reorder. RaBitQ lower-bound safety candidates may be merged after this limit, matching HGraph; `reorder_candidate_count` reports the actual merged count. The value must be finite and positive. It has no effect on range search or when reorder is disabled. |
+| `hops_limit` | int | unlimited | Per-graph KNN hop cap for the root bottom graph and every non-root graph; ignored when it is not greater than `ef_search`. Sparse root routing layers are never hop-limited. FLAT scans and range search are unaffected. |
 | `subindex_ef_search` | int | `50` | Candidate list size used when traversing intermediate sub-graphs on the path. |
 | `hierarchies` | string[] | `[]` | Select which hierarchy to search. Empty means use the default (unnamed) hierarchy. |
 | `hierarchy_op` | string | `"single"` | How to combine results across hierarchies: `single` (search one hierarchy), `union`, or `intersection`. **Note:** `union` and `intersection` are not yet implemented — setting them will cause `KnnSearch`/`RangeSearch` to return an error. |
@@ -198,7 +201,17 @@ Add a `hierarchies` array inside `index_param`. Each element is either:
   `{"name": "category", "max_degree": 64, "no_build_levels": [0]}`
 
 Overridable per-hierarchy parameters: `max_degree`, `ef_construction`, `alpha`,
-`no_build_levels`, `index_min_size`.
+`no_build_levels`, `index_min_size`, `root_graph_type`.
+
+`root_graph_type: "multi_layer"` changes only the selected hierarchy's root. Its bottom graph uses
+the top-level `graph_storage_type`: Flat by default, or Compressed to trade construction and search
+speed for lower graph memory. Sparse routing graphs choose a better entry point before the bottom
+search; child graphs remain sparse. Bulk Build and incremental Add jointly construct the route and
+bottom layers with the same HGraph-style insertion protocol. This layout requires
+`graph_type: "nsw"`; combining `multi_layer` with `odescent` is rejected during parameter
+validation. Bottom and routing edges use the precise codes when an independent precise store
+exists, otherwise they use the base codes. Query traversal continues to use the base codes, and
+final reordering uses the configured reorder source.
 
 ```json
 {
@@ -339,6 +352,9 @@ faster.
 
 Use [Index Analysis](../resources/analyze_index.md) to inspect Pyramid tree structure,
 per-subindex quality, sampled base recall, and duplicate ratios reported by `GetStats()`.
+For each hierarchy, `root_graphs` reports `root_graph_type`, `bottom_graph_storage_type`,
+`bottom_graph_node_count`, `bottom_graph_size`, `route_graph_count`, `route_node_counts`, and
+`route_graph_size`.
 `AnalyzeIndexBySearch` also reports path-scoped query recall, distance, latency, and, when reorder
 is enabled, quantization metrics. Its query dataset must carry the same default or named-hierarchy
 paths required by `KnnSearch`; when paths are required or supplied for a batched dataset, provide

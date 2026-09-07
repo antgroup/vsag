@@ -16,11 +16,13 @@
 #pragma once
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <vector>
 
-#include "io/common/basic_io.h"
 #include "storage/serialization_template_test.h"
 #include "unittest.h"
 
@@ -28,7 +30,7 @@ using namespace vsag;
 
 template <typename T>
 void
-TestBasicReadWrite(BasicIO<T>& io) {
+TestBasicReadWrite(T& io) {
     std::vector<uint64_t> counts = {100, 250};
     std::vector<uint64_t> max_lengths = {2, 20, 37, 128, 260, 999};
     for (auto count : counts) {
@@ -43,7 +45,7 @@ TestBasicReadWrite(BasicIO<T>& io) {
                 total_size += item.length_;
             }
             std::vector<uint8_t> datas(total_size);
-            io.MultiRead(datas.data(), sizes.data(), offs.data(), count);
+            REQUIRE(io.MultiRead(datas.data(), sizes.data(), offs.data(), count));
             uint8_t* cur = datas.data();
             for (auto& item : vecs) {
                 std::vector<uint8_t> data(item.length_);
@@ -69,10 +71,10 @@ TestBasicReadWrite(BasicIO<T>& io) {
 
 template <typename T>
 void
-TestSerializeAndDeserialize(BasicIO<T>& wio, BasicIO<T>& rio) {
+TestSerializeAndDeserialize(T& wio, T& rio) {
     std::vector<uint64_t> counts = {100, 250};
     std::vector<uint64_t> max_lengths = {2, 20, 37, 128, 260, 999};
-    srandom(time(nullptr));
+    srandom(20260823);
     fixtures::TempDir dirname("TestSerializeAndDeserialize");
     for (auto count : counts) {
         for (auto max_length : max_lengths) {

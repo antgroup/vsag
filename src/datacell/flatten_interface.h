@@ -43,6 +43,46 @@ namespace vsag {
 
 DEFINE_POINTER(FlattenInterface);
 
+class FlattenCodesLease {
+public:
+    FlattenCodesLease() = default;
+
+    ~FlattenCodesLease();
+
+    FlattenCodesLease(const FlattenCodesLease&) = delete;
+    FlattenCodesLease&
+    operator=(const FlattenCodesLease&) = delete;
+
+    FlattenCodesLease(FlattenCodesLease&& other) noexcept;
+    FlattenCodesLease&
+    operator=(FlattenCodesLease&& other) noexcept;
+
+    [[nodiscard]] explicit operator bool() const {
+        return data_ != nullptr;
+    }
+
+    [[nodiscard]] const uint8_t*
+    Data() const {
+        return data_;
+    }
+
+private:
+    friend class FlattenInterface;
+
+    FlattenCodesLease(const FlattenInterface* source,
+                      const uint8_t* data,
+                      bool needs_release) noexcept
+        : source_(source), data_(data), needs_release_(needs_release) {
+    }
+
+    void
+    Reset() noexcept;
+
+    const FlattenInterface* source_{nullptr};
+    const uint8_t* data_{nullptr};
+    bool needs_release_{false};
+};
+
 class FlattenInterface {
 public:
     FlattenInterface() = default;
@@ -127,17 +167,10 @@ public:
 
     bool
     CompareVectors(InnerIdType id1, InnerIdType id2) {
-        bool release1, release2;
-        const auto* codes1 = this->GetCodesById(id1, release1);
-        const auto* codes2 = this->GetCodesById(id2, release2);
-        bool result = (std::memcmp(codes1, codes2, this->code_size_) == 0);
-        if (release1) {
-            this->Release(codes1);
-        }
-        if (release2) {
-            this->Release(codes2);
-        }
-        return result;
+        auto codes1 = this->AcquireCodesById(id1);
+        auto codes2 = this->AcquireCodesById(id2);
+        return codes1 and codes2 and
+               std::memcmp(codes1.Data(), codes2.Data(), this->code_size_) == 0;
     }
 
     virtual bool
@@ -150,16 +183,11 @@ public:
             return false;
         }
 
-        bool need_release = false;
-        const auto* codes = this->GetCodesById(id, need_release);
-        if (codes == nullptr) {
+        auto codes = this->AcquireCodesById(id);
+        if (not codes) {
             return false;
         }
-        bool result = (std::memcmp(encoded.data(), codes, this->code_size_) == 0);
-        if (need_release) {
-            this->Release(codes);
-        }
-        return result;
+        return std::memcmp(encoded.data(), codes.Data(), this->code_size_) == 0;
     }
 
     virtual void
@@ -227,6 +255,13 @@ public:
 
     [[nodiscard]] virtual const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const = 0;
+
+    [[nodiscard]] FlattenCodesLease
+    AcquireCodesById(InnerIdType id) const {
+        bool needs_release = false;
+        const uint8_t* data = this->GetCodesById(id, needs_release);
+        return FlattenCodesLease(this, data, needs_release);
+    }
 
     virtual void
     GetSparseVectorByInnerId(InnerIdType inner_id,
@@ -315,5 +350,40 @@ public:
     uint32_t prefetch_depth_code_{1};
     DistanceEvaluationBackend backend_{DistanceEvaluationBackend::UNKNOWN};
 };
+
+inline FlattenCodesLease::~FlattenCodesLease() {
+    Reset();
+}
+
+inline FlattenCodesLease::FlattenCodesLease(FlattenCodesLease&& other) noexcept
+    : source_(other.source_), data_(other.data_), needs_release_(other.needs_release_) {
+    other.source_ = nullptr;
+    other.data_ = nullptr;
+    other.needs_release_ = false;
+}
+
+inline FlattenCodesLease&
+FlattenCodesLease::operator=(FlattenCodesLease&& other) noexcept {
+    if (this != &other) {
+        Reset();
+        source_ = other.source_;
+        data_ = other.data_;
+        needs_release_ = other.needs_release_;
+        other.source_ = nullptr;
+        other.data_ = nullptr;
+        other.needs_release_ = false;
+    }
+    return *this;
+}
+
+inline void
+FlattenCodesLease::Reset() noexcept {
+    if (needs_release_ and source_ != nullptr and data_ != nullptr) {
+        source_->Release(data_);
+    }
+    source_ = nullptr;
+    data_ = nullptr;
+    needs_release_ = false;
+}
 
 }  // namespace vsag

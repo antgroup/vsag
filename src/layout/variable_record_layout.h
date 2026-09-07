@@ -101,17 +101,17 @@ public:
     using LocationEntry = typename LocationPolicy::Entry;
     using LocationLayout = FixedLayout<LocationIO>;
     using PayloadLayout = ByteRangeLayout<PayloadIO>;
+    using Lease = typename PayloadLayout::Lease;
 
     VariableRecordLayout() = default;
 
-    VariableRecordLayout(std::shared_ptr<BasicIO<LocationIO>> location_io,
-                         std::shared_ptr<BasicIO<PayloadIO>> payload_io) {
+    VariableRecordLayout(std::shared_ptr<LocationIO> location_io,
+                         std::shared_ptr<PayloadIO> payload_io) {
         SetIO(std::move(location_io), std::move(payload_io));
     }
 
     void
-    SetIO(std::shared_ptr<BasicIO<LocationIO>> location_io,
-          std::shared_ptr<BasicIO<PayloadIO>> payload_io) {
+    SetIO(std::shared_ptr<LocationIO> location_io, std::shared_ptr<PayloadIO> payload_io) {
         locations_.SetCodeSize(sizeof(LocationEntry));
         locations_.SetIO(std::move(location_io));
         payload_.SetIO(std::move(payload_io));
@@ -176,6 +176,21 @@ public:
             return nullptr;
         }
         return payload_.Read(offset, length, need_release);
+    }
+
+    [[nodiscard]] Lease
+    Acquire(InnerIdType id) const {
+        return Acquire(ReadLocation(id));
+    }
+
+    [[nodiscard]] Lease
+    Acquire(const LocationEntry& location) const {
+        uint64_t offset = 0;
+        uint64_t length = 0;
+        if (not TryResolveRange(location, offset, length)) {
+            return {};
+        }
+        return payload_.Acquire(offset, length);
     }
 
     bool

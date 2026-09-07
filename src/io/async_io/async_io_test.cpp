@@ -20,8 +20,7 @@
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
 #include "io/async_io/async_io_parameter.h"
-#include "io/buffer_io/buffer_io_parameter.h"
-#include "io/common/basic_io_test.h"
+#include "io/common/io_contract_test.h"
 #include "unittest.h"
 
 using namespace vsag;
@@ -36,7 +35,7 @@ TEST_CASE("AsyncIO Read And Write", "[ut][AsyncIO]") {
 
     // read zero
     bool need_release = false;
-    auto result = io->DirectReadImpl(0, 0, need_release);
+    auto result = io->Read(0, 0, need_release);
     REQUIRE(result == nullptr);
 
     // in memory
@@ -55,13 +54,9 @@ TEST_CASE("AsyncIO Parameter", "[ut][AsyncIO]") {
     )";
     auto json = JsonType::Parse(fmt::format(param_str, path));
     auto io_param = IOParameter::GetIOParameterByJson(json);
-#if HAVE_LIBAIO
     REQUIRE(std::dynamic_pointer_cast<AsyncIOParameter>(io_param) != nullptr);
+    REQUIRE(io_param->Kind() == IOKind::ASYNC);
     REQUIRE(io_param->ToJson()["type"].GetString() == "async_io");
-#else
-    REQUIRE(std::dynamic_pointer_cast<BufferIOParameter>(io_param) != nullptr);
-    REQUIRE(io_param->ToJson()["type"].GetString() == "buffer_io");
-#endif
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
     auto io = std::make_unique<AsyncIO>(io_param, common_param);

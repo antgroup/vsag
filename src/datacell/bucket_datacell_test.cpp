@@ -27,6 +27,7 @@
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
+#include "io/memory_io/memory_io.h"
 #include "io/reader_io/reader_io_parameter.h"
 #include "quantization/fp32_quantizer.h"
 #include "simd/simd.h"
@@ -147,13 +148,10 @@ public:
     std::shared_ptr<TrackingWriteIOState> state_;
 };
 
-class TrackingWriteIO : public BasicIO<TrackingWriteIO> {
+class TrackingWriteIO : public MemoryIO {
 public:
-    static constexpr bool InMemory = true;
-    static constexpr bool SkipDeserialize = false;
-
     TrackingWriteIO(const IOParamPtr& param, const IndexCommonParam& common_param)
-        : BasicIO<TrackingWriteIO>(common_param.allocator_.get()) {
+        : MemoryIO(common_param.allocator_.get()) {
         auto tracking_param = std::dynamic_pointer_cast<TrackingWriteIOParameter>(param);
         if (tracking_param == nullptr or tracking_param->state_ == nullptr) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
@@ -165,59 +163,14 @@ public:
     }
 
     void
-    WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
+    Write(const uint8_t* data, uint64_t size, uint64_t offset) {
         state_->writes_by_bucket[bucket_id_].emplace_back(TrackingWrite{size, offset});
-        const auto next_size = offset + size;
-        if (data_.size() < next_size) {
-            data_.resize(next_size);
-        }
-        if (size > 0) {
-            std::memcpy(data_.data() + offset, data, size);
-        }
-        this->PublishSize(next_size);
-    }
-
-    void
-    ResizeImpl(uint64_t size) {
-        data_.resize(size);
-        this->size_ = size;
-    }
-
-    bool
-    ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
-        if (offset > data_.size() or size > data_.size() - offset) {
-            return false;
-        }
-        if (size > 0) {
-            std::memcpy(data, data_.data() + offset, size);
-        }
-        return true;
-    }
-
-    [[nodiscard]] const uint8_t*
-    DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
-        need_release = false;
-        if (offset > data_.size() or size > data_.size() - offset) {
-            return nullptr;
-        }
-        return data_.data() + offset;
-    }
-
-    bool
-    MultiReadImpl(uint8_t* data, uint64_t* sizes, uint64_t* offsets, uint64_t count) const {
-        for (uint64_t i = 0; i < count; ++i) {
-            if (not ReadImpl(sizes[i], offsets[i], data)) {
-                return false;
-            }
-            data += sizes[i];
-        }
-        return true;
+        MemoryIO::Write(data, size, offset);
     }
 
 private:
     std::shared_ptr<TrackingWriteIOState> state_;
     uint64_t bucket_id_{0};
-    std::vector<uint8_t> data_;
 };
 
 }  // namespace

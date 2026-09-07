@@ -16,13 +16,31 @@
 #if HAVE_LIBURING
 
 #include <cstdint>
+#include <utility>
 
 #include "utils/resource_object.h"
 #include "utils/resource_object_pool.h"
+#include "vsag_exception.h"
 
 struct io_uring;
 
 namespace vsag {
+
+class UringSetupException final : public VsagException {
+public:
+    template <typename... Args>
+    explicit UringSetupException(int error_code, ErrorType error_type, Args&&... args)
+        : VsagException(error_type, std::forward<Args>(args)...), error_code_(error_code) {
+    }
+
+    [[nodiscard]] int
+    ErrorCode() const noexcept {
+        return error_code_;
+    }
+
+private:
+    int error_code_;
+};
 
 class UringIOContext : public ResourceObject {
 public:

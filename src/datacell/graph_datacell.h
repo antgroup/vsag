@@ -26,7 +26,6 @@
 #include "graph_interface_parameter.h"
 #include "impl/reverse_edge.h"
 #include "index_common_param.h"
-#include "io/common/basic_io.h"
 #include "layout/fixed_layout.h"
 #include "vsag/constants.h"
 
@@ -73,7 +72,7 @@ public:
     Resize(InnerIdType new_size) override;
 
     inline void
-    SetIO(std::shared_ptr<BasicIO<IOTmpl>> io) {
+    SetIO(std::shared_ptr<IOTmpl> io) {
         this->layout_.SetIO(std::move(io));
     }
 

@@ -30,43 +30,72 @@ using namespace vsag;
 
 namespace {
 
-class NonMemoryReviewIO : public BasicIO<NonMemoryReviewIO> {
+class NonMemoryReviewIO {
 public:
+    using Lease = BorrowedLease;
+
     static constexpr bool InMemory = false;
     static constexpr bool SkipDeserialize = false;
 
-    NonMemoryReviewIO(const IOParamPtr&, const IndexCommonParam& common_param)
-        : BasicIO<NonMemoryReviewIO>(common_param.allocator_.get()) {
+    NonMemoryReviewIO(const IOParamPtr&, const IndexCommonParam&) {
     }
 
     void
-    WriteImpl(const uint8_t*, uint64_t size, uint64_t offset) {
-        this->PublishSize(offset + size);
+    Write(const uint8_t*, uint64_t size, uint64_t offset) {
+        size_ = std::max(size_, offset + size);
     }
 
     bool
-    ReadImpl(uint64_t, uint64_t, uint8_t*) const {
+    Read(uint64_t, uint64_t, uint8_t*) const {
         return false;
     }
 
     [[nodiscard]] const uint8_t*
-    DirectReadImpl(uint64_t, uint64_t, bool& need_release) const {
+    Read(uint64_t, uint64_t, bool& need_release) const {
         need_release = false;
         return nullptr;
     }
-};
 
-class PrefetchReviewIO : public BasicIO<PrefetchReviewIO> {
-public:
-    static constexpr bool InMemory = true;
-    static constexpr bool SkipDeserialize = false;
-
-    PrefetchReviewIO(const IOParamPtr&, const IndexCommonParam& common_param)
-        : BasicIO<PrefetchReviewIO>(common_param.allocator_.get()) {
+    [[nodiscard]] Lease
+    Acquire(uint64_t, uint64_t) const {
+        return {};
     }
 
     void
-    PrefetchImpl(uint64_t offset, uint64_t bytes) {
+    Release(const uint8_t*) const {
+    }
+
+    void
+    Resize(uint64_t size) {
+        size_ = size;
+    }
+
+    [[nodiscard]] int64_t
+    GetMemoryUsage() const {
+        return 0;
+    }
+
+    [[nodiscard]] const uint8_t*
+    GetReadOnlyRawData() const {
+        return nullptr;
+    }
+
+private:
+    uint64_t size_{0};
+};
+
+class PrefetchReviewIO {
+public:
+    using Lease = BorrowedLease;
+
+    static constexpr bool InMemory = true;
+    static constexpr bool SkipDeserialize = false;
+
+    PrefetchReviewIO(const IOParamPtr&, const IndexCommonParam&) {
+    }
+
+    void
+    Prefetch(uint64_t offset, uint64_t bytes) {
         prefetch_offset_ = offset;
         prefetch_bytes_ = bytes;
     }
@@ -169,6 +198,16 @@ TEST_CASE("FixedLayout supports ranges and id batch reads", "[ut][FixedLayout]")
     REQUIRE(range != nullptr);
     REQUIRE_FALSE(need_release);
     REQUIRE(std::memcmp(range, records.data() + 2, 4) == 0);
+
+    auto record_lease = layout.Acquire(2);
+    REQUIRE(record_lease);
+    REQUIRE(record_lease.Size() == 2);
+    REQUIRE(std::memcmp(record_lease.Data(), records.data() + 4, 2) == 0);
+
+    auto range_lease = layout.AcquireRange(1, 2);
+    REQUIRE(range_lease);
+    REQUIRE(range_lease.Size() == 4);
+    REQUIRE(std::memcmp(range_lease.Data(), records.data() + 2, 4) == 0);
 
     const std::array<InnerIdType, 4> ids{3, 1, 3, 0};
     std::array<uint8_t, 8> batch{};

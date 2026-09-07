@@ -640,12 +640,7 @@ PyramidAnalyzer::collect_searchable_node_ids(const IndexNode* node,
 
     std::shared_lock lock(node->mutex_);
     if (node->status_ != IndexNode::Status::NO_INDEX) {
-        Vector<InnerIdType> node_ids(allocator_);
-        if (node->status_ == IndexNode::Status::FLAT) {
-            node_ids = node->ids_;
-        } else if (node->graph_ != nullptr) {
-            node_ids = node->graph_->GetIds();
-        }
+        auto node_ids = node->get_ids_unlocked();
         for (const auto id : node_ids) {
             if (deleted_ids.find(id) == deleted_ids.end() && seen_ids.insert(id).second) {
                 ids.push_back(id);
@@ -1251,17 +1246,13 @@ PyramidAnalyzer::get_node_neighbor_recall(const IndexNode* node,
             continue;
         }
 
-        bool need_release = false;
-        const auto* code = codes->GetCodesById(sample_id, need_release);
-        if (code == nullptr) {
+        auto code = codes->AcquireCodesById(sample_id);
+        if (not code) {
             continue;
         }
 
         Vector<float> query(dim_, allocator_);
-        codes->Decode(code, query.data());
-        if (need_release) {
-            codes->Release(code);
-        }
+        codes->Decode(code.Data(), query.data());
 
         Vector<float> distances(node_ids.size(), allocator_);
         auto computer = codes->FactoryComputer(query.data());

@@ -13,11 +13,14 @@ else
     mkdir -p "${COVERAGE_DIR}"
 fi
 
+# Exclude system headers before lcov runs consistency checks. The remove step below keeps the
+# same filter for compatibility with existing trace files.
 lcov --rc branch_coverage=1 \
      --rc geninfo_unexecuted_blocks=1 \
      --parallel 8 \
      --directory . \
      --capture \
+     --exclude '/usr/*' \
      --substitute "s#${ROOT_DIR}/##g" \
      --ignore-errors mismatch,mismatch \
      --ignore-errors count,count \

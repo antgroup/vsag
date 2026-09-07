@@ -88,6 +88,7 @@ auto result = index->KnnSearch(
 | `mrle_dim` | int | `0` | MRLE 保留的前缀维度；`0` 表示保持输入维度。 |
 | `max_degree` | int | `64` | 子图内节点的最大出度 |
 | `graph_type` | string | `"nsw"` | `nsw` 或 `odescent` |
+| `graph_storage_type` | string | `"flat"` | `multi_layer` 根节点的底图存储：`flat` 偏向构建和检索速度，`compressed` 减少图内存。压缩存储要求 `max_degree <= 255`。单层根图、路由图和子图仍使用 Sparse。 |
 | `ef_construction` | int | `400` | `nsw` 构图时的候选集大小 |
 | `alpha` | float | `1.2` | 构图剪枝系数 |
 | `graph_iter_turn` | int | — | ODescent 迭代轮数（`graph_type: "odescent"` 时生效） |
@@ -104,9 +105,10 @@ auto result = index->KnnSearch(
 | `store_raw_vector` | bool | `false` | 保留 FP32 原始向量，用于 `GetRawVectorByIds` 和精确的按 ID 距离计算 |
 | `store_paths` | bool | `false` | 顶层开关；保留传给 `Build` 和 `Add` 的原始路径，使 `GetDataByIdsWithFlag` 在选择 `DATA_FLAG_PATH` 时可以返回它们。该开关对所有已配置的 hierarchy 生效，不支持按 hierarchy 覆盖 |
 | `index_min_size` | int | `0` | 子索引的最小规模；小于该值的分区会退化为线性扫描 |
+| `root_graph_type` | string | `"single_layer"` | 根图结构：`single_layer` 保留原有稀疏底图；`multi_layer` 使用预分配的 Flat 或 Compressed 底图、类似 HGraph 的稀疏路由层以及联合构图流程。`multi_layer` 要求 `graph_type: "nsw"`。`no_build_levels` 禁用第 0 层时不要显式指定此选项。 |
 | `support_duplicate` | bool | `false` | 是否允许重复 ID |
 | `build_thread_count` | int | `1` | 构建阶段并发线程数 |
-| `hierarchies` | array | `[]` | 命名层级定义。每个元素可以是字符串（继承全部顶层参数）或对象（含 `name` 及可选覆盖参数：`max_degree`、`ef_construction`、`alpha`、`no_build_levels`、`index_min_size`）。设置后激活多层级模式，每个层级维护独立的路径树。 |
+| `hierarchies` | array | `[]` | 命名层级定义。每个元素可以是字符串（继承全部顶层参数）或对象（含 `name` 及可选覆盖参数：`max_degree`、`ef_construction`、`alpha`、`no_build_levels`、`index_min_size`、`root_graph_type`）。设置后激活多层级模式，每个层级维护独立的路径树。 |
 
 ### RaBitQ split 配置
 
@@ -159,7 +161,8 @@ Pyramid 使用 split code 的 code-code 距离完成增量 FLAT→GRAPH 晋升�
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `ef_search` | int | `100` | 叶子层子图检索的候选集大小 |
-| `hops_limit` | int | 不限 | 根图 KNN 检索的最大跳数；不大于 `ef_search` 时忽略 |
+| `factor` | float | 未设置 | KNN 重排候选倍率。值 `<= 1` 时不增加限制；值大于 `1` 时，Pyramid 保持各子图原有搜索行为，先合并子图结果，再将至多 `min(max(ef_search, topk), floor(topk * factor))` 个主图候选送入重排。与 HGraph 一致，RaBitQ lower-bound 安全候选可在该限制后额外并入，`reorder_candidate_count` 记录实际合并数量。参数必须为有限正数；范围检索或关闭重排时不生效。 |
+| `hops_limit` | int | 不限 | 根节点底图及每个非根 GRAPH 的逐图 KNN 跳数上限；不大于 `ef_search` 时忽略。根节点的稀疏路由层不受限制，FLAT 扫描与范围检索不受影响。 |
 | `subindex_ef_search` | int | `50` | 沿路径向下遍历中间子图时的候选集大小 |
 | `hierarchies` | string[] | `[]` | 指定检索哪个层级。空数组表示使用默认（匿名）层级。 |
 | `hierarchy_op` | string | `"single"` | 多层级结果合并方式：`single`（检索单个层级）、`union`、`intersection`。**注意：** `union` 和 `intersection` 尚未实现——设置后 `KnnSearch`/`RangeSearch` 会返回错误。 |
@@ -189,7 +192,15 @@ auto result = index->KnnSearch(
   `{"name": "category", "max_degree": 64, "no_build_levels": [0]}`
 
 可按层级覆盖的参数：`max_degree`、`ef_construction`、`alpha`、`no_build_levels`、
-`index_min_size`。
+`index_min_size`、`root_graph_type`。
+
+`root_graph_type: "multi_layer"` 只改变所选层级的根节点。底图使用顶层
+`graph_storage_type`：默认使用 Flat，也可使用 Compressed，以构建和检索速度换取更低的图
+内存；路由图和子图仍使用 Sparse。稀疏路由图先选择更好的入口点，再进入底图检索。批量
+Build 与增量 Add 都使用类似 HGraph 的 route 与 bottom 联合插入流程。该结构要求
+`graph_type: "nsw"`；参数校验会拒绝 `multi_layer` 与 `odescent` 的组合。存在独立 precise
+storage 时，底图和路由图的边统一使用 precise codes 构建，否则使用 base codes；查询遍历
+继续使用 base codes，最终精排使用配置的 reorder source。
 
 ```json
 {
@@ -323,7 +334,10 @@ new_index->Deserialize(binary_set);
 如果不需要按路径限定查询范围，[HGraph](hgraph.md) 更简洁，性能通常也更高。
 
 可以通过[索引分析](../resources/analyze_index.md)检查 Pyramid 的树结构、子索引质量、
-`GetStats()` 输出的 base 采样召回率和重复比例。`AnalyzeIndexBySearch` 还会输出按路径限定的
+`GetStats()` 输出的 base 采样召回率和重复比例。每个 hierarchy 的 `root_graphs` 会报告
+`root_graph_type`、`bottom_graph_storage_type`、`bottom_graph_node_count`、
+`bottom_graph_size`、`route_graph_count`、`route_node_counts` 和 `route_graph_size`。
+`AnalyzeIndexBySearch` 还会输出按路径限定的
 query 召回率、距离、耗时，以及开启 reorder 时的量化指标。query 数据集必须包含与
 `KnnSearch` 相同的默认或命名 hierarchy 路径；批量数据集在需要或提供路径时，应为每条 query
 提供一条路径。`analyze_index` 工具当前无法从 dense query 文件加载 hierarchy 路径，因此

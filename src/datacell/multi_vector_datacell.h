@@ -16,7 +16,6 @@
 #pragma once
 
 #include "flatten_interface.h"
-#include "io/common/basic_io.h"
 #include "io/memory_block_io/memory_block_io.h"
 #include "layout/variable_record_layout.h"
 #include "quantization/multi_vector_computer.h"

@@ -355,6 +355,28 @@ public:
     GetPaths(const std::string& hierarchy_name) const = 0;
 
     /**
+     * @brief Sets a named array of uint32 metadata values.
+     *
+     * The array contains one value per dataset element. It follows the same ownership rules as
+     * the other pointer-backed Dataset fields.
+     *
+     * @param name Metadata name.
+     * @param values Pointer to the metadata values.
+     * @return DatasetPtr A shared pointer to the dataset with updated metadata.
+     */
+    virtual DatasetPtr
+    UInt32Metadata(const std::string& name, const uint32_t* values) = 0;
+
+    /**
+     * @brief Retrieves a named array of uint32 metadata values.
+     *
+     * @param name Metadata name.
+     * @return const uint32_t* Pointer to the metadata values, or nullptr when absent.
+     */
+    virtual const uint32_t*
+    GetUInt32Metadata(const std::string& name) const = 0;
+
+    /**
      * @brief Sets the extra info for the dataset.
      *
      * @param paths Pointer to extra info.

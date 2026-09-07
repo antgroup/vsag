@@ -19,7 +19,7 @@
 
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
-#include "io/common/basic_io_test.h"
+#include "io/common/io_contract_test.h"
 #include "unittest.h"
 
 using namespace vsag;
@@ -33,22 +33,22 @@ TEST_CASE("BufferIO Read & Write", "[ut][BufferIO]") {
     TestBasicReadWrite(*io);
 }
 
-TEST_CASE("BufferIO DirectReadImpl empty read", "[ut][BufferIO]") {
+TEST_CASE("BufferIO direct read empty range", "[ut][BufferIO]") {
     fixtures::TempDir dir("buffer_io");
     auto path = dir.GenerateRandomFile(false);
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto io = std::make_unique<BufferIO>(path, allocator.get());
 
     bool need_release = true;
-    auto result = io->DirectReadImpl(0, 0, need_release);
+    auto result = io->Read(0, 0, need_release);
     REQUIRE(result == nullptr);
     REQUIRE_FALSE(need_release);
 
     const uint8_t value = 1;
-    io->WriteImpl(&value, 1, 0);
+    io->Write(&value, 1, 0);
 
     need_release = true;
-    result = io->DirectReadImpl(1, 1, need_release);
+    result = io->Read(1, 1, need_release);
     REQUIRE(result == nullptr);
     REQUIRE_FALSE(need_release);
 }

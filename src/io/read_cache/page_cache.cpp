@@ -148,6 +148,27 @@ PageCache::Remove(uint64_t page_id) {
 }
 
 void
+PageCache::RemoveRange(uint64_t first_page_id, uint64_t last_page_id) {
+    if (first_page_id > last_page_id) {
+        return;
+    }
+    std::scoped_lock<std::mutex> lock(mutex_);
+    for (auto it = pages_.begin(); it != pages_.end();) {
+        if (it->first >= first_page_id and it->first <= last_page_id) {
+            OnRemove(it->first);
+            it = pages_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (const auto& [page_id, state] : loading_pages_) {
+        if (page_id >= first_page_id and page_id <= last_page_id) {
+            state->stale = true;
+        }
+    }
+}
+
+void
 PageCache::Clear() {
     std::scoped_lock<std::mutex> lock(mutex_);
     for (const auto& page_pair : pages_) {

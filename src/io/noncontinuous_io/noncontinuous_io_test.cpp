@@ -17,7 +17,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <limits>
 #include <memory>
 #include <thread>
@@ -26,10 +28,43 @@
 #include "impl/allocator/safe_allocator.h"
 #include "io/async_io/async_io.h"
 #include "io/buffer_io/buffer_io.h"
-#include "io/common/basic_io_test.h"
+#include "io/common/io_contract_test.h"
+#include "io/memory_io/memory_io.h"
 #include "io/mmap_io/mmap_io.h"
 #include "unittest.h"
 namespace vsag {
+
+class ToggleFailAllocator : public Allocator {
+public:
+    std::string
+    Name() override {
+        return "ToggleFailAllocator";
+    }
+
+    void*
+    Allocate(uint64_t size) override {
+        return fail_allocations_ ? nullptr : std::malloc(size);
+    }
+
+    void
+    Deallocate(void* data) override {
+        std::free(data);
+    }
+
+    void*
+    Reallocate(void* data, uint64_t size) override {
+        return fail_allocations_ ? nullptr : std::realloc(data, size);
+    }
+
+    void
+    SetFailAllocations(bool fail) {
+        fail_allocations_ = fail;
+    }
+
+private:
+    bool fail_allocations_{false};
+};
+
 struct TrackingIOState {
     std::vector<uint8_t> data_;
     uint64_t multi_read_calls_{0};
@@ -37,24 +72,24 @@ struct TrackingIOState {
     std::vector<uint64_t> last_offsets_;
 };
 
-class TrackingIO : public BasicIO<TrackingIO> {
+class TrackingIO : public MemoryIO {
 public:
-    static constexpr bool InMemory = true;
-    static constexpr bool SkipDeserialize = false;
-
     TrackingIO(std::shared_ptr<TrackingIOState> state, Allocator* allocator)
-        : BasicIO<TrackingIO>(allocator), state_(std::move(state)) {
+        : MemoryIO(allocator), state_(std::move(state)) {
     }
 
     void
-    WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
+    Write(const uint8_t* data, uint64_t size, uint64_t offset) {
         state_->data_.resize(std::max<uint64_t>(state_->data_.size(), offset + size));
         std::memcpy(state_->data_.data() + offset, data, size);
-        this->PublishSize(offset + size);
+        MemoryIO::Write(data, size, offset);
     }
 
     bool
-    MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const {
+    MultiRead(uint8_t* datas,
+              const uint64_t* sizes,
+              const uint64_t* offsets,
+              uint64_t count) const {
         ++state_->multi_read_calls_;
         state_->last_sizes_.assign(sizes, sizes + count);
         state_->last_offsets_.assign(offsets, offsets + count);
@@ -66,6 +101,32 @@ public:
             datas += sizes[i];
         }
         return true;
+    }
+
+    bool
+    ReadMany(const ReadRequest* requests, uint64_t count) const {
+        ++state_->multi_read_calls_;
+        state_->last_sizes_.clear();
+        state_->last_offsets_.clear();
+        state_->last_sizes_.reserve(count);
+        state_->last_offsets_.reserve(count);
+        for (uint64_t i = 0; i < count; ++i) {
+            state_->last_sizes_.emplace_back(requests[i].size);
+            state_->last_offsets_.emplace_back(requests[i].offset);
+            if (requests[i].offset > state_->data_.size() or
+                requests[i].size > state_->data_.size() - requests[i].offset) {
+                return false;
+            }
+            std::memcpy(requests[i].destination,
+                        state_->data_.data() + requests[i].offset,
+                        requests[i].size);
+        }
+        return true;
+    }
+
+    bool
+    ReadManyPrevalidated(const ReadRequest* requests, uint64_t count) const {
+        return ReadMany(requests, count);
     }
 
 private:
@@ -116,18 +177,21 @@ template <typename T>
 void
 NonContinuousIOTestSerialize() {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    fixtures::TempDir temp_dir("NonContinuousIOTestSerialize");
     {
         NonContinuousIOTest<T> test;
         auto non_continuous_allocator1 = std::make_unique<NonContinuousAllocator>(allocator.get());
-        auto io1 = test.CreateNonContinuousIO(non_continuous_allocator1.get(),
-                                              allocator.get(),
-                                              "/tmp/test_noncontinuous_io1",
-                                              allocator.get());
+        auto io1 =
+            test.CreateNonContinuousIO(non_continuous_allocator1.get(),
+                                       allocator.get(),
+                                       (std::filesystem::path(temp_dir.path) / "io1").string(),
+                                       allocator.get());
         auto non_continuous_allocator2 = std::make_unique<NonContinuousAllocator>(allocator.get());
-        auto io2 = test.CreateNonContinuousIO(non_continuous_allocator2.get(),
-                                              allocator.get(),
-                                              "/tmp/test_noncontinuous_io2",
-                                              allocator.get());
+        auto io2 =
+            test.CreateNonContinuousIO(non_continuous_allocator2.get(),
+                                       allocator.get(),
+                                       (std::filesystem::path(temp_dir.path) / "io2").string(),
+                                       allocator.get());
         TestSerializeAndDeserialize(*io1, *io2);
         delete io1;
         delete io2;
@@ -187,6 +251,46 @@ TEST_CASE("NonContinuousIO batches physical fragments", "[NonContinuousIO][ut]")
                                                           page_size * 2});
 }
 
+TEST_CASE("NonContinuousIO spills large physical fragment batches", "[NonContinuousIO][ut]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto non_continuous_allocator = std::make_unique<NonContinuousAllocator>(allocator.get());
+    auto state = std::make_shared<TrackingIOState>();
+    NonContinuousIOTest<TrackingIO> test;
+    std::unique_ptr<NonContinuousIO<TrackingIO>> io(test.CreateNonContinuousIO(
+        non_continuous_allocator.get(), allocator.get(), state, allocator.get()));
+    std::unique_ptr<NonContinuousIO<TrackingIO>> spacer(test.CreateNonContinuousIO(
+        non_continuous_allocator.get(), allocator.get(), state, allocator.get()));
+
+    constexpr uint64_t page_size = 4096;
+    constexpr uint64_t request_count = 80;
+    std::vector<uint8_t> logical_data(page_size * (request_count + 1));
+    for (uint64_t i = 0; i < logical_data.size(); ++i) {
+        logical_data[i] = static_cast<uint8_t>(i % 251);
+    }
+    std::vector<uint8_t> spacer_data(page_size, 0xFF);
+    for (uint64_t page_id = 0; page_id <= request_count; ++page_id) {
+        io->Write(logical_data.data() + page_id * page_size, page_size, page_id * page_size);
+        spacer->Write(spacer_data.data(), page_size, page_id * page_size);
+    }
+
+    std::vector<uint64_t> sizes(request_count, 128);
+    std::vector<uint64_t> offsets(request_count);
+    std::vector<uint8_t> output(request_count * 128);
+    std::vector<uint8_t> expected;
+    expected.reserve(output.size());
+    for (uint64_t i = 0; i < request_count; ++i) {
+        offsets[i] = (i + 1) * page_size - 64;
+        expected.insert(expected.end(),
+                        logical_data.begin() + offsets[i],
+                        logical_data.begin() + offsets[i] + sizes[i]);
+    }
+
+    REQUIRE(io->MultiRead(output.data(), sizes.data(), offsets.data(), request_count));
+    REQUIRE(output == expected);
+    REQUIRE(state->multi_read_calls_ == 1);
+    REQUIRE(state->last_sizes_.size() == request_count * 2);
+}
+
 TEST_CASE("NonContinuousIO validates batch ranges and empty reads", "[NonContinuousIO][ut]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto non_continuous_allocator = std::make_unique<NonContinuousAllocator>(allocator.get());
@@ -227,6 +331,23 @@ TEST_CASE("NonContinuousIO validates batch ranges and empty reads", "[NonContinu
     REQUIRE_FALSE(io->MultiRead(output.data(), nullptr, &zero_size, 1));
     REQUIRE_FALSE(io->MultiRead(output.data(), &zero_size, nullptr, 1));
     REQUIRE(state->multi_read_calls_ == 0);
+}
+
+TEST_CASE("NonContinuousIO canonical acquire reports allocation failure",
+          "[NonContinuousIO][ut][exception-safety]") {
+    ToggleFailAllocator allocator;
+    NonContinuousAllocator extent_allocator(&allocator);
+    NonContinuousIO<MemoryIO> io(&extent_allocator, &allocator, &allocator);
+    std::vector<uint8_t> source(4096, 0x5A);
+    io.WriteAt(0, source.data(), source.size());
+
+    allocator.SetFailAllocations(true);
+    REQUIRE_THROWS_AS(io.Acquire(0, 128), VsagException);
+
+    bool need_release = true;
+    REQUIRE(io.Read(128, 0, need_release) == nullptr);
+    REQUIRE_FALSE(need_release);
+    allocator.SetFailAllocations(false);
 }
 
 TEST_CASE("NonContinuousAllocator allocates unique regions concurrently",

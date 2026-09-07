@@ -203,10 +203,35 @@ SINDI writes these streaming blocks in order:
 | `label_table` | external labels and label remap | yes |
 | `sindi_rerank_index` | optional rerank flat index when rerank is enabled | conditional |
 | `sindi_term_id_mapper` | optional term-id remapping table | conditional |
+| `sindi_host_metadata` | optional host IDs and one-or-more inner-ID ranges per host | conditional |
+| `sindi_date_metadata` | optional encoded date buckets and quarter/host interval directories | conditional |
 
 `DeserializeStreaming` restores the full in-memory SINDI index. `Index::Load` can create the SINDI
 index directly from streaming metadata and currently loads all emitted SINDI blocks into memory.
-Immutable SINDI runtime serialization is not supported by this streaming path.
+Mutable and immutable SINDI runtimes both support this streaming path. Legacy serialization stores
+standalone host metadata or date-routing metadata for mutable and immutable indexes. These
+top-level payloads are mutually exclusive; combined date-and-host routing stores its host directory
+inside the date payload. A restored mutable date-aware index rejects incremental `Add()`.
+
+## SINDI_V2 Blocks
+
+SINDI_V2 writes these streaming blocks in order:
+
+| Block | Contents | Required |
+| --- | --- | --- |
+| `sindi_v2_term_layout` | term-first posting layout, element count, and quantization state | yes |
+| `label_table` | external labels and label remap | yes |
+| `sindi_rerank_index` | optional rerank index when rerank is enabled | conditional |
+| `extra_info` | optional per-document extra information | conditional |
+| `sindi_term_id_mapper` | optional term-id remapping table | conditional |
+| `sindi_host_metadata` | optional host IDs and one-or-more inner-ID ranges per host | conditional |
+| `sindi_date_metadata` | optional encoded date buckets and quarter/host interval directories | conditional |
+
+`DeserializeStreaming` and `Index::Load` restore mutable or immutable SINDI_V2 runtimes from these
+blocks. Legacy serialization stores standalone host metadata or date-routing metadata for mutable
+and immutable indexes. These top-level payloads are mutually exclusive; combined date-and-host
+routing stores its host directory inside the date payload. A restored mutable date-aware index
+rejects incremental `Add()`.
 
 ## Pyramid Blocks
 

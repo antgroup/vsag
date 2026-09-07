@@ -22,7 +22,7 @@
 
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
-#include "io/common/basic_io_test.h"
+#include "io/common/io_contract_test.h"
 
 using namespace vsag;
 
@@ -50,6 +50,9 @@ TEST_CASE("UringIO Parameter", "[ut][UringIO]") {
     )";
     auto json = JsonType::Parse(fmt::format(param_str, path));
     auto io_param = IOParameter::GetIOParameterByJson(json);
+    REQUIRE(std::dynamic_pointer_cast<UringIOParameter>(io_param) != nullptr);
+    REQUIRE(io_param->Kind() == IOKind::URING);
+    REQUIRE(io_param->ToJson()["type"].GetString() == "uring_io");
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
     auto io = std::make_unique<UringIO>(io_param, common_param);

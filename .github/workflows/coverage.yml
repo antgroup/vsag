@@ -60,7 +60,7 @@ jobs:
           apt update
           apt install -y libcapture-tiny-perl libdatetime-perl curl jq
           git clone https://github.com/linux-test-project/lcov.git
-          cd lcov && git checkout v2.3 && make install
+          cd lcov && git checkout v2.3 && make SHELL=/bin/bash install
           lcov --version
       - name: Load Cache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -72,17 +72,20 @@ jobs:
         # `make cov` defaults to the OpenBLAS backend. Use the system-installed
         # OpenBLAS in the ci-x86-openblas image instead of building OpenBLAS
         # from source every run.
-        run: |
-          export CMAKE_GENERATOR="Ninja"
-          export EXTRA_DEFINED="-DVSAG_USE_SYSTEM_OPENBLAS=ON"
-          make cov
+        env:
+          CMAKE_GENERATOR: Ninja
+          EXTRA_DEFINED: -DVSAG_USE_SYSTEM_OPENBLAS=ON
+        run: ./scripts/ci/run-with-diagnostics.sh coverage-diagnostics/compile.log make cov
       - name: Run Test
-        run: |
+        run: >-
+          ./scripts/ci/run-with-diagnostics.sh coverage-diagnostics/tests.log
           ./scripts/testing/test_parallel_bg.sh
       - name: Collect Coverage Info
         run: |
-          bash scripts/coverage/collect_cpp_coverage.sh
-          head -n10 coverage/coverage.info
+          ./scripts/ci/run-with-diagnostics.sh coverage-diagnostics/collect.log \
+            bash scripts/coverage/collect_cpp_coverage.sh
+          ./scripts/ci/run-with-diagnostics.sh coverage-diagnostics/coverage-head.log \
+            head -n10 coverage/coverage.info
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
@@ -92,3 +95,11 @@ jobs:
           flags: cpp
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
+      - name: Upload Coverage Diagnostics
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: coverage-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: coverage-diagnostics/
+          retention-days: 30
+          if-no-files-found: warn
