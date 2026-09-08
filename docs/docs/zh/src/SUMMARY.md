@@ -7,6 +7,7 @@
 - [安装](guide/installation.md)
 - [创建索引](guide/create_index.md)
 - [k-近邻搜索](guide/knn_search.md)
+- [查询统计信息](guide/search_statistics.md)
 - [C API](guide/c_api.md)
 - [pyvsag](guide/pyvsag.md)
 
