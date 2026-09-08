@@ -47,6 +47,10 @@ to Unix Makefiles. An explicit generator always wins; for example, use
 trees are generator-specific, run the matching clean target before changing the generator for an
 existing build directory.
 
+For configure/build targets, pass `DEBUG_BUILD_DIR` as a plain path, for example
+`make asan DEBUG_BUILD_DIR="custom build"`. The shell removes these command-line quotes;
+the recipes quote the path when invoking CMake. Do not embed literal quote characters in the variable.
+
 ## Step-by-Step
 
 ```bash
