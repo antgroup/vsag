@@ -21,34 +21,16 @@
 #include <cctype>
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <string>
 
 #include "metric_type.h"
+#include "search_metrics_names.h"
 #include "typing.h"
 #include "vsag/allocator.h"
+#include "vsag/search_metrics.h"
 
 namespace vsag {
-
-enum class DistanceEvaluationPhase : uint8_t { ROUTING = 0, APPROXIMATE = 1, RERANK = 2 };
-
-enum class DistanceEvaluationBackend : uint8_t {
-    FP32 = 0,
-    FP16,
-    BF16,
-    INT8,
-    SQ8,
-    SQ4,
-    SQ8_UNIFORM,
-    SQ4_UNIFORM,
-    PQ,
-    PQ_FASTSCAN,
-    RABITQ,
-    BINARY,
-    SPARSE_FP32,
-    SPARSE_FP16,
-    SPARSE_SQ8,
-    UNKNOWN,
-};
 
 class SearchStatistics;
 class ReasoningContext;
@@ -93,16 +75,7 @@ public:
 
     static const char*
     PhaseName(DistancePhase phase) {
-        switch (phase) {
-            case DistancePhase::ROUTING:
-                return "routing";
-            case DistancePhase::APPROXIMATE:
-                return "approximate";
-            case DistancePhase::RERANK:
-                return "rerank";
-            default:
-                return "approximate";
-        }
+        return DistanceEvaluationPhaseName(phase);
     }
 
     static DistanceEvaluationBackend
@@ -145,23 +118,7 @@ public:
 
     static const char*
     BackendName(DistanceEvaluationBackend backend) {
-        static constexpr const char* names[] = {"fp32",
-                                                "fp16",
-                                                "bf16",
-                                                "int8",
-                                                "sq8",
-                                                "sq4",
-                                                "sq8_uniform",
-                                                "sq4_uniform",
-                                                "pq",
-                                                "pq_fastscan",
-                                                "rabitq",
-                                                "binary",
-                                                "sparse_fp32",
-                                                "sparse_fp16",
-                                                "sparse_sq8",
-                                                "unknown"};
-        return names[static_cast<uint8_t>(backend)];
+        return DistanceEvaluationBackendName(backend);
     }
 
     static bool
@@ -219,34 +176,36 @@ public:
     ToJson() const {
         JsonType j;
         j["is_timeout"].SetBool(is_timeout.load(std::memory_order_relaxed));
-        j["dist_cmp"].SetInt(dist_cmp.load(std::memory_order_relaxed));
-        j["hops"].SetInt(hops.load(std::memory_order_relaxed));
-        j["io_cnt"].SetInt(io_cnt.load(std::memory_order_relaxed));
-        j["io_time_ms"].SetInt(io_time_ms.load(std::memory_order_relaxed));
-        j["reorder_distance_count"].SetInt(reorder_distance_count.load(std::memory_order_relaxed));
-        j["reorder_candidate_count"].SetInt(
+        j["dist_cmp"].SetUint64(dist_cmp.load(std::memory_order_relaxed));
+        j["hops"].SetUint64(hops.load(std::memory_order_relaxed));
+        j["io_cnt"].SetUint64(io_cnt.load(std::memory_order_relaxed));
+        j["io_time_ms"].SetUint64(io_time_ms.load(std::memory_order_relaxed));
+        j["reorder_distance_count"].SetUint64(
+            reorder_distance_count.load(std::memory_order_relaxed));
+        j["reorder_candidate_count"].SetUint64(
             reorder_candidate_count.load(std::memory_order_relaxed));
-        j["reorder_lower_bound_probe_count"].SetInt(
+        j["reorder_lower_bound_probe_count"].SetUint64(
             reorder_lower_bound_probe_count.load(std::memory_order_relaxed));
-        j["rabitq_filter_count"].SetInt(rabitq_filter_count.load(std::memory_order_relaxed));
-        j["rabitq_full_count"].SetInt(rabitq_full_count.load(std::memory_order_relaxed));
-        j["rabitq_filter_fallback_full_count"].SetInt(
+        j["rabitq_filter_count"].SetUint64(rabitq_filter_count.load(std::memory_order_relaxed));
+        j["rabitq_full_count"].SetUint64(rabitq_full_count.load(std::memory_order_relaxed));
+        j["rabitq_filter_fallback_full_count"].SetUint64(
             rabitq_filter_fallback_full_count.load(std::memory_order_relaxed));
-        j["rabitq_reorder_hint_full_count"].SetInt(
+        j["rabitq_reorder_hint_full_count"].SetUint64(
             rabitq_reorder_hint_full_count.load(std::memory_order_relaxed));
-        j["rabitq_reorder_fallback_full_count"].SetInt(
+        j["rabitq_reorder_fallback_full_count"].SetUint64(
             rabitq_reorder_fallback_full_count.load(std::memory_order_relaxed));
-        j["query_computer_count"].SetInt(query_computer_count.load(std::memory_order_relaxed));
-        j["parallel_search_fallback_count"].SetInt(
+        j["query_computer_count"].SetUint64(query_computer_count.load(std::memory_order_relaxed));
+        j["parallel_search_fallback_count"].SetUint64(
             parallel_search_fallback_count.load(std::memory_order_relaxed));
         j["distance_evaluations"].SetUint64(distance_evaluations.load(std::memory_order_relaxed));
-        for (size_t i = 0; i < 3; ++i) {
-            j["distance_evaluations_by_phase"][PhaseName(static_cast<DistancePhase>(i))].SetUint64(
-                distance_evaluations_by_phase[i].load(std::memory_order_relaxed));
+        for (uint64_t i = 0; i < distance_evaluations_by_phase.size(); ++i) {
+            j["distance_evaluations_by_phase"]
+             [DistanceEvaluationPhaseName(static_cast<DistanceEvaluationPhase>(i))]
+                 .SetUint64(distance_evaluations_by_phase[i].load(std::memory_order_relaxed));
         }
-        for (size_t i = 0; i < distance_evaluations_by_backend.size(); ++i) {
+        for (uint64_t i = 0; i < distance_evaluations_by_backend.size(); ++i) {
             const auto backend = static_cast<DistanceEvaluationBackend>(i);
-            j["distance_evaluations_by_backend"][BackendName(backend)].SetUint64(
+            j["distance_evaluations_by_backend"][DistanceEvaluationBackendName(backend)].SetUint64(
                 distance_evaluations_by_backend[i].load(std::memory_order_relaxed));
         }
         j["complete"].SetBool(complete.load(std::memory_order_relaxed));
@@ -275,14 +234,80 @@ public:
     std::atomic<uint32_t> query_computer_count{0};
     std::atomic<uint32_t> parallel_search_fallback_count{0};
     std::atomic<uint64_t> distance_evaluations{0};
-    std::array<std::atomic<uint64_t>, 3> distance_evaluations_by_phase{};
-    std::array<std::atomic<uint64_t>, 16> distance_evaluations_by_backend{};
+    std::array<std::atomic<uint64_t>, static_cast<uint8_t>(DistanceEvaluationPhase::COUNT)>
+        distance_evaluations_by_phase{};
+    std::array<std::atomic<uint64_t>, static_cast<uint8_t>(DistanceEvaluationBackend::COUNT)>
+        distance_evaluations_by_backend{};
     // Multi-vector (SIMQ) fine-grained statistics
     std::atomic<uint32_t> mv_io_time_ms{0};
     std::atomic<uint32_t> mv_compute_time_ms{0};
     std::atomic<uint32_t> mv_candidate_count{0};
     std::atomic<uint64_t> mv_io_bytes{0};
     std::atomic<bool> complete{true};
+};
+
+class SearchMetrics {
+public:
+    SearchStatistics base;
+
+    /**
+     * Add a query-specific field without replacing established values.
+     * Returns false for a baseline-schema collision or a duplicate extension key; on failure, the
+     * existing metric value is unchanged.
+     */
+    [[nodiscard]] bool
+    AddExtension(std::string key, MetricValue value) {
+        if (MetricsSchema::Base().Contains(key)) {
+            return false;
+        }
+        return extensions_.emplace(std::move(key), std::move(value)).second;
+    }
+
+    /**
+     * Consume the query-local collector after search workers have completed.
+     * Relaxed loads are sufficient for diagnostics after worker synchronization; callers must not
+     * snapshot concurrently with active writers or assume a transactional cross-counter view.
+     */
+    [[nodiscard]] SearchResultMetrics
+    Snapshot() && {
+        SearchResultMetrics result;
+        result.is_timeout = base.is_timeout.load(std::memory_order_relaxed);
+        result.dist_cmp = base.dist_cmp.load(std::memory_order_relaxed);
+        result.hops = base.hops.load(std::memory_order_relaxed);
+        result.io_cnt = base.io_cnt.load(std::memory_order_relaxed);
+        result.io_time_ms = base.io_time_ms.load(std::memory_order_relaxed);
+        result.reorder_distance_count = base.reorder_distance_count.load(std::memory_order_relaxed);
+        result.reorder_candidate_count =
+            base.reorder_candidate_count.load(std::memory_order_relaxed);
+        result.reorder_lower_bound_probe_count =
+            base.reorder_lower_bound_probe_count.load(std::memory_order_relaxed);
+        result.rabitq_filter_count = base.rabitq_filter_count.load(std::memory_order_relaxed);
+        result.rabitq_full_count = base.rabitq_full_count.load(std::memory_order_relaxed);
+        result.rabitq_filter_fallback_full_count =
+            base.rabitq_filter_fallback_full_count.load(std::memory_order_relaxed);
+        result.rabitq_reorder_hint_full_count =
+            base.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed);
+        result.rabitq_reorder_fallback_full_count =
+            base.rabitq_reorder_fallback_full_count.load(std::memory_order_relaxed);
+        result.query_computer_count = base.query_computer_count.load(std::memory_order_relaxed);
+        result.parallel_search_fallback_count =
+            base.parallel_search_fallback_count.load(std::memory_order_relaxed);
+        result.distance_evaluations = base.distance_evaluations.load(std::memory_order_relaxed);
+        for (uint64_t i = 0; i < result.distance_evaluations_by_phase.size(); ++i) {
+            result.distance_evaluations_by_phase[i] =
+                base.distance_evaluations_by_phase[i].load(std::memory_order_relaxed);
+        }
+        for (uint64_t i = 0; i < result.distance_evaluations_by_backend.size(); ++i) {
+            result.distance_evaluations_by_backend[i] =
+                base.distance_evaluations_by_backend[i].load(std::memory_order_relaxed);
+        }
+        result.complete = base.complete.load(std::memory_order_relaxed);
+        result.extensions_ = std::move(extensions_);
+        return result;
+    }
+
+private:
+    std::map<std::string, MetricValue> extensions_;
 };
 
 template <typename QuantTmpl>

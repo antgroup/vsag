@@ -29,6 +29,12 @@ Dataset::Make() {
     return std::make_shared<DatasetImpl>();
 }
 
+std::optional<SearchResultMetrics>
+Dataset::GetSearchMetrics() const {
+    const auto* accessor = dynamic_cast<const SearchMetricsDatasetAccessor*>(this);
+    return accessor == nullptr ? std::nullopt : accessor->GetSearchMetricsInternal();
+}
+
 DatasetPtr
 DatasetImpl::MakeEmptyDataset() {
     auto result = std::make_shared<DatasetImpl>();
@@ -719,7 +725,7 @@ DatasetImpl::Append(const DatasetPtr& other) {
 
 std::vector<std::string>
 DatasetImpl::GetStatistics(const std::vector<std::string>& stat_keys) const {
-    auto json = JsonType::Parse(this->Statistics_);
+    auto json = JsonType::Parse(this->GetStatistics());
     std::vector<std::string> result;
     for (const auto& key : stat_keys) {
         if (json.Contains(key)) {

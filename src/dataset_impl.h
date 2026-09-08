@@ -18,17 +18,21 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 
+#include "search_metrics_internal.h"
 #include "vsag/allocator.h"
 #include "vsag/dataset.h"
 
 namespace vsag {
 
-class DatasetImpl : public Dataset {
+class DatasetImpl : public Dataset, public SearchMetricsDatasetAccessor {
     using var = std::variant<int64_t,
                              const float*,
                              const char*,
@@ -53,8 +57,19 @@ public:
     DatasetImpl(DatasetImpl&& other) noexcept {
         this->owner_ = other.owner_;
         other.owner_ = false;
-        this->data_ = other.data_;
+        this->data_ = std::move(other.data_);
+        this->allocator_ = other.allocator_;
+        this->Statistics_ = std::move(other.Statistics_);
+        this->StatisticsCacheValid_ = other.StatisticsCacheValid_;
+        this->SearchMetrics_ = std::move(other.SearchMetrics_);
+        this->Reasoning_ = std::move(other.Reasoning_);
+
         other.data_.clear();
+        other.allocator_ = nullptr;
+        other.Statistics_ = "{}";
+        other.StatisticsCacheValid_ = true;
+        other.SearchMetrics_.reset();
+        other.Reasoning_ = "{}";
     }
 
     DatasetPtr
@@ -297,9 +312,25 @@ public:
     }
 
     DatasetPtr
-    Statistics(const std::string& Statisticss) override {
-        this->Statistics_ = Statisticss;
+    Statistics(const std::string& statistics) override {
+        std::unique_lock lock(this->StatisticsMutex_);
+        this->SearchMetrics_.reset();
+        this->Statistics_ = statistics;
+        this->StatisticsCacheValid_ = true;
         return shared_from_this();
+    }
+
+    void
+    SetSearchMetricsInternal(SearchResultMetrics metrics) override {
+        std::unique_lock lock(this->StatisticsMutex_);
+        this->SearchMetrics_ = std::move(metrics);
+        this->StatisticsCacheValid_ = false;
+    }
+
+    std::optional<SearchResultMetrics>
+    GetSearchMetricsInternal() const override {
+        std::shared_lock lock(this->StatisticsMutex_);
+        return this->SearchMetrics_;
     }
 
     std::vector<std::string>
@@ -307,6 +338,17 @@ public:
 
     std::string
     GetStatistics() const override {
+        {
+            std::shared_lock lock(this->StatisticsMutex_);
+            if (this->StatisticsCacheValid_) {
+                return this->Statistics_;
+            }
+        }
+        std::unique_lock lock(this->StatisticsMutex_);
+        if (not this->StatisticsCacheValid_ && this->SearchMetrics_.has_value()) {
+            this->Statistics_ = this->SearchMetrics_->Dump();
+            this->StatisticsCacheValid_ = true;
+        }
         return this->Statistics_;
     }
 
@@ -447,7 +489,12 @@ private:
     std::unordered_map<std::string, var> data_;
     Allocator* allocator_ = nullptr;
 
-    std::string Statistics_{"{}"};
+    mutable std::shared_mutex StatisticsMutex_;
+    // These mutable fields are a derived serialization cache. Populating them from a typed snapshot
+    // in a const getter does not change the Dataset's observable statistics value.
+    mutable std::string Statistics_{"{}"};
+    mutable bool StatisticsCacheValid_{true};
+    std::optional<SearchResultMetrics> SearchMetrics_;
     std::string Reasoning_{"{}"};
 };
 

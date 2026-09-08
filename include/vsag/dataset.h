@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -23,6 +24,7 @@
 #include "vsag/allocator.h"
 #include "vsag/attribute.h"
 #include "vsag/constants.h"
+#include "vsag/search_metrics.h"
 
 namespace vsag {
 
@@ -457,6 +459,15 @@ public:
      */
     virtual std::vector<std::string>
     GetStatistics(const std::vector<std::string>& stat_keys) const = 0;
+
+    /**
+     * @brief Returns the typed search-statistics snapshot when supported and collected.
+     *
+     * @return std::nullopt when statistics were not collected or when the Dataset implementation
+     * does not support typed search statistics.
+     */
+    [[nodiscard]] std::optional<SearchResultMetrics>
+    GetSearchMetrics() const;
 
     /**
      * @brief Sets the Reasoning report for the dataset.

@@ -26,6 +26,7 @@
 namespace vsag {
 
 class SafeThreadPool;
+class SearchMetrics;
 
 DEFINE_POINTER2(AttrInvertedInterface, AttributeInvertedInterface);
 DEFINE_POINTER(FlattenInterface);
@@ -117,6 +118,9 @@ public:
 
     [[nodiscard]] DatasetPtr
     SearchWithRequest(const SearchRequest& request) const override;
+
+    [[nodiscard]] DatasetPtr
+    SearchWithRequest(const SearchRequest& request, SearchMetrics* metrics) const;
 
     void
     Serialize(StreamWriter& writer) const override;
