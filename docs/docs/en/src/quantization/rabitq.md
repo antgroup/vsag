@@ -148,4 +148,4 @@ also tracks a residual norm so the inner-product estimate is unbiased.
 - [Transform Quantizer](../advanced/quantization_transform.md)
 - [HGraph index](../indexes/hgraph.md)
 - [RaBitQ x+y Split](rabitq_split.md)
-- [Quantization overview](README.md)
+- [Quantization overview](./)

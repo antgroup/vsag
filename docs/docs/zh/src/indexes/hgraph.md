@@ -58,7 +58,7 @@ auto result = index->KnnSearch(
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `base_quantization_type` | string | —（必填） | `fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`tq` —— 各量化器细节见[量化章节](../quantization/README.md) |
+| `base_quantization_type` | string | —（必填） | `fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`tq` —— 各量化器细节见[量化章节](../quantization/) |
 | `max_degree` | int | `64` | 图节点最大出度 |
 | `ef_construction` | int | `400` | 构建阶段的候选集大小（越大召回越高，构建越慢） |
 | `graph_type` | string | `"nsw"` | 构图算法：`nsw` 或 `odescent` |

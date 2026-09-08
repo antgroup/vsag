@@ -84,4 +84,4 @@ the integer codes back to per-dimension scaled floats.
 
 - [Scalar Uniform (SQ4 / SQ8 Uniform)](sq_uniform.md)
 - [Transform Quantizer](../advanced/quantization_transform.md)
-- [Quantization overview](README.md)
+- [Quantization overview](./)

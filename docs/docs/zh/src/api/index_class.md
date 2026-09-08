@@ -107,7 +107,7 @@ using WriteFuncType = std::function<void(OffsetType, SizeType, const void*)>;
 | `Build` | `tl::expected<std::vector<int64_t>, Error> Build(const DatasetPtr& base)` | *（纯虚函数）* 从全部向量构建索引。返回插入失败的 id。 |
 | `Train` | `tl::expected<void, Error> Train(const DatasetPtr& data)` | 训练索引（如 IVF 聚类中心、量化器）而不插入数据。 |
 | `Tune` | `tl::expected<bool, Error> Tune(const std::string& parameters, bool disable_future_tuning = false)` | 应用运行期调优。见 [优化器](../advanced/optimizer.md)。 |
-| `ContinueBuild` | `tl::expected<Checkpoint, Error> ContinueBuild(const DatasetPtr& base, const BinarySet& binary_set)` | 为无法增量插入的索引提供动态性；用返回的 [`Checkpoint`](#checkpoint) 驱动。 |
+| <a id="continuebuild"></a>`ContinueBuild` | `tl::expected<Checkpoint, Error> ContinueBuild(const DatasetPtr& base, const BinarySet& binary_set)` | 为无法增量插入的索引提供动态性；用返回的 [`Checkpoint`](#checkpoint) 驱动。 |
 | `Add` | `tl::expected<std::vector<int64_t>, Error> Add(const DatasetPtr& base)` | 向已构建的索引插入新向量。返回插入失败的 id。 |
 
 见 [索引构建与训练](../advanced/build_and_train.md) 与 `examples/cpp/311_feature_train.cpp`。
@@ -116,7 +116,7 @@ using WriteFuncType = std::function<void(OffsetType, SizeType, const void*)>;
 
 | 方法 | 签名 | 说明 |
 |------|------|------|
-| `Remove` | `tl::expected<uint32_t, Error> Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE)` | 删除多个 id；返回被删除的数量。 |
+| <a id="remove"></a>`Remove` | `tl::expected<uint32_t, Error> Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE)` | 删除多个 id；返回被删除的数量。 |
 | `Remove` | `tl::expected<uint32_t, Error> Remove(int64_t id, RemoveMode mode = RemoveMode::MARK_REMOVE)` | 单 id 便捷重载。 |
 | `UpdateId` | `tl::expected<bool, Error> UpdateId(int64_t old_id, int64_t new_id)` | 为一个基础点重新打标签。 |
 | `UpdateVector` | `tl::expected<bool, Error> UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false)` | 替换 `id` 对应的向量。`force_update = false` 会执行连通性检查。 |
@@ -207,7 +207,7 @@ RangeSearch(const DatasetPtr& query, float radius, const std::string& parameters
             const FilterPtr& filter, int64_t limited_size = -1) const;
 ```
 
-`radius` 限定距离上界；`limited_size` 限制结果数量（`<= 0` 表示不限，`0` 为错误）。见
+`radius` 限定距离上界；`limited_size` 限制结果数量（`< 0` 表示不限，`0` 为错误）。见
 [范围搜索](../advanced/range_search.md) 与 `examples/cpp/302_feature_range_search.cpp`。
 
 ## 按 id 计算距离
@@ -241,7 +241,7 @@ RangeSearch(const DatasetPtr& query, float radius, const std::string& parameters
 | `GetExtraInfoByIds` | `tl::expected<void, Error> GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const` | 把 `ids` 的 extra-info 数据块拷贝到调用方提供的缓冲区。 |
 | `GetRawVectorByIds` | `tl::expected<DatasetPtr, Error> GetRawVectorByIds(const int64_t* ids, int64_t count, Allocator* specified_allocator = nullptr) const` | 返回已存向量。其值*接近*原始值，但不保证逐位一致（量化/精度）。 |
 | `GetDataByIds` | `tl::expected<DatasetPtr, Error> GetDataByIds(const int64_t* ids, int64_t count) const` | 返回实现默认提供的已存字段；可选字段可能需要显式选择。 |
-| `GetDataByIdsWithFlag` | `tl::expected<DatasetPtr, Error> GetDataByIdsWithFlag(const int64_t* ids, int64_t count, uint64_t selected_data_flag) const` | 通过 [`DATA_FLAG_*`](#数据选择标志) 选择支持的字段。Pyramid 路径需要同时设置 `store_paths: true` 和 `DATA_FLAG_PATH`。 |
+| <a id="getdatabyidswithflag"></a>`GetDataByIdsWithFlag` | `tl::expected<DatasetPtr, Error> GetDataByIdsWithFlag(const int64_t* ids, int64_t count, uint64_t selected_data_flag) const` | 通过 [`DATA_FLAG_*`](#数据选择标志) 选择支持的字段。Pyramid 路径需要同时设置 `store_paths: true` 和 `DATA_FLAG_PATH`。 |
 | `GetIndexDetailInfos` | `tl::expected<std::vector<IndexDetailInfo>, Error> GetIndexDetailInfos() const` | 列出可自省的细节字段。见 [`IndexDetailInfo`](types.md#索引细节信息)。 |
 | `GetDetailDataByName` | `tl::expected<DetailDataPtr, Error> GetDetailDataByName(const std::string& name, IndexDetailInfo& info) const` | 按名称获取一份细节数据负载。 |
 
@@ -251,8 +251,8 @@ RangeSearch(const DatasetPtr& query, float radius, const std::string& parameters
 
 | 方法 | 签名 | 说明 |
 |------|------|------|
-| `CheckFeature` | `bool CheckFeature(IndexFeature feature) const` | 探测某个可选能力是否受支持。见 [`IndexFeature`](types.md#indexfeature)。 |
-| `Merge` | `tl::expected<void, Error> Merge(const std::vector<MergeUnit>& merge_units)` | 合并同类型子索引并进行 id 重映射。见 [`MergeUnit`](#mergeunit-与-idmapfunction)。 |
+| <a id="checkfeature"></a>`CheckFeature` | `bool CheckFeature(IndexFeature feature) const` | 探测某个可选能力是否受支持。见 [`IndexFeature`](types.md#indexfeature)。 |
+| <a id="merge"></a>`Merge` | `tl::expected<void, Error> Merge(const std::vector<MergeUnit>& merge_units)` | 合并同类型子索引并进行 id 重映射。见 [`MergeUnit`](#mergeunit-与-idmapfunction)。 |
 | `Clone` | `tl::expected<IndexPtr, Error> Clone(const std::shared_ptr<Allocator>& allocator = nullptr) const` | 深拷贝索引。 |
 | `ExportModel` | `tl::expected<IndexPtr, Error> ExportModel() const` | 返回一个只携带已训练模型的空索引。 |
 | `ExportIDs` | `tl::expected<DatasetPtr, Error> ExportIDs() const` | 以 dataset 形式返回全部 id。 |
@@ -265,7 +265,7 @@ RangeSearch(const DatasetPtr& query, float radius, const std::string& parameters
 
 | 方法 | 签名 | 说明 |
 |------|------|------|
-| `Serialize` | `tl::expected<BinarySet, Error> Serialize() const` | *（纯虚函数）* 序列化为内存中的 [`BinarySet`](serialization.md#binaryset)。 |
+| <a id="serialize"></a>`Serialize` | `tl::expected<BinarySet, Error> Serialize() const` | *（纯虚函数）* 序列化为内存中的 [`BinarySet`](serialization.md#binaryset)。 |
 | `Serialize` | `tl::expected<void, Error> Serialize(WriteFuncType write_func) const` | 通过 [`WriteFuncType`](#writefunctype) 落盘回调流式输出序列化结果。 |
 | `Serialize` | `tl::expected<void, Error> Serialize(std::ostream& out_stream)` | 序列化到一个已打开的输出流。 |
 | `Deserialize` | `tl::expected<void, Error> Deserialize(const BinarySet& binary_set)` | *（纯虚函数）* 从 `BinarySet` 恢复。索引非空时失败。 |
@@ -292,7 +292,7 @@ HGraph 通过 `Dataset::SourceID` 匹配缓存条目。应在 `Build()` 前导�
 
 | 方法 | 签名 | 说明 |
 |------|------|------|
-| `GetIndexType` | `IndexType GetIndexType() const` | 不支持时**抛出**。 |
+| <a id="getindextype"></a>`GetIndexType` | `IndexType GetIndexType() const` | 不支持时**抛出**。 |
 | `GetNumElements` | `int64_t GetNumElements() const` | *（纯虚函数）* 存活元素数。 |
 | `GetNumberRemoved` | `int64_t GetNumberRemoved() const` | 不支持时**抛出**。已删除元素数。 |
 | `GetMemoryUsage` | `int64_t GetMemoryUsage() const` | *（纯虚函数）* 索引占用的字节数。 |

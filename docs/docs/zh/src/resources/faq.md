@@ -34,7 +34,7 @@ VSAG 中常用索引面向不同场景。
 - 超大规模、吞吐优先、可接受分桶召回折中时，对比 `ivf`。
 - 有明显分区、租户或路径结构时考虑 `pyramid`。
 
-相关页面：[索引总览](../indexes/README.md)、[最佳实践](best_practices.md)。
+相关页面：[索引总览](../indexes/)、[最佳实践](best_practices.md)。
 
 ## 为什么同一套参数在不同数据集上的性能差很多？
 
@@ -280,7 +280,7 @@ precise_quantization_type = 用什么格式重新计算候选距离
 例如输入可以是 `dtype: "float32"`，
 但内部用 `base_quantization_type: "sq8_uniform"` 存储。
 
-相关页面：[量化总览](../quantization/README.md)、[HGraph](../indexes/hgraph.md)、
+相关页面：[量化总览](../quantization/)、[HGraph](../indexes/hgraph.md)、
 [IVF](../indexes/ivf.md)。
 
 ## 过滤搜索应该用 Bitset、lambda、`Filter`、属性过滤还是 `extra_info`？

@@ -80,4 +80,4 @@
 
 - [Uniform 标量量化（SQ4 / SQ8 Uniform）](sq_uniform.md)
 - [量化变换](../advanced/quantization_transform.md)
-- [量化总览](README.md)
+- [量化总览](./)

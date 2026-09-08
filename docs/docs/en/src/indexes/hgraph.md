@@ -64,7 +64,7 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `base_quantization_type` | string | — (required) | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `tq` — see the [Quantization chapter](../quantization/README.md) for per-quantizer details |
+| `base_quantization_type` | string | — (required) | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `tq` — see the [Quantization chapter](../quantization/) for per-quantizer details |
 | `max_degree` | int | `64` | Maximum out-degree per graph node |
 | `ef_construction` | int | `400` | Candidate list size during build (higher = better recall, slower build) |
 | `graph_type` | string | `"nsw"` | Graph algorithm: `nsw` or `odescent` |

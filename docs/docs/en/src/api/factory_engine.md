@@ -8,8 +8,7 @@ Every VSAG workflow begins by obtaining an `Index`. There are two entry points:
   when you want several indexes to share one memory allocator / thread pool, or when you need
   deterministic control over resource lifetime.
 
-This page also documents the process-level [initialization helpers](#library-initialization) and the
-[top-level helper functions](#top-level-helper-functions) for parameter generation and validation.
+This page also documents the process-level [initialization helpers](#library-initialization).
 
 ## Library initialization
 
