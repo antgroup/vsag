@@ -1,0 +1,72 @@
+name: Standalone Lite
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: ["main", "0.*"]
+    paths:
+      - "include/vsag/lite/**"
+      - "src/lite/**"
+      - "lite/**"
+      - ".github/workflows/lite.yml"
+
+concurrency:
+  group: standalone-lite-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-install:
+    name: Build, test, and install
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install required tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-15 clang-tidy-15 ninja-build
+      - name: Check formatting
+        run: |
+          clang-format-15 --dry-run --Werror \
+            include/vsag/lite/index.h \
+            src/lite/index.cpp \
+            src/lite/index_test.cpp \
+            lite/example/main.cpp
+      - name: Configure Debug tests
+        run: |
+          cmake -S lite -B build-lite-first-debug -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DENABLE_TESTS=ON
+      - name: Run clang-tidy
+        run: |
+          clang-tidy-15 src/lite/index.cpp src/lite/index_test.cpp \
+            -p build-lite-first-debug \
+            --header-filter='.*/include/vsag/lite/.*'
+      - name: Build and test Debug
+        run: |
+          cmake --build build-lite-first-debug -j2
+          ./build-lite-first-debug/lite_tests '[lite]'
+          ./build-lite-first-debug/lite_tests '[lite-scale]'
+      - name: Build and install Release library
+        run: |
+          cmake -S lite -B build-lite-first-release -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$PWD/install-lite-first" \
+            -DENABLE_TESTS=OFF
+          cmake --build build-lite-first-release -j2
+          cmake --install build-lite-first-release
+          if ldd build-lite-first-release/libvsag-lite.so | grep -q 'libvsag\.so'; then
+            echo 'Standalone Lite unexpectedly depends on the Full library' >&2
+            exit 1
+          fi
+      - name: Build installed consumer
+        run: |
+          cmake -S lite/example -B build-lite-consumer -G Ninja \
+            -DCMAKE_PREFIX_PATH="$PWD/install-lite-first"
+          cmake --build build-lite-consumer -j2
+          ./build-lite-consumer/lite_example "$RUNNER_TEMP/lite-example.snapshot"
