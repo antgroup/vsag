@@ -169,7 +169,7 @@ For examples, refer to [103_index_hgraph.cpp](https://github.com/antgroup/vsag/b
 
 ### duplicate_distance_threshold
 - **Parameter Type**: float
-- **Parameter Description**: Duplicate-detection distance threshold. When greater than 0, the nearest candidate is treated as the duplicate owner if its distance is within the threshold; when 0, duplicate detection falls back to code memcmp with the nearest candidate
+- **Parameter Description**: Duplicate-detection distance threshold. When greater than 0, the nearest candidate is treated as the duplicate owner if its distance is within the threshold; when 0, compare codes with the nearest candidate first, then check the remaining returned build candidates until a match is found.
 - **Optional Values**: Any non-negative float
 - **Default Value**: 0.0
 
@@ -225,10 +225,21 @@ means that the index uses PQ quantization with 64 subspaces, enables reordering 
 - **Optional Values**: 1 to INT_MAX
 - **Default Value**: Must be provided (no default value)
 
+### max_duplicates_per_group
+- **Parameter Type**: int
+- **Parameter Description**: Maximum number of additional duplicate IDs returned for each
+  duplicate group during KNN graph search
+- **Optional Values**: -1 (unlimited), 0 (do not expand duplicate IDs), or any positive integer
+- **Default Value**: -1
+- **Notes**: Only applies when `support_duplicate` is enabled; range search keeps its existing
+  expansion behavior
+
 ## Examples for Search Parameter String
 ```json
 "hgraph": {
-    "ef_search": 200
+    "ef_search": 200,
+    "max_duplicates_per_group": 2
 }
 ```
-means that the search will use an ef_search value of 200 to control the search quality and performance trade-off.
+means that the search uses an ef_search value of 200 and returns at most two additional IDs from
+each duplicate group.

@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <istream>
 #include <random>
 #include <shared_mutex>
 #include <string>
@@ -78,6 +79,9 @@ public:
 
     DatasetPtr
     CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override;
+
+    void
+    Deserialize(std::istream& in_stream) override;
 
     void
     Deserialize(StreamReader& reader) override;
@@ -284,6 +288,9 @@ private:
 
     void
     deserialize_label_info(StreamReader& reader) const;
+
+    void
+    deserialize(StreamReader& reader, bool force_v0_14);
 
     // used in version [0.12.*, 0.14.*]
     void

@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <memory>
 #include <queue>
 
 #include "typing.h"
@@ -35,6 +36,18 @@ public:
 
     void
     AddDiscardNode(float dis, uint32_t inner_id);
+
+    bool
+    AddPendingDuplicate(float dis, InnerIdType inner_id);
+
+    bool
+    IsPendingDuplicate(InnerIdType inner_id) const;
+
+    const UnorderedMap<InnerIdType, float>*
+    GetPendingDuplicates() const;
+
+    uint64_t
+    GetPendingDuplicateElementNum() const;
 
     uint32_t
     GetTopID();
@@ -84,6 +97,7 @@ private:
     Allocator* allocator_{nullptr};
     uint8_t* list_{nullptr};
     std::unique_ptr<MaxHeap> discard_;
+    std::unique_ptr<UnorderedMap<InnerIdType, float>> pending_duplicates_;
 };
 
 };  // namespace vsag
