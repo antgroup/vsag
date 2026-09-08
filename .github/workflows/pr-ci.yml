@@ -20,6 +20,7 @@ jobs:
     outputs:
       cpp: ${{ steps.changes.outputs.cpp }}
       cmake: ${{ steps.changes.outputs.cmake }}
+      coverage: ${{ steps.changes.outputs.coverage }}
       python: ${{ steps.changes.outputs.python }}
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +47,18 @@ jobs:
               - 'CMakeLists.txt'
               - 'Makefile'
               - 'cmake/**'
+            coverage:
+              - '.github/codecov.yml'
+              - '.github/workflows/coverage.yml'
+              - '.github/workflows/pr-ci.yml'
+              - 'CMakeLists.txt'
+              - 'Makefile'
+              - 'cmake/**'
+              - 'scripts/coverage/**'
+              - 'scripts/testing/test_parallel_bg.sh'
+              - 'src/**/CMakeLists.txt'
+              - 'tests/CMakeLists.txt'
+              - 'tests/scripts/coverage_diagnostics_test.py'
             python:
               - 'python/**'
               - 'python_bindings/**'
@@ -70,6 +83,20 @@ jobs:
       - name: Run Clang format check
         run: ./scripts/format/check_format.sh
 
+  coverage-config:
+    name: Coverage Configuration
+    needs: changes
+    if: needs.changes.outputs.coverage == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test coverage configuration
+        run: |
+          python3 -m unittest tests/scripts/coverage_diagnostics_test.py
+          bash -n scripts/coverage/collect_cpp_coverage.sh
+          bash -n scripts/coverage/check_cov.sh
+          bash -n scripts/testing/test_parallel_bg.sh
+
   build-asan-x86:
     name: ASan Build X86
     needs: [changes, format]
@@ -90,7 +117,6 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts/linters -p 'test_changed_source_filter.py'
           python3 -m unittest tests/scripts/configure_git_safe_directory_test.py
-          python3 -m unittest tests/scripts/coverage_diagnostics_test.py
       - name: Prepare Host
         run: |
           sudo env VSAG_INSTALL_INTEL_MKL=OFF bash ./scripts/deps/install_deps_ubuntu.sh

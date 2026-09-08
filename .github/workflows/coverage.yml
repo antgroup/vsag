@@ -39,6 +39,7 @@ jobs:
     env:
       VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
       VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
+      VSAG_TEST_SEED: 424242
     steps:
       - uses: actions/checkout@v4
         with:
@@ -75,7 +76,10 @@ jobs:
         env:
           CMAKE_GENERATOR: Ninja
           EXTRA_DEFINED: -DVSAG_USE_SYSTEM_OPENBLAS=ON
-        run: ./scripts/ci/run-with-diagnostics.sh coverage-diagnostics/compile.log make cov
+        run: |
+          ./scripts/ci/run-with-diagnostics.sh coverage-diagnostics/compile.log make cov
+          ./scripts/ci/run-with-diagnostics.sh coverage-diagnostics/instrumentation.log \
+            python3 scripts/coverage/verify_cpp_coverage.py instrumentation build/compile_commands.json
       - name: Run Test
         run: >-
           ./scripts/ci/run-with-diagnostics.sh coverage-diagnostics/tests.log
