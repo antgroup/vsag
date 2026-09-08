@@ -80,6 +80,17 @@ TEST_CASE("PyramidBuildCache graph keys are unambiguous", "[ut][pyramid_build_ca
             std::vector<std::string>{"second-neighbor"});
 }
 
+TEST_CASE("PyramidBuildCache counts matched source IDs", "[ut][pyramid_build_cache]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    vsag::PyramidBuildCache cache(allocator.get());
+    PopulateCache(cache.CreateGraphCache("site", ""), allocator.get(), "a", "b");
+    PopulateCache(cache.CreateGraphCache("site", "child"), allocator.get(), "a", "c");
+
+    const std::string source_ids[]{"a", "b", "missing"};
+    REQUIRE(cache.CountMatchedSourceIds(source_ids, 3) == 2);
+    REQUIRE(cache.CountMatchedSourceIds(source_ids, 0) == 0);
+}
+
 TEST_CASE("PyramidBuildCache empty cache remains empty", "[ut][pyramid_build_cache]") {
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     vsag::PyramidBuildCache cache(allocator.get());
