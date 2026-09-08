@@ -855,11 +855,14 @@ path, size, modification time, count, and build parameters. The benchmark execut
 the existing `Serialize(std::ostream&)` format. Keep both files together; serialization is
 excluded from build/mutation timing.
 
-Preflight found a memory error when continuing FORCE_REMOVE after loading a 400-point FP32
-index through either ostream or BinarySet serialization. The same fresh-build mutation cycle
-passes. This runner therefore builds afresh and saves the initial snapshot for future
-investigation; **mutation-benchmark load/reuse is not exposed yet**. A saved file does not
-establish safe physical mutation after reload.
+Historical preflight found a memory error after loading a 400-point FP32 index through either
+ostream or BinarySet, so the performance run above built afresh. Review follow-up identified
+and fixed missing reverse-edge restoration: tail moves left stale incoming references, and
+GetStats degree counting subsequently corrupted the heap. Flat bottom graphs and sparse upper
+graphs now rebuild reverse edges from decoded, valid forward edges without changing the wire
+format. New regressions cover both serialization interfaces, both memory IO layouts, and two
+deletions followed by two additions and searches. **Benchmark load/reuse remains unexposed**;
+these tests are not a new performance run using the saved 3m snapshot.
 
 Monitor `status.json`, `benchmark.log`, and `curve.csv`. Completion validates all 20 stage/ef
 measurements and generates `qps-recall.png`.

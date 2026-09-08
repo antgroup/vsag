@@ -6,6 +6,7 @@ HGraph 可以选择构建一个 MCI（Maximal Clique Index）挂件，用于带�
 
 完整实现说明、内存分析及 10k/3m 结果见
 [HGraph MCI 增删实现与测试报告](hgraph_mci_mutation.md)。
+代码入口、配置和可执行命令见 [代码、配置与脚本使用指南](hgraph_mci_usage.md)。
 
 当主要负载是过滤搜索，并且过滤后只保留较小比例的向量时，可以启用这个功能。搜索
 时，HGraph 会比较 `Filter::ValidRatio()` 和阈值，自动选择普通 HGraph 搜索或 MCI
@@ -106,7 +107,8 @@ MCI 根据同一 ID 映射重建两向 CSR，保留未被指定删除的软删�
 同批重复 ID 只计一次，不存在的 ID 不计数；已软删除的 ID 也可以显式物理删除。
 成功后，物理槽位数减少，后续 Add 从新的尾部追加，不再积累本次删除的旧槽位。
 
-FORCE_REMOVE 与 Add、MARK_REMOVE、Flush 串行，并阻塞查询直到 ID 搬移和修复完成。
+FORCE_REMOVE 与 Add、MARK_REMOVE、Flush 串行。ID 搬移及最终缩容阶段阻塞查询；
+修复阶段释放 force-remove 锁，MCI 仍未发布，查询可能回退到 HGraph。
 该操作不承诺事务回滚：出错前已经完成的物理删除可能保留，未完成的 MCI 不会发布给
 快速搜索。CSR 替换本身在分配成功后才提交，但操作期间新旧缓冲区会同时占用内存。
 实际 RSS 还受分配器和 IO 分块大小影响，不能保证与索引统计内存同比例下降。

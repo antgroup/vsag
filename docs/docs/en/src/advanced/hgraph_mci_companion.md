@@ -6,6 +6,8 @@ vector storage. It is not a standalone index type: create the index as `hgraph`,
 
 For implementation details, memory analysis, and 10k/3m results, see
 [HGraph MCI Mutation Design and Benchmark Report](hgraph_mci_mutation.md).
+For code entry points, configuration, and runnable commands, see the
+[code, configuration, and scripts guide](hgraph_mci_usage.md).
 
 Use this feature when filtered search is the main workload and the filter keeps only a
 small fraction of vectors. HGraph chooses between normal graph traversal and the MCI
@@ -112,8 +114,9 @@ Add's incremental clique routine. It then flushes metadata and shrinks vector/gr
 Repeated IDs in one request count once; missing IDs count zero. Explicitly requested soft-deleted
 IDs can also be physically removed. Subsequent Add starts at the compacted tail.
 
-FORCE_REMOVE is serialized with Add, MARK_REMOVE, and Flush; queries wait until ID moves and
-repair finish. This is not a transactional operation: deletions completed before an error may
+FORCE_REMOVE is serialized with Add, MARK_REMOVE, and Flush. Queries wait during ID moves and
+final shrinking; repair releases the force-remove lock while MCI remains unpublished, so queries
+may fall back to HGraph. This is not a transactional operation: deletions completed before an error may
 remain, and an unfinished companion is not published to fast search. CSR replacement itself
 commits only after allocation succeeds; temporary old/new buffers coexist during compaction.
 Allocator retention and IO block granularity mean RSS need not fall proportionally to index

@@ -7,3 +7,5 @@
 - 网站：<https://vsag.io/docs/resources/eval.html>
 - 中文网站：<https://vsag.io/docs/zh/resources/eval.html>
 - 配置模板：[eval_template.yaml](eval_template.yaml)
+
+MCI 增删基准：[代码、配置与脚本指南](../../docs/docs/zh/src/advanced/hgraph_mci_usage.md)。

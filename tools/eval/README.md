@@ -19,3 +19,5 @@ The canonical documentation for `eval_performance` lives in the website source t
 - Website: <https://vsag.io/docs/resources/eval.html>
 - Chinese website: <https://vsag.io/docs/zh/resources/eval.html>
 - Config template: [eval_template.yaml](eval_template.yaml)
+
+MCI mutation benchmark: [code, configuration, and scripts guide](../../docs/docs/en/src/advanced/hgraph_mci_usage.md).
