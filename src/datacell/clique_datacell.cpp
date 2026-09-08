@@ -223,6 +223,8 @@ CliqueDataCell::compact_unlocked(uint64_t total, const Vector<InnerIdType>* old_
     Vector<Vector<InnerIdType>> new_extra(count, Vector<InnerIdType>(allocator_), allocator_);
     Vector<Vector<InnerIdType>> new_node_delta(total, Vector<InnerIdType>(allocator_), allocator_);
     Vector<uint8_t> new_retired(count, 0, allocator_);
+    // Flush/RemapNodes hold mutex_ exclusively across all swaps. Search views pin the
+    // same mutex in shared mode, so no reader can observe a partially replaced generation.
     p_maxc_.swap(offsets);
     maxcs_.swap(members);
     p_node_to_cid_.swap(inverse_offsets);
@@ -260,11 +262,14 @@ CliqueDataCell::EnsureDeltaNodeRows(uint64_t total) {
 
 void
 CliqueDataCell::MarkUnavailable() {
+    // Stop new search views; already-pinned views remain protected by mutex_.
     available_total_.store(0, std::memory_order_release);
 }
 
 void
 CliqueDataCell::MarkAvailable(uint64_t total) {
+    // Structural writes have finished under the exclusive lock. Pin only for validation;
+    // publishing the atomic is safe alongside readers and does not mutate CSR/delta storage.
     std::shared_lock<std::shared_mutex> lock(mutex_);
     CHECK_ARGUMENT(delta_node_to_cids_.size() == total,
                    "cannot publish an incomplete MCI companion");

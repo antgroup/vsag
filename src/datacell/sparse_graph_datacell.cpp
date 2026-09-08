@@ -178,6 +178,20 @@ SparseGraphDataCell::Deserialize(StreamReader& reader) {
             this->node_version_[key] = value;
         }
     }
+    if (reverse_edges_) {
+        // Sparse upper-level IDs are not a dense [0, total_count_) range. Reconstruct
+        // incoming edges from the loaded rows using decoded, version-valid neighbors.
+        auto restored = std::make_unique<ReverseEdge>(allocator_);
+        Vector<InnerIdType> neighbors(allocator_);
+        for (const auto& row : neighbors_) {
+            neighbors.clear();
+            this->GetNeighbors(row.first, neighbors);
+            for (auto neighbor : neighbors) {
+                restored->AddReverseEdge(row.first, neighbor);
+            }
+        }
+        reverse_edges_.swap(restored);
+    }
 }
 
 void

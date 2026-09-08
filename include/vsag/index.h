@@ -1122,6 +1122,9 @@ public:
      * HGraph with MCI merges delta cliques into CSR and drops retired memberships.
      * Vector IDs and deletion markers are preserved. This is an in-memory operation,
      * not a persistence barrier. Queries may wait while the replacement is published.
+     * It neither rebuilds HGraph nor physically removes vector slots. Clique IDs may
+     * change; callers must not retain them across a flush. Use Serialize for persistence.
+     * Allocation failure before CSR publication leaves the old clique representation intact.
      * @return An error if the index does not support flushing or compaction fails.
      */
     virtual tl::expected<void, Error>

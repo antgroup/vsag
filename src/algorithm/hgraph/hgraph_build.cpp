@@ -315,6 +315,8 @@ HGraph::Add(const DatasetPtr& data) {
 
 std::vector<int64_t>
 HGraph::add_impl(const DatasetPtr& data) {
+    // Match FORCE_REMOVE: acquire mutation serialization before pinning vector IDs.
+    // Reversing these locks could block a remover that needs to reacquire its write lock.
     std::unique_lock<std::mutex> mci_mutation_lock(this->mci_mutation_mutex_, std::defer_lock);
     if (this->mci_parameters_.enabled) {
         mci_mutation_lock.lock();

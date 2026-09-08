@@ -1833,6 +1833,7 @@ HGraph::force_remove_with_mci(const std::vector<int64_t>& ids) {
     {
         std::shared_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
         for (auto old_id : snapshot.repair_node_ids) {
+            // The snapshot precedes compaction: never use its IDs in the new slot space.
             const auto id = old_to_new[old_id];
             if (id == LabelTable::INVALID_ID or this->label_table_->IsRemoved(id)) {
                 continue;
@@ -1864,6 +1865,8 @@ HGraph::Flush() {
                             "HGraph Flush requires the MCI companion");
     }
     std::unique_lock<std::mutex> mutation_lock(this->mci_mutation_mutex_);
+    // Mutation serialization excludes physical ID moves; CliqueDataCell::Flush takes
+    // the exclusive storage lock paired with each query's pinned search view.
     this->mci_cliques_->Flush(this->total_count_.load());
     this->cal_memory_usage();
 }

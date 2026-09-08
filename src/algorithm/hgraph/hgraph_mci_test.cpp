@@ -685,6 +685,70 @@ TEST_CASE("HGraph MCI physical deletion compacts slots and preserves mixed mutat
     verify();
 }
 
+TEST_CASE("HGraph FP32 MCI fresh snapshots support physical mutation after reload",
+          "[ut][hgraph][mci][force_remove][reload_remove]") {
+    const bool stream_format = GENERATE(false, true);
+    const std::string io = GENERATE("memory_io", "block_memory_io");
+    CAPTURE(stream_format, io);
+    constexpr int64_t total = 400;
+    constexpr int64_t dim = 16;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 1000);
+    auto vectors = fixtures::generate_vectors(total, dim);
+    auto params = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    params["metric_type"].SetString("cosine");
+    auto build = params["index_param"];
+    build["base_quantization_type"].SetString("fp32");
+    build["base_io_type"].SetString(io);
+    build["graph_type"].SetString("nsw");
+    build["max_degree"].SetInt(32);
+    build["ef_construction"].SetInt(200);
+    build["build_thread_count"].SetInt(2);
+    build["support_force_remove"].SetBool(true);
+    build["mci_mcs"].SetInt(50);
+    build["mci_clique_max"].SetInt(50);
+    build["mci_incremental_clique_max"].SetInt(50);
+    auto source = vsag::Factory::CreateIndex("hgraph", params.Dump()).value();
+    REQUIRE(source->Build(make_dataset(ids, vectors, 0, total, dim)).value().empty());
+    auto restored = vsag::Factory::CreateIndex("hgraph", params.Dump()).value();
+    if (stream_format) {
+        std::stringstream stream;
+        REQUIRE(source->Serialize(stream).has_value());
+        REQUIRE(restored->Deserialize(stream).has_value());
+    } else {
+        auto binary = source->Serialize();
+        REQUIRE(binary.has_value());
+        REQUIRE(restored->Deserialize(binary.value()).has_value());
+    }
+    // Exercise the un-compacted initial snapshot, not one already shrunk by FORCE_REMOVE.
+    source.reset();
+    for (int64_t stage = 0; stage < 2; ++stage) {
+        std::vector<int64_t> removed(ids.begin() + stage * 40, ids.begin() + (stage + 1) * 40);
+        REQUIRE(restored->Remove(removed, vsag::RemoveMode::FORCE_REMOVE).value() == 40);
+        REQUIRE(restored->GetNumElements() == total - (stage + 1) * 40);
+        const auto stats = vsag::JsonType::Parse(restored->GetStats());
+        REQUIRE(stats["mci_total_nodes"].GetInt() == restored->GetNumElements());
+        REQUIRE(stats["mci_covered_nodes"].GetInt() == restored->GetNumElements());
+    }
+    for (int64_t stage = 0; stage < 2; ++stage) {
+        REQUIRE(restored->Add(make_dataset(ids, vectors, stage * 40, 40, dim)).value().empty());
+        REQUIRE(restored->GetNumElements() == total - 40 + stage * 40);
+    }
+    REQUIRE(restored->Flush().has_value());
+    for (const bool use_mci : {false, true}) {
+        auto search = vsag::JsonType::Parse(R"({"hgraph":{"ef_search":400,
+            "mci_seed_ratio":100,"hgraph_valid_ratio_threshold":1.0}})");
+        search["hgraph"]["use_mci"].SetBool(use_mci);
+        auto result = restored->KnnSearch(make_dataset(ids, vectors, 100, 1, dim),
+                                          10,
+                                          search.Dump(),
+                                          std::make_shared<HalfRatioAllValidFilter>(ids));
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 10);
+        REQUIRE(result.value()->GetIds()[0] == ids[100]);
+    }
+}
+
 TEST_CASE("HGraph MCI force remove handles marked entry points and shadowed labels",
           "[ut][hgraph][mci][force_remove]") {
     std::vector<int64_t> ids{100, 101, 102, 103, 104, 105};

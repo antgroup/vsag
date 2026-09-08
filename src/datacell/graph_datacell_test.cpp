@@ -21,14 +21,70 @@
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
 #include "io/memory_io/memory_io_parameter.h"
+#include "sparse_graph_datacell_parameter.h"
+#include "storage/serialization_template_test.h"
 #include "unittest.h"
 
 using namespace vsag;
 
+TEST_CASE("Graph deserialization restores incoming edges before tail moves",
+          "[ut][GraphDataCell][mci][reload_remove]") {
+    const bool sparse = GENERATE(false, true);
+    const bool versioned = GENERATE(false, true);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.dim_ = 4;
+    GraphInterfaceParamPtr param;
+    if (sparse) {
+        auto sparse_param = std::make_shared<SparseGraphDatacellParameter>();
+        sparse_param->support_delete_ = versioned;
+        param = sparse_param;
+    } else {
+        auto flat_param = std::make_shared<GraphDataCellParameter>();
+        flat_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+        flat_param->support_remove_ = versioned;
+        param = flat_param;
+    }
+    param->use_reverse_edges_ = true;
+    param->max_degree_ = 4;
+    auto graph = GraphInterface::MakeInstance(param, common);
+    auto restored = GraphInterface::MakeInstance(param, common);
+    const Vector<InnerIdType> ids(sparse ? std::initializer_list<InnerIdType>{10, 25, 100}
+                                         : std::initializer_list<InnerIdType>{0, 1, 2},
+                                  allocator.get());
+    graph->Resize(ids.back() + 1);
+    Vector<InnerIdType> empty(allocator.get());
+    for (auto id : ids) {
+        graph->InsertNeighborsById(id, empty);
+    }
+    Vector<InnerIdType> first({ids[1], ids[2]}, allocator.get());
+    Vector<InnerIdType> second({ids[2]}, allocator.get());
+    graph->InsertNeighborsById(ids[0], first);
+    graph->InsertNeighborsById(ids[1], second);
+    if (versioned) {
+        graph->DeleteNeighborsById(ids[1]);
+    }
+    test_serializion(*graph, *restored);
+    Vector<InnerIdType> incoming(allocator.get());
+    restored->GetIncomingNeighbors(ids[1], incoming);
+    REQUIRE(incoming.size() == (versioned ? 0 : 1));
+    restored->GetIncomingNeighbors(ids[2], incoming);
+    std::sort(incoming.begin(), incoming.end());
+    REQUIRE(incoming == Vector<InnerIdType>({ids[0], ids[1]}, allocator.get()));
+    restored->InsertNeighborsById(ids[0], empty);
+    restored->Move(ids[2], ids[0]);
+    Vector<InnerIdType> neighbors(allocator.get());
+    restored->GetNeighbors(ids[1], neighbors);
+    REQUIRE(neighbors == Vector<InnerIdType>({ids[0]}, allocator.get()));
+    restored->GetIncomingNeighbors(ids[2], incoming);
+    REQUIRE(incoming.empty());
+}
+
 void
-TestGraphDataCell(const GraphInterfaceParamPtr& param,
-                  const IndexCommonParam& common_param,
-                  bool test_delete) {
+test_graph_data_cell(const GraphInterfaceParamPtr& param,
+                     const IndexCommonParam& common_param,
+                     bool test_delete) {
     auto count = GENERATE(1000, 2000);
     auto max_id = 10000;
 
@@ -43,7 +99,7 @@ TEST_CASE("GraphDataCell Basic Test", "[ut][GraphDataCell]") {
     auto dim = GENERATE(32, 64);
     auto max_degree = GENERATE(5, 32, 64);
     auto max_capacity = GENERATE(100);
-    auto io_type = GENERATE("memory_io", "block_memory_io");
+    const auto* io_type = GENERATE("memory_io", "block_memory_io");
     auto is_support_delete = GENERATE(true, false);
     constexpr const char* graph_param_temp =
         R"(
@@ -65,14 +121,14 @@ TEST_CASE("GraphDataCell Basic Test", "[ut][GraphDataCell]") {
     auto param_json = JsonType::Parse(param_str);
     auto graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
         GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT, param_json);
-    TestGraphDataCell(graph_param, common_param, is_support_delete);
+    test_graph_data_cell(graph_param, common_param, is_support_delete);
 }
 
 TEST_CASE("GraphDataCell Remove Test", "[ut][GraphDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto dim = GENERATE(32, 64);
     auto max_degree = GENERATE(5, 32);
-    auto io_type = GENERATE("block_memory_io");
+    const auto* io_type = GENERATE("block_memory_io");
     auto is_support_delete = GENERATE(true);
     auto remove_flag_bit = GENERATE(4, 8);
     constexpr const char* graph_param_temp =
@@ -94,7 +150,7 @@ TEST_CASE("GraphDataCell Remove Test", "[ut][GraphDataCell]") {
     auto param_json = JsonType::Parse(param_str);
     auto graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
         GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT, param_json);
-    TestGraphDataCell(graph_param, common_param, is_support_delete);
+    test_graph_data_cell(graph_param, common_param, is_support_delete);
 }
 
 TEST_CASE("GraphDataCell Merge", "[ut][GraphDataCell]") {
@@ -102,7 +158,7 @@ TEST_CASE("GraphDataCell Merge", "[ut][GraphDataCell]") {
     auto dim = GENERATE(32);
     auto max_degree = GENERATE(5, 32, 64);
     auto max_capacity = GENERATE(100);
-    auto io_type = GENERATE("memory_io", "block_memory_io");
+    const auto* io_type = GENERATE("memory_io", "block_memory_io");
     auto is_support_delete = GENERATE(true, false);
     constexpr const char* graph_param_temp =
         R"(
@@ -212,7 +268,7 @@ TEST_CASE("GraphDataCell Move", "[ut][GraphDataCell]") {
     auto graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
         GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT, param_json);
     auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = 1024 * 1024 * 2ULL;
+    const uint64_t size = uint64_t{2} * 1024 * 1024;
     vsag::Options::Instance().set_block_size_limit(size);
     auto graph = GraphInterface::MakeInstance(graph_param, common_param);
     GraphInterfaceTest test(graph);

@@ -354,6 +354,19 @@ GraphDataCell<IOTmpl>::Deserialize(StreamReader& reader) {
     if (is_support_delete_) {
         StreamReader::ReadVector(reader, node_versions_);
     }
+    if (reverse_edges_) {
+        // Reverse edges are derived state, not part of the serialized graph. Restore them
+        // after node versions, before any physical deletion can move a referenced tail ID.
+        auto restored = std::make_unique<ReverseEdge>(this->allocator_);
+        Vector<InnerIdType> neighbors(this->allocator_);
+        for (InnerIdType id = 0; id < this->total_count_; ++id) {
+            this->GetNeighbors(id, neighbors);
+            for (auto neighbor : neighbors) {
+                restored->AddReverseEdge(id, neighbor);
+            }
+        }
+        reverse_edges_.swap(restored);
+    }
 }
 
 template <typename IOTmpl>
