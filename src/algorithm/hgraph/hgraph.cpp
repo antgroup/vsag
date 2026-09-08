@@ -699,6 +699,10 @@ HGraph::GetStats() const {
         stats["mci_base_clique_count"].SetInt(static_cast<int64_t>(mci_stats.base_clique_count));
         stats["mci_delta_clique_count"].SetInt(static_cast<int64_t>(mci_stats.delta_clique_count));
         stats["mci_total_clique_count"].SetInt(static_cast<int64_t>(mci_stats.total_clique_count));
+        stats["mci_retired_clique_count"].SetInt(
+            static_cast<int64_t>(mci_stats.retired_clique_count));
+        stats["mci_inactive_node_count"].SetInt(
+            static_cast<int64_t>(mci_stats.inactive_node_count));
         stats["mci_base_membership_count"].SetInt(
             static_cast<int64_t>(mci_stats.base_membership_count));
         stats["mci_delta_extra_membership_count"].SetInt(

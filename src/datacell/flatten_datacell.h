@@ -123,6 +123,9 @@ public:
 
     void
     ShrinkToFit(InnerIdType capacity) override {
+        std::unique_lock lock(this->mutex_);
+        // Logical truncation must survive a best-effort physical shrink allocation failure.
+        this->total_count_ = std::min(this->total_count_, capacity);
         this->layout_->Shrink(capacity);
         this->max_capacity_ = capacity;
     }

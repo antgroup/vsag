@@ -18,6 +18,73 @@
 
 using namespace vsag;
 
+TEST_CASE("MCISearcher traverses base extras delta and tombstones before and after flush",
+          "[ut][MCISearcher][mci][flush]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.dim_ = 1;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto quantizer =
+        QuantizerParameter::GetQuantizerParameterByJson(JsonType::Parse(R"({"type":"fp32"})"));
+    auto io = IOParameter::GetIOParameterByJson(JsonType::Parse(R"({"type":"memory_io"})"));
+    auto flatten =
+        std::make_shared<FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
+            quantizer, io, common);
+    std::vector<float> vectors{0, 1, 2, 3, 4};
+    std::vector<InnerIdType> ids{0, 1, 2, 3, 4};
+    flatten->Train(vectors.data(), ids.size());
+    flatten->BatchInsertVector(vectors.data(), ids.size(), ids.data());
+    auto cliques = std::make_shared<CliqueDataCell>(allocator.get());
+    Vector<InnerIdType> offsets({0, 2, 4}, allocator.get());
+    Vector<InnerIdType> members({0, 1, 1, 2}, allocator.get());
+    Vector<InnerIdType> inverse_offsets({0, 1, 3, 4}, allocator.get());
+    Vector<InnerIdType> inverse({0, 0, 1, 1}, allocator.get());
+    cliques->Assign(
+        std::move(offsets), std::move(members), std::move(inverse_offsets), std::move(inverse), 3);
+    REQUIRE(cliques->AppendNodeToClique(4, 0, 5, 3));
+    Vector<InnerIdType> delta({2, 3, 4}, allocator.get());
+    cliques->AppendNewClique(delta, 5);
+    Vector<InnerIdType> removed(allocator.get());
+    removed.push_back(1);
+    auto snapshot = cliques->PrepareDelete(removed, 2, 3);
+    cliques->CommitDelete(removed, snapshot.retired_clique_ids, 5);
+    cliques->MarkAvailable(5);
+
+    const bool flush = GENERATE(false, true);
+    if (flush) {
+        cliques->Flush(5);
+    }
+    const bool use_raw = GENERATE(false, true);
+    bool used_raw = false;
+    Vector<InnerIdType> seeds(allocator.get());
+    seeds.push_back(0);
+    MCISearcherParam params;
+    params.seed_count = 1;
+    params.seed_inner_ids = &seeds;
+    params.precise_vectors = use_raw ? vectors.data() : nullptr;
+    params.dim = 1;
+    params.precise_vector_stride = 1;
+    params.metric = common.metric_;
+    params.used_precise_float_csr = &used_raw;
+    InnerSearchParam search;
+    search.ef = 8;
+    search.topk = 5;
+    const float query = 1.0F;
+    auto result = MCISearcher(common).Search(cliques, flatten, &query, search, params, nullptr);
+    REQUIRE(used_raw == use_raw);
+    REQUIRE(result->Size() == 4);
+    std::vector<InnerIdType> found;
+    while (not result->Empty()) {
+        const auto id = result->Top().second;
+        REQUIRE(result->Top().first == (vectors[id] - query) * (vectors[id] - query));
+        found.push_back(id);
+        result->Pop();
+    }
+    std::sort(found.begin(), found.end());
+    REQUIRE(found == std::vector<InnerIdType>{0, 2, 3, 4});
+}
+
 TEST_CASE("MCISearcher threshold results backfill past non-finite traversal seeds",
           "[ut][MCISearcher][threshold][nonfinite]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();

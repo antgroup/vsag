@@ -580,8 +580,25 @@ HGraph::try_mci_search(const SearchRequest& request,
         mci_param.metric = this->metric_;
         mci_param.used_precise_float_csr = &result.used_precise_float_csr;
     }
+    // Keep the deletion set stable throughout traversal; no per-visited-node reader lock.
+    // This is acquired after seed label lookup and released before result label conversion.
+    auto query_filter = std::make_shared<CombinedFilter>();
+    if (params.use_extra_info_filter and this->extra_infos_ != nullptr) {
+        query_filter->AppendFilter(
+            std::make_shared<ExtraInfoWrapperFilter>(request.filter_, this->extra_infos_));
+    } else {
+        query_filter->AppendFilter(
+            std::make_shared<InnerIdWrapperFilter>(request.filter_, *this->label_table_));
+    }
+    query_filter->AppendFilter(this->label_table_->GetDeletedIdsReadView());
+    auto mci_search_param = search_param;
+    mci_search_param.is_inner_id_allowed = query_filter;
     result.result = this->mci_searcher_->Search(
-        this->mci_cliques_, precise_flatten, query, search_param, mci_param, ctx);
+        this->mci_cliques_, precise_flatten, query, mci_search_param, mci_param, ctx);
+    if (result.result == nullptr or result.result->Empty()) {
+        // A concurrent mutation may have unpublished the companion before the view was pinned.
+        return result;
+    }
     result.route = "mci";
     return result;
 }
@@ -1465,10 +1482,55 @@ HGraph::search_mci_knn(InnerIdType query_inner_id,
     return knn_ids;
 }
 
-// Find KNN candidates for a newly inserted node using the current HGraph search path.
-Vector<InnerIdType>
-HGraph::find_mci_knn_for_new_node(InnerIdType new_inner_id, const void* vector) const {
-    return this->search_mci_knn(new_inner_id, vector, static_cast<uint64_t>(new_inner_id) + 1);
+void
+HGraph::repair_mci_clique(InnerIdType node_id) {
+    const auto precise_codes = this->get_precise_codes();
+    const auto total = this->total_count_.load();
+    if (node_id >= total or this->label_table_->IsRemoved(node_id)) {
+        return;
+    }
+    CHECK_ARGUMENT(precise_codes != nullptr, "hgraph mci repair requires available vector codes");
+
+    const bool use_fp32_add_pipeline =
+        this->data_type_ == DataTypes::DATA_TYPE_FLOAT and
+        this->basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32 and
+        precise_codes->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32;
+    if (not use_fp32_add_pipeline) {
+        // Keep non-FP32 repair unchanged; unifying quantized search is a separate change.
+        Vector<std::pair<float, InnerIdType>> candidates(this->allocator_);
+        candidates.reserve(total - 1);
+        for (InnerIdType candidate = 0; candidate < total; ++candidate) {
+            if (candidate != node_id and not this->label_table_->IsRemoved(candidate)) {
+                candidates.emplace_back(precise_codes->ComputePairVectors(node_id, candidate),
+                                        candidate);
+            }
+        }
+        std::sort(candidates.begin(), candidates.end());
+        Vector<InnerIdType> knn_ids(this->allocator_);
+        const auto k = std::min<uint64_t>(this->mci_parameters_.mcs, candidates.size());
+        knn_ids.reserve(k);
+        for (uint64_t i = 0; i < k; ++i) {
+            knn_ids.push_back(candidates[i].second);
+        }
+        this->incremental_update_mci_clique(node_id, knn_ids, static_cast<uint64_t>(node_id) + 1);
+        return;
+    }
+
+    uint64_t stride = 0;
+    const auto* raw = precise_codes->TryGetContiguousRawFloatData(&stride);
+    if (raw != nullptr and stride == this->dim_) {
+        this->incremental_update_mci_clique(
+            node_id, raw + static_cast<uint64_t>(node_id) * stride, total);
+        return;
+    }
+
+    // FP32 storage need not be contiguous (for example block_memory_io).
+    Vector<uint8_t> codes(precise_codes->code_size_, this->allocator_);
+    precise_codes->GetCodesById(node_id, codes.data());
+    Vector<float> query(this->dim_, this->allocator_);
+    CHECK_ARGUMENT(precise_codes->Decode(codes.data(), query.data()),
+                   "failed to decode hgraph mci repair query vector");
+    this->incremental_update_mci_clique(node_id, query.data(), total);
 }
 
 // Try to attach a new node to existing cliques that strongly overlap its KNN set.
@@ -1540,7 +1602,9 @@ HGraph::try_join_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>&
 
 // Create one new incremental clique around an inserted node when joining old cliques is not enough.
 void
-HGraph::build_incremental_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids) {
+HGraph::build_incremental_mci_clique(InnerIdType new_inner_id,
+                                     const Vector<InnerIdType>& knn_ids,
+                                     uint64_t visible_total) {
     if (this->mci_cliques_ == nullptr) {
         return;
     }
@@ -1570,7 +1634,7 @@ HGraph::build_incremental_mci_clique(InnerIdType new_inner_id, const Vector<Inne
         });
 
     const auto total = this->total_count_.load();
-    const auto visible_total = static_cast<uint64_t>(new_inner_id) + 1;
+    visible_total = std::min<uint64_t>(visible_total, total);
     const auto incremental_clique_max =
         std::min<uint64_t>(this->mci_parameters_.incremental_clique_max, visible_total);
     const auto candidate_limit =
@@ -1630,20 +1694,178 @@ HGraph::build_incremental_mci_clique(InnerIdType new_inner_id, const Vector<Inne
 
 // Update the MCI companion index after one vector is inserted into HGraph.
 void
-HGraph::incremental_update_mci_clique(InnerIdType new_inner_id, const void* vector) {
+HGraph::incremental_update_mci_clique(InnerIdType node_id,
+                                      const void* vector,
+                                      uint64_t visible_total) {
     if (not this->mci_parameters_.enabled or this->mci_cliques_ == nullptr) {
         return;
     }
-    auto knn_ids = this->find_mci_knn_for_new_node(new_inner_id, vector);
+    // Add retains its insertion-prefix visibility; existing repair points see the whole graph.
+    if (visible_total == 0) {
+        visible_total = static_cast<uint64_t>(node_id) + 1;
+    }
+    const auto knn_ids = this->search_mci_knn(node_id, vector, visible_total);
+    this->incremental_update_mci_clique(node_id, knn_ids, visible_total);
+}
+
+void
+HGraph::incremental_update_mci_clique(InnerIdType node_id,
+                                      const Vector<InnerIdType>& knn_ids,
+                                      uint64_t visible_total) {
+    if (not this->mci_parameters_.enabled or this->mci_cliques_ == nullptr) {
+        return;
+    }
     if (knn_ids.empty()) {
         Vector<InnerIdType> singleton(this->allocator_);
-        singleton.push_back(new_inner_id);
+        singleton.push_back(node_id);
         this->mci_cliques_->AppendNewClique(singleton, this->total_count_.load());
         return;
     }
-    if (not this->try_join_mci_clique(new_inner_id, knn_ids)) {
-        this->build_incremental_mci_clique(new_inner_id, knn_ids);
+    if (not this->try_join_mci_clique(node_id, knn_ids)) {
+        this->build_incremental_mci_clique(node_id, knn_ids, visible_total);
     }
+}
+
+void
+HGraph::remove_from_mci(const Vector<InnerIdType>& removed_inner_ids) {
+    if (not this->mci_parameters_.enabled or this->mci_cliques_ == nullptr or
+        removed_inner_ids.empty()) {
+        return;
+    }
+    std::shared_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+    Vector<InnerIdType> one_removed(this->allocator_);
+    one_removed.reserve(1);
+    uint64_t affected_clique_count = 0;
+    uint64_t retired_clique_count = 0;
+    uint64_t repair_candidate_count = 0;
+    uint64_t repaired_node_count = 0;
+    for (auto removed_inner_id : removed_inner_ids) {
+        one_removed.clear();
+        one_removed.push_back(removed_inner_id);
+        const auto snapshot =
+            this->mci_cliques_->PrepareDelete(one_removed,
+                                              this->mci_parameters_.delete_clique_size_threshold,
+                                              this->mci_parameters_.delete_node_mct_threshold);
+        this->mci_cliques_->CommitDelete(
+            one_removed, snapshot.retired_clique_ids, this->total_count_.load());
+        affected_clique_count += snapshot.affected_clique_ids.size();
+        retired_clique_count += snapshot.retired_clique_ids.size();
+        repair_candidate_count += snapshot.repair_node_ids.size();
+        for (auto repair_node_id : snapshot.repair_node_ids) {
+            if (this->label_table_->IsRemoved(repair_node_id)) {
+                continue;
+            }
+            Vector<InnerIdType> current_clique_ids(this->allocator_);
+            this->mci_cliques_->CollectNodeCliqueIds(repair_node_id, current_clique_ids);
+            if (current_clique_ids.size() >= this->mci_parameters_.delete_node_mct_threshold) {
+                continue;
+            }
+            this->repair_mci_clique(repair_node_id);
+            ++repaired_node_count;
+        }
+    }
+    logger::info(
+        "hgraph mci mark remove repaired, removed={}, affected_cliques={}, retired_cliques={}, "
+        "repair_candidates={}, repaired_nodes={}",
+        removed_inner_ids.size(),
+        affected_clique_count,
+        retired_clique_count,
+        repair_candidate_count,
+        repaired_node_count);
+}
+
+uint32_t
+HGraph::force_remove_with_mci(const std::vector<int64_t>& ids) {
+    // Same lock order as Add: mutation serialization, then vector-ID lifetime protection.
+    std::unique_lock<std::mutex> mutation_lock(this->mci_mutation_mutex_);
+    std::unique_lock<std::shared_mutex> force_lock(this->force_remove_mutex_);
+    const auto old_total = this->total_count_.load();
+    Vector<std::pair<InnerIdType, int64_t>> targets(this->allocator_);
+    {
+        std::shared_lock label_lock(this->label_lookup_mutex_);
+        for (auto label : ids) {
+            auto [found, id] = this->label_table_->TryGetIdByLabel(label, true);
+            if (found) {
+                targets.emplace_back(id, label);
+            }
+        }
+    }
+    std::sort(targets.begin(), targets.end(), std::greater<>());
+    targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
+    if (targets.empty()) {
+        return 0;
+    }
+    Vector<InnerIdType> removed(this->allocator_);
+    Vector<InnerIdType> old_to_new(old_total, 0, this->allocator_);
+    Vector<InnerIdType> current_to_old(old_total, 0, this->allocator_);
+    for (uint64_t id = 0; id < old_total; ++id) {
+        old_to_new[id] = current_to_old[id] = static_cast<InnerIdType>(id);
+    }
+    for (const auto& target : targets) {
+        removed.push_back(target.first);
+    }
+    const auto snapshot =
+        this->mci_cliques_->PrepareDelete(removed,
+                                          this->mci_parameters_.delete_clique_size_threshold,
+                                          this->mci_parameters_.delete_node_mct_threshold);
+    this->mci_cliques_->MarkUnavailable();
+    // On failure, never expose the old CSR under moved vector IDs. Physical deletions, like
+    // the existing HGraph FORCE_REMOVE operation, are not transactionally rolled back.
+    this->mci_cliques_->CommitDelete(removed, snapshot.retired_clique_ids, old_total);
+    uint32_t count = 0;
+    for (const auto& [id, label] : targets) {
+        // Descending original IDs ensure earlier tail moves cannot relocate a pending target.
+        const auto tail = this->total_count_.load() - 1;
+        count += this->force_remove_one(label);
+        old_to_new[current_to_old[id]] = LabelTable::INVALID_ID;
+        if (id != tail) {
+            current_to_old[id] = current_to_old[tail];
+            old_to_new[current_to_old[id]] = id;
+        }
+    }
+    const auto total = this->total_count_.load();
+    this->mci_cliques_->RemapNodes(old_to_new, total);
+    this->bottom_graph_->SetTotalCount(total);
+    // Graph repair and ID remapping are complete. As in Add, public HGraph search must
+    // acquire its own force-remove read lock. Mutation serialization still excludes Add,
+    // MARK_REMOVE and FORCE_REMOVE, and MCI remains unpublished until repair is complete.
+    force_lock.unlock();
+    {
+        std::shared_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+        for (auto old_id : snapshot.repair_node_ids) {
+            const auto id = old_to_new[old_id];
+            if (id == LabelTable::INVALID_ID or this->label_table_->IsRemoved(id)) {
+                continue;
+            }
+            Vector<InnerIdType> memberships(this->allocator_);
+            this->mci_cliques_->CollectNodeCliqueIds(id, memberships);
+            if (memberships.size() < this->mci_parameters_.delete_node_mct_threshold) {
+                this->repair_mci_clique(id);
+            }
+        }
+    }
+    force_lock.lock();
+    this->mci_cliques_->Flush(total);
+    {
+        std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+        // A later Add must resize all slot-indexed storage, including graph version rows.
+        this->max_capacity_.store(total);
+        this->shrink_to_fit();
+    }
+    this->mci_cliques_->MarkAvailable(total);
+    this->cal_memory_usage();
+    return count;
+}
+
+void
+HGraph::Flush() {
+    if (not this->mci_parameters_.enabled or this->mci_cliques_ == nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "HGraph Flush requires the MCI companion");
+    }
+    std::unique_lock<std::mutex> mutation_lock(this->mci_mutation_mutex_);
+    this->mci_cliques_->Flush(this->total_count_.load());
+    this->cal_memory_usage();
 }
 
 }  // namespace vsag

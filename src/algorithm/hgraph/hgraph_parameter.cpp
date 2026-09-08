@@ -179,7 +179,12 @@ HGraphParameter::FromJson(const JsonType& json) {
     const bool has_mci_parameter =
         json.Contains(HGRAPH_MCI_MCS) or json.Contains(HGRAPH_MCI_CLIQUE_MAX) or
         json.Contains(HGRAPH_MCI_ALPHA) or json.Contains(HGRAPH_MCI_KNNG_SOURCE) or
-        json.Contains(HGRAPH_MCI_KNNG_PATH_KEY);
+        json.Contains(HGRAPH_MCI_KNNG_PATH_KEY) or
+        json.Contains(HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY) or
+        json.Contains(HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY) or
+        json.Contains(HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY) or
+        json.Contains(HGRAPH_MCI_DELETE_CLIQUE_SIZE_THRESHOLD_KEY) or
+        json.Contains(HGRAPH_MCI_DELETE_NODE_MCT_THRESHOLD_KEY);
     this->mci_parameters.enabled =
         has_mci_parameter or (json.Contains(HGRAPH_USE_MCI) and json[HGRAPH_USE_MCI].GetBool());
     if (this->mci_parameters.enabled) {
@@ -221,6 +226,17 @@ HGraphParameter::FromJson(const JsonType& json) {
             this->mci_parameters.incremental_clique_max =
                 static_cast<uint64_t>(incremental_clique_max);
         }
+        if (json.Contains(HGRAPH_MCI_DELETE_CLIQUE_SIZE_THRESHOLD_KEY)) {
+            const auto threshold = json[HGRAPH_MCI_DELETE_CLIQUE_SIZE_THRESHOLD_KEY].GetInt();
+            CHECK_ARGUMENT(threshold > 0,
+                           "hgraph mci_delete_clique_size_threshold must be positive");
+            this->mci_parameters.delete_clique_size_threshold = static_cast<uint64_t>(threshold);
+        }
+        if (json.Contains(HGRAPH_MCI_DELETE_NODE_MCT_THRESHOLD_KEY)) {
+            const auto threshold = json[HGRAPH_MCI_DELETE_NODE_MCT_THRESHOLD_KEY].GetInt();
+            CHECK_ARGUMENT(threshold > 0, "hgraph mci_delete_node_mct_threshold must be positive");
+            this->mci_parameters.delete_node_mct_threshold = static_cast<uint64_t>(threshold);
+        }
         CHECK_ARGUMENT(this->mci_parameters.mcs > 0, "hgraph mci_mcs must be positive");
         CHECK_ARGUMENT(this->mci_parameters.clique_max > 0,
                        "hgraph mci_clique_max must be positive");
@@ -238,10 +254,21 @@ HGraphParameter::FromJson(const JsonType& json) {
                        "hgraph mci_incremental_added_mct must be positive");
         CHECK_ARGUMENT(this->mci_parameters.incremental_clique_max >= 2,
                        "hgraph mci_incremental_clique_max must be >= 2");
+        CHECK_ARGUMENT(this->mci_parameters.delete_clique_size_threshold > 0,
+                       "hgraph mci_delete_clique_size_threshold must be positive");
+        CHECK_ARGUMENT(this->mci_parameters.delete_node_mct_threshold > 0,
+                       "hgraph mci_delete_node_mct_threshold must be positive");
     }
-    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
-        not(this->mci_parameters.enabled and this->support_force_remove),
-        "hgraph mci does not support force remove");
+    if (this->mci_parameters.enabled and this->support_force_remove) {
+        CHECK_ARGUMENT(not this->use_attribute_filter,
+                       "MCI force remove does not support attribute storage remapping");
+        CHECK_ARGUMENT(not this->support_duplicate,
+                       "MCI force remove does not support duplicate groups");
+        auto graph_param = std::dynamic_pointer_cast<GraphDataCellParameter>(bottom_graph_param);
+        CHECK_ARGUMENT(graph_param != nullptr, "MCI force remove requires a flat graph");
+        graph_param->use_reverse_edges_ = true;
+        hierarchical_graph_param->use_reverse_edges_ = true;
+    }
     if (this->rabitq_fused_datacell) {
         CHECK_ARGUMENT(not this->mci_parameters.enabled,
                        "rabitq_fused_datacell does not support MCI");
@@ -310,6 +337,10 @@ HGraphParameter::ToJson() const {
             static_cast<int64_t>(this->mci_parameters.incremental_added_mct));
         json[HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY].SetInt(
             static_cast<int64_t>(this->mci_parameters.incremental_clique_max));
+        json[HGRAPH_MCI_DELETE_CLIQUE_SIZE_THRESHOLD_KEY].SetInt(
+            static_cast<int64_t>(this->mci_parameters.delete_clique_size_threshold));
+        json[HGRAPH_MCI_DELETE_NODE_MCT_THRESHOLD_KEY].SetInt(
+            static_cast<int64_t>(this->mci_parameters.delete_node_mct_threshold));
         if (not this->mci_parameters.knng_path.empty()) {
             json[HGRAPH_MCI_KNNG_PATH_KEY].SetString(this->mci_parameters.knng_path);
         }
@@ -363,6 +394,8 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, mci_parameters.incremental_join_ratio_threshold);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.incremental_added_mct);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.incremental_clique_max);
+    CHECK_FIELD_EQ(*this, *p, mci_parameters.delete_clique_size_threshold);
+    CHECK_FIELD_EQ(*this, *p, mci_parameters.delete_node_mct_threshold);
     return true;
 }
 

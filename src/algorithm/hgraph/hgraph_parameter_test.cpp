@@ -373,7 +373,9 @@ TEST_CASE("HGraph maps flat MCI parameters", "[ut][HGraphParameter]") {
         "mci_knng_source": "odescent",
         "mci_incremental_join_ratio_threshold": 0.7,
         "mci_incremental_added_mct": 2,
-        "mci_incremental_clique_max": 4
+        "mci_incremental_clique_max": 4,
+        "mci_delete_clique_size_threshold": 5,
+        "mci_delete_node_mct_threshold": 2
     })");
 
     vsag::IndexCommonParam common_param;
@@ -391,6 +393,8 @@ TEST_CASE("HGraph maps flat MCI parameters", "[ut][HGraphParameter]") {
     REQUIRE(typed_param->mci_parameters.incremental_join_ratio_threshold == 0.7F);
     REQUIRE(typed_param->mci_parameters.incremental_added_mct == 2);
     REQUIRE(typed_param->mci_parameters.incremental_clique_max == 4);
+    REQUIRE(typed_param->mci_parameters.delete_clique_size_threshold == 5);
+    REQUIRE(typed_param->mci_parameters.delete_node_mct_threshold == 2);
 
     auto json = typed_param->ToJson();
     REQUIRE_FALSE(json.Contains("mci"));
@@ -399,6 +403,8 @@ TEST_CASE("HGraph maps flat MCI parameters", "[ut][HGraphParameter]") {
     REQUIRE(json["mci_clique_max"].GetInt() == 4);
     REQUIRE(json["mci_alpha"].GetFloat() == 1.2F);
     REQUIRE(json["mci_knng_source"].GetString() == "odescent");
+    REQUIRE(json["mci_delete_clique_size_threshold"].GetInt() == 5);
+    REQUIRE(json["mci_delete_node_mct_threshold"].GetInt() == 2);
 }
 
 TEST_CASE("HGraph enables MCI from any public trigger", "[ut][HGraphParameter]") {
@@ -456,6 +462,31 @@ TEST_CASE("HGraph enables MCI from any public trigger", "[ut][HGraphParameter]")
         param["mci_knng_source"].SetString("odescent");
         REQUIRE(is_mci_enabled(param));
     }
+    SECTION("mci_incremental_join_ratio_threshold") {
+        auto param = make_param();
+        param["mci_incremental_join_ratio_threshold"].SetFloat(0.7F);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("mci_incremental_added_mct") {
+        auto param = make_param();
+        param["mci_incremental_added_mct"].SetInt(2);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("mci_incremental_clique_max") {
+        auto param = make_param();
+        param["mci_incremental_clique_max"].SetInt(4);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("mci_delete_clique_size_threshold") {
+        auto param = make_param();
+        param["mci_delete_clique_size_threshold"].SetInt(3);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("mci_delete_node_mct_threshold") {
+        auto param = make_param();
+        param["mci_delete_node_mct_threshold"].SetInt(3);
+        REQUIRE(is_mci_enabled(param));
+    }
 
     SECTION("internal knng path is rejected") {
         auto param = make_param();
@@ -464,7 +495,7 @@ TEST_CASE("HGraph enables MCI from any public trigger", "[ut][HGraphParameter]")
     }
 }
 
-TEST_CASE("HGraph rejects MCI with force remove", "[ut][HGraphParameter]") {
+TEST_CASE("HGraph accepts MCI with force remove", "[ut][HGraphParameter]") {
     auto param = vsag::JsonType::Parse(R"({
         "base_quantization_type": "fp32",
         "graph_type": "nsw",
@@ -476,6 +507,8 @@ TEST_CASE("HGraph rejects MCI with force remove", "[ut][HGraphParameter]") {
     vsag::IndexCommonParam common_param;
     common_param.dim_ = 128;
     common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    REQUIRE_NOTHROW(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    param["support_duplicate"].SetBool(true);
     REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
 }
 
@@ -495,7 +528,9 @@ TEST_CASE("HGraph rejects invalid flat MCI parameters", "[ut][HGraphParameter]")
             "mci_mcs": 8,
             "mci_clique_max": 4,
             "mci_incremental_added_mct": 2,
-            "mci_incremental_clique_max": 4
+            "mci_incremental_clique_max": 4,
+            "mci_delete_clique_size_threshold": 3,
+            "mci_delete_node_mct_threshold": 3
         })");
     };
     vsag::IndexCommonParam common_param;
@@ -520,6 +555,16 @@ TEST_CASE("HGraph rejects invalid flat MCI parameters", "[ut][HGraphParameter]")
     SECTION("mci_incremental_clique_max") {
         auto param = make_param();
         param["mci_incremental_clique_max"].SetInt(-1);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("mci_delete_clique_size_threshold") {
+        auto param = make_param();
+        param["mci_delete_clique_size_threshold"].SetInt(0);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("mci_delete_node_mct_threshold") {
+        auto param = make_param();
+        param["mci_delete_node_mct_threshold"].SetInt(0);
         REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
     }
     SECTION("mci_knng_source") {

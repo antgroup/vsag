@@ -65,6 +65,7 @@
 - [Extra Info（附加信息）](advanced/extra_info.md)
 - [索引生命周期管理](advanced/index_lifecycle.md)
 - [HGraph MCI 挂件](advanced/hgraph_mci_companion.md)
+- [HGraph MCI 增删实现与测试](advanced/hgraph_mci_mutation.md)
 
 # API 参考
 

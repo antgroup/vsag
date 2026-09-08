@@ -60,6 +60,17 @@ target_link_libraries (eval_performance PRIVATE
     z dl)
 add_dependencies (eval_performance hdf5)
 
+add_executable (mci_mutation_benchmark mci_mutation_benchmark.cpp)
+target_link_libraries (mci_mutation_benchmark PRIVATE
+    eval_obj
+    simd
+    vsag
+    vsag_eval_common
+    ${HDF5_CPP_STATIC_LIBRARY}
+    ${HDF5_C_STATIC_LIBRARY}
+    z dl)
+add_dependencies (mci_mutation_benchmark hdf5)
+
 if (ENABLE_TESTS)
     add_executable (eval_dataset_test
         eval_dataset_test.cpp)

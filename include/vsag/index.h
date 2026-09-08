@@ -1116,6 +1116,20 @@ public:
 public:
     virtual ~Index() = default;
 
+    /**
+     * @brief Compact incremental index metadata into its base representation.
+     *
+     * HGraph with MCI merges delta cliques into CSR and drops retired memberships.
+     * Vector IDs and deletion markers are preserved. This is an in-memory operation,
+     * not a persistence barrier. Queries may wait while the replacement is published.
+     * @return An error if the index does not support flushing or compaction fails.
+     */
+    virtual tl::expected<void, Error>
+    Flush() {
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support Flush"));
+    }
+
     // Keep this bridge nonvirtual: an old binary Index subclass has no corrected slot in its
     // vtable. Dispatching through the pre-existing legacy virtuals keeps that ABI safe.
     [[nodiscard]] tl::expected<DatasetPtr, Error>

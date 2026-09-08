@@ -43,6 +43,8 @@ struct HGraphMCIParameters {
     float incremental_join_ratio_threshold{0.6F};
     uint64_t incremental_added_mct{3};
     uint64_t incremental_clique_max{50};
+    uint64_t delete_clique_size_threshold{3};
+    uint64_t delete_node_mct_threshold{3};
 };
 class HGraphParameter : public InnerIndexParameter {
 public:

@@ -1176,6 +1176,13 @@ TEST_CASE("RaBitQSplitDataCell serialize and methods", "[ut][RaBitQSplitDataCell
         flatten->BatchInsertVector(vectors.data(), count);
         flatten->Resize(count * 2);
         flatten->ShrinkToFit(count);
+        REQUIRE(flatten->TotalCount() == count);
+        flatten->ShrinkToFit(count / 2);
+        REQUIRE(flatten->TotalCount() == count / 2);
+        flatten->ShrinkToFit(0);
+        REQUIRE(flatten->TotalCount() == 0);
+        flatten->InsertVector(vectors.data());
+        REQUIRE(flatten->TotalCount() == 1);
     }
 
     SECTION("Move") {

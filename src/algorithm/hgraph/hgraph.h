@@ -170,6 +170,9 @@ public:
     GetStats() const override;
 
     void
+    Flush() override;
+
+    void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 
     IndexType
@@ -681,6 +684,9 @@ private:
     void
     shrink_to_fit();
 
+    uint32_t
+    force_remove_with_mci(const std::vector<int64_t>& ids);
+
     /// Flat brute-force search used when the index is too small or graph is unavailable.
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     DistHeapPtr
@@ -882,10 +888,22 @@ private:
     build_mci_clique_index(const void* vectors = nullptr);
 
     void
-    incremental_update_mci_clique(InnerIdType new_inner_id, const void* vector);
+    incremental_update_mci_clique(InnerIdType node_id,
+                                  const void* vector,
+                                  uint64_t visible_total = 0);
 
-    [[nodiscard]] Vector<InnerIdType>
-    find_mci_knn_for_new_node(InnerIdType new_inner_id, const void* vector) const;
+    void
+    incremental_update_mci_clique(InnerIdType node_id,
+                                  const Vector<InnerIdType>& knn_ids,
+                                  uint64_t visible_total);
+
+    /// Retire undersized MCI cliques and repair their under-covered live members.
+    void
+    remove_from_mci(const Vector<InnerIdType>& removed_inner_ids);
+
+    /// Recover an existing query vector and run the same MCI update as Add, without reinserting it.
+    void
+    repair_mci_clique(InnerIdType node_id);
 
     [[nodiscard]] Vector<InnerIdType>
     search_mci_knn(InnerIdType query_inner_id, const void* vector, uint64_t visible_total) const;
@@ -894,7 +912,9 @@ private:
     try_join_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
 
     void
-    build_incremental_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+    build_incremental_mci_clique(InnerIdType new_inner_id,
+                                 const Vector<InnerIdType>& knn_ids,
+                                 uint64_t visible_total);
 
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};  // coarse/quantized codes for graph search
@@ -938,10 +958,10 @@ private:
     mutable std::shared_mutex global_mutex_;            // guards total_count_, entry_point_id_
     mutable std::shared_mutex persistent_codes_mutex_;  // pins flatten storage during MCI search
     mutable std::mutex mci_build_mutex_;                // serializes full MCI reconstruction
-    mutable std::mutex mci_add_mutex_;                  // serializes MCI-enabled Add calls
-    mutable MutexArrayPtr neighbors_mutex_;             // per-node locks for neighbor lists
-    mutable std::shared_mutex add_mutex_;               // serializes Add() operations
-    mutable std::shared_mutex force_remove_mutex_;      // serializes force-remove operations
+    mutable std::mutex mci_mutation_mutex_;         // serializes MCI-enabled Add and Remove calls
+    mutable MutexArrayPtr neighbors_mutex_;         // per-node locks for neighbor lists
+    mutable std::shared_mutex add_mutex_;           // serializes Add() operations
+    mutable std::shared_mutex force_remove_mutex_;  // serializes force-remove operations
     // Single-flights physical code growth before taking the global writer lock.
     mutable std::mutex physical_code_resize_mutex_;
     std::atomic<bool> physical_code_resize_pending_{false};
