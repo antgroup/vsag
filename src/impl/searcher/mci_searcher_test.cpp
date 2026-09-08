@@ -28,9 +28,9 @@ TEST_CASE("MCISearcher traverses base extras delta and tombstones before and aft
     auto quantizer =
         QuantizerParameter::GetQuantizerParameterByJson(JsonType::Parse(R"({"type":"fp32"})"));
     auto io = IOParameter::GetIOParameterByJson(JsonType::Parse(R"({"type":"memory_io"})"));
-    auto flatten =
-        std::make_shared<FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
-            quantizer, io, common);
+    auto flatten = std::make_shared<
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, FixedLayout<MemoryIO>>>(
+        quantizer, io, common);
     std::vector<float> vectors{0, 1, 2, 3, 4};
     std::vector<InnerIdType> ids{0, 1, 2, 3, 4};
     flatten->Train(vectors.data(), ids.size());
