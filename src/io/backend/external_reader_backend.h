@@ -40,6 +40,7 @@ struct ExternalReaderBackendCapabilities {
     static constexpr bool AsyncReadable = true;
     static constexpr bool Writable = false;
     static constexpr bool Resizable = false;
+    static constexpr bool CanResizeForOverwrite = false;
 };
 
 class ExternalReaderBackend {
