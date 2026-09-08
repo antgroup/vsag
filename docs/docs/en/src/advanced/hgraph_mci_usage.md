@@ -292,9 +292,9 @@ Do not mix their recall conclusions.
 
 MiB = bytes / 1,048,576. Stage memory/timing repeats across ef rows; do not sum it. QPS is
 multithreaded throughput: `1000 / QPS` is not per-request latency. CSV has neither latency percentiles
-nor per-stage RSS. Historical five-stage measurements are in report section 15 and
-`scripts/perf_reports/results/mci_20260908/3m_fp32_hgraph_knn_cycle.csv`; they predate adaptation to
-newer main and are not a performance rerun of current PR HEAD.
+nor per-stage RSS. Historical five-stage measurements are summarized in report section 15;
+raw result files are not included in this PR. These measurements predate adaptation to newer
+main and are not a performance rerun of current PR HEAD.
 
 ```bash
 make debug VSAG_ENABLE_TESTS=ON COMPILE_JOBS=12

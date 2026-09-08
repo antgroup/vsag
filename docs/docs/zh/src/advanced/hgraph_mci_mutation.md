@@ -602,11 +602,7 @@ S4 的 ef=80 召回比 S0 低 1.10 个百分点，ef=160 低 1.35 个百分点�
 
 ## 12. 结果归档与源码导航
 
-归档 CSV 保留了字节级内存和更高精度的 QPS，不依赖会被清理的 `/tmp`：
-
-- [3m FORCE_REMOVE，含阶段 RSS][raw-3m]
-- [10k FORCE_REMOVE，含阶段 RSS][raw-force]
-- [10k MARK_REMOVE，含阶段 RSS][raw-mark]
+本文保留测试结果汇总；本 PR 不包含原始 CSV 结果文件。
 
 原始连续 RSS、日志和本机复现辅助脚本分别位于
 `/tmp/mci-force-3m-wO5WR3/`、`/tmp/mci-force-verify-5G5UPQ/final/`，
@@ -627,9 +623,6 @@ S4 的 ef=80 召回比 S0 低 1.10 个百分点，ef=160 低 1.35 个百分点�
 | [memory_block_io.cpp][src-block] | 按完整块分配和缩容。 |
 | [mci_mutation_benchmark.cpp][src-bench] | 数据加载、过滤真值、五阶段检索与 CSV。 |
 
-[raw-3m]: ../../../../../scripts/perf_reports/results/mci_20260907/3m_force.csv
-[raw-force]: ../../../../../scripts/perf_reports/results/mci_20260907/10k_force.csv
-[raw-mark]: ../../../../../scripts/perf_reports/results/mci_20260907/10k_mark.csv
 [src-build]: ../../../../../src/algorithm/hgraph/hgraph_build.cpp
 [src-mci]: ../../../../../src/algorithm/hgraph/hgraph_mci.cpp
 [src-modify]: ../../../../../src/algorithm/hgraph/hgraph_modify.cpp
@@ -838,8 +831,7 @@ python3 -m unittest discover -s scripts/perf_reports -p 'test_mci_stress.py' -v
 | 加回 20% | 3,241,378 | 94.65% | 3,346.91 | 528.11 | 6,432.85 |
 
 初始构建耗时 553.47 秒。索引 MiB 是索引报告的分配量，**不是进程 RSS**；
-本次未记录各阶段 RSS。原始数据见
-[五阶段 CSV](../../../../../scripts/perf_reports/results/mci_20260908/3m_fp32_hgraph_knn_cycle.csv)。
+本次未记录各阶段 RSS。本 PR 不包含原始结果文件。
 这些结果来自适配新版 main 前的开发实现，不代表适配后 PR 版本的重新压测。
 固定 ef 下 QPS 提高也不等于同等 recall 下性能一定提高。
 

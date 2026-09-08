@@ -684,6 +684,8 @@ private:
     void
     shrink_to_fit();
 
+    /// Physically remove external labels, remap graph/MCI IDs, repair cliques and shrink storage.
+    /// Owns mutation locking; called by Remove(FORCE_REMOVE) when MCI is enabled.
     uint32_t
     force_remove_with_mci(const std::vector<int64_t>& ids);
 
@@ -887,6 +889,9 @@ private:
     void
     build_mci_clique_index(const void* vectors = nullptr);
 
+    /// Search HGraph KNN and update MCI without inserting a vector into HGraph.
+    /// visible_total is the exclusive inner-ID bound for accepted KNN candidates, not live count.
+    /// Zero defaults to node_id + 1 for ADD; existing FP32 repair points pass total_count_.
     void
     incremental_update_mci_clique(InnerIdType node_id,
                                   const void* vector,
@@ -897,7 +902,9 @@ private:
                                   const Vector<InnerIdType>& knn_ids,
                                   uint64_t visible_total);
 
-    /// Retire undersized MCI cliques and repair their under-covered live members.
+    /// Apply deletion to MCI only, retiring small cliques and repairing under-covered survivors.
+    /// Uses unchanged inner IDs; does not remove vectors, remap graph IDs or shrink storage.
+    /// Caller owns mutation locking and handles label deletion and MCI publication.
     void
     remove_from_mci(const Vector<InnerIdType>& removed_inner_ids);
 

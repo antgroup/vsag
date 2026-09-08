@@ -568,11 +568,7 @@ Future work, not implemented in this report:
 
 ## 12. Archived results and source map
 
-The archived CSV files retain byte-level memory and higher-precision QPS independently of `/tmp`:
-
-- [3m FORCE_REMOVE with stage RSS][raw-3m]
-- [10k FORCE_REMOVE with stage RSS][raw-force]
-- [10k MARK_REMOVE with stage RSS][raw-mark]
+This report retains the measurement summaries; raw CSV result files are not included in this PR.
 
 Original continuous RSS, logs, and local helper scripts are in
 `/tmp/mci-force-3m-wO5WR3/` and `/tmp/mci-force-verify-5G5UPQ/final/`.
@@ -593,9 +589,6 @@ dependency downloads timed out. Tables and archived CSV remain independently rea
 | [memory_block_io.cpp][src-block] | Whole-block allocation and shrinking. |
 | [mci_mutation_benchmark.cpp][src-bench] | Loading, ground truth, five stages, CSV. |
 
-[raw-3m]: ../../../../../scripts/perf_reports/results/mci_20260907/3m_force.csv
-[raw-force]: ../../../../../scripts/perf_reports/results/mci_20260907/10k_force.csv
-[raw-mark]: ../../../../../scripts/perf_reports/results/mci_20260907/10k_mark.csv
 [src-build]: ../../../../../src/algorithm/hgraph/hgraph_build.cpp
 [src-mci]: ../../../../../src/algorithm/hgraph/hgraph_mci.cpp
 [src-modify]: ../../../../../src/algorithm/hgraph/hgraph_modify.cpp
@@ -827,8 +820,7 @@ and FORCE_REMOVE batches of 324,138 vectors. At ef_search=320:
 | Add back 20% | 3,241,378 | 94.65% | 3,346.91 | 528.11 | 6,432.85 |
 
 Initial construction took 553.47 seconds. Index MiB is reported index allocation, **not
-process RSS**; per-stage RSS was not recorded. Raw measurements are in
-[the cycle CSV](../../../../../scripts/perf_reports/results/mci_20260908/3m_fp32_hgraph_knn_cycle.csv).
+process RSS**; per-stage RSS was not recorded. Raw result files are not included in this PR.
 These are measurements of the development implementation before its adaptation to the newer
 main branch, not a rerun of the PR rebased onto main. Higher QPS at a fixed ef does not alone
 establish an equal-recall performance improvement.

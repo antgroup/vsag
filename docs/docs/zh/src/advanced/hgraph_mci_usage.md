@@ -292,7 +292,7 @@ MiB = bytes / 1,048,576。相同阶段不同 ef 行会重复阶段内存/耗时�
 QPS 是多线程吞吐，`1000 / QPS` 不是单请求延迟；当前 CSV 不含延迟分位数或逐阶段 RSS。
 
 已完成五阶段结果及 ef=320 汇总见 [测试报告第 15 节](hgraph_mci_mutation.md#15-纯-fp32-五阶段复测与初始索引保存)。
-原始数据为 `scripts/perf_reports/results/mci_20260908/3m_fp32_hgraph_knn_cycle.csv`；
+本 PR 不包含原始结果文件；
 这是适配新版 main 前的开发版本测量，不是当前 PR HEAD 的重新压测。
 
 ## 6. 回归测试与边界
