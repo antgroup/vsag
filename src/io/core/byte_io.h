@@ -132,6 +132,26 @@ public:
         cache_.Clear(old_size);
     }
 
+    /**
+     * @brief Grow the storage to size without zero-filling the freshly
+     * allocated region, for callers that guarantee they overwrite the whole
+     * grown range afterwards (e.g. parallel deserialization).
+     *
+     * Falls back to Resize when the backend cannot skip the fill, so it is
+     * always safe to call.
+     */
+    void
+    ResizeForOverwrite(uint64_t size) {
+        if constexpr (Backend::Capabilities::CanResizeForOverwrite) {
+            uint64_t old_size = Size();
+            backend_.ResizePhysicalForOverwrite(size, old_size);
+            size_.store(size, std::memory_order_release);
+            cache_.Clear(old_size);
+        } else {
+            Resize(size);
+        }
+    }
+
     void
     Shrink(uint64_t size) {
         uint64_t old_size = Size();

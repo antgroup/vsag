@@ -57,6 +57,8 @@
 - [属性过滤（混合搜索）](advanced/attribute_filter.md)
 - [序列化格式](advanced/serialization.md)
 - [新序列化格式](advanced/new_serialization.md)
+- [分块序列化格式](advanced/chunked_serialization.md)
+- [并行反序列化](advanced/parallel_deserialization.md)
 - [内存管理](advanced/memory.md)
 - [搜索路径 Allocator](advanced/search_allocator.md)
 - [索引自省](advanced/introspection.md)
