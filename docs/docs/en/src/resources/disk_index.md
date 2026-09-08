@@ -105,6 +105,21 @@ warning and uses `buffer_io`. This fallback is functional, but it does not provi
 submission/completion batching. See `examples/cpp/325_feature_uring_io.cpp` for an end-to-end load
 example.
 
+### Optional page-cache prefetch hints
+
+File-backed IO parameters accept `enable_prefetch_hint` (default: `false`). When enabled, existing
+search-time `Prefetch` calls issue best-effort operating-system hints: `buffer_io` and buffered
+`uring_io` use file read-ahead advice, `mmap_io` uses mapped-page advice, and `reader_io`
+forwards to the optional `ReaderPrefetcher::Prefetch` hook. A `reader_io` Reader that does not
+implement `ReaderPrefetcher` remains fully compatible: enabled hints are simply ignored. A remote
+Reader can opt in by inheriting from both `Reader` and `ReaderPrefetcher`; its `Prefetch` method
+should return promptly, treat failures as non-fatal, and must not change subsequent read results.
+The option is hint-only and does not affect correctness. Direct-IO paths ignore it because they
+bypass the page cache. In public HGraph/IVF build or `Index::Load` parameters, use the component
+form `precise_enable_prefetch_hint: true` for precise-code `reader_io`; the runnable
+`examples/cpp/408_feature_reader_prefetch.cpp` demonstrates this setup. Enable it only
+after benchmarking the target workload, since frequent hint calls can add overhead.
+
 ## Recommended configuration: base in memory, precise on disk
 
 The workhorse layout keeps a very compact 3-bit RaBitQ base in memory for traversal and pushes

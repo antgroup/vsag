@@ -131,8 +131,11 @@ public:
     }
 
     void
-    Prefetch(uint64_t offset, uint64_t cache_line) {
-        PrefetchLines(region_.Data() + offset, cache_line);
+    Prefetch(uint64_t offset, uint64_t size) {
+        PrefetchLines(region_.Data() + offset, size);
+        if constexpr (not Region::InMemory) {
+            region_.Prefetch(offset, size);
+        }
     }
 
     [[nodiscard]] int64_t

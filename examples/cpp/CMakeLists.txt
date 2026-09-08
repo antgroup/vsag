@@ -154,6 +154,9 @@ target_link_libraries(406_feature_read_cache vsag)
 add_executable(407_feature_ivf_read_cache 407_feature_ivf_read_cache.cpp)
 target_link_libraries(407_feature_ivf_read_cache vsag)
 
+add_executable(408_feature_reader_prefetch 408_feature_reader_prefetch.cpp)
+target_link_libraries(408_feature_reader_prefetch vsag)
+
 if (TARGET vsag::autotune)
     add_executable (326_feature_create_index_with_constraints
         326_feature_create_index_with_constraints.cpp)

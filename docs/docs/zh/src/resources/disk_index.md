@@ -96,6 +96,20 @@ direct IO，并针对实际负载对比两种模式。
 `buffer_io`。回退后功能保持可用，但不具备 io_uring 的提交/完成批处理能力。完整加载示例见
 `examples/cpp/325_feature_uring_io.cpp`。
 
+### 可选的页缓存预取提示
+
+文件型 IO 参数支持 `enable_prefetch_hint`（默认 `false`）。开启后，已有的搜索期 `Prefetch`
+调用会向操作系统发出尽力而为的提示：`buffer_io` 与带缓冲的 `uring_io` 使用文件预读提示，
+`mmap_io` 使用映射页提示，`reader_io` 转发到可选的 `ReaderPrefetcher::Prefetch` hook。
+如果 Reader 没有实现 `ReaderPrefetcher`，即使开启该参数也只会安全地忽略预取提示，原有读取
+行为保持兼容。远程 Reader 可同时继承 `Reader` 与 `ReaderPrefetcher` 来启用此能力；其
+`Prefetch` 实现应快速返回、将失败视为非致命，并且不得改变后续正式读取结果。该选项仅是
+性能提示，不影响正确性；direct IO 会绕过页缓存，因此忽略此提示。在公开的 HGraph/IVF 构建参数
+或 `Index::Load` 参数中，精确码使用 `reader_io` 时通过组件形式
+`precise_enable_prefetch_hint: true` 开启；可运行示例
+`examples/cpp/408_feature_reader_prefetch.cpp` 展示了完整配置。频繁提示可能增加调用开销，
+请在真实负载上完成基准测试后再开启。
+
 ## 推荐配置：base 留内存，precise 落磁盘
 
 最常用的分层方案：内存里保留极为紧凑的 3 位 RaBitQ base 用于遍历，把精度更高的 `sq8` 副本下沉磁盘，
