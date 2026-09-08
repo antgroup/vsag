@@ -386,6 +386,10 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
             codes2 = this->GetCodesById(idx[i + 1], release2);
             codes3 = this->GetCodesById(idx[i + 2], release3);
             codes4 = this->GetCodesById(idx[i + 3], release4);
+            if (codes1 == nullptr or codes2 == nullptr or codes3 == nullptr or codes4 == nullptr) {
+                throw VsagException(ErrorType::READ_ERROR,
+                                    "failed to acquire codes for batch distance evaluation");
+            }
             computer->ComputeDistsBatch4(codes1,
                                          codes2,
                                          codes3,
@@ -405,6 +409,10 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
         const uint8_t* codes = nullptr;
         try {
             codes = this->GetCodesById(idx[i], release);
+            if (codes == nullptr) {
+                throw VsagException(ErrorType::READ_ERROR,
+                                    "failed to acquire codes for id " + std::to_string(idx[i]));
+            }
             computer->ComputeDist(codes, result_dists + i);
         } catch (...) {
             if (release && codes) {
