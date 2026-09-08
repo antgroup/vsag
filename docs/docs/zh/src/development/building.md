@@ -54,6 +54,21 @@ clean-release:           ## Clear build-release/ directory.
 install:                 ## Build and install the release version of vsag.
 ```
 
+## 依赖大小指标
+
+构建指标 JSON 使用 schema 版本 3。每个依赖的 `local_bytes`（Markdown 报告中的
+**Local size**）是文件大小的合计，而不是实际分配的磁盘空间。它替代了 `source_bytes` 和
+`build_bytes`：HDF5 和 OpenBLAS 在源码目录内构建，ANTLR4 的二进制目录也位于源码目录内，
+因此无法可靠地将源码和构建产物分开统计。
+
+对于 ExternalProject 依赖，合计值将整个依赖前缀目录统计一次，包含源码、构建产物、安装文件及
+前缀目录内的元数据。共享 `BUILD_INFO_DIR`（默认为 `.vsag-build-info`）中的临时文件、
+stamp、日志和元数据不计入 `local_bytes`，也不计入准备阶段表格的 `external_build_bytes`；
+这两项均不代表 ExternalProject 的全部存储。对于 FetchContent 依赖，合计同级的 `<name>-src` 和 `<name>-build` 目录。
+不统计符号链接项。单独缓存的 ExternalProject 归档在准备阶段表格中报告，不计入 `local_bytes`。
+系统依赖显示为零，因为不测量主机上的安装文件；未分类或缺失的目录也贡献零字节。这是被测本地目录
+的快照，既不是纯源码大小，也不是单独的构建产物大小。
+
 ## 编译 VSAG 库
 
 `make debug` 是我们开发中最常用的命令，它会以开发模式编译整个项目，禁用大多数优化（`-O0`）并生成调试信息（`-g`）。该目标默认关闭测试、示例、工具和 Python 绑定；如需同时启用它们，可使用 `make dev`。
@@ -151,6 +166,8 @@ make pyvsag-all
 - `RELEASE_BUILD_DIR`：发布模式产物目录，非必要不修改；
 - `VSAG_ENABLE_INTEL_MKL`：是否启用 Intel MKL 作为 BLAS 后端，默认 `OFF`；关闭时使用 OpenBLAS；
 - `VSAG_ENABLE_LIBAIO`：是否启用 `libaio`，默认 `ON`。
+
+配置和构建目标的 `DEBUG_BUILD_DIR` 应传入普通路径，例如 `make asan DEBUG_BUILD_DIR="custom build"`。命令行引号由 shell 去除，Makefile 在调用 CMake 时会为路径加引号；不要在变量值中嵌入字面引号。
 
 ## 离线 / 内网环境构建
 

@@ -47,6 +47,28 @@ to Unix Makefiles. An explicit generator always wins; for example, use
 trees are generator-specific, run the matching clean target before changing the generator for an
 existing build directory.
 
+For configure/build targets, pass `DEBUG_BUILD_DIR` as a plain path, for example
+`make asan DEBUG_BUILD_DIR="custom build"`. The shell removes these command-line quotes;
+the recipes quote the path when invoking CMake. Do not embed literal quote characters in the variable.
+
+## Dependency size metrics
+
+The build metrics JSON uses schema version 3. Each dependency's `local_bytes` (the Markdown
+report's **Local size**) is an aggregate of file sizes, not allocated disk space. It replaces
+`source_bytes` and `build_bytes`: HDF5 and OpenBLAS build in their source trees, and ANTLR4's
+binary directory is nested under its source tree, so those categories cannot be separated reliably.
+
+For ExternalProject dependencies, the aggregate counts the entire dependency prefix once,
+including source, build, install, and any metadata inside that prefix. Shared `BUILD_INFO_DIR`
+files (by default `.vsag-build-info`: temporary files, stamps, logs, and metadata) are excluded
+from both `local_bytes` and the preparation table's `external_build_bytes`; neither measures all
+ExternalProject storage. For FetchContent dependencies, it
+sums the sibling `<name>-src` and `<name>-build` trees. Symlink entries are excluded. Separately
+cached ExternalProject archives are reported in the preparation table, not added to `local_bytes`.
+System dependencies show zero because host installations are not measured; unclassified or missing
+trees also contribute zero. This is a snapshot of the measured local trees, not a source-only size
+or a measurement of generated build artifacts alone.
+
 ## Step-by-Step
 
 ```bash

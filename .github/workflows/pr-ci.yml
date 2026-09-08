@@ -117,6 +117,8 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts/linters -p 'test_changed_source_filter.py'
           python3 -m unittest tests/scripts/configure_git_safe_directory_test.py
+          python3 -m unittest tests/scripts/test_collect_build_metrics.py
+          python3 -m unittest tests/scripts/test_dependency_workflows.py
       - name: Prepare Host
         run: |
           sudo env VSAG_INSTALL_INTEL_MKL=OFF bash ./scripts/deps/install_deps_ubuntu.sh
@@ -124,16 +126,31 @@ jobs:
           ninja --version
           cmake --version
           g++ --version
-      - name: Start Dependency Preparation Timer
-        id: dependency-preparation-start
+      - name: Start FetchContent Preparation Timer
+        id: dependency-source-preparation-start
         run: echo "started_ns=$(date +%s%N)" >> "$GITHUB_OUTPUT"
       - name: Prepare FetchContent Sources
         uses: ./.github/actions/prepare-fetchcontent
         with:
           include-tests: "true"
           include-tools: "true"
-      - name: Cache ExternalProject Archives
-        uses: actions/cache@v4
+      - name: Finish FetchContent Preparation Timer
+        id: dependency-source-preparation
+        env:
+          STARTED_NS: ${{ steps.dependency-source-preparation-start.outputs.started_ns }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          import time
+
+          now = time.time_ns()
+          elapsed = (now - int(os.environ["STARTED_NS"])) / 1_000_000_000
+          print(f"seconds={elapsed:.3f}")
+          print(f"cache_started_ns={now}")
+          PY
+      - name: Restore ExternalProject Archives
+        id: dependency-archive-cache
+        uses: actions/cache/restore@v4
         with:
           path: .ci-downloads
           key: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
@@ -142,14 +159,27 @@ jobs:
       - name: Finish Dependency Preparation Timer
         id: dependency-preparation
         env:
-          STARTED_NS: ${{ steps.dependency-preparation-start.outputs.started_ns }}
+          STARTED_NS: ${{ steps.dependency-source-preparation-start.outputs.started_ns }}
+          CACHE_STARTED_NS: ${{ steps.dependency-source-preparation.outputs.cache_started_ns }}
+          CACHE_HIT: ${{ steps.dependency-archive-cache.outputs.cache-hit }}
+          CACHE_MATCHED_KEY: ${{ steps.dependency-archive-cache.outputs.cache-matched-key }}
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import os
           import time
 
-          elapsed = (time.time_ns() - int(os.environ["STARTED_NS"])) / 1_000_000_000
+          now = time.time_ns()
+          elapsed = (now - int(os.environ["STARTED_NS"])) / 1_000_000_000
+          cache_elapsed = (now - int(os.environ["CACHE_STARTED_NS"])) / 1_000_000_000
+          if os.environ["CACHE_HIT"] == "true":
+              cache_state = "exact-hit"
+          elif os.environ["CACHE_MATCHED_KEY"]:
+              cache_state = "fallback-hit"
+          else:
+              cache_state = "miss"
           print(f"seconds={elapsed:.3f}")
+          print(f"cache_seconds={cache_elapsed:.3f}")
+          print(f"cache_state={cache_state}")
           PY
       - name: Make Asan and collect build metrics
         # The source-build OpenBLAS path remains covered by daily_test.yml.
@@ -158,7 +188,11 @@ jobs:
           CCACHE_DIR: ${{ github.workspace }}/.build-metrics-ccache
           COMPILER_CACHE_KEY: build-metrics-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
           DEPENDENCY_CACHE_KEY: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
+          DEPENDENCY_CACHE_MATCHED_KEY: ${{ steps.dependency-archive-cache.outputs.cache-matched-key }}
+          DEPENDENCY_CACHE_STATE: ${{ steps.dependency-preparation.outputs.cache_state }}
           DEPENDENCY_PREPARATION_SECONDS: ${{ steps.dependency-preparation.outputs.seconds }}
+          DEPENDENCY_SOURCE_PREPARATION_SECONDS: ${{ steps.dependency-source-preparation.outputs.seconds }}
+          DEPENDENCY_CACHE_RESTORE_SECONDS: ${{ steps.dependency-preparation.outputs.cache_seconds }}
         run: |
           export CMAKE_GENERATOR="Ninja"
           export CMAKE_EXPORT_COMPILE_COMMANDS=ON
@@ -172,7 +206,12 @@ jobs:
             --compiler "gcc-$COMPILER" \
             --compiler-cache-key "$COMPILER_CACHE_KEY-gcc-$COMPILER" \
             --dependency-cache-key "$DEPENDENCY_CACHE_KEY" \
+            --dependency-cache-matched-key "$DEPENDENCY_CACHE_MATCHED_KEY" \
+            --dependency-cache-state "$DEPENDENCY_CACHE_STATE" \
+            --dependency-cache-write-policy restore-only \
             --dependency-preparation-seconds "$DEPENDENCY_PREPARATION_SECONDS" \
+            --dependency-source-preparation-seconds "$DEPENDENCY_SOURCE_PREPARATION_SECONDS" \
+            --dependency-cache-restore-seconds "$DEPENDENCY_CACHE_RESTORE_SECONDS" \
             --jobs 3 \
             --clear-ccache
       - name: Append build metrics job summary
