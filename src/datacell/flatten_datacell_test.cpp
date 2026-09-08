@@ -176,6 +176,37 @@ TEST_CASE("FlattenDataCell only reports a stride for contiguous raw data",
     REQUIRE(row_stride == 0);
 }
 
+TEST_CASE("FP32 FlattenDataCell shrink truncates logical rows before subsequent add",
+          "[ut][FlattenDataCell][mci][force_remove]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    const auto io_type = GENERATE("memory_io", "block_memory_io");
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    auto json = JsonType::Parse(R"({
+        "io_params": {"type": "memory_io"},
+        "quantization_params": {"type": "fp32"}
+    })");
+    json["io_params"]["type"].SetString(io_type);
+    param->FromJson(json);
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.dim_ = 4;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto flatten = FlattenInterface::MakeInstance(param, common);
+    constexpr InnerIdType count = 32;
+    auto vectors = fixtures::generate_vectors(count, common.dim_);
+    flatten->Train(vectors.data(), count);
+    flatten->BatchInsertVector(vectors.data(), count);
+    flatten->Resize(count * 2);
+    flatten->ShrinkToFit(count);
+    REQUIRE(flatten->TotalCount() == count);
+    flatten->ShrinkToFit(count / 2);
+    REQUIRE(flatten->TotalCount() == count / 2);
+    flatten->ShrinkToFit(0);
+    REQUIRE(flatten->TotalCount() == 0);
+    flatten->InsertVector(vectors.data());
+    REQUIRE(flatten->TotalCount() == 1);
+}
+
 TEST_CASE("RaBitQSplitDataCell adapts prefetch bytes to split record sizes",
           "[ut][RaBitQSplitDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
@@ -1176,13 +1207,6 @@ TEST_CASE("RaBitQSplitDataCell serialize and methods", "[ut][RaBitQSplitDataCell
         flatten->BatchInsertVector(vectors.data(), count);
         flatten->Resize(count * 2);
         flatten->ShrinkToFit(count);
-        REQUIRE(flatten->TotalCount() == count);
-        flatten->ShrinkToFit(count / 2);
-        REQUIRE(flatten->TotalCount() == count / 2);
-        flatten->ShrinkToFit(0);
-        REQUIRE(flatten->TotalCount() == 0);
-        flatten->InsertVector(vectors.data());
-        REQUIRE(flatten->TotalCount() == 1);
     }
 
     SECTION("Move") {
