@@ -49,7 +49,7 @@ TEST_CASE("Lite validates inputs and preserves IDs through physical deletion", "
 TEST_CASE("Lite snapshot roundtrip and malformed input", "[lite]") {
     auto created = Index::Create(2);
     auto& index = **created;
-    float a[]{1.25f, -2.5f};
+    float a[]{1.25F, -2.5F};
     REQUIRE(index.Add(INT64_MIN, a, 2));
     REQUIRE(index.Add(INT64_MAX, a, 2));
     REQUIRE(index.Add(9, a, 2));
@@ -116,7 +116,7 @@ TEST_CASE("Lite randomized CRUD matches an independent reference", "[lite]") {
     std::unordered_map<int64_t, std::vector<float>> reference;
     std::mt19937 random(20260908);
     for (uint64_t step = 0; step < 1000; ++step) {
-        const int64_t id = random() % 80;
+        const auto id = static_cast<int64_t>(random() % 80);
         std::vector<float> v(7);
         for (auto& x : v) {
             x = static_cast<float>(random() % 100) / 100;
@@ -157,7 +157,7 @@ TEST_CASE("Lite randomized CRUD matches an independent reference", "[lite]") {
         REQUIRE(actual->size() == expected.size());
         for (uint64_t i = 0; i < expected.size(); ++i) {
             REQUIRE((*actual)[i].id == expected[i].id);
-            REQUIRE(std::abs((*actual)[i].distance - expected[i].distance) < 1e-5f);
+            REQUIRE(std::abs((*actual)[i].distance - expected[i].distance) < 1e-5F);
         }
     }
 }

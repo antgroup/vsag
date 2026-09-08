@@ -53,9 +53,9 @@ public:
     static tl::expected<std::unique_ptr<Index>, Error>
     Load(std::istream& input);
 
-    uint64_t
+    [[nodiscard]] uint64_t
     Size() const;
-    uint64_t
+    [[nodiscard]] uint64_t
     Dim() const;
 
 private:
