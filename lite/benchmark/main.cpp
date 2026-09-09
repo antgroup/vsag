@@ -1,0 +1,273 @@
+// Copyright 2024-present the vsag project
+// SPDX-License-Identifier: Apache-2.0
+#include <sys/resource.h>
+#include <vsag/lite/index.h>
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <limits>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+namespace {
+
+using Clock = std::chrono::steady_clock;
+
+struct Config {
+    uint64_t count;
+    uint64_t dim;
+    uint64_t queries;
+    uint64_t k;
+    uint64_t crud_ops;
+    uint64_t seed;
+    std::string snapshot;
+};
+
+uint64_t
+parse_uint(const char* text, const char* name) {
+    std::string value(text);
+    std::string::size_type consumed = 0;
+    uint64_t parsed = 0;
+    try {
+        parsed = std::stoull(value, &consumed);
+    } catch (const std::exception&) {
+        throw std::invalid_argument(std::string("invalid ") + name);
+    }
+    if (consumed != value.size()) {
+        throw std::invalid_argument(std::string("invalid ") + name);
+    }
+    return parsed;
+}
+
+Config
+parse_config(int argc, char** argv) {
+    if (argc != 8) {
+        throw std::invalid_argument(
+            "usage: lite_benchmark COUNT DIM QUERIES K CRUD_OPS SEED SNAPSHOT_PATH");
+    }
+    Config config{parse_uint(argv[1], "count"),
+                  parse_uint(argv[2], "dimension"),
+                  parse_uint(argv[3], "queries"),
+                  parse_uint(argv[4], "k"),
+                  parse_uint(argv[5], "CRUD operation count"),
+                  parse_uint(argv[6], "seed"),
+                  argv[7]};
+    if (config.count == 0 or config.dim == 0 or config.queries == 0 or config.k == 0 or
+        config.crud_ops == 0 or config.k > config.count or config.crud_ops > config.count or
+        config.count > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+        throw std::invalid_argument("configuration values are out of range");
+    }
+    if (std::filesystem::exists(config.snapshot)) {
+        throw std::invalid_argument("snapshot path already exists");
+    }
+    return config;
+}
+
+uint64_t
+mix(uint64_t value) {
+    value += 0x9e3779b97f4a7c15ULL;
+    value = (value ^ (value >> 30U)) * 0xbf58476d1ce4e5b9ULL;
+    value = (value ^ (value >> 27U)) * 0x94d049bb133111ebULL;
+    return value ^ (value >> 31U);
+}
+
+void
+make_vector(uint64_t id, uint64_t variant, const Config& config, std::vector<float>& vector) {
+    for (uint64_t d = 0; d < config.dim; ++d) {
+        const uint64_t bits = mix(config.seed ^ mix(id) ^ mix(variant) ^ mix(d));
+        vector[d] = static_cast<float>(bits >> 40U) / 16777216.0F;
+    }
+}
+
+double
+milliseconds(Clock::time_point start, Clock::time_point end) {
+    return std::chrono::duration<double, std::milli>(end - start).count();
+}
+
+double
+microseconds(Clock::time_point start, Clock::time_point end) {
+    return std::chrono::duration<double, std::micro>(end - start).count();
+}
+
+double
+percentile(std::vector<double> values, double fraction) {
+    std::sort(values.begin(), values.end());
+    const auto rank =
+        static_cast<uint64_t>(std::ceil(fraction * static_cast<double>(values.size()))) - 1;
+    return values[std::min<uint64_t>(rank, values.size() - 1)];
+}
+
+uint64_t
+result_checksum(const std::vector<vsag::lite::Neighbor>& result, uint64_t checksum) {
+    for (const auto& neighbor : result) {
+        uint32_t distance_bits = 0;
+        std::memcpy(&distance_bits, &neighbor.distance, sizeof(distance_bits));
+        checksum ^= mix(static_cast<uint64_t>(neighbor.id));
+        checksum *= 1099511628211ULL;
+        checksum ^= distance_bits;
+        checksum *= 1099511628211ULL;
+    }
+    return checksum;
+}
+
+bool
+same_results(const std::vector<vsag::lite::Neighbor>& left,
+             const std::vector<vsag::lite::Neighbor>& right) {
+    if (left.size() != right.size()) {
+        return false;
+    }
+    for (uint64_t i = 0; i < left.size(); ++i) {
+        if (left[i].id != right[i].id or left[i].distance != right[i].distance) {
+            return false;
+        }
+    }
+    return true;
+}
+
+uint64_t
+peak_rss_kib() {
+    rusage usage{};
+    if (getrusage(RUSAGE_SELF, &usage) != 0) {
+        throw std::runtime_error("getrusage failed");
+    }
+    return static_cast<uint64_t>(usage.ru_maxrss);
+}
+
+void
+require(bool condition, const char* message) {
+    if (not condition) {
+        throw std::runtime_error(message);
+    }
+}
+
+int
+run(const Config& config) {
+    auto created = vsag::lite::Index::Create(config.dim);
+    require(static_cast<bool>(created), "index creation failed");
+    auto index = std::move(*created);
+    std::vector<float> vector(config.dim);
+    std::vector<uint64_t> variants(config.count, 0);
+
+    const auto build_start = Clock::now();
+    for (uint64_t id = 0; id < config.count; ++id) {
+        make_vector(id, 0, config, vector);
+        require(static_cast<bool>(index->Add(static_cast<int64_t>(id), vector.data(), config.dim)),
+                "add failed");
+    }
+    const double build_ms = milliseconds(build_start, Clock::now());
+
+    std::vector<double> update_us;
+    std::vector<double> remove_us;
+    std::vector<double> readd_us;
+    update_us.reserve(config.crud_ops);
+    remove_us.reserve(config.crud_ops);
+    readd_us.reserve(config.crud_ops);
+    for (uint64_t operation = 0; operation < config.crud_ops; ++operation) {
+        const uint64_t id = (operation * 8191ULL) % config.count;
+        variants[id] = operation + 1;
+        make_vector(id, variants[id], config, vector);
+
+        auto start = Clock::now();
+        require(
+            static_cast<bool>(index->Update(static_cast<int64_t>(id), vector.data(), config.dim)),
+            "update failed");
+        update_us.push_back(microseconds(start, Clock::now()));
+
+        start = Clock::now();
+        require(index->Remove(static_cast<int64_t>(id)), "remove failed");
+        remove_us.push_back(microseconds(start, Clock::now()));
+
+        start = Clock::now();
+        require(static_cast<bool>(index->Add(static_cast<int64_t>(id), vector.data(), config.dim)),
+                "re-add failed");
+        readd_us.push_back(microseconds(start, Clock::now()));
+    }
+
+    std::vector<double> search_us;
+    std::vector<std::vector<vsag::lite::Neighbor>> expected;
+    search_us.reserve(config.queries);
+    expected.reserve(config.queries);
+    uint64_t top1_hits = 0;
+    uint64_t checksum = 1469598103934665603ULL;
+    for (uint64_t query = 0; query < config.queries; ++query) {
+        const uint64_t id = (query * 104729ULL) % config.count;
+        make_vector(id, variants[id], config, vector);
+        const auto start = Clock::now();
+        auto result = index->Search(vector.data(), config.dim, config.k);
+        search_us.push_back(microseconds(start, Clock::now()));
+        require(static_cast<bool>(result), "search failed");
+        require(result->size() == config.k, "unexpected search result size");
+        top1_hits += result->front().id == static_cast<int64_t>(id) ? 1 : 0;
+        checksum = result_checksum(*result, checksum);
+        expected.push_back(std::move(*result));
+    }
+
+    const auto save_start = Clock::now();
+    std::ofstream output(config.snapshot, std::ios::binary);
+    require(static_cast<bool>(output), "snapshot open for write failed");
+    require(static_cast<bool>(index->Save(output)), "snapshot save failed");
+    output.close();
+    require(static_cast<bool>(output), "snapshot close failed");
+    const double save_ms = milliseconds(save_start, Clock::now());
+    const uint64_t snapshot_bytes = std::filesystem::file_size(config.snapshot);
+    index.reset();
+
+    const auto load_start = Clock::now();
+    std::ifstream input(config.snapshot, std::ios::binary);
+    auto loaded = vsag::lite::Index::Load(input);
+    require(static_cast<bool>(loaded), "snapshot load failed");
+    const double load_ms = milliseconds(load_start, Clock::now());
+    auto loaded_index = std::move(*loaded);
+
+    std::vector<double> loaded_search_us;
+    loaded_search_us.reserve(config.queries);
+    uint64_t loaded_checksum = 1469598103934665603ULL;
+    for (uint64_t query = 0; query < config.queries; ++query) {
+        const uint64_t id = (query * 104729ULL) % config.count;
+        make_vector(id, variants[id], config, vector);
+        const auto start = Clock::now();
+        auto result = loaded_index->Search(vector.data(), config.dim, config.k);
+        loaded_search_us.push_back(microseconds(start, Clock::now()));
+        require(static_cast<bool>(result), "loaded search failed");
+        require(same_results(*result, expected[query]), "loaded search result changed");
+        loaded_checksum = result_checksum(*result, loaded_checksum);
+    }
+    require(checksum == loaded_checksum, "loaded search checksum changed");
+
+    std::cout << "count,dim,queries,k,crud_ops,seed,build_ms,update_p50_us,update_p99_us,"
+                 "remove_p50_us,remove_p99_us,readd_p50_us,readd_p99_us,search_p50_us,"
+                 "search_p99_us,load_search_p50_us,load_search_p99_us,save_ms,warm_load_ms,"
+                 "snapshot_bytes,peak_rss_kib,top1_recall,result_checksum,final_size\n";
+    std::cout << std::fixed << std::setprecision(3) << config.count << ',' << config.dim << ','
+              << config.queries << ',' << config.k << ',' << config.crud_ops << ',' << config.seed
+              << ',' << build_ms << ',' << percentile(update_us, 0.50) << ','
+              << percentile(update_us, 0.99) << ',' << percentile(remove_us, 0.50) << ','
+              << percentile(remove_us, 0.99) << ',' << percentile(readd_us, 0.50) << ','
+              << percentile(readd_us, 0.99) << ',' << percentile(search_us, 0.50) << ','
+              << percentile(search_us, 0.99) << ',' << percentile(loaded_search_us, 0.50) << ','
+              << percentile(loaded_search_us, 0.99) << ',' << save_ms << ',' << load_ms << ','
+              << snapshot_bytes << ',' << peak_rss_kib() << ','
+              << static_cast<double>(top1_hits) / static_cast<double>(config.queries) << ','
+              << checksum << ',' << loaded_index->Size() << '\n';
+    return 0;
+}
+
+}  // namespace
+
+int
+main(int argc, char** argv) {
+    try {
+        return run(parse_config(argc, argv));
+    } catch (const std::exception& error) {
+        std::cerr << "lite_benchmark: " << error.what() << '\n';
+        return 1;
+    }
+}
