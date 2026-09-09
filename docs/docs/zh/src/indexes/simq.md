@@ -1,9 +1,9 @@
 # SIMQ
 
-SIMQ 是 VSAG 面向 **多向量（multi-vector）** 检索的索引——适用于每篇文档
-由一组 token 级向量（而非单个 embedding）表示的数据场景。这种模式常见于
-ColBERT 等 late-interaction 模型，其中文档由每个 token 对应一个向量表示，
-相关性通过 **MaxSim**（各查询 token 的最大相似度之和）计算。
+SIMQ（Single Index for Multi-vector Query）是 VSAG 面向 **多向量（multi-vector）**
+检索的索引——适用于每篇文档由一组 token 级向量（而非单个 embedding）表示的
+数据场景。这种模式常见于 ColBERT 等 late-interaction 模型，其中文档由每个 token
+对应一个向量表示，相关性通过 **MaxSim**（各查询 token 的最大相似度之和）计算。
 
 
 - 源码：`src/algorithm/simq/`

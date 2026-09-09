@@ -63,7 +63,7 @@ enum class IndexType {
     SINDI = 7,
     WARP = 8,
     LAZY_HGRAPH = 9,
-    SIMQ = 10,
+    SIMQ = 10,  ///< Single Index for Multi-vector Query.
     SINDI_V2 = 11
 };
 #define DATA_FLAG_FLOAT32_VECTOR 0x01
