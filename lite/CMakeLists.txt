@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 get_filename_component(VSAG_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 option(ENABLE_TESTS "Build Lite tests with the repository's Catch2" OFF)
 option(ENABLE_COVERAGE "Instrument Lite sources for gcov" OFF)
+option(ENABLE_BENCHMARKS "Build the deterministic Lite baseline tool" OFF)
 
 set(VSAG_LITE_SOURCES
     "${VSAG_ROOT}/src/lite/index.cpp"
@@ -69,6 +70,12 @@ if(ENABLE_TESTS)
     add_test(NAME lite_unit COMMAND lite_tests "[lite]")
     add_test(NAME lite_scale COMMAND lite_tests "[lite-scale]")
     add_test(NAME lite_graph COMMAND lite_graph_tests "[lite-graph]")
+endif()
+
+if(ENABLE_BENCHMARKS)
+    add_executable(lite_benchmark "${VSAG_ROOT}/lite/benchmark/main.cpp")
+    target_link_libraries(lite_benchmark PRIVATE vsag::lite)
+    target_compile_options(lite_benchmark PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 include(GNUInstallDirs)
