@@ -151,7 +151,7 @@ if (ENABLE_ASAN)
             -fsanitize=address,undefined
             -fno-omit-frame-pointer
             -fno-optimize-sibling-calls
-            -fsanitize-recover=address
+            -fno-sanitize-recover=address,undefined
             -fno-sanitize=vptr)
     else ()
         message (STATUS "Compiling with AddressSanitizer")
