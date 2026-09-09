@@ -380,7 +380,7 @@ public:
 
     /// Grow internal storage; fused Add doubles capacity, while Build reserves exactly (aligned).
     void
-    resize(uint64_t new_size, bool geometric_growth = true);
+    resize(uint64_t new_size, bool geometric_growth = false);
 
     /// Create a single route (upper-layer) graph from the hierarchical params.
     GraphInterfacePtr
@@ -905,7 +905,7 @@ private:
     Vector<GraphInterfacePtr> route_graphs_;   // upper-layer route graphs
     GraphInterfacePtr bottom_graph_{nullptr};  // base-level graph (all vectors)
     std::shared_ptr<HGraphRaBitQFusedDataCell> rabitq_fused_datacell_{nullptr};
-    uint32_t rabitq_fused_cluster_count_{16};
+    uint32_t rabitq_centroid_count_{16};
     uint32_t rabitq_fused_kmeans_iterations_{25};
     std::shared_ptr<RaBitQSplitDataCellInterface> rabitq_split_codes_{nullptr};
     std::shared_ptr<HGraphRaBitQSearcher> rabitq_fused_searcher_{nullptr};

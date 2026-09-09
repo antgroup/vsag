@@ -46,7 +46,7 @@ RaBitQ x+y split 是 HGraph 和 Pyramid 面向低比特底库码的存储与搜�
 | `rabitq_error_rate` | lower-bound 误差项的默认正数倍率。 |
 | `use_reorder` | 建议设为 `true`，使用 `x+y` 距离排序候选。 |
 | `rabitq_fused_datacell` | 仅用于 HGraph；启用融合布局，默认值为 `false`。 |
-| `rabitq_fused_cluster_count` | fused 残差中心数，默认 `16`；支持 `[1, min(N, INT32_MAX)]` 内任意整数，N 为初次训练的数据量，不要求 2 的幂。 |
+| `rabitq_centroid_count` | fused 残差中心数，默认 `16`；支持 `[1, min(N, INT32_MAX)]` 内任意整数，N 为初次训练的数据量，不要求 2 的幂。 |
 | `rabitq_fused_kmeans_iterations` | 全量精确 KMeans 迭代次数，默认 `25`；支持不超过 `INT32_MAX` 的正整数。 |
 | `train_sample_count` | HGraph 最大训练采样数，默认值为 `65536`；显式配置时最小为 `512`。 |
 
@@ -67,7 +67,7 @@ x + y <= 8
 cluster id、label、x-bit code 和 y-bit supplement 会存入同一个 cache-line
 对齐的 record。Pyramid 使用普通 split storage；`rabitq_fused_datacell` 不是
 Pyramid 参数。HGraph 专用搜索循环直接读取该 record，并联合预取图邻居和
-量化码。codec 使用 `rabitq_fused_cluster_count` 个残差中心。
+量化码。codec 使用 `rabitq_centroid_count` 个残差中心。
 
 fused KMeans 始终使用首次 Build 或 Add 提供的全部向量训练，不受 `train_sample_count` 限制。
 使用固定种子的 KMeans++ 初始化，每轮对所有向量执行 FP32 精确最近中心分配；K 达到或超过

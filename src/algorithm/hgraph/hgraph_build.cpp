@@ -135,7 +135,7 @@ void
 HGraph::train_codes_with_dataset(const DatasetPtr& train_data, const DatasetPtr& full_data) {
     if (rabitq_fused_datacell_ != nullptr) {
         CHECK_ARGUMENT(
-            full_data != nullptr and full_data->GetNumElements() >= rabitq_fused_cluster_count_,
+            full_data != nullptr and full_data->GetNumElements() >= rabitq_centroid_count_,
             "fused KMeans requires at least cluster_count training vectors");
     }
     const auto* data_ptr = get_data(train_data);
@@ -144,7 +144,7 @@ HGraph::train_codes_with_dataset(const DatasetPtr& train_data, const DatasetPtr&
         CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
         rabitq_split_codes_->TrainFusedCodec(static_cast<const float*>(get_data(full_data)),
                                              full_data->GetNumElements(),
-                                             rabitq_fused_cluster_count_,
+                                             rabitq_centroid_count_,
                                              rabitq_fused_kmeans_iterations_);
         rabitq_fused_datacell_->SetCodecModel(rabitq_split_codes_->ExportFusedCodec());
     }
@@ -253,7 +253,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
     }
     this->validate_fused_encoding_data(static_cast<const float*>(vectors),
                                        static_cast<uint64_t>(total));
-    this->resize(current_count + new_ids_count);
+    this->resize(current_count + new_ids_count, this->rabitq_fused_datacell_ != nullptr);
     this->total_count_ += new_ids_count;
     Vector<std::pair<InnerIdType, int64_t>> deferred_code_ids(allocator_);
     for (InnerIdType cur_size = 0; cur_size < valid_indices.size(); ++cur_size) {
@@ -474,7 +474,7 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
             std::scoped_lock lock(this->add_mutex_);
             inner_id = this->get_unique_inner_ids(1).at(0);
             if (inner_id >= total_count_) {
-                this->resize(total_count_.load() + 1);
+                this->resize(total_count_.load() + 1, this->rabitq_fused_datacell_ != nullptr);
                 ++total_count_;
             }
         }

@@ -816,7 +816,7 @@ TEST_CASE("HGraph maps and validates fused RaBitQ split datacell", "[ut][HGraphP
     auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
     REQUIRE(typed_param != nullptr);
     REQUIRE(typed_param->rabitq_fused_datacell);
-    REQUIRE(typed_param->rabitq_fused_cluster_count == 16);
+    REQUIRE(typed_param->rabitq_centroid_count == 16);
     REQUIRE(typed_param->rabitq_fused_kmeans_iterations == 25);
     REQUIRE_FALSE(typed_param->mci_parameters.enabled);
     REQUIRE(typed_param->base_codes_param->name == std::string(vsag::RABITQ_SPLIT_DATA_CELL));
@@ -846,22 +846,25 @@ TEST_CASE("HGraph maps and validates fused RaBitQ split datacell", "[ut][HGraphP
     SECTION("arbitrary cluster counts round trip and participate in compatibility") {
         for (auto k : {1, 7, 33, 1000, 3162, 10000, 10001}) {
             auto param = make_param();
-            param[vsag::HGRAPH_RABITQ_FUSED_CLUSTER_COUNT].SetInt(k);
+            param[vsag::RABITQ_CENTROID_COUNT].SetInt(k);
             param[vsag::HGRAPH_RABITQ_FUSED_KMEANS_ITERATIONS].SetInt(3);
             auto parsed = std::dynamic_pointer_cast<vsag::HGraphParameter>(
                 vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
-            REQUIRE(parsed->rabitq_fused_cluster_count == k);
+            REQUIRE(parsed->rabitq_centroid_count == k);
             REQUIRE(parsed->rabitq_fused_kmeans_iterations == 3);
             auto restored = std::make_shared<vsag::HGraphParameter>(parsed->ToJson());
-            REQUIRE(restored->rabitq_fused_cluster_count == k);
+            REQUIRE(restored->rabitq_centroid_count == k);
+            REQUIRE(parsed->CheckCompatibility(restored));
+            // Iterations control initial training, not the layout of an already trained model.
+            restored->rabitq_fused_kmeans_iterations = 4;
             REQUIRE(parsed->CheckCompatibility(restored));
             REQUIRE_FALSE(typed_param->CheckCompatibility(restored));
         }
     }
 
     SECTION("reject invalid cluster counts and iterations") {
-        for (const auto* key : {vsag::HGRAPH_RABITQ_FUSED_CLUSTER_COUNT,
-                                vsag::HGRAPH_RABITQ_FUSED_KMEANS_ITERATIONS}) {
+        for (const auto* key :
+             {vsag::RABITQ_CENTROID_COUNT, vsag::HGRAPH_RABITQ_FUSED_KMEANS_ITERATIONS}) {
             for (int64_t value : {-1LL, 0LL, 2147483648LL}) {
                 auto param = make_param();
                 param[key].SetInt(value);

@@ -395,7 +395,7 @@ TEST_CASE("HGraph fused builds and reloads more than ten thousand centers",
     config["build_thread_count"].SetInt(2);
     config["max_degree"].SetInt(8);
     config["ef_construction"].SetInt(32);
-    config["rabitq_fused_cluster_count"].SetUint64(count);
+    config["rabitq_centroid_count"].SetUint64(count);
     config["rabitq_fused_kmeans_iterations"].SetInt(1);
     config["train_sample_count"].SetInt(512);
     auto dataset = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, count, "l2");
@@ -1394,7 +1394,7 @@ TEST_CASE("HGraph fused RaBitQ split expands a sole representative and its alias
     param_json["index_param"]["graph_storage_type"].SetString("flat");
     param_json["index_param"]["reorder_source"].SetString("base");
     param_json["index_param"]["rabitq_fused_datacell"].SetBool(true);
-    param_json["index_param"]["rabitq_fused_cluster_count"].SetInt(3);
+    param_json["index_param"]["rabitq_centroid_count"].SetInt(3);
     param_json["index_param"]["rabitq_use_fht"].SetBool(true);
     param_json["index_param"]["store_raw_vector"].SetBool(false);
     param_json["index_param"]["use_mci"].SetBool(false);

@@ -243,6 +243,42 @@ TEST_CASE("Full KMeans supports ten thousand centers without approximate routing
     }
 }
 
+TEST_CASE("Full KMeans bounds task submissions for large inputs",
+          "[ut][KMeansCluster][fused_full]") {
+    constexpr uint64_t count = 1000001;
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto pool = std::make_shared<CountingKMeansPool>(4);
+    auto safe_pool = std::make_shared<vsag::SafeThreadPool>(pool);
+    vsag::KMeansCluster cluster(1, allocator.get(), safe_pool);
+    std::vector<float> data(count, 0.0F);
+    data.back() = static_cast<float>(count);
+    const auto labels = cluster.RunFull(1, data.data(), count, 1);
+    // K=1 submits no initialization tasks. Two assignment phases each need <=256 tasks,
+    // and the update phase needs just one, instead of ~2000 row tasks for this input.
+    REQUIRE(pool->submitted <= 2 * 256 + 1);
+    REQUIRE(cluster.k_centroids_[0] == 1.0F);
+    REQUIRE(labels.size() == count);
+    REQUIRE(std::all_of(labels.begin(), labels.end(), [](auto id) { return id == 0; }));
+}
+
+TEST_CASE("Full KMeans drains failed assignment and update tasks",
+          "[ut][KMeansCluster][fused_full]") {
+    constexpr uint64_t count = 8193;
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto pool = std::make_shared<CountingKMeansPool>(4);
+    pool->fail_on = GENERATE(2, 10);
+    pool->drop_task = GENERATE(false, true);
+    auto safe_pool = std::make_shared<vsag::SafeThreadPool>(pool);
+    vsag::KMeansCluster cluster(1, allocator.get(), safe_pool);
+    std::vector<float> data(count, 0.0F);
+    data.back() = static_cast<float>(count);
+    REQUIRE_THROWS(cluster.RunFull(1, data.data(), count, 1));
+    pool->fail_on = 0;
+    REQUIRE_NOTHROW(cluster.RunFull(1, data.data(), count, 1));
+    REQUIRE(cluster.k_centroids_[0] == 1.0F);
+    pool->WaitUntilEmpty();
+}
+
 // Exercises the centroid-assignment path with shape parameters that meet the
 // AMX-BF16 fast-path thresholds in `find_nearest_one_with_blas` (k >= 16,
 // dim >= 32, query batches >= 16).  On hosts without AMX-BF16 support, the

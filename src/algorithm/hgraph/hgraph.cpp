@@ -109,7 +109,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     }
 
     if (hgraph_param->rabitq_fused_datacell) {
-        rabitq_fused_cluster_count_ = hgraph_param->rabitq_fused_cluster_count;
+        rabitq_centroid_count_ = hgraph_param->rabitq_centroid_count;
         rabitq_fused_kmeans_iterations_ = hgraph_param->rabitq_fused_kmeans_iterations;
         auto split_codes =
             std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(basic_flatten_codes_);
@@ -126,7 +126,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
                                                         split_codes->OneBitCodeSize(),
                                                         split_codes->SupplementCodeSize(),
                                                         common_param,
-                                                        rabitq_fused_cluster_count_);
+                                                        rabitq_centroid_count_);
         split_codes->AttachFusedCodeStorage(rabitq_fused_datacell_.get());
         this->bottom_graph_ = rabitq_fused_datacell_;
     } else {

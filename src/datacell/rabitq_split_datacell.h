@@ -1504,7 +1504,9 @@ public:
         std::vector<double> norms(serialized_cluster_count);
         reader.Read(reinterpret_cast<char*>(centers.data()), values * sizeof(float));
         reader.Read(reinterpret_cast<char*>(rotated.data()), values * sizeof(float));
-        reader.Read(reinterpret_cast<char*>(norms.data()), norms.size() * sizeof(double));
+        // The payload length was validated above. Skip stored derived norms instead of copying
+        // values that will immediately be recomputed from the validated rotated centers.
+        reader.Seek(reader.GetCursor() + norms.size() * sizeof(double));
         CHECK_ARGUMENT(AreFusedVectorsFinite(centers.data(), serialized_cluster_count) and
                            AreFusedVectorsFinite(rotated.data(), serialized_cluster_count),
                        "fused codec centers must be finite");
@@ -1812,6 +1814,8 @@ public:
 private:
     [[nodiscard]] RaBitQuantizer<metric>
     FusedQuantizer(uint32_t id) const {
+        // A per-operation centroid view: no per-center quantizer table or shared mutable centroid.
+        // Query scoring uses bottom_quantizer() directly and does not construct this view.
         return RaBitQuantizer<metric>(
             bottom_quantizer(),
             fused_rotated_centroids_.data() + uint64_t{id} * common_param_.dim_);

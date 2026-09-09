@@ -1155,12 +1155,11 @@ HGraph::restore_fused_codec() {
         return;
     }
     rabitq_split_codes_->ImportFusedCodec(rabitq_fused_datacell_->CodecModel());
-    CHECK_ARGUMENT(rabitq_split_codes_->FusedClusterCount() == rabitq_fused_cluster_count_,
+    CHECK_ARGUMENT(rabitq_split_codes_->FusedClusterCount() == rabitq_centroid_count_,
                    "fused codec cluster count does not match construction parameters");
     for (InnerIdType id = 0; id < graph_count; ++id) {
-        CHECK_ARGUMENT(
-            rabitq_fused_datacell_->GetCodeView(id).cluster_id < rabitq_fused_cluster_count_,
-            "invalid fused node cluster id");
+        CHECK_ARGUMENT(rabitq_fused_datacell_->GetCodeView(id).cluster_id < rabitq_centroid_count_,
+                       "invalid fused node cluster id");
     }
 }
 

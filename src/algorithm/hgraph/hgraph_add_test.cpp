@@ -902,7 +902,7 @@ TEST_CASE("HGraph fused full KMeans ignores quantizer sampling and shares query 
         "rabitq_use_fht":true, "graph_io_type":"memory_io",
         "max_degree":8, "ef_construction":32, "build_thread_count":2,
         "use_reorder":true, "reorder_source":"base", "rabitq_fused_datacell":true,
-        "rabitq_fused_cluster_count":513, "rabitq_fused_kmeans_iterations":1,
+        "rabitq_centroid_count":513, "rabitq_fused_kmeans_iterations":1,
         "train_sample_count":512
     })");
     param["graph_type"].SetString(GENERATE("nsw", "odescent"));
@@ -951,7 +951,7 @@ TEST_CASE("HGraph fused full KMeans ignores quantizer sampling and shares query 
         REQUIRE(before->GetDistances()[i] == stream_after->GetDistances()[i]);
     }
     auto wrong_param = param;
-    wrong_param["rabitq_fused_cluster_count"].SetInt(512);
+    wrong_param["rabitq_centroid_count"].SetInt(512);
     REQUIRE_FALSE(MakeHGraphIndex(wrong_param, common)->Deserialize(binary.value()).has_value());
     std::vector<float> extra(dim, 2.0F);
     std::vector<int64_t> extra_ids{1000};
@@ -980,7 +980,7 @@ TEST_CASE("HGraph fused Build reserves once and Add grows geometrically",
         "rabitq_bits_per_dim_base":1, "rabitq_bits_per_dim_precise":7,
         "rabitq_use_fht":true, "max_degree":8, "ef_construction":32,
         "build_thread_count":2, "use_reorder":true, "reorder_source":"base",
-        "rabitq_fused_datacell":true, "rabitq_fused_cluster_count":2,
+        "rabitq_fused_datacell":true, "rabitq_centroid_count":2,
         "rabitq_fused_kmeans_iterations":1, "hgraph_init_capacity":4,
         "resize_increase_count_bit":1
     })");
@@ -1058,9 +1058,14 @@ TEST_CASE("HGraph fused Build reserves once and Add grows geometrically",
     REQUIRE_NOTHROW(hgraph->resize(1));
     REQUIRE_THROWS(hgraph->resize(std::numeric_limits<uint64_t>::max()));
     REQUIRE(allocator->TakeSlabRequests().empty());
+    // Plain reservations retain exact aligned sizing; geometric growth is an explicit opt-in.
+    REQUIRE_NOTHROW(hgraph->resize(289));
+    REQUIRE(allocator->TakeSlabRequests() == std::vector<uint64_t>{bytes(290)});
+    REQUIRE_NOTHROW(hgraph->resize(291, true));
+    REQUIRE(allocator->TakeSlabRequests() == std::vector<uint64_t>{bytes(580)});
     // A bulk reservation larger than twice the old capacity jumps straight to the request.
-    REQUIRE_NOTHROW(hgraph->resize(1000));
-    REQUIRE(allocator->TakeSlabRequests() == std::vector<uint64_t>{bytes(1000)});
+    REQUIRE_NOTHROW(hgraph->resize(2000, true));
+    REQUIRE(allocator->TakeSlabRequests() == std::vector<uint64_t>{bytes(2000)});
     search(restored);
 }
 

@@ -311,10 +311,13 @@ KMeansCluster::RunFull(
     Vector<uint64_t> positions(uint64_t{k}, 0, allocator_);
     Vector<uint64_t> grouped(count, 0, allocator_);
 
-    auto parallel_blocks = [&](uint64_t size, const auto& function) {
+    auto parallel_blocks = [&](uint64_t size, uint64_t min_block_size, const auto& function) {
         std::vector<std::future<void>> futures;
-        constexpr uint64_t block_size = 1024;
-        futures.reserve((size + block_size - 1) / block_size);
+        // ThreadPool does not expose its worker count. Bound each phase to a small task budget
+        // independently of N, while allowing small K to update multiple centers concurrently.
+        constexpr uint64_t max_tasks = 256;
+        const uint64_t block_size = std::max(min_block_size, 1 + (size - 1) / max_tasks);
+        futures.reserve(1 + (size - 1) / block_size);
         std::exception_ptr failure;
         try {
             for (uint64_t first = 0; first < size; first += block_size) {
@@ -354,7 +357,7 @@ KMeansCluster::RunFull(
         }
     };
     for (uint32_t iteration = 0; iteration < iterations; ++iteration) {
-        parallel_blocks(count, assign);
+        parallel_blocks(count, 1024, assign);
         std::fill(offsets.begin(), offsets.end(), 0);
         for (auto label : labels) {
             ++offsets[static_cast<uint64_t>(label) + 1];
@@ -366,7 +369,7 @@ KMeansCluster::RunFull(
         for (uint64_t row = 0; row < count; ++row) {
             grouped[positions[labels[row]]++] = row;
         }
-        parallel_blocks(k, [&](uint64_t first, uint64_t last) {
+        parallel_blocks(k, 1, [&](uint64_t first, uint64_t last) {
             Vector<double> sum(dim, 0.0, allocator_);
             for (uint64_t center = first; center < last; ++center) {
                 const auto members = offsets[center + 1] - offsets[center];
@@ -389,7 +392,7 @@ KMeansCluster::RunFull(
             }
         });
     }
-    parallel_blocks(count, assign);
+    parallel_blocks(count, 1024, assign);
     return labels;
 }
 

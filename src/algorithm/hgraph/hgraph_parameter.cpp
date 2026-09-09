@@ -74,13 +74,13 @@ HGraphParameter::FromJson(const JsonType& json) {
     if (json.Contains(HGRAPH_RABITQ_FUSED_DATACELL_KEY)) {
         this->rabitq_fused_datacell = json[HGRAPH_RABITQ_FUSED_DATACELL_KEY].GetBool();
     }
-    if (json.Contains(HGRAPH_RABITQ_FUSED_CLUSTER_COUNT_KEY)) {
-        CHECK_ARGUMENT(json[HGRAPH_RABITQ_FUSED_CLUSTER_COUNT_KEY].IsNumberInteger(),
-                       "rabitq_fused_cluster_count must be an integer");
-        const auto count = json[HGRAPH_RABITQ_FUSED_CLUSTER_COUNT_KEY].GetInt();
+    if (json.Contains(RABITQ_CENTROID_COUNT_KEY)) {
+        CHECK_ARGUMENT(json[RABITQ_CENTROID_COUNT_KEY].IsNumberInteger(),
+                       "rabitq_centroid_count must be an integer");
+        const auto count = json[RABITQ_CENTROID_COUNT_KEY].GetInt();
         CHECK_ARGUMENT(count > 0 and count <= std::numeric_limits<int32_t>::max(),
-                       "rabitq_fused_cluster_count must be in [1, INT32_MAX]");
-        rabitq_fused_cluster_count = static_cast<uint32_t>(count);
+                       "rabitq_centroid_count must be in [1, INT32_MAX]");
+        rabitq_centroid_count = static_cast<uint32_t>(count);
     }
     if (json.Contains(HGRAPH_RABITQ_FUSED_KMEANS_ITERATIONS_KEY)) {
         CHECK_ARGUMENT(json[HGRAPH_RABITQ_FUSED_KMEANS_ITERATIONS_KEY].IsNumberInteger(),
@@ -302,7 +302,7 @@ HGraphParameter::ToJson() const {
     json[HGRAPH_USE_ELP_OPTIMIZER_KEY].SetBool(this->use_elp_optimizer);
     json[HGRAPH_IGNORE_REORDER_KEY].SetBool(this->ignore_reorder);
     json[HGRAPH_RABITQ_FUSED_DATACELL_KEY].SetBool(this->rabitq_fused_datacell);
-    json[HGRAPH_RABITQ_FUSED_CLUSTER_COUNT_KEY].SetUint64(rabitq_fused_cluster_count);
+    json[RABITQ_CENTROID_COUNT_KEY].SetUint64(rabitq_centroid_count);
     json[HGRAPH_RABITQ_FUSED_KMEANS_ITERATIONS_KEY].SetUint64(rabitq_fused_kmeans_iterations);
     json[REORDER_SOURCE_KEY].SetString(this->reorder_source);
     json[BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
@@ -366,7 +366,7 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, support_force_remove);
     CHECK_FIELD_EQ(*this, *p, rabitq_fused_datacell);
     if (rabitq_fused_datacell) {
-        CHECK_FIELD_EQ(*this, *p, rabitq_fused_cluster_count);
+        CHECK_FIELD_EQ(*this, *p, rabitq_centroid_count);
     }
     // A conjugate-enabled reader can load an older index without the optional graph and start
     // with an empty one. The reverse direction would discard serialized enhancement data.

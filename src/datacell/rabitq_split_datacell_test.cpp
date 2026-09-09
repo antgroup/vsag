@@ -201,6 +201,20 @@ TEST_CASE("Fused dynamic centers share a lazy query cache and serialize the mode
     std::memcpy(bad_center.data() + 16, &invalid, sizeof(invalid));
     REQUIRE_THROWS(split->ImportFusedCodec(bad_center));
     REQUIRE(split->ExportFusedCodec() == payload);
+    auto stale_norms = payload;
+    const double invalid_norm = std::numeric_limits<double>::infinity();
+    const uint64_t norms_offset = 16 + 2 * uint64_t{k} * dim * sizeof(float);
+    for (uint32_t id = 0; id < k; ++id) {
+        std::memcpy(stale_norms.data() + norms_offset + id * sizeof(double),
+                    &invalid_norm,
+                    sizeof(invalid_norm));
+    }
+    REQUIRE_NOTHROW(split->ImportFusedCodec(payload));
+    const auto canonical_payload = split->ExportFusedCodec();
+    REQUIRE_NOTHROW(split->ImportFusedCodec(stale_norms));
+    // Recomputed norms may differ in the last bit from training under FP contraction/reduction.
+    // Compare two imports of identical centers, not a reduction performed at another call site.
+    REQUIRE(static_cast<bool>(split->ExportFusedCodec() == canonical_payload));
 
     auto computer = split->FactoryFusedComputer(vectors.data());
     RaBitQFusedTraversalQuery traversal;
