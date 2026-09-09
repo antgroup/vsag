@@ -906,6 +906,11 @@ TEST_CASE("HGraph fused full KMeans ignores quantizer sampling and shares query 
         "train_sample_count":512
     })");
     param["graph_type"].SetString(GENERATE("nsw", "odescent"));
+    const bool build = GENERATE(true, false);
+    CAPTURE(param["graph_type"].GetString(), build);
+    const auto populate = [build](const auto& target, const auto& dataset) {
+        return build ? target->Build(dataset) : target->Add(dataset);
+    };
     auto index = MakeHGraphIndex(param, common);
     std::vector<float> data(count * dim);
     std::vector<int64_t> ids(count);
@@ -916,7 +921,7 @@ TEST_CASE("HGraph fused full KMeans ignores quantizer sampling and shares query 
         }
     }
     auto base = MakeFloatDataset(data, ids, dim, count);
-    auto result = index->Build(base);
+    auto result = populate(index, base);
     REQUIRE(result.has_value());
     REQUIRE(result.value().empty());
     std::vector<float> q(data.begin(), data.begin() + dim);
@@ -955,16 +960,27 @@ TEST_CASE("HGraph fused full KMeans ignores quantizer sampling and shares query 
     REQUIRE_FALSE(MakeHGraphIndex(wrong_param, common)->Deserialize(binary.value()).has_value());
     std::vector<float> extra(dim, 2.0F);
     std::vector<int64_t> extra_ids{1000};
+    // A one-vector Add cannot retrain K=513; both live and restored indexes must reuse centers.
+    REQUIRE(index->Add(MakeFloatDataset(extra, extra_ids, dim, 1)).has_value());
     REQUIRE(restored->Add(MakeFloatDataset(extra, extra_ids, dim, 1)).has_value());
     REQUIRE(restored->CheckIdExist(1000));
+    auto live_after_add = search(index);
+    auto restored_after_add = search(restored);
+    for (uint64_t i = 0; i < 5; ++i) {
+        REQUIRE(live_after_add->GetIds()[i] == before->GetIds()[i]);
+        REQUIRE(live_after_add->GetDistances()[i] == before->GetDistances()[i]);
+        REQUIRE(restored_after_add->GetIds()[i] == before->GetIds()[i]);
+        REQUIRE(restored_after_add->GetDistances()[i] == before->GetDistances()[i]);
+    }
     const auto update = restored->UpdateVector(1000, MakeFloatQuery(q, dim), true);
     REQUIRE(update.has_value());
     REQUIRE(update.value());
     search(restored);
     // Insufficient initial data is rejected instead of duplicating centers.
     auto empty = MakeHGraphIndex(param, common);
-    REQUIRE_FALSE(empty->Build(MakeFloatDataset(extra, extra_ids, dim, 1)).has_value());
-    REQUIRE(empty->Build(base).has_value());
+    REQUIRE_FALSE(populate(empty, MakeFloatDataset(extra, extra_ids, dim, 1)).has_value());
+    REQUIRE(empty->GetNumElements() == 0);
+    REQUIRE(populate(empty, base).has_value());
     search(empty);
 }
 

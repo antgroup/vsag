@@ -472,7 +472,14 @@ private:
     sample_train_dataset(const DatasetPtr& base) const;
 
     void
-    train_codes_with_dataset(const DatasetPtr& train_data, const DatasetPtr& full_data = nullptr);
+    train_codes_with_dataset(const DatasetPtr& train_data);
+
+    void
+    validate_fused_training_data(const DatasetPtr& full_data) const;
+
+    // Requires the base quantizer's transform to be trained first.
+    void
+    train_fused_codec(const DatasetPtr& full_data);
 
     struct AddContext {
         bool first_empty_add{false};

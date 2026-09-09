@@ -117,7 +117,7 @@ wait_all_futures(std::vector<std::future<void>>& futures) {
 void
 HGraph::Train(const DatasetPtr& base) {
     this->check_fused_mutation_supported("Train");
-    this->train_codes_with_dataset(this->sample_train_dataset(base), base);
+    this->train_codes_with_dataset(this->sample_train_dataset(base));
 }
 
 DatasetPtr
@@ -132,22 +132,9 @@ HGraph::sample_train_dataset(const DatasetPtr& base) const {
 }
 
 void
-HGraph::train_codes_with_dataset(const DatasetPtr& train_data, const DatasetPtr& full_data) {
-    if (rabitq_fused_datacell_ != nullptr) {
-        CHECK_ARGUMENT(
-            full_data != nullptr and full_data->GetNumElements() >= rabitq_centroid_count_,
-            "fused KMeans requires at least cluster_count training vectors");
-    }
+HGraph::train_codes_with_dataset(const DatasetPtr& train_data) {
     const auto* data_ptr = get_data(train_data);
     this->basic_flatten_codes_->Train(data_ptr, train_data->GetNumElements());
-    if (rabitq_fused_datacell_ != nullptr) {
-        CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
-        rabitq_split_codes_->TrainFusedCodec(static_cast<const float*>(get_data(full_data)),
-                                             full_data->GetNumElements(),
-                                             rabitq_centroid_count_,
-                                             kmeans_iterations_);
-        rabitq_fused_datacell_->SetCodecModel(rabitq_split_codes_->ExportFusedCodec());
-    }
     if (has_precise_reorder()) {
         this->high_precise_codes_->Train(data_ptr, train_data->GetNumElements());
     }
@@ -155,6 +142,30 @@ HGraph::train_codes_with_dataset(const DatasetPtr& train_data, const DatasetPtr&
         // nothing to do since raw_vector_ is fp32
         this->raw_vector_->Train(data_ptr, train_data->GetNumElements());
     }
+}
+
+void
+HGraph::validate_fused_training_data(const DatasetPtr& full_data) const {
+    if (rabitq_fused_datacell_ == nullptr) {
+        return;
+    }
+    CHECK_ARGUMENT(full_data != nullptr and full_data->GetNumElements() >= rabitq_centroid_count_,
+                   "fused KMeans requires at least cluster_count training vectors");
+    CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
+}
+
+void
+HGraph::train_fused_codec(const DatasetPtr& full_data) {
+    if (rabitq_fused_datacell_ == nullptr) {
+        return;
+    }
+    // Use all input vectors for KMeans, independently of quantizer sampling.
+    // Preparing the centers reuses the already-trained base quantizer's transform.
+    rabitq_split_codes_->TrainFusedCodec(static_cast<const float*>(get_data(full_data)),
+                                         full_data->GetNumElements(),
+                                         rabitq_centroid_count_,
+                                         kmeans_iterations_);
+    rabitq_fused_datacell_->SetCodecModel(rabitq_split_codes_->ExportFusedCodec());
 }
 
 std::vector<int64_t>
@@ -249,7 +260,9 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
     }
     bool defer_persistent_codes = temporary_sq8_build_data != nullptr;
     if (not defer_persistent_codes or this->rabitq_fused_datacell_ != nullptr) {
-        this->train_codes_with_dataset(this->sample_train_dataset(data), data);
+        this->validate_fused_training_data(data);
+        this->train_codes_with_dataset(this->sample_train_dataset(data));
+        this->train_fused_codec(data);
     }
     this->validate_fused_encoding_data(static_cast<const float*>(vectors),
                                        static_cast<uint64_t>(total));
@@ -312,7 +325,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         build_data.reset();
         temporary_sq8_build_data.reset();
         if (this->rabitq_fused_datacell_ == nullptr) {
-            this->train_codes_with_dataset(this->sample_train_dataset(data), data);
+            this->train_codes_with_dataset(this->sample_train_dataset(data));
         }
         for (const auto& [inner_id, local_idx] : deferred_code_ids) {
             this->insert_persistent_codes(get_data(data, local_idx), inner_id);
@@ -443,8 +456,10 @@ HGraph::prepare_add_context(const DatasetPtr& data) {
             if (reuse_fused_codec) {
                 context.train_data = data;
             } else {
+                this->validate_fused_training_data(data);
                 context.train_data = this->sample_train_dataset(data);
-                this->train_codes_with_dataset(context.train_data, data);
+                this->train_codes_with_dataset(context.train_data);
+                this->train_fused_codec(data);
             }
         }
     }
