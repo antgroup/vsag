@@ -45,6 +45,13 @@ better(const Neighbor& a, const Neighbor& b) {
     return a.distance < b.distance or (a.distance == b.distance and a.id < b.id);
 }
 
+struct NeighborWorseFirst {
+    bool
+    operator()(const Neighbor& a, const Neighbor& b) const {
+        return better(a, b);
+    }
+};
+
 // Explicit byte encoding: never serialize native containers, pointers, or struct padding.
 void
 write(std::ostream& out, uint64_t value, uint64_t bytes = 8) {
@@ -126,14 +133,17 @@ Index::Add(int64_t id, const float* vector, uint64_t dim) {
             if (required > values.capacity()) {
                 const uint64_t maximum = values.max_size();
                 const uint64_t capacity = values.capacity();
-                const uint64_t doubled = capacity > maximum / 2 ? maximum : capacity * 2;
+                const uint64_t doubled =
+                    capacity == 0 ? 1 : (capacity > maximum / 2 ? maximum : capacity * 2);
                 values.reserve(std::max(required, doubled));
             }
         };
-        grow(impl_->vectors, (Size() + 1) * dim);
-        grow(impl_->ids, Size() + 1);
-        impl_->slots.emplace(id, Size());
-        // Scalar insertion cannot allocate after the successful reserves above.
+        const uint64_t slot = Size();
+        grow(impl_->vectors, (slot + 1) * dim);
+        grow(impl_->ids, slot + 1);
+        // Publish the map entry only after every operation that can reallocate a vector has
+        // succeeded. The following scalar inserts cannot throw after the reserves above.
+        impl_->slots.emplace(id, slot);
         impl_->vectors.insert(impl_->vectors.end(), vector, vector + dim);
         impl_->ids.push_back(id);
         return {};
@@ -172,7 +182,7 @@ Index::Remove(int64_t id) {
         std::copy_n(
             impl_->vectors.data() + last * Dim(), Dim(), impl_->vectors.data() + slot * Dim());
         impl_->ids[slot] = impl_->ids[last];
-        impl_->slots.find(impl_->ids[slot])->second = slot;
+        impl_->slots.at(impl_->ids[slot]) = slot;
     }
     impl_->slots.erase(found);
     impl_->ids.pop_back();
@@ -191,7 +201,7 @@ Index::Search(const float* query, uint64_t dim, uint64_t k) const {
         if (k == 0) {
             return std::vector<Neighbor>{};
         }
-        std::priority_queue<Neighbor, std::vector<Neighbor>, decltype(&better)> heap(&better);
+        std::priority_queue<Neighbor, std::vector<Neighbor>, NeighborWorseFirst> heap;
         for (uint64_t slot = 0; slot < Size(); ++slot) {
             const auto distance = simd::ComputeL2SqrImpl<simd::SimdTraits<simd::GenericTag>>(
                 query, impl_->vectors.data() + slot * dim, dim);
@@ -228,7 +238,7 @@ Index::Save(std::ostream& output) const {
         write(output, Size());
         write(output, Size() * (8 + 4 * Dim()));
         write(output, 1);  // FP32 squared-L2 representation.
-        for (auto id : impl_->ids) {
+        for (const auto id : impl_->ids) {
             write(output, static_cast<uint64_t>(id));
         }
         for (float value : impl_->vectors) {

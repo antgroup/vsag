@@ -18,6 +18,8 @@ cmake --build build-lite-consumer -j2
 与 Full 的 make 入口不同，`cmake -S lite` 刻意隔离依赖。测试复用仓库固定版本
 Catch2 v3.7.1，离线时可指定 `-DFETCHCONTENT_SOURCE_DIR_CATCH2=/path/to/catch2-v3.7.1`。
 直接运行 Catch2，不新增平行测试框架或 CTest 套件。关闭测试时不下载 Catch2。
+构建同时生成 `libvsag-lite.so` 和 `libvsag-lite.a`。共享库目标仍为 `vsag::lite`；
+静态归档也会安装，供选择显式静态链接的嵌入式或离线使用方使用。
 
 ## 接口和所有权
 
