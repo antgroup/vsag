@@ -60,6 +60,8 @@ jobs:
             -DENABLE_TESTS=OFF
           cmake --build build-lite-first-release -j2
           cmake --install build-lite-first-release
+          test -f build-lite-first-release/libvsag-lite.a
+          test -f "$PWD/install-lite-first/lib/libvsag-lite.a"
           if ldd build-lite-first-release/libvsag-lite.so | grep -q 'libvsag\.so'; then
             echo 'Standalone Lite unexpectedly depends on the Full library' >&2
             exit 1
@@ -70,3 +72,11 @@ jobs:
             -DCMAKE_PREFIX_PATH="$PWD/install-lite-first"
           cmake --build build-lite-consumer -j2
           ./build-lite-consumer/lite_example "$RUNNER_TEMP/lite-example.snapshot"
+      - name: Build installed static consumer
+        run: |
+          c++ -std=c++17 \
+            -I"$PWD/install-lite-first/include" \
+            lite/example/main.cpp \
+            "$PWD/install-lite-first/lib/libvsag-lite.a" \
+            -o build-lite-static-consumer
+          ./build-lite-static-consumer "$RUNNER_TEMP/lite-static-example.snapshot"

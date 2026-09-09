@@ -21,6 +21,9 @@ entry point. Tests use the existing pinned Catch2 v3.7.1 configuration. For an
 offline build, pass `-DFETCHCONTENT_SOURCE_DIR_CATCH2=/path/to/catch2-v3.7.1`.
 Tests are invoked directly through Catch2; no parallel custom testing framework
 or CTest suite is introduced. With tests disabled, no Catch2 download is needed.
+The build produces both `libvsag-lite.so` and `libvsag-lite.a`. The shared
+target remains `vsag::lite`; the static archive is also installed for embedded
+or offline consumers that choose to link it explicitly.
 
 ## API and ownership
 
