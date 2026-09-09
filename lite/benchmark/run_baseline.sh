@@ -34,3 +34,7 @@ run_case() {
 
 run_case scale-10k 10000 128 64 10 500 20260909
 run_case scale-100k 100000 128 32 10 1000 20260909
+/usr/bin/time -v -o "${output_dir}/crud-stability.time.txt" \
+    "${benchmark}" stability 10000 128 20 500 32 10 20260909 \
+    "${output_dir}/crud-stability-snapshot" \
+    >"${output_dir}/crud-stability.csv"

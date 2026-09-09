@@ -13,6 +13,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -29,6 +30,17 @@ struct Config {
     uint64_t crud_ops;
     uint64_t seed;
     std::string snapshot;
+};
+
+struct StabilityConfig {
+    uint64_t count;
+    uint64_t dim;
+    uint64_t rounds;
+    uint64_t crud_ops;
+    uint64_t queries;
+    uint64_t k;
+    uint64_t seed;
+    std::string snapshot_directory;
 };
 
 uint64_t
@@ -71,6 +83,33 @@ parse_config(int argc, char** argv) {
     return config;
 }
 
+StabilityConfig
+parse_stability_config(int argc, char** argv) {
+    if (argc != 10) {
+        throw std::invalid_argument(
+            "usage: lite_benchmark stability COUNT DIM ROUNDS CRUD_OPS QUERIES K SEED "
+            "SNAPSHOT_DIRECTORY");
+    }
+    StabilityConfig config{parse_uint(argv[2], "count"),
+                           parse_uint(argv[3], "dimension"),
+                           parse_uint(argv[4], "round count"),
+                           parse_uint(argv[5], "CRUD operation count"),
+                           parse_uint(argv[6], "query count"),
+                           parse_uint(argv[7], "k"),
+                           parse_uint(argv[8], "seed"),
+                           argv[9]};
+    if (config.count == 0 or config.dim == 0 or config.rounds == 0 or config.crud_ops == 0 or
+        config.queries == 0 or config.k == 0 or config.k > config.count or
+        config.crud_ops > config.count or
+        config.count > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+        throw std::invalid_argument("configuration values are out of range");
+    }
+    if (std::filesystem::exists(config.snapshot_directory)) {
+        throw std::invalid_argument("snapshot directory already exists");
+    }
+    return config;
+}
+
 uint64_t
 mix(uint64_t value) {
     value += 0x9e3779b97f4a7c15ULL;
@@ -80,9 +119,10 @@ mix(uint64_t value) {
 }
 
 void
-make_vector(uint64_t id, uint64_t variant, const Config& config, std::vector<float>& vector) {
-    for (uint64_t d = 0; d < config.dim; ++d) {
-        const uint64_t bits = mix(config.seed ^ mix(id) ^ mix(variant) ^ mix(d));
+make_vector(
+    uint64_t id, uint64_t variant, uint64_t dim, uint64_t seed, std::vector<float>& vector) {
+    for (uint64_t d = 0; d < dim; ++d) {
+        const uint64_t bits = mix(seed ^ mix(id) ^ mix(variant) ^ mix(d));
         vector[d] = static_cast<float>(bits >> 40U) / 16777216.0F;
     }
 }
@@ -141,6 +181,26 @@ peak_rss_kib() {
     return static_cast<uint64_t>(usage.ru_maxrss);
 }
 
+uint64_t
+current_rss_kib() {
+    std::ifstream status("/proc/self/status");
+    std::string line;
+    while (std::getline(status, line)) {
+        if (line.rfind("VmRSS:", 0) == 0) {
+            std::istringstream fields(line);
+            std::string key;
+            uint64_t value = 0;
+            std::string unit;
+            fields >> key >> value >> unit;
+            if (unit != "kB") {
+                throw std::runtime_error("unexpected VmRSS unit");
+            }
+            return value;
+        }
+    }
+    throw std::runtime_error("VmRSS is unavailable");
+}
+
 void
 require(bool condition, const char* message) {
     if (not condition) {
@@ -158,7 +218,7 @@ run(const Config& config) {
 
     const auto build_start = Clock::now();
     for (uint64_t id = 0; id < config.count; ++id) {
-        make_vector(id, 0, config, vector);
+        make_vector(id, 0, config.dim, config.seed, vector);
         require(static_cast<bool>(index->Add(static_cast<int64_t>(id), vector.data(), config.dim)),
                 "add failed");
     }
@@ -173,7 +233,7 @@ run(const Config& config) {
     for (uint64_t operation = 0; operation < config.crud_ops; ++operation) {
         const uint64_t id = (operation * 8191ULL) % config.count;
         variants[id] = operation + 1;
-        make_vector(id, variants[id], config, vector);
+        make_vector(id, variants[id], config.dim, config.seed, vector);
 
         auto start = Clock::now();
         require(
@@ -199,7 +259,7 @@ run(const Config& config) {
     uint64_t checksum = 1469598103934665603ULL;
     for (uint64_t query = 0; query < config.queries; ++query) {
         const uint64_t id = (query * 104729ULL) % config.count;
-        make_vector(id, variants[id], config, vector);
+        make_vector(id, variants[id], config.dim, config.seed, vector);
         const auto start = Clock::now();
         auto result = index->Search(vector.data(), config.dim, config.k);
         search_us.push_back(microseconds(start, Clock::now()));
@@ -232,7 +292,7 @@ run(const Config& config) {
     uint64_t loaded_checksum = 1469598103934665603ULL;
     for (uint64_t query = 0; query < config.queries; ++query) {
         const uint64_t id = (query * 104729ULL) % config.count;
-        make_vector(id, variants[id], config, vector);
+        make_vector(id, variants[id], config.dim, config.seed, vector);
         const auto start = Clock::now();
         auto result = loaded_index->Search(vector.data(), config.dim, config.k);
         loaded_search_us.push_back(microseconds(start, Clock::now()));
@@ -260,11 +320,123 @@ run(const Config& config) {
     return 0;
 }
 
+int
+run_stability(const StabilityConfig& config) {
+    require(std::filesystem::create_directories(config.snapshot_directory),
+            "snapshot directory creation failed");
+    const auto snapshot =
+        (std::filesystem::path(config.snapshot_directory) / "latest.snapshot").string();
+    auto created = vsag::lite::Index::Create(config.dim);
+    require(static_cast<bool>(created), "index creation failed");
+    auto index = std::move(*created);
+    std::vector<float> vector(config.dim);
+    std::vector<uint64_t> variants(config.count, 0);
+    for (uint64_t id = 0; id < config.count; ++id) {
+        make_vector(id, 0, config.dim, config.seed, vector);
+        require(static_cast<bool>(index->Add(static_cast<int64_t>(id), vector.data(), config.dim)),
+                "add failed");
+    }
+
+    std::cout << "round,count,crud_ops,update_p50_us,update_p99_us,remove_p50_us,"
+                 "remove_p99_us,readd_p50_us,readd_p99_us,search_p50_us,search_p99_us,"
+                 "save_ms,load_ms,snapshot_bytes,current_rss_kib,peak_rss_kib,top1_recall,"
+                 "result_checksum\n";
+    for (uint64_t round = 0; round < config.rounds; ++round) {
+        std::vector<double> update_us;
+        std::vector<double> remove_us;
+        std::vector<double> readd_us;
+        update_us.reserve(config.crud_ops);
+        remove_us.reserve(config.crud_ops);
+        readd_us.reserve(config.crud_ops);
+        for (uint64_t operation = 0; operation < config.crud_ops; ++operation) {
+            const uint64_t id = (round * 1000003ULL + operation * 8191ULL) % config.count;
+            variants[id] = mix(round ^ mix(operation + 1));
+            make_vector(id, variants[id], config.dim, config.seed, vector);
+
+            auto start = Clock::now();
+            require(static_cast<bool>(
+                        index->Update(static_cast<int64_t>(id), vector.data(), config.dim)),
+                    "update failed");
+            update_us.push_back(microseconds(start, Clock::now()));
+            start = Clock::now();
+            require(index->Remove(static_cast<int64_t>(id)), "remove failed");
+            remove_us.push_back(microseconds(start, Clock::now()));
+            start = Clock::now();
+            require(
+                static_cast<bool>(index->Add(static_cast<int64_t>(id), vector.data(), config.dim)),
+                "re-add failed");
+            readd_us.push_back(microseconds(start, Clock::now()));
+        }
+        require(index->Size() == config.count, "index size changed after CRUD round");
+
+        std::vector<double> search_us;
+        std::vector<std::vector<vsag::lite::Neighbor>> expected;
+        search_us.reserve(config.queries);
+        expected.reserve(config.queries);
+        uint64_t top1_hits = 0;
+        uint64_t checksum = 1469598103934665603ULL;
+        for (uint64_t query = 0; query < config.queries; ++query) {
+            const uint64_t id = (round * 65537ULL + query * 104729ULL) % config.count;
+            make_vector(id, variants[id], config.dim, config.seed, vector);
+            const auto start = Clock::now();
+            auto result = index->Search(vector.data(), config.dim, config.k);
+            search_us.push_back(microseconds(start, Clock::now()));
+            require(static_cast<bool>(result), "search failed");
+            require(result->size() == config.k, "unexpected search result size");
+            top1_hits += result->front().id == static_cast<int64_t>(id) ? 1 : 0;
+            checksum = result_checksum(*result, checksum);
+            expected.push_back(std::move(*result));
+        }
+        const uint64_t resident_rss = current_rss_kib();
+
+        const auto save_start = Clock::now();
+        std::ofstream output(snapshot, std::ios::binary | std::ios::trunc);
+        require(static_cast<bool>(output), "snapshot open for write failed");
+        require(static_cast<bool>(index->Save(output)), "snapshot save failed");
+        output.close();
+        require(static_cast<bool>(output), "snapshot close failed");
+        const double save_ms = milliseconds(save_start, Clock::now());
+        const uint64_t snapshot_bytes = std::filesystem::file_size(snapshot);
+
+        const auto load_start = Clock::now();
+        std::ifstream input(snapshot, std::ios::binary);
+        auto loaded = vsag::lite::Index::Load(input);
+        require(static_cast<bool>(loaded), "snapshot load failed");
+        const double load_ms = milliseconds(load_start, Clock::now());
+        auto loaded_index = std::move(*loaded);
+        require(loaded_index->Size() == config.count, "loaded index size changed");
+        uint64_t loaded_checksum = 1469598103934665603ULL;
+        for (uint64_t query = 0; query < config.queries; ++query) {
+            const uint64_t id = (round * 65537ULL + query * 104729ULL) % config.count;
+            make_vector(id, variants[id], config.dim, config.seed, vector);
+            auto result = loaded_index->Search(vector.data(), config.dim, config.k);
+            require(static_cast<bool>(result), "loaded search failed");
+            require(same_results(*result, expected[query]), "loaded search result changed");
+            loaded_checksum = result_checksum(*result, loaded_checksum);
+        }
+        require(checksum == loaded_checksum, "loaded search checksum changed");
+
+        std::cout << std::fixed << std::setprecision(3) << round + 1 << ',' << index->Size() << ','
+                  << config.crud_ops << ',' << percentile(update_us, 0.50) << ','
+                  << percentile(update_us, 0.99) << ',' << percentile(remove_us, 0.50) << ','
+                  << percentile(remove_us, 0.99) << ',' << percentile(readd_us, 0.50) << ','
+                  << percentile(readd_us, 0.99) << ',' << percentile(search_us, 0.50) << ','
+                  << percentile(search_us, 0.99) << ',' << save_ms << ',' << load_ms << ','
+                  << snapshot_bytes << ',' << resident_rss << ',' << peak_rss_kib() << ','
+                  << static_cast<double>(top1_hits) / static_cast<double>(config.queries) << ','
+                  << checksum << '\n';
+    }
+    return 0;
+}
+
 }  // namespace
 
 int
 main(int argc, char** argv) {
     try {
+        if (argc > 1 and std::string(argv[1]) == "stability") {
+            return run_stability(parse_stability_config(argc, argv));
+        }
         return run(parse_config(argc, argv));
     } catch (const std::exception& error) {
         std::cerr << "lite_benchmark: " << error.what() << '\n';
