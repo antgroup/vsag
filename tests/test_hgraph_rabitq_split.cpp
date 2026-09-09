@@ -150,6 +150,7 @@ public:
     void
     WaitUntilEmpty() override {
         release_.store(true, std::memory_order_release);
+        allow_finish_.store(true, std::memory_order_release);
         if (worker_.joinable()) {
             worker_.join();
         }
@@ -177,6 +178,11 @@ public:
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             task();
+            // GeneralEnqueue's packaged-task future is ready here, before the underlying pool
+            // task returns. Keep that boundary deterministic for the drain regression.
+            while (not allow_finish_.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
             task_finished_.store(true, std::memory_order_release);
         });
         return {};
@@ -190,6 +196,7 @@ public:
 private:
     std::atomic<uint64_t> submissions_{0};
     std::atomic<bool> release_{false};
+    std::atomic<bool> allow_finish_{false};
     std::atomic<bool> task_finished_{false};
     std::thread worker_{};
 };
