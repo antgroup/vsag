@@ -264,7 +264,7 @@ RaBitQuantizer<metric>::TrainImpl(const float* data, uint64_t count) {
 
     // transform centroid
     Vector<float> rp_centroids(this->dim_, 0, this->allocator_);
-    rom_->Transform(centroid_.data(), rp_centroids.data());
+    rom_->Transform(CentroidData(), rp_centroids.data());
     centroid_.assign(rp_centroids.begin(), rp_centroids.end());
 
     this->is_trained_ = true;
@@ -815,7 +815,7 @@ RaBitQuantizer<metric>::EncodeOneInternal(const float* data,
 
     rom_->Transform(pca_data.data(), transformed_data.data());
     const norm_type norm = NormalizeWithCentroid(
-        transformed_data.data(), centroid_.data(), normed_data.data(), this->dim_);
+        transformed_data.data(), CentroidData(), normed_data.data(), this->dim_);
 
     if (num_bits_per_dim_base_ != 1) {
         Vector<uint8_t> local_scalar_code(this->allocator_);
@@ -934,7 +934,7 @@ RaBitQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, float* data) {
     }
     // 3. inverse normalize
     InverseNormalizeWithCentroid(normed_data.data(),
-                                 centroid_.data(),
+                                 CentroidData(),
                                  transformed_data.data(),
                                  this->dim_,
                                  *(norm_type*)(codes + offset_norm_));
@@ -2396,11 +2396,11 @@ RaBitQuantizer<metric>::EncodeHnswOneBitMetadata(const float* data, uint8_t* one
     double centroid_code_ip = 0.0;
     double code_norm_sqr = 0.0;
     for (uint64_t i = 0; i < this->dim_; ++i) {
-        const float residual = transformed_data[i] - centroid_[i];
+        const float residual = transformed_data[i] - CentroidData()[i];
         const float centered_code = residual > 0.0F ? 0.5F : -0.5F;
         residual_norm_sqr += static_cast<double>(residual) * residual;
         residual_code_ip += static_cast<double>(residual) * centered_code;
-        centroid_code_ip += static_cast<double>(centroid_[i]) * centered_code;
+        centroid_code_ip += static_cast<double>(CentroidData()[i]) * centered_code;
         code_norm_sqr += static_cast<double>(centered_code) * centered_code;
     }
 
@@ -2413,8 +2413,8 @@ RaBitQuantizer<metric>::EncodeHnswOneBitMetadata(const float* data, uint8_t* one
     float f_rescale = 0.0F;
     if constexpr (metric == MetricType::METRIC_TYPE_IP) {
         const float residual_centroid_ip =
-            FP32ComputeIP(transformed_data.data(), centroid_.data(), this->dim_) -
-            FP32ComputeIP(centroid_.data(), centroid_.data(), this->dim_);
+            FP32ComputeIP(transformed_data.data(), CentroidData(), this->dim_) -
+            FP32ComputeIP(CentroidData(), CentroidData(), this->dim_);
         f_add =
             1.0F - residual_centroid_ip + l2_sqr * static_cast<float>(centroid_code_ip) / safe_ip;
         f_rescale = -l2_sqr / safe_ip;
@@ -2437,7 +2437,7 @@ RaBitQuantizer<metric>::EncodeHnswOneBitMetadata(const float* data, uint8_t* one
 template <MetricType metric>
 bool
 RaBitQuantizer<metric>::EncodeHnswSupplement(const float* data, uint8_t* supplement_code) const {
-    if (data == nullptr or supplement_code == nullptr or centroid_.size() != this->dim_) {
+    if (data == nullptr or supplement_code == nullptr or CentroidSize() != this->dim_) {
         return false;
     }
     for (uint64_t i = 0; i < this->original_dim_; ++i) {
@@ -2458,10 +2458,11 @@ RaBitQuantizer<metric>::EncodeHnswSupplement(const float* data, uint8_t* supplem
 
     double residual_norm_sqr = 0.0;
     for (uint64_t i = 0; i < this->dim_; ++i) {
-        if (not IsFiniteRaBitQValue(transformed_data[i]) or not IsFiniteRaBitQValue(centroid_[i])) {
+        if (not IsFiniteRaBitQValue(transformed_data[i]) or
+            not IsFiniteRaBitQValue(CentroidData()[i])) {
             return false;
         }
-        residual[i] = transformed_data[i] - centroid_[i];
+        residual[i] = transformed_data[i] - CentroidData()[i];
         if (not IsFiniteRaBitQValue(residual[i])) {
             return false;
         }
@@ -2534,7 +2535,7 @@ RaBitQuantizer<metric>::EncodeHnswSupplement(const float* data, uint8_t* supplem
             static_cast<float>(ex_codes[i]) + (residual[i] >= 0.0F ? 128.0F : 0.0F);
         const float centered = total_code - k_center;
         residual_code_ip += static_cast<double>(residual[i]) * centered;
-        centroid_code_ip += static_cast<double>(centroid_[i]) * centered;
+        centroid_code_ip += static_cast<double>(CentroidData()[i]) * centered;
     }
     const float safe_ip = std::fabs(residual_code_ip) > 1e-20
                               ? static_cast<float>(residual_code_ip)
@@ -2545,7 +2546,7 @@ RaBitQuantizer<metric>::EncodeHnswSupplement(const float* data, uint8_t* supplem
     float f_rescale = 0.0F;
     if constexpr (metric == MetricType::METRIC_TYPE_IP) {
         const float residual_centroid_ip =
-            FP32ComputeIP(residual.data(), centroid_.data(), this->dim_);
+            FP32ComputeIP(residual.data(), CentroidData(), this->dim_);
         f_add = 1.0F - residual_centroid_ip +
                 static_cast<float>(residual_norm_sqr * centroid_code_ip / safe_ip);
         f_rescale = -ipnorm_inv * residual_norm;
@@ -2569,10 +2570,10 @@ RaBitQuantizer<metric>::ComputeHnswCentroidTerms(const float* transformed_query,
                                                  float& g_add,
                                                  float& g_error) const {
     const float centroid_distance_sqr =
-        FP32ComputeL2Sqr(transformed_query, centroid_.data(), this->dim_);
+        FP32ComputeL2Sqr(transformed_query, CentroidData(), this->dim_);
     g_error = std::sqrt(centroid_distance_sqr);
     if constexpr (metric == MetricType::METRIC_TYPE_IP) {
-        g_add = -FP32ComputeIP(transformed_query, centroid_.data(), this->dim_);
+        g_add = -FP32ComputeIP(transformed_query, CentroidData(), this->dim_);
     } else {
         g_add = centroid_distance_sqr;
     }
@@ -2729,9 +2730,9 @@ RaBitQuantizer<metric>::EncodeFusedAffineMetadata(const float* data,
         }
 
         const uint32_t full_code = (filter_code << supplement_bits) | supplement;
-        const auto centroid = static_cast<double>(centroid_[d]);
+        const auto centroid = static_cast<double>(CentroidData()[d]);
         const double residual =
-            static_cast<double>(transformed_data[d]) - static_cast<double>(centroid_[d]);
+            static_cast<double>(transformed_data[d]) - static_cast<double>(CentroidData()[d]);
         centroid_filter_ip += centroid * (static_cast<double>(filter_code) - filter_center);
         centroid_full_ip += centroid * (static_cast<double>(full_code) - full_center);
         centroid_residual_ip += centroid * residual;
@@ -2824,7 +2825,7 @@ RaBitQuantizer<metric>::DecodeFusedSplitCode(const uint8_t* one_bit_code,
     }
     if (one_bit_code == nullptr or supplement_code == nullptr or data == nullptr or
         not SupportSplitCodeStorage() or pca_dim_ != original_dim_ or rom_ == nullptr or
-        centroid_.size() != this->dim_) {
+        CentroidSize() != this->dim_) {
         return false;
     }
 
@@ -2892,7 +2893,7 @@ RaBitQuantizer<metric>::DecodeFusedSplitCode(const uint8_t* one_bit_code,
 
         const uint32_t full_code = (filter_code << supplement_bits) | supplement;
         transformed_data[d] =
-            centroid_[d] + residual_scale * (static_cast<float>(full_code) - full_center);
+            CentroidData()[d] + residual_scale * (static_cast<float>(full_code) - full_center);
         if (not IsFiniteRaBitQValue(transformed_data[d])) {
             return false;
         }
@@ -3112,7 +3113,7 @@ RaBitQuantizer<metric>::ProcessTransformedFusedQuery(const float* transformed_qu
     std::fill(computer.buf_, computer.buf_ + this->query_code_size_, 0);
     Vector<float> normed_data(this->dim_, 0, this->allocator_);
     const float query_norm =
-        NormalizeWithCentroid(transformed_query, centroid_.data(), normed_data.data(), this->dim_);
+        NormalizeWithCentroid(transformed_query, CentroidData(), normed_data.data(), this->dim_);
 
     if (num_bits_per_dim_query_ == 4) {
         Vector<uint8_t> quantized_data(this->dim_, 0, this->allocator_);

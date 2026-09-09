@@ -287,6 +287,112 @@ KMeansCluster::find_nearest_one_with_hgraph(const float* query,
     return error / static_cast<float>(query_count);
 }
 
+Vector<int32_t>
+KMeansCluster::RunFull(
+    uint32_t k, const float* data, uint64_t count, uint32_t iterations, uint32_t seed) {
+    CHECK_ARGUMENT(data != nullptr and count > 0 and dim_ > 0,
+                   "full KMeans requires non-empty vectors");
+    CHECK_ARGUMENT(k > 0 and k <= count and k <= std::numeric_limits<int32_t>::max(),
+                   "full KMeans requires 1 <= k <= training count and INT32_MAX");
+    CHECK_ARGUMENT(iterations > 0, "full KMeans iterations must be positive");
+    const auto dim = static_cast<uint64_t>(dim_);
+    CHECK_ARGUMENT(count <= std::numeric_limits<uint64_t>::max() / dim / sizeof(float) and
+                       count < std::numeric_limits<uint64_t>::max() / sizeof(uint64_t),
+                   "full KMeans input size overflow");
+    if (k_centroids_ != nullptr) {
+        allocator_->Deallocate(k_centroids_);
+        k_centroids_ = nullptr;
+    }
+    k_centroids_ = static_cast<float*>(allocator_->Allocate(uint64_t{k} * dim * sizeof(float)));
+    std::mt19937 gen(seed);
+    select_initial_centroids_kmeans_plus_plus(data, count, k, gen);
+    Vector<int32_t> labels(count, 0, allocator_);
+    Vector<uint64_t> offsets(uint64_t{k} + 1, 0, allocator_);
+    Vector<uint64_t> positions(uint64_t{k}, 0, allocator_);
+    Vector<uint64_t> grouped(count, 0, allocator_);
+
+    auto parallel_blocks = [&](uint64_t size, const auto& function) {
+        std::vector<std::future<void>> futures;
+        constexpr uint64_t block_size = 1024;
+        futures.reserve((size + block_size - 1) / block_size);
+        std::exception_ptr failure;
+        try {
+            for (uint64_t first = 0; first < size; first += block_size) {
+                futures.emplace_back(thread_pool_->GeneralEnqueue(
+                    function, first, std::min(size, first + block_size)));
+            }
+        } catch (...) {
+            failure = std::current_exception();
+        }
+        // Drain every task before propagating exceptions: tasks borrow these local buffers.
+        for (auto& future : futures) {
+            try {
+                future.get();
+            } catch (...) {
+                if (failure == nullptr) {
+                    failure = std::current_exception();
+                }
+            }
+        }
+        if (failure != nullptr) {
+            std::rethrow_exception(failure);
+        }
+    };
+    auto assign = [&](uint64_t first, uint64_t last) {
+        for (uint64_t row = first; row < last; ++row) {
+            float best = std::numeric_limits<float>::max();
+            int32_t nearest = 0;
+            for (uint32_t center = 0; center < k; ++center) {
+                const float distance =
+                    FP32ComputeL2Sqr(data + row * dim, k_centroids_ + uint64_t{center} * dim, dim);
+                if (distance < best) {
+                    best = distance;
+                    nearest = static_cast<int32_t>(center);
+                }
+            }
+            labels[row] = nearest;
+        }
+    };
+    for (uint32_t iteration = 0; iteration < iterations; ++iteration) {
+        parallel_blocks(count, assign);
+        std::fill(offsets.begin(), offsets.end(), 0);
+        for (auto label : labels) {
+            ++offsets[static_cast<uint64_t>(label) + 1];
+        }
+        for (uint64_t center = 1; center <= k; ++center) {
+            offsets[center] += offsets[center - 1];
+        }
+        std::copy_n(offsets.begin(), k, positions.begin());
+        for (uint64_t row = 0; row < count; ++row) {
+            grouped[positions[labels[row]]++] = row;
+        }
+        parallel_blocks(k, [&](uint64_t first, uint64_t last) {
+            Vector<double> sum(dim, 0.0, allocator_);
+            for (uint64_t center = first; center < last; ++center) {
+                const auto members = offsets[center + 1] - offsets[center];
+                if (members == 0) {
+                    // A reproducible replacement, independent of scheduling.
+                    const auto row = (center + uint64_t{iteration}) % count;
+                    std::copy_n(data + row * dim, dim, k_centroids_ + center * dim);
+                    continue;
+                }
+                std::fill(sum.begin(), sum.end(), 0.0);
+                for (uint64_t pos = offsets[center]; pos < offsets[center + 1]; ++pos) {
+                    const auto* vector = data + grouped[pos] * dim;
+                    for (uint64_t d = 0; d < dim; ++d) {
+                        sum[d] += vector[d];
+                    }
+                }
+                for (uint64_t d = 0; d < dim; ++d) {
+                    k_centroids_[center * dim + d] = static_cast<float>(sum[d] / members);
+                }
+            }
+        });
+    }
+    parallel_blocks(count, assign);
+    return labels;
+}
+
 void
 // NOLINTNEXTLINE(readability-make-member-function-const)
 KMeansCluster::select_initial_centroids_random(const float* datas,
@@ -314,14 +420,54 @@ KMeansCluster::select_initial_centroids_kmeans_plus_plus(const float* datas,
     }
 
     Vector<float> min_distances(count, std::numeric_limits<float>::max(), allocator_);
+    // Avoid tiny tasks for low-dimensional inputs. Each worker owns a disjoint row range;
+    // the random draws and floating-point reductions below retain their serial order.
+    const uint64_t block_size =
+        std::max(uint64_t{4096}, uint64_t{65536} / static_cast<uint64_t>(std::max(dim_, 1)));
+    std::vector<std::future<void>> futures;
+    if (count > block_size) {
+        futures.reserve(1 + (count - 1) / block_size);
+    }
 
     for (uint32_t c = 1; c < k; ++c) {
         const float* centroid =
             k_centroids_ + static_cast<uint64_t>(c - 1) * static_cast<uint64_t>(dim_);
 
-        for (uint64_t i = 0; i < count; ++i) {
-            float dist = FP32ComputeL2Sqr(datas + i * dim_, centroid, dim_);
-            min_distances[i] = std::min(min_distances[i], dist);
+        const auto update_distances = [&, centroid](uint64_t first, uint64_t last) {
+            for (uint64_t i = first; i < last; ++i) {
+                float dist = FP32ComputeL2Sqr(datas + i * dim_, centroid, dim_);
+                min_distances[i] = std::min(min_distances[i], dist);
+            }
+        };
+        if (count <= block_size) {
+            update_distances(0, count);
+        } else {
+            futures.clear();
+            std::exception_ptr failure;
+            try {
+                for (uint64_t first = 0; first < count;) {
+                    const auto last = first + std::min(block_size, count - first);
+                    futures.emplace_back(
+                        thread_pool_->GeneralEnqueue(update_distances, first, last));
+                    first = last;
+                }
+            } catch (...) {
+                failure = std::current_exception();
+            }
+            // All tasks borrow min_distances and the current center. Drain them even if
+            // submission or execution failed, before changing centers or freeing buffers.
+            for (auto& future : futures) {
+                try {
+                    future.get();
+                } catch (...) {
+                    if (failure == nullptr) {
+                        failure = std::current_exception();
+                    }
+                }
+            }
+            if (failure != nullptr) {
+                std::rethrow_exception(failure);
+            }
         }
 
         double total_weight = 0.0;
@@ -333,7 +479,7 @@ KMeansCluster::select_initial_centroids_kmeans_plus_plus(const float* datas,
             std::uniform_int_distribution<uint64_t> dis(0, count - 1);
             uint64_t idx = dis(gen);
             for (int32_t j = 0; j < dim_; ++j) {
-                k_centroids_[c * dim_ + j] = datas[idx * dim_ + j];
+                k_centroids_[static_cast<uint64_t>(c) * dim_ + j] = datas[idx * dim_ + j];
             }
             continue;
         }
@@ -352,7 +498,7 @@ KMeansCluster::select_initial_centroids_kmeans_plus_plus(const float* datas,
         }
 
         for (int32_t j = 0; j < dim_; ++j) {
-            k_centroids_[c * dim_ + j] = datas[selected_idx * dim_ + j];
+            k_centroids_[static_cast<uint64_t>(c) * dim_ + j] = datas[selected_idx * dim_ + j];
         }
     }
 }

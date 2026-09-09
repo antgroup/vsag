@@ -17,6 +17,8 @@
 #include <chrono>
 #include <future>
 #include <initializer_list>
+#include <limits>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -35,6 +37,32 @@
 #include "vsag/options.h"
 
 namespace {
+
+// Fused slabs have a cache-line-multiple payload plus 63 bytes for alignment.
+// Observe allocation requests rather than timing to detect repeated full-slab copies.
+class FusedSlabTrackingAllocator : public vsag::DefaultAllocator {
+public:
+    void*
+    Allocate(uint64_t size) override {
+        if (size % 64 == 63) {
+            std::lock_guard lock(mutex_);
+            slab_requests_.push_back(size);
+        }
+        return vsag::DefaultAllocator::Allocate(size);
+    }
+
+    std::vector<uint64_t>
+    TakeSlabRequests() {
+        std::lock_guard lock(mutex_);
+        auto requests = std::move(slab_requests_);
+        slab_requests_.clear();
+        return requests;
+    }
+
+private:
+    std::mutex mutex_;
+    std::vector<uint64_t> slab_requests_;
+};
 
 vsag::DatasetPtr
 MakeFloatDataset(std::vector<float>& vectors,
@@ -860,6 +888,180 @@ TEST_CASE("HGraph fused RaBitQ GetStats decodes vectors from node records",
     for (uint64_t i = 0; i < static_cast<uint64_t>(fetch_ids.size()) * dim; ++i) {
         REQUIRE(std::isfinite(fetched_vectors[i]));
     }
+}
+
+TEST_CASE("HGraph fused full KMeans ignores quantizer sampling and shares query preparation",
+          "[ut][hgraph][fused_full]") {
+    constexpr int64_t dim = 16;
+    constexpr int64_t count = 600;
+    auto common = MakeCommonParam(dim, 2);
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"rabitq", "precise_quantization_type":"rabitq",
+        "base_io_type":"memory_io", "base_supplement_io_type":"memory_io",
+        "rabitq_bits_per_dim_base":2, "rabitq_bits_per_dim_precise":6,
+        "rabitq_use_fht":true, "graph_io_type":"memory_io",
+        "max_degree":8, "ef_construction":32, "build_thread_count":2,
+        "use_reorder":true, "reorder_source":"base", "rabitq_fused_datacell":true,
+        "rabitq_fused_cluster_count":513, "rabitq_fused_kmeans_iterations":1,
+        "train_sample_count":512
+    })");
+    param["graph_type"].SetString(GENERATE("nsw", "odescent"));
+    auto index = MakeHGraphIndex(param, common);
+    std::vector<float> data(count * dim);
+    std::vector<int64_t> ids(count);
+    for (int64_t row = 0; row < count; ++row) {
+        ids[row] = row;
+        for (int64_t d = 0; d < dim; ++d) {
+            data[row * dim + d] = static_cast<float>((row * 101 + d * 13) % 997) / 997.0F;
+        }
+    }
+    auto base = MakeFloatDataset(data, ids, dim, count);
+    auto result = index->Build(base);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value().empty());
+    std::vector<float> q(data.begin(), data.begin() + dim);
+    const auto search = [&](const auto& target) {
+        auto result =
+            target->KnnSearch(MakeFloatQuery(q, dim),
+                              5,
+                              R"({"hgraph":{"ef_search":64,"rabitq_one_bit_search":true}})");
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 5);
+        const auto stats = result.value()->GetStatistics({"query_computer_count"});
+        REQUIRE(stats[0] == "1");
+        return result.value();
+    };
+    auto before = search(index);
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = MakeHGraphIndex(param, common);
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    auto after = search(restored);
+    for (uint64_t i = 0; i < 5; ++i) {
+        REQUIRE(before->GetIds()[i] == after->GetIds()[i]);
+        REQUIRE(before->GetDistances()[i] == after->GetDistances()[i]);
+    }
+    std::stringstream stream;
+    REQUIRE(index->Serialize(stream).has_value());
+    auto stream_restored = MakeHGraphIndex(param, common);
+    REQUIRE(stream_restored->Deserialize(stream).has_value());
+    auto stream_after = search(stream_restored);
+    for (uint64_t i = 0; i < 5; ++i) {
+        REQUIRE(before->GetIds()[i] == stream_after->GetIds()[i]);
+        REQUIRE(before->GetDistances()[i] == stream_after->GetDistances()[i]);
+    }
+    auto wrong_param = param;
+    wrong_param["rabitq_fused_cluster_count"].SetInt(512);
+    REQUIRE_FALSE(MakeHGraphIndex(wrong_param, common)->Deserialize(binary.value()).has_value());
+    std::vector<float> extra(dim, 2.0F);
+    std::vector<int64_t> extra_ids{1000};
+    REQUIRE(restored->Add(MakeFloatDataset(extra, extra_ids, dim, 1)).has_value());
+    REQUIRE(restored->CheckIdExist(1000));
+    const auto update = restored->UpdateVector(1000, MakeFloatQuery(q, dim), true);
+    REQUIRE(update.has_value());
+    REQUIRE(update.value());
+    search(restored);
+    // Insufficient initial data is rejected instead of duplicating centers.
+    auto empty = MakeHGraphIndex(param, common);
+    REQUIRE_FALSE(empty->Build(MakeFloatDataset(extra, extra_ids, dim, 1)).has_value());
+    REQUIRE(empty->Build(base).has_value());
+    search(empty);
+}
+
+TEST_CASE("HGraph fused Build reserves once and Add grows geometrically",
+          "[ut][hgraph][fused][capacity]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 35;
+    auto allocator = std::make_shared<FusedSlabTrackingAllocator>();
+    auto common = MakeCommonParam(dim, 2);
+    common.allocator_ = allocator;
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"rabitq", "precise_quantization_type":"rabitq",
+        "rabitq_bits_per_dim_base":1, "rabitq_bits_per_dim_precise":7,
+        "rabitq_use_fht":true, "max_degree":8, "ef_construction":32,
+        "build_thread_count":2, "use_reorder":true, "reorder_source":"base",
+        "rabitq_fused_datacell":true, "rabitq_fused_cluster_count":2,
+        "rabitq_fused_kmeans_iterations":1, "hgraph_init_capacity":4,
+        "resize_increase_count_bit":1
+    })");
+    param["graph_type"].SetString(GENERATE("nsw", "odescent"));
+    const uint64_t initial_capacity = GENERATE(4, 32);
+    param["hgraph_init_capacity"].SetUint64(initial_capacity);
+    auto index = MakeHGraphIndex(param, common);
+    const auto initial = allocator->TakeSlabRequests();
+    REQUIRE(initial.size() == 1);
+    const auto record_size = (initial.front() - 63) / initial_capacity;
+    REQUIRE(record_size % 64 == 0);
+    const auto bytes = [&](uint64_t capacity) { return capacity * record_size + 63; };
+
+    std::vector<float> data(count * dim);
+    std::vector<int64_t> ids(count);
+    for (int64_t row = 0; row < count; ++row) {
+        ids[row] = row;
+        for (int64_t d = 0; d < dim; ++d) {
+            data[row * dim + d] = static_cast<float>((row * 101 + d * 13) % 997) / 997.0F;
+        }
+    }
+    auto base = MakeFloatDataset(data, ids, dim, count);
+    auto built = index->Build(base);
+    REQUIRE(built.has_value());
+    REQUIRE(built.value().empty());
+    // 35 input rows round up to 36; no intermediate slabs or power-of-two overreservation.
+    REQUIRE(allocator->TakeSlabRequests() == std::vector<uint64_t>{bytes(36)});
+
+    std::vector<float> query(data.begin(), data.begin() + dim);
+    const auto search = [&](const auto& target) {
+        auto result =
+            target->KnnSearch(MakeFloatQuery(query, dim), 5, R"({"hgraph":{"ef_search":128}})");
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 5);
+        return result.value();
+    };
+    auto before = search(index);
+    for (int64_t id = count; id < 74; ++id) {
+        std::vector<float> vector(dim, static_cast<float>(id));
+        std::vector<int64_t> label{id};
+        auto added = index->Add(MakeFloatDataset(vector, label, dim, 1));
+        REQUIRE(added.has_value());
+        REQUIRE(added.value().empty());
+    }
+    REQUIRE(allocator->TakeSlabRequests() == std::vector<uint64_t>{bytes(72), bytes(144)});
+    auto after = search(index);
+    for (int64_t i = 0; i < 5; ++i) {
+        REQUIRE(after->GetIds()[i] == before->GetIds()[i]);
+        REQUIRE(after->GetDistances()[i] == before->GetDistances()[i]);
+    }
+
+    // Serialization preserves spare capacity and existing nodes, and restored Add can grow.
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = MakeHGraphIndex(param, common);
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    allocator->TakeSlabRequests();
+    for (int64_t id = 74; id < 145; ++id) {
+        std::vector<float> vector(dim, static_cast<float>(id));
+        std::vector<int64_t> label{id};
+        auto added = restored->Add(MakeFloatDataset(vector, label, dim, 1));
+        REQUIRE(added.has_value());
+        REQUIRE(added.value().empty());
+    }
+    REQUIRE(allocator->TakeSlabRequests() == std::vector<uint64_t>{bytes(288)});
+    REQUIRE(restored->GetNumElements() == 145);
+    for (int64_t id = 0; id < 145; ++id) {
+        REQUIRE(restored->CheckIdExist(id));
+    }
+    search(restored);
+
+    auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(restored->GetInnerIndex());
+    REQUIRE(hgraph != nullptr);
+    REQUIRE_NOTHROW(hgraph->resize(145));
+    REQUIRE_NOTHROW(hgraph->resize(1));
+    REQUIRE_THROWS(hgraph->resize(std::numeric_limits<uint64_t>::max()));
+    REQUIRE(allocator->TakeSlabRequests().empty());
+    // A bulk reservation larger than twice the old capacity jumps straight to the request.
+    REQUIRE_NOTHROW(hgraph->resize(1000));
+    REQUIRE(allocator->TakeSlabRequests() == std::vector<uint64_t>{bytes(1000)});
+    search(restored);
 }
 
 TEST_CASE("HGraph fused RaBitQ remains mutable after fast build and deserialize",

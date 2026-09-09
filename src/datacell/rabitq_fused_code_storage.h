@@ -14,13 +14,102 @@
 
 #pragma once
 
+#include <cmath>
 #include <cstdint>
+#include <limits>
 
 #include "basic_types.h"
+#include "metric_type.h"
+#include "typing.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
-inline constexpr uint32_t K_FUSED_CLUSTER_COUNT = 16;
+inline constexpr uint32_t K_FUSED_DEFAULT_CLUSTER_COUNT = 16;
+inline constexpr uint32_t K_FUSED_CODEC_VERSION = 2;
+
+inline uint64_t
+FusedCodecSize(uint64_t dim, uint64_t count) {
+    CHECK_ARGUMENT(dim > 0 and count > 0 and count <= std::numeric_limits<int32_t>::max(),
+                   "invalid fused codec dimension or cluster count");
+    constexpr uint64_t header = 2 * sizeof(uint32_t) + sizeof(uint64_t);
+    CHECK_ARGUMENT(
+        dim <= (std::numeric_limits<uint64_t>::max() - sizeof(double)) / (2 * sizeof(float)),
+        "fused codec dimension overflow");
+    const uint64_t stride = dim * 2 * sizeof(float) + sizeof(double);
+    CHECK_ARGUMENT(count <= (std::numeric_limits<uint64_t>::max() - header) / stride,
+                   "fused codec size overflow");
+    return header + count * stride;
+}
+
+// A single query owns this cache across graph routing, traversal and reranking.
+class RaBitQFusedQueryCache {
+public:
+    explicit RaBitQFusedQueryCache(Allocator* allocator)
+        : add(allocator), error(allocator), ready(allocator) {
+    }
+
+    void
+    Initialize(const float* query,
+               const float* centers,
+               const double* norms,
+               uint64_t dim,
+               uint32_t count,
+               MetricType metric) {
+        query_ = query;
+        centers_ = centers;
+        norms_ = norms;
+        dim_ = dim;
+        metric_ = metric;
+        query_norm_ = 0.0;
+        for (uint64_t d = 0; d < dim; ++d) {
+            query_norm_ += static_cast<double>(query[d]) * query[d];
+        }
+        add.resize(count);
+        error.resize(count);
+        ready.assign(count, 0);
+        computed_count = 0;
+    }
+
+    void
+    Ensure(uint32_t id) {
+        if (ready[id] != 0) {
+            return;
+        }
+        const auto* center = centers_ + uint64_t{id} * dim_;
+        double dot = 0.0;
+        for (uint64_t d = 0; d < dim_; ++d) {
+            dot += static_cast<double>(query_[d]) * center[d];
+        }
+        const double scale = query_norm_ + norms_[id];
+        double squared = scale - 2.0 * dot;
+        // Subtraction loses precision near the center. Recompute the residual directly there.
+        if (squared <= 1e-6 * scale) {
+            squared = 0.0;
+            for (uint64_t d = 0; d < dim_; ++d) {
+                const double residual = static_cast<double>(query_[d]) - center[d];
+                squared += residual * residual;
+            }
+        }
+        add[id] = static_cast<float>(metric_ == MetricType::METRIC_TYPE_IP ? -dot : squared);
+        error[id] = static_cast<float>(std::sqrt(squared));
+        ready[id] = 1;
+        ++computed_count;
+    }
+
+    Vector<float> add;
+    Vector<float> error;
+    Vector<uint8_t> ready;
+    uint64_t computed_count{0};
+
+private:
+    const float* query_{nullptr};
+    const float* centers_{nullptr};
+    const double* norms_{nullptr};
+    uint64_t dim_{0};
+    double query_norm_{0.0};
+    MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
+};
 
 struct RaBitQFusedCodeView {
     const uint8_t* one_bit_code{nullptr};

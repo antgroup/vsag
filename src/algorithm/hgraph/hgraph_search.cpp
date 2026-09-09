@@ -650,7 +650,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     ctx.distance_phase = DistanceEvaluationPhase::ROUTING;
     auto* split_codes = rabitq_split_codes_.get();
     if (not use_custom_distance and rabitq_fused_datacell_ != nullptr and split_codes != nullptr) {
-        search_param.rabitq_fused_computer = split_codes->FactoryFusedComputer(raw_query);
+        search_param.rabitq_fused_computer =
+            AcquireQueryComputer(basic_flatten_codes_, raw_query, &ctx).computer;
         for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
             search_param.ep =
                 rabitq_fused_searcher_->Route(this->route_graphs_[i],

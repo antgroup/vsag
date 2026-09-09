@@ -79,6 +79,8 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `fast_encode_rabitq_rounds` | int | `6` | Fast RaBitQ coordinate-refinement rounds, in `[1, 32]`. |
 | `rabitq_fused_datacell` | bool | `false` | Fuse the bottom HGraph node and RaBitQ split codes into one in-memory record. Requires L2/IP, flat in-memory graph storage, RaBitQ x+y split codes with x in `[1, 4]`, and the other constraints described in [RaBitQ x+y split](../quantization/rabitq_split.md). |
 | `train_sample_count` | int | `65536` | Maximum number of vectors sampled for quantizer training; must be at least `512` when set explicitly. |
+| `rabitq_fused_cluster_count` | int | `16` | Fused residual center count: any positive integer up to the initial dataset size and `INT32_MAX`. Fused KMeans uses the full dataset regardless of `train_sample_count`. |
+| `rabitq_fused_kmeans_iterations` | int | `25` | Number of full-data exact KMeans iterations in fused mode; positive integer up to `INT32_MAX`. |
 | `build_thread_count` | int | `100` | Threads used to parallelise build |
 | `support_duplicate` | bool | `false` | Enable duplicate-ID detection on insert |
 | `deduplicate_storage` | bool | `false` | Share vector storage between duplicates; requires `support_duplicate: true` |
@@ -93,7 +95,7 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `hgraph_init_capacity` | int | `100` | Initial capacity hint (doesn't cap the final size) |
 | `persist_source_id` | bool | `false` | Persist source-ID metadata during serialization so a restored index can later export a reusable build cache. |
 | `use_conjugate_graph` | bool | `false` | Enable `Feedback`/`Pretrain` graph enhancement; see [Graph Index Enhancement](../advanced/enhance_graph.md). |
-| `resize_increase_count_bit` | int | `10` | `log2` of the slot-growth batch. Valid range is `1` to `31`; `1` grows in 2-slot batches and `10` in 1,024-slot batches. Smaller values reduce preallocation but can increase reallocations. |
+| `resize_increase_count_bit` | int | `10` | `log2` of the slot-growth alignment. Valid range is `1` to `31`; `1` aligns to 2 slots and `10` to 1,024 slots. Fused `Build` reserves for the full input and fused `Add` grows geometrically with this alignment; non-fused indexes retain fixed-batch growth. |
 
 `use_reverse_edges` is intended for workloads that need fast incoming-neighbor inspection, graph
 analysis, or future graph-maintenance algorithms. It is disabled by default because maintaining

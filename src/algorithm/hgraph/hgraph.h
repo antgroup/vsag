@@ -378,9 +378,9 @@ public:
     void
     ensure_physical_code_capacity_unlocked(CodeSlotIdType required_capacity);
 
-    /// Grow internal storage to at least new_size capacity.
+    /// Grow internal storage; fused Add doubles capacity, while Build reserves exactly (aligned).
     void
-    resize(uint64_t new_size);
+    resize(uint64_t new_size, bool geometric_growth = true);
 
     /// Create a single route (upper-layer) graph from the hierarchical params.
     GraphInterfacePtr
@@ -472,7 +472,7 @@ private:
     sample_train_dataset(const DatasetPtr& base) const;
 
     void
-    train_codes_with_dataset(const DatasetPtr& train_data);
+    train_codes_with_dataset(const DatasetPtr& train_data, const DatasetPtr& full_data = nullptr);
 
     struct AddContext {
         bool first_empty_add{false};
@@ -905,6 +905,8 @@ private:
     Vector<GraphInterfacePtr> route_graphs_;   // upper-layer route graphs
     GraphInterfacePtr bottom_graph_{nullptr};  // base-level graph (all vectors)
     std::shared_ptr<HGraphRaBitQFusedDataCell> rabitq_fused_datacell_{nullptr};
+    uint32_t rabitq_fused_cluster_count_{16};
+    uint32_t rabitq_fused_kmeans_iterations_{25};
     std::shared_ptr<RaBitQSplitDataCellInterface> rabitq_split_codes_{nullptr};
     std::shared_ptr<HGraphRaBitQSearcher> rabitq_fused_searcher_{nullptr};
     SparseGraphDatacellParamPtr hierarchical_datacell_param_{nullptr};  // params for route graphs

@@ -24,6 +24,7 @@
 #include "attr/executor/executor.h"
 #include "datacell/rabitq_split_datacell.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/query_computer_pool.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "index_common_param.h"
 #include "simd/rabitq_simd.h"
@@ -284,10 +285,7 @@ public:
             IsFiniteRaBitQValue(runtime_error_rate) and runtime_error_rate > 0.0F
                 ? runtime_error_rate
                 : query.default_rabitq_error_rate;
-        const auto count = std::min<uint32_t>(query.cluster_count, K_FUSED_CLUSTER_COUNT);
-        for (uint32_t i = 0; i < count; ++i) {
-            scaled_cluster_g_error_[i] = error_rate * query.cluster_g_error[i];
-        }
+        error_rate_scale_ = error_rate;
     }
 
     [[nodiscard]] bool
@@ -295,10 +293,10 @@ public:
              float* distance,
              float* lower_bound,
              float* filter_inner_product) const {
-        if (node.cluster_id >= query_.cluster_count or
-            node.cluster_id >= scaled_cluster_g_error_.size()) {
+        if (node.cluster_id >= query_.cluster_count) {
             return false;
         }
+        query_.EnsureCluster(node.cluster_id);
         if constexpr (filter_bits == 1) {
             *filter_inner_product = AffineFilterIP<1>::Approximate(query_, node.one_bit_code);
         } else {
@@ -309,7 +307,8 @@ public:
         *distance = filter_metadata.add + query_.cluster_g_add[node.cluster_id] +
                     filter_metadata.rescale * *filter_inner_product;
         const float raw_lower_bound =
-            *distance - filter_metadata.error * scaled_cluster_g_error_[node.cluster_id];
+            *distance -
+            filter_metadata.error * (error_rate_scale_ * query_.cluster_g_error[node.cluster_id]);
         *lower_bound = raw_lower_bound - 1e-5F * std::max(1.0F, std::fabs(raw_lower_bound));
         return IsFiniteRaBitQValue(*distance) and IsFiniteRaBitQValue(*lower_bound) and
                IsFiniteRaBitQValue(*filter_inner_product);
@@ -337,17 +336,19 @@ public:
                                                      filter_inner_products);
         }
         for (uint32_t i = 0; i < 4; ++i) {
-            valid[i] = nodes[i].cluster_id < query_.cluster_count and
-                       nodes[i].cluster_id < scaled_cluster_g_error_.size();
+            valid[i] = nodes[i].cluster_id < query_.cluster_count;
             if (not valid[i]) {
                 continue;
             }
+            query_.EnsureCluster(nodes[i].cluster_id);
             const auto* metadata = nodes[i].one_bit_code + query_.one_bit_metadata_offset;
             const auto filter_metadata = read_filter_metadata(metadata);
             distances[i] = filter_metadata.add + query_.cluster_g_add[nodes[i].cluster_id] +
                            filter_metadata.rescale * filter_inner_products[i];
             const float raw_lower_bound =
-                distances[i] - filter_metadata.error * scaled_cluster_g_error_[nodes[i].cluster_id];
+                distances[i] -
+                filter_metadata.error *
+                    (error_rate_scale_ * query_.cluster_g_error[nodes[i].cluster_id]);
             lower_bounds[i] = raw_lower_bound - 1e-5F * std::max(1.0F, std::fabs(raw_lower_bound));
             valid[i] = IsFiniteRaBitQValue(distances[i]) and
                        IsFiniteRaBitQValue(lower_bounds[i]) and
@@ -378,9 +379,8 @@ public:
 
     [[nodiscard]] bool
     HasValidFilterDistance(const HGraphRaBitQFusedDataCell::CodeView& node, float distance) const {
-        return node.cluster_id < query_.cluster_count and
-               node.cluster_id < scaled_cluster_g_error_.size() and
-               IsFiniteRaBitQValue(distance) and distance < std::numeric_limits<float>::max();
+        return node.cluster_id < query_.cluster_count and IsFiniteRaBitQValue(distance) and
+               distance < std::numeric_limits<float>::max();
     }
 
 private:
@@ -392,6 +392,7 @@ private:
             not IsFiniteRaBitQValue(exact_filter_inner_product)) {
             return false;
         }
+        query_.EnsureCluster(node.cluster_id);
         const float supplement_ip = RaBitQFloatSupplementCodeIP(
             query_.transformed_query, node.supplement_code, query_.dim, query_.supplement_bits);
         const auto* metadata = node.supplement_code + query_.supplement_metadata_offset;
@@ -408,7 +409,7 @@ private:
 
 private:
     const RaBitQFusedTraversalQuery& query_;
-    std::array<float, K_FUSED_CLUSTER_COUNT> scaled_cluster_g_error_{};
+    float error_rate_scale_{1.0F};
 };
 
 class LegacyOneBitScorer {
@@ -423,10 +424,7 @@ public:
                 : query.default_rabitq_error_rate;
         const float error_rate_scale =
             error_rate / RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE;
-        const auto count = std::min<uint32_t>(query.cluster_count, K_FUSED_CLUSTER_COUNT);
-        for (uint32_t i = 0; i < count; ++i) {
-            scaled_cluster_g_error_[i] = error_rate_scale * query.cluster_g_error[i];
-        }
+        error_rate_scale_ = error_rate_scale;
     }
 
     [[nodiscard]] bool
@@ -434,10 +432,10 @@ public:
              float* distance,
              float* lower_bound,
              float* filter_inner_product) const {
-        if (node.cluster_id >= query_.cluster_count or
-            node.cluster_id >= scaled_cluster_g_error_.size()) {
+        if (node.cluster_id >= query_.cluster_count) {
             return false;
         }
+        query_.EnsureCluster(node.cluster_id);
         const uint64_t packed =
             RaBitQSQ4UBinaryIPWithBaseSum(query_.query_planes, node.one_bit_code, query_.dim);
         const auto raw_ip = static_cast<uint32_t>(packed);
@@ -450,7 +448,8 @@ public:
         *distance = filter_metadata.add + query_.cluster_g_add[node.cluster_id] +
                     filter_metadata.rescale * *filter_inner_product;
         const float raw_lower_bound =
-            *distance - filter_metadata.error * scaled_cluster_g_error_[node.cluster_id];
+            *distance -
+            filter_metadata.error * (error_rate_scale_ * query_.cluster_g_error[node.cluster_id]);
         *lower_bound = raw_lower_bound - 1e-5F * std::max(1.0F, std::fabs(raw_lower_bound));
         return IsFiniteRaBitQValue(*distance) and IsFiniteRaBitQValue(*lower_bound) and
                IsFiniteRaBitQValue(*filter_inner_product);
@@ -469,17 +468,19 @@ public:
                                              nodes[3].one_bit_code,
                                              filter_inner_products);
         for (uint32_t i = 0; i < 4; ++i) {
-            valid[i] = nodes[i].cluster_id < query_.cluster_count and
-                       nodes[i].cluster_id < scaled_cluster_g_error_.size();
+            valid[i] = nodes[i].cluster_id < query_.cluster_count;
             if (not valid[i]) {
                 continue;
             }
+            query_.EnsureCluster(nodes[i].cluster_id);
             const auto* metadata = nodes[i].one_bit_code + query_.one_bit_metadata_offset;
             const auto filter_metadata = read_filter_metadata(metadata);
             distances[i] = filter_metadata.add + query_.cluster_g_add[nodes[i].cluster_id] +
                            filter_metadata.rescale * filter_inner_products[i];
             const float raw_lower_bound =
-                distances[i] - filter_metadata.error * scaled_cluster_g_error_[nodes[i].cluster_id];
+                distances[i] -
+                filter_metadata.error *
+                    (error_rate_scale_ * query_.cluster_g_error[nodes[i].cluster_id]);
             lower_bounds[i] = raw_lower_bound - 1e-5F * std::max(1.0F, std::fabs(raw_lower_bound));
             valid[i] = IsFiniteRaBitQValue(distances[i]) and
                        IsFiniteRaBitQValue(lower_bounds[i]) and
@@ -499,6 +500,7 @@ public:
         if (node.cluster_id >= query_.cluster_count) {
             return false;
         }
+        query_.EnsureCluster(node.cluster_id);
         const float exact_centered_ip = AffineFilterIP<1>::Exact(query_, node.one_bit_code);
         const float supplement_ip =
             query_.supplement_bits == 7 and (query_.dim & 63U) == 0U
@@ -519,14 +521,13 @@ public:
 
     [[nodiscard]] bool
     HasValidFilterDistance(const HGraphRaBitQFusedDataCell::CodeView& node, float distance) const {
-        return node.cluster_id < query_.cluster_count and
-               node.cluster_id < scaled_cluster_g_error_.size() and
-               IsFiniteRaBitQValue(distance) and distance < std::numeric_limits<float>::max();
+        return node.cluster_id < query_.cluster_count and IsFiniteRaBitQValue(distance) and
+               distance < std::numeric_limits<float>::max();
     }
 
 private:
     const RaBitQFusedTraversalQuery& query_;
-    std::array<float, K_FUSED_CLUSTER_COUNT> scaled_cluster_g_error_{};
+    float error_rate_scale_{1.0F};
 };
 
 class SearchBuffer {
@@ -1290,7 +1291,10 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
     const uint64_t deferred_rerank_count = std::max<uint64_t>(search_param.ef, 2 * rerank_topk);
     auto computer = search_param.rabitq_fused_computer != nullptr
                         ? search_param.rabitq_fused_computer
-                        : split_codes->FactoryFusedComputer(query);
+                        : (ctx != nullptr and ctx->computer_pool != nullptr and
+                                   split_codes->UsesExternalFusedCodeStorage()
+                               ? AcquireQueryComputer(flatten, query, ctx).computer
+                               : split_codes->FactoryFusedComputer(query));
     if (computer == nullptr) {
         return nullptr;
     }
@@ -1382,6 +1386,7 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
         if (search_param.enable_rabitq_one_bit_search) {
             ++rabitq_filter_count;
             if (has_direct_traversal_query and node.cluster_id < traversal_query.cluster_count) {
+                traversal_query.EnsureCluster(node.cluster_id);
                 const uint64_t packed_ip = RaBitQSQ4UBinaryIPWithBaseSum(
                     traversal_query.query_planes, node.one_bit_code, traversal_query.dim);
                 const auto raw_ip = static_cast<uint32_t>(packed_ip);

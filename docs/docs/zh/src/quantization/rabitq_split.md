@@ -46,6 +46,8 @@ RaBitQ x+y split 是 HGraph 和 Pyramid 面向低比特底库码的存储与搜�
 | `rabitq_error_rate` | lower-bound 误差项的默认正数倍率。 |
 | `use_reorder` | 建议设为 `true`，使用 `x+y` 距离排序候选。 |
 | `rabitq_fused_datacell` | 仅用于 HGraph；启用融合布局，默认值为 `false`。 |
+| `rabitq_fused_cluster_count` | fused 残差中心数，默认 `16`；支持 `[1, min(N, INT32_MAX)]` 内任意整数，N 为初次训练的数据量，不要求 2 的幂。 |
+| `rabitq_fused_kmeans_iterations` | 全量精确 KMeans 迭代次数，默认 `25`；支持不超过 `INT32_MAX` 的正整数。 |
 | `train_sample_count` | HGraph 最大训练采样数，默认值为 `65536`；显式配置时最小为 `512`。 |
 
 参数约束为：
@@ -65,12 +67,25 @@ x + y <= 8
 cluster id、label、x-bit code 和 y-bit supplement 会存入同一个 cache-line
 对齐的 record。Pyramid 使用普通 split storage；`rabitq_fused_datacell` 不是
 Pyramid 参数。HGraph 专用搜索循环直接读取该 record，并联合预取图邻居和
-量化码。codec 使用固定随机种子可复现训练的 16 个 residual clusters。
+量化码。codec 使用 `rabitq_fused_cluster_count` 个残差中心。
 
-默认情况下，fused HGraph 最多使用 65,536 个向量训练基础 RaBitQ 量化器和 fused
-KMeans codec。`train_sample_count` 小于数据集大小时，使用固定 seed 的均匀 reservoir
-sampling 选择相应数量的向量。增大该值可能提升 cluster centroid 的质量，但会增加
-构建时间和训练阶段的临时内存；将其设置为不小于数据集大小即可使用全部向量训练。
+fused KMeans 始终使用首次 Build 或 Add 提供的全部向量训练，不受 `train_sample_count` 限制。
+使用固定种子的 KMeans++ 初始化，每轮对所有向量执行 FP32 精确最近中心分配；K 达到或超过
+10,000 时也不会切换近似中心路由或 mini-batch。训练和编码计算量随 N、K 和维度增长；训练
+工作内存为 O(N + K × 维度)，分块不会采样或排除向量。初始数据少于 K 条时报错。后续 Add 和
+UpdateVector 使用固定中心；修改 K 必须重建索引。
+
+KMeans++ 仍逐个选择中心，但对每个新中心的全量距离更新按向量分块提交给训练线程池并行执行。
+权重求和及随机抽样保留原有串行顺序，因此在相同 SIMD 后端、相同种子下，改变线程数不会改变
+初始化结果。小规模输入使用串行距离循环以避免任务调度开销。这仍是全量 KMeans++，没有引入
+采样或近似初始化。
+这里的可复现性仅指初始化，并非整个索引：FHT 旋转使用独立随机种子，多线程构图也可能产生差异。
+
+基础 RaBitQ 量化器仍受 `train_sample_count` 控制，默认最多使用 65,536 条，必要时执行固定
+种子的均匀 reservoir sampling。fused 模型保存共享变换、连续的原始及变换后中心表、中心范数
+平方。串行 fused 查询只准备一次查询变换和编码；Route、Search 和重排共用查询私有缓存，首次访问
+某个中心时才计算该中心的 `g_add` 和 `g_error`。这两项依赖 query，不能在 Build 时计算最终值。
+通用并行搜索的工作线程分别持有查询状态，因此每个工作线程各准备一次，而不是每个中心准备一次。
 
 该选项创建支持增量修改的内存索引。完成 `Build` 或 Deserialize 后，仍支持
 `Add`、mark remove、向量/ID/属性/extra-info 更新、检索（包括过滤、iterator、
@@ -84,7 +99,11 @@ Tune、Clone、ExportModel 和 Build Cache 导入导出仍不支持。`Build` �
 每个 record 以 4-byte 邻居数量开头，随后是纯 `InnerIdType` 邻居 ID；节点不再有
 version，邻居 ID 也不编码 version。之后依次保存 cluster id、对齐后的 external
 label、filter code 和 supplement，record stride 仍向上对齐到 64-byte。存储可以在
-`Build` 以及后续 `Add` 期间按需增长。
+`Build` 以及后续 `Add` 期间按需增长。全量 `Build` 在插入节点前按输入向量数
+一次预留容量；增量 `Add` 在容量不足时按两倍增长，若请求容量更大则按请求增长。
+容量向上对齐到 `2^resize_increase_count_bit` 的倍数（内部 ID 上限处除外），
+避免固定小步长扩容时反复复制整个 fused 存储。预留空间会占用内存，扩容期间
+会暂时同时保留新旧两块存储。非 fused 索引维持原有扩容策略。
 
 优化构建会临时使用 SQ8 scalar code 计算对称的 base-to-base 图距离，构建
 完成后立即释放；最终索引只保留 fused RaBitQ record。构建后的 `Add` 会按需
@@ -99,8 +118,8 @@ label、filter code 和 supplement，record stride 仍向上对齐到 64-byte。
 - 必须关闭 MCI、`deduplicate_storage`、remove metadata、reverse edges 和 force remove。
 - fused 不支持 PCA；请省略 `rabitq_pca_dim` 或将其设为 `0`。
 - 不支持旧版 v0.14 序列化格式。
-- fused slab 使用独立 wire version；当前格式会明确拒绝曾包含 node version 和
-  remove flags 的开发期旧格式，不提供迁移分支。
+- fused graph v3、codec v2 拒绝全部旧 fused 格式，包括固定 16 中心的索引；需要重建。
+  加载时必须配置与文件一致的中心数量。
 
 未启用该参数的索引保持原有布局、行为和序列化格式。
 
@@ -391,7 +410,7 @@ split datacell 按以下顺序序列化：
 x/y bit 数和 query bits。修改编码参数需要重建索引；只调整搜索参数
 `hgraph.rabitq_error_rate` 或 `pyramid.rabitq_error_rate` 不需要。
 
-对于 fused 索引，codec model 随 split datacell 序列化，每个节点的 code 只在
+对于 fused 索引，共享 quantizer 随 split datacell 序列化，聚类 codec model 随 fused graph 序列化，每个节点的 code 只在
 bottom-graph slab 中序列化一次。普通和 streaming 往返都会保留该布局，
 不会再生成一份随节点数增长的 split code 副本。
 

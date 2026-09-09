@@ -28,7 +28,7 @@ namespace {
 constexpr uint64_t K_CACHE_LINE_SIZE = 64;
 constexpr uint64_t K_COUNT_OFFSET = 0;
 constexpr uint64_t K_HEADER_SIZE = sizeof(uint32_t);
-constexpr uint32_t K_SERIALIZATION_VERSION = 2;
+constexpr uint32_t K_SERIALIZATION_VERSION = 3;
 
 struct FusedWireLayout {
     uint64_t record_size{0};
@@ -40,19 +40,6 @@ struct FusedWireLayout {
     uint64_t one_bit_code_size{0};
     uint64_t supplement_code_size{0};
 };
-
-uint64_t
-fused_codec_model_size(int64_t dim) {
-    CHECK_ARGUMENT(dim > 0, "invalid fused RaBitQ dimension");
-    constexpr uint64_t fixed_size = sizeof(uint32_t) + sizeof(uint64_t) + sizeof(uint32_t);
-    constexpr uint64_t bytes_per_dimension =
-        static_cast<uint64_t>(K_FUSED_CLUSTER_COUNT) * sizeof(float);
-    const auto unsigned_dim = static_cast<uint64_t>(dim);
-    CHECK_ARGUMENT(
-        unsigned_dim <= (std::numeric_limits<uint64_t>::max() - fixed_size) / bytes_per_dimension,
-        "fused RaBitQ codec size overflow");
-    return fixed_size + unsigned_dim * bytes_per_dimension;
-}
 
 uint64_t
 remaining_bytes(StreamReader& reader) {
@@ -71,11 +58,14 @@ HGraphRaBitQFusedDataCell::AlignUp(uint64_t value, uint64_t alignment) {
 HGraphRaBitQFusedDataCell::HGraphRaBitQFusedDataCell(const GraphDataCellParamPtr& graph_param,
                                                      uint64_t one_bit_code_size,
                                                      uint64_t supplement_code_size,
-                                                     const IndexCommonParam& common_param)
+                                                     const IndexCommonParam& common_param,
+                                                     uint32_t cluster_count)
     : storage_(common_param.allocator_.get()),
       one_bit_code_size_(one_bit_code_size),
       supplement_code_size_(supplement_code_size),
       dim_(common_param.dim_) {
+    (void)FusedCodecSize(common_param.dim_, cluster_count);
+    cluster_count_ = cluster_count;
     CHECK_ARGUMENT(graph_param != nullptr, "fused graph parameter must not be null");
     CHECK_ARGUMENT(graph_param->max_degree_ <= std::numeric_limits<uint32_t>::max(),
                    "fused graph maximum degree exceeds uint32 range");
@@ -398,7 +388,7 @@ HGraphRaBitQFusedDataCell::Deserialize(StreamReader& reader) {
     uint64_t codec_model_size = 0;
     StreamReader::ReadObj(reader, codec_model_size);
     if (codec_model_size != 0) {
-        CHECK_ARGUMENT(codec_model_size == fused_codec_model_size(dim_),
+        CHECK_ARGUMENT(codec_model_size == FusedCodecSize(dim_, cluster_count_),
                        "invalid fused RaBitQ codec payload size");
     }
     auto available_bytes = remaining_bytes(reader);
