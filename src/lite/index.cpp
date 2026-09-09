@@ -238,7 +238,7 @@ Index::Save(std::ostream& output) const {
         write(output, Size());
         write(output, Size() * (8 + 4 * Dim()));
         write(output, 1);  // FP32 squared-L2 representation.
-        for (const auto id : impl_->ids) {
+        for (const auto& id : impl_->ids) {
             write(output, static_cast<uint64_t>(id));
         }
         for (float value : impl_->vectors) {
@@ -290,8 +290,8 @@ Index::Load(std::istream& input) {
         data.slots.reserve(count);
         for (uint64_t slot = 0; slot < count; ++slot) {
             const uint64_t bits = read(input);
-            const int64_t id = bits <= INT64_MAX ? static_cast<int64_t>(bits)
-                                                 : -1 - static_cast<int64_t>(UINT64_MAX - bits);
+            int64_t id;
+            std::memcpy(&id, &bits, sizeof(id));
             if (not data.slots.emplace(id, slot).second) {
                 return failure(ErrorType::INVALID_BINARY, "duplicate snapshot ID");
             }
