@@ -145,7 +145,7 @@ HGraph::train_codes_with_dataset(const DatasetPtr& train_data, const DatasetPtr&
         rabitq_split_codes_->TrainFusedCodec(static_cast<const float*>(get_data(full_data)),
                                              full_data->GetNumElements(),
                                              rabitq_centroid_count_,
-                                             rabitq_fused_kmeans_iterations_);
+                                             kmeans_iterations_);
         rabitq_fused_datacell_->SetCodecModel(rabitq_split_codes_->ExportFusedCodec());
     }
     if (has_precise_reorder()) {

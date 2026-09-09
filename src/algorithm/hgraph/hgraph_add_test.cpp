@@ -902,7 +902,7 @@ TEST_CASE("HGraph fused full KMeans ignores quantizer sampling and shares query 
         "rabitq_use_fht":true, "graph_io_type":"memory_io",
         "max_degree":8, "ef_construction":32, "build_thread_count":2,
         "use_reorder":true, "reorder_source":"base", "rabitq_fused_datacell":true,
-        "rabitq_centroid_count":513, "rabitq_fused_kmeans_iterations":1,
+        "rabitq_centroid_count":513, "kmeans_iterations":1,
         "train_sample_count":512
     })");
     param["graph_type"].SetString(GENERATE("nsw", "odescent"));
@@ -981,7 +981,7 @@ TEST_CASE("HGraph fused Build reserves once and Add grows geometrically",
         "rabitq_use_fht":true, "max_degree":8, "ef_construction":32,
         "build_thread_count":2, "use_reorder":true, "reorder_source":"base",
         "rabitq_fused_datacell":true, "rabitq_centroid_count":2,
-        "rabitq_fused_kmeans_iterations":1, "hgraph_init_capacity":4,
+        "kmeans_iterations":1, "hgraph_init_capacity":4,
         "resize_increase_count_bit":1
     })");
     param["graph_type"].SetString(GENERATE("nsw", "odescent"));

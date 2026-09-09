@@ -48,7 +48,7 @@ The relevant parameters are:
 | `use_reorder` | Should be `true` so candidates are ranked with the `x+y` distance. |
 | `rabitq_fused_datacell` | HGraph only; enables fused graph/code layout. Default: `false`. |
 | `rabitq_centroid_count` | Fused residual centers; default `16`. Any integer in `[1, min(N, INT32_MAX)]`, where N is the initial training dataset size. Not restricted to powers of two. |
-| `rabitq_fused_kmeans_iterations` | Full-data exact KMeans iterations; default `25`, positive integer up to `INT32_MAX`. |
+| `kmeans_iterations` | Full-data exact KMeans iterations; default `25`, positive integer up to `INT32_MAX`. |
 | `train_sample_count` | Maximum HGraph training sample size. The default is `65536`; the minimum explicit value is `512`. |
 
 The constraints are:

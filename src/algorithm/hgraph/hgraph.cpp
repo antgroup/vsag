@@ -110,7 +110,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
 
     if (hgraph_param->rabitq_fused_datacell) {
         rabitq_centroid_count_ = hgraph_param->rabitq_centroid_count;
-        rabitq_fused_kmeans_iterations_ = hgraph_param->rabitq_fused_kmeans_iterations;
+        kmeans_iterations_ = hgraph_param->kmeans_iterations;
         auto split_codes =
             std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(basic_flatten_codes_);
         CHECK_ARGUMENT(split_codes != nullptr,

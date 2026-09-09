@@ -82,13 +82,13 @@ HGraphParameter::FromJson(const JsonType& json) {
                        "rabitq_centroid_count must be in [1, INT32_MAX]");
         rabitq_centroid_count = static_cast<uint32_t>(count);
     }
-    if (json.Contains(HGRAPH_RABITQ_FUSED_KMEANS_ITERATIONS_KEY)) {
-        CHECK_ARGUMENT(json[HGRAPH_RABITQ_FUSED_KMEANS_ITERATIONS_KEY].IsNumberInteger(),
-                       "rabitq_fused_kmeans_iterations must be an integer");
-        const auto iterations = json[HGRAPH_RABITQ_FUSED_KMEANS_ITERATIONS_KEY].GetInt();
+    if (json.Contains(KMEANS_ITERATIONS_KEY)) {
+        CHECK_ARGUMENT(json[KMEANS_ITERATIONS_KEY].IsNumberInteger(),
+                       "kmeans_iterations must be an integer");
+        const auto iterations = json[KMEANS_ITERATIONS_KEY].GetInt();
         CHECK_ARGUMENT(iterations > 0 and iterations <= std::numeric_limits<int32_t>::max(),
-                       "rabitq_fused_kmeans_iterations must be in [1, INT32_MAX]");
-        rabitq_fused_kmeans_iterations = static_cast<uint32_t>(iterations);
+                       "kmeans_iterations must be in [1, INT32_MAX]");
+        kmeans_iterations = static_cast<uint32_t>(iterations);
     }
 
     CHECK_ARGUMENT(json.Contains(BASE_CODES_KEY),
@@ -303,7 +303,7 @@ HGraphParameter::ToJson() const {
     json[HGRAPH_IGNORE_REORDER_KEY].SetBool(this->ignore_reorder);
     json[HGRAPH_RABITQ_FUSED_DATACELL_KEY].SetBool(this->rabitq_fused_datacell);
     json[RABITQ_CENTROID_COUNT_KEY].SetUint64(rabitq_centroid_count);
-    json[HGRAPH_RABITQ_FUSED_KMEANS_ITERATIONS_KEY].SetUint64(rabitq_fused_kmeans_iterations);
+    json[KMEANS_ITERATIONS_KEY].SetUint64(kmeans_iterations);
     json[REORDER_SOURCE_KEY].SetString(this->reorder_source);
     json[BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
     json[GRAPH_KEY].SetJson(this->bottom_graph_param->ToJson());

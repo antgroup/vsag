@@ -906,7 +906,7 @@ private:
     GraphInterfacePtr bottom_graph_{nullptr};  // base-level graph (all vectors)
     std::shared_ptr<HGraphRaBitQFusedDataCell> rabitq_fused_datacell_{nullptr};
     uint32_t rabitq_centroid_count_{16};
-    uint32_t rabitq_fused_kmeans_iterations_{25};
+    uint32_t kmeans_iterations_{25};
     std::shared_ptr<RaBitQSplitDataCellInterface> rabitq_split_codes_{nullptr};
     std::shared_ptr<HGraphRaBitQSearcher> rabitq_fused_searcher_{nullptr};
     SparseGraphDatacellParamPtr hierarchical_datacell_param_{nullptr};  // params for route graphs

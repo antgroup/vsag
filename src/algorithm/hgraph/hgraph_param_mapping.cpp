@@ -166,8 +166,8 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             inner_json[HGRAPH_RABITQ_FUSED_DATACELL_KEY].SetJson(value);
         } else if (key == RABITQ_CENTROID_COUNT) {
             inner_json[RABITQ_CENTROID_COUNT_KEY].SetJson(value);
-        } else if (key == HGRAPH_RABITQ_FUSED_KMEANS_ITERATIONS) {
-            inner_json[HGRAPH_RABITQ_FUSED_KMEANS_ITERATIONS_KEY].SetJson(value);
+        } else if (key == KMEANS_ITERATIONS) {
+            inner_json[KMEANS_ITERATIONS_KEY].SetJson(value);
         } else if (key == USE_ATTRIBUTE_FILTER) {
             inner_json[USE_ATTRIBUTE_FILTER_KEY].SetJson(value);
         } else if (key == HGRAPH_BASE_QUANTIZATION_TYPE) {

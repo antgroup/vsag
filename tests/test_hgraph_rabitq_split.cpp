@@ -396,7 +396,7 @@ TEST_CASE("HGraph fused builds and reloads more than ten thousand centers",
     config["max_degree"].SetInt(8);
     config["ef_construction"].SetInt(32);
     config["rabitq_centroid_count"].SetUint64(count);
-    config["rabitq_fused_kmeans_iterations"].SetInt(1);
+    config["kmeans_iterations"].SetInt(1);
     config["train_sample_count"].SetInt(512);
     auto dataset = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, count, "l2");
     auto index = TestIndex::TestFactory("hgraph", param.Dump(), true);

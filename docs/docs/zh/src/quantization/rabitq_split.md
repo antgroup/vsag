@@ -47,7 +47,7 @@ RaBitQ x+y split 是 HGraph 和 Pyramid 面向低比特底库码的存储与搜�
 | `use_reorder` | 建议设为 `true`，使用 `x+y` 距离排序候选。 |
 | `rabitq_fused_datacell` | 仅用于 HGraph；启用融合布局，默认值为 `false`。 |
 | `rabitq_centroid_count` | fused 残差中心数，默认 `16`；支持 `[1, min(N, INT32_MAX)]` 内任意整数，N 为初次训练的数据量，不要求 2 的幂。 |
-| `rabitq_fused_kmeans_iterations` | 全量精确 KMeans 迭代次数，默认 `25`；支持不超过 `INT32_MAX` 的正整数。 |
+| `kmeans_iterations` | 全量精确 KMeans 迭代次数，默认 `25`；支持不超过 `INT32_MAX` 的正整数。 |
 | `train_sample_count` | HGraph 最大训练采样数，默认值为 `65536`；显式配置时最小为 `512`。 |
 
 参数约束为：

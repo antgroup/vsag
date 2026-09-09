@@ -73,7 +73,7 @@ public:
     bool build_by_base{false};
     bool rabitq_fused_datacell{false};
     uint32_t rabitq_centroid_count{16};
-    uint32_t rabitq_fused_kmeans_iterations{25};
+    uint32_t kmeans_iterations{25};
 
     uint64_t ef_construction{400};
     uint64_t resize_increase_count_bit{DEFAULT_RESIZE_INCREASE_COUNT_BIT};
