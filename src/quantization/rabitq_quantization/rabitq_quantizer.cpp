@@ -225,6 +225,20 @@ RaBitQuantizer<metric>::RaBitQuantizer(const QuantizerParamPtr& param,
                              common_param){};
 
 template <MetricType metric>
+void
+RaBitQuantizer<metric>::TrainFusedTransform() {
+    CHECK_ARGUMENT(pca_dim_ == original_dim_, "fused transform training does not support PCA");
+    if (this->is_trained_) {
+        return;
+    }
+    // Both FHT and random orthogonal rotation ignore training vectors. Fused encoding supplies
+    // a per-cluster centroid, so retain a zero placeholder for the ordinary quantizer's mean.
+    rom_->Train(nullptr, 0);
+    centroid_.assign(this->dim_, 0.0F);
+    this->is_trained_ = true;
+}
+
+template <MetricType metric>
 bool
 RaBitQuantizer<metric>::TrainImpl(const float* data, uint64_t count) {
     if (count == 0 or data == nullptr) {

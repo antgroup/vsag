@@ -55,6 +55,69 @@ TEST_CASE("RaBitQ finite guard survives fast math", "[ut][RaBitQuantizer][rabitq
     REQUIRE_FALSE(IsFiniteRaBitQValue(-std::numeric_limits<float>::infinity()));
 }
 
+TEST_CASE("RaBitQ fused transform training skips the global mean",
+          "[ut][RaBitQuantizer][fused_full]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    const bool use_fht = GENERATE(false, true);
+    auto make_quantizer = [&](uint64_t pca_dim = 0) {
+        return RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>(
+            dim,
+            pca_dim,
+            32,
+            8,
+            use_fht,
+            false,
+            allocator.get(),
+            RaBitQuantizerParameter::RABITQ_VERSION_SPLIT);
+    };
+    auto quantizer = make_quantizer();
+    REQUIRE_NOTHROW(quantizer.TrainFusedTransform());
+    REQUIRE(quantizer.CentroidSize() == dim);
+    for (uint64_t d = 0; d < dim; ++d) {
+        REQUIRE(quantizer.CentroidData()[d] == 0.0F);
+    }
+    const auto serialize = [](auto& model) {
+        std::stringstream stream;
+        IOStreamWriter writer(stream);
+        model.Serialize(writer);
+        return stream.str();
+    };
+    const auto before = serialize(quantizer);
+    REQUIRE_NOTHROW(quantizer.TrainFusedTransform());
+    // The initialized state must also prevent ordinary Train from replacing the rotation/mean.
+    std::vector<float> data(dim, 10.0F);
+    REQUIRE(quantizer.TrainImpl(data.data(), 1));
+    REQUIRE(serialize(quantizer) == before);
+
+    Vector<float> transformed(dim, allocator.get());
+    float raw_norm = 0.0F;
+    float mrq_norm = 0.0F;
+    quantizer.TransformFusedQuery(data.data(), transformed, raw_norm, mrq_norm);
+    double squared_norm = 0.0;
+    for (const auto value : transformed) {
+        REQUIRE(std::isfinite(value));
+        squared_norm += static_cast<double>(value) * value;
+    }
+    REQUIRE(std::abs(squared_norm - dim * 100.0) < dim * 100.0 * 1e-4);
+    auto restored = make_quantizer();
+    std::stringstream stream(before);
+    IOStreamReader reader(stream);
+    restored.Deserialize(reader);
+    Vector<float> restored_query(dim, allocator.get());
+    restored.TransformFusedQuery(data.data(), restored_query, raw_norm, mrq_norm);
+    REQUIRE(restored_query == transformed);
+
+    // Do not overwrite an already trained ordinary model, or silently skip PCA training.
+    auto ordinary = make_quantizer();
+    REQUIRE(ordinary.TrainImpl(data.data(), 1));
+    const auto ordinary_before = serialize(ordinary);
+    REQUIRE_NOTHROW(ordinary.TrainFusedTransform());
+    REQUIRE(serialize(ordinary) == ordinary_before);
+    auto pca = make_quantizer(dim / 2);
+    REQUIRE_THROWS(pca.TrainFusedTransform());
+}
+
 template <MetricType metric>
 void
 TestRaBitQSplitLayoutCacheRoundTrip(uint64_t pca_dim, bool use_mrq) {

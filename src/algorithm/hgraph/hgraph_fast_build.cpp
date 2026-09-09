@@ -53,6 +53,13 @@ HGraphOptimizedBuildSession::HGraphOptimizedBuildSession(HGraph& hgraph) : hgrap
     if (not build_uses_base_codes) {
         return;
     }
+    if (hgraph.rabitq_fused_datacell_ != nullptr and hgraph.graph_type_ != GRAPH_TYPE_VALUE_NSW and
+        not hgraph.has_precise_reorder() and hgraph.raw_vector_ != nullptr and
+        hgraph.raw_vector_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        // ODescent selects raw FP32 in this configuration. Do not generate unused scalar codes
+        // that depend on the global mean when only cluster-residual fused codes are needed.
+        return;
+    }
 
     auto optimized_build_codes =
         std::dynamic_pointer_cast<FlattenOptimizedBuildInterface>(hgraph.basic_flatten_codes_);

@@ -81,8 +81,14 @@ KMeans++ 仍逐个选择中心，但对每个新中心的全量距离更新按�
 采样或近似初始化。
 这里的可复现性仅指初始化，并非整个索引：FHT 旋转使用独立随机种子，多线程构图也可能产生差异。
 
-基础 RaBitQ 量化器仍受 `train_sample_count` 控制，默认最多使用 65,536 条，必要时执行固定
-种子的均匀 reservoir sampling。fused 模型保存共享变换、连续的原始及变换后中心表、中心范数
+基础 RaBitQ 量化器通常受 `train_sample_count` 控制，默认最多使用 65,536 条，必要时执行固定
+种子的均匀 reservoir sampling。当 fused ODescent 实际使用 FP32 距离构图时（当前为
+`store_raw_vector=true` 的路径），跳过这部分采样和全局均值训练，也不生成未参与构图的临时
+scalar RaBitQ 码，只初始化 fused 编码所需的
+数据无关旋转变换；全量 KMeans 仍照常执行。仅保存 raw vectors 不会让 NSW 自动改为 FP32
+构图，其训练行为保持不变。此优化不改变构图数据的选择，也不改变 raw vectors 的保存或加载策略。
+
+fused 模型保存共享变换、连续的原始及变换后中心表、中心范数
 平方。串行 fused 查询只准备一次查询变换和编码；Route、Search 和重排共用查询私有缓存，首次访问
 某个中心时才计算该中心的 `g_add` 和 `g_error`。这两项依赖 query，不能在 Build 时计算最终值。
 通用并行搜索的工作线程分别持有查询状态，因此每个工作线程各准备一次，而不是每个中心准备一次。

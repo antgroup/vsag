@@ -64,9 +64,13 @@ TEST_CASE("RaBitQ split interface queries with filter IP hints", "[ut][RaBitQSpl
     auto vectors = fixtures::generate_vectors(train_count, dim, false, 31);
     auto query = fixtures::generate_vectors(1, dim, false, 71);
     auto flatten = FlattenInterface::MakeInstance(param, common_param);
-    flatten->Train(vectors.data(), train_count);
     auto split = std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(flatten);
     REQUIRE(split != nullptr);
+    if (GENERATE(false, true)) {
+        REQUIRE_NOTHROW(split->TrainFusedTransform());
+    } else {
+        flatten->Train(vectors.data(), train_count);
+    }
     split->TrainFusedCodec(vectors.data(), train_count, cluster_count);
 
     auto graph_param = std::make_shared<GraphDataCellParameter>();

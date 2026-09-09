@@ -153,6 +153,9 @@ public:
                 QueryContext* ctx) const = 0;
 
     virtual void
+    TrainFusedTransform() = 0;
+
+    virtual void
     TrainFusedCodec(const float* data,
                     uint64_t count,
                     uint32_t cluster_count,
@@ -1189,6 +1192,11 @@ public:
         this->add_full_count(ctx, 1);
         return this->bottom_quantizer().ComputeDistWithSplitCode(
             *comp, one_bit_code, supplement_code, distance);
+    }
+
+    void
+    TrainFusedTransform() override {
+        this->bottom_quantizer().TrainFusedTransform();
     }
 
     void

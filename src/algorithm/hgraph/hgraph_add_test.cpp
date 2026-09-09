@@ -906,12 +906,21 @@ TEST_CASE("HGraph fused full KMeans ignores quantizer sampling and shares query 
         "train_sample_count":512
     })");
     param["graph_type"].SetString(GENERATE("nsw", "odescent"));
+    param["store_raw_vector"].SetBool(GENERATE(false, true));
     const bool build = GENERATE(true, false);
-    CAPTURE(param["graph_type"].GetString(), build);
+    CAPTURE(param["graph_type"].GetString(), param["store_raw_vector"].GetBool(), build);
     const auto populate = [build](const auto& target, const auto& dataset) {
         return build ? target->Build(dataset) : target->Add(dataset);
     };
     auto index = MakeHGraphIndex(param, common);
+    if (build) {
+        auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
+        REQUIRE(hgraph != nullptr);
+        vsag::HGraphOptimizedBuildSession session(*hgraph);
+        const bool fp32_graph =
+            param["graph_type"].GetString() == "odescent" and param["store_raw_vector"].GetBool();
+        REQUIRE(session.Active() == not fp32_graph);
+    }
     std::vector<float> data(count * dim);
     std::vector<int64_t> ids(count);
     for (int64_t row = 0; row < count; ++row) {

@@ -137,6 +137,10 @@ public:
     bool
     TrainImpl(const float* data, uint64_t count);
 
+    // Initialize data-independent transforms for fused residual codes without learning a mean.
+    void
+    TrainFusedTransform();
+
     void
     SetCentroid(const float* centroid);
 

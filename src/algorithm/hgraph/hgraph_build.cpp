@@ -258,10 +258,23 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
                                        this->allocator_);
         temporary_sq8_build_data->Train(vectors, total);
     }
+    auto build_data = (has_precise_reorder() and not build_by_base_) ? this->high_precise_codes_
+                                                                     : this->basic_flatten_codes_;
+    if (need_sq8_build_data) {
+        build_data = raw_vector_ != nullptr ? raw_vector_ : temporary_sq8_build_data;
+    }
     bool defer_persistent_codes = temporary_sq8_build_data != nullptr;
     if (not defer_persistent_codes or this->rabitq_fused_datacell_ != nullptr) {
         this->validate_fused_training_data(data);
-        this->train_codes_with_dataset(this->sample_train_dataset(data));
+        if (this->rabitq_fused_datacell_ != nullptr and
+            build_data->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+            // FP32 graph distances do not use the base quantizer's global mean. Avoid sampling
+            // and mean training, but initialize the rotation before preparing fused centers.
+            this->rabitq_split_codes_->TrainFusedTransform();
+            build_data->Train(vectors, total);
+        } else {
+            this->train_codes_with_dataset(this->sample_train_dataset(data));
+        }
         this->train_fused_codec(data);
     }
     this->validate_fused_encoding_data(static_cast<const float*>(vectors),
@@ -299,11 +312,6 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
                 route_graph_ids[j].emplace_back(inner_id);
             }
         }
-    }
-    auto build_data = (has_precise_reorder() and not build_by_base_) ? this->high_precise_codes_
-                                                                     : this->basic_flatten_codes_;
-    if (need_sq8_build_data) {
-        build_data = raw_vector_ != nullptr ? raw_vector_ : temporary_sq8_build_data;
     }
     {
         odescent_param_->max_degree = bottom_graph_->MaximumDegree();

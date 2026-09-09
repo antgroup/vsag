@@ -88,8 +88,16 @@ full-data KMeans++, not sampled or approximate initialization.
 This reproducibility applies to initialization, not the complete index: the FHT
 rotator uses its own random seed, and multithreaded graph construction can also vary.
 
-The base RaBitQ quantizer still uses `train_sample_count` (default 65,536), with fixed-seed uniform
-reservoir sampling when necessary. The fused codec stores shared transforms, contiguous original
+The base RaBitQ quantizer normally uses `train_sample_count` (default 65,536), with fixed-seed uniform
+reservoir sampling when necessary. When fused ODescent construction actually uses FP32 graph
+distances (currently with `store_raw_vector=true`), it skips this sampling and global-mean
+training and does not generate unused temporary scalar RaBitQ graph codes, initializing only
+the data-independent rotation needed by fused codes. Full-data
+KMeans still runs. Merely storing raw vectors does not select FP32 construction for NSW, whose
+existing training behavior is unchanged. This optimization does not change graph-data selection
+or raw-vector storage/load policy.
+
+The fused codec stores shared transforms, contiguous original
 and transformed center tables, and squared center norms. Each query prepares its transform and
 query encoding once on the serial fused path. Routing, traversal, and reranking share a query-local cache which computes
 `g_add` and `g_error` only on the first visit to each center; these terms depend on the query and
