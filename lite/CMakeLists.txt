@@ -9,17 +9,24 @@ get_filename_component(VSAG_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 option(ENABLE_TESTS "Build Lite tests with the repository's Catch2" OFF)
 option(ENABLE_COVERAGE "Instrument Lite sources for gcov" OFF)
 
-add_library(vsag_lite SHARED "${VSAG_ROOT}/src/lite/index.cpp")
+set(VSAG_LITE_SOURCES "${VSAG_ROOT}/src/lite/index.cpp")
+add_library(vsag_lite_objects OBJECT ${VSAG_LITE_SOURCES})
+add_library(vsag_lite SHARED $<TARGET_OBJECTS:vsag_lite_objects>)
+add_library(vsag_lite_static STATIC $<TARGET_OBJECTS:vsag_lite_objects>)
 add_library(vsag::lite ALIAS vsag_lite)
+set_target_properties(vsag_lite_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(vsag_lite PROPERTIES OUTPUT_NAME vsag-lite EXPORT_NAME lite)
-target_compile_features(vsag_lite PUBLIC cxx_std_17)
-target_include_directories(vsag_lite PUBLIC
-    $<BUILD_INTERFACE:${VSAG_ROOT}/include>
-    $<INSTALL_INTERFACE:include>
-    PRIVATE "${VSAG_ROOT}/src")
-target_compile_options(vsag_lite PRIVATE -Wall -Wextra -Wpedantic)
+set_target_properties(vsag_lite_static PROPERTIES OUTPUT_NAME vsag-lite)
+foreach(target vsag_lite_objects vsag_lite vsag_lite_static)
+    target_compile_features(${target} PUBLIC cxx_std_17)
+    target_include_directories(${target} PUBLIC
+        $<BUILD_INTERFACE:${VSAG_ROOT}/include>
+        $<INSTALL_INTERFACE:include>
+        PRIVATE "${VSAG_ROOT}/src")
+endforeach()
+target_compile_options(vsag_lite_objects PRIVATE -Wall -Wextra -Wpedantic)
 if(ENABLE_COVERAGE)
-    target_compile_options(vsag_lite PRIVATE --coverage -O0 -g)
+    target_compile_options(vsag_lite_objects PRIVATE --coverage -O0 -g)
     target_link_options(vsag_lite PRIVATE --coverage)
 endif()
 
@@ -33,6 +40,7 @@ endif()
 include(GNUInstallDirs)
 install(TARGETS vsag_lite EXPORT vsag-lite-config
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(TARGETS vsag_lite_static ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(FILES "${VSAG_ROOT}/include/vsag/lite/index.h" DESTINATION include/vsag/lite)
 # Header-only error contract dependencies; no Full runtime is linked.
 install(FILES
