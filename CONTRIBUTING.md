@@ -143,6 +143,11 @@ $ bash scripts/coverage/check_cov.sh
 
 This matches the CI source population: maintained production code under `src/` and public headers under `include/`, excluding the generated `src/version.h` and vendored `include/vsag/expected.hpp`. The collector retains branch records and writes normalized repository-relative paths to `coverage/coverage.info`.
 
+SIMD pull requests also receive a bounded pre-merge comparison against the PR base: measured
+patch lines must reach 80%, and SIMD-scoped line coverage must not regress. This partial-suite
+result is separate from full-project coverage; other C++ areas are not yet protected by it.
+See the [testing guide](docs/docs/en/src/development/testing.md#pre-merge-simd-stage) for details.
+
 ## Pull Request Labels
 
 Every pull request **must** have the following two labels before it can be merged:
