@@ -30,13 +30,7 @@ public:
                  const ExprPtr& expression,
                  const AttrInvertedInterfacePtr& attr_index);
 
-    Executor(Allocator* allocator,
-             const ExprPtr& expression,
-             const AttrInvertedInterfacePtr& attr_index)
-        : expr_(expression),
-          attr_index_(attr_index),
-          allocator_(allocator),
-          bitset_type_(attr_index->GetBitsetType()){};
+    Executor(Allocator* allocator, ExprPtr expression, const AttrInvertedInterfacePtr& attr_index);
 
     virtual ~Executor() {
         if (this->own_bitset_) {

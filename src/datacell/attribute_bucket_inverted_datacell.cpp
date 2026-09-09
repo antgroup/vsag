@@ -14,6 +14,8 @@
 // limitations under the License.
 
 #include "attribute_bucket_inverted_datacell.h"
+
+#include <unordered_map>
 namespace vsag {
 
 template <class T>
@@ -231,6 +233,27 @@ AttributeBucketInvertedDataCell::UpdateBitsetsByAttr(const AttributeSet& attribu
                                                      const BucketIdType bucket_id,
                                                      const AttributeSet& origin_attributes) {
     std::lock_guard lock(this->global_mutex_);
+    // Validate both sets before erasing postings, so type errors leave the index unchanged.
+    std::unordered_map<std::string, AttrValueType> incoming_types;
+    for (const auto* attr : attributes.attrs_) {
+        const auto& name = attr->name_;
+        const auto type = attr->GetValueType();
+        auto [iter, inserted] = incoming_types.emplace(name, type);
+        if ((!inserted && iter->second != type) ||
+            (field_2_value_map_.find(name) != field_2_value_map_.end() &&
+             field_type_map_.GetTypeOfField(name) != type)) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Attribute field type mismatch: " + name);
+        }
+    }
+    for (const auto* attr : origin_attributes.attrs_) {
+        const auto& name = attr->name_;
+        if (field_2_value_map_.find(name) == field_2_value_map_.end() ||
+            field_type_map_.GetTypeOfField(name) != attr->GetValueType()) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Invalid original attribute field: " + name);
+        }
+    }
     for (const auto* attr : origin_attributes.attrs_) {
         const auto& name = attr->name_;
         auto& value_map = this->field_2_value_map_[name];
@@ -239,7 +262,15 @@ AttributeBucketInvertedDataCell::UpdateBitsetsByAttr(const AttributeSet& attribu
 
     for (const auto* attr : attributes.attrs_) {
         const auto& name = attr->name_;
-        auto& value_map = this->field_2_value_map_[name];
+        auto iter = field_2_value_map_.find(name);
+        if (iter == field_2_value_map_.end()) {
+            iter =
+                field_2_value_map_
+                    .emplace(name, std::make_shared<AttrValueMap>(allocator_, this->bitset_type_))
+                    .first;
+            this->field_type_map_.SetTypeOfField(name, attr->GetValueType());
+        }
+        auto& value_map = iter.value();
         insert_by_type(value_map, attr, offset_id, bucket_id);
     }
 }

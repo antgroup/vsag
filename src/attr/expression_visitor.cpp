@@ -119,7 +119,7 @@ string_view_split(std::string_view str, char delim) {
     result.emplace_back(str.substr(start));
     return result;
 }
-FCExpressionVisitor::FCExpressionVisitor(AttrTypeSchema* schema) : schema_(schema){};
+FCExpressionVisitor::FCExpressionVisitor(const AttrTypeSchema* schema) : schema_(schema){};
 
 std::any
 FCExpressionVisitor::visitFilter_condition(FCParser::Filter_conditionContext* ctx) {
@@ -269,6 +269,45 @@ FCExpressionVisitor::visitArithmeticExpr(FCParser::ArithmeticExprContext* ctx) {
 std::any
 FCExpressionVisitor::visitNumericConst(FCParser::NumericConstContext* ctx) {
     return visit(ctx->numeric());
+}
+
+std::any
+FCExpressionVisitor::visitFunctionExpr(FCParser::FunctionExprContext* ctx) {
+    auto arguments = std::dynamic_pointer_cast<StrListConstant>(
+        std::any_cast<ExprPtr>(visit(ctx->arg_pipe_list())));
+    auto types = std::dynamic_pointer_cast<StrListConstant>(
+        std::any_cast<ExprPtr>(visit(ctx->str_pipe_list())));
+    if (arguments == nullptr || types == nullptr) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid FUNCTION arguments");
+    }
+    try {
+        return std::make_any<ExprPtr>(std::make_shared<FunctionExpression>(
+            ctx->function_name()->getText(), arguments->values, types->values));
+    } catch (const std::exception& error) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, error.what());
+    }
+}
+
+std::any
+FCExpressionVisitor::visitRegionFilterExpr(FCParser::RegionFilterExprContext* ctx) {
+    return std::make_any<ExprPtr>(std::make_shared<RegionFilterExpression>(
+        std::any_cast<ExprPtr>(visit(ctx->field_name(0))),
+        std::any_cast<ExprPtr>(visit(ctx->field_name(1))),
+        std::any_cast<ExprPtr>(visit(ctx->field_name(2))),
+        std::any_cast<ExprPtr>(visit(ctx->int_pipe_list(0))),
+        std::any_cast<ExprPtr>(visit(ctx->int_pipe_list(1))),
+        std::any_cast<ExprPtr>(visit(ctx->int_pipe_list(2)))));
+}
+
+std::any
+FCExpressionVisitor::visitArg_pipe_list(FCParser::Arg_pipe_listContext* ctx) {
+    if (ctx->str_pipe_list() != nullptr) {
+        return visit(ctx->str_pipe_list());
+    }
+    if (ctx->int_pipe_list() != nullptr) {
+        return visitInt_pipe_list(ctx->int_pipe_list(), true);
+    }
+    throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid FUNCTION argument list");
 }
 
 std::any

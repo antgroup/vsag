@@ -22,7 +22,7 @@ AttrTypeSchema::AttrTypeSchema(Allocator* allocator) : allocator_(allocator), sc
 }
 
 AttrValueType
-AttrTypeSchema::GetTypeOfField(const std::string& field_name) {
+AttrTypeSchema::GetTypeOfField(const std::string& field_name) const {
     auto iter = this->schema_.find(field_name);
     if (iter == this->schema_.end()) {
         throw VsagException(ErrorType::INTERNAL_ERROR,

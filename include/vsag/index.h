@@ -43,6 +43,7 @@
 
 namespace vsag {
 
+class AttrTypeSchema;
 class Index;
 using IndexPtr = std::shared_ptr<Index>;
 using IdMapFunction = std::function<std::tuple<bool, int64_t>(int64_t)>;
@@ -857,6 +858,15 @@ public:
     SetImmutable() {
         return tl::unexpected(
             Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support SetImmutable"));
+    }
+
+    /**
+     * @brief Return the attribute schema used by this index.
+     * @return nullptr when attribute filtering is not configured.
+     */
+    [[nodiscard]] virtual const AttrTypeSchema*
+    GetAttrTypeSchema() const {
+        return nullptr;
     }
 
 public:
