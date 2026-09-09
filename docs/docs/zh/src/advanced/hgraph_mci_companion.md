@@ -6,7 +6,7 @@ HGraph 可以选择构建一个 MCI（Maximal Clique Index）挂件，用于带�
 
 完整实现说明、内存分析及 10k/3m 结果见
 [HGraph MCI 增删实现与测试报告](hgraph_mci_mutation.md)。
-代码入口、配置和可执行命令见 [代码、配置与脚本使用指南](hgraph_mci_usage.md)。
+代码入口与配置见 [代码与配置指南](hgraph_mci_usage.md)。
 
 当主要负载是过滤搜索，并且过滤后只保留较小比例的向量时，可以启用这个功能。搜索
 时，HGraph 会比较 `Filter::ValidRatio()` 和阈值，自动选择普通 HGraph 搜索或 MCI
@@ -155,31 +155,6 @@ MCI 挂件会自动恢复。
 最小构建和过滤搜索流程见
 [`examples/cpp/324_feature_hgraph_mci_companion.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/324_feature_hgraph_mci_companion.cpp)。
 
-## 增删性能回归
+## 增删性能结果
 
-仓库提供了针对 HDF5 过滤数据集的五阶段回归程序。
-它依次测量初始全量索引、删除 10%、累计删除 20%、加回 10%
-和全部加回后的 QPS–Recall 曲线：
-
-```bash
-scripts/perf_reports/run_hgraph_mci_mutation.sh
-```
-
-默认数据集为 `/root/data/codefilter-10k-384-angular-f32.hdf5`，结果写入
-`/tmp/vsag_mci_mutation/`。可通过 `MCI_DATASET_PATH`、`MCI_RESULT_DIR` 和
-`MCI_BUILD_DIR` 环境变量调整路径。快速配置使用 200 条查询计算 Recall、
-使用 10000 次检索计算 QPS，并设置 `ef_search=40,80,160`、16 个构建/检索
-线程以及 `mci_mcs=50`。所有值都可以通过命令行覆盖，例如用
-`--query-count 0` 测试全部查询。
-
-增加 `--flush-after-mutation` 可在每个增删阶段后先 flush，再测量搜索。
-CSV 单独记录 `flush_seconds` 和 `mci_raw_float_ratio`，以区分合并时间及快速路径比例。
-增加 `--force-remove` 会启用物理删除支持，并将两次删除改为 FORCE_REMOVE；
-不加此选项仍使用 MARK_REMOVE。CSV 的 `remove_mode` 标明测试模式。
-`vector_memory_bytes`、`graph_memory_bytes` 分别记录基础向量存储和图存储的统计占用。
-
-程序会把 10k HDF5 训练集完整加载到内存，并校验文件中的邻居是否
-符合过滤条件；若不符合，则重新计算精确过滤真值。为了让五个阶段
-使用完全相同的真值，它不会删除参与测试查询 top-k 真值的向量；
-其余向量使用固定随机种子选取，删除和加回集合完全相同。
-若使用 `--max-base`，程序总会在截取的数据子集上重新计算精确过滤真值。
+测试方法与历史结果见[增删测试报告](hgraph_mci_mutation.md)。本 PR 不包含 benchmark 和配套脚本。

@@ -1,5 +1,8 @@
 # HGraph MCI 增删实现与测试报告
 
+> benchmark 源码、脚本及原始结果文件已移出本 PR。下文工具名称、选项和输出仅用于说明
+> 历史实验，不代表当前代码树提供这些工具。
+
 本文记录当前工作树中 MCI 的 ADD、MARK_REMOVE、FORCE_REMOVE、Flush 实现，
 以及 2026-09-07 的 Codefilter 10k、3m 测试结果。
 参数入门见 [HGraph MCI 挂件](hgraph_mci_companion.md)。
@@ -440,28 +443,11 @@ force 开启反向边，初始内存已经不同，应优先比较各自运行�
 在仓库根目录执行。脚本默认构建 Release 的 `mci_mutation_benchmark`；
 已有匹配当前源码的二进制时可设置 `MCI_SKIP_BUILD=1`。
 
-```bash
-MCI_DATASET_PATH=/root/data/codefilter-3m-384-angular-f32.hdf5 \
-MCI_RESULT_DIR=/tmp/mci-3m-reproduce \
-bash scripts/perf_reports/run_hgraph_mci_mutation.sh \
-    --force-remove --mutation-batch-size 324138 \
-    --query-count 200 --search-count 50000 \
-    --build-threads 16 --search-threads 16 --ef-search-values 40,80,160
-```
 
-```bash
-MCI_DATASET_PATH=/root/data/codefilter-10k-384-angular-f32.hdf5 \
-MCI_RESULT_DIR=/tmp/mci-10k-force-reproduce \
-bash scripts/perf_reports/run_hgraph_mci_mutation.sh \
-    --force-remove --mutation-batch-size 10 --search-count 50000
-```
 
-```bash
-MCI_DATASET_PATH=/root/data/codefilter-10k-384-angular-f32.hdf5 \
-MCI_RESULT_DIR=/tmp/mci-10k-mark-reproduce \
-bash scripts/perf_reports/run_hgraph_mci_mutation.sh \
-    --mutation-batch-size 10 --search-count 50000
-```
+
+
+
 
 上述命令复现基准程序指标；额外 `stage_rss_bytes` 来自进程外部采样，
 不是原 C++ CSV 自动生成的列。
@@ -621,7 +607,7 @@ S4 的 ef=80 召回比 S0 低 1.10 个百分点，ef=160 低 1.35 个百分点�
 | [label_table.cpp][src-label] | label 搬移、删除状态和恢复。 |
 | [hgraph_serialize.cpp][src-serialize] | 持久化恢复及内存分项。 |
 | [memory_block_io.cpp][src-block] | 按完整块分配和缩容。 |
-| [mci_mutation_benchmark.cpp][src-bench] | 数据加载、过滤真值、五阶段检索与 CSV。 |
+| `mci_mutation_benchmark.cpp` | 数据加载、过滤真值、五阶段检索与 CSV。 |
 
 [src-build]: ../../../../../src/algorithm/hgraph/hgraph_build.cpp
 [src-mci]: ../../../../../src/algorithm/hgraph/hgraph_mci.cpp
@@ -632,11 +618,10 @@ S4 的 ef=80 召回比 S0 低 1.10 个百分点，ef=160 低 1.35 个百分点�
 [src-label]: ../../../../../src/impl/label_table/label_table.cpp
 [src-serialize]: ../../../../../src/algorithm/hgraph/hgraph_serialize.cpp
 [src-block]: ../../../../../src/io/memory_block_io/memory_block_io.cpp
-[src-bench]: ../../../../../tools/eval/mci_mutation_benchmark.cpp
 
 ## 13. ADD / Delete 阈值扫描脚本
 
-使用 [sweep_mci_thresholds.py][src-sweep] 扫描已有阈值，不修改索引算法。
+使用 `sweep_mci_thresholds.py` 扫描已有阈值，不修改索引算法。
 默认先在 10k 上做单因素实验（OAT），避免直接在 3m 上运行完整参数网格。
 
 | 扫描参数 | 基线 | 默认候选值 |
@@ -673,12 +658,7 @@ S4 的 ef=80 召回比 S0 低 1.10 个百分点，ef=160 低 1.35 个百分点�
 
 先确保当前源码的二进制已构建，再检查计划并启动：
 
-```bash
-cmake --build build-release --target mci_mutation_benchmark -j 8
-python3 scripts/perf_reports/sweep_mci_thresholds.py --dry-run
-python3 scripts/perf_reports/sweep_mci_thresholds.py \
-    --output-dir /tmp/mci-threshold-oat
-```
+
 
 脚本不自动构建；会检查二进制是否支持新的阈值参数。
 省略输出目录时自动创建独立临时目录，不覆盖已有非空目录。
@@ -686,19 +666,11 @@ python3 scripts/perf_reports/sweep_mci_thresholds.py \
 
 仅对比删除团大小阈值 3/4/5/6，固定其他参数（4 组、12 次运行）：
 
-```bash
-python3 scripts/perf_reports/sweep_mci_thresholds.py \
-    --only baseline,delete_size-4,delete_size-5,delete_size-6 \
-    --output-dir /tmp/mci-threshold-delete-step1
-```
+
 
 完成单因素实验后，显式指定候选范围进行组合实验：
 
-```bash
-python3 scripts/perf_reports/sweep_mci_thresholds.py --design grid \
-    --join-ratios 0.6,0.8 --added-mcts 3,6 --clique-maxes 50 \
-    --delete-sizes 4,5,6 --delete-mcts 3,5 --dry-run
-```
+
 
 网格之外仍保留原始基线并去重；上述例子为 25 组、75 次运行，也会超过默认运行上限。
 完整默认网格是 324 组、972 次运行，会超过默认 `--max-runs=64` 而被拒绝。
@@ -706,13 +678,7 @@ python3 scripts/perf_reports/sweep_mci_thresholds.py --design grid \
 
 3m 应只验证少量入选配置，并指定整批修改和更长超时，例如：
 
-```bash
-python3 scripts/perf_reports/sweep_mci_thresholds.py \
-    --dataset /root/data/codefilter-3m-384-angular-f32.hdf5 \
-    --only baseline,added_mct-6 --repeats 1 --build-threads 16 \
-    --mutation-batch-size 324138 --timeout 7200 \
-    --target-recalls 0.85,0.90,0.92 --output-dir /tmp/mci-threshold-3m
-```
+
 
 这只是复现入口，不表示已经完成该 3m 阈值对照。
 `--only` 中的名称来自 `--dry-run`；默认模式为 FORCE_REMOVE，
@@ -744,25 +710,19 @@ MCI 的 hops 在这里表示访问团数，不是最短路径长度。
 参数回显及测量完整性；不满足条件的运行不混入汇总。
 中断后使用完全相同的参数加 `--resume` 续跑：
 
-```bash
-python3 scripts/perf_reports/sweep_mci_thresholds.py \
-    --output-dir /tmp/mci-threshold-oat --resume
-```
+
 
 只跳过通过验证且有完成标记的运行；未完成尝试保留并在新 attempt 目录重试。
 参数、数据身份或二进制指纹变化时拒绝续跑，防止混合不同实验。
 
 脚本测试：
 
-```bash
-python3 -m unittest discover -s scripts/perf_reports -p 'test_sweep_mci_thresholds.py' -v
-```
 
-[src-sweep]: ../../../../../scripts/perf_reports/sweep_mci_thresholds.py
+
 
 ## 14. 80 万初始点的随机增删压测
 
-[run_mci_stress.py][src-stress] 使用独立的 stress 模式，不沿用五阶段实验的真值保护规则。
+`run_mci_stress.py` 使用独立的 stress 模式，不沿用五阶段实验的真值保护规则。
 完整 3m 数据集含 3,241,378 条向量，默认从中无放回随机选 800,000 条全量构建索引。
 每轮再从完整数据池无放回抽取 `round(3,241,378 / 14) = 231,527` 个 ID：
 
@@ -776,13 +736,7 @@ python3 -m unittest discover -s scripts/perf_reports -p 'test_sweep_mci_threshol
 构建和检索各 16 线程，固定前 200 条查询，ef=40/80/160/320，
 每个 ef 计时 10,000 次检索。增删批大小为每轮抽样量，不逐点调用公共接口。
 
-```bash
-cmake --build build-release --target mci_mutation_benchmark -j 8
-python3 scripts/perf_reports/run_mci_stress.py \
-    --dataset /root/data/codefilter-3m-384-angular-f32.hdf5 \
-    --initial-count 800000 --step-count 231527 --rounds 14 --mode toggle \
-    --output-dir /root/data/mci-stress-800k-20260908
-```
+
 
 程序将数据集加载到内存，预计算固定查询在完整数据池中的精确标签过滤距离排序；
 每个检查点从该完整排序中选出仍存活的 top-k，等价于对当前集合重新计算精确真值。
@@ -804,18 +758,13 @@ python3 scripts/perf_reports/run_mci_stress.py \
 输出目录不可非空，不支持从中途索引状态续跑；失败时保留原始日志和已完成曲线。
 仅重新生成已有测量的统计图：
 
-```bash
-python3 scripts/perf_reports/run_mci_stress.py \
-    --output-dir /root/data/mci-stress-800k-20260908 --plot-only
-python3 -m unittest discover -s scripts/perf_reports -p 'test_mci_stress.py' -v
-```
+
 
 `--mode alternate` 为可选对照：奇数轮从缺失集合抽样 ADD，偶数轮从存活集合抽样 DELETE，
 每轮操作 231,527 条。它与默认混合切换负载不同，不能把二者结果混为同一条曲线。
 单元/集成测试使用合成数据独立暴力验证动态真值、ID 存在性、每轮样本数和固定种子复现。
 这些测试不代表 80 万实测已完成，完整实测以输出目录的 `status.json` 为准。
 
-[src-stress]: ../../../../../scripts/perf_reports/run_mci_stress.py
 
 ## 15. 纯 FP32 五阶段复测与初始索引保存
 
@@ -837,11 +786,7 @@ python3 -m unittest discover -s scripts/perf_reports -p 'test_mci_stress.py' -v
 
 删除修复改为 HGraph KNN 后，可用以下后台脚本复测：
 
-```bash
-python3 scripts/perf_reports/run_mci_fp32_cycle.py \
-  --dataset /root/data/codefilter-3m-384-angular-f32.hdf5 \
-  --output-dir /root/data/mci-fp32-cycle-new --threads 16
-```
+
 
 脚本使用已构建的 Release 二进制，并复制程序和 libvsag 到结果目录，避免后续编译
 改变运行版本。阶段为初始 100%、删除到 90%、删除到 80%、添加回 90%、添加回 100%。
@@ -864,7 +809,3 @@ python3 scripts/perf_reports/run_mci_fp32_cycle.py \
 `status.json`、`benchmark.log` 和 `curve.csv` 可用于查看后台进度；完成后验证全部
 20 个 stage/ef 测量点，生成 `qps-recall.png`。本脚本不自动排队，运行前应确认没有
 其他性能测试争用资源。
-
-```bash
-python3 -m unittest discover -s scripts/perf_reports -p 'test_mci_initial_index.py' -v
-```

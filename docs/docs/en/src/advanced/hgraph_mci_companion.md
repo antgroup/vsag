@@ -7,7 +7,7 @@ vector storage. It is not a standalone index type: create the index as `hgraph`,
 For implementation details, memory analysis, and 10k/3m results, see
 [HGraph MCI Mutation Design and Benchmark Report](hgraph_mci_mutation.md).
 For code entry points, configuration, and runnable commands, see the
-[code, configuration, and scripts guide](hgraph_mci_usage.md).
+[code and configuration guide](hgraph_mci_usage.md).
 
 Use this feature when filtered search is the main workload and the filter keeps only a
 small fraction of vectors. HGraph chooses between normal graph traversal and the MCI
@@ -169,32 +169,7 @@ See
 [`examples/cpp/324_feature_hgraph_mci_companion.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/324_feature_hgraph_mci_companion.cpp)
 for a minimal build and filtered-search flow.
 
-## Add/Delete Performance Regression
+## Add/Delete Performance Results
 
-The repository includes a five-stage regression benchmark for filtered HDF5 datasets. It
-measures QPS–recall curves for the initial full index, after deleting 10%, after deleting 20%
-in total, after adding 10% back, and after adding all deleted vectors back:
-
-```bash
-scripts/perf_reports/run_hgraph_mci_mutation.sh
-```
-
-The default dataset is `/root/data/codefilter-10k-384-angular-f32.hdf5`, and results are written to
-`/tmp/vsag_mci_mutation/`. Override paths with `MCI_DATASET_PATH`, `MCI_RESULT_DIR`, and
-`MCI_BUILD_DIR`. The quick profile evaluates recall on 200 queries, times 10,000 searches at
-`ef_search=40,80,160`, uses 16 build and search threads, and builds MCI with `mci_mcs=50`.
-
-Pass `--force-remove` to enable physical deletion support and use FORCE_REMOVE for both deletion
-stages. Without this flag, MARK_REMOVE remains the default. CSV `remove_mode` records the mode.
-`vector_memory_bytes` and `graph_memory_bytes` record base-vector and graph storage accounting.
-Every value can be overridden on the command line; for example, use `--query-count 0` to
-evaluate every query.
-
-Pass `--flush-after-mutation` to flush after each mutation stage before measuring search. The CSV
-also records `flush_seconds` and `mci_raw_float_ratio` separately from mutation time and MCI routing.
-
-The benchmark loads the complete 10k HDF5 training matrix into memory. It validates that the stored
-neighbors match the filtered workload and recomputes exact filtered ground truth when they do not.
-To keep that ground truth identical in all five stages, it protects the evaluated top-k vectors and
-samples deletions from all remaining vectors with a fixed seed. The same vectors are added back.
-With `--max-base`, exact filtered ground truth is always recomputed over the truncated subset.
+See the [historical mutation report](hgraph_mci_mutation.md) for methodology and results.
+The benchmark and supporting scripts are not included in this PR.

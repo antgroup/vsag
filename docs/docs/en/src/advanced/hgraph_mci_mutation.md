@@ -1,5 +1,8 @@
 # HGraph MCI mutation design and benchmark report
 
+> Benchmark sources, scripts and raw results are excluded from this PR. Tool names, options
+> and outputs below describe historical experiments, not tools shipped in this checkout.
+
 This report documents ADD, MARK_REMOVE, FORCE_REMOVE, Flush, and the Codefilter
 10k/3m measurements collected on 2026-09-07. For introductory configuration, see
 [HGraph MCI Companion](hgraph_mci_companion.md).
@@ -403,28 +406,11 @@ reverse edges and starts with a different memory footprint; prefer within-run co
 Run from the repository root. The wrapper builds the Release benchmark by default;
 `MCI_SKIP_BUILD=1` reuses a binary only if it already matches the current source.
 
-```bash
-MCI_DATASET_PATH=/root/data/codefilter-3m-384-angular-f32.hdf5 \
-MCI_RESULT_DIR=/tmp/mci-3m-reproduce \
-bash scripts/perf_reports/run_hgraph_mci_mutation.sh \
-    --force-remove --mutation-batch-size 324138 \
-    --query-count 200 --search-count 50000 \
-    --build-threads 16 --search-threads 16 --ef-search-values 40,80,160
-```
 
-```bash
-MCI_DATASET_PATH=/root/data/codefilter-10k-384-angular-f32.hdf5 \
-MCI_RESULT_DIR=/tmp/mci-10k-force-reproduce \
-bash scripts/perf_reports/run_hgraph_mci_mutation.sh \
-    --force-remove --mutation-batch-size 10 --search-count 50000
-```
 
-```bash
-MCI_DATASET_PATH=/root/data/codefilter-10k-384-angular-f32.hdf5 \
-MCI_RESULT_DIR=/tmp/mci-10k-mark-reproduce \
-bash scripts/perf_reports/run_hgraph_mci_mutation.sh \
-    --mutation-batch-size 10 --search-count 50000
-```
+
+
+
 
 These commands reproduce benchmark metrics. `stage_rss_bytes` is an externally added column,
 not emitted by the C++ benchmark. 3m sampled RSS every 100 ms and used the median over roughly
@@ -587,7 +573,7 @@ dependency downloads timed out. Tables and archived CSV remain independently rea
 | [label_table.cpp][src-label] | Label moves and deletion-state restoration. |
 | [hgraph_serialize.cpp][src-serialize] | Persistence and component memory accounting. |
 | [memory_block_io.cpp][src-block] | Whole-block allocation and shrinking. |
-| [mci_mutation_benchmark.cpp][src-bench] | Loading, ground truth, five stages, CSV. |
+| `mci_mutation_benchmark.cpp` | Loading, ground truth, five stages, CSV. |
 
 [src-build]: ../../../../../src/algorithm/hgraph/hgraph_build.cpp
 [src-mci]: ../../../../../src/algorithm/hgraph/hgraph_mci.cpp
@@ -598,11 +584,10 @@ dependency downloads timed out. Tables and archived CSV remain independently rea
 [src-label]: ../../../../../src/impl/label_table/label_table.cpp
 [src-serialize]: ../../../../../src/algorithm/hgraph/hgraph_serialize.cpp
 [src-block]: ../../../../../src/io/memory_block_io/memory_block_io.cpp
-[src-bench]: ../../../../../tools/eval/mci_mutation_benchmark.cpp
 
 ## 13. ADD / Delete threshold sweep
 
-Use [sweep_mci_thresholds.py][src-sweep] to test existing thresholds without changing the
+Use `sweep_mci_thresholds.py` to test existing thresholds without changing the
 index algorithm. Start with one-factor-at-a-time (OAT) experiments on 10k, rather than a
 full parameter grid on 3m.
 
@@ -649,12 +634,7 @@ are not held fixed across stages.
 
 Build the current benchmark, inspect the plan, then run:
 
-```bash
-cmake --build build-release --target mci_mutation_benchmark -j 8
-python3 scripts/perf_reports/sweep_mci_thresholds.py --dry-run
-python3 scripts/perf_reports/sweep_mci_thresholds.py \
-    --output-dir /tmp/mci-threshold-oat
-```
+
 
 The script does not build automatically; it checks that the binary supports the new
 threshold options. Omitting the output directory creates a unique temporary directory.
@@ -664,19 +644,11 @@ failures preserve logs, remaining configurations continue, and the script exits 
 To isolate deletion size thresholds 3/4/5/6 with other parameters fixed
 (4 configurations, 12 runs):
 
-```bash
-python3 scripts/perf_reports/sweep_mci_thresholds.py \
-    --only baseline,delete_size-4,delete_size-5,delete_size-6 \
-    --output-dir /tmp/mci-threshold-delete-step1
-```
+
 
 After OAT experiments, explicitly narrow the ranges for an interaction grid:
 
-```bash
-python3 scripts/perf_reports/sweep_mci_thresholds.py --design grid \
-    --join-ratios 0.6,0.8 --added-mcts 3,6 --clique-maxes 50 \
-    --delete-sizes 4,5,6 --delete-mcts 3,5 --dry-run
-```
+
 
 The original baseline is retained even outside the grid, with duplicates removed.
 This example has 25 configurations and 75 runs, also exceeding the default run limit.
@@ -687,13 +659,7 @@ Inspect the plan before explicitly increasing this limit. There is no automatic
 Validate only shortlisted configurations on 3m, with full mutation batches and a longer
 timeout, for example:
 
-```bash
-python3 scripts/perf_reports/sweep_mci_thresholds.py \
-    --dataset /root/data/codefilter-3m-384-angular-f32.hdf5 \
-    --only baseline,added_mct-6 --repeats 1 --build-threads 16 \
-    --mutation-batch-size 324138 --timeout 7200 \
-    --target-recalls 0.85,0.90,0.92 --output-dir /tmp/mci-threshold-3m
-```
+
 
 This is a reproduction command, not a claim that this 3m threshold comparison was run.
 Configuration names for `--only` come from `--dry-run`. Removal defaults to FORCE_REMOVE;
@@ -727,10 +693,7 @@ Validation checks five-stage live/physical counts, full MCI coverage, deletion m
 100% fast-path use, echoed thresholds, and measurement completeness. Invalid runs are
 excluded from aggregates. Resume an interrupted experiment with identical parameters:
 
-```bash
-python3 scripts/perf_reports/sweep_mci_thresholds.py \
-    --output-dir /tmp/mci-threshold-oat --resume
-```
+
 
 Only validated measurements with a completion marker are skipped. Incomplete attempts
 are preserved and retried in a new attempt directory. Changed parameters, dataset
@@ -738,15 +701,12 @@ identity, or binary fingerprints reject resume, preventing mixed experiments.
 
 Script tests:
 
-```bash
-python3 -m unittest discover -s scripts/perf_reports -p 'test_sweep_mci_thresholds.py' -v
-```
 
-[src-sweep]: ../../../../../scripts/perf_reports/sweep_mci_thresholds.py
+
 
 ## 14. Random churn from an 800k initial index
 
-[run_mci_stress.py][src-stress] uses a separate stress mode without the five-stage
+`run_mci_stress.py` uses a separate stress mode without the five-stage
 benchmark's ground-truth protection. From the 3,241,378-vector pool, sample 800,000 IDs
 without replacement and fully build the initial index. Each round samples
 `round(3,241,378 / 14) = 231,527` IDs without replacement from the complete pool:
@@ -761,13 +721,7 @@ Defaults retain deletion size threshold 3 and ADD join ratio=0.6, added_mct=3, c
 Build/search use 16 threads, the first 200 fixed queries, ef=40/80/160/320, and 10,000
 timed searches per ef. Mutation batch size equals the round sample size.
 
-```bash
-cmake --build build-release --target mci_mutation_benchmark -j 8
-python3 scripts/perf_reports/run_mci_stress.py \
-    --dataset /root/data/codefilter-3m-384-angular-f32.hdf5 \
-    --initial-count 800000 --step-count 231527 --rounds 14 --mode toggle \
-    --output-dir /root/data/mci-stress-800k-20260908
-```
+
 
 The dataset is loaded into memory. Complete exact label-filtered distance rankings are
 cached for the fixed query cohort. At each checkpoint, selecting the first live top-k
@@ -792,11 +746,7 @@ in-progress plots are partial results. Nonempty output directories are rejected.
 There is no resume from an intermediate index; failures preserve logs and completed curves.
 To redraw existing measurements or run synthetic integration tests:
 
-```bash
-python3 scripts/perf_reports/run_mci_stress.py \
-    --output-dir /root/data/mci-stress-800k-20260908 --plot-only
-python3 -m unittest discover -s scripts/perf_reports -p 'test_mci_stress.py' -v
-```
+
 
 Optional `--mode alternate` adds from absent IDs on odd rounds and removes from live IDs
 on even rounds, using 231,527 IDs each round. This is a different workload; do not mix
@@ -804,7 +754,6 @@ its results with toggle runs. Synthetic tests independently verify live-set exac
 ID existence, sample counts, and seeded reproducibility. They do not establish completion
 of the 800k experiment; check its output `status.json`.
 
-[src-stress]: ../../../../../scripts/perf_reports/run_mci_stress.py
 
 ## 15. FP32 five-stage rerun and initial-index snapshots
 
@@ -827,11 +776,7 @@ establish an equal-recall performance improvement.
 
 After switching FP32 deletion repair to HGraph KNN, run:
 
-```bash
-python3 scripts/perf_reports/run_mci_fp32_cycle.py \
-  --dataset /root/data/codefilter-3m-384-angular-f32.hdf5 \
-  --output-dir /root/data/mci-fp32-cycle-new --threads 16
-```
+
 
 The detached runner snapshots the existing Release executable and libvsag. Live counts follow
 100%, 90%, 80%, 90%, 100%, with each mutation batch equal to 10% of the initial population.
@@ -858,7 +803,3 @@ these tests are not a new performance run using the saved 3m snapshot.
 
 Monitor `status.json`, `benchmark.log`, and `curve.csv`. Completion validates all 20 stage/ef
 measurements and generates `qps-recall.png`.
-
-```bash
-python3 -m unittest discover -s scripts/perf_reports -p 'test_mci_initial_index.py' -v
-```

@@ -221,11 +221,6 @@ public:
     }
 
     [[nodiscard]] int64_t
-    GetGroundTruthCount() const {
-        return neighbors_shape_.second;
-    }
-
-    [[nodiscard]] int64_t
     GetDim() const {
         return dim_;
     }

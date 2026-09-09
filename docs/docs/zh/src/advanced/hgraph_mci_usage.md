@@ -1,11 +1,11 @@
-# HGraph MCI：代码、配置与脚本使用指南
+# HGraph MCI：代码与配置指南
 
 本文对应 MCI 增删开发分支，聚焦纯 FP32 的构建、ADD、MARK_REMOVE、FORCE_REMOVE 和 Flush。
 索引类型始终是 `hgraph`；MCI 是共享 HGraph 向量存储的团索引，不是另一份独立 HNSW。
 算法细节及历史测量见 [增删实现与测试报告](hgraph_mci_mutation.md)。
 
 > 曾复现的“加载后 FORCE_REMOVE”内存错误已定位为缺少图反向边恢复，并补充修复及回归测试。
-> 本文性能脚本仍从全量 Build 开始，没有新增大数据集快照加载复测。
+> 历史性能测试从全量 Build 开始，没有新增大数据集快照加载复测。
 > 新增 `Index::Flush()` 虚接口涉及 ABI，MCI 序列化格式升级为 v2；旧二进制兼容性需单独验证。
 
 ## 1. 代码入口
@@ -24,7 +24,6 @@
 | `src/algorithm/hgraph/hgraph_parameter.{h,cpp}`、`hgraph_param_mapping.cpp` | 参数默认值、校验和外部 JSON 映射 |
 | `src/algorithm/hgraph/hgraph_serialize.cpp` | MCI 格式版本及序列化恢复 |
 | `src/analyzer/hgraph_analyzer.cpp` | 团覆盖、大小、成员数及内存统计 |
-| `tools/eval/mci_mutation_benchmark.cpp` | HDF5 加载、五阶段/随机增删、真值、检索计时、CSV |
 
 ### 1.1 数据布局
 
@@ -177,103 +176,12 @@ check(result);
 Remove 使用外部标签，不接受把内部槽位当成标签；物理删除后不要缓存 inner ID 或团 ID。
 完整的 Dataset 与 Filter 示例见 `examples/cpp/324_feature_hgraph_mci_companion.cpp`。
 
-## 3. 编译与数据准备
+## 3. 测试工具范围
 
-命令均从仓库根目录执行。使用独立 Release 目录，避免误用 Debug 或旧版本二进制：
+开发阶段使用的 benchmark 和脚本已移出本 PR。历史结果仍保留在测试报告中；
+当前代码树不提供这些测试程序、构建目标或脚本。
 
-```bash
-make release RELEASE_BUILD_DIR=build-release-mci VSAG_ENABLE_TOOLS=ON COMPILE_JOBS=12
-build-release-mci/tools/eval/mci_mutation_benchmark --help
-python3 -c 'import h5py, numpy, matplotlib'
-```
-
-Python 脚本/测试需要 `h5py`、`numpy`，绘图需要 `matplotlib`；C++ 构建需要 HDF5 等仓库依赖。
-具体环境要求见 `docs/agents/build-and-test.md`。这里只给出命令，不会因为阅读本文自动安装依赖或启动测试。
-
-使用带标签过滤的 dense/angular HDF5：`train`、`test` 为 FP32 矩阵，`train_labels`、`test_labels`
-为一维标签，`neighbors`、`distances` 提供真值矩阵，可带 `valid_ratios`。
-标签是过滤类别，与向量的唯一外部 ID 不同；基准程序以训练集行号作为向量 ID。
-基准会将数据集加载到进程内存，故 RSS 还包含数据集、真值及查询缓存。
-
-## 4. 脚本选择与命令
-
-| 入口（`scripts/perf_reports/`） | 用途 |
-| --- | --- |
-| `run_hgraph_mci_mutation.sh` | 前台五阶段，默认 10k，默认 MARK_REMOVE；可构建并绘图 |
-| `run_mci_fp32_cycle.py` | 后台 FP32 五阶段 FORCE_REMOVE，保存初始索引及二进制快照 |
-| `sweep_mci_thresholds.py` | 串行阈值对照，支持 dry-run、重复实验及结果汇总 |
-| `run_mci_stress.py` | 前台随机增删压测，使用随存活集合变化的精确真值 |
-| `plot_mci_mutation_curve.py` | 只根据已有 CSV 重新绘图，不重新运行检索 |
-
-### 4.1 10k 快速五阶段
-
-```bash
-MCI_SKIP_BUILD=1 MCI_BUILD_DIR="$PWD/build-release-mci" \
-MCI_DATASET_PATH=/root/data/codefilter-10k-384-angular-f32.hdf5 \
-MCI_RESULT_DIR=/tmp/mci-10k-fp32-guide \
-bash scripts/perf_reports/run_hgraph_mci_mutation.sh \
-  --force-remove --ef-search-values 40,80,160,320 \
-  --build-threads 16 --search-threads 16 --mutation-batch-size 1000
-```
-
-顺序为 100% → 删除 10% → 累计删除 20% → 加回 10% → 全部加回；百分比都以初始向量数为基准。
-`--mutation-batch-size` 是每次调用 Add/Remove 的分块大小，不决定每阶段的总修改比例。
-直接基准默认分块仅为 10；大库不要无意沿用，否则会大量重复物理删除的重映射/Flush。
-去掉 `--force-remove` 并换一个输出目录可对照 MARK_REMOVE；增加 `--flush-after-mutation` 可测阶段后显式 Flush。
-Shell 包装器不是防覆盖归档器，应为每次实验使用新的结果目录。
-
-### 4.2 3m 后台五阶段
-
-```bash
-python3 scripts/perf_reports/run_mci_fp32_cycle.py \
-  --binary "$PWD/build-release-mci/tools/eval/mci_mutation_benchmark" \
-  --dataset /root/data/codefilter-3m-384-angular-f32.hdf5 \
-  --output-dir /root/data/mci-3m-fp32-guide --threads 16
-```
-
-启动器会返回 worker PID；以 `status.json` 的 `state=complete` 判断完成，不以启动命令退出判断完成。
-该脚本固定 ef=40/80/160/320、200 条 recall 查询、10,000 次计时查询；每个修改阶段整批调用。
-3,241,378 条数据每阶段增删 324,138 条。16 线程用于初始构建和检索，不代表修复点并行处理。
-脚本不会自动排队，避免同时运行其他性能任务。
-
-输出：`manifest.json`、`status.json`、`benchmark.log`、`worker.log`、`curve.csv`、`qps-recall.png`，
-以及 `bin/` 快照、`initial.index` 和 `initial.index.json`。非空输出目录会被拒绝。
-初始索引可保存供后续验证，**无 load/reuse 参数**；保存成功不代表该大数据集快照已完成增删验证。
-
-### 4.3 只扫描删除团大小阈值 3、4、5、6
-
-先预览，确认后将同一命令的 `--dry-run` 删除再执行：
-
-```bash
-python3 scripts/perf_reports/sweep_mci_thresholds.py \
-  --binary "$PWD/build-release-mci/tools/eval/mci_mutation_benchmark" \
-  --dataset /root/data/codefilter-3m-384-angular-f32.hdf5 \
-  --only baseline,delete_size-4,delete_size-5,delete_size-6 \
-  --repeats 1 --build-threads 16 --search-threads 16 \
-  --mutation-batch-size 324138 --timeout 7200 \
-  --output-dir /root/data/mci-delete-size-3-4-5-6-guide --dry-run
-```
-
-这只改变 `mci_delete_clique_size_threshold`，不是把 `added_mct` 或 `delete_mct` 一起提高。
-4 个配置分别从全量 Build 开始；默认 FORCE_REMOVE，默认 ef=40/80/160/320。
-扫描脚本不自动构建二进制。`--resume` 是复用已完成实验记录，不是从中途索引恢复。
-
-### 4.4 80 万初始点、完整 3m 的 1/14、7 轮随机增删
-
-```bash
-python3 scripts/perf_reports/run_mci_stress.py \
-  --binary "$PWD/build-release-mci/tools/eval/mci_mutation_benchmark" \
-  --dataset /root/data/codefilter-3m-384-angular-f32.hdf5 \
-  --initial-count 800000 --step-count 231527 --rounds 7 --mode toggle \
-  --threads 16 --output-dir /root/data/mci-stress-800k-7round-guide
-```
-
-每轮从完整数据池无放回随机选 231,527 个 ID：已存活的删除，缺失的添加；先删后加，分别测量。
-231,527 是每轮抽样总数，不是删除和添加各 231,527。不同轮可重复抽到相同 ID，存活总数不固定。
-输出 `statistics.png`、`qps-recall.png`、`curve.csv`、事件/ID/真值 CSV 及状态日志。
-不支持中途索引续跑。`--mode alternate` 是奇数轮 ADD、偶数轮 DELETE，属于不同负载。
-
-## 5. 如何读结果
+## 4. 如何读结果
 
 五阶段保护评测查询的 top-k 真值点，五次使用同一真值；随机增删不保护真值点，
 每个检查点从精确全库排序中取当前存活 top-k。两种实验不能混用 recall 结论。
@@ -295,17 +203,13 @@ QPS 是多线程吞吐，`1000 / QPS` 不是单请求延迟；当前 CSV 不含�
 本 PR 不包含原始结果文件；
 这是适配新版 main 前的开发版本测量，不是当前 PR HEAD 的重新压测。
 
-## 6. 回归测试与边界
+## 5. 回归测试与边界
 
 ```bash
 make debug VSAG_ENABLE_TESTS=ON COMPILE_JOBS=12
 build/tests/unittests '[mci],[LabelTable],RaBitQSplitDataCell serialize and methods'
-python3 -m unittest discover -s scripts/perf_reports -p 'test_sweep_mci_thresholds.py' -v
 ```
 
-`test_mci_initial_index.py`、`test_mci_stress.py` 还提供合成数据集集成测试；目前它们固定读取
-`build-release/tools/eval/mci_mutation_benchmark`，该路径不存在时会跳过，不能把 skip 算作通过。
-上述独立 `build-release-mci` 目录不会被这两个测试自动发现。
 
 文档编写前验证：C++ 定向测试 38 个用例、3,294 条断言通过；脚本测试 10+1+3 项通过，
 其中两个集成测试当时使用 Debug 基准程序作正确性验证。未完成全量 lint、全量测试和 90% 覆盖率验证。
