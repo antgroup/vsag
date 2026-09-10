@@ -31,3 +31,16 @@ The loader is a fresh process, but the runner does not evict the snapshot from t
 `warm_load_ms` is measured in the same process immediately after saving and must not be reported as cold-start latency. A strict cold-load experiment must additionally control and document the operating-system page cache.
 
 The benchmark refuses to overwrite an existing output directory or snapshot. Run it on an otherwise idle machine and retain the compiler, commit SHA, CPU, and raw output with any report.
+
+## Full/Lite comparison
+
+`full_main.cpp` exercises the public Full VSAG BruteForce API with the same generated FP32 vectors, query sequence, dimensions, seed, and operation counts as the Lite baseline. Full removal explicitly uses `RemoveMode::FORCE_REMOVE`, matching Lite's immediate last-record-to-hole removal semantics; the default Full `MARK_REMOVE` behavior is not equivalent.
+
+Build and install Full VSAG from the same commit, build `lite/benchmark/full` against that installation, and build the Lite benchmark with `ENABLE_BENCHMARKS=ON`. Then run:
+
+```bash
+lite/benchmark/run_comparison.sh \
+  FULL_BENCHMARK LITE_BENCHMARK FULL_LIBVSAG_SO LITE_LIBVSAG_LITE_SO OUTPUT_DIRECTORY
+```
+
+The runner alternates Full/Lite execution order over seven repetitions for both 10k x 128 and 100k x 128 cases. It records raw and stripped shared-library sizes, binary and library checksums, per-process `/usr/bin/time -v` output, CSV measurements, and snapshots. Results compare two exact FP32 squared-L2 BruteForce implementations; they do not establish graph-index performance or standard-dataset Recall@K.

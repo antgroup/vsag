@@ -153,7 +153,10 @@ void
 make_vector(
     uint64_t id, uint64_t variant, uint64_t dim, uint64_t seed, std::vector<float>& vector) {
     for (uint64_t d = 0; d < dim; ++d) {
-        const uint64_t bits = mix(seed ^ mix(id) ^ mix(variant) ^ mix(d));
+        uint64_t bits = mix(seed);
+        bits = mix(bits ^ id);
+        bits = mix(bits ^ variant);
+        bits = mix(bits ^ d);
         vector[d] = static_cast<float>(bits >> 40U) / 16777216.0F;
     }
 }
@@ -333,13 +336,14 @@ run(const Config& config) {
     }
     require(checksum == loaded_checksum, "loaded search checksum changed");
 
-    std::cout << "count,dim,queries,k,crud_ops,seed,build_ms,update_p50_us,update_p99_us,"
+    std::cout << "implementation,count,dim,queries,k,crud_ops,seed,build_ms,update_p50_us,"
+                 "update_p99_us,"
                  "remove_p50_us,remove_p99_us,readd_p50_us,readd_p99_us,search_p50_us,"
                  "search_p99_us,load_search_p50_us,load_search_p99_us,save_ms,warm_load_ms,"
                  "snapshot_bytes,peak_rss_kib,top1_recall,result_checksum,final_size\n";
-    std::cout << std::fixed << std::setprecision(3) << config.count << ',' << config.dim << ','
-              << config.queries << ',' << config.k << ',' << config.crud_ops << ',' << config.seed
-              << ',' << build_ms << ',' << percentile(update_us, 0.50) << ','
+    std::cout << std::fixed << std::setprecision(3) << "lite," << config.count << ',' << config.dim
+              << ',' << config.queries << ',' << config.k << ',' << config.crud_ops << ','
+              << config.seed << ',' << build_ms << ',' << percentile(update_us, 0.50) << ','
               << percentile(update_us, 0.99) << ',' << percentile(remove_us, 0.50) << ','
               << percentile(remove_us, 0.99) << ',' << percentile(readd_us, 0.50) << ','
               << percentile(readd_us, 0.99) << ',' << percentile(search_us, 0.50) << ','
