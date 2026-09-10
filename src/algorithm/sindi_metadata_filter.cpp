@@ -630,6 +630,8 @@ constexpr uint32_t DATE_MONTH_SHIFT = 5;
 constexpr uint32_t DATE_MONTH_MASK = 0xF;
 constexpr uint32_t DATE_DAY_MASK = 0x1F;
 constexpr uint32_t MAX_DATE_YEAR = 9999;
+constexpr uint32_t MISSING_DATE_BUCKET = 0;
+constexpr uint32_t MISSING_DATE_QUARTER = 0;
 
 uint32_t
 date_year(uint32_t bucket) {
@@ -716,6 +718,9 @@ date_bucket_to_quarter(uint32_t bucket) {
 
 bool
 date_bucket_matches(uint32_t base_bucket, uint32_t query_bucket) {
+    if (base_bucket == MISSING_DATE_BUCKET) {
+        return false;
+    }
     if (date_year(base_bucket) != date_year(query_bucket)) {
         return false;
     }
@@ -750,6 +755,9 @@ date_bucket_last_day(uint32_t bucket) {
 
 bool
 date_bucket_within_range(uint32_t bucket, uint32_t query_begin, uint32_t query_end) {
+    if (bucket == MISSING_DATE_BUCKET) {
+        return false;
+    }
     if (date_day(bucket) != 0) {
         return bucket >= query_begin and bucket <= query_end;
     }
@@ -920,8 +928,13 @@ SindiDateFilter::PrepareBuild(const DatasetPtr& base) const {
     Vector<uint32_t> source_quarters(static_cast<uint64_t>(data_num), allocator_);
     std::iota(plan.order_.begin(), plan.order_.end(), 0);
     for (uint32_t i = 0; i < static_cast<uint32_t>(data_num); ++i) {
-        plan.source_buckets_[i] = parse_date_bucket(date_buckets[i]);
-        source_quarters[i] = date_bucket_to_quarter(plan.source_buckets_[i]);
+        if (date_buckets[i].empty()) {
+            plan.source_buckets_[i] = MISSING_DATE_BUCKET;
+            source_quarters[i] = MISSING_DATE_QUARTER;
+        } else {
+            plan.source_buckets_[i] = parse_date_bucket(date_buckets[i]);
+            source_quarters[i] = date_bucket_to_quarter(plan.source_buckets_[i]);
+        }
     }
 
     std::sort(plan.order_.begin(), plan.order_.end(), [&](uint32_t lhs, uint32_t rhs) {
@@ -1209,8 +1222,8 @@ SindiDateFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
     StreamReader::ReadObj(reader, has_host);
     CHECK_ARGUMENT(has_host <= 1, "serialized SINDI date host flag is invalid");
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
-        version == SINDI_DATE_METADATA_FORMAT_VERSION ||
-            (version == SINDI_DATE_METADATA_LEGACY_FORMAT_VERSION && has_host == 0),
+        IsSupportedSindiDateMetadataVersion(version) &&
+            (version != SINDI_DATE_METADATA_LEGACY_FORMAT_VERSION || has_host == 0),
         fmt::format("unsupported SINDI date metadata version {}", version));
 
     SindiHostDictionary host_dictionary(allocator_);
@@ -1278,9 +1291,17 @@ SindiDateFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
                            "serialized SINDI date metadata has unexpected host directory");
         }
         for (uint32_t inner_id = partition.begin; inner_id < partition.end; ++inner_id) {
-            CHECK_ARGUMENT(is_valid_date_bucket(document_buckets[inner_id]),
+            const auto bucket = document_buckets[inner_id];
+            if (bucket == MISSING_DATE_BUCKET) {
+                CHECK_ARGUMENT(version == SINDI_DATE_METADATA_FORMAT_VERSION,
+                               "serialized SINDI missing date bucket requires metadata version 3");
+                CHECK_ARGUMENT(partition.quarter == MISSING_DATE_QUARTER,
+                               "serialized SINDI missing date bucket is outside its partition");
+                continue;
+            }
+            CHECK_ARGUMENT(is_valid_date_bucket(bucket),
                            "serialized SINDI document date bucket is invalid");
-            CHECK_ARGUMENT(date_bucket_to_quarter(document_buckets[inner_id]) == partition.quarter,
+            CHECK_ARGUMENT(date_bucket_to_quarter(bucket) == partition.quarter,
                            "serialized SINDI document date bucket does not match its quarter");
         }
         previous_quarter = partition.quarter;

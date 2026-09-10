@@ -114,6 +114,8 @@ term-first posting layout and legacy serialization format. Date filtering suppor
 immutable indexes with either `use_reorder` setting and is preserved by both legacy and streaming
 serialization; range search remains unfiltered. A mutable date-aware SINDI_V2 is build-once and
 follows the same initial `Build()` or first-`Add()` and later-`Add()` rejection rules as SINDI.
+Empty base date strings use the same missing-date semantics as SINDI: unfiltered and host-only
+queries include them, while date bucket and range queries exclude them.
 Exact bucket filtering disables term-level posting pruning in each selected window, so date queries
 may scan more postings than host-only queries. Host-only queries on date-enabled indexes share the
 boundary-window behavior documented for SINDI.

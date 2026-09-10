@@ -180,7 +180,7 @@ Mutable and immutable SINDI can filter KNN queries by hierarchical calendar buck
 without reranking. Attach one canonical string bucket to each base document:
 
 ```cpp
-std::string base_dates[] = {"2026", "2026/05", "2026/05/01"};
+std::string base_dates[] = {"", "2026/05", "2026/05/01"};
 base->Paths("date", base_dates);
 
 std::string query_date = "2026/05";
@@ -198,6 +198,11 @@ months and days. Matching proceeds down the hierarchy: `2026` matches base bucke
 or day granularity in 2026; `2026/05` matches `2026/05` and every day below it; `2026/05/01`
 matches only that exact day. A more precise query never matches a coarser base bucket.
 
+An empty base string means that the document has no date. Missing-date documents remain searchable
+when the query omits all date selectors, including host-only queries, but never match a `date` or
+date-range query. Every base document still needs one array entry, so use an empty string instead of
+omitting a row. Empty query date strings remain invalid; omit the selector to disable date filtering.
+
 For an inclusive range query, provide `date_begin` and `date_end` together. A year or month at the
 beginning expands to its first day, while a year or month at the end expands to its last day. For
 example, `2025/11/20` through `2026/02` means `2025/11/20` through `2026/02/28`, inclusive. A base
@@ -206,10 +211,11 @@ range ending at `2026/08/01` can match a base day bucket on August 1, but not th
 `2026/08` bucket. The two range endpoints are required together, must be ordered after expansion,
 and cannot be combined with the single `date` selector.
 
-The date-aware build orders documents by calendar quarter and, when `host` is present, by host
-inside each quarter. For a mutable index, date metadata can be supplied by `Build()` or the first
-`Add()` while the index is empty. Once the index contains documents, date metadata cannot be
-introduced, and a date-aware mutable index rejects every later `Add()`. This build-once restriction
+The date-aware build places missing dates in a dedicated partition, orders dated documents by
+calendar quarter and, when `host` is present, by host inside each partition. For a mutable index,
+date metadata can be supplied by `Build()` or the first `Add()` while the index is empty. Once the
+index contains documents, date metadata cannot be introduced, and a date-aware mutable index
+rejects every later `Add()`. This build-once restriction
 avoids incrementally maintaining the quarter partitions. Mutable host-only indexes retain their
 existing incremental `Add()` support.
 

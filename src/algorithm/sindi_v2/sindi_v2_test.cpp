@@ -629,7 +629,7 @@ TEST_CASE("SINDIV2 date bucket and host filtering routes and serializes",
     std::array<float, 4> values{4.0F, 0.0F, 2.0F, 3.0F};
     std::array<int64_t, 4> labels{10, 40, 20, 30};
     std::array<std::string, 4> hosts{"host-b", "host-a", "host-b", "host-a"};
-    std::array<std::string, 4> date_buckets = {"2026", "2026/05", "2026/05/01", "2026/08"};
+    std::array<std::string, 4> date_buckets = {"", "2026/05", "2026/05/01", "2026/08"};
     std::array<SparseVector, 4> vectors{};
     vectors[0] = SparseVector{1, &term, values.data()};
     vectors[2] = SparseVector{1, &term, &values[2]};
@@ -722,7 +722,7 @@ TEST_CASE("SINDIV2 date bucket and host filtering routes and serializes",
     REQUIRE(index.KnnSearch(query, 3, search_parameters, nullptr)->GetDim() == 0);
     REQUIRE(index.RangeSearch(query, 2.0F, search_parameters, nullptr, -1)->GetDim() == 3);
     query_date = "2026";
-    REQUIRE(index.KnnSearch(query, 3, search_parameters, nullptr)->GetDim() == 3);
+    REQUIRE(index.KnnSearch(query, 3, search_parameters, nullptr)->GetDim() == 2);
 
     std::string query_date_begin = "2026/05/01";
     std::string query_date_end = "2026/08";
@@ -746,9 +746,18 @@ TEST_CASE("SINDIV2 date bucket and host filtering routes and serializes",
     std::string host = "host-b";
     query->StringMetadata("host", &host);
     auto combined = index.KnnSearch(query, 3, search_parameters, nullptr);
-    REQUIRE(combined->GetDim() == 2);
-    REQUIRE(combined->GetIds()[0] == 10);
-    REQUIRE(combined->GetIds()[1] == 20);
+    REQUIRE(combined->GetDim() == 1);
+    REQUIRE(combined->GetIds()[0] == 20);
+
+    auto host_query = Dataset::Make()
+                          ->NumElements(1)
+                          ->SparseVectors(&query_vector)
+                          ->StringMetadata("host", &host)
+                          ->Owner(false);
+    auto host_only = index.KnnSearch(host_query, 3, search_parameters, nullptr);
+    REQUIRE(host_only->GetDim() == 2);
+    REQUIRE(host_only->GetIds()[0] == 10);
+    REQUIRE(host_only->GetIds()[1] == 20);
 
     auto filtered =
         index.KnnSearch(query, 3, search_parameters, std::make_shared<AllowLabelFilter>(20));
@@ -767,6 +776,12 @@ TEST_CASE("SINDIV2 date bucket and host filtering routes and serializes",
         REQUIRE(restored_result->GetIds()[i] == combined->GetIds()[i]);
         REQUIRE(restored_result->GetDistances()[i] == combined->GetDistances()[i]);
     }
+    auto restored_host_only = restored.KnnSearch(host_query, 3, search_parameters, nullptr);
+    REQUIRE(restored_host_only->GetDim() == host_only->GetDim());
+    for (int64_t i = 0; i < host_only->GetDim(); ++i) {
+        REQUIRE(restored_host_only->GetIds()[i] == host_only->GetIds()[i]);
+        REQUIRE(restored_host_only->GetDistances()[i] == host_only->GetDistances()[i]);
+    }
     if (not parameter->immutable) {
         REQUIRE_THROWS_WITH(restored.Add(dated_add),
                             Catch::Matchers::ContainsSubstring(
@@ -783,6 +798,13 @@ TEST_CASE("SINDIV2 date bucket and host filtering routes and serializes",
     for (int64_t i = 0; i < combined->GetDim(); ++i) {
         REQUIRE(streaming_result->GetIds()[i] == combined->GetIds()[i]);
         REQUIRE(streaming_result->GetDistances()[i] == combined->GetDistances()[i]);
+    }
+    auto streaming_host_only =
+        streaming_restored.KnnSearch(host_query, 3, search_parameters, nullptr);
+    REQUIRE(streaming_host_only->GetDim() == host_only->GetDim());
+    for (int64_t i = 0; i < host_only->GetDim(); ++i) {
+        REQUIRE(streaming_host_only->GetIds()[i] == host_only->GetIds()[i]);
+        REQUIRE(streaming_host_only->GetDistances()[i] == host_only->GetDistances()[i]);
     }
     if (not parameter->immutable) {
         REQUIRE_THROWS_WITH(streaming_restored.Add(undated_add),
@@ -802,6 +824,9 @@ TEST_CASE("SINDIV2 date bucket and host filtering routes and serializes",
     query_date_begin = "2026/09";
     query_date_end = "2026/08";
     REQUIRE_THROWS(index.KnnSearch(range_query, 3, search_parameters, nullptr));
+
+    query_date.clear();
+    REQUIRE_THROWS(index.KnnSearch(query, 3, search_parameters, nullptr));
 }
 
 TEST_CASE("SINDIV2 Heap Insert Strategy Test", "[ut][SINDIV2]") {
