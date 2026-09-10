@@ -92,6 +92,11 @@ Prefer `Build()` for the initial index, followed by incremental additions. Add o
 index can trigger construction, but many tiny Adds are not recommended as a replacement
 for bulk Build.
 
+When ADD needs a new clique, it shares the local graph, maximal-clique enumeration and selection
+core with full `BuildMCICliques`. The incremental size cap determines the local size threshold;
+it no longer accepts two members as the alpha-expansion stopping criterion. The existing join
+shortcut remains unchanged, and high-alpha fallback may still emit smaller cliques.
+
 `MARK_REMOVE` updates the MCI companion as part of the same operation. After removing a node, MCI
 keeps every affected clique whose remaining live size is at least
 `mci_delete_clique_size_threshold`. It retires only smaller cliques and collects only their live

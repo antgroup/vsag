@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "../mci/mci_builder.h"
+#include "../mci/mci_local_builder.h"
 #include "datacell/graph_interface.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
 #include "hgraph.h"
@@ -1512,7 +1513,7 @@ HGraph::repair_mci_clique(InnerIdType node_id) {
         for (uint64_t i = 0; i < k; ++i) {
             knn_ids.push_back(candidates[i].second);
         }
-        this->incremental_update_mci_clique(node_id, knn_ids, static_cast<uint64_t>(node_id) + 1);
+        this->incremental_update_mci_clique(node_id, knn_ids, total);
         return;
     }
 
@@ -1600,7 +1601,7 @@ HGraph::try_join_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>&
     return appended;
 }
 
-// Create one new incremental clique around an inserted node when joining old cliques is not enough.
+// Build around a required seed with the same local MCE and expansion rules as full Build.
 void
 HGraph::build_incremental_mci_clique(InnerIdType new_inner_id,
                                      const Vector<InnerIdType>& knn_ids,
@@ -1608,88 +1609,66 @@ HGraph::build_incremental_mci_clique(InnerIdType new_inner_id,
     if (this->mci_cliques_ == nullptr) {
         return;
     }
-    const auto precise_codes = this->get_precise_codes();
-
-    Vector<InnerIdType> members(this->allocator_);
-    if (knn_ids.empty()) {
-        members.push_back(new_inner_id);
-        this->mci_cliques_->AppendNewClique(members, this->total_count_.load());
-        return;
-    }
-
-    Vector<std::pair<float, InnerIdType>> sorted_neighbors(this->allocator_);
-    sorted_neighbors.reserve(knn_ids.size());
-    for (auto neighbor : knn_ids) {
-        sorted_neighbors.emplace_back(precise_codes->ComputePairVectors(new_inner_id, neighbor),
-                                      neighbor);
-    }
-    std::sort(
-        sorted_neighbors.begin(),
-        sorted_neighbors.end(),
-        [](const std::pair<float, InnerIdType>& lhs, const std::pair<float, InnerIdType>& rhs) {
-            if (lhs.first != rhs.first) {
-                return lhs.first < rhs.first;
-            }
-            return lhs.second < rhs.second;
-        });
-
     const auto total = this->total_count_.load();
-    visible_total = std::min<uint64_t>(visible_total, total);
-    const auto incremental_clique_max =
-        std::min<uint64_t>(this->mci_parameters_.incremental_clique_max, visible_total);
-    const auto candidate_limit =
-        std::min<uint64_t>({this->mci_parameters_.mcs,
-                            incremental_clique_max > 0 ? incremental_clique_max - 1 : 0,
-                            visible_total > 0 ? visible_total - 1 : 0});
-    const auto clique_min =
-        std::min<uint64_t>({K_MCI_MIN_CLIQUE_SIZE, candidate_limit + 1, visible_total});
-    const auto nearest_distance = sorted_neighbors.front().first;
-
-    Vector<InnerIdType> best(this->allocator_);
-    float now_alpha = std::max(1.2F, this->mci_parameters_.alpha);
-    while (true) {
-        const auto distance_limit =
-            ExpandMCIDistanceLimit(nearest_distance, now_alpha, this->metric_);
-        Vector<InnerIdType> clique(this->allocator_);
-        clique.push_back(new_inner_id);
-        for (const auto& [distance, neighbor] : sorted_neighbors) {
-            if (distance > distance_limit) {
-                break;
-            }
-            bool connected = true;
-            for (auto member : clique) {
-                if (member == new_inner_id) {
-                    continue;
-                }
-                if (precise_codes->ComputePairVectors(member, neighbor) > distance_limit) {
-                    connected = false;
-                    break;
-                }
-            }
-            if (connected) {
-                clique.push_back(neighbor);
-                if (clique.size() >= incremental_clique_max) {
-                    break;
-                }
-            }
+    visible_total = std::min(visible_total, total);
+    Vector<InnerIdType> local_to_inner(this->allocator_);
+    local_to_inner.push_back(new_inner_id);
+    for (auto id : knn_ids) {
+        if (id < visible_total and id != new_inner_id and not this->label_table_->IsRemoved(id) and
+            std::find(local_to_inner.begin(), local_to_inner.end(), id) == local_to_inner.end()) {
+            local_to_inner.push_back(id);
         }
-        if (clique.size() > best.size()) {
-            best.swap(clique);
-        }
-        if (best.size() >= clique_min or now_alpha > 100.0F) {
-            break;
-        }
-        now_alpha *= 2.0F;
     }
-
-    if (best.size() < 2) {
-        best.clear();
-        best.push_back(new_inner_id);
-        best.push_back(sorted_neighbors.front().second);
-    } else if (best.size() > incremental_clique_max) {
-        best.resize(incremental_clique_max);
+    // Only the seed requires fresh coverage. In particular, a repair seed may still have
+    // old memberships: treating it as already covered would skip the requested repair.
+    std::vector<std::atomic<int>> coverage(local_to_inner.size());
+    coverage[0].store(0, std::memory_order_relaxed);
+    Vector<InnerIdType> neighbors(this->allocator_);
+    Vector<InnerIdType> memberships(this->allocator_);
+    for (uint64_t i = 1; i < local_to_inner.size(); ++i) {
+        memberships.clear();
+        this->mci_cliques_->CollectNodeCliqueIds(local_to_inner[i], memberships);
+        coverage[i].store(static_cast<int>(std::max<uint64_t>(1, memberships.size())),
+                          std::memory_order_relaxed);
+        neighbors.push_back(static_cast<InnerIdType>(i));
     }
-    this->mci_cliques_->AppendNewClique(best, total);
+    MCIV3BuildParams params;
+    params.total = visible_total;
+    params.candidate_limit = this->mci_parameters_.mcs;
+    params.clique_max = this->mci_parameters_.incremental_clique_max;
+    params.max_degree = this->bottom_graph_->MaximumDegree();
+    params.alpha = this->mci_parameters_.alpha;
+    params.metric = this->metric_;
+    MCILocalCliqueBuilder builder(params, this->allocator_);
+    const auto precise_codes = this->get_precise_codes();
+    auto distance = [&](InnerIdType lhs, InnerIdType rhs) {
+        return precise_codes->ComputePairVectors(local_to_inner[lhs], local_to_inner[rhs]);
+    };
+    auto batch_distance = [&](InnerIdType lhs,
+                              InnerIdType a,
+                              InnerIdType b,
+                              InnerIdType c,
+                              InnerIdType d,
+                              float* values) {
+        const InnerIdType ids[]{a, b, c, d};
+        for (uint64_t i = 0; i < 4; ++i) {
+            values[i] = distance(lhs, ids[i]);
+        }
+    };
+    auto emit = [&](const auto& clique) {
+        Vector<InnerIdType> members(this->allocator_);
+        members.reserve(clique.size());
+        for (auto id : clique) {
+            members.push_back(local_to_inner[id]);
+        }
+        this->mci_cliques_->AppendNewClique(members, total);
+    };
+    float alpha = params.alpha;
+    while (coverage[0].load(std::memory_order_relaxed) == 0) {
+        builder.Build(
+            0, neighbors.data(), neighbors.size(), alpha, coverage, distance, batch_distance, emit);
+        alpha = next_mci_alpha(alpha, params.alpha, 1, 1);
+    }
 }
 
 // Update the MCI companion index after one vector is inserted into HGraph.

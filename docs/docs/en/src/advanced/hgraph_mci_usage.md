@@ -19,6 +19,7 @@ Paths below are relative to the repository root.
 | `include/vsag/index.h`, `src/index/index_impl.h` | Public Build/Add/Remove/Flush/Search and error wrapping |
 | `src/algorithm/hgraph/hgraph_build.cpp` | `Add` → `add_impl`: insert into HGraph, then maintain MCI for successful insertions |
 | `src/algorithm/hgraph/hgraph_mci.cpp` | Full construction, `search_mci_knn`, `incremental_update_mci_clique`, `repair_mci_clique`, `force_remove_with_mci`, `Flush` |
+| `src/algorithm/mci/mci_local_builder.h` | Shared local graph construction, maximal-clique enumeration/selection and alpha policy for Build and incremental construction |
 | `src/algorithm/hgraph/hgraph_modify.cpp` | Removal dispatch, graph repair, tail-slot moves, shrinking |
 | `src/datacell/clique_datacell.{h,cpp}` | Bidirectional CSR, delta, deletion snapshots, retirement, remapping, Flush |
 | `src/impl/searcher/mci_searcher.cpp` | `search_clique_view`: base CSR + delta + deletion markers |
@@ -45,7 +46,9 @@ Shared ADD/repair pipeline:
 2. Target `min(mci_mcs, visible_total - 1)` neighbors. Internal ef is `max(query_k, 100)`,
    not benchmark ef=320. Remove self, deleted, and out-of-range points; enlarge the request if needed.
 3. Try existing cliques with `|KNN ∩ C| / |C| >= join_ratio` and room below the incremental cap,
-   selecting at most `added_mct`. Build a new clique only if none was joined; empty candidates yield a singleton.
+   selecting at most `added_mct`. Only if none was joined, invoke the same local clique builder as
+   full Build, with incremental size cap and the current point requiring coverage. Empty candidates
+   yield a singleton. Incremental construction no longer stops alpha expansion at two members.
 4. Deletion retires only affected cliques whose surviving size is **less than** `delete_size`.
    Select surviving members whose projected effective coverage is **less than** `delete_mct`;
    recheck coverage before repairing.

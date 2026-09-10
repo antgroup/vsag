@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "algorithm/mci/mci_builder.h"
+#include "algorithm/mci/mci_local_builder.h"
 #include "algorithm/mci/mci_runner.h"
 #include "datacell/clique_datacell.h"
 #include "hgraph.h"
@@ -1030,6 +1031,146 @@ TEST_CASE("HGraph companion MCI incrementally adds INT8 vectors", "[ut][hgraph][
     REQUIRE(search_result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
     REQUIRE(std::stoull(search_result.value()->GetStatistics({"dist_cmp"})[0]) > 0);
     REQUIRE(std::stoull(search_result.value()->GetStatistics({"hops"})[0]) > 0);
+}
+
+TEST_CASE("MCI shared local builder expands past a two-node clique",
+          "[ut][hgraph][mci][shared_build]") {
+    vsag::DefaultAllocator allocator;
+    vsag::MCIV3BuildParams params;
+    params.total = 3;
+    params.dim = 1;
+    params.candidate_limit = 2;
+    params.clique_max = 3;
+    params.max_degree = 2;
+    params.metric = vsag::MetricType::METRIC_TYPE_L2SQR;
+    vsag::MCILocalCliqueBuilder builder(params, &allocator);
+    std::vector<std::atomic<int>> coverage(3);
+    coverage[0].store(0);
+    coverage[1].store(1);
+    coverage[2].store(1);
+    const vsag::InnerIdType neighbors[]{1, 2};
+    auto distance = [](vsag::InnerIdType lhs, vsag::InnerIdType rhs) {
+        const float delta = static_cast<float>(lhs) - static_cast<float>(rhs);
+        return delta * delta;
+    };
+    auto batch = [&](auto lhs, auto a, auto b, auto c, auto d, float* values) {
+        const vsag::InnerIdType ids[]{a, b, c, d};
+        for (uint64_t i = 0; i < 4; ++i) {
+            values[i] = distance(lhs, ids[i]);
+        }
+    };
+    std::vector<std::vector<vsag::InnerIdType>> emitted;
+    auto emit = [&](const auto& clique) { emitted.emplace_back(clique.begin(), clique.end()); };
+    builder.Build(0, neighbors, 2, 1.2F, coverage, distance, batch, emit);
+    REQUIRE(emitted.empty());
+    REQUIRE(coverage[0].load() == 0);
+    builder.Build(0, neighbors, 2, 4.8F, coverage, distance, batch, emit);
+    REQUIRE(emitted.size() == 1);
+    std::sort(emitted[0].begin(), emitted[0].end());
+    REQUIRE(emitted[0] == std::vector<vsag::InnerIdType>{0, 1, 2});
+    REQUIRE(coverage[0].load() == 1);
+    REQUIRE(coverage[1].load() == 2);
+    REQUIRE(coverage[2].load() == 2);
+
+    const std::vector<float> vectors{0.0F, 1.0F, 2.0F};
+    const std::vector<vsag::InnerIdType> rows{1, 2, 0, 2, 0, 1};
+    vsag::MCIGraphView graph;
+    graph.neighbors = rows.data();
+    graph.total = 3;
+    graph.row_stride = 2;
+    graph.uniform_count = 2;
+    const auto full = vsag::BuildMCICliques(vectors.data(), graph, params, &allocator);
+    REQUIRE(full.size() == 1);
+    auto members = full[0];
+    std::sort(members.begin(), members.end());
+    REQUIRE(std::equal(members.begin(), members.end(), emitted[0].begin(), emitted[0].end()));
+}
+
+TEST_CASE("MCI shared builder fallback counts only stored members",
+          "[ut][hgraph][mci][shared_build]") {
+    vsag::DefaultAllocator allocator;
+    vsag::MCIV3BuildParams params;
+    params.total = 6;
+    params.candidate_limit = 5;
+    params.clique_max = 3;
+    vsag::MCILocalCliqueBuilder builder(params, &allocator);
+    std::vector<std::atomic<int>> coverage(6);
+    for (auto& count : coverage) {
+        count.store(1);
+    }
+    coverage[0].store(0);
+    // All distances vanish: the unchanged strict seed-edge bound triggers high-alpha fallback.
+    auto distance = [](auto, auto) { return 0.0F; };
+    uint64_t batches = 0;
+    auto batch = [&](auto, auto, auto, auto, auto, float* values) {
+        ++batches;
+        std::fill_n(values, 4, 0.0F);
+    };
+    const vsag::InnerIdType neighbors[]{1, 2, 3, 4, 5};
+    std::vector<vsag::InnerIdType> stored;
+    builder.Build(0, neighbors, 5, 101.0F, coverage, distance, batch, [&](const auto& clique) {
+        stored.assign(clique.begin(), clique.end());
+    });
+    REQUIRE(batches > 0);
+    REQUIRE(stored.size() == 3);
+    REQUIRE(stored.front() == 0);
+    for (uint64_t i = 0; i < coverage.size(); ++i) {
+        const int before = i == 0 ? 0 : 1;
+        const bool present = std::find(stored.begin(), stored.end(), i) != stored.end();
+        REQUIRE(coverage[i].load() == before + static_cast<int>(present));
+    }
+
+    for (auto& count : coverage) {
+        count.store(1);
+    }
+    coverage[0].store(0);
+    // Duplicates, the seed and out-of-range IDs do not count toward the threshold.
+    const vsag::InnerIdType sparse_neighbors[]{1, 1, 0, 99};
+    stored.clear();
+    builder.Build(0, sparse_neighbors, 4, 1.2F, coverage, distance, batch, [&](const auto& clique) {
+        stored.assign(clique.begin(), clique.end());
+    });
+    REQUIRE(stored.empty());
+    builder.Build(
+        0, sparse_neighbors, 4, 101.0F, coverage, distance, batch, [&](const auto& clique) {
+            stored.assign(clique.begin(), clique.end());
+        });
+    REQUIRE(stored == std::vector<vsag::InnerIdType>{0, 1});
+    REQUIRE(coverage[0].load() == 1);
+    REQUIRE(coverage[1].load() == 2);
+    REQUIRE(coverage[2].load() == 1);
+}
+
+TEST_CASE("HGraph Add uses the full-build local clique size threshold",
+          "[ut][hgraph][mci][shared_build]") {
+    const std::string io = GENERATE("memory_io", "block_memory_io");
+    constexpr int64_t dim = 4;
+    auto config = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    auto params = config["index_param"];
+    params["graph_type"].SetString("nsw");
+    params["base_io_type"].SetString(io);
+    params["build_thread_count"].SetInt(1);
+    params["mci_mcs"].SetInt(3);
+    params["mci_clique_max"].SetInt(3);
+    params["mci_incremental_clique_max"].SetInt(3);
+    auto index = vsag::Factory::CreateIndex("hgraph", config.Dump());
+    REQUIRE(index.has_value());
+    std::vector<int64_t> ids{10, 20, 30, 40};
+    std::vector<float> vectors{1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0};
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, 3, dim)).has_value());
+    auto before = vsag::JsonType::Parse(index.value()->GetStats());
+    REQUIRE(before["mci_total_clique_count"].GetInt() == 1);
+    REQUIRE(before["mci_max_clique_size"].GetInt() == 3);
+    // The existing clique is full. At alpha=1.2, the old greedy branch emitted only {0,1}.
+    REQUIRE(index.value()->Add(make_dataset(ids, vectors, 3, 1, dim)).has_value());
+    auto after = vsag::JsonType::Parse(index.value()->GetStats());
+    REQUIRE(after["mci_covered_nodes"].GetInt() == 4);
+    REQUIRE(after["mci_delta_clique_count"].GetInt() == 1);
+    REQUIRE(after["mci_delta_clique_membership_count"].GetInt() == 3);
+    REQUIRE(index.value()->Flush().has_value());
+    auto flushed = vsag::JsonType::Parse(index.value()->GetStats());
+    REQUIRE(flushed["mci_delta_clique_count"].GetInt() == 0);
+    REQUIRE(flushed["mci_covered_nodes"].GetInt() == 4);
 }
 
 TEST_CASE("MCI builder expands negative inner-product distances", "[ut][hgraph][mci]") {

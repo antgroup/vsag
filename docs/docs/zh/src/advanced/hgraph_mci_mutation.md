@@ -135,16 +135,21 @@ join_ratio(u, C) = |K(u) ∩ C| / |C 的有效成员|
 
 ### 3.4 无合适团时新建增量团
 
-`build_incremental_mci_clique` 以 `u` 为起点：
+`build_incremental_mci_clique` 与全量 `BuildMCICliques` 共用 `MCILocalCliqueBuilder::Build`：
 
-1. 按到 `u` 的距离排序候选邻居。
-2. 根据最近邻距离、metric 和 alpha 得到扩张距离界限。
-3. 贪心加入在界限内、且与已选成员距离也满足界限的候选。
-4. 未达到目标最小规模时继续扩大 alpha，并受终止条件与大小上限约束。
-5. 无候选时建立单点团；有候选但构团不足时可退化为自身和最近邻组成的二点团。
-6. 通过 `AppendNewClique` 写完整成员，并为所有成员写反向 delta 关系。
+1. 收集候选，根据距离界限构建局部图，再枚举极大团、选择覆盖目标点的团。
+2. 构团门槛为 `max(2, min(clique_max, candidate_limit + 1, visible_total))`；
+   增量路径使用 `mci_incremental_clique_max` 作为大小上限，不再以凑够两个点结束扩张。
+3. 全量和增量路径共用 `next_mci_alpha` 扩张策略；alpha 超过 100 时保留小团回退机制。
+4. ADD 只把当前点和 KNN 映射成局部 ID，覆盖计数空间为 O(mcs)，不分配 O(total) 数组。
+   当前点被视为需要重新覆盖，即便它是已有部分团关系的删除修复点。
+5. 增量距离计算通过向量存储接口，支持 block-memory；全量 Build 保留 SIMD 批量计算和多线程调度。
+6. 无候选时建立单点团；通过 `AppendNewClique` 写完整成员和每个成员的反向 delta 关系。
+
+优先加入已有团的快捷路径保持不变：只要成功加入一个已有团，就不会再调用构团核心。
 
 该过程强调局部组织质量和覆盖，不承诺找到全局最大团或唯一极大团。
+下文历史测量早于此次共用构团核心的修改，不代表修改后的性能。
 
 ## 4. 删除的共同策略：小团触发、低覆盖点修复
 

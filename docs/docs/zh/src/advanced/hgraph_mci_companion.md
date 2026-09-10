@@ -88,6 +88,10 @@ MCI 挂件依赖过滤器提供合理的 `ValidRatio()`。bitset 和函数过滤
 建议先用 `Build()` 构建初始索引，再通过增量添加路径追加向量。
 空索引上的 `Add()` 可以触发构建，但不建议用大量小批 Add 替代全量 Build。
 
+ADD 需要新建团时，与全量 `BuildMCICliques` 共用局部图构建、极大团枚举和选择核心。
+增量团大小上限参与决定构团门槛，不再以两个成员作为 alpha 扩张的停止标准。
+优先加入已有团的快捷路径不变；高 alpha 回退仍可能生成较小的团。
+
 `MARK_REMOVE` 会同步更新 MCI 挂件。删除一个点后，若受影响团剩余的有效成员数
 不小于 `mci_delete_clique_size_threshold`，该团会被保留；只有更小的团才会被废弃。
 MCI 仅收集这些废弃团中预计有效团数低于 `mci_delete_node_mct_threshold` 的有效点，

@@ -110,16 +110,25 @@ Any successful join ends this update without constructing another clique. The ta
 is an upper bound, not a promise of three memberships. This branch uses overlap ratio and
 does not revalidate every pair of clique members.
 
-### 3.4 Otherwise build one incremental clique
+### 3.4 Otherwise use the full-build local clique algorithm
 
-Candidates are ordered by distance to the node. Starting with the node, the builder greedily
-adds candidates that satisfy an expanded distance bound against the anchor and selected
-members. Alpha can increase until the minimum-size or termination condition is reached,
-subject to the size cap. With no candidates, it creates a singleton. With insufficient
-construction but a neighbor available, it can fall back to a two-node clique.
+`BuildMCICliques` and incremental construction both call `MCILocalCliqueBuilder::Build`.
+The shared core collects candidates, constructs the distance-threshold local graph, enumerates
+maximal cliques, and selects cliques covering required nodes. The size threshold is
+`max(2, min(clique_max, candidate_limit + 1, visible_total))`; incremental construction uses
+`mci_incremental_clique_max` for the cap. Alpha expansion uses the same `next_mci_alpha` policy;
+a two-node result does not end expansion when the configured threshold is larger.
+
+ADD remaps only its seed and KNN to local IDs, so scratch coverage storage is O(mcs), not O(total).
+Only the seed is marked as requiring fresh coverage, including when it is an existing deletion
+repair point. Distance callbacks read vector codes (including block-memory storage); full Build
+retains its SIMD batch distance kernel and parallel round scheduling. Empty candidates produce a
+singleton; after alpha exceeds 100, the shared high-alpha fallback can produce a smaller clique.
+The existing overlap-based join shortcut is unchanged: any successful join still skips construction.
 
 `AppendNewClique` writes complete members and inverse delta memberships for every member.
 This is bounded local construction, not a guarantee of a globally maximum or unique maximal clique.
+Historical measurements below predate this shared-builder change and are not its performance results.
 
 ## 4. Shared deletion policy
 
