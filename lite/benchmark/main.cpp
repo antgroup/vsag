@@ -43,6 +43,16 @@ struct StabilityConfig {
     std::string snapshot_directory;
 };
 
+struct LoadConfig {
+    std::string snapshot;
+    uint64_t dim;
+    uint64_t query_id;
+    uint64_t query_variant;
+    uint64_t queries;
+    uint64_t k;
+    uint64_t seed;
+};
+
 uint64_t
 parse_uint(const char* text, const char* name) {
     std::string value(text);
@@ -106,6 +116,27 @@ parse_stability_config(int argc, char** argv) {
     }
     if (std::filesystem::exists(config.snapshot_directory)) {
         throw std::invalid_argument("snapshot directory already exists");
+    }
+    return config;
+}
+
+LoadConfig
+parse_load_config(int argc, char** argv) {
+    if (argc != 9) {
+        throw std::invalid_argument(
+            "usage: lite_benchmark load SNAPSHOT DIM QUERY_ID QUERY_VARIANT QUERIES K SEED");
+    }
+    LoadConfig config{argv[2],
+                      parse_uint(argv[3], "dimension"),
+                      parse_uint(argv[4], "query ID"),
+                      parse_uint(argv[5], "query variant"),
+                      parse_uint(argv[6], "query count"),
+                      parse_uint(argv[7], "k"),
+                      parse_uint(argv[8], "seed")};
+    if (not std::filesystem::is_regular_file(config.snapshot) or config.dim == 0 or
+        config.query_id > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) or
+        config.queries == 0 or config.k == 0) {
+        throw std::invalid_argument("load configuration values are out of range");
     }
     return config;
 }
@@ -321,6 +352,53 @@ run(const Config& config) {
 }
 
 int
+run_load(const LoadConfig& config) {
+    const uint64_t snapshot_bytes = std::filesystem::file_size(config.snapshot);
+    const auto load_start = Clock::now();
+    std::ifstream input(config.snapshot, std::ios::binary);
+    require(static_cast<bool>(input), "snapshot open for read failed");
+    auto loaded = vsag::lite::Index::Load(input);
+    require(static_cast<bool>(loaded), "snapshot load failed");
+    const double load_ms = milliseconds(load_start, Clock::now());
+    auto index = std::move(*loaded);
+    require(index->Dim() == config.dim, "loaded dimension does not match query configuration");
+    require(index->Size() > 0, "loaded index is empty");
+
+    std::vector<float> query(config.dim);
+    make_vector(config.query_id, config.query_variant, config.dim, config.seed, query);
+    const auto first_start = Clock::now();
+    auto first = index->Search(query.data(), config.dim, config.k);
+    const double first_query_us = microseconds(first_start, Clock::now());
+    require(static_cast<bool>(first), "first query failed");
+    require(not first->empty(), "first query returned no result");
+    require(first->front().id == static_cast<int64_t>(config.query_id),
+            "first query did not recover the configured ID");
+
+    uint64_t checksum = result_checksum(*first, 1469598103934665603ULL);
+    std::vector<double> search_us;
+    search_us.reserve(config.queries);
+    for (uint64_t query_number = 0; query_number < config.queries; ++query_number) {
+        const auto start = Clock::now();
+        auto result = index->Search(query.data(), config.dim, config.k);
+        search_us.push_back(microseconds(start, Clock::now()));
+        require(static_cast<bool>(result), "follow-up query failed");
+        require(same_results(*result, *first), "follow-up query result changed");
+        checksum = result_checksum(*result, checksum);
+    }
+
+    std::cout << "dim,query_id,query_variant,queries,k,seed,snapshot_bytes,load_ms,"
+                 "first_query_us,search_p50_us,search_p99_us,current_rss_kib,peak_rss_kib,"
+                 "result_checksum,final_size,page_cache_control\n";
+    std::cout << std::fixed << std::setprecision(3) << config.dim << ',' << config.query_id << ','
+              << config.query_variant << ',' << config.queries << ',' << config.k << ','
+              << config.seed << ',' << snapshot_bytes << ',' << load_ms << ',' << first_query_us
+              << ',' << percentile(search_us, 0.50) << ',' << percentile(search_us, 0.99) << ','
+              << current_rss_kib() << ',' << peak_rss_kib() << ',' << checksum << ','
+              << index->Size() << ",uncontrolled\n";
+    return 0;
+}
+
+int
 run_stability(const StabilityConfig& config) {
     require(std::filesystem::create_directories(config.snapshot_directory),
             "snapshot directory creation failed");
@@ -434,6 +512,9 @@ run_stability(const StabilityConfig& config) {
 int
 main(int argc, char** argv) {
     try {
+        if (argc > 1 and std::string(argv[1]) == "load") {
+            return run_load(parse_load_config(argc, argv));
+        }
         if (argc > 1 and std::string(argv[1]) == "stability") {
             return run_stability(parse_stability_config(argc, argv));
         }
