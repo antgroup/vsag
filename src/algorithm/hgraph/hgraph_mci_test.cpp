@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "algorithm/mci/mci_builder.h"
+#include "algorithm/mci/mci_coverage.h"
 #include "algorithm/mci/mci_local_builder.h"
 #include "algorithm/mci/mci_runner.h"
 #include "datacell/clique_datacell.h"
@@ -1164,6 +1165,121 @@ TEST_CASE("HGraph companion MCI incrementally adds INT8 vectors", "[ut][hgraph][
     REQUIRE(search_result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
     REQUIRE(std::stoull(search_result.value()->GetStatistics({"dist_cmp"})[0]) > 0);
     REQUIRE(std::stoull(search_result.value()->GetStatistics({"hops"})[0]) > 0);
+}
+
+TEMPLATE_TEST_CASE("MCI final coverage pass preserves seeds and stored membership counts",
+                   "[ut][hgraph][mci][shared_build][coverage_repair]",
+                   int,
+                   uint32_t) {
+    vsag::DefaultAllocator allocator;
+    constexpr uint64_t total = 8;
+    std::vector<std::atomic<TestType>> coverage(total);
+    for (auto& count : coverage) {
+        count.store(1);
+    }
+    coverage[6].store(0);
+    coverage[7].store(0);
+    vsag::Vector<vsag::Vector<vsag::InnerIdType>> cliques(&allocator);
+    cliques.emplace_back(&allocator);
+    cliques.back().assign({0, 1, 2, 3, 4, 5});
+    uint64_t visited = 0;
+    auto visit_neighbors = [&](vsag::InnerIdType seed, auto visitor) {
+        ++visited;
+        if (seed == 6) {
+            // Duplicate/self/invalid neighbors must not consume the candidate budget.
+            const vsag::InnerIdType row[]{6, 99, 0, 0, 1, 2, 3, 4, 5};
+            for (auto id : row) {
+                if (not visitor(id)) {
+                    break;
+                }
+            }
+        }
+        // Seed 7 is isolated and needs a singleton.
+    };
+    REQUIRE(vsag::EnsureMCICliqueCoverage(
+                total, 5, 3, coverage, visit_neighbors, cliques, &allocator) == 2);
+    REQUIRE(visited == 2);
+    REQUIRE(cliques.size() == 3);
+    // Normalization truncates a high-ID seed, then restores it in the stored clique.
+    REQUIRE(std::vector<vsag::InnerIdType>(cliques[1].begin(), cliques[1].end()) ==
+            std::vector<vsag::InnerIdType>{0, 1, 6});
+    REQUIRE(cliques[2].size() == 1);
+    REQUIRE(cliques[2].front() == 7);
+    std::vector<uint64_t> actual(total, 0);
+    for (const auto& clique : cliques) {
+        for (auto id : clique) {
+            ++actual[id];
+        }
+    }
+    for (uint64_t id = 0; id < total; ++id) {
+        REQUIRE(coverage[id].load() == actual[id]);
+        REQUIRE(actual[id] > 0);
+    }
+    // A second pass must neither read graph rows nor append duplicate cliques.
+    REQUIRE(vsag::EnsureMCICliqueCoverage(
+                total, 5, 3, coverage, visit_neighbors, cliques, &allocator) == 0);
+    REQUIRE(visited == 2);
+    REQUIRE(cliques.size() == 3);
+}
+
+TEST_CASE("MCI final coverage pass handles empty and singleton graphs",
+          "[ut][hgraph][mci][shared_build][coverage_repair]") {
+    vsag::DefaultAllocator allocator;
+    const uint64_t total = GENERATE(0, 1);
+    std::vector<std::atomic<int>> coverage(total);
+    for (auto& count : coverage) {
+        count.store(0);
+    }
+    vsag::Vector<vsag::Vector<vsag::InnerIdType>> cliques(&allocator);
+    auto visit_neighbors = [](vsag::InnerIdType, auto) { FAIL("unexpected graph access"); };
+    REQUIRE(vsag::EnsureMCICliqueCoverage(
+                total, 0, 1, coverage, visit_neighbors, cliques, &allocator) == total);
+    REQUIRE(cliques.size() == total);
+    if (total == 1) {
+        REQUIRE(cliques.front().size() == 1);
+        REQUIRE(cliques.front().front() == 0);
+        REQUIRE(coverage[0].load() == 1);
+    }
+}
+
+TEST_CASE("MCI full build covers duplicate vectors after alpha exhaustion",
+          "[ut][hgraph][mci][shared_build][coverage_repair]") {
+    vsag::DefaultAllocator allocator;
+    constexpr uint64_t total = 256;
+    constexpr uint64_t mcs = 200;
+    std::vector<float> vectors(total, 1.0F);
+    std::vector<vsag::InnerIdType> rows(total * mcs);
+    for (uint64_t seed = 0; seed < total; ++seed) {
+        uint64_t count = 0;
+        for (vsag::InnerIdType id = 0; count < mcs; ++id) {
+            if (id != seed) {
+                rows[seed * mcs + count++] = id;
+            }
+        }
+    }
+    vsag::MCIGraphView graph;
+    graph.neighbors = rows.data();
+    graph.total = total;
+    graph.row_stride = mcs;
+    graph.uniform_count = mcs;
+    vsag::MCIV3BuildParams params;
+    params.total = total;
+    params.dim = 1;
+    params.candidate_limit = mcs;
+    params.clique_max = 50;
+    params.thread_count = GENERATE(1, 4);
+    params.metric = vsag::MetricType::METRIC_TYPE_COSINE;
+    const auto cliques = vsag::BuildMCICliques(vectors.data(), graph, params, &allocator);
+    std::vector<bool> covered(total, false);
+    for (const auto& clique : cliques) {
+        REQUIRE_FALSE(clique.empty());
+        REQUIRE(clique.size() <= params.clique_max);
+        for (auto id : clique) {
+            REQUIRE(id < total);
+            covered[id] = true;
+        }
+    }
+    REQUIRE(std::count(covered.begin(), covered.end(), true) == total);
 }
 
 TEST_CASE("MCI shared local builder expands past a two-node clique",

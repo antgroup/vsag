@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "../mci/mci_builder.h"
+#include "../mci/mci_coverage.h"
 #include "../mci/mci_local_builder.h"
 #include "datacell/graph_interface.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
@@ -1316,24 +1317,15 @@ HGraph::build_mci_clique_index(const void* vectors) {
         previous_uncovered = uncovered;
     }
 
-    // Final safety pass: every node must belong to at least one MCI clique.
-    for (InnerIdType inner_id = 0; inner_id < total; ++inner_id) {
-        if (get_clique_count(inner_id) == 0) {
-            Vector<InnerIdType> singleton(this->allocator_);
-            singleton.push_back(inner_id);
-            graph.ForEachNeighbor(inner_id, [&](InnerIdType neighbor) {
-                if (std::find(singleton.begin(), singleton.end(), neighbor) != singleton.end()) {
-                    return true;
-                }
-                singleton.push_back(neighbor);
-                return singleton.size() < graph_max_degree;
-            });
-            Vector<Vector<InnerIdType>> fallback_cliques(this->allocator_);
-            if (try_select_clique(singleton, fallback_cliques)) {
-                append_selected_clique(fallback_cliques.front());
-            }
-        }
-    }
+    const auto repaired = EnsureMCICliqueCoverage(
+        total,
+        graph_max_degree,
+        this->mci_parameters_.clique_max,
+        num_cliques_per_node,
+        [&](InnerIdType seed, auto visitor) { graph.ForEachNeighbor(seed, visitor); },
+        cliques,
+        this->allocator_);
+    logger::info("hgraph mci final coverage repair, fallback_cliques={}", repaired);
 
     uint64_t max_membership = 0;
     uint64_t total_memberships = 0;

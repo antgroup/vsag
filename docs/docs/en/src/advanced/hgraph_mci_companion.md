@@ -41,6 +41,11 @@ The default source is `hgraph`, which preserves the existing behavior. Set the s
 `odescent` to build the MCI KNN graph directly from the stored vectors. An internally configured
 external KNN graph path takes precedence over this selector.
 
+Both the float fast path and the generic full-build path share a final coverage pass.
+Any node still uncovered after clique enumeration is placed in a fallback clique with graph
+neighbors (or a singleton when none are available). This pass relaxes clique distance constraints,
+preserves the seed under the clique-size cap, and counts only stored memberships.
+
 | Parameter | Purpose |
 | --- | --- |
 | `use_mci` | Enables MCI with default build parameters when set to `true`. |

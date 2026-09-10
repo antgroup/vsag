@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "impl/logger/logger.h"
+#include "mci_coverage.h"
 #include "mci_local_builder.h"
 #include "simd/fp32_simd.h"
 
@@ -404,6 +405,31 @@ BuildMCICliques(const float* vectors,
             break;
         }
     } while (uncovered > 0);
+
+    if (uncovered > 0) {
+        auto visit_neighbors = [&](InnerIdType seed, auto visitor) {
+            const auto* row = GraphRow(graph, seed);
+            const auto count = std::min<uint64_t>(GraphRowCount(graph, seed), graph.row_stride);
+            for (uint64_t i = 0; i < count; ++i) {
+                if (not visitor(row[i])) {
+                    break;
+                }
+            }
+        };
+        const auto repaired = EnsureMCICliqueCoverage(total,
+                                                      params.max_degree,
+                                                      params.clique_max,
+                                                      num_cliques_per_node,
+                                                      visit_neighbors,
+                                                      selected_by_thread.front(),
+                                                      allocator);
+        total_clique_count.fetch_add(repaired, std::memory_order_relaxed);
+        clique_containing_seed_count.fetch_add(repaired, std::memory_order_relaxed);
+        logger::info("mci v3 final coverage repair, uncovered_before={}, fallback_cliques={}",
+                     uncovered,
+                     repaired);
+        uncovered = 0;
+    }
 
     const auto timing = SumTiming(total_timings);
     logger::info(
