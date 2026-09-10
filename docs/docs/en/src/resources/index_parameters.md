@@ -136,6 +136,8 @@ No extra parameters.
 
 ## Pyramid
 
+`adaptive_pruning` defaults to `{"enabled": false}`. For experimental NSW bottom forward/reverse L2 pruning, see [Pyramid](../indexes/pyramid.md#experimental-adaptive-nsw-pruning).
+
 Pyramid build parameters also live under `index_param`:
 
 ```json

@@ -183,6 +183,7 @@ extern const char* const HGRAPH_GRAPH_MAX_DEGREE;
 extern const char* const HGRAPH_BUILD_EF_CONSTRUCTION;
 extern const char* const HGRAPH_BUILD_ALPHA;
 extern const char* const HGRAPH_ADAPTIVE_PRUNING;
+extern const char* const PYRAMID_ADAPTIVE_PRUNING;
 extern const char* const HGRAPH_INIT_CAPACITY;
 extern const char* const RESIZE_INCREASE_COUNT_BIT;
 extern const char* const HGRAPH_GRAPH_TYPE;

@@ -91,6 +91,7 @@ auto result = index->KnnSearch(
 | `graph_storage_type` | string | `"flat"` | `multi_layer` 根节点的底图存储：`flat` 偏向构建和检索速度，`compressed` 减少图内存。压缩存储要求 `max_degree <= 255`。单层根图、路由图和子图仍使用 Sparse。 |
 | `ef_construction` | int | `400` | `nsw` 构图时的候选集大小 |
 | `alpha` | float | `1.2` | 构图剪枝系数 |
+| `adaptive_pruning` | object | `{"enabled": false}` | 可选的 NSW 底图正向/反向 L2 选择器；见[配置与范围](#实验性-nsw-自适应剪枝)。 |
 | `graph_iter_turn` | int | — | ODescent 迭代轮数（`graph_type: "odescent"` 时生效） |
 | `neighbor_sample_rate` | float | — | ODescent 的邻居采样比率 |
 | `no_build_levels` | int[] | `[]` | 跳过构图的层级（从根节点开始的 0-based 下标） |
@@ -358,3 +359,39 @@ Pyramid 支持 `RemoveMode::MARK_REMOVE`。调用 `Remove(ids)`（默认模式�
 - [索引参数](../resources/index_parameters.md)
 - [图索引增强](../advanced/enhance_graph.md)
 - [HGraph](hgraph.md)
+
+## 实验性 NSW 自适应剪枝
+
+Pyramid 直接复用 HGraph 的[自适应邻居选择器](adaptive_pruning.md)。在 `index_param.adaptive_pruning` 配置一次，作用于每个已构建路径节点的底图，包括 `single_layer` 根图和 `multi_layer` 根图的底层。路由层保留原有固定 alpha 策略。平面节点升级为 NSW 图时开始使用该策略。
+
+```json
+{
+    "graph_type": "nsw",
+    "alpha": 1.06,
+    "adaptive_pruning": {
+        "enabled": true,
+        "adjust_step": 0.06,
+        "fill_rejected": true,
+        "apply_to_reverse": true,
+        "apply_to_upper": false
+    }
+}
+```
+
+以上字段放在 `index_param` 内。这是实验配置，不是适用于所有数据集的推荐默认值。
+
+| 字段 | 默认值 | 含义 |
+| --- | --- | --- |
+| `enabled` | `false` | NSW 插入时使用共享的多轮选择器 |
+| `adjust_step` | `0.06` | 相对所属 hierarchy 基准 alpha 放宽或收紧的步长 |
+| `fill_rejected` | `false` | 放宽分支结束后，可从剩余拒绝候选中补满容量 |
+| `apply_to_reverse` | `false` | 同时对已满的反向邻居表重新剪枝，以已有邻居为中心 |
+| `apply_to_upper` | `false` | 保留字段，暂不支持启用上层自适应 |
+
+策略全局共享，各 hierarchy 保留自己的有效 `alpha` 和最大度数；不支持 hierarchy 内单独覆盖 `adaptive_pruning`。每个有效 alpha 都必须有限，且满足 `adjust_step >= 0`、`alpha - 2*adjust_step > 0`、`alpha + 3*adjust_step` 有限。alpha=1.06、step=0.06 时，可能使用的调整值介于 0.94–1.24；这些常数不会根据向量维度自动推导。
+
+启用时要求 `graph_type: "nsw"` 和 `metric_type: "l2"`。导入非空构图缓存后的 Build 会被拒绝，空缓存可以正常使用。ODescent、路由层自适应和更新/精炼路径不在本策略范围内。尚有容量的反向邻居表仍直接追加；距离提供器和量化器不变。
+
+序列化会记录策略。加载要求启用状态一致；启用时还要求 alpha、步长、补边和作用范围一致。旧参数中没有此字段时按关闭处理，从而保证后续 Add 继续使用一致策略；这不保证旧版本 VSAG 能读取新写出的索引。
+
+应在相近 recall 下比较 QPS，同时报告构图时间和内存。更多剪枝轮次可能增加构图耗时，即使得到的图能加速查询。当 `k=10` 时，Pyramid 当前仅接受 `[1, 1000]` 范围内的 `ef_search`。GIST 测试若构图路径全部为空、查询不传 `Paths`，只衡量根图无过滤搜索，不能据此推断路径过滤场景的收益。RaBitQ + SQ8 重排使用现有 SQ8 距离提供器构图，与 RaBitQ 3+5 split 存储配置不同。

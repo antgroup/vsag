@@ -129,6 +129,8 @@ LazyHGraph 只支持 `dtype: "float32"`。搜索参数使用 `hgraph` 对象，�
 
 ## Pyramid
 
+`adaptive_pruning` 默认值为 `{"enabled": false}`。实验性 NSW 底图正向/反向 L2 剪枝配置见 [Pyramid](../indexes/pyramid.md#实验性-nsw-自适应剪枝)。
+
 Pyramid 构建参数同样放在 `index_param` 下：
 
 ```json

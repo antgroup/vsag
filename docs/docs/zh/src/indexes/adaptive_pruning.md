@@ -1,6 +1,8 @@
-# HGraph 自适应邻居剪枝
+# HGraph 与 Pyramid 自适应邻居剪枝
 
 HGraph 提供默认关闭的实验性自适应选择器，用于 NSW 底层构图。它改变 `Build` 和 `Add` 产生的图，包括 RaBitQ split/fused 优化构建路径；查询时不执行此策略。公开参数与默认值见 [HGraph 配置](hgraph.md#实验性自适应剪枝)。
+
+Pyramid 的 NSW 底图复用同一个选择器：策略全局共享，基准 alpha 使用所属 hierarchy 的有效值。详见 [Pyramid 配置与范围](pyramid.md#实验性-nsw-自适应剪枝)。Pyramid 路由层不启用自适应；此扩展也不会将 HGraph 的 RaBitQ 临时构图存储引入 Pyramid。
 
 ## 作用范围与兼容性
 
@@ -81,3 +83,5 @@ $$
 ## 测试覆盖
 
 `[adaptive_pruning]` 测试包括比例边界、严格不等式、补边、零步长、自环／重复候选规范化、非法输入、真实 L2 几何与候选排列稳定性、正向／反向范围、缓存拒绝、参数兼容，以及 1/4 线程下 FP32、RaBitQ split/fused 的构建—序列化—加载—追加流程。周边回归标签为 `[pruning_strategy]`、`[HGraphParameter]`、`[hgraph]` 和 `[build_cache]`。
+
+Pyramid 接入测试另覆盖平面节点升级、单层/多层根图、根图与路径查询、FP32/RaBitQ + SQ8 在 1/4 线程下构建—加载—继续 Add、导入缓存拒绝、hierarchy alpha 校验及序列化策略兼容性。
