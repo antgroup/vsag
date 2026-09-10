@@ -92,13 +92,9 @@ public:
     /**
      * @brief Calculate distance by ID using DatasetPtr.
      *
-     * Suitable for sparse vector indexes (SINDI, SINDI_V2) where vectors
-     * cannot be represented as a simple float pointer. The Dataset should
-     * contain sparse vectors via GetSparseVectors().
-     * For dense vector indexes, this overload is also available via default
-     * implementation that calls GetFloat32Vectors().
-     *
-     * Default implementation throws exception; indexes must override appropriately.
+     * The default adapter accepts exactly one dense Float32Vectors query with matching dimension
+     * and delegates to the float-pointer overload. Sparse and multi-vector indexes override this
+     * method for their native representations.
      *
      * @param vector DatasetPtr containing the query vector (sparse or dense format).
      * @param id The unique identifier of the vector in the index.
@@ -110,9 +106,13 @@ public:
     CalcDistanceById(const DatasetPtr& vector,
                      int64_t id,
                      bool calculate_precise_distance = true) const {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support calculate distance by id");
-    };
+        CHECK_ARGUMENT(vector != nullptr, "distance query must not be null");
+        CHECK_ARGUMENT(vector->GetNumElements() == 1, "single-ID distance requires one query");
+        CHECK_ARGUMENT(vector->GetFloat32Vectors() != nullptr,
+                       "distance query must contain float32 vectors");
+        CHECK_ARGUMENT(vector->GetDim() == dim_, "distance query dimension mismatch");
+        return this->CalcDistanceById(vector->GetFloat32Vectors(), id, calculate_precise_distance);
+    }
 
     /**
      * @brief Calculate distance by ID using raw float pointer.
@@ -626,9 +626,10 @@ protected:
             }
             try {
                 distances[i] = calc_fn(ids[i]);
-                // If calc_fn returns -1.0F (e.g., due to concurrent removal), mark as invalid
+                // A valid IP distance can also equal -1. Recheck the label rather than
+                // inferring validity from the distance value after a concurrent removal.
                 if (distances[i] == -1.0F and validity != nullptr) {
-                    (*validity)[i] = false;
+                    (*validity)[i] = not set_missing_distance(i);
                 }
             } catch (const VsagException&) {
                 handle_exception(i);

@@ -231,3 +231,39 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::WarpTestIndex, "Warp Mark Remove", "[ft][
         }
     }
 }
+
+TEST_CASE("WARP native distance contract", "[warp][distance_contract]") {
+    float values[] = {2.0F, 0.0F, 0.0F, 1.0F};
+    MultiVector mv{2, values};
+    int64_t label = 42;
+    auto data = Dataset::Make()
+                    ->NumElements(1)
+                    ->Dim(2)
+                    ->Ids(&label)
+                    ->MultiVectors(&mv)
+                    ->MultiVectorDim(2)
+                    ->Owner(false);
+    auto created = Factory::CreateIndex(
+        "warp", fixtures::WarpTestIndex::GenerateWarpBuildParametersString("ip", 2, WarpParam{}));
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    REQUIRE(index->Build(data).has_value());
+    REQUIRE(index->CheckFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID));
+    auto searched = index->KnnSearch(data, 1, "{}", FilterPtr{});
+    REQUIRE(searched.has_value());
+    auto distance = index->CalcDistanceById(data, label);
+    REQUIRE(distance.has_value());
+    REQUIRE(distance.value() == searched.value()->GetDistances()[0]);
+    MultiVector rows[] = {mv, mv};
+    data->NumElements(2)->MultiVectors(rows);
+    int64_t candidates[] = {-99, label, label, -99};
+    auto result = index->CalcDistancesById(data, candidates, 2, true, 1);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetNumElements() == 2);
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == label);
+    REQUIRE(result.value()->GetIds()[1] == label);
+    REQUIRE(result.value()->GetDistances()[0] == distance.value());
+    REQUIRE(result.value()->GetDistances()[1] == distance.value());
+    REQUIRE_FALSE(index->CalcDistanceById(values, label).has_value());
+}

@@ -216,7 +216,7 @@ RangeSearch(const DatasetPtr& query, float radius, const std::string& parameters
 |------|------|------|
 | `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const float* vector, int64_t id, bool calculate_precise_distance = true) const` | 稠密查询到已存向量 `id` 的距离。 |
 | `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const DatasetPtr& vector, int64_t id, bool calculate_precise_distance = true) const` | 同上，接收 `DatasetPtr`（适用于 SINDI 等稀疏索引）。 |
-| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | 规范的批量版本；`topk > 0` 时返回按距离升序排列的最小距离及对应 ID，无效 `-1` 距离排在最后。 |
+| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | 规范的批量版本；`topk > 0` 时返回按距离升序排列的最小距离及对应 ID，缺失 ID 排在最后（有效距离也可能是负数）。 |
 | `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const DatasetPtr& query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | 规范的 `DatasetPtr` 查询批量版本。`query->GetNumElements() > 1` 时索引需声明 `SUPPORT_BATCH_CALC_DISTANCE_BY_ID`；`ids` 包含 `NumElements * count` 个 row-major 条目。`topk > 0` 时每个 query 返回 `min(topk, count)` 个排序距离及对应 ID。 |
 | `CalDistanceById` | 与 `CalcDistancesById` 相同的签名 | 已弃用的兼容别名；新代码请使用 `CalcDistancesById`。 |
 

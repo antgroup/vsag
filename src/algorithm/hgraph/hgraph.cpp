@@ -452,6 +452,7 @@ HGraph::CalDistanceById(const float* query,
                         int64_t count,
                         bool calculate_precise_distance,
                         int64_t topk) const {
+    CHECK_ARGUMENT(topk == -1 || topk > 0, "distance topk must be -1 or positive");
     FlattenInterfacePtr flat;
     std::shared_lock<std::shared_mutex> lock;
     if (!this->immutable_.load(std::memory_order_acquire)) {

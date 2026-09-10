@@ -1071,34 +1071,49 @@ InnerIndexInterface::cal_distance_by_id(const float* query,
                                         int64_t count,
                                         const FlattenInterfacePtr& data,
                                         std::vector<bool>* validity) const {
+    CHECK_ARGUMENT(count >= 0, "distance count must be non-negative");
+    CHECK_ARGUMENT(
+        static_cast<uint64_t>(count) <= std::numeric_limits<uint64_t>::max() / sizeof(float),
+        "distance buffer size overflows");
+    if (count > 0) {
+        CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
+        CHECK_ARGUMENT(ids != nullptr, "distance IDs must not be null");
+    }
     auto result = Dataset::Make();
     result->NumElements(1)->Dim(count)->Owner(true, allocator_);
-    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
-    result->Distances(distances);
-    auto computer = data->FactoryComputer(query);
-    Vector<InnerIdType> inner_ids(count, 0, allocator_);
-    Vector<InnerIdType> invalid_id_loc(allocator_);
     if (validity != nullptr) {
         validity->assign(count, false);
     }
+    if (count == 0) {
+        return result;
+    }
+    auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
+    CHECK_ARGUMENT(distances != nullptr, "failed to allocate distance buffer");
+    result->Distances(distances);
+    std::fill(distances, distances + count, -1.0F);
+    Vector<InnerIdType> inner_ids(allocator_);
+    Vector<int64_t> positions(allocator_);
     {
         std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
         for (int64_t i = 0; i < count; ++i) {
             auto [success, inner_id] = this->label_table_->TryGetIdByLabel(ids[i]);
             if (success) {
-                inner_ids[i] = inner_id;
+                inner_ids.push_back(inner_id);
+                positions.push_back(i);
                 if (validity != nullptr) {
                     (*validity)[i] = true;
                 }
-            } else {
-                logger::debug(fmt::format("failed to find id: {}", ids[i]));
-                invalid_id_loc.push_back(i);
             }
         }
     }
-    data->Query(distances, computer, inner_ids.data(), count);
-    for (unsigned int i : invalid_id_loc) {
-        distances[i] = -1;
+    // Do not read a placeholder internal ID for missing labels, especially on an empty index.
+    if (not inner_ids.empty()) {
+        auto computer = data->FactoryComputer(query);
+        Vector<float> valid_distances(inner_ids.size(), allocator_);
+        data->Query(valid_distances.data(), computer, inner_ids.data(), inner_ids.size());
+        for (uint64_t i = 0; i < positions.size(); ++i) {
+            distances[positions[i]] = valid_distances[i];
+        }
     }
     return result;
 }

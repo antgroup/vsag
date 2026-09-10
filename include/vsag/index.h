@@ -524,14 +524,12 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID.
      *
-     * Suitable for Dataset-backed query formats, especially sparse vector indexes
-     * (SINDI, SINDI_V2) where vectors cannot be represented as a simple float pointer.
-     * Dense DatasetPtr batch queries are supported by the batch overload below
-     * through Float32Vectors() when the index advertises the batch feature; for
-     * this single-ID overload, dense callers should prefer the const float* API
-     * unless the target implementation explicitly supports DatasetPtr distance.
+     * Accepts one query in the index's native representation: Float32Vectors for dense indexes,
+     * SparseVectors for SINDI/SINDI_V2, or MultiVectors and MultiVectorDim for WARP/SIMQ.
+     * Dense Dataset queries and raw float pointers have the same distance semantics.
+     * Use CalcDistancesById for multiple query rows.
      *
-     * @param vector is the embedding of query (sparse or dense format via DatasetPtr).
+     * @param vector A Dataset containing exactly one native query.
      * @param id is the unique identifier of the vector to be calculated in the index.
      * @param calculate_precise_distance If true, the function will attempt to use high-precision
      *        vectors (e.g., full-precision float32) for distance computation, even if it requires

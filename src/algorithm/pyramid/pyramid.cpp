@@ -2490,6 +2490,7 @@ Pyramid::CalDistanceById(const float* query,
                          int64_t count,
                          bool calculate_precise_distance,
                          int64_t topk) const {
+    CHECK_ARGUMENT(topk == -1 || topk > 0, "distance topk must be -1 or positive");
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     auto flat = this->base_codes_;
     if (has_precise_reorder() && calculate_precise_distance) {

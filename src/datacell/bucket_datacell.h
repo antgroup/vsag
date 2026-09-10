@@ -87,9 +87,10 @@ public:
           InnerIdType id_count,
           QueryContext* ctx = nullptr) override {
         if (id_count > 0 and GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
-            throw VsagException(ErrorType::INTERNAL_ERROR,
-                                "PQFastScan doesn't support ComputeDist, only support "
-                                "ComputeBatchDist");
+            for (InnerIdType i = 0; i < id_count; ++i) {
+                result_dists[i] = QueryOneById(computer, bucket_ids[i], offset_ids[i]);
+            }
+            return;
         }
         auto comp = static_cast<Computer<QuantTmpl>*>(computer.get());
         this->query(result_dists, comp, bucket_ids, offset_ids, id_count, ctx);
@@ -359,8 +360,20 @@ BucketDataCell<QuantTmpl, IOTmpl>::query_one_by_id(
                         offset_id));
     }
     float ret;
-    auto lease = this->datas_[bucket_id].Acquire(offset_id * code_size_, code_size_);
-    computer->ComputeDist(lease.Data(), &ret);
+    if (GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
+        // PQFS stores transposed 32-vector packages, including a padded final package.
+        // A single code is not independently addressable; scan its package and select its lane.
+        constexpr InnerIdType package_size = 32;
+        const auto package_begin = offset_id / package_size * package_size;
+        auto lease =
+            this->datas_[bucket_id].Acquire(package_begin * code_size_, package_size * code_size_);
+        float package_distances[package_size];
+        computer->ScanBatchDists(package_size, lease.Data(), package_distances);
+        ret = package_distances[offset_id - package_begin];
+    } else {
+        auto lease = this->datas_[bucket_id].Acquire(offset_id * code_size_, code_size_);
+        computer->ComputeDist(lease.Data(), &ret);
+    }
 
     if (use_residual_) {
         Vector<float> centroid(this->quantizer_->GetDim(), allocator_);

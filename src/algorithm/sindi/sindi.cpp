@@ -1954,13 +1954,10 @@ SINDI::CalcDistanceById(const DatasetPtr& vector,
                         int64_t id,
                         bool calculate_precise_distance) const {
     std::shared_lock rlock(this->global_mutex_);
-    CHECK_ARGUMENT(immutable_term_datacell_ == nullptr,
-                   "immutable SINDI runtime does not support CalcDistanceById");
 
-    if (vector == nullptr || vector->GetNumElements() == 0 ||
-        vector->GetSparseVectors() == nullptr) {
-        return -1.0F;
-    }
+    CHECK_ARGUMENT(vector != nullptr, "distance query must not be null");
+    CHECK_ARGUMENT(vector->GetNumElements() == 1, "single-ID distance requires one query");
+    CHECK_ARGUMENT(vector->GetSparseVectors() != nullptr, "query must contain sparse vectors");
 
     if (use_reorder_ && calculate_precise_distance) {
         const auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
@@ -1974,7 +1971,10 @@ SINDI::CalcDistanceById(const DatasetPtr& vector,
         return distance;
     }
 
-    const auto inner_id = this->label_table_->GetIdByLabel(id);
+    const auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
+    if (not success) {
+        return -1.0F;
+    }
     auto sparse_query = vector->GetSparseVectors()[0];
     Vector<uint32_t> tmp_ids(allocator_);
     Vector<float> tmp_vals(allocator_);
@@ -2034,8 +2034,6 @@ SINDI::CalDistanceById(const DatasetPtr& query,
     result->Distances(distances);
 
     std::shared_lock rlock(this->global_mutex_);
-    CHECK_ARGUMENT(immutable_term_datacell_ == nullptr,
-                   "immutable SINDI runtime does not support CalDistanceById");
 
     Vector<int64_t> inner_ids(count, -1, allocator_);
     std::unordered_map<int64_t, std::vector<int64_t>> window_positions;
@@ -2153,9 +2151,7 @@ SINDI::InitFeatures() {
 
     // info
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
-    if (not immutable_enabled_) {
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID);
-    }
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID);
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ESTIMATE_MEMORY);
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
 

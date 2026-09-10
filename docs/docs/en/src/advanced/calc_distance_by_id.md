@@ -61,11 +61,27 @@ Declarations live in
 
 ### `calculate_precise_distance`
 
-- `true` (default): the implementation tries to use the **high-precision** representation
-  of the stored vector (e.g. full-precision float32). When the index only retains quantized
-  codes, obtaining the precise value can be more expensive.
-- `false`: the implementation may use the **quantized / approximate** representation that
-  the index already keeps in memory. Faster, but the returned distance is approximate.
+- `true` (default) prefers an available higher-precision/reorder representation. It does **not** reconstruct discarded original vectors. When no separate precise representation exists, it uses the stored representation, which can still be quantized or pruned.
+- `false` uses the base representation. Both modes compute the configured distance; they do not run approximate candidate retrieval. A disk-backed representation can incur I/O in either mode.
+- BruteForce/WARP and SIMQ use their stored distance backend for both modes. HGraph/Pyramid prefer raw vectors when retained, otherwise reorder codes; IVF uses its configured reorder codes/buckets. SINDI/SINDI_V2 use rerank vectors when configured.
+
+### Native query representations
+
+| Index | Single-ID query | Multi-query batch query |
+|---|---|---|
+| BruteForce, HGraph, IVF, Pyramid, LazyHGraph | `float*` or one-row `DatasetPtr` with `Float32Vectors` | `DatasetPtr` with `Float32Vectors` |
+| SINDI, SINDI_V2 | one-row `DatasetPtr` with `SparseVectors` | `DatasetPtr` with `SparseVectors` |
+| WARP, SIMQ | one-row `DatasetPtr` with `MultiVectors` and `MultiVectorDim` | `DatasetPtr` with `MultiVectors` and `MultiVectorDim` |
+
+SINDI immutable storage supports single-ID and batch distances, including after deserialization. WARP/SIMQ calculate the same multi-vector aggregation as their search distance backend, without coarse candidate selection. Raw float pointers cannot represent these native sparse/multi-vector queries.
+
+For N query rows and `count` candidates per row, provide N × count candidate IDs in row-major order (`ids[q * count + j]`); a single candidate list is **not** implicitly broadcast. `CalcDistancesById` is the preferred batch name; `CalDistanceById` remains the compatibility alias.
+
+Missing labels produce `-1`, but a valid inner-product distance can also be negative (including `-1`). Top-k uses label validity, not the sign or value of the distance, to place missing labels last.
+
+IVF PQFS supports point and batch distances using the same packed-code lookup as bucket scanning. A point lookup reads its 32-vector package and selects one lane; this may perform more work than a scalar quantizer lookup, particularly for disk-backed storage.
+
+PQFS is supported as IVF base bucket encoding, not as flat reorder encoding: flat reorder storage does not maintain PQFS packages. Invalid PQFS reorder configurations are rejected at index creation; choose a supported precise quantizer such as FP32 instead.
 
 ### Return Semantics
 
@@ -74,8 +90,8 @@ Declarations live in
   `DatasetPtr` overload returns `NumElements()` rows with `count` distances each. Both preserve
   input order and do not return IDs.
 - With `topk > 0`, the batch overload returns the smallest `min(topk, count)` distances per
-  query, sorted ascending, and `GetIds()` contains the corresponding IDs. Invalid IDs (`-1`
-  distances) are ordered after valid distances and only appear if there are not enough valid IDs.
+  query, sorted ascending, and `GetIds()` contains the corresponding IDs. Missing IDs (represented by `-1`
+  distances) are ordered after valid distances regardless of their sign and only appear if there are not enough valid IDs.
 - The distance metric (IP / L2 / cosine) follows the `metric_type` chosen at index
   construction; see [Metric Semantics](../resources/metric_semantics.md).
 

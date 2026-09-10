@@ -1610,6 +1610,15 @@ TEST_CASE("SINDIV2 memory term layout mutable and immutable roundtrip", "[ut][SI
             REQUIRE(disk_knn->GetIds()[0] == labels[0]);
             REQUIRE(std::abs(disk_loaded.CalcDistanceById(query, labels[0], false) -
                              expected_distance) <= 1e-5F);
+            int64_t candidates[] = {-1, labels[0], labels[1]};
+            auto batch = disk_loaded.CalDistanceById(query, candidates, 3, false);
+            REQUIRE(batch->GetDistances()[0] == -1.0F);
+            REQUIRE(std::abs(batch->GetDistances()[1] - expected_distance) <= 1e-5F);
+            auto top = disk_loaded.CalDistanceById(query, candidates, 3, false, 2);
+            REQUIRE(top->GetIds()[0] != -1);
+            REQUIRE(top->GetIds()[1] != -1);
+            REQUIRE(top->GetDistances()[0] <= top->GetDistances()[1]);
+            REQUIRE_THROWS(disk_loaded.CalcDistanceById(DatasetPtr{}, labels[0]));
 
             if (config.immutable) {
                 REQUIRE_THROWS_WITH(

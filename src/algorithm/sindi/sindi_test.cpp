@@ -1240,8 +1240,13 @@ TEST_CASE("SINDI Immutable Sparse Deserialize KNN Test", "[ut][SINDI]") {
     SparseVector immutable_vector;
     REQUIRE_THROWS(source->GetSparseVectorByInnerId(0, &immutable_vector, allocator.get()));
     REQUIRE_THROWS(immutable->GetSparseVectorByInnerId(0, &immutable_vector, allocator.get()));
-    REQUIRE_THROWS(immutable->CalcDistanceById(query, ids[0]));
-    REQUIRE_THROWS(immutable->CalDistanceById(query, ids.data(), num_base));
+    auto distances = immutable->CalDistanceById(query, ids.data(), num_base);
+    REQUIRE(distances->GetDim() == num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        REQUIRE(std::abs(immutable->CalcDistanceById(query, ids[i]) -
+                         distances->GetDistances()[i]) < 1e-3F);
+    }
+    REQUIRE(immutable->CalcDistanceById(query, -1, false) == -1.0F);
 
     for (auto& item : sv_base) {
         delete[] item.vals_;
@@ -2531,20 +2536,12 @@ TEST_CASE("SINDI prunes before remapping and calibrates SQ8 from raw values", "[
             SparseVector missing_query{1, &missing_term, &query_value};
             auto query = Dataset::Make();
             query->NumElements(1)->SparseVectors(&missing_query)->Owner(false);
-            if (immutable) {
-                REQUIRE_THROWS(index.CalcDistanceById(query, label, false));
-            } else {
-                REQUIRE(std::abs(index.CalcDistanceById(query, label, false) - 1.0F) < 1e-6F);
-            }
+            REQUIRE(std::abs(index.CalcDistanceById(query, label, false) - 1.0F) < 1e-6F);
 
             uint32_t retained_term = 100;
             SparseVector retained_query{1, &retained_term, &query_value};
             query->SparseVectors(&retained_query);
-            if (immutable) {
-                REQUIRE_THROWS(index.CalcDistanceById(query, label, false));
-            } else {
-                REQUIRE(std::abs(index.CalcDistanceById(query, label, false)) < 1e-6F);
-            }
+            REQUIRE(std::abs(index.CalcDistanceById(query, label, false)) < 1e-6F);
         }
     }
 }

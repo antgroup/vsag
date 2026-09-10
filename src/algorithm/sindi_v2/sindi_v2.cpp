@@ -1814,10 +1814,9 @@ SINDIV2::CalcDistanceById(const DatasetPtr& vector,
                           bool calculate_precise_distance) const {
     std::shared_lock rlock(this->global_mutex_);
 
-    if (vector == nullptr || vector->GetNumElements() == 0 ||
-        vector->GetSparseVectors() == nullptr) {
-        return -1.0F;
-    }
+    CHECK_ARGUMENT(vector != nullptr, "distance query must not be null");
+    CHECK_ARGUMENT(vector->GetNumElements() == 1, "single-ID distance requires one query");
+    CHECK_ARGUMENT(vector->GetSparseVectors() != nullptr, "query must contain sparse vectors");
 
     auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
     if (not success) {
@@ -1973,9 +1972,7 @@ SINDIV2::InitFeatures() {
         IndexFeature::SUPPORT_SEARCH_CONCURRENT,
         IndexFeature::SUPPORT_METRIC_TYPE_INNER_PRODUCT,
     });
-    if (not immutable_enabled_) {
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID);
-    }
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID);
     if (not immutable_enabled_ && rerank_type_ != SPARSE_RERANK_TYPE_DMQ8 &&
         param_->term_io_parameter->GetTypeName() == IO_TYPE_VALUE_MEMORY_IO) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_AFTER_BUILD);
