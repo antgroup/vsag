@@ -299,7 +299,9 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
         } else if (key == HGRAPH_USE_MCI || key == HGRAPH_MCI_MCS || key == HGRAPH_MCI_CLIQUE_MAX ||
                    key == HGRAPH_MCI_ALPHA || key == HGRAPH_MCI_KNNG_SOURCE ||
                    key == HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY ||
-                   key == HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY ||
+                   key == HGRAPH_MCI_INCREMENTAL_DEGREE_MIN_KEY ||
+                   key == HGRAPH_MCI_INCREMENTAL_DEGREE_N_DIVISOR_KEY ||
+                   key == HGRAPH_MCI_INCREMENTAL_DEGREE_MCS_DIVISOR_KEY ||
                    key == HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY ||
                    key == HGRAPH_MCI_DELETE_CLIQUE_SIZE_THRESHOLD_KEY ||
                    key == HGRAPH_MCI_DELETE_NODE_MCT_THRESHOLD_KEY) {

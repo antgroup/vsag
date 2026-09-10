@@ -32,6 +32,7 @@
 #include "hgraph.h"
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
+#include "storage/serialization.h"
 #include "unittest.h"
 #include "vsag/bitset.h"
 #include "vsag/dataset.h"
@@ -226,6 +227,87 @@ make_dataset(std::vector<int64_t>& ids,
         ->Float32Vectors(vectors.data() + offset * dim)
         ->Owner(false);
     return dataset;
+}
+
+struct FlushedMCISnapshot {
+    std::string bytes;
+    uint64_t begin;
+    uint64_t end;
+    std::vector<int64_t> labels;
+    vsag::CliqueDataCellPtr cliques;
+};
+
+// Inspect the real serialized CSR without granting tests access to HGraph private state.
+FlushedMCISnapshot
+read_flushed_mci(const vsag::IndexPtr& index, vsag::Allocator* allocator) {
+    REQUIRE(index->Flush().has_value());
+    const auto stats = vsag::JsonType::Parse(index->GetStats());
+    const uint64_t n = stats["mci_total_nodes"].GetInt();
+    const uint64_t c = stats["mci_base_clique_count"].GetInt();
+    const uint64_t m = stats["mci_base_membership_count"].GetInt();
+    REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
+    std::stringstream stream;
+    REQUIRE(index->Serialize(stream).has_value());
+    vsag::IOStreamReader reader(stream);
+    auto footer = vsag::Footer::Parse(reader);
+    REQUIRE(footer != nullptr);
+    REQUIRE_FALSE(footer->GetMetadata()->Get("has_conjugate_graph").GetBool());
+    FlushedMCISnapshot snapshot;
+    snapshot.bytes = stream.str();
+    snapshot.end = snapshot.bytes.size() - footer->Length();
+    // v2: four CSR vectors, clique count, empty delta rows, and inactive/retired masks.
+    const uint64_t mci_bytes = 88 + 13 * (n + c) + 8 * m;
+    REQUIRE(snapshot.end >= mci_bytes);
+    snapshot.begin = snapshot.end - mci_bytes;
+    reader.Seek(0);
+    vsag::StreamReader::ReadVector(reader, snapshot.labels);
+    snapshot.labels.resize(n);
+    reader.Seek(snapshot.begin);
+    snapshot.cliques = std::make_shared<vsag::CliqueDataCell>(allocator);
+    snapshot.cliques->Deserialize(reader, 2);
+    REQUIRE(reader.GetCursor() == snapshot.end);
+    return snapshot;
+}
+
+uint64_t
+snapshot_degree(const FlushedMCISnapshot& snapshot, vsag::InnerIdType node) {
+    vsag::DefaultAllocator allocator;
+    vsag::Vector<vsag::InnerIdType> cids(&allocator);
+    snapshot.cliques->CollectNodeCliqueIds(node, cids);
+    std::set<vsag::InnerIdType> neighbors;
+    for (auto cid : cids) {
+        vsag::Vector<vsag::InnerIdType> members(&allocator);
+        snapshot.cliques->GetCliqueMembers(cid, members);
+        neighbors.insert(members.begin(), members.end());
+    }
+    neighbors.erase(node);
+    return neighbors.size();
+}
+
+// Replace only MCI in a valid small index, to control overlap and JOIN eligibility exactly.
+vsag::IndexPtr
+with_mci_fixture(const vsag::IndexPtr& index,
+                 const std::string& parameters,
+                 const std::vector<std::vector<vsag::InnerIdType>>& cliques) {
+    vsag::DefaultAllocator allocator;
+    const auto snapshot = read_flushed_mci(index, &allocator);
+    vsag::CliqueDataCell replacement(&allocator);
+    replacement.Clear(snapshot.labels.size());
+    for (const auto& clique : cliques) {
+        vsag::Vector<vsag::InnerIdType> members(clique.begin(), clique.end(), &allocator);
+        replacement.AppendNewClique(members, snapshot.labels.size());
+    }
+    replacement.Flush(snapshot.labels.size());
+    std::stringstream stream;
+    stream.write(snapshot.bytes.data(), static_cast<std::streamsize>(snapshot.begin));
+    vsag::IOStreamWriter writer(stream);
+    replacement.Serialize(writer);
+    stream.write(snapshot.bytes.data() + snapshot.end,
+                 static_cast<std::streamsize>(snapshot.bytes.size() - snapshot.end));
+    auto result = vsag::Factory::CreateIndex("hgraph", parameters);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->Deserialize(stream).has_value());
+    return result.value();
 }
 
 }  // namespace
@@ -1165,12 +1247,121 @@ TEST_CASE("HGraph Add uses the full-build local clique size threshold",
     REQUIRE(index.value()->Add(make_dataset(ids, vectors, 3, 1, dim)).has_value());
     auto after = vsag::JsonType::Parse(index.value()->GetStats());
     REQUIRE(after["mci_covered_nodes"].GetInt() == 4);
-    REQUIRE(after["mci_delta_clique_count"].GetInt() == 1);
-    REQUIRE(after["mci_delta_clique_membership_count"].GetInt() == 3);
+    // The shared builder first emits three members, then adds the remaining neighbor in
+    // a two-member clique to reach min(70, N-1)=3 distinct neighbors.
+    REQUIRE(after["mci_delta_clique_count"].GetInt() == 2);
+    REQUIRE(after["mci_delta_clique_membership_count"].GetInt() == 5);
     REQUIRE(index.value()->Flush().has_value());
     auto flushed = vsag::JsonType::Parse(index.value()->GetStats());
     REQUIRE(flushed["mci_delta_clique_count"].GetInt() == 0);
     REQUIRE(flushed["mci_covered_nodes"].GetInt() == 4);
+    vsag::DefaultAllocator allocator;
+    REQUIRE(snapshot_degree(read_flushed_mci(index.value(), &allocator), 3) == 3);
+}
+
+TEST_CASE("MCI Add stops at unique degree rather than clique count",
+          "[ut][hgraph][mci][degree_add]") {
+    const std::string scenario =
+        GENERATE("join", "mixed", "build", "default", "configured", "exhausted", "marked");
+    const std::string io = GENERATE("memory_io", "block_memory_io");
+    CAPTURE(scenario, io);
+    const bool large_index = scenario == "default" or scenario == "configured";
+    const int64_t total = large_index ? 101 : 9;
+    const int64_t dim = total;
+    std::vector<int64_t> ids(total + 1);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::vector<float> vectors((total + 1) * dim, 0.0F);
+    for (int64_t i = 0; i < total; ++i) {
+        vectors[i * dim + i] = 1.0F;
+    }
+    auto configuration = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    auto parameters = configuration["index_param"];
+    parameters["graph_type"].SetString("nsw");
+    parameters["max_degree"].SetInt(large_index ? 128 : 32);
+    parameters["base_io_type"].SetString(io);
+    parameters["build_thread_count"].SetInt(1);
+    parameters["mci_mcs"].SetInt(large_index ? 200 : total);
+    parameters["mci_clique_max"].SetInt(3);
+    parameters["mci_incremental_clique_max"].SetInt(3);
+    parameters["mci_incremental_join_ratio_threshold"].SetFloat(1.0F);
+    if (scenario == "configured") {
+        parameters["mci_incremental_degree_min"].SetInt(100);
+    }
+    if (not large_index) {
+        parameters["mci_incremental_degree_n_divisor"].SetInt(scenario == "marked" ? 2 : 1);
+        parameters["mci_incremental_degree_mcs_divisor"].SetInt(1);
+    }
+    const auto json = configuration.Dump();
+    auto built = vsag::Factory::CreateIndex("hgraph", json);
+    REQUIRE(built.has_value());
+    REQUIRE(built.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+    std::vector<std::vector<vsag::InnerIdType>> cliques;
+    if (scenario == "build") {
+        cliques = {{0, 1, 2}, {3, 4, 5}, {6, 7, 8}};  // All existing cliques are full.
+    } else if (scenario == "mixed") {
+        cliques = {{0, 1}, {2, 3, 4}, {5, 6, 7}, {6, 7, 8}};
+    } else if (scenario == "exhausted") {
+        // Saturated memberships exclude every candidate from local construction.
+        for (uint64_t repeat = 0; repeat < 3; ++repeat) {
+            cliques.insert(cliques.end(), {{0, 1, 2}, {3, 4, 5}, {6, 7, 8}});
+        }
+    } else {
+        // The duplicate clique must be skipped because it contributes no new neighbor.
+        cliques.push_back({0, 1});
+        for (vsag::InnerIdType id = 1; id < total; ++id) {
+            cliques.push_back(
+                {0, id});  // Strong overlap: k joined cliques give only k+1 neighbors.
+        }
+    }
+    auto index = with_mci_fixture(built.value(), json, cliques);
+    REQUIRE(vsag::JsonType::Parse(index->GetStats())["mci_base_clique_count"].GetInt() ==
+            static_cast<int64_t>(cliques.size()));
+    if (scenario == "marked") {
+        REQUIRE(index->Remove({ids[total - 1]}, vsag::RemoveMode::MARK_REMOVE).value() == 1);
+    }
+    REQUIRE(index->Add(make_dataset(ids, vectors, total, 1, dim)).has_value());
+    const auto stats = vsag::JsonType::Parse(index->GetStats());
+    INFO(stats.Dump());
+    REQUIRE(stats["mci_covered_nodes"].GetInt() == total + (scenario == "marked" ? 0 : 1));
+    if (scenario == "join") {
+        REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 8);
+        REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
+    } else if (scenario == "mixed") {
+        REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 1);
+        REQUIRE(stats["mci_delta_clique_count"].GetInt() > 0);
+    } else if (scenario == "build") {
+        REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 0);
+        REQUIRE(stats["mci_delta_clique_count"].GetInt() >= 5);
+    } else if (scenario == "default") {
+        REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 69);
+        REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
+    } else if (scenario == "configured") {
+        // Target 100 requires 99 overlapping two-member cliques, not just the first JOIN.
+        REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 99);
+        REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
+    } else if (scenario == "marked") {
+        // The degree floor is capped at eight other live points, excluding the mark.
+        REQUIRE(index->GetNumElements() == total);
+        REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 7);
+        REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
+    } else {
+        REQUIRE(stats["mci_delta_clique_count"].GetInt() == 1);
+        REQUIRE(stats["mci_delta_clique_membership_count"].GetInt() == 1);
+    }
+    vsag::DefaultAllocator allocator;
+    auto snapshot = read_flushed_mci(index, &allocator);
+    REQUIRE(snapshot.labels[total] == ids[total]);
+    const uint64_t expected = scenario == "default"      ? 70
+                              : scenario == "configured" ? 100
+                              : scenario == "exhausted"  ? 0
+                              : scenario == "marked"     ? total - 1
+                                                         : total;
+    REQUIRE(snapshot_degree(snapshot, total) == expected);
+    auto restored = vsag::Factory::CreateIndex("hgraph", json);
+    REQUIRE(restored.has_value());
+    std::stringstream stream(snapshot.bytes);
+    REQUIRE(restored.value()->Deserialize(stream).has_value());
+    REQUIRE(snapshot_degree(read_flushed_mci(restored.value(), &allocator), total) == expected);
 }
 
 TEST_CASE("MCI builder expands negative inner-product distances", "[ut][hgraph][mci]") {

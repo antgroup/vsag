@@ -45,16 +45,20 @@
 2. 目标邻居数为 `min(mci_mcs, visible_total - 1)`。内部检索 ef 为 `max(query_k, 100)`；
    剔除自身、删除点及可见范围外点，不足时可扩大请求数量。这里不使用性能测试的 ef=320。
 3. 优先加入满足 `|KNN ∩ C| / |C| >= join_ratio` 且未达到增量大小上限的已有团，
-   最多选择 `added_mct` 个。没有成功加入时，调用与全量 Build 共用的
+   以去重邻居度数而非团数作为停止条件。度数不足时，使用尚未相邻的 KNN 候选，调用与全量 Build 共用的
    `MCILocalCliqueBuilder::Build`（`src/algorithm/mci/mci_local_builder.h`），使用增量团大小上限，
-   把当前点视为需要覆盖的点；不再以团大小达到 2 作为 alpha 扩张的停止条件。没有候选时创建单点团。
+   把当前点视为需要覆盖的点，重复直到目标达到、候选耗尽或度数无进展。
+   不再以团大小达到 2 作为 alpha 扩张的停止条件。没有候选时创建单点团。
 4. 删除只废弃受影响且删除后大小 **小于** `delete_size` 的团；从这些团中收集预计有效覆盖团数
    **小于** `delete_mct` 的存活点。修复前再次检查覆盖数，避免已经恢复覆盖的点重复修复。
 5. 纯 FP32 修复从存储中取得或解码该点向量，然后进入第 1–3 步的共用维护流程。
    不再次调用公共 ADD 插入已有向量，也不产生新的向量标签。ADD 的候选可见范围是插入前缀；
    修复已有点时可见范围是当前整张 HGraph。
 
-`added_mct=3` 是加入已有团的数量上限，`delete_mct=3` 是修复触发阈值；两者均不是最终覆盖 3 团的保证。
+ADD 的团数限制参数已移除；`delete_mct=3` 仍是修复候选触发阈值。
+度数目标为 `max(mci_incremental_degree_min, min(N/10000, mcs/2))`，N≤1 时为 0，否则不超过 N-1；
+N 是当前存活点数，包含图插入完成的批次，整数除法向下取整。下限默认 70，10k、mcs=200 时目标是 70。
+加入完整团可以超过目标；无法继续增加邻居时允许低于目标停止。
 非 FP32 修复仍保留成对距离候选路径，本指南不把 FP32 的结论推广到 RaBitQ。
 
 ### 1.3 三种维护操作
@@ -95,7 +99,9 @@
     "mci_clique_max": 50,
     "mci_alpha": 1.2,
     "mci_incremental_join_ratio_threshold": 0.6,
-    "mci_incremental_added_mct": 3,
+    "mci_incremental_degree_min": 70,
+    "mci_incremental_degree_n_divisor": 10000,
+    "mci_incremental_degree_mcs_divisor": 2,
     "mci_incremental_clique_max": 50,
     "mci_delete_clique_size_threshold": 3,
     "mci_delete_node_mct_threshold": 3
@@ -112,7 +118,9 @@ MCI FORCE_REMOVE 要求 flat 图存储，会自动启用反向边，并拒绝不
 | `mci_clique_max` | 50 | `--mci-clique-max`；全量团大小上限 |
 | `mci_alpha` | 1.2 | `--mci-alpha`；构团扩展系数 |
 | `mci_incremental_join_ratio_threshold` | 0.6 | `--mci-incremental-join-ratio-threshold`；范围 [0,1] |
-| `mci_incremental_added_mct` | 3 | `--mci-incremental-added-mct`；正整数 |
+| `mci_incremental_degree_min` | 70 | 度数目标下限，正整数，随索引参数序列化 |
+| `mci_incremental_degree_n_divisor` | 10000 | 度数目标中的存活点数除数，正整数 |
+| `mci_incremental_degree_mcs_divisor` | 2 | 度数目标中的 MCS 除数，正整数 |
 | `mci_incremental_clique_max` | 50 | `--mci-incremental-clique-max`；至少 2；基准不指定时跟随全量上限 |
 | `mci_delete_clique_size_threshold` | 3 | `--mci-delete-clique-size-threshold`；正整数，严格小于才废弃 |
 | `mci_delete_node_mct_threshold` | 3 | `--mci-delete-node-mct-threshold`；正整数，严格小于才修复 |

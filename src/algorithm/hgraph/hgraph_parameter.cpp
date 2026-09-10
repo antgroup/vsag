@@ -181,7 +181,9 @@ HGraphParameter::FromJson(const JsonType& json) {
         json.Contains(HGRAPH_MCI_ALPHA) or json.Contains(HGRAPH_MCI_KNNG_SOURCE) or
         json.Contains(HGRAPH_MCI_KNNG_PATH_KEY) or
         json.Contains(HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY) or
-        json.Contains(HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY) or
+        json.Contains(HGRAPH_MCI_INCREMENTAL_DEGREE_MIN_KEY) or
+        json.Contains(HGRAPH_MCI_INCREMENTAL_DEGREE_N_DIVISOR_KEY) or
+        json.Contains(HGRAPH_MCI_INCREMENTAL_DEGREE_MCS_DIVISOR_KEY) or
         json.Contains(HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY) or
         json.Contains(HGRAPH_MCI_DELETE_CLIQUE_SIZE_THRESHOLD_KEY) or
         json.Contains(HGRAPH_MCI_DELETE_NODE_MCT_THRESHOLD_KEY);
@@ -211,12 +213,21 @@ HGraphParameter::FromJson(const JsonType& json) {
             this->mci_parameters.incremental_join_ratio_threshold =
                 json[HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY].GetFloat();
         }
-        if (json.Contains(HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY)) {
-            const auto incremental_added_mct = json[HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY].GetInt();
-            CHECK_ARGUMENT(incremental_added_mct > 0,
-                           "hgraph mci_incremental_added_mct must be positive");
-            this->mci_parameters.incremental_added_mct =
-                static_cast<uint64_t>(incremental_added_mct);
+        if (json.Contains(HGRAPH_MCI_INCREMENTAL_DEGREE_MIN_KEY)) {
+            const auto minimum = json[HGRAPH_MCI_INCREMENTAL_DEGREE_MIN_KEY].GetInt();
+            CHECK_ARGUMENT(minimum > 0, "hgraph mci_incremental_degree_min must be positive");
+            this->mci_parameters.incremental_degree_min = static_cast<uint64_t>(minimum);
+        }
+        if (json.Contains(HGRAPH_MCI_INCREMENTAL_DEGREE_N_DIVISOR_KEY)) {
+            const auto divisor = json[HGRAPH_MCI_INCREMENTAL_DEGREE_N_DIVISOR_KEY].GetInt();
+            CHECK_ARGUMENT(divisor > 0, "hgraph mci_incremental_degree_n_divisor must be positive");
+            this->mci_parameters.incremental_degree_n_divisor = static_cast<uint64_t>(divisor);
+        }
+        if (json.Contains(HGRAPH_MCI_INCREMENTAL_DEGREE_MCS_DIVISOR_KEY)) {
+            const auto divisor = json[HGRAPH_MCI_INCREMENTAL_DEGREE_MCS_DIVISOR_KEY].GetInt();
+            CHECK_ARGUMENT(divisor > 0,
+                           "hgraph mci_incremental_degree_mcs_divisor must be positive");
+            this->mci_parameters.incremental_degree_mcs_divisor = static_cast<uint64_t>(divisor);
         }
         if (json.Contains(HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY)) {
             const auto incremental_clique_max =
@@ -250,8 +261,12 @@ HGraphParameter::FromJson(const JsonType& json) {
             (this->mci_parameters.incremental_join_ratio_threshold >= 0.0F) and
                 (this->mci_parameters.incremental_join_ratio_threshold <= 1.0F),
             "hgraph mci_incremental_join_ratio_threshold must be in range [0, 1]");
-        CHECK_ARGUMENT(this->mci_parameters.incremental_added_mct > 0,
-                       "hgraph mci_incremental_added_mct must be positive");
+        CHECK_ARGUMENT(this->mci_parameters.incremental_degree_min > 0,
+                       "hgraph mci_incremental_degree_min must be positive");
+        CHECK_ARGUMENT(this->mci_parameters.incremental_degree_n_divisor > 0,
+                       "hgraph mci_incremental_degree_n_divisor must be positive");
+        CHECK_ARGUMENT(this->mci_parameters.incremental_degree_mcs_divisor > 0,
+                       "hgraph mci_incremental_degree_mcs_divisor must be positive");
         CHECK_ARGUMENT(this->mci_parameters.incremental_clique_max >= 2,
                        "hgraph mci_incremental_clique_max must be >= 2");
         CHECK_ARGUMENT(this->mci_parameters.delete_clique_size_threshold > 0,
@@ -333,8 +348,12 @@ HGraphParameter::ToJson() const {
         json[HGRAPH_MCI_KNNG_SOURCE].SetString(this->mci_parameters.knng_source);
         json[HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY].SetFloat(
             this->mci_parameters.incremental_join_ratio_threshold);
-        json[HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY].SetInt(
-            static_cast<int64_t>(this->mci_parameters.incremental_added_mct));
+        json[HGRAPH_MCI_INCREMENTAL_DEGREE_MIN_KEY].SetInt(
+            static_cast<int64_t>(this->mci_parameters.incremental_degree_min));
+        json[HGRAPH_MCI_INCREMENTAL_DEGREE_N_DIVISOR_KEY].SetInt(
+            static_cast<int64_t>(this->mci_parameters.incremental_degree_n_divisor));
+        json[HGRAPH_MCI_INCREMENTAL_DEGREE_MCS_DIVISOR_KEY].SetInt(
+            static_cast<int64_t>(this->mci_parameters.incremental_degree_mcs_divisor));
         json[HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY].SetInt(
             static_cast<int64_t>(this->mci_parameters.incremental_clique_max));
         json[HGRAPH_MCI_DELETE_CLIQUE_SIZE_THRESHOLD_KEY].SetInt(
@@ -392,7 +411,9 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, mci_parameters.knng_source);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.knng_path);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.incremental_join_ratio_threshold);
-    CHECK_FIELD_EQ(*this, *p, mci_parameters.incremental_added_mct);
+    CHECK_FIELD_EQ(*this, *p, mci_parameters.incremental_degree_min);
+    CHECK_FIELD_EQ(*this, *p, mci_parameters.incremental_degree_n_divisor);
+    CHECK_FIELD_EQ(*this, *p, mci_parameters.incremental_degree_mcs_divisor);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.incremental_clique_max);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.delete_clique_size_threshold);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.delete_node_mct_threshold);

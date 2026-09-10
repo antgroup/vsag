@@ -1535,10 +1535,13 @@ HGraph::repair_mci_clique(InnerIdType node_id) {
 }
 
 // Try to attach a new node to existing cliques that strongly overlap its KNN set.
-bool
-HGraph::try_join_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids) {
+void
+HGraph::try_join_mci_clique(InnerIdType new_inner_id,
+                            const Vector<InnerIdType>& knn_ids,
+                            uint64_t degree_target,
+                            UnorderedSet<InnerIdType>& neighbors) {
     if (this->mci_cliques_ == nullptr or knn_ids.empty()) {
-        return false;
+        return;
     }
 
     Vector<InnerIdType> candidate_cliques(this->allocator_);
@@ -1549,7 +1552,7 @@ HGraph::try_join_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>&
         this->mci_cliques_->CollectNodeCliqueIds(neighbor, candidate_cliques);
     }
     if (candidate_cliques.empty()) {
-        return false;
+        return;
     }
     std::sort(candidate_cliques.begin(), candidate_cliques.end());
 
@@ -1578,7 +1581,7 @@ HGraph::try_join_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>&
         }
     }
     if (targets.empty()) {
-        return false;
+        return;
     }
 
     std::sort(targets.begin(),
@@ -1590,15 +1593,29 @@ HGraph::try_join_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>&
                   }
                   return lhs.second < rhs.second;
               });
-    const auto target_count = std::min<uint64_t>(this->mci_parameters_.incremental_added_mct,
-                                                 static_cast<uint64_t>(targets.size()));
     const auto total = this->total_count_.load();
-    bool appended = false;
-    for (uint64_t i = 0; i < target_count; ++i) {
-        appended |= this->mci_cliques_->AppendNodeToClique(
-            new_inner_id, targets[i].second, total, this->mci_parameters_.incremental_clique_max);
+    Vector<InnerIdType> members(this->allocator_);
+    for (const auto& [intersection, clique_id] : targets) {
+        if (neighbors.size() >= degree_target) {
+            break;
+        }
+        members.clear();
+        this->mci_cliques_->GetCliqueMembers(clique_id, members);
+        const auto adds_neighbor = std::any_of(members.begin(), members.end(), [&](auto id) {
+            return id != new_inner_id and not this->label_table_->IsRemoved(id) and
+                   neighbors.find(id) == neighbors.end();
+        });
+        if (not adds_neighbor or
+            not this->mci_cliques_->AppendNodeToClique(
+                new_inner_id, clique_id, total, this->mci_parameters_.incremental_clique_max)) {
+            continue;
+        }
+        for (auto id : members) {
+            if (id != new_inner_id and not this->label_table_->IsRemoved(id)) {
+                neighbors.insert(id);
+            }
+        }
     }
-    return appended;
 }
 
 // Build around a required seed with the same local MCE and expansion rules as full Build.
@@ -1694,14 +1711,61 @@ HGraph::incremental_update_mci_clique(InnerIdType node_id,
     if (not this->mci_parameters_.enabled or this->mci_cliques_ == nullptr) {
         return;
     }
+    UnorderedSet<InnerIdType> neighbors(this->allocator_);
+    Vector<InnerIdType> clique_ids(this->allocator_);
+    auto collect_neighbors = [&]() {
+        clique_ids.clear();
+        this->mci_cliques_->CollectNodeCliqueIds(node_id, clique_ids);
+        Vector<InnerIdType> members(this->allocator_);
+        for (auto cid : clique_ids) {
+            members.clear();
+            this->mci_cliques_->GetCliqueMembers(cid, members);
+            for (auto id : members) {
+                // A MARK_REMOVE batch marks all labels before retiring cliques one by one.
+                if (id != node_id and not this->label_table_->IsRemoved(id)) {
+                    neighbors.insert(id);
+                }
+            }
+        }
+    };
+    collect_neighbors();
+    // N counts live vectors (including this Add batch), not physical capacity or marked IDs.
+    const auto degree_target = this->mci_parameters_.IncrementalDegreeTarget(
+        static_cast<uint64_t>(this->GetNumElements()));
+    if (not clique_ids.empty() and neighbors.size() >= degree_target) {
+        return;
+    }
     if (knn_ids.empty()) {
+        if (not clique_ids.empty()) {
+            return;
+        }
         Vector<InnerIdType> singleton(this->allocator_);
         singleton.push_back(node_id);
         this->mci_cliques_->AppendNewClique(singleton, this->total_count_.load());
         return;
     }
-    if (not this->try_join_mci_clique(node_id, knn_ids)) {
-        this->build_incremental_mci_clique(node_id, knn_ids, visible_total);
+    this->try_join_mci_clique(node_id, knn_ids, degree_target, neighbors);
+    // JOIN success alone is insufficient. Reuse the shared builder on neighbors that do not
+    // already contribute to the seed's degree, so additional cliques make measurable progress.
+    Vector<InnerIdType> remaining(this->allocator_);
+    while (neighbors.size() < degree_target) {
+        remaining.clear();
+        for (auto id : knn_ids) {
+            if (id != node_id and id < visible_total and not this->label_table_->IsRemoved(id) and
+                neighbors.find(id) == neighbors.end()) {
+                remaining.push_back(id);
+            }
+        }
+        if (remaining.empty()) {
+            break;
+        }
+        const auto previous_degree = neighbors.size();
+        this->build_incremental_mci_clique(node_id, remaining, visible_total);
+        collect_neighbors();
+        if (neighbors.size() == previous_degree) {
+            // Coverage limits or exhausted candidates may make the target unattainable.
+            break;
+        }
     }
 }
 

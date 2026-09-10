@@ -49,7 +49,9 @@ external KNN graph path takes precedence over this selector.
 | `mci_clique_max` | Maximum clique size during full build. |
 | `mci_alpha` | Clique construction expansion factor. |
 | `mci_incremental_join_ratio_threshold` | Add-time threshold for joining existing cliques. |
-| `mci_incremental_added_mct` | Maximum existing cliques a newly added node may join. |
+| `mci_incremental_degree_min` | Configurable degree-target floor (default `70`, positive integer). |
+| `mci_incremental_degree_n_divisor` | Live-count divisor for the degree target (default `10000`, positive integer). |
+| `mci_incremental_degree_mcs_divisor` | MCS divisor for the degree target (default `2`, positive integer). |
 | `mci_incremental_clique_max` | Maximum clique size used by incremental clique creation. |
 | `mci_delete_clique_size_threshold` | Retire an affected clique when its live size after deletion is below this value (default `3`). |
 | `mci_delete_node_mct_threshold` | Repair a member of a retired clique when its projected live clique count is below this value (default `3`). |
@@ -86,7 +88,7 @@ selectivity information.
 
 When MCI is enabled by the flat build parameters, `HGraph::Add()` first inserts the HGraph
 batch, then updates MCI for each successfully inserted row. It first tries to join suitable
-existing cliques, then creates a small incremental clique when no good join target exists.
+existing cliques, then creates incremental cliques if the unique neighbor degree is still too low.
 
 Prefer `Build()` for the initial index, followed by incremental additions. Add on an empty
 index can trigger construction, but many tiny Adds are not recommended as a replacement
@@ -94,8 +96,12 @@ for bulk Build.
 
 When ADD needs a new clique, it shares the local graph, maximal-clique enumeration and selection
 core with full `BuildMCICliques`. The incremental size cap determines the local size threshold;
-it no longer accepts two members as the alpha-expansion stopping criterion. The existing join
-shortcut remains unchanged, and high-alpha fallback may still emit smaller cliques.
+it no longer accepts two members as the alpha-expansion stopping criterion. JOIN and construction
+stop at `max(mci_incremental_degree_min, min(N/10000, mcs/2))` unique neighbors by default
+(zero for N≤1, otherwise capped at N-1; integer division). The floor defaults to 70 and both
+divisors are configurable. N is the live count after the
+graph insertion batch. Whole cliques can overshoot the target; exhausted candidates or stalled
+construction stop safely below it. High-alpha fallback may still emit smaller cliques.
 
 `MARK_REMOVE` updates the MCI companion as part of the same operation. After removing a node, MCI
 keeps every affected clique whose remaining live size is at least

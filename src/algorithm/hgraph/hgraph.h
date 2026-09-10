@@ -915,8 +915,11 @@ private:
     [[nodiscard]] Vector<InnerIdType>
     search_mci_knn(InnerIdType query_inner_id, const void* vector, uint64_t visible_total) const;
 
-    bool
-    try_join_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+    void
+    try_join_mci_clique(InnerIdType new_inner_id,
+                        const Vector<InnerIdType>& knn_ids,
+                        uint64_t degree_target,
+                        UnorderedSet<InnerIdType>& neighbors);
 
     void
     build_incremental_mci_clique(InnerIdType new_inner_id,

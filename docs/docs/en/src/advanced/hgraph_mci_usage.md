@@ -46,8 +46,9 @@ Shared ADD/repair pipeline:
 2. Target `min(mci_mcs, visible_total - 1)` neighbors. Internal ef is `max(query_k, 100)`,
    not benchmark ef=320. Remove self, deleted, and out-of-range points; enlarge the request if needed.
 3. Try existing cliques with `|KNN ∩ C| / |C| >= join_ratio` and room below the incremental cap,
-   selecting at most `added_mct`. Only if none was joined, invoke the same local clique builder as
-   full Build, with incremental size cap and the current point requiring coverage. Empty candidates
+   stopping at the unique-neighbor degree target rather than a clique-count limit. If degree remains
+   below target, invoke the same local clique builder as full Build on not-yet-adjacent KNN candidates,
+   repeating until the target is reached, candidates run out, or progress stops. Empty candidates
    yield a singleton. Incremental construction no longer stops alpha expansion at two members.
 4. Deletion retires only affected cliques whose surviving size is **less than** `delete_size`.
    Select surviving members whose projected effective coverage is **less than** `delete_mct`;
@@ -56,8 +57,12 @@ Shared ADD/repair pipeline:
    It does not insert the vector again through public ADD. ADD sees its insertion prefix;
    repair can see the whole current HGraph.
 
-`added_mct` is an upper bound on joins, while `delete_mct` triggers repair; neither guarantees
-that every point ultimately belongs to that many cliques. Non-FP32 repair retains pair-distance
+The ADD clique-count limit has been removed; `delete_mct` still triggers repair.
+The degree target is `max(mci_incremental_degree_min, min(N/10000, mcs/2))`, with zero for N≤1 and otherwise
+capped at N-1; integer division rounds down. N counts live vectors including the completed graph
+insertion batch. The floor defaults to 70, so at N=10000 and mcs=200 the target is 70.
+Whole-clique joins may overshoot;
+candidate exhaustion or lack of progress can stop below target. Non-FP32 repair retains pair-distance
 candidate generation; FP32 findings do not establish RaBitQ behavior.
 
 | Operation | Vector storage | MCI work | Persistence |
@@ -96,7 +101,9 @@ not the defaults for every library option.
     "mci_clique_max": 50,
     "mci_alpha": 1.2,
     "mci_incremental_join_ratio_threshold": 0.6,
-    "mci_incremental_added_mct": 3,
+    "mci_incremental_degree_min": 70,
+    "mci_incremental_degree_n_divisor": 10000,
+    "mci_incremental_degree_mcs_divisor": 2,
     "mci_incremental_clique_max": 50,
     "mci_delete_clique_size_threshold": 3,
     "mci_delete_node_mct_threshold": 3
@@ -113,7 +120,9 @@ enables reverse edges, and rejects incompatible deduplication, duplicate-group, 
 | `mci_clique_max` | 50 | `--mci-clique-max`; full-build clique cap |
 | `mci_alpha` | 1.2 | `--mci-alpha`; expansion coefficient |
 | `mci_incremental_join_ratio_threshold` | 0.6 | `--mci-incremental-join-ratio-threshold`; [0,1] |
-| `mci_incremental_added_mct` | 3 | `--mci-incremental-added-mct`; positive join limit |
+| `mci_incremental_degree_min` | 70 | Positive degree-target floor; serialized with the index |
+| `mci_incremental_degree_n_divisor` | 10000 | Positive live-count divisor for the degree target |
+| `mci_incremental_degree_mcs_divisor` | 2 | Positive MCS divisor for the degree target |
 | `mci_incremental_clique_max` | 50 | `--mci-incremental-clique-max`; at least 2; benchmark inherits the full-build cap when omitted |
 | `mci_delete_clique_size_threshold` | 3 | `--mci-delete-clique-size-threshold`; positive, strict less-than retirement |
 | `mci_delete_node_mct_threshold` | 3 | `--mci-delete-node-mct-threshold`; positive, strict less-than repair |

@@ -101,16 +101,28 @@ join_ratio(u, C) = |K(u) ∩ C| / |effective members of C|
 
 Nonempty cliques below the incremental size cap qualify when the ratio reaches
 `mci_incremental_join_ratio_threshold` (default 0.6). Targets are ordered by overlap count
-descending, then clique ID ascending. At most `mci_incremental_added_mct` targets are tried
-(default 3). A successful append writes base extras or complete delta-clique members,
+descending, then clique ID ascending. JOIN continues until the seed's unique neighbor degree
+reaches its target, rather than stopping after three cliques. A successful append writes base extras or complete delta-clique members,
 respectively, and updates the node's inverse delta row. Invalid, duplicate, retired, or
 over-capacity additions are rejected.
 
-Any successful join ends this update without constructing another clique. The target count
-is an upper bound, not a promise of three memberships. This branch uses overlap ratio and
-does not revalidate every pair of clique members.
+Degree is the union of all live members of cliques containing the seed, excluding the seed
+itself and counting overlapping neighbors once. Cliques adding no new neighbors are skipped.
+For N live vectors, the target is `max(degree_min, min(N / n_divisor, mcs / mcs_divisor))`, capped at
+N-1; a zero/one-vector index has target zero. Integer division rounds down. The parameters
+`mci_incremental_degree_n_divisor` and `mci_incremental_degree_mcs_divisor` default to 10000
+and 2. `degree_min` is configured by `mci_incremental_degree_min` (positive integer, default 70).
+N includes the completed Add batch but excludes marked removals. Thus N=10000 and mcs=200
+gives target 70, whereas N=3241378 gives target 100. The configured floor applies even when mcs/2 is smaller;
+the existing candidate and coverage limits still apply. This is a stopping target, not
+a hard maximum: joining an entire clique can overshoot. The obsolete ADD clique-count
+parameter and greedy construction path have been removed. This branch still uses
+overlap ratio and does not revalidate every pair of clique members.
+The floor is serialized and checked for compatibility when loading. Missing fields in old
+configurations default to 70. Set the floor to 100 when creating a new index to request the
+previous fixed-floor behavior; loading still requires matching stored parameters.
 
-### 3.4 Otherwise use the full-build local clique algorithm
+### 3.4 Fill a degree deficit with the full-build local clique algorithm
 
 `BuildMCICliques` and incremental construction both call `MCILocalCliqueBuilder::Build`.
 The shared core collects candidates, constructs the distance-threshold local graph, enumerates
@@ -124,11 +136,16 @@ Only the seed is marked as requiring fresh coverage, including when it is an exi
 repair point. Distance callbacks read vector codes (including block-memory storage); full Build
 retains its SIMD batch distance kernel and parallel round scheduling. Empty candidates produce a
 singleton; after alpha exceeds 100, the shared high-alpha fallback can produce a smaller clique.
-The existing overlap-based join shortcut is unchanged: any successful join still skips construction.
+After JOIN, any remaining degree deficit triggers construction using KNN candidates that are
+not already neighbors of the seed. Repeat until the target is reached, candidates are exhausted,
+or construction makes no degree progress. This avoids repeatedly constructing the same neighbor
+set. Coverage limits and insertion-prefix visibility can prevent reaching the target; a seed is
+still covered by a singleton when no usable neighbors exist. Deletion repair uses this same
+degree policy after its existing small-clique/low-membership candidate selection.
 
 `AppendNewClique` writes complete members and inverse delta memberships for every member.
 This is bounded local construction, not a guarantee of a globally maximum or unique maximal clique.
-Historical measurements below predate this shared-builder change and are not its performance results.
+Historical measurements below predate the shared-builder and degree-target changes and are not their performance results.
 
 ## 4. Shared deletion policy
 
@@ -371,7 +388,7 @@ Measurements were collected on 2026-09-07 using a Release build on Intel Xeon Pl
 | Vector / graph IO | memory_io / default block_memory_io |
 | MCI candidates | mcs=50, knng_source=hgraph |
 | Clique caps / alpha | initial and incremental caps 50, alpha=1.2 |
-| Join policy | ratio threshold 0.6, added_mct=3 (defaults) |
+| Historical join policy | ratio threshold 0.6, at most 3 cliques (superseded by degree targets) |
 | Delete thresholds | clique_size=3, node_mct=3 |
 | Queries | top-k=10, 200 queries, ef=40/80/160 |
 | Timed searches | 50,000 per ef, cycling over those 200 queries |
@@ -603,7 +620,7 @@ full parameter grid on 3m.
 | Parameter | Baseline | Default candidates |
 | --- | ---: | --- |
 | `join_ratio` | 0.6 | 0.4, 0.6, 0.8 |
-| `added_mct` | 3 | 1, 3, 6 |
+| Historical maximum joined cliques (removed) | 3 | 1, 3, 6 |
 | `clique_max` (incremental only) | 50 | 25, 50, 100 |
 | `delete_size` | 3 | 3, 4, 5, 6 |
 | `delete_mct` | 3 | 3, 5, 8 |
@@ -618,8 +635,8 @@ grid experiments are needed to test this interaction.
 The incremental size cap is independent of the full-build `mci_clique_max=50`, keeping
 the initial build configuration fixed. `mci_mcs` remains 50: an incremental cap of 100
 does not guarantee 100-member cliques. Candidate counts and appending to existing cliques
-also constrain realized sizes. `added_mct` limits attempted joins and `delete_mct` gates
-repair; neither guarantees a minimum membership count.
+also constrain realized sizes. The historical maximum-joined-cliques sweep is no longer
+supported; current ADD uses the degree target. `delete_mct` gates repair, not minimum degree.
 
 ### 13.1 Running experiments
 
@@ -726,7 +743,8 @@ without replacement and fully build the initial index. Each round samples
 - Defaults run 14 rounds, usually giving 29 checkpoints and 116 ef measurements.
 - Only the initial count is 800k; subsequent membership and live counts change.
 
-Defaults retain deletion size threshold 3 and ADD join ratio=0.6, added_mct=3, clique max=50.
+This historical run used deletion size threshold 3, ADD join ratio=0.6, at most 3 joined
+cliques and clique max=50. Current ADD uses the configurable degree target instead.
 Build/search use 16 threads, the first 200 fixed queries, ef=40/80/160/320, and 10,000
 timed searches per ef. Mutation batch size equals the round sample size.
 

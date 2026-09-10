@@ -48,7 +48,9 @@ MCI 会直接基于已存储向量构建专用 KNN 图。若内部配置了外�
 | `mci_knng_source` | KNN 图来源：`hgraph`（默认）或 `odescent`。 |
 | `mci_alpha` | 团构建扩展系数。 |
 | `mci_incremental_join_ratio_threshold` | Add 时加入已有团的阈值。 |
-| `mci_incremental_added_mct` | 新节点最多加入的已有团数量。 |
+| `mci_incremental_degree_min` | 可配置的度数目标下限，默认 `70`，正整数。 |
+| `mci_incremental_degree_n_divisor` | 度数目标的存活点数除数，默认 `10000`，正整数。 |
+| `mci_incremental_degree_mcs_divisor` | 度数目标的 MCS 除数，默认 `2`，正整数。 |
 | `mci_incremental_clique_max` | 增量创建新团时的最大团大小。 |
 | `mci_delete_clique_size_threshold` | 受影响团删除后的有效大小低于该值时才废弃，默认 `3`。 |
 | `mci_delete_node_mct_threshold` | 废弃团中的点预计有效团数低于该值时才修复，默认 `3`。 |
@@ -83,14 +85,17 @@ MCI 挂件依赖过滤器提供合理的 `ValidRatio()`。bitset 和函数过滤
 
 通过扁平构建参数启用 MCI 后，`HGraph::Add()` 先完成 HGraph 插入批次，
 再逐个更新成功插入点的 MCI。它会先尝试加入合适的已有团；
-如果没有好的候选团，则为新点创建一个小的增量团。
+如果去重邻居度数仍不足，则继续为新点创建增量团。
 
 建议先用 `Build()` 构建初始索引，再通过增量添加路径追加向量。
 空索引上的 `Add()` 可以触发构建，但不建议用大量小批 Add 替代全量 Build。
 
 ADD 需要新建团时，与全量 `BuildMCICliques` 共用局部图构建、极大团枚举和选择核心。
 增量团大小上限参与决定构团门槛，不再以两个成员作为 alpha 扩张的停止标准。
-优先加入已有团的快捷路径不变；高 alpha 回退仍可能生成较小的团。
+JOIN 与构团以 `max(mci_incremental_degree_min, min(N/10000, mcs/2))` 个去重邻居为停止目标；
+N≤1 时为 0，否则不超过 N-1，整数除法向下取整。下限默认 70，两个除数也可配置，
+N 为图插入批次完成后的存活点数。加入完整团可能超过目标；候选耗尽或构团无进展时
+允许在目标以下停止。高 alpha 回退仍可能生成较小的团。
 
 `MARK_REMOVE` 会同步更新 MCI 挂件。删除一个点后，若受影响团剩余的有效成员数
 不小于 `mci_delete_clique_size_threshold`，该团会被保留；只有更小的团才会被废弃。

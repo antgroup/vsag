@@ -55,7 +55,10 @@ const char* const HGRAPH_MCI_SEED_COUNT_KEY = "mci_seed_count";
 const char* const HGRAPH_MCI_KNNG_PATH_KEY = "mci_knng_path";
 const char* const HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY =
     "mci_incremental_join_ratio_threshold";
-const char* const HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY = "mci_incremental_added_mct";
+const char* const HGRAPH_MCI_INCREMENTAL_DEGREE_MIN_KEY = "mci_incremental_degree_min";
+const char* const HGRAPH_MCI_INCREMENTAL_DEGREE_N_DIVISOR_KEY = "mci_incremental_degree_n_divisor";
+const char* const HGRAPH_MCI_INCREMENTAL_DEGREE_MCS_DIVISOR_KEY =
+    "mci_incremental_degree_mcs_divisor";
 const char* const HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY = "mci_incremental_clique_max";
 const char* const PYRAMID_PERSIST_SOURCE_ID_KEY = "persist_source_id";
 const char* const PYRAMID_STORE_PATHS_KEY = "store_paths";
