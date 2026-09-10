@@ -19,6 +19,7 @@
 #include <nlohmann/json.hpp>
 #include <vector>
 
+#include "autotune_binding.h"
 #include "binding.h"
 #include "fmt/format.h"
 #include "vsag/constants.h"
@@ -603,6 +604,31 @@ public:
         return this->CalcDistancesById(query, ids);
     }
 
+    py::dict
+    AutoTuneSearch(const py::array& queries,
+                   const py::array& ground_truth,
+                   uint64_t top_k,
+                   const py::dict& parameter_space,
+                   const py::dict& constraints,
+                   const std::string& objective,
+                   uint64_t concurrency,
+                   uint64_t max_trials,
+                   bool include_raw_evaluation) {
+        if (dense_vector_kind_ != DenseVectorKind::FLOAT32) {
+            throw std::invalid_argument("autotune_search only supports float32 indexes");
+        }
+        return vsag::python::autotune_search(index_,
+                                             queries,
+                                             ground_truth,
+                                             top_k,
+                                             parameter_space,
+                                             constraints,
+                                             objective,
+                                             concurrency,
+                                             max_trials,
+                                             include_raw_evaluation);
+    }
+
     void
     Save(const std::string& filename) {
         std::ofstream file(filename, std::ios::binary);
@@ -691,6 +717,36 @@ bind_index(py::module_& module) {
              - index_pointers should be monotonically non-decreasing
              - len(indices) == len(values) == index_pointers[-1]
              - All arrays use 0-based indexing
+         )pbdoc")
+        .def("autotune_search",
+             &Index::AutoTuneSearch,
+             py::arg("queries").noconvert(),
+             py::arg("ground_truth").noconvert(),
+             py::arg("top_k"),
+             py::arg("parameter_space"),
+             py::arg("constraints"),
+             py::arg("objective") = "latency_avg_ms",
+             py::kw_only(),
+             py::arg("concurrency") = 1,
+             py::arg("max_trials") = 1000,
+             py::arg("include_raw_evaluation") = false,
+             R"pbdoc(
+         Synchronously tune search parameters on an existing float32 index using C++ AutoTune.
+
+         queries and ground_truth must be non-empty, aligned, C-contiguous matrices of
+         numpy.float32 and numpy.int64, respectively, with matching row counts. Ground truth
+         contains nearest-neighbor IDs in rank order, with at least top_k columns.
+         parameter_space is a dict with C++ AutoTune candidate syntax; constraints is a
+         non-empty metric-to-threshold dict. objective names the metric to optimize.
+         concurrency controls evaluator threads; max_trials limits planned candidates.
+         include_raw_evaluation adds raw evaluation details to the returned report.
+
+         Returns a dict containing status, search_parameters, metrics, best_effort and report.
+         On "success", search_parameters is a JSON string accepted directly by knn_search.
+         On "no_feasible_candidate", search_parameters is None and best_effort describes
+         the closest candidate. Invalid requests raise ValueError/TypeError; execution
+         failures raise RuntimeError. The call holds the GIL; do not mutate the index or
+         input arrays during evaluation. This API neither rebuilds nor modifies the index.
          )pbdoc")
         .def("knn_search",
              &Index::KnnSearch,
