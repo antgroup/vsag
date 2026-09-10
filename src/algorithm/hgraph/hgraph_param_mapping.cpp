@@ -213,6 +213,8 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             inner_json[GRAPH_KEY][GRAPH_PARAM_MAX_DEGREE_KEY].SetJson(value);
         } else if (key == HGRAPH_BUILD_EF_CONSTRUCTION) {
             inner_json[EF_CONSTRUCTION_KEY].SetJson(value);
+        } else if (key == HGRAPH_ADAPTIVE_PRUNING) {
+            inner_json[HGRAPH_ADAPTIVE_PRUNING].SetJson(value);
         } else if (key == HGRAPH_BUILD_ALPHA) {
             inner_json[ALPHA_KEY].SetJson(value);
         } else if (key == HGRAPH_INIT_CAPACITY) {

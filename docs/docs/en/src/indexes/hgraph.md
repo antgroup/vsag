@@ -236,6 +236,70 @@ The chosen `dtype` only constrains the **input** representation. The on-disk / i
 still controlled by `base_quantization_type` (and optionally `precise_quantization_type` when
 `use_reorder: true`), so e.g. `dtype: "float16"` + `base_quantization_type: "sq8"` is valid.
 
+## Experimental adaptive pruning
+
+See [algorithm details, examples and related work](adaptive_pruning.md).
+
+`index_param.adaptive_pruning` enables a multi-pass L2 neighbor selector for NSW bottom-layer
+**new-node forward edges**. It is disabled by default. Ordinary `Build`, parallel insertion,
+`Add`, and the NSW optimized build path (including RaBitQ split/fused) use this selector.
+Set `apply_to_reverse: true` to also prune full bottom-layer reverse neighbor lists adaptively.
+A reverse list with free slots still appends the new edge directly. When full, the existing
+neighbor is the selection center and its old neighbors plus the new node form the candidates;
+the same alpha/step/fill policy applies under the existing neighbor lock. Upper layers and
+update/refinement operations retain their fixed-alpha policy. Enabled ODescent, imported-cache
+builds, inner product/cosine, and `apply_to_upper: true` remain unsupported.
+
+The following fields belong inside `index_param`. This is a GIST reference experiment,
+not a dimension-dependent default or a claim of improved performance:
+
+```json
+{
+    "alpha": 1.06,
+    "graph_type": "nsw",
+    "adaptive_pruning": {
+        "enabled": true,
+        "adjust_step": 0.06,
+        "fill_rejected": true,
+        "apply_to_reverse": false,
+        "apply_to_upper": false
+    }
+}
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | Enable the adaptive selector |
+| `adjust_step` | `0.06` | Alpha adjustment step, delta |
+| `fill_rejected` | `false` | Fill from remaining rejected candidates after relaxation |
+| `apply_to_reverse` | `false` | Also use adaptive pruning for full bottom-layer reverse lists; requires `enabled: true` |
+| `apply_to_upper` | `false` | Reserved; `true` is unsupported when enabled |
+
+The existing `alpha` is the baseline. Enabled mode requires finite alpha and delta,
+nonnegative delta, positive `alpha - 2*delta`, and finite `alpha + 3*delta`.
+Distances must be finite nonnegative L2 values from the existing build distance provider;
+this setting does not change the build quantizer.
+
+Candidates are sorted by `(distance, internal ID)`, deduplicated, and stripped of self edges.
+A candidate c is rejected if any selected s satisfies `alpha * d(s,c) < d(center,c)`.
+The first pass stops at the graph's actual maximum degree K, retaining the unscanned tail.
+
+- If accepted A is below K, keep A and rescan rejects with `alpha + k*delta`.
+  Choose k=3 for `K/|A| > 3`, k=2 for `1.5 < K/|A| <= 3`, otherwise k=1.
+  Optional filling then appends remaining rejects up to K.
+- If A reaches K, clear it and rescan the full sorted candidate list with `alpha - k*delta`.
+  Choose k=0 for `|B|/K >= 5`, k=1 for `2.5 <= |B|/K < 5`, otherwise k=2,
+  where B contains first-pass rejects. If still below K, rescan the new rejects at baseline
+  alpha. This branch never fills unconditionally.
+- With zero delta, use one baseline pass plus optional filling. This differs from disabled
+  mode, whose original shortcut for fewer than K candidates is preserved.
+
+The selector holds only per-call scratch data and exposes optional per-call statistics for
+tests and profiling; it does not collect global counters or change graph locking.
+Serialized indexes retain the configuration. Reload using the same enabled state and, when
+enabled, the same alpha, delta and scope/fill settings; mismatches fail compatibility checks.
+Indexes written before this option existed default to disabled mode.
+
 ## Search parameters
 
 Search-time parameters live under the `hgraph` sub-object:

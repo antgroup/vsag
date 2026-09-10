@@ -931,7 +931,9 @@ private:
     HGraphMCIParameters mci_parameters_{};
 
     uint64_t ef_construct_{400};  // expansion factor during graph construction
-    float alpha_{1.0};            // Relative Neighborhood Graph pruning coefficient
+    AdaptivePruningParameter adaptive_pruning_;
+
+    float alpha_{1.0};  // Relative Neighborhood Graph pruning coefficient
 
     std::shared_ptr<VisitedListPool> pool_{nullptr};  // pool of visited-lists for search
 

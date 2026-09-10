@@ -1112,3 +1112,19 @@ TEST_CASE("HGraph rejects TQ-only fields for non-TQ quantizers", "[ut][HGraphPar
                                                "mrle_dim":64})");
     REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(mrle_dim, common_param));
 }
+
+TEST_CASE("HGraph adaptive pruning accepts legacy parameters",
+          "[ut][HGraphParameter][adaptive_pruning]") {
+    auto old_json = vsag::JsonType::Parse(generate_hgraph_param(HGraphDefaultParam{}));
+    old_json.Erase("adaptive_pruning");
+    auto old_parameter = std::make_shared<vsag::HGraphParameter>(old_json);
+    CHECK_FALSE(old_parameter->adaptive_pruning.enabled);
+    auto roundtrip = std::make_shared<vsag::HGraphParameter>(old_parameter->ToJson());
+    CHECK(roundtrip->CheckCompatibility(old_parameter));
+    CHECK(old_parameter->CheckCompatibility(roundtrip));
+    roundtrip->alpha = 1.5F;
+    roundtrip->adaptive_pruning.adjust_step = 0.03F;
+    CHECK(old_parameter->CheckCompatibility(roundtrip));
+    roundtrip->adaptive_pruning.enabled = true;
+    CHECK_FALSE(old_parameter->CheckCompatibility(roundtrip));
+}

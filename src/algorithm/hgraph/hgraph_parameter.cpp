@@ -129,6 +129,10 @@ HGraphParameter::FromJson(const JsonType& json) {
         CHECK_ARGUMENT(this->ef_construction > 0, "ef_construction must be positive");
     }
 
+    adaptive_pruning = AdaptivePruningParameter{};
+    if (json.Contains(HGRAPH_ADAPTIVE_PRUNING)) {
+        adaptive_pruning.FromJson(json[HGRAPH_ADAPTIVE_PRUNING]);
+    }
     if (json.Contains(ALPHA_KEY)) {
         this->alpha = json[ALPHA_KEY].GetFloat();
     }
@@ -292,6 +296,7 @@ HGraphParameter::ToJson() const {
     json[EF_CONSTRUCTION_KEY].SetUint64(this->ef_construction);
     json[RESIZE_INCREASE_COUNT_BIT].SetUint64(this->resize_increase_count_bit);
     json[ALPHA_KEY].SetFloat(this->alpha);
+    json[HGRAPH_ADAPTIVE_PRUNING].SetJson(adaptive_pruning.ToJson());
     json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate);
     json[DEDUPLICATE_STORAGE].SetBool(this->deduplicate_storage);
     json[DUPLICATE_DISTANCE_THRESHOLD].SetFloat(this->duplicate_distance_threshold);
@@ -321,6 +326,14 @@ HGraphParameter::ToJson() const {
 bool
 HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     PARAM_CAST_OR_RETURN(HGraphParameter, p, other);
+    CHECK_FIELD_EQ(*this, *p, adaptive_pruning.enabled);
+    if (adaptive_pruning.enabled) {
+        CHECK_FIELD_EQ(*this, *p, alpha);
+        CHECK_FIELD_EQ(*this, *p, adaptive_pruning.adjust_step);
+        CHECK_FIELD_EQ(*this, *p, adaptive_pruning.fill_rejected);
+        CHECK_FIELD_EQ(*this, *p, adaptive_pruning.apply_to_reverse);
+        CHECK_FIELD_EQ(*this, *p, adaptive_pruning.apply_to_upper);
+    }
     auto have_reorder = this->use_reorder && not this->ignore_reorder;
     auto have_reorder_other = p->use_reorder && not p->ignore_reorder;
     if (have_reorder != have_reorder_other) {

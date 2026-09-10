@@ -42,6 +42,7 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 
 | 字段 | 典型值 | 说明 |
 |------|-------|------|
+| `adaptive_pruning` | `{"enabled": false}` | 实验性 NSW 底层正向/反向 L2 剪枝；详见 [HGraph](../indexes/hgraph.md#实验性自适应剪枝) |
 | `max_degree` | 16~48 | 每节点最大出边数 |
 | `ef_construction` | 200~500 | 构建阶段候选集大小，越大召回越高、构建越慢 |
 | `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq4` / `pq` | 主存储的量化策略 —— 支持的全部取值见[量化章节](../quantization/README.md) |
