@@ -17,6 +17,7 @@
 
 #include <string>
 
+#include "algorithm/index_search_parameter.h"
 #include "algorithm/inner_index_parameter.h"
 #include "algorithm/sindi/sindi_parameter.h"
 #include "index_common_param.h"
@@ -70,7 +71,7 @@ public:
     IOParamPtr rerank_io_parameter{nullptr};
 };
 
-class SINDIV2SearchParameter : public Parameter {
+class SINDIV2SearchParameter : public Parameter, public IndexSearchParameter {
 public:
     void
     FromJson(const JsonType& json) override;
