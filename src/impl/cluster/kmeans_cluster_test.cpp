@@ -15,9 +15,11 @@
 
 #include "kmeans_cluster.h"
 
+#include <atomic>
 #include <cstring>
 #include <stdexcept>
 
+#include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
 #include "simd/fp32_simd.h"
 #include "unittest.h"
@@ -85,6 +87,17 @@ public:
     uint64_t submitted{0};
     uint64_t fail_on{0};
     bool drop_task{false};
+};
+
+class CountingKMeansAllocator : public vsag::DefaultAllocator {
+public:
+    void*
+    Allocate(uint64_t size) override {
+        ++allocations;
+        return vsag::DefaultAllocator::Allocate(size);
+    }
+
+    std::atomic<uint64_t> allocations{0};
 };
 
 void
@@ -213,6 +226,10 @@ TEST_CASE("Full KMeans uses all rows and returns final exact assignments",
     REQUIRE_THROWS(cluster.RunFull(0, data.data(), data.size()));
     REQUIRE_THROWS(cluster.RunFull(2, data.data(), 1));
     REQUIRE_THROWS(cluster.RunFull(1, data.data(), data.size(), 0));
+    REQUIRE_THROWS(cluster.RunFull(1, nullptr, data.size()));
+    REQUIRE_THROWS(cluster.RunFull(1, data.data(), 0));
+    vsag::KMeansCluster invalid_dim(0, allocator.get());
+    REQUIRE_THROWS(invalid_dim.RunFull(1, data.data(), data.size()));
 
     data = {0, 1, 2, 3, 10, 20, 21, 22, 40, 41, 43};
     labels = cluster.RunFull(3, data.data(), data.size(), 2);
@@ -277,6 +294,24 @@ TEST_CASE("Full KMeans drains failed assignment and update tasks",
     REQUIRE_NOTHROW(cluster.RunFull(1, data.data(), count, 1));
     REQUIRE(cluster.k_centroids_[0] == 1.0F);
     pool->WaitUntilEmpty();
+}
+
+TEST_CASE("Full KMeans reuses centroid update scratch across iterations",
+          "[ut][KMeansCluster][fused_full]") {
+    constexpr uint64_t count = 1024;
+    constexpr int32_t dim = 7;
+    const uint32_t k = GENERATE(1, 33, 257);
+    auto data = fixtures::generate_vectors(count, dim, false, 42);
+    CountingKMeansAllocator allocator;
+    auto pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
+    pool->SetPoolSize(4);
+    vsag::KMeansCluster cluster(dim, &allocator, pool);
+    allocator.allocations = 0;
+    cluster.RunFull(k, data.data(), count, 1);
+    const auto single_iteration_allocations = allocator.allocations.load();
+    allocator.allocations = 0;
+    cluster.RunFull(k, data.data(), count, 5);
+    REQUIRE(allocator.allocations.load() == single_iteration_allocations);
 }
 
 // Exercises the centroid-assignment path with shape parameters that meet the
@@ -367,7 +402,7 @@ TEST_CASE("Kmeans seeded fixed-order reduction is reproducible", "[ut][KMeansClu
 
 TEST_CASE("Full KMeans is reproducible across worker counts", "[ut][KMeansCluster][fused_full]") {
     constexpr uint64_t count = 4097;
-    constexpr uint32_t k = 33;
+    const uint32_t k = GENERATE(33, 257);
     constexpr int32_t dim = 17;
     auto data = fixtures::generate_vectors(count, dim, false, 42);
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();

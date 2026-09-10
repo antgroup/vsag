@@ -290,14 +290,18 @@ KMeansCluster::find_nearest_one_with_hgraph(const float* query,
 Vector<int32_t>
 KMeansCluster::RunFull(
     uint32_t k, const float* data, uint64_t count, uint32_t iterations, uint32_t seed) {
-    CHECK_ARGUMENT(data != nullptr and count > 0 and dim_ > 0,
-                   "full KMeans requires non-empty vectors");
-    CHECK_ARGUMENT(k > 0 and k <= count and k <= std::numeric_limits<int32_t>::max(),
+    CHECK_ARGUMENT(data != nullptr, "full KMeans requires non-empty vectors");
+    CHECK_ARGUMENT(count > 0, "full KMeans requires non-empty vectors");
+    CHECK_ARGUMENT(dim_ > 0, "full KMeans requires non-empty vectors");
+    CHECK_ARGUMENT(k > 0, "full KMeans requires 1 <= k <= training count and INT32_MAX");
+    CHECK_ARGUMENT(k <= count, "full KMeans requires 1 <= k <= training count and INT32_MAX");
+    CHECK_ARGUMENT(k <= std::numeric_limits<int32_t>::max(),
                    "full KMeans requires 1 <= k <= training count and INT32_MAX");
     CHECK_ARGUMENT(iterations > 0, "full KMeans iterations must be positive");
     const auto dim = static_cast<uint64_t>(dim_);
-    CHECK_ARGUMENT(count <= std::numeric_limits<uint64_t>::max() / dim / sizeof(float) and
-                       count < std::numeric_limits<uint64_t>::max() / sizeof(uint64_t),
+    CHECK_ARGUMENT(count <= std::numeric_limits<uint64_t>::max() / dim / sizeof(float),
+                   "full KMeans input size overflow");
+    CHECK_ARGUMENT(count < std::numeric_limits<uint64_t>::max() / sizeof(uint64_t),
                    "full KMeans input size overflow");
     if (k_centroids_ != nullptr) {
         allocator_->Deallocate(k_centroids_);
@@ -311,12 +315,20 @@ KMeansCluster::RunFull(
     Vector<uint64_t> positions(uint64_t{k}, 0, allocator_);
     Vector<uint64_t> grouped(count, 0, allocator_);
 
-    auto parallel_blocks = [&](uint64_t size, uint64_t min_block_size, const auto& function) {
-        std::vector<std::future<void>> futures;
+    const auto block_size_for = [](uint64_t size, uint64_t min_block_size) {
         // ThreadPool does not expose its worker count. Bound each phase to a small task budget
         // independently of N, while allowing small K to update multiple centers concurrently.
         constexpr uint64_t max_tasks = 256;
-        const uint64_t block_size = std::max(min_block_size, 1 + (size - 1) / max_tasks);
+        return std::max(min_block_size, 1 + (size - 1) / max_tasks);
+    };
+    const uint64_t update_block_size = block_size_for(k, 1);
+    const uint64_t update_blocks = 1 + (k - 1) / update_block_size;
+    // Each update block owns one slice, reused across all Lloyd iterations. Keep scratch
+    // local to this RunFull call, not thread_local (which would outlive the caller's allocator).
+    Vector<double> update_sums(update_blocks * dim, 0.0, allocator_);
+    auto parallel_blocks = [&](uint64_t size, uint64_t min_block_size, const auto& function) {
+        std::vector<std::future<void>> futures;
+        const uint64_t block_size = block_size_for(size, min_block_size);
         futures.reserve(1 + (size - 1) / block_size);
         std::exception_ptr failure;
         try {
@@ -370,7 +382,7 @@ KMeansCluster::RunFull(
             grouped[positions[labels[row]]++] = row;
         }
         parallel_blocks(k, 1, [&](uint64_t first, uint64_t last) {
-            Vector<double> sum(dim, 0.0, allocator_);
+            auto* sum = update_sums.data() + (first / update_block_size) * dim;
             for (uint64_t center = first; center < last; ++center) {
                 const auto members = offsets[center + 1] - offsets[center];
                 if (members == 0) {
@@ -379,7 +391,7 @@ KMeansCluster::RunFull(
                     std::copy_n(data + row * dim, dim, k_centroids_ + center * dim);
                     continue;
                 }
-                std::fill(sum.begin(), sum.end(), 0.0);
+                std::fill_n(sum, dim, 0.0);
                 for (uint64_t pos = offsets[center]; pos < offsets[center + 1]; ++pos) {
                     const auto* vector = data + grouped[pos] * dim;
                     for (uint64_t d = 0; d < dim; ++d) {
@@ -387,7 +399,8 @@ KMeansCluster::RunFull(
                     }
                 }
                 for (uint64_t d = 0; d < dim; ++d) {
-                    k_centroids_[center * dim + d] = static_cast<float>(sum[d] / members);
+                    k_centroids_[center * dim + d] =
+                        static_cast<float>(sum[d] / static_cast<double>(members));
                 }
             }
         });

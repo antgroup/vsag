@@ -78,7 +78,8 @@ HGraphParameter::FromJson(const JsonType& json) {
         CHECK_ARGUMENT(json[RABITQ_CENTROID_COUNT_KEY].IsNumberInteger(),
                        "rabitq_centroid_count must be an integer");
         const auto count = json[RABITQ_CENTROID_COUNT_KEY].GetInt();
-        CHECK_ARGUMENT(count > 0 and count <= std::numeric_limits<int32_t>::max(),
+        CHECK_ARGUMENT(count > 0, "rabitq_centroid_count must be in [1, INT32_MAX]");
+        CHECK_ARGUMENT(count <= std::numeric_limits<int32_t>::max(),
                        "rabitq_centroid_count must be in [1, INT32_MAX]");
         rabitq_centroid_count = static_cast<uint32_t>(count);
     }
@@ -86,7 +87,8 @@ HGraphParameter::FromJson(const JsonType& json) {
         CHECK_ARGUMENT(json[KMEANS_ITERATIONS_KEY].IsNumberInteger(),
                        "kmeans_iterations must be an integer");
         const auto iterations = json[KMEANS_ITERATIONS_KEY].GetInt();
-        CHECK_ARGUMENT(iterations > 0 and iterations <= std::numeric_limits<int32_t>::max(),
+        CHECK_ARGUMENT(iterations > 0, "kmeans_iterations must be in [1, INT32_MAX]");
+        CHECK_ARGUMENT(iterations <= std::numeric_limits<int32_t>::max(),
                        "kmeans_iterations must be in [1, INT32_MAX]");
         kmeans_iterations = static_cast<uint32_t>(iterations);
     }

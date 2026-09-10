@@ -149,7 +149,9 @@ HGraph::validate_fused_training_data(const DatasetPtr& full_data) const {
     if (rabitq_fused_datacell_ == nullptr) {
         return;
     }
-    CHECK_ARGUMENT(full_data != nullptr and full_data->GetNumElements() >= rabitq_centroid_count_,
+    CHECK_ARGUMENT(full_data != nullptr,
+                   "fused KMeans requires at least cluster_count training vectors");
+    CHECK_ARGUMENT(full_data->GetNumElements() >= rabitq_centroid_count_,
                    "fused KMeans requires at least cluster_count training vectors");
     CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
 }
@@ -172,10 +174,10 @@ std::vector<int64_t>
 HGraph::Build(const DatasetPtr& data) {
     CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
     if (this->rabitq_fused_datacell_ != nullptr) {
-        CHECK_ARGUMENT(
-            data->GetNumElements() >= 0 and static_cast<uint64_t>(data->GetNumElements()) <=
-                                                std::numeric_limits<InnerIdType>::max(),
-            "fused build size exceeds inner id range");
+        CHECK_ARGUMENT(data->GetNumElements() >= 0, "fused build size exceeds inner id range");
+        CHECK_ARGUMENT(static_cast<uint64_t>(data->GetNumElements()) <=
+                           std::numeric_limits<InnerIdType>::max(),
+                       "fused build size exceeds inner id range");
         this->validate_add_data(data);
         // The complete batch size is known. Reserve once before per-row ID allocation;
         // otherwise growing the contiguous fused slab repeatedly copies the whole prefix.
@@ -258,6 +260,8 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
                                        this->allocator_);
         temporary_sq8_build_data->Train(vectors, total);
     }
+    // Quantizer types are fixed when datacells are created. Select the actual graph-distance
+    // source before training so fused FP32 builds can skip the unused global mean.
     auto build_data = (has_precise_reorder() and not build_by_base_) ? this->high_precise_codes_
                                                                      : this->basic_flatten_codes_;
     if (need_sq8_build_data) {

@@ -141,6 +141,11 @@ public:
     void
     TrainFusedTransform();
 
+    [[nodiscard]] bool
+    IsTrained() const {
+        return this->is_trained_;
+    }
+
     void
     SetCentroid(const float* centroid);
 

@@ -285,7 +285,7 @@ public:
             IsFiniteRaBitQValue(runtime_error_rate) and runtime_error_rate > 0.0F
                 ? runtime_error_rate
                 : query.default_rabitq_error_rate;
-        error_rate_scale_ = error_rate;
+        error_rate_ = error_rate;
     }
 
     [[nodiscard]] bool
@@ -308,7 +308,7 @@ public:
                     filter_metadata.rescale * *filter_inner_product;
         const float raw_lower_bound =
             *distance -
-            filter_metadata.error * (error_rate_scale_ * query_.cluster_g_error[node.cluster_id]);
+            filter_metadata.error * (error_rate_ * query_.cluster_g_error[node.cluster_id]);
         *lower_bound = raw_lower_bound - 1e-5F * std::max(1.0F, std::fabs(raw_lower_bound));
         return IsFiniteRaBitQValue(*distance) and IsFiniteRaBitQValue(*lower_bound) and
                IsFiniteRaBitQValue(*filter_inner_product);
@@ -347,8 +347,7 @@ public:
                            filter_metadata.rescale * filter_inner_products[i];
             const float raw_lower_bound =
                 distances[i] -
-                filter_metadata.error *
-                    (error_rate_scale_ * query_.cluster_g_error[nodes[i].cluster_id]);
+                filter_metadata.error * (error_rate_ * query_.cluster_g_error[nodes[i].cluster_id]);
             lower_bounds[i] = raw_lower_bound - 1e-5F * std::max(1.0F, std::fabs(raw_lower_bound));
             valid[i] = IsFiniteRaBitQValue(distances[i]) and
                        IsFiniteRaBitQValue(lower_bounds[i]) and
@@ -409,7 +408,7 @@ private:
 
 private:
     const RaBitQFusedTraversalQuery& query_;
-    float error_rate_scale_{1.0F};
+    float error_rate_{1.0F};
 };
 
 class LegacyOneBitScorer {

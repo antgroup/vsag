@@ -15,6 +15,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -59,9 +60,9 @@ struct RaBitQFusedTraversalQuery {
 
     void
     EnsureCluster(uint32_t id) const {
-        if (cluster_cache != nullptr) {
-            cluster_cache->Ensure(id);
-        }
+        // GetFusedTraversalQuery always attaches its owning query computer's cache.
+        assert(cluster_cache != nullptr);
+        cluster_cache->Ensure(id);
     }
     const uint8_t* query_planes{nullptr};
     const float* transformed_query{nullptr};
@@ -1204,6 +1205,8 @@ public:
                     uint64_t count,
                     uint32_t cluster_count,
                     uint32_t iterations = 25) override {
+        CHECK_ARGUMENT(this->bottom_quantizer().IsTrained(),
+                       "fused RaBitQ requires Train or TrainFusedTransform before TrainFusedCodec");
         CHECK_ARGUMENT(data != nullptr and count > 0,
                        "fused RaBitQ training data must not be empty");
         CHECK_ARGUMENT(cluster_count > 0 and cluster_count <= count and

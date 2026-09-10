@@ -43,6 +43,8 @@ FusedCodecSize(uint64_t dim, uint64_t count) {
 }
 
 // A single query owns this cache across graph routing, traversal and reranking.
+// Not thread-safe: these stages must access it sequentially. Concurrent queries/workers need
+// separate caches; ready and computed_count intentionally require no atomic operations.
 class RaBitQFusedQueryCache {
 public:
     explicit RaBitQFusedQueryCache(Allocator* allocator)

@@ -66,6 +66,9 @@ TEST_CASE("RaBitQ split interface queries with filter IP hints", "[ut][RaBitQSpl
     auto flatten = FlattenInterface::MakeInstance(param, common_param);
     auto split = std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(flatten);
     REQUIRE(split != nullptr);
+    REQUIRE_THROWS_AS(split->TrainFusedCodec(vectors.data(), train_count, cluster_count),
+                      VsagException);
+    REQUIRE(split->FusedClusterCount() == 0);
     if (GENERATE(false, true)) {
         REQUIRE_NOTHROW(split->TrainFusedTransform());
     } else {
@@ -280,6 +283,25 @@ TEST_CASE("Fused query center terms avoid cancellation", "[ut][RaBitQSplitDataCe
     cache.Ensure(0);
     REQUIRE(cache.add[0] == 0.015625F);
     REQUIRE(cache.error[0] == 0.125F);
+}
+
+TEST_CASE("Fused query center terms handle zero and tiny vectors",
+          "[ut][RaBitQSplitDataCell][fused_full]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    const float magnitude = GENERATE(0.0F, std::numeric_limits<float>::min());
+    const float query[] = {GENERATE(-1.0F, 1.0F) * magnitude};
+    const float center[] = {magnitude};
+    const double norm = static_cast<double>(magnitude) * magnitude;
+    const auto metric = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP);
+    RaBitQFusedQueryCache cache(allocator.get());
+    cache.Initialize(query, center, &norm, 1, 1, metric);
+    cache.Ensure(0);
+    // The squared term may round to zero in FP32, but its FP64 square root must not be lost.
+    REQUIRE(cache.add[0] == 0.0F);
+    REQUIRE(cache.error[0] ==
+            static_cast<float>(std::abs(static_cast<double>(query[0]) - center[0])));
+    cache.Ensure(0);
+    REQUIRE(cache.computed_count == 1);
 }
 
 }  // namespace vsag
