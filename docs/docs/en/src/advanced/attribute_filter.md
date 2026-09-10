@@ -88,7 +88,9 @@ accepts a vector according to its type value:
 
 Missing values yield empty matches; other type values have no accepting branch. Missing
 fields or incompatible types are errors. Non-FastBitset attribute storage is not supported
-by this specialized executor. It can be combined with ordinary AND/OR/NOT predicates.
+by this specialized executor. It can be combined with ordinary AND/OR predicates.
+The parser accepts `!(...)`, but execution of a `NotExpression` remains unsupported
+(`INTERNAL_ERROR`, `Unsupported expression type`); this is not changed by factory dispatch.
 
 The type field must be signed and represent -1. Region and residence fields may use signed
 or unsigned integer types; query values must fit their field type and signed 64-bit input
@@ -97,6 +99,30 @@ range. Out-of-range values are rejected rather than truncated.
 `FUNCTION(name,"arg1|arg2","type1|type2")` is retained for parser/AST compatibility with
 `ads` only. It does **not** register callbacks or provide search-time function execution;
 passing such an expression to the executor is unsupported.
+
+### Internal executor factories
+
+Region expressions use the immutable named `ExecutorFactoryRegistry` by default, with no
+request flag. `Executor::MakeInstance` delegates to the internal builtin adapter in
+`src/attr/executor/builtin_executor.cpp`, which maps the existing typed region AST to the
+compile-linked `region_filter` factory. Registration glue is separate from the reusable
+registry implementation; the factory constructs the same `RegionFilterExecutor` with the
+same schema, range, and FastBitset checks and bitmap algorithm.
+
+This is an **internal, compile-linked extension point**, not a user-injectable registry,
+public plugin SDK, dynamic-library loader, or runtime registration/unregistration API.
+Adding a builtin requires source changes and rebuilding VSAG; it does not add grammar or
+make generic `FUNCTION(...)` executable. Existing search entrypoint signatures are unchanged.
+
+The builtin registry is initialized once and read-only afterwards. Each factory call creates
+an independent executor with its own mutable scratch/result bitmaps; the expression and
+attribute index are retained by shared ownership, while the allocator must outlive the
+executor. Shared expressions and the index must not be mutated concurrently with evaluation.
+Call `Init()` before use and `Clear()` before each composed `Run(bucket_id)`, as search does;
+logical AND/OR may modify a child's result bitmap in place, never borrowed index postings.
+Lookup occurs once per region executor construction, not in `Run` or per-candidate
+`CheckValid`. IVF creates an executor tree per parallel search worker, and each region leaf
+resolves separately, so this is not necessarily one lookup per request.
 
 ### Introducing fields during updates
 
@@ -254,7 +280,8 @@ common needs of structured filtering.
 | NOT         | `!(expr)`              |
 | Grouping    | `(...)`                |
 
-`NOT` is only available in the prefixed form `!(...)`.
+The parser recognizes `NOT` only in the prefixed form `!(...)`; its execution is
+currently unsupported (see [Region filter](#region-filter)).
 
 ### Comparison operators
 
@@ -323,8 +350,8 @@ category = "electronics"
 # numeric range, multi-valued field
 price >= 100 AND price <= 1000 AND tag IN ["promo", "new"]
 
-# negation
-!(status = "archived") AND multi_notin(region, "us-east|us-west", "|")
+# exclusion without the unsupported NOT expression
+status != "archived" AND multi_notin(region, "us-east|us-west", "|")
 
 # arithmetic on the left side of the comparison
 (end_ts - start_ts) > 3600 AND charge_type = 5
