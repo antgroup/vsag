@@ -1240,7 +1240,7 @@ TEST_CASE("SINDI Immutable Sparse Deserialize KNN Test", "[ut][SINDI]") {
     SparseVector immutable_vector;
     REQUIRE_THROWS(source->GetSparseVectorByInnerId(0, &immutable_vector, allocator.get()));
     REQUIRE_THROWS(immutable->GetSparseVectorByInnerId(0, &immutable_vector, allocator.get()));
-    auto distances = immutable->CalDistanceById(query, ids.data(), num_base);
+    auto distances = immutable->CalcDistancesById(query, ids.data(), num_base);
     REQUIRE(distances->GetDim() == num_base);
     for (int64_t i = 0; i < num_base; ++i) {
         REQUIRE(std::abs(immutable->CalcDistanceById(query, ids[i]) -

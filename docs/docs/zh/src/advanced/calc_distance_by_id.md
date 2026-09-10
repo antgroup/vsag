@@ -15,6 +15,14 @@
 > 仍保留该弃用别名；新代码应使用 `CalcDistancesById`。两者语义完全相同。详情参见
 > [issue #2068](https://github.com/antgroup/vsag/issues/2068)。
 
+HGraph 还支持配置为稀疏或非 FP32 数据类型。这些配置应使用包含原生 query 字段的 Dataset（`SparseVectors`、`Int8Vectors`，以及 FP16/BF16 对应的 `Float16Vectors`）；只有 float32 索引才能使用普通 `float*` 距离查询。Dataset 表示必须匹配索引配置，不能只检查向量维度。
+
+### C++ 实现迁移
+
+`CalcDistancesById` 是正式的批量虚函数接口，包含完整 `topk` 参数。公共包装层和内部索引实现直接通过该名称派发；公共弃用别名 `CalDistanceById` 只转发到正式接口，不再反向依赖旧入口。
+
+自定义索引实现应 override 对应的 `CalcDistancesById` 重载，不能再依赖仅 override 历史拼写。普通调用旧别名仍保持源码兼容，但仅覆盖旧别名不再构成正式批量接口的实现。此次虚函数接口布局发生变化，不保证与此前编译的 `Index` 子类二进制兼容；请使用匹配的头文件和库重新编译自定义子类及相关 C++ 组件。
+
 ## 接口概览
 
 ```cpp
@@ -139,7 +147,7 @@ std::vector<int64_t> candidate_ids = {
 };
 
 if (index->CheckFeature(vsag::SUPPORT_BATCH_CALC_DISTANCE_BY_ID)) {
-    auto result = index->CalDistanceById(queries, candidate_ids.data(), 3, true, /*topk=*/2);
+    auto result = index->CalcDistancesById(queries, candidate_ids.data(), 3, true, /*topk=*/2);
     if (result.has_value()) {
         auto batch = result.value();
         // batch 的 NumElements() == 2，Dim() == 2。

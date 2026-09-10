@@ -108,14 +108,13 @@ public:
     CalcDistancesById(const float* query,
                       const int64_t* ids,
                       int64_t count,
-                      bool calculate_precise_distance = true) const override;
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const override;
 
-    DatasetPtr
-    CalDistanceById(const float* query,
-                    const int64_t* ids,
-                    int64_t count,
-                    bool calculate_precise_distance = true,
-                    int64_t topk = -1) const override;
+    float
+    CalcDistanceById(const DatasetPtr& query,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
 
     void
     Deserialize(StreamReader& reader) override;
@@ -431,6 +430,9 @@ public:
                      RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr) const;
 
 private:
+    float
+    calc_native_distance_by_id(const void* query, int64_t id, bool precise) const;
+
     void
     check_fused_mutation_supported(std::string_view operation) const;
 

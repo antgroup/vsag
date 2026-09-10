@@ -121,22 +121,22 @@ public:
     }
 
     tl::expected<DatasetPtr, Error>
-    CalDistanceById(const float* query,
-                    const int64_t* ids,
-                    int64_t count,
-                    bool calculate_precise_distance = true,
-                    int64_t topk = -1) const override {
-        SAFE_CALL(return this->inner_index_->CalDistanceById(
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const override {
+        SAFE_CALL(return this->inner_index_->CalcDistancesById(
             query, ids, count, calculate_precise_distance, topk));
     }
 
     tl::expected<DatasetPtr, Error>
-    CalDistanceById(const DatasetPtr& query,
-                    const int64_t* ids,
-                    int64_t count,
-                    bool calculate_precise_distance = true,
-                    int64_t topk = -1) const override {
-        SAFE_CALL(return this->inner_index_->CalDistanceById(
+    CalcDistancesById(const DatasetPtr& query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const override {
+        SAFE_CALL(return this->inner_index_->CalcDistancesById(
             query, ids, count, calculate_precise_distance, topk));
     }
 

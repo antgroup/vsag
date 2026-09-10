@@ -53,6 +53,12 @@ get_one_query(const vsag::DatasetPtr& queries, int i) {
         query->Float32Vectors(queries->GetFloat32Vectors() + i * queries->GetDim());
     }
 
+    if (queries->GetInt8Vectors() != nullptr) {
+        query->Int8Vectors(queries->GetInt8Vectors() + i * queries->GetDim());
+    }
+    if (queries->GetFloat16Vectors() != nullptr) {
+        query->Float16Vectors(queries->GetFloat16Vectors() + i * queries->GetDim());
+    }
     if (queries->GetPaths() != nullptr) {
         query->Paths(queries->GetPaths() + i);
     }

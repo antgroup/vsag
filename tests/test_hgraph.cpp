@@ -320,10 +320,12 @@ HGraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
     TestFilterSearch(index, dataset, search_param, recall, true, true);
     TestCheckIdExist(index, dataset);
-    TestCalcDistanceById(index, dataset, 1e-5, expect_success);
+    // Sparse dot products accumulate in a different order from the ground-truth backend.
+    const float distance_tolerance = dataset->query_->GetSparseVectors() != nullptr ? 1e-4F : 1e-5F;
+    TestCalcDistanceById(index, dataset, distance_tolerance, expect_success);
     TestGetRawVectorByIds(index, dataset, expect_success);
-    TestBatchCalcDistanceById(index, dataset, 1e-5, expect_success);
-    TestMultiQueryBatchCalcDistanceById(index, dataset, 1e-5, expect_success);
+    TestBatchCalcDistanceById(index, dataset, distance_tolerance, expect_success);
+    TestMultiQueryBatchCalcDistanceById(index, dataset, distance_tolerance, expect_success);
     TestSearchAllocator(index, dataset, search_param, recall, true);
     TestUpdateVector(index, dataset, search_param, false);
     TestUpdateId(index, dataset, search_param, true);
@@ -1510,7 +1512,7 @@ TestHGraphWithAttr(const fixtures::HGraphTestIndexPtr& test_index,
 
 HGRAPH_PR_DAILY_CASE("HGraph With Attr", "[ft][filter_search][hgraph]", TestHGraphWithAttr)
 
-TEST_CASE("HGraph CalDistanceById default topk returns shaped result", "[ft][hgraph][pr]") {
+TEST_CASE("HGraph CalcDistancesById default topk returns shaped result", "[ft][hgraph][pr]") {
     using namespace fixtures;
 
     HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
@@ -1522,7 +1524,7 @@ TEST_CASE("HGraph CalDistanceById default topk returns shaped result", "[ft][hgr
     const auto count = dataset->top_k;
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    auto result = index->CalDistanceById(
+    auto result = index->CalcDistancesById(
         dataset->query_->GetFloat32Vectors(), dataset->ground_truth_->GetIds(), count, true, -1);
 #pragma GCC diagnostic pop
 
@@ -4483,7 +4485,7 @@ TEST_CASE("HGraph GetStats reports build cache hit-rate", "[ft][hgraph][cache][p
     const auto missed_nodes = parsed["build_cache_missed_nodes"].GetInt();
     REQUIRE(hit_nodes + missed_nodes == TEST_COUNT);
 }
-TEST_CASE("HGraph Concurrent Tune and CalDistanceById", "[ft][concurrent][hgraph]") {
+TEST_CASE("HGraph Concurrent Tune and CalcDistancesById", "[ft][concurrent][hgraph]") {
     constexpr uint32_t dim = 64;
     constexpr uint32_t num_vectors = 1000;
 
@@ -4646,7 +4648,7 @@ TEST_CASE("HGraph Concurrent Tune and CalcDistanceById (single id)", "[ft][concu
     REQUIRE(cal_count.load() > 0);
 }
 
-TEST_CASE("HGraph Concurrent Tune(disable_future_tuning=false) and CalDistanceById",
+TEST_CASE("HGraph Concurrent Tune(disable_future_tuning=false) and CalcDistancesById",
           "[ft][concurrent][hgraph]") {
     constexpr uint32_t dim = 64;
     constexpr uint32_t num_vectors = 1000;

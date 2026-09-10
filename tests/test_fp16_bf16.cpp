@@ -176,4 +176,49 @@ TEST_CASE("HGraph with BF16 Test", "[ft][hgraph][bf16]") {
     }
 }
 
+TEST_CASE("HGraph typed native distance contract", "[ft][hgraph][distance_contract]") {
+    for (const auto& dtype :
+         {std::string("float16"), std::string("bfloat16"), std::string("int8")}) {
+        const std::string quant = dtype == "float16"    ? "fp16"
+                                  : dtype == "bfloat16" ? "bf16"
+                                                        : "int8";
+        const std::string params =
+            "{\"dtype\":\"" + dtype +
+            "\",\"metric_type\":\"l2\",\"dim\":32,\"index_param\":{\"base_quantization_type\":\"" +
+            quant + "\",\"max_degree\":16,\"ef_construction\":50}}";
+        auto made = vsag::Factory::CreateIndex("hgraph", params);
+        REQUIRE(made.has_value());
+        auto index = made.value();
+        uint16_t half[64] = {};
+        int8_t ints[64] = {};
+        float wrong[32] = {};
+        int64_t labels[] = {11, 22};
+        auto base = vsag::Dataset::Make()->Owner(false)->Dim(32)->NumElements(2)->Ids(labels);
+        if (dtype == "int8")
+            base->Int8Vectors(ints);
+        else
+            base->Float16Vectors(half);
+        REQUIRE(index->Build(base).has_value());
+        auto single = vsag::Dataset::Make()->Owner(false)->Dim(32)->NumElements(1);
+        if (dtype == "int8")
+            single->Int8Vectors(ints);
+        else
+            single->Float16Vectors(half);
+        auto distance = index->CalcDistanceById(single, 11);
+        REQUIRE(distance.has_value());
+        REQUIRE(distance.value() == 0);
+        REQUIRE(!index->CalcDistanceById(wrong, 11).has_value());
+        int64_t candidates[] = {11, 999, 22, 999};
+        for (int64_t topk : {-1, 2}) {
+            auto batch = index->CalcDistancesById(base, candidates, 2, true, topk);
+            REQUIRE(batch.has_value());
+            REQUIRE(batch.value()->GetNumElements() == 2);
+            REQUIRE(batch.value()->GetDistances()[0] == 0);
+            REQUIRE(batch.value()->GetDistances()[1] == -1);
+            REQUIRE(batch.value()->GetDistances()[2] == 0);
+            REQUIRE(batch.value()->GetDistances()[3] == -1);
+        }
+    }
+}
+
 }  // namespace vsag

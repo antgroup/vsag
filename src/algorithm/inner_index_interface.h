@@ -142,8 +142,7 @@ public:
      * The query must be a contiguous float32 array. For sparse vector indexes,
      * this overload is not applicable.
      *
-     * Default implementation loops through IDs calling CalcDistanceById.
-     * Dense indexes may override for batch optimization.
+     * Canonical batch distance-by-ID interface. Dense indexes override the float* overload; sparse and multi-vector indexes override the DatasetPtr overload.
      *
      * @param query Pointer to the float32 query vector (dense format).
      * @param ids Array of unique identifiers of vectors to be calculated.
@@ -152,11 +151,11 @@ public:
      * @return DatasetPtr containing distances. '-1' indicates an invalid ID.
      */
     virtual DatasetPtr
-    CalDistanceById(const float* query,
-                    const int64_t* ids,
-                    int64_t count,
-                    bool calculate_precise_distance = true,
-                    int64_t topk = -1) const;
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const;
 
     /**
      * @brief Calculate distances by IDs (batch) using DatasetPtr, supports multi-query.
@@ -174,7 +173,7 @@ public:
      * distances[i * count + j] is the distance from query i to that ID.
      * '-1' indicates an invalid ID.
      *
-     * Default implementation loops through queries and IDs calling CalcDistanceById.
+     * Default implementation loops through queries and IDs calling CalcDistanceById (single-ID).
      * Sparse indexes must override for proper sparse vector handling.
      *
      * @param query DatasetPtr containing query vector(s) (sparse or dense format).
@@ -187,25 +186,11 @@ public:
      *         '-1' indicates an invalid ID.
      */
     virtual DatasetPtr
-    CalDistanceById(const DatasetPtr& query,
-                    const int64_t* ids,
-                    int64_t count,
-                    bool calculate_precise_distance = true,
-                    int64_t topk = -1) const;
-
-    // The public Index bridge accepts topk and dispatches to its legacy virtual overload. These
-    // internal corrected helpers intentionally retain the historical no-topk fast path.
-    virtual DatasetPtr
-    CalcDistancesById(const float* query,
-                      const int64_t* ids,
-                      int64_t count,
-                      bool calculate_precise_distance = true) const;
-
-    virtual DatasetPtr
     CalcDistancesById(const DatasetPtr& query,
                       const int64_t* ids,
                       int64_t count,
-                      bool calculate_precise_distance = true) const;
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const;
 
     virtual uint64_t
     CalSerializeSize() const;
@@ -643,11 +628,11 @@ protected:
     calc_distance_by_id(const float* query, int64_t id, const FlattenInterfacePtr& data) const;
 
     DatasetPtr
-    cal_distance_by_id(const float* query,
-                       const int64_t* ids,
-                       int64_t count,
-                       const FlattenInterfacePtr& data,
-                       std::vector<bool>* validity = nullptr) const;
+    calc_distance_by_id(const float* query,
+                        const int64_t* ids,
+                        int64_t count,
+                        const FlattenInterfacePtr& data,
+                        std::vector<bool>* validity = nullptr) const;
 
     // ========== Search Helper Methods ==========
     // Common filter composition: combines DeletedIdsFilter with user filter

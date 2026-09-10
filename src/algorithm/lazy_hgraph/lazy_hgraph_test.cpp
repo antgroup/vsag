@@ -653,7 +653,7 @@ TEST_CASE("LazyHGraph calculates distance by id in flat and graph phases", "[ut]
     vsag::InnerIndexPtr interface = index;
     REQUIRE(interface->CalcDistanceById(query, 1701) == expected);
     int64_t candidates[] = {1701, -999, 1700};
-    auto flat_top = interface->CalDistanceById(query, candidates, 3, true, 1);
+    auto flat_top = interface->CalcDistancesById(query, candidates, 3, true, 1);
     REQUIRE(flat_top->GetIds()[0] == 1700);
     REQUIRE(flat_top->GetDistances()[0] == 0.0F);
 
@@ -664,7 +664,7 @@ TEST_CASE("LazyHGraph calculates distance by id in flat and graph phases", "[ut]
     REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::GRAPH);
     REQUIRE(index->CalcDistanceById(more_vectors.data(), 1800) == 0.0F);
     REQUIRE(interface->CalcDistanceById(query, 1701) == expected);
-    auto graph_top = interface->CalDistanceById(query, candidates, 3, true, 1);
+    auto graph_top = interface->CalcDistancesById(query, candidates, 3, true, 1);
     REQUIRE(graph_top->GetIds()[0] == flat_top->GetIds()[0]);
     REQUIRE(graph_top->GetDistances()[0] == flat_top->GetDistances()[0]);
 }

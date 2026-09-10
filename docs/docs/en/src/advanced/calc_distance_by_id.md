@@ -18,6 +18,14 @@ a `DatasetPtr` (works for both dense and sparse vectors).
 > `CalcDistancesById`. The two names have identical semantics. See
 > [issue #2068](https://github.com/antgroup/vsag/issues/2068).
 
+HGraph also supports configured sparse and non-FP32 data types. In those configurations, use a Dataset containing the native query field (`SparseVectors`, `Int8Vectors`, or `Float16Vectors` for FP16/BF16); a raw `float*` distance query is only valid for a float32 index. The Dataset representation must match the index configuration, not merely its vector dimension.
+
+### C++ implementation migration
+
+`CalcDistancesById` is the canonical virtual batch interface, including its `topk` parameter. Public wrappers and internal index implementations dispatch through this name directly. The deprecated public `CalDistanceById` aliases forward to the canonical interface, never the reverse.
+
+Custom index implementations must override the appropriate `CalcDistancesById` overloads instead of relying on an override of the historical spelling. Existing ordinary calls to the deprecated alias remain source-compatible, but overriding only that alias is not sufficient to implement the canonical interface. The virtual interface layout changes: binary compatibility with previously compiled `Index` subclasses is not preserved. Recompile custom subclasses and dependent C++ components against the matching headers and library.
+
 ## API Overview
 
 ```cpp
@@ -145,7 +153,7 @@ std::vector<int64_t> candidate_ids = {
 };
 
 if (index->CheckFeature(vsag::SUPPORT_BATCH_CALC_DISTANCE_BY_ID)) {
-    auto result = index->CalDistanceById(queries, candidate_ids.data(), 3, true, /*topk=*/2);
+    auto result = index->CalcDistancesById(queries, candidate_ids.data(), 3, true, /*topk=*/2);
     if (result.has_value()) {
         auto batch = result.value();
         // batch has NumElements() == 2 and Dim() == 2.

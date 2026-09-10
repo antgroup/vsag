@@ -415,6 +415,36 @@ HGraph::generate_one_route_graph() {
 
 float
 HGraph::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance) const {
+    CHECK_ARGUMENT(data_type_ == DataTypes::DATA_TYPE_FLOAT,
+                   "non-float32 HGraph distance requires a native Dataset query");
+    CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
+    return calc_native_distance_by_id(query, id, calculate_precise_distance);
+}
+
+float
+HGraph::CalcDistanceById(const DatasetPtr& query,
+                         int64_t id,
+                         bool calculate_precise_distance) const {
+    CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
+    CHECK_ARGUMENT(query->GetNumElements() == 1, "single-ID distance requires one query");
+    if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
+        CHECK_ARGUMENT(query->GetDim() == dim_, "distance query dimension mismatch");
+    }
+    const auto* native_query = get_data(query);
+    CHECK_ARGUMENT(native_query != nullptr, "distance query representation must match index dtype");
+    if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
+        const auto& sparse = query->GetSparseVectors()[0];
+        CHECK_ARGUMENT(sparse.len_ == 0 || (sparse.ids_ != nullptr && sparse.vals_ != nullptr),
+                       "sparse query requires term IDs and values");
+    }
+    return calc_native_distance_by_id(native_query, id, calculate_precise_distance);
+}
+
+float
+HGraph::calc_native_distance_by_id(const void* native_query,
+                                   int64_t id,
+                                   bool calculate_precise_distance) const {
+    const auto* query = static_cast<const float*>(native_query);
     FlattenInterfacePtr flat;
     std::shared_lock<std::shared_mutex> lock;
     if (!this->immutable_.load(std::memory_order_acquire)) {
@@ -442,16 +472,10 @@ DatasetPtr
 HGraph::CalcDistancesById(const float* query,
                           const int64_t* ids,
                           int64_t count,
-                          bool calculate_precise_distance) const {
-    return this->CalDistanceById(query, ids, count, calculate_precise_distance);
-}
-
-DatasetPtr
-HGraph::CalDistanceById(const float* query,
-                        const int64_t* ids,
-                        int64_t count,
-                        bool calculate_precise_distance,
-                        int64_t topk) const {
+                          bool calculate_precise_distance,
+                          int64_t topk) const {
+    CHECK_ARGUMENT(data_type_ == DataTypes::DATA_TYPE_FLOAT,
+                   "non-float32 HGraph distance requires a native Dataset query");
     CHECK_ARGUMENT(topk == -1 || topk > 0, "distance topk must be -1 or positive");
     FlattenInterfacePtr flat;
     std::shared_lock<std::shared_mutex> lock;
@@ -474,7 +498,7 @@ HGraph::CalDistanceById(const float* query,
         lock.unlock();
     }
     std::vector<bool> validity;
-    auto result = InnerIndexInterface::cal_distance_by_id(query, ids, count, flat, &validity);
+    auto result = InnerIndexInterface::calc_distance_by_id(query, ids, count, flat, &validity);
     if (topk == -1) {
         return result;
     }

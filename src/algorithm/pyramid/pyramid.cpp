@@ -2480,16 +2480,8 @@ DatasetPtr
 Pyramid::CalcDistancesById(const float* query,
                            const int64_t* ids,
                            int64_t count,
-                           bool calculate_precise_distance) const {
-    return this->CalDistanceById(query, ids, count, calculate_precise_distance);
-}
-
-DatasetPtr
-Pyramid::CalDistanceById(const float* query,
-                         const int64_t* ids,
-                         int64_t count,
-                         bool calculate_precise_distance,
-                         int64_t topk) const {
+                           bool calculate_precise_distance,
+                           int64_t topk) const {
     CHECK_ARGUMENT(topk == -1 || topk > 0, "distance topk must be -1 or positive");
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     auto flat = this->base_codes_;
@@ -2500,7 +2492,7 @@ Pyramid::CalDistanceById(const float* query,
         flat = this->raw_vector_;
     }
     std::vector<bool> validity;
-    auto result = InnerIndexInterface::cal_distance_by_id(query, ids, count, flat, &validity);
+    auto result = InnerIndexInterface::calc_distance_by_id(query, ids, count, flat, &validity);
     if (topk == -1) {
         return result;
     }
