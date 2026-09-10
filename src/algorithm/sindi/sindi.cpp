@@ -38,6 +38,7 @@
 #include "storage/serialization_tags.h"
 #include "storage/tlv_section.h"
 #include "utils/search_threshold.h"
+#include "utils/timer.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
 #include "vsag/options.h"
@@ -747,6 +748,10 @@ SINDI::KnnSearch(const DatasetPtr& query,
     inner_param.topk = threshold.has_value() ? static_cast<int64_t>(inner_param.ef) : k;
     inner_param.distance_threshold = threshold;
     inner_param.enable_reorder = use_reorder_;
+    if (search_param.enable_time_record) {
+        inner_param.time_cost = std::make_shared<Timer>();
+        inner_param.time_cost->SetThreshold(search_param.timeout_ms);
+    }
 
     auto filter_callback_remaining =
         filter != nullptr and search_param.filter_callback_limit > 0
@@ -883,6 +888,12 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         if (filter_callback_limit_reached) {
             break;
         }
+        if (inner_param.time_cost != nullptr and inner_param.time_cost->CheckOvertime()) {
+            if (statistics != nullptr) {
+                statistics->is_timeout.store(true, std::memory_order_relaxed);
+            }
+            break;
+        }
     }
 
     if (statistics != nullptr and query_context.has_untracked_approximate_evaluations) {
@@ -1003,6 +1014,10 @@ SINDI::RangeSearch(const DatasetPtr& query,
 
     inner_param.range_search_limit_size = static_cast<int>(limited_size);
     inner_param.radius = radius;
+    if (search_param.enable_time_record) {
+        inner_param.time_cost = std::make_shared<Timer>();
+        inner_param.time_cost->SetThreshold(search_param.timeout_ms);
+    }
 
     auto filter_callback_remaining =
         filter != nullptr and search_param.filter_callback_limit > 0
@@ -1071,6 +1086,10 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
         filter_enabled ? create_filter_callback_limiter(request.filter_, filter_callback_remaining)
                        : nullptr;
     inner_param.is_inner_id_allowed = this->create_search_filter(user_filter);
+    if (search_param.enable_time_record) {
+        inner_param.time_cost = std::make_shared<Timer>();
+        inner_param.time_cost->SetThreshold(search_param.timeout_ms);
+    }
 
     std::shared_ptr<ReasoningContext> reasoning_ctx;
     if (not request.expected_labels_.empty()) {

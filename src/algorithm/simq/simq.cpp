@@ -43,6 +43,7 @@
 #include "storage/stream_writer.h"
 #include "typing.h"
 #include "utils/search_threshold.h"
+#include "utils/timer.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -1395,6 +1396,11 @@ SIMQ::KnnSearch(const DatasetPtr& query,
     rerank_k = std::min(rerank_k, static_cast<int64_t>(total_count_));
     k = std::min(k, static_cast<int64_t>(total_count_));
     const auto threshold = ParseSearchThreshold(parameters);
+    std::shared_ptr<Timer> timer;
+    if (sp.enable_time_record) {
+        timer = std::make_shared<Timer>();
+        timer->SetThreshold(sp.timeout_ms);
+    }
 
     uint64_t coarse_dist_cmp = 0;
     uint64_t coarse_probe_count = 0;
@@ -1404,6 +1410,9 @@ SIMQ::KnnSearch(const DatasetPtr& query,
     double coarse_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_coarse_start)
             .count();
+    if (timer and timer->CheckOvertime()) {
+        stats.is_timeout.store(true, std::memory_order_relaxed);
+    }
     uint64_t coarse_candidate_count = coarse_results.size();
     if (static_cast<int64_t>(coarse_results.size()) > rerank_k) {
         coarse_results.resize(rerank_k);
@@ -1418,6 +1427,10 @@ SIMQ::KnnSearch(const DatasetPtr& query,
     std::vector<InnerIdType> batch_ids;
     batch_ids.reserve(coarse_results.size());
     for (auto& [doc_id, _] : coarse_results) {
+        if (timer and timer->CheckOvertime()) {
+            stats.is_timeout.store(true, std::memory_order_relaxed);
+            break;
+        }
         if (filter != nullptr && !filter->CheckValid(this->label_table_->GetLabelById(doc_id))) {
             ++filtered_candidate_count;
             continue;
@@ -1425,7 +1438,7 @@ SIMQ::KnnSearch(const DatasetPtr& query,
         batch_ids.push_back(doc_id);
     }
 
-    // Single batched Query call (enables MultiRead in MultiVectorDataCell)
+    // Batched Query calls (enable MultiRead in MultiVectorDataCell)
     auto t_query_start = std::chrono::steady_clock::now();
     uint32_t mv_io_ms = 0;
     uint32_t mv_compute_ms = 0;
@@ -1436,15 +1449,24 @@ SIMQ::KnnSearch(const DatasetPtr& query,
         // back through SearchStatistics.
         QueryContext query_context{.stats = &stats,
                                    .distance_phase = DistanceEvaluationPhase::RERANK};
-        mv_codes_->Query(batch_dists.data(),
-                         computer,
-                         batch_ids.data(),
-                         static_cast<InnerIdType>(batch_ids.size()),
-                         &query_context);
-        stats.dist_cmp.fetch_add(static_cast<uint32_t>(batch_ids.size()),
-                                 std::memory_order_relaxed);
-        for (uint64_t i = 0; i < batch_ids.size(); i++) {
-            reranked.emplace_back(batch_dists[i], batch_ids[i]);
+        // Preserve the single MultiRead batch when no timeout was requested.
+        // With a deadline, finish at most one small batch before checking again.
+        const size_t batch_size = timer ? 32 : batch_ids.size();
+        for (size_t offset = 0; offset < batch_ids.size(); offset += batch_size) {
+            if (timer and timer->CheckOvertime()) {
+                stats.is_timeout.store(true, std::memory_order_relaxed);
+                break;
+            }
+            const auto count = std::min(batch_size, batch_ids.size() - offset);
+            mv_codes_->Query(batch_dists.data() + offset,
+                             computer,
+                             batch_ids.data() + offset,
+                             static_cast<InnerIdType>(count),
+                             &query_context);
+            stats.dist_cmp.fetch_add(static_cast<uint32_t>(count), std::memory_order_relaxed);
+            for (size_t i = offset; i < offset + count; ++i) {
+                reranked.emplace_back(batch_dists[i], batch_ids[i]);
+            }
         }
         mv_io_ms = stats.mv_io_time_ms.load(std::memory_order_relaxed);
         mv_compute_ms = stats.mv_compute_time_ms.load(std::memory_order_relaxed);
@@ -1485,6 +1507,9 @@ SIMQ::KnnSearch(const DatasetPtr& query,
         ++result_index;
     }
     bool limited_size_applied = false;
+    if (timer and timer->CheckOvertime()) {
+        stats.is_timeout.store(true, std::memory_order_relaxed);
+    }
     result_ds->Statistics(dump_simq_statistics(stats,
                                                coarse_dist_cmp,
                                                coarse_probe_count,
@@ -1531,6 +1556,11 @@ SIMQ::RangeSearch(const DatasetPtr& query,
     int64_t coarse_k = sp.coarse_k > 0 ? sp.coarse_k : default_coarse_k_;
     int64_t rerank_k = sp.rerank_k > 0 ? sp.rerank_k : default_rerank_k_;
     rerank_k = std::min(rerank_k, static_cast<int64_t>(total_count_));
+    std::shared_ptr<Timer> timer;
+    if (sp.enable_time_record) {
+        timer = std::make_shared<Timer>();
+        timer->SetThreshold(sp.timeout_ms);
+    }
 
     uint64_t coarse_dist_cmp = 0;
     uint64_t coarse_probe_count = 0;
@@ -1540,6 +1570,9 @@ SIMQ::RangeSearch(const DatasetPtr& query,
     double coarse_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_coarse_start)
             .count();
+    if (timer and timer->CheckOvertime()) {
+        stats.is_timeout.store(true, std::memory_order_relaxed);
+    }
     uint64_t coarse_candidate_count = coarse_results.size();
     if (static_cast<int64_t>(coarse_results.size()) > rerank_k) {
         coarse_results.resize(rerank_k);
@@ -1551,6 +1584,10 @@ SIMQ::RangeSearch(const DatasetPtr& query,
     uint64_t filtered_candidate_count = 0;
     auto t_query_start = std::chrono::steady_clock::now();
     for (auto& [doc_id, _] : coarse_results) {
+        if (timer and timer->CheckOvertime()) {
+            stats.is_timeout.store(true, std::memory_order_relaxed);
+            break;
+        }
         if (filter != nullptr && !filter->CheckValid(this->label_table_->GetLabelById(doc_id))) {
             ++filtered_candidate_count;
             continue;
@@ -1584,6 +1621,9 @@ SIMQ::RangeSearch(const DatasetPtr& query,
     for (uint64_t i = 0; i < in_range.size(); ++i) {
         dists[i] = in_range[i].first;
         ids[i] = this->label_table_->GetLabelById(in_range[i].second);
+    }
+    if (timer and timer->CheckOvertime()) {
+        stats.is_timeout.store(true, std::memory_order_relaxed);
     }
     result_ds->Statistics(dump_simq_statistics(stats,
                                                coarse_dist_cmp,
