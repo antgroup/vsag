@@ -25,6 +25,7 @@
 #include <thread>
 #include <vector>
 
+#include "fixtures/framework/test_reader.h"
 #include "functest.h"
 #include "impl/filter/iterator_filter.h"
 #include "inner_string_params.h"
@@ -2776,6 +2777,129 @@ TEST_CASE("HGraph streaming Load applies IO parameters", "[ft][serialize][hgraph
     std::stringstream invalid_load_stream(bytes);
     REQUIRE_FALSE(
         vsag::Index::Load(invalid_load_stream, R"({"precise_io_type":"invalid_io"})").has_value());
+}
+
+TEST_CASE("HGraph forward blocks preserve optional data", "[ft][hgraph][streaming]") {
+    using namespace fixtures;
+    constexpr int64_t count = 32;
+    constexpr int64_t dim = 16;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "sq8");
+    build_param.thread_count = 1;
+    build_param.use_attr_filter = true;
+    build_param.store_raw_vector = true;
+    build_param.extra_info_size = sizeof(uint64_t);
+    auto json =
+        vsag::JsonType::Parse(HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
+    json[vsag::INDEX_PARAM]["persist_source_id"].SetBool(true);
+    const auto param = json.Dump();
+    auto dataset =
+        HGraphTestIndex::pool.GetDatasetAndCreate(dim, count, "l2", false, 0.8, sizeof(uint64_t));
+    std::vector<std::string> source_ids(count);
+    std::vector<vsag::AttributeSet> attribute_sets(count);
+    std::vector<vsag::AttributeValue<std::string>> attributes(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        source_ids[i] = fmt::format("source_{}", i);
+        attributes[i].name_ = "group";
+        attributes[i].GetValue() = {i % 2 == 0 ? "allowed" : "excluded"};
+        attribute_sets[i].attrs_.push_back(&attributes[i]);
+    }
+    // Keep fixture-owned datasets unchanged: optional fields refer to local test storage.
+    auto base = vsag::Dataset::Make();
+    base->NumElements(count)
+        ->Dim(dim)
+        ->Ids(dataset->base_->GetIds())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->ExtraInfos(dataset->base_->GetExtraInfos())
+        ->SourceID(source_ids.data())
+        ->AttributeSets(attribute_sets.data())
+        ->Owner(false);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    REQUIRE(index->Build(base).has_value());
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    const auto bytes = stream.str();
+    for (auto tag : {vsag::StreamSerializationTag::RAW_VECTOR,
+                     vsag::StreamSerializationTag::ATTRIBUTE_FILTER,
+                     vsag::StreamSerializationTag::EXTRA_INFO}) {
+        REQUIRE(vsag::test::FindStreamingBlock(bytes, tag).payload_size > 0);
+    }
+    const auto labels =
+        vsag::test::FindStreamingBlock(bytes, vsag::StreamSerializationTag::LABEL_TABLE);
+    const auto label_payload = bytes.substr(labels.payload_offset, labels.payload_size);
+    for (const auto& source_id : source_ids) {
+        REQUIRE(label_payload.find(source_id) != std::string::npos);
+    }
+    auto restored = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    std::istringstream input(bytes);
+    REQUIRE(restored->DeserializeStreaming(input).has_value());
+    std::istringstream load_input(bytes);
+    auto loaded = vsag::Index::Load(load_input, "{}");
+    REQUIRE(loaded.has_value());
+    for (const auto& candidate : {restored, loaded.value()}) {
+        TestIndex::TestGetRawVectorByIds(candidate, dataset);
+        vsag::SearchRequest request;
+        request.query_ = get_one_query(dataset->query_, 0);
+        request.topk_ = 10;
+        request.params_str_ = fmt::format(search_param_tmp, 200, false);
+        request.enable_attribute_filter_ = true;
+        request.attribute_filter_str_ = R"(multi_in(group, "allowed", "|"))";
+        const auto expected = index->SearchWithRequest(request);
+        const auto actual = candidate->SearchWithRequest(request);
+        REQUIRE(expected.has_value());
+        REQUIRE(actual.has_value());
+        REQUIRE(actual.value()->GetDim() == expected.value()->GetDim());
+        for (int64_t i = 0; i < actual.value()->GetDim(); ++i) {
+            REQUIRE(actual.value()->GetIds()[i] == expected.value()->GetIds()[i]);
+        }
+        // Re-serialization exposes the persisted Source ID table and extra-info bytes.
+        std::stringstream roundtrip;
+        REQUIRE(candidate->SerializeStreaming(roundtrip).has_value());
+        const auto restored_bytes = roundtrip.str();
+        for (auto tag : {vsag::StreamSerializationTag::LABEL_TABLE,
+                         vsag::StreamSerializationTag::EXTRA_INFO}) {
+            const auto before = vsag::test::FindStreamingBlock(bytes, tag);
+            const auto after = vsag::test::FindStreamingBlock(restored_bytes, tag);
+            REQUIRE(restored_bytes.substr(after.payload_offset, after.payload_size) ==
+                    bytes.substr(before.payload_offset, before.payload_size));
+        }
+    }
+}
+
+TEST_CASE("HGraph forward blocks validate external precise reader",
+          "[ft][serialize][hgraph][streaming]") {
+    auto fixture = MakeHGraphStreamingFixture("sq8,fp32");
+    const auto block = vsag::test::FindStreamingBlock(
+        fixture.bytes, vsag::StreamSerializationTag::HIGH_PRECISION_CODES);
+    vsag::Binary binary;
+    binary.size = block.payload_size;
+    binary.data.reset(new int8_t[binary.size]);
+    std::memcpy(binary.data.get(), fixture.bytes.data() + block.payload_offset, binary.size);
+    const bool corrupt = GENERATE(false, true);
+    if (corrupt) {
+        binary.data[binary.size - 1] ^= 1;
+    }
+    vsag::LoadParameters parameters;
+    parameters.Set("precise_io_type", "reader_io")
+        .SetReader("precise_reader", std::make_shared<fixtures::TestReader>(binary));
+    std::istringstream input(fixture.bytes);
+    auto result = vsag::Index::Load(input, parameters);
+    if (corrupt) {
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_BINARY);
+        return;
+    }
+    REQUIRE(result.has_value());
+    auto query = fixtures::get_one_query(fixture.dataset->query_, 0);
+    const auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
+    auto expected = fixture.index->KnnSearch(query, 10, search_param);
+    auto actual = result.value()->KnnSearch(query, 10, search_param);
+    REQUIRE(expected.has_value());
+    REQUIRE(actual.has_value());
+    REQUIRE(actual.value()->GetDim() == expected.value()->GetDim());
+    for (int64_t i = 0; i < expected.value()->GetDim(); ++i) {
+        REQUIRE(actual.value()->GetIds()[i] == expected.value()->GetIds()[i]);
+        REQUIRE(actual.value()->GetDistances()[i] == expected.value()->GetDistances()[i]);
+    }
 }
 
 TEST_CASE("HGraph streaming serialization compatibility",

@@ -75,6 +75,42 @@ MakeReaderParam(std::vector<uint8_t> data, bool enable_cache = false) {
 
 }  // namespace
 
+TEST_CASE("ReaderIO binds ranges from forward-only input", "[ut][ReaderIO]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto payload = MakeReaderData(20000, 9);
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    writer.Write("prefix", 6);
+    StreamWriter::WriteObj(writer, static_cast<uint64_t>(payload.size()));
+    writer.Write(reinterpret_cast<const char*>(payload.data()), payload.size());
+    writer.Write("suffix", 6);
+    auto serialized = stream.str();
+    const bool truncated = GENERATE(false, true);
+    if (truncated) {
+        serialized.resize(6 + sizeof(uint64_t) + payload.size() - 1);
+    }
+    std::istringstream input(serialized);
+    ForwardStreamReader reader(input);
+    reader.Skip(6);
+    ReaderIO io(allocator.get());
+    if (truncated) {
+        REQUIRE_THROWS_AS(io.Deserialize(reader), VsagException);
+        REQUIRE_FALSE(io.HasDeserialized());
+        REQUIRE(io.Size() == 0);
+        return;
+    }
+    io.Deserialize(reader);
+    REQUIRE(io.Size() == payload.size());
+    REQUIRE(reader.GetCursor() == 6 + sizeof(uint64_t) + payload.size());
+    io.InitIO(MakeReaderParam(std::vector<uint8_t>(serialized.begin(), serialized.end())));
+    std::vector<uint8_t> actual(payload.size());
+    REQUIRE(io.ReadAt(0, actual.size(), actual.data()));
+    REQUIRE(actual == payload);
+    char suffix[6];
+    reader.Read(suffix, sizeof(suffix));
+    REQUIRE(std::string(suffix, sizeof(suffix)) == "suffix");
+}
+
 TEST_CASE("ReaderIO rejects an invalid generic parameter", "[ut][ReaderIO]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;

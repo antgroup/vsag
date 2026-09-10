@@ -249,6 +249,65 @@ TEST_CASE("HGraph RaBitQ Split Homogeneous IO", "[ft][rabitq_split][hgraph]") {
     TestIndex::TestKnnSearch(index, dataset, kSplitSearchParam, 0.1F, true);
 }
 
+TEST_CASE("HGraph non-fused RaBitQ Split streaming round trip", "[ft][hgraph][streaming]") {
+    using namespace fixtures;
+    const auto supplement = GENERATE(std::string(""), std::string("block_memory_io"));
+    auto json = vsag::JsonType::Parse(HGraphRaBitQSplitTestIndex::GenerateBuildParam(
+        "l2", 128, "block_memory_io", supplement, 3, 5, false));
+    json["index_param"]["rabitq_fused_datacell"].SetBool(false);
+    const auto param = json.Dump();
+    auto index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param, true);
+    auto dataset = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(128, 128, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    auto restored = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param, true);
+    REQUIRE(restored->DeserializeStreaming(stream).has_value());
+    std::istringstream load_input(stream.str());
+    auto loaded = vsag::Index::Load(load_input, "{}");
+    REQUIRE(loaded.has_value());
+    auto query = get_one_query(dataset->query_, 0);
+    const auto expected = index->KnnSearch(query, 10, kSplitSearchParam);
+    REQUIRE(expected.has_value());
+    for (const auto& candidate : {restored, loaded.value()}) {
+        const auto actual = candidate->KnnSearch(query, 10, kSplitSearchParam);
+        REQUIRE(actual.has_value());
+        REQUIRE(actual.value()->GetDim() == expected.value()->GetDim());
+        for (int64_t i = 0; i < actual.value()->GetDim(); ++i) {
+            REQUIRE(actual.value()->GetIds()[i] == expected.value()->GetIds()[i]);
+            REQUIRE(actual.value()->GetDistances()[i] == expected.value()->GetDistances()[i]);
+        }
+    }
+    const auto original = stream.str();
+    const auto block =
+        vsag::test::FindStreamingBlock(original, vsag::StreamSerializationTag::BASE_CODES);
+    // FlattenInterface writes total_count, max_capacity, and code_size before the IO field.
+    const uint64_t io_offset =
+        block.payload_offset + 2 * sizeof(vsag::InnerIdType) + sizeof(uint32_t);
+    for (const auto invalid_length : {uint64_t{65}, std::numeric_limits<uint64_t>::max()}) {
+        auto corrupted = original;
+        vsag::test::WriteStreamingObj(corrupted, io_offset, invalid_length);
+        auto target = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param, true);
+        std::istringstream input(corrupted);
+        const auto result = target->DeserializeStreaming(input);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_BINARY);
+        REQUIRE(result.error().message.find("IO type length") != std::string::npos);
+        // Do not reuse a target after failed streaming deserialization.
+    }
+    if (not supplement.empty()) {
+        auto corrupted = original;
+        corrupted[io_offset + sizeof(uint64_t)] = '?';
+        auto target = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param, true);
+        std::istringstream input(corrupted);
+        const auto result = target->DeserializeStreaming(input);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_BINARY);
+        REQUIRE(result.error().message.find("unknown RaBitQ supplement IO type") !=
+                std::string::npos);
+    }
+}
+
 TEST_CASE("HGraph MRLE RaBitQ Split", "[ft][rabitq_split][hgraph][MRLE]") {
     using namespace fixtures;
     constexpr int64_t dim = 128;

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <array>
+#include <catch2/matchers/catch_matchers.hpp>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -61,6 +63,123 @@ private:
 };
 
 }  // namespace
+
+TEST_CASE("Forward block reader validates consumed and drained bytes",
+          "[ut][streaming_serialization]") {
+    const uint64_t size = GENERATE(0, 3, 20000);
+    const uint64_t consume = GENERATE(0, 1, 2);
+    const std::string payload(size, 'x');
+    std::istringstream input("prefix" + payload + "suffix");
+    vsag::ForwardStreamReader reader(input);
+    reader.Skip(6);
+    vsag::StreamBlockHeader header;
+    header.value_len = size;
+    header.payload_checksum = vsag::StreamHeader::CalculateChecksum(payload);
+    vsag::ReadForwardBlockPayload(reader, header, [&](vsag::StreamReader& block) {
+        REQUIRE(block.GetCursor() == 0);
+        REQUIRE(block.Length() == size);
+        block.Read(nullptr, 0);
+        if (consume == 1) {
+            block.Skip(size / 2);
+        } else if (consume == 2) {
+            std::string actual(size, '\0');
+            block.Read(actual.data(), size);
+            REQUIRE(actual == payload);
+        }
+    });
+    REQUIRE(reader.GetCursor() == 6 + size);
+    char suffix[6];
+    reader.Read(suffix, sizeof(suffix));
+    REQUIRE(std::string(suffix, sizeof(suffix)) == "suffix");
+}
+
+TEST_CASE("Forward block reader rejects invalid input without unwinding drains",
+          "[ut][streaming_serialization]") {
+    std::istringstream input("abc");
+    vsag::ForwardStreamReader reader(input);
+    vsag::StreamBlockHeader header;
+    header.value_len = 3;
+    header.payload_checksum = vsag::StreamHeader::CalculateChecksum("abc");
+    SECTION("seek is forbidden even at the current position") {
+        REQUIRE_THROWS(vsag::ReadForwardBlockPayload(
+            reader, header, [](vsag::StreamReader& block) { block.Seek(0); }));
+        REQUIRE(reader.GetCursor() == 0);
+    }
+    SECTION("overflow-sized read is rejected before touching the source") {
+        REQUIRE_THROWS(vsag::ReadForwardBlockPayload(reader, header, [](vsag::StreamReader& block) {
+            char value;
+            block.Read(&value, std::numeric_limits<uint64_t>::max());
+        }));
+        REQUIRE(reader.GetCursor() == 0);
+    }
+    SECTION("callback exception does not drain") {
+        REQUIRE_THROWS_WITH(
+            vsag::ReadForwardBlockPayload(reader,
+                                          header,
+                                          [](vsag::StreamReader& block) {
+                                              block.Skip(1);
+                                              throw std::runtime_error("callback failed");
+                                          }),
+            "callback failed");
+        REQUIRE(reader.GetCursor() == 1);
+    }
+    SECTION("checksum failure occurs after component mutation") {
+        ++header.payload_checksum;
+        bool mutated = false;
+        REQUIRE_THROWS(
+            vsag::ReadForwardBlockPayload(reader, header, [&](vsag::StreamReader& block) {
+                block.Skip(2);
+                mutated = true;
+            }));
+        REQUIRE(mutated);  // The partially restored target must be discarded.
+        REQUIRE(reader.GetCursor() == 3);
+    }
+    SECTION("truncated drain") {
+        header.value_len = 4;
+        REQUIRE_THROWS(vsag::ReadForwardBlockPayload(reader, header, [](vsag::StreamReader&) {}));
+    }
+    SECTION("truncated callback read") {
+        header.value_len = 4;
+        REQUIRE_THROWS(vsag::ReadForwardBlockPayload(
+            reader, header, [](vsag::StreamReader& block) { block.Skip(4); }));
+    }
+    SECTION("chunked sentinel is unsupported") {
+        header.value_len = std::numeric_limits<uint64_t>::max();
+        REQUIRE_THROWS(vsag::ReadForwardBlockPayload(
+            reader, header, [](vsag::StreamReader&) { FAIL("must not invoke callback"); }));
+        REQUIRE(reader.GetCursor() == 0);
+    }
+}
+
+TEST_CASE("Forward block reader drains a large generated payload with bounded reads",
+          "[ut][streaming_serialization]") {
+    const uint64_t size = vsag::Options::Instance().block_size_limit() + 1;
+    std::array<char, 8192> bytes{};
+    uint32_t checksum = vsag::StreamHeader::InitialChecksum();
+    for (uint64_t offset = 0; offset < size;) {
+        const uint64_t count = std::min<uint64_t>(bytes.size(), size - offset);
+        checksum = vsag::StreamHeader::UpdateChecksum(checksum, {bytes.data(), count});
+        offset += count;
+    }
+    uint64_t consumed = 0;
+    vsag::ReadFuncStreamReader reader(
+        [&](uint64_t offset, uint64_t count, void* destination) {
+            REQUIRE(offset == consumed);
+            REQUIRE(count <= bytes.size());
+            std::memset(destination, 0, count);
+            consumed += count;
+        },
+        0,
+        size);
+    vsag::StreamBlockHeader header;
+    header.value_len = size;
+    header.payload_checksum = vsag::StreamHeader::FinalizeChecksum(checksum);
+    vsag::ReadForwardBlockPayload(reader, header, [&](vsag::StreamReader& block) {
+        REQUIRE(consumed == 0);  // No payload materialization before the callback.
+        block.Skip(size / 2);
+    });
+    REQUIRE(consumed == size);
+}
 
 TEST_CASE("StreamHeader", "[ut][streaming_serialization]") {
     auto metadata = std::make_shared<vsag::Metadata>();

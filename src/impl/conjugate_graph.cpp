@@ -213,27 +213,25 @@ tl::expected<void, Error>
 ConjugateGraph::Deserialize(StreamReader& in_stream) {
     try {
         uint32_t offset = 0;
-        uint32_t footer_offset = 0;
         uint64_t neighbor_size = 0;
         int64_t from_tag_id = 0;
         int64_t to_tag_id = 0;
 
         conjugate_graph_.clear();
 
-        auto cur_pos = in_stream.GetCursor();
-
         read_var_from_stream(in_stream, &offset, &memory_usage_);
-        if (memory_usage_ <= FOOTER_SIZE) {
+        if (memory_usage_ < sizeof(memory_usage_) + FOOTER_SIZE) {
             throw VsagException(ErrorType::INVALID_BINARY,
                                 fmt::format("Incorrect header: memory_usage_({})", memory_usage_));
         }
-        footer_offset = memory_usage_ - FOOTER_SIZE;
-        in_stream.Seek(cur_pos + footer_offset);
-        footer_.Deserialize(in_stream);
-
-        offset = sizeof(memory_usage_);
-        in_stream.Seek(cur_pos + offset);
-        while (offset != memory_usage_ - FOOTER_SIZE) {
+        const uint32_t footer_offset = memory_usage_ - FOOTER_SIZE;
+        // The existing format stores the footer after all adjacency entries. Read it last so
+        // this component also works inside a forward-only streaming block.
+        while (offset < footer_offset) {
+            if (footer_offset - offset < sizeof(from_tag_id) + sizeof(neighbor_size)) {
+                throw VsagException(ErrorType::INVALID_BINARY,
+                                    "conjugate graph entry header overlaps footer");
+            }
             read_var_from_stream(in_stream, &offset, &from_tag_id);
             if (conjugate_graph_.count(from_tag_id) == 0) {
                 conjugate_graph_.emplace(from_tag_id,
@@ -241,11 +239,16 @@ ConjugateGraph::Deserialize(StreamReader& in_stream) {
             }
 
             read_var_from_stream(in_stream, &offset, &neighbor_size);
-            for (int i = 0; i < neighbor_size; i++) {
+            if (neighbor_size > (footer_offset - offset) / sizeof(to_tag_id)) {
+                throw VsagException(ErrorType::INVALID_BINARY,
+                                    "conjugate graph neighbors overlap footer");
+            }
+            for (uint64_t i = 0; i < neighbor_size; i++) {
                 read_var_from_stream(in_stream, &offset, &to_tag_id);
                 conjugate_graph_[from_tag_id]->insert(to_tag_id);
             }
         }
+        footer_.Deserialize(in_stream);
 
         return {};
     } catch (const std::runtime_error& e) {
