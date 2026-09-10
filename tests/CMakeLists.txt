@@ -31,6 +31,7 @@ target_link_libraries (unittests
         simd_test vsag_test algorithm_test factory_test attr_test
         datacell_test layout_test quantizer_test storage_test io_test utils_test impl_test
         vsag_static
+        coverage_config
 )
 
 if (APPLE)
@@ -100,5 +101,6 @@ target_link_libraries (functests PRIVATE
         vsag 
         simd
         fmt::fmt
+        coverage_config
 )
 add_dependencies (functests Catch2)

@@ -69,7 +69,7 @@ struct CliqueDataCellSearchView : CliqueDataCellBaseView {
     const uint8_t* inactive_nodes{nullptr};
     const uint8_t* retired_cliques{nullptr};
 
-    bool
+    [[nodiscard]] bool
     IsLiveNode(InnerIdType id) const {
         return id < total_nodes and inactive_nodes[id] == 0;
     }
@@ -123,6 +123,8 @@ struct CliqueDataCellSearchView : CliqueDataCellBaseView {
 };
 
 struct MCIDeleteSnapshot {
+    // Node IDs belong to the slot space at PrepareDelete time, before FORCE_REMOVE compaction.
+    // Translate repair_node_ids through old_to_new before accessing the compacted index.
     explicit MCIDeleteSnapshot(Allocator* allocator)
         : affected_clique_ids(allocator),
           retired_clique_ids(allocator),

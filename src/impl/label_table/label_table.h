@@ -46,6 +46,7 @@ public:
                         bool compress_redundant_data = false,
                         LabelRemapType label_remap_type = LabelRemapType::PG);
 
+    // Reserved sentinel, never a live slot ID; valid IDs must be strictly below this value.
     static constexpr InnerIdType INVALID_ID = std::numeric_limits<InnerIdType>::max();
 
     void
@@ -371,6 +372,7 @@ public:
             }
         }
         label_table_[to] = label_table_[from];
+        // The caller retires the old tail; ShrinkToFit removes its stale label/source-ID row.
         // An old tombstone may share its label with a later Add. Moving it must not hide
         // the active incarnation by replacing that label's current reverse mapping.
         if (remap_from) {

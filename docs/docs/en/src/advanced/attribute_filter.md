@@ -40,6 +40,72 @@ All three can be combined inside a single `SearchRequest`; they are ANDed togeth
 When `use_attribute_filter` is enabled, BruteForce currently rejects `Remove` calls
 (re-add the index to delete entries).
 
+## Reusing parsed expressions
+
+For repeated requests with the same predicate, parse it with the index schema and pass the
+result in `SearchRequest::expression_`:
+
+```cpp
+auto expression = vsag::AstParse("age >= 18", index->GetAttrTypeSchema());
+vsag::SearchRequest request;
+request.enable_attribute_filter_ = true;
+request.expression_ = expression;
+// Set query_, topk_, and index-specific search parameters as usual.
+```
+
+A non-null `expression_` takes precedence over `attribute_filter_str_` in IVF, HGraph,
+and BruteForce. Attribute filtering must still be enabled. Treat a shared expression as
+immutable while requests use it. The schema pointer is borrowed from the index; do not
+retain it past the index lifetime or mutate the schema through it. Precompiled C++ clients
+must rebuild because the request and index interfaces have changed.
+
+## Region filter
+
+The `ads` branch's specialized predicate is available for FastBitset-backed attribute
+indexes:
+
+```text
+region_filter(region_type, region_list, residence_tag_list, "10|20", "30", "40")
+```
+
+The first three arguments select the type, region, and residence fields. The final three
+arguments are integer lists for region, residence, and trigger matching. Trigger values
+are looked up in the **residence field**, not a fourth field. Unlike the old `ads`
+implementation, execution honors the supplied field names instead of hard-coding them.
+
+Let R, H, and T be region, residence, and trigger matches respectively. The predicate
+accepts a vector according to its type value:
+
+| Type | Condition |
+|---|---|
+| -1 | Always accepted |
+| 0 | T OR (R AND H) |
+| 1 | H |
+| 2 | R |
+| 3 | R OR H |
+| 4 | R AND H |
+| 5 | R AND NOT H |
+
+Missing values yield empty matches; other type values have no accepting branch. Missing
+fields or incompatible types are errors. Non-FastBitset attribute storage is not supported
+by this specialized executor. It can be combined with ordinary AND/OR/NOT predicates.
+
+The type field must be signed and represent -1. Region and residence fields may use signed
+or unsigned integer types; query values must fit their field type and signed 64-bit input
+range. Out-of-range values are rejected rather than truncated.
+
+`FUNCTION(name,"arg1|arg2","type1|type2")` is retained for parser/AST compatibility with
+`ads` only. It does **not** register callbacks or provide search-time function execution;
+passing such an expression to the executor is unsupported.
+
+### Introducing fields during updates
+
+For IVF's bucket attribute index, the update overload that receives both new and original
+attributes can introduce previously unseen fields. It creates their value maps and records
+their types; these are retained by serialization. Existing field types must match: mismatched
+incoming or original types are rejected before any postings are erased, and existing schema
+entries are not overwritten. This does not change other attribute-update overloads.
+
 ## Attribute Data Model
 
 Attributes are defined per vector and grouped into an `AttributeSet`

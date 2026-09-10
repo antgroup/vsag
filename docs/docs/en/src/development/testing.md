@@ -17,21 +17,27 @@ make test
 ```
 
 Note: `make test` does not enable coverage instrumentation. To produce a coverage report, use
-`make cov` — it configures the build with `ENABLE_COVERAGE=ON`; run the test binaries afterwards
-to collect and aggregate coverage data:
+`make cov` — it configures the build with `ENABLE_COVERAGE=ON`; then run the same non-daily unit
+and functional suites as coverage CI with its fixed seed before collecting the trace:
 
 ```bash
 make cov
-# then run the test binaries, e.g.:
-./build-debug/tests/functional_tests
-# open build-debug/coverage/index.html
+VSAG_TEST_SEED=424242 bash scripts/testing/test_parallel_bg.sh
+bash scripts/coverage/collect_cpp_coverage.sh
+bash scripts/coverage/check_cov.sh
 ```
+
+The collector writes `coverage/coverage.info` with repository-relative paths and branch data.
+It measures maintained production sources under `src/` and public headers under `include/`,
+excluding generated `src/version.h` and vendored `include/vsag/expected.hpp`. Code compiled only
+on another platform is explicitly outside the Linux x86 report and must be measured by a
+platform-specific coverage job rather than treated as covered.
 
 ## Run a Single Binary
 
 ```bash
-./build-debug/tests/functional_tests "[hgraph]"
-./build-debug/tests/functional_tests "[hgraph][concurrent]"
+./build/tests/functests "[hgraph]"
+./build/tests/functests "[hgraph][concurrent]"
 ```
 
 Catch2 supports filtering by name, tag, and wildcards — see `--help`.

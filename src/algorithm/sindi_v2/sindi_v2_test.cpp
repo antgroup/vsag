@@ -308,6 +308,17 @@ TEST_CASE("SINDIV2 host filter supports mutable immutable and reorder modes",
         auto result = index.KnnSearch(query, 2, search_parameters, nullptr);
         REQUIRE(result->GetDim() == 1);
         REQUIRE(result->GetIds()[0] == 30);
+        auto statistics = JsonType::Parse(result->GetStatistics());
+        REQUIRE(statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() == 0);
+        REQUIRE_FALSE(statistics["complete"].GetBool());
+
+        uint32_t unknown_term = 7;
+        query_vector.ids_ = &unknown_term;
+        result = index.KnnSearch(query, 2, search_parameters, nullptr);
+        statistics = JsonType::Parse(result->GetStatistics());
+        REQUIRE(statistics["distance_evaluations"].GetUint64() == 0);
+        REQUIRE(statistics["complete"].GetBool());
+        query_vector.ids_ = &term;
 
         query_host = "host-b";
         result = index.KnnSearch(query, 2, search_parameters, nullptr);
@@ -1220,6 +1231,10 @@ TEST_CASE("SINDIV2 ReaderIO Rerank Uses Section Offset", "[ut][SINDIV2]") {
     auto result = loaded.KnnSearch(query, k, search_param, nullptr);
     REQUIRE(result->GetDim() == k);
     REQUIRE(result->GetIds()[0] == 0);
+    auto statistics = JsonType::Parse(result->GetStatistics());
+    REQUIRE(statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() == 0);
+    REQUIRE(statistics["distance_evaluations_by_phase"]["rerank"].GetUint64() > 0);
+    REQUIRE_FALSE(statistics["complete"].GetBool());
 
     for (auto& item : sv_base) {
         delete[] item.vals_;

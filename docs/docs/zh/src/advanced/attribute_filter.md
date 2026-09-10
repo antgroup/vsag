@@ -36,6 +36,57 @@ category = "electronics" AND price <= 1000 AND multi_in(tag, "promo|new", "|")
 
 启用 `use_attribute_filter` 后，BruteForce 暂不支持 `Remove`（如需删除请重建索引）。
 
+## 复用已解析表达式
+
+相同条件的重复请求可以先使用索引 schema 解析，再通过 `SearchRequest::expression_` 传入：
+
+```cpp
+auto expression = vsag::AstParse("age >= 18", index->GetAttrTypeSchema());
+vsag::SearchRequest request;
+request.enable_attribute_filter_ = true;
+request.expression_ = expression;
+// 按原有方式设置 query_、topk_ 和索引搜索参数。
+```
+
+在 IVF、HGraph 和 BruteForce 中，非空 `expression_` 优先于 `attribute_filter_str_`；仍需启用属性过滤。
+共享表达式在请求使用期间应视为不可变对象。schema 指针由索引持有，不得在索引销毁后继续使用，也不要通过该指针修改 schema。
+请求和索引接口发生变化，预编译的 C++ 客户端必须重新编译。
+
+## Region filter
+
+迁移自 `ads` 分支的专用谓词用于 FastBitset 属性索引：
+
+```text
+region_filter(region_type, region_list, residence_tag_list, "10|20", "30", "40")
+```
+
+前三个参数分别指定类型、地域、常住地字段，后三个参数分别是地域、常住地和触发值的整数列表。
+触发值查询的是**常住地字段**，不是第四个字段。与旧 `ads` 实现不同，执行时使用传入的字段名，不再硬编码字段名称。
+
+令 R、H、T 分别表示地域、常住地和触发值匹配，按类型值决定是否接受：
+
+| 类型 | 条件 |
+|---|---|
+| -1 | 直接接受 |
+| 0 | T OR (R AND H) |
+| 1 | H |
+| 2 | R |
+| 3 | R OR H |
+| 4 | R AND H |
+| 5 | R AND NOT H |
+
+未出现的值对应空匹配；其他类型值没有接受分支。字段不存在或类型不兼容会报错。
+该专用 executor 不支持非 FastBitset 属性存储，可以与普通 AND/OR/NOT 条件组合。
+
+类型字段必须是能表示 -1 的有符号整数。地域和常住地字段可使用有符号或无符号整数；查询值必须同时满足字段类型和有符号 64 位输入范围，越界时报错而不是截断。
+
+`FUNCTION(name,"arg1|arg2","type1|type2")` 仅为兼容 `ads` 保留语法和 AST，**不提供**回调注册或搜索时函数执行能力；将此类表达式传给 executor 不受支持。
+
+### 更新时引入字段
+
+对于 IVF 的 bucket 属性索引，同时接收新旧属性的更新重载可引入之前不存在的字段：创建值映射并记录字段类型，序列化会保留这些内容。
+已有字段类型必须一致：新属性或原属性类型不匹配时，会在删除任何 posting 前拒绝更新，也不会覆盖已有 schema 类型。这不改变其他属性更新重载的行为。
+
 ## 属性数据模型
 
 属性按向量定义，组织成 `AttributeSet`（`include/vsag/attribute.h`）。每个属性包含：

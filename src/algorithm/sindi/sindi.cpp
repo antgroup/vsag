@@ -106,18 +106,6 @@ has_sorted_posting_lists(const JsonType& basic_info) {
                SINDI_SORTED_POSTING_LIST_FORMAT_VERSION;
 }
 
-DistanceEvaluationBackend
-sparse_backend(SparseValueQuantizationType quant_type) {
-    switch (quant_type) {
-        case SparseValueQuantizationType::SQ8:
-            return DistanceEvaluationBackend::SPARSE_SQ8;
-        case SparseValueQuantizationType::FP16:
-            return DistanceEvaluationBackend::SPARSE_FP16;
-        default:
-            return DistanceEvaluationBackend::SPARSE_FP32;
-    }
-}
-
 uint32_t
 sparse_value_code_size(SparseValueQuantizationType type) {
     switch (type) {
@@ -846,11 +834,6 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         // compute
         term_datacell_->QueryWindow(
             dists.data(), window_id, computer, use_term_lists_heap_insert, query_context);
-        if (statistics != nullptr) {
-            statistics->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
-                                    sparse_backend(sparse_value_quant_type_),
-                                    query_context.evaluation_tracker.Count());
-        }
 
         if (reasoning_ctx != nullptr) {
             selected_buckets->push_back(static_cast<BucketIdType>(cur));
@@ -900,6 +883,10 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         if (filter_callback_limit_reached) {
             break;
         }
+    }
+
+    if (statistics != nullptr and query_context.has_untracked_approximate_evaluations) {
+        statistics->complete.store(false, std::memory_order_relaxed);
     }
 
     if (selected_buckets != nullptr and not selected_buckets->empty()) {

@@ -114,13 +114,23 @@ HGraph::find_new_entry_point() {
         }
         route_graphs_.pop_back();
     }
-    if (not find_new_ep and this->total_count_.load() > 1) {
-        this->entry_point_id_ = inner_id == 0 ? 1 : 0;
-        for (InnerIdType candidate = 0; candidate < this->total_count_.load(); ++candidate) {
-            if (candidate != inner_id and not this->label_table_->IsRemoved(candidate)) {
-                this->entry_point_id_ = candidate;
-                break;
+    if (not find_new_ep and this->bottom_graph_ != nullptr and
+        this->bottom_graph_->TotalCount() > 0) {
+        const auto total = this->total_count_.load();
+        auto fallback = LabelTable::INVALID_ID;
+        for (InnerIdType candidate = 0; candidate < total; ++candidate) {
+            if (candidate != inner_id and this->bottom_graph_->CheckIdExists(candidate)) {
+                fallback = candidate;
+                if (not this->label_table_->IsRemoved(candidate)) {
+                    this->entry_point_id_ = candidate;
+                    return;
+                }
             }
+        }
+        // If only marked slots remain, retain a physical navigation entry for later Add.
+        // Search filters tombstones from results; INVALID is only valid for an empty graph.
+        if (fallback != LabelTable::INVALID_ID) {
+            this->entry_point_id_ = fallback;
         }
     }
 }
@@ -239,6 +249,13 @@ HGraph::force_remove_one(int64_t label) {
     bool was_mark_removed = false;
     {
         std::unique_lock lock(this->label_lookup_mutex_);
+        // After move_id (or when swap_id == inner_id so move_id is skipped),
+        // entry_point_id_ may still equal the deleted inner_id when
+        // find_new_entry_point failed to locate an upper-level successor.
+        // Retry with the bottom graph visible now that graph state is updated.
+        if (this->entry_point_id_ == inner_id and this->total_count_.load() > 1) {
+            this->find_new_entry_point();
+        }
         was_mark_removed = this->label_table_->IsRemoved(inner_id);
         this->label_table_->ForceRemove(label, inner_id);
         if (swap_id != inner_id) {
@@ -279,6 +296,8 @@ HGraph::shrink_to_fit() {
         route_graph->ShrinkToFit(total_count);
     }
     label_table_->ShrinkToFit(total_count);
+
+    this->max_capacity_.store(total_count);
 }
 
 void

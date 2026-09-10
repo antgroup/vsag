@@ -213,7 +213,7 @@ private:
     uint64_t origin_size_;
 };
 
-class CountingMemoryReader : public vsag::Reader {
+class CountingMemoryReader : public vsag::Reader, public vsag::ReaderPrefetcher {
 public:
     explicit CountingMemoryReader(std::string bytes, bool fail_reads = false)
         : bytes_(std::move(bytes)), fail_reads_(fail_reads) {
@@ -259,10 +259,24 @@ public:
     }
 
     void
+    Prefetch(uint64_t offset, uint64_t len) override {
+        prefetch_calls_.fetch_add(1, std::memory_order_relaxed);
+        prefetch_bytes_.fetch_add(len, std::memory_order_relaxed);
+        this->CheckRead(offset, len);
+    }
+
+    void
     ResetCounters() {
         read_calls_.store(0, std::memory_order_relaxed);
         multi_read_calls_.store(0, std::memory_order_relaxed);
         read_bytes_.store(0, std::memory_order_relaxed);
+        prefetch_calls_.store(0, std::memory_order_relaxed);
+        prefetch_bytes_.store(0, std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] uint64_t
+    PrefetchCalls() const {
+        return prefetch_calls_.load(std::memory_order_relaxed);
     }
 
     [[nodiscard]] uint64_t
@@ -296,6 +310,8 @@ private:
     std::atomic<uint64_t> read_calls_{0};
     std::atomic<uint64_t> multi_read_calls_{0};
     std::atomic<uint64_t> read_bytes_{0};
+    std::atomic<uint64_t> prefetch_calls_{0};
+    std::atomic<uint64_t> prefetch_bytes_{0};
 };
 
 std::string
@@ -663,6 +679,7 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
         vsag::LoadParameters load_parameters;
         load_parameters.Set("precise_io_type", "reader_io")
             .Set("precise_enable_read_cache", enable_read_cache)
+            .Set("precise_enable_prefetch_hint", true)
             .Set("precise_cache_total_size", precise_cache_total_size)
             .SetReader("precise_reader", reader);
         std::stringstream load_stream(bytes);
@@ -690,6 +707,9 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
     REQUIRE(std::abs(actual_search.value()->GetDistances()[0] -
                      expected_search.value()->GetDistances()[0]) < 2e-6F);
     REQUIRE(precise_reader->ReadBytes() > 0);
+    if (precise_codes_layout == "flat") {
+        REQUIRE(precise_reader->PrefetchCalls() > 0);
+    }
     if (enable_read_cache) {
         REQUIRE(precise_reader->ReadCalls() + precise_reader->MultiReadCalls() > 0);
         precise_reader->ResetCounters();
@@ -799,6 +819,7 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
             R"({"precise_io_type": 1})",
             R"({"precise_io_type": "unknown_io"})",
             R"({"precise_io_type": "reader_io", "precise_enable_read_cache": "true"})",
+            R"({"precise_io_type": "reader_io", "precise_enable_prefetch_hint": "true"})",
             R"({"precise_io_type": "reader_io", "precise_cache_total_size": -1})",
         };
         for (const auto& parameters : invalid_parameters) {

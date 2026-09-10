@@ -679,9 +679,13 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     FilterPtr ft = this->create_search_filter(request.filter_, params.use_extra_info_filter);
 
     if (request.enable_attribute_filter_ and this->attr_filter_index_ != nullptr) {
-        auto& schema = this->attr_filter_index_->field_type_map_;
-        auto expr = AstParse(request.attribute_filter_str_, &schema);
-        auto executor = Executor::MakeInstance(this->allocator_, expr, this->attr_filter_index_);
+        ExprPtr expression = request.expression_;
+        if (expression == nullptr) {
+            auto& schema = this->attr_filter_index_->field_type_map_;
+            expression = AstParse(request.attribute_filter_str_, &schema);
+        }
+        auto executor =
+            Executor::MakeInstance(this->allocator_, expression, this->attr_filter_index_);
         executor->Init();
         search_param.executors.emplace_back(executor);
     }

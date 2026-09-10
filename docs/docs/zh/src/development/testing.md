@@ -20,15 +20,16 @@ make test
 1. 运行 `src/` 下的单元测试；
 2. 运行 `tests/` 下的功能测试；
 3. `make test` 并未开启覆盖率（`ENABLE_COVERAGE=ON`）。需要覆盖率报告时请使用
-   `make cov`：该目标仅完成带覆盖率插桩的编译，随后需要手动运行测试二进制以生成报告。
+   `make cov`：该目标仅完成带覆盖率插桩的编译，随后按下文命令以固定随机种子运行
+   与覆盖率 CI 相同的非 daily 单元测试和功能测试并生成报告。
 
 ## 仅运行单个测试二进制
 
 构建完成后，可直接运行单个测试：
 
 ```bash
-./build-debug/tests/functional_tests "[hgraph]"
-./build-debug/tests/functional_tests "[hgraph][concurrent]"
+./build/tests/functests "[hgraph]"
+./build/tests/functests "[hgraph][concurrent]"
 ```
 
 Catch2 支持按名字、tag、通配符等方式筛选用例，详见 `--help`。
@@ -39,11 +40,15 @@ Catch2 支持按名字、tag、通配符等方式筛选用例，详见 `--help`�
 
 ```bash
 make cov
-# 然后运行测试二进制以采集覆盖率，例如：
-./build-debug/tests/functional_tests
+VSAG_TEST_SEED=424242 bash scripts/testing/test_parallel_bg.sh
+bash scripts/coverage/collect_cpp_coverage.sh
+bash scripts/coverage/check_cov.sh
 ```
 
-报告会输出到 `build-debug/coverage/` 下，可用浏览器打开 `index.html` 查看未覆盖的分支。
+采集脚本会生成包含分支数据和仓库相对路径的 `coverage/coverage.info`。统计范围仅包括
+`src/` 下的维护中生产代码和 `include/` 下的公共头文件，并排除构建时生成的
+`src/version.h` 与引入的兼容头文件 `include/vsag/expected.hpp`。仅在其他平台编译的路径
+明确不属于 Linux x86 报告的统计范围，必须由平台专用覆盖率任务统计，不能视为已覆盖。
 
 ## 内存泄漏与多线程
 

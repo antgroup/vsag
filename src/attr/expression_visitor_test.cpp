@@ -848,6 +848,24 @@ TEST_CASE("Test LongMultiInExpression", "[ut][expression_visitor]") {
     }
 }
 
+TEST_CASE("Test region and function expressions", "[ut][expression_visitor]") {
+    auto region = AstParse(R"(region_filter(kind,geo,home,"10|11","20","30"))");
+    auto region_expression = std::dynamic_pointer_cast<RegionFilterExpression>(region);
+    REQUIRE(region_expression != nullptr);
+    REQUIRE(region_expression->region_type->ToString() == "kind");
+    REQUIRE(region_expression->region_list->ToString() == "geo");
+    REQUIRE(region_expression->residence_list->ToString() == "home");
+    REQUIRE(region_expression->ToString() ==
+            "region_filter (kind, geo, home, [10, 11], [20], [30])");
+
+    auto function = AstParse(R"(FUNCTION(time_filter,"1|abc","int32|string"))");
+    auto function_expression = std::dynamic_pointer_cast<FunctionExpression>(function);
+    REQUIRE(function_expression != nullptr);
+    REQUIRE(function_expression->ToString() == R"(FUNCTION (time_filter,"1|abc","int32|string"))");
+    REQUIRE_THROWS_AS(AstParse(R"(FUNCTION(time_filter,"1|abc","int32"))"), VsagException);
+    REQUIRE_THROWS_AS(AstParse(R"(region_filter(kind,geo,home,"10","20"))"), VsagException);
+}
+
 TEST_CASE("Test ComplexExpression", "[ut][expression_visitor]") {
     {
         auto filter_condition_str =

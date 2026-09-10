@@ -17,6 +17,7 @@
 
 #include <fmt/format.h>
 
+#include <atomic>
 #include <chrono>
 #include <exception>
 #include <limits>
@@ -313,6 +314,7 @@ Pyramid::search_graph_for_add(const GraphInterfacePtr& graph,
 
 void
 Pyramid::connect_cached_graph_point(InnerIdType inner_id,
+                                    const float* vector,
                                     const DistHeapPtr& candidates,
                                     const GraphInterfacePtr& graph,
                                     const FlattenInterfacePtr& codes,
@@ -330,9 +332,23 @@ Pyramid::connect_cached_graph_point(InnerIdType inner_id,
         auto merged = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
         UnorderedSet<InnerIdType> seen(allocator_);
         seen.reserve(existing_neighbors.size() + (candidates == nullptr ? 0 : candidates->Size()));
+        Vector<InnerIdType> filtered_neighbors(allocator_);
+        filtered_neighbors.reserve(existing_neighbors.size());
         for (const auto neighbor : existing_neighbors) {
             if (neighbor != inner_id && seen.emplace(neighbor).second) {
-                merged->Push(codes->ComputePairVectors(inner_id, neighbor), neighbor);
+                filtered_neighbors.push_back(neighbor);
+            }
+        }
+        if (not filtered_neighbors.empty()) {
+            auto computer = codes->FactoryComputer(vector);
+            Vector<float> distances(filtered_neighbors.size(), allocator_);
+            codes->Query(distances.data(),
+                         computer,
+                         filtered_neighbors.data(),
+                         static_cast<InnerIdType>(filtered_neighbors.size()),
+                         nullptr);
+            for (uint64_t i = 0; i < filtered_neighbors.size(); ++i) {
+                merged->Push(distances[i], filtered_neighbors[i]);
             }
         }
         if (candidates != nullptr) {
@@ -445,7 +461,8 @@ Pyramid::add_routed_point(const Hierarchy& hierarchy,
         }
 
         if (use_self_as_entry) {
-            connect_cached_graph_point(inner_id, results, node.graph_, codes, hierarchy.alpha);
+            connect_cached_graph_point(
+                inner_id, vector, results, node.graph_, codes, hierarchy.alpha);
         } else {
             LockGuard point_lock(points_mutex_, inner_id);
             if (results == nullptr || results->Empty()) {
@@ -2004,10 +2021,19 @@ Pyramid::Build(const DatasetPtr& base) {
             }
         }
         if (unique) {
-            return build_with_cache(base);
+            constexpr uint64_t minimum_cache_hit_percent = 80;
+            const uint64_t matched =
+                cache_->CountMatchedSourceIds(source_id_data, static_cast<uint64_t>(data_num));
+            if (matched * 100 >= static_cast<uint64_t>(data_num) * minimum_cache_hit_percent) {
+                return build_with_cache(base);
+            }
+            logger::info(
+                "[pyramid_build_cache] source-id overlap below {}%; falling back to cold build",
+                minimum_cache_hit_percent);
+        } else {
+            logger::warn(
+                "[pyramid_build_cache] duplicate source_id or label; falling back to cold build");
         }
-        logger::warn(
-            "[pyramid_build_cache] duplicate source_id or label; falling back to cold build");
     }
     populate_hierarchy_trees(base);
     if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
@@ -2086,7 +2112,8 @@ Pyramid::add_bottom_graph_point(const Hierarchy& hierarchy,
             return;
         }
         if (use_self_as_entry) {
-            connect_cached_graph_point(inner_id, results, node.graph_, codes, hierarchy.alpha);
+            connect_cached_graph_point(
+                inner_id, vector, results, node.graph_, codes, hierarchy.alpha);
         } else {
             mutually_connect_new_element(
                 inner_id, results, node.graph_, codes, points_mutex_, allocator_, hierarchy.alpha);
@@ -2503,6 +2530,9 @@ Pyramid::GetStats() const {
         stats["build_cache_hit_rate"].SetFloat(build_cache_hit_rate_);
         stats["build_cache_hit_nodes"].SetUint64(build_cache_hit_nodes_);
         stats["build_cache_missed_nodes"].SetUint64(build_cache_missed_nodes_);
+        stats["build_cache_hit_memberships"].SetUint64(build_cache_hit_memberships_);
+        stats["build_cache_missed_memberships"].SetUint64(build_cache_missed_memberships_);
+        stats["build_cache_restored_edges"].SetUint64(build_cache_restored_edges_);
     } else {
         stats["build_cache_hit_rate"]["skipped_reason"].SetString(
             "index was not built from an imported cache");
@@ -2653,6 +2683,9 @@ Pyramid::build_with_cache(const DatasetPtr& base) {
     build_cache_hit_rate_ = -1.0F;
     build_cache_hit_nodes_ = 0;
     build_cache_missed_nodes_ = 0;
+    build_cache_hit_memberships_ = 0;
+    build_cache_missed_memberships_ = 0;
+    build_cache_restored_edges_ = 0;
 
     auto start = std::chrono::steady_clock::now();
     int64_t data_num = base->GetNumElements();
@@ -2727,61 +2760,133 @@ Pyramid::build_with_cache(const DatasetPtr& base) {
                     node_ids.insert(inner_id);
                 }
 
-                for (auto inner_id : node_member_ids) {
-                    if (inner_id >= static_cast<InnerIdType>(data_num)) {
-                        continue;
+                constexpr InnerIdType invalid_id = std::numeric_limits<InnerIdType>::max();
+                Vector<InnerIdType> old_to_new(
+                    graph_cache->source_ids_.size(), invalid_id, allocator_);
+                for (uint64_t old_inner = 0; old_inner < graph_cache->source_ids_.size();
+                     ++old_inner) {
+                    const auto& cached_source_id = graph_cache->source_ids_[old_inner];
+                    auto current = source_id_to_inner.find(cached_source_id);
+                    if (current != source_id_to_inner.end()) {
+                        old_to_new[old_inner] = current->second;
                     }
-                    auto source_id = source_ids[inner_id];
-                    auto cached = graph_cache->GetNeighbors(source_id);
-                    if (cached.empty()) {
-                        node_missed_ids.push_back(inner_id);
-                        continue;
-                    }
+                }
 
+                Vector<Vector<InnerIdType>> restored_neighbors(
+                    node_member_ids.size(), Vector<InnerIdType>(allocator_), allocator_);
+                node_hit_ids.resize(node_member_ids.size());
+                node_missed_ids.resize(node_member_ids.size());
+                std::atomic<uint64_t> hit_count{0};
+                std::atomic<uint64_t> miss_count{0};
+
+                constexpr uint64_t restore_block_size = 4096;
+                const uint64_t restore_blocks =
+                    (node_member_ids.size() + restore_block_size - 1) / restore_block_size;
+                Vector<std::future<void>> restore_futures(allocator_);
+                auto* const graph = gnode->graph_.get();
+                auto restore_block = [&, graph](uint64_t begin, uint64_t end) {
                     Vector<InnerIdType> new_neighbors(allocator_);
-                    for (const auto& nb_src : cached) {
-                        auto it = source_id_to_inner.find(nb_src);
-                        if (it != source_id_to_inner.end() && it->second != inner_id &&
-                            node_ids.find(it->second) != node_ids.end()) {
-                            new_neighbors.push_back(it->second);
+                    new_neighbors.reserve(graph->MaximumDegree());
+                    for (uint64_t offset = begin; offset < end; ++offset) {
+                        const auto inner_id = node_member_ids[offset];
+                        if (inner_id >= static_cast<InnerIdType>(data_num)) {
+                            continue;
                         }
-                    }
-                    std::sort(new_neighbors.begin(), new_neighbors.end());
-                    new_neighbors.erase(std::unique(new_neighbors.begin(), new_neighbors.end()),
-                                        new_neighbors.end());
-
-                    if (new_neighbors.empty()) {
-                        node_missed_ids.push_back(inner_id);
-                        continue;
-                    }
-
-                    if (gnode->graph_->TotalCount() == 0) {
-                        gnode->entry_point_ = inner_id;
-                    }
-
-                    const auto max_deg = gnode->graph_->MaximumDegree();
-                    if (new_neighbors.size() > max_deg) {
-                        DistHeapPtr candidates =
-                            std::make_shared<StandardHeap<true, false>>(allocator_, -1);
-                        for (auto nb : new_neighbors) {
-                            float dist = codes->ComputePairVectors(inner_id, nb);
-                            candidates->Push(dist, nb);
+                        const auto* cached =
+                            graph_cache->FindNeighborInnerIds(source_ids[inner_id]);
+                        if (cached == nullptr || cached->size() <= 1) {
+                            node_missed_ids[miss_count.fetch_add(1, std::memory_order_relaxed)] =
+                                inner_id;
+                            continue;
                         }
-                        while (candidates->Size() > max_deg) {
-                            candidates->Pop();
-                        }
+
                         new_neighbors.clear();
-                        new_neighbors.reserve(max_deg);
-                        while (!candidates->Empty()) {
-                            new_neighbors.push_back(candidates->Top().second);
-                            candidates->Pop();
+                        for (uint64_t cached_offset = 1; cached_offset < cached->size();
+                             ++cached_offset) {
+                            const auto old_neighbor = (*cached)[cached_offset];
+                            if (static_cast<uint64_t>(old_neighbor) >= old_to_new.size()) {
+                                continue;
+                            }
+                            const auto new_neighbor = old_to_new[old_neighbor];
+                            if (new_neighbor != invalid_id && new_neighbor != inner_id &&
+                                node_ids.find(new_neighbor) != node_ids.end()) {
+                                new_neighbors.push_back(new_neighbor);
+                            }
+                        }
+                        std::sort(new_neighbors.begin(), new_neighbors.end());
+                        new_neighbors.erase(std::unique(new_neighbors.begin(), new_neighbors.end()),
+                                            new_neighbors.end());
+                        const auto max_degree = graph->MaximumDegree();
+                        if (new_neighbors.size() > max_degree) {
+                            const auto* vector = data_vectors + dim_ * inner_id;
+                            auto computer = codes->FactoryComputer(vector);
+                            Vector<float> distances(new_neighbors.size(), allocator_);
+                            codes->Query(distances.data(),
+                                         computer,
+                                         new_neighbors.data(),
+                                         static_cast<InnerIdType>(new_neighbors.size()),
+                                         nullptr);
+                            Vector<std::pair<float, InnerIdType>> ranked(allocator_);
+                            ranked.reserve(new_neighbors.size());
+                            for (uint64_t index = 0; index < new_neighbors.size(); ++index) {
+                                ranked.emplace_back(distances[index], new_neighbors[index]);
+                            }
+                            std::partial_sort(
+                                ranked.begin(), ranked.begin() + max_degree, ranked.end());
+                            new_neighbors.clear();
+                            new_neighbors.reserve(max_degree);
+                            for (uint64_t index = 0; index < max_degree; ++index) {
+                                new_neighbors.push_back(ranked[index].second);
+                            }
+                        }
+
+                        if (new_neighbors.empty()) {
+                            node_missed_ids[miss_count.fetch_add(1, std::memory_order_relaxed)] =
+                                inner_id;
+                            continue;
+                        }
+
+                        restored_neighbors[offset] = new_neighbors;
+                        node_hit_ids[hit_count.fetch_add(1, std::memory_order_relaxed)] = inner_id;
+                    }
+                };
+
+                if (thread_pool_ != nullptr && restore_blocks > 1) {
+                    restore_futures.reserve(restore_blocks);
+                    for (uint64_t block = 0; block < restore_blocks; ++block) {
+                        const uint64_t begin = block * restore_block_size;
+                        const uint64_t end =
+                            std::min<uint64_t>(begin + restore_block_size, node_member_ids.size());
+                        restore_futures.push_back(
+                            thread_pool_->GeneralEnqueue(restore_block, begin, end));
+                    }
+                    drain_futures(restore_futures, nullptr);
+                } else {
+                    restore_block(0, node_member_ids.size());
+                }
+                node_hit_ids.resize(hit_count.load(std::memory_order_relaxed));
+                node_missed_ids.resize(miss_count.load(std::memory_order_relaxed));
+                constexpr uint64_t minimum_fast_path_hit_percent = 80;
+                const bool use_fast_path =
+                    not node_member_ids.empty() &&
+                    node_hit_ids.size() * 100 >=
+                        node_member_ids.size() * minimum_fast_path_hit_percent;
+                if (use_fast_path) {
+                    for (uint64_t offset = 0; offset < node_member_ids.size(); ++offset) {
+                        if (not restored_neighbors[offset].empty()) {
+                            build_cache_restored_edges_ += restored_neighbors[offset].size();
+                            gnode->graph_->InsertNeighborsById(node_member_ids[offset],
+                                                               restored_neighbors[offset]);
                         }
                     }
-                    // Cache entries seed only outgoing edges. add_one_point() below refines them
-                    // against current vectors and installs deduplicated reverse edges.
-                    gnode->graph_->InsertNeighborsById(inner_id, new_neighbors);
-                    node_hit_ids.push_back(inner_id);
-                    hierarchy_hits[static_cast<size_t>(inner_id)] = true;
+                    for (const auto inner_id : node_hit_ids) {
+                        hierarchy_hits[static_cast<size_t>(inner_id)] = true;
+                    }
+                    gnode->entry_point_ =
+                        *std::min_element(node_hit_ids.begin(), node_hit_ids.end());
+                } else {
+                    node_hit_ids.clear();
+                    node_missed_ids = node_member_ids;
                 }
             } else {
                 node_missed_ids = node_member_ids;
@@ -2805,10 +2910,108 @@ Pyramid::build_with_cache(const DatasetPtr& base) {
                     });
             };
 
+            build_cache_hit_memberships_ += node_hit_ids.size();
+            build_cache_missed_memberships_ += node_missed_ids.size();
             refine_nodes(node_missed_ids, h_ptr->ef_construction, false);
-            // Match HGraph's warm hit phase: self-entry keeps refinement local and the
-            // reduced budget limits work while merged cache rows preserve graph connectivity.
-            refine_nodes(node_hit_ids, std::max<uint64_t>(h_ptr->ef_construction / 3, 1), true);
+            if (gnode->has_routing()) {
+                // Routing overlays are not part of the build cache. Reinsert cache hits to
+                // rebuild route levels while using the restored bottom graph as their seed.
+                refine_nodes(node_hit_ids, std::max<uint64_t>(h_ptr->ef_construction / 3, 1), true);
+            } else if (node_path.empty() && not node_hit_ids.empty()) {
+                // Repair single-layer root rows against a stable graph snapshot. Candidate
+                // selection runs in parallel, then forward rows are committed after a barrier.
+                // Miss insertion already installs reverse edges; rewriting reverse edges for
+                // every cache hit would turn a high-hit warm build back into O(N * degree).
+                constexpr uint64_t refine_block_size = 128;
+                const uint64_t refine_ef =
+                    std::min<uint64_t>(16, std::max<uint64_t>(h_ptr->ef_construction / 3, 1));
+                Vector<Vector<InnerIdType>> refined_neighbors(
+                    node_hit_ids.size(), Vector<InnerIdType>(allocator_), allocator_);
+                const auto codes = construction_codes();
+                auto refine_block = [this,
+                                     graph_node,
+                                     data_vectors,
+                                     &node_hit_ids,
+                                     &refined_neighbors,
+                                     codes,
+                                     refine_ef,
+                                     alpha = h_ptr->alpha](uint64_t begin, uint64_t end) {
+                    for (uint64_t offset = begin; offset < end; ++offset) {
+                        const auto inner_id = node_hit_ids[offset];
+                        const auto* vector = data_vectors + dim_ * inner_id;
+                        Vector<InnerIdType> existing(allocator_);
+                        graph_node->graph_->GetNeighbors(inner_id, existing);
+
+                        InnerSearchParam search_param;
+                        search_param.ef = refine_ef;
+                        search_param.topk = static_cast<int64_t>(refine_ef);
+                        search_param.search_mode = KNN_SEARCH;
+                        search_param.hops_limit = std::numeric_limits<uint32_t>::max();
+                        search_param.ep = existing.empty() ? graph_node->entry_point_ : inner_id;
+                        auto candidates = search_graph_for_add(
+                            graph_node->graph_, codes, inner_id, vector, search_param);
+
+                        auto merged = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+                        UnorderedSet<InnerIdType> seen(allocator_);
+                        seen.reserve(existing.size() + candidates->Size());
+                        Vector<InnerIdType> filtered(allocator_);
+                        filtered.reserve(existing.size());
+                        for (const auto neighbor : existing) {
+                            if (neighbor != inner_id && seen.emplace(neighbor).second) {
+                                filtered.push_back(neighbor);
+                            }
+                        }
+                        if (not filtered.empty()) {
+                            auto computer = codes->FactoryComputer(vector);
+                            Vector<float> distances(filtered.size(), allocator_);
+                            codes->Query(distances.data(),
+                                         computer,
+                                         filtered.data(),
+                                         static_cast<InnerIdType>(filtered.size()),
+                                         nullptr);
+                            for (uint64_t index = 0; index < filtered.size(); ++index) {
+                                merged->Push(distances[index], filtered[index]);
+                            }
+                        }
+                        while (not candidates->Empty()) {
+                            const auto candidate = candidates->Top();
+                            candidates->Pop();
+                            if (candidate.second != inner_id &&
+                                seen.emplace(candidate.second).second) {
+                                merged->Push(candidate.first, candidate.second);
+                            }
+                        }
+                        select_edges_by_heuristic(
+                            merged, graph_node->graph_->MaximumDegree(), codes, allocator_, alpha);
+                        auto& output = refined_neighbors[offset];
+                        output.reserve(merged->Size());
+                        while (not merged->Empty()) {
+                            output.push_back(merged->Top().second);
+                            merged->Pop();
+                        }
+                    }
+                };
+                const uint64_t refine_blocks =
+                    (node_hit_ids.size() + refine_block_size - 1) / refine_block_size;
+                Vector<std::future<void>> refine_futures(allocator_);
+                if (thread_pool_ != nullptr && refine_blocks > 1) {
+                    refine_futures.reserve(refine_blocks);
+                    for (uint64_t block = 0; block < refine_blocks; ++block) {
+                        const uint64_t begin = block * refine_block_size;
+                        const uint64_t end =
+                            std::min<uint64_t>(begin + refine_block_size, node_hit_ids.size());
+                        refine_futures.push_back(
+                            thread_pool_->GeneralEnqueue(refine_block, begin, end));
+                    }
+                    drain_futures(refine_futures, nullptr);
+                } else {
+                    refine_block(0, node_hit_ids.size());
+                }
+                for (uint64_t offset = 0; offset < node_hit_ids.size(); ++offset) {
+                    graph_node->graph_->InsertNeighborsById(node_hit_ids[offset],
+                                                            refined_neighbors[offset]);
+                }
+            }
             Vector<InnerIdType>(allocator_).swap(gnode->ids_);
         }
 

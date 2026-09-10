@@ -136,9 +136,12 @@ $ sudo apt-get install lcov
 Compile with coverage flags, run tests, and collect the coverage report:
 ```shell
 $ make cov
-$ bash scripts/testing/test_parallel_bg.sh
+$ VSAG_TEST_SEED=424242 bash scripts/testing/test_parallel_bg.sh
 $ bash scripts/coverage/collect_cpp_coverage.sh
+$ bash scripts/coverage/check_cov.sh
 ```
+
+This matches the CI source population: maintained production code under `src/` and public headers under `include/`, excluding the generated `src/version.h` and vendored `include/vsag/expected.hpp`. The collector retains branch records and writes normalized repository-relative paths to `coverage/coverage.info`.
 
 ## Pull Request Labels
 

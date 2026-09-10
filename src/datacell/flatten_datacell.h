@@ -124,6 +124,7 @@ public:
     void
     ShrinkToFit(InnerIdType capacity) override {
         std::unique_lock lock(this->mutex_);
+        // Caller has moved survivors below capacity; only stale tail slots are truncated.
         // Logical truncation must survive a best-effort physical shrink allocation failure.
         this->total_count_ = std::min(this->total_count_, capacity);
         this->layout_->Shrink(capacity);
@@ -388,6 +389,10 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
         auto lease2 = this->layout_->Acquire(idx[i + 1]);
         auto lease3 = this->layout_->Acquire(idx[i + 2]);
         auto lease4 = this->layout_->Acquire(idx[i + 3]);
+        if (not lease1 or not lease2 or not lease3 or not lease4) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "failed to acquire codes for batch distance evaluation");
+        }
         computer->ComputeDistsBatch4(lease1.Data(),
                                      lease2.Data(),
                                      lease3.Data(),
@@ -399,6 +404,10 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
     }
     for (; i < id_count; ++i) {
         auto lease = this->layout_->Acquire(idx[i]);
+        if (not lease) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "failed to acquire codes for id " + std::to_string(idx[i]));
+        }
         computer->ComputeDist(lease.Data(), result_dists + i);
     }
     if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations)

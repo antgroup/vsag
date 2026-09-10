@@ -427,9 +427,12 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
     if (request.enable_attribute_filter_) {
         CHECK_ARGUMENT(this->use_attribute_filter_ && this->attr_filter_index_ != nullptr,
                        "attribute filter is not available");
-        auto& schema = this->attr_filter_index_->field_type_map_;
-        auto expr = AstParse(request.attribute_filter_str_, &schema);
-        executor = Executor::MakeInstance(this->allocator_, expr, this->attr_filter_index_);
+        ExprPtr expression = request.expression_;
+        if (expression == nullptr) {
+            auto& schema = this->attr_filter_index_->field_type_map_;
+            expression = AstParse(request.attribute_filter_str_, &schema);
+        }
+        executor = Executor::MakeInstance(this->allocator_, expression, this->attr_filter_index_);
         executor->Init();
         executor->Clear();
         attr_filter = executor->Run();

@@ -166,6 +166,9 @@ one-hop neighborhood. The current implementation instead uses strict less-than t
 
 `CommitDelete` sets node/clique masks. Before repairing each selected node, the code checks
 that it is still live and undercovered: an earlier repair may already have covered it.
+MARK_REMOVE passes the complete removed-ID batch to one PrepareDelete/CommitDelete pair,
+including when reapplying tombstones after a full MCI rebuild. Repair candidates are deduplicated
+before repair begins, so shared cliques are evaluated against the final batch state.
 
 ### 4.2 What sharing ADD means
 
@@ -191,8 +194,10 @@ few candidates. This is approximate graph search, not exact KNN or parallelized 
 
 Existing points use contiguous FP32 data when available. Non-contiguous storage such as
 block_memory_io reads and decodes the point's FP32 codes before entering the same pipeline.
-Quantized configurations and other input dtypes retain their previous full-scan repair path;
-their candidate generation is outside the scope of this change.
+Quantized configurations and other input dtypes retain exact full-scan candidates, but a bounded
+top-K heap retains only mcs entries (O(mcs) scratch space), with the same distance/ID ordering.
+This still performs O(N) distance evaluations per repaired node, or O(RN) for R repair nodes;
+replacing this exact scan with quantized approximate search is outside the scope of this change.
 
 New additions retain insertion-prefix visibility. Existing FP32 repair points search the entire
 current index, excluding removed points and self. Shared clique construction also receives
@@ -210,15 +215,16 @@ new benchmarks are required.
 
 ### 4.3 Guarantees not provided
 
-`T_mct` triggers repair; it is not an enforced post-repair minimum. One successful join can
-end an update. The code does not recount all one-hop degrees, split every remaining large
+`T_mct` triggers repair; it is not an enforced post-repair minimum. An update stops when its
+unique-neighbor degree target is reached or its usable candidates are exhausted. The code
+does not recount all one-hop degrees, split every remaining large
 clique into connected components, or prove global graph connectivity after deletion.
 FORCE_REMOVE graph repair and MCI coverage repair are separate operations.
 
 ## 5. MARK_REMOVE
 
 The default Remove mode marks labels, updates live/deleted counts, temporarily unpublishes
-MCI, processes unique removed inner IDs one by one through snapshot/commit/repair, and
+MCI, snapshots/commits the complete removed-ID batch before selective survivor repair, and
 republishes MCI and memory accounting.
 
 It does not move vector slots, shrink their capacity, or perform FORCE_REMOVE graph repair.

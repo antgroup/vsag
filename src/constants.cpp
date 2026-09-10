@@ -162,6 +162,7 @@ const char* const HGRAPH_BASE_CACHE_TOTAL_SIZE = "base_cache_total_size";
 const char* const HGRAPH_GRAPH_ENABLE_READ_CACHE = "graph_enable_read_cache";
 const char* const HGRAPH_GRAPH_CACHE_TOTAL_SIZE = "graph_cache_total_size";
 const char* const HGRAPH_PRECISE_ENABLE_READ_CACHE = "precise_enable_read_cache";
+const char* const HGRAPH_PRECISE_ENABLE_PREFETCH_HINT = "precise_enable_prefetch_hint";
 const char* const HGRAPH_PRECISE_CACHE_TOTAL_SIZE = "precise_cache_total_size";
 const char* const HGRAPH_RAW_VECTOR_ENABLE_READ_CACHE = "raw_vector_enable_read_cache";
 const char* const HGRAPH_RAW_VECTOR_CACHE_TOTAL_SIZE = "raw_vector_cache_total_size";
@@ -218,6 +219,7 @@ const char* const IVF_BASE_FILE_PATH = "base_file_path";
 const char* const IVF_BASE_ENABLE_READ_CACHE = "base_enable_read_cache";
 const char* const IVF_BASE_CACHE_TOTAL_SIZE = "base_cache_total_size";
 const char* const IVF_PRECISE_ENABLE_READ_CACHE = "precise_enable_read_cache";
+const char* const IVF_PRECISE_ENABLE_PREFETCH_HINT = "precise_enable_prefetch_hint";
 const char* const IVF_PRECISE_CACHE_TOTAL_SIZE = "precise_cache_total_size";
 
 const char* const PYRAMID_SUPPORT_DUPLICATE = SUPPORT_DUPLICATE;

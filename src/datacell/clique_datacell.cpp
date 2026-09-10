@@ -562,7 +562,11 @@ CliqueDataCell::Serialize(StreamWriter& writer) const {
 
 void
 CliqueDataCell::Deserialize(StreamReader& reader, uint64_t format_version) {
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        format_version == 1 or format_version == 2,
+        "unsupported clique datacell format version");
     std::unique_lock<std::shared_mutex> lock(mutex_);
+    available_total_.store(std::numeric_limits<uint64_t>::max(), std::memory_order_release);
     StreamReader::ReadVector(reader, p_maxc_);
     StreamReader::ReadVector(reader, maxcs_);
     StreamReader::ReadVector(reader, p_node_to_cid_);
@@ -731,6 +735,7 @@ CliqueDataCell::CollectStats(uint64_t total) const {
         stats.avg_clique_size = static_cast<double>(stats.total_membership_count) /
                                 static_cast<double>(active_clique_count);
     }
+    // CSR rows include retired base cliques; active_clique_count measures live availability.
     stats.has_index = available_total_.load(std::memory_order_acquire) == total and
                       active_clique_count > 0 and p_maxc_.size() == total_clique_count_ + 1 and
                       p_node_to_cid_.size() <= total + 1 and delta_node_to_cids_.size() == total;
@@ -742,6 +747,10 @@ CliqueDataCell::validate(uint64_t total) const {
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
         not p_maxc_.empty(),
         "clique datacell pMaxC must not be empty");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        not p_node_to_cid_.empty(),
+        "clique datacell pNodeToCid must not be empty");
+    // Live Add nodes may exist only in delta, so the base CSR can cover a shorter prefix.
     CHECK_ARGUMENT(p_node_to_cid_.size() <= total + 1,
                    fmt::format("clique datacell pNodeToCid size {} must not exceed total + 1 ({})",
                                p_node_to_cid_.size(),

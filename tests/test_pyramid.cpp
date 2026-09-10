@@ -2269,6 +2269,8 @@ TEST_CASE("Pyramid ExportCache + ImportCache + Build acceleration smoke test",
     REQUIRE(restored_data.value()->GetPaths()[0] == "a/b/c");
     auto warm_stats = vsag::JsonType::Parse(warmed->GetStats());
     REQUIRE(warm_stats["build_cache_hit_nodes"].GetInt() > 0);
+    REQUIRE(warm_stats["build_cache_hit_memberships"].GetInt() > 0);
+    REQUIRE(warm_stats["build_cache_restored_edges"].GetInt() > 0);
     REQUIRE(warm_stats["root_graphs"]["default"]["route_graph_count"].GetInt() > 0);
     std::vector<float> query_vec(TEST_DIM);
     std::copy(vectors.begin(), vectors.begin() + TEST_DIM, query_vec.begin());
@@ -2291,6 +2293,76 @@ TEST_CASE("Pyramid ExportCache + ImportCache + Build acceleration smoke test",
         }
     }
     REQUIRE(found_self);
+}
+
+TEST_CASE("Pyramid Build Cache clamps rows to the current maximum degree",
+          "[ft][pyramid][cache][pr]") {
+    constexpr int64_t test_dim = 32;
+    constexpr int64_t test_count = 200;
+    const auto source_param = fmt::format(R"({{
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": {},
+        "index_param": {{
+            "base_quantization_type": "fp32",
+            "max_degree": 32,
+            "ef_construction": 64,
+            "no_build_levels": [0, 1, 2],
+            "index_min_size": 28,
+            "persist_source_id": true
+        }}
+    }})",
+                                          test_dim);
+    const auto target_param = fmt::format(R"({{
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": {},
+        "index_param": {{
+            "base_quantization_type": "fp32",
+            "max_degree": 8,
+            "ef_construction": 32,
+            "no_build_levels": [0, 1, 2],
+            "index_min_size": 28,
+            "persist_source_id": true
+        }}
+    }})",
+                                          test_dim);
+
+    std::mt19937 rng(99);
+    std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
+    std::vector<float> vectors(test_dim * test_count);
+    for (auto& value : vectors) {
+        value = dist(rng);
+    }
+    std::vector<int64_t> ids(test_count);
+    std::vector<std::string> paths(test_count, "a/b/c");
+    std::vector<std::string> source_ids(test_count);
+    for (int64_t i = 0; i < test_count; ++i) {
+        ids[i] = i + 1;
+        source_ids[i] = fmt::format("pyr_degree_sid_{}", i);
+    }
+    auto make_dataset = [&]() {
+        return MakePyramidCacheDataset(test_count, test_dim, vectors, ids, paths, source_ids);
+    };
+
+    auto source = vsag::Factory::CreateIndex("pyramid", source_param).value();
+    REQUIRE(source->Build(make_dataset()).has_value());
+    std::stringstream cache;
+    REQUIRE(source->ExportCache(cache).has_value());
+
+    cache.seekg(0);
+    auto warmed = vsag::Factory::CreateIndex("pyramid", target_param).value();
+    REQUIRE(warmed->ImportCache(cache).has_value());
+    REQUIRE(warmed->Build(make_dataset()).has_value());
+    auto stats = vsag::JsonType::Parse(warmed->GetStats());
+    REQUIRE(stats["build_cache_hit_nodes"].GetInt() > 0);
+
+    std::vector<float> query_vector(test_dim);
+    std::copy_n(vectors.data(), test_dim, query_vector.data());
+    auto query = MakePyramidCacheQuery(test_dim, query_vector, "a/b/c");
+    auto result = warmed->KnnSearch(query, 10, R"({"pyramid":{"ef_search":50}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() > 0);
 }
 
 TEST_CASE("Pyramid ExportCache + ImportCache + Build miss-only path", "[ft][pyramid][cache][pr]") {
@@ -2367,14 +2439,12 @@ TEST_CASE("Pyramid ExportCache + ImportCache + Build miss-only path", "[ft][pyra
     REQUIRE(baseline_parsed.Contains("build_cache_hit_rate"));
     REQUIRE(baseline_parsed["build_cache_hit_rate"].Contains("skipped_reason"));
 
-    // warmed with disjoint source_ids -> 0 hit-rate, all missed
+    // Disjoint source IDs fall back to the regular cold builder before cache restoration.
     auto warmed_stats_str = warmed->GetStats();
     INFO(warmed_stats_str);
     auto warmed_parsed = vsag::JsonType::Parse(warmed_stats_str);
     REQUIRE(warmed_parsed.Contains("build_cache_hit_rate"));
-    REQUIRE(warmed_parsed["build_cache_hit_rate"].GetFloat() == 0.0F);
-    REQUIRE(warmed_parsed["build_cache_missed_nodes"].GetInt() == TEST_COUNT);
-    REQUIRE(warmed_parsed["build_cache_hit_nodes"].GetInt() == 0);
+    REQUIRE(warmed_parsed["build_cache_hit_rate"].Contains("skipped_reason"));
 }
 
 TEST_CASE("Pyramid GetStats reports build cache hit-rate", "[ft][pyramid][cache][pr]") {
@@ -2445,6 +2515,11 @@ TEST_CASE("Pyramid GetStats reports build cache hit-rate", "[ft][pyramid][cache]
     REQUIRE(warm_parsed.Contains("build_cache_hit_rate"));
     REQUIRE(warm_parsed.Contains("build_cache_hit_nodes"));
     REQUIRE(warm_parsed.Contains("build_cache_missed_nodes"));
+    REQUIRE(warm_parsed.Contains("build_cache_hit_memberships"));
+    REQUIRE(warm_parsed.Contains("build_cache_missed_memberships"));
+    REQUIRE(warm_parsed.Contains("build_cache_restored_edges"));
+    REQUIRE(warm_parsed["build_cache_hit_memberships"].GetInt() > 0);
+    REQUIRE(warm_parsed["build_cache_restored_edges"].GetInt() > 0);
     const float hit_rate = warm_parsed["build_cache_hit_rate"].GetFloat();
     REQUIRE(hit_rate > 0.0F);
     REQUIRE(hit_rate <= 1.0F);

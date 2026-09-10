@@ -124,6 +124,7 @@ public:
     }
 };
 
+// Inject at each allocation ordinal until the operation succeeds, not at a byte limit.
 class FlushFailureAllocator : public vsag::DefaultAllocator {
 public:
     void*
@@ -392,6 +393,56 @@ TEST_CASE("HGraph companion MCI selectively repairs under-covered members", "[ut
             stats["mci_retired_clique_count"].GetInt());
     REQUIRE(restored_stats["mci_delta_clique_count"].GetInt() ==
             stats["mci_delta_clique_count"].GetInt());
+}
+
+TEST_CASE("HGraph MCI mark removal projects the complete batch before repair",
+          "[ut][hgraph][mci]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 8;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 100);
+    std::vector<float> vectors(total * dim, 0.0F);
+    auto params = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    params["index_param"]["mci_delete_clique_size_threshold"].SetInt(3);
+    const auto json = params.Dump();
+    auto built = vsag::Factory::CreateIndex("hgraph", json);
+    REQUIRE(built.has_value());
+    REQUIRE(built.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+    // Each deletion alone leaves the first clique at the threshold; together they retire it.
+    auto index = with_mci_fixture(built.value(), json, {{0, 1, 2, 3}, {2, 4, 5}, {3, 6, 7}});
+    const auto removed = index->Remove({ids[1], ids[0], ids[1]});
+    REQUIRE(removed.has_value());
+    REQUIRE(removed.value() == 2);
+    const auto stats = vsag::JsonType::Parse(index->GetStats());
+    REQUIRE(stats["mci_inactive_node_count"].GetInt() == 2);
+    REQUIRE(stats["mci_retired_clique_count"].GetInt() == 1);
+    REQUIRE(stats["mci_covered_nodes"].GetInt() == total - 2);
+    vsag::DefaultAllocator allocator;
+    const auto snapshot = read_flushed_mci(index, &allocator);
+    REQUIRE(snapshot_degree(snapshot, 0) == 0);
+    REQUIRE(snapshot_degree(snapshot, 1) == 0);
+    REQUIRE(snapshot_degree(snapshot, 2) > 2);
+    REQUIRE(snapshot_degree(snapshot, 3) > 2);
+}
+
+TEST_CASE("Clique validation rejects empty node offsets and unknown formats", "[ut][hgraph][mci]") {
+    vsag::DefaultAllocator allocator;
+    vsag::CliqueDataCell cell(&allocator);
+    vsag::Vector<vsag::InnerIdType> p_maxc(&allocator);
+    p_maxc.push_back(0);
+    vsag::Vector<vsag::InnerIdType> maxcs(&allocator);
+    vsag::Vector<vsag::InnerIdType> p_node_to_cid(&allocator);
+    vsag::Vector<vsag::InnerIdType> node_to_cids(&allocator);
+    REQUIRE_THROWS_AS(cell.Assign(std::move(p_maxc),
+                                  std::move(maxcs),
+                                  std::move(p_node_to_cid),
+                                  std::move(node_to_cids),
+                                  0),
+                      vsag::VsagException);
+    std::stringstream stream;
+    vsag::IOStreamReader reader(stream);
+    REQUIRE_THROWS_AS(cell.Deserialize(reader, 0), vsag::VsagException);
+    REQUIRE_THROWS_AS(cell.Deserialize(reader, 3), vsag::VsagException);
 }
 
 TEST_CASE("HGraph FP32 MCI deletion repairs use the complete Add candidate pipeline",

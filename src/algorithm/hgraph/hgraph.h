@@ -968,7 +968,11 @@ private:
     mutable std::shared_mutex global_mutex_;            // guards total_count_, entry_point_id_
     mutable std::shared_mutex persistent_codes_mutex_;  // pins flatten storage during MCI search
     mutable std::mutex mci_build_mutex_;                // serializes full MCI reconstruction
-    mutable std::mutex mci_mutation_mutex_;         // serializes MCI-enabled Add and Remove calls
+    // MCI writers take mutation before force_remove; label scopes end before repair/search.
+    // Shrink/UpdateVector take force_remove before persistent_codes. Repair releases force_remove
+    // before public search reacquires it (shared_mutex is non-recursive); mutation still excludes
+    // all ID-moving operations. CSR storage/view locks are internal to CliqueDataCell.
+    mutable std::mutex mci_mutation_mutex_;         // serializes MCI Add, Remove and Flush
     mutable MutexArrayPtr neighbors_mutex_;         // per-node locks for neighbor lists
     mutable std::shared_mutex add_mutex_;           // serializes Add() operations
     mutable std::shared_mutex force_remove_mutex_;  // serializes force-remove operations

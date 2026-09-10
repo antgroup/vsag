@@ -181,6 +181,8 @@ SparseGraphDataCell::Deserialize(StreamReader& reader) {
     if (reverse_edges_) {
         // Sparse upper-level IDs are not a dense [0, total_count_) range. Reconstruct
         // incoming edges from the loaded rows using decoded, version-valid neighbors.
+        // GetNeighbors releases its map lock before AddReverseEdge takes the new object's lock;
+        // loading is exclusive to the caller and no graph/reverse-edge lock is nested here.
         auto restored = std::make_unique<ReverseEdge>(allocator_);
         Vector<InnerIdType> neighbors(allocator_);
         for (const auto& row : neighbors_) {

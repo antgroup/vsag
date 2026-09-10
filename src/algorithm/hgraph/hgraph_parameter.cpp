@@ -23,6 +23,7 @@
 #include "datacell/graph_interface_parameter.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
 #include "datacell/sparse_vector_datacell_parameter.h"
+#include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_parameter.h"
 #include "inner_string_params.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
@@ -281,6 +282,10 @@ HGraphParameter::FromJson(const JsonType& json) {
                        "MCI force remove does not support duplicate groups");
         auto graph_param = std::dynamic_pointer_cast<GraphDataCellParameter>(bottom_graph_param);
         CHECK_ARGUMENT(graph_param != nullptr, "MCI force remove requires a flat graph");
+        if (not graph_param->use_reverse_edges_ or
+            not hierarchical_graph_param->use_reverse_edges_) {
+            logger::info("MCI force remove enables reverse edges for safe physical ID compaction");
+        }
         graph_param->use_reverse_edges_ = true;
         hierarchical_graph_param->use_reverse_edges_ = true;
     }

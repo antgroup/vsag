@@ -187,6 +187,9 @@ families such as `fp32`, `fp16`, `bf16`, `int8`, `sq8`, `sq4`, `pq`, `pq_fastsca
 
 The total equals the phase sum. Known backend values equal the total; unknown work is in `unknown`
 and sets `complete` to `false`. Values are unsigned 64-bit JSON integers with saturating addition.
+SINDI and SINDI_V2 omit approximate-phase evaluations to avoid per-posting-ID tracking in their
+search hot paths. Their measured phases remain available, but `complete` is `false` when
+approximate evaluations occur.
 Legacy `dist_cmp` and `reorder_distance_count` remain available unchanged for compatibility.
 Python preserves `(ids, distances)` tuple unpacking. Opt in with
 `knn_search_with_statistics`: the dense overload returns one statistics JSON string, while the

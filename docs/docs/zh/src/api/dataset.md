@@ -172,7 +172,10 @@ struct MultiVector {
 和稀疏表示族，不包含 ISA 或批量变体。
 
 `distance_evaluations` 等于阶段之和；已知 backend 之和等于总数。未知工作记入 `unknown` 并使
-`complete` 为 `false`。数值是无符号 64 位 JSON 整数，加法饱和。旧的 `dist_cmp` 与
+`complete` 为 `false`。数值是无符号 64 位 JSON 整数，加法饱和。
+`SINDI` 和 `SINDI_V2` 为避免在搜索热路径中逐 posting ID 跟踪，不统计 approximate 阶段的
+evaluation；其他已测量阶段仍会返回，但发生 approximate evaluation 时 `complete` 为 `false`。
+旧的 `dist_cmp` 与
 `reorder_distance_count` 保持兼容且含义不变。Python 保留 `(ids, distances)` 解包方式；可通过
 `knn_search_with_statistics` 显式获取统计信息：稠密重载返回一个统计 JSON 字符串，稀疏 CSR
 重载为每个查询返回一个字符串。`range_search_with_statistics` 返回范围搜索数组及一个统计

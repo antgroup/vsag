@@ -1497,21 +1497,30 @@ HGraph::repair_mci_clique(InnerIdType node_id) {
         this->basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32 and
         precise_codes->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32;
     if (not use_fp32_add_pipeline) {
-        // Keep non-FP32 repair unchanged; unifying quantized search is a separate change.
+        // Preserve exact non-FP32 candidates, but retain only the nearest mcs entries.
+        // Distance work is O(total); scratch space is O(mcs), not O(total).
+        const auto k = std::min<uint64_t>(this->mci_parameters_.mcs, total - 1);
         Vector<std::pair<float, InnerIdType>> candidates(this->allocator_);
-        candidates.reserve(total - 1);
+        candidates.reserve(k);
         for (InnerIdType candidate = 0; candidate < total; ++candidate) {
-            if (candidate != node_id and not this->label_table_->IsRemoved(candidate)) {
-                candidates.emplace_back(precise_codes->ComputePairVectors(node_id, candidate),
-                                        candidate);
+            if (k > 0 and candidate != node_id and not this->label_table_->IsRemoved(candidate)) {
+                const auto value = std::make_pair(
+                    precise_codes->ComputePairVectors(node_id, candidate), candidate);
+                if (candidates.size() < k) {
+                    candidates.push_back(value);
+                    std::push_heap(candidates.begin(), candidates.end());
+                } else if (value < candidates.front()) {
+                    std::pop_heap(candidates.begin(), candidates.end());
+                    candidates.back() = value;
+                    std::push_heap(candidates.begin(), candidates.end());
+                }
             }
         }
-        std::sort(candidates.begin(), candidates.end());
+        std::sort_heap(candidates.begin(), candidates.end());
         Vector<InnerIdType> knn_ids(this->allocator_);
-        const auto k = std::min<uint64_t>(this->mci_parameters_.mcs, candidates.size());
-        knn_ids.reserve(k);
-        for (uint64_t i = 0; i < k; ++i) {
-            knn_ids.push_back(candidates[i].second);
+        knn_ids.reserve(candidates.size());
+        for (const auto& candidate : candidates) {
+            knn_ids.push_back(candidate.second);
         }
         this->incremental_update_mci_clique(node_id, knn_ids, total);
         return;
@@ -1638,6 +1647,8 @@ HGraph::build_incremental_mci_clique(InnerIdType new_inner_id,
     }
     // Only the seed requires fresh coverage. In particular, a repair seed may still have
     // old memberships: treating it as already covered would skip the requested repair.
+    // Fixed-size construction needs no atomic copies/moves. Explicitly initialize every slot
+    // before the shared builder loads it; never resize this vector or alias plain ints as atomics.
     std::vector<std::atomic<int>> coverage(local_to_inner.size());
     coverage[0].store(0, std::memory_order_relaxed);
     Vector<InnerIdType> neighbors(this->allocator_);
@@ -1661,12 +1672,12 @@ HGraph::build_incremental_mci_clique(InnerIdType new_inner_id,
     auto distance = [&](InnerIdType lhs, InnerIdType rhs) {
         return precise_codes->ComputePairVectors(local_to_inner[lhs], local_to_inner[rhs]);
     };
-    auto batch_distance = [&](InnerIdType lhs,
-                              InnerIdType a,
-                              InnerIdType b,
-                              InnerIdType c,
-                              InnerIdType d,
-                              float* values) {
+    auto scalar_batch_distance = [&](InnerIdType lhs,
+                                     InnerIdType a,
+                                     InnerIdType b,
+                                     InnerIdType c,
+                                     InnerIdType d,
+                                     float* values) {
         const InnerIdType ids[]{a, b, c, d};
         for (uint64_t i = 0; i < 4; ++i) {
             values[i] = distance(lhs, ids[i]);
@@ -1682,8 +1693,14 @@ HGraph::build_incremental_mci_clique(InnerIdType new_inner_id,
     };
     float alpha = params.alpha;
     while (coverage[0].load(std::memory_order_relaxed) == 0) {
-        builder.Build(
-            0, neighbors.data(), neighbors.size(), alpha, coverage, distance, batch_distance, emit);
+        builder.Build(0,
+                      neighbors.data(),
+                      neighbors.size(),
+                      alpha,
+                      coverage,
+                      distance,
+                      scalar_batch_distance,
+                      emit);
         alpha = next_mci_alpha(alpha, params.alpha, 1, 1);
     }
 }
@@ -1721,7 +1738,7 @@ HGraph::incremental_update_mci_clique(InnerIdType node_id,
             members.clear();
             this->mci_cliques_->GetCliqueMembers(cid, members);
             for (auto id : members) {
-                // A MARK_REMOVE batch marks all labels before retiring cliques one by one.
+                // Count only live neighbors, even while label and clique masks are being updated.
                 if (id != node_id and not this->label_table_->IsRemoved(id)) {
                     neighbors.insert(id);
                 }
@@ -1776,44 +1793,33 @@ HGraph::remove_from_mci(const Vector<InnerIdType>& removed_inner_ids) {
         return;
     }
     std::shared_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
-    Vector<InnerIdType> one_removed(this->allocator_);
-    one_removed.reserve(1);
-    uint64_t affected_clique_count = 0;
-    uint64_t retired_clique_count = 0;
-    uint64_t repair_candidate_count = 0;
+    // Project the whole batch before repairing: no temporary cliques for later deletions.
+    const auto snapshot =
+        this->mci_cliques_->PrepareDelete(removed_inner_ids,
+                                          this->mci_parameters_.delete_clique_size_threshold,
+                                          this->mci_parameters_.delete_node_mct_threshold);
+    this->mci_cliques_->CommitDelete(
+        removed_inner_ids, snapshot.retired_clique_ids, this->total_count_.load());
     uint64_t repaired_node_count = 0;
-    for (auto removed_inner_id : removed_inner_ids) {
-        one_removed.clear();
-        one_removed.push_back(removed_inner_id);
-        const auto snapshot =
-            this->mci_cliques_->PrepareDelete(one_removed,
-                                              this->mci_parameters_.delete_clique_size_threshold,
-                                              this->mci_parameters_.delete_node_mct_threshold);
-        this->mci_cliques_->CommitDelete(
-            one_removed, snapshot.retired_clique_ids, this->total_count_.load());
-        affected_clique_count += snapshot.affected_clique_ids.size();
-        retired_clique_count += snapshot.retired_clique_ids.size();
-        repair_candidate_count += snapshot.repair_node_ids.size();
-        for (auto repair_node_id : snapshot.repair_node_ids) {
-            if (this->label_table_->IsRemoved(repair_node_id)) {
-                continue;
-            }
-            Vector<InnerIdType> current_clique_ids(this->allocator_);
-            this->mci_cliques_->CollectNodeCliqueIds(repair_node_id, current_clique_ids);
-            if (current_clique_ids.size() >= this->mci_parameters_.delete_node_mct_threshold) {
-                continue;
-            }
-            this->repair_mci_clique(repair_node_id);
-            ++repaired_node_count;
+    for (auto repair_node_id : snapshot.repair_node_ids) {
+        if (this->label_table_->IsRemoved(repair_node_id)) {
+            continue;
         }
+        Vector<InnerIdType> current_clique_ids(this->allocator_);
+        this->mci_cliques_->CollectNodeCliqueIds(repair_node_id, current_clique_ids);
+        if (current_clique_ids.size() >= this->mci_parameters_.delete_node_mct_threshold) {
+            continue;
+        }
+        this->repair_mci_clique(repair_node_id);
+        ++repaired_node_count;
     }
     logger::info(
         "hgraph mci mark remove repaired, removed={}, affected_cliques={}, retired_cliques={}, "
         "repair_candidates={}, repaired_nodes={}",
         removed_inner_ids.size(),
-        affected_clique_count,
-        retired_clique_count,
-        repair_candidate_count,
+        snapshot.affected_clique_ids.size(),
+        snapshot.retired_clique_ids.size(),
+        snapshot.repair_node_ids.size(),
         repaired_node_count);
 }
 
@@ -1839,10 +1845,13 @@ HGraph::force_remove_with_mci(const std::vector<int64_t>& ids) {
         return 0;
     }
     Vector<InnerIdType> removed(this->allocator_);
-    Vector<InnerIdType> old_to_new(old_total, 0, this->allocator_);
-    Vector<InnerIdType> current_to_old(old_total, 0, this->allocator_);
+    Vector<InnerIdType> old_to_new(this->allocator_);
+    Vector<InnerIdType> current_to_old(this->allocator_);
+    old_to_new.reserve(old_total);
+    current_to_old.reserve(old_total);
     for (uint64_t id = 0; id < old_total; ++id) {
-        old_to_new[id] = current_to_old[id] = static_cast<InnerIdType>(id);
+        old_to_new.emplace_back(static_cast<InnerIdType>(id));
+        current_to_old.emplace_back(static_cast<InnerIdType>(id));
     }
     for (const auto& target : targets) {
         removed.push_back(target.first);
@@ -1893,6 +1902,8 @@ HGraph::force_remove_with_mci(const std::vector<int64_t>& ids) {
     {
         std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
         // A later Add must resize all slot-indexed storage, including graph version rows.
+        // Publish the logical watermark first: a failed shrink may leave some buffers smaller
+        // than others, so retaining the old watermark would let Add skip necessary growth.
         this->max_capacity_.store(total);
         this->shrink_to_fit();
     }

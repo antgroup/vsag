@@ -72,6 +72,9 @@ public:
     void
     ShrinkPhysical(uint64_t size);
 
+    void
+    Prefetch(uint64_t offset, uint64_t size);
+
 private:
     void
     Remap(uint64_t mapped_size);
