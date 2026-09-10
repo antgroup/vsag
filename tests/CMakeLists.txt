@@ -19,6 +19,7 @@
 #  unittests
 add_executable (unittests
         test_main.cpp
+        test_search_session.cpp
         $<TARGET_OBJECTS:fixtures_allocator>
         $<TARGET_OBJECTS:fixtures_core>
         $<TARGET_OBJECTS:fixtures_data>

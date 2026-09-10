@@ -76,6 +76,16 @@ public:
     CheckAndMappingExternalParam(const JsonType& external_param,
                                  const IndexCommonParam& common_param);
 
+    friend class HGraphContinueSession;
+
+    std::unique_ptr<SearchSession>
+    OpenSearchSession(const DatasetPtr& query,
+                      int64_t k_per_call,
+                      const std::string& parameters,
+                      const FilterPtr& filter,
+                      Allocator* allocator,
+                      std::shared_ptr<const InnerIndexInterface> owner) const override;
+
     friend class HGraphAnalyzer;
     friend class HGraphOptimizedBuildSession;
 
