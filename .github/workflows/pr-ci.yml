@@ -50,6 +50,7 @@ jobs:
             coverage:
               - '.github/codecov.yml'
               - '.github/workflows/coverage.yml'
+              - '.github/workflows/pr-simd-coverage.yml'
               - '.github/workflows/pr-ci.yml'
               - 'CMakeLists.txt'
               - 'Makefile'
@@ -59,6 +60,7 @@ jobs:
               - 'src/**/CMakeLists.txt'
               - 'tests/CMakeLists.txt'
               - 'tests/scripts/coverage_diagnostics_test.py'
+              - 'tests/scripts/simd_coverage_test.py'
             python:
               - 'python/**'
               - 'python_bindings/**'
@@ -93,6 +95,8 @@ jobs:
       - name: Test coverage configuration
         run: |
           python3 -m unittest tests/scripts/coverage_diagnostics_test.py
+          python3 -m unittest tests/scripts/simd_coverage_test.py
+          bash -n scripts/coverage/run_simd_coverage.sh
           bash -n scripts/coverage/collect_cpp_coverage.sh
           bash -n scripts/coverage/check_cov.sh
           bash -n scripts/testing/test_parallel_bg.sh
