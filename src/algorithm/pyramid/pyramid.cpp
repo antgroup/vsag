@@ -128,8 +128,8 @@ Pyramid::create_knn_search_param(const PyramidSearchParameters& parsed_param,
                                  const FilterPtr& filter,
                                  const std::optional<float>& threshold) const {
     CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
-    CHECK_ARGUMENT(parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::SINGLE,
-                   "multi-hierarchy search (union/intersection) is not yet implemented");
+    CHECK_ARGUMENT(parsed_param.hierarchy_op != PyramidSearchParameters::HierarchyOp::UNION,
+                   "multi-hierarchy union search is not yet implemented");
     auto ef_search_threshold =
         std::max<uint64_t>(AMPLIFICATION_FACTOR * k, static_cast<uint64_t>(1000));
     CHECK_ARGUMENT(  // NOLINT
@@ -684,8 +684,6 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     const bool collect_rabitq_lower_bounds = search_param.enable_rabitq_one_bit_search and
                                              use_reorder_ and
                                              base_codes_->SupportSplitCodeStorage();
-    std::string hierarchy_name =
-        parsed_param.hierarchies.empty() ? "" : parsed_param.hierarchies[0];
     DistanceRecordVector rabitq_lower_bound_candidates(allocator_);
     std::mutex rabitq_lower_bound_mutex;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
@@ -714,7 +712,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
                           k,
                           reorder_candidate_limit,
                           ctx,
-                          hierarchy_name,
+                          parsed_param,
                           collect_rabitq_lower_bounds ? &rabitq_lower_bound_candidates : nullptr);
     result->Statistics(stats.Dump());
     return FilterDatasetByThreshold(result, threshold, allocator_, k);
@@ -733,8 +731,8 @@ Pyramid::RangeSearch(const DatasetPtr& query,
 
     auto parsed_param = PyramidSearchParameters::FromJson(parameters);
     ctx.rabitq_error_rate = parsed_param.rabitq_error_rate;
-    CHECK_ARGUMENT(parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::SINGLE,
-                   "multi-hierarchy search (union/intersection) is not yet implemented");
+    CHECK_ARGUMENT(parsed_param.hierarchy_op != PyramidSearchParameters::HierarchyOp::UNION,
+                   "multi-hierarchy union search is not yet implemented");
     InnerSearchParam search_param;
     search_param.ef = parsed_param.ef_search;
     search_param.radius = radius * RADIUS_EPSILON;
@@ -758,8 +756,6 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     const bool collect_rabitq_lower_bounds = search_param.enable_rabitq_one_bit_search and
                                              use_reorder_ and
                                              base_codes_->SupportSplitCodeStorage();
-    std::string hierarchy_name =
-        parsed_param.hierarchies.empty() ? "" : parsed_param.hierarchies[0];
     DistanceRecordVector rabitq_lower_bound_candidates(allocator_);
     std::mutex rabitq_lower_bound_mutex;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
@@ -788,7 +784,7 @@ Pyramid::RangeSearch(const DatasetPtr& query,
                           search_param.topk,
                           std::nullopt,
                           ctx,
-                          hierarchy_name,
+                          parsed_param,
                           collect_rabitq_lower_bounds ? &rabitq_lower_bound_candidates : nullptr);
     result->Statistics(stats.Dump());
     return result;
@@ -827,8 +823,8 @@ Pyramid::SearchWithRequest(const SearchRequest& request) const {
         search_param = this->create_knn_search_param(
             parsed_param, request.topk_, request_filter, request.threshold_);
     } else {
-        CHECK_ARGUMENT(parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::SINGLE,
-                       "multi-hierarchy search (union/intersection) is not yet implemented");
+        CHECK_ARGUMENT(parsed_param.hierarchy_op != PyramidSearchParameters::HierarchyOp::UNION,
+                       "multi-hierarchy union search is not yet implemented");
         search_param.ef = parsed_param.ef_search;
         search_param.radius = request.radius_ * RADIUS_EPSILON;
         search_param.search_mode = RANGE_SEARCH;
@@ -915,8 +911,6 @@ Pyramid::SearchWithRequest(const SearchRequest& request) const {
         return node_result;
     };
 
-    std::string hierarchy_name =
-        parsed_param.hierarchies.empty() ? "" : parsed_param.hierarchies[0];
     const auto final_topk = is_knn ? request.topk_ : search_param.topk;
     const auto reorder_candidate_limit =
         is_knn ? get_reorder_candidate_limit(
@@ -929,7 +923,7 @@ Pyramid::SearchWithRequest(const SearchRequest& request) const {
                           final_topk,
                           reorder_candidate_limit,
                           ctx,
-                          hierarchy_name,
+                          parsed_param,
                           collect_rabitq_lower_bounds ? &rabitq_lower_bound_candidates : nullptr);
     if (is_knn) {
         result = FilterDatasetByThreshold(result, request.threshold_, ctx.alloc, request.topk_);
@@ -966,15 +960,19 @@ Pyramid::search_impl(const DatasetPtr& query,
                      int64_t final_topk,
                      std::optional<int64_t> reorder_candidate_limit,
                      QueryContext& ctx,
-                     const std::string& hierarchy_name,
+                     const PyramidSearchParameters& parsed_param,
                      const DistanceRecordVector* rabitq_lower_bound_candidates) const {
+    const std::string hierarchy_name =
+        parsed_param.hierarchies.empty() ? "" : parsed_param.hierarchies[0];
     auto h_iter = hierarchies_.find(hierarchy_name);
     CHECK_ARGUMENT(h_iter != hierarchies_.end(),
                    fmt::format("unknown hierarchy name: '{}'", hierarchy_name));
     const auto& h = *h_iter->second;
 
     const auto* query_path = query->GetPaths(hierarchy_name);
-    if (query_path == nullptr) {
+    const bool intersection =
+        parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::INTERSECTION;
+    if (query_path == nullptr and not intersection) {
         query_path = query->GetPaths();
     }
     // NOLINTNEXTLINE(readability-simplify-boolean-expr)
@@ -985,6 +983,24 @@ Pyramid::search_impl(const DatasetPtr& query,
     DistHeapPtr search_result = std::make_shared<StandardHeap<true, false>>(ctx.alloc, -1);
 
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
+    if (intersection) {
+        auto combined = std::make_shared<CombinedFilter>();
+        combined->AppendFilter(search_param.is_inner_id_allowed);
+        // Validate every selector, including the driving hierarchy, before searching.
+        for (uint64_t i = 0; i < parsed_param.hierarchies.size(); ++i) {
+            const auto& name = parsed_param.hierarchies[i];
+            auto iter = hierarchies_.find(name);
+            CHECK_ARGUMENT(iter != hierarchies_.end(),
+                           fmt::format("unknown hierarchy name: '{}'", name));
+            const auto* paths = query->GetPaths(name);
+            CHECK_ARGUMENT(paths != nullptr,
+                           fmt::format("query_path is required for hierarchy '{}'", name));
+            if (i != 0) {
+                combined->AppendFilter(create_hierarchy_filter(*iter->second, paths[0]));
+            }
+        }
+        search_param.is_inner_id_allowed = combined;
+    }
     VisitedListGuard vl_guard(pool_.get());
     const VisitedListPtr& vl = vl_guard.get();
     if (query_path != nullptr) {
@@ -993,6 +1009,20 @@ Pyramid::search_impl(const DatasetPtr& query,
             h, search_func, vl, search_result, current_path, search_param, ctx.reasoning_ctx);
     } else {
         h.root->Search(search_func, vl, search_result, search_param.ef, ctx.reasoning_ctx);
+    }
+
+    if (intersection) {
+        // Overlapping OR paths (including parallel searches) may emit the same id repeatedly.
+        // Deduplicate before factor/topk limits so repeats cannot displace valid matches.
+        UnorderedSet<InnerIdType> seen(ctx.alloc);
+        auto unique_result = std::make_shared<StandardHeap<true, false>>(ctx.alloc, -1);
+        const auto* candidates = search_result->GetData();
+        for (uint64_t i = 0; i < search_result->Size(); ++i) {
+            if (seen.insert(candidates[i].second).second) {
+                unique_result->Push(candidates[i].first, candidates[i].second);
+            }
+        }
+        search_result = unique_result;
     }
 
     if (use_reorder_) {
@@ -2297,6 +2327,67 @@ Pyramid::add_to_hierarchy(Hierarchy& h,
                                  ? nullptr
                                  : data_vectors + dim_ * input_index;
         add_to_path(h, paths[input_index], inner_id, vector, sampled_level);
+    });
+}
+
+bool
+Pyramid::matches_scope(const IndexNode* node, InnerIdType id) const {
+    std::shared_lock lock(node->mutex_);
+    if (node->status_ == IndexNode::Status::FLAT) {
+        return std::find(node->ids_.begin(), node->ids_.end(), id) != node->ids_.end();
+    }
+    if (node->status_ == IndexNode::Status::GRAPH) {
+        const auto contains = [&](InnerIdType candidate) {
+            // A singleton root has no edges (and compressed storage has no row for it).
+            if (node->graph_->TotalCount() != 0 and candidate == node->entry_point_) {
+                return true;
+            }
+            const auto storage = node->graph_param_->graph_storage_type_;
+            if (storage != GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT and
+                storage != GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_COMPRESSED) {
+                return node->graph_->CheckIdExists(candidate);
+            }
+            if (candidate >= node->graph_->TotalCount()) {
+                return false;
+            }
+            // Dense root capacity can include holes from partial hierarchy inserts. NSW keeps
+            // at least one neighbor after connecting a non-singleton; MARK_REMOVE only changes
+            // the label filter. Protect compressed row ownership as well as dense row counts.
+            SharedLock point_lock(points_mutex_, candidate);
+            return node->graph_->GetNeighborSize(candidate) != 0;
+        };
+        if (contains(id)) {
+            return true;
+        }
+        // Duplicate vectors can belong to a scope without having their own graph row.
+        const auto duplicates = node->graph_->GetDuplicateIds(id);
+        return std::any_of(duplicates.begin(), duplicates.end(), contains);
+    }
+    // Unbuilt levels are represented by their searchable descendants, as in IndexNode::Search.
+    return std::any_of(node->children_.begin(), node->children_.end(), [&](const auto& child) {
+        return matches_scope(child.second.get(), id);
+    });
+}
+
+FilterPtr
+Pyramid::create_hierarchy_filter(const Hierarchy& hierarchy, const std::string& path) const {
+    Vector<const IndexNode*> scopes(allocator_);
+    for (const auto& one_path : parse_path(path)) {
+        auto* node = hierarchy.root.get();
+        for (const auto& segment : one_path) {
+            node = node->GetChild(segment, false);
+            if (node == nullptr) {
+                break;
+            }
+        }
+        if (node != nullptr) {
+            scopes.push_back(node);
+        }
+    }
+    return std::make_shared<WhiteListFilter>([this, scopes = std::move(scopes)](int64_t id) {
+        return std::any_of(scopes.begin(), scopes.end(), [this, id](const IndexNode* node) {
+            return matches_scope(node, static_cast<InnerIdType>(id));
+        });
     });
 }
 

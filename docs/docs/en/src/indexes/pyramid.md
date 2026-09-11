@@ -171,7 +171,7 @@ Search-time parameters live under the `pyramid` sub-object:
 | `hops_limit` | int | unlimited | Per-graph KNN hop cap for the root bottom graph and every non-root graph; ignored when it is not greater than `ef_search`. Sparse root routing layers are never hop-limited. FLAT scans and range search are unaffected. |
 | `subindex_ef_search` | int | `50` | Candidate list size used when traversing intermediate sub-graphs on the path. |
 | `hierarchies` | string[] | `[]` | Select which hierarchy to search. Empty means use the default (unnamed) hierarchy. |
-| `hierarchy_op` | string | `"single"` | How to combine results across hierarchies: `single` (search one hierarchy), `union`, or `intersection`. **Note:** `union` and `intersection` are not yet implemented — setting them will cause `KnnSearch`/`RangeSearch` to return an error. |
+| `hierarchy_op` | string | `"single"` | Use `intersection` with two or more selected hierarchies: paths within each hierarchy are OR scopes, and hierarchies are combined with AND before candidate truncation and reorder. Supported by `KnnSearch`, `RangeSearch`, and `SearchWithRequest`. `union` remains unsupported; omit this parameter when selecting one hierarchy. |
 | `rabitq_error_rate` | float | `1.9` | Positive lower-bound error multiplier for this search. The default `1.9` is relatively large; increasing it improves accuracy but slows down search. |
 
 ```cpp
@@ -320,6 +320,27 @@ auto result = index->RangeSearch(
     query, /*radius=*/20.0f,
     R"({"pyramid": {"ef_search": 100, "hierarchies": ["category"]}})").value();
 ```
+
+### Intersection across hierarchies
+
+Provide a named query path for **every** selected hierarchy. Separate OR alternatives with `|`;
+`/` separates path segments. For example, `(host1 OR host2) AND (finance/bank OR finance/insurance)`:
+
+```cpp
+std::string hosts[] = {"host1|host2"};
+std::string categories[] = {"finance/bank|finance/insurance"};
+query->Paths("site", hosts)->Paths("category", categories);
+auto result = index->KnnSearch(
+    query, 10,
+    R"({"pyramid":{"ef_search":100,"hierarchies":["site","category"],"hierarchy_op":"intersection"}})");
+```
+
+Missing named paths and unknown hierarchy names are errors. An empty path string or a path that
+does not exist contributes an empty scope. Single-hierarchy queries retain their existing default
+path fallback. External filters and deleted-label filtering also apply to intersection results.
+The first selected hierarchy drives approximate search; the remaining hierarchy trees filter its
+candidates before any final limit or reorder. Recall still depends on the usual search parameters.
+No `store_paths` setting or index rebuild is required for restored multi-hierarchy indexes.
 
 ### Serialize & Deserialize
 
