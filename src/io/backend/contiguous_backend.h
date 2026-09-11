@@ -37,6 +37,7 @@ struct ContiguousBackendCapabilities {
     static constexpr bool AsyncReadable = false;
     static constexpr bool Writable = true;
     static constexpr bool Resizable = true;
+    static constexpr bool CanResizeForOverwrite = Region::CanResizeForOverwrite;
 };
 
 template <typename Region>
@@ -123,6 +124,11 @@ public:
     void
     ResizePhysical(uint64_t size) {
         region_.ResizePhysical(size);
+    }
+
+    void
+    ResizePhysicalForOverwrite(uint64_t size, uint64_t previous_logical_size) {
+        region_.ResizePhysicalForOverwrite(size, previous_logical_size);
     }
 
     void

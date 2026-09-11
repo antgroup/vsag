@@ -19,6 +19,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "common.h"
+#include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
 #include "query_context.h"
 #include "utils/search_threshold.h"
@@ -185,6 +186,12 @@ public:
     Deserialize(std::istream& in_stream) override {
         CHECK_DESERIALIZE_EMPTY_INDEX;
         SAFE_CALL(this->inner_index_->Deserialize(in_stream));
+    }
+
+    tl::expected<void, Error>
+    ParallelDeserialize(DeserializeReader& reader) override {
+        CHECK_DESERIALIZE_EMPTY_INDEX;
+        SAFE_CALL(this->inner_index_->ParallelDeserialize(reader));
     }
 
     tl::expected<void, Error>
@@ -495,6 +502,11 @@ public:
     tl::expected<void, Error>
     Serialize(std::ostream& out_stream) override {
         SAFE_CALL(this->inner_index_->Serialize(out_stream));
+    }
+
+    tl::expected<void, Error>
+    Serialize(SerializeWriter& writer, uint64_t chunk_size) override {
+        SAFE_CALL(this->inner_index_->Serialize(writer, chunk_size));
     }
 
     tl::expected<void, Error>
