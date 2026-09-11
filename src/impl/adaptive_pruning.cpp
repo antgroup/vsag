@@ -25,9 +25,10 @@ namespace vsag {
 void
 AdaptivePruningParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(json.IsObject(), "index parameters must be an object");
-    CHECK_ARGUMENT(
-        not json.Contains("fill_rejected") && not json.Contains("adaptive_pruning_fill_rejected"),
-        "fill_rejected has been removed; rejected neighbors are never filled");
+    const bool has_removed_fill =
+        json.Contains("fill_rejected") || json.Contains("adaptive_pruning_fill_rejected");
+    CHECK_ARGUMENT(not has_removed_fill,
+                   "fill_rejected has been removed; rejected neighbors are never filled");
     *this = AdaptivePruningParameter{};
     if (json.Contains("adaptive_pruning")) {
         enabled = json["adaptive_pruning"].GetBool();

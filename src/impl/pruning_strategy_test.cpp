@@ -317,7 +317,7 @@ TEST_CASE("Adaptive reverse pruning relaxes around the existing neighbor",
     CHECK(actual.front() == 0);
 }
 
-TEST_CASE("Adaptive reverse pruning preserves append and optional fill",
+TEST_CASE("Adaptive reverse pruning preserves append and prunes full lists",
           "[ut][pruning_strategy][adaptive_pruning][reverse]") {
     auto allocator = Engine::CreateDefaultAllocator();
     IndexCommonParam common;
