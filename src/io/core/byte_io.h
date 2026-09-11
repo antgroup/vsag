@@ -184,9 +184,9 @@ public:
         StreamReader::ReadObj(reader, size);
         const uint64_t serialized_start = reader.GetCursor();
         if constexpr (SkipDeserialize) {
-            const uint64_t serialized_end = CheckedEnd(serialized_start, size);
+            (void)CheckedEnd(serialized_start, size);
             uint64_t old_size = Size();
-            reader.Seek(serialized_end);
+            reader.Skip(size);
             backend_.BindSerializedRange(serialized_start, size);
             start_ = serialized_start;
             has_deserialized_ = true;

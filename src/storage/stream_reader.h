@@ -67,6 +67,11 @@ public:
     virtual void
     Read(char* data, uint64_t size) = 0;
 
+    // Advance by consuming bytes with a fixed-size buffer by default. Wrappers that validate
+    // consumed bytes must not bypass Read(); random-access sources may optimize cursor advances.
+    virtual void
+    Skip(uint64_t size);
+
     virtual void
     Seek(uint64_t cursor) = 0;
 
@@ -117,6 +122,9 @@ SkipForward(StreamReader& reader, uint64_t size);
 
 class ReadFuncStreamReader : public StreamReader {
 public:
+    void
+    Skip(uint64_t size) override;
+
     void
     Read(char* data, uint64_t size) override;
 
@@ -182,6 +190,9 @@ private:
 
 class BufferStreamReader : public StreamReader {
 public:
+    void
+    Skip(uint64_t size) override;
+
     [[nodiscard]] uint64_t
     Length() override;
 
@@ -212,6 +223,9 @@ private:
 
 class SliceStreamReader : public StreamReader {
 public:
+    void
+    Skip(uint64_t size) override;
+
     [[nodiscard]] uint64_t
     Length() override;
 

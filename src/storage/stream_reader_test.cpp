@@ -17,8 +17,93 @@
 #include "stream_reader.h"
 
 #include <cstdint>
+#include <limits>
+#include <sstream>
 
+#include "impl/allocator/safe_allocator.h"
 #include "unittest.h"
+#include "vsag_exception.h"
+
+TEST_CASE("StreamReader Skip consumes forward input", "[ut][stream_reader]") {
+    std::istringstream input(std::string(20000, 'x') + "tail");
+    vsag::ForwardStreamReader reader(input);
+    reader.Skip(0);
+    REQUIRE(reader.GetCursor() == 0);
+    reader.Skip(20000);
+    REQUIRE(reader.GetCursor() == 20000);
+    char tail[4];
+    reader.Read(tail, sizeof(tail));
+    REQUIRE(std::string(tail, sizeof(tail)) == "tail");
+    REQUIRE_THROWS_AS(reader.Skip(1), vsag::VsagException);
+}
+
+TEST_CASE("StreamReader Skip respects bounds without reading random-access data",
+          "[ut][stream_reader]") {
+    uint64_t read_count = 0;
+    vsag::ReadFuncStreamReader reader(
+        [&](uint64_t, uint64_t size, void* dest) {
+            ++read_count;
+            std::memset(dest, 'x', size);
+        },
+        0,
+        100);
+    auto slice = reader.Slice(50);
+    slice.Skip(20);
+    REQUIRE(slice.GetCursor() == 20);
+    REQUIRE(reader.GetCursor() == 20);
+    REQUIRE_THROWS_AS(slice.Skip(31), vsag::VsagException);
+    REQUIRE(slice.GetCursor() == 20);
+    slice.Skip(30);
+    reader.Skip(50);
+    reader.Skip(0);
+    REQUIRE(read_count == 0);
+    REQUIRE(reader.GetCursor() == 100);
+    REQUIRE_THROWS_AS(reader.Skip(1), vsag::VsagException);
+    REQUIRE_THROWS_AS(reader.Skip(std::numeric_limits<uint64_t>::max()), vsag::VsagException);
+    REQUIRE(reader.GetCursor() == 100);
+}
+
+TEST_CASE("BufferStreamReader Skip preserves buffered cursor and delegates unread bytes",
+          "[ut][stream_reader]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    const std::string data = "0123456789";
+    uint64_t read_count = 0;
+    vsag::ReadFuncStreamReader source(
+        [&](uint64_t offset, uint64_t size, void* dest) {
+            ++read_count;
+            std::memcpy(dest, data.data() + offset, size);
+        },
+        0,
+        data.size());
+    vsag::BufferStreamReader reader(&source, data.size(), allocator.get());
+    reader.Skip(3);
+    REQUIRE(read_count == 0);
+    REQUIRE(reader.GetCursor() == 3);
+    char value = 0;
+    reader.Read(&value, 1);
+    REQUIRE(value == '3');
+    reader.Skip(2);
+    REQUIRE(reader.GetCursor() == 6);
+    reader.Read(&value, 1);
+    REQUIRE(value == '6');
+    REQUIRE_THROWS_AS(reader.Skip(4), vsag::VsagException);
+    REQUIRE(reader.GetCursor() == 7);
+    reader.Skip(3);
+    reader.Skip(0);
+    REQUIRE(reader.GetCursor() == data.size());
+    REQUIRE(read_count == 1);
+}
+
+TEST_CASE("BoundedForwardReader Skip consumes only its payload", "[ut][stream_reader]") {
+    std::istringstream input("payloadsuffix");
+    vsag::ForwardStreamReader source(input);
+    vsag::BoundedForwardReader reader(&source, 7);
+    REQUIRE_THROWS_AS(reader.Skip(8), vsag::VsagException);
+    REQUIRE(source.GetCursor() == 0);
+    reader.Skip(7);
+    REQUIRE(reader.GetCursor() == 7);
+    REQUIRE(source.GetCursor() == 7);
+}
 
 // fill buffer with below and return a wrappered StreamReader object:
 // ['1' '1' ... repeats 1024 times]

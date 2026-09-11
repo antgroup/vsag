@@ -905,6 +905,23 @@ TEST_CASE("RaBitQSplitDataCell fused model-only serialization",
     split->TrainFusedCodec(vectors.data(), count, cluster_count);
 
     const auto legacy_payload = serialize_flatten(flatten);
+    // The current split format remains supported without fused storage. Invalid IO fields must
+    // fail instead of rewinding to the unpublished format that omitted the field.
+    auto ordinary_restored = FlattenInterface::MakeInstance(param, common_param);
+    REQUIRE_NOTHROW(deserialize_flatten(ordinary_restored, legacy_payload));
+    const uint64_t io_offset = 2 * sizeof(InnerIdType) + sizeof(uint32_t);
+    for (uint64_t invalid_length : {uint64_t{65}, std::numeric_limits<uint64_t>::max()}) {
+        auto invalid = legacy_payload;
+        std::memcpy(invalid.data() + io_offset, &invalid_length, sizeof(invalid_length));
+        auto rejected = FlattenInterface::MakeInstance(param, common_param);
+        REQUIRE_THROWS_AS(deserialize_flatten(rejected, invalid), VsagException);
+    }
+    auto invalid_type = legacy_payload;
+    const uint64_t invalid_type_length = 3;
+    std::memcpy(invalid_type.data() + io_offset, &invalid_type_length, sizeof(invalid_type_length));
+    std::memcpy(invalid_type.data() + io_offset + sizeof(uint64_t), "bad", invalid_type_length);
+    auto rejected_type = FlattenInterface::MakeInstance(param, common_param);
+    REQUIRE_THROWS_AS(deserialize_flatten(rejected_type, invalid_type), VsagException);
     const uint64_t memory_with_split_codes = flatten->GetMemoryUsage();
     const uint64_t code_payload_size =
         static_cast<uint64_t>(count) * (split->OneBitCodeSize() + split->SupplementCodeSize());
@@ -980,6 +997,9 @@ TEST_CASE("RaBitQSplitDataCell fused model-only serialization",
         REQUIRE(std::abs(expected_distances[id] - model_distances[id]) <= 1e-6F);
     }
 
+    // Review pending (#2582): the legacy split-to-fused fallback is disabled for forward-only
+    // loading. Preserve the old compatibility assertions until its removal is confirmed.
+    /*
     auto [legacy_flatten, legacy_split, legacy_graph] = make_attached_pair();
     deserialize_flatten(legacy_flatten, legacy_payload);
     deserialize_graph(legacy_graph, graph_payload);
@@ -1000,6 +1020,9 @@ TEST_CASE("RaBitQSplitDataCell fused model-only serialization",
     for (InnerIdType id = 0; id < count; ++id) {
         REQUIRE(std::abs(expected_distances[id] - legacy_distances[id]) <= 1e-6F);
     }
+    */
+    auto rejected = make_attached_pair();
+    REQUIRE_THROWS_AS(deserialize_flatten(std::get<0>(rejected), legacy_payload), VsagException);
 }
 
 TEST_CASE("RaBitQSplitDataCell supports MRLE transform quantizer",
