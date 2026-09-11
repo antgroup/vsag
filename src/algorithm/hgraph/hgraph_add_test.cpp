@@ -1545,10 +1545,10 @@ TEST_CASE("HGraph adaptive pruning build reload and add", "[ut][hgraph][adaptive
     auto common = MakeCommonParam(2, threads);
     auto json = MakeFp32HGraphJson(false, threads);
     json["alpha"].SetFloat(1.06F);
-    json["adaptive_pruning"].SetJson(
-        vsag::JsonType::Parse(R"({"enabled":true,"adjust_step":0.06,"fill_rejected":true})"));
+    json["adaptive_pruning"].SetBool(true);
+    json["adaptive_pruning_adjust_step"].SetFloat(0.06F);
     const bool reverse = GENERATE(false, true);
-    json["adaptive_pruning"]["apply_to_reverse"].SetBool(reverse);
+    json["adaptive_pruning_apply_to_reverse"].SetBool(reverse);
     auto index = MakeHGraphIndex(json, common);
     std::vector<float> vectors;
     std::vector<int64_t> ids;
@@ -1582,17 +1582,11 @@ TEST_CASE("HGraph adaptive pruning build reload and add", "[ut][hgraph][adaptive
     auto incompatible_json = MakeFp32HGraphJson(false, threads);
     auto incompatible = MakeHGraphIndex(incompatible_json, common);
     CHECK_FALSE(incompatible->Deserialize(binary.value()).has_value());
-    for (const auto* field : {"adjust_step", "fill_rejected"}) {
-        auto changed = vsag::JsonType::Parse(json.Dump());
-        if (std::string(field) == "adjust_step") {
-            changed["adaptive_pruning"][field].SetFloat(0.03F);
-        } else {
-            changed["adaptive_pruning"][field].SetBool(false);
-        }
-        CHECK_FALSE(MakeHGraphIndex(changed, common)->Deserialize(binary.value()).has_value());
-    }
+    auto changed = vsag::JsonType::Parse(json.Dump());
+    changed["adaptive_pruning_adjust_step"].SetFloat(0.03F);
+    CHECK_FALSE(MakeHGraphIndex(changed, common)->Deserialize(binary.value()).has_value());
     auto wrong_scope = vsag::JsonType::Parse(json.Dump());
-    wrong_scope["adaptive_pruning"]["apply_to_reverse"].SetBool(not reverse);
+    wrong_scope["adaptive_pruning_apply_to_reverse"].SetBool(not reverse);
     CHECK_FALSE(MakeHGraphIndex(wrong_scope, common)->Deserialize(binary.value()).has_value());
     json["alpha"].SetFloat(1.12F);
     CHECK_FALSE(MakeHGraphIndex(json, common)->Deserialize(binary.value()).has_value());
@@ -1601,7 +1595,7 @@ TEST_CASE("HGraph adaptive pruning build reload and add", "[ut][hgraph][adaptive
 TEST_CASE("HGraph adaptive pruning unsupported contexts", "[ut][hgraph][adaptive_pruning]") {
     auto common = MakeCommonParam(2);
     auto json = MakeFp32HGraphJson(false);
-    json["adaptive_pruning"]["enabled"].SetBool(true);
+    json["adaptive_pruning"].SetBool(true);
     SECTION("ODescent") {
         json["graph_type"].SetString("odescent");
         CHECK_THROWS(MakeHGraphIndex(json, common));
@@ -1611,11 +1605,11 @@ TEST_CASE("HGraph adaptive pruning unsupported contexts", "[ut][hgraph][adaptive
         CHECK_THROWS(MakeHGraphIndex(json, common));
     }
     SECTION("Unsupported scope") {
-        json["adaptive_pruning"]["apply_to_upper"].SetBool(true);
+        json["adaptive_pruning_apply_to_upper"].SetBool(true);
         CHECK_THROWS(MakeHGraphIndex(json, common));
     }
     SECTION("Invalid threshold") {
-        json["adaptive_pruning"]["adjust_step"].SetFloat(1.0F);
+        json["adaptive_pruning_adjust_step"].SetFloat(1.0F);
         CHECK_THROWS(MakeHGraphIndex(json, common));
     }
 }
@@ -1633,8 +1627,8 @@ TEST_CASE("HGraph adaptive pruning rejects imported build caches",
     std::stringstream cache;
     REQUIRE(source->ExportCache(cache).has_value());
     cache.seekg(0);
-    json["adaptive_pruning"]["enabled"].SetBool(true);
-    json["adaptive_pruning"]["apply_to_reverse"].SetBool(GENERATE(false, true));
+    json["adaptive_pruning"].SetBool(true);
+    json["adaptive_pruning_apply_to_reverse"].SetBool(GENERATE(false, true));
     auto target = MakeHGraphIndex(json, common);
     REQUIRE(target->ImportCache(cache).has_value());
     const auto result = target->Build(data);
@@ -1656,13 +1650,13 @@ TEST_CASE("HGraph adaptive pruning RaBitQ split and fused lifecycle",
         "rabitq_bits_per_dim_base":2, "rabitq_bits_per_dim_precise":6,
         "graph_io_type":"memory_io", "graph_storage_type":"flat", "graph_type":"nsw",
         "max_degree":8, "ef_construction":32, "use_reorder":true, "reorder_source":"base",
-        "alpha":1.06, "adaptive_pruning":{"enabled":true,"fill_rejected":true}
+        "alpha":1.06, "adaptive_pruning":true
     })");
     json["rabitq_fused_datacell"].SetBool(fused);
     // Split incremental Add already requires raw vectors for its temporary SQ8 build store.
     json["store_raw_vector"].SetBool(not fused);
     json["build_thread_count"].SetInt(threads);
-    json["adaptive_pruning"]["apply_to_reverse"].SetBool(GENERATE(false, true));
+    json["adaptive_pruning_apply_to_reverse"].SetBool(GENERATE(false, true));
     auto index = MakeHGraphIndex(json, common);
     std::vector<float> vectors(count * dim);
     std::vector<int64_t> ids(count);

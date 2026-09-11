@@ -354,11 +354,11 @@ auto result = index->KnnSearch(query, topk, params, my_filter).value();
 
 `index_param.adaptive_pruning` 为 NSW **底层新节点正向选边**启用多轮 L2 剪枝，默认关闭。
 普通 `Build`、并行插入、`Add` 以及 NSW 优化构建（包括 RaBitQ split/fused）共用该选择器。
-设置 `apply_to_reverse: true` 后，底层已满的反向邻居表也使用自适应剪枝。
+设置 `adaptive_pruning_apply_to_reverse: true` 后，底层已满的反向邻居表也使用自适应剪枝。
 邻居表未满时仍直接追加新节点；已满时以被更新的旧节点为中心，将旧邻居与新节点合并为候选，
-在原有节点锁内使用相同的 alpha、步长和补边策略完成选边和写回。
+在原有节点锁内使用相同的 alpha 和步长策略完成选边和写回。
 上层和更新/细化仍使用固定 alpha。启用时仍拒绝 ODescent、导入缓存后的构建、IP/cosine
-以及 `apply_to_upper: true`。
+以及 `adaptive_pruning_apply_to_upper: true`。
 
 将以下字段放在 `index_param` 内。这是 GIST 参考实验配置，不按维度自动设置，也不代表已验证性能收益：
 
@@ -366,23 +366,19 @@ auto result = index->KnnSearch(query, topk, params, my_filter).value();
 {
     "alpha": 1.06,
     "graph_type": "nsw",
-    "adaptive_pruning": {
-        "enabled": true,
-        "adjust_step": 0.06,
-        "fill_rejected": true,
-        "apply_to_reverse": false,
-        "apply_to_upper": false
-    }
+    "adaptive_pruning": true,
+    "adaptive_pruning_adjust_step": 0.06,
+    "adaptive_pruning_apply_to_reverse": false,
+    "adaptive_pruning_apply_to_upper": false
 }
 ```
 
 | 字段 | 默认值 | 含义 |
 | --- | --- | --- |
-| `enabled` | `false` | 启用自适应选择器 |
-| `adjust_step` | `0.06` | alpha 调整步长 δ |
-| `fill_rejected` | `false` | 放宽后从剩余拒绝列表补边 |
-| `apply_to_reverse` | `false` | 对已满的底层反向邻居表启用自适应剪枝；需同时 `enabled: true` |
-| `apply_to_upper` | `false` | 预留；启用时不支持 `true` |
+| `adaptive_pruning` | `false` | 启用自适应选择器 |
+| `adaptive_pruning_adjust_step` | `0.06` | alpha 调整步长 δ |
+| `adaptive_pruning_apply_to_reverse` | `false` | 对已满的底层反向邻居表启用自适应剪枝；需同时 `adaptive_pruning: true` |
+| `adaptive_pruning_apply_to_upper` | `false` | 预留；启用时不支持 `true` |
 
 基准值沿用已有 `alpha`。启用时要求 alpha 和 δ 有限，δ 非负，`alpha - 2*δ > 0`，
 且 `alpha + 3*δ` 有限。距离来自原有建图距离提供器，必须为有限、非负的 L2 值；
@@ -393,13 +389,15 @@ auto result = index->KnnSearch(query, topk, params, my_filter).value();
 
 - 接受集合 A 不满 K：保留 A，以 `alpha + k*δ` 重扫拒绝集合。
   `K/|A| > 3` 取 k=3，`1.5 < K/|A| <= 3` 取 k=2，其余取 k=1。
-  开启补边时，再按剩余拒绝列表顺序补至 K。
+  不追加仍被拒绝的候选，允许邻接表不足 K。
 - A 达到 K：清空 A，以 `alpha - k*δ` 重扫完整排序候选（含原尾部）。
   以第一轮拒绝集合 B 计算：`|B|/K >= 5` 取 k=0，`2.5 <= |B|/K < 5` 取 k=1，其余取 k=2。
   若仍不满 K，以基准 alpha 重扫新的拒绝集合；此分支不无条件补边。
-- δ=0：只执行一次基准扫描及可选补边。关闭功能时保留 legacy 的全部规则，
+- δ=0：只执行一次基准扫描，不补边。关闭功能时保留 legacy 的全部规则，
   包括候选不足 K 时直接返回的短路，因此两者不等价。
 
 临时数据和可选统计仅属于单次调用；不增加全局计数或修改图锁协议。
-序列化保存该配置。加载时 enabled 必须相同；启用时还要求 alpha、步长、补边和作用范围一致，
+序列化保存该配置。加载时 adaptive_pruning 必须相同；启用时还要求 alpha、步长和作用范围一致，
 否则兼容性检查失败。没有该字段的旧索引按关闭处理。
+
+参数平铺在 `index_param` 下；`adaptive_pruning` 是布尔开关。旧实验版嵌套对象和已删除的 `fill_rejected` 参数会报错，旧实验索引需重新构建。
