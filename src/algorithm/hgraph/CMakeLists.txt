@@ -7,6 +7,7 @@ set(HGRAPH_SRCS
     hgraph_parameter.cpp
     hgraph_param_mapping.cpp
     hgraph_search.cpp
+    hgraph_continue_session.cpp
     hgraph_serialize.cpp
     hgraph_enhance.cpp
 )

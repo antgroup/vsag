@@ -41,6 +41,7 @@
 #include "utils/pointer_define.h"
 #include "vsag/dataset.h"
 #include "vsag/index.h"
+#include "vsag/search_session.h"
 
 namespace vsag {
 
@@ -370,6 +371,17 @@ public:
 
     virtual void
     InitFeatures() = 0;
+
+    virtual std::unique_ptr<SearchSession>
+    OpenSearchSession(const DatasetPtr& query,
+                      int64_t k_per_call,
+                      const std::string& parameters,
+                      const FilterPtr& filter,
+                      Allocator* allocator,
+                      std::shared_ptr<const InnerIndexInterface> owner) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index does not support SearchSession");
+    }
 
     [[nodiscard]] virtual DatasetPtr
     KnnSearch(const DatasetPtr& query,
