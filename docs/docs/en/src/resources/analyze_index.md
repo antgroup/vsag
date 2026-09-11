@@ -26,14 +26,16 @@ as degree distribution, entry-point quality, sub-index recall and low-recall hot
 exposed through `GetStats()` rather than through `AnalyzeIndexBySearch`.
 
 Pyramid query analysis follows the same path-scoping rules as `KnnSearch`. For the default
-hierarchy, attach one path per query with `Dataset::Paths`. For a named hierarchy, attach paths
-with `Dataset::Paths(hierarchy_name, paths)` and select that hierarchy in the Pyramid search
-parameters. A path is required when the selected hierarchy's root is `NO_INDEX`. Batched query
-datasets must provide a corresponding path for every query when paths are required or supplied.
-Pyramid calculates ground truth only from vectors eligible for each query's hierarchy and path,
-excluding mark-removed vectors. Pyramid query analysis currently supports KNN requests only and
-uses `query_`, `topk_`, and `params_str_` from `SearchRequest`; filtered and iterator requests are
-not supported. Run analysis against a stable index without concurrent add or remove operations.
+hierarchy, attach paths with `Dataset::Paths`. For a named hierarchy, use
+`Dataset::Paths(hierarchy_name, paths)` and select that hierarchy in the Pyramid search parameters.
+A path is required when the selected hierarchy's root is `NO_INDEX`. In a batched query dataset,
+the outer path collection has one row per query. The legacy overload stores one path string per
+row and interprets `|` as a union; the structured overload stores one or many atomic paths
+per row and treats `|` as an ordinary path character. Pyramid calculates ground truth only from
+vectors eligible for each query's hierarchy and path union, excluding mark-removed vectors.
+Pyramid query analysis currently supports KNN requests only and uses `query_`, `topk_`, and
+`params_str_` from `SearchRequest`; filtered and iterator requests are not supported. Run analysis
+against a stable index without concurrent add or remove operations.
 
 ### Static metrics from `GetStats()`
 

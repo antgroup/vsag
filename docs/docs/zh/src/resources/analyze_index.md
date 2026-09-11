@@ -24,13 +24,15 @@ AnalyzeIndexBySearch(const SearchRequest& request);
 通过 `GetStats()` 而非 `AnalyzeIndexBySearch` 输出。
 
 Pyramid 的查询分析遵循与 `KnnSearch` 相同的路径限定语义。对于默认 hierarchy，
-使用 `Dataset::Paths` 为每条 query 设置路径；对于命名 hierarchy，使用
+使用 `Dataset::Paths` 设置路径；对于命名 hierarchy，使用
 `Dataset::Paths(hierarchy_name, paths)` 设置路径，并在 Pyramid 搜索参数中选择该
-hierarchy。当选中 hierarchy 的根节点为 `NO_INDEX` 时必须提供路径。批量 query
-数据集在需要或提供路径时，必须为每条 query 提供对应路径。Pyramid 只在每条 query 的
-hierarchy 和路径所允许的向量中计算真值集，并排除已标记删除的向量。Pyramid 查询分析
-目前只支持 KNN 请求，并使用 `SearchRequest` 中的 `query_`、`topk_` 和 `params_str_`；不支持
-带过滤条件或 iterator 的请求。分析期间应保持索引稳定，不要并发执行 add 或 remove。
+hierarchy。当选中 hierarchy 的根节点为 `NO_INDEX` 时必须提供路径。批量 query 数据集的
+外层路径集合每行对应一条 query：旧重载每行保存一个路径字符串，并将 `|` 解释为并集；
+结构化重载每行可保存一条或多条原子路径，并将 `|` 当作普通路径字符。Pyramid 只在
+每条 query 的 hierarchy 和路径并集所允许的向量中计算真值集，并排除已标记删除的向量。
+Pyramid 查询分析目前只支持 KNN 请求，并使用 `SearchRequest` 中的 `query_`、`topk_` 和
+`params_str_`；不支持带过滤条件或 iterator 的请求。分析期间应保持索引稳定，不要并发执行
+add 或 remove。
 
 ### `GetStats()` 输出的静态指标
 
