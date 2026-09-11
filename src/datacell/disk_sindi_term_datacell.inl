@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include "impl/reasoning/reasoning_context.h"
+
 namespace vsag {
 
 template <typename IOTmpl>
@@ -29,7 +31,18 @@ DiskSindiTermDataCell<IOTmpl>::insert_candidate_into_heap(uint32_t id,
                                                           float radius,
                                                           const FilterPtr& filter,
                                                           const std::optional<float>& threshold,
-                                                          bool enable_reorder) const {
+                                                          bool enable_reorder, ReasoningContext* reasoning_ctx) const {
+    if (reasoning_ctx != nullptr) {
+        reasoning_ctx->RecordVisit(id + offset_id, 1.0F + dist,
+                                    reasoning_ctx->total_hops_);  // [reasoning]
+    }
+    const auto rejected_by_filter = [&]() {
+        const bool rejected = not filter->CheckValid(id + offset_id);
+        if (rejected && reasoning_ctx != nullptr) {
+            reasoning_ctx->RecordFilterReject(id + offset_id);  // [reasoning]
+        }
+        return rejected;
+    };
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
         if (threshold.has_value() and
             (not std::isfinite(dist) or (not enable_reorder and 1.0F + dist > threshold.value()))) {
@@ -39,9 +52,9 @@ DiskSindiTermDataCell<IOTmpl>::insert_candidate_into_heap(uint32_t id,
     }
     if constexpr (type != InnerSearchType::PURE) {
 #if __cplusplus >= 202002L
-        if (dist > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
+        if (dist > cur_heap_top or rejected_by_filter()) [[likely]] {
 #else
-        if (__builtin_expect(dist > cur_heap_top or not filter->CheckValid(id + offset_id), 1)) {
+        if (__builtin_expect(dist > cur_heap_top or rejected_by_filter(), 1)) {
 #endif
             dist = 0;
             return;
@@ -59,6 +72,10 @@ DiskSindiTermDataCell<IOTmpl>::insert_candidate_into_heap(uint32_t id,
     heap.emplace(dist, id + offset_id);
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
         if (heap.size() > n_candidate) {
+            if (reasoning_ctx != nullptr) {
+                reasoning_ctx->RecordEviction(heap.top().second,
+                                               reasoning_ctx->total_hops_);  // [reasoning]
+            }
             heap.pop();
         }
         cur_heap_top =
@@ -81,7 +98,11 @@ DiskSindiTermDataCell<IOTmpl>::fill_heap_initial(uint32_t id,
                                                  uint32_t n_candidate,
                                                  const FilterPtr& filter,
                                                  const std::optional<float>& threshold,
-                                                 bool enable_reorder) const {
+                                                 bool enable_reorder, ReasoningContext* reasoning_ctx) const {
+    if (reasoning_ctx != nullptr) {
+        reasoning_ctx->RecordVisit(id + offset_id, 1.0F + dist,
+                                    reasoning_ctx->total_hops_);  // [reasoning]
+    }
     if (threshold.has_value() and
         (not std::isfinite(dist) or (not enable_reorder and 1.0F + dist > threshold.value()))) {
         dist = 0.0F;
@@ -90,6 +111,9 @@ DiskSindiTermDataCell<IOTmpl>::fill_heap_initial(uint32_t id,
     if (dist < 0) {
         if constexpr (type != InnerSearchType::PURE) {
             if (not filter->CheckValid(id + offset_id)) {
+                if (reasoning_ctx != nullptr) {
+                    reasoning_ctx->RecordFilterReject(id + offset_id);  // [reasoning]
+                }
                 dist = 0;
                 return false;
             }
@@ -159,7 +183,7 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindow(float* dists,
                                                                      n_candidate,
                                                                      filter,
                                                                      param.distance_threshold,
-                                                                     param.enable_reorder);
+                                                                     param.enable_reorder, param.reasoning_ctx);
                     if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
                         if (filter_callback_remaining != nullptr and
                             *filter_callback_remaining == 0) {
@@ -191,7 +215,7 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindow(float* dists,
                                                    radius,
                                                    filter,
                                                    param.distance_threshold,
-                                                   param.enable_reorder);
+                                                   param.enable_reorder, param.reasoning_ctx);
             if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
                 if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
                     computer->ResetTerm();
@@ -238,7 +262,7 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByDists(float* dists,
                                                                  n_candidate,
                                                                  filter,
                                                                  param.distance_threshold,
-                                                                 param.enable_reorder);
+                                                                 param.enable_reorder, param.reasoning_ctx);
                 if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
                     if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
                         return true;
@@ -262,7 +286,7 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByDists(float* dists,
                                                radius,
                                                filter,
                                                param.distance_threshold,
-                                               param.enable_reorder);
+                                               param.enable_reorder, param.reasoning_ctx);
         if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
             if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
                 return true;

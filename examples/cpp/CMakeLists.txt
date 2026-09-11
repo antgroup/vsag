@@ -176,3 +176,6 @@ target_link_libraries(329_feature_ivf_precise_bucket vsag)
 
 add_executable(114_index_simq 114_index_simq.cpp)
 target_link_libraries(114_index_simq vsag)
+
+add_executable(327_feature_search_reasoning 327_feature_search_reasoning.cpp)
+target_link_libraries(327_feature_search_reasoning vsag)

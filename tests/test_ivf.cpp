@@ -2665,6 +2665,17 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     REQUIRE(result.has_value());
     REQUIRE_FALSE(result.value()->GetReasoning().empty());
     REQUIRE(result.value()->GetReasoning().find("expected_analysis") != std::string::npos);
+    SECTION("Range reasoning metadata matches request") {
+        req.mode_ = vsag::SearchMode::RANGE_SEARCH;
+        req.radius_ = 100.0F;
+        req.limited_size_ = 10;
+        auto range_result = index->SearchWithRequest(req);
+        REQUIRE(range_result.has_value());
+        REQUIRE(range_result.value()->GetDim() > 0);
+        auto report = vsag::JsonType::Parse(range_result.value()->GetReasoning());
+        REQUIRE(report["meta"]["search_mode"].GetString() == "range");
+        REQUIRE(report["meta"]["topk"].GetInt() == -1);
+    }
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,

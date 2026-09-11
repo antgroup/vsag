@@ -48,6 +48,7 @@
 
 # Advanced Features
 
+- [Search Reasoning](advanced/search_reasoning.md)
 - [Build and Train](advanced/build_and_train.md)
 - [HGraph Build Cache](advanced/build_cache.md)
 - [Range Search](advanced/range_search.md)
