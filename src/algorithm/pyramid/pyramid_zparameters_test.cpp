@@ -877,15 +877,18 @@ TEST_CASE("Pyramid adaptive pruning legacy parameters and compatibility",
     restored->adaptive_pruning.enabled = true;
     CHECK_FALSE(source->CheckCompatibility(restored));
 
-    legacy["adaptive_pruning"].SetJson(vsag::JsonType::Parse(
-        R"({"enabled":true,"adjust_step":0.06,"fill_rejected":true,"apply_to_reverse":true})"));
+    legacy["adaptive_pruning"].SetBool(true);
+    legacy["adaptive_pruning_adjust_step"].SetFloat(0.06F);
+    legacy["adaptive_pruning_apply_to_reverse"].SetBool(true);
     source->FromJson(legacy);
     vsag::ParameterTest::TestToJson(source);
+    CHECK(source->ToJson()["adaptive_pruning"].GetBool());
+    CHECK(source->ToJson()["adaptive_pruning_apply_to_reverse"].GetBool());
+    CHECK_FALSE(source->ToJson().Contains("fill_rejected"));
     restored->FromJson(source->ToJson());
     REQUIRE(source->CheckCompatibility(restored));
     const auto field = GENERATE(std::string("alpha"),
                                 std::string("adjust_step"),
-                                std::string("fill_rejected"),
                                 std::string("apply_to_reverse"),
                                 std::string("apply_to_upper"));
     CAPTURE(field);
@@ -893,8 +896,6 @@ TEST_CASE("Pyramid adaptive pruning legacy parameters and compatibility",
         restored->alpha += 0.06F;
     } else if (field == "adjust_step") {
         restored->adaptive_pruning.adjust_step = 0.03F;
-    } else if (field == "fill_rejected") {
-        restored->adaptive_pruning.fill_rejected = false;
     } else if (field == "apply_to_reverse") {
         restored->adaptive_pruning.apply_to_reverse = false;
     } else {
@@ -916,7 +917,7 @@ TEST_CASE("Pyramid adaptive pruning validates graph metric and hierarchy alpha",
     common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
     auto external = vsag::JsonType::Parse(R"({
         "base_quantization_type":"fp32", "graph_type":"nsw", "alpha":1.06,
-        "adaptive_pruning":{"enabled":true,"adjust_step":0.06},
+        "adaptive_pruning":true,"adaptive_pruning_adjust_step":0.06,
         "hierarchies":[{"name":"a","alpha":1.2},{"name":"b","alpha":1.06}]
     })");
     auto make_index = [&]() {
@@ -924,6 +925,13 @@ TEST_CASE("Pyramid adaptive pruning validates graph metric and hierarchy alpha",
         return std::make_shared<vsag::Pyramid>(param, common);
     };
     REQUIRE_NOTHROW(make_index());
+    SECTION("obsolete nested policy") {
+        external["adaptive_pruning"].SetJson(vsag::JsonType::Parse(R"({"enabled":true})"));
+    }
+    SECTION("removed fill option") {
+        const auto* key = GENERATE("fill_rejected", "adaptive_pruning_fill_rejected");
+        external[key].SetBool(false);
+    }
     SECTION("unsupported graph") {
         external["graph_type"].SetString("odescent");
     }
@@ -932,10 +940,10 @@ TEST_CASE("Pyramid adaptive pruning validates graph metric and hierarchy alpha",
             GENERATE(vsag::MetricType::METRIC_TYPE_IP, vsag::MetricType::METRIC_TYPE_COSINE);
     }
     SECTION("unsupported routing scope") {
-        external["adaptive_pruning"]["apply_to_upper"].SetBool(true);
+        external["adaptive_pruning_apply_to_upper"].SetBool(true);
     }
     SECTION("invalid step") {
-        external["adaptive_pruning"]["adjust_step"].SetFloat(0.6F);
+        external["adaptive_pruning_adjust_step"].SetFloat(0.6F);
     }
     SECTION("invalid hierarchy alpha") {
         (*external["hierarchies"].GetInnerJson())[1]["alpha"] = 0.1F;

@@ -96,7 +96,7 @@ Build-time parameters live under `index_param`.
 | `graph_storage_type` | string | `"flat"` | Bottom-graph storage for a `multi_layer` root: `flat` favors construction and search speed, while `compressed` reduces graph memory. Compressed storage requires `max_degree <= 255`. Single-layer roots, routing graphs, and child graphs remain sparse. |
 | `ef_construction` | int | `400` | Candidate list size for `nsw` builds. |
 | `alpha` | float | `1.2` | Pruning factor during graph construction. |
-| `adaptive_pruning` | object | `{"enabled": false}` | Optional NSW bottom forward/reverse L2 selector; see [configuration and scope](#experimental-adaptive-nsw-pruning). |
+| `adaptive_pruning` | boolean | `false` | Optional NSW bottom forward/reverse L2 selector; see [configuration and scope](#experimental-adaptive-nsw-pruning). |
 | `graph_iter_turn` | int | — | ODescent iterations (effective with `graph_type: "odescent"`). |
 | `neighbor_sample_rate` | float | — | ODescent neighbor sampling rate. |
 | `no_build_levels` | int[] | `[]` | Tree levels that skip graph construction (0-indexed from the root). |
@@ -382,19 +382,16 @@ not physically reclaimed.
 
 ## Experimental adaptive NSW pruning
 
-Pyramid reuses the [adaptive neighbor selector](adaptive_pruning.md) used by HGraph. Configure it once under `index_param.adaptive_pruning`; it applies to the bottom graph of each built path node, including a `single_layer` root and the bottom of a `multi_layer` root. Routing layers keep their existing fixed-alpha selection. Flat nodes start using the policy when they are promoted to NSW graphs.
+Pyramid reuses the [adaptive neighbor selector](adaptive_pruning.md) used by HGraph. Configure its flat fields once under `index_param`; it applies to the bottom graph of each built path node, including a `single_layer` root and the bottom of a `multi_layer` root. Routing layers keep their existing fixed-alpha selection. Flat nodes start using the policy when they are promoted to NSW graphs.
 
 ```json
 {
     "graph_type": "nsw",
     "alpha": 1.06,
-    "adaptive_pruning": {
-        "enabled": true,
-        "adjust_step": 0.06,
-        "fill_rejected": true,
-        "apply_to_reverse": true,
-        "apply_to_upper": false
-    }
+    "adaptive_pruning": true,
+    "adaptive_pruning_adjust_step": 0.06,
+    "adaptive_pruning_apply_to_reverse": true,
+    "adaptive_pruning_apply_to_upper": false
 }
 ```
 
@@ -402,16 +399,19 @@ These fields belong inside `index_param`; the example is an experiment configura
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `enabled` | `false` | Use the shared multi-pass selector during NSW insertion |
-| `adjust_step` | `0.06` | Step used to relax or tighten the hierarchy's baseline alpha |
-| `fill_rejected` | `false` | Optionally fill remaining capacity after the relaxation branch |
-| `apply_to_reverse` | `false` | Also re-prune full reverse lists, centered on the existing neighbor |
-| `apply_to_upper` | `false` | Reserved; enabling upper-layer adaptation is unsupported |
+| `adaptive_pruning` | `false` | Use the shared multi-pass selector during NSW insertion |
+| `adaptive_pruning_adjust_step` | `0.06` | Step used to relax or tighten the hierarchy's baseline alpha |
+| `adaptive_pruning_apply_to_reverse` | `false` | Also re-prune full reverse lists, centered on the existing neighbor |
+| `adaptive_pruning_apply_to_upper` | `false` | Reserved; enabling upper-layer adaptation is unsupported |
 
 The policy is global, while each hierarchy retains its own effective `alpha` and maximum degree. There is no hierarchy-specific `adaptive_pruning` override. Every effective alpha must be finite, with `adjust_step >= 0`, `alpha - 2*adjust_step > 0`, and finite `alpha + 3*adjust_step`. For alpha 1.06 and step 0.06, the possible adjusted values span 0.94–1.24; these constants are not derived automatically from vector dimension.
 
 Enabled mode requires `graph_type: "nsw"` and `metric_type: "l2"`. A build with a nonempty imported cache is rejected; an empty cache is accepted. ODescent, routing-layer adaptation, and update/refinement paths are outside this policy's scope. Reverse lists with spare capacity still append directly. The distance provider and quantizer are unchanged.
 
-Serialization records the policy. Reload requires matching enabled state and, when enabled, matching alpha, step, fill and scope settings. Parameters saved without this field mean disabled mode. This allows consistent subsequent `Add` operations; it does not guarantee that older VSAG binaries can read newly serialized indexes.
+Serialization records the policy. Reload requires matching enabled state and, when enabled, matching alpha, step and scope settings. Parameters saved without this field mean disabled mode. This allows consistent subsequent `Add` operations; it does not guarantee that older VSAG binaries can read newly serialized indexes.
 
 Compare QPS at comparable recall, together with build time and memory. Extra pruning passes can increase construction time even when the resulting graph accelerates queries. For `k=10`, Pyramid currently accepts `ef_search` only in `[1, 1000]`. A root-only GIST run with empty build paths and no query `Paths` measures unfiltered root search; its gains do not establish gains for path-filtered workloads. For RaBitQ + SQ8 reorder, construction uses the existing SQ8 distance provider; this configuration is distinct from RaBitQ 3+5 split storage.
+
+Parameters are flat fields under `index_param`. The old experimental nested object and removed `fill_rejected` option are rejected; rebuild indexes using that experimental schema.
+
+In the GIST 1M four-combination ablation, the single-factor QPS change from filling ranged from −3.4% to +4.7%, without consistent benefit, so unconditional filling and its option were removed. Reverse adaptation remains optional: it slowed all matched recall targets at alpha=1.06 and improved them at alpha=1.2 in this experiment. Each configuration used one parallel-built index; small differences do not establish stable gains. Select the reverse setting for the dataset and target recall.

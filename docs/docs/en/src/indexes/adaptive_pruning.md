@@ -6,11 +6,11 @@ Pyramid uses the same selector for NSW bottom graphs, with one global policy and
 
 ## Scope and compatibility
 
-- `enabled=false` preserves the original selector, including its shortcut for fewer candidates than the degree limit.
-- `enabled=true` applies to new-node forward selection. `apply_to_reverse=true` additionally applies when an existing bottom-layer reverse neighbor list is full. Lists with free slots append directly.
+- `adaptive_pruning=false` preserves the original selector, including its shortcut for fewer candidates than the degree limit.
+- `adaptive_pruning=true` applies to new-node forward selection. `adaptive_pruning_apply_to_reverse=true` additionally applies when an existing bottom-layer reverse neighbor list is full. Lists with free slots append directly.
 - Reverse selection uses the existing neighbor as its center, with its old neighbors and the incoming node as candidates. Selection and publication remain under that neighbor's existing lock.
-- Upper layers and update/refinement operations retain the existing selector. ODescent, imported-cache builds, non-L2 metrics, and enabled `apply_to_upper=true` are rejected.
-- Serialization records the policy. Reload requires the same enabled state and, when enabled, the same baseline alpha, step, fill flag and scope. Older parameter objects without this policy mean disabled mode. This is not a guarantee that older VSAG binaries can read newly written indexes.
+- Upper layers and update/refinement operations retain the existing selector. ODescent, imported-cache builds, non-L2 metrics, and enabled `adaptive_pruning_apply_to_upper=true` are rejected.
+- Serialization records the policy. Reload requires the same enabled state and, when enabled, the same baseline alpha, step and scope. Older parameter objects without this policy mean disabled mode. This is not a guarantee that older VSAG binaries can read newly written indexes.
 
 ## Distance rule
 
@@ -28,10 +28,10 @@ Candidates are sorted by `(distance, internal ID)`. Self edges and duplicate IDs
 
 ## Adaptive schedule
 
-Write `alpha0` for the existing HGraph `alpha` parameter or the current Pyramid hierarchy's effective `alpha` and `delta` for `adjust_step`. A scan processes candidates in order, accepting non-rejected entries until `K` is reached or the input is exhausted. Rejected entries are recorded separately; unscanned entries are not counted as rejects.
+Write `alpha0` for the existing HGraph `alpha` parameter or the current Pyramid hierarchy's effective `alpha` and `delta` for `adaptive_pruning_adjust_step`. A scan processes candidates in order, accepting non-rejected entries until `K` is reached or the input is exhausted. Rejected entries are recorded separately; unscanned entries are not counted as rejects.
 
 1. Scan the normalized candidates at `alpha0`, obtaining accepted list `A` and rejected list `B`.
-2. If `delta=0`, optionally append rejected candidates until `K` and return. This is not equivalent to disabling the policy.
+2. If `delta=0`, return the first-pass result without filling unused capacity. This is not equivalent to disabling the policy.
 3. If `0 < |A| < K`, retain `A` and rescan `B` at a relaxed alpha:
 
 | Ratio `K / |A|` | Relaxed alpha |
@@ -40,7 +40,7 @@ Write `alpha0` for the existing HGraph `alpha` parameter or the current Pyramid 
 | `> 1.5` and `<= 3` | `alpha0 + 2*delta` |
 | `> 3` | `alpha0 + 3*delta` |
 
-If `fill_rejected=true`, append remaining rejects in scan order until `K` or exhaustion. Fill bypasses the geometric comparison.
+Remaining rejected candidates are not appended, even when capacity remains.
 
 4. If `|A| = K`, compute the following alpha using the first scan's rejected count:
 
@@ -50,7 +50,7 @@ If `fill_rejected=true`, append remaining rejects in scan order until `K` or exh
 | `>= 2.5` and `< 5` | `alpha0 - delta` |
 | `< 2.5` | `alpha0 - 2*delta` |
 
-Clear `A` and rescan the **entire original normalized list**, including its previously unscanned tail, at the tightened alpha. If fewer than `K` entries survive, retain them and rescan the new rejects at `alpha0`. This branch never fills unconditionally, even if `fill_rejected=true`.
+Clear `A` and rescan the **entire original normalized list**, including its previously unscanned tail, at the tightened alpha. If fewer than `K` entries survive, retain them and rescan the new rejects at `alpha0`. This branch never fills unconditionally.
 
 Return the accepted list sorted by `(distance, internal ID)`. Empty inputs, self-only inputs and `K=0` produce no neighbors. The algorithm can return fewer than `K` neighbors; it does not invent candidates.
 
@@ -82,6 +82,8 @@ These establish related public techniques, not a proven derivation chain or prio
 
 ## Validation
 
-Tests tagged `[adaptive_pruning]` cover ratio boundaries, strict equality, optional fill, zero step, self/duplicate normalization, invalid inputs, a real L2 tightening example across input permutations, forward/reverse scope, cache rejection, parameter compatibility, and FP32/RaBitQ split/fused build–serialize–reload–Add with one and four construction threads. `[pruning_strategy]`, `[HGraphParameter]`, `[hgraph]`, and `[build_cache]` provide surrounding regression coverage.
+Tests tagged `[adaptive_pruning]` cover ratio boundaries, strict equality, unused capacity without filling, zero step, self/duplicate normalization, invalid inputs, a real L2 tightening example across input permutations, forward/reverse scope, cache rejection, parameter compatibility, and FP32/RaBitQ split/fused build–serialize–reload–Add with one and four construction threads. `[pruning_strategy]`, `[HGraphParameter]`, `[hgraph]`, and `[build_cache]` provide surrounding regression coverage.
+
+Parameters are flat fields under `index_param`; `adaptive_pruning` is a boolean. The former experimental nested object and removed `fill_rejected` option are rejected; rebuild indexes created with that experimental schema.
 
 Pyramid integration tests additionally cover flat-node promotion, single-layer and multi-layer roots, root and path queries, FP32/RaBitQ + SQ8 build–reload–Add with one and four threads, imported-cache rejection, and validation of hierarchy alpha and serialization policy compatibility.

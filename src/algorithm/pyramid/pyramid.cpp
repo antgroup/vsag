@@ -1875,8 +1875,11 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
     for (const auto& [key, ignored] : external_param.GetInnerJson()->items()) {
         (void)ignored;
         auto value = external_param[key];
-        if (key == PYRAMID_ADAPTIVE_PRUNING) {
-            inner_json[PYRAMID_ADAPTIVE_PRUNING].SetJson(value);
+        if (key == PYRAMID_ADAPTIVE_PRUNING || key == "adaptive_pruning_adjust_step" ||
+            key == "adaptive_pruning_apply_to_reverse" ||
+            key == "adaptive_pruning_apply_to_upper" || key == "adaptive_pruning_fill_rejected" ||
+            key == "fill_rejected") {
+            inner_json[key].SetJson(value);
         } else if (key == PYRAMID_EF_CONSTRUCTION) {
             inner_json[EF_CONSTRUCTION_KEY].SetJson(value);
         } else if (key == PYRAMID_USE_REORDER) {

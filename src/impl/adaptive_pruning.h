@@ -24,7 +24,6 @@ namespace vsag {
 struct AdaptivePruningParameter {
     bool enabled{false};
     float adjust_step{0.06F};
-    bool fill_rejected{false};
     bool apply_to_reverse{false};
     bool apply_to_upper{false};
 
@@ -41,7 +40,6 @@ enum class AdaptivePruningBranch { SINGLE, RELAX, TIGHTEN };
 struct AdaptivePruningStats {
     uint64_t initial_accepted{0};
     uint64_t initial_rejected{0};
-    uint64_t filled{0};
     uint64_t distance_calls{0};
     float second_alpha{0};
     AdaptivePruningBranch branch{AdaptivePruningBranch::SINGLE};

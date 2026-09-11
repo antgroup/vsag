@@ -260,10 +260,7 @@ PyramidHierarchyParameters::CheckCompatibility(const PyramidHierarchyParameters&
 void
 PyramidParameters::FromJson(const JsonType& json) {
     InnerIndexParameter::FromJson(json);
-    adaptive_pruning = AdaptivePruningParameter{};
-    if (json.Contains(PYRAMID_ADAPTIVE_PRUNING)) {
-        adaptive_pruning.FromJson(json[PYRAMID_ADAPTIVE_PRUNING]);
-    }
+    adaptive_pruning.FromJson(json);
     // init graph param
     const auto& graph_json = json[GRAPH_KEY];
 
@@ -361,7 +358,7 @@ JsonType
 PyramidParameters::ToJson() const {
     JsonType json = InnerIndexParameter::ToJson();
     json[NO_BUILD_LEVELS].SetVector(no_build_levels);
-    json[PYRAMID_ADAPTIVE_PRUNING].SetJson(adaptive_pruning.ToJson());
+    json.UpdateJson(adaptive_pruning.ToJson());
     json[BASE_CODES_KEY].SetJson(base_codes_param->ToJson());
 
     auto graph_json = graph_param->ToJson();
@@ -402,7 +399,6 @@ PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
     if (adaptive_pruning.enabled) {
         CHECK_FIELD_EQ(*this, *p, alpha);
         CHECK_FIELD_EQ(*this, *p, adaptive_pruning.adjust_step);
-        CHECK_FIELD_EQ(*this, *p, adaptive_pruning.fill_rejected);
         CHECK_FIELD_EQ(*this, *p, adaptive_pruning.apply_to_reverse);
         CHECK_FIELD_EQ(*this, *p, adaptive_pruning.apply_to_upper);
     }

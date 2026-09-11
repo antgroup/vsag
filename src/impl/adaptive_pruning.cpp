@@ -24,33 +24,33 @@ namespace vsag {
 
 void
 AdaptivePruningParameter::FromJson(const JsonType& json) {
-    CHECK_ARGUMENT(json.IsObject(), "adaptive_pruning must be an object");
+    CHECK_ARGUMENT(json.IsObject(), "index parameters must be an object");
+    const bool has_removed_fill =
+        json.Contains("fill_rejected") || json.Contains("adaptive_pruning_fill_rejected");
+    CHECK_ARGUMENT(not has_removed_fill,
+                   "fill_rejected has been removed; rejected neighbors are never filled");
     *this = AdaptivePruningParameter{};
-    if (json.Contains("enabled")) {
-        enabled = json["enabled"].GetBool();
+    if (json.Contains("adaptive_pruning")) {
+        enabled = json["adaptive_pruning"].GetBool();
     }
-    if (json.Contains("adjust_step")) {
-        adjust_step = json["adjust_step"].GetFloat();
+    if (json.Contains("adaptive_pruning_adjust_step")) {
+        adjust_step = json["adaptive_pruning_adjust_step"].GetFloat();
     }
-    if (json.Contains("fill_rejected")) {
-        fill_rejected = json["fill_rejected"].GetBool();
+    if (json.Contains("adaptive_pruning_apply_to_reverse")) {
+        apply_to_reverse = json["adaptive_pruning_apply_to_reverse"].GetBool();
     }
-    if (json.Contains("apply_to_reverse")) {
-        apply_to_reverse = json["apply_to_reverse"].GetBool();
-    }
-    if (json.Contains("apply_to_upper")) {
-        apply_to_upper = json["apply_to_upper"].GetBool();
+    if (json.Contains("adaptive_pruning_apply_to_upper")) {
+        apply_to_upper = json["adaptive_pruning_apply_to_upper"].GetBool();
     }
 }
 
 JsonType
 AdaptivePruningParameter::ToJson() const {
     JsonType json;
-    json["enabled"].SetBool(enabled);
-    json["adjust_step"].SetFloat(adjust_step);
-    json["fill_rejected"].SetBool(fill_rejected);
-    json["apply_to_reverse"].SetBool(apply_to_reverse);
-    json["apply_to_upper"].SetBool(apply_to_upper);
+    json["adaptive_pruning"].SetBool(enabled);
+    json["adaptive_pruning_adjust_step"].SetFloat(adjust_step);
+    json["adaptive_pruning_apply_to_reverse"].SetBool(apply_to_reverse);
+    json["adaptive_pruning_apply_to_upper"].SetBool(apply_to_upper);
     return json;
 }
 
@@ -130,23 +130,11 @@ select_edges_adaptive(Vector<PruningCandidate>& candidates,
             }
         }
     };
-    auto fill = [&](const Vector<PruningCandidate>& failures) {
-        if (not parameter.fill_rejected) {
-            return;
-        }
-        for (const auto& candidate : failures) {
-            if (accepted.size() == target_degree) {
-                break;
-            }
-            accepted.push_back(candidate);
-            ++result.filled;
-        }
-    };
     scan(candidates, alpha, rejected);
     result.initial_accepted = accepted.size();
     result.initial_rejected = rejected.size();
     if (parameter.adjust_step == 0) {
-        fill(rejected);
+        // A zero step keeps the single-pass result, including any unused capacity.
     } else if (not accepted.empty() && accepted.size() < target_degree) {
         result.branch = AdaptivePruningBranch::RELAX;
         const double ratio =
@@ -160,7 +148,6 @@ select_edges_adaptive(Vector<PruningCandidate>& candidates,
         result.second_alpha = alpha + static_cast<float>(steps) * parameter.adjust_step;
         Vector<PruningCandidate> remaining(allocator);
         scan(rejected, result.second_alpha, remaining);
-        fill(remaining);
     } else if (accepted.size() == target_degree) {
         result.branch = AdaptivePruningBranch::TIGHTEN;
         const double ratio =

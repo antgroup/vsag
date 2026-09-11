@@ -17,6 +17,7 @@
 
 #include <fmt/format.h>
 
+#include <catch2/catch_approx.hpp>
 #include <cmath>
 
 #include "hgraph.h"
@@ -1127,4 +1128,28 @@ TEST_CASE("HGraph adaptive pruning accepts legacy parameters",
     CHECK(old_parameter->CheckCompatibility(roundtrip));
     roundtrip->adaptive_pruning.enabled = true;
     CHECK_FALSE(old_parameter->CheckCompatibility(roundtrip));
+}
+
+TEST_CASE("HGraph flat adaptive parameters map and reject obsolete options",
+          "[ut][HGraphParameter][adaptive_pruning]") {
+    vsag::IndexCommonParam common;
+    common.dim_ = 8;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto json = vsag::JsonType::Parse(R"({"adaptive_pruning":true,
+        "adaptive_pruning_adjust_step":0.03,"adaptive_pruning_apply_to_reverse":true})");
+    auto parameter = std::dynamic_pointer_cast<vsag::HGraphParameter>(
+        vsag::HGraph::CheckAndMappingExternalParam(json, common));
+    REQUIRE(parameter != nullptr);
+    CHECK(parameter->adaptive_pruning.enabled);
+    CHECK(parameter->adaptive_pruning.apply_to_reverse);
+    CHECK(parameter->adaptive_pruning.adjust_step == Catch::Approx(0.03F));
+    CHECK(parameter->ToJson()["adaptive_pruning"].GetBool());
+    CHECK_FALSE(parameter->ToJson().Contains("fill_rejected"));
+    for (const auto* field : {"fill_rejected", "adaptive_pruning_fill_rejected"}) {
+        auto obsolete = vsag::JsonType::Parse(json.Dump());
+        obsolete[field].SetBool(false);
+        CHECK_THROWS(vsag::HGraph::CheckAndMappingExternalParam(obsolete, common));
+    }
+    json["adaptive_pruning"].SetJson(vsag::JsonType::Parse(R"({"enabled":true})"));
+    CHECK_THROWS(vsag::HGraph::CheckAndMappingExternalParam(json, common));
 }

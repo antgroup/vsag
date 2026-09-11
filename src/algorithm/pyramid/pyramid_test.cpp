@@ -126,8 +126,8 @@ MakePyramidIndex(uint32_t index_min_size,
             vsag::QUANTIZATION_TYPE_VALUE_FP32);
     }
     if (adaptive) {
-        external_param[vsag::PYRAMID_ADAPTIVE_PRUNING].SetJson(vsag::JsonType::Parse(
-            R"({"enabled":true,"fill_rejected":true,"apply_to_reverse":true})"));
+        external_param["adaptive_pruning"].SetBool(true);
+        external_param["adaptive_pruning_apply_to_reverse"].SetBool(true);
     }
     auto param = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
     result.index = std::make_shared<vsag::Pyramid>(param, common_param);
@@ -177,9 +177,8 @@ MakeRootPyramidIndex(const std::string& root_graph_type,
         external[vsag::PYRAMID_RABITQ_BITS_PER_DIM_BASE].SetUint64(3);
     }
     if (adaptive) {
-        external[vsag::PYRAMID_ADAPTIVE_PRUNING].SetJson(
-            vsag::JsonType::Parse(R"({"enabled":true,"fill_rejected":true})"));
-        external[vsag::PYRAMID_ADAPTIVE_PRUNING]["apply_to_reverse"].SetBool(reverse);
+        external["adaptive_pruning"].SetBool(true);
+        external["adaptive_pruning_apply_to_reverse"].SetBool(reverse);
     }
     auto param = vsag::Pyramid::CheckAndMappingExternalParam(external, common_param);
     result.index = std::make_shared<vsag::Pyramid>(param, common_param);

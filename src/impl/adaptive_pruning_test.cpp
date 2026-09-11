@@ -102,7 +102,6 @@ TEST_CASE("Adaptive pruning revisits rejects and preserves tail", "[ut][adaptive
             &stats);
         REQUIRE(result.size() == 2);
         CHECK(stats.branch == AdaptivePruningBranch::RELAX);
-        CHECK(stats.filled == 0);
     }
     SECTION("Tightening considers previously unscanned candidates") {
         candidates = {{1.0F, 1}, {2.0F, 2}, {3.0F, 3}};
@@ -132,16 +131,14 @@ TEST_CASE("Adaptive pruning revisits rejects and preserves tail", "[ut][adaptive
             &stats);
         REQUIRE(result.size() == 2);
         CHECK(result[1].second == 2);
-        CHECK(stats.filled == 0);
     }
 }
 
-TEST_CASE("Adaptive pruning normalization and optional fill", "[ut][adaptive_pruning]") {
+TEST_CASE("Adaptive pruning normalization leaves rejected capacity unused",
+          "[ut][adaptive_pruning]") {
     auto allocator = Engine::CreateDefaultAllocator();
     AdaptivePruningParameter p;
     p.enabled = true;
-    const bool fill = GENERATE(false, true);
-    p.fill_rejected = fill;
     p.adjust_step = GENERATE(0.0F, 0.06F);
     Vector<PruningCandidate> candidates(allocator.get());
     candidates = {{2.0F, 3}, {1.0F, 2}, {0.0F, 0}, {1.0F, 1}, {3.0F, 1}};
@@ -155,14 +152,9 @@ TEST_CASE("Adaptive pruning normalization and optional fill", "[ut][adaptive_pru
         [](InnerIdType, InnerIdType) { return 0.0F; },
         allocator.get(),
         &stats);
-    REQUIRE(result.size() == (fill ? 3 : 1));
+    REQUIRE(result.size() == 1);
     CHECK(result[0].second == 1);
-    CHECK(stats.filled == (fill ? 2 : 0));
     CHECK(stats.second_alpha == Catch::Approx(p.adjust_step == 0 ? 1.06F : 1.24F));
-    if (fill) {
-        CHECK(result[1].second == 2);
-        CHECK(result[2].second == 3);
-    }
 }
 
 TEST_CASE("Adaptive pruning strict inequality and empty inputs", "[ut][adaptive_pruning]") {
@@ -223,9 +215,8 @@ TEST_CASE("Adaptive pruning rejects invalid numeric inputs", "[ut][adaptive_prun
 
 TEST_CASE("Adaptive pruning parameter roundtrip", "[ut][adaptive_pruning]") {
     AdaptivePruningParameter p;
-    p.FromJson(JsonType::Parse(R"({"enabled":true,"adjust_step":0.04,"fill_rejected":true})"));
+    p.FromJson(JsonType::Parse(R"({"adaptive_pruning":true,"adaptive_pruning_adjust_step":0.04})"));
     CHECK(p.enabled);
-    CHECK(p.fill_rejected);
     CHECK(p.adjust_step == Catch::Approx(0.04F));
     CHECK_NOTHROW(p.Validate(1.06F));
     AdaptivePruningParameter restored;
@@ -238,9 +229,12 @@ TEST_CASE("Adaptive pruning parameter roundtrip", "[ut][adaptive_pruning]") {
     CHECK_THROWS(restored.Validate(1.06F));
     p.FromJson(JsonType::Parse("{}"));
     CHECK_FALSE(p.enabled);
-    CHECK_FALSE(p.fill_rejected);
     CHECK_NOTHROW(p.Validate(-1));
     CHECK_THROWS(p.FromJson(JsonType::Parse("[]")));
+    CHECK_THROWS(p.FromJson(JsonType::Parse(R"({"adaptive_pruning":{"enabled":true}})")));
+    CHECK_THROWS(p.FromJson(JsonType::Parse(R"({"fill_rejected":false})")));
+    CHECK_THROWS(p.FromJson(JsonType::Parse(R"({"adaptive_pruning_fill_rejected":true})")));
+    CHECK(p.ToJson()["adaptive_pruning"].GetBool() == p.enabled);
 }
 
 TEST_CASE("Adaptive pruning tightens real L2 neighbors independently of input order",
@@ -248,7 +242,6 @@ TEST_CASE("Adaptive pruning tightens real L2 neighbors independently of input or
     auto allocator = Engine::CreateDefaultAllocator();
     AdaptivePruningParameter policy;
     policy.enabled = true;
-    policy.fill_rejected = GENERATE(false, true);
     // Squared L2: d(0,1)=1, d(0,2)=d(1,2)=1.25, d(0,3)=4, d(1,3)=9.
     // The first pass takes {1,2}; tightening rejects 2 and must inspect the tail for 3.
     const float vectors[][2] = {{0, 0}, {1, 0}, {0.5F, 1}, {-2, 0}};
@@ -274,7 +267,6 @@ TEST_CASE("Adaptive pruning tightens real L2 neighbors independently of input or
         CHECK(selected[1].second == 3);
         CHECK(stats.branch == AdaptivePruningBranch::TIGHTEN);
         CHECK(stats.second_alpha == Catch::Approx(0.94F));
-        CHECK(stats.filled == 0);
     } while (std::next_permutation(order.begin(), order.end()));
 }
 
@@ -300,7 +292,6 @@ TEST_CASE("Adaptive pruning handles singleton degree and coincident vectors",
     for (uint64_t i = 0; i < degree; ++i) {
         CHECK(selected[i].second == i + 1);
     }
-    CHECK(stats.filled == 0);
     CHECK(stats.distance_calls == degree * (degree - 1));
     policy.enabled = false;
     CHECK_THROWS(select_edges_adaptive(

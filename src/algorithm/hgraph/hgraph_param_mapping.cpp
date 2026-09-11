@@ -213,8 +213,6 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             inner_json[GRAPH_KEY][GRAPH_PARAM_MAX_DEGREE_KEY].SetJson(value);
         } else if (key == HGRAPH_BUILD_EF_CONSTRUCTION) {
             inner_json[EF_CONSTRUCTION_KEY].SetJson(value);
-        } else if (key == HGRAPH_ADAPTIVE_PRUNING) {
-            inner_json[HGRAPH_ADAPTIVE_PRUNING].SetJson(value);
         } else if (key == HGRAPH_BUILD_ALPHA) {
             inner_json[ALPHA_KEY].SetJson(value);
         } else if (key == HGRAPH_INIT_CAPACITY) {
@@ -298,7 +296,11 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             inner_json[PARAMETER_USE_CONJUGATE_GRAPH].SetJson(value);
         } else if (key == HGRAPH_LABEL_REMAP_TYPE) {
             inner_json[LABEL_REMAP_TYPE_KEY].SetJson(value);
-        } else if (key == HGRAPH_USE_MCI || key == HGRAPH_MCI_MCS || key == HGRAPH_MCI_CLIQUE_MAX ||
+        } else if (key == HGRAPH_ADAPTIVE_PRUNING || key == "adaptive_pruning_adjust_step" ||
+                   key == "adaptive_pruning_apply_to_reverse" ||
+                   key == "adaptive_pruning_apply_to_upper" ||
+                   key == "adaptive_pruning_fill_rejected" || key == "fill_rejected" ||
+                   key == HGRAPH_USE_MCI || key == HGRAPH_MCI_MCS || key == HGRAPH_MCI_CLIQUE_MAX ||
                    key == HGRAPH_MCI_ALPHA || key == HGRAPH_MCI_KNNG_SOURCE ||
                    key == HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY ||
                    key == HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY ||

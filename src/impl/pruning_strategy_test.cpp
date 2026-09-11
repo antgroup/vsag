@@ -298,7 +298,6 @@ TEST_CASE("Adaptive reverse pruning relaxes around the existing neighbor",
     AdaptivePruningParameter policy;
     policy.enabled = GENERATE(false, true);
     policy.apply_to_reverse = GENERATE(false, true);
-    policy.fill_rejected = false;
     auto mutexes = std::make_shared<EmptyMutex>();
     CHECK(mutually_connect_new_element(
               3, candidates, graph, flatten, mutexes, allocator.get(), 1.06F, &policy) == 0);
@@ -318,7 +317,7 @@ TEST_CASE("Adaptive reverse pruning relaxes around the existing neighbor",
     CHECK(actual.front() == 0);
 }
 
-TEST_CASE("Adaptive reverse pruning preserves append and optional fill",
+TEST_CASE("Adaptive reverse pruning preserves append and prunes full lists",
           "[ut][pruning_strategy][adaptive_pruning][reverse]") {
     auto allocator = Engine::CreateDefaultAllocator();
     IndexCommonParam common;
@@ -340,7 +339,6 @@ TEST_CASE("Adaptive reverse pruning preserves append and optional fill",
     AdaptivePruningParameter policy;
     policy.enabled = true;
     policy.apply_to_reverse = true;
-    policy.fill_rejected = GENERATE(false, true);
     Vector<InnerIdType> neighbors(allocator.get());
     neighbors.push_back(1);
     if (full) {
@@ -355,14 +353,10 @@ TEST_CASE("Adaptive reverse pruning preserves append and optional fill",
     graph->GetNeighbors(0, neighbors);
     std::sort(neighbors.begin(), neighbors.end());
     if (not full) {
-        // Running the selector here with fill=false would incorrectly drop the new edge.
+        // Running the selector here would incorrectly drop the new edge.
         REQUIRE(neighbors.size() == 2);
         CHECK(neighbors[0] == 1);
         CHECK(neighbors[1] == 3);
-    } else if (policy.fill_rejected) {
-        REQUIRE(neighbors.size() == 2);
-        CHECK(neighbors[0] == 1);
-        CHECK(neighbors[1] == 2);
     } else {
         REQUIRE(neighbors.size() == 1);
         CHECK(neighbors[0] == 1);
