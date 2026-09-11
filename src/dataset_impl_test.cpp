@@ -15,7 +15,9 @@
 
 #include "dataset_impl.h"
 
+#include "allocator/memory_record_allocator.h"
 #include "impl/allocator/default_allocator.h"
+#include "search_metrics_internal.h"
 #include "unittest.h"
 #include "vsag/dataset.h"
 #include "vsag/engine.h"
@@ -25,6 +27,30 @@ TEST_CASE("Dataset Implement Test", "[ut][dataset]") {
         auto dataset = vsag::Dataset::Make();
         auto* data = static_cast<float*>(allocator.Allocate(sizeof(float) * 1));
         dataset->Float32Vectors(data)->Owner(true, &allocator);
+    }
+
+    SECTION("move preserves allocator and result metadata") {
+        fixtures::MemoryRecordAllocator tracked_allocator;
+        {
+            auto source = std::make_shared<vsag::DatasetImpl>();
+            auto* data = static_cast<float*>(tracked_allocator.Allocate(sizeof(float)));
+            source->Float32Vectors(data)->Owner(true, &tracked_allocator);
+            source->Reasoning(R"({"reason":"moved"})");
+            vsag::SearchResultMetrics metrics;
+            metrics.distance_evaluations = 7;
+            source->SetSearchMetricsInternal(metrics);
+
+            vsag::DatasetImpl moved(std::move(*source));
+            CHECK(moved.GetFloat32Vectors() == data);
+            CHECK(moved.GetReasoning() == R"({"reason":"moved"})");
+            REQUIRE(moved.GetSearchMetricsInternal().has_value());
+            CHECK(moved.GetSearchMetricsInternal()->distance_evaluations == 7);
+            CHECK(source->GetFloat32Vectors() == nullptr);
+            CHECK(source->GetReasoning() == "{}");
+            CHECK_FALSE(source->GetSearchMetricsInternal().has_value());
+            CHECK(source->GetStatistics() == "{}");
+        }
+        CHECK(tracked_allocator.GetCurrentMemory() == 0);
     }
 
     SECTION("delete") {
