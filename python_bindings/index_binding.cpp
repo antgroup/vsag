@@ -579,6 +579,9 @@ public:
             throw std::invalid_argument("query and ids must be 1-dimensional");
         }
 
+        if (buf_query.shape[0] == 0) {
+            throw std::runtime_error("calc_distances_by_id failed: query must not be empty");
+        }
         const int64_t count = buf_ids.shape[0];
         auto distances = py::array_t<float>(count);
         auto dist_view = distances.mutable_unchecked<1>();
