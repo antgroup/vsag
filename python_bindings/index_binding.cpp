@@ -570,7 +570,8 @@ public:
     }
 
     py::array_t<float>
-    CalcDistancesById(const py::array_t<float>& query, const py::array_t<int64_t>& ids) {
+    CalcDistancesById(const py::array_t<float, py::array::c_style | py::array::forcecast>& query,
+                      const py::array_t<int64_t, py::array::c_style | py::array::forcecast>& ids) {
         auto buf_query = query.request();
         auto buf_ids = ids.request();
 
@@ -578,28 +579,35 @@ public:
             throw std::invalid_argument("query and ids must be 1-dimensional");
         }
 
+        if (buf_query.shape[0] == 0) {
+            throw std::runtime_error("calc_distances_by_id failed: query must not be empty");
+        }
         const int64_t count = buf_ids.shape[0];
         auto distances = py::array_t<float>(count);
         auto dist_view = distances.mutable_unchecked<1>();
 
-        for (int64_t i = 0; i < count; ++i) {
-            dist_view(i) = -1.0F;
+        auto dataset = vsag::Dataset::Make();
+        dataset->Owner(false)
+            ->NumElements(1)
+            ->Dim(buf_query.shape[0])
+            ->Float32Vectors(query.data());
+        auto result = index_->CalcDistancesById(dataset, ids.data(), count);
+        if (!result.has_value()) {
+            throw std::runtime_error(
+                fmt::format("calc_distances_by_id failed: {}", result.error().message));
         }
 
-        auto result = index_->CalcDistancesById(query.data(), ids.data(), count);
-
-        if (result.has_value()) {
-            const auto* dist_data = result.value()->GetDistances();
-            for (int64_t i = 0; i < count; ++i) {
-                dist_view(i) = dist_data[i];
-            }
+        const auto* dist_data = result.value()->GetDistances();
+        for (int64_t i = 0; i < count; ++i) {
+            dist_view(i) = dist_data[i];
         }
 
         return distances;
     }
 
     py::array_t<float>
-    CalDistanceById(const py::array_t<float>& query, const py::array_t<int64_t>& ids) {
+    CalDistanceById(const py::array_t<float, py::array::c_style | py::array::forcecast>& query,
+                    const py::array_t<int64_t, py::array::c_style | py::array::forcecast>& ids) {
         return this->CalcDistancesById(query, ids);
     }
 
@@ -892,7 +900,12 @@ bind_index(py::module_& module) {
              ids (numpy.ndarray): 1D array of int64 IDs to calculate distances for
 
          Returns:
-             numpy.ndarray: Array of float32 distances corresponding to each ID.
+             numpy.ndarray: 1D float32 distances in ID order; missing IDs produce -1.
+
+         Notes:
+             Query length must match the index dimension. Strided inputs are copied
+             to contiguous arrays. C++ operation failures raise RuntimeError rather
+             than returning missing-ID sentinels. Only one dense query is accepted.
          )pbdoc")
         .def("cal_distance_by_id",
              &Index::CalDistanceById,

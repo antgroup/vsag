@@ -700,3 +700,61 @@ TEST_CASE("SIMQ: incremental Add triggers split and preserves recall", "[simq][a
               << "\n";
     REQUIRE(mean_recall >= 0.3f);
 }
+
+TEST_CASE("SIMQ distance-by-ID native query contract", "[simq][distance_contract]") {
+    TempFile tmp;
+    std::array<float, SIMQ_DIM> values{};
+    values[0] = 2.0F;
+    MultiVector mv{1, values.data()};
+    int64_t label = 7;
+    auto base = Dataset::Make()
+                    ->NumElements(1)
+                    ->Dim(SIMQ_DIM)
+                    ->Ids(&label)
+                    ->MultiVectors(&mv)
+                    ->MultiVectorDim(SIMQ_DIM)
+                    ->Owner(false);
+    auto created = Factory::CreateIndex("simq", make_build_param(tmp.path, 1.0F, 4, 2, 1, 1));
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    REQUIRE(index->CheckFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID));
+    REQUIRE(index->CheckFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID));
+    auto empty_distance = index->CalcDistanceById(base, label);
+    REQUIRE(empty_distance.has_value());
+    REQUIRE(empty_distance.value() == -1.0F);
+    REQUIRE(index->Build(base).has_value());
+    auto search = index->KnnSearch(base, 1, make_search_param(1, 1), FilterPtr{});
+    REQUIRE(search.has_value());
+    REQUIRE(search.value()->GetDim() == 1);
+    const auto expected = search.value()->GetDistances()[0];
+    REQUIRE(expected < 0.0F);
+    for (const auto precise : {false, true}) {
+        auto single = index->CalcDistanceById(base, label, precise);
+        REQUIRE(single.has_value());
+        REQUIRE(single.value() == expected);
+        MultiVector queries[] = {mv, mv};
+        auto query = Dataset::Make()
+                         ->NumElements(2)
+                         ->Dim(SIMQ_DIM)
+                         ->MultiVectors(queries)
+                         ->MultiVectorDim(SIMQ_DIM)
+                         ->Owner(false);
+        int64_t ids[] = {999, label, label, 999};
+        auto batch = index->CalcDistancesById(query, ids, 2, precise);
+        REQUIRE(batch.has_value());
+        REQUIRE(batch.value()->GetNumElements() == 2);
+        REQUIRE(batch.value()->GetDim() == 2);
+        REQUIRE(batch.value()->GetDistances()[0] == -1.0F);
+        REQUIRE(batch.value()->GetDistances()[1] == expected);
+        REQUIRE(batch.value()->GetDistances()[2] == expected);
+        REQUIRE(batch.value()->GetDistances()[3] == -1.0F);
+        auto top = index->CalcDistancesById(query, ids, 2, precise, 1);
+        REQUIRE(top.has_value());
+        REQUIRE(top.value()->GetDim() == 1);
+        REQUIRE(top.value()->GetIds()[0] == label);
+        REQUIRE(top.value()->GetIds()[1] == label);
+        REQUIRE(top.value()->GetDistances()[0] == expected);
+        REQUIRE(top.value()->GetDistances()[1] == expected);
+    }
+    REQUIRE_FALSE(index->CalcDistanceById(DatasetPtr{}, label).has_value());
+}

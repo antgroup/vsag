@@ -15,6 +15,14 @@
 > 仍保留该弃用别名；新代码应使用 `CalcDistancesById`。两者语义完全相同。详情参见
 > [issue #2068](https://github.com/antgroup/vsag/issues/2068)。
 
+HGraph 还支持配置为稀疏或非 FP32 数据类型。这些配置应使用包含原生 query 字段的 Dataset（`SparseVectors`、`Int8Vectors`，以及 FP16/BF16 对应的 `Float16Vectors`）；只有 float32 索引才能使用普通 `float*` 距离查询。Dataset 表示必须匹配索引配置，不能只检查向量维度。
+
+### C++ 实现迁移
+
+`CalcDistancesById` 是正式的批量虚函数接口，包含完整 `topk` 参数。公共包装层和内部索引实现直接通过该名称派发；公共弃用别名 `CalDistanceById` 只转发到正式接口，不再反向依赖旧入口。
+
+自定义索引实现应 override 对应的 `CalcDistancesById` 重载，不能再依赖仅 override 历史拼写。普通调用旧别名仍保持源码兼容，但仅覆盖旧别名不再构成正式批量接口的实现。此次虚函数接口布局发生变化，不保证与此前编译的 `Index` 子类二进制兼容；请使用匹配的头文件和库重新编译自定义子类及相关 C++ 组件。
+
 ## 接口概览
 
 ```cpp
@@ -57,9 +65,27 @@ CalcDistancesById(const DatasetPtr& query,
 
 ### `calculate_precise_distance`
 
-- `true`（默认）：尽量使用**高精度**向量表示（如完整 float32）来计算距离。当索引仅保留
-  量化编码时，获取精确值可能开销更大。
-- `false`：可以使用索引内存中已有的**量化 / 近似**表示，速度更快但距离是近似值。
+- `true`（默认）优先使用已保留的高精度/重排表示，**不会还原已经丢弃的原始向量**。没有独立精确表示时使用存储表示，结果仍可能受量化或剪枝影响。
+- `false` 使用基础表示。两种模式都是对指定 ID 计算距离，不执行近似候选检索；磁盘存储下两种模式均可能产生 I/O。
+- BruteForce/WARP 和 SIMQ 的两种模式使用同一套存储距离后端。HGraph/Pyramid 优先使用保留的原始向量，其次是重排编码；IVF 使用配置的重排编码/桶；SINDI/SINDI_V2 在配置重排时使用 rerank 向量。
+
+### 各索引的原生 query 表示
+
+| 索引 | 单 ID query | 多 query 批量输入 |
+|---|---|---|
+| BruteForce、HGraph、IVF、Pyramid、LazyHGraph | `float*`，或含 `Float32Vectors` 的单行 `DatasetPtr` | 含 `Float32Vectors` 的 `DatasetPtr` |
+| SINDI、SINDI_V2 | 含 `SparseVectors` 的单行 `DatasetPtr` | 含 `SparseVectors` 的 `DatasetPtr` |
+| WARP、SIMQ | 含 `MultiVectors`、`MultiVectorDim` 的单行 `DatasetPtr` | 含 `MultiVectors`、`MultiVectorDim` 的 `DatasetPtr` |
+
+SINDI immutable 存储也支持单 ID 和批量距离，包括反序列化后的索引。WARP/SIMQ 使用与搜索距离后端一致的多向量聚合，不经过粗排候选选择。普通 float 指针不能表示稀疏或多向量 query。
+
+N 行 query、每行 `count` 个候选 ID 时，必须按行优先提供 N × count 个 ID（`ids[q * count + j]`），不会隐式广播一份候选列表。新代码推荐使用 `CalcDistancesById`；`CalDistanceById` 保留为兼容别名。
+
+缺失 label 返回 `-1`，但有效内积距离也可能为负数（包括 `-1`）。top-k 根据 label 是否有效判断排序优先级，而不是根据距离的符号或数值判断。
+
+IVF PQFS 支持单 ID 和批量距离，复用整桶扫描所用的打包编码查表。单 ID 查询会读取所在的 32 向量数据包并取出对应结果，因此工作量可能高于标量量化的单 ID 查询，磁盘存储下尤其如此。
+
+PQFS 可用于 IVF 基础桶编码，但不能用于 flat 重排编码，因为该存储不维护 PQFS 数据包。非法 PQFS 重排配置会在创建索引时被拒绝；请选用 FP32 等受支持的精确量化类型。
 
 ### 返回值含义
 
@@ -67,7 +93,7 @@ CalcDistancesById(const DatasetPtr& query,
 - `topk == -1` 时，裸指针批量重载返回一行 `count` 个距离；`DatasetPtr` 重载返回
   `NumElements()` 行、每行 `count` 个距离。两者都保持输入顺序，且不返回 ID。
 - `topk > 0` 时，批量重载每个 query 返回按距离升序排列的最小 `min(topk, count)` 个
-  距离，`GetIds()` 包含对应 ID。无效 ID（距离为 `-1`）排在有效距离之后，仅在有效 ID
+  距离，`GetIds()` 包含对应 ID。缺失 ID（距离为 `-1`）排在所有有效距离之后，不受有效距离的符号影响，仅在有效 ID
   不足时才出现在结果中。
 - 距离的语义由建索引时设置的 `metric_type`（IP / L2 / cosine）决定，参见
   [度量语义](../resources/metric_semantics.md)。
@@ -121,7 +147,7 @@ std::vector<int64_t> candidate_ids = {
 };
 
 if (index->CheckFeature(vsag::SUPPORT_BATCH_CALC_DISTANCE_BY_ID)) {
-    auto result = index->CalDistanceById(queries, candidate_ids.data(), 3, true, /*topk=*/2);
+    auto result = index->CalcDistancesById(queries, candidate_ids.data(), 3, true, /*topk=*/2);
     if (result.has_value()) {
         auto batch = result.value();
         // batch 的 NumElements() == 2，Dim() == 2。

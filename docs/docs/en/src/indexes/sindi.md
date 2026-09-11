@@ -131,8 +131,9 @@ build time increased from about 330 seconds to 599 seconds. Treat these figures 
 evidence, not a capacity guarantee.
 
 The immutable runtime supports KNN and range search plus legacy `Serialize`/`Deserialize`.
-It rejects incremental `Add`, `GetSparseVectorByInnerId`, `CalcDistanceById`, and
-`CalDistanceById`. Mutable and immutable runtimes both support `SerializeStreaming`,
+It rejects incremental `Add` and `GetSparseVectorByInnerId`. Single-ID
+`CalcDistanceById` and batch `CalcDistancesById` (including the legacy `CalDistanceById` alias)
+are supported; see [distance-by-ID](../advanced/calc_distance_by_id.md). Mutable and immutable runtimes both support `SerializeStreaming`,
 `DeserializeStreaming`, and `Index::Load`.
 The serialized index must be loaded into a SINDI created with the same `immutable` setting.
 New indexes record the sorted posting-list format version and skip normalization when loaded.

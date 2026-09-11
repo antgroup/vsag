@@ -24,6 +24,32 @@ namespace fixtures {
 #pragma warning(disable : 4996)
 #endif
 
+// General index suites include lossy storage without retained FP32 vectors. Compare the
+// formal single/batch APIs at both precision settings; exact FP32-oracle checks remain in
+// dedicated distance tests rather than assuming every quantizer reconstructs originals.
+void
+TestIndex::TestStoredDistanceConsistency(const IndexPtr& index, const TestDatasetPtr& dataset) {
+    REQUIRE(index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID));
+    REQUIRE(index->CheckFeature(vsag::SUPPORT_BATCH_CALC_DISTANCE_BY_ID));
+    const auto queries = dataset->query_;
+    const auto count = dataset->top_k;
+    for (bool precise : {false, true}) {
+        for (int64_t q = 0; q < queries->GetNumElements(); ++q) {
+            auto query = get_one_query(queries, q);
+            const auto* ids = dataset->ground_truth_->GetIds() + q * count;
+            auto batch = index->CalcDistancesById(query, ids, count, precise);
+            REQUIRE(batch.has_value());
+            for (int64_t j = 0; j < count; ++j) {
+                auto single = index->CalcDistanceById(query, ids[j], precise);
+                REQUIRE(single.has_value());
+                REQUIRE(std::isfinite(single.value()));
+                const float tolerance = 1e-5F * std::max(1.0F, std::abs(single.value()));
+                REQUIRE(std::abs(single.value() - batch.value()->GetDistances()[j]) <= tolerance);
+            }
+        }
+    }
+}
+
 void
 TestIndex::TestCalcDistanceById(const IndexPtr& index,
                                 const TestDatasetPtr& dataset,
@@ -44,7 +70,8 @@ TestIndex::TestCalcDistanceById(const IndexPtr& index,
             auto id = gts->GetIds()[i * gt_topK + j];
             auto dist = gts->GetDistances()[i * gt_topK + j];
             tl::expected<float, vsag::Error> result;
-            if (is_sparse) {
+            if (is_sparse || queries->GetSparseVectors() != nullptr ||
+                queries->GetInt8Vectors() != nullptr || queries->GetFloat16Vectors() != nullptr) {
                 result = index->CalcDistanceById(query, id);
             } else {
                 result = index->CalcDistanceById(query->GetFloat32Vectors(), id);
@@ -76,10 +103,11 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
     for (int64_t i = 0; i < query_count; ++i) {
         auto query = get_one_query(queries, i);
         tl::expected<DatasetPtr, vsag::Error> result;
-        if (is_sparse) {
-            result = index->CalDistanceById(query, gts->GetIds() + (i * gt_topK), gt_topK);
+        if (is_sparse || queries->GetSparseVectors() != nullptr ||
+            queries->GetInt8Vectors() != nullptr || queries->GetFloat16Vectors() != nullptr) {
+            result = index->CalcDistancesById(query, gts->GetIds() + (i * gt_topK), gt_topK);
         } else {
-            result = index->CalDistanceById(
+            result = index->CalcDistancesById(
                 query->GetFloat32Vectors(), gts->GetIds() + (i * gt_topK), gt_topK);
         }
         if (not expected_success) {
@@ -99,11 +127,12 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
         }
         tl::expected<DatasetPtr, vsag::Error> result;
         queries->NumElements(1);
-        if (is_sparse) {
-            result = index->CalDistanceById(queries, no_exist_ids.data(), test_num);
+        if (is_sparse || queries->GetSparseVectors() != nullptr ||
+            queries->GetInt8Vectors() != nullptr || queries->GetFloat16Vectors() != nullptr) {
+            result = index->CalcDistancesById(queries, no_exist_ids.data(), test_num);
         } else {
-            result =
-                index->CalDistanceById(queries->GetFloat32Vectors(), no_exist_ids.data(), test_num);
+            result = index->CalcDistancesById(
+                queries->GetFloat32Vectors(), no_exist_ids.data(), test_num);
         }
         for (int i = 0; i < test_num; ++i) {
             fixtures::dist_t dist = result.value()->GetDistances()[i];
@@ -120,7 +149,8 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
         for (int64_t i = 0; i < query_count; ++i) {
             auto query = get_one_query(queries, i);
             tl::expected<DatasetPtr, vsag::Error> result;
-            if (is_sparse) {
+            if (is_sparse || queries->GetSparseVectors() != nullptr ||
+                queries->GetInt8Vectors() != nullptr || queries->GetFloat16Vectors() != nullptr) {
                 result = index->CalcDistancesById(
                     query, gts->GetIds() + (i * gt_topK), gt_topK, true, topk);
             } else {
@@ -172,7 +202,7 @@ TestIndex::TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
 
     // Use each query's own ground-truth IDs as the row-major batch ID matrix.
     const int64_t* batch_ids = gts->GetIds();
-    auto multi_result = index->CalDistanceById(queries, batch_ids, gt_topK);
+    auto multi_result = index->CalcDistancesById(queries, batch_ids, gt_topK);
     if (not expected_success) {
         if (not expect_all_missing_on_failure) {
             REQUIRE_FALSE(multi_result.has_value());
@@ -193,7 +223,7 @@ TestIndex::TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
     for (int64_t q = 0; q < num_queries; ++q) {
         auto single_query = get_one_query(queries, q);
         const int64_t* row_ids = batch_ids + q * gt_topK;
-        auto single_result = index->CalDistanceById(single_query, row_ids, gt_topK);
+        auto single_result = index->CalcDistancesById(single_query, row_ids, gt_topK);
         REQUIRE(single_result.has_value());
         auto* single_distances = single_result.value()->GetDistances();
         for (int64_t j = 0; j < gt_topK; ++j) {
@@ -213,7 +243,7 @@ TestIndex::TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
                     (i % 2 == 0) ? row_ids[i % gt_topK] : -(q * test_num + i + 1);
             }
         }
-        auto r2 = index->CalDistanceById(queries, mixed_ids.data(), test_num);
+        auto r2 = index->CalcDistancesById(queries, mixed_ids.data(), test_num);
         REQUIRE(r2.has_value());
         auto* d2 = r2.value()->GetDistances();
         for (int64_t q = 0; q < num_queries; ++q) {
@@ -224,7 +254,7 @@ TestIndex::TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
             }
         }
 
-        auto topk_result = index->CalDistanceById(queries, mixed_ids.data(), test_num, true, 3);
+        auto topk_result = index->CalcDistancesById(queries, mixed_ids.data(), test_num, true, 3);
         REQUIRE(topk_result.has_value());
         auto* topk_dists = topk_result.value()->GetDistances();
         auto* topk_ids = topk_result.value()->GetIds();
@@ -238,7 +268,7 @@ TestIndex::TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
 
     SECTION("test topk multi-query batch") {
         int64_t topk = std::min(gt_topK, (int64_t)3);
-        auto topk_result = index->CalDistanceById(queries, batch_ids, gt_topK, true, topk);
+        auto topk_result = index->CalcDistancesById(queries, batch_ids, gt_topK, true, topk);
         REQUIRE(topk_result.has_value());
         auto* topk_dists = topk_result.value()->GetDistances();
         auto* topk_ids_out = topk_result.value()->GetIds();
@@ -267,7 +297,7 @@ TestIndex::TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
 
     SECTION("test topk > count returns all") {
         int64_t big_topk = gt_topK + 100;
-        auto big_result = index->CalDistanceById(queries, batch_ids, gt_topK, true, big_topk);
+        auto big_result = index->CalcDistancesById(queries, batch_ids, gt_topK, true, big_topk);
         REQUIRE(big_result.has_value());
         REQUIRE(big_result.value()->GetDim() == gt_topK);
         auto* big_dists = big_result.value()->GetDistances();
@@ -280,7 +310,7 @@ TestIndex::TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
     }
 
     SECTION("test topk -1 no ids in result") {
-        auto default_result = index->CalDistanceById(queries, batch_ids, gt_topK);
+        auto default_result = index->CalcDistancesById(queries, batch_ids, gt_topK);
         REQUIRE(default_result.has_value());
         REQUIRE(default_result.value()->GetIds() == nullptr);
         REQUIRE(default_result.value()->GetDim() == gt_topK);

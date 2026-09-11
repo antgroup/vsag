@@ -524,14 +524,12 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID.
      *
-     * Suitable for Dataset-backed query formats, especially sparse vector indexes
-     * (SINDI, SINDI_V2) where vectors cannot be represented as a simple float pointer.
-     * Dense DatasetPtr batch queries are supported by the batch overload below
-     * through Float32Vectors() when the index advertises the batch feature; for
-     * this single-ID overload, dense callers should prefer the const float* API
-     * unless the target implementation explicitly supports DatasetPtr distance.
+     * Accepts one query in the index's native representation: Float32Vectors for dense indexes,
+     * SparseVectors for SINDI/SINDI_V2, or MultiVectors and MultiVectorDim for WARP/SIMQ.
+     * Dense Dataset queries and raw float pointers have the same distance semantics.
+     * Use CalcDistancesById for multiple query rows.
      *
-     * @param vector is the embedding of query (sparse or dense format via DatasetPtr).
+     * @param vector A Dataset containing exactly one native query.
      * @param id is the unique identifier of the vector to be calculated in the index.
      * @param calculate_precise_distance If true, the function will attempt to use high-precision
      *        vectors (e.g., full-precision float32) for distance computation, even if it requires
@@ -572,15 +570,13 @@ public:
      *         min(topk, count), IDs are returned, and the distance/ID buffers contain Dim()
      *         entries. '-1' indicates an invalid distance.
      */
-    [[deprecated(
-        "use CalcDistancesById instead")]] [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
+    [[deprecated("use CalcDistancesById instead")]] [[nodiscard]] tl::expected<DatasetPtr, Error>
     CalDistanceById(const float* query,
                     const int64_t* ids,
                     int64_t count,
                     bool calculate_precise_distance = true,
                     int64_t topk = -1) const {
-        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                    "Index does not support get distance by id"));
+        return this->CalcDistancesById(query, ids, count, calculate_precise_distance, topk);
     }
 
     /**
@@ -589,7 +585,7 @@ public:
      * Suitable for Dataset-backed batch query formats. Sparse vector indexes
      * (SINDI, SINDI_V2) use GetSparseVectors(). Dense vector indexes that advertise
      * SUPPORT_BATCH_CALC_DISTANCE_BY_ID can use Float32Vectors() through the
-     * default DatasetPtr batch implementation or an index-specific override.
+     * forwarding alias to CalcDistancesById(DatasetPtr).
      *
      * When the query DatasetPtr contains multiple vectors (NumElements > 1),
      * this method computes distances for each query against its own row of IDs.
@@ -620,15 +616,13 @@ public:
      *         distance/ID buffers contain NumElements() * Dim() entries in row-major layout.
     *         '-1' indicates an invalid distance.
     */
-    [[deprecated(
-        "use CalcDistancesById instead")]] [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
+    [[deprecated("use CalcDistancesById instead")]] [[nodiscard]] tl::expected<DatasetPtr, Error>
     CalDistanceById(const DatasetPtr& query,
                     const int64_t* ids,
                     int64_t count,
                     bool calculate_precise_distance = true,
                     int64_t topk = -1) const {
-        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                    "Index does not support get distance by id"));
+        return this->CalcDistancesById(query, ids, count, calculate_precise_distance, topk);
     }
 
     /**
@@ -1126,48 +1120,26 @@ public:
 public:
     virtual ~Index() = default;
 
-    // Keep this bridge nonvirtual: an old binary Index subclass has no corrected slot in its
-    // vtable. Dispatching through the pre-existing legacy virtuals keeps that ABI safe.
-    [[nodiscard]] tl::expected<DatasetPtr, Error>
+    // Canonical virtual batch distance-by-ID. Index implementations override this
+    // in InnerIndexInterface; the deprecated CalDistanceById alias forwards here.
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     CalcDistancesById(const float* query,
                       const int64_t* ids,
                       int64_t count,
                       bool calculate_precise_distance = true,
                       int64_t topk = -1) const {
-#if defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#elif defined(_MSC_VER)
-#pragma warning(push)
-#pragma warning(disable : 4996)
-#endif
-        return this->CalDistanceById(query, ids, count, calculate_precise_distance, topk);
-#if defined(__GNUC__)
-#pragma GCC diagnostic pop
-#elif defined(_MSC_VER)
-#pragma warning(pop)
-#endif
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support CalcDistancesById"));
     }
 
-    [[nodiscard]] tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     CalcDistancesById(const DatasetPtr& query,
                       const int64_t* ids,
                       int64_t count,
                       bool calculate_precise_distance = true,
                       int64_t topk = -1) const {
-#if defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#elif defined(_MSC_VER)
-#pragma warning(push)
-#pragma warning(disable : 4996)
-#endif
-        return this->CalDistanceById(query, ids, count, calculate_precise_distance, topk);
-#if defined(__GNUC__)
-#pragma GCC diagnostic pop
-#elif defined(_MSC_VER)
-#pragma warning(pop)
-#endif
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support CalcDistancesById"));
     }
 };
 
