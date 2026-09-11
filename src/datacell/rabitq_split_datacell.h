@@ -156,6 +156,7 @@ public:
     virtual void
     TrainFusedTransform() = 0;
 
+    // Direct datacell callers default to 25 Lloyd iterations; HGraph passes its configuration.
     virtual void
     TrainFusedCodec(const float* data,
                     uint64_t count,
@@ -1486,8 +1487,7 @@ public:
                      fused_centroids_.size() * sizeof(float));
         writer.Write(reinterpret_cast<const char*>(fused_rotated_centroids_.data()),
                      fused_rotated_centroids_.size() * sizeof(float));
-        writer.Write(reinterpret_cast<const char*>(fused_centroid_norms_.data()),
-                     fused_centroid_norms_.size() * sizeof(double));
+        // Norms are derived from rotated centers on import and are not stored in codec v3.
         return output.str();
     }
 
@@ -1496,7 +1496,8 @@ public:
         CHECK_ARGUMENT(not serialized.empty(), "fused RaBitQ codec payload is empty");
         CHECK_ARGUMENT(this->quantization_param_ != nullptr,
                        "fused RaBitQ quantizer parameter is unavailable");
-        CHECK_ARGUMENT(serialized.size() >= 16, "truncated fused codec header");
+        CHECK_ARGUMENT(serialized.size() >= K_FUSED_CODEC_HEADER_SIZE,
+                       "truncated fused codec header");
         std::stringstream input(serialized);
         IOStreamReader reader(input);
         uint32_t version = 0;
@@ -1508,20 +1509,17 @@ public:
         StreamReader::ReadObj(reader, dim);
         CHECK_ARGUMENT(dim == static_cast<uint64_t>(common_param_.dim_),
                        "fused codec dimension mismatch");
-        CHECK_ARGUMENT(serialized.size() == FusedCodecSize(dim, serialized_cluster_count),
+        CHECK_ARGUMENT(serialized.size() == CheckedFusedCodecSize(dim, serialized_cluster_count),
                        "invalid fused RaBitQ codec payload size");
         const uint64_t values = dim * serialized_cluster_count;
         std::vector<float> centers(values), rotated(values);
         std::vector<double> norms(serialized_cluster_count);
         reader.Read(reinterpret_cast<char*>(centers.data()), values * sizeof(float));
         reader.Read(reinterpret_cast<char*>(rotated.data()), values * sizeof(float));
-        // The payload length was validated above. Skip stored derived norms instead of copying
-        // values that will immediately be recomputed from the validated rotated centers.
-        reader.Seek(reader.GetCursor() + norms.size() * sizeof(double));
         CHECK_ARGUMENT(AreFusedVectorsFinite(centers.data(), serialized_cluster_count) and
                            AreFusedVectorsFinite(rotated.data(), serialized_cluster_count),
                        "fused codec centers must be finite");
-        // Norms are derived state. Recompute them rather than trusting serialized values.
+        // Norms are derived state, not serialized fields. Compute them from validated centers.
         for (uint32_t id = 0; id < serialized_cluster_count; ++id) {
             double norm = 0.0;
             for (uint64_t d = 0; d < dim; ++d) {

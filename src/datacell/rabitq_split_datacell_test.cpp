@@ -192,36 +192,37 @@ TEST_CASE("Fused dynamic centers share a lazy query cache and serialize the mode
     split->TrainFusedCodec(vectors.data(), count, k, 2);
     REQUIRE(split->FusedClusterCount() == k);
     const auto payload = split->ExportFusedCodec();
-    REQUIRE(payload.size() == FusedCodecSize(dim, k));
-    auto old_version = payload;
-    const uint32_t version = 1;
-    std::memcpy(old_version.data(), &version, sizeof(version));
-    REQUIRE_THROWS(split->ImportFusedCodec(old_version));
+    REQUIRE(payload.size() == CheckedFusedCodecSize(dim, k));
+    REQUIRE(payload.size() == K_FUSED_CODEC_HEADER_SIZE + 2 * uint64_t{k} * dim * sizeof(float));
+    for (uint32_t version : {1U, 2U}) {
+        auto old_version = payload;
+        std::memcpy(old_version.data(), &version, sizeof(version));
+        REQUIRE_THROWS(split->ImportFusedCodec(old_version));
+    }
+    // The previous v2 payload also carried K derived double-precision norms.
+    auto old_layout = payload + std::string(uint64_t{k} * sizeof(double), '\0');
+    const uint32_t old_layout_version = 2;
+    std::memcpy(old_layout.data(), &old_layout_version, sizeof(old_layout_version));
+    REQUIRE_THROWS(split->ImportFusedCodec(old_layout));
+    for (uint64_t length = 0; length < K_FUSED_CODEC_HEADER_SIZE; ++length) {
+        REQUIRE_THROWS(split->ImportFusedCodec(payload.substr(0, length)));
+    }
     REQUIRE_THROWS(split->ImportFusedCodec(payload + "x"));
     REQUIRE_THROWS(split->ImportFusedCodec(payload.substr(0, payload.size() - 1)));
     auto bad_count = payload;
     const uint32_t oversized_count = std::numeric_limits<uint32_t>::max();
     std::memcpy(bad_count.data() + sizeof(uint32_t), &oversized_count, sizeof(oversized_count));
     REQUIRE_THROWS(split->ImportFusedCodec(bad_count));
-    auto bad_center = payload;
     const float invalid = std::numeric_limits<float>::infinity();
-    std::memcpy(bad_center.data() + 16, &invalid, sizeof(invalid));
-    REQUIRE_THROWS(split->ImportFusedCodec(bad_center));
-    REQUIRE(split->ExportFusedCodec() == payload);
-    auto stale_norms = payload;
-    const double invalid_norm = std::numeric_limits<double>::infinity();
-    const uint64_t norms_offset = 16 + 2 * uint64_t{k} * dim * sizeof(float);
-    for (uint32_t id = 0; id < k; ++id) {
-        std::memcpy(stale_norms.data() + norms_offset + id * sizeof(double),
-                    &invalid_norm,
-                    sizeof(invalid_norm));
+    for (uint64_t offset : {K_FUSED_CODEC_HEADER_SIZE,
+                            K_FUSED_CODEC_HEADER_SIZE + uint64_t{k} * dim * sizeof(float)}) {
+        auto bad_center = payload;
+        std::memcpy(bad_center.data() + offset, &invalid, sizeof(invalid));
+        REQUIRE_THROWS(split->ImportFusedCodec(bad_center));
     }
+    REQUIRE(split->ExportFusedCodec() == payload);
     REQUIRE_NOTHROW(split->ImportFusedCodec(payload));
-    const auto canonical_payload = split->ExportFusedCodec();
-    REQUIRE_NOTHROW(split->ImportFusedCodec(stale_norms));
-    // Recomputed norms may differ in the last bit from training under FP contraction/reduction.
-    // Compare two imports of identical centers, not a reduction performed at another call site.
-    REQUIRE(static_cast<bool>(split->ExportFusedCodec() == canonical_payload));
+    REQUIRE(split->ExportFusedCodec() == payload);
 
     auto computer = split->FactoryFusedComputer(vectors.data());
     RaBitQFusedTraversalQuery traversal;
@@ -232,7 +233,7 @@ TEST_CASE("Fused dynamic centers share a lazy query cache and serialize the mode
     REQUIRE(traversal.cluster_cache->computed_count == 1);
     traversal.EnsureCluster(k - 1);
     REQUIRE(traversal.cluster_cache->computed_count == 1);
-    uint64_t offset = 16 + k * dim * sizeof(float);
+    uint64_t offset = K_FUSED_CODEC_HEADER_SIZE + k * dim * sizeof(float);
     std::vector<float> centers(k * dim);
     std::memcpy(centers.data(), payload.data() + offset, centers.size() * sizeof(float));
     for (uint32_t id = 0; id < k; ++id) {
@@ -283,6 +284,18 @@ TEST_CASE("Fused query center terms avoid cancellation", "[ut][RaBitQSplitDataCe
     cache.Ensure(0);
     REQUIRE(cache.add[0] == 0.015625F);
     REQUIRE(cache.error[0] == 0.125F);
+}
+
+TEST_CASE("Fused codec size validates fields and overflow",
+          "[ut][RaBitQSplitDataCell][fused_full]") {
+    REQUIRE(CheckedFusedCodecSize(1, 1) == K_FUSED_CODEC_HEADER_SIZE + 2 * sizeof(float));
+    REQUIRE_THROWS(CheckedFusedCodecSize(0, 1));
+    REQUIRE_THROWS(CheckedFusedCodecSize(1, 0));
+    REQUIRE_THROWS(CheckedFusedCodecSize(1, std::numeric_limits<uint32_t>::max()));
+    REQUIRE_THROWS(CheckedFusedCodecSize(std::numeric_limits<uint64_t>::max(), 1));
+    const auto largest_stride_dim = std::numeric_limits<uint64_t>::max() / (2 * sizeof(float));
+    REQUIRE_THROWS(CheckedFusedCodecSize(largest_stride_dim, 1));
+    REQUIRE_THROWS(CheckedFusedCodecSize(largest_stride_dim / 2, 3));
 }
 
 TEST_CASE("Fused query center terms handle zero and tiny vectors",

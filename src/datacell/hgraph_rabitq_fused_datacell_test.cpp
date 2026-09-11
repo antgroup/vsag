@@ -111,7 +111,7 @@ TEST_CASE("HGraph RaBitQ fused deserialize validates its wire layout",
     constexpr uint64_t supplement_size = 16;
     auto graph = std::make_shared<HGraphRaBitQFusedDataCell>(
         graph_param, one_bit_size, supplement_size, common_param);
-    const uint64_t expected_codec_model_size = FusedCodecSize(common_param.dim_, 16);
+    const uint64_t expected_codec_model_size = CheckedFusedCodecSize(common_param.dim_, 16);
     graph->SetCodecModel(std::string(expected_codec_model_size, '\0'));
     Vector<InnerIdType> empty_neighbors(allocator.get());
     graph->InsertNeighborsById(0, empty_neighbors);

@@ -1019,6 +1019,14 @@ TEST_CASE("HGraph fused Build reserves once and Add grows geometrically",
     REQUIRE(record_size % 64 == 0);
     const auto bytes = [&](uint64_t capacity) { return capacity * record_size + 63; };
 
+    auto malformed = vsag::Dataset::Make();
+    malformed->Dim(dim)->NumElements(-1)->Owner(false);
+    auto rejected = index->Build(malformed);
+    REQUIRE_FALSE(rejected.has_value());
+    REQUIRE(rejected.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(allocator->TakeSlabRequests().empty());
+    REQUIRE(index->GetNumElements() == 0);
+
     std::vector<float> data(count * dim);
     std::vector<int64_t> ids(count);
     for (int64_t row = 0; row < count; ++row) {

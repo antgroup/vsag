@@ -174,6 +174,8 @@ std::vector<int64_t>
 HGraph::Build(const DatasetPtr& data) {
     CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
     if (this->rabitq_fused_datacell_ != nullptr) {
+        // Dataset accepts a signed count from the caller. Reject malformed negative counts
+        // before converting to an unsigned capacity or reserving the fused slab.
         CHECK_ARGUMENT(data->GetNumElements() >= 0, "fused build size exceeds inner id range");
         CHECK_ARGUMENT(static_cast<uint64_t>(data->GetNumElements()) <=
                            std::numeric_limits<InnerIdType>::max(),
@@ -269,6 +271,8 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
     }
     bool defer_persistent_codes = temporary_sq8_build_data != nullptr;
     if (not defer_persistent_codes or this->rabitq_fused_datacell_ != nullptr) {
+        // Both fused paths below train the codec, so validate before either initializes a
+        // transform. This helper is deliberately a no-op for non-fused builds.
         this->validate_fused_training_data(data);
         if (this->rabitq_fused_datacell_ != nullptr and
             build_data->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {

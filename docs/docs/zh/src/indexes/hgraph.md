@@ -74,7 +74,7 @@ auto result = index->KnnSearch(
 | `rabitq_fused_datacell` | bool | `false` | 将底层 HGraph 节点与 RaBitQ split 编码融合到一条内存记录中；要求 L2/IP、flat 内存图、x 在 `[1, 4]` 的 RaBitQ x+y split 编码，并满足 [RaBitQ x+y split](../quantization/rabitq_split.md) 中的其他约束 |
 | `train_sample_count` | int | `65536` | 量化器训练的最大采样向量数；显式配置时最小为 `512`。fused ODescent 使用 FP32 距离构图时跳过该采样及全局均值训练；fused KMeans 始终使用初始全量数据 |
 | `rabitq_centroid_count` | int | `16` | fused 残差中心数，可取不超过初始数据量及 `INT32_MAX` 的任意正整数；KMeans 全量训练不受 `train_sample_count` 限制 |
-| `kmeans_iterations` | int | `25` | fused 全量精确 KMeans 的迭代次数，不超过 `INT32_MAX` 的正整数 |
+| `kmeans_iterations` | int | `25` | fused 全量精确 KMeans 的迭代次数，不超过 `INT32_MAX` 的正整数；与 `rabitq_centroid_count` 一样，仅在 `rabitq_fused_datacell=true` 时生效，否则只校验范围、不参与训练 |
 | `build_thread_count` | int | `100` | 构建阶段并发线程数 |
 | `support_duplicate` | bool | `false` | 是否在插入时做重复 ID 检测 |
 | `deduplicate_storage` | bool | `false` | 让重复向量共享存储；需同时设置 `support_duplicate: true` |

@@ -51,6 +51,9 @@ The relevant parameters are:
 | `kmeans_iterations` | Full-data exact KMeans iterations; default `25`, positive integer up to `INT32_MAX`. |
 | `train_sample_count` | Maximum HGraph training sample size. The default is `65536`; the minimum explicit value is `512`. |
 
+In HGraph, `rabitq_centroid_count` and `kmeans_iterations` take effect only when
+`rabitq_fused_datacell=true`. Otherwise their values are range-validated but do not affect training.
+
 The constraints are:
 
 ```text
@@ -143,8 +146,9 @@ storage:
   must be disabled.
 - PCA is not supported; omit `rabitq_pca_dim` or set it to `0`.
 - The legacy v0.14 serialization format is not supported.
-- Fused graph format v3 and codec format v2 reject all earlier fused formats, including fixed-16
-  indexes. Rebuild those indexes. The destination must specify the same cluster count.
+- Fused graph format v3 and codec format v3 reject all earlier fused formats, including fixed-16
+  indexes and the previous codec v2. Rebuild those indexes. The destination must specify the same
+  cluster count. Codec v3 omits derived norms; loading computes them from validated rotated centers.
 
 Indexes created without this option keep their existing layout, behavior, and
 serialization format.

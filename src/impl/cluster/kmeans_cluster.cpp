@@ -386,7 +386,8 @@ KMeansCluster::RunFull(
             for (uint64_t center = first; center < last; ++center) {
                 const auto members = offsets[center + 1] - offsets[center];
                 if (members == 0) {
-                    // A reproducible replacement, independent of scheduling.
+                    // A reproducible replacement, independent of scheduling. It can coincide
+                    // with another center; duplicate input rows need not yield K distinct centers.
                     const auto row = (center + uint64_t{iteration}) % count;
                     std::copy_n(data + row * dim, dim, k_centroids_ + center * dim);
                     continue;

@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -26,20 +27,21 @@
 namespace vsag {
 
 inline constexpr uint32_t K_FUSED_DEFAULT_CLUSTER_COUNT = 16;
-inline constexpr uint32_t K_FUSED_CODEC_VERSION = 2;
+inline constexpr uint32_t K_FUSED_CODEC_VERSION = 3;
+inline constexpr uint64_t K_FUSED_CODEC_HEADER_SIZE = 2 * sizeof(uint32_t) + sizeof(uint64_t);
 
+// Validate dimension/count and size arithmetic before returning the serialized codec size.
 inline uint64_t
-FusedCodecSize(uint64_t dim, uint64_t count) {
+CheckedFusedCodecSize(uint64_t dim, uint64_t count) {
     CHECK_ARGUMENT(dim > 0 and count > 0 and count <= std::numeric_limits<int32_t>::max(),
                    "invalid fused codec dimension or cluster count");
-    constexpr uint64_t header = 2 * sizeof(uint32_t) + sizeof(uint64_t);
+    CHECK_ARGUMENT(dim <= std::numeric_limits<uint64_t>::max() / (2 * sizeof(float)),
+                   "fused codec dimension overflow");
+    const uint64_t stride = dim * 2 * sizeof(float);
     CHECK_ARGUMENT(
-        dim <= (std::numeric_limits<uint64_t>::max() - sizeof(double)) / (2 * sizeof(float)),
-        "fused codec dimension overflow");
-    const uint64_t stride = dim * 2 * sizeof(float) + sizeof(double);
-    CHECK_ARGUMENT(count <= (std::numeric_limits<uint64_t>::max() - header) / stride,
-                   "fused codec size overflow");
-    return header + count * stride;
+        count <= (std::numeric_limits<uint64_t>::max() - K_FUSED_CODEC_HEADER_SIZE) / stride,
+        "fused codec size overflow");
+    return K_FUSED_CODEC_HEADER_SIZE + count * stride;
 }
 
 // A single query owns this cache across graph routing, traversal and reranking.
@@ -75,6 +77,7 @@ public:
 
     void
     Ensure(uint32_t id) {
+        assert(id < ready.size());
         if (ready[id] != 0) {
             return;
         }

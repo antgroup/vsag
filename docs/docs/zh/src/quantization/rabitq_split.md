@@ -50,6 +50,9 @@ RaBitQ x+y split 是 HGraph 和 Pyramid 面向低比特底库码的存储与搜�
 | `kmeans_iterations` | 全量精确 KMeans 迭代次数，默认 `25`；支持不超过 `INT32_MAX` 的正整数。 |
 | `train_sample_count` | HGraph 最大训练采样数，默认值为 `65536`；显式配置时最小为 `512`。 |
 
+在 HGraph 中，`rabitq_centroid_count` 和 `kmeans_iterations` 仅在
+`rabitq_fused_datacell=true` 时生效；否则只校验参数取值范围，不影响训练。
+
 参数约束为：
 
 ```text
@@ -124,7 +127,7 @@ label、filter code 和 supplement，record stride 仍向上对齐到 64-byte。
 - 必须关闭 MCI、`deduplicate_storage`、remove metadata、reverse edges 和 force remove。
 - fused 不支持 PCA；请省略 `rabitq_pca_dim` 或将其设为 `0`。
 - 不支持旧版 v0.14 序列化格式。
-- fused graph v3、codec v2 拒绝全部旧 fused 格式，包括固定 16 中心的索引；需要重建。
+- fused graph v3、codec v3 拒绝全部旧 fused 格式，包括固定 16 中心的索引及之前的 codec v2；需要重建。codec v3 不再保存派生范数，加载时从经过校验的旋转中心计算。
   加载时必须配置与文件一致的中心数量。
 
 未启用该参数的索引保持原有布局、行为和序列化格式。

@@ -278,6 +278,19 @@ TEST_CASE("Full KMeans bounds task submissions for large inputs",
     REQUIRE(std::all_of(labels.begin(), labels.end(), [](auto id) { return id == 0; }));
 }
 
+TEST_CASE("Full KMeans handles duplicate data and empty clusters deterministically",
+          "[ut][KMeansCluster][fused_full]") {
+    constexpr uint32_t count = 7;
+    constexpr int32_t dim = 3;
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    vsag::KMeansCluster cluster(dim, allocator.get());
+    std::vector<float> data(count * dim, 2.0F);
+    const auto labels = cluster.RunFull(count, data.data(), count, 3);
+    REQUIRE(std::all_of(labels.begin(), labels.end(), [](auto id) { return id == 0; }));
+    REQUIRE(std::equal(data.begin(), data.end(), cluster.k_centroids_));
+    REQUIRE(cluster.RunFull(count, data.data(), count, 3) == labels);
+}
+
 TEST_CASE("Full KMeans drains failed assignment and update tasks",
           "[ut][KMeansCluster][fused_full]") {
     constexpr uint64_t count = 8193;
