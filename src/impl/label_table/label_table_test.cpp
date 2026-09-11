@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -27,6 +28,32 @@
 #include "unittest.h"
 
 using namespace vsag;
+
+TEST_CASE("LabelTable deletion read view pins mutations once per query", "[ut][LabelTable]") {
+    DefaultAllocator allocator;
+    LabelTable table(&allocator);
+    table.Insert(0, 100);
+    table.Insert(1, 101);
+    REQUIRE(table.GetDeletedIdsReadView() == nullptr);
+    table.MarkRemove(100);
+    auto view = table.GetDeletedIdsReadView();
+    REQUIRE(view != nullptr);
+    REQUIRE_FALSE(view->CheckValid(int64_t{0}));
+    REQUIRE(view->CheckValid(1));
+    std::atomic<bool> started{false};
+    auto remove = std::async(std::launch::async, [&]() {
+        started.store(true);
+        return table.MarkRemove(101);
+    });
+    while (not started.load()) {
+        std::this_thread::yield();
+    }
+    const auto status = remove.wait_for(std::chrono::milliseconds(20));
+    view.reset();
+    REQUIRE(remove.get() == 1);
+    REQUIRE(status == std::future_status::timeout);
+    REQUIRE_FALSE(table.GetDeletedIdsReadView()->CheckValid(1));
+}
 
 namespace {
 
@@ -336,17 +363,51 @@ TEST_CASE("LabelTable deserializes legacy duplicate payload", "[ut][LabelTable]"
 TEST_CASE("LabelTable Move", "[ut][LabelTable]") {
     auto allocator = std::make_shared<DefaultAllocator>();
 
+    SECTION("Moving a tombstone preserves a readded label") {
+        LabelTable table(allocator.get());
+        table.Insert(0, 100);
+        table.Insert(1, 200);
+        table.MarkRemove(100);
+        table.Insert(2, 100);
+        table.Move(0, 1);
+        REQUIRE(table.IsRemoved(1));
+        REQUIRE_FALSE(table.IsRemoved(2));
+        REQUIRE(table.GetIdByLabel(100) == 2);
+        REQUIRE_FALSE(table.TryGetIdByLabel(200).first);
+    }
+
+    SECTION("Restore tombstones ignores spare label rows and prefers the live incarnation") {
+        LabelTable table(allocator.get());
+        table.Resize(64);
+        table.Insert(0, 0);
+        table.Insert(1, 100);
+        table.Insert(2, 100);
+        Vector<InnerIdType> removed({2}, allocator.get());
+        table.RestoreDeletedIds(removed, 3);
+        REQUIRE(table.GetIdByLabel(0) == 0);
+        REQUIRE(table.GetIdByLabel(100) == 1);
+        REQUIRE(table.IsRemoved(2));
+        REQUIRE(table.GetTotalCount() == 3);
+        removed.push_back(3);
+        REQUIRE_THROWS(table.RestoreDeletedIds(removed, 3));
+        REQUIRE(table.GetIdByLabel(100) == 1);
+    }
+
     SECTION("Move with reverse map") {
         LabelTable label_table(allocator.get(), true);
         label_table.Resize(5);
         label_table.Insert(0, 100);
         label_table.Insert(1, 200);
         label_table.Insert(2, 300);
+        label_table.InsertSourceId(0, "source-100");
 
         label_table.Move(0, 3);
 
         REQUIRE(label_table.GetLabelById(3) == 100);
         REQUIRE(label_table.GetIdByLabel(100) == 3);
+        REQUIRE(label_table.GetSourceId(3) == "source-100");
+        label_table.ShrinkToFit(3);
+        REQUIRE(label_table.GetSourceId(3).empty());
     }
 
     SECTION("Move without reverse map") {

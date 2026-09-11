@@ -170,6 +170,9 @@ public:
     GetStats() const override;
 
     void
+    Flush() override;
+
+    void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 
     IndexType
@@ -681,6 +684,11 @@ private:
     void
     shrink_to_fit();
 
+    /// Physically remove external labels, remap graph/MCI IDs, repair cliques and shrink storage.
+    /// Owns mutation locking; called by Remove(FORCE_REMOVE) when MCI is enabled.
+    uint32_t
+    force_remove_with_mci(const std::vector<int64_t>& ids);
+
     /// Flat brute-force search used when the index is too small or graph is unavailable.
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     DistHeapPtr
@@ -881,20 +889,42 @@ private:
     void
     build_mci_clique_index(const void* vectors = nullptr);
 
+    /// Search HGraph KNN and update MCI without inserting a vector into HGraph.
+    /// visible_total is the exclusive inner-ID bound for accepted KNN candidates, not live count.
+    /// Zero defaults to node_id + 1 for ADD; existing FP32 repair points pass total_count_.
     void
-    incremental_update_mci_clique(InnerIdType new_inner_id, const void* vector);
+    incremental_update_mci_clique(InnerIdType node_id,
+                                  const void* vector,
+                                  uint64_t visible_total = 0);
 
-    [[nodiscard]] Vector<InnerIdType>
-    find_mci_knn_for_new_node(InnerIdType new_inner_id, const void* vector) const;
+    void
+    incremental_update_mci_clique(InnerIdType node_id,
+                                  const Vector<InnerIdType>& knn_ids,
+                                  uint64_t visible_total);
+
+    /// Apply deletion to MCI only, retiring small cliques and repairing under-covered survivors.
+    /// Uses unchanged inner IDs; does not remove vectors, remap graph IDs or shrink storage.
+    /// Caller owns mutation locking and handles label deletion and MCI publication.
+    void
+    remove_from_mci(const Vector<InnerIdType>& removed_inner_ids);
+
+    /// Recover an existing query vector and run the same MCI update as Add, without reinserting it.
+    void
+    repair_mci_clique(InnerIdType node_id);
 
     [[nodiscard]] Vector<InnerIdType>
     search_mci_knn(InnerIdType query_inner_id, const void* vector, uint64_t visible_total) const;
 
-    bool
-    try_join_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+    void
+    try_join_mci_clique(InnerIdType new_inner_id,
+                        const Vector<InnerIdType>& knn_ids,
+                        uint64_t degree_target,
+                        UnorderedSet<InnerIdType>& neighbors);
 
     void
-    build_incremental_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+    build_incremental_mci_clique(InnerIdType new_inner_id,
+                                 const Vector<InnerIdType>& knn_ids,
+                                 uint64_t visible_total);
 
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};  // coarse/quantized codes for graph search
@@ -938,10 +968,14 @@ private:
     mutable std::shared_mutex global_mutex_;            // guards total_count_, entry_point_id_
     mutable std::shared_mutex persistent_codes_mutex_;  // pins flatten storage during MCI search
     mutable std::mutex mci_build_mutex_;                // serializes full MCI reconstruction
-    mutable std::mutex mci_add_mutex_;                  // serializes MCI-enabled Add calls
-    mutable MutexArrayPtr neighbors_mutex_;             // per-node locks for neighbor lists
-    mutable std::shared_mutex add_mutex_;               // serializes Add() operations
-    mutable std::shared_mutex force_remove_mutex_;      // serializes force-remove operations
+    // MCI writers take mutation before force_remove; label scopes end before repair/search.
+    // Shrink/UpdateVector take force_remove before persistent_codes. Repair releases force_remove
+    // before public search reacquires it (shared_mutex is non-recursive); mutation still excludes
+    // all ID-moving operations. CSR storage/view locks are internal to CliqueDataCell.
+    mutable std::mutex mci_mutation_mutex_;         // serializes MCI Add, Remove and Flush
+    mutable MutexArrayPtr neighbors_mutex_;         // per-node locks for neighbor lists
+    mutable std::shared_mutex add_mutex_;           // serializes Add() operations
+    mutable std::shared_mutex force_remove_mutex_;  // serializes force-remove operations
     // Single-flights physical code growth before taking the global writer lock.
     mutable std::mutex physical_code_resize_mutex_;
     std::atomic<bool> physical_code_resize_pending_{false};

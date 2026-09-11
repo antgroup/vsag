@@ -65,6 +65,8 @@
 - [Extra Info](advanced/extra_info.md)
 - [Index Lifecycle Management](advanced/index_lifecycle.md)
 - [HGraph MCI Companion](advanced/hgraph_mci_companion.md)
+- [HGraph MCI Code and Configuration](advanced/hgraph_mci_usage.md)
+- [HGraph MCI Mutation Design and Benchmarks](advanced/hgraph_mci_mutation.md)
 
 # API Reference
 

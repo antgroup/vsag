@@ -47,7 +47,8 @@ bash scripts/coverage/check_cov.sh
 
 采集脚本会生成包含分支数据和仓库相对路径的 `coverage/coverage.info`。统计范围仅包括
 `src/` 下的维护中生产代码和 `include/` 下的公共头文件，并排除构建时生成的
-`src/version.h` 与引入的兼容头文件 `include/vsag/expected.hpp`。仅在其他平台编译的路径
+`src/` 目录中的 `version.h` 与引入的兼容头文件 `include/vsag/expected.hpp`；
+该生成头文件在刚检出的源码中尚不存在。仅在其他平台编译的路径
 明确不属于 Linux x86 报告的统计范围，必须由平台专用覆盖率任务统计，不能视为已覆盖。
 
 ## 内存泄漏与多线程

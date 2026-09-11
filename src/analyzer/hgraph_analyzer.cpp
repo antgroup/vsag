@@ -420,10 +420,21 @@ HGraphAnalyzer::calculate_search_result(const Vector<float>& sample_datas,
                                         const std::string& search_param,
                                         uint32_t sample_size) {
     auto time_cost = 0.0F;
+    Vector<int8_t> int8_query(allocator_);
+    if (hgraph_->data_type_ == DataTypes::DATA_TYPE_INT8) {
+        int8_query.resize(dim_);
+    }
     for (int i = 0; i < sample_size; ++i) {
         auto query = Dataset::Make();
-        query->Dim(dim_)->NumElements(1)->Owner(false)->Float32Vectors(
-            sample_datas.data() + static_cast<uint64_t>(i * dim_));
+        query->Dim(dim_)->NumElements(1)->Owner(false);
+        const auto* sample = sample_datas.data() + static_cast<uint64_t>(i) * dim_;
+        if (hgraph_->data_type_ == DataTypes::DATA_TYPE_INT8) {
+            // INT8 Decode writes raw bytes into each sample's float-sized scratch row.
+            std::memcpy(int8_query.data(), sample, dim_ * sizeof(int8_t));
+            query->Int8Vectors(int8_query.data());
+        } else {
+            query->Float32Vectors(sample);
+        }
         double single_query_time;
         DatasetPtr result = nullptr;
         {
@@ -516,10 +527,31 @@ HGraphAnalyzer::GetBaseSearchTimeCost(const std::string& search_param) {
 JsonType
 HGraphAnalyzer::GetStats() {
     JsonType stats;
+    if (total_count_ == 0) {
+        stats["total_count"].SetInt(0);
+        stats["deleted_count"].SetInt(hgraph_->delete_count_);
+        stats["connect_components"].SetInt(0);
+        stats["maximal_component_size"].SetInt(0);
+        const std::vector<uint32_t> empty;
+        stats["in_degree_distribution"].SetVector<uint32_t>(empty);
+        stats["out_degree_distribution"].SetVector<uint32_t>(empty);
+        for (const auto* key : {"avg_distance_base",
+                                "average_degree",
+                                "duplicate_ratio",
+                                "proximity_recall_neighbor",
+                                "quantization_bias_ratio",
+                                "quantization_inversion_count_rate",
+                                "recall_base",
+                                "time_cost_query"}) {
+            stats[key].SetFloat(0.0F);
+        }
+        return stats;
+    }
     stats["avg_distance_base"].SetFloat(GetBaseAvgDistance());
     auto components = GetComponentCount();
     stats["connect_components"].SetUint64(components.size());
-    stats["maximal_component_size"].SetInt(*std::max_element(components.begin(), components.end()));
+    stats["maximal_component_size"].SetInt(
+        components.empty() ? 0 : *std::max_element(components.begin(), components.end()));
     stats["deleted_count"].SetInt(hgraph_->delete_count_);
     const auto& [count_in_degree, count_out_degree, avg_degree] = GetDegreeDistribution();
     stats["in_degree_distribution"].SetVector<uint32_t>(count_in_degree);

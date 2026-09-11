@@ -352,6 +352,11 @@ public:
     }
 
     virtual void
+    Flush() {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index doesn't support Flush");
+    }
+
+    virtual void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support GetVectorByInnerId");

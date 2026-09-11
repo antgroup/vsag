@@ -37,6 +37,8 @@ namespace vsag {
 
 namespace {
 
+constexpr uint64_t K_MCI_FORMAT_VERSION = 2;
+
 std::string
 dump_basic_info_for_log(const JsonType& basic_info) {
     JsonType log_basic_info = basic_info;  // NOLINT(performance-unnecessary-copy-initialization)
@@ -199,6 +201,9 @@ HGraph::serialize_basic_info() const {
     jsonify_basic_info["data_type"].SetInt(static_cast<int64_t>(this->data_type_));
     jsonify_basic_info["persist_source_id"].SetBool(this->persist_source_id_);
     jsonify_basic_info[HGRAPH_USE_MCI].SetBool(this->mci_parameters_.enabled);
+    if (this->mci_parameters_.enabled) {
+        jsonify_basic_info["mci_format_version"].SetUint64(K_MCI_FORMAT_VERSION);
+    }
     // logger::debug("mult: {}", this->mult_);
     TO_JSON_BASE64(jsonify_basic_info, mult);
     jsonify_basic_info["max_capacity"].SetUint64(this->max_capacity_.load());
@@ -999,6 +1004,9 @@ HGraph::Deserialize(StreamReader& reader) {
         auto basic_info = metadata->Get(BASIC_INFO);
         auto has_serialized_index_param = basic_info.Contains(INDEX_PARAM);
         auto has_serialized_total_count = basic_info.Contains("total_count");
+        const auto mci_format_version = basic_info.Contains("mci_format_version")
+                                            ? basic_info["mci_format_version"].GetUint64()
+                                            : 1;
         uint64_t serialized_total_count = 0;
         if (has_serialized_total_count) {
             serialized_total_count = basic_info["total_count"].GetUint64();
@@ -1077,10 +1085,24 @@ HGraph::Deserialize(StreamReader& reader) {
             this->raw_vector_->Deserialize(buffer_reader);
         }
         if (this->mci_parameters_.enabled) {
+            const auto total = this->total_count_.load();
+            // Label storage may include spare capacity, while the remap may omit shadowed
+            // labels after MARK_REMOVE + Add. Neither is required to equal physical slots.
+            if ((has_serialized_total_count and serialized_total_count != total) or
+                this->label_table_->label_table_.size() < total or
+                this->label_table_->GetRemapSize() > total) {
+                throw VsagException(ErrorType::INVALID_BINARY,
+                                    "serialized HGraph MCI node and label counts are inconsistent");
+            }
             if (this->mci_cliques_ == nullptr) {
                 this->mci_cliques_ = std::make_shared<CliqueDataCell>(this->allocator_);
             }
-            this->mci_cliques_->Deserialize(buffer_reader);
+            this->mci_cliques_->Deserialize(buffer_reader, mci_format_version, total);
+            if (this->support_force_remove()) {
+                const auto removed_ids = this->mci_cliques_->GetInactiveNodeIds();
+                this->label_table_->RestoreDeletedIds(removed_ids, this->total_count_.load());
+                this->delete_count_.store(static_cast<int64_t>(removed_ids.size()));
+            }
         }
         if (metadata->Get("has_conjugate_graph").IsBool() &&
             metadata->Get("has_conjugate_graph").GetBool()) {

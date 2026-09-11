@@ -26,31 +26,14 @@
 #include <vector>
 
 #include "impl/logger/logger.h"
-#include "mci_runner.h"
+#include "mci_coverage.h"
+#include "mci_local_builder.h"
 #include "simd/fp32_simd.h"
 
 namespace vsag {
 namespace {
 
 constexpr uint64_t K_V3_SCHEDULE_CHUNK = 64;
-// NOLINTNEXTLINE(readability-identifier-naming)
-struct MCIV3Candidate {
-    InnerIdType id{0};
-    float distance{0.0F};
-};
-
-// NOLINTNEXTLINE(readability-identifier-naming)
-struct MCIV3Edge {
-    InnerIdType u{0};
-    InnerIdType v{0};
-    float dis{0.0F};
-
-    bool
-    operator<(const MCIV3Edge& other) const {
-        return dis < other.dis;
-    }
-};
-
 // NOLINTNEXTLINE(readability-identifier-naming)
 struct MCIV3ThreadTiming {
     double candidate_collect{0.0};
@@ -83,18 +66,6 @@ double
 // NOLINTNEXTLINE(readability-identifier-naming)
 SecondsSince(const std::chrono::steady_clock::time_point& start) {
     return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-}
-
-float
-// NOLINTNEXTLINE(readability-identifier-naming)
-ExpandDistanceLimit(float nearest_distance, float alpha, MetricType metric) {
-    if (metric != MetricType::METRIC_TYPE_IP) {
-        return nearest_distance * alpha;
-    }
-    const auto nearest_similarity = 1.0F - nearest_distance;
-    const auto similarity_limit =
-        nearest_similarity >= 0.0F ? nearest_similarity / alpha : nearest_similarity * alpha;
-    return 1.0F - similarity_limit;
 }
 
 const float*
@@ -300,229 +271,60 @@ BuildMCICliques(const float* vectors,
 
         for (uint64_t tid = 0; tid < thread_count; ++tid) {
             workers.emplace_back(catch_worker_exception, [&, tid]() {
-                std::vector<MCIV3Edge> edges;
-                edges.reserve(candidate_limit * (candidate_limit + 1) / 2);
-                Vector<MCIV3Candidate> candidates(candidate_limit, allocator);
-                Vector<const float*> candidate_vectors(candidate_limit, allocator);
-                std::vector<std::vector<InnerIdType>> local_max_cliques(max_saved_cliques);
-                for (auto& clique : local_max_cliques) {
-                    clique.reserve(candidate_limit + 1);
-                }
-                mci::ccrmce_runner<MCIV3Edge, InnerIdType> mce_runner;
-                mce_runner.reserve(static_cast<uint32_t>(candidate_limit + 1));
-                auto append_selected_clique = [&](const auto& clique) {
-                    selected_by_thread[tid].emplace_back(allocator);
-                    selected_by_thread[tid].back().assign(clique.begin(), clique.end());
-                    if (selected_by_thread[tid].back().size() > params.clique_max) {
-                        selected_by_thread[tid].back().resize(params.clique_max);
+                auto local_params = params;
+                local_params.candidate_limit = candidate_limit;
+                MCILocalCliqueBuilder local_builder(local_params, allocator);
+                auto batch_distance = [&](InnerIdType lhs,
+                                          InnerIdType a,
+                                          InnerIdType b,
+                                          InnerIdType c,
+                                          InnerIdType d,
+                                          float* values) {
+                    compute_distance_batch(VectorAt(vectors, dim, lhs),
+                                           dim,
+                                           VectorAt(vectors, dim, a),
+                                           VectorAt(vectors, dim, b),
+                                           VectorAt(vectors, dim, c),
+                                           VectorAt(vectors, dim, d),
+                                           values[0],
+                                           values[1],
+                                           values[2],
+                                           values[3]);
+                    if (params.metric != MetricType::METRIC_TYPE_L2SQR) {
+                        const InnerIdType ids[]{a, b, c, d};
+                        for (uint64_t i = 0; i < 4; ++i) {
+                            values[i] = distance_from_dot(lhs, ids[i], values[i]);
+                        }
                     }
                 };
-
                 auto solve_seed = [&](InnerIdType seed) {
-                    edges.clear();
-                    uint64_t candidate_size = 0;
-
-                    auto stage_start = std::chrono::steady_clock::now();
-                    const auto* row = GraphRow(graph, seed);
-                    const auto row_count =
-                        std::min<uint64_t>(GraphRowCount(graph, seed), candidate_limit);
-                    for (uint64_t rank = 0; rank < row_count; ++rank) {
-                        const auto neighbor = row[rank];
-                        if (neighbor >= total or neighbor == seed or
-                            num_cliques_per_node[neighbor].load(std::memory_order_relaxed) >=
-                                static_cast<int>(node_clique_limit)) {
-                            continue;
+                    auto emit = [&](const auto& clique) {
+                        selected_by_thread[tid].emplace_back(allocator);
+                        selected_by_thread[tid].back().assign(clique.begin(), clique.end());
+                        total_clique_count.fetch_add(1, std::memory_order_relaxed);
+                        if (std::find(clique.begin(), clique.end(), seed) != clique.end()) {
+                            clique_containing_seed_count.fetch_add(1, std::memory_order_relaxed);
                         }
-                        bool duplicate = false;
-                        for (uint64_t i = 0; i < candidate_size; ++i) {
-                            if (candidates[i].id == neighbor) {
-                                duplicate = true;
-                                break;
-                            }
-                        }
-                        if (duplicate) {
-                            continue;
-                        }
-                        candidates[candidate_size].id = neighbor;
-                        candidate_vectors[candidate_size] = VectorAt(vectors, dim, neighbor);
-                        ++candidate_size;
-                    }
-                    round_timings[tid].candidate_collect += SecondsSince(stage_start);
-                    sum_candidate_size.fetch_add(candidate_size, std::memory_order_relaxed);
+                    };
+                    const auto stats = local_builder.Build(seed,
+                                                           GraphRow(graph, seed),
+                                                           GraphRowCount(graph, seed),
+                                                           now_alpha,
+                                                           num_cliques_per_node,
+                                                           compute_distance,
+                                                           batch_distance,
+                                                           emit);
+                    sum_candidate_size.fetch_add(stats.candidates, std::memory_order_relaxed);
                     candidate_count.fetch_add(1, std::memory_order_relaxed);
-
-                    if (candidate_size + 1 < clique_threshold) {
-                        if (now_alpha > 100.0F) {
-                            Vector<InnerIdType> fallback(allocator);
-                            fallback.reserve(candidate_size + 1);
-                            fallback.push_back(seed);
-                            for (uint64_t i = 0; i < candidate_size; ++i) {
-                                const auto id = candidates[i].id;
-                                if (num_cliques_per_node[id].load(std::memory_order_relaxed) > 0) {
-                                    fallback.push_back(id);
-                                }
-                            }
-                            num_cliques_per_node[seed].fetch_add(1, std::memory_order_relaxed);
-                            total_clique_count.fetch_add(1, std::memory_order_relaxed);
-                            append_selected_clique(fallback);
-                            clique_containing_seed_count.fetch_add(1, std::memory_order_relaxed);
-                        }
-                        return;
-                    }
-
-                    stage_start = std::chrono::steady_clock::now();
-                    for (uint64_t i = 0; i < candidate_size; ++i) {
-                        const auto candidate_id = candidates[i].id;
-                        candidates[i].distance = compute_distance(candidate_id, seed);
-                    }
-                    std::sort(candidates.begin(),
-                              candidates.begin() + static_cast<int64_t>(candidate_size),
-                              [](const MCIV3Candidate& lhs, const MCIV3Candidate& rhs) {
-                                  return lhs.distance < rhs.distance;
-                              });
-                    for (uint64_t i = 0; i < candidate_size; ++i) {
-                        candidate_vectors[i] = VectorAt(vectors, dim, candidates[i].id);
-                    }
-                    round_timings[tid].query_distance += SecondsSince(stage_start);
-
-                    const float distance_limit =
-                        ExpandDistanceLimit(candidates[0].distance, now_alpha, params.metric);
-                    stage_start = std::chrono::steady_clock::now();
-                    for (uint64_t i = 0; i < candidate_size; ++i) {
-                        if (candidates[i].distance < distance_limit) {
-                            edges.push_back(
-                                MCIV3Edge{seed, candidates[i].id, candidates[i].distance});
-                        }
-                    }
-                    for (uint64_t i = 0; i < candidate_size; ++i) {
-                        const auto lhs_id = candidates[i].id;
-                        const auto* lhs_vector = candidate_vectors[i];
-                        uint64_t j = i + 1;
-                        for (; j + 3 < candidate_size; j += 4) {
-                            float distances[4]{0.0F, 0.0F, 0.0F, 0.0F};
-                            compute_distance_batch(lhs_vector,
-                                                   dim,
-                                                   candidate_vectors[j],
-                                                   candidate_vectors[j + 1],
-                                                   candidate_vectors[j + 2],
-                                                   candidate_vectors[j + 3],
-                                                   distances[0],
-                                                   distances[1],
-                                                   distances[2],
-                                                   distances[3]);
-                            for (uint64_t batch = 0; batch < 4; ++batch) {
-                                const auto rhs_id = candidates[j + batch].id;
-                                const float distance =
-                                    params.metric == MetricType::METRIC_TYPE_L2SQR
-                                        ? distances[batch]
-                                        : distance_from_dot(lhs_id, rhs_id, distances[batch]);
-                                if (distance <= distance_limit) {
-                                    edges.push_back(MCIV3Edge{lhs_id, rhs_id, distance});
-                                }
-                            }
-                        }
-                        for (; j < candidate_size; ++j) {
-                            const auto rhs_id = candidates[j].id;
-                            const float distance = compute_distance(lhs_id, rhs_id);
-                            if (distance <= distance_limit) {
-                                edges.push_back(MCIV3Edge{lhs_id, rhs_id, distance});
-                            }
-                        }
-                    }
-                    round_timings[tid].pair_distance += SecondsSince(stage_start);
-                    sum_edge_size.fetch_add(edges.size(), std::memory_order_relaxed);
-
-                    stage_start = std::chrono::steady_clock::now();
-                    std::sort(edges.begin(), edges.end());
-                    round_timings[tid].edge_sort += SecondsSince(stage_start);
-
-                    if (edges.size() < clique_threshold * (clique_threshold - 1) / 2 and
-                        now_alpha > 100.0F) {
-                        Vector<InnerIdType> fallback(allocator);
-                        fallback.reserve(candidate_size + 1);
-                        fallback.push_back(seed);
-                        for (uint64_t i = 0; i < candidate_size; ++i) {
-                            const auto id = candidates[i].id;
-                            if (num_cliques_per_node[id].load(std::memory_order_relaxed) > 0) {
-                                fallback.push_back(id);
-                                num_cliques_per_node[id].fetch_add(1, std::memory_order_relaxed);
-                            }
-                        }
-                        num_cliques_per_node[seed].fetch_add(1, std::memory_order_relaxed);
-                        total_clique_count.fetch_add(1, std::memory_order_relaxed);
-                        append_selected_clique(fallback);
-                        clique_containing_seed_count.fetch_add(1, std::memory_order_relaxed);
-                        return;
-                    }
-
-                    stage_start = std::chrono::steady_clock::now();
-                    const InnerIdType local_clique_count =
-                        mce_runner.run(edges,
-                                       local_max_cliques,
-                                       static_cast<InnerIdType>(clique_threshold),
-                                       num_cliques_per_node,
-                                       static_cast<InnerIdType>(max_saved_cliques));
-                    round_timings[tid].mce += SecondsSince(stage_start);
-                    sum_clique_count.fetch_add(local_clique_count, std::memory_order_relaxed);
-
-                    if (local_clique_count == 0 and now_alpha > 100.0F) {
-                        Vector<InnerIdType> fallback(allocator);
-                        fallback.reserve(candidate_size + 1);
-                        fallback.push_back(seed);
-                        for (uint64_t i = 0; i < candidate_size; ++i) {
-                            const auto id = candidates[i].id;
-                            if (num_cliques_per_node[id].load(std::memory_order_relaxed) > 0) {
-                                fallback.push_back(id);
-                                num_cliques_per_node[id].fetch_add(1, std::memory_order_relaxed);
-                            }
-                        }
-                        num_cliques_per_node[seed].fetch_add(1, std::memory_order_relaxed);
-                        total_clique_count.fetch_add(1, std::memory_order_relaxed);
-                        append_selected_clique(fallback);
-                        clique_containing_seed_count.fetch_add(1, std::memory_order_relaxed);
-                        return;
-                    }
-
-                    stage_start = std::chrono::steady_clock::now();
-                    uint64_t chosen_count = 0;
-                    for (uint64_t i = 0; i < local_clique_count; ++i) {
-                        auto& clique = local_max_cliques[i];
-                        if (clique.size() > params.clique_max) {
-                            const bool contains_seed =
-                                std::find(clique.begin(), clique.end(), seed) != clique.end();
-                            clique.resize(params.clique_max);
-                            if (contains_seed and
-                                std::find(clique.begin(), clique.end(), seed) == clique.end()) {
-                                clique.back() = seed;
-                            }
-                        }
-                        bool has_uncovered_node = false;
-                        bool contains_seed = false;
-                        for (auto id : clique) {
-                            if (num_cliques_per_node[id].load(std::memory_order_relaxed) < 1) {
-                                has_uncovered_node = true;
-                            }
-                            if (id == seed) {
-                                contains_seed = true;
-                            }
-                        }
-                        if (not has_uncovered_node) {
-                            continue;
-                        }
-                        for (auto id : clique) {
-                            num_cliques_per_node[id].fetch_add(1, std::memory_order_relaxed);
-                        }
-                        total_clique_count.fetch_add(1, std::memory_order_relaxed);
-                        if (contains_seed) {
-                            clique_containing_seed_count.fetch_add(1, std::memory_order_relaxed);
-                        }
-                        append_selected_clique(clique);
-                        ++chosen_count;
-                        if (chosen_count > params.max_degree) {
-                            break;
-                        }
-                    }
-                    round_timings[tid].choose += SecondsSince(stage_start);
+                    sum_edge_size.fetch_add(stats.edges, std::memory_order_relaxed);
+                    sum_clique_count.fetch_add(stats.cliques, std::memory_order_relaxed);
+                    auto& timing = round_timings[tid];
+                    timing.candidate_collect += stats.candidate_collect;
+                    timing.query_distance += stats.query_distance;
+                    timing.pair_distance += stats.pair_distance;
+                    timing.edge_sort += stats.edge_sort;
+                    timing.mce += stats.mce;
+                    timing.choose += stats.choose;
                 };
 
                 while (true) {
@@ -597,16 +399,37 @@ BuildMCICliques(const float* vectors,
             timing.mce,
             timing.choose);
 
-        if (uncovered < static_cast<uint64_t>(0.9 * static_cast<double>(previous_uncovered))) {
-            now_alpha += params.alpha;
-        } else {
-            now_alpha *= 2.0F;
-        }
+        now_alpha = next_mci_alpha(now_alpha, params.alpha, uncovered, previous_uncovered);
         previous_uncovered = uncovered;
         if (now_alpha > 1000.0F) {
             break;
         }
     } while (uncovered > 0);
+
+    if (uncovered > 0) {
+        auto visit_neighbors = [&](InnerIdType seed, auto visitor) {
+            const auto* row = GraphRow(graph, seed);
+            const auto count = std::min<uint64_t>(GraphRowCount(graph, seed), graph.row_stride);
+            for (uint64_t i = 0; i < count; ++i) {
+                if (not visitor(row[i])) {
+                    break;
+                }
+            }
+        };
+        const auto repaired = EnsureMCICliqueCoverage(total,
+                                                      params.max_degree,
+                                                      params.clique_max,
+                                                      num_cliques_per_node,
+                                                      visit_neighbors,
+                                                      selected_by_thread.front(),
+                                                      allocator);
+        total_clique_count.fetch_add(repaired, std::memory_order_relaxed);
+        clique_containing_seed_count.fetch_add(repaired, std::memory_order_relaxed);
+        logger::info("mci v3 final coverage repair, uncovered_before={}, fallback_cliques={}",
+                     uncovered,
+                     repaired);
+        uncovered = 0;
+    }
 
     const auto timing = SumTiming(total_timings);
     logger::info(

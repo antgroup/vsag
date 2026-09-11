@@ -46,6 +46,7 @@ public:
                         bool compress_redundant_data = false,
                         LabelRemapType label_remap_type = LabelRemapType::PG);
 
+    // Reserved sentinel, never a live slot ID; valid IDs must be strictly below this value.
     static constexpr InnerIdType INVALID_ID = std::numeric_limits<InnerIdType>::max();
 
     void
@@ -267,6 +268,14 @@ public:
         return deleted_ids_filter_;
     }
 
+    // Pins the deletion set once; callers must release the filter before acquiring label locks.
+    FilterPtr
+    GetDeletedIdsReadView() const;
+
+    // Restore a persisted physical-slot mask after loading labels, before publishing the index.
+    void
+    RestoreDeletedIds(const Vector<InnerIdType>& ids, uint64_t total);
+
     std::vector<InnerIdType>
     GetDeletedIds(InnerIdType max_count) {
         std::shared_lock rlock(delete_ids_mutex_);
@@ -354,17 +363,37 @@ public:
             }
         }
 
+        bool remap_from = false;
         if (use_reverse_map_) {
-            label_remap_.Erase(label_table_[to]);
+            InnerIdType mapped = INVALID_ID;
+            remap_from = label_remap_.Find(label_table_[from], mapped) and mapped == from;
+            if (label_remap_.Find(label_table_[to], mapped) and mapped == to) {
+                label_remap_.Erase(label_table_[to]);
+            }
         }
         label_table_[to] = label_table_[from];
-        if (use_reverse_map_) {
+        // The caller retires the old tail; ShrinkToFit removes its stale label/source-ID row.
+        // An old tombstone may share its label with a later Add. Moving it must not hide
+        // the active incarnation by replacing that label's current reverse mapping.
+        if (remap_from) {
             label_remap_.InsertOrAssign(label_table_[to], to);
+        }
+        if (from < source_id_table_.size()) {
+            auto source_id = std::move(source_id_table_[from]);
+            if (to >= source_id_table_.size()) {
+                source_id_table_.resize(static_cast<uint64_t>(to) + 1);
+            }
+            source_id_table_[to] = std::move(source_id);
+        } else if (to < source_id_table_.size()) {
+            source_id_table_[to].clear();
         }
     }
 
     void
     ShrinkToFit(InnerIdType capacity) {
+        if (source_id_table_.size() > capacity) {
+            source_id_table_.resize(capacity);
+        }
         // Avoid a full-table copy for small removals; vector storage is still compacted by BruteForce.
         if (capacity <= label_table_.capacity() / 2) {
             try {
