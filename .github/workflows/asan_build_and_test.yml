@@ -9,7 +9,7 @@ on:
 jobs:
   build_asan_x86:
     name: Asan Build X86
-    runs-on: ubuntu-22.04
+    runs-on: [ linux, self-hosted, X64 ]
     container:
       image: vsaglib/vsag:ci-x86-mkl
       volumes:
@@ -125,7 +125,7 @@ jobs:
   test_asan_x86:
     name: Test X86
     needs: build_asan_x86
-    runs-on: ubuntu-22.04
+    runs-on: [ linux, self-hosted, X64 ]
     concurrency:
       group: test_asan_x86-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -246,7 +246,7 @@ jobs:
   test_example_x86:
     name: Test Example X86
     needs: build_asan_x86
-    runs-on: ubuntu-22.04
+    runs-on: [ linux, self-hosted, X64 ]
     container:
       image: vsaglib/vsag:ci-x86-mkl
       volumes:
@@ -276,7 +276,7 @@ jobs:
               $example
             fi
           done
-  
+
   test_example_aarch64:
     name: Test Example Aarch64
     needs: build_asan_aarch64
