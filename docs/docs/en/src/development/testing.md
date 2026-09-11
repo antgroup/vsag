@@ -29,7 +29,7 @@ bash scripts/coverage/check_cov.sh
 
 The collector writes `coverage/coverage.info` with repository-relative paths and branch data.
 It measures maintained production sources under `src/` and public headers under `include/`,
-excluding generated `src/version.h` and vendored `include/vsag/expected.hpp`. Code compiled only
+excluding generated `version.h` and vendored `include/vsag/expected.hpp`. Code compiled only
 on another platform is explicitly outside the Linux x86 report and must be measured by a
 platform-specific coverage job rather than treated as covered.
 
