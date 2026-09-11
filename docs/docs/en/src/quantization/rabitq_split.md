@@ -47,7 +47,12 @@ The relevant parameters are:
 | `rabitq_error_rate` | Default positive multiplier applied to the lower-bound error term. |
 | `use_reorder` | Should be `true` so candidates are ranked with the `x+y` distance. |
 | `rabitq_fused_datacell` | HGraph only; enables fused graph/code layout. Default: `false`. |
+| `rabitq_centroid_count` | Fused residual centers; default `16`. Any integer in `[1, min(N, INT32_MAX)]`, where N is the initial training dataset size. Not restricted to powers of two. |
+| `kmeans_iterations` | Full-data exact KMeans iterations; default `25`, positive integer up to `INT32_MAX`. |
 | `train_sample_count` | Maximum HGraph training sample size. The default is `65536`; the minimum explicit value is `512`. |
+
+In HGraph, `rabitq_centroid_count` and `kmeans_iterations` take effect only when
+`rabitq_fused_datacell=true`. Otherwise their values are range-validated but do not affect training.
 
 The constraints are:
 
@@ -67,14 +72,40 @@ bottom-layer node's neighbors, cluster id, label, x-bit code, and y-bit
 supplement in one cache-line-aligned record. Pyramid uses ordinary split
 storage; `rabitq_fused_datacell` is not a Pyramid parameter. The specialized
 HGraph search loop reads the record directly and prefetches graph links and
-quantized codes together. The codec uses 16 reproducibly trained residual
-clusters.
+quantized codes together. The codec uses `rabitq_centroid_count` residual clusters.
 
-By default, fused HGraph trains the base RaBitQ quantizer and fused KMeans codec on at most 65,536
-vectors. When `train_sample_count` is smaller than the dataset, it selects that many vectors using
-fixed-seed uniform reservoir sampling. Increasing the value can improve cluster-centroid quality at
-the cost of build time and temporary training memory; set it to at least the dataset size to train
-on all vectors.
+Fused KMeans always trains on every vector supplied to the initial Build or Add, independently of
+`train_sample_count`. It uses fixed-seed KMeans++ initialization and exact FP32 nearest-center
+assignment on every iteration, including when K is 10,000 or higher. No approximate center router
+or mini-batch training is used. Training and encoding cost grow with N, K, and dimension. Training
+workspace is O(N + K × dimension); blocking does not sample or exclude vectors. Initial data with
+fewer than K vectors is rejected. Centers remain fixed for subsequent Add and UpdateVector;
+changing K requires rebuilding the index.
+
+KMeans++ selects centers sequentially, but updates distances to each newly selected
+center in parallel row blocks using the training thread pool. Weight summation and
+random selection retain their original serial order, so changing the worker count
+does not change initialization results for a fixed seed on the same SIMD backend.
+Small inputs use a serial distance loop to avoid scheduling overhead. This remains
+full-data KMeans++, not sampled or approximate initialization.
+This reproducibility applies to initialization, not the complete index: the FHT
+rotator uses its own random seed, and multithreaded graph construction can also vary.
+
+The base RaBitQ quantizer normally uses `train_sample_count` (default 65,536), with fixed-seed uniform
+reservoir sampling when necessary. When fused ODescent construction actually uses FP32 graph
+distances (currently with `store_raw_vector=true`), it skips this sampling and global-mean
+training and does not generate unused temporary scalar RaBitQ graph codes, initializing only
+the data-independent rotation needed by fused codes. Full-data
+KMeans still runs. Merely storing raw vectors does not select FP32 construction for NSW, whose
+existing training behavior is unchanged. This optimization does not change graph-data selection
+or raw-vector storage/load policy.
+
+The fused codec stores shared transforms, contiguous original
+and transformed center tables, and squared center norms. Each query prepares its transform and
+query encoding once on the serial fused path. Routing, traversal, and reranking share a query-local cache which computes
+`g_add` and `g_error` only on the first visit to each center; these terms depend on the query and
+cannot be precomputed during Build. Generic parallel-search workers keep separate query states,
+so they prepare once per worker rather than once per cluster.
 
 This option creates an incrementally mutable in-memory index. After `Build` or
 Deserialize, it supports `Add`, mark remove, vector/id/attribute/extra-info
@@ -90,7 +121,14 @@ Each record starts with a 4-byte neighbor count followed by plain
 `InnerIdType` neighbor IDs. There is no node version and no version encoding in
 neighbor IDs. Cluster id, aligned external label, filter code, and supplement
 follow; the record stride remains rounded up to a 64-byte boundary. Storage can
-grow during `Build` and later `Add` operations.
+grow during `Build` and later `Add` operations. Full `Build` reserves capacity
+once for the input vector count before inserting nodes. Incremental `Add`
+doubles capacity when it is exhausted, or grows to the requested capacity if
+larger. Capacities are rounded up to multiples of `2^resize_increase_count_bit`
+(except at the internal ID limit). This avoids repeatedly copying the entire
+fused slab in small fixed increments. Spare capacity consumes memory, and
+growth temporarily retains both the old and new slabs. Non-fused indexes keep
+their existing growth policy.
 
 The optimized build uses temporary SQ8 scalar codes for symmetric base-to-base
 graph construction, then discards them. The completed index keeps only the
@@ -108,9 +146,9 @@ storage:
   must be disabled.
 - PCA is not supported; omit `rabitq_pca_dim` or set it to `0`.
 - The legacy v0.14 serialization format is not supported.
-- The fused slab wire format is versioned independently. The current format
-  intentionally rejects earlier development formats that contained node
-  versions and remove flags.
+- Fused graph format v3 and codec format v3 reject all earlier fused formats, including fixed-16
+  indexes and the previous codec v2. Rebuild those indexes. The destination must specify the same
+  cluster count. Codec v3 omits derived norms; loading computes them from validated rotated centers.
 
 Indexes created without this option keep their existing layout, behavior, and
 serialization format.
@@ -416,7 +454,7 @@ index, especially `dim`, `metric_type`, x/y bit widths, and query bits.
 Changing an encoded parameter requires rebuilding the index. Tuning only the
 search-time `hgraph.rabitq_error_rate` or `pyramid.rabitq_error_rate` does not.
 
-For a fused index, the codec model is serialized with the split datacell and
+For a fused index, the shared quantizer is serialized with the split datacell, while the cluster codec model is serialized with the fused graph, and
 the per-node codes are serialized once as part of the bottom-graph slab.
 Ordinary and streaming round trips preserve this layout without creating a
 second count-scaled copy of the split codes.

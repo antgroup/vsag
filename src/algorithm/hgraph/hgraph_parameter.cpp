@@ -74,6 +74,24 @@ HGraphParameter::FromJson(const JsonType& json) {
     if (json.Contains(HGRAPH_RABITQ_FUSED_DATACELL_KEY)) {
         this->rabitq_fused_datacell = json[HGRAPH_RABITQ_FUSED_DATACELL_KEY].GetBool();
     }
+    if (json.Contains(RABITQ_CENTROID_COUNT_KEY)) {
+        CHECK_ARGUMENT(json[RABITQ_CENTROID_COUNT_KEY].IsNumberInteger(),
+                       "rabitq_centroid_count must be an integer");
+        const auto count = json[RABITQ_CENTROID_COUNT_KEY].GetInt();
+        CHECK_ARGUMENT(count > 0, "rabitq_centroid_count must be in [1, INT32_MAX]");
+        CHECK_ARGUMENT(count <= std::numeric_limits<int32_t>::max(),
+                       "rabitq_centroid_count must be in [1, INT32_MAX]");
+        rabitq_centroid_count = static_cast<uint32_t>(count);
+    }
+    if (json.Contains(KMEANS_ITERATIONS_KEY)) {
+        CHECK_ARGUMENT(json[KMEANS_ITERATIONS_KEY].IsNumberInteger(),
+                       "kmeans_iterations must be an integer");
+        const auto iterations = json[KMEANS_ITERATIONS_KEY].GetInt();
+        CHECK_ARGUMENT(iterations > 0, "kmeans_iterations must be in [1, INT32_MAX]");
+        CHECK_ARGUMENT(iterations <= std::numeric_limits<int32_t>::max(),
+                       "kmeans_iterations must be in [1, INT32_MAX]");
+        kmeans_iterations = static_cast<uint32_t>(iterations);
+    }
 
     CHECK_ARGUMENT(json.Contains(BASE_CODES_KEY),
                    fmt::format("hgraph parameters must contains {}", BASE_CODES_KEY));
@@ -286,6 +304,8 @@ HGraphParameter::ToJson() const {
     json[HGRAPH_USE_ELP_OPTIMIZER_KEY].SetBool(this->use_elp_optimizer);
     json[HGRAPH_IGNORE_REORDER_KEY].SetBool(this->ignore_reorder);
     json[HGRAPH_RABITQ_FUSED_DATACELL_KEY].SetBool(this->rabitq_fused_datacell);
+    json[RABITQ_CENTROID_COUNT_KEY].SetUint64(rabitq_centroid_count);
+    json[KMEANS_ITERATIONS_KEY].SetUint64(kmeans_iterations);
     json[REORDER_SOURCE_KEY].SetString(this->reorder_source);
     json[BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
     json[GRAPH_KEY].SetJson(this->bottom_graph_param->ToJson());
@@ -347,6 +367,9 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, duplicate_distance_threshold);
     CHECK_FIELD_EQ(*this, *p, support_force_remove);
     CHECK_FIELD_EQ(*this, *p, rabitq_fused_datacell);
+    if (rabitq_fused_datacell) {
+        CHECK_FIELD_EQ(*this, *p, rabitq_centroid_count);
+    }
     // A conjugate-enabled reader can load an older index without the optional graph and start
     // with an empty one. The reverse direction would discard serialized enhancement data.
     if (not this->use_conjugate_graph and p->use_conjugate_graph) {

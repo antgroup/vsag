@@ -385,6 +385,54 @@ TEST_CASE("HGraph RaBitQ Split validates dimension before optimized training",
     REQUIRE(index->GetNumElements() == base_count);
 }
 
+TEST_CASE("HGraph fused builds and reloads more than ten thousand centers",
+          "[ft][rabitq_split][hgraph][fused][fused_full]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 8;
+    constexpr uint64_t count = 10001;
+    auto param = vsag::JsonType::Parse(
+        HGraphRaBitQSplitTestIndex::GenerateBuildParam("l2", dim, "memory_io", "", 2, 6));
+    auto config = param["index_param"];
+    config["graph_io_type"].SetString("memory_io");
+    config["graph_storage_type"].SetString("flat");
+    config["rabitq_fused_datacell"].SetBool(true);
+    config["rabitq_use_fht"].SetBool(true);
+    config["reorder_source"].SetString("base");
+    config["build_by_base"].SetBool(false);
+    config["build_thread_count"].SetInt(2);
+    config["max_degree"].SetInt(8);
+    config["ef_construction"].SetInt(32);
+    config["rabitq_centroid_count"].SetUint64(count);
+    config["kmeans_iterations"].SetInt(1);
+    config["train_sample_count"].SetInt(512);
+    auto dataset = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, count, "l2");
+    auto index = TestIndex::TestFactory("hgraph", param.Dump(), true);
+    REQUIRE(index->Build(dataset->base_).has_value());
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dim)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors() + (count - 1) * dim)
+        ->Owner(false);
+    const auto search = [&](const auto& target) {
+        auto result = target->KnnSearch(
+            query, 5, R"({"hgraph":{"ef_search":128,"rabitq_one_bit_search":true}})");
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 5);
+        REQUIRE(result.value()->GetStatistics({"query_computer_count"})[0] == "1");
+        return result.value();
+    };
+    auto before = search(index);
+    std::stringstream stream;
+    REQUIRE(index->Serialize(stream).has_value());
+    auto restored = TestIndex::TestFactory("hgraph", param.Dump(), true);
+    REQUIRE(restored->Deserialize(stream).has_value());
+    auto after = search(restored);
+    for (uint64_t i = 0; i < 5; ++i) {
+        REQUIRE(before->GetIds()[i] == after->GetIds()[i]);
+        REQUIRE(before->GetDistances()[i] == after->GetDistances()[i]);
+    }
+}
+
 TEST_CASE("HGraph fused RaBitQ rejects ExportModel",
           "[ft][rabitq_split][hgraph][fused][export_model]") {
     using namespace fixtures;
@@ -1353,6 +1401,7 @@ TEST_CASE("HGraph fused RaBitQ split expands a sole representative and its alias
     param_json["index_param"]["graph_storage_type"].SetString("flat");
     param_json["index_param"]["reorder_source"].SetString("base");
     param_json["index_param"]["rabitq_fused_datacell"].SetBool(true);
+    param_json["index_param"]["rabitq_centroid_count"].SetInt(3);
     param_json["index_param"]["rabitq_use_fht"].SetBool(true);
     param_json["index_param"]["store_raw_vector"].SetBool(false);
     param_json["index_param"]["use_mci"].SetBool(false);

@@ -87,8 +87,64 @@ public:
 
     explicit RaBitQuantizer(const QuantizerParamPtr& param, const IndexCommonParam& common_param);
 
+    // Lightweight, non-owning centroid view. The trained source and center table must outlive it.
+    RaBitQuantizer(const RaBitQuantizer& source, const float* transformed_centroid)
+        : Quantizer<RaBitQuantizer<metric>>(source),
+          num_bits_per_dim_query_(source.num_bits_per_dim_query_),
+          num_bits_per_dim_base_(source.num_bits_per_dim_base_),
+          num_bits_per_dim_filter_(source.num_bits_per_dim_filter_),
+          fast_encode_rabitq_(source.fast_encode_rabitq_),
+          fast_encode_rabitq_rounds_(source.fast_encode_rabitq_rounds_),
+          inv_sqrt_d_(source.inv_sqrt_d_),
+          rabitq_version_(source.rabitq_version_),
+          rabitq_error_rate_(source.rabitq_error_rate_),
+          use_fht_(source.use_fht_),
+          rom_(source.rom_),
+          centroid_view_(transformed_centroid),
+          pca_(source.pca_),
+          original_dim_(source.original_dim_),
+          pca_dim_(source.pca_dim_),
+          use_mrq_(source.use_mrq_),
+          aligned_dim_(source.aligned_dim_),
+          query_offset_lb_(source.query_offset_lb_),
+          query_offset_delta_(source.query_offset_delta_),
+          query_offset_sum_(source.query_offset_sum_),
+          query_offset_norm_(source.query_offset_norm_),
+          query_offset_mrq_norm_(source.query_offset_mrq_norm_),
+          query_offset_raw_norm_(source.query_offset_raw_norm_),
+          offset_code_(source.offset_code_),
+          offset_norm_(source.offset_norm_),
+          offset_error_(source.offset_error_),
+          offset_norm_code_(source.offset_norm_code_),
+          offset_sum_(source.offset_sum_),
+          offset_mrq_norm_(source.offset_mrq_norm_),
+          offset_raw_norm_(source.offset_raw_norm_),
+          offset_low_bound_error_(source.offset_low_bound_error_),
+          offset_one_bit_error_(source.offset_one_bit_error_),
+          split_layout_(source.split_layout_) {
+    }
+
+    [[nodiscard]] const float*
+    CentroidData() const {
+        return centroid_view_ == nullptr ? centroid_.data() : centroid_view_;
+    }
+
+    [[nodiscard]] uint64_t
+    CentroidSize() const {
+        return centroid_view_ == nullptr ? centroid_.size() : this->dim_;
+    }
+
     bool
     TrainImpl(const float* data, uint64_t count);
+
+    // Initialize data-independent transforms for fused residual codes without learning a mean.
+    void
+    TrainFusedTransform();
+
+    [[nodiscard]] bool
+    IsTrained() const {
+        return this->is_trained_;
+    }
 
     void
     SetCentroid(const float* centroid);
@@ -550,6 +606,7 @@ private:
     bool use_fht_{false};
     std::shared_ptr<VectorTransformer> rom_;
     std::vector<float> centroid_;  // TODO(ZXY): use centroids (e.g., IVF or Graph) outside
+    const float* centroid_view_{nullptr};
 
     // pca related
     std::shared_ptr<PCATransformer> pca_;

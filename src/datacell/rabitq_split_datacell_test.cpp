@@ -64,9 +64,16 @@ TEST_CASE("RaBitQ split interface queries with filter IP hints", "[ut][RaBitQSpl
     auto vectors = fixtures::generate_vectors(train_count, dim, false, 31);
     auto query = fixtures::generate_vectors(1, dim, false, 71);
     auto flatten = FlattenInterface::MakeInstance(param, common_param);
-    flatten->Train(vectors.data(), train_count);
     auto split = std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(flatten);
     REQUIRE(split != nullptr);
+    REQUIRE_THROWS_AS(split->TrainFusedCodec(vectors.data(), train_count, cluster_count),
+                      VsagException);
+    REQUIRE(split->FusedClusterCount() == 0);
+    if (GENERATE(false, true)) {
+        REQUIRE_NOTHROW(split->TrainFusedTransform());
+    } else {
+        flatten->Train(vectors.data(), train_count);
+    }
     split->TrainFusedCodec(vectors.data(), train_count, cluster_count);
 
     auto graph_param = std::make_shared<GraphDataCellParameter>();
@@ -155,6 +162,182 @@ TEST_CASE("RaBitQ split interface queries with filter IP hints", "[ut][RaBitQSpl
     }
     REQUIRE(fallback_statistics.rabitq_full_count.load() == query_count);
     REQUIRE(fallback_statistics.rabitq_reorder_hint_full_count.load() == query_count - 1);
+}
+
+TEST_CASE("Fused dynamic centers share a lazy query cache and serialize the model",
+          "[ut][RaBitQSplitDataCell][fused_full]") {
+    const auto metric = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP);
+    const auto filter_bits = GENERATE(1, 2, 3, 4);
+    const auto k = GENERATE(1U, 7U, 33U);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 32;
+    constexpr uint64_t count = 70;
+    auto param_json = JsonType::Parse(R"({
+        "codes_type": "rabitq_split", "io_params": {"type": "memory_io"},
+        "quantization_params": {"type": "rabitq", "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32, "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 2, "use_fht": true}
+    })");
+    param_json["quantization_params"]["rabitq_bits_per_dim_filter"].SetInt(filter_bits);
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(param_json);
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = metric;
+    auto vectors = fixtures::generate_vectors(count, dim, false, 71);
+    auto flatten = FlattenInterface::MakeInstance(param, common_param);
+    flatten->Train(vectors.data(), count);
+    auto split = std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(flatten);
+    split->TrainFusedCodec(vectors.data(), count, k, 2);
+    REQUIRE(split->FusedClusterCount() == k);
+    const auto payload = split->ExportFusedCodec();
+    REQUIRE(payload.size() == CheckedFusedCodecSize(dim, k));
+    REQUIRE(payload.size() == K_FUSED_CODEC_HEADER_SIZE + 2 * uint64_t{k} * dim * sizeof(float));
+    for (uint32_t version : {1U, 2U}) {
+        auto old_version = payload;
+        std::memcpy(old_version.data(), &version, sizeof(version));
+        REQUIRE_THROWS(split->ImportFusedCodec(old_version));
+    }
+    // The previous v2 payload also carried K derived double-precision norms.
+    auto old_layout = payload + std::string(uint64_t{k} * sizeof(double), '\0');
+    const uint32_t old_layout_version = 2;
+    std::memcpy(old_layout.data(), &old_layout_version, sizeof(old_layout_version));
+    REQUIRE_THROWS(split->ImportFusedCodec(old_layout));
+    for (uint64_t length = 0; length < K_FUSED_CODEC_HEADER_SIZE; ++length) {
+        REQUIRE_THROWS(split->ImportFusedCodec(payload.substr(0, length)));
+    }
+    REQUIRE_THROWS(split->ImportFusedCodec(payload + "x"));
+    REQUIRE_THROWS(split->ImportFusedCodec(payload.substr(0, payload.size() - 1)));
+    auto bad_count = payload;
+    const uint32_t oversized_count = std::numeric_limits<uint32_t>::max();
+    std::memcpy(bad_count.data() + sizeof(uint32_t), &oversized_count, sizeof(oversized_count));
+    REQUIRE_THROWS(split->ImportFusedCodec(bad_count));
+    const float invalid = std::numeric_limits<float>::infinity();
+    for (uint64_t offset : {K_FUSED_CODEC_HEADER_SIZE,
+                            K_FUSED_CODEC_HEADER_SIZE + uint64_t{k} * dim * sizeof(float)}) {
+        auto bad_center = payload;
+        std::memcpy(bad_center.data() + offset, &invalid, sizeof(invalid));
+        REQUIRE_THROWS(split->ImportFusedCodec(bad_center));
+    }
+    REQUIRE(split->ExportFusedCodec() == payload);
+    REQUIRE_NOTHROW(split->ImportFusedCodec(payload));
+    REQUIRE(split->ExportFusedCodec() == payload);
+
+    auto computer = split->FactoryFusedComputer(vectors.data());
+    RaBitQFusedTraversalQuery traversal;
+    REQUIRE(split->GetFusedTraversalQuery(computer, &traversal));
+    REQUIRE(traversal.cluster_cache->ComputedCount() == 0);
+    // A high-numbered center must work even when no visited node has populated it yet.
+    traversal.EnsureCluster(k - 1);
+    REQUIRE(traversal.cluster_cache->ComputedCount() == 1);
+    traversal.EnsureCluster(k - 1);
+    REQUIRE(traversal.cluster_cache->ComputedCount() == 1);
+    uint64_t offset = K_FUSED_CODEC_HEADER_SIZE + k * dim * sizeof(float);
+    std::vector<float> centers(k * dim);
+    std::memcpy(centers.data(), payload.data() + offset, centers.size() * sizeof(float));
+    for (uint32_t id = 0; id < k; ++id) {
+        traversal.EnsureCluster(id);
+        double squared = 0.0, dot = 0.0;
+        for (uint64_t d = 0; d < dim; ++d) {
+            const double q = traversal.transformed_query[d];
+            const double c = centers[uint64_t{id} * dim + d];
+            squared += (q - c) * (q - c);
+            dot += q * c;
+        }
+        const float expected =
+            static_cast<float>(metric == MetricType::METRIC_TYPE_IP ? -dot : squared);
+        REQUIRE(std::abs(traversal.cluster_g_add[id] - expected) < 1e-4F);
+        REQUIRE(std::abs(traversal.cluster_g_error[id] - std::sqrt(squared)) < 1e-4);
+    }
+    REQUIRE(traversal.cluster_cache->ComputedCount() == k);
+    auto other = split->FactoryFusedComputer(vectors.data() + dim);
+    RaBitQFusedTraversalQuery other_traversal;
+    REQUIRE(split->GetFusedTraversalQuery(other, &other_traversal));
+    REQUIRE(other_traversal.cluster_cache != traversal.cluster_cache);
+    REQUIRE(other_traversal.cluster_cache->ComputedCount() == 0);
+
+    Vector<uint8_t> filter(split->OneBitCodeSize(), allocator.get());
+    Vector<uint8_t> supplement(split->SupplementCodeSize(), allocator.get());
+    uint32_t id = 0;
+    REQUIRE(split->EncodeFused(vectors.data() + dim, filter.data(), supplement.data(), &id));
+    float before = 0.0F, after = 0.0F;
+    REQUIRE(
+        split->ComputeFusedFull(computer, id, filter.data(), supplement.data(), &before, nullptr));
+    // Query caches borrow the model, so release them before replacing it.
+    computer.reset();
+    other.reset();
+    split->ImportFusedCodec(payload);
+    computer = split->FactoryFusedComputer(vectors.data());
+    REQUIRE(
+        split->ComputeFusedFull(computer, id, filter.data(), supplement.data(), &after, nullptr));
+    REQUIRE(before == after);
+}
+
+TEST_CASE("Fused query center terms avoid cancellation", "[ut][RaBitQSplitDataCell][fused_full]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    const float query[] = {1000000.0F, 1000000.125F};
+    const float center[] = {1000000.0F, 1000000.0F};
+    const double norm = 2000000000000.0;
+    RaBitQFusedQueryCache cache(allocator.get());
+    cache.Initialize(query, center, &norm, 2, 1, MetricType::METRIC_TYPE_L2SQR);
+    cache.Ensure(0);
+    REQUIRE(cache.add[0] == 0.015625F);
+    REQUIRE(cache.error[0] == 0.125F);
+}
+
+TEST_CASE("Fused codec size validates fields and overflow",
+          "[ut][RaBitQSplitDataCell][fused_full]") {
+    REQUIRE(CheckedFusedCodecSize(1, 1) == K_FUSED_CODEC_HEADER_SIZE + 2 * sizeof(float));
+    REQUIRE_THROWS(CheckedFusedCodecSize(0, 1));
+    REQUIRE_THROWS(CheckedFusedCodecSize(1, 0));
+    REQUIRE_THROWS(CheckedFusedCodecSize(1, std::numeric_limits<uint32_t>::max()));
+    REQUIRE_THROWS(CheckedFusedCodecSize(std::numeric_limits<uint64_t>::max(), 1));
+    const auto largest_stride_dim = std::numeric_limits<uint64_t>::max() / (2 * sizeof(float));
+    REQUIRE_THROWS(CheckedFusedCodecSize(largest_stride_dim, 1));
+    REQUIRE_THROWS(CheckedFusedCodecSize(largest_stride_dim / 2, 3));
+}
+
+TEST_CASE("Fused query center terms handle zero and tiny vectors",
+          "[ut][RaBitQSplitDataCell][fused_full]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    const float magnitude = GENERATE(0.0F, std::numeric_limits<float>::min());
+    const float query[] = {GENERATE(-1.0F, 1.0F) * magnitude};
+    const float center[] = {magnitude};
+    const double norm = static_cast<double>(magnitude) * magnitude;
+    const auto metric = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP);
+    RaBitQFusedQueryCache cache(allocator.get());
+    cache.Initialize(query, center, &norm, 1, 1, metric);
+    cache.Ensure(0);
+    // The squared term may round to zero in FP32, but its FP64 square root must not be lost.
+    REQUIRE(cache.add[0] == 0.0F);
+    REQUIRE(cache.error[0] ==
+            static_cast<float>(std::abs(static_cast<double>(query[0]) - center[0])));
+    cache.Ensure(0);
+    REQUIRE(cache.ComputedCount() == 1);
+}
+
+TEST_CASE("Fused query cache exposes a read-only count and resets it on initialization",
+          "[ut][RaBitQSplitDataCell][fused_full]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    const float query[] = {1.0F};
+    const float centers[] = {0.0F, 2.0F};
+    const double norms[] = {0.0, 4.0};
+    RaBitQFusedQueryCache cache(allocator.get());
+    const auto& read_only_cache = cache;
+    REQUIRE(read_only_cache.ComputedCount() == 0);
+    cache.Initialize(query, centers, norms, 1, 2, MetricType::METRIC_TYPE_L2SQR);
+    REQUIRE(read_only_cache.ComputedCount() == 0);
+    cache.Ensure(1);
+    REQUIRE(read_only_cache.ComputedCount() == 1);
+    cache.Ensure(1);
+    REQUIRE(read_only_cache.ComputedCount() == 1);
+    cache.Ensure(0);
+    REQUIRE(read_only_cache.ComputedCount() == 2);
+    cache.Initialize(query, centers, norms, 1, 1, MetricType::METRIC_TYPE_L2SQR);
+    REQUIRE(read_only_cache.ComputedCount() == 0);
+    cache.Ensure(0);
+    REQUIRE(read_only_cache.ComputedCount() == 1);
 }
 
 }  // namespace vsag
