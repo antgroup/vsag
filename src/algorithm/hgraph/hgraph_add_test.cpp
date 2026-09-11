@@ -1539,3 +1539,148 @@ TEST_CASE("HGraph optimized build accepts MRLE RaBitQ split with raw-vector stor
     vsag::HGraphOptimizedBuildSession session(*hgraph);
     REQUIRE(session.Active());
 }
+
+TEST_CASE("HGraph adaptive pruning build reload and add", "[ut][hgraph][adaptive_pruning]") {
+    const int64_t threads = GENERATE(1, 4);
+    auto common = MakeCommonParam(2, threads);
+    auto json = MakeFp32HGraphJson(false, threads);
+    json["alpha"].SetFloat(1.06F);
+    json["adaptive_pruning"].SetBool(true);
+    json["adaptive_pruning_adjust_step"].SetFloat(0.06F);
+    const bool reverse = GENERATE(false, true);
+    json["adaptive_pruning_apply_to_reverse"].SetBool(reverse);
+    auto index = MakeHGraphIndex(json, common);
+    std::vector<float> vectors;
+    std::vector<int64_t> ids;
+    for (int64_t i = 0; i < 128; ++i) {
+        vectors.push_back(static_cast<float>(i % 16));
+        vectors.push_back(static_cast<float>(i / 16));
+        ids.push_back(i);
+    }
+    auto build = index->Build(MakeFloatDataset(vectors, ids, 2, ids.size()));
+    REQUIRE(build.has_value());
+    REQUIRE(build.value().empty());
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = MakeHGraphIndex(json, common);
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    std::vector<float> query = {3.0F, 3.0F};
+    auto found =
+        restored->KnnSearch(MakeFloatQuery(query, 2), 1, R"({"hgraph":{"ef_search":128}})");
+    REQUIRE(found.has_value());
+    REQUIRE(found.value()->GetDim() == 1);
+    CHECK(found.value()->GetIds()[0] == 51);
+    std::vector<float> added = {3.25F, 3.25F};
+    std::vector<int64_t> added_ids = {128};
+    auto add = restored->Add(MakeFloatDataset(added, added_ids, 2, 1));
+    REQUIRE(add.has_value());
+    REQUIRE(add.value().empty());
+    found = restored->KnnSearch(MakeFloatQuery(added, 2), 1, R"({"hgraph":{"ef_search":128}})");
+    REQUIRE(found.has_value());
+    REQUIRE(found.value()->GetDim() == 1);
+    CHECK(found.value()->GetIds()[0] == 128);
+    auto incompatible_json = MakeFp32HGraphJson(false, threads);
+    auto incompatible = MakeHGraphIndex(incompatible_json, common);
+    CHECK_FALSE(incompatible->Deserialize(binary.value()).has_value());
+    auto changed = vsag::JsonType::Parse(json.Dump());
+    changed["adaptive_pruning_adjust_step"].SetFloat(0.03F);
+    CHECK_FALSE(MakeHGraphIndex(changed, common)->Deserialize(binary.value()).has_value());
+    auto wrong_scope = vsag::JsonType::Parse(json.Dump());
+    wrong_scope["adaptive_pruning_apply_to_reverse"].SetBool(not reverse);
+    CHECK_FALSE(MakeHGraphIndex(wrong_scope, common)->Deserialize(binary.value()).has_value());
+    json["alpha"].SetFloat(1.12F);
+    CHECK_FALSE(MakeHGraphIndex(json, common)->Deserialize(binary.value()).has_value());
+}
+
+TEST_CASE("HGraph adaptive pruning unsupported contexts", "[ut][hgraph][adaptive_pruning]") {
+    auto common = MakeCommonParam(2);
+    auto json = MakeFp32HGraphJson(false);
+    json["adaptive_pruning"].SetBool(true);
+    SECTION("ODescent") {
+        json["graph_type"].SetString("odescent");
+        CHECK_THROWS(MakeHGraphIndex(json, common));
+    }
+    SECTION("Inner product") {
+        common.metric_ = vsag::MetricType::METRIC_TYPE_IP;
+        CHECK_THROWS(MakeHGraphIndex(json, common));
+    }
+    SECTION("Unsupported scope") {
+        json["adaptive_pruning_apply_to_upper"].SetBool(true);
+        CHECK_THROWS(MakeHGraphIndex(json, common));
+    }
+    SECTION("Invalid threshold") {
+        json["adaptive_pruning_adjust_step"].SetFloat(1.0F);
+        CHECK_THROWS(MakeHGraphIndex(json, common));
+    }
+}
+
+TEST_CASE("HGraph adaptive pruning rejects imported build caches",
+          "[ut][hgraph][adaptive_pruning][cache]") {
+    auto common = MakeCommonParam(2);
+    std::vector<float> vectors = {0, 0, 1, 0, 0, 1, 1, 1};
+    std::vector<int64_t> ids = {10, 20, 30, 40};
+    std::vector<std::string> source_ids = {"a", "b", "c", "d"};
+    auto data = MakeFloatDatasetWithSourceIds(vectors, ids, source_ids, 2, 4);
+    auto json = MakeFp32HGraphJson(false);
+    auto source = MakeHGraphIndex(json, common);
+    REQUIRE(source->Build(data).has_value());
+    std::stringstream cache;
+    REQUIRE(source->ExportCache(cache).has_value());
+    cache.seekg(0);
+    json["adaptive_pruning"].SetBool(true);
+    json["adaptive_pruning_apply_to_reverse"].SetBool(GENERATE(false, true));
+    auto target = MakeHGraphIndex(json, common);
+    REQUIRE(target->ImportCache(cache).has_value());
+    const auto result = target->Build(data);
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    CHECK(result.error().message.find("adaptive_pruning") != std::string::npos);
+}
+
+TEST_CASE("HGraph adaptive pruning RaBitQ split and fused lifecycle",
+          "[ut][hgraph][adaptive_pruning][fused]") {
+    const bool fused = GENERATE(false, true);
+    const int64_t threads = GENERATE(1, 4);
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 64;
+    auto common = MakeCommonParam(dim, threads);
+    auto json = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"rabitq", "precise_quantization_type":"rabitq",
+        "base_io_type":"memory_io", "base_supplement_io_type":"memory_io",
+        "rabitq_bits_per_dim_base":2, "rabitq_bits_per_dim_precise":6,
+        "graph_io_type":"memory_io", "graph_storage_type":"flat", "graph_type":"nsw",
+        "max_degree":8, "ef_construction":32, "use_reorder":true, "reorder_source":"base",
+        "alpha":1.06, "adaptive_pruning":true
+    })");
+    json["rabitq_fused_datacell"].SetBool(fused);
+    // Split incremental Add already requires raw vectors for its temporary SQ8 build store.
+    json["store_raw_vector"].SetBool(not fused);
+    json["build_thread_count"].SetInt(threads);
+    json["adaptive_pruning_apply_to_reverse"].SetBool(GENERATE(false, true));
+    auto index = MakeHGraphIndex(json, common);
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i;
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[i * dim + d] = static_cast<float>((i * 17 + d * 13) % 101) / 101.0F;
+        }
+    }
+    auto built = index->Build(MakeFloatDataset(vectors, ids, dim, count));
+    REQUIRE(built.has_value());
+    REQUIRE(built.value().empty());
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = MakeHGraphIndex(json, common);
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    std::vector<float> added(dim, 2.0F);
+    std::vector<int64_t> added_ids = {count};
+    auto result = restored->Add(MakeFloatDataset(added, added_ids, dim, 1));
+    REQUIRE(result.has_value());
+    REQUIRE(result.value().empty());
+    auto found =
+        restored->KnnSearch(MakeFloatQuery(added, dim), 1, R"({"hgraph":{"ef_search":64}})");
+    REQUIRE(found.has_value());
+    REQUIRE(found.value()->GetDim() == 1);
+    CHECK(found.value()->GetIds()[0] == count);
+}

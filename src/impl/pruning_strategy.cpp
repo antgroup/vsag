@@ -52,9 +52,40 @@ public:
 
 private:
     const DistanceProviderForGraph& distance_provider_;
-    // The helper lives for one pruning pass; its source IDs are bounded by the selected-edge limit.
+    // Per-call cache; adaptive passes may select different source IDs (at most twice the degree).
     UnorderedMap<InnerIdType, ComputerInterfacePtr> computers_;
 };
+
+void
+select_adaptive_heap(const DistHeapPtr& edges,
+                     InnerIdType center,
+                     uint64_t max_size,
+                     const DistanceProviderForGraph& distance_provider,
+                     Allocator* allocator,
+                     float alpha,
+                     const AdaptivePruningParameter& parameter) {
+    // Keep distance-computer scratch bounded to one vertex selection.
+    PairwiseDistanceComputer pairwise_distance(distance_provider, allocator);
+    Vector<PruningCandidate> candidates(allocator);
+    candidates.reserve(edges->Size());
+    while (not edges->Empty()) {
+        candidates.push_back(edges->Top());
+        edges->Pop();
+    }
+    const auto selected = select_edges_adaptive(
+        candidates,
+        center,
+        max_size,
+        alpha,
+        parameter,
+        [&](InnerIdType left, InnerIdType right) {
+            return pairwise_distance.PairwiseDistance(left, right);
+        },
+        allocator);
+    for (const auto& candidate : selected) {
+        edges->Push(candidate.first, candidate.second);
+    }
+}
 
 }  // namespace
 
@@ -133,10 +164,16 @@ mutually_connect_new_element(InnerIdType cur_c,
                              const DistanceProviderForGraph& distance_provider,
                              const MutexArrayPtr& neighbors_mutexes,
                              Allocator* allocator,
-                             float alpha) {
+                             float alpha,
+                             const AdaptivePruningParameter* pruning) {
     PairwiseDistanceComputer pairwise_distance(distance_provider, allocator);
     const uint64_t max_size = graph->MaximumDegree();
-    select_edges_by_heuristic(top_candidates, max_size, distance_provider, allocator, alpha);
+    if (pruning != nullptr && pruning->enabled) {
+        select_adaptive_heap(
+            top_candidates, cur_c, max_size, distance_provider, allocator, alpha, *pruning);
+    } else {
+        select_edges_by_heuristic(top_candidates, max_size, distance_provider, allocator, alpha);
+    }
     if (top_candidates->Size() > max_size) {
         throw VsagException(
             ErrorType::INTERNAL_ERROR,
@@ -150,6 +187,10 @@ mutually_connect_new_element(InnerIdType cur_c,
         top_candidates->Pop();
     }
 
+    if (selected_neighbors.empty()) {
+        graph->InsertNeighborsById(cur_c, selected_neighbors);
+        return cur_c;
+    }
     InnerIdType next_closest_entry_point = selected_neighbors.back();
 
     graph->InsertNeighborsById(cur_c, selected_neighbors);
@@ -187,7 +228,20 @@ mutually_connect_new_element(InnerIdType cur_c,
                     neighbors[j]);
             }
 
-            select_edges_by_heuristic(candidates, max_size, distance_provider, allocator, alpha);
+            // The reverse center is the existing neighbor, not the newly inserted node.
+            // This selection and publication stay under that neighbor's existing lock.
+            if (pruning != nullptr && pruning->enabled && pruning->apply_to_reverse) {
+                select_adaptive_heap(candidates,
+                                     selected_neighbor,
+                                     max_size,
+                                     distance_provider,
+                                     allocator,
+                                     alpha,
+                                     *pruning);
+            } else {
+                select_edges_by_heuristic(
+                    candidates, max_size, distance_provider, allocator, alpha);
+            }
 
             Vector<InnerIdType> cand_neighbors(allocator);
             while (not candidates->Empty()) {
@@ -230,10 +284,17 @@ mutually_connect_new_element(InnerIdType cur_c,
                              const FlattenInterfacePtr& flatten,
                              const MutexArrayPtr& neighbors_mutexes,
                              Allocator* allocator,
-                             float alpha) {
+                             float alpha,
+                             const AdaptivePruningParameter* pruning) {
     FlattenDistanceProvider distance_provider(flatten, nullptr);
-    return mutually_connect_new_element(
-        cur_c, top_candidates, graph, distance_provider, neighbors_mutexes, allocator, alpha);
+    return mutually_connect_new_element(cur_c,
+                                        top_candidates,
+                                        graph,
+                                        distance_provider,
+                                        neighbors_mutexes,
+                                        allocator,
+                                        alpha,
+                                        pruning);
 }
 
 }  // namespace vsag

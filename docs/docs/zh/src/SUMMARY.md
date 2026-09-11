@@ -15,6 +15,7 @@
 - [总览](indexes/README.md)
 - [索引参数](resources/index_parameters.md)
 - [HGraph](indexes/hgraph.md)
+  - [自适应邻居剪枝](indexes/adaptive_pruning.md)
 - [LazyHGraph](indexes/lazy_hgraph.md)
 - [IVF](indexes/ivf.md)
 - [SINDI](indexes/sindi.md)
