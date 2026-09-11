@@ -474,7 +474,8 @@ Pyramid::add_routed_point(const Hierarchy& hierarchy,
                                              codes,
                                              points_mutex_,
                                              allocator_,
-                                             hierarchy.alpha);
+                                             hierarchy.alpha,
+                                             &adaptive_pruning_);
             }
         }
 
@@ -1874,7 +1875,12 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
     for (const auto& [key, ignored] : external_param.GetInnerJson()->items()) {
         (void)ignored;
         auto value = external_param[key];
-        if (key == PYRAMID_EF_CONSTRUCTION) {
+        if (key == PYRAMID_ADAPTIVE_PRUNING || key == "adaptive_pruning_adjust_step" ||
+            key == "adaptive_pruning_apply_to_reverse" ||
+            key == "adaptive_pruning_apply_to_upper" || key == "adaptive_pruning_fill_rejected" ||
+            key == "fill_rejected") {
+            inner_json[key].SetJson(value);
+        } else if (key == PYRAMID_EF_CONSTRUCTION) {
             inner_json[EF_CONSTRUCTION_KEY].SetJson(value);
         } else if (key == PYRAMID_USE_REORDER) {
             inner_json[USE_REORDER_KEY].SetJson(value);
@@ -2003,6 +2009,8 @@ Pyramid::Train(const DatasetPtr& base) {
 std::vector<int64_t>
 Pyramid::Build(const DatasetPtr& base) {
     CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
+    CHECK_ARGUMENT(not(adaptive_pruning_.enabled && has_loaded_cache()),
+                   "adaptive_pruning does not yet support building from imported cache");
     const auto data_num = base->GetNumElements();
     if (graph_type_ == GRAPH_TYPE_VALUE_NSW && not support_duplicate_ && has_loaded_cache() &&
         base->GetSourceID() != nullptr) {
@@ -2115,8 +2123,14 @@ Pyramid::add_bottom_graph_point(const Hierarchy& hierarchy,
             connect_cached_graph_point(
                 inner_id, vector, results, node.graph_, codes, hierarchy.alpha);
         } else {
-            mutually_connect_new_element(
-                inner_id, results, node.graph_, codes, points_mutex_, allocator_, hierarchy.alpha);
+            mutually_connect_new_element(inner_id,
+                                         results,
+                                         node.graph_,
+                                         codes,
+                                         points_mutex_,
+                                         allocator_,
+                                         hierarchy.alpha,
+                                         &adaptive_pruning_);
         }
         if (update_entry_point) {
             node.entry_point_ = inner_id;

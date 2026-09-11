@@ -68,6 +68,7 @@ public:
           odescent_param_(pyramid_param->odescent_param),
           index_min_size_(pyramid_param->index_min_size),
           graph_type_(pyramid_param->graph_type),
+          adaptive_pruning_(pyramid_param->adaptive_pruning),
           default_rabitq_one_bit_search_(pyramid_param->use_reorder and
                                          pyramid_param->base_codes_param->name ==
                                              RABITQ_SPLIT_DATA_CELL),
@@ -75,6 +76,16 @@ public:
           persist_source_id_(pyramid_param->persist_source_id),
           store_paths_(pyramid_param->store_paths),
           cache_(std::make_unique<PyramidBuildCache>(common_param.allocator_.get())) {
+        adaptive_pruning_.Validate(pyramid_param->alpha);
+        if (adaptive_pruning_.enabled) {
+            CHECK_ARGUMENT(graph_type_ == GRAPH_TYPE_VALUE_NSW,
+                           "adaptive_pruning currently supports only nsw graph construction");
+            CHECK_ARGUMENT(common_param.metric_ == MetricType::METRIC_TYPE_L2SQR,
+                           "adaptive_pruning currently supports only L2 distance");
+            for (const auto& hierarchy : pyramid_param->hierarchies) {
+                adaptive_pruning_.Validate(hierarchy.alpha);
+            }
+        }
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
         if (pyramid_param->has_hierarchies) {
             for (const auto& h_param : pyramid_param->hierarchies) {
@@ -568,7 +579,8 @@ private:
     mutable std::shared_mutex resize_mutex_;             // guards flatten storage resize/write/read
     mutable std::mutex cur_element_count_mutex_;         // guards cur_element_count_ updates
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};       // graph algorithm type
-    bool default_rabitq_one_bit_search_{false};          // default split lower-bound search
+    AdaptivePruningParameter adaptive_pruning_;
+    bool default_rabitq_one_bit_search_{false};  // default split lower-bound search
 
     std::mutex random_generator_mutex_;
     std::default_random_engine level_generator_{
