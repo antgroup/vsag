@@ -207,3 +207,11 @@ For a complete list of build options, see the `option()` directives in `cmake/VS
 - `src/`: the source codes and unit tests
 - `tests/`: the functional tests
 - `tools/`: the tools
+
+### Python AutoTune build dependencies
+
+Enabling `ENABLE_PYBINDS` also builds the C++ AutoTune engine and evaluator
+(HDF5, yaml-cpp, argparse, tabulate and httplib dependencies), without requiring
+`ENABLE_TOOLS`. AutoTune is statically included in `_pyvsag`; no additional
+AutoTune shared library needs to be shipped in the wheel. The existing
+`libvsag` packaging and wheel repair steps still apply.
