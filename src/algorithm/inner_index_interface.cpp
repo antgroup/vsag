@@ -829,14 +829,26 @@ InnerIndexInterface::get_data_by_ids_with_flag(const int64_t* ids,
             inner_ids.emplace_back(this->label_table_->GetIdByLabel(ids[i]));
         }
     }
-    auto thread_count = static_cast<int64_t>(this->build_thread_count_);
-    auto item_per_thread = (count + thread_count - 1) / thread_count;
+    if ((selected_data_flag & DATA_FLAG_FLOAT32_VECTOR) != 0U) {
+        CHECK_ARGUMENT(this->has_raw_vector_, "has_raw_vector_ is false");
+    }
+    if ((selected_data_flag & DATA_FLAG_ATTRIBUTE) != 0U) {
+        CHECK_ARGUMENT(this->has_attribute_, "has_attribute_ is false");
+    }
+    if ((selected_data_flag & DATA_FLAG_EXTRA_INFO) != 0U) {
+        CHECK_ARGUMENT(this->extra_info_size_ > 0, "extra_info_size_ is 0");
+    }
     auto dataset = Dataset::Make();
     dataset->NumElements(count)->Dim(dim_)->Owner(true, allocator_);
+    if (count == 0) {
+        return dataset;
+    }
+
+    const auto thread_count = static_cast<int64_t>(std::max<uint64_t>(
+        uint64_t{1}, std::min<uint64_t>(this->build_thread_count_, static_cast<uint64_t>(count))));
+    const auto item_per_thread =
+        count / thread_count + static_cast<int64_t>(count % thread_count != 0);
     if ((selected_data_flag & DATA_FLAG_FLOAT32_VECTOR) != 0U) {
-        if (not this->has_raw_vector_) {
-            throw VsagException(ErrorType::INVALID_ARGUMENT, "has_raw_vector_ is false");
-        }
         auto* fp32_data = reinterpret_cast<float*>(
             this->allocator_->Allocate(count * this->dim_ * sizeof(float)));
         dataset->Float32Vectors(fp32_data);
@@ -845,11 +857,12 @@ InnerIndexInterface::get_data_by_ids_with_flag(const int64_t* ids,
                 this->GetVectorByInnerId(inner_ids[i], fp32_data + i * this->dim_);
             }
         };
-        if (this->thread_pool_ != nullptr) {
+        if (this->thread_pool_ != nullptr and thread_count > 1) {
             std::vector<std::future<void>> futures;
+            futures.reserve(thread_count);
             for (int64_t i = 0; i < thread_count; ++i) {
-                int64_t begin = i * item_per_thread;
-                int64_t end = std::min(begin + item_per_thread, count);
+                const auto begin = i * item_per_thread;
+                const auto end = std::min(begin + item_per_thread, count);
                 futures.emplace_back(this->thread_pool_->GeneralEnqueue(get_vec_func, begin, end));
             }
             for (auto& future : futures) {
@@ -861,9 +874,6 @@ InnerIndexInterface::get_data_by_ids_with_flag(const int64_t* ids,
     }
 
     if ((selected_data_flag & DATA_FLAG_ATTRIBUTE) != 0U) {
-        if (not this->has_attribute_) {
-            throw VsagException(ErrorType::INVALID_ARGUMENT, "has_attribute_ is false");
-        }
         auto* attribute_data = new AttributeSet[count];
         dataset->AttributeSets(attribute_data);
         auto get_attr_func = [&](int64_t begin, int64_t end) {
@@ -871,11 +881,12 @@ InnerIndexInterface::get_data_by_ids_with_flag(const int64_t* ids,
                 this->GetAttributeSetByInnerId(inner_ids[i], attribute_data + i);
             }
         };
-        if (this->thread_pool_ != nullptr) {
+        if (this->thread_pool_ != nullptr and thread_count > 1) {
             std::vector<std::future<void>> futures;
+            futures.reserve(thread_count);
             for (int64_t i = 0; i < thread_count; ++i) {
-                int64_t begin = i * item_per_thread;
-                int64_t end = std::min(begin + item_per_thread, count);
+                const auto begin = i * item_per_thread;
+                const auto end = std::min(begin + item_per_thread, count);
                 futures.emplace_back(this->thread_pool_->GeneralEnqueue(get_attr_func, begin, end));
             }
             for (auto& future : futures) {
@@ -887,9 +898,6 @@ InnerIndexInterface::get_data_by_ids_with_flag(const int64_t* ids,
     }
 
     if ((selected_data_flag & DATA_FLAG_EXTRA_INFO) != 0U) {
-        if (extra_info_size_ == 0) {
-            throw VsagException(ErrorType::INVALID_ARGUMENT, "extra_info_size_ is 0");
-        }
         auto* extra_info =
             reinterpret_cast<char*>(this->allocator_->Allocate(count * extra_info_size_));
         dataset->ExtraInfos(extra_info)->ExtraInfoSize(static_cast<int64_t>(extra_info_size_));
@@ -899,11 +907,12 @@ InnerIndexInterface::get_data_by_ids_with_flag(const int64_t* ids,
                                                      extra_info + i * extra_info_size_);
             }
         };
-        if (this->thread_pool_ != nullptr) {
+        if (this->thread_pool_ != nullptr and thread_count > 1) {
             std::vector<std::future<void>> futures;
+            futures.reserve(thread_count);
             for (int64_t i = 0; i < thread_count; ++i) {
-                int64_t begin = i * item_per_thread;
-                int64_t end = std::min(begin + item_per_thread, count);
+                const auto begin = i * item_per_thread;
+                const auto end = std::min(begin + item_per_thread, count);
                 futures.emplace_back(
                     this->thread_pool_->GeneralEnqueue(get_extra_info_func, begin, end));
             }
