@@ -46,7 +46,7 @@ CheckedFusedCodecSize(uint64_t dim, uint64_t count) {
 
 // A single query owns this cache across graph routing, traversal and reranking.
 // Not thread-safe: these stages must access it sequentially. Concurrent queries/workers need
-// separate caches; ready and computed_count intentionally require no atomic operations.
+// separate caches; ready and computed_count_ intentionally require no atomic operations.
 class RaBitQFusedQueryCache {
 public:
     explicit RaBitQFusedQueryCache(Allocator* allocator)
@@ -72,7 +72,7 @@ public:
         add.resize(count);
         error.resize(count);
         ready.assign(count, 0);
-        computed_count = 0;
+        computed_count_ = 0;
     }
 
     void
@@ -99,15 +99,22 @@ public:
         add[id] = static_cast<float>(metric_ == MetricType::METRIC_TYPE_IP ? -dot : squared);
         error[id] = static_cast<float>(std::sqrt(squared));
         ready[id] = 1;
-        ++computed_count;
+        ++computed_count_;
+    }
+
+    // Read under the same single-owner sequencing as Initialize/Ensure. Const access does not
+    // synchronize with concurrent mutation of the cache.
+    [[nodiscard]] uint64_t
+    ComputedCount() const {
+        return computed_count_;
     }
 
     Vector<float> add;
     Vector<float> error;
     Vector<uint8_t> ready;
-    uint64_t computed_count{0};
 
 private:
+    uint64_t computed_count_{0};
     const float* query_{nullptr};
     const float* centers_{nullptr};
     const double* norms_{nullptr};

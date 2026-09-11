@@ -227,12 +227,12 @@ TEST_CASE("Fused dynamic centers share a lazy query cache and serialize the mode
     auto computer = split->FactoryFusedComputer(vectors.data());
     RaBitQFusedTraversalQuery traversal;
     REQUIRE(split->GetFusedTraversalQuery(computer, &traversal));
-    REQUIRE(traversal.cluster_cache->computed_count == 0);
+    REQUIRE(traversal.cluster_cache->ComputedCount() == 0);
     // A high-numbered center must work even when no visited node has populated it yet.
     traversal.EnsureCluster(k - 1);
-    REQUIRE(traversal.cluster_cache->computed_count == 1);
+    REQUIRE(traversal.cluster_cache->ComputedCount() == 1);
     traversal.EnsureCluster(k - 1);
-    REQUIRE(traversal.cluster_cache->computed_count == 1);
+    REQUIRE(traversal.cluster_cache->ComputedCount() == 1);
     uint64_t offset = K_FUSED_CODEC_HEADER_SIZE + k * dim * sizeof(float);
     std::vector<float> centers(k * dim);
     std::memcpy(centers.data(), payload.data() + offset, centers.size() * sizeof(float));
@@ -250,12 +250,12 @@ TEST_CASE("Fused dynamic centers share a lazy query cache and serialize the mode
         REQUIRE(std::abs(traversal.cluster_g_add[id] - expected) < 1e-4F);
         REQUIRE(std::abs(traversal.cluster_g_error[id] - std::sqrt(squared)) < 1e-4);
     }
-    REQUIRE(traversal.cluster_cache->computed_count == k);
+    REQUIRE(traversal.cluster_cache->ComputedCount() == k);
     auto other = split->FactoryFusedComputer(vectors.data() + dim);
     RaBitQFusedTraversalQuery other_traversal;
     REQUIRE(split->GetFusedTraversalQuery(other, &other_traversal));
     REQUIRE(other_traversal.cluster_cache != traversal.cluster_cache);
-    REQUIRE(other_traversal.cluster_cache->computed_count == 0);
+    REQUIRE(other_traversal.cluster_cache->ComputedCount() == 0);
 
     Vector<uint8_t> filter(split->OneBitCodeSize(), allocator.get());
     Vector<uint8_t> supplement(split->SupplementCodeSize(), allocator.get());
@@ -314,7 +314,30 @@ TEST_CASE("Fused query center terms handle zero and tiny vectors",
     REQUIRE(cache.error[0] ==
             static_cast<float>(std::abs(static_cast<double>(query[0]) - center[0])));
     cache.Ensure(0);
-    REQUIRE(cache.computed_count == 1);
+    REQUIRE(cache.ComputedCount() == 1);
+}
+
+TEST_CASE("Fused query cache exposes a read-only count and resets it on initialization",
+          "[ut][RaBitQSplitDataCell][fused_full]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    const float query[] = {1.0F};
+    const float centers[] = {0.0F, 2.0F};
+    const double norms[] = {0.0, 4.0};
+    RaBitQFusedQueryCache cache(allocator.get());
+    const auto& read_only_cache = cache;
+    REQUIRE(read_only_cache.ComputedCount() == 0);
+    cache.Initialize(query, centers, norms, 1, 2, MetricType::METRIC_TYPE_L2SQR);
+    REQUIRE(read_only_cache.ComputedCount() == 0);
+    cache.Ensure(1);
+    REQUIRE(read_only_cache.ComputedCount() == 1);
+    cache.Ensure(1);
+    REQUIRE(read_only_cache.ComputedCount() == 1);
+    cache.Ensure(0);
+    REQUIRE(read_only_cache.ComputedCount() == 2);
+    cache.Initialize(query, centers, norms, 1, 1, MetricType::METRIC_TYPE_L2SQR);
+    REQUIRE(read_only_cache.ComputedCount() == 0);
+    cache.Ensure(0);
+    REQUIRE(read_only_cache.ComputedCount() == 1);
 }
 
 }  // namespace vsag
