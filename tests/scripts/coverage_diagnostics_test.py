@@ -226,7 +226,7 @@ class CoverageCMakeTest(unittest.TestCase):
     @staticmethod
     def coverage_scopes(cmake: str, target: str) -> list[str]:
         scopes = []
-        pattern = rf"target_link_libraries\s*\(\s*{re.escape(target)}\b(?P<body>.*?)\)"
+        pattern = rf"target_link_libraries\s*\(\s*{re.escape(target)}(?=\s|\))(?P<body>.*?)\)"
         for match in re.finditer(pattern, cmake, flags=re.DOTALL):
             current_scope = ""
             for token in match.group("body").split():
@@ -272,7 +272,13 @@ class CoverageCMakeTest(unittest.TestCase):
     def test_coverage_test_executables_link_runtime_privately(self):
         cmake = (ROOT / "tests/CMakeLists.txt").read_text(encoding="utf-8")
 
-        self.assertEqual(self.coverage_scopes(cmake, "unittests"), ["PRIVATE"])
+        helper = re.search(
+            r"function\s*\(\s*vsag_add_unittest_executable\s+target\s*\)(.*?)endfunction\s*\(\s*\)",
+            cmake,
+            flags=re.DOTALL,
+        )
+        self.assertIsNotNone(helper)
+        self.assertEqual(self.coverage_scopes(helper.group(1), "${target}"), ["PRIVATE"])
         self.assertEqual(self.coverage_scopes(cmake, "functests"), ["PRIVATE"])
 
 
