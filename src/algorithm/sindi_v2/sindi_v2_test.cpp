@@ -1986,3 +1986,66 @@ TEST_CASE("SINDIV2 optimized DMQ and batch distance end-to-end", "[ut][SINDIV2]"
         }
     }
 }
+
+TEST_CASE("SINDI V2 timeout triggers is_timeout", "[ut][SINDIV2][timeout]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    uint32_t term = 1;
+    std::array<float, 4> values{4.0F, 0.0F, 2.0F, 3.0F};
+    std::array<int64_t, 4> labels{10, 40, 20, 30};
+    std::array<SparseVector, 4> vectors{};
+    vectors[0] = SparseVector{1, &term, &values[0]};
+    vectors[2] = SparseVector{1, &term, &values[2]};
+    vectors[3] = SparseVector{1, &term, &values[3]};
+    auto base = Dataset::Make()
+                    ->NumElements(4)
+                    ->SparseVectors(vectors.data())
+                    ->Ids(labels.data())
+                    ->Owner(false);
+
+    auto parameter = std::make_shared<SINDIV2Parameter>();
+    parameter->term_id_limit = 8;
+    parameter->window_size = 10000;
+    parameter->use_reorder = false;
+    parameter->term_io_parameter = std::make_shared<MemoryIOParameter>();
+    parameter->rerank_io_parameter = std::make_shared<MemoryBlockIOParameter>();
+    SINDIV2 index(parameter, common_param);
+    REQUIRE(index.Build(base) == std::vector<int64_t>{40});
+
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&vectors[0])->Owner(false);
+
+    // With timeout_ms=0, search should hit timeout
+    const std::string timeout_param = R"(
+        {
+            "sindi_v2":
+            {
+                "n_candidate": 20,
+                "query_prune_ratio": 0.0,
+                "term_prune_ratio": 0.0,
+                "timeout_ms": 0
+            }
+        })";
+    auto result = index.KnnSearch(query, 2, timeout_param, nullptr);
+    auto stats_json = JsonType::Parse(result->GetStatistics());
+    REQUIRE(stats_json.Contains("is_timeout"));
+    REQUIRE(stats_json["is_timeout"].GetBool() == true);
+
+    // Without timeout, search completes normally
+    const std::string normal_param = R"(
+        {
+            "sindi_v2":
+            {
+                "n_candidate": 20,
+                "query_prune_ratio": 0.0,
+                "term_prune_ratio": 0.0
+            }
+        })";
+    result = index.KnnSearch(query, 2, normal_param, nullptr);
+    stats_json = JsonType::Parse(result->GetStatistics());
+    REQUIRE(stats_json.Contains("is_timeout"));
+    REQUIRE(stats_json["is_timeout"].GetBool() == false);
+}

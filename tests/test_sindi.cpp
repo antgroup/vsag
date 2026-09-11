@@ -630,3 +630,41 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     REQUIRE(result.has_value());
     REQUIRE_FALSE(result.value()->GetReasoning().empty());
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Timeout Search",
+                             "[ft][sindi][timeout][pr]") {
+    fixtures::SINDIParam param;
+    param.use_reorder = false;
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(dataset->base_->GetSparseVectors())->Owner(false);
+
+    // Test with timeout_ms=0 — should trigger timeout immediately
+    std::string timeout_param = R"(
+        {
+            "sindi":
+            {
+                "n_candidate": 20,
+                "query_prune_ratio": 0.0,
+                "term_prune_ratio": 0.0,
+                "timeout_ms": 0
+            }
+        })";
+    auto result = index->KnnSearch(query, 5, timeout_param);
+    REQUIRE(result.has_value());
+    auto stats = result.value()->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "true");
+
+    // Test without timeout — should complete normally
+    result = index->KnnSearch(query, 5, fixtures::SINDITestIndex::search_param);
+    REQUIRE(result.has_value());
+    stats = result.value()->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "false");
+}
