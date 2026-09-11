@@ -166,6 +166,7 @@ auto values = result->GetStatistics(
 | `simq_coarse_candidate_count` | 粗排产生且尚未应用 `rerank_k` 的唯一文档候选数 |
 | `simq_rerank_candidate_count` | 应用 `rerank_k` 后保留的候选数 |
 | `simq_filtered_candidate_count` | 被调用方 filter 排除的精排候选数 |
+| `simq_rerank_batch_count` | filter 之后执行的批量精确精排调用次数 |
 | `simq_result_count` | 精排并应用 range/top-k 限制后最终返回的结果数 |
 | `simq_limited_size_applied` | `RangeSearch` 是否因 `limited_size` 截断结果 |
 
