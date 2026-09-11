@@ -53,13 +53,47 @@ preserves the seed under the clique-size cap, and counts only stored memberships
 | `mci_knng_source` | KNN graph source: `hgraph` (default) or `odescent`. |
 | `mci_clique_max` | Maximum clique size during full build. |
 | `mci_alpha` | Clique construction expansion factor. |
-| `mci_incremental_join_ratio_threshold` | Add-time threshold for joining existing cliques. |
-| `mci_incremental_degree_min` | Configurable degree-target floor (default `70`, positive integer). |
-| `mci_incremental_degree_n_divisor` | Live-count divisor for the degree target (default `10000`, positive integer). |
-| `mci_incremental_degree_mcs_divisor` | MCS divisor for the degree target (default `2`, positive integer). |
-| `mci_incremental_clique_max` | Maximum clique size used by incremental clique creation. |
-| `mci_delete_clique_size_threshold` | Retire an affected clique when its live size after deletion is below this value (default `3`). |
-| `mci_delete_node_mct_threshold` | Repair a member of a retired clique when its projected live clique count is below this value (default `3`). |
+
+### Incremental Maintenance Parameters
+
+These parameters also belong in `index_param`. They control ADD and survivor repair after deletion.
+Repair shares ADD's existing-clique join and new-clique construction routines; it does not
+reinsert the existing vector into HGraph.
+
+Degree is the size of the deduplicated union of other live members of all effective cliques
+covering the current point. It is neither HGraph out-degree nor the point's clique-membership count.
+The degree stopping target is:
+
+```cpp
+target = N <= 1 ? 0 :
+    min(N - 1,
+        max(mci_incremental_degree_min,
+            min(N / mci_incremental_degree_n_divisor,
+                mcs / mci_incremental_degree_mcs_divisor)));
+```
+
+`N` is the current live vector count, including the completed HGraph insertion batch but excluding
+marked removals; `mcs` means `mci_mcs`. Integer division rounds down. This is a stopping target,
+not a guaranteed minimum degree or a hard cap: joining a whole clique can overshoot it,
+and exhausted candidates or stalled construction can stop below it.
+
+| Parameter | Default and range | Meaning |
+| --- | --- | --- |
+| `mci_incremental_join_ratio_threshold` | Default `0.6`; range `[0, 1]`. | Overlap threshold for joining an existing clique: the number of its live members present in the point's KNN candidates, divided by its live member count. For a 10-member clique with 6 members in the candidates, the ratio is `0.6`: threshold `0.6` qualifies, whereas `0.7` does not. The clique must also have room and add new neighbors. This ratio does not revalidate distance constraints against every member. Lowering the threshold relaxes joining; raising it is stricter and may leave more degree deficits for new-clique construction. Compare `0.5 / 0.6 / 0.7` while measuring recall, ADD time, and total memberships. |
+| `mci_incremental_degree_min` | Default `50`; positive integer. | Floor in the degree-target formula, still capped at `N-1`. At `N=10000, mcs=200`, the default target is `50`; setting the floor to `70` makes the target `70`. At `N≈3m, mcs=200`, both floors produce target `100`. If many points have low degree, try a higher floor and verify recall; a lower floor can reduce maintenance needed to reach the target but may reduce search connectivity. First check whether the floor actually determines the target. |
+| `mci_incremental_degree_n_divisor` | Default `10000`; positive integer. | Controls the size-dependent term `N / divisor`. At `N=800000, mcs=200, degree_min=50`, the default target is `80`. Changing the divisor to `20000` makes this term `40`, so the floor sets the final target to `50`. A smaller divisor raises the size-dependent term; a larger divisor lowers it. Use it to adjust how the target grows with the dataset, noting that the floor or MCS term can make a change ineffective. |
+| `mci_incremental_degree_mcs_divisor` | Default `2`; positive integer. | Controls `mcs / divisor`, which is combined with the size-dependent term before applying the floor. At `N≈3m, mcs=200, degree_min=50`, divisor `2` gives target `100`; divisor `4` gives target `50`. A smaller divisor can raise the target and a larger one can lower it, subject to the other terms. This parameter does not change the number of KNN candidates; change `mci_mcs` to change that candidate budget. |
+| `mci_incremental_clique_max` | Default `50`; integer at least `2`. | Caps both newly constructed incremental cliques and the size after appending to an existing clique. With cap `50`, a 49-member clique can grow to 50, but a 50-member clique cannot accept another point. Full-build cliques already at size 50 therefore cannot be appended to under the defaults. New cliques can be smaller than the cap. Raising it allows some formerly full cliques to grow and permits larger new cliques; lowering it may require more cliques to fill the degree deficit. Evaluate it together with `mci_clique_max`, total memberships, and query cost. |
+| `mci_delete_clique_size_threshold` | Default `30`; positive integer. | Retire a clique affected by the deletion batch only if its remaining live member count after the entire batch is strictly below the threshold: 29 is retired, 30 is retained by default. Retirement removes the clique and its memberships, not surviving vectors; unrelated small cliques are not scanned for retirement. This is not a construction size cap. A higher threshold expands retirement and may increase repair cost and structural change; a lower threshold retains more small cliques. Start at `30` and adjust in steps of `10`, comparing retired cliques, repair counts, deletion time, and recall rather than assuming higher is better. If a construction size cap is below this threshold, every affected clique of that size is retired; evaluate the settings together. |
+| `mci_delete_node_mct_threshold` | Default `3`; positive integer. | Selects surviving members of retired cliques whose projected effective clique count is strictly below the threshold. Counts exclude all cliques retiring in the batch, and repair candidates are deduplicated. By default, projected counts 0, 1, and 2 qualify; 3 does not. This counts cliques, not unique neighbors. Raising the threshold expands the candidate set; lowering it narrows the set. Value `1` selects only candidates projected to lose all clique coverage. Compare `3 → 4 → 5 → 6` for repair cost and query quality. Coverage is checked again before repair, so selection does not guarantee creation of a new clique. |
+
+These tuning directions follow the implementation; they are not validated optimal settings.
+Keep dataset stages, mutation IDs, ground truth, and other settings fixed while changing one
+parameter at a time. Compare quality, throughput, mutation time, and memory together.
+For example, at `N≈3m, mcs=100, degree_min=50`, the default target is `50`; changing only the
+live-count divisor leaves it unchanged whenever the size-dependent term remains at least 50.
+Explicit settings override defaults, and loading an existing index requires matching its stored
+parameters. Historical experiments using retirement threshold 3 do not measure the current default 30.
 
 ## Search Configuration
 
@@ -102,11 +136,9 @@ for bulk Build.
 When ADD needs a new clique, it shares the local graph, maximal-clique enumeration and selection
 core with full `BuildMCICliques`. The incremental size cap determines the local size threshold;
 it no longer accepts two members as the alpha-expansion stopping criterion. JOIN and construction
-stop at `max(mci_incremental_degree_min, min(N/10000, mcs/2))` unique neighbors by default
-(zero for N≤1, otherwise capped at N-1; integer division). The floor defaults to 70 and both
-divisors are configurable. N is the live count after the
-graph insertion batch. Whole cliques can overshoot the target; exhausted candidates or stalled
-construction stop safely below it. High-alpha fallback may still emit smaller cliques.
+use the degree target defined by the incremental maintenance parameters above, stopping when
+the target is reached, candidates are exhausted, or construction stalls.
+High-alpha fallback may still emit smaller cliques.
 
 `MARK_REMOVE` updates the MCI companion as part of the same operation. After removing a node, MCI
 keeps every affected clique whose remaining live size is at least

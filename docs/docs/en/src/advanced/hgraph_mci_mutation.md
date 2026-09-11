@@ -111,15 +111,15 @@ itself and counting overlapping neighbors once. Cliques adding no new neighbors 
 For N live vectors, the target is `max(degree_min, min(N / n_divisor, mcs / mcs_divisor))`, capped at
 N-1; a zero/one-vector index has target zero. Integer division rounds down. The parameters
 `mci_incremental_degree_n_divisor` and `mci_incremental_degree_mcs_divisor` default to 10000
-and 2. `degree_min` is configured by `mci_incremental_degree_min` (positive integer, default 70).
+and 2. `degree_min` is configured by `mci_incremental_degree_min` (positive integer, default 50).
 N includes the completed Add batch but excludes marked removals. Thus N=10000 and mcs=200
-gives target 70, whereas N=3241378 gives target 100. The configured floor applies even when mcs/2 is smaller;
+gives target 50, whereas N=3241378 gives target 100. The configured floor applies even when mcs/2 is smaller;
 the existing candidate and coverage limits still apply. This is a stopping target, not
 a hard maximum: joining an entire clique can overshoot. The obsolete ADD clique-count
 parameter and greedy construction path have been removed. This branch still uses
 overlap ratio and does not revalidate every pair of clique members.
 The floor is serialized and checked for compatibility when loading. Missing fields in old
-configurations default to 70. Set the floor to 100 when creating a new index to request the
+configurations default to 50. Set the floor to 100 when creating a new index to request the
 previous fixed-floor behavior; loading still requires matching stored parameters.
 
 ### 3.4 Fill a degree deficit with the full-build local clique algorithm
@@ -154,8 +154,17 @@ Historical measurements below predate the shared-builder and degree-target chang
 The earlier proposal retired every clique covering a deleted node and rebuilt its complete
 one-hop neighborhood. The current implementation instead uses strict less-than thresholds:
 
-- `T_size = mci_delete_clique_size_threshold`, default 3.
+- `T_size = mci_delete_clique_size_threshold`, default 30.
 - `T_mct = mci_delete_node_mct_threshold`, default 3.
+
+With the default size threshold, an affected clique with 29 remaining live members is retired;
+one with 30 is retained. Unaffected small cliques are not scanned for retirement. This is a
+retirement threshold, not the construction size cap; the survivor-membership threshold remains 3.
+If the construction size cap is below 30, every affected clique of that size is retired;
+evaluate or adjust the retirement threshold together with that cap.
+Explicitly configured values (including 3) are preserved, and serialized parameters must match
+when loading an existing index. Historical experiments below retain their original configurations
+and do not measure the new default of 30.
 
 `PrepareDelete(D, T_size, T_mct)` produces a read-only snapshot:
 

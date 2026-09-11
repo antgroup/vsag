@@ -60,7 +60,7 @@ Shared ADD/repair pipeline:
 The ADD clique-count limit has been removed; `delete_mct` still triggers repair.
 The degree target is `max(mci_incremental_degree_min, min(N/10000, mcs/2))`, with zero for N≤1 and otherwise
 capped at N-1; integer division rounds down. N counts live vectors including the completed graph
-insertion batch. The floor defaults to 70, so at N=10000 and mcs=200 the target is 70.
+insertion batch. The floor defaults to 50, so at N=10000 and mcs=200 the target is 50.
 Whole-clique joins may overshoot;
 candidate exhaustion or lack of progress can stop below target. Non-FP32 repair retains pair-distance
 candidate generation; FP32 findings do not establish RaBitQ behavior.
@@ -101,11 +101,11 @@ not the defaults for every library option.
     "mci_clique_max": 50,
     "mci_alpha": 1.2,
     "mci_incremental_join_ratio_threshold": 0.6,
-    "mci_incremental_degree_min": 70,
+    "mci_incremental_degree_min": 50,
     "mci_incremental_degree_n_divisor": 10000,
     "mci_incremental_degree_mcs_divisor": 2,
     "mci_incremental_clique_max": 50,
-    "mci_delete_clique_size_threshold": 3,
+    "mci_delete_clique_size_threshold": 30,
     "mci_delete_node_mct_threshold": 3
   }
 }
@@ -120,11 +120,11 @@ enables reverse edges, and rejects incompatible deduplication, duplicate-group, 
 | `mci_clique_max` | 50 | `--mci-clique-max`; full-build clique cap |
 | `mci_alpha` | 1.2 | `--mci-alpha`; expansion coefficient |
 | `mci_incremental_join_ratio_threshold` | 0.6 | `--mci-incremental-join-ratio-threshold`; [0,1] |
-| `mci_incremental_degree_min` | 70 | Positive degree-target floor; serialized with the index |
+| `mci_incremental_degree_min` | 50 | Positive degree-target floor; serialized with the index |
 | `mci_incremental_degree_n_divisor` | 10000 | Positive live-count divisor for the degree target |
 | `mci_incremental_degree_mcs_divisor` | 2 | Positive MCS divisor for the degree target |
 | `mci_incremental_clique_max` | 50 | `--mci-incremental-clique-max`; at least 2; benchmark inherits the full-build cap when omitted |
-| `mci_delete_clique_size_threshold` | 3 | `--mci-delete-clique-size-threshold`; positive, strict less-than retirement |
+| `mci_delete_clique_size_threshold` | 30 | Positive; retire affected cliques with fewer than 30 live members by default, retain those with exactly 30 |
 | `mci_delete_node_mct_threshold` | 3 | `--mci-delete-node-mct-threshold`; positive, strict less-than repair |
 
 For example, `delete_size=4` considers affected cliques with 0–3 survivors, not all cliques

@@ -426,6 +426,47 @@ TEST_CASE("HGraph MCI mark removal projects the complete batch before repair",
     REQUIRE(snapshot_degree(snapshot, 3) > 2);
 }
 
+TEST_CASE("MCI default deletion threshold retires only affected cliques below thirty members",
+          "[ut][hgraph][mci]") {
+    const bool flush_before_delete = GENERATE(false, true);
+    vsag::DefaultAllocator allocator;
+    vsag::CliqueDataCell cell(&allocator);
+    constexpr uint64_t total = 64;
+    cell.Clear(total);
+    vsag::Vector<vsag::InnerIdType> members(&allocator);
+    for (vsag::InnerIdType id = 0; id < 31; ++id) {
+        members.push_back(id);
+    }
+    cell.AppendNewClique(members, total);
+    members.clear();
+    for (vsag::InnerIdType id = 31; id < 61; ++id) {
+        members.push_back(id);
+    }
+    cell.AppendNewClique(members, total);
+    members = {61, 62, 63};
+    cell.AppendNewClique(members, total);
+    if (flush_before_delete) {
+        cell.Flush(total);
+    }
+
+    const vsag::HGraphMCIParameters defaults;
+    const vsag::Vector<vsag::InnerIdType> removed({0, 31}, &allocator);
+    const auto snapshot = cell.PrepareDelete(
+        removed, defaults.delete_clique_size_threshold, defaults.delete_node_mct_threshold);
+    // Remaining size 30 is retained; 29 is retired. The unrelated three-member clique stays.
+    REQUIRE(snapshot.affected_clique_ids.size() == 2);
+    REQUIRE(snapshot.retired_clique_ids.size() == 1);
+    REQUIRE(snapshot.retired_clique_ids.front() == 1);
+    REQUIRE(snapshot.repair_node_ids.size() == 29);
+    for (uint64_t i = 0; i < snapshot.repair_node_ids.size(); ++i) {
+        REQUIRE(snapshot.repair_node_ids[i] == i + 32);
+    }
+    cell.CommitDelete(removed, snapshot.retired_clique_ids, total);
+    REQUIRE(cell.GetCliqueMemberCount(0) == 30);
+    REQUIRE(cell.GetCliqueMemberCount(1) == 0);
+    REQUIRE(cell.GetCliqueMemberCount(2) == 3);
+}
+
 TEST_CASE("Clique validation rejects empty node offsets and unknown formats", "[ut][hgraph][mci]") {
     vsag::DefaultAllocator allocator;
     vsag::CliqueDataCell cell(&allocator);
@@ -1415,7 +1456,7 @@ TEST_CASE("HGraph Add uses the full-build local clique size threshold",
     auto after = vsag::JsonType::Parse(index.value()->GetStats());
     REQUIRE(after["mci_covered_nodes"].GetInt() == 4);
     // The shared builder first emits three members, then adds the remaining neighbor in
-    // a two-member clique to reach min(70, N-1)=3 distinct neighbors.
+    // a two-member clique to reach min(50, N-1)=3 distinct neighbors.
     REQUIRE(after["mci_delta_clique_count"].GetInt() == 2);
     REQUIRE(after["mci_delta_clique_membership_count"].GetInt() == 5);
     REQUIRE(index.value()->Flush().has_value());
@@ -1500,7 +1541,7 @@ TEST_CASE("MCI Add stops at unique degree rather than clique count",
         REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 0);
         REQUIRE(stats["mci_delta_clique_count"].GetInt() >= 5);
     } else if (scenario == "default") {
-        REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 69);
+        REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 49);
         REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
     } else if (scenario == "configured") {
         // Target 100 requires 99 overlapping two-member cliques, not just the first JOIN.
@@ -1518,7 +1559,7 @@ TEST_CASE("MCI Add stops at unique degree rather than clique count",
     vsag::DefaultAllocator allocator;
     auto snapshot = read_flushed_mci(index, &allocator);
     REQUIRE(snapshot.labels[total] == ids[total]);
-    const uint64_t expected = scenario == "default"      ? 70
+    const uint64_t expected = scenario == "default"      ? 50
                               : scenario == "configured" ? 100
                               : scenario == "exhausted"  ? 0
                               : scenario == "marked"     ? total - 1

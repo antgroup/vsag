@@ -407,22 +407,53 @@ TEST_CASE("HGraph maps flat MCI parameters", "[ut][HGraphParameter]") {
     REQUIRE(json["mci_delete_node_mct_threshold"].GetInt() == 2);
 }
 
+TEST_CASE("HGraph MCI deletion threshold defaults and overrides round-trip",
+          "[ut][HGraphParameter][mci]") {
+    const vsag::HGraphMCIParameters defaults;
+    REQUIRE(defaults.delete_clique_size_threshold == 30);
+    REQUIRE(defaults.delete_node_mct_threshold == 3);
+    const bool explicit_threshold = GENERATE(false, true);
+    auto json = vsag::JsonType::Parse(R"({"base_quantization_type":"fp32",
+        "graph_type":"nsw","max_degree":32,"ef_construction":100,"use_mci":true})");
+    if (explicit_threshold) {
+        // Preserve explicitly configured historical thresholds rather than replacing them.
+        json["mci_delete_clique_size_threshold"].SetInt(3);
+    }
+    vsag::IndexCommonParam common;
+    common.dim_ = 16;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    const auto mapped = vsag::HGraph::CheckAndMappingExternalParam(json, common);
+    const auto param = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
+    REQUIRE(param != nullptr);
+    const uint64_t expected = explicit_threshold ? 3 : 30;
+    REQUIRE(param->mci_parameters.delete_clique_size_threshold == expected);
+    REQUIRE(param->mci_parameters.delete_node_mct_threshold == 3);
+    REQUIRE(param->ToJson()["mci_delete_clique_size_threshold"].GetInt() == expected);
+    auto restored = std::make_shared<vsag::HGraphParameter>(param->ToJson());
+    REQUIRE(restored->mci_parameters.delete_clique_size_threshold == expected);
+    REQUIRE(restored->CheckCompatibility(param));
+}
+
 TEST_CASE("HGraph MCI incremental degree targets round-trip and validate",
           "[ut][HGraphParameter][mci][degree_add]") {
     vsag::HGraphMCIParameters defaults;
     REQUIRE(defaults.IncrementalDegreeTarget(0) == 0);
     REQUIRE(defaults.IncrementalDegreeTarget(1) == 0);
     REQUIRE(defaults.IncrementalDegreeTarget(2) == 1);
-    REQUIRE(defaults.incremental_degree_min == 70);
-    REQUIRE(defaults.IncrementalDegreeTarget(70) == 69);
-    REQUIRE(defaults.IncrementalDegreeTarget(71) == 70);
-    REQUIRE(defaults.IncrementalDegreeTarget(100) == 70);
-    REQUIRE(defaults.IncrementalDegreeTarget(101) == 70);
-    REQUIRE(defaults.IncrementalDegreeTarget(6000) == 70);
-    REQUIRE(defaults.IncrementalDegreeTarget(9999) == 70);
-    REQUIRE(defaults.IncrementalDegreeTarget(10000) == 70);
-    REQUIRE(defaults.IncrementalDegreeTarget(19999) == 70);
-    REQUIRE(defaults.IncrementalDegreeTarget(20000) == 70);
+    REQUIRE(defaults.incremental_degree_min == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(50) == 49);
+    REQUIRE(defaults.IncrementalDegreeTarget(51) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(70) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(71) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(100) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(101) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(6000) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(9999) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(10000) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(19999) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(20000) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(509999) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(510000) == 51);
     REQUIRE(defaults.IncrementalDegreeTarget(800000) == 80);
     REQUIRE(defaults.IncrementalDegreeTarget(3241378) == 100);
     defaults.incremental_degree_min = 40;
@@ -431,6 +462,7 @@ TEST_CASE("HGraph MCI incremental degree targets round-trip and validate",
     REQUIRE(defaults.IncrementalDegreeTarget(100) == 99);
     REQUIRE(defaults.IncrementalDegreeTarget(10000) == 100);
     defaults.incremental_degree_min = 70;
+    REQUIRE(defaults.IncrementalDegreeTarget(10000) == 70);
     defaults.mcs = 400;
     REQUIRE(defaults.IncrementalDegreeTarget(1500000) == 150);
     REQUIRE(defaults.IncrementalDegreeTarget(3241378) == 200);
@@ -455,7 +487,9 @@ TEST_CASE("HGraph MCI incremental degree targets round-trip and validate",
     const auto param = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
     REQUIRE(param->mci_parameters.enabled);
     REQUIRE(param->mci_parameters.incremental_degree_min ==
-            (key == "mci_incremental_degree_min" ? 4 : 70));
+            (key == "mci_incremental_degree_min" ? 4 : 50));
+    REQUIRE(param->ToJson()["mci_incremental_degree_min"].GetInt() ==
+            (key == "mci_incremental_degree_min" ? 4 : 50));
     REQUIRE(param->ToJson()[key].GetInt() == 4);
     auto restored = std::make_shared<vsag::HGraphParameter>(param->ToJson());
     REQUIRE(restored->CheckCompatibility(param));

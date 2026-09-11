@@ -57,7 +57,7 @@
 
 ADD 的团数限制参数已移除；`delete_mct=3` 仍是修复候选触发阈值。
 度数目标为 `max(mci_incremental_degree_min, min(N/10000, mcs/2))`，N≤1 时为 0，否则不超过 N-1；
-N 是当前存活点数，包含图插入完成的批次，整数除法向下取整。下限默认 70，10k、mcs=200 时目标是 70。
+N 是当前存活点数，包含图插入完成的批次，整数除法向下取整。下限默认 50，10k、mcs=200 时目标是 50。
 加入完整团可以超过目标；无法继续增加邻居时允许低于目标停止。
 非 FP32 修复仍保留成对距离候选路径，本指南不把 FP32 的结论推广到 RaBitQ。
 
@@ -99,11 +99,11 @@ N 是当前存活点数，包含图插入完成的批次，整数除法向下取
     "mci_clique_max": 50,
     "mci_alpha": 1.2,
     "mci_incremental_join_ratio_threshold": 0.6,
-    "mci_incremental_degree_min": 70,
+    "mci_incremental_degree_min": 50,
     "mci_incremental_degree_n_divisor": 10000,
     "mci_incremental_degree_mcs_divisor": 2,
     "mci_incremental_clique_max": 50,
-    "mci_delete_clique_size_threshold": 3,
+    "mci_delete_clique_size_threshold": 30,
     "mci_delete_node_mct_threshold": 3
   }
 }
@@ -118,11 +118,11 @@ MCI FORCE_REMOVE 要求 flat 图存储，会自动启用反向边，并拒绝不
 | `mci_clique_max` | 50 | `--mci-clique-max`；全量团大小上限 |
 | `mci_alpha` | 1.2 | `--mci-alpha`；构团扩展系数 |
 | `mci_incremental_join_ratio_threshold` | 0.6 | `--mci-incremental-join-ratio-threshold`；范围 [0,1] |
-| `mci_incremental_degree_min` | 70 | 度数目标下限，正整数，随索引参数序列化 |
+| `mci_incremental_degree_min` | 50 | 度数目标下限，正整数，随索引参数序列化 |
 | `mci_incremental_degree_n_divisor` | 10000 | 度数目标中的存活点数除数，正整数 |
 | `mci_incremental_degree_mcs_divisor` | 2 | 度数目标中的 MCS 除数，正整数 |
 | `mci_incremental_clique_max` | 50 | `--mci-incremental-clique-max`；至少 2；基准不指定时跟随全量上限 |
-| `mci_delete_clique_size_threshold` | 3 | `--mci-delete-clique-size-threshold`；正整数，严格小于才废弃 |
+| `mci_delete_clique_size_threshold` | 30 | 正整数；默认废弃剩余有效成员数小于 30 的受影响团，恰好为 30 时保留 |
 | `mci_delete_node_mct_threshold` | 3 | `--mci-delete-node-mct-threshold`；正整数，严格小于才修复 |
 
 例如 `delete_size=4` 会考虑删除后只剩 0–3 个成员的受影响团，并不废弃所有包含被删点的团。
