@@ -88,6 +88,10 @@ public:
 
     std::string
     AnalyzeIndexBySearch(const SearchRequest& request) override {
+        if (not CheckFeature(IndexFeature::SUPPORT_ANALYZE_INDEX_BY_SEARCH)) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "index does not support search analysis");
+        }
         return this->inner_index_->AnalyzeIndexBySearch(request);
     }
 
@@ -302,6 +306,10 @@ public:
 
     [[nodiscard]] std::string
     GetStats() const override {
+        if (not CheckFeature(IndexFeature::SUPPORT_GET_STATS)) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "index does not support static analysis");
+        }
         return this->inner_index_->GetStats();
     }
 

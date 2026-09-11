@@ -21,7 +21,7 @@ namespace vsag {
 
 class PyramidAnalyzer : public AnalyzerBase {
 public:
-    PyramidAnalyzer(Pyramid* pyramid, const AnalyzerParam& param)
+    PyramidAnalyzer(const Pyramid* pyramid, const AnalyzerParam& param)
         : pyramid_(pyramid),
           sample_ids_(pyramid->allocator_),
           sample_datas_(pyramid->allocator_),
@@ -217,7 +217,7 @@ private:
                                 const Vector<InnerIdType>& node_ids,
                                 uint32_t& duplicate_group_size);
 
-    Pyramid* pyramid_;
+    const Pyramid* pyramid_;
 
     Vector<InnerIdType> sample_ids_;
     Vector<float> sample_datas_;
