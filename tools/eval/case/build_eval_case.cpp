@@ -26,6 +26,47 @@
 
 namespace vsag::eval {
 
+namespace {
+
+class StartedMonitorGuard {
+public:
+    explicit StartedMonitorGuard(std::vector<MonitorPtr>& monitors) : monitors_(monitors) {
+    }
+
+    ~StartedMonitorGuard() {
+        while (stopped_monitor_count_ < started_monitor_count_) {
+            const auto monitor_id = started_monitor_count_ - stopped_monitor_count_ - 1;
+            ++stopped_monitor_count_;
+            try {
+                monitors_[monitor_id]->Stop();
+            } catch (...) {
+            }
+        }
+    }
+
+    void
+    StartAll() {
+        for (auto& monitor : monitors_) {
+            monitor->Start();
+            ++started_monitor_count_;
+        }
+    }
+
+    void
+    StopNext() {
+        const auto monitor_id = started_monitor_count_ - stopped_monitor_count_ - 1;
+        monitors_[monitor_id]->Stop();
+        ++stopped_monitor_count_;
+    }
+
+private:
+    std::vector<MonitorPtr>& monitors_;
+    uint64_t started_monitor_count_{0};
+    uint64_t stopped_monitor_count_{0};
+};
+
+}  // namespace
+
 BuildEvalCase::BuildEvalCase(const std::string& dataset_path,
                              const std::string& index_path,
                              vsag::IndexPtr index,
@@ -83,16 +124,15 @@ BuildEvalCase::do_build() {
     if (this->dataset_ptr_->GetTrainPaths() != nullptr) {
         base->Paths(this->dataset_ptr_->GetTrainPaths());
     }
-    for (auto& monitor : monitors_) {
-        monitor->Start();
-    }
+    StartedMonitorGuard monitor_guard(monitors_);
+    monitor_guard.StartAll();
     auto build_index = index_->Build(base);
     if (not build_index.has_value()) {
         throw std::runtime_error(build_index.error().message);
     }
-    for (auto& monitor : monitors_) {
-        monitor->Record();
-        monitor->Stop();
+    for (auto monitor = monitors_.rbegin(); monitor != monitors_.rend(); ++monitor) {
+        (*monitor)->Record();
+        monitor_guard.StopNext();
     }
 }
 void
