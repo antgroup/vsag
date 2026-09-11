@@ -566,6 +566,11 @@ InnerIndexInterface::CalcDistancesById(const DatasetPtr& query,
             std::memcpy(row, row_result->GetDistances(), sizeof(float) * count);
         } else {
             sub->NumElements(1)->Dim(query->GetDim())->Owner(false);
+            // Keep every supplied representation: the concrete single-ID adapter chooses the
+            // field matching its index configuration, not the presence of auxiliary fields.
+            if (query->GetFloat32Vectors() != nullptr) {
+                sub->Float32Vectors(query->GetFloat32Vectors() + q * query->GetDim());
+            }
             if (is_sparse) {
                 sub->SparseVectors(query->GetSparseVectors() + q);
             }

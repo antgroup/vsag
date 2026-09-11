@@ -248,6 +248,7 @@ TEST_CASE("WARP native distance contract", "[warp][distance_contract]") {
     REQUIRE(created.has_value());
     auto index = created.value();
     REQUIRE(index->Build(data).has_value());
+    REQUIRE(index->CheckFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID));
     REQUIRE(index->CheckFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID));
     auto searched = index->KnnSearch(data, 1, "{}", FilterPtr{});
     REQUIRE(searched.has_value());

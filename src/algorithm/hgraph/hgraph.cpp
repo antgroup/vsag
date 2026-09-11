@@ -434,8 +434,9 @@ HGraph::CalcDistanceById(const DatasetPtr& query,
     CHECK_ARGUMENT(native_query != nullptr, "distance query representation must match index dtype");
     if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
         const auto& sparse = query->GetSparseVectors()[0];
-        CHECK_ARGUMENT(sparse.len_ == 0 || (sparse.ids_ != nullptr && sparse.vals_ != nullptr),
-                       "sparse query requires term IDs and values");
+        const bool valid_sparse =
+            sparse.len_ == 0 || (sparse.ids_ != nullptr && sparse.vals_ != nullptr);
+        CHECK_ARGUMENT(valid_sparse, "sparse query requires term IDs and values");
     }
     return calc_native_distance_by_id(native_query, id, calculate_precise_distance);
 }
@@ -476,7 +477,8 @@ HGraph::CalcDistancesById(const float* query,
                           int64_t topk) const {
     CHECK_ARGUMENT(data_type_ == DataTypes::DATA_TYPE_FLOAT,
                    "non-float32 HGraph distance requires a native Dataset query");
-    CHECK_ARGUMENT(topk == -1 || topk > 0, "distance topk must be -1 or positive");
+    const bool valid_topk = topk == -1 || topk > 0;
+    CHECK_ARGUMENT(valid_topk, "distance topk must be -1 or positive");
     FlattenInterfacePtr flat;
     std::shared_lock<std::shared_mutex> lock;
     if (!this->immutable_.load(std::memory_order_acquire)) {

@@ -1641,8 +1641,8 @@ SIMQ::CalcDistanceById(const DatasetPtr& query, int64_t id, bool calculate_preci
     CHECK_ARGUMENT(query->GetMultiVectorDim() == dim_, "query multi-vector dimension mismatch");
     const auto* vectors = query->GetMultiVectors();
     CHECK_ARGUMENT(vectors != nullptr, "query must contain multi-vectors");
-    CHECK_ARGUMENT(vectors[0].len_ > 0 && vectors[0].vectors_ != nullptr,
-                   "query multi-vector must contain token vectors");
+    const bool valid_vector = vectors[0].len_ > 0 && vectors[0].vectors_ != nullptr;
+    CHECK_ARGUMENT(valid_vector, "query multi-vector must contain token vectors");
     std::shared_lock lock(global_mutex_);
     const auto [valid, inner_id] = label_table_->TryGetIdByLabel(id);
     if (not valid) {

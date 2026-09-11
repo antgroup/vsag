@@ -210,6 +210,9 @@ public:
                      bool support_filter_obj = false);
 
     static void
+    TestStoredDistanceConsistency(const IndexPtr& index, const TestDatasetPtr& dataset);
+
+    static void
     TestCalcDistanceById(const IndexPtr& index,
                          const TestDatasetPtr& dataset,
                          float error = 1e-5,

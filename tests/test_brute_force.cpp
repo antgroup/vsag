@@ -2031,3 +2031,51 @@ TEST_CASE("BruteForce valid minus-one distance sorts before missing IDs", "[dist
     REQUIRE(top.value()->GetIds()[0] == label);
     REQUIRE(top.value()->GetDistances()[0] == -1.0F);
 }
+
+TEST_CASE("BruteForce distance stays consistent during force removal",
+          "[distance_contract][concurrent][brute_force]") {
+    auto param =
+        fixtures::BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32");
+    auto made = vsag::Factory::CreateIndex("brute_force", param);
+    REQUIRE(made.has_value());
+    auto index = made.value();
+    constexpr int64_t count = 512;
+    std::vector<float> values(count * 16);
+    std::vector<int64_t> labels(count);
+    for (int64_t i = 0; i < count; ++i) {
+        labels[i] = i;
+        for (int64_t j = 0; j < 16; ++j) values[i * 16 + j] = static_cast<float>(i);
+    }
+    auto base = vsag::Dataset::Make()
+                    ->Owner(false)
+                    ->NumElements(count)
+                    ->Dim(16)
+                    ->Ids(labels.data())
+                    ->Float32Vectors(values.data());
+    REQUIRE(index->Build(base).has_value());
+    std::atomic<bool> start{false};
+    std::atomic<bool> failed{false};
+    std::thread reader([&] {
+        while (!start.load()) std::this_thread::yield();
+        for (int64_t pass = 0; pass < 8; ++pass) {
+            for (int64_t i = 0; i < count; ++i) {
+                auto distance = index->CalcDistanceById(values.data() + i * 16, labels[i]);
+                if (!distance.has_value() ||
+                    (distance.value() != 0.0F && distance.value() != -1.0F)) {
+                    failed.store(true);
+                }
+            }
+        }
+    });
+    start.store(true);
+    bool removed = true;
+    for (int64_t i = 0; i < count; ++i) {
+        auto result = index->Remove({labels[i]}, vsag::RemoveMode::FORCE_REMOVE);
+        if (!result.has_value())
+            removed = false;
+    }
+    reader.join();
+    REQUIRE(removed);
+    REQUIRE_FALSE(failed.load());
+    REQUIRE(index->GetNumElements() == 0);
+}

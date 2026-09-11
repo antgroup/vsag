@@ -24,6 +24,32 @@ namespace fixtures {
 #pragma warning(disable : 4996)
 #endif
 
+// General index suites include lossy storage without retained FP32 vectors. Compare the
+// formal single/batch APIs at both precision settings; exact FP32-oracle checks remain in
+// dedicated distance tests rather than assuming every quantizer reconstructs originals.
+void
+TestIndex::TestStoredDistanceConsistency(const IndexPtr& index, const TestDatasetPtr& dataset) {
+    REQUIRE(index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID));
+    REQUIRE(index->CheckFeature(vsag::SUPPORT_BATCH_CALC_DISTANCE_BY_ID));
+    const auto queries = dataset->query_;
+    const auto count = dataset->top_k;
+    for (bool precise : {false, true}) {
+        for (int64_t q = 0; q < queries->GetNumElements(); ++q) {
+            auto query = get_one_query(queries, q);
+            const auto* ids = dataset->ground_truth_->GetIds() + q * count;
+            auto batch = index->CalcDistancesById(query, ids, count, precise);
+            REQUIRE(batch.has_value());
+            for (int64_t j = 0; j < count; ++j) {
+                auto single = index->CalcDistanceById(query, ids[j], precise);
+                REQUIRE(single.has_value());
+                REQUIRE(std::isfinite(single.value()));
+                const float tolerance = 1e-5F * std::max(1.0F, std::abs(single.value()));
+                REQUIRE(std::abs(single.value() - batch.value()->GetDistances()[j]) <= tolerance);
+            }
+        }
+    }
+}
+
 void
 TestIndex::TestCalcDistanceById(const IndexPtr& index,
                                 const TestDatasetPtr& dataset,

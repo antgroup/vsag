@@ -681,8 +681,8 @@ BruteForce::CalcDistanceById(const DatasetPtr& query,
     CHECK_ARGUMENT(query->GetMultiVectorDim() == dim_, "query multi-vector dimension mismatch");
     const auto* vectors = query->GetMultiVectors();
     CHECK_ARGUMENT(vectors != nullptr, "query must contain multi-vectors");
-    CHECK_ARGUMENT(vectors[0].len_ > 0 && vectors[0].vectors_ != nullptr,
-                   "query multi-vector must contain token vectors");
+    const bool valid_vector = vectors[0].len_ > 0 && vectors[0].vectors_ != nullptr;
+    CHECK_ARGUMENT(valid_vector, "query multi-vector must contain token vectors");
     std::shared_lock global_lock(global_mutex_, std::defer_lock);
     std::shared_lock label_lock(label_lookup_mutex_, std::defer_lock);
     std::lock(global_lock, label_lock);
@@ -702,18 +702,18 @@ BruteForce::CalcDistanceById(const float* vector,
                              bool calculate_precise_distance) const {
     CHECK_ARGUMENT(not is_multi_vector_, "multi-vector distance requires a Dataset query");
     CHECK_ARGUMENT(vector != nullptr, "distance query must not be null");
-    auto computer = this->inner_codes_->FactoryComputer(vector);
-    float result = 0.0F;
-    InnerIdType inner_id = 0;
-    {
-        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
-        auto [success, mapped_id] = this->label_table_->TryGetIdByLabel(id);
-        if (not success) {
-            return -1.0F;
-        }
-        inner_id = mapped_id;
+    // ForceRemove can move the last vector into this slot. Keep label mapping and code
+    // storage stable through Query, using deadlock-safe acquisition as in the native path.
+    std::shared_lock global_lock(global_mutex_, std::defer_lock);
+    std::shared_lock label_lock(label_lookup_mutex_, std::defer_lock);
+    std::lock(global_lock, label_lock);
+    const auto [success, inner_id] = label_table_->TryGetIdByLabel(id);
+    if (not success) {
+        return -1.0F;
     }
-    this->inner_codes_->Query(&result, computer, &inner_id, 1);
+    auto computer = inner_codes_->FactoryComputer(vector);
+    float result = 0.0F;
+    inner_codes_->Query(&result, computer, &inner_id, 1);
     return result;
 }
 

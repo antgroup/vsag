@@ -189,6 +189,8 @@ TEST_CASE("HGraph typed native distance contract", "[ft][hgraph][distance_contra
         auto made = vsag::Factory::CreateIndex("hgraph", params);
         REQUIRE(made.has_value());
         auto index = made.value();
+        REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID));
+        REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID));
         uint16_t half[64] = {};
         int8_t ints[64] = {};
         float wrong[32] = {};

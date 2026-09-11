@@ -322,9 +322,10 @@ HGraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestCheckIdExist(index, dataset);
     // Sparse dot products accumulate in a different order from the ground-truth backend.
     const float distance_tolerance = dataset->query_->GetSparseVectors() != nullptr ? 1e-4F : 1e-5F;
-    TestCalcDistanceById(index, dataset, distance_tolerance, expect_success);
+    if (expect_success) {
+        TestStoredDistanceConsistency(index, dataset);
+    }
     TestGetRawVectorByIds(index, dataset, expect_success);
-    TestBatchCalcDistanceById(index, dataset, distance_tolerance, expect_success);
     TestMultiQueryBatchCalcDistanceById(index, dataset, distance_tolerance, expect_success);
     TestSearchAllocator(index, dataset, search_param, recall, true);
     TestUpdateVector(index, dataset, search_param, false);

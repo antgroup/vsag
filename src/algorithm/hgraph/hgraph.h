@@ -431,7 +431,9 @@ public:
 
 private:
     float
-    calc_native_distance_by_id(const void* query, int64_t id, bool precise) const;
+    calc_native_distance_by_id(const void* native_query,
+                               int64_t id,
+                               bool calculate_precise_distance) const;
 
     void
     check_fused_mutation_supported(std::string_view operation) const;
