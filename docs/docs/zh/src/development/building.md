@@ -152,6 +152,8 @@ make pyvsag-all
 - `VSAG_ENABLE_INTEL_MKL`：是否启用 Intel MKL 作为 BLAS 后端，默认 `OFF`；关闭时使用 OpenBLAS；
 - `VSAG_ENABLE_LIBAIO`：是否启用 `libaio`，默认 `ON`。
 
+配置和构建目标的 `DEBUG_BUILD_DIR` 应传入普通路径，例如 `make asan DEBUG_BUILD_DIR="custom build"`。命令行引号由 shell 去除，Makefile 在调用 CMake 时会为路径加引号；不要在变量值中嵌入字面引号。
+
 ## 离线 / 内网环境构建
 
 VSAG 会在配置 / 构建阶段下载第三方库。在离线或网络受限的环境中，可以设置按依赖的
