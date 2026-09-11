@@ -30,6 +30,7 @@ target_link_libraries (unittests
         Catch2::Catch2 
         simd_test vsag_test algorithm_test factory_test attr_test
         datacell_test layout_test quantizer_test storage_test io_test utils_test impl_test
+        gpu_test
         vsag_static
         coverage_config
 )
@@ -48,6 +49,7 @@ if (APPLE)
         "-Wl,-force_load,$<TARGET_FILE:storage_test>"
         "-Wl,-force_load,$<TARGET_FILE:io_test>"
         "-Wl,-force_load,$<TARGET_FILE:utils_test>"
+        "-Wl,-force_load,$<TARGET_FILE:gpu_test>"
         "-Wl,-force_load,$<TARGET_FILE:impl_test>"
         )
 else()
@@ -56,6 +58,7 @@ else()
                         "-Wl,--whole-archive"
                         simd_test vsag_test algorithm_test factory_test attr_test
                         datacell_test layout_test quantizer_test storage_test io_test utils_test impl_test
+                        gpu_test
                         "-Wl,--no-whole-archive"
         )
 endif()
