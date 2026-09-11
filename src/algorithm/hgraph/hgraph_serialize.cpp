@@ -1085,10 +1085,19 @@ HGraph::Deserialize(StreamReader& reader) {
             this->raw_vector_->Deserialize(buffer_reader);
         }
         if (this->mci_parameters_.enabled) {
+            const auto total = this->total_count_.load();
+            // Label storage may include spare capacity, while the remap may omit shadowed
+            // labels after MARK_REMOVE + Add. Neither is required to equal physical slots.
+            if ((has_serialized_total_count and serialized_total_count != total) or
+                this->label_table_->label_table_.size() < total or
+                this->label_table_->GetRemapSize() > total) {
+                throw VsagException(ErrorType::INVALID_BINARY,
+                                    "serialized HGraph MCI node and label counts are inconsistent");
+            }
             if (this->mci_cliques_ == nullptr) {
                 this->mci_cliques_ = std::make_shared<CliqueDataCell>(this->allocator_);
             }
-            this->mci_cliques_->Deserialize(buffer_reader, mci_format_version);
+            this->mci_cliques_->Deserialize(buffer_reader, mci_format_version, total);
             if (this->support_force_remove()) {
                 const auto removed_ids = this->mci_cliques_->GetInactiveNodeIds();
                 this->label_table_->RestoreDeletedIds(removed_ids, this->total_count_.load());

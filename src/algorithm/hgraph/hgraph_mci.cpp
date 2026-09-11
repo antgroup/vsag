@@ -1653,6 +1653,8 @@ HGraph::build_incremental_mci_clique(InnerIdType new_inner_id,
         neighbors.push_back(static_cast<InnerIdType>(i));
     }
     MCIV3BuildParams params;
+    // Coverage uses compact local IDs, but its values are global live membership counts,
+    // not memberships within this neighborhood. Keep the full-build global skip threshold.
     params.total = visible_total;
     params.candidate_limit = this->mci_parameters_.mcs;
     params.clique_max = this->mci_parameters_.incremental_clique_max;
@@ -1664,6 +1666,9 @@ HGraph::build_incremental_mci_clique(InnerIdType new_inner_id,
     auto distance = [&](InnerIdType lhs, InnerIdType rhs) {
         return precise_codes->ComputePairVectors(local_to_inner[lhs], local_to_inner[rhs]);
     };
+    // The stored-code API exposes pairwise distances, not four-pair distances. Each pair
+    // retains the codec's SIMD/metric handling across FP32, INT8 and non-contiguous storage;
+    // group four calls here rather than assume the full-build contiguous FP32 layout.
     auto scalar_batch_distance = [&](InnerIdType lhs,
                                      InnerIdType a,
                                      InnerIdType b,

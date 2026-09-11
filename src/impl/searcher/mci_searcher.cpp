@@ -131,6 +131,8 @@ search_clique_view(const CliqueDataCellSearchView& view,
     thread_local MCIEpochMarks visited_nodes;
     thread_local MCIEpochMarks visited_cliques;
     SearchCandidateQueue candidates(allocator);
+    // Epoch marks are indexed by physical inner ID, not by live-node ordinal. MARK_REMOVE
+    // leaves holes and live high IDs; Reset retains capacity rather than compacting IDs.
     visited_nodes.Reset(total);
     visited_cliques.Reset(view.total_clique_count);
     candidates.Reset(static_cast<uint64_t>(candidate_limit));

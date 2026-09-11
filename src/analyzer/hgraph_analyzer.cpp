@@ -420,14 +420,20 @@ HGraphAnalyzer::calculate_search_result(const Vector<float>& sample_datas,
                                         const std::string& search_param,
                                         uint32_t sample_size) {
     auto time_cost = 0.0F;
+    Vector<int8_t> int8_query(allocator_);
+    if (hgraph_->data_type_ == DataTypes::DATA_TYPE_INT8) {
+        int8_query.resize(dim_);
+    }
     for (int i = 0; i < sample_size; ++i) {
         auto query = Dataset::Make();
-        query->Dim(dim_)->NumElements(1)->Owner(false)->Float32Vectors(
-            sample_datas.data() + static_cast<uint64_t>(i * dim_));
+        query->Dim(dim_)->NumElements(1)->Owner(false);
+        const auto* sample = sample_datas.data() + static_cast<uint64_t>(i) * dim_;
         if (hgraph_->data_type_ == DataTypes::DATA_TYPE_INT8) {
             // INT8 Decode writes raw bytes into each sample's float-sized scratch row.
-            query->Int8Vectors(reinterpret_cast<const int8_t*>(sample_datas.data() +
-                                                               static_cast<uint64_t>(i * dim_)));
+            std::memcpy(int8_query.data(), sample, dim_ * sizeof(int8_t));
+            query->Int8Vectors(int8_query.data());
+        } else {
+            query->Float32Vectors(sample);
         }
         double single_query_time;
         DatasetPtr result = nullptr;

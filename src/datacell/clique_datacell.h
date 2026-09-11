@@ -15,6 +15,7 @@
 #pragma once
 
 #include <atomic>
+#include <limits>
 #include <shared_mutex>
 
 #include "container_types.h"
@@ -216,8 +217,11 @@ public:
     void
     Serialize(StreamWriter& writer) const;
 
+    /// If supplied, validate the caller's physical ID domain before publishing the loaded CSR.
     void
-    Deserialize(StreamReader& reader, uint64_t format_version = 2);
+    Deserialize(StreamReader& reader,
+                uint64_t format_version = 2,
+                uint64_t expected_total = std::numeric_limits<uint64_t>::max());
 
     [[nodiscard]] uint64_t
     GetMemoryUsage() const;

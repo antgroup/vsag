@@ -41,6 +41,7 @@ EnsureMCICliqueCoverage(uint64_t total,
     uint64_t repaired = 0;
     const auto candidate_cap = std::max<uint64_t>(1, std::min(max_degree, total));
     const auto member_cap = std::max<uint64_t>(1, clique_max);
+    UnorderedSet<InnerIdType> seen(allocator);
     for (uint64_t raw_seed = 0; raw_seed < total; ++raw_seed) {
         const auto seed = static_cast<InnerIdType>(raw_seed);
         if (coverage[seed].load(std::memory_order_relaxed) != 0) {
@@ -50,9 +51,12 @@ EnsureMCICliqueCoverage(uint64_t total,
         clique.reserve(candidate_cap);
         clique.push_back(seed);
         if (clique.size() < candidate_cap) {
+            // Reuse bounded scratch space; preserve neighbor order without quadratic scans.
+            seen.clear();
+            seen.reserve(candidate_cap);
+            seen.insert(seed);
             visit_neighbors(seed, [&](InnerIdType neighbor) {
-                if (neighbor < total and
-                    std::find(clique.begin(), clique.end(), neighbor) == clique.end()) {
+                if (neighbor < total and seen.insert(neighbor).second) {
                     clique.push_back(neighbor);
                 }
                 return clique.size() < candidate_cap;

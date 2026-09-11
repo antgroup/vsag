@@ -506,6 +506,8 @@ CliqueDataCell::PrepareDelete(const Vector<InnerIdType>& node_ids,
     for (auto clique_id : snapshot.retired_clique_ids) {
         retiring.insert(clique_id);
     }
+    // Project the whole batch: exclude every retiring clique together, then repair each
+    // survivor only once if its remaining memberships fall below the threshold.
     Vector<InnerIdType> clique_ids(allocator_);
     for (auto node_id : repair_candidates) {
         clique_ids.clear();
@@ -561,7 +563,9 @@ CliqueDataCell::Serialize(StreamWriter& writer) const {
 }
 
 void
-CliqueDataCell::Deserialize(StreamReader& reader, uint64_t format_version) {
+CliqueDataCell::Deserialize(StreamReader& reader,
+                            uint64_t format_version,
+                            uint64_t expected_total) {
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
         format_version == 1 or format_version == 2,
         "unsupported clique datacell format version");
@@ -577,6 +581,10 @@ CliqueDataCell::Deserialize(StreamReader& reader, uint64_t format_version) {
     read_nested_vector(reader, delta_node_to_cids_, allocator_);
     const auto base_total = p_node_to_cid_.empty() ? 0 : p_node_to_cid_.size() - 1;
     const auto total = std::max<uint64_t>(base_total, delta_node_to_cids_.size());
+    if (expected_total != std::numeric_limits<uint64_t>::max() and total != expected_total) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            "serialized MCI node count differs from HGraph node count");
+    }
     if (format_version >= 2) {
         StreamReader::ReadVector(reader, inactive_nodes_);
         StreamReader::ReadVector(reader, retired_cliques_);

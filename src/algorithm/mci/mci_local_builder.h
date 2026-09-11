@@ -127,7 +127,7 @@ public:
             append(std::move(clique));
         };
         if (candidates_.size() + 1 < threshold_) {
-            if (alpha > 100.0F) {
+            if (alpha > FALLBACK_ALPHA_THRESHOLD) {
                 fallback();
             }
             return stats;
@@ -178,7 +178,8 @@ public:
         start = std::chrono::steady_clock::now();
         std::sort(edges_.begin(), edges_.end());
         stats.edge_sort = elapsed(start);
-        if (edges_.size() < threshold_ * (threshold_ - 1) / 2 and alpha > 100.0F) {
+        if (edges_.size() < threshold_ * (threshold_ - 1) / 2 and
+            alpha > FALLBACK_ALPHA_THRESHOLD) {
             fallback();
             return stats;
         }
@@ -189,7 +190,7 @@ public:
                                     coverage,
                                     static_cast<InnerIdType>(max_saved_));
         stats.mce = elapsed(start);
-        if (stats.cliques == 0 and alpha > 100.0F) {
+        if (stats.cliques == 0 and alpha > FALLBACK_ALPHA_THRESHOLD) {
             fallback();
             return stats;
         }
@@ -205,6 +206,9 @@ public:
     }
 
 private:
+    // Above this alpha, failed local enumeration may relax constraints to cover the seed.
+    static constexpr float FALLBACK_ALPHA_THRESHOLD = 100.0F;
+
     struct Candidate {
         InnerIdType id;
         float distance;
@@ -230,6 +234,10 @@ private:
             return nearest * alpha;
         }
         const auto similarity = 1.0F - nearest;
+        // IP distance is 1 - dot, without normalization or a [0, 2] bound. For negative
+        // similarity, multiplication relaxes the bound as alpha grows; clamping would
+        // reject legitimate negative-IP neighbors. E.g. nearest=2, alpha=2 gives limit=3,
+        // which still excludes a pair at distance 4.
         return 1.0F - (similarity >= 0.0F ? similarity / alpha : similarity * alpha);
     }
 

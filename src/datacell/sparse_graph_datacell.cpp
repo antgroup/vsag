@@ -183,6 +183,8 @@ SparseGraphDataCell::Deserialize(StreamReader& reader) {
         // incoming edges from the loaded rows using decoded, version-valid neighbors.
         // GetNeighbors releases its map lock before AddReverseEdge takes the new object's lock;
         // loading is exclusive to the caller and no graph/reverse-edge lock is nested here.
+        // Its uncontended shared lock preserves the usual decoding/version checks on this
+        // cold path without adding a separate unlocked neighbor API.
         auto restored = std::make_unique<ReverseEdge>(allocator_);
         Vector<InnerIdType> neighbors(allocator_);
         for (const auto& row : neighbors_) {
