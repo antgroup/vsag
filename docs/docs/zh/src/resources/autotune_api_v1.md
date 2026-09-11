@@ -20,7 +20,7 @@ HGraph/IVF 的构建和查询调优，以及一个使用全量 query 的 KNN wor
 | `workload` | object | 是 | 要优化的 KNN workload。 |
 | `constraints` | object | 是 | 非空的“指标到阈值”映射。 |
 | `objective` | object | 是 | 对可行候选排序的目标指标。 |
-| `tuning_config` | object | 否 | workspace、产物保留和 trial 上限。 |
+| `tuning_config` | object | 否 | workspace、产物保留、trial 上限和 HGraph 复用策略。 |
 | `output` | object | 否 | 报告路径和原始 eval 输出开关。 |
 
 ### 数据集规则
@@ -135,6 +135,19 @@ bucket 数量。AutoTune 无法推断已有 IVF 的 bucket 数量，因此 searc
 规范化索引名和具体 `create_params` 相同的候选属于同一个 build group。AutoTune 对该组
 只构建一次、序列化一次作为证据，再使用同一个内存索引实例执行所有关联的 search 候选。
 
+默认情况下，只有 `max_degree` 不同的 HGraph create 候选可以在每种量化类型内复用一次
+最大 degree 的原生 build。这里的量化类型特指 `base_quantization_type`。AutoTune 通过
+`Index::Tune` 为每个具体 degree 候选生成独立的
+最终 artifact。设置 `tuning_config.allow_quantization_tune=true` 后，还允许不同量化类型
+共享一次 canonical fp32 build。这里也仅指不同的 `base_quantization_type` 值。变换不支持
+或失败时，受影响的候选会回退到原生构建。
+当 `build_seconds` 或 `build_and_search_seconds` 是约束或目标时，禁用该复用。
+
+最终以派生 artifact 为准。它不保证与使用相同 `create_params` 原生构建的图等价，因为
+degree 裁剪会继承 source 拓扑；开启量化 Tune 时，切换量化也不会重新构图。指标来自对
+最终序列化 artifact 的实际评测；使用方必须反序列化该 artifact，而不能只按返回参数
+重新构建。
+
 ### 已有索引模式
 
 设置 `index_path` 后：
@@ -243,6 +256,7 @@ V1 指标口径：
   "tuning_config": {
     "workspace_path": "/tmp/vsag_autotune",
     "keep_intermediate": false,
+    "allow_quantization_tune": false,
     "max_trials": 1000
   },
   "output": {
@@ -256,6 +270,7 @@ V1 指标口径：
 | --- | --- | --- |
 | `tuning_config.workspace_path` | `/tmp/vsag_autotune` | run 产物和 CLI 默认报告目录。 |
 | `tuning_config.keep_intermediate` | `false` | 是否保留所有生成索引。 |
+| `tuning_config.allow_quantization_tune` | `false` | 是否允许从一个 fp32 HGraph build 派生其他 `base_quantization_type` 候选；search-only 模式下无效。 |
 | `tuning_config.max_trials` | `1000` | 计划最坏 trial 数上限；硬上限为 `100000`。 |
 | `output.result_path` | `<workspace>/run-<id>.json` | CLI 完整报告路径。 |
 | `output.include_raw_eval` | `false` | 在 build/trial 中包含原生 eval JSON。 |
@@ -348,6 +363,9 @@ search-only 模式的 `builds` 为空。build-and-search 模式下，每个 `bui
 | `build_id` | 被 trial 引用的稳定 ID。 |
 | `index_name` | 具体索引类型。 |
 | `create_params` | 具体创建参数。 |
+| `strategy` | `full_build` 或 `hgraph_tune`。 |
+| `source_build_id` | canonical HGraph source 标识；仅 `hgraph_tune` 存在。 |
+| `transform_seconds` | 累计变换耗时；仅 `hgraph_tune` 存在。 |
 | `status` | `success` 或 `failed`。 |
 | `metrics` | 可用的 build 共享指标。 |
 | `artifacts` | `source`、`index_path`、`use_existing_index` 和 `retained`。 |
@@ -385,11 +403,16 @@ query workload。
 一次。search-only 模式直接为所有 trial 复用调用方索引，或复用 CLI 适配器反序列化得到的
 索引。
 
+对于 `strategy=hgraph_tune`，`transform_seconds` 是生成该 artifact 所计入的图和量化
+变换耗时。其 `metrics.build_seconds` 是 canonical source build 耗时加
+`transform_seconds`，不是独立原生构建该候选的耗时。
+
 ### Artifact 语义
 
-V1 只在 build-and-search 记录中提供 artifact 字段。`artifacts.source` 为 `generated`；
-`artifacts.index_path` 用于说明被评测索引曾存放在哪里，不保证响应返回时路径仍然存在。
-需要检查 `artifacts.retained`：
+V1 只在 build-and-search 记录中提供 artifact 字段。原生构建的 `artifacts.source` 为
+`generated`，变换生成的 HGraph artifact 为 `hgraph_tune`。`artifacts.index_path` 用于
+说明被评测索引曾存放在哪里，不保证响应返回时路径仍然存在。需要检查
+`artifacts.retained`：
 
 - `true`：这是最终推荐产物，或者请求保留所有生成索引；
 - `false`：AutoTune 计划删除或已经删除生成产物。
