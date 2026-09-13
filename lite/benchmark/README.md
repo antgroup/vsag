@@ -44,3 +44,31 @@ lite/benchmark/run_comparison.sh \
 ```
 
 The runner alternates Full/Lite execution order over seven repetitions for both 10k x 128 and 100k x 128 cases. It records raw and stripped shared-library sizes, binary and library checksums, per-process `/usr/bin/time -v` output, CSV measurements, and snapshots. Results compare two exact FP32 squared-L2 BruteForce implementations; they do not establish graph-index performance or standard-dataset Recall@K.
+
+## SIFT-128 subset Recall@10
+
+The optional `lite_dataset_benchmark` evaluates independent queries from the public
+[ANN-Benchmarks SIFT-128 Euclidean dataset](https://github.com/erikbern/ann-benchmarks).
+Install Python `numpy` and `h5py` in an isolated environment, download the HDF5
+file to a directory outside the repository, and prepare the two prefixes:
+
+```bash
+curl -fL -o /data/sift-128-euclidean.hdf5 https://ann-benchmarks.com/sift-128-euclidean.hdf5
+python3 lite/benchmark/prepare_sift.py /data/sift-128-euclidean.hdf5 /data/sift-prepared
+cmake -S lite -B build-lite-baseline -DCMAKE_BUILD_TYPE=Release -DENABLE_BENCHMARKS=ON
+cmake --build build-lite-baseline --target lite_dataset_benchmark
+lite/benchmark/run_sift.sh build-lite-baseline/lite_dataset_benchmark /data/sift-prepared /data/sift-results
+```
+
+The preparation script takes the first 10k and 100k training vectors and the
+first 100 independent test queries. It recomputes squared-L2 exact Top-10
+ground truth separately on each selected base prefix (ties by ascending ID).
+The HDF5 file's original 1M-base neighbors must not be reused for a subset.
+Each `manifest.json` records the source and converted-file SHA-256 hashes;
+the output directory must be new. The runner records seven raw CSVs, process
+measurements, environment and per-scale manifests. The executable verifies
+each query's search result against the selected-prefix ground truth, then
+checks exact result and distance equality after Save/Load. These measurements
+cover standalone Lite exact BruteForce only; they do not compare Full on this
+dataset, imply an ANN quality improvement, or measure strict cold loading.
+The scripts require a little-endian host for the fvecs/ivecs interchange files.
