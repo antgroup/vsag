@@ -49,7 +49,7 @@ measure_library() {
     local stripped="${output_dir}/${implementation}-stripped.so"
     cp "${library}" "${stripped}"
     strip --strip-unneeded "${stripped}"
-    printf '%s,%s,%s\n' "${implementation}" "$(stat -c %s "${library}")" \
+    printf '%s,%s,%s\n' "${implementation}" "$(stat -Lc %s "${library}")" \
         "$(stat -c %s "${stripped}")" >>"${output_dir}/library-size.csv"
 }
 
