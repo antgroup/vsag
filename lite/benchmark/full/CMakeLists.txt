@@ -10,3 +10,7 @@ find_package(vsag CONFIG REQUIRED)
 add_executable(full_benchmark ../full_main.cpp)
 target_link_libraries(full_benchmark PRIVATE vsag::vsag)
 target_compile_options(full_benchmark PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(full_dataset_benchmark ../full_dataset_main.cpp)
+target_link_libraries(full_dataset_benchmark PRIVATE vsag::vsag)
+target_compile_options(full_dataset_benchmark PRIVATE -Wall -Wextra -Wpedantic)
