@@ -58,3 +58,9 @@ install(FILES
     "${VSAG_ROOT}/include/vsag/logger.h"
     DESTINATION include/vsag)
 install(EXPORT vsag-lite-config NAMESPACE vsag:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/vsag-lite)
+
+if(ENABLE_BENCHMARKS)
+    add_executable(lite_dataset_benchmark "${VSAG_ROOT}/lite/benchmark/dataset_main.cpp")
+    target_link_libraries(lite_dataset_benchmark PRIVATE vsag::lite)
+    target_compile_options(lite_dataset_benchmark PRIVATE -Wall -Wextra -Wpedantic)
+endif()
