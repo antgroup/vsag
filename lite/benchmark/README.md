@@ -72,3 +72,23 @@ checks exact result and distance equality after Save/Load. These measurements
 cover standalone Lite exact BruteForce only; they do not compare Full on this
 dataset, imply an ANN quality improvement, or measure strict cold loading.
 The scripts require a little-endian host for the fvecs/ivecs interchange files.
+
+To compare Full and Lite BruteForce on the same prepared SIFT subsets, build
+the independent Full consumer against a Full VSAG installation from this
+commit and run the alternating seven-round comparison:
+
+```bash
+cmake -S lite/benchmark/full -B build-full-dataset -DCMAKE_PREFIX_PATH=/path/to/full-install
+cmake --build build-full-dataset --target full_dataset_benchmark
+lite/benchmark/run_sift_comparison.sh build-full-dataset/full_dataset_benchmark \
+  build-lite-baseline/lite_dataset_benchmark /path/to/full-install/lib/libvsag.so \
+  build-lite-baseline/libvsag-lite.so /data/sift-prepared /data/sift-comparison
+```
+
+Each implementation gets the same base/query/ground-truth files and Top-10
+definition. Full uses FP32 squared-L2 BruteForce and its own snapshot format;
+it copies query values into an existing Dataset outside the timed search.
+The runner retains raw process stdout, stderr, CSV, snapshots, environment,
+and seven executions per scale per implementation. The Full library and Lite
+library build identities should be recorded alongside the executable hashes
+when reporting this comparison.
