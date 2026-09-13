@@ -12,6 +12,10 @@ if [[ -e "${output_dir}" ]]; then
     echo "output directory already exists: ${output_dir}" >&2
     exit 1
 fi
+if [[ ! -f "${benchmark}" || ! -x "${benchmark}" ]]; then
+    echo "benchmark executable does not exist or is not executable: ${benchmark}" >&2
+    exit 1
+fi
 mkdir -p "${output_dir}"
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)

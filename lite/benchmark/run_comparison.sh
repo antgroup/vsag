@@ -15,14 +15,19 @@ if [[ -e "${output_dir}" ]]; then
     echo "output directory already exists: ${output_dir}" >&2
     exit 1
 fi
-mkdir -p "${output_dir}"
-
 for input in "${full_benchmark}" "${lite_benchmark}" "${full_library}" "${lite_library}"; do
     if [[ ! -f "${input}" ]]; then
         echo "input file does not exist: ${input}" >&2
         exit 1
     fi
 done
+for benchmark in "${full_benchmark}" "${lite_benchmark}"; do
+    if [[ ! -x "${benchmark}" ]]; then
+        echo "benchmark is not executable: ${benchmark}" >&2
+        exit 1
+    fi
+done
+mkdir -p "${output_dir}"
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 {
