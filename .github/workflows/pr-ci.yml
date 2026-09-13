@@ -327,6 +327,15 @@ jobs:
           ./scripts/testing/test_parallel_by_name.sh unittests
           ./build/tools/eval/eval_dataset_test -d yes
           ./build/tools/autotune/autotune_test -d yes
+      - name: Test evaluation query preparation
+        run: |
+          python3 -m pip install numpy h5py
+          chmod +x ./build/tools/eval/eval_performance
+          export LD_LIBRARY_PATH="$PWD/build/src:$PWD/build/tools/autotune"
+          export LSAN_OPTIONS="suppressions=$PWD/omp.supp"
+          export OPENBLAS_NUM_THREADS=1
+          VSAG_EVAL_BINARY="$PWD/build/tools/eval/eval_performance" \
+            python3 -m unittest tests/scripts/test_prepare_query_split.py -v
       - name: Upload Log
         uses: actions/upload-artifact@v5
         with:
