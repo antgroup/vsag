@@ -30,7 +30,7 @@ The loader is a fresh process, but the runner does not evict the snapshot from t
 
 `warm_load_ms` is measured in the same process immediately after saving and must not be reported as cold-start latency. A strict cold-load experiment must additionally control and document the operating-system page cache.
 
-The benchmark refuses to overwrite an existing output directory or snapshot. Run it on an otherwise idle machine and retain the compiler, commit SHA, CPU, and raw output with any report.
+The runners check that their benchmark executables and library inputs exist before creating an output directory, and refuse to overwrite an existing output directory or snapshot. Run them on an otherwise idle machine and retain the compiler, commit SHA, CPU, and raw output with any report.
 
 ## Full/Lite comparison
 
