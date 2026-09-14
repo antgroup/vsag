@@ -50,13 +50,15 @@ jobs:
             src/lite/fp32_distance_avx512.cpp \
             src/lite/index.cpp \
             src/lite/index_test.cpp \
-            lite/example/main.cpp
+            lite/example/main.cpp \
+            lite/benchmark/sq8_probe.cpp
       - name: Configure Debug tests
         run: |
           cmake -S lite -B build-lite-first-debug -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            -DENABLE_TESTS=ON
+            -DENABLE_TESTS=ON \
+            -DENABLE_QUANTIZATION_PROBE=ON
       - name: Run clang-tidy
         run: |
           clang-tidy-15 \
@@ -73,6 +75,7 @@ jobs:
             src/lite/fp32_distance_avx512.cpp \
             src/lite/index.cpp \
             src/lite/index_test.cpp \
+            lite/benchmark/sq8_probe.cpp \
             -p build-lite-first-debug \
             --header-filter='.*/include/vsag/lite/.*'
       - name: Build and test Debug
