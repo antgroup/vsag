@@ -541,6 +541,9 @@ private:
     void
     check_fused_mutation_supported(std::string_view operation) const;
 
+    void
+    check_user_defined_precise_io_supported(std::string_view operation) const;
+
     std::vector<int64_t>
     add_impl(const DatasetPtr& data);
 

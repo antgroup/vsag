@@ -38,6 +38,7 @@
 #include "impl/pruning_strategy.h"
 #include "impl/searcher/basic_searcher.h"
 #include "io/memory_io/memory_io_parameter.h"
+#include "io/user_defined_io/user_defined_io_parameter.h"
 #include "pipnn_storage_build.h"
 #include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
 #include "storage/stream_reader.h"
@@ -1471,6 +1472,20 @@ HGraph::InitFeatures() {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_CONCURRENT, false);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_DELETE_CONCURRENT,
                                               false);
+    }
+
+    // Lifecycle copies (Clone / ExportModel) re-create datacells through the same IO
+    // parameters. For user-defined IO this re-binds the *source* Reader/Writer pair: the copy
+    // would either share one backing store (Clone) or resize that store through the shared
+    // Writer during later builds (ExportModel). Both silently corrupt the original index, so
+    // reject the operations until the pair can supply independent storage for copies.
+    const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
+    if (this->has_precise_reorder() and this->high_precise_codes_ != nullptr and
+        hgraph_param != nullptr and hgraph_param->precise_codes_param != nullptr and
+        std::dynamic_pointer_cast<UserDefinedIOParameter>(
+            hgraph_param->precise_codes_param->io_parameter) != nullptr) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CLONE, false);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_EXPORT_MODEL, false);
     }
 }
 
