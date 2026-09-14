@@ -45,6 +45,15 @@ wait_all_futures(std::vector<std::future<void>>& futures) {
 
 }  // namespace
 
+bool
+HGraph::skip_scalar_codes_for_fused_odescent() const {
+    // Non-NSW builds currently dispatch to ODescent. In this configuration its distances use
+    // raw FP32, so scalar codes depending on the global mean are not consumed during build.
+    return rabitq_fused_datacell_ != nullptr and graph_type_ != GRAPH_TYPE_VALUE_NSW and
+           not has_precise_reorder() and raw_vector_ != nullptr and
+           raw_vector_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32;
+}
+
 HGraphOptimizedBuildSession::HGraphOptimizedBuildSession(HGraph& hgraph) : hgraph_(&hgraph) {
     if (hgraph.using_dedup_storage()) {
         return;
@@ -53,11 +62,7 @@ HGraphOptimizedBuildSession::HGraphOptimizedBuildSession(HGraph& hgraph) : hgrap
     if (not build_uses_base_codes) {
         return;
     }
-    if (hgraph.rabitq_fused_datacell_ != nullptr and hgraph.graph_type_ != GRAPH_TYPE_VALUE_NSW and
-        not hgraph.has_precise_reorder() and hgraph.raw_vector_ != nullptr and
-        hgraph.raw_vector_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
-        // ODescent selects raw FP32 in this configuration. Do not generate unused scalar codes
-        // that depend on the global mean when only cluster-residual fused codes are needed.
+    if (hgraph.skip_scalar_codes_for_fused_odescent()) {
         return;
     }
 

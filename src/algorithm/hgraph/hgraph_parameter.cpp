@@ -369,6 +369,8 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, rabitq_fused_datacell);
     if (rabitq_fused_datacell) {
         CHECK_FIELD_EQ(*this, *p, rabitq_centroid_count);
+        // kmeans_iterations only controls training; loading the stored model does not rerun
+        // KMeans, so a different iteration budget is intentionally compatible.
     }
     // A conjugate-enabled reader can load an older index without the optional graph and start
     // with an empty one. The reverse direction would discard serialized enhancement data.

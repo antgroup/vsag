@@ -1523,8 +1523,8 @@ public:
         for (uint32_t id = 0; id < serialized_cluster_count; ++id) {
             double norm = 0.0;
             for (uint64_t d = 0; d < dim; ++d) {
-                const auto value = rotated[uint64_t{id} * dim + d];
-                norm += static_cast<double>(value) * value;
+                const double value = rotated[uint64_t{id} * dim + d];
+                norm += value * value;
             }
             norms[id] = norm;
         }

@@ -64,6 +64,8 @@ HGraphRaBitQFusedDataCell::HGraphRaBitQFusedDataCell(const GraphDataCellParamPtr
       one_bit_code_size_(one_bit_code_size),
       supplement_code_size_(supplement_code_size),
       dim_(common_param.dim_) {
+    // Validate codec parameters and size arithmetic before any model is installed. Only the
+    // validation is needed here; no codec payload is allocated by this constructor.
     (void)CheckedFusedCodecSize(common_param.dim_, cluster_count);
     cluster_count_ = cluster_count;
     CHECK_ARGUMENT(graph_param != nullptr, "fused graph parameter must not be null");

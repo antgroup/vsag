@@ -431,6 +431,9 @@ public:
                      RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr) const;
 
 private:
+    [[nodiscard]] bool
+    skip_scalar_codes_for_fused_odescent() const;
+
     void
     check_fused_mutation_supported(std::string_view operation) const;
 

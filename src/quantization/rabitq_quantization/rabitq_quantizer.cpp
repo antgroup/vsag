@@ -16,6 +16,7 @@
 #include "rabitq_quantizer.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -233,6 +234,8 @@ RaBitQuantizer<metric>::TrainFusedTransform() {
     }
     // Both FHT and random orthogonal rotation ignore training vectors. Fused encoding supplies
     // a per-cluster centroid, so retain a zero placeholder for the ordinary quantizer's mean.
+    // The constructor always creates a rotator, independently of the PCA dimension check.
+    assert(rom_ != nullptr);
     rom_->Train(nullptr, 0);
     centroid_.assign(this->dim_, 0.0F);
     this->is_trained_ = true;
