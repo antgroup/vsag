@@ -82,10 +82,10 @@ not general performance guarantees. Raw
 results and environment are kept outside Git. The default v0.1 guide remains
 in the English and Chinese links below.
 
-## SQ8 candidate evaluation
+## SQ8 and FP16 candidate evaluation
 
-The optional [SQ8 probe](benchmark/README.md) measures classic per-dimension
-SQ8 encoding and exhaustive-query distortion on independent SIFT queries.
+The optional [quantization probe](benchmark/README.md) measures classic
+per-dimension SQ8 and IEEE FP16 encoding on independent SIFT queries.
 It is a selection experiment, not a quantized Lite backend: Graph, public
 API and v1/v2 snapshots remain FP32. The code-byte count must not be reported
 as current index RSS or snapshot size.
