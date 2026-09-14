@@ -241,7 +241,7 @@ Index::Save(std::ostream& output) const {
         for (const auto& id : impl_->ids) {
             write(output, static_cast<uint64_t>(id));
         }
-        for (float value : impl_->vectors) {
+        for (const float value : impl_->vectors) {
             uint32_t bits;
             std::memcpy(&bits, &value, 4);
             write(output, bits, 4);
