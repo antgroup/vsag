@@ -1,5 +1,13 @@
 # 独立 VSAG Lite v0.1
 
+> 第二阶段分支说明（2026-09-14）：默认 Index::Create(dim) 仍是精确 BruteForce，
+> v1 快照字节格式不变。显式调用 BuildGraph(degree, ef_search) 成功后才切换为
+> 独立的单层近似图；失败不修改原索引。图模式继续使用同一套 Add/Update/Remove/
+> Search 接口；Save 写入含 FP32、ID、参数和邻接关系的 v2 快照，Load 同时接受
+> v1/v2。v2 与 Full VSAG 快照不兼容，不提供并发、校验和、量化或 mmap。
+> 本页余下内容说明首版默认 BruteForce 行为。
+
+
 这是实验性的独立构建入口，以 FP32、L2 平方距离的精确 BruteForce 起步，
 选择性复用源码，而不是条件裁剪完整库。目前面向 Linux x86_64、C++17 和项目
 既定编译器基线，不改变默认 Full 构建。从仓库根目录运行：

@@ -170,6 +170,11 @@ public:
         return true;
     }
 
+    [[nodiscard]] BackendKind
+    Kind() const override {
+        return BackendKind::BRUTE_FORCE;
+    }
+
     [[nodiscard]] uint64_t
     Size() const override {
         return ids_.size();
