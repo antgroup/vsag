@@ -60,6 +60,7 @@ namespace vsag {
 class ChunkedManifest;
 struct ComponentManifestEntry;
 class FlattenOptimizedBuildInterface;
+class HGraphFGIM;
 class HGraphRaBitQFusedDataCell;
 class HGraphRaBitQSearcher;
 class HGraphOptimizedBuildSession;
@@ -80,6 +81,8 @@ public:
                                  const IndexCommonParam& common_param);
 
     friend class HGraphAnalyzer;
+    friend class HGraphFGIM;
+    friend class HGraphFGIMTest;
     friend class HGraphOptimizedBuildSession;
 
 public:
