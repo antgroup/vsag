@@ -17,6 +17,7 @@
 #include <array>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <set>
 #include <sstream>
@@ -118,6 +119,22 @@ RequireSameResults(const DatasetPtr& expected, const DatasetPtr& actual) {
     }
 }
 
+std::string
+CreateDateMetadataPayload(uint32_t version, uint32_t bucket, uint32_t quarter) {
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    StreamWriter::WriteObj(writer, version);
+    StreamWriter::WriteObj(writer, uint32_t{0});
+    StreamWriter::WriteVector(writer, std::vector<uint32_t>{bucket});
+    StreamWriter::WriteObj(writer, uint64_t{1});
+    StreamWriter::WriteObj(writer, quarter);
+    StreamWriter::WriteObj(writer, uint32_t{0});
+    StreamWriter::WriteObj(writer, uint32_t{1});
+    StreamWriter::WriteVector(writer, std::vector<uint32_t>{});
+    StreamWriter::WriteVector(writer, std::vector<uint32_t>{});
+    return stream.str();
+}
+
 class AllowLabelFilter : public Filter {
 public:
     explicit AllowLabelFilter(int64_t label) : label_(label) {
@@ -166,7 +183,7 @@ TEST_CASE("SINDI date bucket and host filters route and serialize",
 
     SmallSindiDataset data(0);
     std::array<std::string, 4> hosts = {"host-b", "host-a", "host-b", "host-a"};
-    std::array<std::string, 4> date_buckets = {"2026", "2026/05", "2026/05/01", "2026/08"};
+    std::array<std::string, 4> date_buckets = {"", "2026/05", "2026/05/01", "2026/08"};
     auto base = data.Base()
                     ->StringMetadata(SINDI_HOST_METADATA_NAME, hosts.data())
                     ->Paths(SINDI_DATE_PATH_NAME, date_buckets.data());
@@ -240,7 +257,7 @@ TEST_CASE("SINDI date bucket and host filters route and serialize",
     REQUIRE(index->KnnSearch(query, 3, kSindiSearchParameters, nullptr)->GetDim() == 0);
     REQUIRE(index->RangeSearch(query, 2.0F, kSindiSearchParameters, nullptr, -1)->GetDim() == 3);
     query_date = "2026";
-    REQUIRE(index->KnnSearch(query, 3, kSindiSearchParameters, nullptr)->GetDim() == 3);
+    REQUIRE(index->KnnSearch(query, 3, kSindiSearchParameters, nullptr)->GetDim() == 2);
 
     std::string query_date_begin = "2026/05/01";
     std::string query_date_end = "2026/08";
@@ -273,9 +290,14 @@ TEST_CASE("SINDI date bucket and host filters route and serialize",
     std::string host = "host-b";
     query->StringMetadata(SINDI_HOST_METADATA_NAME, &host);
     auto combined = index->KnnSearch(query, 3, kSindiSearchParameters, nullptr);
-    REQUIRE(combined->GetDim() == 2);
-    REQUIRE(combined->GetIds()[0] == 10);
-    REQUIRE(combined->GetIds()[1] == 20);
+    REQUIRE(combined->GetDim() == 1);
+    REQUIRE(combined->GetIds()[0] == 20);
+
+    auto host_query = data.Query()->StringMetadata(SINDI_HOST_METADATA_NAME, &host);
+    auto host_only = index->KnnSearch(host_query, 3, kSindiSearchParameters, nullptr);
+    REQUIRE(host_only->GetDim() == 2);
+    REQUIRE(host_only->GetIds()[0] == 10);
+    REQUIRE(host_only->GetIds()[1] == 20);
 
     SearchRequest request;
     request.query_ = query;
@@ -291,6 +313,8 @@ TEST_CASE("SINDI date bucket and host filters route and serialize",
     auto restored = std::make_unique<SINDI>(parameter, common_param);
     test_serializion(*index, *restored);
     RequireSameResults(combined, restored->KnnSearch(query, 3, kSindiSearchParameters, nullptr));
+    RequireSameResults(host_only,
+                       restored->KnnSearch(host_query, 3, kSindiSearchParameters, nullptr));
     RequireSameResults(host_range,
                        restored->KnnSearch(range_query, 3, kSindiSearchParameters, nullptr));
     if (not immutable) {
@@ -306,6 +330,8 @@ TEST_CASE("SINDI date bucket and host filters route and serialize",
     REQUIRE_NOTHROW(streaming_restored->DeserializeStreaming(stream));
     RequireSameResults(combined,
                        streaming_restored->KnnSearch(query, 3, kSindiSearchParameters, nullptr));
+    RequireSameResults(
+        host_only, streaming_restored->KnnSearch(host_query, 3, kSindiSearchParameters, nullptr));
     RequireSameResults(
         host_range, streaming_restored->KnnSearch(range_query, 3, kSindiSearchParameters, nullptr));
     if (not immutable) {
@@ -336,10 +362,113 @@ TEST_CASE("SINDI date bucket and host filters route and serialize",
                                  ->Paths(SINDI_DATE_END_PATH_NAME, &query_date_end);
     REQUIRE_THROWS(index->KnnSearch(conflicting_query, 3, kSindiSearchParameters, nullptr));
 
-    std::array<std::string, 4> invalid_buckets = {"2026", "2026/13", "2026/05/01", "2026/08"};
+    query_date.clear();
+    REQUIRE_THROWS(index->KnnSearch(query, 3, kSindiSearchParameters, nullptr));
+
+    std::array<std::string, 4> invalid_buckets = {"", " ", "2026/05/01", "2026/08"};
     SINDI invalid_bucket_index(parameter, common_param);
     REQUIRE_THROWS(invalid_bucket_index.Build(
         data.Base()->Paths(SINDI_DATE_PATH_NAME, invalid_buckets.data())));
+}
+
+TEST_CASE("SINDI accepts entirely missing base date metadata",
+          "[ut][SINDI][metadata_filter][date_filter]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    SmallSindiDataset data(0);
+    std::array<std::string, 4> date_buckets{};
+    const bool immutable = GENERATE(false, true);
+    auto parameter = CreateSindiParameter(immutable, false);
+    parameter->use_reorder = GENERATE(false, true);
+    SINDI index(parameter, common_param);
+    REQUIRE(index.Build(data.Base()->Paths(SINDI_DATE_PATH_NAME, date_buckets.data())) ==
+            std::vector<int64_t>{40});
+    REQUIRE(index.KnnSearch(data.Query(), 3, kSindiSearchParameters, nullptr)->GetDim() == 3);
+
+    std::string query_date = "2026";
+    auto query = data.Query()->Paths(SINDI_DATE_PATH_NAME, &query_date);
+    REQUIRE(index.KnnSearch(query, 3, kSindiSearchParameters, nullptr)->GetDim() == 0);
+}
+
+TEST_CASE("SINDI date metadata versions gate missing date buckets",
+          "[ut][SINDI][metadata_filter][date_filter][serialization]") {
+    constexpr uint32_t year = 2026;
+    constexpr uint32_t valid_bucket = year << 9;
+    constexpr uint32_t valid_quarter = year * 4;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+
+    SECTION("reads existing v1 and hostless v2 metadata") {
+        const auto version = GENERATE(SINDI_DATE_METADATA_LEGACY_FORMAT_VERSION,
+                                      SINDI_DATE_METADATA_STRING_HOST_FORMAT_VERSION);
+        std::stringstream stream(CreateDateMetadataPayload(version, valid_bucket, valid_quarter));
+        IOStreamReader reader(stream);
+        SindiDateFilter date_filter(allocator.get());
+        REQUIRE_NOTHROW(date_filter.Deserialize(reader, 1));
+    }
+
+    SECTION("reads v2 metadata with a string host dictionary") {
+        std::string date = "2026";
+        std::string host = "host-a";
+        auto base = Dataset::Make()
+                        ->NumElements(1)
+                        ->Paths(SINDI_DATE_PATH_NAME, &date)
+                        ->StringMetadata(SINDI_HOST_METADATA_NAME, &host)
+                        ->Owner(false);
+        SindiDateFilter original(allocator.get());
+        auto plan = original.PrepareBuild(base);
+        plan.RecordSuccess(0);
+        original.CommitBuild(std::move(plan), 1);
+
+        std::stringstream serialized;
+        IOStreamWriter writer(serialized);
+        original.Serialize(writer);
+        auto payload = serialized.str();
+        const uint32_t version = SINDI_DATE_METADATA_STRING_HOST_FORMAT_VERSION;
+        std::memcpy(payload.data(), &version, sizeof(version));
+
+        std::stringstream stream(payload);
+        IOStreamReader reader(stream);
+        SindiDateFilter restored(allocator.get());
+        REQUIRE_NOTHROW(restored.Deserialize(reader, 1));
+        auto query = Dataset::Make()
+                         ->NumElements(1)
+                         ->Paths(SINDI_DATE_PATH_NAME, &date)
+                         ->StringMetadata(SINDI_HOST_METADATA_NAME, &host)
+                         ->Owner(false);
+        REQUIRE(restored.Classify(query, 10000).kind == SindiHostRouteKind::WINDOW);
+    }
+
+    SECTION("rejects missing buckets in v1 and v2 metadata") {
+        const auto version = GENERATE(SINDI_DATE_METADATA_LEGACY_FORMAT_VERSION,
+                                      SINDI_DATE_METADATA_STRING_HOST_FORMAT_VERSION);
+        std::stringstream stream(CreateDateMetadataPayload(version, 0, 0));
+        IOStreamReader reader(stream);
+        SindiDateFilter date_filter(allocator.get());
+        REQUIRE_THROWS_WITH(
+            date_filter.Deserialize(reader, 1),
+            Catch::Matchers::ContainsSubstring("missing date bucket requires metadata version 3"));
+    }
+
+    SECTION("accepts a missing partition in v3 metadata") {
+        std::stringstream stream(
+            CreateDateMetadataPayload(SINDI_DATE_METADATA_FORMAT_VERSION, 0, 0));
+        IOStreamReader reader(stream);
+        SindiDateFilter date_filter(allocator.get());
+        REQUIRE_NOTHROW(date_filter.Deserialize(reader, 1));
+    }
+
+    SECTION("rejects a missing bucket outside the missing partition") {
+        std::stringstream stream(
+            CreateDateMetadataPayload(SINDI_DATE_METADATA_FORMAT_VERSION, 0, valid_quarter));
+        IOStreamReader reader(stream);
+        SindiDateFilter date_filter(allocator.get());
+        REQUIRE_THROWS_WITH(
+            date_filter.Deserialize(reader, 1),
+            Catch::Matchers::ContainsSubstring("missing date bucket is outside its partition"));
+    }
 }
 
 TEST_CASE("SINDI date ranges preserve coarse bucket containment across years",

@@ -1,13 +1,12 @@
 
 # Configuration for CodeCov
 codecov:
+  disable_default_path_fixes: true
   max_report_age: off
   require_ci_to_pass: no
   notify:
     require_ci_to_pass: no
     wait_for_ci: false
-fixes:
-  - "/__w/vsag/::/"
 
 
 coverage:
@@ -42,22 +41,51 @@ component_management:
         branches:
           - "!main"
   individual_components:  # in alphabetical
+    - component_id: module_analyzer
+      name: analyzer
+      paths:
+        - src/analyzer/**
+    - component_id: module_attr
+      name: attr
+      paths:
+        - src/attr/**
     - component_id: module_common
       name: common
       paths:
-        - src/*
+        - include/vsag/**
+        - ^src/[^/]+$
     - component_id: module_datacell
       name: datacell
       paths:
         - src/datacell/**
         - src/io/**
         - src/quantization/**
+    - component_id: module_factory
+      name: factory
+      paths:
+        - src/factory/**
+    - component_id: module_impl
+      name: impl
+      paths:
+        - src/impl/**
     - component_id: module_index
       name: index
       paths:
         - src/index/**
         - src/algorithm/**
+    - component_id: module_layout
+      name: layout
+      paths:
+        - src/layout/**
     - component_id: module_simd
       name: simd
       paths:
         - src/simd/**
+    - component_id: module_storage
+      name: storage
+      paths:
+        - src/storage/**
+    - component_id: module_utils
+      name: utils
+      paths:
+        - src/utils/**

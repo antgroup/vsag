@@ -95,13 +95,13 @@ IOParameter::GetIOParameterByJson(const JsonType& json) {
         return nullptr;
     }
     if (io_ptr != nullptr) {
-        io_ptr->LoadReadCacheConfig(json);
+        io_ptr->LoadCommonConfig(json);
     }
     return io_ptr;
 }
 
 void
-IOParameter::LoadReadCacheConfig(const JsonType& json) {
+IOParameter::LoadCommonConfig(const JsonType& json) {
     if (json.Contains(READ_CACHE_ENABLED_KEY)) {
         CHECK_ARGUMENT(json[READ_CACHE_ENABLED_KEY].IsBool(),
                        "enable_read_cache must be a boolean");
@@ -112,13 +112,21 @@ IOParameter::LoadReadCacheConfig(const JsonType& json) {
         CHECK_ARGUMENT(val.IsNumberUnsigned(), "total_cache_size must be a non-negative integer");
         read_cache_total_size_ = val.GetUint64();
     }
+    if (json.Contains(IO_PREFETCH_HINT_KEY)) {
+        CHECK_ARGUMENT(json[IO_PREFETCH_HINT_KEY].IsBool(),
+                       "enable_prefetch_hint must be a boolean");
+        enable_prefetch_hint_ = json[IO_PREFETCH_HINT_KEY].GetBool();
+    }
 }
 
 void
-IOParameter::AppendReadCacheConfig(JsonType& json) const {
+IOParameter::AppendCommonConfig(JsonType& json) const {
     if (enable_read_cache_) {
         json[READ_CACHE_ENABLED_KEY].SetBool(true);
         json[READ_CACHE_TOTAL_CACHE_SIZE_KEY].SetUint64(read_cache_total_size_);
+    }
+    if (enable_prefetch_hint_) {
+        json[IO_PREFETCH_HINT_KEY].SetBool(true);
     }
 }
 

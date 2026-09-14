@@ -438,6 +438,7 @@ private:
 
     void
     connect_cached_graph_point(InnerIdType inner_id,
+                               const float* vector,
                                const DistHeapPtr& candidates,
                                const GraphInterfacePtr& graph,
                                const FlattenInterfacePtr& codes,
@@ -581,9 +582,12 @@ private:
 
     std::unique_ptr<PyramidBuildCache> cache_{nullptr};  // per-graph caches for warm-start build
 
-    float build_cache_hit_rate_{-1.0F};     // cache hit rate from last cache-based build
-    uint64_t build_cache_hit_nodes_{0};     // number of nodes with cache hit
-    uint64_t build_cache_missed_nodes_{0};  // number of nodes without cache hit
+    float build_cache_hit_rate_{-1.0F};           // cache hit rate from last cache-based build
+    uint64_t build_cache_hit_nodes_{0};           // number of nodes with cache hit
+    uint64_t build_cache_missed_nodes_{0};        // number of nodes without cache hit
+    uint64_t build_cache_hit_memberships_{0};     // cache-hit hierarchy graph memberships
+    uint64_t build_cache_missed_memberships_{0};  // cache-miss hierarchy graph memberships
+    uint64_t build_cache_restored_edges_{0};      // outgoing edges loaded before refinement
 };
 
 }  // namespace vsag

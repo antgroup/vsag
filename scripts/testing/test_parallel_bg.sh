@@ -5,6 +5,12 @@ exit_codes=()
 logger_files=()
 parallel_tags="[hgraph]"
 othertag=""
+rng_args=()
+
+if [ -n "${VSAG_TEST_SEED:-}" ]; then
+  rng_args=(--rng-seed "${VSAG_TEST_SEED}")
+  echo "test random seed: ${VSAG_TEST_SEED}"
+fi
 
 rm -rf ./log
 mkdir ./log
@@ -20,20 +26,20 @@ else
 fi
 echo "addition_tag: ${addition_tag}"
 
-./build/tests/unittests -d yes ${UT_FILTER} -a --order rand --allow-running-no-tests -o "./log/unittest.log" &
+./build/tests/unittests -d yes ${UT_FILTER} -a --order rand "${rng_args[@]}" --allow-running-no-tests -o "./log/unittest.log" &
 pids+=($!)
 logger_files+=("./log/unittest.log")
 
 for tag in ${parallel_tags}
 do
   othertag="~"${tag}${othertag}
-  ./build/tests/functests -d yes ${UT_FILTER} -a --order rand --allow-running-no-tests ${tag} ${addition_tag} -o ./log/${tag}.log &
+  ./build/tests/functests -d yes ${UT_FILTER} -a --order rand "${rng_args[@]}" --allow-running-no-tests ${tag} ${addition_tag} -o ./log/${tag}.log &
   pids+=($!)
   logname="./log/"${tag}".log"
   logger_files+=($logname)
 done
 
-./build/tests/functests -d yes ${UT_FILTER} -a --order rand --allow-running-no-tests ${othertag} ${addition_tag} -o ./log/other.log &
+./build/tests/functests -d yes ${UT_FILTER} -a --order rand "${rng_args[@]}" --allow-running-no-tests ${othertag} ${addition_tag} -o ./log/other.log &
 pids+=($!)
 logger_files+=("./log/other.log")
 

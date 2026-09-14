@@ -60,13 +60,14 @@ public:
     KindFromName(std::string_view name);
 
     void
-    LoadReadCacheConfig(const JsonType& json);
+    LoadCommonConfig(const JsonType& json);
 
     void
-    AppendReadCacheConfig(JsonType& json) const;
+    AppendCommonConfig(JsonType& json) const;
 
     bool enable_read_cache_{false};
     uint64_t read_cache_total_size_{256ULL * 1024 * 1024};
+    bool enable_prefetch_hint_{false};
 
 public:
     /**

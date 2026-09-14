@@ -29,3 +29,24 @@ TEST_CASE("IOParameter maps profile names to stable kinds", "[ut][IOParameter]")
     REQUIRE(IOParameter::KindFromName(IO_TYPE_VALUE_READER_IO) == IOKind::READER);
     REQUIRE(IOParameter::KindFromName("unknown_io") == IOKind::UNKNOWN);
 }
+
+TEST_CASE("IOParameter parses prefetch hint configuration", "[ut][IOParameter]") {
+    JsonType json;
+    json[TYPE_KEY].SetString(IO_TYPE_VALUE_BUFFER_IO);
+    json[IO_FILE_PATH_KEY].SetString("./test");
+    json[IO_PREFETCH_HINT_KEY].SetBool(true);
+
+    auto parameter = IOParameter::GetIOParameterByJson(json);
+    REQUIRE(parameter != nullptr);
+    REQUIRE(parameter->enable_prefetch_hint_);
+    REQUIRE(parameter->ToJson()[IO_PREFETCH_HINT_KEY].GetBool());
+}
+
+TEST_CASE("IOParameter rejects non-boolean prefetch hint configuration", "[ut][IOParameter]") {
+    JsonType json;
+    json[TYPE_KEY].SetString(IO_TYPE_VALUE_BUFFER_IO);
+    json[IO_FILE_PATH_KEY].SetString("./test");
+    json[IO_PREFETCH_HINT_KEY].SetString("true");
+
+    REQUIRE_THROWS(IOParameter::GetIOParameterByJson(json));
+}

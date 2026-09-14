@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -35,6 +36,16 @@ enum class SearchMode {
     KNN_SEARCH = 1,
     RANGE_SEARCH = 2,
 };
+
+class AttrTypeSchema;
+class Expression;
+using ExprPtr = std::shared_ptr<Expression>;
+
+/**
+ * @brief Parse an attribute filter expression.
+ */
+ExprPtr
+AstParse(const std::string& filter_condition_str, const AttrTypeSchema* schema = nullptr);
 
 class SearchRequest {
 public:
@@ -225,6 +236,13 @@ public:
      *          the specified buckets. Empty means "use default bucket routing".
      */
     std::vector<std::vector<int64_t>> bucket_ids_{};
+
+    /**
+     * @brief Pre-built attribute expression used instead of attribute_filter_str_
+     * @details When non-null and enable_attribute_filter_ is true, this expression has priority
+     *          over parsing attribute_filter_str_. Appended to preserve aggregate initialization.
+     */
+    ExprPtr expression_{nullptr};
 };
 
 }  // namespace vsag

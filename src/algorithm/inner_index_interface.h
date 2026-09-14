@@ -481,6 +481,14 @@ public:
                             "Index doesn't support SearchWithRequest");
     }
 
+    [[nodiscard]] virtual const AttrTypeSchema*
+    GetAttrTypeSchema() const {
+        if (this->attr_filter_index_ == nullptr) {
+            return nullptr;
+        }
+        return &this->attr_filter_index_->field_type_map_;
+    }
+
     virtual void
     Serialize(std::ostream& out_stream) const;
 

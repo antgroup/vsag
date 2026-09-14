@@ -132,3 +132,25 @@ TEST_CASE("MMapIO existing file", "[ut][MMapIO]") {
         REQUIRE(read_buf[i] == 0xEF);
     }
 }
+
+TEST_CASE("MMapIO enabled prefetch hint preserves reads", "[ut][MMapIO]") {
+    fixtures::TempDir dir("mmap_io_prefetch");
+    auto path = dir.GenerateRandomFile(false);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto parameter = std::make_shared<MMapIOParameter>();
+    parameter->path_ = path;
+    parameter->enable_prefetch_hint_ = true;
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    IOParamPtr io_parameter = parameter;
+    MMapIO io(io_parameter, common_param);
+
+    std::vector<uint8_t> data(8192, 0xAB);
+    io.Write(data.data(), data.size(), 0);
+    io.Prefetch(123, 256);
+    io.Prefetch(data.size(), 64);
+
+    std::vector<uint8_t> result(256);
+    REQUIRE(io.Read(result.size(), 123, result.data()));
+    REQUIRE(std::all_of(result.begin(), result.end(), [](uint8_t value) { return value == 0xAB; }));
+}

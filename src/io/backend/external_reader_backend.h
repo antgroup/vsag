@@ -70,6 +70,7 @@ public:
             throw VsagException(ErrorType::INTERNAL_ERROR, "ReaderIO requires a non-null reader");
         }
         reader_ = reader_param->reader;
+        prefetcher_ = dynamic_cast<ReaderPrefetcher*>(reader_.get());
         if (has_deserialized) {
             BindSerializedRange(serialized_start, current_logical_size);
             ValidateBoundRange();
@@ -221,7 +222,15 @@ public:
     }
 
     void
-    Prefetch(uint64_t, uint64_t) {
+    Prefetch(uint64_t offset, uint64_t size) {
+        if (prefetcher_ == nullptr or size == 0 or offset >= logical_size_ or
+            offset > UINT64_MAX - base_offset_) {
+            return;
+        }
+        try {
+            prefetcher_->Prefetch(base_offset_ + offset, std::min(size, logical_size_ - offset));
+        } catch (...) {
+        }
     }
 
     [[nodiscard]] int64_t
@@ -258,6 +267,7 @@ private:
 
     Allocator* allocator_{nullptr};
     std::shared_ptr<Reader> reader_;
+    ReaderPrefetcher* prefetcher_{nullptr};
     uint64_t base_offset_{0};
     uint64_t logical_size_{0};
 };

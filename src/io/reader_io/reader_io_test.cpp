@@ -23,7 +23,7 @@
 #include "io/reader_io/reader_io_parameter.h"
 #include "unittest.h"
 
-class TestReader : public vsag::Reader {
+class TestReader : public vsag::Reader, public vsag::ReaderPrefetcher {
 public:
     TestReader(uint8_t* data, uint64_t size) : data_(data), size_(size) {
     }
@@ -39,15 +39,124 @@ public:
         callback(vsag::IOErrorCode::IO_SUCCESS, "success");
     }
 
+    void
+    Prefetch(uint64_t offset, uint64_t len) override {
+        if (throw_on_prefetch_) {
+            throw std::runtime_error("prefetch failed");
+        }
+        prefetch_offset_ = offset;
+        prefetch_len_ = len;
+        ++prefetch_count_;
+    }
+
     uint64_t
     Size() const override {
         return size_;
     }
 
+    uint64_t prefetch_offset_{0};
+    uint64_t prefetch_len_{0};
+    uint64_t prefetch_count_{0};
+    bool throw_on_prefetch_{false};
+
 private:
     const uint8_t* data_{nullptr};
     uint64_t size_{0};
 };
+
+TEST_CASE("ReaderIO forwards enabled prefetch hints", "[ut][ReaderIO]") {
+    std::vector<uint8_t> data(1024);
+    auto reader = std::make_shared<TestReader>(data.data(), data.size());
+    auto parameter = std::make_shared<vsag::ReaderIOParameter>();
+    parameter->reader = reader;
+    parameter->enable_prefetch_hint_ = true;
+
+    vsag::IndexCommonParam common_param;
+    common_param.allocator_ = vsag::Engine::CreateDefaultAllocator();
+    IOParamPtr io_parameter = parameter;
+    ReaderIO io(io_parameter, common_param);
+
+    io.Prefetch(128, 64);
+    REQUIRE(reader->prefetch_count_ == 1);
+    REQUIRE(reader->prefetch_offset_ == 128);
+    REQUIRE(reader->prefetch_len_ == 64);
+}
+
+TEST_CASE("ReaderIO clamps prefetch and suppresses reader failures", "[ut][ReaderIO]") {
+    std::vector<uint8_t> data(1024);
+    auto reader = std::make_shared<TestReader>(data.data(), data.size());
+    auto parameter = std::make_shared<vsag::ReaderIOParameter>();
+    parameter->reader = reader;
+    parameter->enable_prefetch_hint_ = true;
+
+    vsag::IndexCommonParam common_param;
+    common_param.allocator_ = vsag::Engine::CreateDefaultAllocator();
+    IOParamPtr io_parameter = parameter;
+    ReaderIO io(io_parameter, common_param);
+
+    io.Prefetch(1000, 64);
+    REQUIRE(reader->prefetch_count_ == 1);
+    REQUIRE(reader->prefetch_offset_ == 1000);
+    REQUIRE(reader->prefetch_len_ == 24);
+
+    reader->throw_on_prefetch_ = true;
+    REQUIRE_NOTHROW(io.Prefetch(128, 64));
+}
+
+TEST_CASE("ReaderIO ignores hints for Readers without ReaderPrefetcher", "[ut][ReaderIO]") {
+    class ReaderWithoutPrefetch final : public vsag::Reader {
+    public:
+        explicit ReaderWithoutPrefetch(std::vector<uint8_t> data) : data_(std::move(data)) {
+        }
+
+        void
+        Read(uint64_t offset, uint64_t len, void* dest) override {
+            std::memcpy(dest, data_.data() + offset, len);
+        }
+
+        void
+        AsyncRead(uint64_t offset, uint64_t len, void* dest, vsag::CallBack callback) override {
+            Read(offset, len, dest);
+            callback(vsag::IOErrorCode::IO_SUCCESS, "success");
+        }
+
+        [[nodiscard]] uint64_t
+        Size() const override {
+            return data_.size();
+        }
+
+    private:
+        std::vector<uint8_t> data_;
+    };
+
+    auto parameter = std::make_shared<vsag::ReaderIOParameter>();
+    parameter->reader = std::make_shared<ReaderWithoutPrefetch>(std::vector<uint8_t>(1024));
+    parameter->enable_prefetch_hint_ = true;
+
+    vsag::IndexCommonParam common_param;
+    common_param.allocator_ = vsag::Engine::CreateDefaultAllocator();
+    IOParamPtr io_parameter = parameter;
+    ReaderIO io(io_parameter, common_param);
+
+    REQUIRE_NOTHROW(io.Prefetch(128, 64));
+    std::vector<uint8_t> result(64);
+    REQUIRE(io.ReadAt(128, 64, result.data()));
+}
+
+TEST_CASE("ReaderIO keeps prefetch disabled by default", "[ut][ReaderIO]") {
+    std::vector<uint8_t> data(1024);
+    auto reader = std::make_shared<TestReader>(data.data(), data.size());
+    auto parameter = std::make_shared<vsag::ReaderIOParameter>();
+    parameter->reader = reader;
+
+    vsag::IndexCommonParam common_param;
+    common_param.allocator_ = vsag::Engine::CreateDefaultAllocator();
+    IOParamPtr io_parameter = parameter;
+    ReaderIO io(io_parameter, common_param);
+
+    io.Prefetch(128, 64);
+    REQUIRE(reader->prefetch_count_ == 0);
+}
 
 TEST_CASE("ReaderIO Read Test", "[ut][ReaderIO]") {
     const uint64_t kTestSize = 1024;

@@ -105,4 +105,4 @@ scale 与 offset**。这在热路径上带来三点收益：
 
 - [标量量化（SQ4 / SQ8）](sq.md)
 - [量化变换](../advanced/quantization_transform.md)
-- [量化总览](README.md)
+- [量化总览](./)

@@ -21,7 +21,7 @@
 
 namespace vsag {
 vsag::ExprPtr
-AstParse(const std::string& filter_condition_str, AttrTypeSchema* schema) {
+AstParse(const std::string& filter_condition_str, const AttrTypeSchema* schema) {
     antlr4::ANTLRInputStream input(filter_condition_str);
     FCLexer lexer(&input);
     antlr4::CommonTokenStream tokens(&lexer);

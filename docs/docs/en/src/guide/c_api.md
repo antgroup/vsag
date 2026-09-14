@@ -115,4 +115,4 @@ the header.
 
 `include/vsag/vsag_c_api.h` is the complete source-level reference for signatures, error codes,
 callbacks, and structures. Search parameters use the same JSON objects documented on the
-corresponding [index pages](../indexes/README.md).
+corresponding [index pages](../indexes/).

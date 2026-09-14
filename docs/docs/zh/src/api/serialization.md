@@ -127,6 +127,33 @@ auto fresh = vsag::Factory::CreateIndex("hgraph", params).value();
 fresh->Deserialize(readers);
 ```
 
+### 自定义 Reader 的可选预取提示
+
+自定义 Reader 可以额外继承 `ReaderPrefetcher`。这样既不改变现有 `Reader` ABI，又允许
+`reader_io` 转发搜索期的尽力而为预取提示：
+
+```cpp
+class RemoteReader : public vsag::Reader, public vsag::ReaderPrefetcher {
+public:
+    void Read(uint64_t offset, uint64_t len, void* dest) override;
+    void AsyncRead(uint64_t offset, uint64_t len, void* dest, vsag::CallBack callback) override;
+    uint64_t Size() const override;
+
+    void Prefetch(uint64_t offset, uint64_t len) override {
+        // 可选择发起非阻塞的范围预取；不要让失败异常逃逸。
+        remote_cache.TryPrefetch(offset, len);
+    }
+};
+
+vsag::LoadParameters load_parameters;
+load_parameters.Set("precise_io_type", "reader_io")
+    .Set("precise_enable_prefetch_hint", true)
+    .SetReader("precise_reader", std::make_shared<RemoteReader>());
+```
+
+只实现 `Reader` 的现有实现仍保持兼容；即使开启提示，也会安全地 no-op。完整可运行示例见
+`examples/cpp/408_feature_reader_prefetch.cpp`。
+
 ## 参见
 
 - [Index](index_class.md#序列化) —— `Serialize` / `Deserialize` 方法族。

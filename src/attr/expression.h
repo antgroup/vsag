@@ -18,10 +18,13 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <variant>
 #include <vector>
+
+#include "vsag_exception.h"
 
 namespace vsag {
 enum class OpType {
@@ -42,6 +45,8 @@ enum class ExpressionType {
     kStrListExpression,
     kNotExpression,
     kLogicalExpression,
+    kFunctionExpression,
+    kRegionFilterExpression,
 };
 
 /**
@@ -469,4 +474,73 @@ public:
 
     ExprPtr expr;
 };
+
+class FunctionExpression : public Expression {
+public:
+    FunctionExpression(std::string name,
+                       std::vector<std::string> args,
+                       std::vector<std::string> types)
+        : Expression(ExpressionType::kFunctionExpression, OpType::kNone),
+          function_name(std::move(name)),
+          arguments(std::move(args)),
+          argument_types(std::move(types)) {
+        if (arguments.size() != argument_types.size()) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "function argument and type counts must match");
+        }
+    }
+
+    std::string
+    ToString() const override {
+        auto join = [](const std::vector<std::string>& values) {
+            std::string result;
+            for (uint64_t i = 0; i < values.size(); ++i) {
+                if (i != 0) {
+                    result += "|";
+                }
+                result += values[i];
+            }
+            return result;
+        };
+        return "FUNCTION (" + function_name + ",\"" + join(arguments) + "\",\"" +
+               join(argument_types) + "\")";
+    }
+
+    std::string function_name;
+    std::vector<std::string> arguments;
+    std::vector<std::string> argument_types;
+};
+
+class RegionFilterExpression : public Expression {
+public:
+    RegionFilterExpression(ExprPtr region_type,
+                           ExprPtr region_list,
+                           ExprPtr residence_list,
+                           ExprPtr regions,
+                           ExprPtr residences,
+                           ExprPtr triggers)
+        : Expression(ExpressionType::kRegionFilterExpression, OpType::kNone),
+          region_type(std::move(region_type)),
+          region_list(std::move(region_list)),
+          residence_list(std::move(residence_list)),
+          regions(std::move(regions)),
+          residences(std::move(residences)),
+          triggers(std::move(triggers)) {
+    }
+
+    std::string
+    ToString() const override {
+        return "region_filter (" + region_type->ToString() + ", " + region_list->ToString() + ", " +
+               residence_list->ToString() + ", " + regions->ToString() + ", " +
+               residences->ToString() + ", " + triggers->ToString() + ")";
+    }
+
+    ExprPtr region_type;
+    ExprPtr region_list;
+    ExprPtr residence_list;
+    ExprPtr regions;
+    ExprPtr residences;
+    ExprPtr triggers;
+};
+
 }  // namespace vsag

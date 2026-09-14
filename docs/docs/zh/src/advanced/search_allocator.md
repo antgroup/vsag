@@ -8,14 +8,13 @@ VSAG 提供一个与索引自身 allocator 解耦的 **per-call** `Allocator` �
 
 这个 Allocator 通过两个入口暴露：`SearchRequest::search_allocator_`（推荐）和旧版
 `SearchParam::allocator`。**但具体有多少搜索路径真正消费这个 allocator，取决于索引与入口的实现。**
-目前只有 `HGraph::SearchWithRequest` 把 `search_allocator_` 端到端贯通了（既用于临时缓冲，也用
-于结果 `Dataset`）；其它 `SearchWithRequest` 实现（IVF / BruteForce / WARP）只在部分临时
-状态上使用 `search_allocator_`，结果 `Dataset` 仍由索引自身的 allocator 分配。详见下文
-[与索引 Allocator 的关系](#与索引-allocator-的关系)。
+HGraph、IVF、Pyramid 与 SINDI 会把非空的 `SearchRequest::search_allocator_` 用于非空结果缓冲
+和搜索临时状态。BruteForce（包括 WARP 模式）只把它用于部分临时工作，结果 `Dataset` 仍使用
+索引 allocator。详见下文[与索引 Allocator 的关系](#与索引-allocator-的关系)。
 
-> **适用范围。** Allocator 注入目前只通过 `KnnSearch`（`SearchParam` 重载）和
-> `SearchWithRequest` 暴露。`RangeSearch` 没有携带 Allocator 的重载；
-> `SearchRequest::search_allocator_` 也不会被 range-search 路径读取。
+> **适用范围。** Allocator 注入通过 `KnnSearch`（`SearchParam` 重载）和
+> `SearchWithRequest` 暴露。专用的 `RangeSearch` 重载没有 allocator 参数，但 range 模式的
+> `SearchRequest` 可以携带它，支持该入口的索引也会在范围搜索路径读取 `search_allocator_`。
 
 ## 推荐 API —— `SearchRequest::search_allocator_`
 
@@ -66,23 +65,20 @@ auto result = index->KnnSearch(query, /*k=*/10, search_param).value();
 
 结果 `Dataset` 的所有权契约取决于具体实现 `SearchWithRequest` 的索引：
 
-- **HGraph** 是目前唯一把 `request.search_allocator_` 贯通到 `create_fast_dataset` 的索引
-  （见 `src/algorithm/hgraph.cpp` 中 `ctx.alloc = request.search_allocator_`）。其结果 `Dataset`
-  被标记为 `Owner(true, allocator)`，析构时会自动用该 allocator 释放 `ids` / `distances`。
-- **IVF / BruteForce / WARP** 当前用 `create_fast_dataset(..., allocator_)` 构造结果，即索引
-  自身的 allocator（`src/algorithm/ivf/ivf.cpp`、`src/algorithm/bruteforce/bruteforce.cpp`；
-  WARP 使用 BruteForce 的 WARP 模式实现）。这些路径上 `request.search_allocator_` 只会被部分
-  临时缓冲读取，结果缓冲仍由索引 allocator 持有。在这些索引上请把结果 `Dataset` 的生命周期
-  视为绑定到索引 allocator。
+- **HGraph / IVF / Pyramid / SINDI** 会把选中的 query allocator 传给非空结果构造逻辑。
+  `request.search_allocator_` 非空时，返回的 `Dataset` 通过该 allocator 持有 `ids` / `distances`
+  缓冲，并在析构时释放它们。
+- **BruteForce / WARP** 当前调用不带 allocator 参数的
+  `pack_knn_result_with_extra_info(heap)`，因此结果使用索引 allocator；
+  `request.search_allocator_` 仍用于部分临时工作。
+- **空结果** 使用共享的 empty-dataset 路径，不会通过 per-search allocator 分配结果缓冲。
 
 实际意义：
 
 - **不要手动 `Deallocate` 结果缓冲。** 让 `Dataset` 离开作用域即可；同时手动 `Deallocate(...)`
   与析构器释放会触发双重释放，属于未定义行为。
-- **持有结果的那个 allocator 必须比结果 `Dataset` 活得更久。** HGraph 上是 per-search
-  allocator；IVF / BruteForce / WARP 上是索引 allocator（索引活着它就活着）。
-- **`examples/cpp/314_feature_hgraph_search_allocator.cpp` 目前显式地 Deallocate。** 这是早期
-  API 迭代遗留的写法；针对当前 owner-tracking 行为的新代码应改为依赖 `Dataset` 析构器。
+- **持有结果的那个 allocator 必须比结果 `Dataset` 活得更久。** HGraph、IVF、Pyramid、
+  SINDI 上可能是 per-search allocator；BruteForce / WARP 上则是索引 allocator。
 
 最简单的安全模式是「一线程一 allocator，批与批之间 reset」：
 
@@ -104,15 +100,16 @@ arena.reset();              // 一次性回收本批所有 per-query 缓冲
 
 ## 与索引 Allocator 的关系
 
-| 场景                                                                       | 使用的 allocator                                                                                                       |
-|----------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
-| 索引构建、插入、持久状态                                                     | `Resource` 的 allocator（未传入则使用默认 allocator）。                                                                  |
-| `HGraph::SearchWithRequest` 的临时缓冲与结果 `Dataset`                        | 已设置 `search_allocator_` 时使用它，否则使用 `Resource` 的 allocator。HGraph 是目前唯一把 `search_allocator_` 贯通到结果的索引。 |
-| `IVF` / `BruteForce` / `WARP` `SearchWithRequest` 的结果 `Dataset`            | 始终使用索引自身的 allocator（`allocator_`）。目前**不**消费 `search_allocator_`。                                       |
-| `IVF` / `BruteForce` / `WARP` `SearchWithRequest` 的部分临时状态              | 设置 `search_allocator_` 时会用它分配部分临时缓冲，否则使用索引 allocator。                                              |
-| `KnnSearch(query, k, SearchParam)`（旧版）                                   | 在支持 `SearchParam::allocator` 的索引上（如 HGraph 示例）使用该 allocator，否则使用 `Resource` allocator。           |
-| `KnnSearch(query, k, parameters_str)`                                       | 无 per-search Allocator 入口，统一使用 `Resource` 的 allocator。                                                         |
-| `RangeSearch(...)`（所有形态）                                               | 使用 `Resource` 的 allocator；没有 per-search Allocator 入口。                                                           |
+| 场景 | 使用的 allocator |
+|---|---|
+| 索引构建、插入、持久状态 | `Resource` 的 allocator（未传入则使用默认 allocator）。 |
+| HGraph / IVF / Pyramid / SINDI 的 `SearchWithRequest` 非空结果 | 已设置 `search_allocator_` 时使用它，否则使用索引 allocator。 |
+| BruteForce / WARP 的 `SearchWithRequest` 结果 | 使用索引 allocator；`search_allocator_` 只用于部分临时工作。 |
+| `SearchWithRequest` 临时状态 | 由索引实现决定；上述实现至少会在部分查询路径读取 `search_allocator_`。 |
+| `KnnSearch(query, k, SearchParam)`（旧版） | 支持该参数的旧版重载使用 `SearchParam::allocator`，否则使用索引 allocator。 |
+| `KnnSearch(query, k, parameters_str)` | 没有 per-search allocator 入口，使用索引 allocator。 |
+| 专用 `RangeSearch(...)` 重载 | 没有 allocator 参数，使用索引 allocator。 |
+| Range 模式的 `SearchWithRequest` | 与 KNN 模式遵循相同的索引特定规则。 |
 
 设置 per-search Allocator 不会影响索引的永久数据结构。它只是收窄了某一次搜索调用所触碰内存的
 生命周期 —— 且仅限于索引/入口实际消费它的那部分（详见各行说明）。

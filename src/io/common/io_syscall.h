@@ -17,7 +17,14 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#if defined(__APPLE__) || defined(__linux__)
+#include <sys/mman.h>
+#endif
+
+#include <algorithm>
+#include <climits>
 #include <cstdint>
+#include <limits>
 
 #ifdef _MSC_VER
 #define FORCEINLINE __forceinline
@@ -55,6 +62,38 @@ public:
         return ftruncate(fd, static_cast<off_t>(length));
 #else
         return ftruncate64(fd, static_cast<int64_t>(length));
+#endif
+    }
+
+    static FORCEINLINE void
+    FAdviseWillNeed(int fd, uint64_t offset, uint64_t length) {
+#if defined(__APPLE__) && defined(F_RDADVISE)
+        constexpr auto kMaxOffset = static_cast<uint64_t>(std::numeric_limits<off_t>::max());
+        struct radvisory advice = {static_cast<off_t>(std::min(offset, kMaxOffset)),
+                                   static_cast<int>(std::min<uint64_t>(length, INT_MAX))};
+        (void)fcntl(fd, F_RDADVISE, &advice);
+#elif defined(__linux__)
+        constexpr auto kMaxOffset = static_cast<uint64_t>(std::numeric_limits<off_t>::max());
+        (void)posix_fadvise(fd,
+                            static_cast<off_t>(std::min(offset, kMaxOffset)),
+                            static_cast<off_t>(std::min(length, kMaxOffset)),
+                            POSIX_FADV_WILLNEED);
+#else
+        (void)fd;
+        (void)offset;
+        (void)length;
+#endif
+    }
+
+    static FORCEINLINE void
+    MAdviseWillNeed(void* address, uint64_t length) {
+#if defined(__APPLE__) || defined(__linux__)
+        const auto advised_length =
+            static_cast<size_t>(std::min<uint64_t>(length, std::numeric_limits<size_t>::max()));
+        (void)madvise(address, advised_length, MADV_WILLNEED);
+#else
+        (void)address;
+        (void)length;
 #endif
     }
 };

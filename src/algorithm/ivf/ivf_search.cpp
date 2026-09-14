@@ -650,11 +650,14 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     }
 
     if (request.enable_attribute_filter_ and this->attr_filter_index_ != nullptr) {
-        auto& schema = this->attr_filter_index_->field_type_map_;
-        auto expr = AstParse(request.attribute_filter_str_, &schema);
+        ExprPtr expression = request.expression_;
+        if (expression == nullptr) {
+            auto& schema = this->attr_filter_index_->field_type_map_;
+            expression = AstParse(request.attribute_filter_str_, &schema);
+        }
         for (int64_t i = 0; i < param.parallel_search_thread_count; ++i) {
             auto executor =
-                Executor::MakeInstance(this->allocator_, expr, this->attr_filter_index_);
+                Executor::MakeInstance(this->allocator_, expression, this->attr_filter_index_);
             executor->Init();
             param.executors.emplace_back(executor);
         }

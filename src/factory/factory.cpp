@@ -170,6 +170,14 @@ apply_hgraph_streaming_load_parameters(JsonType& index_param, const std::string&
                 load_json[HGRAPH_PRECISE_DIRECT_READ].GetBool());
         }
     }
+    if (load_json.Contains(HGRAPH_PRECISE_ENABLE_PREFETCH_HINT)) {
+        CHECK_ARGUMENT(load_json[HGRAPH_PRECISE_ENABLE_PREFETCH_HINT].IsBool(),
+                       "precise_enable_prefetch_hint must be a boolean");
+        if (index_param.Contains(PRECISE_CODES_KEY)) {
+            index_param[PRECISE_CODES_KEY][IO_PARAMS_KEY][IO_PREFETCH_HINT_KEY].SetBool(
+                load_json[HGRAPH_PRECISE_ENABLE_PREFETCH_HINT].GetBool());
+        }
+    }
     if (load_json.Contains(RAW_VECTOR_IO_TYPE)) {
         require_string_load_parameter(load_json, RAW_VECTOR_IO_TYPE);
         set_streaming_io_override(index_param,
@@ -217,6 +225,12 @@ apply_ivf_streaming_load_parameters(JsonType& index_param, const LoadParameters&
                        "precise_enable_read_cache must be a boolean");
         index_param[PRECISE_CODES_KEY][IO_PARAMS_KEY][READ_CACHE_ENABLED_KEY].SetBool(
             load_json[IVF_PRECISE_ENABLE_READ_CACHE].GetBool());
+    }
+    if (load_json.Contains(IVF_PRECISE_ENABLE_PREFETCH_HINT)) {
+        CHECK_ARGUMENT(load_json[IVF_PRECISE_ENABLE_PREFETCH_HINT].IsBool(),
+                       "precise_enable_prefetch_hint must be a boolean");
+        index_param[PRECISE_CODES_KEY][IO_PARAMS_KEY][IO_PREFETCH_HINT_KEY].SetBool(
+            load_json[IVF_PRECISE_ENABLE_PREFETCH_HINT].GetBool());
     }
     if (load_json.Contains(IVF_PRECISE_CACHE_TOTAL_SIZE)) {
         CHECK_ARGUMENT(load_json[IVF_PRECISE_CACHE_TOTAL_SIZE].IsNumberUnsigned(),

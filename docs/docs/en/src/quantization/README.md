@@ -124,7 +124,7 @@ A pragmatic decision tree:
 
 For every lossy quantizer above, enabling `use_reorder: true` with
 `precise_quantization_type: "fp32"` is the standard way to recover recall at
-the cost of extra memory; see the [HGraph parameter table](../indexes/hgraph.md#parameters)
+the cost of extra memory; see the [HGraph build-parameter table](../indexes/hgraph.md#build-parameters)
 for the exact behavior.
 
 ## Where quantization is exposed
@@ -136,7 +136,7 @@ Not every index exposes every parameter as an external key. As of today:
   `rabitq_pca_dim`, `rabitq_bits_per_dim_query`,
   `rabitq_bits_per_dim_base`, `rabitq_bits_per_dim_precise`,
   `rabitq_error_rate`, `rabitq_use_fht`, `sq4_uniform_trunc_rate`, `tq_chain`
-  (see `src/algorithm/hgraph.cpp`).
+  (see `src/algorithm/hgraph/hgraph.cpp`).
 - **IVF** exposes `base_quantization_type`, `base_pq_dim`, the common reorder
   keys, and the RabitQ tuning keys `rabitq_pca_dim`,
   `rabitq_bits_per_dim_query`, `rabitq_bits_per_dim_base`, `rabitq_version`,

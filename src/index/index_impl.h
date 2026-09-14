@@ -626,6 +626,11 @@ public:
         return this->common_param_;
     }
 
+    [[nodiscard]] const AttrTypeSchema*
+    GetAttrTypeSchema() const override {
+        return this->inner_index_->GetAttrTypeSchema();
+    }
+
 private:
     tl::expected<InnerIndexPtr, Error>
     clone_inner_index(const IndexCommonParam& common_param) const {

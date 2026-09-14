@@ -170,6 +170,24 @@ MMapRegion::Remap(uint64_t mapped_size) {
 }
 
 void
+MMapRegion::Prefetch(uint64_t offset, uint64_t size) {
+    if (mapped_data_ == nullptr or size == 0 or offset >= mapped_capacity_) {
+        return;
+    }
+    static const auto page_size = []() -> uint64_t {
+        const auto result = sysconf(_SC_PAGESIZE);
+        return result > 0 ? static_cast<uint64_t>(result) : 0;
+    }();
+    if (page_size == 0) {
+        return;
+    }
+    const uint64_t aligned_offset = offset - offset % page_size;
+    const uint64_t end =
+        std::min(mapped_capacity_, offset + std::min(size, mapped_capacity_ - offset));
+    IOSyscall::MAdviseWillNeed(mapped_data_ + aligned_offset, end - aligned_offset);
+}
+
+void
 MMapRegion::CleanupFailedConstruction() noexcept {
     if (mapped_data_ != nullptr) {
         (void)munmap(mapped_data_, mapped_capacity_);

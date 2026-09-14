@@ -18,6 +18,7 @@ last-reviewed: 2026-05-12
 ```bash
 make debug
 make test
+make test-module MODULE=datacell
 make fmt
 make lint
 make fix-lint
@@ -27,6 +28,8 @@ make pyvsag
 ```
 
 Prefer these targets over invoking `cmake` directly so behavior matches CI.
+
+`make test-module MODULE=<name>` is the local acceleration path for one unit-test subsystem. The maintained module names are `simd`, `common`, `algorithm`, `factory`, `attr`, `datacell`, `layout`, `quantization`, `storage`, `io`, `utils`, and `impl`. It accepts the same `CASE` and `SHARD` runtime arguments as `make test`; use the aggregate `make test` path before submitting changes.
 
 ## Development environment
 
@@ -58,9 +61,9 @@ versions for consistent formatting and diagnostics. CI will fail otherwise.
   `make test` builds and runs the unit + functional suite but does **not**
   enable coverage instrumentation. To produce the coverage report locally use
   the `make cov` flow (which configures the build with `ENABLE_COVERAGE=ON`)
-  followed by running the test binaries and
-  `scripts/coverage/collect_cpp_coverage.sh`; the equivalent CI coverage
-  workflow enforces the 90% threshold. This threshold is based on the
-  unit-test suite; functional tests under `tests/` and Python code are not
-  currently included in the coverage metric unless explicitly documented
-  otherwise.
+  followed by `VSAG_TEST_SEED=424242 bash scripts/testing/test_parallel_bg.sh`
+  and `bash scripts/coverage/collect_cpp_coverage.sh`. The C++ report combines the
+  non-daily unit and functional suites, but measures only maintained production
+  sources under `src/` and `include/`; it excludes the generated
+  `src/version.h` and vendored `include/vsag/expected.hpp`. Python sources and
+  platform paths not compiled by the coverage job are not part of this metric.

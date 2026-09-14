@@ -137,4 +137,4 @@ FHT 旋转是固定的（无需学习），因此不增加训练代价；PCA 预
 - [量化变换](../advanced/quantization_transform.md)
 - [HGraph 索引](../indexes/hgraph.md)
 - [RaBitQ x+y Split](rabitq_split.md)
-- [量化总览](README.md)
+- [量化总览](./)

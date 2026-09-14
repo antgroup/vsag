@@ -173,21 +173,39 @@ TEST_CASE("IVF Nearest Partition Centroid Scan Test", "[ut][IVFNearestPartition]
         REQUIRE(untrained_restored->ClassifyDatas(nullptr, 1, buckets_per_data, nullptr) ==
                 untrained_result);
 
-        auto vectors = fixtures::generate_vectors(data_count, dim, true, 95);
+        // KMeans sees exactly bucket_count distinct points, so initialization only permutes
+        // the centroids. Powers of two on separate axes keep L2 arithmetic exact and cosine
+        // centroids unit length. Random centroids can produce near-ties that BLAS and the
+        // independent SIMD distance oracle round differently.
+        std::vector<float> vectors(data_count * dim, 0.0F);
+        for (int64_t i = 0; i < data_count; ++i) {
+            const auto axis = i % bucket_count;
+            vectors[i * dim + axis] = static_cast<float>(1 << (axis % 4));
+        }
         auto dataset = Dataset::Make();
         dataset->Float32Vectors(vectors.data())->Dim(dim)->NumElements(data_count)->Owner(false);
         partition->Train(dataset);
         REQUIRE(partition->route_index_ptr_ == nullptr);
 
+        // Exercise different norms, signs and query directions, including exact ties. These
+        // queries are separate from the training points and retain exact bucket-ID checks.
+        std::vector<float> queries(data_count * dim, 0.0F);
+        for (int64_t i = 1; i < data_count; ++i) {
+            const auto scale = static_cast<float>(1 + i / bucket_count);
+            for (int64_t j = 0; j < buckets_per_data; ++j) {
+                queries[i * dim + (i + j) % bucket_count] =
+                    scale * static_cast<float>(j + 1) * (i % 2 == 0 ? 0.25F : -0.25F);
+            }
+        }
         auto actual =
-            partition->ClassifyDatas(vectors.data(), data_count, buckets_per_data, nullptr);
+            partition->ClassifyDatas(queries.data(), data_count, buckets_per_data, nullptr);
         REQUIRE(actual.size() == static_cast<uint64_t>(data_count * buckets_per_data));
 
         Vector<float> centroid(dim, allocator.get());
         Vector<float> normalized_query(dim, allocator.get());
         Vector<std::pair<float, BucketIdType>> expected(bucket_count, allocator.get());
         for (int64_t i = 0; i < data_count; ++i) {
-            const auto* query = vectors.data() + i * dim;
+            const auto* query = queries.data() + i * dim;
             if (metric == MetricType::METRIC_TYPE_COSINE) {
                 Normalize(query, normalized_query.data(), dim);
                 query = normalized_query.data();
@@ -204,6 +222,7 @@ TEST_CASE("IVF Nearest Partition Centroid Scan Test", "[ut][IVFNearestPartition]
             }
             std::sort(expected.begin(), expected.end());
             for (BucketIdType j = 0; j < buckets_per_data; ++j) {
+                CAPTURE(static_cast<int>(metric), i, j);
                 REQUIRE(actual[i * buckets_per_data + j] == expected[j].second);
             }
         }
@@ -214,7 +233,7 @@ TEST_CASE("IVF Nearest Partition Centroid Scan Test", "[ut][IVFNearestPartition]
             std::make_unique<IVFNearestPartition>(bucket_count, common_param, graph_config_param);
         test_serializion(*partition, *restored);
         REQUIRE(restored->route_index_ptr_ == nullptr);
-        REQUIRE(restored->ClassifyDatas(vectors.data(), data_count, buckets_per_data, nullptr) ==
+        REQUIRE(restored->ClassifyDatas(queries.data(), data_count, buckets_per_data, nullptr) ==
                 actual);
     }
 }

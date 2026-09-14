@@ -111,4 +111,4 @@ vsag_index_range_search(vsag_index_t index,
 ## 参考
 
 `include/vsag/vsag_c_api.h` 是函数签名、错误码、回调和结构体的完整源码级
-参考。搜索参数 JSON 与对应[索引页面](../indexes/README.md)中的 C++ API 相同。
+参考。搜索参数 JSON 与对应[索引页面](../indexes/)中的 C++ API 相同。

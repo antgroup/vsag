@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <utility>
@@ -152,7 +153,11 @@ public:
     }
 
     void
-    Prefetch(uint64_t, uint64_t) {
+    Prefetch(uint64_t offset, uint64_t size) {
+        if (not file_.DirectRead() and size > 0 and offset < file_.Size()) {
+            IOSyscall::FAdviseWillNeed(
+                file_.ReadFd(), offset, std::min(size, file_.Size() - offset));
+        }
     }
 
     [[nodiscard]] int64_t

@@ -29,7 +29,7 @@ public:
     virtual ~AttrTypeSchema() = default;
 
     AttrValueType
-    GetTypeOfField(const std::string& field_name);
+    GetTypeOfField(const std::string& field_name) const;
 
     void
     SetTypeOfField(const std::string& field_name, AttrValueType type);
