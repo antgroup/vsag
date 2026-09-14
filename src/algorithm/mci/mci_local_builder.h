@@ -65,7 +65,7 @@ public:
         runner_.reserve(static_cast<uint32_t>(candidate_limit_ + 1));
     }
 
-    template <typename Distance, typename BatchDistance, typename Emit>
+    template <bool collect_timings = true, typename Distance, typename BatchDistance, typename Emit>
     MCILocalBuildStats
     Build(InnerIdType seed,
           const InnerIdType* neighbors,
@@ -76,9 +76,24 @@ public:
           BatchDistance batch_distance,
           Emit emit) {
         MCILocalBuildStats stats;
+        // Full build logs timings; Add/repair compiles out all clock reads.
+        auto now = []() {
+            if constexpr (collect_timings) {
+                return std::chrono::steady_clock::now();
+            } else {
+                return std::chrono::steady_clock::time_point{};
+            }
+        };
+        auto elapsed = [&](const auto& start) {
+            if constexpr (collect_timings) {
+                return std::chrono::duration<double>(now() - start).count();
+            } else {
+                return 0.0;
+            }
+        };
         candidates_.clear();
         edges_.clear();
-        auto start = std::chrono::steady_clock::now();
+        auto start = now();
         const auto node_limit = std::max<uint64_t>(3, params_.total / 100);
         for (uint64_t i = 0; i < std::min(neighbor_count, candidate_limit_); ++i) {
             const auto id = neighbors[i];
@@ -133,7 +148,7 @@ public:
             return stats;
         }
 
-        start = std::chrono::steady_clock::now();
+        start = now();
         for (auto& candidate : candidates_) {
             candidate.distance = distance(candidate.id, seed);
         }
@@ -142,7 +157,7 @@ public:
         });
         stats.query_distance = elapsed(start);
         const auto limit = distance_limit(candidates_.front().distance, alpha, params_.metric);
-        start = std::chrono::steady_clock::now();
+        start = now();
         for (const auto& candidate : candidates_) {
             if (candidate.distance < limit) {
                 edges_.push_back({seed, candidate.id, candidate.distance});
@@ -175,7 +190,7 @@ public:
         }
         stats.edges = edges_.size();
         stats.pair_distance = elapsed(start);
-        start = std::chrono::steady_clock::now();
+        start = now();
         std::sort(edges_.begin(), edges_.end());
         stats.edge_sort = elapsed(start);
         if (edges_.size() < threshold_ * (threshold_ - 1) / 2 and
@@ -183,7 +198,7 @@ public:
             fallback();
             return stats;
         }
-        start = std::chrono::steady_clock::now();
+        start = now();
         stats.cliques = runner_.run(edges_,
                                     local_cliques_,
                                     static_cast<InnerIdType>(threshold_),
@@ -194,7 +209,7 @@ public:
             fallback();
             return stats;
         }
-        start = std::chrono::steady_clock::now();
+        start = now();
         uint64_t chosen = 0;
         for (uint64_t i = 0; i < stats.cliques; ++i) {
             if (append(local_cliques_[i]) and ++chosen > params_.max_degree) {
@@ -222,11 +237,6 @@ private:
             return dis < other.dis;
         }
     };
-
-    static double
-    elapsed(const std::chrono::steady_clock::time_point& start) {
-        return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-    }
 
     static float
     distance_limit(float nearest, float alpha, MetricType metric) {

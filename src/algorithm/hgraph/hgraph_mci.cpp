@@ -1690,14 +1690,14 @@ HGraph::build_incremental_mci_clique(InnerIdType new_inner_id,
     };
     float alpha = params.alpha;
     while (coverage[0].load(std::memory_order_relaxed) == 0) {
-        builder.Build(0,
-                      neighbors.data(),
-                      neighbors.size(),
-                      alpha,
-                      coverage,
-                      distance,
-                      scalar_batch_distance,
-                      emit);
+        builder.Build<false>(0,
+                             neighbors.data(),
+                             neighbors.size(),
+                             alpha,
+                             coverage,
+                             distance,
+                             scalar_batch_distance,
+                             emit);
         alpha = next_mci_alpha(alpha, params.alpha, 1, 1);
     }
 }

@@ -2037,7 +2037,7 @@ TEST_CASE("MCI runner preserves the P extension in must cliques", "[ut][hgraph][
     REQUIRE(has_p_extension);
 }
 
-TEST_CASE("Clique base view pins CSR storage", "[ut][hgraph][mci]") {
+TEST_CASE("Clique search view pins CSR storage", "[ut][hgraph][mci]") {
     vsag::DefaultAllocator allocator;
     vsag::CliqueDataCell cell(&allocator);
     auto assign_clique = [&]() {
@@ -2062,8 +2062,8 @@ TEST_CASE("Clique base view pins CSR storage", "[ut][hgraph][mci]") {
     cell.MarkAvailable(2);
     REQUIRE(cell.HasCliqueIndex(2));
 
-    vsag::CliqueDataCellBaseView view;
-    REQUIRE(cell.TryGetBaseView(2, view));
+    vsag::CliqueDataCellSearchView view;
+    REQUIRE(cell.TryGetSearchView(2, view));
     std::atomic<bool> writer_started{false};
     auto writer = std::async(std::launch::async, [&]() {
         writer_started.store(true, std::memory_order_release);
@@ -2148,9 +2148,16 @@ TEST_CASE("Clique delete retires only undersized cliques and shares the Add delt
     REQUIRE(stats.retired_clique_count == 2);
     REQUIRE(stats.delta_clique_count == 2);
     REQUIRE(stats.covered_nodes == 6);
+    REQUIRE(stats.base_membership_count == 2);
+    REQUIRE(stats.delta_extra_membership_count == 2);
+    REQUIRE(stats.delta_clique_membership_count == 2);
+    REQUIRE(stats.total_membership_count == 6);
 
-    vsag::CliqueDataCellBaseView view;
-    REQUIRE_FALSE(cell.TryGetBaseView(total, view));
+    {
+        vsag::CliqueDataCellSearchView view;
+        REQUIRE(cell.TryGetSearchView(total, view));
+        REQUIRE_FALSE(view.IsLiveNode(0));
+    }
 
     cell.Flush(total);
     auto flushed = cell.CollectStats(total);
@@ -2333,6 +2340,139 @@ TEST_CASE("Clique flush is atomic on allocation failure", "[ut][hgraph][mci][flu
     }
     REQUIRE(succeeded);
     REQUIRE(failures > 0);
+}
+
+TEST_CASE("Clique clean flush and member checks do not allocate", "[ut][hgraph][mci][flush]") {
+    FlushFailureAllocator allocator;
+    vsag::CliqueDataCell cell(&allocator);
+    cell.Clear(4);
+    vsag::Vector<vsag::InnerIdType> members({0, 1, 2}, &allocator);
+    cell.AppendNewClique(members, 4);
+    cell.Flush(4);
+    cell.MarkAvailable(4);
+
+    allocator.remaining = 0;
+    REQUIRE_NOTHROW(cell.Flush(4));
+    REQUIRE(cell.GetCliqueMemberCount(0) == 3);
+    REQUIRE(cell.GetCliqueMemberCount(99) == 0);
+    REQUIRE_FALSE(cell.AppendNodeToClique(1, 0, 4, 4));
+    REQUIRE_FALSE(cell.AppendNodeToClique(3, 0, 4, 3));
+    REQUIRE_NOTHROW(cell.Flush(4));
+    allocator.remaining = -1;
+
+    uint64_t total = 4;
+    SECTION("New members dirty the base CSR") {
+        REQUIRE(cell.AppendNodeToClique(3, 0, total, 4));
+    }
+    SECTION("New cliques dirty the base CSR") {
+        members.assign({2, 3});
+        cell.AppendNewClique(members, total);
+    }
+    SECTION("Deletion dirties CSR even without retiring a clique") {
+        members.assign({1});
+        cell.CommitDelete(members, vsag::Vector<vsag::InnerIdType>(&allocator), total);
+    }
+    SECTION("Retirement alone dirties CSR") {
+        members.assign({0});
+        cell.CommitDelete(vsag::Vector<vsag::InnerIdType>(&allocator), members, total);
+    }
+    SECTION("Loaded snapshots conservatively compact once") {
+        std::stringstream stream;
+        vsag::IOStreamWriter writer(stream);
+        cell.Serialize(writer);
+        vsag::IOStreamReader reader(stream);
+        cell.Deserialize(reader, 2, total);
+    }
+    SECTION("Assigned empty clique rows still require compaction") {
+        vsag::Vector<vsag::InnerIdType> offsets({0, 0, 2}, &allocator);
+        vsag::Vector<vsag::InnerIdType> stored({0, 1}, &allocator);
+        vsag::Vector<vsag::InnerIdType> inverse_offsets({0, 1, 2, 2, 2}, &allocator);
+        vsag::Vector<vsag::InnerIdType> inverse({1, 1}, &allocator);
+        cell.Assign(std::move(offsets),
+                    std::move(stored),
+                    std::move(inverse_offsets),
+                    std::move(inverse),
+                    total);
+        REQUIRE(cell.GetCliqueMemberCount(0) == 0);
+    }
+    SECTION("Remapping already produces clean CSR with surviving tombstones") {
+        members.assign({1});
+        cell.CommitDelete(members, vsag::Vector<vsag::InnerIdType>(&allocator), total);
+        vsag::Vector<vsag::InnerIdType> mapping({0, 1, 2, vsag::LabelTable::INVALID_ID},
+                                                &allocator);
+        total = 3;
+        cell.RemapNodes(mapping, total);
+        allocator.remaining = 0;
+        REQUIRE_NOTHROW(cell.Flush(total));
+        allocator.remaining = -1;
+        REQUIRE_FALSE(cell.HasCliqueIndex(total));
+        cell.MarkAvailable(total);
+        REQUIRE(cell.CollectStats(total).inactive_node_count == 1);
+        // Another deletion after remapping must dirty it again.
+        members.assign({2});
+        cell.CommitDelete(members, vsag::Vector<vsag::InnerIdType>(&allocator), total);
+    }
+
+    allocator.remaining = 0;
+    REQUIRE_THROWS_AS(cell.Flush(total), std::bad_alloc);
+    allocator.remaining = -1;
+    const auto before = cell.CollectStats(total);
+    REQUIRE_NOTHROW(cell.Flush(total));
+    const auto after = cell.CollectStats(total);
+    REQUIRE(after.total_membership_count == before.total_membership_count);
+    REQUIRE(after.covered_nodes == before.covered_nodes);
+    REQUIRE(after.inactive_node_count == before.inactive_node_count);
+    REQUIRE(after.delta_clique_count == 0);
+    REQUIRE(after.retired_clique_count == 0);
+    allocator.remaining = 0;
+    REQUIRE_NOTHROW(cell.Flush(total));
+    allocator.remaining = -1;
+}
+
+TEST_CASE("MCI optional timing does not change clique construction",
+          "[ut][hgraph][mci][shared_build]") {
+    vsag::DefaultAllocator allocator;
+    vsag::MCIV3BuildParams params;
+    params.total = 4;
+    params.candidate_limit = 3;
+    params.clique_max = 3;
+    vsag::MCILocalCliqueBuilder builder(params, &allocator);
+    std::vector<std::atomic<int>> coverage(4);
+    for (uint64_t i = 0; i < coverage.size(); ++i) {
+        coverage[i].store(i == 0 ? 0 : 1);
+    }
+    const vsag::InnerIdType neighbors[]{1, 2, 3};
+    auto distance = [](auto, auto) { return 1.0F; };
+    auto batch = [](auto, auto, auto, auto, auto, float* values) { std::fill_n(values, 4, 1.0F); };
+    std::vector<std::vector<vsag::InnerIdType>> timed_cliques;
+    const auto timed =
+        builder.Build(0, neighbors, 3, 2.0F, coverage, distance, batch, [&](const auto& clique) {
+            timed_cliques.emplace_back(clique.begin(), clique.end());
+        });
+    REQUIRE_FALSE(timed_cliques.empty());
+    std::vector<int> timed_coverage;
+    for (uint64_t i = 0; i < coverage.size(); ++i) {
+        timed_coverage.push_back(coverage[i].load());
+        coverage[i].store(i == 0 ? 0 : 1);
+    }
+    std::vector<std::vector<vsag::InnerIdType>> untimed_cliques;
+    const auto untimed = builder.Build<false>(
+        0, neighbors, 3, 2.0F, coverage, distance, batch, [&](const auto& clique) {
+            untimed_cliques.emplace_back(clique.begin(), clique.end());
+        });
+    REQUIRE(untimed_cliques == timed_cliques);
+    REQUIRE(untimed.candidates == timed.candidates);
+    REQUIRE(untimed.edges == timed.edges);
+    REQUIRE(untimed.cliques == timed.cliques);
+    for (uint64_t i = 0; i < coverage.size(); ++i) {
+        REQUIRE(coverage[i].load() == timed_coverage[i]);
+    }
+    REQUIRE(untimed.candidate_collect == 0.0);
+    REQUIRE(untimed.query_distance == 0.0);
+    REQUIRE(untimed.pair_distance == 0.0);
+    REQUIRE(untimed.edge_sort == 0.0);
+    REQUIRE(untimed.mce == 0.0);
+    REQUIRE(untimed.choose == 0.0);
 }
 
 TEST_CASE("Clique remapping preserves tombstones and is allocation failure atomic",

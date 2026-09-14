@@ -78,6 +78,7 @@ CliqueDataCell::CliqueDataCell(Allocator* allocator)
 void
 CliqueDataCell::Clear(uint64_t total) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
+    needs_compaction_ = true;
     p_maxc_.clear();
     maxcs_.clear();
     p_node_to_cid_.clear();
@@ -88,9 +89,10 @@ CliqueDataCell::Clear(uint64_t total) {
     active_clique_count_ = 0;
     inactive_node_count_ = 0;
     retired_clique_count_ = 0;
-    ResetDelta(total);
+    reset_delta_unlocked(total);
     inactive_nodes_.assign(total, 0);
     retired_cliques_.clear();
+    needs_compaction_ = false;
     available_total_.store(0, std::memory_order_release);
 }
 
@@ -101,6 +103,7 @@ CliqueDataCell::Assign(Vector<InnerIdType>&& p_maxc,
                        Vector<InnerIdType>&& node_to_cids,
                        uint64_t total) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
+    needs_compaction_ = true;
     p_maxc_ = std::move(p_maxc);
     maxcs_ = std::move(maxcs);
     p_node_to_cid_ = std::move(p_node_to_cid);
@@ -109,15 +112,17 @@ CliqueDataCell::Assign(Vector<InnerIdType>&& p_maxc,
     active_clique_count_ = total_clique_count_;
     inactive_node_count_ = 0;
     retired_clique_count_ = 0;
-    ResetDelta(total);
+    reset_delta_unlocked(total);
     inactive_nodes_.assign(total, 0);
     retired_cliques_.assign(total_clique_count_, 0);
     validate(total);
+    // Assign may contain empty CSR rows; Flush must still be able to discard them.
+    needs_compaction_ = std::adjacent_find(p_maxc_.begin(), p_maxc_.end()) != p_maxc_.end();
     available_total_.store(total, std::memory_order_release);
 }
 
 void
-CliqueDataCell::ResetDelta(uint64_t total) {
+CliqueDataCell::reset_delta_unlocked(uint64_t total) {
     delta_cliques_.clear();
     delta_clique_extra_.clear();
     delta_clique_extra_.resize(total_clique_count_, Vector<InnerIdType>(allocator_));
@@ -132,7 +137,9 @@ void
 CliqueDataCell::Flush(uint64_t total) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
     CHECK_ARGUMENT(delta_node_to_cids_.size() == total, "cannot flush an incomplete MCI companion");
-    compact_unlocked(total, nullptr);
+    if (needs_compaction_) {
+        compact_unlocked(total, nullptr);
+    }
 }
 
 void
@@ -241,21 +248,26 @@ CliqueDataCell::compact_unlocked(uint64_t total, const Vector<InnerIdType>* old_
         inactive_node_count_ = inactive_count;
     }
     // Plain Flush keeps the inactive mask; physical compaction remaps surviving tombstones.
+    needs_compaction_ = false;
 }
 
 void
-CliqueDataCell::EnsureDeltaNodeRows(uint64_t total) {
+CliqueDataCell::ensure_delta_node_rows_unlocked(uint64_t total) {
     while (delta_node_to_cids_.size() < total) {
+        needs_compaction_ = true;
         delta_node_to_cids_.emplace_back(allocator_);
     }
     if (delta_clique_extra_.size() < total_clique_count_) {
+        needs_compaction_ = true;
         delta_clique_extra_.resize(total_clique_count_, Vector<InnerIdType>(allocator_));
     }
     if (inactive_nodes_.size() < total) {
+        needs_compaction_ = true;
         inactive_nodes_.resize(total, 0);
     }
     const auto logical_count = total_logical_clique_count_unlocked();
     if (retired_cliques_.size() < logical_count) {
+        needs_compaction_ = true;
         retired_cliques_.resize(logical_count, 0);
     }
 }
@@ -343,30 +355,7 @@ CliqueDataCell::CollectNodeCliqueIds(InnerIdType node_id, Vector<InnerIdType>& c
 void
 CliqueDataCell::get_clique_members_unlocked(InnerIdType clique_id,
                                             Vector<InnerIdType>& members) const {
-    if (is_clique_retired_unlocked(clique_id)) {
-        return;
-    }
-    auto append_live = [&](auto begin, auto end) {
-        for (auto iter = begin; iter != end; ++iter) {
-            if (not is_node_inactive_unlocked(*iter)) {
-                members.push_back(*iter);
-            }
-        }
-    };
-    if (clique_id < total_clique_count_) {
-        const auto begin = p_maxc_[clique_id];
-        const auto end = p_maxc_[clique_id + 1];
-        append_live(maxcs_.begin() + begin, maxcs_.begin() + end);
-        if (clique_id < delta_clique_extra_.size()) {
-            append_live(delta_clique_extra_[clique_id].begin(),
-                        delta_clique_extra_[clique_id].end());
-        }
-    } else {
-        const auto delta_id = clique_id - total_clique_count_;
-        if (delta_id < delta_cliques_.size()) {
-            append_live(delta_cliques_[delta_id].begin(), delta_cliques_[delta_id].end());
-        }
-    }
+    for_each_live_member_unlocked(clique_id, [&](InnerIdType id, bool) { members.push_back(id); });
 }
 
 void
@@ -378,9 +367,9 @@ CliqueDataCell::GetCliqueMembers(InnerIdType clique_id, Vector<InnerIdType>& mem
 uint64_t
 CliqueDataCell::GetCliqueMemberCount(InnerIdType clique_id) const {
     std::shared_lock<std::shared_mutex> lock(mutex_);
-    Vector<InnerIdType> members(allocator_);
-    get_clique_members_unlocked(clique_id, members);
-    return members.size();
+    uint64_t count = 0;
+    for_each_live_member_unlocked(clique_id, [&](InnerIdType, bool) { ++count; });
+    return count;
 }
 
 bool
@@ -389,32 +378,33 @@ CliqueDataCell::AppendNodeToClique(InnerIdType node_id,
                                    uint64_t total,
                                    uint64_t max_members) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
-    EnsureDeltaNodeRows(total);
+    ensure_delta_node_rows_unlocked(total);
     if (clique_id >= total_logical_clique_count_unlocked() or
         node_id >= delta_node_to_cids_.size() or is_node_inactive_unlocked(node_id) or
         is_clique_retired_unlocked(clique_id)) {
         return false;
     }
-    Vector<InnerIdType> active_members(allocator_);
-    get_clique_members_unlocked(clique_id, active_members);
-    if (active_members.size() >= max_members or
-        std::find(active_members.begin(), active_members.end(), node_id) != active_members.end()) {
+    uint64_t member_count = 0;
+    bool contains_node = false;
+    for_each_live_member_unlocked(clique_id, [&](InnerIdType id, bool) {
+        ++member_count;
+        contains_node |= id == node_id;
+    });
+    if (member_count >= max_members or contains_node) {
         return false;
     }
     auto& node_cliques = delta_node_to_cids_[node_id];
     if (std::find(node_cliques.begin(), node_cliques.end(), clique_id) != node_cliques.end()) {
         return false;
     }
+    // Mark before the first write, including writes that may fail partway through allocation.
+    needs_compaction_ = true;
     if (clique_id < total_clique_count_) {
         auto& members = delta_clique_extra_[clique_id];
-        if (std::find(members.begin(), members.end(), node_id) == members.end()) {
-            members.push_back(node_id);
-        }
+        members.push_back(node_id);
     } else {
         auto& members = delta_cliques_[clique_id - total_clique_count_];
-        if (std::find(members.begin(), members.end(), node_id) == members.end()) {
-            members.push_back(node_id);
-        }
+        members.push_back(node_id);
     }
     node_cliques.push_back(clique_id);
     return true;
@@ -431,7 +421,8 @@ CliqueDataCell::AppendNewClique(const Vector<InnerIdType>& members, uint64_t tot
 
 void
 CliqueDataCell::append_new_clique_unlocked(const Vector<InnerIdType>& members, uint64_t total) {
-    EnsureDeltaNodeRows(total);
+    needs_compaction_ = true;
+    ensure_delta_node_rows_unlocked(total);
     const auto new_clique_id = static_cast<InnerIdType>(total_logical_clique_count_unlocked());
     Vector<InnerIdType> normalized(allocator_);
     normalized.reserve(members.size());
@@ -449,9 +440,6 @@ CliqueDataCell::append_new_clique_unlocked(const Vector<InnerIdType>& members, u
     retired_cliques_.push_back(0);
     ++active_clique_count_;
     for (auto node_id : delta_cliques_.back()) {
-        if (node_id >= delta_node_to_cids_.size()) {
-            continue;
-        }
         auto& node_cliques = delta_node_to_cids_[node_id];
         if (std::find(node_cliques.begin(), node_cliques.end(), new_clique_id) ==
             node_cliques.end()) {
@@ -531,15 +519,17 @@ CliqueDataCell::CommitDelete(const Vector<InnerIdType>& node_ids,
                              const Vector<InnerIdType>& retired_clique_ids,
                              uint64_t total) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
-    EnsureDeltaNodeRows(total);
+    ensure_delta_node_rows_unlocked(total);
     for (auto node_id : node_ids) {
         if (node_id < inactive_nodes_.size() and inactive_nodes_[node_id] == 0) {
+            needs_compaction_ = true;
             inactive_nodes_[node_id] = 1;
             ++inactive_node_count_;
         }
     }
     for (auto clique_id : retired_clique_ids) {
         if (clique_id < retired_cliques_.size() and retired_cliques_[clique_id] == 0) {
+            needs_compaction_ = true;
             retired_cliques_[clique_id] = 1;
             --active_clique_count_;
             ++retired_clique_count_;
@@ -571,6 +561,8 @@ CliqueDataCell::Deserialize(StreamReader& reader,
         "unsupported clique datacell format version");
     std::unique_lock<std::shared_mutex> lock(mutex_);
     available_total_.store(std::numeric_limits<uint64_t>::max(), std::memory_order_release);
+    // Snapshots do not carry dirty state; conservatively compact on the first Flush.
+    needs_compaction_ = true;
     StreamReader::ReadVector(reader, p_maxc_);
     StreamReader::ReadVector(reader, maxcs_);
     StreamReader::ReadVector(reader, p_node_to_cid_);
@@ -624,37 +616,6 @@ CliqueDataCell::GetMemoryUsage() const {
 }
 
 bool
-CliqueDataCell::TryGetBaseView(uint64_t total, CliqueDataCellBaseView& view) const {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
-    const auto has_index =
-        available_total_.load(std::memory_order_acquire) == total and
-        total_logical_clique_count_unlocked() > 0 and p_maxc_.size() == total_clique_count_ + 1 and
-        p_node_to_cid_.size() == total + 1 and delta_node_to_cids_.size() == total;
-    if (not has_index or not delta_cliques_.empty() or inactive_node_count_ != 0 or
-        retired_clique_count_ != 0) {
-        return false;
-    }
-    for (const auto& extra_members : delta_clique_extra_) {
-        if (not extra_members.empty()) {
-            return false;
-        }
-    }
-    for (const auto& node_cliques : delta_node_to_cids_) {
-        if (not node_cliques.empty()) {
-            return false;
-        }
-    }
-
-    view.p_maxc = p_maxc_.data();
-    view.maxcs = maxcs_.data();
-    view.p_node_to_cid = p_node_to_cid_.data();
-    view.node_to_cids = node_to_cids_.data();
-    view.total_clique_count = total_clique_count_;
-    view.guard = std::move(lock);
-    return true;
-}
-
-bool
 CliqueDataCell::TryGetSearchView(uint64_t total, CliqueDataCellSearchView& view) const {
     std::shared_lock<std::shared_mutex> lock(mutex_);
     if (available_total_.load(std::memory_order_acquire) != total or active_clique_count_ == 0 or
@@ -689,39 +650,31 @@ CliqueDataCell::CollectStats(uint64_t total) const {
     stats.inactive_node_count = inactive_node_count_;
     stats.retired_clique_count = retired_clique_count_;
     Vector<uint64_t> node_memberships(total, 0, allocator_);
-    Vector<InnerIdType> members(allocator_);
     uint64_t active_clique_count = 0;
     for (InnerIdType clique_id = 0; clique_id < stats.total_clique_count; ++clique_id) {
         if (is_clique_retired_unlocked(clique_id)) {
             continue;
         }
-        members.clear();
-        get_clique_members_unlocked(clique_id, members);
-        if (members.empty()) {
-            continue;
-        }
-        ++active_clique_count;
-        stats.max_clique_size = std::max<uint64_t>(stats.max_clique_size, members.size());
-        stats.total_membership_count += members.size();
-        if (clique_id < total_clique_count_) {
-            for (auto member : members) {
-                const auto begin = p_maxc_[clique_id];
-                const auto end = p_maxc_[clique_id + 1];
-                if (std::find(maxcs_.begin() + begin, maxcs_.begin() + end, member) !=
-                    maxcs_.begin() + end) {
-                    ++stats.base_membership_count;
-                } else {
-                    ++stats.delta_extra_membership_count;
-                }
+        uint64_t member_count = 0;
+        for_each_live_member_unlocked(clique_id, [&](InnerIdType member, bool from_base) {
+            ++member_count;
+            if (from_base) {
+                ++stats.base_membership_count;
+            } else if (clique_id < total_clique_count_) {
+                ++stats.delta_extra_membership_count;
+            } else {
+                ++stats.delta_clique_membership_count;
             }
-        } else {
-            stats.delta_clique_membership_count += members.size();
-        }
-        for (auto member : members) {
             if (member < node_memberships.size()) {
                 ++node_memberships[member];
             }
+        });
+        if (member_count == 0) {
+            continue;
         }
+        ++active_clique_count;
+        stats.max_clique_size = std::max(stats.max_clique_size, member_count);
+        stats.total_membership_count += member_count;
     }
     for (uint64_t node_id = 0; node_id < node_memberships.size(); ++node_id) {
         if (is_node_inactive_unlocked(static_cast<InnerIdType>(node_id))) {

@@ -29,16 +29,6 @@ class StreamWriter;
 
 DEFINE_POINTER(CliqueDataCell);
 
-struct CliqueDataCellBaseView {
-    // Pins the CSR pointer storage for the lifetime of this view.
-    std::shared_lock<std::shared_mutex> guard;
-    const InnerIdType* p_maxc{nullptr};
-    const InnerIdType* maxcs{nullptr};
-    const InnerIdType* p_node_to_cid{nullptr};
-    const InnerIdType* node_to_cids{nullptr};
-    uint64_t total_clique_count{0};
-};
-
 struct CliqueDataCellStats {
     bool has_index{false};
     uint64_t total_nodes{0};
@@ -60,7 +50,13 @@ struct CliqueDataCellStats {
 };
 
 // One shared lock pins both CSR and delta storage for an entire query.
-struct CliqueDataCellSearchView : CliqueDataCellBaseView {
+struct CliqueDataCellSearchView {
+    std::shared_lock<std::shared_mutex> guard;
+    const InnerIdType* p_maxc{nullptr};
+    const InnerIdType* maxcs{nullptr};
+    const InnerIdType* p_node_to_cid{nullptr};
+    const InnerIdType* node_to_cids{nullptr};
+    uint64_t total_clique_count{0};
     uint64_t base_clique_count{0};
     uint64_t base_node_count{0};
     uint64_t total_nodes{0};
@@ -151,9 +147,6 @@ public:
            Vector<InnerIdType>&& node_to_cids,
            uint64_t total);
 
-    void
-    ResetDelta(uint64_t total);
-
     // Merge live base/delta memberships into CSR without changing vector inner IDs.
     void
     Flush(uint64_t total);
@@ -167,9 +160,6 @@ public:
     GetInactiveNodeIds() const;
 
     void
-    EnsureDeltaNodeRows(uint64_t total);
-
-    void
     MarkUnavailable();
 
     void
@@ -177,11 +167,6 @@ public:
 
     [[nodiscard]] bool
     HasCliqueIndex(uint64_t total) const;
-
-    [[nodiscard]] uint64_t
-    TotalBaseCliqueCount() const {
-        return total_clique_count_;
-    }
 
     [[nodiscard]] uint64_t
     TotalLogicalCliqueCount() const;
@@ -227,15 +212,49 @@ public:
     GetMemoryUsage() const;
 
     [[nodiscard]] bool
-    TryGetBaseView(uint64_t total, CliqueDataCellBaseView& view) const;
-
-    [[nodiscard]] bool
     TryGetSearchView(uint64_t total, CliqueDataCellSearchView& view) const;
 
     [[nodiscard]] CliqueDataCellStats
     CollectStats(uint64_t total) const;
 
 private:
+    void
+    reset_delta_unlocked(uint64_t total);
+
+    void
+    ensure_delta_node_rows_unlocked(uint64_t total);
+
+    // Caller holds mutex_. Preserve storage origin for allocation-free counts/statistics,
+    // including while MCI is unpublished and the query view cannot be acquired.
+    template <typename Visitor>
+    void
+    for_each_live_member_unlocked(InnerIdType clique_id, Visitor visit) const {
+        if (is_clique_retired_unlocked(clique_id)) {
+            return;
+        }
+        auto append_live = [&](auto begin, auto end, bool from_base) {
+            for (auto iter = begin; iter != end; ++iter) {
+                if (not is_node_inactive_unlocked(*iter)) {
+                    visit(*iter, from_base);
+                }
+            }
+        };
+        if (clique_id < total_clique_count_) {
+            append_live(
+                maxcs_.begin() + p_maxc_[clique_id], maxcs_.begin() + p_maxc_[clique_id + 1], true);
+            if (clique_id < delta_clique_extra_.size()) {
+                const auto& extra = delta_clique_extra_[clique_id];
+                append_live(extra.begin(), extra.end(), false);
+            }
+        } else {
+            const auto delta_id = clique_id - total_clique_count_;
+            if (delta_id < delta_cliques_.size()) {
+                const auto& members = delta_cliques_[delta_id];
+                append_live(members.begin(), members.end(), false);
+            }
+        }
+    }
+
     [[nodiscard]] uint64_t
     total_logical_clique_count_unlocked() const;
 
@@ -276,6 +295,9 @@ private:
     uint64_t active_clique_count_{0};
     uint64_t inactive_node_count_{0};
     uint64_t retired_clique_count_{0};
+    // Transient, not serialized. Unlike inactive_node_count_, this distinguishes already
+    // compacted tombstones from new changes. Clear only after successful compaction.
+    bool needs_compaction_{false};
     std::atomic<uint64_t> available_total_{0};
 
     mutable std::shared_mutex mutex_;
