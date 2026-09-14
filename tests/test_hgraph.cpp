@@ -22,6 +22,7 @@
 #include <future>
 #include <iostream>
 #include <limits>
+#include <mutex>
 #include <random>
 #include <sstream>
 #include <thread>
@@ -29,6 +30,7 @@
 
 #include "core/test_budget.h"
 #include "framework/test_budget_context.h"
+#include "framework/test_reader.h"
 #include "functest.h"
 #include "impl/filter/iterator_filter.h"
 #include "inner_string_params.h"
@@ -2031,6 +2033,288 @@ TestHGraphFactor(const fixtures::HGraphTestIndexPtr& test_index,
                 vsag::Options::Instance().set_block_size_limit(origin_size);
             }
         }
+    }
+}
+
+TEST_CASE("HGraph user-defined precise IO builds and searches", "[ft][hgraph][user_defined_io]") {
+    struct Store {
+        std::mutex mutex;
+        std::vector<uint8_t> bytes;
+        uint64_t reads{0};
+        uint64_t writes{0};
+        uint64_t resizes{0};
+    };
+    auto make_storage = [](const std::shared_ptr<Store>& store) {
+        return vsag::Factory::CreateUserDefinedIO(
+            [store](uint64_t offset, uint64_t len, void* destination) {
+                std::lock_guard<std::mutex> lock(store->mutex);
+                if (offset > store->bytes.size() or len > store->bytes.size() - offset) {
+                    throw std::runtime_error("read out of bounds");
+                }
+                if (len > 0) {
+                    std::memcpy(destination, store->bytes.data() + offset, len);
+                }
+                ++store->reads;
+            },
+            [store](uint64_t offset, uint64_t len, const void* source) {
+                std::lock_guard<std::mutex> lock(store->mutex);
+                if (offset > UINT64_MAX - len) {
+                    throw std::runtime_error("write overflow");
+                }
+                if (offset + len > store->bytes.size()) {
+                    store->bytes.resize(offset + len);
+                }
+                if (len > 0) {
+                    std::memcpy(store->bytes.data() + offset, source, len);
+                }
+                ++store->writes;
+            },
+            [store](uint64_t size) {
+                std::lock_guard<std::mutex> lock(store->mutex);
+                store->bytes.resize(size);
+                ++store->resizes;
+            },
+            0);
+    };
+    auto store = std::make_shared<Store>();
+    auto storage = make_storage(store);
+    vsag::UserDefinedIOSet storages;
+    storages.Set("hgraph_precise", storage.reader, storage.writer);
+
+    constexpr int64_t dim = 16;
+    constexpr int64_t count = 256;
+    std::vector<int64_t> ids(count);
+    std::vector<float> vectors(count * dim);
+    std::mt19937 generator(424242);
+    std::uniform_real_distribution<float> distribution(-1.0F, 1.0F);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = 1000 + i;
+        for (int64_t j = 0; j < dim; ++j) {
+            vectors[i * dim + j] = distribution(generator);
+        }
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+
+    const std::string external_param = R"({
+        "dtype":"float32","metric_type":"l2","dim":16,
+        "index_param":{"use_reorder":true,"build_by_base":false,
+        "base_quantization_type":"sq8","base_io_type":"block_memory_io",
+        "precise_quantization_type":"fp32","precise_io_type":"user_defined_io",
+        "precise_user_defined_io":"hgraph_precise","graph_io_type":"block_memory_io",
+        "graph_type":"odescent","max_degree":32,"ef_construction":100,
+        "build_thread_count":1,"graph_iter_turn":5}}
+    )";
+    auto external = vsag::Factory::CreateIndex("hgraph", external_param, storages);
+    REQUIRE(external.has_value());
+    REQUIRE(external.value()->Build(base).has_value());
+    REQUIRE(store->writes > 0);
+    REQUIRE(store->resizes > 0);
+    REQUIRE(store->reads > 0);
+    REQUIRE_FALSE(store->bytes.empty());
+
+    const std::string memory_param = R"({
+        "dtype":"float32","metric_type":"l2","dim":16,
+        "index_param":{"use_reorder":true,"build_by_base":false,
+        "base_quantization_type":"sq8","base_io_type":"block_memory_io",
+        "precise_quantization_type":"fp32","precise_io_type":"block_memory_io",
+        "graph_io_type":"block_memory_io","graph_type":"odescent","max_degree":32,
+        "ef_construction":100,"build_thread_count":1,"graph_iter_turn":5}}
+    )";
+    auto baseline = vsag::Factory::CreateIndex("hgraph", memory_param).value();
+    REQUIRE(baseline->Build(base).has_value());
+
+    std::vector<float> query_vector(dim);
+    for (int64_t j = 0; j < dim; ++j) {
+        query_vector[j] = vectors[37 * dim + j] + static_cast<float>(j + 1) * 0.0001F;
+    }
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
+    const auto reads_before_search = store->reads;
+    auto actual = external.value()->KnnSearch(query, 10, R"({"hgraph":{"ef_search":200}})");
+    auto expected = baseline->KnnSearch(query, 10, R"({"hgraph":{"ef_search":200}})");
+    REQUIRE(actual.has_value());
+    REQUIRE(expected.has_value());
+    REQUIRE(store->reads > reads_before_search);
+    // Search results report their count through GetDim() in this codebase (see the
+    // GetDim() == topk assertions across tests/); GetNumElements() would be the query count.
+    REQUIRE(actual.value()->GetDim() == 10);
+    REQUIRE(expected.value()->GetDim() == 10);
+    for (int64_t i = 0; i < 10; ++i) {
+        REQUIRE(actual.value()->GetIds()[i] == expected.value()->GetIds()[i]);
+        REQUIRE(std::abs(actual.value()->GetDistances()[i] - expected.value()->GetDistances()[i]) <
+                0.0001F);
+    }
+
+    SECTION("ReaderSet restore preserves the independent writable pair") {
+        const auto source_bytes = store->bytes;
+        auto serialized = external.value()->Serialize();
+        REQUIRE(serialized.has_value());
+        auto restored_store = std::make_shared<Store>();
+        auto restored_storage = make_storage(restored_store);
+        vsag::UserDefinedIOSet restored_storages;
+        restored_storages.Set("hgraph_precise", restored_storage.reader, restored_storage.writer);
+        auto restored =
+            vsag::Factory::CreateIndex("hgraph", external_param, restored_storages).value();
+        REQUIRE(restored->CheckFeature(vsag::IndexFeature::SUPPORT_DESERIALIZE_READER_SET));
+        {
+            vsag::ReaderSet readers;
+            for (const auto& key : serialized.value().GetKeys()) {
+                readers.Set(key,
+                            std::make_shared<fixtures::TestReader>(serialized.value().Get(key)));
+            }
+            auto result = restored->Deserialize(readers);
+            REQUIRE(result.has_value());
+        }
+        REQUIRE(restored->GetNumElements() == count);
+        REQUIRE(restored_store->writes > 0);
+        REQUIRE(restored_store->bytes == source_bytes);
+        const auto reads_before = restored_store->reads;
+        auto restored_result = restored->KnnSearch(query, 10, R"({"hgraph":{"ef_search":200}})");
+        REQUIRE(restored_result.has_value());
+        REQUIRE(restored_store->reads > reads_before);
+        for (int64_t i = 0; i < 10; ++i) {
+            REQUIRE(restored_result.value()->GetIds()[i] == actual.value()->GetIds()[i]);
+            REQUIRE(std::abs(restored_result.value()->GetDistances()[i] -
+                             actual.value()->GetDistances()[i]) < 0.0001F);
+        }
+        auto appended = vsag::Dataset::Make();
+        int64_t appended_id = 9000;
+        appended->NumElements(1)
+            ->Dim(dim)
+            ->Ids(&appended_id)
+            ->Float32Vectors(query_vector.data())
+            ->Owner(false);
+        const auto writes_before = restored_store->writes;
+        REQUIRE(restored->Add(appended).has_value());
+        REQUIRE(restored_store->writes > writes_before);
+        REQUIRE(restored->GetNumElements() == count + 1);
+        REQUIRE(store->bytes == source_bytes);
+    }
+}
+
+TEST_CASE("HGraph user-defined IO rejects missing pair", "[ft][hgraph][user_defined_io]") {
+    const std::string param = R"({
+        "dtype":"float32","metric_type":"l2","dim":16,
+        "index_param":{"use_reorder":true,"base_quantization_type":"sq8",
+        "precise_quantization_type":"fp32","precise_io_type":"user_defined_io",
+        "precise_user_defined_io":"missing"}}
+    )";
+    vsag::UserDefinedIOSet storages;
+    REQUIRE_FALSE(vsag::Factory::CreateIndex("hgraph", param, storages).has_value());
+}
+
+TEST_CASE("HGraph user-defined IO lifecycle copies are guarded", "[ft][hgraph][user_defined_io]") {
+    struct Store {
+        std::mutex mutex;
+        std::vector<uint8_t> bytes;
+    };
+    auto store = std::make_shared<Store>();
+    auto storage = vsag::Factory::CreateUserDefinedIO(
+        [store](uint64_t offset, uint64_t len, void* destination) {
+            std::lock_guard<std::mutex> lock(store->mutex);
+            if (offset > store->bytes.size() or len > store->bytes.size() - offset) {
+                throw std::runtime_error("read out of bounds");
+            }
+            if (len > 0) {
+                std::memcpy(destination, store->bytes.data() + offset, len);
+            }
+        },
+        [store](uint64_t offset, uint64_t len, const void* source) {
+            std::lock_guard<std::mutex> lock(store->mutex);
+            if (offset + len > store->bytes.size()) {
+                store->bytes.resize(offset + len);
+            }
+            if (len > 0) {
+                std::memcpy(store->bytes.data() + offset, source, len);
+            }
+        },
+        [store](uint64_t size) {
+            std::lock_guard<std::mutex> lock(store->mutex);
+            store->bytes.resize(size);
+        },
+        0);
+    vsag::UserDefinedIOSet storages;
+    storages.Set("hgraph_precise", storage.reader, storage.writer);
+
+    constexpr int64_t dim = 16;
+    constexpr int64_t count = 128;
+    std::vector<int64_t> ids(count);
+    std::vector<float> vectors(count * dim);
+    std::mt19937 generator(97);
+    std::uniform_real_distribution<float> distribution(-1.0F, 1.0F);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = 1000 + i;
+        for (int64_t j = 0; j < dim; ++j) {
+            vectors[i * dim + j] = distribution(generator);
+        }
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+
+    const std::string param = R"({
+        "dtype":"float32","metric_type":"l2","dim":16,
+        "index_param":{"use_reorder":true,"build_by_base":false,
+        "base_quantization_type":"sq8","base_io_type":"block_memory_io",
+        "precise_quantization_type":"fp32","precise_io_type":"user_defined_io",
+        "precise_user_defined_io":"hgraph_precise","graph_io_type":"block_memory_io",
+        "graph_type":"odescent","max_degree":32,"ef_construction":100,
+        "build_thread_count":1,"graph_iter_turn":5}}
+    )";
+    auto index = vsag::Factory::CreateIndex("hgraph", param, storages).value();
+    REQUIRE(index->Build(base).has_value());
+    const auto size_after_build = store->bytes.size();
+
+    // Clone / ExportModel would re-bind this storage pair into a second HGraph and
+    // resize or overwrite the shared backing bytes; both must stay unsupported.
+    REQUIRE_FALSE(index->CheckFeature(vsag::IndexFeature::SUPPORT_CLONE));
+    REQUIRE_FALSE(index->CheckFeature(vsag::IndexFeature::SUPPORT_EXPORT_MODEL));
+    auto cloned = index->Clone();
+    REQUIRE_FALSE(cloned.has_value());
+    REQUIRE(cloned.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+    auto model = index->ExportModel();
+    REQUIRE_FALSE(model.has_value());
+    REQUIRE(model.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+
+    // A memory-IO index with the same other parameters keeps lifecycle copies.
+    const std::string memory_param = R"({
+        "dtype":"float32","metric_type":"l2","dim":16,
+        "index_param":{"use_reorder":true,"build_by_base":false,
+        "base_quantization_type":"sq8","base_io_type":"block_memory_io",
+        "precise_quantization_type":"fp32","precise_io_type":"block_memory_io",
+        "graph_io_type":"block_memory_io","graph_type":"odescent","max_degree":32,
+        "ef_construction":100,"build_thread_count":1,"graph_iter_turn":5}}
+    )";
+    auto memory_index = vsag::Factory::CreateIndex("hgraph", memory_param).value();
+    REQUIRE(memory_index->Build(base).has_value());
+    REQUIRE(memory_index->CheckFeature(vsag::IndexFeature::SUPPORT_CLONE));
+    REQUIRE(memory_index->CheckFeature(vsag::IndexFeature::SUPPORT_EXPORT_MODEL));
+    REQUIRE(store->bytes.size() == size_after_build);
+}
+
+TEST_CASE("HGraph user-defined IO rejects invalid binding names", "[ft][hgraph][user_defined_io]") {
+    for (const auto* name : {"null", "42", "false", "[]", "{}", "\"\""}) {
+        const std::string param = std::string(R"({
+            "dtype":"float32","metric_type":"l2","dim":16,
+            "index_param":{"use_reorder":true,"base_quantization_type":"sq8",
+            "precise_quantization_type":"fp32","precise_io_type":"user_defined_io",
+            "precise_user_defined_io":)") +
+                                  name + "}}";
+        vsag::UserDefinedIOSet storages;
+        auto result = vsag::Factory::CreateIndex("hgraph", param, storages);
+        REQUIRE_FALSE(result.has_value());
+        const auto* expected = std::string(name) == "\"\""
+                                   ? "precise_user_defined_io must be non-empty"
+                                   : "precise_user_defined_io must be a string";
+        REQUIRE(result.error().message.find(expected) != std::string::npos);
     }
 }
 
