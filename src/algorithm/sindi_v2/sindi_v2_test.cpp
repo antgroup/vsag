@@ -136,19 +136,22 @@ create_sindi_v2_param(uint32_t term_id_limit,
                       const std::string& term_path,
                       const std::string& term_io_type = "buffer_io",
                       const std::string& rerank_io_type = "memory_io",
-                      uint32_t rerank_layout = 0) {
+                      uint32_t rerank_layout = 0,
+                      const std::string& rerank_type = "fp32") {
     auto param_str = fmt::format(R"({{
         "term_id_limit": {},
         "window_size": 10000,
         "doc_prune_ratio": 0.0,
         "use_quantization": false,
         "use_reorder": true,
+        "rerank_type": "{}",
         "avg_doc_term_length": 100,
         "rerank_layout": {},
         "term_io": {{ "type": "{}", "file_path": "{}" }},
         "rerank_io": {{ "type": "{}" }}
     }})",
                                  term_id_limit,
+                                 rerank_type,
                                  rerank_layout,
                                  term_io_type,
                                  term_path,
@@ -1094,11 +1097,14 @@ TEST_CASE("SINDIV2 Top Terms Rerank Layout End-To-End", "[ut][SINDIV2]") {
 
     fixtures::TempDir dir("sindi_v2_top_terms_layout");
     const std::string term_path = dir.GenerateRandomFile(false);
+    const std::string rerank_type = GENERATE("fp32", "fp16");
+    CAPTURE(rerank_type);
     auto param = create_sindi_v2_param(term_id_limit,
                                        term_path,
                                        "buffer_io",
                                        "memory_io",
-                                       /*rerank_layout=*/8);
+                                       /*rerank_layout=*/8,
+                                       rerank_type);
     auto index = std::make_unique<SINDIV2>(param, common_param);
     REQUIRE(index->Build(base).empty());
 
@@ -1114,6 +1120,9 @@ TEST_CASE("SINDIV2 Top Terms Rerank Layout End-To-End", "[ut][SINDIV2]") {
     auto result = index->KnnSearch(query, k, search_param, nullptr);
     REQUIRE(result->GetDim() == k);
     REQUIRE(result->GetIds()[0] == 0);
+    const auto statistics = JsonType::Parse(result->GetStatistics());
+    const auto backend = rerank_type == SPARSE_RERANK_TYPE_FP16 ? "sparse_fp16" : "sparse_fp32";
+    REQUIRE(statistics["distance_evaluations_by_backend"][backend].GetUint64() > 0);
     for (int64_t i = 0; i < result->GetDim(); ++i) {
         auto precise_dist = index->CalcDistanceById(query, result->GetIds()[i], true);
         REQUIRE(std::abs(result->GetDistances()[i] - precise_dist) < 1e-5);
@@ -1390,56 +1399,75 @@ TEST_CASE("SINDIV2 mutable memory index supports Add after Deserialize", "[ut][S
     common_param.metric_ = MetricType::METRIC_TYPE_IP;
     common_param.dim_ = 8;
 
-    auto parameter = std::make_shared<SINDIV2Parameter>();
-    parameter->FromJson(JsonType::Parse(R"({
+    const std::string rerank_type = GENERATE("fp32", "fp16");
+    DYNAMIC_SECTION("rerank_type=" << rerank_type) {
+        auto parameter = std::make_shared<SINDIV2Parameter>();
+        parameter->FromJson(JsonType::Parse(fmt::format(R"({{
         "term_id_limit": 8,
         "window_size": 10000,
+        "avg_doc_term_length": 3,
         "use_reorder": true,
-        "term_io": {"type": "memory_io"},
-        "rerank_io": {"type": "block_memory_io"}
-    })"));
+        "rerank_type": "{}",
+        "term_io": {{"type": "memory_io"}},
+        "rerank_io": {{"type": "block_memory_io"}}
+    }})",
+                                                        rerank_type)));
 
-    uint32_t base_term = 1;
-    float base_value = 1.0F;
-    int64_t base_label = 10;
-    SparseVector base_vector{1, &base_term, &base_value};
-    auto base = Dataset::Make();
-    base->NumElements(1)->SparseVectors(&base_vector)->Ids(&base_label)->Owner(false);
+        uint32_t base_term = 1;
+        float base_value = 1.0F;
+        int64_t base_label = 10;
+        SparseVector base_vector{1, &base_term, &base_value};
+        auto base = Dataset::Make();
+        base->NumElements(1)->SparseVectors(&base_vector)->Ids(&base_label)->Owner(false);
 
-    SINDIV2 built(parameter, common_param);
-    REQUIRE(built.Build(base).empty());
+        SINDIV2 built(parameter, common_param);
+        REQUIRE(built.Build(base).empty());
 
-    std::stringstream stream;
-    IOStreamWriter writer(stream);
-    built.Serialize(writer);
+        std::stringstream stream;
+        IOStreamWriter writer(stream);
+        built.Serialize(writer);
 
-    SINDIV2 loaded(parameter, common_param);
-    stream.seekg(0, std::ios::beg);
-    loaded.Deserialize(stream);
+        SINDIV2 loaded(parameter, common_param);
+        stream.seekg(0, std::ios::beg);
+        loaded.Deserialize(stream);
 
-    uint32_t added_term = 2;
-    float added_value = 2.0F;
-    int64_t added_label = 20;
-    SparseVector added_vector{1, &added_term, &added_value};
-    auto added = Dataset::Make();
-    added->NumElements(1)->SparseVectors(&added_vector)->Ids(&added_label)->Owner(false);
-    REQUIRE(loaded.Add(added).empty());
-    REQUIRE(loaded.GetNumElements() == 2);
+        uint32_t added_term = 2;
+        float added_value = 2.0F;
+        int64_t added_label = 20;
+        SparseVector added_vector{1, &added_term, &added_value};
+        auto added = Dataset::Make();
+        added->NumElements(1)->SparseVectors(&added_vector)->Ids(&added_label)->Owner(false);
+        REQUIRE(loaded.Add(added).empty());
+        REQUIRE(loaded.GetNumElements() == 2);
 
-    auto query = Dataset::Make();
-    query->NumElements(1)->SparseVectors(&added_vector)->Owner(false);
-    const auto result = loaded.KnnSearch(query,
-                                         1,
-                                         R"({
+        auto query = Dataset::Make();
+        query->NumElements(1)->SparseVectors(&added_vector)->Owner(false);
+        const auto result = loaded.KnnSearch(query,
+                                             1,
+                                             R"({
             "sindi_v2": {
                 "query_prune_ratio": 0.0,
                 "term_prune_ratio": 0.0,
                 "n_candidate": 2
             }
         })",
-                                         nullptr);
-    REQUIRE(result->GetDim() == 1);
-    REQUIRE(result->GetIds()[0] == added_label);
+                                             nullptr);
+        REQUIRE(result->GetDim() == 1);
+        REQUIRE(result->GetIds()[0] == added_label);
+        const auto statistics = JsonType::Parse(result->GetStatistics());
+        const auto backend = rerank_type == SPARSE_RERANK_TYPE_FP16 ? "sparse_fp16" : "sparse_fp32";
+        REQUIRE(statistics["distance_evaluations_by_backend"][backend].GetUint64() > 0);
+
+        if (rerank_type == SPARSE_RERANK_TYPE_FP16) {
+            auto fp32_parameter = std::make_shared<SINDIV2Parameter>();
+            auto fp32_json = parameter->ToJson();
+            fp32_json[SPARSE_RERANK_TYPE].SetString(SPARSE_RERANK_TYPE_FP32);
+            fp32_parameter->FromJson(fp32_json);
+            SINDIV2 fp32(fp32_parameter, common_param);
+            constexpr uint64_t estimate_count = 10'000'000;
+            REQUIRE(loaded.EstimateMemory(estimate_count) < fp32.EstimateMemory(estimate_count));
+        }
+    }
 }
 
 TEST_CASE("SINDIV2 rejects corrupted term layout", "[ut][SINDIV2]") {

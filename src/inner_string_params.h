@@ -99,6 +99,7 @@ const char* const QUANTIZATION_TYPE_VALUE_PQ = "pq";
 const char* const QUANTIZATION_TYPE_VALUE_PQFS = "pqfs";
 const char* const QUANTIZATION_TYPE_VALUE_RABITQ = "rabitq";
 const char* const QUANTIZATION_TYPE_VALUE_SPARSE = "sparse";
+const char* const QUANTIZATION_TYPE_VALUE_SPARSE_FP16 = "sparse_fp16";
 const char* const QUANTIZATION_TYPE_VALUE_TQ = "tq";
 
 // vector transformer type

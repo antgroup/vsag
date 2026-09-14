@@ -17,6 +17,8 @@
 
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include <catch2/catch_all.hpp>
+#include <cmath>
+#include <limits>
 
 #include "simd_status.h"
 #include "unittest.h"
@@ -45,6 +47,28 @@ TEST_CASE("Encode & Decode FP16", "[ut][simd]") {
         float decode_fp32 = generic::FP16ToFloat(fp16);
         REQUIRE(std::abs(decode_fp32 - item) < 1);
     }
+}
+
+TEST_CASE("FP16 conversion handles IEEE boundary values", "[ut][simd][fp16]") {
+    constexpr float min_normal = 0x1p-14F;
+    constexpr float min_subnormal = 0x1p-24F;
+
+    REQUIRE(generic::FloatToFP16(0.0F) == 0x0000U);
+    REQUIRE(generic::FloatToFP16(-0.0F) == 0x8000U);
+    REQUIRE(generic::FP16ToFloat(0x0000U) == 0.0F);
+    REQUIRE(std::signbit(generic::FP16ToFloat(0x8000U)));
+
+    REQUIRE(generic::FloatToFP16(min_normal) == 0x0400U);
+    REQUIRE(generic::FP16ToFloat(0x0400U) == min_normal);
+    REQUIRE(generic::FloatToFP16(min_subnormal) == 0x0001U);
+    REQUIRE(generic::FP16ToFloat(0x0001U) == min_subnormal);
+    REQUIRE(generic::FloatToFP16(0x1p-25F) == 0x0000U);
+
+    REQUIRE(generic::FloatToFP16(std::numeric_limits<float>::infinity()) == 0x7C00U);
+    REQUIRE(std::isinf(generic::FP16ToFloat(0x7C00U)));
+    const uint16_t fp16_nan = generic::FloatToFP16(std::numeric_limits<float>::quiet_NaN());
+    REQUIRE((fp16_nan & 0x0200U) != 0);
+    REQUIRE(std::isnan(generic::FP16ToFloat(fp16_nan)));
 }
 
 #define TEST_ACCURACY(Func)                                                           \

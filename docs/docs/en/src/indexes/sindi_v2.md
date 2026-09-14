@@ -80,7 +80,7 @@ Build parameters live under `index_param`.
 | `doc_prune_ratio` | float | `0.0` | Fraction of lowest-weight document terms removed during build (`[0.0, 1.0)`). |
 | `use_quantization` | bool or string | `false` | `false` stores FP32, `true` stores SQ8, and `"fp16"` stores FP16 values. |
 | `use_reorder` | bool | `false` | Store high-precision vectors and rerank coarse candidates. |
-| `rerank_type` | string | `"fp32"` | Rerank storage type: `fp32` or `dmq8`. |
+| `rerank_type` | string | `"fp32"` | Rerank storage type: `fp32`, `fp16`, or `dmq8`. FP16 stores document values in half precision and scores in FP32. |
 | `dmq_shared_codebook_threshold` | int | `1024` | Low-frequency term threshold for the shared DMQ codebook. |
 | `remap_term_ids` | bool | `false` | Compact sparse or widely separated external term IDs. |
 | `avg_doc_term_length` | int | `100` | Memory-estimation hint only. |
@@ -93,7 +93,8 @@ File-backed `term_io` supports `mmap_io`, `buffer_io`, and `async_io`, and
 requires `file_path`. If a file-backed `rerank_io` omits `file_path`, VSAG
 derives it as `<term_io.file_path>.rerank`.
 
-`rerank_layout > 0` requires `use_reorder: true`. `rerank_type: "dmq8"`
+`rerank_type: "fp16"` requires `use_reorder: true` and supports the same rerank I/O and layout
+options as `fp32`. `rerank_layout > 0` requires `use_reorder: true`. `rerank_type: "dmq8"`
 requires `rerank_layout: 0` and the default `block_memory_io` rerank backend.
 
 ### Host filtering

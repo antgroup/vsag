@@ -149,7 +149,11 @@ create_rerank_flat(const IndexCommonParam& common_param,
     }
     auto rerank_param = std::make_shared<SparseVectorDataCellParameter>();
     rerank_param->io_parameter = std::make_shared<MemoryBlockIOParameter>();
-    rerank_param->quantizer_parameter = std::make_shared<SparseQuantizerParameter>();
+    auto quantizer_param = std::make_shared<SparseQuantizerParameter>();
+    if (rerank_type == SPARSE_RERANK_TYPE_FP16) {
+        quantizer_param->value_type = SparseQuantizerValueType::FP16;
+    }
+    rerank_param->quantizer_parameter = quantizer_param;
     return FlattenInterface::MakeInstance(rerank_param, common_param);
 }
 
@@ -688,7 +692,17 @@ SINDI::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     auto check_and_cleanup = [this, inner_id, &new_sv](auto&& get_sparse_vector) -> bool {
         SparseVector old_sv;
         get_sparse_vector(inner_id, &old_sv, this->allocator_);
-        bool ret = is_subset_of_sparse_vector(old_sv, new_sv);
+        bool ret = false;
+        if (rerank_type_ == SPARSE_RERANK_TYPE_FP16) {
+            Vector<float> rounded_values(new_sv.len_, allocator_);
+            for (uint32_t i = 0; i < new_sv.len_; ++i) {
+                rounded_values[i] = generic::FP16ToFloat(generic::FloatToFP16(new_sv.vals_[i]));
+            }
+            SparseVector rounded_new_sv{new_sv.len_, new_sv.ids_, rounded_values.data()};
+            ret = is_subset_of_sparse_vector(old_sv, rounded_new_sv);
+        } else {
+            ret = is_subset_of_sparse_vector(old_sv, new_sv);
+        }
 
         this->allocator_->Deallocate(old_sv.vals_);
         this->allocator_->Deallocate(old_sv.ids_);
@@ -1907,8 +1921,16 @@ SINDI::EstimateMemory(uint64_t num_elements) const {
             mem += estimated_codebook_count * sizeof(SparseDmqQuantizer::Codebook);
             mem += estimated_term_count * 2 * sizeof(uint32_t);
         } else {
-            mem += num_elements *
-                   (sizeof(uint32_t) + avg_doc_term_length_ * (sizeof(uint32_t) + sizeof(float)));
+            const uint64_t rerank_value_size =
+                rerank_type_ == SPARSE_RERANK_TYPE_FP16 ? sizeof(uint16_t) : sizeof(float);
+            uint64_t rerank_code_size =
+                sizeof(uint32_t) + static_cast<uint64_t>(avg_doc_term_length_) *
+                                       (sizeof(uint32_t) + rerank_value_size);
+            if (rerank_type_ == SPARSE_RERANK_TYPE_FP16) {
+                constexpr uint64_t alignment = alignof(uint32_t);
+                rerank_code_size = (rerank_code_size + alignment - 1) / alignment * alignment;
+            }
+            mem += num_elements * rerank_code_size;
 
             const auto block_size = Options::Instance().block_size_limit();
             const auto offset_bytes = num_elements * (sizeof(uint64_t) + sizeof(uint32_t));
