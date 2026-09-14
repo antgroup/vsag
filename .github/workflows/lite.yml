@@ -50,8 +50,7 @@ jobs:
       - name: Build and test Debug
         run: |
           cmake --build build-lite-first-debug -j2
-          ./build-lite-first-debug/lite_tests '[lite]'
-          ./build-lite-first-debug/lite_tests '[lite-scale]'
+          ctest --test-dir build-lite-first-debug --output-on-failure -j2
       - name: Build and install Release library
         run: |
           cmake -S lite -B build-lite-first-release -G Ninja \
