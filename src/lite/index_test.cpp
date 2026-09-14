@@ -112,6 +112,34 @@ TEST_CASE("Lite search filters external IDs across CRUD and snapshot load", "[li
     REQUIRE(restored->front().distance == after_crud->front().distance);
 }
 
+TEST_CASE("Lite v1 snapshot has fixed bytes", "[lite]") {
+    auto created = Index::Create(1);
+    const float value = 1.25F;
+    REQUIRE((*created)->Add(-1, &value, 1));
+    std::stringstream output;
+    REQUIRE((*created)->Save(output));
+    constexpr std::array<unsigned char, 60> expected{
+        'V', 'S', 'A', 'G', 'L', 'T', '0', '1', 1, 0, 0, 0, 0, 0, 0, 0,  // version
+        1,   0,   0,   0,   0,   0,   0,   0,                            // dimension
+        1,   0,   0,   0,   0,   0,   0,   0,                            // count
+        12,  0,   0,   0,   0,   0,   0,   0,                            // payload bytes
+        1,   0,   0,   0,   0,   0,   0,   0,                            // FP32 squared L2
+        255, 255, 255, 255, 255, 255, 255, 255,                          // ID -1
+        0,   0,   160, 63,                                               // 1.25f
+    };
+    const auto bytes = output.str();
+    REQUIRE(bytes.size() == expected.size());
+    REQUIRE(
+        std::equal(expected.begin(), expected.end(), bytes.begin(), [](unsigned char a, char b) {
+            return a == static_cast<unsigned char>(b);
+        }));
+    std::stringstream input(
+        std::string(reinterpret_cast<const char*>(expected.data()), expected.size()));
+    auto loaded = Index::Load(input);
+    REQUIRE(loaded);
+    REQUIRE((*loaded)->Search(&value, 1, 1)->front().id == -1);
+}
+
 TEST_CASE("Lite snapshot roundtrip and malformed input", "[lite]") {
     auto created = Index::Create(2);
     auto& index = **created;

@@ -2,18 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "vsag/lite/index.h"
 
-#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <istream>
 #include <limits>
 #include <new>
 #include <ostream>
-#include <queue>
 #include <stdexcept>
-#include <unordered_map>
 
-#include "fp32_distance.h"
+#include "lite/backend.h"
 
 namespace vsag::lite {
 namespace {
@@ -23,35 +20,6 @@ failure(ErrorType type, const char* message) {
     return tl::unexpected(Error(type, message));
 }
 
-tl::expected<void, Error>
-validate(const float* data, uint64_t actual, uint64_t expected) {
-    if (actual != expected) {
-        return failure(ErrorType::DIMENSION_NOT_EQUAL, "dimension mismatch");
-    }
-    if (data == nullptr) {
-        return failure(ErrorType::INVALID_ARGUMENT, "null vector");
-    }
-    for (uint64_t i = 0; i < actual; ++i) {
-        if (not std::isfinite(data[i])) {
-            return failure(ErrorType::INVALID_ARGUMENT, "non-finite vector");
-        }
-    }
-    return {};
-}
-
-bool
-better(const Neighbor& a, const Neighbor& b) {
-    return a.distance < b.distance or (a.distance == b.distance and a.id < b.id);
-}
-
-struct NeighborWorseFirst {
-    bool
-    operator()(const Neighbor& a, const Neighbor& b) const {
-        return better(a, b);
-    }
-};
-
-// Explicit byte encoding: never serialize native containers, pointers, or struct padding.
 void
 write(std::ostream& out, uint64_t value, uint64_t bytes = 8) {
     for (uint64_t i = 0; i < bytes; ++i) {
@@ -79,25 +47,25 @@ static_assert(sizeof(float) == 4 and std::numeric_limits<float>::is_iec559);
 }  // namespace
 
 struct Index::Impl {
-    explicit Impl(uint64_t dimension) : dim(dimension) {
+    explicit Impl(std::unique_ptr<detail::Backend> index_backend)
+        : backend(std::move(index_backend)) {
     }
-    uint64_t dim;
-    std::vector<float> vectors;
-    std::vector<int64_t> ids;
-    std::unordered_map<int64_t, uint64_t> slots;
+    std::unique_ptr<detail::Backend> backend;
 };
 
-Index::Index(uint64_t dim) : impl_(std::make_unique<Impl>(dim)) {
+Index::Index(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {
 }
 Index::~Index() = default;
 
 tl::expected<std::unique_ptr<Index>, Error>
 Index::Create(uint64_t dim) {
-    if (dim == 0 or dim > std::vector<float>().max_size()) {
-        return failure(ErrorType::INVALID_ARGUMENT, "invalid dimension");
+    auto backend = detail::make_brute_force_backend(dim);
+    if (not backend) {
+        return tl::unexpected(backend.error());
     }
     try {
-        return std::unique_ptr<Index>(new Index(dim));
+        auto impl = std::make_unique<Impl>(std::move(*backend));
+        return std::unique_ptr<Index>(new Index(std::move(impl)));
     } catch (const std::bad_alloc&) {
         return failure(ErrorType::NO_ENOUGH_MEMORY, "create allocation failed");
     }
@@ -105,139 +73,37 @@ Index::Create(uint64_t dim) {
 
 uint64_t
 Index::Size() const {
-    return impl_->ids.size();
+    return impl_->backend->Size();
 }
 
 uint64_t
 Index::Dim() const {
-    return impl_->dim;
+    return impl_->backend->Dim();
 }
 
 tl::expected<void, Error>
 Index::Add(int64_t id, const float* vector, uint64_t dim) {
-    auto valid = validate(vector, dim, Dim());
-    if (not valid) {
-        return tl::unexpected(valid.error());
-    }
-    if (impl_->slots.count(id) != 0) {
-        return failure(ErrorType::INVALID_ARGUMENT, "duplicate ID");
-    }
-    if (Size() >= impl_->vectors.max_size() / dim or Size() >= impl_->ids.max_size()) {
-        return failure(ErrorType::NO_ENOUGH_MEMORY, "index capacity exceeded");
-    }
-    try {
-        // Reserve geometrically, before publishing any logical record. reserve(n+1) each time
-        // would turn a sequence of single-vector inserts into quadratic copying.
-        auto grow = [](auto& values, uint64_t required) {
-            if (required > values.capacity()) {
-                const uint64_t maximum = values.max_size();
-                const uint64_t capacity = values.capacity();
-                const uint64_t doubled =
-                    capacity == 0 ? 1 : (capacity > maximum / 2 ? maximum : capacity * 2);
-                values.reserve(std::max(required, doubled));
-            }
-        };
-        const uint64_t slot = Size();
-        grow(impl_->vectors, (slot + 1) * dim);
-        grow(impl_->ids, slot + 1);
-        // Publish the map entry only after every operation that can reallocate a vector has
-        // succeeded. The following scalar inserts cannot throw after the reserves above.
-        impl_->slots.emplace(id, slot);
-        impl_->vectors.insert(impl_->vectors.end(), vector, vector + dim);
-        impl_->ids.push_back(id);
-        return {};
-    } catch (const std::bad_alloc&) {
-        return failure(ErrorType::NO_ENOUGH_MEMORY, "add allocation failed");
-    } catch (const std::length_error&) {
-        return failure(ErrorType::NO_ENOUGH_MEMORY, "add capacity exceeded");
-    }
+    return impl_->backend->Add(id, vector, dim);
 }
 
 tl::expected<void, Error>
 Index::Update(int64_t id, const float* vector, uint64_t dim) {
-    auto valid = validate(vector, dim, Dim());
-    if (not valid) {
-        return tl::unexpected(valid.error());
-    }
-    auto slot = impl_->slots.find(id);
-    if (slot == impl_->slots.end()) {
-        return failure(ErrorType::INVALID_ARGUMENT, "missing ID");
-    }
-    std::copy_n(vector, dim, impl_->vectors.data() + slot->second * dim);
-    return {};
+    return impl_->backend->Update(id, vector, dim);
 }
 
 bool
 Index::Remove(int64_t id) {
-    auto found = impl_->slots.find(id);
-    if (found == impl_->slots.end()) {
-        return false;
-    }
-    const uint64_t slot = found->second;
-    const uint64_t last = Size() - 1;
-    // Same dense-slot principle as Full BruteForce::Remove(FORCE_REMOVE).
-    // This is deliberately not a graph-compatible stable-slot contract.
-    if (slot != last) {
-        std::copy_n(
-            impl_->vectors.data() + last * Dim(), Dim(), impl_->vectors.data() + slot * Dim());
-        impl_->ids[slot] = impl_->ids[last];
-        impl_->slots.at(impl_->ids[slot]) = slot;
-    }
-    impl_->slots.erase(found);
-    impl_->ids.pop_back();
-    impl_->vectors.resize(last * Dim());
-    return true;
+    return impl_->backend->Remove(id);
 }
 
 tl::expected<std::vector<Neighbor>, Error>
 Index::Search(const float* query, uint64_t dim, uint64_t k) const {
-    return SearchImpl(query, dim, k, nullptr);
+    return impl_->backend->Search(query, dim, k);
 }
 
 tl::expected<std::vector<Neighbor>, Error>
 Index::Search(const float* query, uint64_t dim, uint64_t k, const IdFilter& filter) const {
-    return SearchImpl(query, dim, k, filter ? &filter : nullptr);
-}
-
-tl::expected<std::vector<Neighbor>, Error>
-Index::SearchImpl(const float* query, uint64_t dim, uint64_t k, const IdFilter* filter) const {
-    auto valid = validate(query, dim, Dim());
-    if (not valid) {
-        return tl::unexpected(valid.error());
-    }
-    try {
-        k = std::min(k, Size());
-        if (k == 0) {
-            return std::vector<Neighbor>{};
-        }
-        std::priority_queue<Neighbor, std::vector<Neighbor>, NeighborWorseFirst> heap;
-        // Small dimensions keep the v1 scalar accumulation order and avoid ISA call overhead.
-        const auto distance_fn =
-            dim < 16 ? detail::GenericFP32Distance : detail::SelectFP32Distance();
-        for (uint64_t slot = 0; slot < Size(); ++slot) {
-            if (filter != nullptr and not(*filter)(impl_->ids[slot])) {
-                continue;
-            }
-            const auto distance = distance_fn(query, impl_->vectors.data() + slot * dim, dim);
-            Neighbor next{impl_->ids[slot], distance};
-            if (heap.size() < k) {
-                heap.push(next);
-            } else if (better(next, heap.top())) {
-                heap.pop();
-                heap.push(next);
-            }
-        }
-        std::vector<Neighbor> result(heap.size());
-        for (uint64_t i = result.size(); i > 0; --i) {
-            result[i - 1] = heap.top();
-            heap.pop();
-        }
-        return result;
-    } catch (const std::bad_alloc&) {
-        return failure(ErrorType::NO_ENOUGH_MEMORY, "search allocation failed");
-    } catch (const std::length_error&) {
-        return failure(ErrorType::NO_ENOUGH_MEMORY, "search capacity exceeded");
-    }
+    return impl_->backend->Search(query, dim, k, filter ? &filter : nullptr);
 }
 
 tl::expected<void, Error>
@@ -247,18 +113,21 @@ Index::Save(std::ostream& output) const {
     }
     try {
         output.write(K_MAGIC, 8);
-        write(output, 1);  // Format version.
+        write(output, 1);
         write(output, Dim());
         write(output, Size());
         write(output, Size() * (8 + 4 * Dim()));
-        write(output, 1);  // FP32 squared-L2 representation.
-        for (const auto& id : impl_->ids) {
-            write(output, static_cast<uint64_t>(id));
+        write(output, 1);
+        for (uint64_t slot = 0; slot < Size(); ++slot) {
+            write(output, static_cast<uint64_t>(impl_->backend->IdAt(slot)));
         }
-        for (const float value : impl_->vectors) {
-            uint32_t bits;
-            std::memcpy(&bits, &value, 4);
-            write(output, bits, 4);
+        for (uint64_t slot = 0; slot < Size(); ++slot) {
+            const auto* vector = impl_->backend->VectorAt(slot);
+            for (uint64_t i = 0; i < Dim(); ++i) {
+                uint32_t bits;
+                std::memcpy(&bits, vector + i, 4);
+                write(output, bits, 4);
+            }
         }
         if (not output) {
             return failure(ErrorType::READ_ERROR, "snapshot write failed");
@@ -294,24 +163,17 @@ Index::Load(std::istream& input) {
             payload != count * (8 + 4 * dim) or available != K_HEADER_BYTES + payload) {
             return failure(ErrorType::INVALID_BINARY, "invalid snapshot layout");
         }
-        auto created = Create(dim);
-        if (not created) {
-            return tl::unexpected(created.error());
-        }
-        auto& data = *(*created)->impl_;
-        // Bounds validated against the actual input length before any payload allocation.
-        data.ids.reserve(count);
-        data.slots.reserve(count);
+        // Validate the layout before allocating and keep one owned copy of each payload.
+        std::vector<int64_t> ids;
+        ids.reserve(count);
         for (uint64_t slot = 0; slot < count; ++slot) {
             const uint64_t bits = read(input);
             int64_t id;
             std::memcpy(&id, &bits, sizeof(id));
-            if (not data.slots.emplace(id, slot).second) {
-                return failure(ErrorType::INVALID_BINARY, "duplicate snapshot ID");
-            }
-            data.ids.push_back(id);
+            ids.push_back(id);
         }
-        data.vectors.reserve(count * dim);
+        std::vector<float> vectors;
+        vectors.reserve(count * dim);
         for (uint64_t i = 0; i < count * dim; ++i) {
             auto bits = static_cast<uint32_t>(read(input, 4));
             float value;
@@ -319,9 +181,14 @@ Index::Load(std::istream& input) {
             if (not std::isfinite(value)) {
                 return failure(ErrorType::INVALID_BINARY, "non-finite snapshot vector");
             }
-            data.vectors.push_back(value);
+            vectors.push_back(value);
         }
-        return std::move(*created);
+        auto backend = detail::restore_brute_force_backend(dim, std::move(ids), std::move(vectors));
+        if (not backend) {
+            return tl::unexpected(backend.error());
+        }
+        auto impl = std::make_unique<Impl>(std::move(*backend));
+        return std::unique_ptr<Index>(new Index(std::move(impl)));
     } catch (const std::ios_base::failure&) {
         return failure(ErrorType::INVALID_BINARY, "snapshot read failed");
     } catch (const std::bad_alloc&) {

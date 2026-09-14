@@ -49,10 +49,7 @@ public:
     /** k=0 or an empty index returns an empty result; k is capped at the record count. */
     tl::expected<std::vector<Neighbor>, Error>
     Search(const float* query, uint64_t dim, uint64_t k) const;
-    /**
-     * Search while keeping only records whose external ID is accepted by the filter.
-     * An empty filter accepts every ID. The result can contain fewer than k records.
-     */
+    /** Return only records whose external ID is accepted; an empty filter accepts all. */
     tl::expected<std::vector<Neighbor>, Error>
     Search(const float* query, uint64_t dim, uint64_t k, const IdFilter& filter) const;
 
@@ -69,10 +66,8 @@ public:
     Dim() const;
 
 private:
-    explicit Index(uint64_t dim);
-    tl::expected<std::vector<Neighbor>, Error>
-    SearchImpl(const float* query, uint64_t dim, uint64_t k, const IdFilter* filter) const;
     struct Impl;
+    explicit Index(std::unique_ptr<Impl> impl);
     std::unique_ptr<Impl> impl_;
 };
 
