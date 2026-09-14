@@ -43,7 +43,7 @@ lite/benchmark/run_comparison.sh \
   FULL_BENCHMARK LITE_BENCHMARK FULL_LIBVSAG_SO LITE_LIBVSAG_LITE_SO OUTPUT_DIRECTORY
 ```
 
-The runner alternates Full/Lite execution order over seven repetitions for both 10k x 128 and 100k x 128 cases. It records raw and stripped shared-library sizes, binary and library checksums, per-process `/usr/bin/time -v` output, CSV measurements, and snapshots. Results compare two exact FP32 squared-L2 BruteForce implementations; they do not establish graph-index performance or standard-dataset Recall@K.
+The runner alternates Full/Lite execution order over seven repetitions for both 10k x 128 and 100k x 128 cases. It records raw and stripped shared-library sizes, binary and library checksums, per-process `/usr/bin/time -v` output, CSV measurements, and snapshots. It extracts the single CSV header/data pair from captured stdout and fails if the pair is missing, duplicated, or malformed; Full VSAG diagnostic logs remain in the raw stdout file. Results compare two exact FP32 squared-L2 BruteForce implementations; they do not establish graph-index performance or standard-dataset Recall@K.
 
 ## SIFT-128 subset Recall@10
 
