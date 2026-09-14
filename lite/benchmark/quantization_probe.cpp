@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -18,6 +19,7 @@
 
 #include "quantization/scalar_quantization/scalar_quantization_utils.h"
 #include "simd/kernels/compute_l2.h"
+#include "simd/kernels/half_compute.h"
 #include "simd/kernels/sq8_compute.h"
 #include "simd/traits/simd_traits_generic.h"
 
@@ -121,6 +123,75 @@ train_and_encode(const std::vector<float>& base, uint64_t count, uint64_t dim) {
     return model;
 }
 
+// Offline IEEE binary16 encoder; the Full generic.cpp conversion is not linked
+// into the standalone Lite probe. Keep this candidate codec out of Index.
+uint16_t
+float_to_fp16(float value) {
+    if (not std::isfinite(value)) {
+        throw std::invalid_argument("non-finite FP16 input");
+    }
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    const auto sign = static_cast<uint16_t>((bits >> 16) & 0x8000U);
+    const uint32_t exponent = (bits >> 23) & 0xffU;
+    uint32_t mantissa = bits & 0x7fffffU;
+    if (exponent == 0) {
+        return sign;
+    }
+    int32_t half_exponent = static_cast<int32_t>(exponent) - 127 + 15;
+    if (half_exponent >= 31) {
+        throw std::invalid_argument("FP16 range overflow");
+    }
+    if (half_exponent <= 0) {
+        if (half_exponent < -10) {
+            return sign;
+        }
+        mantissa |= 0x800000U;
+        const auto shift = static_cast<uint32_t>(14 - half_exponent);
+        uint32_t rounded = mantissa >> shift;
+        const uint32_t remainder = mantissa & ((1U << shift) - 1U);
+        const uint32_t halfway = 1U << (shift - 1);
+        if (remainder > halfway or (remainder == halfway and (rounded & 1U) != 0)) {
+            ++rounded;
+        }
+        return static_cast<uint16_t>(sign | rounded);
+    }
+    uint32_t rounded = mantissa >> 13;
+    const uint32_t remainder = mantissa & 0x1fffU;
+    if (remainder > 0x1000U or (remainder == 0x1000U and (rounded & 1U) != 0)) {
+        ++rounded;
+    }
+    if (rounded == 0x400U) {
+        rounded = 0;
+        ++half_exponent;
+    }
+    if (half_exponent >= 31) {
+        throw std::invalid_argument("FP16 rounded range overflow");
+    }
+    return static_cast<uint16_t>(sign | (static_cast<uint32_t>(half_exponent) << 10) | rounded);
+}
+
+struct FP16Codes {
+    std::vector<uint16_t> codes;
+    double rmse = 0;
+};
+
+FP16Codes
+encode_fp16(const std::vector<float>& base) {
+    FP16Codes result;
+    result.codes.reserve(base.size());
+    long double squared_error = 0;
+    for (const float value : base) {
+        const uint16_t code = float_to_fp16(value);
+        result.codes.push_back(code);
+        const float decoded = vsag::simd::FP16Traits<vsag::simd::GenericFP16Tag>::load_half(&code);
+        const long double error = static_cast<long double>(value) - decoded;
+        squared_error += error * error;
+    }
+    result.rmse = std::sqrt(static_cast<double>(squared_error / base.size()));
+    return result;
+}
+
 struct Candidate {
     uint64_t id;
     float distance;
@@ -174,6 +245,26 @@ hits(const std::vector<Candidate>& neighbors, const int32_t* truth, uint64_t k) 
 }
 
 void
+fp16_self_test() {
+    const std::vector<float> values{
+        0.0F, -0.0F, 1.0F, 65504.0F, std::ldexp(1.0F, -24), std::ldexp(1.0F, -25)};
+    const auto model = encode_fp16(values);
+    if (model.codes != std::vector<uint16_t>{0, 0x8000U, 0x3c00U, 0x7bffU, 1, 0}) {
+        throw std::runtime_error("FP16 boundary encoding failed");
+    }
+    const float negative_zero =
+        vsag::simd::FP16Traits<vsag::simd::GenericFP16Tag>::load_half(&model.codes[1]);
+    if (not std::signbit(negative_zero)) {
+        throw std::runtime_error("FP16 negative zero lost");
+    }
+    try {
+        float_to_fp16(100000.0F);
+        throw std::runtime_error("FP16 overflow was accepted");
+    } catch (const std::invalid_argument&) {
+    }
+}
+
+void
 self_test() {
     const std::vector<float> base{0, 5, 1, 5, 2, 5, 3, 5};
     const auto model = train_and_encode(base, 4, 2);
@@ -212,10 +303,16 @@ run(const std::filesystem::path& root) {
     const auto model = train_and_encode(base.values, base.count, dim);
     const double train_encode_ms =
         std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+    const auto fp16_start = Clock::now();
+    const auto fp16_model = encode_fp16(base.values);
+    const double fp16_encode_ms =
+        std::chrono::duration<double, std::milli>(Clock::now() - fp16_start).count();
     std::vector<double> exact_us;
     std::vector<double> sq8_us;
+    std::vector<double> fp16_us;
     uint64_t exact_hits = 0;
     uint64_t sq8_hits = 0;
+    uint64_t fp16_hits = 0;
     for (uint64_t q = 0; q < queries.count; ++q) {
         const float* query = queries.values.data() + q * dim;
         auto exact_scan = [&] {
@@ -234,6 +331,19 @@ run(const std::filesystem::path& root) {
                                                                       dim);
             });
         };
+        auto fp16_scan = [&] {
+            std::vector<uint16_t> query_codes(dim);
+            for (uint64_t d = 0; d < dim; ++d) {
+                query_codes[d] = float_to_fp16(query[d]);
+            }
+            return top_k(base.count, k, [&](uint64_t id) {
+                return vsag::simd::HalfComputeL2SqrImpl<
+                    vsag::simd::FP16Traits<vsag::simd::GenericFP16Tag>>(
+                    reinterpret_cast<const uint8_t*>(query_codes.data()),
+                    reinterpret_cast<const uint8_t*>(fp16_model.codes.data() + id * dim),
+                    dim);
+            });
+        };
         auto measure = [](const auto& scan, std::vector<double>& latencies) {
             const auto begin = Clock::now();
             auto results = scan();
@@ -243,12 +353,19 @@ run(const std::filesystem::path& root) {
         };
         std::vector<Candidate> exact;
         std::vector<Candidate> approximate;
-        if (q % 2 == 0) {
+        std::vector<Candidate> half_precision;
+        if (q % 3 == 0) {
             exact = measure(exact_scan, exact_us);
             approximate = measure(sq8_scan, sq8_us);
+            half_precision = measure(fp16_scan, fp16_us);
+        } else if (q % 3 == 1) {
+            approximate = measure(sq8_scan, sq8_us);
+            half_precision = measure(fp16_scan, fp16_us);
+            exact = measure(exact_scan, exact_us);
         } else {
-            approximate = measure(sq8_scan, sq8_us);
+            half_precision = measure(fp16_scan, fp16_us);
             exact = measure(exact_scan, exact_us);
+            approximate = measure(sq8_scan, sq8_us);
         }
         const int32_t* expected = truth.values.data() + q * k;
         for (uint64_t i = 0; i < k; ++i) {
@@ -258,22 +375,29 @@ run(const std::filesystem::path& root) {
         }
         exact_hits += hits(exact, expected, k);
         sq8_hits += hits(approximate, expected, k);
+        fp16_hits += hits(half_precision, expected, k);
     }
     const uint64_t opportunities = queries.count * k;
     if (exact_hits != opportunities) {
         throw std::runtime_error("provided ground truth differs from FP32 exhaustive scan");
     }
-    std::cout << "base_count,query_count,dim,train_encode_ms,exact_recall_at_10,"
-                 "sq8_recall_at_10,exact_p50_us,exact_p99_us,sq8_p50_us,sq8_p99_us,"
-                 "rmse,fp32_vector_bytes,sq8_code_bytes,sq8_model_bytes\n";
+    std::cout << "base_count,query_count,dim,sq8_train_encode_ms,fp16_encode_ms,"
+                 "exact_recall_at_10,sq8_recall_at_10,fp16_recall_at_10,"
+                 "exact_p50_us,exact_p99_us,sq8_p50_us,sq8_p99_us,fp16_p50_us,fp16_p99_us,"
+                 "sq8_rmse,fp16_rmse,fp32_vector_bytes,sq8_code_bytes,sq8_model_bytes,"
+                 "fp16_code_bytes\n";
     std::cout << std::fixed << std::setprecision(6) << base.count << ',' << queries.count << ','
-              << dim << ',' << train_encode_ms << ','
+              << dim << ',' << train_encode_ms << ',' << fp16_encode_ms << ','
               << static_cast<double>(exact_hits) / static_cast<double>(opportunities) << ','
               << static_cast<double>(sq8_hits) / static_cast<double>(opportunities) << ','
+              << static_cast<double>(fp16_hits) / static_cast<double>(opportunities) << ','
               << percentile(exact_us, 0.50) << ',' << percentile(exact_us, 0.99) << ','
-              << percentile(sq8_us, 0.50) << ',' << percentile(sq8_us, 0.99) << ',' << model.rmse
-              << ',' << base.values.size() * sizeof(float) << ',' << model.codes.size() << ','
-              << (model.lower.size() + model.diff.size()) * sizeof(float) << '\n';
+              << percentile(sq8_us, 0.50) << ',' << percentile(sq8_us, 0.99) << ','
+              << percentile(fp16_us, 0.50) << ',' << percentile(fp16_us, 0.99) << ',' << model.rmse
+              << ',' << fp16_model.rmse << ',' << base.values.size() * sizeof(float) << ','
+              << model.codes.size() << ','
+              << (model.lower.size() + model.diff.size()) * sizeof(float) << ','
+              << fp16_model.codes.size() * sizeof(uint16_t) << '\n';
 }
 
 }  // namespace
@@ -283,10 +407,11 @@ main(int argc, char** argv) {
     try {
         if (argc == 2 and std::string(argv[1]) == "--self-test") {
             self_test();
+            fp16_self_test();
             return 0;
         }
         if (argc != 2) {
-            std::cerr << "usage: lite_sq8_probe SIFT_DIR | --self-test\n";
+            std::cerr << "usage: lite_quantization_probe SIFT_DIR | --self-test\n";
             return 2;
         }
         run(argv[1]);
