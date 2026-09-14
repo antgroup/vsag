@@ -64,7 +64,10 @@ select_adaptive_heap(const DistHeapPtr& edges,
                      Allocator* allocator,
                      float alpha,
                      const AdaptivePruningParameter& parameter) {
-    // Keep distance-computer scratch bounded to one vertex selection.
+    // Keep this cache local to one selection: adaptive passes need at most O(K) source
+    // computers. Sharing the caller's cache across up to K full reverse lists could retain
+    // O(K^2) distinct source computers until insertion finishes. The caller's separate cache
+    // is only for center-to-candidate distances and retains at most K reverse centers.
     PairwiseDistanceComputer pairwise_distance(distance_provider, allocator);
     Vector<PruningCandidate> candidates(allocator);
     candidates.reserve(edges->Size());

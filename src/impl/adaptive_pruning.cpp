@@ -159,13 +159,16 @@ select_edges_adaptive(Vector<PruningCandidate>& candidates,
             steps = 1;
         }
         result.second_alpha = alpha - static_cast<float>(steps) * parameter.adjust_step;
-        accepted.clear();
-        rejected.clear();
-        // The normalized original list is exactly sorted(A+B) followed by unscanned tail T.
-        scan(candidates, result.second_alpha, rejected);
-        if (accepted.size() < target_degree) {
-            Vector<PruningCandidate> remaining(allocator);
-            scan(rejected, alpha, remaining);
+        // With zero tightening steps the first pass already has the same result.
+        if (steps != 0) {
+            accepted.clear();
+            rejected.clear();
+            // The normalized original list is exactly sorted(A+B) followed by unscanned tail T.
+            scan(candidates, result.second_alpha, rejected);
+            if (accepted.size() < target_degree) {
+                Vector<PruningCandidate> remaining(allocator);
+                scan(rejected, alpha, remaining);
+            }
         }
     }
     std::sort(accepted.begin(), accepted.end());

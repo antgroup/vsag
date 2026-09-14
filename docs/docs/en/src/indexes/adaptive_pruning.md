@@ -56,6 +56,8 @@ Return the accepted list sorted by `(distance, internal ID)`. Empty inputs, self
 
 Configuration requires finite `alpha0` and `delta`, `delta >= 0`, `alpha0 - 2*delta > 0`, and finite `alpha0 + 3*delta`. The GIST reference configuration `alpha0=1.06, delta=0.06` yields relaxed values 1.12/1.18/1.24 and tightened values 1.06/1.00/0.94. These are explicit experiment settings, not dimension-specific defaults.
 
+When the first pass rejects at least `5K` candidates, the tightening step count is zero. Keep the first-pass result without repeating the same-alpha scan. This differs from `delta=0`: the configured step may be positive, but the feedback rule chooses no tightening.
+
 ## Worked example
 
 Use squared L2, center `u=(0,0)`, candidates `a=(1,0)`, `b=(0.5,1)`, `c=(-2,0)`, `K=2`, `alpha0=1.06`, and `delta=0.06`.
