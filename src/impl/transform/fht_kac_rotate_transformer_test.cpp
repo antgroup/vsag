@@ -25,26 +25,6 @@
 using namespace vsag;
 
 void
-TestRandomness(FhtKacRotator& rom1, FhtKacRotator& rom2, int dim) {
-    size_t flip_len = (dim + 7) / FhtKacRotator::BYTE_LEN * FhtKacRotator::ROUND;
-    std::vector<uint8_t> mat1(flip_len);
-    rom1.CopyFlip(mat1.data());
-
-    std::vector<uint8_t> mat2(flip_len);
-    rom2.CopyFlip(mat2.data());
-
-    uint64_t count_same = 0, count_non_zero = 0;
-    for (uint64_t i = 0; i < flip_len; i++) {
-        if (mat1[i] == mat2[i]) {
-            count_same++;
-        }
-        count_non_zero++;
-    }
-    uint64_t threshold = std::max(1UL, static_cast<uint64_t>(0.1 * count_non_zero));
-    REQUIRE(count_same <= threshold);
-}
-
-void
 TestSame(FhtKacRotator& rom1, FhtKacRotator& rom2, uint64_t dim) {
     size_t flip_len = (dim + 7) / FhtKacRotator::BYTE_LEN * FhtKacRotator::ROUND;
     std::vector<uint8_t> mat1(flip_len);
@@ -89,11 +69,8 @@ TEST_CASE("Basic Hadamard Test", "[ut][FhtKacRotator]") {
     for (auto dim : dims) {
         INFO(fmt::format("dim = {}", dim));
         FhtKacRotator rom(allocator.get(), dim);
-        FhtKacRotator rom_alter(allocator.get(), dim);
         rom.Train();
-        rom_alter.Train();
         TestTransform(rom, dim);
-        TestRandomness(rom, rom_alter, dim);
     }
 }
 
@@ -110,5 +87,69 @@ TEST_CASE("Hadamard Matrix Serialize / Deserialize Test", "[ut][FhtKacRotator]")
         test_serializion(rom1, rom2);
 
         TestSame(rom1, rom2, dim);
+    }
+}
+
+TEST_CASE("Hadamard transform matches dense reference", "[ut][FhtKacRotator]") {
+    constexpr uint64_t dim = 32;
+    constexpr uint64_t flip_offset = dim / FhtKacRotator::BYTE_LEN;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    FhtKacRotator rom(allocator.get(), dim);
+    std::vector<uint8_t> flips(flip_offset * FhtKacRotator::ROUND);
+
+    SECTION("trained masks") {
+        rom.Train();
+        rom.CopyFlip(flips.data());
+    }
+    SECTION("two matching bytes are valid") {
+        // Independent uniform masks can share bytes: for 16 bytes, P(2+ matches)
+        // is about 0.18%. Such collisions do not violate the transform contract.
+        std::vector<uint8_t> other_flips(flips.size());
+        uint64_t matching_bytes = 0;
+        for (uint64_t i = 0; i < flips.size(); ++i) {
+            other_flips[i] = static_cast<uint8_t>(17 * i);
+            flips[i] = i < 2 ? other_flips[i] : static_cast<uint8_t>(other_flips[i] ^ 0xa5);
+            matching_bytes += flips[i] == other_flips[i];
+        }
+        REQUIRE(matching_bytes == 2);
+        std::stringstream stream;
+        IOStreamWriter writer(stream);
+        StreamWriter::WriteVector(writer, flips);
+        IOStreamReader reader(stream);
+        rom.Deserialize(reader);
+    }
+
+    // Check every basis vector against H[r,c] = (-1)^popcount(r & c) / sqrt(dim).
+    // This oracle uses dense multiplication, independently of the SIMD butterflies.
+    // It detects missing sign flips, incorrect round order, scaling, and a no-op
+    // transform, which norm preservation and a round trip alone cannot detect.
+    for (uint64_t basis = 0; basis < dim; ++basis) {
+        CAPTURE(basis);
+        std::vector<float> input(dim, 0.0F), actual(dim), inverse(dim);
+        input[basis] = 1.0F;
+        std::vector<double> expected(input.begin(), input.end());
+        for (int round = 0; round < FhtKacRotator::ROUND; ++round) {
+            std::vector<double> next(dim, 0.0);
+            for (uint64_t row = 0; row < dim; ++row) {
+                for (uint64_t col = 0; col < dim; ++col) {
+                    int sign = 1;
+                    for (uint64_t bits = row & col; bits != 0; bits &= bits - 1) {
+                        sign = -sign;
+                    }
+                    if ((flips[round * flip_offset + col / 8] & (1U << (col % 8))) != 0) {
+                        sign = -sign;
+                    }
+                    next[row] += sign * expected[col] / std::sqrt(static_cast<double>(dim));
+                }
+            }
+            expected = std::move(next);
+        }
+        rom.Transform(input.data(), actual.data());
+        rom.InverseTransform(actual.data(), inverse.data());
+        for (uint64_t row = 0; row < dim; ++row) {
+            CAPTURE(row);
+            REQUIRE(std::fabs(actual[row] - expected[row]) < 1e-5);
+            REQUIRE(std::fabs(inverse[row] - input[row]) < 1e-5);
+        }
     }
 }
