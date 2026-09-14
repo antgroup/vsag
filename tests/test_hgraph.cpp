@@ -21,6 +21,7 @@
 #include <cstring>
 #include <future>
 #include <limits>
+#include <mutex>
 #include <random>
 #include <sstream>
 #include <thread>
@@ -1500,6 +1501,146 @@ TestHGraphFactor(const fixtures::HGraphTestIndexPtr& test_index,
                 vsag::Options::Instance().set_block_size_limit(origin_size);
             }
         }
+    }
+}
+
+TEST_CASE("HGraph external precise storage builds and searches", "[ft][hgraph][external_storage]") {
+    struct Store {
+        std::mutex mutex;
+        std::vector<uint8_t> bytes;
+        uint64_t reads{0};
+        uint64_t writes{0};
+        uint64_t resizes{0};
+    };
+    auto store = std::make_shared<Store>();
+    auto storage = vsag::Factory::CreateExternalStorage(
+        [store](uint64_t offset, uint64_t len, void* destination) {
+            std::lock_guard<std::mutex> lock(store->mutex);
+            if (offset > store->bytes.size() or len > store->bytes.size() - offset) {
+                throw std::runtime_error("read out of bounds");
+            }
+            if (len > 0) {
+                std::memcpy(destination, store->bytes.data() + offset, len);
+            }
+            ++store->reads;
+        },
+        [store](uint64_t offset, uint64_t len, const void* source) {
+            std::lock_guard<std::mutex> lock(store->mutex);
+            if (offset > UINT64_MAX - len) {
+                throw std::runtime_error("write overflow");
+            }
+            if (offset + len > store->bytes.size()) {
+                store->bytes.resize(offset + len);
+            }
+            if (len > 0) {
+                std::memcpy(store->bytes.data() + offset, source, len);
+            }
+            ++store->writes;
+        },
+        [store](uint64_t size) {
+            std::lock_guard<std::mutex> lock(store->mutex);
+            store->bytes.resize(size);
+            ++store->resizes;
+        },
+        0);
+    vsag::ExternalStorageSet storages;
+    storages.Set("hgraph_precise", storage.reader, storage.writer);
+
+    constexpr int64_t dim = 16;
+    constexpr int64_t count = 256;
+    std::vector<int64_t> ids(count);
+    std::vector<float> vectors(count * dim);
+    std::mt19937 generator(424242);
+    std::uniform_real_distribution<float> distribution(-1.0F, 1.0F);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = 1000 + i;
+        for (int64_t j = 0; j < dim; ++j) {
+            vectors[i * dim + j] = distribution(generator);
+        }
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+
+    const std::string external_param = R"({
+        "dtype":"float32","metric_type":"l2","dim":16,
+        "index_param":{"use_reorder":true,"build_by_base":false,
+        "base_quantization_type":"sq8","base_io_type":"block_memory_io",
+        "precise_quantization_type":"fp32","precise_io_type":"external_storage_io",
+        "precise_external_storage":"hgraph_precise","graph_io_type":"block_memory_io",
+        "graph_type":"odescent","max_degree":32,"ef_construction":100,
+        "build_thread_count":1,"graph_iter_turn":5}}
+    )";
+    auto external = vsag::Factory::CreateIndex("hgraph", external_param, storages);
+    REQUIRE(external.has_value());
+    REQUIRE(external.value()->Build(base).has_value());
+    REQUIRE(store->writes > 0);
+    REQUIRE(store->resizes > 0);
+    REQUIRE(store->reads > 0);
+    REQUIRE_FALSE(store->bytes.empty());
+
+    const std::string memory_param = R"({
+        "dtype":"float32","metric_type":"l2","dim":16,
+        "index_param":{"use_reorder":true,"build_by_base":false,
+        "base_quantization_type":"sq8","base_io_type":"block_memory_io",
+        "precise_quantization_type":"fp32","precise_io_type":"block_memory_io",
+        "graph_io_type":"block_memory_io","graph_type":"odescent","max_degree":32,
+        "ef_construction":100,"build_thread_count":1,"graph_iter_turn":5}}
+    )";
+    auto baseline = vsag::Factory::CreateIndex("hgraph", memory_param).value();
+    REQUIRE(baseline->Build(base).has_value());
+
+    std::vector<float> query_vector(dim);
+    for (int64_t j = 0; j < dim; ++j) {
+        query_vector[j] = vectors[37 * dim + j] + static_cast<float>(j + 1) * 0.0001F;
+    }
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
+    const auto reads_before_search = store->reads;
+    auto actual = external.value()->KnnSearch(query, 10, R"({"hgraph":{"ef_search":200}})");
+    auto expected = baseline->KnnSearch(query, 10, R"({"hgraph":{"ef_search":200}})");
+    REQUIRE(actual.has_value());
+    REQUIRE(expected.has_value());
+    REQUIRE(store->reads > reads_before_search);
+    REQUIRE(actual.value()->GetDim() == 10);
+    REQUIRE(expected.value()->GetDim() == 10);
+    for (int64_t i = 0; i < 10; ++i) {
+        REQUIRE(actual.value()->GetIds()[i] == expected.value()->GetIds()[i]);
+        REQUIRE(std::abs(actual.value()->GetDistances()[i] - expected.value()->GetDistances()[i]) <
+                0.0001F);
+    }
+}
+
+TEST_CASE("HGraph external storage rejects missing pair", "[ft][hgraph][external_storage]") {
+    const std::string param = R"({
+        "dtype":"float32","metric_type":"l2","dim":16,
+        "index_param":{"use_reorder":true,"base_quantization_type":"sq8",
+        "precise_quantization_type":"fp32","precise_io_type":"external_storage_io",
+        "precise_external_storage":"missing"}}
+    )";
+    vsag::ExternalStorageSet storages;
+    REQUIRE_FALSE(vsag::Factory::CreateIndex("hgraph", param, storages).has_value());
+}
+
+TEST_CASE("HGraph external storage rejects invalid binding names",
+          "[ft][hgraph][external_storage]") {
+    for (const auto* name : {"null", "42", "false", "[]", "{}", "\"\""}) {
+        const std::string param = std::string(R"({
+            "dtype":"float32","metric_type":"l2","dim":16,
+            "index_param":{"use_reorder":true,"base_quantization_type":"sq8",
+            "precise_quantization_type":"fp32","precise_io_type":"external_storage_io",
+            "precise_external_storage":)") +
+                                  name + "}}";
+        vsag::ExternalStorageSet storages;
+        auto result = vsag::Factory::CreateIndex("hgraph", param, storages);
+        REQUIRE_FALSE(result.has_value());
+        const auto* expected = std::string(name) == "\"\""
+                                   ? "precise_external_storage must be non-empty"
+                                   : "precise_external_storage must be a string";
+        REQUIRE(result.error().message.find(expected) != std::string::npos);
     }
 }
 

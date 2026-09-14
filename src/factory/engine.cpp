@@ -48,10 +48,19 @@ Engine::Shutdown() {
 
 tl::expected<std::shared_ptr<Index>, Error>
 Engine::CreateIndex(const std::string& origin_name, const std::string& parameters) {
+    return CreateIndex(origin_name, parameters, ExternalStorageSet{});
+}
+
+tl::expected<std::shared_ptr<Index>, Error>
+Engine::CreateIndex(const std::string& origin_name,
+                    const std::string& parameters,
+                    const ExternalStorageSet& external_storages) {
     try {
         register_all_index_creators();
         auto parsed_params = JsonType::Parse(parameters);
         auto index_common_params = IndexCommonParam::CheckAndCreate(parsed_params, this->resource_);
+        index_common_params.external_storages_ =
+            std::make_shared<ExternalStorageSet>(external_storages);
         return create_registered_index(origin_name, parsed_params, index_common_params);
     } catch (const std::invalid_argument& e) {
         LOG_ERROR_AND_RETURNS(

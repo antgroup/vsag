@@ -173,6 +173,9 @@ MakeFlattenDataCellForMetric(const FlattenInterfaceParamPtr& param,
     if (io_type == IO_TYPE_VALUE_READER_IO) {
         return MakeFlattenDataCellInstance<metric, ReaderIO>(param, common_param);
     }
+    if (io_type == IO_TYPE_VALUE_EXTERNAL_STORAGE_IO) {
+        return MakeFlattenDataCellInstance<metric, ExternalStorageIO>(param, common_param);
+    }
     return nullptr;
 }
 

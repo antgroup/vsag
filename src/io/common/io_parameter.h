@@ -33,6 +33,7 @@ enum class IOKind : uint8_t {
     ASYNC,
     URING,
     READER,
+    EXTERNAL_STORAGE,
 };
 
 /**

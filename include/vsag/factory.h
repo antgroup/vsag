@@ -22,12 +22,15 @@
 #include "vsag/allocator.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
+#include "vsag/readerset.h"
 
 namespace vsag {
 
 class Index;
 class Reader;
 using ReadFunc = std::function<void(uint64_t, uint64_t, void*)>;
+using WriteFunc = std::function<void(uint64_t, uint64_t, const void*)>;
+using ResizeFunc = std::function<void(uint64_t)>;
 
 class Factory {
 public:
@@ -49,6 +52,12 @@ public:
                 const std::string& parameters,
                 Allocator* allocator = nullptr);
 
+    static tl::expected<std::shared_ptr<Index>, Error>
+    CreateIndex(const std::string& name,
+                const std::string& parameters,
+                const ExternalStorageSet& external_storages,
+                Allocator* allocator = nullptr);
+
     /**
      * @brief Creates a local file reader for the specified file.
      *
@@ -68,6 +77,26 @@ public:
 
     static std::shared_ptr<Reader>
     CreateReadFuncReader(ReadFunc read_func, uint64_t base_offset, uint64_t size);
+
+    /**
+     * @brief Creates a paired Reader and Writer backed by synchronous callbacks.
+     *
+     * The adapter invokes read/write/resize storage callbacks while holding its internal mutex.
+     * Those callbacks must not re-enter the returned Reader or Writer, including Reader::Size().
+     * AsyncRead's completion instead runs synchronously on the calling thread after the mutex is
+     * released and may re-enter the adapter. Completion exceptions propagate to that caller without
+     * a second completion; worker-thread callers must catch them or use non-throwing completions.
+     * A zero-length write beyond the current size grows storage through resize_func so the paired
+     * Reader size and backing extent remain consistent. Growth contents are defined by resize_func;
+     * the adapter does not guarantee zero-filled bytes. A successful resize callback must expose
+     * exactly the requested logical extent (physical allocation may be larger). Callbacks must
+     * throw on failure; the adapter publishes a new size only after the callback succeeds.
+     */
+    static ExternalStorage
+    CreateExternalStorage(ReadFunc read_func,
+                          WriteFunc write_func,
+                          ResizeFunc resize_func,
+                          uint64_t initial_size);
 
 private:
     Factory() = default;

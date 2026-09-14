@@ -1,5 +1,24 @@
 # 磁盘索引最佳实践
 
+## 实验性回调存储构建（POC）
+
+本 POC 支持 HGraph：SQ8 base 编码及图使用 `block_memory_io`，FP32 precise 编码使用 `external_storage_io`。现有只读 `Reader` / `ReaderSet` 加载保持不变，VSAG 不实现具体远端存储协议。
+
+```cpp
+// 用户回调访问同一份独立的逻辑字节存储。
+auto pair = vsag::Factory::CreateExternalStorage(read_func, write_func, resize_func, 0);
+vsag::ExternalStorageSet storages;
+storages.Set("precise", pair.reader, pair.writer);
+auto result = vsag::Factory::CreateIndex("hgraph", parameters, storages);
+// 检查 result，随后正常调用 Build 和 KnnSearch。
+```
+
+`index_param` 必须包含 `use_reorder: true`、`base_quantization_type: "sq8"`、`precise_quantization_type: "fp32"`、`precise_io_type: "external_storage_io"` 和 `precise_external_storage: "precise"`。base 和图保持 `block_memory_io`。配对在构造阶段扩容前注入，写回调发生在 Build 中，不只是 Serialize 时。
+
+`read_func(offset, length, destination)`、`write_func(offset, length, source)` 和 `resize_func(size)` 均为同步回调。写成功后必须立即可读，返回前消费完源缓冲区；超出原范围的写入必须扩展底层存储。Resize 保留未截断的前缀，并使结果范围可读。适配器仅在写入或调整大小成功后更新大小；`initial_size` 必须与既有存储一致。失败必须抛异常。适配器持有互斥锁执行回调，回调不得重入同一个适配器；部分写失败不提供回滚。索引使用期间不得绕过配对修改底层数据。
+
+名称必须非空且唯一，Reader/Writer 均不得为空。每个独立可写 IO 实例需要独立的底层字节空间；换个名称注册同一存储不产生隔离，不要让多个独立索引复用同一可写配对。本 POC 不支持外置 graph/base/bucket，不提供异步写、崩溃持久化、事务或经过验证的可写存储恢复。后端内存估算不计用户回调底层存储的驻留内存。尚未测量真实网络构建性能；ODescent 可能发起大量小读取，因此这里只证明功能可行，不是性能推荐。
+
 ![磁盘版 HGraph：图结构与紧凑 base 编码留在内存中用于遍历，更高精度的 precise 副本存于磁盘，仅在重排阶段为 ef_search 入围候选读取](../figures/resources/disk-index-overview.svg)
 
 当数据规模增长到内存放不下全量向量时，把最冷、最大的那部分索引下沉到 SSD，是控制成本最直接的

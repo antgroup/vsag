@@ -29,6 +29,7 @@ set (IO_SRC
         mmap_io/mmap_io_parameter.cpp
         reader_io/reader_io.cpp
         reader_io/reader_io_parameter.cpp
+        external_storage_io/external_storage_io.cpp
         read_cache/page_cache.cpp
         read_cache/lru_page_cache.cpp
 )

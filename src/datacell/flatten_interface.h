@@ -28,6 +28,7 @@
 #include "hash_types.h"
 #include "impl/runtime_parameter.h"
 #include "index_common_param_fwd.h"
+#include "io/external_storage_io/external_storage_io.h"
 #include "io/reader_io/reader_io.h"
 #include "quantization/computer.h"
 #include "query_context.h"
