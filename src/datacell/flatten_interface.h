@@ -29,6 +29,7 @@
 #include "impl/runtime_parameter.h"
 #include "index_common_param_fwd.h"
 #include "io/reader_io/reader_io.h"
+#include "io/user_defined_io/user_defined_io.h"
 #include "quantization/computer.h"
 #include "query_context.h"
 #include "storage/stream_reader.h"

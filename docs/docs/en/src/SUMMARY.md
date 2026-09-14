@@ -64,6 +64,7 @@
 - [Per-Search Allocator](advanced/search_allocator.md)
 - [Index Introspection](advanced/introspection.md)
 - [Extensibility](advanced/extensibility.md)
+- [User-Defined IO](advanced/user_defined_io.md)
 - [Graph Enhancement](advanced/enhance_graph.md)
 - [Extra Info](advanced/extra_info.md)
 - [Index Lifecycle Management](advanced/index_lifecycle.md)
