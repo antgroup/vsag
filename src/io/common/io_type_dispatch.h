@@ -33,6 +33,7 @@ struct IOTypeTag {
     using Type = IO;
 };
 
+// NOLINTBEGIN(readability-identifier-naming)
 template <typename Visitor>
 decltype(auto)
 VisitIOKind(IOKind kind, Visitor&& visitor) {
@@ -51,6 +52,10 @@ VisitIOKind(IOKind kind, Visitor&& visitor) {
             return std::forward<Visitor>(visitor)(IOTypeTag<UringIO>{});
         case IOKind::READER:
             return std::forward<Visitor>(visitor)(IOTypeTag<ReaderIO>{});
+        // Intentionally excluded: user defined IO backend is constructed by the precise FP32 factory
+        // path only, not by generic visitors that instantiate all graph/quantizer combinations.
+        case IOKind::USER_DEFINED:
+            [[fallthrough]];
         case IOKind::UNKNOWN:
             return std::forward<Visitor>(visitor)(IOTypeTag<void>{});
     }
@@ -58,3 +63,4 @@ VisitIOKind(IOKind kind, Visitor&& visitor) {
 }
 
 }  // namespace vsag
+// NOLINTEND(readability-identifier-naming)

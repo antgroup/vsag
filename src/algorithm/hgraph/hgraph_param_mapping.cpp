@@ -70,6 +70,27 @@ build_default_hgraph_inner_param(const JsonType& external_json) {
     const auto graph_io_type = external_json.Contains(HGRAPH_GRAPH_IO_TYPE)
                                    ? external_json[HGRAPH_GRAPH_IO_TYPE].GetString()
                                    : std::string(IO_TYPE_VALUE_BLOCK_MEMORY_IO);
+    const bool uses_user_defined_io = precise_io_type == IO_TYPE_VALUE_USER_DEFINED_IO;
+    CHECK_ARGUMENT(uses_user_defined_io == external_json.Contains(HGRAPH_PRECISE_USER_DEFINED_IO),
+                   "precise_user_defined_io is required exactly when precise_io_type is "
+                   "user_defined_io");
+    if (uses_user_defined_io) {
+        CHECK_ARGUMENT(external_json[HGRAPH_PRECISE_USER_DEFINED_IO].IsString(),
+                       "precise_user_defined_io must be a string");
+        CHECK_ARGUMENT(not external_json[HGRAPH_PRECISE_USER_DEFINED_IO].GetString().empty(),
+                       "precise_user_defined_io must be non-empty");
+        CHECK_ARGUMENT(external_json.Contains(HGRAPH_USE_REORDER) &&
+                           external_json[HGRAPH_USE_REORDER].IsBool() &&
+                           external_json[HGRAPH_USE_REORDER].GetBool(),
+                       "user_defined_io requires use_reorder=true");
+        CHECK_ARGUMENT(precise_quantization_type == QUANTIZATION_TYPE_VALUE_FP32,
+                       "user_defined_io only supports precise fp32 codes");
+        CHECK_ARGUMENT(base_quantization_type == QUANTIZATION_TYPE_VALUE_SQ8,
+                       "user_defined_io POC requires base sq8 codes");
+        CHECK_ARGUMENT(base_io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO &&
+                           graph_io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO,
+                       "user_defined_io POC requires in-memory base and graph storage");
+    }
     const auto tq_chain = external_json.Contains(INDEX_TQ_CHAIN)
                               ? external_json[INDEX_TQ_CHAIN].GetString()
                               : std::string();
@@ -104,6 +125,10 @@ build_default_hgraph_inner_param(const JsonType& external_json) {
         build_default_flatten_param(base_quantization_type, base_io_type, tq_chain));
     json[PRECISE_CODES_KEY].SetJson(
         build_default_flatten_param(precise_quantization_type, precise_io_type));
+    if (uses_user_defined_io) {
+        json[PRECISE_CODES_KEY][IO_PARAMS_KEY][IO_USER_DEFINED_IO_KEY].SetJson(
+            external_json[HGRAPH_PRECISE_USER_DEFINED_IO]);
+    }
     json[RAW_VECTOR_KEY].SetJson(build_default_flatten_param(
         QUANTIZATION_TYPE_VALUE_FP32, IO_TYPE_VALUE_BLOCK_MEMORY_IO, "", true));
     json[STORE_RAW_VECTOR_KEY].SetBool(false);
@@ -183,6 +208,8 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             inner_json[BASE_CODES_KEY][SUPPLEMENT_IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(value);
         } else if (key == HGRAPH_PRECISE_IO_TYPE) {
             inner_json[PRECISE_CODES_KEY][IO_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == HGRAPH_PRECISE_USER_DEFINED_IO) {
+            inner_json[PRECISE_CODES_KEY][IO_PARAMS_KEY][IO_USER_DEFINED_IO_KEY].SetJson(value);
         } else if (key == HGRAPH_BASE_FILE_PATH) {
             inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(value);
         } else if (key == HGRAPH_BASE_DIRECT_READ) {

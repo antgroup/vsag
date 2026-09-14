@@ -1,6 +1,10 @@
 # 磁盘索引最佳实践
 
-![磁盘版 HGraph：图结构与紧凑 base 编码留在内存中用于遍历，更高精度的 precise 副本存于磁盘，仅在重排阶段为 ef_search 入围候选读取](../figures/resources/disk-index-overview.svg)
+## 用户自定义 IO 回调
+
+将 `precise_io_type` 设置为 `"user_defined_io"` 并通过 `Factory::CreateUserDefinedIO`
+注册回调。详细的回调约定、配置表和可运行示例请参阅
+**[用户自定义 IO](../advanced/user_defined_io.md)**。
 
 当数据规模增长到内存放不下全量向量时，把最冷、最大的那部分索引下沉到 SSD，是控制成本最直接的
 手段。VSAG 让索引的每个部分各自选择存储后端，从而实现热数据留内存、冷数据从磁盘读取。本文介绍

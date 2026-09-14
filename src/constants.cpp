@@ -176,6 +176,7 @@ const char* const HGRAPH_PRECISE_CACHE_TOTAL_SIZE = "precise_cache_total_size";
 const char* const HGRAPH_RAW_VECTOR_ENABLE_READ_CACHE = "raw_vector_enable_read_cache";
 const char* const HGRAPH_RAW_VECTOR_CACHE_TOTAL_SIZE = "raw_vector_cache_total_size";
 const char* const HGRAPH_PRECISE_IO_TYPE = "precise_io_type";
+const char* const HGRAPH_PRECISE_USER_DEFINED_IO = "precise_user_defined_io";
 const char* const HGRAPH_PRECISE_FILE_PATH = "precise_file_path";
 const char* const HGRAPH_PRECISE_DIRECT_READ = "precise_direct_read";
 const char* const HGRAPH_PARAMETER_EF_RUNTIME = "ef_search";

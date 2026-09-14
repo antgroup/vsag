@@ -64,6 +64,7 @@
 - [搜索路径 Allocator](advanced/search_allocator.md)
 - [索引自省](advanced/introspection.md)
 - [可扩展性](advanced/extensibility.md)
+- [用户自定义 IO](advanced/user_defined_io.md)
 - [图索引增强](advanced/enhance_graph.md)
 - [Extra Info（附加信息）](advanced/extra_info.md)
 - [索引生命周期管理](advanced/index_lifecycle.md)

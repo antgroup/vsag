@@ -182,3 +182,6 @@ target_link_libraries(114_index_simq vsag)
 
 add_executable(330_feature_timeout_search 330_feature_timeout_search.cpp)
 target_link_libraries(330_feature_timeout_search vsag)
+
+add_executable(200_user_defined_io 200_user_defined_io.cpp)
+target_link_libraries(200_user_defined_io vsag)

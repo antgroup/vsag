@@ -26,6 +26,7 @@
 #include "io/mmap_io/mmap_io_parameter.h"
 #include "io/reader_io/reader_io_parameter.h"
 #include "io/uring_io/uring_io_parameter.h"
+#include "io/user_defined_io/user_defined_io_parameter.h"
 
 namespace vsag {
 
@@ -86,6 +87,10 @@ IOParameter::GetIOParameterByJson(const JsonType& json) {
                 break;
             case IOKind::READER:
                 io_ptr = std::make_shared<ReaderIOParameter>();
+                io_ptr->FromJson(json);
+                break;
+            case IOKind::USER_DEFINED:
+                io_ptr = std::make_shared<UserDefinedIOParameter>();
                 io_ptr->FromJson(json);
                 break;
             case IOKind::UNKNOWN:
@@ -152,6 +157,9 @@ IOParameter::KindFromName(std::string_view name) {
     }
     if (name == IO_TYPE_VALUE_READER_IO) {
         return IOKind::READER;
+    }
+    if (name == IO_TYPE_VALUE_USER_DEFINED_IO) {
+        return IOKind::USER_DEFINED;
     }
     return IOKind::UNKNOWN;
 }
