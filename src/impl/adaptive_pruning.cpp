@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include "hash_types.h"
 
@@ -160,12 +161,14 @@ select_edges_adaptive(Vector<PruningCandidate>& candidates,
         }
         result.second_alpha = alpha - static_cast<float>(steps) * parameter.adjust_step;
         accepted.clear();
-        rejected.clear();
+        // Reuse the allocation while separating first-pass rejects from tightened-pass failures.
+        auto tightened_rejects = std::move(rejected);
+        tightened_rejects.clear();
         // The normalized original list is exactly sorted(A+B) followed by unscanned tail T.
-        scan(candidates, result.second_alpha, rejected);
+        scan(candidates, result.second_alpha, tightened_rejects);
         if (accepted.size() < target_degree) {
             Vector<PruningCandidate> remaining(allocator);
-            scan(rejected, alpha, remaining);
+            scan(tightened_rejects, alpha, remaining);
         }
     }
     std::sort(accepted.begin(), accepted.end());

@@ -118,7 +118,7 @@ TEST_CASE("Adaptive pruning revisits rejects and preserves tail", "[ut][adaptive
         CHECK(result[0].second == 1);
         CHECK(result[1].second == 3);
     }
-    SECTION("Tightening falls back to baseline without unconditional fill") {
+    SECTION("Baseline fallback scans tightened rejects rather than first-pass rejects") {
         candidates = {{1.0F, 1}, {2.0F, 2}};
         auto result = select_edges_adaptive(
             candidates,
@@ -131,6 +131,11 @@ TEST_CASE("Adaptive pruning revisits rejects and preserves tail", "[ut][adaptive
             &stats);
         REQUIRE(result.size() == 2);
         CHECK(result[1].second == 2);
+        // The first pass accepts both candidates. Only the tightened pass rejects ID 2.
+        CHECK(stats.initial_rejected == 0);
+        CHECK(stats.initial_accepted == 2);
+        CHECK(stats.branch == AdaptivePruningBranch::TIGHTEN);
+        CHECK(stats.distance_calls == 3);
     }
 }
 

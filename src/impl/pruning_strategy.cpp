@@ -166,7 +166,6 @@ mutually_connect_new_element(InnerIdType cur_c,
                              Allocator* allocator,
                              float alpha,
                              const AdaptivePruningParameter* pruning) {
-    PairwiseDistanceComputer pairwise_distance(distance_provider, allocator);
     const uint64_t max_size = graph->MaximumDegree();
     if (pruning != nullptr && pruning->enabled) {
         select_adaptive_heap(
@@ -195,6 +194,8 @@ mutually_connect_new_element(InnerIdType cur_c,
 
     graph->InsertNeighborsById(cur_c, selected_neighbors);
 
+    // Used by full reverse lists below, including when forward selection is adaptive.
+    PairwiseDistanceComputer pairwise_distance(distance_provider, allocator);
     for (auto selected_neighbor : selected_neighbors) {
         if (selected_neighbor == cur_c) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
