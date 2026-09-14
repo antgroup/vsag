@@ -397,3 +397,31 @@ TEST_CASE("SINDIV2 DMQ parameter validation and compatibility", "[ut][SINDIV2Par
         parameter->FromJson(file_rerank_json),
         Catch::Matchers::ContainsSubstring("rerank_type=dmq8 only supports block_memory_io"));
 }
+
+TEST_CASE("SINDIV2 FP16 rerank parameter validation", "[ut][SINDIV2Parameter]") {
+    const auto fp16_json = JsonType::Parse(R"({
+        "term_id_limit": 30109,
+        "window_size": 60000,
+        "use_reorder": true,
+        "rerank_type": "fp16",
+        "rerank_layout": 8,
+        "term_io": {"type": "memory_io"},
+        "rerank_io": {"type": "memory_io"}
+    })");
+
+    auto parameter = std::make_shared<SINDIV2Parameter>();
+    REQUIRE_NOTHROW(parameter->FromJson(fp16_json));
+    REQUIRE(parameter->rerank_type == SPARSE_RERANK_TYPE_FP16);
+    REQUIRE(parameter->rerank_layout == 8);
+    REQUIRE(parameter->ToJson()[SPARSE_RERANK_TYPE].GetString() == SPARSE_RERANK_TYPE_FP16);
+
+    auto restored = std::make_shared<SINDIV2Parameter>();
+    restored->FromJson(parameter->ToJson());
+    REQUIRE(parameter->CheckCompatibility(restored));
+
+    auto no_reorder = fp16_json;
+    no_reorder[USE_REORDER_KEY].SetBool(false);
+    REQUIRE_THROWS_WITH(
+        restored->FromJson(no_reorder),
+        Catch::Matchers::ContainsSubstring("rerank_type=fp16 requires use_reorder=true"));
+}
