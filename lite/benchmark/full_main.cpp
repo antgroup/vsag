@@ -112,9 +112,14 @@ microseconds(Clock::time_point start, Clock::time_point end) {
 
 double
 percentile(std::vector<double> values, double fraction) {
+    if (values.empty() or not std::isfinite(fraction) or fraction < 0.0 or fraction > 1.0) {
+        throw std::invalid_argument("invalid percentile input");
+    }
     std::sort(values.begin(), values.end());
     const auto rank =
-        static_cast<uint64_t>(std::ceil(fraction * static_cast<double>(values.size()))) - 1;
+        std::max<uint64_t>(
+            1, static_cast<uint64_t>(std::ceil(fraction * static_cast<double>(values.size())))) -
+        1;
     return values[std::min<uint64_t>(rank, values.size() - 1)];
 }
 
@@ -271,7 +276,6 @@ run(const Config& config) {
 
     std::vector<double> loaded_search_us;
     loaded_search_us.reserve(config.queries);
-    uint64_t loaded_checksum = 1469598103934665603ULL;
     for (uint64_t query_number = 0; query_number < config.queries; ++query_number) {
         const uint64_t id = (query_number * 104729ULL) % config.count;
         make_vector(id, variants[id], config.dim, config.seed, vector);
@@ -279,7 +283,6 @@ run(const Config& config) {
         auto result = search(loaded_index, query_data, config.k);
         loaded_search_us.push_back(microseconds(start, Clock::now()));
         require(same_results(result, expected[query_number]), "loaded search result changed");
-        loaded_checksum = result_checksum(result, loaded_checksum);
     }
     // Full VSAG may recompute equivalent FP32 distances with a small rounding
     // difference after serialization. IDs and ordering are checked exactly;

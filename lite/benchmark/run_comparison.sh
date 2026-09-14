@@ -65,8 +65,15 @@ run_case() {
     /usr/bin/time -v -o "${output_dir}/${implementation}-${name}.time.txt" \
         "${benchmark}" "$@" "${output_dir}/${implementation}-${name}.snapshot" \
         >"${output_dir}/${implementation}-${name}.stdout.txt"
-    tail -n 2 "${output_dir}/${implementation}-${name}.stdout.txt" \
-        >"${output_dir}/${implementation}-${name}.csv"
+    awk -F, '$1 == "implementation" && $2 == "count" {
+                if (++found != 1) exit 1
+                columns = NF; pending = 1; print; next
+            }
+            pending {
+                if (NF != columns || $1 !~ /^(full|lite)$/) exit 1
+                print; pending = 0; next
+            }
+            END { if (found != 1 || pending) exit 1 }' "${output_dir}/${implementation}-${name}.stdout.txt" >"${output_dir}/${implementation}-${name}.csv"
 }
 
 for run in {1..7}; do

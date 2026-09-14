@@ -173,9 +173,14 @@ microseconds(Clock::time_point start, Clock::time_point end) {
 
 double
 percentile(std::vector<double> values, double fraction) {
+    if (values.empty() or not std::isfinite(fraction) or fraction < 0.0 or fraction > 1.0) {
+        throw std::invalid_argument("invalid percentile input");
+    }
     std::sort(values.begin(), values.end());
     const auto rank =
-        static_cast<uint64_t>(std::ceil(fraction * static_cast<double>(values.size()))) - 1;
+        std::max<uint64_t>(
+            1, static_cast<uint64_t>(std::ceil(fraction * static_cast<double>(values.size())))) -
+        1;
     return values[std::min<uint64_t>(rank, values.size() - 1)];
 }
 

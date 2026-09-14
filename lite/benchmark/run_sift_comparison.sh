@@ -67,7 +67,15 @@ for run in {1..7}; do
             /usr/bin/time -v -o "${output_dir}/${name}.time.txt" \
                 "${benchmark}" "${dataset}/scale-${count}" "${output_dir}/${name}.snapshot" \
                 >"${output_dir}/${name}.stdout.txt" 2>"${output_dir}/${name}.stderr.txt"
-            tail -n 2 "${output_dir}/${name}.stdout.txt" >"${output_dir}/${name}.csv"
+            awk -F, '$1 == "base_count" && $2 == "query_count" {
+                if (++found != 1) exit 1
+                columns = NF; pending = 1; print; next
+            }
+            pending {
+                if (NF != columns || $1 !~ /^([0-9]+)$/) exit 1
+                print; pending = 0; next
+            }
+            END { if (found != 1 || pending) exit 1 }' "${output_dir}/${name}.stdout.txt" >"${output_dir}/${name}.csv"
         done
     done
 done
