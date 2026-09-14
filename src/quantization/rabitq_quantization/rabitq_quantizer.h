@@ -146,14 +146,6 @@ public:
         return this->is_trained_;
     }
 
-    void
-    SetCentroid(const float* centroid);
-
-    // Fused residual clusters differ only by centroid. Reuse the immutable trained transforms
-    // instead of retaining one dense dim-by-dim matrix per cluster.
-    void
-    ShareFusedModelFrom(const RaBitQuantizer& source);
-
     bool
     EncodeOneImpl(const float* data, uint8_t* codes) const;
 
@@ -199,9 +191,6 @@ public:
 
     bool
     EncodeHnswSupplement(const float* data, uint8_t* supplement_code) const;
-
-    void
-    ComputeHnswCentroidTerms(const float* transformed_query, float& g_add, float& g_error) const;
 
     bool
     ComputeHnswOneBit(

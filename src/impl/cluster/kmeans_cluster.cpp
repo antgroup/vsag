@@ -288,8 +288,12 @@ KMeansCluster::find_nearest_one_with_hgraph(const float* query,
 }
 
 Vector<int32_t>
-KMeansCluster::RunFull(
-    uint32_t k, const float* data, uint64_t count, uint32_t iterations, uint32_t seed) {
+KMeansCluster::RunFull(uint32_t k,
+                       const float* data,
+                       uint64_t count,
+                       uint32_t iterations,
+                       uint32_t seed,
+                       bool return_assignments) {
     CHECK_ARGUMENT(data != nullptr, "full KMeans requires non-empty vectors");
     CHECK_ARGUMENT(count > 0, "full KMeans requires non-empty vectors");
     CHECK_ARGUMENT(dim_ > 0, "full KMeans requires non-empty vectors");
@@ -405,6 +409,9 @@ KMeansCluster::RunFull(
                 }
             }
         });
+    }
+    if (not return_assignments) {
+        return Vector<int32_t>(allocator_);
     }
     parallel_blocks(count, 1024, assign);
     return labels;

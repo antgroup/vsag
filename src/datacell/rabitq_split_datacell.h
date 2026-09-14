@@ -270,8 +270,6 @@ public:
                                  const IndexCommonParam& common_param)
         : common_param_(common_param), allocator_(common_param.allocator_.get()) {
         this->quantizer_ = std::make_shared<QuantizerT>(quantization_param, common_param);
-        this->quantization_param_ =
-            std::dynamic_pointer_cast<RaBitQuantizerParameter>(quantization_param);
         if (not this->bottom_quantizer().SupportSplitCodeStorage()) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                 "rabitq split data cell requires rabitq_version=split, "
@@ -1213,14 +1211,12 @@ public:
         CHECK_ARGUMENT(cluster_count > 0 and cluster_count <= count and
                            cluster_count <= std::numeric_limits<int32_t>::max(),
                        "fused RaBitQ requires 1 <= cluster count <= training count and INT32_MAX");
-        CHECK_ARGUMENT(this->quantization_param_ != nullptr,
-                       "fused RaBitQ quantizer parameter is unavailable");
         CHECK_ARGUMENT(this->AreFusedVectorsFinite(data, count),
                        "fused RaBitQ training data must contain only finite values");
 
         KMeansCluster kmeans(
             static_cast<int32_t>(common_param_.dim_), allocator_, common_param_.thread_pool_);
-        kmeans.RunFull(cluster_count, data, count, iterations);
+        kmeans.RunFull(cluster_count, data, count, iterations, 0x52425131U, false);
         const auto values = static_cast<uint64_t>(cluster_count) * common_param_.dim_;
         fused_centroids_.assign(kmeans.k_centroids_, kmeans.k_centroids_ + values);
         this->PrepareFusedCenters();
@@ -1494,8 +1490,6 @@ public:
     void
     ImportFusedCodec(const std::string& serialized) override {
         CHECK_ARGUMENT(not serialized.empty(), "fused RaBitQ codec payload is empty");
-        CHECK_ARGUMENT(this->quantization_param_ != nullptr,
-                       "fused RaBitQ quantizer parameter is unavailable");
         CHECK_ARGUMENT(serialized.size() >= K_FUSED_CODEC_HEADER_SIZE,
                        "truncated fused codec header");
         std::stringstream input(serialized);
@@ -1790,7 +1784,6 @@ public:
 
 public:
     IndexCommonParam common_param_;
-    RaBitQuantizerParamPtr quantization_param_{nullptr};
     std::shared_ptr<QuantizerT> quantizer_{nullptr};
     std::vector<float> fused_centroids_;
     std::vector<float> fused_rotated_centroids_;

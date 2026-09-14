@@ -260,6 +260,32 @@ TEST_CASE("Full KMeans supports ten thousand centers without approximate routing
     }
 }
 
+TEST_CASE("Full KMeans centers-only mode skips the final assignment tasks",
+          "[ut][KMeansCluster][fused_full]") {
+    constexpr uint64_t count = 2050;
+    constexpr uint32_t dim = 3;
+    const uint32_t k = GENERATE(1, 7);
+    const uint32_t iterations = GENERATE(1, 3);
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto pool = std::make_shared<CountingKMeansPool>(2);
+    auto safe_pool = std::make_shared<vsag::SafeThreadPool>(pool);
+    vsag::KMeansCluster cluster(dim, allocator.get(), safe_pool);
+    std::vector<float> data(count * dim);
+    for (uint64_t i = 0; i < data.size(); ++i) {
+        data[i] = static_cast<float>((i * 101) % 997) / 997.0F;
+    }
+    const auto labels = cluster.RunFull(k, data.data(), count, iterations);
+    REQUIRE(labels.size() == count);
+    const std::vector<float> centers(cluster.k_centroids_, cluster.k_centroids_ + k * dim);
+    const auto tasks_with_assignments = pool->submitted;
+    pool->submitted = 0;
+    REQUIRE(cluster.RunFull(k, data.data(), count, iterations, 0x52425131U, false).empty());
+    REQUIRE(std::equal(centers.begin(), centers.end(), cluster.k_centroids_));
+    // This input uses three 1024-row assignment blocks. Initialization and Lloyd updates
+    // are unchanged; only the final prediction pass is omitted.
+    REQUIRE(tasks_with_assignments == pool->submitted + 3);
+}
+
 TEST_CASE("Full KMeans bounds task submissions for large inputs",
           "[ut][KMeansCluster][fused_full]") {
     constexpr uint64_t count = 1000001;

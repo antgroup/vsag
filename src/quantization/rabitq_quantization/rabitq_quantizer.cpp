@@ -288,32 +288,6 @@ RaBitQuantizer<metric>::TrainImpl(const float* data, uint64_t count) {
     return true;
 }
 
-template <MetricType metric>
-void
-RaBitQuantizer<metric>::SetCentroid(const float* centroid) {
-    CHECK_ARGUMENT(centroid != nullptr, "RaBitQ centroid must not be null");
-    Vector<float> pca_centroid(this->original_dim_, 0.0F, this->allocator_);
-    Vector<float> rotated_centroid(this->dim_, 0.0F, this->allocator_);
-    if (pca_dim_ != this->original_dim_) {
-        pca_->Transform(centroid, pca_centroid.data());
-    } else {
-        std::copy(centroid, centroid + original_dim_, pca_centroid.begin());
-    }
-    rom_->Transform(pca_centroid.data(), rotated_centroid.data());
-    centroid_.assign(rotated_centroid.begin(), rotated_centroid.end());
-}
-
-template <MetricType metric>
-void
-RaBitQuantizer<metric>::ShareFusedModelFrom(const RaBitQuantizer& source) {
-    CHECK_ARGUMENT(this->dim_ == source.dim_ and this->original_dim_ == source.original_dim_ and
-                       this->pca_dim_ == source.pca_dim_ and this->use_fht_ == source.use_fht_,
-                   "incompatible RaBitQ fused model");
-    this->rom_ = source.rom_;
-    this->pca_ = source.pca_;
-    this->is_trained_ = source.is_trained_;
-}
-
 inline float
 ip_obar_q(float ip_yu_q, float q_prime_sum, float y_norm, int B) {
     // used for recover distance from ip_yu_q
@@ -2579,21 +2553,6 @@ RaBitQuantizer<metric>::EncodeHnswSupplement(const float* data, uint8_t* supplem
     std::memcpy(
         supplement_code + SupplementMetaOffset() + sizeof(float), &f_rescale, sizeof(float));
     return true;
-}
-
-template <MetricType metric>
-void
-RaBitQuantizer<metric>::ComputeHnswCentroidTerms(const float* transformed_query,
-                                                 float& g_add,
-                                                 float& g_error) const {
-    const float centroid_distance_sqr =
-        FP32ComputeL2Sqr(transformed_query, CentroidData(), this->dim_);
-    g_error = std::sqrt(centroid_distance_sqr);
-    if constexpr (metric == MetricType::METRIC_TYPE_IP) {
-        g_add = -FP32ComputeIP(transformed_query, CentroidData(), this->dim_);
-    } else {
-        g_add = centroid_distance_sqr;
-    }
 }
 
 template <MetricType metric>

@@ -993,6 +993,85 @@ TEST_CASE("HGraph fused full KMeans ignores quantizer sampling and shares query 
     search(empty);
 }
 
+TEST_CASE("HGraph fused preencoding preserves batch failure and stored codes",
+          "[ut][hgraph][fused][preencoding]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 32;
+    const auto threads = GENERATE(0, 2);
+    auto common = MakeCommonParam(dim, threads);
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"rabitq", "precise_quantization_type":"rabitq",
+        "base_io_type":"memory_io", "base_supplement_io_type":"memory_io",
+        "rabitq_bits_per_dim_base":2, "rabitq_bits_per_dim_precise":6,
+        "rabitq_use_fht":true, "graph_io_type":"memory_io", "graph_type":"odescent",
+        "max_degree":8, "ef_construction":32, "build_thread_count":2,
+        "use_reorder":true, "reorder_source":"base", "rabitq_fused_datacell":true,
+        "rabitq_centroid_count":4, "kmeans_iterations":1, "store_raw_vector":true
+    })");
+    const auto filter_bits = GENERATE(1, 2, 4);
+    param["rabitq_bits_per_dim_base"].SetInt(filter_bits);
+    param["rabitq_bits_per_dim_precise"].SetInt(8 - filter_bits);
+    auto index = MakeHGraphIndex(param, common);
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> ids(count);
+    for (int64_t row = 0; row < count; ++row) {
+        ids[row] = row;
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[row * dim + d] = static_cast<float>((row * 101 + d * 13) % 997) / 997.0F;
+        }
+    }
+    ids[5] = ids[2];
+    auto base = MakeFloatDataset(vectors, ids, dim, count);
+    const bool build = GENERATE(true, false);
+    auto built = build ? index->Build(base) : index->Add(base);
+    REQUIRE(built.has_value());
+    REQUIRE(built.value() == std::vector<int64_t>{2});
+    REQUIRE(index->GetNumElements() == count - 1);
+
+    // A finite vector whose encoding overflows must reject the entire batch, including
+    // valid rows encoded before it, without changing old codes or publishing new labels.
+    std::vector<float> added(vectors.begin(), vectors.begin() + 3 * dim);
+    std::vector<int64_t> added_ids{100, 101, 102};
+    std::fill(added.begin() + 2 * dim, added.end(), std::numeric_limits<float>::max());
+    const auto before = index->CalcDistanceById(vectors.data(), 0);
+    REQUIRE(before.has_value());
+    auto result = index->Add(MakeFloatDataset(added, added_ids, dim, 3));
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(index->GetNumElements() == count - 1);
+    for (auto id : added_ids) {
+        REQUIRE_FALSE(index->CheckIdExist(id));
+    }
+    const auto unchanged = index->CalcDistanceById(vectors.data(), 0);
+    REQUIRE(unchanged.has_value());
+    REQUIRE(unchanged.value() == before.value());
+
+    std::copy_n(vectors.data() + 2 * dim, dim, added.data() + 2 * dim);
+    result = index->Add(MakeFloatDataset(added, added_ids, dim, 3));
+    REQUIRE(result.has_value());
+    REQUIRE(result.value().empty());
+    REQUIRE(index->GetNumElements() == count + 2);
+    auto serialized = index->Serialize();
+    REQUIRE(serialized.has_value());
+    auto restored = MakeHGraphIndex(param, common);
+    REQUIRE(restored->Deserialize(serialized.value()).has_value());
+    for (uint64_t row = 0; row < added_ids.size(); ++row) {
+        const auto original = index->CalcDistanceById(vectors.data(), static_cast<int64_t>(row));
+        const auto live = index->CalcDistanceById(vectors.data(), added_ids[row]);
+        const auto round_trip = restored->CalcDistanceById(vectors.data(), added_ids[row]);
+        REQUIRE(original.has_value());
+        REQUIRE(live.has_value());
+        REQUIRE(round_trip.has_value());
+        REQUIRE(live.value() == original.value());
+        REQUIRE(round_trip.value() == live.value());
+    }
+    std::vector<float> query(vectors.begin(), vectors.begin() + dim);
+    auto search =
+        restored->KnnSearch(MakeFloatQuery(query, dim), 5, R"({"hgraph":{"ef_search":64}})");
+    REQUIRE(search.has_value());
+    REQUIRE(search.value()->GetDim() == 5);
+}
+
 TEST_CASE("HGraph fused Build reserves once and Add grows geometrically",
           "[ut][hgraph][fused][capacity]") {
     constexpr int64_t dim = 64;

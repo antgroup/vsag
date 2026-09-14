@@ -82,6 +82,13 @@ workspace is O(N + K × dimension); blocking does not sample or exclude vectors.
 fewer than K vectors is rejected. Centers remain fixed for subsequent Add and UpdateVector;
 changing K requires rebuilding the index.
 
+Fused training requests centers only, skipping the unused final full-data label assignment.
+Build/Add paths without an optimized scalar-code build session (including FP32 ODescent)
+pre-encode the input once and reuse those codes after the entire batch passes validation.
+This temporarily requires `N × (4 + filter_code_bytes + supplement_code_bytes)` bytes for
+the current input batch, including its cluster IDs. The cache is released after persistence;
+it does not retain raw vectors or increase search-time memory.
+
 KMeans++ selects centers sequentially, but updates distances to each newly selected
 center in parallel row blocks using the training thread pool. Weight summation and
 random selection retain their original serial order, so changing the worker count

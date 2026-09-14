@@ -285,8 +285,8 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         }
         this->train_fused_codec(data);
     }
-    this->validate_fused_encoding_data(static_cast<const float*>(vectors),
-                                       static_cast<uint64_t>(total));
+    auto fused_codes = this->prepare_fused_encoding_data(static_cast<const float*>(vectors),
+                                                         static_cast<uint64_t>(total));
     this->resize(current_count + new_ids_count, this->rabitq_fused_datacell_ != nullptr);
     this->total_count_ += new_ids_count;
     Vector<std::pair<InnerIdType, int64_t>> deferred_code_ids(allocator_);
@@ -301,7 +301,9 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
             this->label_table_->InsertSourceId(inner_id, source_id[i]);
         }
         if (not defer_persistent_codes) {
-            this->insert_persistent_codes(get_data(data, i), inner_id);
+            const auto code = fused_codes != nullptr ? fused_codes->Get(i) : RaBitQFusedCodeView{};
+            this->insert_persistent_codes(
+                get_data(data, i), inner_id, fused_codes != nullptr ? &code : nullptr);
         } else {
             deferred_code_ids.emplace_back(inner_id, i);
         }
@@ -320,6 +322,9 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
                 route_graph_ids[j].emplace_back(inner_id);
             }
         }
+    }
+    if (not defer_persistent_codes) {
+        fused_codes.reset();
     }
     {
         odescent_param_->max_degree = bottom_graph_->MaximumDegree();
@@ -344,7 +349,10 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
             this->train_codes_with_dataset(this->sample_train_dataset(data));
         }
         for (const auto& [inner_id, local_idx] : deferred_code_ids) {
-            this->insert_persistent_codes(get_data(data, local_idx), inner_id);
+            const auto code =
+                fused_codes != nullptr ? fused_codes->Get(local_idx) : RaBitQFusedCodeView{};
+            this->insert_persistent_codes(
+                get_data(data, local_idx), inner_id, fused_codes != nullptr ? &code : nullptr);
         }
     }
     return failed_ids;
@@ -372,10 +380,18 @@ HGraph::add_impl(const DatasetPtr& data) {
 
     this->validate_add_data(data);
     auto context = this->prepare_add_context(data);
-    this->validate_fused_encoding_data(static_cast<const float*>(get_data(data)),
-                                       static_cast<uint64_t>(data->GetNumElements()));
+    auto fused_codes = this->prepare_fused_encoding_data(
+        static_cast<const float*>(get_data(data)), static_cast<uint64_t>(data->GetNumElements()));
     this->prepare_graph_read_codes(data, context);
     auto batch = this->prepare_add_batch(data);
+    if (fused_codes != nullptr) {
+        for (const auto& row : batch.rows) {
+            const auto code = fused_codes->Get(row.input_idx);
+            this->insert_persistent_codes(get_data(data, row.input_idx), row.inner_id, &code);
+        }
+        context.persistent_codes_prepared = true;
+        fused_codes.reset();
+    }
     this->prepare_temporary_graph_read_codes(data, context, batch);
     if (had_mci_clique_index) {
         this->mci_cliques_->MarkUnavailable();
@@ -419,21 +435,42 @@ HGraph::validate_fused_vector_data(const float* data, uint64_t count) const {
     }
 }
 
-void
-HGraph::validate_fused_encoding_data(const float* data, uint64_t count) const {
+RaBitQFusedCodeView
+HGraph::FusedEncodingBatch::Get(uint64_t row) const {
+    const auto* record = codes.data() + row * (sizeof(uint32_t) + one_bit_size + supplement_size);
+    RaBitQFusedCodeView view;
+    std::memcpy(&view.cluster_id, record, sizeof(view.cluster_id));
+    view.one_bit_code = record + sizeof(view.cluster_id);
+    view.supplement_code = view.one_bit_code + one_bit_size;
+    return view;
+}
+
+std::unique_ptr<HGraph::FusedEncodingBatch>
+HGraph::prepare_fused_encoding_data(const float* data, uint64_t count) const {
     if (this->rabitq_fused_datacell_ == nullptr or this->optimized_build_codes_ != nullptr) {
-        return;
+        return nullptr;
     }
     CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
-    ByteBuffer one_bit(rabitq_split_codes_->OneBitCodeSize(), allocator_);
-    ByteBuffer supplement(rabitq_split_codes_->SupplementCodeSize(), allocator_);
+    auto batch = std::make_unique<FusedEncodingBatch>(allocator_);
+    batch->one_bit_size = rabitq_split_codes_->OneBitCodeSize();
+    batch->supplement_size = rabitq_split_codes_->SupplementCodeSize();
+    const uint64_t stride = sizeof(uint32_t) + batch->one_bit_size + batch->supplement_size;
+    CHECK_ARGUMENT(count <= std::numeric_limits<uint64_t>::max() / stride,
+                   "fused encoding batch size overflow");
+    batch->codes.resize(count * stride);
     const auto dim = static_cast<uint64_t>(this->dim_);
     for (uint64_t row = 0; row < count; ++row) {
+        auto* record = batch->codes.data() + row * stride;
         uint32_t cluster_id = 0;
-        CHECK_ARGUMENT(rabitq_split_codes_->EncodeFused(
-                           data + row * dim, one_bit.data, supplement.data, &cluster_id),
-                       "failed to encode fused RaBitQ node codes");
+        CHECK_ARGUMENT(
+            rabitq_split_codes_->EncodeFused(data + row * dim,
+                                             record + sizeof(cluster_id),
+                                             record + sizeof(cluster_id) + batch->one_bit_size,
+                                             &cluster_id),
+            "failed to encode fused RaBitQ node codes");
+        std::memcpy(record, &cluster_id, sizeof(cluster_id));
     }
+    return batch;
 }
 
 void
@@ -628,19 +665,23 @@ HGraph::graph_read_codes_is_temporary(const AddContext& context) const {
 }
 
 void
-HGraph::insert_persistent_codes(const void* data, InnerIdType inner_id) {
+HGraph::insert_persistent_codes(const void* data,
+                                InnerIdType inner_id,
+                                const RaBitQFusedCodeView* fused_code) {
     std::shared_lock<std::shared_mutex> add_lock;
     if (not this->support_force_remove()) {
         add_lock = std::shared_lock<std::shared_mutex>(this->add_mutex_);
     }
     std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
-    this->insert_persistent_codes_unlocked(data, inner_id);
+    this->insert_persistent_codes_unlocked(data, inner_id, fused_code);
 }
 
 void
-HGraph::insert_persistent_codes_unlocked(const void* data, InnerIdType inner_id) {
+HGraph::insert_persistent_codes_unlocked(const void* data,
+                                         InnerIdType inner_id,
+                                         const RaBitQFusedCodeView* fused_code) {
     this->basic_flatten_codes_->InsertVector(data, inner_id);
-    this->sync_fused_node_codes(inner_id, data);
+    this->sync_fused_node_codes(inner_id, data, fused_code);
     if (has_precise_reorder()) {
         this->high_precise_codes_->InsertVector(data, inner_id);
     }
@@ -670,12 +711,22 @@ HGraph::insert_fused_optimized_build_codes(const void* data, InnerIdType inner_i
 }
 
 void
-HGraph::sync_fused_node_codes(InnerIdType inner_id, const void* data) {
+HGraph::sync_fused_node_codes(InnerIdType inner_id,
+                              const void* data,
+                              const RaBitQFusedCodeView* fused_code) {
     if (rabitq_fused_datacell_ == nullptr) {
         return;
     }
     CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
     const auto label = label_table_->GetLabelById(inner_id);
+    if (fused_code != nullptr) {
+        rabitq_fused_datacell_->SetNodeCodes(inner_id,
+                                             label,
+                                             fused_code->cluster_id,
+                                             fused_code->one_bit_code,
+                                             fused_code->supplement_code);
+        return;
+    }
     ByteBuffer one_bit(rabitq_split_codes_->OneBitCodeSize(), allocator_);
     ByteBuffer supplement(rabitq_split_codes_->SupplementCodeSize(), allocator_);
     uint32_t cluster_id = 0;
@@ -745,7 +796,8 @@ void
 HGraph::prepare_codes_before_probe_if_needed(const void* data,
                                              InnerIdType inner_id,
                                              const AddContext& context) {
-    if (this->should_insert_codes_before_probe(context.use_dedup_storage)) {
+    if (not context.persistent_codes_prepared and
+        this->should_insert_codes_before_probe(context.use_dedup_storage)) {
         this->insert_persistent_codes(data, inner_id);
     }
 }

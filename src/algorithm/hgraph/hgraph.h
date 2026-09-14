@@ -58,6 +58,7 @@
 namespace vsag {
 class FlattenOptimizedBuildInterface;
 class HGraphRaBitQFusedDataCell;
+struct RaBitQFusedCodeView;
 class HGraphRaBitQSearcher;
 class HGraphOptimizedBuildSession;
 class IteratorFilterContext;
@@ -351,11 +352,15 @@ public:
 
     /// Write codes for inner_id into the persistent flatten storage.
     void
-    insert_persistent_codes(const void* data, InnerIdType inner_id);
+    insert_persistent_codes(const void* data,
+                            InnerIdType inner_id,
+                            const RaBitQFusedCodeView* fused_code = nullptr);
 
     /// Write codes when the caller already protects storage capacity.
     void
-    insert_persistent_codes_unlocked(const void* data, InnerIdType inner_id);
+    insert_persistent_codes_unlocked(const void* data,
+                                     InnerIdType inner_id,
+                                     const RaBitQFusedCodeView* fused_code = nullptr);
 
     void
     insert_fused_optimized_build_codes(const void* data, InnerIdType inner_id);
@@ -365,7 +370,9 @@ public:
     insert_persistent_codes_to_slot(const void* data, CodeSlotIdType code_slot_id);
 
     void
-    sync_fused_node_codes(InnerIdType inner_id, const void* data);
+    sync_fused_node_codes(InnerIdType inner_id,
+                          const void* data,
+                          const RaBitQFusedCodeView* fused_code = nullptr);
 
     void
     restore_fused_codec();
@@ -489,6 +496,7 @@ private:
         bool use_dedup_storage{false};
         bool need_temporary_sq8_build_data{false};
         bool use_parallel_add{false};
+        bool persistent_codes_prepared{false};
         DatasetPtr train_data{nullptr};
         FlattenInterfacePtr graph_read_codes{nullptr};
     };
@@ -540,8 +548,22 @@ private:
     void
     validate_fused_vector_data(const float* data, uint64_t count) const;
 
-    void
-    validate_fused_encoding_data(const float* data, uint64_t count) const;
+    // Operation-local compressed codes: validate the entire input before publishing rows,
+    // then reuse the encoding instead of doing a second nearest-centroid search/quantization.
+    struct FusedEncodingBatch {
+        explicit FusedEncodingBatch(Allocator* allocator) : codes(allocator) {
+        }
+
+        RaBitQFusedCodeView
+        Get(uint64_t row) const;
+
+        Vector<uint8_t> codes;
+        uint64_t one_bit_size{0};
+        uint64_t supplement_size{0};
+    };
+
+    std::unique_ptr<FusedEncodingBatch>
+    prepare_fused_encoding_data(const float* data, uint64_t count) const;
 
     AddContext
     prepare_add_context(const DatasetPtr& data);
