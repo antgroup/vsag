@@ -52,6 +52,11 @@ IteratorFilterContext::init(InnerIdType max_size, int64_t ef_search, Allocator* 
 
 void
 IteratorFilterContext::AddDiscardNode(float dis, uint32_t inner_id) {
+    if (this->IsPendingDuplicate(inner_id)) {
+        // Pending duplicates retain the graph-search distance. Reorder may evict the same ID with
+        // a refined distance, which must not change the next graph search's lower bound.
+        return;
+    }
     if (discard_->size() >= ef_search_) {
         if (discard_->top().first > dis) {
             discard_->pop();
@@ -60,6 +65,29 @@ IteratorFilterContext::AddDiscardNode(float dis, uint32_t inner_id) {
     } else {
         discard_->emplace(dis, inner_id);
     }
+}
+
+bool
+IteratorFilterContext::AddPendingDuplicate(float dis, InnerIdType inner_id) {
+    if (pending_duplicates_ == nullptr) {
+        pending_duplicates_ = std::make_unique<UnorderedMap<InnerIdType, float>>(allocator_);
+    }
+    return pending_duplicates_->try_emplace(inner_id, dis).second;
+}
+
+bool
+IteratorFilterContext::IsPendingDuplicate(InnerIdType inner_id) const {
+    return pending_duplicates_ != nullptr && pending_duplicates_->contains(inner_id);
+}
+
+const UnorderedMap<InnerIdType, float>*
+IteratorFilterContext::GetPendingDuplicates() const {
+    return pending_duplicates_.get();
+}
+
+uint64_t
+IteratorFilterContext::GetPendingDuplicateElementNum() const {
+    return pending_duplicates_ == nullptr ? 0 : pending_duplicates_->size();
 }
 
 uint32_t
@@ -94,6 +122,9 @@ IteratorFilterContext::SetOFFFirstUsed() {
 
 void
 IteratorFilterContext::SetPoint(InnerIdType inner_id) {
+    if (pending_duplicates_ != nullptr) {
+        pending_duplicates_->erase(inner_id);
+    }
     if (inner_id >= max_size_) {
         return;
     }

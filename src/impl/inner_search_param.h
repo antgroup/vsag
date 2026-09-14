@@ -64,6 +64,7 @@ public:
 
     // use in search process with duplicate ids
     bool consider_duplicate{false};
+    int64_t max_duplicates_per_group{-1};
 
     // skip results with dist <= min_distance (for search iterator)
     float min_distance{std::numeric_limits<float>::lowest()};
@@ -87,6 +88,8 @@ public:
             factor = other.factor;
             first_order_scan_ratio = other.first_order_scan_ratio;
             parallel_search_thread_count = other.parallel_search_thread_count;
+            consider_duplicate = other.consider_duplicate;
+            max_duplicates_per_group = other.max_duplicates_per_group;
         }
         return *this;
     }
