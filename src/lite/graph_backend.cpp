@@ -1,6 +1,7 @@
 // Copyright 2024-present the vsag project
 // SPDX-License-Identifier: Apache-2.0
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -337,11 +338,17 @@ private:
         }
         neighbors.push_back(target);
         if (neighbors.size() > max_degree_) {
-            std::sort(neighbors.begin(), neighbors.end(), [&](uint64_t a, uint64_t b) {
-                const float da = distance(VectorAt(source), VectorAt(a));
-                const float db = distance(VectorAt(source), VectorAt(b));
-                return da < db or (da == db and a < b);
-            });
+            // max_degree_ is at most 64; cache each distance once before sorting.
+            std::array<Candidate, 65> ranked{};
+            for (uint64_t i = 0; i < neighbors.size(); ++i) {
+                ranked[i] = {neighbors[i], distance(VectorAt(source), VectorAt(neighbors[i]))};
+            }
+            std::sort(ranked.begin(),
+                      ranked.begin() + static_cast<std::ptrdiff_t>(neighbors.size()),
+                      closer);
+            for (uint64_t i = 0; i < max_degree_; ++i) {
+                neighbors[i] = ranked[i].slot;
+            }
             neighbors.resize(max_degree_);
         }
     }
