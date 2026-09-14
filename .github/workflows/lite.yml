@@ -33,6 +33,8 @@ jobs:
         run: |
           clang-format-15 --dry-run --Werror \
             include/vsag/lite/index.h \
+            src/lite/backend.h \
+            src/lite/bruteforce_backend.cpp \
             src/lite/fp32_distance.h \
             src/lite/fp32_distance.cpp \
             src/lite/fp32_distance_sse.cpp \
@@ -50,6 +52,7 @@ jobs:
       - name: Run clang-tidy
         run: |
           clang-tidy-15 \
+            src/lite/bruteforce_backend.cpp \
             src/lite/fp32_distance.cpp \
             src/lite/fp32_distance_sse.cpp \
             src/lite/fp32_distance_avx2.cpp \
