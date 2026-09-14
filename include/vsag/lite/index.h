@@ -21,6 +21,9 @@ struct Neighbor {
 /** Return true when an external ID is allowed in search results. */
 using IdFilter = std::function<bool(int64_t)>;
 
+/** Active Lite backend. Graph search is approximate; BruteForce is the default. */
+enum class BackendKind { BRUTE_FORCE, GRAPH };
+
 /**
  * Minimal FP32, squared-L2 index. No concurrent calls are supported.
  * Input vectors are borrowed for the duration of a call; stored data is owned.
@@ -31,6 +34,12 @@ public:
     /** Create an empty fixed-dimension index. Zero dimensions are rejected. */
     static tl::expected<std::unique_ptr<Index>, Error>
     Create(uint64_t dim);
+    /** Explicitly build a graph from the flat contents; failure leaves this index unchanged. */
+    tl::expected<void, Error>
+    BuildGraph(uint64_t max_degree = 16, uint64_t ef_search = 128);
+
+    [[nodiscard]] BackendKind
+    ActiveBackend() const;
 
     ~Index();
     Index(const Index&) = delete;

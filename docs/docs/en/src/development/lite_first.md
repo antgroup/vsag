@@ -1,5 +1,15 @@
 # Independent VSAG Lite v0.1
 
+> Phase-2 branch note (2026-09-14): the default Index::Create(dim) still uses
+> exact BruteForce and its byte-identical v1 snapshot. Call BuildGraph(degree,
+> ef_search) explicitly to publish a standalone single-layer approximate graph
+> after a successful build. Graph Add/Update/Remove and Search use the same
+> Index API; Save writes v2 including FP32 vectors, IDs, options and adjacency,
+> while Load accepts both v1 and v2. Graph v2 is not a Full VSAG snapshot.
+> No concurrent calls, checksum, quantization or mmap are provided. The
+> remainder of this page documents the original v0.1 default behavior.
+
+
 This experimental entry point starts with exact FP32 squared-L2 BruteForce and
 selective source reuse, rather than conditionally compiling the Full library.
 It currently targets Linux x86_64, C++17 and the repository compiler baseline.
