@@ -53,8 +53,11 @@ the experiment workflow and write the graph snapshot outside the repository:
 
 The second command loads the snapshot in a fresh process. The 2026-09-14
 single-run 100k SIFT probe at degree 16 / ef 128 measured Recall@10 0.946,
-search P50 444 us, build 43.5 s and a 65.6 MB graph snapshot. These are
-exploratory numbers on one host, not statistical performance claims. Raw
+search P50 442 us, build 35.1 s and a 65.6 MB graph snapshot after
+caching graph-pruning distances. Three alternating 10k runs with the same
+benchmark executable reduced median build from 2.50 s to 1.70 s while
+producing byte-identical snapshots. These are same-host exploratory numbers,
+not general performance guarantees. Raw
 results and environment are kept outside Git. The default v0.1 guide remains
 in the English and Chinese links below.
 
