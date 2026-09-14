@@ -45,6 +45,21 @@ public:
         other.data_ = nullptr;
     }
 
+    // Hands ownership of the allocation to the caller without deallocating it. Used by
+    // LegacyRead, where ownership transfer is reported through the need_release flag.
+    uint8_t*
+    Release() {
+        auto* data = data_;
+        allocator_ = nullptr;
+        data_ = nullptr;
+        return data;
+    }
+
+    [[nodiscard]] uint8_t*
+    Data() const {
+        return data_;
+    }
+
     AllocatorOwner&
     operator=(AllocatorOwner&& other) noexcept {
         if (this != &other) {
