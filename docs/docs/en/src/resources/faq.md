@@ -36,7 +36,7 @@ Practical guidance:
 - Compare `ivf` when throughput and memory matter more than single-query latency.
 - Consider `pyramid` when your data has clear partition, tenant, or path structure.
 
-Related pages: [Index Overview](../indexes/README.md), [Best Practices](best_practices.md).
+Related pages: [Index Overview](../indexes/), [Best Practices](best_practices.md).
 
 ## Why does the same parameter set perform very differently on different datasets?
 
@@ -286,7 +286,7 @@ internal storage / computation format. They are not the same. For example, input
 can be `dtype: "float32"` while the index stores vectors with
 `base_quantization_type: "sq8_uniform"`.
 
-Related pages: [Quantization Overview](../quantization/README.md),
+Related pages: [Quantization Overview](../quantization/),
 [HGraph](../indexes/hgraph.md), [IVF](../indexes/ivf.md).
 
 ## Should I use Bitset, lambda, `Filter`, attribute filtering, or `extra_info`?

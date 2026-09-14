@@ -15,6 +15,27 @@ VSAG 采用 [Catch2](https://github.com/catchorg/Catch2) 作为测试框架，�
 make test
 ```
 
+## 构建并运行单个单元测试模块
+
+为了缩短编辑、构建和测试周期，可以只构建并运行一个仍在维护的单元测试子系统：
+
+```bash
+make test-module MODULE=datacell
+make test-module MODULE=algorithm CASE='[ut][sample_train_data]'
+```
+
+可用模块名为 `simd`、`common`、`algorithm`、`factory`、`attr`、`datacell`、`layout`、
+`quantization`、`storage`、`io`、`utils` 和 `impl`。每条命令都会构建共享的生产代码与测试夹具依赖，
+但只编译所选模块的测试源码。对应的 CMake 目标和可执行文件名为 `unittests_<module>`：
+
+```bash
+cmake -S . -B build -DENABLE_TESTS=ON
+cmake --build build --target unittests_datacell
+./build/tests/unittests_datacell '[ut][AttributeInvertedInterfaceParameter]'
+```
+
+模块目标仅用于加速本地开发。完整验证仍应运行 `make test`；其中聚合的 `unittests` 可执行文件包含所有模块。
+
 说明：
 
 1. 运行 `src/` 下的单元测试；
@@ -46,9 +67,9 @@ bash scripts/coverage/check_cov.sh
 ```
 
 采集脚本会生成包含分支数据和仓库相对路径的 `coverage/coverage.info`。统计范围仅包括
-`src/` 下的维护中生产代码和 `include/` 下的公共头文件，并排除构建时生成的
-`src/` 目录中的 `version.h` 与引入的兼容头文件 `include/vsag/expected.hpp`；
-该生成头文件在刚检出的源码中尚不存在。仅在其他平台编译的路径
+`src/` 下的维护中生产代码和 `include/` 下的公共头文件，并排除 `src/` 下的
+`version.h`（构建时由 `cmake/GenerateVersionHeader.cmake` 从纳入版本控制的模板
+`src/version.h.in` 生成）与引入的兼容头文件 `include/vsag/expected.hpp`。仅在其他平台编译的路径
 明确不属于 Linux x86 报告的统计范围，必须由平台专用覆盖率任务统计，不能视为已覆盖。
 
 ## 内存泄漏与多线程

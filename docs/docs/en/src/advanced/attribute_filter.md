@@ -359,7 +359,7 @@ the new attribute values immediately.
 
 The most complete usage sample lives in the test suite:
 
-- `tests/test_index.cpp` — `TestIndex::TestWithAttr` (build attributes, search via
+- `tests/test_index/test_index_misc.cpp` — `TestIndex::TestWithAttr` (build attributes, search via
   `SearchRequest`, then `UpdateAttribute` and re-search).
 - `tests/fixtures/data/vector_generator.cpp` — `generate_attributes` shows how to construct
   `AttributeSet*` arrays of mixed types programmatically.

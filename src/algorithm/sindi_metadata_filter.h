@@ -198,12 +198,14 @@ inline constexpr const char* SINDI_DATE_BEGIN_PATH_NAME = "date_begin";
 inline constexpr const char* SINDI_DATE_END_PATH_NAME = "date_end";
 inline constexpr const char* SINDI_DATE_METADATA_FORMAT_VERSION_KEY =
     "sindi_date_metadata_format_version";
-inline constexpr uint32_t SINDI_DATE_METADATA_FORMAT_VERSION = 2;
+inline constexpr uint32_t SINDI_DATE_METADATA_FORMAT_VERSION = 3;
+inline constexpr uint32_t SINDI_DATE_METADATA_STRING_HOST_FORMAT_VERSION = 2;
 inline constexpr uint32_t SINDI_DATE_METADATA_LEGACY_FORMAT_VERSION = 1;
 
 inline bool
 IsSupportedSindiDateMetadataVersion(int64_t version) {
     return version == SINDI_DATE_METADATA_LEGACY_FORMAT_VERSION ||
+           version == SINDI_DATE_METADATA_STRING_HOST_FORMAT_VERSION ||
            version == SINDI_DATE_METADATA_FORMAT_VERSION;
 }
 

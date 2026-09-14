@@ -321,7 +321,7 @@ auto status = index->UpdateAttribute(/*id=*/123, new_attrs);
 
 最完整的使用示例在测试套件中：
 
-- `tests/test_index.cpp` 中的 `TestIndex::TestWithAttr`：构建属性、用 `SearchRequest` 查询，
+- `tests/test_index/test_index_misc.cpp` 中的 `TestIndex::TestWithAttr`：构建属性、用 `SearchRequest` 查询，
   以及 `UpdateAttribute` 后再次查询。
 - `tests/fixtures/data/vector_generator.cpp` 中的 `generate_attributes`：演示如何按程序化方式
   构造混合类型的 `AttributeSet*` 数组。

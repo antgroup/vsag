@@ -16,6 +16,29 @@ suite:
 make test
 ```
 
+## Build and Run One Unit-Test Module
+
+For a shorter edit-build-test cycle, build and run one maintained unit-test subsystem:
+
+```bash
+make test-module MODULE=datacell
+make test-module MODULE=algorithm CASE='[ut][sample_train_data]'
+```
+
+The available module names are `simd`, `common`, `algorithm`, `factory`, `attr`, `datacell`,
+`layout`, `quantization`, `storage`, `io`, `utils`, and `impl`. Each command builds the shared
+production and fixture dependencies plus only the selected module's test sources. The corresponding
+CMake target and executable are named `unittests_<module>`:
+
+```bash
+cmake -S . -B build -DENABLE_TESTS=ON
+cmake --build build --target unittests_datacell
+./build/tests/unittests_datacell '[ut][AttributeInvertedInterfaceParameter]'
+```
+
+These module targets are a local acceleration path. Continue to run `make test`, whose aggregate
+`unittests` executable contains every module, for full validation.
+
 Note: `make test` does not enable coverage instrumentation. To produce a coverage report, use
 `make cov` — it configures the build with `ENABLE_COVERAGE=ON`; then run the same non-daily unit
 and functional suites as coverage CI with its fixed seed before collecting the trace:
@@ -29,8 +52,9 @@ bash scripts/coverage/check_cov.sh
 
 The collector writes `coverage/coverage.info` with repository-relative paths and branch data.
 It measures maintained production sources under `src/` and public headers under `include/`,
-excluding the build-generated `version.h` header under `src/` and vendored
-`include/vsag/expected.hpp`. The generated header is absent from a fresh source checkout. Code compiled only
+excluding the generated `version.h` header in `src/` (created at build time from the tracked
+template `src/version.h.in` by `cmake/GenerateVersionHeader.cmake`) and vendored
+`include/vsag/expected.hpp`. Code compiled only
 on another platform is explicitly outside the Linux x86 report and must be measured by a
 platform-specific coverage job rather than treated as covered.
 

@@ -80,4 +80,4 @@
 - [PQ FastScan](pqfs.md)
 - [量化变换](../advanced/quantization_transform.md)
 - [HGraph 索引](../indexes/hgraph.md)
-- [量化总览](README.md)
+- [量化总览](./)

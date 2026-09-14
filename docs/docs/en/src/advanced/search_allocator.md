@@ -10,16 +10,17 @@ intended for use cases such as:
 
 The hook is exposed through two surfaces — `SearchRequest::search_allocator_` (recommended) and
 the legacy `SearchParam::allocator` — but **how much of a search actually consumes that
-allocator depends on the index and the entry point**. As of today, only `HGraph::SearchWithRequest`
-plumbs `search_allocator_` end-to-end (scratch buffers **and** the result `Dataset`); the other
-`SearchWithRequest` implementations (IVF / BruteForce / WARP) use it for some scratch
-state but still allocate the result `Dataset` from the index's own allocator. See
+allocator depends on the index and the entry point**. HGraph, IVF, Pyramid, and SINDI use a
+non-null `SearchRequest::search_allocator_` for non-empty result buffers as well as search
+scratch state. BruteForce (including WARP mode) uses it for selected temporary work, while its
+result `Dataset` still uses the index allocator. See
 [Relationship to the Index's Allocator](#relationship-to-the-indexs-allocator) below for the
 per-surface breakdown.
 
-> **Scope.** The allocator hook is currently exposed through `KnnSearch` (`SearchParam` overload)
-> and `SearchWithRequest`. `RangeSearch` does not have an allocator-bearing overload at this
-> time, and `SearchRequest::search_allocator_` is not consulted by the range-search path.
+> **Scope.** The allocator hook is exposed through `KnnSearch` (`SearchParam` overload) and
+> `SearchWithRequest`. The dedicated `RangeSearch` overloads do not accept an allocator, but a
+> range-mode `SearchRequest` does, and supporting indexes consult `search_allocator_` on that
+> path too.
 
 ## Recommended API — `SearchRequest::search_allocator_`
 
@@ -73,29 +74,23 @@ emit deprecation warnings, but new code should still target `SearchRequest` /
 
 The result-`Dataset` ownership contract depends on which index implements `SearchWithRequest`:
 
-- **HGraph** is the only index that currently plumbs `request.search_allocator_` into
-  `create_fast_dataset` (see `src/algorithm/hgraph.cpp` — `ctx.alloc = request.search_allocator_`).
-  The resulting `Dataset` is marked `Owner(true, allocator)` and its destructor will call
-  `allocator->Deallocate(...)` on `ids` / `distances` automatically.
-- **IVF / BruteForce / WARP** currently construct the result `Dataset` via
-  `create_fast_dataset(..., allocator_)` — i.e. the index's own allocator
-  (`src/algorithm/ivf/ivf.cpp`, `src/algorithm/bruteforce/bruteforce.cpp`; WARP uses the
-  BruteForce implementation in WARP mode).
-  `request.search_allocator_` is only consulted for scratch state on those paths today; the
-  result buffers are owned by the index's allocator. Treat the result `Dataset`'s lifetime as
-  tied to the index's allocator on these indexes.
+- **HGraph / IVF / Pyramid / SINDI** pass the selected query allocator into their non-empty
+  result builders. When `request.search_allocator_` is non-null, the returned `Dataset` owns its
+  `ids` / `distances` buffers through that allocator and releases them from its destructor.
+- **BruteForce / WARP** currently build the result through
+  `pack_knn_result_with_extra_info(heap)` without an allocator argument, so the result uses the
+  index allocator. `request.search_allocator_` is still used for selected temporary work.
+- **Empty results** use the shared empty-dataset path and do not allocate result buffers through
+  the per-search allocator.
 
 What this means in practice:
 
 - **Do not manually `Deallocate` the result buffers.** Letting the `Dataset` go out of scope is
   enough; double-freeing through both manual `Deallocate(...)` and the destructor is undefined
   behaviour.
-- **Whichever allocator owns the result must outlive that result `Dataset`.** For HGraph that is
-  the per-search allocator; for IVF / BruteForce / WARP that is the index allocator (always
-  alive while the index is alive).
-- **`examples/cpp/314_feature_hgraph_search_allocator.cpp` currently makes the deallocation
-  explicit.** That pattern is left over from earlier API iterations; new code that targets the
-  current owner-tracking behaviour should rely on the `Dataset` destructor instead.
+- **Whichever allocator owns the result must outlive that result `Dataset`.** For HGraph, IVF,
+  Pyramid, and SINDI this can be the per-search allocator; for BruteForce / WARP it is the index
+  allocator.
 
 The simplest safe pattern is "one allocator per thread, reset between batches":
 
@@ -117,15 +112,16 @@ arena.reset();              // drops every per-query buffer at once
 
 ## Relationship to the Index's Allocator
 
-| Surface                                                                            | Allocator used                                                                                                                                |
-|------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| Index build, insert, persistent state                                              | `Resource`'s allocator (or default if none was passed).                                                                                       |
-| `HGraph::SearchWithRequest` scratch + result `Dataset`                             | `search_allocator_` if set, otherwise the `Resource`'s allocator. HGraph is the only index that plumbs `search_allocator_` into the result.   |
-| `IVF` / `BruteForce` / `WARP` `SearchWithRequest` result `Dataset`                 | Always the index's own allocator (`allocator_`). `search_allocator_` is *not* consulted for result buffers today.                             |
-| `IVF` / `BruteForce` / `WARP` `SearchWithRequest` scratch state                    | Uses `search_allocator_` for some intermediate buffers when set; otherwise the index's allocator.                                             |
-| `KnnSearch(query, k, SearchParam)` (legacy)                                        | Uses `SearchParam::allocator` if set, on indexes whose `KnnSearch` honors it (e.g. HGraph examples). Otherwise the `Resource` allocator. |
-| `KnnSearch(query, k, parameters_str)`                                              | No per-search allocator hook — uses the `Resource` allocator.                                                                                 |
-| `RangeSearch(...)` (all forms)                                                     | Uses the `Resource` allocator; no per-search allocator hook.                                                                                  |
+| Surface | Allocator used |
+|---|---|
+| Index build, insert, persistent state | `Resource`'s allocator (or the default if none was passed). |
+| HGraph / IVF / Pyramid / SINDI `SearchWithRequest` non-empty result | `search_allocator_` if set, otherwise the index allocator. |
+| BruteForce / WARP `SearchWithRequest` result | The index allocator; `search_allocator_` is used only for selected temporary work. |
+| `SearchWithRequest` scratch state | Index-specific; the implementations above consult `search_allocator_` for at least part of the query path. |
+| `KnnSearch(query, k, SearchParam)` (legacy) | `SearchParam::allocator` on indexes whose legacy overload honors it; otherwise the index allocator. |
+| `KnnSearch(query, k, parameters_str)` | No per-search allocator hook; uses the index allocator. |
+| Dedicated `RangeSearch(...)` overloads | No allocator parameter; use the index allocator. |
+| Range-mode `SearchWithRequest` | Follows the same index-specific rules as KNN-mode `SearchWithRequest`. |
 
 Setting a per-search allocator never affects the index's permanent data structures. It only
 narrows the lifetime of memory touched by one specific search call, and only to the extent that

@@ -109,9 +109,10 @@ SINDI_V2 同样支持 [SINDI 的日期 bucket、闭区间输入与层级匹配�
 SINDI_V2 仍保留 term-first posting 布局和自己的旧版序列化格式。日期过滤支持 mutable 和
 immutable 索引以及 `use_reorder` 的任意设置，并由旧版与 streaming 序列化共同保存；范围搜索仍不
 参与过滤。mutable 日期 SINDI_V2 同样是 build-once：只允许通过初次 `Build()` 或空索引上的第一次
-`Add()` 写入日期数据，之后拒绝 `Add()`。为了执行精确 bucket 过滤，每个选中 window 都会关闭
-term 级 posting 剪枝，因此日期查询可能比仅 host 查询扫描更多 posting。在启用日期的索引上，仅
-host 查询也遵循 SINDI 所述的边界 window 行为。
+`Add()` 写入日期数据，之后拒绝 `Add()`。base 日期空字符串沿用 SINDI 的缺失日期语义：无日期条件
+和仅 host 查询会包含它们，日期 bucket 和范围查询会排除它们。为了执行精确 bucket 过滤，每个选中
+window 都会关闭 term 级 posting 剪枝，因此日期查询可能比仅 host 查询扫描更多 posting。在启用
+日期的索引上，仅 host 查询也遵循 SINDI 所述的边界 window 行为。
 
 ## 检索参数
 
