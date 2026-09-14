@@ -23,6 +23,112 @@ SPEC.loader.exec_module(METRICS)
 
 
 class BuildMetricsTest(unittest.TestCase):
+    def test_normalize_output_preserves_path_components(self) -> None:
+        for path, expected in (
+            ("./SRC/File.cpp.o", "src/file.cpp.o"),
+            (".\\SRC\\File.cpp.o", "src/file.cpp.o"),
+            ("../SRC/File.cpp.o", "../src/file.cpp.o"),
+            ("/SRC/File.cpp.o", "/src/file.cpp.o"),
+            (".ci-fetchcontent/File.o", ".ci-fetchcontent/file.o"),
+            ("", ""),
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(METRICS.normalize_output(path), expected)
+
+    def test_nested_module_and_auxiliary_classification(self) -> None:
+        cases = {
+            "src/datacell/CMakeFiles/datacell.dir/flatten_datacell_factory_ip.cpp.o": "production_compile",
+            "src/datacell/CMakeFiles/datacell.dir/multi_vector_datacell_factory.cpp.o": "production_compile",
+            "src/datacell/CMakeFiles/datacell.dir/flatten_datacell_factory_cosine.cpp.o": "production_compile",
+            "src/other/deep/CMakeFiles/module.dir/file.cpp.o": "production_compile",
+            "src/module/CMakeFiles/module_test.dir/file.cpp.o": "test_compile",
+            "tests/module/CMakeFiles/fixture.dir/file.cpp.o": "test_compile",
+            ".ci-fetchcontent/catch2-build/src/CMakeFiles/Catch2.dir/file.cpp.o": "dependency_compile",
+            "tools/eval/CMakeFiles/eval.dir/src/file.cpp.o": "tools_compile",
+            "examples/cpp/CMakeFiles/example.dir/src/file.cpp.o": "examples_compile",
+            "unknown/CMakeFiles/unknown.dir/file.cpp.o": "other_compile",
+        }
+        for path, category in cases.items():
+            for prefix in ("", "./", "/workspace/project/build/"):
+                with self.subTest(path=prefix + path):
+                    self.assertEqual(METRICS.classify_edge(prefix + path), category)
+
+    def test_cache_reasons_and_rates_do_not_imply_overall_coverage(self) -> None:
+        for text in (
+            "direct_cache_hit\t590\npreprocessed_cache_hit\t2\ncache_miss\t0\n"
+            "could_not_use_precompiled_header\t166\ncalled_for_link\t10\n",
+            json.dumps({"stats": {"cache_hit_direct": 590, "cache_hit_preprocessed": 2,
+                                  "cache_miss": 0, "could_not_use_precompiled_header": 166,
+                                  "called_for_link": 10}}),
+        ):
+            stats = METRICS.load_ccache_stats(text)
+            self.assertEqual(stats["cache_hit"], 592)
+            self.assertEqual(stats["cacheable_request_hit_rate"], 1.0)
+            self.assertEqual(stats["uncacheable_reasons"]["could_not_use_precompiled_header"], 166)
+            self.assertIsNone(stats["uncacheable_reasons"]["could_not_use_modules"])
+            self.assertIsNone(stats["overall_cache_coverage"])
+        for text in ('{"cache_hit":0,"cache_miss":0}', '{"cache_hit_direct":7}',
+                     '{"files_in_cache":3}'):
+            self.assertIsNone(METRICS.load_ccache_stats(text)["cacheable_request_hit_rate"])
+        for text in ("unavailable", "[]", '{"stats":null}'):
+            self.assertFalse(METRICS.load_ccache_stats(text)["available"])
+
+    def test_every_category_is_visible_and_missing_telemetry_is_not_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".ninja_log"
+            path.write_text("# ninja log v5\n0\t120\t0\tunknown.cpp.o\ta\n"
+                            "0\t200\t0\tgenerated.txt\tb\n")
+            ninja = METRICS.parse_ninja_log(path, {})
+        self.assertEqual(set(ninja["categories"]), set(METRICS.BUILD_CATEGORIES))
+        report = {
+            "status": "success",
+            "configuration": {"compiler": "fixture", "jobs": 1,
+                              "dependency_preparation_seconds": 0,
+                              "compiler_cache_key": "test", "dependency_cache_key": "test"},
+            "phases": [{"name": "clean_build", "elapsed_seconds": 1,
+                        "ninja": ninja, "ccache": METRICS.load_ccache_stats(
+                            '{"cache_hit":592,"cache_miss":0,"could_not_use_precompiled_header":166}')},
+                       {"name": "noop_build", "elapsed_seconds": 0.1,
+                        "ninja": {"available": False}}],
+        }
+        for concise in (False, True):
+            rendered = METRICS.render_markdown(report, concise)
+            for category in METRICS.BUILD_CATEGORIES:
+                self.assertIn(f"| clean_build | {category} |", rendered)
+            self.assertIn("| other_compile | 1 | 0.120 s |", rendered)
+            self.assertIn("| noop_build | unavailable | n/a | n/a |", rendered)
+            self.assertIn("unverified", rendered)
+            self.assertIn("could_not_use_precompiled_header: 166", rendered)
+            self.assertIn("100.00% | n/a", rendered)
+            self.assertIn("not aggregate concurrent build memory", rendered)
+            self.assertIn("not wall time", rendered)
+            self.assertNotIn("None", rendered)
+
+    def test_cache_reason_rendering_distinguishes_unavailable_partial_and_zero(self) -> None:
+        cases = (
+            (METRICS.load_ccache_stats("ccache: error"), "n/a (ccache statistics unavailable)"),
+            ({"available": False, "uncacheable_reasons": dict.fromkeys(METRICS.UNCACHEABLE_REASONS, 0)},
+             "n/a (ccache statistics unavailable)"),
+            (METRICS.load_ccache_stats('{"cache_hit":0,"cache_miss":0}'),
+             "could_not_use_precompiled_header: n/a"),
+            (METRICS.load_ccache_stats(json.dumps(dict.fromkeys(METRICS.UNCACHEABLE_REASONS, 0))),
+             "all reported reasons: 0"),
+        )
+        for cache, expected in cases:
+            for concise in (False, True):
+                with self.subTest(cache=cache, concise=concise):
+                    report = {
+                        "status": "success",
+                        "configuration": {"compiler": "fixture", "jobs": 1,
+                                          "dependency_preparation_seconds": 0,
+                                          "compiler_cache_key": "test", "dependency_cache_key": "test"},
+                        "phases": [{"name": "configure", "elapsed_seconds": 0, "ccache": cache}],
+                    }
+                    rendered = METRICS.render_markdown(report, concise)
+                    self.assertIn(expected, rendered)
+                    if expected != "all reported reasons: 0":
+                        self.assertNotIn("all reported reasons: 0", rendered)
+
     def test_dependency_paths_require_strict_repository_descendants(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
@@ -95,7 +201,7 @@ class BuildMetricsTest(unittest.TestCase):
                                 },
                                 "phases": [phase],
                             }, concise=True)
-                            self.assertNotIn("verified", summary)
+                            self.assertIn("unverified", summary)
                             self.assertNotIn("None", summary)
                             self.assertIn("| n/a |", summary)
             finally:
@@ -411,12 +517,26 @@ class BuildMetricsTest(unittest.TestCase):
         shutil.copyfile(ROOT / "Makefile", root / "Makefile")
         (root / "CMakeLists.txt").write_text(
             "cmake_minimum_required(VERSION 3.18)\n"
-            "project(metrics_fixture NONE)\n"
+            "project(metrics_fixture CXX)\n"
+            "set(CMAKE_CXX_COMPILER_LAUNCHER ${CMAKE_SOURCE_DIR}/record-command.py)\n"
+            "set(CMAKE_CXX_LINKER_LAUNCHER ${CMAKE_SOURCE_DIR}/record-command.py)\n"
+            "add_executable(fixture main.cpp)\n"
             "add_custom_command(OUTPUT artifact.txt\n"
             "  COMMAND ${CMAKE_COMMAND} -E touch artifact.txt VERBATIM)\n"
             "add_custom_target(artifact ALL DEPENDS artifact.txt)\n",
             encoding="utf-8",
         )
+
+        (root / "main.cpp").write_text("int main() { return 0; }\n")
+        launcher = root / "record-command.py"
+        launcher.write_text(
+            f"#!{os.sys.executable}\n"
+            "import json, pathlib, subprocess, sys\n"
+            "with (pathlib.Path(__file__).parent / 'commands.jsonl').open('a') as log:\n"
+            "    log.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+            "sys.exit(subprocess.call(sys.argv[1:]))\n"
+        )
+        launcher.chmod(0o755)
 
     @unittest.skipUnless(
         all(shutil.which(tool) for tool in ("make", "cmake", "ninja")),
@@ -601,8 +721,23 @@ class BuildMetricsTest(unittest.TestCase):
                 collector = METRICS.Collector(args)
                 collector.ccache = lambda *arguments: {}
                 collector.write_reports = lambda: None
+                capture = collector.capture_build
+                observed = {}
+
+                def capture_with_command_evidence(name, mode):
+                    command_log = Path(directory) / "commands.jsonl"
+                    before = command_log.read_text() if command_log.exists() else ""
+                    capture(name, mode)
+                    after = command_log.read_text()
+                    observed[name] = after[len(before):].splitlines()
+
+                collector.capture_build = capture_with_command_evidence
                 with patch.dict(os.environ, {"CMAKE_GENERATOR": "Ninja"}):
                     self.assertEqual(collector.collect(), 0)
+                self.assertEqual(len(observed["clean_build"]), 2)
+                self.assertEqual(len(observed["warm_cache_build"]), 2)
+                self.assertEqual(observed["noop_build"], [])
+                self.assertEqual(collector.phases[-1]["build_edges"], 0)
                 self.assertTrue((collector.build_dir / "artifact.txt").is_file())
                 self.assertEqual(
                     [phase["name"] for phase in collector.phases],
