@@ -39,6 +39,18 @@ public:
     BuildCache&
     CreateGraphCache(const std::string& hierarchy_name, const std::string& node_path);
 
+    // Local source-id indices: each member maps to its actual adjacency row owner.
+    // An absent map means legacy/non-duplicate metadata, not singleton groups.
+    using GroupOwners = std::vector<InnerIdType>;
+
+    const GroupOwners*
+    GetGroupOwners(const std::string& hierarchy_name, const std::string& node_path) const;
+
+    void
+    SetGroupOwners(const std::string& hierarchy_name,
+                   const std::string& node_path,
+                   GroupOwners owners);
+
     uint64_t
     CountMatchedSourceIds(const std::string* source_ids, uint64_t count) const;
 
@@ -61,6 +73,7 @@ private:
 
     // mapping from a hierarchy/node path key to one graph's build cache
     UnorderedMap<std::string, std::unique_ptr<BuildCache>> graph_caches_;
+    UnorderedMap<std::string, GroupOwners> group_owners_;
 };
 
 }  // namespace vsag
