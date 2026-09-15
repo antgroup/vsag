@@ -4,7 +4,6 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -17,6 +16,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "lite/fp16_codec.h"
 #include "quantization/scalar_quantization/scalar_quantization_utils.h"
 #include "simd/kernels/compute_l2.h"
 #include "simd/kernels/half_compute.h"
@@ -123,54 +123,6 @@ train_and_encode(const std::vector<float>& base, uint64_t count, uint64_t dim) {
     return model;
 }
 
-// Offline IEEE binary16 encoder; the Full generic.cpp conversion is not linked
-// into the standalone Lite probe. Keep this candidate codec out of Index.
-uint16_t
-float_to_fp16(float value) {
-    if (not std::isfinite(value)) {
-        throw std::invalid_argument("non-finite FP16 input");
-    }
-    uint32_t bits = 0;
-    std::memcpy(&bits, &value, sizeof(bits));
-    const auto sign = static_cast<uint16_t>((bits >> 16) & 0x8000U);
-    const uint32_t exponent = (bits >> 23) & 0xffU;
-    uint32_t mantissa = bits & 0x7fffffU;
-    if (exponent == 0) {
-        return sign;
-    }
-    int32_t half_exponent = static_cast<int32_t>(exponent) - 127 + 15;
-    if (half_exponent >= 31) {
-        throw std::invalid_argument("FP16 range overflow");
-    }
-    if (half_exponent <= 0) {
-        if (half_exponent < -10) {
-            return sign;
-        }
-        mantissa |= 0x800000U;
-        const auto shift = static_cast<uint32_t>(14 - half_exponent);
-        uint32_t rounded = mantissa >> shift;
-        const uint32_t remainder = mantissa & ((1U << shift) - 1U);
-        const uint32_t halfway = 1U << (shift - 1);
-        if (remainder > halfway or (remainder == halfway and (rounded & 1U) != 0)) {
-            ++rounded;
-        }
-        return static_cast<uint16_t>(sign | rounded);
-    }
-    uint32_t rounded = mantissa >> 13;
-    const uint32_t remainder = mantissa & 0x1fffU;
-    if (remainder > 0x1000U or (remainder == 0x1000U and (rounded & 1U) != 0)) {
-        ++rounded;
-    }
-    if (rounded == 0x400U) {
-        rounded = 0;
-        ++half_exponent;
-    }
-    if (half_exponent >= 31) {
-        throw std::invalid_argument("FP16 rounded range overflow");
-    }
-    return static_cast<uint16_t>(sign | (static_cast<uint32_t>(half_exponent) << 10) | rounded);
-}
-
 struct FP16Codes {
     std::vector<uint16_t> codes;
     double rmse = 0;
@@ -182,9 +134,9 @@ encode_fp16(const std::vector<float>& base) {
     result.codes.reserve(base.size());
     long double squared_error = 0;
     for (const float value : base) {
-        const uint16_t code = float_to_fp16(value);
+        const uint16_t code = vsag::lite::detail::encode_fp16(value);
         result.codes.push_back(code);
-        const float decoded = vsag::simd::FP16Traits<vsag::simd::GenericFP16Tag>::load_half(&code);
+        const float decoded = vsag::lite::detail::decode_fp16(code);
         const long double error = static_cast<long double>(value) - decoded;
         squared_error += error * error;
     }
@@ -246,10 +198,17 @@ hits(const std::vector<Candidate>& neighbors, const int32_t* truth, uint64_t k) 
 
 void
 fp16_self_test() {
-    const std::vector<float> values{
-        0.0F, -0.0F, 1.0F, 65504.0F, std::ldexp(1.0F, -24), std::ldexp(1.0F, -25)};
+    const std::vector<float> values{0.0F,
+                                    -0.0F,
+                                    1.0F,
+                                    65504.0F,
+                                    std::ldexp(1.0F, -24),
+                                    std::ldexp(1.0F, -25),
+                                    std::ldexp(1.0F, -26),
+                                    std::ldexp(1.5F, -24),
+                                    std::numeric_limits<float>::denorm_min()};
     const auto model = encode_fp16(values);
-    if (model.codes != std::vector<uint16_t>{0, 0x8000U, 0x3c00U, 0x7bffU, 1, 0}) {
+    if (model.codes != std::vector<uint16_t>{0, 0x8000U, 0x3c00U, 0x7bffU, 1, 0, 0, 2, 0}) {
         throw std::runtime_error("FP16 boundary encoding failed");
     }
     const float negative_zero =
@@ -257,10 +216,15 @@ fp16_self_test() {
     if (not std::signbit(negative_zero)) {
         throw std::runtime_error("FP16 negative zero lost");
     }
-    try {
-        float_to_fp16(100000.0F);
-        throw std::runtime_error("FP16 overflow was accepted");
-    } catch (const std::invalid_argument&) {
+    for (const float invalid : {65520.0F,
+                                100000.0F,
+                                std::numeric_limits<float>::infinity(),
+                                std::numeric_limits<float>::quiet_NaN()}) {
+        try {
+            vsag::lite::detail::encode_fp16(invalid);
+            throw std::runtime_error("invalid FP16 value was accepted");
+        } catch (const std::invalid_argument&) {
+        }
     }
 }
 
@@ -334,7 +298,7 @@ run(const std::filesystem::path& root) {
         auto fp16_scan = [&] {
             std::vector<uint16_t> query_codes(dim);
             for (uint64_t d = 0; d < dim; ++d) {
-                query_codes[d] = float_to_fp16(query[d]);
+                query_codes[d] = vsag::lite::detail::encode_fp16(query[d]);
             }
             return top_k(base.count, k, [&](uint64_t id) {
                 return vsag::simd::HalfComputeL2SqrImpl<

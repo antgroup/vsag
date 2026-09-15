@@ -34,6 +34,7 @@ jobs:
           clang-format-15 --dry-run --Werror \
             include/vsag/lite/index.h \
             src/lite/backend.h \
+            src/lite/fp16_codec.h \
             src/lite/bruteforce_backend.cpp \
             src/lite/graph_backend.cpp \
             src/lite/graph_backend_test.cpp \

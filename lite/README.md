@@ -86,9 +86,12 @@ in the English and Chinese links below.
 
 The optional [quantization probe](benchmark/README.md) measures classic
 per-dimension SQ8 and IEEE FP16 encoding on independent SIFT queries.
-It is a selection experiment, not a quantized Lite backend: Graph, public
-API and v1/v2 snapshots remain FP32. The code-byte count must not be reported
-as current index RSS or snapshot size.
+It is a selection experiment, not a public quantized Lite backend. An internal
+FP16 graph factory now measures combined graph traversal without changing
+Index or v1/v2 snapshots. At 100k SIFT it retained Recall@10 of 0.946 but took
+73.69 s to build and 711 us query P50, versus 21.69 s and 303 us for FP32
+in the same Release executable. The code-byte count must not be reported as
+current index RSS or snapshot size.
 
 - [English v0.1 guide](../docs/docs/en/src/development/lite_first.md)
 - [中文 v0.1 说明](../docs/docs/zh/src/development/lite_first.md)

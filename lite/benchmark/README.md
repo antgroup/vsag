@@ -145,7 +145,24 @@ candidate outcomes (median of each run's query P50):
 | SQ8 | 0.988 | 34.145 ms | 12,800,000 plus 1,024-byte model |
 | FP16 | 1.000 | 47.474 ms | 25,600,000 |
 
-These timings are from generic scalar exhaustive scans, not the Lite graph.
+An internal FP16 graph candidate is also covered by the graph test executable:
+
+    VSAG_SIFT_DIR=/path/to/scale-100000 /path/to/lite_graph_tests '[lite-fp16-sift]'
+
+It stores FP16 vectors and uses quantized query-to-node and node-to-node L2
+for graph traversal and construction. It remains an internal factory: the
+public Index API and v1/v2 snapshots do not expose it. On 2026-09-15, three
+10k SIFT runs at degree 16 / ef 128 kept Recall@10 at 0.973; median build was
+5.33 s and query P50 was 493 us, versus 1.32 s and 143 us for FP32 in the
+same Release executable. One 100k run kept Recall@10 at 0.946, with 73.69 s
+build and 711 us P50, versus 21.69 s and 303 us for FP32. FP16 vector code
+bytes were 25.6 MB at 100k, while IDs and adjacency targets accounted for
+another 0.8 MB and 12.8 MB; container and hash-map overhead are excluded.
+A transformed 10k input scaled by 0.001 also measured Recall@10 of 0.973.
+These results show no query or build speed advantage with the generic scalar
+half kernel.
+
+The first table above reports generic scalar exhaustive scans, separate from the Lite graph results.
 The FP16 result is lossless on original integer-valued SIFT coordinates:
 its reconstruction RMSE was zero. As an additional **transformed input**
 check, multiplying the 10k SIFT base and queries by 0.001 produced nonzero
@@ -154,7 +171,7 @@ transformed case is not a standard dataset result and does not establish
 quality for general floating-point embeddings. The probe keeps all three
 representations in memory; encoded bytes are not index RSS or snapshot size.
 
-Before integrating either candidate into the Lite graph, evaluate combined
-graph-plus-quantization Recall, latency, real index RSS, CRUD and Save/Load
-with a separately versioned snapshot format. The measured generic scalar
-kernels currently incur a substantial latency cost.
+Before exposing a quantized graph through Index, measure its steady-state RSS,
+choose or implement a faster distance kernel, and design a separately versioned
+snapshot with complete CRUD, Save/Load and malformed-input coverage. The scalar
+FP16 graph result does not justify public integration yet.

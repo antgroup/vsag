@@ -23,8 +23,10 @@
 #include <vector>
 
 #include "lite/backend.h"
+#include "lite/fp16_codec.h"
 
 using vsag::lite::detail::make_brute_force_backend;
+using vsag::lite::detail::make_fp16_graph_backend;
 using vsag::lite::detail::make_graph_backend;
 
 TEST_CASE("Lite graph backend validates input and survives CRUD", "[lite-graph]") {
@@ -310,6 +312,65 @@ TEST_CASE("Lite graph backend recall on independent queries", "[lite-graph]") {
     REQUIRE(hits >= 700);
 }
 
+TEST_CASE("Lite FP16 graph candidate validates range and recall", "[lite-graph][lite-fp16]") {
+    constexpr uint64_t count = 1000;
+    constexpr uint64_t dim = 16;
+    constexpr uint64_t queries = 100;
+    constexpr uint64_t k = 10;
+    std::mt19937 rng(20260915);
+    std::normal_distribution<float> normal(0.0F, 1.0F);
+    auto flat = make_brute_force_backend(dim);
+    REQUIRE(flat);
+    std::vector<float> values(count * dim);
+    for (uint64_t id = 0; id < count; ++id) {
+        for (uint64_t d = 0; d < dim; ++d) {
+            values[id * dim + d] = normal(rng);
+        }
+        REQUIRE((*flat)->Add(id, values.data() + id * dim, dim));
+    }
+    REQUIRE_FALSE(make_fp16_graph_backend(**flat, 1, 128));
+    auto graph = make_fp16_graph_backend(**flat, 16, 128);
+    REQUIRE(graph);
+    const float* decoded = (*graph)->VectorAt(0);
+    for (uint64_t d = 0; d < dim; ++d) {
+        REQUIRE(decoded[d] ==
+                vsag::lite::detail::decode_fp16(vsag::lite::detail::encode_fp16(values[d])));
+    }
+    const std::array<float, dim> overflow{70000.0F};
+    REQUIRE_FALSE((*graph)->Add(count, overflow.data(), dim));
+    REQUIRE_FALSE((*graph)->Update(0, overflow.data(), dim));
+    REQUIRE_FALSE((*graph)->Search(overflow.data(), dim, k));
+    uint64_t hits = 0;
+    std::array<float, dim> query{};
+    for (uint64_t q = 0; q < queries; ++q) {
+        for (float& value : query) {
+            value = normal(rng);
+        }
+        const auto exact = (*flat)->Search(query.data(), dim, k);
+        const auto approximate = (*graph)->Search(query.data(), dim, k);
+        REQUIRE(exact);
+        REQUIRE(approximate);
+        REQUIRE(approximate->size() == k);
+        for (const auto& neighbor : *approximate) {
+            REQUIRE(std::isfinite(neighbor.distance));
+            hits += static_cast<uint64_t>(
+                std::any_of(exact->begin(), exact->end(), [&](const auto& expected) {
+                    return expected.id == neighbor.id;
+                }));
+        }
+    }
+    INFO("FP16 graph Recall@10=" << static_cast<double>(hits) / (queries * k));
+    REQUIRE(hits >= 700);
+    REQUIRE((*graph)->Remove(0));
+    REQUIRE_FALSE((*graph)->Remove(0));
+    for (float& value : query) {
+        value = normal(rng);
+    }
+    REQUIRE((*graph)->Update(1, query.data(), dim));
+    REQUIRE((*graph)->Add(count, query.data(), dim));
+    REQUIRE((*graph)->Size() == count);
+}
+
 namespace {
 template <typename T>
 std::vector<std::vector<T>>
@@ -502,6 +563,55 @@ TEST_CASE("Lite graph SIFT independent-query probe", "[.][lite-sift]") {
               << build_ms << ',' << latency[(latency.size() - 1) / 2] << ','
               << latency[(latency.size() * 99 - 1) / 100] << ',' << save_ms << ',' << load_ms << ','
               << std::filesystem::file_size(snapshot_path) << '\n';
+    REQUIRE(hits >= queries.size() * 5);
+}
+
+TEST_CASE("Lite FP16 graph SIFT candidate probe", "[.][lite-fp16-sift]") {
+    const char* directory = std::getenv("VSAG_SIFT_DIR");
+    REQUIRE(directory != nullptr);
+    const std::string root(directory);
+    const auto base = read_sift<float>(root + "/base.fvecs", 128);
+    const auto queries = read_sift<float>(root + "/queries.fvecs", 128);
+    const auto truth = read_sift<int32_t>(root + "/groundtruth.ivecs", 10);
+    REQUIRE(queries.size() == truth.size());
+    auto flat = make_brute_force_backend(128);
+    REQUIRE(flat);
+    for (uint64_t id = 0; id < base.size(); ++id) {
+        REQUIRE((*flat)->Add(id, base[id].data(), 128));
+    }
+    auto start = std::chrono::steady_clock::now();
+    auto graph = make_fp16_graph_backend(**flat, 16, 128);
+    REQUIRE(graph);
+    const auto build_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    uint64_t links = 0;
+    for (uint64_t slot = 0; slot < (*graph)->Size(); ++slot) {
+        links += (*graph)->LinkCountAt(slot);
+    }
+    uint64_t hits = 0;
+    std::vector<double> latency;
+    for (uint64_t q = 0; q < queries.size(); ++q) {
+        start = std::chrono::steady_clock::now();
+        const auto result = (*graph)->Search(queries[q].data(), 128, 10);
+        latency.push_back(
+            std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start)
+                .count());
+        REQUIRE(result);
+        REQUIRE(result->size() == 10);
+        const std::unordered_set<int64_t> expected(truth[q].begin(), truth[q].end());
+        for (const auto& neighbor : *result) {
+            hits += expected.count(neighbor.id);
+        }
+    }
+    std::sort(latency.begin(), latency.end());
+    std::cout << "base_count,query_count,degree,ef,recall_at_10,build_ms,search_p50_us,"
+                 "search_p99_us,fp16_code_bytes,id_bytes,link_bytes\n";
+    std::cout << base.size() << ',' << queries.size() << ",16,128,"
+              << static_cast<double>(hits) / static_cast<double>(queries.size() * 10) << ','
+              << build_ms << ',' << latency[(latency.size() - 1) / 2] << ','
+              << latency[(latency.size() * 99 - 1) / 100] << ','
+              << base.size() * 128 * sizeof(uint16_t) << ',' << base.size() * sizeof(int64_t) << ','
+              << links * sizeof(uint64_t) << '\n';
     REQUIRE(hits >= queries.size() * 5);
 }
 
