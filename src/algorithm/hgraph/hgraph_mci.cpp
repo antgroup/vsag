@@ -1495,10 +1495,25 @@ HGraph::repair_mci_clique(InnerIdType node_id) {
         const auto k = std::min<uint64_t>(this->mci_parameters_.mcs, total - 1);
         Vector<std::pair<float, InnerIdType>> candidates(this->allocator_);
         candidates.reserve(k);
-        for (InnerIdType candidate = 0; candidate < total; ++candidate) {
-            if (k > 0 and candidate != node_id and not this->label_table_->IsRemoved(candidate)) {
-                const auto value = std::make_pair(
-                    precise_codes->ComputePairVectors(node_id, candidate), candidate);
+        // QueryById preserves stored-code pair semantics; codecs may reuse the seed code
+        // and prefetch a batch without reconstructing an approximate raw query vector.
+        constexpr InnerIdType batch_size = 64;
+        InnerIdType batch_ids[batch_size];
+        float batch_distances[batch_size];
+        for (InnerIdType candidate = 0; k > 0 and candidate < total;) {
+            InnerIdType count = 0;
+            while (candidate < total and count < batch_size) {
+                if (candidate != node_id and not this->label_table_->IsRemoved(candidate)) {
+                    batch_ids[count++] = candidate;
+                }
+                ++candidate;
+            }
+            if (count == 0) {
+                continue;
+            }
+            precise_codes->QueryById(batch_distances, node_id, batch_ids, count);
+            for (InnerIdType i = 0; i < count; ++i) {
+                const auto value = std::make_pair(batch_distances[i], batch_ids[i]);
                 if (candidates.size() < k) {
                     candidates.push_back(value);
                     std::push_heap(candidates.begin(), candidates.end());
@@ -1632,9 +1647,11 @@ HGraph::build_incremental_mci_clique(InnerIdType new_inner_id,
     visible_total = std::min(visible_total, total);
     Vector<InnerIdType> local_to_inner(this->allocator_);
     local_to_inner.push_back(new_inner_id);
+    UnorderedSet<InnerIdType> seen(this->allocator_);
+    seen.reserve(knn_ids.size());
     for (auto id : knn_ids) {
         if (id < visible_total and id != new_inner_id and not this->label_table_->IsRemoved(id) and
-            std::find(local_to_inner.begin(), local_to_inner.end(), id) == local_to_inner.end()) {
+            seen.insert(id).second) {
             local_to_inner.push_back(id);
         }
     }

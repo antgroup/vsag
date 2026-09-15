@@ -836,6 +836,68 @@ TEST_CASE("HGraph MCI fast search survives mutations flush and serialization",
     verify(index, false);
 }
 
+TEST_CASE("HGraph fallback discards candidates marked during traversal", "[ut][hgraph][mci]") {
+    constexpr int64_t total = 8;
+    constexpr int64_t dim = 4;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 100);
+    std::vector<float> vectors(total * dim, 1.0F);
+    auto params = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    params["index_param"]["mci_delete_clique_size_threshold"].SetInt(1);
+    auto created = vsag::Factory::CreateIndex("hgraph", params.Dump());
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    REQUIRE(index->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    class PausedFilter : public HalfRatioAllValidFilter {
+    public:
+        PausedFilter(const std::vector<int64_t>& labels, std::shared_future<void> resume)
+            : HalfRatioAllValidFilter(labels), last_(labels.back()), resume_(std::move(resume)) {
+        }
+        bool
+        CheckValid(int64_t id) const override {
+            if (id == last_ and not paused_.exchange(true)) {
+                reached.set_value();
+                timed_out = resume_.wait_for(std::chrono::seconds(10)) != std::future_status::ready;
+            }
+            return HalfRatioAllValidFilter::CheckValid(id);
+        }
+        mutable std::promise<void> reached;
+        mutable bool timed_out{false};
+
+    private:
+        int64_t last_;
+        std::shared_future<void> resume_;
+        mutable std::atomic<bool> paused_{false};
+    };
+    std::promise<void> resume;
+    auto filter = std::make_shared<PausedFilter>(ids, resume.get_future().share());
+    auto reached = filter->reached.get_future();
+    auto query = make_dataset(ids, vectors, 0, 1, dim);
+    const bool range = GENERATE(false, true);
+    const auto search_params =
+        R"({"hgraph":{"ef_search":64,"use_mci":false,"brute_force_threshold":1.0}})";
+    auto search = std::async(std::launch::async, [&]() {
+        return range ? index->RangeSearch(query, 1.0F, search_params, filter, total)
+                     : index->KnnSearch(query, total, search_params, filter);
+    });
+    // The ascending brute-force scan has already accepted the first ID when it pauses.
+    // Deletion completes before the pending query resumes, even if its initial filter was null.
+    const auto status = reached.wait_for(std::chrono::seconds(10));
+    auto removed = index->Remove({ids[0]});
+    resume.set_value();
+    auto result = search.get();
+    REQUIRE(status == std::future_status::ready);
+    REQUIRE_FALSE(filter->timed_out);
+    REQUIRE(removed.has_value());
+    REQUIRE(removed.value() == 1);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == total - 1);
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(result.value()->GetIds()[i] != ids[0]);
+    }
+}
+
 TEST_CASE("HGraph MCI physical deletion compacts slots and preserves mixed mutations",
           "[ut][hgraph][mci][force_remove]") {
     constexpr int64_t total = 48;
@@ -2376,7 +2438,8 @@ TEST_CASE("Clique clean flush and member checks do not allocate", "[ut][hgraph][
         members.assign({0});
         cell.CommitDelete(vsag::Vector<vsag::InnerIdType>(&allocator), members, total);
     }
-    SECTION("Loaded snapshots conservatively compact once") {
+    SECTION("Loaded dirty snapshots still require compaction") {
+        REQUIRE(cell.AppendNodeToClique(3, 0, total, 4));
         std::stringstream stream;
         vsag::IOStreamWriter writer(stream);
         cell.Serialize(writer);
@@ -2426,6 +2489,57 @@ TEST_CASE("Clique clean flush and member checks do not allocate", "[ut][hgraph][
     REQUIRE(after.retired_clique_count == 0);
     allocator.remaining = 0;
     REQUIRE_NOTHROW(cell.Flush(total));
+    allocator.remaining = -1;
+}
+
+TEST_CASE("Clique deserialization recognizes clean CSR and retains dirty state",
+          "[ut][hgraph][mci][flush]") {
+    FlushFailureAllocator allocator;
+    vsag::CliqueDataCell cell(&allocator);
+    cell.Clear(4);
+    vsag::Vector<vsag::InnerIdType> members({0, 1, 2}, &allocator);
+    cell.AppendNewClique(members, 4);
+    cell.Flush(4);
+    const auto scenario = GENERATE("clean", "extra", "delta", "deleted", "retired", "empty_row");
+    if (std::string(scenario) == "extra") {
+        REQUIRE(cell.AppendNodeToClique(3, 0, 4, 4));
+    } else if (std::string(scenario) == "delta") {
+        cell.AppendNewClique(members, 4);
+    } else if (std::string(scenario) == "deleted") {
+        members.assign({1});
+        cell.CommitDelete(members, vsag::Vector<vsag::InnerIdType>(&allocator), 4);
+    } else if (std::string(scenario) == "retired") {
+        members.assign({0});
+        cell.CommitDelete(vsag::Vector<vsag::InnerIdType>(&allocator), members, 4);
+    } else if (std::string(scenario) == "empty_row") {
+        cell.Assign(vsag::Vector<vsag::InnerIdType>({0, 0, 2}, &allocator),
+                    vsag::Vector<vsag::InnerIdType>({0, 1}, &allocator),
+                    vsag::Vector<vsag::InnerIdType>({0, 1, 2, 2, 2}, &allocator),
+                    vsag::Vector<vsag::InnerIdType>({1, 1}, &allocator),
+                    4);
+    }
+    const auto before = cell.CollectStats(4);
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    cell.Serialize(writer);
+    vsag::CliqueDataCell restored(&allocator);
+    vsag::IOStreamReader reader(stream);
+    restored.Deserialize(reader, 2, 4);
+    allocator.remaining = 0;
+    if (std::string(scenario) == "clean") {
+        REQUIRE_NOTHROW(restored.Flush(4));
+    } else {
+        REQUIRE_THROWS_AS(restored.Flush(4), std::bad_alloc);
+    }
+    allocator.remaining = -1;
+    REQUIRE_NOTHROW(restored.Flush(4));
+    const auto after = restored.CollectStats(4);
+    REQUIRE(after.total_membership_count == before.total_membership_count);
+    REQUIRE(after.covered_nodes == before.covered_nodes);
+    REQUIRE(after.inactive_node_count == before.inactive_node_count);
+    REQUIRE(after.delta_clique_count == 0);
+    allocator.remaining = 0;
+    REQUIRE_NOTHROW(restored.Flush(4));
     allocator.remaining = -1;
 }
 

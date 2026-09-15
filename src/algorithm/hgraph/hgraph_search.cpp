@@ -900,6 +900,29 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         }
     }
 
+    if (mci_result.route != "mci") {
+        // A fallback traversal can accept an ID before MARK_REMOVE and then visit a new
+        // slot with the same label after Add. Recheck the entire result against one deletion
+        // generation before packing, even if create_search_filter saw no deletions initially.
+        // MCI already pins its deletion state during traversal. Release this view before
+        // any label lookup below to preserve the label -> deletion lock order.
+        const auto deleted_view = this->label_table_->GetDeletedIdsReadView();
+        if (deleted_view != nullptr) {
+            DistanceRecordVector live_records(ctx.alloc);
+            live_records.reserve(search_result->Size());
+            while (not search_result->Empty()) {
+                const auto record = search_result->Top();
+                search_result->Pop();
+                if (deleted_view->CheckValid(record.second)) {
+                    live_records.push_back(record);
+                }
+            }
+            for (const auto& record : live_records) {
+                search_result->Push(record);
+            }
+        }
+    }
+
     // Trim and pack results
     if (is_range) {
         while (not search_result->Empty() and

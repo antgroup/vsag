@@ -561,7 +561,7 @@ CliqueDataCell::Deserialize(StreamReader& reader,
         "unsupported clique datacell format version");
     std::unique_lock<std::shared_mutex> lock(mutex_);
     available_total_.store(std::numeric_limits<uint64_t>::max(), std::memory_order_release);
-    // Snapshots do not carry dirty state; conservatively compact on the first Flush.
+    // Keep failed/partial loads dirty; derive clean state only after validation succeeds.
     needs_compaction_ = true;
     StreamReader::ReadVector(reader, p_maxc_);
     StreamReader::ReadVector(reader, maxcs_);
@@ -600,6 +600,21 @@ CliqueDataCell::Deserialize(StreamReader& reader,
         }
     }
     validate(total);
+    const auto has_members = [](const auto& rows) {
+        return std::any_of(
+            rows.begin(), rows.end(), [](const auto& row) { return not row.empty(); });
+    };
+    // Empty allocated delta rows and zero-filled masks do not require compaction. Retain
+    // conservative compaction for tombstones and malformed member IDs, as well as real delta.
+    needs_compaction_ =
+        base_total != total or not delta_cliques_.empty() or inactive_node_count_ != 0 or
+        retired_clique_count_ != 0 or delta_clique_extra_.size() != total_clique_count_ or
+        std::adjacent_find(p_maxc_.begin(), p_maxc_.end()) != p_maxc_.end() or
+        has_members(delta_clique_extra_) or has_members(delta_node_to_cids_) or
+        std::any_of(maxcs_.begin(), maxcs_.end(), [total](auto id) { return id >= total; }) or
+        std::any_of(node_to_cids_.begin(), node_to_cids_.end(), [&](auto cid) {
+            return cid >= total_clique_count_;
+        });
     available_total_.store(total, std::memory_order_release);
 }
 

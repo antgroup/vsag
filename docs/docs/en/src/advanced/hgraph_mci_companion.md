@@ -197,6 +197,9 @@ Flush is serialized with Add/Remove. It holds an exclusive clique-storage lock w
 and publishing the replacement, so searches may wait. Replacement buffers are allocated before
 publication; an allocation failure leaves the old clique representation intact. Temporary memory
 includes both the old and new CSR. Do not retain clique IDs across a flush.
+Loading a validated compact CSR with no delta entries, empty clique rows, or deletion/retirement
+markers preserves the clean state, so its first Flush skips rebuilding the CSR. Other snapshots
+are conservatively compacted when flushed.
 
 MCI search pins CSR, delta, and deletion masks with one shared lock per query and traverses them
 without copying membership lists. Contiguous FP32 vectors continue to use direct distance
@@ -209,6 +212,9 @@ Add/MARK_REMOVE may temporarily unpublish the companion, so concurrent queries s
 HGraph under the existing mutation semantics. This does not guarantee complete recall during a
 mutation; fallback results can be empty when the graph entry point has been deleted. Flush alone
 does not unpublish the companion; queries wait for the clique storage lock when necessary.
+Fallback queries recheck candidate IDs against one deletion-set view before packing results.
+This removes old candidates deleted during traversal, including an old slot whose label has
+been re-added at a new slot. It does not make an entire concurrent search a transactional snapshot.
 
 The clique data is serialized inside the HGraph index. Loading the HGraph index restores the
 companion automatically.

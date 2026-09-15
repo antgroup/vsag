@@ -909,6 +909,8 @@ private:
     remove_from_mci(const Vector<InnerIdType>& removed_inner_ids);
 
     /// Recover an existing query vector and run the same MCI update as Add, without reinserting it.
+    /// Non-FP32 repair scans O(N) stored-code distances per seed with O(mcs) heap storage;
+    /// FP32 repair uses HGraph KNN. Neither path promises logarithmic worst-case search time.
     void
     repair_mci_clique(InnerIdType node_id);
 
