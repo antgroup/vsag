@@ -28,6 +28,8 @@ namespace vsag {
 /// Relax clique distance constraints for remaining seeds, using the seed and graph neighbors.
 /// VisitNeighbors(seed, visitor) must stop when visitor returns false. Coverage counters must
 /// describe the memberships already stored in cliques; only newly stored members are counted.
+/// Reuse the parallel phase's atomic array to avoid an O(total) copy or aliasing atomics as plain
+/// integers. Worker joins provide synchronization; relaxed accesses suffice for this serial pass.
 template <typename Count, typename VisitNeighbors>
 uint64_t
 // NOLINTNEXTLINE(readability-identifier-naming)

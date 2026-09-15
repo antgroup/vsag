@@ -434,17 +434,16 @@ CliqueDataCell::append_new_clique_unlocked(const Vector<InnerIdType>& members, u
     std::sort(normalized.begin(), normalized.end());
     normalized.erase(std::unique(normalized.begin(), normalized.end()), normalized.end());
     if (normalized.empty()) {
+        logger::debug("MCI discards a new clique with no live in-range members, input_members={}",
+                      members.size());
         return;
     }
     delta_cliques_.push_back(std::move(normalized));
     retired_cliques_.push_back(0);
     ++active_clique_count_;
     for (auto node_id : delta_cliques_.back()) {
-        auto& node_cliques = delta_node_to_cids_[node_id];
-        if (std::find(node_cliques.begin(), node_cliques.end(), new_clique_id) ==
-            node_cliques.end()) {
-            node_cliques.push_back(new_clique_id);
-        }
+        // Members are unique and this freshly allocated clique ID cannot occur in old rows.
+        delta_node_to_cids_[node_id].push_back(new_clique_id);
     }
 }
 

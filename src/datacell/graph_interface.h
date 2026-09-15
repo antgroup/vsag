@@ -182,6 +182,9 @@ public:
     }
 
     /// Read the tail (e.g. code line size, node versions) following the io data.
+    /// Restore layout/configuration derived from these fields, such as the layout's code size.
+    /// The probe path calls this before WriteRaw fills the backing IO: defer any reconstruction
+    /// that reads backing IO contents (e.g. reverse edges) to FinishDeserialize after all fills join.
     virtual void
     DeserializeTail(StreamReader& reader) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,

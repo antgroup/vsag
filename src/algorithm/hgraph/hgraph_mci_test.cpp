@@ -2831,6 +2831,44 @@ TEST_CASE("Clique remapping preserves tombstones and is allocation failure atomi
     REQUIRE(view.IsLiveNode(0));
 }
 
+TEST_CASE("Fresh clique IDs append unique memberships and discard inactive input",
+          "[ut][hgraph][mci]") {
+    vsag::DefaultAllocator allocator;
+    vsag::CliqueDataCell cell(&allocator);
+    cell.Clear(3);
+    const vsag::Vector<vsag::InnerIdType> members({0, 0, 1, 1}, &allocator);
+    for (uint64_t i = 0; i < 3; ++i) {
+        cell.AppendNewClique(members, 3);
+    }
+    cell.MarkAvailable(3);
+    {
+        vsag::CliqueDataCellSearchView view;
+        REQUIRE(cell.TryGetSearchView(3, view));
+        REQUIRE((*view.delta_node_cids)[0].size() == 3);
+        REQUIRE((*view.delta_node_cids)[1].size() == 3);
+        for (uint64_t i = 0; i < 3; ++i) {
+            REQUIRE((*view.delta_node_cids)[0][i] == i);
+            REQUIRE((*view.delta_node_cids)[1][i] == i);
+        }
+    }
+    for (uint64_t i = 0; i < 3; ++i) {
+        REQUIRE(cell.GetCliqueMemberCount(i) == 2);
+    }
+    cell.Flush(3);
+    cell.AppendNewClique(members, 3);
+    vsag::Vector<vsag::InnerIdType> cids(&allocator);
+    cell.CollectNodeCliqueIds(0, cids);
+    REQUIRE(cids.size() == 4);
+    const vsag::Vector<vsag::InnerIdType> removed({0, 1}, &allocator);
+    cell.CommitDelete(removed, vsag::Vector<vsag::InnerIdType>(&allocator), 3);
+    const auto before = cell.TotalLogicalCliqueCount();
+    cell.AppendNewClique(members, 3);
+    REQUIRE(cell.TotalLogicalCliqueCount() == before);
+    cell.AppendNewClique(vsag::Vector<vsag::InnerIdType>({2, 2, 99}, &allocator), 3);
+    REQUIRE(cell.TotalLogicalCliqueCount() == before + 1);
+    REQUIRE(cell.GetCliqueMemberCount(before) == 1);
+}
+
 TEST_CASE("Clique flush handles fully deleted indexes and later additions",
           "[ut][hgraph][mci][flush]") {
     vsag::DefaultAllocator allocator;

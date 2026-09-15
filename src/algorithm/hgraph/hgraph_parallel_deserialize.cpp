@@ -175,8 +175,6 @@ HGraph::ParallelDeserialize(DeserializeReader& reader) {
     // after all fills have joined, before any FORCE_REMOVE may relocate tail IDs.
     this->bottom_graph_->FinishDeserialize();
     this->validate_and_publish_dedup_state(serialized_total_count);
-    this->publish_physical_code_capacity();
-    this->initialize_deserialized_runtime_state();
     if (!this->using_dedup_storage()) {
         this->total_count_ = this->basic_flatten_codes_->TotalCount();
     }
@@ -185,6 +183,8 @@ HGraph::ParallelDeserialize(DeserializeReader& reader) {
         // validating their shared ID domain or restoring the label deletion set.
         this->restore_mci_label_state(basic_info);
     }
+    this->publish_physical_code_capacity();
+    this->initialize_deserialized_runtime_state();
     if (this->raw_vector_ != nullptr) {
         this->has_raw_vector_ = true;
     }
