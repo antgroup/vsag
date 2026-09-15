@@ -15,12 +15,10 @@
 #pragma once
 
 #include <cstddef>
-#include <string>
 #include <vector>
 
 #include "basic_types.h"
 #include "container_types.h"
-#include "vsag/dataset.h"
 
 namespace vsag {
 

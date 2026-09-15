@@ -19,11 +19,13 @@
 #include <memory>
 #include <random>
 #include <set>
+#include <string>
 #include <tuple>
 
 #include "algorithm/hgraph/hgraph.h"
 #include "impl/allocator/safe_allocator.h"
 #include "unittest.h"
+#include "vsag/dataset.h"
 
 namespace vsag {
 
