@@ -22,6 +22,7 @@
 #include <cmath>
 #include <future>
 #include <numeric>
+#include <random>
 #include <set>
 #include <sstream>
 #include <thread>
@@ -30,6 +31,8 @@
 #include "impl/allocator/safe_allocator.h"
 #include "index/index_impl.h"
 #include "index_common_param.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "unittest.h"
 #include "vsag/options.h"
 
@@ -1384,4 +1387,142 @@ TEST_CASE("Pyramid IndexNode allows concurrent existing-child lookup",
 
     REQUIRE(lookup.get() == expected);
     REQUIRE(completed_while_shared);
+}
+
+TEST_CASE("Pyramid scalar RaBitQ split build supports search serialization and Add",
+          "[ut][pyramid][optimized_build]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 96;
+    const auto graph_type = GENERATE("nsw", "odescent");
+    const auto metric = GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR,
+                                 vsag::MetricType::METRIC_TYPE_IP,
+                                 vsag::MetricType::METRIC_TYPE_COSINE);
+    const bool fast = GENERATE(true, false);
+    const bool store_raw = GENERATE(false, true);
+    CAPTURE(graph_type, metric, fast, store_raw);
+    vsag::IndexCommonParam common;
+    common.dim_ = dim;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common.metric_ = metric;
+    common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto external = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "rabitq_bits_per_dim_query": 32,
+        "use_reorder": true,
+        "base_io_type": "block_memory_io",
+        "max_degree": 16,
+        "ef_construction": 64,
+        "index_min_size": 8,
+        "build_thread_count": 4,
+        "hierarchies": ["site", "category"]
+    })");
+    external["graph_type"].SetString(graph_type);
+    external["fast_encode_rabitq"].SetBool(fast);
+    external["store_raw_vector"].SetBool(store_raw);
+    if (store_raw) {
+        external["hierarchies"].SetJson(vsag::JsonType::Parse(R"(["site"])"));
+        if (std::string(graph_type) == "nsw") {
+            external["root_graph_type"].SetString("multi_layer");
+        }
+    }
+    auto param = vsag::Pyramid::CheckAndMappingExternalParam(external, common);
+    class ObservedPyramid : public vsag::Pyramid {
+    public:
+        using vsag::Pyramid::Pyramid;
+        bool scalar_build_observed{false};
+        bool fail_training{false};
+
+        void
+        Train(const vsag::DatasetPtr& data) override {
+            vsag::Pyramid::Train(data);
+            // The existing split serializer rejects temporary scalar storage. Observe that
+            // invariant through the public interface without exposing private build state.
+            std::stringstream stream;
+            vsag::IOStreamWriter writer(stream);
+            try {
+                Serialize(writer);
+            } catch (const vsag::VsagException& error) {
+                REQUIRE(std::string(error.what()).find("during optimized build") !=
+                        std::string::npos);
+                scalar_build_observed = true;
+            }
+            if (fail_training) {
+                throw std::runtime_error("injected training failure");
+            }
+        }
+    };
+    auto index = std::make_shared<ObservedPyramid>(param, common);
+    std::vector<float> vectors((count + 1) * dim);
+    std::vector<int64_t> ids(count + 1);
+    std::vector<std::string> sites(count + 1, "tenant/leaf");
+    std::vector<std::string> categories(count + 1, "group");
+    std::mt19937 generator(42);
+    std::normal_distribution<float> distribution;
+    for (int64_t i = 0; i <= count; ++i) {
+        ids[i] = 1000 + i;
+        float norm = 0.0F;
+        for (int64_t d = 0; d < dim; ++d) {
+            const auto value = distribution(generator);
+            vectors[i * dim + d] = value;
+            norm += value * value;
+        }
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[i * dim + d] /= std::sqrt(norm);
+        }
+    }
+    auto dataset = [&](int64_t offset, int64_t size) {
+        return vsag::Dataset::Make()
+            ->NumElements(size)
+            ->Dim(dim)
+            ->Ids(ids.data() + offset)
+            ->Float32Vectors(vectors.data() + offset * dim)
+            ->Paths("site", sites.data() + offset)
+            ->Paths("category", categories.data() + offset)
+            ->Owner(false);
+    };
+    if (fast and std::string(graph_type) == "odescent") {
+        index->fail_training = true;
+        REQUIRE_THROWS_AS(index->Build(dataset(0, count)), std::runtime_error);
+        REQUIRE(index->scalar_build_observed);
+        // Aborting the session must release scalar mode even when training fails.
+        std::stringstream aborted_stream;
+        vsag::IOStreamWriter aborted_writer(aborted_stream);
+        REQUIRE_NOTHROW(index->Serialize(aborted_writer));
+        index = std::make_shared<ObservedPyramid>(param, common);
+    }
+    REQUIRE(index->Build(dataset(0, count)).empty());
+    REQUIRE(index->scalar_build_observed == fast);
+    REQUIRE(index->GetNumElements() == count);
+    auto stats = vsag::JsonType::Parse(index->GetStats());
+    REQUIRE(stats["hierarchies"]["site"]["subindex_quality"]["graph_subindexes"].GetInt() >= 1);
+    if (not store_raw) {
+        REQUIRE(stats["hierarchies"]["category"]["subindex_quality"]["graph_subindexes"].GetInt() >=
+                1);
+    }
+    const auto search_params =
+        R"({"pyramid":{"ef_search":96,"hierarchies":["site"],"rabitq_one_bit_search":true}})";
+    const auto check_query = [&](const std::shared_ptr<vsag::Pyramid>& target, int64_t id) {
+        auto result = target->KnnSearch(dataset(id, 1), 1, search_params, vsag::FilterPtr{});
+        REQUIRE(result->GetDim() == 1);
+        REQUIRE(result->GetIds()[0] == ids[id]);
+        REQUIRE(std::isfinite(result->GetDistances()[0]));
+    };
+    for (int64_t id : {0, 37, 95}) {
+        check_query(index, id);
+    }
+    // Serialization must only see final split records, never temporary scalar build codes.
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    index->Serialize(writer);
+    auto loaded = std::make_shared<vsag::Pyramid>(param, common);
+    vsag::IOStreamReader reader(stream);
+    loaded->Deserialize(reader);
+    check_query(loaded, 37);
+    REQUIRE(index->Add(dataset(count, 1)).empty());
+    REQUIRE(loaded->Add(dataset(count, 1)).empty());
+    check_query(index, count);
+    check_query(loaded, count);
 }

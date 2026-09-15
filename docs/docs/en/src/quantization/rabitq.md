@@ -72,10 +72,10 @@ the PCA, base/query bit, and FHT keys for its base quantizer. The
 `fast_encode_rabitq` and `fast_encode_rabitq_rounds` are available on HGraph,
 IVF, and Pyramid and are propagated to both base and precise RaBitQ quantizers.
 
-For a normal first HGraph build with split RaBitQ and `fast_encode_rabitq=true`,
-HGraph first encodes all vectors into one unsigned-byte scalar code per dimension, together
+For a normal first HGraph or Pyramid build with split RaBitQ and `fast_encode_rabitq=true`,
+the index first encodes all vectors into one unsigned-byte scalar code per dimension, together
 with the standard RaBitQ metadata and a separate 8-byte code sum per vector. It waits for
-that parallel encoding phase before starting graph tasks. Those tasks use scalar SIMD kernels
+the encoding phase before starting graph tasks. Those tasks use scalar SIMD kernels
 for code-code distances; the raw inner-product kernels are independent of the configured
 `x+y` bit count, while the quantizer still applies the matching quantization range and
 center. After construction, the scalar codes are packed
@@ -84,6 +84,8 @@ rerunning PCA, ROM/FHT, or RaBitQ quantization. The temporary scalar records and
 are released before `Build` returns. For an 8-bit total code the scalar and packed
 payloads have the same size; lower total bit counts trade extra build memory for faster
 graph-distance evaluation.
+
+Pyramid also uses the scalar SIMD build path described above for ordinary initial `Build` calls (NSW and ODescent), including `3+5` split configurations. Construction uses symmetric distances from the full `x+y`-bit codes, then packs filter/supplement records once and releases temporary storage. Setting `fast_encode_rabitq=false` selects the existing build path. Builds that use an imported Build Cache and subsequent `Add` calls do not enable this temporary build mode. Pyramid encodes in parallel when storage is preallocated and the IO supports it, and sequentially otherwise; both cases use scalar SIMD graph distances. Pyramid does not require the HGraph-only `rabitq_fused_datacell` option.
 
 ```json
 {
