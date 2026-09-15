@@ -164,9 +164,9 @@ public:
     SetUnsupported(HGraph& graph, const std::string& condition) {
         if (condition == "conjugate") {
             graph.use_conjugate_graph_ = true;
-        } else if (condition == "float32") {
+        } else if (condition == "non-float32") {
             graph.data_type_ = DataTypes::DATA_TYPE_INT8;
-        } else if (condition == "L2") {
+        } else if (condition == "non-L2") {
             graph.metric_ = MetricType::METRIC_TYPE_IP;
         } else if (condition == "dimensions") {
             ++graph.dim_;
@@ -337,12 +337,15 @@ TEST_CASE_METHOD(HGraphFGIMTest, "FGIM rejects unsupported inputs", "[ut][hgraph
         ExpectInvalid(sources, 3, "deleted");
     }
     SECTION("unsupported source properties") {
-        const auto condition =
-            GENERATE("float32", "L2", "dimensions", "deduplicate", "base storage", "fully built");
+        const std::string condition = GENERATE(
+            "non-float32", "non-L2", "dimensions", "deduplicate", "base storage", "fully built");
+        const std::string expected_diagnostic = condition == "non-float32" ? "float32"
+                                                : condition == "non-L2"    ? "L2"
+                                                                           : condition;
         CAPTURE(condition);
         // Isolate input validation without requiring an unsupported source build.
         SetUnsupported(*b, condition);
-        ExpectInvalid(sources, 3, condition);
+        ExpectInvalid(sources, 3, expected_diagnostic);
     }
 }
 

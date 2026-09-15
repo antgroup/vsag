@@ -45,7 +45,9 @@ public:
     static FGIMKnnGraph
     BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, std::size_t k);
 
-    // Internal-only search, not a public index API. Same source preconditions as Build.
+    // Internal-only search, not a public index API. The caller must validate the target
+    // as FGIM-compatible and provide at least target.dim_ floats in query.
+    // CrossQuery does not repeat full source validation.
     // Optional statistics are for diagnostics; normal FGIM runs do not collect them.
     static FGIMNeighborList
     CrossQuery(const HGraph& target,
