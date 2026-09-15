@@ -165,7 +165,7 @@ Pyramid 使用 split code 的 code-code 距离完成增量 FLAT→GRAPH 晋升�
 | `hops_limit` | int | 不限 | 根节点底图及每个非根 GRAPH 的逐图 KNN 跳数上限；不大于 `ef_search` 时忽略。根节点的稀疏路由层不受限制，FLAT 扫描与范围检索不受影响。 |
 | `subindex_ef_search` | int | `50` | 沿路径向下遍历中间子图时的候选集大小 |
 | `hierarchies` | string[] | `[]` | 指定检索哪个层级。空数组表示使用默认（匿名）层级。 |
-| `hierarchy_op` | string | `"single"` | 多层级结果合并方式：`single`（检索单个层级）、`union`、`intersection`。**注意：** `union` 和 `intersection` 尚未实现——设置后 `KnnSearch`/`RangeSearch` 会返回错误。 |
+| `hierarchy_op` | string | `"single"` | 选择两个或更多层级时使用 `intersection`：同一层级内路径为 OR，不同层级为 AND，约束在候选截断和重排前生效。支持 `KnnSearch`、`RangeSearch` 和 `SearchWithRequest`。`union` 仍不支持；仅选择一个层级时省略此参数。 |
 | `rabitq_error_rate` | float | `1.9` | 本次搜索使用的正数 lower-bound 误差倍率。默认值 `1.9` 较大；值越大，精度越高，但搜索速度越慢。 |
 
 ```cpp
@@ -307,6 +307,22 @@ auto result = index->RangeSearch(
     query, /*radius=*/20.0f,
     R"({"pyramid": {"ef_search": 100, "hierarchies": ["category"]}})").value();
 ```
+
+### 跨层级交集检索
+
+必须为**每个**选中的层级分别提供命名查询路径。`|` 分隔同层级内的 OR 条件，`/` 分隔路径段。例如 `(host1 OR host2) AND (finance/bank OR finance/insurance)`：
+
+```cpp
+std::string hosts[] = {"host1|host2"};
+std::string categories[] = {"finance/bank|finance/insurance"};
+query->Paths("site", hosts)->Paths("category", categories);
+auto result = index->KnnSearch(
+    query, 10,
+    R"({"pyramid":{"ef_search":100,"hierarchies":["site","category"],"hierarchy_op":"intersection"}})");
+```
+
+缺少命名路径或指定未知层级会报错；空路径字符串或不存在的路径对应空范围。单层级查询保留原有的默认路径回退行为。外部过滤器和已删除标签过滤同样作用于交集结果。
+第一个选中的层级驱动近似搜索，其余层级的路径树在最终截断和重排之前过滤候选；召回率仍取决于常规搜索参数。恢复已有多层级索引即可使用，无需启用 `store_paths` 或重建索引。
 
 ### 序列化与反序列化
 

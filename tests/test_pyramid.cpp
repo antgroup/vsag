@@ -1943,7 +1943,7 @@ TEST_CASE("Multi-Hierarchy: Search without hierarchies param in multi-mode error
     REQUIRE_FALSE(result.has_value());
 }
 
-TEST_CASE("Multi-Hierarchy: Multi-hierarchy union/intersection rejected",
+TEST_CASE("Multi-Hierarchy: Intersection requires all named paths",
           "[ft][pyramid][multi_hierarchy]") {
     MultiHierarchyFixture f;
     auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
