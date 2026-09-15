@@ -171,6 +171,12 @@ public:
     [[nodiscard]] uint64_t
     TotalLogicalCliqueCount() const;
 
+    [[nodiscard]] uint64_t
+    GetTotalNodes() const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        return delta_node_to_cids_.size();
+    }
+
     void
     CollectNodeCliqueIds(InnerIdType node_id, Vector<InnerIdType>& clique_ids) const;
 

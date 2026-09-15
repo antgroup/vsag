@@ -215,6 +215,9 @@ does not unpublish the companion; queries wait for the clique storage lock when 
 Fallback queries recheck candidate IDs against one deletion-set view before packing results.
 This removes old candidates deleted during traversal, including an old slot whose label has
 been re-added at a new slot. It does not make an entire concurrent search a transactional snapshot.
+If candidates are deleted during traversal, KNN fallback may return fewer than `k` results even
+when enough live vectors remain. Results are best-effort under concurrent mutations; there is no
+secondary fill pass, since another pass could encounter further mutations too.
 
 The clique data is serialized inside the HGraph index. Loading the HGraph index restores the
 companion automatically.

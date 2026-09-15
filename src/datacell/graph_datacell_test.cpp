@@ -31,6 +31,7 @@ TEST_CASE("Graph deserialization restores incoming edges before tail moves",
           "[ut][GraphDataCell][mci][reload_remove]") {
     const bool sparse = GENERATE(false, true);
     const bool versioned = GENERATE(false, true);
+    const bool split_io = GENERATE(false, true);
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common;
     common.allocator_ = allocator;
@@ -65,7 +66,22 @@ TEST_CASE("Graph deserialization restores incoming edges before tail moves",
     if (versioned) {
         graph->DeleteNeighborsById(ids[1]);
     }
-    test_serializion(*graph, *restored);
+    if (split_io and not sparse) {
+        std::stringstream stream;
+        IOStreamWriter writer(stream);
+        graph->Serialize(writer);
+        const auto bytes = stream.str();
+        IOStreamReader reader(stream);
+        const auto io_size = restored->ReserveIO(reader);
+        const auto io_offset = reader.GetCursor();
+        // Mirror the probe path: read versions before filling the reserved IO extent.
+        reader.Seek(io_offset + io_size);
+        restored->DeserializeTail(reader);
+        restored->WriteRaw(reinterpret_cast<const uint8_t*>(bytes.data()) + io_offset, io_size, 0);
+        restored->FinishDeserialize();
+    } else {
+        test_serializion(*graph, *restored);
+    }
     Vector<InnerIdType> incoming(allocator.get());
     restored->GetIncomingNeighbors(ids[1], incoming);
     REQUIRE(incoming.size() == (versioned ? 0 : 1));

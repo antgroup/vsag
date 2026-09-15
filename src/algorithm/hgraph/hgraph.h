@@ -56,6 +56,9 @@
 #include "vsag/index_features.h"
 
 namespace vsag {
+
+class ChunkedManifest;
+struct ComponentManifestEntry;
 class FlattenOptimizedBuildInterface;
 class HGraphRaBitQFusedDataCell;
 class HGraphRaBitQSearcher;
@@ -239,6 +242,12 @@ public:
 
     void
     Serialize(StreamWriter& writer) const override;
+
+    void
+    Serialize(SerializeWriter& writer, uint64_t chunk_size) const override;
+
+    void
+    ParallelDeserialize(DeserializeReader& reader) override;
 
     /// Set the number of threads used during Build().
     void
@@ -650,6 +659,74 @@ private:
     void
     serialize_label_info(StreamWriter& writer) const;
 
+    /// shared post-deserialization steps (dedup validation, memory accounting)
+    void
+    finish_deserialize();
+
+    /// validate and publish the logical state derived from the code-slot map
+    void
+    validate_and_publish_dedup_state(uint64_t serialized_total_count);
+
+    /// publish the physical code capacity after the code components are ready
+    void
+    publish_physical_code_capacity();
+
+    /// initialize runtime capacity shared by search and subsequent mutations
+    void
+    initialize_deserialized_runtime_state();
+
+    /// restore basic info and duplicate-format flags from the footer
+    /// metadata and return the serialized total count; shared by
+    /// Deserialize(StreamReader&) and the parallel deserialization paths
+    uint64_t
+    apply_footer_metadata(const MetadataPtr& metadata);
+
+    // Load clique-owned state only; restore labels after all parallel component tasks finish.
+    void
+    deserialize_mci_cliques(StreamReader& reader, const JsonType& basic_info);
+
+    void
+    restore_mci_label_state(const JsonType& basic_info);
+
+    /// Restore a whole component whose Deserialize seeks inside its own payload
+    /// (see requires_seekable_payload). The frame is buffered first, so the
+    /// component gets a seekable reader and the frame stays exactly consumed
+    /// even though the component's own cursor does not reach the end.
+    void
+    deserialize_seekable_whole_component(DeserializeReader& reader,
+                                         const ComponentManifestEntry& comp,
+                                         bool compressed,
+                                         const JsonType& basic_info);
+
+    /// dispatch a whole component of the chunked manifest to its sequential
+    /// Deserialize by name.
+    ///
+    /// Not internally synchronized. The manifest path dispatches each whole
+    /// component as one pool task, so distinct components run concurrently:
+    /// every branch must touch only index members that no other branch
+    /// touches. Adding a branch that reads or writes shared state (a counter,
+    /// a capacity field) requires either moving that state out of here or
+    /// serializing the component on the calling thread.
+    void
+    deserialize_whole_component(const std::string& name,
+                                StreamReader& reader,
+                                const JsonType& basic_info);
+
+    /// parallel body load driven by the manifest recorded in the footer
+    void
+    parallel_deserialize_manifest(DeserializeReader& reader,
+                                  ThreadPool& pool,
+                                  const ChunkedManifest& chunked_manifest,
+                                  const JsonType& basic_info);
+
+    /// parallel load of an uncompressed body without a recorded manifest:
+    /// probe the component extents sequentially, then fill io data in parallel
+    void
+    parallel_deserialize_probe(DeserializeReader& reader,
+                               ThreadPool& pool,
+                               uint64_t body_end,
+                               const JsonType& basic_info);
+
     /// Read label (external id) mappings from stream.
     void
     deserialize_label_info(StreamReader& reader) const;
@@ -971,7 +1048,9 @@ private:
     mutable std::shared_mutex persistent_codes_mutex_;  // pins flatten storage during MCI search
     mutable std::mutex mci_build_mutex_;                // serializes full MCI reconstruction
     // MCI writers take mutation before force_remove; label scopes end before repair/search.
-    // Shrink/UpdateVector take force_remove before persistent_codes. Repair releases force_remove
+    // Add insertion and Shrink/UpdateVector take force_remove before persistent_codes.
+    // FORCE_REMOVE reacquires force_remove exclusively before pinning codes exclusively to shrink.
+    // Repair releases force_remove
     // before public search reacquires it (shared_mutex is non-recursive); mutation still excludes
     // all ID-moving operations. CSR storage/view locks are internal to CliqueDataCell.
     mutable std::mutex mci_mutation_mutex_;         // serializes MCI Add, Remove and Flush
@@ -1004,6 +1083,11 @@ private:
     bool support_force_remove_{false};  // enable physical deletion
     bool use_conjugate_graph_{false};   // enable graph-enhancement feedback
     std::shared_ptr<ConjugateGraph> conjugate_graph_{nullptr};
+    // guards conjugate_graph_ against concurrent search paths. During a
+    // parallel restore exactly one component task acquires it (the conjugate
+    // graph handler); before adding another acquirer there, read the INVARIANT
+    // in hgraph_parallel_deserialize.cpp — two restore tasks holding component
+    // locks while waiting on this one would deadlock.
     mutable std::shared_mutex conjugate_graph_mutex_;
     float duplicate_distance_threshold_{0.0F};  // distance threshold for duplicate detection
 

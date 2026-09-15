@@ -96,8 +96,59 @@ public:
     void
     Serialize(StreamWriter& writer) override;
 
+    [[nodiscard]] uint64_t
+    GetIOSize() const override {
+        // any io whose Write persists the bytes (in-memory or file-backed)
+        // can be pre-allocated by ReserveIO and filled concurrently by
+        // WriteRaw; only SkipDeserialize ios (e.g. reader_io, whose Write is
+        // a no-op counter) opt out and fall back to the whole-component path
+        if constexpr (not IOTmpl::SkipDeserialize) {
+            return this->layout_.GetIOSize();
+        } else {
+            return 0;
+        }
+    }
+
+    uint64_t
+    ReserveIO(StreamReader& reader) override {
+        if constexpr (not IOTmpl::SkipDeserialize) {
+            GraphInterface::Deserialize(reader);
+            uint64_t io_size = 0;
+            StreamReader::ReadObj(reader, io_size);
+            this->layout_.ResizeForOverwrite(io_size);
+            return io_size;
+        } else {
+            return GraphInterface::ReserveIO(reader);
+        }
+    }
+
+    void
+    WriteRaw(const uint8_t* data, uint64_t size, uint64_t offset) override {
+        if constexpr (not IOTmpl::SkipDeserialize) {
+            this->layout_.WriteRaw(data, size, offset);
+        } else {
+            GraphInterface::WriteRaw(data, size, offset);
+        }
+    }
+
+    void
+    DeserializeTail(StreamReader& reader) override {
+        if constexpr (not IOTmpl::SkipDeserialize) {
+            StreamReader::ReadObj(reader, this->code_line_size_);
+            this->layout_.SetCodeSize(this->code_line_size_);
+            if (is_support_delete_) {
+                StreamReader::ReadVector(reader, node_versions_);
+            }
+        } else {
+            GraphInterface::DeserializeTail(reader);
+        }
+    }
+
     void
     Deserialize(StreamReader& reader) override;
+
+    void
+    FinishDeserialize() override;
 
     bool
     InMemory() const override {
@@ -354,6 +405,12 @@ GraphDataCell<IOTmpl>::Deserialize(StreamReader& reader) {
     if (is_support_delete_) {
         StreamReader::ReadVector(reader, node_versions_);
     }
+    this->FinishDeserialize();
+}
+
+template <typename IOTmpl>
+void
+GraphDataCell<IOTmpl>::FinishDeserialize() {
     if (reverse_edges_) {
         // Reverse edges are derived state, not part of the serialized graph. Restore them
         // after node versions, before any physical deletion can move a referenced tail ID.
