@@ -610,3 +610,49 @@ TEST_CASE("LabelTable Concurrent MarkRemove", "[ut][LabelTable]") {
         }
     }
 }
+
+TEST_CASE("LabelTable restores live padding labels together with tombstones", "[ut][LabelTable]") {
+    DefaultAllocator allocator;
+    LabelTable labels(&allocator);
+    labels.Resize(64);
+    labels.Insert(0, -1);
+    labels.Insert(1, 100);
+    REQUIRE(labels.HasActivePaddingLabel());
+    const Vector<InnerIdType> removed(std::initializer_list<InnerIdType>{0}, &allocator);
+    labels.RestoreDeletedIds(removed, 2);
+    REQUIRE_FALSE(labels.HasActivePaddingLabel());
+    labels.RestoreDeletedIds(Vector<InnerIdType>(&allocator), 2);
+    REQUIRE(labels.HasActivePaddingLabel());
+    // A live re-add remains active even if an older slot with the same label is marked.
+    labels.Insert(2, -1);
+    labels.RestoreDeletedIds(removed, 3);
+    REQUIRE(labels.HasActivePaddingLabel());
+    REQUIRE(labels.GetIdByLabel(-1) == 2);
+    labels.RestoreDeletedIds(Vector<InnerIdType>({0, 2}, &allocator), 3);
+    REQUIRE_FALSE(labels.HasActivePaddingLabel());
+}
+
+TEST_CASE("LabelTable padding restore ignores unused capacity", "[ut][LabelTable]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    LabelTable labels(allocator.get());
+    labels.Insert(0, 100);
+    labels.Insert(1, 200);
+    labels.label_table_.resize(128, -1);
+    labels.RebuildActivePaddingLabelIdsFromRemap();
+    REQUIRE_FALSE(labels.HasActivePaddingLabel());
+
+    labels.Insert(2, -1);
+    labels.RebuildActivePaddingLabelIdsFromRemap();
+    REQUIRE(labels.HasActivePaddingLabel());
+    labels.MarkRemove(-1);
+    labels.RebuildActivePaddingLabelIdsFromRemap();
+    REQUIRE_FALSE(labels.HasActivePaddingLabel());
+    labels.EraseFromDeletedIds(2);
+    REQUIRE(labels.HasActivePaddingLabel());
+
+    labels.MarkRemove(-1);
+    labels.label_table_.resize(2);
+    labels.EraseFromDeletedIds(2);
+    REQUIRE_FALSE(labels.IsRemoved(2));
+    REQUIRE_FALSE(labels.HasActivePaddingLabel());
+}

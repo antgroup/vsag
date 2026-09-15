@@ -32,14 +32,17 @@
 #include "analyzer/hgraph_analyzer.h"
 #include "datacell/clique_datacell.h"
 #include "hgraph.h"
+#include "hgraph_component_names.h"
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
+#include "storage/chunked_manifest.h"
 #include "storage/serialization.h"
 #include "unittest.h"
 #include "vsag/bitset.h"
 #include "vsag/dataset.h"
 #include "vsag/factory.h"
 #include "vsag/filter.h"
+#include "vsag/serialize_writer.h"
 
 namespace {
 
@@ -277,22 +280,35 @@ read_flushed_mci(const vsag::IndexPtr& index, vsag::Allocator* allocator) {
     REQUIRE(index->Flush().has_value());
     const auto stats = vsag::JsonType::Parse(index->GetStats());
     const uint64_t n = stats["mci_total_nodes"].GetInt();
-    const uint64_t c = stats["mci_base_clique_count"].GetInt();
-    const uint64_t m = stats["mci_base_membership_count"].GetInt();
     REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
     std::stringstream stream;
-    REQUIRE(index->Serialize(stream).has_value());
+    class PlainWriter : public vsag::SerializeWriter {
+    public:
+        explicit PlainWriter(std::stringstream& stream) : stream_(stream) {
+        }
+        void
+        Write(const char* data, uint64_t size) override {
+            stream_.write(data, static_cast<std::streamsize>(size));
+        }
+
+    private:
+        std::stringstream& stream_;
+    } writer(stream);
+    REQUIRE(index->Serialize(writer, vsag::DEFAULT_SERIALIZE_CHUNK_SIZE).has_value());
     vsag::IOStreamReader reader(stream);
     auto footer = vsag::Footer::Parse(reader);
     REQUIRE(footer != nullptr);
     REQUIRE_FALSE(footer->GetMetadata()->Get("has_conjugate_graph").GetBool());
     FlushedMCISnapshot snapshot;
     snapshot.bytes = stream.str();
-    snapshot.end = snapshot.bytes.size() - footer->Length();
-    // v2: four CSR vectors, clique count, empty delta rows, and inactive/retired masks.
-    const uint64_t mci_bytes = 88 + 13 * (n + c) + 8 * m;
-    REQUIRE(snapshot.end >= mci_bytes);
-    snapshot.begin = snapshot.end - mci_bytes;
+    const auto manifest =
+        vsag::ChunkedManifest::FromJson(footer->GetMetadata()->Get(vsag::CHUNKED_LAYOUT_KEY));
+    manifest.Validate(snapshot.bytes.size() - footer->Length());
+    const auto* component = manifest.FindComponent(vsag::COMPONENT_MCI_CLIQUES);
+    REQUIRE(component != nullptr);
+    REQUIRE(component->granularity == vsag::ComponentGranularity::Whole);
+    snapshot.begin = component->offset;
+    snapshot.end = component->offset + component->logical_size;
     reader.Seek(0);
     vsag::StreamReader::ReadVector(reader, snapshot.labels);
     snapshot.labels.resize(n);
@@ -873,8 +889,10 @@ TEST_CASE("HGraph fallback discards candidates marked during traversal", "[ut][h
     std::promise<void> resume;
     auto filter = std::make_shared<PausedFilter>(ids, resume.get_future().share());
     auto reached = filter->reached.get_future();
-    auto query = make_dataset(ids, vectors, 0, 1, dim);
-    const bool range = GENERATE(false, true);
+    const auto mode = GENERATE(0, 1, 2);
+    const bool range = mode == 1;
+    const bool batch = mode == 2;
+    auto query = make_dataset(ids, vectors, 0, batch ? 2 : 1, dim);
     const auto search_params =
         R"({"hgraph":{"ef_search":64,"use_mci":false,"brute_force_threshold":1.0}})";
     auto search = std::async(std::launch::async, [&]() {
@@ -892,10 +910,90 @@ TEST_CASE("HGraph fallback discards candidates marked during traversal", "[ut][h
     REQUIRE(removed.has_value());
     REQUIRE(removed.value() == 1);
     REQUIRE(result.has_value());
-    REQUIRE(result.value()->GetDim() == total - 1);
-    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
-        REQUIRE(result.value()->GetIds()[i] != ids[0]);
+    REQUIRE(result.value()->GetNumElements() == (batch ? 2 : 1));
+    REQUIRE(result.value()->GetDim() == (batch ? total : total - 1));
+    for (int64_t row = 0; row < result.value()->GetNumElements(); ++row) {
+        for (int64_t i = 0; i < total - 1; ++i) {
+            const auto label = result.value()->GetIds()[row * result.value()->GetDim() + i];
+            REQUIRE(label != ids[0]);
+            REQUIRE(label != -1);
+        }
+        if (batch) {
+            REQUIRE(result.value()->GetIds()[row * total + total - 1] == -1);
+        }
     }
+}
+
+TEST_CASE("MCI local candidates deduplicate the bounded input and reset between seeds",
+          "[ut][hgraph][mci][shared_build]") {
+    vsag::DefaultAllocator allocator;
+    vsag::MCIV3BuildParams params;
+    params.total = 6;
+    params.candidate_limit = 5;
+    params.clique_max = 4;
+    vsag::MCILocalCliqueBuilder builder(params, &allocator);
+    std::vector<std::atomic<int>> coverage(6);
+    for (auto& count : coverage) {
+        count.store(0);
+    }
+    const vsag::InnerIdType neighbors[] = {1, 1, 0, 99, 2, 3};
+    auto distance = [](auto, auto) { return 1.0F; };
+    auto batch_distance = [](auto, auto, auto, auto, auto, float*) {};
+    auto emit = [](const auto&) { FAIL("The candidates are below the local threshold"); };
+    for (uint64_t round = 0; round < 2; ++round) {
+        const auto stats =
+            builder.Build<false>(0, neighbors, 6, 1.0F, coverage, distance, batch_distance, emit);
+        REQUIRE(stats.candidates == 2);
+    }
+    coverage[1].store(3);
+    const auto stats =
+        builder.Build<false>(0, neighbors, 6, 1.0F, coverage, distance, batch_distance, emit);
+    REQUIRE(stats.candidates == 1);
+}
+
+TEST_CASE("MCI restored tombstoned padding label permits batch KNN", "[ut][hgraph][mci][batch]") {
+    constexpr int64_t total = 16;
+    constexpr int64_t dim = 4;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), -1);
+    std::vector<float> vectors(total * dim, 1.0F);
+    auto json = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    json["index_param"]["graph_type"].SetString("nsw");
+    json["index_param"]["support_force_remove"].SetBool(true);
+    const auto params = json.Dump();
+    auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+    REQUIRE(index->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+    REQUIRE(index->Remove({-1}, vsag::RemoveMode::MARK_REMOVE).value() == 1);
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = vsag::Factory::CreateIndex("hgraph", params).value();
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    REQUIRE(restored->GetNumElements() == total - 1);
+    const auto result = restored->KnnSearch(
+        make_dataset(ids, vectors, 1, 2, dim), 3, R"({"hgraph":{"ef_search":32}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetNumElements() == 2);
+    REQUIRE(result.value()->GetDim() == 3);
+    for (int64_t i = 0; i < 6; ++i) {
+        REQUIRE(result.value()->GetIds()[i] != -1);
+    }
+}
+
+TEST_CASE("MCI failed emission does not publish coverage", "[ut][hgraph][mci][shared_build]") {
+    vsag::DefaultAllocator allocator;
+    vsag::MCIV3BuildParams params;
+    params.total = 1;
+    params.candidate_limit = 0;
+    vsag::MCILocalCliqueBuilder builder(params, &allocator);
+    std::vector<std::atomic<int>> coverage(1);
+    coverage[0].store(0);
+    auto distance = [](auto, auto) { return 0.0F; };
+    auto batch_distance = [](auto, auto, auto, auto, auto, float*) {};
+    auto emit = [](const auto&) { throw std::bad_alloc(); };
+    REQUIRE_THROWS_AS(
+        builder.Build<false>(0, nullptr, 0, 200.0F, coverage, distance, batch_distance, emit),
+        std::bad_alloc);
+    REQUIRE(coverage[0].load() == 0);
 }
 
 TEST_CASE("HGraph MCI physical deletion compacts slots and preserves mixed mutations",

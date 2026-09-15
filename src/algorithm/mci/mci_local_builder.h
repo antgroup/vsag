@@ -56,8 +56,10 @@ public:
               2, std::min<uint64_t>({params.clique_max, candidate_limit_ + 1, params.total}))),
           max_saved_(std::min<uint64_t>(candidate_limit_, params.max_degree + 2)),
           candidates_(allocator),
+          seen_candidates_(allocator),
           local_cliques_(max_saved_) {
         candidates_.reserve(candidate_limit_);
+        seen_candidates_.reserve(candidate_limit_);
         edges_.reserve(candidate_limit_ * (candidate_limit_ + 1) / 2);
         for (auto& clique : local_cliques_) {
             clique.reserve(candidate_limit_ + 1);
@@ -97,6 +99,7 @@ public:
             }
         };
         candidates_.clear();
+        seen_candidates_.clear();
         edges_.clear();
         auto start = now();
         const auto node_limit = std::max<uint64_t>(3, params_.total / 100);
@@ -106,9 +109,7 @@ public:
                 coverage[id].load(std::memory_order_relaxed) >= static_cast<int>(node_limit)) {
                 continue;
             }
-            if (std::none_of(candidates_.begin(), candidates_.end(), [id](const auto& candidate) {
-                    return candidate.id == id;
-                })) {
+            if (seen_candidates_.insert(id).second) {
                 candidates_.push_back({id, 0.0F});
             }
         }
@@ -261,6 +262,7 @@ private:
     uint64_t threshold_;
     uint64_t max_saved_;
     Vector<Candidate> candidates_;
+    UnorderedSet<InnerIdType> seen_candidates_;
     std::vector<Edge> edges_;
     std::vector<std::vector<InnerIdType>> local_cliques_;
     mci::ccrmce_runner<Edge, InnerIdType> runner_;
