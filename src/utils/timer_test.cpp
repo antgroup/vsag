@@ -47,3 +47,17 @@ TEST_CASE("Timer Basic", "[ut][Timer]") {
         REQUIRE(cost >= 5.0);
     }
 }
+
+TEST_CASE("Timer Reset restarts elapsed time and preserves threshold", "[ut][Timer]") {
+    Timer timer;
+    constexpr double threshold_ms = 100.0;
+    timer.SetThreshold(threshold_ms);
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    REQUIRE(timer.CheckOvertime());
+    const auto before_reset = timer.Record();
+    timer.Reset();
+    REQUIRE(timer.Record() < before_reset);
+    REQUIRE_FALSE(timer.CheckOvertime());
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    REQUIRE(timer.CheckOvertime());
+}

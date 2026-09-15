@@ -1,11 +1,11 @@
 # Pyramid
 
-![Pyramid: a tree of per-node proximity sub-graphs keyed by a path string; the search walks down the tree along the query's path prefix and runs ef_search inside the leaf sub-graph](../figures/indexes/pyramid-overview.svg)
+![Pyramid: a tree of per-node proximity sub-graphs keyed by path strings; vectors can belong to multiple paths and search walks the requested path prefixes](../figures/indexes/pyramid-overview.svg)
 
-Pyramid is VSAG's **hierarchical, path-partitioned** graph index. Every vector is
-tagged with a path string such as `"a/d/f"`, and Pyramid builds a graph per node
-in that path tree. At query time you supply a path prefix, and Pyramid restricts
-the search to the corresponding sub-tree.
+Pyramid is VSAG's **hierarchical, path-partitioned** graph index. A vector can be
+tagged with one or multiple path strings such as `"a/d/f"`, and Pyramid
+builds a graph per node in those path trees. At query time you supply one or more
+path prefixes, and Pyramid restricts the search to the corresponding sub-trees.
 
 This is ideal for multi-tenant deployments, tag-partitioned catalogs, or any
 scenario where one logical index serves many groups that must not cross-contaminate
@@ -17,9 +17,10 @@ results.
 
 ## How it works
 
-1. **Path tree.** Each vector carries a `path` in addition to its id. Paths use
-   `/` as separator (e.g. `"tenant_a/lang_en/topic_news"`). Pyramid builds one
-   sub-index for every path prefix seen during build.
+1. **Path tree.** Each vector can carry independent paths in addition to its id.
+   Paths use `/` as separator (e.g. `"tenant_a/lang_en/topic_news"`). Pyramid
+   builds one sub-index for every path prefix seen during build. The vector data
+   and id are stored once even when the vector belongs to multiple paths.
 2. **Per-level sub-graphs.** By default every level gets its own proximity graph.
    Use `no_build_levels` to skip levels that are too small or too coarse to
    benefit from graph indexing — those levels still exist as passthrough
@@ -238,9 +239,9 @@ final reordering uses the configured reorder source.
 
 ### Dataset API for named hierarchies
 
-Use the overloaded `Paths(hierarchy_name, paths)` method to assign paths per
+Use the overloaded `Paths(hierarchy_name, paths)` methods to assign paths per
 hierarchy. The same `Ids()` and `Float32Vectors()` are shared across all
-hierarchies:
+hierarchies. The pointer overload keeps the existing one-path-per-vector form:
 
 ```cpp
 auto base = vsag::Dataset::Make();
@@ -272,10 +273,45 @@ const std::string* category_paths = data->GetPaths("category");
 
 `GetDataByIds` and `GetDataByIdsWithFlag` calls without `DATA_FLAG_PATH` do not attach path arrays.
 Selecting `DATA_FLAG_PATH` while `store_paths` is `false` returns an invalid-argument error. When
-path storage is enabled, a hierarchy is included only if every requested ID has a recorded path in
-that hierarchy. If even one requested ID was built or added without that hierarchy's path, its
-getter returns `nullptr`; other hierarchies whose requested paths are complete are still returned.
-In single-hierarchy mode, the same completeness rule applies to `GetPaths()`.
+path storage is enabled, these legacy getters include a hierarchy only if every requested ID has
+exactly one recorded path in that hierarchy. If any requested ID has no recorded path or multiple
+paths, its getter returns `nullptr`; other hierarchies whose requested paths are complete are returned.
+In single-hierarchy mode, the same rule applies to `GetPaths()`.
+
+Use the structured overload to retrieve every path regardless of the stored representation:
+
+```cpp
+std::vector<std::vector<std::string>> tag_paths;
+if (data->GetPaths("tag", tag_paths)) {
+    // tag_paths[i] contains every path for requested_ids[i].
+}
+```
+
+To assign multiple independent paths to one vector in the same hierarchy, pass
+a nested vector. The outer vector has one entry per dataset element; each inner
+vector has one or multiple paths:
+
+```cpp
+std::vector<std::vector<std::string>> tag_paths = {
+    {"technology", "military"}, // vector 0 belongs to both paths
+    {"sports"},                  // vector 1 belongs to one path
+    {""},                        // vector 2 belongs to the hierarchy root
+};
+
+auto base = vsag::Dataset::Make();
+base->NumElements(3)
+    ->Dim(128)
+    ->Ids(ids)
+    ->Float32Vectors(data)
+    ->Paths("tag", std::move(tag_paths))
+    ->Paths("site", site_paths) // legacy pointer form can coexist
+    ->Owner(false);
+index->Build(base);
+```
+
+An empty inner vector is invalid. An inner vector containing `""` assigns the vector to the root.
+Duplicate paths and shared prefixes are inserted once per tree node. `Add()` accepts the same form,
+and serialization preserves every resulting path assignment.
 
 ### Searching a specific hierarchy
 
@@ -295,10 +331,25 @@ auto result = index->KnnSearch(
     R"({"pyramid": {"ef_search": 100, "hierarchies": ["site"]}})").value();
 ```
 
+The legacy query form uses `|` for a union of path alternatives, for example
+`"technology|military"`; a vector reachable through both alternatives appears
+once in the result. In this legacy string form, `|` is reserved and has no
+escaping syntax. A structured query avoids that delimiter convention and also
+allows a literal `|` inside a path segment:
+
+```cpp
+auto query = vsag::Dataset::Make();
+query->NumElements(1)
+    ->Dim(128)
+    ->Float32Vectors(q)
+    ->Paths("tag", std::vector<std::vector<std::string>>{{"technology", "military"}})
+    ->Owner(false);
+```
+
 ### Incremental insertion (Add)
 
-`Add()` works the same as `Build()` — provide named paths and the index inserts
-into all matching hierarchies:
+`Add()` works the same as `Build()` — provide either single or structured named
+paths and the index inserts each accepted vector into all matching paths:
 
 ```cpp
 auto new_data = vsag::Dataset::Make();
@@ -357,9 +408,11 @@ For each hierarchy, `root_graphs` reports `root_graph_type`, `bottom_graph_stora
 `route_graph_size`.
 `AnalyzeIndexBySearch` also reports path-scoped query recall, distance, latency, and, when reorder
 is enabled, quantization metrics. Its query dataset must carry the same default or named-hierarchy
-paths required by `KnnSearch`; when paths are required or supplied for a batched dataset, provide
-one path per query. The `analyze_index` tool cannot currently load hierarchy paths from its dense
-query file, so use the C++ API for path-scoped dynamic analysis.
+paths required by `KnnSearch`. For a batched dataset, the outer path collection has one row per
+query: the legacy overload supplies one path string per row (and uses `|` for a union), while the
+structured overload supplies one or many atomic paths per row and permits literal `|`
+characters. The `analyze_index` tool cannot currently load hierarchy paths from its dense query
+file, so use the C++ API for path-scoped dynamic analysis.
 
 ## Mark remove
 

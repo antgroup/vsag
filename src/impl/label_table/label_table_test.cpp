@@ -514,3 +514,28 @@ TEST_CASE("LabelTable Concurrent MarkRemove", "[ut][LabelTable]") {
         }
     }
 }
+
+TEST_CASE("LabelTable padding restore ignores unused capacity", "[ut][LabelTable]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    LabelTable labels(allocator.get());
+    labels.Insert(0, 100);
+    labels.Insert(1, 200);
+    labels.label_table_.resize(128, -1);
+    labels.RebuildActivePaddingLabelIdsFromRemap();
+    REQUIRE_FALSE(labels.HasActivePaddingLabel());
+
+    labels.Insert(2, -1);
+    labels.RebuildActivePaddingLabelIdsFromRemap();
+    REQUIRE(labels.HasActivePaddingLabel());
+    labels.MarkRemove(-1);
+    labels.RebuildActivePaddingLabelIdsFromRemap();
+    REQUIRE_FALSE(labels.HasActivePaddingLabel());
+    labels.EraseFromDeletedIds(2);
+    REQUIRE(labels.HasActivePaddingLabel());
+
+    labels.MarkRemove(-1);
+    labels.label_table_.resize(2);
+    labels.EraseFromDeletedIds(2);
+    REQUIRE_FALSE(labels.IsRemoved(2));
+    REQUIRE_FALSE(labels.HasActivePaddingLabel());
+}

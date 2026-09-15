@@ -14,7 +14,10 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <memory>
+#include <utility>
+#include <vector>
 
 #include "pyramid.h"
 #include "pyramid_path_store.h"
@@ -78,15 +81,25 @@ Pyramid::GetDataByIdsWithFlag(const int64_t* ids,
         if (hierarchy->path_store == nullptr) {
             throw VsagException(ErrorType::INTERNAL_ERROR, "Pyramid path store is missing");
         }
-        auto paths = std::make_unique<std::string[]>(static_cast<uint64_t>(count));
-        if (not hierarchy->path_store->GetPaths(inner_ids, paths.get())) {
+        std::vector<std::vector<std::string>> path_rows;
+        if (not hierarchy->path_store->GetPathRows(inner_ids, path_rows) ||
+            std::any_of(
+                path_rows.begin(), path_rows.end(), [](const auto& row) { return row.empty(); })) {
             continue;
         }
-        if (hierarchy_name.empty()) {
-            result->Paths(paths.get());
-        } else {
-            result->Paths(hierarchy_name, paths.get());
+
+        const bool has_multiple_paths = std::any_of(
+            path_rows.begin(), path_rows.end(), [](const auto& row) { return row.size() > 1; });
+        if (has_multiple_paths) {
+            result->Paths(hierarchy_name, std::move(path_rows));
+            continue;
         }
+
+        auto paths = std::make_unique<std::string[]>(static_cast<uint64_t>(count));
+        for (uint64_t offset = 0; offset < static_cast<uint64_t>(count); ++offset) {
+            paths[offset] = std::move(path_rows[offset][0]);
+        }
+        result->Paths(hierarchy_name, paths.get());
         paths.release();
     }
     return result;
