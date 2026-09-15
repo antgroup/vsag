@@ -30,6 +30,7 @@ AdaptivePruningParameter::FromJson(const JsonType& json) {
         json.Contains("fill_rejected") || json.Contains("adaptive_pruning_fill_rejected");
     CHECK_ARGUMENT(not has_removed_fill,
                    "fill_rejected has been removed; rejected neighbors are never filled");
+    // Parse a complete configuration: omitted fields reset to defaults on every call.
     *this = AdaptivePruningParameter{};
     if (json.Contains("adaptive_pruning")) {
         enabled = json["adaptive_pruning"].GetBool();
@@ -115,6 +116,7 @@ select_edges_adaptive(Vector<PruningCandidate>& candidates,
             for (const auto& selected : accepted) {
                 float pair_distance = distance(selected.second, candidate.second);
                 ++result.distance_calls;
+                // Finite inputs can still overflow squared L2; keep this check in release builds.
                 const bool valid_distance = std::isfinite(pair_distance) && pair_distance >= 0;
                 CHECK_ARGUMENT(
                     valid_distance,

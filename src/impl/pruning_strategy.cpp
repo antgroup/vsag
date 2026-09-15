@@ -52,7 +52,8 @@ public:
 
 private:
     const DistanceProviderForGraph& distance_provider_;
-    // Per-call cache; adaptive passes may select different source IDs (at most twice the degree).
+    // Cache lifetime follows this object: one selection, or the entire reverse-neighbor loop.
+    // Selection caches contain accepted source IDs; the outer reverse cache contains centers.
     UnorderedMap<InnerIdType, ComputerInterfacePtr> computers_;
 };
 
@@ -64,7 +65,8 @@ select_adaptive_heap(const DistHeapPtr& edges,
                      Allocator* allocator,
                      float alpha,
                      const AdaptivePruningParameter& parameter) {
-    // Keep distance-computer scratch bounded to one vertex selection.
+    // Keep distance-computer scratch bounded to one vertex selection, including reverse pruning.
+    // Sharing across reverse selections could retain O(degree^2) source computers.
     PairwiseDistanceComputer pairwise_distance(distance_provider, allocator);
     Vector<PruningCandidate> candidates(allocator);
     candidates.reserve(edges->Size());
@@ -187,6 +189,7 @@ mutually_connect_new_element(InnerIdType cur_c,
     }
 
     if (selected_neighbors.empty()) {
+        // No forward neighbors means no reverse edges to update, and back() would be invalid.
         graph->InsertNeighborsById(cur_c, selected_neighbors);
         return cur_c;
     }
