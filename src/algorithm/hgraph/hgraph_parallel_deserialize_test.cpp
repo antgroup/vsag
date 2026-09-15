@@ -109,7 +109,9 @@ public:
         if (len > buffer_.size() or offset > buffer_.size() - len) {
             throw std::out_of_range("read beyond the in-memory file");
         }
-        std::memcpy(dest, buffer_.data() + offset, len);
+        if (len > 0) {
+            std::memcpy(dest, buffer_.data() + offset, len);
+        }
     }
 
 protected:
@@ -178,7 +180,9 @@ std::string
 RewriteChunkedManifest(const std::string& buffer,
                        const std::function<void(nlohmann::json&)>& mutate) {
     auto read_func = [&buffer](uint64_t offset, uint64_t len, void* dest) {
-        std::memcpy(dest, buffer.data() + offset, len);
+        if (len > 0) {
+            std::memcpy(dest, buffer.data() + offset, len);
+        }
     };
     vsag::ReadFuncStreamReader footer_reader(read_func, 0, buffer.size());
     auto footer = vsag::Footer::Parse(footer_reader);

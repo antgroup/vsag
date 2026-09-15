@@ -525,7 +525,9 @@ public:
         if (len > bytes_.size() or offset > bytes_.size() - len) {
             throw std::runtime_error("chunked functional-test read is out of range");
         }
-        std::memcpy(dest, bytes_.data() + offset, len);
+        if (len > 0) {
+            std::memcpy(dest, bytes_.data() + offset, len);
+        }
     }
 
 protected:
