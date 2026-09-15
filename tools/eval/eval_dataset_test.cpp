@@ -484,6 +484,11 @@ TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][
     REQUIRE(coverage_result["index_info"].empty());
     REQUIRE(omp_get_max_threads() == caller_thread_count);
 
+    config.recall_target = 1.01;
+    REQUIRE_THROWS_WITH(vsag::eval::EvaluateSearch(index, dataset, config),
+                        "recall_target must be finite and in [0, 1]");
+    config.recall_target = 1.0;
+
     config.search_param = R"({"hgraph":{"ef_search":0}})";
     REQUIRE_THROWS_WITH(
         vsag::eval::EvaluateSearch(index, dataset, config),

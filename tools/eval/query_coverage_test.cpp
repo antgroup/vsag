@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "case/search_eval_case.h"
 #include "eval_config.h"
 #include "eval_dataset.h"
 #include "eval_job.h"
@@ -68,6 +69,17 @@ LoadYamlConfig(const std::string& extra_yaml = "") {
 }
 
 void
+ConstructSearchCase(const EvalConfig& config) {
+    std::vector<float> vectors{0.0F};
+    std::vector<int64_t> ids{0};
+    auto queries =
+        vsag::Dataset::Make()->NumElements(1)->Dim(1)->Float32Vectors(vectors.data())->Owner(false);
+    auto truth = vsag::Dataset::Make()->NumElements(1)->Dim(1)->Ids(ids.data())->Owner(false);
+    auto dataset = EvalDataset::FromSearchDatasets(queries, truth);
+    SearchEvalCase eval_case("", "", nullptr, config, dataset);
+}
+
+void
 RequireCoverage(const Monitor::JsonType& result,
                 double target,
                 uint64_t reached_queries,
@@ -82,32 +94,35 @@ RequireCoverage(const Monitor::JsonType& result,
 
 }  // namespace
 
-TEST_CASE("EvalConfig parses optional recall targets from CLI and YAML",
+TEST_CASE("Search evaluation accepts parsed recall targets and rejects invalid values",
           "[ut][eval][query_coverage]") {
     REQUIRE_FALSE(LoadCliConfig({}).recall_target.has_value());
     REQUIRE(LoadCliConfig({"--recall_target", "0.9"}).recall_target.value() == Catch::Approx(0.9));
-    REQUIRE_THROWS_WITH(LoadCliConfig({"--recall_target", "1.01"}),
+    REQUIRE_THROWS_WITH(ConstructSearchCase(LoadCliConfig({"--recall_target", "1.01"})),
                         "recall_target must be finite and in [0, 1]");
 
     REQUIRE_FALSE(LoadYamlConfig().recall_target.has_value());
     REQUIRE(LoadYamlConfig("recall_target: 0\n").recall_target.value() == Catch::Approx(0.0));
     REQUIRE(LoadYamlConfig("recall_target: 1\n").recall_target.value() == Catch::Approx(1.0));
-    REQUIRE_THROWS_WITH(LoadYamlConfig("recall_target: -0.01\n"),
+    REQUIRE_THROWS_WITH(ConstructSearchCase(LoadYamlConfig("recall_target: -0.01\n")),
                         "recall_target must be finite and in [0, 1]");
-    REQUIRE_THROWS_WITH(LoadYamlConfig("recall_target: .nan\n"),
+    REQUIRE_THROWS_WITH(ConstructSearchCase(LoadYamlConfig("recall_target: .nan\n")),
                         "recall_target must be finite and in [0, 1]");
 }
 
-TEST_CASE("EvalConfig rejects recall targets for modes without recall at k",
+TEST_CASE("Search evaluation rejects recall targets for modes without recall at k",
           "[ut][eval][query_coverage]") {
     const auto knn_filter = LoadYamlConfig("search_mode: knn_filter\nrecall_target: 0.9\n");
+    REQUIRE_NOTHROW(ConstructSearchCase(knn_filter));
     REQUIRE(knn_filter.search_mode == "knn_filter");
     REQUIRE(knn_filter.recall_target.value() == Catch::Approx(0.9));
 
-    REQUIRE_THROWS_WITH(LoadYamlConfig("search_mode: range\nrecall_target: 0.9\n"),
-                        "recall_target is supported only for knn and knn_filter search modes");
-    REQUIRE_THROWS_WITH(LoadYamlConfig("search_mode: range_filter\nrecall_target: 0.9\n"),
-                        "recall_target is supported only for knn and knn_filter search modes");
+    REQUIRE_THROWS_WITH(
+        ConstructSearchCase(LoadYamlConfig("search_mode: range\nrecall_target: 0.9\n")),
+        "recall_target is supported only for knn and knn_filter search modes");
+    REQUIRE_THROWS_WITH(
+        ConstructSearchCase(LoadYamlConfig("search_mode: range_filter\nrecall_target: 0.9\n")),
+        "recall_target is supported only for knn and knn_filter search modes");
 
     REQUIRE(LoadYamlConfig("search_mode: range\n").search_mode == "range");
 }

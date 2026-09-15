@@ -139,7 +139,6 @@ EvalConfig::Load(argparse::ArgumentParser& parser) {
         config.enable_percent_latency = false;
     }
 
-    config.Validate();
     return config;
 }
 
@@ -219,7 +218,6 @@ EvalConfig::Load(YAML::Node& yaml_node, const EvalJob& global_options) {
         disable = false;
     }
 
-    config.Validate();
     return config;
 }
 
