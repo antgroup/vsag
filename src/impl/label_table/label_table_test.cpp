@@ -29,6 +29,41 @@
 
 using namespace vsag;
 
+TEST_CASE("LabelTable deletion snapshot uses the requested allocator", "[ut][LabelTable]") {
+    DefaultAllocator table_allocator;
+    DefaultAllocator snapshot_allocator;
+    LabelTable table(&table_allocator);
+    const auto& const_table = table;
+    auto empty = const_table.GetAllDeletedIds(&snapshot_allocator);
+    REQUIRE(empty.empty());
+    REQUIRE(empty.get_allocator() == AllocatorWrapper<InnerIdType>(&snapshot_allocator));
+
+    table.Insert(0, 100);
+    table.Insert(1, 101);
+    table.Insert(2, 102);
+    REQUIRE(table.MarkRemove(std::vector<LabelType>{100, 102}) == 2);
+    auto snapshot = const_table.GetAllDeletedIds(&snapshot_allocator);
+    REQUIRE(snapshot.get_allocator() == AllocatorWrapper<InnerIdType>(&snapshot_allocator));
+    std::sort(snapshot.begin(), snapshot.end());
+    auto legacy_snapshot = table.GetAllDeletedIds();
+    std::sort(legacy_snapshot.begin(), legacy_snapshot.end());
+    REQUIRE(legacy_snapshot == std::vector<InnerIdType>{0, 2});
+    REQUIRE(std::equal(
+        snapshot.begin(), snapshot.end(), legacy_snapshot.begin(), legacy_snapshot.end()));
+
+    // The snapshot owns its data and does not keep the deletion read lock alive.
+    REQUIRE(table.MarkRemove(101) == 1);
+    table.EraseFromDeletedIds(0);
+    REQUIRE(snapshot.size() == 2);
+    REQUIRE(snapshot[0] == 0);
+    REQUIRE(snapshot[1] == 2);
+    auto updated = const_table.GetAllDeletedIds(&snapshot_allocator);
+    std::sort(updated.begin(), updated.end());
+    REQUIRE(updated.size() == 2);
+    REQUIRE(updated[0] == 1);
+    REQUIRE(updated[1] == 2);
+}
+
 TEST_CASE("LabelTable deletion read view pins mutations once per query", "[ut][LabelTable]") {
     DefaultAllocator allocator;
     LabelTable table(&allocator);

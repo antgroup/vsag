@@ -293,6 +293,13 @@ public:
         return std::vector<InnerIdType>(deleted_ids_.begin(), deleted_ids_.end());
     }
 
+    // Return an owned snapshot directly in the caller's allocator, without an intermediate copy.
+    Vector<InnerIdType>
+    GetAllDeletedIds(Allocator* allocator) const {
+        std::shared_lock rlock(delete_ids_mutex_);
+        return {deleted_ids_.begin(), deleted_ids_.end(), allocator};
+    }
+
 private:
     InnerIdType
     get_id_by_label_with_reverse_map(LabelType label) const noexcept;

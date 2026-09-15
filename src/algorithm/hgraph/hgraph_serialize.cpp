@@ -1100,7 +1100,7 @@ HGraph::Deserialize(StreamReader& reader) {
             this->mci_cliques_->Deserialize(buffer_reader, mci_format_version, total);
             if (this->support_force_remove()) {
                 const auto removed_ids = this->mci_cliques_->GetInactiveNodeIds();
-                this->label_table_->RestoreDeletedIds(removed_ids, this->total_count_.load());
+                this->label_table_->RestoreDeletedIds(removed_ids, total);
                 this->delete_count_.store(static_cast<int64_t>(removed_ids.size()));
             }
         }
