@@ -163,6 +163,8 @@ HGraph::Build(const DatasetPtr& data) {
     std::vector<int64_t> ret;
     const bool using_build_cache = this->has_loaded_cache();
     if (using_build_cache) {
+        CHECK_ARGUMENT(not adaptive_pruning_.enabled,
+                       "adaptive_pruning does not yet support building from imported cache");
         this->check_fused_mutation_supported("Build with imported cache");
         if (this->using_dedup_storage()) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
@@ -872,7 +874,8 @@ HGraph::publish_unique_to_bottom_graph(InnerIdType inner_id,
                                      flatten_codes,
                                      neighbors_mutex_,
                                      allocator_,
-                                     alpha_);
+                                     alpha_,
+                                     &adaptive_pruning_);
         return;
     }
     bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));

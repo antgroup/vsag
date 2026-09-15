@@ -65,7 +65,8 @@ MakePyramidIndex(uint32_t index_min_size,
                  bool use_mrle_split = false,
                  bool use_mrle_fp32 = false,
                  bool use_reorder = false,
-                 bool store_raw_vector = false) {
+                 bool store_raw_vector = false,
+                 bool adaptive = false) {
     PyramidTestIndex result;
     vsag::IndexCommonParam common_param;
     common_param.dim_ = PYRAMID_TEST_DIM;
@@ -124,6 +125,10 @@ MakePyramidIndex(uint32_t index_min_size,
         external_param[vsag::PYRAMID_PRECISE_QUANTIZATION_TYPE].SetString(
             vsag::QUANTIZATION_TYPE_VALUE_FP32);
     }
+    if (adaptive) {
+        external_param["adaptive_pruning"].SetBool(true);
+        external_param["adaptive_pruning_apply_to_reverse"].SetBool(true);
+    }
     auto param = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
     result.index = std::make_shared<vsag::Pyramid>(param, common_param);
     return result;
@@ -136,7 +141,9 @@ MakeRootPyramidIndex(const std::string& root_graph_type,
                      bool support_duplicate = false,
                      uint64_t build_thread_count = 1,
                      bool use_rabitq_with_sq8 = false,
-                     const std::string& graph_storage_type = vsag::GRAPH_STORAGE_TYPE_VALUE_FLAT) {
+                     const std::string& graph_storage_type = vsag::GRAPH_STORAGE_TYPE_VALUE_FLAT,
+                     bool adaptive = false,
+                     bool reverse = false) {
     PyramidTestIndex result;
     vsag::IndexCommonParam common_param;
     common_param.dim_ = PYRAMID_TEST_DIM;
@@ -168,6 +175,10 @@ MakeRootPyramidIndex(const std::string& root_graph_type,
         external[vsag::PYRAMID_BASE_IO_TYPE].SetString("block_memory_io");
         external[vsag::PYRAMID_PRECISE_IO_TYPE].SetString("block_memory_io");
         external[vsag::PYRAMID_RABITQ_BITS_PER_DIM_BASE].SetUint64(3);
+    }
+    if (adaptive) {
+        external["adaptive_pruning"].SetBool(true);
+        external["adaptive_pruning_apply_to_reverse"].SetBool(reverse);
     }
     auto param = vsag::Pyramid::CheckAndMappingExternalParam(external, common_param);
     result.index = std::make_shared<vsag::Pyramid>(param, common_param);
@@ -529,11 +540,13 @@ TEST_CASE("Pyramid query analyzer selects an available ground truth code source"
     }
 }
 
-TEST_CASE("Pyramid promotes flat node at index minimum size", "[ut][pyramid]") {
+TEST_CASE("Pyramid promotes flat node at index minimum size", "[ut][pyramid][adaptive_pruning]") {
+    const bool adaptive = GENERATE(false, true);
     const bool split_rabitq = GENERATE(false, true);
     const bool build_all_at_once = GENERATE(false, true);
     CAPTURE(split_rabitq, build_all_at_once);
-    auto test_index = MakePyramidIndex(3, 4, false, split_rabitq);
+    auto test_index =
+        MakePyramidIndex(3, 4, false, split_rabitq, false, false, false, false, adaptive);
     const auto& index = test_index.index;
     std::vector<float> vectors = {
         0.0F,
@@ -867,11 +880,13 @@ TEST_CASE("Pyramid rejects TQ-only fields for non-TQ quantizers", "[ut][pyramid]
 }
 
 TEST_CASE("Pyramid multi-layer root builds routes and survives serialization",
-          "[ut][pyramid][root_graph]") {
+          "[ut][pyramid][root_graph][adaptive_pruning]") {
+    const bool adaptive = GENERATE(false, true);
+    const bool reverse = GENERATE(false, true);
     const auto graph_storage_type =
         GENERATE(std::string(vsag::GRAPH_STORAGE_TYPE_VALUE_FLAT),
                  std::string(vsag::GRAPH_STORAGE_TYPE_VALUE_COMPRESSED));
-    CAPTURE(graph_storage_type);
+    CAPTURE(graph_storage_type, adaptive, reverse);
     constexpr int64_t count = 512;
     std::vector<float> vectors(count * PYRAMID_TEST_DIM);
     FillRootVectors(vectors, count);
@@ -884,7 +899,9 @@ TEST_CASE("Pyramid multi-layer root builds routes and survives serialization",
                                        false,
                                        1,
                                        false,
-                                       graph_storage_type);
+                                       graph_storage_type,
+                                       adaptive,
+                                       reverse);
     REQUIRE(source.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count))
                 .empty());
 
@@ -937,7 +954,9 @@ TEST_CASE("Pyramid multi-layer root builds routes and survives serialization",
                                          false,
                                          1,
                                          false,
-                                         graph_storage_type);
+                                         graph_storage_type,
+                                         adaptive,
+                                         reverse);
     vsag::IOStreamReader reader(stream);
     restored.index->Deserialize(reader);
     auto restored_result = restored.index->KnnSearch(query, 10, search_params, nullptr);
@@ -1384,4 +1403,123 @@ TEST_CASE("Pyramid IndexNode allows concurrent existing-child lookup",
 
     REQUIRE(lookup.get() == expected);
     REQUIRE(completed_while_shared);
+}
+
+TEST_CASE("Pyramid adaptive pruning root and path build reload and add",
+          "[ut][pyramid][adaptive_pruning]") {
+    const auto root_type = GENERATE(std::string(vsag::PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER),
+                                    std::string(vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER));
+    const uint64_t threads = GENERATE(1, 4);
+    const bool reverse = GENERATE(false, true);
+    const bool quantized = GENERATE(false, true);
+    CAPTURE(root_type, threads, reverse, quantized);
+    auto make_index = [&](bool enabled) {
+        return MakeRootPyramidIndex(root_type,
+                                    false,
+                                    vsag::GRAPH_TYPE_VALUE_NSW,
+                                    false,
+                                    threads,
+                                    quantized,
+                                    vsag::GRAPH_STORAGE_TYPE_VALUE_FLAT,
+                                    enabled,
+                                    reverse);
+    };
+    constexpr int64_t count = 128;
+    constexpr int64_t added_count = 32;
+    std::vector<float> vectors((count + added_count) * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, count + added_count);
+    // Keep appended vectors inside the range learned by SQ8 during Build.
+    for (int64_t i = 0; i < added_count; ++i) {
+        for (int64_t d = 0; d < PYRAMID_TEST_DIM; ++d) {
+            vectors[(count + i) * PYRAMID_TEST_DIM + d] =
+                (vectors[i * PYRAMID_TEST_DIM + d] + vectors[(i + 1) * PYRAMID_TEST_DIM + d]) *
+                0.5F;
+        }
+    }
+    std::vector<int64_t> ids(count + added_count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> paths(count + added_count, "tenant/items");
+    auto source = make_index(true);
+    REQUIRE(source.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count))
+                .empty());
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    source.index->Serialize(writer);
+    auto restored = make_index(true);
+    vsag::IOStreamReader reader(stream);
+    restored.index->Deserialize(reader);
+    REQUIRE(restored.index->GetNumElements() == count);
+    const auto search_params = R"({"pyramid":{"ef_search":128}})";
+    for (const bool use_path : {false, true}) {
+        auto query = vsag::Dataset::Make()
+                         ->NumElements(1)
+                         ->Dim(PYRAMID_TEST_DIM)
+                         ->Float32Vectors(vectors.data() + 37 * PYRAMID_TEST_DIM)
+                         ->Owner(false);
+        if (use_path) {
+            query->Paths(paths.data());
+        }
+        auto before = source.index->KnnSearch(query, 10, search_params, nullptr);
+        auto after = restored.index->KnnSearch(query, 10, search_params, nullptr);
+        REQUIRE(before->GetDim() == 10);
+        REQUIRE(after->GetDim() == before->GetDim());
+        CHECK(std::equal(before->GetIds(), before->GetIds() + 10, after->GetIds()));
+        CHECK(
+            std::equal(before->GetDistances(), before->GetDistances() + 10, after->GetDistances()));
+    }
+    REQUIRE(restored.index
+                ->Add(MakePyramidDataset(vectors.data() + count * PYRAMID_TEST_DIM,
+                                         ids.data() + count,
+                                         paths.data() + count,
+                                         added_count))
+                .empty());
+    REQUIRE(restored.index->GetNumElements() == count + added_count);
+    auto added_query = MakePyramidDataset(
+        vectors.data() + count * PYRAMID_TEST_DIM, nullptr, paths.data() + count, 1);
+    const int64_t topk = quantized ? 10 : 1;
+    auto found = restored.index->KnnSearch(added_query, topk, search_params, nullptr);
+    REQUIRE(found->GetDim() == topk);
+    CHECK(std::find(found->GetIds(), found->GetIds() + topk, count) != found->GetIds() + topk);
+    auto incompatible = make_index(false);
+    std::stringstream incompatible_stream(stream.str());
+    vsag::IOStreamReader incompatible_reader(incompatible_stream);
+    CHECK_THROWS(incompatible.index->Deserialize(incompatible_reader));
+}
+
+TEST_CASE("Pyramid adaptive pruning rejects nonempty imported build cache",
+          "[ut][pyramid][adaptive_pruning][pyramid_build_cache]") {
+    auto target = MakeRootPyramidIndex(vsag::PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER,
+                                       false,
+                                       vsag::GRAPH_TYPE_VALUE_NSW,
+                                       false,
+                                       1,
+                                       false,
+                                       vsag::GRAPH_STORAGE_TYPE_VALUE_FLAT,
+                                       true,
+                                       GENERATE(false, true));
+    vsag::PyramidBuildCache cache(target.allocator.get());
+    const bool populated = GENERATE(false, true);
+    if (populated) {
+        auto& graph = cache.CreateGraphCache("default", "");
+        graph.source_ids_.push_back("cached");
+        graph.source_ids_.push_back("other");
+        vsag::Vector<vsag::InnerIdType> neighbors(target.allocator.get());
+        neighbors.push_back(1);
+        graph.neighbors_.emplace("cached", std::move(neighbors));
+    }
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    cache.Serialize(writer);
+    target.index->ImportCache(stream);
+    std::vector<float> vectors(PYRAMID_TEST_DIM, 0.0F);
+    std::vector<int64_t> ids{0};
+    std::vector<std::string> paths{""};
+    auto dataset = MakePyramidDataset(vectors.data(), ids.data(), paths.data(), 1);
+    if (populated) {
+        CHECK_THROWS(target.index->Build(dataset));
+        CHECK(target.index->GetNumElements() == 0);
+    } else {
+        REQUIRE(target.index->Build(dataset).empty());
+        CHECK(target.index->GetNumElements() == 1);
+    }
 }

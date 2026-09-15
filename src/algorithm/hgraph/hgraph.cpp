@@ -67,6 +67,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       build_by_base_(hgraph_param->build_by_base),
       reorder_by_base_(hgraph_param->reorder_source == HGRAPH_REORDER_SOURCE_BASE),
       ef_construct_(hgraph_param->ef_construction),
+      adaptive_pruning_(hgraph_param->adaptive_pruning),
       alpha_(hgraph_param->alpha),
       duplicate_distance_threshold_(hgraph_param->duplicate_distance_threshold),
       support_force_remove_(hgraph_param->support_force_remove),
@@ -76,6 +77,13 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       mci_parameters_(hgraph_param->mci_parameters),
       use_old_serial_format_(common_param.use_old_serial_format_),
       use_conjugate_graph_(hgraph_param->use_conjugate_graph) {
+    adaptive_pruning_.Validate(alpha_);
+    if (adaptive_pruning_.enabled) {
+        CHECK_ARGUMENT(graph_type_ == GRAPH_TYPE_VALUE_NSW,
+                       "adaptive_pruning currently supports only nsw graph construction");
+        CHECK_ARGUMENT(common_param.metric_ == MetricType::METRIC_TYPE_L2SQR,
+                       "adaptive_pruning currently supports only L2 distance");
+    }
     this->support_duplicate_ = hgraph_param->support_duplicate;
     this->deduplicate_storage_ = hgraph_param->deduplicate_storage;
     const bool is_dense_vector = common_param.repr_ == RecordRepr::DENSE &&

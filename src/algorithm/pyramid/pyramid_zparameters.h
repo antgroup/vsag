@@ -26,6 +26,7 @@
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_datacell_parameter.h"
 #include "datacell/graph_interface.h"
+#include "impl/adaptive_pruning.h"
 #include "impl/odescent/odescent_graph_parameter.h"
 #include "index_common_param.h"
 #include "typing.h"
@@ -77,6 +78,7 @@ public:
     uint64_t ef_construction{400};
     int64_t max_degree{64};
     std::string graph_type{GRAPH_TYPE_VALUE_NSW};
+    AdaptivePruningParameter adaptive_pruning;
     float alpha{1.2F};
     uint32_t index_min_size{0};
     std::string root_graph_type{PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER};
