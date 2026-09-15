@@ -2698,6 +2698,62 @@ TEST_CASE("Clique clean flush and member checks do not allocate", "[ut][hgraph][
     allocator.remaining = -1;
 }
 
+TEST_CASE("Clique no-op mutations preserve clean CSR after deletion",
+          "[ut][hgraph][mci][flush][noop_compaction]") {
+    FlushFailureAllocator allocator;
+    vsag::CliqueDataCell cell(&allocator);
+    cell.Clear(4);
+    vsag::Vector<vsag::InnerIdType> members({0, 1, 2}, &allocator);
+    const vsag::Vector<vsag::InnerIdType> empty(&allocator);
+    cell.AppendNewClique(members, 4);
+    members.assign({1});
+    cell.CommitDelete(members, empty, 4);
+    cell.Flush(4);
+    cell.MarkAvailable(4);
+
+    SECTION("Empty input does not dirty CSR") {
+        cell.AppendNewClique(empty, 4);
+    }
+    SECTION("Out-of-range input does not dirty CSR") {
+        members.assign({4, 99});
+        cell.AppendNewClique(members, 4);
+    }
+    SECTION("Inactive input does not dirty CSR") {
+        members.assign({1, 1});
+        cell.AppendNewClique(members, 4);
+    }
+    SECTION("Repeated and invalid deletion IDs do not dirty CSR") {
+        members.assign({1, 1, 99});
+        const vsag::Vector<vsag::InnerIdType> invalid_cliques({99}, &allocator);
+        cell.CommitDelete(members, invalid_cliques, 4);
+    }
+    SECTION("Failure while normalizing input leaves clean CSR clean") {
+        members.assign({0, 2});
+        allocator.remaining = 0;
+        REQUIRE_THROWS_AS(cell.AppendNewClique(members, 4), std::bad_alloc);
+    }
+    SECTION("Actual row growth still dirties CSR even if all members are discarded") {
+        members.assign({99});
+        cell.AppendNewClique(members, 5);
+        allocator.remaining = 0;
+        REQUIRE_THROWS_AS(cell.Flush(5), std::bad_alloc);
+        allocator.remaining = -1;
+        REQUIRE_NOTHROW(cell.Flush(5));
+        REQUIRE(cell.GetTotalNodes() == 5);
+        return;
+    }
+    // A clean Flush must not allocate, even with retained inactive-node markers.
+    allocator.remaining = 0;
+    REQUIRE_NOTHROW(cell.Flush(4));
+    REQUIRE(cell.HasCliqueIndex(4));
+    REQUIRE(cell.GetCliqueMemberCount(0) == 2);
+    REQUIRE(cell.TotalLogicalCliqueCount() == 1);
+    allocator.remaining = -1;
+    const auto stats = cell.CollectStats(4);
+    REQUIRE(stats.inactive_node_count == 1);
+    REQUIRE(stats.covered_nodes == 2);
+}
+
 TEST_CASE("Clique deserialization recognizes clean CSR and retains dirty state",
           "[ut][hgraph][mci][flush]") {
     FlushFailureAllocator allocator;

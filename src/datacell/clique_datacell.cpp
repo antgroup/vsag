@@ -416,7 +416,6 @@ CliqueDataCell::AppendNewClique(const Vector<InnerIdType>& members, uint64_t tot
         return;
     }
     std::unique_lock<std::shared_mutex> lock(mutex_);
-    needs_compaction_ = true;
     ensure_delta_node_rows_unlocked(total);
     const auto new_clique_id = static_cast<InnerIdType>(total_logical_clique_count_unlocked());
     Vector<InnerIdType> normalized(allocator_);
@@ -433,6 +432,9 @@ CliqueDataCell::AppendNewClique(const Vector<InnerIdType>& members, uint64_t tot
                       members.size());
         return;
     }
+    // Row growth marks itself dirty; discarded input must not dirty an unchanged CSR.
+    // Mark before the first append, including writes that may fail partway through allocation.
+    needs_compaction_ = true;
     delta_cliques_.push_back(std::move(normalized));
     retired_cliques_.push_back(0);
     ++active_clique_count_;
