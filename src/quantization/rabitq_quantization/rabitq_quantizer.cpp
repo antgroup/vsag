@@ -228,6 +228,8 @@ RaBitQuantizer<metric>::RaBitQuantizer(const QuantizerParamPtr& param,
 template <MetricType metric>
 void
 RaBitQuantizer<metric>::TrainFusedTransform() {
+    // HGraph parameters also reject PCA for fused storage. Keep this runtime guard for
+    // direct datacell callers: the data-independent initialization cannot train PCA.
     CHECK_ARGUMENT(pca_dim_ == original_dim_, "fused transform training does not support PCA");
     if (this->is_trained_) {
         return;

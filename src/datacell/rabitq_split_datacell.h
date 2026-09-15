@@ -156,12 +156,12 @@ public:
     virtual void
     TrainFusedTransform() = 0;
 
-    // Direct datacell callers default to 25 Lloyd iterations; HGraph passes its configuration.
+    // Require an explicit iteration count; HGraph passes the configured kmeans_iterations.
     virtual void
     TrainFusedCodec(const float* data,
                     uint64_t count,
                     uint32_t cluster_count,
-                    uint32_t iterations = 25) = 0;
+                    uint32_t iterations) = 0;
 
     [[nodiscard]] virtual uint32_t
     FusedClusterCount() const = 0;
@@ -1203,7 +1203,7 @@ public:
     TrainFusedCodec(const float* data,
                     uint64_t count,
                     uint32_t cluster_count,
-                    uint32_t iterations = 25) override {
+                    uint32_t iterations) override {
         CHECK_ARGUMENT(this->bottom_quantizer().IsTrained(),
                        "fused RaBitQ requires Train or TrainFusedTransform before TrainFusedCodec");
         CHECK_ARGUMENT(data != nullptr and count > 0,

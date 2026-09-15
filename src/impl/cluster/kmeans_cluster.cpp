@@ -29,6 +29,14 @@
 namespace vsag {
 namespace {
 constexpr uint64_t QUERY_BS = 65536ULL;
+
+uint64_t
+kmeans_block_size_for(uint64_t size, uint64_t min_block_size) {
+    // ThreadPool does not expose its worker count. Bound both initialization and Lloyd
+    // phases independently of N, while allowing small K to update centers concurrently.
+    constexpr uint64_t max_tasks = 256;
+    return std::max(min_block_size, 1 + (size - 1) / max_tasks);
+}
 }  // namespace
 
 KMeansCluster::KMeansCluster(int32_t dim, Allocator* allocator, SafeThreadPoolPtr thread_pool)
@@ -319,20 +327,14 @@ KMeansCluster::RunFull(uint32_t k,
     Vector<uint64_t> positions(uint64_t{k}, 0, allocator_);
     Vector<uint64_t> grouped(count, 0, allocator_);
 
-    const auto block_size_for = [](uint64_t size, uint64_t min_block_size) {
-        // ThreadPool does not expose its worker count. Bound each phase to a small task budget
-        // independently of N, while allowing small K to update multiple centers concurrently.
-        constexpr uint64_t max_tasks = 256;
-        return std::max(min_block_size, 1 + (size - 1) / max_tasks);
-    };
-    const uint64_t update_block_size = block_size_for(k, 1);
+    const uint64_t update_block_size = kmeans_block_size_for(k, 1);
     const uint64_t update_blocks = 1 + (k - 1) / update_block_size;
     // Each update block owns one slice, reused across all Lloyd iterations. Keep scratch
     // local to this RunFull call, not thread_local (which would outlive the caller's allocator).
     Vector<double> update_sums(update_blocks * dim, 0.0, allocator_);
     auto parallel_blocks = [&](uint64_t size, uint64_t min_block_size, const auto& function) {
         std::vector<std::future<void>> futures;
-        const uint64_t block_size = block_size_for(size, min_block_size);
+        const uint64_t block_size = kmeans_block_size_for(size, min_block_size);
         futures.reserve(1 + (size - 1) / block_size);
         std::exception_ptr failure;
         try {
@@ -344,6 +346,7 @@ KMeansCluster::RunFull(uint32_t k,
             failure = std::current_exception();
         }
         // Drain every task before propagating exceptions: tasks borrow these local buffers.
+        // This also forms the barrier between assignment reads and centroid-update writes.
         for (auto& future : futures) {
             try {
                 future.get();
@@ -446,8 +449,9 @@ KMeansCluster::select_initial_centroids_kmeans_plus_plus(const float* datas,
     Vector<float> min_distances(count, std::numeric_limits<float>::max(), allocator_);
     // Avoid tiny tasks for low-dimensional inputs. Each worker owns a disjoint row range;
     // the random draws and floating-point reductions below retain their serial order.
-    const uint64_t block_size =
+    const uint64_t min_block_size =
         std::max(uint64_t{4096}, uint64_t{65536} / static_cast<uint64_t>(std::max(dim_, 1)));
+    const uint64_t block_size = kmeans_block_size_for(count, min_block_size);
     std::vector<std::future<void>> futures;
     if (count > block_size) {
         futures.reserve(1 + (count - 1) / block_size);

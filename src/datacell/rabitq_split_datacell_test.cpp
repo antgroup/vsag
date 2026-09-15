@@ -66,7 +66,7 @@ TEST_CASE("RaBitQ split interface queries with filter IP hints", "[ut][RaBitQSpl
     auto flatten = FlattenInterface::MakeInstance(param, common_param);
     auto split = std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(flatten);
     REQUIRE(split != nullptr);
-    REQUIRE_THROWS_AS(split->TrainFusedCodec(vectors.data(), train_count, cluster_count),
+    REQUIRE_THROWS_AS(split->TrainFusedCodec(vectors.data(), train_count, cluster_count, 25),
                       VsagException);
     REQUIRE(split->FusedClusterCount() == 0);
     if (GENERATE(false, true)) {
@@ -74,7 +74,7 @@ TEST_CASE("RaBitQ split interface queries with filter IP hints", "[ut][RaBitQSpl
     } else {
         flatten->Train(vectors.data(), train_count);
     }
-    split->TrainFusedCodec(vectors.data(), train_count, cluster_count);
+    split->TrainFusedCodec(vectors.data(), train_count, cluster_count, 25);
 
     auto graph_param = std::make_shared<GraphDataCellParameter>();
     graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();

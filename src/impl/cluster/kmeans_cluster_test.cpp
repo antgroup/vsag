@@ -131,6 +131,29 @@ TEST_CASE("Parallel KMeans++ matches serial initialization bit for bit",
     REQUIRE(pool->submitted == expected_tasks);
 }
 
+TEST_CASE("Parallel KMeans++ bounds submissions without changing selected centers",
+          "[ut][KMeansCluster][kmeans_init]") {
+    constexpr int32_t dim = 16;
+    constexpr uint32_t k = 3;
+    constexpr uint32_t seed = 123;
+    // Straddle the task-budget boundary, including a partial final row block.
+    const uint64_t count = GENERATE(1048576, 1048577);
+    const uint64_t threads = GENERATE(1, 4);
+    std::vector<float> data(count * dim);
+    for (uint64_t row = 0; row < count; ++row) {
+        std::fill_n(data.data() + row * dim, dim, static_cast<float>(row % 997));
+    }
+    const auto expected = SerialKMeansPlusPlus(data.data(), count, dim, k, seed);
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto pool = std::make_shared<CountingKMeansPool>(threads);
+    auto safe_pool = std::make_shared<vsag::SafeThreadPool>(pool);
+    vsag::KMeansCluster cluster(dim, allocator.get(), safe_pool);
+    RunInitialization(cluster, k, data.data(), count, seed);
+    REQUIRE(pool->submitted == uint64_t{k - 1} * 256);
+    REQUIRE(std::memcmp(cluster.k_centroids_, expected.data(), expected.size() * sizeof(float)) ==
+            0);
+}
+
 TEST_CASE("Parallel KMeans++ preserves zero-weight fallback and drains failed tasks",
           "[ut][KMeansCluster][kmeans_init]") {
     constexpr int32_t dim = 17;

@@ -326,6 +326,8 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
     if (not defer_persistent_codes) {
         fused_codes.reset();
     }
+    // Deferred fused records are inserted after ODescent; retain their prevalidated codes.
+    // Non-fused builds never allocate this batch (prepare_fused_encoding_data returns null).
     {
         odescent_param_->max_degree = bottom_graph_->MaximumDegree();
         ODescent odescent_builder(
@@ -386,6 +388,7 @@ HGraph::add_impl(const DatasetPtr& data) {
     auto batch = this->prepare_add_batch(data);
     if (fused_codes != nullptr) {
         for (const auto& row : batch.rows) {
+            // Codes are indexed by original input row, not the filtered batch position.
             const auto code = fused_codes->Get(row.input_idx);
             this->insert_persistent_codes(get_data(data, row.input_idx), row.inner_id, &code);
         }
