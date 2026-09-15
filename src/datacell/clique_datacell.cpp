@@ -416,11 +416,6 @@ CliqueDataCell::AppendNewClique(const Vector<InnerIdType>& members, uint64_t tot
         return;
     }
     std::unique_lock<std::shared_mutex> lock(mutex_);
-    append_new_clique_unlocked(members, total);
-}
-
-void
-CliqueDataCell::append_new_clique_unlocked(const Vector<InnerIdType>& members, uint64_t total) {
     needs_compaction_ = true;
     ensure_delta_node_rows_unlocked(total);
     const auto new_clique_id = static_cast<InnerIdType>(total_logical_clique_count_unlocked());

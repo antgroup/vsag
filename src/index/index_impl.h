@@ -318,11 +318,6 @@ public:
         return this->inner_index_->GetStats();
     }
 
-    tl::expected<void, Error>
-    Flush() override {
-        SAFE_CALL(this->inner_index_->Flush());
-    }
-
     tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
               int64_t k,

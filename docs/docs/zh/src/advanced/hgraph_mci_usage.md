@@ -1,12 +1,12 @@
 # HGraph MCI：代码与配置指南
 
-本文对应 MCI 增删开发分支，聚焦纯 FP32 的构建、ADD、MARK_REMOVE、FORCE_REMOVE 和 Flush。
+本文对应 MCI 增删开发分支，聚焦纯 FP32 的构建、ADD、MARK_REMOVE、FORCE_REMOVE 和自动压缩。
 索引类型始终是 `hgraph`；MCI 是共享 HGraph 向量存储的团索引，不是另一份独立 HNSW。
 算法细节及历史测量见 [增删实现与测试报告](hgraph_mci_mutation.md)。
 
 > 曾复现的“加载后 FORCE_REMOVE”内存错误已定位为缺少图反向边恢复，并补充修复及回归测试。
 > 历史性能测试从全量 Build 开始，没有新增大数据集快照加载复测。
-> 新增 `Index::Flush()` 虚接口涉及 ABI，MCI 序列化格式升级为 v2；旧二进制兼容性需单独验证。
+> 压缩改为内部自动维护，不扩展 Index 虚接口。MCI 序列化格式升级为 v2；旧二进制兼容性需单独验证。
 
 ## 1. 代码入口
 
@@ -14,9 +14,9 @@
 
 | 文件 | 重点入口 / 职责 |
 | --- | --- |
-| `include/vsag/index.h`、`src/index/index_impl.h` | 公共 Build/Add/Remove/Flush/Search 接口及错误包装 |
+| `include/vsag/index.h`、`src/index/index_impl.h` | 公共 Build/Add/Remove/Search 接口及错误包装 |
 | `src/algorithm/hgraph/hgraph_build.cpp` | `Add` → `add_impl`：先插入 HGraph，再维护成功插入点的 MCI |
-| `src/algorithm/hgraph/hgraph_mci.cpp` | 全量构团；`search_mci_knn`、`incremental_update_mci_clique`、`repair_mci_clique`、`force_remove_with_mci`、`Flush` |
+| `src/algorithm/hgraph/hgraph_mci.cpp` | 全量构团；`search_mci_knn`、`incremental_update_mci_clique`、`repair_mci_clique`、`force_remove_with_mci`、`maybe_compact_mci` |
 | `src/algorithm/hgraph/hgraph_modify.cpp` | Remove 模式分流、图边修补、尾部 ID 搬移、存储缩容 |
 | `src/datacell/clique_datacell.{h,cpp}` | 两向 CSR、三种 delta、删除快照、团废弃、节点重映射和 Flush |
 | `src/impl/searcher/mci_searcher.cpp` | `search_clique_view`：统一遍历 base CSR + delta + 删除标记 |
@@ -67,7 +67,11 @@ N 是当前存活点数，包含图插入完成的批次，整数除法向下取
 | --- | --- | --- | --- |
 | MARK_REMOVE（默认） | 保留，仅逻辑删除 | 小团筛选、低覆盖点修复，结果进入 delta | 否 |
 | FORCE_REMOVE | 尾点搬移填洞，减少物理槽位并尝试缩容 | 批量快照、ID 重映射、修复、自动 Flush | 否 |
-| Flush | 不删除或移动向量 | 合并 delta、移除废弃成员、压紧团编号、重建两向 CSR | 否 |
+| 内部自动压缩 | 不删除或移动向量 | 合并 delta、移除废弃成员、压紧团编号、重建两向 CSR | 否 |
+
+ADD 与 MARK_REMOVE 共用 100 个成功增删向量的计数：ADD 逐点检查，删除在整批投影与修复后检查。
+失败新增、重复或不存在的删除不计数。压缩成功、全量重建、加载及 FORCE_REMOVE 批末压缩后清零。
+自动维护分配失败时保留 delta，下次成功增删再重试；未达到阈值的 delta 仍可查询和序列化。
 
 增删和 Flush 共用 MCI mutation mutex 串行化。物理 ID 搬移及最终缩容需要独占保护；
 修复阶段会释放 force-remove 锁，以便内部 HGraph 检索自行获取读锁，此时 MCI 尚未发布，
@@ -178,7 +182,7 @@ check(appended);
 if (!appended.value().empty()) {
     throw std::runtime_error("some added vectors were not inserted");
 }
-check(index->Flush());  // 可选；不是持久化，FORCE_REMOVE 内部已经自动 Flush。
+// MCI 自动压缩，不需要也不再提供公共 Flush 调用。
 auto result = index->KnnSearch(query, 10, search_json, filter);
 check(result);
 ```
@@ -200,7 +204,7 @@ Remove 使用外部标签，不接受把内部槽位当成标签；物理删除�
 | --- | --- |
 | `stage`、`active_vectors`、`index_elements` | 阶段、存活数量、索引对外元素计数；后者不能代替物理存储统计 |
 | `ef_search`、`recall_at_k`、`qps` | 搜索宽度、recall、计时吞吐；固定 ef 不等于固定质量 |
-| `build_seconds`、`mutation_seconds`、`flush_seconds` | 构建、阶段增删、阶段后显式 Flush；FORCE_REMOVE 内部 Flush 已计入增删时间 |
+| `build_seconds`、`mutation_seconds`、`flush_seconds` | 历史构建、增删和显式压缩耗时；当前自动压缩计入增删耗时，不再提供阶段后公共 Flush |
 | `index_memory_bytes`、`vector_memory_bytes`、`graph_memory_bytes`、`mci_memory_bytes` | 索引及分项统计，不是进程 RSS |
 | `mci_route_ratio`、`mci_raw_float_ratio` | MCI 路由与直接 FP32 路径命中比例；不能只看配置判断路由 |
 | `mci_total_cliques`、`mci_delta_cliques`、`mci_total_memberships` | 团数、增量团数、成员关系总数 |

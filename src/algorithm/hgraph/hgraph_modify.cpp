@@ -53,6 +53,7 @@ HGraph::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
         delete_count_ += delete_count;
         if (not removed_inner_ids.empty()) {
             this->remove_from_mci(removed_inner_ids);
+            this->maybe_compact_mci(delete_count);
             this->mci_cliques_->MarkAvailable(this->total_count_.load());
             this->cal_memory_usage();
         }

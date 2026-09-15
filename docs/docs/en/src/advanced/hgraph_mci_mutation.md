@@ -308,7 +308,7 @@ Old and new buffers coexist temporarily, so peak memory may increase during comp
 
 ### 7.1 Flush
 
-`index->Flush()` merges base members, extras, and new cliques; removes retired cliques,
+Internal automatic compaction merges base members, extras, and new cliques; removes retired cliques,
 inactive members, and empty rows; renumbers cliques; and builds both CSR directions. It
 allocates replacement buffers before publishing, then clears delta/retired contents.
 
@@ -316,7 +316,16 @@ Plain Flush preserves vector IDs and inactive masks. It neither rebuilds HGraph 
 vectors nor writes to disk. Repeat Flush preserves effective relationships, but clique IDs
 must not be cached across it. Empty per-node/per-clique delta row descriptors still consume
 metadata memory. `RemapNodes` shares the compaction core and additionally applies an ID map.
-FORCE_REMOVE automatically flushes repair output; Add and MARK_REMOVE do not.
+FORCE_REMOVE automatically flushes repair output. Add and MARK_REMOVE share a runtime counter
+and compact at 100 successful vector mutations. Add checks per inserted point, including inside
+large batches; MARK_REMOVE checks once after projecting and repairing the complete batch.
+Failed insertions and duplicate/missing removals do not count. Successful compaction, full build,
+load, and FORCE_REMOVE's final compaction reset the counter. Allocation failures in automatic
+maintenance preserve valid delta and retry on the next successful mutation without failing an
+otherwise completed Add/MARK_REMOVE. There is no public Flush API; serialization includes delta
+even below the threshold. Historical experiments below predate this policy and are not new
+performance measurements of automatic compaction; historical explicit-flush commands no longer
+apply to the current API.
 
 ### 7.2 Direct traversal
 
@@ -354,8 +363,10 @@ shared locking.
 
 Add/MARK_REMOVE can temporarily unpublish MCI and let queries fall back to HGraph. Full
 recall during these mutations is not guaranteed; an invalid fallback entry point can yield
-empty results. FORCE_REMOVE blocks queries through movement and repair. Flush keeps MCI
-published but readers may wait for its exclusive CSR lock. These are not cross-batch
+empty results. FORCE_REMOVE blocks queries during movement and final shrinking, but releases
+the force-remove lock during repair while MCI remains unpublished. Internal Flush does not
+change publication itself; the enclosing mutation controls it. Readers may wait for its
+exclusive CSR lock. These are not cross-batch
 transaction or universal snapshot-isolation guarantees.
 
 ### 7.4 Persistence

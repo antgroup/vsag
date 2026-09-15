@@ -1218,6 +1218,7 @@ HGraph::deserialize_mci_cliques(StreamReader& reader, const JsonType& basic_info
     }
     // Parallel component tasks must not read or modify the label table here.
     this->mci_cliques_->Deserialize(reader, version, total);
+    this->mci_pending_mutations_ = 0;
 }
 
 void

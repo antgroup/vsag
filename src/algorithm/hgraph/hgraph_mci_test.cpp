@@ -266,7 +266,7 @@ make_dataset(std::vector<int64_t>& ids,
     return dataset;
 }
 
-struct FlushedMCISnapshot {
+struct MCISnapshot {
     std::string bytes;
     uint64_t begin;
     uint64_t end;
@@ -274,13 +274,11 @@ struct FlushedMCISnapshot {
     vsag::CliqueDataCellPtr cliques;
 };
 
-// Inspect the real serialized CSR without granting tests access to HGraph private state.
-FlushedMCISnapshot
-read_flushed_mci(const vsag::IndexPtr& index, vsag::Allocator* allocator) {
-    REQUIRE(index->Flush().has_value());
+// Inspect real serialized base/delta state without accessing HGraph private state.
+MCISnapshot
+read_mci_snapshot(const vsag::IndexPtr& index, vsag::Allocator* allocator) {
     const auto stats = vsag::JsonType::Parse(index->GetStats());
     const uint64_t n = stats["mci_total_nodes"].GetInt();
-    REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
     std::stringstream stream;
     class PlainWriter : public vsag::SerializeWriter {
     public:
@@ -299,7 +297,7 @@ read_flushed_mci(const vsag::IndexPtr& index, vsag::Allocator* allocator) {
     auto footer = vsag::Footer::Parse(reader);
     REQUIRE(footer != nullptr);
     REQUIRE_FALSE(footer->GetMetadata()->Get("has_conjugate_graph").GetBool());
-    FlushedMCISnapshot snapshot;
+    MCISnapshot snapshot;
     snapshot.bytes = stream.str();
     const auto manifest =
         vsag::ChunkedManifest::FromJson(footer->GetMetadata()->Get(vsag::CHUNKED_LAYOUT_KEY));
@@ -320,7 +318,7 @@ read_flushed_mci(const vsag::IndexPtr& index, vsag::Allocator* allocator) {
 }
 
 uint64_t
-snapshot_degree(const FlushedMCISnapshot& snapshot, vsag::InnerIdType node) {
+snapshot_degree(const MCISnapshot& snapshot, vsag::InnerIdType node) {
     vsag::DefaultAllocator allocator;
     vsag::Vector<vsag::InnerIdType> cids(&allocator);
     snapshot.cliques->CollectNodeCliqueIds(node, cids);
@@ -340,7 +338,7 @@ with_mci_fixture(const vsag::IndexPtr& index,
                  const std::string& parameters,
                  const std::vector<std::vector<vsag::InnerIdType>>& cliques) {
     vsag::DefaultAllocator allocator;
-    const auto snapshot = read_flushed_mci(index, &allocator);
+    const auto snapshot = read_mci_snapshot(index, &allocator);
     vsag::CliqueDataCell replacement(&allocator);
     replacement.Clear(snapshot.labels.size());
     for (const auto& clique : cliques) {
@@ -467,7 +465,7 @@ TEST_CASE("HGraph MCI mark removal projects the complete batch before repair",
     REQUIRE(stats["mci_retired_clique_count"].GetInt() == 1);
     REQUIRE(stats["mci_covered_nodes"].GetInt() == total - 2);
     vsag::DefaultAllocator allocator;
-    const auto snapshot = read_flushed_mci(index, &allocator);
+    const auto snapshot = read_mci_snapshot(index, &allocator);
     REQUIRE(snapshot_degree(snapshot, 0) == 0);
     REQUIRE(snapshot_degree(snapshot, 1) == 0);
     REQUIRE(snapshot_degree(snapshot, 2) > 2);
@@ -539,7 +537,8 @@ TEST_CASE("HGraph FP32 MCI deletion repairs use the complete Add candidate pipel
           "[ut][hgraph][mci][repair_add]") {
     const auto mode = GENERATE(vsag::RemoveMode::MARK_REMOVE, vsag::RemoveMode::FORCE_REMOVE);
     const std::string io = GENERATE("memory_io", "block_memory_io");
-    CAPTURE(mode, io);
+    const int64_t repair_threshold = GENERATE(1, 2);
+    CAPTURE(mode, io, repair_threshold);
     constexpr int64_t dim = 16;
     constexpr int64_t total = 16;
     std::vector<int64_t> ids(total + 1);
@@ -562,7 +561,7 @@ TEST_CASE("HGraph FP32 MCI deletion repairs use the complete Add candidate pipel
     params["mci_clique_max"].SetInt(total);
     params["mci_incremental_clique_max"].SetInt(total);
     params["mci_delete_clique_size_threshold"].SetInt(total + 1);
-    params["mci_delete_node_mct_threshold"].SetInt(1);
+    params["mci_delete_node_mct_threshold"].SetInt(repair_threshold);
 
     vsag::IndexCommonParam common;
     common.dim_ = dim;
@@ -578,7 +577,10 @@ TEST_CASE("HGraph FP32 MCI deletion repairs use the complete Add candidate pipel
     // All distinct vectors are equidistant. Rebuild a clique around inner ID 0
     // using higher IDs as well, not clamp its capacity/visibility to the old ID + 1 prefix.
     REQUIRE(index.Remove({ids[total - 1]}, mode) == 1);
-    REQUIRE(index.candidate_searches > 0);
+    // The first repair covers every survivor with one clique. At threshold 1, later seeds
+    // are skipped; at threshold 2, they still require a recheck through the Add pipeline.
+    // In particular, reused membership scratch must not accumulate rows across seeds.
+    REQUIRE(index.candidate_searches == (repair_threshold == 1 ? 1 : total - 1));
     REQUIRE(index.GetNumElements() == total - 1);
     auto stats = vsag::JsonType::Parse(index.GetStats());
     REQUIRE(stats["mci_has_index"].GetBool());
@@ -621,7 +623,7 @@ TEST_CASE("HGraph rejects mismatched serialized MCI node counts", "[ut][hgraph][
     std::vector<float> vectors{0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6};
     REQUIRE(index->Build(make_dataset(ids, vectors, 0, total, 2)).has_value());
     vsag::DefaultAllocator allocator;
-    const auto snapshot = read_flushed_mci(index, &allocator);
+    const auto snapshot = read_mci_snapshot(index, &allocator);
     const auto wrong_total = static_cast<uint64_t>(static_cast<int64_t>(total) + delta);
     std::stringstream stream;
     vsag::IOStreamWriter writer(stream);
@@ -675,7 +677,7 @@ TEST_CASE("HGraph MCI stays unpublished when force-remove repair allocation fail
     index.fail_candidate_search = false;
     REQUIRE(index.candidate_searches > 0);
     // Physical deletion is not rolled back. Queries must fall back to the repaired HGraph,
-    // never read the old CSR with moved IDs, even if the caller subsequently flushes it.
+    // never read the old CSR with moved IDs, even after a subsequent no-op removal.
     REQUIRE(index.GetNumElements() == 5);
     for (uint64_t pass = 0; pass < 2; ++pass) {
         REQUIRE_FALSE(vsag::JsonType::Parse(index.GetStats())["mci_has_index"].GetBool());
@@ -690,7 +692,7 @@ TEST_CASE("HGraph MCI stays unpublished when force-remove repair allocation fail
         for (int64_t i = 0; i < result->GetDim(); ++i) {
             REQUIRE(result->GetIds()[i] != ids[0]);
         }
-        index.Flush();
+        REQUIRE(index.Remove({-1}, vsag::RemoveMode::MARK_REMOVE) == 0);
     }
 }
 
@@ -730,7 +732,7 @@ TEST_CASE("HGraph companion MCI serializes concurrent initial Add", "[ut][hgraph
     REQUIRE(stats["mci_has_index"].GetBool());
 }
 
-TEST_CASE("HGraph MCI fast search survives mutations flush and serialization",
+TEST_CASE("HGraph MCI fast search survives mutations automatic compaction and serialization",
           "[ut][hgraph][mci][flush]") {
     constexpr int64_t total = 32;
     constexpr int64_t dim = 4;
@@ -746,7 +748,6 @@ TEST_CASE("HGraph MCI fast search survives mutations flush and serialization",
     auto created = vsag::Factory::CreateIndex("hgraph", params.Dump());
     REQUIRE(created.has_value());
     auto index = created.value();
-    REQUIRE(index->Flush().has_value());
     REQUIRE(index->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
     auto filter = std::make_shared<HalfRatioAllValidFilter>(ids);
     auto query = make_dataset(ids, vectors, 0, 1, dim);
@@ -772,46 +773,20 @@ TEST_CASE("HGraph MCI fast search survives mutations flush and serialization",
     verify(index, true);
     REQUIRE(index->Add(make_dataset(ids, vectors, 0, 1, dim)).has_value());
     auto before = verify(index, false);
-    REQUIRE(index->Flush().has_value());
-    auto after = verify(index, false);
-    for (int64_t i = 0; i < before->GetDim(); ++i) {
-        REQUIRE(before->GetIds()[i] == after->GetIds()[i]);
-        REQUIRE(before->GetDistances()[i] == after->GetDistances()[i]);
-    }
     auto stats = vsag::JsonType::Parse(index->GetStats());
-    REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
-    REQUIRE(stats["mci_retired_clique_count"].GetInt() == 0);
     REQUIRE(stats["mci_inactive_node_count"].GetInt() == 1);
-    REQUIRE(index->Flush().has_value());
     auto serialized = index->Serialize();
     REQUIRE(serialized.has_value());
     auto restored = vsag::Factory::CreateIndex("hgraph", params.Dump());
     REQUIRE(restored.has_value());
     REQUIRE(restored.value()->Deserialize(serialized.value()).has_value());
-    verify(restored.value(), false);
+    auto after = verify(restored.value(), false);
+    for (int64_t i = 0; i < before->GetDim(); ++i) {
+        REQUIRE(before->GetIds()[i] == after->GetIds()[i]);
+        REQUIRE(before->GetDistances()[i] == after->GetDistances()[i]);
+    }
     REQUIRE(restored.value()->Remove({ids[0]}).value() == 1);
     verify(restored.value(), true);
-    REQUIRE(restored.value()->Flush().has_value());
-    verify(restored.value(), true);
-
-    std::atomic<bool> start{false};
-    auto searches = std::async(std::launch::async, [&]() {
-        while (not start.load()) {
-            std::this_thread::yield();
-        }
-        for (uint64_t i = 0; i < 50; ++i) {
-            auto result = index->KnnSearch(query, total, search_params, filter);
-            if (not result.has_value() or result.value()->GetDim() != total) {
-                return false;
-            }
-        }
-        return true;
-    });
-    start.store(true);
-    for (uint64_t i = 0; i < 20; ++i) {
-        REQUIRE(index->Flush().has_value());
-    }
-    REQUIRE(searches.get());
 
     auto concurrent_queries = std::async(std::launch::async, [&]() {
         for (uint64_t i = 0; i < 200; ++i) {
@@ -841,10 +816,10 @@ TEST_CASE("HGraph MCI fast search survives mutations flush and serialization",
         }
         return std::string();
     });
-    for (uint64_t i = 0; i < 10; ++i) {
+    // Cross the 100-mutation boundary while queries run.
+    for (uint64_t i = 0; i < 60; ++i) {
         REQUIRE(index->Remove({ids[0]}).value() == 1);
         REQUIRE(index->Add(make_dataset(ids, vectors, 0, 1, dim)).has_value());
-        REQUIRE(index->Flush().has_value());
     }
     const auto concurrent_error = concurrent_queries.get();
     INFO(concurrent_error);
@@ -1079,7 +1054,6 @@ TEST_CASE("HGraph MCI physical deletion compacts slots and preserves mixed mutat
         REQUIRE(found == expected);
     };
     verify();
-    REQUIRE(index->Flush().has_value());
     auto serialized = index->Serialize();
     REQUIRE(serialized.has_value());
     auto restored = vsag::Factory::CreateIndex("hgraph", params.Dump());
@@ -1131,7 +1105,6 @@ TEST_CASE("HGraph MCI physical deletion compacts slots and preserves mixed mutat
     for (uint64_t i = 0; i < 8; ++i) {
         REQUIRE(index->Remove({ids[0]}, vsag::RemoveMode::FORCE_REMOVE).value() == 1);
         REQUIRE(index->Add(dataset(0, 1)).has_value());
-        REQUIRE(index->Flush().has_value());
     }
     REQUIRE(concurrent_search.get());
     verify();
@@ -1186,7 +1159,6 @@ TEST_CASE("HGraph FP32 MCI fresh snapshots support physical mutation after reloa
         REQUIRE(restored->Add(make_dataset(ids, vectors, stage * 40, 40, dim)).value().empty());
         REQUIRE(restored->GetNumElements() == total - 40 + stage * 40);
     }
-    REQUIRE(restored->Flush().has_value());
     for (const bool use_mci : {false, true}) {
         auto search = vsag::JsonType::Parse(R"({"hgraph":{"ef_search":400,
             "mci_seed_ratio":100,"hgraph_valid_ratio_threshold":1.0}})");
@@ -1810,12 +1782,8 @@ TEST_CASE("HGraph Add uses the full-build local clique size threshold",
     // a two-member clique to reach min(50, N-1)=3 distinct neighbors.
     REQUIRE(after["mci_delta_clique_count"].GetInt() == 2);
     REQUIRE(after["mci_delta_clique_membership_count"].GetInt() == 5);
-    REQUIRE(index.value()->Flush().has_value());
-    auto flushed = vsag::JsonType::Parse(index.value()->GetStats());
-    REQUIRE(flushed["mci_delta_clique_count"].GetInt() == 0);
-    REQUIRE(flushed["mci_covered_nodes"].GetInt() == 4);
     vsag::DefaultAllocator allocator;
-    REQUIRE(snapshot_degree(read_flushed_mci(index.value(), &allocator), 3) == 3);
+    REQUIRE(snapshot_degree(read_mci_snapshot(index.value(), &allocator), 3) == 3);
 }
 
 TEST_CASE("MCI Add stops at unique degree rather than clique count",
@@ -1908,7 +1876,7 @@ TEST_CASE("MCI Add stops at unique degree rather than clique count",
         REQUIRE(stats["mci_delta_clique_membership_count"].GetInt() == 1);
     }
     vsag::DefaultAllocator allocator;
-    auto snapshot = read_flushed_mci(index, &allocator);
+    auto snapshot = read_mci_snapshot(index, &allocator);
     REQUIRE(snapshot.labels[total] == ids[total]);
     const uint64_t expected = scenario == "default"      ? 50
                               : scenario == "configured" ? 100
@@ -1920,7 +1888,7 @@ TEST_CASE("MCI Add stops at unique degree rather than clique count",
     REQUIRE(restored.has_value());
     std::stringstream stream(snapshot.bytes);
     REQUIRE(restored.value()->Deserialize(stream).has_value());
-    REQUIRE(snapshot_degree(read_flushed_mci(restored.value(), &allocator), total) == expected);
+    REQUIRE(snapshot_degree(read_mci_snapshot(restored.value(), &allocator), total) == expected);
 }
 
 TEST_CASE("MCI local builder relaxes negative similarities without accepting every edge",
@@ -2423,52 +2391,192 @@ TEST_CASE("HGraph Merge rebuilds the MCI companion", "[ut][hgraph][mci]") {
     REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
 }
 
-TEST_CASE("HGraph MCI flush preserves queries across allocation failures",
-          "[ut][hgraph][mci][flush]") {
-    FlushFailureAllocator allocator;
-    auto params = vsag::JsonType::Parse(generate_hgraph_mci_params(2));
+TEST_CASE("HGraph MCI automatically compacts after one hundred successful mutations",
+          "[ut][hgraph][mci][auto_compact]") {
+    constexpr int64_t base = 256;
+    constexpr int64_t dim = 4;
+    std::vector<int64_t> ids(600);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::vector<float> vectors(ids.size() * dim);
+    for (uint64_t i = 0; i < vectors.size(); ++i) {
+        vectors[i] = static_cast<float>((i * 17) % 257);
+    }
+    auto params = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
     params["index_param"]["graph_type"].SetString("nsw");
-    params["index_param"]["max_degree"].SetInt(32);
+    params["index_param"]["base_io_type"].SetString("memory_io");
     params["index_param"]["build_thread_count"].SetInt(1);
-    auto index = vsag::Factory::CreateIndex("hgraph", params.Dump(), &allocator).value();
-    std::vector<int64_t> ids{0, 1, 2, 3, 4, 5};
-    std::vector<float> vectors{0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6};
-    REQUIRE(index->Build(make_dataset(ids, vectors, 0, 4, 2)).has_value());
-    REQUIRE(index->Add(make_dataset(ids, vectors, 4, 2, 2)).has_value());
-    const auto before = vsag::JsonType::Parse(index->GetStats());
-    REQUIRE(before["mci_delta_clique_count"].GetInt() > 0);
-    auto filter = std::make_shared<HalfRatioAllValidFilter>(ids);
-    bool succeeded = false;
-    uint64_t failures = 0;
-    for (int64_t budget = 0; budget < 128; ++budget) {
-        allocator.remaining = budget;
-        const auto flushed = index->Flush();
-        allocator.remaining = -1;
-        succeeded = flushed.has_value();
-        failures += not succeeded;
-        const auto after = vsag::JsonType::Parse(index->GetStats());
-        REQUIRE(after["mci_has_index"].GetBool());
-        REQUIRE(after["mci_covered_nodes"].GetInt() == before["mci_covered_nodes"].GetInt());
-        REQUIRE(after["mci_total_membership_count"].GetInt() ==
-                before["mci_total_membership_count"].GetInt());
-        REQUIRE(after["mci_delta_clique_count"].GetInt() ==
-                (succeeded ? 0 : before["mci_delta_clique_count"].GetInt()));
-        auto result =
-            index->KnnSearch(make_dataset(ids, vectors, 5, 1, 2),
-                             6,
-                             R"({"hgraph":{"ef_search":100,"use_mci":true,"mci_seed_ratio":100,
-                           "hgraph_valid_ratio_threshold":1}})",
-                             filter);
+    params["index_param"]["support_force_remove"].SetBool(true);
+    params["index_param"]["mci_delete_clique_size_threshold"].SetInt(1);
+    auto index = vsag::Factory::CreateIndex("hgraph", params.Dump()).value();
+    REQUIRE(index->Build(make_dataset(ids, vectors, 0, base, dim)).has_value());
+    auto add = [&](int64_t offset, int64_t count) {
+        auto result = index->Add(make_dataset(ids, vectors, offset, count, dim));
         REQUIRE(result.has_value());
-        REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
-        REQUIRE(result.value()->GetDim() == 6);
-        REQUIRE(result.value()->GetIds()[0] == ids[5]);
-        if (succeeded) {
-            break;
+        REQUIRE(result.value().empty());
+    };
+    auto delta_memberships = [&]() {
+        const auto stats = vsag::JsonType::Parse(index->GetStats());
+        return stats["mci_delta_extra_membership_count"].GetInt() +
+               stats["mci_delta_clique_membership_count"].GetInt();
+    };
+    SECTION("Add counts vectors across requests and inside large batches, not failed IDs") {
+        add(base, 99);
+        REQUIRE(delta_memberships() > 0);
+        REQUIRE(index->Remove({-1, -1}).value() == 0);
+        auto duplicate = index->Add(make_dataset(ids, vectors, 0, 1, dim));
+        REQUIRE(duplicate.has_value());
+        REQUIRE(duplicate.value() == std::vector<int64_t>{ids[0]});
+        REQUIRE(delta_memberships() > 0);
+        add(base + 99, 1);
+        REQUIRE(delta_memberships() == 0);
+        add(base + 100, 101);
+        REQUIRE(delta_memberships() > 0);
+        add(base + 201, 99);
+        REQUIRE(delta_memberships() == 0);
+    }
+    SECTION("Add and complete MARK_REMOVE batches share the counter") {
+        add(base, 50);
+        std::vector<int64_t> removed(ids.begin(), ids.begin() + 49);
+        removed.push_back(ids[0]);
+        removed.push_back(-1);
+        REQUIRE(index->Remove(removed).value() == 49);
+        REQUIRE(delta_memberships() > 0);
+        REQUIRE(index->Remove(ids[49]).value() == 1);
+        REQUIRE(delta_memberships() == 0);
+        const auto stats = vsag::JsonType::Parse(index->GetStats());
+        REQUIRE(stats["mci_inactive_node_count"].GetInt() == 50);
+        REQUIRE(stats["mci_total_nodes"].GetInt() == base + 50);
+    }
+    SECTION("A large deletion compacts after the whole batch and resets the counter") {
+        add(base, 1);
+        REQUIRE(index->Remove(std::vector<int64_t>(ids.begin(), ids.begin() + 200)).value() == 200);
+        REQUIRE(delta_memberships() == 0);
+        add(base + 1, 99);
+        REQUIRE(delta_memberships() > 0);
+        add(base + 100, 1);
+        REQUIRE(delta_memberships() == 0);
+    }
+    SECTION("Restore preserves delta but starts a new runtime counter") {
+        add(base, 99);
+        auto bytes = index->Serialize();
+        REQUIRE(bytes.has_value());
+        auto restored = vsag::Factory::CreateIndex("hgraph", params.Dump()).value();
+        REQUIRE(restored->Deserialize(bytes.value()).has_value());
+        index = restored;
+        add(base + 99, 1);
+        REQUIRE(delta_memberships() > 0);
+        add(base + 100, 99);
+        REQUIRE(delta_memberships() == 0);
+    }
+    SECTION("FORCE_REMOVE compacts immediately and clears earlier pending mutations") {
+        add(base, 99);
+        REQUIRE(index->Remove(ids[0], vsag::RemoveMode::FORCE_REMOVE).value() == 1);
+        REQUIRE(delta_memberships() == 0);
+        add(base + 99, 99);
+        REQUIRE(delta_memberships() > 0);
+        add(base + 198, 1);
+        REQUIRE(delta_memberships() == 0);
+    }
+    std::vector<int64_t> live;
+    for (auto id : ids) {
+        if (index->CheckIdExist(id)) {
+            live.push_back(id);
         }
     }
-    REQUIRE(succeeded);
-    REQUIRE(failures > 0);
+    REQUIRE(index->GetNumElements() == static_cast<int64_t>(live.size()));
+    auto filter = std::make_shared<HalfRatioAllValidFilter>(live);
+    auto result =
+        index->KnnSearch(make_dataset(ids, vectors, base, 1, dim),
+                         static_cast<int64_t>(live.size()),
+                         R"({"hgraph":{"ef_search":1024,"use_mci":true,"mci_seed_ratio":100,
+            "hgraph_valid_ratio_threshold":1}})",
+                         filter);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    std::vector<int64_t> found(result.value()->GetIds(),
+                               result.value()->GetIds() + result.value()->GetDim());
+    std::sort(found.begin(), found.end());
+    REQUIRE(found == live);
+}
+
+TEST_CASE("HGraph automatic MCI compaction retries allocation failure after Add or Remove",
+          "[ut][hgraph][mci][auto_compact]") {
+    class CompactionFailureAllocator : public vsag::DefaultAllocator {
+    public:
+        void*
+        Allocate(uint64_t bytes) override {
+            if (fail_bytes != 0 and bytes == fail_bytes) {
+                fail_bytes = 0;
+                ++failures;
+                if (vsag_error) {
+                    throw vsag::VsagException(vsag::ErrorType::NO_ENOUGH_MEMORY,
+                                              "injected compaction allocation failure");
+                }
+                throw std::bad_alloc();
+            }
+            return vsag::DefaultAllocator::Allocate(bytes);
+        }
+        uint64_t fail_bytes{0};
+        uint64_t failures{0};
+        bool vsag_error{false};
+    } allocator;
+    // Cover both mutation entry points and both allocator failure conventions.
+    const bool remove = GENERATE(false, true);
+    allocator.vsag_error = GENERATE(false, true);
+    CAPTURE(remove, allocator.vsag_error);
+    constexpr int64_t base = 32;
+    constexpr int64_t dim = 4;
+    std::vector<int64_t> ids(base + 102);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> vectors(ids.size() * dim);
+    for (uint64_t i = 0; i < vectors.size(); ++i) {
+        vectors[i] = static_cast<float>((i * 17) % 257);
+    }
+    auto params = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    params["index_param"]["graph_type"].SetString("nsw");
+    params["index_param"]["build_thread_count"].SetInt(1);
+    auto index = vsag::Factory::CreateIndex("hgraph", params.Dump(), &allocator).value();
+    REQUIRE(index->Build(make_dataset(ids, vectors, 0, base, dim)).has_value());
+    REQUIRE(index->Add(make_dataset(ids, vectors, base, 99, dim)).has_value());
+    // The replacement inverse CSR allocates exactly total + 1 offsets. Arm just this
+    // allocation size to distinguish compaction from graph insertion and local construction.
+    allocator.fail_bytes = (base + 100 + (remove ? 0 : 1)) * sizeof(vsag::InnerIdType);
+    if (remove) {
+        auto removed = index->Remove(ids[0]);
+        REQUIRE(removed.has_value());
+        REQUIRE(removed.value() == 1);
+    } else {
+        auto added = index->Add(make_dataset(ids, vectors, base + 99, 1, dim));
+        REQUIRE(added.has_value());
+        REQUIRE(added.value().empty());
+    }
+    REQUIRE(allocator.failures == 1);
+    auto stats = vsag::JsonType::Parse(index->GetStats());
+    REQUIRE(stats["mci_has_index"].GetBool());
+    REQUIRE(stats["mci_delta_clique_count"].GetInt() > 0);
+    const auto expected_live = base + (remove ? 98 : 100);
+    REQUIRE(index->GetNumElements() == expected_live);
+    auto query = make_dataset(ids, vectors, base + 98, 1, dim);
+    auto filter = std::make_shared<HalfRatioAllValidFilter>(ids);
+    auto result =
+        index->KnnSearch(query,
+                         expected_live,
+                         R"({"hgraph":{"ef_search":512,"use_mci":true,"mci_seed_ratio":100,
+            "hgraph_valid_ratio_threshold":1}})",
+                         filter);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    REQUIRE(result.value()->GetDim() == expected_live);
+    if (remove) {
+        for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+            REQUIRE(result.value()->GetIds()[i] != ids[0]);
+        }
+    }
+    REQUIRE(index->Add(make_dataset(ids, vectors, base + (remove ? 99 : 100), 1, dim)).has_value());
+    stats = vsag::JsonType::Parse(index->GetStats());
+    REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
+    REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 0);
+    REQUIRE(index->GetNumElements() == expected_live + 1);
 }
 
 TEST_CASE("Clique flush is atomic on allocation failure", "[ut][hgraph][mci][flush]") {

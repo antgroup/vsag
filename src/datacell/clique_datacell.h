@@ -277,9 +277,6 @@ private:
     get_clique_members_unlocked(InnerIdType clique_id, Vector<InnerIdType>& members) const;
 
     void
-    append_new_clique_unlocked(const Vector<InnerIdType>& members, uint64_t total);
-
-    void
     validate(uint64_t total) const;
 
     void

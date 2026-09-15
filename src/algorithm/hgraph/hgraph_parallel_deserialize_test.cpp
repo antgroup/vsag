@@ -845,7 +845,6 @@ TEST_CASE("HGraph parallel restore preserves MCI tombstones and later mutations"
     REQUIRE(loaded->GetNumElements() == data.count - 4);
     REQUIRE(loaded->Add(first).has_value());
     REQUIRE(loaded->GetNumElements() == data.count - 3);
-    REQUIRE(loaded->Flush().has_value());
     auto result = loaded->KnnSearch(first, 10, R"({"hgraph":{"ef_search":96}})");
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() == 10);

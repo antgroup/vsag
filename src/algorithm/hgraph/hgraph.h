@@ -174,9 +174,6 @@ public:
     GetStats() const override;
 
     void
-    Flush() override;
-
-    void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 
     IndexType
@@ -997,11 +994,21 @@ private:
     void
     remove_from_mci(const Vector<InnerIdType>& removed_inner_ids);
 
+    /// Account successful vector mutations and compact at 100. Caller holds mci_mutation_mutex_.
+    /// MARK_REMOVE accounts the complete batch after repair; FORCE_REMOVE compacts separately.
+    void
+    maybe_compact_mci(uint64_t changed_count);
+
     /// Recover an existing query vector and run the same MCI update as Add, without reinserting it.
     /// Non-FP32 repair scans O(N) stored-code distances per seed with O(mcs) heap storage;
     /// FP32 repair uses HGraph KNN. Neither path promises logarithmic worst-case search time.
     void
     repair_mci_clique(InnerIdType node_id);
+
+    /// Recheck live coverage after earlier repairs, reusing caller-owned scratch storage.
+    /// Caller holds mutation and persistent-codes locks and supplies a current inner ID.
+    bool
+    repair_mci_clique_if_undercovered(InnerIdType node_id, Vector<InnerIdType>& memberships);
 
     [[nodiscard]] Vector<InnerIdType>
     search_mci_knn(InnerIdType query_inner_id, const void* vector, uint64_t visible_total) const;
@@ -1050,6 +1057,7 @@ private:
 
     CliqueDataCellPtr mci_cliques_{nullptr};  // companion MCI clique datacell
     HGraphMCIParameters mci_parameters_{};
+    uint64_t mci_pending_mutations_{0};  // runtime-only; guarded by mci_mutation_mutex_
 
     uint64_t ef_construct_{400};  // expansion factor during graph construction
     float alpha_{1.0};            // Relative Neighborhood Graph pruning coefficient
@@ -1065,7 +1073,7 @@ private:
     // Repair releases force_remove
     // before public search reacquires it (shared_mutex is non-recursive); mutation still excludes
     // all ID-moving operations. CSR storage/view locks are internal to CliqueDataCell.
-    mutable std::mutex mci_mutation_mutex_;         // serializes MCI Add, Remove and Flush
+    mutable std::mutex mci_mutation_mutex_;         // serializes MCI Add, Remove and compaction
     mutable MutexArrayPtr neighbors_mutex_;         // per-node locks for neighbor lists
     mutable std::shared_mutex add_mutex_;           // serializes Add() operations
     mutable std::shared_mutex force_remove_mutex_;  // serializes force-remove operations

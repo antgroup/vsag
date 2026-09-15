@@ -186,16 +186,26 @@ commits only after allocation succeeds; temporary old/new buffers coexist during
 Allocator retention and IO block granularity mean RSS need not fall proportionally to index
 memory accounting.
 
-Call `index->Flush()` to merge the companion's incremental metadata into its two CSR arrays.
+MCI automatically merges incremental metadata into its two CSR arrays after 100 successful
+vector mutations, using one counter shared by Add and MARK_REMOVE. Add checks after each
+inserted point, including within a large batch. MARK_REMOVE projects and repairs the complete
+deletion batch before checking the threshold, so a large deletion batch compacts once at its end.
+Duplicate/missing removal IDs and failed insertions do not count; repair seeds do not count as
+new vectors. FORCE_REMOVE retains its mandatory end-of-batch compaction and resets the counter.
+Successful compaction resets the counter to zero; a new full build or load also resets this
+runtime-only counter. Below the threshold, queries and serialization still include delta.
+There is no public Flush interface and no change to the Index virtual interface for compaction.
+
 Flush includes new delta cliques and members appended to base cliques, drops retired cliques and
 deleted members, and rebuilds the node-to-clique mapping with compact clique IDs. It clears the
 delta storage but preserves vector inner IDs and deletion markers. The operation is idempotent
 and does not rebuild HGraph or persist data to disk; use `Serialize()` for persistence.
-Other index types and HGraph without MCI return an unsupported-operation error.
 
 Flush is serialized with Add/Remove. It holds an exclusive clique-storage lock while constructing
 and publishing the replacement, so searches may wait. Replacement buffers are allocated before
-publication; an allocation failure leaves the old clique representation intact. Temporary memory
+publication; an allocation failure leaves the old clique representation intact. Automatic
+maintenance defers allocation failures without failing a completed Add/MARK_REMOVE and retries
+on the next successful mutation. This does not change FORCE_REMOVE's failure semantics. Temporary memory
 includes both the old and new CSR. Do not retain clique IDs across a flush.
 Loading a validated compact CSR with no delta entries, empty clique rows, or deletion/retirement
 markers preserves the clean state, so its first Flush skips rebuilding the CSR. Other snapshots
@@ -210,8 +220,8 @@ checks the user filter first, and avoids acquiring the deletion-set lock for eve
 
 Add/MARK_REMOVE may temporarily unpublish the companion, so concurrent queries still fall back to
 HGraph under the existing mutation semantics. This does not guarantee complete recall during a
-mutation; fallback results can be empty when the graph entry point has been deleted. Flush alone
-does not unpublish the companion; queries wait for the clique storage lock when necessary.
+mutation; fallback results can be empty when the graph entry point has been deleted. Automatic
+compaction runs within that mutation; queries may wait for the clique storage lock.
 Fallback queries recheck candidate IDs against one deletion-set view before packing results.
 This removes old candidates deleted during traversal, including an old slot whose label has
 been re-added at a new slot. It does not make an entire concurrent search a transactional snapshot.

@@ -799,6 +799,7 @@ HGraph::build_mci_clique_index(const void* vectors) {
         return;
     }
     std::scoped_lock build_lock(this->mci_build_mutex_);
+    this->mci_pending_mutations_ = 0;
     std::shared_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
 
     const auto total = this->total_count_.load();
@@ -1336,35 +1337,7 @@ HGraph::build_mci_clique_index(const void* vectors) {
         max_membership = std::max(max_membership, membership);
     }
 
-    Vector<InnerIdType> p_maxc(this->allocator_);
-    Vector<InnerIdType> maxcs(this->allocator_);
-    Vector<Vector<InnerIdType>> node_to_clique(
-        total, Vector<InnerIdType>(this->allocator_), this->allocator_);
-    p_maxc.push_back(0);
-    for (InnerIdType clique_id = 0; clique_id < cliques.size(); ++clique_id) {
-        for (auto inner_id : cliques[clique_id]) {
-            maxcs.push_back(inner_id);
-            node_to_clique[inner_id].push_back(clique_id);
-        }
-        p_maxc.push_back(static_cast<InnerIdType>(maxcs.size()));
-    }
-
-    Vector<InnerIdType> p_node_to_cid(this->allocator_);
-    Vector<InnerIdType> node_to_cids(this->allocator_);
-    p_node_to_cid.push_back(0);
-    for (InnerIdType inner_id = 0; inner_id < total; ++inner_id) {
-        auto& ids = node_to_clique[inner_id];
-        std::sort(ids.begin(), ids.end());
-        ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
-        node_to_cids.insert(node_to_cids.end(), ids.begin(), ids.end());
-        p_node_to_cid.push_back(static_cast<InnerIdType>(node_to_cids.size()));
-    }
-
-    mci_cliques_->Assign(std::move(p_maxc),
-                         std::move(maxcs),
-                         std::move(p_node_to_cid),
-                         std::move(node_to_cids),
-                         total);
+    AssignMCICliquesToDatacell(this->mci_cliques_, cliques, total, this->allocator_);
     logger::info(
         "hgraph mci clique build finished, total_cliques={}, total_memberships={}, "
         "avg_membership={}, max_membership={}",
@@ -1449,8 +1422,6 @@ HGraph::search_mci_knn(InnerIdType query_inner_id,
         }
     }
 
-    std::sort(knn_ids.begin(), knn_ids.end());
-    knn_ids.erase(std::unique(knn_ids.begin(), knn_ids.end()), knn_ids.end());
     if (knn_ids.size() > k) {
         Vector<std::pair<float, InnerIdType>> sorted_neighbors(this->allocator_);
         sorted_neighbors.reserve(knn_ids.size());
@@ -1804,6 +1775,20 @@ HGraph::incremental_update_mci_clique(InnerIdType node_id,
     }
 }
 
+bool
+HGraph::repair_mci_clique_if_undercovered(InnerIdType node_id, Vector<InnerIdType>& memberships) {
+    if (this->label_table_->IsRemoved(node_id)) {
+        return false;
+    }
+    memberships.clear();
+    this->mci_cliques_->CollectNodeCliqueIds(node_id, memberships);
+    if (memberships.size() >= this->mci_parameters_.delete_node_mct_threshold) {
+        return false;
+    }
+    this->repair_mci_clique(node_id);
+    return true;
+}
+
 void
 HGraph::remove_from_mci(const Vector<InnerIdType>& removed_inner_ids) {
     if (not this->mci_parameters_.enabled or this->mci_cliques_ == nullptr or
@@ -1819,17 +1804,11 @@ HGraph::remove_from_mci(const Vector<InnerIdType>& removed_inner_ids) {
     this->mci_cliques_->CommitDelete(
         removed_inner_ids, snapshot.retired_clique_ids, this->total_count_.load());
     uint64_t repaired_node_count = 0;
+    Vector<InnerIdType> memberships(this->allocator_);
     for (auto repair_node_id : snapshot.repair_node_ids) {
-        if (this->label_table_->IsRemoved(repair_node_id)) {
-            continue;
+        if (this->repair_mci_clique_if_undercovered(repair_node_id, memberships)) {
+            ++repaired_node_count;
         }
-        Vector<InnerIdType> current_clique_ids(this->allocator_);
-        this->mci_cliques_->CollectNodeCliqueIds(repair_node_id, current_clique_ids);
-        if (current_clique_ids.size() >= this->mci_parameters_.delete_node_mct_threshold) {
-            continue;
-        }
-        this->repair_mci_clique(repair_node_id);
-        ++repaired_node_count;
     }
     logger::info(
         "hgraph mci mark remove repaired, removed={}, affected_cliques={}, retired_cliques={}, "
@@ -1902,21 +1881,19 @@ HGraph::force_remove_with_mci(const std::vector<int64_t>& ids) {
     force_lock.unlock();
     {
         std::shared_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+        Vector<InnerIdType> memberships(this->allocator_);
         for (auto old_id : snapshot.repair_node_ids) {
             // The snapshot precedes compaction: never use its IDs in the new slot space.
             const auto id = old_to_new[old_id];
-            if (id == LabelTable::INVALID_ID or this->label_table_->IsRemoved(id)) {
+            if (id == LabelTable::INVALID_ID) {
                 continue;
             }
-            Vector<InnerIdType> memberships(this->allocator_);
-            this->mci_cliques_->CollectNodeCliqueIds(id, memberships);
-            if (memberships.size() < this->mci_parameters_.delete_node_mct_threshold) {
-                this->repair_mci_clique(id);
-            }
+            this->repair_mci_clique_if_undercovered(id, memberships);
         }
     }
     force_lock.lock();
     this->mci_cliques_->Flush(total);
+    this->mci_pending_mutations_ = 0;
     {
         std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
         // A later Add must resize all slot-indexed storage, including graph version rows.
@@ -1931,16 +1908,31 @@ HGraph::force_remove_with_mci(const std::vector<int64_t>& ids) {
 }
 
 void
-HGraph::Flush() {
-    if (not this->mci_parameters_.enabled or this->mci_cliques_ == nullptr) {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "HGraph Flush requires the MCI companion");
+HGraph::maybe_compact_mci(uint64_t changed_count) {
+    if (changed_count == 0) {
+        return;
     }
-    std::unique_lock<std::mutex> mutation_lock(this->mci_mutation_mutex_);
-    // Mutation serialization excludes physical ID moves; CliqueDataCell::Flush takes
-    // the exclusive storage lock paired with each query's pinned search view.
-    this->mci_cliques_->Flush(this->total_count_.load());
-    this->cal_memory_usage();
+    constexpr uint64_t interval = 100;
+    // Saturate rather than overflow on large batches; failed compaction retries on the next change.
+    this->mci_pending_mutations_ +=
+        std::min(changed_count, interval - this->mci_pending_mutations_);
+    if (this->mci_pending_mutations_ < interval) {
+        return;
+    }
+    try {
+        // The caller already serializes mutations. Storage replacement pins out query views.
+        this->mci_cliques_->Flush(this->total_count_.load());
+        this->mci_pending_mutations_ = 0;
+    } catch (const std::bad_alloc&) {
+        // Automatic compaction is optional maintenance: preserve a completed Add/Remove and
+        // its valid delta if replacement allocation fails. Flush publishes only after allocation.
+        logger::warn("MCI automatic compaction deferred: allocation failed");
+    } catch (const VsagException& e) {
+        if (e.error_.type != ErrorType::NO_ENOUGH_MEMORY) {
+            throw;
+        }
+        logger::warn("MCI automatic compaction deferred: allocation failed");
+    }
 }
 
 }  // namespace vsag

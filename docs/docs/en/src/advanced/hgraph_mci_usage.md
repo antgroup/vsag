@@ -1,13 +1,13 @@
 # HGraph MCI: code and configuration
 
 This guide covers the development branch's FP32 Build, ADD, MARK_REMOVE, FORCE_REMOVE,
-and Flush workflows. The index type is `hgraph`; MCI shares its vector storage and is not
+and automatic compaction workflows. The index type is `hgraph`; MCI shares its vector storage and is not
 a separate HNSW index. See the [mutation report](hgraph_mci_mutation.md) for algorithms and measurements.
 
 > The reproduced reload-then-FORCE_REMOVE memory error was traced to missing graph reverse-edge
 > restoration and has a fix and regression coverage. Historical measurements used a fresh Build;
 > no new large-dataset snapshot-reuse benchmark is claimed.
-> The new virtual `Index::Flush()` requires ABI review; MCI serialization advances to v2.
+> Compaction is internal and adds no virtual `Index` interface; MCI serialization advances to v2.
 > Compatibility with older binaries must be tested separately.
 
 ## 1. Code map and maintenance
@@ -16,9 +16,9 @@ Paths below are relative to the repository root.
 
 | File | Entry points / responsibility |
 | --- | --- |
-| `include/vsag/index.h`, `src/index/index_impl.h` | Public Build/Add/Remove/Flush/Search and error wrapping |
+| `include/vsag/index.h`, `src/index/index_impl.h` | Public Build/Add/Remove/Search and error wrapping |
 | `src/algorithm/hgraph/hgraph_build.cpp` | `Add` → `add_impl`: insert into HGraph, then maintain MCI for successful insertions |
-| `src/algorithm/hgraph/hgraph_mci.cpp` | Full construction, `search_mci_knn`, `incremental_update_mci_clique`, `repair_mci_clique`, `force_remove_with_mci`, `Flush` |
+| `src/algorithm/hgraph/hgraph_mci.cpp` | Full construction, `search_mci_knn`, `incremental_update_mci_clique`, `repair_mci_clique`, `force_remove_with_mci`, `maybe_compact_mci` |
 | `src/algorithm/mci/mci_local_builder.h` | Shared local graph construction, maximal-clique enumeration/selection and alpha policy for Build and incremental construction |
 | `src/algorithm/hgraph/hgraph_modify.cpp` | Removal dispatch, graph repair, tail-slot moves, shrinking |
 | `src/datacell/clique_datacell.{h,cpp}` | Bidirectional CSR, delta, deletion snapshots, retirement, remapping, Flush |
@@ -69,7 +69,13 @@ candidate generation; FP32 findings do not establish RaBitQ behavior.
 | --- | --- | --- | --- |
 | MARK_REMOVE, default | Retain physical slots | Retire small cliques, repair under-covered points into delta | None |
 | FORCE_REMOVE | Move tail points into holes; reduce slots and attempt shrinking | Snapshot, remap, repair, automatic Flush | None |
-| Flush | No vector deletion/movement | Merge delta, remove retired memberships, rebuild CSR | None |
+| Internal automatic compaction | No vector deletion/movement | Merge delta, remove retired memberships, rebuild CSR | None |
+
+Add and MARK_REMOVE share a 100-successful-vector counter: Add checks per point; deletion checks
+after the complete batch is projected and repaired. Failed inserts and duplicate/missing removals
+do not count. A successful compaction, full rebuild, load, or FORCE_REMOVE end-of-batch compaction
+resets the counter. Allocation failure during automatic maintenance retains delta and retries on
+the next successful mutation. Delta remains searchable and serializable below the threshold.
 
 MCI mutations share a serialization mutex. Physical moves and final shrinking hold exclusive
 force-remove protection. Repair releases that lock so internal HGraph queries can acquire read
@@ -175,14 +181,14 @@ check(appended);
 if (!appended.value().empty()) {
     throw std::runtime_error("some added vectors were not inserted");
 }
-check(index->Flush());
+// MCI compaction is automatic; no public Flush call is required or available.
 auto result = index->KnnSearch(query, 10, search_json, filter);
 check(result);
 ```
 
 Build/Add also return failed-insertion labels: checking only `expected` is insufficient.
 `removed.value()` is the actual removal count. MARK_REMOVE retains physical slots.
-Explicit Flush is optional; FORCE_REMOVE already flushes internally. Flush does not serialize.
+Compaction is automatic, including at the end of FORCE_REMOVE; it does not serialize.
 Remove accepts external labels, not inner slots; do not retain internal node/clique IDs across compaction.
 See `examples/cpp/324_feature_hgraph_mci_companion.cpp` for Dataset and Filter construction.
 
@@ -201,7 +207,7 @@ Do not mix their recall conclusions.
 | --- | --- |
 | `stage`, `active_vectors`, `index_elements` | Stage, live count, public element count; the last is not physical storage accounting |
 | `ef_search`, `recall_at_k`, `qps` | Search width, recall, timed throughput; fixed ef is not fixed quality |
-| `build_seconds`, `mutation_seconds`, `flush_seconds` | Build, stage mutation, explicit post-stage Flush; internal FORCE_REMOVE Flush is part of mutation time |
+| `build_seconds`, `mutation_seconds`, `flush_seconds` | Historical build/mutation/explicit-flush timings; current automatic compaction is included in mutation time, with no public post-stage Flush |
 | `index_memory_bytes`, `vector_memory_bytes`, `graph_memory_bytes`, `mci_memory_bytes` | Index/component accounting, not RSS |
 | `mci_route_ratio`, `mci_raw_float_ratio` | Actual MCI/direct FP32 route rates |
 | `mci_total_cliques`, `mci_delta_cliques`, `mci_total_memberships` | Clique, delta-clique, and membership counts |
