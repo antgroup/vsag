@@ -14,11 +14,17 @@
 
 #pragma once
 
+#include <array>
+#include <atomic>
+#include <cstring>
 #include <functional>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 
+#include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/heap/distance_heap.h"
@@ -96,6 +102,7 @@ public:
 
     friend class Pyramid;
     friend class PyramidAnalyzer;
+    friend class PyramidDuplicateTestPeer;
 
 public:
     GraphInterfacePtr graph_{nullptr};  // graph over the ids in this node
@@ -112,6 +119,43 @@ public:
     Status status_{Status::NO_INDEX};  // current build state
 
 private:
+    // Exact code admission uses immutable construction codes, not copied vectors.
+    struct DuplicateAdmission {
+        using Key = std::pair<uint64_t, InnerIdType>;
+        struct CodeLess {
+            FlattenInterfacePtr codes;
+            bool
+            operator()(const Key& lhs, const Key& rhs) const {
+                if (lhs.first != rhs.first) {
+                    return lhs.first < rhs.first;
+                }
+                auto left = codes->AcquireCodesById(lhs.second);
+                auto right = codes->AcquireCodesById(rhs.second);
+                CHECK_ARGUMENT(left && right, "Pyramid duplicate admission requires codes");
+                return std::memcmp(left.Data(), right.Data(), codes->code_size_) < 0;
+            }
+        };
+        struct Stripe {
+            static constexpr uint64_t kStripeCount = 64;
+            std::mutex mutex;
+            using Entry = std::pair<const Key, InnerIdType>;
+            std::map<Key, InnerIdType, CodeLess, AllocatorWrapper<Entry>> representatives;
+            Stripe(const FlattenInterfacePtr& codes, Allocator* allocator)
+                : representatives(CodeLess{codes}, AllocatorWrapper<Entry>(allocator)) {
+            }
+        };
+        // Existing encoded IDs are immutable: Add trains only an empty index,
+        // and Pyramid removal marks labels without moving or rewriting codes.
+        DuplicateAdmission(const FlattenInterfacePtr& codes, Allocator* allocator) {
+            for (auto& stripe : stripes) {
+                stripe = std::make_unique<Stripe>(codes, allocator);
+            }
+        }
+        std::array<std::unique_ptr<Stripe>, Stripe::kStripeCount> stripes;
+        std::atomic<uint64_t> representative_count{0};
+    };
+    std::unique_ptr<DuplicateAdmission> duplicate_admission_;
+
     class RoutingOverlay {
     public:
         RoutingOverlay(Allocator* allocator, GraphInterfaceParamPtr param)

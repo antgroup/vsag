@@ -335,6 +335,41 @@ TEST_CASE("Pyramid reads legacy reserved label slots", "[ut][pyramid][reserved_l
     }
 }
 
+namespace vsag {
+// Narrow test peer: manufacture a legacy persisted row state without exposing a
+// public mutation API or changing production serialization.
+class PyramidDuplicateTestPeer {
+public:
+    static IndexNode&
+    Root(Pyramid& index) {
+        return *index.hierarchies_.begin()->second->root;
+    }
+    static void
+    ClearAdmission(Pyramid& index) {
+        auto& node = Root(index);
+        REQUIRE(node.duplicate_admission_ != nullptr);
+        for (auto& stripe : node.duplicate_admission_->stripes) {
+            stripe->representatives.clear();
+        }
+        node.duplicate_admission_->representative_count.store(0);
+    }
+
+    static InnerIdType
+    OnlyAdmissionOwner(Pyramid& index) {
+        auto& node = Root(index);
+        REQUIRE(node.duplicate_admission_->representative_count.load() == 1);
+        for (const auto& stripe : node.duplicate_admission_->stripes) {
+            if (not stripe->representatives.empty()) {
+                return stripe->representatives.begin()->second;
+            }
+        }
+        FAIL("Missing admission owner");
+        return 0;
+    }
+};
+
+}  // namespace vsag
+
 TEST_CASE("Split function tests", "[ut][pyramid]") {
     SECTION("Empty input string") {
         auto result = vsag::split("", ',');
@@ -1656,6 +1691,39 @@ TEST_CASE("Pyramid PiPNN preserves vectors after duplicate label filtering",
     check_vectors(restored);
 }
 
+TEST_CASE("Pyramid ODescent build preserves shared parameters",
+          "[ut][pyramid][odescent_parameter_isolation]") {
+    const auto threads = GENERATE(1, 4);
+    vsag::IndexCommonParam common;
+    common.dim_ = PYRAMID_TEST_DIM;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto external = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32", "graph_type": "odescent",
+        "max_degree": 8, "index_min_size": 8,
+        "hierarchies": ["site", "category"]
+    })");
+    external["build_thread_count"].SetInt(threads);
+    auto param = std::dynamic_pointer_cast<vsag::PyramidParameters>(
+        vsag::Pyramid::CheckAndMappingExternalParam(external, common));
+    // Deliberately differ from the graph degree so mutation is observable even serially.
+    param->odescent_param->max_degree = 32;
+    auto index = std::make_shared<vsag::Pyramid>(param, common);
+    constexpr int64_t count = 96;
+    std::vector<float> vectors(count * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, count);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> sites(count, "tenant/leaf");
+    std::vector<std::string> categories(count, "group");
+    auto data = MakePyramidDataset(vectors.data(), ids.data(), sites.data(), count);
+    data->Paths("site", sites.data())->Paths("category", categories.data());
+    REQUIRE(index->Build(data).empty());
+    REQUIRE(index->GetNumElements() == count);
+    CHECK(param->odescent_param->max_degree == 32);
+}
+
 TEST_CASE("Pyramid scalar RaBitQ split build supports search serialization and Add",
           "[ut][pyramid][optimized_build]") {
     constexpr int64_t dim = 64;
@@ -1792,4 +1860,107 @@ TEST_CASE("Pyramid scalar RaBitQ split build supports search serialization and A
     REQUIRE(loaded->Add(dataset(count, 1)).empty());
     check_query(index, count);
     check_query(loaded, count);
+}
+
+TEST_CASE("Pyramid rehydrates isolated physical duplicate owners after deserialize",
+          "[ut][pyramid][duplicate][duplicate_legacy_empty_owner]") {
+    const auto root_type = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    const auto storage = GENERATE(std::string("flat"), std::string("compressed"));
+    CAPTURE(root_type, storage);
+    constexpr int64_t count = 8;
+    std::vector<float> vectors(count * PYRAMID_TEST_DIM);
+    std::vector<int64_t> ids(count);
+    std::vector<std::string> paths(count, "");
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = 100 + i;
+        const auto group = i / 2;
+        for (int64_t d = 0; d < PYRAMID_TEST_DIM; ++d) {
+            vectors[i * PYRAMID_TEST_DIM + d] = static_cast<float>(group * (d + 1));
+        }
+    }
+    auto source =
+        MakeRootPyramidIndex(root_type, false, vsag::GRAPH_TYPE_VALUE_NSW, true, 1, false, storage);
+    REQUIRE(source.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count))
+                .empty());
+    auto& root = vsag::PyramidDuplicateTestPeer::Root(*source.index);
+    vsag::InnerIdType owner = 0;
+    bool selected = false;
+    for (const auto candidate :
+         {vsag::InnerIdType{0}, vsag::InnerIdType{2}, vsag::InnerIdType{4}, vsag::InnerIdType{6}}) {
+        if (candidate != root.entry_point_ && root.graph_->GetNeighborSize(candidate) != 0) {
+            owner = candidate;
+            selected = true;
+            break;
+        }
+    }
+    REQUIRE(selected);
+    const auto previous_aliases = root.graph_->GetDuplicateIds(owner);
+    REQUIRE(previous_aliases.size() == 1);
+    root.graph_->InsertNeighborsById(owner,
+                                     vsag::Vector<vsag::InnerIdType>(source.allocator.get()));
+    // Remove every incoming link as well: ordinary neighbor-search duplicate
+    // detection must not accidentally mask a missing admission-registry owner.
+    for (vsag::InnerIdType id = 0; id < count; ++id) {
+        vsag::Vector<vsag::InnerIdType> row(source.allocator.get());
+        root.graph_->GetNeighbors(id, row);
+        const auto end = std::remove(row.begin(), row.end(), owner);
+        if (end != row.end()) {
+            row.erase(end, row.end());
+            root.graph_->InsertNeighborsById(id, row);
+        }
+    }
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    source.index->Serialize(writer);
+    auto restored =
+        MakeRootPyramidIndex(root_type, false, vsag::GRAPH_TYPE_VALUE_NSW, true, 1, false, storage);
+    vsag::IOStreamReader reader(stream);
+    restored.index->Deserialize(reader);
+    std::vector<float> added(vectors.begin() + owner * PYRAMID_TEST_DIM,
+                             vectors.begin() + (owner + 1) * PYRAMID_TEST_DIM);
+    int64_t label = 999;
+    std::string path;
+    REQUIRE(restored.index->Add(MakePyramidDataset(added.data(), &label, &path, 1)).empty());
+    auto& graph = vsag::PyramidDuplicateTestPeer::Root(*restored.index);
+    auto aliases = graph.graph_->GetDuplicateIds(owner);
+    REQUIRE(std::find(aliases.begin(), aliases.end(), vsag::InnerIdType{count}) != aliases.end());
+    REQUIRE(aliases.size() == previous_aliases.size() + 1);
+    REQUIRE(graph.graph_->GetNeighborSize(count) == 0);
+    std::stringstream second_stream;
+    vsag::IOStreamWriter second_writer(second_stream);
+    restored.index->Serialize(second_writer);
+    auto second =
+        MakeRootPyramidIndex(root_type, false, vsag::GRAPH_TYPE_VALUE_NSW, true, 1, false, storage);
+    vsag::IOStreamReader second_reader(second_stream);
+    second.index->Deserialize(second_reader);
+    label = 1000;
+    REQUIRE(second.index->Add(MakePyramidDataset(added.data(), &label, &path, 1)).empty());
+    auto& second_root = vsag::PyramidDuplicateTestPeer::Root(*second.index);
+    const auto second_aliases = second_root.graph_->GetDuplicateIds(owner);
+    REQUIRE(second_aliases.size() == previous_aliases.size() + 2);
+    REQUIRE(std::find(second_aliases.begin(), second_aliases.end(), vsag::InnerIdType{count + 1}) !=
+            second_aliases.end());
+    REQUIRE(second_root.graph_->GetNeighborSize(count + 1) == 0);
+}
+
+TEST_CASE("Pyramid neighbor-found duplicates publish the physical owner",
+          "[ut][pyramid][duplicate][duplicate_admission_owner][concurrent]") {
+    const auto root_type = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    auto fixture = MakeRootPyramidIndex(root_type, false, vsag::GRAPH_TYPE_VALUE_NSW, true);
+    std::vector<float> vectors(8 * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, 8);
+    std::vector<int64_t> ids{10, 11, 12, 13, 14, 15, 16, 17};
+    std::vector<std::string> paths(8, "");
+    REQUIRE(fixture.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), 8))
+                .empty());
+    const auto owner = vsag::PyramidDuplicateTestPeer::Root(*fixture.index).entry_point_;
+    vsag::PyramidDuplicateTestPeer::ClearAdmission(*fixture.index);
+    int64_t label = 100;
+    std::string path;
+    REQUIRE(
+        fixture.index
+            ->Add(MakePyramidDataset(vectors.data() + owner * PYRAMID_TEST_DIM, &label, &path, 1))
+            .empty());
+    REQUIRE(vsag::PyramidDuplicateTestPeer::OnlyAdmissionOwner(*fixture.index) == owner);
+    REQUIRE(vsag::PyramidDuplicateTestPeer::Root(*fixture.index).graph_->GetNeighborSize(8) == 0);
 }

@@ -18,6 +18,7 @@
 #include <set>
 #include <vector>
 
+#include "datacell/dense_duplicate_tracker.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_datacell_parameter.h"
 #include "impl/filter/black_list_filter.h"
@@ -452,4 +453,75 @@ TEST_CASE("BasicSearcher traverses through a non-finite-distance bridge",
         result->Pop();
     }
     REQUIRE(found_target);
+}
+
+TEST_CASE("BasicSearcher expands finite entrypoint aliases without graph edges",
+          "[ut][BasicSearcher][duplicate_entrypoint]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.dim_ = 1;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto quantizer =
+        QuantizerParameter::GetQuantizerParameterByJson(JsonType::Parse(R"({"type":"fp32"})"));
+    auto io = IOParameter::GetIOParameterByJson(JsonType::Parse(R"({"type":"memory_io"})"));
+    auto flatten = std::make_shared<
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, FixedLayout<MemoryIO>>>(
+        quantizer, io, common);
+    flatten->SetQuantizer(
+        std::make_shared<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>>(1, allocator.get()));
+    flatten->SetIO(std::make_unique<MemoryIO>(allocator.get()));
+    std::vector<float> vectors = {2.0F, 2.0F, 2.0F};
+    std::vector<InnerIdType> ids = {0, 1, 2};
+    flatten->Train(vectors.data(), ids.size());
+    flatten->BatchInsertVector(vectors.data(), ids.size(), ids.data());
+    auto graph =
+        std::make_shared<MockGraphDataCell>(std::vector<std::vector<InnerIdType>>{{}, {}, {}});
+    auto tracker = std::make_shared<DenseDuplicateTracker>(allocator.get());
+    tracker->Resize(ids.size());
+    graph->SetDuplicateTracker(tracker);
+    graph->SetDuplicateId(0, 1);
+    graph->SetDuplicateId(0, 2);
+    auto pool = std::make_shared<VisitedListPool>(1, allocator.get(), ids.size(), allocator.get());
+    const auto mode = GENERATE(KNN_SEARCH, RANGE_SEARCH);
+    const auto consider_duplicate = GENERATE(false, true);
+    const auto filtered = GENERATE(false, true);
+    const auto radius = GENERATE(3.0F, 4.0F);
+    CAPTURE(mode, consider_duplicate, filtered, radius);
+    InnerSearchParam param;
+    param.ep = 0;
+    param.ef = ids.size();
+    param.topk = ids.size();
+    param.radius = radius;
+    param.search_mode = mode;
+    param.consider_duplicate = consider_duplicate;
+    if (filtered) {
+        // Excluding the representative must not exclude its eligible aliases.
+        param.is_inner_id_allowed =
+            std::make_shared<BlackListFilter>([](LabelType id) { return id == 0; });
+    }
+    float query = 0.0F;
+    auto vl = pool->TakeOne();
+    QueryContext* ctx = nullptr;
+    auto result =
+        BasicSearcher(common).Search(graph, flatten, vl, &query, param, LabelTablePtr{}, ctx);
+    pool->ReturnOne(vl);
+    std::set<InnerIdType> expected;
+    if (mode == KNN_SEARCH || radius >= 4.0F) {
+        if (!filtered) {
+            expected.insert(0);
+        }
+        if (consider_duplicate) {
+            expected.insert(1);
+            expected.insert(2);
+        }
+    }
+    REQUIRE(result->Size() == expected.size());
+    std::set<InnerIdType> actual;
+    while (!result->Empty()) {
+        REQUIRE(result->Top().first == 4.0F);
+        actual.insert(result->Top().second);
+        result->Pop();
+    }
+    REQUIRE(actual == expected);
 }
