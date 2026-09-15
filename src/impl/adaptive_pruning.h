@@ -47,7 +47,9 @@ struct AdaptivePruningStats {
 
 using PruningCandidate = std::pair<float, InnerIdType>;
 
-// Pure L2 selector. Candidates are normalized in place; the returned list is nearest first.
+// Applies adaptive pruning using the supplied distance function.
+// Requires finite, non-negative squared L2 distances; callers enforce the metric choice.
+// Candidates are normalized in place; the returned list is nearest first.
 // The caller decides whether this policy applies to its graph layer and selection role.
 Vector<PruningCandidate>
 select_edges_adaptive(Vector<PruningCandidate>& candidates,

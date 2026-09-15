@@ -106,8 +106,7 @@ select_edges_by_heuristic(Vector<InnerIdType>& neighbors,
  * @param pruning Optional policy for this graph. Enabled selects forward edges adaptively;
  *                apply_to_reverse additionally selects full reverse neighbor lists adaptively.
  *                Pass nullptr for upper layers to retain their fixed-alpha policy.
- * @return InnerIdType The ID of the farthest selected neighbor, typically used
- *                     as an entry point for subsequent operations.
+ * @return InnerIdType The ID of the nearest selected neighbor, or cur_c if no neighbor is selected.
  */
 InnerIdType
 mutually_connect_new_element(InnerIdType cur_c,
