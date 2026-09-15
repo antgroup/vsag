@@ -11,7 +11,8 @@ using DatasetPtr = std::shared_ptr<Dataset>;
 ## Builder pattern
 
 `Dataset` uses a fluent builder: `Make()` creates an instance, and every setter returns the same
-`DatasetPtr` so calls chain. Setters only store pointers/values — they do **not** copy your buffers.
+`DatasetPtr` so calls chain. Pointer setters store the supplied buffers without copying them. Value
+setters, such as the structured Pyramid paths overload, keep their own value.
 
 ```cpp
 auto base = vsag::Dataset::Make()
@@ -88,7 +89,17 @@ For documents that hold several dense sub-vectors each:
 | `ExtraInfoSize(int64_t)` | `GetExtraInfoSize()` | `int64_t` | Bytes per extra-info blob. |
 | `Paths(const std::string*)` | `GetPaths()` | `const std::string*` | Hierarchy paths (Pyramid). Default hierarchy. |
 | `Paths(const std::string& hierarchy, const std::string*)` | `GetPaths(const std::string& hierarchy)` | `const std::string*` | Paths for a named hierarchy. |
+| `Paths(const std::string& hierarchy, std::vector<std::vector<std::string>>)` | `GetPaths(const std::string& hierarchy, std::vector<std::vector<std::string>>& paths)` | structured paths | One or multiple Pyramid paths per element. |
 | `SourceID(const std::string*)` | `GetSourceID()` | `const std::string*` | Optional stable source identifier per element; HGraph uses it to match build-cache entries across snapshots. |
+
+For the structured `Paths` overload, the outer vector must have exactly `NumElements()` entries and
+each inner vector must list at least one independent path for that element. An empty inner vector is
+invalid; an inner vector containing one empty string (`{""}`) assigns the element to the hierarchy
+root. Repeated or shared-prefix paths do not duplicate the vector in a node or in search results.
+
+The structured container is copied or moved into `Dataset`, so its lifetime is independent of
+`Owner()`. The structured `GetPaths` overload copies either representation into the output container
+and returns `false` after clearing the output when the hierarchy is absent.
 
 See [Attribute Filter (Hybrid Search)](../advanced/attribute_filter.md),
 [Extra Info](../advanced/extra_info.md), and
@@ -116,9 +127,17 @@ if (result.has_value()) {
 }
 ```
 
-For KNN, `GetNumElements()` is `1` and the ids/distances arrays have length `k`. For range search,
-the number of matches is reported through the result's dimension. See
+For single-query KNN, `GetNumElements()` is `1` and `GetDim()` is the actual result count. HGraph
+and IVF batched KNN results are row-major `GetNumElements() x GetDim()` matrices. HGraph pads short
+rows with `id == -1` and infinite distance. For range search, the number of matches is reported
+through the result's dimension. See
 [k-Nearest Neighbor Search](../guide/knn_search.md).
+
+
+For HGraph batched KNN, an empty index (including one with all elements removed) returns
+`NumElements = query_count` and `Dim = requested k`, with every slot padded by `-1` and
+`+infinity`. For a non-empty index, `Dim = min(requested k, live element count)`; filtering
+can leave padded slots within that width. Single-query empty results retain `Dim = 0`.
 
 ## `SparseVector`
 

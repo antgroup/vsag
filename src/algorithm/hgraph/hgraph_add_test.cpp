@@ -946,6 +946,35 @@ TEST_CASE("HGraph fused full KMeans ignores quantizer sampling and shares query 
         return result.value();
     };
     auto before = search(index);
+    // The batch-search refactor must keep one fused computer per query, shared by routing,
+    // traversal and reranking, without leaking a previous row's centroid terms into the next.
+    constexpr int64_t query_count = 3;
+    auto batch_query = vsag::Dataset::Make();
+    batch_query->NumElements(query_count)->Dim(dim)->Float32Vectors(data.data())->Owner(false);
+    for (const bool one_bit : {false, true}) {
+        const auto search_params = vsag::JsonType::Parse(
+            one_bit ? R"({"hgraph":{"ef_search":64,"rabitq_one_bit_search":true}})"
+                    : R"({"hgraph":{"ef_search":64,"rabitq_one_bit_search":false}})");
+        auto batch_result = index->KnnSearch(batch_query, 5, search_params.Dump());
+        REQUIRE(batch_result.has_value());
+        REQUIRE(batch_result.value()->GetNumElements() == query_count);
+        REQUIRE(batch_result.value()->GetDim() == 5);
+        REQUIRE(batch_result.value()->GetStatistics({"query_computer_count"})[0] == "3");
+        for (int64_t row = 0; row < query_count; ++row) {
+            std::vector<float> single_query(data.begin() + row * dim,
+                                            data.begin() + (row + 1) * dim);
+            auto single_result =
+                index->KnnSearch(MakeFloatQuery(single_query, dim), 5, search_params.Dump());
+            REQUIRE(single_result.has_value());
+            REQUIRE(single_result.value()->GetDim() == 5);
+            for (int64_t rank = 0; rank < 5; ++rank) {
+                REQUIRE(batch_result.value()->GetIds()[row * 5 + rank] ==
+                        single_result.value()->GetIds()[rank]);
+                REQUIRE(batch_result.value()->GetDistances()[row * 5 + rank] ==
+                        single_result.value()->GetDistances()[rank]);
+            }
+        }
+    }
     auto binary = index->Serialize();
     REQUIRE(binary.has_value());
     auto restored = MakeHGraphIndex(param, common);

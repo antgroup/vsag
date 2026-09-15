@@ -25,6 +25,7 @@ namespace vsag {
 class HeapRegion {
 public:
     static constexpr bool InMemory = true;
+    static constexpr bool CanResizeForOverwrite = false;
 
     explicit HeapRegion(Allocator* allocator) : allocator_(allocator) {
         data_ = static_cast<uint8_t*>(allocator_->Allocate(1));
