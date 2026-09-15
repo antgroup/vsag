@@ -81,6 +81,12 @@ class QuerySplitTest(unittest.TestCase):
         shutil.move(str(output), moved / output.name)
         self.assert_split(moved / output.name, self.rows)
 
+    def test_numpy_integer_rows_preserve_data_order_and_json_manifest(self):
+        rows = {"calibration": [np.int64(5), np.uint32(1), 3],
+                "validation": [np.int32(4), np.uint64(0)]}
+        SPLIT.prepare_split(self.source, rows, self.output)
+        self.assert_split(self.output, self.rows)
+
     def test_large_subsets_preserve_order_across_copy_blocks(self):
         self.make_source(count=10000, dim=1024)
         rows = {"calibration": list(range(9999, 0, -2)), "validation": list(range(0, 10000, 2))}
@@ -92,6 +98,9 @@ class QuerySplitTest(unittest.TestCase):
                    {"calibration": [0, 0], "validation": [1]},
                    {"calibration": [0], "validation": [0]},
                    {"calibration": [True], "validation": [1]},
+                   {"calibration": [np.bool_(True)], "validation": [1]},
+                   {"calibration": [np.int64(-1)], "validation": [2]},
+                   {"calibration": [np.uint64(2**64 - 1)], "validation": [2]},
                    {"calibration": [1.0], "validation": [2]},
                    {"calibration": [-1], "validation": [2]},
                    {"calibration": [6], "validation": [2]}]

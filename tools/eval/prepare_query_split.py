@@ -55,6 +55,7 @@ def validate_dataset(source):
 
 
 def validate_rows(rows, query_count):
+    """Validate selections and return JSON-compatible integer row lists."""
     if not isinstance(rows, dict) or set(rows) != set(ROLES):
         raise ValueError("query rows must contain calibration and validation lists")
     seen = set()
@@ -62,11 +63,13 @@ def validate_rows(rows, query_count):
         selected = rows[role]
         if not isinstance(selected, list) or not selected:
             raise ValueError(f"{role} must be a non-empty list")
-        if any(type(i) is not int or not 0 <= i < query_count for i in selected):
+        if any(isinstance(i, bool) or not isinstance(i, (int, np.integer))
+               or not 0 <= i < query_count for i in selected):
             raise ValueError(f"{role} contains an invalid query row")
         if len(set(selected)) != len(selected) or seen.intersection(selected):
             raise ValueError("query row indices must be unique within and across splits")
         seen.update(selected)
+    return {role: [int(i) for i in rows[role]] for role in ROLES}
 
 
 def read_rows(dataset, indices):
@@ -113,7 +116,7 @@ def prepare_split(source_path, rows, output_path):
     output_path = output_path.resolve()
     with h5py.File(source_path, "r") as source:
         validate_dataset(source)
-        validate_rows(rows, source["test"].shape[0])
+        rows = validate_rows(rows, source["test"].shape[0])
         validate_content(source, rows)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         relative_source = os.path.relpath(source_path, output_path)
