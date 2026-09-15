@@ -7,17 +7,27 @@
 ```sh
 cmake -S lite -B build-lite-first -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=ON
 cmake --build build-lite-first -j2
-./build-lite-first/lite_tests '[lite]'
-./build-lite-first/lite_tests '[lite-scale]'
+ctest --test-dir build-lite-first --output-on-failure
 cmake --install build-lite-first --prefix "$PWD/install-lite-first"
 cmake -S lite/example -B build-lite-consumer -DCMAKE_PREFIX_PATH="$PWD/install-lite-first"
 cmake --build build-lite-consumer -j2
 ./build-lite-consumer/lite_example "$PWD/new-example.lite"
 ```
 
+安装后的示例只包含 `vsag/lite/index.h` 并链接 `vsag::lite`，不链接
+`libvsag.so`。它展示 Add、Search、Update、Remove、Save 和 Load。每次运行
+请使用新的快照路径。预期输出：
+
+```text
+added id=42 squared_l2=0
+updated id=42 squared_l2=0
+removed id=42 remaining=1
+loaded id=7 squared_l2=0
+```
+
 与 Full 的 make 入口不同，`cmake -S lite` 刻意隔离依赖。测试复用仓库固定版本
 Catch2 v3.7.1，离线时可指定 `-DFETCHCONTENT_SOURCE_DIR_CATCH2=/path/to/catch2-v3.7.1`。
-直接运行 Catch2，不新增平行测试框架或 CTest 套件。关闭测试时不下载 Catch2。
+现有 Catch2 用例已注册到 CTest，名称为 `lite_unit` 和 `lite_scale`。关闭测试时不下载 Catch2。
 构建同时生成 `libvsag-lite.so` 和 `libvsag-lite.a`。共享库目标仍为 `vsag::lite`；
 静态归档也会安装，供选择显式静态链接的嵌入式或离线使用方使用。
 
@@ -70,7 +80,21 @@ Save 从当前输出位置写入；flush/close、文件权限、原子替换及�
 
 `[lite]` 覆盖 CRUD、独立参考搜索与损坏快照；显式选择的 `[lite-scale]` 运行十万条128维
 合成数据流程，仅为正确性冒烟测试，不代表真实检索 Benchmark 或性能收益。
-至少两个数据集/规模的 Full/Lite 对比、冷暖加载、CRUD 延迟/吞吐、召回率和内存仍需完成。
+独立的 [实验 PR #2926](https://github.com/antgroup/vsag/pull/2926) 在同一机器上，
+以 10k/100k × 128 的相同 FP32 精确 BruteForce 负载，交替运行 Full/Lite 各 7 次。
+下表来自提交 `d729426` 的生成数据对照：动态库在 `strip` 后测量；RSS 是
+`getrusage(RUSAGE_SELF)` 报告的进程生命周期峰值在 7 次中的中位数。
+
+| 指标 | Full | Lite |
+| --- | ---: | ---: |
+| strip 后动态库（字节） | 40,463,344 | 39,488 |
+| 10k 进程峰值 RSS（KiB） | 164,416 | 12,112 |
+| 100k 进程峰值 RSS（KiB） | 214,200 | 72,912 |
+| 100k Search P50（微秒） | 2,401 | 4,392 |
+
+RSS 包含 benchmark 的数据缓冲、CRUD、查询和临时分配，不是纯索引对象内存。
+在 100k 下，Lite 的 Search、Save 和同进程 warm Load 慢于 Full。完整配置、
+原始结果流程和限制见 #2926；严格冷加载与图索引对照仍待完成。
 
 Debug 构建可加 `-DENABLE_COVERAGE=ON`，运行测试后用 gcov 收集源码覆盖率；
 只报告实际结果，不代表 Full 覆盖率。安装后的外部示例验证不依赖 libvsag.so。

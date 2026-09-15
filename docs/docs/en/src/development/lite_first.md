@@ -8,19 +8,29 @@ The default Full build is unchanged. Run these commands from the repository root
 ```sh
 cmake -S lite -B build-lite-first -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=ON
 cmake --build build-lite-first -j2
-./build-lite-first/lite_tests '[lite]'
-./build-lite-first/lite_tests '[lite-scale]'
+ctest --test-dir build-lite-first --output-on-failure
 cmake --install build-lite-first --prefix "$PWD/install-lite-first"
 cmake -S lite/example -B build-lite-consumer -DCMAKE_PREFIX_PATH="$PWD/install-lite-first"
 cmake --build build-lite-consumer -j2
 ./build-lite-consumer/lite_example "$PWD/new-example.lite"
 ```
 
+The installed consumer only includes `vsag/lite/index.h` and links `vsag::lite`;
+it does not link `libvsag.so`. It demonstrates Add, Search, Update, Remove,
+Save and Load. Use a new snapshot path for each run. Expected output:
+
+```text
+added id=42 squared_l2=0
+updated id=42 squared_l2=0
+removed id=42 remaining=1
+loaded id=7 squared_l2=0
+```
+
 Unlike the Full `make` targets, `cmake -S lite` is a separate dependency-isolated
 entry point. Tests use the existing pinned Catch2 v3.7.1 configuration. For an
 offline build, pass `-DFETCHCONTENT_SOURCE_DIR_CATCH2=/path/to/catch2-v3.7.1`.
-Tests are invoked directly through Catch2; no parallel custom testing framework
-or CTest suite is introduced. With tests disabled, no Catch2 download is needed.
+The existing Catch2 cases are registered with CTest as `lite_unit` and `lite_scale`.
+With tests disabled, no Catch2 download is needed.
 The build produces both `libvsag-lite.so` and `libvsag-lite.a`. The shared
 target remains `vsag::lite`; the static archive is also installed for embedded
 or offline consumers that choose to link it explicitly.
@@ -90,8 +100,25 @@ shared ErrorType has no separate write-error code.
 `[lite]` covers CRUD, independent-reference search and malformed snapshots.
 The opt-in `[lite-scale]` case runs a 100,000 x 128 synthetic end-to-end workflow;
 it is a correctness smoke test, not a realistic retrieval benchmark or a claim
-of performance improvement. Full/Lite comparisons on at least two datasets or
-scales, cold/warm loading, CRUD latency/throughput, recall and memory remain work.
+of performance improvement. The separate [benchmark PR #2926](https://github.com/antgroup/vsag/pull/2926)
+compares the same exact FP32 BruteForce workload at 10k and 100k x 128,
+using seven alternating Full/Lite runs on one machine. The figures below
+come from its generated-data comparison at commit `d729426`; shared-library
+sizes are measured after `strip`, and RSS is the median process-lifetime
+peak reported by `getrusage(RUSAGE_SELF)`.
+
+| Measure | Full | Lite |
+| --- | ---: | ---: |
+| Stripped shared library (bytes) | 40,463,344 | 39,488 |
+| 10k process peak RSS (KiB) | 164,416 | 12,112 |
+| 100k process peak RSS (KiB) | 214,200 | 72,912 |
+| 100k Search P50 (us) | 2,401 | 4,392 |
+
+The RSS figures include the benchmark's data buffers, CRUD, queries and
+temporary allocations; they are not index-object memory. At 100k, Lite's
+search, Save and warm Load are slower than Full. See #2926 for the complete
+configuration, raw-result workflow and limitations. Strict cold load and
+graph-index comparisons remain work.
 
 For source coverage add `-DENABLE_COVERAGE=ON` to a Debug build, run the tests,
 and collect gcov results. Only report actually measured coverage; Full coverage
