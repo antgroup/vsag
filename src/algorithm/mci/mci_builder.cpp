@@ -218,6 +218,7 @@ BuildMCICliques(const float* vectors,
                                             ? FP32ComputeL2SqrBatch4
                                             : FP32ComputeIPBatch4;
 
+    // C++17 atomic default construction does not initialize the counter values.
     std::vector<std::atomic<int>> num_cliques_per_node(total);
     for (auto& count : num_cliques_per_node) {
         count.store(0, std::memory_order_relaxed);

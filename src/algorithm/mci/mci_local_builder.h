@@ -76,6 +76,11 @@ public:
           BatchDistance batch_distance,
           Emit emit) {
         MCILocalBuildStats stats;
+        // An empty index has no seed to cover. Do not suppress a valid singleton fallback
+        // merely because candidate_limit_ is zero.
+        if (seed >= params_.total or seed >= coverage.size()) {
+            return stats;
+        }
         // Full build logs timings; Add/repair compiles out all clock reads.
         auto now = []() {
             if constexpr (collect_timings) {

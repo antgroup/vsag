@@ -80,13 +80,13 @@ struct CliqueDataCellSearchView {
         if (id < base_node_count) {
             for (auto offset = p_node_to_cid[id]; offset < p_node_to_cid[id + 1]; ++offset) {
                 const auto cid = node_to_cids[offset];
-                if (retired_cliques[cid] == 0 and not visit(cid)) {
+                if (cid < total_clique_count and retired_cliques[cid] == 0 and not visit(cid)) {
                     return;
                 }
             }
         }
         for (auto cid : (*delta_node_cids)[id]) {
-            if (retired_cliques[cid] == 0 and not visit(cid)) {
+            if (cid < total_clique_count and retired_cliques[cid] == 0 and not visit(cid)) {
                 return;
             }
         }

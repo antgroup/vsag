@@ -934,6 +934,7 @@ HGraph::build_mci_clique_index(const void* vectors) {
     // Generic path for quantized or non-float data: enumerate cliques from local seed graphs.
     logger::info("hgraph mci clique enumeration started, total={}", total);
     Vector<Vector<InnerIdType>> cliques(this->allocator_);
+    // C++17 atomic default construction does not initialize the counter values.
     std::vector<std::atomic<uint32_t>> num_cliques_per_node(total);
     for (auto& count : num_cliques_per_node) {
         count.store(0, std::memory_order_relaxed);
@@ -1641,6 +1642,7 @@ HGraph::build_incremental_mci_clique(InnerIdType new_inner_id,
     // old memberships: treating it as already covered would skip the requested repair.
     // Fixed-size construction needs no atomic copies/moves. Explicitly initialize every slot
     // before the shared builder loads it; never resize this vector or alias plain ints as atomics.
+    // C++17 atomic default construction does not initialize the counter values.
     std::vector<std::atomic<int>> coverage(local_to_inner.size());
     coverage[0].store(0, std::memory_order_relaxed);
     Vector<InnerIdType> neighbors(this->allocator_);
@@ -1698,6 +1700,8 @@ HGraph::build_incremental_mci_clique(InnerIdType new_inner_id,
                              distance,
                              scalar_batch_distance,
                              emit);
+        // Only this seed needs coverage: every unsuccessful round has 1 -> 1 uncovered
+        // seeds, so the shared no-progress rule doubles alpha. Success exits the loop.
         alpha = next_mci_alpha(alpha, params.alpha, 1, 1);
     }
 }

@@ -77,6 +77,22 @@ marked removals; `mcs` means `mci_mcs`. Integer division rounds down. This is a 
 not a guaranteed minimum degree or a hard cap: joining a whole clique can overshoot it,
 and exhausted candidates or stalled construction can stop below it.
 
+Migration warning: `mci_incremental_added_mct` is no longer supported. Remove this old
+clique-count setting from `index_param` and configure `mci_incremental_degree_min`,
+`mci_incremental_degree_n_divisor`, and `mci_incremental_degree_mcs_divisor` instead.
+The old key is ignored, not translated; leaving it in the JSON applies the new defaults
+unless the degree parameters are explicitly set. There is no equivalent one-to-one mapping
+because overlapping cliques contribute different numbers of unique neighbors. Recheck recall
+and mutation cost, and rebuild old snapshots with the new configuration rather than assuming
+that a removed parameter provides snapshot compatibility.
+
+The default MCS divisor `2` limits the adaptive term to half the KNN candidate budget before
+the floor is applied; it does not cap the final target at half a clique size. MCS defaults to
+`200` and is distinct from `mci_clique_max`. If `mcs=32` and the floor is `50`, the target is
+`min(N-1, 50)` for every N, not `max(50, N/10000)`. This is a tuning heuristic, not a guarantee
+that half the candidates become neighbors; the floor can dominate and a whole-clique join
+can exceed the target.
+
 | Parameter | Default and range | Meaning |
 | --- | --- | --- |
 | `mci_incremental_join_ratio_threshold` | Default `0.6`; range `[0, 1]`. | Overlap threshold for joining an existing clique: the number of its live members present in the point's KNN candidates, divided by its live member count. For a 10-member clique with 6 members in the candidates, the ratio is `0.6`: threshold `0.6` qualifies, whereas `0.7` does not. The clique must also have room and add new neighbors. This ratio does not revalidate distance constraints against every member. Lowering the threshold relaxes joining; raising it is stricter and may leave more degree deficits for new-clique construction. Compare `0.5 / 0.6 / 0.7` while measuring recall, ADD time, and total memberships. |

@@ -2429,6 +2429,93 @@ TEST_CASE("Clique clean flush and member checks do not allocate", "[ut][hgraph][
     allocator.remaining = -1;
 }
 
+TEST_CASE("MCI local builder rejects missing seeds but preserves singleton coverage",
+          "[ut][hgraph][mci][shared_build]") {
+    vsag::DefaultAllocator allocator;
+    vsag::MCIV3BuildParams params;
+    params.total = GENERATE(0, 1, 2);
+    params.candidate_limit = 0;
+    vsag::MCILocalCliqueBuilder builder(params, &allocator);
+    const auto coverage_size = GENERATE(0, 1);
+    std::vector<std::atomic<int>> coverage(coverage_size);
+    for (auto& count : coverage) {
+        count.store(0);
+    }
+    auto distance = [](auto, auto) {
+        FAIL("No distance is needed without candidates");
+        return 0.0F;
+    };
+    auto batch = [](auto, auto, auto, auto, auto, float*) {
+        FAIL("No batch distance is needed without candidates");
+    };
+    uint64_t emitted = 0;
+    auto emit = [&](const auto& clique) {
+        REQUIRE(clique == std::vector<vsag::InnerIdType>{0});
+        ++emitted;
+    };
+    builder.Build(0, nullptr, 0, 100.0F, coverage, distance, batch, emit);
+    REQUIRE(emitted == 0);
+    builder.Build(0, nullptr, 0, 200.0F, coverage, distance, batch, emit);
+    const bool valid_seed = params.total > 0 and coverage_size > 0;
+    REQUIRE(emitted == (valid_seed ? 1 : 0));
+    if (coverage_size > 0) {
+        REQUIRE(coverage[0].load() == (valid_seed ? 1 : 0));
+    }
+    // Seed 1 is outside either the global population or the supplied compact coverage.
+    builder.Build(1, nullptr, 0, 200.0F, coverage, distance, batch, emit);
+    REQUIRE(emitted == (valid_seed ? 1 : 0));
+}
+
+TEST_CASE("MCI search view skips out of range base and delta clique IDs", "[ut][hgraph][mci]") {
+    vsag::DefaultAllocator allocator;
+    const vsag::InnerIdType offsets[]{0, 2};
+    const vsag::InnerIdType base_cids[]{std::numeric_limits<vsag::InnerIdType>::max(), 0};
+    const uint8_t inactive[]{0};
+    uint8_t retired[]{0, 0};
+    vsag::Vector<vsag::Vector<vsag::InnerIdType>> delta_cids(&allocator);
+    delta_cids.emplace_back(&allocator);
+    delta_cids[0].push_back(2);
+    delta_cids[0].push_back(1);
+    vsag::CliqueDataCellSearchView view;
+    view.p_node_to_cid = offsets;
+    view.node_to_cids = base_cids;
+    view.total_clique_count = 2;
+    view.base_clique_count = 1;
+    view.base_node_count = 1;
+    view.total_nodes = 1;
+    view.delta_node_cids = &delta_cids;
+    view.inactive_nodes = inactive;
+    view.retired_cliques = retired;
+    std::vector<vsag::InnerIdType> visited;
+    auto visit = [&](auto cid) {
+        visited.push_back(cid);
+        return true;
+    };
+    view.ForEachNodeClique(0, visit);
+    REQUIRE(visited == std::vector<vsag::InnerIdType>{0, 1});
+    visited.clear();
+    view.ForEachNodeClique(0, [&](auto cid) {
+        visited.push_back(cid);
+        return false;
+    });
+    REQUIRE(visited == std::vector<vsag::InnerIdType>{0});
+    retired[0] = 1;
+    visited.clear();
+    view.ForEachNodeClique(0, visit);
+    REQUIRE(visited == std::vector<vsag::InnerIdType>{1});
+    visited.clear();
+    view.ForEachNodeClique(1, visit);
+    view.ForEachMember(2, visit);
+    REQUIRE(visited.empty());
+}
+
+TEST_CASE("MCI alpha doubles on stalled seed coverage and adds after broad progress",
+          "[ut][hgraph][mci][shared_build]") {
+    REQUIRE(vsag::next_mci_alpha(8.0F, 2.0F, 1, 1) == 16.0F);
+    REQUIRE(vsag::next_mci_alpha(8.0F, 2.0F, 100, 100) == 16.0F);
+    REQUIRE(vsag::next_mci_alpha(8.0F, 2.0F, 80, 100) == 10.0F);
+}
+
 TEST_CASE("MCI optional timing does not change clique construction",
           "[ut][hgraph][mci][shared_build]") {
     vsag::DefaultAllocator allocator;

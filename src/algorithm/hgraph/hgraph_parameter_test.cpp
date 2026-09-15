@@ -456,6 +456,11 @@ TEST_CASE("HGraph MCI incremental degree targets round-trip and validate",
     REQUIRE(defaults.IncrementalDegreeTarget(510000) == 51);
     REQUIRE(defaults.IncrementalDegreeTarget(800000) == 80);
     REQUIRE(defaults.IncrementalDegreeTarget(3241378) == 100);
+    defaults.mcs = 32;
+    REQUIRE(defaults.IncrementalDegreeTarget(32) == 31);
+    REQUIRE(defaults.IncrementalDegreeTarget(10000) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(3241378) == 50);
+    defaults.mcs = 200;
     defaults.incremental_degree_min = 40;
     REQUIRE(defaults.IncrementalDegreeTarget(10000) == 40);
     defaults.incremental_degree_min = 100;
