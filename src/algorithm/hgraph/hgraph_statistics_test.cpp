@@ -9,6 +9,7 @@
 
 #include "json_types.h"
 #include "unittest.h"
+#include "vsag/resource.h"
 #include "vsag/vsag.h"
 
 TEST_CASE("HGraph result statistics remain independent and readable", "[ut][hgraph_statistics]") {
@@ -38,9 +39,35 @@ TEST_CASE("HGraph result statistics remain independent and readable", "[ut][hgra
     const auto snapshot = result->GetStatistics();
     const auto parsed = vsag::JsonType::Parse(snapshot);
     REQUIRE(parsed["distance_evaluations"].GetUint64() > 0);
+    const auto phases = parsed["distance_evaluations_by_phase"];
+    REQUIRE(parsed["distance_evaluations"].GetUint64() == phases["routing"].GetUint64() +
+                                                              phases["approximate"].GetUint64() +
+                                                              phases["rerank"].GetUint64());
     const auto selected = result->GetStatistics({"distance_evaluations", "missing"});
     REQUIRE(selected[0] == parsed["distance_evaluations"].Dump());
     REQUIRE(selected[1].empty());
+    {
+        auto resource = std::make_shared<vsag::Resource>();
+        auto allocator = resource->GetAllocator();
+        vsag::SearchRequest request;
+        request.query_ = query;
+        request.topk_ = 3;
+        request.params_str_ = R"({"hgraph":{"ef_search":16}})";
+        request.search_allocator_ = allocator.get();
+        auto custom = index->SearchWithRequest(request);
+        REQUIRE(custom.has_value());
+        REQUIRE(custom.value()->GetIds()[0] == 7);
+        REQUIRE(vsag::JsonType::Parse(custom.value()->GetStatistics())["distance_evaluations"]
+                    .GetUint64() > 0);
+    }
+    {
+        query->NumElements(2);
+        auto batch = index->KnnSearch(query, 3, R"({"hgraph":{"ef_search":16}})");
+        REQUIRE(batch.has_value());
+        REQUIRE(batch.value()->GetNumElements() == 2);
+        REQUIRE(vsag::JsonType::Parse(batch.value()->GetStatistics()).Contains("batch_routes"));
+        query->NumElements(1);
+    }
     query->Float32Vectors(vectors.data() + 19 * 4);
     REQUIRE(index->KnnSearch(query, 3, R"({"hgraph":{"ef_search":16}})").has_value());
     index.reset();

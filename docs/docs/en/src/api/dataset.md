@@ -187,6 +187,12 @@ append rules.
 
 ## Per-search distance statistics
 
+For single-query HGraph results without a reasoning report, JSON serialization may be deferred
+until `GetStatistics()` or `GetStatistics(keys)` is called. The result retains its statistics;
+later queries do not change them. `Statistics(string)` replaces the retained statistics as usual.
+This avoids serialization work when only IDs and distances are consumed. Reading statistics still
+pays that cost, and repeated reads may serialize again; retain the returned string if it is reused.
+
 Results from maintained HGraph, BruteForce, IVF, Pyramid, SINDI, and SIMQ searches include an
 additive `GetStatistics()` contract:
 
