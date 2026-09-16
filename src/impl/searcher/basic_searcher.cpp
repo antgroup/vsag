@@ -58,9 +58,6 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
     }
 
     for (uint32_t i = 0; i < neighbors.size(); i++) {
-        if (i + prefetch_stride_visit_ < neighbors.size()) {
-            vl->Prefetch(neighbors[i + prefetch_stride_visit_]);
-        }
         if (not vl->TestAndSet(neighbors[i])) {
             if (not filter || count_no_visited == 0 || skip_strategy == nullptr ||
                 skip_strategy->ShouldVisit() || filter->CheckValid(neighbors[i])) {
