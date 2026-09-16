@@ -173,6 +173,12 @@ FP32ComputeIPBatch4(const float* RESTRICT query,
                     float& result3,
                     float& result4) {
 #if defined(ENABLE_AVX512)
+    // Short vectors otherwise pay for both wide reduction and narrower tail dispatch.
+    if (dim < 32) {
+        avx2::FP32ComputeIPBatch4(
+            query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
+        return;
+    }
     simd::ComputeBatch4Impl<simd::SimdTraits<simd::Avx512Tag>, simd::Batch4Kind::IP>(
         query,
         dim,
