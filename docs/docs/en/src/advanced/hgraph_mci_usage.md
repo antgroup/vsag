@@ -103,7 +103,7 @@ not the defaults for every library option.
     "support_force_remove": true,
     "use_mci": true,
     "mci_knng_source": "hgraph",
-    "mci_mcs": 50,
+    "mci_mcs": 200,
     "mci_clique_max": 50,
     "mci_alpha": 1.2,
     "mci_incremental_join_ratio_threshold": 0.6,
