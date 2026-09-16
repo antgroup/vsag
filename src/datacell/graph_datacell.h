@@ -90,9 +90,7 @@ public:
     Prefetch(InnerIdType id, uint32_t neighbor_i) override {
         const uint64_t offset_in_record =
             NEIGHBORS_OFFSET + static_cast<uint64_t>(neighbor_i) * sizeof(InnerIdType);
-        if (offset_in_record < this->code_line_size_) {
-            layout_.PrefetchAt(id, offset_in_record, this->code_line_size_ - offset_in_record);
-        }
+        layout_.PrefetchAt(id, offset_in_record, 64);
     }
 
     void

@@ -15,22 +15,10 @@
 
 #include "standard_heap.h"
 
-#include <algorithm>
-
 namespace vsag {
 template <bool max_heap, bool fixed_size>
 StandardHeap<max_heap, fixed_size>::StandardHeap(Allocator* allocator, int64_t max_size)
     : DistanceHeap(allocator, max_size), queue_(allocator) {
-    // Search heaps are usually created empty and grow to a small bounded
-    // frontier. Clamp the reservation hint so malformed or unusually large
-    // values cannot request an impossible allocation.
-    constexpr uint64_t kMinInitialReserve = 64;
-    constexpr uint64_t kMaxInitialReserve = 512;
-    const auto initial_reserve =
-        max_size > 0 ? std::clamp<uint64_t>(
-                           static_cast<uint64_t>(max_size), kMinInitialReserve, kMaxInitialReserve)
-                     : kMinInitialReserve;
-    queue_.reserve(initial_reserve);
 }
 
 template <bool max_heap, bool fixed_size>
@@ -38,37 +26,30 @@ void
 StandardHeap<max_heap, fixed_size>::Push(float dist, InnerIdType id) {
     if constexpr (fixed_size) {
         if (this->queue_.size() == this->max_size_) {
-            const bool worse = max_heap ? (dist > this->queue_.front().first)
-                                        : (dist < this->queue_.front().first);
-            if (worse) {
-                return;
+            if constexpr (max_heap) {
+                if (dist > this->queue_.front().first) {
+                    return;
+                }
+            } else {
+                if (dist < this->queue_.front().first) {
+                    return;
+                }
             }
         }
     }
-    this->queue_.emplace_back(dist, id);
-    this->sift_up(this->queue_.size() - 1);
+    DistanceRecord record{dist, id};
+    this->queue_.emplace_back(std::move(record));
+    if constexpr (max_heap) {
+        std::push_heap(this->queue_.begin(), this->queue_.end(), CompareMax());
+    } else {
+        std::push_heap(this->queue_.begin(), this->queue_.end(), CompareMin());
+    }
 
     if constexpr (fixed_size) {
         if (this->queue_.size() > max_size_) {
             this->Pop();
         }
     }
-}
-
-template <bool max_heap, bool fixed_size>
-void
-StandardHeap<max_heap, fixed_size>::Pop() {
-    const auto size = this->queue_.size();
-    if (size == 0) {
-        return;
-    }
-    if (size == 1) {
-        this->queue_.pop_back();
-        return;
-    }
-    this->queue_.front() = this->queue_.back();
-    this->queue_.pop_back();
-    this->sift_down(0, size - 1);
 }
 
 template class StandardHeap<true, true>;

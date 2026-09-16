@@ -153,7 +153,6 @@ HGraph::train_codes_with_dataset(const DatasetPtr& train_data) {
 
 std::vector<int64_t>
 HGraph::Build(const DatasetPtr& data) {
-    auto transition_lock = this->acquire_mutable_transition_lock("build");
     CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
     if (this->rabitq_fused_datacell_ != nullptr) {
         this->validate_add_data(data);
@@ -311,7 +310,6 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
 
 std::vector<int64_t>
 HGraph::Add(const DatasetPtr& data) {
-    auto transition_lock = this->acquire_mutable_transition_lock("add");
     return this->add_impl(data);
 }
 

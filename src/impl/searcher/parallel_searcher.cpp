@@ -122,16 +122,12 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     // set customize query alloctor
     Allocator* alloc = select_query_allocator(ctx, allocator_);
 
-    // Concrete-typed pointers: hot-path heap ops bypass the virtual
-    // DistanceHeap interface; the heaps stay coordinator-thread-local.
-    auto top_candidates_ptr = std::make_shared<StandardHeap<true, false>>(
-        alloc, std::max<int64_t>(inner_search_param.ef, 64));
-    auto* top_candidates = top_candidates_ptr.get();
+    auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
     StandardHeap<true, false> candidate_set_storage(alloc, -1);
     auto* candidate_set = &candidate_set_storage;
 
     if (not graph or not flatten) {
-        return top_candidates_ptr;
+        return top_candidates;
     }
     if (inner_search_param.parallel_search_thread_count <= 0) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
@@ -428,7 +424,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         future.get();
     }
 
-    return top_candidates_ptr;
+    return top_candidates;
 }
 
 void

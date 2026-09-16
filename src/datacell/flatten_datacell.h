@@ -421,6 +421,7 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
         }
     }
 
+    memset(result_dists, 0, sizeof(float) * id_count);
     int64_t i = 0;
     for (; i + 3 < id_count; i += 4) {
         for (int64_t j = 0; j < 4; ++j) {

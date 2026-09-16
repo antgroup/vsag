@@ -231,12 +231,8 @@ public:
 
     void
     Prefetch(uint64_t offset, uint64_t cache_line) {
-        while (cache_line > 0) {
-            const auto chunk = std::min(cache_line, block_size_ - (offset & in_block_mask_));
-            PrefetchLines(DataAt(offset), chunk);
-            offset += chunk;
-            cache_line -= chunk;
-        }
+        PrefetchLines(DataAt(offset),
+                      std::min(cache_line, block_size_ - (offset & in_block_mask_)));
     }
 
     [[nodiscard]] int64_t

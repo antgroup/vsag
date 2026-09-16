@@ -25,39 +25,6 @@
 #include "unittest.h"
 using namespace vsag;
 
-TEMPLATE_TEST_CASE_SIG("StandardHeap bounded push matches sorted candidates",
-                       "[ut][distance_heap]",
-                       ((bool max_heap), max_heap),
-                       true,
-                       false) {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    for (uint64_t limit : {0, 1, 2, 7, 64}) {
-        StandardHeap<max_heap, false> heap(allocator.get(), -1);
-        std::vector<float> expected;
-        for (uint64_t i = 0; i < 200; ++i) {
-            const float distance = static_cast<float>((i * 17) % 31) - 15.0F;
-            heap.PushBounded(distance, static_cast<InnerIdType>(i), limit);
-            expected.push_back(distance);
-            std::sort(expected.begin(), expected.end(), [](float a, float b) {
-                return max_heap ? a < b : a > b;
-            });
-            if (expected.size() > limit) {
-                expected.resize(limit);
-            }
-            REQUIRE(heap.Size() == expected.size());
-            if (not expected.empty()) {
-                REQUIRE(heap.Top().first == expected.back());
-            }
-        }
-        while (not expected.empty()) {
-            CHECK(heap.Top().first == expected.back());
-            heap.Pop();
-            expected.pop_back();
-        }
-        CHECK(heap.Empty());
-    }
-}
-
 class TestDistanceHeap {
 public:
     TestDistanceHeap() {

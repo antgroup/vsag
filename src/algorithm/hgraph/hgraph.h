@@ -453,16 +453,6 @@ private:
     add_impl(const DatasetPtr& data);
 
     [[nodiscard]] std::shared_lock<std::shared_mutex>
-    acquire_mutable_transition_lock(const char* operation_name) const {
-        std::shared_lock<std::shared_mutex> lock(this->immutable_transition_mutex_);
-        if (this->immutable_.load(std::memory_order_acquire)) {
-            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                std::string("immutable index no support ") + operation_name);
-        }
-        return lock;
-    }
-
-    [[nodiscard]] std::shared_lock<std::shared_mutex>
     acquire_global_read_lock() const {
         if (not this->physical_code_resize_pending_.load(std::memory_order_acquire)) {
             return std::shared_lock<std::shared_mutex>(this->global_mutex_);
@@ -1020,8 +1010,6 @@ private:
 
     std::shared_ptr<VisitedListPool> pool_{nullptr};  // pool of visited-lists for search
 
-    // Keeps SetImmutable() from completing while a mutable operation is in flight.
-    mutable std::shared_mutex immutable_transition_mutex_;
     mutable std::shared_mutex global_mutex_;            // guards total_count_, entry_point_id_
     mutable std::shared_mutex persistent_codes_mutex_;  // pins flatten storage during MCI search
     mutable std::mutex mci_build_mutex_;                // serializes full MCI reconstruction

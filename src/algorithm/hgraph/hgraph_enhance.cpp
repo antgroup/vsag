@@ -145,7 +145,6 @@ HGraph::Pretrain(const std::vector<int64_t>& base_tag_ids,
 
 bool
 HGraph::UpdateId(int64_t old_id, int64_t new_id) {
-    auto transition_lock = this->acquire_mutable_transition_lock("update id");
     if (old_id == new_id) {
         return true;
     }

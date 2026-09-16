@@ -256,12 +256,6 @@ public:
                        float& dists2,
                        float& dists3,
                        float& dists4) const {
-        // Some Batch4 implementations accumulate partial SIMD chunks into the
-        // output references, so initialize only the four scalar results here.
-        dists1 = 0.0F;
-        dists2 = 0.0F;
-        dists3 = 0.0F;
-        dists4 = 0.0F;
         if constexpr (HasComputeDistsBatch4Impl<QuantT>::value) {
             cast().ComputeDistsBatch4Impl(
                 computer, codes1, codes2, codes3, codes4, dists1, dists2, dists3, dists4);

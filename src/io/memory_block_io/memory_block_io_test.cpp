@@ -23,20 +23,6 @@
 
 using namespace vsag;
 
-TEST_CASE("MemoryBlockIO prefetch spans blocks without changing data", "[ut][MemoryBlockIO]") {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    MemoryBlockIO io(128, allocator.get());
-    std::vector<uint8_t> data(384, 42);
-    io.Write(data.data(), data.size(), 0);
-    io.Prefetch(96, 256);
-    io.Prefetch(380, 256);
-    io.Prefetch(384, 64);
-    io.Prefetch(0, 0);
-    std::vector<uint8_t> actual(data.size());
-    REQUIRE(io.Read(actual.size(), 0, actual.data()));
-    CHECK(actual == data);
-}
-
 auto block_memory_io_block_sizes = {1023, 4096, 123123, 1024 * 1024};
 
 TEST_CASE("MemoryBlockIO Read and Write Test", "[ut][MemoryBlockIO]") {

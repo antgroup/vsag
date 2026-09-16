@@ -22,8 +22,6 @@ namespace vsag {
 
 uint32_t
 HGraph::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
-    auto transition_lock = this->acquire_mutable_transition_lock("remove");
-
     uint32_t delete_count = 0;
     if (mode == RemoveMode::MARK_REMOVE) {
         std::scoped_lock label_lock(this->label_lookup_mutex_);
@@ -259,7 +257,6 @@ HGraph::shrink_to_fit() {
 
 void
 HGraph::UpdateAttribute(int64_t id, const AttributeSet& new_attrs) {
-    auto transition_lock = this->acquire_mutable_transition_lock("update attribute");
     auto inner_id = this->label_table_->GetIdByLabel(id);
     this->attr_filter_index_->UpdateBitsetsByAttr(new_attrs, inner_id, 0);
 }
@@ -268,7 +265,6 @@ void
 HGraph::UpdateAttribute(int64_t id,
                         const AttributeSet& new_attrs,
                         const AttributeSet& origin_attrs) {
-    auto transition_lock = this->acquire_mutable_transition_lock("update attribute");
     auto inner_id = this->label_table_->GetIdByLabel(id);
     this->attr_filter_index_->UpdateBitsetsByAttr(new_attrs, inner_id, 0, origin_attrs);
 }

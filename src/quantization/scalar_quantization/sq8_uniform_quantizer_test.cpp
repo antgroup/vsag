@@ -21,6 +21,39 @@
 #include "unittest.h"
 using namespace vsag;
 
+TEMPLATE_TEST_CASE_SIG("SQ8 Uniform Batch4 matches single distances",
+                       "[ut][SQ8UniformQuantizer][batch4]",
+                       ((MetricType metric), metric),
+                       MetricType::METRIC_TYPE_L2SQR,
+                       MetricType::METRIC_TYPE_IP,
+                       MetricType::METRIC_TYPE_COSINE) {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    for (uint64_t dim : {1, 17, 32, 65, 257}) {
+        SQ8UniformQuantizer<metric> quantizer(dim, allocator.get());
+        auto data = fixtures::GenerateVectors<float>(8, dim, 47);
+        REQUIRE(quantizer.Train(data.data(), 8));
+        const auto stride = quantizer.GetCodeSize();
+        std::vector<uint8_t> codes(4 * stride);
+        REQUIRE(quantizer.EncodeBatch(data.data(), codes.data(), 4));
+        auto computer = quantizer.FactoryComputer();
+        computer->SetQuery(data.data() + 4 * dim);
+        float got[4] = {-1, -1, -1, -1};
+        computer->ComputeDistsBatch4(codes.data(),
+                                     codes.data() + stride,
+                                     codes.data() + 2 * stride,
+                                     codes.data() + 3 * stride,
+                                     got[0],
+                                     got[1],
+                                     got[2],
+                                     got[3]);
+        for (uint64_t i = 0; i < 4; ++i) {
+            float expected = 0;
+            computer->ComputeDist(codes.data() + i * stride, &expected);
+            CHECK(fixtures::dist_t(got[i]) == fixtures::dist_t(expected));
+        }
+    }
+}
+
 const auto dims = fixtures::get_common_used_dims();
 const auto counts = {10, 101};
 
