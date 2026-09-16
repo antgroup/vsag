@@ -99,7 +99,7 @@ ADD 与 MARK_REMOVE 共用 100 个成功增删向量的计数：ADD 逐点检查
     "support_force_remove": true,
     "use_mci": true,
     "mci_knng_source": "hgraph",
-    "mci_mcs": 50,
+    "mci_mcs": 200,
     "mci_clique_max": 50,
     "mci_alpha": 1.2,
     "mci_incremental_join_ratio_threshold": 0.6,
