@@ -27,6 +27,10 @@ PrefetchImpl<0>(const void* data){};
 
 void
 PrefetchLines(const void* data, uint64_t size) {
+    if (size >= 64 and size < 128) {
+        PrefetchImpl<1>(data);
+        return;
+    }
     uint64_t n = std::min<uint64_t>(size / 64, 63ULL);
     switch (n) {
         PREFETCH_LINE(0);
