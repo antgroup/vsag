@@ -230,6 +230,61 @@ does not recount all one-hop degrees, split every remaining large
 clique into connected components, or prove global graph connectivity after deletion.
 FORCE_REMOVE graph repair and MCI coverage repair are separate operations.
 
+### 4.4 Selecting the retirement and repair sets
+
+`PrepareDelete` is a two-threshold, single-pass filter over the affected neighborhood. It never
+scans the whole index, and it does not iterate to a fixed point:
+
+```text
+retire(C)  ⟺  |live(C) \ D| < T_size
+repair(v)  ⟺  |effective cliques(v) \ retiring| < T_mct
+```
+
+The second condition is **projected**: the cliques that the same batch is about to retire are
+subtracted before the count is compared. Comparing against the current count instead would miss
+survivors whose remaining cliques are exactly the ones being retired. `retiring` is decided in one
+pass over the whole batch, so scanning `D` in a different order cannot change it; `repair_node_ids`
+is sorted so that the repair order is reproducible.
+
+Worked example with the defaults (`T_size=30`, `T_mct=3`), deleting node 7, which belongs to `C1`
+(31 live members before the deletion), `C2` (21), and `C3` (5):
+
+| Step | Result |
+| --- | --- |
+| affected cliques | `{C1, C2, C3}` |
+| remaining live members | `C1`: 30, `C2`: 20, `C3`: 4 |
+| retired (`remaining < 30`) | `{C2, C3}`; `C1` is retained |
+| repair candidates | live members of `C2` and `C3`, excluding node 7, deduplicated |
+| projected memberships | a candidate in `{C2, C3, C9}` has 1 → repaired; one in `{C2, C4, C5, C6}` has 3 → skipped |
+
+The selected set is an upper bound. Right before each repair, `repair_mci_clique_if_undercovered`
+re-reads the current membership count, so an earlier repair in the same batch can satisfy coverage
+and skip a later candidate. Repair never retires additional cliques.
+
+Selection cost is proportional to the affected neighborhood, not to the index size:
+
+| Phase | Work |
+| --- | --- |
+| affected cliques | sum of effective clique degrees over the deleted nodes |
+| retirement | sum of live members over the affected cliques |
+| repair set | sum of effective clique counts over the repair candidates |
+
+The expensive work happens after selection: pure FP32 repair runs one approximate KNN and a local
+clique construction per selected node, and non-FP32 repair runs an O(N) distance scan per selected
+node. Both thresholds exist to keep that selected set small.
+
+| Removal path | Targets entering `PrepareDelete` | ID space |
+| --- | --- | --- |
+| MARK_REMOVE | one resolved batch per `Remove()` call; already-removed labels are skipped | current slots |
+| FORCE_REMOVE | one resolved batch per `Remove()` call; soft-deleted targets are included so their slots can be reclaimed | pre-compaction slots (`old_total`); repair IDs must be translated through `old_to_new` |
+| Reapply after a full rebuild | every ID in the label deletion set, because the rebuild reset the MCI masks | current slots |
+
+Tuning: raising `T_size` retires less (fewer repairs, more masked-out residue in the CSR); lowering
+it retires more (cleaner structure, more repair work). `T_mct` is a trigger rather than a
+postcondition, so raising it repairs more nodes. Keep `T_size` consistent with `mci_clique_max` and
+`mci_incremental_clique_max`: if a clique cap is below `T_size`, every affected clique of that size
+is retired.
+
 ## 5. MARK_REMOVE
 
 The default Remove mode marks labels, updates live/deleted counts, temporarily unpublishes
@@ -279,8 +334,12 @@ Descending original IDs prevent earlier tail moves from relocating pending targe
 For example, deleting IDs 2 and 7 from ten slots can move 9 to 7, then 8 to 2, leaving `[0, 8)`.
 Labels move with their actual vectors, not with the old destination slots.
 
-MARK_REMOVE computes MCI snapshots one node at a time; FORCE_REMOVE snapshots the set in one
-call. Changing mode or batch size can therefore change repair order and resulting cliques.
+Both removal modes snapshot the whole target set resolved by a single `Remove()` call in one
+`PrepareDelete`/`CommitDelete` pair; the snapshot granularity is the same. The modes differ in
+which targets enter that set and in their ID space: MARK_REMOVE resolves labels with removed
+targets skipped, while FORCE_REMOVE also resolves soft-deleted targets and uses the
+pre-compaction slot space. Changing the batch therefore changes the snapshot's target set, and
+with it the repair order and the resulting cliques.
 
 ### 6.3 Graph and identity repair
 
