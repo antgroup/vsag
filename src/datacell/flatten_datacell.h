@@ -389,7 +389,7 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
                                               QueryContext* ctx) {
     Allocator* search_alloc = select_query_allocator(ctx, allocator_);
     const auto prefetch_stride =
-        this->prefetch_stride_code_ == 0 ? 0 : std::max<uint32_t>(4, this->prefetch_stride_code_);
+        this->prefetch_stride_code_ == 0 ? 0 : std::max<uint32_t>(8, this->prefetch_stride_code_);
 
     for (uint32_t i = 0; i < prefetch_stride and i < id_count; i++) {
         this->layout_->Prefetch(idx[i], this->prefetch_depth_code_ * 64);
