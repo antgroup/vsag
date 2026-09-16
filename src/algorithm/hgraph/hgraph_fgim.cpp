@@ -70,7 +70,7 @@ HGraphFGIM::ValidateSourcesAndGetOffsets(const Vector<const HGraph*>& source_gra
         CHECK_ARGUMENT(
             static_cast<uint64_t>(count) <= std::numeric_limits<InnerIdType>::max() - total,
             "FGIM total node count exceeds the merged internal ID capacity");
-        CHECK_ARGUMENT(source->bottom_graph_ != nullptr &&
+        CHECK_ARGUMENT(source->bottom_graph_ != nullptr && source->label_table_ != nullptr &&
                            source->bottom_graph_->TotalCount() == count &&
                            source->basic_flatten_codes_->TotalCount() == count &&
                            source->label_table_->GetTotalCount() == count,
@@ -92,6 +92,8 @@ HGraphFGIM::AppendOriginalCandidates(const HGraph& source,
         CHECK_ARGUMENT(local_v < source.GetNumElements() && local_v != local_u,
                        "FGIM encountered an invalid original neighbor");
         // Both distance operands remain in the source-local internal ID space.
+        // Validated fp32/L2 storage layers contain the same vectors, so base distances
+        // are comparable to CrossQuery distances; bitwise equality is not assumed.
         const float distance = source.basic_flatten_codes_->ComputePairVectors(local_u, local_v);
         candidates.push_back({source_offset + local_v, distance});
     }

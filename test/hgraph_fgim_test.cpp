@@ -178,6 +178,8 @@ public:
             graph.basic_flatten_codes_ = nullptr;
         } else if (condition == "fully built") {
             graph.bottom_graph_->SetTotalCount(0);
+        } else if (condition == "missing label table") {
+            graph.label_table_ = nullptr;
         }
     }
 
@@ -337,6 +339,10 @@ TEST_CASE_METHOD(HGraphFGIMTest, "FGIM rejects unsupported inputs", "[ut][hgraph
     SECTION("removed source node") {
         REQUIRE(b->Remove({2000}) == 1);
         ExpectInvalid(sources, 3, "deleted");
+    }
+    SECTION("missing label table") {
+        SetUnsupported(*b, "missing label table");
+        ExpectInvalid(sources, 3, "fully built");
     }
     SECTION("unsupported source properties") {
         const std::string condition = GENERATE(
