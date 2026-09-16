@@ -31,6 +31,40 @@
 
 namespace vsag {
 namespace {
+struct ResultAllocatorOwner {
+    explicit ResultAllocatorOwner(std::shared_ptr<Allocator> allocator)
+        : allocator(std::move(allocator)) {
+    }
+    std::shared_ptr<Allocator> allocator;
+};
+
+// Base destruction order keeps the allocator alive until DatasetImpl frees its data.
+class DeferredStatisticsDataset final : private ResultAllocatorOwner, public DatasetImpl {
+public:
+    DeferredStatisticsDataset(DatasetImpl&& data,
+                              std::shared_ptr<Allocator> allocator,
+                              std::function<std::string()> statistics)
+        : ResultAllocatorOwner(std::move(allocator)),
+          DatasetImpl(std::move(data)),
+          statistics_(std::move(statistics)) {
+    }
+
+    DatasetPtr
+    Statistics(const std::string& statistics) override {
+        auto result = DatasetImpl::Statistics(statistics);
+        statistics_ = {};
+        return result;
+    }
+
+    std::string
+    GetStatistics() const override {
+        return statistics_ ? statistics_() : DatasetImpl::GetStatistics();
+    }
+
+private:
+    std::function<std::string()> statistics_;
+};
+
 struct HGraphVisitedListGuard {
     std::shared_ptr<VisitedListPool> pool;
     VisitedListPtr visited_list;
@@ -669,7 +703,8 @@ HGraph::search_range_with_request(const SearchRequest& request,
 [[nodiscard]] DatasetPtr
 HGraph::SearchWithRequest(const SearchRequest& request) const {
     ValidateSearchThreshold(request.threshold_);
-    SearchStatistics stats;
+    auto stats_owner = std::make_shared<SearchStatistics>();
+    auto& stats = *stats_owner;
     QueryContext ctx{.alloc = this->allocator_, .stats = &stats};
     if (request.search_allocator_ != nullptr) {
         ctx.alloc = request.search_allocator_;
@@ -1250,7 +1285,18 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                 }
                 search_result->Pop();
             }
-            dataset_results->Statistics(mci_result.MakeStatistics(stats).Dump());
+            if (reasoning_ctx) {
+                dataset_results->Statistics(mci_result.MakeStatistics(stats).Dump());
+            } else {
+                auto metadata = mci_result;
+                metadata.result.reset();
+                dataset_results = std::make_shared<DeferredStatisticsDataset>(
+                    std::move(static_cast<DatasetImpl&>(*dataset_results)),
+                    ctx.alloc == allocator_ ? allocator_owner_ : nullptr,
+                    [stats_owner, metadata = std::move(metadata)]() {
+                        return metadata.MakeStatistics(*stats_owner).Dump();
+                    });
+            }
         } else {
             int64_t offset = q_idx * k;
             for (int64_t j = count - 1; j >= 0; --j) {
