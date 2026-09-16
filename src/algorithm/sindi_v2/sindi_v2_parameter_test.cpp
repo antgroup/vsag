@@ -18,9 +18,19 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "inner_string_params.h"
+#include "sindi_v2.h"
 #include "unittest.h"
 
 using namespace vsag;
+
+TEST_CASE("SINDIV2 rejects unknown external parameters", "[ut][SINDIV2Parameter]") {
+    IndexCommonParam common_param;
+    REQUIRE_NOTHROW(SINDIV2::CheckAndMappingExternalParam(
+        JsonType::Parse(R"({"term_id_limit": 50000000, "window_size": 50000})"), common_param));
+    REQUIRE_THROWS_WITH(SINDIV2::CheckAndMappingExternalParam(
+                            JsonType::Parse(R"({"unknown_param": true})"), common_param),
+                        Catch::Matchers::ContainsSubstring("invalid config param: unknown_param"));
+}
 
 TEST_CASE("SINDIV2 term prune parameter validation", "[ut][SINDIV2Parameter]") {
     auto parse = [](const std::string& parameters) {

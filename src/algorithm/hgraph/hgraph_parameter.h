@@ -71,6 +71,7 @@ public:
     bool use_elp_optimizer{false};
     bool ignore_reorder{false};
     bool build_by_base{false};
+    bool rabitq_fused_datacell{false};
 
     uint64_t ef_construction{400};
     uint64_t resize_increase_count_bit{DEFAULT_RESIZE_INCREASE_COUNT_BIT};
@@ -82,6 +83,7 @@ public:
     bool support_force_remove{false};
 
     bool persist_source_id{false};
+    bool use_conjugate_graph{false};
 
     HGraphMCIParameters mci_parameters{};
 
@@ -102,6 +104,7 @@ public:
     bool use_extra_info_filter{false};
     bool rabitq_one_bit_search{false};
     bool use_mci{true};
+    bool use_conjugate_graph_search{true};
     float mci_seed_ratio{0.1F};
     float mci_hgraph_valid_ratio_threshold{0.05F};
     // If > 0 and the active filter's ValidRatio() <= brute_force_threshold,

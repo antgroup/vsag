@@ -368,6 +368,17 @@ CopyPathArray(const std::vector<std::string>& paths) {
     return path_array;
 }
 
+std::vector<std::string>
+GetElementPaths(const vsag::DatasetPtr& dataset,
+                const std::string& hierarchy_name,
+                uint64_t element_index) {
+    uint64_t path_count = 0;
+    const auto* paths = vsag::GetDatasetPaths(*dataset, hierarchy_name, element_index, path_count);
+    REQUIRE(paths != nullptr);
+    REQUIRE(path_count > 0);
+    return {paths, paths + path_count};
+}
+
 vsag::DatasetPtr
 MakeDatasetWithNamedPaths(
     const std::vector<std::string>& default_paths,
@@ -529,6 +540,250 @@ TEST_CASE("Dataset Named Paths Test", "[ut][dataset]") {
         REQUIRE(dataset->GetPaths("site")[2] == "site/c");
         REQUIRE(dataset->GetPaths("taxonomy")[2] == "taxonomy/c");
     }
+
+    SECTION("structured paths represent one or many paths") {
+        std::vector<std::vector<std::string>> paths = {{"tag/a", "tag/b"}, {"tag/c"}, {""}};
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(3)->Dim(1)->Paths("tag", paths);
+        paths[0][0] = "changed";
+
+        REQUIRE(dataset->GetPaths("tag") == nullptr);
+        REQUIRE(GetElementPaths(dataset, "tag", 0) == std::vector<std::string>{"tag/a", "tag/b"});
+        REQUIRE(GetElementPaths(dataset, "tag", 1) == std::vector<std::string>{"tag/c"});
+        REQUIRE(GetElementPaths(dataset, "tag", 2) == std::vector<std::string>{""});
+
+        std::vector<std::vector<std::string>> copied_paths;
+        REQUIRE(dataset->GetPaths("tag", copied_paths));
+        REQUIRE(copied_paths ==
+                std::vector<std::vector<std::string>>{{"tag/a", "tag/b"}, {"tag/c"}, {""}});
+
+        uint64_t path_count = 1;
+        REQUIRE(vsag::GetDatasetPaths(*dataset, "missing", 0, path_count) == nullptr);
+        REQUIRE(path_count == 0);
+        REQUIRE_FALSE(dataset->GetPaths("missing", copied_paths));
+        REQUIRE(copied_paths.empty());
+    }
+
+    SECTION("common getter preserves legacy empty path semantics") {
+        std::string paths[2] = {"tag/a", ""};
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(2)->Dim(1)->Paths("tag", paths)->Owner(false);
+
+        REQUIRE(GetElementPaths(dataset, "tag", 0) == std::vector<std::string>{"tag/a"});
+        REQUIRE(GetElementPaths(dataset, "tag", 1) == std::vector<std::string>{""});
+
+        std::vector<std::vector<std::string>> copied_paths;
+        REQUIRE(dataset->GetPaths("tag", copied_paths));
+        REQUIRE(copied_paths == std::vector<std::vector<std::string>>{{"tag/a"}, {""}});
+    }
+
+    SECTION("structured paths validate row and outer sizes") {
+        auto empty_row = vsag::Dataset::Make();
+        empty_row->NumElements(2);
+        REQUIRE_THROWS(
+            empty_row->Paths("tag", std::vector<std::vector<std::string>>{{"tag/a"}, {}}));
+
+        auto after_count = vsag::Dataset::Make();
+        after_count->NumElements(2);
+        REQUIRE_THROWS(after_count->Paths("tag", std::vector<std::vector<std::string>>{{"tag/a"}}));
+
+        auto before_count = vsag::Dataset::Make();
+        before_count->Paths("tag", std::vector<std::vector<std::string>>{{"tag/a"}});
+        REQUIRE_THROWS(before_count->NumElements(2));
+    }
+
+    SECTION("structured paths can be replaced while updating element count") {
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(2)->Paths("tag",
+                                       std::vector<std::vector<std::string>>{{"tag/a"}, {"tag/b"}});
+
+        dataset->NumElements(3);
+        uint64_t path_count = 0;
+        REQUIRE_THROWS(vsag::GetDatasetPaths(*dataset, "tag", 0, path_count));
+        dataset->Paths("tag", std::vector<std::vector<std::string>>{{"tag/a"}, {"tag/b"}, {""}});
+
+        REQUIRE(GetElementPaths(dataset, "tag", 2) == std::vector<std::string>{""});
+    }
+
+    SECTION("structured paths replace an owned legacy buffer") {
+        auto* legacy_paths = CopyPathArray({"tag/a", "tag/b"});
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(2)->Paths("tag", legacy_paths)->Owner(true);
+
+        dataset->Paths("tag", std::vector<std::vector<std::string>>{{"tag/c", "tag/d"}, {""}});
+
+        REQUIRE(GetElementPaths(dataset, "tag", 0) == std::vector<std::string>{"tag/c", "tag/d"});
+        REQUIRE(GetElementPaths(dataset, "tag", 1) == std::vector<std::string>{""});
+    }
+
+    SECTION("deep copy preserves structured paths") {
+        auto original = vsag::Dataset::Make();
+        original->NumElements(2)->Dim(1)->Paths(
+            "tag", std::vector<std::vector<std::string>>{{"tag/a", "tag/b"}, {""}});
+
+        auto copy = original->DeepCopy();
+        original->Paths("tag", std::vector<std::vector<std::string>>{{"replacement"}, {"other"}});
+
+        REQUIRE(GetElementPaths(copy, "tag", 0) == std::vector<std::string>{"tag/a", "tag/b"});
+        REQUIRE(GetElementPaths(copy, "tag", 1) == std::vector<std::string>{""});
+    }
+
+    SECTION("append combines structured paths") {
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(2)->Dim(1)->Paths(
+            "tag", std::vector<std::vector<std::string>>{{"tag/a", "tag/b"}, {""}});
+        auto appended = vsag::Dataset::Make();
+        appended->NumElements(1)->Dim(1)->Paths("tag",
+                                                std::vector<std::vector<std::string>>{{"tag/c"}});
+
+        dataset->Append(appended);
+
+        REQUIRE(dataset->GetNumElements() == 3);
+        REQUIRE(GetElementPaths(dataset, "tag", 0) == std::vector<std::string>{"tag/a", "tag/b"});
+        REQUIRE(GetElementPaths(dataset, "tag", 1) == std::vector<std::string>{""});
+        REQUIRE(GetElementPaths(dataset, "tag", 2) == std::vector<std::string>{"tag/c"});
+    }
+
+    SECTION("append promotes mixed legacy and structured paths") {
+        auto* legacy_paths = CopyPathArray({"tag/a", ""});
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(2)->Dim(1)->Paths("tag", legacy_paths)->Owner(true);
+        auto appended = vsag::Dataset::Make();
+        appended->NumElements(1)->Dim(1)->Paths(
+            "tag", std::vector<std::vector<std::string>>{{"tag/b", "tag/c"}});
+
+        dataset->Append(appended);
+
+        REQUIRE(dataset->GetPaths("tag") == nullptr);
+        REQUIRE(GetElementPaths(dataset, "tag", 0) == std::vector<std::string>{"tag/a"});
+        REQUIRE(GetElementPaths(dataset, "tag", 1) == std::vector<std::string>{""});
+        REQUIRE(GetElementPaths(dataset, "tag", 2) == std::vector<std::string>{"tag/b", "tag/c"});
+    }
+
+    SECTION("append promotes structured and legacy paths in reverse order") {
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(2)->Dim(1)->Paths(
+            "tag", std::vector<std::vector<std::string>>{{"tag/a", "tag/b"}, {""}});
+        auto* legacy_paths = CopyPathArray({"tag/c"});
+        auto appended = vsag::Dataset::Make();
+        appended->NumElements(1)->Dim(1)->Paths("tag", legacy_paths)->Owner(true);
+
+        dataset->Append(appended);
+
+        REQUIRE(GetElementPaths(dataset, "tag", 0) == std::vector<std::string>{"tag/a", "tag/b"});
+        REQUIRE(GetElementPaths(dataset, "tag", 1) == std::vector<std::string>{""});
+        REQUIRE(GetElementPaths(dataset, "tag", 2) == std::vector<std::string>{"tag/c"});
+    }
+}
+
+TEST_CASE("Dataset Named UInt32 Metadata Test", "[ut][dataset]") {
+    {
+        auto* shared_metadata = new uint32_t[2]{3, 5};
+        auto aliased = vsag::Dataset::Make();
+        aliased->NumElements(2)
+            ->Dim(1)
+            ->VectorCounts(shared_metadata)
+            ->UInt32Metadata("host_id", shared_metadata)
+            ->UInt32Metadata("tenant_id", shared_metadata)
+            ->Owner(true);
+    }
+
+    auto* first_host_ids = new uint32_t[2]{3, 5};
+    auto first = vsag::Dataset::Make();
+    first->NumElements(2)
+        ->Dim(1)
+        ->VectorCounts(first_host_ids)
+        ->UInt32Metadata("host_id", first_host_ids)
+        ->Owner(true);
+
+    REQUIRE(first->GetUInt32Metadata("host_id") == first_host_ids);
+    REQUIRE(first->GetUInt32Metadata("missing") == nullptr);
+
+    auto copy = first->DeepCopy();
+    REQUIRE(copy->GetUInt32Metadata("host_id") != first_host_ids);
+    REQUIRE(copy->GetUInt32Metadata("host_id")[0] == 3);
+    REQUIRE(copy->GetUInt32Metadata("host_id")[1] == 5);
+
+    auto* appended_host_ids = new uint32_t[2]{7, 11};
+    auto* appended_vector_counts = new uint32_t[2]{13, 17};
+    auto appended = vsag::Dataset::Make();
+    appended->NumElements(2)
+        ->Dim(1)
+        ->VectorCounts(appended_vector_counts)
+        ->UInt32Metadata("host_id", appended_host_ids)
+        ->Owner(true);
+    first->Append(appended);
+    REQUIRE(first->GetNumElements() == 4);
+    REQUIRE(first->GetUInt32Metadata("host_id")[2] == 7);
+    REQUIRE(first->GetUInt32Metadata("host_id")[3] == 11);
+    REQUIRE(first->GetVectorCounts()[2] == 13);
+    REQUIRE(first->GetVectorCounts()[3] == 17);
+
+    auto slice = vsag::Dataset::Make();
+    slice->NumElements(2)
+        ->Dim(1)
+        ->UInt32Metadata("host_id", first->GetUInt32Metadata("host_id") + 1)
+        ->Owner(false);
+    REQUIRE(slice->GetUInt32Metadata("host_id")[0] == 5);
+    REQUIRE(slice->GetUInt32Metadata("host_id")[1] == 7);
+
+    auto missing_metadata = vsag::Dataset::Make()->NumElements(1)->Dim(1)->Owner(false);
+    REQUIRE_THROWS(first->Append(missing_metadata));
+
+    auto null_metadata = vsag::Dataset::Make();
+    null_metadata->NumElements(2)->UInt32Metadata("host_id", nullptr)->Owner(true);
+    auto null_metadata_copy = null_metadata->DeepCopy();
+    REQUIRE(null_metadata_copy->GetUInt32Metadata("host_id") == nullptr);
+}
+
+TEST_CASE("Dataset Named String Metadata Test", "[ut][dataset]") {
+    {
+        auto* shared_metadata = new std::string[2]{"a.example", "b.example"};
+        auto aliased = vsag::Dataset::Make();
+        aliased->NumElements(2)
+            ->Dim(1)
+            ->Paths(shared_metadata)
+            ->StringMetadata("host", shared_metadata)
+            ->StringMetadata("tenant", shared_metadata)
+            ->SourceID(shared_metadata)
+            ->Owner(true);
+    }
+
+    auto* first_hosts = new std::string[2]{"a.example", "b.example"};
+    auto first = vsag::Dataset::Make();
+    first->NumElements(2)->Dim(1)->StringMetadata("host", first_hosts)->Owner(true);
+
+    REQUIRE(first->GetStringMetadata("host") == first_hosts);
+    REQUIRE(first->GetStringMetadata("missing") == nullptr);
+
+    auto copy = first->DeepCopy();
+    REQUIRE(copy->GetStringMetadata("host") != first_hosts);
+    REQUIRE(copy->GetStringMetadata("host")[0] == "a.example");
+    REQUIRE(copy->GetStringMetadata("host")[1] == "b.example");
+
+    auto* appended_hosts = new std::string[2]{"c.example", ""};
+    auto appended = vsag::Dataset::Make();
+    appended->NumElements(2)->Dim(1)->StringMetadata("host", appended_hosts)->Owner(true);
+    first->Append(appended);
+    REQUIRE(first->GetNumElements() == 4);
+    REQUIRE(first->GetStringMetadata("host")[2] == "c.example");
+    REQUIRE(first->GetStringMetadata("host")[3].empty());
+
+    auto slice = vsag::Dataset::Make();
+    slice->NumElements(2)
+        ->Dim(1)
+        ->StringMetadata("host", first->GetStringMetadata("host") + 1)
+        ->Owner(false);
+    REQUIRE(slice->GetStringMetadata("host")[0] == "b.example");
+    REQUIRE(slice->GetStringMetadata("host")[1] == "c.example");
+
+    auto missing_metadata = vsag::Dataset::Make()->NumElements(1)->Dim(1)->Owner(false);
+    REQUIRE_THROWS(first->Append(missing_metadata));
+
+    auto null_metadata = vsag::Dataset::Make();
+    null_metadata->NumElements(2)->StringMetadata("host", nullptr)->Owner(true);
+    auto null_metadata_copy = null_metadata->DeepCopy();
+    REQUIRE(null_metadata_copy->GetStringMetadata("host") == nullptr);
 }
 
 TEST_CASE("Dataset MultiVector Basic Test", "[ut][dataset]") {

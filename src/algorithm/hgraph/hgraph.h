@@ -16,6 +16,7 @@
 #pragma once
 
 #include <atomic>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -37,6 +38,7 @@
 #include "datacell/sparse_graph_datacell_parameter.h"
 #include "hgraph_parameter.h"
 #include "impl/basic_optimizer.h"
+#include "impl/conjugate_graph.h"
 #include "impl/heap/distance_heap.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
@@ -55,9 +57,15 @@
 #include "vsag/index_features.h"
 
 namespace vsag {
+
+class ChunkedManifest;
+struct ComponentManifestEntry;
 class FlattenOptimizedBuildInterface;
+class HGraphRaBitQFusedDataCell;
+class HGraphRaBitQSearcher;
 class HGraphOptimizedBuildSession;
 class IteratorFilterContext;
+class RaBitQSplitDataCellInterface;
 
 /**
  * @brief HGraph: hierarchical navigable graph index.
@@ -118,6 +126,9 @@ public:
 
     InnerIndexPtr
     ExportModel(const IndexCommonParam& param) const override;
+
+    InnerIndexPtr
+    Clone(const IndexCommonParam& param) override;
 
     uint64_t
     EstimateMemory(uint64_t num_elements) const override;
@@ -216,8 +227,25 @@ public:
     uint32_t
     Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override;
 
+    uint32_t
+    Feedback(const DatasetPtr& query,
+             int64_t k,
+             const std::string& parameters,
+             int64_t global_optimum_tag_id = std::numeric_limits<int64_t>::max()) override;
+
+    uint32_t
+    Pretrain(const std::vector<int64_t>& base_tag_ids,
+             uint32_t k,
+             const std::string& parameters) override;
+
     void
     Serialize(StreamWriter& writer) const override;
+
+    void
+    Serialize(SerializeWriter& writer, uint64_t chunk_size) const override;
+
+    void
+    ParallelDeserialize(DeserializeReader& reader) override;
 
     /// Set the number of threads used during Build().
     void
@@ -247,8 +275,14 @@ public:
     bool
     UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override;
 
+    bool
+    UpdateId(int64_t old_id, int64_t new_id) override;
+
     void
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override;
+
+    bool
+    UpdateExtraInfo(const DatasetPtr& new_base) override;
 
     void
     UpdateAttribute(int64_t id,
@@ -267,17 +301,22 @@ public:
      * pointer is absent.
      */
     const void*
-    get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
+    get_data(const DatasetPtr& dataset, int64_t index = 0) const {
+        CHECK_ARGUMENT(index >= 0, "query index must be non-negative");
+        CHECK_ARGUMENT(
+            data_type_ == DataTypes::DATA_TYPE_SPARSE ||
+                (dim_ == 0 || (dim_ > 0 && index <= std::numeric_limits<int64_t>::max() / dim_)),
+            "query offset exceeds int64_t range");
         if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
             auto* ptr = dataset->GetFloat32Vectors();
-            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
+            return ptr ? ptr + index * dim_ : nullptr;
         } else if (data_type_ == DataTypes::DATA_TYPE_INT8) {
             auto* ptr = dataset->GetInt8Vectors();
-            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
+            return ptr ? ptr + index * dim_ : nullptr;
         } else if (data_type_ == DataTypes::DATA_TYPE_FP16 ||
                    data_type_ == DataTypes::DATA_TYPE_BF16) {
             auto* ptr = dataset->GetFloat16Vectors();
-            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
+            return ptr ? ptr + index * dim_ : nullptr;
         } else if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
             auto* ptr = dataset->GetSparseVectors();
             return ptr ? ptr + index : nullptr;
@@ -333,9 +372,18 @@ public:
     void
     insert_persistent_codes_unlocked(const void* data, InnerIdType inner_id);
 
+    void
+    insert_fused_optimized_build_codes(const void* data, InnerIdType inner_id);
+
     /// Write codes to a physical code slot when deduplicated storage is enabled.
     void
     insert_persistent_codes_to_slot(const void* data, CodeSlotIdType code_slot_id);
+
+    void
+    sync_fused_node_codes(InnerIdType inner_id, const void* data);
+
+    void
+    restore_fused_codec();
 
     /// Ensure physical code storage can hold required_capacity physical slots.
     void
@@ -353,6 +401,25 @@ public:
     GraphInterfacePtr
     generate_one_route_graph();
 
+    // Keep legacy RaBitQ candidates compact while allowing fused direct search to preserve hints.
+    // Only the buffer selected by search_one_graph allocates element storage.
+    struct RaBitQSearchCandidateBuffers {
+        explicit RaBitQSearchCandidateBuffers(Allocator* allocator)
+            : generic(allocator), fused(allocator) {
+        }
+
+        void
+        Reset() {
+            generic.clear();
+            fused.clear();
+            fused_search_used = false;
+        }
+
+        DistanceRecordVector generic;
+        RaBitQCandidateVector fused;
+        bool fused_search_used{false};
+    };
+
     /// Search a single graph layer, returning a candidate distance heap.
     /// @param ctx  may be nullptr during add (non-query) scenarios.
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
@@ -363,7 +430,8 @@ public:
                      InnerSearchParam& inner_search_param,
                      const VisitedListPtr& vt,
                      QueryContext* ctx,
-                     DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+                     RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr,
+                     bool* fused_search_finalized = nullptr) const;
 
     /// Overload that accepts an IteratorFilterContext for iterative search.
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
@@ -375,9 +443,15 @@ public:
                      IteratorFilterContext* iter_ctx,
                      // ctx can be nullptr in adding scenario
                      QueryContext* ctx,
-                     DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+                     RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr) const;
 
 private:
+    void
+    check_fused_mutation_supported(std::string_view operation) const;
+
+    std::vector<int64_t>
+    add_impl(const DatasetPtr& data);
+
     [[nodiscard]] std::shared_lock<std::shared_mutex>
     acquire_global_read_lock() const {
         if (not this->physical_code_resize_pending_.load(std::memory_order_acquire)) {
@@ -467,6 +541,12 @@ private:
 
     void
     validate_add_data(const DatasetPtr& data) const;
+
+    void
+    validate_fused_vector_data(const float* data, uint64_t count) const;
+
+    void
+    validate_fused_encoding_data(const float* data, uint64_t count) const;
 
     AddContext
     prepare_add_context(const DatasetPtr& data);
@@ -582,6 +662,60 @@ private:
     void
     serialize_label_info(StreamWriter& writer) const;
 
+    /// shared post-deserialization steps (dedup validation, memory accounting)
+    void
+    finish_deserialize();
+
+    /// validate and publish the logical state derived from the code-slot map
+    void
+    validate_and_publish_dedup_state(uint64_t serialized_total_count);
+
+    /// publish the physical code capacity after the code components are ready
+    void
+    publish_physical_code_capacity();
+
+    /// initialize runtime capacity shared by search and subsequent mutations
+    void
+    initialize_deserialized_runtime_state();
+
+    /// restore basic info and duplicate-format flags from the footer
+    /// metadata and return the serialized total count; shared by
+    /// Deserialize(StreamReader&) and the parallel deserialization paths
+    uint64_t
+    apply_footer_metadata(const MetadataPtr& metadata);
+
+    /// Restore a whole component whose Deserialize seeks inside its own payload
+    /// (see requires_seekable_payload). The frame is buffered first, so the
+    /// component gets a seekable reader and the frame stays exactly consumed
+    /// even though the component's own cursor does not reach the end.
+    void
+    deserialize_seekable_whole_component(DeserializeReader& reader,
+                                         const ComponentManifestEntry& comp,
+                                         bool compressed);
+
+    /// dispatch a whole component of the chunked manifest to its sequential
+    /// Deserialize by name.
+    ///
+    /// Not internally synchronized. The manifest path dispatches each whole
+    /// component as one pool task, so distinct components run concurrently:
+    /// every branch must touch only index members that no other branch
+    /// touches. Adding a branch that reads or writes shared state (a counter,
+    /// a capacity field) requires either moving that state out of here or
+    /// serializing the component on the calling thread.
+    void
+    deserialize_whole_component(const std::string& name, StreamReader& reader);
+
+    /// parallel body load driven by the manifest recorded in the footer
+    void
+    parallel_deserialize_manifest(DeserializeReader& reader,
+                                  ThreadPool& pool,
+                                  const ChunkedManifest& chunked_manifest);
+
+    /// parallel load of an uncompressed body without a recorded manifest:
+    /// probe the component extents sequentially, then fill io data in parallel
+    void
+    parallel_deserialize_probe(DeserializeReader& reader, ThreadPool& pool, uint64_t body_end);
+
     /// Read label (external id) mappings from stream.
     void
     deserialize_label_info(StreamReader& reader) const;
@@ -626,6 +760,12 @@ private:
                        QueryContext* ctx,
                        const std::optional<float>& threshold = std::nullopt) const;
 
+    DatasetPtr
+    search_range_with_request(const SearchRequest& request,
+                              const HGraphSearchParameters& params,
+                              const FilterPtr& filter,
+                              QueryContext& ctx) const;
+
 private:
     /// Reorder the candidate heap using precise codes, updating in-place.
     void
@@ -635,7 +775,7 @@ private:
             int64_t k,
             IteratorFilterContext* iter_ctx,
             QueryContext& ctx,
-            const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr,
+            const RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr,
             const std::optional<float>& distance_threshold = std::nullopt) const;
 
     /// Run ELP (Edge-Link Pruning) optimizer on the bottom graph.
@@ -839,6 +979,9 @@ private:
 
     Vector<GraphInterfacePtr> route_graphs_;   // upper-layer route graphs
     GraphInterfacePtr bottom_graph_{nullptr};  // base-level graph (all vectors)
+    std::shared_ptr<HGraphRaBitQFusedDataCell> rabitq_fused_datacell_{nullptr};
+    std::shared_ptr<RaBitQSplitDataCellInterface> rabitq_split_codes_{nullptr};
+    std::shared_ptr<HGraphRaBitQSearcher> rabitq_fused_searcher_{nullptr};
     SparseGraphDatacellParamPtr hierarchical_datacell_param_{nullptr};  // params for route graphs
 
     bool use_elp_optimizer_{false};  // enable ELP edge-link pruning
@@ -895,9 +1038,17 @@ private:
 
     bool use_old_serial_format_{false};  // true when deserialized from legacy format
 
-    bool support_duplicate_{false};             // allow duplicate external ids
-    bool deduplicate_storage_{false};           // share duplicate vector storage slots
-    bool support_force_remove_{false};          // enable physical deletion
+    bool support_duplicate_{false};     // allow duplicate external ids
+    bool deduplicate_storage_{false};   // share duplicate vector storage slots
+    bool support_force_remove_{false};  // enable physical deletion
+    bool use_conjugate_graph_{false};   // enable graph-enhancement feedback
+    std::shared_ptr<ConjugateGraph> conjugate_graph_{nullptr};
+    // guards conjugate_graph_ against concurrent search paths. During a
+    // parallel restore exactly one component task acquires it (the conjugate
+    // graph handler); before adding another acquirer there, read the INVARIANT
+    // in hgraph_parallel_deserialize.cpp — two restore tasks holding component
+    // locks while waiting on this one would deadlock.
+    mutable std::shared_mutex conjugate_graph_mutex_;
     float duplicate_distance_threshold_{0.0F};  // distance threshold for duplicate detection
 
     bool persist_source_id_{false};  // whether to persist source_id in serialization

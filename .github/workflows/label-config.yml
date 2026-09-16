@@ -1,0 +1,32 @@
+name: Label configuration
+
+on:
+  pull_request:
+    paths:
+      - ".github/labels.json"
+      - ".github/mergify.yml"
+      - ".github/scripts/check-label-config.mjs"
+      - ".github/workflows/label-config.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/labels.json"
+      - ".github/mergify.yml"
+      - ".github/scripts/check-label-config.mjs"
+      - ".github/workflows/label-config.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node .github/scripts/check-label-config.mjs --remote antgroup/vsag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

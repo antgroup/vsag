@@ -30,6 +30,7 @@ docker pull vsaglib/vsag:ubuntu
   - or Clang version 13.0.0 or later
 - Build Tools: 
   - CMake version 3.18.0 or later
+  - Ninja (preferred when available; Unix Makefiles remain the compatibility fallback)
   - clang-tidy version 15 EXACTLY (not higher, not lower - required for consistent lint diagnostics)
   - clang-format version 15 EXACTLY (not higher, not lower - required for consistent formatting)
 - Additional Dependencies:
@@ -47,7 +48,7 @@ $ ./scripts/deps/install_deps_macos.sh
 ```
 
 ## VSAG Build Tool
-VSAG project use the Unix Makefiles to compile, package and install the library. Here is the commands below:
+VSAG uses CMake to compile, package, and install the library through the commands below. The Makefile prefers Ninja when a usable installation is available and otherwise falls back to Unix Makefiles. Set `CMAKE_GENERATOR` explicitly to use another supported generator; explicit values always take precedence.
 ```bash
 Usage: make <target>
 
@@ -58,6 +59,7 @@ help:                    ## Show the help.
 debug:                   ## Build vsag with debug options.
 dev:                     ## Build full developer configuration.
 test:                    ## Build and run unit tests.
+test-module:             ## Build and run one unit-test module. Usage: make test-module MODULE=datacell
 asan:                    ## Build with AddressSanitizer option.
 test_asan: asan          ## Run unit tests with AddressSanitizer option.
 tsan:                    ## Build with ThreadSanitizer option.
@@ -74,7 +76,8 @@ test_asan_parallel: asan ## Run unit tests parallel with AddressSanitizer option
 test_tsan_parallel: tsan ## Run unit tests parallel with ThreadSanitizer option.
 ##
 ## ================ distribution ================
-release:                 ## Build vsag with release options.
+release:                 ## Build reproducible release/package output (ccache off by default).
+release-perf:            ## Build optimized output for iteration/benchmarks (ccache on by default).
 run-dist-tests:          ## Run distribution tests.
 dist-pre-cxx11-abi:      ## Build vsag with distribution options (pre C++11 ABI).
 dist-cxx11-abi:          ## Build vsag with distribution options (C++11 ABI).
@@ -82,15 +85,19 @@ dist-libcxx:             ## Build vsag using libc++.
 pyvsag:                  ## Build a specific Python version wheel. Usage: make pyvsag PY_VERSION=3.10
 pyvsag-all:              ## Build wheels for all supported versions.
 clean-release:           ## Clear build-release/ directory.
+clean-release-perf:      ## Clear build-release-perf/ directory.
 install:                 ## Build and install the release version of vsag.
 ```
 
 Build target behavior:
 
-- `make debug` builds the default minimal configuration. It does not enable tests, examples, tools, Python bindings, or `mockimpl` unless they are explicitly turned on.
-- `make dev` builds the full developer configuration with tests, examples, tools, Python bindings, and `mockimpl` enabled.
-- `make test`, `make asan`, `make tsan`, and the related parallel test targets automatically enable tests and `mockimpl`.
-- `make release` follows the same minimal defaults as `make debug`. Enable optional components explicitly when needed, for example `make release VSAG_ENABLE_TOOLS=ON`.
+- `make debug` builds the default minimal configuration. It does not enable tests, examples, tools, or Python bindings unless they are explicitly turned on.
+- `make dev` builds the full developer configuration with tests, examples, tools, and Python bindings enabled.
+- `make test`, `make asan`, `make tsan`, and the related parallel test targets automatically enable tests.
+- `make test-module MODULE=<name>` builds and runs one unit-test subsystem without building the other unit-test modules. `CASE=<filter>` applies the usual Catch2 runtime filter; run `make test` for full validation.
+- `make release` is the reproducible release/package path. It uses the minimal configuration, Release optimization semantics, and disables ccache by default. Enable optional components explicitly when needed, for example `make release VSAG_ENABLE_TOOLS=ON`.
+- `make release-perf` uses the same Release optimization semantics and minimal configuration in `build-release-perf/`, but enables ccache by default for iterative development and benchmarking.
+- Override either cache default explicitly with `VSAG_ENABLE_CCACHE=ON` or `VSAG_ENABLE_CCACHE=OFF`.
 - Linux and macOS use the same dependency-script plus `make` entry points for the core C++ build. Use `./scripts/deps/install_deps.sh` first, then run the usual `make` target. The current macOS validation scope is `make debug`, `make release`, and `make test` on arm64; Python wheel packaging remains Linux-focused.
 
 ## CMake Build Options
@@ -164,7 +171,7 @@ unversioned variable remains as a deprecated compatibility fallback. The value m
 be a local filesystem path or URL, making this the primary mechanism for offline,
 air-gapped, or internal-mirror builds.
 
-- **`VSAG_THIRDPARTY_OPENBLAS_0_3_24`** (representative `main` example)
+- **`VSAG_THIRDPARTY_OPENBLAS_0_3_34`** (representative `main` example)
   - Override the OpenBLAS source archive URL/path used by `ExternalProject_Add`
   - Useful for offline builds, local mirrors, or pre-downloaded archives
 
@@ -187,9 +194,6 @@ source of truth for the exact upstream URL and expected checksum.
 - **`ENABLE_PYBINDS`** (default: `OFF`)
   - Build the `_pyvsag` Python extension module
 
-- **`ENABLE_MOCKIMPL`** (default: `OFF`)
-  - Build the `mockimpl` targets used by interface and compatibility-style testing
-
 For a complete list of build options, see the `option()` directives in `cmake/VSAGOptions.cmake`.
 
 ## Project Structure
@@ -199,7 +203,6 @@ For a complete list of build options, see the `option()` directives in `cmake/VS
 - `examples/`: cpp and python example codes
 - `extern/`: third-party libraries
 - `include/`: export header files
-- `mockimpl/`: the mock implementation that can be used in interface test
 - `python/`: the pyvsag package and setup tools
 - `python_bindings/`: the python bindings
 - `scripts/`: useful scripts

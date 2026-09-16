@@ -23,6 +23,15 @@
 namespace vsag {
 BucketDataCellParameter::BucketDataCellParameter() = default;
 
+std::shared_ptr<BucketDataCellParameter>
+BucketDataCellParameter::CreateDefault(const std::string& quantization_type,
+                                       const std::string& io_type) {
+    auto parameter = std::make_shared<BucketDataCellParameter>();
+    parameter->io_parameter = IOParameter::CreateDefault(io_type);
+    parameter->quantizer_parameter = QuantizerParameter::CreateDefault(quantization_type);
+    return parameter;
+}
+
 void
 BucketDataCellParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(json.Contains(IO_PARAMS_KEY),

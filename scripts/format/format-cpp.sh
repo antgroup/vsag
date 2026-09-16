@@ -48,7 +48,6 @@ find include/ -iname "*.h" -o -iname "*.cpp" | xargs "$CLANG_FORMAT" -i
 find src/ -iname "*.h" -o -iname "*.cpp" | xargs "$CLANG_FORMAT" -i
 find python_bindings/ -iname "*.h" -o -iname "*.cpp" | xargs "$CLANG_FORMAT" -i
 find examples/cpp/ -iname "*.h" -o -iname "*.cpp" | xargs "$CLANG_FORMAT" -i
-find mockimpl/ -iname "*.h" -o -iname "*.cpp" | xargs "$CLANG_FORMAT" -i
 find tests/ -iname "*.h" -o -iname "*.cpp" | xargs "$CLANG_FORMAT" -i
 find tools/ -iname "*.h" -o -iname "*.cpp" | xargs "$CLANG_FORMAT" -i
 

@@ -102,3 +102,51 @@ TEST_CASE("Kmeans Larger Dim (AMX BF16 path)", "[ut][KMeansCluster]") {
     }
     REQUIRE(converged);
 }
+
+TEST_CASE("Kmeans seeded fixed-order reduction is reproducible", "[ut][KMeansCluster]") {
+    constexpr uint32_t k = 8;
+    constexpr int32_t dim = 17;
+    constexpr uint64_t count = 4097;
+    std::vector<float> data(count * dim);
+    for (uint64_t i = 0; i < count; ++i) {
+        for (int32_t d = 0; d < dim; ++d) {
+            data[i * dim + d] =
+                static_cast<float>(i % k) * 5.0F +
+                static_cast<float>((i * 31 + static_cast<uint64_t>(d) * 17) % 97) * 0.0001F;
+        }
+    }
+
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto single_thread_pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
+    single_thread_pool->SetPoolSize(1);
+    auto multi_thread_pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
+    multi_thread_pool->SetPoolSize(4);
+    vsag::KMeansCluster single_thread(dim, allocator.get(), single_thread_pool);
+    vsag::KMeansCluster multi_thread(dim, allocator.get(), multi_thread_pool);
+
+    const auto single_thread_labels = single_thread.Run(k,
+                                                        data.data(),
+                                                        count,
+                                                        6,
+                                                        nullptr,
+                                                        false,
+                                                        1e-6F,
+                                                        vsag::KMeansInitMethod::KMEANS_PLUS_PLUS,
+                                                        0x52425131U,
+                                                        true);
+    const auto multi_thread_labels = multi_thread.Run(k,
+                                                      data.data(),
+                                                      count,
+                                                      6,
+                                                      nullptr,
+                                                      false,
+                                                      1e-6F,
+                                                      vsag::KMeansInitMethod::KMEANS_PLUS_PLUS,
+                                                      0x52425131U,
+                                                      true);
+    REQUIRE(single_thread_labels == multi_thread_labels);
+    const uint64_t centroid_values = static_cast<uint64_t>(k) * dim;
+    REQUIRE(std::equal(single_thread.k_centroids_,
+                       single_thread.k_centroids_ + centroid_values,
+                       multi_thread.k_centroids_));
+}

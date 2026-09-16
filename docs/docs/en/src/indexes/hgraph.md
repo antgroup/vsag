@@ -64,7 +64,7 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `base_quantization_type` | string | — (required) | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `tq` — see the [Quantization chapter](../quantization/README.md) for per-quantizer details |
+| `base_quantization_type` | string | — (required) | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `tq` — see the [Quantization chapter](../quantization/) for per-quantizer details |
 | `max_degree` | int | `64` | Maximum out-degree per graph node |
 | `ef_construction` | int | `400` | Candidate list size during build (higher = better recall, slower build) |
 | `graph_type` | string | `"nsw"` | Graph algorithm: `nsw` or `odescent` |
@@ -77,6 +77,8 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `mrle_dim` | int | `0` | Output dimension for an MRLE transform in `tq_chain`; allowed range `[0, dim]`, where `0` means the input dimension. |
 | `fast_encode_rabitq` | bool | `true` | Use the fast multi-bit RaBitQ encoder; set to `false` for the previous exact encoder. |
 | `fast_encode_rabitq_rounds` | int | `6` | Fast RaBitQ coordinate-refinement rounds, in `[1, 32]`. |
+| `rabitq_fused_datacell` | bool | `false` | Fuse the bottom HGraph node and RaBitQ split codes into one in-memory record. Requires L2/IP, flat in-memory graph storage, RaBitQ x+y split codes with x in `[1, 4]`, and the other constraints described in [RaBitQ x+y split](../quantization/rabitq_split.md). |
+| `train_sample_count` | int | `65536` | Maximum number of vectors sampled for quantizer training; must be at least `512` when set explicitly. |
 | `build_thread_count` | int | `100` | Threads used to parallelise build |
 | `support_duplicate` | bool | `false` | Enable duplicate-ID detection on insert |
 | `deduplicate_storage` | bool | `false` | Share vector storage between duplicates; requires `support_duplicate: true` |
@@ -90,6 +92,7 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `base_direct_read` / `precise_direct_read` | bool | `false` | With `uring_io`, open the corresponding file using direct IO instead of the page cache. |
 | `hgraph_init_capacity` | int | `100` | Initial capacity hint (doesn't cap the final size) |
 | `persist_source_id` | bool | `false` | Persist source-ID metadata during serialization so a restored index can later export a reusable build cache. |
+| `use_conjugate_graph` | bool | `false` | Enable `Feedback`/`Pretrain` graph enhancement; see [Graph Index Enhancement](../advanced/enhance_graph.md). |
 | `resize_increase_count_bit` | int | `10` | `log2` of the slot-growth batch. Valid range is `1` to `31`; `1` grows in 2-slot batches and `10` in 1,024-slot batches. Smaller values reduce preallocation but can increase reallocations. |
 
 `use_reverse_edges` is intended for workloads that need fast incoming-neighbor inspection, graph

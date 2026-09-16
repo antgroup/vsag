@@ -17,6 +17,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sindi/term_id_mapper.h"
+#include "algorithm/sindi_metadata_filter.h"
 #include "algorithm/sindi_v2/sindi_v2_parameter.h"
 #include "datacell/disk_sindi_term_datacell.h"
 #include "datacell/flatten_interface.h"
@@ -152,7 +153,8 @@ private:
                 bool use_term_lists_heap_insert,
                 SindiQueryContext& query_context,
                 const SparseVector* original_query = nullptr,
-                SearchStatistics* statistics = nullptr) const;
+                SearchStatistics* statistics = nullptr,
+                const SindiMetadataSearchRoute& metadata_route = {}) const;
 
     bool
     UseTermListsHeapInsert(const SINDIV2SearchParameter& search_param) const;
@@ -192,6 +194,29 @@ private:
     void
     serialize_term_layout(StreamWriter& writer) const;
 
+    MetadataPtr
+    collect_streaming_header() const override;
+
+    void
+    serialize_streaming_body(StreamWriter& writer) const override;
+
+    void
+    deserialize_streaming_body(StreamReader& reader, const MetadataPtr& metadata) override;
+
+    void
+    load_streaming_body(StreamReader& reader,
+                        const MetadataPtr& metadata,
+                        const LoadParameters& parameters) override;
+
+    void
+    read_streaming_body(StreamReader& reader, const MetadataPtr& metadata);
+
+    void
+    serialize_streaming_term_layout(StreamWriter& writer) const;
+
+    void
+    deserialize_streaming_term_layout(StreamReader& reader);
+
 private:
     mutable std::shared_mutex global_mutex_;
 
@@ -207,6 +232,7 @@ private:
     SparseValueQuantizationType sparse_value_quant_type_{SparseValueQuantizationType::FP32};
     std::string rerank_type_{SPARSE_RERANK_TYPE_FP32};
     uint32_t dmq_shared_codebook_threshold_{DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD};
+    SindiMetadataFilter metadata_filter_;
     float doc_prune_ratio_{0};
 
     FlattenInterfacePtr rerank_flat_{nullptr};

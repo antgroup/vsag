@@ -131,6 +131,7 @@ jobs:
         env:
           CIBW_ARCHS: ${{ matrix.arch }}
           CIBW_BUILD: ${{ matrix.cibw-build-id }}
+          CIBW_ENVIRONMENT: ${{ matrix.arch == 'x86_64' && 'VSAG_OPENBLAS_TARGET=GENERIC' || '' }}
           CIBW_TEST_COMMAND: "pip install numpy pytest && ls -alF /project/ && python /project/tests/python/run_test.py"
 
       - uses: actions/upload-artifact@v5
@@ -164,6 +165,7 @@ jobs:
         env:
           CIBW_ARCHS: ${{ matrix.arch }}
           CIBW_BUILD: ${{ matrix.cibw-build-id }}
+          CIBW_ENVIRONMENT: ${{ matrix.arch == 'x86_64' && 'VSAG_OPENBLAS_TARGET=GENERIC' || '' }}
           CIBW_TEST_COMMAND: |
             pip install numpy pytest && \
             echo "=== Running VSAG Python Tests ===" && \
@@ -211,6 +213,7 @@ jobs:
         env:
           CIBW_ARCHS: ${{ matrix.arch }}
           CIBW_BUILD: "cp36-*"
+          CIBW_ENVIRONMENT: ${{ matrix.arch == 'x86_64' && 'VSAG_OPENBLAS_TARGET=GENERIC' || '' }}
           CIBW_TEST_COMMAND: |
             pip install numpy pytest && \
             echo "=== Running VSAG Python Tests ===" && \

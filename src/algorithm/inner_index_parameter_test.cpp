@@ -112,3 +112,54 @@ TEST_CASE("Label remap type parameter test", "[ut][InnerIndexParameter][label_re
         REQUIRE_THROWS_AS(param->FromJson(json_obj), vsag::VsagException);
     }
 }
+
+TEST_CASE("RaBitQ split configuration test", "[ut][InnerIndexParameter][rabitq_split]") {
+    auto external_json = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "use_reorder": true,
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5
+    })");
+
+    const auto config = vsag::ParseRaBitQSplitConfig(external_json);
+    REQUIRE(config.enabled);
+    REQUIRE(config.filter_bits == 3);
+    REQUIRE(config.supplement_bits == 5);
+    REQUIRE(config.TotalBits() == 8);
+
+    auto inner_json = vsag::JsonType::Parse(R"({
+        "base_codes": {
+            "quantization_params": {}
+        }
+    })");
+    vsag::ApplyRaBitQSplitConfig(config, inner_json);
+    REQUIRE(inner_json["reorder_source"].GetString() == "base");
+    REQUIRE(inner_json["base_codes"]["codes_type"].GetString() == "rabitq_split");
+    REQUIRE(inner_json["base_codes"]["quantization_params"]["rabitq_version"].GetString() ==
+            "split");
+    REQUIRE(
+        inner_json["base_codes"]["quantization_params"]["rabitq_bits_per_dim_filter"].GetInt() ==
+        3);
+    REQUIRE(inner_json["base_codes"]["quantization_params"]["rabitq_bits_per_dim_base"].GetInt() ==
+            8);
+}
+
+TEST_CASE("hold_molds is applied only to supported quantizers",
+          "[ut][InnerIndexParameter][hold_molds]") {
+    auto fp32 = vsag::JsonType::Parse(R"({"type":"fp32"})");
+    fp32 = vsag::ApplyHoldMoldsToQuantizer(fp32, true);
+    REQUIRE(fp32[vsag::HOLD_MOLDS].GetBool());
+
+    auto int8 = vsag::JsonType::Parse(R"({"type":"int8"})");
+    int8 = vsag::ApplyHoldMoldsToQuantizer(int8, true);
+    REQUIRE(int8[vsag::HOLD_MOLDS].GetBool());
+
+    auto transform = vsag::JsonType::Parse(R"({"type":"tq","tq_chain":"mrle, fp32"})");
+    transform = vsag::ApplyHoldMoldsToQuantizer(transform, true);
+    REQUIRE(transform[vsag::HOLD_MOLDS].GetBool());
+
+    auto rabitq = vsag::JsonType::Parse(R"({"type":"rabitq"})");
+    rabitq = vsag::ApplyHoldMoldsToQuantizer(rabitq, true);
+    REQUIRE_FALSE(rabitq.Contains(vsag::HOLD_MOLDS));
+}

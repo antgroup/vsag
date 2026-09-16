@@ -110,6 +110,12 @@ public:
     Remove(uint64_t page_id);
 
     /**
+     * @brief Remove cached pages whose ids are in the inclusive range.
+     */
+    void
+    RemoveRange(uint64_t first_page_id, uint64_t last_page_id);
+
+    /**
      * @brief Clear all cached pages.
      */
     virtual void

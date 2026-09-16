@@ -62,6 +62,9 @@ target_link_libraries(302_feature_range_search vsag)
 add_executable (303_feature_remove 303_feature_remove.cpp)
 target_link_libraries (303_feature_remove vsag)
 
+add_executable(304_feature_enhance_graph 304_feature_enhance_graph.cpp)
+target_link_libraries(304_feature_enhance_graph vsag)
+
 # add_executable(305_feature_update 305_feature_update.cpp)
 # target_link_libraries(305_feature_update vsag)
 
@@ -150,6 +153,9 @@ target_link_libraries(406_feature_read_cache vsag)
 
 add_executable(407_feature_ivf_read_cache 407_feature_ivf_read_cache.cpp)
 target_link_libraries(407_feature_ivf_read_cache vsag)
+
+add_executable(408_feature_reader_prefetch 408_feature_reader_prefetch.cpp)
+target_link_libraries(408_feature_reader_prefetch vsag)
 
 if (TARGET vsag::autotune)
     add_executable (326_feature_create_index_with_constraints

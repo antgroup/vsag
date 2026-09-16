@@ -577,9 +577,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     REQUIRE(result.value()->GetReasoning().find("expected_analysis") != std::string::npos);
     auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
     REQUIRE(statistics["distance_evaluations"].GetUint64() > 0);
+    REQUIRE(statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() == 0);
     REQUIRE(statistics["distance_evaluations"].GetUint64() ==
-            statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() +
-                statistics["distance_evaluations_by_phase"]["rerank"].GetUint64());
+            statistics["distance_evaluations_by_phase"]["rerank"].GetUint64());
+    REQUIRE_FALSE(statistics["complete"].GetBool());
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,

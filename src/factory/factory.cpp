@@ -42,6 +42,8 @@
 #include "algorithm/pyramid/pyramid_zparameters.h"
 #include "algorithm/sindi/sindi.h"
 #include "algorithm/sindi/sindi_parameter.h"
+#include "algorithm/sindi_v2/sindi_v2.h"
+#include "algorithm/sindi_v2/sindi_v2_parameter.h"
 #include "common.h"
 #include "data_type.h"
 #include "impl/thread_pool/safe_thread_pool.h"
@@ -168,6 +170,14 @@ apply_hgraph_streaming_load_parameters(JsonType& index_param, const std::string&
                 load_json[HGRAPH_PRECISE_DIRECT_READ].GetBool());
         }
     }
+    if (load_json.Contains(HGRAPH_PRECISE_ENABLE_PREFETCH_HINT)) {
+        CHECK_ARGUMENT(load_json[HGRAPH_PRECISE_ENABLE_PREFETCH_HINT].IsBool(),
+                       "precise_enable_prefetch_hint must be a boolean");
+        if (index_param.Contains(PRECISE_CODES_KEY)) {
+            index_param[PRECISE_CODES_KEY][IO_PARAMS_KEY][IO_PREFETCH_HINT_KEY].SetBool(
+                load_json[HGRAPH_PRECISE_ENABLE_PREFETCH_HINT].GetBool());
+        }
+    }
     if (load_json.Contains(RAW_VECTOR_IO_TYPE)) {
         require_string_load_parameter(load_json, RAW_VECTOR_IO_TYPE);
         set_streaming_io_override(index_param,
@@ -216,6 +226,12 @@ apply_ivf_streaming_load_parameters(JsonType& index_param, const LoadParameters&
         index_param[PRECISE_CODES_KEY][IO_PARAMS_KEY][READ_CACHE_ENABLED_KEY].SetBool(
             load_json[IVF_PRECISE_ENABLE_READ_CACHE].GetBool());
     }
+    if (load_json.Contains(IVF_PRECISE_ENABLE_PREFETCH_HINT)) {
+        CHECK_ARGUMENT(load_json[IVF_PRECISE_ENABLE_PREFETCH_HINT].IsBool(),
+                       "precise_enable_prefetch_hint must be a boolean");
+        index_param[PRECISE_CODES_KEY][IO_PARAMS_KEY][IO_PREFETCH_HINT_KEY].SetBool(
+            load_json[IVF_PRECISE_ENABLE_PREFETCH_HINT].GetBool());
+    }
     if (load_json.Contains(IVF_PRECISE_CACHE_TOTAL_SIZE)) {
         CHECK_ARGUMENT(load_json[IVF_PRECISE_CACHE_TOTAL_SIZE].IsNumberUnsigned(),
                        "precise_cache_total_size must be a non-negative integer");
@@ -224,13 +240,13 @@ apply_ivf_streaming_load_parameters(JsonType& index_param, const LoadParameters&
     }
 }
 
-struct streaming_index_load_target {
+struct StreamingIndexLoadTarget {
     IndexPtr index;
     InnerIndexPtr inner_index;
 };
 
 template <typename IndexT, typename ParamT>
-streaming_index_load_target
+StreamingIndexLoadTarget
 create_streaming_index(const JsonType& index_param, const IndexCommonParam& common_param) {
     auto param = std::make_shared<ParamT>();
     param->FromJson(index_param);
@@ -238,7 +254,7 @@ create_streaming_index(const JsonType& index_param, const IndexCommonParam& comm
     return {std::make_shared<IndexImpl<IndexT>>(inner_index, common_param), inner_index};
 }
 
-tl::expected<streaming_index_load_target, Error>
+tl::expected<StreamingIndexLoadTarget, Error>
 create_streaming_index_from_metadata(const MetadataPtr& metadata,
                                      const LoadParameters& parameters,
                                      Allocator* allocator) {
@@ -294,6 +310,9 @@ create_streaming_index_from_metadata(const MetadataPtr& metadata,
     if (index_name == INDEX_SINDI) {
         return create_streaming_index<SINDI, SINDIParameter>(index_param, common_param);
     }
+    if (index_name == INDEX_SINDI_V2) {
+        return create_streaming_index<SINDIV2, SINDIV2Parameter>(index_param, common_param);
+    }
 
     LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                           "streaming load does not support index type: ",
@@ -326,7 +345,7 @@ Index::GetStreamingMetadata(std::istream& in_stream) {
             StreamingIndexMetadata result;
             result.metadata_json = std::move(stream_header.metadata_string);
 
-            struct manifest_block {
+            struct ManifestBlock {
                 std::string name;
                 uint32_t tag{0};
                 uint32_t version{0};
@@ -334,13 +353,13 @@ Index::GetStreamingMetadata(std::istream& in_stream) {
                 uint64_t payload_size{0};
                 bool has_payload_size{false};
             };
-            std::vector<manifest_block> manifest_blocks;
+            std::vector<ManifestBlock> manifest_blocks;
             auto manifest = stream_header.metadata->Get("block_manifest");
             if (manifest.IsArray()) {
                 const auto* manifest_json = manifest.GetInnerJson();
                 manifest_blocks.reserve(manifest_json->size());
                 for (const auto& block_json : *manifest_json) {
-                    manifest_block block;
+                    ManifestBlock block;
                     block.name = block_json.value("name", std::string{});
                     block.tag = block_json.value("tag", 0U);
                     block.version = block_json.value("version", 0U);

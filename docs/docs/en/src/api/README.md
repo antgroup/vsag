@@ -6,7 +6,7 @@ against, grouped by responsibility. The installed headers remain the authoritati
 truth; the pages here explain intent, ownership, and how the pieces fit together.
 
 > Looking for how to *configure* an index (the JSON `index_param` / search keys)? That is covered
-> in [Index Parameters](../resources/index_parameters.md) and each [index page](../indexes/README.md).
+> in [Index Parameters](../resources/index_parameters.md) and each [index page](../indexes/).
 > This chapter covers the *code* surface (types and methods), not the JSON schema.
 
 ## Include and namespace

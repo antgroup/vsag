@@ -58,7 +58,7 @@ auto result = index->KnnSearch(
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `base_quantization_type` | string | —（必填） | `fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`tq` —— 各量化器细节见[量化章节](../quantization/README.md) |
+| `base_quantization_type` | string | —（必填） | `fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`tq` —— 各量化器细节见[量化章节](../quantization/) |
 | `max_degree` | int | `64` | 图节点最大出度 |
 | `ef_construction` | int | `400` | 构建阶段的候选集大小（越大召回越高，构建越慢） |
 | `graph_type` | string | `"nsw"` | 构图算法：`nsw` 或 `odescent` |
@@ -71,6 +71,8 @@ auto result = index->KnnSearch(
 | `mrle_dim` | int | `0` | `tq_chain` 中 MRLE 的输出维度，范围 `[0, dim]`；`0` 表示输入维度 |
 | `fast_encode_rabitq` | bool | `true` | 使用多 bit RaBitQ 快速编码；设为 `false` 使用原有精确编码器 |
 | `fast_encode_rabitq_rounds` | int | `6` | RaBitQ 快速编码的坐标微调轮数，范围 `[1, 32]` |
+| `rabitq_fused_datacell` | bool | `false` | 将底层 HGraph 节点与 RaBitQ split 编码融合到一条内存记录中；要求 L2/IP、flat 内存图、x 在 `[1, 4]` 的 RaBitQ x+y split 编码，并满足 [RaBitQ x+y split](../quantization/rabitq_split.md) 中的其他约束 |
+| `train_sample_count` | int | `65536` | 量化器训练的最大采样向量数；显式配置时最小为 `512` |
 | `build_thread_count` | int | `100` | 构建阶段并发线程数 |
 | `support_duplicate` | bool | `false` | 是否在插入时做重复 ID 检测 |
 | `deduplicate_storage` | bool | `false` | 让重复向量共享存储；需同时设置 `support_duplicate: true` |
@@ -84,6 +86,7 @@ auto result = index->KnnSearch(
 | `base_direct_read` / `precise_direct_read` | bool | `false` | 使用 `uring_io` 时，以 direct IO 打开对应文件而非经过页缓存 |
 | `hgraph_init_capacity` | int | `100` | 初始容量提示（不会限制最终规模） |
 | `persist_source_id` | bool | `false` | 序列化时保留 Source ID 元数据，使恢复后的索引仍可导出可复用的构建缓存 |
+| `use_conjugate_graph` | bool | `false` | 启用 `Feedback`/`Pretrain` 图增强；详见[图索引增强](../advanced/enhance_graph.md) |
 | `resize_increase_count_bit` | int | `10` | 扩容批次 slot 数的 `log2`，取值范围为 `1` 到 `31`。`1` 表示每次按 2 个 slot 对齐，`10` 表示按 1024 个 slot 对齐。较小取值减少预分配，但可能增加重分配次数。 |
 
 `use_reverse_edges` 面向需要快速检查入邻居、图分析或图维护算法的负载。维护反向邻接表会让边

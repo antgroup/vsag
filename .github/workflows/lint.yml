@@ -25,6 +25,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Trust exact workspace for Git tooling
+        run: ./scripts/ci/configure-git-safe-directory.sh
       - name: Prepare FetchContent Sources
         uses: ./.github/actions/prepare-fetchcontent
       - name: Cache ExternalProject Archives

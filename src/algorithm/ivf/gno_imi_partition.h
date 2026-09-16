@@ -52,7 +52,7 @@ public:
     Serialize(StreamWriter& writer) override;
 
     void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
+    Deserialize(LvalueOrRvalue<StreamReader> reader) override;
 
 public:
     IVFNearestPartitionTrainerType trainer_type_{IVFNearestPartitionTrainerType::KMeansTrainer};

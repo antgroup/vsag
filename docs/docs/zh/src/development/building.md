@@ -16,7 +16,7 @@ arm64 核心 C++ 构建，预编译 C++ 包与 Python wheel 仍以 Linux 为主�
 `-DENABLE_LIBURING=ON`。默认值为 `OFF`；在非 Linux 平台或未找到 liburing 时，
 请求 `uring_io` 的配置会打印一次性告警并回退到 `buffer_io`。
 
-在 CMake 配置中，有许多参数和编译目标。为了方便使用，我们将常用的编译目标（或命令）写到了 Makefile 中，使用 Unix Makefiles 进行管理，已避免记忆各种配置或者从命令行输入大段参数。这些编译目标（或命令）可以通过在项目根目录运行 `make help` 查看：
+在 CMake 配置中，有许多参数和编译目标。为了方便使用，我们将常用的编译目标（或命令）写到了 Makefile 中，以避免记忆各种配置或者从命令行输入大段参数。当存在可用的 `ninja` 且 CMake 支持 Ninja 生成器时，这些目标会优先使用 Ninja；否则会回退到 Unix Makefiles。显式设置的 `CMAKE_GENERATOR` 始终优先，例如可以使用 `make debug CMAKE_GENERATOR='Unix Makefiles'` 直接指定回退生成器。由于 CMake 构建目录与生成器绑定，更换现有构建目录的生成器前应先运行对应的清理目标。这些编译目标（或命令）可以通过在项目根目录运行 `make help` 查看：
 
 ```bash
 Usage: make <target>
@@ -54,9 +54,24 @@ clean-release:           ## Clear build-release/ directory.
 install:                 ## Build and install the release version of vsag.
 ```
 
+## 依赖大小指标
+
+构建指标 JSON 使用 schema 版本 3。每个依赖的 `local_bytes`（Markdown 报告中的
+**Local size**）是文件大小的合计，而不是实际分配的磁盘空间。它替代了 `source_bytes` 和
+`build_bytes`：HDF5 和 OpenBLAS 在源码目录内构建，ANTLR4 的二进制目录也位于源码目录内，
+因此无法可靠地将源码和构建产物分开统计。
+
+对于 ExternalProject 依赖，合计值将整个依赖前缀目录统计一次，包含源码、构建产物、安装文件及
+前缀目录内的元数据。共享 `BUILD_INFO_DIR`（默认为 `.vsag-build-info`）中的临时文件、
+stamp、日志和元数据不计入 `local_bytes`，也不计入准备阶段表格的 `external_build_bytes`；
+这两项均不代表 ExternalProject 的全部存储。对于 FetchContent 依赖，合计同级的 `<name>-src` 和 `<name>-build` 目录。
+不统计符号链接项。单独缓存的 ExternalProject 归档在准备阶段表格中报告，不计入 `local_bytes`。
+系统依赖显示为零，因为不测量主机上的安装文件；未分类或缺失的目录也贡献零字节。这是被测本地目录
+的快照，既不是纯源码大小，也不是单独的构建产物大小。
+
 ## 编译 VSAG 库
 
-`make debug` 是我们开发中最常用的命令，它会以开发模式编译整个项目，禁用大多数优化（`-O0`）并生成调试信息（`-g`）。该目标默认关闭测试、示例、工具、Python 绑定与 `mockimpl`；如需同时启用它们，可使用 `make dev`。
+`make debug` 是我们开发中最常用的命令，它会以开发模式编译整个项目，禁用大多数优化（`-O0`）并生成调试信息（`-g`）。该目标默认关闭测试、示例、工具和 Python 绑定；如需同时启用它们，可使用 `make dev`。
 
 在默认设置下，开发模式的编译产物会生成在 `./build/` 目录中。可以通过如下命令运行单元测试：
 
@@ -144,13 +159,15 @@ make pyvsag-all
 
 环境变量说明如下：
 
-- `CMAKE_GENERATOR`：CMake 内部使用什么来编译项目，默认是 `"Unix Makefiles"`，其他可选值请参考 [CMake Generators](https://cmake.org/cmake/help/latest/manual/cmake-generators.7.html)；
+- `CMAKE_GENERATOR`：显式指定 CMake 使用的生成器；未设置时优先选择可用的 Ninja，否则回退到 Unix Makefiles。其他可选值请参考 [CMake Generators](https://cmake.org/cmake/help/latest/manual/cmake-generators.7.html)；
 - `CMAKE_INSTALL_PREFIX`：安装路径，即运行 `make install` 后头文件和库文件会被安装到哪里，一般不需要修改；
 - `COMPILE_JOBS`：编译并行度，默认是 6 并行编译，建议设置成你的 CPU 核数以提高编译速度；
 - `DEBUG_BUILD_DIR`：开发模式产物目录，非必要不修改；
 - `RELEASE_BUILD_DIR`：发布模式产物目录，非必要不修改；
 - `VSAG_ENABLE_INTEL_MKL`：是否启用 Intel MKL 作为 BLAS 后端，默认 `OFF`；关闭时使用 OpenBLAS；
 - `VSAG_ENABLE_LIBAIO`：是否启用 `libaio`，默认 `ON`。
+
+配置和构建目标的 `DEBUG_BUILD_DIR` 应传入普通路径，例如 `make asan DEBUG_BUILD_DIR="custom build"`。命令行引号由 shell 去除，Makefile 在调用 CMake 时会为路径加引号；不要在变量值中嵌入字面引号。
 
 ## 离线 / 内网环境构建
 

@@ -24,6 +24,7 @@
 
 #include "impl/heap/search_candidate_queue.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/query_computer_pool.h"
 #include "impl/searcher/searcher_utils.h"
 #include "index_common_param.h"
 #include "simd/fp32_simd.h"
@@ -285,7 +286,8 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
         *mci_param.used_precise_float_csr = false;
     }
 
-    auto computer = flatten->FactoryComputer(query);
+    auto computer_lease = AcquireQueryComputer(flatten, query, ctx);
+    const auto& computer = computer_lease.computer;
     thread_local MCIEpochMarks visited_nodes;
     thread_local MCIEpochMarks visited_cliques;
     visited_nodes.Reset(total);

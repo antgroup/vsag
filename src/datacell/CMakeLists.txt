@@ -36,9 +36,6 @@ endif ()
 
 add_library (datacell OBJECT ${DATACELL_SRCS})
 target_link_libraries (datacell PRIVATE transform quantizer io attr coverage_config vsag_src_common)
-if (CMAKE_GENERATOR MATCHES "Ninja")
-    set_property (TARGET datacell PROPERTY JOB_POOL_COMPILE rabitq_split_factory_pool)
-endif ()
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE DATACELL_TESTS "*_test.cpp")

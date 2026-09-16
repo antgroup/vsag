@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,6 +17,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <limits>
 #include <numeric>
 
 #include "common.h"
@@ -26,6 +26,20 @@
 #include "vsag/options.h"
 
 namespace vsag {
+namespace {
+
+uint64_t
+GetMultiVectorRecordSize(uint32_t token_count, uint64_t code_size_per_token) {
+    constexpr uint64_t header_size = sizeof(uint32_t);
+    if (code_size_per_token != 0 and
+        token_count > (std::numeric_limits<uint64_t>::max() - header_size) / code_size_per_token) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "MultiVectorDataCell: record size overflow");
+    }
+    return header_size + static_cast<uint64_t>(token_count) * code_size_per_token;
+}
+
+}  // namespace
 
 template <typename QuantTmpl, typename IOTmpl>
 MultiVectorDataCell<QuantTmpl, IOTmpl>::MultiVectorDataCell(
@@ -38,9 +52,11 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::MultiVectorDataCell(
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
     this->backend_ =
         QuantizerDistanceBackend<QuantTmpl>::Get(static_cast<const QuantTmpl&>(*this->quantizer_));
-    this->io_ = std::make_shared<IOTmpl>(io_param, common_param);
-    this->offset_io_ =
+    auto io = std::make_shared<IOTmpl>(io_param, common_param);
+    auto offset_io =
         std::make_shared<MemoryBlockIO>(Options::Instance().block_size_limit(), allocator_);
+    layout_.SetIO(std::move(offset_io), std::move(io));
+    layout_.SetLocationPolicy(HeaderLengthLocationPolicy{this->quantizer_->GetCodeSize()});
     this->max_capacity_ = 0;
     this->code_size_ = 0;
 }
@@ -71,37 +87,25 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerId
     }
 
     const uint64_t code_size_per_token = this->quantizer_->GetCodeSize();
-    const uint64_t payload_bytes = static_cast<uint64_t>(multi_vector->len_) * code_size_per_token;
-    const uint64_t code_size = sizeof(uint32_t) + payload_bytes;
+    const uint64_t code_size = GetMultiVectorRecordSize(multi_vector->len_, code_size_per_token);
     ByteBuffer codes(code_size, allocator_);
     std::memcpy(codes.data, &multi_vector->len_, sizeof(uint32_t));
-
-    // Encode each token through the quantizer (FP32Quantizer is a no-op memcpy)
-    for (uint32_t t = 0; t < multi_vector->len_; ++t) {
-        const float* token_vec =
-            multi_vector->vectors_ +
-            static_cast<uint64_t>(t) * static_cast<uint64_t>(multi_vector_dim_);
+    for (uint32_t token = 0; token < multi_vector->len_; ++token) {
+        const float* token_vector =
+            multi_vector->vectors_ + static_cast<uint64_t>(token) * multi_vector_dim_;
         this->quantizer_->EncodeOne(
-            token_vec,
-            codes.data + sizeof(uint32_t) + static_cast<uint64_t>(t) * code_size_per_token);
+            token_vector,
+            codes.data + sizeof(uint32_t) + static_cast<uint64_t>(token) * code_size_per_token);
     }
 
-    uint64_t old_offset = 0;
     {
-        std::lock_guard lock(current_offset_mutex_);
-        old_offset = current_offset_;
-        current_offset_ += code_size;
+        std::lock_guard lock(mutex_);
+        layout_.Write(idx, codes.data, code_size);
+        if (static_cast<uint64_t>(idx) >= token_counts_.size()) {
+            token_counts_.resize(static_cast<uint64_t>(idx) + 1, 0);
+        }
+        token_counts_[idx] = multi_vector->len_;
     }
-    offset_io_->Write(reinterpret_cast<const uint8_t*>(&old_offset),
-                      sizeof(old_offset),
-                      static_cast<uint64_t>(idx) * sizeof(old_offset));
-    io_->Write(codes.data, code_size, old_offset);
-
-    // Cache the token count in memory so Query can skip the disk read
-    if (static_cast<uint64_t>(idx) >= token_counts_.size()) {
-        token_counts_.resize(static_cast<uint64_t>(idx) + 1, 0);
-    }
-    token_counts_[idx] = multi_vector->len_;
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -130,14 +134,16 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
 template <typename QuantTmpl, typename IOTmpl>
 void
 MultiVectorDataCell<QuantTmpl, IOTmpl>::Resize(InnerIdType new_capacity) {
-    if (new_capacity <= this->max_capacity_) {
+    std::lock_guard lock(mutex_);
+    const InnerIdType effective_capacity = std::max(new_capacity, total_count_);
+    if (effective_capacity <= this->max_capacity_) {
         return;
     }
-    this->offset_io_->Resize(static_cast<uint64_t>(new_capacity) * sizeof(uint64_t));
-    if (static_cast<uint64_t>(new_capacity) > token_counts_.size()) {
-        token_counts_.resize(static_cast<uint64_t>(new_capacity), 0);
+    layout_.ResizeLocations(effective_capacity);
+    if (static_cast<uint64_t>(effective_capacity) > token_counts_.size()) {
+        token_counts_.resize(static_cast<uint64_t>(effective_capacity), 0);
     }
-    this->max_capacity_ = new_capacity;
+    this->max_capacity_ = effective_capacity;
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -155,14 +161,30 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::GetMetricType() {
 template <typename QuantTmpl, typename IOTmpl>
 const uint8_t*
 MultiVectorDataCell<QuantTmpl, IOTmpl>::GetCodesById(InnerIdType id, bool& need_release) const {
-    uint64_t offset = 0;
-    offset_io_->Read(sizeof(offset), static_cast<uint64_t>(id) * sizeof(offset), (uint8_t*)&offset);
-    uint32_t len = 0;
-    io_->Read(sizeof(len), offset, (uint8_t*)&len);
-    const uint64_t code_size_per_token = this->quantizer_->GetCodeSize();
-    uint64_t read_size = sizeof(uint32_t) + static_cast<uint64_t>(len) * code_size_per_token;
+    std::shared_lock lock(mutex_);
+    CHECK_ARGUMENT(id < total_count_, "MultiVectorDataCell id is out of range");
+    const uint64_t offset = layout_.ReadLocation(id);
+    uint32_t length = 0;
+    if (not layout_.Payload().Read(offset, sizeof(length), reinterpret_cast<uint8_t*>(&length))) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "MultiVectorDataCell: failed to read token count");
+    }
+    const uint64_t read_size = GetMultiVectorRecordSize(length, this->quantizer_->GetCodeSize());
+    const uint64_t payload_size = layout_.Payload().GetByteSize();
+    if (offset > payload_size or read_size > payload_size - offset) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "MultiVectorDataCell: token data range exceeds payload");
+    }
     auto* codes = static_cast<uint8_t*>(allocator_->Allocate(read_size));
-    io_->Read(read_size, offset, codes);
+    if (codes == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                            "MultiVectorDataCell: failed to allocate buffer for GetCodesById");
+    }
+    if (not layout_.Payload().Read(offset, read_size, codes)) {
+        allocator_->Deallocate(codes);
+        throw VsagException(ErrorType::READ_ERROR,
+                            "MultiVectorDataCell: failed to read token data");
+    }
     need_release = true;
     return codes;
 }
@@ -184,48 +206,47 @@ void
 MultiVectorDataCell<QuantTmpl, IOTmpl>::Serialize(StreamWriter& writer) {
     FlattenInterface::Serialize(writer);
     StreamWriter::WriteObj(writer, multi_vector_dim_);
-    StreamWriter::WriteObj(writer, current_offset_);
-    this->offset_io_->Serialize(writer);
-    this->io_->Serialize(writer);
+    StreamWriter::WriteObj(writer, layout_.GetNextOffset());
+    layout_.Locations().Serialize(writer);
+    layout_.Payload().Serialize(writer);
     this->quantizer_->Serialize(writer);
 }
 
 template <typename QuantTmpl, typename IOTmpl>
 void
-MultiVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+MultiVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     FlattenInterface::Deserialize(reader);
     StreamReader::ReadObj(reader, multi_vector_dim_);
-    StreamReader::ReadObj(reader, current_offset_);
-    this->offset_io_->Deserialize(reader);
-    this->io_->Deserialize(reader);
+    uint64_t current_offset = 0;
+    StreamReader::ReadObj(reader, current_offset);
+    layout_.SetNextOffset(current_offset);
+    layout_.Locations().Deserialize(reader);
+    layout_.Payload().Deserialize(reader);
     this->quantizer_->Deserialize(reader);
+    layout_.SetLocationPolicy(HeaderLengthLocationPolicy{this->quantizer_->GetCodeSize()});
     this->backend_ =
         QuantizerDistanceBackend<QuantTmpl>::Get(static_cast<const QuantTmpl&>(*this->quantizer_));
 
-    // Rebuild token_counts_ cache using batched MultiRead so Query does not need
-    // a separate io_submit to fetch token counts from disk.
     if (this->total_count_ > 0) {
         std::vector<uint64_t> offsets(static_cast<uint64_t>(this->total_count_));
-        std::vector<uint64_t> off_sizes(static_cast<uint64_t>(this->total_count_),
-                                        sizeof(uint64_t));
-        std::vector<uint64_t> off_offs(static_cast<uint64_t>(this->total_count_));
+        std::vector<InnerIdType> ids(static_cast<uint64_t>(this->total_count_));
         for (InnerIdType i = 0; i < this->total_count_; ++i) {
-            off_offs[i] = static_cast<uint64_t>(i) * sizeof(uint64_t);
+            ids[i] = i;
         }
-        if (not offset_io_->MultiRead(reinterpret_cast<uint8_t*>(offsets.data()),
-                                      off_sizes.data(),
-                                      off_offs.data(),
-                                      static_cast<uint64_t>(this->total_count_))) {
+        if (not layout_.Locations().MultiRead(ids.data(),
+                                              static_cast<uint64_t>(this->total_count_),
+                                              reinterpret_cast<uint8_t*>(offsets.data()),
+                                              allocator_)) {
             throw VsagException(ErrorType::READ_ERROR,
                                 "MultiVectorDataCell: failed to read offsets in Deserialize");
         }
 
         token_counts_.resize(static_cast<uint64_t>(this->total_count_));
-        std::vector<uint64_t> tc_sizes(static_cast<uint64_t>(this->total_count_), sizeof(uint32_t));
-        if (not this->io_->MultiRead(reinterpret_cast<uint8_t*>(token_counts_.data()),
-                                     tc_sizes.data(),
-                                     offsets.data(),
-                                     static_cast<uint64_t>(this->total_count_))) {
+        std::vector<uint64_t> sizes(static_cast<uint64_t>(this->total_count_), sizeof(uint32_t));
+        if (not layout_.Payload().MultiRead(offsets.data(),
+                                            sizes.data(),
+                                            static_cast<uint64_t>(this->total_count_),
+                                            reinterpret_cast<uint8_t*>(token_counts_.data()))) {
             throw VsagException(ErrorType::READ_ERROR,
                                 "MultiVectorDataCell: failed to read token counts in Deserialize");
         }
@@ -252,122 +273,103 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Query(float* result_dists,
                                               const InnerIdType* idx,
                                               InnerIdType id_count,
                                               QueryContext* ctx) {
-    auto* mv_computer = dynamic_cast<MultiVectorComputer*>(computer.get());
-    CHECK_ARGUMENT(mv_computer != nullptr, "computer is not a MultiVectorComputer");
-
+    auto* computer_impl = dynamic_cast<MultiVectorComputer*>(computer.get());
+    CHECK_ARGUMENT(computer_impl != nullptr, "computer is not a MultiVectorComputer");
     if (id_count == 0) {
         return;
     }
-
-    SearchStatistics* stats = (ctx != nullptr) ? ctx->stats : nullptr;
-
-    // Step 1: Batch read all offsets via MultiRead (offset_io_ is MemoryBlockIO, in-memory)
-    auto t_io_start = std::chrono::steady_clock::now();
-    std::vector<uint64_t> offsets(id_count);
-    std::vector<uint64_t> offset_sizes(id_count, sizeof(uint64_t));
-    std::vector<uint64_t> offset_offsets(id_count);
+    CHECK_ARGUMENT(idx != nullptr, "MultiVectorDataCell query ids are null");
+    std::shared_lock lock(mutex_);
     for (InnerIdType i = 0; i < id_count; ++i) {
-        offset_offsets[i] = static_cast<uint64_t>(idx[i]) * sizeof(uint64_t);
+        CHECK_ARGUMENT(idx[i] < total_count_, "MultiVectorDataCell query id is out of range");
     }
-    if (not offset_io_->MultiRead(reinterpret_cast<uint8_t*>(offsets.data()),
-                                  offset_sizes.data(),
-                                  offset_offsets.data(),
-                                  static_cast<uint64_t>(id_count))) {
+
+    SearchStatistics* stats = ctx != nullptr ? ctx->stats : nullptr;
+    const auto io_start = std::chrono::steady_clock::now();
+    std::vector<uint64_t> offsets(id_count);
+    if (not layout_.Locations().MultiRead(idx,
+                                          static_cast<uint64_t>(id_count),
+                                          reinterpret_cast<uint8_t*>(offsets.data()),
+                                          allocator_)) {
         throw VsagException(ErrorType::READ_ERROR,
                             "MultiVectorDataCell: failed to read offsets in Query");
     }
 
-    // Step 2: Look up token counts from in-memory cache (no disk IO)
-    //         Populated by InsertVector (Build) or rebuilt in Deserialize.
     const uint64_t code_size_per_token = this->quantizer_->GetCodeSize();
     std::vector<uint64_t> data_sizes(id_count);
     uint64_t total_size = 0;
+    const uint64_t payload_size = layout_.Payload().GetByteSize();
     for (InnerIdType i = 0; i < id_count; ++i) {
         if (static_cast<uint64_t>(idx[i]) >= token_counts_.size()) {
             throw VsagException(ErrorType::READ_ERROR,
-                                "MultiVectorDataCell: token_counts_ not populated for doc ID " +
-                                    std::to_string(idx[i]));
+                                "MultiVectorDataCell: token count is unavailable");
         }
-        const uint32_t token_count = token_counts_[idx[i]];
-        data_sizes[i] = sizeof(uint32_t) + static_cast<uint64_t>(token_count) * code_size_per_token;
+        data_sizes[i] = GetMultiVectorRecordSize(token_counts_[idx[i]], code_size_per_token);
+        if (offsets[i] > payload_size or data_sizes[i] > payload_size - offsets[i]) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "MultiVectorDataCell: token data range exceeds payload");
+        }
+        if (data_sizes[i] > std::numeric_limits<uint64_t>::max() - total_size) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "MultiVectorDataCell: batch record size overflow");
+        }
         total_size += data_sizes[i];
     }
 
-    // Step 2.5: Sort requests by disk offset for sequential IO.
-    //           SSD schedulers handle sorted requests more efficiently, and
-    //           AsyncIO::MultiReadImpl can merge/schedule them better.
-    //           We build a permutation, reorder offsets/data_sizes accordingly,
-    //           then unsort the computed distances back to the caller's order.
-    std::vector<uint32_t> perm(static_cast<uint64_t>(id_count));
-    std::iota(perm.begin(), perm.end(), 0);
-    std::sort(perm.begin(), perm.end(), [&offsets](uint32_t a, uint32_t b) {
-        return offsets[a] < offsets[b];
+    std::vector<uint32_t> permutation(static_cast<uint64_t>(id_count));
+    std::iota(permutation.begin(), permutation.end(), 0);
+    std::sort(permutation.begin(), permutation.end(), [&offsets](uint32_t lhs, uint32_t rhs) {
+        return offsets[lhs] < offsets[rhs];
     });
-
     std::vector<uint64_t> sorted_offsets(static_cast<uint64_t>(id_count));
-    std::vector<uint64_t> sorted_data_sizes(static_cast<uint64_t>(id_count));
-    std::vector<InnerIdType> sorted_idx(static_cast<uint64_t>(id_count));
+    std::vector<uint64_t> sorted_sizes(static_cast<uint64_t>(id_count));
+    std::vector<InnerIdType> sorted_ids(static_cast<uint64_t>(id_count));
     for (InnerIdType i = 0; i < id_count; ++i) {
-        sorted_offsets[i] = offsets[perm[i]];
-        sorted_data_sizes[i] = data_sizes[perm[i]];
-        sorted_idx[i] = idx[perm[i]];
+        sorted_offsets[i] = offsets[permutation[i]];
+        sorted_sizes[i] = data_sizes[permutation[i]];
+        sorted_ids[i] = idx[permutation[i]];
     }
 
-    // Step 3: Batch read all data via MultiRead (async IO, now in offset-sorted order)
-    auto* all_codes = static_cast<uint8_t*>(this->allocator_->Allocate(total_size));
+    ByteBuffer all_codes_buffer(total_size, allocator_);
+    auto* all_codes = all_codes_buffer.data;
     if (all_codes == nullptr) {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
                             "MultiVectorDataCell: failed to allocate buffer for Query");
     }
-    if (not this->io_->MultiRead(all_codes,
-                                 sorted_data_sizes.data(),
-                                 sorted_offsets.data(),
-                                 static_cast<uint64_t>(id_count))) {
-        this->allocator_->Deallocate(all_codes);
+    if (not layout_.Payload().MultiRead(
+            sorted_offsets.data(), sorted_sizes.data(), id_count, all_codes)) {
         throw VsagException(ErrorType::READ_ERROR,
                             "MultiVectorDataCell: failed to read data in Query");
     }
-    double io_ms =
-        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_io_start)
+    const double io_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - io_start)
             .count();
 
-    // Step 4: Compute MaxSim distances in sorted order → temp_dists
-    auto t_compute_start = std::chrono::steady_clock::now();
-    std::vector<float> temp_dists(static_cast<uint64_t>(id_count));
-    // Decode buffer: one doc at a time (reused across iterations)
+    const auto compute_start = std::chrono::steady_clock::now();
+    std::vector<float> sorted_distances(static_cast<uint64_t>(id_count));
     std::vector<float> decoded_tokens;
     uint64_t cursor = 0;
     for (InnerIdType i = 0; i < id_count; ++i) {
-        const uint32_t token_count = token_counts_[sorted_idx[i]];
+        const uint32_t token_count = token_counts_[sorted_ids[i]];
         const uint8_t* encoded = all_codes + cursor + sizeof(uint32_t);
-
-        // Decode quantized tokens back to float32 for ComputeDist.
-        // For FP32Quantizer this is a no-op memcpy; for SQ8/FP16 it performs
-        // the actual dequantization.
-        decoded_tokens.resize(static_cast<uint64_t>(token_count) *
-                              static_cast<uint64_t>(multi_vector_dim_));
-        for (uint32_t t = 0; t < token_count; ++t) {
+        decoded_tokens.resize(static_cast<uint64_t>(token_count) * multi_vector_dim_);
+        for (uint32_t token = 0; token < token_count; ++token) {
             this->quantizer_->DecodeOne(
-                encoded + static_cast<uint64_t>(t) * code_size_per_token,
-                decoded_tokens.data() +
-                    static_cast<uint64_t>(t) * static_cast<uint64_t>(multi_vector_dim_));
+                encoded + static_cast<uint64_t>(token) * code_size_per_token,
+                decoded_tokens.data() + static_cast<uint64_t>(token) * multi_vector_dim_);
         }
-        mv_computer->ComputeDist(
-            reinterpret_cast<const uint8_t*>(decoded_tokens.data()), token_count, &temp_dists[i]);
-        cursor += sorted_data_sizes[i];
+        computer_impl->ComputeDist(reinterpret_cast<const uint8_t*>(decoded_tokens.data()),
+                                   token_count,
+                                   &sorted_distances[i]);
+        cursor += sorted_sizes[i];
     }
-
-    // Step 4.5: Unsort temp_dists back to the caller's original order.
     for (InnerIdType i = 0; i < id_count; ++i) {
-        result_dists[perm[i]] = temp_dists[i];
+        result_dists[permutation[i]] = sorted_distances[i];
     }
-    double compute_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
-                                                                  t_compute_start)
-                            .count();
+    const double compute_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - compute_start)
+            .count();
 
-    this->allocator_->Deallocate(all_codes);
-
-    // Populate SearchStatistics with fine-grained breakdown (rounded to ms)
     if (stats != nullptr) {
         stats->mv_io_time_ms.fetch_add(static_cast<uint32_t>(io_ms + 0.5),
                                        std::memory_order_relaxed);
@@ -377,8 +379,6 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Query(float* result_dists,
                                             std::memory_order_relaxed);
         stats->mv_io_bytes.fetch_add(total_size, std::memory_order_relaxed);
     }
-
-    // Record distance evaluations for telemetry (compatible with upstream PR #2545)
     if (ctx != nullptr and ctx->stats != nullptr) {
         ctx->stats->AddDistance(DistanceEvaluationPhase::RERANK,
                                 this->quantizer_->Name(),
@@ -390,10 +390,7 @@ template <typename QuantTmpl, typename IOTmpl>
 uint64_t
 MultiVectorDataCell<QuantTmpl, IOTmpl>::GetMemoryUsage() const {
     uint64_t memory = sizeof(MultiVectorDataCell<QuantTmpl, IOTmpl>);
-    memory += this->offset_io_->size_;
-    if (IOTmpl::InMemory) {
-        memory += this->io_->GetMemoryUsage();
-    }
+    memory += layout_.GetMemoryUsage();
     memory += sizeof(QuantTmpl);
     memory += token_counts_.capacity() * sizeof(uint32_t);
     return memory;

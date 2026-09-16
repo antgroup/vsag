@@ -16,6 +16,10 @@
 
 set (IVF_SRCS
         ivf.cpp
+        ivf_build.cpp
+        ivf_modify.cpp
+        ivf_search.cpp
+        ivf_serialize.cpp
         ivf_parameter.cpp
         ivf_partition_strategy.cpp
         flat_bucket_searcher.cpp

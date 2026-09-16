@@ -39,6 +39,7 @@
 # Developer Guide
 
 - [Code Structure](development/code_structure.md)
+- [C++ Coding Guide](development/coding_style.md)
 - [New Index Integration Checklist](development/new_index_checklist.md)
 - [Building](development/building.md)
 - [Offline / Air-gapped Builds](development/offline_build.md)
@@ -56,6 +57,8 @@
 - [Attribute Filter (Hybrid Search)](advanced/attribute_filter.md)
 - [Serialization](advanced/serialization.md)
 - [New Serialization](advanced/new_serialization.md)
+- [Chunked Serialization](advanced/chunked_serialization.md)
+- [Parallel Deserialization](advanced/parallel_deserialization.md)
 - [Memory Management](advanced/memory.md)
 - [Per-Search Allocator](advanced/search_allocator.md)
 - [Index Introspection](advanced/introspection.md)
@@ -95,7 +98,7 @@
 - [FAQ](resources/faq.md)
 - [Release Notes](resources/release_notes.md)
   - [VSAG 1.0](resources/release_notes/v1.0.md)
-- [Roadmap (2025)](resources/roadmap_2025.md)
+- [VSAG 1.0 Historical Roadmap](resources/roadmap_2025.md)
 - [Community](resources/community.md)
 - [Filing Issues with an AI Agent](resources/filing_issues_with_agent.md)
 - [Related Projects](resources/related_projects.md)

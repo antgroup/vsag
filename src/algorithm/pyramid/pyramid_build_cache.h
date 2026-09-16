@@ -39,6 +39,9 @@ public:
     BuildCache&
     CreateGraphCache(const std::string& hierarchy_name, const std::string& node_path);
 
+    uint64_t
+    CountMatchedSourceIds(const std::string* source_ids, uint64_t count) const;
+
     bool
     Empty() const {
         for (const auto& [key, graph_cache] : graph_caches_) {

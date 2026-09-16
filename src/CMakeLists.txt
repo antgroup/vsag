@@ -35,17 +35,28 @@ list (FILTER CPP_INDEX_SRCS EXCLUDE REGEX "_test.cpp")
 
 set (VSAG_SRCS ${CPP_SRCS} ${CPP_INDEX_SRCS})
 
-add_library (vsag SHARED ${VSAG_SRCS})
-add_library (vsag_static STATIC ${VSAG_SRCS})
+set (VSAG_DEP_LIBS antlr4-autogen antlr4-runtime simd io quantizer storage utils factory analyzer
+     datacell rabitq_split_datacell_factory ${IMPL_LIBS} ${ALGORITHM_LIBS} attr pthread m dl
+     ${BLAS_LIBRARIES})
+
+add_library (vsag_objects OBJECT ${VSAG_SRCS})
+add_library (vsag SHARED $<TARGET_OBJECTS:vsag_objects>)
+add_library (vsag_static STATIC $<TARGET_OBJECTS:vsag_objects>)
 
 # Trigger build-time regeneration of src/version.h before vsag's TUs compile.
+add_dependencies (vsag_objects version)
 add_dependencies (vsag version)
 add_dependencies (vsag_static version)
 
-set_target_properties (vsag PROPERTIES
+set_target_properties (vsag_objects vsag PROPERTIES
     C_VISIBILITY_PRESET default
     CXX_VISIBILITY_PRESET default
     VISIBILITY_INLINES_HIDDEN OFF)
+set_target_properties (vsag_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# CMake adds this definition when sources compile directly in the shared target. Keep the
+# common object compilation equivalent. No VSAG source branches on this internal definition.
+target_compile_definitions (vsag_objects PRIVATE vsag_EXPORTS)
 
 if (ENABLE_SOVERSION)
     set_target_properties (vsag PROPERTIES
@@ -63,10 +74,6 @@ foreach (_lib vsag vsag_static)
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 endforeach ()
 
-set (VSAG_DEP_LIBS antlr4-autogen antlr4-runtime simd io quantizer storage utils factory analyzer
-      datacell rabitq_split_datacell_factory ${IMPL_LIBS} ${ALGORITHM_LIBS} attr pthread m dl
-      ${BLAS_LIBRARIES})
-
 # `vsag_src_common` aggregates third-party include paths and link
 # dependencies (fmt::fmt, nlohmann_json::nlohmann_json, tsl::robin_map, and
 # several internal *_headers INTERFACE libraries) that vsag's own source
@@ -77,6 +84,7 @@ set (VSAG_DEP_LIBS antlr4-autogen antlr4-runtime simd io quantizer storage utils
 # directly via add_subdirectory(), since some of those targets transitively
 # rely on, e.g., <nlohmann/json.hpp>. Wrapping the link in BUILD_INTERFACE
 # is what gives us both: PUBLIC propagation in-tree, no leakage on install.
+target_link_libraries (vsag_objects PRIVATE vsag_src_common ${VSAG_DEP_LIBS} coverage_config)
 target_link_libraries (vsag
     PUBLIC $<BUILD_INTERFACE:vsag_src_common>
     PRIVATE ${VSAG_DEP_LIBS} coverage_config)
@@ -88,16 +96,20 @@ if (TARGET vsag_openmp)
     foreach (_vsag_openmp_target IN ITEMS algorithm analyzer cluster factory hgraph odescent pyramid)
         vsag_link_openmp_private (${_vsag_openmp_target})
     endforeach ()
+    vsag_link_openmp_private (vsag_objects)
     vsag_link_openmp_private (vsag)
     vsag_link_openmp_private (vsag_static)
 endif ()
 
 maybe_add_dependencies (vsag antlr4 roaring)
 maybe_add_dependencies (vsag_static antlr4 roaring)
+maybe_add_dependencies (vsag_objects antlr4 roaring)
 if (VSAG_BLAS_BACKEND STREQUAL "openblas")
+    maybe_add_dependencies (vsag_objects openblas)
     maybe_add_dependencies (vsag openblas)
     maybe_add_dependencies (vsag_static openblas)
 elseif (VSAG_BLAS_BACKEND STREQUAL "mkl")
+    maybe_add_dependencies (vsag_objects mkl)
     maybe_add_dependencies (vsag mkl)
     maybe_add_dependencies (vsag_static mkl)
 endif ()

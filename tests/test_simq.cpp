@@ -55,6 +55,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "algorithm/simq/simq.h"
 #include "algorithm/simq/simq_utils.h"
 #include "framework/test_dataset.h"
 #include "framework/test_dataset_pool.h"
@@ -64,6 +65,24 @@
 #include "vsag/vsag.h"
 
 using namespace vsag;
+
+TEST_CASE("SIMQ rejects unsupported common parameters", "[simq][parameter]") {
+    IndexCommonParam common_param;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    SECTION("datatype") {
+        common_param.data_type_ = DataTypes::DATA_TYPE_INT8;
+        REQUIRE_THROWS_AS(SIMQ::CheckAndMappingExternalParam(JsonType(), common_param),
+                          VsagException);
+    }
+
+    SECTION("metric") {
+        common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+        REQUIRE_THROWS_AS(SIMQ::CheckAndMappingExternalParam(JsonType(), common_param),
+                          VsagException);
+    }
+}
 
 TEST_CASE("SIMQ distance ordering places NaN after finite results", "[simq][threshold]") {
     std::vector<std::pair<float, InnerIdType>> results = {

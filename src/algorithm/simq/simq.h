@@ -44,6 +44,7 @@ struct SplitTask {
     std::unordered_set<InnerIdType> new_docs;  // Docs moving to new cluster
 };
 
+/** Single Index for Multi-vector Query (SIMQ) implementation. */
 class SIMQ : public InnerIndexInterface {
 public:
     static ParamPtr

@@ -40,8 +40,6 @@ constexpr const char* VALID_COMMON_PARAMETERS = R"(
 
 }  // namespace
 
-#ifndef VSAG_MOCKIMPL_TEST
-
 TEST_CASE("Factory rejects removed index names", "[ft][factory][unsupported_index]") {
     constexpr std::array<const char*, 8> removed_names = {
         "hnsw", "HNSW", "Hnsw", "fresh_hnsw", "FRESH_HNSW", "diskann", "DiskANN", "DISKANN"};
@@ -70,12 +68,3 @@ TEST_CASE("Factory still creates a supported index", "[ft][factory][supported_in
     REQUIRE(index.has_value());
     REQUIRE(index.value()->GetIndexType() == vsag::IndexType::BRUTEFORCE);
 }
-
-#else
-
-TEST_CASE("Mock factory creates an index", "[ft][factory]") {
-    auto index = vsag::Factory::CreateIndex("brute_force", VALID_COMMON_PARAMETERS);
-    REQUIRE(index.has_value());
-}
-
-#endif

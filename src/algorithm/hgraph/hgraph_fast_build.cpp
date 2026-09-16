@@ -117,7 +117,7 @@ HGraph::try_optimized_build(const DatasetPtr& data) {
 
     std::vector<int64_t> result;
     if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
-        result = this->Add(data);
+        result = this->add_impl(data);
     } else {
         result = this->build_by_odescent(data);
     }
@@ -127,7 +127,8 @@ HGraph::try_optimized_build(const DatasetPtr& data) {
 
 bool
 HGraph::need_temporary_sq8_build_data_for_add() const {
-    return this->optimized_build_codes_ == nullptr and not this->has_precise_reorder() and
+    return this->rabitq_fused_datacell_ == nullptr and this->optimized_build_codes_ == nullptr and
+           not this->has_precise_reorder() and
            this->basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ;
 }
 
@@ -139,7 +140,12 @@ HGraph::prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows) 
 
     if (this->thread_pool_ == nullptr) {
         for (const auto& row : rows) {
-            this->insert_persistent_codes(get_data(data, row.input_idx), row.inner_id);
+            if (this->rabitq_fused_datacell_ != nullptr) {
+                this->insert_fused_optimized_build_codes(get_data(data, row.input_idx),
+                                                         row.inner_id);
+            } else {
+                this->insert_persistent_codes(get_data(data, row.input_idx), row.inner_id);
+            }
         }
         return;
     }
@@ -148,13 +154,29 @@ HGraph::prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows) 
     HGraphBuildTaskGuard task_guard(futures, static_cast<uint64_t>(rows.size()));
     // Parallel graph insertion may probe rows from the same batch. Make every scalar code
     // visible before any of those probes starts.
-    for (const auto& row : rows) {
-        const auto inner_id = row.inner_id;
-        const auto input_idx = row.input_idx;
-        futures.emplace_back(
-            this->thread_pool_->GeneralEnqueue([this, data, inner_id, input_idx]() {
-                this->insert_persistent_codes(get_data(data, input_idx), inner_id);
-            }));
+    try {
+        for (const auto& row : rows) {
+            const auto inner_id = row.inner_id;
+            const auto input_idx = row.input_idx;
+            futures.emplace_back(
+                this->thread_pool_->GeneralEnqueue([this, data, inner_id, input_idx]() {
+                    if (this->rabitq_fused_datacell_ != nullptr) {
+                        this->insert_fused_optimized_build_codes(get_data(data, input_idx),
+                                                                 inner_id);
+                    } else {
+                        this->insert_persistent_codes(get_data(data, input_idx), inner_id);
+                    }
+                }));
+        }
+    } catch (...) {
+        const auto enqueue_exception = std::current_exception();
+        // A GeneralEnqueue future can become ready just before the underlying pool marks the
+        // wrapper task complete. Drain the pool before optimized-build state can be released.
+        try {
+            this->thread_pool_->WaitUntilEmpty();
+        } catch (...) {
+        }
+        std::rethrow_exception(enqueue_exception);
     }
     wait_all_futures(futures);
     futures.clear();

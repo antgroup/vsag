@@ -30,6 +30,7 @@
 #include "vsag/binaryset.h"
 #include "vsag/bitset.h"
 #include "vsag/dataset.h"
+#include "vsag/deserialize_reader.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
 #include "vsag/filter.h"
@@ -40,9 +41,11 @@
 #include "vsag/readerset.h"
 #include "vsag/search_param.h"
 #include "vsag/search_request.h"
+#include "vsag/serialize_writer.h"
 
 namespace vsag {
 
+class AttrTypeSchema;
 class Index;
 using IndexPtr = std::shared_ptr<Index>;
 using IdMapFunction = std::function<std::tuple<bool, int64_t>(int64_t)>;
@@ -63,7 +66,7 @@ enum class IndexType {
     SINDI = 7,
     WARP = 8,
     LAZY_HGRAPH = 9,
-    SIMQ = 10,
+    SIMQ = 10,  ///< Single Index for Multi-vector Query.
     SINDI_V2 = 11
 };
 #define DATA_FLAG_FLOAT32_VECTOR 0x01
@@ -72,6 +75,7 @@ enum class IndexType {
 #define DATA_FLAG_EXTRA_INFO 0x10
 #define DATA_FLAG_ATTRIBUTE 0x20
 #define DATA_FLAG_ID 0x40
+#define DATA_FLAG_PATH 0x80
 
 using OffsetType = uint64_t;
 using SizeType = uint64_t;
@@ -271,14 +275,17 @@ public:
     // [search methods]
 
     /**
-      * @brief Performing single KNN search on index
+      * @brief Perform KNN search; HGraph and IVF also accept batched queries.
       * 
       * @param query should contains dim, num_elements and vectors
       * @param k the result size of every query
       * @param invalid represents whether an element is filtered out by pre-filter
       * @return result contains 
-      *                - num_elements: 1
-      *                - ids, distances: length is (num_elements * k)
+      *                - single-query: num_elements = 1, dim is the actual result count
+      *                - batched HGraph/IVF KNN: num_elements is the query count;
+      *                  ids and distances use row-major num_elements x dim storage
+      *                - HGraph missing neighbors use id = -1, distance = +infinity;
+      *                  active external label -1 is rejected for batched HGraph KNN
       */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
@@ -287,14 +294,17 @@ public:
               BitsetPtr invalid = nullptr) const = 0;
 
     /**
-      * @brief Performing single KNN search on index
+      * @brief Perform KNN search; HGraph and IVF also accept batched queries.
       *
       * @param query should contains dim, num_elements and vectors
       * @param k the result size of every query
       * @param filter represents whether an element is filtered out by pre-filter
       * @return result contains
-      *                - num_elements: 1
-      *                - ids, distances: length is (num_elements * k)
+      *                - single-query: num_elements = 1, dim is the actual result count
+      *                - batched HGraph/IVF KNN: num_elements is the query count;
+      *                  ids and distances use row-major num_elements x dim storage
+      *                - HGraph missing neighbors use id = -1, distance = +infinity;
+      *                  active external label -1 is rejected for batched HGraph KNN
       */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
@@ -303,14 +313,17 @@ public:
               const std::function<bool(int64_t)>& filter) const = 0;
 
     /**
-      * @brief Performing single KNN search on index
+      * @brief Perform KNN search; HGraph and IVF also accept batched queries.
       *
       * @param query should contains dim, num_elements and vectors
       * @param k the result size of every query
       * @param filter represents whether an element is filtered out by pre-filter
       * @return result contains
-      *                - num_elements: 1
-      *                - ids, distances: length is (num_elements * k)
+      *                - single-query: num_elements = 1, dim is the actual result count
+      *                - batched HGraph/IVF KNN: num_elements is the query count;
+      *                  ids and distances use row-major num_elements x dim storage
+      *                - HGraph missing neighbors use id = -1, distance = +infinity;
+      *                  active external label -1 is rejected for batched HGraph KNN
       */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
@@ -325,9 +338,11 @@ public:
       * @brief Performing search with request on index
       * 
       * @param request @see SearchRequest
-      * @return result contains 
-      *                - num_elements: 1
-      *                - ids, distances: length is (num_elements * k)               
+      * @return result contains
+      *                - single-query: num_elements = 1 and dim is the actual result count
+      *                - HGraph/IVF batched KNN: num_elements is the query count; ids and
+      *                  distances form a row-major num_elements x dim matrix. Missing HGraph
+      *                  neighbors are padded with id = -1 and distance = +infinity.
       */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const {
@@ -700,7 +715,7 @@ public:
     }
 
     /**
-     * @brief Retrieve all data associated with vectors identified by given IDs.
+     * @brief Retrieve selected data associated with vectors identified by given IDs.
      *
      * This method fetches data stored with the vectors in the index
      * (e.g., attributes, labels, or extra infos).
@@ -709,7 +724,7 @@ public:
      * @param count Number of IDs in the 'ids' array.
      * @param selected_data_flag selected data flag, set with DATA_FLAG_*
      * @return tl::expected<DatasetPtr, Error>
-     *         - On success: A DatasetPtr containing the extra data, attribute and vector
+     *         - On success: A DatasetPtr containing the selected supported fields
      *         - On failure: An error object (e.g., invalid ID, out of memory).
      * @note The default base-class implementation returns tl::unexpected(ErrorType::UNSUPPORTED_INDEX_OPERATION) If the index implementation does not support this operation
      *            (default behavior for base class).
@@ -756,7 +771,7 @@ public:
     }
 
     /**
-     * @brief Retrieve all data associated with vectors identified by given IDs.
+     * @brief Retrieve the default data fields associated with vectors identified by given IDs.
      *
      * This method fetches data stored with the vectors in the index
      * (e.g., attributes, labels, or extra infos).
@@ -764,11 +779,11 @@ public:
      * @param ids Array of vector IDs for which extra information is requested.
      * @param count Number of IDs in the 'ids' array.
      * @return tl::expected<DatasetPtr, Error>
-     *         - On success: A DatasetPtr containing the extra data, attribute and vector
+     *         - On success: A DatasetPtr containing the implementation's default fields
      *         - On failure: An error object (e.g., invalid ID, out of memory).
      * @note The default base-class implementation returns tl::unexpected(ErrorType::UNSUPPORTED_INDEX_OPERATION) If the index implementation does not support this operation
      *            (default behavior for base class).
-     * @note The default implementation returns all data which in current index
+     * @note Optional fields may require explicit selection through GetDataByIdsWithFlag.
      */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     GetDataByIds(const int64_t* ids, int64_t count) const {
@@ -858,6 +873,15 @@ public:
             Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support SetImmutable"));
     }
 
+    /**
+     * @brief Return the attribute schema used by this index.
+     * @return nullptr when attribute filtering is not configured.
+     */
+    [[nodiscard]] virtual const AttrTypeSchema*
+    GetAttrTypeSchema() const {
+        return nullptr;
+    }
+
 public:
     // [serialize/deserialize with binaryset]
 
@@ -911,6 +935,24 @@ public:
     }
 
     /**
+      * @brief Serialize index through the given writer in the chunked format.
+      *
+      * The io data of large components is split into independently
+      * decompressible frames of chunk_size logical bytes, and the physical
+      * layout of every component is recorded in the index footer. Whether
+      * the frames are compressed is decided solely by the injected writer;
+      * with a plain writer the body bytes are written verbatim.
+      *
+      * @param writer is the byte sink (optionally compressing) for the serialized index
+      * @param chunk_size is the logical granularity of one compressed frame in bytes
+      */
+    virtual tl::expected<void, Error>
+    Serialize(SerializeWriter& writer, uint64_t chunk_size = DEFAULT_SERIALIZE_CHUNK_SIZE) {
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support chunked serialize"));
+    }
+
+    /**
       * @brief Serialize the full index to the header-first streaming format.
       *
       * The stream starts with the VSAG streaming magic/version header, followed by metadata and
@@ -934,6 +976,30 @@ public:
     Deserialize(std::istream& in_stream) {
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                     "Index does not support deserialize from a file stream"));
+    }
+
+    /**
+      * @brief Deserialize index in parallel from a positioned reader.
+      *
+      * The reader provides positioned reads (and decompression for
+      * compressed frames) over an index file written in the chunked format;
+      * the physical layout is taken from the index footer. Uncompressed
+      * files without a recorded layout are probed and loaded in parallel
+      * as well. The chunk granularity is decided at serialization time.
+      *
+      * Concurrency is driven by the thread pool bound to the Engine at
+      * creation time (see Resource); when the Engine has no thread pool
+      * bound, the implementation falls back to an internal default pool.
+      *
+      * Note: the index allocator is invoked concurrently by the worker
+      * threads, so a custom allocator must be thread-safe.
+      *
+      * @param reader is the positioned-read (optionally decompressing) data source
+      */
+    virtual tl::expected<void, Error>
+    ParallelDeserialize(DeserializeReader& reader) {
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support parallel deserialization"));
     }
 
     /**

@@ -338,9 +338,29 @@ public:
     Paths(const std::string& hierarchy_name, const std::string* paths) = 0;
 
     /**
+     * @brief Sets one or multiple paths per element for a named hierarchy.
+     *
+     * @details
+     * The outer vector must contain exactly NumElements() entries. Each non-empty inner vector
+     * contains the independent paths assigned to that element. An empty string represents the
+     * hierarchy root. The path strings use '/' to separate hierarchy levels.
+     *
+     * Unlike the pointer overload, the dataset stores this container by value, so its lifetime is
+     * independent of Owner().
+     *
+     * @param hierarchy_name The hierarchy name. An empty string targets the default hierarchy.
+     * @param paths Paths grouped by dataset element.
+     * @return DatasetPtr A shared pointer to the dataset with updated paths.
+     * @note This overload is non-virtual so extending the API does not change Dataset's vtable.
+     */
+    DatasetPtr
+    Paths(const std::string& hierarchy_name, std::vector<std::vector<std::string>> paths);
+
+    /**
      * @brief Retrieves the paths array of the dataset.
      *
      * @return const std::string* Pointer to the array of paths.
+     * @note Returns nullptr when the default hierarchy uses structured paths.
      */
     virtual const std::string*
     GetPaths() const = 0;
@@ -350,9 +370,69 @@ public:
      *
      * @param hierarchy_name The hierarchy name. An empty string targets the default hierarchy.
      * @return const std::string* Pointer to the array of paths.
+     * @note Returns nullptr when the hierarchy uses structured paths.
      */
     virtual const std::string*
     GetPaths(const std::string& hierarchy_name) const = 0;
+
+    /**
+     * @brief Retrieves paths grouped by dataset element for a named hierarchy.
+     *
+     * @details
+     * This overload normalizes both the legacy single-path representation and the structured
+     * multi-path representation into one non-empty path vector per dataset element.
+     *
+     * @param hierarchy_name The hierarchy name. An empty string targets the default hierarchy.
+     * @param paths Output paths grouped by dataset element. Cleared when the hierarchy is absent.
+     * @return true when the hierarchy is present, otherwise false.
+     * @note This overload is non-virtual so extending the API does not change Dataset's vtable.
+     */
+    bool
+    GetPaths(const std::string& hierarchy_name, std::vector<std::vector<std::string>>& paths) const;
+
+    /**
+     * @brief Sets a named array of uint32 metadata values.
+     *
+     * The array contains one value per dataset element. It follows the same ownership rules as
+     * the other pointer-backed Dataset fields.
+     *
+     * @param name Metadata name.
+     * @param values Pointer to the metadata values.
+     * @return DatasetPtr A shared pointer to the dataset with updated metadata.
+     */
+    virtual DatasetPtr
+    UInt32Metadata(const std::string& name, const uint32_t* values) = 0;
+
+    /**
+     * @brief Retrieves a named array of uint32 metadata values.
+     *
+     * @param name Metadata name.
+     * @return const uint32_t* Pointer to the metadata values, or nullptr when absent.
+     */
+    virtual const uint32_t*
+    GetUInt32Metadata(const std::string& name) const = 0;
+
+    /**
+     * @brief Sets a named array of string metadata values.
+     *
+     * The array contains one value per dataset element. It follows the same ownership rules as
+     * the other pointer-backed Dataset fields.
+     *
+     * @param name Metadata name.
+     * @param values Pointer to the metadata values.
+     * @return DatasetPtr A shared pointer to the dataset with updated metadata.
+     */
+    virtual DatasetPtr
+    StringMetadata(const std::string& name, const std::string* values) = 0;
+
+    /**
+     * @brief Retrieves a named array of string metadata values.
+     *
+     * @param name Metadata name.
+     * @return const std::string* Pointer to the metadata values, or nullptr when absent.
+     */
+    virtual const std::string*
+    GetStringMetadata(const std::string& name) const = 0;
 
     /**
      * @brief Sets the extra info for the dataset.

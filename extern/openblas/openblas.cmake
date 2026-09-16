@@ -172,10 +172,10 @@ if (NOT OPENBLAS_FOUND)
     message (STATUS "Building OpenBLAS from source")
 
     set (openblas_urls
-        https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.24/OpenBLAS-0.3.24.tar.gz
-        https://sourceforge.net/projects/openblas/files/v0.3.24/OpenBLAS-0.3.24.tar.gz/download
+        https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.34/OpenBLAS-0.3.34.tar.gz
+        https://sourceforge.net/projects/openblas/files/v0.3.34/OpenBLAS-0.3.34.tar.gz/download
     )
-    vsag_resolve_thirdparty_override (OPENBLAS v0.3.24 openblas_urls)
+    vsag_resolve_thirdparty_override (OPENBLAS v0.3.34 openblas_urls)
 
     # OpenBLAS build tools (getarch) require strict FP semantics; -Ofast
     # (which implies -ffast-math) breaks CPU detection. Replace with -O2.
@@ -193,11 +193,22 @@ if (NOT OPENBLAS_FOUND)
     string (STRIP "${_openblas_c_flags}" _openblas_c_flags)
     string (STRIP "${_openblas_cxx_flags}" _openblas_cxx_flags)
 
+    set (_openblas_target_arg)
+    if (DEFINED ENV{VSAG_OPENBLAS_TARGET} AND NOT "$ENV{VSAG_OPENBLAS_TARGET}" STREQUAL "")
+        string (STRIP "$ENV{VSAG_OPENBLAS_TARGET}" _openblas_target)
+        if (NOT _openblas_target MATCHES "^[A-Za-z0-9_]+$")
+            message (FATAL_ERROR
+                     "VSAG_OPENBLAS_TARGET must contain only letters, digits, or underscores; "
+                     "got '$ENV{VSAG_OPENBLAS_TARGET}'.")
+        endif ()
+        list (APPEND _openblas_target_arg "TARGET=${_openblas_target}")
+    endif ()
+
     ExternalProject_Add (
         ${name}
         URL ${openblas_urls}
-        URL_HASH MD5=23599a30e4ce887590957d94896789c8
-        DOWNLOAD_NAME OpenBLAS-v0.3.24.tar.gz
+        URL_HASH SHA256=cd7e129868320cc2d033afa920e31202dfe0b8066a5b66661900ccc0f197dfed
+        DOWNLOAD_NAME OpenBLAS-v0.3.34.tar.gz
         PREFIX ${CMAKE_CURRENT_BINARY_DIR}/${name}
         TMP_DIR ${BUILD_INFO_DIR}
         STAMP_DIR ${BUILD_INFO_DIR}
@@ -211,13 +222,17 @@ if (NOT OPENBLAS_FOUND)
             OMP_NUM_THREADS=1
             PATH=/usr/lib/ccache:$ENV{PATH}
             LD_LIBRARY_PATH=/opt/alibaba-cloud-compiler/lib64/:$ENV{LD_LIBRARY_PATH}
-            make USE_THREAD=0 USE_LOCKING=1 DYNAMIC_ARCH=1 NOFORTRAN=1 -j1
+            make USE_THREAD=0 USE_LOCKING=1 ${_openblas_target_arg} DYNAMIC_ARCH=1
+                 NOFORTRAN=1 -j1
         INSTALL_COMMAND
-            make DYNAMIC_ARCH=1 NOFORTRAN=1 PREFIX=${install_dir} install
+            make ${_openblas_target_arg} DYNAMIC_ARCH=1 NOFORTRAN=1 PREFIX=${install_dir}
+                 install
         BUILD_IN_SOURCE 1
         LOG_CONFIGURE TRUE
         LOG_BUILD TRUE
         LOG_INSTALL TRUE
+        LOG_MERGED_STDOUTERR TRUE
+        LOG_OUTPUT_ON_FAILURE TRUE
         DOWNLOAD_NO_PROGRESS 1
         INACTIVITY_TIMEOUT 5
         TIMEOUT 30

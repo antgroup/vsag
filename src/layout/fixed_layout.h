@@ -18,12 +18,10 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
-#include <type_traits>
 
 #include "common.h"
 #include "index_common_param.h"
-#include "io/common/basic_io.h"
-#include "io/memory_io/memory_io.h"
+#include "io/common/io_parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "vsag_exception.h"
@@ -31,7 +29,7 @@
 namespace vsag {
 
 /**
- * A fixed-size record layout backed by a concrete CRTP IO type.
+ * A fixed-size record layout backed by a concrete byte IO type.
  *
  * FixedLayout maps a logical record ID to the byte range
  * `[id * code_size, (id + 1) * code_size)`. It only organizes and transports
@@ -41,6 +39,7 @@ template <typename IOTmpl>
 class FixedLayout {
 public:
     using IOType = IOTmpl;
+    using Lease = typename IOTmpl::Lease;
     static constexpr bool InMemory = IOTmpl::InMemory;
 
     FixedLayout() = default;
@@ -66,13 +65,18 @@ public:
     }
 
     void
-    SetIO(std::shared_ptr<BasicIO<IOTmpl>> io) {
+    SetIO(std::shared_ptr<IOTmpl> io) {
         io_ = std::move(io);
     }
 
     void
     Write(InnerIdType id, const uint8_t* code) {
         io_->Write(code, code_size_, GetOffset(id));
+    }
+
+    void
+    WriteAt(InnerIdType id, uint64_t offset_in_record, const uint8_t* data, uint64_t length) {
+        io_->Write(data, length, GetOffsetAt(id, offset_in_record, length));
     }
 
     void
@@ -85,6 +89,11 @@ public:
         return io_->Read(code_size_, GetOffset(id), code);
     }
 
+    bool
+    ReadAt(InnerIdType id, uint64_t offset_in_record, uint64_t length, uint8_t* data) const {
+        return io_->Read(length, GetOffsetAt(id, offset_in_record, length), data);
+    }
+
     [[nodiscard]] const uint8_t*
     Read(InnerIdType id, bool& need_release) const {
         return io_->Read(code_size_, GetOffset(id), need_release);
@@ -93,6 +102,16 @@ public:
     [[nodiscard]] const uint8_t*
     ReadRange(InnerIdType begin_id, uint64_t count, bool& need_release) const {
         return io_->Read(GetByteSize(count), GetOffset(begin_id), need_release);
+    }
+
+    [[nodiscard]] Lease
+    Acquire(InnerIdType id) const {
+        return io_->Acquire(GetOffset(id), code_size_);
+    }
+
+    [[nodiscard]] Lease
+    AcquireRange(InnerIdType begin_id, uint64_t count) const {
+        return io_->Acquire(GetOffset(begin_id), GetByteSize(count));
     }
 
     bool
@@ -117,6 +136,12 @@ public:
         io_->Prefetch(GetOffset(id), bytes);
     }
 
+    /** Prefetches from a record-relative offset; hints may start or span beyond one record. */
+    void
+    PrefetchAt(InnerIdType id, uint64_t offset_in_record, uint64_t bytes) {
+        io_->Prefetch(AddOffset(GetOffset(id), offset_in_record), bytes);
+    }
+
     void
     Resize(uint64_t capacity) {
         io_->Resize(GetByteSize(capacity));
@@ -129,22 +154,11 @@ public:
 
     void
     Move(InnerIdType from, InnerIdType to) {
-        bool need_release = false;
-        const auto* code = Read(from, need_release);
-        if (code == nullptr) {
+        auto lease = Acquire(from);
+        if (not lease) {
             throw VsagException(ErrorType::READ_ERROR, "failed to read fixed layout record");
         }
-        try {
-            Write(to, code);
-        } catch (...) {
-            if (need_release and code != nullptr) {
-                Release(code);
-            }
-            throw;
-        }
-        if (need_release and code != nullptr) {
-            Release(code);
-        }
+        Write(to, lease.Data());
     }
 
     void
@@ -158,8 +172,32 @@ public:
     }
 
     void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+    Deserialize(LvalueOrRvalue<StreamReader> reader) {
         io_->Deserialize(reader);
+    }
+
+    [[nodiscard]] uint64_t
+    GetIOSize() const {
+        return io_->Size();
+    }
+
+    void
+    ResizeForOverwrite(uint64_t size) {
+        io_->ResizeForOverwrite(size);
+    }
+
+    /**
+     * @brief Write to a raw byte offset, bypassing the record-oriented offset
+     * calculation of the normal write path.
+     *
+     * Intended for the parallel deserialization fill only, where the caller
+     * has already validated and pre-allocated the extent through ReserveIO /
+     * ResizeForOverwrite and writes to disjoint pre-assigned ranges. General
+     * callers should use the record-oriented write path instead.
+     */
+    void
+    WriteRaw(const uint8_t* data, uint64_t size, uint64_t offset) {
+        io_->Write(data, size, offset);
     }
 
     [[nodiscard]] uint64_t
@@ -172,16 +210,30 @@ public:
 
     [[nodiscard]] const uint8_t*
     TryGetContiguousData() const {
-        if constexpr (std::is_same_v<IOTmpl, MemoryIO>) {
-            return std::static_pointer_cast<MemoryIO>(io_)->GetReadOnlyRawData();
-        }
-        return nullptr;
+        return io_->GetReadOnlyRawData();
     }
 
 private:
     [[nodiscard]] uint64_t
     GetOffset(InnerIdType id) const {
         return GetByteSize(static_cast<uint64_t>(id));
+    }
+
+    [[nodiscard]] uint64_t
+    GetOffsetAt(InnerIdType id, uint64_t offset_in_record, uint64_t length) const {
+        if (offset_in_record > code_size_ or length > code_size_ - offset_in_record) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "fixed layout range exceeds record boundary");
+        }
+        return AddOffset(GetOffset(id), offset_in_record);
+    }
+
+    [[nodiscard]] uint64_t
+    AddOffset(uint64_t offset, uint64_t delta) const {
+        if (delta > std::numeric_limits<uint64_t>::max() - offset) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "fixed layout offset overflow");
+        }
+        return offset + delta;
     }
 
     [[nodiscard]] uint64_t
@@ -193,7 +245,7 @@ private:
     }
 
     uint64_t code_size_{0};
-    std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
+    std::shared_ptr<IOTmpl> io_{nullptr};
 };
 
 }  // namespace vsag

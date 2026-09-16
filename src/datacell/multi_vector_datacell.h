@@ -16,9 +16,10 @@
 #pragma once
 
 #include "flatten_interface.h"
-#include "io/common/basic_io.h"
 #include "io/memory_block_io/memory_block_io.h"
+#include "layout/variable_record_layout.h"
 #include "quantization/multi_vector_computer.h"
+#include "quantization/quantizer.h"
 #include "typing.h"
 #include "vsag/dataset.h"
 
@@ -113,19 +114,16 @@ public:
     Serialize(StreamWriter& writer) override;
 
     void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
+    Deserialize(LvalueOrRvalue<StreamReader> reader) override;
 
     uint64_t
     GetMemoryUsage() const override;
 
 private:
     std::shared_ptr<Quantizer<QuantTmpl>> quantizer_{nullptr};
-    std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 
     Allocator* const allocator_{nullptr};
-    std::shared_ptr<MemoryBlockIO> offset_io_{nullptr};
-    uint64_t current_offset_{0};
-    std::mutex current_offset_mutex_;
+    VariableRecordLayout<HeaderLengthLocationPolicy, MemoryBlockIO, IOTmpl> layout_{};
 
     uint32_t multi_vector_dim_{0};
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};

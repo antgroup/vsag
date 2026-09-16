@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <optional>
 #include <random>
 
 #include "impl/thread_pool/safe_thread_pool.h"
@@ -44,20 +45,14 @@ public:
         double* err = nullptr,
         bool use_mse_for_convergence = false,
         float threshold = 1e-6F,
-        KMeansInitMethod init_method = KMeansInitMethod::KMEANS_PLUS_PLUS);
+        KMeansInitMethod init_method = KMeansInitMethod::KMEANS_PLUS_PLUS,
+        std::optional<uint32_t> random_seed = std::nullopt,
+        bool deterministic_reduction = false);
 
 public:
     float* k_centroids_{nullptr};
 
 private:
-    double
-    find_nearest_one_with_blas(const float* query,
-                               const uint64_t query_count,
-                               const uint64_t k,
-                               float* y_sqr,
-                               float* distances,
-                               Vector<int32_t>& labels);
-
     double
     find_nearest_one_with_hgraph(const float* query,
                                  const uint64_t query_count,
@@ -84,8 +79,6 @@ private:
     const int32_t dim_{0};
 
     static constexpr uint64_t THRESHOLD_FOR_HGRAPH = 10000ULL;
-
-    static constexpr uint64_t QUERY_BS = 65536ULL;
 };
 
 }  // namespace vsag

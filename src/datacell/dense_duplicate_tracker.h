@@ -42,6 +42,9 @@ public:
     Deserialize(StreamReader& reader) override;
 
     void
+    DeserializeBounded(StreamReader& reader, uint64_t max_size) override;
+
+    void
     DeserializeFromLegacyFormat(StreamReader& reader, size_t total_size) override;
 
     void

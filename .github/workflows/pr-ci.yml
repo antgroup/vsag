@@ -20,6 +20,7 @@ jobs:
     outputs:
       cpp: ${{ steps.changes.outputs.cpp }}
       cmake: ${{ steps.changes.outputs.cmake }}
+      coverage: ${{ steps.changes.outputs.coverage }}
       python: ${{ steps.changes.outputs.python }}
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +47,20 @@ jobs:
               - 'CMakeLists.txt'
               - 'Makefile'
               - 'cmake/**'
+            coverage:
+              - '.github/codecov.yml'
+              - '.github/workflows/coverage.yml'
+              - '.github/workflows/pr-simd-coverage.yml'
+              - '.github/workflows/pr-ci.yml'
+              - 'CMakeLists.txt'
+              - 'Makefile'
+              - 'cmake/**'
+              - 'scripts/coverage/**'
+              - 'scripts/testing/test_parallel_bg.sh'
+              - 'src/**/CMakeLists.txt'
+              - 'tests/CMakeLists.txt'
+              - 'tests/scripts/coverage_diagnostics_test.py'
+              - 'tests/scripts/simd_coverage_test.py'
             python:
               - 'python/**'
               - 'python_bindings/**'
@@ -70,6 +85,22 @@ jobs:
       - name: Run Clang format check
         run: ./scripts/format/check_format.sh
 
+  coverage-config:
+    name: Coverage Configuration
+    needs: changes
+    if: needs.changes.outputs.coverage == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test coverage configuration
+        run: |
+          python3 -m unittest tests/scripts/coverage_diagnostics_test.py
+          python3 -m unittest tests/scripts/simd_coverage_test.py
+          bash -n scripts/coverage/run_simd_coverage.sh
+          bash -n scripts/coverage/collect_cpp_coverage.sh
+          bash -n scripts/coverage/check_cov.sh
+          bash -n scripts/testing/test_parallel_bg.sh
+
   build-asan-x86:
     name: ASan Build X86
     needs: [changes, format]
@@ -84,70 +115,154 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Trust exact workspace for Git tooling
+        run: ./scripts/ci/configure-git-safe-directory.sh
+      - name: Test CI helper scripts
+        run: |
+          python3 -m unittest discover -s scripts/linters -p 'test_changed_source_filter.py'
+          python3 -m unittest tests/scripts/configure_git_safe_directory_test.py
+          python3 -m unittest tests/scripts/test_collect_build_metrics.py
+          python3 -m unittest tests/scripts/test_dependency_workflows.py
       - name: Prepare Host
         run: |
           sudo env VSAG_INSTALL_INTEL_MKL=OFF bash ./scripts/deps/install_deps_ubuntu.sh
-          sudo apt-get install -y clang-tidy-15
+          sudo apt-get install -y clang-tidy-15 time
           ninja --version
           cmake --version
           g++ --version
+      - name: Start FetchContent Preparation Timer
+        id: dependency-source-preparation-start
+        run: echo "started_ns=$(date +%s%N)" >> "$GITHUB_OUTPUT"
       - name: Prepare FetchContent Sources
         uses: ./.github/actions/prepare-fetchcontent
         with:
           include-tests: "true"
           include-tools: "true"
-      - name: Cache ExternalProject Archives
-        uses: actions/cache@v4
+      - name: Finish FetchContent Preparation Timer
+        id: dependency-source-preparation
+        env:
+          STARTED_NS: ${{ steps.dependency-source-preparation-start.outputs.started_ns }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          import time
+
+          now = time.time_ns()
+          elapsed = (now - int(os.environ["STARTED_NS"])) / 1_000_000_000
+          print(f"seconds={elapsed:.3f}")
+          print(f"cache_started_ns={now}")
+          PY
+      - name: Restore ExternalProject Archives
+        id: dependency-archive-cache
+        uses: actions/cache/restore@v4
         with:
           path: .ci-downloads
           key: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
           restore-keys: |
             external-${{ runner.os }}-${{ runner.arch }}-
-      - name: Load Cache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          max-size: "2G"
-          save: ${{ github.event_name != 'pull_request' }}
-          key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
-      - name: Make Asan
+      - name: Finish Dependency Preparation Timer
+        id: dependency-preparation
+        env:
+          STARTED_NS: ${{ steps.dependency-source-preparation-start.outputs.started_ns }}
+          CACHE_STARTED_NS: ${{ steps.dependency-source-preparation.outputs.cache_started_ns }}
+          CACHE_HIT: ${{ steps.dependency-archive-cache.outputs.cache-hit }}
+          CACHE_MATCHED_KEY: ${{ steps.dependency-archive-cache.outputs.cache-matched-key }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          import time
+
+          now = time.time_ns()
+          elapsed = (now - int(os.environ["STARTED_NS"])) / 1_000_000_000
+          cache_elapsed = (now - int(os.environ["CACHE_STARTED_NS"])) / 1_000_000_000
+          if os.environ["CACHE_HIT"] == "true":
+              cache_state = "exact-hit"
+          elif os.environ["CACHE_MATCHED_KEY"]:
+              cache_state = "fallback-hit"
+          else:
+              cache_state = "miss"
+          print(f"seconds={elapsed:.3f}")
+          print(f"cache_seconds={cache_elapsed:.3f}")
+          print(f"cache_state={cache_state}")
+          PY
+      - name: Make Asan and collect build metrics
         # The source-build OpenBLAS path remains covered by daily_test.yml.
+        env:
+          BUILD_BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+          CCACHE_DIR: ${{ github.workspace }}/.build-metrics-ccache
+          COMPILER_CACHE_KEY: build-metrics-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+          DEPENDENCY_CACHE_KEY: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
+          DEPENDENCY_CACHE_MATCHED_KEY: ${{ steps.dependency-archive-cache.outputs.cache-matched-key }}
+          DEPENDENCY_CACHE_STATE: ${{ steps.dependency-preparation.outputs.cache_state }}
+          DEPENDENCY_PREPARATION_SECONDS: ${{ steps.dependency-preparation.outputs.seconds }}
+          DEPENDENCY_SOURCE_PREPARATION_SECONDS: ${{ steps.dependency-source-preparation.outputs.seconds }}
+          DEPENDENCY_CACHE_RESTORE_SECONDS: ${{ steps.dependency-preparation.outputs.cache_seconds }}
         run: |
           export CMAKE_GENERATOR="Ninja"
           export CMAKE_EXPORT_COMPILE_COMMANDS=ON
           export EXTRA_DEFINED="-DVSAG_USE_SYSTEM_OPENBLAS=ON"
-          make asan VSAG_ENABLE_EXAMPLES=ON VSAG_ENABLE_TOOLS=ON COMPILE_JOBS=3
+          export VSAG_ENABLE_EXAMPLES=ON
+          export VSAG_ENABLE_TOOLS=ON
+          COMPILER=$(g++ -dumpfullversion -dumpversion)
+          python3 scripts/collect_build_metrics.py \
+            --base-sha "$BUILD_BASE_SHA" \
+            --commit-sha "$GITHUB_SHA" \
+            --compiler "gcc-$COMPILER" \
+            --compiler-cache-key "$COMPILER_CACHE_KEY-gcc-$COMPILER" \
+            --dependency-cache-key "$DEPENDENCY_CACHE_KEY" \
+            --dependency-cache-matched-key "$DEPENDENCY_CACHE_MATCHED_KEY" \
+            --dependency-cache-state "$DEPENDENCY_CACHE_STATE" \
+            --dependency-cache-write-policy restore-only \
+            --dependency-preparation-seconds "$DEPENDENCY_PREPARATION_SECONDS" \
+            --dependency-source-preparation-seconds "$DEPENDENCY_SOURCE_PREPARATION_SECONDS" \
+            --dependency-cache-restore-seconds "$DEPENDENCY_CACHE_RESTORE_SECONDS" \
+            --jobs 3 \
+            --clear-ccache
+      - name: Append build metrics job summary
+        if: always()
+        run: |
+          if [ -f build-metrics/job-summary.md ]; then
+            cat build-metrics/job-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Build performance metrics" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "The collector failed before producing a report." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload build metrics
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./build-metrics
+          name: build-performance-metrics-${{ github.run_id }}
+          compression-level: 6
+          retention-days: 14
+          if-no-files-found: warn
       - name: Get changed source files
         id: changed-srcs
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git fetch origin ${{ github.base_ref }} --depth=1
-          if ! CHANGED=$(git diff --name-only origin/${{ github.base_ref }}..HEAD -- 'src/**/*.cpp' ':(exclude)src/**/*_test.cpp'); then
-            echo "Failed to determine changed source files" >&2
+          git fetch origin "$BASE_BRANCH" --depth=1
+          if ! PATTERN=$(python3 ./scripts/linters/changed_source_filter.py "origin/$BASE_BRANCH"); then
+            echo "Failed to build changed-source lint filter" >&2
             exit 1
-          fi
-          PATTERN=""
-          if [ -n "$CHANGED" ]; then
-            if ! PATTERN=$(CHANGED="$CHANGED" python3 - <<'PY'
-          import os
-          import re
-
-          changed = os.environ["CHANGED"].splitlines()
-          print("|".join(f"{re.escape(path)}$" for path in changed))
-          PY
-            ); then
-              echo "Failed to build changed-source lint filter" >&2
-              exit 1
-            fi
-            if [ -z "$PATTERN" ]; then
-              echo "Changed source files were found, but the lint filter is empty" >&2
-              exit 1
-            fi
           fi
           echo "pattern=$PATTERN" >> "$GITHUB_OUTPUT"
       - name: Run Lint
+        id: changed_source_lint
         if: steps.changed-srcs.outputs.pattern != ''
         run: |
           ./scripts/linters/run-clang-tidy-15.sh -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j 4 '${{ steps.changed-srcs.outputs.pattern }}'
+      - name: Verify changed-source lint execution
+        if: always() && steps.changed-srcs.outcome == 'success'
+        env:
+          LINT_PATTERN: ${{ steps.changed-srcs.outputs.pattern }}
+          LINT_OUTCOME: ${{ steps.changed_source_lint.outcome }}
+        run: |
+          if [ -n "$LINT_PATTERN" ] && [ "$LINT_OUTCOME" != "success" ]; then
+            echo "Changed sources were found, but lint outcome was: $LINT_OUTCOME" >&2
+            exit 1
+          fi
       - name: Clean
         run: |
           find ./build -type f -name "*.o" -exec rm -f {} +

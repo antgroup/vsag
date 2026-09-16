@@ -7,6 +7,7 @@ This page documents how to build VSAG from source.
 - **OS**: Ubuntu 20.04+, CentOS 7+, or macOS 14+ on Apple Silicon
 - **Compiler**: GCC 9.4.0+, Clang 13.0.0+, or Apple Clang from Xcode Command Line Tools
 - **CMake**: 3.18.0+
+- **Ninja**: preferred when available; Unix Makefiles are used as the fallback
 - **clang-format / clang-tidy**: exactly version 15 (enforced)
 - Optional: HDF5 (for `tools/eval/eval_performance`), libaio (for the `async_io` data-cell backend),
   liburing (for `uring_io` on Linux), Intel MKL.
@@ -39,6 +40,34 @@ dist-cxx11-abi      Build redistributable tarball (C++11 ABI)
 dist-libcxx         Build redistributable tarball (libc++)
 clean       Remove build trees
 ```
+
+These targets prefer Ninja when a usable `ninja` executable is available. Otherwise they fall back
+to Unix Makefiles. An explicit generator always wins; for example, use
+`make debug CMAKE_GENERATOR='Unix Makefiles'` to request the fallback directly. Because CMake build
+trees are generator-specific, run the matching clean target before changing the generator for an
+existing build directory.
+
+For configure/build targets, pass `DEBUG_BUILD_DIR` as a plain path, for example
+`make asan DEBUG_BUILD_DIR="custom build"`. The shell removes these command-line quotes;
+the recipes quote the path when invoking CMake. Do not embed literal quote characters in the variable.
+
+## Dependency size metrics
+
+The build metrics JSON uses schema version 3. Each dependency's `local_bytes` (the Markdown
+report's **Local size**) is an aggregate of file sizes, not allocated disk space. It replaces
+`source_bytes` and `build_bytes`: HDF5 and OpenBLAS build in their source trees, and ANTLR4's
+binary directory is nested under its source tree, so those categories cannot be separated reliably.
+
+For ExternalProject dependencies, the aggregate counts the entire dependency prefix once,
+including source, build, install, and any metadata inside that prefix. Shared `BUILD_INFO_DIR`
+files (by default `.vsag-build-info`: temporary files, stamps, logs, and metadata) are excluded
+from both `local_bytes` and the preparation table's `external_build_bytes`; neither measures all
+ExternalProject storage. For FetchContent dependencies, it
+sums the sibling `<name>-src` and `<name>-build` trees. Symlink entries are excluded. Separately
+cached ExternalProject archives are reported in the preparation table, not added to `local_bytes`.
+System dependencies show zero because host installations are not measured; unclassified or missing
+trees also contribute zero. This is a snapshot of the measured local trees, not a source-only size
+or a measurement of generated build artifacts alone.
 
 ## Step-by-Step
 

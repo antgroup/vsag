@@ -10,7 +10,8 @@ VSAG 通过 **Conjugate Graph**（共轭图）机制对这类查询进行在线/
 
 ```json
 {
-    "hnsw": {
+    "index_param": {
+        "base_quantization_type": "fp32",
         "max_degree": 32,
         "ef_construction": 400,
         "use_conjugate_graph": true
@@ -23,7 +24,7 @@ VSAG 通过 **Conjugate Graph**（共轭图）机制对这类查询进行在线/
 
 ```cpp
 std::string search_param_json = R"({
-    "hnsw": {
+    "hgraph": {
         "ef_search": 100,
         "use_conjugate_graph_search": true
     }
@@ -33,8 +34,15 @@ auto result = index->KnnSearch(query, k, search_param_json);
 
 ## 工作原理
 
-共轭图由原图在训练数据上的"失败路径"反向构建而成，在搜索时作为补充的候选边参与贪心扩展。
-它相当于对主图的一层轻量索引补丁，典型体积 < 主图 10%。
+已知困难查询的精确最近邻标签时，可调用
+`Feedback(query, k, search_parameters, global_optimum_id)`；省略 `global_optimum_id` 时，
+HGraph 会通过精确扫描计算。离线增强可调用 `Pretrain(base_ids, k, search_parameters)`，
+它会在选定的 float32 基础向量及其近邻之间生成查询并反馈失败路径。两个方法均返回新插入的
+共轭边数量，重复反馈返回 0。
+
+共轭图保存从局部结果标签到已知全局最优标签的映射，并在 HGraph 常规遍历后补充候选。
+`use_conjugate_graph` 默认关闭；未开启时调用 `Feedback` 或 `Pretrain` 会返回
+`UNSUPPORTED_INDEX_OPERATION`。索引启用共轭图后，搜索增强默认开启，也可按次搜索关闭。
 
 ## 示例
 
@@ -50,4 +58,6 @@ auto result = index->KnnSearch(query, k, search_param_json);
 
 - 启用后构建时间会略有增加。
 - 共轭图数据会随索引一并序列化。
+- `UpdateId` 会同时更新 HGraph 标签表与共轭边。
+- `Pretrain` 当前支持 float32 HGraph；`Feedback` 支持 HGraph 的全部数据类型。
 - 与 `Tune` 可以叠加使用，分别作用于路由质量与运行期参数。

@@ -62,8 +62,8 @@ public:
     void
     Deserialize(StreamReader& reader) override;
 
-    TransformerMetaPtr
-    Transform(const float* input_vec, float* output_vec) const override;
+    void
+    Transform(const float* input_vec, float* output_vec, uint8_t* meta = nullptr) const override;
 
     void
     InverseTransform(const float* input_vec, float* output_vec) const override;

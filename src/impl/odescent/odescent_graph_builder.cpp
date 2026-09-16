@@ -16,6 +16,7 @@
 #include "odescent_graph_builder.h"
 
 #include <chrono>
+#include <exception>
 #include <ios>
 
 #include "datacell/flatten_datacell_parameter.h"
@@ -384,12 +385,30 @@ void
 ODescent::parallelize_task(const std::function<void(int64_t, int64_t)>& task) {
     if (this->thread_pool_ != nullptr) {
         Vector<std::future<void>> futures(allocator_);
-        for (int64_t i = 0; i < data_num_; i += odescent_param_->block_size) {
-            int64_t end = std::min(i + odescent_param_->block_size, data_num_);
-            futures.push_back(thread_pool_->GeneralEnqueue(task, i, end));
+        futures.reserve((data_num_ + odescent_param_->block_size - 1) /
+                        odescent_param_->block_size);
+        std::exception_ptr first_exception = nullptr;
+        try {
+            for (int64_t i = 0; i < data_num_; i += odescent_param_->block_size) {
+                int64_t end = std::min(i + odescent_param_->block_size, data_num_);
+                futures.push_back(thread_pool_->GeneralEnqueue(task, i, end));
+            }
+        } catch (...) {
+            first_exception = std::current_exception();
         }
+        // Workers reference builder state and temporary codes owned by the build session.
+        // Drain every task before either owner can unwind and release that storage.
         for (auto& future : futures) {
-            future.get();
+            try {
+                future.get();
+            } catch (...) {
+                if (first_exception == nullptr) {
+                    first_exception = std::current_exception();
+                }
+            }
+        }
+        if (first_exception != nullptr) {
+            std::rethrow_exception(first_exception);
         }
     } else {
         for (int64_t i = 0; i < data_num_; i += odescent_param_->block_size) {

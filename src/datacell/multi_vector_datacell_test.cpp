@@ -137,6 +137,12 @@ TEST_CASE("MultiVectorDataCell batch insert reserves ids when idx is null",
         multi_vectors.data(), static_cast<InnerIdType>(multi_vectors.size()), nullptr);
 
     REQUIRE(data_cell->TotalCount() == token_counts.size());
+    REQUIRE_NOTHROW(data_cell->Resize(1));
+    bool need_release = false;
+    const auto* codes =
+        data_cell->GetCodesById(static_cast<InnerIdType>(multi_vectors.size() - 1), need_release);
+    REQUIRE(codes != nullptr);
+    data_cell->Release(codes);
 }
 
 TEST_CASE("MultiVectorDataCell GetCodesById reads back inserted data",
@@ -304,6 +310,11 @@ TEST_CASE("MultiVectorDataCell rejects invalid InsertVector inputs", "[ut][Multi
         MultiVector mv{2, nullptr};
         REQUIRE_THROWS(data_cell->InsertVector(&mv, 0));
     }
+
+    SECTION("out-of-range id") {
+        bool need_release = false;
+        REQUIRE_THROWS(data_cell->GetCodesById(0, need_release));
+    }
 }
 
 TEST_CASE("MultiVectorDataCell rejects invalid BatchInsertVector inputs",
@@ -336,6 +347,23 @@ TEST_CASE("MultiVectorDataCell rejects invalid FactoryComputer inputs",
     SECTION("nullptr query vectors") {
         MultiVector mv{2, nullptr};
         REQUIRE_THROWS(data_cell->FactoryComputer(&mv));
+    }
+
+    SECTION("nullptr query ids") {
+        std::vector<float> query(dim, 1.0F);
+        MultiVector mv{1, query.data()};
+        auto computer = data_cell->FactoryComputer(&mv);
+        float distance = 0.0F;
+        REQUIRE_THROWS(data_cell->Query(&distance, computer, nullptr, 1));
+    }
+
+    SECTION("out-of-range query id") {
+        std::vector<float> query(dim, 1.0F);
+        MultiVector mv{1, query.data()};
+        auto computer = data_cell->FactoryComputer(&mv);
+        const InnerIdType id = 0;
+        float distance = 0.0F;
+        REQUIRE_THROWS(data_cell->Query(&distance, computer, &id, 1));
     }
 }
 

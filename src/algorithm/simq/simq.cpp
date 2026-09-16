@@ -21,6 +21,7 @@
 #include <cstring>
 #include <future>
 #include <limits>
+#include <nlohmann/json.hpp>
 #include <numeric>
 #include <random>
 #include <sstream>
@@ -28,6 +29,7 @@
 #include <unordered_set>
 #include <utility>
 
+#include "datacell/multi_vector_datacell_parameter.h"
 #include "dataset_impl.h"
 #include "impl/logger/logger.h"
 #include "impl/thread_pool/safe_thread_pool.h"
@@ -50,7 +52,7 @@ wait_all_futures(std::vector<std::future<void>>& futures);
 
 namespace {
 
-struct cluster_member_entry {
+struct ClusterMemberEntry {
     InnerIdType vec_id;
     float distance;
 };
@@ -142,7 +144,7 @@ public:
     Fit(const float* vecs, int64_t num_vecs, int64_t dim);
 
     std::vector<int> cluster_centers_;
-    std::unordered_map<int, std::vector<cluster_member_entry>> clusters_;
+    std::unordered_map<int, std::vector<ClusterMemberEntry>> clusters_;
     std::vector<int> vec_to_cluster_;
 
 private:
@@ -156,7 +158,7 @@ private:
     ip_distance(int v1, int v2) const;
 
     static void
-    sorted_insert(std::vector<cluster_member_entry>& members, InnerIdType vec_id, float dist);
+    sorted_insert(std::vector<ClusterMemberEntry>& members, InnerIdType vec_id, float dist);
 
     void
     split_cluster(int old_center_id, int64_t dim);
@@ -243,11 +245,11 @@ HGraphDynamicClustering::ip_distance(int v1, int v2) const {
 }
 
 void
-HGraphDynamicClustering::sorted_insert(std::vector<cluster_member_entry>& members,
+HGraphDynamicClustering::sorted_insert(std::vector<ClusterMemberEntry>& members,
                                        InnerIdType vec_id,
                                        float dist) {
     auto it = std::lower_bound(
-        members.begin(), members.end(), dist, [](const cluster_member_entry& e, float val) {
+        members.begin(), members.end(), dist, [](const ClusterMemberEntry& e, float val) {
             return e.distance < val;
         });
     members.insert(it, {vec_id, dist});
@@ -272,10 +274,10 @@ HGraphDynamicClustering::split_cluster(int old_center_id, int64_t /*dim*/) {
     }
 
     auto split_it = cluster.begin() + (split_start_idx_ - 1);
-    std::vector<cluster_member_entry> to_move(split_it, cluster.end());
+    std::vector<ClusterMemberEntry> to_move(split_it, cluster.end());
     cluster.erase(split_it, cluster.end());
 
-    std::vector<cluster_member_entry> new_cluster;
+    std::vector<ClusterMemberEntry> new_cluster;
     new_cluster.push_back({static_cast<InnerIdType>(new_center_id), 0.0F});
     vec_to_cluster_[new_center_id] = new_center_id;
 
@@ -755,7 +757,7 @@ SIMQ::Add(const DatasetPtr& data) {
     // cross-thread data race on the per-token vectors).
     // Cluster-level structures (cluster_lists_, cluster_token_counts_) are
     // collected per-thread and merged in Phase 4.
-    struct per_thread_cluster_data {
+    struct PerThreadClusterData {
         // cluster_idx → list of inner_ids that touch it (unique per thread)
         std::unordered_map<InnerIdType, std::vector<InnerIdType>> cluster_docs;
         // cluster_idx → token count contribution
@@ -772,7 +774,7 @@ SIMQ::Add(const DatasetPtr& data) {
     last_reported_pct_ = -1;
 
     if (use_parallel) {
-        Vector<per_thread_cluster_data> per_thread(num_docs, allocator_);
+        Vector<PerThreadClusterData> per_thread(num_docs, allocator_);
         std::vector<std::future<void>> futures;
         futures.reserve(num_docs);
 
@@ -1072,17 +1074,13 @@ SIMQ::execute_split_parallel(const SplitTask& task) {
 
     const auto udim = static_cast<uint64_t>(dim_);
     const uint64_t code_size_per_token = mv_codes_->GetQuantizerCodeSize();
-    bool need_release = false;
-    const auto* codes = mv_codes_->GetCodesById(rep_doc, need_release);
+    auto codes = mv_codes_->AcquireCodesById(rep_doc);
+    CHECK_ARGUMENT(codes, "failed to read simq representative vector");
 
     std::vector<float> new_rep_vec(udim);
     mv_codes_->Decode(
-        codes + sizeof(uint32_t) + static_cast<uint64_t>(rep_offset) * code_size_per_token,
+        codes.Data() + sizeof(uint32_t) + static_cast<uint64_t>(rep_offset) * code_size_per_token,
         new_rep_vec.data());
-
-    if (need_release) {
-        mv_codes_->Release(codes);
-    }
 
     auto new_label = static_cast<int64_t>(task.new_cluster_idx);
     auto new_ds = Dataset::Make();
@@ -1102,15 +1100,11 @@ SIMQ::execute_split_parallel(const SplitTask& task) {
         InnerIdType tid = task.tokens[rank];
         InnerIdType doc_id = token_to_doc_[tid];
         uint32_t offset = token_to_offset_[tid];
-        bool nr = false;
-        const auto* c = mv_codes_->GetCodesById(doc_id, nr);
+        auto codes = mv_codes_->AcquireCodesById(doc_id);
+        CHECK_ARGUMENT(codes, "failed to read simq split vector");
         mv_codes_->Decode(
-            c + sizeof(uint32_t) + static_cast<uint64_t>(offset) * code_size_per_token,
+            codes.Data() + sizeof(uint32_t) + static_cast<uint64_t>(offset) * code_size_per_token,
             decoded_token.data());
-
-        if (nr) {
-            mv_codes_->Release(c);
-        }
 
         float dot = 0.0F;
         for (uint64_t d = 0; d < udim; ++d) {
@@ -1182,17 +1176,14 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
     InnerIdType rep_tid = cluster_tokens[half];
     InnerIdType rep_doc = token_to_doc_[rep_tid];
     uint32_t rep_offset = token_to_offset_[rep_tid];
-    bool need_release = false;
-    const auto* codes = mv_codes_->GetCodesById(rep_doc, need_release);
+    auto codes = mv_codes_->AcquireCodesById(rep_doc);
+    CHECK_ARGUMENT(codes, "failed to read simq representative vector");
     const uint64_t code_size_per_token = mv_codes_->GetQuantizerCodeSize();
     const auto udim = static_cast<uint64_t>(dim_);
     std::vector<float> new_rep_vec(udim);
     mv_codes_->Decode(
-        codes + sizeof(uint32_t) + static_cast<uint64_t>(rep_offset) * code_size_per_token,
+        codes.Data() + sizeof(uint32_t) + static_cast<uint64_t>(rep_offset) * code_size_per_token,
         new_rep_vec.data());
-    if (need_release) {
-        mv_codes_->Release(codes);
-    }
 
     auto new_label = static_cast<int64_t>(new_cluster_idx);
     auto new_ds = Dataset::Make();
@@ -1213,19 +1204,16 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
         InnerIdType tid = cluster_tokens[rank];
         InnerIdType doc_id = token_to_doc_[tid];
         uint32_t offset = token_to_offset_[tid];
-        bool nr = false;
-        const auto* c = mv_codes_->GetCodesById(doc_id, nr);
+        auto codes = mv_codes_->AcquireCodesById(doc_id);
+        CHECK_ARGUMENT(codes, "failed to read simq split vector");
         mv_codes_->Decode(
-            c + sizeof(uint32_t) + static_cast<uint64_t>(offset) * code_size_per_token,
+            codes.Data() + sizeof(uint32_t) + static_cast<uint64_t>(offset) * code_size_per_token,
             decoded_token.data());
         float dot = 0.0F;
         for (uint64_t d = 0; d < udim; ++d) {
             dot += decoded_token[d] * new_rep_vec[d];
         }
         token_to_dist_[tid] = 1.0F - dot;
-        if (nr) {
-            mv_codes_->Release(c);
-        }
     }
 
     ++num_clusters_;
@@ -1250,12 +1238,12 @@ SIMQ::coarse_search(const float* query_tokens,
 
     // Each query token's search is independent. We do all KnnSearch calls in
     // parallel, then sequentially propagate scores (which is fast O(k) per token).
-    struct token_search_result {
+    struct TokenSearchResult {
         std::vector<std::pair<float, InnerIdType>> cscores;
         int64_t actual_coarse_k{0};
         uint64_t dist_cmp{0};
     };
-    std::vector<token_search_result> token_results(query_token_count);
+    std::vector<TokenSearchResult> token_results(query_token_count);
 
     if (this->thread_pool_ && query_token_count > 1) {
         std::vector<std::future<void>> futures;
@@ -1752,36 +1740,20 @@ SIMQ::InitFeatures() {
     });
 }
 
-static const std::string SIMQ_PARAMS_TEMPLATE =
-    R"(
-    {
-        "{TYPE_KEY}": "{INDEX_SIMQ}",
-        "{BASE_CODES_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_ASYNC_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{CODES_TYPE_KEY}": "multi_vector"
-        }
-    })";
+JsonType
+build_default_simq_param(const JsonType& external_param) {
+    const auto io_type = external_param.Contains(BRUTE_FORCE_BASE_IO_TYPE)
+                             ? external_param[BRUTE_FORCE_BASE_IO_TYPE].GetString()
+                             : IO_TYPE_VALUE_ASYNC_IO;
+    JsonType json;
+    json[TYPE_KEY].SetString(INDEX_SIMQ);
+    json[BASE_CODES_KEY].SetJson(MultiVectorDataCellParameter::CreateDefault(io_type)->ToJson());
+    return json;
+}
 
 ParamPtr
 SIMQ::CheckAndMappingExternalParam(const JsonType& external_param,
                                    const IndexCommonParam& common_param) {
-    const ConstParamMap external_mapping = {
-        {BRUTE_FORCE_BASE_IO_TYPE, {BASE_CODES_KEY, IO_PARAMS_KEY, TYPE_KEY}},
-        {BRUTE_FORCE_BASE_FILE_PATH, {BASE_CODES_KEY, IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
-        {"init_cluster_ratio", {"init_cluster_ratio"}},
-        {"max_cluster_size", {"max_cluster_size"}},
-        {"split_start_idx", {"split_start_idx"}},
-        {"random_seed", {"random_seed"}},
-        {"coarse_k", {"coarse_k"}},
-        {"rerank_k", {"rerank_k"}},
-        {"quantization_type", {"quantization_type"}},
-        {BUILD_THREAD_COUNT_KEY, {BUILD_THREAD_COUNT_KEY}},
-        {"split_delay_seconds", {"split_delay_seconds"}},
-    };
-
     if (common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
         throw VsagException(ErrorType::INVALID_ARGUMENT, "simq only supports float32 datatype");
     }
@@ -1789,9 +1761,24 @@ SIMQ::CheckAndMappingExternalParam(const JsonType& external_param,
         throw VsagException(ErrorType::INVALID_ARGUMENT, "simq only supports ip metric type");
     }
 
-    std::string str = format_map(SIMQ_PARAMS_TEMPLATE, DEFAULT_MAP);
-    auto inner_json = JsonType::Parse(str);
-    mapping_external_param_to_inner(external_param, external_mapping, inner_json);
+    auto inner_json = build_default_simq_param(external_param);
+    for (const auto& [key, ignored] : external_param.GetInnerJson()->items()) {
+        (void)ignored;
+        auto value = external_param[key];
+        if (key == BRUTE_FORCE_BASE_IO_TYPE) {
+            inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == BRUTE_FORCE_BASE_FILE_PATH) {
+            inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(value);
+        } else if (key == "init_cluster_ratio" || key == "max_cluster_size" ||
+                   key == "split_start_idx" || key == "random_seed" || key == "coarse_k" ||
+                   key == "rerank_k" || key == "quantization_type" ||
+                   key == BUILD_THREAD_COUNT_KEY || key == "split_delay_seconds") {
+            inner_json[key].SetJson(value);
+        } else {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("invalid config param: {}", key));
+        }
+    }
 
     auto simq_param = std::make_shared<SIMQParameter>();
     simq_param->FromJson(inner_json);

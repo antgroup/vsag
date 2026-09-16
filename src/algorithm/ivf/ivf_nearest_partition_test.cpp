@@ -15,10 +15,15 @@
 
 #include "ivf_nearest_partition.h"
 
+#include <algorithm>
+#include <vector>
+
 #include "algorithm/inner_index_interface.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/inner_search_param.h"
 #include "impl/thread_pool/safe_thread_pool.h"
+#include "simd/fp32_simd.h"
+#include "simd/normalize.h"
 #include "storage/serialization_template_test.h"
 #include "unittest.h"
 using namespace vsag;
@@ -95,4 +100,173 @@ TEST_CASE("IVF Nearest Partition Serialize Test", "[ut][IVFNearestPartition]") {
 
     auto restored_class_result = partition2->ClassifyDatas(vec.data(), data_count, 1, nullptr);
     REQUIRE(restored_class_result == class_result);
+}
+
+TEST_CASE("IVF Nearest Partition Routing Statistics Test", "[ut][IVFNearestPartition]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto thread_pool = SafeThreadPool::FactoryDefaultThreadPool();
+    std::vector<SafeThreadPoolPtr> pools{thread_pool, nullptr};
+    int64_t dim = 128;
+    int64_t bucket_count = 20;
+    for (auto& tp : pools) {
+        IndexCommonParam param;
+        param.dim_ = dim;
+        param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+        param.allocator_ = allocator;
+        param.thread_pool_ = tp;
+
+        IVFPartitionStrategyParametersPtr strategy_param =
+            std::make_shared<IVFPartitionStrategyParameters>();
+        auto partition = std::make_unique<IVFNearestPartition>(bucket_count, param, strategy_param);
+
+        auto dataset = Dataset::Make();
+        int64_t data_count = 1000L;
+        auto vec = fixtures::generate_vectors(data_count, dim, true, 95);
+        dataset->Float32Vectors(vec.data())->Dim(dim)->NumElements(data_count)->Owner(false);
+
+        partition->Train(dataset);
+        auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1, nullptr);
+
+        // The search path accumulates routing statistics through a non-null QueryContext. The
+        // statistics parsing must produce the same bucket assignment and non-zero routing stats
+        // (the parse now runs outside the reduce lock).
+        SearchStatistics stats;
+        QueryContext ctx;
+        ctx.stats = &stats;
+        auto stats_result = partition->ClassifyDatas(vec.data(), data_count, 1, &ctx);
+        REQUIRE(stats_result == class_result);
+        REQUIRE(stats.dist_cmp.load() > 0);
+        auto dumped = JsonType::Parse(stats.Dump());
+        REQUIRE(dumped["distance_evaluations_by_phase"]["routing"].GetUint64() > 0);
+    }
+}
+
+TEST_CASE("IVF Nearest Partition Centroid Scan Test", "[ut][IVFNearestPartition]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 32;
+    constexpr BucketIdType bucket_count = 16;
+    constexpr int64_t data_count = 256;
+    constexpr BucketIdType buckets_per_data = 4;
+    const std::vector<MetricType> metrics{
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP, MetricType::METRIC_TYPE_COSINE};
+
+    for (const auto metric : metrics) {
+        IndexCommonParam common_param;
+        common_param.dim_ = dim;
+        common_param.metric_ = metric;
+        common_param.allocator_ = allocator;
+
+        auto strategy_param = std::make_shared<IVFPartitionStrategyParameters>();
+        strategy_param->use_route_graph = false;
+        auto partition =
+            std::make_unique<IVFNearestPartition>(bucket_count, common_param, strategy_param);
+        REQUIRE(partition->route_index_ptr_ == nullptr);
+
+        const auto untrained_result =
+            partition->ClassifyDatas(nullptr, 1, buckets_per_data, nullptr);
+        REQUIRE(untrained_result == Vector<BucketIdType>(buckets_per_data,
+                                                         static_cast<BucketIdType>(-1),
+                                                         allocator.get()));
+        auto untrained_restored =
+            std::make_unique<IVFNearestPartition>(bucket_count, common_param, strategy_param);
+        test_serializion(*partition, *untrained_restored);
+        REQUIRE(untrained_restored->ClassifyDatas(nullptr, 1, buckets_per_data, nullptr) ==
+                untrained_result);
+
+        // KMeans sees exactly bucket_count distinct points, so initialization only permutes
+        // the centroids. Powers of two on separate axes keep L2 arithmetic exact and cosine
+        // centroids unit length. Random centroids can produce near-ties that BLAS and the
+        // independent SIMD distance oracle round differently.
+        std::vector<float> vectors(data_count * dim, 0.0F);
+        for (int64_t i = 0; i < data_count; ++i) {
+            const auto axis = i % bucket_count;
+            vectors[i * dim + axis] = static_cast<float>(1 << (axis % 4));
+        }
+        auto dataset = Dataset::Make();
+        dataset->Float32Vectors(vectors.data())->Dim(dim)->NumElements(data_count)->Owner(false);
+        partition->Train(dataset);
+        REQUIRE(partition->route_index_ptr_ == nullptr);
+
+        // Exercise different norms, signs and query directions, including exact ties. These
+        // queries are separate from the training points and retain exact bucket-ID checks.
+        std::vector<float> queries(data_count * dim, 0.0F);
+        for (int64_t i = 1; i < data_count; ++i) {
+            const auto scale = static_cast<float>(1 + i / bucket_count);
+            for (int64_t j = 0; j < buckets_per_data; ++j) {
+                queries[i * dim + (i + j) % bucket_count] =
+                    scale * static_cast<float>(j + 1) * (i % 2 == 0 ? 0.25F : -0.25F);
+            }
+        }
+        auto actual =
+            partition->ClassifyDatas(queries.data(), data_count, buckets_per_data, nullptr);
+        REQUIRE(actual.size() == static_cast<uint64_t>(data_count * buckets_per_data));
+
+        Vector<float> centroid(dim, allocator.get());
+        Vector<float> normalized_query(dim, allocator.get());
+        Vector<std::pair<float, BucketIdType>> expected(bucket_count, allocator.get());
+        for (int64_t i = 0; i < data_count; ++i) {
+            const auto* query = queries.data() + i * dim;
+            if (metric == MetricType::METRIC_TYPE_COSINE) {
+                Normalize(query, normalized_query.data(), dim);
+                query = normalized_query.data();
+            }
+            for (BucketIdType b = 0; b < bucket_count; ++b) {
+                partition->GetCentroid(b, centroid);
+                float distance = 0.0F;
+                if (metric == MetricType::METRIC_TYPE_L2SQR) {
+                    distance = FP32ComputeL2Sqr(query, centroid.data(), dim);
+                } else {
+                    distance = 1.0F - FP32ComputeIP(query, centroid.data(), dim);
+                }
+                expected[b] = {distance, b};
+            }
+            std::sort(expected.begin(), expected.end());
+            for (BucketIdType j = 0; j < buckets_per_data; ++j) {
+                CAPTURE(static_cast<int>(metric), i, j);
+                REQUIRE(actual[i * buckets_per_data + j] == expected[j].second);
+            }
+        }
+
+        auto graph_config_param = std::make_shared<IVFPartitionStrategyParameters>();
+        graph_config_param->use_route_graph = true;
+        auto restored =
+            std::make_unique<IVFNearestPartition>(bucket_count, common_param, graph_config_param);
+        test_serializion(*partition, *restored);
+        REQUIRE(restored->route_index_ptr_ == nullptr);
+        REQUIRE(restored->ClassifyDatas(queries.data(), data_count, buckets_per_data, nullptr) ==
+                actual);
+    }
+}
+
+TEST_CASE("IVF Nearest Partition Route Graph Layout Cross Config Test",
+          "[ut][IVFNearestPartition]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 32;
+    constexpr BucketIdType bucket_count = 16;
+    constexpr int64_t data_count = 256;
+
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = allocator;
+
+    auto graph_param = std::make_shared<IVFPartitionStrategyParameters>();
+    graph_param->use_route_graph = true;
+    auto graph_partition =
+        std::make_unique<IVFNearestPartition>(bucket_count, common_param, graph_param);
+
+    auto vectors = fixtures::generate_vectors(data_count, dim, true, 95);
+    auto dataset = Dataset::Make();
+    dataset->Float32Vectors(vectors.data())->Dim(dim)->NumElements(data_count)->Owner(false);
+    graph_partition->Train(dataset);
+    auto expected = graph_partition->ClassifyDatas(vectors.data(), data_count, 1, nullptr);
+
+    auto scan_config_param = std::make_shared<IVFPartitionStrategyParameters>();
+    scan_config_param->use_route_graph = false;
+    auto restored =
+        std::make_unique<IVFNearestPartition>(bucket_count, common_param, scan_config_param);
+    REQUIRE(restored->route_index_ptr_ == nullptr);
+    test_serializion(*graph_partition, *restored);
+    REQUIRE(restored->route_index_ptr_ != nullptr);
+    REQUIRE(restored->ClassifyDatas(vectors.data(), data_count, 1, nullptr) == expected);
 }

@@ -31,6 +31,11 @@ HGraph::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
     }
 
     if (mode == RemoveMode::FORCE_REMOVE) {
+        if (this->rabitq_fused_datacell_ != nullptr) {
+            throw VsagException(
+                ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                "fused RaBitQ HGraph without neighbor versions does not support force remove");
+        }
         CHECK_ARGUMENT(this->support_force_remove(),
                        "force remove requires index_param.support_force_remove to be true");
         std::unique_lock<std::shared_mutex> wlock(this->force_remove_mutex_);
@@ -75,6 +80,22 @@ HGraph::find_new_entry_point() {
             break;
         }
         route_graphs_.pop_back();
+    }
+
+    // No upper-level successor found -- fall back to the bottom graph.
+    // Pick any remaining node as the new entry point so the index stays
+    // usable for subsequent Add / search operations.
+    if (not find_new_ep and this->bottom_graph_ != nullptr and
+        this->bottom_graph_->TotalCount() > 0) {
+        auto total = this->total_count_.load();
+        for (InnerIdType candidate = 0; candidate < total; ++candidate) {
+            if (candidate != this->entry_point_id_ and
+                this->bottom_graph_->CheckIdExists(candidate)) {
+                this->entry_point_id_ = candidate;
+                find_new_ep = true;
+                break;
+            }
+        }
     }
 }
 
@@ -189,6 +210,13 @@ HGraph::force_remove_one(int64_t label) {
     bool was_mark_removed = false;
     {
         std::unique_lock lock(this->label_lookup_mutex_);
+        // After move_id (or when swap_id == inner_id so move_id is skipped),
+        // entry_point_id_ may still equal the deleted inner_id when
+        // find_new_entry_point failed to locate an upper-level successor.
+        // Retry with the bottom graph visible now that graph state is updated.
+        if (this->entry_point_id_ == inner_id and this->total_count_.load() > 1) {
+            this->find_new_entry_point();
+        }
         was_mark_removed = this->label_table_->IsRemoved(inner_id);
         this->label_table_->ForceRemove(label, inner_id);
         if (swap_id != inner_id) {
@@ -223,6 +251,8 @@ HGraph::shrink_to_fit() {
         route_graph->ShrinkToFit(total_count);
     }
     label_table_->ShrinkToFit(total_count);
+
+    this->max_capacity_.store(total_count);
 }
 
 void

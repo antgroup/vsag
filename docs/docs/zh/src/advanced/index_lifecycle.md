@@ -8,17 +8,18 @@
 - `Clone` —— 对已有索引进行深拷贝。
 - `ExportModel` —— 将训练好的模型导出为空索引以复用。
 
-每个操作均为可选项，仅当底层索引通过 `index->CheckFeature(...)` 公布对应能力标志时才可用。
+每个操作均为可选项。带有专用能力标志的操作应通过 `index->CheckFeature(...)` 检查；`Remove`
+没有专用标志，必须按索引类型和 `RemoveMode` 判断。
 
 ## 能力标志
 
-| 操作              | 能力标志                                  | HGraph | IVF | SINDI |
-|-------------------|------------------------------------------|:------:|:---:|:-----:|
-| `Remove`          | _（暂无专用标志，参见下文）_              |   是   |  —  |   —   |
-| `UpdateVector`    | `SUPPORT_UPDATE_VECTOR_CONCURRENT`       |   是   |  —  |  是   |
-| `UpdateId`        | `SUPPORT_UPDATE_ID_CONCURRENT`           |   是   |  —  |  是   |
-| `Clone`           | `SUPPORT_CLONE`                          |   是   | 是  |   —   |
-| `ExportModel`     | `SUPPORT_EXPORT_MODEL`                   |   是   | 是  |   —   |
+| 操作 | 能力标志 | HGraph | Pyramid | IVF | BruteForce | SINDI |
+|---|---|:---:|:---:|:---:|:---:|:---:|
+| `Remove` | _（暂无专用标志，参见下文）_ | 是 | 仅 `RemoveMode::MARK_REMOVE` | 仅 `RemoveMode::MARK_REMOVE` | 是 | 仅 `RemoveMode::MARK_REMOVE` |
+| `UpdateVector` | `SUPPORT_UPDATE_VECTOR_CONCURRENT` | 是 | — | — | 是 | 是 |
+| `UpdateId` | `SUPPORT_UPDATE_ID_CONCURRENT` | 是 | — | — | — | 是 |
+| `Clone` | `SUPPORT_CLONE` | 是 | 是 | 是 | 是 | — |
+| `ExportModel` | `SUPPORT_EXPORT_MODEL` | 是 | 是 | 是 | — | — |
 
 对于带能力标志的操作，请在调用前通过 `index->CheckFeature(vsag::SUPPORT_*)` 在运行时进行检查；
 不支持的索引会返回 `UNSUPPORTED_INDEX_OPERATION`。`Remove` 目前未提供专用能力标志，是否可用
@@ -83,11 +84,20 @@ index->Remove(std::vector<int64_t>{id1, id2, id3});
 
 可运行示例：`examples/cpp/303_feature_remove.cpp`。
 
+### Pyramid 与 IVF 删除
+
+Pyramid 和 IVF 都只支持 `RemoveMode::MARK_REMOVE`：操作写入墓碑、让后续检索排除对应 id，但不会
+物理回收向量存储。两者均不支持 `FORCE_REMOVE`。
+
 ### BruteForce 删除
 
 BruteForce 也支持这两种模式，但它**不使用** HGraph 的 `support_force_remove` 配置。
 `MARK_REMOVE` 会写入墓碑并保留向量存储。`FORCE_REMOVE` 不需要额外配置：它会物理删除条目，必要时
 移动最后一个内部槽位，同时保持外部 id 不变。
+
+BruteForce 处于非 multi-vector 模式且启用 `use_attribute_filter: true` 时，不支持任一种删除模式；如需删除属性过滤数据，请重建索引。
+
+在 multi-vector 模式下，BruteForce 仅支持 `RemoveMode::MARK_REMOVE`，不支持 `FORCE_REMOVE`；即使启用 `use_attribute_filter: true` 也是如此。
 
 BruteForce 默认使用 `block_memory_io`。每个成功的物理删除批次都会将逻辑向量和可选额外信息存储收缩到
 存活条目数，并释放末尾完整的块；最后一个未填满的块会保留。标签表会在存活条目数不超过当前容量一半时
@@ -123,6 +133,9 @@ if (status.has_value() && *status) {
 
 将 `force_update` 置为 `true` 会跳过检查并强制更新；请谨慎使用，可能损失召回率。
 
+上述连通性检查适用于 HGraph。BruteForce 也支持使用维度相同的 FP32 向量进行 `UpdateVector`，但它
+没有图连通性检查，因此 `force_update` 不会改变更新行为。Pyramid 和 IVF 不支持 `UpdateVector`。
+
 ### `UpdateId`
 
 `UpdateId(old_id, new_id)` 重命名已有 id 而不动底层向量。成功返回 `true`，若 `old_id` 不存在
@@ -133,6 +146,9 @@ index->UpdateId(123, 456);
 ```
 
 结合 `UpdateVector`、`Remove`、`Add` 的可运行示例：`examples/cpp/305_feature_update.cpp`。
+
+多个索引可经共享的 label table 路径调用 `UpdateId`，但只有声明
+`SUPPORT_UPDATE_ID_CONCURRENT` 的索引承诺对应的并发更新语义。
 
 ## 克隆索引
 

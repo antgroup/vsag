@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#if HAVE_LIBURING
-
 #include "io/uring_io/uring_io_parameter.h"
 
 #include <fmt/format.h>
@@ -49,8 +47,7 @@ UringIOParameter::ToJson() const {
     json[TYPE_KEY].SetString(IO_TYPE_VALUE_URING_IO);
     json[IO_FILE_PATH_KEY].SetString(this->path_);
     json[IO_DIRECT_READ_KEY].SetBool(this->direct_read_);
-    AppendReadCacheConfig(json);
+    AppendCommonConfig(json);
     return json;
 }
 }  // namespace vsag
-#endif  // HAVE_LIBURING

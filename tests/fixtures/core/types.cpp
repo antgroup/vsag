@@ -18,12 +18,12 @@
 
 namespace fixtures {
 
-comparable_float_t::comparable_float_t(float val) {
+ComparableFloatT::ComparableFloatT(float val) {
     this->value = val;
 }
 
 bool
-comparable_float_t::operator==(const comparable_float_t& d) const {
+ComparableFloatT::operator==(const ComparableFloatT& d) const {
     double a = this->value;
     double b = d.value;
     if (std::abs(a - b) < epsilon) {
@@ -35,7 +35,7 @@ comparable_float_t::operator==(const comparable_float_t& d) const {
 }
 
 std::ostream&
-operator<<(std::ostream& os, const comparable_float_t& obj) {
+operator<<(std::ostream& os, const ComparableFloatT& obj) {
     os << obj.value;
     return os;
 }

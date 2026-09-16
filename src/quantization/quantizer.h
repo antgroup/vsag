@@ -196,7 +196,7 @@ public:
                              const uint8_t* codes,
                              float threshold,
                              float* dists) const {
-        if constexpr (has_ComputeDistWithThresholdImpl<QuantT>::value) {
+        if constexpr (HasComputeDistWithThresholdImpl<QuantT>::value) {
             return cast().ComputeDistWithThresholdImpl(computer, codes, threshold, dists);
         } else {
             cast().ComputeDistImpl(computer, codes, dists);
@@ -209,7 +209,7 @@ public:
                               const uint8_t* codes,
                               float* dists,
                               float* lower_bound) const {
-        if constexpr (has_ComputeDistWithLowerBoundImpl<QuantT>::value) {
+        if constexpr (HasComputeDistWithLowerBoundImpl<QuantT>::value) {
             return cast().ComputeDistWithLowerBoundImpl(computer, codes, dists, lower_bound);
         } else {
             cast().ComputeDistImpl(computer, codes, dists);
@@ -256,7 +256,7 @@ public:
                        float& dists2,
                        float& dists3,
                        float& dists4) const {
-        if constexpr (has_ComputeDistsBatch4Impl<QuantT>::value) {
+        if constexpr (HasComputeDistsBatch4Impl<QuantT>::value) {
             cast().ComputeDistsBatch4Impl(
                 computer, codes1, codes2, codes3, codes4, dists1, dists2, dists3, dists4);
         } else {

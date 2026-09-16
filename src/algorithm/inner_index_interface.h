@@ -41,6 +41,7 @@
 #include "utils/pointer_define.h"
 #include "vsag/dataset.h"
 #include "vsag/index.h"
+#include "vsag/serialize_writer.h"
 
 namespace vsag {
 
@@ -238,6 +239,15 @@ public:
 
     virtual void
     Deserialize(std::istream& in_stream);
+
+    /// parallel deserialization using the thread pool bound to this index
+    /// (via Resource); implementations fall back to an internal default
+    /// pool when none is bound
+    virtual void
+    ParallelDeserialize(DeserializeReader& reader) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "index does not support parallel deserialization");
+    }
 
     virtual void
     DeserializeStreaming(std::istream& in_stream);
@@ -481,6 +491,14 @@ public:
                             "Index doesn't support SearchWithRequest");
     }
 
+    [[nodiscard]] virtual const AttrTypeSchema*
+    GetAttrTypeSchema() const {
+        if (this->attr_filter_index_ == nullptr) {
+            return nullptr;
+        }
+        return &this->attr_filter_index_->field_type_map_;
+    }
+
     virtual void
     Serialize(std::ostream& out_stream) const;
 
@@ -492,6 +510,13 @@ public:
 
     virtual void
     Serialize(StreamWriter& writer) const = 0;
+
+    /// serialize in the chunked format (see Index::Serialize(SerializeWriter&, uint64_t))
+    virtual void
+    Serialize(SerializeWriter& writer, uint64_t chunk_size) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "index does not support chunked serialization");
+    }
 
     [[nodiscard]] virtual BinarySet
     Serialize() const;
@@ -552,6 +577,12 @@ public:
     }
 
 protected:
+    DatasetPtr
+    get_data_by_ids_with_flag(const int64_t* ids,
+                              int64_t count,
+                              uint64_t selected_data_flag,
+                              Vector<InnerIdType>& inner_ids) const;
+
     virtual MetadataPtr
     collect_streaming_header() const;
 

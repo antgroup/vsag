@@ -15,7 +15,7 @@ one, read it top-to-bottom, then adapt it to your data.
 ## Build
 
 Examples are gated behind `ENABLE_EXAMPLES=ON`. The shortest path is
-`make dev`, which enables tests, Python bindings, tools, mockimpl, and
+`make dev`, which enables tests, Python bindings, tools, and
 the examples in a single configure:
 
 ```bash
@@ -108,6 +108,7 @@ together when the directory is listed:
 | [`402_persistent_streaming.cpp`](402_persistent_streaming.cpp) | Streaming serialization for large indexes. |
 | [`403_persistent_streaming_load.cpp`](403_persistent_streaming_load.cpp) | Static `Index::Load` from streaming serialization across index types. |
 | [`404_persistent_streaming_load_hybrid.cpp`](404_persistent_streaming_load_hybrid.cpp) | Static `Index::Load` for a hybrid HGraph index with memory and disk-backed RaBitQ split codes. |
+| [`408_feature_reader_prefetch.cpp`](408_feature_reader_prefetch.cpp) | Optional `ReaderPrefetcher` implementation, public load parameter activation, and observable search-time hints. |
 
 ### Quantization (`5xx`)
 

@@ -1,6 +1,6 @@
 name: Improvement
 description: Refactor, performance tweak, chore, or test-only change.
-title: "[improve](<area>): <short imperative summary>"
+title: "[improve](<scope>): <short imperative summary>"
 labels: ["kind/improvement"]
 assignees: ["wxyucs"]
 body:
@@ -17,17 +17,37 @@ body:
       required: true
 
   - type: dropdown
+    id: module
+    attributes:
+      label: Affected module
+      description: Select the primary product module, or not applicable for a cross-cutting issue.
+      options:
+        - module/api
+        - module/attr
+        - module/datacell
+        - module/index
+        - module/simd
+        - not applicable
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
     id: area
     attributes:
       label: Affected area
+      description: Select the primary cross-cutting area, or not applicable if none applies.
       options:
-        - hgraph
-        - ivf
-        - sindi
-        - pyvsag
-        - eval_performance
-        - build
-        - docs
+        - area/bindings-node
+        - area/bindings-python
+        - area/ci
+        - area/dependencies
+        - area/docker
+        - area/docs
+        - area/examples
+        - area/testing
+        - area/tools
+        - not applicable
         - other
     validations:
       required: true

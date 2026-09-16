@@ -19,8 +19,10 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <shared_mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "analyzer/analyzer.h"
@@ -102,18 +104,6 @@ has_sorted_posting_lists(const JsonType& basic_info) {
     return basic_info.Contains(SINDI_POSTING_LIST_FORMAT_VERSION_KEY) and
            basic_info[SINDI_POSTING_LIST_FORMAT_VERSION_KEY].GetInt() >=
                SINDI_SORTED_POSTING_LIST_FORMAT_VERSION;
-}
-
-DistanceEvaluationBackend
-sparse_backend(SparseValueQuantizationType quant_type) {
-    switch (quant_type) {
-        case SparseValueQuantizationType::SQ8:
-            return DistanceEvaluationBackend::SPARSE_SQ8;
-        case SparseValueQuantizationType::FP16:
-            return DistanceEvaluationBackend::SPARSE_FP16;
-        default:
-            return DistanceEvaluationBackend::SPARSE_FP32;
-    }
 }
 
 uint32_t
@@ -246,6 +236,25 @@ get_bits_for_term_id_limit(uint32_t term_id_limit) {
 ParamPtr
 SINDI::CheckAndMappingExternalParam(const JsonType& external_param,
                                     const IndexCommonParam& common_param) {
+    static const std::unordered_set<std::string> supported_keys = {
+        SPARSE_TERM_ID_LIMIT,
+        SPARSE_DOC_PRUNE_RATIO,
+        USE_REORDER_KEY,
+        USE_QUANTIZATION,
+        SPARSE_WINDOW_SIZE,
+        SPARSE_AVG_DOC_TERM_LENGTH,
+        SPARSE_DESERIALIZE_WITHOUT_FOOTER,
+        SPARSE_DESERIALIZE_WITHOUT_BUFFER,
+        SPARSE_REMAP_TERM_IDS,
+        SPARSE_RERANK_TYPE,
+        SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD,
+        SPARSE_IMMUTABLE,
+    };
+    for (const auto& [key, value] : external_param.GetInnerJson()->items()) {
+        (void)value;
+        CHECK_ARGUMENT(supported_keys.find(key) != supported_keys.end(),
+                       fmt::format("invalid config param: {}", key));
+    }
     auto ptr = std::make_shared<SINDIParameter>();
     ptr->FromJson(external_param);
     return ptr;
@@ -253,13 +262,14 @@ SINDI::CheckAndMappingExternalParam(const JsonType& external_param,
 
 SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param),
+      term_id_limit_(param->term_id_limit),
+      window_size_(param->window_size),
       use_reorder_(param->use_reorder),
+      doc_prune_ratio_(param->doc_prune_ratio),
       sparse_value_quant_type_(param->sparse_value_quant_type),
       rerank_type_(param->rerank_type),
       dmq_shared_codebook_threshold_(param->dmq_shared_codebook_threshold),
-      term_id_limit_(param->term_id_limit),
-      window_size_(param->window_size),
-      doc_prune_ratio_(param->doc_prune_ratio),
+      metadata_filter_(common_param.allocator_.get()),
       deserialize_without_footer_(param->deserialize_without_footer),
       deserialize_without_buffer_(param->deserialize_without_buffer),
       quantization_params_(std::make_shared<QuantizationParams>()),
@@ -440,6 +450,9 @@ SINDI::add(const DatasetPtr& base, bool sort_affected_windows) {
 
     auto data_num = base->GetNumElements();
     CHECK_ARGUMENT(data_num > 0, "data_num is zero when add vectors");
+    const auto current_element_count = cur_element_count_.load(std::memory_order_relaxed);
+    auto metadata_build = metadata_filter_.PrepareBuild(base, current_element_count);
+    const auto first_inner_id = static_cast<uint32_t>(current_element_count);
 
     const auto* sparse_vectors = base->GetSparseVectors();
     const auto* ids = base->GetIds();
@@ -462,7 +475,11 @@ SINDI::add(const DatasetPtr& base, bool sort_affected_windows) {
     if (use_reorder_) {
         rerank_vectors.reserve(data_num);
     }
-    for (uint32_t i = 0; i < data_num; ++i) {
+    for (int64_t position = 0; position < data_num; ++position) {
+        const auto i =
+            metadata_build.Enabled()
+                ? static_cast<int64_t>(metadata_build.SourceIndex(static_cast<uint32_t>(position)))
+                : position;
         const auto& sparse_vector = sparse_vectors[i];
         if (label_table_->CheckLabel(ids[i])) {
             failed_ids.push_back(ids[i]);
@@ -507,6 +524,7 @@ SINDI::add(const DatasetPtr& base, bool sort_affected_windows) {
         if (use_reorder_) {
             rerank_vectors.push_back(sparse_vectors[i]);
         }
+        metadata_build.RecordSuccess(static_cast<uint32_t>(position));
         last_affected_window = cur_element_count_ / window_size_;
         cur_element_count_++;
     }
@@ -514,6 +532,9 @@ SINDI::add(const DatasetPtr& base, bool sort_affected_windows) {
         rerank_flat_->BatchInsertVector(rerank_vectors.data(),
                                         static_cast<InnerIdType>(rerank_vectors.size()));
     }
+    metadata_filter_.CommitBuild(std::move(metadata_build),
+                                 first_inner_id,
+                                 static_cast<uint32_t>(cur_element_count_.load()));
     if (sort_affected_windows) {
         for (int64_t window = first_affected_window; window <= last_affected_window; ++window) {
             mutable_term_datacell_->SortByValue(static_cast<uint32_t>(window));
@@ -547,6 +568,7 @@ SINDI::build_immutable(const DatasetPtr& base) {
     const auto* ids = base->GetIds();
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
+    auto metadata_build = metadata_filter_.PrepareBuild(base, 0);
 
     if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
         this->init_quantization_params_from_vectors(base);
@@ -577,7 +599,11 @@ SINDI::build_immutable(const DatasetPtr& base) {
     if (use_reorder_) {
         rerank_vectors.reserve(data_num);
     }
-    for (int64_t i = 0; i < data_num; ++i) {
+    for (int64_t position = 0; position < data_num; ++position) {
+        const auto i =
+            metadata_build.Enabled()
+                ? static_cast<int64_t>(metadata_build.SourceIndex(static_cast<uint32_t>(position)))
+                : position;
         const auto& sparse_vector = sparse_vectors[i];
         if (label_table_->CheckLabel(ids[i])) {
             failed_ids.push_back(ids[i]);
@@ -621,6 +647,7 @@ SINDI::build_immutable(const DatasetPtr& base) {
         if (use_reorder_) {
             rerank_vectors.push_back(sparse_vectors[i]);
         }
+        metadata_build.RecordSuccess(static_cast<uint32_t>(position));
         ++cur_element_count_;
 
         if (cur_element_count_ % window_size_ == 0) {
@@ -634,6 +661,8 @@ SINDI::build_immutable(const DatasetPtr& base) {
         rerank_flat_->BatchInsertVector(rerank_vectors.data(),
                                         static_cast<InnerIdType>(rerank_vectors.size()));
     }
+    metadata_filter_.CommitBuild(
+        std::move(metadata_build), 0, static_cast<uint32_t>(cur_element_count_.load()));
     this->cal_memory_usage();
     return failed_ids;
 }
@@ -728,6 +757,13 @@ SINDI::KnnSearch(const DatasetPtr& query,
         create_filter_callback_limiter(filter, filter_callback_remaining));
 
     SearchStatistics statistics;
+    const auto metadata_route = metadata_filter_.Classify(query, window_size_);
+    if (metadata_route.kind == SindiHostRouteKind::EMPTY) {
+        auto result = make_empty_result();
+        result->Statistics(statistics.Dump());
+        return result;
+    }
+    metadata_filter_.ApplyFilter(metadata_route, inner_param.is_inner_id_allowed);
     SparseVector effective_query = sparse_query;
     Vector<uint32_t> tmp_ids(allocator);
     Vector<float> tmp_vals(allocator);
@@ -750,7 +786,8 @@ SINDI::KnnSearch(const DatasetPtr& query,
                                           rerank_query,
                                           nullptr,
                                           &statistics,
-                                          filter_callback_remaining_ptr);
+                                          filter_callback_remaining_ptr,
+                                          metadata_route);
     result->Statistics(statistics.Dump());
     return FilterDatasetByThreshold(result, threshold, allocator, k);
 }
@@ -764,7 +801,8 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                    const SparseVector* original_query,
                    ReasoningContext* reasoning_ctx,
                    SearchStatistics* statistics,
-                   const uint64_t* filter_callback_remaining) const {
+                   const uint64_t* filter_callback_remaining,
+                   const SindiMetadataSearchRoute& metadata_route) const {
     auto* search_allocator = allocator != nullptr ? allocator : allocator_;
     // computer and heap
     MaxHeap heap(search_allocator);
@@ -777,24 +815,25 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
     // window iteration
     Vector<float> dists(window_size_, 0.0F, search_allocator);
     auto filter = inner_param.is_inner_id_allowed;
-    const auto [min_window_id, max_window_id] = this->get_min_max_window_id(filter);
+    auto [min_window_id, max_window_id] = this->get_min_max_window_id(filter);
+    SindiMetadataFilter::ApplyWindowRoute(
+        metadata_route, window_size_, min_window_id, max_window_id);
     auto selected_buckets = reasoning_ctx != nullptr
                                 ? std::make_unique<Vector<BucketIdType>>(search_allocator)
                                 : nullptr;
     SindiQueryContext query_context(search_allocator);
-    for (auto cur = min_window_id; cur <= max_window_id; cur++) {
-        const auto window_start_id = static_cast<uint32_t>(cur) * window_size_;
-        // compute
-        term_datacell_->QueryWindow(dists.data(),
-                                    static_cast<uint32_t>(cur),
-                                    computer,
-                                    use_term_lists_heap_insert,
-                                    query_context);
-        if (statistics != nullptr) {
-            statistics->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
-                                    sparse_backend(sparse_value_quant_type_),
-                                    query_context.evaluation_tracker.Count());
+    for (auto cur = min_window_id; cur <= max_window_id; ++cur) {
+        cur = metadata_filter_.NextMatchingWindow(metadata_route, window_size_, cur, max_window_id);
+        if (cur > max_window_id) {
+            break;
         }
+        const auto window_id = static_cast<uint32_t>(cur);
+        const auto window_start_id = window_id * window_size_;
+        computer->SetTermPruneEnabled(
+            not metadata_filter_.RequiresFullTermScan(metadata_route, window_id, window_size_));
+        // compute
+        term_datacell_->QueryWindow(
+            dists.data(), window_id, computer, use_term_lists_heap_insert, query_context);
 
         if (reasoning_ctx != nullptr) {
             selected_buckets->push_back(static_cast<BucketIdType>(cur));
@@ -817,7 +856,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         if (use_term_lists_heap_insert) {
             filter_callback_limit_reached =
                 term_datacell_->InsertHeapByWindow(dists.data(),
-                                                   static_cast<uint32_t>(cur),
+                                                   window_id,
                                                    computer,
                                                    heap,
                                                    inner_param,
@@ -844,6 +883,10 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         if (filter_callback_limit_reached) {
             break;
         }
+    }
+
+    if (statistics != nullptr and query_context.has_untracked_approximate_evaluations) {
+        statistics->complete.store(false, std::memory_order_relaxed);
     }
 
     if (selected_buckets != nullptr and not selected_buckets->empty()) {
@@ -1053,6 +1096,16 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
         reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
     }
 
+    const auto metadata_route = is_range ? SindiMetadataSearchRoute{}
+                                         : metadata_filter_.Classify(request.query_, window_size_);
+    if (metadata_route.kind == SindiHostRouteKind::EMPTY) {
+        auto result = make_empty_result();
+        result->Statistics(statistics.Dump());
+        this->AttachReasoningReport(result, reasoning_ctx.get());
+        return result;
+    }
+    metadata_filter_.ApplyFilter(metadata_route, inner_param.is_inner_id_allowed);
+
     SparseVector effective_query = sparse_query;
     Vector<uint32_t> tmp_ids(allocator);
     Vector<float> tmp_vals(allocator);
@@ -1097,7 +1150,8 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
                                          rerank_query,
                                          reasoning_ctx.get(),
                                          &statistics,
-                                         filter_callback_remaining_ptr);
+                                         filter_callback_remaining_ptr,
+                                         metadata_route);
     }
 
     result->Statistics(statistics.Dump());
@@ -1158,6 +1212,7 @@ SINDI::cal_memory_usage() {
         memory +=
             static_cast<uint64_t>(term_id_mapper_->Size()) * TERM_ID_MAPPER_ENTRY_MEMORY_BYTES;
     }
+    memory += metadata_filter_.GetMemoryUsage();
 
     std::unique_lock lock(this->memory_usage_mutex_);
     this->current_memory_usage_.store(static_cast<int64_t>(memory));
@@ -1212,6 +1267,11 @@ SINDI::Serialize(StreamWriter& writer) const {
     if (remap_term_ids_ && term_id_mapper_) {
         term_id_mapper_->Serialize(writer);
     }
+    if (metadata_filter_.HasHostMetadata()) {
+        metadata_filter_.SerializeHostMetadata(writer);
+    } else if (metadata_filter_.HasDateMetadata()) {
+        metadata_filter_.SerializeDateMetadata(writer);
+    }
 
     JsonType jsonify_basic_info;
     jsonify_basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
@@ -1221,6 +1281,12 @@ SINDI::Serialize(StreamWriter& writer) const {
         jsonify_basic_info[SINDI_RERANK_FLAT_FORMAT_KEY].SetInt(SINDI_RERANK_FLAT_FORMAT_DMQ);
     } else if (use_reorder_) {
         jsonify_basic_info[SINDI_RERANK_FLAT_FORMAT_KEY].SetInt(SINDI_RERANK_FLAT_FORMAT_DATACELL);
+    }
+    if (metadata_filter_.HasHostMetadata()) {
+        jsonify_basic_info[SINDI_HAS_HOST_METADATA_KEY].SetBool(true);
+    } else if (metadata_filter_.HasDateMetadata()) {
+        jsonify_basic_info[SINDI_DATE_METADATA_FORMAT_VERSION_KEY].SetInt(
+            SINDI_DATE_METADATA_FORMAT_VERSION);
     }
     write_index_footer(writer, jsonify_basic_info);
 }
@@ -1248,6 +1314,13 @@ SINDI::collect_streaming_header() const {
                                        : SINDI_RERANK_FLAT_FORMAT_DATACELL;
         basic_info[SINDI_RERANK_FLAT_FORMAT_KEY].SetInt(rerank_format);
     }
+    if (metadata_filter_.HasHostMetadata()) {
+        basic_info[SINDI_HAS_HOST_METADATA_KEY].SetBool(true);
+    }
+    if (metadata_filter_.HasDateMetadata()) {
+        basic_info[SINDI_DATE_METADATA_FORMAT_VERSION_KEY].SetInt(
+            SINDI_DATE_METADATA_FORMAT_VERSION);
+    }
     metadata->Set(BASIC_INFO, basic_info);
 
     JsonType manifest;
@@ -1270,6 +1343,20 @@ SINDI::collect_streaming_header() const {
     }
     if (this->remap_term_ids_ && this->term_id_mapper_) {
         auto tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_TERM_ID_MAPPER);
+        AppendStreamingManifestBlock(manifest,
+                                     tag,
+                                     StreamSerializationBlockCurrentVersion(tag),
+                                     StreamSerializationTagCritical(tag));
+    }
+    if (metadata_filter_.HasHostMetadata()) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_HOST_METADATA);
+        AppendStreamingManifestBlock(manifest,
+                                     tag,
+                                     StreamSerializationBlockCurrentVersion(tag),
+                                     StreamSerializationTagCritical(tag));
+    }
+    if (metadata_filter_.HasDateMetadata()) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_DATE_METADATA);
         AppendStreamingManifestBlock(manifest,
                                      tag,
                                      StreamSerializationBlockCurrentVersion(tag),
@@ -1304,8 +1391,6 @@ SINDI::serialize_windows(StreamWriter& writer) const {
 void
 SINDI::serialize_streaming_body(StreamWriter& writer) const {
     std::shared_lock rlock(this->global_mutex_);
-    CHECK_ARGUMENT(not immutable_enabled_,
-                   "immutable SINDI runtime does not support SerializeStreaming");
 
     auto windows_tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_WINDOWS);
     auto label_tag = static_cast<uint32_t>(StreamSerializationTag::LABEL_TABLE);
@@ -1329,6 +1414,20 @@ SINDI::serialize_streaming_body(StreamWriter& writer) const {
         WriteStreamingBlock(
             writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& w) {
                 this->term_id_mapper_->Serialize(w);
+            });
+    }
+    if (metadata_filter_.HasHostMetadata()) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_HOST_METADATA);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& block) {
+                metadata_filter_.SerializeHostMetadata(block);
+            });
+    }
+    if (metadata_filter_.HasDateMetadata()) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_DATE_METADATA);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& block) {
+                metadata_filter_.SerializeDateMetadata(block);
             });
     }
 }
@@ -1410,6 +1509,16 @@ SINDI::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
 
     auto basic_info = metadata->Get(BASIC_INFO);
     const auto postings_sorted = has_sorted_posting_lists(basic_info);
+    const bool expects_host_metadata = basic_info.Contains(SINDI_HAS_HOST_METADATA_KEY) &&
+                                       basic_info[SINDI_HAS_HOST_METADATA_KEY].GetBool();
+    const bool expects_date_metadata = basic_info.Contains(SINDI_DATE_METADATA_FORMAT_VERSION_KEY);
+    if (expects_date_metadata) {
+        CHECK_ARGUMENT(IsSupportedSindiDateMetadataVersion(
+                           basic_info[SINDI_DATE_METADATA_FORMAT_VERSION_KEY].GetInt()),
+                       "unsupported SINDI streaming date metadata version");
+    }
+    CHECK_ARGUMENT(not(expects_host_metadata and expects_date_metadata),
+                   "SINDI streaming metadata cannot contain separate host and date blocks");
     if (basic_info.Contains(INDEX_PARAM)) {
         auto index_param = std::make_shared<SINDIParameter>();
         index_param->FromString(basic_info[INDEX_PARAM].GetString());
@@ -1426,6 +1535,8 @@ SINDI::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
     bool loaded_label_table = false;
     bool loaded_rerank = false;
     bool loaded_term_mapper = false;
+    bool loaded_host_metadata = false;
+    bool loaded_date_metadata = false;
 
     bool has_dmq_rerank_format = false;
     if (this->use_reorder_) {
@@ -1504,6 +1615,32 @@ SINDI::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
                     loaded_term_mapper = true;
                 }
                 break;
+            case StreamSerializationTag::SINDI_HOST_METADATA:
+                CHECK_ARGUMENT(expects_host_metadata,
+                               "unexpected SINDI streaming host metadata block");
+                CHECK_ARGUMENT(not loaded_host_metadata,
+                               "duplicate SINDI streaming host metadata block");
+                CHECK_ARGUMENT(loaded_windows, "SINDI streaming host metadata must follow windows");
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    metadata_filter_.DeserializeHostMetadata(
+                        block, static_cast<uint64_t>(cur_element_count_.load()));
+                });
+                loaded_host_metadata = true;
+                break;
+            case StreamSerializationTag::SINDI_DATE_METADATA:
+                CHECK_ARGUMENT(expects_date_metadata,
+                               "unexpected SINDI streaming date metadata block");
+                CHECK_ARGUMENT(not loaded_date_metadata,
+                               "duplicate SINDI streaming date metadata block");
+                CHECK_ARGUMENT(not loaded_host_metadata,
+                               "SINDI streaming metadata cannot load host and date blocks");
+                CHECK_ARGUMENT(loaded_windows, "SINDI streaming date metadata must follow windows");
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    metadata_filter_.DeserializeDateMetadata(
+                        block, static_cast<uint64_t>(cur_element_count_.load()));
+                });
+                loaded_date_metadata = true;
+                break;
             default:
                 if (block_header.IsCritical()) {
                     throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
@@ -1533,16 +1670,30 @@ SINDI::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
         throw VsagException(ErrorType::READ_ERROR,
                             "SINDI streaming serialization term mapper block is missing");
     }
+    if (expects_host_metadata && !loaded_host_metadata) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "SINDI streaming serialization host metadata block is missing");
+    }
+    if (expects_date_metadata && !loaded_date_metadata) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "SINDI streaming serialization date metadata block is missing");
+    }
+    if (!loaded_host_metadata && !loaded_date_metadata) {
+        metadata_filter_.Clear();
+    }
     this->cal_memory_usage();
 }
 
 void
 SINDI::Deserialize(StreamReader& reader) {
     std::scoped_lock wlock(this->global_mutex_);
+    metadata_filter_.Clear();
 
     bool has_datacell_rerank_format = false;
     bool has_footer = false;
     bool has_dmq_rerank_format = false;
+    bool has_host_metadata = false;
+    bool has_date_metadata = false;
     bool postings_sorted = false;
     if (not deserialize_without_footer_) {
         JsonType jsonify_basic_info;
@@ -1576,6 +1727,17 @@ SINDI::Deserialize(StreamReader& reader) {
                     has_datacell_rerank_format = rerank_format == SINDI_RERANK_FLAT_FORMAT_DATACELL;
                     has_dmq_rerank_format = rerank_format == SINDI_RERANK_FLAT_FORMAT_DMQ;
                 }
+                if (jsonify_basic_info.Contains(SINDI_DATE_METADATA_FORMAT_VERSION_KEY)) {
+                    CHECK_ARGUMENT(
+                        IsSupportedSindiDateMetadataVersion(
+                            jsonify_basic_info[SINDI_DATE_METADATA_FORMAT_VERSION_KEY].GetInt()),
+                        "unsupported SINDI date metadata version");
+                    has_date_metadata = true;
+                }
+                has_host_metadata = jsonify_basic_info.Contains(SINDI_HAS_HOST_METADATA_KEY) &&
+                                    jsonify_basic_info[SINDI_HAS_HOST_METADATA_KEY].GetBool();
+                CHECK_ARGUMENT(not(has_host_metadata and has_date_metadata),
+                               "SINDI metadata cannot contain separate host and date payloads");
             } else {
                 logger::debug("SINDI footer not found, fallback to legacy deserialize path");
             }
@@ -1661,6 +1823,13 @@ SINDI::Deserialize(StreamReader& reader) {
         term_id_mapper_->Deserialize(reader_ref);
     }
 
+    if (has_host_metadata) {
+        metadata_filter_.DeserializeHostMetadata(reader_ref,
+                                                 static_cast<uint64_t>(cur_element_count_.load()));
+    } else if (has_date_metadata) {
+        metadata_filter_.DeserializeDateMetadata(reader_ref,
+                                                 static_cast<uint64_t>(cur_element_count_.load()));
+    }
     this->cal_memory_usage();
 }
 

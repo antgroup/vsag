@@ -15,6 +15,9 @@
 
 #pragma once
 
+#include <array>
+#include <cstdint>
+#include <cstring>
 #include <limits>
 #include <string>
 
@@ -25,6 +28,22 @@
 #include "rabitq_quantizer_parameter.h"
 
 namespace vsag {
+
+[[nodiscard]] inline bool
+IsFiniteRaBitQValue(float value) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    constexpr uint32_t k_exponent_mask = 0x7F800000U;
+    // Exponent zero (including subnormal values) is finite. Only the all-ones exponent used by
+    // infinities and NaNs is rejected; use bits because release builds enable fast-math.
+    return (bits & k_exponent_mask) != k_exponent_mask;
+}
+
+enum class RaBitQFusedIPPrecision : uint8_t {
+    INVALID = 0,
+    EXACT = 1,
+    APPROXIMATE = 2,
+};
 
 /** Implement of RaBitQ Quantization, Integrate MRQ (Minimized Residual Quantization) and Extend-RaBitQ
  *
@@ -71,6 +90,14 @@ public:
     bool
     TrainImpl(const float* data, uint64_t count);
 
+    void
+    SetCentroid(const float* centroid);
+
+    // Fused residual clusters differ only by centroid. Reuse the immutable trained transforms
+    // instead of retaining one dense dim-by-dim matrix per cluster.
+    void
+    ShareFusedModelFrom(const RaBitQuantizer& source);
+
     bool
     EncodeOneImpl(const float* data, uint8_t* codes) const;
 
@@ -103,6 +130,110 @@ public:
     void
     ProcessTransformedResidualQuery(const float* transformed_query,
                                     Computer<RaBitQuantizer>& computer) const;
+
+    void
+    TransformFusedQuery(const float* query,
+                        Vector<float>& transformed_query,
+                        float& query_raw_norm,
+                        norm_type& mrq_norm_sqr) const;
+
+    void
+    ProcessTransformedFusedQuery(const float* transformed_query,
+                                 float query_raw_norm,
+                                 norm_type mrq_norm_sqr,
+                                 Computer<RaBitQuantizer>& computer) const;
+
+    void
+    PrepareHnswFourBitQuery(const float* transformed_query,
+                            Vector<uint8_t>& query_planes,
+                            float& delta,
+                            float& vl,
+                            float& query_sum) const;
+
+    void
+    EncodeHnswOneBitMetadata(const float* data, uint8_t* one_bit_code) const;
+
+    bool
+    EncodeHnswSupplement(const float* data, uint8_t* supplement_code) const;
+
+    void
+    ComputeHnswCentroidTerms(const float* transformed_query, float& g_add, float& g_error) const;
+
+    bool
+    ComputeHnswOneBit(
+        const uint8_t* query_planes,
+        float query_delta,
+        float query_vl,
+        float query_sum,
+        float g_add,
+        float g_error,
+        const uint8_t* one_bit_code,
+        const uint8_t* supplement_code,
+        float* distance,
+        float* lower_bound,
+        float* filter_inner_product,
+        float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN()) const;
+
+    bool
+    ComputeHnswFull(const float* transformed_query,
+                    float query_sum,
+                    float g_add,
+                    float g_error,
+                    const uint8_t* one_bit_code,
+                    const uint8_t* supplement_code,
+                    float filter_inner_product,
+                    float* distance,
+                    float* lower_bound) const;
+
+    // Replaces the native split metadata in-place with fused affine coefficients.
+    // The x/y plane payload and the record sizes are unchanged.
+    bool
+    EncodeFusedAffineMetadata(const float* data,
+                              uint8_t* one_bit_code,
+                              uint8_t* supplement_code) const;
+
+    bool
+    DecodeFusedSplitCode(const uint8_t* one_bit_code,
+                         const uint8_t* supplement_code,
+                         bool legacy_hnsw_codec,
+                         float* data) const;
+
+    bool
+    ComputeFusedAffineFilter(const float* transformed_query,
+                             const uint8_t* query_planes,
+                             float query_delta,
+                             float query_vl,
+                             float query_sum,
+                             float g_add,
+                             float g_error,
+                             const uint8_t* one_bit_code,
+                             float runtime_rabitq_error_rate,
+                             float* distance,
+                             float* lower_bound,
+                             float* centered_filter_inner_product,
+                             RaBitQFusedIPPrecision* precision) const;
+
+    bool
+    ComputeFusedAffineFullWithFilterIP(const float* transformed_query,
+                                       float query_sum,
+                                       float g_add,
+                                       const uint8_t* one_bit_code,
+                                       const uint8_t* supplement_code,
+                                       float exact_centered_filter_inner_product,
+                                       float* distance) const;
+
+    bool
+    ComputeFusedAffineFullDirect(const float* transformed_query,
+                                 float query_sum,
+                                 float g_add,
+                                 const uint8_t* one_bit_code,
+                                 const uint8_t* supplement_code,
+                                 float* distance) const;
+
+    [[nodiscard]] float
+    DefaultRaBitQErrorRate() const {
+        return rabitq_error_rate_;
+    }
 
     void
     ComputeDistImpl(Computer<RaBitQuantizer>& computer, const uint8_t* codes, float* dists) const;
@@ -343,6 +474,19 @@ public:
         float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN(),
         float* filter_inner_product = nullptr) const;
 
+    // Same coarse x-bit estimate as ComputeDistWithOneBitLowerBound(). When the
+    // filter-stage inner product is exact, it is returned for direct split
+    // reranking. The x=1 four-bit traversal estimate is approximate, so that
+    // mode returns NaN and requires the full path to rescan the x-bit code.
+    bool
+    ComputeDistWithOneBitLowerBoundAndFilterIP(
+        Computer<RaBitQuantizer>& computer,
+        const uint8_t* one_bit_code,
+        float* dists,
+        float* lower_bound,
+        float* filter_inner_product,
+        float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN()) const;
+
     void
     ComputeDistsWithOneBitLowerBoundBatch4(
         Computer<RaBitQuantizer>& computer,
@@ -379,16 +523,24 @@ public:
                                                   float* dists) const;
 
     // Computes the full x+y split distance while reusing the filter-stage distance.
-    // `filter_dist` is the x-bit distance already produced by
+    // `filter_dist` is the exact x-bit distance already produced by
     // ComputeDistWithOneBitLowerBound(); it is not a lower bound and not the final
     // x+y distance. Passing it here lets the reorder path scan only the y-bit
-    // supplement planes instead of rescanning the x-bit filter planes.
+    // supplement planes instead of rescanning the x-bit filter planes. The
+    // x=1 four-bit traversal estimate is rejected because it is approximate.
     bool
     ComputeDistWithSplitCodeAndFilterDist(Computer<RaBitQuantizer>& computer,
                                           const uint8_t* one_bit_code,
                                           const uint8_t* supplement_code,
                                           float filter_dist,
                                           float* dists) const;
+
+    bool
+    ComputeDistWithSplitCodeAndFilterIP(Computer<RaBitQuantizer>& computer,
+                                        const uint8_t* one_bit_code,
+                                        const uint8_t* supplement_code,
+                                        float filter_inner_product,
+                                        float* dists) const;
 
     [[nodiscard]] uint64_t
     OneBitRecordNormOffset() const;
@@ -501,6 +653,11 @@ private:
                                                     float* dists) const;
 
     bool
+    ComputeFusedExactCenteredFilterIP(const float* transformed_query,
+                                      const uint8_t* one_bit_code,
+                                      float* centered_filter_inner_product) const;
+
+    bool
     EncodeOneInternal(const float* data,
                       uint8_t* codes,
                       uint8_t* scalar_code,
@@ -508,6 +665,40 @@ private:
 
     uint64_t
     UnpackScalarCode(const uint8_t* codes, uint8_t* scalar_code) const;
+
+    struct SplitLayout {
+        bool is_split{false};
+        bool has_multi_bit_filter{false};
+        uint32_t filter_bits{1};
+        uint32_t reorder_bits{0};
+        uint64_t plane_bytes{0};
+        uint64_t code_planes_size{0};
+        uint64_t code_meta_offset{0};
+        uint64_t code_meta_size{0};
+        uint64_t filter_planes_size{0};
+        uint64_t supplement_planes_size{0};
+        uint64_t supplement_meta_offset{0};
+        uint64_t one_bit_record_norm_offset{0};
+        uint64_t one_bit_record_norm_code_offset{0};
+        uint64_t one_bit_record_mrq_norm_offset{0};
+        uint64_t one_bit_record_raw_norm_offset{0};
+        uint64_t one_bit_record_low_bound_error_offset{0};
+        uint64_t one_bit_record_one_bit_error_offset{0};
+        uint64_t one_bit_record_size{0};
+        uint64_t one_bit_code_size{0};
+        uint64_t supplement_code_size{0};
+        uint64_t supplement_norm_code_offset{0};
+        uint64_t supplement_norm_offset{0};
+        uint64_t supplement_error_offset{0};
+        uint64_t supplement_mrq_norm_offset{0};
+        uint64_t supplement_raw_norm_offset{0};
+        std::array<uint64_t, 8> sequential_plane_offsets{};
+        std::array<uint64_t, 8> stored_plane_indices{};
+        std::array<uint64_t, 8> stored_plane_offsets{};
+    };
+
+    void
+    RefreshSplitLayout(bool is_split);
 
     [[nodiscard]] norm_type
     ComputeScalarCodeNorm(const uint8_t* scalar_codes,
@@ -562,6 +753,7 @@ private:
     uint64_t offset_raw_norm_{0};
     uint64_t offset_low_bound_error_{0};
     uint64_t offset_one_bit_error_{0};
+    SplitLayout split_layout_{};
 };
 
 }  // namespace vsag

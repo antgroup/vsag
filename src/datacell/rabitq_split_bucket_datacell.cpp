@@ -2085,7 +2085,7 @@ RaBitQSplitBucketDataCell::Serialize(StreamWriter& writer) {
 }
 
 void
-RaBitQSplitBucketDataCell::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+RaBitQSplitBucketDataCell::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     const auto expected_bucket_count = this->bucket_count_;
     BucketInterface::Deserialize(reader);
     CHECK_ARGUMENT(this->bucket_count_ == expected_bucket_count,

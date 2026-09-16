@@ -26,6 +26,11 @@ DEFINE_POINTER2(FlattenDataCellParam, FlattenDataCellParameter);
 
 class FlattenDataCellParameter : public FlattenInterfaceParameter {
 public:
+    static FlattenDataCellParamPtr
+    CreateDefault(const std::string& quantization_type,
+                  const std::string& io_type,
+                  bool hold_molds = false);
+
     explicit FlattenDataCellParameter();
 
     void

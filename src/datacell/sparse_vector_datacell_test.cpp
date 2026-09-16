@@ -69,6 +69,7 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
     data_cell->BatchInsertVector(sparse_vectors.data() + half_count + half_count / 2,
                                  half_count / 2,
                                  idx.data() + half_count + half_count / 2);
+    REQUIRE_NOTHROW(data_cell->Resize(base_count - 1));
 
     for (int i = 0; i < base_count - 1; ++i) {
         fixtures::dist_t distance = data_cell->ComputePairVectors(idx[i], idx[i + 1]);
@@ -579,6 +580,33 @@ TEST_CASE("SparseDataCell New Format Sentinel", "[ut][SparseDataCell]") {
         delete[] item.vals_;
         delete[] item.ids_;
     }
+}
+
+TEST_CASE("SparseDataCell rejects undersized legacy location tables", "[ut][SparseDataCell]") {
+    constexpr const char* param_str = R"({
+        "io_params": {"type": "memory_io"},
+        "quantization_params": {"type": "sparse"}
+    })";
+    JsonType parsed_json = JsonType::Parse(param_str);
+    auto param = std::make_shared<SparseVectorDataCellParameter>();
+    param->FromJson(parsed_json);
+    IndexCommonParam common_param;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 100;
+
+    std::stringstream legacy_ss;
+    write_legacy_format(legacy_ss,
+                        /*total_count=*/2,
+                        /*max_capacity=*/2,
+                        /*code_size=*/0,
+                        /*io_bytes=*/{},
+                        /*legacy_entries=*/{{0, 0}},
+                        /*quantizer_bytes=*/{});
+
+    auto loaded = FlattenInterface::MakeInstance(param, common_param);
+    IOStreamReader reader(legacy_ss);
+    REQUIRE_THROWS_AS(loaded->Deserialize(reader), VsagException);
 }
 
 }  // namespace vsag

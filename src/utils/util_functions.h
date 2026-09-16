@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cmath>
+#include <optional>
 #include <string>
 
 #include "index_common_param.h"
@@ -55,14 +56,6 @@ static inline __attribute__((always_inline)) int64_t
 align_up(const int64_t& value, int64_t base) {
     return ((value + base - 1) / base) * base;
 }
-
-std::string
-format_map(const std::string& str, const std::unordered_map<std::string, std::string>& mappings);
-
-void
-mapping_external_param_to_inner(const JsonType& external_json,
-                                ConstParamMap& param_map,
-                                JsonType& inner_json);
 
 std::tuple<DatasetPtr, float*, int64_t*>
 create_fast_dataset(int64_t dim, Allocator* allocator);
@@ -136,6 +129,7 @@ sample_train_data(const DatasetPtr& data,
                   int64_t total_elements,
                   int64_t dim,
                   int64_t train_sample_count,
-                  Allocator* allocator = nullptr);
+                  Allocator* allocator = nullptr,
+                  std::optional<uint64_t> random_seed = std::nullopt);
 
 }  // namespace vsag

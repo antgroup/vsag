@@ -105,7 +105,7 @@ public:
      * @param reader The StreamReader to deserialize the MultiBitsetManager from.
      */
     void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader);
+    Deserialize(LvalueOrRvalue<StreamReader> reader);
 
     /**
      * @brief Retrieves the type of ComputableBitset instances managed by this object.

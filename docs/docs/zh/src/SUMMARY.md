@@ -39,6 +39,7 @@
 # 开发者指南
 
 - [代码目录结构](development/code_structure.md)
+- [C++ 编码指南](development/coding_style.md)
 - [新索引接入检查清单](development/new_index_checklist.md)
 - [编译构建](development/building.md)
 - [离线 / 内网环境构建](development/offline_build.md)
@@ -56,6 +57,8 @@
 - [属性过滤（混合搜索）](advanced/attribute_filter.md)
 - [序列化格式](advanced/serialization.md)
 - [新序列化格式](advanced/new_serialization.md)
+- [分块序列化格式](advanced/chunked_serialization.md)
+- [并行反序列化](advanced/parallel_deserialization.md)
 - [内存管理](advanced/memory.md)
 - [搜索路径 Allocator](advanced/search_allocator.md)
 - [索引自省](advanced/introspection.md)
@@ -95,7 +98,7 @@
 - [FAQ 常见问题](resources/faq.md)
 - [版本日志](resources/release_notes.md)
   - [VSAG 1.0](resources/release_notes/v1.0.md)
-- [2025 路线图](resources/roadmap_2025.md)
+- [VSAG 1.0 历史路线图](resources/roadmap_2025.md)
 - [开源社区](resources/community.md)
 - [使用 AI Agent 创建 Issue](resources/filing_issues_with_agent.md)
 - [关联项目](resources/related_projects.md)

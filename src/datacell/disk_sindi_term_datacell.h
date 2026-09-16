@@ -25,8 +25,8 @@
 #include "datacell/sindi_search_term_datacell.h"
 #include "impl/inner_search_param.h"
 #include "index_common_param.h"
-#include "io/common/basic_io.h"
 #include "io/common/io_parameter.h"
+#include "layout/byte_range_layout.h"
 #include "quantization/sparse_quantization/sparse_term_computer.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
@@ -224,7 +224,7 @@ private:
     uint32_t window_size_{0};
     IOParamPtr io_param_{nullptr};
     IndexCommonParam common_param_;
-    std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
+    mutable ByteRangeLayout<IOTmpl> payload_layout_{};
 
     mutable std::shared_mutex term_layout_mutex_;
     std::vector<DiskTermEntry> term_dict_;

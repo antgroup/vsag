@@ -42,7 +42,49 @@ GetRaBitQFloatPackedSupplementCodeIP() {
 RaBitQFloatPackedSupplementCodeType RaBitQFloatPackedSupplementCodeIP =
     GetRaBitQFloatPackedSupplementCodeIP();
 
+static RaBitQFloatExCode7Type
+GetRaBitQFloatExCode7IP() {
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQFloatExCode7IP;
+#endif
+    }
+    return generic::RaBitQFloatExCode7IP;
+}
+RaBitQFloatExCode7Type RaBitQFloatExCode7IP = GetRaBitQFloatExCode7IP();
 VSAG_DEFINE_SIMD_DISPATCH_VPOPCNTDQ(RaBitQSQ4UBinaryIP, RaBitQSQ4UBinaryType);
+static RaBitQSQ4UBinaryWithBaseSumType
+GetRaBitQSQ4UBinaryIPWithBaseSum() {
+    if (SimdStatus::SupportAVX512VPOPCNTDQ()) {
+#if defined(ENABLE_AVX512VPOPCNTDQ)
+        return avx512vpopcntdq::RaBitQSQ4UBinaryIPWithBaseSum;
+#endif
+    }
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQSQ4UBinaryIPWithBaseSum;
+#endif
+    }
+    return generic::RaBitQSQ4UBinaryIPWithBaseSum;
+}
+RaBitQSQ4UBinaryWithBaseSumType RaBitQSQ4UBinaryIPWithBaseSum = GetRaBitQSQ4UBinaryIPWithBaseSum();
+static RaBitQSQ4UBinaryWithBaseSumBatch4Type
+GetRaBitQSQ4UBinaryIPWithBaseSumBatch4() {
+    if (SimdStatus::SupportAVX512VPOPCNTDQ()) {
+#if defined(ENABLE_AVX512VPOPCNTDQ)
+        return avx512vpopcntdq::RaBitQSQ4UBinaryIPWithBaseSumBatch4;
+#endif
+    }
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQSQ4UBinaryIPWithBaseSumBatch4;
+#endif
+    }
+    return generic::RaBitQSQ4UBinaryIPWithBaseSumBatch4;
+}
+RaBitQSQ4UBinaryWithBaseSumBatch4Type RaBitQSQ4UBinaryIPWithBaseSumBatch4 =
+    GetRaBitQSQ4UBinaryIPWithBaseSumBatch4();
+
 static RaBitQCodeCodeType
 GetRaBitQCodeCodeIP() {
     if (SimdStatus::SupportAVX512()) {
@@ -183,6 +225,39 @@ GetRaBitQFloatThreeBitCenteredIPBatch4() {
 }
 RaBitQFloatThreeBitCenteredBatch4Type RaBitQFloatThreeBitCenteredIPBatch4 =
     GetRaBitQFloatThreeBitCenteredIPBatch4();
+
+static RaBitQFloatFourBitCenteredType
+GetRaBitQFloatFourBitCenteredIP() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::RaBitQFloatFourBitCenteredIP;
+#endif
+    }
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQFloatFourBitCenteredIP;
+#endif
+    }
+    return generic::RaBitQFloatFourBitCenteredIP;
+}
+RaBitQFloatFourBitCenteredType RaBitQFloatFourBitCenteredIP = GetRaBitQFloatFourBitCenteredIP();
+
+static RaBitQFloatFourBitCenteredBatch4Type
+GetRaBitQFloatFourBitCenteredIPBatch4() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::RaBitQFloatFourBitCenteredIPBatch4;
+#endif
+    }
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQFloatFourBitCenteredIPBatch4;
+#endif
+    }
+    return generic::RaBitQFloatFourBitCenteredIPBatch4;
+}
+RaBitQFloatFourBitCenteredBatch4Type RaBitQFloatFourBitCenteredIPBatch4 =
+    GetRaBitQFloatFourBitCenteredIPBatch4();
 
 static RaBitQFloatThreeBitByLookupType
 GetRaBitQFloatThreeBitIPByLookup() {

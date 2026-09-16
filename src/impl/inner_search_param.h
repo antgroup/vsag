@@ -19,6 +19,7 @@
 #include <mutex>
 #include <optional>
 
+#include "quantization/computer.h"
 #include "typing.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/pointer_define.h"
@@ -41,6 +42,7 @@ public:
 
 public:
     int64_t topk{0};
+    int64_t rerank_topk{0};
     float radius{0.0F};
     InnerIdType ep{0};
     uint64_t ef{10};
@@ -55,6 +57,7 @@ public:
     bool enable_rabitq_one_bit_search{false};
     SearchDistanceBatchFunc distance_batch_func{nullptr};
     uint64_t distance_batch_size{1};
+    ComputerInterfacePtr rabitq_fused_computer{nullptr};
 
     // for ivf
     int scan_bucket_size{1};

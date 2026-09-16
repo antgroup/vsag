@@ -64,6 +64,10 @@ auto result = index->KnnSearch(
     R"({"ivf": {"scan_buckets_count": 16}})").value();
 ```
 
+## Input data type
+
+The public `Build`, `Add`, and search paths currently accept FP32 vectors supplied with `Dataset::Float32Vectors`; set `dtype` to `"float32"`. `base_quantization_type` selects internal encoding and storage and does not enable FP16/BF16 input. `dtype: "int8"` is not supported when creating an IVF index.
+
 ## Build parameters
 
 Build-time parameters live under `index_param`. See
@@ -78,7 +82,7 @@ Build-time parameters live under `index_param`. See
 | `ivf_train_type` | string | `"kmeans"` | Centroid training: `kmeans` or `random` |
 | `route_max_degree` | int | `64` | Routing HGraph maximum degree (effective for `ivf`) |
 | `route_ef_construction` | int | `300` | Routing HGraph construction search breadth (effective for `ivf`) |
-| `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` — see the [Quantization chapter](../quantization/README.md) for per-quantizer details |
+| `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` — see the [Quantization chapter](../quantization/) for per-quantizer details |
 | `base_pq_dim` | int | `1` | PQ subspaces (required with `pq` / `pqfs`) |
 | `rabitq_pca_dim` | int | `0` | Optional PCA preprocessing dimension for `base_quantization_type: "rabitq"` |
 | `rabitq_bits_per_dim_query` | int | `32` | Query bits for `rabitq`; allowed values are `4` or `32` |

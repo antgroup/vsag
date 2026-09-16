@@ -15,6 +15,9 @@
 
 #pragma once
 
+#include <string>
+#include <vector>
+
 #include "common.h"
 #include "inner_string_params.h"
 #include "typing.h"
@@ -22,6 +25,20 @@
 namespace vsag {
 
 DEFINE_POINTER2(Param, Parameter);
+
+struct CompatibilityIssue {
+    std::string path;
+    std::string message;
+};
+
+struct CompatibilityReport {
+    std::vector<CompatibilityIssue> issues;
+
+    bool
+    IsCompatible() const {
+        return issues.empty();
+    }
+};
 
 class Parameter {
 public:
@@ -57,6 +74,9 @@ public:
     CheckCompatibility(const ParamPtr& other) const {
         return this->ToString() == other->ToString();
     }
+
+    virtual CompatibilityReport
+    CollectCompatibilityIssues(const ParamPtr& other) const;
 };
 
 }  // namespace vsag

@@ -17,7 +17,7 @@
 
 #include "compressed_graph_datacell.h"
 #include "graph_datacell.h"
-#include "io/io_headers.h"
+#include "io/common/io_type_dispatch.h"
 #include "sparse_graph_datacell.h"
 
 namespace vsag {
@@ -57,30 +57,16 @@ GraphInterface::MakeInstance(const GraphInterfaceParamPtr& graph_param,
         case GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_COMPRESSED:
             return std::make_shared<CompressedGraphDataCell>(graph_param, common_param);
         case GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT:
-            auto io_string = std::dynamic_pointer_cast<GraphDataCellParameter>(graph_param)
-                                 ->io_parameter_->GetTypeName();
-            if (io_string == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
-                return std::make_shared<GraphDataCell<MemoryBlockIO>>(graph_param, common_param);
-            }
-            if (io_string == IO_TYPE_VALUE_MEMORY_IO) {
-                return std::make_shared<GraphDataCell<MemoryIO>>(graph_param, common_param);
-            }
-            if (io_string == IO_TYPE_VALUE_MMAP_IO) {
-                return std::make_shared<GraphDataCell<MMapIO>>(graph_param, common_param);
-            }
-            if (io_string == IO_TYPE_VALUE_BUFFER_IO) {
-                return std::make_shared<GraphDataCell<BufferIO>>(graph_param, common_param);
-            }
-            if (io_string == IO_TYPE_VALUE_ASYNC_IO) {
-                return std::make_shared<GraphDataCell<AsyncIO>>(graph_param, common_param);
-            }
-            if (io_string == IO_TYPE_VALUE_URING_IO) {
-                return std::make_shared<GraphDataCell<UringIO>>(graph_param, common_param);
-            }
-            if (io_string == IO_TYPE_VALUE_READER_IO) {
-                return std::make_shared<GraphDataCell<ReaderIO>>(graph_param, common_param);
-            }
-            return nullptr;
+            auto io_kind = std::dynamic_pointer_cast<GraphDataCellParameter>(graph_param)
+                               ->io_parameter_->Kind();
+            return VisitIOKind(io_kind, [&](auto tag) -> GraphInterfacePtr {
+                using IO = typename decltype(tag)::Type;
+                if constexpr (std::is_void_v<IO>) {
+                    return nullptr;
+                } else {
+                    return std::make_shared<GraphDataCell<IO>>(graph_param, common_param);
+                }
+            });
     }
     return nullptr;
 }

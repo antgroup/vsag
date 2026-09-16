@@ -8,7 +8,7 @@
 
 namespace vsag::mci {
 
-struct mce_stats {
+struct MceStats {
     uint64_t roots_seen = 0;
     uint64_t roots_skipped_by_degree = 0;
     uint64_t roots_skipped_no_must = 0;
@@ -21,11 +21,11 @@ struct mce_stats {
 
     void
     reset() {
-        *this = mce_stats{};
+        *this = MceStats{};
     }
 
     void
-    add(const mce_stats& other) {
+    add(const MceStats& other) {
         roots_seen += other.roots_seen;
         roots_skipped_by_degree += other.roots_skipped_by_degree;
         roots_skipped_no_must += other.roots_skipped_no_must;
@@ -139,7 +139,7 @@ public:
     std::vector<uint32_t> nxt_c;
     void
     reserve(uint32_t sz);
-    mce_stats stats;
+    MceStats stats;
     uint32_t max_clique_cnt_limit = std::numeric_limits<uint32_t>::max();
     uint32_t remaining_must_count = 0;
     bool stop_search = false;

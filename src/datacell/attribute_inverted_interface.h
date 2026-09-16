@@ -74,7 +74,7 @@ public:
     }
 
     virtual void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+    Deserialize(LvalueOrRvalue<StreamReader> reader) {
         this->field_type_map_.Deserialize(reader);
     }
 

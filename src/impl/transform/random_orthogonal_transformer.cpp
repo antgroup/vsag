@@ -55,9 +55,10 @@ RandomOrthogonalMatrix::CopyOrthogonalMatrix(float* out_matrix) const {
               out_matrix);
 }
 
-TransformerMetaPtr
-RandomOrthogonalMatrix::Transform(const float* original_vec, float* transformed_vec) const {
-    auto meta = std::make_shared<ROMMeta>();
+void
+RandomOrthogonalMatrix::Transform(const float* original_vec,
+                                  float* transformed_vec,
+                                  uint8_t* /*meta*/) const {
     // perform matrix-vector multiplication: y = Q * x
     auto dim = static_cast<int32_t>(this->input_dim_);
     BlasFunction::Sgemv(BlasFunction::RowMajor,
@@ -72,8 +73,6 @@ RandomOrthogonalMatrix::Transform(const float* original_vec, float* transformed_
                         0.0F,
                         transformed_vec,
                         1);
-
-    return meta;
 }
 
 void

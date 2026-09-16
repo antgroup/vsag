@@ -26,8 +26,25 @@ DEFINE_POINTER2(ExtraInfoDataCellParam, ExtraInfoDataCellParameter);
 DEFINE_POINTER2(FlattenInterfaceParam, FlattenInterfaceParameter);
 DEFINE_POINTER2(AttributeInvertedInterfaceParam, AttributeInvertedInterfaceParameter);
 
+struct RaBitQSplitConfig {
+    bool enabled{false};
+    int64_t filter_bits{0};
+    int64_t supplement_bits{0};
+
+    int64_t
+    TotalBits() const {
+        return filter_bits + supplement_bits;
+    }
+};
+
+RaBitQSplitConfig
+ParseRaBitQSplitConfig(const JsonType& external_json);
+
 void
-MapRaBitQSplitParam(const JsonType& external_json, JsonType& inner_json);
+ApplyRaBitQSplitConfig(const RaBitQSplitConfig& config, JsonType& inner_json);
+
+JsonType
+ApplyHoldMoldsToQuantizer(const JsonType& source_json, bool hold_molds);
 
 void
 ValidateMRLEDim(const JsonType& external_json, uint64_t dim);

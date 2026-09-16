@@ -158,7 +158,7 @@ public:
     Serialize(StreamWriter& writer) override;
 
     void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
+    Deserialize(LvalueOrRvalue<StreamReader> reader) override;
 
     void
     InitIO(const IOParamPtr& io_param) override {
@@ -230,7 +230,7 @@ private:
 
         uint64_t page_id_base = 0;
         for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
-            uint64_t bucket_page_count = get_page_count(this->datas_[bucket_id].size_);
+            uint64_t bucket_page_count = get_page_count(this->datas_[bucket_id].Size());
             if (bucket_page_count > UINT64_MAX - page_id_base) {
                 throw VsagException(ErrorType::INVALID_BINARY,
                                     "bucket read cache page id overflow");
@@ -241,7 +241,7 @@ private:
         auto shared_cache = std::make_shared<LRUPageCache>(cache_page_count);
         page_id_base = 0;
         for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
-            uint64_t bucket_page_count = get_page_count(this->datas_[bucket_id].size_);
+            uint64_t bucket_page_count = get_page_count(this->datas_[bucket_id].Size());
             this->datas_[bucket_id].SetReadCache(shared_cache, page_id_base);
             page_id_base += bucket_page_count;
         }
@@ -374,13 +374,8 @@ BucketDataCell<QuantTmpl, IOTmpl>::query_one_by_id(
                         offset_id));
     }
     float ret;
-    bool need_release = false;
-    const auto* codes =
-        this->datas_[bucket_id].Read(code_size_, offset_id * code_size_, need_release);
-    computer->ComputeDist(codes, &ret);
-    if (need_release) {
-        this->datas_[bucket_id].Release(codes);
-    }
+    auto lease = this->datas_[bucket_id].Acquire(offset_id * code_size_, code_size_);
+    computer->ComputeDist(lease.Data(), &ret);
 
     if (use_residual_) {
         Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
@@ -563,13 +558,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::scan_bucket_by_id(float* result_dists,
     auto data_count = bucket_size;
     while (data_count > 0) {
         auto compute_count = std::min(data_count, scan_block_size);
-        bool need_release = false;
-        const auto* codes = this->datas_[bucket_id].Read(
-            code_size_ * compute_count, offset * code_size_, need_release);
-        computer->ScanBatchDists(compute_count, codes, result_dists + offset);
-        if (need_release) {
-            this->datas_[bucket_id].Release(codes);
-        }
+        auto lease =
+            this->datas_[bucket_id].Acquire(offset * code_size_, code_size_ * compute_count);
+        computer->ScanBatchDists(compute_count, lease.Data(), result_dists + offset);
         data_count -= compute_count;
         offset += compute_count;
     }
@@ -930,7 +921,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::Serialize(StreamWriter& writer) {
 
 template <typename QuantTmpl, typename IOTmpl>
 void
-BucketDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+BucketDataCell<QuantTmpl, IOTmpl>::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     BucketInterface::Deserialize(reader);
     quantizer_->Deserialize(reader);
     this->backend_ =
@@ -973,8 +964,8 @@ BucketDataCell<QuantTmpl, IOTmpl>::package_fastscan() {
         if (bucket_size == 0) {
             continue;
         }
-        bool need_release = false;
-        const auto* codes = this->datas_[i].Read(code_size_ * bucket_size, 0, need_release);
+        auto lease = this->datas_[i].Acquire(0, code_size_ * bucket_size);
+        const auto* codes = lease.Data();
         InnerIdType begin = 0;
         while (begin < bucket_size) {
             auto valid_size = bucket_size - begin;
@@ -984,9 +975,6 @@ BucketDataCell<QuantTmpl, IOTmpl>::package_fastscan() {
             quantizer_->Package32(codes + begin * code_size_, buffer.data, valid_size);
             this->datas_[i].Write(buffer.data, code_size_ * 32, begin * code_size_);
             begin += 32;
-        }
-        if (need_release) {
-            this->datas_[i].Release(codes);
         }
     }
 }
@@ -1000,17 +988,14 @@ BucketDataCell<QuantTmpl, IOTmpl>::unpack_fastscan() {
         if (bucket_size == 0) {
             continue;
         }
-        bool need_release = false;
-        const auto* codes = this->datas_[i].Read(code_size_ * bucket_size, 0, need_release);
+        auto lease = this->datas_[i].Acquire(0, code_size_ * bucket_size);
+        const auto* codes = lease.Data();
         InnerIdType begin = 0;
         while (begin < bucket_size) {
             const uint8_t* src_block = codes + begin * code_size_;
             quantizer_->Unpack32(src_block, buffer.data);
             this->datas_[i].Write(buffer.data, code_size_ * 32, begin * code_size_);
             begin += 32;
-        }
-        if (need_release) {
-            this->datas_[i].Release(codes);
         }
     }
 }
@@ -1038,18 +1023,13 @@ BucketDataCell<QuantTmpl, IOTmpl>::MergeOther(const BucketInterfacePtr& other, I
         throw VsagException(ErrorType::INTERNAL_ERROR, "Merge other's bucket datacell failed");
     }
     for (int i = 0; i < ptr->bucket_count_; ++i) {
-        bool need_release = false;
         if (ptr->bucket_sizes_[i] == 0) {
             continue;
         }
-        auto* other_data =
-            ptr->datas_[i].Read(ptr->bucket_sizes_[i] * this->code_size_, 0, need_release);
-        this->datas_[i].Write(other_data,
+        auto lease = ptr->datas_[i].Acquire(0, ptr->bucket_sizes_[i] * this->code_size_);
+        this->datas_[i].Write(lease.Data(),
                               ptr->bucket_sizes_[i] * this->code_size_,
                               this->bucket_sizes_[i] * this->code_size_);
-        if (need_release) {
-            ptr->datas_[i].Release(other_data);
-        }
         this->bucket_sizes_[i] += ptr->bucket_sizes_[i];
         this->inner_ids_[i].reserve(this->bucket_sizes_[i]);
         for (auto id : ptr->inner_ids_[i]) {

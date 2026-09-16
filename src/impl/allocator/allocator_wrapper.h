@@ -74,9 +74,12 @@ public:
     }
 
     template <class U>
-    struct rebind {
+    struct Rebind {
         using other = AllocatorWrapper<U>;
     };
+
+    template <class U>
+    using rebind = Rebind<U>;
 
     Allocator* allocator_{};
 };

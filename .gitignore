@@ -182,7 +182,6 @@ dist/
 data/
 !tests/fixtures/data/
 /src/version.h
-/mockimpl/vsag/version.h
 /coverage_ut.info
 /lcov_cobertura.py
 /testresult/

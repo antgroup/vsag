@@ -29,7 +29,7 @@ public:
     virtual ~AttrTypeSchema() = default;
 
     AttrValueType
-    GetTypeOfField(const std::string& field_name);
+    GetTypeOfField(const std::string& field_name) const;
 
     void
     SetTypeOfField(const std::string& field_name, AttrValueType type);
@@ -38,7 +38,7 @@ public:
     Serialize(StreamWriter& writer);
 
     void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader);
+    Deserialize(LvalueOrRvalue<StreamReader> reader);
 
 private:
     UnorderedMap<std::string, AttrValueType> schema_;

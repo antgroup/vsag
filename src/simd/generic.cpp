@@ -111,12 +111,12 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 
 float
 FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
-    return simd::ComputeIPImpl<simd::SimdTraits<simd::Generic_Tag>>(query, codes, dim);
+    return simd::ComputeIPImpl<simd::SimdTraits<simd::GenericTag>>(query, codes, dim);
 }
 
 float
 FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
-    return simd::ComputeL2SqrImpl<simd::SimdTraits<simd::Generic_Tag>>(query, codes, dim);
+    return simd::ComputeL2SqrImpl<simd::SimdTraits<simd::GenericTag>>(query, codes, dim);
 }
 
 void
@@ -141,7 +141,7 @@ FP32ComputeIPBatch4(const float* RESTRICT query,
                     float& result2,
                     float& result3,
                     float& result4) {
-    simd::ComputeBatch4Impl<simd::SimdTraits<simd::Generic_Tag>, simd::Batch4Kind::IP>(
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::GenericTag>, simd::Batch4Kind::IP>(
         query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
 }
 
@@ -156,33 +156,33 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        float& result2,
                        float& result3,
                        float& result4) {
-    simd::ComputeBatch4Impl<simd::SimdTraits<simd::Generic_Tag>, simd::Batch4Kind::L2>(
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::GenericTag>, simd::Batch4Kind::L2>(
         query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
 }
 
 void
 FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
-    simd::BinaryOpImpl<simd::SimdTraits<simd::Generic_Tag>, simd::BinaryOp::Sub>(x, y, z, dim);
+    simd::BinaryOpImpl<simd::SimdTraits<simd::GenericTag>, simd::BinaryOp::Sub>(x, y, z, dim);
 }
 
 void
 FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
-    simd::BinaryOpImpl<simd::SimdTraits<simd::Generic_Tag>, simd::BinaryOp::Add>(x, y, z, dim);
+    simd::BinaryOpImpl<simd::SimdTraits<simd::GenericTag>, simd::BinaryOp::Add>(x, y, z, dim);
 }
 
 void
 FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
-    simd::BinaryOpImpl<simd::SimdTraits<simd::Generic_Tag>, simd::BinaryOp::Mul>(x, y, z, dim);
+    simd::BinaryOpImpl<simd::SimdTraits<simd::GenericTag>, simd::BinaryOp::Mul>(x, y, z, dim);
 }
 
 void
 FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
-    simd::BinaryOpImpl<simd::SimdTraits<simd::Generic_Tag>, simd::BinaryOp::Div>(x, y, z, dim);
+    simd::BinaryOpImpl<simd::SimdTraits<simd::GenericTag>, simd::BinaryOp::Div>(x, y, z, dim);
 }
 
 float
 FP32ReduceAdd(const float* x, uint64_t dim) {
-    return simd::ReduceAddImpl<simd::SimdTraits<simd::Generic_Tag>>(x, dim);
+    return simd::ReduceAddImpl<simd::SimdTraits<simd::GenericTag>>(x, dim);
 }
 
 union FP32Struct {
@@ -192,12 +192,12 @@ union FP32Struct {
 
 float
 INT8ComputeL2Sqr(const int8_t* query, const int8_t* codes, uint64_t dim) {
-    return simd::Int8ComputeL2SqrImpl<simd::Int8Traits<simd::Generic_Int8_Tag>>(query, codes, dim);
+    return simd::Int8ComputeL2SqrImpl<simd::Int8Traits<simd::GenericInt8Tag>>(query, codes, dim);
 }
 
 float
 INT8ComputeIP(const int8_t* query, const int8_t* codes, uint64_t dim) {
-    return simd::Int8ComputeIPImpl<simd::Int8Traits<simd::Generic_Int8_Tag>>(query, codes, dim);
+    return simd::Int8ComputeIPImpl<simd::Int8Traits<simd::GenericInt8Tag>>(query, codes, dim);
 }
 
 float
@@ -242,25 +242,25 @@ FloatToFP16(const float fp32_value) {
 
 float
 BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
-    return simd::HalfComputeIPImpl<simd::BF16Traits<simd::Generic_BF16_Tag>>(
+    return simd::HalfComputeIPImpl<simd::BF16Traits<simd::GenericBF16Tag>>(
         query, codes, dim, nullptr);
 }
 
 float
 BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
-    return simd::HalfComputeL2SqrImpl<simd::BF16Traits<simd::Generic_BF16_Tag>>(
+    return simd::HalfComputeL2SqrImpl<simd::BF16Traits<simd::GenericBF16Tag>>(
         query, codes, dim, nullptr);
 }
 
 float
 FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
-    return simd::HalfComputeIPImpl<simd::FP16Traits<simd::Generic_FP16_Tag>>(
+    return simd::HalfComputeIPImpl<simd::FP16Traits<simd::GenericFP16Tag>>(
         query, codes, dim, nullptr);
 }
 
 float
 FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
-    return simd::HalfComputeL2SqrImpl<simd::FP16Traits<simd::Generic_FP16_Tag>>(
+    return simd::HalfComputeL2SqrImpl<simd::FP16Traits<simd::GenericFP16Tag>>(
         query, codes, dim, nullptr);
 }
 
@@ -281,7 +281,7 @@ SQ8ComputeIP(const float* RESTRICT query,
              const float* RESTRICT lower_bound,
              const float* RESTRICT diff,
              uint64_t dim) {
-    return simd::SQ8ComputeIPImpl<simd::SQ8Traits<simd::Generic_SQ8_Tag>>(
+    return simd::SQ8ComputeIPImpl<simd::SQ8Traits<simd::GenericSQ8Tag>>(
         query, codes, lower_bound, diff, dim);
 }
 
@@ -291,7 +291,7 @@ SQ8ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT lower_bound,
                 const float* RESTRICT diff,
                 uint64_t dim) {
-    return simd::SQ8ComputeL2SqrImpl<simd::SQ8Traits<simd::Generic_SQ8_Tag>>(
+    return simd::SQ8ComputeL2SqrImpl<simd::SQ8Traits<simd::GenericSQ8Tag>>(
         query, codes, lower_bound, diff, dim);
 }
 
@@ -301,7 +301,7 @@ SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT lower_bound,
                   const float* RESTRICT diff,
                   uint64_t dim) {
-    return simd::SQ8ComputeCodesIPImpl<simd::SQ8Traits<simd::Generic_SQ8_Tag>>(
+    return simd::SQ8ComputeCodesIPImpl<simd::SQ8Traits<simd::GenericSQ8Tag>>(
         codes1, codes2, lower_bound, diff, dim);
 }
 
@@ -311,7 +311,7 @@ SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT lower_bound,
                      const float* RESTRICT diff,
                      uint64_t dim) {
-    return simd::SQ8ComputeCodesL2SqrImpl<simd::SQ8Traits<simd::Generic_SQ8_Tag>>(
+    return simd::SQ8ComputeCodesL2SqrImpl<simd::SQ8Traits<simd::GenericSQ8Tag>>(
         codes1, codes2, lower_bound, diff, dim);
 }
 
@@ -382,7 +382,7 @@ SQ4ComputeIP(const float* RESTRICT query,
              const float* RESTRICT lower_bound,
              const float* RESTRICT diff,
              uint64_t dim) {
-    return simd::SQ4ComputeIPImpl<simd::SQ4Traits<simd::Generic_SQ4_Tag>>(
+    return simd::SQ4ComputeIPImpl<simd::SQ4Traits<simd::GenericSQ4Tag>>(
         query, codes, lower_bound, diff, dim, &SQ4ScalarIP);
 }
 
@@ -392,7 +392,7 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT lower_bound,
                 const float* RESTRICT diff,
                 uint64_t dim) {
-    return simd::SQ4ComputeL2SqrImpl<simd::SQ4Traits<simd::Generic_SQ4_Tag>>(
+    return simd::SQ4ComputeL2SqrImpl<simd::SQ4Traits<simd::GenericSQ4Tag>>(
         query, codes, lower_bound, diff, dim, &SQ4ScalarL2);
 }
 
@@ -402,7 +402,7 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT lower_bound,
                   const float* RESTRICT diff,
                   uint64_t dim) {
-    return simd::SQ4ComputeCodesIPImpl<simd::SQ4Traits<simd::Generic_SQ4_Tag>>(
+    return simd::SQ4ComputeCodesIPImpl<simd::SQ4Traits<simd::GenericSQ4Tag>>(
         codes1, codes2, lower_bound, diff, dim, &SQ4ScalarCodesIP);
 }
 
@@ -412,7 +412,7 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT lower_bound,
                      const float* RESTRICT diff,
                      uint64_t dim) {
-    return simd::SQ4ComputeCodesL2SqrImpl<simd::SQ4Traits<simd::Generic_SQ4_Tag>>(
+    return simd::SQ4ComputeCodesL2SqrImpl<simd::SQ4Traits<simd::GenericSQ4Tag>>(
         codes1, codes2, lower_bound, diff, dim, &SQ4ScalarCodesL2);
 }
 
@@ -662,6 +662,72 @@ RaBitQFloatThreeBitCenteredIPBatch4(const float* vector,
     }
 }
 
+float
+RaBitQFloatFourBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim) {
+    if (dim == 0) {
+        return 0.0F;
+    }
+
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint8_t* plane0 = bits;
+    const uint8_t* plane1 = bits + plane_bytes;
+    const uint8_t* plane2 = bits + 2 * plane_bytes;
+    const uint8_t* plane3 = bits + 3 * plane_bytes;
+    float result = 0.0F;
+    for (uint64_t d = 0; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        float weight = (plane0[byte_idx] & bit_mask) != 0U ? 4.0F : -4.0F;
+        weight += (plane1[byte_idx] & bit_mask) != 0U ? 2.0F : -2.0F;
+        weight += (plane2[byte_idx] & bit_mask) != 0U ? 1.0F : -1.0F;
+        weight += (plane3[byte_idx] & bit_mask) != 0U ? 0.5F : -0.5F;
+        result += vector[d] * weight;
+    }
+    return result;
+}
+
+void
+RaBitQFloatFourBitCenteredIPBatch4(const float* vector,
+                                   const uint8_t* bits1,
+                                   const uint8_t* bits2,
+                                   const uint8_t* bits3,
+                                   const uint8_t* bits4,
+                                   uint64_t dim,
+                                   float* results) {
+    results[0] = 0.0F;
+    results[1] = 0.0F;
+    results[2] = 0.0F;
+    results[3] = 0.0F;
+    if (dim == 0) {
+        return;
+    }
+
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint8_t* plane0[4] = {bits1, bits2, bits3, bits4};
+    const uint8_t* plane1[4] = {
+        bits1 + plane_bytes, bits2 + plane_bytes, bits3 + plane_bytes, bits4 + plane_bytes};
+    const uint8_t* plane2[4] = {bits1 + 2 * plane_bytes,
+                                bits2 + 2 * plane_bytes,
+                                bits3 + 2 * plane_bytes,
+                                bits4 + 2 * plane_bytes};
+    const uint8_t* plane3[4] = {bits1 + 3 * plane_bytes,
+                                bits2 + 3 * plane_bytes,
+                                bits3 + 3 * plane_bytes,
+                                bits4 + 3 * plane_bytes};
+    for (uint64_t d = 0; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const float value = vector[d];
+        for (uint32_t i = 0; i < 4; ++i) {
+            float weight = (plane0[i][byte_idx] & bit_mask) != 0U ? 4.0F : -4.0F;
+            weight += (plane1[i][byte_idx] & bit_mask) != 0U ? 2.0F : -2.0F;
+            weight += (plane2[i][byte_idx] & bit_mask) != 0U ? 1.0F : -1.0F;
+            weight += (plane3[i][byte_idx] & bit_mask) != 0U ? 0.5F : -0.5F;
+            results[i] += value * weight;
+        }
+    }
+}
+
 void
 RaBitQFloatBuildByteIPLookupTable(const float* vector, uint64_t dim, float* lookup) {
     const uint64_t block_count = (dim + 7) / 8;
@@ -842,6 +908,33 @@ RaBitQFloatPackedSupplementCodeIP(const float* vector,
 }
 
 float
+RaBitQFloatExCode7IP(const float* vector, const uint8_t* compact_code, uint64_t dim) {
+    if ((dim & 63U) != 0U) {
+        return 0.0F;
+    }
+    float result = 0.0F;
+    for (uint64_t block = 0; block < dim; block += 64) {
+        const uint8_t* low_codes = compact_code;
+        for (uint64_t lane = 0; lane < 48; ++lane) {
+            const uint32_t top = (compact_code[48 + (lane & 7U)] >> (lane >> 3U)) & 1U;
+            const uint32_t code = (low_codes[lane] & 0x3FU) | (top << 6U);
+            result += vector[block + lane] * static_cast<float>(code);
+        }
+        for (uint64_t lane = 48; lane < 64; ++lane) {
+            const uint64_t packed_lane = lane - 48;
+            const uint32_t low = ((low_codes[packed_lane] >> 6U) & 0x3U) |
+                                 (((low_codes[16 + packed_lane] >> 6U) & 0x3U) << 2U) |
+                                 (((low_codes[32 + packed_lane] >> 6U) & 0x3U) << 4U);
+            const uint32_t top = (compact_code[48 + (lane & 7U)] >> (lane >> 3U)) & 1U;
+            const uint32_t code = low | (top << 6U);
+            result += vector[block + lane] * static_cast<float>(code);
+        }
+        compact_code += 56;
+    }
+    return result;
+}
+
+float
 RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim) {
     if (dim == 0) {
         return 0.0f;
@@ -1009,6 +1102,51 @@ RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
     return result;
 }
 
+uint64_t
+RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
+    uint32_t inner_product = 0;
+    uint32_t base_sum = 0;
+    const uint64_t num_bytes = (dim + 7) / 8;
+    for (uint64_t i = 0; i < num_bytes; ++i) {
+        const auto base = bits[i];
+        base_sum += static_cast<uint32_t>(__builtin_popcount(base));
+        for (uint32_t bit = 0; bit < 4; ++bit) {
+            inner_product +=
+                static_cast<uint32_t>(__builtin_popcount(codes[bit * num_bytes + i] & base)) << bit;
+        }
+    }
+    return static_cast<uint64_t>(inner_product) | (static_cast<uint64_t>(base_sum) << 32U);
+}
+
+void
+RaBitQSQ4UBinaryIPWithBaseSumBatch4(const uint8_t* codes,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint64_t* results) {
+    uint32_t inner_products[4] = {0, 0, 0, 0};
+    uint32_t base_sums[4] = {0, 0, 0, 0};
+    const uint8_t* bases[4] = {bits1, bits2, bits3, bits4};
+    const uint64_t num_bytes = (dim + 7) / 8;
+    for (uint64_t i = 0; i < num_bytes; ++i) {
+        for (uint32_t base_id = 0; base_id < 4; ++base_id) {
+            const auto base = bases[base_id][i];
+            base_sums[base_id] += static_cast<uint32_t>(__builtin_popcount(base));
+            for (uint32_t bit = 0; bit < 4; ++bit) {
+                inner_products[base_id] +=
+                    static_cast<uint32_t>(__builtin_popcount(codes[bit * num_bytes + i] & base))
+                    << bit;
+            }
+        }
+    }
+    for (uint32_t i = 0; i < 4; ++i) {
+        results[i] =
+            static_cast<uint64_t>(inner_products[i]) | (static_cast<uint64_t>(base_sums[i]) << 32U);
+    }
+}
+
 float
 Normalize(const float* from, float* to, uint64_t dim) {
     float norm = std::sqrt(FP32ComputeIP(from, from, dim));
@@ -1018,20 +1156,20 @@ Normalize(const float* from, float* to, uint64_t dim) {
 
 float
 NormalizeWithCentroid(const float* from, const float* centroid, float* to, uint64_t dim) {
-    return simd::NormalizeWithCentroidImpl<simd::SimdTraits<simd::Generic_Tag>>(
+    return simd::NormalizeWithCentroidImpl<simd::SimdTraits<simd::GenericTag>>(
         from, centroid, to, dim);
 }
 
 void
 InverseNormalizeWithCentroid(
     const float* from, const float* centroid, float* to, uint64_t dim, float norm) {
-    simd::InverseNormalizeWithCentroidImpl<simd::SimdTraits<simd::Generic_Tag>>(
+    simd::InverseNormalizeWithCentroidImpl<simd::SimdTraits<simd::GenericTag>>(
         from, centroid, to, dim, norm);
 }
 
 void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
-    simd::DivScalarImpl<simd::SimdTraits<simd::Generic_Tag>>(from, to, dim, scalar);
+    simd::DivScalarImpl<simd::SimdTraits<simd::GenericTag>>(from, to, dim, scalar);
 }
 
 void
@@ -1222,7 +1360,7 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 
 void
 KacsWalk(float* data, uint64_t len) {
-    simd::KacsWalkImpl<simd::SimdTraits<simd::Generic_Tag>>(data, len);
+    simd::KacsWalkImpl<simd::SimdTraits<simd::GenericTag>>(data, len);
 }
 
 void
@@ -1237,12 +1375,12 @@ FlipSign(const uint8_t* flip, float* data, uint64_t dim) {
 
 void
 VecRescale(float* data, uint64_t dim, float val) {
-    simd::VecRescaleImpl<simd::SimdTraits<simd::Generic_Tag>>(data, dim, val);
+    simd::VecRescaleImpl<simd::SimdTraits<simd::GenericTag>>(data, dim, val);
 }
 
 void
 RotateOp(float* data, int idx, int dim_, int step) {
-    simd::RotateOpImpl<simd::SimdTraits<simd::Generic_Tag>>(data, idx, dim_, step);
+    simd::RotateOpImpl<simd::SimdTraits<simd::GenericTag>>(data, idx, dim_, step);
 }
 
 void

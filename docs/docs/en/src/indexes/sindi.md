@@ -132,11 +132,108 @@ evidence, not a capacity guarantee.
 
 The immutable runtime supports KNN and range search plus legacy `Serialize`/`Deserialize`.
 It rejects incremental `Add`, `GetSparseVectorByInnerId`, `CalcDistanceById`, and
-`CalDistanceById`. Streaming serialization is not supported for immutable SINDI; use the matching
-legacy serialization APIs or keep the index mutable when the streaming format is required.
+`CalDistanceById`. Mutable and immutable runtimes both support `SerializeStreaming`,
+`DeserializeStreaming`, and `Index::Load`.
 The serialized index must be loaded into a SINDI created with the same `immutable` setting.
 New indexes record the sorted posting-list format version and skip normalization when loaded.
 Indexes written without this marker remain compatible and are normalized during loading.
+
+### Host filtering
+
+Mutable and immutable SINDI and [SINDI_V2](sindi_v2.md) indexes can group documents by their source
+host and avoid returning documents from other hosts. Attach a complete string `host` array to a
+host-aware `Build()` or mutable `Add()` batch. Use an empty string for a document with no host:
+
+```cpp
+base->NumElements(n)
+    ->SparseVectors(sparse_vectors)
+    ->Ids(ids)
+    ->StringMetadata("host", base_hosts)
+    ->Owner(false);
+index->Build(base);
+
+std::string query_host = "example.com";
+query->NumElements(1)
+    ->SparseVectors(&query_vec)
+    ->StringMetadata("host", &query_host)
+    ->Owner(false);
+```
+
+Each `Build()` or mutable `Add()` batch groups internal IDs by host while preserving external
+labels. Host queries scan the relevant posting windows and apply exact membership checks over the
+host's one or more internal-ID ranges. Repeated mutable `Add()` calls may append disjoint ranges for
+the same host. Tombstones and an additional user `Filter` are applied together with host membership.
+
+Host strings are matched byte for byte without case folding or URL normalization. VSAG assigns
+compact internal IDs and persists the string-to-ID dictionary with the index; callers never provide
+those IDs. The empty string is the missing-host bucket. Once a mutable index contains host metadata,
+every later `Add()` must provide a complete `host` array; host metadata cannot be introduced after
+host-unaware documents. An empty-string query searches only missing-host documents, while omitting
+`host` preserves full-index KNN behavior. An unknown host returns an empty result. Indexes built
+without base host metadata ignore query host metadata and retain their previous behavior. The old
+numeric `host_id` input is rejected. Host filtering currently applies only to KNN; range search keeps
+its existing full-index behavior.
+
+### Date-bucket filtering
+
+Mutable and immutable SINDI can filter KNN queries by hierarchical calendar buckets, with or
+without reranking. Attach one canonical string bucket to each base document:
+
+```cpp
+std::string base_dates[] = {"", "2026/05", "2026/05/01"};
+base->Paths("date", base_dates);
+
+std::string query_date = "2026/05";
+query->Paths("date", &query_date)->Owner(false);
+
+std::string date_begin = "2025/11/20";
+std::string date_end = "2026/02";
+query->Paths("date_begin", &date_begin)
+    ->Paths("date_end", &date_end)
+    ->Owner(false);
+```
+
+Accepted forms are `YYYY`, `YYYY/MM`, and `YYYY/MM/DD`, with valid calendar values and zero-padded
+months and days. Matching proceeds down the hierarchy: `2026` matches base buckets at year, month,
+or day granularity in 2026; `2026/05` matches `2026/05` and every day below it; `2026/05/01`
+matches only that exact day. A more precise query never matches a coarser base bucket.
+
+An empty base string means that the document has no date. Missing-date documents remain searchable
+when the query omits all date selectors, including host-only queries, but never match a `date` or
+date-range query. Every base document still needs one array entry, so use an empty string instead of
+omitting a row. Empty query date strings remain invalid; omit the selector to disable date filtering.
+
+For an inclusive range query, provide `date_begin` and `date_end` together. A year or month at the
+beginning expands to its first day, while a year or month at the end expands to its last day. For
+example, `2025/11/20` through `2026/02` means `2025/11/20` through `2026/02/28`, inclusive. A base
+bucket matches when its complete calendar period is contained in the query range. Consequently, a
+range ending at `2026/08/01` can match a base day bucket on August 1, but not the coarser
+`2026/08` bucket. The two range endpoints are required together, must be ordered after expansion,
+and cannot be combined with the single `date` selector.
+
+The date-aware build places missing dates in a dedicated partition, orders dated documents by
+calendar quarter and, when `host` is present, by host inside each partition. For a mutable index,
+date metadata can be supplied by `Build()` or the first `Add()` while the index is empty. Once the
+index contains documents, date metadata cannot be introduced, and a date-aware mutable index
+rejects every later `Add()`. This build-once restriction
+avoids incrementally maintaining the quarter partitions. Mutable host-only indexes retain their
+existing incremental `Add()` support.
+
+Year-only base buckets are anchored in the first quarter of that year and stored only once. The
+physical fixed-size window layout is unchanged. A date query first selects the relevant quarter
+partitions, then applies exact hierarchical bucket or range matching before candidates enter the
+heap. Query strings are parsed once during routing; candidate checks use only the packed integer
+buckets. Date, host, tombstone, and user `Filter` conditions use AND semantics.
+
+Queries without `date`, `date_begin`, or `date_end` search every quarter. Host-only queries select
+that host from every quarter. All selected windows share one candidate heap and, when
+`use_reorder` is enabled, one rerank pass. Date filtering supports mutable and immutable indexes
+with either `use_reorder` setting, applies only to KNN search, and is preserved by both legacy and
+streaming serialization. A deserialized mutable date-aware index remains build-once and rejects
+`Add()`. Exact bucket and range filtering disable term-level posting pruning in each selected
+window, so date queries may scan more postings than host-only queries. Wider ranges also select
+more windows. A host-only query on a date-enabled index can require a full scan for windows that
+cross quarter or host boundaries.
 
 ## Search parameters
 

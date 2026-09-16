@@ -15,6 +15,7 @@
 
 #include "io/memory_io/memory_io_parameter.h"
 
+#include "io/common/io_parameter.h"
 #include "parameter_test.h"
 #include "unittest.h"
 
@@ -26,4 +27,8 @@ TEST_CASE("MemoryIOParameter Test", "[ut][MemoryIOParameter]") {
     vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
     param->FromJson(param_json);
     ParameterTest::TestToJson(param);
+}
+
+TEST_CASE("IOParameter CreateDefault rejects unsupported type", "[ut][IOParameter]") {
+    REQUIRE_THROWS_AS(IOParameter::CreateDefault("unsupported_io"), VsagException);
 }

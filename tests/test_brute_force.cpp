@@ -816,6 +816,44 @@ TEST_CASE("BruteForce streaming Load skips attribute filter state",
     REQUIRE(remove_result.has_value());
 }
 
+TEST_CASE("BruteForce pre-parsed attribute expression precedence",
+          "[ft][bruteforce][attribute_expression]") {
+    using namespace fixtures;
+    auto param =
+        BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32", true);
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(16, 100, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+    REQUIRE(index->GetAttrTypeSchema() != nullptr);
+
+    vsag::SearchRequest request;
+    request.query_ = get_one_query(dataset->query_, 0);
+    request.topk_ = 10;
+    request.params_str_ = search_param_tmp;
+    request.enable_attribute_filter_ = true;
+    request.attribute_filter_str_ = R"(multi_in(term_0, "0", "|"))";
+    auto expected = index->SearchWithRequest(request);
+    REQUIRE(expected.has_value());
+    request.expression_ = vsag::AstParse(request.attribute_filter_str_, index->GetAttrTypeSchema());
+    request.attribute_filter_str_ = "not a valid predicate (((";
+    auto actual = index->SearchWithRequest(request);
+    REQUIRE(actual.has_value());
+    REQUIRE(actual.value()->GetDim() == expected.value()->GetDim());
+    for (int64_t i = 0; i < actual.value()->GetDim(); ++i) {
+        REQUIRE(actual.value()->GetIds()[i] == expected.value()->GetIds()[i]);
+        REQUIRE(actual.value()->GetDistances()[i] == expected.value()->GetDistances()[i]);
+    }
+    request.expression_.reset();
+    REQUIRE_FALSE(index->SearchWithRequest(request).has_value());
+    request.enable_attribute_filter_ = false;
+    REQUIRE(index->SearchWithRequest(request).has_value());
+
+    auto plain_param =
+        BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32");
+    auto plain = TestIndex::TestFactory(BruteForceTestIndex::name, plain_param, true);
+    REQUIRE(plain->GetAttrTypeSchema() == nullptr);
+}
+
 TEST_CASE("BruteForce empty streaming index consumes section end",
           "[ft][serialize][streaming][bruteforce][compatibility]") {
     using namespace fixtures;

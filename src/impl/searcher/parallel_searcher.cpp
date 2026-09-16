@@ -25,9 +25,11 @@
 
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/query_computer_pool.h"
 #include "impl/searcher/searcher_utils.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/spsc_queue.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -127,8 +129,17 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     if (not graph or not flatten) {
         return top_candidates;
     }
+    if (inner_search_param.parallel_search_thread_count <= 0) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "parallel search thread count must be positive");
+    }
+    if (inner_search_param.parallel_search_thread_count > 1 and this->pool == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "parallel search requires a non-null thread pool");
+    }
 
-    auto computer = flatten->FactoryComputer(query);
+    auto computer_lease = AcquireQueryComputer(flatten, query, ctx);
+    const auto& computer = computer_lease.computer;
 
     auto is_id_allowed = inner_search_param.is_inner_id_allowed;
     auto ep = inner_search_param.ep;
@@ -178,7 +189,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     if (check_func(ep) and is_result_distance_eligible<mode>(dist, inner_search_param)) {
         top_candidates->Push(dist, ep);
     }
-    if (not std::isfinite(dist) and inner_search_param.consider_duplicate and
+    if (not is_finite_distance(dist) and inner_search_param.consider_duplicate and
         is_result_distance_eligible<mode>(dist, inner_search_param)) {
         for (const auto duplicate_id : graph->GetDuplicateIds(ep)) {
             if (check_func(duplicate_id)) {
@@ -214,6 +225,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
 
     auto task = [&](uint64_t thread_id) {
         auto worker_computer = flatten->FactoryComputer(query);
+        RecordQueryComputerCreation(ctx == nullptr ? nullptr : ctx->stats);
         SearchTask item;
         while (true) {
             if (queues[thread_id].Pop(item)) {
@@ -325,7 +337,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         for (uint64_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
             const auto cur_id = to_be_visited_id[i];
-            if (not std::isfinite(dist)) {
+            if (not is_finite_distance(dist)) {
                 auto push_result = [&](InnerIdType result_id) {
                     if (not is_result_distance_eligible<mode>(dist, inner_search_param) or
                         not check_func(result_id)) {

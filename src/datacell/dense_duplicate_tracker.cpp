@@ -17,6 +17,7 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <limits>
 
 #include "vsag_exception.h"
 
@@ -107,6 +108,11 @@ DenseDuplicateTracker::Serialize(StreamWriter& writer) const {
 
 void
 DenseDuplicateTracker::Deserialize(StreamReader& reader) {
+    this->DeserializeBounded(reader, std::numeric_limits<uint64_t>::max());
+}
+
+void
+DenseDuplicateTracker::DeserializeBounded(StreamReader& reader, uint64_t max_size) {
     std::scoped_lock lock(mutex_);
 
     if (has_deserialized_) {
@@ -116,6 +122,14 @@ DenseDuplicateTracker::Deserialize(StreamReader& reader) {
     StreamReader::ReadObj(reader, duplicate_count_);
     size_t size;
     StreamReader::ReadObj(reader, size);
+    if (size > max_size) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            "duplicate tracker size exceeds graph capacity");
+    }
+    if (duplicate_count_ > size) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            "duplicate group count exceeds tracker size");
+    }
     duplicate_ids_.resize(size);
     for (InnerIdType i = 0; i < size; ++i) {
         duplicate_ids_[i] = i;
@@ -133,11 +147,20 @@ DenseDuplicateTracker::Deserialize(StreamReader& reader) {
             throw VsagException(ErrorType::INVALID_BINARY,
                                 fmt::format("duplicate head_id {} in duplicate tracker", head_id));
         }
-        Vector<InnerIdType> id_list(allocator_);
-        StreamReader::ReadVector(reader, id_list);
+        uint64_t id_count = 0;
+        StreamReader::ReadObj(reader, id_count);
+        if (id_count >= size) {
+            throw VsagException(ErrorType::INVALID_BINARY, "duplicate group exceeds tracker size");
+        }
+        const auto remaining = reader.Length() - std::min(reader.GetCursor(), reader.Length());
+        if (id_count > remaining / sizeof(InnerIdType)) {
+            throw VsagException(ErrorType::INVALID_BINARY, "truncated duplicate tracker group");
+        }
 
         auto current_id = head_id;
-        for (const auto& dup_id : id_list) {
+        for (uint64_t j = 0; j < id_count; ++j) {
+            InnerIdType dup_id = 0;
+            StreamReader::ReadObj(reader, dup_id);
             if (dup_id >= size) {
                 throw VsagException(
                     ErrorType::INVALID_BINARY,

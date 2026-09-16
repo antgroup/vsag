@@ -160,8 +160,7 @@ main() {
             std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
         }
 
-        allocator.Deallocate((void*)result->GetIds());
-        allocator.Deallocate((void*)result->GetDistances());
+        // The result owns its buffers through allocator and releases them on destruction.
     }
 
     /******************* Hgraph sq8 Iterator Filter *****************/
@@ -184,8 +183,7 @@ main() {
                 std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
             }
 
-            allocator.Deallocate((void*)result->GetIds());
-            allocator.Deallocate((void*)result->GetDistances());
+            // The result releases its allocator-backed buffers on destruction.
         }
 
         /* last search */
@@ -199,8 +197,7 @@ main() {
                 std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
             }
 
-            allocator.Deallocate((void*)result->GetIds());
-            allocator.Deallocate((void*)result->GetDistances());
+            // The result releases its allocator-backed buffers on destruction.
         }
 
         delete search_param.iter_ctx;

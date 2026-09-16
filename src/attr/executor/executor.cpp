@@ -18,8 +18,20 @@
 #include "comparison_executor.h"
 #include "integer_list_executor.h"
 #include "logical_executor.h"
+#include "region_filter_executor.h"
 #include "string_list_executor.h"
 namespace vsag {
+
+Executor::Executor(Allocator* allocator,
+                   ExprPtr expression,
+                   const AttrInvertedInterfacePtr& attr_index)
+    : expr_(std::move(expression)), attr_index_(attr_index), allocator_(allocator) {
+    if (attr_index == nullptr) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "attribute executor requires an attribute index");
+    }
+    bitset_type_ = attr_index->GetBitsetType();
+}
 
 ExecutorPtr
 Executor::MakeInstance(Allocator* allocator,
@@ -36,6 +48,14 @@ Executor::MakeInstance(Allocator* allocator,
     }
     if (std::dynamic_pointer_cast<LogicalExpression>(expression)) {
         return std::make_shared<LogicalExecutor>(allocator, expression, attr_index);
+    }
+    if (std::dynamic_pointer_cast<RegionFilterExpression>(expression)) {
+        return std::make_shared<RegionFilterExecutor>(allocator, expression, attr_index);
+    }
+    if (std::dynamic_pointer_cast<FunctionExpression>(expression)) {
+        throw VsagException(
+            ErrorType::UNSUPPORTED_INDEX_OPERATION,
+            "FUNCTION expressions are parsed for compatibility only and are not executable");
     }
     throw VsagException(ErrorType::INTERNAL_ERROR, "Unsupported expression type");
 }
