@@ -15,8 +15,6 @@
 
 #pragma once
 
-#include <queue>
-
 #include "distance_heap.h"
 
 namespace vsag {
@@ -30,20 +28,41 @@ public:
     void
     Push(float dist, InnerIdType id) override;
 
+    // Inserts a record only when it belongs to the best max_size records.
+    // When the heap is full, replacing the root and sifting down avoids the
+    // separate append/sift-up/pop sequence used by an unbounded heap.
+    bool
+    PushBounded(float dist, InnerIdType id, uint64_t max_size) {
+        if (max_size == 0) {
+            return false;
+        }
+        const DistanceRecord value{dist, id};
+        if (this->queue_.size() < max_size) {
+            this->queue_.emplace_back(value);
+            this->sift_up(this->queue_.size() - 1);
+            return true;
+        }
+        if constexpr (kIsMaxHeap) {
+            if (dist >= this->queue_.front().first) {
+                return false;
+            }
+        } else {
+            if (dist <= this->queue_.front().first) {
+                return false;
+            }
+        }
+        this->queue_.front() = value;
+        this->sift_down(0, this->queue_.size());
+        return true;
+    }
+
     [[nodiscard]] const DistanceRecord&
     Top() const override {
         return this->queue_.front();
     }
 
     void
-    Pop() override {
-        if constexpr (max_heap) {
-            std::pop_heap(queue_.begin(), queue_.end(), CompareMax());
-        } else {
-            std::pop_heap(queue_.begin(), queue_.end(), CompareMin());
-        }
-        queue_.pop_back();
-    }
+    Pop() override;
 
     [[nodiscard]] uint64_t
     Size() const override {
@@ -61,6 +80,57 @@ public:
     }
 
 private:
+    // Hand-rolled sift operations: hoisting the moved record into a register
+    // and writing it once at its final slot beats the generic iterator-based
+    // std::push_heap / std::pop_heap on the per-neighbor hot path.
+    static constexpr bool kIsMaxHeap = max_heap;
+
+    // "a ranks above b" = a sits closer to the root: the larger dist wins for
+    // max-heaps (top_candidates keeps the worst candidate on top for eviction)
+    // and the smaller dist wins for min-heaps.
+    static bool
+    higher_than(const DistanceRecord& a, const DistanceRecord& b) {
+        if constexpr (kIsMaxHeap) {
+            return CompareMax()(b, a);
+        } else {
+            return CompareMin()(b, a);
+        }
+    }
+
+    void
+    sift_up(uint64_t idx) {
+        const auto value = this->queue_[idx];
+        while (idx > 0) {
+            const auto parent = (idx - 1) / 2;
+            if (!higher_than(value, this->queue_[parent])) {
+                break;
+            }
+            this->queue_[idx] = this->queue_[parent];
+            idx = parent;
+        }
+        this->queue_[idx] = value;
+    }
+
+    void
+    sift_down(uint64_t idx, uint64_t size) {
+        const auto value = this->queue_[idx];
+        while (true) {
+            auto child = 2 * idx + 1;
+            if (child >= size) {
+                break;
+            }
+            if (child + 1 < size && higher_than(this->queue_[child + 1], this->queue_[child])) {
+                ++child;
+            }
+            if (!higher_than(this->queue_[child], value)) {
+                break;
+            }
+            this->queue_[idx] = this->queue_[child];
+            idx = child;
+        }
+        this->queue_[idx] = value;
+    }
+
     Vector<DistanceRecord> queue_;
 };
 }  // namespace vsag

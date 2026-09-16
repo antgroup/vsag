@@ -218,6 +218,7 @@ void
 AttributeBucketInvertedDataCell::UpdateBitsetsByAttr(const AttributeSet& attributes,
                                                      const InnerIdType offset_id,
                                                      const BucketIdType bucket_id) {
+    std::lock_guard lock(this->global_mutex_);
     for (const auto* attr : attributes.attrs_) {
         const auto& name = attr->name_;
         auto& value_map = this->field_2_value_map_[name];

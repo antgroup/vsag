@@ -22,6 +22,43 @@
 
 using namespace vsag;
 
+TEST_CASE("SQ8 Uniform Batch4 matches scalar IP including tails", "[ut][simd][batch4]") {
+    std::vector<SQ8UniformComputeCodesIPBatch4Type> kernels = {
+        generic::SQ8UniformComputeCodesIPBatch4, SQ8UniformComputeCodesIPBatch4};
+    if (SimdStatus::SupportSSE())
+        kernels.push_back(sse::SQ8UniformComputeCodesIPBatch4);
+    if (SimdStatus::SupportAVX2())
+        kernels.push_back(avx2::SQ8UniformComputeCodesIPBatch4);
+    if (SimdStatus::SupportAVX512())
+        kernels.push_back(avx512::SQ8UniformComputeCodesIPBatch4);
+    if (SimdStatus::SupportNEON())
+        kernels.push_back(neon::SQ8UniformComputeCodesIPBatch4);
+    if (SimdStatus::SupportSVE())
+        kernels.push_back(sve::SQ8UniformComputeCodesIPBatch4);
+    for (uint64_t dim : {0, 1, 15, 16, 17, 31, 32, 33, 63, 64, 65, 128, 257}) {
+        const auto stride = dim + 3;
+        auto query = fixtures::generate_uint8_codes(1, stride, 31);
+        auto codes = fixtures::generate_uint8_codes(4, stride, 17);
+        for (auto kernel : kernels) {
+            float got[4] = {-1, -1, -1, -1};
+            kernel(query.data(),
+                   codes.data(),
+                   codes.data() + stride,
+                   codes.data() + 2 * stride,
+                   codes.data() + 3 * stride,
+                   dim,
+                   got[0],
+                   got[1],
+                   got[2],
+                   got[3]);
+            for (uint64_t i = 0; i < 4; ++i) {
+                CHECK(got[i] == generic::SQ8UniformComputeCodesIP(
+                                    query.data(), codes.data() + i * stride, dim));
+            }
+        }
+    }
+}
+
 #define TEST_ACCURACY(Func)                                                                      \
     {                                                                                            \
         auto gt =                                                                                \

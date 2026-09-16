@@ -90,7 +90,9 @@ public:
     Prefetch(InnerIdType id, uint32_t neighbor_i) override {
         const uint64_t offset_in_record =
             NEIGHBORS_OFFSET + static_cast<uint64_t>(neighbor_i) * sizeof(InnerIdType);
-        layout_.PrefetchAt(id, offset_in_record, 64);
+        if (offset_in_record < this->code_line_size_) {
+            layout_.PrefetchAt(id, offset_in_record, this->code_line_size_ - offset_in_record);
+        }
     }
 
     void
@@ -336,20 +338,20 @@ GraphDataCell<IOTmpl>::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbo
     }
     if (is_support_delete_) {
         neighbor_count &= remove_flag_mask_;
-        Vector<InnerIdType> shared_neighbor_ids(neighbor_count, this->allocator_);
+        neighbor_ids.resize(neighbor_count);
         this->layout_.ReadAt(id,
                              NEIGHBORS_OFFSET,
                              static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType),
-                             reinterpret_cast<uint8_t*>(shared_neighbor_ids.data()));
-        neighbor_ids.clear();
-        neighbor_ids.reserve(neighbor_count);
-        for (int i = 0; i < neighbor_count; ++i) {
-            uint8_t neighbor_version = shared_neighbor_ids[i] >> id_bit_;
-            InnerIdType neighbor_id = shared_neighbor_ids[i] & remove_flag_mask_;
+                             reinterpret_cast<uint8_t*>(neighbor_ids.data()));
+        uint32_t valid_count = 0;
+        for (uint32_t i = 0; i < neighbor_count; ++i) {
+            const uint8_t neighbor_version = neighbor_ids[i] >> id_bit_;
+            const InnerIdType neighbor_id = neighbor_ids[i] & remove_flag_mask_;
             if (node_versions_[neighbor_id] == neighbor_version) {
-                neighbor_ids.push_back(neighbor_id);
+                neighbor_ids[valid_count++] = neighbor_id;
             }
         }
+        neighbor_ids.resize(valid_count);
     } else {
         neighbor_ids.resize(neighbor_count);
         this->layout_.ReadAt(id,

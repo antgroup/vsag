@@ -68,8 +68,7 @@ ParallelSearcher::visit(const GraphInterfacePtr& graph,
             if (j + prefetch_stride_visit_ < neighbors[i].size()) {
                 vl->Prefetch(neighbors[i][j + prefetch_stride_visit_]);
             }
-            if (not vl->Get(neighbors[i][j])) {
-                vl->Set(neighbors[i][j]);
+            if (not vl->TestAndSet(neighbors[i][j])) {
                 if (not filter || count_no_visited == 0 || skip_strategy == nullptr ||
                     skip_strategy->ShouldVisit() || filter->CheckValid(neighbors[i][j])) {
                     to_be_visited_id[count_no_visited] = neighbors[i][j];
@@ -123,11 +122,16 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     // set customize query alloctor
     Allocator* alloc = select_query_allocator(ctx, allocator_);
 
-    auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
-    auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
+    // Concrete-typed pointers: hot-path heap ops bypass the virtual
+    // DistanceHeap interface; the heaps stay coordinator-thread-local.
+    auto top_candidates_ptr = std::make_shared<StandardHeap<true, false>>(
+        alloc, std::max<int64_t>(inner_search_param.ef, 64));
+    auto* top_candidates = top_candidates_ptr.get();
+    StandardHeap<true, false> candidate_set_storage(alloc, -1);
+    auto* candidate_set = &candidate_set_storage;
 
     if (not graph or not flatten) {
-        return top_candidates;
+        return top_candidates_ptr;
     }
     if (inner_search_param.parallel_search_thread_count <= 0) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
@@ -424,7 +428,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         future.get();
     }
 
-    return top_candidates;
+    return top_candidates_ptr;
 }
 
 void

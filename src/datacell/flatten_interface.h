@@ -406,7 +406,7 @@ public:
     InnerIdType total_count_{0};
     InnerIdType max_capacity_{800};
     uint32_t code_size_{0};
-    uint32_t prefetch_stride_code_{1};
+    uint32_t prefetch_stride_code_{3};
     uint32_t prefetch_depth_code_{1};
     DistanceEvaluationBackend backend_{DistanceEvaluationBackend::UNKNOWN};
 };

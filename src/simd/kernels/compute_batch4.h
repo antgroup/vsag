@@ -16,10 +16,9 @@
 #pragma once
 
 // Batch-of-4 IP / L2 kernel: one query vector against four code vectors.
-// Results are accumulated into result1..result4 (the caller must initialise
-// them before invocation, e.g. to 0). Matches the existing semantics of
-// FP32ComputeIPBatch4 / FP32ComputeL2SqrBatch4: the four accumulators
-// share the same query load, so we get 4x reuse of every q-cacheline.
+// Results are accumulated into result1..result4. The caller initializes the
+// four scalar outputs before invoking the kernel. The four accumulators share
+// each query load, so we get 4x reuse of every query cache line.
 
 #include <cstdint>
 
@@ -80,6 +79,45 @@ ComputeBatch4Impl(const float* RESTRICT query,
     V s4 = T::zero();
 
     uint64_t i = 0;
+    // Four vector chunks per iteration to maximize the number of independent
+    // code loads in flight; accumulation order per code is unchanged, so
+    // results stay bit-identical.
+    for (; i + 4 * W <= dim; i += 4 * W) {
+        const V qa = T::load(query + i);
+        const V qb = T::load(query + i + W);
+        const V qc = T::load(query + i + 2 * W);
+        const V qd = T::load(query + i + 3 * W);
+        s1 = batch4_accumulate<T, Kind>(qa, T::load(c1 + i), s1);
+        s2 = batch4_accumulate<T, Kind>(qa, T::load(c2 + i), s2);
+        s3 = batch4_accumulate<T, Kind>(qa, T::load(c3 + i), s3);
+        s4 = batch4_accumulate<T, Kind>(qa, T::load(c4 + i), s4);
+        s1 = batch4_accumulate<T, Kind>(qb, T::load(c1 + i + W), s1);
+        s2 = batch4_accumulate<T, Kind>(qb, T::load(c2 + i + W), s2);
+        s3 = batch4_accumulate<T, Kind>(qb, T::load(c3 + i + W), s3);
+        s4 = batch4_accumulate<T, Kind>(qb, T::load(c4 + i + W), s4);
+        s1 = batch4_accumulate<T, Kind>(qc, T::load(c1 + i + 2 * W), s1);
+        s2 = batch4_accumulate<T, Kind>(qc, T::load(c2 + i + 2 * W), s2);
+        s3 = batch4_accumulate<T, Kind>(qc, T::load(c3 + i + 2 * W), s3);
+        s4 = batch4_accumulate<T, Kind>(qc, T::load(c4 + i + 2 * W), s4);
+        s1 = batch4_accumulate<T, Kind>(qd, T::load(c1 + i + 3 * W), s1);
+        s2 = batch4_accumulate<T, Kind>(qd, T::load(c2 + i + 3 * W), s2);
+        s3 = batch4_accumulate<T, Kind>(qd, T::load(c3 + i + 3 * W), s3);
+        s4 = batch4_accumulate<T, Kind>(qd, T::load(c4 + i + 3 * W), s4);
+    }
+    // Two vector chunks per iteration: the eight code loads in flight overlap
+    // their latencies instead of serializing behind one query load.
+    for (; i + 2 * W <= dim; i += 2 * W) {
+        const V qa = T::load(query + i);
+        const V qb = T::load(query + i + W);
+        s1 = batch4_accumulate<T, Kind>(qa, T::load(c1 + i), s1);
+        s2 = batch4_accumulate<T, Kind>(qa, T::load(c2 + i), s2);
+        s3 = batch4_accumulate<T, Kind>(qa, T::load(c3 + i), s3);
+        s4 = batch4_accumulate<T, Kind>(qa, T::load(c4 + i), s4);
+        s1 = batch4_accumulate<T, Kind>(qb, T::load(c1 + i + W), s1);
+        s2 = batch4_accumulate<T, Kind>(qb, T::load(c2 + i + W), s2);
+        s3 = batch4_accumulate<T, Kind>(qb, T::load(c3 + i + W), s3);
+        s4 = batch4_accumulate<T, Kind>(qb, T::load(c4 + i + W), s4);
+    }
     for (; i + W <= dim; i += W) {
         V q = T::load(query + i);
         s1 = batch4_accumulate<T, Kind>(q, T::load(c1 + i), s1);
@@ -92,6 +130,9 @@ ComputeBatch4Impl(const float* RESTRICT query,
     r3 += T::reduce_add(s3);
     r4 += T::reduce_add(s4);
 
+    // Preserve the established reduction tree for non-aligned dimensions.
+    // Folding scalar tail terms into the already-reduced wide accumulator can
+    // produce materially different results under cancellation.
     if constexpr (W > 1) {
         if (dim > i) {
             fallback(query + i, dim - i, c1 + i, c2 + i, c3 + i, c4 + i, r1, r2, r3, r4);

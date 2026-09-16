@@ -7,8 +7,37 @@
 
 #include <limits>
 #include <stdexcept>
+#include <thread>
+#include <vector>
 
 #include "unittest.h"
+
+TEST_CASE("SearchStatistics concurrent distance updates", "[ut][search_statistics]") {
+    vsag::SearchStatistics stats;
+    constexpr uint64_t thread_count = 8;
+    constexpr uint64_t iterations = 100000;
+    std::atomic<bool> start{false};
+    std::vector<std::thread> workers;
+    for (uint64_t i = 0; i < thread_count; ++i) {
+        workers.emplace_back([&] {
+            while (not start.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            for (uint64_t j = 0; j < iterations; ++j) {
+                stats.AddDistance(vsag::SearchStatistics::DistancePhase::APPROXIMATE,
+                                  vsag::DistanceEvaluationBackend::FP32);
+            }
+        });
+    }
+    start.store(true, std::memory_order_release);
+    for (auto& worker : workers) {
+        worker.join();
+    }
+    CHECK(stats.distance_evaluations.load() == thread_count * iterations);
+    CHECK(stats.distance_evaluations_by_phase[1].load() == thread_count * iterations);
+    CHECK(stats.distance_evaluations_by_backend[0].load() == thread_count * iterations);
+    CHECK(stats.complete.load());
+}
 
 TEST_CASE("SearchStatistics distance contract", "[ut][search_statistics]") {
     vsag::SearchStatistics stats;

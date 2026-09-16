@@ -72,17 +72,17 @@ public:
             std::hash<std::thread::id>()(std::this_thread::get_id()) % kSubPoolCount};
         auto pool_id = prefer_pool_id_;
         while (true) {
-            if (sub_pool_mutexes_[pool_id].try_lock()) {
+            if (sub_pool_mutexes_[pool_id].mutex.try_lock()) {
                 prefer_pool_id_ = pool_id;
                 if (pool_[pool_id]->empty()) {
-                    sub_pool_mutexes_[pool_id].unlock();
+                    sub_pool_mutexes_[pool_id].mutex.unlock();
                     auto obj = this->constructor_();
                     obj->source_pool_id_ = pool_id;
                     return obj;
                 }
                 std::shared_ptr<T> obj = pool_[pool_id]->front();
                 pool_[pool_id]->pop_front();
-                sub_pool_mutexes_[pool_id].unlock();
+                sub_pool_mutexes_[pool_id].mutex.unlock();
                 obj->source_pool_id_ = pool_id;
                 obj->Reset();
                 return obj;
@@ -95,7 +95,7 @@ public:
     void
     ReturnOne(std::shared_ptr<T>& obj) {
         auto pool_id = obj->source_pool_id_;
-        std::lock_guard<std::mutex> lock(sub_pool_mutexes_[pool_id]);
+        std::lock_guard<std::mutex> lock(sub_pool_mutexes_[pool_id].mutex);
         pool_[pool_id]->emplace_back(obj);
     }
 
@@ -105,6 +105,10 @@ public:
     }
 
 private:
+    struct alignas(64) MutexSlot {
+        std::mutex mutex;
+    };
+
     inline void
     fill(uint64_t size) {
         for (uint64_t i = 0; i < size; ++i) {
@@ -115,7 +119,7 @@ private:
 
 private:
     std::unique_ptr<Deque<std::shared_ptr<T>>> pool_[kSubPoolCount];
-    std::mutex sub_pool_mutexes_[kSubPoolCount];
+    MutexSlot sub_pool_mutexes_[kSubPoolCount];
     uint64_t init_size_{0};
 
     std::atomic<int64_t> memory_usage_{0};
