@@ -47,6 +47,18 @@ main(int argc, char** argv) {
     std::cout << "added id=" << before->front().id << " squared_l2=" << before->front().distance
               << '\n';
 
+    auto filtered = (*index)->Search(first, 3, 2, [](int64_t id) { return id != 42; });
+    if (not filtered) {
+        std::cerr << "Filtered Search failed: " << filtered.error().message << '\n';
+        return 1;
+    }
+    if (filtered->size() != 1 or filtered->front().id != 7 or filtered->front().distance != 48) {
+        std::cerr << "Filtered Search returned an unexpected result\n";
+        return 1;
+    }
+    std::cout << "filtered id=" << filtered->front().id
+              << " squared_l2=" << filtered->front().distance << '\n';
+
     auto update = (*index)->Update(42, updated, 3);
     if (not update) {
         std::cerr << "Update failed: " << update.error().message << '\n';
