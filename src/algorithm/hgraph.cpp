@@ -968,7 +968,9 @@ HGraph::KnnSearch(const DatasetPtr& query,
                                                      search_param,
                                                      (VisitedListPtr) nullptr,
                                                      &ctx);
-                search_param.ep = result->Top().second;
+                if (not result->Empty()) {
+                    search_param.ep = result->Top().second;
+                }
             }
         }
 
@@ -1180,7 +1182,9 @@ HGraph::RangeSearch(const DatasetPtr& query,
                                              search_param,
                                              (VisitedListPtr) nullptr,
                                              &ctx);
-        search_param.ep = result->Top().second;
+        if (not result->Empty()) {
+            search_param.ep = result->Top().second;
+        }
     }
 
     CHECK_ARGUMENT((1 <= params.ef_search) and (params.ef_search <= 1000),  // NOLINT
@@ -1676,6 +1680,7 @@ HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
     std::unique_lock add_lock(add_mutex_);
     if (level >= static_cast<int>(this->route_graphs_.size()) || bottom_graph_->TotalCount() == 0) {
         std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
+        const auto previous_route_graph_count = this->route_graphs_.size();
         // level maybe a negative number(-1)
         for (auto j = static_cast<int>(this->route_graphs_.size()); j <= level; ++j) {
             this->route_graphs_.emplace_back(this->generate_one_route_graph());
@@ -1684,7 +1689,7 @@ HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
         if (insert_success) {
             entry_point_id_ = inner_id;
         } else {
-            this->route_graphs_.pop_back();
+            this->route_graphs_.resize(previous_route_graph_count);
         }
         add_lock.unlock();
     } else {
@@ -1712,7 +1717,9 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     for (auto j = this->route_graphs_.size() - 1; j > level; --j) {
         result = search_one_graph(
             data, route_graphs_[j], flatten_codes, param, (VisitedListPtr) nullptr, nullptr);
-        param.ep = result->Top().second;
+        if (not result->Empty()) {
+            param.ep = result->Top().second;
+        }
     }
 
     param.ef = this->ef_construct_;
@@ -1736,13 +1743,16 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
             label_table_->SetDuplicateId(static_cast<InnerIdType>(param.duplicate_id), inner_id);
             return false;
         }
-        mutually_connect_new_element(inner_id,
-                                     result,
-                                     this->bottom_graph_,
-                                     flatten_codes,
-                                     neighbors_mutex_,
-                                     allocator_,
-                                     alpha_);
+        const auto next_entry_point = mutually_connect_new_element(inner_id,
+                                                                   result,
+                                                                   this->bottom_graph_,
+                                                                   flatten_codes,
+                                                                   neighbors_mutex_,
+                                                                   allocator_,
+                                                                   alpha_);
+        if (next_entry_point == INVALID_ENTRY_POINT) {
+            return false;
+        }
     } else {
         bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
     }
@@ -1756,13 +1766,16 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
                                       // to specify which overloaded function to call
                                       (VisitedListPtr) nullptr,
                                       nullptr);
-            mutually_connect_new_element(inner_id,
-                                         result,
-                                         route_graphs_[j],
-                                         flatten_codes,
-                                         neighbors_mutex_,
-                                         allocator_,
-                                         alpha_);
+            const auto next_entry_point = mutually_connect_new_element(inner_id,
+                                                                       result,
+                                                                       route_graphs_[j],
+                                                                       flatten_codes,
+                                                                       neighbors_mutex_,
+                                                                       allocator_,
+                                                                       alpha_);
+            if (next_entry_point == INVALID_ENTRY_POINT) {
+                return false;
+            }
         } else {
             route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         }
@@ -2257,7 +2270,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(
             raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param, vt, &ctx);
-        search_param.ep = result->Top().second;
+        if (not result->Empty()) {
+            search_param.ep = result->Top().second;
+        }
     }
 
     FilterPtr ft = nullptr;

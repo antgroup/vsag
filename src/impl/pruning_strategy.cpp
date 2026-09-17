@@ -15,6 +15,7 @@
 
 #include "pruning_strategy.h"
 
+#include "common.h"
 #include "datacell/flatten_datacell.h"
 #include "datacell/graph_interface.h"
 #include "impl/heap/standard_heap.h"
@@ -87,9 +88,12 @@ mutually_connect_new_element(InnerIdType cur_c,
         top_candidates->Pop();
     }
 
-    InnerIdType next_closest_entry_point = selected_neighbors.back();
-
     graph->InsertNeighborsById(cur_c, selected_neighbors);
+    if (selected_neighbors.empty()) {
+        return INVALID_ENTRY_POINT;
+    }
+
+    InnerIdType next_closest_entry_point = selected_neighbors.back();
 
     for (auto selected_neighbor : selected_neighbors) {
         if (selected_neighbor == cur_c) {

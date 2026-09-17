@@ -21,6 +21,7 @@
 #include <memory>
 #include <vector>
 
+#include "common.h"
 #include "datacell/flatten_datacell.h"
 #include "datacell/flatten_datacell_parameter.h"
 #include "datacell/graph_datacell_parameter.h"
@@ -193,6 +194,20 @@ TEST_CASE("Pruning Strategy Select Edges With Heuristic", "[ut][pruning_strategy
         Vector<InnerIdType> neighbors_0(allocator.get());
         graph->GetNeighbors(0, neighbors_0);
         REQUIRE(neighbors_0.size() == 1);
+    }
+
+    SECTION("Mutual connection supports no candidates") {
+        auto graph_param = std::make_shared<GraphDataCellParameter>();
+        graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+        graph_param->max_degree_ = 4;
+        auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+
+        auto candidates = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
+        auto mutexes = std::make_shared<EmptyMutex>();
+        auto entry_point =
+            mutually_connect_new_element(0, candidates, graph, flatten, mutexes, allocator.get());
+
+        REQUIRE(entry_point == INVALID_ENTRY_POINT);
     }
 }
 
