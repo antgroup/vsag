@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <iosfwd>
 #include <memory>
 #include <vector>
@@ -16,6 +17,9 @@ struct Neighbor {
     int64_t id;
     float distance;
 };
+
+/** Return true when an external ID is allowed in search results. */
+using IdFilter = std::function<bool(int64_t)>;
 
 /**
  * Minimal FP32, squared-L2 index. No concurrent calls are supported.
@@ -45,6 +49,12 @@ public:
     /** k=0 or an empty index returns an empty result; k is capped at the record count. */
     tl::expected<std::vector<Neighbor>, Error>
     Search(const float* query, uint64_t dim, uint64_t k) const;
+    /**
+     * Search while keeping only records whose external ID is accepted by the filter.
+     * An empty filter accepts every ID. The result can contain fewer than k records.
+     */
+    tl::expected<std::vector<Neighbor>, Error>
+    Search(const float* query, uint64_t dim, uint64_t k, const IdFilter& filter) const;
 
     /** Write a little-endian snapshot at the current stream position; no atomic file replace. */
     tl::expected<void, Error>
@@ -60,6 +70,8 @@ public:
 
 private:
     explicit Index(uint64_t dim);
+    tl::expected<std::vector<Neighbor>, Error>
+    SearchImpl(const float* query, uint64_t dim, uint64_t k, const IdFilter* filter) const;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
