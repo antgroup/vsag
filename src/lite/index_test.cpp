@@ -48,6 +48,70 @@ TEST_CASE("Lite validates inputs and preserves IDs through physical deletion", "
     REQUIRE(index.Size() == 0);
 }
 
+TEST_CASE("Lite search filters external IDs across CRUD and snapshot load", "[lite]") {
+    auto created = Index::Create(2);
+    auto& index = **created;
+    const float query[]{0, 0};
+    const float first[]{0, 0};
+    const float second[]{1, 0};
+    const float third[]{2, 0};
+    const float fourth[]{3, 0};
+    REQUIRE(index.Add(101, first, 2));
+    REQUIRE(index.Add(-7, second, 2));
+    REQUIRE(index.Add(303, third, 2));
+    REQUIRE(index.Add(404, fourth, 2));
+
+    const auto unfiltered = index.Search(query, 2, 10);
+    REQUIRE(unfiltered);
+    const vsag::lite::IdFilter empty_filter;
+    const auto empty_filter_result = index.Search(query, 2, 10, empty_filter);
+    REQUIRE(empty_filter_result);
+    REQUIRE(empty_filter_result->size() == unfiltered->size());
+    for (uint64_t i = 0; i < unfiltered->size(); ++i) {
+        REQUIRE((*empty_filter_result)[i].id == (*unfiltered)[i].id);
+        REQUIRE((*empty_filter_result)[i].distance == (*unfiltered)[i].distance);
+    }
+
+    std::vector<int64_t> checked_ids;
+    const vsag::lite::IdFilter selected = [&checked_ids](int64_t id) {
+        checked_ids.push_back(id);
+        return id == -7 or id == 404;
+    };
+    const auto filtered = index.Search(query, 2, 10, selected);
+    REQUIRE(filtered);
+    REQUIRE(checked_ids == std::vector<int64_t>{101, -7, 303, 404});
+    REQUIRE(filtered->size() == 2);
+    REQUIRE((*filtered)[0].id == -7);
+    REQUIRE((*filtered)[1].id == 404);
+
+    const auto rejected = index.Search(query, 2, 4, [](int64_t) { return false; });
+    REQUIRE(rejected);
+    REQUIRE(rejected->empty());
+    const auto fewer_than_k = index.Search(query, 2, 4, [](int64_t id) { return id == 303; });
+    REQUIRE(fewer_than_k);
+    REQUIRE(fewer_than_k->size() == 1);
+    REQUIRE(fewer_than_k->front().id == 303);
+
+    const float updated[]{-1, 0};
+    REQUIRE(index.Update(404, updated, 2));
+    REQUIRE(index.Remove(-7));
+    const auto after_crud = index.Search(query, 2, 4, [](int64_t id) { return id % 2 == 0; });
+    REQUIRE(after_crud);
+    REQUIRE(after_crud->size() == 1);
+    REQUIRE(after_crud->front().id == 404);
+    REQUIRE(after_crud->front().distance == 1);
+
+    std::stringstream stream;
+    REQUIRE(index.Save(stream));
+    auto loaded = Index::Load(stream);
+    REQUIRE(loaded);
+    const auto restored = (*loaded)->Search(query, 2, 4, [](int64_t id) { return id % 2 == 0; });
+    REQUIRE(restored);
+    REQUIRE(restored->size() == after_crud->size());
+    REQUIRE(restored->front().id == after_crud->front().id);
+    REQUIRE(restored->front().distance == after_crud->front().distance);
+}
+
 TEST_CASE("Lite snapshot roundtrip and malformed input", "[lite]") {
     auto created = Index::Create(2);
     auto& index = **created;

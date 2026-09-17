@@ -191,6 +191,16 @@ Index::Remove(int64_t id) {
 
 tl::expected<std::vector<Neighbor>, Error>
 Index::Search(const float* query, uint64_t dim, uint64_t k) const {
+    return SearchImpl(query, dim, k, nullptr);
+}
+
+tl::expected<std::vector<Neighbor>, Error>
+Index::Search(const float* query, uint64_t dim, uint64_t k, const IdFilter& filter) const {
+    return SearchImpl(query, dim, k, filter ? &filter : nullptr);
+}
+
+tl::expected<std::vector<Neighbor>, Error>
+Index::SearchImpl(const float* query, uint64_t dim, uint64_t k, const IdFilter* filter) const {
     auto valid = validate(query, dim, Dim());
     if (not valid) {
         return tl::unexpected(valid.error());
@@ -205,6 +215,9 @@ Index::Search(const float* query, uint64_t dim, uint64_t k) const {
         const auto distance_fn =
             dim < 16 ? detail::GenericFP32Distance : detail::SelectFP32Distance();
         for (uint64_t slot = 0; slot < Size(); ++slot) {
+            if (filter != nullptr and not(*filter)(impl_->ids[slot])) {
+                continue;
+            }
             const auto distance = distance_fn(query, impl_->vectors.data() + slot * dim, dim);
             Neighbor next{impl_->ids[slot], distance};
             if (heap.size() < k) {

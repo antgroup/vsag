@@ -21,6 +21,7 @@ Save and Load. Use a new snapshot path for each run. Expected output:
 
 ```text
 added id=42 squared_l2=0
+filtered id=7 squared_l2=48
 updated id=42 squared_l2=0
 removed id=42 remaining=1
 loaded id=7 squared_l2=0
@@ -46,8 +47,10 @@ be externally serialized. Results own their memory; internal slots are not expos
 - Single-record Add rejects duplicate IDs; Update rejects absent IDs.
 - Remove returns false for absent IDs. A removed external ID can be inserted again.
 - Add failure leaves logical records unchanged, though reserved capacity may grow.
-- Search returns `min(k, Size())` entries sorted by squared-L2 then ascending ID.
-  Valid queries with k=0 or an empty index return an empty result.
+- Search returns up to `min(k, Size())` entries sorted by squared-L2 then ascending ID.
+  The overload taking `IdFilter` calls it with each external ID before computing distance;
+  `true` allows that record. An empty filter accepts every ID, and filtering can return fewer
+  than k entries. Valid queries with k=0 or an empty index return an empty result.
 - FP32 accumulation can overflow to positive infinity for extreme finite inputs;
   those distances tie and are ordered by ID. This is not arbitrary-precision L2.
 - NaN/Inf inputs and dimension mismatches are rejected even for k=0.

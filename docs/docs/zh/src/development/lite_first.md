@@ -20,6 +20,7 @@ cmake --build build-lite-consumer -j2
 
 ```text
 added id=42 squared_l2=0
+filtered id=7 squared_l2=48
 updated id=42 squared_l2=0
 removed id=42 remaining=1
 loaded id=7 squared_l2=0
@@ -40,8 +41,9 @@ Load 采用现有 `tl::expected` / `vsag::Error`，不调用 Full 全局日志�
 - 单条 Add 拒绝重复 ID；Update 拒绝不存在的 ID。
 - Remove 对不存在的 ID 返回 false；删除后的外部 ID 可以重新新增。
 - Add 失败不改变逻辑记录，但预留容量可能已经增加。
-- Search 返回 min(k, Size()) 条记录，按 L2 平方距离、ID 升序排列。
-  合法查询遇 k=0 或空库返回空结果。
+- Search 最多返回 min(k, Size()) 条记录，按 L2 平方距离、ID 升序排列。
+  带 `IdFilter` 的重载会在计算距离前传入每条记录的外部 ID；返回 `true` 才允许该记录。
+  空过滤器允许所有 ID，过滤后结果可以少于 k 条。合法查询遇 k=0 或空库返回空结果。
 - 极端有限输入的 FP32 累加可能溢出为正无穷，此时按 ID 排序，不承诺任意精度 L2。
 - 即使 k=0，NaN/Inf、空指针和维度不匹配仍报错。
 - 已捕获的分配失败转为 Error，但错误对象本身仍可能分配内存，不承诺 OOM 下绝不抛异常。
