@@ -1,0 +1,277 @@
+name: Build Performance Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'main or a full 40-character commit SHA reachable from main (no PR refs)'
+        required: false
+        default: main
+        type: string
+  schedule:
+    - cron: '23 3 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-performance-${{ github.workflow }}-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  benchmark-x86:
+    name: Build Performance X86 (not a PR check)
+    if: github.ref == 'refs/heads/main' && (github.event_name != 'schedule' || github.repository == 'antgroup/vsag')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    env:
+      VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
+      VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
+      CCACHE_DIR: ${{ github.workspace }}/.benchmark-ccache
+      BENCHMARK_JOBS: '3'
+      CMAKE_GENERATOR: Ninja
+      CMAKE_EXPORT_COMPILE_COMMANDS: 'ON'
+      EXTRA_DEFINED: '-DVSAG_USE_SYSTEM_OPENBLAS=ON'
+      VSAG_ENABLE_EXAMPLES: 'ON'
+      VSAG_ENABLE_TOOLS: 'ON'
+    steps:
+      - name: Checkout approved main history
+        uses: actions/checkout@v4
+        with:
+          repository: antgroup/vsag
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve approved benchmark commit
+        id: target
+        env:
+          REQUESTED_REF: ${{ github.event.inputs.ref || 'main' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_sha=$(git rev-parse HEAD)
+          if [[ "$REQUESTED_REF" == main ]]; then
+            sha="$base_sha"
+          elif [[ "$REQUESTED_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            if ! object_type=$(git cat-file -t "$REQUESTED_REF" 2>/dev/null); then
+              echo '::error::Unknown commit SHA (not found in fetched approved main history).'
+              exit 1
+            fi
+            if [[ "$object_type" != commit ]]; then
+              echo '::error::Benchmark SHA must identify a commit object, not a tag, tree or blob.'
+              exit 1
+            fi
+            sha=$(git rev-parse --verify "$REQUESTED_REF^{commit}")
+            if ! git merge-base --is-ancestor "$sha" "$base_sha"; then
+              echo '::error::Benchmark SHA must be reachable from approved main; PR refs are not allowed.'
+              exit 1
+            fi
+          else
+            echo '::error::Use main or a full 40-character SHA reachable from main; arbitrary refs are not allowed.'
+            exit 1
+          fi
+          git checkout --detach "$sha"
+          sha=$(git rev-parse HEAD)
+          printf 'sha=%s\nbase_sha=%s\n' "$sha" "$base_sha" >> "$GITHUB_OUTPUT"
+          rm -rf -- build-metrics
+          mkdir -p build-metrics
+          printf 'commit_sha=%s\nbase_sha=%s\n' "$sha" "$base_sha" > build-metrics/target.txt
+          printf '## Build benchmark\n\nActual commit: `%s`\n\n' "$sha" >> "$GITHUB_STEP_SUMMARY"
+      - name: Require verified-noop collector support
+        # Legacy schema 1 deletes Ninja state. Never run it as a valid baseline.
+        # This is a schema capability gate, not a proof of collector correctness.
+        run: |
+          python3 - <<'PY'
+          import ast
+          import os
+          from pathlib import Path
+
+          source = Path('scripts/collect_build_metrics.py')
+          try:
+              tree = ast.parse(source.read_text(encoding='utf-8'))
+              collectors = [node for node in tree.body
+                            if isinstance(node, ast.ClassDef) and node.name == 'Collector']
+              methods = [node for collector in collectors for node in collector.body
+                         if isinstance(node, ast.FunctionDef)]
+              reports = [node.value for method in methods if method.name == 'write_reports'
+                         for node in ast.walk(method) if isinstance(node, ast.Assign)
+                         and any(isinstance(target, ast.Name) and target.id == 'report'
+                                 for target in node.targets)]
+              schema3 = len(collectors) == 1 and bool(reports) and all(
+                  isinstance(report, ast.Dict) and any(
+                      isinstance(key, ast.Constant) and key.value == 'schema_version'
+                      and isinstance(value, ast.Constant) and type(value.value) is int and value.value == 3
+                      for key, value in zip(report.keys, report.values)
+                  ) for report in reports
+              )
+              noop_field = any(
+                  isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store)
+                  and isinstance(node.value, ast.Name) and node.value.id == 'phase'
+                  and isinstance(node.slice, ast.Constant) and node.slice.value == 'true_noop'
+                  for method in methods if method.name == 'capture_build'
+                  for node in ast.walk(method)
+              )
+          except (OSError, SyntaxError):
+              schema3 = noop_field = False
+          if not (schema3 and noop_field):
+              message = ('BLOCKED: collector lacks supported schema 3 verified-noop reporting. '
+                         'Legacy no-op measurements are NOT trustworthy. '
+                         'Requires antgroup/vsag#2899; no benchmark was run. '
+                         'Revalidate this gate if the collector API changes.')
+              Path('build-metrics/preflight.txt').write_text(message + '\n', encoding='utf-8')
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+                  summary.write('**' + message + '**\n')
+              raise SystemExit(message)
+          PY
+      - name: Prepare trusted Ubuntu host
+        # Fixed workflow-owned package list matches PR OpenBLAS setup, not target-ref sudo scripts.
+        run: |
+          sudo apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            ccache cmake g++ gcc gfortran lcov libaio-dev libcurl4-openssl-dev \
+            liblapacke-dev libomp-15-dev libopenblas-dev liburing-dev make \
+            ninja-build python3-dev clang-tidy-15 time
+          {
+            g++ --version
+            cmake --version
+            ninja --version
+            ccache --version
+            printf 'BENCHMARK_JOBS=%s\nCMAKE_GENERATOR=%s\nCMAKE_EXPORT_COMPILE_COMMANDS=%s\nEXTRA_DEFINED=%s\nVSAG_ENABLE_EXAMPLES=%s\nVSAG_ENABLE_TOOLS=%s\n' \
+              "$BENCHMARK_JOBS" "$CMAKE_GENERATOR" "$CMAKE_EXPORT_COMPILE_COMMANDS" \
+              "$EXTRA_DEFINED" "$VSAG_ENABLE_EXAMPLES" "$VSAG_ENABLE_TOOLS"
+            printf '%s\n' 'Cold means empty compiler cache, not cold network downloads. No compiler cache is restored or saved.'
+          } > build-metrics/toolchain.txt
+      - name: Start Dependency Preparation Timer
+        id: dependency-preparation-start
+        run: echo "started_ns=$(date +%s%N)" >> "$GITHUB_OUTPUT"
+      - name: Prepare FetchContent Sources
+        uses: ./.github/actions/prepare-fetchcontent
+        with:
+          include-tests: 'true'
+          include-tools: 'true'
+      - name: Finish source preparation and start archive timer
+        id: sources
+        env:
+          STARTED_NS: ${{ steps.dependency-preparation-start.outputs.started_ns }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          import time
+
+          now = time.time_ns()
+          print(f"seconds={(now - int(os.environ['STARTED_NS'])) / 1_000_000_000:.3f}")
+          print(f'started_ns={now}')
+          PY
+      - name: Restore ExternalProject Archives (never save)
+        id: archives
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci-downloads
+          key: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
+          restore-keys: |
+            external-${{ runner.os }}-${{ runner.arch }}-
+      - name: Finish Dependency Preparation Timer
+        id: dependency-preparation
+        env:
+          STARTED_NS: ${{ steps.dependency-preparation-start.outputs.started_ns }}
+          ARCHIVE_STARTED_NS: ${{ steps.sources.outputs.started_ns }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          import time
+
+          now = time.time_ns()
+          elapsed = (now - int(os.environ['STARTED_NS'])) / 1_000_000_000
+          archive = (now - int(os.environ['ARCHIVE_STARTED_NS'])) / 1_000_000_000
+          print(f'seconds={elapsed:.3f}')
+          print(f'archive_seconds={archive:.3f}')
+          PY
+      - name: Collect isolated cold warm and no-op metrics
+        env:
+          BUILD_BASE_SHA: ${{ steps.target.outputs.base_sha }}
+          BUILD_COMMIT_SHA: ${{ steps.target.outputs.sha }}
+          DEPENDENCY_CACHE_KEY: ${{ steps.archives.outputs.cache-primary-key }}
+          DEPENDENCY_CACHE_MATCHED_KEY: ${{ steps.archives.outputs.cache-matched-key }}
+          DEPENDENCY_CACHE_STATE: ${{ steps.archives.outputs.cache-hit == 'true' && 'exact-hit' || (steps.archives.outputs.cache-matched-key != '' && 'fallback-hit' || 'miss') }}
+          DEPENDENCY_PREPARATION_SECONDS: ${{ steps.dependency-preparation.outputs.seconds }}
+          DEPENDENCY_SOURCE_PREPARATION_SECONDS: ${{ steps.sources.outputs.seconds }}
+          DEPENDENCY_CACHE_RESTORE_SECONDS: ${{ steps.dependency-preparation.outputs.archive_seconds }}
+        run: |
+          COMPILER=$(g++ -dumpfullversion -dumpversion)
+          # build/ belongs only to this fresh hosted job; keep the existing collector CLI.
+          collector_command=(python3 scripts/collect_build_metrics.py \
+            --build-dir build \
+            --output-dir build-metrics \
+            --base-sha "$BUILD_BASE_SHA" \
+            --commit-sha "$BUILD_COMMIT_SHA" \
+            --compiler "gcc-$COMPILER" \
+            --compiler-cache-key "isolated-no-restore-no-save-gcc-$COMPILER" \
+            --dependency-cache-key "$DEPENDENCY_CACHE_KEY" \
+            --dependency-cache-matched-key "$DEPENDENCY_CACHE_MATCHED_KEY" \
+            --dependency-cache-state "$DEPENDENCY_CACHE_STATE" \
+            --dependency-cache-write-policy restore-only \
+            --dependency-source-preparation-seconds "$DEPENDENCY_SOURCE_PREPARATION_SECONDS" \
+            --dependency-cache-restore-seconds "$DEPENDENCY_CACHE_RESTORE_SECONDS" \
+            --dependency-preparation-seconds "$DEPENDENCY_PREPARATION_SECONDS" \
+            --jobs "$BENCHMARK_JOBS" \
+            --clear-ccache)
+          printf '%q ' "${collector_command[@]}" > build-metrics/collector-command.txt
+          printf '\n' >> build-metrics/collector-command.txt
+          "${collector_command[@]}"
+      - name: Verify benchmark report
+        # #2899 reports true_noop=false without failing collection; enforce it here.
+        env:
+          BUILD_COMMIT_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          try:
+              report = json.loads(Path('build-metrics/build-metrics.json').read_text(encoding='utf-8'))
+              noop = next((p for p in report.get('phases', []) if p.get('name') == 'noop_build'), {})
+              valid = (type(report.get('schema_version')) is int and report['schema_version'] == 3
+                       and report.get('status') == 'success'
+                       and report.get('commit_sha') == os.environ['BUILD_COMMIT_SHA']
+                       and type(noop.get('exit_code')) is int and noop['exit_code'] == 0
+                       and noop.get('true_noop') is True
+                       and noop.get('ninja', {}).get('available') is True
+                       and type(noop.get('build_edges')) is int and noop['build_edges'] == 0)
+          except (OSError, ValueError, TypeError, AttributeError):
+              valid = False
+          if not valid:
+              message = ('FAILED: no-op was not verified (work executed, telemetry unavailable, '
+                         'or unsupported report). Do not use this run as a no-op baseline; inspect raw logs.')
+              Path('build-metrics/verification.txt').write_text(message + '\n', encoding='utf-8')
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+                  summary.write('**' + message + '**\n')
+              raise SystemExit(message)
+          PY
+      - name: Preserve diagnostics and summary
+        if: always()
+        run: |
+          mkdir -p build-metrics
+          { ccache --show-stats --verbose || ccache --show-stats || true; } > build-metrics/ccache-final.txt 2>&1
+          ccache --print-stats >> build-metrics/ccache-final.txt 2>&1 || true
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          report = Path('build-metrics/job-summary.md')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+              summary.write('\nCold = cold compiler cache; dependency downloads may be warm.\n\n')
+              if report.is_file():
+                  summary.write(report.read_text(encoding='utf-8'))
+              else:
+                  summary.write('No benchmark report: inspect the failed step and preflight diagnostics.\n')
+          PY
+      - name: Upload build metrics
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./build-metrics
+          name: build-performance-metrics-${{ github.run_id }}-${{ github.run_attempt }}
+          compression-level: 6
+          retention-days: 14
+          if-no-files-found: warn
