@@ -77,6 +77,8 @@ struct CliqueDataCellSearchView {
         if (not IsLiveNode(id)) {
             return;
         }
+        // Base rows only cover [0, base_node_count); the delta row exists for every live slot in
+        // [0, total_nodes), which TryGetSearchView validates before publishing the view.
         if (id < base_node_count) {
             for (auto offset = p_node_to_cid[id]; offset < p_node_to_cid[id + 1]; ++offset) {
                 const auto cid = node_to_cids[offset];

@@ -284,7 +284,7 @@ HGraphParameter::FromJson(const JsonType& json) {
         CHECK_ARGUMENT(graph_param != nullptr, "MCI force remove requires a flat graph");
         if (not graph_param->use_reverse_edges_ or
             not hierarchical_graph_param->use_reverse_edges_) {
-            logger::info("MCI force remove enables reverse edges for safe physical ID compaction");
+            logger::warn("MCI force remove enables reverse edges for safe physical ID compaction");
         }
         graph_param->use_reverse_edges_ = true;
         hierarchical_graph_param->use_reverse_edges_ = true;
