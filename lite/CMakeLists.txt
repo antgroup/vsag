@@ -9,7 +9,26 @@ get_filename_component(VSAG_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 option(ENABLE_TESTS "Build Lite tests with the repository's Catch2" OFF)
 option(ENABLE_COVERAGE "Instrument Lite sources for gcov" OFF)
 
-set(VSAG_LITE_SOURCES "${VSAG_ROOT}/src/lite/index.cpp")
+set(VSAG_LITE_SOURCES
+    "${VSAG_ROOT}/src/lite/index.cpp"
+    "${VSAG_ROOT}/src/lite/fp32_distance.cpp")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$"
+   AND CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang)$")
+    # Only these small Lite translation units include ISA-specific VSAG traits.
+    list(APPEND VSAG_LITE_SOURCES
+        "${VSAG_ROOT}/src/lite/fp32_distance_sse.cpp"
+        "${VSAG_ROOT}/src/lite/fp32_distance_avx2.cpp"
+        "${VSAG_ROOT}/src/lite/fp32_distance_avx512.cpp")
+    set_source_files_properties("${VSAG_ROOT}/src/lite/fp32_distance_sse.cpp"
+        PROPERTIES COMPILE_FLAGS
+        "-msse4.1")
+    set_source_files_properties("${VSAG_ROOT}/src/lite/fp32_distance_avx2.cpp"
+        PROPERTIES COMPILE_FLAGS "-mavx2 -mfma")
+    set_source_files_properties("${VSAG_ROOT}/src/lite/fp32_distance_avx512.cpp"
+        PROPERTIES COMPILE_FLAGS
+        "-mavx512f -mavx512dq -mavx512bw -mavx512vl")
+    set(VSAG_LITE_HAS_X86_SIMD ON)
+endif()
 add_library(vsag_lite_objects OBJECT ${VSAG_LITE_SOURCES})
 add_library(vsag_lite SHARED $<TARGET_OBJECTS:vsag_lite_objects>)
 add_library(vsag_lite_static STATIC $<TARGET_OBJECTS:vsag_lite_objects>)
@@ -25,6 +44,9 @@ foreach(target vsag_lite_objects vsag_lite vsag_lite_static)
         PRIVATE "${VSAG_ROOT}/src")
 endforeach()
 target_compile_options(vsag_lite_objects PRIVATE -Wall -Wextra -Wpedantic)
+if(VSAG_LITE_HAS_X86_SIMD)
+    target_compile_definitions(vsag_lite_objects PRIVATE VSAG_LITE_HAS_X86_SIMD)
+endif()
 if(ENABLE_COVERAGE)
     target_compile_options(vsag_lite_objects PRIVATE --coverage -O0 -g)
     target_link_options(vsag_lite PRIVATE --coverage)
@@ -35,6 +57,9 @@ if(ENABLE_TESTS)
     include("${VSAG_ROOT}/extern/catch2/catch2.cmake")
     add_executable(lite_tests "${VSAG_ROOT}/src/lite/index_test.cpp")
     target_link_libraries(lite_tests PRIVATE vsag::lite Catch2::Catch2WithMain)
+    if(VSAG_LITE_HAS_X86_SIMD)
+        target_compile_definitions(lite_tests PRIVATE VSAG_LITE_HAS_X86_SIMD)
+    endif()
     enable_testing()
     add_test(NAME lite_unit COMMAND lite_tests "[lite]")
     add_test(NAME lite_scale COMMAND lite_tests "[lite-scale]")

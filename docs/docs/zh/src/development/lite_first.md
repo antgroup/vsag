@@ -48,8 +48,10 @@ Load 采用现有 `tl::expected` / `vsag::Error`，不调用 Full 全局日志�
 
 ## 数据组织和复用
 
-私有实现统一拥有连续 FP32 数据、外部 ID 和 ID→槽位映射。扫描复用官方通用
-ComputeL2SqrImpl 内核。删除参考 Full BruteForce 的末尾填洞原则，但保留容量供复用，
+私有实现统一拥有连续 FP32 数据、外部 ID 和 ID→槽位映射。扫描复用官方
+ComputeL2SqrImpl 内核。x86_64 GNU/Clang 构建通过小型运行时分派器按 CPU/OS 支持
+选择 AVX512、AVX2、SSE4.1 或 Generic；维度小于 16 时保留 Generic 路径，其他支持的
+工具链使用 Generic。删除参考 Full BruteForce 的末尾填洞原则，但保留容量供复用，
 不承诺 RSS 立即下降。不引入 Full Factory、InnerIndexInterface、属性及多向量依赖。
 
 首版将少量职责放在一个私有实现单元，避免空抽象接口。加入图索引前须抽取存储边界，
@@ -95,6 +97,17 @@ Save 从当前输出位置写入；flush/close、文件权限、原子替换及�
 RSS 包含 benchmark 的数据缓冲、CRUD、查询和临时分配，不是纯索引对象内存。
 在 100k 下，Lite 的 Search、Save 和同进程 warm Load 慢于 Full。完整配置、
 原始结果流程和限制见 #2926；严格冷加载与图索引对照仍待完成。
+
+后续在同一台 AMD EPYC 服务器上，将标量 Lite 与运行时 SIMD 分派版本交替运行 7 次。
+抽查的 640 条 Top-10 结果中，ID 和顺序全部一致；最大距离绝对误差为 `9.54e-6`。
+
+| 数据集 | 标量 Search P50（微秒） | SIMD Search P50（微秒） | 标量峰值 RSS（KiB） | SIMD 峰值 RSS（KiB） |
+| --- | ---: | ---: | ---: | ---: |
+| 10k × 128 | 436.0 | 100.1 | 12,108 | 12,120 |
+| 100k × 128 | 4,344.0 | 3,331.8 | 72,908 | 72,924 |
+
+strip 后 Lite 动态库由 39,488 增至 47,704 字节。这些数据只是该机器、该负载下的
+中位数，不代表普遍性能结论。
 
 Debug 构建可加 `-DENABLE_COVERAGE=ON`，运行测试后用 gcov 收集源码覆盖率；
 只报告实际结果，不代表 Full 覆盖率。安装后的外部示例验证不依赖 libvsag.so。

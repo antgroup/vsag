@@ -10,6 +10,8 @@
 #include <sstream>
 #include <unordered_map>
 
+#include "fp32_distance.h"
+
 using vsag::lite::Index;
 
 TEST_CASE("Lite validates inputs and preserves IDs through physical deletion", "[lite]") {
@@ -229,4 +231,48 @@ TEST_CASE("Lite stream failure contracts", "[lite]") {
     }
     std::stringstream excessive(invalid);
     REQUIRE_FALSE(Index::Load(excessive));
+}
+
+TEST_CASE("Lite FP32 ISA kernels preserve squared-L2 across short and tail dimensions", "[lite]") {
+    float query[129];
+    float vector[129];
+    for (uint64_t i = 0; i < 129; ++i) {
+        query[i] = static_cast<float>(i % 11) * 0.125F - 0.375F;
+        vector[i] = static_cast<float>(i % 7) * 0.0625F + 0.25F;
+    }
+    using vsag::lite::detail::FP32Distance;
+    const FP32Distance generic = vsag::lite::detail::GenericFP32Distance;
+    const FP32Distance selected = vsag::lite::detail::SelectFP32Distance();
+    std::vector<FP32Distance> kernels{generic, selected};
+#ifdef VSAG_LITE_HAS_X86_SIMD
+    __builtin_cpu_init();
+    if (__builtin_cpu_supports("sse4.1")) {
+        kernels.push_back(vsag::lite::detail::SseFP32Distance);
+    }
+    if (__builtin_cpu_supports("avx2") and __builtin_cpu_supports("fma")) {
+        kernels.push_back(vsag::lite::detail::Avx2FP32Distance);
+    }
+    if (__builtin_cpu_supports("avx512f") and __builtin_cpu_supports("avx512dq") and
+        __builtin_cpu_supports("avx512bw") and __builtin_cpu_supports("avx512vl") and
+        __builtin_cpu_supports("avx2")) {
+        kernels.push_back(vsag::lite::detail::Avx512FP32Distance);
+        REQUIRE(selected == vsag::lite::detail::Avx512FP32Distance);
+    } else if (__builtin_cpu_supports("avx2") and __builtin_cpu_supports("fma")) {
+        REQUIRE(selected == vsag::lite::detail::Avx2FP32Distance);
+    } else if (__builtin_cpu_supports("sse4.1")) {
+        REQUIRE(selected == vsag::lite::detail::SseFP32Distance);
+    } else {
+        REQUIRE(selected == generic);
+    }
+#else
+    REQUIRE(selected == generic);
+#endif
+    for (const uint64_t dim :
+         {1ULL, 3ULL, 4ULL, 5ULL, 8ULL, 9ULL, 16ULL, 17ULL, 32ULL, 33ULL, 128ULL, 129ULL}) {
+        const float expected = generic(query, vector, dim);
+        for (const auto kernel : kernels) {
+            const float actual = kernel(query, vector, dim);
+            REQUIRE(std::abs(actual - expected) <= 1e-4F * std::max(1.0F, expected));
+        }
+    }
 }

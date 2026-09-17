@@ -57,8 +57,11 @@ be externally serialized. Results own their memory; internal slots are not expos
 ## Data organization and reuse
 
 The private implementation owns contiguous FP32 records, external IDs, and an
-ID-to-slot map. BruteForce scans use the official generic `ComputeL2SqrImpl`
-kernel. Physical removal uses the same last-record-to-hole principle as Full
+ID-to-slot map. BruteForce scans reuse the official `ComputeL2SqrImpl` kernels.
+On x86_64 GNU/Clang builds, a small runtime dispatcher selects AVX512, AVX2,
+SSE4.1, or Generic according to CPU/OS support; dimensions below 16 retain the
+Generic path. Other supported toolchains use Generic. Physical removal uses the
+same last-record-to-hole principle as Full
 BruteForce, but retains capacity for reuse. It does not promise immediate RSS
 reduction. The minimal implementation intentionally avoids Full Factory,
 InnerIndexInterface, attribute and multi-vector dependencies.
@@ -119,6 +122,19 @@ temporary allocations; they are not index-object memory. At 100k, Lite's
 search, Save and warm Load are slower than Full. See #2926 for the complete
 configuration, raw-result workflow and limitations. Strict cold load and
 graph-index comparisons remain work.
+
+A follow-up seven-run alternating comparison on the same AMD EPYC host measures
+the scalar Lite build against the runtime-dispatched SIMD build. Search results
+kept identical IDs and order for all 640 inspected Top-10 rows; the largest
+absolute distance difference was `9.54e-6`.
+
+| Dataset | Scalar Search P50 (us) | SIMD Search P50 (us) | Scalar peak RSS (KiB) | SIMD peak RSS (KiB) |
+| --- | ---: | ---: | ---: | ---: |
+| 10k x 128 | 436.0 | 100.1 | 12,108 | 12,120 |
+| 100k x 128 | 4,344.0 | 3,331.8 | 72,908 | 72,924 |
+
+The stripped Lite shared library changed from 39,488 to 47,704 bytes. These are
+single-machine medians for this exact workload, not general performance claims.
 
 For source coverage add `-DENABLE_COVERAGE=ON` to a Debug build, run the tests,
 and collect gcov results. Only report actually measured coverage; Full coverage
