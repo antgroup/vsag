@@ -145,6 +145,8 @@ CliqueDataCell::Flush(uint64_t total) {
 void
 CliqueDataCell::RemapNodes(const Vector<InnerIdType>& old_to_new, uint64_t total) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
+    // Callers commit the deletion batch before moving any slot: CommitDelete sizes inactive_nodes_
+    // for the pre-compaction slot space, which is exactly the domain old_to_new is built for.
     CHECK_ARGUMENT(old_to_new.size() == inactive_nodes_.size(), "invalid MCI remap size");
     compact_unlocked(total, &old_to_new);
     available_total_.store(0, std::memory_order_release);

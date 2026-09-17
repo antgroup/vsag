@@ -1914,6 +1914,8 @@ HGraph::maybe_compact_mci(uint64_t changed_count) {
     }
     constexpr uint64_t interval = 100;
     // Saturate rather than overflow on large batches; failed compaction retries on the next change.
+    // The batch that reaches the threshold is compacted in full, so the excess is not carried over
+    // and the effective mutation span between two compactions is at most 2 * interval - 1.
     this->mci_pending_mutations_ +=
         std::min(changed_count, interval - this->mci_pending_mutations_);
     if (this->mci_pending_mutations_ < interval) {
