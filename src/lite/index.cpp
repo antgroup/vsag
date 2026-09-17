@@ -13,8 +13,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
-#include "simd/kernels/compute_l2.h"
-#include "simd/traits/simd_traits_generic.h"
+#include "fp32_distance.h"
 
 namespace vsag::lite {
 namespace {
@@ -202,9 +201,11 @@ Index::Search(const float* query, uint64_t dim, uint64_t k) const {
             return std::vector<Neighbor>{};
         }
         std::priority_queue<Neighbor, std::vector<Neighbor>, NeighborWorseFirst> heap;
+        // Small dimensions keep the v1 scalar accumulation order and avoid ISA call overhead.
+        const auto distance_fn =
+            dim < 16 ? detail::GenericFP32Distance : detail::SelectFP32Distance();
         for (uint64_t slot = 0; slot < Size(); ++slot) {
-            const auto distance = simd::ComputeL2SqrImpl<simd::SimdTraits<simd::GenericTag>>(
-                query, impl_->vectors.data() + slot * dim, dim);
+            const auto distance = distance_fn(query, impl_->vectors.data() + slot * dim, dim);
             Neighbor next{impl_->ids[slot], distance};
             if (heap.size() < k) {
                 heap.push(next);
