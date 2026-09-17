@@ -257,6 +257,18 @@ public:
         label_table_.resize(new_size);
     }
 
+    // Dense append-only callers should reserve storage without creating label slots.
+    // Resize remains available for callers that populate explicitly sized tables.
+    void
+    Reserve(uint64_t capacity) {
+        label_table_.reserve(capacity);
+    }
+
+    // Legacy dense payloads may contain reserved slots. Their owning index must
+    // supply the persisted vector count; label values cannot identify unused slots.
+    void
+    TrimUnusedSlots(uint64_t valid_count);
+
     int64_t
     GetTotalCount() {
         return total_count_;

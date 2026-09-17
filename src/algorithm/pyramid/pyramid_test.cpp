@@ -35,6 +35,59 @@
 #include "storage/stream_writer.h"
 #include "unittest.h"
 #include "vsag/options.h"
+#include "vsag/vsag.h"
+
+TEST_CASE("Pyramid reserved slots are not labels", "[ut][pyramid][reserved_labels]") {
+    const bool real_zero = GENERATE(false, true);
+    const bool immutable = GENERATE(false, true);
+    const bool streaming = GENERATE(false, true);
+    const auto create = []() {
+        auto result = vsag::Factory::CreateIndex("pyramid", R"({
+            "dim":8,"dtype":"float32","metric_type":"ip",
+            "index_param":{"base_quantization_type":"fp32","use_reorder":false}
+        })");
+        REQUIRE(result.has_value());
+        return result.value();
+    };
+    auto index = create();
+    int64_t id = real_zero ? 0 : 118;
+    float vector[8] = {0.25F};
+    float query[8] = {1.0F};
+    std::string path;
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(1)
+                    ->Dim(8)
+                    ->Ids(&id)
+                    ->Float32Vectors(vector)
+                    ->Paths(&path)
+                    ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+    if (immutable) {
+        REQUIRE(index->SetImmutable().has_value());
+    }
+    const auto check = [&](const auto& value) {
+        CHECK(value->CheckIdExist(0) == real_zero);
+        auto distance = value->CalcDistanceById(query, 0);
+        CHECK(distance.has_value() == real_zero);
+        if (real_zero && distance.has_value()) {
+            CHECK(distance.value() == 0.75F);
+        }
+        auto existing = value->CalcDistanceById(query, id);
+        REQUIRE(existing.has_value());
+        CHECK(existing.value() == 0.75F);
+    };
+    check(index);
+    std::stringstream stream;
+    REQUIRE((streaming ? index->SerializeStreaming(stream) : index->Serialize(stream)).has_value());
+    auto restored = create();
+    if (immutable) {
+        REQUIRE(restored->SetImmutable().has_value());
+    }
+    REQUIRE((streaming ? restored->DeserializeStreaming(stream) : restored->Deserialize(stream))
+                .has_value());
+    CHECK(restored->GetNumElements() == 1);
+    check(restored);
+}
 
 namespace {
 
@@ -225,6 +278,62 @@ RequirePyramidSearchStatistics(const vsag::DatasetPtr& result, uint64_t approxim
 }
 
 }  // namespace
+
+TEST_CASE("Pyramid reads legacy reserved label slots", "[ut][pyramid][reserved_labels]") {
+    const bool real_zero = GENERATE(false, true);
+    const bool immutable = GENERATE(false, true);
+    const bool streaming = GENERATE(false, true);
+    auto source = MakePyramidIndex(100);
+    std::vector<float> vectors(9 * PYRAMID_TEST_DIM, 0.25F);
+    std::vector<int64_t> ids = {118, 136, 123, 125, 114, 151, 116, 117, 161};
+    if (real_zero) {
+        ids[0] = 0;
+    }
+    std::vector<std::string> paths(9);
+    REQUIRE(source.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), 9))
+                .empty());
+    // Reproduce the old vector payload, including its zero-filled unused suffix.
+    source.index->label_table_->Resize(10);
+    std::stringstream stream;
+    if (streaming) {
+        source.index->SerializeStreaming(stream);
+    } else {
+        vsag::IOStreamWriter writer(stream);
+        source.index->Serialize(writer);
+    }
+    auto restored = MakePyramidIndex(100);
+    if (immutable) {
+        restored.index->SetImmutable();
+    }
+    if (streaming) {
+        restored.index->DeserializeStreaming(stream);
+    } else {
+        vsag::IOStreamReader reader(stream);
+        restored.index->Deserialize(reader);
+    }
+    CHECK(restored.index->label_table_->GetTotalCount() == 9);
+    CHECK(restored.index->CheckIdExist(0) == real_zero);
+    if (real_zero) {
+        CHECK(restored.index->label_table_->GetIdByLabel(0) == 0);
+        CHECK(restored.index->CalcDistanceById(vectors.data(), 0) == 0.0F);
+    } else {
+        CHECK_THROWS_AS(restored.index->CalcDistanceById(vectors.data(), 0), vsag::VsagException);
+    }
+    if (not immutable) {
+        int64_t added_ids[2] = {200, 201};
+        REQUIRE(restored.index->Add(MakePyramidDataset(vectors.data(), added_ids, paths.data(), 2))
+                    .empty());
+        CHECK(restored.index->label_table_->GetTotalCount() == 11);
+        CHECK(restored.index->CalcDistanceById(vectors.data(), added_ids[1]) == 0.0F);
+        CHECK(restored.index->CheckIdExist(0) == real_zero);
+        CHECK(restored.index->Remove({ids[0]}, vsag::RemoveMode::MARK_REMOVE) == 1);
+        CHECK(restored.index->GetNumElements() == 10);
+        CHECK(restored.index->label_table_->GetTotalCount() == 11);
+        CHECK_FALSE(restored.index->CheckIdExist(ids[0]));
+        CHECK_THROWS_AS(restored.index->CalcDistanceById(vectors.data(), ids[0]),
+                        vsag::VsagException);
+    }
+}
 
 TEST_CASE("Split function tests", "[ut][pyramid]") {
     SECTION("Empty input string") {

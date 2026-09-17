@@ -39,6 +39,7 @@
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
 #include "io/memory_io/memory_io_parameter.h"
+#include "quantization/fp32_quantizer.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer.h"
 #include "quantization/transform_quantization/transform_quantizer.h"
 #include "rabitq_split_datacell.h"
@@ -47,6 +48,17 @@
 using namespace vsag;
 
 namespace {
+
+class FailingBatchLayout : public FixedLayout<MemoryIO> {
+public:
+    using FixedLayout<MemoryIO>::FixedLayout;
+    static constexpr bool InMemory = false;
+
+    bool
+    MultiRead(const InnerIdType*, uint64_t, uint8_t*, Allocator*) const {
+        return false;
+    }
+};
 
 bool
 IsNaNBitPattern(float value) {
@@ -109,6 +121,46 @@ private:
 };
 
 }  // namespace
+
+TEST_CASE("FlattenDataCell rejects invalid distance reads", "[ut][Flatten][invalid_reads]") {
+    IndexCommonParam common;
+    common.dim_ = 8;
+    common.metric_ = MetricType::METRIC_TYPE_IP;
+    common.allocator_ = std::make_shared<DefaultAllocator>();
+    auto quantizer = std::make_shared<FP32QuantizerParameter>();
+    auto io = std::make_shared<MemoryIOParameter>();
+    using Cell = FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_IP>, FixedLayout<MemoryIO>>;
+    Cell cell(quantizer, io, common);
+    float vector[8] = {0.25F};
+    cell.Train(vector, 1);
+    cell.Resize(10);
+    cell.InsertVector(vector, 0);
+    auto computer = cell.FactoryComputer(vector);
+    InnerIdType ids[4] = {0, 0, 0, 1};
+    float distances[4] = {};
+    SECTION("reserved and sentinel IDs") {
+        CHECK_THROWS_AS(cell.Query(distances, computer, ids + 3, 1), VsagException);
+        CHECK_THROWS_AS(cell.Query(distances, computer, ids, 4), VsagException);
+        CHECK_THROWS_AS(cell.ComputePairVectors(0, 1), VsagException);
+        CHECK_THROWS_AS(cell.ComputePairVectors(1, 0), VsagException);
+        ids[0] = std::numeric_limits<InnerIdType>::max();
+        CHECK_THROWS_AS(cell.Query(distances, computer, ids, 1), VsagException);
+    }
+    SECTION("failed leases for valid IDs") {
+        cell.SetIO(std::make_shared<MemoryIO>(common.allocator_.get()));
+        ids[3] = 0;
+        CHECK_THROWS_AS(cell.Query(distances, computer, ids, 1), VsagException);
+        CHECK_THROWS_AS(cell.Query(distances, computer, ids, 4), VsagException);
+        CHECK_THROWS_AS(cell.ComputePairVectors(0, 0), VsagException);
+    }
+    SECTION("failed batch read") {
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_IP>, FailingBatchLayout> failing(
+            quantizer, io, common);
+        failing.InsertVector(vector, 0);
+        ids[3] = 0;
+        CHECK_THROWS_AS(failing.Query(distances, computer, ids, 4), VsagException);
+    }
+}
 
 void
 TestFlattenDataCell(FlattenDataCellParamPtr& param,

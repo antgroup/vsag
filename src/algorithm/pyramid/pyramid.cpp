@@ -1526,6 +1526,7 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
                             "Pyramid streaming serialization paths block is missing");
     }
 
+    label_table_->TrimUnusedSlots(base_codes_->TotalCount());
     resize(max_capacity);
     this->current_memory_usage_ = static_cast<int64_t>(this->CalSerializeSize());
 }
@@ -1563,6 +1564,8 @@ Pyramid::Deserialize(StreamReader& reader) {
         raw_vector_->Deserialize(buffer_reader);
     }
     cur_element_count_ = base_codes_->TotalCount();
+
+    label_table_->TrimUnusedSlots(base_codes_->TotalCount());
 
     if (param_json.Contains(PYRAMID_HIERARCHIES)) {
         uint64_t hierarchy_count = 0;
@@ -1655,18 +1658,23 @@ Pyramid::prepare_add_batch(const DatasetPtr& base) {
     }
 
     batch.input_indices.reserve(data_num);
-    for (int64_t input_index = 0; input_index < data_num; ++input_index) {
-        if (not label_table_->CheckLabel(data_ids[input_index])) {
-            const auto inner_id =
-                static_cast<InnerIdType>(batch.first_inner_id + batch.input_indices.size());
-            label_table_->Insert(inner_id, data_ids[input_index]);
-            if (source_ids != nullptr) {
-                label_table_->InsertSourceId(inner_id, source_ids[input_index]);
+    {
+        // Inserting into reserved storage changes the label vector's logical size.
+        // Search readers hold resize_mutex_ while accessing that vector.
+        std::unique_lock<std::shared_mutex> storage_lock(resize_mutex_);
+        for (int64_t input_index = 0; input_index < data_num; ++input_index) {
+            if (not label_table_->CheckLabel(data_ids[input_index])) {
+                const auto inner_id =
+                    static_cast<InnerIdType>(batch.first_inner_id + batch.input_indices.size());
+                label_table_->Insert(inner_id, data_ids[input_index]);
+                if (source_ids != nullptr) {
+                    label_table_->InsertSourceId(inner_id, source_ids[input_index]);
+                }
+                batch.input_indices.push_back(input_index);
+            } else {
+                logger::warn("Label {} already exists, skip adding.", data_ids[input_index]);
+                batch.failed_ids.push_back(data_ids[input_index]);
             }
-            batch.input_indices.push_back(input_index);
-        } else {
-            logger::warn("Label {} already exists, skip adding.", data_ids[input_index]);
-            batch.failed_ids.push_back(data_ids[input_index]);
         }
     }
 
@@ -1792,7 +1800,7 @@ Pyramid::resize(int64_t new_max_capacity) {
         return;
     }
     pool_ = std::make_unique<VisitedListPool>(1, allocator_, new_max_capacity, allocator_);
-    label_table_->Resize(new_max_capacity);
+    label_table_->Reserve(new_max_capacity);
     base_codes_->Resize(new_max_capacity);
     if (has_precise_reorder()) {
         precise_codes_->Resize(new_max_capacity);
@@ -2627,7 +2635,15 @@ Pyramid::CalcDistanceById(const float* query, int64_t id, bool calculate_precise
     if (raw_vector_ != nullptr && calculate_precise_distance) {
         flat = this->raw_vector_;
     }
-    return InnerIndexInterface::calc_distance_by_id(query, id, flat);
+    InnerIdType inner_id;
+    {
+        std::shared_lock<std::shared_mutex> label_lock(label_lookup_mutex_);
+        inner_id = label_table_->GetIdByLabel(id);
+    }
+    auto computer = flat->FactoryComputer(query);
+    float distance = 0.0F;
+    flat->Query(&distance, computer, &inner_id, 1);
+    return distance;
 }
 
 DatasetPtr
