@@ -1069,10 +1069,11 @@ private:
     mutable std::mutex mci_build_mutex_;                // serializes full MCI reconstruction
     // MCI writers take mutation before force_remove; label scopes end before repair/search.
     // Add insertion and Shrink/UpdateVector take force_remove before persistent_codes.
-    // FORCE_REMOVE reacquires force_remove exclusively before pinning codes exclusively to shrink.
-    // Repair releases force_remove
-    // before public search reacquires it (shared_mutex is non-recursive); mutation still excludes
-    // all ID-moving operations. CSR storage/view locks are internal to CliqueDataCell.
+    // FORCE_REMOVE spans the same pair: it holds force_remove exclusively, releases it, then takes
+    // persistent_codes shared for repair, and finally reacquires force_remove exclusively before
+    // pinning codes exclusively to shrink. The release is required because repair enters public
+    // search, which reacquires force_remove itself (shared_mutex is non-recursive); mutation still
+    // excludes all ID-moving operations. CSR storage/view locks are internal to CliqueDataCell.
     mutable std::mutex mci_mutation_mutex_;         // serializes MCI Add, Remove and compaction
     mutable MutexArrayPtr neighbors_mutex_;         // per-node locks for neighbor lists
     mutable std::shared_mutex add_mutex_;           // serializes Add() operations
