@@ -29,8 +29,11 @@
 #include <sstream>
 #include <utility>
 
+#include "algorithm/pyramid/pyramid_build_cache.h"
 #include "functest.h"
+#include "impl/allocator/safe_allocator.h"
 #include "storage/serialization_tags.h"
+#include "storage/stream_reader.h"
 #include "storage/streaming_serialization_test_utils.h"
 #include "test_index.h"
 #include "vsag/vsag.h"
@@ -2395,10 +2398,12 @@ MakePyramidCacheQuery(int64_t dim, const std::vector<float>& query, const std::s
     dataset->NumElements(1)
         ->Dim(dim)
         ->Float32Vectors(raw_query_vec.get())
-        ->Paths(raw_paths.get())
+        ->Paths(path.empty() ? nullptr : raw_paths.get())
         ->Owner(true);
     raw_query_vec.release();
-    raw_paths.release();
+    if (!path.empty()) {
+        raw_paths.release();
+    }
     return dataset;
 }
 
@@ -2774,60 +2779,856 @@ TEST_CASE("Pyramid GetStats reports build cache hit-rate", "[ft][pyramid][cache]
     REQUIRE(hit_nodes + missed_nodes == TEST_COUNT);
 }
 
-TEST_CASE("Pyramid dense native distance contract", "[distance_contract]") {
-    using namespace fixtures;
-    for (const auto* quantizer : {"fp32", "sq8"}) {
-        PyramidParam build_param;
-        build_param.base_quantization_type = quantizer;
-        auto param = PyramidTestIndex::GeneratePyramidBuildParametersString("l2", 16, build_param);
-        auto created = vsag::Factory::CreateIndex("pyramid", param);
-        REQUIRE(created.has_value());
-        auto index = created.value();
-        REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID));
-        REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID));
-        std::vector<float> values(64 * 16);
-        std::vector<int64_t> labels(64);
-        std::vector<std::string> paths(64, "a/b");
-        for (int64_t i = 0; i < 64; ++i) {
-            labels[i] = 100 + i;
-            for (int64_t j = 0; j < 16; ++j) {
-                values[i * 16 + j] = static_cast<float>((i + j) % 23) / 23.0F;
-            }
-        }
-        auto base = vsag::Dataset::Make()
-                        ->NumElements(64)
-                        ->Dim(16)
-                        ->Ids(labels.data())
-                        ->Float32Vectors(values.data())
-                        ->Paths(paths.data())
-                        ->Owner(false);
-        REQUIRE(index->Build(base).has_value());
-        auto query = vsag::Dataset::Make()
-                         ->NumElements(1)
-                         ->Dim(16)
-                         ->Float32Vectors(values.data())
-                         ->Owner(false);
-        for (bool precise : {false, true}) {
-            auto raw = index->CalcDistanceById(values.data(), labels[1], precise);
-            auto native = index->CalcDistanceById(query, labels[1], precise);
-            REQUIRE(raw.has_value());
-            REQUIRE(native.has_value());
-            REQUIRE(std::abs(raw.value() - native.value()) < 1e-5F);
-            int64_t candidates[] = {labels[1], -999, labels[0], labels[1], labels[0], -999};
-            query->NumElements(2);
-            auto batch = index->CalcDistancesById(query, candidates, 3, precise);
-            REQUIRE(batch.has_value());
-            REQUIRE(batch.value()->GetNumElements() == 2);
-            REQUIRE(batch.value()->GetDim() == 3);
-            REQUIRE(std::abs(batch.value()->GetDistances()[0] - raw.value()) < 1e-5F);
-            REQUIRE(batch.value()->GetDistances()[1] == -1.0F);
-            auto top = index->CalcDistancesById(query, candidates, 3, precise, 2);
-            REQUIRE(top.has_value());
-            REQUIRE(top.value()->GetDim() == 2);
-            for (int i = 0; i < 4; ++i) {
-                REQUIRE(top.value()->GetIds()[i] != -999);
-            }
-            query->NumElements(1);
+TEST_CASE("Pyramid duplicate cache roundtrips and membership changes",
+          "[ft][pyramid][cache][duplicate_cache][pr]") {
+    const auto root = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    const auto change = GENERATE(std::string("reorder"),
+                                 std::string("remove-representative"),
+                                 std::string("remove-alias"),
+                                 std::string("move-path"),
+                                 std::string("all-identical"),
+                                 std::string("no-edges"),
+                                 std::string("repeated-label"));
+    const auto use_cache = GENERATE(false, true);
+    const auto serialized = GENERATE(false, true);
+    CAPTURE(root, change, use_cache, serialized);
+    constexpr int64_t dim = 8;
+    constexpr int64_t count = 120;
+    const auto param = fmt::format(R"({{
+        "dtype":"float32", "metric_type":"l2", "dim":8,
+        "index_param":{{"base_quantization_type":"fp32", "max_degree":16,
+        "ef_construction":64, "build_thread_count":1, "root_graph_type":"{}",
+        "index_min_size":8, "persist_source_id":true, "store_paths":true,
+        "support_duplicate":true}} }})",
+                                   root);
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> ids(count);
+    std::vector<std::string> paths(count, "a/b");
+    std::vector<std::string> sources(count);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = 1000 + i;
+        sources[i] = "duplicate-source-" + std::to_string(i);
+        const auto group = change == "all-identical" ? 0 : i / 10;
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[i * dim + d] = static_cast<float>(group * (d + 1));
         }
     }
+    auto dataset = [&]() {
+        return MakePyramidCacheDataset(ids.size(), dim, vectors, ids, paths, sources);
+    };
+    auto baseline = vsag::Factory::CreateIndex("pyramid", param).value();
+    REQUIRE(baseline->Build(dataset()).has_value());
+    std::stringstream cache;
+    REQUIRE(baseline->ExportCache(cache).has_value());
+    if (change == "remove-representative" || change == "remove-alias") {
+        const uint64_t offset = change == "remove-representative" ? 0 : 1;
+        ids.erase(ids.begin() + offset);
+        paths.erase(paths.begin() + offset);
+        sources.erase(sources.begin() + offset);
+        vectors.erase(vectors.begin() + offset * dim, vectors.begin() + (offset + 1) * dim);
+    } else if (change == "move-path") {
+        paths[0] = "other/path";
+    } else if (change == "no-edges") {
+        ids.resize(10);
+        paths.resize(10);
+        sources.resize(10);
+        vectors.resize(10 * dim);
+    } else if (change == "repeated-label") {
+        ids[1] = ids[0];
+    }
+    // Reverse input IDs without changing SourceID/vector identity; the actual
+    // representative is now not necessarily the minimum inner ID in its group.
+    std::reverse(ids.begin(), ids.end());
+    std::reverse(paths.begin(), paths.end());
+    std::reverse(sources.begin(), sources.end());
+    for (uint64_t i = 0; i < ids.size() / 2; ++i) {
+        for (int64_t d = 0; d < dim; ++d) {
+            std::swap(vectors[i * dim + d], vectors[(ids.size() - i - 1) * dim + d]);
+        }
+    }
+    for (int round = 0; round < 2; ++round) {
+        auto warm = vsag::Factory::CreateIndex("pyramid", param).value();
+        if (use_cache) {
+            cache.seekg(0);
+            REQUIRE(warm->ImportCache(cache).has_value());
+        }
+        auto built = warm->Build(dataset());
+        REQUIRE(built.has_value());
+        if (change == "repeated-label") {
+            REQUIRE_FALSE(built.value().empty());
+            return;
+        }
+        REQUIRE(built.value().empty());
+        REQUIRE(warm->GetNumElements() == static_cast<int64_t>(ids.size()));
+        if (use_cache && change == "remove-representative" && round == 0) {
+            const auto stats = vsag::JsonType::Parse(warm->GetStats());
+            // Only the affected ten-member class loses reuse; its nine survivors
+            // are inserted normally. The other eleven classes keep their cache rows.
+            REQUIRE(stats["build_cache_hit_nodes"].GetInt() == 110);
+            REQUIRE(stats["build_cache_missed_nodes"].GetInt() == 9);
+            REQUIRE(stats["build_cache_restored_edges"].GetInt() > 0);
+        }
+        if (use_cache && change == "reorder") {
+            auto stats = vsag::JsonType::Parse(warm->GetStats());
+            REQUIRE(stats["build_cache_hit_nodes"].GetInt() == static_cast<int64_t>(ids.size()));
+            REQUIRE(stats["build_cache_restored_edges"].GetInt() > 0);
+        }
+        auto binary = warm->Serialize();
+        REQUIRE(binary.has_value());
+        auto restored = vsag::Factory::CreateIndex("pyramid", param).value();
+        REQUIRE(restored->Deserialize(binary.value()).has_value());
+        if (!serialized) {
+            restored = warm;
+        }
+        for (uint64_t i = 0; i < ids.size(); ++i) {
+            std::vector<float> vector(vectors.begin() + i * dim, vectors.begin() + (i + 1) * dim);
+            for (const auto& path : {paths[i], std::string{}}) {
+                auto query = MakePyramidCacheQuery(dim, vector, path);
+                auto result =
+                    restored->KnnSearch(query, ids.size(), R"({"pyramid":{"ef_search":256}})");
+                REQUIRE(result.has_value());
+                std::vector<int64_t> expected;
+                for (uint64_t j = 0; j < ids.size(); ++j) {
+                    if (path.empty() || paths[j] == path) {
+                        expected.push_back(ids[j]);
+                    }
+                }
+                REQUIRE(result.value()->GetDim() == static_cast<int64_t>(expected.size()));
+                std::vector<int64_t> actual;
+                for (int64_t j = 0; j < result.value()->GetDim(); ++j) {
+                    const auto label = result.value()->GetIds()[j];
+                    actual.push_back(label);
+                    auto found = std::find(ids.begin(), ids.end(), label);
+                    REQUIRE(found != ids.end());
+                    const uint64_t offset = std::distance(ids.begin(), found);
+                    float distance = 0;
+                    for (int64_t d = 0; d < dim; ++d) {
+                        const auto delta = vector[d] - vectors[offset * dim + d];
+                        distance += delta * delta;
+                    }
+                    REQUIRE(std::abs(result.value()->GetDistances()[j] - distance) < 0.01F);
+                }
+                std::sort(expected.begin(), expected.end());
+                std::sort(actual.begin(), actual.end());
+                REQUIRE(actual == expected);
+            }
+        }
+        cache.str("");
+        cache.clear();
+        REQUIRE(restored->ExportCache(cache).has_value());
+    }
+}
+
+static void
+CheckLargePyramidDuplicateCache(const std::string& root,
+                                const std::string& storage,
+                                int cold_threads,
+                                int warm_threads = 4,
+                                int copies = 2,
+                                bool production_construction = false) {
+    CAPTURE(root, storage, cold_threads);
+    constexpr int64_t groups = 1050;
+    const int64_t count = groups * copies;
+    constexpr int64_t dim = 2;
+    const auto param = fmt::format(R"({{
+        "dtype":"float32", "metric_type":"l2", "dim":2,
+        "index_param":{{"base_quantization_type":"fp32", "max_degree":16,
+        "ef_construction":32, "build_thread_count":4, "root_graph_type":"{}",
+        "graph_storage_type":"{}", "index_min_size":8,
+        "persist_source_id":true, "store_paths":true, "support_duplicate":true}} }})",
+                                   root,
+                                   storage);
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> ids(count);
+    std::vector<std::string> paths(count, "a/b");
+    std::vector<std::string> sources(count);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = 10000 + i;
+        sources[i] = "large-duplicate-" + std::to_string(i);
+        vectors[i * dim] = static_cast<float>(i / copies);
+        vectors[i * dim + 1] = static_cast<float>((i / copies) % 17);
+    }
+    auto dataset = MakePyramidCacheDataset(count, dim, vectors, ids, paths, sources);
+    auto cold_param = vsag::JsonType::Parse(param);
+    if (production_construction) {
+        cold_param["index_param"]["max_degree"].SetInt(64);
+        cold_param["index_param"]["ef_construction"].SetInt(500);
+    }
+    cold_param["index_param"]["build_thread_count"].SetInt(cold_threads);
+    cold_param["index_param"]["support_duplicate"].SetBool(copies == 2);
+    auto cold = vsag::Factory::CreateIndex("pyramid", cold_param.Dump()).value();
+    REQUIRE(cold->Build(dataset).has_value());
+    std::stringstream cache;
+    REQUIRE(cold->ExportCache(cache).has_value());
+    // Inspect the interchange representation, not private dense storage high-water IDs.
+    // Every group has exactly one physical row and every edge targets another owner.
+    {
+        auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+        vsag::PyramidBuildCache exported(allocator.get());
+        std::stringstream snapshot(cache.str());
+        vsag::IOStreamReader reader(snapshot);
+        exported.Deserialize(reader);
+        for (const auto& path : {std::string{}, std::string("a"), std::string("a/b")}) {
+            auto* graph = exported.GetGraphCache("", path);
+            const auto* owners = exported.GetGroupOwners("", path);
+            REQUIRE(graph != nullptr);
+            REQUIRE(owners != nullptr);
+            REQUIRE(owners->size() == static_cast<uint64_t>(count));
+            uint64_t representatives = 0;
+            for (uint64_t member = 0; member < owners->size(); ++member) {
+                const auto owner = (*owners)[member];
+                REQUIRE(owner < owners->size());
+                REQUIRE((*owners)[owner] == owner);
+                if (owner != member) {
+                    continue;
+                }
+                ++representatives;
+                const auto* row = graph->FindNeighborInnerIds(graph->source_ids_[member]);
+                REQUIRE(row != nullptr);
+                REQUIRE(row->size() <= static_cast<uint64_t>(production_construction ? 65 : 17));
+                REQUIRE(row->front() == member);
+                for (uint64_t edge = 1; edge < row->size(); ++edge) {
+                    REQUIRE((*row)[edge] < owners->size());
+                    REQUIRE((*owners)[(*row)[edge]] == (*row)[edge]);
+                }
+            }
+            REQUIRE(representatives == static_cast<uint64_t>(groups));
+        }
+    }
+    auto warm_param = vsag::JsonType::Parse(param);
+    if (production_construction) {
+        warm_param["index_param"]["max_degree"].SetInt(64);
+        warm_param["index_param"]["ef_construction"].SetInt(500);
+    }
+    warm_param["index_param"]["build_thread_count"].SetInt(warm_threads);
+    warm_param["index_param"]["support_duplicate"].SetBool(copies == 2);
+    auto warm = vsag::Factory::CreateIndex("pyramid", warm_param.Dump()).value();
+    REQUIRE(warm->ImportCache(cache).has_value());
+    REQUIRE(warm->Build(dataset).has_value());
+    const auto stats = vsag::JsonType::Parse(warm->GetStats());
+    const auto& root_stats = stats["root_graphs"]["default"];
+    REQUIRE(stats["build_cache_hit_nodes"].GetInt() == count);
+    REQUIRE(stats["build_cache_restored_edges"].GetInt() > 0);
+    if (cold_threads == 1) {
+        // Dense routed roots report the high-water ID, not occupied row count.
+        REQUIRE(root_stats["bottom_graph_node_count"].GetInt() ==
+                (root == "multi_layer" ? count - 1 : groups));
+    }
+    if (root == "multi_layer") {
+        REQUIRE(root_stats["route_graph_count"].GetInt() > 0);
+    } else {
+        REQUIRE(root_stats["route_graph_count"].GetInt() == 0);
+    }
+    auto binary = warm->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = vsag::Factory::CreateIndex("pyramid", warm_param.Dump()).value();
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    for (const auto& index : {cold, warm, restored}) {
+        CAPTURE(index == cold ? "cold" : (index == warm ? "warm" : "restored"));
+        for (const auto offset : {int64_t{0}, int64_t{1024}, count - 2}) {
+            for (const auto& path : {std::string("a/b"), std::string{}}) {
+                CAPTURE(offset, path);
+                std::vector<float> vector(vectors.begin() + offset * dim,
+                                          vectors.begin() + (offset + 1) * dim);
+                auto query = MakePyramidCacheQuery(dim, vector, path);
+                auto result = index->KnnSearch(query, count, R"({"pyramid":{"ef_search":4096}})");
+                REQUIRE(result.has_value());
+                if (result.value()->GetDim() != count) {
+                    std::vector<bool> found(count, false);
+                    for (int64_t j = 0; j < result.value()->GetDim(); ++j) {
+                        found[result.value()->GetIds()[j] - 10000] = true;
+                    }
+                    uint64_t partial_groups = 0;
+                    std::string missing;
+                    for (int64_t j = 0; j < count; ++j) {
+                        if (!found[j]) {
+                            missing += std::to_string(j) + ",";
+                        }
+                        if (j % 2 == 0 && found[j] != found[j + 1]) {
+                            ++partial_groups;
+                        }
+                    }
+                    WARN("missing IDs=" << missing << " partial_groups=" << partial_groups);
+                    auto range =
+                        index->RangeSearch(query, 1e12F, R"({"pyramid":{"ef_search":4096}})");
+                    REQUIRE(range.has_value());
+                    WARN("Range count=" << range.value()->GetDim());
+                }
+                REQUIRE(result.value()->GetDim() == count);
+                std::vector<int64_t> actual;
+                for (int64_t j = 0; j < count; ++j) {
+                    const auto label = result.value()->GetIds()[j];
+                    REQUIRE(label >= 10000);
+                    REQUIRE(label < 10000 + count);
+                    actual.push_back(label);
+                    const auto id = label - 10000;
+                    float distance = 0.0F;
+                    for (int64_t d = 0; d < dim; ++d) {
+                        const auto delta = vector[d] - vectors[id * dim + d];
+                        distance += delta * delta;
+                    }
+                    REQUIRE(result.value()->GetDistances()[j] == distance);
+                }
+                std::sort(actual.begin(), actual.end());
+                REQUIRE(actual == ids);
+            }
+        }
+    }
+    // Rehydrate transient admission from physical representatives after deserialize.
+    // Also exercise the existing cold and cache-restored registries with incremental Add.
+    if (copies == 2) {
+        std::vector<float> extra_vector(vectors.begin(), vectors.begin() + dim);
+        std::vector<int64_t> extra_ids{900000};
+        std::vector<std::string> extra_paths{"a/b"};
+        std::vector<std::string> extra_sources{"incremental-alias"};
+        auto extra =
+            MakePyramidCacheDataset(1, dim, extra_vector, extra_ids, extra_paths, extra_sources);
+        for (const auto& index : {cold, warm, restored}) {
+            REQUIRE(index->Add(extra).has_value());
+            auto query = MakePyramidCacheQuery(dim, extra_vector, "a/b");
+            auto result = index->KnnSearch(query, 3, R"({"pyramid":{"ef_search":256}})");
+            REQUIRE(result.has_value());
+            REQUIRE(result.value()->GetDim() == 3);
+            std::vector<int64_t> actual(result.value()->GetIds(), result.value()->GetIds() + 3);
+            std::sort(actual.begin(), actual.end());
+            REQUIRE(actual == std::vector<int64_t>{10000, 10001, 900000});
+        }
+    }
+}
+
+TEST_CASE("Pyramid duplicate cache restores more than 1024 representatives",
+          "[ft][pyramid][cache][duplicate_cache_large][pr]") {
+    const auto root = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    const auto storage = GENERATE(std::string("flat"), std::string("compressed"));
+    CheckLargePyramidDuplicateCache(root, storage, 1);
+}
+
+TEST_CASE("Pyramid parallel duplicate admission preserves connectivity and cache hits",
+          "[ft][pyramid][cache][duplicate_connectivity][pr][concurrent]") {
+    const auto root = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    const auto storage = GENERATE(std::string("flat"), std::string("compressed"));
+    const auto threads = GENERATE(4, 32);
+    CheckLargePyramidDuplicateCache(root, storage, threads, threads);
+}
+
+TEST_CASE("Pyramid production construction duplicate connectivity diagnostic",
+          "[ft][pyramid][cache][duplicate_connectivity_production][pr][concurrent]") {
+    const auto root = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    const auto storage = GENERATE(std::string("flat"), std::string("compressed"));
+    CheckLargePyramidDuplicateCache(root, storage, 32, 32, 2, true);
+}
+
+namespace {
+
+struct DuplicateClassFixture {
+    static constexpr int64_t dim = 2;
+    std::vector<int64_t> ids;
+    std::vector<float> vectors;
+    std::vector<std::string> paths;
+    std::vector<std::string> sources;
+    std::string params;
+
+    explicit DuplicateClassFixture(const std::string& root) {
+        params = fmt::format(R"({{
+            "dtype":"float32", "metric_type":"l2", "dim":2,
+            "index_param":{{"base_quantization_type":"fp32", "max_degree":16,
+            "ef_construction":64, "build_thread_count":1, "root_graph_type":"{}",
+            "index_min_size":8, "persist_source_id":true, "store_paths":true,
+            "support_duplicate":true}} }})",
+                             root);
+        for (int64_t i = 0; i < 100; ++i) {
+            ids.push_back(1000 + i);
+            sources.push_back("focused-class-" + std::to_string(i));
+            paths.push_back("a/b");
+            vectors.push_back(static_cast<float>(i / 10));
+            vectors.push_back(static_cast<float>((i / 10) * 2));
+        }
+    }
+
+    void
+    CopyVector(uint64_t target, uint64_t source) {
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[target * dim + d] = vectors[source * dim + d];
+        }
+    }
+
+    auto
+    Dataset() const {
+        return MakePyramidCacheDataset(ids.size(), dim, vectors, ids, paths, sources);
+    }
+
+    void
+    Check(const vsag::IndexPtr& index) const {
+        // Full population, not top-k tie order: enforce every unique label and exact FP32 L2.
+        for (const auto& path : {std::string{}, std::string("a/b")}) {
+            for (const auto offset : {uint64_t{0}, uint64_t{10}, uint64_t{20}}) {
+                CAPTURE(path, offset);
+                std::vector<float> vector(vectors.begin() + offset * dim,
+                                          vectors.begin() + (offset + 1) * dim);
+                auto query = MakePyramidCacheQuery(dim, vector, path);
+                auto result =
+                    index->KnnSearch(query, ids.size(), R"({"pyramid":{"ef_search":256}})");
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetDim() == static_cast<int64_t>(ids.size()));
+                std::vector<int64_t> actual;
+                for (int64_t j = 0; j < result.value()->GetDim(); ++j) {
+                    const auto label = result.value()->GetIds()[j];
+                    const auto found = std::find(ids.begin(), ids.end(), label);
+                    REQUIRE(found != ids.end());
+                    const auto row = static_cast<uint64_t>(found - ids.begin());
+                    float distance = 0.0F;
+                    for (int64_t d = 0; d < dim; ++d) {
+                        const auto delta = vector[d] - vectors[row * dim + d];
+                        distance += delta * delta;
+                    }
+                    REQUIRE(result.value()->GetDistances()[j] == distance);
+                    actual.push_back(label);
+                }
+                std::sort(actual.begin(), actual.end());
+                auto expected = ids;
+                std::sort(expected.begin(), expected.end());
+                REQUIRE(actual == expected);
+            }
+        }
+    }
+};
+
+}  // namespace
+
+TEST_CASE("Pyramid cache class demotion and membership threshold",
+          "[ft][pyramid][cache][duplicate_class_validation][pr]") {
+    const auto root = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    const auto change = GENERATE(std::string("three-merged-classes"),
+                                 std::string("split-matches-stable"),
+                                 std::string("exactly-80-percent"),
+                                 std::string("79-percent"));
+    CAPTURE(root, change);
+    DuplicateClassFixture fixture(root);
+    // For threshold cases: classes 0/1/2 have sizes 10/11/9; all others have size 10.
+    // This allows 80 and 79 surviving memberships with all 100 SourceIDs retained.
+    if (change == "exactly-80-percent" || change == "79-percent") {
+        fixture.CopyVector(20, 10);
+    }
+    auto cold = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(cold->Build(fixture.Dataset()).has_value());
+    std::stringstream cache;
+    REQUIRE(cold->ExportCache(cache).has_value());
+    const auto old_sources = fixture.sources;
+    const auto old_ids = fixture.ids;
+    int64_t expected_hits = 0;
+    if (change == "three-merged-classes") {
+        // A third collision must also demote: retaining it incorrectly reaches the 80% gate.
+        for (uint64_t i = 10; i < 30; ++i) {
+            fixture.CopyVector(i, 0);
+        }
+    } else if (change == "split-matches-stable") {
+        fixture.CopyVector(1, 10);
+        expected_hits = 90;
+    } else {
+        // Split entire classes by changing one alias, not their physical representative.
+        fixture.vectors[1 * fixture.dim] = 100.0F;
+        const uint64_t second_alias = change == "exactly-80-percent" ? 31 : 11;
+        fixture.vectors[second_alias * fixture.dim] = 101.0F;
+        expected_hits = change == "exactly-80-percent" ? 80 : 0;
+    }
+    REQUIRE(fixture.sources == old_sources);
+    REQUIRE(fixture.ids == old_ids);
+    auto warm = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(warm->ImportCache(cache).has_value());
+    REQUIRE(warm->Build(fixture.Dataset()).has_value());
+    const auto stats = vsag::JsonType::Parse(warm->GetStats());
+    REQUIRE(stats["build_cache_hit_nodes"].GetInt() == expected_hits);
+    REQUIRE(stats["build_cache_missed_nodes"].GetInt() == 100 - expected_hits);
+    if (expected_hits != 0) {
+        REQUIRE(stats["build_cache_restored_edges"].GetInt() > 0);
+    } else {
+        REQUIRE(stats["build_cache_restored_edges"].GetInt() == 0);
+    }
+    fixture.Check(warm);
+    auto serialized = warm->Serialize();
+    REQUIRE(serialized.has_value());
+    auto restored = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(restored->Deserialize(serialized.value()).has_value());
+    fixture.Check(restored);
+}
+
+TEST_CASE("Pyramid cached owner survives filtered empty row and equal misses",
+          "[ft][pyramid][cache][duplicate_class_validation][pr]") {
+    const auto root = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    CAPTURE(root);
+    DuplicateClassFixture fixture(root);
+    auto cold = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(cold->Build(fixture.Dataset()).has_value());
+    std::stringstream exported;
+    REQUIRE(cold->ExportCache(exported).has_value());
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    vsag::PyramidBuildCache cache(allocator.get());
+    vsag::IOStreamReader reader(exported);
+    cache.Deserialize(reader);
+    for (const auto& path : {std::string{}, std::string("a"), std::string("a/b")}) {
+        auto* graph = cache.GetGraphCache("", path);
+        const auto* owners = cache.GetGroupOwners("", path);
+        REQUIRE(graph != nullptr);
+        REQUIRE(owners != nullptr);
+        auto owner_of = [&](const std::string& source) {
+            const auto found =
+                std::find(graph->source_ids_.begin(), graph->source_ids_.end(), source);
+            REQUIRE(found != graph->source_ids_.end());
+            return (*owners)[static_cast<uint64_t>(found - graph->source_ids_.begin())];
+        };
+        const auto invalid_owner = owner_of(fixture.sources[0]);
+        const auto stable_owner = owner_of(fixture.sources[10]);
+        REQUIRE(invalid_owner != stable_owner);
+        // Valid wire row, but its sole edge will be filtered when class 0 is demoted.
+        auto& row = graph->neighbors_.at(graph->source_ids_[stable_owner]);
+        row.clear();
+        row.push_back(stable_owner);
+        row.push_back(invalid_owner);
+    }
+    std::stringstream modified;
+    vsag::IOStreamWriter writer(modified);
+    cache.Serialize(writer);
+    fixture.CopyVector(1, 10);  // Demote class 0; its miss must join retained class 1.
+    auto warm = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(warm->ImportCache(modified).has_value());
+    REQUIRE(warm->Build(fixture.Dataset()).has_value());
+    const auto stats = vsag::JsonType::Parse(warm->GetStats());
+    REQUIRE(stats["build_cache_hit_nodes"].GetInt() == 90);
+    REQUIRE(stats["build_cache_missed_nodes"].GetInt() == 10);
+    fixture.Check(warm);
+    auto binary = warm->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    fixture.Check(restored);
+    std::vector<float> added(fixture.vectors.begin() + 10 * fixture.dim,
+                             fixture.vectors.begin() + 11 * fixture.dim);
+    auto one = MakePyramidCacheDataset(1, fixture.dim, added, {2000}, {"a/b"}, {"focused-added"});
+    REQUIRE(warm->Add(one).has_value());
+    REQUIRE(restored->Add(one).has_value());
+    fixture.ids.push_back(2000);
+    fixture.sources.push_back("focused-added");
+    fixture.paths.push_back("a/b");
+    fixture.vectors.insert(fixture.vectors.end(), added.begin(), added.end());
+    fixture.Check(warm);
+    fixture.Check(restored);
+    auto after_add = restored->Serialize();
+    REQUIRE(after_add.has_value());
+    auto final_index = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(final_index->Deserialize(after_add.value()).has_value());
+    fixture.Check(final_index);
+}
+
+TEST_CASE("Pyramid cached source component remains reachable from routed entries",
+          "[ft][pyramid][cache][duplicate_class_validation][duplicate_return_connectivity][pr]") {
+    const auto root = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    const auto storage = GENERATE(std::string("flat"), std::string("compressed"));
+    CAPTURE(root, storage);
+    DuplicateClassFixture fixture(root);
+    auto params = vsag::JsonType::Parse(fixture.params);
+    params["index_param"]["graph_storage_type"].SetString(storage);
+    fixture.params = params.Dump();
+    auto cold = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(cold->Build(fixture.Dataset()).has_value());
+    std::stringstream exported;
+    REQUIRE(cold->ExportCache(exported).has_value());
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    vsag::PyramidBuildCache cache(allocator.get());
+    vsag::IOStreamReader reader(exported);
+    cache.Deserialize(reader);
+    for (const auto& path : {std::string{}, std::string("a"), std::string("a/b")}) {
+        auto* graph = cache.GetGraphCache("", path);
+        const auto* owners = cache.GetGroupOwners("", path);
+        REQUIRE(graph != nullptr);
+        REQUIRE(owners != nullptr);
+        std::vector<vsag::InnerIdType> representatives;
+        for (vsag::InnerIdType id = 0; id < owners->size(); ++id) {
+            if ((*owners)[id] == id) {
+                representatives.push_back(id);
+            }
+        }
+        REQUIRE(representatives.size() == 10);
+        // The first cached owner can reach every other owner, but nothing can return
+        // to it. This passes a forward-only repair and fails routed-entry reachability.
+        for (uint64_t i = 0; i < representatives.size(); ++i) {
+            const auto id = representatives[i];
+            auto& row = graph->neighbors_.at(graph->source_ids_[id]);
+            row.clear();
+            row.push_back(id);
+            row.push_back(representatives[i == 0 ? 1 : (i == 9 ? 1 : i + 1)]);
+        }
+    }
+    std::stringstream modified;
+    vsag::IOStreamWriter writer(modified);
+    cache.Serialize(writer);
+    auto warm = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(warm->ImportCache(modified).has_value());
+    REQUIRE(warm->Build(fixture.Dataset()).has_value());
+    REQUIRE(vsag::JsonType::Parse(warm->GetStats())["build_cache_hit_nodes"].GetInt() == 100);
+    fixture.Check(warm);
+    std::stringstream checked;
+    REQUIRE(warm->ExportCache(checked).has_value());
+    vsag::PyramidBuildCache restored(allocator.get());
+    vsag::IOStreamReader checked_reader(checked);
+    restored.Deserialize(checked_reader);
+    for (const auto& path : {std::string{}, std::string("a"), std::string("a/b")}) {
+        const auto* graph = restored.GetGraphCache("", path);
+        const auto* owners = restored.GetGroupOwners("", path);
+        REQUIRE(graph != nullptr);
+        REQUIRE(owners != nullptr);
+        for (vsag::InnerIdType start = 0; start < owners->size(); ++start) {
+            if ((*owners)[start] != start) {
+                continue;
+            }
+            std::vector<bool> seen(owners->size());
+            std::vector<vsag::InnerIdType> queue{start};
+            seen[start] = true;
+            for (uint64_t offset = 0; offset < queue.size(); ++offset) {
+                const auto id = queue[offset];
+                const auto* row = graph->FindNeighborInnerIds(graph->source_ids_[id]);
+                REQUIRE(row != nullptr);
+                REQUIRE(row->size() <= 17);
+                for (uint64_t edge = 1; edge < row->size(); ++edge) {
+                    const auto target = (*row)[edge];
+                    REQUIRE(target < owners->size());
+                    REQUIRE((*owners)[target] == target);
+                    if (not seen[target]) {
+                        seen[target] = true;
+                        queue.push_back(target);
+                    }
+                }
+            }
+            REQUIRE(queue.size() == 10);
+        }
+    }
+}
+
+TEST_CASE("Pyramid warm cache preserves raw vectors and precise distances",
+          "[ft][pyramid][cache][raw_vector][duplicate_raw_cache][pr]") {
+    const auto duplicate = GENERATE(false, true);
+    const auto root = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    DuplicateClassFixture fixture(root);
+    auto params = vsag::JsonType::Parse(fixture.params);
+    params["index_param"]["support_duplicate"].SetBool(duplicate);
+    params["index_param"]["base_quantization_type"].SetString("sq8");
+    params["index_param"]["store_raw_vector"].SetBool(true);
+    fixture.params = params.Dump();
+    auto cold = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(cold->Build(fixture.Dataset()).has_value());
+    std::stringstream cache;
+    REQUIRE(cold->ExportCache(cache).has_value());
+    auto warm = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(warm->ImportCache(cache).has_value());
+    REQUIRE(warm->Build(fixture.Dataset()).has_value());
+    REQUIRE(vsag::JsonType::Parse(warm->GetStats())["build_cache_hit_nodes"].GetInt() > 0);
+    auto binary = warm->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    for (const auto& index : {cold, warm, restored}) {
+        auto raw = index->GetRawVectorByIds(fixture.ids.data(), fixture.ids.size(), nullptr);
+        REQUIRE(raw.has_value());
+        REQUIRE(std::equal(
+            fixture.vectors.begin(), fixture.vectors.end(), raw.value()->GetFloat32Vectors()));
+        for (uint64_t row = 0; row < fixture.ids.size(); ++row) {
+            auto distance = index->CalcDistanceById(fixture.vectors.data(), fixture.ids[row], true);
+            REQUIRE(distance.has_value());
+            float expected = 0;
+            for (int64_t d = 0; d < fixture.dim; ++d) {
+                const auto delta = fixture.vectors[d] - fixture.vectors[row * fixture.dim + d];
+                expected += delta * delta;
+            }
+            REQUIRE(distance.value() == expected);
+        }
+    }
+}
+
+namespace {
+struct DuplicateMultiPathFixture {
+    static constexpr int64_t DIM = 2;
+    std::vector<int64_t> ids;
+    std::vector<float> vectors;
+    std::vector<std::string> sources;
+    std::vector<std::vector<std::string>> paths;
+
+    DuplicateMultiPathFixture() {
+        for (int64_t i = 0; i < 120; ++i) {
+            ids.push_back(1000 + i);
+            const auto group = i / 2;
+            vectors.push_back(static_cast<float>(group));
+            vectors.push_back(static_cast<float>(group * 2));
+            sources.push_back("multipath-source-" + std::to_string(i));
+            paths.push_back(i % 2 == 0
+                                ? std::vector<std::string>{"a/x", "a/y", "a/x", "literal|pipe"}
+                                : std::vector<std::string>{"a/x", "b/z"});
+        }
+    }
+
+    auto
+    Dataset() -> vsag::DatasetPtr {
+        return vsag::Dataset::Make()
+            ->NumElements(static_cast<int64_t>(ids.size()))
+            ->Dim(DIM)
+            ->Ids(ids.data())
+            ->Float32Vectors(vectors.data())
+            ->SourceID(sources.data())
+            ->Paths("tag", paths)
+            ->Owner(false);
+    }
+
+    void
+    Reverse() {
+        std::reverse(ids.begin(), ids.end());
+        std::reverse(sources.begin(), sources.end());
+        std::reverse(paths.begin(), paths.end());
+        for (uint64_t left = 0; left < ids.size() / 2; ++left) {
+            const auto right = ids.size() - 1 - left;
+            for (int64_t d = 0; d < DIM; ++d) {
+                std::swap(vectors[left * DIM + d], vectors[right * DIM + d]);
+            }
+        }
+    }
+
+    void
+    Check(const vsag::IndexPtr& index) const {
+        const std::vector<std::vector<std::string>> queries{
+            {""}, {"a"}, {"a/x"}, {"a/y"}, {"b/z"}, {"a/x", "a/y", "a/x"}, {"literal|pipe"}};
+        const float query_vector[2]{0.0F, 0.0F};
+        for (const auto& query_paths : queries) {
+            CAPTURE(query_paths);
+            std::vector<int64_t> expected;
+            for (uint64_t row = 0; row < ids.size(); ++row) {
+                bool matches = false;
+                for (const auto& prefix : query_paths) {
+                    for (const auto& path : paths[row]) {
+                        matches = matches || prefix.empty() || path == prefix ||
+                                  path.rfind(prefix + "/", 0) == 0;
+                    }
+                }
+                if (matches) {
+                    expected.push_back(ids[row]);
+                }
+            }
+            auto query = vsag::Dataset::Make()
+                             ->NumElements(1)
+                             ->Dim(DIM)
+                             ->Float32Vectors(query_vector)
+                             ->Paths("tag", std::vector<std::vector<std::string>>{query_paths})
+                             ->Owner(false);
+            auto result =
+                index->KnnSearch(query,
+                                 static_cast<int64_t>(ids.size()),
+                                 R"({"pyramid":{"ef_search":512,"hierarchies":["tag"]}})");
+            REQUIRE(result.has_value());
+            REQUIRE(result.value()->GetDim() == static_cast<int64_t>(expected.size()));
+            std::vector<int64_t> actual;
+            for (int64_t offset = 0; offset < result.value()->GetDim(); ++offset) {
+                const auto label = result.value()->GetIds()[offset];
+                const auto found = std::find(ids.begin(), ids.end(), label);
+                REQUIRE(found != ids.end());
+                const auto row = static_cast<uint64_t>(found - ids.begin());
+                const auto x = vectors[row * DIM];
+                const auto y = vectors[row * DIM + 1];
+                REQUIRE(result.value()->GetDistances()[offset] == x * x + y * y);
+                actual.push_back(label);
+            }
+            std::sort(actual.begin(), actual.end());
+            std::sort(expected.begin(), expected.end());
+            REQUIRE(actual == expected);  // Includes duplicate-label exclusion in path unions.
+        }
+    }
+};
+}  // namespace
+
+TEST_CASE("Pyramid duplicate cache preserves multipath memberships",
+          "[ft][pyramid][cache][duplicate_multipath_cache][concurrent][pr]") {
+    const auto root = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    const auto threads = GENERATE(4, 32);
+    const auto move_owner = GENERATE(false, true);
+    CAPTURE(root, threads, move_owner);
+    auto params = vsag::JsonType::Parse(R"({
+        "dtype":"float32", "metric_type":"l2", "dim":2,
+        "index_param":{"graph_type":"nsw", "base_quantization_type":"fp32",
+            "use_reorder":false, "index_min_size":8, "max_degree":16,
+            "ef_construction":64, "support_duplicate":true,
+            "persist_source_id":true, "store_paths":true,
+            "hierarchies":[{"name":"tag", "no_build_levels":[]} ]}})");
+    params["index_param"]["build_thread_count"].SetInt(threads);
+    // Match established root_graph_type handling in existing duplicate-cache fixtures.
+    params["index_param"]["root_graph_type"].SetString(root);
+    const auto build_params = params.Dump();
+    DuplicateMultiPathFixture fixture;
+    auto day1 = vsag::Factory::CreateIndex("pyramid", build_params).value();
+    REQUIRE(day1->Build(fixture.Dataset()).has_value());
+    fixture.Check(day1);
+    std::stringstream exported;
+    REQUIRE(day1->ExportCache(exported).has_value());
+    const auto cache_bytes = exported.str();
+    if (move_owner) {
+        auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+        vsag::PyramidBuildCache metadata(allocator.get());
+        std::stringstream input(cache_bytes);
+        vsag::IOStreamReader reader(input);
+        metadata.Deserialize(reader);
+        const auto* graph = metadata.GetGraphCache("tag", "a/x");
+        const auto* owners = metadata.GetGroupOwners("tag", "a/x");
+        REQUIRE(graph != nullptr);
+        REQUIRE(owners != nullptr);
+        uint64_t owner = 0;
+        while (owner < owners->size() && (*owners)[owner] != owner) {
+            ++owner;
+        }
+        REQUIRE(owner < owners->size());
+        const auto found =
+            std::find(fixture.sources.begin(), fixture.sources.end(), graph->source_ids_[owner]);
+        REQUIRE(found != fixture.sources.end());
+        const auto row = static_cast<uint64_t>(found - fixture.sources.begin());
+        // Drop only this actual owner's a/x membership, retaining its other paths and SourceID.
+        auto& paths = fixture.paths[row];
+        paths.erase(std::remove(paths.begin(), paths.end(), "a/x"), paths.end());
+        REQUIRE(not paths.empty());
+    }
+    fixture.Reverse();
+    auto cold = vsag::Factory::CreateIndex("pyramid", build_params).value();
+    REQUIRE(cold->Build(fixture.Dataset()).has_value());
+    fixture.Check(cold);
+    auto warm = vsag::Factory::CreateIndex("pyramid", build_params).value();
+    std::stringstream cache_input(cache_bytes);
+    REQUIRE(warm->ImportCache(cache_input).has_value());
+    REQUIRE(warm->Build(fixture.Dataset()).has_value());
+    fixture.Check(warm);
+    const auto stats = vsag::JsonType::Parse(warm->GetStats());
+    REQUIRE(stats["build_cache_hit_nodes"].GetInt() > 0);
+    REQUIRE(stats["build_cache_restored_edges"].GetInt() > 0);
+    if (not move_owner) {
+        REQUIRE(stats["build_cache_hit_nodes"].GetInt() == 120);
+    }
+    auto serialized = warm->Serialize();
+    REQUIRE(serialized.has_value());
+    auto restored = vsag::Factory::CreateIndex("pyramid", build_params).value();
+    REQUIRE(restored->Deserialize(serialized.value()).has_value());
+    fixture.Check(restored);
+    float added_vector[2]{0.0F, 0.0F};
+    int64_t added_id = 9999;
+    std::string added_source = "multipath-added";
+    const std::vector<std::string> added_paths{"a/x", "a/y", "a/x"};
+    auto added = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(2)
+                     ->Float32Vectors(added_vector)
+                     ->Ids(&added_id)
+                     ->SourceID(&added_source)
+                     ->Paths("tag", std::vector<std::vector<std::string>>{added_paths})
+                     ->Owner(false);
+    REQUIRE(restored->Add(added).has_value());
+    fixture.ids.push_back(added_id);
+    fixture.sources.push_back(added_source);
+    fixture.vectors.insert(fixture.vectors.end(), {0.0F, 0.0F});
+    fixture.paths.push_back(added_paths);
+    fixture.Check(restored);
+    auto after_add = restored->Serialize();
+    REQUIRE(after_add.has_value());
+    auto roundtrip = vsag::Factory::CreateIndex("pyramid", build_params).value();
+    REQUIRE(roundtrip->Deserialize(after_add.value()).has_value());
+    fixture.Check(roundtrip);
 }

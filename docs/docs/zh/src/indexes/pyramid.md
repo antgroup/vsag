@@ -106,7 +106,7 @@ auto result = index->KnnSearch(
 | `store_paths` | bool | `false` | 顶层开关；保留传给 `Build` 和 `Add` 的原始路径，使 `GetDataByIdsWithFlag` 在选择 `DATA_FLAG_PATH` 时可以返回它们。该开关对所有已配置的 hierarchy 生效，不支持按 hierarchy 覆盖 |
 | `index_min_size` | int | `0` | 子索引的最小规模；小于该值的分区会退化为线性扫描 |
 | `root_graph_type` | string | `"single_layer"` | 根图结构：`single_layer` 保留原有稀疏底图；`multi_layer` 使用预分配的 Flat 或 Compressed 底图、类似 HGraph 的稀疏路由层以及联合构图流程。`multi_layer` 要求 `graph_type: "nsw"`。`no_build_levels` 禁用第 0 层时不要显式指定此选项。 |
-| `support_duplicate` | bool | `false` | 是否允许重复 ID |
+| `support_duplicate` | bool | `false` | 根据构建编码的 `CompareVectors` 语义对编码等价、外部标签不同的向量分组；外部标签仍须唯一。 |
 | `build_thread_count` | int | `1` | 构建阶段并发线程数 |
 | `hierarchies` | array | `[]` | 命名层级定义。每个元素可以是字符串（继承全部顶层参数）或对象（含 `name` 及可选覆盖参数：`max_degree`、`ef_construction`、`alpha`、`no_build_levels`、`index_min_size`、`root_graph_type`）。设置后激活多层级模式，每个层级维护独立的路径树。 |
 
@@ -152,7 +152,13 @@ Pyramid 使用 split code 的 code-code 距离完成增量 FLAT→GRAPH 晋升�
 
 ## 构建缓存
 
-`ExportCache` 会保存每个层级、每个节点的 NSW 图种子，`ImportCache` 可在后续 `Build` 中复用。缓存数据使用索引缓存 payload 格式，而非 streaming 索引序列化格式。需要复用缓存的索引通过 footer 序列化前应设置 `persist_source_id: true`，并且两次构建中的每个向量都必须提供唯一的 `Dataset::SourceID`。缓存预热仅适用于 `graph_type: "nsw"`；ODescent、重复 ID 模式、缺少 source ID 或 source ID 重复时会自动回退到普通冷构建。`ef_construction` 不作为缓存路径的准入条件。输入数据中至少 80% 的 source ID 必须与导入缓存重合；低于该比例时会回退到普通冷构建。缓存未命中的节点仍按正常流程构建。single-layer root 的命中节点会执行低成本、分块并行的出边修复，较小的标签子图则保留恢复后的缓存行。由于 Build Cache 不保存 route graph，multi-layer 节点仍会重建 routing overlay。`GetStats()` 除向量命中/未命中数量外，还会报告图成员关系的命中/未命中数量和恢复的边数量。
+`ExportCache` 保存每个层级、每个节点的 NSW 图种子，`ImportCache` 可在后续 `Build` 中复用。缓存使用索引缓存 payload 格式，而非 streaming 索引序列化格式。需要复用缓存的索引通过 footer 序列化前应设置 `persist_source_id: true`，两次构建中的每个向量都须提供唯一的 `Dataset::SourceID` 和外部标签。缓存预热仅适用于 `graph_type: "nsw"`；ODescent、缺少 source ID、source ID 或标签重复时回退到普通冷构建（保留普通构建拒绝重复标签的行为）。`ef_construction` 不作为准入条件。输入 source ID 至少 80% 须与缓存重合。未命中成员按正常流程构建；single-layer root 命中成员执行出边修复，multi-layer 节点重建未缓存的 routing overlay。
+
+启用 `support_duplicate: true` 时，Pyramid 显式保存每个图的组成员及实际邻接行代表，而不是最小标签或内部 ID。预热构建重映射 SourceID，并验证当前图成员关系和构建编码等价性。代表缺失或迁移、组等价性变化、组缓存行不可用时，仅将受影响的组转为 miss，其他合法组仍可复用。仅删除别名不会使其组失效。编码新合并的组保守重建。按哈希组织的有序索引通过比较完整构建编码字节处理冲突，不将哈希相同视为向量相等。每图至少 80% 的成员关系须保持可复用；缺少组元数据（含旧缓存）或复用比例不足时，整个图回退冷构建。缺少有效缓存邻接的全相同向量图仍冷构建。先恢复代表邻接再关联别名，过滤指向失效组的边；别名只计入成员关系，不增加恢复边或路由条目。
+
+并发插入使用临时的图级精确编码代表登记表，仅在相应的准入分片锁内完成代表发布。登记表引用已有构建编码，不复制完整向量；加载索引后在需要时重建。启用 duplicate 的 NSW `Build` 在冷构建和预热修整结束后，既检查从每个底层图入口出发的正向可达性，也检查各代表返回该入口的可达性。必要时补充有界、按几何距离选择的连接，同时保护正向遍历树边并保持最大度数。这两项检查共同确保图内物理代表之间的强连通性，也适用于路由下降为不同查询选择的底层入口。返回路径检查采用 CSR 反向邻接结构，对于 R 个代表和 E 条边需要 O(R + E) 临时内存，逐图处理并释放。这是 Build 阶段的不变量，不保证任意后续 `Add` 操作后的连通性。有限搜索预算的近似查询仍可能漏召回整个向量组，不承诺通用的召回率或构建加速。 反序列化后，稀疏图的显式空邻接行仍保留物理代表身份。旧版稠密或压缩存储可能丢失孤立空重复组的历史代表身份；准入初始化优先保留可由邻接行、入边或路由观察到的代表，然后为仍不可观察的已持久化重复组规范化一个成员作为代表，而不改变组内标签。这不等于恢复历史代表身份，也不保证任意增量图的连通性。此一次性旧索引准入扫描需要 O(H + A + E) 遍历工作和 O(H) 访问标记内存，其中 H 为已存储 ID 的高水位，A 为访问的重复成员数，E 为遍历的边数；精确编码有序索引操作另计通常的比较开销。
+
+带重复组的缓存使用 Pyramid 专用版本化格式；新读取器兼容旧普通缓存，旧读取器不能读取新重复组 payload。不含组元数据的普通缓存保留旧格式。HGraph 缓存及索引序列化格式不变。`GetStats()` 区分向量、图成员关系的命中/未命中计数和恢复边数；图回退计为未命中，不计为已恢复组。
 
 ## 检索参数
 
