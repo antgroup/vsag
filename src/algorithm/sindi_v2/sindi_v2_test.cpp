@@ -31,6 +31,7 @@
 
 #include "datacell/extra_info_datacell_parameter.h"
 #include "impl/allocator/safe_allocator.h"
+#include "index/index_impl.h"
 #include "index_common_param.h"
 #include "io/memory_block_io/memory_block_io_parameter.h"
 #include "io/memory_io/memory_io_parameter.h"
@@ -1892,6 +1893,123 @@ TEST_CASE("SINDIV2 SQ8 build validates labels without a redundant unique-label p
             REQUIRE(duplicate_index->GetNumElements() == 2);
         }
     }
+}
+
+TEST_CASE("SINDIV2 request threshold and radius validation", "[ut][SINDIV2][review2846]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_IP;
+    common.dim_ = 2;
+    uint32_t terms[] = {0, 1};
+    float values[][2] = {{0.5F, 0.25F}, {0.25F, 0.125F}, {0.125F, 0.0625F}};
+    SparseVector vectors[] = {{2, terms, values[0]}, {2, terms, values[1]}, {2, terms, values[2]}};
+    int64_t labels[] = {10, 20, 30};
+    float query_values[] = {1.0F, 1.0F};
+    SparseVector query_vector{2, terms, query_values};
+    auto base = Dataset::Make()->NumElements(3)->SparseVectors(vectors)->Ids(labels)->Owner(false);
+    auto query = Dataset::Make()->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+    for (bool reorder : {false, true}) {
+        for (bool immutable : {false, true}) {
+            for (float prune : {0.0F, 0.4F}) {
+                DYNAMIC_SECTION("reorder=" << reorder << " immutable=" << immutable
+                                           << " prune=" << prune) {
+                    auto parameter = std::make_shared<SINDIV2Parameter>();
+                    parameter->FromJson(JsonType::Parse(fmt::format(R"({{
+                        "term_id_limit": 16, "window_size": 10000,
+                        "doc_prune_ratio": {}, "use_quantization": false,
+                        "use_reorder": {}, "immutable": {}, "remap_term_ids": false,
+                        "term_io": {{"type": "memory_io"}},
+                        "rerank_io": {{"type": "block_memory_io"}}
+                    }})",
+                                                                    prune,
+                                                                    reorder,
+                                                                    immutable)));
+                    auto inner = std::make_shared<SINDIV2>(parameter, common);
+                    IndexImpl<SINDIV2> index(inner, common);
+                    REQUIRE(index.Build(base).has_value());
+                    SearchRequest request;
+                    request.query_ = query;
+                    request.topk_ = 3;
+                    request.params_str_ = R"({"sindi_v2":{"query_prune_ratio":0.0,
+                        "term_prune_ratio":0.0,"n_candidate":3}})";
+                    const float boundary = (!reorder && prune > 0) ? 0.5F : 0.25F;
+                    request.threshold_ = boundary;
+                    auto result = index.SearchWithRequest(request);
+                    REQUIRE(result.has_value());
+                    CHECK(result.value()->GetDim() == 1);
+                    if (result.value()->GetDim() > 0) {
+                        CHECK(result.value()->GetIds()[0] == 10);
+                        CHECK(result.value()->GetDistances()[0] == boundary);
+                    }
+                    auto legacy_params = JsonType::Parse(request.params_str_);
+                    (*legacy_params.GetInnerJson())["threshold"] = boundary;
+                    auto legacy = inner->KnnSearch(query, 3, legacy_params.Dump(), nullptr);
+                    CHECK(legacy->GetDim() == 1);
+                    request.threshold_ = std::nextafter(boundary, -1.0F);
+                    CHECK(inner->SearchWithRequest(request)->GetDim() == 0);
+                    request.threshold_ = std::numeric_limits<float>::quiet_NaN();
+                    CHECK_THROWS_AS(inner->SearchWithRequest(request), VsagException);
+                    auto invalid = index.SearchWithRequest(request);
+                    CHECK_FALSE(invalid.has_value());
+                    if (!invalid.has_value()) {
+                        CHECK(invalid.error().type == ErrorType::INVALID_ARGUMENT);
+                    }
+                    request.threshold_.reset();
+                    request.mode_ = SearchMode::RANGE_SEARCH;
+                    for (float radius : {-1.0F, std::numeric_limits<float>::quiet_NaN()}) {
+                        request.radius_ = radius;
+                        CHECK_THROWS_AS(inner->SearchWithRequest(request), VsagException);
+                        CHECK_THROWS_AS(
+                            inner->RangeSearch(query, radius, request.params_str_, nullptr, -1),
+                            VsagException);
+                        auto range = index.SearchWithRequest(request);
+                        CHECK_FALSE(range.has_value());
+                        if (!range.has_value()) {
+                            CHECK(range.error().type == ErrorType::INVALID_ARGUMENT);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("SINDIV2 threshold rerank backfills rejected nonfinite candidates",
+          "[ut][SINDIV2][review2846]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_IP;
+    common.dim_ = 2;
+    auto parameter = std::make_shared<SINDIV2Parameter>();
+    parameter->FromJson(JsonType::Parse(R"({
+        "term_id_limit":16, "window_size":10000, "doc_prune_ratio":0.0,
+        "use_quantization":false, "use_reorder":true, "remap_term_ids":false,
+        "term_io":{"type":"memory_io"}, "rerank_io":{"type":"block_memory_io"}
+    })"));
+    SINDIV2 index(parameter, common);
+    uint32_t terms[] = {0, 1};
+    float values[][2] = {
+        {1.0F, std::numeric_limits<float>::max()}, {0.125F, 0.0F}, {0.0625F, 0.0F}};
+    SparseVector vectors[] = {{2, terms, values[0]}, {2, terms, values[1]}, {2, terms, values[2]}};
+    int64_t labels[] = {10, 20, 30};
+    auto base = Dataset::Make()->NumElements(3)->SparseVectors(vectors)->Ids(labels)->Owner(false);
+    REQUIRE(index.Build(base).empty());
+    float query_values[] = {4.0F, 2.0F};
+    SparseVector vector{2, terms, query_values};
+    SearchRequest request;
+    request.query_ = Dataset::Make()->NumElements(1)->SparseVectors(&vector)->Owner(false);
+    request.params_str_ = R"({"sindi_v2":{"query_prune_ratio":0.4,
+        "term_prune_ratio":0.0,"n_candidate":3}})";
+    request.topk_ = 2;
+    request.threshold_ = 0.75F;
+    auto result = index.SearchWithRequest(request);
+    REQUIRE(result->GetDim() == 2);
+    CHECK(result->GetIds()[0] == 20);
+    CHECK(result->GetIds()[1] == 30);
+    CHECK(result->GetDistances()[0] == 0.5F);
+    CHECK(result->GetDistances()[1] == 0.75F);
 }
 
 TEST_CASE("SINDIV2 optimized DMQ and batch distance end-to-end", "[ut][SINDIV2]") {
