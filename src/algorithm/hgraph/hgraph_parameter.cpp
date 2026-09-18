@@ -368,14 +368,19 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
 
 HGraphSearchParameters
 HGraphSearchParameters::FromJson(const std::string& json_string) {
-    auto params = JsonType::Parse(json_string);
+    return FromParsedJson(JsonType::Parse(json_string));
+}
 
+HGraphSearchParameters
+HGraphSearchParameters::FromParsedJson(const JsonType& params) {
     HGraphSearchParameters obj;
 
-    // set obj.ef_search
+    // Validate structure before indexing: malformed requests remain recoverable.
+    CHECK_ARGUMENT(params.IsObject(), "search parameters must be an object");
     CHECK_ARGUMENT(params.Contains(INDEX_TYPE_HGRAPH),
                    fmt::format("parameters must contains {}", INDEX_TYPE_HGRAPH));
 
+    CHECK_ARGUMENT(params[INDEX_TYPE_HGRAPH].IsObject(), "hgraph parameters must be an object");
     obj.IndexSearchParameter::FromJson(params[INDEX_TYPE_HGRAPH]);
 
     CHECK_ARGUMENT(

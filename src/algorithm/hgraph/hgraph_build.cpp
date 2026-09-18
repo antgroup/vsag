@@ -1022,6 +1022,7 @@ HGraph::InitFeatures() {
         IndexFeature::SUPPORT_KNN_SEARCH,
         IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
         IndexFeature::SUPPORT_KNN_ITERATOR_FILTER_SEARCH,
+        IndexFeature::SUPPORT_CONTINUE_SEARCH_SESSION,
     });
     // update
     if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {

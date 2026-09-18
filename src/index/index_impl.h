@@ -20,6 +20,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "common.h"
 #include "impl/thread_pool/safe_thread_pool.h"
+#include "index/search_session_provider.h"
 #include "index_common_param.h"
 #include "query_context.h"
 #include "utils/search_threshold.h"
@@ -32,7 +33,7 @@ GENERATE_HAS_STATIC_CLASS_FUNCTION(CheckAndMappingExternalParam,
                                    std::declval<const IndexCommonParam&>());
 
 template <class T>
-class IndexImpl : public Index {
+class IndexImpl : public Index, public SearchSessionProvider {
     static_assert(std::is_base_of<InnerIndexInterface, T>::value);
     static_assert(HasStaticCheckAndMappingExternalParam<T>::value);
 
@@ -397,6 +398,28 @@ public:
         CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
         SAFE_CALL(return this->inner_index_->KnnSearch(
             query, k, parameters, filter, nullptr, iter_ctx, is_last_filter));
+    }
+
+    using Index::OpenSearchSession;
+
+    tl::expected<std::unique_ptr<SearchSession>, Error>
+    CreateSearchSession(const DatasetPtr& query,
+                        int64_t k_per_call,
+                        const std::string& parameters,
+                        const FilterPtr& filter,
+                        Allocator* allocator) const override {
+        // InnerIndexInterface stores a raw allocator; retain common resources too.
+        // Destruction order releases the backend before its allocator/thread pool.
+        struct SessionOwner {
+            IndexCommonParam resources;
+            InnerIndexPtr backend;
+        };
+        SAFE_CALL(
+            auto lifetime = std::make_shared<SessionOwner>(
+                SessionOwner{this->common_param_, this->inner_index_});
+            std::shared_ptr<const InnerIndexInterface> owner(lifetime, this->inner_index_.get());
+            return this->inner_index_->OpenSearchSession(
+                query, k_per_call, parameters, filter, allocator, std::move(owner)));
     }
 
     tl::expected<void, Error>

@@ -97,6 +97,10 @@ public:
     static HGraphSearchParameters
     FromJson(const std::string& json_string);
 
+    // Reuse an already parsed document without changing string-call overload resolution.
+    static HGraphSearchParameters
+    FromParsedJson(const JsonType& params);
+
 public:
     int64_t ef_search{30};
     uint32_t hops_limit{std::numeric_limits<uint32_t>::max()};
