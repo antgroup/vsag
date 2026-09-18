@@ -22,10 +22,63 @@
 
 #include "datacell/flatten_interface.h"
 #include "impl/filter/iterator_filter.h"
+#include "quantization/scalar_quantization/scalar_quantizer.h"
 #include "searcher_test.h"
 #include "unittest.h"
 #include "utils/visited_list.h"
 using namespace vsag;
+
+TEST_CASE("BasicSearcher finds duplicate codes beyond the nearest SQ cosine candidate",
+          "[ut][BasicSearcher][duplicate]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.dim_ = 2;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_COSINE;
+
+    auto quantizer_param =
+        QuantizerParameter::GetQuantizerParameterByJson(JsonType::Parse(R"({"type":"sq8"})"));
+    auto io_param = IOParameter::GetIOParameterByJson(JsonType::Parse(R"({"type":"memory_io"})"));
+    auto flatten =
+        std::make_shared<FlattenDataCell<SQ8Quantizer<MetricType::METRIC_TYPE_COSINE>, MemoryIO>>(
+            quantizer_param, io_param, common);
+
+    // Fix both SQ intervals to [-1, 1] without depending on random training data.
+    const std::vector<float> training = {1.0F, 0.0F, -1.0F, 0.0F, 0.0F, 1.0F, 0.0F, -1.0F};
+    flatten->Train(training.data(), 4);
+    // IDs 0 and 2 are identical A vectors. ID 2 is stored but not yet in the graph.
+    // Only IDs 0 and 1 (a different B vector) are graph candidates.
+    const std::vector<float> vectors = {0.599F, 0.801F, 0.6F, 0.8F, 0.599F, 0.801F};
+    flatten->BatchInsertVector(vectors.data(), 3, nullptr);
+    REQUIRE(flatten->CompareVectors(2, 0));
+    REQUIRE_FALSE(flatten->CompareVectors(2, 1));
+
+    const auto* query = vectors.data() + 4;
+    auto computer = flatten->FactoryComputer(query);
+    const InnerIdType candidate_ids[] = {0, 1};
+    float distances[2];
+    flatten->Query(distances, computer, candidate_ids, 2);
+    // Quantization makes B closer to the raw A query than A's own code.
+    REQUIRE(distances[1] < distances[0]);
+
+    auto graph =
+        std::make_shared<MockGraphDataCell>(std::vector<std::vector<InnerIdType>>{{1}, {0}});
+    auto pool = std::make_shared<VisitedListPool>(1, allocator.get(), 3, allocator.get());
+    BasicSearcher searcher(common);
+    InnerSearchParam param;
+    param.ep = 0;
+    param.ef = 2;
+    param.topk = 2;
+    param.find_duplicate = true;
+    param.duplicate_query_id = 2;
+    param.duplicate_distance_threshold = 0.0F;
+
+    auto visited = pool->TakeOne();
+    auto result = searcher.Search(graph, flatten, visited, query, param, LabelTablePtr{}, nullptr);
+    pool->ReturnOne(visited);
+    REQUIRE(result->Size() == 2);
+    REQUIRE(param.duplicate_id == 0);
+}
 
 TEST_CASE("BasicSearcher traverses through a non-finite-distance bridge",
           "[ut][BasicSearcher][nonfinite]") {
