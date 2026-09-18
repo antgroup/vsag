@@ -6,6 +6,8 @@
 > after a successful build. Graph Add/Update/Remove and Search use the same
 > Index API; Save writes v2 including FP32 vectors, IDs, options and adjacency,
 > while Load accepts both v1 and v2. Graph v2 is not a Full VSAG snapshot.
+> The filtered Search overload also applies after BuildGraph: rejected external IDs
+> can be traversed to keep the graph connected, but are never returned.
 > No concurrent calls, checksum, quantization or mmap are provided. The
 > remainder of this page documents the original v0.1 default behavior.
 

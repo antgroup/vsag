@@ -22,6 +22,8 @@ public:
     Remove(int64_t id) = 0;
     virtual tl::expected<std::vector<Neighbor>, Error>
     Search(const float* query, uint64_t dim, uint64_t k) const = 0;
+    virtual tl::expected<std::vector<Neighbor>, Error>
+    Search(const float* query, uint64_t dim, uint64_t k, const IdFilter& filter) const = 0;
 
     [[nodiscard]] virtual uint64_t
     Size() const = 0;

@@ -11,6 +11,8 @@ option(ENABLE_COVERAGE "Instrument Lite sources for gcov" OFF)
 
 set(VSAG_LITE_SOURCES
     "${VSAG_ROOT}/src/lite/index.cpp"
+    "${VSAG_ROOT}/src/lite/bruteforce_backend.cpp"
+    "${VSAG_ROOT}/src/lite/graph_backend.cpp"
     "${VSAG_ROOT}/src/lite/fp32_distance.cpp")
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$"
    AND CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang)$")
@@ -56,8 +58,9 @@ if(ENABLE_TESTS)
     include("${VSAG_ROOT}/cmake/VSAGThirdPartyOverride.cmake")
     include("${VSAG_ROOT}/extern/catch2/catch2.cmake")
     add_executable(lite_tests "${VSAG_ROOT}/src/lite/index_test.cpp")
+    add_executable(lite_graph_tests "${VSAG_ROOT}/src/lite/graph_backend_test.cpp")
     target_link_libraries(lite_tests PRIVATE vsag::lite Catch2::Catch2WithMain)
-    target_include_directories(lite_graph_tests PRIVATE "\${VSAG_ROOT}/src")
+    target_include_directories(lite_graph_tests PRIVATE "${VSAG_ROOT}/src")
     target_link_libraries(lite_graph_tests PRIVATE vsag::lite Catch2::Catch2WithMain)
     if(VSAG_LITE_HAS_X86_SIMD)
         target_compile_definitions(lite_tests PRIVATE VSAG_LITE_HAS_X86_SIMD)
