@@ -39,6 +39,7 @@
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
 #include "storage/tlv_section.h"
+#include "utils/timer.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
 #include "vsag/options.h"
@@ -812,6 +813,10 @@ SINDIV2::KnnSearch(const DatasetPtr& query,
     InnerSearchParam inner_param;
     inner_param.ef = std::max(candidate_count, static_cast<uint64_t>(k));
     inner_param.topk = k;
+    if (search_param.enable_time_record) {
+        inner_param.time_cost = std::make_shared<Timer>();
+        inner_param.time_cost->SetThreshold(search_param.timeout_ms);
+    }
 
     FilterPtr ft = nullptr;
     if (filter != nullptr) {
@@ -952,6 +957,12 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                                               mode,
                                               inner_param.is_inner_id_allowed != nullptr);
         }
+        if (inner_param.time_cost != nullptr and inner_param.time_cost->CheckOvertime()) {
+            if (statistics != nullptr) {
+                statistics->is_timeout.store(true, std::memory_order_relaxed);
+            }
+            break;
+        }
     }
 
     if (statistics != nullptr and query_context.has_untracked_approximate_evaluations) {
@@ -1071,6 +1082,10 @@ SINDIV2::RangeSearch(const DatasetPtr& query,
     InnerSearchParam inner_param;
     inner_param.radius = radius;
     inner_param.range_search_limit_size = static_cast<int>(limited_size);
+    if (search_param.enable_time_record) {
+        inner_param.time_cost = std::make_shared<Timer>();
+        inner_param.time_cost->SetThreshold(search_param.timeout_ms);
+    }
     if (filter != nullptr) {
         inner_param.is_inner_id_allowed =
             std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
