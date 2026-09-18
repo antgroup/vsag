@@ -70,6 +70,14 @@ ReadSeekableBlockPayload(StreamReader& reader,
                          const StreamBlockHeader& header,
                          const std::function<void(StreamReader&)>& deserialize);
 
+// Reads directly from the source with bounded memory and no random access. After deserialize
+// succeeds, drains the suffix and validates the checksum. On failure, the caller must discard
+// any partially restored component state; no draining is performed during exception unwinding.
+void
+ReadForwardBlockPayload(StreamReader& reader,
+                        const StreamBlockHeader& header,
+                        const std::function<void(StreamReader&)>& deserialize);
+
 void
 ReadExternalBlockPayload(const ReaderPtr& reader,
                          const StreamBlockHeader& header,
