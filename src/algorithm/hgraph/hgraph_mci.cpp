@@ -518,6 +518,7 @@ HGraph::MCIHybridSearchResult::MakeStatistics(const SearchStatistics& stats) con
     json["mci_seed_count"].SetInt(static_cast<int64_t>(this->seed_count));
     json["mci_seed_ratio"].SetFloat(this->seed_ratio);
     json["mci_raw_float_csr"].SetBool(this->used_precise_float_csr);
+    json["mci_bitmap_fast_path"].SetBool(this->used_bitmap_fast_path);
     return json;
 }
 
@@ -579,6 +580,18 @@ HGraph::try_mci_search(const SearchRequest& request,
         mci_param.precise_vector_stride = precise_vector_stride;
         mci_param.metric = this->metric_;
         mci_param.used_precise_float_csr = &result.used_precise_float_csr;
+    }
+    // The searcher indexes the bitmap with inner ids. Providers must return an inner-id-indexed
+    // bitmap: InnerIdWrapperFilter only forwards the wrapped bitmap when the label table maps every
+    // inner id to itself, and it is the only filter shape MCI searches the bitmap with.
+    if (inner_filter != nullptr) {
+        uint64_t bitmap_size = 0;
+        const auto* bitmap = inner_filter->GetValidBitmap(&bitmap_size);
+        if (bitmap != nullptr and bitmap_size >= total_count) {
+            mci_param.valid_bitmap = bitmap;
+            mci_param.valid_bitmap_size = bitmap_size;
+            mci_param.used_bitmap_fast_path = &result.used_bitmap_fast_path;
+        }
     }
     result.result = this->mci_searcher_->Search(
         this->mci_cliques_, precise_flatten, query, search_param, mci_param, ctx);

@@ -153,6 +153,7 @@ LabelTable::MarkRemove(const std::vector<LabelType>& labels) {
 void
 LabelTable::Deserialize(StreamReader& reader) {
     StreamReader::ReadVector(reader, label_table_);
+    MarkLabelsMutated();
     RebuildActivePaddingLabelIds();
     if (use_reverse_map_) {
         this->label_remap_.Clear();
@@ -200,6 +201,7 @@ LabelTable::MergeOther(const LabelTablePtr& other, const IdMapFunction& id_map) 
             }
         }
     }
+    MarkLabelsMutated();
     total_count_ += static_cast<int64_t>(other_size_u);
 }
 }  // namespace vsag

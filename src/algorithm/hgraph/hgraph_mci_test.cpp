@@ -96,6 +96,67 @@ public:
     }
 };
 
+// Keeps the `valid_count` labels that start at `first_label` and, when requested, also exposes a
+// dense bitmap whose valid inner ids are given by `bitmap_valid_ids`. The two sets are only the same
+// object when labels and inner ids coincide.
+class RangeBitmapFilter : public vsag::Filter {
+public:
+    RangeBitmapFilter(int64_t first_label,
+                      int64_t total,
+                      int64_t valid_count,
+                      const std::vector<int64_t>& bitmap_valid_ids,
+                      bool expose_bitmap)
+        : first_label_(first_label),
+          valid_count_(valid_count),
+          bitmap_(static_cast<uint64_t>(total), 0),
+          expose_bitmap_(expose_bitmap) {
+        valid_ids_.resize(static_cast<uint64_t>(valid_count));
+        std::iota(valid_ids_.begin(), valid_ids_.end(), first_label_);
+        for (auto id : bitmap_valid_ids) {
+            if (id >= 0 and id < total) {
+                bitmap_[static_cast<uint64_t>(id)] = 1;
+            }
+        }
+    }
+
+    bool
+    CheckValid(int64_t id) const override {
+        return id >= first_label_ and id < first_label_ + valid_count_;
+    }
+
+    float
+    ValidRatio() const override {
+        return static_cast<float>(valid_count_) / static_cast<float>(bitmap_.size());
+    }
+
+    void
+    GetValidIds(const int64_t** valid_ids, int64_t& count) const override {
+        *valid_ids = valid_ids_.data();
+        count = static_cast<int64_t>(valid_ids_.size());
+    }
+
+    [[nodiscard]] const uint8_t*
+    GetValidBitmap(uint64_t* size) const override {
+        if (not expose_bitmap_) {
+            if (size != nullptr) {
+                *size = 0;
+            }
+            return nullptr;
+        }
+        if (size != nullptr) {
+            *size = bitmap_.size();
+        }
+        return bitmap_.data();
+    }
+
+private:
+    int64_t first_label_{0};
+    int64_t valid_count_{0};
+    std::vector<int64_t> valid_ids_;
+    std::vector<uint8_t> bitmap_;
+    bool expose_bitmap_{false};
+};
+
 struct TestEdge {
     uint32_t u{0};
     uint32_t v{0};
@@ -828,4 +889,107 @@ TEST_CASE("HGraph Merge rebuilds the MCI companion", "[ut][hgraph][mci]") {
         filter);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+}
+
+TEST_CASE("HGraph MCI inlines an identity-mapped filter bitmap", "[ut][hgraph][mci]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 64;
+    constexpr int64_t valid_count = total / 2;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> vectors(total * dim);
+    for (int64_t i = 0; i < total; ++i) {
+        vectors[i * dim] = static_cast<float>(i / 4);
+        vectors[i * dim + 1] = static_cast<float>(i % 4);
+        vectors[i * dim + 2] = static_cast<float>((i * 3) % 7);
+        vectors[i * dim + 3] = static_cast<float>((i * 5) % 11);
+    }
+    std::vector<int64_t> bitmap_valid_ids(valid_count);
+    std::iota(bitmap_valid_ids.begin(), bitmap_valid_ids.end(), 0);
+
+    auto index = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    // Query with the vector of a filtered-out element, so that a wrong validity answer is visible.
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->Float32Vectors(vectors.data() + (total - 1) * dim)
+                     ->Owner(false);
+    const std::string search_params =
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":5.0,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})";
+
+    auto bitmap_filter =
+        std::make_shared<RangeBitmapFilter>(0, total, valid_count, bitmap_valid_ids, true);
+    auto bitmap_result = index.value()->KnnSearch(query, 5, search_params, bitmap_filter);
+    REQUIRE(bitmap_result.has_value());
+    REQUIRE(bitmap_result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    REQUIRE(vsag::JsonType::Parse(bitmap_result.value()->GetStatistics())["mci_bitmap_fast_path"]
+                .GetBool());
+    REQUIRE(bitmap_result.value()->GetDim() > 0);
+    for (int64_t i = 0; i < bitmap_result.value()->GetDim(); ++i) {
+        REQUIRE(bitmap_result.value()->GetIds()[i] < valid_count);
+    }
+
+    // The same filter without a bitmap searches through the callback path and must agree exactly.
+    auto callback_filter =
+        std::make_shared<RangeBitmapFilter>(0, total, valid_count, bitmap_valid_ids, false);
+    auto callback_result = index.value()->KnnSearch(query, 5, search_params, callback_filter);
+    REQUIRE(callback_result.has_value());
+    REQUIRE_FALSE(
+        vsag::JsonType::Parse(callback_result.value()->GetStatistics())["mci_bitmap_fast_path"]
+            .GetBool());
+    REQUIRE(callback_result.value()->GetDim() == bitmap_result.value()->GetDim());
+    for (int64_t i = 0; i < callback_result.value()->GetDim(); ++i) {
+        REQUIRE(callback_result.value()->GetIds()[i] == bitmap_result.value()->GetIds()[i]);
+    }
+}
+
+TEST_CASE("HGraph MCI ignores a bitmap whose ids are not inner ids", "[ut][hgraph][mci]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 64;
+    constexpr int64_t valid_count = total / 2;
+    constexpr int64_t first_label = 8000;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), first_label);
+    std::vector<float> vectors(total * dim);
+    for (int64_t i = 0; i < total; ++i) {
+        vectors[i * dim] = static_cast<float>(i / 4);
+        vectors[i * dim + 1] = static_cast<float>(i % 4);
+        vectors[i * dim + 2] = static_cast<float>((i * 3) % 7);
+        vectors[i * dim + 3] = static_cast<float>((i * 5) % 11);
+    }
+    // The exposed bitmap marks exactly the ids this filter rejects. Reusing it as an inner-id
+    // bitmap would return them, so the label table not being the identity must disable the bitmap.
+    std::vector<int64_t> bitmap_valid_ids(valid_count);
+    std::iota(bitmap_valid_ids.begin(), bitmap_valid_ids.end(), valid_count);
+
+    auto index = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->Float32Vectors(vectors.data() + (total - 1) * dim)
+                     ->Owner(false);
+    const std::string search_params =
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":5.0,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})";
+
+    auto filter = std::make_shared<RangeBitmapFilter>(
+        first_label, total, valid_count, bitmap_valid_ids, true);
+    auto result = index.value()->KnnSearch(query, 5, search_params, filter);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    REQUIRE_FALSE(
+        vsag::JsonType::Parse(result.value()->GetStatistics())["mci_bitmap_fast_path"].GetBool());
+    REQUIRE(result.value()->GetDim() > 0);
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        const auto id = result.value()->GetIds()[i];
+        REQUIRE(id >= first_label);
+        REQUIRE(id < first_label + valid_count);
+    }
 }
