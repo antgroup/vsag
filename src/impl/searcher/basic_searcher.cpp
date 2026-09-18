@@ -916,12 +916,21 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         } else {
             const bool has_stored_query =
                 inner_search_param.duplicate_query_id < flatten->TotalCount();
-            const bool is_duplicate =
-                has_stored_query
-                    ? flatten->CompareVectors(inner_search_param.duplicate_query_id, min_index)
-                    : flatten->CompareRawVectorWithId(query, min_index);
-            if (is_duplicate) {
+            auto matches_query = [&](InnerIdType id) {
+                return has_stored_query
+                           ? flatten->CompareVectors(inner_search_param.duplicate_query_id, id)
+                           : flatten->CompareRawVectorWithId(query, id);
+            };
+            if (matches_query(min_index)) {
                 inner_search_param.duplicate_id = min_index;
+            } else {
+                // Quantization can rank a different code ahead of an identical one.
+                for (uint32_t i = 0; i < top_candidates->Size(); ++i) {
+                    if (data[i].second != min_index && matches_query(data[i].second)) {
+                        inner_search_param.duplicate_id = data[i].second;
+                        break;
+                    }
+                }
             }
         }
     }
