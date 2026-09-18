@@ -123,6 +123,7 @@ cache options (`ENABLE_*`). Defaults below reflect a plain `make release`.
 | `VSAG_ENABLE_TOOLS` | `ENABLE_TOOLS` | `OFF` | Build utilities under `tools/` |
 | `VSAG_ENABLE_EXAMPLES` | `ENABLE_EXAMPLES` | `OFF` | Build sample programs under `examples/cpp/` |
 | n/a | `ENABLE_LIBURING` | `OFF` | Enable the Linux `uring_io` backend when liburing is installed |
+| n/a | `ENABLE_CUDA` | `OFF` | Build the optional CUDA backend; requires an NVIDIA toolkit |
 | n/a | `CMAKE_BUILD_TYPE` | driven by Makefile target | Debug / Release |
 
 When invoking CMake directly instead of using `make`, use the underlying CMake cache option names:

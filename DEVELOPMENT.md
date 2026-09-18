@@ -194,6 +194,18 @@ source of truth for the exact upstream URL and expected checksum.
 - **`ENABLE_PYBINDS`** (default: `OFF`)
   - Build the `_pyvsag` Python extension module
 
+- **`ENABLE_CUDA`** (default: `OFF`)
+  - Build the optional CUDA backend. Requires CUDA 11.8 or later, with `nvcc` on
+    `PATH` or `CMAKE_CUDA_COMPILER` set. With the option off a stub exporting the
+    same symbols is compiled instead, so callers link unconditionally and decide at
+    runtime.
+  - The CUDA host pass uses `CMAKE_CXX_COMPILER`. If nvcc rejects that compiler,
+    point `CMAKE_CUDA_HOST_COMPILER` at one it accepts.
+  - `VSAG_CUDA_ARCHITECTURES` is a `;`-separated CMake list, default
+    `75-real;80-real;86-real;89-real;90` (Turing through Hopper). Older devices
+    such as Volta need CUDA 12 or earlier and an explicit list, e.g.
+    `-DVSAG_CUDA_ARCHITECTURES="70-real;75-real;80"`.
+
 For a complete list of build options, see the `option()` directives in `cmake/VSAGOptions.cmake`.
 
 ## Project Structure
