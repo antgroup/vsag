@@ -555,13 +555,32 @@ HGraph::try_mci_search(const SearchRequest& request,
     mci_param.hops_limit = search_param.hops_limit;
 
     Vector<InnerIdType> seed_inner_ids(ctx->alloc);
-    if (bitset_seed_source) {
-        seed_inner_ids = collect_bitset_seed_inner_ids(
-            inner_filter, total_count, mci_param.seed_count, ctx->alloc);
-    } else {
+    {
+        // Both seed collection and GetValidBitmap() read the label table: seed collection maps valid
+        // labels to inner ids, and InnerIdWrapperFilter only exposes a bitmap when the labels are the
+        // inner ids. Label mutations take this mutex exclusively, so they have to be excluded while
+        // those reads happen. The lock is taken before persistent_codes_mutex_ below, which keeps the
+        // lock order this function and the index already use.
         std::shared_lock label_lock(this->label_lookup_mutex_);
-        seed_inner_ids = collect_seed_inner_ids(
-            request.filter_, this->label_table_, mci_param.seed_count, ctx->alloc);
+        if (bitset_seed_source) {
+            seed_inner_ids = collect_bitset_seed_inner_ids(
+                inner_filter, total_count, mci_param.seed_count, ctx->alloc);
+        } else {
+            seed_inner_ids = collect_seed_inner_ids(
+                request.filter_, this->label_table_, mci_param.seed_count, ctx->alloc);
+        }
+        // The searcher indexes the bitmap with inner ids. Providers must return an inner-id-indexed
+        // bitmap: InnerIdWrapperFilter only forwards the wrapped bitmap when the label table maps
+        // every inner id to itself, and it is the only filter shape MCI searches the bitmap with.
+        if (inner_filter != nullptr) {
+            uint64_t bitmap_size = 0;
+            const auto* bitmap = inner_filter->GetValidBitmap(&bitmap_size);
+            if (bitmap != nullptr and bitmap_size >= total_count) {
+                mci_param.valid_bitmap = bitmap;
+                mci_param.valid_bitmap_size = bitmap_size;
+                mci_param.used_bitmap_fast_path = &result.used_bitmap_fast_path;
+            }
+        }
     }
     result.seed_count = seed_inner_ids.size();
     mci_param.seed_count = result.seed_count;
@@ -580,18 +599,6 @@ HGraph::try_mci_search(const SearchRequest& request,
         mci_param.precise_vector_stride = precise_vector_stride;
         mci_param.metric = this->metric_;
         mci_param.used_precise_float_csr = &result.used_precise_float_csr;
-    }
-    // The searcher indexes the bitmap with inner ids. Providers must return an inner-id-indexed
-    // bitmap: InnerIdWrapperFilter only forwards the wrapped bitmap when the label table maps every
-    // inner id to itself, and it is the only filter shape MCI searches the bitmap with.
-    if (inner_filter != nullptr) {
-        uint64_t bitmap_size = 0;
-        const auto* bitmap = inner_filter->GetValidBitmap(&bitmap_size);
-        if (bitmap != nullptr and bitmap_size >= total_count) {
-            mci_param.valid_bitmap = bitmap;
-            mci_param.valid_bitmap_size = bitmap_size;
-            mci_param.used_bitmap_fast_path = &result.used_bitmap_fast_path;
-        }
     }
     result.result = this->mci_searcher_->Search(
         this->mci_cliques_, precise_flatten, query, search_param, mci_param, ctx);
@@ -993,7 +1000,12 @@ HGraph::build_mci_clique_index(const void* vectors) {
     };
 
     const auto candidate_limit = std::min<uint64_t>(this->mci_parameters_.mcs, total - 1);
-    const auto clique_min = std::min<uint64_t>({K_MCI_MIN_CLIQUE_SIZE, candidate_limit + 1, total});
+    // Same meaning as in the float path (mci_builder.cpp): mci_clique_max is the minimum size of a
+    // clique the enumeration has to report, so it stays meaningful for quantized data too.
+    const auto clique_min = std::min<uint64_t>(
+        {std::max<uint64_t>(K_MCI_MIN_CLIQUE_SIZE, this->mci_parameters_.clique_max),
+         candidate_limit + 1,
+         total});
     const auto node_clique_limit = std::max<uint32_t>(3, static_cast<uint32_t>(total / 100));
     const auto graph_max_degree =
         this->bottom_graph_ == nullptr ? 32U : this->bottom_graph_->MaximumDegree();

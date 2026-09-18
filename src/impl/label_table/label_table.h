@@ -362,6 +362,11 @@ public:
      * a filter observes is not necessarily the inner id it is probed with. Only the live ids
      * `[0, GetTotalCount())` take part: the table pre-allocates capacity, and those spare slots are
      * never probed. The answer is cached and recomputed after any label mutation.
+     *
+     * Concurrency: scanning the table requires concurrent label mutations to be excluded, because a
+     * mutation can reallocate the storage being read. `labels_version_` only protects the cached
+     * answer, not the scan. Search paths therefore call this while holding the label lock in shared
+     * mode, the same way they read labels anywhere else.
      */
     [[nodiscard]] bool
     IsIdentityMapping() const {
