@@ -13,6 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "attr/expression.h"
+
+// Check the header's integer type before another include can provide it.
+static_assert(sizeof(uint64_t) == 8);
+
 #include <antlr4-autogen/FCLexer.h>
 
 #include <catch2/catch_test_macros.hpp>
