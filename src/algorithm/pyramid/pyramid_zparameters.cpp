@@ -184,6 +184,10 @@ PyramidParameters::FromJson(const JsonType& json) {
         this->index_min_size = json[INDEX_MIN_SIZE].GetInt();
     }
 
+    if (json.Contains(PYRAMID_STORE_PATHS_KEY)) {
+        this->store_paths = json[PYRAMID_STORE_PATHS_KEY].GetBool();
+    }
+
     if (json.Contains(SUPPORT_DUPLICATE)) {
         this->support_duplicate = json[SUPPORT_DUPLICATE].GetBool();
     }
@@ -233,6 +237,7 @@ PyramidParameters::ToJson() const {
     json[USE_REORDER_KEY].SetBool(this->use_reorder);
     json[INDEX_MIN_SIZE].SetInt(index_min_size);
     json[SUPPORT_DUPLICATE].SetBool(support_duplicate);
+    json[PYRAMID_STORE_PATHS_KEY].SetBool(store_paths);
     if (this->use_reorder) {
         json[PRECISE_CODES_KEY].SetJson(precise_codes_param->ToJson());
     }
@@ -301,6 +306,7 @@ PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
     }
     CHECK_FIELD_EQ(*this, *p, index_min_size);
     CHECK_FIELD_EQ(*this, *p, support_duplicate);
+    CHECK_FIELD_EQ(*this, *p, store_paths);
     return true;
 }
 
