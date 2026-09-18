@@ -73,29 +73,62 @@ def elapsed_seconds(start_ns: int, end_ns: int) -> float:
     return round((end_ns - start_ns) / 1_000_000_000, 3)
 
 
+# ccache 4.5.1 core/Statistics.cpp FLAG_UNCACHEABLE counters. Missing keys
+# remain unavailable: different versions need not expose the same outcomes.
+UNCACHEABLE_REASONS = (
+    "autoconf_test", "bad_compiler_arguments", "called_for_link",
+    "called_for_preprocessing", "compile_failed", "compiler_produced_empty_output",
+    "compiler_produced_no_output", "compiler_produced_stdout", "could_not_use_modules",
+    "could_not_use_precompiled_header", "multiple_source_files", "no_input_file",
+    "output_to_stdout", "preprocessor_error", "recache", "unsupported_code_directive",
+    "unsupported_compiler_option", "unsupported_source_language",
+)
+BUILD_CATEGORIES = (
+    "production_compile", "test_compile", "dependency_compile", "tools_compile",
+    "examples_compile", "other_compile", "dependency_build", "link",
+    "build_maintenance", "other",
+)
+
+
 def load_ccache_stats(text: str) -> dict[str, Any]:
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        values = {}
+        data = {}
         for line in text.splitlines():
             fields = line.split("\t", 1)
             if len(fields) == 2 and fields[1].isdigit():
-                values[fields[0]] = int(fields[1])
-        if not values:
-            return {"available": False, "raw": text.strip()}
-        return {
-            "available": True,
-            "cache_hit": values.get("direct_cache_hit", 0)
-            + values.get("preprocessed_cache_hit", 0),
-            "cache_miss": values.get("cache_miss", 0),
-            "raw": values,
-        }
-    stats = data.get("stats", data)
+                data[fields[0]] = int(fields[1])
+    stats = data.get("stats", data) if isinstance(data, dict) else {}
+    if not isinstance(stats, dict):
+        stats = {}
+    values = {key: value for key, value in stats.items()
+              if type(value) is int and value >= 0}
+    if not values:
+        return {"available": False, "raw": text.strip()}
+    hits = values.get("cache_hit")
+    if hits is None:
+        for direct, preprocessed in (
+            ("direct_cache_hit", "preprocessed_cache_hit"),
+            ("cache_hit_direct", "cache_hit_preprocessed"),
+        ):
+            if direct in values and preprocessed in values:
+                hits = values[direct] + values[preprocessed]
+                break
+    misses = values.get("cache_miss")
+    requests = hits + misses if hits is not None and misses is not None else None
     return {
         "available": True,
-        "cache_hit": stats.get("cache_hit", stats.get("cache_hit_direct", 0)),
-        "cache_miss": stats.get("cache_miss", 0),
+        "cache_hit": hits,
+        "cache_miss": misses,
+        "cacheable_requests": requests,
+        "cacheable_request_hit_rate": hits / requests if requests else None,
+        "uncacheable_reasons": {key: values.get(key) for key in UNCACHEABLE_REASONS},
+        "overall_cache_coverage": None,
+        "overall_cache_coverage_unavailable_reason": (
+            "Total compiler invocations, including those bypassing ccache, are not measured; "
+            "cacheable-request hit rate is not overall cache coverage."
+        ),
         "raw": data,
     }
 
@@ -125,7 +158,8 @@ def canonical_dependency(name: str) -> str:
 
 
 def normalize_output(output: str) -> str:
-    return output.replace("\\", "/").lower().removeprefix("./")
+    normalized = output.replace("\\", "/").lower()
+    return normalized[2:] if normalized.startswith("./") else normalized
 
 
 def external_project_stage(output: str) -> tuple[str, str] | None:
@@ -202,7 +236,13 @@ def classify_output(
             part in normalized for part in ("/tests/", "test.dir/", "_test.dir/")
         ):
             return {"category": "test_compile", "dependency": None, "stage": None}
-        if normalized.startswith("src/cmakefiles/") or "/src/cmakefiles/" in normalized:
+        # Match the path before CMakeFiles, including nested module directories.
+        object_directory = normalized.split("/cmakefiles/", 1)[0]
+        components = object_directory.split("/")
+        for directory, category in (("tools", "tools_compile"), ("examples", "examples_compile")):
+            if directory in components:
+                return {"category": category, "dependency": None, "stage": None}
+        if "src" in components:
             return {"category": "production_compile", "dependency": None, "stage": None}
         return {"category": "other_compile", "dependency": None, "stage": None}
     if dependency is not None:
@@ -233,6 +273,8 @@ def classify_outputs(
         "dependency_compile": 0,
         "test_compile": 1,
         "production_compile": 2,
+        "tools_compile": 3,
+        "examples_compile": 3,
         "other_compile": 3,
         "dependency_build": 4,
         "link": 5,
@@ -274,6 +316,7 @@ def parse_ninja_log(
             "build_edge_count": 0,
             "deduplicated_output_records": 0,
         }
+    categories = {name: {"edges": 0, "cumulative_seconds": 0.0} for name in BUILD_CATEGORIES}
     edge_records: list[dict[str, Any]] = []
     raw_log_records = 0
     normalized_link_outputs = {normalize_output(item) for item in link_outputs or set()}
@@ -840,6 +883,10 @@ def dependency_stage_text(stages: dict[str, dict[str, Any]]) -> str:
     )
 
 
+def available_text(value: Any) -> str:
+    return "n/a" if value is None else str(value)
+
+
 def markdown_cell(value: Any) -> str:
     return str(value).replace("|", "\\|").replace("\n", " ")
 
@@ -863,7 +910,7 @@ def render_markdown(report: dict[str, Any], concise: bool) -> str:
         ("configure", "CMake configure"),
         ("clean_build", f"Clean build ({clean_cache_state})"),
         ("warm_cache_build", "Warm-cache rebuild (clean outputs)"),
-        ("noop_build", "No-op build"),
+        ("noop_build", "Expected no-op build (unverified; Ninja telemetry unavailable)"),
     ):
         phase = phases.get(name)
         if phase is None:
@@ -884,9 +931,39 @@ def render_markdown(report: dict[str, Any], concise: bool) -> str:
             edge_count = f"{edge_count} total / {build_edges} build"
         lines.append(
             f"| {label} | {phase['elapsed_seconds']:.3f} s | {peak_text} | "
-            f"{ccache.get('cache_hit', 'n/a')} | {ccache.get('cache_miss', 'n/a')} | "
+            f"{available_text(ccache.get('cache_hit'))} | {available_text(ccache.get('cache_miss'))} | "
             f"{edge_count} |"
         )
+
+    lines.extend([
+        "",
+        "Peak RSS is /usr/bin/time -v maximum resident set size for the timed command "
+        "and its waited-for children; it is not aggregate concurrent build memory.",
+        "",
+        "### Compiler cache coverage",
+        "",
+        "Cacheable-request hit rate = hits / (hits + misses). Overall cache coverage "
+        "is unavailable: invocations bypassing ccache are not measured. Linking and "
+        "uncacheable work are not cache hits. Missing counters and zero denominators are n/a.",
+        "",
+        "| Phase | Cacheable-request hit rate | Overall cache coverage | Uncacheable reasons (events) |",
+        "| --- | ---: | --- | --- |",
+    ])
+    for phase in report["phases"]:
+        cache = phase.get("ccache")
+        if cache is None:
+            continue
+        rate = cache.get("cacheable_request_hit_rate")
+        rate_text = f"{100 * rate:.2f}%" if rate is not None else "n/a"
+        if not cache.get("available"):
+            reason_text = "n/a (ccache statistics unavailable)"
+        else:
+            reasons = cache.get("uncacheable_reasons", {})
+            reason_text = "; ".join(
+                f"{key}: {available_text(reasons.get(key))}" for key in UNCACHEABLE_REASONS
+                if reasons.get(key) != 0
+            ) or "all reported reasons: 0"
+        lines.append(f"| {phase['name']} | {rate_text} | n/a | {reason_text} |")
 
     storage = config.get("dependency_storage", {})
     cache_state = config.get("dependency_cache_state", "unknown").replace("-", " ")
@@ -898,7 +975,7 @@ def render_markdown(report: dict[str, Any], concise: bool) -> str:
             "",
             "| Item | State | Wall time | Current size |",
             "| --- | --- | ---: | ---: |",
-            f"| Pinned FetchContent sources | prepared checkout | {config.get('dependency_source_preparation_seconds', 0.0):.3f} s | {format_bytes(int(storage.get('fetchcontent_bytes', 0)))} |",
+            f"| FetchContent source/build trees | see per-dependency preparation | {config.get('dependency_source_preparation_seconds', 0.0):.3f} s | {format_bytes(int(storage.get('fetchcontent_bytes', 0)))} |",
             f"| ExternalProject source archives | {cache_state}; {write_policy} | {config.get('dependency_cache_restore_seconds', 0.0):.3f} s | {format_bytes(int(storage.get('archive_bytes', 0)))} |",
             f"| ExternalProject source/build/install trees | source build | included in build phases | {format_bytes(int(storage.get('external_build_bytes', 0)))} |",
             "",
@@ -906,6 +983,13 @@ def render_markdown(report: dict[str, Any], concise: bool) -> str:
             "",
         ]
     )
+    lines.extend([
+        "Preparation covers only the supplied source preparation and archive restore timers "
+        "before configure, not all dependency work. Additional download, configure, build "
+        "and install work occurs in the configure/build phases; nested dependency commands "
+        "are included in their parent Ninja edge, not separately timed compiler invocations.",
+        "",
+    ])
     matched_key = config.get("dependency_cache_matched_key", "")
     lines.append(f"Compiler cache key: `{config['compiler_cache_key']}`  ")
     lines.append(f"Dependency archive cache key: `{config['dependency_cache_key']}`  ")
@@ -952,19 +1036,35 @@ def render_markdown(report: dict[str, Any], concise: bool) -> str:
         )
 
     clean = phases.get("clean_build", {})
-    if clean:
-        lines.extend(
-            [
-                "Clean-build cumulative Ninja edge time (parallel edges overlap):",
-                "",
-                f"- Dependencies: {metric(clean, 'dependency_compile') + metric(clean, 'dependency_build'):.3f} s",
-                f"- VSAG production compile: {metric(clean, 'production_compile'):.3f} s",
-                f"- Test compile: {metric(clean, 'test_compile'):.3f} s",
-                f"- Link: {metric(clean, 'link'):.3f} s",
-                f"- Multi-output records deduplicated: {clean.get('ninja', {}).get('deduplicated_output_records', 0)}",
-                "",
-            ]
+    lines.extend([
+        "### Ninja category accounting",
+        "",
+        "Cumulative Ninja edge time sums durations of parallel edges that overlap; "
+        "it is not wall time. Multi-output edges are counted once.",
+        "",
+        "| Phase | Category | Edges | Cumulative edge time |",
+        "| --- | --- | ---: | ---: |",
+    ])
+    deduplication_notes = []
+    for phase in report["phases"]:
+        ninja = phase.get("ninja")
+        if ninja is None:
+            continue
+        if not ninja.get("available"):
+            lines.append(f"| {phase['name']} | unavailable | n/a | n/a |")
+            continue
+        categories = ninja.get("categories", {})
+        for category in sorted(set(BUILD_CATEGORIES) | set(categories)):
+            values = categories.get(category, {})
+            lines.append(
+                f"| {phase['name']} | {category} | {values.get('edges', 0)} | "
+                f"{values.get('cumulative_seconds', 0):.3f} s |"
+            )
+        deduplication_notes.append(
+            f"{phase['name']}: multi-output records deduplicated: "
+            f"{ninja.get('deduplicated_output_records', 0)}"
         )
+    lines.extend(["", "; ".join(deduplication_notes), ""])
     if concise:
         lines.append("The `build-performance-metrics` artifact contains JSON, complete logs, Ninja statistics, and the slowest translation units.")
         return "\n".join(lines) + "\n"

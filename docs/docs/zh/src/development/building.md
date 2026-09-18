@@ -54,6 +54,23 @@ clean-release:           ## Clear build-release/ directory.
 install:                 ## Build and install the release version of vsag.
 ```
 
+## 构建阶段与缓存报告
+
+采集器在干净构建、暖缓存重建和未改动的 no-op 阶段间保留 Ninja 历史。
+只有命令成功且可用的 Ninja 数据记录零条构建边时，才验证为 no-op；缺少数据时明确标记为未验证。
+JSON 和 Markdown 包含所有类别，包括 datacell 等嵌套生产模块、工具、示例及未分类工作。
+多输出边只计一次。累计边耗时包含并行重叠时间，不等于墙钟时间；嵌套 ExternalProject
+工作计入父边，而非逐个命令单独计时。
+
+可缓存请求命中率为 `hits / (hits + misses)`。可用的不可缓存原因（包括
+`could_not_use_precompiled_header`）单独报告；缺失计数及零分母在 JSON 中为 `null`，
+在 Markdown 中为 `n/a`。由于未统计绕过 ccache 的编译器调用，整体缓存覆盖率不可用。
+JSON 保留原始计数。报告不会修改 PCH 或缓存正确性设置。
+
+依赖准备计时只覆盖 configure 前的源码准备和压缩包恢复，不代表全部依赖工作；后续下载、
+配置、编译和安装位于配置或构建阶段。`/usr/bin/time -v` 的 Peak RSS 是被计时命令及其
+等待子进程所报告的最大驻留集大小，并非所有同时运行构建进程的内存总和。
+
 ## 依赖大小指标
 
 构建指标 JSON 使用 schema 版本 3。每个依赖的 `local_bytes`（Markdown 报告中的

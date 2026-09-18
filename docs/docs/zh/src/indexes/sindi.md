@@ -121,7 +121,8 @@ auto result = index->KnnSearch(
 构建时间则从约 330 秒增加到 599 秒。这些数字是特定负载的实测证据，不是容量保证。
 
 不可变运行态支持 KNN、范围搜索以及旧版 `Serialize`/`Deserialize`。它不支持增量
-`Add`、`GetSparseVectorByInnerId`、`CalcDistanceById` 与 `CalDistanceById`。
+`Add` 与 `GetSparseVectorByInnerId`。支持单 ID `CalcDistanceById` 和批量
+`CalcDistancesById`（包括旧名 `CalDistanceById`），详见[按 ID 计算距离](../advanced/calc_distance_by_id.md)。
 mutable 和 immutable 运行态均支持 `SerializeStreaming`、`DeserializeStreaming` 与
 `Index::Load`。
 反序列化时，新建 SINDI 的 `immutable` 设置必须与存储格式一致。

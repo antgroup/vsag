@@ -1814,10 +1814,9 @@ SINDIV2::CalcDistanceById(const DatasetPtr& vector,
                           bool calculate_precise_distance) const {
     std::shared_lock rlock(this->global_mutex_);
 
-    if (vector == nullptr || vector->GetNumElements() == 0 ||
-        vector->GetSparseVectors() == nullptr) {
-        return -1.0F;
-    }
+    CHECK_ARGUMENT(vector != nullptr, "distance query must not be null");
+    CHECK_ARGUMENT(vector->GetNumElements() == 1, "single-ID distance requires one query");
+    CHECK_ARGUMENT(vector->GetSparseVectors() != nullptr, "query must contain sparse vectors");
 
     auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
     if (not success) {
@@ -1847,29 +1846,29 @@ SINDIV2::CalcDistanceById(const DatasetPtr& vector,
 }
 
 DatasetPtr
-SINDIV2::CalDistanceById(const DatasetPtr& query,
-                         const int64_t* ids,
-                         int64_t count,
-                         bool calculate_precise_distance,
-                         int64_t topk) const {
+SINDIV2::CalcDistancesById(const DatasetPtr& query,
+                           const int64_t* ids,
+                           int64_t count,
+                           bool calculate_precise_distance,
+                           int64_t topk) const {
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
         topk == -1 || topk > 0,
-        "CalDistanceById topk must be -1 or positive");
-    CHECK_ARGUMENT(query != nullptr, "CalDistanceById query must not be null");
-    CHECK_ARGUMENT(count >= 0, "CalDistanceById count must be non-negative");
+        "CalcDistancesById topk must be -1 or positive");
+    CHECK_ARGUMENT(query != nullptr, "CalcDistancesById query must not be null");
+    CHECK_ARGUMENT(count >= 0, "CalcDistancesById count must be non-negative");
     if (count > 0) {
-        CHECK_ARGUMENT(ids != nullptr, "CalDistanceById ids must not be null");
+        CHECK_ARGUMENT(ids != nullptr, "CalcDistancesById ids must not be null");
     }
     const int64_t num_queries = query->GetNumElements();
-    CHECK_ARGUMENT(num_queries > 0, "CalDistanceById query count must be positive");
+    CHECK_ARGUMENT(num_queries > 0, "CalcDistancesById query count must be positive");
     CHECK_ARGUMENT(query->GetSparseVectors() != nullptr,
-                   "CalDistanceById query sparse vectors must not be null");
+                   "CalcDistancesById query sparse vectors must not be null");
     const auto count_size = static_cast<uint64_t>(count);
     const auto num_queries_size = static_cast<uint64_t>(num_queries);
     const auto max_distance_count = std::numeric_limits<uint64_t>::max() / sizeof(float);
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
         count_size == 0 || num_queries_size <= max_distance_count / count_size,
-        "CalDistanceById distance buffer size overflows");
+        "CalcDistancesById distance buffer size overflows");
 
     auto result = Dataset::Make();
     result->NumElements(num_queries)->Dim(count)->Owner(true, allocator_);
@@ -1973,9 +1972,7 @@ SINDIV2::InitFeatures() {
         IndexFeature::SUPPORT_SEARCH_CONCURRENT,
         IndexFeature::SUPPORT_METRIC_TYPE_INNER_PRODUCT,
     });
-    if (not immutable_enabled_) {
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID);
-    }
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID);
     if (not immutable_enabled_ && rerank_type_ != SPARSE_RERANK_TYPE_DMQ8 &&
         param_->term_io_parameter->GetTypeName() == IO_TYPE_VALUE_MEMORY_IO) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_AFTER_BUILD);

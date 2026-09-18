@@ -112,16 +112,8 @@ IVF::InitFeatures() {
         });
     }
 
-    bool has_fp32 = false;
-    if (precise_bucket_ != nullptr) {
-        has_fp32 = precise_bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32;
-    } else if (reorder_codes_ != nullptr) {
-        has_fp32 = reorder_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32;
-    }
-    if (name == QUANTIZATION_TYPE_VALUE_FP32 or has_fp32) {
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID);
-    }
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID);
 
     if (name == QUANTIZATION_TYPE_VALUE_FP32 and
         this->bucket_->GetMetricType() != MetricType::METRIC_TYPE_COSINE and

@@ -2,6 +2,28 @@
 
 This page documents how to build VSAG from source.
 
+## Build phase and cache reporting
+
+The collector preserves Ninja history for clean, warm-cache, and unchanged no-op phases.
+A no-op is verified only when available Ninja telemetry records zero build edges and the
+command succeeds; missing telemetry is explicitly unverified. Every observed category,
+including nested production modules such as datacell, tools, examples, and unclassified
+work, appears in JSON and Markdown. Multi-output edges count once. Cumulative edge time
+sums overlapping parallel durations and is not wall time; nested ExternalProject work
+is included in its parent edge rather than individually timed.
+
+Cacheable-request hit rate is `hits / (hits + misses)`. Available uncacheable reasons,
+including `could_not_use_precompiled_header`, are reported separately; missing counters
+and zero denominators are `null` in JSON and `n/a` in Markdown. Overall cache coverage is
+unavailable because compiler invocations bypassing ccache are not measured. Raw counters
+remain in JSON. This reporting does not change PCH or cache correctness settings.
+
+Dependency preparation timers cover source preparation and archive restoration before
+configure, not all dependency work: further downloads, configuration, compilation and
+installation occur in configure/build phases. Peak RSS from `/usr/bin/time -v` is the
+maximum resident set size reported for the timed command and waited-for children, not
+the sum of simultaneously resident build processes.
+
 ## Prerequisites
 
 - **OS**: Ubuntu 20.04+, CentOS 7+, or macOS 14+ on Apple Silicon
