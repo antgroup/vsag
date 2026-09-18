@@ -1190,9 +1190,9 @@ RaBitQuantizer<metric>::PackScalarCodeToSplitCode(const uint8_t* scalar_code,
     RaBitQPackScalarToSplitPlanes(scalar_code,
                                   one_bit_code,
                                   supplement_code,
-                                this->dim_,
-                                num_bits_per_dim_base_,
-                                FilterBits());
+                                  this->dim_,
+                                  num_bits_per_dim_base_,
+                                  FilterBits());
 
     auto scalar_metadata = [&](uint64_t full_code_offset) {
         return scalar_code + ScalarCodeMetaOffset() + (full_code_offset - CodeMetaOffset());
@@ -2691,8 +2691,8 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCode(Computer<RaBitQuantizer>& compu
             const float filter_center = 0.5F * static_cast<float>((1U << FilterBits()) - 1U);
             const float filter_ip_yu_q = filter_centered_ip + filter_center * query_raw_sum;
             ip_yu_q = filter_ip_yu_q * static_cast<float>(1U << ReorderBits());
-            ip_yu_q += RaBitQFloatSupplementCodeIP(
-                query_data, supplement_code, this->dim_, ReorderBits());
+            ip_yu_q +=
+                RaBitQFloatSupplementCodeIP(query_data, supplement_code, this->dim_, ReorderBits());
         } else {
             ip_yu_q = RaBitQFloatSQIPBySplitCode(reinterpret_cast<const float*>(query),
                                                  one_bit_code,

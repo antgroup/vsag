@@ -291,7 +291,8 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
         } else if (key == HGRAPH_BASE_SUPPLEMENT_IO_TYPE) {
             inner_json[BUCKET_PARAMS_KEY][SUPPLEMENT_IO_PARAMS_KEY][TYPE_KEY].SetJson(value);
         } else if (key == HGRAPH_BASE_SUPPLEMENT_FILE_PATH) {
-            inner_json[BUCKET_PARAMS_KEY][SUPPLEMENT_IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(value);
+            inner_json[BUCKET_PARAMS_KEY][SUPPLEMENT_IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(
+                value);
         } else if (key == RABITQ_VERSION) {
             inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_VERSION_KEY]
                 .SetJson(value);
