@@ -435,12 +435,7 @@ SINDI::Add(const DatasetPtr& base) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "SINDI DMQ rerank does not support incremental Add");
     }
-    const auto previous_window_count = mutable_term_datacell_->GetWindowCount();
-    auto failed_ids = this->add(base, true);
-    if (mutable_term_datacell_->GetWindowCount() != previous_window_count) {
-        this->cal_memory_usage();
-    }
-    return failed_ids;
+    return this->add(base, true);
 }
 
 std::vector<int64_t>
@@ -468,9 +463,9 @@ SINDI::add(const DatasetPtr& base, bool sort_affected_windows) {
     Vector<uint32_t> pruned_ids(allocator_);
     Vector<float> pruned_vals(allocator_);
     Vector<uint32_t> remapped_ids(allocator_);
-    const auto first_affected_window = cur_element_count_ / window_size_;
-    // This remains -1 when every input vector is rejected, so post-insert loops are no-ops.
-    int64_t last_affected_window = -1;
+    const auto first_affected_window =
+        static_cast<uint32_t>(cur_element_count_.load(std::memory_order_relaxed) / window_size_);
+    std::optional<uint32_t> last_affected_window;
     std::vector<SparseVector> rerank_vectors;
     if (use_reorder_) {
         rerank_vectors.reserve(data_num);
@@ -525,7 +520,8 @@ SINDI::add(const DatasetPtr& base, bool sort_affected_windows) {
             rerank_vectors.push_back(sparse_vectors[i]);
         }
         metadata_build.RecordSuccess(static_cast<uint32_t>(position));
-        last_affected_window = cur_element_count_ / window_size_;
+        last_affected_window = static_cast<uint32_t>(
+            cur_element_count_.load(std::memory_order_relaxed) / window_size_);
         cur_element_count_++;
     }
     if (not rerank_vectors.empty()) {
@@ -535,9 +531,24 @@ SINDI::add(const DatasetPtr& base, bool sort_affected_windows) {
     metadata_filter_.CommitBuild(std::move(metadata_build),
                                  first_inner_id,
                                  static_cast<uint32_t>(cur_element_count_.load()));
-    if (sort_affected_windows) {
-        for (int64_t window = first_affected_window; window <= last_affected_window; ++window) {
-            mutable_term_datacell_->SortByValue(static_cast<uint32_t>(window));
+    if (sort_affected_windows && last_affected_window.has_value()) {
+        bool posting_state_changed = false;
+        const auto current_count =
+            static_cast<uint64_t>(cur_element_count_.load(std::memory_order_relaxed));
+        for (uint32_t window = first_affected_window;; ++window) {
+            const auto window_end =
+                (static_cast<uint64_t>(window) + 1) * static_cast<uint64_t>(window_size_);
+            if (window_end <= current_count) {
+                posting_state_changed |= mutable_term_datacell_->NormalizeDirtyPostings(window);
+            } else {
+                posting_state_changed |= mutable_term_datacell_->FinalizeInsertBatch(window);
+            }
+            if (window == last_affected_window.value()) {
+                break;
+            }
+        }
+        if (posting_state_changed) {
+            this->cal_memory_usage();
         }
     }
     return failed_ids;
@@ -1198,7 +1209,7 @@ SINDI::UseTermListsHeapInsert(const SINDISearchParameter& search_param,
 }
 
 void
-SINDI::cal_memory_usage() {
+SINDI::cal_memory_usage() const {
     auto memory = sizeof(SINDI);
     if (term_datacell_ != nullptr) {
         memory += term_datacell_->GetMemoryUsage();
@@ -1219,8 +1230,16 @@ SINDI::cal_memory_usage() {
 }
 
 void
+SINDI::normalize_dirty_postings_for_serialization() const {
+    if (mutable_term_datacell_ != nullptr && mutable_term_datacell_->NormalizeDirtyPostings()) {
+        this->cal_memory_usage();
+    }
+}
+
+void
 SINDI::Serialize(StreamWriter& writer) const {
-    std::shared_lock rlock(this->global_mutex_);
+    std::scoped_lock wlock(this->global_mutex_);
+    this->normalize_dirty_postings_for_serialization();
 
     if (cur_element_count_ == 0) {
         const auto cur_element_count = cur_element_count_.load();
@@ -1390,7 +1409,8 @@ SINDI::serialize_windows(StreamWriter& writer) const {
 
 void
 SINDI::serialize_streaming_body(StreamWriter& writer) const {
-    std::shared_lock rlock(this->global_mutex_);
+    std::scoped_lock wlock(this->global_mutex_);
+    this->normalize_dirty_postings_for_serialization();
 
     auto windows_tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_WINDOWS);
     auto label_tag = static_cast<uint32_t>(StreamSerializationTag::LABEL_TABLE);
