@@ -45,11 +45,11 @@ public:
         return 0;
     }
     [[nodiscard]] virtual uint64_t
-    LinkCountAt(uint64_t) const {
+    LinkCountAt([[maybe_unused]] uint64_t slot) const {
         return 0;
     }
     [[nodiscard]] virtual uint64_t
-    LinkAt(uint64_t, uint64_t) const {
+    LinkAt([[maybe_unused]] uint64_t slot, [[maybe_unused]] uint64_t edge) const {
         return 0;
     }
 };
