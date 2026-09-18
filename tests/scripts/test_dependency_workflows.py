@@ -45,7 +45,8 @@ class DependencyWorkflowTest(unittest.TestCase):
         self.assertIn("uses: actions/cache/restore@v4", pr_ci)
         self.assertNotIn("uses: actions/cache@v4", pr_ci)
         self.assertNotIn("uses: actions/cache/save@v4", pr_ci)
-        self.assertIn("dependency-cache-write-policy restore-only", pr_ci)
+        benchmark = (ROOT / ".github/workflows/build_performance.yml").read_text(encoding="utf-8")
+        self.assertIn("dependency-cache-write-policy restore-only", benchmark)
 
     def test_archive_directory_is_exported_for_the_entire_metrics_job(self) -> None:
         asan = job_text(ROOT / ".github/workflows/pr-ci.yml", "build-asan-x86")
