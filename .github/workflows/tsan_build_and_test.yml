@@ -96,6 +96,13 @@ jobs:
           echo race:libomp.so.5 >> omp.supp
           echo race:fmt::v10::detail::format_decimal >> omp.supp
           echo "race:libmkl_intel_thread.so.2" >> omp.supp
+          # OpenBLAS scales the output buffer from its own persistent worker
+          # threads and rejoins them with an internal barrier that TSan cannot
+          # observe, so every call that reads a BLAS result afterwards is
+          # reported as racing with the BLAS write. Suppress those reports like
+          # the OpenMP and MKL thread-pool entries above.
+          echo race:libopenblas.so >> omp.supp
+          echo race:libopenblas.so.0 >> omp.supp
           export TSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/functests
           ./build/tests/functests "[concurrent]~[daily]"
