@@ -156,6 +156,16 @@ public:
 
     tl::expected<std::vector<Neighbor>, Error>
     Search(const float* query, uint64_t dim, uint64_t k) const override {
+        return SearchImpl(query, dim, k, nullptr);
+    }
+
+    tl::expected<std::vector<Neighbor>, Error>
+    Search(const float* query, uint64_t dim, uint64_t k, const IdFilter& filter) const override {
+        return SearchImpl(query, dim, k, filter ? &filter : nullptr);
+    }
+
+    tl::expected<std::vector<Neighbor>, Error>
+    SearchImpl(const float* query, uint64_t dim, uint64_t k, const IdFilter* filter) const {
         auto valid = validate(query, dim, Dim());
         if (not valid) {
             return tl::unexpected(valid.error());
@@ -167,6 +177,8 @@ public:
             }
             const uint64_t ef = std::min(Size(), std::max(k, ef_search_));
             std::priority_queue<Candidate, std::vector<Candidate>, decltype(&closer)> best(&closer);
+            std::priority_queue<Candidate, std::vector<Candidate>, decltype(&closer)> accepted(
+                &closer);
             std::priority_queue<Candidate, std::vector<Candidate>, decltype(&farther)> candidates(
                 &farther);
             std::vector<uint8_t> visited(Size(), 0);
@@ -181,6 +193,12 @@ public:
                 best.push(next);
                 if (best.size() > ef) {
                     best.pop();
+                }
+                if (filter != nullptr and (*filter)(IdAt(slot))) {
+                    accepted.push(next);
+                    if (accepted.size() > k) {
+                        accepted.pop();
+                    }
                 }
             };
             visit(0);
@@ -205,11 +223,12 @@ public:
                 }
             }
 
+            auto& output = filter == nullptr ? best : accepted;
             std::vector<Neighbor> result;
-            result.reserve(best.size());
-            while (not best.empty()) {
-                const auto candidate = best.top();
-                best.pop();
+            result.reserve(output.size());
+            while (not output.empty()) {
+                const auto candidate = output.top();
+                output.pop();
                 result.push_back({IdAt(candidate.slot), candidate.distance});
             }
             std::sort(
@@ -217,7 +236,7 @@ public:
                     return left.distance < right.distance or
                            (left.distance == right.distance and left.id < right.id);
                 });
-            result.resize(k);
+            result.resize(std::min(k, static_cast<uint64_t>(result.size())));
             return result;
         } catch (const std::bad_alloc&) {
             return failure(ErrorType::NO_ENOUGH_MEMORY, "search allocation failed");

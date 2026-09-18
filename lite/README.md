@@ -14,6 +14,11 @@ with Full VSAG. It has no checksum or crash-safe file replacement. The graph
 is a standalone single-layer candidate, not Full HGraph or LazyHGraph.
 Quantization and mmap are not included.
 
+Search(query, dim, k, IdFilter) accepts a callback on external IDs; returning true allows
+an ID in the result. The graph still visits and scores rejected nodes for connectivity,
+so the filtered result may contain fewer than k neighbors. The three-argument Search
+retains its unfiltered behavior.
+
 The supported graph options are max_degree 2–64 and ef_search at least
 max_degree. Callers can check ActiveBackend() before and after BuildGraph().
 For example, after creating an Index and adding vectors:
