@@ -111,6 +111,7 @@ SearchEvalCase::SearchEvalCase(const std::string& dataset_path,
     } else if (search_mode == "range_filter") {
         this->search_type_ = SearchType::RANGE_FILTER;
     }
+    config_.Validate();
     this->init_monitor();
 }
 
@@ -140,9 +141,12 @@ SearchEvalCase::init_latency_monitor() {
 
 void
 SearchEvalCase::init_recall_monitor() {
-    if (config_.enable_recall or config_.enable_percent_recall) {
-        auto recall_monitor = std::make_shared<RecallMonitor>(
-            this->dataset_ptr_->GetNumberOfQuery(), config_.use_id_based_recall);
+    if (config_.enable_recall or config_.enable_percent_recall or
+        config_.recall_target.has_value()) {
+        auto recall_monitor =
+            std::make_shared<RecallMonitor>(this->dataset_ptr_->GetNumberOfQuery(),
+                                            config_.use_id_based_recall,
+                                            config_.recall_target);
         if (config_.enable_recall) {
             recall_monitor->SetMetrics("avg_recall");
         }
