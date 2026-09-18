@@ -539,3 +539,65 @@ TEST_CASE("LabelTable padding restore ignores unused capacity", "[ut][LabelTable
     REQUIRE_FALSE(labels.IsRemoved(2));
     REQUIRE_FALSE(labels.HasActivePaddingLabel());
 }
+
+TEST_CASE("LabelTable reports identity label mappings", "[ut][LabelTable]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+
+    SECTION("identity inserts and relabeling") {
+        LabelTable label_table(allocator.get());
+        REQUIRE(label_table.IsIdentityMapping());
+
+        label_table.Insert(0, 0);
+        label_table.Insert(1, 1);
+        REQUIRE(label_table.IsIdentityMapping());
+
+        // A previously cached answer must not survive a relabel.
+        label_table.Insert(2, 99);
+        REQUIRE_FALSE(label_table.IsIdentityMapping());
+        label_table.UpdateLabel(99, 2);
+        REQUIRE(label_table.IsIdentityMapping());
+    }
+
+    SECTION("shifted labels") {
+        LabelTable label_table(allocator.get());
+        label_table.Insert(0, 8000);
+        label_table.Insert(1, 8001);
+        REQUIRE_FALSE(label_table.IsIdentityMapping());
+    }
+
+    SECTION("move breaks the mapping") {
+        LabelTable label_table(allocator.get());
+        label_table.Insert(0, 0);
+        label_table.Insert(1, 1);
+        REQUIRE(label_table.IsIdentityMapping());
+        label_table.Move(1, 0);
+        REQUIRE_FALSE(label_table.IsIdentityMapping());
+    }
+
+    SECTION("pre-allocated capacity is not part of the live mapping") {
+        LabelTable label_table(allocator.get());
+        label_table.Insert(0, 0);
+        label_table.Insert(1, 1);
+        // Builds pre-size the table well beyond the number of inserted labels.
+        label_table.Resize(64);
+        REQUIRE(label_table.IsIdentityMapping());
+        label_table.Insert(2, 42);
+        REQUIRE_FALSE(label_table.IsIdentityMapping());
+    }
+
+    SECTION("deserialize refreshes the cached answer") {
+        LabelTable source(allocator.get());
+        source.Insert(0, 0);
+        source.Insert(1, 1);
+        std::stringstream stream;
+        IOStreamWriter writer(stream);
+        source.Serialize(writer);
+
+        LabelTable target(allocator.get());
+        target.Insert(0, 5000);
+        REQUIRE_FALSE(target.IsIdentityMapping());
+        IOStreamReader reader(stream);
+        target.Deserialize(reader);
+        REQUIRE(target.IsIdentityMapping());
+    }
+}

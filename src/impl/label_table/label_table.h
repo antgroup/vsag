@@ -59,6 +59,7 @@ public:
             label_table_.resize(id + 1);
         }
         label_table_[id] = label;
+        MarkLabelsMutated();
         if (label == -1 && deleted_ids_.count(id) == 0) {
             active_padding_label_ids_.insert(id);
         } else if (was_padding_label) {
@@ -194,6 +195,7 @@ public:
                 found = true;
             }
         }
+        MarkLabelsMutated();
         if (not found) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
                                 fmt::format("old label {} does not exist", old_label));
@@ -234,6 +236,7 @@ public:
     void
     Deserialize(LvalueOrRvalue<StreamReader> reader) {
         StreamReader::ReadVector(reader, label_table_);
+        MarkLabelsMutated();
         RebuildActivePaddingLabelIds();
         if (use_reverse_map_) {
             this->label_remap_.Clear();
@@ -255,6 +258,7 @@ public:
             return;
         }
         label_table_.resize(new_size);
+        MarkLabelsMutated();
     }
 
     int64_t
@@ -341,7 +345,49 @@ private:
     InnerIdType
     get_id_by_label_with_label_table(LabelType label) const noexcept;
 
+    // Must be called after every write to label_table_ so that cached label-space properties are
+    // never reused for the new content.
+    void
+    MarkLabelsMutated() {
+        this->labels_version_.fetch_add(1, std::memory_order_release);
+    }
+
 public:
+    /**
+     * @brief Whether this table maps every live inner id to itself, i.e. the label space and the
+     * inner-id space coincide.
+     *
+     * Components that reuse an id-space-indexed structure as an inner-id-indexed one (for example
+     * the validity bitmap that the MCI searcher inlines) must check this first, because the label
+     * a filter observes is not necessarily the inner id it is probed with. Only the live ids
+     * `[0, GetTotalCount())` take part: the table pre-allocates capacity, and those spare slots are
+     * never probed. The answer is cached and recomputed after any label mutation.
+     *
+     * Concurrency: scanning the table requires concurrent label mutations to be excluded, because a
+     * mutation can reallocate the storage being read. `labels_version_` only protects the cached
+     * answer, not the scan. Search paths therefore call this while holding the label lock in shared
+     * mode, the same way they read labels anywhere else.
+     */
+    [[nodiscard]] bool
+    IsIdentityMapping() const {
+        const auto version = this->labels_version_.load(std::memory_order_acquire);
+        if (version == this->identity_version_.load(std::memory_order_acquire)) {
+            return this->identity_mapping_.load(std::memory_order_relaxed);
+        }
+        const auto live_count =
+            static_cast<uint64_t>(this->total_count_.load(std::memory_order_relaxed));
+        bool identity = true;
+        for (uint64_t id = 0; id < live_count and id < label_table_.size(); ++id) {
+            if (label_table_[id] != static_cast<LabelType>(id)) {
+                identity = false;
+                break;
+            }
+        }
+        this->identity_mapping_.store(identity, std::memory_order_relaxed);
+        this->identity_version_.store(version, std::memory_order_release);
+        return identity;
+    }
+
     // Label table, map from id to label.
     Vector<LabelType> label_table_;
 
@@ -357,6 +403,13 @@ public:
 
     Allocator* allocator_{nullptr};
     std::atomic<int64_t> total_count_{0L};
+
+    // Cached answer of IsIdentityMapping() and the label version it was computed from. Every label
+    // mutation bumps labels_version_ *after* the write, so a cached answer can never be reused for
+    // different table content.
+    mutable std::atomic<uint64_t> labels_version_{1};
+    mutable std::atomic<uint64_t> identity_version_{0};
+    mutable std::atomic<bool> identity_mapping_{false};
 
     bool
     InsertSourceId(InnerIdType inner_id, const std::string& source_id) {
@@ -412,6 +465,7 @@ public:
             label_remap_.Erase(label_table_[to]);
         }
         label_table_[to] = label_table_[from];
+        MarkLabelsMutated();
         if (use_reverse_map_) {
             label_remap_.InsertOrAssign(label_table_[to], to);
         }
@@ -447,6 +501,7 @@ public:
         if (duplicate_tracker_ != nullptr) {
             duplicate_tracker_->Resize(capacity);
         }
+        MarkLabelsMutated();
     }
 
     void
