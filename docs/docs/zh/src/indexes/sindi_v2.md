@@ -78,7 +78,7 @@ auto result = index->KnnSearch(
 | `doc_prune_ratio` | float | `0.0` | 构建时丢弃最低权重文档 term 的比例，范围为 `[0.0, 1.0)`。 |
 | `use_quantization` | bool 或 string | `false` | `false` 存 FP32，`true` 存 SQ8，`"fp16"` 存 FP16。 |
 | `use_reorder` | bool | `false` | 保存高精度向量并对粗排候选重排。 |
-| `rerank_type` | string | `"fp32"` | 重排存储类型：`fp32` 或 `dmq8`。 |
+| `rerank_type` | string | `"fp32"` | 重排存储类型：`fp32`、`fp16` 或 `dmq8`。FP16 以半精度保存文档 value，并以 FP32 打分。 |
 | `dmq_shared_codebook_threshold` | int | `1024` | 低频 term 使用共享 DMQ codebook 的阈值。 |
 | `remap_term_ids` | bool | `false` | 压缩稀疏或间隔很大的外部 term ID。 |
 | `avg_doc_term_length` | int | `100` | 仅用于内存估算。 |
@@ -91,7 +91,8 @@ auto result = index->KnnSearch(
 `file_path`。文件型 `rerank_io` 未设置 `file_path` 时，VSAG 使用
 `<term_io.file_path>.rerank`。
 
-`rerank_layout > 0` 要求 `use_reorder: true`。`rerank_type: "dmq8"` 要求
+`rerank_type: "fp16"` 要求 `use_reorder: true`，并支持与 `fp32` 相同的重排 I/O 和布局
+选项。`rerank_layout > 0` 要求 `use_reorder: true`。`rerank_type: "dmq8"` 要求
 `rerank_layout: 0`，并使用默认的 `block_memory_io` 重排后端。
 
 ### Host 过滤

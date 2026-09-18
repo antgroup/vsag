@@ -203,11 +203,30 @@ FloatToBF16(const float fp32_value) {
 
 float
 FP16ToFloat(const uint16_t fp16_value) {
-    uint32_t sign = (fp16_value >> 15) & 0x1;
-    int32_t exp = ((fp16_value >> 10) & 0x1F) - 15;
-    uint32_t mantissa = (fp16_value & 0x3FF) << 13;
+    const uint32_t sign = static_cast<uint32_t>(fp16_value & 0x8000U) << 16;
+    const uint32_t exponent = (fp16_value >> 10) & 0x1FU;
+    uint32_t mantissa = fp16_value & 0x03FFU;
     FP32Struct fp32;
-    fp32.int_value = (sign << 31) | ((exp + 127) << 23) | mantissa;
+    if (exponent == 0) {
+        if (mantissa == 0) {
+            fp32.int_value = sign;
+            return fp32.float_value;
+        }
+        int32_t normalized_exponent = -14;
+        while ((mantissa & 0x0400U) == 0) {
+            mantissa <<= 1;
+            --normalized_exponent;
+        }
+        mantissa &= 0x03FFU;
+        fp32.int_value =
+            sign | (static_cast<uint32_t>(normalized_exponent + 127) << 23) | (mantissa << 13);
+        return fp32.float_value;
+    }
+    if (exponent == 0x1FU) {
+        fp32.int_value = sign | 0x7F800000U | (mantissa << 13);
+        return fp32.float_value;
+    }
+    fp32.int_value = sign | ((exponent + 112U) << 23) | (mantissa << 13);
     return fp32.float_value;
 }
 
@@ -215,16 +234,44 @@ uint16_t
 FloatToFP16(const float fp32_value) {
     FP32Struct fp32;
     fp32.float_value = fp32_value;
-    uint16_t sign = (fp32.int_value >> 31) & 0x1;
-    int32_t exp = ((fp32.int_value >> 23) & 0xFF) - 127;
-    uint32_t mantissa = fp32.int_value & 0x007FFFFF;
+    const uint16_t sign = static_cast<uint16_t>((fp32.int_value >> 16) & 0x8000U);
+    const uint32_t exponent = (fp32.int_value >> 23) & 0xFFU;
+    const uint32_t mantissa = fp32.int_value & 0x007FFFFFU;
 
-    if (exp > 15) {
-        exp = 15;
-    } else if (exp < -14) {
-        exp = -14;
+    if (exponent == 0xFFU) {
+        if (mantissa == 0) {
+            return static_cast<uint16_t>(sign | 0x7C00U);
+        }
+        const uint16_t nan_mantissa =
+            static_cast<uint16_t>(((mantissa >> 13) == 0 ? 1 : mantissa >> 13) | 0x0200U);
+        return static_cast<uint16_t>(sign | 0x7C00U | nan_mantissa);
     }
-    return (sign << 15) | ((exp + 15) << 10) | (mantissa >> 13);
+    if (exponent > 142U) {
+        return static_cast<uint16_t>(sign | 0x7C00U);
+    }
+    if (exponent < 113U) {
+        if (exponent < 102U) {
+            return sign;
+        }
+        const uint32_t significand = mantissa | 0x00800000U;
+        const uint32_t shift = 126U - exponent;
+        uint32_t fp16_mantissa = significand >> shift;
+        const uint32_t remainder_mask = (1U << shift) - 1U;
+        const uint32_t remainder = significand & remainder_mask;
+        const uint32_t halfway = 1U << (shift - 1U);
+        if (remainder > halfway || (remainder == halfway && (fp16_mantissa & 1U) != 0)) {
+            ++fp16_mantissa;
+        }
+        return static_cast<uint16_t>(sign | fp16_mantissa);
+    }
+
+    const uint32_t fp16_exponent = exponent - 112U;
+    uint32_t fp16_mantissa = mantissa >> 13;
+    const uint32_t remainder = mantissa & 0x1FFFU;
+    if (remainder > 0x1000U || (remainder == 0x1000U && (fp16_mantissa & 1U) != 0)) {
+        ++fp16_mantissa;
+    }
+    return static_cast<uint16_t>(sign | ((fp16_exponent << 10) + fp16_mantissa));
 }
 
 float

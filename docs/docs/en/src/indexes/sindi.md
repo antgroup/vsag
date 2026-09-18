@@ -22,8 +22,9 @@ pairs and is one of the VSAG indexes that accepts `dtype: "sparse"`.
    walks the corresponding inverted lists in each window, aggregates contributions
    into a max-heap of size `n_candidate`, and returns the top-k. When `use_reorder`
    is enabled, the candidates are re-scored against a forward store. The default
-   forward store keeps fp32 values, while `rerank_type: "dmq8"` uses a compressed
-   DMQ store to reduce rerank memory.
+   forward store keeps FP32 values. `rerank_type: "fp16"` stores half-precision
+   values and converts them to FP32 for scoring, while `rerank_type: "dmq8"` uses
+   a compressed DMQ store to reduce rerank memory further.
 
 Distance is returned as `1 - inner_product` so results sort ascending as in the
 dense indexes.
@@ -80,7 +81,7 @@ and `metric_type` **must** be `"ip"`.
 | `doc_prune_ratio` | float | `0.0` | Fraction of lowest-weight terms dropped per doc at build time (`[0.0, 1.0)`). |
 | `use_quantization` | bool or string | `false` | `false` stores FP32 values, `true` stores SQ8 values, and `"fp16"` stores FP16 values. |
 | `use_reorder` | bool | `false` | Keep a forward store and rescore candidates after coarse SINDI scoring. |
-| `rerank_type` | string | `"fp32"` | Forward-store type used when `use_reorder` is enabled. `fp32` keeps exact values; `dmq8` stores compressed 8-bit DMQ codes. |
+| `rerank_type` | string | `"fp32"` | Forward-store type used when `use_reorder` is enabled. `fp32` keeps exact values, `fp16` stores half-precision values while scoring in FP32, and `dmq8` stores compressed 8-bit DMQ codes. |
 | `dmq_shared_codebook_threshold` | int | `1024` | With `rerank_type: "dmq8"`, terms occurring at most this many times share one codebook; more frequent terms keep independent codebooks. Set to `0` to disable sharing. |
 | `remap_term_ids` | bool | `false` | Remap term IDs before indexing; useful when term IDs are sparse or have large gaps. |
 | `avg_doc_term_length` | int | `100` | Hint for memory estimation only. |
@@ -104,6 +105,18 @@ and `metric_type` **must** be `"ip"`.
 Indexes built with `false` or `true` retain the legacy serialization representation. Older VSAG
 versions cannot parse a SINDI index that uses the new `"fp16"` value format; upgrade readers
 before deploying FP16 artifacts.
+
+### Rerank value formats
+
+`rerank_type` controls the separate forward store created by `use_reorder: true`; it is independent
+of the posting-list `use_quantization` setting. `fp16` keeps query values and accumulation in FP32
+but stores document values in FP16. Because term IDs remain 32-bit, the core bytes per non-zero
+forward-store entry decrease from 8 to 6 before record and block overhead. FP16 conversion adds
+compute work, so latency may improve for memory-bound workloads but can regress for short or
+cache-resident vectors. Measure with representative data.
+
+Both `fp16` and `dmq8` require `use_reorder: true`. Older VSAG versions cannot read the FP16 rerank
+payload.
 
 ### Immutable low-memory build
 
@@ -275,9 +288,10 @@ auto result = index->KnnSearch(
 - Hybrid dense+sparse pipelines where SINDI handles the sparse leg in parallel with
   HGraph / IVF for dense embeddings.
 - Memory-constrained deployments of sparse corpora (`use_quantization: true` selects SQ8,
-  while `"fp16"` halves FP32 value bytes; `use_reorder:
-  true` trades forward-store memory for recall, and `rerank_type: "dmq8"` reduces
-  that forward-store overhead).
+  while `"fp16"` halves FP32 posting value bytes; `use_reorder: true` trades
+  forward-store memory for recall, `rerank_type: "fp16"` reduces forward-store
+  value bytes with modest precision loss, and `rerank_type: "dmq8"` compresses
+  that store further).
 - Read-only snapshots that need lower peak build memory (`immutable: true`), accepting slower
   construction and no incremental writes.
 
@@ -311,8 +325,9 @@ When `rerank_type` is `dmq8`, codebooks are fixed by the initial build, so incre
      (`use_quantization: true`). This is a common balance between memory and
      recall.
 3. Pruned high-accuracy index with compressed reranking. Use the same pruning and
-     inverted-list quantization as above, but set `rerank_type: "dmq8"` together
-     with `use_reorder: true` to reduce forward-store memory.
+     inverted-list quantization as above, but set `rerank_type: "fp16"` together
+     with `use_reorder: true` for a precision-oriented reduction in forward-store
+     memory, or select `dmq8` for stronger compression.
 4. Very large sparse vocabularies. When term IDs are sparse within the `uint32`
      range, such as hash-based tokenizers, external vocabulary IDs, or vocabularies
      with large gaps, enable `remap_term_ids: true`. This avoids managing many

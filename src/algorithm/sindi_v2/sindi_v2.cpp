@@ -212,7 +212,11 @@ create_rerank_flat(const IndexCommonParam& common_param,
     }
     auto rerank_param = std::make_shared<SparseVectorDataCellParameter>();
     rerank_param->io_parameter = io_param;
-    rerank_param->quantizer_parameter = std::make_shared<SparseQuantizerParameter>();
+    auto quantizer_param = std::make_shared<SparseQuantizerParameter>();
+    if (rerank_type == SPARSE_RERANK_TYPE_FP16) {
+        quantizer_param->value_type = SparseQuantizerValueType::FP16;
+    }
+    rerank_param->quantizer_parameter = quantizer_param;
     return FlattenInterface::MakeInstance(rerank_param, common_param);
 }
 
@@ -1774,9 +1778,16 @@ SINDIV2::EstimateMemory(uint64_t num_elements) const {
             mem += estimated_codebook_count * sizeof(SparseDmqQuantizer::Codebook);
             mem += estimated_term_count * 2 * sizeof(uint32_t);
         } else {
-            const auto rerank_payload_bytes =
-                num_elements *
-                (sizeof(uint32_t) + avg_doc_term_length_ * (sizeof(uint32_t) + sizeof(float)));
+            const uint64_t rerank_value_size =
+                rerank_type_ == SPARSE_RERANK_TYPE_FP16 ? sizeof(uint16_t) : sizeof(float);
+            uint64_t rerank_code_size =
+                sizeof(uint32_t) + static_cast<uint64_t>(avg_doc_term_length_) *
+                                       (sizeof(uint32_t) + rerank_value_size);
+            if (rerank_type_ == SPARSE_RERANK_TYPE_FP16) {
+                constexpr uint64_t alignment = alignof(uint32_t);
+                rerank_code_size = (rerank_code_size + alignment - 1) / alignment * alignment;
+            }
+            const auto rerank_payload_bytes = num_elements * rerank_code_size;
             const auto rerank_offset_bytes = num_elements * (sizeof(uint64_t) + sizeof(uint32_t));
             mem += block_memory_ceil(rerank_offset_bytes);
             if (param_->rerank_io_parameter != nullptr &&
