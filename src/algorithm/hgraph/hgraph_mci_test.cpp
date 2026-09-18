@@ -567,7 +567,7 @@ TEST_CASE("MCI builder includes duplicate-vector seed edges", "[ut][hgraph][mci]
         cliques.begin(), cliques.end(), [](const auto& clique) { return clique.size() == total; }));
 }
 
-TEST_CASE("MCI builder treats clique_max only as a storage cap", "[ut][hgraph][mci]") {
+TEST_CASE("MCI builder keeps maximal cliques larger than clique_max", "[ut][hgraph][mci]") {
     constexpr uint64_t total = 6;
     constexpr uint64_t dim = 2;
     const std::vector<float> vectors{
@@ -595,10 +595,63 @@ TEST_CASE("MCI builder treats clique_max only as a storage cap", "[ut][hgraph][m
     vsag::DefaultAllocator allocator;
     const auto cliques = vsag::BuildMCICliques(vectors.data(), graph, params, &allocator);
     REQUIRE_FALSE(cliques.empty());
-    REQUIRE(std::all_of(
-        cliques.begin(), cliques.end(), [](const auto& clique) { return clique.size() <= 2; }));
+    // clique_max is a lower bound on the size of a maximal clique, never a cap: an enumerated clique
+    // is stored in full, so it may grow up to the candidate pool (mcs neighbours plus the seed).
+    REQUIRE(std::all_of(cliques.begin(), cliques.end(), [&](const auto& clique) {
+        return clique.size() >= params.clique_max and clique.size() <= params.candidate_limit + 1;
+    }));
+    // Both clusters of this data are triangles, so a size-3 maximal clique must survive intact.
     REQUIRE(std::any_of(
-        cliques.begin(), cliques.end(), [](const auto& clique) { return clique.size() == 2; }));
+        cliques.begin(), cliques.end(), [](const auto& clique) { return clique.size() == 3; }));
+}
+
+TEST_CASE("MCI builder stores a full candidate-pool clique", "[ut][hgraph][mci]") {
+    // Every pair of vectors is equally far apart, so each seed sees a complete graph over its
+    // candidate pool and the only maximal clique has size candidate_limit + 1.
+    constexpr uint64_t total = 7;
+    constexpr uint64_t dim = 7;
+    constexpr uint64_t candidate_limit = 6;
+    std::vector<float> vectors(total * dim, 0.0F);
+    for (uint64_t id = 0; id < total; ++id) {
+        vectors[id * dim + id] = 1.0F;
+    }
+    std::vector<vsag::InnerIdType> neighbors(total * candidate_limit);
+    for (uint64_t id = 0; id < total; ++id) {
+        uint64_t rank = 0;
+        for (uint64_t other = 0; other < total; ++other) {
+            if (other == id) {
+                continue;
+            }
+            neighbors[id * candidate_limit + rank] = static_cast<vsag::InnerIdType>(other);
+            ++rank;
+        }
+    }
+    const std::vector<uint32_t> counts(total, candidate_limit);
+
+    vsag::MCIGraphView graph;
+    graph.neighbors = neighbors.data();
+    graph.counts = counts.data();
+    graph.total = total;
+    graph.row_stride = candidate_limit;
+    vsag::MCIV3BuildParams params;
+    params.total = total;
+    params.dim = dim;
+    params.candidate_limit = candidate_limit;
+    params.clique_max = 3;
+    params.max_degree = 32;
+    params.alpha = 1.2F;
+    params.thread_count = 2;
+    params.metric = vsag::MetricType::METRIC_TYPE_L2SQR;
+
+    vsag::DefaultAllocator allocator;
+    const auto cliques = vsag::BuildMCICliques(vectors.data(), graph, params, &allocator);
+    REQUIRE_FALSE(cliques.empty());
+    REQUIRE(std::all_of(cliques.begin(), cliques.end(), [&](const auto& clique) {
+        return clique.size() >= params.clique_max;
+    }));
+    REQUIRE(std::any_of(cliques.begin(), cliques.end(), [&](const auto& clique) {
+        return clique.size() == candidate_limit + 1;
+    }));
 }
 
 TEST_CASE("MCI builder transports worker exceptions", "[ut][hgraph][mci]") {

@@ -933,8 +933,12 @@ HGraph::build_mci_clique_index(const void* vectors) {
         normalized.assign(clique.begin(), clique.end());
         std::sort(normalized.begin(), normalized.end());
         normalized.erase(std::unique(normalized.begin(), normalized.end()), normalized.end());
-        if (normalized.size() > this->mci_parameters_.clique_max) {
-            normalized.resize(this->mci_parameters_.clique_max);
+        // mci_clique_max is a minimum size, not a storage cap: the maximal clique enumerated for
+        // this seed is kept in full. Its size cannot exceed the candidate pool (mcs neighbours plus
+        // the seed), so this bound only rejects an inconsistent result.
+        const auto clique_cap = std::min<uint64_t>(this->mci_parameters_.mcs, total - 1) + 1;
+        if (normalized.size() > clique_cap) {
+            normalized.resize(clique_cap);
             if (std::find(normalized.begin(), normalized.end(), anchor) == normalized.end()) {
                 normalized.back() = anchor;
             }

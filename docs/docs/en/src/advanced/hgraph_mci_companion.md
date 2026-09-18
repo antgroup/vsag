@@ -41,7 +41,7 @@ external KNN graph path takes precedence over this selector.
 | `use_mci` | Enables MCI with default build parameters when set to `true`. |
 | `mci_mcs` | Candidate neighbor count used when constructing cliques. |
 | `mci_knng_source` | KNN graph source: `hgraph` (default) or `odescent`. |
-| `mci_clique_max` | Maximum clique size during full build. |
+| `mci_clique_max` | Minimum size of a maximal clique the full build must keep. Cliques are stored in full, so this is a lower bound, not a cap. |
 | `mci_alpha` | Clique construction expansion factor. |
 | `mci_incremental_join_ratio_threshold` | Add-time threshold for joining existing cliques. |
 | `mci_incremental_added_mct` | Maximum existing cliques a newly added node may join. |
