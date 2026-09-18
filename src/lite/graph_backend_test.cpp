@@ -65,6 +65,67 @@ TEST_CASE("Lite graph backend validates input and survives CRUD", "[lite-graph]"
     REQUIRE((*graph)->Search(b.data(), 2, 3)->size() == 3);
 }
 
+TEST_CASE("Lite graph filter traverses rejected IDs and survives snapshot load", "[lite-graph]") {
+    auto created = vsag::lite::Index::Create(2);
+    REQUIRE(created);
+    auto& index = **created;
+    std::array<float, 2> vector{};
+    for (int64_t slot = 0; slot < 32; ++slot) {
+        vector[0] = static_cast<float>(slot);
+        REQUIRE(index.Add(1000 + slot, vector.data(), 2));
+    }
+    REQUIRE(index.BuildGraph(4, 32));
+    const std::array<float, 2> query{15, 0};
+    const auto unfiltered = index.Search(query.data(), 2, 8);
+    REQUIRE(unfiltered);
+    const vsag::lite::IdFilter empty_filter;
+    const auto without_filter = index.Search(query.data(), 2, 8, empty_filter);
+    REQUIRE(without_filter);
+    REQUIRE(without_filter->size() == unfiltered->size());
+    for (uint64_t i = 0; i < unfiltered->size(); ++i) {
+        REQUIRE((*without_filter)[i].id == (*unfiltered)[i].id);
+        REQUIRE((*without_filter)[i].distance == (*unfiltered)[i].distance);
+    }
+
+    std::unordered_set<int64_t> checked_ids;
+    const vsag::lite::IdFilter only_middle = [&checked_ids](int64_t id) {
+        checked_ids.insert(id);
+        return id == 1015;
+    };
+    const auto selected = index.Search(query.data(), 2, 8, only_middle);
+    REQUIRE(selected);
+    REQUIRE(selected->size() == 1);
+    REQUIRE(selected->front().id == 1015);
+    REQUIRE(selected->front().distance == 0);
+    REQUIRE(checked_ids.count(1015) == 1);
+    REQUIRE(checked_ids.size() > 1);
+
+    const auto rejected = index.Search(query.data(), 2, 8, [](int64_t) { return false; });
+    REQUIRE(rejected);
+    REQUIRE(rejected->empty());
+    REQUIRE_FALSE(index.Search(nullptr, 2, 8, only_middle));
+    REQUIRE(index.Search(query.data(), 2, 0, only_middle)->empty());
+
+    const std::array<float, 2> updated{14.5F, 0};
+    REQUIRE(index.Update(1015, updated.data(), 2));
+    REQUIRE(index.Remove(1001));
+    const auto after_crud = index.Search(query.data(), 2, 8, only_middle);
+    REQUIRE(after_crud);
+    REQUIRE(after_crud->size() == 1);
+    REQUIRE(after_crud->front().id == 1015);
+    REQUIRE(after_crud->front().distance == 0.25F);
+
+    std::stringstream snapshot;
+    REQUIRE(index.Save(snapshot));
+    auto loaded = vsag::lite::Index::Load(snapshot);
+    REQUIRE(loaded);
+    const auto restored = (*loaded)->Search(query.data(), 2, 8, only_middle);
+    REQUIRE(restored);
+    REQUIRE(restored->size() == after_crud->size());
+    REQUIRE(restored->front().id == after_crud->front().id);
+    REQUIRE(restored->front().distance == after_crud->front().distance);
+}
+
 TEST_CASE("Lite graph backend validates restored adjacency bounds", "[lite-graph]") {
     using vsag::lite::detail::restore_graph_backend;
     REQUIRE_FALSE(restore_graph_backend(0, 2, 16, {}, {}, {}));

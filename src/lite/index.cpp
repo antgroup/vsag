@@ -121,7 +121,8 @@ Index::Search(const float* query, uint64_t dim, uint64_t k) const {
 
 tl::expected<std::vector<Neighbor>, Error>
 Index::Search(const float* query, uint64_t dim, uint64_t k, const IdFilter& filter) const {
-    return impl_->backend->Search(query, dim, k, filter ? &filter : nullptr);
+    return filter ? impl_->backend->Search(query, dim, k, filter)
+                  : impl_->backend->Search(query, dim, k);
 }
 
 tl::expected<void, Error>

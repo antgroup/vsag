@@ -5,6 +5,8 @@
 > 独立的单层近似图；失败不修改原索引。图模式继续使用同一套 Add/Update/Remove/
 > Search 接口；Save 写入含 FP32、ID、参数和邻接关系的 v2 快照，Load 同时接受
 > v1/v2。v2 与 Full VSAG 快照不兼容，不提供并发、校验和、量化或 mmap。
+> BuildGraph 后同样支持按外部 ID 过滤；图搜索可经过不允许返回的节点以保持连通性，
+> 但这些节点不会出现在结果中。
 > 本页余下内容说明首版默认 BruteForce 行为。
 
 

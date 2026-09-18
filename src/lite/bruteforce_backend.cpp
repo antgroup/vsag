@@ -9,8 +9,7 @@
 #include <unordered_map>
 
 #include "lite/backend.h"
-#include "simd/kernels/compute_l2.h"
-#include "simd/traits/simd_traits_generic.h"
+#include "lite/fp32_distance.h"
 
 namespace vsag::lite::detail {
 namespace {
@@ -123,6 +122,16 @@ public:
 
     tl::expected<std::vector<Neighbor>, Error>
     Search(const float* query, uint64_t dim, uint64_t k) const override {
+        return SearchImpl(query, dim, k, nullptr);
+    }
+
+    tl::expected<std::vector<Neighbor>, Error>
+    Search(const float* query, uint64_t dim, uint64_t k, const IdFilter& filter) const override {
+        return SearchImpl(query, dim, k, filter ? &filter : nullptr);
+    }
+
+    tl::expected<std::vector<Neighbor>, Error>
+    SearchImpl(const float* query, uint64_t dim, uint64_t k, const IdFilter* filter) const {
         auto valid = validate(query, dim, Dim());
         if (not valid) {
             return tl::unexpected(valid.error());
@@ -133,9 +142,12 @@ public:
                 return std::vector<Neighbor>{};
             }
             std::priority_queue<Neighbor, std::vector<Neighbor>, NeighborWorseFirst> heap;
+            const auto distance_fn = dim < 16 ? GenericFP32Distance : SelectFP32Distance();
             for (uint64_t slot = 0; slot < Size(); ++slot) {
-                const auto distance = simd::ComputeL2SqrImpl<simd::SimdTraits<simd::GenericTag>>(
-                    query, VectorAt(slot), dim);
+                if (filter != nullptr and not(*filter)(IdAt(slot))) {
+                    continue;
+                }
+                const auto distance = distance_fn(query, VectorAt(slot), dim);
                 Neighbor next{IdAt(slot), distance};
                 if (heap.size() < k) {
                     heap.push(next);
