@@ -21,6 +21,7 @@
 #include "inner_string_params.h"
 #include "io/async_io/async_io_parameter.h"
 #include "io/buffer_io/buffer_io_parameter.h"
+#include "io/external_storage_io/external_storage_io_parameter.h"
 #include "io/memory_block_io/memory_block_io_parameter.h"
 #include "io/memory_io/memory_io_parameter.h"
 #include "io/mmap_io/mmap_io_parameter.h"
@@ -88,6 +89,10 @@ IOParameter::GetIOParameterByJson(const JsonType& json) {
                 io_ptr = std::make_shared<ReaderIOParameter>();
                 io_ptr->FromJson(json);
                 break;
+            case IOKind::EXTERNAL_STORAGE:
+                io_ptr = std::make_shared<ExternalStorageIOParameter>();
+                io_ptr->FromJson(json);
+                break;
             case IOKind::UNKNOWN:
                 break;
         }
@@ -152,6 +157,9 @@ IOParameter::KindFromName(std::string_view name) {
     }
     if (name == IO_TYPE_VALUE_READER_IO) {
         return IOKind::READER;
+    }
+    if (name == IO_TYPE_VALUE_EXTERNAL_STORAGE_IO) {
+        return IOKind::EXTERNAL_STORAGE;
     }
     return IOKind::UNKNOWN;
 }

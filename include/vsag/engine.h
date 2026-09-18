@@ -19,6 +19,7 @@
 #include "vsag/allocator.h"
 #include "vsag/dataset.h"
 #include "vsag/index.h"
+#include "vsag/readerset.h"
 #include "vsag/resource.h"
 #include "vsag/thread_pool.h"
 
@@ -67,6 +68,11 @@ public:
      */
     [[nodiscard]] tl::expected<std::shared_ptr<Index>, Error>
     CreateIndex(const std::string& name, const std::string& parameters);
+
+    [[nodiscard]] tl::expected<std::shared_ptr<Index>, Error>
+    CreateIndex(const std::string& name,
+                const std::string& parameters,
+                const ExternalStorageSet& external_storages);
 
     /**
      * @brief Creates a memory allocator instance managed by the engine.

@@ -71,12 +71,14 @@ const char* const IO_TYPE_VALUE_MEMORY_IO = "memory_io";
 const char* const IO_TYPE_VALUE_BUFFER_IO = "buffer_io";
 const char* const IO_TYPE_VALUE_MMAP_IO = "mmap_io";
 const char* const IO_TYPE_VALUE_READER_IO = "reader_io";
+const char* const IO_TYPE_VALUE_EXTERNAL_STORAGE_IO = "external_storage_io";
 const char* const IO_TYPE_VALUE_ASYNC_IO = "async_io";
 const char* const IO_TYPE_VALUE_URING_IO = "uring_io";
 const char* const IO_TYPE_VALUE_BLOCK_MEMORY_IO = "block_memory_io";
 const char* const READ_CACHE_TOTAL_CACHE_SIZE_KEY = "total_cache_size";
 const char* const READ_CACHE_ENABLED_KEY = "enable_read_cache";
 const char* const IO_PREFETCH_HINT_KEY = "enable_prefetch_hint";
+const char* const IO_EXTERNAL_STORAGE_KEY = "external_storage";
 const char* const BLOCK_IO_BLOCK_SIZE_KEY = "block_size";
 
 // IO param for file

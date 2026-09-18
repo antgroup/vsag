@@ -207,6 +207,7 @@ extern const char* const HGRAPH_PRECISE_CACHE_TOTAL_SIZE;
 extern const char* const HGRAPH_RAW_VECTOR_ENABLE_READ_CACHE;
 extern const char* const HGRAPH_RAW_VECTOR_CACHE_TOTAL_SIZE;
 extern const char* const HGRAPH_PRECISE_IO_TYPE;
+extern const char* const HGRAPH_PRECISE_EXTERNAL_STORAGE;
 extern const char* const HGRAPH_PRECISE_FILE_PATH;
 extern const char* const HGRAPH_PRECISE_DIRECT_READ;
 extern const char* const HGRAPH_PARAMETER_EF_RUNTIME;

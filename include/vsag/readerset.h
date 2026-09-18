@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -49,6 +50,9 @@ using CallBack = std::function<void(IOErrorCode code, const std::string& message
 
 class Reader;
 using ReaderPtr = std::shared_ptr<Reader>;
+
+class Writer;
+using WriterPtr = std::shared_ptr<Writer>;
 
 /**
  * @brief Optional interface for readers that support best-effort prefetch hints.
@@ -147,6 +151,76 @@ public:
      */
     [[nodiscard]] virtual uint64_t
     Size() const = 0;
+};
+
+/**
+ * @brief Synchronous random-access writer for externally managed storage.
+ *
+ * A successful Write makes the bytes visible through the paired Reader and consumes the source
+ * synchronously, so the caller may reuse or release the source buffer after Write returns. Resize
+ * preserves the existing prefix through min(old_size, new_size), zero-fills growth only if the
+ * implementation's storage normally does so, and truncates bytes beyond a smaller new size.
+ * This interface does not provide crash durability, transactions, or synchronization for
+ * overlapping writes.
+ */
+class Writer {
+public:
+    Writer() = default;
+    virtual ~Writer() = default;
+
+    virtual void
+    Write(uint64_t offset, uint64_t len, const void* source) = 0;
+
+    virtual void
+    Resize(uint64_t size) = 0;
+};
+
+struct ExternalStorage {
+    ReaderPtr reader;
+    WriterPtr writer;
+};
+
+/**
+ * @brief Named Reader and Writer pairs retained by indexes created with external storage.
+ */
+class ExternalStorageSet {
+public:
+    /**
+     * @brief Retains shared ownership of a named pair; the caller's shared_ptrs are unaffected.
+     * Configure the set before sharing it with index construction; concurrent mutation is unsupported.
+     */
+    void
+    Set(const std::string& name, ReaderPtr reader, WriterPtr writer) {
+        if (name.empty()) {
+            throw std::invalid_argument("external storage name must not be empty");
+        }
+        if (reader == nullptr or writer == nullptr) {
+            throw std::invalid_argument("external storage Reader and Writer must not be null");
+        }
+        if (data_.find(name) != data_.end()) {
+            throw std::invalid_argument("duplicate external storage name: " + name);
+        }
+        data_.emplace(name, ExternalStorage{std::move(reader), std::move(writer)});
+    }
+
+    /**
+     * @brief Returns a borrowed pair, or nullptr when absent.
+     * The pointer is invalidated by rehash (e.g. inserting other names) or by destroying/assigning
+     * the owning set; copy the pair to retain independent shared ownership.
+     */
+    [[nodiscard]] const ExternalStorage*
+    Get(const std::string& name) const {
+        const auto iter = data_.find(name);
+        return iter == data_.end() ? nullptr : &iter->second;
+    }
+
+    [[nodiscard]] bool
+    Contains(const std::string& name) const {
+        return data_.find(name) != data_.end();
+    }
+
+private:
+    std::unordered_map<std::string, ExternalStorage> data_;
 };
 
 /**

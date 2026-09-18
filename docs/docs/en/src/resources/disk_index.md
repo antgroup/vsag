@@ -1,5 +1,24 @@
 # Disk-Based Index Best Practices
 
+## Experimental callback-backed construction (POC)
+
+This POC supports HGraph with SQ8 base codes and its graph in `block_memory_io`, and FP32 precise codes in `external_storage_io`. Existing read-only `Reader` / `ReaderSet` loading remains unchanged. No remote-storage protocol is implemented by VSAG.
+
+```cpp
+// User callbacks address the same independent logical byte store.
+auto pair = vsag::Factory::CreateExternalStorage(read_func, write_func, resize_func, 0);
+vsag::ExternalStorageSet storages;
+storages.Set("precise", pair.reader, pair.writer);
+auto result = vsag::Factory::CreateIndex("hgraph", parameters, storages);
+// Check result, then call Build and KnnSearch normally.
+```
+
+The `index_param` object must include `use_reorder: true`, `base_quantization_type: "sq8"`, `precise_quantization_type: "fp32"`, `precise_io_type: "external_storage_io"`, and `precise_external_storage: "precise"`. Keep base and graph in `block_memory_io`. The registry is available before construction-time resizing; callback writes happen during Build, not merely during Serialize.
+
+`read_func(offset, length, destination)`, `write_func(offset, length, source)` and `resize_func(size)` are synchronous. Successful writes must be readable immediately and consume the source before returning. Writes beyond the current extent must grow the backing store. Resize must preserve the retained prefix and make its resulting extent readable. The paired adapter tracks size only after successful writes/resizes; `initial_size` must match existing storage. Callbacks must throw on failure and must not reenter the same adapter, whose operations are serialized by a mutex. A partial failing write is not rolled back. Do not modify the backing store outside the pair while the index uses it.
+
+Names must be nonempty and unique, and both handles must be non-null. Each independent mutable IO instance needs independent backing bytes; registering the same storage under another name does not create isolation. Do not reuse one mutable pair across independent indexes. This POC does not support external graph/base/bucket storage, asynchronous writes, crash durability, transactions, or validated writable-storage restore. Callback backing residency is not counted by the backend's memory estimate. Real-network construction performance is unmeasured; ODescent can issue many small reads, so this is a functional feasibility result, not a performance recommendation.
+
 ![Disk-backed HGraph: the graph and compact base codes stay in memory for traversal, while a higher-precision precise copy on disk is read only for the ef_search finalists during reorder](../figures/resources/disk-index-overview.svg)
 
 When a corpus grows past the point where every vector fits in RAM, moving the coldest,
