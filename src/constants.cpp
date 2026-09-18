@@ -83,6 +83,15 @@ const char* const ODESCENT_PARAMETER_BUILD_BLOCK_SIZE = "build_block_size";
 
 const char* const GRAPH_TYPE_ODESCENT = "odescent";
 const char* const GRAPH_TYPE_NSW = "nsw";
+const char* const GRAPH_TYPE_PIPNN = "pipnn";
+
+const char* const PIPNN_PARAMETER_MAX_LEAF_SIZE = "pipnn_max_leaf_size";
+const char* const PIPNN_PARAMETER_MIN_LEAF_SIZE = "pipnn_min_leaf_size";
+const char* const PIPNN_PARAMETER_LEADER_SAMPLE_RATE = "pipnn_leader_sample_rate";
+const char* const PIPNN_PARAMETER_FANOUT = "pipnn_fanout";
+const char* const PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT = "pipnn_leaf_neighbor_count";
+const char* const PIPNN_PARAMETER_HASH_PLANE_COUNT = "pipnn_hash_plane_count";
+const char* const PIPNN_PARAMETER_RESERVOIR_SIZE = "pipnn_reservoir_size";
 
 const char* const INDEX_PARAM = "index_param";
 

@@ -84,6 +84,15 @@ extern const char* const ODESCENT_PARAMETER_MIN_IN_DEGREE;
 extern const char* const ODESCENT_PARAMETER_BUILD_BLOCK_SIZE;
 extern const char* const GRAPH_TYPE_ODESCENT;
 extern const char* const GRAPH_TYPE_NSW;
+extern const char* const GRAPH_TYPE_PIPNN;
+
+extern const char* const PIPNN_PARAMETER_MAX_LEAF_SIZE;
+extern const char* const PIPNN_PARAMETER_MIN_LEAF_SIZE;
+extern const char* const PIPNN_PARAMETER_LEADER_SAMPLE_RATE;
+extern const char* const PIPNN_PARAMETER_FANOUT;
+extern const char* const PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT;
+extern const char* const PIPNN_PARAMETER_HASH_PLANE_COUNT;
+extern const char* const PIPNN_PARAMETER_RESERVOIR_SIZE;
 
 extern const char* const INDEX_PARAM;
 

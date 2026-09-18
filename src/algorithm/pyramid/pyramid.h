@@ -67,6 +67,7 @@ public:
           common_param_(common_param),
           hierarchies_(common_param.allocator_.get()),
           odescent_param_(pyramid_param->odescent_param),
+          pipnn_param_(pyramid_param->pipnn_param),
           index_min_size_(pyramid_param->index_min_size),
           graph_type_(pyramid_param->graph_type),
           default_rabitq_one_bit_search_(pyramid_param->use_reorder and
@@ -76,6 +77,12 @@ public:
           persist_source_id_(pyramid_param->persist_source_id),
           store_paths_(pyramid_param->store_paths),
           cache_(std::make_unique<PyramidBuildCache>(common_param.allocator_.get())) {
+        if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN and
+            (common_param.repr_ != RecordRepr::DENSE or
+             common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT)) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Pyramid PiPNN only supports dense float32 indexes");
+        }
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
         if (pyramid_param->has_hierarchies) {
             for (const auto& h_param : pyramid_param->hierarchies) {
@@ -337,14 +344,16 @@ private:
     populate_path_tree(Hierarchy& h,
                        const DatasetPtr& dataset,
                        const std::string& hierarchy_name,
-                       int64_t count);
+                       int64_t count,
+                       const Vector<int64_t>* input_indices = nullptr);
 
     /// Resolve path strings to unique tree nodes, preserving first-seen order.
     static std::vector<IndexNode*>
     collect_path_nodes(Hierarchy& h, const std::string* paths, uint64_t path_count);
 
     void
-    populate_hierarchy_trees(const DatasetPtr& base);
+    populate_hierarchy_trees(const DatasetPtr& base,
+                             const Vector<int64_t>* input_indices = nullptr);
 
     /// Insert vectors and their path labels into the hierarchy tree.
     void
@@ -394,9 +403,9 @@ private:
         return static_cast<double>(total_count) * rand_value < 1.0;
     }
 
-    /// Build all hierarchy graphs via ODescent in batch mode.
+    /// Build all hierarchy graphs in batch mode.
     std::vector<int64_t>
-    build_by_odescent(const DatasetPtr& base);
+    build_by_batch_graph(const DatasetPtr& base);
 
     static GraphInterfaceParamPtr
     make_route_graph_param(const GraphInterfaceParamPtr& bottom_graph_param);
@@ -569,6 +578,7 @@ private:
     mutable std::shared_mutex resize_mutex_;             // guards flatten storage resize/write/read
     mutable std::mutex cur_element_count_mutex_;         // guards cur_element_count_ updates
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};       // graph algorithm type
+    PiPNNGraphBuilderParameter pipnn_param_{};           // PiPNN build parameters
     bool default_rabitq_one_bit_search_{false};          // default split lower-bound search
 
     std::mutex random_generator_mutex_;

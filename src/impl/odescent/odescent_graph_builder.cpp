@@ -15,6 +15,7 @@
 
 #include "odescent_graph_builder.h"
 
+#include <atomic>
 #include <chrono>
 #include <exception>
 #include <ios>
@@ -215,12 +216,51 @@ void
 ODescent::add_reverse_edges() {
     Vector<Linklist> reverse_graph(allocator_);
     reverse_graph.resize(data_num_, Linklist(allocator_));
-    for (int i = 0; i < data_num_; ++i) {
-        reverse_graph[i].neighbors.reserve(odescent_param_->max_degree);
-    }
-    for (int i = 0; i < data_num_; ++i) {
-        for (const auto& node : graph_[i].neighbors) {
-            reverse_graph[node.id].neighbors.emplace_back(i, node.distance);
+    if (thread_pool_ != nullptr and data_num_ >= 4096) {
+        Vector<std::atomic<uint32_t>> reverse_counts(static_cast<uint64_t>(data_num_), allocator_);
+        auto initialize_counts = [&](int64_t start, int64_t end) {
+            for (int64_t i = start; i < end; ++i) {
+                reverse_counts[i].store(0, std::memory_order_relaxed);
+            }
+        };
+        parallelize_task(initialize_counts);
+
+        auto count_edges = [&](int64_t start, int64_t end) {
+            for (int64_t i = start; i < end; ++i) {
+                for (const auto& node : graph_[i].neighbors) {
+                    reverse_counts[node.id].fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        };
+        parallelize_task(count_edges);
+
+        auto allocate_rows = [&](int64_t start, int64_t end) {
+            for (int64_t i = start; i < end; ++i) {
+                reverse_graph[i].neighbors.resize(
+                    reverse_counts[i].exchange(0, std::memory_order_relaxed));
+            }
+        };
+        parallelize_task(allocate_rows);
+
+        auto fill_edges = [&](int64_t start, int64_t end) {
+            for (int64_t i = start; i < end; ++i) {
+                for (const auto& node : graph_[i].neighbors) {
+                    const auto offset =
+                        reverse_counts[node.id].fetch_add(1, std::memory_order_relaxed);
+                    reverse_graph[node.id].neighbors[offset] =
+                        Node(static_cast<uint32_t>(i), node.distance);
+                }
+            }
+        };
+        parallelize_task(fill_edges);
+    } else {
+        for (int64_t i = 0; i < data_num_; ++i) {
+            reverse_graph[i].neighbors.reserve(odescent_param_->max_degree);
+        }
+        for (int64_t i = 0; i < data_num_; ++i) {
+            for (const auto& node : graph_[i].neighbors) {
+                reverse_graph[node.id].neighbors.emplace_back(i, node.distance);
+            }
         }
     }
 
@@ -280,12 +320,7 @@ ODescent::sample_candidates(Vector<UnorderedSet<uint32_t>>& old_neighbors,
 
 void
 ODescent::repair_no_in_edge() {
-    Vector<int> in_edges_count(data_num_, 0, allocator_);
-    for (int i = 0; i < data_num_; ++i) {
-        for (auto& neighbor : graph_[i].neighbors) {
-            in_edges_count[neighbor.id]++;
-        }
-    }
+    auto in_edges_count = count_in_edges();
 
     Vector<int> replace_pos(
         data_num_,
@@ -331,14 +366,46 @@ ODescent::repair_no_in_edge() {
     }
 }
 
-void
-ODescent::prune_graph() {
+Vector<int>
+ODescent::count_in_edges() {
     Vector<int> in_edges_count(data_num_, 0, allocator_);
-    for (int i = 0; i < data_num_; ++i) {
-        for (auto& neighbor : graph_[i].neighbors) {
-            in_edges_count[neighbor.id]++;
+    if (thread_pool_ != nullptr and data_num_ >= 4096) {
+        Vector<std::atomic<int>> parallel_counts(static_cast<uint64_t>(data_num_), allocator_);
+        auto initialize_counts = [&](int64_t start, int64_t end) {
+            for (int64_t i = start; i < end; ++i) {
+                parallel_counts[i].store(0, std::memory_order_relaxed);
+            }
+        };
+        parallelize_task(initialize_counts);
+
+        auto count_edges = [&](int64_t start, int64_t end) {
+            for (int64_t i = start; i < end; ++i) {
+                for (const auto& neighbor : graph_[i].neighbors) {
+                    parallel_counts[neighbor.id].fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        };
+        parallelize_task(count_edges);
+
+        auto copy_counts = [&](int64_t start, int64_t end) {
+            for (int64_t i = start; i < end; ++i) {
+                in_edges_count[i] = parallel_counts[i].load(std::memory_order_relaxed);
+            }
+        };
+        parallelize_task(copy_counts);
+    } else {
+        for (int64_t i = 0; i < data_num_; ++i) {
+            for (const auto& neighbor : graph_[i].neighbors) {
+                in_edges_count[neighbor.id]++;
+            }
         }
     }
+    return in_edges_count;
+}
+
+void
+ODescent::prune_graph() {
+    auto in_edges_count = count_in_edges();
 
     auto min_in_degree = std::min(odescent_param_->min_in_degree, data_num_ - 1);
     auto task = [&, this](int64_t start, int64_t end) {

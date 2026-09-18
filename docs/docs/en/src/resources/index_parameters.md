@@ -47,6 +47,7 @@ HGraph places its build parameters under the generic `index_param` key (see
 |-------|---------|-------------|
 | `max_degree` | 16–48 | Maximum out-degree per node |
 | `ef_construction` | 200–500 | Candidate set size during build; larger = higher recall, slower build |
+| `alpha` | `1.0` | Final robust-pruning factor; PiPNN requires a finite value at least `1.0` |
 | `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq4` / `pq` | Quantization of the base storage — see the [Quantization chapter](../quantization/) for all supported values |
 | `use_reverse_edges` | `false` | Track incoming neighbors for O(1) reverse-edge lookup; roughly doubles edge storage and is unsupported with compressed graph storage |
 | `label_remap_type` | `pg` | Label-map implementation: `pg` (default) or `robin` |
@@ -56,6 +57,24 @@ HGraph places its build parameters under the generic `index_param` key (see
 | `mrle_dim` | `0` | MRLE output dimension in `[0, dim]`; `0` means input dimension |
 | `fast_encode_rabitq` | `true` | Use fast multi-bit RaBitQ encoding; `false` restores the exact encoder |
 | `fast_encode_rabitq_rounds` | `6` | Fast-encoder refinement rounds in `[1, 32]` |
+
+### PiPNN build parameters
+
+When `graph_type` is `pipnn`, HGraph and Pyramid also accept the following build parameters under
+`index_param`. They share these defaults and validation rules:
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `pipnn_max_leaf_size` | `1024` | Maximum partition leaf size, in `[2, 2147483647]`. |
+| `pipnn_min_leaf_size` | `64` | Target for merging undersized leaves; must be positive and no larger than `pipnn_max_leaf_size`. |
+| `pipnn_leader_sample_rate` | `0.005` | Fraction sampled as leaders, in `(0, 1]`; each partition uses `2` to `1000`, bounded by its point count. |
+| `pipnn_fanout` | `[10, 2]` | Positive nearest-leader fanout at successive partition levels; deeper levels use `1`. |
+| `pipnn_leaf_neighbor_count` | `5` | Positive nearest-candidate count per point and leaf; undersized leaves use at least `4`. |
+| `pipnn_hash_plane_count` | `12` | Direction-hash bits in `[1, 15]`; `max_degree <= 2^pipnn_hash_plane_count`. |
+| `pipnn_reservoir_size` | `64` | Positive per-point candidate capacity before final pruning; effective capacity is `max(value, max_degree)` and must not exceed `65535`. |
+
+The existing `alpha` field controls PiPNN's final robust pruning. `ef_construction` only tunes NSW
+and has no effect on PiPNN.
 
 At search time:
 
@@ -150,6 +169,9 @@ Pyramid build parameters also live under `index_param`:
     }
 }
 ```
+
+For `graph_type: "pipnn"`, see the shared
+[PiPNN build parameters](#pipnn-build-parameters) above.
 
 `store_paths` is a top-level Pyramid build parameter and defaults to `false`. Enable it when
 `GetDataByIdsWithFlag` must return the original default or named-hierarchy paths with

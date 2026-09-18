@@ -157,6 +157,54 @@ TEST_CASE("FlattenDataCell Basic Test", "[ut][FlattenDataCell] ") {
     }
 }
 
+TEST_CASE("FlattenDataCell supports concurrent contiguous batch insertion",
+          "[ut][FlattenDataCell][pipnn]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr InnerIdType count = 128;
+    constexpr InnerIdType batch_size = 32;
+    constexpr uint64_t dim = 32;
+    auto vectors = fixtures::generate_vectors(count, dim);
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(JsonType::Parse(R"({
+        "io_params": {"type": "memory_io"},
+        "quantization_params": {"type": "sq8"}
+    })"));
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_COSINE;
+
+    auto parallel = FlattenInterface::MakeInstance(param, common_param);
+    auto serial = FlattenInterface::MakeInstance(param, common_param);
+    parallel->Train(vectors.data(), count);
+    parallel->ExportModel(serial);
+    parallel->Resize(count);
+
+    std::vector<InnerIdType> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::future<void>> futures;
+    for (InnerIdType begin = 0; begin < count; begin += batch_size) {
+        futures.emplace_back(std::async(std::launch::async, [&, begin]() {
+            parallel->BatchInsertVector(vectors.data() + static_cast<uint64_t>(begin) * dim,
+                                        batch_size,
+                                        ids.data() + begin);
+        }));
+    }
+    for (auto& future : futures) {
+        future.get();
+    }
+    serial->BatchInsertVector(vectors.data(), count);
+
+    REQUIRE(parallel->TotalCount() == count);
+    std::vector<uint8_t> parallel_code(parallel->code_size_);
+    std::vector<uint8_t> serial_code(serial->code_size_);
+    for (InnerIdType id = 0; id < count; ++id) {
+        REQUIRE(parallel->GetCodesById(id, parallel_code.data()));
+        REQUIRE(serial->GetCodesById(id, serial_code.data()));
+        REQUIRE(parallel_code == serial_code);
+    }
+}
+
 TEST_CASE("FlattenDataCell only reports a stride for contiguous raw data",
           "[ut][FlattenDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();

@@ -233,6 +233,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             inner_json[GRAPH_KEY][ODESCENT_PARAMETER_MIN_IN_DEGREE].SetJson(value);
         } else if (key == ODESCENT_PARAMETER_BUILD_BLOCK_SIZE) {
             inner_json[GRAPH_KEY][ODESCENT_PARAMETER_BUILD_BLOCK_SIZE].SetJson(value);
+        } else if (key == PIPNN_PARAMETER_MAX_LEAF_SIZE or key == PIPNN_PARAMETER_MIN_LEAF_SIZE or
+                   key == PIPNN_PARAMETER_LEADER_SAMPLE_RATE or key == PIPNN_PARAMETER_FANOUT or
+                   key == PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT or
+                   key == PIPNN_PARAMETER_HASH_PLANE_COUNT or
+                   key == PIPNN_PARAMETER_RESERVOIR_SIZE) {
+            inner_json[GRAPH_KEY][key].SetJson(value);
         } else if (key == HGRAPH_BUILD_THREAD_COUNT) {
             inner_json[BUILD_THREAD_COUNT_KEY].SetJson(value);
         } else if (key == HGRAPH_TRAIN_SAMPLE_COUNT) {
