@@ -1,7 +1,7 @@
-# VSAG Lite (phase-2 experimental graph branch)
+# VSAG Lite
 
 The standalone library defaults to exact FP32 squared-L2 BruteForce and does not
-link Full VSAG. On this phase-2 branch, callers may explicitly transition an
+link Full VSAG. Callers may explicitly transition an
 existing Lite Index with BuildGraph(max_degree, ef_search). Graph search is
 approximate. BuildGraph builds a replacement before publishing it; a failure
 leaves the BruteForce index unchanged. Add, Update and Remove remain available
@@ -29,6 +29,20 @@ For example, after creating an Index and adding vectors:
 
 This candidate trades faster approximate queries for graph construction time,
 larger snapshots and a temporary flat-plus-graph memory peak during transition.
+
+## Directory layout
+
+- `include/vsag/lite/index.h`: public Lite API and external-ID search filter.
+- `src/lite/index.cpp`: API dispatch and v1/v2 snapshot handling.
+- `src/lite/bruteforce_backend.cpp`, `src/lite/graph_backend.cpp`, and
+  `src/lite/fp32_distance*.cpp`: exact and graph implementations plus FP32 distance dispatch.
+- `src/lite/index_test.cpp` and `src/lite/graph_backend_test.cpp`: functional,
+  CRUD, filtering, and snapshot tests.
+- `lite/CMakeLists.txt` and `lite/example/`: standalone build, install, and consumer example.
+- `docs/docs/{en,zh}/src/development/lite_first.md`: user-facing guides.
+
+Benchmark runners and SQ8/FP16 candidate probes are tracked with the experiment work;
+the public Lite API here remains FP32.
 
 ## Graph snapshot v2
 
