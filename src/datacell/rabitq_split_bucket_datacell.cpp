@@ -24,17 +24,11 @@
 #include "rabitq_split_datacell.h"
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
+#include "utils/float_utils.h"
 
 namespace vsag {
 
 namespace {
-
-bool
-IsFiniteFloat(float value) {
-    uint32_t bits = 0;
-    std::memcpy(&bits, &value, sizeof(bits));
-    return (bits & 0x7F800000U) != 0x7F800000U;
-}
 
 RaBitQSplitResidualOriginalQueryInterface&
 GetResidualOriginalQueryCodes(const FlattenInterfacePtr& codes) {
@@ -822,7 +816,7 @@ RaBitQSplitBucketDataCell::query_non_residual_by_inner_ids(
             CHECK_ARGUMENT(location != INVALID_LOCATION,
                            "invalid inner id for RaBitQ split bucket");
             entries.push_back({static_cast<BucketIdType>(location >> LOCATION_SPLIT_BIT),
-                               static_cast<InnerIdType>(location & 0xFFFFFFFFULL),
+                               static_cast<InnerIdType>(location & LOCATION_MASK),
                                inner_ids[i],
                                i,
                                INVALID_CACHE_VERSION});
@@ -899,7 +893,7 @@ RaBitQSplitBucketDataCell::query_non_residual_by_inner_ids(
             if (filter_inner_products != nullptr) {
                 if (direct_filter_inner_products_valid) {
                     reusable_inner_product = sorted_filter_inner_products[i];
-                    reusable_inner_product_valid = IsFiniteFloat(reusable_inner_product);
+                    reusable_inner_product_valid = IsFiniteFloatBits(reusable_inner_product);
                 }
             }
             if (reusable_inner_product_valid) {
@@ -963,6 +957,10 @@ RaBitQSplitBucketDataCell::query_non_residual_by_inner_ids(
         }
     }
     for (uint64_t i = 0; i < stale_ids.size(); ++i) {
+        // A failed re-resolution (the lane was deleted, or kept moving across
+        // retries) intentionally leaves the distance at FLT_MAX. The entry is still
+        // reported instead of being dropped, and FLT_MAX can never win top-k
+        // selection, so no separate invalid marker is required.
         float stale_dist = std::numeric_limits<float>::max();
         this->query_current_by_inner_id(stale_dist, computer, stale_ids[i], ctx);
         result_dists[stale_result_offsets[i]] = stale_dist;
@@ -1013,7 +1011,7 @@ RaBitQSplitBucketDataCell::query_residual_by_inner_ids(
             CHECK_ARGUMENT(location != INVALID_LOCATION,
                            "invalid inner id for RaBitQ split bucket");
             entries.push_back({static_cast<BucketIdType>(location >> LOCATION_SPLIT_BIT),
-                               static_cast<InnerIdType>(location & 0xFFFFFFFFULL),
+                               static_cast<InnerIdType>(location & LOCATION_MASK),
                                inner_ids[i],
                                i,
                                INVALID_CACHE_VERSION});
@@ -1097,7 +1095,7 @@ RaBitQSplitBucketDataCell::query_residual_by_inner_ids(
         fallback_positions.clear();
         auto convert_shared_filter_inner_product = [&](InnerIdType position,
                                                        float shared_filter_inner_product) {
-            if (not IsFiniteFloat(shared_filter_inner_product)) {
+            if (not IsFiniteFloatBits(shared_filter_inner_product)) {
                 return false;
             }
             const uint64_t block_index =
@@ -1112,7 +1110,7 @@ RaBitQSplitBucketDataCell::query_residual_by_inner_ids(
                        index_in_block,
                        shared_filter_inner_product,
                        sorted_filter_inner_products.data() + position) and
-                   IsFiniteFloat(sorted_filter_inner_products[position]);
+                   IsFiniteFloatBits(sorted_filter_inner_products[position]);
         };
         for (InnerIdType i = group_begin; i < group_end; ++i) {
             bool entry_is_current =
@@ -1148,7 +1146,7 @@ RaBitQSplitBucketDataCell::query_residual_by_inner_ids(
                 if (entries[i].offset_id < this->residual_bias_[bucket_id].size()) {
                     full_add = this->residual_bias_[bucket_id][entries[i].offset_id];
                 }
-                reusable_inner_product_valid = IsFiniteFloat(full_add);
+                reusable_inner_product_valid = IsFiniteFloatBits(full_add);
             }
             if (reusable_inner_product_valid) {
                 reusable_ids[reusable_count] = sorted_ids[i];
@@ -1236,6 +1234,10 @@ RaBitQSplitBucketDataCell::query_residual_by_inner_ids(
         }
     }
     for (uint64_t i = 0; i < stale_ids.size(); ++i) {
+        // A failed re-resolution (the lane was deleted, or kept moving across
+        // retries) intentionally leaves the distance at FLT_MAX. The entry is still
+        // reported instead of being dropped, and FLT_MAX can never win top-k
+        // selection, so no separate invalid marker is required.
         float stale_dist = std::numeric_limits<float>::max();
         this->query_current_by_inner_id(stale_dist, computer, stale_ids[i], ctx);
         result_dists[stale_result_offsets[i]] = stale_dist;

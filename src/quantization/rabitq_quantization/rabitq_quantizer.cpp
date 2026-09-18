@@ -29,6 +29,7 @@
 #include "simd/pqfs_simd.h"
 #include "simd/rabitq_simd.h"
 #include "typing.h"
+#include "utils/float_utils.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -55,13 +56,6 @@ FastScanUniformRandom(uint64_t* random_state) {
     value ^= value >> 31U;
     constexpr float kInverseRandomRange = 1.0F / static_cast<float>(1U << 24U);
     return static_cast<float>(value >> 40U) * kInverseRandomRange;
-}
-
-bool
-IsFiniteFloatBits(float value) {
-    uint32_t bits = 0;
-    memcpy(&bits, &value, sizeof(bits));
-    return (bits & 0x7F800000U) != 0x7F800000U;
 }
 
 float
@@ -1462,6 +1456,9 @@ RaBitQuantizer<metric>::ComputeFastScan32ResidualFactors(const uint8_t* one_bit_
     float filter_error = 0.0F;
     memcpy(&base_norm, one_bit_code + OneBitRecordNormOffset(), sizeof(base_norm));
     memcpy(&filter_error, one_bit_code + OneBitRecordOneBitErrorOffset(), sizeof(filter_error));
+    // The residual scale below is a magnitude, so the sign of the stored error does
+    // not matter here. This deliberately differs from the exact split-code path,
+    // which keeps the sign through EffectiveRaBitQError.
     filter_error = std::fabs(filter_error);
     if (filter_error <= 1e-5F or not IsFiniteFloatBits(base_norm)) {
         f_add = std::numeric_limits<float>::max();

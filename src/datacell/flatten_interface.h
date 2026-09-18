@@ -402,9 +402,10 @@ public:
     DiscardFilterCodes() {
     }
 
+    // Only datacells that actually store filter codes override this to true.
     [[nodiscard]] virtual bool
     HasFilterCodes() const {
-        return true;
+        return false;
     }
 
     virtual void

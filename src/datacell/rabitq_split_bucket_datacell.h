@@ -378,6 +378,7 @@ private:
 
     static constexpr uint64_t FASTSCAN_BATCH_SIZE = 32;
     static constexpr uint64_t LOCATION_SPLIT_BIT = 32;
+    static constexpr uint64_t LOCATION_MASK = (1ULL << LOCATION_SPLIT_BIT) - 1ULL;
     static constexpr uint64_t PACKED_FILTER_STORAGE_MAGIC = 0x3154425346514252ULL;
     static constexpr uint32_t PACKED_FILTER_STORAGE_VERSION = 3;
     static constexpr uint32_t PACKED_RESIDUAL_FULL_FACTOR_STORAGE_VERSION = 4;

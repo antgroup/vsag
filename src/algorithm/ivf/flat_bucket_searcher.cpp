@@ -20,6 +20,7 @@
 #include "attr/executor/executor.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "impl/searcher/basic_searcher.h"
+#include "utils/float_utils.h"
 
 namespace vsag {
 
@@ -86,7 +87,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                 reasoning_ctx->RecordVisit(origin_id, dist[j], 0);
             }
             if (param.distance_threshold.has_value() and
-                (not std::isfinite(dist[j]) or
+                (not IsFiniteFloatBits(dist[j]) or
                  (not param.enable_reorder and dist[j] > param.distance_threshold.value()))) {
                 continue;
             }

@@ -20,19 +20,9 @@
 #include "simd/kernels/kernels.h"
 #include "simd/kernels/rabitq_pack.h"
 #include "simd/traits/simd_traits_generic.h"
+#include "utils/float_utils.h"
 
 namespace vsag::generic {
-
-namespace {
-
-bool
-IsFiniteFloatBits(float value) {
-    uint32_t bits = 0;
-    std::memcpy(&bits, &value, sizeof(bits));
-    return (bits & 0x7F800000U) != 0x7F800000U;
-}
-
-}  // namespace
 
 float
 L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {

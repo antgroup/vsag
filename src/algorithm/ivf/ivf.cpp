@@ -43,6 +43,7 @@
 #include "query_context.h"
 #include "rabitq_split_bucket_searcher.h"
 #include "storage/stream_writer.h"
+#include "utils/float_utils.h"
 #include "utils/util_functions.h"
 #include "vsag_exception.h"
 
@@ -144,7 +145,7 @@ public:
                 ctx.reasoning_ctx->RecordReorder(ids[i], hints[i], distances[i]);
             }
             if (distance_threshold.has_value() and
-                (not std::isfinite(distances[i]) or distances[i] > *distance_threshold)) {
+                (not IsFiniteFloatBits(distances[i]) or distances[i] > *distance_threshold)) {
                 continue;
             }
             if (result->Size() < static_cast<uint64_t>(topk) or

@@ -77,6 +77,9 @@ RaBitQSupplementMask(uint32_t bits) {
     return bits >= 8U ? 0xFFU : static_cast<uint8_t>((1U << bits) - 1U);
 }
 
+// `packed` must already be zeroed for the chunk (RaBitQPackScalarSupplementCode does
+// that for the whole layout). A chunk only spans ChunkBytes() == bits * 8 bytes, so for
+// bits == 6 the seventh plane at packed[48] does not exist and must not be touched.
 inline void
 RaBitQPackCompactSupplementChunk(const uint8_t* values, uint8_t* packed, uint32_t bits) {
     if (bits == 5U) {

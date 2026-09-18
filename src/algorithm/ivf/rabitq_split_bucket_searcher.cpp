@@ -16,7 +16,6 @@
 
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <limits>
 
 #include "attr/executor/executor.h"
@@ -24,19 +23,9 @@
 #include "impl/searcher/basic_searcher.h"
 #include "query_context.h"
 #include "simd/pqfs_simd.h"
+#include "utils/float_utils.h"
 
 namespace vsag {
-
-namespace {
-
-bool
-IsFiniteFloatBits(float value) {
-    uint32_t bits = 0;
-    std::memcpy(&bits, &value, sizeof(bits));
-    return (bits & 0x7F800000U) != 0x7F800000U;
-}
-
-}  // namespace
 
 void
 RaBitQSplitBucketSearcher::Search(BucketIdType bucket_id,
