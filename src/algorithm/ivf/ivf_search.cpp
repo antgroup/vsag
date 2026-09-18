@@ -187,9 +187,10 @@ IVF::reorder(int64_t topk,
              const InnerSearchParam& param,
              QueryContext& ctx,
              ReasoningContext* reasoning_ctx,
-             const std::optional<float>& distance_threshold) const {
-    auto reorder_heap =
-        reorder_->Reorder(input, query, topk, ctx, nullptr, nullptr, distance_threshold);
+             const std::optional<float>& distance_threshold,
+             const ComputerInterfacePtr& bucket_computer) const {
+    auto reorder_heap = reorder_->Reorder(
+        input, query, topk, ctx, nullptr, nullptr, distance_threshold, bucket_computer);
     auto dataset_results = this->pack_knn_result(reorder_heap, ctx.alloc);
 
     return dataset_results;
@@ -200,7 +201,8 @@ DistHeapPtr
 IVF::search(const DatasetPtr& query,
             const InnerSearchParam& param,
             QueryContext& ctx,
-            ReasoningContext* reasoning_ctx) const {
+            ReasoningContext* reasoning_ctx,
+            ComputerInterfacePtr* bucket_computer) const {
     const auto* query_data = query->GetFloat32Vectors();
     Vector<BucketIdType> candidate_buckets(allocator_);
     if (not param.bucket_ids.empty()) {
@@ -214,7 +216,11 @@ IVF::search(const DatasetPtr& query,
     if (reasoning_ctx != nullptr) {
         reasoning_ctx->RecordBucketSelection(candidate_buckets);
     }
-    auto computer = bucket_->FactoryComputer(query_data);
+    auto computer = bucket_->FactoryComputerForBuckets(
+        query_data, candidate_buckets.data(), candidate_buckets.size());
+    if (bucket_computer != nullptr) {
+        *bucket_computer = computer;
+    }
 
     int64_t topk = param.topk;
     if constexpr (mode == RANGE_SEARCH) {
@@ -242,10 +248,20 @@ IVF::search(const DatasetPtr& query,
     }
     std::vector<DistHeapPtr> heaps(search_thread_count);
     std::atomic<uint64_t> cur_bucket_num(0);
+    const bool collect_candidate_filter_inner_products =
+        mode == KNN_SEARCH and use_reorder_ and param.enable_reorder and
+        bucket_->SupportSplitCodeStorage() and buckets_per_data_ == 1;
     auto search_func = [&](int64_t thread_id) -> void {
-        heaps[thread_id] = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
+        if (collect_candidate_filter_inner_products) {
+            heaps[thread_id] =
+                DistanceHeap::MakeInstanceBySizeWithAuxiliary<true, false>(this->allocator_, topk);
+        } else {
+            heaps[thread_id] =
+                DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
+        }
         auto& heap = heaps[thread_id];
         Vector<float> dist(allocator_);
+        Vector<InnerIdType> scanned_inner_ids(allocator_);
         uint64_t i = cur_bucket_num.fetch_add(1);
         for (; i < bucket_count; i = cur_bucket_num.fetch_add(1)) {
             if (param.time_cost != nullptr and param.time_cost->CheckOvertime() and
@@ -266,6 +282,7 @@ IVF::search(const DatasetPtr& query,
                                      buckets_per_data_,
                                      heap,
                                      dist,
+                                     scanned_inner_ids,
                                      reasoning_ctx);
         }
     };
@@ -284,18 +301,34 @@ IVF::search(const DatasetPtr& query,
         for (auto& future : futures) {
             future.get();
         }
-        search_result = DistanceHeap::MakeInstanceBySize<true, true>(this->allocator_, topk);
+        if (collect_candidate_filter_inner_products) {
+            search_result =
+                DistanceHeap::MakeInstanceBySizeWithAuxiliary<true, true>(this->allocator_, topk);
+        } else {
+            search_result = DistanceHeap::MakeInstanceBySize<true, true>(this->allocator_, topk);
+        }
         for (auto& heap : heaps) {
-            auto size = heap->Size();
-            const auto* data = heap->GetData();
-            for (int i = 0; i < size; ++i) {
+            const auto size = heap->Size();
+            const auto* auxiliary_data = heap->GetDataWithAuxiliary();
+            const auto* data = auxiliary_data == nullptr ? heap->GetData() : nullptr;
+            for (uint64_t i = 0; i < size; ++i) {
+                const auto& record = auxiliary_data == nullptr ? data[i] : auxiliary_data[i].record;
                 if (reasoning_ctx != nullptr and
                     search_result->Size() >= static_cast<uint64_t>(topk) and
-                    data[i].first < search_result->Top().first) {
+                    record.first < search_result->Top().first) {
                     reasoning_ctx->RecordEviction(search_result->Top().second / buckets_per_data_,
                                                   1);
                 }
-                search_result->Push(data[i]);
+                if (auxiliary_data == nullptr) {
+                    search_result->Push(record);
+                } else {
+                    search_result->PushWithAuxiliary(record.first,
+                                                     record.second,
+                                                     auxiliary_data[i].auxiliary,
+                                                     auxiliary_data[i].source_bucket_id,
+                                                     auxiliary_data[i].source_offset_id,
+                                                     auxiliary_data[i].source_version);
+                }
             }
         }
     }
@@ -733,12 +766,20 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             param.range_search_limit_size =
                 static_cast<int>(param.factor * static_cast<float>(request.limited_size_));
         }
-        auto search_result = this->search<RANGE_SEARCH>(query, param, ctx, reasoning_ctx.get());
+        ComputerInterfacePtr bucket_computer = nullptr;
+        auto search_result =
+            this->search<RANGE_SEARCH>(query, param, ctx, reasoning_ctx.get(), &bucket_computer);
         if (use_reorder_ and param.enable_reorder) {
             int64_t k = (request.limited_size_ > 0) ? request.limited_size_
                                                     : static_cast<int64_t>(search_result->Size());
-            auto result = reorder(
-                k, search_result, query->GetFloat32Vectors(), param, ctx, reasoning_ctx.get());
+            auto result = reorder(k,
+                                  search_result,
+                                  query->GetFloat32Vectors(),
+                                  param,
+                                  ctx,
+                                  reasoning_ctx.get(),
+                                  std::nullopt,
+                                  bucket_computer);
             result->Statistics(stats.Dump());
             this->AttachReasoningReport(result, reasoning_ctx.get());
             return result;
@@ -765,7 +806,9 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     // Reordered searches defer the finite bound to exact distances, but bucket selection still
     // needs threshold-mode state so non-finite approximations cannot consume the rerank pool.
     param.distance_threshold = request.threshold_;
-    auto search_result = this->search<KNN_SEARCH>(query, param, ctx, reasoning_ctx.get());
+    ComputerInterfacePtr bucket_computer = nullptr;
+    auto search_result =
+        this->search<KNN_SEARCH>(query, param, ctx, reasoning_ctx.get(), &bucket_computer);
     if (reorder_enabled) {
         auto result = reorder(request.threshold_.has_value() ? param.topk : request.topk_,
                               search_result,
@@ -773,7 +816,8 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                               param,
                               ctx,
                               reasoning_ctx.get(),
-                              request.threshold_);
+                              request.threshold_,
+                              bucket_computer);
         result = FilterDatasetByThreshold(result, request.threshold_, ctx.alloc, request.topk_);
         AttachReasoningReport(result, reasoning_ctx.get());
         result->Statistics(stats.Dump());

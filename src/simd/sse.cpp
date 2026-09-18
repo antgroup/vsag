@@ -617,6 +617,73 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
 }
 
 void
+PQFastScanLookUp32HighAcc(const uint8_t* RESTRICT low_lookup_table,
+                          const uint8_t* RESTRICT high_lookup_table,
+                          const uint8_t* RESTRICT codes,
+                          uint64_t pq_dim,
+                          int32_t* RESTRICT result) {
+    generic::PQFastScanLookUp32HighAcc(low_lookup_table, high_lookup_table, codes, pq_dim, result);
+}
+
+void
+PQFastScanLookUp32HighAccOverwrite(const uint8_t* RESTRICT low_lookup_table,
+                                   const uint8_t* RESTRICT high_lookup_table,
+                                   const uint8_t* RESTRICT codes,
+                                   uint64_t pq_dim,
+                                   int32_t* RESTRICT result) {
+    for (uint64_t lane = 0; lane < 32; ++lane) {
+        result[lane] = 0;
+    }
+    PQFastScanLookUp32HighAcc(low_lookup_table, high_lookup_table, codes, pq_dim, result);
+}
+
+uint32_t
+FP32LessThan32Mask(const float* values, float limit) {
+#if defined(ENABLE_SSE)
+    const auto limit_vec = _mm_set1_ps(limit);
+    uint32_t mask = 0;
+    for (uint64_t i = 0; i < 8; ++i) {
+        const auto value = _mm_loadu_ps(values + i * 4);
+        mask |= static_cast<uint32_t>(_mm_movemask_ps(_mm_cmplt_ps(value, limit_vec))) << (i * 4);
+    }
+    return mask;
+#else
+    return generic::FP32LessThan32Mask(values, limit);
+#endif
+}
+
+uint32_t
+RaBitQFastScan32ResidualPostprocess(const int32_t* accumulators,
+                                    uint32_t filter_bits,
+                                    float delta,
+                                    float sum_vl,
+                                    float query_sum,
+                                    float query_norm,
+                                    float query_bucket_norm_sqr,
+                                    float inv_sqrt_d,
+                                    const float* f_add,
+                                    const float* f_scale,
+                                    const float* filter_norm_codes,
+                                    uint32_t valid_size,
+                                    float* dists,
+                                    float* filter_inner_products) {
+    return generic::RaBitQFastScan32ResidualPostprocess(accumulators,
+                                                        filter_bits,
+                                                        delta,
+                                                        sum_vl,
+                                                        query_sum,
+                                                        query_norm,
+                                                        query_bucket_norm_sqr,
+                                                        inv_sqrt_d,
+                                                        f_add,
+                                                        f_scale,
+                                                        filter_norm_codes,
+                                                        valid_size,
+                                                        dists,
+                                                        filter_inner_products);
+}
+
+void
 BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_SSE)
     simd::BitAndImpl<simd::BitTraits<simd::SseBitTag>>(x, y, num_byte, result, &generic::BitAnd);
