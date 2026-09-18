@@ -198,6 +198,9 @@ public:
     std::string
     GetStats() const override;
 
+    [[nodiscard]] AnalyzerBasePtr
+    CreateAnalyzer(const AnalyzerParam& param) const override;
+
     std::string
     AnalyzeIndexBySearch(const SearchRequest& request) override;
 
