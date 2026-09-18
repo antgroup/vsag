@@ -18,6 +18,7 @@ COVERAGE_VERIFIER = ROOT / "scripts/coverage/verify_cpp_coverage.py"
 CODECOV_CONFIG = ROOT / ".github/codecov.yml"
 PARALLEL_TEST_RUNNER = ROOT / "scripts/testing/test_parallel_bg.sh"
 PR_CI_WORKFLOW = ROOT / ".github/workflows/pr-ci.yml"
+COVERAGE_WORKFLOW = ROOT / ".github/workflows/coverage.yml"
 
 
 class DiagnosticRunnerTest(unittest.TestCase):
@@ -472,6 +473,73 @@ class CodecovComponentTest(unittest.TestCase):
 
 
 class CoverageWorkflowTest(unittest.TestCase):
+    def test_container_workspace_trust_allows_tracked_source_verification(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory) / "workspace"
+            workspace.mkdir()
+            subprocess.run(["git", "init", "-q", str(workspace)], check=True)
+            (workspace / "src").mkdir()
+            (workspace / "src/example.cpp").write_text("int example;\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "-C", str(workspace), "add", "src/example.cpp"], check=True
+            )
+            trace = workspace / "coverage.info"
+            trace.write_text(
+                "SF:src/example.cpp\nDA:1,1\nBRDA:1,0,0,1\nend_of_record\n",
+                encoding="utf-8",
+            )
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "GITHUB_ACTIONS": "true",
+                    "GITHUB_WORKSPACE": str(workspace),
+                    "GIT_CONFIG_GLOBAL": str(Path(directory) / "gitconfig"),
+                    "GIT_CONFIG_NOSYSTEM": "1",
+                    "GIT_TEST_ASSUME_DIFFERENT_OWNER": "1",
+                }
+            )
+            command = [
+                "python3",
+                str(COVERAGE_VERIFIER),
+                "trace",
+                str(trace),
+                "--source-root",
+                str(workspace),
+            ]
+            unsafe = subprocess.run(command, env=environment, capture_output=True, text=True)
+            self.assertEqual(unsafe.returncode, 1)
+            self.assertIn("dubious ownership", unsafe.stderr)
+            self.assertIn("exit status 128", unsafe.stderr)
+
+            workflow = COVERAGE_WORKFLOW.read_text(encoding="utf-8")
+            setup = re.search(
+                r"^      - name: Configure Git workspace\n"
+                r"        run: (?P<command>[^\n]+)\n",
+                workflow,
+                flags=re.MULTILINE,
+            )
+            self.assertIsNotNone(setup, "Coverage must configure container workspace trust")
+            self.assertLess(
+                setup.start(), workflow.index("      - name: Compile with Coverage Flags")
+            )
+            configured = subprocess.run(
+                ["bash", "-c", setup.group("command")],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(configured.returncode, 0, configured.stderr)
+            safe = subprocess.run(command, env=environment, capture_output=True, text=True)
+            self.assertEqual(safe.returncode, 0, safe.stderr)
+            self.assertIn("verified 1 repository production source records", safe.stdout)
+            trusted = subprocess.check_output(
+                ["git", "config", "--global", "--get-all", "safe.directory"],
+                env=environment,
+                text=True,
+            )
+            self.assertEqual(trusted.splitlines(), [str(workspace)])
+
     def test_premerge_check_is_configuration_only(self):
         workflow = PR_CI_WORKFLOW.read_text(encoding="utf-8")
         job_match = re.search(
