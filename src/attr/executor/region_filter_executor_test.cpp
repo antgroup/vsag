@@ -25,10 +25,10 @@ namespace {
 
 template <typename Type, typename List>
 void
-InsertTypedAttributes(const AttrInvertedInterfacePtr& index,
-                      Type type_value,
-                      std::vector<List> region_values,
-                      std::vector<List> residence_values) {
+insert_typed_attributes(const AttrInvertedInterfacePtr& index,
+                        Type type_value,
+                        std::vector<List> region_values,
+                        std::vector<List> residence_values) {
     AttributeValue<Type> type;
     type.name_ = "kind";
     type.GetValue() = {type_value};
@@ -138,7 +138,10 @@ TEST_CASE("RegionFilterExecutor truth table and expression fields", "[ut][Region
     }
 
     auto expression = AstParse(R"(region_filter(kind,geo,home,"10|404","20|405","30|406"))");
-    auto executor = Executor::MakeInstance(allocator.get(), expression, attr_index);
+    ExecutorPtr executor =
+        GENERATE(false, true)
+            ? Executor::MakeInstance(allocator.get(), expression, attr_index)
+            : std::make_shared<RegionFilterExecutor>(allocator.get(), expression, attr_index);
     REQUIRE(std::dynamic_pointer_cast<RegionFilterExecutor>(executor) != nullptr);
     executor->Init();
     auto* filter = executor->Run(3);
@@ -162,7 +165,10 @@ TEST_CASE("RegionFilterExecutor validates inputs and lifecycle", "[ut][RegionFil
     attr_index->Insert(row.set, 0, 0);
 
     auto expression = AstParse(R"(region_filter(kind,geo,home,"10","20","30"))");
-    auto executor = Executor::MakeInstance(allocator.get(), expression, attr_index);
+    ExecutorPtr executor =
+        GENERATE(false, true)
+            ? Executor::MakeInstance(allocator.get(), expression, attr_index)
+            : std::make_shared<RegionFilterExecutor>(allocator.get(), expression, attr_index);
     REQUIRE_THROWS_AS(executor->Run(), VsagException);
 
     try {
@@ -214,7 +220,7 @@ TEST_CASE("RegionFilterExecutor checks integer field boundaries", "[ut][RegionFi
 
     SECTION("signed boundaries are accepted") {
         auto index = AttributeInvertedInterface::MakeInstance(allocator.get(), true);
-        InsertTypedAttributes<int8_t, int8_t>(index, -1, {-128, 127}, {-128, 127});
+        insert_typed_attributes<int8_t, int8_t>(index, -1, {-128, 127}, {-128, 127});
         auto expression =
             AstParse(R"(region_filter(kind,geo,home,"-128|127","-128|127","-128|127"))");
         auto executor = std::make_shared<RegionFilterExecutor>(allocator.get(), expression, index);
@@ -224,7 +230,7 @@ TEST_CASE("RegionFilterExecutor checks integer field boundaries", "[ut][RegionFi
 
     SECTION("signed overflow is rejected") {
         auto index = AttributeInvertedInterface::MakeInstance(allocator.get(), true);
-        InsertTypedAttributes<int8_t, int8_t>(index, 1, {0}, {0});
+        insert_typed_attributes<int8_t, int8_t>(index, 1, {0}, {0});
         auto expression = AstParse(R"(region_filter(kind,geo,home,"128","0","0"))");
         REQUIRE_THROWS_AS(
             std::make_shared<RegionFilterExecutor>(allocator.get(), expression, index),
@@ -237,7 +243,7 @@ TEST_CASE("RegionFilterExecutor checks integer field boundaries", "[ut][RegionFi
 
     SECTION("unsigned list boundaries are checked") {
         auto index = AttributeInvertedInterface::MakeInstance(allocator.get(), true);
-        InsertTypedAttributes<int16_t, uint8_t>(index, 2, {0, 255}, {0, 255});
+        insert_typed_attributes<int16_t, uint8_t>(index, 2, {0, 255}, {0, 255});
         auto expression = AstParse(R"(region_filter(kind,geo,home,"0|255","0|255","255"))");
         auto executor = std::make_shared<RegionFilterExecutor>(allocator.get(), expression, index);
         executor->Init();
@@ -255,7 +261,7 @@ TEST_CASE("RegionFilterExecutor checks integer field boundaries", "[ut][RegionFi
 
     SECTION("unsigned type field is rejected because it cannot represent minus one") {
         auto index = AttributeInvertedInterface::MakeInstance(allocator.get(), true);
-        InsertTypedAttributes<uint8_t, int16_t>(index, 1, {10}, {20});
+        insert_typed_attributes<uint8_t, int16_t>(index, 1, {10}, {20});
         auto expression = AstParse(R"(region_filter(kind,geo,home,"10","20","30"))");
         REQUIRE_THROWS_AS(
             std::make_shared<RegionFilterExecutor>(allocator.get(), expression, index),
