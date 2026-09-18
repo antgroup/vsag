@@ -19,9 +19,11 @@
 #include <vector>
 
 #include "nlohmann/json.hpp"
+#include "vsag/bitset.h"
 #include "vsag/dataset.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
+#include "vsag/filter.h"
 #include "vsag/index.h"
 
 namespace vsag::autotune {
@@ -59,6 +61,15 @@ struct Workload {
     uint64_t top_k{0};
     /// Number of evaluator search threads.
     uint64_t concurrency{1};
+    /// Optional per-query ID filters for HGraph. When non-empty, the vector must contain exactly
+    /// one entry per query; a null entry means that query is unfiltered. Filters may be invoked
+    /// concurrently and repeatedly during tuning, and ValidRatio() must describe their actual
+    /// selectivity.
+    std::vector<FilterPtr> query_filters;
+    /// Optional per-query HGraph exclusion bitsets. A set bit excludes the corresponding external
+    /// ID. This vector follows the same size and null-entry rules as query_filters, and the two
+    /// vectors are mutually exclusive.
+    std::vector<BitsetPtr> query_invalid_bitsets;
 };
 
 /// Evaluation options shared by index and search tuning.
