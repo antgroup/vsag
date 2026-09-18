@@ -428,6 +428,16 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
         fused_graph_ != nullptr and split_codes != nullptr,
         "fused reorder requires fused graph and RaBitQ split codes");
+    ComputerInterfacePtr shared_computer;
+    const auto get_computer = [&]() -> const ComputerInterfacePtr& {
+        if (shared_computer == nullptr) {
+            shared_computer =
+                ctx.computer_pool != nullptr and split_codes->UsesExternalFusedCodeStorage()
+                    ? AcquireQueryComputer(flatten_, query, &ctx).computer
+                    : split_codes->FactoryFusedComputer(query);
+        }
+        return shared_computer;
+    };
     // set query allocator
     Allocator* query_allocator = select_query_allocator(ctx.alloc, allocator_);
     auto is_distance_eligible = [&distance_threshold](float distance) {
@@ -455,7 +465,7 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
     if (rabitq_lower_bound_candidates == nullptr) {
         topk = std::min(topk, static_cast<int64_t>(heap_candidate_size));
         auto reorder_heap = std::make_shared<StandardHeap<true, false>>(query_allocator, topk);
-        auto computer = split_codes->FactoryFusedComputer(query);
+        const auto& computer = get_computer();
         Vector<InnerIdType> ids(heap_candidate_size, query_allocator);
         Vector<float> dists(heap_candidate_size, query_allocator);
         const auto* candidate_result = input == nullptr ? nullptr : input->GetData();
@@ -562,14 +572,6 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
         }
     }
 
-    ComputerInterfacePtr computer{nullptr};
-    const auto ensure_computer = [&]() -> const ComputerInterfacePtr& {
-        if (computer == nullptr) {
-            computer = split_codes->FactoryFusedComputer(query);
-        }
-        return computer;
-    };
-
     const uint64_t unhinted_candidate_size = candidate_size - hinted_candidate_size;
     if (unhinted_candidate_size > 0) {
         add_reorder_lower_bound_probe_count(ctx, unhinted_candidate_size);
@@ -578,7 +580,7 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
                              lower_bounds.data() + hinted_candidate_size,
                              filter_inner_products.data() + hinted_candidate_size,
                              split_codes,
-                             ensure_computer(),
+                             get_computer(),
                              all_ids.data() + hinted_candidate_size,
                              unhinted_candidate_size,
                              &ctx);
@@ -667,7 +669,7 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
                 QueryFusedFullWithHint(missing_dists.data(),
                                        missing_hints.data(),
                                        split_codes,
-                                       ensure_computer(),
+                                       get_computer(),
                                        missing_ids.data(),
                                        missing_count,
                                        &ctx);

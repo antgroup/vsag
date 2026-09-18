@@ -814,6 +814,9 @@ TEST_CASE("HGraph maps and validates fused RaBitQ split datacell", "[ut][HGraphP
     auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
     REQUIRE(typed_param != nullptr);
     REQUIRE(typed_param->rabitq_fused_datacell);
+    REQUIRE(typed_param->rabitq_centroid_count == 16);
+    REQUIRE(typed_param->kmeans_iterations == 25);
+    REQUIRE(std::string(vsag::KMEANS_ITERATIONS) == "kmeans_iterations");
     REQUIRE_FALSE(typed_param->mci_parameters.enabled);
     REQUIRE(typed_param->base_codes_param->name == std::string(vsag::RABITQ_SPLIT_DATA_CELL));
 
@@ -836,6 +839,41 @@ TEST_CASE("HGraph maps and validates fused RaBitQ split datacell", "[ut][HGraphP
             param["rabitq_bits_per_dim_precise"].SetInt(8 - filter_bits);
             CAPTURE(filter_bits);
             REQUIRE_NOTHROW(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+        }
+    }
+
+    SECTION("arbitrary cluster counts round trip and participate in compatibility") {
+        for (auto k : {1, 7, 33, 1000, 3162, 10000, 10001}) {
+            auto param = make_param();
+            param[vsag::RABITQ_CENTROID_COUNT].SetInt(k);
+            param[vsag::KMEANS_ITERATIONS].SetInt(3);
+            auto parsed = std::dynamic_pointer_cast<vsag::HGraphParameter>(
+                vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+            REQUIRE(parsed->rabitq_centroid_count == k);
+            REQUIRE(parsed->kmeans_iterations == 3);
+            auto restored = std::make_shared<vsag::HGraphParameter>(parsed->ToJson());
+            REQUIRE(restored->rabitq_centroid_count == k);
+            REQUIRE(restored->kmeans_iterations == 3);
+            REQUIRE(parsed->CheckCompatibility(restored));
+            // Iterations control initial training, not the layout of an already trained model.
+            restored->kmeans_iterations = 4;
+            REQUIRE(parsed->CheckCompatibility(restored));
+            REQUIRE_FALSE(typed_param->CheckCompatibility(restored));
+        }
+    }
+
+    SECTION("reject invalid cluster counts and iterations") {
+        for (const auto* key : {vsag::RABITQ_CENTROID_COUNT, vsag::KMEANS_ITERATIONS}) {
+            for (int64_t value : {-1LL, 0LL, 2147483648LL}) {
+                auto param = make_param();
+                param[key].SetInt(value);
+                REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+            }
+            for (const auto* value : {"1.5", "true", "\"16\"", "18446744073709551615"}) {
+                auto param = make_param();
+                param[key] = vsag::JsonType::Parse(value);
+                REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+            }
         }
     }
 

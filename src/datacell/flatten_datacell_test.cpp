@@ -332,7 +332,7 @@ TEST_CASE("RaBitQSplitDataCell fused residual clusters", "[ut][RaBitQSplitDataCe
     REQUIRE(split->FusedFilterBits() == 1);
     REQUIRE(split->FusedSupplementBits() == 7);
     REQUIRE(split->UsesLegacyHnswFusedCodec());
-    split->TrainFusedCodec(vectors.data(), count, cluster_count);
+    split->TrainFusedCodec(vectors.data(), count, cluster_count, 25);
     const auto codec_model = split->ExportFusedCodec();
     REQUIRE_FALSE(codec_model.empty());
 
@@ -357,7 +357,7 @@ TEST_CASE("RaBitQSplitDataCell fused residual clusters", "[ut][RaBitQSplitDataCe
         CAPTURE(invalid_value);
         std::vector<float> invalid_training(vectors.data(), vectors.data() + vectors.size());
         invalid_training[0] = invalid_value;
-        REQUIRE_THROWS(split->TrainFusedCodec(invalid_training.data(), count, cluster_count));
+        REQUIRE_THROWS(split->TrainFusedCodec(invalid_training.data(), count, cluster_count, 25));
         REQUIRE(split->ExportFusedCodec() == codec_model);
 
         std::vector<float> invalid_vector(vectors.data(), vectors.data() + dim);
@@ -505,7 +505,7 @@ TEST_CASE("RaBitQSplitDataCell native fused bit splits", "[ut][RaBitQSplitDataCe
         REQUIRE(split->FusedSupplementBits() == split_case.supplement_bits);
         REQUIRE_FALSE(split->UsesLegacyHnswFusedCodec());
 
-        split->TrainFusedCodec(vectors.data(), count, cluster_count);
+        split->TrainFusedCodec(vectors.data(), count, cluster_count, 25);
         auto graph_param = std::make_shared<GraphDataCellParameter>();
         graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
         graph_param->max_degree_ = 8;
@@ -759,7 +759,7 @@ TEST_CASE("RaBitQSplitDataCell fused zero residual metadata",
             auto split = std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(flatten);
             REQUIRE(split != nullptr);
             REQUIRE_FALSE(split->UsesLegacyHnswFusedCodec());
-            split->TrainFusedCodec(vectors.data(), count, cluster_count);
+            split->TrainFusedCodec(vectors.data(), count, cluster_count, 25);
 
             Vector<uint8_t> one_bit(split->OneBitCodeSize(), allocator.get());
             Vector<uint8_t> supplement(split->SupplementCodeSize(), allocator.get());
@@ -902,7 +902,7 @@ TEST_CASE("RaBitQSplitDataCell fused model-only serialization",
     flatten->BatchInsertVector(vectors.data(), count);
     auto split = std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(flatten);
     REQUIRE(split != nullptr);
-    split->TrainFusedCodec(vectors.data(), count, cluster_count);
+    split->TrainFusedCodec(vectors.data(), count, cluster_count, 25);
 
     const auto legacy_payload = serialize_flatten(flatten);
     const uint64_t memory_with_split_codes = flatten->GetMemoryUsage();

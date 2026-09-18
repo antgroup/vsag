@@ -34,10 +34,17 @@ namespace {
 struct HGraphVisitedListGuard {
     std::shared_ptr<VisitedListPool> pool;
     VisitedListPtr visited_list;
-    ~HGraphVisitedListGuard() {
+
+    void
+    Release() {
         if (visited_list != nullptr) {
             pool->ReturnOne(visited_list);
+            visited_list.reset();
         }
+    }
+
+    ~HGraphVisitedListGuard() {
+        Release();
     }
 };
 
@@ -567,11 +574,29 @@ HGraph::search_range_with_request(const SearchRequest& request,
     QueryComputerPool query_computer_pool(raw_query, ctx.stats);
     ctx.computer_pool = &query_computer_pool;
     ctx.distance_phase = DistanceEvaluationPhase::ROUTING;
-    for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
-        auto result = this->search_one_graph(
-            raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param, vt, &ctx);
-        if (!result->Empty()) {
-            search_param.ep = result->Top().second;
+    if (rabitq_fused_datacell_ != nullptr and rabitq_split_codes_ != nullptr) {
+        search_param.rabitq_fused_computer =
+            AcquireQueryComputer(basic_flatten_codes_, raw_query, &ctx).computer;
+        for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
+            search_param.ep =
+                rabitq_fused_searcher_->Route(this->route_graphs_[i],
+                                              rabitq_fused_datacell_,
+                                              basic_flatten_codes_,
+                                              search_param.rabitq_fused_computer,
+                                              search_param.ep,
+                                              search_param.enable_rabitq_one_bit_search);
+        }
+    } else {
+        for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
+            auto result = this->search_one_graph(raw_query,
+                                                 this->route_graphs_[i],
+                                                 this->basic_flatten_codes_,
+                                                 search_param,
+                                                 vt,
+                                                 &ctx);
+            if (not result->Empty()) {
+                search_param.ep = result->Top().second;
+            }
         }
     }
     ctx.distance_phase = DistanceEvaluationPhase::APPROXIMATE;
@@ -631,6 +656,8 @@ HGraph::search_range_with_request(const SearchRequest& request,
                                                &ctx,
                                                rabitq_candidates_ptr);
     }
+
+    vt_guard.Release();
 
     if (mci_result.route != "mci" && not brute_force_used && use_reorder_ &&
         search_param.enable_reorder) {
@@ -1006,7 +1033,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         search_param.rabitq_fused_computer = nullptr;
         if (not use_custom_distance and rabitq_fused_datacell_ != nullptr and
             split_codes != nullptr) {
-            search_param.rabitq_fused_computer = split_codes->FactoryFusedComputer(raw_query);
+            search_param.rabitq_fused_computer =
+                AcquireQueryComputer(basic_flatten_codes_, raw_query, &ctx).computer;
             for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
                 ep_search_param.ep =
                     rabitq_fused_searcher_->Route(this->route_graphs_[i],
@@ -1071,6 +1099,11 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                                                    &ctx,
                                                    rabitq_candidates_ptr,
                                                    &fused_search_finalized);
+        }
+
+        // Reuse the visited list across batch rows, then release it before final reranking.
+        if (q_idx + 1 == query_count) {
+            vt_guard.Release();
         }
 
         const bool fused_search_already_reranked =
