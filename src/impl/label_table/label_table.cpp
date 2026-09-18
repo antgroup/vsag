@@ -171,6 +171,24 @@ LabelTable::Deserialize(StreamReader& reader) {
 }
 
 void
+LabelTable::TrimUnusedSlots(uint64_t valid_count) {
+    if (valid_count > label_table_.size()) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "label table is smaller than the stored vector count");
+    }
+    label_table_.resize(valid_count);
+    total_count_.store(static_cast<int64_t>(valid_count));
+    RebuildActivePaddingLabelIds();
+    if (use_reverse_map_) {
+        label_remap_.Clear();
+        label_remap_.Reserve(valid_count);
+        for (InnerIdType id = 0; id < valid_count; ++id) {
+            label_remap_.InsertOrAssign(label_table_[id], id);
+        }
+    }
+}
+
+void
 LabelTable::MergeOther(const LabelTablePtr& other, const IdMapFunction& id_map) {
     auto other_size = other->GetTotalCount();
     auto current_total_count = total_count_.load();

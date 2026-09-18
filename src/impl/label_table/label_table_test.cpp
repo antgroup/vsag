@@ -38,6 +38,52 @@ sorted_duplicates(std::vector<InnerIdType> ids) -> std::vector<InnerIdType> {
 
 }  // namespace
 
+TEST_CASE("LabelTable dense reservation and legacy trimming", "[ut][LabelTable]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    const bool reverse_map = GENERATE(false, true);
+    const bool real_zero = GENERATE(false, true);
+    LabelTable labels(allocator.get(), reverse_map);
+    labels.Reserve(10);
+    CHECK_FALSE(labels.CheckLabel(0));
+    labels.Insert(0, real_zero ? 0 : 118);
+    CHECK(labels.GetTotalCount() == 1);
+    CHECK(labels.CheckLabel(0) == real_zero);
+    CHECK(labels.TryGetIdByLabel(0).first == real_zero);
+    CHECK_THROWS_AS(labels.GetLabelById(1), VsagException);
+
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    labels.Serialize(writer);
+    IOStreamReader reader(stream);
+    LabelTable restored(allocator.get(), reverse_map);
+    restored.Deserialize(reader);
+    CHECK(restored.GetTotalCount() == 1);
+    CHECK(restored.CheckLabel(0) == real_zero);
+    CHECK(restored.GetIdByLabel(real_zero ? 0 : 118) == 0);
+
+    // The legacy payload carries the vector length, including reserved slots.
+    labels.Resize(10);
+    std::stringstream legacy;
+    IOStreamWriter legacy_writer(legacy);
+    labels.Serialize(legacy_writer);
+    IOStreamReader legacy_reader(legacy);
+    LabelTable legacy_restored(allocator.get(), reverse_map);
+    legacy_restored.Deserialize(legacy_reader);
+    legacy_restored.TrimUnusedSlots(1);
+    CHECK(legacy_restored.GetTotalCount() == 1);
+    CHECK(legacy_restored.CheckLabel(0) == real_zero);
+    CHECK(legacy_restored.GetIdByLabel(real_zero ? 0 : 118) == 0);
+    CHECK_THROWS_AS(legacy_restored.TrimUnusedSlots(2), VsagException);
+    legacy_restored.Reserve(20);
+    legacy_restored.Insert(1, -1);
+    CHECK(legacy_restored.HasActivePaddingLabel());
+    CHECK(legacy_restored.MarkRemove(-1) == 1);
+    legacy_restored.TrimUnusedSlots(2);
+    CHECK_FALSE(legacy_restored.HasActivePaddingLabel());
+    CHECK_FALSE(legacy_restored.CheckLabel(-1));
+    CHECK(legacy_restored.GetTotalCount() == 2);
+}
+
 TEST_CASE("LabelTable Basic Operations", "[ut][LabelTable]") {
     auto allocator = std::make_shared<DefaultAllocator>();
     LabelTable label_table(allocator.get());

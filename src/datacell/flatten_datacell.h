@@ -389,6 +389,14 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
                                               QueryContext* ctx) {
     Allocator* search_alloc = select_query_allocator(ctx, allocator_);
 
+    const auto total_count = this->TotalCount();
+    for (InnerIdType i = 0; i < id_count; ++i) {
+        if (idx[i] >= total_count) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "invalid internal id " + std::to_string(idx[i]));
+        }
+    }
+
     for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; i++) {
         this->layout_->Prefetch(idx[i], this->prefetch_depth_code_ * 64);
     }
@@ -400,7 +408,10 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
             double io_cost_ms = 0.0F;
             {
                 Timer timer(io_cost_ms);
-                this->layout_->MultiRead(idx, id_count, codes.data, search_alloc);
+                if (not this->layout_->MultiRead(idx, id_count, codes.data, search_alloc)) {
+                    throw VsagException(ErrorType::READ_ERROR,
+                                        "failed to read codes for batch distance evaluation");
+                }
             }
 
             if (ctx != nullptr and ctx->stats != nullptr) {
@@ -462,8 +473,17 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
 template <typename QuantTmpl, typename LayoutTmpl>
 float
 FlattenDataCell<QuantTmpl, LayoutTmpl>::ComputePairVectors(InnerIdType id1, InnerIdType id2) {
+    const auto total_count = this->TotalCount();
+    if (id1 >= total_count or id2 >= total_count) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "invalid internal id for pair distance evaluation");
+    }
     auto lease1 = this->layout_->Acquire(id1);
     auto lease2 = this->layout_->Acquire(id2);
+    if (not lease1 or not lease2) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "failed to acquire codes for pair distance evaluation");
+    }
     return this->quantizer_->Compute(lease1.Data(), lease2.Data());
 }
 

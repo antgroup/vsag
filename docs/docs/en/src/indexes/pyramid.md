@@ -425,6 +425,18 @@ the running total. Removing an id that is absent or already removed is a no-op.
 Mark-removed vectors still occupy memory until the index is rebuilt; the space is
 not physically reclaimed.
 
+## Label lookup and persistence
+
+Label `0` is valid. Reserved capacity does not create labels: `CheckIdExist(0)` is false
+when no vector has that label, and single-ID `CalcDistanceById` returns an error for a
+missing or mark-removed label.
+
+Pyramid writes only populated label slots using the existing length-prefixed vector format.
+When reading older payloads containing unused slots, it uses the stored vector count to
+discard the unused suffix and rebuild label mappings. Both seekable and streaming formats
+support this recovery. Older readers can still parse newly written payloads, but do not gain
+the corrected lookup behavior; upgrade the reader as well.
+
 ## See also
 
 - [Creating an Index](../guide/create_index.md)
