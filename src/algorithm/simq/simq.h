@@ -78,6 +78,11 @@ public:
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
 
+    float
+    CalcDistanceById(const DatasetPtr& query,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
+
     void
     Serialize(StreamWriter& writer) const override;
 

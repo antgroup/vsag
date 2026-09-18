@@ -25,6 +25,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/pyramid/pyramid_build_cache.h"
 #include "algorithm/pyramid/pyramid_path_store.h"
+#include "datacell/flatten_optimized_build_interface.h"
 #include "datacell/graph_interface.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
 #include "impl/allocator/safe_allocator.h"
@@ -150,14 +151,8 @@ public:
     CalcDistancesById(const float* query,
                       const int64_t* ids,
                       int64_t count,
-                      bool calculate_precise_distance = true) const override;
-
-    DatasetPtr
-    CalDistanceById(const float* query,
-                    const int64_t* ids,
-                    int64_t count,
-                    bool calculate_precise_distance = true,
-                    int64_t topk = -1) const override;
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const override;
 
     DatasetPtr
     GetDataByIdsWithFlag(const int64_t* ids,
@@ -559,6 +554,7 @@ private:
     IndexCommonParam common_param_;
     ODescentParameterPtr odescent_param_{nullptr};  // ODescent build parameters
     UnorderedMap<std::string, std::unique_ptr<Hierarchy>> hierarchies_;  // named hierarchies
+    FlattenOptimizedBuildInterfacePtr optimized_build_codes_{nullptr};
     FlattenInterfacePtr base_codes_{nullptr};     // coarse codes for online graph traversal
     FlattenInterfacePtr precise_codes_{nullptr};  // default construction/reorder codes when present
     FlattenInterfacePtr raw_vector_{nullptr};     // original vectors for decode-only paths

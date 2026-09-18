@@ -2,6 +2,28 @@
 
 This page documents how to build VSAG from source.
 
+## Build phase and cache reporting
+
+The collector preserves Ninja history for clean, warm-cache, and unchanged no-op phases.
+A no-op is verified only when available Ninja telemetry records zero build edges and the
+command succeeds; missing telemetry is explicitly unverified. Every observed category,
+including nested production modules such as datacell, tools, examples, and unclassified
+work, appears in JSON and Markdown. Multi-output edges count once. Cumulative edge time
+sums overlapping parallel durations and is not wall time; nested ExternalProject work
+is included in its parent edge rather than individually timed.
+
+Cacheable-request hit rate is `hits / (hits + misses)`. Available uncacheable reasons,
+including `could_not_use_precompiled_header`, are reported separately; missing counters
+and zero denominators are `null` in JSON and `n/a` in Markdown. Overall cache coverage is
+unavailable because compiler invocations bypassing ccache are not measured. Raw counters
+remain in JSON. This reporting does not change PCH or cache correctness settings.
+
+Dependency preparation timers cover source preparation and archive restoration before
+configure, not all dependency work: further downloads, configuration, compilation and
+installation occur in configure/build phases. Peak RSS from `/usr/bin/time -v` is the
+maximum resident set size reported for the timed command and waited-for children, not
+the sum of simultaneously resident build processes.
+
 ## Prerequisites
 
 - **OS**: Ubuntu 20.04+, CentOS 7+, or macOS 14+ on Apple Silicon
@@ -46,6 +68,28 @@ to Unix Makefiles. An explicit generator always wins; for example, use
 `make debug CMAKE_GENERATOR='Unix Makefiles'` to request the fallback directly. Because CMake build
 trees are generator-specific, run the matching clean target before changing the generator for an
 existing build directory.
+
+For configure/build targets, pass `DEBUG_BUILD_DIR` as a plain path, for example
+`make asan DEBUG_BUILD_DIR="custom build"`. The shell removes these command-line quotes;
+the recipes quote the path when invoking CMake. Do not embed literal quote characters in the variable.
+
+## Dependency size metrics
+
+The build metrics JSON uses schema version 3. Each dependency's `local_bytes` (the Markdown
+report's **Local size**) is an aggregate of file sizes, not allocated disk space. It replaces
+`source_bytes` and `build_bytes`: HDF5 and OpenBLAS build in their source trees, and ANTLR4's
+binary directory is nested under its source tree, so those categories cannot be separated reliably.
+
+For ExternalProject dependencies, the aggregate counts the entire dependency prefix once,
+including source, build, install, and any metadata inside that prefix. Shared `BUILD_INFO_DIR`
+files (by default `.vsag-build-info`: temporary files, stamps, logs, and metadata) are excluded
+from both `local_bytes` and the preparation table's `external_build_bytes`; neither measures all
+ExternalProject storage. For FetchContent dependencies, it
+sums the sibling `<name>-src` and `<name>-build` trees. Symlink entries are excluded. Separately
+cached ExternalProject archives are reported in the preparation table, not added to `local_bytes`.
+System dependencies show zero because host installations are not measured; unclassified or missing
+trees also contribute zero. This is a snapshot of the measured local trees, not a source-only size
+or a measurement of generated build artifacts alone.
 
 ## Step-by-Step
 

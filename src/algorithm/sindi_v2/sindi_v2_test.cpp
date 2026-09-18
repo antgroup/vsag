@@ -1610,6 +1610,15 @@ TEST_CASE("SINDIV2 memory term layout mutable and immutable roundtrip", "[ut][SI
             REQUIRE(disk_knn->GetIds()[0] == labels[0]);
             REQUIRE(std::abs(disk_loaded.CalcDistanceById(query, labels[0], false) -
                              expected_distance) <= 1e-5F);
+            int64_t candidates[] = {-1, labels[0], labels[1]};
+            auto batch = disk_loaded.CalcDistancesById(query, candidates, 3, false);
+            REQUIRE(batch->GetDistances()[0] == -1.0F);
+            REQUIRE(std::abs(batch->GetDistances()[1] - expected_distance) <= 1e-5F);
+            auto top = disk_loaded.CalcDistancesById(query, candidates, 3, false, 2);
+            REQUIRE(top->GetIds()[0] != -1);
+            REQUIRE(top->GetIds()[1] != -1);
+            REQUIRE(top->GetDistances()[0] <= top->GetDistances()[1]);
+            REQUIRE_THROWS(disk_loaded.CalcDistanceById(DatasetPtr{}, labels[0]));
 
             if (config.immutable) {
                 REQUIRE_THROWS_WITH(
@@ -1946,13 +1955,13 @@ TEST_CASE("SINDIV2 optimized DMQ and batch distance end-to-end", "[ut][SINDIV2]"
             REQUIRE(search_result->GetIds()[0] == 10);
 
             int64_t distance_ids[] = {30, 999, 10, 10, 999, 20};
-            auto all_distances = built.CalDistanceById(batch_query, distance_ids, 3, true, -1);
+            auto all_distances = built.CalcDistancesById(batch_query, distance_ids, 3, true, -1);
             REQUIRE(all_distances->GetNumElements() == 2);
             REQUIRE(all_distances->GetDim() == 3);
             REQUIRE(all_distances->GetDistances()[1] == -1.0F);
             REQUIRE(all_distances->GetDistances()[4] == -1.0F);
 
-            auto precise_topk = built.CalDistanceById(batch_query, distance_ids, 3, true, 2);
+            auto precise_topk = built.CalcDistancesById(batch_query, distance_ids, 3, true, 2);
             REQUIRE(precise_topk->GetNumElements() == 2);
             REQUIRE(precise_topk->GetDim() == 2);
             REQUIRE(precise_topk->GetIds()[0] == 10);
@@ -1960,7 +1969,7 @@ TEST_CASE("SINDIV2 optimized DMQ and batch distance end-to-end", "[ut][SINDIV2]"
             REQUIRE(precise_topk->GetIds()[2] == 20);
             REQUIRE(precise_topk->GetIds()[3] == 10);
 
-            auto approximate_topk = built.CalDistanceById(batch_query, distance_ids, 3, false, 2);
+            auto approximate_topk = built.CalcDistancesById(batch_query, distance_ids, 3, false, 2);
             REQUIRE(approximate_topk->GetNumElements() == 2);
             REQUIRE(approximate_topk->GetDim() == 2);
             REQUIRE(approximate_topk->GetIds()[0] == 10);

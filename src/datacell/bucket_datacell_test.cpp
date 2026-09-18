@@ -870,18 +870,18 @@ TEST_CASE("BucketDataCell batch query handles all bucket quantizers", "[ut][Buck
             std::vector<InnerIdType> offset_ids{33, 1, 2, 34, 33, 2};
             std::vector<float> actual(bucket_ids.size());
             if (quantizer_name == "pqfs") {
-                try {
-                    bucket->Query(actual.data(),
-                                  computer,
-                                  bucket_ids.data(),
-                                  offset_ids.data(),
-                                  static_cast<InnerIdType>(bucket_ids.size()));
-                    FAIL("PQFS batch point query should preserve QueryOneById rejection");
-                } catch (const VsagException& error) {
-                    REQUIRE(error.error_.type == ErrorType::INTERNAL_ERROR);
-                    REQUIRE(error.error_.message ==
-                            "PQFastScan doesn't support ComputeDist, only support "
-                            "ComputeBatchDist");
+                bucket->Query(actual.data(),
+                              computer,
+                              bucket_ids.data(),
+                              offset_ids.data(),
+                              static_cast<InnerIdType>(bucket_ids.size()));
+                for (uint64_t i = 0; i < actual.size(); ++i) {
+                    std::vector<float> scan(vectors_per_bucket);
+                    bucket->ScanBucketById(scan.data(), computer, bucket_ids[i]);
+                    REQUIRE(std::abs(actual[i] - scan[offset_ids[i]]) < 1e-5F);
+                    REQUIRE(std::abs(actual[i] -
+                                     bucket->QueryOneById(computer, bucket_ids[i], offset_ids[i])) <
+                            1e-5F);
                 }
                 continue;
             }

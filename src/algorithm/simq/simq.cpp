@@ -1634,6 +1634,27 @@ SIMQ::deserialize_rep_hgraph(StreamReader& reader) {
     rep_hgraph_->Deserialize(slice);
 }
 
+float
+SIMQ::CalcDistanceById(const DatasetPtr& query, int64_t id, bool calculate_precise_distance) const {
+    CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
+    CHECK_ARGUMENT(query->GetNumElements() == 1, "single-ID distance requires one query");
+    CHECK_ARGUMENT(query->GetMultiVectorDim() == dim_, "query multi-vector dimension mismatch");
+    const auto* vectors = query->GetMultiVectors();
+    CHECK_ARGUMENT(vectors != nullptr, "query must contain multi-vectors");
+    const bool valid_vector = vectors[0].len_ > 0 && vectors[0].vectors_ != nullptr;
+    CHECK_ARGUMENT(valid_vector, "query multi-vector must contain token vectors");
+    std::shared_lock lock(global_mutex_);
+    const auto [valid, inner_id] = label_table_->TryGetIdByLabel(id);
+    if (not valid) {
+        return -1.0F;
+    }
+    // SIMQ has one stored representation; both precision modes use the rerank backend.
+    auto computer = mv_codes_->FactoryComputer(vectors);
+    float distance = 0.0F;
+    mv_codes_->Query(&distance, computer, &inner_id, 1);
+    return distance;
+}
+
 void
 SIMQ::Serialize(StreamWriter& writer) const {
     std::shared_lock lock(global_mutex_);
@@ -1722,6 +1743,8 @@ SIMQ::Deserialize(StreamReader& reader) {
 void
 SIMQ::InitFeatures() {
     index_feature_list_->SetFeatures({
+        IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
+        IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID,
         IndexFeature::SUPPORT_BUILD,
         IndexFeature::SUPPORT_ADD_AFTER_BUILD,
         IndexFeature::SUPPORT_BATCH_ADD_WITH_MULTI_THREAD,

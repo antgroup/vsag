@@ -67,7 +67,7 @@
 和 Pyramid，并会传播给 base 与 precise RaBitQ 量化器。
 
 对于启用 split RaBitQ 和 `fast_encode_rabitq=true` 的普通首次 HGraph
-构建时，HGraph 会先并行把所有向量编码为逐维一个无符号字节的
+或 Pyramid 构建时，索引会先把所有向量编码为逐维一个无符号字节的
 scalar code，同时保存标准 RaBitQ metadata，并在独立数组中为每个
 向量保存 8 字节 code sum。编码完成后才启动构图任务，使用 scalar SIMD
 计算 code-code 距离。raw inner-product 内核不感知配置的 `x+y` 总位数，
@@ -76,6 +76,8 @@ scalar code，同时保存标准 RaBitQ metadata，并在独立数组中为每�
 PCA、ROM/FHT 或 RaBitQ 量化。scalar record 与 code-sum 数组都会在
 `Build` 返回前释放。总位数为 8 时，scalar 与 packed payload 大小相同；
 总位数更低时会以额外构建内存换取更快的构图距离计算。
+
+Pyramid 的首次普通 `Build`（NSW 和 ODescent）同样复用上述 scalar SIMD 构图路径，包含 `3+5` split 配置。构图使用完整 `x+y` 位码的对称距离，构建完成后一次性打包为 filter/supplement records 并释放临时存储。关闭 `fast_encode_rabitq` 会回退到原有构建路径；命中 Build Cache 的构建和后续 `Add` 不启用该临时构建模式。Pyramid 在存储已预分配且 IO 支持时并行编码，否则顺序编码；两种情况都使用 scalar SIMD 构图。Pyramid 不需要设置 HGraph 专用的 `rabitq_fused_datacell`。
 
 ```json
 {

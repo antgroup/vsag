@@ -29,14 +29,13 @@ jobs:
           save: false
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
-        # Daily guard for the from-source OpenBLAS build path. We intentionally
-        # do NOT pass -DUSE_SYSTEM_OPENBLAS=ON here: even though the image
-        # ships libopenblas-dev, leaving the flag at its default (OFF) means
-        # CMake downloads and compiles OpenBLAS via ExternalProject_Add, which
-        # is what release artifacts depend on. PR CI / coverage / lint use the
-        # system OpenBLAS for speed; this job is the one that keeps the
-        # source-build path covered.
-        run: export CMAKE_GENERATOR="Ninja"; make asan COMPILE_JOBS=3 VSAG_ENABLE_EXAMPLES=ON
+        # Explicitly disable system selection because AUTO would use the
+        # OpenBLAS installation in this image. This job guards the bundled
+        # ExternalProject source-build path used by source fallback.
+        env:
+          CMAKE_GENERATOR: Ninja
+          EXTRA_DEFINED: -DVSAG_USE_SYSTEM_OPENBLAS=OFF
+        run: make asan COMPILE_JOBS=3 VSAG_ENABLE_EXAMPLES=ON
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
