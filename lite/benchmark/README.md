@@ -2,6 +2,24 @@
 
 This experimental tool records a deterministic standalone Lite BruteForce baseline. It does not claim a performance improvement.
 
+## Directory layout
+
+- `lite/benchmark/main.cpp`, `dataset_main.cpp`, and `run_*.sh`:
+  deterministic Lite baseline, CRUD, load, and SIFT runners.
+- `lite/benchmark/full/`, `full_main.cpp`, and `full_dataset_main.cpp`:
+  separate Full VSAG comparison consumers.
+- `lite/benchmark/prepare_sift.py`: prepares the documented SIFT subsets.
+- `lite/benchmark/quantization_probe.cpp`: opt-in SQ8/FP16 scan experiment.
+- `src/lite/fp16_codec.h` and the internal FP16 factory/tests in
+  `src/lite/graph_backend.cpp` and `src/lite/graph_backend_test.cpp`:
+  candidate graph experiment, not a public `Index` backend.
+- `lite/CMakeLists.txt`: `ENABLE_BENCHMARKS` and
+  `ENABLE_QUANTIZATION_PROBE` opt-in build switches.
+
+The public FP32 graph, filtering, CRUD, and snapshot implementation comes from
+the Lite feature branch; this experiment branch adds measurements and internal
+quantization candidates.
+
 Build it with `-DENABLE_BENCHMARKS=ON`, then run:
 
 ```bash
