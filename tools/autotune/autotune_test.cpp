@@ -732,6 +732,57 @@ TEST_CASE("AutoTune reports the closest successful trial when constraints are in
     REQUIRE(result["best_effort"]["evidence"]["trial_id"] == "trial-0");
 }
 
+TEST_CASE("AutoTune reports the closest pruned trial when every candidate exceeds memory") {
+    vsag::autotune::internal::RequestContext request;
+    request.top_k = 10;
+    request.objective = "latency_avg_ms";
+    request.constraints = {{"index_memory_mb", 1.0}};
+    vsag::autotune::internal::Evaluation evaluation;
+    const auto trial = [](const std::string& id, double memory) {
+        return JsonType{{"trial_id", id},
+                        {"index_name", "hgraph"},
+                        {"search_params", JsonType::object()},
+                        {"status", "pruned"},
+                        {"metrics", {{"index_memory_mb", memory}}}};
+    };
+    evaluation.trials = {trial("trial-0", 3.0), trial("trial-1", 2.0)};
+
+    const auto result = vsag::autotune::internal::SelectResult(request, evaluation);
+    REQUIRE(result["status"] == "no_feasible_candidate");
+    REQUIRE(result["recommendation"].is_null());
+    REQUIRE(result["best_effort"]["evidence"]["trial_id"] == "trial-1");
+    REQUIRE(result["best_effort"]["constraint_evaluation"]["satisfied"] == false);
+    REQUIRE_FALSE(result.contains("failure"));
+}
+
+TEST_CASE("AutoTune prefers evaluated best effort over a closer pruned trial") {
+    vsag::autotune::internal::RequestContext request;
+    request.top_k = 10;
+    request.objective = "latency_avg_ms";
+    request.constraints = {
+        {"index_memory_mb", 1.0}, {"build_seconds", 1.0}, {"index_size_mb", 1.0}};
+    vsag::autotune::internal::Evaluation evaluation;
+    evaluation.trials = {
+        {{"trial_id", "pruned"},
+         {"index_name", "hgraph"},
+         {"search_params", JsonType::object()},
+         {"status", "pruned"},
+         {"metrics", {{"index_memory_mb", 1.1}, {"build_seconds", 0.5}, {"index_size_mb", 0.5}}}},
+        {{"trial_id", "evaluated"},
+         {"index_name", "hgraph"},
+         {"search_params", JsonType::object()},
+         {"status", "success"},
+         {"metrics",
+          {{"index_memory_mb", 0.5},
+           {"build_seconds", 10.0},
+           {"index_size_mb", 10.0},
+           {"latency_avg_ms", 1.0}}}}};
+
+    const auto result = vsag::autotune::internal::SelectResult(request, evaluation);
+    REQUIRE(result["status"] == "no_feasible_candidate");
+    REQUIRE(result["best_effort"]["evidence"]["trial_id"] == "evaluated");
+}
+
 TEST_CASE("AutoTune distinguishes a missing objective metric from failed trials") {
     vsag::autotune::internal::RequestContext request;
     request.top_k = 10;
@@ -807,6 +858,53 @@ TEST_CASE("AutoTune builds once per create candidate and supports an existing in
     REQUIRE(existing_result["request"]["create_params"]["metric_type"] == "l2");
 }
 
+TEST_CASE("AutoTune prunes searches for memory-infeasible build groups") {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kOFF);
+    ScopedBlockSizeLimit block_size_limit(256UL * 1024);
+    ScopedPath dataset(temp_path("autotune-pruned-dataset", ".hdf5"));
+    ScopedPath workspace(temp_path("autotune-pruned-workspace"));
+    write_dataset(dataset.Get());
+
+    auto input = request(dataset.Get(), workspace.Get());
+    input["constraints"] = {{"index_memory_mb", 0.0}};
+    input["tuning_config"]["keep_intermediate"] = false;
+    const auto result = vsag::autotune::RunAutoTune(input);
+    INFO(result.dump(2));
+
+    REQUIRE(result["status"] == "no_feasible_candidate");
+    REQUIRE(result["recommendation"].is_null());
+    REQUIRE_FALSE(result["best_effort"].is_null());
+    REQUIRE(result["builds"].size() == 2);
+    REQUIRE(result["trials"].size() == 4);
+    for (const auto& build : result["builds"]) {
+        REQUIRE(build["status"] == "success");
+        REQUIRE(build["metrics"]["index_memory_mb"].get<double>() > 0.0);
+    }
+    for (const auto& trial : result["trials"]) {
+        REQUIRE(trial["status"] == "pruned");
+        REQUIRE(trial["failure"].is_null());
+        REQUIRE(trial["metrics"]["index_memory_mb"].get<double>() > 0.0);
+        REQUIRE_FALSE(trial["metrics"].contains("search_seconds"));
+        REQUIRE_FALSE(trial["metrics"].contains("latency_avg_ms"));
+        REQUIRE(trial["constraint_evaluation"]["satisfied"] == false);
+    }
+    REQUIRE(count_index_artifacts(workspace.Get()) == 0);
+
+    auto objective_input = request(dataset.Get(), workspace.Get());
+    objective_input["indexes"] = JsonType::array({objective_input["indexes"][0]});
+    objective_input["indexes"][0]["search_params"]["hgraph"]["ef_search"] = 8;
+    objective_input["constraints"] = {{"recall_at_k", 0.0}};
+    objective_input["objective"] = {{"metric", "index_memory_mb"}};
+    objective_input["tuning_config"]["keep_intermediate"] = false;
+    objective_input["tuning_config"]["max_trials"] = 1;
+    const auto objective_result = vsag::autotune::RunAutoTune(objective_input);
+    INFO(objective_result.dump(2));
+    REQUIRE(objective_result["status"] == "success");
+    REQUIRE(objective_result["trials"].size() == 1);
+    REQUIRE(objective_result["trials"][0]["status"] == "success");
+    REQUIRE(objective_result["trials"][0]["metrics"].contains("search_seconds"));
+}
+
 TEST_CASE("AutoTune CLI keeps only the recommended artifact by default") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kOFF);
     ScopedBlockSizeLimit block_size_limit(256UL * 1024);
@@ -872,6 +970,18 @@ TEST_CASE("AutoTune searches an in-memory existing index") {
     REQUIRE_FALSE(latency_only->metrics.contains("recall_at_k"));
     REQUIRE_FALSE(latency_only->report.contains("report_path"));
     REQUIRE(load_json_reports(workspace.Get()).empty());
+
+    input.constraints = {{vsag::autotune::Metric::INDEX_MEMORY_MB, 0.0}};
+    const auto memory_pruned = vsag::autotune::TuneSearch(input);
+    REQUIRE(memory_pruned.has_value());
+    REQUIRE(memory_pruned->status == vsag::autotune::TuneStatus::NO_FEASIBLE_CANDIDATE);
+    REQUIRE(memory_pruned->report["trials"].size() == 2);
+    for (const auto& trial : memory_pruned->report["trials"]) {
+        REQUIRE(trial["status"] == "pruned");
+        REQUIRE(trial["metrics"]["index_memory_mb"].get<double>() > 0.0);
+        REQUIRE_FALSE(trial["metrics"].contains("search_seconds"));
+        REQUIRE_FALSE(trial["metrics"].contains("latency_avg_ms"));
+    }
 
     input.objective = vsag::autotune::Metric::INDEX_MEMORY_MB;
     REQUIRE_THROWS_WITH(
@@ -971,6 +1081,9 @@ TEST_CASE("AutoTune searches an existing Pyramid index for one path workload") {
     REQUIRE(memory_constrained.has_value());
     REQUIRE(memory_constrained->status == vsag::autotune::TuneStatus::NO_FEASIBLE_CANDIDATE);
     REQUIRE(memory_constrained->best_effort["constraint_evaluation"]["satisfied"] == false);
+    for (const auto& trial : memory_constrained->report["trials"]) {
+        REQUIRE(trial["status"] == "success");
+    }
 
     input.constraints.pop_back();
     input.workload.queries = fixture.queries;
