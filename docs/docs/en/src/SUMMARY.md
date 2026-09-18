@@ -15,6 +15,7 @@
 - [Overview](indexes/README.md)
 - [Index Parameters](resources/index_parameters.md)
 - [HGraph](indexes/hgraph.md)
+  - [Adaptive neighbor pruning](indexes/adaptive_pruning.md)
 - [LazyHGraph](indexes/lazy_hgraph.md)
 - [IVF](indexes/ivf.md)
 - [SINDI](indexes/sindi.md)

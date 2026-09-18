@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "impl/adaptive_pruning.h"
 #include "impl/distance_provider_for_graph.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
@@ -38,8 +39,8 @@ DEFINE_POINTER(MutexArray);
  * @param max_size Maximum number of edges to select.
  * @param flatten Flatten interface for computing pairwise vector distances.
  * @param allocator Allocator for memory management.
- * @param alpha Diversity parameter controlling the trade-off between proximity
- *              and diversity. Higher values allow more diverse neighbors.
+ * @param alpha Pruning relaxation parameter. Larger values make the geometric
+ *              rejection condition harder to satisfy.
  */
 void
 select_edges_by_heuristic(const DistHeapPtr& edges,
@@ -68,8 +69,8 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
  * @param max_size Maximum number of neighbors to select.
  * @param flatten Flatten interface for computing pairwise vector distances.
  * @param allocator Allocator for memory management.
- * @param alpha Diversity parameter controlling the trade-off between proximity
- *              and diversity. Higher values allow more diverse neighbors.
+ * @param alpha Pruning relaxation parameter. Larger values make the geometric
+ *              rejection condition harder to satisfy.
  */
 void
 select_edges_by_heuristic(Vector<InnerIdType>& neighbors,
@@ -102,6 +103,9 @@ select_edges_by_heuristic(Vector<InnerIdType>& neighbors,
  * @param neighbors_mutexes Mutex array for thread-safe neighbor updates.
  * @param allocator Allocator for memory management.
  * @param alpha Diversity parameter for heuristic edge selection.
+ * @param pruning Optional policy for this graph. Enabled selects forward edges adaptively;
+ *                apply_to_reverse additionally selects full reverse neighbor lists adaptively.
+ *                Pass nullptr for upper layers to retain their fixed-alpha policy.
  * @return InnerIdType The ID of the farthest selected neighbor, typically used
  *                     as an entry point for subsequent operations.
  */
@@ -112,7 +116,8 @@ mutually_connect_new_element(InnerIdType cur_c,
                              const DistanceProviderForGraph& distance_provider,
                              const MutexArrayPtr& neighbors_mutexes,
                              Allocator* allocator,
-                             float alpha = 1.0F);
+                             float alpha = 1.0F,
+                             const AdaptivePruningParameter* pruning = nullptr);
 
 InnerIdType
 mutually_connect_new_element(InnerIdType cur_c,
@@ -121,6 +126,7 @@ mutually_connect_new_element(InnerIdType cur_c,
                              const FlattenInterfacePtr& flatten,
                              const MutexArrayPtr& neighbors_mutexes,
                              Allocator* allocator,
-                             float alpha = 1.0F);
+                             float alpha = 1.0F,
+                             const AdaptivePruningParameter* pruning = nullptr);
 
 }  // namespace vsag

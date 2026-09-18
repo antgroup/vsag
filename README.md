@@ -266,6 +266,7 @@ Thrive together in VSAG community with users and developers from all around the 
 
 - **Optimized Index Types**
   - **HGraph (Graph Index)**: For scenarios demanding high recall and low latency.
+    Supports opt-in [adaptive neighbor pruning](docs/docs/en/src/indexes/adaptive_pruning.md) for NSW/L2 construction.
   - **LazyHGraph (Adaptive Graph Index)**: Uses exact BruteForce for small FP32 datasets
     and automatically converts to HGraph after a configurable threshold. Deletes in the flat
     phase physically remove vectors and shrink storage instead of leaving tombstones. Vector
