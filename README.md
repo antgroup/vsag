@@ -223,7 +223,7 @@ C++, Python, and TypeScript examples are provided. Please explore the [examples]
 
 We suggest you start with:
 - **C++**: [103_index_hgraph.cpp](./examples/cpp/103_index_hgraph.cpp)
-- **Python**: [103_index_hgraph.py](./examples/python/103_index_hgraph.py)
+- **Python**: [103_index_hgraph.py](./examples/python/103_index_hgraph.py); tune an existing index with [111_autotune_search.py](./examples/python/111_autotune_search.py)
 - **TypeScript**: [103_index_hgraph.ts](./examples/typescript/103_index_hgraph.ts)
 
 ## Building from Source

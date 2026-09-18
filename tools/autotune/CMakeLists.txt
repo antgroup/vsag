@@ -12,25 +12,38 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_library (vsag_autotune SHARED
+add_library (vsag_autotune_obj OBJECT
     autotune.cpp
     autotune_candidate.cpp
-    autotune_evaluation.cpp
-    $<TARGET_OBJECTS:eval_obj>)
-add_library (vsag::autotune ALIAS vsag_autotune)
-target_include_directories (vsag_autotune PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_include_directories (vsag_autotune PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    autotune_evaluation.cpp)
+target_include_directories (vsag_autotune_obj PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories (vsag_autotune_obj PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../eval)
-target_link_libraries (vsag_autotune PUBLIC nlohmann_json::nlohmann_json vsag)
-target_link_libraries (vsag_autotune PRIVATE
+target_link_libraries (vsag_autotune_obj PUBLIC nlohmann_json::nlohmann_json vsag)
+target_link_libraries (vsag_autotune_obj PUBLIC
     simd
     vsag_eval_common
     ${HDF5_CPP_STATIC_LIBRARY}
     ${HDF5_C_STATIC_LIBRARY}
     z
     ${CMAKE_DL_LIBS})
-add_dependencies (vsag_autotune hdf5)
+add_dependencies (vsag_autotune_obj hdf5)
+
+# Embed the existing engine in the Python extension, without another runtime shared library.
+if (ENABLE_PYBINDS)
+    add_library (vsag_autotune_python STATIC $<TARGET_OBJECTS:eval_obj>)
+    target_link_libraries (vsag_autotune_python PUBLIC vsag_autotune_obj)
+endif ()
+
+if (NOT ENABLE_TOOLS OR NOT ENABLE_CXX11_ABI)
+    return ()
+endif ()
+
+add_library (vsag_autotune SHARED $<TARGET_OBJECTS:eval_obj>)
+target_link_libraries (vsag_autotune PRIVATE vsag_autotune_obj)
+target_link_libraries (vsag_autotune PUBLIC nlohmann_json::nlohmann_json vsag)
+target_include_directories (vsag_autotune PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+add_library (vsag::autotune ALIAS vsag_autotune)
 
 add_executable (autotune main.cpp)
 target_include_directories (autotune PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
