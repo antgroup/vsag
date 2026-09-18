@@ -50,6 +50,44 @@ class ComparisonTest(unittest.TestCase):
                                   {"src/simd/new.h": {1}})
         self.assertIn("Unmeasured changed file", result["errors"][0])
 
+    def test_declaration_only_changed_header_is_not_an_error(self):
+        header = "src/simd/declarations.h"
+        result = coverage.compare({SOURCE: {1: True}}, {SOURCE: {1: True}},
+                                  {header: {1}}, (), [header])
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(result["declaration_only"], [header])
+
+    def test_executable_code_detection_keeps_the_gate_fail_closed(self):
+        declarations = ("#include <cstdint>\n"
+                        "#define DECLARE(ns)          \\\n"
+                        "    namespace ns {               \\\n"
+                        "    void Run(int value);         \\\n"
+                        "    }\n"
+                        "namespace vsag {\n"
+                        "DECLARE(generic)\n"
+                        "using RunType = void (*)(int value);\n"
+                        "extern RunType Run;\n"
+                        "}  // namespace vsag\n")
+        self.assertFalse(coverage.defines_executable_code(declarations))
+        for definition in ("void Run(int value) {\n    (void)value;\n}\n",
+                           "auto Run(int value) const\n    -> int {\n    return value;\n}\n",
+                           "void Run(int value)\n{\n    (void)value;\n}\n"):
+            with self.subTest(definition=definition):
+                self.assertTrue(coverage.defines_executable_code(definition))
+
+    def test_unmeasurable_helper_skips_only_headers_without_code(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "src/simd").mkdir(parents=True)
+            (root / "src/simd/declarations.h").write_text("void Run(int value);\n")
+            (root / "src/simd/measured.h").write_text("inline int Run() {\n    return 1;\n}\n")
+            (root / "src/simd/missing.cpp").write_text("void Run(int value) {\n    (void)value;\n}\n")
+            changes = {"src/simd/declarations.h": {1},
+                       "src/simd/measured.h": {1},
+                       "src/simd/missing.cpp": {1}}
+            self.assertEqual(coverage.unmeasurable_changes(root, changes, {}),
+                             {"src/simd/declarations.h"})
+
     def test_only_actual_deletions_can_disappear(self):
         other = "src/simd/other.cpp"
         base = {SOURCE: {1: True}, other: {1: True}}
