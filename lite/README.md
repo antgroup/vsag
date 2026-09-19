@@ -12,6 +12,8 @@ v2 with the FP32 records, graph options and adjacency; Load detects either
 version and restores the corresponding backend. The format is not compatible
 with Full VSAG. It has no checksum or crash-safe file replacement. The graph
 is a standalone single-layer candidate, not Full HGraph or LazyHGraph.
+BruteForce and graph use the same runtime-selected FP32 distance kernel on supported
+x86_64 builds; dimensions below 16 and other platforms use Generic.
 Quantization and mmap are not included.
 
 Search(query, dim, k, IdFilter) accepts a callback on external IDs; returning true allows

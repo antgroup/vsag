@@ -142,7 +142,7 @@ public:
                 return std::vector<Neighbor>{};
             }
             std::priority_queue<Neighbor, std::vector<Neighbor>, NeighborWorseFirst> heap;
-            const auto distance_fn = dim < 16 ? GenericFP32Distance : SelectFP32Distance();
+            const auto distance_fn = dim < 16 ? generic_fp32_distance : select_fp32_distance();
             for (uint64_t slot = 0; slot < Size(); ++slot) {
                 if (filter != nullptr and not(*filter)(IdAt(slot))) {
                     continue;

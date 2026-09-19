@@ -333,26 +333,26 @@ TEST_CASE("Lite FP32 ISA kernels preserve squared-L2 across short and tail dimen
         vector[i] = static_cast<float>(i % 7) * 0.0625F + 0.25F;
     }
     using vsag::lite::detail::FP32Distance;
-    const FP32Distance generic = vsag::lite::detail::GenericFP32Distance;
-    const FP32Distance selected = vsag::lite::detail::SelectFP32Distance();
+    const FP32Distance generic = vsag::lite::detail::generic_fp32_distance;
+    const FP32Distance selected = vsag::lite::detail::select_fp32_distance();
     std::vector<FP32Distance> kernels{generic, selected};
 #ifdef VSAG_LITE_HAS_X86_SIMD
     __builtin_cpu_init();
     if (__builtin_cpu_supports("sse4.1")) {
-        kernels.push_back(vsag::lite::detail::SseFP32Distance);
+        kernels.push_back(vsag::lite::detail::sse_fp32_distance);
     }
     if (__builtin_cpu_supports("avx2") and __builtin_cpu_supports("fma")) {
-        kernels.push_back(vsag::lite::detail::Avx2FP32Distance);
+        kernels.push_back(vsag::lite::detail::avx2_fp32_distance);
     }
     if (__builtin_cpu_supports("avx512f") and __builtin_cpu_supports("avx512dq") and
         __builtin_cpu_supports("avx512bw") and __builtin_cpu_supports("avx512vl") and
         __builtin_cpu_supports("avx2")) {
-        kernels.push_back(vsag::lite::detail::Avx512FP32Distance);
-        REQUIRE(selected == vsag::lite::detail::Avx512FP32Distance);
+        kernels.push_back(vsag::lite::detail::avx512_fp32_distance);
+        REQUIRE(selected == vsag::lite::detail::avx512_fp32_distance);
     } else if (__builtin_cpu_supports("avx2") and __builtin_cpu_supports("fma")) {
-        REQUIRE(selected == vsag::lite::detail::Avx2FP32Distance);
+        REQUIRE(selected == vsag::lite::detail::avx2_fp32_distance);
     } else if (__builtin_cpu_supports("sse4.1")) {
-        REQUIRE(selected == vsag::lite::detail::SseFP32Distance);
+        REQUIRE(selected == vsag::lite::detail::sse_fp32_distance);
     } else {
         REQUIRE(selected == generic);
     }
