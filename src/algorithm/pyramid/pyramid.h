@@ -378,7 +378,8 @@ private:
                 std::optional<int64_t> reorder_candidate_limit,
                 QueryContext& ctx,
                 const std::string& hierarchy_name,
-                const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+                const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr,
+                std::optional<float> range_search_radius = std::nullopt) const;
 
     InnerSearchParam
     create_knn_search_param(const PyramidSearchParameters& parsed_param,

@@ -37,6 +37,7 @@
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "impl/reasoning/search_reasoning.h"
+#include "impl/searcher/basic_searcher.h"
 #include "io/common/io_parameter.h"
 #include "io/memory_block_io/memory_block_io_parameter.h"
 #include "quantization/transform_quantization/transform_quantizer_parameter.h"
@@ -69,7 +70,6 @@ drain_futures(Vector<std::future<void>>& futures, std::exception_ptr first_excep
 
 }  // namespace
 
-const static float RADIUS_EPSILON = 1.1F;
 static constexpr uint64_t SOURCE_ID_TABLE_MAGIC = 0x534F555243454944ULL;  // SOURCEID
 FilterPtr
 create_request_filter(const SearchRequest& request) {
@@ -781,8 +781,10 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     CHECK_ARGUMENT(parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::SINGLE,
                    "multi-hierarchy search (union/intersection) is not yet implemented");
     InnerSearchParam search_param;
-    search_param.ef = parsed_param.ef_search;
-    search_param.radius = radius * RADIUS_EPSILON;
+    search_param.ef = limited_size > 0
+                          ? std::max(static_cast<int64_t>(parsed_param.ef_search), limited_size)
+                          : parsed_param.ef_search;
+    search_param.radius = radius;
     search_param.search_mode = RANGE_SEARCH;
     search_param.parallel_search_thread_count = parsed_param.parallel_search_thread_count;
     search_param.enable_rabitq_one_bit_search = parsed_param.has_rabitq_one_bit_search
@@ -834,7 +836,8 @@ Pyramid::RangeSearch(const DatasetPtr& query,
                           std::nullopt,
                           ctx,
                           hierarchy_name,
-                          collect_rabitq_lower_bounds ? &rabitq_lower_bound_candidates : nullptr);
+                          collect_rabitq_lower_bounds ? &rabitq_lower_bound_candidates : nullptr,
+                          radius);
     result->Statistics(stats.Dump());
     return result;
 }
@@ -874,8 +877,11 @@ Pyramid::SearchWithRequest(const SearchRequest& request) const {
     } else {
         CHECK_ARGUMENT(parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::SINGLE,
                        "multi-hierarchy search (union/intersection) is not yet implemented");
-        search_param.ef = parsed_param.ef_search;
-        search_param.radius = request.radius_ * RADIUS_EPSILON;
+        search_param.ef =
+            request.limited_size_ > 0
+                ? std::max(static_cast<int64_t>(parsed_param.ef_search), request.limited_size_)
+                : parsed_param.ef_search;
+        search_param.radius = request.radius_;
         search_param.search_mode = RANGE_SEARCH;
         search_param.enable_reorder = use_reorder_;
         search_param.parallel_search_thread_count = parsed_param.parallel_search_thread_count;
@@ -975,7 +981,8 @@ Pyramid::SearchWithRequest(const SearchRequest& request) const {
                           reorder_candidate_limit,
                           ctx,
                           hierarchy_name,
-                          collect_rabitq_lower_bounds ? &rabitq_lower_bound_candidates : nullptr);
+                          collect_rabitq_lower_bounds ? &rabitq_lower_bound_candidates : nullptr,
+                          is_knn ? std::nullopt : std::optional<float>(request.radius_));
     if (is_knn) {
         result = FilterDatasetByThreshold(result, request.threshold_, ctx.alloc, request.topk_);
     }
@@ -1012,7 +1019,8 @@ Pyramid::search_impl(const DatasetPtr& query,
                      std::optional<int64_t> reorder_candidate_limit,
                      QueryContext& ctx,
                      const std::string& hierarchy_name,
-                     const DistanceRecordVector* rabitq_lower_bound_candidates) const {
+                     const DistanceRecordVector* rabitq_lower_bound_candidates,
+                     std::optional<float> range_search_radius) const {
     auto h_iter = hierarchies_.find(hierarchy_name);
     CHECK_ARGUMENT(h_iter != hierarchies_.end(),
                    fmt::format("unknown hierarchy name: '{}'", hierarchy_name));
@@ -1076,8 +1084,12 @@ Pyramid::search_impl(const DatasetPtr& query,
         return DatasetImpl::MakeEmptyDataset();
     }
 
-    while (not search_result->Empty() && (search_result->Size() > final_topk ||
-                                          search_result->Top().first > search_param.radius)) {
+    const float radius_cutoff = range_search_radius.has_value()
+                                    ? (range_search_radius.value() + THRESHOLD_ERROR)
+                                    : search_param.radius;
+
+    while (not search_result->Empty() &&
+           (search_result->Size() > final_topk || search_result->Top().first > radius_cutoff)) {
         search_result->Pop();
     }
 
