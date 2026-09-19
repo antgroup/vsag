@@ -7,9 +7,9 @@
 namespace vsag::lite::detail {
 
 float
-SseFP32Distance(const float* query, const float* vector, uint64_t dim) {
+sse_fp32_distance(const float* query, const float* vector, uint64_t dim) {
     return simd::ComputeL2SqrImpl<simd::SimdTraits<simd::SseTag>>(
-        query, vector, dim, GenericFP32Distance);
+        query, vector, dim, generic_fp32_distance);
 }
 
 }  // namespace vsag::lite::detail

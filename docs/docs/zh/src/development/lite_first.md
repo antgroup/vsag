@@ -52,23 +52,24 @@ Load 采用现有 `tl::expected` / `vsag::Error`，不调用 Full 全局日志�
 - Remove 对不存在的 ID 返回 false；删除后的外部 ID 可以重新新增。
 - Add 失败不改变逻辑记录，但预留容量可能已经增加。
 - Search 最多返回 min(k, Size()) 条记录，按 L2 平方距离、ID 升序排列。
-  带 `IdFilter` 的重载会在计算距离前传入每条记录的外部 ID；返回 `true` 才允许该记录。
-  空过滤器允许所有 ID，过滤后结果可以少于 k 条。合法查询遇 k=0 或空库返回空结果。
+  BruteForce 在计算距离前按外部 ID 过滤。图搜索为保持连通性，仍可对被拒绝的
+  节点计算距离并遍历，但不会返回它们。空过滤器接受全部 ID；结果可能少于 k 条。
+  合法查询遇 k=0 或空库返回空结果。
 - 极端有限输入的 FP32 累加可能溢出为正无穷，此时按 ID 排序，不承诺任意精度 L2。
 - 即使 k=0，NaN/Inf、空指针和维度不匹配仍报错。
 - 已捕获的分配失败转为 Error，但错误对象本身仍可能分配内存，不承诺 OOM 下绝不抛异常。
 
 ## 数据组织和复用
 
-私有实现统一拥有连续 FP32 数据、外部 ID 和 ID→槽位映射。扫描复用官方
-ComputeL2SqrImpl 内核。x86_64 GNU/Clang 构建通过小型运行时分派器按 CPU/OS 支持
+私有实现统一拥有连续 FP32 数据、外部 ID 和 ID→槽位映射。BruteForce 扫描与图的构建、搜索共用官方
+ComputeL2SqrImpl 内核及运行时距离分派。x86_64 GNU/Clang 构建通过小型运行时分派器按 CPU/OS 支持
 选择 AVX512、AVX2、SSE4.1 或 Generic；维度小于 16 时保留 Generic 路径，其他支持的
 工具链使用 Generic。删除参考 Full BruteForce 的末尾填洞原则，但保留容量供复用，
 不承诺 RSS 立即下降。不引入 Full Factory、InnerIndexInterface、属性及多向量依赖。
 
-首版将少量职责放在一个私有实现单元，避免空抽象接口。加入图索引前须抽取存储边界，
-选择图安全的槽位和删除策略；参考 LazyHGraph 的构建成功后发布方式，不重写 ANN。
-量化应将候选遍历与编码/距离分离；mmap 需要明确映射生命周期和读写策略。这些能力尚未实现。
+BruteForce 仍是默认后端。`BuildGraph` 构建独立的私有 FP32 图后端，成功后才发布；
+图阶段保留 CRUD 和过滤搜索。BruteForce 使用 v1 快照，图使用 v2 快照。公开 Lite
+索引尚未集成量化或 mmap。
 
 ## 快照 v1
 

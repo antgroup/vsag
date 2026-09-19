@@ -60,9 +60,10 @@ be externally serialized. Results own their memory; internal slots are not expos
 - Remove returns false for absent IDs. A removed external ID can be inserted again.
 - Add failure leaves logical records unchanged, though reserved capacity may grow.
 - Search returns up to `min(k, Size())` entries sorted by squared-L2 then ascending ID.
-  The overload taking `IdFilter` calls it with each external ID before computing distance;
-  `true` allows that record. An empty filter accepts every ID, and filtering can return fewer
-  than k entries. Valid queries with k=0 or an empty index return an empty result.
+  BruteForce checks the external ID before computing distance. Graph search may score and
+  traverse rejected IDs to preserve connectivity, but never returns them. An empty filter
+  accepts every ID; filtering can return fewer than k entries. Valid queries with k=0 or
+  an empty index return an empty result.
 - FP32 accumulation can overflow to positive infinity for extreme finite inputs;
   those distances tie and are ordered by ID. This is not arbitrary-precision L2.
 - NaN/Inf inputs and dimension mismatches are rejected even for k=0.
@@ -72,7 +73,8 @@ be externally serialized. Results own their memory; internal slots are not expos
 ## Data organization and reuse
 
 The private implementation owns contiguous FP32 records, external IDs, and an
-ID-to-slot map. BruteForce scans reuse the official `ComputeL2SqrImpl` kernels.
+ID-to-slot map. BruteForce scans and graph construction/search reuse the official
+`ComputeL2SqrImpl` kernels through the same runtime distance dispatcher.
 On x86_64 GNU/Clang builds, a small runtime dispatcher selects AVX512, AVX2,
 SSE4.1, or Generic according to CPU/OS support; dimensions below 16 retain the
 Generic path. Other supported toolchains use Generic. Physical removal uses the
@@ -81,13 +83,10 @@ BruteForce, but retains capacity for reuse. It does not promise immediate RSS
 reduction. The minimal implementation intentionally avoids Full Factory,
 InnerIndexInterface, attribute and multi-vector dependencies.
 
-The first version keeps these small responsibilities in one private translation
-unit rather than creating unused abstract interfaces. Before adding graph search,
-extract the store boundary and select a graph-safe slot/deletion strategy.
-Reference LazyHGraph's build-before-publish phase transition rather than inventing
-a new ANN algorithm. Quantization should separate candidate traversal from code
-encoding/distance. mmap requires explicit mapping lifetimes and read/write policy.
-None of these future capabilities is implemented in v0.1.
+The initial BruteForce backend is still the default. `BuildGraph` constructs a separate
+private FP32 graph backend and publishes it only after success; graph CRUD and filtered
+search remain available. BruteForce snapshots use v1, while graph snapshots use v2.
+Quantization and mmap are not part of the public Lite index.
 
 ## Snapshot v1
 
