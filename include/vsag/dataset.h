@@ -413,6 +413,30 @@ public:
     GetUInt32Metadata(const std::string& name) const = 0;
 
     /**
+     * @brief Sets a named array of int64 metadata values.
+     *
+     * The array contains one value per dataset element. It follows the same ownership rules as
+     * the other pointer-backed Dataset fields.
+     *
+     * @param name Metadata name.
+     * @param values Pointer to the metadata values.
+     * @return DatasetPtr A shared pointer to the dataset with updated metadata.
+     * @note This method is non-virtual so extending the API does not change Dataset's vtable.
+     */
+    DatasetPtr
+    Int64Metadata(const std::string& name, const int64_t* values);
+
+    /**
+     * @brief Retrieves a named array of int64 metadata values.
+     *
+     * @param name Metadata name.
+     * @return const int64_t* Pointer to the metadata values, or nullptr when absent.
+     * @note This method is non-virtual so extending the API does not change Dataset's vtable.
+     */
+    const int64_t*
+    GetInt64Metadata(const std::string& name) const;
+
+    /**
      * @brief Sets a named array of string metadata values.
      *
      * The array contains one value per dataset element. It follows the same ownership rules as

@@ -264,6 +264,20 @@ public:
     }
 
     DatasetPtr
+    Int64Metadata(const std::string& name, const int64_t* values) {
+        this->data_[Int64MetadataKey(name)] = values;
+        return shared_from_this();
+    }
+
+    const int64_t*
+    GetInt64Metadata(const std::string& name) const {
+        if (auto iter = this->data_.find(Int64MetadataKey(name)); iter != this->data_.end()) {
+            return std::get<const int64_t*>(iter->second);
+        }
+        return nullptr;
+    }
+
+    DatasetPtr
     StringMetadata(const std::string& name, const std::string* values) override {
         this->data_[StringMetadataKey(name)] = values;
         return shared_from_this();
@@ -429,6 +443,26 @@ private:
     static std::string
     UInt32MetadataNameFromKey(const std::string& key) {
         return key.substr(UInt32MetadataPrefix().size());
+    }
+
+    static constexpr std::string_view
+    Int64MetadataPrefix() {
+        return "int64_metadata:";
+    }
+
+    static std::string
+    Int64MetadataKey(const std::string& name) {
+        return std::string(Int64MetadataPrefix()) + name;
+    }
+
+    static bool
+    IsInt64MetadataKey(const std::string& key) {
+        return key.rfind(Int64MetadataPrefix(), 0) == 0;
+    }
+
+    static std::string
+    Int64MetadataNameFromKey(const std::string& key) {
+        return key.substr(Int64MetadataPrefix().size());
     }
 
     static constexpr std::string_view
