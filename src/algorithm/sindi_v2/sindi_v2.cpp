@@ -512,7 +512,7 @@ SINDIV2::Add(const DatasetPtr& base) {
     auto data_num = base->GetNumElements();
     CHECK_ARGUMENT(data_num > 0, "data_num is zero when add vectors");
     const auto current_element_count = cur_element_count_;
-    auto metadata_build = metadata_filter_.PrepareBuild(base, current_element_count);
+    auto metadata_build = metadata_filter_.PrepareBuild(base, current_element_count, window_size_);
     const auto first_inner_id = static_cast<uint32_t>(current_element_count);
 
     const auto* sparse_vectors = base->GetSparseVectors();
@@ -646,7 +646,7 @@ SINDIV2::build_immutable(const DatasetPtr& base) {
     const auto* ids = base->GetIds();
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
-    auto metadata_build = metadata_filter_.PrepareBuild(base, 0);
+    auto metadata_build = metadata_filter_.PrepareBuild(base, 0, window_size_);
 
     Vector<uint8_t> accepted_documents(allocator_);
     if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
@@ -1181,9 +1181,9 @@ SINDIV2::collect_streaming_header() const {
     if (metadata_filter_.HasHostMetadata()) {
         basic_info[SINDI_HAS_HOST_METADATA_KEY].SetBool(true);
     }
-    if (metadata_filter_.HasDateMetadata()) {
-        basic_info[SINDI_DATE_METADATA_FORMAT_VERSION_KEY].SetInt(
-            SINDI_DATE_METADATA_FORMAT_VERSION);
+    if (metadata_filter_.HasTimeMetadata()) {
+        basic_info[SINDI_TIME_METADATA_FORMAT_VERSION_KEY].SetInt(
+            SINDI_TIME_METADATA_FORMAT_VERSION);
     }
     metadata->Set(BASIC_INFO, basic_info);
 
@@ -1209,8 +1209,8 @@ SINDIV2::collect_streaming_header() const {
     if (metadata_filter_.HasHostMetadata()) {
         append_block(StreamSerializationTag::SINDI_HOST_METADATA);
     }
-    if (metadata_filter_.HasDateMetadata()) {
-        append_block(StreamSerializationTag::SINDI_DATE_METADATA);
+    if (metadata_filter_.HasTimeMetadata()) {
+        append_block(StreamSerializationTag::SINDI_TIME_METADATA);
     }
     metadata->Set("block_manifest", manifest);
     metadata->SetEmptyIndex(cur_element_count_ == 0);
@@ -1255,9 +1255,9 @@ SINDIV2::serialize_streaming_body(StreamWriter& writer) const {
         write_block(StreamSerializationTag::SINDI_HOST_METADATA,
                     [this](StreamWriter& block) { metadata_filter_.SerializeHostMetadata(block); });
     }
-    if (metadata_filter_.HasDateMetadata()) {
-        write_block(StreamSerializationTag::SINDI_DATE_METADATA,
-                    [this](StreamWriter& block) { metadata_filter_.SerializeDateMetadata(block); });
+    if (metadata_filter_.HasTimeMetadata()) {
+        write_block(StreamSerializationTag::SINDI_TIME_METADATA,
+                    [this](StreamWriter& block) { metadata_filter_.SerializeTimeMetadata(block); });
     }
 }
 
@@ -1336,14 +1336,14 @@ SINDIV2::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
     }
     const bool expects_host_metadata = basic_info.Contains(SINDI_HAS_HOST_METADATA_KEY) &&
                                        basic_info[SINDI_HAS_HOST_METADATA_KEY].GetBool();
-    const bool expects_date_metadata = basic_info.Contains(SINDI_DATE_METADATA_FORMAT_VERSION_KEY);
-    if (expects_date_metadata) {
-        CHECK_ARGUMENT(IsSupportedSindiDateMetadataVersion(
-                           basic_info[SINDI_DATE_METADATA_FORMAT_VERSION_KEY].GetInt()),
-                       "unsupported SINDI_V2 streaming date metadata version");
+    const bool expects_time_metadata = basic_info.Contains(SINDI_TIME_METADATA_FORMAT_VERSION_KEY);
+    if (expects_time_metadata) {
+        CHECK_ARGUMENT(IsSupportedSindiTimeMetadataVersion(
+                           basic_info[SINDI_TIME_METADATA_FORMAT_VERSION_KEY].GetInt()),
+                       "unsupported SINDI_V2 streaming time metadata version");
     }
-    CHECK_ARGUMENT(not(expects_host_metadata and expects_date_metadata),
-                   "SINDI_V2 streaming metadata cannot contain separate host and date blocks");
+    CHECK_ARGUMENT(not(expects_host_metadata and expects_time_metadata),
+                   "SINDI_V2 streaming metadata cannot contain separate host and time blocks");
 
     bool loaded_term_layout = false;
     bool loaded_labels = false;
@@ -1351,7 +1351,7 @@ SINDIV2::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
     bool loaded_extra_info = false;
     bool loaded_term_mapper = false;
     bool loaded_host_metadata = false;
-    bool loaded_date_metadata = false;
+    bool loaded_time_metadata = false;
     while (true) {
         const auto block_header = StreamBlockHeader::Read(reader);
         if (block_header.IsSectionEnd()) {
@@ -1431,20 +1431,20 @@ SINDIV2::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
                 });
                 loaded_host_metadata = true;
                 break;
-            case StreamSerializationTag::SINDI_DATE_METADATA:
-                CHECK_ARGUMENT(expects_date_metadata,
-                               "unexpected SINDI_V2 streaming date metadata block");
-                CHECK_ARGUMENT(!loaded_date_metadata,
-                               "duplicate SINDI_V2 streaming date metadata block");
+            case StreamSerializationTag::SINDI_TIME_METADATA:
+                CHECK_ARGUMENT(expects_time_metadata,
+                               "unexpected SINDI_V2 streaming time metadata block");
+                CHECK_ARGUMENT(!loaded_time_metadata,
+                               "duplicate SINDI_V2 streaming time metadata block");
                 CHECK_ARGUMENT(!loaded_host_metadata,
-                               "SINDI_V2 streaming metadata cannot load host and date blocks");
+                               "SINDI_V2 streaming metadata cannot load host and time blocks");
                 CHECK_ARGUMENT(loaded_term_layout,
-                               "SINDI_V2 streaming date metadata must follow term layout");
+                               "SINDI_V2 streaming time metadata must follow term layout");
                 ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
-                    metadata_filter_.DeserializeDateMetadata(
+                    metadata_filter_.DeserializeTimeMetadata(
                         block, static_cast<uint64_t>(cur_element_count_));
                 });
-                loaded_date_metadata = true;
+                loaded_time_metadata = true;
                 break;
             default:
                 if (block_header.IsCritical()) {
@@ -1493,9 +1493,9 @@ SINDIV2::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
         !expects_host_metadata || loaded_host_metadata,
         "SINDI_V2 streaming host metadata block is missing");
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
-        !expects_date_metadata || loaded_date_metadata,
-        "SINDI_V2 streaming date metadata block is missing");
-    if (!loaded_host_metadata && !loaded_date_metadata) {
+        !expects_time_metadata || loaded_time_metadata,
+        "SINDI_V2 streaming time metadata block is missing");
+    if (!loaded_host_metadata && !loaded_time_metadata) {
         metadata_filter_.Clear();
     }
     this->cal_memory_usage();
@@ -1537,8 +1537,8 @@ SINDIV2::Serialize(StreamWriter& writer) const {
     }
     if (metadata_filter_.HasHostMetadata()) {
         metadata_filter_.SerializeHostMetadata(writer);
-    } else if (metadata_filter_.HasDateMetadata()) {
-        metadata_filter_.SerializeDateMetadata(writer);
+    } else if (metadata_filter_.HasTimeMetadata()) {
+        metadata_filter_.SerializeTimeMetadata(writer);
     }
 
     // Footer
@@ -1549,9 +1549,9 @@ SINDIV2::Serialize(StreamWriter& writer) const {
     jsonify_basic_info[SINDI_V2_TERM_LAYOUT_KIND_KEY].SetString(SINDI_V2_TERM_LAYOUT_KIND);
     if (metadata_filter_.HasHostMetadata()) {
         jsonify_basic_info[SINDI_HAS_HOST_METADATA_KEY].SetBool(true);
-    } else if (metadata_filter_.HasDateMetadata()) {
-        jsonify_basic_info[SINDI_DATE_METADATA_FORMAT_VERSION_KEY].SetInt(
-            SINDI_DATE_METADATA_FORMAT_VERSION);
+    } else if (metadata_filter_.HasTimeMetadata()) {
+        jsonify_basic_info[SINDI_TIME_METADATA_FORMAT_VERSION_KEY].SetInt(
+            SINDI_TIME_METADATA_FORMAT_VERSION);
     }
     metadata->Set("basic_info", jsonify_basic_info);
     auto footer = std::make_shared<Footer>(metadata);
@@ -1630,17 +1630,17 @@ SINDIV2::Deserialize(StreamReader& reader) {
                        jsonify_basic_info[SINDI_V2_TERM_LAYOUT_KIND_KEY].GetString() ==
                            SINDI_V2_TERM_LAYOUT_KIND,
                    "invalid SINDIV2 term layout kind");
-    const bool has_date_metadata =
-        jsonify_basic_info.Contains(SINDI_DATE_METADATA_FORMAT_VERSION_KEY);
+    const bool has_time_metadata =
+        jsonify_basic_info.Contains(SINDI_TIME_METADATA_FORMAT_VERSION_KEY);
     const bool has_host_metadata = jsonify_basic_info.Contains(SINDI_HAS_HOST_METADATA_KEY) &&
                                    jsonify_basic_info[SINDI_HAS_HOST_METADATA_KEY].GetBool();
-    if (has_date_metadata) {
-        CHECK_ARGUMENT(IsSupportedSindiDateMetadataVersion(
-                           jsonify_basic_info[SINDI_DATE_METADATA_FORMAT_VERSION_KEY].GetInt()),
-                       "unsupported SINDI_V2 date metadata version");
+    if (has_time_metadata) {
+        CHECK_ARGUMENT(IsSupportedSindiTimeMetadataVersion(
+                           jsonify_basic_info[SINDI_TIME_METADATA_FORMAT_VERSION_KEY].GetInt()),
+                       "unsupported SINDI_V2 time metadata version");
     }
-    CHECK_ARGUMENT(not(has_host_metadata and has_date_metadata),
-                   "SINDI_V2 metadata cannot contain separate host and date payloads");
+    CHECK_ARGUMENT(not(has_host_metadata and has_time_metadata),
+                   "SINDI_V2 metadata cannot contain separate host and time payloads");
     auto param = jsonify_basic_info[INDEX_PARAM].GetString();
     SINDIV2ParameterPtr index_param = std::make_shared<SINDIV2Parameter>();
     index_param->FromString(param);
@@ -1736,8 +1736,8 @@ SINDIV2::Deserialize(StreamReader& reader) {
 
     if (has_host_metadata) {
         metadata_filter_.DeserializeHostMetadata(reader, static_cast<uint64_t>(cur_element_count_));
-    } else if (has_date_metadata) {
-        metadata_filter_.DeserializeDateMetadata(reader, static_cast<uint64_t>(cur_element_count_));
+    } else if (has_time_metadata) {
+        metadata_filter_.DeserializeTimeMetadata(reader, static_cast<uint64_t>(cur_element_count_));
     }
     this->cal_memory_usage();
 }
