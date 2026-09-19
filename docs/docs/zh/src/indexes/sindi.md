@@ -163,58 +163,48 @@ host-unaware 文档后不能再引入 host metadata。空字符串查询只检�
 忽略查询 host metadata，行为保持不变。旧的数值 `host_id` 输入会被拒绝。host 过滤当前仅适用于
 KNN；范围搜索仍使用原有全索引路径。
 
-### 日期 bucket 过滤
+### 发布时间过滤
 
-mutable 和 immutable SINDI 无论是否开启 rerank，都可以按日历层级 bucket 过滤 KNN 查询。
-构建时为每篇文档附加一个规范字符串 bucket：
+mutable 和 immutable SINDI 无论是否开启 rerank，都可以按文档发布时间过滤 KNN 查询。构建时通过
+int64 metadata 为每篇文档附加一个 Unix 秒时间戳；`0` 表示该文档没有发布时间：
 
 ```cpp
-std::string base_dates[] = {"", "2026/05", "2026/05/01"};
-base->Paths("date", base_dates);
+int64_t base_times[] = {0, 1777593600, 1777680000};
+base->Int64Metadata("publish_time_stamp", base_times);
 
-std::string query_date = "2026/05";
-query->Paths("date", &query_date)->Owner(false);
+int64_t query_time = 1777593600;
+query->Int64Metadata("publish_time_stamp", &query_time)->Owner(false);
 
-std::string date_begin = "2025/11/20";
-std::string date_end = "2026/02";
-query->Paths("date_begin", &date_begin)
-    ->Paths("date_end", &date_end)
+int64_t time_begin = 1777593600;
+int64_t time_end = 1777766399;
+query->Int64Metadata("publish_time_stamp_begin", &time_begin)
+    ->Int64Metadata("publish_time_stamp_end", &time_end)
     ->Owner(false);
 ```
 
-接受 `YYYY`、`YYYY/MM` 和 `YYYY/MM/DD` 三种格式；月份和日期必须补齐两位并符合实际日历。
-匹配只向下进行：`2026` 匹配 2026 年的年、月、日 base bucket；`2026/05` 匹配
-`2026/05` 及其下所有日；`2026/05/01` 只匹配该日。更精确的查询不会匹配更粗粒度的 base bucket。
+SINDI 使用 `timestamp / 86400` 把每个正时间戳归一化为 UTC epoch day。单值查询匹配同一 UTC 日的
+所有文档；范围查询把两个端点归一化后按闭区间匹配。两个范围端点必须同时提供、满足
+`begin <= end`，并且不能与单值 selector 同时使用。query 值必须大于 `0`；base 值必须非负，
+负数会被拒绝。换算后的 epoch day 超过 `INT32_MAX` 时同样报错。
 
-base 空字符串表示该文档没有日期。查询不提供任何日期 selector 时仍会检索缺失日期文档，
-仅按 host 查询时同样包含其中 host 匹配的缺失日期文档；`date` 或日期范围查询永远不会命中它们。
-每篇 base 文档仍须在数组中占一项，因此应传入空字符串，而不是省略对应行。query 日期不接受
-空字符串；需要关闭日期过滤时应省略该 selector。
+base 值为 `0` 的文档在不提供时间 selector 时仍可检索，仅按 host 查询时也会包含 host 匹配的
+无时间文档；任何时间查询都不会命中这些文档。每篇 base 文档仍须在数组中占一项。没有使用
+`publish_time_stamp` 构建的索引收到任一时间 selector 时会报错。
 
-闭区间查询必须同时提供 `date_begin` 和 `date_end`。开始端的年或月扩展到该周期第一天，结束端
-的年或月扩展到该周期最后一天。例如 `2025/11/20` 到 `2026/02` 表示包含首尾的
-`2025/11/20` 至 `2026/02/28`。只有完整日历周期都落在查询范围内的 base bucket 才会命中；
-因此结束于 `2026/08/01` 的范围可以命中 8 月 1 日的日 bucket，但不能命中较粗的
-`2026/08` bucket。两个端点缺一不可，扩展后必须保持正序，并且不能与单值 `date` 同时使用。
+时间构建先按发布时间排序，再按 `window_size` 个文档切分逻辑分区，并在每个分区内按 host 分组；
+无时间文档合并为末尾的单独分区。查询先选择 UTC day 范围相交的分区，再在候选进入 heap 前执行
+精确的逐文档 day 与可选 host 检查。时间、host、删除标记和用户 `Filter` 使用 AND 语义。插入失败
+或跳过的文档可能让相邻逻辑分区共享同一个物理 window，精确 day 检查会保证边界结果正确。
 
-日期构建把缺失日期放入独立分区，并将其余文档按自然季度排序；同时提供 `host` 时，再在每个分区内
-按 host 排序。mutable 索引只能在索引为空时通过 `Build()` 或第一次 `Add()` 提供日期 metadata。
-索引已有文档后不能再引入日期 metadata，已经包含日期 metadata 的 mutable 索引会拒绝之后的所有
-`Add()`，从而避免增量维护季度
-分区。仅使用 host 的 mutable 索引仍保留原有的增量 `Add()` 能力。
+带时间的索引为 build-once。mutable 索引可以通过 `Build()` 或空索引上的第一次 `Add()` 提供
+`publish_time_stamp`，但之后的每次 `Add()` 都会被拒绝。仅使用 host 的 mutable 索引仍保留原有
+增量 `Add()` 能力。发布时间过滤支持 mutable、immutable 以及 `use_reorder` 的任意设置，仅作用于
+KNN，并由普通与 streaming 序列化共同保存；恢复后的 mutable 时间索引仍保持 build-once。
 
-仅包含年份的 base bucket 锚定到该年第一季度并且只存储一次。原有固定大小 window 布局保持不变。
-日期查询先选择相关季度分区，再在候选进入 heap 前执行精确层级 bucket 或范围判断。查询字符串只在
-路由阶段解析一次，候选判断仅比较压缩后的整数 bucket。日期、host、删除标记和用户 `Filter` 使用
-AND 语义。
-
-不提供 `date`、`date_begin` 或 `date_end` 时搜索全部季度；仅提供 host 时会从每个季度选择该 host。
-所有选中 window 共用一个候选堆，并在开启 `use_reorder` 时共用一次 rerank。日期过滤支持 mutable
-和 immutable 索引以及 `use_reorder` 的任意设置，仅作用于 KNN，并由旧版与 streaming 序列化共同
-保存。反序列化恢复的 mutable 日期索引仍保持 build-once，并拒绝 `Add()`。为了执行精确 bucket 或
-范围过滤，每个选中 window 都会关闭 term 级 posting 剪枝，因此日期查询可能比仅 host 查询扫描更多
-posting，较宽的范围也会选择更多 window。在启用日期的索引上，仅 host 查询遇到跨季度或 host 边界
-的 window 时也可能需要完整扫描。
+不提供时间 selector 时会扫描全部时间分区与无时间分区；仅提供 host 时会从每个分区选择该 host。
+精确时间过滤会关闭所选 window 的 term 级 posting 剪枝，因此时间查询可能比仅 host 查询扫描更多
+posting，较宽的范围也会选择更多 window。在启用时间的索引上，仅 host 查询遇到跨分区或 host
+边界的 window 时也可能需要完整扫描。
 
 ## 检索参数
 

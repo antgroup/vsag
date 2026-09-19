@@ -175,66 +175,56 @@ without base host metadata ignore query host metadata and retain their previous 
 numeric `host_id` input is rejected. Host filtering currently applies only to KNN; range search keeps
 its existing full-index behavior.
 
-### Date-bucket filtering
+### Publish-time filtering
 
-Mutable and immutable SINDI can filter KNN queries by hierarchical calendar buckets, with or
-without reranking. Attach one canonical string bucket to each base document:
+Mutable and immutable SINDI can filter KNN queries by a document publication timestamp, with or
+without reranking. Supply one Unix timestamp in seconds per base document through int64 metadata.
+`0` means that the document has no publication time:
 
 ```cpp
-std::string base_dates[] = {"", "2026/05", "2026/05/01"};
-base->Paths("date", base_dates);
+int64_t base_times[] = {0, 1777593600, 1777680000};
+base->Int64Metadata("publish_time_stamp", base_times);
 
-std::string query_date = "2026/05";
-query->Paths("date", &query_date)->Owner(false);
+int64_t query_time = 1777593600;
+query->Int64Metadata("publish_time_stamp", &query_time)->Owner(false);
 
-std::string date_begin = "2025/11/20";
-std::string date_end = "2026/02";
-query->Paths("date_begin", &date_begin)
-    ->Paths("date_end", &date_end)
+int64_t time_begin = 1777593600;
+int64_t time_end = 1777766399;
+query->Int64Metadata("publish_time_stamp_begin", &time_begin)
+    ->Int64Metadata("publish_time_stamp_end", &time_end)
     ->Owner(false);
 ```
 
-Accepted forms are `YYYY`, `YYYY/MM`, and `YYYY/MM/DD`, with valid calendar values and zero-padded
-months and days. Matching proceeds down the hierarchy: `2026` matches base buckets at year, month,
-or day granularity in 2026; `2026/05` matches `2026/05` and every day below it; `2026/05/01`
-matches only that exact day. A more precise query never matches a coarser base bucket.
+SINDI normalizes every positive timestamp to a UTC epoch day with `timestamp / 86400`. A single
+timestamp matches every document on the same UTC day. A range is inclusive after both endpoints
+are normalized to UTC days. The two range endpoints must be supplied together, must satisfy
+`begin <= end`, and cannot be combined with the single-value selector. Query values must be
+positive. Base values must be non-negative; negative values are rejected. Timestamps whose epoch
+day exceeds `INT32_MAX` are rejected.
 
-An empty base string means that the document has no date. Missing-date documents remain searchable
-when the query omits all date selectors, including host-only queries, but never match a `date` or
-date-range query. Every base document still needs one array entry, so use an empty string instead of
-omitting a row. Empty query date strings remain invalid; omit the selector to disable date filtering.
+Documents with base value `0` remain searchable when a query omits time selectors, including
+host-only queries, but never match a time query. Every base document still needs one array entry.
+An index built without `publish_time_stamp` rejects a query that supplies any time selector.
 
-For an inclusive range query, provide `date_begin` and `date_end` together. A year or month at the
-beginning expands to its first day, while a year or month at the end expands to its last day. For
-example, `2025/11/20` through `2026/02` means `2025/11/20` through `2026/02/28`, inclusive. A base
-bucket matches when its complete calendar period is contained in the query range. Consequently, a
-range ending at `2026/08/01` can match a base day bucket on August 1, but not the coarser
-`2026/08` bucket. The two range endpoints are required together, must be ordered after expansion,
-and cannot be combined with the single `date` selector.
+A time-aware build orders documents by publication timestamp, cuts the ordered sequence into
+logical partitions of `window_size` documents, and groups by host inside each partition. Missing
+times form one final partition. Search first selects partitions whose UTC-day range intersects the
+query, then applies exact per-document day and optional host checks before candidates enter the
+heap. Time, host, tombstone, and user `Filter` conditions use AND semantics. Failed or skipped
+documents can make adjacent logical partitions share a physical window; the exact day check keeps
+boundary results correct.
 
-The date-aware build places missing dates in a dedicated partition, orders dated documents by
-calendar quarter and, when `host` is present, by host inside each partition. For a mutable index,
-date metadata can be supplied by `Build()` or the first `Add()` while the index is empty. Once the
-index contains documents, date metadata cannot be introduced, and a date-aware mutable index
-rejects every later `Add()`. This build-once restriction
-avoids incrementally maintaining the quarter partitions. Mutable host-only indexes retain their
-existing incremental `Add()` support.
+Time-aware indexes are build-once. A mutable index may receive `publish_time_stamp` through
+`Build()` or the first `Add()` while empty, but rejects every later `Add()`. Mutable host-only
+indexes retain incremental `Add()` support. Publish-time filtering supports mutable and immutable
+indexes with either `use_reorder` setting, applies only to KNN search, and is preserved by standard
+and streaming serialization. A restored mutable time-aware index remains build-once.
 
-Year-only base buckets are anchored in the first quarter of that year and stored only once. The
-physical fixed-size window layout is unchanged. A date query first selects the relevant quarter
-partitions, then applies exact hierarchical bucket or range matching before candidates enter the
-heap. Query strings are parsed once during routing; candidate checks use only the packed integer
-buckets. Date, host, tombstone, and user `Filter` conditions use AND semantics.
-
-Queries without `date`, `date_begin`, or `date_end` search every quarter. Host-only queries select
-that host from every quarter. All selected windows share one candidate heap and, when
-`use_reorder` is enabled, one rerank pass. Date filtering supports mutable and immutable indexes
-with either `use_reorder` setting, applies only to KNN search, and is preserved by both legacy and
-streaming serialization. A deserialized mutable date-aware index remains build-once and rejects
-`Add()`. Exact bucket and range filtering disable term-level posting pruning in each selected
-window, so date queries may scan more postings than host-only queries. Wider ranges also select
-more windows. A host-only query on a date-enabled index can require a full scan for windows that
-cross quarter or host boundaries.
+Queries without a time selector scan every time and missing-time partition. Host-only queries
+select that host from every partition. Exact time filtering disables term-level posting pruning in
+each selected window, so time queries may scan more postings than host-only queries; wider ranges
+also select more windows. A host-only query on a time-enabled index can require a full scan for
+windows that cross partition or host boundaries.
 
 ## Search parameters
 
