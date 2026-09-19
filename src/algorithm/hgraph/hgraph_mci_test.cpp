@@ -776,3 +776,82 @@ TEST_CASE("HGraph Merge rebuilds the MCI companion", "[ut][hgraph][mci]") {
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
 }
+
+TEST_CASE("HGraph MCI stops expanding cliques that discover nothing", "[ut][hgraph][mci]") {
+    // Every valid vector is a seed here, so the clique expansion phase can only rediscover already
+    // visited points. The traversal has to notice that no expansion makes progress and stop,
+    // instead of walking every clique of every candidate to the end of the candidate queue.
+    constexpr int64_t dim = 8;
+    constexpr int64_t total = 512;
+    constexpr int64_t valid_count = 400;
+
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 1000);
+    // A prime modulus keeps every row distinct, so the expected neighbours are unambiguous.
+    std::vector<float> vectors(total * dim);
+    for (int64_t i = 0; i < total * dim; ++i) {
+        vectors[i] = static_cast<float>((i * 37) % 997) / 997.0F;
+    }
+    std::vector<int64_t> valid_ids(ids.begin(), ids.begin() + valid_count);
+    auto filter = std::make_shared<HalfRatioAllValidFilter>(valid_ids);
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->Float32Vectors(vectors.data())
+                     ->Owner(false);
+    // mci_seed_ratio=20 gives ceil(sqrt(512) * 20) = 453 seed slots for 400 valid vectors, so the
+    // seed phase already scores every one of them. ef_search=512 lets the candidate queue hold all
+    // of them, which is what makes the pointless expansion phase long.
+    const std::string search_params =
+        R"({"hgraph":{"ef_search":512,"use_mci":true,"mci_seed_ratio":20.0,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})";
+
+    auto params = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    params["index_param"]["base_quantization_type"].SetString("fp32");
+    params["index_param"]["max_degree"].SetInt(16);
+    params["index_param"]["mci_mcs"].SetInt(64);
+    params["index_param"]["build_thread_count"].SetInt(1);
+
+    auto index = vsag::Factory::CreateIndex("hgraph", params.Dump());
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    auto result = index.value()->KnnSearch(query, 5, search_params, filter);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    REQUIRE(std::stoull(result.value()->GetStatistics({"mci_seed_count"})[0]) == valid_count);
+
+    // Every returned id must be valid: the early stop may not let invalid vectors through.
+    REQUIRE(result.value()->GetDim() == 5);
+    for (int64_t rank = 0; rank < result.value()->GetDim(); ++rank) {
+        REQUIRE(std::find(valid_ids.begin(), valid_ids.end(), result.value()->GetIds()[rank]) !=
+                valid_ids.end());
+    }
+
+    // The seed phase scored every valid vector, so the early stop must not drop the best of them:
+    // the result has to be the five nearest valid vectors.
+    std::vector<std::pair<float, int64_t>> expected;
+    for (int64_t i = 0; i < valid_count; ++i) {
+        float dist = 0.0F;
+        for (int64_t d = 0; d < dim; ++d) {
+            const float diff = vectors[d] - vectors[i * dim + d];
+            dist += diff * diff;
+        }
+        expected.emplace_back(dist, ids[i]);
+    }
+    std::sort(expected.begin(), expected.end());
+    std::vector<int64_t> got(result.value()->GetIds(), result.value()->GetIds() + 5);
+    std::vector<int64_t> want;
+    for (int64_t rank = 0; rank < 5; ++rank) {
+        want.push_back(expected[rank].second);
+    }
+    std::sort(got.begin(), got.end());
+    std::sort(want.begin(), want.end());
+    REQUIRE(got == want);
+
+    // The expansion must stay bounded: this index expands 314 cliques without the early stop and
+    // 38 with it, so the bound separates the two behaviours with a wide margin.
+    const auto hops = std::stoull(result.value()->GetStatistics({"hops"})[0]);
+    REQUIRE(hops > 0);
+    REQUIRE(hops <= 150);
+}
