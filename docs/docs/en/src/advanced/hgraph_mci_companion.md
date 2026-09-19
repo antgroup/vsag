@@ -75,6 +75,38 @@ The companion needs a `Filter` object with a meaningful `ValidRatio()` hint. Bit
 function filters are accepted, but a custom `Filter` gives the search planner better
 selectivity information.
 
+## Search Traversal and Early Stop
+
+A filtered MCI search fills its candidate queue by scoring seed vectors, then expands the cliques of
+the candidates it collected:
+
+1. seeds are sampled from the valid labels, controlled by `mci_seed_ratio`;
+2. for every candidate that has not been expanded yet, each of its cliques is walked and every
+   member that is valid and unvisited is scored;
+3. the traversal ends when the candidate queue has no unexpanded entry left.
+
+Step 2 is what makes MCI useful for selective filters: one clique reaches a whole neighbourhood at
+once. It is also where the traversal can waste work, because cliques overlap heavily. On a 5M-vector
+quantized index (`mci_mcs=200`, `mci_clique_max=50`) a vector belongs to 22.4 cliques and an average
+clique has 102 members, so once the reachable neighbourhood has been scored the remaining expansions
+only walk members that are already visited. On that index the traversal expanded 11k-27k cliques per
+query while scoring only 0.68 points per expanded clique.
+
+MCI therefore stops expanding after 32 consecutive candidates that discovered nothing new (neither a
+new candidate nor a new result). Same index, `ef_search=600`, `mci_seed_ratio=10`:
+
+| | recall@100 | mean latency | cliques expanded per query |
+| --- | --- | --- | --- |
+| without the early stop | 0.9869 | 66 ms | 11k-27k |
+| with the early stop | 0.9856 | 31 ms | 0.7k-2.0k |
+
+The saving is largest for the queries whose seeds already cover every valid vector: there the
+recall is unchanged (bit-identical) and the latency drops 4-11x. Queries whose valid set is larger
+than the seed budget keep expanding, and they are the ones behind the small recall difference above.
+
+The early stop bounds work, not recall: the traversal still has no lower-bound based termination, so
+`mci_seed_ratio` and `ef_search` remain the knobs that decide how much of the valid set is explored.
+
 ## Add, Serialize, and Stats
 
 When MCI is enabled by the flat build parameters, `HGraph::Add()` updates the companion
