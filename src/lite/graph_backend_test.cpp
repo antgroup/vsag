@@ -87,6 +87,17 @@ TEST_CASE("Lite graph filter traverses rejected IDs and survives snapshot load",
         REQUIRE((*without_filter)[i].distance == (*unfiltered)[i].distance);
     }
 
+    const auto closest_even =
+        index.Search(query.data(), 2, 3, [](int64_t id) { return id % 2 == 0; });
+    REQUIRE(closest_even);
+    REQUIRE(closest_even->size() == 3);
+    REQUIRE((*closest_even)[0].id == 1014);
+    REQUIRE((*closest_even)[1].id == 1016);
+    REQUIRE((*closest_even)[2].id == 1012);
+    REQUIRE((*closest_even)[0].distance == 1);
+    REQUIRE((*closest_even)[1].distance == 1);
+    REQUIRE((*closest_even)[2].distance == 9);
+
     std::unordered_set<int64_t> checked_ids;
     const vsag::lite::IdFilter only_middle = [&checked_ids](int64_t id) {
         checked_ids.insert(id);
@@ -124,6 +135,44 @@ TEST_CASE("Lite graph filter traverses rejected IDs and survives snapshot load",
     REQUIRE(restored->size() == after_crud->size());
     REQUIRE(restored->front().id == after_crud->front().id);
     REQUIRE(restored->front().distance == after_crud->front().distance);
+}
+
+TEST_CASE("Lite graph update removes obsolete reverse links", "[lite-graph]") {
+    auto flat = make_brute_force_backend(2);
+    REQUIRE(flat);
+    for (int64_t id = 0; id < 8; ++id) {
+        const std::array<float, 2> vector{static_cast<float>(id), 0};
+        REQUIRE((*flat)->Add(id, vector.data(), 2));
+    }
+    auto graph = make_graph_backend(**flat, 2, 8);
+    REQUIRE(graph);
+
+    constexpr uint64_t updated_slot = 0;
+    std::unordered_set<uint64_t> old_neighbors;
+    for (uint64_t i = 0; i < (*graph)->LinkCountAt(updated_slot); ++i) {
+        old_neighbors.insert((*graph)->LinkAt(updated_slot, i));
+    }
+
+    const std::array<float, 2> moved{100, 0};
+    REQUIRE((*graph)->Update(0, moved.data(), 2));
+    std::unordered_set<uint64_t> new_neighbors;
+    for (uint64_t i = 0; i < (*graph)->LinkCountAt(updated_slot); ++i) {
+        new_neighbors.insert((*graph)->LinkAt(updated_slot, i));
+    }
+
+    uint64_t obsolete = 0;
+    for (uint64_t old_neighbor : old_neighbors) {
+        if (new_neighbors.count(old_neighbor) != 0) {
+            continue;
+        }
+        ++obsolete;
+        bool still_linked = false;
+        for (uint64_t i = 0; i < (*graph)->LinkCountAt(old_neighbor); ++i) {
+            still_linked |= (*graph)->LinkAt(old_neighbor, i) == updated_slot;
+        }
+        REQUIRE_FALSE(still_linked);
+    }
+    REQUIRE(obsolete > 0);
 }
 
 TEST_CASE("Lite graph backend validates restored adjacency bounds", "[lite-graph]") {

@@ -11,8 +11,7 @@
 #include <unordered_map>
 
 #include "lite/backend.h"
-#include "simd/kernels/compute_l2.h"
-#include "simd/traits/simd_traits_generic.h"
+#include "lite/fp32_distance.h"
 
 namespace vsag::lite::detail {
 namespace {
@@ -58,7 +57,10 @@ farther(const Candidate& left, const Candidate& right) {
 class GraphBackend final : public Backend {
 public:
     GraphBackend(uint64_t dimension, uint64_t max_degree, uint64_t ef_search)
-        : dim_(dimension), max_degree_(max_degree), ef_search_(ef_search) {
+        : dim_(dimension),
+          max_degree_(max_degree),
+          ef_search_(ef_search),
+          distance_(select_fp32_distance()) {
     }
 
     tl::expected<void, Error>
@@ -76,16 +78,19 @@ public:
         }
         try {
             auto neighbors = nearest(vector, max_degree_);
+            if (not neighbors) {
+                return tl::unexpected(neighbors.error());
+            }
             grow(vectors_, (Size() + 1) * dim);
             grow(ids_, Size() + 1);
             grow(extras_, Size() + 1);
-            for (uint64_t neighbor : neighbors) {
+            for (uint64_t neighbor : *neighbors) {
                 extras_[neighbor].reserve(max_degree_ + 1);
             }
             slots_.emplace(id, Size());
             vectors_.insert(vectors_.end(), vector, vector + dim);
             ids_.push_back(id);
-            extras_.push_back(std::move(neighbors));
+            extras_.push_back(std::move(*neighbors));
             for (uint64_t neighbor : extras_.back()) {
                 link(neighbor, Size() - 1);
             }
@@ -108,14 +113,22 @@ public:
             return failure(ErrorType::INVALID_ARGUMENT, "missing ID");
         }
         try {
-            auto neighbors = nearest(vector, max_degree_, found->second);
-            for (uint64_t neighbor : neighbors) {
+            const uint64_t slot = found->second;
+            auto neighbors = nearest(vector, max_degree_, slot);
+            if (not neighbors) {
+                return tl::unexpected(neighbors.error());
+            }
+            for (uint64_t neighbor : *neighbors) {
                 extras_[neighbor].reserve(max_degree_ + 1);
             }
-            std::copy_n(vector, dim, vectors_.data() + found->second * dim);
-            extras_[found->second] = std::move(neighbors);
-            for (uint64_t neighbor : extras_[found->second]) {
-                link(neighbor, found->second);
+            for (uint64_t old_neighbor : extras_[slot]) {
+                auto& reverse = extras_[old_neighbor];
+                reverse.erase(std::remove(reverse.begin(), reverse.end(), slot), reverse.end());
+            }
+            std::copy_n(vector, dim, vectors_.data() + slot * dim);
+            extras_[slot] = std::move(*neighbors);
+            for (uint64_t neighbor : extras_[slot]) {
+                link(neighbor, slot);
             }
             return {};
         } catch (const std::bad_alloc&) {
@@ -176,6 +189,7 @@ public:
                 return std::vector<Neighbor>{};
             }
             const uint64_t ef = std::min(Size(), std::max(k, ef_search_));
+            // With closer as Compare, top() is the farthest candidate and pop() evicts it.
             std::priority_queue<Candidate, std::vector<Candidate>, decltype(&closer)> best(&closer);
             std::priority_queue<Candidate, std::vector<Candidate>, decltype(&closer)> accepted(
                 &closer);
@@ -321,19 +335,19 @@ private:
 
     [[nodiscard]] float
     distance(const float* left, const float* right) const {
-        return simd::ComputeL2SqrImpl<simd::SimdTraits<simd::GenericTag>>(left, right, Dim());
+        return distance_(left, right, Dim());
     }
 
-    std::vector<uint64_t>
+    tl::expected<std::vector<uint64_t>, Error>
     nearest(const float* vector,
             uint64_t count,
             uint64_t excluded = std::numeric_limits<uint64_t>::max()) const {
         if (Size() == 0) {
-            return {};
+            return std::vector<uint64_t>{};
         }
         const auto found = Search(vector, Dim(), std::min(Size(), std::max(count * 4, ef_search_)));
         if (not found) {
-            throw std::bad_alloc();
+            return tl::unexpected(found.error());
         }
         std::vector<uint64_t> result;
         result.reserve(count);
@@ -375,6 +389,7 @@ private:
     uint64_t dim_;
     uint64_t max_degree_;
     uint64_t ef_search_;
+    FP32Distance distance_;
     std::vector<float> vectors_;
     std::vector<int64_t> ids_;
     std::unordered_map<int64_t, uint64_t> slots_;
