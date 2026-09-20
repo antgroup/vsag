@@ -11,15 +11,13 @@
 #include <stdexcept>
 
 #include "lite/backend.h"
+#include "lite/backend_utils.h"
 #include "lite/fp16_codec.h"
 
 namespace vsag::lite {
 namespace {
 
-auto
-failure(ErrorType type, const char* message) {
-    return tl::unexpected(Error(type, message));
-}
+using detail::failure;
 
 void
 write(std::ostream& out, uint64_t value, uint64_t bytes = 8) {
@@ -239,10 +237,12 @@ Index::Save(std::ostream& output) const {
             }
         }
         if (not output) {
+            // ErrorType has no write-specific value; keep the existing stream-error contract.
             return failure(ErrorType::READ_ERROR, "snapshot write failed");
         }
         return {};
     } catch (const std::ios_base::failure&) {
+        // ErrorType has no write-specific value; keep the existing stream-error contract.
         return failure(ErrorType::READ_ERROR, "snapshot write failed");
     }
 }
