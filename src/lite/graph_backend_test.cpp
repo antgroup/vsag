@@ -560,6 +560,11 @@ TEST_CASE("Lite graph public transition and v2 snapshot roundtrip", "[lite-graph
 TEST_CASE("Lite graph SIFT independent-query probe", "[.][lite-sift]") {
     const char* directory = std::getenv("VSAG_SIFT_DIR");
     REQUIRE(directory != nullptr);
+    const char* storage_name = std::getenv("VSAG_GRAPH_STORAGE");
+    const std::string selected = storage_name == nullptr ? "fp32" : storage_name;
+    REQUIRE((selected == "fp32" or selected == "fp16"));
+    const auto storage =
+        selected == "fp16" ? vsag::lite::VectorStorage::FP16 : vsag::lite::VectorStorage::FP32;
     const std::string root(directory);
     const auto base = read_sift<float>(root + "/base.fvecs", 128);
     const auto queries = read_sift<float>(root + "/queries.fvecs", 128);
@@ -571,7 +576,7 @@ TEST_CASE("Lite graph SIFT independent-query probe", "[.][lite-sift]") {
         REQUIRE((*graph)->Add(id, base[id].data(), 128));
     }
     auto start = std::chrono::steady_clock::now();
-    REQUIRE((*graph)->BuildGraph(16, 128));
+    REQUIRE((*graph)->BuildGraph(storage, 16, 128));
     const auto build_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     std::vector<double> latency;
@@ -608,6 +613,7 @@ TEST_CASE("Lite graph SIFT independent-query probe", "[.][lite-sift]") {
     const auto load_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     REQUIRE((*loaded)->ActiveBackend() == vsag::lite::BackendKind::GRAPH);
+    REQUIRE((*loaded)->ActiveVectorStorage() == storage);
     for (uint64_t q = 0; q < queries.size(); ++q) {
         auto after = (*loaded)->Search(queries[q].data(), 128, 10);
         REQUIRE(after);
@@ -618,9 +624,9 @@ TEST_CASE("Lite graph SIFT independent-query probe", "[.][lite-sift]") {
         }
     }
     std::sort(latency.begin(), latency.end());
-    std::cout << "base_count,query_count,degree,ef,recall_at_10,build_ms,search_p50_us,"
-                 "search_p99_us,save_ms,load_ms,snapshot_bytes\n";
-    std::cout << base.size() << ',' << queries.size() << ",16,128,"
+    std::cout << "storage,base_count,query_count,degree,ef,recall_at_10,build_ms,"
+                 "search_p50_us,search_p99_us,save_ms,load_ms,snapshot_bytes\n";
+    std::cout << selected << ',' << base.size() << ',' << queries.size() << ",16,128,"
               << static_cast<double>(hits) / static_cast<double>(queries.size() * 10) << ','
               << build_ms << ',' << latency[(latency.size() - 1) / 2] << ','
               << latency[(latency.size() * 99 - 1) / 100] << ',' << save_ms << ',' << load_ms << ','
@@ -676,21 +682,32 @@ TEST_CASE("Lite graph SIFT fresh-process load probe", "[.][lite-sift-load]") {
     const auto queries = read_sift<float>(root + "/queries.fvecs", 128);
     const auto truth = read_sift<int32_t>(root + "/groundtruth.ivecs", 10);
     REQUIRE(queries.size() == truth.size());
+    REQUIRE(queries.size() > 1);
     auto start = std::chrono::steady_clock::now();
     std::ifstream input(snapshot_path, std::ios::binary);
     auto loaded = vsag::lite::Index::Load(input);
     REQUIRE(loaded);
     REQUIRE((*loaded)->ActiveBackend() == vsag::lite::BackendKind::GRAPH);
+    const auto storage = (*loaded)->ActiveVectorStorage();
+    REQUIRE(
+        (storage == vsag::lite::VectorStorage::FP32 or storage == vsag::lite::VectorStorage::FP16));
+    const char* const storage_name = storage == vsag::lite::VectorStorage::FP16 ? "fp16" : "fp32";
     const auto load_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     uint64_t hits = 0;
-    std::vector<double> latency;
+    double first_query_us = 0;
+    std::vector<double> follow_up_latency;
     for (uint64_t q = 0; q < queries.size(); ++q) {
         start = std::chrono::steady_clock::now();
         auto result = (*loaded)->Search(queries[q].data(), 128, 10);
-        latency.push_back(
+        const auto elapsed_us =
             std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start)
-                .count());
+                .count();
+        if (q == 0) {
+            first_query_us = elapsed_us;
+        } else {
+            follow_up_latency.push_back(elapsed_us);
+        }
         REQUIRE(result);
         REQUIRE(result->size() == 10);
         const std::unordered_set<int64_t> expected(truth[q].begin(), truth[q].end());
@@ -698,15 +715,19 @@ TEST_CASE("Lite graph SIFT fresh-process load probe", "[.][lite-sift-load]") {
             hits += expected.count(neighbor.id);
         }
     }
-    std::sort(latency.begin(), latency.end());
+    std::sort(follow_up_latency.begin(), follow_up_latency.end());
+    trim_heap();
+    const auto steady_rss_kib = current_rss_kib();
     rusage usage{};
     REQUIRE(getrusage(RUSAGE_SELF, &usage) == 0);
-    std::cout << "query_count,recall_at_10,load_ms,search_p50_us,search_p99_us,"
-                 "process_peak_rss_kib,snapshot_bytes\n";
-    std::cout << queries.size() << ','
+    std::cout << "storage,query_count,recall_at_10,load_ms,first_query_us,search_p50_us,"
+                 "search_p99_us,steady_rss_kib,process_peak_rss_kib,snapshot_bytes\n";
+    std::cout << storage_name << ',' << queries.size() << ','
               << static_cast<double>(hits) / static_cast<double>(queries.size() * 10) << ','
-              << load_ms << ',' << latency[(latency.size() - 1) / 2] << ','
-              << latency[(latency.size() * 99 - 1) / 100] << ',' << usage.ru_maxrss << ','
+              << load_ms << ',' << first_query_us << ','
+              << follow_up_latency[(follow_up_latency.size() - 1) / 2] << ','
+              << follow_up_latency[(follow_up_latency.size() * 99 - 1) / 100] << ','
+              << steady_rss_kib << ',' << usage.ru_maxrss << ','
               << std::filesystem::file_size(snapshot_path) << '\n';
     REQUIRE(hits >= queries.size() * 5);
 }
