@@ -233,11 +233,11 @@ private:
                        BucketIdType bucket_id,
                        bool require_fastscan = false);
 
-    void
-    check_routed_bucket(const SplitBucketComputer& computer, BucketIdType bucket_id) const;
+    static void
+    check_routed_bucket(const SplitBucketComputer& computer, BucketIdType bucket_id);
 
-    [[nodiscard]] uint64_t
-    get_routed_bucket_index(const SplitBucketComputer& computer, BucketIdType bucket_id) const;
+    [[nodiscard]] static uint64_t
+    get_routed_bucket_index(const SplitBucketComputer& computer, BucketIdType bucket_id);
 
     uint64_t
     scan_bucket_by_id(float* result_dists,

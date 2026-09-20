@@ -31,7 +31,7 @@ namespace vsag {
 namespace {
 
 RaBitQSplitResidualOriginalQueryInterface&
-GetResidualOriginalQueryCodes(const FlattenInterfacePtr& codes) {
+get_residual_original_query_codes(const FlattenInterfacePtr& codes) {
     auto* residual_codes = dynamic_cast<RaBitQSplitResidualOriginalQueryInterface*>(codes.get());
     CHECK_ARGUMENT(residual_codes != nullptr,
                    "RaBitQ split codes do not support original-query residual factors");
@@ -68,7 +68,7 @@ RaBitQSplitBucketDataCell::RaBitQSplitBucketDataCell(const BucketDataCellParamPt
     CHECK_ARGUMENT(this->codes_ != nullptr and this->codes_->SupportSplitCodeStorage(),
                    "failed to create RaBitQ split bucket codes");
     this->codes_->EnableExternalFilterCodeStorage();
-    this->residual_original_query_codes_ = &GetResidualOriginalQueryCodes(this->codes_);
+    this->residual_original_query_codes_ = &get_residual_original_query_codes(this->codes_);
 
     this->bucket_count_ = static_cast<BucketIdType>(param->buckets_count);
     this->code_size_ = this->codes_->code_size_;
@@ -122,7 +122,7 @@ RaBitQSplitBucketDataCell::get_scan_computers(SplitBucketComputer& computer,
         return {computer.inner_, computer.fastscan_};
     }
 
-    this->check_routed_bucket(computer, bucket_id);
+    RaBitQSplitBucketDataCell::check_routed_bucket(computer, bucket_id);
 
     std::lock_guard lock(computer.bucket_computers_mutex_);
     for (uint64_t i = 0; i < computer.bucket_ids_.size(); ++i) {
@@ -140,9 +140,10 @@ RaBitQSplitBucketDataCell::get_scan_computers(SplitBucketComputer& computer,
 
 void
 RaBitQSplitBucketDataCell::check_routed_bucket(const SplitBucketComputer& computer,
-                                               BucketIdType bucket_id) const {
+                                               BucketIdType bucket_id) {
     if (computer.routed_buckets_prepared_ and
-        this->get_routed_bucket_index(computer, bucket_id) == INVALID_ROUTED_BUCKET_INDEX) {
+        RaBitQSplitBucketDataCell::get_routed_bucket_index(computer, bucket_id) ==
+            INVALID_ROUTED_BUCKET_INDEX) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             "residual query computer was not prepared for the requested bucket");
     }
@@ -150,7 +151,7 @@ RaBitQSplitBucketDataCell::check_routed_bucket(const SplitBucketComputer& comput
 
 uint64_t
 RaBitQSplitBucketDataCell::get_routed_bucket_index(const SplitBucketComputer& computer,
-                                                   BucketIdType bucket_id) const {
+                                                   BucketIdType bucket_id) {
     const auto it = std::find(
         computer.routed_bucket_ids_.begin(), computer.routed_bucket_ids_.end(), bucket_id);
     if (it == computer.routed_bucket_ids_.end()) {
@@ -400,9 +401,9 @@ RaBitQSplitBucketDataCell::scan_bucket_by_id(float* result_dists,
     ComputerInterfacePtr scan_fastscan = bucket_computer.fastscan_;
     float query_bucket_norm_sqr = 0.0F;
     if (this->use_l2_residual_query()) {
-        this->check_routed_bucket(bucket_computer, bucket_id);
+        RaBitQSplitBucketDataCell::check_routed_bucket(bucket_computer, bucket_id);
         const uint64_t routed_bucket_index =
-            this->get_routed_bucket_index(bucket_computer, bucket_id);
+            RaBitQSplitBucketDataCell::get_routed_bucket_index(bucket_computer, bucket_id);
         if (routed_bucket_index != INVALID_ROUTED_BUCKET_INDEX) {
             query_bucket_norm_sqr = bucket_computer.routed_bucket_norm_sqrs_[routed_bucket_index];
         } else {
@@ -426,11 +427,11 @@ RaBitQSplitBucketDataCell::scan_bucket_by_id(float* result_dists,
     if (scan_fastscan != nullptr and this->fastscan_block_size_ > 0 and
         this->fastscan_blocks_[bucket_id].size() >= block_count * this->fastscan_block_size_) {
         float* scan_filter_inner_products = direct_filter_inner_products;
-        constexpr uint64_t kStackComputedMaskCount = 256;
-        std::array<uint32_t, kStackComputedMaskCount> stack_computed_masks{};
+        constexpr uint64_t stack_computed_mask_count = 256;
+        std::array<uint32_t, stack_computed_mask_count> stack_computed_masks{};
         Vector<uint32_t> dynamic_computed_masks(this->allocator_);
         uint32_t* computed_masks = stack_computed_masks.data();
-        if (block_count > kStackComputedMaskCount) {
+        if (block_count > stack_computed_mask_count) {
             dynamic_computed_masks.resize(block_count, 0);
             computed_masks = dynamic_computed_masks.data();
         }
@@ -630,10 +631,12 @@ RaBitQSplitBucketDataCell::QueryWithCandidateFilterInnerProductBySource(
     InnerIdType id_count,
     QueryContext* ctx) {
     (void)hint_dists;
-    CHECK_ARGUMENT(
-        id_count == 0 or (filter_inner_products != nullptr and source_bucket_ids != nullptr and
-                          source_offset_ids != nullptr and source_versions != nullptr),
-        "candidate provenance inputs are required");
+    const bool provenance_available = filter_inner_products != nullptr and
+                                      source_bucket_ids != nullptr and
+                                      source_offset_ids != nullptr and source_versions != nullptr;
+    if (id_count != 0) {
+        CHECK_ARGUMENT(provenance_available, "candidate provenance inputs are required");
+    }
     auto& bucket_computer = RaBitQSplitBucketDataCell::get_bucket_computer(computer);
     if (this->use_l2_residual_query()) {
         this->query_residual_by_inner_ids(result_dists,
@@ -696,9 +699,8 @@ RaBitQSplitBucketDataCell::query_current_by_inner_id(float& result_dist,
                                                      InnerIdType inner_id,
                                                      QueryContext* ctx) {
     result_dist = std::numeric_limits<float>::max();
-    constexpr uint32_t kMaxLocationRetries = 3;
-    constexpr uint64_t kLocationMask = (1ULL << LOCATION_SPLIT_BIT) - 1ULL;
-    for (uint32_t retry = 0; retry < kMaxLocationRetries; ++retry) {
+    constexpr uint32_t max_location_retries = 3;
+    for (uint32_t retry = 0; retry < max_location_retries; ++retry) {
         uint64_t location = INVALID_LOCATION;
         {
             std::lock_guard location_lock(this->locations_mutex_);
@@ -710,7 +712,7 @@ RaBitQSplitBucketDataCell::query_current_by_inner_id(float& result_dist,
         }
 
         const auto bucket_id = static_cast<BucketIdType>(location >> LOCATION_SPLIT_BIT);
-        const auto offset_id = static_cast<InnerIdType>(location & kLocationMask);
+        const auto offset_id = static_cast<InnerIdType>(location & LOCATION_MASK);
         if (bucket_id < 0 or bucket_id >= this->bucket_count_) {
             return false;
         }
@@ -1080,7 +1082,8 @@ RaBitQSplitBucketDataCell::query_residual_by_inner_ids(
         };
         float query_bucket_norm_sqr = 0.0F;
         if (use_original_query) {
-            const uint64_t routed_bucket_index = this->get_routed_bucket_index(computer, bucket_id);
+            const uint64_t routed_bucket_index =
+                RaBitQSplitBucketDataCell::get_routed_bucket_index(computer, bucket_id);
             if (routed_bucket_index != INVALID_ROUTED_BUCKET_INDEX) {
                 query_bucket_norm_sqr = computer.routed_bucket_norm_sqrs_[routed_bucket_index];
             } else {
@@ -1515,8 +1518,9 @@ RaBitQSplitBucketDataCell::InsertVector(const void* vector,
             write_target(offset_id);
             if (old_location != INVALID_LOCATION) {
                 const auto old_offset_id = static_cast<InnerIdType>(old_location & location_mask);
-                CHECK_ARGUMENT(old_offset_id < offset_id and
-                                   this->inner_ids_[bucket_id][old_offset_id] == inner_id,
+                CHECK_ARGUMENT(old_offset_id < offset_id,
+                               "stale RaBitQ split bucket location during relocation");
+                CHECK_ARGUMENT(this->inner_ids_[bucket_id][old_offset_id] == inner_id,
                                "stale RaBitQ split bucket location during relocation");
                 invalidate_old_lane(bucket_id, old_offset_id);
             }
@@ -1556,8 +1560,9 @@ RaBitQSplitBucketDataCell::InsertVector(const void* vector,
             continue;
         }
 
-        CHECK_ARGUMENT(old_offset_id < this->inner_ids_[old_bucket_id].size() and
-                           this->inner_ids_[old_bucket_id][old_offset_id] == inner_id,
+        CHECK_ARGUMENT(old_offset_id < this->inner_ids_[old_bucket_id].size(),
+                       "stale RaBitQ split bucket location during relocation");
+        CHECK_ARGUMENT(this->inner_ids_[old_bucket_id][old_offset_id] == inner_id,
                        "stale RaBitQ split bucket location during relocation");
         const auto offset_id = static_cast<InnerIdType>(this->inner_ids_[bucket_id].size());
         const uint64_t target_location =
@@ -1710,8 +1715,9 @@ RaBitQSplitBucketDataCell::InsertVectorWithOffset(const void* vector,
             write_target();
             if (old_location != INVALID_LOCATION and old_location != target_location) {
                 const auto old_offset_id = static_cast<InnerIdType>(old_location & location_mask);
-                CHECK_ARGUMENT(old_offset_id < this->inner_ids_[bucket_id].size() and
-                                   this->inner_ids_[bucket_id][old_offset_id] == inner_id,
+                CHECK_ARGUMENT(old_offset_id < this->inner_ids_[bucket_id].size(),
+                               "stale RaBitQ split bucket location during relocation");
+                CHECK_ARGUMENT(this->inner_ids_[bucket_id][old_offset_id] == inner_id,
                                "stale RaBitQ split bucket location during relocation");
                 invalidate_old_lane(bucket_id, old_offset_id);
             }
@@ -1753,8 +1759,9 @@ RaBitQSplitBucketDataCell::InsertVectorWithOffset(const void* vector,
             continue;
         }
 
-        CHECK_ARGUMENT(old_offset_id < this->inner_ids_[old_bucket_id].size() and
-                           this->inner_ids_[old_bucket_id][old_offset_id] == inner_id,
+        CHECK_ARGUMENT(old_offset_id < this->inner_ids_[old_bucket_id].size(),
+                       "stale RaBitQ split bucket location during relocation");
+        CHECK_ARGUMENT(this->inner_ids_[old_bucket_id][old_offset_id] == inner_id,
                        "stale RaBitQ split bucket location during relocation");
         resize_target();
         invalidate_target_occupant();
@@ -1889,10 +1896,13 @@ RaBitQSplitBucketDataCell::MergeOther(const BucketInterfacePtr& other, InnerIdTy
                 this->get_filter_code(bucket_id, offset, filter_code.data);
                 this->set_residual_filter_code(bucket_id, offset, filter_code.data);
                 float full_add = std::numeric_limits<float>::quiet_NaN();
-                residual_codes.ComputeResidualFullFactorForId(filter_code.data,
-                                                              this->inner_ids_[bucket_id][offset],
-                                                              transformed_centroid,
-                                                              &full_add);
+                // A failed computation leaves full_add at the NaN sentinel that readers
+                // treat as "not computed", so the boolean result is deliberately ignored.
+                static_cast<void>(residual_codes.ComputeResidualFullFactorForId(
+                    filter_code.data,
+                    this->inner_ids_[bucket_id][offset],
+                    transformed_centroid,
+                    &full_add));
                 this->residual_bias_[bucket_id][offset] = full_add;
             }
         }
@@ -2174,7 +2184,8 @@ RaBitQSplitBucketDataCell::rebuild_locations() {
             if (this->locations_.size() <= inner_id) {
                 this->locations_.resize(static_cast<uint64_t>(inner_id) + 1, INVALID_LOCATION);
             }
-            this->locations_[inner_id] = this->pack_location(bucket_id, offset);
+            this->locations_[inner_id] =
+                RaBitQSplitBucketDataCell::pack_location(bucket_id, offset);
         }
     }
 }

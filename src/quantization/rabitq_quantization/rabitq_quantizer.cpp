@@ -37,7 +37,7 @@ namespace vsag {
 namespace {
 
 uint64_t&
-FastScanFallbackRandomState() {
+fast_scan_fallback_random_state() {
     thread_local uint64_t state = []() {
         std::random_device random_device;
         return (static_cast<uint64_t>(random_device()) << 32U) |
@@ -47,19 +47,19 @@ FastScanFallbackRandomState() {
 }
 
 float
-FastScanUniformRandom(uint64_t* random_state) {
-    uint64_t& state = random_state == nullptr ? FastScanFallbackRandomState() : *random_state;
+fast_scan_uniform_random(uint64_t* random_state) {
+    uint64_t& state = random_state == nullptr ? fast_scan_fallback_random_state() : *random_state;
     state += 0x9e3779b97f4a7c15ULL;
     uint64_t value = state;
     value = (value ^ (value >> 30U)) * 0xbf58476d1ce4e5b9ULL;
     value = (value ^ (value >> 27U)) * 0x94d049bb133111ebULL;
     value ^= value >> 31U;
-    constexpr float kInverseRandomRange = 1.0F / static_cast<float>(1U << 24U);
-    return static_cast<float>(value >> 40U) * kInverseRandomRange;
+    constexpr float inverse_random_range = 1.0F / static_cast<float>(1U << 24U);
+    return static_cast<float>(value >> 40U) * inverse_random_range;
 }
 
 float
-EffectiveRaBitQError(float error) {
+effective_rabitq_error(float error) {
     if (std::abs(error) < 1e-5F) {
         return error >= 0.0F ? 1.0F : -1.0F;
     }
@@ -1458,7 +1458,7 @@ RaBitQuantizer<metric>::ComputeFastScan32ResidualFactors(const uint8_t* one_bit_
     memcpy(&filter_error, one_bit_code + OneBitRecordOneBitErrorOffset(), sizeof(filter_error));
     // The residual scale below is a magnitude, so the sign of the stored error does
     // not matter here. This deliberately differs from the exact split-code path,
-    // which keeps the sign through EffectiveRaBitQError.
+    // which keeps the sign through effective_rabitq_error.
     filter_error = std::fabs(filter_error);
     if (filter_error <= 1e-5F or not IsFiniteFloatBits(base_norm)) {
         f_add = std::numeric_limits<float>::max();
@@ -1685,8 +1685,8 @@ RaBitQuantizer<metric>::PrepareFastScan32HighAccQuery(Computer<RaBitQuantizer>& 
         return;
     }
 
-    constexpr int64_t kHighAccQuantizedMax = std::numeric_limits<uint16_t>::max();
-    deltas[0] = range / static_cast<float>(kHighAccQuantizedMax);
+    constexpr int64_t high_acc_quantized_max = std::numeric_limits<uint16_t>::max();
+    deltas[0] = range / static_cast<float>(high_acc_quantized_max);
     uint8_t* low_lookup_table = lookup_table;
     uint8_t* high_lookup_table = lookup_table + GetFastScan32LookupSize();
     for (uint64_t group = 0; group < groups_per_plane; ++group) {
@@ -1707,9 +1707,9 @@ RaBitQuantizer<metric>::PrepareFastScan32HighAccQuery(Computer<RaBitQuantizer>& 
         for (uint64_t mask = 0; mask < 16; ++mask) {
             const float scaled = (group_lut[mask] - lower) / deltas[0];
             const auto quantized =
-                static_cast<int64_t>(scaled + FastScanUniformRandom(random_state));
+                static_cast<int64_t>(scaled + fast_scan_uniform_random(random_state));
             const auto value =
-                static_cast<uint16_t>(std::clamp<int64_t>(quantized, 0, kHighAccQuantizedMax));
+                static_cast<uint16_t>(std::clamp<int64_t>(quantized, 0, high_acc_quantized_max));
             const uint64_t offset = group * 16 + mask;
             low_lookup_table[offset] = static_cast<uint8_t>(value & 0xFFU);
             high_lookup_table[offset] = static_cast<uint8_t>(value >> 8U);
@@ -2054,7 +2054,7 @@ RaBitQuantizer<metric>::ComputeResidualFullFactor(const uint8_t* filter_code,
     if (not IsFiniteFloatBits(base_norm) or base_norm < 0.0F or not IsFiniteFloatBits(base_error)) {
         return false;
     }
-    const float effective_error = EffectiveRaBitQError(base_error);
+    const float effective_error = effective_rabitq_error(base_error);
 
     float centroid_inner_product = 0.0F;
     if (num_bits_per_dim_base_ == 1) {
@@ -2127,7 +2127,7 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCodeAndOriginalQueryFilterInnerProdu
     if (not IsFiniteFloatBits(base_norm) or base_norm < 0.0F or not IsFiniteFloatBits(base_error)) {
         return false;
     }
-    const float effective_error = EffectiveRaBitQError(base_error);
+    const float effective_error = effective_rabitq_error(base_error);
 
     float query_norm = 0.0F;
     float query_sum = 0.0F;
@@ -2723,7 +2723,7 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCode(Computer<RaBitQuantizer>& compu
     error_type base_error = 0;
     memcpy(
         &base_error, supplement_code + split_layout_.supplement_error_offset, sizeof(base_error));
-    base_error = EffectiveRaBitQError(base_error);
+    base_error = effective_rabitq_error(base_error);
 
     float ip_est = ip_bq_estimate / base_error;
     float result = l2_ube(base_norm, query_norm, ip_est);
@@ -2823,7 +2823,7 @@ RaBitQuantizer<metric>::FinalizeSplitCodeDistanceWithFilterInnerProduct(
 
     error_type base_error = 0.0F;
     memcpy(&base_error, meta_field(offset_error_), sizeof(base_error));
-    base_error = EffectiveRaBitQError(base_error);
+    base_error = effective_rabitq_error(base_error);
 
     float result = l2_ube(base_norm, query_norm, ip_bq_estimate / base_error);
     if (pca_dim_ != this->original_dim_ and use_mrq_) {
