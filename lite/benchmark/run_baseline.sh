@@ -58,3 +58,8 @@ run_load_case fresh-process-load-100k "${output_dir}/scale-100k.snapshot" 32
     "${benchmark}" stability 10000 128 20 500 32 10 20260909 \
     "${output_dir}/crud-stability-snapshot" \
     >"${output_dir}/crud-stability.csv"
+
+/usr/bin/time -v -o "${output_dir}/graph-crud-stability.time.txt" \
+    "${benchmark}" graph-stability 2000 32 10 100 32 10 20260909 12 64 \
+    "${output_dir}/graph-crud-stability-snapshot" \
+    >"${output_dir}/graph-crud-stability.csv"

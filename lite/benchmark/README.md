@@ -34,7 +34,16 @@ The stability command can also be run directly:
 
 ```bash
 lite_benchmark stability COUNT DIM ROUNDS CRUD_OPS QUERIES K SEED SNAPSHOT_DIRECTORY
+lite_benchmark graph-stability COUNT DIM ROUNDS CRUD_OPS QUERIES K SEED MAX_DEGREE EF_SEARCH SNAPSHOT_DIRECTORY
 ```
+
+The graph stability mode applies the same update-remove-readd cycle after an explicit
+`BuildGraph`. It records the active count, v2 snapshot size, current and peak RSS, recall,
+and round-trip checksum together with the graph parameters. The default runner uses a
+2,000 x 32, 10-round configuration so this diagnostic remains practical despite physical
+graph repair on every removal. Stable RSS and snapshot size show bounded behavior for that
+recorded workload; they do not prove that the allocator returns memory to the operating
+system or that all workloads are fragmentation-free.
 
 After generating the two baseline snapshots, the runner starts seven separate loader processes for each scale. Every loader reports snapshot size, `load_ms`, first-query latency, follow-up query P50/P99, current/peak RSS, result checksum, and final index size. The known ID 0 query uses variant 1 because the fixed baseline CRUD sequence updates that ID before saving. The loader repeats this same query for every follow-up search, so its `search_p50_us` and `search_p99_us` measure repeated-query latency rather than a distribution across distinct queries. Its `peak_rss_kib` covers the entire loader process.
 

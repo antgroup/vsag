@@ -40,6 +40,9 @@ struct StabilityConfig {
     uint64_t queries;
     uint64_t k;
     uint64_t seed;
+    bool graph;
+    uint64_t max_degree;
+    uint64_t ef_search;
     std::string snapshot_directory;
 };
 
@@ -107,12 +110,46 @@ parse_stability_config(int argc, char** argv) {
                            parse_uint(argv[6], "query count"),
                            parse_uint(argv[7], "k"),
                            parse_uint(argv[8], "seed"),
+                           false,
+                           0,
+                           0,
                            argv[9]};
     if (config.count == 0 or config.dim == 0 or config.rounds == 0 or config.crud_ops == 0 or
         config.queries == 0 or config.k == 0 or config.k > config.count or
         config.crud_ops > config.count or
         config.count > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
         throw std::invalid_argument("configuration values are out of range");
+    }
+    if (std::filesystem::exists(config.snapshot_directory)) {
+        throw std::invalid_argument("snapshot directory already exists");
+    }
+    return config;
+}
+
+StabilityConfig
+parse_graph_stability_config(int argc, char** argv) {
+    if (argc != 12) {
+        throw std::invalid_argument(
+            "usage: lite_benchmark graph-stability COUNT DIM ROUNDS CRUD_OPS QUERIES K SEED "
+            "MAX_DEGREE EF_SEARCH SNAPSHOT_DIRECTORY");
+    }
+    StabilityConfig config{parse_uint(argv[2], "count"),
+                           parse_uint(argv[3], "dimension"),
+                           parse_uint(argv[4], "round count"),
+                           parse_uint(argv[5], "CRUD operation count"),
+                           parse_uint(argv[6], "query count"),
+                           parse_uint(argv[7], "k"),
+                           parse_uint(argv[8], "seed"),
+                           true,
+                           parse_uint(argv[9], "maximum degree"),
+                           parse_uint(argv[10], "ef search"),
+                           argv[11]};
+    if (config.count == 0 or config.dim == 0 or config.rounds == 0 or config.crud_ops == 0 or
+        config.queries == 0 or config.k == 0 or config.k > config.count or
+        config.crud_ops > config.count or
+        config.count > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) or
+        config.max_degree < 2 or config.max_degree > 64 or config.ef_search < config.max_degree) {
+        throw std::invalid_argument("graph stability configuration values are out of range");
     }
     if (std::filesystem::exists(config.snapshot_directory)) {
         throw std::invalid_argument("snapshot directory already exists");
@@ -423,11 +460,15 @@ run_stability(const StabilityConfig& config) {
         require(static_cast<bool>(index->Add(static_cast<int64_t>(id), vector.data(), config.dim)),
                 "add failed");
     }
+    if (config.graph) {
+        require(static_cast<bool>(index->BuildGraph(config.max_degree, config.ef_search)),
+                "graph build failed");
+    }
 
     std::cout << "round,count,crud_ops,update_p50_us,update_p99_us,remove_p50_us,"
                  "remove_p99_us,readd_p50_us,readd_p99_us,search_p50_us,search_p99_us,"
                  "save_ms,load_ms,snapshot_bytes,current_rss_kib,peak_rss_kib,top1_recall,"
-                 "result_checksum\n";
+                 "result_checksum,backend,max_degree,ef_search\n";
     for (uint64_t round = 0; round < config.rounds; ++round) {
         std::vector<double> update_us;
         std::vector<double> remove_us;
@@ -511,7 +552,8 @@ run_stability(const StabilityConfig& config) {
                   << percentile(search_us, 0.99) << ',' << save_ms << ',' << load_ms << ','
                   << snapshot_bytes << ',' << resident_rss << ',' << peak_rss_kib() << ','
                   << static_cast<double>(top1_hits) / static_cast<double>(config.queries) << ','
-                  << checksum << '\n';
+                  << checksum << ',' << (config.graph ? "graph" : "bruteforce") << ','
+                  << config.max_degree << ',' << config.ef_search << '\n';
     }
     return 0;
 }
@@ -526,6 +568,9 @@ main(int argc, char** argv) {
         }
         if (argc > 1 and std::string(argv[1]) == "stability") {
             return run_stability(parse_stability_config(argc, argv));
+        }
+        if (argc > 1 and std::string(argv[1]) == "graph-stability") {
+            return run_stability(parse_graph_stability_config(argc, argv));
         }
         return run(parse_config(argc, argv));
     } catch (const std::exception& error) {
