@@ -127,3 +127,7 @@ strip 后 Lite 动态库由 39,488 增至 47,704 字节。这些数据只是该�
 Debug 构建可加 `-DENABLE_COVERAGE=ON`，运行测试后用 gcov 收集源码覆盖率；
 只报告实际结果，不代表 Full 覆盖率。安装后的外部示例验证不依赖 libvsag.so。
 首版不承诺 Full API/ABI 替换、语言绑定、图索引、稀疏向量、WARP、量化、mmap 或并发调用。
+
+## FP16 图存储
+
+调用 `BuildGraph(VectorStorage::FP16, max_degree, ef_search)` 可让图向量使用 IEEE binary16 存储，同时保持现有 FP32 输入与查询接口。原有 `BuildGraph(max_degree, ef_search)` 仍默认使用 FP32；`ActiveVectorStorage()` 可查询当前表示。FP16 图使用 v3 快照，既有 v1/v2 字节与加载行为不变。v3 采用可移植的小端 binary16，加载不依赖保存机器的指令集。建图或更新时会拒绝超出有限 FP16 范围的值。
