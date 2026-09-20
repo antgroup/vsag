@@ -25,6 +25,7 @@
 #include "lite/backend.h"
 
 using vsag::lite::detail::make_brute_force_backend;
+using vsag::lite::detail::make_fp16_graph_backend;
 using vsag::lite::detail::make_graph_backend;
 
 TEST_CASE("Lite graph backend validates input and survives CRUD", "[lite-graph]") {
@@ -57,12 +58,39 @@ TEST_CASE("Lite graph backend validates input and survives CRUD", "[lite-graph]"
     REQUIRE((*graph)->Remove(1));
     REQUIRE_FALSE((*graph)->Remove(1));
     REQUIRE((*graph)->Size() == 2);
+    for (uint64_t slot = 0; slot < (*graph)->Size(); ++slot) {
+        for (uint64_t edge = 0; edge < (*graph)->LinkCountAt(slot); ++edge) {
+            REQUIRE((*graph)->LinkAt(slot, edge) != slot);
+        }
+    }
     const auto result = (*graph)->Search(a.data(), 2, 2);
     REQUIRE(result);
     REQUIRE(result->size() == 2);
     REQUIRE(std::none_of(result->begin(), result->end(), [](const auto& n) { return n.id == 1; }));
     REQUIRE((*graph)->Add(1, b.data(), 2));
     REQUIRE((*graph)->Search(b.data(), 2, 3)->size() == 3);
+}
+
+TEST_CASE("Lite FP16 VectorAt uses caller-owned scratch", "[lite-graph]") {
+    auto flat = make_brute_force_backend(2);
+    REQUIRE(flat);
+    const std::array<float, 2> first_vector{0.125F, -0.25F};
+    const std::array<float, 2> second_vector{1.5F, 2.0F};
+    REQUIRE((*flat)->Add(1, first_vector.data(), 2));
+    REQUIRE((*flat)->Add(2, second_vector.data(), 2));
+    auto graph = make_fp16_graph_backend(**flat, 4, 32);
+    REQUIRE(graph);
+
+    std::vector<float> first_scratch;
+    std::vector<float> second_scratch;
+    const float* first = (*graph)->VectorAt(0, first_scratch);
+    const float* second = (*graph)->VectorAt(1, second_scratch);
+    REQUIRE(first == first_scratch.data());
+    REQUIRE(second == second_scratch.data());
+    REQUIRE(first[0] == first_vector[0]);
+    REQUIRE(first[1] == first_vector[1]);
+    REQUIRE(second[0] == second_vector[0]);
+    REQUIRE(second[1] == second_vector[1]);
 }
 
 TEST_CASE("Lite graph filter traverses rejected IDs and survives snapshot load", "[lite-graph]") {
