@@ -32,7 +32,7 @@ public:
     [[nodiscard]] virtual int64_t
     IdAt(uint64_t slot) const = 0;
     [[nodiscard]] virtual const float*
-    VectorAt(uint64_t slot) const = 0;
+    VectorAt(uint64_t slot, std::vector<float>& scratch) const = 0;
 
     [[nodiscard]] virtual BackendKind
     Kind() const = 0;

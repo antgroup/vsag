@@ -11,33 +11,13 @@
 #include <unordered_map>
 
 #include "lite/backend.h"
+#include "lite/backend_utils.h"
 #include "lite/fp16_codec.h"
 #include "lite/fp16_distance.h"
 #include "lite/fp32_distance.h"
 
 namespace vsag::lite::detail {
 namespace {
-
-auto
-failure(ErrorType type, const char* message) {
-    return tl::unexpected(Error(type, message));
-}
-
-tl::expected<void, Error>
-validate(const float* data, uint64_t actual, uint64_t expected) {
-    if (actual != expected) {
-        return failure(ErrorType::DIMENSION_NOT_EQUAL, "dimension mismatch");
-    }
-    if (data == nullptr) {
-        return failure(ErrorType::INVALID_ARGUMENT, "null vector");
-    }
-    for (uint64_t i = 0; i < actual; ++i) {
-        if (not std::isfinite(data[i])) {
-            return failure(ErrorType::INVALID_ARGUMENT, "non-finite vector");
-        }
-    }
-    return {};
-}
 
 struct Candidate {
     uint64_t slot;
@@ -64,8 +44,7 @@ public:
           ef_search_(ef_search),
           fp16_(fp16),
           distance_(select_fp32_distance()),
-          fp16_distance_(select_fp16_distance()),
-          decoded_(fp16 ? dimension : 0) {
+          fp16_distance_(select_fp16_distance()) {
     }
 
     tl::expected<void, Error>
@@ -194,6 +173,8 @@ public:
             }
             ids_[slot] = ids_[last];
             extras_[slot] = std::move(extras_[last]);
+            extras_[slot].erase(std::remove(extras_[slot].begin(), extras_[slot].end(), slot),
+                                extras_[slot].end());
             slots_.at(ids_[slot]) = slot;
         }
         slots_.erase(found);
@@ -260,10 +241,16 @@ public:
                 }
             };
             visit(0);
-            visit(Size() - 1);
+            const uint64_t last = Size() - 1;
+            if (last != 0) {
+                visit(last);
+            }
             constexpr uint64_t k_extra_entry_points = 6;
             for (uint64_t i = 1; i <= k_extra_entry_points; ++i) {
-                visit(i * (Size() - 1) / (k_extra_entry_points + 1));
+                const uint64_t entry = i * last / (k_extra_entry_points + 1);
+                if (entry != 0 and entry != last) {
+                    visit(entry);
+                }
             }
 
             while (not candidates.empty()) {
@@ -389,14 +376,15 @@ public:
     }
 
     [[nodiscard]] const float*
-    VectorAt(uint64_t slot) const override {
+    VectorAt(uint64_t slot, std::vector<float>& scratch) const override {
         if (not fp16_) {
             return vectors_.data() + slot * Dim();
         }
+        scratch.resize(Dim());
         for (uint64_t d = 0; d < Dim(); ++d) {
-            decoded_[d] = decode_fp16(fp16_vectors_[slot * Dim() + d]);
+            scratch[d] = decode_fp16(fp16_vectors_[slot * Dim() + d]);
         }
-        return decoded_.data();
+        return scratch.data();
     }
 
 private:
@@ -494,7 +482,6 @@ private:
     FP16Distance fp16_distance_;
     std::vector<float> vectors_;
     std::vector<uint16_t> fp16_vectors_;
-    mutable std::vector<float> decoded_;
     std::vector<int64_t> ids_;
     std::unordered_map<int64_t, uint64_t> slots_;
     std::vector<std::vector<uint64_t>> extras_;
@@ -510,8 +497,10 @@ make_graph_backend(const Backend& source, uint64_t max_degree, uint64_t ef_searc
     }
     try {
         auto graph = std::make_unique<GraphBackend>(source.Dim(), max_degree, ef_search);
+        std::vector<float> scratch;
         for (uint64_t slot = 0; slot < source.Size(); ++slot) {
-            auto added = graph->Add(source.IdAt(slot), source.VectorAt(slot), source.Dim());
+            auto added =
+                graph->Add(source.IdAt(slot), source.VectorAt(slot, scratch), source.Dim());
             if (not added) {
                 return tl::unexpected(added.error());
             }
@@ -532,8 +521,10 @@ make_fp16_graph_backend(const Backend& source, uint64_t max_degree, uint64_t ef_
     }
     try {
         auto graph = std::make_unique<GraphBackend>(source.Dim(), max_degree, ef_search, true);
+        std::vector<float> scratch;
         for (uint64_t slot = 0; slot < source.Size(); ++slot) {
-            auto added = graph->Add(source.IdAt(slot), source.VectorAt(slot), source.Dim());
+            auto added =
+                graph->Add(source.IdAt(slot), source.VectorAt(slot, scratch), source.Dim());
             if (not added) {
                 return tl::unexpected(added.error());
             }
