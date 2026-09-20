@@ -158,3 +158,7 @@ and collect gcov results. Only report actually measured coverage; Full coverage
 is not implied. The installed consumer above checks that the new target can be
 used without linking `libvsag.so`. Full API/ABI replacement, bindings, graph
 search, sparse vectors, WARP, quantization, mmap and concurrent calls are out of scope.
+
+## FP16 graph storage
+
+Call `BuildGraph(VectorStorage::FP16, max_degree, ef_search)` to store graph vectors as IEEE binary16 while keeping the existing FP32 input and search API. The original `BuildGraph(max_degree, ef_search)` remains FP32. `ActiveVectorStorage()` reports the active representation. FP16 graphs use snapshot version 3; versions 1 and 2 remain readable and unchanged. Loading does not require the save host ISA because the stored representation is portable little-endian binary16. Values outside the finite FP16 range are rejected when the graph is built or updated.
