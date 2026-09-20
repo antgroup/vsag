@@ -264,3 +264,20 @@ At commit `bcd2388`, one snapshot per storage and scale was generated and each s
 The v3 snapshot is 39.0% smaller at both scales. Its median steady RSS is 21.0% lower at 10k and 33.1% lower at 100k, with unchanged measured Recall@10. The current v3 Load path is 8.05x slower at 10k and 7.77x slower at 100k, and its process peak RSS is higher. `Index::Load` currently reads every binary16 value through a per-value stream operation into a temporary FP32 vector; `GraphBackend::Restore` then encodes that FP32 vector back into final FP16 storage. This double conversion explains the observed load-time and transient-memory bottleneck and identifies a targeted follow-up optimization. Query latency differences are mixed and should not be generalized from one snapshot generation.
 
 Raw stdout, stderr, `/usr/bin/time -v`, environment metadata, snapshot SHA-256 values, and the generated summary are retained in `/home/ubuntu/project/vsag-lite-fp16-v3-load-validation-20260920-bcd2388` on the measured host. The experiment does not measure mmap, zero-copy loading, strict cold I/O, native big-endian execution, or cross-host variance.
+
+### Direct v3 restore follow-up
+
+Feature commit `5ac36ef` removes the FP32 staging copy. `Index::Load` bulk-reads portable binary16 values into a `uint16_t` container, byte-swaps in place when required, rejects non-finite exponent patterns without decoding to float, and moves the container directly into the FP16 graph backend. Versions 1 and 2 and the v3 bytes remain unchanged.
+
+The comparison reused the exact `[lite-sift-load]` executable from probe commit `bcd2388` (rebased as `73f78a3`), the same v3 snapshot per scale, and switched only `LD_LIBRARY_PATH` between feature baseline `73f9c4c` and `5ac36ef`. Each version ran in seven fresh processes with alternating order. Values below are medians; page cache state remained uncontrolled.
+
+| SIFT-128 subset | Library | Load (ms) | First query (us) | Follow-up P50/P99 (us) | Steady RSS (KiB) | Peak RSS (KiB) | Recall@10 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10k | Before | 27.089 | 169.066 | 107.697 / 152.277 | 9,204 | 14,012 | 0.973 |
+| 10k | Direct restore | 2.580 | 124.417 | 95.097 / 123.678 | 9,200 | 9,240 | 0.973 |
+| 100k | Before | 270.248 | 441.151 | 297.024 / 406.631 | 50,752 | 100,600 | 0.946 |
+| 100k | Direct restore | 26.168 | 397.111 | 283.013 / 381.693 | 50,748 | 50,848 | 0.946 |
+
+Direct restore improved median v3 Load by 10.50x at 10k and 10.33x at 100k. Median process peak RSS fell by 34.1% and 49.5%; steady RSS, snapshot bytes, snapshot SHA-256, and Recall@10 remained unchanged. Query timings were not the optimization target and show no regression in these runs. The result demonstrates removal of the measured conversion bottleneck, while retaining the owned-memory, non-mmap load design and the same strict-cold-I/O limitation.
+
+All 28 loader processes passed their assertions with empty stderr. Raw stdout, stderr, `/usr/bin/time -v`, environment and binary hashes, snapshot hashes, and summaries are retained in `/home/ubuntu/project/vsag-lite-fp16-v3-load-compare-20260920-5ac36ef`.
