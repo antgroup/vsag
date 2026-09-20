@@ -362,6 +362,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                     }
                     top_candidates->Push(dist, result_id);
                     unrewarded_hops = 0;
+                    empty_hops = 0;
                     if constexpr (mode == KNN_SEARCH) {
                         while (top_candidates->Size() > ef) {
                             top_candidates->Pop();
@@ -397,6 +398,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                 if (check_func(cur_id)) {
                     top_candidates->Push(dist, cur_id);
                     unrewarded_hops = 0;
+                    empty_hops = 0;
                 }
                 if (inner_search_param.consider_duplicate) {
                     const auto duplicate_ids = graph->GetDuplicateIds(cur_id);
@@ -404,6 +406,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                         if (check_func(item)) {
                             top_candidates->Push(dist, item);
                             unrewarded_hops = 0;
+                            empty_hops = 0;
                         }
                     }
                 }
