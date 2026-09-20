@@ -85,6 +85,12 @@ TEST_CASE("BasicSearcher supports KNN, range, filters, and empty data cells",
     REQUIRE(search(KNN_SEARCH, filter) == std::set<InnerIdType>{1, 3, 5});
     REQUIRE(search(RANGE_SEARCH, filter) == std::set<InnerIdType>{1});
 
+    graph = std::make_shared<MockGraphDataCell>(std::vector<std::vector<InnerIdType>>{
+        {0, 1, 1, 2, 2, 3, 4, 5}, {0, 1, 2}, {0, 1, 2}, {}, {}, {}});
+    REQUIRE(search(KNN_SEARCH, nullptr) == std::set<InnerIdType>{0, 1, 2});
+    REQUIRE(search(RANGE_SEARCH, nullptr) == std::set<InnerIdType>{0, 1, 2});
+    REQUIRE(search(KNN_SEARCH, filter) == std::set<InnerIdType>{1, 3, 5});
+
     InnerSearchParam param;
     auto vl = pool->TakeOne();
     QueryContext* ctx = nullptr;

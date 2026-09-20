@@ -40,7 +40,7 @@ BasicSearcher::BasicSearcher(Allocator* allocator, MutexArrayPtr mutex_array)
     : allocator_(allocator), mutex_array_(std::move(mutex_array)) {
 }
 
-uint32_t
+inline __attribute__((always_inline)) uint32_t
 BasicSearcher::visit(const GraphInterfacePtr& graph,
                      const VisitedListPtr& vl,
                      const std::pair<float, uint64_t>& current_node_pair,
@@ -55,6 +55,17 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
         graph->GetNeighbors(current_node_pair.second, neighbors);
     } else {
         graph->GetNeighbors(current_node_pair.second, neighbors);
+    }
+
+    if (not filter) {
+        for (const auto id : neighbors) {
+            vl->Prefetch(id);
+        }
+        for (const auto id : neighbors) {
+            to_be_visited_id[count_no_visited] = id;
+            count_no_visited += not vl->TestAndSet(id);
+        }
+        return count_no_visited;
     }
 
     for (uint32_t i = 0; i < neighbors.size(); i++) {
