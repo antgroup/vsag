@@ -3,8 +3,9 @@
 > 第二阶段分支说明（2026-09-14）：默认 Index::Create(dim) 仍是精确 BruteForce，
 > v1 快照字节格式不变。显式调用 BuildGraph(degree, ef_search) 成功后才切换为
 > 独立的单层近似图；失败不修改原索引。图模式继续使用同一套 Add/Update/Remove/
-> Search 接口；Save 写入含 FP32、ID、参数和邻接关系的 v2 快照，Load 同时接受
-> v1/v2。v2 与 Full VSAG 快照不兼容，不提供并发、校验和、量化或 mmap。
+> Search 接口；FP32 图 Save 写入 v2，FP16 图写入 v3，均包含向量、ID、参数和
+> 邻接关系；Load 接受 v1/v2/v3。图快照与 Full VSAG 不兼容，不提供并发、校验和、
+> SQ8 或 mmap。
 > BuildGraph 后同样支持按外部 ID 过滤；图搜索可经过不允许返回的节点以保持连通性，
 > 但这些节点不会出现在结果中。
 > 本页余下内容说明首版默认 BruteForce 行为。
@@ -67,9 +68,9 @@ ComputeL2SqrImpl 内核及运行时距离分派。x86_64 GNU/Clang 构建通过�
 工具链使用 Generic。删除参考 Full BruteForce 的末尾填洞原则，但保留容量供复用，
 不承诺 RSS 立即下降。不引入 Full Factory、InnerIndexInterface、属性及多向量依赖。
 
-BruteForce 仍是默认后端。`BuildGraph` 构建独立的私有 FP32 图后端，成功后才发布；
-图阶段保留 CRUD 和过滤搜索。BruteForce 使用 v1 快照，图使用 v2 快照。公开 Lite
-索引尚未集成量化或 mmap。
+BruteForce 仍是默认后端。`BuildGraph` 构建独立的私有图后端，成功后才发布；
+图阶段保留 CRUD 和过滤搜索。BruteForce 使用 v1 快照，FP32 图使用 v2，显式选择的
+FP16 图使用 v3。公开 Lite 索引尚未集成 SQ8 或 mmap。
 
 ## 快照 v1
 
@@ -87,7 +88,8 @@ BruteForce 仍是默认后端。`BuildGraph` 构建独立的私有 FP32 图后�
 | 48 + 8 * 记录数 | 连续行优先 FP32 向量 |
 
 Load 要求可定位流，读取当前位置到结尾；拒绝截断、尾随字节、错误尺寸/版本、重复 ID 和
-非有限值。实现将连续 ID、向量以及每一行图邻接表批量读入最终持有内存；非小端主机在原位
+非有限值。实现将连续 ID、向量以及每一行图邻接表批量读入最终持有内存；v3 binary16
+向量也直接读入最终 FP16 容器，通过指数位检查有限值，不产生 FP32 中间副本。非小端主机在原位
 转换载荷数值。成功后返回新索引，不修改已有索引；该路径仍为持有内存加载，不是 mmap 或
 零拷贝。没有校验和，不能检测所有仍合法的位损坏。
 Save 从当前输出位置写入；flush/close、文件权限、原子替换及崩溃持久性由调用者负责，
@@ -126,8 +128,8 @@ strip 后 Lite 动态库由 39,488 增至 47,704 字节。这些数据只是该�
 
 Debug 构建可加 `-DENABLE_COVERAGE=ON`，运行测试后用 gcov 收集源码覆盖率；
 只报告实际结果，不代表 Full 覆盖率。安装后的外部示例验证不依赖 libvsag.so。
-首版不承诺 Full API/ABI 替换、语言绑定、图索引、稀疏向量、WARP、量化、mmap 或并发调用。
+当前不承诺 Full API/ABI 替换、语言绑定、稀疏向量、WARP、SQ8、mmap 或并发调用。
 
 ## FP16 图存储
 
-调用 `BuildGraph(VectorStorage::FP16, max_degree, ef_search)` 可让图向量使用 IEEE binary16 存储，同时保持现有 FP32 输入与查询接口。原有 `BuildGraph(max_degree, ef_search)` 仍默认使用 FP32；`ActiveVectorStorage()` 可查询当前表示。FP16 图使用 v3 快照，既有 v1/v2 字节与加载行为不变。v3 采用可移植的小端 binary16，加载不依赖保存机器的指令集。建图或更新时会拒绝超出有限 FP16 范围的值。
+调用 `BuildGraph(VectorStorage::FP16, max_degree, ef_search)` 可让图向量使用 IEEE binary16 存储，同时保持现有 FP32 输入与查询接口。原有 `BuildGraph(max_degree, ef_search)` 仍默认使用 FP32；`ActiveVectorStorage()` 可查询当前表示。FP16 图使用 v3 快照，既有 v1/v2 字节与加载行为不变。v3 采用可移植的小端 binary16，加载不依赖保存机器的指令集。加载器将 v3 向量批量读入最终 FP16 存储，通过 binary16 指数位检查有限值，并在需要时原地转换字节序。建图或更新时会拒绝超出有限 FP16 范围的值。
