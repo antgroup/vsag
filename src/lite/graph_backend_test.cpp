@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <sys/resource.h>
 
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
+
 #include <algorithm>
 #include <array>
 #include <catch2/catch_test_macros.hpp>
@@ -374,6 +378,31 @@ read_sift(const std::string& path, int32_t expected_dim) {
     REQUIRE(input.eof());
     return rows;
 }
+uint64_t
+current_rss_kib() {
+    std::ifstream status("/proc/self/status");
+    std::string line;
+    while (std::getline(status, line)) {
+        if (line.rfind("VmRSS:", 0) == 0) {
+            std::istringstream fields(line);
+            std::string key;
+            uint64_t value = 0;
+            std::string unit;
+            fields >> key >> value >> unit;
+            REQUIRE(unit == "kB");
+            return value;
+        }
+    }
+    FAIL("VmRSS is unavailable");
+    return 0;
+}
+
+void
+trim_heap() {
+#if defined(__GLIBC__)
+    malloc_trim(0);
+#endif
+}
 }  // namespace
 
 TEST_CASE("Lite public FP16 graph CRUD and v3 snapshot", "[lite-graph]") {
@@ -596,6 +625,45 @@ TEST_CASE("Lite graph SIFT independent-query probe", "[.][lite-sift]") {
               << build_ms << ',' << latency[(latency.size() - 1) / 2] << ','
               << latency[(latency.size() * 99 - 1) / 100] << ',' << save_ms << ',' << load_ms << ','
               << std::filesystem::file_size(snapshot_path) << '\n';
+    REQUIRE(hits >= queries.size() * 5);
+}
+
+TEST_CASE("Lite graph SIFT isolated RSS probe", "[.][lite-sift-rss]") {
+    const char* directory = std::getenv("VSAG_SIFT_DIR");
+    const char* backend = std::getenv("VSAG_SIFT_RSS_BACKEND");
+    REQUIRE(directory != nullptr);
+    REQUIRE(backend != nullptr);
+    const std::string root(directory);
+    auto base = read_sift<float>(root + "/base.fvecs", 128);
+    const auto queries = read_sift<float>(root + "/queries.fvecs", 128);
+    const auto truth = read_sift<int32_t>(root + "/groundtruth.ivecs", 10);
+    const uint64_t base_count = base.size();
+    auto index = vsag::lite::Index::Create(128);
+    REQUIRE(index);
+    for (uint64_t id = 0; id < base_count; ++id) {
+        REQUIRE((*index)->Add(id, base[id].data(), 128));
+    }
+    const std::string selected(backend);
+    REQUIRE((selected == "fp32" or selected == "fp16"));
+    const auto storage =
+        selected == "fp16" ? vsag::lite::VectorStorage::FP16 : vsag::lite::VectorStorage::FP32;
+    REQUIRE((*index)->BuildGraph(storage, 16, 128));
+    std::vector<std::vector<float>>().swap(base);
+    trim_heap();
+    uint64_t hits = 0;
+    for (uint64_t q = 0; q < queries.size(); ++q) {
+        const auto result = (*index)->Search(queries[q].data(), 128, 10);
+        REQUIRE(result);
+        const std::unordered_set<int64_t> expected(truth[q].begin(), truth[q].end());
+        for (const auto& neighbor : *result) {
+            hits += expected.count(neighbor.id);
+        }
+    }
+    trim_heap();
+    std::cout << "backend,base_count,query_count,recall_at_10,steady_rss_kib\n";
+    std::cout << backend << ',' << base_count << ',' << queries.size() << ','
+              << static_cast<double>(hits) / static_cast<double>(queries.size() * 10) << ','
+              << current_rss_kib() << '\n';
     REQUIRE(hits >= queries.size() * 5);
 }
 
