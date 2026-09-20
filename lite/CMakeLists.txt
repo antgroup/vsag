@@ -13,14 +13,25 @@ set(VSAG_LITE_SOURCES
     "${VSAG_ROOT}/src/lite/index.cpp"
     "${VSAG_ROOT}/src/lite/bruteforce_backend.cpp"
     "${VSAG_ROOT}/src/lite/graph_backend.cpp"
+    "${VSAG_ROOT}/src/lite/fp16_distance.cpp"
     "${VSAG_ROOT}/src/lite/fp32_distance.cpp")
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$"
    AND CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang)$")
     # Only these small Lite translation units include ISA-specific VSAG traits.
     list(APPEND VSAG_LITE_SOURCES
+        "${VSAG_ROOT}/src/lite/fp16_distance_avx.cpp"
+        "${VSAG_ROOT}/src/lite/fp16_distance_avx2.cpp"
+        "${VSAG_ROOT}/src/lite/fp16_distance_avx512.cpp"
         "${VSAG_ROOT}/src/lite/fp32_distance_sse.cpp"
         "${VSAG_ROOT}/src/lite/fp32_distance_avx2.cpp"
         "${VSAG_ROOT}/src/lite/fp32_distance_avx512.cpp")
+    set_source_files_properties("${VSAG_ROOT}/src/lite/fp16_distance_avx.cpp"
+        PROPERTIES COMPILE_FLAGS "-mavx -mf16c")
+    set_source_files_properties("${VSAG_ROOT}/src/lite/fp16_distance_avx2.cpp"
+        PROPERTIES COMPILE_FLAGS "-mavx2 -mfma -mf16c")
+    set_source_files_properties("${VSAG_ROOT}/src/lite/fp16_distance_avx512.cpp"
+        PROPERTIES COMPILE_FLAGS
+        "-mavx512f -mavx512dq -mavx512bw -mavx512vl -mavx2 -mf16c")
     set_source_files_properties("${VSAG_ROOT}/src/lite/fp32_distance_sse.cpp"
         PROPERTIES COMPILE_FLAGS
         "-msse4.1")
