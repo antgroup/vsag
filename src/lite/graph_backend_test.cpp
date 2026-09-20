@@ -330,6 +330,54 @@ read_sift(const std::string& path, int32_t expected_dim) {
 }
 }  // namespace
 
+TEST_CASE("Lite public FP16 graph CRUD and v3 snapshot", "[lite-graph]") {
+    using vsag::lite::Index;
+    using vsag::lite::VectorStorage;
+    auto created = Index::Create(2);
+    const std::array<float, 2> a{0.125F, -0.25F};
+    const std::array<float, 2> b{1.5F, 2.0F};
+    const std::array<float, 2> c{-3.0F, 4.0F};
+    REQUIRE((*created)->Add(10, a.data(), 2));
+    REQUIRE((*created)->Add(20, b.data(), 2));
+    REQUIRE((*created)->Add(30, c.data(), 2));
+    REQUIRE((*created)->BuildGraph(VectorStorage::FP16, 4, 32));
+    REQUIRE((*created)->ActiveVectorStorage() == VectorStorage::FP16);
+    REQUIRE((*created)->Update(20, a.data(), 2));
+    REQUIRE((*created)->Remove(30));
+    REQUIRE((*created)->Add(40, c.data(), 2));
+    const auto before = (*created)->Search(a.data(), 2, 3, [](int64_t id) { return id != 10; });
+    REQUIRE(before);
+    std::stringstream output;
+    REQUIRE((*created)->Save(output));
+    const auto bytes = output.str();
+    REQUIRE(static_cast<unsigned char>(bytes[8]) == 3);
+    REQUIRE(static_cast<unsigned char>(bytes[40]) == 3);
+    auto loaded = Index::Load(output);
+    REQUIRE(loaded);
+    REQUIRE((*loaded)->ActiveVectorStorage() == VectorStorage::FP16);
+    const auto after = (*loaded)->Search(a.data(), 2, 3, [](int64_t id) { return id != 10; });
+    REQUIRE(after);
+    REQUIRE(after->size() == before->size());
+    for (uint64_t i = 0; i < after->size(); ++i) {
+        REQUIRE((*after)[i].id == (*before)[i].id);
+        REQUIRE((*after)[i].distance == (*before)[i].distance);
+    }
+    for (uint64_t n = 0; n < bytes.size(); ++n) {
+        std::stringstream truncated(bytes.substr(0, n));
+        REQUIRE_FALSE(Index::Load(truncated));
+    }
+    auto nonfinite = bytes;
+    constexpr uint64_t vector_offset = 48 + 16 + 3 * 8;
+    nonfinite[vector_offset] = 1;
+    nonfinite[vector_offset + 1] = static_cast<char>(0x7c);
+    std::stringstream invalid_half(nonfinite);
+    REQUIRE_FALSE(Index::Load(invalid_half));
+    auto bad_representation = bytes;
+    bad_representation[40] = 2;
+    std::stringstream invalid_representation(bad_representation);
+    REQUIRE_FALSE(Index::Load(invalid_representation));
+}
+
 TEST_CASE("Lite graph public transition and v2 snapshot roundtrip", "[lite-graph]") {
     using vsag::lite::BackendKind;
     using vsag::lite::Index;

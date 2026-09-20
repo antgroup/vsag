@@ -11,6 +11,7 @@
 #include <stdexcept>
 
 #include "lite/backend.h"
+#include "lite/fp16_codec.h"
 
 namespace vsag::lite {
 namespace {
@@ -106,10 +107,17 @@ Index::Create(uint64_t dim) {
 
 tl::expected<void, Error>
 Index::BuildGraph(uint64_t max_degree, uint64_t ef_search) {
+    return BuildGraph(VectorStorage::FP32, max_degree, ef_search);
+}
+
+tl::expected<void, Error>
+Index::BuildGraph(VectorStorage storage, uint64_t max_degree, uint64_t ef_search) {
     if (impl_->backend->Kind() != BackendKind::BRUTE_FORCE) {
         return failure(ErrorType::INVALID_ARGUMENT, "index is already a graph");
     }
-    auto graph = detail::make_graph_backend(*impl_->backend, max_degree, ef_search);
+    auto graph = storage == VectorStorage::FP16
+                     ? detail::make_fp16_graph_backend(*impl_->backend, max_degree, ef_search)
+                     : detail::make_graph_backend(*impl_->backend, max_degree, ef_search);
     if (not graph) {
         return tl::unexpected(graph.error());
     }
@@ -120,6 +128,11 @@ Index::BuildGraph(uint64_t max_degree, uint64_t ef_search) {
 BackendKind
 Index::ActiveBackend() const {
     return impl_->backend->Kind();
+}
+
+VectorStorage
+Index::ActiveVectorStorage() const {
+    return impl_->backend->Storage();
 }
 
 uint64_t
@@ -160,11 +173,14 @@ Index::Search(const float* query, uint64_t dim, uint64_t k, const IdFilter& filt
 
 tl::expected<void, Error>
 Index::Save(std::ostream& output) const {
-    if (Dim() > (UINT64_MAX - 8) / 4 or Size() > (UINT64_MAX - K_HEADER_BYTES) / (8 + 4 * Dim())) {
+    const bool graph = ActiveBackend() == BackendKind::GRAPH;
+    const bool fp16 = graph and ActiveVectorStorage() == VectorStorage::FP16;
+    const uint64_t vector_bytes = fp16 ? 2 : 4;
+    if (Dim() > (UINT64_MAX - 8) / vector_bytes or
+        Size() > (UINT64_MAX - K_HEADER_BYTES) / (8 + vector_bytes * Dim())) {
         return failure(ErrorType::INVALID_ARGUMENT, "snapshot size overflow");
     }
-    const bool graph = ActiveBackend() == BackendKind::GRAPH;
-    uint64_t payload = Size() * (8 + 4 * Dim());
+    uint64_t payload = Size() * (8 + vector_bytes * Dim());
     if (graph) {
         if (payload > UINT64_MAX - K_HEADER_BYTES - 16 or
             Size() > (UINT64_MAX - K_HEADER_BYTES - 16 - payload) / 8) {
@@ -182,11 +198,11 @@ Index::Save(std::ostream& output) const {
     }
     try {
         output.write(K_MAGIC, 8);
-        write(output, graph ? 2 : 1);
+        write(output, fp16 ? 3 : (graph ? 2 : 1));
         write(output, Dim());
         write(output, Size());
         write(output, payload);
-        write(output, graph ? 2 : 1);
+        write(output, fp16 ? 3 : (graph ? 2 : 1));
         if (graph) {
             write(output, impl_->backend->MaxDegree());
             write(output, impl_->backend->EfSearch());
@@ -197,9 +213,13 @@ Index::Save(std::ostream& output) const {
         for (uint64_t slot = 0; slot < Size(); ++slot) {
             const auto* vector = impl_->backend->VectorAt(slot);
             for (uint64_t i = 0; i < Dim(); ++i) {
-                uint32_t bits;
-                std::memcpy(&bits, vector + i, 4);
-                write(output, bits, 4);
+                if (fp16) {
+                    write(output, detail::encode_fp16(vector[i]), 2);
+                } else {
+                    uint32_t bits;
+                    std::memcpy(&bits, vector + i, 4);
+                    write(output, bits, 4);
+                }
             }
         }
         if (graph) {
@@ -237,14 +257,15 @@ Index::Load(std::istream& input) {
             return failure(ErrorType::INVALID_BINARY, "invalid snapshot magic");
         }
         const auto version = read(input);
-        if (version != 1 and version != 2) {
+        if (version != 1 and version != 2 and version != 3) {
             return failure(ErrorType::INVALID_BINARY, "unsupported snapshot version");
         }
         const auto dim = read(input);
         const auto count = read(input);
         const auto payload = read(input);
         const auto representation = read(input);
-        if (dim == 0 or dim > (UINT64_MAX - 16) / 4 or representation != version or
+        const uint64_t vector_bytes = version == 3 ? 2 : 4;
+        if (dim == 0 or dim > (UINT64_MAX - 16) / vector_bytes or representation != version or
             available < K_HEADER_BYTES or payload != available - K_HEADER_BYTES) {
             return failure(ErrorType::INVALID_BINARY, "invalid snapshot layout");
         }
@@ -254,14 +275,14 @@ Index::Load(std::istream& input) {
                 return failure(ErrorType::INVALID_BINARY, "invalid flat snapshot layout");
             }
         } else {
-            if (count > (UINT64_MAX - K_HEADER_BYTES - 16) / (16 + 4 * dim) or
-                payload < 16 + count * (16 + 4 * dim)) {
+            if (count > (UINT64_MAX - K_HEADER_BYTES - 16) / (16 + vector_bytes * dim) or
+                payload < 16 + count * (16 + vector_bytes * dim)) {
                 return failure(ErrorType::INVALID_BINARY, "invalid graph snapshot layout");
             }
         }
         uint64_t degree = 0;
         uint64_t ef_search = 0;
-        if (version == 2) {
+        if (version >= 2) {
             degree = read(input);
             ef_search = read(input);
             if (degree < 2 or degree > 64 or ef_search < degree) {
@@ -281,21 +302,31 @@ Index::Load(std::istream& input) {
             }
         }
         std::vector<float> vectors(count * dim);
-        read_bytes(input, vectors.data(), count * dim * sizeof(float));
-        for (auto& value : vectors) {
-            if (not little_endian) {
-                uint32_t bits = 0;
-                std::memcpy(&bits, &value, sizeof(bits));
-                bits = byte_swap(bits);
-                std::memcpy(&value, &bits, sizeof(value));
+        if (version == 3) {
+            for (auto& value : vectors) {
+                const auto bits = static_cast<uint16_t>(read(input, 2));
+                value = detail::decode_fp16(bits);
+                if (not std::isfinite(value)) {
+                    return failure(ErrorType::INVALID_BINARY, "non-finite snapshot vector");
+                }
             }
-            if (not std::isfinite(value)) {
-                return failure(ErrorType::INVALID_BINARY, "non-finite snapshot vector");
+        } else {
+            read_bytes(input, vectors.data(), count * dim * sizeof(float));
+            for (auto& value : vectors) {
+                if (not little_endian) {
+                    uint32_t bits = 0;
+                    std::memcpy(&bits, &value, sizeof(bits));
+                    bits = byte_swap(bits);
+                    std::memcpy(&value, &bits, sizeof(value));
+                }
+                if (not std::isfinite(value)) {
+                    return failure(ErrorType::INVALID_BINARY, "non-finite snapshot vector");
+                }
             }
         }
         std::vector<std::vector<uint64_t>> links;
-        if (version == 2) {
-            uint64_t link_bytes = payload - 16 - count * (16 + 4 * dim);
+        if (version >= 2) {
+            uint64_t link_bytes = payload - 16 - count * (16 + vector_bytes * dim);
             links.reserve(count);
             for (uint64_t slot = 0; slot < count; ++slot) {
                 const auto link_count = read(input);
@@ -319,6 +350,9 @@ Index::Load(std::istream& input) {
         auto backend =
             version == 1
                 ? detail::restore_brute_force_backend(dim, std::move(ids), std::move(vectors))
+            : version == 3
+                ? detail::restore_fp16_graph_backend(
+                      dim, degree, ef_search, std::move(ids), std::move(vectors), std::move(links))
                 : detail::restore_graph_backend(
                       dim, degree, ef_search, std::move(ids), std::move(vectors), std::move(links));
         if (not backend) {
