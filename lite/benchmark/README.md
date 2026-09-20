@@ -215,7 +215,35 @@ transformed case is not a standard dataset result and does not establish
 quality for general floating-point embeddings. The probe keeps all three
 representations in memory; encoded bytes are not index RSS or snapshot size.
 
-Before integrating either candidate into the Lite graph, evaluate combined
-graph-plus-quantization Recall, latency, real index RSS, CRUD and Save/Load
-with a separately versioned snapshot format. The measured generic scalar
-kernels currently incur a substantial latency cost.
+The exhaustive scan remains an offline algorithm comparison. FP16 graph storage
+is now exposed by the Lite API and uses the official SIMD-dispatched half
+kernel plus the separately versioned v3 snapshot; SQ8 remains an offline
+candidate.
+
+## Public FP16 graph resident memory
+
+The hidden `[lite-sift-rss]` probe builds either the default FP32 graph or
+`VectorStorage::FP16` through the public Index API in a fresh process. It
+releases the input base vectors, calls `malloc_trim(0)` on glibc, executes the
+same 100 independent queries, and reads current `VmRSS` from
+`/proc/self/status`. Queries and ground truth remain resident, so the result
+is a same-process-layout comparison rather than an exact container byte count.
+
+    VSAG_SIFT_DIR=/path/to/scale-100000 VSAG_SIFT_RSS_BACKEND=fp32 /path/to/lite_graph_tests '[lite-sift-rss]'
+    VSAG_SIFT_DIR=/path/to/scale-100000 VSAG_SIFT_RSS_BACKEND=fp16 /path/to/lite_graph_tests '[lite-sift-rss]'
+
+On 2026-09-20, one fresh process per backend produced:
+
+| SIFT-128 subset | Storage | Recall@10 | Current RSS |
+| --- | --- | ---: | ---: |
+| 10k | FP32 | 0.973 | 12,036 KiB |
+| 10k | FP16 | 0.973 | 9,492 KiB |
+| 100k | FP32 | 0.946 | 77,424 KiB |
+| 100k | FP16 | 0.946 | 52,236 KiB |
+
+FP16 reduced current RSS by 21.1% at 10k and 32.5% at 100k in these single
+runs while preserving measured Recall@10. The 100k FP16 graph also stores
+25,600,000 vector-code bytes instead of 51,200,000 FP32 bytes; IDs, links,
+containers, queries, ground truth, allocator behavior, and the process image
+explain why total RSS does not fall by 50%. These are single-host, single-run
+measurements and not a variance or cross-platform study.
