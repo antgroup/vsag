@@ -7,14 +7,15 @@ approximate. BuildGraph builds a replacement before publishing it; a failure
 leaves the BruteForce index unchanged. Add, Update and Remove remain available
 after transition. Calls must be externally serialized.
 
-BruteForce Save/Load keeps the byte-identical v1 snapshot. Graph Save writes
-v2 with the FP32 records, graph options and adjacency; Load detects either
-version and restores the corresponding backend. The format is not compatible
+BruteForce Save/Load keeps the byte-identical v1 snapshot. FP32 Graph Save writes
+v2 and FP16 Graph Save writes v3 with records, graph options and adjacency; Load
+detects all three versions and restores the corresponding backend. The format is not compatible
 with Full VSAG. It has no checksum or crash-safe file replacement. The graph
 is a standalone single-layer candidate, not Full HGraph or LazyHGraph.
-BruteForce and graph use the same runtime-selected FP32 distance kernel on supported
-x86_64 builds; dimensions below 16 and other platforms use Generic.
-Quantization and mmap are not included.
+BruteForce and FP32 graph use the runtime-selected FP32 distance kernel on supported
+x86_64 builds; FP16 graph uses the corresponding half-precision dispatcher. Dimensions
+below 16 and other platforms use Generic.
+SQ8 and mmap are not included; FP16 graph storage is available only when explicitly selected.
 
 Search(query, dim, k, IdFilter) accepts a callback on external IDs; returning true allows
 an ID in the result. The graph still visits and scores rejected nodes for connectivity,
@@ -35,7 +36,7 @@ larger snapshots and a temporary flat-plus-graph memory peak during transition.
 ## Directory layout
 
 - `include/vsag/lite/index.h`: public Lite API and external-ID search filter.
-- `src/lite/index.cpp`: API dispatch and v1/v2 snapshot handling.
+- `src/lite/index.cpp`: API dispatch and v1/v2/v3 snapshot handling.
 - `src/lite/bruteforce_backend.cpp`, `src/lite/graph_backend.cpp`, and
   `src/lite/fp32_distance*.cpp`: exact and graph implementations plus FP32 distance dispatch.
 - `src/lite/index_test.cpp` and `src/lite/graph_backend_test.cpp`: functional,
@@ -43,8 +44,8 @@ larger snapshots and a temporary flat-plus-graph memory peak during transition.
 - `lite/CMakeLists.txt` and `lite/example/`: standalone build, install, and consumer example.
 - `docs/docs/{en,zh}/src/development/lite_first.md`: user-facing guides.
 
-Benchmark runners and SQ8/FP16 candidate probes are tracked with the experiment work;
-the public Lite API here remains FP32.
+Benchmark runners and candidate probes are tracked with the experiment work; the public
+Lite API supports FP32 and explicitly selected FP16 graph storage, while SQ8 remains experimental.
 
 ## Graph snapshot v2
 
@@ -89,4 +90,4 @@ The installed consumer and v0.1 measurements are documented in the linked Englis
 
 ## FP16 graph storage
 
-Call `BuildGraph(VectorStorage::FP16, max_degree, ef_search)` to store graph vectors as IEEE binary16 while keeping the existing FP32 input and search API. The original `BuildGraph(max_degree, ef_search)` remains FP32. `ActiveVectorStorage()` reports the active representation. FP16 graphs use snapshot version 3; versions 1 and 2 remain readable and unchanged. Loading does not require the save host ISA because the stored representation is portable little-endian binary16. Values outside the finite FP16 range are rejected when the graph is built or updated.
+Call `BuildGraph(VectorStorage::FP16, max_degree, ef_search)` to store graph vectors as IEEE binary16 while keeping the existing FP32 input and search API. The original `BuildGraph(max_degree, ef_search)` remains FP32. `ActiveVectorStorage()` reports the active representation. FP16 graphs use snapshot version 3; versions 1 and 2 remain readable and unchanged. Loading does not require the save host ISA because the stored representation is portable little-endian binary16. The loader bulk-reads v3 vectors directly into final FP16 storage, validates finite binary16 exponent fields, and converts byte order in place on non-little-endian hosts. Values outside the finite FP16 range are rejected when the graph is built or updated.

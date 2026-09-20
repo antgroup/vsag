@@ -4,11 +4,12 @@
 > exact BruteForce and its byte-identical v1 snapshot. Call BuildGraph(degree,
 > ef_search) explicitly to publish a standalone single-layer approximate graph
 > after a successful build. Graph Add/Update/Remove and Search use the same
-> Index API; Save writes v2 including FP32 vectors, IDs, options and adjacency,
-> while Load accepts both v1 and v2. Graph v2 is not a Full VSAG snapshot.
+> Index API; Save writes v2 for FP32 graphs and v3 for FP16 graphs, including
+> vectors, IDs, options and adjacency. Load accepts v1, v2 and v3. Graph snapshots
+> are not compatible with Full VSAG.
 > The filtered Search overload also applies after BuildGraph: rejected external IDs
 > can be traversed to keep the graph connected, but are never returned.
-> No concurrent calls, checksum, quantization or mmap are provided. The
+> No concurrent calls, checksum, SQ8 or mmap are provided. The
 > remainder of this page documents the original v0.1 default behavior.
 
 
@@ -84,9 +85,9 @@ reduction. The minimal implementation intentionally avoids Full Factory,
 InnerIndexInterface, attribute and multi-vector dependencies.
 
 The initial BruteForce backend is still the default. `BuildGraph` constructs a separate
-private FP32 graph backend and publishes it only after success; graph CRUD and filtered
-search remain available. BruteForce snapshots use v1, while graph snapshots use v2.
-Quantization and mmap are not part of the public Lite index.
+private graph backend and publishes it only after success; graph CRUD and filtered
+search remain available. BruteForce snapshots use v1, FP32 graphs use v2, and explicitly
+selected FP16 graphs use v3. SQ8 and mmap are not part of the public Lite index.
 
 ## Snapshot v1
 
@@ -106,8 +107,10 @@ The binary format is separate from Full VSAG. All numeric fields are little endi
 Load requires a seekable stream and consumes its remaining bytes, rejecting
 truncation, trailing bytes, invalid sizes/versions, duplicate IDs and non-finite
 values before publishing a new index. It bulk-reads contiguous IDs, vectors and
-each graph adjacency row directly into their final owned containers. Non-little-endian
-hosts convert those payload values in place. Loading does not mutate an existing
+each graph adjacency row directly into their final owned containers. Version 3 binary16
+vectors are also read directly into final FP16 storage and checked for finite exponent
+fields without an FP32 staging copy. Non-little-endian hosts convert payload values in
+place. Loading does not mutate an existing
 index. This is an owned-memory load, not mmap or zero-copy. There is no checksum:
 valid-looking bit corruption cannot always be detected.
 Save writes at the current output position; the caller owns flushing/closing,
@@ -156,9 +159,9 @@ single-machine medians for this exact workload, not general performance claims.
 For source coverage add `-DENABLE_COVERAGE=ON` to a Debug build, run the tests,
 and collect gcov results. Only report actually measured coverage; Full coverage
 is not implied. The installed consumer above checks that the new target can be
-used without linking `libvsag.so`. Full API/ABI replacement, bindings, graph
-search, sparse vectors, WARP, quantization, mmap and concurrent calls are out of scope.
+used without linking `libvsag.so`. Full API/ABI replacement, bindings, sparse vectors,
+WARP, SQ8, mmap and concurrent calls are out of scope.
 
 ## FP16 graph storage
 
-Call `BuildGraph(VectorStorage::FP16, max_degree, ef_search)` to store graph vectors as IEEE binary16 while keeping the existing FP32 input and search API. The original `BuildGraph(max_degree, ef_search)` remains FP32. `ActiveVectorStorage()` reports the active representation. FP16 graphs use snapshot version 3; versions 1 and 2 remain readable and unchanged. Loading does not require the save host ISA because the stored representation is portable little-endian binary16. Values outside the finite FP16 range are rejected when the graph is built or updated.
+Call `BuildGraph(VectorStorage::FP16, max_degree, ef_search)` to store graph vectors as IEEE binary16 while keeping the existing FP32 input and search API. The original `BuildGraph(max_degree, ef_search)` remains FP32. `ActiveVectorStorage()` reports the active representation. FP16 graphs use snapshot version 3; versions 1 and 2 remain readable and unchanged. Loading does not require the save host ISA because the stored representation is portable little-endian binary16. Version 3 values are bulk-read directly into final FP16 storage, validated by their binary16 exponent fields, and byte-swapped in place when required. Values outside the finite FP16 range are rejected when the graph is built or updated.
