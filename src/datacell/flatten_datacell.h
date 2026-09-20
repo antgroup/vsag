@@ -39,6 +39,7 @@ template <typename QuantTmpl, typename LayoutTmpl>
 class FlattenDataCell : public FlattenInterface {
 public:
     FlattenDataCell() : layout_(std::make_shared<LayoutTmpl>()) {
+        this->prefetch_stride_code_ = 16;
     }
 
     explicit FlattenDataCell(const QuantizerParamPtr& quantization_param,
@@ -292,6 +293,7 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::FlattenDataCell(const QuantizerParamPtr&
                                                         const IOParamPtr& io_param,
                                                         const IndexCommonParam& common_param)
     : allocator_(common_param.allocator_.get()) {
+    this->prefetch_stride_code_ = 16;
     this->common_param_ = common_param;
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
     this->code_size_ = quantizer_->GetCodeSize();
@@ -388,8 +390,7 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
                                               InnerIdType id_count,
                                               QueryContext* ctx) {
     Allocator* search_alloc = select_query_allocator(ctx, allocator_);
-    const auto prefetch_stride =
-        this->prefetch_stride_code_ == 0 ? 0 : std::max<uint32_t>(16, this->prefetch_stride_code_);
+    const auto prefetch_stride = this->prefetch_stride_code_;
 
     for (uint32_t i = 0; i < prefetch_stride and i < id_count; i++) {
         this->layout_->Prefetch(idx[i], this->prefetch_depth_code_ * 64);

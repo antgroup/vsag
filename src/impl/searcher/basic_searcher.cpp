@@ -70,8 +70,8 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
 
     for (uint32_t i = 0; i < neighbors.size(); i++) {
         if (not vl->TestAndSet(neighbors[i])) {
-            if (not filter || count_no_visited == 0 || skip_strategy == nullptr ||
-                skip_strategy->ShouldVisit() || filter->CheckValid(neighbors[i])) {
+            if (count_no_visited == 0 or skip_strategy == nullptr or skip_strategy->ShouldVisit() or
+                filter->CheckValid(neighbors[i])) {
                 to_be_visited_id[count_no_visited] = neighbors[i];
                 count_no_visited++;
             }
@@ -950,6 +950,8 @@ BasicSearcher::SetRuntimeParameters(const UnorderedMap<std::string, float>& new_
     bool ret = false;
     auto iter = new_params.find(PREFETCH_STRIDE_VISIT);
     if (iter != new_params.end()) {
+        // Note: BasicSearcher::visit uses full-batch prefetch and no longer consumes
+        // prefetch_stride_visit_. Kept for backward compatibility with external configurations.
         prefetch_stride_visit_ = static_cast<uint32_t>(iter->second);
         ret = true;
     }
