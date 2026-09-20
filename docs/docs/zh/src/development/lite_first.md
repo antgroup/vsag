@@ -72,6 +72,70 @@ BruteForce 仍是默认后端。`BuildGraph` 构建独立的私有图后端，�
 图阶段保留 CRUD 和过滤搜索。BruteForce 使用 v1 快照，FP32 图使用 v2，显式选择的
 FP16 图使用 v3。公开 Lite 索引尚未集成 SQ8 或 mmap。
 
+## 架构设计与兼容边界
+
+独立 Lite 的边界刻意保持精简：
+
+```text
+应用程序
+    |
+    v
+vsag::lite::Index             公开所有权和错误契约
+    |
+    v
+detail::Backend               私有 CRUD/Search/存储抽象
+    |-------------------|
+    v                   v
+BruteForceBackend       GraphBackend
+FP32 行优先             FP32 或 FP16 行优先 + 邻接行
+    |                   |
+    +---------+---------+
+              v
+    运行时 L2 分派            按环境使用 Generic/SSE/AVX2/AVX512
+              |
+              v
+    版本化持有式快照           v1 flat / v2 FP32 图 / v3 FP16 图
+```
+
+`lite/CMakeLists.txt` 只把上述源码闭包构建为共享和静态 `vsag-lite` 库。
+Lite 复用仓库的 `Error`/`tl::expected` 契约和官方 L2 实现 traits，但不链接
+Full Factory、HGraph、线程池、分配器编排、日志运行时、IO 框架、属性系统、
+稀疏或多向量索引。安装面保持为 `vsag/lite/index.h` 和仅头文件的错误契约依赖。
+
+索引选择围绕小数据部署目标：
+
+- BruteForce 是默认项，因为它结果精确、无需构建阶段，并且对小集合保持最少状态。
+- 单层图必须显式构建，因为它以构建时间、快照字节和近似召回为代价换取更快查询。
+  `BuildGraph` 先完整创建替代后端，只有成功后才发布。
+- FP16 是显式图存储选项。它减少向量和快照字节，但调用输入和结果仍为 FP32；
+  它可能改变距离与召回，因此图默认仍为 FP32。
+
+BruteForce 用一个行优先 `std::vector<float>` 保存向量，另用并行 ID vector 和
+`unordered_map` 保存外部 ID 到槽位映射。Graph 为每个槽位增加一个有界出邻接 vector；
+FP16 将向量载荷换成行优先 binary16。容量按几何方式增长。Remove 把最后一条记录
+物理搬入空洞并更新槽位引用，同时保留已分配容量供复用，不承诺 RSS 立即下降。
+图裁剪和旧快照可能含非对称邻接，因此删除会扫描已存边，不能假设每条入边都出现在
+被删节点的出邻接行中。
+
+建图期间 flat 源后端和替代后端会暂时同时存在，所以峰值内存可能高于任一稳态。
+每次 Search 自己持有 visited 位图和候选队列。FP16 解码 scratch 在实现内部由调用方
+持有，并在序列化迭代间复用；不存在共享可变解码缓冲、后台压缩或内部同步。
+
+兼容目标是行为和迁移成本，不是 ABI 等价：
+
+| 关注点 | Lite 行为 | 与 Full 的差异 |
+| --- | --- | --- |
+| 错误 | 适用接口返回 `tl::expected<..., vsag::Error>` | 复用契约但不依赖 Full 运行时 |
+| ID 和向量 | int64 外部 ID、固定维度、调用输入 FP32 | 仅单向量稠密 L2 平方距离 |
+| CRUD | Add、Update、物理 Remove、Search | 无删除标记、属性和多向量操作 |
+| 过滤 | 按外部 ID 回调 | 独立的最小回调类型 |
+| 结果 | 持有式 `std::vector<Neighbor>` | 不是 Full `Dataset` 结果 ABI |
+| 持久化 | 可定位 C++ 流和 Lite v1/v2/v3 | 不兼容 Full 序列化 |
+| 并发 | 调用方必须串行化 | 无内部线程池或并发调用保证 |
+
+因此，即使 CRUD 命名和错误处理较熟悉，迁移代码仍需调整构造、结果处理和持久化；
+本项目不宣称可直接替换 Full API/ABI。
+
 ## 快照 v1
 
 格式与 Full 独立，数值字段均为小端：

@@ -89,6 +89,80 @@ private graph backend and publishes it only after success; graph CRUD and filter
 search remain available. BruteForce snapshots use v1, FP32 graphs use v2, and explicitly
 selected FP16 graphs use v3. SQ8 and mmap are not part of the public Lite index.
 
+## Architecture design and compatibility
+
+The standalone boundary is intentionally narrow:
+
+```text
+application
+    |
+    v
+vsag::lite::Index             public ownership and error contract
+    |
+    v
+detail::Backend               private CRUD/Search/storage abstraction
+    |-------------------|
+    v                   v
+BruteForceBackend       GraphBackend
+FP32 row-major          FP32 or FP16 row-major + adjacency rows
+    |                   |
+    +---------+---------+
+              v
+    runtime L2 dispatcher     Generic/SSE/AVX2/AVX512 as available
+              |
+              v
+    versioned owned snapshot  v1 flat / v2 FP32 graph / v3 FP16 graph
+```
+
+`lite/CMakeLists.txt` builds only this source closure into shared and static
+`vsag-lite` libraries. Lite reuses the repository's `Error`/`tl::expected`
+contract and official L2 implementation traits, but does not link the Full
+Factory, HGraph, thread pool, allocator orchestration, logging runtime, IO
+framework, attribute system, sparse or multi-vector indexes. This keeps the
+installed surface to `vsag/lite/index.h` plus the header-only error contract.
+
+The index choices follow the small-data deployment goal:
+
+- BruteForce is the default because it is exact, has no construction phase,
+  and keeps the smallest state for small collections.
+- The single-layer graph is explicit because it trades construction time,
+  snapshot bytes and approximate recall for faster queries. `BuildGraph`
+  creates the complete replacement first and publishes it only on success.
+- FP16 is an explicit graph storage choice. It reduces vector and snapshot
+  bytes, while inputs and results stay FP32. It may change distances and recall,
+  so FP32 remains the graph default.
+
+BruteForce stores vectors in one row-major `std::vector<float>`, IDs in a
+parallel vector and the external-ID mapping in an `unordered_map`. Graph adds
+one bounded outgoing-adjacency vector per slot; FP16 replaces the vector payload
+with row-major binary16 words. Capacity grows geometrically. Remove physically
+moves the last record into the hole and updates slot references, while retaining
+allocated capacity for reuse; it does not promise an RSS drop. Pruning and old
+snapshots may contain asymmetric adjacency, so removal scans stored edges rather
+than assuming every incoming edge appears in the removed node's outgoing row.
+
+Graph construction temporarily owns both the flat source and the replacement,
+so peak memory can exceed either steady state. Search owns its visited bitmap and
+candidate queues per call. FP16 decode scratch belongs to the caller inside the
+implementation and is reused across serialization iterations. There is no shared
+mutable decode buffer, background compaction or internal synchronization.
+
+The compatibility boundary is behavioral rather than ABI compatibility:
+
+| Concern | Lite behavior | Difference from Full |
+| --- | --- | --- |
+| Errors | `tl::expected<..., vsag::Error>` where applicable | Reuses the contract without the Full runtime |
+| IDs and vectors | int64 external IDs, fixed dimension, FP32 call inputs | Single-vector dense squared-L2 only |
+| CRUD | Add, Update, physical Remove and Search | No delete markers, attributes or multi-vector operations |
+| Filtering | Callback on external IDs | Separate minimal callback type |
+| Results | Owned `std::vector<Neighbor>` | Not the Full `Dataset` result ABI |
+| Persistence | Seekable C++ streams and Lite v1/v2/v3 | Not Full serialization compatible |
+| Concurrency | Calls must be externally serialized | No internal thread pool or concurrent-call guarantee |
+
+Migrating code must therefore adapt construction, result handling and
+persistence even when CRUD names and error handling are familiar. Full API/ABI
+replacement is not claimed.
+
 ## Snapshot v1
 
 The binary format is separate from Full VSAG. All numeric fields are little endian:
