@@ -27,17 +27,50 @@ write(std::ostream& out, uint64_t value, uint64_t bytes = 8) {
     }
 }
 
+void
+read_bytes(std::istream& in, void* destination, uint64_t bytes) {
+    if (bytes == 0) {
+        return;
+    }
+    if (bytes > static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max())) {
+        throw std::length_error("snapshot section exceeds stream capacity");
+    }
+    in.read(static_cast<char*>(destination), static_cast<std::streamsize>(bytes));
+    if (not in) {
+        throw std::ios_base::failure("truncated snapshot");
+    }
+}
+
 uint64_t
 read(std::istream& in, uint64_t bytes = 8) {
+    char encoded[8]{};
+    read_bytes(in, encoded, bytes);
     uint64_t value = 0;
     for (uint64_t i = 0; i < bytes; ++i) {
-        auto byte = in.get();
-        if (byte == std::char_traits<char>::eof()) {
-            throw std::ios_base::failure("truncated snapshot");
-        }
-        value |= static_cast<uint64_t>(static_cast<unsigned char>(byte)) << (8 * i);
+        value |= static_cast<uint64_t>(static_cast<unsigned char>(encoded[i])) << (8 * i);
     }
     return value;
+}
+
+bool
+native_little_endian() {
+    const uint16_t value = 1;
+    unsigned char first = 0;
+    std::memcpy(&first, &value, 1);
+    return first == 1;
+}
+
+uint64_t
+byte_swap(uint64_t value) {
+    value = ((value & 0x00ff00ff00ff00ffULL) << 8U) | ((value & 0xff00ff00ff00ff00ULL) >> 8U);
+    value = ((value & 0x0000ffff0000ffffULL) << 16U) | ((value & 0xffff0000ffff0000ULL) >> 16U);
+    return (value << 32U) | (value >> 32U);
+}
+
+uint32_t
+byte_swap(uint32_t value) {
+    value = ((value & 0x00ff00ffU) << 8U) | ((value & 0xff00ff00U) >> 8U);
+    return (value << 16U) | (value >> 16U);
 }
 
 constexpr uint64_t K_HEADER_BYTES = 48;
@@ -236,24 +269,29 @@ Index::Load(std::istream& input) {
             }
         }
         // Validate the layout before allocating and keep one owned copy of each payload.
-        std::vector<int64_t> ids;
-        ids.reserve(count);
-        for (uint64_t slot = 0; slot < count; ++slot) {
-            const uint64_t bits = read(input);
-            int64_t id;
-            std::memcpy(&id, &bits, sizeof(id));
-            ids.push_back(id);
+        const bool little_endian = native_little_endian();
+        std::vector<int64_t> ids(count);
+        read_bytes(input, ids.data(), count * sizeof(int64_t));
+        if (not little_endian) {
+            for (auto& id : ids) {
+                uint64_t bits = 0;
+                std::memcpy(&bits, &id, sizeof(bits));
+                bits = byte_swap(bits);
+                std::memcpy(&id, &bits, sizeof(id));
+            }
         }
-        std::vector<float> vectors;
-        vectors.reserve(count * dim);
-        for (uint64_t i = 0; i < count * dim; ++i) {
-            auto bits = static_cast<uint32_t>(read(input, 4));
-            float value;
-            std::memcpy(&value, &bits, 4);
+        std::vector<float> vectors(count * dim);
+        read_bytes(input, vectors.data(), count * dim * sizeof(float));
+        for (auto& value : vectors) {
+            if (not little_endian) {
+                uint32_t bits = 0;
+                std::memcpy(&bits, &value, sizeof(bits));
+                bits = byte_swap(bits);
+                std::memcpy(&value, &bits, sizeof(value));
+            }
             if (not std::isfinite(value)) {
                 return failure(ErrorType::INVALID_BINARY, "non-finite snapshot vector");
             }
-            vectors.push_back(value);
         }
         std::vector<std::vector<uint64_t>> links;
         if (version == 2) {
@@ -264,10 +302,12 @@ Index::Load(std::istream& input) {
                 if (link_count > degree or link_count > link_bytes / 8) {
                     return failure(ErrorType::INVALID_BINARY, "invalid graph link count");
                 }
-                std::vector<uint64_t> row;
-                row.reserve(link_count);
-                for (uint64_t i = 0; i < link_count; ++i) {
-                    row.push_back(read(input));
+                std::vector<uint64_t> row(link_count);
+                read_bytes(input, row.data(), link_count * sizeof(uint64_t));
+                if (not little_endian) {
+                    for (auto& neighbor : row) {
+                        neighbor = byte_swap(neighbor);
+                    }
                 }
                 links.push_back(std::move(row));
                 link_bytes -= link_count * 8;
