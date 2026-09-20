@@ -247,3 +247,20 @@ runs while preserving measured Recall@10. The 100k FP16 graph also stores
 containers, queries, ground truth, allocator behavior, and the process image
 explain why total RSS does not fall by 50%. These are single-host, single-run
 measurements and not a variance or cross-platform study.
+
+## FP16 v3 snapshot size and fresh-process load
+
+The hidden `[lite-sift]` probe accepts `VSAG_GRAPH_STORAGE=fp32|fp16`; omitting the variable preserves the FP32 default. It builds through the public API, writes a v2 FP32 or v3 FP16 snapshot, reloads it, verifies the active storage, and checks exact result and distance equality across the round trip. The `[lite-sift-load]` probe discovers the stored representation after loading and reports first-query latency separately from follow-up-query P50/P99, together with current and process-lifetime peak RSS.
+
+At commit `bcd2388`, one snapshot per storage and scale was generated and each snapshot was loaded in seven fresh processes with alternating FP32/FP16 execution order. The table reports the single build/save observation and the median of seven load processes. Page cache state was uncontrolled, so Load is a fresh-process metric rather than strict cold I/O.
+
+| SIFT-128 subset | Storage | Snapshot bytes | Recall@10 | Build (ms) | Save (ms) | Load median (ms) | First query median (us) | Follow-up P50/P99 median (us) | Steady RSS median (KiB) | Peak RSS median (KiB) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10k | FP32 v2 | 6,560,064 | 0.973 | 864.663 | 26.526 | 3.373 | 129.207 | 100.097 / 128.808 | 11,724 | 11,764 |
+| 10k | FP16 v3 | 4,000,064 | 0.973 | 843.392 | 24.027 | 27.149 | 175.937 | 108.498 / 156.537 | 9,260 | 14,064 |
+| 100k | FP32 v2 | 65,600,064 | 0.946 | 20,178.9 | 276.240 | 34.874 | 459.440 | 337.664 / 462.920 | 75,808 | 75,908 |
+| 100k | FP16 v3 | 40,000,064 | 0.946 | 17,230.1 | 243.660 | 270.980 | 455.701 | 308.394 / 432.701 | 50,752 | 100,600 |
+
+The v3 snapshot is 39.0% smaller at both scales. Its median steady RSS is 21.0% lower at 10k and 33.1% lower at 100k, with unchanged measured Recall@10. The current v3 Load path is 8.05x slower at 10k and 7.77x slower at 100k, and its process peak RSS is higher. `Index::Load` currently reads every binary16 value through a per-value stream operation into a temporary FP32 vector; `GraphBackend::Restore` then encodes that FP32 vector back into final FP16 storage. This double conversion explains the observed load-time and transient-memory bottleneck and identifies a targeted follow-up optimization. Query latency differences are mixed and should not be generalized from one snapshot generation.
+
+Raw stdout, stderr, `/usr/bin/time -v`, environment metadata, snapshot SHA-256 values, and the generated summary are retained in `/home/ubuntu/project/vsag-lite-fp16-v3-load-validation-20260920-bcd2388` on the measured host. The experiment does not measure mmap, zero-copy loading, strict cold I/O, native big-endian execution, or cross-host variance.
