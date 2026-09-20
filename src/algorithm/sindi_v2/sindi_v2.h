@@ -154,6 +154,7 @@ private:
                 SindiQueryContext& query_context,
                 const SparseVector* original_query = nullptr,
                 SearchStatistics* statistics = nullptr,
+                const uint64_t* filter_callback_remaining = nullptr,
                 const SindiMetadataSearchRoute& metadata_route = {}) const;
 
     bool

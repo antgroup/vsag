@@ -205,7 +205,8 @@ SINDI_V2 supports all SINDI features with both in-memory and disk-based I/O.
 }
 ```
 
-See the [SINDI_V2 page](../indexes/sindi_v2.md) for details.
+See the [SINDI_V2 page](../indexes/sindi_v2.md) for build parameters and search parameters such as
+`n_candidate` and `filter_callback_limit`.
 
 ## Runtime Parameters
 

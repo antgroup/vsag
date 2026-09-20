@@ -28,6 +28,7 @@
 
 #include "datacell/sparse_dmq_datacell.h"
 #include "datacell/sparse_vector_datacell_parameter.h"
+#include "impl/filter/filter_callback_limiter.h"
 #include "impl/filter/inner_id_wrapper_filter.h"
 #include "impl/filter/white_list_filter.h"
 #include "impl/heap/standard_heap.h"
@@ -818,9 +819,15 @@ SINDIV2::KnnSearch(const DatasetPtr& query,
         inner_param.time_cost->SetThreshold(search_param.timeout_ms);
     }
 
+    auto filter_callback_remaining =
+        filter != nullptr and search_param.filter_callback_limit > 0
+            ? std::make_shared<uint64_t>(search_param.filter_callback_limit)
+            : nullptr;
+    const uint64_t* filter_callback_remaining_ptr = filter_callback_remaining.get();
     FilterPtr ft = nullptr;
     if (filter != nullptr) {
-        ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
+        ft = std::make_shared<InnerIdWrapperFilter>(
+            create_filter_callback_limiter(filter, filter_callback_remaining), *this->label_table_);
     }
     inner_param.is_inner_id_allowed = ft;
 
@@ -858,6 +865,7 @@ SINDIV2::KnnSearch(const DatasetPtr& query,
                                           query_context,
                                           rerank_query,
                                           &statistics,
+                                          filter_callback_remaining_ptr,
                                           metadata_route);
     result->Statistics(statistics.Dump());
     return result;
@@ -872,6 +880,7 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                      SindiQueryContext& query_context,
                      const SparseVector* original_query,
                      SearchStatistics* statistics,
+                     const uint64_t* filter_callback_remaining,
                      const SindiMetadataSearchRoute& metadata_route) const {
     MaxHeap heap(allocator);
     int64_t k = 0;
@@ -899,6 +908,7 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
         term_datacell_->QueryWindow(
             dists.data(), window_id, computer, use_term_lists_heap_insert, query_context);
 
+        bool filter_callback_limit_reached = false;
         if (not has_effective_query_terms) {
             uint32_t valid_window_size = 0;
             if (window_start_id < static_cast<uint64_t>(cur_element_count_)) {
@@ -909,11 +919,22 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
             }
             for (uint32_t local_id = 0; local_id < valid_window_size; ++local_id) {
                 const auto inner_id = window_start_id + local_id;
-                if (filter != nullptr && not filter->CheckValid(inner_id)) {
-                    continue;
+                if (filter != nullptr) {
+                    const bool valid = filter->CheckValid(inner_id);
+                    filter_callback_limit_reached =
+                        filter_callback_remaining != nullptr && *filter_callback_remaining == 0;
+                    if (not valid) {
+                        if (filter_callback_limit_reached) {
+                            break;
+                        }
+                        continue;
+                    }
                 }
                 if (inner_param.distance_threshold.has_value() && not inner_param.enable_reorder &&
                     1.0F > inner_param.distance_threshold.value()) {
+                    if (filter_callback_limit_reached) {
+                        break;
+                    }
                     continue;
                 }
                 if constexpr (mode == KNN_SEARCH) {
@@ -923,6 +944,9 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                     }
                 } else {
                     if (1.0F > inner_param.radius) {
+                        if (filter_callback_limit_reached) {
+                            break;
+                        }
                         continue;
                     }
                     heap.emplace(0.0F, inner_id);
@@ -931,17 +955,22 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                         heap.pop();
                     }
                 }
+                if (filter_callback_limit_reached) {
+                    break;
+                }
             }
         } else if (use_term_lists_heap_insert) {
-            term_datacell_->InsertHeapByWindow(dists.data(),
-                                               window_id,
-                                               computer,
-                                               heap,
-                                               inner_param,
-                                               window_start_id,
-                                               mode,
-                                               inner_param.is_inner_id_allowed != nullptr,
-                                               query_context);
+            filter_callback_limit_reached =
+                term_datacell_->InsertHeapByWindow(dists.data(),
+                                                   window_id,
+                                                   computer,
+                                                   heap,
+                                                   inner_param,
+                                                   window_start_id,
+                                                   mode,
+                                                   inner_param.is_inner_id_allowed != nullptr,
+                                                   query_context,
+                                                   filter_callback_remaining);
         } else {
             uint32_t valid_window_size = 0;
             if (window_start_id < static_cast<uint64_t>(cur_element_count_)) {
@@ -949,13 +978,18 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                 valid_window_size =
                     static_cast<uint32_t>(std::min<uint64_t>(window_size_, remaining_count));
             }
-            term_datacell_->InsertHeapByDists(dists.data(),
-                                              valid_window_size,
-                                              heap,
-                                              inner_param,
-                                              window_start_id,
-                                              mode,
-                                              inner_param.is_inner_id_allowed != nullptr);
+            filter_callback_limit_reached =
+                term_datacell_->InsertHeapByDists(dists.data(),
+                                                  valid_window_size,
+                                                  heap,
+                                                  inner_param,
+                                                  window_start_id,
+                                                  mode,
+                                                  inner_param.is_inner_id_allowed != nullptr,
+                                                  filter_callback_remaining);
+        }
+        if (filter_callback_limit_reached) {
+            break;
         }
         if (inner_param.time_cost != nullptr and inner_param.time_cost->CheckOvertime()) {
             if (statistics != nullptr) {
@@ -1086,9 +1120,14 @@ SINDIV2::RangeSearch(const DatasetPtr& query,
         inner_param.time_cost = std::make_shared<Timer>();
         inner_param.time_cost->SetThreshold(search_param.timeout_ms);
     }
+    auto filter_callback_remaining =
+        filter != nullptr and search_param.filter_callback_limit > 0
+            ? std::make_shared<uint64_t>(search_param.filter_callback_limit)
+            : nullptr;
+    const uint64_t* filter_callback_remaining_ptr = filter_callback_remaining.get();
     if (filter != nullptr) {
-        inner_param.is_inner_id_allowed =
-            std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
+        inner_param.is_inner_id_allowed = std::make_shared<InnerIdWrapperFilter>(
+            create_filter_callback_limiter(filter, filter_callback_remaining), *this->label_table_);
     }
 
     Vector<uint32_t> tmp_ids(allocator_);
@@ -1111,7 +1150,8 @@ SINDIV2::RangeSearch(const DatasetPtr& query,
                                   sparse_query.len_ != 0 && UseTermListsHeapInsert(search_param),
                                   query_context,
                                   rerank_query,
-                                  &statistics);
+                                  &statistics,
+                                  filter_callback_remaining_ptr);
     result->Statistics(statistics.Dump());
     return result;
 }

@@ -172,7 +172,127 @@ private:
     int64_t label_;
 };
 
+class CountingFilter : public Filter {
+public:
+    explicit CountingFilter(int64_t only_valid_label) : only_valid_label_(only_valid_label) {
+    }
+
+    [[nodiscard]] bool
+    CheckValid(int64_t label) const override {
+        ++count_;
+        return WouldAccept(label);
+    }
+
+    [[nodiscard]] bool
+    WouldAccept(int64_t label) const {
+        return label == only_valid_label_;
+    }
+
+    [[nodiscard]] uint64_t
+    Count() const {
+        return count_;
+    }
+
+private:
+    int64_t only_valid_label_{-1};
+    mutable uint64_t count_{0};
+};
+
 }  // namespace
+
+TEST_CASE("SINDIV2 Filter Callback Limit", "[ut][SINDIV2]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 1;
+
+    const bool immutable = GENERATE(false, true);
+    const float query_prune_ratio = GENERATE(0.0F, 0.2F);
+    const auto search_mode = GENERATE(SearchMode::KNN_SEARCH, SearchMode::RANGE_SEARCH);
+    const bool remap_term_ids = GENERATE(false, true);
+    CAPTURE(immutable, query_prune_ratio, search_mode, remap_term_ids);
+
+    auto parameter = std::make_shared<SINDIV2Parameter>();
+    parameter->term_id_limit = 8;
+    parameter->window_size = 4;
+    parameter->doc_prune_ratio = 0.0F;
+    parameter->avg_doc_term_length = 1;
+    parameter->immutable = immutable;
+    parameter->remap_term_ids = remap_term_ids;
+    parameter->term_io_parameter = std::make_shared<MemoryIOParameter>();
+    parameter->rerank_io_parameter = std::make_shared<MemoryBlockIOParameter>();
+
+    constexpr uint64_t count = 8;
+    uint32_t term = 3;
+    std::vector<float> values(count, 1.0F);
+    std::vector<int64_t> labels(count);
+    std::vector<SparseVector> vectors(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        labels[i] = static_cast<int64_t>(i);
+        vectors[i] = SparseVector{1, &term, &values[i]};
+    }
+    auto base = Dataset::Make();
+    base->NumElements(count)->SparseVectors(vectors.data())->Ids(labels.data())->Owner(false);
+
+    SINDIV2 index(parameter, common_param);
+    REQUIRE(index.Build(base).empty());
+
+    float query_value = 1.0F;
+    SparseVector query_vector{1, &term, &query_value};
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+
+    const auto search = [&](const std::string& parameters, const FilterPtr& filter) {
+        if (search_mode == SearchMode::RANGE_SEARCH) {
+            return index.RangeSearch(query, 0.0F, parameters, filter, 4);
+        }
+        return index.KnnSearch(query, 4, parameters, filter);
+    };
+
+    const auto limited_parameters = fmt::format(
+        R"({{"sindi_v2": {{"n_candidate": 4, "query_prune_ratio": {}, "filter_callback_limit": 3}}}})",
+        query_prune_ratio);
+    auto limited_filter = std::make_shared<CountingFilter>(2);
+    auto limited_result = search(limited_parameters, limited_filter);
+
+    REQUIRE(limited_filter->Count() == 3);
+    REQUIRE(limited_result->GetDim() == 1);
+    REQUIRE(limited_result->GetIds()[0] == 2);
+    REQUIRE(limited_filter->WouldAccept(limited_result->GetIds()[0]));
+
+    auto rejecting_filter = std::make_shared<CountingFilter>(-1);
+    auto rejected_result = search(limited_parameters, rejecting_filter);
+    REQUIRE(rejecting_filter->Count() == 3);
+    REQUIRE(rejected_result->GetDim() == 0);
+
+    const auto unlimited_parameters = fmt::format(
+        R"({{"sindi_v2": {{"n_candidate": 4, "query_prune_ratio": {}, "filter_callback_limit": 0}}}})",
+        query_prune_ratio);
+    auto unlimited_filter = std::make_shared<CountingFilter>(2);
+    auto unlimited_result = search(unlimited_parameters, unlimited_filter);
+    REQUIRE(unlimited_filter->Count() > 3);
+    REQUIRE(unlimited_result->GetDim() == 1);
+    REQUIRE(unlimited_result->GetIds()[0] == 2);
+
+    auto unfiltered_result = search(limited_parameters, nullptr);
+    REQUIRE(unfiltered_result->GetDim() == 4);
+
+    if (remap_term_ids) {
+        uint32_t unknown_term = 7;
+        query_vector.ids_ = &unknown_term;
+        auto empty_query_filter = std::make_shared<CountingFilter>(2);
+        auto empty_query_result = search(limited_parameters, empty_query_filter);
+        REQUIRE(empty_query_filter->Count() == 3);
+        if (search_mode == SearchMode::KNN_SEARCH) {
+            REQUIRE(empty_query_result->GetDim() == 1);
+            REQUIRE(empty_query_result->GetIds()[0] == 2);
+        } else {
+            REQUIRE(empty_query_result->GetDim() == 0);
+        }
+        query_vector.ids_ = &term;
+    }
+}
 
 TEST_CASE("SINDIV2 immutable host filter routes", "[ut][SINDIV2][host_filter]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();

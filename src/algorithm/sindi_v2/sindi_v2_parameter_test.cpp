@@ -43,14 +43,17 @@ TEST_CASE("SINDIV2 term prune parameter validation", "[ut][SINDIV2Parameter]") {
         "sindi_v2": {
             "query_prune_ratio": 0.99,
             "term_prune_ratio": 0.99,
-            "term_retain_threshold": 4096
+            "term_retain_threshold": 4096,
+            "filter_callback_limit": 123
         }
     })");
     REQUIRE(configured.query_prune_ratio == 0.99F);
     REQUIRE(configured.term_prune_ratio == 0.99F);
     REQUIRE(configured.term_retain_threshold == 4096);
+    REQUIRE(configured.filter_callback_limit == 123);
     const auto roundtrip = configured.ToJson();
     REQUIRE(roundtrip[INDEX_SINDI_V2][SPARSE_TERM_RETAIN_THRESHOLD].GetUint64() == 4096);
+    REQUIRE(roundtrip[INDEX_SINDI_V2][SPARSE_FILTER_CALLBACK_LIMIT].GetUint64() == 123);
     REQUIRE_FALSE(roundtrip[INDEX_SINDI_V2].Contains("use_term_lists_heap_insert"));
 
     const auto legacy = parse(R"({
@@ -62,10 +65,20 @@ TEST_CASE("SINDIV2 term prune parameter validation", "[ut][SINDIV2Parameter]") {
     REQUIRE(legacy.query_prune_ratio == 0.2F);
     REQUIRE_FALSE(legacy.ToJson()[INDEX_SINDI_V2].Contains("use_term_lists_heap_insert"));
 
-    const auto explicit_zero =
-        parse(R"({"sindi_v2": {"term_prune_ratio": 0.0, "term_retain_threshold": 0}})");
+    const auto explicit_zero = parse(R"({"sindi_v2": {
+            "term_prune_ratio": 0.0,
+            "term_retain_threshold": 0,
+            "filter_callback_limit": 0
+        }})");
     REQUIRE(explicit_zero.term_prune_ratio == 0.0F);
     REQUIRE(explicit_zero.term_retain_threshold == 0);
+    REQUIRE(explicit_zero.filter_callback_limit == 0);
+
+    const auto max_callback_limit =
+        parse(R"({"sindi_v2": {"filter_callback_limit": 18446744073709551615}})");
+    REQUIRE(max_callback_limit.filter_callback_limit == std::numeric_limits<uint64_t>::max());
+    REQUIRE(max_callback_limit.ToJson()[INDEX_SINDI_V2][SPARSE_FILTER_CALLBACK_LIMIT].GetUint64() ==
+            std::numeric_limits<uint64_t>::max());
 
     const auto old_threshold = parse(R"({"sindi_v2": {"term_prune_threshold": 10}})");
     REQUIRE(old_threshold.term_retain_threshold == DEFAULT_TERM_RETAIN_THRESHOLD);
@@ -78,6 +91,9 @@ TEST_CASE("SINDIV2 term prune parameter validation", "[ut][SINDIV2Parameter]") {
     REQUIRE_THROWS(parse(R"({"sindi_v2": {"term_retain_threshold": -1}})"));
     REQUIRE_THROWS(parse(R"({"sindi_v2": {"term_retain_threshold": 2.5}})"));
     REQUIRE_THROWS(parse(R"({"sindi_v2": {"term_retain_threshold": 18446744073709551616}})"));
+    REQUIRE_THROWS(parse(R"({"sindi_v2": {"filter_callback_limit": -1}})"));
+    REQUIRE_THROWS(parse(R"({"sindi_v2": {"filter_callback_limit": 2.5}})"));
+    REQUIRE_THROWS(parse(R"({"sindi_v2": {"filter_callback_limit": 18446744073709551616}})"));
 }
 
 TEST_CASE("SINDIV2 doc prune ratio boundaries", "[ut][SINDIV2Parameter]") {

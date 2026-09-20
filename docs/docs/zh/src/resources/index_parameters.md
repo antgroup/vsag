@@ -195,7 +195,8 @@ SINDI_V2 兼容 SINDI 的全部功能，并支持内存与磁盘 I/O。
 }
 ```
 
-详情见 [SINDI_V2 页面](../indexes/sindi_v2.md)。
+构建参数及 `n_candidate`、`filter_callback_limit` 等检索参数详见
+[SINDI_V2 页面](../indexes/sindi_v2.md)。
 
 ## 运行期参数
 

@@ -60,6 +60,7 @@ auto result = index->KnnSearch(
     query, 10,
     R"({"sindi_v2": {
         "n_candidate": 100,
+        "filter_callback_limit": 10000,
         "query_prune_ratio": 0.1,
         "term_prune_ratio": 0.2,
         "term_retain_threshold": 10000
@@ -121,6 +122,7 @@ window 都会关闭 term 级 posting 剪枝，因此日期查询可能比仅 hos
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `n_candidate` | int | `0` | 粗排候选数量；`0` 使用根据 `topk` 推导的索引默认值。 |
+| `filter_callback_limit` | uint64 | `0` | 单次带过滤检索最多调用用户 `Filter::CheckValid` 回调的次数；`0` 表示不限制。达到正数上限时，在正常处理最后一次回调结果后停止候选及后续 window 扫描，并返回此前已经通过过滤的候选，因此结果可能不完整。该限制适用于常规 KNN 和范围检索 API。 |
 | `query_prune_ratio` | float | `0.0` | 跳过最低权重查询 term 的比例，范围为 `[0.0, 1.0)`。 |
 | `term_prune_ratio` | float | `0.0` | 每条 term list 中跳过最低存储权重的比例，范围为 `[0.0, 1.0)`。 |
 | `term_retain_threshold` | uint64 | `0` | 单个 term 在所有 window 中最多扫描的 posting 总数；`0` 表示关闭，正数使每个非空 window posting list 最多扫描 `max(1, floor(threshold / window_count))` 条。 |

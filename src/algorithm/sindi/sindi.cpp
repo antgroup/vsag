@@ -28,6 +28,7 @@
 #include "analyzer/analyzer.h"
 #include "datacell/sparse_dmq_datacell.h"
 #include "datacell/sparse_vector_datacell_parameter.h"
+#include "impl/filter/filter_callback_limiter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "index_feature_list.h"
@@ -54,51 +55,6 @@ constexpr int64_t SINDI_RERANK_FLAT_FORMAT_DATACELL = 2;
 constexpr int64_t SINDI_RERANK_FLAT_FORMAT_DMQ = 3;
 constexpr const char* SINDI_POSTING_LIST_FORMAT_VERSION_KEY = "sindi_posting_list_format_version";
 constexpr int64_t SINDI_SORTED_POSTING_LIST_FORMAT_VERSION = 1;
-
-class FilterCallbackLimiter : public Filter {
-public:
-    FilterCallbackLimiter(FilterPtr filter, std::shared_ptr<uint64_t> remaining)
-        : filter_(std::move(filter)), remaining_(std::move(remaining)) {
-    }
-
-    [[nodiscard]] bool
-    CheckValid(int64_t id) const override {
-        if (*remaining_ == 0) {
-            return false;
-        }
-        const bool valid = filter_->CheckValid(id);
-        --(*remaining_);
-        return valid;
-    }
-
-    [[nodiscard]] float
-    ValidRatio() const override {
-        return filter_->ValidRatio();
-    }
-
-    [[nodiscard]] Distribution
-    FilterDistribution() const override {
-        return filter_->FilterDistribution();
-    }
-
-    void
-    GetValidIds(const int64_t** valid_ids, int64_t& count) const override {
-        filter_->GetValidIds(valid_ids, count);
-    }
-
-private:
-    FilterPtr filter_;
-    std::shared_ptr<uint64_t> remaining_;
-};
-
-FilterPtr
-create_filter_callback_limiter(const FilterPtr& filter,
-                               const std::shared_ptr<uint64_t>& remaining) {
-    if (filter == nullptr or remaining == nullptr) {
-        return filter;
-    }
-    return std::make_shared<FilterCallbackLimiter>(filter, remaining);
-}
 
 bool
 has_sorted_posting_lists(const JsonType& basic_info) {
