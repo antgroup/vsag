@@ -26,6 +26,7 @@
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/query_computer_pool.h"
+#include "impl/reasoning/search_reasoning.h"
 #include "impl/searcher/searcher_utils.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/spsc_queue.h"
@@ -147,6 +148,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
 
     float dist = 0.0F;
     auto lower_bound = std::numeric_limits<float>::max();
+    auto* reasoning = ctx == nullptr ? nullptr : ctx->reasoning_ctx;
 
     uint32_t hops = 0;
     uint32_t dist_cmp = 0;
@@ -265,14 +267,24 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
             if (top_candidates->Empty()) {
                 ++empty_hops;
                 if (empty_hops >= max_empty_hops) {
+                    if (reasoning != nullptr) {
+                        reasoning->SetTermination(
+                            ReasoningContext::kTerminationEmptyTraversalLimitReached);
+                    }
                     break;
                 }
             } else if ((-current_first_node_pair.first) > lower_bound) {
                 if (top_candidates->Size() >= ef) {
+                    if (reasoning != nullptr) {
+                        reasoning->SetTermination(ReasoningContext::kTerminationLowerBoundReached);
+                    }
                     break;
                 }
                 ++unrewarded_hops;
                 if (unrewarded_hops >= max_unrewarded_hops) {
+                    if (reasoning != nullptr) {
+                        reasoning->SetTermination(ReasoningContext::kTerminationLowerBoundReached);
+                    }
                     break;
                 }
             } else {
