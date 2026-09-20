@@ -22,6 +22,9 @@
 #include "datacell/graph_datacell_parameter.h"
 #include "impl/filter/black_list_filter.h"
 #include "impl/filter/iterator_filter.h"
+#include "impl/filter/white_list_filter.h"
+#include "impl/reasoning/search_reasoning.h"
+#include "query_context.h"
 #include "searcher_test.h"
 #include "unittest.h"
 #include "utils/visited_list.h"
@@ -452,4 +455,211 @@ TEST_CASE("BasicSearcher traverses through a non-finite-distance bridge",
         result->Pop();
     }
     REQUIRE(found_target);
+}
+
+TEST_CASE("BasicSearcher bounded traversal when valid candidates < ef",
+          "[ut][BasicSearcher][low_selectivity]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.dim_ = 1;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+    constexpr const char* param_temp = R"({{"type": "{}"}})";
+    auto quantizer_param = QuantizerParameter::GetQuantizerParameterByJson(
+        JsonType::Parse(fmt::format(param_temp, "fp32")));
+    auto io_param =
+        IOParameter::GetIOParameterByJson(JsonType::Parse(fmt::format(param_temp, "memory_io")));
+    auto flatten = std::make_shared<
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, FixedLayout<MemoryIO>>>(
+        quantizer_param, io_param, common);
+    flatten->SetQuantizer(
+        std::make_shared<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>>(1, allocator.get()));
+    flatten->SetIO(std::make_unique<MemoryIO>(allocator.get()));
+
+    constexpr size_t total_nodes = 2000;
+    std::vector<float> vectors(total_nodes);
+    std::vector<InnerIdType> ids(total_nodes);
+    std::vector<std::vector<InnerIdType>> adj(total_nodes);
+    for (size_t i = 0; i < total_nodes; ++i) {
+        vectors[i] = static_cast<float>(i);
+        ids[i] = static_cast<InnerIdType>(i);
+        if (i + 1 < total_nodes) {
+            adj[i].push_back(static_cast<InnerIdType>(i + 1));
+        }
+    }
+    flatten->Train(vectors.data(), ids.size());
+    flatten->BatchInsertVector(vectors.data(), ids.size(), ids.data());
+
+    auto graph = std::make_shared<MockGraphDataCell>(std::move(adj));
+    auto pool = std::make_shared<VisitedListPool>(1, allocator.get(), ids.size(), allocator.get());
+    BasicSearcher searcher(common);
+
+    // Only 2 nodes pass the filter: id == 0 and id == 1
+    auto filter = std::make_shared<WhiteListFilter>([](LabelType id) -> bool { return id < 2; });
+
+    InnerSearchParam param;
+    param.ep = 0;
+    param.ef = 50;
+    param.topk = 2;
+    param.search_mode = KNN_SEARCH;
+    param.is_inner_id_allowed = filter;
+
+    float query = 0.0F;
+    auto vl = pool->TakeOne();
+    ReasoningContext reasoning(allocator.get());
+    QueryContext ctx;
+    ctx.alloc = allocator.get();
+    ctx.reasoning_ctx = &reasoning;
+
+    auto result = searcher.Search(graph, flatten, vl, &query, param, LabelTablePtr{}, &ctx);
+
+    // Should return the 2 valid candidates
+    REQUIRE(result != nullptr);
+    REQUIRE(result->Size() == 2);
+    std::set<InnerIdType> result_ids;
+    while (not result->Empty()) {
+        result_ids.insert(result->Top().second);
+        result->Pop();
+    }
+    REQUIRE(result_ids == std::set<InnerIdType>{0, 1});
+
+    // Traversal must be bounded by max_unrewarded_hops (std::max(ef, 500) = 500)
+    // and terminate early rather than exhausting all 2000 nodes
+    REQUIRE(vl->Get(0) == true);
+    REQUIRE(vl->Get(1) == true);
+    REQUIRE(vl->Get(600) == false);
+    REQUIRE(vl->Get(1999) == false);
+    REQUIRE(reasoning.termination_reason_ == ReasoningContext::kTerminationLowerBoundReached);
+
+    pool->ReturnOne(vl);
+}
+
+TEST_CASE("BasicSearcher bounded traversal when zero valid candidates exist",
+          "[ut][BasicSearcher][zero_candidates]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.dim_ = 1;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+    constexpr const char* param_temp = R"({{"type": "{}"}})";
+    auto quantizer_param = QuantizerParameter::GetQuantizerParameterByJson(
+        JsonType::Parse(fmt::format(param_temp, "fp32")));
+    auto io_param =
+        IOParameter::GetIOParameterByJson(JsonType::Parse(fmt::format(param_temp, "memory_io")));
+    auto flatten = std::make_shared<
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, FixedLayout<MemoryIO>>>(
+        quantizer_param, io_param, common);
+    flatten->SetQuantizer(
+        std::make_shared<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>>(1, allocator.get()));
+    flatten->SetIO(std::make_unique<MemoryIO>(allocator.get()));
+
+    constexpr size_t total_nodes = 15000;
+    std::vector<float> vectors(total_nodes);
+    std::vector<InnerIdType> ids(total_nodes);
+    std::vector<std::vector<InnerIdType>> adj(total_nodes);
+    for (size_t i = 0; i < total_nodes; ++i) {
+        vectors[i] = static_cast<float>(i);
+        ids[i] = static_cast<InnerIdType>(i);
+        if (i + 1 < total_nodes) {
+            adj[i].push_back(static_cast<InnerIdType>(i + 1));
+        }
+    }
+    flatten->Train(vectors.data(), ids.size());
+    flatten->BatchInsertVector(vectors.data(), ids.size(), ids.data());
+
+    auto graph = std::make_shared<MockGraphDataCell>(std::move(adj));
+    auto pool = std::make_shared<VisitedListPool>(1, allocator.get(), ids.size(), allocator.get());
+    BasicSearcher searcher(common);
+
+    // Reject all nodes
+    auto filter = std::make_shared<WhiteListFilter>([](LabelType) -> bool { return false; });
+
+    InnerSearchParam param;
+    param.ep = 0;
+    param.ef = 50;
+    param.topk = 5;
+    param.search_mode = KNN_SEARCH;
+    param.is_inner_id_allowed = filter;
+
+    float query = 0.0F;
+    auto vl = pool->TakeOne();
+    ReasoningContext reasoning(allocator.get());
+    QueryContext ctx;
+    ctx.alloc = allocator.get();
+    ctx.reasoning_ctx = &reasoning;
+
+    auto result = searcher.Search(graph, flatten, vl, &query, param, LabelTablePtr{}, &ctx);
+
+    REQUIRE(result != nullptr);
+    REQUIRE(result->Empty());
+
+    // Traversal should be capped by max_empty_hops (10000) and not traverse all 15000 nodes
+    REQUIRE(vl->Get(0) == true);
+    REQUIRE(vl->Get(14999) == false);
+    REQUIRE(reasoning.termination_reason_ == ReasoningContext::kTerminationHopsLimitReached);
+
+    pool->ReturnOne(vl);
+}
+
+TEST_CASE("BasicSearcher recall preserved across non-valid intermediate nodes",
+          "[ut][BasicSearcher][recall_bridge]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.dim_ = 1;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+    constexpr const char* param_temp = R"({{"type": "{}"}})";
+    auto quantizer_param = QuantizerParameter::GetQuantizerParameterByJson(
+        JsonType::Parse(fmt::format(param_temp, "fp32")));
+    auto io_param =
+        IOParameter::GetIOParameterByJson(JsonType::Parse(fmt::format(param_temp, "memory_io")));
+    auto flatten = std::make_shared<
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, FixedLayout<MemoryIO>>>(
+        quantizer_param, io_param, common);
+    flatten->SetQuantizer(
+        std::make_shared<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>>(1, allocator.get()));
+    flatten->SetIO(std::make_unique<MemoryIO>(allocator.get()));
+
+    // Node 0: dist 0 (valid)
+    // Node 1: dist 50 (invalid bridge)
+    // Node 2: dist 2 (valid target)
+    std::vector<float> vectors = {0.0F, 50.0F, 2.0F};
+    std::vector<InnerIdType> ids = {0, 1, 2};
+    flatten->Train(vectors.data(), ids.size());
+    flatten->BatchInsertVector(vectors.data(), ids.size(), ids.data());
+
+    auto graph =
+        std::make_shared<MockGraphDataCell>(std::vector<std::vector<InnerIdType>>{{1}, {2}, {}});
+    auto pool = std::make_shared<VisitedListPool>(1, allocator.get(), ids.size(), allocator.get());
+    BasicSearcher searcher(common);
+
+    auto filter =
+        std::make_shared<WhiteListFilter>([](LabelType id) -> bool { return id == 0 || id == 2; });
+
+    InnerSearchParam param;
+    param.ep = 0;
+    param.ef = 10;
+    param.topk = 2;
+    param.search_mode = KNN_SEARCH;
+    param.is_inner_id_allowed = filter;
+
+    float query = 0.0F;
+    auto vl = pool->TakeOne();
+    QueryContext* ctx = nullptr;
+
+    auto result = searcher.Search(graph, flatten, vl, &query, param, LabelTablePtr{}, ctx);
+
+    REQUIRE(result != nullptr);
+    REQUIRE(result->Size() == 2);
+    std::set<InnerIdType> result_ids;
+    while (not result->Empty()) {
+        result_ids.insert(result->Top().second);
+        result->Pop();
+    }
+    REQUIRE(result_ids == std::set<InnerIdType>{0, 2});
+
+    pool->ReturnOne(vl);
 }
