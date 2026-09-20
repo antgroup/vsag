@@ -57,6 +57,11 @@ encode_fp16(float value) {
     return static_cast<uint16_t>(sign | (static_cast<uint32_t>(half_exponent) << 10) | rounded);
 }
 
+inline bool
+is_finite_fp16(uint16_t value) {
+    return (value & 0x7c00U) != 0x7c00U;
+}
+
 inline float
 decode_fp16(uint16_t value) {
     return simd::FP16Traits<simd::GenericFP16Tag>::load_half(&value);

@@ -75,7 +75,7 @@ restore_fp16_graph_backend(uint64_t dim,
                            uint64_t max_degree,
                            uint64_t ef_search,
                            std::vector<int64_t> ids,
-                           std::vector<float> vectors,
+                           std::vector<uint16_t> vectors,
                            std::vector<std::vector<uint64_t>> links);
 
 tl::expected<std::unique_ptr<Backend>, Error>
