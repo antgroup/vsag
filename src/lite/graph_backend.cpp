@@ -19,6 +19,8 @@
 namespace vsag::lite::detail {
 namespace {
 
+constexpr uint64_t K_MAX_DEGREE = 64;
+
 struct Candidate {
     uint64_t slot;
     float distance;
@@ -155,6 +157,8 @@ public:
         }
         const uint64_t slot = found->second;
         const uint64_t last = Size() - 1;
+        // Degree pruning and restored snapshots may be asymmetric, so outgoing neighbors do not
+        // identify every edge that points to slot or last. Scan all stored edges for correctness.
         for (auto& neighbors : extras_) {
             neighbors.erase(std::remove(neighbors.begin(), neighbors.end(), slot), neighbors.end());
             for (auto& neighbor : neighbors) {
@@ -268,19 +272,41 @@ public:
                 }
             }
 
-            auto& output = filter == nullptr ? best : accepted;
             std::vector<Neighbor> result;
-            result.reserve(output.size());
-            while (not output.empty()) {
-                const auto candidate = output.top();
-                output.pop();
-                result.push_back({IdAt(candidate.slot), candidate.distance});
+            if (filter == nullptr) {
+                result.resize(best.size());
+                for (uint64_t i = result.size(); i > 0; --i) {
+                    const auto candidate = best.top();
+                    best.pop();
+                    result[i - 1] = {IdAt(candidate.slot), candidate.distance};
+                }
+                // The heap already orders distances. Sort only equal-distance groups to preserve
+                // the public ID tie-break without re-sorting the complete result.
+                for (uint64_t begin = 0; begin < result.size();) {
+                    uint64_t end = begin + 1;
+                    while (end < result.size() and result[end].distance == result[begin].distance) {
+                        ++end;
+                    }
+                    std::sort(result.begin() + static_cast<std::ptrdiff_t>(begin),
+                              result.begin() + static_cast<std::ptrdiff_t>(end),
+                              [](const Neighbor& left, const Neighbor& right) {
+                                  return left.id < right.id;
+                              });
+                    begin = end;
+                }
+            } else {
+                result.reserve(accepted.size());
+                while (not accepted.empty()) {
+                    const auto candidate = accepted.top();
+                    accepted.pop();
+                    result.push_back({IdAt(candidate.slot), candidate.distance});
+                }
+                std::sort(
+                    result.begin(), result.end(), [](const Neighbor& left, const Neighbor& right) {
+                        return left.distance < right.distance or
+                               (left.distance == right.distance and left.id < right.id);
+                    });
             }
-            std::sort(
-                result.begin(), result.end(), [](const Neighbor& left, const Neighbor& right) {
-                    return left.distance < right.distance or
-                           (left.distance == right.distance and left.id < right.id);
-                });
             result.resize(std::min(k, static_cast<uint64_t>(result.size())));
             return result;
         } catch (const std::invalid_argument&) {
@@ -433,6 +459,8 @@ private:
         if (Size() == 0) {
             return std::vector<uint64_t>{};
         }
+        // Explore four times the requested neighbor count during incremental construction to
+        // improve graph quality before retaining the closest count candidates.
         const auto found = Search(vector, Dim(), std::min(Size(), std::max(count * 4, ef_search_)));
         if (not found) {
             return tl::unexpected(found.error());
@@ -459,8 +487,9 @@ private:
         }
         neighbors.push_back(target);
         if (neighbors.size() > max_degree_) {
-            // max_degree_ is at most 64; cache each distance once before sorting.
-            std::array<Candidate, 65> ranked{};
+            // Cache each distance once before sorting. The shared limit keeps this capacity in
+            // sync with graph option and snapshot validation.
+            std::array<Candidate, K_MAX_DEGREE + 1> ranked{};
             for (uint64_t i = 0; i < neighbors.size(); ++i) {
                 ranked[i] = {neighbors[i], distance(source, neighbors[i])};
             }
@@ -492,7 +521,7 @@ private:
 tl::expected<std::unique_ptr<Backend>, Error>
 make_graph_backend(const Backend& source, uint64_t max_degree, uint64_t ef_search) {
     if (source.Kind() != BackendKind::BRUTE_FORCE or source.Dim() == 0 or max_degree < 2 or
-        max_degree > 64 or ef_search < max_degree) {
+        max_degree > K_MAX_DEGREE or ef_search < max_degree) {
         return failure(ErrorType::INVALID_ARGUMENT, "invalid graph options");
     }
     try {
@@ -516,7 +545,7 @@ make_graph_backend(const Backend& source, uint64_t max_degree, uint64_t ef_searc
 tl::expected<std::unique_ptr<Backend>, Error>
 make_fp16_graph_backend(const Backend& source, uint64_t max_degree, uint64_t ef_search) {
     if (source.Kind() != BackendKind::BRUTE_FORCE or source.Dim() == 0 or max_degree < 2 or
-        max_degree > 64 or ef_search < max_degree) {
+        max_degree > K_MAX_DEGREE or ef_search < max_degree) {
         return failure(ErrorType::INVALID_ARGUMENT, "invalid FP16 graph options");
     }
     try {
@@ -544,7 +573,7 @@ restore_fp16_graph_backend(uint64_t dim,
                            std::vector<int64_t> ids,
                            std::vector<uint16_t> vectors,
                            std::vector<std::vector<uint64_t>> links) {
-    if (dim == 0 or dim > vectors.max_size() or max_degree < 2 or max_degree > 64 or
+    if (dim == 0 or dim > vectors.max_size() or max_degree < 2 or max_degree > K_MAX_DEGREE or
         ef_search < max_degree or ids.size() > vectors.max_size() / dim or
         vectors.size() != ids.size() * dim or links.size() != ids.size()) {
         return failure(ErrorType::INVALID_BINARY, "invalid FP16 graph snapshot layout");
@@ -583,7 +612,7 @@ restore_graph_backend(uint64_t dim,
                       std::vector<int64_t> ids,
                       std::vector<float> vectors,
                       std::vector<std::vector<uint64_t>> links) {
-    if (dim == 0 or dim > vectors.max_size() or max_degree < 2 or max_degree > 64 or
+    if (dim == 0 or dim > vectors.max_size() or max_degree < 2 or max_degree > K_MAX_DEGREE or
         ef_search < max_degree or ids.size() > vectors.max_size() / dim or
         vectors.size() != ids.size() * dim or links.size() != ids.size()) {
         return failure(ErrorType::INVALID_BINARY, "invalid graph snapshot layout");

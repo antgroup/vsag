@@ -71,6 +71,24 @@ TEST_CASE("Lite graph backend validates input and survives CRUD", "[lite-graph]"
     REQUIRE((*graph)->Search(b.data(), 2, 3)->size() == 3);
 }
 
+TEST_CASE("Lite graph removal cleans asymmetric restored links", "[lite-graph]") {
+    using vsag::lite::detail::restore_graph_backend;
+    auto graph = restore_graph_backend(
+        2, 2, 8, {10, 11, 12, 13}, {0, 0, 1, 0, 0, 1, 1, 1}, {{1}, {}, {3}, {}});
+    REQUIRE(graph);
+    REQUIRE((*graph)->Remove(11));
+    REQUIRE((*graph)->Size() == 3);
+    REQUIRE((*graph)->LinkCountAt(0) == 0);
+    REQUIRE((*graph)->LinkCountAt(2) == 1);
+    REQUIRE((*graph)->LinkAt(2, 0) == 1);
+    for (uint64_t slot = 0; slot < (*graph)->Size(); ++slot) {
+        for (uint64_t edge = 0; edge < (*graph)->LinkCountAt(slot); ++edge) {
+            REQUIRE((*graph)->LinkAt(slot, edge) < (*graph)->Size());
+            REQUIRE((*graph)->LinkAt(slot, edge) != slot);
+        }
+    }
+}
+
 TEST_CASE("Lite FP16 VectorAt uses caller-owned scratch", "[lite-graph]") {
     auto flat = make_brute_force_backend(2);
     REQUIRE(flat);
