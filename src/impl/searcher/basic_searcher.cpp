@@ -233,7 +233,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 ++empty_hops;
                 if (empty_hops >= max_empty_hops) {
                     if (reasoning != nullptr) {
-                        reasoning->SetTermination(ReasoningContext::kTerminationHopsLimitReached);
+                        reasoning->SetTermination(
+                            ReasoningContext::kTerminationEmptyTraversalLimitReached);
                     }
                     break;
                 }
@@ -465,7 +466,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 ++empty_hops;
                 if (empty_hops >= max_empty_hops) {
                     if (reasoning != nullptr) {
-                        reasoning->SetTermination(ReasoningContext::kTerminationHopsLimitReached);
+                        reasoning->SetTermination(
+                            ReasoningContext::kTerminationEmptyTraversalLimitReached);
                     }
                     break;
                 }
@@ -820,7 +822,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 ++empty_hops;
                 if (empty_hops >= max_empty_hops) {
                     if (reasoning != nullptr) {
-                        reasoning->SetTermination(ReasoningContext::kTerminationHopsLimitReached);
+                        reasoning->SetTermination(
+                            ReasoningContext::kTerminationEmptyTraversalLimitReached);
                     }
                     break;
                 }

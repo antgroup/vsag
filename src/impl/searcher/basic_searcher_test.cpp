@@ -598,7 +598,8 @@ TEST_CASE("BasicSearcher bounded traversal when zero valid candidates exist",
     // Traversal should be capped by max_empty_hops (10000) and not traverse all 15000 nodes
     REQUIRE(vl->Get(0) == true);
     REQUIRE(vl->Get(14999) == false);
-    REQUIRE(reasoning.termination_reason_ == ReasoningContext::kTerminationHopsLimitReached);
+    REQUIRE(reasoning.termination_reason_ ==
+            ReasoningContext::kTerminationEmptyTraversalLimitReached);
 
     pool->ReturnOne(vl);
 }
