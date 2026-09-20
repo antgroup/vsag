@@ -9,31 +9,11 @@
 #include <unordered_map>
 
 #include "lite/backend.h"
+#include "lite/backend_utils.h"
 #include "lite/fp32_distance.h"
 
 namespace vsag::lite::detail {
 namespace {
-
-auto
-failure(ErrorType type, const char* message) {
-    return tl::unexpected(Error(type, message));
-}
-
-tl::expected<void, Error>
-validate(const float* data, uint64_t actual, uint64_t expected) {
-    if (actual != expected) {
-        return failure(ErrorType::DIMENSION_NOT_EQUAL, "dimension mismatch");
-    }
-    if (data == nullptr) {
-        return failure(ErrorType::INVALID_ARGUMENT, "null vector");
-    }
-    for (uint64_t i = 0; i < actual; ++i) {
-        if (not std::isfinite(data[i])) {
-            return failure(ErrorType::INVALID_ARGUMENT, "non-finite vector");
-        }
-    }
-    return {};
-}
 
 bool
 better(const Neighbor& a, const Neighbor& b) {
@@ -143,11 +123,12 @@ public:
             }
             std::priority_queue<Neighbor, std::vector<Neighbor>, NeighborWorseFirst> heap;
             const auto distance_fn = dim < 16 ? generic_fp32_distance : select_fp32_distance();
+            std::vector<float> scratch;
             for (uint64_t slot = 0; slot < Size(); ++slot) {
                 if (filter != nullptr and not(*filter)(IdAt(slot))) {
                     continue;
                 }
-                const auto distance = distance_fn(query, VectorAt(slot), dim);
+                const auto distance = distance_fn(query, VectorAt(slot, scratch), dim);
                 Neighbor next{IdAt(slot), distance};
                 if (heap.size() < k) {
                     heap.push(next);
@@ -203,7 +184,7 @@ public:
     }
 
     [[nodiscard]] const float*
-    VectorAt(uint64_t slot) const override {
+    VectorAt(uint64_t slot, [[maybe_unused]] std::vector<float>& scratch) const override {
         return vectors_.data() + slot * Dim();
     }
 

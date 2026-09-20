@@ -215,8 +215,9 @@ Index::Save(std::ostream& output) const {
         for (uint64_t slot = 0; slot < Size(); ++slot) {
             write(output, static_cast<uint64_t>(impl_->backend->IdAt(slot)));
         }
+        std::vector<float> scratch;
         for (uint64_t slot = 0; slot < Size(); ++slot) {
-            const auto* vector = impl_->backend->VectorAt(slot);
+            const auto* vector = impl_->backend->VectorAt(slot, scratch);
             for (uint64_t i = 0; i < Dim(); ++i) {
                 if (fp16) {
                     write(output, detail::encode_fp16(vector[i]), 2);
