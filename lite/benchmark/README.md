@@ -67,6 +67,30 @@ The loader is a fresh process, but the runner does not evict the snapshot from t
 
 `warm_load_ms` is measured in the same process immediately after saving and must not be reported as cold-start latency. A strict cold-load experiment must additionally control and document the operating-system page cache.
 
+### Batched snapshot-load comparison
+
+Commit `fb36355` replaces per-value stream calls with bulk reads directly into the final
+owned ID, FP32 vector, and adjacency containers. It keeps the v1/v2 little-endian formats
+and converts payload values in place on non-little-endian hosts. This remains an
+owned-memory load rather than mmap or zero-copy.
+
+On 2026-09-20, the same Release executables alternated only the loaded shared library
+between parent `64bbed5` and `fb36355`. The v1 generated 100k x 128 snapshot used seven
+runs per version. The v2 graph case used five runs per version on the 100k SIFT snapshot
+at degree 16 / ef 128; every run executed the existing `[lite-sift-load]` assertions and
+100 queries. Page cache state was uncontrolled, so these are fresh-process comparisons,
+not strict cold-load measurements.
+
+| Snapshot | Before median Load (ms) | Batched median Load (ms) | Speedup | Result check |
+| --- | ---: | ---: | ---: | --- |
+| v1 BruteForce, 52,000,048 bytes | 192.956 | 22.436 | 8.60x | identical checksum and 100,000 IDs |
+| v2 graph, 65,600,064 bytes | 250.835 | 34.652 | 7.24x | Recall@10 0.946 and all 611 assertions passed |
+
+Median process RSS was effectively unchanged: 58,448 versus 58,428 KiB for v1 and
+76,172 versus 76,140 KiB peak RSS for v2. The raw stdout, `/usr/bin/time -v` files,
+commands, and exact-commit artifact directories are retained outside Git. The comparison
+does not measure mmap, zero-copy loading, native big-endian execution, or strict cold I/O.
+
 The runners check that their benchmark executables and library inputs exist before creating an output directory, and refuse to overwrite an existing output directory or snapshot. Run them on an otherwise idle machine and retain the compiler, commit SHA, CPU, and raw output with any report.
 
 ## Full/Lite comparison
