@@ -105,8 +105,11 @@ The binary format is separate from Full VSAG. All numeric fields are little endi
 
 Load requires a seekable stream and consumes its remaining bytes, rejecting
 truncation, trailing bytes, invalid sizes/versions, duplicate IDs and non-finite
-values before publishing a new index. Loading does not mutate an existing index.
-There is no checksum: valid-looking bit corruption cannot always be detected.
+values before publishing a new index. It bulk-reads contiguous IDs, vectors and
+each graph adjacency row directly into their final owned containers. Non-little-endian
+hosts convert those payload values in place. Loading does not mutate an existing
+index. This is an owned-memory load, not mmap or zero-copy. There is no checksum:
+valid-looking bit corruption cannot always be detected.
 Save writes at the current output position; the caller owns flushing/closing,
 atomic replacement, permissions and crash durability. Partial output may remain
 after failure. Write failures currently use existing `READ_ERROR` because the
