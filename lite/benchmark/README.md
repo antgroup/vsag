@@ -2,6 +2,8 @@
 
 This experimental tool records a deterministic standalone Lite BruteForce baseline. It does not claim a performance improvement.
 
+See [FINAL_REPORT.md](FINAL_REPORT.md) for the consolidated current-head and historical evidence.
+
 ## Directory layout
 
 - `lite/benchmark/main.cpp`, `dataset_main.cpp`, and `run_*.sh`:
