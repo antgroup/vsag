@@ -24,6 +24,9 @@ using IdFilter = std::function<bool(int64_t)>;
 /** Active Lite backend. Graph search is approximate; BruteForce is the default. */
 enum class BackendKind { BRUTE_FORCE, GRAPH };
 
+/** Vector storage used by the active backend. */
+enum class VectorStorage { FP32, FP16 };
+
 /**
  * Minimal FP32, squared-L2 index. No concurrent calls are supported.
  * Input vectors are borrowed for the duration of a call; stored data is owned.
@@ -37,9 +40,14 @@ public:
     /** Explicitly build a graph from the flat contents; failure leaves this index unchanged. */
     tl::expected<void, Error>
     BuildGraph(uint64_t max_degree = 16, uint64_t ef_search = 128);
+    /** Explicitly build a graph with the selected vector storage. */
+    tl::expected<void, Error>
+    BuildGraph(VectorStorage storage, uint64_t max_degree = 16, uint64_t ef_search = 128);
 
     [[nodiscard]] BackendKind
     ActiveBackend() const;
+    [[nodiscard]] VectorStorage
+    ActiveVectorStorage() const;
 
     ~Index();
     Index(const Index&) = delete;

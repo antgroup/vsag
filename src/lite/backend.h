@@ -36,6 +36,10 @@ public:
 
     [[nodiscard]] virtual BackendKind
     Kind() const = 0;
+    [[nodiscard]] virtual VectorStorage
+    Storage() const {
+        return VectorStorage::FP32;
+    }
     [[nodiscard]] virtual uint64_t
     MaxDegree() const {
         return 0;
@@ -62,6 +66,17 @@ restore_brute_force_backend(uint64_t dim, std::vector<int64_t> ids, std::vector<
 
 tl::expected<std::unique_ptr<Backend>, Error>
 make_graph_backend(const Backend& source, uint64_t max_degree, uint64_t ef_search);
+
+tl::expected<std::unique_ptr<Backend>, Error>
+make_fp16_graph_backend(const Backend& source, uint64_t max_degree, uint64_t ef_search);
+
+tl::expected<std::unique_ptr<Backend>, Error>
+restore_fp16_graph_backend(uint64_t dim,
+                           uint64_t max_degree,
+                           uint64_t ef_search,
+                           std::vector<int64_t> ids,
+                           std::vector<float> vectors,
+                           std::vector<std::vector<uint64_t>> links);
 
 tl::expected<std::unique_ptr<Backend>, Error>
 restore_graph_backend(uint64_t dim,
