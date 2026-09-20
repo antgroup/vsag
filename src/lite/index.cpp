@@ -215,6 +215,7 @@ Index::Save(std::ostream& output) const {
         for (uint64_t slot = 0; slot < Size(); ++slot) {
             write(output, static_cast<uint64_t>(impl_->backend->IdAt(slot)));
         }
+        // Caller-owned FP16 decode storage is reused across slots; FP32 backends ignore it.
         std::vector<float> scratch;
         for (uint64_t slot = 0; slot < Size(); ++slot) {
             const auto* vector = impl_->backend->VectorAt(slot, scratch);
