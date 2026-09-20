@@ -309,6 +309,9 @@ public:
     Restore(std::vector<int64_t> ids,
             std::vector<float> vectors,
             std::vector<std::vector<uint64_t>> links) {
+        if (fp16_) {
+            return false;
+        }
         slots_.reserve(ids.size());
         for (uint64_t slot = 0; slot < ids.size(); ++slot) {
             if (not slots_.emplace(ids[slot], slot).second) {
@@ -316,14 +319,26 @@ public:
             }
         }
         ids_ = std::move(ids);
-        if (fp16_) {
-            fp16_vectors_.reserve(vectors.size());
-            for (float value : vectors) {
-                fp16_vectors_.push_back(encode_fp16(value));
-            }
-        } else {
-            vectors_ = std::move(vectors);
+        vectors_ = std::move(vectors);
+        extras_ = std::move(links);
+        return true;
+    }
+
+    bool
+    RestoreFP16(std::vector<int64_t> ids,
+                std::vector<uint16_t> vectors,
+                std::vector<std::vector<uint64_t>> links) {
+        if (not fp16_) {
+            return false;
         }
+        slots_.reserve(ids.size());
+        for (uint64_t slot = 0; slot < ids.size(); ++slot) {
+            if (not slots_.emplace(ids[slot], slot).second) {
+                return false;
+            }
+        }
+        ids_ = std::move(ids);
+        fp16_vectors_ = std::move(vectors);
         extras_ = std::move(links);
         return true;
     }
@@ -536,7 +551,7 @@ restore_fp16_graph_backend(uint64_t dim,
                            uint64_t max_degree,
                            uint64_t ef_search,
                            std::vector<int64_t> ids,
-                           std::vector<float> vectors,
+                           std::vector<uint16_t> vectors,
                            std::vector<std::vector<uint64_t>> links) {
     if (dim == 0 or dim > vectors.max_size() or max_degree < 2 or max_degree > 64 or
         ef_search < max_degree or ids.size() > vectors.max_size() / dim or
@@ -559,7 +574,7 @@ restore_fp16_graph_backend(uint64_t dim,
     }
     try {
         auto graph = std::make_unique<GraphBackend>(dim, max_degree, ef_search, true);
-        if (not graph->Restore(std::move(ids), std::move(vectors), std::move(links))) {
+        if (not graph->RestoreFP16(std::move(ids), std::move(vectors), std::move(links))) {
             return failure(ErrorType::INVALID_BINARY, "invalid FP16 graph snapshot");
         }
         return std::unique_ptr<Backend>(std::move(graph));

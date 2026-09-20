@@ -68,6 +68,11 @@ byte_swap(uint64_t value) {
     return (value << 32U) | (value >> 32U);
 }
 
+uint16_t
+byte_swap(uint16_t value) {
+    return static_cast<uint16_t>((value << 8U) | (value >> 8U));
+}
+
 uint32_t
 byte_swap(uint32_t value) {
     value = ((value & 0x00ff00ffU) << 8U) | ((value & 0xff00ff00U) >> 8U);
@@ -301,17 +306,22 @@ Index::Load(std::istream& input) {
                 std::memcpy(&id, &bits, sizeof(id));
             }
         }
-        std::vector<float> vectors(count * dim);
+        std::vector<float> vectors;
+        std::vector<uint16_t> fp16_vectors;
         if (version == 3) {
-            for (auto& value : vectors) {
-                const auto bits = static_cast<uint16_t>(read(input, 2));
-                value = detail::decode_fp16(bits);
-                if (not std::isfinite(value)) {
+            fp16_vectors.resize(count * dim);
+            read_bytes(input, fp16_vectors.data(), fp16_vectors.size() * sizeof(uint16_t));
+            for (auto& value : fp16_vectors) {
+                if (not little_endian) {
+                    value = byte_swap(value);
+                }
+                if (not detail::is_finite_fp16(value)) {
                     return failure(ErrorType::INVALID_BINARY, "non-finite snapshot vector");
                 }
             }
         } else {
-            read_bytes(input, vectors.data(), count * dim * sizeof(float));
+            vectors.resize(count * dim);
+            read_bytes(input, vectors.data(), vectors.size() * sizeof(float));
             for (auto& value : vectors) {
                 if (not little_endian) {
                     uint32_t bits = 0;
@@ -351,8 +361,12 @@ Index::Load(std::istream& input) {
             version == 1
                 ? detail::restore_brute_force_backend(dim, std::move(ids), std::move(vectors))
             : version == 3
-                ? detail::restore_fp16_graph_backend(
-                      dim, degree, ef_search, std::move(ids), std::move(vectors), std::move(links))
+                ? detail::restore_fp16_graph_backend(dim,
+                                                     degree,
+                                                     ef_search,
+                                                     std::move(ids),
+                                                     std::move(fp16_vectors),
+                                                     std::move(links))
                 : detail::restore_graph_backend(
                       dim, degree, ef_search, std::move(ids), std::move(vectors), std::move(links));
         if (not backend) {
