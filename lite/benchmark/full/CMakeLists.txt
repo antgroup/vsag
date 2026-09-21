@@ -14,3 +14,7 @@ target_compile_options(full_benchmark PRIVATE -Wall -Wextra -Wpedantic)
 add_executable(full_dataset_benchmark ../full_dataset_main.cpp)
 target_link_libraries(full_dataset_benchmark PRIVATE vsag::vsag)
 target_compile_options(full_dataset_benchmark PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(full_rabitq_dataset_benchmark ../full_rabitq_dataset_main.cpp)
+target_link_libraries(full_rabitq_dataset_benchmark PRIVATE vsag::vsag)
+target_compile_options(full_rabitq_dataset_benchmark PRIVATE -Wall -Wextra -Wpedantic)

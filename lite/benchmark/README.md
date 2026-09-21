@@ -283,3 +283,34 @@ The comparison reused the exact `[lite-sift-load]` executable from probe commit 
 Direct restore improved median v3 Load by 10.50x at 10k and 10.33x at 100k. Median process peak RSS fell by 34.1% and 49.5%; steady RSS, snapshot bytes, snapshot SHA-256, and Recall@10 remained unchanged. Query timings were not the optimization target and show no regression in these runs. The result demonstrates removal of the measured conversion bottleneck, while retaining the owned-memory, non-mmap load design and the same strict-cold-I/O limitation.
 
 All 28 loader processes passed their assertions with empty stderr. Raw stdout, stderr, `/usr/bin/time -v`, environment and binary hashes, snapshot hashes, and summaries are retained in `/home/ubuntu/project/vsag-lite-fp16-v3-load-compare-20260920-5ac36ef`.
+
+## Full HGraph RaBitQ reference probe
+
+`full_rabitq_dataset_benchmark` is an opt-in Full VSAG consumer used to evaluate
+official RaBitQ behavior before proposing a Lite storage format. It compares the
+same public HGraph implementation at degree 16 and `ef_search=128` in three modes:
+
+- `fp32`: FP32 base storage.
+- `rabitq1`: one-bit RaBitQ traversal with FP32 reorder, the documented safe default.
+- `rabitq3x5`: three filter bits plus five supplement bits in split storage.
+
+The probe uses public `Factory`, `Index::Build`, search, Serialize, and Deserialize
+APIs. It reports Recall@10, build and query latency, snapshot size, and process RSS,
+and requires identical results after round-trip loading. It does not copy or expose
+the internal RaBitQ quantizer in Lite.
+
+Build the independent Full consumer and run seven alternating repetitions:
+
+```bash
+cmake -S lite/benchmark/full -B build-full-rabitq \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/path/to/full-vsag-install
+cmake --build build-full-rabitq --target full_rabitq_dataset_benchmark
+lite/benchmark/run_rabitq_reference.sh \
+  build-full-rabitq/full_rabitq_dataset_benchmark \
+  /path/to/full-vsag-install/lib/libvsag.so \
+  /path/to/prepared-sift /new/output-directory
+```
+
+This is a Full HGraph reference, not a Lite graph benchmark. It is suitable for
+checking achievable quality, storage, and dependency cost, but algorithm-level
+differences prevent attributing Full-versus-Lite differences solely to quantization.
