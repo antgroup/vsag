@@ -114,4 +114,41 @@ range_search_recall(const float* base,
                     int64_t result_size,
                     float threshold);
 
+/**
+ * @brief Configuration for random projection tree (RPT) partitioning.
+ */
+struct RPTPartitionParams {
+    /// Target bucket size L: every partition holds at most L vectors.
+    uint64_t bucket_size{1000};
+
+    /// Upper bound on the tree depth. When reached, the remaining vectors are split
+    /// into equal-sized chunks by id order so that the size guarantees still hold.
+    uint64_t max_depth{64};
+
+    /// Random seed. The same input and seed always produce the same partitions.
+    uint64_t seed{0};
+};
+
+/**
+ * @brief Partitions vectors into near-uniform buckets using a random projection tree.
+ *
+ * The vectors are recursively split along random projection directions. Given `n`
+ * vectors and a target bucket size `L = params.bucket_size`, the result satisfies:
+ *   - the number of partitions equals `ceil(n / L)`;
+ *   - every partition holds at most `L` vectors;
+ *   - when `n >= L`, every partition holds at least `floor(L / 2)` vectors, and the
+ *     ratio between the largest and the smallest partition never exceeds 2.
+ *
+ * @param d The dimensionality of the vectors, must be positive.
+ * @param n The number of vectors. `n == 0` yields an empty result.
+ * @param x Pointer to the input array of size `n * d`. It is owned by the caller and is
+ *          neither modified nor retained after the call returns.
+ * @param params Partitioning configuration, see RPTPartitionParams.
+ * @return The vector ids (indices into `x`) of each partition, or an error when the
+ *         arguments are invalid (`d == 0`, `bucket_size == 0`, or `x == nullptr` with
+ *         `n > 0`).
+ */
+tl::expected<std::vector<std::vector<int64_t>>, Error>
+rpt_partition(uint64_t d, uint64_t n, const float* x, const RPTPartitionParams& params);
+
 }  // namespace vsag
