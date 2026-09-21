@@ -3,6 +3,7 @@
 This experimental tool records a deterministic standalone Lite BruteForce baseline. It does not claim a performance improvement.
 
 See [FINAL_REPORT.md](FINAL_REPORT.md) for the consolidated current-head and historical evidence.
+See [RABITQ_LITE_FEASIBILITY.md](RABITQ_LITE_FEASIBILITY.md) for the source-based boundary and next experimental gate.\
 
 ## Directory layout
 
