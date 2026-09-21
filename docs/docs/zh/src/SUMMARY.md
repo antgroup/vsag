@@ -68,6 +68,7 @@
 - [Extra Info（附加信息）](advanced/extra_info.md)
 - [索引生命周期管理](advanced/index_lifecycle.md)
 - [HGraph MCI 挂件](advanced/hgraph_mci_companion.md)
+- [随机投影树分区](advanced/rpt_partition.md)
 
 # API 参考
 
