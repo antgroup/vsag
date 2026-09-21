@@ -10,6 +10,7 @@ option(ENABLE_TESTS "Build Lite tests with the repository's Catch2" OFF)
 option(ENABLE_COVERAGE "Instrument Lite sources for gcov" OFF)
 option(ENABLE_BENCHMARKS "Build the deterministic Lite baseline tool" OFF)
 option(ENABLE_QUANTIZATION_PROBE "Build the standalone SQ8/FP16 candidate probe" OFF)
+option(ENABLE_RABITQ_LITE_PROBE "Build the standalone RaBitQ split-layout probe" OFF)
 
 set(VSAG_LITE_SOURCES
     "${VSAG_ROOT}/src/lite/index.cpp"
@@ -100,6 +101,15 @@ if(ENABLE_QUANTIZATION_PROBE)
     endif()
 endif()
 
+if(ENABLE_RABITQ_LITE_PROBE)
+    add_executable(lite_rabitq_layout_probe
+        "${VSAG_ROOT}/lite/benchmark/rabitq_lite_layout_probe.cpp")
+    target_include_directories(lite_rabitq_layout_probe PRIVATE "${VSAG_ROOT}/src")
+    target_compile_options(lite_rabitq_layout_probe PRIVATE -Wall -Wextra -Wpedantic)
+    if(ENABLE_TESTS)
+        add_test(NAME lite_rabitq_layout_probe COMMAND lite_rabitq_layout_probe)
+    endif()
+endif()
 include(GNUInstallDirs)
 install(TARGETS vsag_lite EXPORT vsag-lite-config
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})

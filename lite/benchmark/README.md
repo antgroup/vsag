@@ -13,6 +13,7 @@ See [RABITQ_LITE_FEASIBILITY.md](RABITQ_LITE_FEASIBILITY.md) for the source-base
   separate Full VSAG comparison consumers.
 - `lite/benchmark/prepare_sift.py`: prepares the documented SIFT subsets.
 - `lite/benchmark/quantization_probe.cpp`: opt-in SQ8/FP16 scan experiment.
+- lite/benchmark/rabitq_lite_layout_probe.cpp: opt-in RaBitQ 3+5 bit-plane differential probe.
 - `src/lite/fp16_codec.h` and the internal FP16 factory/tests in
   `src/lite/graph_backend.cpp` and `src/lite/graph_backend_test.cpp`:
   candidate graph experiment, not a public `Index` backend.
