@@ -122,3 +122,38 @@ The snapshot SHA-256 values are:
 - The graph is the standalone Lite single-layer implementation. It is not Full `HGraph` or `LazyHGraph`.
 - Filtered search, Update, Remove, Save, and Load are covered by tests, but concurrent calls are outside the current API guarantee.
 - The Full/Lite BruteForce, SIMD, churn, and before/after load comparisons belong to their recorded commits and must not be presented as current-head reruns.
+
+## Full HGraph RaBitQ reference
+
+Experiment commit `844790629e57bcd89809dbba58b260f8a74d74e1`
+adds an opt-in public-API Full HGraph consumer. It uses batch `Build`, because
+RaBitQ requires training, and compares FP32, the documented one-bit RaBitQ
+configuration with FP32 reorder, and a three-filter-bit plus
+five-supplement-bit split configuration. Degree is 16 and `ef_search` is 128
+for all modes. Seven fresh processes per scale and mode were run in alternating
+order; all 42 serialize/deserialize result-identity checks passed.
+
+| SIFT-128 subset | Mode | Recall@10 median [range] | Build (ms) | P50/P99 median (us) | Snapshot bytes | Final/peak RSS (KiB) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 10k | FP32 | 0.997 [0.971, 1.000] | 258.890 | 90.148 / 141.856 | 5,765,755 | 169,320 / 177,052 |
+| 10k | RaBitQ 1-bit + FP32 reorder | 0.987 [0.921, 0.990] | 304.969 | 93.278 / 124.655 | 6,013,051 | 300,676 / 308,660 |
+| 10k | RaBitQ 3+5 split | 0.983 [0.919, 0.995] | 328.196 | 121.757 / 153.896 | 2,202,806 | 301,480 / 308,896 |
+| 100k | FP32 | 0.997 [0.996, 0.998] | 3,227.986 | 190.635 / 265.864 | 57,157,546 | 190,456 / 315,288 |
+| 100k | RaBitQ 1-bit + FP32 reorder | 0.915 [0.901, 0.928] | 3,389.983 | 181.305 / 238.453 | 59,567,366 | 321,404 / 446,720 |
+| 100k | RaBitQ 3+5 split | 0.986 [0.984, 0.989] | 3,605.873 | 221.003 / 326.071 | 22,235,021 | 322,544 / 461,840 |
+
+At 100k, the 3+5 split reduces snapshot bytes by 61.1% relative to FP32
+HGraph, while median Recall@10 changes by -0.011. Median P50 is 15.9% slower,
+build is 11.7% slower, and load is 20.3% slower. Its P99 range was
+290.072--2,891.121 us because one run was an outlier. The one-bit mode does
+not satisfy the Lite storage goal in this form: its FP32 reorder payload makes
+the snapshot 4.2% larger than FP32 and it consumes substantially more process
+memory.
+
+This is a Full HGraph reference, not a Lite graph result. Full RaBitQ retains
+PCA/FHT models, allocator and Full library state, so the RSS values cannot be
+projected onto a future standalone Lite implementation. The evidence supports
+a bounded Lite-specific 3+5 layout and dependency audit; it does not support
+copying the Full quantizer or adding RaBitQ to the public Lite feature PR yet.
+Raw artifacts are retained at
+`/home/ubuntu/project/vsag-lite-rabitq-reference-20260921-8447906`.

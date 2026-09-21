@@ -314,3 +314,51 @@ lite/benchmark/run_rabitq_reference.sh \
 This is a Full HGraph reference, not a Lite graph benchmark. It is suitable for
 checking achievable quality, storage, and dependency cost, but algorithm-level
 differences prevent attributing Full-versus-Lite differences solely to quantization.
+
+### Measured RaBitQ reference results
+
+At experiment commit `844790629e57bcd89809dbba58b260f8a74d74e1`,
+the runner executed seven fresh processes per scale and mode, rotating the mode
+order on each repetition. All 42 processes passed the serialize/deserialize
+identity checks and produced empty stderr. Values below are medians; brackets
+show the observed Recall@10 or P99 range where it materially affects
+interpretation.
+
+| SIFT-128 subset | Mode | Recall@10 median [range] | Build (ms) | Query P50/P99 median (us) | Snapshot bytes | Final RSS (KiB) | Peak RSS (KiB) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10k | FP32 | 0.997 [0.971, 1.000] | 258.890 | 90.148 / 141.856 | 5,765,755 | 169,320 | 177,052 |
+| 10k | RaBitQ 1-bit + FP32 reorder | 0.987 [0.921, 0.990] | 304.969 | 93.278 / 124.655 | 6,013,051 | 300,676 | 308,660 |
+| 10k | RaBitQ 3+5 split | 0.983 [0.919, 0.995] | 328.196 | 121.757 / 153.896 | 2,202,806 | 301,480 | 308,896 |
+| 100k | FP32 | 0.997 [0.996, 0.998] | 3,227.986 | 190.635 / 265.864 | 57,157,546 | 190,456 | 315,288 |
+| 100k | RaBitQ 1-bit + FP32 reorder | 0.915 [0.901, 0.928] | 3,389.983 | 181.305 / 238.453 | 59,567,366 | 321,404 | 446,720 |
+| 100k | RaBitQ 3+5 split | 0.986 [0.984, 0.989] | 3,605.873 | 221.003 / 326.071 [290.072, 2,891.121] | 22,235,021 | 322,544 | 461,840 |
+
+At 100k, the 3+5 split snapshot is 61.1% smaller than the FP32 HGraph
+snapshot, with an absolute Recall@10 median change of -0.011. Its median query
+P50 is 15.9% slower, build is 11.7% slower, and load is 20.3% slower
+(79.451 ms versus 66.044 ms). One 3+5 run produced a 2.891 ms P99 outlier, so
+the tail result is not yet stable. The 1-bit mode is not a storage candidate
+for the Lite objective in this configuration: its FP32 reorder payload makes
+the snapshot 4.2% larger than FP32, while Recall@10 is lower and resident
+memory is substantially higher.
+
+The Full process retains transform models and Full VSAG dependencies, so its
+RSS is evidence about integration cost rather than a projection of a future
+Lite backend. These measurements also compare three Full HGraph
+configurations; they must not be combined with the separate Lite graph
+measurements to claim a quantization-only speed or memory change. The next
+bounded step is therefore a Lite-specific 3+5 storage-layout and dependency
+audit. No RaBitQ code or API should be added to the feature PR until that
+design identifies an independently testable minimal subset.
+
+Raw CSV, stdout, stderr, `/usr/bin/time -v`, snapshots, manifests, environment
+metadata, and binary/library hashes are retained outside Git at:
+
+```text
+/home/ubuntu/project/vsag-lite-rabitq-reference-20260921-8447906
+```
+
+The measured benchmark executable SHA-256 is
+`b50d34d3cc4e46a9b38564d930c3ae05fb38565a23407ac94d49b3bd7d7feba6`;
+the Full VSAG shared library SHA-256 is
+`4d245bfcde3969ecd18b338b68d7cd8b3a8f4c47d39eeba71045b9aafadb7505`.
