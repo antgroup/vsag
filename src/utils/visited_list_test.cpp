@@ -15,11 +15,34 @@
 
 #include "visited_list.h"
 
+#include <algorithm>
+#include <limits>
+#include <random>
 #include <thread>
 
 #include "impl/allocator/default_allocator.h"
 #include "unittest.h"
 using namespace vsag;
+
+namespace {
+class CountingAllocator : public DefaultAllocator {
+public:
+    void*
+    Allocate(uint64_t size) override {
+        ++allocate_count_;
+        return DefaultAllocator::Allocate(size);
+    }
+
+    void
+    Deallocate(void* p) override {
+        ++deallocate_count_;
+        DefaultAllocator::Deallocate(p);
+    }
+
+    uint64_t allocate_count_{0};
+    uint64_t deallocate_count_{0};
+};
+}  // namespace
 
 TEST_CASE("VisitedList Basic Test", "[ut][VisitedList]") {
     auto allocator = std::make_shared<DefaultAllocator>();
@@ -56,6 +79,87 @@ TEST_CASE("VisitedList Basic Test", "[ut][VisitedList]") {
         vl_ptr->Reset();
         for (auto& id : ids) {
             REQUIRE(vl_ptr->Get(id) == false);
+        }
+    }
+
+    SECTION("test word boundaries and repeated sets") {
+        const std::vector<InnerIdType> ids = {0, 1, 63, 64, 65, static_cast<InnerIdType>(size - 1)};
+        for (const auto id : ids) {
+            vl_ptr->Set(id);
+            vl_ptr->Set(id);
+            REQUIRE(vl_ptr->Get(id));
+        }
+
+        vl_ptr->Reset();
+        for (const auto id : ids) {
+            REQUIRE_FALSE(vl_ptr->Get(id));
+        }
+
+        vl_ptr->Set(64);
+        REQUIRE(vl_ptr->Get(64));
+        vl_ptr->Reset();
+        REQUIRE_FALSE(vl_ptr->Get(64));
+    }
+
+    SECTION("test memory usage") {
+        const auto word_count = (static_cast<uint64_t>(size) + VisitedList::kBitsPerWord - 1) /
+                                VisitedList::kBitsPerWord;
+        const auto expected = sizeof(VisitedList) + word_count * (sizeof(VisitedList::WordType) +
+                                                                  sizeof(VisitedList::TagType));
+        REQUIRE(vl_ptr->GetMemoryUsage() == expected);
+    }
+
+    SECTION("test tag overflow") {
+        vl_ptr->Set(0);
+        for (uint64_t i = 0; i < std::numeric_limits<VisitedList::TagType>::max(); ++i) {
+            vl_ptr->Reset();
+        }
+        REQUIRE_FALSE(vl_ptr->Get(0));
+        vl_ptr->Set(0);
+        REQUIRE(vl_ptr->Get(0));
+    }
+}
+
+TEST_CASE("VisitedList Zero Size Test", "[ut][VisitedList]") {
+    CountingAllocator allocator;
+    {
+        VisitedList visited_list(0, &allocator);
+        REQUIRE(visited_list.GetMemoryUsage() == sizeof(VisitedList));
+        for (uint64_t i = 0; i < std::numeric_limits<VisitedList::TagType>::max(); ++i) {
+            visited_list.Reset();
+        }
+    }
+    REQUIRE(allocator.allocate_count_ == 0);
+    REQUIRE(allocator.deallocate_count_ == 0);
+}
+
+TEST_CASE("VisitedList Randomized Differential Test", "[ut][VisitedList]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    std::mt19937_64 random_generator(20260715);
+    const std::vector<InnerIdType> sizes = {1, 2, 5, 63, 64, 65, 127, 128, 129, 10000};
+
+    for (const auto size : sizes) {
+        VisitedList visited_list(size, allocator.get());
+        std::vector<bool> reference(static_cast<uint64_t>(size), false);
+        std::uniform_int_distribution<uint64_t> id_distribution(0, static_cast<uint64_t>(size) - 1);
+        std::uniform_int_distribution<uint64_t> operation_distribution(0, 15);
+
+        for (uint64_t operation = 0; operation < 20000; ++operation) {
+            const auto id = static_cast<InnerIdType>(id_distribution(random_generator));
+            const auto operation_type = operation_distribution(random_generator);
+            if (operation_type == 0) {
+                visited_list.Reset();
+                std::fill(reference.begin(), reference.end(), false);
+            } else if (operation_type <= 8) {
+                visited_list.Set(id);
+                reference[static_cast<uint64_t>(id)] = true;
+            } else {
+                REQUIRE(visited_list.Get(id) == reference[static_cast<uint64_t>(id)]);
+            }
+        }
+
+        for (InnerIdType id = 0; id < size; ++id) {
+            REQUIRE(visited_list.Get(id) == reference[static_cast<uint64_t>(id)]);
         }
     }
 }
