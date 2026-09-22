@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -12,10 +13,12 @@
 #include <numeric>
 #include <queue>
 #include <random>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "simd/kernels/rabitq_pack.h"
@@ -439,6 +442,128 @@ hits(const std::vector<Candidate>& neighbors, const int32_t* truth, uint64_t k) 
 }
 
 void
+write_u64(std::ostream& output, uint64_t value, uint64_t bytes = 8) {
+    for (uint64_t i = 0; i < bytes; ++i) {
+        output.put(static_cast<char>((value >> (8U * i)) & 0xffU));
+    }
+    require(static_cast<bool>(output), "snapshot write failed");
+}
+
+uint64_t
+read_u64(std::istream& input, uint64_t bytes = 8) {
+    uint64_t value = 0;
+    for (uint64_t i = 0; i < bytes; ++i) {
+        const int byte = input.get();
+        require(byte != std::char_traits<char>::eof(), "truncated snapshot");
+        value |= static_cast<uint64_t>(static_cast<uint8_t>(byte)) << (8U * i);
+    }
+    return value;
+}
+
+void
+write_float(std::ostream& output, float value) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    write_u64(output, bits, sizeof(bits));
+}
+
+float
+read_float(std::istream& input) {
+    const auto bits = static_cast<uint32_t>(read_u64(input, sizeof(uint32_t)));
+    float value = 0.0F;
+    std::memcpy(&value, &bits, sizeof(value));
+    require(std::isfinite(value), "non-finite snapshot metadata");
+    return value;
+}
+
+void
+write_bytes(std::ostream& output, const std::vector<uint8_t>& bytes) {
+    if (not bytes.empty()) {
+        output.write(reinterpret_cast<const char*>(bytes.data()),
+                     static_cast<std::streamsize>(bytes.size()));
+    }
+    require(static_cast<bool>(output), "snapshot write failed");
+}
+
+void
+read_bytes(std::istream& input, std::vector<uint8_t>& bytes) {
+    if (not bytes.empty()) {
+        input.read(reinterpret_cast<char*>(bytes.data()),
+                   static_cast<std::streamsize>(bytes.size()));
+    }
+    require(static_cast<bool>(input), "truncated snapshot");
+}
+
+void
+save_snapshot(std::ostream& output, const Model& model, const std::vector<Encoded>& codes) {
+    constexpr char magic[] = "VSLRBQ01";
+    output.write(magic, 8);
+    write_u64(output, 1);
+    write_u64(output, model.dim);
+    write_u64(output, codes.size());
+    write_u64(output, model.centroid.size());
+    write_u64(output, model.flips.size());
+    for (float value : model.centroid) {
+        write_float(output, value);
+    }
+    write_bytes(output, model.flips);
+    const uint64_t plane_bytes = (model.dim + 7) / 8;
+    for (const auto& code : codes) {
+        require(code.filter.size() == plane_bytes * K_FILTER_BITS and
+                    code.supplement.size() == plane_bytes * K_SUPPLEMENT_BITS,
+                "invalid encoded record");
+        write_float(output, code.norm);
+        write_float(output, code.code_norm);
+        write_float(output, code.error);
+        write_float(output, code.filter_norm);
+        write_float(output, code.filter_error);
+        write_float(output, code.lower_bound_error);
+        write_bytes(output, code.filter);
+        write_bytes(output, code.supplement);
+    }
+}
+
+std::pair<Model, std::vector<Encoded>>
+load_snapshot(std::istream& input) {
+    char magic[8]{};
+    input.read(magic, sizeof(magic));
+    require(input and std::memcmp(magic, "VSLRBQ01", 8) == 0, "invalid snapshot magic");
+    require(read_u64(input) == 1, "unsupported snapshot version");
+    const uint64_t dim = read_u64(input);
+    const uint64_t count = read_u64(input);
+    const uint64_t centroid_size = read_u64(input);
+    const uint64_t flips_size = read_u64(input);
+    require(dim > 0 and dim <= (1U << 20U) and (dim & (dim - 1)) == 0 and centroid_size == dim,
+            "invalid snapshot model");
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    require(flips_size == K_ROUNDS * plane_bytes and count <= 1000000, "invalid snapshot layout");
+    Model model{dim, std::vector<float>(dim), std::vector<uint8_t>(flips_size)};
+    for (float& value : model.centroid) {
+        value = read_float(input);
+    }
+    read_bytes(input, model.flips);
+    std::vector<Encoded> codes(count);
+    for (auto& code : codes) {
+        code.norm = read_float(input);
+        code.code_norm = read_float(input);
+        code.error = read_float(input);
+        code.filter_norm = read_float(input);
+        code.filter_error = read_float(input);
+        code.lower_bound_error = read_float(input);
+        require(code.norm > 0.0F and code.code_norm > 0.0F and code.filter_norm > 0.0F and
+                    code.filter_error >= 1e-5F and code.filter_error <= 1.0F and
+                    code.lower_bound_error >= 0.0F,
+                "invalid snapshot metadata");
+        code.filter.resize(plane_bytes * K_FILTER_BITS);
+        code.supplement.resize(plane_bytes * K_SUPPLEMENT_BITS);
+        read_bytes(input, code.filter);
+        read_bytes(input, code.supplement);
+    }
+    require(input.peek() == std::char_traits<char>::eof(), "snapshot trailing bytes");
+    return {std::move(model), std::move(codes)};
+}
+
+void
 self_test() {
     constexpr uint64_t dim = 128;
     constexpr uint64_t count = 64;
@@ -508,6 +633,37 @@ self_test() {
                                       1e-4F * std::max(1.0F, std::fabs(left.distance));
                        }),
             "lower-bound filtering changed full-code top-k");
+    std::stringstream snapshot(std::ios::in | std::ios::out | std::ios::binary);
+    save_snapshot(snapshot, first, codes);
+    const std::string bytes = snapshot.str();
+    require(not bytes.empty(), "empty snapshot");
+    snapshot.seekg(0);
+    auto [loaded_model, loaded_codes] = load_snapshot(snapshot);
+    require(loaded_model.dim == first.dim and loaded_model.centroid == first.centroid and
+                loaded_model.flips == first.flips and loaded_codes.size() == codes.size(),
+            "snapshot model mismatch");
+    float loaded_query_norm = 0.0F;
+    const auto loaded_query = normalize(loaded_model, base.data() + dim, loaded_query_norm);
+    const auto loaded = filtered_search(loaded_query, loaded_query_norm, loaded_codes, 10);
+    require(std::equal(filtered.neighbors.begin(),
+                       filtered.neighbors.end(),
+                       loaded.neighbors.begin(),
+                       [](const auto& left, const auto& right) {
+                           return left.id == right.id and left.distance == right.distance;
+                       }),
+            "snapshot search mismatch");
+    for (const std::string& invalid : {bytes.substr(0, bytes.size() - 1),
+                                       std::string("BADMAGIC") + bytes.substr(8),
+                                       bytes + std::string(1, '\0')}) {
+        std::stringstream damaged(invalid, std::ios::in | std::ios::binary);
+        try {
+            static_cast<void>(load_snapshot(damaged));
+            throw std::runtime_error("damaged snapshot was accepted");
+        } catch (const std::runtime_error& error) {
+            require(std::string(error.what()) != "damaged snapshot was accepted",
+                    "damaged snapshot was accepted");
+        }
+    }
 }
 
 void
