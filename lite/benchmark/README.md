@@ -14,7 +14,8 @@ See [RABITQ_LITE_FEASIBILITY.md](RABITQ_LITE_FEASIBILITY.md) for the source-base
 - `lite/benchmark/prepare_sift.py`: prepares the documented SIFT subsets.
 - `lite/benchmark/quantization_probe.cpp`: opt-in SQ8/FP16 scan experiment.
 - `lite/benchmark/rabitq_lite_layout_probe.cpp`: opt-in RaBitQ 3+5 bit-plane differential probe.
-- `lite/benchmark/rabitq_lite_codec_probe.cpp`: deterministic FHT training, 3-bit lower-bound filtering, and 5-bit supplement reranking probe.
+- `lite/benchmark/rabitq_lite_codec_probe.cpp`: deterministic FHT training, 3-bit lower-bound filtering, 5-bit supplement reranking, and filter-first graph traversal probe.
+- `lite/benchmark/prepare_gist.cpp`: bounded GIST fbin-prefix converter that recomputes exact squared-L2 Top-10 ground truth for each selected scale.
 - `src/lite/fp16_codec.h` and the internal FP16 factory/tests in
   `src/lite/graph_backend.cpp` and `src/lite/graph_backend_test.cpp`:
   candidate graph experiment, not a public `Index` backend.
@@ -399,3 +400,22 @@ Single fresh-process SIFT results with degree 16 and `ef_search=128` were:
 | 100k | 0.985 | 0.940 | 1,150.83 | 128 | 14,266.271 | 406.009 | 13,600,008 |
 
 The 100k graph traversal is 35.1x faster than this probe's scalar full scan, while Recall@10 is 0.006 below the separately measured public Lite FP32 graph result of 0.946. This is a functional gate, not a stable performance comparison: each scale ran once, the scalar filter kernel is not SIMD-dispatched, and process peak RSS includes the input dataset plus temporary BruteForce and FP32 graph instances used to build/export the topology. Raw CSV, stderr, and `/usr/bin/time -v` evidence are in `/home/ubuntu/project/vsag-lite-rabitq-graph-validation-20260922-final`.
+
+## GIST-960 RaBitQ validation
+
+The RaBitQ codec probe accepts non-power-of-two dimensions using the same four-round transform shape as `FHTKacRotator`: alternating front/back floor-power-of-two FHT blocks, sign masks, Kac mixing, and final scaling. Its self-test covers dimensions 768 and 960, norm preservation, deterministic encoding, layout sizes, and snapshot round trips.
+
+Prepare a documented prefix from the public ANN_GIST1M `fbin` files outside the repository. The converter requires 960-dimensional inputs, rejects truncated or non-finite payloads, and recomputes exact Top-10 independently for the 10k and 100k prefixes:
+
+```bash
+cmake -S lite -B build-lite-rabitq -DCMAKE_BUILD_TYPE=Release \
+  -DENABLE_RABITQ_LITE_PROBE=ON -DENABLE_TESTS=ON
+cmake --build build-lite-rabitq --target lite_prepare_gist lite_rabitq_codec_probe
+build-lite-rabitq/lite_prepare_gist base.fbin query.fbin /data/gist-prepared 100000 100
+build-lite-rabitq/lite_rabitq_codec_probe /data/gist-prepared/scale-10000 32 512
+build-lite-rabitq/lite_rabitq_codec_probe /data/gist-prepared/scale-100000 32 512
+```
+
+On the recorded 100-query prefixes, exhaustive full-code and lower-bound-filtered Recall@10 were both 0.997 at 10k and 100k. With `max_degree=32` and `ef_search=512`, graph Recall@10 was 0.984 at 10k and 0.949 at 100k; graph-search P50 was 5.408 ms and 9.139 ms. The 100k run encoded in 2.715 s, built the temporary FP32-derived graph in 180.568 s, used 1,408,628 KiB process peak RSS, and stored 36.0 MB filter payload, 60.0 MB supplement payload, 2.4 MB metadata, and 26.4 MB CSR topology (decimal bytes).
+
+These are single-run experiment results, not a public-backend or SIMD performance claim. The scalar full scan keeps source vectors and a temporary FP32 graph backend resident, and the GIST subsets are prefix-specific datasets with recomputed ground truth. Full GIST1M is optional stress testing rather than a Lite acceptance requirement; high dimensionality is covered here without redefining Lite as a million-scale index.

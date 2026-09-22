@@ -42,9 +42,9 @@ require(bool value, const char* message) {
 }
 
 void
-fht(std::vector<float>& values) {
-    for (uint64_t step = 1; step < values.size(); step *= 2) {
-        for (uint64_t block = 0; block < values.size(); block += step * 2) {
+fht(float* values, uint64_t dim) {
+    for (uint64_t step = 1; step < dim; step *= 2) {
+        for (uint64_t block = 0; block < dim; block += step * 2) {
             for (uint64_t lane = 0; lane < step; ++lane) {
                 const float left = values[block + lane];
                 const float right = values[block + step + lane];
@@ -55,6 +55,31 @@ fht(std::vector<float>& values) {
     }
 }
 
+void
+kacs_walk(std::vector<float>& values) {
+    const uint64_t half = values.size() / 2;
+    const uint64_t base = values.size() % 2;
+    const uint64_t offset = base + half;
+    for (uint64_t i = 0; i < half; ++i) {
+        const float left = values[i];
+        const float right = values[i + offset];
+        values[i] = left + right;
+        values[i + offset] = left - right;
+    }
+    if (base != 0) {
+        values[half] *= std::sqrt(2.0F);
+    }
+}
+
+uint64_t
+floor_power_of_two(uint64_t value) {
+    uint64_t result = 1;
+    while (result <= value / 2) {
+        result *= 2;
+    }
+    return result;
+}
+
 struct Model {
     uint64_t dim{};
     std::vector<float> centroid;
@@ -62,17 +87,28 @@ struct Model {
 
     void
     Transform(std::vector<float>& values) const {
+        require(values.size() == dim, "transform dimension mismatch");
         const uint64_t bytes = (dim + 7) / 8;
-        const float scale = 1.0F / std::sqrt(static_cast<float>(dim));
+        const uint64_t truncated_dim = floor_power_of_two(dim);
+        const float scale = 1.0F / std::sqrt(static_cast<float>(truncated_dim));
         for (uint32_t round = 0; round < K_ROUNDS; ++round) {
             for (uint64_t d = 0; d < dim; ++d) {
                 if ((flips[round * bytes + d / 8] & (1U << (d % 8))) != 0U) {
                     values[d] = -values[d];
                 }
             }
-            fht(values);
+            float* block = round % 2 == 0 ? values.data() : values.data() + dim - truncated_dim;
+            fht(block, truncated_dim);
+            for (uint64_t d = 0; d < truncated_dim; ++d) {
+                block[d] *= scale;
+            }
+            if (truncated_dim != dim) {
+                kacs_walk(values);
+            }
+        }
+        if (truncated_dim != dim) {
             for (float& value : values) {
-                value *= scale;
+                value *= 0.25F;
             }
         }
     }
@@ -81,7 +117,6 @@ struct Model {
 Model
 train(const std::vector<float>& base, uint64_t count, uint64_t dim, uint32_t seed) {
     require(count > 0 and dim > 0 and base.size() == count * dim, "invalid training matrix");
-    require((dim & (dim - 1)) == 0, "probe FHT dimension must be a power of two");
     Model model{
         dim, std::vector<float>(dim, 0.0F), std::vector<uint8_t>(K_ROUNDS * ((dim + 7) / 8))};
     for (float value : base) {
@@ -755,8 +790,7 @@ load_snapshot(std::istream& input) {
     const uint64_t count = read_u64(input);
     const uint64_t centroid_size = read_u64(input);
     const uint64_t flips_size = read_u64(input);
-    require(dim > 0 and dim <= (1U << 20U) and (dim & (dim - 1)) == 0 and centroid_size == dim,
-            "invalid snapshot model");
+    require(dim > 0 and dim <= (1U << 20U) and centroid_size == dim, "invalid snapshot model");
     const uint64_t plane_bytes = (dim + 7) / 8;
     require(flips_size == K_ROUNDS * plane_bytes and count <= 1000000, "invalid snapshot layout");
     Model model{dim, std::vector<float>(dim), std::vector<uint8_t>(flips_size)};
@@ -788,7 +822,48 @@ load_snapshot(std::istream& input) {
 }
 
 void
+high_dim_transform_self_test() {
+    for (uint64_t dim : {768ULL, 960ULL}) {
+        constexpr uint64_t count = 4;
+        std::vector<float> base(count * dim);
+        for (uint64_t i = 0; i < base.size(); ++i) {
+            base[i] = std::sin(static_cast<float>(i) * 0.017F) +
+                      0.25F * std::cos(static_cast<float>(i) * 0.031F);
+        }
+        const auto model = train(base, count, dim, 71);
+        std::vector<float> original(base.begin(), base.begin() + static_cast<int64_t>(dim));
+        std::vector<float> transformed = original;
+        model.Transform(transformed);
+        double original_norm = 0.0;
+        double transformed_norm = 0.0;
+        for (uint64_t d = 0; d < dim; ++d) {
+            original_norm += original[d] * original[d];
+            transformed_norm += transformed[d] * transformed[d];
+        }
+        require(std::fabs(original_norm - transformed_norm) <= 1e-4 * std::max(1.0, original_norm),
+                "high-dimensional FHT changed vector norm");
+        const auto first = encode(model, base.data());
+        const auto second = encode(model, base.data());
+        const uint64_t plane_bytes = (dim + 7) / 8;
+        require(first.filter == second.filter and first.supplement == second.supplement and
+                    first.filter.size() == plane_bytes * K_FILTER_BITS and
+                    first.supplement.size() == plane_bytes * K_SUPPLEMENT_BITS,
+                "high-dimensional encoding mismatch");
+        EncodedRecords codes(dim);
+        codes.Append(first);
+        std::stringstream snapshot(std::ios::in | std::ios::out | std::ios::binary);
+        save_snapshot(snapshot, model, codes);
+        snapshot.seekg(0);
+        auto [loaded_model, loaded_codes] = load_snapshot(snapshot);
+        require(loaded_model.dim == dim and loaded_codes.Size() == 1 and
+                    loaded_model.centroid == model.centroid and loaded_model.flips == model.flips,
+                "high-dimensional snapshot mismatch");
+    }
+}
+
+void
 self_test() {
+    high_dim_transform_self_test();
     constexpr uint64_t dim = 128;
     constexpr uint64_t count = 64;
     std::mt19937 generator(91);
@@ -916,9 +991,34 @@ self_test() {
     }
 }
 
+uint64_t
+read_dimension(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (not input) {
+        throw std::runtime_error("cannot open " + path.string());
+    }
+    int32_t dim = 0;
+    input.read(reinterpret_cast<char*>(&dim), sizeof(dim));
+    require(input and dim > 0, "invalid record dimension");
+    return static_cast<uint64_t>(dim);
+}
+
+uint64_t
+parse_positive(const char* value) {
+    const std::string text(value);
+    try {
+        size_t consumed = 0;
+        const uint64_t parsed = std::stoull(text, &consumed);
+        require(consumed == text.size() and parsed > 0, "invalid positive integer");
+        return parsed;
+    } catch (const std::exception&) {
+        throw std::runtime_error("invalid positive integer");
+    }
+}
+
 void
-run(const std::filesystem::path& root) {
-    constexpr uint64_t dim = 128;
+run(const std::filesystem::path& root, uint64_t max_degree, uint64_t ef_search) {
+    const uint64_t dim = read_dimension(root / "base.fvecs");
     constexpr uint64_t k = 10;
     const auto base = read_records<float>(root / "base.fvecs", dim);
     const auto queries = read_records<float>(root / "queries.fvecs", dim);
@@ -935,8 +1035,8 @@ run(const std::filesystem::path& root) {
     }
     const double build_ms =
         std::chrono::duration<double, std::milli>(Clock::now() - build_start).count();
-    constexpr uint64_t max_degree = 16;
-    constexpr uint64_t ef_search = 128;
+    require(max_degree >= 4 and max_degree <= 64, "max_degree must be in [4, 64]");
+    require(ef_search >= k and ef_search <= base.count, "ef_search must be in [10, base_count]");
     const auto graph_build_start = Clock::now();
     const auto graph = build_graph_topology(base.values, base.count, dim, max_degree, ef_search);
     const double graph_build_ms =
@@ -986,13 +1086,15 @@ run(const std::filesystem::path& root) {
     std::sort(graph_search_us.begin(), graph_search_us.end());
     const uint64_t opportunities = queries.count * k;
     const uint64_t plane_bytes = (dim + 7) / 8;
-    std::cout << "base_count,query_count,dim,build_encode_ms,graph_build_ms,full_recall_at_10,"
+    std::cout << "base_count,query_count,dim,max_degree,ef_search,build_encode_ms,graph_build_ms,"
+                 "full_recall_at_10,"
                  "filtered_recall_at_10,graph_recall_at_10,filtered_full_agreement,"
                  "graph_full_agreement,mean_reordered,reorder_ratio,search_p50_us,"
                  "mean_graph_visited,mean_graph_reordered,graph_search_p50_us,filter_bytes,"
                  "supplement_bytes,metadata_bytes,graph_bytes\n";
     std::cout << std::fixed << std::setprecision(6) << base.count << ',' << queries.count << ','
-              << dim << ',' << build_ms << ',' << graph_build_ms << ','
+              << dim << ',' << max_degree << ',' << ef_search << ',' << build_ms << ','
+              << graph_build_ms << ','
               << static_cast<double>(full_hits) / static_cast<double>(opportunities) << ','
               << static_cast<double>(filtered_hits) / static_cast<double>(opportunities) << ','
               << static_cast<double>(graph_hits) / static_cast<double>(opportunities) << ','
@@ -1020,11 +1122,14 @@ main(int argc, char** argv) {
             std::cout << "rabitq_lite_codec_probe: PASS\n";
             return 0;
         }
-        if (argc == 2) {
-            run(argv[1]);
+        if (argc == 2 or argc == 4) {
+            const uint64_t max_degree = argc == 4 ? parse_positive(argv[2]) : 16;
+            const uint64_t ef_search = argc == 4 ? parse_positive(argv[3]) : 128;
+            run(argv[1], max_degree, ef_search);
             return 0;
         }
-        std::cerr << "usage: lite_rabitq_codec_probe [SIFT_DIR | --self-test]\n";
+        std::cerr << "usage: lite_rabitq_codec_probe [DATASET_DIR [MAX_DEGREE EF_SEARCH] | "
+                     "--self-test]\n";
         return 2;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
