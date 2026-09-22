@@ -386,3 +386,16 @@ The next probe revision adds an independent little-endian `VSLRBQ01` v1 snapshot
 ### Contiguous RaBitQ record storage
 
 The next probe revision replaces one `filter` and one `supplement` allocation per record with three owned contiguous arrays: all filter planes, all supplement planes, and fixed-size metadata. The scalar 8-bit code remains a temporary encoding buffer and is not retained. The self-test verifies record strides and byte-identical snapshot output after load/save. Single fresh-process checks retained the same 10k/100k Recall@10, filtered/full agreement, and reorder counts. The 100k process peak was 69,048 KiB versus the earlier seven-run median of 78,456 KiB (12.0% lower), but that comparison is directional because the new value is a single run and both processes retain source vectors. Raw output and `/usr/bin/time -v` evidence are in `/home/ubuntu/project/vsag-lite-rabitq-contiguous-validation-20260922`.
+
+### RaBitQ filter-first graph traversal
+
+The graph adapter reuses the existing Lite FP32 graph builder to produce a controlled topology, exports that topology into contiguous CSR offsets and neighbors, and then searches it using only the RaBitQ 3-bit filter distance. After traversal, it reads the 5-bit supplement for at most `ef_search=128` candidates and returns the full-code Top-10. This isolates traversal and reorder behavior without introducing another graph-construction algorithm. The probe now links `vsag::lite` only to build the reference topology; its RaBitQ model, records, traversal, and distance path remain experiment-local.
+
+Single fresh-process SIFT results with degree 16 and `ef_search=128` were:
+
+| Scale | Full RaBitQ Recall@10 | Graph Recall@10 | Mean visited | Supplement reorder | Full-scan P50 (us) | Graph P50 (us) | CSR bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10k | 0.994 | 0.966 | 829.15 | 128 | 1,461.610 | 281.383 | 1,360,008 |
+| 100k | 0.985 | 0.940 | 1,150.83 | 128 | 14,266.271 | 406.009 | 13,600,008 |
+
+The 100k graph traversal is 35.1x faster than this probe's scalar full scan, while Recall@10 is 0.006 below the separately measured public Lite FP32 graph result of 0.946. This is a functional gate, not a stable performance comparison: each scale ran once, the scalar filter kernel is not SIMD-dispatched, and process peak RSS includes the input dataset plus temporary BruteForce and FP32 graph instances used to build/export the topology. Raw CSV, stderr, and `/usr/bin/time -v` evidence are in `/home/ubuntu/project/vsag-lite-rabitq-graph-validation-20260922-final`.

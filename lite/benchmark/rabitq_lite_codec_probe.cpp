@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include "lite/backend.h"
 #include "simd/kernels/rabitq_pack.h"
 
 namespace {
@@ -411,6 +412,12 @@ better(const Candidate& left, const Candidate& right) {
            (left.distance == right.distance and left.id < right.id);
 }
 
+bool
+farther(const Candidate& left, const Candidate& right) {
+    return left.distance > right.distance or
+           (left.distance == right.distance and left.id > right.id);
+}
+
 template <typename Distance>
 std::vector<Candidate>
 top_k(uint64_t count, uint64_t k, Distance distance) {
@@ -465,6 +472,141 @@ filtered_search(const std::vector<float>& query,
         heap.pop();
     }
     return {std::move(result), reordered};
+}
+
+struct GraphTopology {
+    [[nodiscard]] uint64_t
+    Size() const {
+        return offsets.empty() ? 0 : offsets.size() - 1;
+    }
+
+    std::vector<uint64_t> offsets;
+    std::vector<uint64_t> neighbors;
+};
+
+GraphTopology
+build_graph_topology(const std::vector<float>& base,
+                     uint64_t count,
+                     uint64_t dim,
+                     uint64_t max_degree,
+                     uint64_t ef_search) {
+    auto created = vsag::lite::detail::make_brute_force_backend(dim);
+    require(static_cast<bool>(created), "cannot create Lite build source");
+    auto source = std::move(*created);
+    for (uint64_t slot = 0; slot < count; ++slot) {
+        auto added = source->Add(static_cast<int64_t>(slot), base.data() + slot * dim, dim);
+        require(static_cast<bool>(added), "cannot populate Lite build source");
+    }
+    auto built = vsag::lite::detail::make_graph_backend(*source, max_degree, ef_search);
+    require(static_cast<bool>(built), "cannot build Lite graph topology");
+    auto graph = std::move(*built);
+    GraphTopology result;
+    result.offsets.reserve(count + 1);
+    result.neighbors.reserve(count * max_degree);
+    result.offsets.push_back(0);
+    for (uint64_t slot = 0; slot < count; ++slot) {
+        require(graph->IdAt(slot) == static_cast<int64_t>(slot), "graph slot order changed");
+        const uint64_t degree = graph->LinkCountAt(slot);
+        require(degree <= max_degree, "graph degree exceeds limit");
+        for (uint64_t edge = 0; edge < degree; ++edge) {
+            const uint64_t neighbor = graph->LinkAt(slot, edge);
+            require(neighbor < count and neighbor != slot, "invalid graph edge");
+            result.neighbors.push_back(neighbor);
+        }
+        result.offsets.push_back(result.neighbors.size());
+    }
+    return result;
+}
+
+struct GraphSearchResult {
+    std::vector<Candidate> neighbors;
+    uint64_t visited{};
+    uint64_t reordered{};
+};
+
+GraphSearchResult
+graph_search(const std::vector<float>& query,
+             float query_norm,
+             const EncodedRecords& codes,
+             const GraphTopology& graph,
+             uint64_t k,
+             uint64_t ef_search) {
+    require(graph.Size() == codes.Size(), "graph and encoded records disagree");
+    k = std::min(k, codes.Size());
+    if (k == 0) {
+        return {};
+    }
+    const uint64_t ef = std::min(codes.Size(), std::max(k, ef_search));
+    std::priority_queue<Candidate, std::vector<Candidate>, decltype(&better)> best(&better);
+    std::priority_queue<Candidate, std::vector<Candidate>, decltype(&farther)> candidates(&farther);
+    std::vector<uint8_t> visited(codes.Size(), 0);
+    uint64_t visited_count = 0;
+
+    auto visit = [&](uint64_t slot) {
+        if (visited[slot] != 0) {
+            return;
+        }
+        visited[slot] = 1;
+        ++visited_count;
+        const auto estimate = filter_estimate(query, query_norm, codes.At(slot));
+        const Candidate next{slot, estimate.distance};
+        candidates.push(next);
+        best.push(next);
+        if (best.size() > ef) {
+            best.pop();
+        }
+    };
+
+    visit(0);
+    const uint64_t last = codes.Size() - 1;
+    if (last != 0) {
+        visit(last);
+    }
+    constexpr uint64_t k_extra_entry_points = 6;
+    for (uint64_t i = 1; i <= k_extra_entry_points; ++i) {
+        const uint64_t entry = i * last / (k_extra_entry_points + 1);
+        if (entry != 0 and entry != last) {
+            visit(entry);
+        }
+    }
+
+    while (not candidates.empty()) {
+        const Candidate current = candidates.top();
+        candidates.pop();
+        if (best.size() == ef and better(best.top(), current)) {
+            break;
+        }
+        if (codes.Size() > 1) {
+            visit((current.id + codes.Size() - 1) % codes.Size());
+            visit((current.id + 1) % codes.Size());
+        }
+        for (uint64_t edge = graph.offsets[current.id]; edge < graph.offsets[current.id + 1];
+             ++edge) {
+            visit(graph.neighbors[edge]);
+        }
+    }
+
+    const uint64_t reorder_count = best.size();
+    std::priority_queue<Candidate, std::vector<Candidate>, decltype(&better)> reordered(&better);
+    while (not best.empty()) {
+        const uint64_t slot = best.top().id;
+        best.pop();
+        const auto code = codes.At(slot);
+        const auto estimate = filter_estimate(query, query_norm, code);
+        const Candidate next{slot, full_distance(query, query_norm, code, estimate.centered_ip)};
+        if (reordered.size() < k) {
+            reordered.push(next);
+        } else if (better(next, reordered.top())) {
+            reordered.pop();
+            reordered.push(next);
+        }
+    }
+    std::vector<Candidate> result(reordered.size());
+    for (uint64_t i = result.size(); i > 0; --i) {
+        result[i - 1] = reordered.top();
+        reordered.pop();
+    }
+    return {std::move(result), visited_count, reorder_count};
 }
 
 template <typename T>
@@ -712,6 +854,12 @@ self_test() {
     const auto filtered = filtered_search(normalized_query, query_norm, codes, 10);
     require(filtered.reordered > 0 and filtered.reordered <= count,
             "invalid filtered search count");
+    const auto graph = build_graph_topology(base, count, dim, 8, 32);
+    const auto graph_result = graph_search(normalized_query, query_norm, codes, graph, 10, 32);
+    require(graph_result.neighbors.size() == 10 and graph_result.visited > 0 and
+                graph_result.visited <= count and graph_result.reordered >= 10 and
+                graph_result.reordered <= 32,
+            "invalid graph search result");
     require(std::equal(full.begin(),
                        full.end(),
                        filtered.neighbors.begin(),
@@ -733,6 +881,17 @@ self_test() {
     float loaded_query_norm = 0.0F;
     const auto loaded_query = normalize(loaded_model, base.data() + dim, loaded_query_norm);
     const auto loaded = filtered_search(loaded_query, loaded_query_norm, loaded_codes, 10);
+    const auto loaded_graph =
+        graph_search(loaded_query, loaded_query_norm, loaded_codes, graph, 10, 32);
+    require(loaded_graph.visited == graph_result.visited and
+                loaded_graph.reordered == graph_result.reordered and
+                std::equal(graph_result.neighbors.begin(),
+                           graph_result.neighbors.end(),
+                           loaded_graph.neighbors.begin(),
+                           [](const auto& left, const auto& right) {
+                               return left.id == right.id and left.distance == right.distance;
+                           }),
+            "snapshot graph search mismatch");
     std::stringstream repeated_snapshot(std::ios::in | std::ios::out | std::ios::binary);
     save_snapshot(repeated_snapshot, loaded_model, loaded_codes);
     require(repeated_snapshot.str() == bytes, "snapshot bytes changed after round-trip");
@@ -776,11 +935,22 @@ run(const std::filesystem::path& root) {
     }
     const double build_ms =
         std::chrono::duration<double, std::milli>(Clock::now() - build_start).count();
+    constexpr uint64_t max_degree = 16;
+    constexpr uint64_t ef_search = 128;
+    const auto graph_build_start = Clock::now();
+    const auto graph = build_graph_topology(base.values, base.count, dim, max_degree, ef_search);
+    const double graph_build_ms =
+        std::chrono::duration<double, std::milli>(Clock::now() - graph_build_start).count();
     uint64_t full_hits = 0;
     uint64_t filtered_hits = 0;
+    uint64_t graph_hits = 0;
     uint64_t agreement = 0;
+    uint64_t graph_agreement = 0;
     uint64_t reordered = 0;
+    uint64_t graph_visited = 0;
+    uint64_t graph_reordered = 0;
     std::vector<double> search_us;
+    std::vector<double> graph_search_us;
     for (uint64_t q = 0; q < queries.count; ++q) {
         float query_norm = 0.0F;
         const auto query = normalize(model, queries.values.data() + q * dim, query_norm);
@@ -792,6 +962,10 @@ run(const std::filesystem::path& root) {
         const auto filtered = filtered_search(query, query_norm, codes, k);
         search_us.push_back(
             std::chrono::duration<double, std::micro>(Clock::now() - start).count());
+        const auto graph_start = Clock::now();
+        const auto graph_result = graph_search(query, query_norm, codes, graph, k, ef_search);
+        graph_search_us.push_back(
+            std::chrono::duration<double, std::micro>(Clock::now() - graph_start).count());
         const int32_t* expected = truth.values.data() + q * k;
         for (uint64_t i = 0; i < k; ++i) {
             require(expected[i] >= 0 and static_cast<uint64_t>(expected[i]) < base.count,
@@ -799,28 +973,42 @@ run(const std::filesystem::path& root) {
         }
         full_hits += hits(full, expected, k);
         filtered_hits += hits(filtered.neighbors, expected, k);
+        graph_hits += hits(graph_result.neighbors, expected, k);
         reordered += filtered.reordered;
+        graph_visited += graph_result.visited;
+        graph_reordered += graph_result.reordered;
         for (uint64_t i = 0; i < k; ++i) {
             agreement += static_cast<uint64_t>(full[i].id == filtered.neighbors[i].id);
+            graph_agreement += static_cast<uint64_t>(full[i].id == graph_result.neighbors[i].id);
         }
     }
     std::sort(search_us.begin(), search_us.end());
+    std::sort(graph_search_us.begin(), graph_search_us.end());
     const uint64_t opportunities = queries.count * k;
     const uint64_t plane_bytes = (dim + 7) / 8;
-    std::cout << "base_count,query_count,dim,build_encode_ms,full_recall_at_10,"
-                 "filtered_recall_at_10,filtered_full_agreement,mean_reordered,reorder_ratio,"
-                 "search_p50_us,filter_bytes,supplement_bytes,metadata_bytes\n";
+    std::cout << "base_count,query_count,dim,build_encode_ms,graph_build_ms,full_recall_at_10,"
+                 "filtered_recall_at_10,graph_recall_at_10,filtered_full_agreement,"
+                 "graph_full_agreement,mean_reordered,reorder_ratio,search_p50_us,"
+                 "mean_graph_visited,mean_graph_reordered,graph_search_p50_us,filter_bytes,"
+                 "supplement_bytes,metadata_bytes,graph_bytes\n";
     std::cout << std::fixed << std::setprecision(6) << base.count << ',' << queries.count << ','
-              << dim << ',' << build_ms << ','
+              << dim << ',' << build_ms << ',' << graph_build_ms << ','
               << static_cast<double>(full_hits) / static_cast<double>(opportunities) << ','
               << static_cast<double>(filtered_hits) / static_cast<double>(opportunities) << ','
+              << static_cast<double>(graph_hits) / static_cast<double>(opportunities) << ','
               << static_cast<double>(agreement) / static_cast<double>(opportunities) << ','
+              << static_cast<double>(graph_agreement) / static_cast<double>(opportunities) << ','
               << static_cast<double>(reordered) / static_cast<double>(queries.count) << ','
               << static_cast<double>(reordered) / static_cast<double>(queries.count * base.count)
               << ',' << search_us[search_us.size() / 2] << ','
+              << static_cast<double>(graph_visited) / static_cast<double>(queries.count) << ','
+              << static_cast<double>(graph_reordered) / static_cast<double>(queries.count) << ','
+              << graph_search_us[graph_search_us.size() / 2] << ','
               << base.count * plane_bytes * K_FILTER_BITS << ','
               << base.count * plane_bytes * K_SUPPLEMENT_BITS << ','
-              << base.count * 6 * sizeof(float) << '\n';
+              << base.count * 6 * sizeof(float) << ','
+              << graph.offsets.size() * sizeof(uint64_t) + graph.neighbors.size() * sizeof(uint64_t)
+              << '\n';
 }
 }  // namespace
 
