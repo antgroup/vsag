@@ -131,3 +131,9 @@ accepts a Recall@10 floor and latency budget, the Lite-specific snapshot and
 steady-RSS results materially improve on FP16, and CRUD behavior with a fixed
 trained model is specified and tested. The current Full reference supports
 continuing the 3+5 experiment; it does not by itself satisfy those gates.
+
+## Prototype gate status at `a99b0e6`
+
+The standalone probe now covers deterministic batch training, FHT masks, fast 8-bit CAQ encoding, 3+5 plane packing, the official L2 lower-bound calculation, candidate pruning, and supplement-only reranking. Its self-test checks deterministic model/code generation, scalar-versus-split inner-product parity, and filtered-versus-full-code Top-10 equality. It also rejects non-finite vectors and malformed, duplicate, or out-of-range SIFT ground truth.
+
+Seven fresh SIFT-100k processes all produced 0.985 Recall@10 and exact Top-10 agreement between filtered search and an exhaustive full-code scan. The filter read the supplement for a mean 0.2273% of records. These results pass the standalone functional and quality gate for this fixed dataset and seed. They do not pass the public-backend promotion gate: the probe has no model/code persistence, graph integration, CRUD model lifecycle, SIMD filter kernel, or owned-memory measurement that excludes source vectors and per-record allocation overhead. The next bounded implementation is therefore internal contiguous storage plus round-trip persistence and corruption tests, followed by graph traversal integration only if the mentor accepts the measured quality floor.
