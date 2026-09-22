@@ -568,8 +568,9 @@ private:
     bool support_duplicate_{false};                      // whether to allow duplicate ids
     mutable std::shared_mutex resize_mutex_;             // guards flatten storage resize/write/read
     mutable std::mutex cur_element_count_mutex_;         // guards cur_element_count_ updates
-    std::string graph_type_{GRAPH_TYPE_VALUE_NSW};       // graph algorithm type
-    bool default_rabitq_one_bit_search_{false};          // default split lower-bound search
+    mutable std::once_flag parallel_without_pool_warned_;  // one-shot latch for the pool warning
+    std::string graph_type_{GRAPH_TYPE_VALUE_NSW};         // graph algorithm type
+    bool default_rabitq_one_bit_search_{false};            // default split lower-bound search
 
     std::mutex random_generator_mutex_;
     std::default_random_engine level_generator_{
