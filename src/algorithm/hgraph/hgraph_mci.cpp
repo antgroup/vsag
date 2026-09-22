@@ -114,7 +114,9 @@ collect_bitset_seed_inner_ids(const FilterPtr& inner_filter,
     const auto id_remainder = total % sample_count;
     uint64_t id = 0;
     uint64_t accumulated_remainder = 0;
+    uint64_t samples_done = 0;
     for (uint64_t sample = 0; sample < sample_count and inner_ids.size() < seed_count; ++sample) {
+        ++samples_done;
         const auto inner_id = static_cast<InnerIdType>(id);
         if (inner_filter->CheckValid(inner_id)) {
             inner_ids.push_back(inner_id);
@@ -127,10 +129,12 @@ collect_bitset_seed_inner_ids(const FilterPtr& inner_filter,
         }
     }
     if (enumerates_all_valid != nullptr) {
-        // Complete only when the scan really visited every inner id and the seed budget did not
-        // cut it short.  `id_step == 1` is not sufficient: the Bresenham-style advance still skips
-        // `id_remainder` positions when the remainder is non-zero, so ids would be missed.
-        *enumerates_all_valid = sample_count == total and inner_ids.size() < seed_count;
+        // Complete only when the scan really visited every inner id.  `id_step == 1` is not enough:
+        // the Bresenham-style advance still skips `id_remainder` positions when the remainder is
+        // non-zero, so ids would be missed.  With `sample_count == total` the advance is exactly one
+        // per iteration, hence the whole id space is covered once the loop ran to completion -- also
+        // when the budget happens to be filled by the last probed id.
+        *enumerates_all_valid = sample_count == total and samples_done == sample_count;
     }
     return inner_ids;
 }
@@ -567,29 +571,6 @@ HGraph::try_mci_search(const SearchRequest& request,
     uint64_t seed_budget = scaled_seed_count >= static_cast<double>(total_count)
                                ? total_count
                                : std::max<uint64_t>(1, static_cast<uint64_t>(scaled_seed_count));
-    // Coverage-driven budget: seeding every valid point makes the seed phase exact (the searcher
-    // then skips the whole clique expansion), which beats the expansion tail whenever
-    // `0.5 ms + per_distance * valid` does. The budget is only raised when the target fits into
-    // `mci_seed_max_count`, so a wide filter never degenerates into an exact scan.
-    if (params.mci_seed_coverage > 0.0F and not bitset_seed_source and request.filter_ != nullptr) {
-        const int64_t* valid_labels = nullptr;
-        int64_t valid_label_count = 0;
-        request.filter_->GetValidIds(&valid_labels, valid_label_count);
-        if (valid_label_count > 0) {
-            // Compare in floating point: `mci_seed_coverage` may be arbitrarily large and casting
-            // an out-of-range double to an integer is undefined behaviour.
-            const auto target = std::ceil(static_cast<double>(params.mci_seed_coverage) *
-                                          static_cast<double>(valid_label_count));
-            const auto cap = params.mci_seed_max_count > 0
-                                 ? std::min(static_cast<double>(params.mci_seed_max_count),
-                                            static_cast<double>(total_count))
-                                 : static_cast<double>(total_count);
-            if (std::isfinite(target) and target <= cap) {
-                seed_budget = std::max(seed_budget, static_cast<uint64_t>(target));
-            }
-        }
-    }
-    mci_param.seed_count = seed_budget;
     mci_param.hops_limit = search_param.hops_limit;
 
     Vector<InnerIdType> seed_inner_ids(ctx->alloc);
@@ -601,6 +582,31 @@ HGraph::try_mci_search(const SearchRequest& request,
         // those reads happen. The lock is taken before persistent_codes_mutex_ below, which keeps the
         // lock order this function and the index already use.
         std::shared_lock label_lock(this->label_lookup_mutex_);
+        // Coverage-driven budget: seeding every valid point makes the seed phase exact (the searcher
+        // then skips the whole clique expansion), which beats the expansion tail whenever
+        // `0.5 ms + per_distance * valid` does. The budget is only raised when the target fits into
+        // `mci_seed_max_count`, so a wide filter never degenerates into an exact scan.  It reads the
+        // valid-label list the collector below walks, hence the same shared lock.
+        if (params.mci_seed_coverage > 0.0F and not bitset_seed_source and
+            request.filter_ != nullptr) {
+            const int64_t* valid_labels = nullptr;
+            int64_t valid_label_count = 0;
+            request.filter_->GetValidIds(&valid_labels, valid_label_count);
+            if (valid_label_count > 0) {
+                // Compare in floating point: `mci_seed_coverage` may be arbitrarily large and
+                // casting an out-of-range double to an integer is undefined behaviour.
+                const auto target = std::ceil(static_cast<double>(params.mci_seed_coverage) *
+                                              static_cast<double>(valid_label_count));
+                const auto cap = params.mci_seed_max_count > 0
+                                     ? std::min(static_cast<double>(params.mci_seed_max_count),
+                                                static_cast<double>(total_count))
+                                     : static_cast<double>(total_count);
+                if (std::isfinite(target) and target <= cap) {
+                    seed_budget = std::max(seed_budget, static_cast<uint64_t>(target));
+                }
+            }
+        }
+        mci_param.seed_count = seed_budget;
         if (bitset_seed_source) {
             seed_inner_ids = collect_bitset_seed_inner_ids(
                 inner_filter, total_count, mci_param.seed_count, ctx->alloc, &enumerates_all_valid);
