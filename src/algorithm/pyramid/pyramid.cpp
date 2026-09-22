@@ -640,7 +640,8 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
         data_num > static_cast<int64_t>(base_codes_->max_capacity_) and
         (not has_precise_reorder() or
          data_num > static_cast<int64_t>(precise_codes_->max_capacity_)) and
-        (raw_vector_ == nullptr or data_num > static_cast<int64_t>(raw_vector_->max_capacity_));
+        (raw_vector_ == nullptr or data_num > static_cast<int64_t>(raw_vector_->max_capacity_)) and
+        (extra_infos_ == nullptr or data_num > static_cast<int64_t>(extra_infos_->max_capacity_));
     resize(data_num);
     for (InnerIdType inner_id = 0; inner_id < data_num; ++inner_id) {
         const auto input_index = input_indices[inner_id];
@@ -679,6 +680,15 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
         }
         if (raw_vector_ != nullptr) {
             insert_codes(raw_vector_);
+        }
+        const auto* extra_infos = base->GetExtraInfos();
+        if (extra_infos_ != nullptr && extra_infos != nullptr) {
+            CHECK_ARGUMENT(extra_infos_->max_capacity_ >= static_cast<uint64_t>(data_num),
+                           "extra infos capacity is smaller than the data count");
+            for (InnerIdType inner_id = 0; inner_id < data_num; ++inner_id) {
+                extra_infos_->InsertExtraInfo(
+                    extra_infos + input_indices[inner_id] * extra_info_size_, inner_id);
+            }
         }
     }
     if (store_paths_) {
@@ -1203,10 +1213,19 @@ Pyramid::search_impl(const DatasetPtr& query,
     result->Ids(ids);
     auto* dists = static_cast<float*>(ctx.alloc->Allocate(sizeof(float) * target_size));
     result->Distances(dists);
+    char* extra_infos = nullptr;
+    if (extra_info_size_ > 0 && extra_infos_ != nullptr) {
+        extra_infos = static_cast<char*>(
+            ctx.alloc->Allocate(static_cast<int64_t>(extra_info_size_ * target_size)));
+        result->ExtraInfos(extra_infos)->ExtraInfoSize(static_cast<int64_t>(extra_info_size_));
+    }
     for (int64_t j = target_size - 1; j >= 0; --j) {
         dists[j] = search_result->Top().first;
-        ids[j] = label_table_->GetLabelById(search_result->Top().second);
-
+        auto inner_id = search_result->Top().second;
+        ids[j] = label_table_->GetLabelById(inner_id);
+        if (extra_infos != nullptr) {
+            extra_infos_->GetExtraInfoById(inner_id, extra_infos + extra_info_size_ * j);
+        }
         search_result->Pop();
     }
     return result;
@@ -1248,6 +1267,9 @@ Pyramid::GetMemoryUsageDetail() const {
     }
     if (raw_vector_ != nullptr) {
         memory_usage["raw_vector"] = raw_vector_->GetMemoryUsage();
+    }
+    if (extra_infos_ != nullptr) {
+        memory_usage["extra_infos"] = extra_infos_->GetMemoryUsage();
     }
     uint64_t hierarchy_memory = hierarchies_.bucket_count() *
                                 (sizeof(decltype(hierarchies_)::value_type) + sizeof(uint32_t));
@@ -1303,6 +1325,10 @@ Pyramid::Serialize(StreamWriter& writer) const {
 
     if (store_paths_) {
         serialize_paths(writer);
+    }
+
+    if (extra_info_size_ > 0 && extra_infos_ != nullptr) {
+        extra_infos_->Serialize(writer);
     }
 
     // serialize footer (introduced since v0.15)
@@ -1399,6 +1425,13 @@ Pyramid::collect_streaming_header() const {
                                      StreamSerializationBlockCurrentVersion(path_tag),
                                      StreamSerializationTagCritical(path_tag));
     }
+    if (extra_info_size_ > 0 && extra_infos_ != nullptr) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::EXTRA_INFO);
+        AppendStreamingManifestBlock(manifest,
+                                     tag,
+                                     StreamSerializationBlockCurrentVersion(tag),
+                                     StreamSerializationTagCritical(tag));
+    }
     metadata->Set("block_manifest", manifest);
     metadata->SetEmptyIndex(this->GetNumElements() == 0);
     return metadata;
@@ -1457,6 +1490,13 @@ Pyramid::serialize_streaming_body(StreamWriter& writer) const {
         WriteStreamingBlock(
             writer, path_tag, StreamSerializationTagCritical(path_tag), [this](StreamWriter& w) {
                 this->serialize_paths(w);
+            });
+    }
+    if (extra_info_size_ > 0 && extra_infos_ != nullptr) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::EXTRA_INFO);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& w) {
+                this->extra_infos_->Serialize(w);
             });
     }
 }
@@ -1521,6 +1561,7 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
     bool loaded_raw_vector = false;
     bool loaded_hierarchies = false;
     bool loaded_paths = false;
+    bool loaded_extra_info = false;
 
     while (true) {
         auto block_header = StreamBlockHeader::Read(reader);
@@ -1601,6 +1642,19 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
                 });
                 loaded_paths = true;
                 break;
+            case StreamSerializationTag::EXTRA_INFO:
+                if (loaded_extra_info) {
+                    throw VsagException(ErrorType::READ_ERROR,
+                                        "duplicate Pyramid streaming extra_info block");
+                }
+                if (extra_info_size_ > 0 && extra_infos_ != nullptr) {
+                    ReadSeekableBlockPayload(
+                        block_reader, block_header, [this](StreamReader& block) {
+                            this->extra_infos_->Deserialize(block);
+                        });
+                }
+                loaded_extra_info = true;
+                break;
             default:
                 if (block_header.IsCritical()) {
                     throw VsagException(
@@ -1634,6 +1688,10 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
     if (store_paths_ && !loaded_paths) {
         throw VsagException(ErrorType::READ_ERROR,
                             "Pyramid streaming serialization paths block is missing");
+    }
+    if (extra_info_size_ > 0 && extra_infos_ != nullptr && !loaded_extra_info) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "Pyramid streaming serialization extra_info block is missing");
     }
 
     label_table_->TrimUnusedSlots(base_codes_->TotalCount());
@@ -1703,6 +1761,10 @@ Pyramid::Deserialize(StreamReader& reader) {
         deserialize_paths(buffer_reader, static_cast<uint64_t>(cur_element_count_));
     }
 
+    if (extra_info_size_ > 0 && extra_infos_ != nullptr) {
+        extra_infos_->Deserialize(buffer_reader);
+    }
+
     resize(max_capacity);
     this->current_memory_usage_ = this->CalSerializeSize();
 }
@@ -1762,7 +1824,10 @@ Pyramid::prepare_add_batch(const DatasetPtr& base) {
         new_capacity > static_cast<int64_t>(base_codes_->max_capacity_) and
         (not has_precise_reorder() or
          new_capacity > static_cast<int64_t>(precise_codes_->max_capacity_)) and
-        (raw_vector_ == nullptr or new_capacity > static_cast<int64_t>(raw_vector_->max_capacity_));
+        (raw_vector_ == nullptr or
+         new_capacity > static_cast<int64_t>(raw_vector_->max_capacity_)) and
+        (extra_infos_ == nullptr or
+         new_capacity > static_cast<int64_t>(extra_infos_->max_capacity_));
     if (new_capacity > max_capacity_) {
         resize(new_capacity);
     }
@@ -1811,11 +1876,19 @@ Pyramid::encode_add_batch(const DatasetPtr& base, const AddBatch& batch) {
         CHECK_ARGUMENT(raw_vector_->max_capacity_ >= required_capacity,
                        "raw vector capacity is smaller than the encoded id range");
     }
+    if (extra_infos_ != nullptr) {
+        CHECK_ARGUMENT(extra_infos_->max_capacity_ >= required_capacity,
+                       "extra infos capacity is smaller than the encoded id range");
+    }
 
     const auto* data_vectors = base->GetFloat32Vectors();
-    const auto encode_range = [this, data_vectors, &batch](uint64_t begin, uint64_t end) {
+    const auto* extra_infos = base->GetExtraInfos();
+    const auto extra_info_size = extra_info_size_;
+    const auto encode_range = [this, data_vectors, extra_infos, extra_info_size, &batch](
+                                  uint64_t begin, uint64_t end) {
         for (uint64_t offset = begin; offset < end; ++offset) {
-            const auto* vector = data_vectors + dim_ * batch.input_indices[offset];
+            const auto input_index = batch.input_indices[offset];
+            const auto* vector = data_vectors + dim_ * input_index;
             const auto inner_id = static_cast<InnerIdType>(batch.first_inner_id + offset);
             base_codes_->InsertVector(vector, inner_id);
             if (has_precise_reorder()) {
@@ -1823,6 +1896,10 @@ Pyramid::encode_add_batch(const DatasetPtr& base, const AddBatch& batch) {
             }
             if (raw_vector_ != nullptr) {
                 raw_vector_->InsertVector(vector, inner_id);
+            }
+            if (extra_infos_ != nullptr && extra_infos != nullptr) {
+                extra_infos_->InsertExtraInfo(extra_infos + input_index * extra_info_size,
+                                              inner_id);
             }
         }
     };
@@ -1918,6 +1995,9 @@ Pyramid::resize(int64_t new_max_capacity) {
     if (raw_vector_ != nullptr) {
         raw_vector_->Resize(new_max_capacity);
     }
+    if (extra_infos_ != nullptr) {
+        extra_infos_->Resize(new_max_capacity);
+    }
     points_mutex_->Resize(new_max_capacity);
     for (const auto& [name, hierarchy] : hierarchies_) {
         hierarchy->root->resize_graph(static_cast<InnerIdType>(new_max_capacity));
@@ -1974,6 +2054,11 @@ Pyramid::InitFeatures() {
     }
     if (has_raw_vector_) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
+    }
+    if (extra_infos_ != nullptr) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_EXTRA_INFO_BY_ID);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_KNN_SEARCH_WITH_EX_FILTER);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT);
     }
 
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_DELETE_BY_ID);
@@ -2047,6 +2132,10 @@ build_default_pyramid_param(const JsonType& external_param) {
     json[PYRAMID_ROOT_GRAPH_TYPE].SetString(PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER);
     json[SUPPORT_DUPLICATE].SetBool(false);
     json[PYRAMID_STORE_PATHS_KEY].SetBool(false);
+    JsonType extra_info;
+    extra_info[IO_PARAMS_KEY].SetJson(
+        IOParameter::CreateDefault(IO_TYPE_VALUE_BLOCK_MEMORY_IO)->ToJson());
+    json[EXTRA_INFO_KEY].SetJson(extra_info);
     return json;
 }
 
@@ -2178,6 +2267,8 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
         } else if (key == PYRAMID_SUPPORT_DUPLICATE) {
             inner_json[SUPPORT_DUPLICATE].SetJson(value);
             inner_json[GRAPH_KEY][SUPPORT_DUPLICATE].SetJson(value);
+        } else if (key == EXTRA_INFO_KEY) {
+            inner_json[EXTRA_INFO_KEY].SetJson(value);
         } else {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                 fmt::format("invalid config param: {}", key));
@@ -3356,11 +3447,10 @@ Pyramid::AnalyzeIndexBySearch(const SearchRequest& request) {
     CHECK_ARGUMENT(request.mode_ == SearchMode::KNN_SEARCH,
                    "Pyramid AnalyzeIndexBySearch only supports KNN search");
     const bool is_supported_search =
-        not request.enable_filter_ && not request.enable_bitset_filter_ &&
         not request.enable_attribute_filter_ && not request.enable_iterator_search_;
     CHECK_ARGUMENT(is_supported_search,
                    "Pyramid AnalyzeIndexBySearch does not support "
-                   "filtered or iterator search");
+                   "attribute or iterator search");
     CHECK_ARGUMENT(request.topk_ > 0,
                    fmt::format("topk({}) must be greater than 0", request.topk_));
     CHECK_ARGUMENT(request.topk_ <= static_cast<int64_t>(std::numeric_limits<uint32_t>::max()),
