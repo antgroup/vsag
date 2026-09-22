@@ -390,6 +390,23 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
                        "ef_search exceeds int64_t range");
     }
     obj.ef_search = ef_search_json.GetInt();
+    obj.hgraph_ef_search = 0;
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_EF_SEARCH)) {
+        obj.hgraph_ef_search = params[INDEX_TYPE_HGRAPH][HGRAPH_EF_SEARCH].GetInt();
+        CHECK_ARGUMENT(obj.hgraph_ef_search >= 1, "hgraph_ef_search must be at least 1");
+    }
+    obj.mci_ef_search = 0;
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_EF_SEARCH)) {
+        obj.mci_ef_search = params[INDEX_TYPE_HGRAPH][HGRAPH_MCI_EF_SEARCH].GetInt();
+        CHECK_ARGUMENT(obj.mci_ef_search >= 1, "mci_ef_search must be at least 1");
+    }
+    // Both routes default to the shared `ef_search` when their own value is not given.
+    if (obj.hgraph_ef_search <= 0) {
+        obj.hgraph_ef_search = obj.ef_search;
+    }
+    if (obj.mci_ef_search <= 0) {
+        obj.mci_ef_search = obj.ef_search;
+    }
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_HOPS_LIMIT)) {
         obj.hops_limit = params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_HOPS_LIMIT].GetInt();
     }

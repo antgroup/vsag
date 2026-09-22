@@ -224,6 +224,8 @@ extern const char* const HGRAPH_MCI_KNNG_SOURCE;
 extern const char* const HGRAPH_MCI_KNNG_SOURCE_HGRAPH;
 extern const char* const HGRAPH_MCI_KNNG_SOURCE_ODESCENT;
 extern const char* const HGRAPH_MCI_SEED_RATIO;
+extern const char* const HGRAPH_EF_SEARCH;
+extern const char* const HGRAPH_MCI_EF_SEARCH;
 extern const char* const HGRAPH_MCI_HGRAPH_VALID_RATIO_THRESHOLD;
 extern const char* const HGRAPH_EXTRA_INFO_SIZE;
 extern const char* const HGRAPH_SUPPORT_DUPLICATE;
