@@ -99,12 +99,30 @@ collect_bitset_seed_inner_ids(const FilterPtr& inner_filter,
                               uint64_t total,
                               uint64_t seed_count,
                               Allocator* allocator,
+                              bool enumerate_all = false,
                               bool* enumerates_all_valid = nullptr) {
     Vector<InnerIdType> inner_ids(allocator);
     if (inner_filter == nullptr or total == 0 or seed_count == 0) {
         return inner_ids;
     }
     inner_ids.reserve(std::min(total, seed_count));
+    if (enumerate_all) {
+        // The budget covers the whole valid set, so build the complete list with a single sequential
+        // pass instead of striding.  `CheckValid` is a bit test for bitmap-style filters, which makes
+        // this the cheapest possible way to enumerate the valid points, and the resulting list lets
+        // the seed phase answer exactly without any clique expansion.
+        uint64_t scanned = 0;
+        for (InnerIdType id = 0; id < total and inner_ids.size() < seed_count; ++id) {
+            ++scanned;
+            if (inner_filter->CheckValid(id)) {
+                inner_ids.push_back(id);
+            }
+        }
+        if (enumerates_all_valid != nullptr) {
+            *enumerates_all_valid = (scanned == total);
+        }
+        return inner_ids;
+    }
     const auto scaled_sample_count = seed_count > total / K_MCI_BITSET_SEED_SAMPLE_MULTIPLIER
                                          ? total
                                          : seed_count * K_MCI_BITSET_SEED_SAMPLE_MULTIPLIER;
@@ -587,16 +605,24 @@ HGraph::try_mci_search(const SearchRequest& request,
         // `0.5 ms + per_distance * valid` does. The budget is only raised when the target fits into
         // `mci_seed_max_count`, so a wide filter never degenerates into an exact scan.  It reads the
         // valid-label list the collector below walks, hence the same shared lock.
-        if (params.mci_seed_coverage > 0.0F and not bitset_seed_source and
-            request.filter_ != nullptr) {
-            const int64_t* valid_labels = nullptr;
-            int64_t valid_label_count = 0;
-            request.filter_->GetValidIds(&valid_labels, valid_label_count);
-            if (valid_label_count > 0) {
+        if (params.mci_seed_coverage > 0.0F and request.filter_ != nullptr) {
+            double valid_estimate = 0.0;
+            if (bitset_seed_source) {
+                // Bitset filters derive `ValidRatio()` from their population count, so it is exact.
+                const auto ratio =
+                    static_cast<double>(std::min(1.0F, std::max(0.0F, result.valid_ratio)));
+                valid_estimate = ratio * static_cast<double>(total_count);
+            } else {
+                const int64_t* valid_labels = nullptr;
+                int64_t valid_label_count = 0;
+                request.filter_->GetValidIds(&valid_labels, valid_label_count);
+                valid_estimate = static_cast<double>(std::max<int64_t>(0, valid_label_count));
+            }
+            if (valid_estimate > 0.0) {
                 // Compare in floating point: `mci_seed_coverage` may be arbitrarily large and
                 // casting an out-of-range double to an integer is undefined behaviour.
-                const auto target = std::ceil(static_cast<double>(params.mci_seed_coverage) *
-                                              static_cast<double>(valid_label_count));
+                const auto target =
+                    std::ceil(static_cast<double>(params.mci_seed_coverage) * valid_estimate);
                 const auto cap = params.mci_seed_max_count > 0
                                      ? std::min(static_cast<double>(params.mci_seed_max_count),
                                                 static_cast<double>(total_count))
@@ -608,8 +634,15 @@ HGraph::try_mci_search(const SearchRequest& request,
         }
         mci_param.seed_count = seed_budget;
         if (bitset_seed_source) {
-            seed_inner_ids = collect_bitset_seed_inner_ids(
-                inner_filter, total_count, mci_param.seed_count, ctx->alloc, &enumerates_all_valid);
+            const auto estimated_valid = static_cast<uint64_t>(std::llround(
+                static_cast<double>(std::min(1.0F, std::max(0.0F, result.valid_ratio))) *
+                static_cast<double>(total_count)));
+            seed_inner_ids = collect_bitset_seed_inner_ids(inner_filter,
+                                                           total_count,
+                                                           mci_param.seed_count,
+                                                           ctx->alloc,
+                                                           seed_budget >= estimated_valid,
+                                                           &enumerates_all_valid);
         } else {
             seed_inner_ids = collect_seed_inner_ids(request.filter_,
                                                     this->label_table_,

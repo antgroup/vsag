@@ -149,6 +149,12 @@ PrepareMergedVisitMarks(const MCISearcherParam& mci_param,
         mci_param.valid_bitmap_size < total) {
         return nullptr;
     }
+    // An exhaustive seed list already is the snapshot of the valid set, so the merged marks would
+    // never be read: the saturation guard stops the search right after the seed phase.  Skip the
+    // O(total) materialisation in that case.
+    if (mci_param.enumerated_valid_count != 0) {
+        return nullptr;
+    }
     merged_marks.Reset(mci_param.valid_bitmap, total);
     return mci_param.valid_bitmap;
 }
@@ -249,23 +255,28 @@ search_precise_float_csr(const CliqueDataCellBaseView& view,
     auto get_closest_unexpanded = [&]() -> SearchCandidate* {
         return candidates.GetClosestUnexpanded();
     };
+    // An exhaustive seed list enumerates every valid point, so the seed phase can score it directly
+    // (no filter check, no visited marks); the expansion cannot run in that case.
+    const bool trusted_seed_list = mci_param.enumerated_valid_count != 0;
     auto try_visit = [&](InnerIdType inner_id) -> bool {
         if (inner_id >= total) {
             return false;
         }
-        if (valid_bitmap != nullptr) {
-            // The merged marks answer "already visited" and "filtered out" in one access.
-            if (not merged_marks.TryVisit(inner_id)) {
-                return false;
-            }
-        } else {
-            if (visited_nodes.Get(inner_id)) {
-                return false;
-            }
-            visited_nodes.Set(inner_id);
-            if (inner_search_param.is_inner_id_allowed != nullptr and
-                not inner_search_param.is_inner_id_allowed->CheckValid(inner_id)) {
-                return false;
+        if (not trusted_seed_list) {
+            if (valid_bitmap != nullptr) {
+                // The merged marks answer "already visited" and "filtered out" in one access.
+                if (not merged_marks.TryVisit(inner_id)) {
+                    return false;
+                }
+            } else {
+                if (visited_nodes.Get(inner_id)) {
+                    return false;
+                }
+                visited_nodes.Set(inner_id);
+                if (inner_search_param.is_inner_id_allowed != nullptr and
+                    not inner_search_param.is_inner_id_allowed->CheckValid(inner_id)) {
+                    return false;
+                }
             }
         }
         const auto* vector =
@@ -480,6 +491,9 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
         return nullptr;
     };
     uint32_t dist_cmp = 0;
+    // An exhaustive seed list enumerates every valid point, so the seed phase can score it directly
+    // (no filter check, no visited marks); the expansion cannot run in that case.
+    const bool trusted_seed_list = mci_param.enumerated_valid_count != 0;
     auto try_mark = [&](InnerIdType inner_id) -> bool {
         if (inner_id >= total) {
             return false;
@@ -558,7 +572,8 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
             }
             const auto offset = i * seed_count / sampled_seed_count;
             const auto seed_inner_id = (*mci_param.seed_inner_ids)[offset];
-            if (try_mark(seed_inner_id)) {
+            // An exhaustive list needs no marks and no filter check (see the float path).
+            if (trusted_seed_list or try_mark(seed_inner_id)) {
                 ++seeds;
                 seed_batch_ids.push_back(seed_inner_id);
                 if (seed_batch_ids.size() == kSeedBatch) {

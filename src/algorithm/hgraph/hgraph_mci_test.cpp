@@ -918,7 +918,7 @@ TEST_CASE("HGraph MCI inlines an identity-mapped filter bitmap", "[ut][hgraph][m
                      ->Float32Vectors(vectors.data() + (total - 1) * dim)
                      ->Owner(false);
     const std::string search_params =
-        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":5.0,)"
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.1,"mci_seed_coverage":0,)"
         R"("hgraph_valid_ratio_threshold":1.0}})";
 
     auto bitmap_filter =
@@ -1237,13 +1237,15 @@ TEST_CASE("HGraph MCI bitset sampling never claims coverage it did not scan", "[
         }
     }
 
-    // ceil(sqrt(6000) * 0.1) == 8 seeds.
-    auto result =
-        index.value()->KnnSearch(query,
-                                 1,
-                                 R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.1,)"
-                                 R"("hgraph_valid_ratio_threshold":1.0}})",
-                                 blacklist);
+    // Coverage is disabled so the budget stays at ceil(sqrt(6000) * 0.012) == 1 seed, below
+    // the two valid ids: the scan is cut short by the budget and must not claim coverage., below the two valid ids, so the collector
+    // strides over the id space instead of enumerating it and must not claim coverage.
+    auto result = index.value()->KnnSearch(
+        query,
+        1,
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.012,"mci_seed_coverage":0,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})",
+        blacklist);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
     // Only id 0 is probed, so the seed phase is incomplete and the expansion has to run.
@@ -1337,4 +1339,58 @@ TEST_CASE("HGraph MCI bitset full scan reports saturation when it exactly fills 
     REQUIRE(result.value()->GetStatistics({"mci_seed_saturated"})[0] == "true");
     REQUIRE(result.value()->GetDim() == 1);
     REQUIRE(result.value()->GetIds()[0] == ids[total - 1]);
+}
+
+TEST_CASE("HGraph MCI enumerates a bitset filter and answers exactly", "[ut][hgraph][mci]") {
+    // With a bitmap-style filter the per-id check is a bit test, so once the seed budget covers the
+    // valid set the collector walks the id space once, collects every valid point and the seed phase
+    // answers exactly without any clique expansion (and without the merged-marks array).
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 6000;
+    constexpr int64_t near_count = 8;
+
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::vector<float> vectors(total * dim, 0.0F);
+    for (int64_t i = 0; i < total; ++i) {
+        if (i < near_count) {
+            vectors[i * dim + 1] = 0.1F * static_cast<float>(i);
+        } else {
+            vectors[i * dim] = 1000.0F + static_cast<float>(i % 17);
+            vectors[i * dim + 1] = static_cast<float>(i % 23);
+            vectors[i * dim + 2] = static_cast<float>(i % 29);
+            vectors[i * dim + 3] = static_cast<float>(i % 31);
+        }
+    }
+
+    auto index = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data() + 3 * dim)->Owner(false);
+
+    auto blacklist = vsag::Bitset::Make();
+    for (int64_t i = 0; i < total; ++i) {
+        if (i != 0 and i != 3) {
+            blacklist->Set(ids[i]);
+        }
+    }
+
+    // ceil(sqrt(6000) * 0.1) == 8 seeds >= 2 valid ids, so the collector enumerates the id space.
+    auto result =
+        index.value()->KnnSearch(query,
+                                 1,
+                                 R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.1,)"
+                                 R"("hgraph_valid_ratio_threshold":1.0}})",
+                                 blacklist);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    REQUIRE(std::stoull(result.value()->GetStatistics({"mci_seed_count"})[0]) == 2);
+    REQUIRE(result.value()->GetStatistics({"mci_seed_saturated"})[0] == "true");
+    // Bitset filters expose no merged bitmap, so the fast path stays off.
+    REQUIRE_FALSE(
+        vsag::JsonType::Parse(result.value()->GetStatistics())["mci_bitmap_fast_path"].GetBool());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == ids[3]);
 }
