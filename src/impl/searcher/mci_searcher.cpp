@@ -212,12 +212,9 @@ search_precise_float_csr(const CliqueDataCellBaseView& view,
                          Allocator* allocator) {
     const auto candidate_limit =
         std::max<int64_t>(inner_search_param.topk, static_cast<int64_t>(inner_search_param.ef));
-    // The returned heap is truncated to the user's top-k by the caller; `candidate_limit`
-    // (which is `max(topk, ef)`) is only needed for the expansion frontier.
-    const auto result_limit = inner_search_param.rerank_topk > 0
-                                  ? static_cast<int64_t>(inner_search_param.rerank_topk)
-                                  : std::max<int64_t>(1, inner_search_param.topk);
-    auto result_heap = DistanceHeap::MakeInstanceBySize<true, true>(allocator, result_limit);
+    // Keep `candidate_limit` results: the conjugate-graph enhancement consumes up to LOOK_AT_K of
+    // them, and the caller truncates to the user's top-k anyway.
+    auto result_heap = DistanceHeap::MakeInstanceBySize<true, true>(allocator, candidate_limit);
     thread_local MCIEpochMarks visited_nodes;
     thread_local MCIEpochMarks visited_cliques;
     SearchCandidateQueue candidates(allocator);
@@ -393,10 +390,7 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
     auto* alloc = select_query_allocator(ctx, allocator_);
     const auto candidate_limit =
         std::max<int64_t>(inner_search_param.topk, static_cast<int64_t>(inner_search_param.ef));
-    const auto result_limit = inner_search_param.rerank_topk > 0
-                                  ? static_cast<int64_t>(inner_search_param.rerank_topk)
-                                  : std::max<int64_t>(1, inner_search_param.topk);
-    auto heap = DistanceHeap::MakeInstanceBySize<true, true>(alloc, result_limit);
+    auto heap = DistanceHeap::MakeInstanceBySize<true, true>(alloc, candidate_limit);
     const auto early_stop = mci_early_stop_knobs(mci_param);
     DistHeapPtr kth_heap;
     if (early_stop.lower_break) {

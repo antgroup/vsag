@@ -987,6 +987,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     uint64_t batch_brute_force_queries = 0;
     uint64_t batch_seed_count = 0;
     bool batch_precise_float_csr = false;
+    bool batch_seed_saturated = false;
     MCIHybridSearchResult batch_mci_result(params, ft);
     for (int64_t q_idx = 0; q_idx < query_count; ++q_idx) {
         const auto* raw_query = use_custom_distance ? nullptr : get_data(query, q_idx);
@@ -1204,6 +1205,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             }
             batch_seed_count += mci_result.seed_count;
             batch_precise_float_csr = batch_precise_float_csr or mci_result.used_precise_float_csr;
+            batch_seed_saturated = batch_seed_saturated or mci_result.seed_saturated;
         }
 
         // UpdateId may publish a new label after the initial padding check.
@@ -1282,6 +1284,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                                                                               : "mixed");
         batch_stats["mci_seed_count"].SetUint64(batch_seed_count);
         batch_stats["mci_raw_float_csr"].SetBool(batch_precise_float_csr);
+        batch_stats["mci_seed_saturated"].SetBool(batch_seed_saturated);
         batch_stats["batch_routes"]["hgraph"].SetUint64(batch_hgraph_queries);
         batch_stats["batch_routes"]["mci"].SetUint64(batch_mci_queries);
         batch_stats["batch_routes"]["brute_force"].SetUint64(batch_brute_force_queries);

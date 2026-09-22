@@ -1200,3 +1200,88 @@ TEST_CASE("HGraph MCI idle window aborts unproductive clique expansion", "[ut][h
     // The idle window is a heuristic: require most of the top-k to survive the earlier stop.
     REQUIRE(overlap >= 5);
 }
+
+TEST_CASE("HGraph MCI bitset sampling never claims coverage it did not scan", "[ut][hgraph][mci]") {
+    // Regression: with total=6000 and a seed budget of 8 the bitset collector probes 4096 strided
+    // positions, so `id_step == 1` must not be reported as full coverage -- id 3 is never probed.
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 6000;
+    constexpr int64_t near_count = 8;  // ids 0..7 form one cluster, the rest is far away
+
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::vector<float> vectors(total * dim, 0.0F);
+    for (int64_t i = 0; i < total; ++i) {
+        if (i < near_count) {
+            vectors[i * dim + 1] = 0.1F * static_cast<float>(i);
+        } else {
+            vectors[i * dim] = 1000.0F + static_cast<float>(i % 17);
+            vectors[i * dim + 1] = static_cast<float>(i % 23);
+            vectors[i * dim + 2] = static_cast<float>(i % 29);
+            vectors[i * dim + 3] = static_cast<float>(i % 31);
+        }
+    }
+
+    auto index = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    // Query sits exactly on id 3, which is valid but is skipped by the strided bitset scan.
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data() + 3 * dim)->Owner(false);
+
+    auto blacklist = vsag::Bitset::Make();
+    for (int64_t i = 0; i < total; ++i) {
+        if (i != 0 and i != 3) {
+            blacklist->Set(ids[i]);
+        }
+    }
+
+    // ceil(sqrt(6000) * 0.1) == 8 seeds.
+    auto result =
+        index.value()->KnnSearch(query,
+                                 1,
+                                 R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.1,)"
+                                 R"("hgraph_valid_ratio_threshold":1.0}})",
+                                 blacklist);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    // Only id 0 is probed, so the seed phase is incomplete and the expansion has to run.
+    REQUIRE(std::stoull(result.value()->GetStatistics({"mci_seed_count"})[0]) == 1);
+    REQUIRE(result.value()->GetStatistics({"mci_seed_saturated"})[0] == "false");
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == ids[3]);
+}
+
+TEST_CASE("HGraph MCI reports saturation for batched queries", "[ut][hgraph][mci]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 64;
+
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 1000);
+    auto vectors = make_test_vectors(total, dim);
+
+    auto index = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    std::vector<float> queries(2 * dim, 0.0F);
+    std::copy_n(vectors.begin(), dim, queries.begin());
+    std::copy_n(vectors.begin() + dim, dim, queries.begin() + dim);
+    auto query = vsag::Dataset::Make();
+    query->NumElements(2)->Dim(dim)->Float32Vectors(queries.data())->Owner(false);
+
+    std::vector<int64_t> covered(ids.begin(), ids.begin() + 5);
+    auto filter = std::make_shared<HalfRatioAllValidFilter>(covered);
+
+    auto result =
+        index.value()->KnnSearch(query,
+                                 3,
+                                 R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,)"
+                                 R"("hgraph_valid_ratio_threshold":1.0}})",
+                                 filter);
+    REQUIRE(result.has_value());
+    REQUIRE(std::stoull(result.value()->GetStatistics({"mci_seed_count"})[0]) == 5 * 2);
+    // Aggregated with OR semantics over the sub-queries.
+    REQUIRE(result.value()->GetStatistics({"mci_seed_saturated"})[0] == "true");
+}

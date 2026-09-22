@@ -127,8 +127,10 @@ collect_bitset_seed_inner_ids(const FilterPtr& inner_filter,
         }
     }
     if (enumerates_all_valid != nullptr) {
-        // Complete only when every inner id was probed and the seed budget did not cut the scan.
-        *enumerates_all_valid = id_step == 1 and inner_ids.size() < seed_count;
+        // Complete only when the scan really visited every inner id and the seed budget did not
+        // cut it short.  `id_step == 1` is not sufficient: the Bresenham-style advance still skips
+        // `id_remainder` positions when the remainder is non-zero, so ids would be missed.
+        *enumerates_all_valid = sample_count == total and inner_ids.size() < seed_count;
     }
     return inner_ids;
 }
@@ -574,13 +576,16 @@ HGraph::try_mci_search(const SearchRequest& request,
         int64_t valid_label_count = 0;
         request.filter_->GetValidIds(&valid_labels, valid_label_count);
         if (valid_label_count > 0) {
-            const auto covered =
-                static_cast<uint64_t>(std::ceil(static_cast<double>(params.mci_seed_coverage) *
-                                                static_cast<double>(valid_label_count)));
-            const bool fits_cap = params.mci_seed_max_count <= 0 or
-                                  covered <= static_cast<uint64_t>(params.mci_seed_max_count);
-            if (covered <= total_count and fits_cap) {
-                seed_budget = std::max(seed_budget, covered);
+            // Compare in floating point: `mci_seed_coverage` may be arbitrarily large and casting
+            // an out-of-range double to an integer is undefined behaviour.
+            const auto target = std::ceil(static_cast<double>(params.mci_seed_coverage) *
+                                          static_cast<double>(valid_label_count));
+            const auto cap = params.mci_seed_max_count > 0
+                                 ? std::min(static_cast<double>(params.mci_seed_max_count),
+                                            static_cast<double>(total_count))
+                                 : static_cast<double>(total_count);
+            if (std::isfinite(target) and target <= cap) {
+                seed_budget = std::max(seed_budget, static_cast<uint64_t>(target));
             }
         }
     }
