@@ -108,6 +108,16 @@ public:
     bool use_mci{true};
     bool use_conjugate_graph_search{true};
     float mci_seed_ratio{0.1F};
+    // Seed budget is `max(ceil(sqrt(N) * mci_seed_ratio), ceil(mci_seed_coverage * valid))`
+    // whenever the coverage part fits into `mci_seed_max_count` (0 = unlimited). Full coverage
+    // lets the MCI searcher answer exactly and skip the clique expansion entirely.
+    float mci_seed_coverage{1.0F};
+    int64_t mci_seed_max_count{32768};
+    // Expansion early stop: N consecutive expanded candidates that discovered nothing new abort
+    // the remaining expansion (0 disables). The metric lower bound is a heuristic (a clique
+    // member can be closer to the query than the candidate that led to it), so it is opt-in.
+    int64_t mci_expansion_idle_window{32};
+    bool mci_expansion_lower_bound{false};
     float mci_hgraph_valid_ratio_threshold{0.05F};
     // If > 0 and the active filter's ValidRatio() <= brute_force_threshold,
     // the search bypasses the graph traversal and runs an exact scan over the

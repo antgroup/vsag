@@ -42,6 +42,15 @@ struct MCISearcherParam {
     const uint8_t* valid_bitmap{nullptr};
     uint64_t valid_bitmap_size{0};
     bool* used_bitmap_fast_path{nullptr};
+    // Non-zero iff `seed_inner_ids` enumerates every valid point of the filter, in which case it
+    // equals that count. The seed phase then already scored every valid point with exact
+    // distances, so the result heap is final and clique expansion cannot change it.
+    uint64_t enumerated_valid_count{0};
+    // Set to true for this search when the guard above skipped the clique expansion.
+    bool* skipped_expansion{nullptr};
+    // Expansion early stop; see HGraphSearchParameters::mci_expansion_*.
+    uint64_t expansion_idle_window{32};
+    bool expansion_lower_bound{false};
 };
 
 class MCISearcher {

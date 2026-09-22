@@ -948,6 +948,7 @@ private:
         uint64_t seed_count{0};
         bool used_precise_float_csr{false};
         bool used_bitmap_fast_path{false};
+        bool seed_saturated{false};
     };
 
     [[nodiscard]] MCIHybridSearchResult

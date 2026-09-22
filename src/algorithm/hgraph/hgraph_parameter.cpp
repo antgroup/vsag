@@ -416,6 +416,27 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
             std::isfinite(obj.mci_seed_ratio) and obj.mci_seed_ratio >= 0.0F,
             "hgraph mci_seed_ratio must be finite and non-negative");
     }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_SEED_COVERAGE)) {
+        obj.mci_seed_coverage = params[INDEX_TYPE_HGRAPH][HGRAPH_MCI_SEED_COVERAGE].GetFloat();
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            std::isfinite(obj.mci_seed_coverage) and obj.mci_seed_coverage >= 0.0F,
+            "hgraph mci_seed_coverage must be finite and non-negative");
+    }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_SEED_MAX_COUNT)) {
+        obj.mci_seed_max_count = params[INDEX_TYPE_HGRAPH][HGRAPH_MCI_SEED_MAX_COUNT].GetInt();
+        CHECK_ARGUMENT(obj.mci_seed_max_count >= 0,
+                       "hgraph mci_seed_max_count must be non-negative");
+    }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_EXPANSION_IDLE_WINDOW)) {
+        obj.mci_expansion_idle_window =
+            params[INDEX_TYPE_HGRAPH][HGRAPH_MCI_EXPANSION_IDLE_WINDOW].GetInt();
+        CHECK_ARGUMENT(obj.mci_expansion_idle_window >= 0,
+                       "hgraph mci_expansion_idle_window must be non-negative");
+    }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_EXPANSION_LOWER_BOUND)) {
+        obj.mci_expansion_lower_bound =
+            params[INDEX_TYPE_HGRAPH][HGRAPH_MCI_EXPANSION_LOWER_BOUND].GetBool();
+    }
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_HGRAPH_VALID_RATIO_THRESHOLD)) {
         obj.mci_hgraph_valid_ratio_threshold =
             params[INDEX_TYPE_HGRAPH][HGRAPH_MCI_HGRAPH_VALID_RATIO_THRESHOLD].GetFloat();

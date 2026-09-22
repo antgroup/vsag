@@ -34,6 +34,34 @@
 namespace vsag {
 namespace {
 
+// MCI expansion early stop, driven by the search parameters (HGraphSearchParameters::
+// mci_expansion_idle_window / mci_expansion_lower_bound).  `VSAG_MCI_EARLY_STOP` and
+// `VSAG_MCI_IDLE_LIMIT` remain as debug overrides for A/B experiments.
+struct MCIEarlyStopKnobs {
+    bool idle_break{false};
+    bool lower_break{false};
+    uint64_t idle_limit{32};
+};
+
+MCIEarlyStopKnobs
+mci_early_stop_knobs(const MCISearcherParam& mci_param) {
+    MCIEarlyStopKnobs result;
+    result.idle_break = mci_param.expansion_idle_window > 0;
+    result.idle_limit = mci_param.expansion_idle_window;
+    result.lower_break = mci_param.expansion_lower_bound;
+    const char* mode = std::getenv("VSAG_MCI_EARLY_STOP");  // debug override
+    if (mode != nullptr) {
+        const std::string text(mode);
+        result.idle_break = text.find("idle") != std::string::npos;
+        result.lower_break = text.find("lower") != std::string::npos;
+    }
+    const char* limit = std::getenv("VSAG_MCI_IDLE_LIMIT");
+    if (limit != nullptr) {
+        result.idle_limit = std::strtoull(limit, nullptr, 10);
+    }
+    return result;
+}
+
 // NOLINTNEXTLINE(readability-identifier-naming)
 struct MCIEpochMarks {
     std::vector<uint16_t> marks;
@@ -184,7 +212,12 @@ search_precise_float_csr(const CliqueDataCellBaseView& view,
                          Allocator* allocator) {
     const auto candidate_limit =
         std::max<int64_t>(inner_search_param.topk, static_cast<int64_t>(inner_search_param.ef));
-    auto result_heap = DistanceHeap::MakeInstanceBySize<true, true>(allocator, candidate_limit);
+    // The returned heap is truncated to the user's top-k by the caller; `candidate_limit`
+    // (which is `max(topk, ef)`) is only needed for the expansion frontier.
+    const auto result_limit = inner_search_param.rerank_topk > 0
+                                  ? static_cast<int64_t>(inner_search_param.rerank_topk)
+                                  : std::max<int64_t>(1, inner_search_param.topk);
+    auto result_heap = DistanceHeap::MakeInstanceBySize<true, true>(allocator, result_limit);
     thread_local MCIEpochMarks visited_nodes;
     thread_local MCIEpochMarks visited_cliques;
     SearchCandidateQueue candidates(allocator);
@@ -203,7 +236,17 @@ search_precise_float_csr(const CliqueDataCellBaseView& view,
                                            : 1.0F;
     const auto cosine_hold_mold =
         metric == MetricType::METRIC_TYPE_COSINE and precise_vector_stride > dim;
+    const auto early_stop = mci_early_stop_knobs(mci_param);
+    DistHeapPtr kth_heap;
+    if (early_stop.lower_break) {
+        kth_heap = DistanceHeap::MakeInstanceBySize<true, true>(allocator, inner_search_param.topk);
+    }
+    uint64_t accepted = 0;
+    uint64_t idle_candidates = 0;
     auto insert_candidate = [&](float distance, InnerIdType inner_id) {
+        if (candidates.CanUpdate(distance)) {
+            ++accepted;
+        }
         candidates.Insert(distance, inner_id);
     };
     auto get_closest_unexpanded = [&]() -> SearchCandidate* {
@@ -236,6 +279,9 @@ search_precise_float_csr(const CliqueDataCellBaseView& view,
         insert_candidate(dist, inner_id);
         if (is_result_distance_eligible<KNN_SEARCH>(dist, inner_search_param)) {
             result_heap->Push(dist, inner_id);
+            if (kth_heap != nullptr) {
+                kth_heap->Push(dist, inner_id);
+            }
         }
         return true;
     };
@@ -272,8 +318,13 @@ search_precise_float_csr(const CliqueDataCellBaseView& view,
         }
     }
 
+    const bool seeds_cover_all_valid_points =
+        mci_param.enumerated_valid_count != 0 and seeds >= mci_param.enumerated_valid_count;
+    if (mci_param.skipped_expansion != nullptr) {
+        *mci_param.skipped_expansion = seeds_cover_all_valid_points;
+    }
     uint32_t hops = 0;
-    while (not timed_out and hops < mci_param.hops_limit) {
+    while (not timed_out and not seeds_cover_all_valid_points and hops < mci_param.hops_limit) {
         if (check_overtime and mci_check_overtime(inner_search_param, ctx)) {
             break;
         }
@@ -281,6 +332,12 @@ search_precise_float_csr(const CliqueDataCellBaseView& view,
         if (candidate == nullptr) {
             break;
         }
+        if (kth_heap != nullptr and
+            kth_heap->Size() >= static_cast<uint64_t>(inner_search_param.topk) and
+            candidate->distance > kth_heap->Top().first) {
+            break;
+        }
+        const auto accepted_before = accepted;
         const auto inner_id = candidate->inner_id;
         for (auto offset = view.p_node_to_cid[inner_id]; offset < view.p_node_to_cid[inner_id + 1];
              ++offset) {
@@ -297,6 +354,15 @@ search_precise_float_csr(const CliqueDataCellBaseView& view,
             }
             if (hops >= mci_param.hops_limit) {
                 break;
+            }
+        }
+        if (early_stop.idle_break) {
+            if (accepted == accepted_before) {
+                if (++idle_candidates >= early_stop.idle_limit) {
+                    break;
+                }
+            } else {
+                idle_candidates = 0;
             }
         }
     }
@@ -327,7 +393,15 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
     auto* alloc = select_query_allocator(ctx, allocator_);
     const auto candidate_limit =
         std::max<int64_t>(inner_search_param.topk, static_cast<int64_t>(inner_search_param.ef));
-    auto heap = DistanceHeap::MakeInstanceBySize<true, true>(alloc, candidate_limit);
+    const auto result_limit = inner_search_param.rerank_topk > 0
+                                  ? static_cast<int64_t>(inner_search_param.rerank_topk)
+                                  : std::max<int64_t>(1, inner_search_param.topk);
+    auto heap = DistanceHeap::MakeInstanceBySize<true, true>(alloc, result_limit);
+    const auto early_stop = mci_early_stop_knobs(mci_param);
+    DistHeapPtr kth_heap;
+    if (early_stop.lower_break) {
+        kth_heap = DistanceHeap::MakeInstanceBySize<true, true>(alloc, inner_search_param.topk);
+    }
     if (cliques == nullptr or flatten == nullptr or query == nullptr) {
         return heap;
     }
@@ -362,6 +436,15 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
 
     auto computer_lease = AcquireQueryComputer(flatten, query, ctx);
     const auto& computer = computer_lease.computer;
+    // Distances are counted once at the end of the search, so the datacell must not aggregate
+    // them per call -- same contract as HGraph's brute force.
+    QueryContext distance_ctx_storage;
+    QueryContext* distance_ctx = nullptr;
+    if (ctx != nullptr) {
+        distance_ctx_storage = *ctx;
+        distance_ctx_storage.track_distance_evaluations = false;
+        distance_ctx = &distance_ctx_storage;
+    }
     thread_local MCIEpochMarks visited_nodes;
     thread_local MCIEpochMarks visited_cliques;
     visited_nodes.Reset(total);
@@ -378,6 +461,8 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
         return static_cast<int64_t>(candidates.size()) < candidate_limit or
                distance < candidates.back().distance;
     };
+    uint64_t accepted = 0;
+    uint64_t idle_candidates = 0;
     auto insert_candidate = [&](float distance, InnerIdType inner_id) {
         if (not can_update(distance)) {
             return;
@@ -389,6 +474,7 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
         if (static_cast<int64_t>(candidates.size()) > candidate_limit) {
             candidates.pop_back();
         }
+        ++accepted;
     };
     auto get_closest_unexpanded = [&]() -> SearchCandidate* {
         for (auto& candidate : candidates) {
@@ -400,7 +486,7 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
         return nullptr;
     };
     uint32_t dist_cmp = 0;
-    auto try_visit = [&](InnerIdType inner_id) -> bool {
+    auto try_mark = [&](InnerIdType inner_id) -> bool {
         if (inner_id >= total) {
             return false;
         }
@@ -419,13 +505,25 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
                 return false;
             }
         }
-        float dist = 0.0F;
-        flatten->Query(&dist, computer, &inner_id, 1, ctx);
+        return true;
+    };
+    auto score_marked = [&](float dist, InnerIdType inner_id) {
         ++dist_cmp;
         insert_candidate(dist, inner_id);
         if (is_result_distance_eligible<KNN_SEARCH>(dist, inner_search_param)) {
             heap->Push(dist, inner_id);
+            if (kth_heap != nullptr) {
+                kth_heap->Push(dist, inner_id);
+            }
         }
+    };
+    auto try_visit = [&](InnerIdType inner_id) -> bool {
+        if (not try_mark(inner_id)) {
+            return false;
+        }
+        float dist = 0.0F;
+        flatten->Query(&dist, computer, &inner_id, 1, distance_ctx);
+        score_marked(dist, inner_id);
         return true;
     };
 
@@ -438,16 +536,43 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
         seed_list_provided = true;
         const auto seed_count = mci_param.seed_inner_ids->size();
         const auto sampled_seed_count = std::min<uint64_t>(seed_target, seed_count);
+        // Batch the seed distances: HGraph's brute force scores 64 ids per Query call, and a
+        // single-id call pays the per-call overhead (dispatch, layout acquire, statistics) once
+        // per point instead of once per 64.
+        constexpr uint64_t kSeedBatch = 64;
+        std::vector<InnerIdType> seed_batch_ids;
+        std::vector<float> seed_batch_dists(kSeedBatch, 0.0F);
+        seed_batch_ids.reserve(kSeedBatch);
+        auto flush_seed_batch = [&]() {
+            if (seed_batch_ids.empty()) {
+                return;
+            }
+            flatten->Query(seed_batch_dists.data(),
+                           computer,
+                           seed_batch_ids.data(),
+                           static_cast<uint64_t>(seed_batch_ids.size()),
+                           distance_ctx);
+            for (size_t k = 0; k < seed_batch_ids.size(); ++k) {
+                score_marked(seed_batch_dists[k], seed_batch_ids[k]);
+            }
+            seed_batch_ids.clear();
+        };
         for (uint64_t i = 0; i < sampled_seed_count; ++i) {
             if (check_overtime and mci_check_overtime(inner_search_param, ctx)) {
                 timed_out = true;
                 break;
             }
             const auto offset = i * seed_count / sampled_seed_count;
-            if (try_visit((*mci_param.seed_inner_ids)[offset])) {
+            const auto seed_inner_id = (*mci_param.seed_inner_ids)[offset];
+            if (try_mark(seed_inner_id)) {
                 ++seeds;
+                seed_batch_ids.push_back(seed_inner_id);
+                if (seed_batch_ids.size() == kSeedBatch) {
+                    flush_seed_batch();
+                }
             }
         }
+        flush_seed_batch();
     }
     if (not seed_list_provided) {
         for (InnerIdType seed = 0; seed < total and seeds < seed_target; ++seed) {
@@ -461,10 +586,15 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
         }
     }
 
+    const bool seeds_cover_all_valid_points =
+        mci_param.enumerated_valid_count != 0 and seeds >= mci_param.enumerated_valid_count;
+    if (mci_param.skipped_expansion != nullptr) {
+        *mci_param.skipped_expansion = seeds_cover_all_valid_points;
+    }
     uint32_t hops = 0;
     Vector<InnerIdType> clique_ids(alloc);
     Vector<InnerIdType> members(alloc);
-    while (not timed_out and hops < mci_param.hops_limit) {
+    while (not timed_out and not seeds_cover_all_valid_points and hops < mci_param.hops_limit) {
         if (check_overtime and mci_check_overtime(inner_search_param, ctx)) {
             break;
         }
@@ -472,6 +602,12 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
         if (candidate == nullptr) {
             break;
         }
+        if (kth_heap != nullptr and
+            kth_heap->Size() >= static_cast<uint64_t>(inner_search_param.topk) and
+            candidate->distance > kth_heap->Top().first) {
+            break;
+        }
+        const auto accepted_before = accepted;
         clique_ids.clear();
         cliques->CollectNodeCliqueIds(candidate->inner_id, clique_ids);
         for (auto clique_id : clique_ids) {
@@ -489,11 +625,22 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
                 break;
             }
         }
+        if (early_stop.idle_break) {
+            if (accepted == accepted_before) {
+                if (++idle_candidates >= early_stop.idle_limit) {
+                    break;
+                }
+            } else {
+                idle_candidates = 0;
+            }
+        }
     }
 
     if (ctx != nullptr and ctx->stats != nullptr) {
         ctx->stats->dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
         ctx->stats->hops.fetch_add(hops, std::memory_order_relaxed);
+        ctx->stats->AddDistance(
+            SearchStatistics::DistancePhase::APPROXIMATE, flatten->backend_, dist_cmp);
     }
     return heap;
 }
