@@ -20,6 +20,7 @@
 #include "../index_search_parameter.h"
 #include "../inner_index_parameter.h"
 #include "data_type.h"
+#include "impl/adaptive_pruning.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/pointer_define.h"
 #include "vsag/constants.h"
@@ -76,6 +77,7 @@ public:
     uint64_t ef_construction{400};
     uint64_t resize_increase_count_bit{DEFAULT_RESIZE_INCREASE_COUNT_BIT};
     float alpha{1.0F};
+    AdaptivePruningParameter adaptive_pruning;
 
     bool support_duplicate{false};
     bool deduplicate_storage{false};
