@@ -653,8 +653,7 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
     if (optimized_build_codes_ != nullptr) {
         AddBatch batch(allocator_);
         batch.storage_preallocated = storage_preallocated;
-        batch.input_indices.resize(data_num);
-        std::iota(batch.input_indices.begin(), batch.input_indices.end(), 0);
+        batch.input_indices = input_indices;
         encode_add_batch(base, batch);
     } else {
         const auto insert_codes = [&](const FlattenInterfacePtr& codes) {

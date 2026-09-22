@@ -17,8 +17,11 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <future>
 #include <set>
+#include <stdexcept>
 #include <vector>
 
 #include "datacell/graph_interface.h"
@@ -29,6 +32,34 @@
 #include "unittest.h"
 
 namespace {
+
+class RejectSecondSubmissionPool : public vsag::ThreadPool {
+public:
+    std::promise<void> rejected;
+    std::shared_ptr<std::packaged_task<void()>> pending;
+
+    std::future<void>
+    Enqueue(std::function<void()> task) override {
+        if (pending != nullptr) {
+            rejected.set_value();
+            throw std::runtime_error("injected PiPNN submission failure");
+        }
+        pending = std::make_shared<std::packaged_task<void()>>(std::move(task));
+        return pending->get_future();
+    }
+
+    void
+    WaitUntilEmpty() override {
+    }
+
+    void
+    SetQueueSizeLimit(uint64_t) override {
+    }
+
+    void
+    SetPoolSize(uint64_t) override {
+    }
+};
 
 vsag::IndexCommonParam
 MakeCommonParam(uint64_t dimensions,
@@ -106,6 +137,40 @@ RequireGraphInvariants(const vsag::GraphInterfacePtr& graph,
 }
 
 }  // namespace
+
+TEST_CASE("PiPNN drains accepted workers when task submission fails",
+          "[ut][pipnn][submission_failure]") {
+    auto common = MakeCommonParam(4);
+    auto graph = MakeGraph(common, 512, 16);
+    auto vectors = MakeVectors(512, 4);
+    vsag::Vector<vsag::InnerIdType> ids(common.allocator_.get());
+    for (vsag::InnerIdType id = 0; id < 512; ++id) {
+        ids.emplace_back(id);
+    }
+    auto rows = MakeRows(vectors, ids, 4, common.allocator_.get());
+    auto pool = std::make_shared<RejectSecondSubmissionPool>();
+    auto rejected = pool->rejected.get_future();
+    vsag::SafeThreadPool safe_pool(pool);
+    vsag::PiPNNGraphBuilder builder({}, 4, common.metric_, common.allocator_.get(), &safe_pool, 2);
+    auto build = std::async(std::launch::async, [&]() {
+        try {
+            builder.Build(graph, ids, rows);
+        } catch (const std::runtime_error& error) {
+            return std::string(error.what());
+        }
+        return std::string{};
+    });
+    rejected.wait();
+    // Keep the accepted task pending: Build must not unwind its captured state yet.
+    const bool returned_early =
+        build.wait_for(std::chrono::milliseconds(100)) == std::future_status::ready;
+    if (not returned_early) {
+        (*pool->pending)();
+    }
+    // On the buggy path, discard the callback instead of executing dangling references.
+    CHECK(build.get() == "injected PiPNN submission failure");
+    CHECK_FALSE(returned_early);
+}
 
 TEST_CASE("PiPNN graph builder preserves adjacency invariants and determinism", "[ut][pipnn]") {
     constexpr uint64_t dimensions = 8;

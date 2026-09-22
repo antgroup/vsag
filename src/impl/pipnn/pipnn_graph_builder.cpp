@@ -1289,19 +1289,25 @@ PiPNNPipeline::parallel_for(uint64_t total,
     const uint64_t worker_count = std::min(thread_count_, block_count);
     Vector<std::future<void>> futures(allocator_);
     futures.reserve(worker_count);
-    for (uint64_t worker = 0; worker < worker_count; ++worker) {
-        futures.emplace_back(thread_pool_->GeneralEnqueue([&]() {
-            while (true) {
-                const uint64_t begin = next.fetch_add(block_size, std::memory_order_relaxed);
-                if (begin >= total) {
-                    return;
+    std::exception_ptr first_exception;
+    try {
+        for (uint64_t worker = 0; worker < worker_count; ++worker) {
+            futures.emplace_back(thread_pool_->GeneralEnqueue([&]() {
+                while (true) {
+                    const uint64_t begin = next.fetch_add(block_size, std::memory_order_relaxed);
+                    if (begin >= total) {
+                        return;
+                    }
+                    task(begin, std::min(begin + block_size, total));
                 }
-                task(begin, std::min(begin + block_size, total));
-            }
-        }));
+            }));
+        }
+    } catch (...) {
+        first_exception = std::current_exception();
     }
 
-    std::exception_ptr first_exception;
+    // Submitted workers borrow stack and pipeline state, even when a later submission fails.
+    // Drain them before unwinding either lifetime.
     for (auto& future : futures) {
         try {
             future.get();

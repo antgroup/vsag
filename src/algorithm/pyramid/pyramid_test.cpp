@@ -1475,6 +1475,78 @@ TEST_CASE("Pyramid PiPNN multi-layer root supports RaBitQ with SQ8 reorder",
             result->GetIds() + result->GetDim());
 }
 
+TEST_CASE("Pyramid PiPNN preserves vectors after duplicate label filtering",
+          "[ut][pyramid][pipnn][optimized_build][duplicate_label_mapping]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 96;
+    const bool fast = GENERATE(true, false);
+    const uint64_t threads = GENERATE(1, 4);
+    CAPTURE(fast, threads);
+    vsag::IndexCommonParam common;
+    common.dim_ = dim;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto external = vsag::JsonType::Parse(R"({
+        "graph_type": "pipnn",
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "rabitq_bits_per_dim_query": 32,
+        "use_reorder": true,
+        "store_raw_vector": true,
+        "max_degree": 16,
+        "ef_construction": 64,
+        "index_min_size": 8,
+        "hierarchies": ["site"]
+    })");
+    external["fast_encode_rabitq"].SetBool(fast);
+    external["build_thread_count"].SetUint64(threads);
+    auto index = std::make_shared<vsag::IndexImpl<vsag::Pyramid>>(external, common);
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    for (int64_t row = 0; row < count; ++row) {
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[row * dim + d] = static_cast<float>(row) + 0.01F * static_cast<float>(d);
+        }
+    }
+    // Reject rows at two positions; subsequent labels must still refer to their original rows.
+    ids[1] = ids[0];
+    ids[48] = ids[47];
+    auto data = vsag::Dataset::Make()
+                    ->NumElements(count)
+                    ->Dim(dim)
+                    ->Ids(ids.data())
+                    ->Float32Vectors(vectors.data())
+                    ->Owner(false);
+    auto built = index->Build(data);
+    REQUIRE(built.has_value());
+    REQUIRE(built.value() == std::vector<int64_t>{0, 47});
+    REQUIRE(index->GetNumElements() == count - 2);
+
+    const auto check_vectors = [&](const auto& target) {
+        for (int64_t row = 0; row < count; ++row) {
+            if (row == 1 or row == 48) {
+                continue;
+            }
+            CAPTURE(row);
+            auto result = target->GetRawVectorByIds(&ids[row], 1, nullptr);
+            REQUIRE(result.has_value());
+            const auto* actual = result.value()->GetFloat32Vectors();
+            REQUIRE(
+                std::equal(vectors.data() + row * dim, vectors.data() + (row + 1) * dim, actual));
+        }
+    };
+    check_vectors(index);
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    auto restored = std::make_shared<vsag::IndexImpl<vsag::Pyramid>>(external, common);
+    REQUIRE(restored->DeserializeStreaming(stream).has_value());
+    check_vectors(restored);
+}
+
 TEST_CASE("Pyramid scalar RaBitQ split build supports search serialization and Add",
           "[ut][pyramid][optimized_build]") {
     constexpr int64_t dim = 64;
