@@ -730,11 +730,12 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                                             this->build_thread_count_);
             GraphBuildFunc build_graph =
                 [&](GraphInterfacePtr& graph, const Vector<InnerIdType>& ids, uint32_t level) {
-                    if (level == 0) {
-                        graph->SetMaxCapacity(static_cast<InnerIdType>(data_num));
-                        pipnn_builder.Build(graph, ids, rows);
-                        return;
-                    }
+                    // `rows` is indexed by compacted inner id while `ids` is this node's own id
+                    // list, which is a strict subset as soon as an element is missing from the
+                    // node. Remap positionally for every level rather than assuming level 0 spans
+                    // the whole [0, data_num) range: the public path API currently requires at
+                    // least one path per element, but that caller-side invariant is not something
+                    // this builder should depend on.
                     Vector<const float*> node_rows(allocator_);
                     node_rows.reserve(ids.size());
                     for (const auto id : ids) {
