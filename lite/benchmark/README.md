@@ -419,3 +419,20 @@ build-lite-rabitq/lite_rabitq_codec_probe /data/gist-prepared/scale-100000 32 51
 On the recorded 100-query prefixes, exhaustive full-code and lower-bound-filtered Recall@10 were both 0.997 at 10k and 100k. With `max_degree=32` and `ef_search=512`, graph Recall@10 was 0.984 at 10k and 0.949 at 100k; graph-search P50 was 5.408 ms and 9.139 ms. The 100k run encoded in 2.715 s, built the temporary FP32-derived graph in 180.568 s, used 1,408,628 KiB process peak RSS, and stored 36.0 MB filter payload, 60.0 MB supplement payload, 2.4 MB metadata, and 26.4 MB CSR topology (decimal bytes).
 
 These are single-run experiment results, not a public-backend or SIMD performance claim. The scalar full scan keeps source vectors and a temporary FP32 graph backend resident, and the GIST subsets are prefix-specific datasets with recomputed ground truth. Full GIST1M is optional stress testing rather than a Lite acceptance requirement; high dimensionality is covered here without redefining Lite as a million-scale index.
+
+## RaBitQ CSR snapshot experiment
+
+The experiment-only `VSLRBQ01` format keeps its existing version 1 model/code payload unchanged. Version 2 appends the CSR graph as little-endian offset and neighbor arrays. Loading validates the offset count, zero origin, monotonic and bounded adjacency ranges, maximum degree 64, final edge count, neighbor range, self-loops, duplicate neighbors, truncation, and trailing bytes before graph search can run.
+
+Use separate processes to save and restore a prepared dataset:
+
+```bash
+build-lite-rabitq/lite_rabitq_codec_probe --save \
+  /data/sift-prepared/scale-10000 /data/sift-10k-rabitq-v2.bin 16 128
+build-lite-rabitq/lite_rabitq_codec_probe --load \
+  /data/sift-prepared/scale-10000 /data/sift-10k-rabitq-v2.bin 128
+```
+
+Recorded SIFT-10k and SIFT-100k snapshots were 2,880,648 and 28,800,648 bytes. Fresh-process load took 6.817 and 66.843 ms, and restored graph Recall@10 remained exactly 0.966 and 0.940. Mean visited/reordered counts also remained 829.15/128 and 1,150.83/128. The 100k loader used 32,176 KiB process peak RSS. These are single-run fresh-process measurements with uncontrolled page cache; they validate independent persistence and result stability rather than strict cold-load performance.
+
+Version 2 is local to the opt-in probe. It does not change public Lite v1/v2/v3 snapshots or expose RaBitQ through `VectorStorage`.

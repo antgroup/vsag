@@ -754,11 +754,15 @@ read_bytes(std::istream& input, std::vector<uint8_t>& bytes) {
 }
 
 void
-save_snapshot(std::ostream& output, const Model& model, const EncodedRecords& codes) {
+write_snapshot_payload(std::ostream& output,
+                       uint64_t version,
+                       const Model& model,
+                       const EncodedRecords& codes) {
     constexpr char magic[] = "VSLRBQ01";
-    require(model.dim == codes.dim, "snapshot model and records disagree");
+    require((version == 1 or version == 2) and model.dim == codes.dim,
+            "snapshot model and records disagree");
     output.write(magic, 8);
-    write_u64(output, 1);
+    write_u64(output, version);
     write_u64(output, model.dim);
     write_u64(output, codes.Size());
     write_u64(output, model.centroid.size());
@@ -780,12 +784,22 @@ save_snapshot(std::ostream& output, const Model& model, const EncodedRecords& co
     }
 }
 
-std::pair<Model, EncodedRecords>
-load_snapshot(std::istream& input) {
+void
+save_snapshot(std::ostream& output, const Model& model, const EncodedRecords& codes) {
+    write_snapshot_payload(output, 1, model, codes);
+}
+
+struct EncodedSnapshot {
+    Model model;
+    EncodedRecords codes;
+};
+
+EncodedSnapshot
+load_snapshot_payload(std::istream& input, uint64_t expected_version) {
     char magic[8]{};
     input.read(magic, sizeof(magic));
     require(input and std::memcmp(magic, "VSLRBQ01", 8) == 0, "invalid snapshot magic");
-    require(read_u64(input) == 1, "unsupported snapshot version");
+    require(read_u64(input) == expected_version, "unsupported snapshot version");
     const uint64_t dim = read_u64(input);
     const uint64_t count = read_u64(input);
     const uint64_t centroid_size = read_u64(input);
@@ -817,8 +831,78 @@ load_snapshot(std::istream& input) {
                    codes.supplements.data() + id * codes.SupplementBytes(),
                    codes.SupplementBytes());
     }
-    require(input.peek() == std::char_traits<char>::eof(), "snapshot trailing bytes");
     return {std::move(model), std::move(codes)};
+}
+
+std::pair<Model, EncodedRecords>
+load_snapshot(std::istream& input) {
+    auto loaded = load_snapshot_payload(input, 1);
+    require(input.peek() == std::char_traits<char>::eof(), "snapshot trailing bytes");
+    return {std::move(loaded.model), std::move(loaded.codes)};
+}
+
+void
+validate_graph_topology(const GraphTopology& graph, uint64_t count) {
+    require(graph.offsets.size() == count + 1 and graph.offsets.front() == 0,
+            "invalid graph offset layout");
+    require(graph.neighbors.size() <= count * 64, "graph edge count exceeds limit");
+    for (uint64_t slot = 0; slot < count; ++slot) {
+        const uint64_t begin = graph.offsets[slot];
+        const uint64_t end = graph.offsets[slot + 1];
+        require(begin <= end and end <= graph.neighbors.size() and end - begin <= 64,
+                "invalid graph adjacency bounds");
+        for (uint64_t edge = begin; edge < end; ++edge) {
+            const uint64_t neighbor = graph.neighbors[edge];
+            require(neighbor < count and neighbor != slot, "invalid graph neighbor");
+            require(std::find(graph.neighbors.begin() + static_cast<int64_t>(begin),
+                              graph.neighbors.begin() + static_cast<int64_t>(edge),
+                              neighbor) == graph.neighbors.begin() + static_cast<int64_t>(edge),
+                    "duplicate graph neighbor");
+        }
+    }
+    require(graph.offsets.back() == graph.neighbors.size(), "graph edge count mismatch");
+}
+
+void
+save_graph_snapshot(std::ostream& output,
+                    const Model& model,
+                    const EncodedRecords& codes,
+                    const GraphTopology& graph) {
+    validate_graph_topology(graph, codes.Size());
+    write_snapshot_payload(output, 2, model, codes);
+    write_u64(output, graph.offsets.size());
+    write_u64(output, graph.neighbors.size());
+    for (uint64_t offset : graph.offsets) {
+        write_u64(output, offset);
+    }
+    for (uint64_t neighbor : graph.neighbors) {
+        write_u64(output, neighbor);
+    }
+}
+
+struct GraphSnapshot {
+    Model model;
+    EncodedRecords codes;
+    GraphTopology graph;
+};
+
+GraphSnapshot
+load_graph_snapshot(std::istream& input) {
+    auto loaded = load_snapshot_payload(input, 2);
+    const uint64_t offset_count = read_u64(input);
+    const uint64_t neighbor_count = read_u64(input);
+    require(offset_count == loaded.codes.Size() + 1 and neighbor_count <= loaded.codes.Size() * 64,
+            "invalid graph snapshot layout");
+    GraphTopology graph{std::vector<uint64_t>(offset_count), std::vector<uint64_t>(neighbor_count)};
+    for (uint64_t& offset : graph.offsets) {
+        offset = read_u64(input);
+    }
+    for (uint64_t& neighbor : graph.neighbors) {
+        neighbor = read_u64(input);
+    }
+    validate_graph_topology(graph, loaded.codes.Size());
+    require(input.peek() == std::char_traits<char>::eof(), "snapshot trailing bytes");
+    return {std::move(loaded.model), std::move(loaded.codes), std::move(graph)};
 }
 
 void
@@ -989,6 +1073,84 @@ self_test() {
                     "damaged snapshot was accepted");
         }
     }
+    std::stringstream graph_snapshot(std::ios::in | std::ios::out | std::ios::binary);
+    save_graph_snapshot(graph_snapshot, first, codes, graph);
+    const std::string graph_bytes = graph_snapshot.str();
+    graph_snapshot.seekg(0);
+    auto restored = load_graph_snapshot(graph_snapshot);
+    require(restored.model.centroid == first.centroid and restored.model.flips == first.flips and
+                restored.codes.Size() == codes.Size() and
+                restored.graph.offsets == graph.offsets and
+                restored.graph.neighbors == graph.neighbors,
+            "graph snapshot mismatch");
+    const auto restored_graph =
+        graph_search(normalized_query, query_norm, restored.codes, restored.graph, 10, 32);
+    require(restored_graph.visited == graph_result.visited and
+                restored_graph.reordered == graph_result.reordered and
+                std::equal(graph_result.neighbors.begin(),
+                           graph_result.neighbors.end(),
+                           restored_graph.neighbors.begin(),
+                           [](const auto& left, const auto& right) {
+                               return left.id == right.id and left.distance == right.distance;
+                           }),
+            "restored graph search mismatch");
+    std::stringstream repeated_graph(std::ios::in | std::ios::out | std::ios::binary);
+    save_graph_snapshot(repeated_graph, restored.model, restored.codes, restored.graph);
+    require(repeated_graph.str() == graph_bytes, "graph snapshot bytes changed after round-trip");
+
+    const uint64_t plane_bytes_for_snapshot = (dim + 7) / 8;
+    const uint64_t record_bytes =
+        6 * sizeof(float) + plane_bytes_for_snapshot * (K_FILTER_BITS + K_SUPPLEMENT_BITS);
+    const uint64_t graph_start = 6 * sizeof(uint64_t) + dim * sizeof(float) +
+                                 K_ROUNDS * plane_bytes_for_snapshot + count * record_bytes;
+    const uint64_t offsets_start = graph_start + 2 * sizeof(uint64_t);
+    const uint64_t neighbors_start = offsets_start + graph.offsets.size() * sizeof(uint64_t);
+    require(graph.offsets[1] >= 2, "test graph needs two first-node neighbors");
+    auto overwrite_u64 = [](std::string& value, uint64_t offset, uint64_t replacement_value) {
+        require(offset <= value.size() and value.size() - offset >= sizeof(uint64_t),
+                "test mutation outside snapshot");
+        for (uint64_t i = 0; i < sizeof(uint64_t); ++i) {
+            value[offset + i] = static_cast<char>((replacement_value >> (8U * i)) & 0xffU);
+        }
+    };
+    std::vector<std::string> invalid_graphs{graph_bytes.substr(0, graph_bytes.size() - 1),
+                                            graph_bytes + std::string(1, '\0')};
+    auto wrong_offsets = graph_bytes;
+    overwrite_u64(wrong_offsets, graph_start, count);
+    invalid_graphs.push_back(std::move(wrong_offsets));
+    auto too_many_neighbors = graph_bytes;
+    overwrite_u64(too_many_neighbors, graph_start + sizeof(uint64_t), count * 64 + 1);
+    invalid_graphs.push_back(std::move(too_many_neighbors));
+    auto nonzero_first_offset = graph_bytes;
+    overwrite_u64(nonzero_first_offset, offsets_start, 1);
+    invalid_graphs.push_back(std::move(nonzero_first_offset));
+    auto decreasing_offsets = graph_bytes;
+    overwrite_u64(decreasing_offsets, offsets_start + sizeof(uint64_t), graph.offsets[2] + 1);
+    invalid_graphs.push_back(std::move(decreasing_offsets));
+    auto mismatched_last_offset = graph_bytes;
+    overwrite_u64(mismatched_last_offset,
+                  offsets_start + count * sizeof(uint64_t),
+                  graph.neighbors.size() + 1);
+    invalid_graphs.push_back(std::move(mismatched_last_offset));
+    auto out_of_range_neighbor = graph_bytes;
+    overwrite_u64(out_of_range_neighbor, neighbors_start, count);
+    invalid_graphs.push_back(std::move(out_of_range_neighbor));
+    auto self_loop = graph_bytes;
+    overwrite_u64(self_loop, neighbors_start, 0);
+    invalid_graphs.push_back(std::move(self_loop));
+    auto duplicate_neighbor = graph_bytes;
+    overwrite_u64(duplicate_neighbor, neighbors_start + sizeof(uint64_t), graph.neighbors[0]);
+    invalid_graphs.push_back(std::move(duplicate_neighbor));
+    for (const std::string& invalid : invalid_graphs) {
+        std::stringstream damaged(invalid, std::ios::in | std::ios::binary);
+        try {
+            static_cast<void>(load_graph_snapshot(damaged));
+            throw std::runtime_error("damaged graph snapshot was accepted");
+        } catch (const std::runtime_error& error) {
+            require(std::string(error.what()) != "damaged graph snapshot was accepted",
+                    "damaged graph snapshot was accepted");
+        }
+    }
 }
 
 uint64_t
@@ -1017,7 +1179,10 @@ parse_positive(const char* value) {
 }
 
 void
-run(const std::filesystem::path& root, uint64_t max_degree, uint64_t ef_search) {
+run(const std::filesystem::path& root,
+    uint64_t max_degree,
+    uint64_t ef_search,
+    const std::filesystem::path& snapshot_path = {}) {
     const uint64_t dim = read_dimension(root / "base.fvecs");
     constexpr uint64_t k = 10;
     const auto base = read_records<float>(root / "base.fvecs", dim);
@@ -1041,6 +1206,12 @@ run(const std::filesystem::path& root, uint64_t max_degree, uint64_t ef_search) 
     const auto graph = build_graph_topology(base.values, base.count, dim, max_degree, ef_search);
     const double graph_build_ms =
         std::chrono::duration<double, std::milli>(Clock::now() - graph_build_start).count();
+    if (not snapshot_path.empty()) {
+        require(not std::filesystem::exists(snapshot_path), "snapshot output already exists");
+        std::ofstream output(snapshot_path, std::ios::binary);
+        require(static_cast<bool>(output), "cannot create graph snapshot");
+        save_graph_snapshot(output, model, codes, graph);
+    }
     uint64_t full_hits = 0;
     uint64_t filtered_hits = 0;
     uint64_t graph_hits = 0;
@@ -1112,6 +1283,58 @@ run(const std::filesystem::path& root, uint64_t max_degree, uint64_t ef_search) 
               << graph.offsets.size() * sizeof(uint64_t) + graph.neighbors.size() * sizeof(uint64_t)
               << '\n';
 }
+
+void
+run_loaded(const std::filesystem::path& root,
+           const std::filesystem::path& snapshot_path,
+           uint64_t ef_search) {
+    std::ifstream input(snapshot_path, std::ios::binary);
+    require(static_cast<bool>(input), "cannot open graph snapshot");
+    const auto load_start = Clock::now();
+    auto snapshot = load_graph_snapshot(input);
+    const double load_ms =
+        std::chrono::duration<double, std::milli>(Clock::now() - load_start).count();
+    constexpr uint64_t k = 10;
+    require(ef_search >= k and ef_search <= snapshot.codes.Size(),
+            "ef_search must be in [10, base_count]");
+    const auto queries = read_records<float>(root / "queries.fvecs", snapshot.model.dim);
+    const auto truth = read_records<int32_t>(root / "groundtruth.ivecs", k);
+    require(queries.count == truth.count and snapshot.codes.Size() >= k,
+            "inconsistent graph dataset");
+    uint64_t graph_hits = 0;
+    uint64_t graph_visited = 0;
+    uint64_t graph_reordered = 0;
+    std::vector<double> graph_search_us;
+    for (uint64_t q = 0; q < queries.count; ++q) {
+        float query_norm = 0.0F;
+        const auto query =
+            normalize(snapshot.model, queries.values.data() + q * snapshot.model.dim, query_norm);
+        const auto start = Clock::now();
+        const auto found =
+            graph_search(query, query_norm, snapshot.codes, snapshot.graph, k, ef_search);
+        graph_search_us.push_back(
+            std::chrono::duration<double, std::micro>(Clock::now() - start).count());
+        const int32_t* expected = truth.values.data() + q * k;
+        for (uint64_t i = 0; i < k; ++i) {
+            require(expected[i] >= 0 and static_cast<uint64_t>(expected[i]) < snapshot.codes.Size(),
+                    "ground-truth ID outside base");
+        }
+        graph_hits += hits(found.neighbors, expected, k);
+        graph_visited += found.visited;
+        graph_reordered += found.reordered;
+    }
+    std::sort(graph_search_us.begin(), graph_search_us.end());
+    const uint64_t opportunities = queries.count * k;
+    std::cout << "base_count,query_count,dim,ef_search,load_ms,graph_recall_at_10,"
+                 "mean_graph_visited,mean_graph_reordered,graph_search_p50_us,snapshot_bytes\n";
+    std::cout << std::fixed << std::setprecision(6) << snapshot.codes.Size() << ',' << queries.count
+              << ',' << snapshot.model.dim << ',' << ef_search << ',' << load_ms << ','
+              << static_cast<double>(graph_hits) / static_cast<double>(opportunities) << ','
+              << static_cast<double>(graph_visited) / static_cast<double>(queries.count) << ','
+              << static_cast<double>(graph_reordered) / static_cast<double>(queries.count) << ','
+              << graph_search_us[graph_search_us.size() / 2] << ','
+              << std::filesystem::file_size(snapshot_path) << '\n';
+}
 }  // namespace
 
 int
@@ -1122,6 +1345,14 @@ main(int argc, char** argv) {
             std::cout << "rabitq_lite_codec_probe: PASS\n";
             return 0;
         }
+        if (argc == 6 and std::string(argv[1]) == "--save") {
+            run(argv[2], parse_positive(argv[4]), parse_positive(argv[5]), argv[3]);
+            return 0;
+        }
+        if (argc == 5 and std::string(argv[1]) == "--load") {
+            run_loaded(argv[2], argv[3], parse_positive(argv[4]));
+            return 0;
+        }
         if (argc == 2 or argc == 4) {
             const uint64_t max_degree = argc == 4 ? parse_positive(argv[2]) : 16;
             const uint64_t ef_search = argc == 4 ? parse_positive(argv[3]) : 128;
@@ -1129,7 +1360,8 @@ main(int argc, char** argv) {
             return 0;
         }
         std::cerr << "usage: lite_rabitq_codec_probe [DATASET_DIR [MAX_DEGREE EF_SEARCH] | "
-                     "--self-test]\n";
+                     "--save DATASET_DIR SNAPSHOT MAX_DEGREE EF_SEARCH | "
+                     "--load DATASET_DIR SNAPSHOT EF_SEARCH | --self-test]\n";
         return 2;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

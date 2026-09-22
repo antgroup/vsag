@@ -159,3 +159,11 @@ The codec now follows the official non-power-of-two `FHTKacRotator` behavior ins
 Using 100 independent queries against 960-dimensional GIST prefixes, exhaustive 8-bit full-code and lower-bound-filtered Recall@10 were both 0.997 at 10k and 100k. For filter-first graph traversal, degree 16 / ef 128 produced Recall@10 of 0.880/0.722. Increasing only ef to 512 produced 0.960/0.872. Degree 32 / ef 512 produced 0.984/0.949, showing that high-dimensional graph connectivity mattered more than deeper traversal alone. At 100k, that last configuration used a 26,400,008-byte CSR topology, 4,939.93 mean visited nodes, 512 supplement reorders per query, 9,139.447 us graph-search P50, 180,568.435 ms graph build time, and 1,408,628 KiB process peak RSS.
 
 This passes the bounded high-dimensional codec and graph-quality experiment gate. It does not justify a public RaBitQ backend yet: topology still comes from a temporary FP32 Lite graph, filter distance is scalar, CSR is not persisted, and fixed-model CRUD semantics remain undefined. Full GIST1M is an optional pressure test, not a current Lite gate; the next implementation priority remains validated topology persistence and CRUD/model lifecycle.
+
+## CSR persistence gate
+
+The experiment now persists the filter-first topology with the trained model and contiguous split records in `VSLRBQ01` version 2. Version 1 remains byte-compatible and code-only. Version 2 stores CSR offsets and neighbors in little-endian order and rejects invalid offset counts, non-zero origins, decreasing or out-of-range ranges, degrees above 64, final edge-count mismatches, out-of-range neighbors, self-loops, duplicates, truncation, and trailing bytes.
+
+Independent SIFT processes saved and loaded 10k/100k snapshots of 2,880,648/28,800,648 bytes. Load time was 6.817/66.843 ms, graph Recall@10 remained 0.966/0.940, and visited/reordered counts were unchanged. The 100k loader peak RSS was 32,176 KiB. Page cache was uncontrolled and each scale was measured once, so these values are functional evidence rather than stable cold-load performance.
+
+This closes the experiment topology-persistence gate without changing public Lite snapshots. The next bounded task is to define fixed-model Add, Update, and Remove behavior, including slot compaction and CSR reverse-link repair, before any public backend proposal.
