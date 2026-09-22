@@ -60,13 +60,16 @@ make_empty_dataset_with_stats(const SearchStatistics& stats) {
 
 static void
 apply_hops_limit(InnerSearchParam& search_param, const HGraphSearchParameters& params) {
-    if (static_cast<uint64_t>(params.hops_limit) <= static_cast<uint64_t>(params.ef_search)) {
+    // The limit is meaningless only when it cannot bind on either route, so compare with the
+    // smaller of the two effective breadths.
+    const int64_t min_ef = std::min(params.GetHGraphEfSearch(), params.GetMciEfSearch());
+    if (static_cast<uint64_t>(params.hops_limit) <= static_cast<uint64_t>(min_ef)) {
         search_param.hops_limit = std::numeric_limits<uint32_t>::max();
         if (params.hops_limit != std::numeric_limits<uint32_t>::max()) {
             logger::warn(
                 fmt::format("hops_limit({}) is not greater than ef_search({}), ignoring hops_limit",
                             params.hops_limit,
-                            params.ef_search));
+                            min_ef));
         }
         return;
     }
@@ -200,7 +203,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
                 }
             }
 
-            search_param.ef = std::max(params.ef_search, k);
+            search_param.ef = std::max(params.GetHGraphEfSearch(), k);
             search_param.is_inner_id_allowed = ft;
             search_param.distance_threshold = threshold;
             search_param.topk = static_cast<int64_t>(search_param.ef);
@@ -588,7 +591,7 @@ HGraph::search_range_with_request(const SearchRequest& request,
         search_param.executors.emplace_back(executor);
     }
 
-    search_param.ef = std::max(params.ef_search, request.limited_size_);
+    search_param.ef = std::max(params.GetHGraphEfSearch(), request.limited_size_);
     search_param.is_inner_id_allowed = filter;
     search_param.radius = request.radius_;
     search_param.search_mode = RANGE_SEARCH;
@@ -860,7 +863,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     InnerSearchParam base_search_param;
     base_search_param.is_inner_id_allowed = ft;
     base_search_param.distance_threshold = request.threshold_;
-    base_search_param.ef = std::max(params.ef_search, k);
+    base_search_param.ef = std::max(params.GetHGraphEfSearch(), k);
     if (this->use_conjugate_graph_ and params.use_conjugate_graph_search) {
         base_search_param.ef = std::max(base_search_param.ef, static_cast<uint64_t>(LOOK_AT_K));
     }

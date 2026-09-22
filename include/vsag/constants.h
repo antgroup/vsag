@@ -225,6 +225,8 @@ extern const char* const HGRAPH_MCI_KNNG_SOURCE_HGRAPH;
 extern const char* const HGRAPH_MCI_KNNG_SOURCE_ODESCENT;
 extern const char* const HGRAPH_MCI_SEED_RATIO;
 extern const char* const HGRAPH_MCI_SEED_COVERAGE;
+extern const char* const HGRAPH_EF_SEARCH;
+extern const char* const HGRAPH_MCI_EF_SEARCH;
 extern const char* const HGRAPH_MCI_SEED_MAX_COUNT;
 extern const char* const HGRAPH_MCI_EXPANSION_IDLE_WINDOW;
 extern const char* const HGRAPH_MCI_EXPANSION_LOWER_BOUND;

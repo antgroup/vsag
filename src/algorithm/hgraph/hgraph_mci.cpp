@@ -686,8 +686,13 @@ HGraph::try_mci_search(const SearchRequest& request,
         mci_param.metric = this->metric_;
         mci_param.used_precise_float_csr = &result.used_precise_float_csr;
     }
+    // The hybrid has its own search breadth; `rerank_topk` is the user's k.
+    InnerSearchParam mci_search_param = search_param;
+    mci_search_param.ef =
+        std::max<int64_t>(params.GetMciEfSearch(), static_cast<int64_t>(search_param.rerank_topk));
+    mci_search_param.topk = static_cast<int64_t>(mci_search_param.ef);
     result.result = this->mci_searcher_->Search(
-        this->mci_cliques_, precise_flatten, query, search_param, mci_param, ctx);
+        this->mci_cliques_, precise_flatten, query, mci_search_param, mci_param, ctx);
     result.route = "mci";
     return result;
 }
