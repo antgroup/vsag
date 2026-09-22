@@ -228,6 +228,18 @@ Pyramid::build_by_odescent(const DatasetPtr& base) {
     if (create_new_raw_vector_) {
         raw_vector_->BatchInsertVector(data_vectors, data_num);
     }
+    if (store_paths_) {
+        for (const auto& [hierarchy_name, hierarchy] : hierarchies_) {
+            const auto* paths = base->GetPaths(hierarchy_name);
+            if (paths != nullptr) {
+                auto writer = hierarchy->path_store->AcquireWriter();
+                writer.Prepare(static_cast<uint64_t>(data_num), static_cast<uint64_t>(data_num));
+                for (uint64_t offset = 0; offset < static_cast<uint64_t>(data_num); ++offset) {
+                    writer.Insert(static_cast<InnerIdType>(offset), paths[offset]);
+                }
+            }
+        }
+    }
     auto codes = use_reorder_ ? precise_codes_ : base_codes_;
 
     if (thread_pool_ != nullptr && hierarchies_.size() > 1) {
@@ -456,6 +468,10 @@ Pyramid::Serialize(StreamWriter& writer) const {
         hierarchies_.at("")->root->Serialize(writer);
     }
 
+    if (store_paths_) {
+        serialize_paths(writer);
+    }
+
     // serialize footer (introduced since v0.15)
     JsonType basic_info;
     basic_info["max_capacity"].SetInt(max_capacity_);
@@ -508,6 +524,13 @@ Pyramid::collect_streaming_header() const {
                                  hierarchy_tag,
                                  StreamSerializationBlockCurrentVersion(hierarchy_tag),
                                  StreamSerializationTagCritical(hierarchy_tag));
+    if (store_paths_) {
+        const auto path_tag = static_cast<uint32_t>(StreamSerializationTag::PYRAMID_PATHS);
+        AppendStreamingManifestBlock(manifest,
+                                     path_tag,
+                                     StreamSerializationBlockCurrentVersion(path_tag),
+                                     StreamSerializationTagCritical(path_tag));
+    }
     metadata->Set("block_manifest", manifest);
     metadata->SetEmptyIndex(this->GetNumElements() == 0);
     return metadata;
@@ -560,6 +583,13 @@ Pyramid::serialize_streaming_body(StreamWriter& writer) const {
                         hierarchy_tag,
                         StreamSerializationTagCritical(hierarchy_tag),
                         [this](StreamWriter& w) { this->serialize_hierarchies(w); });
+    if (store_paths_) {
+        const auto path_tag = static_cast<uint32_t>(StreamSerializationTag::PYRAMID_PATHS);
+        WriteStreamingBlock(
+            writer, path_tag, StreamSerializationTagCritical(path_tag), [this](StreamWriter& w) {
+                this->serialize_paths(w);
+            });
+    }
 }
 
 void
@@ -622,6 +652,7 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
     bool loaded_precise_codes = false;
     bool loaded_raw_vector = false;
     bool loaded_hierarchies = false;
+    bool loaded_paths = false;
 
     while (true) {
         auto block_header = StreamBlockHeader::Read(reader);
@@ -688,6 +719,20 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
                     });
                 loaded_hierarchies = true;
                 break;
+            case StreamSerializationTag::PYRAMID_PATHS:
+                if (loaded_paths) {
+                    throw VsagException(ErrorType::READ_ERROR,
+                                        "duplicate Pyramid streaming paths block");
+                }
+                if (not loaded_base_codes) {
+                    throw VsagException(ErrorType::READ_ERROR,
+                                        "Pyramid streaming paths block precedes base codes");
+                }
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    this->deserialize_paths(block, static_cast<uint64_t>(this->cur_element_count_));
+                });
+                loaded_paths = true;
+                break;
             default:
                 if (block_header.IsCritical()) {
                     throw VsagException(
@@ -718,6 +763,10 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
         throw VsagException(ErrorType::READ_ERROR,
                             "Pyramid streaming serialization raw vector block is missing");
     }
+    if (store_paths_ && !loaded_paths) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "Pyramid streaming serialization paths block is missing");
+    }
 
     resize(max_capacity);
     this->current_memory_usage_ = static_cast<int64_t>(this->CalSerializeSize());
@@ -731,6 +780,13 @@ Pyramid::Deserialize(StreamReader& reader) {
         throw VsagException(ErrorType::READ_ERROR, "failed to read index footer");
     }
     auto max_capacity = basic_info["max_capacity"].GetInt();
+    auto param_json = JsonType::Parse(basic_info[INDEX_PARAM].GetString());
+    const bool serialized_store_paths = param_json.Contains(PYRAMID_STORE_PATHS_KEY) &&
+                                        param_json[PYRAMID_STORE_PATHS_KEY].GetBool();
+    if (serialized_store_paths != store_paths_) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "serialized Pyramid store_paths does not match config");
+    }
 
     BufferStreamReader buffer_reader(
         &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
@@ -747,7 +803,6 @@ Pyramid::Deserialize(StreamReader& reader) {
     }
     cur_element_count_ = base_codes_->TotalCount();
 
-    auto param_json = JsonType::Parse(basic_info[INDEX_PARAM].GetString());
     if (param_json.Contains(PYRAMID_HIERARCHIES)) {
         uint64_t hierarchy_count = 0;
         StreamReader::ReadObj(buffer_reader, hierarchy_count);
@@ -768,6 +823,10 @@ Pyramid::Deserialize(StreamReader& reader) {
             h_iter != hierarchies_.end(),
             "deserialized single-hierarchy index but current config has named hierarchies");
         h_iter->second->root->Deserialize(buffer_reader);
+    }
+
+    if (store_paths_) {
+        deserialize_paths(buffer_reader, static_cast<uint64_t>(cur_element_count_));
     }
 
     resize(max_capacity);
@@ -800,6 +859,7 @@ Pyramid::Add(const DatasetPtr& base) {
     const auto* data_ids = base->GetIds();
     std::vector<int64_t> failed_ids;
     Vector<int64_t> data_biases(allocator_);
+    Vector<InnerIdType> accepted_inner_ids(allocator_);
     int64_t local_cur_element_count = 0;
     {
         std::lock_guard lock(cur_element_count_mutex_);
@@ -814,21 +874,26 @@ Pyramid::Add(const DatasetPtr& base) {
             resize(new_capacity);
         }
         int64_t valid_id_count = 0;
+        if (store_paths_) {
+            accepted_inner_ids.reserve(data_num);
+        }
         for (int64_t i = 0; i < data_num; ++i) {
             if (not label_table_->CheckLabel(data_ids[i])) {
-                label_table_->Insert(valid_id_count + local_cur_element_count, data_ids[i]);
-                base_codes_->InsertVector(data_vectors + dim_ * i,
-                                          valid_id_count + local_cur_element_count);
+                const auto inner_id =
+                    static_cast<InnerIdType>(valid_id_count + local_cur_element_count);
+                label_table_->Insert(inner_id, data_ids[i]);
+                base_codes_->InsertVector(data_vectors + dim_ * i, inner_id);
                 if (use_reorder_) {
-                    precise_codes_->InsertVector(data_vectors + dim_ * i,
-                                                 valid_id_count + local_cur_element_count);
+                    precise_codes_->InsertVector(data_vectors + dim_ * i, inner_id);
                 }
                 if (create_new_raw_vector_) {
-                    raw_vector_->InsertVector(data_vectors + dim_ * i,
-                                              valid_id_count + local_cur_element_count);
+                    raw_vector_->InsertVector(data_vectors + dim_ * i, inner_id);
                 }
                 valid_id_count++;
                 data_biases.push_back(i);
+                if (store_paths_) {
+                    accepted_inner_ids.push_back(inner_id);
+                }
             } else {
                 logger::warn("Label {} already exists, skip adding.", data_ids[i]);
                 failed_ids.push_back(data_ids[i]);
@@ -841,6 +906,14 @@ Pyramid::Add(const DatasetPtr& base) {
     for (const auto& [hname, h_ptr] : hierarchies_) {
         const auto* hpath = base->GetPaths(hname);
         if (hpath != nullptr) {
+            if (store_paths_ && not accepted_inner_ids.empty()) {
+                auto writer = h_ptr->path_store->AcquireWriter();
+                writer.Prepare(static_cast<uint64_t>(accepted_inner_ids.back()) + 1,
+                               static_cast<uint64_t>(accepted_inner_ids.size()));
+                for (uint64_t offset = 0; offset < data_biases.size(); ++offset) {
+                    writer.Insert(accepted_inner_ids[offset], hpath[data_biases[offset]]);
+                }
+            }
             add_to_hierarchy(*h_ptr, data_vectors, hpath, data_biases, local_cur_element_count);
         }
     }
@@ -917,6 +990,9 @@ Pyramid::InitFeatures() {
     if (can_decode_exact_vector || raw_vector_ != nullptr) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
     }
+    if (store_paths_) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_DATA_BY_IDS);
+    }
 
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_DELETE_BY_ID);
 }
@@ -991,7 +1067,8 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         "{EF_CONSTRUCTION_KEY}": 400,
         "{NO_BUILD_LEVELS}":[],
         "{INDEX_MIN_SIZE}": 0,
-        "{SUPPORT_DUPLICATE}": false
+        "{SUPPORT_DUPLICATE}": false,
+        "{PYRAMID_STORE_PATHS_KEY}": false
     })";
 
 ParamPtr
@@ -1020,6 +1097,7 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
         {PYRAMID_BUILD_THREAD_COUNT, {BUILD_THREAD_COUNT_KEY}},
         {PYRAMID_NO_BUILD_LEVELS, {NO_BUILD_LEVELS}},
         {PYRAMID_HIERARCHIES, {PYRAMID_HIERARCHIES}},
+        {PYRAMID_STORE_PATHS, {PYRAMID_STORE_PATHS_KEY}},
         {PYRAMID_BASE_PQ_DIM,
          {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, PRODUCT_QUANTIZATION_DIM_KEY}},
         {PYRAMID_BASE_FILE_PATH, {BASE_CODES_KEY, IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
