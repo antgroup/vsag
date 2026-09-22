@@ -44,26 +44,26 @@ struct PartitionRequest {
 
 /// Random projection tree partitioning through the public vsag::rpt_partition API.
 PartitionResult
-PartitionByRpt(const PartitionRequest& request);
+partition_by_rpt(const PartitionRequest& request);
 
 /// Baseline: shuffle the ids, then cut into equal-sized chunks.
 PartitionResult
-PartitionByRandom(const PartitionRequest& request);
+partition_by_random(const PartitionRequest& request);
 
 /// Baseline: sort the ids by the highest-variance dimension, then cut into equal-sized chunks.
 PartitionResult
-PartitionBySingleDim(const PartitionRequest& request);
+partition_by_single_dim(const PartitionRequest& request);
 
 /// Baseline: KMeans with ceil(count / bucket_size) clusters. Partition sizes are unbounded.
 PartitionResult
-PartitionByKmeans(const PartitionRequest& request);
+partition_by_kmeans(const PartitionRequest& request);
 
 /// Runs the strategy registered under `name`, or reports an error in the result.
 PartitionResult
-RunStrategy(const std::string& name, const PartitionRequest& request);
+run_strategy(const std::string& name, const PartitionRequest& request);
 
-/// Names of every strategy `RunStrategy` accepts.
+/// Names of every strategy `run_strategy` accepts.
 std::vector<std::string>
-StrategyNames();
+strategy_names();
 
 }  // namespace vsag::rpt_bench

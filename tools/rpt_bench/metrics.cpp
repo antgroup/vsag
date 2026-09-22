@@ -24,18 +24,18 @@ namespace vsag::rpt_bench {
 namespace {
 
 uint64_t
-CeilDiv(uint64_t value, uint64_t divisor) {
+ceil_div(uint64_t value, uint64_t divisor) {
     return (value + divisor - 1) / divisor;
 }
 
 /// Gini coefficient of the partition sizes: 0 means all partitions are equal.
 double
-ComputeGini(std::vector<uint64_t> sizes) {
+compute_gini(std::vector<uint64_t> sizes) {
     if (sizes.empty()) {
         return 0.0;
     }
     std::sort(sizes.begin(), sizes.end());
-    double n = static_cast<double>(sizes.size());
+    auto n = static_cast<double>(sizes.size());
     double total = 0.0;
     double weighted = 0.0;
     for (uint64_t i = 0; i < sizes.size(); ++i) {
@@ -51,10 +51,10 @@ ComputeGini(std::vector<uint64_t> sizes) {
 }  // namespace
 
 UniformityMetrics
-ComputeUniformity(const Partitions& partitions, uint64_t count, uint64_t bucket_size) {
+compute_uniformity(const Partitions& partitions, uint64_t count, uint64_t bucket_size) {
     UniformityMetrics metrics;
     metrics.num_partitions = partitions.size();
-    metrics.expected_partitions = bucket_size == 0 ? 0 : CeilDiv(count, bucket_size);
+    metrics.expected_partitions = bucket_size == 0 ? 0 : ceil_div(count, bucket_size);
     if (partitions.empty()) {
         return metrics;
     }
@@ -79,7 +79,7 @@ ComputeUniformity(const Partitions& partitions, uint64_t count, uint64_t bucket_
         variance += delta * delta;
     }
     metrics.stddev_size = std::sqrt(variance / static_cast<double>(sizes.size()));
-    metrics.gini = ComputeGini(sizes);
+    metrics.gini = compute_gini(sizes);
 
     bool bounds =
         metrics.num_partitions == metrics.expected_partitions && metrics.max_size <= bucket_size;
@@ -91,13 +91,13 @@ ComputeUniformity(const Partitions& partitions, uint64_t count, uint64_t bucket_
 }
 
 LocalityMetrics
-ComputeLocality(const Partitions& partitions,
-                uint64_t count,
-                const int64_t* neighbors,
-                uint64_t num_queries,
-                uint64_t ground_truth_k,
-                uint64_t topk,
-                uint64_t max_queries) {
+compute_locality(const Partitions& partitions,
+                 uint64_t count,
+                 const int64_t* neighbors,
+                 uint64_t num_queries,
+                 uint64_t ground_truth_k,
+                 uint64_t topk,
+                 uint64_t max_queries) {
     LocalityMetrics metrics;
     if (neighbors == nullptr || num_queries == 0 || ground_truth_k == 0 || partitions.empty()) {
         return metrics;
@@ -156,7 +156,7 @@ ComputeLocality(const Partitions& partitions,
             ordered_counts.push_back(hits);
         }
         std::sort(ordered_counts.begin(), ordered_counts.end(), std::greater<>());
-        uint64_t target = CeilDiv(valid * 9, 10);
+        uint64_t target = ceil_div(valid * 9, 10);
         uint64_t covered = 0;
         uint64_t scans = 0;
         for (uint64_t hits : ordered_counts) {
