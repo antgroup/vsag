@@ -164,6 +164,7 @@ Pyramid 使用 split code 的 code-code 距离完成增量 FLAT→GRAPH 晋升�
 | `factor` | float | 未设置 | KNN 重排候选倍率。值 `<= 1` 时不增加限制；值大于 `1` 时，Pyramid 保持各子图原有搜索行为，先合并子图结果，再将至多 `min(max(ef_search, topk), floor(topk * factor))` 个主图候选送入重排。与 HGraph 一致，RaBitQ lower-bound 安全候选可在该限制后额外并入，`reorder_candidate_count` 记录实际合并数量。参数必须为有限正数；范围检索或关闭重排时不生效。 |
 | `hops_limit` | int | 不限 | 根节点底图及每个非根 GRAPH 的逐图 KNN 跳数上限；不大于 `ef_search` 时忽略。根节点的稀疏路由层不受限制，FLAT 扫描与范围检索不受影响。 |
 | `subindex_ef_search` | int | `50` | 沿路径向下遍历中间子图时的候选集大小 |
+| `parallelism` | int | `1` | 大于 `1` 时并行检索查询路径命中的各个子图，各子图结果合并并按 inner id 去重后再重排。它是开关而非并发上限——见表格下方的说明。 |
 | `hierarchies` | string[] | `[]` | 指定检索哪个层级。空数组表示使用默认（匿名）层级。 |
 | `hierarchy_op` | string | `"single"` | 多层级结果合并方式：`single`（检索单个层级）、`union`、`intersection`。**注意：** `union` 和 `intersection` 尚未实现——设置后 `KnnSearch`/`RangeSearch` 会返回错误。 |
 | `rabitq_error_rate` | float | `1.9` | 本次搜索使用的正数 lower-bound 误差倍率。默认值 `1.9` 较大；值越大，精度越高，但搜索速度越慢。 |
@@ -173,6 +174,13 @@ auto result = index->KnnSearch(
     query, topk,
     R"({"pyramid": {"ef_search": 200, "subindex_ef_search": 80}})").value();
 ```
+
+### `parallelism` 的线程池前提
+
+`parallelism` 只有在索引持有线程池时才生效。通过 `Engine` 创建索引、并由 `Resource` 提供 `ThreadPool`（例如 `Engine::CreateThreadPool(n)`），或者建库时设置 `build_thread_count > 1`，索引才会持有线程池。`Factory::CreateIndex` 与 `Index::Load` 都不会挂载线程池，因此这两条路径上 `parallelism` 会被忽略，各子图按顺序串行检索。参数无法生效时，Pyramid 会为每个索引打印一次告警。
+
+`<= 0` 的取值会被钳到 `1`。当 `parallelism >= 2` 时，Pyramid 为每个解析出的子图向索引线程池提交一个任务，等全部完成后按 inner id 合并（取最小距离）。该值不是并发上限：`parallelism: 2` 同样可能同时执行两个以上的子图检索。实际并发为
+`min(解析出的子图数, 索引线程池的空闲 worker 数)`；线程池大小固定，由索引上所有请求共享。另外，一条路径不一定只对应一个任务：结束于中间节点的路径会展开为其下所有索引节点。
 
 ## 多层级支持 (Multi-Hierarchy)
 

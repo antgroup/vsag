@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "impl/allocator/safe_allocator.h"
+#include "impl/thread_pool/safe_thread_pool.h"
 #include "index/index_impl.h"
 #include "index_common_param.h"
 #include "storage/stream_reader.h"
@@ -68,7 +69,8 @@ MakePyramidIndex(uint32_t index_min_size,
                  bool use_mrle_split = false,
                  bool use_mrle_fp32 = false,
                  bool use_reorder = false,
-                 bool store_raw_vector = false) {
+                 bool store_raw_vector = false,
+                 std::shared_ptr<vsag::SafeThreadPool> thread_pool = nullptr) {
     PyramidTestIndex result;
     vsag::IndexCommonParam common_param;
     common_param.dim_ = PYRAMID_TEST_DIM;
@@ -76,6 +78,7 @@ MakePyramidIndex(uint32_t index_min_size,
     common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
     result.allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     common_param.allocator_ = result.allocator;
+    common_param.thread_pool_ = std::move(thread_pool);
 
     auto external_param = vsag::JsonType::Parse(R"({
         "base_quantization_type": "fp32",
@@ -1525,4 +1528,64 @@ TEST_CASE("Pyramid scalar RaBitQ split build supports search serialization and A
     REQUIRE(loaded->Add(dataset(count, 1)).empty());
     check_query(index, count);
     check_query(loaded, count);
+}
+
+TEST_CASE("Pyramid parallelism degrades to serial search without a thread pool",
+          "[ut][pyramid][parallel]") {
+    constexpr int64_t count = 256;
+    std::vector<float> vectors(count * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, count);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> paths(count);
+    for (int64_t i = 0; i < count; ++i) {
+        paths[i] = "tenant/branch" + std::to_string(i % 4);
+    }
+    // `build_thread_count == 1` and no Resource thread pool: the index cannot honor
+    // `parallelism`, so the search must fall back to the serial path without failing.
+    auto test_index = MakePyramidIndex(1, 1);
+    auto base = MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count);
+    REQUIRE(test_index.index->Build(base).empty());
+
+    std::string query_path = "tenant/branch0|tenant/branch1|tenant/branch2|tenant/branch3";
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(PYRAMID_TEST_DIM)
+                     ->Float32Vectors(vectors.data() + 37 * PYRAMID_TEST_DIM)
+                     ->Paths(&query_path)
+                     ->Owner(false);
+
+    const auto serial = test_index.index->KnnSearch(
+        query,
+        5,
+        R"({"pyramid":{"ef_search":50,"subindex_ef_search":50,"parallelism":1}})",
+        nullptr);
+    REQUIRE(serial->GetDim() == 5);
+
+    // With a thread pool the same request must take the parallel branch and still return the
+    // same ranked result as the serial path.
+    auto pooled_index = MakePyramidIndex(1,
+                                         1,
+                                         false,
+                                         false,
+                                         false,
+                                         false,
+                                         false,
+                                         false,
+                                         vsag::SafeThreadPool::FactoryDefaultThreadPool());
+    REQUIRE(pooled_index.index->Build(base).empty());
+
+    for (const int64_t parallelism : {2, 4, 16}) {
+        const std::string params =
+            R"({"pyramid":{"ef_search":50,"subindex_ef_search":50,"parallelism":)" +
+            std::to_string(parallelism) + "}}";
+        const auto result = test_index.index->KnnSearch(query, 5, params, nullptr);
+        const auto pooled = pooled_index.index->KnnSearch(query, 5, params, nullptr);
+        REQUIRE(result->GetDim() == serial->GetDim());
+        REQUIRE(pooled->GetDim() == serial->GetDim());
+        for (int64_t i = 0; i < serial->GetDim(); ++i) {
+            REQUIRE(result->GetIds()[i] == serial->GetIds()[i]);
+            REQUIRE(pooled->GetIds()[i] == serial->GetIds()[i]);
+        }
+    }
 }

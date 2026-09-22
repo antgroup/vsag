@@ -21,6 +21,7 @@
 #include <chrono>
 #include <exception>
 #include <limits>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <numeric>
 #include <unordered_set>
@@ -1051,6 +1052,14 @@ Pyramid::search_impl(const DatasetPtr& query,
     VisitedListGuard vl_guard(pool_.get());
     const VisitedListPtr& vl = vl_guard.get();
     if (has_query_paths) {
+        if (search_param.parallel_search_thread_count > 1 and this->thread_pool_ == nullptr) {
+            std::call_once(parallel_without_pool_warned_, []() {
+                logger::warn(
+                    "pyramid: `parallelism` is ignored because this index has no thread pool; "
+                    "create the index with a Resource that provides a ThreadPool, or build with "
+                    "build_thread_count > 1, to search routed sub-graphs in parallel");
+            });
+        }
         search_hierarchy(
             h, search_func, vl, search_result, parsed_query_paths, search_param, ctx.reasoning_ctx);
     } else {

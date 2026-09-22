@@ -171,6 +171,7 @@ Search-time parameters live under the `pyramid` sub-object:
 | `factor` | float | unset | KNN reorder candidate multiplier. Values `<= 1` add no limit. When greater than `1`, Pyramid first completes the unchanged subgraph searches and merges their results, then sends at most `min(max(ef_search, topk), floor(topk * factor))` main-graph candidates to reorder. RaBitQ lower-bound safety candidates may be merged after this limit, matching HGraph; `reorder_candidate_count` reports the actual merged count. The value must be finite and positive. It has no effect on range search or when reorder is disabled. |
 | `hops_limit` | int | unlimited | Per-graph KNN hop cap for the root bottom graph and every non-root graph; ignored when it is not greater than `ef_search`. Sparse root routing layers are never hop-limited. FLAT scans and range search are unaffected. |
 | `subindex_ef_search` | int | `50` | Candidate list size used when traversing intermediate sub-graphs on the path. |
+| `parallelism` | int | `1` | Values greater than `1` enable parallel search of the sub-graphs reached by the query paths; the per-subgraph results are merged and de-duplicated before reordering. It is a switch rather than a concurrency limit — see the note below the table. |
 | `hierarchies` | string[] | `[]` | Select which hierarchy to search. Empty means use the default (unnamed) hierarchy. |
 | `hierarchy_op` | string | `"single"` | How to combine results across hierarchies: `single` (search one hierarchy), `union`, or `intersection`. **Note:** `union` and `intersection` are not yet implemented — setting them will cause `KnnSearch`/`RangeSearch` to return an error. |
 | `rabitq_error_rate` | float | `1.9` | Positive lower-bound error multiplier for this search. The default `1.9` is relatively large; increasing it improves accuracy but slows down search. |
@@ -180,6 +181,13 @@ auto result = index->KnnSearch(
     query, topk,
     R"({"pyramid": {"ef_search": 200, "subindex_ef_search": 80}})").value();
 ```
+
+### Thread pool requirement for `parallelism`
+
+`parallelism` only takes effect when the index owns a thread pool. An index created through an `Engine` whose `Resource` supplies a `ThreadPool` (for example `Engine::CreateThreadPool(n)`), or an index built with `build_thread_count > 1`, has one. `Factory::CreateIndex` and `Index::Load` do not attach a thread pool, so on those paths `parallelism` is ignored and the routed sub-graphs are searched one after another. When the parameter cannot be honored, Pyramid logs a warning once per index.
+
+Values `<= 0` are clamped to `1`. With `parallelism >= 2`, Pyramid submits one task per resolved sub-graph to the index's thread pool, waits for all of them, and then merges the candidates by inner id (keeping the smallest distance). The value is not a concurrency cap: `parallelism: 2` can still run more than two sub-graph searches at the same time. The effective concurrency is
+`min(number of resolved sub-graphs, free workers in the index thread pool)`, and that pool is fixed in size and shared by every request on the index. Note that one path does not always map to one task: a path that ends at an intermediate node expands to all of its descendant index nodes.
 
 ## Multi-Hierarchy Support
 
