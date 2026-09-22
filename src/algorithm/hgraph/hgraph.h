@@ -62,6 +62,7 @@ class ChunkedManifest;
 struct ComponentManifestEntry;
 class FlattenOptimizedBuildInterface;
 class HGraphRaBitQFusedDataCell;
+struct RaBitQFusedCodeView;
 class HGraphRaBitQSearcher;
 class HGraphOptimizedBuildSession;
 class IteratorFilterContext;
@@ -365,11 +366,15 @@ public:
 
     /// Write codes for inner_id into the persistent flatten storage.
     void
-    insert_persistent_codes(const void* data, InnerIdType inner_id);
+    insert_persistent_codes(const void* data,
+                            InnerIdType inner_id,
+                            const RaBitQFusedCodeView* fused_code = nullptr);
 
     /// Write codes when the caller already protects storage capacity.
     void
-    insert_persistent_codes_unlocked(const void* data, InnerIdType inner_id);
+    insert_persistent_codes_unlocked(const void* data,
+                                     InnerIdType inner_id,
+                                     const RaBitQFusedCodeView* fused_code = nullptr);
 
     void
     insert_fused_optimized_build_codes(const void* data, InnerIdType inner_id);
@@ -379,7 +384,9 @@ public:
     insert_persistent_codes_to_slot(const void* data, CodeSlotIdType code_slot_id);
 
     void
-    sync_fused_node_codes(InnerIdType inner_id, const void* data);
+    sync_fused_node_codes(InnerIdType inner_id,
+                          const void* data,
+                          const RaBitQFusedCodeView* fused_code = nullptr);
 
     void
     restore_fused_codec();
@@ -392,9 +399,9 @@ public:
     void
     ensure_physical_code_capacity_unlocked(CodeSlotIdType required_capacity);
 
-    /// Grow internal storage to at least new_size capacity.
+    /// Grow internal storage; fused Add doubles capacity, while Build reserves exactly (aligned).
     void
-    resize(uint64_t new_size);
+    resize(uint64_t new_size, bool geometric_growth = false);
 
     /// Create a single route (upper-layer) graph from the hierarchical params.
     GraphInterfacePtr
@@ -450,6 +457,9 @@ private:
                                int64_t id,
                                bool calculate_precise_distance) const;
 
+    [[nodiscard]] bool
+    skip_scalar_codes_for_fused_odescent() const;
+
     void
     check_fused_mutation_supported(std::string_view operation) const;
 
@@ -493,11 +503,19 @@ private:
     void
     train_codes_with_dataset(const DatasetPtr& train_data);
 
+    void
+    validate_fused_training_data(const DatasetPtr& full_data) const;
+
+    // Requires the base quantizer's transform to be trained first.
+    void
+    train_fused_codec(const DatasetPtr& full_data);
+
     struct AddContext {
         bool first_empty_add{false};
         bool use_dedup_storage{false};
         bool need_temporary_sq8_build_data{false};
         bool use_parallel_add{false};
+        bool persistent_codes_prepared{false};
         DatasetPtr train_data{nullptr};
         FlattenInterfacePtr graph_read_codes{nullptr};
     };
@@ -549,8 +567,22 @@ private:
     void
     validate_fused_vector_data(const float* data, uint64_t count) const;
 
-    void
-    validate_fused_encoding_data(const float* data, uint64_t count) const;
+    // Operation-local compressed codes: validate the entire input before publishing rows,
+    // then reuse the encoding instead of doing a second nearest-centroid search/quantization.
+    struct FusedEncodingBatch {
+        explicit FusedEncodingBatch(Allocator* allocator) : codes(allocator) {
+        }
+
+        RaBitQFusedCodeView
+        Get(uint64_t row) const;
+
+        Vector<uint8_t> codes;
+        uint64_t one_bit_size{0};
+        uint64_t supplement_size{0};
+    };
+
+    std::unique_ptr<FusedEncodingBatch>
+    prepare_fused_encoding_data(const float* data, uint64_t count) const;
 
     AddContext
     prepare_add_context(const DatasetPtr& data);
@@ -984,6 +1016,8 @@ private:
     Vector<GraphInterfacePtr> route_graphs_;   // upper-layer route graphs
     GraphInterfacePtr bottom_graph_{nullptr};  // base-level graph (all vectors)
     std::shared_ptr<HGraphRaBitQFusedDataCell> rabitq_fused_datacell_{nullptr};
+    uint32_t rabitq_centroid_count_{16};
+    uint32_t kmeans_iterations_{25};
     std::shared_ptr<RaBitQSplitDataCellInterface> rabitq_split_codes_{nullptr};
     std::shared_ptr<HGraphRaBitQSearcher> rabitq_fused_searcher_{nullptr};
     SparseGraphDatacellParamPtr hierarchical_datacell_param_{nullptr};  // params for route graphs
