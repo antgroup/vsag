@@ -186,6 +186,77 @@ struct Encoded {
     float norm{}, code_norm{}, error{}, filter_norm{}, filter_error{}, lower_bound_error{};
 };
 
+struct EncodedMetadata {
+    float norm{}, code_norm{}, error{}, filter_norm{}, filter_error{}, lower_bound_error{};
+};
+
+struct EncodedView {
+    const uint8_t* filter;
+    const uint8_t* supplement;
+    EncodedMetadata metadata;
+};
+
+struct EncodedRecords {
+    explicit EncodedRecords(uint64_t input_dim) : dim(input_dim) {
+    }
+
+    [[nodiscard]] uint64_t
+    FilterBytes() const {
+        return ((dim + 7) / 8) * K_FILTER_BITS;
+    }
+
+    [[nodiscard]] uint64_t
+    SupplementBytes() const {
+        return ((dim + 7) / 8) * K_SUPPLEMENT_BITS;
+    }
+
+    [[nodiscard]] uint64_t
+    Size() const {
+        return metadata.size();
+    }
+
+    void
+    Reserve(uint64_t count) {
+        metadata.reserve(count);
+        filters.reserve(count * FilterBytes());
+        supplements.reserve(count * SupplementBytes());
+    }
+
+    void
+    Resize(uint64_t count) {
+        metadata.resize(count);
+        filters.resize(count * FilterBytes());
+        supplements.resize(count * SupplementBytes());
+    }
+
+    void
+    Append(Encoded code) {
+        require(code.filter.size() == FilterBytes() and code.supplement.size() == SupplementBytes(),
+                "invalid encoded record");
+        metadata.push_back({code.norm,
+                            code.code_norm,
+                            code.error,
+                            code.filter_norm,
+                            code.filter_error,
+                            code.lower_bound_error});
+        filters.insert(filters.end(), code.filter.begin(), code.filter.end());
+        supplements.insert(supplements.end(), code.supplement.begin(), code.supplement.end());
+    }
+
+    [[nodiscard]] EncodedView
+    At(uint64_t id) const {
+        require(id < Size(), "encoded record outside storage");
+        return {filters.data() + id * FilterBytes(),
+                supplements.data() + id * SupplementBytes(),
+                metadata[id]};
+    }
+
+    uint64_t dim;
+    std::vector<EncodedMetadata> metadata;
+    std::vector<uint8_t> filters;
+    std::vector<uint8_t> supplements;
+};
+
 std::vector<float>
 normalize(const Model& model, const float* input, float& norm) {
     std::vector<float> values(input, input + model.dim);
@@ -302,12 +373,13 @@ struct FilterEstimate {
 };
 
 FilterEstimate
-filter_estimate(const std::vector<float>& query, float query_norm, const Encoded& code) {
-    const float centered_ip = filter_centered_ip(query, code.filter.data());
-    const float normalized_ip = centered_ip / code.filter_norm / code.filter_error;
-    const float distance = l2_distance(code.norm, query_norm, normalized_ip);
-    const float error =
-        2.0F * code.norm * query_norm * K_ERROR_RATE * code.lower_bound_error / code.filter_error;
+filter_estimate(const std::vector<float>& query, float query_norm, const EncodedView& code) {
+    const float centered_ip = filter_centered_ip(query, code.filter);
+    const float normalized_ip =
+        centered_ip / code.metadata.filter_norm / code.metadata.filter_error;
+    const float distance = l2_distance(code.metadata.norm, query_norm, normalized_ip);
+    const float error = 2.0F * code.metadata.norm * query_norm * K_ERROR_RATE *
+                        code.metadata.lower_bound_error / code.metadata.filter_error;
     const float estimate = distance - error;
     const float lower_bound = estimate - 1e-5F * std::max(1.0F, std::fabs(estimate));
     return {distance, lower_bound, centered_ip};
@@ -316,15 +388,16 @@ filter_estimate(const std::vector<float>& query, float query_norm, const Encoded
 float
 full_distance(const std::vector<float>& query,
               float query_norm,
-              const Encoded& code,
+              const EncodedView& code,
               float centered_filter_ip) {
     const float query_sum = std::accumulate(query.begin(), query.end(), 0.0F);
     const float filter_ip = centered_filter_ip + 3.5F * query_sum;
     const float code_ip = filter_ip * static_cast<float>(1U << K_SUPPLEMENT_BITS) +
-                          supplement_ip(query, code.supplement.data());
-    const float base_error = std::fabs(code.error) < 1e-5F ? 1.0F : code.error;
-    const float normalized_ip = (code_ip - 127.5F * query_sum) / code.code_norm / base_error;
-    return l2_distance(code.norm, query_norm, normalized_ip);
+                          supplement_ip(query, code.supplement);
+    const float base_error = std::fabs(code.metadata.error) < 1e-5F ? 1.0F : code.metadata.error;
+    const float normalized_ip =
+        (code_ip - 127.5F * query_sum) / code.metadata.code_norm / base_error;
+    return l2_distance(code.metadata.norm, query_norm, normalized_ip);
 }
 
 struct Candidate {
@@ -367,17 +440,18 @@ struct SearchResult {
 SearchResult
 filtered_search(const std::vector<float>& query,
                 float query_norm,
-                const std::vector<Encoded>& codes,
+                const EncodedRecords& codes,
                 uint64_t k) {
     std::priority_queue<Candidate, std::vector<Candidate>, decltype(&better)> heap(&better);
     uint64_t reordered = 0;
-    for (uint64_t id = 0; id < codes.size(); ++id) {
-        const auto coarse = filter_estimate(query, query_norm, codes[id]);
+    for (uint64_t id = 0; id < codes.Size(); ++id) {
+        const auto code = codes.At(id);
+        const auto coarse = filter_estimate(query, query_norm, code);
         if (heap.size() == k and coarse.lower_bound >= heap.top().distance) {
             continue;
         }
         ++reordered;
-        const Candidate next{id, full_distance(query, query_norm, codes[id], coarse.centered_ip)};
+        const Candidate next{id, full_distance(query, query_norm, code, coarse.centered_ip)};
         if (heap.size() < k) {
             heap.push(next);
         } else if (better(next, heap.top())) {
@@ -477,53 +551,59 @@ read_float(std::istream& input) {
 }
 
 void
-write_bytes(std::ostream& output, const std::vector<uint8_t>& bytes) {
-    if (not bytes.empty()) {
-        output.write(reinterpret_cast<const char*>(bytes.data()),
-                     static_cast<std::streamsize>(bytes.size()));
+write_bytes(std::ostream& output, const uint8_t* bytes, uint64_t size) {
+    if (size > 0) {
+        output.write(reinterpret_cast<const char*>(bytes), static_cast<std::streamsize>(size));
     }
     require(static_cast<bool>(output), "snapshot write failed");
 }
 
 void
-read_bytes(std::istream& input, std::vector<uint8_t>& bytes) {
-    if (not bytes.empty()) {
-        input.read(reinterpret_cast<char*>(bytes.data()),
-                   static_cast<std::streamsize>(bytes.size()));
+write_bytes(std::ostream& output, const std::vector<uint8_t>& bytes) {
+    write_bytes(output, bytes.data(), bytes.size());
+}
+
+void
+read_bytes(std::istream& input, uint8_t* bytes, uint64_t size) {
+    if (size > 0) {
+        input.read(reinterpret_cast<char*>(bytes), static_cast<std::streamsize>(size));
     }
     require(static_cast<bool>(input), "truncated snapshot");
 }
 
 void
-save_snapshot(std::ostream& output, const Model& model, const std::vector<Encoded>& codes) {
+read_bytes(std::istream& input, std::vector<uint8_t>& bytes) {
+    read_bytes(input, bytes.data(), bytes.size());
+}
+
+void
+save_snapshot(std::ostream& output, const Model& model, const EncodedRecords& codes) {
     constexpr char magic[] = "VSLRBQ01";
+    require(model.dim == codes.dim, "snapshot model and records disagree");
     output.write(magic, 8);
     write_u64(output, 1);
     write_u64(output, model.dim);
-    write_u64(output, codes.size());
+    write_u64(output, codes.Size());
     write_u64(output, model.centroid.size());
     write_u64(output, model.flips.size());
     for (float value : model.centroid) {
         write_float(output, value);
     }
     write_bytes(output, model.flips);
-    const uint64_t plane_bytes = (model.dim + 7) / 8;
-    for (const auto& code : codes) {
-        require(code.filter.size() == plane_bytes * K_FILTER_BITS and
-                    code.supplement.size() == plane_bytes * K_SUPPLEMENT_BITS,
-                "invalid encoded record");
-        write_float(output, code.norm);
-        write_float(output, code.code_norm);
-        write_float(output, code.error);
-        write_float(output, code.filter_norm);
-        write_float(output, code.filter_error);
-        write_float(output, code.lower_bound_error);
-        write_bytes(output, code.filter);
-        write_bytes(output, code.supplement);
+    for (uint64_t id = 0; id < codes.Size(); ++id) {
+        const auto code = codes.At(id);
+        write_float(output, code.metadata.norm);
+        write_float(output, code.metadata.code_norm);
+        write_float(output, code.metadata.error);
+        write_float(output, code.metadata.filter_norm);
+        write_float(output, code.metadata.filter_error);
+        write_float(output, code.metadata.lower_bound_error);
+        write_bytes(output, code.filter, codes.FilterBytes());
+        write_bytes(output, code.supplement, codes.SupplementBytes());
     }
 }
 
-std::pair<Model, std::vector<Encoded>>
+std::pair<Model, EncodedRecords>
 load_snapshot(std::istream& input) {
     char magic[8]{};
     input.read(magic, sizeof(magic));
@@ -542,22 +622,24 @@ load_snapshot(std::istream& input) {
         value = read_float(input);
     }
     read_bytes(input, model.flips);
-    std::vector<Encoded> codes(count);
-    for (auto& code : codes) {
-        code.norm = read_float(input);
-        code.code_norm = read_float(input);
-        code.error = read_float(input);
-        code.filter_norm = read_float(input);
-        code.filter_error = read_float(input);
-        code.lower_bound_error = read_float(input);
-        require(code.norm > 0.0F and code.code_norm > 0.0F and code.filter_norm > 0.0F and
-                    code.filter_error >= 1e-5F and code.filter_error <= 1.0F and
-                    code.lower_bound_error >= 0.0F,
+    EncodedRecords codes(dim);
+    codes.Resize(count);
+    for (uint64_t id = 0; id < count; ++id) {
+        auto& metadata = codes.metadata[id];
+        metadata.norm = read_float(input);
+        metadata.code_norm = read_float(input);
+        metadata.error = read_float(input);
+        metadata.filter_norm = read_float(input);
+        metadata.filter_error = read_float(input);
+        metadata.lower_bound_error = read_float(input);
+        require(metadata.norm > 0.0F and metadata.code_norm > 0.0F and
+                    metadata.filter_norm > 0.0F and metadata.filter_error >= 1e-5F and
+                    metadata.filter_error <= 1.0F and metadata.lower_bound_error >= 0.0F,
                 "invalid snapshot metadata");
-        code.filter.resize(plane_bytes * K_FILTER_BITS);
-        code.supplement.resize(plane_bytes * K_SUPPLEMENT_BITS);
-        read_bytes(input, code.filter);
-        read_bytes(input, code.supplement);
+        read_bytes(input, codes.filters.data() + id * codes.FilterBytes(), codes.FilterBytes());
+        read_bytes(input,
+                   codes.supplements.data() + id * codes.SupplementBytes(),
+                   codes.SupplementBytes());
     }
     require(input.peek() == std::char_traits<char>::eof(), "snapshot trailing bytes");
     return {std::move(model), std::move(codes)};
@@ -610,16 +692,22 @@ self_test() {
     }
     require(std::fabs(direct - split) <= 1e-4F * std::max(1.0F, std::fabs(direct)),
             "codec split mismatch");
-    std::vector<Encoded> codes;
-    codes.reserve(count);
+    EncodedRecords codes(dim);
+    codes.Reserve(count);
     for (uint64_t id = 0; id < count; ++id) {
-        codes.push_back(encode(first, base.data() + id * dim));
+        codes.Append(encode(first, base.data() + id * dim));
     }
+    require(codes.filters.size() == count * codes.FilterBytes() and
+                codes.supplements.size() == count * codes.SupplementBytes(),
+            "encoded records are not compact");
+    require(codes.At(1).filter == codes.At(0).filter + codes.FilterBytes() and
+                codes.At(1).supplement == codes.At(0).supplement + codes.SupplementBytes(),
+            "encoded records are not contiguous");
     float query_norm = 0.0F;
     const auto normalized_query = normalize(first, base.data() + dim, query_norm);
     const auto full = top_k(count, 10, [&](uint64_t id) {
-        const auto coarse = filter_estimate(normalized_query, query_norm, codes[id]);
-        return full_distance(normalized_query, query_norm, codes[id], coarse.centered_ip);
+        const auto coarse = filter_estimate(normalized_query, query_norm, codes.At(id));
+        return full_distance(normalized_query, query_norm, codes.At(id), coarse.centered_ip);
     });
     const auto filtered = filtered_search(normalized_query, query_norm, codes, 10);
     require(filtered.reordered > 0 and filtered.reordered <= count,
@@ -640,11 +728,14 @@ self_test() {
     snapshot.seekg(0);
     auto [loaded_model, loaded_codes] = load_snapshot(snapshot);
     require(loaded_model.dim == first.dim and loaded_model.centroid == first.centroid and
-                loaded_model.flips == first.flips and loaded_codes.size() == codes.size(),
+                loaded_model.flips == first.flips and loaded_codes.Size() == codes.Size(),
             "snapshot model mismatch");
     float loaded_query_norm = 0.0F;
     const auto loaded_query = normalize(loaded_model, base.data() + dim, loaded_query_norm);
     const auto loaded = filtered_search(loaded_query, loaded_query_norm, loaded_codes, 10);
+    std::stringstream repeated_snapshot(std::ios::in | std::ios::out | std::ios::binary);
+    save_snapshot(repeated_snapshot, loaded_model, loaded_codes);
+    require(repeated_snapshot.str() == bytes, "snapshot bytes changed after round-trip");
     require(std::equal(filtered.neighbors.begin(),
                        filtered.neighbors.end(),
                        loaded.neighbors.begin(),
@@ -678,12 +769,10 @@ run(const std::filesystem::path& root) {
             "inconsistent SIFT dataset");
     const auto build_start = Clock::now();
     const auto model = train(base.values, base.count, dim, 47);
-    std::vector<Encoded> codes;
-    codes.reserve(base.count);
+    EncodedRecords codes(dim);
+    codes.Reserve(base.count);
     for (uint64_t id = 0; id < base.count; ++id) {
-        codes.push_back(encode(model, base.values.data() + id * dim));
-        codes.back().scalar.clear();
-        codes.back().scalar.shrink_to_fit();
+        codes.Append(encode(model, base.values.data() + id * dim));
     }
     const double build_ms =
         std::chrono::duration<double, std::milli>(Clock::now() - build_start).count();
@@ -696,8 +785,8 @@ run(const std::filesystem::path& root) {
         float query_norm = 0.0F;
         const auto query = normalize(model, queries.values.data() + q * dim, query_norm);
         const auto full = top_k(base.count, k, [&](uint64_t id) {
-            const auto coarse = filter_estimate(query, query_norm, codes[id]);
-            return full_distance(query, query_norm, codes[id], coarse.centered_ip);
+            const auto coarse = filter_estimate(query, query_norm, codes.At(id));
+            return full_distance(query, query_norm, codes.At(id), coarse.centered_ip);
         });
         const auto start = Clock::now();
         const auto filtered = filtered_search(query, query_norm, codes, k);
