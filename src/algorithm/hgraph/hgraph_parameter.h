@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <limits>
 
 #include "../index_search_parameter.h"
@@ -41,8 +42,23 @@ struct HGraphMCIParameters {
     std::string knng_source{HGRAPH_MCI_KNNG_SOURCE_HGRAPH};
     std::string knng_path{};
     float incremental_join_ratio_threshold{0.6F};
-    uint64_t incremental_added_mct{3};
+    uint64_t incremental_degree_min{50};
+    uint64_t incremental_degree_n_divisor{10000};
+    uint64_t incremental_degree_mcs_divisor{2};
     uint64_t incremental_clique_max{50};
+    uint64_t delete_clique_size_threshold{30};
+    uint64_t delete_node_mct_threshold{3};
+
+    [[nodiscard]] uint64_t
+    IncrementalDegreeTarget(uint64_t live_total) const {
+        if (live_total <= 1) {
+            return 0;
+        }
+        return std::min(live_total - 1,
+                        std::max<uint64_t>(incremental_degree_min,
+                                           std::min(live_total / incremental_degree_n_divisor,
+                                                    mcs / incremental_degree_mcs_divisor)));
+    }
 };
 class HGraphParameter : public InnerIndexParameter {
 public:
