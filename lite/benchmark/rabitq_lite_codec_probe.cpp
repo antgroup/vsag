@@ -1,12 +1,21 @@
 // Copyright 2024-present the vsag project
 // SPDX-License-Identifier: Apache-2.0
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <limits>
 #include <numeric>
+#include <queue>
 #include <random>
 #include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <unordered_set>
 #include <vector>
 
 #include "simd/kernels/rabitq_pack.h"
@@ -17,6 +26,9 @@ constexpr uint32_t K_FILTER_BITS = 3;
 constexpr uint32_t K_SUPPLEMENT_BITS = 5;
 constexpr uint32_t K_ROUNDS = 4;
 constexpr uint32_t K_ENCODE_ROUNDS = 6;
+constexpr float K_ERROR_RATE = 1.9F;
+
+using Clock = std::chrono::steady_clock;
 
 void
 require(bool value, const char* message) {
@@ -168,7 +180,7 @@ fast_encode(const std::vector<float>& normalized, float& code_norm) {
 
 struct Encoded {
     std::vector<uint8_t> filter, supplement, scalar;
-    float norm{}, code_norm{}, error{};
+    float norm{}, code_norm{}, error{}, filter_norm{}, filter_error{}, lower_bound_error{};
 };
 
 std::vector<float>
@@ -205,15 +217,225 @@ encode(const Model& model, const float* input) {
                                                   K_TOTAL_BITS,
                                                   K_FILTER_BITS,
                                                   0);
-    double ip = 0.0;
-    double sum = 0.0;
+    double full_ip = 0.0;
+    double full_norm_sqr = 0.0;
+    double filter_ip = 0.0;
+    double filter_norm_sqr = 0.0;
+    double query_sum = 0.0;
     for (uint64_t d = 0; d < model.dim; ++d) {
-        ip += normalized[d] * static_cast<float>(result.scalar[d]);
-        sum += normalized[d];
+        const float query = normalized[d];
+        const float code = result.scalar[d];
+        const auto filter_code = static_cast<float>(result.scalar[d] >> K_SUPPLEMENT_BITS);
+        full_ip += query * code;
+        full_norm_sqr += (code - 127.5F) * (code - 127.5F);
+        filter_ip += query * filter_code;
+        filter_norm_sqr += (filter_code - 3.5F) * (filter_code - 3.5F);
+        query_sum += query;
     }
-    result.error = static_cast<float>((ip - 127.5 * sum) / result.code_norm);
-    require(std::isfinite(result.error), "non-finite encoding metadata");
+    result.code_norm = static_cast<float>(std::sqrt(full_norm_sqr));
+    result.filter_norm = static_cast<float>(std::sqrt(filter_norm_sqr));
+    result.error = static_cast<float>((full_ip - 127.5 * query_sum) / result.code_norm);
+    result.filter_error =
+        std::fabs(static_cast<float>((filter_ip - 3.5 * query_sum) / result.filter_norm));
+    result.filter_error = std::clamp(result.filter_error, 1e-5F, 1.0F);
+    result.lower_bound_error =
+        std::sqrt(std::max(0.0F, 1.0F - result.filter_error * result.filter_error) /
+                  std::max(1.0F, static_cast<float>(model.dim - 1)));
+    require(std::isfinite(result.error) and std::isfinite(result.filter_error) and
+                std::isfinite(result.lower_bound_error),
+            "non-finite encoding metadata");
     return result;
+}
+
+uint32_t
+read_plane_code(const uint8_t* planes,
+                uint64_t plane_bytes,
+                uint64_t d,
+                uint32_t bits,
+                bool most_significant_first) {
+    const auto mask = static_cast<uint8_t>(1U << (d & 7U));
+    const uint64_t byte = d >> 3U;
+    uint32_t code = 0;
+    for (uint32_t bit = 0; bit < bits; ++bit) {
+        if ((planes[bit * plane_bytes + byte] & mask) != 0U) {
+            code += most_significant_first ? 1U << (bits - bit - 1U) : 1U << bit;
+        }
+    }
+    return code;
+}
+
+float
+filter_centered_ip(const std::vector<float>& query, const uint8_t* filter) {
+    const uint64_t plane_bytes = (query.size() + 7) / 8;
+    float result = 0.0F;
+    for (uint64_t d = 0; d < query.size(); ++d) {
+        const auto code = read_plane_code(filter, plane_bytes, d, K_FILTER_BITS, true);
+        result += query[d] * (static_cast<float>(code) - 3.5F);
+    }
+    return result;
+}
+
+float
+supplement_ip(const std::vector<float>& query, const uint8_t* supplement) {
+    const uint64_t plane_bytes = (query.size() + 7) / 8;
+    float result = 0.0F;
+    for (uint64_t d = 0; d < query.size(); ++d) {
+        const auto code = read_plane_code(supplement, plane_bytes, d, K_SUPPLEMENT_BITS, false);
+        result += query[d] * static_cast<float>(code);
+    }
+    return result;
+}
+
+float
+l2_distance(float base_norm, float query_norm, float normalized_ip) {
+    return base_norm * base_norm + query_norm * query_norm -
+           2.0F * base_norm * query_norm * normalized_ip;
+}
+
+struct FilterEstimate {
+    float distance;
+    float lower_bound;
+    float centered_ip;
+};
+
+FilterEstimate
+filter_estimate(const std::vector<float>& query, float query_norm, const Encoded& code) {
+    const float centered_ip = filter_centered_ip(query, code.filter.data());
+    const float normalized_ip = centered_ip / code.filter_norm / code.filter_error;
+    const float distance = l2_distance(code.norm, query_norm, normalized_ip);
+    const float error =
+        2.0F * code.norm * query_norm * K_ERROR_RATE * code.lower_bound_error / code.filter_error;
+    const float estimate = distance - error;
+    const float lower_bound = estimate - 1e-5F * std::max(1.0F, std::fabs(estimate));
+    return {distance, lower_bound, centered_ip};
+}
+
+float
+full_distance(const std::vector<float>& query,
+              float query_norm,
+              const Encoded& code,
+              float centered_filter_ip) {
+    const float query_sum = std::accumulate(query.begin(), query.end(), 0.0F);
+    const float filter_ip = centered_filter_ip + 3.5F * query_sum;
+    const float code_ip = filter_ip * static_cast<float>(1U << K_SUPPLEMENT_BITS) +
+                          supplement_ip(query, code.supplement.data());
+    const float base_error = std::fabs(code.error) < 1e-5F ? 1.0F : code.error;
+    const float normalized_ip = (code_ip - 127.5F * query_sum) / code.code_norm / base_error;
+    return l2_distance(code.norm, query_norm, normalized_ip);
+}
+
+struct Candidate {
+    uint64_t id;
+    float distance;
+};
+
+bool
+better(const Candidate& left, const Candidate& right) {
+    return left.distance < right.distance or
+           (left.distance == right.distance and left.id < right.id);
+}
+
+template <typename Distance>
+std::vector<Candidate>
+top_k(uint64_t count, uint64_t k, Distance distance) {
+    std::priority_queue<Candidate, std::vector<Candidate>, decltype(&better)> heap(&better);
+    for (uint64_t id = 0; id < count; ++id) {
+        const Candidate next{id, distance(id)};
+        if (heap.size() < k) {
+            heap.push(next);
+        } else if (better(next, heap.top())) {
+            heap.pop();
+            heap.push(next);
+        }
+    }
+    std::vector<Candidate> result(heap.size());
+    for (uint64_t i = result.size(); i > 0; --i) {
+        result[i - 1] = heap.top();
+        heap.pop();
+    }
+    return result;
+}
+
+struct SearchResult {
+    std::vector<Candidate> neighbors;
+    uint64_t reordered{};
+};
+
+SearchResult
+filtered_search(const std::vector<float>& query,
+                float query_norm,
+                const std::vector<Encoded>& codes,
+                uint64_t k) {
+    std::priority_queue<Candidate, std::vector<Candidate>, decltype(&better)> heap(&better);
+    uint64_t reordered = 0;
+    for (uint64_t id = 0; id < codes.size(); ++id) {
+        const auto coarse = filter_estimate(query, query_norm, codes[id]);
+        if (heap.size() == k and coarse.lower_bound >= heap.top().distance) {
+            continue;
+        }
+        ++reordered;
+        const Candidate next{id, full_distance(query, query_norm, codes[id], coarse.centered_ip)};
+        if (heap.size() < k) {
+            heap.push(next);
+        } else if (better(next, heap.top())) {
+            heap.pop();
+            heap.push(next);
+        }
+    }
+    std::vector<Candidate> result(heap.size());
+    for (uint64_t i = result.size(); i > 0; --i) {
+        result[i - 1] = heap.top();
+        heap.pop();
+    }
+    return {std::move(result), reordered};
+}
+
+template <typename T>
+struct Records {
+    std::vector<T> values;
+    uint64_t count{};
+};
+
+template <typename T>
+Records<T>
+read_records(const std::filesystem::path& path, uint64_t expected_dim) {
+    std::ifstream input(path, std::ios::binary);
+    if (not input) {
+        throw std::runtime_error("cannot open " + path.string());
+    }
+    Records<T> result;
+    std::vector<T> row(expected_dim);
+    while (true) {
+        int32_t dim = 0;
+        input.read(reinterpret_cast<char*>(&dim), sizeof(dim));
+        if (input.gcount() == 0 and input.eof()) {
+            break;
+        }
+        require(input.gcount() == sizeof(dim) and dim == static_cast<int32_t>(expected_dim),
+                "invalid record dimension");
+        input.read(reinterpret_cast<char*>(row.data()), sizeof(T) * expected_dim);
+        require(static_cast<bool>(input), "truncated record");
+        if constexpr (std::is_same_v<T, float>) {
+            require(std::all_of(
+                        row.begin(), row.end(), [](float value) { return std::isfinite(value); }),
+                    "non-finite vector");
+        }
+        result.values.insert(result.values.end(), row.begin(), row.end());
+        ++result.count;
+    }
+    require(result.count > 0, "empty records");
+    return result;
+}
+
+uint64_t
+hits(const std::vector<Candidate>& neighbors, const int32_t* truth, uint64_t k) {
+    const std::unordered_set<int32_t> expected(truth, truth + k);
+    require(expected.size() == k, "duplicate ground-truth ID");
+    uint64_t total = 0;
+    for (const auto& neighbor : neighbors) {
+        total += expected.count(static_cast<int32_t>(neighbor.id));
+    }
+    return total;
 }
 
 void
@@ -263,15 +485,114 @@ self_test() {
     }
     require(std::fabs(direct - split) <= 1e-4F * std::max(1.0F, std::fabs(direct)),
             "codec split mismatch");
+    std::vector<Encoded> codes;
+    codes.reserve(count);
+    for (uint64_t id = 0; id < count; ++id) {
+        codes.push_back(encode(first, base.data() + id * dim));
+    }
+    float query_norm = 0.0F;
+    const auto normalized_query = normalize(first, base.data() + dim, query_norm);
+    const auto full = top_k(count, 10, [&](uint64_t id) {
+        const auto coarse = filter_estimate(normalized_query, query_norm, codes[id]);
+        return full_distance(normalized_query, query_norm, codes[id], coarse.centered_ip);
+    });
+    const auto filtered = filtered_search(normalized_query, query_norm, codes, 10);
+    require(filtered.reordered > 0 and filtered.reordered <= count,
+            "invalid filtered search count");
+    require(std::equal(full.begin(),
+                       full.end(),
+                       filtered.neighbors.begin(),
+                       [](const auto& left, const auto& right) {
+                           return left.id == right.id and
+                                  std::fabs(left.distance - right.distance) <=
+                                      1e-4F * std::max(1.0F, std::fabs(left.distance));
+                       }),
+            "lower-bound filtering changed full-code top-k");
+}
+
+void
+run(const std::filesystem::path& root) {
+    constexpr uint64_t dim = 128;
+    constexpr uint64_t k = 10;
+    const auto base = read_records<float>(root / "base.fvecs", dim);
+    const auto queries = read_records<float>(root / "queries.fvecs", dim);
+    const auto truth = read_records<int32_t>(root / "groundtruth.ivecs", k);
+    require(queries.count == truth.count and base.count >= k and
+                base.count <= static_cast<uint64_t>(std::numeric_limits<int32_t>::max()),
+            "inconsistent SIFT dataset");
+    const auto build_start = Clock::now();
+    const auto model = train(base.values, base.count, dim, 47);
+    std::vector<Encoded> codes;
+    codes.reserve(base.count);
+    for (uint64_t id = 0; id < base.count; ++id) {
+        codes.push_back(encode(model, base.values.data() + id * dim));
+        codes.back().scalar.clear();
+        codes.back().scalar.shrink_to_fit();
+    }
+    const double build_ms =
+        std::chrono::duration<double, std::milli>(Clock::now() - build_start).count();
+    uint64_t full_hits = 0;
+    uint64_t filtered_hits = 0;
+    uint64_t agreement = 0;
+    uint64_t reordered = 0;
+    std::vector<double> search_us;
+    for (uint64_t q = 0; q < queries.count; ++q) {
+        float query_norm = 0.0F;
+        const auto query = normalize(model, queries.values.data() + q * dim, query_norm);
+        const auto full = top_k(base.count, k, [&](uint64_t id) {
+            const auto coarse = filter_estimate(query, query_norm, codes[id]);
+            return full_distance(query, query_norm, codes[id], coarse.centered_ip);
+        });
+        const auto start = Clock::now();
+        const auto filtered = filtered_search(query, query_norm, codes, k);
+        search_us.push_back(
+            std::chrono::duration<double, std::micro>(Clock::now() - start).count());
+        const int32_t* expected = truth.values.data() + q * k;
+        for (uint64_t i = 0; i < k; ++i) {
+            require(expected[i] >= 0 and static_cast<uint64_t>(expected[i]) < base.count,
+                    "ground-truth ID outside base");
+        }
+        full_hits += hits(full, expected, k);
+        filtered_hits += hits(filtered.neighbors, expected, k);
+        reordered += filtered.reordered;
+        for (uint64_t i = 0; i < k; ++i) {
+            agreement += static_cast<uint64_t>(full[i].id == filtered.neighbors[i].id);
+        }
+    }
+    std::sort(search_us.begin(), search_us.end());
+    const uint64_t opportunities = queries.count * k;
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    std::cout << "base_count,query_count,dim,build_encode_ms,full_recall_at_10,"
+                 "filtered_recall_at_10,filtered_full_agreement,mean_reordered,reorder_ratio,"
+                 "search_p50_us,filter_bytes,supplement_bytes,metadata_bytes\n";
+    std::cout << std::fixed << std::setprecision(6) << base.count << ',' << queries.count << ','
+              << dim << ',' << build_ms << ','
+              << static_cast<double>(full_hits) / static_cast<double>(opportunities) << ','
+              << static_cast<double>(filtered_hits) / static_cast<double>(opportunities) << ','
+              << static_cast<double>(agreement) / static_cast<double>(opportunities) << ','
+              << static_cast<double>(reordered) / static_cast<double>(queries.count) << ','
+              << static_cast<double>(reordered) / static_cast<double>(queries.count * base.count)
+              << ',' << search_us[search_us.size() / 2] << ','
+              << base.count * plane_bytes * K_FILTER_BITS << ','
+              << base.count * plane_bytes * K_SUPPLEMENT_BITS << ','
+              << base.count * 6 * sizeof(float) << '\n';
 }
 }  // namespace
 
 int
-main() {
+main(int argc, char** argv) {
     try {
-        self_test();
-        std::cout << "rabitq_lite_codec_probe: PASS\n";
-        return 0;
+        if (argc == 1 or (argc == 2 and std::string(argv[1]) == "--self-test")) {
+            self_test();
+            std::cout << "rabitq_lite_codec_probe: PASS\n";
+            return 0;
+        }
+        if (argc == 2) {
+            run(argv[1]);
+            return 0;
+        }
+        std::cerr << "usage: lite_rabitq_codec_probe [SIFT_DIR | --self-test]\n";
+        return 2;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

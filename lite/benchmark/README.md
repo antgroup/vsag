@@ -13,8 +13,8 @@ See [RABITQ_LITE_FEASIBILITY.md](RABITQ_LITE_FEASIBILITY.md) for the source-base
   separate Full VSAG comparison consumers.
 - `lite/benchmark/prepare_sift.py`: prepares the documented SIFT subsets.
 - `lite/benchmark/quantization_probe.cpp`: opt-in SQ8/FP16 scan experiment.
-- lite/benchmark/rabitq_lite_layout_probe.cpp: opt-in RaBitQ 3+5 bit-plane differential probe.
-- lite/benchmark/rabitq_lite_codec_probe.cpp: deterministic FHT training and 8-bit RaBitQ 3+5 encoding probe.
+- `lite/benchmark/rabitq_lite_layout_probe.cpp`: opt-in RaBitQ 3+5 bit-plane differential probe.
+- `lite/benchmark/rabitq_lite_codec_probe.cpp`: deterministic FHT training, 3-bit lower-bound filtering, and 5-bit supplement reranking probe.
 - `src/lite/fp16_codec.h` and the internal FP16 factory/tests in
   `src/lite/graph_backend.cpp` and `src/lite/graph_backend_test.cpp`:
   candidate graph experiment, not a public `Index` backend.
@@ -365,3 +365,16 @@ The measured benchmark executable SHA-256 is
 `b50d34d3cc4e46a9b38564d930c3ae05fb38565a23407ac94d49b3bd7d7feba6`;
 the Full VSAG shared library SHA-256 is
 `4d245bfcde3969ecd18b338b68d7cd8b3a8f4c47d39eeba71045b9aafadb7505`.
+
+## Lite RaBitQ 3+5 search probe
+
+The opt-in codec probe follows the Full RaBitQ L2 split-search equations without changing the public Lite API or snapshots. It trains a deterministic four-round FHT model, encodes an 8-bit CAQ scalar code, stores the high 3 bits in filter planes and the low 5 bits in supplement planes, and records the norm/error metadata needed by the official lower-bound formula. Search scans the filter payload first and reads the supplement payload only when the lower bound can still enter the current Top-K heap.
+
+Run its deterministic self-test or the prepared SIFT-10k smoke with:
+
+```bash
+build-lite-rabitq-codec-run/lite_rabitq_codec_probe --self-test
+build-lite-rabitq-codec-run/lite_rabitq_codec_probe /path/to/scale-10000
+```
+
+The 2026-09-21 SIFT-10k smoke produced 0.994 Recall@10 for both the full 8-bit split scan and lower-bound-filtered search. The filtered result matched the full-code Top-10 exactly and reordered a mean 136.43 of 10,000 candidates (1.3643%). Its 480,000 filter bytes, 800,000 supplement bytes, and 240,000 metadata bytes describe encoded payloads only; the standalone process also retains source vectors, queries, model state, and C++ container overhead. The single run is a functional smoke, not a stable latency benchmark or evidence for a public Lite backend.
