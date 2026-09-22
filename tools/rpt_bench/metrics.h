@@ -57,18 +57,18 @@ struct LocalityMetrics {
 };
 
 UniformityMetrics
-ComputeUniformity(const Partitions& partitions, uint64_t count, uint64_t bucket_size);
+compute_uniformity(const Partitions& partitions, uint64_t count, uint64_t bucket_size);
 
 /// `neighbors` is the row-major ground-truth id matrix of `num_queries` x `ground_truth_k`.
 /// At most `max_queries` queries are sampled (0 means all) and at most `topk` neighbours
 /// per query are used (0 means all available).
 LocalityMetrics
-ComputeLocality(const Partitions& partitions,
-                uint64_t count,
-                const int64_t* neighbors,
-                uint64_t num_queries,
-                uint64_t ground_truth_k,
-                uint64_t topk,
-                uint64_t max_queries);
+compute_locality(const Partitions& partitions,
+                 uint64_t count,
+                 const int64_t* neighbors,
+                 uint64_t num_queries,
+                 uint64_t ground_truth_k,
+                 uint64_t topk,
+                 uint64_t max_queries);
 
 }  // namespace vsag::rpt_bench

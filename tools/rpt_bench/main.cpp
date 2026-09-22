@@ -33,7 +33,7 @@ using vsag::rpt_bench::PartitionRequest;
 using vsag::rpt_bench::UniformityMetrics;
 
 std::vector<std::string>
-SplitList(const std::string& text) {
+split_list(const std::string& text) {
     std::vector<std::string> items;
     std::stringstream stream(text);
     std::string item;
@@ -46,16 +46,16 @@ SplitList(const std::string& text) {
 }
 
 std::vector<uint64_t>
-ParseBucketSizes(const std::string& text) {
+parse_bucket_sizes(const std::string& text) {
     std::vector<uint64_t> sizes;
-    for (const auto& item : SplitList(text)) {
+    for (const auto& item : split_list(text)) {
         sizes.push_back(std::stoull(item));
     }
     return sizes;
 }
 
 void
-ParseArgs(argparse::ArgumentParser& parser, int argc, char** argv) {
+parse_args(argparse::ArgumentParser& parser, int argc, char** argv) {
     parser.add_argument<std::string>("--dataset", "-d")
         .required()
         .help("Path to an ann-benchmarks style hdf5 dataset");
@@ -102,7 +102,7 @@ ParseArgs(argparse::ArgumentParser& parser, int argc, char** argv) {
 }
 
 nlohmann::json
-ToJson(const UniformityMetrics& metrics) {
+to_json(const UniformityMetrics& metrics) {
     nlohmann::json json;
     json["num_partitions"] = metrics.num_partitions;
     json["expected_partitions"] = metrics.expected_partitions;
@@ -117,7 +117,7 @@ ToJson(const UniformityMetrics& metrics) {
 }
 
 nlohmann::json
-ToJson(const LocalityMetrics& metrics) {
+to_json(const LocalityMetrics& metrics) {
     nlohmann::json json;
     json["queries_evaluated"] = metrics.queries_evaluated;
     json["k"] = metrics.k;
@@ -128,7 +128,7 @@ ToJson(const LocalityMetrics& metrics) {
 }
 
 void
-PrintHeader() {
+print_header() {
     std::cout << std::left << std::setw(12) << "strategy" << std::right << std::setw(8) << "L"
               << std::setw(10) << "parts" << std::setw(8) << "max" << std::setw(8) << "min"
               << std::setw(9) << "max/min" << std::setw(9) << "gini" << std::setw(8) << "bounds"
@@ -137,12 +137,12 @@ PrintHeader() {
 }
 
 void
-PrintRow(const std::string& strategy,
-         uint64_t bucket_size,
-         const UniformityMetrics& uniformity,
-         const LocalityMetrics& locality,
-         double build_time_ms,
-         int64_t peak_rss_delta_kb) {
+print_row(const std::string& strategy,
+          uint64_t bucket_size,
+          const UniformityMetrics& uniformity,
+          const LocalityMetrics& locality,
+          double build_time_ms,
+          int64_t peak_rss_delta_kb) {
     std::cout << std::left << std::setw(12) << strategy << std::right << std::setw(8) << bucket_size
               << std::setw(10) << uniformity.num_partitions << std::setw(8) << uniformity.max_size
               << std::setw(8) << uniformity.min_size << std::fixed << std::setprecision(2)
@@ -155,21 +155,19 @@ PrintRow(const std::string& strategy,
               << std::setw(11) << locality.mean_partitions_for_90_recall << std::endl;
 }
 
-}  // namespace
-
 int
-main(int argc, char** argv) {
+run(int argc, char** argv) {
     argparse::ArgumentParser parser("rpt_bench");
-    ParseArgs(parser, argc, argv);
+    parse_args(parser, argc, argv);
 
-    std::string dataset_path = parser.get<std::string>("--dataset");
-    auto bucket_sizes = ParseBucketSizes(parser.get<std::string>("--bucket_sizes"));
-    auto strategies = SplitList(parser.get<std::string>("--strategies"));
+    auto dataset_path = parser.get<std::string>("--dataset");
+    auto bucket_sizes = parse_bucket_sizes(parser.get<std::string>("--bucket_sizes"));
+    auto strategies = split_list(parser.get<std::string>("--strategies"));
     auto seed = static_cast<uint64_t>(parser.get<int>("--seed"));
     auto topk = static_cast<uint64_t>(parser.get<int>("--topk"));
     auto max_queries = static_cast<uint64_t>(parser.get<int>("--max_queries"));
     auto max_base = static_cast<uint64_t>(parser.get<int>("--max_base"));
-    std::string output_path = parser.get<std::string>("--output");
+    auto output_path = parser.get<std::string>("--output");
 
     vsag::init();
 
@@ -192,13 +190,13 @@ main(int argc, char** argv) {
     }
     const auto* base = static_cast<const float*>(dataset->GetTrain());
     auto num_queries = static_cast<uint64_t>(dataset->GetNumberOfQuery());
-    uint64_t ground_truth_k = dataset->GetGroundTruthK();
+    auto ground_truth_k = dataset->GetGroundTruthK();
     const int64_t* neighbors = num_queries > 0 ? dataset->GetNeighbors(0) : nullptr;
 
     std::cout << "dataset: " << dataset_path << "  dim=" << dim << "  base=" << count
               << "  queries=" << num_queries << "  gt_k=" << ground_truth_k << std::endl
               << std::endl;
-    PrintHeader();
+    print_header();
 
     nlohmann::json report;
     report["dataset"] = dataset_path;
@@ -216,7 +214,7 @@ main(int argc, char** argv) {
             request.bucket_size = bucket_size;
             request.seed = seed;
 
-            auto result = vsag::rpt_bench::RunStrategy(strategy, request);
+            auto result = vsag::rpt_bench::run_strategy(strategy, request);
             if (not result.error.empty()) {
                 std::cerr << strategy << " (L=" << bucket_size << ") failed: " << result.error
                           << std::endl;
@@ -224,28 +222,28 @@ main(int argc, char** argv) {
             }
 
             auto uniformity =
-                vsag::rpt_bench::ComputeUniformity(result.partitions, count, bucket_size);
-            auto locality = vsag::rpt_bench::ComputeLocality(result.partitions,
-                                                             count,
-                                                             neighbors,
-                                                             num_queries,
-                                                             ground_truth_k,
-                                                             topk,
-                                                             max_queries);
-            PrintRow(strategy,
-                     bucket_size,
-                     uniformity,
-                     locality,
-                     result.build_time_ms,
-                     result.peak_rss_delta_kb);
+                vsag::rpt_bench::compute_uniformity(result.partitions, count, bucket_size);
+            auto locality = vsag::rpt_bench::compute_locality(result.partitions,
+                                                              count,
+                                                              neighbors,
+                                                              num_queries,
+                                                              ground_truth_k,
+                                                              topk,
+                                                              max_queries);
+            print_row(strategy,
+                      bucket_size,
+                      uniformity,
+                      locality,
+                      result.build_time_ms,
+                      result.peak_rss_delta_kb);
 
             nlohmann::json run;
             run["strategy"] = strategy;
             run["bucket_size"] = bucket_size;
             run["build_time_ms"] = result.build_time_ms;
             run["peak_rss_delta_kb"] = result.peak_rss_delta_kb;
-            run["uniformity"] = ToJson(uniformity);
-            run["locality"] = ToJson(locality);
+            run["uniformity"] = to_json(uniformity);
+            run["locality"] = to_json(locality);
             report["runs"].push_back(run);
         }
     }
@@ -261,4 +259,14 @@ main(int argc, char** argv) {
     }
 
     return 0;
+}
+
+}  // namespace
+
+int
+main(int argc, char** argv) try {
+    return run(argc, argv);
+} catch (const std::exception& e) {
+    std::cerr << "rpt_bench failed: " << e.what() << std::endl;
+    return 1;
 }

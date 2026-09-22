@@ -31,7 +31,7 @@ namespace {
 
 /// Current high-water resident set size of the process, in KiB, or 0 when unavailable.
 int64_t
-ReadPeakRssKb() {
+read_peak_rss_kb() {
     std::ifstream status("/proc/self/status");
     std::string key;
     while (status >> key) {
@@ -46,13 +46,13 @@ ReadPeakRssKb() {
 }
 
 uint64_t
-CeilDiv(uint64_t value, uint64_t divisor) {
+ceil_div(uint64_t value, uint64_t divisor) {
     return (value + divisor - 1) / divisor;
 }
 
 /// Cuts an ordered id list into `leaves` chunks whose sizes differ by at most one.
 Partitions
-CutIntoChunks(const std::vector<int64_t>& ids, uint64_t leaves) {
+cut_into_chunks(const std::vector<int64_t>& ids, uint64_t leaves) {
     Partitions partitions;
     partitions.reserve(leaves);
     uint64_t count = ids.size();
@@ -71,22 +71,22 @@ CutIntoChunks(const std::vector<int64_t>& ids, uint64_t leaves) {
 /// Runs `body` while measuring wall time and the growth of the peak RSS.
 template <typename Body>
 PartitionResult
-Measure(Body&& body) {
+measure(Body&& body) {
     PartitionResult result;
-    int64_t rss_before = ReadPeakRssKb();
+    int64_t rss_before = read_peak_rss_kb();
     auto start = std::chrono::steady_clock::now();
     body(result);
     auto end = std::chrono::steady_clock::now();
     result.build_time_ms = std::chrono::duration<double, std::milli>(end - start).count();
-    result.peak_rss_delta_kb = ReadPeakRssKb() - rss_before;
+    result.peak_rss_delta_kb = read_peak_rss_kb() - rss_before;
     return result;
 }
 
 }  // namespace
 
 PartitionResult
-PartitionByRpt(const PartitionRequest& request) {
-    return Measure([&](PartitionResult& result) {
+partition_by_rpt(const PartitionRequest& request) {
+    return measure([&](PartitionResult& result) {
         RPTPartitionParams params;
         params.bucket_size = request.bucket_size;
         params.seed = request.seed;
@@ -100,19 +100,19 @@ PartitionByRpt(const PartitionRequest& request) {
 }
 
 PartitionResult
-PartitionByRandom(const PartitionRequest& request) {
-    return Measure([&](PartitionResult& result) {
+partition_by_random(const PartitionRequest& request) {
+    return measure([&](PartitionResult& result) {
         std::vector<int64_t> ids(request.count);
         std::iota(ids.begin(), ids.end(), 0);
         std::mt19937_64 generator(request.seed);
         std::shuffle(ids.begin(), ids.end(), generator);
-        result.partitions = CutIntoChunks(ids, CeilDiv(request.count, request.bucket_size));
+        result.partitions = cut_into_chunks(ids, ceil_div(request.count, request.bucket_size));
     });
 }
 
 PartitionResult
-PartitionBySingleDim(const PartitionRequest& request) {
-    return Measure([&](PartitionResult& result) {
+partition_by_single_dim(const PartitionRequest& request) {
+    return measure([&](PartitionResult& result) {
         // Pick the dimension with the largest variance, then sort the ids along it.
         std::vector<double> sums(request.dim, 0.0);
         std::vector<double> square_sums(request.dim, 0.0);
@@ -146,14 +146,14 @@ PartitionBySingleDim(const PartitionRequest& request) {
             }
             return a < b;
         });
-        result.partitions = CutIntoChunks(ids, CeilDiv(request.count, request.bucket_size));
+        result.partitions = cut_into_chunks(ids, ceil_div(request.count, request.bucket_size));
     });
 }
 
 PartitionResult
-PartitionByKmeans(const PartitionRequest& request) {
-    return Measure([&](PartitionResult& result) {
-        uint64_t clusters = CeilDiv(request.count, request.bucket_size);
+partition_by_kmeans(const PartitionRequest& request) {
+    return measure([&](PartitionResult& result) {
+        uint64_t clusters = ceil_div(request.count, request.bucket_size);
         if (clusters > request.count) {
             result.error = "bucket_size yields more clusters than vectors";
             return;
@@ -180,18 +180,18 @@ PartitionByKmeans(const PartitionRequest& request) {
 }
 
 PartitionResult
-RunStrategy(const std::string& name, const PartitionRequest& request) {
+run_strategy(const std::string& name, const PartitionRequest& request) {
     if (name == "rpt") {
-        return PartitionByRpt(request);
+        return partition_by_rpt(request);
     }
     if (name == "random") {
-        return PartitionByRandom(request);
+        return partition_by_random(request);
     }
     if (name == "single_dim") {
-        return PartitionBySingleDim(request);
+        return partition_by_single_dim(request);
     }
     if (name == "kmeans") {
-        return PartitionByKmeans(request);
+        return partition_by_kmeans(request);
     }
     PartitionResult result;
     result.error = "unknown strategy: " + name;
@@ -199,7 +199,7 @@ RunStrategy(const std::string& name, const PartitionRequest& request) {
 }
 
 std::vector<std::string>
-StrategyNames() {
+strategy_names() {
     return {"rpt", "random", "single_dim", "kmeans"};
 }
 
