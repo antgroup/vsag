@@ -27,6 +27,7 @@
 #include "algorithm/hgraph/hgraph_parameter.h"
 #include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_interface.h"
+#include "datacell/token_code_interface.h"
 #include "index_common_param.h"
 #include "simq_parameter.h"
 #include "typing.h"
@@ -109,13 +110,13 @@ public:
 
 private:
     void
-    run_clustering(const float* flat_vecs,
+    run_clustering(const uint8_t* token_codes,
                    const Vector<InnerIdType>& vec_to_doc,
                    int64_t num_vecs,
                    int64_t dim);
 
     void
-    build_rep_hgraph(const float* flat_vecs, int64_t dim);
+    build_rep_hgraph(const uint8_t* token_codes, int64_t dim);
 
     std::vector<std::pair<InnerIdType, float>>
     coarse_search(const float* query_tokens,
@@ -131,9 +132,6 @@ private:
     deserialize_rep_hgraph(StreamReader& reader);
 
     void
-    split_cluster_incremental(InnerIdType cluster_idx);
-
-    void
     flush_pending_splits();
 
     void
@@ -143,6 +141,11 @@ private:
     prepare_and_execute_splits(std::vector<SplitTask>& tasks);
 
 private:
+    Vector<uint8_t> representative_codes_;
+    std::shared_ptr<TokenCodeInterface> token_codes_;
+    std::string quantization_type_{"fp32"};
+    std::string representative_quantization_type_{"fp32"};
+
     IndexCommonParam common_param_;
     int64_t num_clusters_{0};
 
