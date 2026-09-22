@@ -59,7 +59,8 @@ read_streaming_section_end(StreamReader& reader) {
 
 InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_param,
                                          const IndexCommonParam& common_param)
-    : allocator_(common_param.allocator_.get()),
+    : allocator_owner_(common_param.allocator_),
+      allocator_(common_param.allocator_.get()),
       create_param_ptr_(index_param),
       dim_(common_param.dim_),
       metric_(common_param.metric_),

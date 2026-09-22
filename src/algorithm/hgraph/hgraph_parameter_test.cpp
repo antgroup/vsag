@@ -25,6 +25,20 @@
 #include "parameter_test.h"
 #include "unittest.h"
 
+TEST_CASE("HGraph cached search parameters remain independent", "[ut][HGraphParameter]") {
+    const std::string first = R"({"hgraph":{"ef_search":16,"skip_ratio":0.25}})";
+    const std::string second = R"({"hgraph":{"ef_search":32}})";
+    auto parsed = vsag::HGraphSearchParameters::FromJson(first);
+    parsed.ef_search = 999;
+    CHECK(vsag::HGraphSearchParameters::FromJson(first).ef_search == 16);
+    CHECK(vsag::HGraphSearchParameters::FromJson(second).ef_search == 32);
+    CHECK(vsag::HGraphSearchParameters::FromJson(first).skip_ratio == 0.25F);
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(R"({"hgraph":{"ef_search":"invalid"}})"));
+    CHECK(vsag::HGraphSearchParameters::FromJson(first).ef_search == 16);
+    CHECK(vsag::HGraphSearchParameters::FromJson(second + std::string(5000, ' ')).ef_search == 32);
+    CHECK(vsag::HGraphSearchParameters::FromJson(first).ef_search == 16);
+}
+
 #define TEST_COMPATIBILITY_CASE(section_name, param_member, val1, val2, expect_compatible) \
     SECTION(section_name) {                                                                \
         HGraphDefaultParam param1;                                                         \

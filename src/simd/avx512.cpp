@@ -173,6 +173,12 @@ FP32ComputeIPBatch4(const float* RESTRICT query,
                     float& result3,
                     float& result4) {
 #if defined(ENABLE_AVX512)
+    // Short vectors otherwise pay for both wide reduction and narrower tail dispatch.
+    if (dim < 32) {
+        avx2::FP32ComputeIPBatch4(
+            query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
+        return;
+    }
     simd::ComputeBatch4Impl<simd::SimdTraits<simd::Avx512Tag>, simd::Batch4Kind::IP>(
         query,
         dim,
@@ -634,6 +640,26 @@ SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query,
     for (uint64_t i = 0; i < n_codes; ++i) {
         out[i] = avx512::SQ8UniformComputeCodesIP(query, codes + i * code_stride, dim);
     }
+}
+
+void
+SQ8UniformComputeCodesIPBatch4(const uint8_t* RESTRICT query,
+                               const uint8_t* RESTRICT code1,
+                               const uint8_t* RESTRICT code2,
+                               const uint8_t* RESTRICT code3,
+                               const uint8_t* RESTRICT code4,
+                               uint64_t dim,
+                               float& result1,
+                               float& result2,
+                               float& result3,
+                               float& result4) {
+#if defined(ENABLE_AVX512)
+    simd::SQ8UniformComputeCodesIPBatch4Impl<simd::UniformCodeTraits<simd::Avx512UniformTag>>(
+        query, code1, code2, code3, code4, dim, result1, result2, result3, result4);
+#else
+    avx2::SQ8UniformComputeCodesIPBatch4(
+        query, code1, code2, code3, code4, dim, result1, result2, result3, result4);
+#endif
 }
 
 float

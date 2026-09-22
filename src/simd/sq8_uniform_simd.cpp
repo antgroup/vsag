@@ -52,4 +52,28 @@ GetSQ8UniformComputeCodesIPBatch() {
 }
 SQ8UniformComputeCodesIPBatchType SQ8UniformComputeCodesIPBatch =
     GetSQ8UniformComputeCodesIPBatch();
+
+// Four-way batched IP. The AMX implementation delegates to AVX-512 anyway
+// (tile setup does not amortize for four codes), so the cascade skips it.
+static SQ8UniformComputeCodesIPBatch4Type
+GetSQ8UniformComputeCodesIPBatch4() {
+    if (SimdStatus::SupportAVX512()) {
+        VSAG_SIMD_DISPATCH_BODY_AVX512(SQ8UniformComputeCodesIPBatch4)
+    }
+    if (SimdStatus::SupportAVX2()) {
+        VSAG_SIMD_DISPATCH_BODY_AVX2(SQ8UniformComputeCodesIPBatch4)
+    }
+    if (SimdStatus::SupportSSE()) {
+        VSAG_SIMD_DISPATCH_BODY_SSE(SQ8UniformComputeCodesIPBatch4)
+    }
+    if (SimdStatus::SupportSVE()) {
+        VSAG_SIMD_DISPATCH_BODY_SVE(SQ8UniformComputeCodesIPBatch4)
+    }
+    if (SimdStatus::SupportNEON()) {
+        VSAG_SIMD_DISPATCH_BODY_NEON(SQ8UniformComputeCodesIPBatch4)
+    }
+    return generic::SQ8UniformComputeCodesIPBatch4;
+}
+SQ8UniformComputeCodesIPBatch4Type SQ8UniformComputeCodesIPBatch4 =
+    GetSQ8UniformComputeCodesIPBatch4();
 }  // namespace vsag

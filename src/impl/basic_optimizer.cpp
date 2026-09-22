@@ -39,6 +39,7 @@ Optimizer<OptimizableOBJ>::Optimize(std::shared_ptr<OptimizableOBJ> obj) {
             current_params[param.name_] = param.Cur();
             auto set_status = obj->SetRuntimeParameters(current_params);
             if (not set_status) {
+                param.Next();
                 continue;
             }
 
@@ -71,13 +72,14 @@ Optimizer<OptimizableOBJ>::Optimize(std::shared_ptr<OptimizableOBJ> obj) {
 
         if (successful_optimized) {
             current_params[param.name_] = best_params_[param.name_];
+            obj->SetRuntimeParameters(current_params);
             vsag::logger::info(fmt::format("setting to best param: {} -> {}, improving {:.3f}%",
                                            param.name_,
                                            best_params_[param.name_],
                                            best_improve));
         } else {
             param.Reset();
-            current_params[param.name_] = param.Cur();
+            current_params[param.name_] = param.Default();
             obj->SetRuntimeParameters(current_params);
 
             vsag::logger::info(fmt::format(

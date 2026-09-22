@@ -40,7 +40,7 @@ BasicSearcher::BasicSearcher(Allocator* allocator, MutexArrayPtr mutex_array)
     : allocator_(allocator), mutex_array_(std::move(mutex_array)) {
 }
 
-uint32_t
+inline __attribute__((always_inline)) uint32_t
 BasicSearcher::visit(const GraphInterfacePtr& graph,
                      const VisitedListPtr& vl,
                      const std::pair<float, uint64_t>& current_node_pair,
@@ -57,14 +57,21 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
         graph->GetNeighbors(current_node_pair.second, neighbors);
     }
 
-    for (uint32_t i = 0; i < neighbors.size(); i++) {
-        if (i + prefetch_stride_visit_ < neighbors.size()) {
-            vl->Prefetch(neighbors[i + prefetch_stride_visit_]);
+    if (not filter) {
+        for (const auto id : neighbors) {
+            vl->Prefetch(id);
         }
-        if (not vl->Get(neighbors[i])) {
-            vl->Set(neighbors[i]);
-            if (not filter || count_no_visited == 0 || skip_strategy == nullptr ||
-                skip_strategy->ShouldVisit() || filter->CheckValid(neighbors[i])) {
+        for (const auto id : neighbors) {
+            to_be_visited_id[count_no_visited] = id;
+            count_no_visited += not vl->TestAndSet(id);
+        }
+        return count_no_visited;
+    }
+
+    for (uint32_t i = 0; i < neighbors.size(); i++) {
+        if (not vl->TestAndSet(neighbors[i])) {
+            if (count_no_visited == 0 or skip_strategy == nullptr or skip_strategy->ShouldVisit() or
+                filter->CheckValid(neighbors[i])) {
                 to_be_visited_id[count_no_visited] = neighbors[i];
                 count_no_visited++;
             }
@@ -180,7 +187,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            QueryContext* ctx) const {
     Allocator* alloc = select_query_allocator(ctx, allocator_);
     auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
-    auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
+    StandardHeap<true, false> candidate_set_storage(alloc, -1);
+    auto* candidate_set = &candidate_set_storage;
     if (not graph or not vl) {
         return top_candidates;
     }
@@ -332,7 +340,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Allocator* alloc = select_query_allocator(ctx, allocator_);
 
     auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
-    auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
+    StandardHeap<true, false> candidate_set_storage(alloc, -1);
+    auto* candidate_set = &candidate_set_storage;
 
     if (not graph or not flatten) {
         return top_candidates;
@@ -562,7 +571,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Allocator* alloc = select_query_allocator(ctx, allocator_);
 
     auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
-    auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
+    StandardHeap<true, false> candidate_set_storage(alloc, -1);
+    auto* candidate_set = &candidate_set_storage;
 
     const bool use_custom_distance = inner_search_param.distance_batch_func != nullptr;
     if (not graph or (not flatten and not use_custom_distance)) {
@@ -940,6 +950,8 @@ BasicSearcher::SetRuntimeParameters(const UnorderedMap<std::string, float>& new_
     bool ret = false;
     auto iter = new_params.find(PREFETCH_STRIDE_VISIT);
     if (iter != new_params.end()) {
+        // Note: BasicSearcher::visit uses full-batch prefetch and no longer consumes
+        // prefetch_stride_visit_. Kept for backward compatibility with external configurations.
         prefetch_stride_visit_ = static_cast<uint32_t>(iter->second);
         ret = true;
     }

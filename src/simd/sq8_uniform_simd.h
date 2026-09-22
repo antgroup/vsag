@@ -21,19 +21,30 @@
 
 namespace vsag {
 
-#define DECLARE_SQ8_UNIFORM_FUNCTIONS(ns)                        \
-    namespace ns {                                               \
-    float                                                        \
-    SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,     \
-                             const uint8_t* RESTRICT codes2,     \
-                             uint64_t dim);                      \
-    void                                                         \
-    SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query, \
-                                  const uint8_t* RESTRICT codes, \
-                                  uint64_t dim,                  \
-                                  uint64_t n_codes,              \
-                                  uint64_t code_stride,          \
-                                  float* RESTRICT out);          \
+#define DECLARE_SQ8_UNIFORM_FUNCTIONS(ns)                         \
+    namespace ns {                                                \
+    float                                                         \
+    SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,      \
+                             const uint8_t* RESTRICT codes2,      \
+                             uint64_t dim);                       \
+    void                                                          \
+    SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query,  \
+                                  const uint8_t* RESTRICT codes,  \
+                                  uint64_t dim,                   \
+                                  uint64_t n_codes,               \
+                                  uint64_t code_stride,           \
+                                  float* RESTRICT out);           \
+    void                                                          \
+    SQ8UniformComputeCodesIPBatch4(const uint8_t* RESTRICT query, \
+                                   const uint8_t* RESTRICT code1, \
+                                   const uint8_t* RESTRICT code2, \
+                                   const uint8_t* RESTRICT code3, \
+                                   const uint8_t* RESTRICT code4, \
+                                   uint64_t dim,                  \
+                                   float& result1,                \
+                                   float& result2,                \
+                                   float& result3,                \
+                                   float& result4);               \
     }  // namespace ns
 DECLARE_SQ8_UNIFORM_FUNCTIONS(generic)
 DECLARE_SQ8_UNIFORM_FUNCTIONS(sse)
@@ -65,4 +76,19 @@ using SQ8UniformComputeCodesIPBatchType = void (*)(const uint8_t* RESTRICT query
                                                    uint64_t code_stride,
                                                    float* RESTRICT out);
 extern SQ8UniformComputeCodesIPBatchType SQ8UniformComputeCodesIPBatch;
+
+// Four-way batched inner product: one query against four independently
+// addressed SQ8-uniform codes. The query block loads are shared across all
+// four accumulators, unlike four separate SQ8UniformComputeCodesIP calls.
+using SQ8UniformComputeCodesIPBatch4Type = void (*)(const uint8_t* RESTRICT query,
+                                                    const uint8_t* RESTRICT code1,
+                                                    const uint8_t* RESTRICT code2,
+                                                    const uint8_t* RESTRICT code3,
+                                                    const uint8_t* RESTRICT code4,
+                                                    uint64_t dim,
+                                                    float& result1,
+                                                    float& result2,
+                                                    float& result3,
+                                                    float& result4);
+extern SQ8UniformComputeCodesIPBatch4Type SQ8UniformComputeCodesIPBatch4;
 }  // namespace vsag

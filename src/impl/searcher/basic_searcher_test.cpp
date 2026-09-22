@@ -16,6 +16,8 @@
 #include "basic_searcher.h"
 
 #include <set>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "datacell/flatten_interface.h"
@@ -84,6 +86,12 @@ TEST_CASE("BasicSearcher supports KNN, range, filters, and empty data cells",
         std::make_shared<BlackListFilter>([](LabelType id) -> bool { return id % 2 == 0; });
     REQUIRE(search(KNN_SEARCH, filter) == std::set<InnerIdType>{1, 3, 5});
     REQUIRE(search(RANGE_SEARCH, filter) == std::set<InnerIdType>{1});
+
+    graph = std::make_shared<MockGraphDataCell>(std::vector<std::vector<InnerIdType>>{
+        {0, 1, 1, 2, 2, 3, 4, 5}, {0, 1, 2}, {0, 1, 2}, {}, {}, {}});
+    REQUIRE(search(KNN_SEARCH, nullptr) == std::set<InnerIdType>{0, 1, 2});
+    REQUIRE(search(RANGE_SEARCH, nullptr) == std::set<InnerIdType>{0, 1, 2});
+    REQUIRE(search(KNN_SEARCH, filter) == std::set<InnerIdType>{1, 3, 5});
 
     InnerSearchParam param;
     auto vl = pool->TakeOne();
@@ -223,10 +231,117 @@ TEST_CASE("Optimize SQ4", "[ut][BasicOptimizer]") {
     auto loss_before = searcher->MockRun(stats);
     auto optimizer_searcher = std::make_shared<Optimizer<BasicSearcher>>(common);
     optimizer_searcher->RegisterParameter(RuntimeParameter(PREFETCH_DEPTH_CODE, 1, 3, 1));
-    optimizer_searcher->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 3, 1));
-    optimizer_searcher->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_VISIT, 1, 3, 1));
+    optimizer_searcher->RegisterParameter(
+        RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 16, 1, vector_data_cell->prefetch_stride_code_));
+    // PREFETCH_STRIDE_VISIT is deprecated in BasicSearcher::visit,
+    // verify backward-compatible acceptance
+    UnorderedMap<std::string, float> compat_params(allocator.get());
+    compat_params[PREFETCH_STRIDE_VISIT] = 2;
+    REQUIRE(searcher->SetRuntimeParameters(compat_params));
+
     float end2end_improvement = optimizer_searcher->Optimize(searcher);
-    auto loss_after = searcher->MockRun(stats);
+    static_cast<void>(end2end_improvement);
+    REQUIRE(vector_data_cell->prefetch_stride_code_ >= 1);
+    REQUIRE(vector_data_cell->prefetch_stride_code_ <= 16);
+}
+
+namespace {
+class DeterministicSearcherMock : public BasicSearcher {
+public:
+    explicit DeterministicSearcherMock(const IndexCommonParam& param) : BasicSearcher(param) {
+    }
+
+    bool
+    SetRuntimeParameters(const UnorderedMap<std::string, float>& new_params) override {
+        for (const auto& [k, v] : new_params) {
+            attempts_.push_back(v);
+            REQUIRE(attempts_.size() <= max_attempts_);
+            if (rejected_values_.find(v) != rejected_values_.end()) {
+                return false;
+            }
+            current_params_[k] = v;
+        }
+        return true;
+    }
+
+    double
+    MockRun(SearchStatistics& stats) const override {
+        auto it = current_params_.find(PREFETCH_STRIDE_CODE);
+        if (it != current_params_.end()) {
+            auto cost_it = cost_map_.find(it->second);
+            if (cost_it != cost_map_.end()) {
+                return cost_it->second;
+            }
+        }
+        return default_cost_;
+    }
+
+    std::unordered_map<std::string, float> current_params_;
+    std::unordered_map<float, double> cost_map_;
+    std::unordered_set<float> rejected_values_;
+    std::vector<float> attempts_;
+    double default_cost_{100.0};
+    uint32_t max_attempts_{100};
+};
+}  // namespace
+
+TEST_CASE("Optimizer<BasicSearcher> deterministic state machine regression",
+          "[ut][BasicSearcher][optimizer_regression]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+
+    SECTION("No improvement preserves exact initial baselines") {
+        for (float initial_stride : {1.0f, 4.0f, 16.0f}) {
+            auto mock = std::make_shared<DeterministicSearcherMock>(common);
+            mock->current_params_[PREFETCH_STRIDE_CODE] = initial_stride;
+
+            auto optimizer = std::make_shared<Optimizer<BasicSearcher>>(common);
+            optimizer->RegisterParameter(
+                RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 16, 1, initial_stride));
+
+            optimizer->Optimize(mock);
+            REQUIRE(mock->current_params_[PREFETCH_STRIDE_CODE] == initial_stride);
+        }
+    }
+
+    SECTION("Significant improvement installs winning candidate") {
+        auto mock = std::make_shared<DeterministicSearcherMock>(common);
+        mock->current_params_[PREFETCH_STRIDE_CODE] = 16.0f;
+        mock->cost_map_[4.0f] = 50.0;  // 50% improvement over default 100.0
+
+        auto optimizer = std::make_shared<Optimizer<BasicSearcher>>(common);
+        optimizer->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 16, 1, 16.0f));
+
+        optimizer->Optimize(mock);
+        REQUIRE(mock->current_params_[PREFETCH_STRIDE_CODE] == 4.0f);
+    }
+
+    SECTION("Rejected candidates progress without looping") {
+        auto mock = std::make_shared<DeterministicSearcherMock>(common);
+        mock->current_params_[PREFETCH_STRIDE_CODE] = 16.0f;
+        mock->rejected_values_.insert(1.0f);
+        mock->rejected_values_.insert(2.0f);
+        mock->cost_map_[3.0f] = 50.0;
+
+        auto optimizer = std::make_shared<Optimizer<BasicSearcher>>(common);
+        optimizer->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 16, 1, 16.0f));
+
+        optimizer->Optimize(mock);
+        REQUIRE(mock->current_params_[PREFETCH_STRIDE_CODE] == 3.0f);
+
+        uint32_t ones = 0;
+        uint32_t twos = 0;
+        for (float v : mock->attempts_) {
+            if (v == 1.0f) {
+                ++ones;
+            } else if (v == 2.0f) {
+                ++twos;
+            }
+        }
+        REQUIRE(ones == 1);
+        REQUIRE(twos == 1);
+    }
 }
 
 TEST_CASE("BasicSearcher duplicate threshold keeps nearest owner",

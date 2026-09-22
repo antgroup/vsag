@@ -444,6 +444,33 @@ SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query,
     }
 }
 
+void
+SQ8UniformComputeCodesIPBatch4(const uint8_t* RESTRICT query,
+                               const uint8_t* RESTRICT code1,
+                               const uint8_t* RESTRICT code2,
+                               const uint8_t* RESTRICT code3,
+                               const uint8_t* RESTRICT code4,
+                               uint64_t dim,
+                               float& result1,
+                               float& result2,
+                               float& result3,
+                               float& result4) {
+    int32_t sum1 = 0;
+    int32_t sum2 = 0;
+    int32_t sum3 = 0;
+    int32_t sum4 = 0;
+    for (uint64_t d = 0; d < dim; ++d) {
+        sum1 += query[d] * code1[d];
+        sum2 += query[d] * code2[d];
+        sum3 += query[d] * code3[d];
+        sum4 += query[d] * code4[d];
+    }
+    result1 = static_cast<float>(sum1);
+    result2 = static_cast<float>(sum2);
+    result3 = static_cast<float>(sum3);
+    result4 = static_cast<float>(sum4);
+}
+
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
     if (dim == 0) {

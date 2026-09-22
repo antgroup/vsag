@@ -68,8 +68,7 @@ ParallelSearcher::visit(const GraphInterfacePtr& graph,
             if (j + prefetch_stride_visit_ < neighbors[i].size()) {
                 vl->Prefetch(neighbors[i][j + prefetch_stride_visit_]);
             }
-            if (not vl->Get(neighbors[i][j])) {
-                vl->Set(neighbors[i][j]);
+            if (not vl->TestAndSet(neighbors[i][j])) {
                 if (not filter || count_no_visited == 0 || skip_strategy == nullptr ||
                     skip_strategy->ShouldVisit() || filter->CheckValid(neighbors[i][j])) {
                     to_be_visited_id[count_no_visited] = neighbors[i][j];
@@ -124,7 +123,8 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     Allocator* alloc = select_query_allocator(ctx, allocator_);
 
     auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
-    auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
+    StandardHeap<true, false> candidate_set_storage(alloc, -1);
+    auto* candidate_set = &candidate_set_storage;
 
     if (not graph or not flatten) {
         return top_candidates;

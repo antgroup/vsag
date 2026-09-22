@@ -1058,6 +1058,23 @@ SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query,
     }
 }
 
+void
+SQ8UniformComputeCodesIPBatch4(const uint8_t* RESTRICT query,
+                               const uint8_t* RESTRICT code1,
+                               const uint8_t* RESTRICT code2,
+                               const uint8_t* RESTRICT code3,
+                               const uint8_t* RESTRICT code4,
+                               uint64_t dim,
+                               float& result1,
+                               float& result2,
+                               float& result3,
+                               float& result4) {
+    result1 = sve::SQ8UniformComputeCodesIP(query, code1, dim);
+    result2 = sve::SQ8UniformComputeCodesIP(query, code2, dim);
+    result3 = sve::SQ8UniformComputeCodesIP(query, code3, dim);
+    result4 = sve::SQ8UniformComputeCodesIP(query, code4, dim);
+}
+
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
 #if defined(ENABLE_SVE)

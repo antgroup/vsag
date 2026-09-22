@@ -30,8 +30,14 @@ namespace vsag {
 
 struct RuntimeParameter {
 public:
-    RuntimeParameter(const std::string& name, float min, float max, float step = 0)
-        : name_(name), min_(min), cur_(min), max_(max), step_(step) {
+    RuntimeParameter(
+        const std::string& name, float min, float max, float step = 0, float default_val = -1)
+        : name_(name),
+          min_(min),
+          cur_(min),
+          max_(max),
+          step_(step),
+          default_val_(default_val < 0 ? min : default_val) {
         is_end_ = false;
         if (std::abs(step_) <= 1e-5) {
             step_ = (max_ - min_) / 10.0;
@@ -57,6 +63,11 @@ public:
         return cur_;
     }
 
+    float
+    Default() const {
+        return default_val_;
+    }
+
     void
     Reset() {
         cur_ = min_;
@@ -76,6 +87,7 @@ private:
     float max_{0};
     float step_{0};
     float cur_{0};
+    float default_val_{0};
     bool is_end_{false};
 };
 

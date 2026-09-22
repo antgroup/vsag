@@ -22,6 +22,37 @@
 
 using namespace vsag;
 
+TEST_CASE("FP32 short Batch4 preserves accumulator semantics", "[ut][simd][short_batch4]") {
+    if (not SimdStatus::SupportAVX512()) {
+        return;
+    }
+    std::vector<float> query(64), codes(4 * 64);
+    for (uint64_t i = 0; i < query.size(); ++i) {
+        query[i] = static_cast<float>(i % 5) - 2.0F;
+    }
+    for (uint64_t i = 0; i < codes.size(); ++i) {
+        codes[i] = static_cast<float>(i % 11) - 5.0F;
+    }
+    for (uint64_t dim : {0, 1, 15, 16, 17, 24, 25, 31, 32, 33, 63}) {
+        float result[4] = {1, 2, 3, 4};
+        avx512::FP32ComputeIPBatch4(query.data(),
+                                    dim,
+                                    codes.data(),
+                                    codes.data() + 64,
+                                    codes.data() + 128,
+                                    codes.data() + 192,
+                                    result[0],
+                                    result[1],
+                                    result[2],
+                                    result[3]);
+        for (uint64_t i = 0; i < 4; ++i) {
+            CHECK(result[i] ==
+                  static_cast<float>(i + 1) +
+                      generic::FP32ComputeIP(query.data(), codes.data() + i * 64, dim));
+        }
+    }
+}
+
 namespace {
 
 void

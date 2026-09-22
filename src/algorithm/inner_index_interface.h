@@ -696,6 +696,8 @@ protected:
                                       Allocator* allocator);
 
 public:
+    // Declared before allocator-backed members so it is destroyed after them.
+    std::shared_ptr<Allocator> allocator_owner_;
     LabelTablePtr label_table_{nullptr};
     mutable std::shared_mutex label_lookup_mutex_{};  // lock for label_lookup_ & labels_
 

@@ -181,6 +181,11 @@ struct MultiVector {
 
 ## 单次搜索距离统计
 
+对于未生成推理报告的 HGraph 单条查询结果，JSON 序列化可能推迟到调用 `GetStatistics()`
+或 `GetStatistics(keys)` 时执行。结果对象保留自己的统计数据，后续查询不会改变它；
+`Statistics(string)` 仍会替换这些统计。只读取 ID 和距离时可以省去序列化工作；读取统计时
+仍需支付这部分开销，重复读取也可能重复序列化，因此需要复用时可保留返回的字符串。
+
 维护中的 HGraph、BruteForce、IVF、Pyramid、SINDI 和 SIMQ 搜索结果会在 `GetStatistics()` 中附加
 统计信息。一次逻辑 query-to-candidate 距离或边界评估计数一次；批量 `N` 个候选计为 `N`，
 重复评估每次计数，而距离调用之前被拒绝的候选、过滤检查、图边、预取、堆操作和跳过的下界不计数。
