@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 
 #include "basic_types.h"
 #include "metric_type.h"
@@ -34,7 +35,10 @@ struct MCIV3BuildParams {
     uint64_t total{0};
     uint64_t dim{0};
     uint64_t candidate_limit{0};
+    // Enumeration threshold; full-build maximal cliques are stored whole.
     uint64_t clique_max{50};
+    // Incremental construction may impose a separate storage cap.
+    uint64_t clique_size_cap{std::numeric_limits<uint64_t>::max()};
     uint64_t max_degree{32};
     float alpha{1.2F};
     uint64_t thread_count{1};
