@@ -185,3 +185,30 @@ At cf7a0f08, fixed-count SIFT-10k/100k runs completed 250/60 Update-Remove-Add c
 On the same SIFT matrices, the graph-selected path used zero fallbacks. Median Update/Remove/Add P50 improved by 6.67x/4.41x/7.83x at 10k and 13.66x/4.83x/17.78x at 100k. Full-code self Top-1 remained 1.000; graph self Top-1 and graph/full positional medians matched the exhaustive-control medians at both scales. Snapshot size, RSS, and query latency were effectively unchanged. This closes the bounded mutation-neighbor optimization gate for these inputs. Targeted tests additionally cover empty adjacency, low-ef search, empty/one/two-element mutation, last-slot deletion, and non-last-slot compaction without an unexpected fallback.
 
 The experiment now dispatches the official centered 3-bit inner-product kernel through standalone Generic/AVX2/AVX512 translation units. On the same fixed-count matrices, Update/Add/graph-search P50 improved by 1.29x/1.32x/1.57x at 10k and 1.08x/1.10x/1.42x at 100k, with unchanged median quality and zero fallbacks. The probe retains Lite-only linkage. This closes the scalar-filter risk for the measured x86 host, while ARM SIMD, adjacency-vector mutation memory, and a maintainer-approved public backend contract remain open.
+
+## Isolated mutable-state memory gate
+
+The probe now loads a version 3 mutable snapshot in a fresh process and reports
+component-level logical/capacity bytes before any dataset or temporary FP32
+graph builder is created. Seven-process medians at SIFT-10k/100k were
+3,103,312/31,195,840 known owned-capacity bytes and 7,792/43,556 KiB current
+RSS. The corresponding snapshot sizes were 2,943,408/29,595,936 bytes and
+median load times were 10.257/101.869 ms.
+
+At both scales, adjacency capacity equaled adjacency logical bytes after load.
+The 100k state contained 1,599,408 edges and 15,195,264 adjacency-capacity
+bytes, including the outer adjacency-vector objects. The known-capacity total
+excludes `std::unordered_map` nodes and buckets; the loader separately reported
+100,000 entries and 172,933 buckets. These results explain why the earlier
+mixed-process `state_rss` was not a measurement of the mutable backend alone
+and provide no current evidence that reserved adjacency capacity or
+fragmentation warrants a flat-storage rewrite.
+
+This closes the isolated owned-memory measurement gate for the experiment.
+The highest-priority remaining decision is a maintainer/mentor-approved public
+RaBitQ backend contract: configuration and selection, fixed-model lifecycle,
+search/reorder behavior, persistence/versioning, CRUD guarantees, and
+compatibility with the existing Lite API. A future inbound-edge index or Remove
+optimization should be justified with a workload showing that Remove is the
+dominant cost; ARM SIMD and batch-four full-scan work remain optional follow-up
+experiments.

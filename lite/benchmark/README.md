@@ -489,3 +489,42 @@ The same fixed-count CRUD matrices produced the following medians relative to th
 Every round kept full-code self Top-1 at 1.000, used zero exhaustive mutation fallbacks, restored identical result IDs/distances, and produced empty stderr. Remove does not use the filter inner-product kernel; its 0.97x/0.93x ratios are run-to-run variation rather than a SIMD result. Snapshot bytes and state RSS were effectively unchanged.
 
 The measured host selected AVX512 and supports AVX2 fallback. Release and ASan+UBSan CTest passed 6/6; clang-format-15, clang-tidy-15, and the standalone dependency check passed. Raw CSV, snapshots, time output, CPU metadata, binary/source hashes, and a verified SHA-256 manifest are in `/home/ubuntu/project/vsag-lite-rabitq-simd-validation-20260923`. These results close the bounded scalar-filter performance risk on this x86 host. ARM SIMD, batch-four full scans, mutable adjacency memory, and the public backend contract remain separate work.
+
+### Isolated mutable RaBitQ memory
+
+The version 3 mutable snapshot can be loaded in a fresh process without retaining
+the source dataset or the temporary FP32 graph builder:
+
+    lite_rabitq_codec_probe --mutable-rss SNAPSHOT
+
+The command reports logical and capacity bytes for the model, split-code storage,
+external IDs, and adjacency, together with adjacency edge count, ID-map entry and
+bucket counts, load time, current RSS, and peak RSS. `known_capacity_bytes` does
+not include `std::unordered_map` node or bucket allocations, so the entry and
+bucket counts are reported separately rather than estimated as portable bytes.
+
+Seven fresh processes per scale loaded the SIMD-stage SIFT snapshots. The
+following values are medians:
+
+| Scale | Snapshot | Load | Known owned capacity | Adjacency edges | Adjacency capacity | ID-map entries / buckets | Current RSS | Peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10k | 2,943,408 B | 10.257 ms | 3,103,312 B | 157,842 | 1,502,736 B | 10,000 / 10,273 | 7,792 KiB | 14,508 KiB |
+| 100k | 29,595,936 B | 101.869 ms | 31,195,840 B | 1,599,408 | 15,195,264 B | 100,000 / 172,933 | 43,556 KiB | 57,948 KiB |
+
+Adjacency capacity exactly matched adjacency logical bytes after snapshot load
+at both scales. The 100k owned-capacity total consists mainly of 15.2 MB split
+codes, 0.8 MB IDs, and 15.2 MB adjacency storage; the remaining gap to RSS also
+contains the ID map, allocator/process overhead, and shared runtime pages. This
+fresh-process result shows that the earlier roughly 156.8 MiB CRUD `state_rss`
+was dominated by retained source data and temporary graph-building state. It
+does not identify adjacency reserved capacity or fragmentation as the next
+bottleneck, so a flat-adjacency rewrite is not justified by the current
+evidence.
+
+Release and ASan+UBSan CTest passed 6/6, and clang-format-15,
+clang-tidy-15, stderr checks, and the SHA-256 manifest passed. Raw per-process
+JSON, stderr, source/environment metadata, summary, and the verified manifest
+are in
+`/home/ubuntu/project/vsag-lite-rabitq-mutable-rss-validation-20260923`.
+This remains probe-only evidence and does not change the public Lite API or
+snapshot formats.
