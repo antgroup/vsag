@@ -465,3 +465,12 @@ At commit cf7a0f08, SIFT-10k ran five rounds of 50 CRUD cycles and SIFT-100k ran
 | 100k | 39,843.379 us | 4,449.088 us | 39,208.362 us | 535.205 us | 1.000 | 0.920 | 0.920 | 29,597,472 B | 156,672 KiB |
 
 The roughly 10x Update/Add increase from 10k to 100k identifies exhaustive full-code neighbor selection as the dominant mutation bottleneck. Remove also scales about 10x because it intentionally scans all possibly asymmetric adjacency lists. The first 100k round had a 16.254 ms Remove P99 outlier; later round P99 values were 4.595/4.544 ms. Graph/full positional Top-10 agreement ranged from 0.899 to 0.946 at 10k and 0.789 to 0.834 at 100k, while full-code self Top-1 stayed 1.000. This supports optimizing mutation neighbor discovery next, while retaining the exhaustive path as a differential oracle. Raw CSV, stderr, /usr/bin/time -v, environment, binary hash, summary, snapshots, and verified SHA-256 manifest are in /home/ubuntu/project/vsag-lite-rabitq-crud-validation-20260923-cf7a0f0.
+
+Commit e2f096b9 replaced exhaustive mutation selection with the existing filter-first graph traversal and removed per-row sort/unique work from the correctness-required all-adjacency Remove scan. The exact same matrices produced zero exhaustive fallbacks and empty stderr:
+
+| Scale | Update P50 median | Speedup | Remove P50 median | Speedup | Add P50 median | Speedup | Graph self Top-1 median | Graph/full positional median |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10k | 617.175 us | 6.67x | 101.256 us | 4.41x | 514.037 us | 7.83x | 0.960 | 0.932 |
+| 100k | 2,917.346 us | 13.66x | 921.936 us | 4.83x | 2,204.874 us | 17.78x | 0.920 | 0.800 |
+
+Full-code self Top-1 remained 1.000. The optimized 10k/100k medians for snapshot bytes, state RSS, and graph-search P50 were effectively unchanged from the control matrix; 100k values were 29,597,472 B, 156,796 KiB, and 552.096 us. The matched quality medians and zero fallbacks show that the speedup came from bounded graph candidate discovery and removal of redundant list sorting in this workload. They do not prove that fallback is impossible on other graph shapes or that mutation is production-ready. Raw evidence and a machine-readable old/new comparison are in /home/ubuntu/project/vsag-lite-rabitq-graph-mutation-validation-20260923-e2f096b.
