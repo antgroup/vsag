@@ -5513,6 +5513,7 @@ TEST_CASE("(PR) HGraph Batch SearchWithRequest layout and restore", "[ft][hgraph
         const auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
         REQUIRE(statistics["batch_routes"]["hgraph"].GetUint64() +
                     statistics["batch_routes"]["mci"].GetUint64() +
+                    statistics["batch_routes"]["hybrid"].GetUint64() +
                     statistics["batch_routes"]["brute_force"].GetUint64() ==
                 2);
     }

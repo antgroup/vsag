@@ -43,8 +43,12 @@ Vector<InnerIdType>
 collect_seed_inner_ids(const FilterPtr& filter,
                        const LabelTablePtr& label_table,
                        uint64_t seed_count,
-                       Allocator* allocator) {
+                       Allocator* allocator,
+                       bool* enumerates_all_valid = nullptr) {
     Vector<InnerIdType> inner_ids(allocator);
+    if (enumerates_all_valid != nullptr) {
+        *enumerates_all_valid = false;
+    }
     if (filter == nullptr or label_table == nullptr or seed_count == 0) {
         return inner_ids;
     }
@@ -67,6 +71,13 @@ collect_seed_inner_ids(const FilterPtr& filter,
     }
     std::sort(inner_ids.begin(), inner_ids.end());
     inner_ids.erase(std::unique(inner_ids.begin(), inner_ids.end()), inner_ids.end());
+    if (enumerates_all_valid != nullptr) {
+        // `sampled_count == valid_count` means the whole valid-label list was visited (no
+        // stride sampling) and every label resolved to a distinct inner id, so the seed
+        // list is exactly the valid set and the traversal cannot add anything to it.
+        *enumerates_all_valid = sampled_count == static_cast<uint64_t>(valid_count) and
+                                inner_ids.size() == static_cast<uint64_t>(valid_count);
+    }
     return inner_ids;
 }
 
@@ -519,6 +530,16 @@ HGraph::MCIHybridSearchResult::MakeStatistics(const SearchStatistics& stats) con
     json["mci_seed_ratio"].SetFloat(this->seed_ratio);
     json["mci_raw_float_csr"].SetBool(this->used_precise_float_csr);
     json["mci_bitmap_fast_path"].SetBool(this->used_bitmap_fast_path);
+    json["hybrid_expanded_nodes"].SetUint64(this->hybrid_stats.expanded_nodes);
+    json["hybrid_expansion_skipped"].SetBool(this->hybrid_stats.expansion_skipped);
+    json["hybrid_seed_budget"].SetUint64(this->hybrid_seed_budget);
+    json["hybrid_seeded_entries"].SetUint64(this->hybrid_stats.seeded_entries);
+    json["hybrid_sparse_neighbors_visited"].SetUint64(this->hybrid_stats.sparse_neighbors_visited);
+    json["hybrid_mci_members_considered"].SetUint64(this->hybrid_stats.mci_members_considered);
+    json["hybrid_mci_members_satisfied"].SetUint64(this->hybrid_stats.mci_members_satisfied);
+    json["hybrid_mci_cliques_expanded"].SetUint64(this->hybrid_stats.mci_cliques_expanded);
+    json["hybrid_dist_computations"].SetUint64(this->hybrid_stats.dist_computations);
+    json["hybrid_mci_stopped_early"].SetBool(this->hybrid_stats.mci_stopped_early);
     return json;
 }
 
@@ -604,6 +625,80 @@ HGraph::try_mci_search(const SearchRequest& request,
         this->mci_cliques_, precise_flatten, query, search_param, mci_param, ctx);
     result.route = "mci";
     return result;
+}
+
+Vector<InnerIdType>
+HGraph::collect_hybrid_seeds(const SearchRequest& request,
+                             const FilterPtr& inner_filter,
+                             const HGraphSearchParameters& params,
+                             uint64_t total_count,
+                             uint64_t* seed_budget_out,
+                             bool* seeds_are_exhaustive_out,
+                             Allocator* alloc) const {
+    Vector<InnerIdType> seeds(alloc);
+    if (seed_budget_out != nullptr) {
+        *seed_budget_out = 0;
+    }
+    if (seeds_are_exhaustive_out != nullptr) {
+        *seeds_are_exhaustive_out = false;
+    }
+    // total_count is the caller's snapshot of the index size. Using it instead of loading
+    // total_count_ a second time keeps this budget, the caller's non-empty guard and the
+    // companion availability check on one count even when an Add lands mid-search.
+    if (total_count == 0) {
+        return seeds;
+    }
+
+    // Seed budget, identical to the two-route MCI seeding so that the seed strategy cannot
+    // confound a comparison between the two: the sqrt term is the floor, and the
+    // coverage term raises it to (a fraction of) the valid set only when that target fits
+    // into mci_seed_max_count and does not exceed N. A target that misses the cap is
+    // dropped entirely rather than truncated, so a wide filter never turns into a scan.
+    const auto scaled_seed_count = std::ceil(std::sqrt(static_cast<double>(total_count)) *
+                                             static_cast<double>(params.mci_seed_ratio));
+    uint64_t seed_budget = scaled_seed_count >= static_cast<double>(total_count)
+                               ? total_count
+                               : std::max<uint64_t>(1, static_cast<uint64_t>(scaled_seed_count));
+    // Detection needs the concrete filter type: inner_filter may already be wrapped (for
+    // example by InnerIdWrapperFilter) and would no longer cast to BlackListFilter. The
+    // sampler below instead needs that wrapper, because it probes ids through CheckValid()
+    // and therefore requires an inner-id-indexed view. try_mci_search splits them the same way.
+    const bool bitset_seed_source = has_bitset_source(request.filter_);
+    if (params.mci_seed_coverage > 0.0F and not bitset_seed_source and request.filter_ != nullptr) {
+        const int64_t* valid_labels = nullptr;
+        int64_t valid_label_count = 0;
+        request.filter_->GetValidIds(&valid_labels, valid_label_count);
+        if (valid_label_count > 0) {
+            const auto covered =
+                static_cast<uint64_t>(std::ceil(static_cast<double>(params.mci_seed_coverage) *
+                                                static_cast<double>(valid_label_count)));
+            const bool fits_cap = params.mci_seed_max_count <= 0 or
+                                  covered <= static_cast<uint64_t>(params.mci_seed_max_count);
+            if (covered <= total_count and fits_cap) {
+                seed_budget = std::max(seed_budget, covered);
+            }
+        }
+    }
+    if (seed_budget_out != nullptr) {
+        *seed_budget_out = seed_budget;
+    }
+    if (seed_budget == 0) {
+        return seeds;
+    }
+
+    // Both samplers read the label table: id-based sampling maps labels to inner ids, and
+    // the bitmap sampler relies on the filter being indexed by inner id. Label mutations
+    // take label_lookup_mutex_ exclusively, so exclude them while those reads happen.
+    std::shared_lock label_lock(this->label_lookup_mutex_);
+    if (bitset_seed_source) {
+        // The bitset sampler strides over the id space and stops at the budget, so it cannot
+        // prove exhaustiveness here. Reporting false only forgoes the skip, never correctness.
+        seeds = collect_bitset_seed_inner_ids(inner_filter, total_count, seed_budget, alloc);
+    } else {
+        seeds = collect_seed_inner_ids(
+            request.filter_, this->label_table_, seed_budget, alloc, seeds_are_exhaustive_out);
+    }
+    return seeds;
 }
 
 // Build the MCI KNN candidate graph from an external KNNG file when available. Otherwise, search

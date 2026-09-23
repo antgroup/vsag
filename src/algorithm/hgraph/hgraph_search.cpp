@@ -985,9 +985,39 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     uint64_t batch_hgraph_queries = 0;
     uint64_t batch_mci_queries = 0;
     uint64_t batch_brute_force_queries = 0;
+    uint64_t batch_hybrid_queries = 0;
     uint64_t batch_seed_count = 0;
     bool batch_precise_float_csr = false;
     MCIHybridSearchResult batch_mci_result(params, ft);
+    // The dynamic neighbor traversal is seeded from the predicate's own valid set: a
+    // single coarse-search entry cannot reach a highly selective valid region because
+    // the predicate removes almost its entire neighbourhood. collect_hybrid_seeds applies
+    // the same budget formula and samplers as the two-route MCI seeding, so a comparison
+    // between the two routes is not confounded by the seed strategy. Setting both
+    // mci_seed_ratio and mci_seed_coverage to 0 disables seeding, leaving the
+    // coarse-search entry point. The whole batch shares one filter, so this runs once.
+    Vector<InnerIdType> hybrid_seed_ids(this->allocator_);
+    bool hybrid_has_seed_list = false;
+    bool hybrid_seeds_exhaustive = false;
+    uint64_t hybrid_seed_budget = 0;
+    // One snapshot of the index size for the whole batch. The seed budget, the non-empty
+    // guard and the companion availability check all read it, so a concurrent Add cannot
+    // leave them disagreeing about which count the companion was published for. A stale
+    // snapshot is still safe -- the searcher re-checks the companion against the flatten
+    // count -- it just cannot make the three reads diverge.
+    const uint64_t hybrid_total_count = params.use_hybrid_traversal ? this->total_count_.load() : 0;
+    if (hybrid_total_count > 0) {
+        hybrid_seed_ids = this->collect_hybrid_seeds(request,
+                                                     ft,
+                                                     params,
+                                                     hybrid_total_count,
+                                                     &hybrid_seed_budget,
+                                                     &hybrid_seeds_exhaustive,
+                                                     this->allocator_);
+        hybrid_has_seed_list = not hybrid_seed_ids.empty();
+        // batch_seed_count is accumulated from the per-query counters below, so it
+        // reports the seeds the traversal used rather than the collected list size.
+    }
     for (int64_t q_idx = 0; q_idx < query_count; ++q_idx) {
         const auto* raw_query = use_custom_distance ? nullptr : get_data(query, q_idx);
         QueryComputerPool query_computer_pool(raw_query, &stats);
@@ -1039,6 +1069,15 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         DistHeapPtr search_result;
         bool brute_force_used = false;
         MCIHybridSearchResult mci_result(params, ft);
+        // Dynamic neighbor traversal: a single traversal that walks the sparse
+        // Hgraph neighbours and the MCI clique members together. It reuses the
+        // entry point the route graphs produced for the bottom graph, and needs an
+        // MCI companion that is published for the current total count.
+        const bool hybrid_available =
+            params.use_hybrid_traversal and not use_custom_distance and
+            search_param.executors.empty() and search_param.ep != INVALID_ENTRY_POINT and
+            this->mci_parameters_.enabled and this->mci_cliques_ != nullptr and
+            this->mci_cliques_->HasCliqueIndex(hybrid_total_count);
         if (not use_custom_distance) {
             if (params.brute_force_threshold > 0.0F &&
                 mci_result.valid_ratio <= params.brute_force_threshold) {
@@ -1046,6 +1085,39 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                     raw_query, ft, k, 0.0F, &ctx, request.threshold_);
                 brute_force_used = true;
                 mci_result.route = "brute_force";
+            } else if (hybrid_available) {
+                HybridTraversalParam hybrid_param;
+                hybrid_param.ef = search_param.ef;
+                // The result heap keeps ef candidates, not k: the reorder stage can only
+                // rescore the candidates it is handed, so a k-deep heap lets coarse
+                // quantization errors through unrecoverably. The outer layer trims to k
+                // after reorder, exactly like the plain bottom-graph search does.
+                hybrid_param.topk = static_cast<int64_t>(search_param.ef);
+                hybrid_param.entry_id = search_param.ep;
+                // Seeded from the predicate's valid set when the filter can enumerate it;
+                // otherwise the traversal falls back to the coarse-search entry point.
+                hybrid_param.seed_inner_ids = hybrid_has_seed_list ? &hybrid_seed_ids : nullptr;
+                // collect_hybrid_seeds already applied the whole budget, so the traversal
+                // must use the list as-is; a non-zero seed_count here would sample it a
+                // second time and silently shrink the budget.
+                hybrid_param.seed_count = 0;
+                // The seed list already covers every valid point, so every valid distance is
+                // known and the expansion cannot add anything: answer from the seeds directly.
+                hybrid_param.seeds_are_exhaustive = hybrid_seeds_exhaustive;
+                hybrid_param.hops_limit = params.hops_limit;
+                hybrid_param.vob = params.hybrid_vob;
+                hybrid_param.filter_cost_ratio = params.hybrid_filter_cost_ratio;
+                mci_result.result = this->hybrid_mci_searcher_->Search(this->bottom_graph_,
+                                                                       this->mci_cliques_,
+                                                                       this->basic_flatten_codes_,
+                                                                       raw_query,
+                                                                       ft,
+                                                                       hybrid_param,
+                                                                       &ctx,
+                                                                       &mci_result.hybrid_stats);
+                mci_result.route = "hybrid";
+                mci_result.hybrid_seed_budget = hybrid_seed_budget;
+                search_result = std::move(mci_result.result);
             } else {
                 mci_result =
                     this->try_mci_search(request, params, ft, raw_query, search_param, &ctx);
@@ -1195,14 +1267,19 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         }
 
         if (query_count > 1) {
+            // Each route contributes exactly its own seed counter: the MCI route fills
+            // mci_result.seed_count, the traversal fills hybrid_stats.seeded_entries.
             if (mci_result.route == "mci") {
                 ++batch_mci_queries;
+                batch_seed_count += mci_result.seed_count;
+            } else if (mci_result.route == "hybrid") {
+                ++batch_hybrid_queries;
+                batch_seed_count += mci_result.hybrid_stats.seeded_entries;
             } else if (mci_result.route == "brute_force") {
                 ++batch_brute_force_queries;
             } else {
                 ++batch_hgraph_queries;
             }
-            batch_seed_count += mci_result.seed_count;
             batch_precise_float_csr = batch_precise_float_csr or mci_result.used_precise_float_csr;
         }
 
@@ -1278,6 +1355,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         batch_stats["mci_hybrid_route"].SetString(
             batch_mci_queries == static_cast<uint64_t>(query_count)           ? "mci"
             : batch_brute_force_queries == static_cast<uint64_t>(query_count) ? "brute_force"
+            : batch_hybrid_queries == static_cast<uint64_t>(query_count)      ? "hybrid"
             : batch_hgraph_queries == static_cast<uint64_t>(query_count)      ? "hgraph"
                                                                               : "mixed");
         batch_stats["mci_seed_count"].SetUint64(batch_seed_count);
@@ -1285,6 +1363,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         batch_stats["batch_routes"]["hgraph"].SetUint64(batch_hgraph_queries);
         batch_stats["batch_routes"]["mci"].SetUint64(batch_mci_queries);
         batch_stats["batch_routes"]["brute_force"].SetUint64(batch_brute_force_queries);
+        batch_stats["batch_routes"]["hybrid"].SetUint64(batch_hybrid_queries);
         dataset_results->Statistics(batch_stats.Dump());
     }
 

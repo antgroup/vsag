@@ -109,6 +109,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     }
     this->searcher_ = std::make_shared<BasicSearcher>(common_param, neighbors_mutex_);
     this->mci_searcher_ = std::make_shared<MCISearcher>(common_param);
+    this->hybrid_mci_searcher_ = std::make_shared<HybridMCISearcher>(common_param);
     if (this->mci_parameters_.enabled) {
         this->mci_cliques_ = std::make_shared<CliqueDataCell>(common_param.allocator_.get());
     }

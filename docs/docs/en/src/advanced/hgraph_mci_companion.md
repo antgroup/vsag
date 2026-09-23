@@ -71,9 +71,61 @@ The seed count is
 `mci_seed_ratio` defaults to `0.1` and must be finite and non-negative. The resulting
 seed count is capped at the number of points that satisfy the filter.
 
+`mci_seed_coverage` raises that budget to `ceil(mci_seed_coverage * valid_count)` whenever the
+target fits into `mci_seed_max_count` and does not exceed the vector count; otherwise the
+coverage term is dropped entirely rather than truncated. `mci_seed_coverage` defaults to `1.0`
+and `mci_seed_max_count` to `32768` (`0` means unlimited). The budget never drops below one, so
+seeding cannot be disabled completely -- set both terms to `0` to leave a single seed.
+
+Because that term is dropped rather than clamped, `mci_seed_coverage` has no effect once the
+valid set exceeds `mci_seed_max_count`: for those (wide-filter) queries the budget silently
+falls back to the `ceil(sqrt(N) * mci_seed_ratio)` floor. Raising the cap is what extends the
+exact-seeding regime, at the cost of a larger seed phase. The default of `32768` keeps that
+enumeration cheap in absolute terms -- 32768 inner ids are 128 KiB and therefore stay in cache --
+so the saturated skip stays a win instead of turning a wide predicate into a scan-sized seed
+phase.
+
 The companion needs a `Filter` object with a meaningful `ValidRatio()` hint. Bitset and
 function filters are accepted, but a custom `Filter` gives the search planner better
 selectivity information.
+
+## Dynamic Neighbor Traversal
+
+`use_hybrid_traversal` (default `false`) replaces the either/or routing above with a single
+traversal that handles both neighbor sources of every expanded vector in one pass:
+
+- the sparse HGraph neighbors are scored first and pushed into the candidate heap, so the
+  search subgraph stays connected regardless of selectivity;
+- the clique members of the same vector are scored predicate-first, and that part is cut short
+  by a virtual-overhead budget.
+
+The budget stops the clique part once
+`considered * (hybrid_filter_cost_ratio + local_selectivity)` reaches `hybrid_vob`, where
+`hybrid_filter_cost_ratio` is `O_filter / O_dist` (the cost of one predicate filtering relative
+to one distance computation) and `local_selectivity` is the running predicate hit rate of the
+current neighbor traversal. A non-positive `hybrid_vob` disables the early stop. The two
+parameters default to `0.0` and `1.0`, and `hybrid_vob` is expressed in units of `O_dist`.
+
+```json
+{
+    "hgraph": {
+      "ef_search": 600,
+      "use_hybrid_traversal": true,
+      "hybrid_vob": 32.0,
+      "mci_seed_ratio": 1.0,
+      "mci_seed_coverage": 1.0
+    }
+}
+```
+
+The traversal is seeded from the predicate's valid set using the same budget and samplers as
+the MCI route, so the two can be compared without the seed strategy confounding the result.
+When that budget ends up covering every valid point, all valid distances are already known and
+the traversal answers from the seeds directly; the expansion is skipped because it is provably
+redundant, not as an approximation. `GetStatistics()` reports the behavior through
+`mci_hybrid_route` (`"hybrid"` when the traversal ran), `hybrid_seed_budget`,
+`hybrid_seeded_entries`, `hybrid_expansion_skipped`, `hybrid_expanded_nodes`,
+`hybrid_mci_members_considered`, `hybrid_dist_computations` and `hybrid_mci_stopped_early`.
 
 ## Add, Serialize, and Stats
 

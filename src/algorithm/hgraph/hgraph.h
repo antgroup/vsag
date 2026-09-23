@@ -42,6 +42,7 @@
 #include "impl/heap/distance_heap.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
+#include "impl/searcher/hybrid_mci_searcher.h"
 #include "impl/searcher/mci_searcher.h"
 #include "impl/searcher/parallel_searcher.h"
 #include "impl/thread_pool/default_thread_pool.h"
@@ -955,6 +956,10 @@ private:
         uint64_t seed_count{0};
         bool used_precise_float_csr{false};
         bool used_bitmap_fast_path{false};
+        // Counters of the dynamic neighbor traversal (route == "hybrid").
+        HybridSearchStats hybrid_stats{};
+        // Seed budget the traversal resolved for the current filter, before sampling.
+        uint64_t hybrid_seed_budget{0};
     };
 
     [[nodiscard]] MCIHybridSearchResult
@@ -964,6 +969,29 @@ private:
                    const void* query,
                    const InnerSearchParam& search_param,
                    QueryContext* ctx) const;
+
+    /**
+     * Seeds for the dynamic neighbor traversal. Uses the exact seed budget of try_mci_search
+     * -- max(ceil(sqrt(N) * mci_seed_ratio), ceil(mci_seed_coverage * valid)) with the cap rule
+     * -- and the same samplers (label sampling when the filter enumerates valid ids, uniform
+     * bitmap sampling when it only exposes a validity map). Keeping the two identical means a
+     * comparison between the two routes cannot be confounded by the seed strategy.
+     * The resolved budget is written to seed_budget_out, and seeds_are_exhaustive_out is set
+     * when the returned list is exactly the whole valid set -- in that case every valid point
+     * already has a distance and the traversal cannot improve on the seeds, so the caller can
+     * skip the expansion entirely. Returns an empty vector when the filter supports neither
+     * source, in which case the traversal falls back to the coarse-search entry point.
+     * total_count is the snapshot the caller already holds, so the budget is derived from the
+     * same count that the companion availability check uses.
+     */
+    [[nodiscard]] Vector<InnerIdType>
+    collect_hybrid_seeds(const SearchRequest& request,
+                         const FilterPtr& inner_filter,
+                         const HGraphSearchParameters& params,
+                         uint64_t total_count,
+                         uint64_t* seed_budget_out,
+                         bool* seeds_are_exhaustive_out,
+                         Allocator* alloc) const;
 
     void
     build_mci_clique_index(const void* vectors = nullptr);
@@ -1001,9 +1029,10 @@ private:
     bool build_by_base_{false};      // build graph using base (not quantized) codes
     bool reorder_by_base_{false};    // use base codes for reorder (no separate precise)
 
-    BasicSearcherPtr searcher_;              // single-thread graph searcher
-    MCISearcherPtr mci_searcher_;            // companion MCI clique searcher
-    ParallelSearcherPtr parallel_searcher_;  // multi-thread graph searcher
+    BasicSearcherPtr searcher_;                 // single-thread graph searcher
+    MCISearcherPtr mci_searcher_;               // companion MCI clique searcher
+    HybridMCISearcherPtr hybrid_mci_searcher_;  // sparse + clique dynamic neighbor traversal
+    ParallelSearcherPtr parallel_searcher_;     // multi-thread graph searcher
 
     std::default_random_engine level_generator_{
         2021};          // random number generator for level sampling

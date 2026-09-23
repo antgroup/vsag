@@ -418,6 +418,23 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_USE_MCI)) {
         obj.use_mci = params[INDEX_TYPE_HGRAPH][HGRAPH_USE_MCI].GetBool();
     }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_USE_HYBRID_TRAVERSAL)) {
+        obj.use_hybrid_traversal = params[INDEX_TYPE_HGRAPH][HGRAPH_USE_HYBRID_TRAVERSAL].GetBool();
+    }
+    auto parse_hybrid_cost = [&](const char* key, double& target, const char* name) {
+        if (not params[INDEX_TYPE_HGRAPH].Contains(key)) {
+            return;
+        }
+        // JsonType exposes GetFloat() only, so a double target widens exactly from here.
+        const auto value = params[INDEX_TYPE_HGRAPH][key].GetFloat();
+        CHECK_ARGUMENT(std::isfinite(value), fmt::format("hgraph {} must be finite", name));
+        CHECK_ARGUMENT(value >= 0.0, fmt::format("hgraph {} must be non-negative", name));
+        target = value;
+    };
+    parse_hybrid_cost(HGRAPH_HYBRID_VOB, obj.hybrid_vob, HGRAPH_HYBRID_VOB);
+    parse_hybrid_cost(HGRAPH_HYBRID_FILTER_COST_RATIO,
+                      obj.hybrid_filter_cost_ratio,
+                      HGRAPH_HYBRID_FILTER_COST_RATIO);
     if (params[INDEX_TYPE_HGRAPH].Contains(PARAMETER_USE_CONJUGATE_GRAPH_SEARCH)) {
         obj.use_conjugate_graph_search =
             params[INDEX_TYPE_HGRAPH][PARAMETER_USE_CONJUGATE_GRAPH_SEARCH].GetBool();
@@ -429,6 +446,17 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
         CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
             std::isfinite(obj.mci_seed_ratio) and obj.mci_seed_ratio >= 0.0F,
             "hgraph mci_seed_ratio must be finite and non-negative");
+    }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_SEED_COVERAGE)) {
+        obj.mci_seed_coverage = params[INDEX_TYPE_HGRAPH][HGRAPH_MCI_SEED_COVERAGE].GetFloat();
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            std::isfinite(obj.mci_seed_coverage) and obj.mci_seed_coverage >= 0.0F,
+            "hgraph mci_seed_coverage must be finite and non-negative");
+    }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_SEED_MAX_COUNT)) {
+        obj.mci_seed_max_count = params[INDEX_TYPE_HGRAPH][HGRAPH_MCI_SEED_MAX_COUNT].GetInt();
+        CHECK_ARGUMENT(obj.mci_seed_max_count >= 0,
+                       "hgraph mci_seed_max_count must be non-negative");
     }
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_HGRAPH_VALID_RATIO_THRESHOLD)) {
         obj.mci_hgraph_valid_ratio_threshold =
