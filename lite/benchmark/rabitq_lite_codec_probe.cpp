@@ -1647,6 +1647,50 @@ self_test() {
     require(not mutable_graph.Update(-1, base.data()), "missing mutable graph Update succeeded");
     require(not mutable_graph.Remove(-1), "missing mutable graph Remove succeeded");
 
+    GraphTopology disconnected_graph{std::vector<uint64_t>(10, 0), {}};
+    EncodedRecords disconnected_codes(dim);
+    for (uint64_t slot = 0; slot < 9; ++slot) {
+        disconnected_codes.Append(encode(first, base.data() + slot * dim));
+    }
+    float disconnected_query_norm = 0.0F;
+    const auto disconnected_query = normalize(first, base.data(), disconnected_query_norm);
+    const auto disconnected_result = graph_search(
+        disconnected_query, disconnected_query_norm, disconnected_codes, disconnected_graph, 8, 2);
+    require(disconnected_result.neighbors.size() == 8 and disconnected_result.visited >= 8,
+            "disconnected low-ef graph search returned too few candidates");
+    std::unordered_set<uint64_t> disconnected_slots;
+    for (const auto& candidate : disconnected_result.neighbors) {
+        require(disconnected_slots.insert(candidate.id).second,
+                "disconnected graph search returned a duplicate candidate");
+    }
+
+    MutableGraphState tiny_graph(first, EncodedRecords(dim), GraphTopology{{0}, {}}, {}, 2, 2);
+    require(tiny_graph.Search(base.data(), 10).neighbors.empty(),
+            "empty mutable graph search returned a candidate");
+    require(tiny_graph.Add(2000, base.data()), "empty mutable graph Add failed");
+    tiny_graph.Validate();
+    require(tiny_graph.Search(base.data(), 10).neighbors.size() == 1,
+            "single-element mutable graph search failed");
+    require(tiny_graph.Update(2000, base.data() + dim),
+            "single-element mutable graph Update failed");
+    tiny_graph.Validate();
+    require(tiny_graph.Remove(2000), "last-slot mutable graph Remove failed");
+    tiny_graph.Validate();
+    require(tiny_graph.Size() == 0, "last-slot removal did not empty mutable graph");
+    require(tiny_graph.Add(2001, base.data()), "first tiny graph Add failed");
+    require(tiny_graph.Add(2002, base.data() + dim), "second tiny graph Add failed");
+    require(tiny_graph.Update(2001, base.data() + 2 * dim),
+            "two-element mutable graph Update failed");
+    tiny_graph.Validate();
+    require(tiny_graph.Remove(2001), "non-last tiny graph Remove failed");
+    tiny_graph.Validate();
+    require(tiny_graph.Size() == 1 and tiny_graph.IdAt(0) == 2002,
+            "non-last removal did not compact the final slot");
+    require(tiny_graph.GetMutationFallbacks() == 0,
+            "valid tiny graph mutations unexpectedly used exhaustive fallback");
+    require(tiny_graph.Remove(2002), "final tiny graph Remove failed");
+    tiny_graph.Validate();
+
     std::vector<float> mutation(dim);
     int64_t next_id = 1000 + static_cast<int64_t>(count);
     for (uint64_t step = 0; step < 180; ++step) {
