@@ -55,6 +55,14 @@ public:
     int32_t route_ef_construction{300};
     bool use_route_graph{true};
     GNOIMIParameterPtr gnoimi_param{nullptr};
+
+    // Opt-in CUDA build backend, off by default. These decide how the centroids
+    // are computed, not what the index looks like afterwards, which is why
+    // CheckCompatibility ignores them.
+    bool enable_gpu_build{false};
+    int32_t gpu_device_id{0};
+    uint64_t gpu_memory_budget{0};       // 0: derive from free device memory
+    uint64_t gpu_min_work_threshold{0};  // 0: use the calibrated default
 };
 
 using IVFPartitionStrategyParametersPtr = std::shared_ptr<IVFPartitionStrategyParameters>;

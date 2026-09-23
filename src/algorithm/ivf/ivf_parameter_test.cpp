@@ -16,6 +16,7 @@
 #include "ivf_parameter.h"
 
 #include <cmath>
+#include <limits>
 #include <numeric>
 
 #include "ivf.h"
@@ -609,5 +610,83 @@ TEST_CASE("IVF rejects invalid RaBitQ split storage parameters",
         auto param = make_valid_param();
         param["graph_build_threshold"].SetInt(10);
         REQUIRE_THROWS(vsag::IVF::CheckAndMappingExternalParam(param, common_param));
+    }
+}
+
+TEST_CASE("IVF maps GPU build external parameters", "[ut][IVFParameter]") {
+    auto external_param = vsag::JsonType::Parse(R"({
+        "buckets_count": 64,
+        "enable_gpu_build": true,
+        "gpu_device_id": 2,
+        "gpu_memory_budget": 536870912,
+        "gpu_min_work_threshold": 4294967296
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 64;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto param = vsag::IVF::CheckAndMappingExternalParam(external_param, common_param);
+    auto ivf_param = std::dynamic_pointer_cast<vsag::IVFParameter>(param);
+    REQUIRE(ivf_param != nullptr);
+
+    const auto& strategy = ivf_param->ivf_partition_strategy_parameter;
+    REQUIRE(strategy != nullptr);
+    REQUIRE(strategy->enable_gpu_build);
+    REQUIRE(strategy->gpu_device_id == 2);
+    REQUIRE(strategy->gpu_memory_budget == 536870912ULL);
+    REQUIRE(strategy->gpu_min_work_threshold == 4294967296ULL);
+}
+
+TEST_CASE("IVF leaves the GPU build off when it is not asked for", "[ut][IVFParameter]") {
+    auto external_param = vsag::JsonType::Parse(R"({"buckets_count": 64})");
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 64;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto param = vsag::IVF::CheckAndMappingExternalParam(external_param, common_param);
+    auto ivf_param = std::dynamic_pointer_cast<vsag::IVFParameter>(param);
+    REQUIRE(ivf_param != nullptr);
+    REQUIRE_FALSE(ivf_param->ivf_partition_strategy_parameter->enable_gpu_build);
+}
+
+TEST_CASE("IVF refuses GPU parameters outside the range they land in", "[ut][IVFParameter]") {
+    // The two unsigned knobs stop at INT64_MAX rather than at UINT64_MAX, which
+    // WorthOffloading's own overflow argument rests on, and a value past it has to
+    // be refused rather than wrapped. GetInt turns one into a negative, so this
+    // pins which bound each value breaks as well as that it is refused.
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 64;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    const auto mapped = [&](const std::string& body) {
+        return vsag::IVF::CheckAndMappingExternalParam(vsag::JsonType::Parse(body), common_param);
+    };
+
+    SECTION("a budget past INT64_MAX") {
+        REQUIRE_THROWS(
+            mapped(R"({"buckets_count": 64, "gpu_memory_budget": 18446744073709551615})"));
+    }
+    SECTION("a threshold past INT64_MAX") {
+        REQUIRE_THROWS(
+            mapped(R"({"buckets_count": 64, "gpu_min_work_threshold": 18446744073709551615})"));
+    }
+    SECTION("a negative budget") {
+        REQUIRE_THROWS(mapped(R"({"buckets_count": 64, "gpu_memory_budget": -1})"));
+    }
+    SECTION("a device beyond int32") {
+        REQUIRE_THROWS(mapped(R"({"buckets_count": 64, "gpu_device_id": 2147483648})"));
+    }
+    SECTION("INT64_MAX itself is taken") {
+        auto param = std::dynamic_pointer_cast<vsag::IVFParameter>(
+            mapped(R"({"buckets_count": 64, "gpu_memory_budget": 9223372036854775807})"));
+        REQUIRE(param != nullptr);
+        REQUIRE(param->ivf_partition_strategy_parameter->gpu_memory_budget ==
+                static_cast<uint64_t>(std::numeric_limits<int64_t>::max()));
+    }
+    SECTION("a budget written as a float is still taken") {
+        auto param = std::dynamic_pointer_cast<vsag::IVFParameter>(
+            mapped(R"({"buckets_count": 64, "gpu_memory_budget": 1e9})"));
+        REQUIRE(param != nullptr);
+        REQUIRE(param->ivf_partition_strategy_parameter->gpu_memory_budget == 1000000000ULL);
     }
 }
