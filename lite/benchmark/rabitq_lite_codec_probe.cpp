@@ -763,6 +763,32 @@ compact_graph(const std::vector<std::vector<uint64_t>>& adjacency) {
     return result;
 }
 
+struct MutableMemoryUsage {
+    uint64_t model_logical_bytes{};
+    uint64_t model_capacity_bytes{};
+    uint64_t codes_logical_bytes{};
+    uint64_t codes_capacity_bytes{};
+    uint64_t ids_logical_bytes{};
+    uint64_t ids_capacity_bytes{};
+    uint64_t adjacency_edges{};
+    uint64_t adjacency_logical_bytes{};
+    uint64_t adjacency_capacity_bytes{};
+    uint64_t slot_entries{};
+    uint64_t slot_buckets{};
+
+    [[nodiscard]] uint64_t
+    KnownLogicalBytes() const {
+        return model_logical_bytes + codes_logical_bytes + ids_logical_bytes +
+               adjacency_logical_bytes;
+    }
+
+    [[nodiscard]] uint64_t
+    KnownCapacityBytes() const {
+        return model_capacity_bytes + codes_capacity_bytes + ids_capacity_bytes +
+               adjacency_capacity_bytes;
+    }
+};
+
 class MutableGraphState {
 public:
     MutableGraphState(Model input_model,
@@ -934,6 +960,33 @@ public:
     [[nodiscard]] uint64_t
     GetMutationFallbacks() const {
         return mutation_fallbacks_;
+    }
+
+    [[nodiscard]] MutableMemoryUsage
+    GetMemoryUsage() const {
+        MutableMemoryUsage result;
+        result.model_logical_bytes =
+            model_.centroid.size() * sizeof(float) + model_.flips.size() * sizeof(uint8_t);
+        result.model_capacity_bytes =
+            model_.centroid.capacity() * sizeof(float) + model_.flips.capacity() * sizeof(uint8_t);
+        result.codes_logical_bytes = codes_.metadata.size() * sizeof(EncodedMetadata) +
+                                     codes_.filters.size() * sizeof(uint8_t) +
+                                     codes_.supplements.size() * sizeof(uint8_t);
+        result.codes_capacity_bytes = codes_.metadata.capacity() * sizeof(EncodedMetadata) +
+                                      codes_.filters.capacity() * sizeof(uint8_t) +
+                                      codes_.supplements.capacity() * sizeof(uint8_t);
+        result.ids_logical_bytes = ids_.size() * sizeof(int64_t);
+        result.ids_capacity_bytes = ids_.capacity() * sizeof(int64_t);
+        result.adjacency_logical_bytes = adjacency_.size() * sizeof(std::vector<uint64_t>);
+        result.adjacency_capacity_bytes = adjacency_.capacity() * sizeof(std::vector<uint64_t>);
+        for (const auto& neighbors : adjacency_) {
+            result.adjacency_edges += neighbors.size();
+            result.adjacency_logical_bytes += neighbors.size() * sizeof(uint64_t);
+            result.adjacency_capacity_bytes += neighbors.capacity() * sizeof(uint64_t);
+        }
+        result.slot_entries = slots_.size();
+        result.slot_buckets = slots_.bucket_count();
+        return result;
     }
 
 private:
@@ -1971,6 +2024,36 @@ run_loaded(const std::filesystem::path& root,
 }
 
 void
+run_mutable_rss(const std::filesystem::path& snapshot_path) {
+    const auto start = Clock::now();
+    std::ifstream input(snapshot_path, std::ios::binary);
+    require(static_cast<bool>(input), "cannot open mutable RSS snapshot");
+    auto state = load_mutable_snapshot(input);
+    const double load_ms = milliseconds(start, Clock::now());
+    state.Validate();
+    const auto usage = state.GetMemoryUsage();
+    require(usage.KnownLogicalBytes() <= usage.KnownCapacityBytes(),
+            "mutable known logical bytes exceed capacity bytes");
+    require(usage.slot_entries == state.Size(), "mutable RSS slot entry count mismatch");
+
+    std::cout << "count,dim,max_degree,ef_search,load_ms,snapshot_bytes,"
+                 "model_logical_bytes,model_capacity_bytes,codes_logical_bytes,"
+                 "codes_capacity_bytes,ids_logical_bytes,ids_capacity_bytes,adjacency_edges,"
+                 "adjacency_logical_bytes,adjacency_capacity_bytes,known_logical_bytes,"
+                 "known_capacity_bytes,slot_entries,slot_buckets,current_rss_kib,peak_rss_kib\n";
+    std::cout << std::fixed << std::setprecision(6) << state.Size() << ',' << state.GetModel().dim
+              << ',' << state.GetMaxDegree() << ',' << state.GetEfSearch() << ',' << load_ms << ','
+              << std::filesystem::file_size(snapshot_path) << ',' << usage.model_logical_bytes
+              << ',' << usage.model_capacity_bytes << ',' << usage.codes_logical_bytes << ','
+              << usage.codes_capacity_bytes << ',' << usage.ids_logical_bytes << ','
+              << usage.ids_capacity_bytes << ',' << usage.adjacency_edges << ','
+              << usage.adjacency_logical_bytes << ',' << usage.adjacency_capacity_bytes << ','
+              << usage.KnownLogicalBytes() << ',' << usage.KnownCapacityBytes() << ','
+              << usage.slot_entries << ',' << usage.slot_buckets << ',' << current_rss_kib() << ','
+              << peak_rss_kib() << '\n';
+}
+
+void
 run_crud(const std::filesystem::path& root,
          const std::filesystem::path& snapshot_path,
          uint64_t rounds,
@@ -2171,6 +2254,10 @@ main(int argc, char** argv) {
             run_loaded(argv[2], argv[3], parse_positive(argv[4]));
             return 0;
         }
+        if (argc == 3 and std::string(argv[1]) == "--mutable-rss") {
+            run_mutable_rss(argv[2]);
+            return 0;
+        }
         if (argc == 9 and std::string(argv[1]) == "--crud") {
             run_crud(argv[2],
                      argv[3],
@@ -2190,6 +2277,7 @@ main(int argc, char** argv) {
         std::cerr << "usage: lite_rabitq_codec_probe [DATASET_DIR [MAX_DEGREE EF_SEARCH] | "
                      "--save DATASET_DIR SNAPSHOT MAX_DEGREE EF_SEARCH | "
                      "--load DATASET_DIR SNAPSHOT EF_SEARCH | "
+                     "--mutable-rss SNAPSHOT | "
                      "--crud DATASET_DIR SNAPSHOT ROUNDS CRUD_OPS QUERIES MAX_DEGREE EF_SEARCH | "
                      "--self-test]\n";
         return 2;
