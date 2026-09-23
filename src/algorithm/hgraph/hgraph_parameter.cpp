@@ -404,6 +404,23 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
                        "ef_search exceeds int64_t range");
     }
     obj.ef_search = ef_search_json.GetInt();
+    obj.hgraph_ef_search = 0;
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_EF_SEARCH)) {
+        obj.hgraph_ef_search = params[INDEX_TYPE_HGRAPH][HGRAPH_EF_SEARCH].GetInt();
+        CHECK_ARGUMENT(obj.hgraph_ef_search >= 1, "hgraph_ef_search must be at least 1");
+    }
+    obj.mci_ef_search = 0;
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_EF_SEARCH)) {
+        obj.mci_ef_search = params[INDEX_TYPE_HGRAPH][HGRAPH_MCI_EF_SEARCH].GetInt();
+        CHECK_ARGUMENT(obj.mci_ef_search >= 1, "mci_ef_search must be at least 1");
+    }
+    // Both routes default to the shared `ef_search` when their own value is not given.
+    if (obj.hgraph_ef_search <= 0) {
+        obj.hgraph_ef_search = obj.ef_search;
+    }
+    if (obj.mci_ef_search <= 0) {
+        obj.mci_ef_search = obj.ef_search;
+    }
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_HOPS_LIMIT)) {
         obj.hops_limit = params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_HOPS_LIMIT].GetInt();
     }
@@ -429,6 +446,27 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
         CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
             std::isfinite(obj.mci_seed_ratio) and obj.mci_seed_ratio >= 0.0F,
             "hgraph mci_seed_ratio must be finite and non-negative");
+    }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_SEED_COVERAGE)) {
+        obj.mci_seed_coverage = params[INDEX_TYPE_HGRAPH][HGRAPH_MCI_SEED_COVERAGE].GetFloat();
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            std::isfinite(obj.mci_seed_coverage) and obj.mci_seed_coverage >= 0.0F,
+            "hgraph mci_seed_coverage must be finite and non-negative");
+    }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_SEED_MAX_COUNT)) {
+        obj.mci_seed_max_count = params[INDEX_TYPE_HGRAPH][HGRAPH_MCI_SEED_MAX_COUNT].GetInt();
+        CHECK_ARGUMENT(obj.mci_seed_max_count >= 0,
+                       "hgraph mci_seed_max_count must be non-negative");
+    }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_EXPANSION_IDLE_WINDOW)) {
+        obj.mci_expansion_idle_window =
+            params[INDEX_TYPE_HGRAPH][HGRAPH_MCI_EXPANSION_IDLE_WINDOW].GetInt();
+        CHECK_ARGUMENT(obj.mci_expansion_idle_window >= 0,
+                       "hgraph mci_expansion_idle_window must be non-negative");
+    }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_EXPANSION_LOWER_BOUND)) {
+        obj.mci_expansion_lower_bound =
+            params[INDEX_TYPE_HGRAPH][HGRAPH_MCI_EXPANSION_LOWER_BOUND].GetBool();
     }
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_HGRAPH_VALID_RATIO_THRESHOLD)) {
         obj.mci_hgraph_valid_ratio_threshold =

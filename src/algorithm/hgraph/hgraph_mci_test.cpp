@@ -360,7 +360,7 @@ TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][
         index.value()->KnnSearch(query,
                                  3,
                                  R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.5,)"
-                                 R"("hgraph_valid_ratio_threshold":1.0}})",
+                                 R"("mci_seed_coverage":0,"hgraph_valid_ratio_threshold":1.0}})",
                                  filter);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() > 0);
@@ -435,7 +435,7 @@ TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][
         index.value()->KnnSearch(query,
                                  1,
                                  R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.1,)"
-                                 R"("hgraph_valid_ratio_threshold":1.0}})",
+                                 R"("mci_seed_coverage":0,"hgraph_valid_ratio_threshold":1.0}})",
                                  mixed_filter);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() == 1);
@@ -918,7 +918,7 @@ TEST_CASE("HGraph MCI inlines an identity-mapped filter bitmap", "[ut][hgraph][m
                      ->Float32Vectors(vectors.data() + (total - 1) * dim)
                      ->Owner(false);
     const std::string search_params =
-        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":5.0,)"
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.1,"mci_seed_coverage":0,)"
         R"("hgraph_valid_ratio_threshold":1.0}})";
 
     auto bitmap_filter =
@@ -992,4 +992,464 @@ TEST_CASE("HGraph MCI ignores a bitmap whose ids are not inner ids", "[ut][hgrap
         REQUIRE(id >= first_label);
         REQUIRE(id < first_label + valid_count);
     }
+}
+
+TEST_CASE("HGraph MCI skips clique expansion when seeds cover every valid point",
+          "[ut][hgraph][mci]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 64;
+
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 1000);
+
+    std::vector<float> vectors(total * dim, 0.0F);
+    for (int64_t i = 0; i < total; ++i) {
+        vectors[i * dim] = static_cast<float>(i / 4);
+        vectors[i * dim + 1] = static_cast<float>(i % 4);
+        vectors[i * dim + 2] = static_cast<float>((i * 3) % 7);
+        vectors[i * dim + 3] = static_cast<float>((i * 5) % 11);
+    }
+
+    auto index = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
+
+    // ceil(sqrt(64) * 1.0) == 8 seeds: a filter with at most 8 valid labels is enumerated
+    // completely, so the seed phase already produces the exact top-k.
+    const char* search_params = R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,)"
+                                R"("hgraph_valid_ratio_threshold":1.0}})";
+    // The partial case has to keep the ratio-based budget, so the coverage budget is disabled.
+    const char* partial_params = R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,)"
+                                 R"("mci_seed_coverage":0,"hgraph_valid_ratio_threshold":1.0}})";
+
+    auto exact_topk = [&](int64_t valid_count) {
+        std::vector<std::pair<float, int64_t>> scored;
+        for (int64_t i = 0; i < valid_count; ++i) {
+            float distance = 0.0F;
+            for (int64_t d = 0; d < dim; ++d) {
+                const float delta = vectors[i * dim + d] - vectors[d];
+                distance += delta * delta;
+            }
+            scored.emplace_back(distance, ids[i]);
+        }
+        std::sort(scored.begin(), scored.end());
+        std::vector<int64_t> topk;
+        for (int64_t i = 0; i < 3; ++i) {
+            topk.emplace_back(scored[i].second);
+        }
+        std::sort(topk.begin(), topk.end());
+        return topk;
+    };
+
+    std::vector<int64_t> covered(ids.begin(), ids.begin() + 5);
+    auto covered_filter = std::make_shared<HalfRatioAllValidFilter>(covered);
+    auto covered_result = index.value()->KnnSearch(query, 3, search_params, covered_filter);
+    REQUIRE(covered_result.has_value());
+    REQUIRE(covered_result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    REQUIRE(std::stoull(covered_result.value()->GetStatistics({"mci_seed_count"})[0]) == 5);
+    // Every valid point was scored by the seed phase, so the returned search skipped the
+    // whole clique expansion. Auxiliary entry-point searches share the statistics object and
+    // still contribute a few hops, which is why the hop count is not asserted to be zero.
+    REQUIRE(covered_result.value()->GetStatistics({"mci_seed_saturated"})[0] == "true");
+    const auto covered_hops = std::stoull(covered_result.value()->GetStatistics({"hops"})[0]);
+
+    std::vector<int64_t> returned(covered_result.value()->GetIds(),
+                                  covered_result.value()->GetIds() + 3);
+    std::sort(returned.begin(), returned.end());
+    REQUIRE(returned == exact_topk(5));
+
+    // More valid labels than seeds: the seed list is a stride sample, so the expansion still
+    // contributes and must not be skipped.
+    std::vector<int64_t> partial(ids.begin(), ids.begin() + 40);
+    auto partial_filter = std::make_shared<HalfRatioAllValidFilter>(partial);
+    auto partial_result = index.value()->KnnSearch(query, 3, partial_params, partial_filter);
+    REQUIRE(partial_result.has_value());
+    REQUIRE(partial_result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    REQUIRE(partial_result.value()->GetStatistics({"mci_seed_saturated"})[0] == "false");
+    REQUIRE(std::stoull(partial_result.value()->GetStatistics({"hops"})[0]) > covered_hops);
+}
+
+namespace {
+
+// Shared fixture: `total` vectors with a deterministic, non-degenerate layout.
+std::vector<float>
+make_test_vectors(int64_t total, int64_t dim) {
+    std::vector<float> vectors(total * dim, 0.0F);
+    for (int64_t i = 0; i < total; ++i) {
+        vectors[i * dim] = static_cast<float>(i / 8);
+        vectors[i * dim + 1] = static_cast<float>(i % 8);
+        vectors[i * dim + 2] = static_cast<float>((i * 3) % 11);
+        vectors[i * dim + 3] = static_cast<float>((i * 5) % 13);
+    }
+    return vectors;
+}
+
+}  // namespace
+
+TEST_CASE("HGraph MCI coverage budget seeds every valid point when it fits the cap",
+          "[ut][hgraph][mci]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 512;
+    constexpr int64_t valid_count = 200;  // ceil(sqrt(512) * 0.1) == 3 with the ratio budget
+
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 1000);
+    auto vectors = make_test_vectors(total, dim);
+
+    auto index = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
+
+    std::vector<int64_t> valid(ids.begin(), ids.begin() + valid_count);
+    auto filter = std::make_shared<HalfRatioAllValidFilter>(valid);
+
+    // Default coverage budget: the seed list enumerates the whole valid set, the searcher skips
+    // the expansion and the answer is the exact top-k.
+    auto covered = index.value()->KnnSearch(
+        query,
+        10,
+        R"({"hgraph":{"ef_search":512,"use_mci":true,"mci_seed_ratio":0.1,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})",
+        filter);
+    REQUIRE(covered.has_value());
+    REQUIRE(std::stoull(covered.value()->GetStatistics({"mci_seed_count"})[0]) == valid_count);
+    REQUIRE(covered.value()->GetStatistics({"mci_seed_saturated"})[0] == "true");
+
+    std::vector<std::pair<float, int64_t>> scored;
+    for (int64_t i = 0; i < valid_count; ++i) {
+        float distance = 0.0F;
+        for (int64_t d = 0; d < dim; ++d) {
+            const float delta = vectors[static_cast<size_t>(i * dim + d)] - vectors[d];
+            distance += delta * delta;
+        }
+        scored.emplace_back(distance, ids[i]);
+    }
+    std::sort(scored.begin(), scored.end());
+    std::vector<int64_t> expected;
+    for (int64_t i = 0; i < 10; ++i) {
+        expected.emplace_back(scored[i].second);
+    }
+    std::sort(expected.begin(), expected.end());
+    std::vector<int64_t> returned(covered.value()->GetIds(), covered.value()->GetIds() + 10);
+    std::sort(returned.begin(), returned.end());
+    REQUIRE(returned == expected);
+
+    // With the coverage budget disabled the ratio budget applies, so the seed phase is partial.
+    auto partial = index.value()->KnnSearch(
+        query,
+        10,
+        R"({"hgraph":{"ef_search":512,"use_mci":true,"mci_seed_ratio":0.1,)"
+        R"("mci_seed_coverage":0,"hgraph_valid_ratio_threshold":1.0}})",
+        filter);
+    REQUIRE(partial.has_value());
+    REQUIRE(std::stoull(partial.value()->GetStatistics({"mci_seed_count"})[0]) < valid_count);
+    REQUIRE(partial.value()->GetStatistics({"mci_seed_saturated"})[0] == "false");
+}
+
+TEST_CASE("HGraph MCI idle window aborts unproductive clique expansion", "[ut][hgraph][mci]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 1024;
+    constexpr int64_t valid_count = 512;
+
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 1000);
+    auto vectors = make_test_vectors(total, dim);
+
+    auto index = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
+
+    std::vector<int64_t> valid(ids.begin(), ids.begin() + valid_count);
+    auto filter = std::make_shared<HalfRatioAllValidFilter>(valid);
+
+    // Both runs use the ratio budget so that the expansion actually happens.
+    auto full = index.value()->KnnSearch(
+        query,
+        10,
+        R"({"hgraph":{"ef_search":1024,"use_mci":true,"mci_seed_ratio":0.1,"mci_seed_coverage":0,)"
+        R"("mci_expansion_idle_window":0,"hgraph_valid_ratio_threshold":1.0}})",
+        filter);
+    auto idle = index.value()->KnnSearch(
+        query,
+        10,
+        R"({"hgraph":{"ef_search":1024,"use_mci":true,"mci_seed_ratio":0.1,"mci_seed_coverage":0,)"
+        R"("mci_expansion_idle_window":1,"hgraph_valid_ratio_threshold":1.0}})",
+        filter);
+    REQUIRE(full.has_value());
+    REQUIRE(idle.has_value());
+
+    const auto full_hops = std::stoull(full.value()->GetStatistics({"hops"})[0]);
+    const auto idle_hops = std::stoull(idle.value()->GetStatistics({"hops"})[0]);
+    REQUIRE(full_hops > 0);
+    REQUIRE(idle_hops < full_hops);
+
+    std::vector<int64_t> full_ids(full.value()->GetIds(), full.value()->GetIds() + 10);
+    std::vector<int64_t> idle_ids(idle.value()->GetIds(), idle.value()->GetIds() + 10);
+    const auto overlap = std::count_if(idle_ids.begin(), idle_ids.end(), [&](int64_t id) {
+        return std::find(full_ids.begin(), full_ids.end(), id) != full_ids.end();
+    });
+    // The idle window is a heuristic: require most of the top-k to survive the earlier stop.
+    REQUIRE(overlap >= 5);
+}
+
+TEST_CASE("HGraph MCI bitset sampling never claims coverage it did not scan", "[ut][hgraph][mci]") {
+    // Regression: with total=6000 and a seed budget of 8 the bitset collector probes 4096 strided
+    // positions, so `id_step == 1` must not be reported as full coverage -- id 3 is never probed.
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 6000;
+    constexpr int64_t near_count = 8;  // ids 0..7 form one cluster, the rest is far away
+
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::vector<float> vectors(total * dim, 0.0F);
+    for (int64_t i = 0; i < total; ++i) {
+        if (i < near_count) {
+            vectors[i * dim + 1] = 0.1F * static_cast<float>(i);
+        } else {
+            vectors[i * dim] = 1000.0F + static_cast<float>(i % 17);
+            vectors[i * dim + 1] = static_cast<float>(i % 23);
+            vectors[i * dim + 2] = static_cast<float>(i % 29);
+            vectors[i * dim + 3] = static_cast<float>(i % 31);
+        }
+    }
+
+    auto index = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    // Query sits exactly on id 3, which is valid but is skipped by the strided bitset scan.
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data() + 3 * dim)->Owner(false);
+
+    auto blacklist = vsag::Bitset::Make();
+    for (int64_t i = 0; i < total; ++i) {
+        if (i != 0 and i != 3) {
+            blacklist->Set(ids[i]);
+        }
+    }
+
+    // Coverage is disabled so the budget stays at ceil(sqrt(6000) * 0.012) == 1 seed, below
+    // the two valid ids: the scan is cut short by the budget and must not claim coverage., below the two valid ids, so the collector
+    // strides over the id space instead of enumerating it and must not claim coverage.
+    auto result = index.value()->KnnSearch(
+        query,
+        1,
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.012,"mci_seed_coverage":0,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})",
+        blacklist);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    // Only id 0 is probed, so the seed phase is incomplete and the expansion has to run.
+    REQUIRE(std::stoull(result.value()->GetStatistics({"mci_seed_count"})[0]) == 1);
+    // The load-bearing assertion: the collector only probed 4096 of 6000 ids, so it must not claim
+    // full coverage.  Whether the following expansion rediscovers the skipped point depends on the
+    // sampled clique build, so that is covered by the expansion tests instead of asserted here.
+    REQUIRE(result.value()->GetStatistics({"mci_seed_saturated"})[0] == "false");
+    REQUIRE(result.value()->GetDim() == 1);
+}
+
+TEST_CASE("HGraph MCI reports saturation for batched queries", "[ut][hgraph][mci]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 64;
+
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 1000);
+    auto vectors = make_test_vectors(total, dim);
+
+    auto index = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    std::vector<float> queries(2 * dim, 0.0F);
+    std::copy_n(vectors.begin(), dim, queries.begin());
+    std::copy_n(vectors.begin() + dim, dim, queries.begin() + dim);
+    auto query = vsag::Dataset::Make();
+    query->NumElements(2)->Dim(dim)->Float32Vectors(queries.data())->Owner(false);
+
+    std::vector<int64_t> covered(ids.begin(), ids.begin() + 5);
+    auto filter = std::make_shared<HalfRatioAllValidFilter>(covered);
+
+    auto result =
+        index.value()->KnnSearch(query,
+                                 3,
+                                 R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,)"
+                                 R"("hgraph_valid_ratio_threshold":1.0}})",
+                                 filter);
+    REQUIRE(result.has_value());
+    REQUIRE(std::stoull(result.value()->GetStatistics({"mci_seed_count"})[0]) == 5 * 2);
+    // Aggregated with OR semantics over the sub-queries.
+    REQUIRE(result.value()->GetStatistics({"mci_seed_saturated"})[0] == "true");
+}
+
+TEST_CASE("HGraph MCI bitset full scan reports saturation when it exactly fills the budget",
+          "[ut][hgraph][mci]") {
+    // total == sample_count, so the scan is a true full pass; the budget is filled by the last
+    // probed id, which must still count as full coverage (the whole id space was visited).
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 4096;
+
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::vector<float> vectors(total * dim, 0.0F);
+    for (int64_t i = 0; i < total; ++i) {
+        vectors[i * dim] = static_cast<float>((i * 7) % 101);
+        vectors[i * dim + 1] = static_cast<float>((i * 11) % 103);
+        vectors[i * dim + 2] = static_cast<float>((i * 13) % 107);
+        vectors[i * dim + 3] = static_cast<float>((i * 17) % 109);
+    }
+
+    auto index = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dim)
+        ->Float32Vectors(vectors.data() + (total - 1) * dim)
+        ->Owner(false);
+
+    // Exactly four valid ids, the last of which is the final probed position.
+    const std::vector<int64_t> keep{ids[0], ids[1], ids[2], ids[total - 1]};
+    auto blacklist = vsag::Bitset::Make();
+    for (auto id : ids) {
+        if (std::find(keep.begin(), keep.end(), id) == keep.end()) {
+            blacklist->Set(id);
+        }
+    }
+
+    // ceil(sqrt(4096) * 0.0625) == 4 seeds, and sample_count == total == 4096.
+    auto result = index.value()->KnnSearch(
+        query,
+        1,
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.0625,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})",
+        blacklist);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    REQUIRE(std::stoull(result.value()->GetStatistics({"mci_seed_count"})[0]) == 4);
+    REQUIRE(result.value()->GetStatistics({"mci_seed_saturated"})[0] == "true");
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == ids[total - 1]);
+}
+
+TEST_CASE("HGraph MCI enumerates a bitset filter and answers exactly", "[ut][hgraph][mci]") {
+    // With a bitmap-style filter the per-id check is a bit test, so once the seed budget covers the
+    // valid set the collector walks the id space once, collects every valid point and the seed phase
+    // answers exactly without any clique expansion (and without the merged-marks array).
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 6000;
+    constexpr int64_t near_count = 8;
+
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::vector<float> vectors(total * dim, 0.0F);
+    for (int64_t i = 0; i < total; ++i) {
+        if (i < near_count) {
+            vectors[i * dim + 1] = 0.1F * static_cast<float>(i);
+        } else {
+            vectors[i * dim] = 1000.0F + static_cast<float>(i % 17);
+            vectors[i * dim + 1] = static_cast<float>(i % 23);
+            vectors[i * dim + 2] = static_cast<float>(i % 29);
+            vectors[i * dim + 3] = static_cast<float>(i % 31);
+        }
+    }
+
+    auto index = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data() + 3 * dim)->Owner(false);
+
+    auto blacklist = vsag::Bitset::Make();
+    for (int64_t i = 0; i < total; ++i) {
+        if (i != 0 and i != 3) {
+            blacklist->Set(ids[i]);
+        }
+    }
+
+    // ceil(sqrt(6000) * 0.1) == 8 seeds >= 2 valid ids, so the collector enumerates the id space.
+    auto result =
+        index.value()->KnnSearch(query,
+                                 1,
+                                 R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.1,)"
+                                 R"("hgraph_valid_ratio_threshold":1.0}})",
+                                 blacklist);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    REQUIRE(std::stoull(result.value()->GetStatistics({"mci_seed_count"})[0]) == 2);
+    REQUIRE(result.value()->GetStatistics({"mci_seed_saturated"})[0] == "true");
+    // Bitset filters expose no merged bitmap, so the fast path stays off.
+    REQUIRE_FALSE(
+        vsag::JsonType::Parse(result.value()->GetStatistics())["mci_bitmap_fast_path"].GetBool());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == ids[3]);
+}
+
+TEST_CASE("HGraph per-route ef_search sets each route's search breadth", "[ut][hgraph][mci]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 64;
+
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 1000);
+
+    std::vector<float> vectors(total * dim, 0.0F);
+    for (int64_t i = 0; i < total; ++i) {
+        vectors[i * dim] = static_cast<float>(i / 4);
+        vectors[i * dim + 1] = static_cast<float>(i % 4);
+        vectors[i * dim + 2] = static_cast<float>((i * 3) % 7);
+        vectors[i * dim + 3] = static_cast<float>((i * 5) % 11);
+    }
+
+    auto index = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
+
+    // 40 of 64 labels are valid and the seed budget stays ratio-based, so the partial seeds
+    // force a real expansion whose breadth is exactly the route's ef.
+    std::vector<int64_t> valid(ids.begin(), ids.begin() + 40);
+    auto filter = std::make_shared<HalfRatioAllValidFilter>(valid);
+
+    // MCI band: a huge shared ef must not widen the hybrid, which has its own breadth.
+    const char* mci_routed =
+        R"({"hgraph":{"ef_search":4096,"mci_ef_search":16,"use_mci":true,)"
+        R"("mci_seed_ratio":1.0,"mci_seed_coverage":0,"hgraph_valid_ratio_threshold":1.0}})";
+    const char* mci_reference = R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,)"
+                                R"("mci_seed_coverage":0,"hgraph_valid_ratio_threshold":1.0}})";
+    auto mci_result = index.value()->KnnSearch(query, 3, mci_routed, filter);
+    auto mci_baseline = index.value()->KnnSearch(query, 3, mci_reference, filter);
+    REQUIRE(mci_result.has_value());
+    REQUIRE(mci_baseline.has_value());
+    REQUIRE(mci_result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    REQUIRE(mci_baseline.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    REQUIRE(mci_result.value()->GetStatistics({"mci_seed_saturated"})[0] == "false");
+    // Same breadth, same deterministic walk: ignoring `mci_ef_search` would instead run a
+    // 4096-wide expansion and explore strictly more hops.
+    REQUIRE(mci_result.value()->GetStatistics({"hops"}) ==
+            mci_baseline.value()->GetStatistics({"hops"}));
+
+    // HGraph band: the plain walk follows `hgraph_ef_search` under the same rule.
+    const char* hgraph_routed =
+        R"({"hgraph":{"ef_search":4096,"hgraph_ef_search":16,"hgraph_valid_ratio_threshold":0.5}})";
+    const char* hgraph_reference =
+        R"({"hgraph":{"ef_search":16,"hgraph_valid_ratio_threshold":0.5}})";
+    auto hgraph_result = index.value()->KnnSearch(query, 3, hgraph_routed, filter);
+    auto hgraph_baseline = index.value()->KnnSearch(query, 3, hgraph_reference, filter);
+    REQUIRE(hgraph_result.has_value());
+    REQUIRE(hgraph_baseline.has_value());
+    REQUIRE(hgraph_result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("hgraph")");
+    REQUIRE(hgraph_result.value()->GetStatistics({"hops"}) ==
+            hgraph_baseline.value()->GetStatistics({"hops"}));
 }

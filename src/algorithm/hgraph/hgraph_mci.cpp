@@ -43,7 +43,8 @@ Vector<InnerIdType>
 collect_seed_inner_ids(const FilterPtr& filter,
                        const LabelTablePtr& label_table,
                        uint64_t seed_count,
-                       Allocator* allocator) {
+                       Allocator* allocator,
+                       bool* enumerates_all_valid = nullptr) {
     Vector<InnerIdType> inner_ids(allocator);
     if (filter == nullptr or label_table == nullptr or seed_count == 0) {
         return inner_ids;
@@ -67,6 +68,12 @@ collect_seed_inner_ids(const FilterPtr& filter,
     }
     std::sort(inner_ids.begin(), inner_ids.end());
     inner_ids.erase(std::unique(inner_ids.begin(), inner_ids.end()), inner_ids.end());
+    if (enumerates_all_valid != nullptr) {
+        // `sampled_count == valid_count` means the whole valid-label list was visited (no
+        // stride sampling) and every label resolved to a distinct inner id.
+        *enumerates_all_valid = sampled_count == static_cast<uint64_t>(valid_count) and
+                                inner_ids.size() == static_cast<uint64_t>(valid_count);
+    }
     return inner_ids;
 }
 
@@ -91,12 +98,31 @@ Vector<InnerIdType>
 collect_bitset_seed_inner_ids(const FilterPtr& inner_filter,
                               uint64_t total,
                               uint64_t seed_count,
-                              Allocator* allocator) {
+                              Allocator* allocator,
+                              bool enumerate_all = false,
+                              bool* enumerates_all_valid = nullptr) {
     Vector<InnerIdType> inner_ids(allocator);
     if (inner_filter == nullptr or total == 0 or seed_count == 0) {
         return inner_ids;
     }
     inner_ids.reserve(std::min(total, seed_count));
+    if (enumerate_all) {
+        // The budget covers the whole valid set, so build the complete list with a single sequential
+        // pass instead of striding.  `CheckValid` is a bit test for bitmap-style filters, which makes
+        // this the cheapest possible way to enumerate the valid points, and the resulting list lets
+        // the seed phase answer exactly without any clique expansion.
+        uint64_t scanned = 0;
+        for (InnerIdType id = 0; id < total and inner_ids.size() < seed_count; ++id) {
+            ++scanned;
+            if (inner_filter->CheckValid(id)) {
+                inner_ids.push_back(id);
+            }
+        }
+        if (enumerates_all_valid != nullptr) {
+            *enumerates_all_valid = (scanned == total);
+        }
+        return inner_ids;
+    }
     const auto scaled_sample_count = seed_count > total / K_MCI_BITSET_SEED_SAMPLE_MULTIPLIER
                                          ? total
                                          : seed_count * K_MCI_BITSET_SEED_SAMPLE_MULTIPLIER;
@@ -106,7 +132,9 @@ collect_bitset_seed_inner_ids(const FilterPtr& inner_filter,
     const auto id_remainder = total % sample_count;
     uint64_t id = 0;
     uint64_t accumulated_remainder = 0;
+    uint64_t samples_done = 0;
     for (uint64_t sample = 0; sample < sample_count and inner_ids.size() < seed_count; ++sample) {
+        ++samples_done;
         const auto inner_id = static_cast<InnerIdType>(id);
         if (inner_filter->CheckValid(inner_id)) {
             inner_ids.push_back(inner_id);
@@ -117,6 +145,14 @@ collect_bitset_seed_inner_ids(const FilterPtr& inner_filter,
             ++id;
             accumulated_remainder -= sample_count;
         }
+    }
+    if (enumerates_all_valid != nullptr) {
+        // Complete only when the scan really visited every inner id.  `id_step == 1` is not enough:
+        // the Bresenham-style advance still skips `id_remainder` positions when the remainder is
+        // non-zero, so ids would be missed.  With `sample_count == total` the advance is exactly one
+        // per iteration, hence the whole id space is covered once the loop ran to completion -- also
+        // when the budget happens to be filled by the last probed id.
+        *enumerates_all_valid = sample_count == total and samples_done == sample_count;
     }
     return inner_ids;
 }
@@ -519,6 +555,7 @@ HGraph::MCIHybridSearchResult::MakeStatistics(const SearchStatistics& stats) con
     json["mci_seed_ratio"].SetFloat(this->seed_ratio);
     json["mci_raw_float_csr"].SetBool(this->used_precise_float_csr);
     json["mci_bitmap_fast_path"].SetBool(this->used_bitmap_fast_path);
+    json["mci_seed_saturated"].SetBool(this->seed_saturated);
     return json;
 }
 
@@ -549,12 +586,13 @@ HGraph::try_mci_search(const SearchRequest& request,
     const auto total_count = this->total_count_.load();
     const auto scaled_seed_count = std::ceil(std::sqrt(static_cast<double>(total_count)) *
                                              static_cast<double>(params.mci_seed_ratio));
-    mci_param.seed_count = scaled_seed_count >= static_cast<double>(total_count)
+    uint64_t seed_budget = scaled_seed_count >= static_cast<double>(total_count)
                                ? total_count
                                : std::max<uint64_t>(1, static_cast<uint64_t>(scaled_seed_count));
     mci_param.hops_limit = search_param.hops_limit;
 
     Vector<InnerIdType> seed_inner_ids(ctx->alloc);
+    bool enumerates_all_valid = false;
     {
         // Both seed collection and GetValidBitmap() read the label table: seed collection maps valid
         // labels to inner ids, and InnerIdWrapperFilter only exposes a bitmap when the labels are the
@@ -562,12 +600,55 @@ HGraph::try_mci_search(const SearchRequest& request,
         // those reads happen. The lock is taken before persistent_codes_mutex_ below, which keeps the
         // lock order this function and the index already use.
         std::shared_lock label_lock(this->label_lookup_mutex_);
+        // Coverage-driven budget: seeding every valid point makes the seed phase exact (the searcher
+        // then skips the whole clique expansion), which beats the expansion tail whenever
+        // `0.5 ms + per_distance * valid` does. The budget is only raised when the target fits into
+        // `mci_seed_max_count`, so a wide filter never degenerates into an exact scan.  It reads the
+        // valid-label list the collector below walks, hence the same shared lock.
+        if (params.mci_seed_coverage > 0.0F and request.filter_ != nullptr) {
+            double valid_estimate = 0.0;
+            if (bitset_seed_source) {
+                // Bitset filters derive `ValidRatio()` from their population count, so it is exact.
+                const auto ratio =
+                    static_cast<double>(std::min(1.0F, std::max(0.0F, result.valid_ratio)));
+                valid_estimate = ratio * static_cast<double>(total_count);
+            } else {
+                const int64_t* valid_labels = nullptr;
+                int64_t valid_label_count = 0;
+                request.filter_->GetValidIds(&valid_labels, valid_label_count);
+                valid_estimate = static_cast<double>(std::max<int64_t>(0, valid_label_count));
+            }
+            if (valid_estimate > 0.0) {
+                // Compare in floating point: `mci_seed_coverage` may be arbitrarily large and
+                // casting an out-of-range double to an integer is undefined behaviour.
+                const auto target =
+                    std::ceil(static_cast<double>(params.mci_seed_coverage) * valid_estimate);
+                const auto cap = params.mci_seed_max_count > 0
+                                     ? std::min(static_cast<double>(params.mci_seed_max_count),
+                                                static_cast<double>(total_count))
+                                     : static_cast<double>(total_count);
+                if (std::isfinite(target) and target <= cap) {
+                    seed_budget = std::max(seed_budget, static_cast<uint64_t>(target));
+                }
+            }
+        }
+        mci_param.seed_count = seed_budget;
         if (bitset_seed_source) {
-            seed_inner_ids = collect_bitset_seed_inner_ids(
-                inner_filter, total_count, mci_param.seed_count, ctx->alloc);
+            const auto estimated_valid = static_cast<uint64_t>(std::llround(
+                static_cast<double>(std::min(1.0F, std::max(0.0F, result.valid_ratio))) *
+                static_cast<double>(total_count)));
+            seed_inner_ids = collect_bitset_seed_inner_ids(inner_filter,
+                                                           total_count,
+                                                           mci_param.seed_count,
+                                                           ctx->alloc,
+                                                           seed_budget >= estimated_valid,
+                                                           &enumerates_all_valid);
         } else {
-            seed_inner_ids = collect_seed_inner_ids(
-                request.filter_, this->label_table_, mci_param.seed_count, ctx->alloc);
+            seed_inner_ids = collect_seed_inner_ids(request.filter_,
+                                                    this->label_table_,
+                                                    mci_param.seed_count,
+                                                    ctx->alloc,
+                                                    &enumerates_all_valid);
         }
         // The searcher indexes the bitmap with inner ids. Providers must return an inner-id-indexed
         // bitmap: InnerIdWrapperFilter only forwards the wrapped bitmap when the label table maps
@@ -585,6 +666,11 @@ HGraph::try_mci_search(const SearchRequest& request,
     result.seed_count = seed_inner_ids.size();
     mci_param.seed_count = result.seed_count;
     mci_param.seed_inner_ids = &seed_inner_ids;
+    mci_param.enumerated_valid_count = enumerates_all_valid ? seed_inner_ids.size() : 0;
+    mci_param.skipped_expansion = &result.seed_saturated;
+    mci_param.expansion_idle_window =
+        static_cast<uint64_t>(std::max<int64_t>(0, params.mci_expansion_idle_window));
+    mci_param.expansion_lower_bound = params.mci_expansion_lower_bound;
     if (seed_inner_ids.empty()) {
         return result;
     }
@@ -600,8 +686,13 @@ HGraph::try_mci_search(const SearchRequest& request,
         mci_param.metric = this->metric_;
         mci_param.used_precise_float_csr = &result.used_precise_float_csr;
     }
+    // The hybrid has its own search breadth; `rerank_topk` is the user's k.
+    InnerSearchParam mci_search_param = search_param;
+    mci_search_param.ef =
+        std::max<int64_t>(params.GetMciEfSearch(), static_cast<int64_t>(search_param.rerank_topk));
+    mci_search_param.topk = static_cast<int64_t>(mci_search_param.ef);
     result.result = this->mci_searcher_->Search(
-        this->mci_cliques_, precise_flatten, query, search_param, mci_param, ctx);
+        this->mci_cliques_, precise_flatten, query, mci_search_param, mci_param, ctx);
     result.route = "mci";
     return result;
 }

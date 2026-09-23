@@ -1112,3 +1112,30 @@ TEST_CASE("HGraph rejects TQ-only fields for non-TQ quantizers", "[ut][HGraphPar
                                                "mrle_dim":64})");
     REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(mrle_dim, common_param));
 }
+
+TEST_CASE("HGraph per-route ef_search defaults to ef_search", "[ut][HGraphParameter]") {
+    auto shared = vsag::HGraphSearchParameters::FromJson(R"({"hgraph":{"ef_search":600}})");
+    REQUIRE(shared.ef_search == 600);
+    REQUIRE(shared.hgraph_ef_search == 600);
+    REQUIRE(shared.mci_ef_search == 600);
+
+    // Narrowing one route leaves the other on the shared value.
+    auto mci_narrow =
+        vsag::HGraphSearchParameters::FromJson(R"({"hgraph":{"ef_search":600,"mci_ef_search":8}})");
+    REQUIRE(mci_narrow.hgraph_ef_search == 600);
+    REQUIRE(mci_narrow.mci_ef_search == 8);
+
+    auto hgraph_narrow = vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph":{"ef_search":600,"hgraph_ef_search":32}})");
+    REQUIRE(hgraph_narrow.hgraph_ef_search == 32);
+    REQUIRE(hgraph_narrow.mci_ef_search == 600);
+
+    auto both = vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph":{"ef_search":600,"hgraph_ef_search":256,"mci_ef_search":8}})");
+    REQUIRE(both.hgraph_ef_search == 256);
+    REQUIRE(both.mci_ef_search == 8);
+
+    // Values must be positive integers when given.
+    REQUIRE_THROWS(
+        vsag::HGraphSearchParameters::FromJson(R"({"hgraph":{"ef_search":10,"mci_ef_search":0}})"));
+}
