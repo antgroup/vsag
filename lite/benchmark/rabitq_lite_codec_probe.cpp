@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -277,6 +278,41 @@ struct EncodedRecords {
                             code.lower_bound_error});
         filters.insert(filters.end(), code.filter.begin(), code.filter.end());
         supplements.insert(supplements.end(), code.supplement.begin(), code.supplement.end());
+    }
+
+    void
+    Replace(uint64_t slot, Encoded code) {
+        require(slot < Size() and code.filter.size() == FilterBytes() and
+                    code.supplement.size() == SupplementBytes(),
+                "invalid encoded replacement");
+        metadata[slot] = {code.norm,
+                          code.code_norm,
+                          code.error,
+                          code.filter_norm,
+                          code.filter_error,
+                          code.lower_bound_error};
+        std::copy(code.filter.begin(), code.filter.end(), filters.data() + slot * FilterBytes());
+        std::copy(code.supplement.begin(),
+                  code.supplement.end(),
+                  supplements.data() + slot * SupplementBytes());
+    }
+
+    void
+    RemoveSwap(uint64_t slot) {
+        require(slot < Size(), "encoded removal outside storage");
+        const uint64_t last = Size() - 1;
+        if (slot != last) {
+            metadata[slot] = metadata[last];
+            std::copy_n(filters.data() + last * FilterBytes(),
+                        FilterBytes(),
+                        filters.data() + slot * FilterBytes());
+            std::copy_n(supplements.data() + last * SupplementBytes(),
+                        SupplementBytes(),
+                        supplements.data() + slot * SupplementBytes());
+        }
+        metadata.pop_back();
+        filters.resize(last * FilterBytes());
+        supplements.resize(last * SupplementBytes());
     }
 
     [[nodiscard]] EncodedView
@@ -644,6 +680,280 @@ graph_search(const std::vector<float>& query,
     return {std::move(result), visited_count, reorder_count};
 }
 
+std::vector<std::vector<uint64_t>>
+expand_graph(const GraphTopology& graph) {
+    std::vector<std::vector<uint64_t>> result(graph.Size());
+    for (uint64_t slot = 0; slot < graph.Size(); ++slot) {
+        result[slot].assign(
+            graph.neighbors.begin() + static_cast<int64_t>(graph.offsets[slot]),
+            graph.neighbors.begin() + static_cast<int64_t>(graph.offsets[slot + 1]));
+    }
+    return result;
+}
+
+GraphTopology
+compact_graph(const std::vector<std::vector<uint64_t>>& adjacency) {
+    GraphTopology result;
+    result.offsets.reserve(adjacency.size() + 1);
+    result.offsets.push_back(0);
+    for (const auto& neighbors : adjacency) {
+        result.neighbors.insert(result.neighbors.end(), neighbors.begin(), neighbors.end());
+        result.offsets.push_back(result.neighbors.size());
+    }
+    return result;
+}
+
+class MutableGraphState {
+public:
+    MutableGraphState(Model input_model,
+                      EncodedRecords input_codes,
+                      const GraphTopology& input_graph,
+                      std::vector<int64_t> input_ids,
+                      uint64_t input_max_degree,
+                      uint64_t input_ef_search)
+        : model_(std::move(input_model)),
+          codes_(std::move(input_codes)),
+          ids_(std::move(input_ids)),
+          adjacency_(expand_graph(input_graph)),
+          max_degree_(input_max_degree),
+          ef_search_(input_ef_search) {
+        require(max_degree_ >= 2 and max_degree_ <= 64 and ef_search_ >= max_degree_,
+                "invalid mutable graph options");
+        require(ids_.size() == codes_.Size() and adjacency_.size() == codes_.Size(),
+                "mutable graph storage disagrees");
+        for (uint64_t slot = 0; slot < ids_.size(); ++slot) {
+            require(slots_.emplace(ids_[slot], slot).second, "duplicate mutable graph ID");
+        }
+        Validate();
+    }
+
+    [[nodiscard]] uint64_t
+    Size() const {
+        return codes_.Size();
+    }
+
+    [[nodiscard]] bool
+    Add(int64_t id, const float* vector) {
+        require(vector != nullptr, "null mutable graph vector");
+        if (slots_.count(id) != 0) {
+            return false;
+        }
+        float query_norm = 0.0F;
+        const auto query = normalize(model_, vector, query_norm);
+        const auto neighbors =
+            nearest(query, query_norm, std::numeric_limits<uint64_t>::max(), max_degree_);
+        const uint64_t slot = Size();
+        codes_.Append(encode(model_, vector));
+        ids_.push_back(id);
+        adjacency_.push_back(neighbors);
+        slots_.emplace(id, slot);
+        for (uint64_t neighbor : neighbors) {
+            link(neighbor, slot);
+        }
+        Validate();
+        return true;
+    }
+
+    [[nodiscard]] bool
+    Update(int64_t id, const float* vector) {
+        require(vector != nullptr, "null mutable graph vector");
+        const auto found = slots_.find(id);
+        if (found == slots_.end()) {
+            return false;
+        }
+        const uint64_t slot = found->second;
+        float query_norm = 0.0F;
+        const auto query = normalize(model_, vector, query_norm);
+        const auto neighbors = nearest(query, query_norm, slot, max_degree_);
+        for (auto& reverse : adjacency_) {
+            reverse.erase(std::remove(reverse.begin(), reverse.end(), slot), reverse.end());
+        }
+        codes_.Replace(slot, encode(model_, vector));
+        adjacency_[slot] = neighbors;
+        for (uint64_t neighbor : neighbors) {
+            link(neighbor, slot);
+        }
+        Validate();
+        return true;
+    }
+
+    [[nodiscard]] bool
+    Remove(int64_t id) {
+        const auto found = slots_.find(id);
+        if (found == slots_.end()) {
+            return false;
+        }
+        const uint64_t slot = found->second;
+        const uint64_t last = Size() - 1;
+        for (auto& neighbors : adjacency_) {
+            neighbors.erase(std::remove(neighbors.begin(), neighbors.end(), slot), neighbors.end());
+            for (uint64_t& neighbor : neighbors) {
+                if (neighbor == last) {
+                    neighbor = slot;
+                }
+            }
+            std::sort(neighbors.begin(), neighbors.end());
+            neighbors.erase(std::unique(neighbors.begin(), neighbors.end()), neighbors.end());
+        }
+        if (slot != last) {
+            ids_[slot] = ids_[last];
+            adjacency_[slot] = std::move(adjacency_[last]);
+            adjacency_[slot].erase(
+                std::remove(adjacency_[slot].begin(), adjacency_[slot].end(), slot),
+                adjacency_[slot].end());
+            slots_.at(ids_[slot]) = slot;
+        }
+        slots_.erase(found);
+        ids_.pop_back();
+        adjacency_.pop_back();
+        codes_.RemoveSwap(slot);
+        Validate();
+        return true;
+    }
+
+    [[nodiscard]] GraphSearchResult
+    Search(const float* query, uint64_t k) const {
+        require(query != nullptr, "null mutable graph query");
+        float query_norm = 0.0F;
+        const auto normalized = normalize(model_, query, query_norm);
+        return graph_search(
+            normalized, query_norm, codes_, compact_graph(adjacency_), k, ef_search_);
+    }
+
+    void
+    Validate() const {
+        require(ids_.size() == Size() and adjacency_.size() == Size() and slots_.size() == Size(),
+                "mutable graph size mismatch");
+        for (uint64_t slot = 0; slot < Size(); ++slot) {
+            const auto found = slots_.find(ids_[slot]);
+            require(found != slots_.end() and found->second == slot,
+                    "mutable graph ID map mismatch");
+            require(adjacency_[slot].size() <= max_degree_, "mutable graph degree exceeds limit");
+            for (uint64_t i = 0; i < adjacency_[slot].size(); ++i) {
+                const uint64_t neighbor = adjacency_[slot][i];
+                require(neighbor < Size() and neighbor != slot, "invalid mutable graph neighbor");
+                require(std::find(adjacency_[slot].begin(),
+                                  adjacency_[slot].begin() + static_cast<int64_t>(i),
+                                  neighbor) == adjacency_[slot].begin() + static_cast<int64_t>(i),
+                        "duplicate mutable graph neighbor");
+            }
+        }
+    }
+
+    [[nodiscard]] const Model&
+    GetModel() const {
+        return model_;
+    }
+
+    [[nodiscard]] const EncodedRecords&
+    GetCodes() const {
+        return codes_;
+    }
+
+    [[nodiscard]] GraphTopology
+    GetGraph() const {
+        return compact_graph(adjacency_);
+    }
+
+    [[nodiscard]] const std::vector<int64_t>&
+    GetIds() const {
+        return ids_;
+    }
+
+    [[nodiscard]] uint64_t
+    GetMaxDegree() const {
+        return max_degree_;
+    }
+
+    [[nodiscard]] uint64_t
+    GetEfSearch() const {
+        return ef_search_;
+    }
+
+private:
+    [[nodiscard]] std::vector<float>
+    decode_query(uint64_t slot) const {
+        const auto code = codes_.At(slot);
+        const uint64_t plane_bytes = (model_.dim + 7) / 8;
+        std::vector<float> result(model_.dim);
+        for (uint64_t d = 0; d < model_.dim; ++d) {
+            const uint32_t high = read_plane_code(code.filter, plane_bytes, d, K_FILTER_BITS, true);
+            const uint32_t low =
+                read_plane_code(code.supplement, plane_bytes, d, K_SUPPLEMENT_BITS, false);
+            result[d] = (static_cast<float>((high << K_SUPPLEMENT_BITS) + low) - 127.5F) /
+                        code.metadata.code_norm;
+        }
+        return result;
+    }
+
+    [[nodiscard]] float
+    pair_distance(uint64_t source, uint64_t target) const {
+        const auto query = decode_query(source);
+        const auto code = codes_.At(target);
+        const auto coarse = filter_estimate(query, codes_.At(source).metadata.norm, code);
+        return full_distance(query, codes_.At(source).metadata.norm, code, coarse.centered_ip);
+    }
+
+    [[nodiscard]] std::vector<uint64_t>
+    nearest(const std::vector<float>& query,
+            float query_norm,
+            uint64_t excluded,
+            uint64_t count) const {
+        std::priority_queue<Candidate, std::vector<Candidate>, decltype(&better)> heap(&better);
+        for (uint64_t slot = 0; slot < Size(); ++slot) {
+            if (slot == excluded) {
+                continue;
+            }
+            const auto code = codes_.At(slot);
+            const auto coarse = filter_estimate(query, query_norm, code);
+            const Candidate candidate{slot,
+                                      full_distance(query, query_norm, code, coarse.centered_ip)};
+            if (heap.size() < count) {
+                heap.push(candidate);
+            } else if (better(candidate, heap.top())) {
+                heap.pop();
+                heap.push(candidate);
+            }
+        }
+        std::vector<uint64_t> result(heap.size());
+        for (uint64_t i = result.size(); i > 0; --i) {
+            result[i - 1] = heap.top().id;
+            heap.pop();
+        }
+        return result;
+    }
+
+    void
+    link(uint64_t source, uint64_t target) {
+        auto& neighbors = adjacency_[source];
+        if (source == target or
+            std::find(neighbors.begin(), neighbors.end(), target) != neighbors.end()) {
+            return;
+        }
+        neighbors.push_back(target);
+        if (neighbors.size() > max_degree_) {
+            std::vector<Candidate> ranked;
+            ranked.reserve(neighbors.size());
+            for (uint64_t neighbor : neighbors) {
+                ranked.push_back({neighbor, pair_distance(source, neighbor)});
+            }
+            std::sort(ranked.begin(), ranked.end(), better);
+            neighbors.resize(max_degree_);
+            for (uint64_t i = 0; i < max_degree_; ++i) {
+                neighbors[i] = ranked[i].id;
+            }
+        }
+    }
+
+    Model model_;
+    EncodedRecords codes_;
+    std::vector<int64_t> ids_;
+    std::unordered_map<int64_t, uint64_t> slots_;
+    std::vector<std::vector<uint64_t>> adjacency_;
+    uint64_t max_degree_;
+    uint64_t ef_search_;
+};
+
 template <typename T>
 struct Records {
     std::vector<T> values;
@@ -712,6 +1022,21 @@ read_u64(std::istream& input, uint64_t bytes = 8) {
 }
 
 void
+write_i64(std::ostream& output, int64_t value) {
+    uint64_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    write_u64(output, bits);
+}
+
+int64_t
+read_i64(std::istream& input) {
+    const uint64_t bits = read_u64(input);
+    int64_t value = 0;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
+void
 write_float(std::ostream& output, float value) {
     uint32_t bits = 0;
     std::memcpy(&bits, &value, sizeof(bits));
@@ -759,7 +1084,7 @@ write_snapshot_payload(std::ostream& output,
                        const Model& model,
                        const EncodedRecords& codes) {
     constexpr char magic[] = "VSLRBQ01";
-    require((version == 1 or version == 2) and model.dim == codes.dim,
+    require((version == 1 or version == 2 or version == 3) and model.dim == codes.dim,
             "snapshot model and records disagree");
     output.write(magic, 8);
     write_u64(output, version);
@@ -903,6 +1228,61 @@ load_graph_snapshot(std::istream& input) {
     validate_graph_topology(graph, loaded.codes.Size());
     require(input.peek() == std::char_traits<char>::eof(), "snapshot trailing bytes");
     return {std::move(loaded.model), std::move(loaded.codes), std::move(graph)};
+}
+
+void
+save_mutable_snapshot(std::ostream& output, const MutableGraphState& state) {
+    state.Validate();
+    write_snapshot_payload(output, 3, state.GetModel(), state.GetCodes());
+    write_u64(output, state.GetMaxDegree());
+    write_u64(output, state.GetEfSearch());
+    write_u64(output, state.GetIds().size());
+    for (int64_t id : state.GetIds()) {
+        write_i64(output, id);
+    }
+    const auto graph = state.GetGraph();
+    write_u64(output, graph.offsets.size());
+    write_u64(output, graph.neighbors.size());
+    for (uint64_t offset : graph.offsets) {
+        write_u64(output, offset);
+    }
+    for (uint64_t neighbor : graph.neighbors) {
+        write_u64(output, neighbor);
+    }
+}
+
+MutableGraphState
+load_mutable_snapshot(std::istream& input) {
+    auto loaded = load_snapshot_payload(input, 3);
+    const uint64_t max_degree = read_u64(input);
+    const uint64_t ef_search = read_u64(input);
+    const uint64_t id_count = read_u64(input);
+    require(id_count == loaded.codes.Size(), "invalid mutable snapshot ID count");
+    std::vector<int64_t> ids(id_count);
+    std::unordered_set<int64_t> unique_ids;
+    for (int64_t& id : ids) {
+        id = read_i64(input);
+        require(unique_ids.insert(id).second, "duplicate mutable snapshot ID");
+    }
+    const uint64_t offset_count = read_u64(input);
+    const uint64_t neighbor_count = read_u64(input);
+    require(offset_count == loaded.codes.Size() + 1 and neighbor_count <= loaded.codes.Size() * 64,
+            "invalid mutable snapshot graph layout");
+    GraphTopology graph{std::vector<uint64_t>(offset_count), std::vector<uint64_t>(neighbor_count)};
+    for (uint64_t& offset : graph.offsets) {
+        offset = read_u64(input);
+    }
+    for (uint64_t& neighbor : graph.neighbors) {
+        neighbor = read_u64(input);
+    }
+    validate_graph_topology(graph, loaded.codes.Size());
+    require(input.peek() == std::char_traits<char>::eof(), "snapshot trailing bytes");
+    return {std::move(loaded.model),
+            std::move(loaded.codes),
+            graph,
+            std::move(ids),
+            max_degree,
+            ef_search};
 }
 
 void
@@ -1149,6 +1529,98 @@ self_test() {
         } catch (const std::runtime_error& error) {
             require(std::string(error.what()) != "damaged graph snapshot was accepted",
                     "damaged graph snapshot was accepted");
+        }
+    }
+
+    std::vector<int64_t> mutable_ids(count);
+    std::iota(mutable_ids.begin(), mutable_ids.end(), 1000);
+    MutableGraphState mutable_graph(first, codes, graph, mutable_ids, 8, 32);
+    const auto fixed_centroid = mutable_graph.GetModel().centroid;
+    const auto fixed_flips = mutable_graph.GetModel().flips;
+    require(not mutable_graph.Add(mutable_ids.front(), base.data()),
+            "duplicate mutable graph Add succeeded");
+    require(not mutable_graph.Update(-1, base.data()), "missing mutable graph Update succeeded");
+    require(not mutable_graph.Remove(-1), "missing mutable graph Remove succeeded");
+
+    std::vector<float> mutation(dim);
+    int64_t next_id = 1000 + static_cast<int64_t>(count);
+    for (uint64_t step = 0; step < 180; ++step) {
+        for (uint64_t d = 0; d < dim; ++d) {
+            mutation[d] = distribution(generator) + static_cast<float>(step % 7) * 0.01F;
+        }
+        if (step % 3 == 0) {
+            const int64_t id = mutable_ids[step % mutable_ids.size()];
+            require(mutable_graph.Update(id, mutation.data()), "mutable graph Update failed");
+        } else if (step % 3 == 1 and mutable_ids.size() > 32) {
+            const uint64_t position = (step * 7) % mutable_ids.size();
+            const int64_t id = mutable_ids[position];
+            require(mutable_graph.Remove(id), "mutable graph Remove failed");
+            mutable_ids.erase(mutable_ids.begin() + static_cast<int64_t>(position));
+        } else {
+            require(mutable_graph.Add(next_id, mutation.data()), "mutable graph Add failed");
+            mutable_ids.push_back(next_id);
+            ++next_id;
+        }
+        mutable_graph.Validate();
+        require(mutable_graph.GetModel().centroid == fixed_centroid and
+                    mutable_graph.GetModel().flips == fixed_flips,
+                "mutable graph retrained the fixed RaBitQ model");
+    }
+    require(mutable_graph.Add(-17, mutation.data()), "negative mutable graph ID Add failed");
+    mutable_ids.push_back(-17);
+    require(mutable_graph.GetIds().size() == mutable_ids.size(),
+            "mutable graph active ID count mismatch");
+    const auto mutable_result = mutable_graph.Search(base.data() + 2 * dim, 10);
+    require(mutable_result.neighbors.size() == 10 and mutable_result.visited > 0,
+            "mutable graph search failed after CRUD");
+
+    std::stringstream mutable_snapshot(std::ios::in | std::ios::out | std::ios::binary);
+    save_mutable_snapshot(mutable_snapshot, mutable_graph);
+    const std::string mutable_bytes = mutable_snapshot.str();
+    mutable_snapshot.seekg(0);
+    auto restored_mutable = load_mutable_snapshot(mutable_snapshot);
+    restored_mutable.Validate();
+    require(restored_mutable.GetIds() == mutable_graph.GetIds() and
+                restored_mutable.GetGraph().offsets == mutable_graph.GetGraph().offsets and
+                restored_mutable.GetGraph().neighbors == mutable_graph.GetGraph().neighbors and
+                restored_mutable.GetModel().centroid == fixed_centroid and
+                restored_mutable.GetModel().flips == fixed_flips,
+            "mutable graph snapshot mismatch");
+    const auto restored_mutable_result = restored_mutable.Search(base.data() + 2 * dim, 10);
+    require(restored_mutable_result.visited == mutable_result.visited and
+                restored_mutable_result.reordered == mutable_result.reordered and
+                std::equal(mutable_result.neighbors.begin(),
+                           mutable_result.neighbors.end(),
+                           restored_mutable_result.neighbors.begin(),
+                           [](const auto& left, const auto& right) {
+                               return left.id == right.id and left.distance == right.distance;
+                           }),
+            "mutable graph search changed after restore");
+    std::stringstream repeated_mutable(std::ios::in | std::ios::out | std::ios::binary);
+    save_mutable_snapshot(repeated_mutable, restored_mutable);
+    require(repeated_mutable.str() == mutable_bytes,
+            "mutable graph snapshot bytes changed after round-trip");
+    const uint64_t mutable_payload_end = 6 * sizeof(uint64_t) + dim * sizeof(float) +
+                                         K_ROUNDS * plane_bytes_for_snapshot +
+                                         mutable_graph.Size() * record_bytes;
+    auto wrong_id_count = mutable_bytes;
+    overwrite_u64(
+        wrong_id_count, mutable_payload_end + 2 * sizeof(uint64_t), mutable_graph.Size() + 1);
+    auto duplicate_id = mutable_bytes;
+    overwrite_u64(duplicate_id,
+                  mutable_payload_end + 4 * sizeof(uint64_t),
+                  static_cast<uint64_t>(mutable_graph.GetIds().front()));
+    for (const std::string& invalid : {mutable_bytes.substr(0, mutable_bytes.size() - 1),
+                                       mutable_bytes + std::string(1, '\0'),
+                                       wrong_id_count,
+                                       duplicate_id}) {
+        std::stringstream damaged(invalid, std::ios::in | std::ios::binary);
+        try {
+            static_cast<void>(load_mutable_snapshot(damaged));
+            throw std::runtime_error("damaged mutable snapshot was accepted");
+        } catch (const std::runtime_error& error) {
+            require(std::string(error.what()) != "damaged mutable snapshot was accepted",
+                    "damaged mutable snapshot was accepted");
         }
     }
 }

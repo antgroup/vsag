@@ -166,4 +166,14 @@ The experiment now persists the filter-first topology with the trained model and
 
 Independent SIFT processes saved and loaded 10k/100k snapshots of 2,880,648/28,800,648 bytes. Load time was 6.817/66.843 ms, graph Recall@10 remained 0.966/0.940, and visited/reordered counts were unchanged. The 100k loader peak RSS was 32,176 KiB. Page cache was uncontrolled and each scale was measured once, so these values are functional evidence rather than stable cold-load performance.
 
-This closes the experiment topology-persistence gate without changing public Lite snapshots. The next bounded task is to define fixed-model Add, Update, and Remove behavior, including slot compaction and CSR reverse-link repair, before any public backend proposal.
+This closes the experiment topology-persistence gate without changing public Lite snapshots.
+
+## Fixed-model CRUD gate
+
+The experiment now defines Add, Update, and Remove under one immutable trained RaBitQ model. Add and Update encode with the existing centroid and FHT masks and never retrain them. Neighbor selection uses an exhaustive full-code control path; reverse links use a decoded-code approximation only for bounded degree pruning. This is a correctness-oriented mutation reference, not a claimed ANN build or latency result.
+
+The mutable state keeps external IDs separate from physical slots. Remove follows the official Lite graph backend's last-slot-to-hole compaction and scans every adjacency list because degree pruning can make the graph asymmetric. Update removes all inbound references before replacing the code and relinking. The deterministic self-test performs 180 mixed operations, validates the ID map, bounds, self-loop and duplicate invariants after every operation, and verifies search equality after persistence.
+
+Experiment-only VSLRBQ01 version 3 adds external IDs, graph parameters, and CSR topology to the fixed model and split records. Versions 1 and 2 remain unchanged. Version 3 rejects duplicate IDs, count mismatches, malformed CSR, truncation, and trailing bytes. This does not alter public Lite snapshots or expose a new VectorStorage value.
+
+This closes the bounded CRUD-semantics gate. Performance remains unmeasured, mutation currently expands CSR into adjacency vectors, pairwise pruning uses decoded codes, and the scalar filter path remains. The next decision is whether to optimize this experimental mutation path and SIMD filtering or prepare a narrowly scoped public-backend design for maintainer review.

@@ -436,3 +436,12 @@ build-lite-rabitq/lite_rabitq_codec_probe --load \
 Recorded SIFT-10k and SIFT-100k snapshots were 2,880,648 and 28,800,648 bytes. Fresh-process load took 6.817 and 66.843 ms, and restored graph Recall@10 remained exactly 0.966 and 0.940. Mean visited/reordered counts also remained 829.15/128 and 1,150.83/128. The 100k loader used 32,176 KiB process peak RSS. These are single-run fresh-process measurements with uncontrolled page cache; they validate independent persistence and result stability rather than strict cold-load performance.
 
 Version 2 is local to the opt-in probe. It does not change public Lite v1/v2/v3 snapshots or expose RaBitQ through `VectorStorage`.
+
+
+### RaBitQ fixed-model CRUD experiment
+
+The experiment now has a correctness-oriented mutable graph state. Add and Update encode with the existing trained centroid and FHT masks; the model is never retrained. Remove uses last-slot compaction, repairs every reference to the removed and moved slots, and preserves the external-ID-to-slot map. The mutation path expands persisted CSR into adjacency vectors and uses exhaustive full-code neighbor selection, so it is not a mutation-performance result.
+
+VSLRBQ01 version 3 persists the fixed model, contiguous split records, external IDs, graph options, and CSR topology. Versions 1 and 2 remain unchanged. The self-test runs 180 deterministic mixed Add/Update/Remove operations, checks structural invariants after every operation, and requires byte-stable persistence plus identical graph-search results after a fresh restore.
+
+This remains local to lite_rabitq_codec_probe; it does not change the public Lite API or public snapshot formats. Pairwise degree pruning currently reconstructs an approximate query from the stored 8-bit code, and SIMD filter dispatch is still open.
