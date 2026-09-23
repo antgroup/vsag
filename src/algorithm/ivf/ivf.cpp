@@ -254,6 +254,15 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                 value);
         } else if (key == IVF_USE_ROUTE_GRAPH) {
             inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_USE_ROUTE_GRAPH_KEY].SetJson(value);
+        } else if (key == IVF_ENABLE_GPU_BUILD) {
+            inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_ENABLE_GPU_BUILD_KEY].SetJson(value);
+        } else if (key == IVF_GPU_DEVICE_ID) {
+            inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_GPU_DEVICE_ID_KEY].SetJson(value);
+        } else if (key == IVF_GPU_MEMORY_BUDGET) {
+            inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_GPU_MEMORY_BUDGET_KEY].SetJson(value);
+        } else if (key == IVF_GPU_MIN_WORK_THRESHOLD) {
+            inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_GPU_MIN_WORK_THRESHOLD_KEY].SetJson(
+                value);
         } else if (key == GNO_IMI_FIRST_ORDER_BUCKETS_COUNT) {
             inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_PARTITION_STRATEGY_TYPE_GNO_IMI]
                       [GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY]

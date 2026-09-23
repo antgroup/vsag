@@ -15,6 +15,7 @@
 #include <cuda_runtime.h>
 
 #include "cuda_backend.h"
+#include "gpu_plan.h"
 
 namespace vsag::gpu {
 
@@ -40,6 +41,40 @@ CudaSelectDevice(int32_t device_id) {
         return false;
     }
     return cudaSetDevice(device_id) == cudaSuccess;
+}
+
+CudaDeviceScope::CudaDeviceScope(int32_t device_id) {
+    if (device_id < 0) {
+        return;
+    }
+    // cudaGetDevice creates no context of its own, so asking first costs
+    // nothing on a thread that has none.
+    if (cudaGetDevice(&previous_) != cudaSuccess) {
+        // Only to leave the member determinate. bound_ stays false on this path
+        // and the destructor restores nothing unless it is true, so this 0 is
+        // never the one the header's ambiguity is about.
+        previous_ = 0;
+        return;
+    }
+    bound_ = CudaSelectDevice(device_id);
+}
+
+CudaDeviceScope::~CudaDeviceScope() {
+    // See the header: 0 is ambiguous and is left alone.
+    if (bound_ and previous_ != 0) {
+        cudaSetDevice(previous_);
+    }
+}
+
+uint64_t
+CudaSuggestedBudget(uint64_t cap_bytes) {
+    // cudaMemGetInfo takes size_t*; everything downstream is uint64_t.
+    size_t free_bytes = 0;
+    size_t total_bytes = 0;
+    if (cudaMemGetInfo(&free_bytes, &total_bytes) != cudaSuccess) {
+        return 0;
+    }
+    return CapBudget(static_cast<uint64_t>(free_bytes), cap_bytes);
 }
 
 }  // namespace vsag::gpu

@@ -177,6 +177,10 @@ const char* const IVF_PARTITION_STRATEGY_TYPE_GNO_IMI = "gno_imi";
 const char* const IVF_ROUTE_MAX_DEGREE_KEY = "route_max_degree";
 const char* const IVF_ROUTE_EF_CONSTRUCTION_KEY = "route_ef_construction";
 const char* const IVF_USE_ROUTE_GRAPH_KEY = "use_route_graph";
+const char* const IVF_ENABLE_GPU_BUILD_KEY = "enable_gpu_build";
+const char* const IVF_GPU_DEVICE_ID_KEY = "gpu_device_id";
+const char* const IVF_GPU_MEMORY_BUDGET_KEY = "gpu_memory_budget";
+const char* const IVF_GPU_MIN_WORK_THRESHOLD_KEY = "gpu_min_work_threshold";
 
 const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY = "first_order_buckets_count";
 const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY = "second_order_buckets_count";

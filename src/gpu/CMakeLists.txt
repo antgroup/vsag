@@ -13,7 +13,11 @@
 # limitations under the License.
 
 if (ENABLE_CUDA)
-    add_library (vsag_gpu STATIC cuda_backend.cu)
+    add_library (vsag_gpu STATIC
+        cuda_backend.cu
+        cuda_assign.cu
+        cuda_seed.cu
+        cuda_accumulate.cu)
     # The tree's C/C++ flags are language-scoped and do not reach nvcc; the
     # host pass follows the tree's C++ standard, and everything else is
     # CMake's per-configuration CUDA default.
@@ -22,9 +26,21 @@ if (ENABLE_CUDA)
         CUDA_STANDARD ${CMAKE_CXX_STANDARD}
         CUDA_STANDARD_REQUIRED ON)
     # Private: no other translation unit needs the macro or the toolkit's
-    # headers. The static runtime keeps libcudart.so off the result.
+    # headers. Everything from the toolkit is linked statically, so a build with
+    # the backend on still loads on a machine that has no CUDA installed and
+    # reports no device, which is the contract the header states. cuBLAS pulls
+    # in cublasLt and culibos. It costs 108 MiB, 1151 MiB against 1042, measured
+    # on the Release build with CUDA 12.4; a toolkit change moves that, so the
+    # number is worth re-measuring rather than trusting. It is the price of the
+    # contract either way: a build that links cuBLAS dynamically cannot load at
+    # all where the toolkit is absent, which would mean shipping two builds
+    # instead of deciding at runtime.
     target_compile_definitions (vsag_gpu PRIVATE VSAG_ENABLE_CUDA=1)
-    target_link_libraries (vsag_gpu PRIVATE CUDA::cudart_static)
+    target_link_libraries (vsag_gpu PRIVATE
+        CUDA::cudart_static
+        CUDA::cublas_static
+        CUDA::cublasLt_static
+        CUDA::culibos)
 else ()
     add_library (vsag_gpu STATIC cuda_backend_stub.cpp)
     # Only the stub is instrumented; nvcc does not accept --coverage.

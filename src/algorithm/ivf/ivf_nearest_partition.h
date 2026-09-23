@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include "algorithm/inner_index_interface.h"
 #include "index_common_param.h"
 #include "ivf_partition_strategy.h"
@@ -37,6 +39,12 @@ public:
                   int64_t count,
                   BucketIdType buckets_per_data,
                   QueryContext* ctx) const override;
+
+    Vector<BucketIdType>
+    ClassifyDatasForSearch(const void* datas,
+                           int64_t count,
+                           const InnerSearchParam& param,
+                           QueryContext* ctx) override;
 
     void
     GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) override;
@@ -64,6 +72,18 @@ private:
                            int64_t count,
                            BucketIdType buckets_per_data,
                            QueryContext* ctx) const;
+
+    /// The routing both public entry points share.
+    Vector<BucketIdType>
+    classify_datas_on_host(const void* datas,
+                           int64_t count,
+                           BucketIdType buckets_per_data,
+                           QueryContext* ctx) const;
+
+    /// Build-time assignment on the CUDA backend; nothing when the caller
+    /// should use the host path instead.
+    std::optional<Vector<BucketIdType>>
+    classify_datas_on_device(const void* datas, int64_t count, BucketIdType buckets_per_data) const;
 
 private:
     bool use_route_graph_{true};

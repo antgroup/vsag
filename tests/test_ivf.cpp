@@ -3630,3 +3630,85 @@ TEST_CASE("IVF rejects unpackaged PQFS flat reorder", "[distance_contract]") {
     REQUIRE_FALSE(created.has_value());
     REQUIRE(created.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 }
+
+TEST_CASE("IVF builds with the documented GPU configuration", "[ft][ivf][pr]") {
+    // The JSON the IVF page tells users to write, through the public API. Every
+    // other test of this feature reaches the partition or the clustering
+    // directly; this one checks that the four keys survive the whole path from
+    // an index_param string to a built, searchable index whose answers do not
+    // depend on the flag.
+    //
+    // What this catches is the plumbing: a key that fails to reach the partition
+    // fails the build or the search here, which is what it is for. Deleting the
+    // mapping for enable_gpu_build in ivf.cpp makes it fail.
+    //
+    // The id comparison is a weaker guard than it looks. scan_buckets_count
+    // equals buckets_count, so every bucket is scanned and the neighbours do not
+    // depend on where training put the centroids; that is what makes the
+    // comparison deterministic across two independently trained indexes, and it
+    // is also why a change in the clustering alone will not show up here. The
+    // clustering itself is compared against the host path in
+    // ivf_nearest_partition_test.cpp.
+    //
+    // gpu_min_work_threshold is left at its default, so the problem stays below
+    // the offload floor and the run is the host's whether or not a device is
+    // present. What is under test is the plumbing, not the kernels.
+    constexpr int64_t dim = 64;
+    constexpr int64_t base_count = 1000;
+    auto build_param = [dim](bool gpu) {
+        return fmt::format(R"({{
+            "dtype": "float32",
+            "metric_type": "l2",
+            "dim": {},
+            "index_param": {{
+                "buckets_count": 32,
+                "base_quantization_type": "fp32",
+                "partition_strategy_type": "ivf",
+                "ivf_train_type": "kmeans",
+                "enable_gpu_build": {},
+                "gpu_device_id": 0
+            }}
+        }})",
+                           dim,
+                           gpu ? "true" : "false");
+    };
+
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, "l2");
+    constexpr int64_t topk = 10;
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+
+    const std::string search_param = R"({"ivf":{"scan_buckets_count":32}})";
+    auto ids_of = [](const vsag::DatasetPtr& result, int64_t count) {
+        return std::vector<int64_t>(result->GetIds(), result->GetIds() + count);
+    };
+
+    std::vector<int64_t> without_backend;
+    for (const bool gpu : {false, true}) {
+        CAPTURE(gpu);
+        auto index = vsag::Factory::CreateIndex("ivf", build_param(gpu));
+        REQUIRE(index.has_value());
+        REQUIRE(index.value()->Build(dataset->base_).has_value());
+
+        auto search_result = index.value()->KnnSearch(query, topk, search_param);
+        REQUIRE(search_result.has_value());
+        REQUIRE(search_result.value()->GetDim() == topk);
+        const auto ids = ids_of(search_result.value(), topk);
+
+        if (not gpu) {
+            without_backend = ids;
+        } else {
+            REQUIRE(ids == without_backend);
+        }
+
+        // Serializing and loading it back must work with no GPU setting in the
+        // reader's parameters at all, and answer the same way.
+        std::stringstream stream;
+        REQUIRE(index.value()->Serialize(stream).has_value());
+        auto reloaded = vsag::Factory::CreateIndex("ivf", build_param(false));
+        REQUIRE(reloaded.has_value());
+        REQUIRE(reloaded.value()->Deserialize(stream).has_value());
+        auto reloaded_result = reloaded.value()->KnnSearch(query, topk, search_param);
+        REQUIRE(reloaded_result.has_value());
+        REQUIRE(ids_of(reloaded_result.value(), topk) == ids);
+    }
+}
