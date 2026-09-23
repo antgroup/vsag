@@ -474,3 +474,18 @@ Commit e2f096b9 replaced exhaustive mutation selection with the existing filter-
 | 100k | 2,917.346 us | 13.66x | 921.936 us | 4.83x | 2,204.874 us | 17.78x | 0.920 | 0.800 |
 
 Full-code self Top-1 remained 1.000. The optimized 10k/100k medians for snapshot bytes, state RSS, and graph-search P50 were effectively unchanged from the control matrix; 100k values were 29,597,472 B, 156,796 KiB, and 552.096 us. The matched quality medians and zero fallbacks show that the speedup came from bounded graph candidate discovery and removal of redundant list sorting in this workload. They do not prove that fallback is impossible on other graph shapes or that mutation is production-ready. Raw evidence and a machine-readable old/new comparison are in /home/ubuntu/project/vsag-lite-rabitq-graph-mutation-validation-20260923-e2f096b.
+
+### RaBitQ filter SIMD experiment
+
+Commit `214630d4` reuses the official `RaBitQFloatThreeBitCenteredIPImpl` kernel and AVX2/AVX512 traits in probe-only translation units. Runtime selection follows the existing Lite CPU-feature pattern and falls back to the portable scalar implementation. The probe still links only `libvsag-lite`; it does not add Full VSAG as a dependency. The self-test compares all 64 encoded records against the scalar formula before using the dispatched path.
+
+The same fixed-count CRUD matrices produced the following medians relative to the graph-selected scalar control:
+
+| Scale | Update P50 | Speedup | Add P50 | Speedup | Graph search P50 | Speedup | Graph self Top-1 | Graph/full positional |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10k | 478.638 us | 1.29x | 390.099 us | 1.32x | 190.924 us | 1.57x | 0.960 | 0.932 |
+| 100k | 2,693.471 us | 1.08x | 2,008.118 us | 1.10x | 387.919 us | 1.42x | 0.920 | 0.800 |
+
+Every round kept full-code self Top-1 at 1.000, used zero exhaustive mutation fallbacks, restored identical result IDs/distances, and produced empty stderr. Remove does not use the filter inner-product kernel; its 0.97x/0.93x ratios are run-to-run variation rather than a SIMD result. Snapshot bytes and state RSS were effectively unchanged.
+
+The measured host selected AVX512 and supports AVX2 fallback. Release and ASan+UBSan CTest passed 6/6; clang-format-15, clang-tidy-15, and the standalone dependency check passed. Raw CSV, snapshots, time output, CPU metadata, binary/source hashes, and a verified SHA-256 manifest are in `/home/ubuntu/project/vsag-lite-rabitq-simd-validation-20260923`. These results close the bounded scalar-filter performance risk on this x86 host. ARM SIMD, batch-four full scans, mutable adjacency memory, and the public backend contract remain separate work.
