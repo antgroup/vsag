@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "lite/backend.h"
+#include "rabitq_filter_ip.h"
 #include "simd/kernels/rabitq_pack.h"
 
 namespace {
@@ -464,7 +465,7 @@ read_plane_code(const uint8_t* planes,
 }
 
 float
-filter_centered_ip(const std::vector<float>& query, const uint8_t* filter) {
+scalar_filter_centered_ip(const std::vector<float>& query, const uint8_t* filter) {
     const uint64_t plane_bytes = (query.size() + 7) / 8;
     float result = 0.0F;
     for (uint64_t d = 0; d < query.size(); ++d) {
@@ -472,6 +473,12 @@ filter_centered_ip(const std::vector<float>& query, const uint8_t* filter) {
         result += query[d] * (static_cast<float>(code) - 3.5F);
     }
     return result;
+}
+
+float
+filter_centered_ip(const std::vector<float>& query, const uint8_t* filter) {
+    static const auto compute = vsag::lite::experiment::select_rabitq_filter_ip();
+    return compute(query.data(), filter, query.size());
 }
 
 float
@@ -1489,6 +1496,12 @@ self_test() {
     require(codes.At(1).filter == codes.At(0).filter + codes.FilterBytes() and
                 codes.At(1).supplement == codes.At(0).supplement + codes.SupplementBytes(),
             "encoded records are not contiguous");
+    for (uint64_t slot = 0; slot < codes.Size(); ++slot) {
+        const float scalar = scalar_filter_centered_ip(query, codes.At(slot).filter);
+        const float dispatched = filter_centered_ip(query, codes.At(slot).filter);
+        require(std::fabs(scalar - dispatched) <= 1e-5F * std::max(1.0F, std::fabs(scalar)),
+                "SIMD filter inner product differs from scalar");
+    }
     float query_norm = 0.0F;
     const auto normalized_query = normalize(first, base.data() + dim, query_norm);
     const auto full = top_k(count, 10, [&](uint64_t id) {
