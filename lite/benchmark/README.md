@@ -445,3 +445,14 @@ The experiment now has a correctness-oriented mutable graph state. Add and Updat
 VSLRBQ01 version 3 persists the fixed model, contiguous split records, external IDs, graph options, and CSR topology. Versions 1 and 2 remain unchanged. The self-test runs 180 deterministic mixed Add/Update/Remove operations, checks structural invariants after every operation, and requires byte-stable persistence plus identical graph-search results after a fresh restore.
 
 This remains local to lite_rabitq_codec_probe; it does not change the public Lite API or public snapshot formats. Pairwise degree pruning currently reconstructs an approximate query from the stored 8-bit code, and SIMD filter dispatch is still open.
+
+
+### RaBitQ fixed-model CRUD stability mode
+
+The codec probe can measure the experiment-only mutable state with a fixed trained model:
+
+    lite_rabitq_codec_probe --crud DATASET_DIR SNAPSHOT ROUNDS CRUD_OPS QUERIES MAX_DEGREE EF_SEARCH
+
+Each operation updates one external ID, removes it, and adds the same ID and updated vector again, keeping the active count fixed. Full structural validation runs after each mutation batch rather than inside the timed operations. Each CSV row reports Update/Remove/Add P50 and P99, adjacency-to-CSR compaction, graph-search latency, exhaustive full-code and graph self-query Top-1, graph/full agreement, traversal work, snapshot save/load, snapshot bytes, RSS, and a deterministic result checksum.
+
+The loader must reproduce every measured graph result and distance exactly. The reported state RSS is sampled before loading; round-trip RSS includes both the original and restored states. Process peak RSS also includes source vectors and the temporary FP32 graph used to create the initial reference topology. The mutation path remains a scalar correctness reference with exhaustive full-code neighbor selection, so these numbers must not be presented as a production update-throughput result.

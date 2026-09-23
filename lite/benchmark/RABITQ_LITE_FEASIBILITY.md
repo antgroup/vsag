@@ -176,4 +176,6 @@ The mutable state keeps external IDs separate from physical slots. Remove follow
 
 Experiment-only VSLRBQ01 version 3 adds external IDs, graph parameters, and CSR topology to the fixed model and split records. Versions 1 and 2 remain unchanged. Version 3 rejects duplicate IDs, count mismatches, malformed CSR, truncation, and trailing bytes. This does not alter public Lite snapshots or expose a new VectorStorage value.
 
-This closes the bounded CRUD-semantics gate. Performance remains unmeasured, mutation currently expands CSR into adjacency vectors, pairwise pruning uses decoded codes, and the scalar filter path remains. The next decision is whether to optimize this experimental mutation path and SIMD filtering or prepare a narrowly scoped public-backend design for maintainer review.
+This closes the bounded CRUD-semantics gate. Mutation currently expands CSR into adjacency vectors, pairwise pruning uses decoded codes, and the scalar filter path remains.
+
+The probe now also has a configurable fixed-count CRUD stability mode. It times Update, Remove, and Add separately, validates the full structure at each batch boundary, separates CSR compaction from graph search, compares graph results with exhaustive full-code search, and verifies exact search equality after every version 3 save/load. RSS is reported both before loading and with original/restored states resident. This measurement path is intended to identify the next bottleneck; it does not turn the scalar mutation reference into a production performance claim.

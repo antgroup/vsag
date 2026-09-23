@@ -1,5 +1,7 @@
 // Copyright 2024-present the vsag project
 // SPDX-License-Identifier: Apache-2.0
+#include <sys/resource.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -40,6 +42,57 @@ require(bool value, const char* message) {
     if (not value) {
         throw std::runtime_error(message);
     }
+}
+
+double
+microseconds(Clock::time_point start, Clock::time_point end) {
+    return std::chrono::duration<double, std::micro>(end - start).count();
+}
+
+double
+milliseconds(Clock::time_point start, Clock::time_point end) {
+    return std::chrono::duration<double, std::milli>(end - start).count();
+}
+
+double
+percentile(const std::vector<double>& sorted, double fraction) {
+    require(not sorted.empty(), "cannot compute an empty percentile");
+    const auto position =
+        static_cast<uint64_t>(std::ceil(fraction * static_cast<double>(sorted.size())));
+    return sorted[std::max<uint64_t>(1, position) - 1];
+}
+
+uint64_t
+peak_rss_kib() {
+    rusage usage{};
+    require(getrusage(RUSAGE_SELF, &usage) == 0, "getrusage failed");
+#if defined(__APPLE__)
+    return static_cast<uint64_t>(usage.ru_maxrss) / 1024;
+#else
+    return static_cast<uint64_t>(usage.ru_maxrss);
+#endif
+}
+
+uint64_t
+current_rss_kib() {
+#if defined(__linux__)
+    std::ifstream status("/proc/self/status");
+    std::string line;
+    while (std::getline(status, line)) {
+        if (line.rfind("VmRSS:", 0) == 0) {
+            std::istringstream fields(line);
+            std::string key;
+            uint64_t value = 0;
+            std::string unit;
+            fields >> key >> value >> unit;
+            require(unit == "kB", "unexpected VmRSS unit");
+            return value;
+        }
+    }
+    throw std::runtime_error("VmRSS is unavailable");
+#else
+    return peak_rss_kib();
+#endif
 }
 
 void
@@ -750,7 +803,6 @@ public:
         for (uint64_t neighbor : neighbors) {
             link(neighbor, slot);
         }
-        Validate();
         return true;
     }
 
@@ -773,7 +825,6 @@ public:
         for (uint64_t neighbor : neighbors) {
             link(neighbor, slot);
         }
-        Validate();
         return true;
     }
 
@@ -807,7 +858,6 @@ public:
         ids_.pop_back();
         adjacency_.pop_back();
         codes_.RemoveSwap(slot);
-        Validate();
         return true;
     }
 
@@ -858,6 +908,12 @@ public:
     [[nodiscard]] const std::vector<int64_t>&
     GetIds() const {
         return ids_;
+    }
+
+    [[nodiscard]] int64_t
+    IdAt(uint64_t slot) const {
+        require(slot < ids_.size(), "mutable graph ID outside storage");
+        return ids_[slot];
     }
 
     [[nodiscard]] uint64_t
@@ -953,6 +1009,22 @@ private:
     uint64_t max_degree_;
     uint64_t ef_search_;
 };
+
+uint64_t
+result_checksum(const std::vector<Candidate>& neighbors,
+                const MutableGraphState& state,
+                uint64_t checksum) {
+    constexpr uint64_t prime = 1099511628211ULL;
+    for (const auto& neighbor : neighbors) {
+        checksum ^= static_cast<uint64_t>(state.IdAt(neighbor.id));
+        checksum *= prime;
+        uint32_t distance_bits = 0;
+        std::memcpy(&distance_bits, &neighbor.distance, sizeof(distance_bits));
+        checksum ^= distance_bits;
+        checksum *= prime;
+    }
+    return checksum;
+}
 
 template <typename T>
 struct Records {
@@ -1807,6 +1879,189 @@ run_loaded(const std::filesystem::path& root,
               << graph_search_us[graph_search_us.size() / 2] << ','
               << std::filesystem::file_size(snapshot_path) << '\n';
 }
+
+void
+run_crud(const std::filesystem::path& root,
+         const std::filesystem::path& snapshot_path,
+         uint64_t rounds,
+         uint64_t crud_ops,
+         uint64_t query_count,
+         uint64_t max_degree,
+         uint64_t ef_search) {
+    const uint64_t dim = read_dimension(root / "base.fvecs");
+    auto base = read_records<float>(root / "base.fvecs", dim);
+    require(base.count >= 10 and query_count <= base.count and max_degree >= 4 and
+                max_degree <= 64 and ef_search >= 10 and ef_search <= base.count,
+            "invalid CRUD stability configuration");
+    if (not snapshot_path.parent_path().empty()) {
+        require(std::filesystem::exists(snapshot_path.parent_path()),
+                "snapshot directory does not exist");
+    }
+
+    const auto encode_start = Clock::now();
+    auto model = train(base.values, base.count, dim, 47);
+    EncodedRecords codes(dim);
+    codes.Reserve(base.count);
+    for (uint64_t slot = 0; slot < base.count; ++slot) {
+        codes.Append(encode(model, base.values.data() + slot * dim));
+    }
+    const double build_encode_ms = milliseconds(encode_start, Clock::now());
+
+    const auto graph_start = Clock::now();
+    const auto initial_graph =
+        build_graph_topology(base.values, base.count, dim, max_degree, ef_search);
+    const double graph_build_ms = milliseconds(graph_start, Clock::now());
+    std::vector<int64_t> ids(base.count);
+    std::iota(ids.begin(), ids.end(), 0);
+    MutableGraphState state(
+        std::move(model), std::move(codes), initial_graph, std::move(ids), max_degree, ef_search);
+
+    std::cout
+        << "round,count,dim,crud_ops,queries,max_degree,ef_search,build_encode_ms,graph_build_ms,"
+           "update_p50_us,update_p99_us,remove_p50_us,remove_p99_us,add_p50_us,add_p99_us,"
+           "compact_ms,search_p50_us,search_p99_us,full_self_top1_recall,"
+           "graph_self_top1_recall,graph_full_top1_agreement,graph_full_positional_agreement,"
+           "mean_visited,mean_reordered,save_ms,load_ms,snapshot_bytes,state_rss_kib,"
+           "roundtrip_rss_kib,peak_rss_kib,result_checksum\n";
+
+    constexpr uint64_t k = 10;
+    for (uint64_t round = 0; round < rounds; ++round) {
+        std::vector<double> update_us;
+        std::vector<double> remove_us;
+        std::vector<double> add_us;
+        update_us.reserve(crud_ops);
+        remove_us.reserve(crud_ops);
+        add_us.reserve(crud_ops);
+        for (uint64_t operation = 0; operation < crud_ops; ++operation) {
+            const uint64_t id = (round * 65537ULL + operation * 8191ULL) % base.count;
+            float* vector = base.values.data() + id * dim;
+            for (uint64_t d = 0; d < dim; ++d) {
+                const auto delta_index =
+                    static_cast<int64_t>((round * 13 + operation * 7 + d * 3) % 17);
+                vector[d] += static_cast<float>(delta_index - 8) * 0.125F;
+            }
+
+            auto start = Clock::now();
+            require(state.Update(static_cast<int64_t>(id), vector), "CRUD Update failed");
+            update_us.push_back(microseconds(start, Clock::now()));
+
+            start = Clock::now();
+            require(state.Remove(static_cast<int64_t>(id)), "CRUD Remove failed");
+            remove_us.push_back(microseconds(start, Clock::now()));
+
+            start = Clock::now();
+            require(state.Add(static_cast<int64_t>(id), vector), "CRUD Add failed");
+            add_us.push_back(microseconds(start, Clock::now()));
+        }
+        state.Validate();
+        require(state.Size() == base.count, "CRUD changed the active record count");
+        std::sort(update_us.begin(), update_us.end());
+        std::sort(remove_us.begin(), remove_us.end());
+        std::sort(add_us.begin(), add_us.end());
+
+        const auto compact_start = Clock::now();
+        const auto topology = state.GetGraph();
+        const double compact_ms = milliseconds(compact_start, Clock::now());
+        std::vector<double> search_us;
+        search_us.reserve(query_count);
+        std::vector<std::vector<Candidate>> expected;
+        expected.reserve(query_count);
+        uint64_t full_self_hits = 0;
+        uint64_t graph_self_hits = 0;
+        uint64_t top1_agreement = 0;
+        uint64_t positional_agreement = 0;
+        uint64_t visited = 0;
+        uint64_t reordered = 0;
+        uint64_t checksum = 1469598103934665603ULL;
+        for (uint64_t query_number = 0; query_number < query_count; ++query_number) {
+            const uint64_t id = (round * 104729ULL + query_number * 65537ULL) % base.count;
+            const float* vector = base.values.data() + id * dim;
+            float query_norm = 0.0F;
+            const auto query = normalize(state.GetModel(), vector, query_norm);
+            const auto full = top_k(state.Size(), k, [&](uint64_t slot) {
+                const auto code = state.GetCodes().At(slot);
+                const auto coarse = filter_estimate(query, query_norm, code);
+                return full_distance(query, query_norm, code, coarse.centered_ip);
+            });
+            const auto start = Clock::now();
+            auto found = graph_search(query, query_norm, state.GetCodes(), topology, k, ef_search);
+            search_us.push_back(microseconds(start, Clock::now()));
+            require(found.neighbors.size() == k, "CRUD search result size changed");
+            full_self_hits += state.IdAt(full.front().id) == static_cast<int64_t>(id) ? 1 : 0;
+            graph_self_hits +=
+                state.IdAt(found.neighbors.front().id) == static_cast<int64_t>(id) ? 1 : 0;
+            top1_agreement +=
+                state.IdAt(found.neighbors.front().id) == state.IdAt(full.front().id) ? 1 : 0;
+            for (uint64_t position = 0; position < k; ++position) {
+                positional_agreement +=
+                    state.IdAt(found.neighbors[position].id) == state.IdAt(full[position].id) ? 1
+                                                                                              : 0;
+            }
+            visited += found.visited;
+            reordered += found.reordered;
+            checksum = result_checksum(found.neighbors, state, checksum);
+            expected.push_back(std::move(found.neighbors));
+        }
+        std::sort(search_us.begin(), search_us.end());
+
+        const auto save_start = Clock::now();
+        {
+            std::ofstream output(snapshot_path, std::ios::binary | std::ios::trunc);
+            require(static_cast<bool>(output), "cannot create mutable CRUD snapshot");
+            save_mutable_snapshot(output, state);
+            output.close();
+            require(static_cast<bool>(output), "cannot close mutable CRUD snapshot");
+        }
+        const double save_ms = milliseconds(save_start, Clock::now());
+        const uint64_t snapshot_bytes = std::filesystem::file_size(snapshot_path);
+        const uint64_t state_rss_kib = current_rss_kib();
+
+        const auto load_start = Clock::now();
+        std::ifstream input(snapshot_path, std::ios::binary);
+        require(static_cast<bool>(input), "cannot open mutable CRUD snapshot");
+        auto restored = load_mutable_snapshot(input);
+        const double load_ms = milliseconds(load_start, Clock::now());
+        const auto restored_topology = restored.GetGraph();
+        uint64_t restored_checksum = 1469598103934665603ULL;
+        for (uint64_t query_number = 0; query_number < query_count; ++query_number) {
+            const uint64_t id = (round * 104729ULL + query_number * 65537ULL) % base.count;
+            const float* vector = base.values.data() + id * dim;
+            float query_norm = 0.0F;
+            const auto query = normalize(restored.GetModel(), vector, query_norm);
+            const auto found = graph_search(
+                query, query_norm, restored.GetCodes(), restored_topology, k, ef_search);
+            require(found.neighbors.size() == expected[query_number].size(),
+                    "restored CRUD result size changed");
+            require(std::equal(found.neighbors.begin(),
+                               found.neighbors.end(),
+                               expected[query_number].begin(),
+                               [](const auto& left, const auto& right) {
+                                   return left.id == right.id and left.distance == right.distance;
+                               }),
+                    "restored CRUD search result changed");
+            restored_checksum = result_checksum(found.neighbors, restored, restored_checksum);
+        }
+        require(restored_checksum == checksum, "restored CRUD checksum changed");
+
+        const uint64_t opportunities = query_count * k;
+        std::cout << std::fixed << std::setprecision(6) << round + 1 << ',' << state.Size() << ','
+                  << dim << ',' << crud_ops << ',' << query_count << ',' << max_degree << ','
+                  << ef_search << ',' << build_encode_ms << ',' << graph_build_ms << ','
+                  << percentile(update_us, 0.50) << ',' << percentile(update_us, 0.99) << ','
+                  << percentile(remove_us, 0.50) << ',' << percentile(remove_us, 0.99) << ','
+                  << percentile(add_us, 0.50) << ',' << percentile(add_us, 0.99) << ','
+                  << compact_ms << ',' << percentile(search_us, 0.50) << ','
+                  << percentile(search_us, 0.99) << ','
+                  << static_cast<double>(full_self_hits) / static_cast<double>(query_count) << ','
+                  << static_cast<double>(graph_self_hits) / static_cast<double>(query_count) << ','
+                  << static_cast<double>(top1_agreement) / static_cast<double>(query_count) << ','
+                  << static_cast<double>(positional_agreement) / static_cast<double>(opportunities)
+                  << ',' << static_cast<double>(visited) / static_cast<double>(query_count) << ','
+                  << static_cast<double>(reordered) / static_cast<double>(query_count) << ','
+                  << save_ms << ',' << load_ms << ',' << snapshot_bytes << ',' << state_rss_kib
+                  << ',' << current_rss_kib() << ',' << peak_rss_kib() << ',' << checksum << '\n';
+    }
+}
 }  // namespace
 
 int
@@ -1825,6 +2080,16 @@ main(int argc, char** argv) {
             run_loaded(argv[2], argv[3], parse_positive(argv[4]));
             return 0;
         }
+        if (argc == 9 and std::string(argv[1]) == "--crud") {
+            run_crud(argv[2],
+                     argv[3],
+                     parse_positive(argv[4]),
+                     parse_positive(argv[5]),
+                     parse_positive(argv[6]),
+                     parse_positive(argv[7]),
+                     parse_positive(argv[8]));
+            return 0;
+        }
         if (argc == 2 or argc == 4) {
             const uint64_t max_degree = argc == 4 ? parse_positive(argv[2]) : 16;
             const uint64_t ef_search = argc == 4 ? parse_positive(argv[3]) : 128;
@@ -1833,7 +2098,9 @@ main(int argc, char** argv) {
         }
         std::cerr << "usage: lite_rabitq_codec_probe [DATASET_DIR [MAX_DEGREE EF_SEARCH] | "
                      "--save DATASET_DIR SNAPSHOT MAX_DEGREE EF_SEARCH | "
-                     "--load DATASET_DIR SNAPSHOT EF_SEARCH | --self-test]\n";
+                     "--load DATASET_DIR SNAPSHOT EF_SEARCH | "
+                     "--crud DATASET_DIR SNAPSHOT ROUNDS CRUD_OPS QUERIES MAX_DEGREE EF_SEARCH | "
+                     "--self-test]\n";
         return 2;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
