@@ -28,8 +28,8 @@ std::vector<InnerIdType>
 HGraphFGIM::ValidateSourcesAndGetOffsets(const Vector<const HGraph*>& source_graphs,
                                          std::size_t k) {
     CHECK_ARGUMENT(source_graphs.size() >= 2, "FGIM requires at least two source HGraphs");
-    CHECK_ARGUMENT(k > 0 && k <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
-                   "FGIM k must be positive and representable as int64_t");
+    const bool valid_k = k > 0 && k <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+    CHECK_ARGUMENT(valid_k, "FGIM k must be positive and representable as int64_t");
 
     std::vector<InnerIdType> offsets{0};
     uint64_t total = 0;
@@ -46,8 +46,8 @@ HGraphFGIM::ValidateSourcesAndGetOffsets(const Vector<const HGraph*>& source_gra
         CHECK_ARGUMENT(source->data_type_ == DataTypes::DATA_TYPE_FLOAT,
                        "FGIM requires float32 vectors");
         CHECK_ARGUMENT(source->metric_ == MetricType::METRIC_TYPE_L2SQR, "FGIM requires L2");
-        CHECK_ARGUMENT(source->dim_ > 0 && (i == 0 || source->dim_ == dimension),
-                       "FGIM requires matching positive dimensions");
+        const bool valid_dimension = source->dim_ > 0 && (i == 0 || source->dim_ == dimension);
+        CHECK_ARGUMENT(valid_dimension, "FGIM requires matching positive dimensions");
         dimension = source->dim_;
         CHECK_ARGUMENT(!source->deduplicate_storage_, "FGIM does not support deduplicate storage");
         CHECK_ARGUMENT(!source->use_conjugate_graph_,
@@ -57,24 +57,25 @@ HGraphFGIM::ValidateSourcesAndGetOffsets(const Vector<const HGraph*>& source_gra
                 source->basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32,
             "FGIM requires fp32 base storage");
         // GetVectorByInnerId and search may select precise or raw storage instead of base.
-        CHECK_ARGUMENT(
+        const bool valid_precise_storage =
             !source->has_precise_reorder() ||
-                (source->high_precise_codes_ != nullptr &&
-                 source->high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32),
-            "FGIM requires fp32 precise storage when reorder is enabled");
-        CHECK_ARGUMENT(
+            (source->high_precise_codes_ != nullptr &&
+             source->high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32);
+        CHECK_ARGUMENT(valid_precise_storage,
+                       "FGIM requires fp32 precise storage when reorder is enabled");
+        const bool valid_raw_storage =
             !source->create_new_raw_vector_ ||
-                (source->raw_vector_ != nullptr &&
-                 source->raw_vector_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32),
-            "FGIM requires fp32 raw vector storage");
+            (source->raw_vector_ != nullptr &&
+             source->raw_vector_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32);
+        CHECK_ARGUMENT(valid_raw_storage, "FGIM requires fp32 raw vector storage");
         CHECK_ARGUMENT(
             static_cast<uint64_t>(count) <= std::numeric_limits<InnerIdType>::max() - total,
             "FGIM total node count exceeds the merged internal ID capacity");
-        CHECK_ARGUMENT(source->bottom_graph_ != nullptr && source->label_table_ != nullptr &&
-                           source->bottom_graph_->TotalCount() == count &&
-                           source->basic_flatten_codes_->TotalCount() == count &&
-                           source->label_table_->GetTotalCount() == count,
-                       "FGIM requires dense, fully built source HGraphs");
+        const bool fully_built = source->bottom_graph_ != nullptr && source->label_table_ != nullptr &&
+                                 source->bottom_graph_->TotalCount() == count &&
+                                 source->basic_flatten_codes_->TotalCount() == count &&
+                                 source->label_table_->GetTotalCount() == count;
+        CHECK_ARGUMENT(fully_built, "FGIM requires dense, fully built source HGraphs");
         total += static_cast<uint64_t>(count);
         offsets.push_back(static_cast<InnerIdType>(total));
     }
@@ -89,8 +90,8 @@ HGraphFGIM::AppendOriginalCandidates(const HGraph& source,
     Vector<InnerIdType> neighbors(source.allocator_);
     source.bottom_graph_->GetNeighbors(local_u, neighbors);
     for (InnerIdType local_v : neighbors) {
-        CHECK_ARGUMENT(local_v < source.GetNumElements() && local_v != local_u,
-                       "FGIM encountered an invalid original neighbor");
+        const bool valid_neighbor = local_v < source.GetNumElements() && local_v != local_u;
+        CHECK_ARGUMENT(valid_neighbor, "FGIM encountered an invalid original neighbor");
         // Both distance operands remain in the source-local internal ID space.
         // Validated fp32/L2 storage layers contain the same vectors, so base distances
         // are comparable to CrossQuery distances; bitwise equality is not assumed.
@@ -104,7 +105,8 @@ HGraphFGIM::CrossQuery(const HGraph& target,
                        const float* query,
                        int64_t l,
                        SearchStatistics* stats) {
-    CHECK_ARGUMENT(query != nullptr && l > 0 && target.GetNumElements() > 0,
+    const bool valid_query = query != nullptr && l > 0 && target.GetNumElements() > 0;
+    CHECK_ARGUMENT(valid_query,
                    "FGIM CrossQuery requires a query, positive L and a non-empty target");
     CHECK_ARGUMENT(!target.use_conjugate_graph_,
                    "FGIM internal search does not support conjugate graph enhancement");
@@ -167,7 +169,7 @@ HGraphFGIM::BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, std
     const auto offsets = ValidateSourcesAndGetOffsets(source_graphs, k);
     const uint64_t other_count = source_graphs.size() - 1;
     // ceil(k / (m - 1)), without overflowing k + m - 2.
-    const auto query_count = static_cast<int64_t>(k / other_count + (k % other_count != 0));
+    const auto query_count = static_cast<int64_t>(k / other_count + (k % other_count != 0 ? 1 : 0));
     FGIMKnnGraph graph(offsets.back());
     std::vector<float> vector(source_graphs.front()->dim_);
 
