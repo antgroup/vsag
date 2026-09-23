@@ -103,10 +103,33 @@ VSAG provides several CMake options to customize the build:
 ### Third-Party Source Overrides
 
 Third-party archives can be supplied through pin-qualified environment variables such as
-`VSAG_THIRDPARTY_OPENBLAS_0_3_23`. The deprecated unversioned variable remains a compatibility
+`VSAG_THIRDPARTY_OPENBLAS_0_3_34`. The deprecated unversioned variable remains a compatibility
 fallback. Pin-qualified overrides take precedence, followed by the unversioned fallback and the
 authoritative upstream URLs. Override diagnostics report only the selected variable name and
 never its value.
+
+The bundled OpenBLAS version is 0.3.34, built with C LAPACK (`NOFORTRAN=1`),
+`DYNAMIC_ARCH=1`, `USE_THREAD=0`, and `USE_LOCKING=1`, without a Fortran runtime link.
+Nested build jobs follow `NUM_BUILDING_JOBS`. Its CPU detection tools use
+strict floating-point flags, and GCC 15 builds use GNU C17 for translated LAPACK.
+For offline builds, place the release archive in the configured `DOWNLOAD_DIR` as
+`OpenBLAS-v0.3.34.tar.gz`. CMake verifies SHA-256
+`cd7e129868320cc2d033afa920e31202dfe0b8066a5b66661900ccc0f197dfed` before extraction.
+For an HTTP mirror, use `VSAG_THIRDPARTY_OPENBLAS_0_3_34`; the old 0.3.23 variable
+is ignored. Use the download cache for local files: the shared override helper
+prepends mirror URLs to upstream fallbacks, which CMake cannot combine with local paths.
+
+To validate only the bundled OpenBLAS dependency and both libstdc++ ABI consumers:
+
+```bash
+cmake -S tests/cmake/openblas_fixture -B build/openblas-smoke -DVSAG_SOURCE_DIR="$PWD"
+cmake --build build/openblas-smoke --parallel 8
+build/openblas-smoke/openblas_smoke_0
+build/openblas-smoke/openblas_smoke_1
+```
+
+This fixture builds the pinned source archive and links it by absolute path, so an
+installed OpenBLAS cannot substitute for the dependency under test.
 
 ### Other Build Options
 

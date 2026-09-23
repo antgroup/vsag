@@ -1,0 +1,37 @@
+cmake_minimum_required(VERSION 3.18)
+project(openblas_fixture C CXX)
+include(ExternalProject)
+include(${VSAG_SOURCE_DIR}/cmake/VSAGThirdPartyOverride.cmake)
+set(BUILD_INFO_DIR ${CMAKE_CURRENT_BINARY_DIR}/stamps)
+if(NOT DOWNLOAD_DIR)
+    set(DOWNLOAD_DIR ${CMAKE_CURRENT_BINARY_DIR}/downloads)
+endif()
+set(NUM_BUILDING_JOBS 8)
+set(common_configure_envs env "CC=${CMAKE_C_COMPILER}" "CXX=${CMAKE_CXX_COMPILER}"
+    "CFLAGS=-Ofast -ffast-math -fPIC -D_DEFAULT_SOURCE -D_GNU_SOURCE"
+    "CXXFLAGS=-Ofast -ffast-math -fPIC")
+# Configuration-only regression for GCC 15; this does not simulate compilation.
+if(TEST_GNU15_FLAGS)
+    set(CMAKE_C_COMPILER_ID GNU)
+    set(CMAKE_C_COMPILER_VERSION 15)
+endif()
+include(${VSAG_SOURCE_DIR}/extern/openblas/openblas.cmake)
+set(ENABLE_INTEL_MKL OFF)
+include(${VSAG_SOURCE_DIR}/extern/mkl/mkl.cmake)
+if("${BLAS_LIBRARIES}" MATCHES "gfortran")
+    message(FATAL_ERROR "C LAPACK must not require the Fortran runtime")
+endif()
+list(TRANSFORM BLAS_LIBRARIES REPLACE "^libopenblas\\.a$" "${install_dir}/lib/libopenblas.a")
+ExternalProject_Get_Property(openblas BUILD_COMMAND INSTALL_COMMAND URL_HASH DOWNLOAD_NAME)
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/commands.txt
+    "${BUILD_COMMAND}\n${INSTALL_COMMAND}\n${URL_HASH}\n${DOWNLOAD_NAME}\n")
+foreach(abi 0 1)
+    add_executable(openblas_smoke_${abi} ../openblas_smoke.cpp
+        ${VSAG_SOURCE_DIR}/src/impl/blas/blas_function.cpp)
+    target_compile_definitions(openblas_smoke_${abi} PRIVATE _GLIBCXX_USE_CXX11_ABI=${abi})
+    target_compile_options(openblas_smoke_${abi} PRIVATE -fopenmp)
+    target_include_directories(openblas_smoke_${abi} PRIVATE ${VSAG_SOURCE_DIR}/src)
+    target_link_libraries(openblas_smoke_${abi} PRIVATE
+        ${BLAS_LIBRARIES} -fopenmp pthread m dl)
+    add_dependencies(openblas_smoke_${abi} openblas)
+endforeach()
