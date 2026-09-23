@@ -528,3 +528,6 @@ are in
 `/home/ubuntu/project/vsag-lite-rabitq-mutable-rss-validation-20260923`.
 This remains probe-only evidence and does not change the public Lite API or
 snapshot formats.
+
+The proposed public API, fixed-model lifecycle, version 4 snapshot boundary, and
+promotion gates are documented in [`RABITQ_LITE_BACKEND_DESIGN.md`](RABITQ_LITE_BACKEND_DESIGN.md).
