@@ -843,8 +843,6 @@ public:
                     neighbor = slot;
                 }
             }
-            std::sort(neighbors.begin(), neighbors.end());
-            neighbors.erase(std::unique(neighbors.begin(), neighbors.end()), neighbors.end());
         }
         if (slot != last) {
             ids_[slot] = ids_[last];
@@ -926,6 +924,11 @@ public:
         return ef_search_;
     }
 
+    [[nodiscard]] uint64_t
+    GetMutationFallbacks() const {
+        return mutation_fallbacks_;
+    }
+
 private:
     [[nodiscard]] std::vector<float>
     decode_query(uint64_t slot) const {
@@ -951,10 +954,10 @@ private:
     }
 
     [[nodiscard]] std::vector<uint64_t>
-    nearest(const std::vector<float>& query,
-            float query_norm,
-            uint64_t excluded,
-            uint64_t count) const {
+    nearest_exhaustive(const std::vector<float>& query,
+                       float query_norm,
+                       uint64_t excluded,
+                       uint64_t count) const {
         std::priority_queue<Candidate, std::vector<Candidate>, decltype(&better)> heap(&better);
         for (uint64_t slot = 0; slot < Size(); ++slot) {
             if (slot == excluded) {
@@ -977,6 +980,35 @@ private:
             heap.pop();
         }
         return result;
+    }
+
+    [[nodiscard]] std::vector<uint64_t>
+    nearest(const std::vector<float>& query, float query_norm, uint64_t excluded, uint64_t count) {
+        const uint64_t available = Size() - static_cast<uint64_t>(excluded < Size());
+        const uint64_t desired = std::min(count, available);
+        if (desired == 0) {
+            return {};
+        }
+        const uint64_t requested =
+            std::min(Size(), desired + static_cast<uint64_t>(excluded < Size()));
+        const auto found = graph_search(query,
+                                        query_norm,
+                                        codes_,
+                                        compact_graph(adjacency_),
+                                        requested,
+                                        std::max(ef_search_, count * 4));
+        std::vector<uint64_t> result;
+        result.reserve(desired);
+        for (const auto& candidate : found.neighbors) {
+            if (candidate.id != excluded) {
+                result.push_back(candidate.id);
+                if (result.size() == desired) {
+                    return result;
+                }
+            }
+        }
+        ++mutation_fallbacks_;
+        return nearest_exhaustive(query, query_norm, excluded, count);
     }
 
     void
@@ -1008,6 +1040,7 @@ private:
     std::vector<std::vector<uint64_t>> adjacency_;
     uint64_t max_degree_;
     uint64_t ef_search_;
+    uint64_t mutation_fallbacks_{};
 };
 
 uint64_t
@@ -1919,7 +1952,7 @@ run_crud(const std::filesystem::path& root,
     std::cout
         << "round,count,dim,crud_ops,queries,max_degree,ef_search,build_encode_ms,graph_build_ms,"
            "update_p50_us,update_p99_us,remove_p50_us,remove_p99_us,add_p50_us,add_p99_us,"
-           "compact_ms,search_p50_us,search_p99_us,full_self_top1_recall,"
+           "mutation_fallbacks,compact_ms,search_p50_us,search_p99_us,full_self_top1_recall,"
            "graph_self_top1_recall,graph_full_top1_agreement,graph_full_positional_agreement,"
            "mean_visited,mean_reordered,save_ms,load_ms,snapshot_bytes,state_rss_kib,"
            "roundtrip_rss_kib,peak_rss_kib,result_checksum\n";
@@ -1932,6 +1965,7 @@ run_crud(const std::filesystem::path& root,
         update_us.reserve(crud_ops);
         remove_us.reserve(crud_ops);
         add_us.reserve(crud_ops);
+        const uint64_t fallbacks_before = state.GetMutationFallbacks();
         for (uint64_t operation = 0; operation < crud_ops; ++operation) {
             const uint64_t id = (round * 65537ULL + operation * 8191ULL) % base.count;
             float* vector = base.values.data() + id * dim;
@@ -2050,8 +2084,8 @@ run_crud(const std::filesystem::path& root,
                   << percentile(update_us, 0.50) << ',' << percentile(update_us, 0.99) << ','
                   << percentile(remove_us, 0.50) << ',' << percentile(remove_us, 0.99) << ','
                   << percentile(add_us, 0.50) << ',' << percentile(add_us, 0.99) << ','
-                  << compact_ms << ',' << percentile(search_us, 0.50) << ','
-                  << percentile(search_us, 0.99) << ','
+                  << state.GetMutationFallbacks() - fallbacks_before << ',' << compact_ms << ','
+                  << percentile(search_us, 0.50) << ',' << percentile(search_us, 0.99) << ','
                   << static_cast<double>(full_self_hits) / static_cast<double>(query_count) << ','
                   << static_cast<double>(graph_self_hits) / static_cast<double>(query_count) << ','
                   << static_cast<double>(top1_agreement) / static_cast<double>(query_count) << ','
