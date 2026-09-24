@@ -34,12 +34,6 @@ make_sparse_vector_data_cell_instance(const FlattenInterfaceParamPtr& param,
             ErrorType::INVALID_ARGUMENT,
             fmt::format("INT8 data type does not support {} quantization", quantization));
     }
-    if (common_param.data_type_ == DataTypes::DATA_TYPE_FP16 ||
-        common_param.data_type_ == DataTypes::DATA_TYPE_BF16) {
-        throw VsagException(
-            ErrorType::INVALID_ARGUMENT,
-            fmt::format("FP16/BF16 data type does not support {} quantization", quantization));
-    }
     if (common_param.metric_ != MetricType::METRIC_TYPE_IP) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("Sparse quantization only supports IP metric, got {}",
