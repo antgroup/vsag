@@ -22,8 +22,10 @@
 
 #include "datacell/flatten_interface.h"
 #include "datacell/multi_vector_datacell_parameter.h"
+#include "datacell/token_code_interface.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
+#include "quantization/quantizer_headers.h"
 #include "storage/serialization.h"
 #include "unittest.h"
 #include "vsag/dataset.h"
@@ -367,4 +369,58 @@ TEST_CASE("MultiVectorDataCell rejects invalid FactoryComputer inputs",
     }
 }
 
+TEST_CASE("MultiVector native token capability matches quantizer",
+          "[ut][MultiVectorDataCell][TokenCode]") {
+    const auto name = GENERATE("fp32", "fp16", "bf16", "sq8_uniform");
+    const auto metric = GENERATE(MetricType::METRIC_TYPE_IP, MetricType::METRIC_TYPE_L2SQR);
+    IndexCommonParam common;
+    common.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common.dim_ = 4;
+    common.metric_ = metric;
+    auto params = std::make_shared<MultiVectorDataCellParameter>();
+    params->FromJson(JsonType::Parse(fmt::format(
+        R"({{"io_params":{{"type":"memory_io"}},"quantization_params":{{"type":"{}"}}}})", name)));
+    auto cell = FlattenInterface::MakeInstance(params, common);
+    auto tokens = std::dynamic_pointer_cast<TokenCodeInterface>(cell);
+    REQUIRE(tokens != nullptr);
+    const float sample[] = {-0.5F, 0.25F, 0.75F, -0.125F, 0.125F, -0.75F, 0.5F, 0.25F};
+    cell->Train(sample, 2);
+    std::vector<uint8_t> first(cell->GetQuantizerCodeSize()), second(first.size());
+    tokens->EncodeToken(sample, first.data());
+    tokens->EncodeToken(sample + 4, second.data());
+    const auto actual = tokens->ComputeTokenCodes(first.data(), second.data());
+    auto check = [&](auto quantizer) {
+        quantizer.Train(sample, 2);
+        std::vector<uint8_t> a(quantizer.GetCodeSize()), b(a.size());
+        REQUIRE(quantizer.EncodeOne(sample, a.data()));
+        REQUIRE(quantizer.EncodeOne(sample + 4, b.data()));
+        REQUIRE(a == first);
+        REQUIRE(b == second);
+        REQUIRE(actual == quantizer.Compute(a.data(), b.data()));
+    };
+    if (metric == MetricType::METRIC_TYPE_IP) {
+        if (std::string(name) == "fp32")
+            check(FP32Quantizer<MetricType::METRIC_TYPE_IP>(params->quantizer_parameter, common));
+        if (std::string(name) == "fp16")
+            check(FP16Quantizer<MetricType::METRIC_TYPE_IP>(params->quantizer_parameter, common));
+        if (std::string(name) == "bf16")
+            check(BF16Quantizer<MetricType::METRIC_TYPE_IP>(params->quantizer_parameter, common));
+        if (std::string(name) == "sq8_uniform")
+            check(SQ8UniformQuantizer<MetricType::METRIC_TYPE_IP>(params->quantizer_parameter,
+                                                                  common));
+    } else {
+        if (std::string(name) == "fp32")
+            check(
+                FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>(params->quantizer_parameter, common));
+        if (std::string(name) == "fp16")
+            check(
+                FP16Quantizer<MetricType::METRIC_TYPE_L2SQR>(params->quantizer_parameter, common));
+        if (std::string(name) == "bf16")
+            check(
+                BF16Quantizer<MetricType::METRIC_TYPE_L2SQR>(params->quantizer_parameter, common));
+        if (std::string(name) == "sq8_uniform")
+            check(SQ8UniformQuantizer<MetricType::METRIC_TYPE_L2SQR>(params->quantizer_parameter,
+                                                                     common));
+    }
+}
 }  // namespace vsag

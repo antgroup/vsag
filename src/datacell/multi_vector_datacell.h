@@ -20,13 +20,14 @@
 #include "layout/variable_record_layout.h"
 #include "quantization/multi_vector_computer.h"
 #include "quantization/quantizer.h"
+#include "token_code_interface.h"
 #include "typing.h"
 #include "vsag/dataset.h"
 
 namespace vsag {
 
 template <typename QuantTmpl, typename IOTmpl>
-class MultiVectorDataCell : public FlattenInterface {
+class MultiVectorDataCell : public FlattenInterface, public TokenCodeInterface {
 public:
     MultiVectorDataCell() = default;
 
@@ -48,6 +49,17 @@ public:
     Decode(const uint8_t* codes, float* vector) override {
         this->quantizer_->DecodeOne(codes, vector);
         return true;
+    }
+
+    void
+    EncodeToken(const float* vector, uint8_t* code) override {
+        CHECK_ARGUMENT(this->quantizer_->EncodeOne(vector, code),
+                       "multi-vector token encoding failed");
+    }
+
+    float
+    ComputeTokenCodes(const uint8_t* lhs, const uint8_t* rhs) override {
+        return this->quantizer_->Compute(lhs, rhs);
     }
 
     bool
