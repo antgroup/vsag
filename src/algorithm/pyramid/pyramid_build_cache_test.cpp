@@ -108,3 +108,63 @@ TEST_CASE("PyramidBuildCache rejects truncated declared allocations", "[ut][pyra
     vsag::IOStreamReader reader(stream);
     REQUIRE_THROWS(cache.Deserialize(reader));
 }
+
+TEST_CASE("PyramidBuildCache group owners and legacy replacement", "[ut][pyramid_build_cache]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    vsag::PyramidBuildCache cache(allocator.get());
+    PopulateCache(cache.CreateGraphCache("site", ""), allocator.get(), "a", "b");
+    cache.SetGroupOwners("site", "", {1, 1});
+    REQUIRE_THROWS(cache.SetGroupOwners("site", "", {2, 2}));
+    REQUIRE_THROWS(cache.SetGroupOwners("site", "", {1, 0}));
+    REQUIRE_THROWS(cache.SetGroupOwners("site", "", {0}));
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    cache.Serialize(writer);
+    vsag::PyramidBuildCache restored(allocator.get());
+    vsag::IOStreamReader reader(stream);
+    restored.Deserialize(reader);
+    REQUIRE(restored.GetGroupOwners("site", "") != nullptr);
+    REQUIRE(*restored.GetGroupOwners("site", "") == vsag::PyramidBuildCache::GroupOwners{1, 1});
+
+    std::stringstream truncated;
+    vsag::IOStreamWriter truncated_writer(truncated);
+    vsag::StreamWriter::WriteObj(truncated_writer, std::numeric_limits<uint64_t>::max());
+    vsag::IOStreamReader truncated_reader(truncated);
+    REQUIRE_THROWS(restored.Deserialize(truncated_reader));
+    REQUIRE(*restored.GetGroupOwners("site", "") == vsag::PyramidBuildCache::GroupOwners{1, 1});
+
+    // Independent old-format fixture, deliberately not PyramidBuildCache::Serialize.
+    std::stringstream legacy;
+    vsag::IOStreamWriter legacy_writer(legacy);
+    vsag::StreamWriter::WriteObj(legacy_writer, uint64_t{1});
+    vsag::StreamWriter::WriteString(legacy_writer, "4:site");
+    cache.GetGraphCache("site", "")->Serialize(legacy_writer);
+    vsag::IOStreamReader legacy_reader(legacy);
+    restored.Deserialize(legacy_reader);
+    REQUIRE(restored.GetGroupOwners("site", "") == nullptr);
+    REQUIRE(restored.GetGraphCache("site", "")->GetNeighbors("a") == std::vector<std::string>{"b"});
+    std::stringstream ordinary;
+    vsag::IOStreamWriter ordinary_writer(ordinary);
+    restored.Serialize(ordinary_writer);
+    REQUIRE(ordinary.str() == legacy.str());
+}
+
+TEST_CASE("PyramidBuildCache rejects invalid serialized groups", "[ut][pyramid_build_cache]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    const auto owner = GENERATE(vsag::InnerIdType{2}, vsag::InnerIdType{0});
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    vsag::StreamWriter::WriteObj(writer, std::numeric_limits<uint64_t>::max());
+    vsag::StreamWriter::WriteObj(writer, uint64_t{1});
+    vsag::StreamWriter::WriteObj(writer, uint64_t{1});
+    vsag::StreamWriter::WriteString(writer, "4:site");
+    vsag::BuildCache graph(allocator.get());
+    PopulateCache(graph, allocator.get(), "a", "b");
+    graph.Serialize(writer);
+    vsag::StreamWriter::WriteObj(writer, uint64_t{2});
+    vsag::StreamWriter::WriteObj(writer, vsag::InnerIdType{1});
+    vsag::StreamWriter::WriteObj(writer, owner);
+    vsag::PyramidBuildCache cache(allocator.get());
+    vsag::IOStreamReader reader(stream);
+    REQUIRE_THROWS(cache.Deserialize(reader));
+}
