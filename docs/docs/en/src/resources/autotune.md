@@ -139,6 +139,7 @@ from the dataset and need not be repeated. If provided, they must match the data
   "tuning_config": {
     "workspace_path": "/tmp/vsag_autotune",
     "keep_intermediate": false,
+    "allow_quantization_tune": false,
     "max_trials": 1000
   }
 }
@@ -161,6 +162,21 @@ is omitted, both indexes are evaluated.
 Candidates with identical concrete create parameters share one build. Each concrete search
 parameter set remains a separate trial. An adaptive `ef_search` range records only the concrete
 points that were actually evaluated.
+
+For HGraph, AutoTune reuses one native build at the largest degree for candidates that differ only
+in `max_degree`, independently within each `base_quantization_type`. Set
+`tuning_config.allow_quantization_tune` to `true` to additionally derive different
+`base_quantization_type` values from one canonical fp32 build. The option has no effect in
+search-only mode. `Index::Tune` produces and serializes an independent artifact
+for every candidate. An unsupported or failed transformation transparently falls back to a native
+build. This optimization is disabled when `build_seconds` or `build_and_search_seconds` is a
+constraint or the objective.
+
+A derived artifact is not guaranteed to have the same graph as a native build from its reported
+`create_params`: degree reduction inherits the larger graph's topology. When enabled,
+quantization tuning also does not rebuild that graph. The measured metrics describe the serialized
+artifact. Consumers must load that artifact with the reported `create_params` instead of
+rebuilding from the parameters.
 
 ## Existing Index
 
@@ -228,6 +244,11 @@ The following metrics can be used as constraints or as the objective:
 existing-index mode. `index_memory_mb` may be a constraint, but not the objective, because it is
 constant across search candidates for the same existing index and cannot rank them. The objective
 direction is inferred from the metric, so no `direction` field is needed.
+
+Build records identify `full_build` or `hgraph_tune` in `strategy`. For `hgraph_tune`,
+`transform_seconds` is the cumulative graph and quantization transformation time attributed to the
+artifact, and `metrics.build_seconds` is the canonical source build time plus that transformation
+time. It is not an independently rebuilt candidate's build time.
 
 AutoTune uses a dedicated latency/QPS pass and a separate recall/statistics pass, so a logical
 query runs more than once per trial. `search_seconds` covers both in-memory passes and metric

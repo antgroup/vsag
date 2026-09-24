@@ -133,6 +133,7 @@ cmake --build build-release --target 326_feature_create_index_with_constraints -
   "tuning_config": {
     "workspace_path": "/tmp/vsag_autotune",
     "keep_intermediate": false,
+    "allow_quantization_tune": false,
     "max_trials": 1000
   }
 }
@@ -153,6 +154,17 @@ cmake --build build-release --target 326_feature_create_index_with_constraints -
 
 具体 create 参数相同的候选只构建一次；每组具体 search 参数仍然是独立 trial。自适应
 `ef_search` 范围只记录实际评测过的具体参数点。
+
+对于 HGraph，只有 `max_degree` 不同的候选默认会在每种量化类型内复用一次最大 degree
+的原生 build。这里的量化类型特指 `base_quantization_type`。设置
+`tuning_config.allow_quantization_tune=true` 后，还可以从一次 canonical fp32 build
+派生不同 `base_quantization_type` 候选；该选项在 search-only 模式下无效。`Index::Tune`
+会为每个候选生成并序列化独立 artifact。变换不支持或失败时会自动回退到原生构建。
+当 `build_seconds` 或 `build_and_search_seconds` 是约束或目标时，会禁用该优化。
+
+派生 artifact 不保证与使用其 `create_params` 原生构建的图相同：degree 裁剪会继承大图
+拓扑；开启量化 Tune 时，切换量化也不会重新构图。指标来自对最终序列化 artifact 的实际
+评测；使用方必须用返回的 `create_params` 加载该 artifact，而不能只按参数重新构建。
 
 ## 已有索引
 
@@ -216,6 +228,11 @@ Pyramid path 调优示例见
 已有索引模式不提供 `build_seconds`、`index_size_mb` 和 `build_and_search_seconds`。
 `index_memory_mb` 可以作为约束，但不能作为目标，因为同一个已有索引的所有 search 候选
 内存相同，无法据此排序。目标方向由指标本身决定，因此不需要 `direction` 字段。
+
+Build 记录通过 `strategy` 区分 `full_build` 和 `hgraph_tune`。对于 `hgraph_tune`，
+`transform_seconds` 是生成该 artifact 累计的图和量化变换耗时，
+`metrics.build_seconds` 是 canonical source build 耗时加该变换耗时，不代表独立原生
+重建该候选的耗时。
 
 AutoTune 使用独立的 latency/QPS pass 和 recall/statistics pass，因此同一条逻辑 query 在
 每个 trial 中会执行多次。`search_seconds` 包含两个内存 pass 和指标采集，但不包含索引
