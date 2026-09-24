@@ -94,7 +94,9 @@ public:
     void
     InsertVector(const void* vector, vsag::InnerIdType idx) override {
         inserted_ids.push_back(idx);
-        this->total_count_ = std::max(this->total_count_, idx + 1);
+        this->total_count_.store(
+            std::max(this->total_count_.load(std::memory_order_relaxed), idx + 1),
+            std::memory_order_release);
     }
 
     bool
