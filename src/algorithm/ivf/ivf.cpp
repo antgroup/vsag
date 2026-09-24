@@ -33,12 +33,17 @@
 #include "flat_bucket_searcher.h"
 #include "gno_imi_partition.h"
 #include "graph_bucket_searcher.h"
+#include "impl/reasoning/search_reasoning.h"
 #include "impl/reorder/bucket_reorder.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "index/index_impl.h"
 #include "inner_string_params.h"
 #include "ivf_nearest_partition.h"
+#include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
+#include "query_context.h"
+#include "rabitq_split_bucket_searcher.h"
 #include "storage/stream_writer.h"
+#include "utils/float_utils.h"
 #include "utils/util_functions.h"
 #include "vsag_exception.h"
 
@@ -55,6 +60,109 @@ make_precise_bucket_param(const IVFParameterPtr& param) {
     precise_bucket_param->use_residual_ = false;
     return precise_bucket_param;
 }
+
+class SplitBucketReorder final : public ReorderInterface {
+public:
+    SplitBucketReorder(BucketInterfacePtr bucket, Allocator* allocator)
+        : bucket_(std::move(bucket)), allocator_(allocator) {
+    }
+
+    DistHeapPtr
+    Reorder(const DistHeapPtr& input,
+            const void* query,
+            int64_t topk,
+            QueryContext& ctx,
+            IteratorFilterContext* /*iter_ctx*/,
+            const DistanceRecordVector* /*records*/,
+            const std::optional<float>& distance_threshold,
+            const ComputerInterfacePtr& preset_computer) override {
+        const uint64_t candidate_count = input == nullptr ? 0 : input->Size();
+        topk = std::min(topk, static_cast<int64_t>(candidate_count));
+        auto result = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
+        if (candidate_count == 0 or topk == 0) {
+            return result;
+        }
+
+        Allocator* query_allocator = select_query_allocator(ctx.alloc, this->allocator_);
+        Vector<InnerIdType> ids(candidate_count, query_allocator);
+        Vector<float> hints(candidate_count, query_allocator);
+        Vector<float> distances(candidate_count, query_allocator);
+        const auto* candidates_with_auxiliary = input->GetDataWithAuxiliary();
+        const auto* candidates = candidates_with_auxiliary == nullptr ? input->GetData() : nullptr;
+        Vector<float> candidate_filter_inner_products(
+            candidates_with_auxiliary == nullptr ? 0 : candidate_count, query_allocator);
+        Vector<BucketIdType> candidate_source_bucket_ids(
+            candidates_with_auxiliary == nullptr ? 0 : candidate_count, query_allocator);
+        Vector<InnerIdType> candidate_source_offset_ids(
+            candidates_with_auxiliary == nullptr ? 0 : candidate_count, query_allocator);
+        Vector<uint64_t> candidate_source_versions(
+            candidates_with_auxiliary == nullptr ? 0 : candidate_count, query_allocator);
+        for (uint64_t i = 0; i < candidate_count; ++i) {
+            const auto& record = candidates_with_auxiliary == nullptr
+                                     ? candidates[i]
+                                     : candidates_with_auxiliary[i].record;
+            hints[i] = record.first;
+            ids[i] = record.second;
+            if (candidates_with_auxiliary != nullptr) {
+                candidate_filter_inner_products[i] = candidates_with_auxiliary[i].auxiliary;
+                candidate_source_bucket_ids[i] = candidates_with_auxiliary[i].source_bucket_id;
+                candidate_source_offset_ids[i] = candidates_with_auxiliary[i].source_offset_id;
+                candidate_source_versions[i] = candidates_with_auxiliary[i].source_version;
+            }
+        }
+        if (ctx.stats != nullptr) {
+            ctx.stats->reorder_distance_count.fetch_add(static_cast<uint32_t>(candidate_count),
+                                                        std::memory_order_relaxed);
+        }
+        auto computer =
+            preset_computer == nullptr ? this->bucket_->FactoryComputer(query) : preset_computer;
+        {
+            ScopedDistancePhase scoped(ctx, DistanceEvaluationPhase::RERANK);
+            if (candidates_with_auxiliary != nullptr) {
+                this->bucket_->QueryWithCandidateFilterInnerProductBySource(
+                    distances.data(),
+                    hints.data(),
+                    candidate_filter_inner_products.data(),
+                    candidate_source_bucket_ids.data(),
+                    candidate_source_offset_ids.data(),
+                    candidate_source_versions.data(),
+                    computer,
+                    ids.data(),
+                    static_cast<InnerIdType>(candidate_count),
+                    &ctx);
+            } else {
+                this->bucket_->QueryWithDistanceHintByInnerId(
+                    distances.data(),
+                    hints.data(),
+                    computer,
+                    ids.data(),
+                    static_cast<InnerIdType>(candidate_count),
+                    &ctx);
+            }
+        }
+        for (uint64_t i = 0; i < candidate_count; ++i) {
+            if (ctx.reasoning_ctx != nullptr) {
+                ctx.reasoning_ctx->RecordReorder(ids[i], hints[i], distances[i]);
+            }
+            if (distance_threshold.has_value() and
+                (not IsFiniteFloatBits(distances[i]) or distances[i] > *distance_threshold)) {
+                continue;
+            }
+            if (result->Size() < static_cast<uint64_t>(topk) or
+                distances[i] < result->Top().first) {
+                result->Push(distances[i], ids[i]);
+                if (result->Size() > static_cast<uint64_t>(topk)) {
+                    result->Pop();
+                }
+            }
+        }
+        return result;
+    }
+
+private:
+    BucketInterfacePtr bucket_{nullptr};
+    Allocator* allocator_{nullptr};
+};
 
 }  // namespace
 
@@ -177,6 +285,15 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY]
                       [RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY]
                           .SetJson(value);
+        } else if (key == RABITQ_BITS_PER_DIM_PRECISE) {
+            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY]
+                      [RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY]
+                          .SetJson(value);
+        } else if (key == HGRAPH_BASE_SUPPLEMENT_IO_TYPE) {
+            inner_json[BUCKET_PARAMS_KEY][SUPPLEMENT_IO_PARAMS_KEY][TYPE_KEY].SetJson(value);
+        } else if (key == HGRAPH_BASE_SUPPLEMENT_FILE_PATH) {
+            inner_json[BUCKET_PARAMS_KEY][SUPPLEMENT_IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(
+                value);
         } else if (key == RABITQ_VERSION) {
             inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_VERSION_KEY]
                 .SetJson(value);
@@ -212,6 +329,63 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
         }
     }
 
+    if (external_param.Contains(RABITQ_BITS_PER_DIM_PRECISE)) {
+        CHECK_ARGUMENT(
+            external_param.Contains(RABITQ_BITS_PER_DIM_BASE),
+            fmt::format("{} requires {}", RABITQ_BITS_PER_DIM_PRECISE, RABITQ_BITS_PER_DIM_BASE));
+        CHECK_ARGUMENT(external_param.Contains(IVF_BASE_QUANTIZATION_TYPE) and
+                           external_param[IVF_BASE_QUANTIZATION_TYPE].GetString() ==
+                               QUANTIZATION_TYPE_VALUE_RABITQ,
+                       fmt::format("{} requires {}={}",
+                                   RABITQ_BITS_PER_DIM_PRECISE,
+                                   IVF_BASE_QUANTIZATION_TYPE,
+                                   QUANTIZATION_TYPE_VALUE_RABITQ));
+        CHECK_ARGUMENT(external_param.Contains(IVF_PRECISE_QUANTIZATION_TYPE) and
+                           external_param[IVF_PRECISE_QUANTIZATION_TYPE].GetString() ==
+                               QUANTIZATION_TYPE_VALUE_RABITQ,
+                       fmt::format("{} requires {}={}",
+                                   RABITQ_BITS_PER_DIM_PRECISE,
+                                   IVF_PRECISE_QUANTIZATION_TYPE,
+                                   QUANTIZATION_TYPE_VALUE_RABITQ));
+        CHECK_ARGUMENT(
+            external_param.Contains(IVF_USE_REORDER) and
+                external_param[IVF_USE_REORDER].IsBool() and
+                external_param[IVF_USE_REORDER].GetBool(),
+            fmt::format("{} requires {}=true", RABITQ_BITS_PER_DIM_PRECISE, IVF_USE_REORDER));
+
+        const int64_t filter_bits = external_param[RABITQ_BITS_PER_DIM_BASE].GetInt();
+        const int64_t supplement_bits = external_param[RABITQ_BITS_PER_DIM_PRECISE].GetInt();
+        const auto filter_bits_error =
+            fmt::format("{} must be in [1, 8], got {}", RABITQ_BITS_PER_DIM_BASE, filter_bits);
+        CHECK_ARGUMENT(filter_bits >= 1, filter_bits_error);
+        CHECK_ARGUMENT(filter_bits <= 8, filter_bits_error);
+        const auto supplement_bits_error = fmt::format(
+            "{} must be in [1, 8], got {}", RABITQ_BITS_PER_DIM_PRECISE, supplement_bits);
+        CHECK_ARGUMENT(supplement_bits >= 1, supplement_bits_error);
+        CHECK_ARGUMENT(supplement_bits <= 8, supplement_bits_error);
+        CHECK_ARGUMENT(filter_bits + supplement_bits <= 8,
+                       fmt::format("{} + {} must be no greater than 8, got {}",
+                                   RABITQ_BITS_PER_DIM_BASE,
+                                   RABITQ_BITS_PER_DIM_PRECISE,
+                                   filter_bits + supplement_bits));
+        if (external_param.Contains(RABITQ_BITS_PER_DIM_QUERY)) {
+            CHECK_ARGUMENT(
+                external_param[RABITQ_BITS_PER_DIM_QUERY].GetInt() == 32,
+                fmt::format("split storage requires {} to be 32", RABITQ_BITS_PER_DIM_QUERY));
+        }
+        CHECK_ARGUMENT(inner_json[BUCKET_PER_DATA_KEY].GetInt() == 1,
+                       "IVF RaBitQ split storage requires buckets_per_data=1");
+        CHECK_ARGUMENT(inner_json[GRAPH_BUILD_THRESHOLD_KEY].GetInt() == 0,
+                       "IVF RaBitQ split storage does not support bucket graphs");
+
+        auto quant_json = inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY];
+        quant_json[RABITQ_QUANTIZATION_VERSION_KEY].SetString(
+            RaBitQuantizerParameter::RABITQ_VERSION_SPLIT);
+        quant_json[RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY].SetInt(32);
+        quant_json[RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY].SetInt(filter_bits);
+        quant_json[RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY].SetInt(filter_bits + supplement_bits);
+    }
+
     auto ivf_parameter = std::make_shared<IVFParameter>();
     ivf_parameter->FromJson(inner_json);
 
@@ -223,11 +397,15 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
       buckets_per_data_(param->buckets_per_data),
       location_map_(common_param.allocator_.get()),
       bucket_graphs_(common_param.allocator_.get()),
-      common_param_(common_param),
-      bucket_searcher_(std::make_shared<FlatBucketSearcher>()) {
+      common_param_(common_param) {
     this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
     if (this->bucket_ == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bucket init error");
+    }
+    if (this->bucket_->SupportSplitCodeStorage()) {
+        this->bucket_searcher_ = std::make_shared<RaBitQSplitBucketSearcher>();
+    } else {
+        this->bucket_searcher_ = std::make_shared<FlatBucketSearcher>();
     }
 
     // Initialize thread pool before partition strategy construction
@@ -251,7 +429,9 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
             modified_common_param, param->ivf_partition_strategy_parameter);
     }
     if (this->use_reorder_) {
-        if (param->precise_codes_layout == PRECISE_CODES_LAYOUT_VALUE_BUCKET) {
+        if (this->bucket_->SupportSplitCodeStorage()) {
+            this->reorder_ = std::make_shared<SplitBucketReorder>(this->bucket_, this->allocator_);
+        } else if (param->precise_codes_layout == PRECISE_CODES_LAYOUT_VALUE_BUCKET) {
             this->precise_bucket_ = BucketInterface::MakeInstance(make_precise_bucket_param(param),
                                                                   modified_common_param);
             CHECK_ARGUMENT(this->precise_bucket_ != nullptr,
@@ -263,7 +443,7 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
         } else {
             this->reorder_codes_ =
                 FlattenInterface::MakeInstance(param->precise_codes_param, modified_common_param);
-            reorder_ = std::make_shared<FlattenReorder>(this->reorder_codes_, allocator_);
+            this->reorder_ = std::make_shared<FlattenReorder>(this->reorder_codes_, allocator_);
         }
     }
     if (param->bucket_param->use_residual_) {
@@ -323,12 +503,10 @@ IVF::ExportModel(const IndexCommonParam& param) const {
     auto index = std::make_shared<IVF>(this->create_param_ptr_, param);
     IVFPartitionStrategy::Clone(this->partition_strategy_, index->partition_strategy_);
     this->bucket_->ExportModel(index->bucket_);
-    if (use_reorder_) {
-        if (precise_bucket_ != nullptr) {
-            this->precise_bucket_->ExportModel(index->precise_bucket_);
-        } else {
-            this->reorder_codes_->ExportModel(index->reorder_codes_);
-        }
+    if (precise_bucket_ != nullptr) {
+        this->precise_bucket_->ExportModel(index->precise_bucket_);
+    } else if (reorder_codes_ != nullptr) {
+        this->reorder_codes_->ExportModel(index->reorder_codes_);
     }
     index->is_trained_ = this->is_trained_;
     return index;
@@ -345,14 +523,12 @@ IVF::merge_one_unit(const MergeUnit& unit) {
     this->bucket_->MergeOther(other_index->bucket_, bucket_bias);
     other_index->bucket_->Package();
 
-    if (this->use_reorder_) {
-        if (precise_bucket_ != nullptr) {
-            other_index->precise_bucket_->Unpack();
-            this->precise_bucket_->MergeOther(other_index->precise_bucket_, bucket_bias);
-            other_index->precise_bucket_->Package();
-        } else {
-            this->reorder_codes_->MergeOther(other_index->reorder_codes_, this->total_elements_);
-        }
+    if (precise_bucket_ != nullptr) {
+        other_index->precise_bucket_->Unpack();
+        this->precise_bucket_->MergeOther(other_index->precise_bucket_, bucket_bias);
+        other_index->precise_bucket_->Package();
+    } else if (reorder_codes_ != nullptr) {
+        this->reorder_codes_->MergeOther(other_index->reorder_codes_, this->total_elements_);
     }
     this->total_elements_ += other_index->total_elements_;
 }
@@ -437,7 +613,32 @@ IVF::CalcDistancesById(const float* query,
             }
         }
     }
-    if (this->use_reorder_ && calculate_precise_distance && reorder_codes_ != nullptr) {
+    if (this->bucket_->SupportSplitCodeStorage() and calculate_precise_distance) {
+        auto computer = this->bucket_->FactoryComputer(query);
+        Vector<InnerIdType> valid_inner_ids(allocator_);
+        Vector<int64_t> valid_offsets(allocator_);
+        valid_inner_ids.reserve(count);
+        valid_offsets.reserve(count);
+        for (int64_t i = 0; i < count; ++i) {
+            if (validity[i]) {
+                valid_inner_ids.push_back(inner_ids[i]);
+                valid_offsets.push_back(i);
+            }
+        }
+        if (not valid_inner_ids.empty()) {
+            Vector<float> valid_distances(valid_inner_ids.size(), allocator_);
+            this->bucket_->QueryWithDistanceHintByInnerId(
+                valid_distances.data(),
+                nullptr,
+                computer,
+                valid_inner_ids.data(),
+                static_cast<InnerIdType>(valid_inner_ids.size()),
+                nullptr);
+            for (uint64_t i = 0; i < valid_inner_ids.size(); ++i) {
+                distances[valid_offsets[i]] = valid_distances[i];
+            }
+        }
+    } else if (this->use_reorder_ && calculate_precise_distance && reorder_codes_ != nullptr) {
         Vector<InnerIdType> valid_ids(allocator_);
         Vector<int64_t> positions(allocator_);
         for (int64_t i = 0; i < count; ++i) {
@@ -507,6 +708,13 @@ IVF::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_dis
     auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
     if (not success) {
         return -1.0F;
+    }
+    if (this->bucket_->SupportSplitCodeStorage() and calculate_precise_distance) {
+        float dist = 0.0F;
+        auto computer = this->bucket_->FactoryComputer(query);
+        this->bucket_->QueryWithDistanceHintByInnerId(
+            &dist, nullptr, computer, &inner_id, 1, nullptr);
+        return dist;
     }
     if (this->use_reorder_ && calculate_precise_distance && reorder_codes_ != nullptr) {
         float dist = 0.0F;
@@ -625,9 +833,10 @@ void
 IVF::cal_memory_usage() {
     auto memory = sizeof(IVF);
     memory += this->bucket_->GetMemoryUsage();
-    if (use_reorder_) {
-        memory += precise_bucket_ != nullptr ? precise_bucket_->GetMemoryUsage()
-                                             : reorder_codes_->GetMemoryUsage();
+    if (precise_bucket_ != nullptr) {
+        memory += precise_bucket_->GetMemoryUsage();
+    } else if (reorder_codes_ != nullptr) {
+        memory += reorder_codes_->GetMemoryUsage();
     }
     if (this->extra_info_size_ > 0 and this->extra_infos_ != nullptr) {
         memory += this->extra_infos_->GetMemoryUsage();

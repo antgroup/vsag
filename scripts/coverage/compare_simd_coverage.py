@@ -12,6 +12,12 @@ import sys
 
 SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hxx"}
 PROFILE = "simd-v1:seed=424242:filter=[simd]~[!benchmark]:order=lex"
+# gcov emits line records only for sources that define something. A changed file
+# holding nothing but declarations (prototypes, aliases, macros) can never show
+# up in a trace, so it must not be reported as an unmeasured changed file. The
+# check errs towards "defines code", which keeps the gate fail-closed.
+HEADER_SUFFIXES = {".h", ".hpp", ".hxx"}
+FUNCTION_BODY = re.compile(r"\)[^;{}()]*\{")
 
 
 def production(path):
@@ -40,6 +46,35 @@ def changed_lines(root, base, head):
         for start, count in re.findall(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", patch, re.M):
             added.update(range(int(start), int(start) + int(count or 1)))
         result[path] = added
+    return result
+
+
+def defines_executable_code(text):
+    """Return True when the source text can produce gcov line records."""
+    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
+    text = re.sub(r"//[^\n]*", " ", text)
+    text = re.sub(r"\\\n", " ", text)
+    text = re.sub(r"(?m)^[ \t]*#.*$", " ", text)
+    return FUNCTION_BODY.search(text) is not None
+
+
+def unmeasurable_changes(root, changes, head):
+    """Changed scoped headers that define no code and therefore cannot be measured.
+
+    Only headers qualify: an unmeasured changed translation unit is always a real
+    failure, because it means the file was not compiled into the measured build.
+    """
+    result = set()
+    for path, added in changes.items():
+        if not scoped(path) or not added or path in head:
+            continue
+        if PurePosixPath(path).suffix not in HEADER_SUFFIXES:
+            continue
+        source = root / path
+        if not source.is_file():
+            continue
+        if not defines_executable_code(source.read_text(encoding="utf-8", errors="replace")):
+            result.add(path)
     return result
 
 
@@ -72,13 +107,16 @@ def totals(files):
     return sum(sum(lines.values()) for lines in files.values()), sum(map(len, files.values()))
 
 
-def compare(base, head, changes, deleted=()):
+def compare(base, head, changes, deleted=(), unmeasurable=()):
     errors = []
     patch = []
+    declaration_only = []
     for path, added in changes.items():
         if not scoped(path) or not added:
             continue
-        if path not in head:
+        if path in unmeasurable:
+            declaration_only.append(path)
+        elif path not in head:
             errors.append(f"Unmeasured changed file: {path}")
         else:
             patch.extend(head[path][line] for line in added if line in head[path])
@@ -97,6 +135,7 @@ def compare(base, head, changes, deleted=()):
         "base": {"covered": before, "measured": before_total},
         "head": {"covered": after, "measured": after_total},
         "patch": {"covered": sum(patch), "measured": len(patch)},
+        "declaration_only": sorted(declaration_only),
         "unsupported": sorted(path for path in changes if not scoped(path)),
         "new_files": sorted(head.keys() - base.keys()),
         "errors": errors,
@@ -116,10 +155,11 @@ def main():
             if metadata != {"sha": sha, "profile": PROFILE}:
                 raise ValueError(f"{role} SHA/profile mismatch; baseline is not comparable")
         changes = changed_lines(args.root, args.base, args.head)
+        head_trace = read_trace(args.reports / "head.info")
         deleted = git(args.root, "diff", "--no-renames", "--diff-filter=D", "--name-only",
                       "-z", args.base, args.head).decode().split("\0")
-        result = compare(read_trace(args.reports / "base.info"),
-                         read_trace(args.reports / "head.info"), changes, deleted)
+        result = compare(read_trace(args.reports / "base.info"), head_trace, changes, deleted,
+                         unmeasurable_changes(args.root, changes, head_trace))
         result.update(base_sha=args.base, head_sha=args.head, profile=PROFILE)
         (args.reports / "result.json").write_text(json.dumps(result, indent=2) + "\n")
         lines = ["## Pre-merge SIMD coverage", "", f"Base: `{args.base}`; merge candidate: `{args.head}`.",
@@ -131,6 +171,9 @@ def main():
             lines.append(f"- {role}: {value}")
         lines += ["", "Patch target: 80%; SIMD line coverage must not regress (unrounded comparison).",
                   "Other C++ paths are unsupported by this stage; full-project non-regression remains deferred."]
+        if result["declaration_only"]:
+            lines += ["", "Declaration-only changed files (no executable lines; not measurable):"]
+            lines += [f"- `{p}`" for p in result["declaration_only"]]
         if result["unsupported"]:
             lines += ["", "Unsupported changed files:"] + [f"- `{p}`" for p in result["unsupported"]]
         if result["new_files"]:
