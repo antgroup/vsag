@@ -36,6 +36,8 @@
 #include "inner_string_params.h"
 #include "io/reader_io/reader_io_parameter.h"
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
+#include "simd/bf16_simd.h"
+#include "simd/fp16_simd.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
@@ -223,11 +225,24 @@ create_rerank_flat(const IndexCommonParam& common_param,
 }
 
 std::vector<uint32_t>
-make_top_terms_signature(const SparseVector& vector, uint32_t top_terms) {
+make_top_terms_signature(const SparseVector& vector,
+                         uint32_t top_terms,
+                         DataTypes data_type = DataTypes::DATA_TYPE_FLOAT) {
     std::vector<std::pair<float, uint32_t>> weighted_terms;
     weighted_terms.reserve(vector.len_);
+    bool need_convert =
+        (data_type == DataTypes::DATA_TYPE_FP16 || data_type == DataTypes::DATA_TYPE_BF16);
     for (uint32_t i = 0; i < vector.len_; ++i) {
-        weighted_terms.emplace_back(vector.vals_[i], vector.ids_[i]);
+        float val = vector.vals_[i];
+        if (need_convert) {
+            const auto* fp16_vals = reinterpret_cast<const uint16_t*>(vector.vals_);
+            if (data_type == DataTypes::DATA_TYPE_FP16) {
+                val = generic::FP16ToFloat(fp16_vals[i]);
+            } else {
+                val = generic::BF16ToFloat(fp16_vals[i]);
+            }
+        }
+        weighted_terms.emplace_back(val, vector.ids_[i]);
     }
     auto compare_by_weight = [](const auto& lhs, const auto& rhs) {
         if (lhs.first != rhs.first) {
@@ -255,8 +270,10 @@ make_top_terms_signature(const SparseVector& vector, uint32_t top_terms) {
 }
 
 std::vector<uint64_t>
-make_top_terms_signature_key(const SparseVector& vector, uint32_t top_terms) {
-    auto signature = make_top_terms_signature(vector, top_terms);
+make_top_terms_signature_key(const SparseVector& vector,
+                             uint32_t top_terms,
+                             DataTypes data_type = DataTypes::DATA_TYPE_FLOAT) {
+    auto signature = make_top_terms_signature(vector, top_terms, data_type);
     return {signature.begin(), signature.end()};
 }
 
@@ -269,10 +286,12 @@ struct RerankLayoutRecord {
 void
 write_rerank_flat_with_layout(const FlattenInterfacePtr& rerank_flat,
                               std::vector<RerankLayoutRecord>& records,
-                              uint32_t rerank_layout) {
+                              uint32_t rerank_layout,
+                              DataTypes data_type = DataTypes::DATA_TYPE_FLOAT) {
     if (rerank_layout > 0) {
         for (auto& record : records) {
-            record.signature = make_top_terms_signature_key(*record.vector, rerank_layout);
+            record.signature =
+                make_top_terms_signature_key(*record.vector, rerank_layout, data_type);
         }
         std::sort(records.begin(), records.end(), [](const auto& lhs, const auto& rhs) {
             if (lhs.signature != rhs.signature) {
@@ -406,7 +425,13 @@ SINDIV2::sort_and_prune_sparse_vector_for_build(const SparseVector& input,
     sorted_terms.clear();
     sorted_terms.reserve(input.len_);
     for (uint32_t index = 0; index < input.len_; ++index) {
-        sorted_terms.emplace_back(input.ids_[index], input.vals_[index]);
+        float val = input.vals_[index];
+        if (data_type_ == DataTypes::DATA_TYPE_FP16) {
+            val = generic::FP16ToFloat(reinterpret_cast<const uint16_t*>(input.vals_)[index]);
+        } else if (data_type_ == DataTypes::DATA_TYPE_BF16) {
+            val = generic::BF16ToFloat(reinterpret_cast<const uint16_t*>(input.vals_)[index]);
+        }
+        sorted_terms.emplace_back(input.ids_[index], val);
     }
     std::sort(sorted_terms.begin(), sorted_terms.end(), [](const auto& lhs, const auto& rhs) {
         if (lhs.second != rhs.second) {
@@ -615,7 +640,8 @@ SINDIV2::Add(const DatasetPtr& base) {
                                         static_cast<InnerIdType>(dmq_rerank_vectors.size()));
     }
     if (use_reorder_ && rerank_layout_ > 0) {
-        write_rerank_flat_with_layout(rerank_flat_, rerank_layout_records, rerank_layout_);
+        write_rerank_flat_with_layout(
+            rerank_flat_, rerank_layout_records, rerank_layout_, data_type_);
     }
     metadata_filter_.CommitBuild(
         std::move(metadata_build), first_inner_id, static_cast<uint32_t>(cur_element_count_));
@@ -756,7 +782,8 @@ SINDIV2::build_immutable(const DatasetPtr& base) {
                                         static_cast<InnerIdType>(dmq_rerank_vectors.size()));
     }
     if (use_reorder_ && rerank_layout_ > 0) {
-        write_rerank_flat_with_layout(rerank_flat_, rerank_layout_records, rerank_layout_);
+        write_rerank_flat_with_layout(
+            rerank_flat_, rerank_layout_records, rerank_layout_, data_type_);
     }
     metadata_filter_.CommitBuild(
         std::move(metadata_build), 0, static_cast<uint32_t>(cur_element_count_));
@@ -2093,7 +2120,13 @@ SINDIV2::remap_sparse_vector_for_query(const SparseVector& input,
         auto compact = term_id_mapper_->TryMap(input.ids_[i]);
         if (compact.has_value()) {
             tmp_ids.push_back(compact.value());
-            tmp_vals.push_back(input.vals_[i]);
+            float val = input.vals_[i];
+            if (data_type_ == DataTypes::DATA_TYPE_FP16) {
+                val = generic::FP16ToFloat(reinterpret_cast<const uint16_t*>(input.vals_)[i]);
+            } else if (data_type_ == DataTypes::DATA_TYPE_BF16) {
+                val = generic::BF16ToFloat(reinterpret_cast<const uint16_t*>(input.vals_)[i]);
+            }
+            tmp_vals.push_back(val);
         }
     }
     SparseVector remapped;
