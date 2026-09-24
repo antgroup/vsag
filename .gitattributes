@@ -1,0 +1,2 @@
+# Preserve benchmark artifacts exactly as emitted, including CRLF CSV output and raw log spacing.
+benchs/saq/results/** -text -whitespace

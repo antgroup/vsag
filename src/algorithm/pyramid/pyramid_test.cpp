@@ -1793,3 +1793,29 @@ TEST_CASE("Pyramid scalar RaBitQ split build supports search serialization and A
     check_query(index, count);
     check_query(loaded, count);
 }
+
+TEST_CASE("Pyramid maps SAQ parameters", "[ut][pyramid][SAQ]") {
+    auto external_param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "saq",
+        "saq_avg_bits": 4.5,
+        "saq_segment_count": 2,
+        "saq_adjustment_rounds": 5,
+        "saq_use_pca": true,
+        "saq_random_rotation": false
+    })");
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::PyramidParameters>(mapped);
+    REQUIRE(typed_param != nullptr);
+    const auto base_json = typed_param->base_codes_param->ToJson();
+    const auto quantization = base_json["quantization_params"];
+    REQUIRE(quantization["type"].GetString() == std::string("saq"));
+    REQUIRE(quantization["saq_avg_bits"].GetFloat() == 4.5F);
+    REQUIRE(quantization["saq_segment_count"].GetUint64() == 2);
+    REQUIRE(quantization["saq_adjustment_rounds"].GetUint64() == 5);
+    REQUIRE(quantization["saq_use_pca"].GetBool());
+    REQUIRE_FALSE(quantization["saq_random_rotation"].GetBool());
+}

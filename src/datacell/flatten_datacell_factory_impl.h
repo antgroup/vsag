@@ -142,6 +142,10 @@ MakeFlattenDataCellInstance(const FlattenInterfaceParamPtr& param,
         return MakeFlattenDataCellInstanceWithTQ<RaBitQuantizer<metric>, IOTmpl, metric>(
             param, common_param, is_transform_quantizer);
     }
+    if (actual_quantization == QUANTIZATION_TYPE_VALUE_SAQ) {
+        return MakeFlattenDataCellInstanceWithTQ<SAQQuantizer<metric>, IOTmpl, metric>(
+            param, common_param, is_transform_quantizer);
+    }
 
     throw VsagException(ErrorType::INVALID_ARGUMENT,
                         fmt::format("Unsupported quantization type: {}", actual_quantization));

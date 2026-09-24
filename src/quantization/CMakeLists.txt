@@ -26,6 +26,7 @@ set (QUANTIZER_SRC
         product_quantization/pq_fastscan_quantizer.cpp
         product_quantization/product_quantizer.cpp
         rabitq_quantization/rabitq_quantizer.cpp
+        saq_quantization/saq_quantizer.cpp
         sparse_quantization/sparse_dmq_quantizer.cpp
         quantizer_parameter.cpp
         fp32_quantizer_parameter.cpp
@@ -34,6 +35,7 @@ set (QUANTIZER_SRC
         scalar_quantization/sq4_uniform_quantizer_parameter.cpp
         scalar_quantization/scalar_quantization_trainer.cpp
         rabitq_quantization/rabitq_quantizer_parameter.cpp
+        saq_quantization/saq_quantizer_parameter.cpp
         product_quantization/product_quantizer_parameter.cpp
         product_quantization/pq_fastscan_quantizer_parameter.cpp
         transform_quantization/transform_quantizer_parameter.cpp
