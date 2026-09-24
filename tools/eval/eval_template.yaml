@@ -21,6 +21,7 @@ eval_case1:
     index_path: "/tmp/sift-128-euclidean/index/hgraph_index"
     search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
     topk: 10
+    recall_target: 0.9 # optional for knn/knn_filter, target in [0, 1]
     range: 0.5
     delete_index_after_search: false # free up storage space used by index
     num_threads_building: 16

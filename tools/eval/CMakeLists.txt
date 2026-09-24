@@ -62,7 +62,8 @@ add_dependencies (eval_performance hdf5)
 
 if (ENABLE_TESTS)
     add_executable (eval_dataset_test
-        eval_dataset_test.cpp)
+        eval_dataset_test.cpp
+        query_coverage_test.cpp)
     target_include_directories (eval_dataset_test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries (eval_dataset_test PRIVATE
