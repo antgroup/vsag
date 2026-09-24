@@ -575,9 +575,11 @@ public:
         {
             std::lock_guard lock(this->mutex_);
             if (idx == std::numeric_limits<InnerIdType>::max()) {
-                idx = this->total_count_;
+                idx = this->total_count_.load(std::memory_order_relaxed);
             }
-            this->total_count_ = std::max(this->total_count_, idx + 1);
+            this->total_count_.store(
+                std::max(this->total_count_.load(std::memory_order_relaxed), idx + 1),
+                std::memory_order_release);
         }
         ByteBuffer full_code(this->code_size_, this->allocator_);
         ByteBuffer supplement_code(this->supplement_code_size_, this->allocator_);
@@ -597,9 +599,11 @@ public:
         {
             std::lock_guard lock(this->mutex_);
             if (idx == std::numeric_limits<InnerIdType>::max()) {
-                idx = this->total_count_;
+                idx = this->total_count_.load(std::memory_order_relaxed);
             }
-            this->total_count_ = std::max(this->total_count_, idx + 1);
+            this->total_count_.store(
+                std::max(this->total_count_.load(std::memory_order_relaxed), idx + 1),
+                std::memory_order_release);
         }
         ByteBuffer full_code(this->code_size_, this->allocator_);
         ByteBuffer supplement_code(this->supplement_code_size_, this->allocator_);
@@ -829,7 +833,7 @@ public:
 
     [[nodiscard]] bool
     HasFilterCodes() const override {
-        if (this->total_count_ == 0) {
+        if (this->total_count_.load(std::memory_order_relaxed) == 0) {
             return false;
         }
         ByteBuffer filter_code(this->one_bit_code_size_, this->allocator_);
@@ -841,16 +845,17 @@ public:
         auto ptr = std::dynamic_pointer_cast<
             RaBitQSplitDataCell<metric, OneBitIOTmpl, SupplementIOTmpl, QuantizerT>>(other);
         CHECK_ARGUMENT(ptr != nullptr, "merge supplement codes datacell type mismatch");
-        const InnerIdType final_count = bias + ptr->total_count_;
-        const InnerIdType required_count = std::max(this->total_count_, final_count);
+        const InnerIdType final_count = bias + ptr->total_count_.load(std::memory_order_relaxed);
+        const InnerIdType required_count =
+            std::max(this->total_count_.load(std::memory_order_relaxed), final_count);
         this->supplement_layout_->Resize(required_count);
         ByteBuffer supplement_code(this->supplement_code_size_, this->allocator_);
-        for (InnerIdType id = 0; id < ptr->total_count_; ++id) {
+        for (InnerIdType id = 0; id < ptr->total_count_.load(std::memory_order_relaxed); ++id) {
             CHECK_ARGUMENT(ptr->supplement_layout_->Read(id, supplement_code.data),
                            "failed to read source supplement code");
             this->supplement_layout_->Write(bias + id, supplement_code.data);
         }
-        this->total_count_ = required_count;
+        this->total_count_.store(required_count, std::memory_order_release);
         this->max_capacity_ = std::max(this->max_capacity_, required_count);
     }
 
@@ -1495,7 +1500,8 @@ public:
 
         // Finalize workers write disjoint IDs, but the backing IO must already be fully sized so
         // no worker enters a concurrent reallocation path.
-        const InnerIdType final_capacity = std::max(this->max_capacity_, this->total_count_);
+        const InnerIdType final_capacity =
+            std::max(this->max_capacity_, this->total_count_.load(std::memory_order_relaxed));
         if (not this->external_filter_code_storage_) {
             this->x_bit_layout_->Resize(final_capacity);
         }
@@ -1522,14 +1528,17 @@ public:
 
         const auto& thread_pool = this->optimized_build_context_.thread_pool;
         const uint64_t worker_count = std::min<uint64_t>(
-            this->optimized_build_context_.thread_count, static_cast<uint64_t>(this->total_count_));
+            this->optimized_build_context_.thread_count,
+            static_cast<uint64_t>(this->total_count_.load(std::memory_order_relaxed)));
         constexpr bool supports_parallel_finalize = not std::is_same_v<OneBitIOTmpl, MMapIO> and
                                                     not std::is_same_v<SupplementIOTmpl, MMapIO>;
         // MMapIO writes update shared logical size state even after Resize, so disjoint writes are
         // not thread-safe for that backend.
         if (thread_pool != nullptr and worker_count > 1 and supports_parallel_finalize) {
             const uint64_t block_size =
-                (static_cast<uint64_t>(this->total_count_) + worker_count - 1) / worker_count;
+                (static_cast<uint64_t>(this->total_count_.load(std::memory_order_relaxed)) +
+                 worker_count - 1) /
+                worker_count;
             std::vector<std::future<void>> futures;
             futures.reserve(worker_count);
             auto wait_futures = [&futures]() {
@@ -1551,8 +1560,10 @@ public:
                 }
             };
             try {
-                for (uint64_t begin = 0; begin < this->total_count_; begin += block_size) {
-                    const uint64_t end = std::min<uint64_t>(begin + block_size, this->total_count_);
+                for (uint64_t begin = 0; begin < this->total_count_.load(std::memory_order_relaxed);
+                     begin += block_size) {
+                    const uint64_t end = std::min<uint64_t>(
+                        begin + block_size, this->total_count_.load(std::memory_order_relaxed));
                     futures.emplace_back(
                         thread_pool->GeneralEnqueue(finalize_range,
                                                     static_cast<InnerIdType>(begin),
@@ -1568,7 +1579,7 @@ public:
             }
             wait_futures();
         } else {
-            finalize_range(0, this->total_count_);
+            finalize_range(0, this->total_count_.load(std::memory_order_relaxed));
         }
 
         this->optimized_build_active_ = false;
@@ -1600,7 +1611,7 @@ public:
         {
             std::lock_guard lock(this->mutex_);
             if (idx == std::numeric_limits<InnerIdType>::max()) {
-                idx = this->total_count_;
+                idx = this->total_count_.load(std::memory_order_relaxed);
             }
             // Optimized-build workers write disjoint IDs without locking, so both temporary
             // arrays must be fully sized before the workers start.
@@ -1608,7 +1619,9 @@ public:
                 not this->optimized_build_active_ or
                     static_cast<uint64_t>(idx) < this->optimized_build_code_sums_->size(),
                 "optimized RaBitQ build storage must be resized before inserting vectors");
-            this->total_count_ = std::max(this->total_count_, idx + 1);
+            this->total_count_.store(
+                std::max(this->total_count_.load(std::memory_order_relaxed), idx + 1),
+                std::memory_order_release);
         }
         if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
             return;
@@ -1619,7 +1632,7 @@ public:
     bool
     UpdateVector(const void* vector,
                  InnerIdType idx = std::numeric_limits<InnerIdType>::max()) override {
-        if (idx >= this->total_count_) {
+        if (idx >= this->total_count_.load(std::memory_order_acquire)) {
             return false;
         }
         if (this->fused_code_storage_ != nullptr) {
@@ -2484,7 +2497,7 @@ public:
                                 "Merge rabitq split datacell failed: not match type");
         }
 
-        for (InnerIdType i = 0; i < ptr->total_count_; ++i) {
+        for (InnerIdType i = 0; i < ptr->total_count_.load(std::memory_order_relaxed); ++i) {
             ByteBuffer one_bit(one_bit_code_size_, allocator_);
             ByteBuffer supplement(supplement_code_size_, allocator_);
             ptr->x_bit_layout_->Read(i, one_bit.data);
@@ -2493,7 +2506,13 @@ public:
             this->x_bit_layout_->Write(target_id, one_bit.data);
             this->supplement_layout_->Write(target_id, supplement.data);
         }
-        this->total_count_ = std::max(this->total_count_, bias + ptr->total_count_);
+        auto target =
+            static_cast<InnerIdType>(bias + ptr->total_count_.load(std::memory_order_relaxed));
+        auto prev = this->total_count_.load(std::memory_order_relaxed);
+        while (target > prev &&
+               !this->total_count_.compare_exchange_weak(
+                   prev, target, std::memory_order_release, std::memory_order_relaxed)) {
+        }
     }
 
     void

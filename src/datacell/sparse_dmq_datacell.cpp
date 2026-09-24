@@ -41,7 +41,8 @@ SparseDmqDataCell::SparseDmqDataCell(uint32_t term_id_limit,
 
 const uint8_t*
 SparseDmqDataCell::GetCode(InnerIdType id) const {
-    CHECK_ARGUMENT(id < this->total_count_, "SparseDmqDataCell inner id is out of range");
+    CHECK_ARGUMENT(id < this->total_count_.load(std::memory_order_acquire),
+                   "SparseDmqDataCell inner id is out of range");
     return codes_.data() + offsets_[id];
 }
 
@@ -98,14 +99,14 @@ SparseDmqDataCell::BatchInsertVector(const void* vectors, InnerIdType count, Inn
     CHECK_ARGUMENT(count > 0, "SparseDmqDataCell insertion count must be positive");
     const auto* sparse_vectors = static_cast<const SparseVector*>(vectors);
     std::unique_lock lock(this->mutex_);
-    if (this->total_count_ != 0) {
+    if (this->total_count_.load(std::memory_order_relaxed) != 0) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "SparseDmqDataCell does not support incremental insertion");
     }
     quantizer_->TrainImpl(reinterpret_cast<const float*>(vectors), count);
     offsets_.reserve(offsets_.size() + count);
     for (InnerIdType index = 0; index < count; ++index) {
-        const InnerIdType expected_id = this->total_count_ + index;
+        const InnerIdType expected_id = this->total_count_.load(std::memory_order_relaxed) + index;
         if (idx_vec != nullptr) {
             CHECK_ARGUMENT(idx_vec[index] == expected_id,
                            "SparseDmqDataCell only supports sequential insertion");
@@ -117,8 +118,9 @@ SparseDmqDataCell::BatchInsertVector(const void* vectors, InnerIdType count, Inn
                                   codes_.data() + offset);
         offsets_.push_back(codes_.size());
     }
-    this->total_count_ += count;
-    this->max_capacity_ = std::max(this->max_capacity_, this->total_count_);
+    this->total_count_.fetch_add(count, std::memory_order_release);
+    this->max_capacity_ =
+        std::max(this->max_capacity_, this->total_count_.load(std::memory_order_relaxed));
 }
 
 float
@@ -151,7 +153,7 @@ SparseDmqDataCell::GetSparseVectorByInnerId(InnerIdType inner_id,
 
 void
 SparseDmqDataCell::Prefetch(InnerIdType id) {
-    if (id < this->total_count_) {
+    if (id < this->total_count_.load(std::memory_order_acquire)) {
         __builtin_prefetch(codes_.data() + offsets_[id], 0, 1);
     }
 }
@@ -210,7 +212,8 @@ bool
 SparseDmqDataCell::GetCodesById(InnerIdType id, uint8_t* codes) const {
     CHECK_ARGUMENT(codes != nullptr, "SparseDmqDataCell output codes are null");
     std::shared_lock lock(this->mutex_);
-    CHECK_ARGUMENT(id < this->total_count_, "SparseDmqDataCell inner id is out of range");
+    CHECK_ARGUMENT(id < this->total_count_.load(std::memory_order_acquire),
+                   "SparseDmqDataCell inner id is out of range");
     std::memcpy(codes, GetCode(id), offsets_[id + 1] - offsets_[id]);
     return true;
 }
@@ -220,7 +223,7 @@ SparseDmqDataCell::Serialize(StreamWriter& writer) {
     std::shared_lock lock(this->mutex_);
     StreamWriter::WriteObj(writer, K_SPARSE_DMQ_DATACELL_MAGIC);
     StreamWriter::WriteObj(writer, K_SPARSE_DMQ_DATACELL_VERSION);
-    StreamWriter::WriteObj(writer, this->total_count_);
+    StreamWriter::WriteObj(writer, this->total_count_.load(std::memory_order_acquire));
     StreamWriter::WriteVector(writer, offsets_);
     StreamWriter::WriteVector(writer, codes_);
     quantizer_->Serialize(writer);
@@ -237,17 +240,21 @@ SparseDmqDataCell::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     StreamReader::ReadObj(reader, version);
     CHECK_ARGUMENT(version == K_SPARSE_DMQ_DATACELL_VERSION,
                    fmt::format("unsupported sparse DMQ datacell version {}", version));
-    StreamReader::ReadObj(reader, this->total_count_);
+    InnerIdType val;
+    StreamReader::ReadObj(reader, val);
+    this->total_count_.store(val, std::memory_order_release);
     StreamReader::ReadVector(reader, offsets_);
     StreamReader::ReadVector(reader, codes_);
     quantizer_->Deserialize(reader);
-    CHECK_ARGUMENT(offsets_.size() == static_cast<uint64_t>(this->total_count_) + 1,
-                   "serialized DMQ offset count is inconsistent");
+    CHECK_ARGUMENT(
+        offsets_.size() ==
+            static_cast<uint64_t>(this->total_count_.load(std::memory_order_relaxed)) + 1,
+        "serialized DMQ offset count is inconsistent");
     CHECK_ARGUMENT(not offsets_.empty(), "serialized DMQ offsets are empty");
     CHECK_ARGUMENT(offsets_.front() == 0, "serialized DMQ offsets must start at zero");
     CHECK_ARGUMENT(offsets_.back() == codes_.size(),
                    "serialized DMQ offsets do not match code size");
-    for (InnerIdType id = 0; id < this->total_count_; ++id) {
+    for (InnerIdType id = 0; id < this->total_count_.load(std::memory_order_relaxed); ++id) {
         CHECK_ARGUMENT(offsets_[id] <= offsets_[id + 1], "serialized DMQ offsets are not ordered");
         CHECK_ARGUMENT(offsets_[id + 1] - offsets_[id] >= sizeof(SparseDmqQuantizer::EncodedHeader),
                        "serialized DMQ code is smaller than its header");
@@ -256,7 +263,7 @@ SparseDmqDataCell::Deserialize(LvalueOrRvalue<StreamReader> reader) {
         CHECK_ARGUMENT(offsets_[id + 1] - offsets_[id] == quantizer_->GetEncodedSize(vector),
                        "serialized DMQ code size is inconsistent");
     }
-    this->max_capacity_ = this->total_count_;
+    this->max_capacity_ = this->total_count_.load(std::memory_order_relaxed);
 }
 
 uint64_t

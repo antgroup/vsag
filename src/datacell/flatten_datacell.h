@@ -312,23 +312,26 @@ template <typename QuantTmpl, typename LayoutTmpl>
 void
 FlattenDataCell<QuantTmpl, LayoutTmpl>::InsertVector(const void* vector, InnerIdType idx) {
     {
-        std::lock_guard lock(mutex_);
         if (idx == std::numeric_limits<InnerIdType>::max()) {
-            idx = total_count_;
-            ++total_count_;
+            idx = total_count_.fetch_add(1, std::memory_order_acq_rel);
         } else {
-            total_count_ = std::max(total_count_, idx + 1);
+            auto prev = total_count_.load(std::memory_order_relaxed);
+            while (prev < idx + 1 &&
+                   !total_count_.compare_exchange_weak(
+                       prev, idx + 1, std::memory_order_acq_rel, std::memory_order_relaxed)) {
+            }
         }
     }
     ByteBuffer codes(static_cast<uint64_t>(code_size_), allocator_);
     quantizer_->EncodeOne(static_cast<const float*>(vector), codes.data);
     layout_->Write(idx, codes.data);
+    std::atomic_thread_fence(std::memory_order_release);
 }
 
 template <typename QuantTmpl, typename LayoutTmpl>
 bool
 FlattenDataCell<QuantTmpl, LayoutTmpl>::UpdateVector(const void* vector, InnerIdType idx) {
-    if (idx >= total_count_) {
+    if (idx >= total_count_.load(std::memory_order_acquire)) {
         return false;
     }
     std::lock_guard lock(mutex_);
@@ -348,12 +351,9 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::BatchInsertVector(const void* vectors,
                          allocator_);
         quantizer_->EncodeBatch(static_cast<const float*>(vectors), codes.data, count);
         uint64_t cur_count;
-        {
-            std::lock_guard lock(mutex_);
-            cur_count = total_count_;
-            total_count_ += count;
-        }
+        { cur_count = total_count_.fetch_add(count, std::memory_order_acq_rel); }
         layout_->WriteRange(cur_count, codes.data, count);
+        std::atomic_thread_fence(std::memory_order_release);
     } else {
         bool ids_are_contiguous = count > 0;
         for (InnerIdType i = 1; i < count and ids_are_contiguous; ++i) {
@@ -364,8 +364,14 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::BatchInsertVector(const void* vectors,
                              allocator_);
             quantizer_->EncodeBatch(static_cast<const float*>(vectors), codes.data, count);
             std::lock_guard lock(mutex_);
-            total_count_ = std::max(total_count_, idx_vec[0] + count);
-            layout_->WriteRange(idx_vec[0], codes.data, count);
+            {
+                auto prev = total_count_.load(std::memory_order_relaxed);
+                const auto target = idx_vec[0] + count;
+                if (target > prev) {
+                    total_count_.store(target, std::memory_order_release);
+                }
+                layout_->WriteRange(idx_vec[0], codes.data, count);
+            }
             return;
         }
         auto dim = quantizer_->GetDim();
@@ -541,7 +547,7 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::MergeOther(const FlattenInterfacePtr& ot
                             "Merge flatten datacell failed: not match type");
     }
     constexpr uint64_t BUFFER_SIZE = 1024 * 1024 * 10;
-    uint64_t total_count = ptr->total_count_;
+    uint64_t total_count = ptr->total_count_.load(std::memory_order_acquire);
     uint64_t read_count = 0;
     while (read_count < total_count) {
         uint64_t count = std::min(BUFFER_SIZE / this->code_size_, total_count - read_count);
@@ -553,7 +559,7 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::MergeOther(const FlattenInterfacePtr& ot
         this->layout_->WriteRange(bias + read_count, lease.Data(), count);
         read_count += count;
     }
-    this->total_count_ += total_count;
+    this->total_count_.fetch_add(total_count, std::memory_order_release);
 }
 
 template <typename QuantTmpl, typename LayoutTmpl>
