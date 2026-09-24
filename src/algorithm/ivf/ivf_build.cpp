@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "datacell/graph_datacell_parameter.h"
+#include "impl/graph_build_helper.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/inner_search_param.h"
 #include "impl/pruning_strategy.h"
@@ -312,6 +313,64 @@ private:
     BucketIdType bucket_id_;
 };
 
+struct BucketGraphBuildOperations {
+    struct State {
+        InnerIdType id;
+        uint64_t position;
+        InnerSearchParam param;
+        PairwiseBucketDistanceProvider distance;
+
+        State(InnerIdType id,
+              uint64_t position,
+              const std::shared_ptr<BucketInterface>& bucket,
+              BucketIdType bucket_id)
+            : id(id), position(position), distance(bucket, bucket_id, id) {
+        }
+    };
+    const std::shared_ptr<BucketInterface>& bucket;
+    BucketIdType bucket_id;
+    const GraphInterfacePtr& graph;
+    BasicSearcher& searcher;
+    const VisitedListPtr& visited;
+    const std::shared_ptr<EmptyMutex>& mutexes;
+    Allocator* allocator;
+    InnerIdType entry;
+    uint64_t ef_construction;
+
+    State
+    MakeState(InnerIdType id, uint64_t position) {
+        return {id, position, bucket, bucket_id};
+    }
+    bool
+    Prepare(State& state) {
+        if (state.position == 0) {
+            graph->InsertNeighborsById(state.id, Vector<InnerIdType>(allocator));
+            return true;
+        }
+        state.param.ep = entry;
+        state.param.ef = std::min(ef_construction, state.position);
+        state.param.topk = static_cast<int64_t>(state.param.ef);
+        visited->Reset();
+        return false;
+    }
+    DistHeapPtr
+    Search(State& state) {
+        return searcher.Search(graph, state.distance, visited, state.param, nullptr, nullptr);
+    }
+    static bool
+    AcceptDuplicate(const State& /*state*/, const DistHeapPtr& /*candidates*/) {
+        return false;
+    }
+    void
+    Connect(State& state, const DistHeapPtr& candidates) {
+        mutually_connect_new_element(
+            state.id, candidates, graph, state.distance, mutexes, allocator);
+    }
+    void
+    Finish(const State& /*state*/) {
+    }
+};
+
 void
 IVF::build_bucket_graphs() {
     if (graph_build_threshold_ <= 0) {
@@ -359,21 +418,11 @@ IVF::build_bucket_graphs() {
         BasicSearcher searcher(common_param_);
 
         const auto entry = valid_ids.front();
-        graph->InsertNeighborsById(entry, Vector<InnerIdType>(allocator_));
         auto visited = std::make_shared<VisitedList>(bucket_size, allocator_);
-        for (uint64_t node_pos = 1; node_pos < valid_ids.size(); ++node_pos) {
-            const auto node = valid_ids[node_pos];
-            InnerSearchParam search_param;
-            search_param.ep = entry;
-            search_param.ef = std::min(ef_construction, node_pos);
-            search_param.topk = static_cast<int64_t>(search_param.ef);
-            PairwiseBucketDistanceProvider distance_provider(bucket_, b, node);
-            visited->Reset();
-            auto candidates =
-                searcher.Search(graph, distance_provider, visited, search_param, nullptr, nullptr);
-            mutually_connect_new_element(
-                node, candidates, graph, distance_provider, mutexes, allocator_);
-        }
+        BucketGraphBuildOperations operations{
+            bucket_, b, graph, searcher, visited, mutexes, allocator_, entry, ef_construction};
+        GraphBuildProgress progress;
+        GraphBuildHelper::AppendIds(valid_ids, progress, operations);
 
         bucket_graphs_[b] = std::move(graph);
     };

@@ -34,6 +34,7 @@
 #include "datacell/graph_datacell_parameter.h"
 #include "dataset_impl.h"
 #include "impl/distance_provider_for_graph.h"
+#include "impl/graph_build_helper.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pipnn/pipnn_graph_builder.h"
@@ -2294,6 +2295,107 @@ Pyramid::add_graph_point(const Hierarchy& hierarchy,
     add_bottom_graph_point(hierarchy, node, inner_id, vector, ef_construction, use_self_as_entry);
 }
 
+struct Pyramid::BottomGraphBuildOperations {
+    struct State {
+        InnerIdType id;
+        const float* vector;
+        InnerSearchParam search_param;
+        FlattenInterfacePtr codes;
+        bool update_entry_point{false};
+
+        State(InnerIdType id, const float* vector) : id(id), vector(vector) {
+        }
+    };
+    Pyramid& owner;
+    const Hierarchy& hierarchy;
+    IndexNode& node;
+    uint64_t ef_construction;
+    bool use_self_as_entry;
+    const float* vector;
+    FlattenInterfacePtr decode_codes{nullptr};
+    float* decoded_vector{nullptr};
+
+    State
+    MakeState(InnerIdType id, uint64_t /*processed*/) const {
+        return State{id, vector};
+    }
+
+    bool
+    Prepare(State& state) {
+        if (decode_codes != nullptr) {
+            auto buffer = decode_codes->AcquireCodesById(state.id);
+            if (not(buffer and decode_codes->Decode(buffer.Data(), decoded_vector))) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "Pyramid graph promotion requires decodable vectors");
+            }
+            state.vector = decoded_vector;
+        }
+        if (node.graph_->TotalCount() == 0) {
+            node.graph_->InsertNeighborsById(state.id, Vector<InnerIdType>(owner.allocator_));
+            node.entry_point_ = state.id;
+            return true;
+        }
+        const auto ef = ef_construction == 0 ? hierarchy.ef_construction : ef_construction;
+        auto& param = state.search_param;
+        param.ef = ef;
+        param.topk = static_cast<int64_t>(ef);
+        param.search_mode = KNN_SEARCH;
+        param.hops_limit = 10000;
+        if (owner.support_duplicate_) {
+            param.find_duplicate = true;
+            param.duplicate_query_id = state.id;
+        }
+        state.codes = owner.construction_codes();
+        {
+            std::scoped_lock<std::mutex> random_lock(owner.random_generator_mutex_);
+            state.update_entry_point = owner.is_update_entry_point(node.graph_->TotalCount());
+        }
+        bool cached = false;
+        if (use_self_as_entry) {
+            SharedLock point_lock(owner.points_mutex_, state.id);
+            cached = node.graph_->GetNeighborSize(state.id) > 0;
+        }
+        param.ep = use_self_as_entry && cached ? state.id : node.entry_point_;
+        return false;
+    }
+    DistHeapPtr
+    Search(State& state) {
+        return owner.search_graph_for_add(
+            node.graph_, state.codes, state.id, state.vector, state.search_param);
+    }
+    bool
+    AcceptDuplicate(State& state, const DistHeapPtr& /*candidates*/) {
+        if (owner.support_duplicate_ && state.search_param.duplicate_id >= 0) {
+            std::unique_lock lock(owner.label_lookup_mutex_);
+            node.graph_->SetDuplicateId(static_cast<InnerIdType>(state.search_param.duplicate_id),
+                                        state.id);
+            return true;
+        }
+        return false;
+    }
+    void
+    Connect(State& state, const DistHeapPtr& candidates) {
+        if (use_self_as_entry) {
+            owner.connect_cached_graph_point(
+                state.id, state.vector, candidates, node.graph_, state.codes, hierarchy.alpha);
+        } else {
+            mutually_connect_new_element(state.id,
+                                         candidates,
+                                         node.graph_,
+                                         state.codes,
+                                         owner.points_mutex_,
+                                         owner.allocator_,
+                                         hierarchy.alpha);
+        }
+    }
+    void
+    Finish(const State& state) {
+        if (state.update_entry_point) {
+            node.entry_point_ = state.id;
+        }
+    }
+};
+
 void
 Pyramid::add_bottom_graph_point(const Hierarchy& hierarchy,
                                 IndexNode& node,
@@ -2302,55 +2404,16 @@ Pyramid::add_bottom_graph_point(const Hierarchy& hierarchy,
                                 uint64_t ef_construction,
                                 bool use_self_as_entry) {
     std::unique_lock graph_lock(node.mutex_);
-    if (node.graph_->TotalCount() == 0) {
-        node.graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
-        node.entry_point_ = inner_id;
-    } else {
-        const uint64_t effective_ef =
-            ef_construction == 0 ? hierarchy.ef_construction : ef_construction;
-        InnerSearchParam search_param;
-        search_param.ef = effective_ef;
-        search_param.topk = static_cast<int64_t>(effective_ef);
-        search_param.search_mode = KNN_SEARCH;
-        search_param.hops_limit = 10000;
-        if (support_duplicate_) {
-            search_param.find_duplicate = true;
-            search_param.duplicate_query_id = inner_id;
-        }
-        auto codes = construction_codes();
-        bool update_entry_point;
-        {
-            std::scoped_lock<std::mutex> random_lock(random_generator_mutex_);
-            update_entry_point = is_update_entry_point(node.graph_->TotalCount());
-        }
-        bool has_cached_neighbors = false;
-        if (use_self_as_entry) {
-            SharedLock point_lock(points_mutex_, inner_id);
-            has_cached_neighbors = node.graph_->GetNeighborSize(inner_id) > 0;
-        }
-        search_param.ep = use_self_as_entry && has_cached_neighbors ? inner_id : node.entry_point_;
-        if (not update_entry_point) {
-            graph_lock.unlock();
-        }
-
-        auto results = search_graph_for_add(node.graph_, codes, inner_id, vector, search_param);
-        if (this->support_duplicate_ && search_param.duplicate_id >= 0) {
-            std::unique_lock lock(this->label_lookup_mutex_);
-            node.graph_->SetDuplicateId(static_cast<InnerIdType>(search_param.duplicate_id),
-                                        inner_id);
-            return;
-        }
-        if (use_self_as_entry) {
-            connect_cached_graph_point(
-                inner_id, vector, results, node.graph_, codes, hierarchy.alpha);
-        } else {
-            mutually_connect_new_element(
-                inner_id, results, node.graph_, codes, points_mutex_, allocator_, hierarchy.alpha);
-        }
-        if (update_entry_point) {
-            node.entry_point_ = inner_id;
-        }
+    BottomGraphBuildOperations operations{
+        *this, hierarchy, node, ef_construction, use_self_as_entry, vector};
+    auto state = operations.MakeState(inner_id, 0);
+    if (operations.Prepare(state)) {
+        return;
     }
+    if (not state.update_entry_point) {
+        graph_lock.unlock();
+    }
+    GraphBuildHelper::RunPrepared(operations, state);
 }
 
 void
@@ -2398,23 +2461,15 @@ Pyramid::add_one_point(const Hierarchy& hierarchy,
         graph_node.ids_ = node->ids_;
         graph_node.Init();
 
-        if (base_codes_->SupportSplitCodeStorage() and raw_vector_ == nullptr) {
-            for (const auto id : node->ids_) {
-                add_one_point(hierarchy, &graph_node, id, nullptr);
-            }
-        } else {
-            auto codes = decodable_codes();
-            Vector<float> decoded_vector(dim_, allocator_);
-            for (const auto id : node->ids_) {
-                auto buffer = codes->AcquireCodesById(id);
-                const bool decoded = buffer and codes->Decode(buffer.Data(), decoded_vector.data());
-                if (not decoded) {
-                    throw VsagException(ErrorType::INTERNAL_ERROR,
-                                        "Pyramid graph promotion requires decodable vectors");
-                }
-                add_one_point(hierarchy, &graph_node, id, decoded_vector.data());
-            }
-        }
+        // A FLAT node cannot have routing (IndexNode::Init forces routed nodes to GRAPH).
+        // Replay only the bottom-layer candidate, without recursive state/lock dispatch.
+        const bool id_distance = base_codes_->SupportSplitCodeStorage() and raw_vector_ == nullptr;
+        auto decode_codes = id_distance ? nullptr : decodable_codes();
+        Vector<float> decoded_vector(id_distance ? 0 : dim_, allocator_);
+        BottomGraphBuildOperations operations{
+            *this, hierarchy, graph_node, 0, false, nullptr, decode_codes, decoded_vector.data()};
+        GraphBuildProgress progress;
+        GraphBuildHelper::AppendIds(node->ids_, progress, operations);
 
         node->graph_ = std::move(graph_node.graph_);
         node->graph_param_ = std::move(graph_node.graph_param_);

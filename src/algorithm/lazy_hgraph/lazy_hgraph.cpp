@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "dataset_impl.h"
+#include "impl/graph_build_helper.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "storage/stream_reader.h"
@@ -220,10 +221,10 @@ LazyHGraph::TransitionToGraph() {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to get lazy_hgraph vectors");
     }
 
-    auto new_graph = std::make_shared<HGraph>(graph_param_, this->common_param_);
-    new_graph->InitFeatures();
-    auto failed_ids = new_graph->Build(build_data);
-    CHECK_ARGUMENT(failed_ids.empty(), "lazy_hgraph transition failed to build all ids");
+    auto new_graph = GraphBuildHelper::BuildIndexCandidate(
+        [&] { return std::make_shared<HGraph>(graph_param_, this->common_param_); },
+        build_data,
+        "lazy_hgraph transition failed to build all ids");
     graph_index_ = new_graph;
     flat_index_.reset();
     phase_.store(Phase::GRAPH, std::memory_order_release);
