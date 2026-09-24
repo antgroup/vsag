@@ -24,6 +24,8 @@
 #include <utility>
 
 #include "common.h"
+#include "simd/bf16_simd.h"
+#include "simd/fp16_simd.h"
 
 namespace vsag {
 namespace {
@@ -126,6 +128,16 @@ sort_sparse_vector(const SparseVector& vector, Allocator* allocator) {
 
 }  // namespace
 
+static float
+half_to_float(uint16_t val, DataTypes data_type) {
+    if (data_type == DataTypes::DATA_TYPE_FP16) {
+        return generic::FP16ToFloat(val);
+    }
+    CHECK_ARGUMENT(data_type == DataTypes::DATA_TYPE_BF16,
+                   "half_to_float only supports FP16 and BF16 data types");
+    return generic::BF16ToFloat(val);
+}
+
 struct SparseDmqQuantizer::QueryData {
     explicit QueryData(Allocator* allocator)
         : ids(allocator), values(allocator), term_to_index(allocator), code_lut(allocator) {
@@ -140,7 +152,8 @@ struct SparseDmqQuantizer::QueryData {
 
 SparseDmqQuantizer::SparseDmqQuantizer(uint32_t term_id_limit,
                                        Allocator* allocator,
-                                       uint32_t shared_codebook_threshold)
+                                       uint32_t shared_codebook_threshold,
+                                       DataTypes data_type)
     : Quantizer<SparseDmqQuantizer>(0, allocator),
       term_ids_(allocator),
       codebooks_(allocator),
@@ -148,7 +161,8 @@ SparseDmqQuantizer::SparseDmqQuantizer(uint32_t term_id_limit,
       compact_id_by_term_id_(allocator),
       compact_id_lookup_(allocator),
       id_bits_(get_bits_for_value_limit(term_id_limit)),
-      shared_codebook_threshold_(shared_codebook_threshold) {
+      shared_codebook_threshold_(shared_codebook_threshold),
+      data_type_(data_type) {
     this->metric_ = MetricType::METRIC_TYPE_IP;
     this->code_size_ = 0;
 }
@@ -284,14 +298,22 @@ SparseDmqQuantizer::TrainImpl(const float* data, uint64_t count) {
     UnorderedMap<uint32_t, uint32_t> term_indexes(this->allocator_);
     Vector<uint32_t> term_ids(this->allocator_);
     Vector<uint64_t> term_counts(this->allocator_);
+    bool need_convert =
+        (data_type_ == DataTypes::DATA_TYPE_FP16 || data_type_ == DataTypes::DATA_TYPE_BF16);
     for (uint64_t vector_index = 0; vector_index < count; ++vector_index) {
+        const auto& vec = vectors[vector_index];
         double sum = 0.0;
-        for (uint32_t index = 0; index < vectors[vector_index].len_; ++index) {
-            sum += vectors[vector_index].vals_[index];
+        if (need_convert) {
+            const auto* fp16_vals = reinterpret_cast<const uint16_t*>(vec.vals_);
+            for (uint32_t index = 0; index < vec.len_; ++index) {
+                sum += half_to_float(fp16_vals[index], data_type_);
+            }
+        } else {
+            for (uint32_t index = 0; index < vec.len_; ++index) {
+                sum += vec.vals_[index];
+            }
         }
-        means[vector_index] = vectors[vector_index].len_ == 0
-                                  ? 0.0F
-                                  : static_cast<float>(sum / vectors[vector_index].len_);
+        means[vector_index] = vec.len_ == 0 ? 0.0F : static_cast<float>(sum / vec.len_);
         for (uint32_t index = 0; index < vectors[vector_index].len_; ++index) {
             const uint32_t term_id = vectors[vector_index].ids_[index];
             if (compact_id_by_term_id_.find(term_id) != compact_id_by_term_id_.end()) {
@@ -345,13 +367,18 @@ SparseDmqQuantizer::TrainImpl(const float* data, uint64_t count) {
     Vector<uint64_t> cursors(offsets.begin(), offsets.end(), this->allocator_);
     Vector<float> residuals(offsets.back(), this->allocator_);
     for (uint64_t vector_index = 0; vector_index < count; ++vector_index) {
-        for (uint32_t index = 0; index < vectors[vector_index].len_; ++index) {
-            auto iterator = term_indexes.find(vectors[vector_index].ids_[index]);
+        const auto& vec = vectors[vector_index];
+        for (uint32_t index = 0; index < vec.len_; ++index) {
+            auto iterator = term_indexes.find(vec.ids_[index]);
             if (iterator == term_indexes.end()) {
                 continue;
             }
             const uint32_t bucket = training_bucket_by_term[iterator->second];
-            residuals[cursors[bucket]++] = vectors[vector_index].vals_[index] - means[vector_index];
+            float val =
+                need_convert
+                    ? half_to_float(reinterpret_cast<const uint16_t*>(vec.vals_)[index], data_type_)
+                    : vec.vals_[index];
+            residuals[cursors[bucket]++] = val - means[vector_index];
         }
     }
 
@@ -377,7 +404,17 @@ SparseDmqQuantizer::TrainImpl(const float* data, uint64_t count) {
 bool
 SparseDmqQuantizer::EncodeOneImpl(const float* data, uint8_t* codes) const {
     const auto& vector = *reinterpret_cast<const SparseVector*>(data);
-    auto [ids, values] = sort_sparse_vector(vector, this->allocator_);
+    SparseVector converted = vector;
+    Vector<float> converted_vals(this->allocator_);
+    if (data_type_ == DataTypes::DATA_TYPE_FP16 || data_type_ == DataTypes::DATA_TYPE_BF16) {
+        const auto* fp16_vals = reinterpret_cast<const uint16_t*>(vector.vals_);
+        converted_vals.resize(vector.len_);
+        for (uint32_t i = 0; i < vector.len_; ++i) {
+            converted_vals[i] = half_to_float(fp16_vals[i], data_type_);
+        }
+        converted.vals_ = converted_vals.data();
+    }
+    auto [ids, values] = sort_sparse_vector(converted, this->allocator_);
     EncodedHeader header;
     header.len = vector.len_;
     double sum = std::accumulate(values.begin(), values.end(), 0.0);
@@ -495,8 +532,18 @@ SparseDmqQuantizer::ProcessQueryImpl(const float* query,
                                      Computer<SparseDmqQuantizer>& computer) const {
     void* memory = this->allocator_->Allocate(sizeof(QueryData));
     auto* query_data = new (memory) QueryData(this->allocator_);
-    auto [ids, values] =
-        sort_sparse_vector(*reinterpret_cast<const SparseVector*>(query), this->allocator_);
+    const auto& sv = *reinterpret_cast<const SparseVector*>(query);
+    SparseVector converted = sv;
+    Vector<float> converted_vals(this->allocator_);
+    if (data_type_ == DataTypes::DATA_TYPE_FP16 || data_type_ == DataTypes::DATA_TYPE_BF16) {
+        const auto* fp16_vals = reinterpret_cast<const uint16_t*>(sv.vals_);
+        converted_vals.resize(sv.len_);
+        for (uint32_t i = 0; i < sv.len_; ++i) {
+            converted_vals[i] = half_to_float(fp16_vals[i], data_type_);
+        }
+        converted.vals_ = converted_vals.data();
+    }
+    auto [ids, values] = sort_sparse_vector(converted, this->allocator_);
     Vector<uint32_t> compact_ids(this->allocator_);
     Vector<float> matched_values(this->allocator_);
     compact_ids.reserve(ids.size());
