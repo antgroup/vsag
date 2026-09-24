@@ -335,6 +335,21 @@ Factory::CreateIndex(const std::string& origin_name,
     return e.CreateIndex(origin_name, parameters);
 }
 
+tl::expected<std::shared_ptr<Index>, Error>
+Factory::CreateIndex(const std::string& origin_name,
+                     const std::string& parameters,
+                     const UserDefinedIOSet& user_defined_ios,
+                     Allocator* allocator) {
+    std::shared_ptr<Resource> resource{nullptr};
+    if (allocator == nullptr) {
+        resource = std::make_shared<Resource>(Engine::CreateDefaultAllocator(), nullptr);
+    } else {
+        resource = std::make_shared<Resource>(allocator, nullptr);
+    }
+    Engine e(resource.get());
+    return e.CreateIndex(origin_name, parameters, user_defined_ios);
+}
+
 tl::expected<StreamingIndexMetadata, Error>
 Index::GetStreamingMetadata(std::istream& in_stream) {
     try {
@@ -562,14 +577,17 @@ public:
     ReadFuncReader(ReadFunc read_func, uint64_t base_offset, uint64_t size)
         : read_func_(std::move(read_func)), base_offset_(base_offset), size_(size) {
         if (!read_func_) {
-            throw std::runtime_error("ReadFuncReader: read_func is empty");
+            throw std::invalid_argument("ReadFuncReader: read_func is empty");
         }
     }
 
     void
     Read(uint64_t offset, uint64_t len, void* dest) override {
         if (offset > size_ || len > size_ - offset) {
-            throw std::runtime_error("ReadFuncReader: read range is out of bounds");
+            throw std::invalid_argument("ReadFuncReader: read range is out of bounds");
+        }
+        if (len > 0 and dest == nullptr) {
+            throw std::invalid_argument("ReadFuncReader: read destination is null");
         }
         std::lock_guard<std::mutex> lock(read_mutex_);
         read_func_(base_offset_ + offset, len, dest);
@@ -597,6 +615,102 @@ private:
     std::mutex read_mutex_;
 };
 
+class CallbackStorage final : public Reader, public Writer {
+public:
+    CallbackStorage(ReadFunc read_func,
+                    WriteFunc write_func,
+                    ResizeFunc resize_func,
+                    uint64_t initial_size)
+        : read_func_(std::move(read_func)),
+          write_func_(std::move(write_func)),
+          resize_func_(std::move(resize_func)),
+          size_(initial_size) {
+        if (!read_func_ or !write_func_ or !resize_func_) {
+            throw std::invalid_argument("user defined IO callbacks must not be empty");
+        }
+    }
+
+    void
+    Read(uint64_t offset, uint64_t len, void* dest) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (offset > size_ or len > size_ - offset) {
+            throw std::invalid_argument("user defined IO read range is out of bounds");
+        }
+        if (len > 0 and dest == nullptr) {
+            throw std::invalid_argument("user defined IO read destination is null");
+        }
+        if (len > 0) {
+            read_func_(offset, len, dest);
+        }
+    }
+
+    void
+    AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
+        if (!callback) {
+            throw std::invalid_argument("user defined IO completion callback must not be empty");
+        }
+        auto code = IOErrorCode::IO_SUCCESS;
+        std::string message = "success";
+        try {
+            Read(offset, len, dest);
+        } catch (const std::exception& error) {
+            code = IOErrorCode::IO_ERROR;
+            message = error.what();
+        } catch (...) {
+            code = IOErrorCode::IO_ERROR;
+            message = "user defined IO read failed";
+        }
+        // Completion exceptions propagate to the caller; they indicate a callback contract
+        // violation and must not be silently swallowed.
+        callback(code, message);
+    }
+
+    [[nodiscard]] uint64_t
+    Size() const override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return size_;
+    }
+
+    void
+    Write(uint64_t offset, uint64_t len, const void* source) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (len > 0 and source == nullptr) {
+            throw std::invalid_argument("user defined IO write source is null");
+        }
+        if (offset > UINT64_MAX - len) {
+            throw std::invalid_argument("user defined IO write range overflows");
+        }
+        if (len == 0) {
+            if (offset > size_) {
+                resize_locked(offset);
+            }
+            return;
+        }
+        write_func_(offset, len, source);
+        size_ = std::max(size_, offset + len);
+    }
+
+    void
+    Resize(uint64_t size) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        resize_locked(size);
+    }
+
+private:
+    // The caller holds mutex_; publish the logical size only after the callback succeeds.
+    void
+    resize_locked(uint64_t size) {
+        resize_func_(size);
+        size_ = size;
+    }
+
+    ReadFunc read_func_;
+    WriteFunc write_func_;
+    ResizeFunc resize_func_;
+    mutable std::mutex mutex_;
+    uint64_t size_{0};
+};
+
 std::shared_ptr<Reader>
 Factory::CreateReadFuncReader(ReadFunc read_func, uint64_t size) {
     return std::make_shared<ReadFuncReader>(std::move(read_func), 0, size);
@@ -605,6 +719,16 @@ Factory::CreateReadFuncReader(ReadFunc read_func, uint64_t size) {
 std::shared_ptr<Reader>
 Factory::CreateReadFuncReader(ReadFunc read_func, uint64_t base_offset, uint64_t size) {
     return std::make_shared<ReadFuncReader>(std::move(read_func), base_offset, size);
+}
+
+UserDefinedIOPair
+Factory::CreateUserDefinedIO(ReadFunc read_func,
+                             WriteFunc write_func,
+                             ResizeFunc resize_func,
+                             uint64_t initial_size) {
+    auto storage = std::make_shared<CallbackStorage>(
+        std::move(read_func), std::move(write_func), std::move(resize_func), initial_size);
+    return UserDefinedIOPair{storage, storage};
 }
 
 }  // namespace vsag

@@ -33,6 +33,7 @@ enum class IOKind : uint8_t {
     ASYNC,
     URING,
     READER,
+    USER_DEFINED,
 };
 
 /**
