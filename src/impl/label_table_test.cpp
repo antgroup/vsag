@@ -286,3 +286,36 @@ TEST_CASE("LabelTable keeps duplicate records unchanged after invalid input",
     REQUIRE(duplicate_ids.size() == 1);
     REQUIRE(duplicate_ids.contains(1));
 }
+
+TEST_CASE("LabelTable restores only the logical label range", "[ut][LabelTable]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    for (const auto& labels : {std::vector<LabelType>{0, 10},
+                               std::vector<LabelType>{10, 0},
+                               std::vector<LabelType>{10, 20}}) {
+        LabelTable source(allocator.get(), true, true);
+        source.Resize(32);
+        source.Insert(0, labels[0]);
+        source.Insert(1, labels[1]);
+        source.SetDuplicateId(0, 1);
+        std::stringstream stream;
+        IOStreamWriter writer(stream);
+        source.Serialize(writer);
+        ForwardOnlyStreamReader reader(stream.str());
+        LabelTable restored(allocator.get(), true, true);
+        restored.Deserialize(reader, true);
+        REQUIRE_THROWS_AS(restored.RestoreLogicalCount(33), VsagException);
+        restored.RestoreLogicalCount(2);
+        REQUIRE(restored.GetTotalCount() == 2);
+        REQUIRE(restored.GetRemapSize() == 2);
+        REQUIRE(restored.GetIdByLabel(labels[0]) == 0);
+        REQUIRE(restored.GetIdByLabel(labels[1]) == 1);
+        REQUIRE(restored.GetDuplicateId(0).contains(1));
+        REQUIRE_FALSE(restored.CheckLabel(99));
+        if (labels[1] == 20) {
+            REQUIRE_FALSE(restored.CheckLabel(0));
+        }
+        restored.RestoreLogicalCount(0);
+        REQUIRE(restored.GetTotalCount() == 0);
+        REQUIRE(restored.GetRemapSize() == 0);
+    }
+}

@@ -1382,7 +1382,7 @@ HGraph::serialize_label_info(StreamWriter& writer) const {
 void
 HGraph::deserialize_label_info(StreamReader& reader) const {
     if (this->label_table_->CompressDuplicateData()) {
-        this->label_table_->Deserialize(reader);
+        this->label_table_->Deserialize(reader, true);
         return;
     }
     StreamReader::ReadVector(reader, this->label_table_->label_table_);
@@ -1550,6 +1550,9 @@ HGraph::deserialize(StreamReader& reader, bool force_v0_14) {
         this->deserialize_label_info(buffer_reader);
 
         this->basic_flatten_codes_->Deserialize(buffer_reader);
+        if (this->label_table_->CompressDuplicateData()) {
+            this->label_table_->RestoreLogicalCount(this->basic_flatten_codes_->TotalCount());
+        }
         this->bottom_graph_->Deserialize(buffer_reader);
         if (this->use_reorder_) {
             this->high_precise_codes_->Deserialize(buffer_reader);
