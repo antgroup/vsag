@@ -1987,6 +1987,14 @@ RaBitQuantizer<metric>::ComputeQueryBaseImpl(const uint8_t* query_codes,
         // num_bits_per_dim_query_ == 4 and num_bits_per_dim_base_ != 1: not support for now
     }
 
+    return this->RecoverQueryBaseDistance(query_codes, base_codes, ip_bq_estimate);
+}
+
+template <MetricType metric>
+float
+RaBitQuantizer<metric>::RecoverQueryBaseDistance(const uint8_t* query_codes,
+                                                 const uint8_t* base_codes,
+                                                 float ip_bq_estimate) const {
     norm_type query_norm = *((norm_type*)(query_codes + query_offset_norm_));
     norm_type base_norm = *((norm_type*)(base_codes + offset_norm_));
 
@@ -3171,6 +3179,39 @@ RaBitQuantizer<metric>::ComputeDistImpl(Computer<RaBitQuantizer>& computer,
                                         const uint8_t* codes,
                                         float* dists) const {
     dists[0] = this->ComputeQueryBaseImpl(computer.buf_, codes);
+}
+
+template <MetricType metric>
+void
+RaBitQuantizer<metric>::ComputeDistsBatch4Impl(Computer<RaBitQuantizer>& computer,
+                                               const uint8_t* codes1,
+                                               const uint8_t* codes2,
+                                               const uint8_t* codes3,
+                                               const uint8_t* codes4,
+                                               float& dist1,
+                                               float& dist2,
+                                               float& dist3,
+                                               float& dist4) const {
+    if (num_bits_per_dim_query_ == 32 and num_bits_per_dim_base_ == 1) {
+        float estimates[4];
+        RaBitQFloatBinaryIPBatch4(reinterpret_cast<const float*>(computer.buf_),
+                                  codes1,
+                                  codes2,
+                                  codes3,
+                                  codes4,
+                                  this->dim_,
+                                  inv_sqrt_d_,
+                                  estimates);
+        dist1 = this->RecoverQueryBaseDistance(computer.buf_, codes1, estimates[0]);
+        dist2 = this->RecoverQueryBaseDistance(computer.buf_, codes2, estimates[1]);
+        dist3 = this->RecoverQueryBaseDistance(computer.buf_, codes3, estimates[2]);
+        dist4 = this->RecoverQueryBaseDistance(computer.buf_, codes4, estimates[3]);
+    } else {
+        dist1 = this->ComputeQueryBaseImpl(computer.buf_, codes1);
+        dist2 = this->ComputeQueryBaseImpl(computer.buf_, codes2);
+        dist3 = this->ComputeQueryBaseImpl(computer.buf_, codes3);
+        dist4 = this->ComputeQueryBaseImpl(computer.buf_, codes4);
+    }
 }
 
 template <MetricType metric>

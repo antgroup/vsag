@@ -1020,6 +1020,46 @@ TEST_CASE("RaBitQ Encode and Decode", "[ut][RaBitQuantizer]") {
     }
 }
 
+template <MetricType metric>
+void
+CheckRaBitQBatch4(uint64_t base_bits) {
+    constexpr uint64_t dim = 64;
+    constexpr uint64_t count = 100;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto vectors = fixtures::generate_vectors(count, dim);
+    RaBitQuantizer<metric> quantizer(dim, dim, 32, base_bits, true, false, allocator.get());
+    REQUIRE(quantizer.TrainImpl(vectors.data(), count));
+
+    auto computer = quantizer.FactoryComputer();
+    computer->SetQuery(vectors.data() + 4 * dim);
+    const uint64_t code_size = quantizer.GetCodeSize();
+    std::vector<uint8_t> codes(4 * code_size);
+    for (uint64_t i = 0; i < 4; ++i) {
+        REQUIRE(quantizer.EncodeOne(vectors.data() + i * dim, codes.data() + i * code_size));
+    }
+
+    float actual[4]{};
+    computer->ComputeDistsBatch4(codes.data(),
+                                 codes.data() + code_size,
+                                 codes.data() + 2 * code_size,
+                                 codes.data() + 3 * code_size,
+                                 actual[0],
+                                 actual[1],
+                                 actual[2],
+                                 actual[3]);
+    for (uint64_t i = 0; i < 4; ++i) {
+        const float expected = quantizer.ComputeDist(*computer, codes.data() + i * code_size);
+        REQUIRE(fixtures::dist_t(actual[i]) == fixtures::dist_t(expected));
+    }
+}
+
+TEST_CASE("RaBitQ Batch4 matches single distances", "[ut][RaBitQuantizer][batch4]") {
+    CheckRaBitQBatch4<MetricType::METRIC_TYPE_L2SQR>(1);
+    CheckRaBitQBatch4<MetricType::METRIC_TYPE_COSINE>(1);
+    CheckRaBitQBatch4<MetricType::METRIC_TYPE_IP>(1);
+    CheckRaBitQBatch4<MetricType::METRIC_TYPE_L2SQR>(2);
+}
+
 TEST_CASE("RaBitQ Compute", "[ut][RaBitQuantizer]") {
     auto use_fht = GENERATE(true, false);
     auto num_bits_per_dim_query = GENERATE(4, 32);

@@ -116,6 +116,11 @@ public:
     float
     ComputeQueryBaseImpl(const uint8_t* query_codes, const uint8_t* base_codes) const;
 
+    float
+    RecoverQueryBaseDistance(const uint8_t* query_codes,
+                             const uint8_t* base_codes,
+                             float ip_bq_estimate) const;
+
     void
     ProcessQueryImpl(const float* query, Computer<RaBitQuantizer>& computer) const;
 
@@ -225,6 +230,17 @@ public:
 
     void
     ComputeDistImpl(Computer<RaBitQuantizer>& computer, const uint8_t* codes, float* dists) const;
+
+    void
+    ComputeDistsBatch4Impl(Computer<RaBitQuantizer>& computer,
+                           const uint8_t* codes1,
+                           const uint8_t* codes2,
+                           const uint8_t* codes3,
+                           const uint8_t* codes4,
+                           float& dist1,
+                           float& dist2,
+                           float& dist3,
+                           float& dist4) const;
 
     void
     ScanBatchDistImpl(Computer<RaBitQuantizer<metric>>& computer,

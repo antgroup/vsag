@@ -405,6 +405,77 @@ TEST_CASE("RaBitQ FP32-BQ SIMD Batch4 Compute Codes", "[ut][simd]") {
     }
 }
 
+TEST_CASE("RaBitQ FP32-BQ Batch4 preserves legacy high-dimensional coding", "[ut][simd]") {
+    const uint64_t dim = GENERATE(1000000ULL, 1000001ULL, 1048576ULL);
+    const uint64_t code_size = (dim + 7) / 8;
+    const float inv_sqrt_d = 1.0F / std::sqrt(static_cast<float>(dim));
+    if (dim == 1000000) {
+        REQUIRE(inv_sqrt_d > 1e-3);
+        REQUIRE(inv_sqrt_d == 1e-3F);
+    } else {
+        REQUIRE(inv_sqrt_d < 1e-3F);
+    }
+
+    std::vector<float> query(dim, 0.0F);
+    query[0] = 1.0F;
+    std::vector<uint8_t> codes(code_size * 4, 0);
+    codes[0] = 1;
+    codes[code_size * 2] = 1;
+    if (dim == 1048576) {
+        query[0] = 0.5F;
+        query[1] = -0.5F;
+        query[2] = 0.5F;
+        query[3] = -0.5F;
+        codes[0] = 0b0101;
+        codes[code_size * 2] = 0b0101;
+    }
+    const uint8_t* bits[4] = {codes.data(),
+                              codes.data() + code_size,
+                              codes.data() + code_size * 2,
+                              codes.data() + code_size * 3};
+
+    auto check = [&](RaBitQFloatBinaryType single, RaBitQFloatBinaryBatch4Type batch) {
+        float results[4];
+        batch(query.data(), bits[0], bits[1], bits[2], bits[3], dim, inv_sqrt_d, results);
+        for (uint32_t i = 0; i < 4; ++i) {
+            REQUIRE(results[i] == single(query.data(), bits[i], dim, inv_sqrt_d));
+            if (dim > 1000000) {
+                REQUIRE(results[i] == (i % 2 == 0 ? 1.0F : 0.0F));
+            }
+        }
+    };
+
+    check(generic::RaBitQFloatBinaryIP, generic::RaBitQFloatBinaryIPBatch4);
+    if (SimdStatus::SupportSSE()) {
+        check(sse::RaBitQFloatBinaryIP, sse::RaBitQFloatBinaryIPBatch4);
+    }
+    if (SimdStatus::SupportAVX()) {
+        check(avx::RaBitQFloatBinaryIP, avx::RaBitQFloatBinaryIPBatch4);
+    }
+    if (SimdStatus::SupportAVX2()) {
+        check(avx2::RaBitQFloatBinaryIP, avx2::RaBitQFloatBinaryIPBatch4);
+    }
+    if (SimdStatus::SupportAVX512()) {
+        check(avx512::RaBitQFloatBinaryIP, avx512::RaBitQFloatBinaryIPBatch4);
+    }
+    if (SimdStatus::SupportNEON()) {
+        check(neon::RaBitQFloatBinaryIP, neon::RaBitQFloatBinaryIPBatch4);
+    }
+    if (SimdStatus::SupportSVE()) {
+        check(sve::RaBitQFloatBinaryIP, sve::RaBitQFloatBinaryIPBatch4);
+    }
+}
+
+TEST_CASE("RaBitQ NEON Batch4 preserves raw-bit tail", "[ut][simd]") {
+    const float query[7] = {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F};
+    const uint8_t bits = 0b01010101;
+    float results[4];
+    neon::RaBitQFloatBinaryIPBatch4(query, &bits, &bits, &bits, &bits, 7, 0.0F, results);
+    for (float result : results) {
+        REQUIRE(result == generic::RaBitQFloatBinaryIP(query, &bits, 7, 0.0F));
+    }
+}
+
 TEST_CASE("RaBitQ FP32 three-bit SIMD Batch4 Compute Codes", "[ut][simd]") {
     const std::vector<uint64_t> dims = {0, 1, 7, 8, 9, 15, 16, 17, 63, 64, 65, 960};
 

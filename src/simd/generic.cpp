@@ -453,6 +453,7 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
     float result = 0.0f;
 
     float neg = 0, pos = 0;
+    // Persisted one-bit errors were computed with this legacy scale cutoff.
     if (inv_sqrt_d > 1e-3) {
         pos = inv_sqrt_d;
         neg = -inv_sqrt_d;
@@ -487,8 +488,8 @@ RaBitQFloatBinaryIPBatch4(const float* vector,
         return;
     }
 
-    const float pos = inv_sqrt_d > 1e-3F ? inv_sqrt_d : 1.0F;
-    const float neg = inv_sqrt_d > 1e-3F ? -inv_sqrt_d : 0.0F;
+    const float pos = inv_sqrt_d > 1e-3 ? inv_sqrt_d : 1.0F;
+    const float neg = inv_sqrt_d > 1e-3 ? -inv_sqrt_d : 0.0F;
     for (uint64_t d = 0; d < dim; ++d) {
         const uint64_t byte_id = d >> 3;
         const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
