@@ -103,6 +103,21 @@ public:
 
 public:
     int64_t ef_search{30};
+    // Per-route search breadth: the plain HGraph walk and the MCI hybrid can use different
+    // `ef_search` values (the MCI band does not need a wide expansion once its seeds are exact).
+    // Both fall back to `ef_search` when unset, so existing callers are unaffected.
+    int64_t hgraph_ef_search{0};
+    int64_t mci_ef_search{0};
+
+    // Effective per-route breadth: `ef_search` wins whenever the route value is unset.
+    int64_t
+    GetHGraphEfSearch() const {
+        return hgraph_ef_search > 0 ? hgraph_ef_search : ef_search;
+    }
+    int64_t
+    GetMciEfSearch() const {
+        return mci_ef_search > 0 ? mci_ef_search : ef_search;
+    }
     uint32_t hops_limit{std::numeric_limits<uint32_t>::max()};
     bool use_reorder{false};
     bool use_extra_info_filter{false};

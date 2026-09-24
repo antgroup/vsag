@@ -993,3 +993,59 @@ TEST_CASE("HGraph MCI ignores a bitmap whose ids are not inner ids", "[ut][hgrap
         REQUIRE(id < first_label + valid_count);
     }
 }
+TEST_CASE("HGraph per-route ef_search sets each route's search breadth", "[ut][hgraph][mci]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 64;
+
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 1000);
+
+    std::vector<float> vectors(total * dim, 0.0F);
+    for (int64_t i = 0; i < total; ++i) {
+        vectors[i * dim] = static_cast<float>(i / 4);
+        vectors[i * dim + 1] = static_cast<float>(i % 4);
+        vectors[i * dim + 2] = static_cast<float>((i * 3) % 7);
+        vectors[i * dim + 3] = static_cast<float>((i * 5) % 11);
+    }
+
+    auto index = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
+
+    // 40 of 64 labels are valid and the seed budget stays ratio-based, so the partial seeds
+    // force a real expansion whose breadth is exactly the route's ef.
+    std::vector<int64_t> valid(ids.begin(), ids.begin() + 40);
+    auto filter = std::make_shared<HalfRatioAllValidFilter>(valid);
+
+    // MCI band: a huge shared ef must not widen the hybrid, which has its own breadth.
+    const char* mci_routed = R"({"hgraph":{"ef_search":4096,"mci_ef_search":16,"use_mci":true,)"
+                             R"("mci_seed_ratio":1.0,"hgraph_valid_ratio_threshold":1.0}})";
+    const char* mci_reference = R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,)"
+                                R"("hgraph_valid_ratio_threshold":1.0}})";
+    auto mci_result = index.value()->KnnSearch(query, 3, mci_routed, filter);
+    auto mci_baseline = index.value()->KnnSearch(query, 3, mci_reference, filter);
+    REQUIRE(mci_result.has_value());
+    REQUIRE(mci_baseline.has_value());
+    REQUIRE(mci_result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    REQUIRE(mci_baseline.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    // Same breadth, same deterministic walk: ignoring `mci_ef_search` would instead run a
+    // 4096-wide expansion and explore strictly more hops.
+    REQUIRE(mci_result.value()->GetStatistics({"hops"}) ==
+            mci_baseline.value()->GetStatistics({"hops"}));
+
+    // HGraph band: the plain walk follows `hgraph_ef_search` under the same rule.
+    const char* hgraph_routed =
+        R"({"hgraph":{"ef_search":4096,"hgraph_ef_search":16,"hgraph_valid_ratio_threshold":0.5}})";
+    const char* hgraph_reference =
+        R"({"hgraph":{"ef_search":16,"hgraph_valid_ratio_threshold":0.5}})";
+    auto hgraph_result = index.value()->KnnSearch(query, 3, hgraph_routed, filter);
+    auto hgraph_baseline = index.value()->KnnSearch(query, 3, hgraph_reference, filter);
+    REQUIRE(hgraph_result.has_value());
+    REQUIRE(hgraph_baseline.has_value());
+    REQUIRE(hgraph_result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("hgraph")");
+    REQUIRE(hgraph_result.value()->GetStatistics({"hops"}) ==
+            hgraph_baseline.value()->GetStatistics({"hops"}));
+}
