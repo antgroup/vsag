@@ -155,7 +155,7 @@ public:
     [[nodiscard]] bool
     ResolveNeighbor(InnerIdType stored_neighbor, InnerIdType& neighbor) const {
         neighbor = stored_neighbor;
-        return neighbor < total_count_;
+        return neighbor < total_count_.load(std::memory_order_acquire);
     }
 
     [[nodiscard]] const uint8_t*

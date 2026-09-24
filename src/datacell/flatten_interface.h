@@ -16,6 +16,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <limits>
 #include <shared_mutex>
@@ -290,13 +291,12 @@ public:
 
     [[nodiscard]] virtual InnerIdType
     TotalCount() const {
-        std::shared_lock lock(mutex_);
-        return this->total_count_;
+        return this->total_count_.load(std::memory_order_acquire);
     }
 
     virtual void
     Serialize(StreamWriter& writer) {
-        StreamWriter::WriteObj(writer, this->total_count_);
+        StreamWriter::WriteObj(writer, this->total_count_.load(std::memory_order_acquire));
         StreamWriter::WriteObj(writer, this->max_capacity_);
         StreamWriter::WriteObj(writer, this->code_size_);
     }
@@ -363,7 +363,9 @@ public:
 
     virtual void
     Deserialize(LvalueOrRvalue<StreamReader> reader) {
-        StreamReader::ReadObj(reader, this->total_count_);
+        InnerIdType val;
+        StreamReader::ReadObj(reader, val);
+        this->total_count_.store(val, std::memory_order_release);
         StreamReader::ReadObj(reader, this->max_capacity_);
         StreamReader::ReadObj(reader, this->code_size_);
     }
@@ -403,7 +405,7 @@ public:
 public:
     mutable std::shared_mutex mutex_;
 
-    InnerIdType total_count_{0};
+    std::atomic<InnerIdType> total_count_{0};
     InnerIdType max_capacity_{800};
     uint32_t code_size_{0};
     uint32_t prefetch_stride_code_{1};
