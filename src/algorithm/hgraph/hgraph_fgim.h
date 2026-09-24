@@ -14,7 +14,7 @@
 
 #pragma once
 
-#include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include "basic_types.h"
@@ -41,7 +41,7 @@ public:
     // No concurrent mutation is allowed. Only float32/L2/fp32 without deletion
     // or deduplicate storage is supported. Result rows use merged internal IDs.
     static FGIMKnnGraph
-    BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, std::size_t k);
+    BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, uint64_t k);
 
     // Internal-only search, not a public index API. The caller must validate the target
     // as FGIM-compatible and provide at least target.dim_ floats in query.
@@ -55,7 +55,7 @@ public:
 
 private:
     static std::vector<InnerIdType>
-    ValidateSourcesAndGetOffsets(const Vector<const HGraph*>& source_graphs, std::size_t k);
+    ValidateSourcesAndGetOffsets(const Vector<const HGraph*>& source_graphs, uint64_t k);
 
     static void
     AppendOriginalCandidates(const HGraph& source,

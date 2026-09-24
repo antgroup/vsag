@@ -25,8 +25,7 @@
 namespace vsag {
 
 std::vector<InnerIdType>
-HGraphFGIM::ValidateSourcesAndGetOffsets(const Vector<const HGraph*>& source_graphs,
-                                         std::size_t k) {
+HGraphFGIM::ValidateSourcesAndGetOffsets(const Vector<const HGraph*>& source_graphs, uint64_t k) {
     CHECK_ARGUMENT(source_graphs.size() >= 2, "FGIM requires at least two source HGraphs");
     const bool valid_k = k > 0 && k <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
     CHECK_ARGUMENT(valid_k, "FGIM k must be positive and representable as int64_t");
@@ -71,7 +70,8 @@ HGraphFGIM::ValidateSourcesAndGetOffsets(const Vector<const HGraph*>& source_gra
         CHECK_ARGUMENT(
             static_cast<uint64_t>(count) <= std::numeric_limits<InnerIdType>::max() - total,
             "FGIM total node count exceeds the merged internal ID capacity");
-        const bool fully_built = source->bottom_graph_ != nullptr && source->label_table_ != nullptr &&
+        const bool fully_built = source->bottom_graph_ != nullptr &&
+                                 source->label_table_ != nullptr &&
                                  source->bottom_graph_->TotalCount() == count &&
                                  source->basic_flatten_codes_->TotalCount() == count &&
                                  source->label_table_->GetTotalCount() == count;
@@ -165,7 +165,7 @@ HGraphFGIM::CrossQuery(const HGraph& target,
 }
 
 FGIMKnnGraph
-HGraphFGIM::BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, std::size_t k) {
+HGraphFGIM::BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, uint64_t k) {
     const auto offsets = ValidateSourcesAndGetOffsets(source_graphs, k);
     const uint64_t other_count = source_graphs.size() - 1;
     // ceil(k / (m - 1)), without overflowing k + m - 2.
