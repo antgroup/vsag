@@ -1813,6 +1813,76 @@ SIMQ::InitFeatures() {
     });
 }
 
+namespace {
+
+float
+stats_calculate_percentile(const std::vector<float>& sorted_values, float percentile) {
+    if (sorted_values.empty()) {
+        return 0.0F;
+    }
+    float index = percentile * static_cast<float>(sorted_values.size() - 1);
+    auto lower = static_cast<uint64_t>(std::floor(index));
+    auto upper = static_cast<uint64_t>(std::ceil(index));
+    if (lower == upper) {
+        return sorted_values[lower];
+    }
+    float weight = index - static_cast<float>(lower);
+    return sorted_values[lower] * (1.0F - weight) + sorted_values[upper] * weight;
+}
+
+JsonType
+stats_make_doc_vector_count_json(std::vector<float> values) {
+    JsonType json;
+    if (values.empty()) {
+        json["mean"].SetFloat(0.0F);
+        json["p90"].SetFloat(0.0F);
+        json["p99"].SetFloat(0.0F);
+        json["min"].SetInt(0);
+        json["max"].SetInt(0);
+        return json;
+    }
+
+    std::sort(values.begin(), values.end());
+    float sum = std::accumulate(values.begin(), values.end(), 0.0F);
+    json["mean"].SetFloat(sum / static_cast<float>(values.size()));
+    json["p90"].SetFloat(stats_calculate_percentile(values, 0.90F));
+    json["p99"].SetFloat(stats_calculate_percentile(values, 0.99F));
+    json["min"].SetInt(static_cast<int64_t>(values.front()));
+    json["max"].SetInt(static_cast<int64_t>(values.back()));
+    return json;
+}
+
+}  // namespace
+
+std::string
+SIMQ::GetStats() const {
+    std::shared_lock lock(global_mutex_);
+    JsonType stats;
+
+    uint64_t count = total_count_.load();
+    stats["total_count"].SetUint64(count);
+    stats["total_token_count"].SetUint64(token_to_doc_.size());
+
+    JsonType dist_json;
+    if (count == 0 || token_to_doc_.empty()) {
+        dist_json = stats_make_doc_vector_count_json({});
+    } else {
+        std::unordered_map<InnerIdType, uint32_t> doc_token_counts;
+        for (InnerIdType doc_id : token_to_doc_) {
+            ++doc_token_counts[doc_id];
+        }
+        std::vector<float> values;
+        values.reserve(count);
+        for (uint64_t i = 0; i < count; ++i) {
+            auto it = doc_token_counts.find(static_cast<InnerIdType>(i));
+            values.push_back(static_cast<float>(it != doc_token_counts.end() ? it->second : 0));
+        }
+        dist_json = stats_make_doc_vector_count_json(std::move(values));
+    }
+    stats["doc_vector_count_distribution"].SetJson(dist_json);
+    return stats.Dump();
+}
+
 JsonType
 build_default_simq_param(const JsonType& external_param) {
     const auto io_type = external_param.Contains(BRUTE_FORCE_BASE_IO_TYPE)
