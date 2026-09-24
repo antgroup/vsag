@@ -247,3 +247,47 @@ typed `TuneIndex` 和 `TuneSearch` 绝不会写报告文件，而是通过返回
 V1 评测一个 KNN workload；除已支持的 HGraph `ef_search` 自适应搜索外，其他候选仍完整遍历。
 它暂不支持过滤或范围查询 workload、query sampling、跨请求 build cache，以及基于模型的
 候选生成。
+
+## Python：调优已有索引
+
+`pyvsag.Index.autotune_search` 直接调用同步 C++ `TuneSearch` 引擎，无需 HDF5
+输入或命令行工具。[完整 Python 示例](https://github.com/antgroup/vsag/blob/main/examples/python/111_autotune_search.py)
+展示构建索引、计算精确真值以及用推荐参数执行实际搜索。
+
+```python
+result = index.autotune_search(
+    queries=queries,
+    ground_truth=ground_truth,
+    top_k=10,
+    parameter_space={"hgraph": {"ef_search": [16, 32, 128]}},
+    constraints={"recall_at_k": 0.95},
+    objective="latency_avg_ms",
+)
+if result["status"] == "success":
+    ids, distances = index.knn_search(queries[0], 10, result["search_parameters"])
+else:
+    print(result["best_effort"])
+```
+
+输入须为内存对齐、C 连续的 NumPy 矩阵：`queries` 类型为 `float32`，形状为
+`(query_count, dim)`；`ground_truth` 类型为 `int64`，形状为
+`(query_count, ground_truth_k)`。矩阵均不能为空，且 `ground_truth_k >= top_k > 0`。
+真值应使用索引的距离度量，按近邻排名排列实际索引 ID。此 Python 工作流支持已有的 float32 HGraph 和 IVF 索引。
+
+`parameter_space` 使用 C++ 候选语法；`constraints` 为非空的指标到阈值字典，
+召回率和 QPS 为下界，其他指标为上界。`objective` 默认 `latency_avg_ms`。
+指标可用性及候选选择规则与 C++ 相同。可选的仅关键字参数包括
+`concurrency=1`（1–200 个评估线程）、`max_trials=1000`（1–100000 次计划试验）
+和 `include_raw_evaluation=False`。
+
+返回字典包含 `status`、`search_parameters`、`metrics`、`best_effort` 和 `report`。
+状态为 `success` 时，`search_parameters` 是可直接传给 `knn_search` 的 JSON 字符串，
+`metrics` 包含经过验证的指标。状态为 `no_feasible_candidate` 时，
+`search_parameters` 为 `None`，`metrics` 为空，`best_effort` 描述最接近要求但未满足
+全部约束的候选。两种状态下 `report` 均包含完整 C++ 报告。
+无效输入抛出 `ValueError` 或 `TypeError`；执行失败抛出 `RuntimeError`。
+
+调用期间持有 Python GIL，并借用输入缓冲区直至结束；调优期间不要修改索引或输入数组。
+此方法不会重建、修改索引，也不会自动将推荐参数应用于后续搜索。
+Python `TuneIndex`、带过滤条件的工作负载和异步执行不在此 API 范围内。
+Python 构建自动包含 AutoTune/评估代码及其构建依赖，即使 `ENABLE_TOOLS=OFF` 也可使用。
