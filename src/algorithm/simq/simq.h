@@ -104,6 +104,9 @@ public:
         return static_cast<int64_t>(total_count_);
     }
 
+    [[nodiscard]] std::string
+    GetStats() const override;
+
     void
     InitFeatures() override;
 
