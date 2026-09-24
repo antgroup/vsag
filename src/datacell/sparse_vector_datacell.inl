@@ -187,7 +187,7 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(LvalueOrRvalue<StreamReader
                                             legacy_offset_io_size));
         }
         const uint64_t doc_count = legacy_offset_io_size / legacy_entry_size;
-        if (doc_count > std::numeric_limits<InnerIdType>::max() || doc_count < total_count_) {
+        if (doc_count > std::numeric_limits<InnerIdType>::max() || doc_count < total_count_.load(std::memory_order_relaxed)) {
             throw VsagException(
                 ErrorType::INVALID_ARGUMENT,
                 fmt::format("invalid legacy SparseVectorDataCell document count: {}", doc_count));
@@ -254,8 +254,9 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
     Vector<InnerIdType> idx_ptr(count, allocator_);
     if (idx_vec == nullptr) {
         idx_vec = idx_ptr.data();
+        InnerIdType base = total_count_.fetch_add(count, std::memory_order_acq_rel);
         for (InnerIdType i = 0; i < count; ++i) {
-            idx_vec[i] = total_count_ + i;
+            idx_vec[i] = base + i;
         }
     }
     for (InnerIdType i = 0; i < count; ++i) {
@@ -277,7 +278,7 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerI
     quantizer_->EncodeOne((const float*)vector, codes.data());
     {
         std::lock_guard lock(mutex_);
-        total_count_ = std::max(total_count_, idx + 1);
+        total_count_.store(std::max(total_count_.load(std::memory_order_relaxed), idx + 1), std::memory_order_release);
         max_code_size_ = std::max(max_code_size_, code_size);
         layout_.Write(idx, codes.data(), code_size);
     }

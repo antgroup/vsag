@@ -79,10 +79,9 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerId
     {
         std::lock_guard lock(mutex_);
         if (idx == std::numeric_limits<InnerIdType>::max()) {
-            idx = total_count_;
-            ++total_count_;
+            idx = total_count_.fetch_add(1, std::memory_order_acq_rel);
         } else {
-            total_count_ = std::max(total_count_, idx + 1);
+            total_count_.store(std::max(total_count_.load(std::memory_order_relaxed), idx + 1), std::memory_order_release);
         }
     }
 
@@ -135,7 +134,7 @@ template <typename QuantTmpl, typename IOTmpl>
 void
 MultiVectorDataCell<QuantTmpl, IOTmpl>::Resize(InnerIdType new_capacity) {
     std::lock_guard lock(mutex_);
-    const InnerIdType effective_capacity = std::max(new_capacity, total_count_);
+    const InnerIdType effective_capacity = std::max(new_capacity, total_count_.load(std::memory_order_relaxed));
     if (effective_capacity <= this->max_capacity_) {
         return;
     }
