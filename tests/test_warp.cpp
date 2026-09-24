@@ -98,6 +98,17 @@ WarpTestIndex::GenerateWarpSearchParametersString() {
 
 }  // namespace fixtures
 
+TEST_CASE("WARP analysis preserves its public index type", "[ft][warp][analysis]") {
+    WarpParam warp_param;
+    auto index = Factory::CreateIndex(
+        INDEX_WARP,
+        fixtures::WarpTestIndex::GenerateWarpBuildParametersString("ip", 8, warp_param));
+    REQUIRE(index.has_value());
+    const auto stats = JsonType::Parse(index.value()->GetStats());
+    REQUIRE(stats["_analysis"]["index_type"].GetString() == INDEX_WARP);
+    REQUIRE(stats["_analysis"]["analysis_type"].GetString() == "stats");
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::WarpTestIndex, "Warp Add Test", "[ft][warp]") {
     auto metric_type = GENERATE("ip");
     std::string base_quantization_str = GENERATE("fp32");
