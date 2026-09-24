@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <string>
 
+#include "algorithm/index_search_parameter.h"
 #include "algorithm/inner_index_parameter.h"
 #include "index_common_param.h"
 #include "utils/pointer_define.h"
@@ -81,7 +82,7 @@ public:
     uint32_t avg_doc_term_length{100};
 };
 
-class SINDISearchParameter : public Parameter {
+class SINDISearchParameter : public Parameter, public IndexSearchParameter {
 public:
     void
     FromJson(const JsonType& json) override;

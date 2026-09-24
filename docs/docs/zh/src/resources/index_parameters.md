@@ -44,6 +44,7 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 |------|-------|------|
 | `max_degree` | 16~48 | 每节点最大出边数 |
 | `ef_construction` | 200~500 | 构建阶段候选集大小，越大召回越高、构建越慢 |
+| `alpha` | `1.0` | 最终 robust pruning 的系数；PiPNN 要求有限且不小于 `1.0` |
 | `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq4` / `pq` | 主存储的量化策略 —— 支持的全部取值见[量化章节](../quantization/) |
 | `use_reverse_edges` | `false` | 跟踪入边，实现 O(1) 反向邻居查找；边存储约翻倍，且压缩图存储不支持 |
 | `label_remap_type` | `pg` | label map 实现：默认 `pg`，或 `robin` |
@@ -53,6 +54,24 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 | `mrle_dim` | `0` | MRLE 输出维度，范围 `[0, dim]`；`0` 表示输入维度 |
 | `fast_encode_rabitq` | `true` | 使用多 bit RaBitQ 快速编码；设为 `false` 恢复精确编码器 |
 | `fast_encode_rabitq_rounds` | `6` | 快速编码器微调轮数，范围 `[1, 32]` |
+
+### PiPNN 构建参数
+
+当 `graph_type` 为 `pipnn` 时，HGraph 和 Pyramid 还会从 `index_param` 接受以下构建参数，
+两者使用相同的默认值和校验规则：
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `pipnn_max_leaf_size` | `1024` | 分区叶子的最大点数，范围 `[2, 2147483647]` |
+| `pipnn_min_leaf_size` | `64` | 合并过小叶子时的目标规模，必须为正数且不超过 `pipnn_max_leaf_size` |
+| `pipnn_leader_sample_rate` | `0.005` | leader 采样比率，范围 `(0, 1]`；每个分区使用 `2` 到 `1000` 个 leader，且不超过分区点数 |
+| `pipnn_fanout` | `[10, 2]` | 连续分区层级的正数最近 leader fanout；更深层使用 `1` |
+| `pipnn_leaf_neighbor_count` | `5` | 每个点在每个叶子中贡献的最近候选数，必须为正数；过小叶子至少使用 `4` |
+| `pipnn_hash_plane_count` | `12` | 方向 hash 位数，范围 `[1, 15]`，且 `max_degree <= 2^pipnn_hash_plane_count` |
+| `pipnn_reservoir_size` | `64` | 最终剪枝前每个点的候选容量，必须为正数；实际容量为 `max(value, max_degree)` 且不能超过 `65535` |
+
+现有的 `alpha` 字段控制 PiPNN 的最终 robust pruning。`ef_construction` 只调节 NSW，
+对 PiPNN 不生效。
 
 搜索时：
 
@@ -143,6 +162,8 @@ Pyramid 构建参数同样放在 `index_param` 下：
     }
 }
 ```
+
+`graph_type: "pipnn"` 可调节的项见上文 [PiPNN 构建参数](#pipnn-构建参数)。
 
 `store_paths` 是 Pyramid 顶层构建参数，默认值为 `false`。需要通过
 `GetDataByIdsWithFlag` 和 `DATA_FLAG_PATH` 返回默认或命名 hierarchy 的原始路径时应启用它；路径完整性与持久化语义见

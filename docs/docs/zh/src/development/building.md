@@ -16,6 +16,10 @@ arm64 核心 C++ 构建，预编译 C++ 包与 Python wheel 仍以 Linux 为主�
 `-DENABLE_LIBURING=ON`。默认值为 `OFF`；在非 Linux 平台或未找到 liburing 时，
 请求 `uring_io` 的配置会打印一次性告警并回退到 `buffer_io`。
 
+如果需要构建可选的 CUDA 后端，请安装 NVIDIA 工具链（`nvcc` 在 `PATH` 中或设置
+`CMAKE_CUDA_COMPILER`），并在直接配置 CMake 时添加 `-DENABLE_CUDA=ON`。默认值为 `OFF`；
+关闭时会编译一份导出相同符号的空实现，调用方无条件链接、在运行时判断是否有设备。
+
 在 CMake 配置中，有许多参数和编译目标。为了方便使用，我们将常用的编译目标（或命令）写到了 Makefile 中，以避免记忆各种配置或者从命令行输入大段参数。当存在可用的 `ninja` 且 CMake 支持 Ninja 生成器时，这些目标会优先使用 Ninja；否则会回退到 Unix Makefiles。显式设置的 `CMAKE_GENERATOR` 始终优先，例如可以使用 `make debug CMAKE_GENERATOR='Unix Makefiles'` 直接指定回退生成器。由于 CMake 构建目录与生成器绑定，更换现有构建目录的生成器前应先运行对应的清理目标。这些编译目标（或命令）可以通过在项目根目录运行 `make help` 查看：
 
 ```bash
@@ -85,6 +89,27 @@ stamp、日志和元数据不计入 `local_bytes`，也不计入准备阶段表�
 不统计符号链接项。单独缓存的 ExternalProject 归档在准备阶段表格中报告，不计入 `local_bytes`。
 系统依赖显示为零，因为不测量主机上的安装文件；未分类或缺失的目录也贡献零字节。这是被测本地目录
 的快照，既不是纯源码大小，也不是单独的构建产物大小。
+## PR ASan 构建与独立构建基准
+
+> **[ #2899 ](https://github.com/antgroup/vsag/pull/2899) 修复前，旧版 no-op 测量不可信。** 独立工作流会对缺少受支持 schema 3 `true_noop` 报告能力的 collector 明确预检失败。拆分 PR 构建本身并不修复 collector；前置 PR 尚未合并时，定时任务会失败，而不是发布误导性的旧版基线。
+
+PR CI 的 **ASan Build X86** 只运行一次 `make asan COMPILE_JOBS=3`，保留 Ninja、compile commands、system OpenBLAS、examples 和 tools。Makefile 仍启用 tests、Sanitize 和 ASan/UBSan，changed-source lint、下游测试、兼容性检查及构建产物契约保持不变。`ccache --zero-stats` 只重置统计，**不删除缓存对象**。构建步骤记录耗时，always 步骤输出 verbose/兼容回退缓存诊断，不掩盖真实构建失败；ccache 仍启用并使用一次性 GitHub-hosted VM 上的默认目录，不跨 job 恢复或保存编译缓存。PR X86 的依赖归档缓存有意从恢复并保存改为**只恢复**（`actions/cache/restore@v4`），防止 PR 上下文将归档写回共享缓存；这项策略并不只适用于独立 benchmark。
+
+独立的 **Build Performance Benchmark**（`.github/workflows/build_performance.yml`）每周一 UTC 03:23 测 upstream `main`，也可通过 Actions 手动运行。它不是 PR required check，使用独立 concurrency、Ubuntu 22.04 hosted runner、180 分钟超时和 14 天报告保留期。工作流进入默认分支后，可运行：
+
+```bash
+gh workflow run build_performance.yml --ref main -f ref=main
+# 或指定本仓库 main 历史中可达的完整 40 位 commit SHA：
+gh workflow run build_performance.yml --ref main -f ref=<full-main-history-sha>
+```
+
+工作流本身必须从 `main` dispatch（其他工作流分支会被跳过），并显式 checkout `antgroup/vsag` upstream `main`，只接受 `main` 或该已获取 upstream 历史中的完整 SHA，并将实际 checkout 的 SHA（不是 dispatch 事件 SHA）及 main 基线写入 `target.txt`。PR ref、任意分支和未合并功能提交均被有意拒绝，因此迁移草稿分支无法通过此入口测量自己；hosted dispatch 和端到端验收需等工作流及受支持 collector 进入 main 后完成。fork 的定时任务被禁用。
+
+安全边界采取保守策略：contents 只读权限、不使用业务 secrets、不保留 checkout 凭据，通过环境变量传递并引用输入，校验 SHA 及祖先关系；Ubuntu 安装使用工作流自身固定的包列表，而不以特权运行目标 ref 的安装脚本。包列表与 PR 的 OpenBLAS-only host 准备一致，后续应保持同步。现有 composite action checkout 固定版本的依赖源码；下载归档缓存只恢复、**不保存**，编译缓存完全不跨运行恢复或保存。全新 benchmark job 独占 `build/` 和 `.benchmark-ccache`，`--clear-ccache` 不触碰普通 PR 缓存；保留默认 `build/` 以兼容现有 collector/Makefile API。
+
+“Cold”表示全新构建和空的**编译缓存**，不意味着网络或依赖下载也是冷启动。保持 collector 原有 CLI，流程为 configure → cold build → clean → warm ccache rebuild → no-op，warm 与 no-op 之间不再 clean。报告保留 JSON、Markdown、分阶段日志、峰值 RSS、Ninja 统计和 ccache 细项；`toolchain.txt` 记录工具版本和工作流实际环境变量值，`collector-command.txt` 记录工作流执行的、经过 shell 转义的 collector 调用命令。底层构建命令/选项以 collector 的分阶段日志为准，其报告保留依赖准备耗时与缓存元数据。compiler-cache key 只是说明性元数据，不证明恢复过缓存。并行累计 edge 时间不是墙钟时间，命中率不覆盖 bypass/PCH/link 工作；缺失遥测不能当作零。
+
+预检不执行 collector，只检查已知 schema 3 能力，不证明测量逻辑本身正确。采集结束后还要求成功状态、Ninja 遥测可用、`true_noop: true` 和零 build edges。#2899 在 no-op 为 false 时可以只报告而不返回失败，因此此工作流会额外使该运行失败，并保留原始报告供诊断。残余生成/检查 edge 需要结合日志和 collector 的 build-edge 分类解释。未来未知 schema 也会保守失败，等待审核后适配。这是以暂时的红灯/缺失基线换取避免错误标记的权衡，不应绕过预检恢复旧报告。#2899 合并后需重新核验最终 API 及测试，包括日志缺失、历史重写、多输出 edge、源文件/头文件修改后的重建。本迁移不修改 collector、PCH、编译选项或持久化缓存。
 
 ## 编译 VSAG 库
 

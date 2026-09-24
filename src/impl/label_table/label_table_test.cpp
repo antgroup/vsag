@@ -38,6 +38,52 @@ sorted_duplicates(std::vector<InnerIdType> ids) -> std::vector<InnerIdType> {
 
 }  // namespace
 
+TEST_CASE("LabelTable dense reservation and legacy trimming", "[ut][LabelTable]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    const bool reverse_map = GENERATE(false, true);
+    const bool real_zero = GENERATE(false, true);
+    LabelTable labels(allocator.get(), reverse_map);
+    labels.Reserve(10);
+    CHECK_FALSE(labels.CheckLabel(0));
+    labels.Insert(0, real_zero ? 0 : 118);
+    CHECK(labels.GetTotalCount() == 1);
+    CHECK(labels.CheckLabel(0) == real_zero);
+    CHECK(labels.TryGetIdByLabel(0).first == real_zero);
+    CHECK_THROWS_AS(labels.GetLabelById(1), VsagException);
+
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    labels.Serialize(writer);
+    IOStreamReader reader(stream);
+    LabelTable restored(allocator.get(), reverse_map);
+    restored.Deserialize(reader);
+    CHECK(restored.GetTotalCount() == 1);
+    CHECK(restored.CheckLabel(0) == real_zero);
+    CHECK(restored.GetIdByLabel(real_zero ? 0 : 118) == 0);
+
+    // The legacy payload carries the vector length, including reserved slots.
+    labels.Resize(10);
+    std::stringstream legacy;
+    IOStreamWriter legacy_writer(legacy);
+    labels.Serialize(legacy_writer);
+    IOStreamReader legacy_reader(legacy);
+    LabelTable legacy_restored(allocator.get(), reverse_map);
+    legacy_restored.Deserialize(legacy_reader);
+    legacy_restored.TrimUnusedSlots(1);
+    CHECK(legacy_restored.GetTotalCount() == 1);
+    CHECK(legacy_restored.CheckLabel(0) == real_zero);
+    CHECK(legacy_restored.GetIdByLabel(real_zero ? 0 : 118) == 0);
+    CHECK_THROWS_AS(legacy_restored.TrimUnusedSlots(2), VsagException);
+    legacy_restored.Reserve(20);
+    legacy_restored.Insert(1, -1);
+    CHECK(legacy_restored.HasActivePaddingLabel());
+    CHECK(legacy_restored.MarkRemove(-1) == 1);
+    legacy_restored.TrimUnusedSlots(2);
+    CHECK_FALSE(legacy_restored.HasActivePaddingLabel());
+    CHECK_FALSE(legacy_restored.CheckLabel(-1));
+    CHECK(legacy_restored.GetTotalCount() == 2);
+}
+
 TEST_CASE("LabelTable Basic Operations", "[ut][LabelTable]") {
     auto allocator = std::make_shared<DefaultAllocator>();
     LabelTable label_table(allocator.get());
@@ -538,4 +584,66 @@ TEST_CASE("LabelTable padding restore ignores unused capacity", "[ut][LabelTable
     labels.EraseFromDeletedIds(2);
     REQUIRE_FALSE(labels.IsRemoved(2));
     REQUIRE_FALSE(labels.HasActivePaddingLabel());
+}
+
+TEST_CASE("LabelTable reports identity label mappings", "[ut][LabelTable]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+
+    SECTION("identity inserts and relabeling") {
+        LabelTable label_table(allocator.get());
+        REQUIRE(label_table.IsIdentityMapping());
+
+        label_table.Insert(0, 0);
+        label_table.Insert(1, 1);
+        REQUIRE(label_table.IsIdentityMapping());
+
+        // A previously cached answer must not survive a relabel.
+        label_table.Insert(2, 99);
+        REQUIRE_FALSE(label_table.IsIdentityMapping());
+        label_table.UpdateLabel(99, 2);
+        REQUIRE(label_table.IsIdentityMapping());
+    }
+
+    SECTION("shifted labels") {
+        LabelTable label_table(allocator.get());
+        label_table.Insert(0, 8000);
+        label_table.Insert(1, 8001);
+        REQUIRE_FALSE(label_table.IsIdentityMapping());
+    }
+
+    SECTION("move breaks the mapping") {
+        LabelTable label_table(allocator.get());
+        label_table.Insert(0, 0);
+        label_table.Insert(1, 1);
+        REQUIRE(label_table.IsIdentityMapping());
+        label_table.Move(1, 0);
+        REQUIRE_FALSE(label_table.IsIdentityMapping());
+    }
+
+    SECTION("pre-allocated capacity is not part of the live mapping") {
+        LabelTable label_table(allocator.get());
+        label_table.Insert(0, 0);
+        label_table.Insert(1, 1);
+        // Builds pre-size the table well beyond the number of inserted labels.
+        label_table.Resize(64);
+        REQUIRE(label_table.IsIdentityMapping());
+        label_table.Insert(2, 42);
+        REQUIRE_FALSE(label_table.IsIdentityMapping());
+    }
+
+    SECTION("deserialize refreshes the cached answer") {
+        LabelTable source(allocator.get());
+        source.Insert(0, 0);
+        source.Insert(1, 1);
+        std::stringstream stream;
+        IOStreamWriter writer(stream);
+        source.Serialize(writer);
+
+        LabelTable target(allocator.get());
+        target.Insert(0, 5000);
+        REQUIRE_FALSE(target.IsIdentityMapping());
+        IOStreamReader reader(stream);
+        target.Deserialize(reader);
+        REQUIRE(target.IsIdentityMapping());
+    }
 }

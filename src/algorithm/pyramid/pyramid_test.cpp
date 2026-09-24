@@ -35,6 +35,59 @@
 #include "storage/stream_writer.h"
 #include "unittest.h"
 #include "vsag/options.h"
+#include "vsag/vsag.h"
+
+TEST_CASE("Pyramid reserved slots are not labels", "[ut][pyramid][reserved_labels]") {
+    const bool real_zero = GENERATE(false, true);
+    const bool immutable = GENERATE(false, true);
+    const bool streaming = GENERATE(false, true);
+    const auto create = []() {
+        auto result = vsag::Factory::CreateIndex("pyramid", R"({
+            "dim":8,"dtype":"float32","metric_type":"ip",
+            "index_param":{"base_quantization_type":"fp32","use_reorder":false}
+        })");
+        REQUIRE(result.has_value());
+        return result.value();
+    };
+    auto index = create();
+    int64_t id = real_zero ? 0 : 118;
+    float vector[8] = {0.25F};
+    float query[8] = {1.0F};
+    std::string path;
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(1)
+                    ->Dim(8)
+                    ->Ids(&id)
+                    ->Float32Vectors(vector)
+                    ->Paths(&path)
+                    ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+    if (immutable) {
+        REQUIRE(index->SetImmutable().has_value());
+    }
+    const auto check = [&](const auto& value) {
+        CHECK(value->CheckIdExist(0) == real_zero);
+        auto distance = value->CalcDistanceById(query, 0);
+        CHECK(distance.has_value() == real_zero);
+        if (real_zero && distance.has_value()) {
+            CHECK(distance.value() == 0.75F);
+        }
+        auto existing = value->CalcDistanceById(query, id);
+        REQUIRE(existing.has_value());
+        CHECK(existing.value() == 0.75F);
+    };
+    check(index);
+    std::stringstream stream;
+    REQUIRE((streaming ? index->SerializeStreaming(stream) : index->Serialize(stream)).has_value());
+    auto restored = create();
+    if (immutable) {
+        REQUIRE(restored->SetImmutable().has_value());
+    }
+    REQUIRE((streaming ? restored->DeserializeStreaming(stream) : restored->Deserialize(stream))
+                .has_value());
+    CHECK(restored->GetNumElements() == 1);
+    check(restored);
+}
 
 namespace {
 
@@ -225,6 +278,62 @@ RequirePyramidSearchStatistics(const vsag::DatasetPtr& result, uint64_t approxim
 }
 
 }  // namespace
+
+TEST_CASE("Pyramid reads legacy reserved label slots", "[ut][pyramid][reserved_labels]") {
+    const bool real_zero = GENERATE(false, true);
+    const bool immutable = GENERATE(false, true);
+    const bool streaming = GENERATE(false, true);
+    auto source = MakePyramidIndex(100);
+    std::vector<float> vectors(9 * PYRAMID_TEST_DIM, 0.25F);
+    std::vector<int64_t> ids = {118, 136, 123, 125, 114, 151, 116, 117, 161};
+    if (real_zero) {
+        ids[0] = 0;
+    }
+    std::vector<std::string> paths(9);
+    REQUIRE(source.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), 9))
+                .empty());
+    // Reproduce the old vector payload, including its zero-filled unused suffix.
+    source.index->label_table_->Resize(10);
+    std::stringstream stream;
+    if (streaming) {
+        source.index->SerializeStreaming(stream);
+    } else {
+        vsag::IOStreamWriter writer(stream);
+        source.index->Serialize(writer);
+    }
+    auto restored = MakePyramidIndex(100);
+    if (immutable) {
+        restored.index->SetImmutable();
+    }
+    if (streaming) {
+        restored.index->DeserializeStreaming(stream);
+    } else {
+        vsag::IOStreamReader reader(stream);
+        restored.index->Deserialize(reader);
+    }
+    CHECK(restored.index->label_table_->GetTotalCount() == 9);
+    CHECK(restored.index->CheckIdExist(0) == real_zero);
+    if (real_zero) {
+        CHECK(restored.index->label_table_->GetIdByLabel(0) == 0);
+        CHECK(restored.index->CalcDistanceById(vectors.data(), 0) == 0.0F);
+    } else {
+        CHECK_THROWS_AS(restored.index->CalcDistanceById(vectors.data(), 0), vsag::VsagException);
+    }
+    if (not immutable) {
+        int64_t added_ids[2] = {200, 201};
+        REQUIRE(restored.index->Add(MakePyramidDataset(vectors.data(), added_ids, paths.data(), 2))
+                    .empty());
+        CHECK(restored.index->label_table_->GetTotalCount() == 11);
+        CHECK(restored.index->CalcDistanceById(vectors.data(), added_ids[1]) == 0.0F);
+        CHECK(restored.index->CheckIdExist(0) == real_zero);
+        CHECK(restored.index->Remove({ids[0]}, vsag::RemoveMode::MARK_REMOVE) == 1);
+        CHECK(restored.index->GetNumElements() == 10);
+        CHECK(restored.index->label_table_->GetTotalCount() == 11);
+        CHECK_FALSE(restored.index->CheckIdExist(ids[0]));
+        CHECK_THROWS_AS(restored.index->CalcDistanceById(vectors.data(), ids[0]),
+                        vsag::VsagException);
+    }
+}
 
 TEST_CASE("Split function tests", "[ut][pyramid]") {
     SECTION("Empty input string") {
@@ -870,11 +979,13 @@ TEST_CASE("Pyramid rejects TQ-only fields for non-TQ quantizers", "[ut][pyramid]
 }
 
 TEST_CASE("Pyramid multi-layer root builds routes and survives serialization",
-          "[ut][pyramid][root_graph]") {
+          "[ut][pyramid][root_graph][pipnn]") {
+    const auto graph_type = GENERATE(std::string(vsag::GRAPH_TYPE_VALUE_NSW),
+                                     std::string(vsag::GRAPH_TYPE_VALUE_PIPNN));
     const auto graph_storage_type =
         GENERATE(std::string(vsag::GRAPH_STORAGE_TYPE_VALUE_FLAT),
                  std::string(vsag::GRAPH_STORAGE_TYPE_VALUE_COMPRESSED));
-    CAPTURE(graph_storage_type);
+    CAPTURE(graph_type, graph_storage_type);
     constexpr int64_t count = 512;
     std::vector<float> vectors(count * PYRAMID_TEST_DIM);
     FillRootVectors(vectors, count);
@@ -883,7 +994,7 @@ TEST_CASE("Pyramid multi-layer root builds routes and survives serialization",
     std::vector<std::string> paths(count, "");
     auto source = MakeRootPyramidIndex(vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER,
                                        false,
-                                       vsag::GRAPH_TYPE_VALUE_NSW,
+                                       graph_type,
                                        false,
                                        1,
                                        false,
@@ -936,7 +1047,7 @@ TEST_CASE("Pyramid multi-layer root builds routes and survives serialization",
     source.index->Serialize(writer);
     auto restored = MakeRootPyramidIndex(vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER,
                                          false,
-                                         vsag::GRAPH_TYPE_VALUE_NSW,
+                                         graph_type,
                                          false,
                                          1,
                                          false,
@@ -991,6 +1102,38 @@ TEST_CASE("Pyramid multi-layer root builds routes and survives serialization",
         REQUIRE(post_restore_result->GetIds()[0] == post_restore_ids[offset]);
         REQUIRE(std::abs(post_restore_result->GetDistances()[0]) < 1e-6F);
     }
+}
+
+TEST_CASE("Pyramid NSW and PiPNN builds retain descendant path search",
+          "[ut][pyramid][pipnn][path]") {
+    const auto graph_type = GENERATE(std::string(vsag::GRAPH_TYPE_VALUE_NSW),
+                                     std::string(vsag::GRAPH_TYPE_VALUE_PIPNN));
+    CAPTURE(graph_type);
+    constexpr int64_t count = 128;
+    std::vector<float> vectors(count * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, count);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> paths(count, "tenant/leaf");
+    auto test_index = MakeRootPyramidIndex(
+        vsag::PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER, false, graph_type, false, 4);
+    REQUIRE(
+        test_index.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count))
+            .empty());
+
+    const auto stats = vsag::JsonType::Parse(test_index.index->GetStats());
+    REQUIRE(stats["root_graphs"]["default"]["bottom_graph_node_count"].GetUint64() == count);
+    std::string query_path = "tenant/leaf";
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(PYRAMID_TEST_DIM)
+                     ->Float32Vectors(vectors.data() + 73 * PYRAMID_TEST_DIM)
+                     ->Paths(&query_path)
+                     ->Owner(false);
+    auto result = test_index.index->KnnSearch(
+        query, 1, R"({"pyramid":{"ef_search":128,"subindex_ef_search":128}})", nullptr);
+    REQUIRE(result->GetDim() == 1);
+    REQUIRE(result->GetIds()[0] == ids[73]);
 }
 
 TEST_CASE("Pyramid NSW Build and empty Add share routed construction",
@@ -1299,7 +1442,10 @@ TEST_CASE("Pyramid legacy deserialization rejects incompatible root graph type",
 }
 
 TEST_CASE("Pyramid multi-layer root routes duplicate representatives",
-          "[ut][pyramid][root_graph][duplicate]") {
+          "[ut][pyramid][root_graph][duplicate][pipnn]") {
+    const auto graph_type = GENERATE(std::string(vsag::GRAPH_TYPE_VALUE_NSW),
+                                     std::string(vsag::GRAPH_TYPE_VALUE_PIPNN));
+    CAPTURE(graph_type);
     constexpr int64_t count = 512;
     std::vector<float> vectors(count * PYRAMID_TEST_DIM);
     std::vector<int64_t> ids(count);
@@ -1312,8 +1458,8 @@ TEST_CASE("Pyramid multi-layer root routes duplicate representatives",
                 static_cast<float>((representative * (d + 3) + d * 17) % 997) / 997.0F;
         }
     }
-    auto test_index = MakeRootPyramidIndex(
-        vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER, false, vsag::GRAPH_TYPE_VALUE_NSW, true);
+    auto test_index =
+        MakeRootPyramidIndex(vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER, false, graph_type, true);
     REQUIRE(
         test_index.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count))
             .empty());
@@ -1387,6 +1533,127 @@ TEST_CASE("Pyramid IndexNode allows concurrent existing-child lookup",
 
     REQUIRE(lookup.get() == expected);
     REQUIRE(completed_while_shared);
+}
+
+TEST_CASE("Pyramid PiPNN multi-layer root supports RaBitQ with SQ8 reorder",
+          "[ut][pipnn][pyramid]") {
+    constexpr int64_t count = 48;
+    std::vector<float> vectors((count + 1) * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, count + 1);
+    std::vector<int64_t> ids(count + 1);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::vector<std::string> paths(count + 1, "tenant");
+
+    auto test_index = MakeRootPyramidIndex(vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER,
+                                           false,
+                                           vsag::GRAPH_TYPE_VALUE_PIPNN,
+                                           false,
+                                           4,
+                                           true);
+    REQUIRE(
+        test_index.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count))
+            .empty());
+    auto stats = vsag::JsonType::Parse(test_index.index->GetStats());
+    REQUIRE(stats["root_graphs"]["default"]["route_graph_count"].GetUint64() > 0);
+
+    auto added = MakePyramidDataset(
+        vectors.data() + count * PYRAMID_TEST_DIM, ids.data() + count, paths.data() + count, 1);
+    REQUIRE(test_index.index->Add(added).empty());
+
+    std::stringstream stream(std::ios::in | std::ios::out | std::ios::binary);
+    vsag::IOStreamWriter writer(stream);
+    test_index.index->Serialize(writer);
+    auto restored = MakeRootPyramidIndex(vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER,
+                                         false,
+                                         vsag::GRAPH_TYPE_VALUE_PIPNN,
+                                         false,
+                                         4,
+                                         true);
+    stream.seekg(0);
+    vsag::IOStreamReader reader(stream);
+    restored.index->Deserialize(reader);
+
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(PYRAMID_TEST_DIM)
+                     ->Float32Vectors(vectors.data() + count * PYRAMID_TEST_DIM)
+                     ->Owner(false);
+    auto result =
+        restored.index->KnnSearch(query, 5, R"({"pyramid":{"ef_search":64}})", vsag::FilterPtr{});
+    REQUIRE(std::find(result->GetIds(), result->GetIds() + result->GetDim(), ids[count]) !=
+            result->GetIds() + result->GetDim());
+}
+
+TEST_CASE("Pyramid PiPNN preserves vectors after duplicate label filtering",
+          "[ut][pyramid][pipnn][optimized_build][duplicate_label_mapping]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 96;
+    const bool fast = GENERATE(true, false);
+    const uint64_t threads = GENERATE(1, 4);
+    CAPTURE(fast, threads);
+    vsag::IndexCommonParam common;
+    common.dim_ = dim;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto external = vsag::JsonType::Parse(R"({
+        "graph_type": "pipnn",
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "rabitq_bits_per_dim_query": 32,
+        "use_reorder": true,
+        "store_raw_vector": true,
+        "max_degree": 16,
+        "ef_construction": 64,
+        "index_min_size": 8,
+        "hierarchies": ["site"]
+    })");
+    external["fast_encode_rabitq"].SetBool(fast);
+    external["build_thread_count"].SetUint64(threads);
+    auto index = std::make_shared<vsag::IndexImpl<vsag::Pyramid>>(external, common);
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    for (int64_t row = 0; row < count; ++row) {
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[row * dim + d] = static_cast<float>(row) + 0.01F * static_cast<float>(d);
+        }
+    }
+    // Reject rows at two positions; subsequent labels must still refer to their original rows.
+    ids[1] = ids[0];
+    ids[48] = ids[47];
+    auto data = vsag::Dataset::Make()
+                    ->NumElements(count)
+                    ->Dim(dim)
+                    ->Ids(ids.data())
+                    ->Float32Vectors(vectors.data())
+                    ->Owner(false);
+    auto built = index->Build(data);
+    REQUIRE(built.has_value());
+    REQUIRE(built.value() == std::vector<int64_t>{0, 47});
+    REQUIRE(index->GetNumElements() == count - 2);
+
+    const auto check_vectors = [&](const auto& target) {
+        for (int64_t row = 0; row < count; ++row) {
+            if (row == 1 or row == 48) {
+                continue;
+            }
+            CAPTURE(row);
+            auto result = target->GetRawVectorByIds(&ids[row], 1, nullptr);
+            REQUIRE(result.has_value());
+            const auto* actual = result.value()->GetFloat32Vectors();
+            REQUIRE(
+                std::equal(vectors.data() + row * dim, vectors.data() + (row + 1) * dim, actual));
+        }
+    };
+    check_vectors(index);
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    auto restored = std::make_shared<vsag::IndexImpl<vsag::Pyramid>>(external, common);
+    REQUIRE(restored->DeserializeStreaming(stream).has_value());
+    check_vectors(restored);
 }
 
 TEST_CASE("Pyramid scalar RaBitQ split build supports search serialization and Add",

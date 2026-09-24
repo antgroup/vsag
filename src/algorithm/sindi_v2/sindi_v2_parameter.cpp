@@ -327,6 +327,9 @@ SINDIV2SearchParameter::FromJson(const JsonType& json) {
                    fmt::format("parameters must contain {}", INDEX_SINDI_V2));
     const auto search_json = json[INDEX_SINDI_V2];
 
+    // Parse common search parameters (timeout_ms, factor, etc.)
+    IndexSearchParameter::FromJson(search_json);
+
     term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
     term_retain_threshold = DEFAULT_TERM_RETAIN_THRESHOLD;
     if (search_json.Contains(SPARSE_TERM_PRUNE_RATIO)) {

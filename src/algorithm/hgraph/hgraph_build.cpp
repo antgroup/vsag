@@ -23,6 +23,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "datacell/flatten_build_utils.h"
 #include "datacell/flatten_datacell_parameter.h"
 #include "datacell/hgraph_rabitq_fused_datacell.h"
 #include "datacell/rabitq_split_datacell.h"
@@ -32,6 +33,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
+#include "impl/pipnn/pipnn_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "impl/searcher/basic_searcher.h"
 #include "io/memory_io/memory_io_parameter.h"
@@ -162,6 +164,10 @@ HGraph::Build(const DatasetPtr& data) {
     this->build_cache_missed_nodes_ = 0;
     std::vector<int64_t> ret;
     const bool using_build_cache = this->has_loaded_cache();
+    if (using_build_cache and graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "HGraph PiPNN does not support build_with_cache");
+    }
     if (using_build_cache) {
         this->check_fused_mutation_supported("Build with imported cache");
         if (this->using_dedup_storage()) {
@@ -178,8 +184,12 @@ HGraph::Build(const DatasetPtr& data) {
             ret = std::move(optimized_result.value());
         } else if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
             ret = this->add_impl(data);
-        } else {
+        } else if (graph_type_ == GRAPH_TYPE_VALUE_ODESCENT) {
             ret = this->build_by_odescent(data);
+        } else if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+            ret = this->build_by_pipnn(data);
+        } else {
+            throw VsagException(ErrorType::INTERNAL_ERROR, "unknown HGraph graph_type");
         }
     }
     if (use_elp_optimizer_) {
@@ -194,24 +204,59 @@ HGraph::Build(const DatasetPtr& data) {
 
 std::vector<int64_t>
 HGraph::build_by_odescent(const DatasetPtr& data) {
+    return this->build_by_batch_graph(data, false);
+}
+
+std::vector<int64_t>
+HGraph::build_by_pipnn(const DatasetPtr& data) {
+    this->validate_add_data(data);
+    if (this->extra_infos_ != nullptr) {
+        CHECK_ARGUMENT(data->GetExtraInfos() != nullptr, "extra_infos is nullptr");
+        CHECK_ARGUMENT(data->GetExtraInfoSize() == static_cast<int64_t>(this->extra_info_size_),
+                       "extra_infos size mismatch");
+    }
+    return this->build_by_batch_graph(data, true);
+}
+
+std::vector<int64_t>
+HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
     std::vector<int64_t> failed_ids;
 
+    auto pipnn_parameter = this->pipnn_param_;
+    if (use_pipnn) {
+        pipnn_parameter.alpha = this->alpha_;
+        pipnn_parameter.Validate(bottom_graph_->MaximumDegree());
+    }
     auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
     const auto* vectors = get_data(data);
     const auto* extra_infos = data->GetExtraInfos();
+    const auto* attr_sets = data->GetAttributeSets();
     const auto* source_id = data->GetSourceID();
     Vector<int64_t> valid_indices(allocator_);
+    const bool labels_are_strictly_increasing =
+        total <= 1 or std::adjacent_find(labels, labels + total, [](LabelType lhs, LabelType rhs) {
+                          return lhs >= rhs;
+                      }) == labels + total;
     UnorderedSet<LabelType> seen_labels(allocator_);
+    if (not labels_are_strictly_increasing) {
+        seen_labels.reserve(static_cast<uint64_t>(total));
+    }
     for (int64_t i = 0; i < total; ++i) {
         auto label = labels[i];
-        if (this->label_table_->CheckLabel(label) or seen_labels.find(label) != seen_labels.end()) {
+        const bool is_duplicate =
+            not labels_are_strictly_increasing and not seen_labels.emplace(label).second;
+        if (this->label_table_->CheckLabel(label) or is_duplicate) {
             failed_ids.emplace_back(label);
             continue;
         }
-        seen_labels.insert(label);
         valid_indices.emplace_back(i);
     }
+    if (use_pipnn) {
+        CHECK_ARGUMENT(valid_indices.size() <= std::numeric_limits<InnerIdType>::max(),
+                       "PiPNN point count exceeds the internal ID limit");
+    }
+
     auto inner_ids = this->get_unique_inner_ids(static_cast<InnerIdType>(valid_indices.size()));
     auto current_count = total_count_.load();
     uint64_t new_ids_count = 0;
@@ -234,6 +279,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
                                        this->allocator_);
         temporary_sq8_build_data->Train(vectors, total);
     }
+
     bool defer_persistent_codes = temporary_sq8_build_data != nullptr;
     if (not defer_persistent_codes or this->rabitq_fused_datacell_ != nullptr) {
         this->train_codes_with_dataset(this->sample_train_dataset(data));
@@ -242,7 +288,43 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
                                        static_cast<uint64_t>(total));
     this->resize(current_count + new_ids_count);
     this->total_count_ += new_ids_count;
+    const bool all_rows_are_valid =
+        valid_indices.size() == static_cast<uint64_t>(total) and not this->using_dedup_storage();
+    auto batch_insert_flatten_codes = [&](const FlattenInterfacePtr& flatten) {
+        if (flatten == nullptr) {
+            return;
+        }
+        ParallelBatchInsertVector(flatten,
+                                  static_cast<InnerIdType>(total),
+                                  inner_ids.data(),
+                                  this->thread_pool_.get(),
+                                  this->build_thread_count_,
+                                  [&](InnerIdType begin) { return get_data(data, begin); });
+    };
+    auto batch_insert_persistent_codes = [&]() {
+        batch_insert_flatten_codes(this->basic_flatten_codes_);
+        if (has_precise_reorder()) {
+            batch_insert_flatten_codes(this->high_precise_codes_);
+        }
+        if (create_new_raw_vector_) {
+            batch_insert_flatten_codes(this->raw_vector_);
+        }
+    };
+    bool persistent_codes_batched = false;
+    if (not defer_persistent_codes and all_rows_are_valid) {
+        batch_insert_persistent_codes();
+        persistent_codes_batched = true;
+    }
+    bool temporary_codes_batched = false;
+    if (temporary_sq8_build_data != nullptr and all_rows_are_valid) {
+        batch_insert_flatten_codes(temporary_sq8_build_data);
+        temporary_codes_batched = true;
+    }
     Vector<std::pair<InnerIdType, int64_t>> deferred_code_ids(allocator_);
+    Vector<const float*> pipnn_vectors(allocator_);
+    if (use_pipnn) {
+        pipnn_vectors.reserve(valid_indices.size());
+    }
     for (InnerIdType cur_size = 0; cur_size < valid_indices.size(); ++cur_size) {
         auto i = valid_indices[cur_size];
         auto label = labels[i];
@@ -253,13 +335,24 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         if (source_id != nullptr && not source_id[i].empty()) {
             this->label_table_->InsertSourceId(inner_id, source_id[i]);
         }
-        if (not defer_persistent_codes) {
-            this->insert_persistent_codes(get_data(data, i), inner_id);
-        } else {
+        if (defer_persistent_codes) {
             deferred_code_ids.emplace_back(inner_id, i);
+        } else if (not persistent_codes_batched) {
+            this->insert_persistent_codes(get_data(data, i), inner_id);
         }
-        if (temporary_sq8_build_data != nullptr) {
+        if (temporary_sq8_build_data != nullptr and not temporary_codes_batched) {
             temporary_sq8_build_data->InsertVector(get_data(data, i), inner_id);
+        }
+        if (use_pipnn and this->extra_infos_ != nullptr) {
+            const auto* extra_info = extra_infos + i * extra_info_size_;
+            this->extra_infos_->InsertExtraInfo(extra_info, inner_id);
+        }
+        if (use_pipnn and attr_sets != nullptr and this->use_attribute_filter_) {
+            this->attr_filter_index_->Insert(attr_sets[i], inner_id);
+        }
+        if (use_pipnn) {
+            pipnn_vectors.emplace_back(
+                static_cast<const float*>(get_data(data, static_cast<uint32_t>(i))));
         }
         auto level = this->get_random_level() - 1;
         if (level >= 0) {
@@ -274,35 +367,99 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
             }
         }
     }
+
+    if (this->rabitq_fused_datacell_ != nullptr and all_rows_are_valid) {
+        constexpr InnerIdType batch_size = 4096;
+        const auto batch_count = (static_cast<InnerIdType>(total) + batch_size - 1) / batch_size;
+        std::vector<std::future<void>> futures;
+        HGraphBuildTaskGuard future_guard(futures, static_cast<uint64_t>(batch_count));
+        for (InnerIdType begin = 0; begin < total; begin += batch_size) {
+            const auto end = std::min<InnerIdType>(begin + batch_size, total);
+            auto publish_batch = [this, data, &inner_ids, begin, end]() {
+                for (InnerIdType i = begin; i < end; ++i) {
+                    this->sync_fused_node_codes(inner_ids[i], get_data(data, i));
+                }
+            };
+            if (this->thread_pool_ != nullptr and this->build_thread_count_ > 1) {
+                futures.emplace_back(this->thread_pool_->GeneralEnqueue(std::move(publish_batch)));
+            } else {
+                publish_batch();
+            }
+        }
+        wait_all_futures(futures);
+    }
+
     auto build_data = (has_precise_reorder() and not build_by_base_) ? this->high_precise_codes_
                                                                      : this->basic_flatten_codes_;
     if (need_sq8_build_data) {
         build_data = raw_vector_ != nullptr ? raw_vector_ : temporary_sq8_build_data;
     }
-    {
+    if (use_pipnn) {
+        PiPNNGraphBuilder pipnn_builder(pipnn_parameter,
+                                        static_cast<uint64_t>(this->dim_),
+                                        this->metric_,
+                                        this->allocator_,
+                                        this->thread_pool_.get(),
+                                        this->build_thread_count_);
+        pipnn_builder.Build(bottom_graph_, inner_ids, pipnn_vectors);
+        if (this->support_duplicate_) {
+            entry_point_id_ = bottom_graph_->GetGroupId(entry_point_id_);
+            for (auto& route_graph_id : route_graph_ids) {
+                for (auto& id : route_graph_id) {
+                    id = bottom_graph_->GetGroupId(id);
+                }
+                std::sort(route_graph_id.begin(), route_graph_id.end());
+                route_graph_id.erase(std::unique(route_graph_id.begin(), route_graph_id.end()),
+                                     route_graph_id.end());
+            }
+        }
+    } else {
         odescent_param_->max_degree = bottom_graph_->MaximumDegree();
         ODescent odescent_builder(
             odescent_param_, build_data, allocator_, this->thread_pool_.get());
         odescent_builder.Build();
         odescent_builder.SaveGraph(bottom_graph_);
     }
+
+    auto route_odescent_param = this->odescent_param_;
+    if (route_odescent_param == nullptr) {
+        route_odescent_param = std::make_shared<ODescentParameter>();
+    }
     for (auto& route_graph_id : route_graph_ids) {
-        odescent_param_->max_degree = bottom_graph_->MaximumDegree() / 2;
+        auto current_route_odescent_param =
+            use_pipnn ? std::make_shared<ODescentParameter>(*route_odescent_param)
+                      : route_odescent_param;
+        current_route_odescent_param->max_degree = bottom_graph_->MaximumDegree() / 2;
+        if (use_pipnn and this->thread_pool_ != nullptr and this->build_thread_count_ > 1 and
+            not route_graph_id.empty()) {
+            const uint64_t worker_count =
+                std::min<uint64_t>(this->build_thread_count_, route_graph_id.size());
+            current_route_odescent_param->block_size =
+                static_cast<int64_t>((route_graph_id.size() + worker_count - 1) / worker_count);
+        }
         ODescent sparse_odescent_builder(
-            odescent_param_, build_data, allocator_, this->thread_pool_.get());
+            current_route_odescent_param, build_data, allocator_, this->thread_pool_.get());
         auto graph = this->generate_one_route_graph();
         sparse_odescent_builder.Build(route_graph_id);
         sparse_odescent_builder.SaveGraph(graph);
         this->route_graphs_.emplace_back(graph);
     }
+    if (use_pipnn and entry_point_id_ == INVALID_ENTRY_POINT and not inner_ids.empty()) {
+        entry_point_id_ = inner_ids.front();
+    }
+
     if (defer_persistent_codes) {
         build_data.reset();
         temporary_sq8_build_data.reset();
         if (this->rabitq_fused_datacell_ == nullptr) {
             this->train_codes_with_dataset(this->sample_train_dataset(data));
         }
-        for (const auto& [inner_id, local_idx] : deferred_code_ids) {
-            this->insert_persistent_codes(get_data(data, local_idx), inner_id);
+        if (all_rows_are_valid) {
+            batch_insert_persistent_codes();
+        } else {
+            for (const auto& [inner_id, local_idx] : deferred_code_ids) {
+                this->insert_persistent_codes(get_data(data, local_idx), inner_id);
+            }
         }
     }
     return failed_ids;
@@ -310,6 +467,12 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
 
 std::vector<int64_t>
 HGraph::Add(const DatasetPtr& data) {
+    if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        std::unique_lock<std::mutex> initial_build_lock(pipnn_initial_build_mutex_);
+        if (this->total_count_.load() == 0) {
+            return this->Build(data);
+        }
+    }
     return this->add_impl(data);
 }
 

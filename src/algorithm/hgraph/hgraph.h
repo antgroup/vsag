@@ -362,6 +362,13 @@ public:
     /// Build all graphs (bottom + route) via ODescent in batch mode.
     std::vector<int64_t>
     build_by_odescent(const DatasetPtr& data);
+    /// Build the bottom graph via PiPNN and route graphs via ODescent.
+    std::vector<int64_t>
+    build_by_pipnn(const DatasetPtr& data);
+
+    /// Shared batch-build orchestration for ODescent and PiPNN.
+    std::vector<int64_t>
+    build_by_batch_graph(const DatasetPtr& data, bool use_pipnn);
 
     /// Write codes for inner_id into the persistent flatten storage.
     void
@@ -947,6 +954,7 @@ private:
         std::string route{"disabled"};
         uint64_t seed_count{0};
         bool used_precise_float_csr{false};
+        bool used_bitmap_fast_path{false};
     };
 
     [[nodiscard]] MCIHybridSearchResult
@@ -1004,6 +1012,7 @@ private:
     InnerIdType entry_point_id_{INVALID_ENTRY_POINT};  // top-level entry point
 
     ODescentParameterPtr odescent_param_{nullptr};  // ODescent build parameters
+    PiPNNGraphBuilderParameter pipnn_param_{};      // PiPNN build parameters
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};  // graph algorithm type
 
     CliqueDataCellPtr mci_cliques_{nullptr};  // companion MCI clique datacell
@@ -1018,6 +1027,7 @@ private:
     mutable std::shared_mutex persistent_codes_mutex_;  // pins flatten storage during MCI search
     mutable std::mutex mci_build_mutex_;                // serializes full MCI reconstruction
     mutable std::mutex mci_add_mutex_;                  // serializes MCI-enabled Add calls
+    mutable std::mutex pipnn_initial_build_mutex_;      // serializes PiPNN's first Add batch
     mutable MutexArrayPtr neighbors_mutex_;             // per-node locks for neighbor lists
     mutable std::shared_mutex add_mutex_;               // serializes Add() operations
     mutable std::shared_mutex force_remove_mutex_;      // serializes force-remove operations

@@ -13,8 +13,8 @@ HGraph 都是推荐的默认索引。
 ## 工作原理
 
 1. **构图。** 向量被组织成层级近邻图：上层作为导航入口，底层连接每个数据点到在
-   `max_degree` 预算内的最近邻。构图算法可以是 NSW 风格插入（`graph_type: "nsw"`，默认）
-   或 ODescent（`graph_type: "odescent"`）。
+   `max_degree` 预算内的最近邻。构图算法可以是 NSW 风格插入（`graph_type: "nsw"`，默认）、
+   ODescent（`graph_type: "odescent"`）或 PiPNN（`graph_type: "pipnn"`）。
 2. **量化。** 底层存储使用可配置的量化器进行压缩（`base_quantization_type` —
    `fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`tq`）。
    可选地再保留一份高精度副本（`use_reorder: true` 搭配 `precise_quantization_type`），
@@ -61,7 +61,15 @@ auto result = index->KnnSearch(
 | `base_quantization_type` | string | —（必填） | `fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`tq` —— 各量化器细节见[量化章节](../quantization/) |
 | `max_degree` | int | `64` | 图节点最大出度 |
 | `ef_construction` | int | `400` | 构建阶段的候选集大小（越大召回越高，构建越慢） |
-| `graph_type` | string | `"nsw"` | 构图算法：`nsw` 或 `odescent` |
+| `alpha` | float | `1.0` | 最终 robust pruning 的系数；PiPNN 要求有限且不小于 `1.0` |
+| `graph_type` | string | `"nsw"` | 构图算法：`nsw`、`odescent` 或 `pipnn` |
+| `pipnn_max_leaf_size` | int | `1024` | 分区叶子的最大点数；越大候选覆盖可能越高，叶内距离计算也越多 |
+| `pipnn_min_leaf_size` | int | `64` | 合并过小叶子时使用的目标规模 |
+| `pipnn_leader_sample_rate` | float | `0.005` | 分区 leader 的采样比率；每个分区最少使用 `2` 个、最多 `1000` 个 leader，且不超过分区点数 |
+| `pipnn_fanout` | int[] | `[10, 2]` | 每个列出的分区层级中，一个点加入的最近 leader 分区数；更深层使用 `1` |
+| `pipnn_leaf_neighbor_count` | int | `5` | 每个点在每个叶子中贡献的最近候选数，是 PiPNN 主要的质量/构建工作量旋钮；小于 `pipnn_min_leaf_size` 的叶子至少使用 `4` |
+| `pipnn_hash_plane_count` | int | `12` | 方向 hash 位数，范围 `[1, 15]`；`max_degree` 不能超过 `2` 的该次幂 |
+| `pipnn_reservoir_size` | int | `64` | 最终剪枝前每个点保留的候选槽数；实际容量至少为 `max_degree` |
 | `use_reverse_edges` | bool | `false` | 跟踪入边，实现 O(1) 反向邻居查找；边存储约翻倍，且 `graph_storage_type: "compressed"` 不支持 |
 | `label_remap_type` | string | `"pg"` | label 到内部 ID 的 map 实现：`"pg"` 或 `"robin"`；恢复或组合兼容索引时应保持一致 |
 | `use_reorder` | bool | `false` | 是否额外保留一份高精度副本用于精排 |
@@ -95,11 +103,26 @@ auto result = index->KnnSearch(
 `label_remap_type` 只改变内部 label map，不改变用户 ID。默认值为 `"pg"`；
 `"robin"` 选择另一种 robin-map 实现，建议针对实际 ID 分布实测后再调整。
 
+### PiPNN 构建边界
+
+设置 `graph_type: "pipnn"` 可让初次全量 `Build` 使用
+[PiPNN](https://arxiv.org/abs/2602.21247)。PiPNN 构建器接收 `dtype: "float32"`、
+`metric_type: "l2"`、`"ip"` 或 `"cosine"` 的稠密向量输入，从原始构建向量生成底层图，并复用
+HGraph 现有的路由层、向量存储、搜索、过滤、精排、增量 `Add`、删除和序列化路径。持久化底层
+存储可以使用 `sq8` 等受支持的量化器，包括 RaBitQ 配合 SQ8 精排。缓存辅助构建和向量存储去重
+暂不支持 PiPNN。上表的 `pipnn_*` 参数用于调节该构建器，`ef_construction` 不生效；
+现有的 `alpha` 参数控制 PiPNN 的最终 robust pruning。
+
+`build_thread_count` 会并行化向量预处理、分区、候选边生成和最终剪枝。性能测试时应固定
+`OPENBLAS_NUM_THREADS=1`，避免 BLAS 线程影响构建线程扩展性。可复现配置
+`tools/eval/pipnn_parallel.yaml` 会在 SIFT1M 上以相同 Recall@10 目标比较 NSW、ODescent 和
+PiPNN，并通过查询验证每一份生成的图。
+
 ### 向量存储去重
 
 同时设置 `support_duplicate: true` 和 `deduplicate_storage: true` 后，重复向量会共享
 同一个物理编码槽位，但仍保留各自的标签。该选项目前仅支持使用 `graph_type: "nsw"` 的
-稠密向量 HGraph 索引；`graph_type: "odescent"` 不支持。
+稠密向量 HGraph 索引；`graph_type: "odescent"` 和 `graph_type: "pipnn"` 不支持。
 
 启用存储去重后，暂不支持以下操作和配置：
 

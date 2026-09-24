@@ -71,6 +71,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       duplicate_distance_threshold_(hgraph_param->duplicate_distance_threshold),
       support_force_remove_(hgraph_param->support_force_remove),
       odescent_param_(hgraph_param->odescent_param),
+      pipnn_param_(hgraph_param->pipnn_param),
       graph_type_(hgraph_param->graph_type),
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
       mci_parameters_(hgraph_param->mci_parameters),
@@ -83,6 +84,13 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     if (this->deduplicate_storage_ && not is_dense_vector) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             "HGraph deduplicate_storage only supports dense vectors");
+    }
+    if (this->graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        if (common_param.repr_ != RecordRepr::DENSE or
+            common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "HGraph PiPNN only supports dense float32 indexes");
+        }
     }
     if (this->deduplicate_storage_ && this->graph_type_ != GRAPH_TYPE_VALUE_NSW) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,

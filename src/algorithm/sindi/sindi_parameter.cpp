@@ -220,6 +220,9 @@ SINDISearchParameter::FromJson(const JsonType& json) {
                    fmt::format("parameters must contains {}", INDEX_SINDI));
     const auto search_json = json[INDEX_SINDI];
 
+    // Parse common search parameters (timeout_ms, factor, etc.)
+    IndexSearchParameter::FromJson(search_json);
+
     term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
     term_retain_threshold = DEFAULT_TERM_RETAIN_THRESHOLD;
     filter_callback_limit = DEFAULT_FILTER_CALLBACK_LIMIT;
