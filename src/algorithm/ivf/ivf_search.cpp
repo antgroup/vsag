@@ -34,7 +34,7 @@
 #include "dataset_impl.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/inner_search_param.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/reorder/bucket_reorder.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "inner_string_params.h"
@@ -60,6 +60,7 @@ IVF::KnnSearch(const DatasetPtr& query,
     req.params_str_ = parameters;
     req.threshold_ = ParseSearchThreshold(parameters);
     if (filter != nullptr) {
+        req.enable_filter_ = true;
         req.filter_ = filter;
     }
     return this->SearchWithRequest(req);
@@ -78,6 +79,7 @@ IVF::RangeSearch(const DatasetPtr& query,
     req.limited_size_ = limited_size;
     req.params_str_ = parameters;
     if (filter != nullptr) {
+        req.enable_filter_ = true;
         req.filter_ = filter;
     }
     return this->SearchWithRequest(req);
@@ -212,7 +214,7 @@ IVF::search(const DatasetPtr& query,
         candidate_buckets = partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, &ctx);
     }
     if (reasoning_ctx != nullptr) {
-        reasoning_ctx->RecordBucketSelection(candidate_buckets);
+        reasoning_ctx->RecordBucketSelection(candidate_buckets);  // [reasoning]
     }
     auto computer = bucket_->FactoryComputer(query_data);
 
@@ -348,7 +350,7 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
         candidate_buckets = partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, &ctx);
     }
     if (reasoning_ctx != nullptr) {
-        reasoning_ctx->RecordBucketSelection(candidate_buckets);
+        reasoning_ctx->RecordBucketSelection(candidate_buckets);  // [reasoning]
     }
 
     int64_t topk = request.topk_;
@@ -402,12 +404,12 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
             const auto origin_id = candidate_ids[i] / buckets_per_data_;
             if (filter != nullptr and not filter->CheckValid(origin_id)) {
                 if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordFilterReject(origin_id);
+                    reasoning_ctx->RecordFilterReject(origin_id);  // [reasoning]
                 }
                 continue;
             }
             if (reasoning_ctx != nullptr) {
-                reasoning_ctx->RecordVisit(origin_id, scores[i], 0);
+                reasoning_ctx->RecordVisit(origin_id, scores[i], 0);  // [reasoning]
             }
             search_result->Push(scores[i], candidate_ids[i]);
             while (search_result->Size() > static_cast<uint64_t>(topk)) {
@@ -446,7 +448,7 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
             const auto origin_id = inner_id / buckets_per_data_;
             if (attr_filter != nullptr and not attr_filter->CheckValid(offset)) {
                 if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordFilterReject(origin_id);
+                    reasoning_ctx->RecordFilterReject(origin_id);  // [reasoning]
                 }
                 continue;
             }
@@ -497,7 +499,8 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
 
     bool is_range = (request.mode_ == SearchMode::RANGE_SEARCH);
 
-    auto param = this->create_search_param(request.params_str_, request.filter_);
+    const auto filter = request.enable_filter_ ? request.filter_ : nullptr;
+    auto param = this->create_search_param(request.params_str_, filter);
     const bool use_custom_distance = request.distance_batch_func_ != nullptr;
     if (use_custom_distance) {
         CHECK_ARGUMENT(request.distance_batch_size_ > 0,
@@ -664,12 +667,17 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     }
     std::shared_ptr<ReasoningContext> reasoning_ctx;
     if (not request.expected_labels_.empty()) {
-        reasoning_ctx = std::make_shared<ReasoningContext>(this->allocator_);
+        auto* reasoning_allocator = select_query_allocator(ctx.alloc, this->allocator_);
+        reasoning_ctx = std::make_shared<ReasoningContext>(reasoning_allocator);
         reasoning_ctx->SetSearchParams(
-            request.topk_, "IVF", use_reorder_, request.filter_ != nullptr);
+            request.mode_ == SearchMode::RANGE_SEARCH ? -1 : request.topk_,
+            "IVF",
+            use_reorder_,
+            filter != nullptr,
+            request.mode_ == SearchMode::RANGE_SEARCH);
 
-        UnorderedMap<int64_t, InnerIdType> label_to_inner_id(this->allocator_);
-        std::vector<std::tuple<InnerIdType, BucketIdType, InnerIdType>> locations;
+        UnorderedMap<int64_t, InnerIdType> label_to_inner_id(reasoning_allocator);
+        Vector<std::tuple<InnerIdType, BucketIdType, InnerIdType>> locations(reasoning_allocator);
         {
             std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
             locations.reserve(request.expected_labels_.size());
@@ -683,12 +691,13 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             }
         }
 
-        Vector<int64_t> expected_labels_vec(this->allocator_);
+        Vector<int64_t> expected_labels_vec(reasoning_allocator);
         expected_labels_vec.reserve(request.expected_labels_.size());
         for (const auto& label : request.expected_labels_) {
             expected_labels_vec.push_back(label);
         }
-        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
+        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec,
+                                                 label_to_inner_id);  // [reasoning]
 
         const auto* query_data = query->GetFloat32Vectors();
         auto computer = this->bucket_->FactoryComputer(query_data);
@@ -698,7 +707,7 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                 ctx.stats->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
                                        this->bucket_->backend_);
             }
-            reasoning_ctx->SetTrueDistance(inner_id, dist);
+            reasoning_ctx->SetTrueDistance(inner_id, dist);  // [reasoning]
         }
         ctx.reasoning_ctx = reasoning_ctx.get();
     }
@@ -804,7 +813,8 @@ IVF::AttachReasoningReport(const DatasetPtr& dataset_results,
     }
     auto count = dataset_results->GetDim();
     if (count > 0 and dataset_results->GetIds() != nullptr) {
-        Vector<InnerIdType> result_inner_ids(static_cast<uint64_t>(count), this->allocator_);
+        Vector<InnerIdType> result_inner_ids(static_cast<uint64_t>(count),
+                                             reasoning_ctx->GetAllocator());
         {
             std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
             for (int64_t i = 0; i < count; ++i) {
@@ -812,9 +822,9 @@ IVF::AttachReasoningReport(const DatasetPtr& dataset_results,
                     this->label_table_->GetIdByLabel(dataset_results->GetIds()[i]);
             }
         }
-        reasoning_ctx->MarkResult(result_inner_ids);
+        reasoning_ctx->MarkResult(result_inner_ids);  // [reasoning]
     }
-    reasoning_ctx->DiagnoseExpectedTargets();
-    dataset_results->Reasoning(reasoning_ctx->GenerateReport());
+    reasoning_ctx->DiagnoseExpectedTargets();                     // [reasoning]
+    dataset_results->Reasoning(reasoning_ctx->GenerateReport());  // [reasoning]
 }
 }  // namespace vsag

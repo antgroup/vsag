@@ -1627,6 +1627,17 @@ TEST_CASE("(PR) BruteForce Reasoning Found Verification", "[ft][bruteforce][reas
     auto reasoning = result.value()->GetReasoning();
     REQUIRE(reasoning.find("1/1") != std::string::npos);
     REQUIRE(reasoning.find("0 missed") != std::string::npos);
+    SECTION("Range reasoning metadata matches request") {
+        req.mode_ = vsag::SearchMode::RANGE_SEARCH;
+        req.radius_ = 100.0F;
+        req.limited_size_ = 10;
+        auto range_result = index->SearchWithRequest(req);
+        REQUIRE(range_result.has_value());
+        REQUIRE(range_result.value()->GetDim() > 0);
+        auto report = vsag::JsonType::Parse(range_result.value()->GetReasoning());
+        REQUIRE(report["meta"]["search_mode"].GetString() == "range");
+        REQUIRE(report["meta"]["topk"].GetInt() == -1);
+    }
 }
 
 TEST_CASE("(PR) BruteForce Reasoning Multiple Labels Mixed", "[ft][bruteforce][reasoning][pr]") {

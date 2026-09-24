@@ -21,6 +21,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "common.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
 #include "query_context.h"
@@ -618,6 +619,10 @@ public:
                      effective_request.query_->GetNumElements() <= 1 ||
                      this->inner_index_->GetIndexType() != IndexType::HGRAPH)) {
                     auto result = make_empty_search_result();
+                    if (!effective_request.expected_labels_.empty()) {
+                        result->Reasoning(ReasoningContext::MakeStatusReport(
+                            ReasoningReportStatus::kEmptyIndex, this->inner_index_->GetName()));
+                    }
                     if (metrics) {
                         CHECK_ARGUMENT(
                             AttachSearchMetrics(result, std::move(metrics.value()).Snapshot()),
@@ -645,6 +650,10 @@ public:
                      effective_request.query_->GetNumElements() <= 1 ||
                      this->inner_index_->GetIndexType() != IndexType::HGRAPH)) {
                     auto result = make_empty_search_result();
+                    if (!effective_request.expected_labels_.empty()) {
+                        result->Reasoning(ReasoningContext::MakeStatusReport(
+                            ReasoningReportStatus::kEmptyIndex, this->inner_index_->GetName()));
+                    }
                     if (not want_statistics) {
                         result->Statistics("{}");
                     }
