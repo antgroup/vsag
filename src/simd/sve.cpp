@@ -1114,7 +1114,10 @@ RaBitQFloatBinaryIPBatch4(const float* vector,
                           uint64_t dim,
                           float inv_sqrt_d,
                           float* results) {
-    neon::RaBitQFloatBinaryIPBatch4(vector, bits1, bits2, bits3, bits4, dim, inv_sqrt_d, results);
+    results[0] = sve::RaBitQFloatBinaryIP(vector, bits1, dim, inv_sqrt_d);
+    results[1] = sve::RaBitQFloatBinaryIP(vector, bits2, dim, inv_sqrt_d);
+    results[2] = sve::RaBitQFloatBinaryIP(vector, bits3, dim, inv_sqrt_d);
+    results[3] = sve::RaBitQFloatBinaryIP(vector, bits4, dim, inv_sqrt_d);
 }
 
 void
