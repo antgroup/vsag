@@ -141,6 +141,46 @@ global:
 Any HDF5 dataset from [ann-benchmarks](https://github.com/erikbern/ann-benchmarks)
 (e.g. `sift-128-euclidean.hdf5`, `gist-960-euclidean.hdf5`) works out of the box.
 
+## Prepare calibration and validation inputs
+
+`tools/eval/prepare_query_split.py` creates query subsets for calibrating parameters and
+checking them on separate queries. It accepts the unfiltered dense HDF5 layout described in
+[Dataset Format](dataset_format.md), with float32 or int8 vectors and the four datasets
+`train`, `test`, `neighbors`, and `distances`. Sparse, multi-vector, and filtering datasets
+are rejected.
+
+Install NumPy and h5py in the Python environment used for the helper, then specify the
+original query row indices for each subset. For example:
+
+```bash
+python3 -m pip install numpy h5py
+cat > query_rows.json <<'JSON'
+{
+  "calibration": [0, 2, 4],
+  "validation": [1, 3, 5]
+}
+JSON
+python3 tools/eval/prepare_query_split.py \
+  /path/to/sift-128-euclidean.hdf5 query_rows.json /tmp/sift-query-split
+```
+
+Choose representative query populations for the workload; the small lists above illustrate
+the input format. Both lists must be non-empty. Repeated row indices and identical query
+vectors across the two lists are rejected. Query comparison uses exact vector values
+(treating positive and negative zero equally). Identical vectors within one list retain
+their original row weighting, and unlisted query rows are omitted.
+
+The new output directory contains `calibration.hdf5`, `validation.hdf5`, and
+`query_rows.json` with the source path and row mapping. Selected query vectors and their
+paired ground-truth rows keep the supplied order, types, and attributes. Each output links
+to the original `/train` dataset through a relative HDF5 external link, preserving base row
+IDs without copying the base vectors. Keep the source file unchanged and preserve this
+relative layout when moving the files. Existing output directories are not overwritten.
+
+Use `calibration.hdf5` as `datapath` while selecting search parameters, then use the frozen
+parameters with `validation.hdf5`. An index built from the original base vectors can be
+reused for both files.
+
 ## References
 
 - Source: `tools/eval/`
