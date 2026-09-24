@@ -15,7 +15,6 @@
 
 #pragma once
 
-#include <chrono>
 #include <optional>
 
 #include "monitor.h"
@@ -35,6 +34,8 @@ public:
     void
     Stop() override;
 
+    // Read results after all Record() calls have completed. SearchEvalCase waits at
+    // the search loop's OpenMP barrier before collecting results; Stop() is a no-op.
     JsonType
     GetResult() override;
 

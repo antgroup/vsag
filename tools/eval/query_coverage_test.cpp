@@ -14,7 +14,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_string.hpp>
+#include <catch2/matchers/catch_matchers.hpp>
 #include <string>
 #include <vector>
 
@@ -125,6 +125,11 @@ TEST_CASE("Search evaluation rejects recall targets for modes without recall at 
         "recall_target is supported only for knn and knn_filter search modes");
 
     REQUIRE(LoadYamlConfig("search_mode: range\n").search_mode == "range");
+}
+
+TEST_CASE("Recall coverage reports zero queries before recording", "[ut][eval][query_coverage]") {
+    RecallMonitor monitor(0, true, 0.9);
+    RequireCoverage(monitor.GetResult(), 0.9, 0, 0, 0.0);
 }
 
 TEST_CASE("Recall coverage uses the discrete per-query boundary", "[ut][eval][query_coverage]") {
