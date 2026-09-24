@@ -26,6 +26,7 @@
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/query_computer_pool.h"
+#include "impl/reasoning/search_reasoning.h"
 #include "impl/searcher/searcher_utils.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/spsc_queue.h"
@@ -147,10 +148,15 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
 
     float dist = 0.0F;
     auto lower_bound = std::numeric_limits<float>::max();
+    auto* reasoning = ctx == nullptr ? nullptr : ctx->reasoning_ctx;
 
     uint32_t hops = 0;
     uint32_t dist_cmp = 0;
     uint32_t count_no_visited = 0;
+    uint32_t unrewarded_hops = 0;
+    uint32_t empty_hops = 0;
+    const uint32_t max_unrewarded_hops = std::max<uint32_t>(ef, 500);
+    const uint32_t max_empty_hops = std::max<uint32_t>(10000, 10 * ef);
     uint64_t beam = 1;
     uint32_t vector_size = graph->MaximumDegree() * beam;
     uint32_t current_start = 0;
@@ -259,8 +265,31 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         node_pair[0] = current_first_node_pair;
 
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-            if ((-current_first_node_pair.first) > lower_bound && top_candidates->Size() == ef) {
-                break;
+            if (top_candidates->Empty()) {
+                ++empty_hops;
+                if (empty_hops >= max_empty_hops) {
+                    if (reasoning != nullptr) {
+                        reasoning->SetTermination(
+                            ReasoningContext::kTerminationEmptyTraversalLimitReached);
+                    }
+                    break;
+                }
+            } else if ((-current_first_node_pair.first) > lower_bound) {
+                if (top_candidates->Size() >= ef) {
+                    if (reasoning != nullptr) {
+                        reasoning->SetTermination(ReasoningContext::kTerminationLowerBoundReached);
+                    }
+                    break;
+                }
+                ++unrewarded_hops;
+                if (unrewarded_hops >= max_unrewarded_hops) {
+                    if (reasoning != nullptr) {
+                        reasoning->SetTermination(ReasoningContext::kTerminationLowerBoundReached);
+                    }
+                    break;
+                }
+            } else {
+                unrewarded_hops = 0;
             }
         }
         candidate_set->Pop();
@@ -345,6 +374,8 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                         return;
                     }
                     top_candidates->Push(dist, result_id);
+                    unrewarded_hops = 0;
+                    empty_hops = 0;
                     if constexpr (mode == KNN_SEARCH) {
                         while (top_candidates->Size() > ef) {
                             top_candidates->Pop();
@@ -379,12 +410,16 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                 candidate_set->Push(-dist, cur_id);
                 if (check_func(cur_id)) {
                     top_candidates->Push(dist, cur_id);
+                    unrewarded_hops = 0;
+                    empty_hops = 0;
                 }
                 if (inner_search_param.consider_duplicate) {
                     const auto duplicate_ids = graph->GetDuplicateIds(cur_id);
                     for (const auto& item : duplicate_ids) {
                         if (check_func(item)) {
                             top_candidates->Push(dist, item);
+                            unrewarded_hops = 0;
+                            empty_hops = 0;
                         }
                     }
                 }

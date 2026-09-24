@@ -103,6 +103,8 @@ public:
     static constexpr const char* kTerminationLowerBoundReached = "lower_bound_reached";
     static constexpr const char* kTerminationHopsLimitReached = "hops_limit_reached";
     static constexpr const char* kTerminationTimeout = "timeout";
+    static constexpr const char* kTerminationEmptyTraversalLimitReached =
+        "empty_traversal_limit_reached";
 
 public:
     int64_t topk_{0};
