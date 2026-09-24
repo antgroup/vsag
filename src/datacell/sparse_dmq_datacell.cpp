@@ -33,7 +33,7 @@ SparseDmqDataCell::SparseDmqDataCell(uint32_t term_id_limit,
                                      uint32_t shared_codebook_threshold)
     : allocator_(common_param.allocator_.get()),
       quantizer_(std::make_shared<SparseDmqQuantizer>(
-          term_id_limit, allocator_, shared_codebook_threshold)),
+          term_id_limit, allocator_, shared_codebook_threshold, common_param.data_type_)),
       offsets_(allocator_),
       codes_(allocator_) {
     offsets_.push_back(0);

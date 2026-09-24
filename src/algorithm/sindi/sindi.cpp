@@ -34,6 +34,7 @@
 #include "index_feature_list.h"
 #include "io/memory_block_io/memory_block_io_parameter.h"
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
+#include "simd/bf16_simd.h"
 #include "simd/fp16_simd.h"
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
@@ -328,7 +329,13 @@ SINDI::sort_and_prune_sparse_vector_for_build(const SparseVector& input,
     sorted_terms.clear();
     sorted_terms.reserve(input.len_);
     for (uint32_t index = 0; index < input.len_; ++index) {
-        sorted_terms.emplace_back(input.ids_[index], input.vals_[index]);
+        float val = input.vals_[index];
+        if (data_type_ == DataTypes::DATA_TYPE_FP16) {
+            val = generic::FP16ToFloat(reinterpret_cast<const uint16_t*>(input.vals_)[index]);
+        } else if (data_type_ == DataTypes::DATA_TYPE_BF16) {
+            val = generic::BF16ToFloat(reinterpret_cast<const uint16_t*>(input.vals_)[index]);
+        }
+        sorted_terms.emplace_back(input.ids_[index], val);
     }
     std::sort(sorted_terms.begin(), sorted_terms.end(), [](const auto& lhs, const auto& rhs) {
         if (lhs.second != rhs.second) {
@@ -370,8 +377,16 @@ SINDI::init_quantization_params_from_vectors(const DatasetPtr& base) {
     for (int64_t document = 0; document < base->GetNumElements(); ++document) {
         const auto& sparse_vector = sparse_vectors[document];
         for (uint32_t term = 0; term < sparse_vector.len_; ++term) {
-            min_val = std::min(min_val, sparse_vector.vals_[term]);
-            max_val = std::max(max_val, sparse_vector.vals_[term]);
+            float val = sparse_vector.vals_[term];
+            if (data_type_ == DataTypes::DATA_TYPE_FP16) {
+                val = generic::FP16ToFloat(
+                    reinterpret_cast<const uint16_t*>(sparse_vector.vals_)[term]);
+            } else if (data_type_ == DataTypes::DATA_TYPE_BF16) {
+                val = generic::BF16ToFloat(
+                    reinterpret_cast<const uint16_t*>(sparse_vector.vals_)[term]);
+            }
+            min_val = std::min(min_val, val);
+            max_val = std::max(max_val, val);
             has_value = true;
         }
     }
@@ -2200,7 +2215,13 @@ SINDI::remap_sparse_vector_for_query(const SparseVector& input,
         auto compact = term_id_mapper_->TryMap(input.ids_[i]);
         if (compact.has_value()) {
             tmp_ids.push_back(compact.value());
-            tmp_vals.push_back(input.vals_[i]);
+            float val = input.vals_[i];
+            if (data_type_ == DataTypes::DATA_TYPE_FP16) {
+                val = generic::FP16ToFloat(reinterpret_cast<const uint16_t*>(input.vals_)[i]);
+            } else if (data_type_ == DataTypes::DATA_TYPE_BF16) {
+                val = generic::BF16ToFloat(reinterpret_cast<const uint16_t*>(input.vals_)[i]);
+            }
+            tmp_vals.push_back(val);
         }
     }
     SparseVector remapped;
