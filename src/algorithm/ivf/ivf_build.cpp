@@ -74,17 +74,8 @@ IVF::InitFeatures() {
         });
     }
 
-    bool has_fp32 = false;
-    if (use_reorder_) {
-        const auto precise_quantizer_name = precise_bucket_ != nullptr
-                                                ? precise_bucket_->GetQuantizerName()
-                                                : reorder_codes_->GetQuantizerName();
-        has_fp32 = precise_quantizer_name == QUANTIZATION_TYPE_VALUE_FP32;
-    }
-    if (name == QUANTIZATION_TYPE_VALUE_FP32 or has_fp32) {
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID);
-    }
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID);
 
     if (name == QUANTIZATION_TYPE_VALUE_FP32 and
         this->bucket_->GetMetricType() != MetricType::METRIC_TYPE_COSINE and

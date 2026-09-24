@@ -16,6 +16,7 @@
 #pragma once
 
 #include <atomic>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -41,6 +42,7 @@
 #include "impl/heap/distance_heap.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
+#include "impl/searcher/hybrid_mci_searcher.h"
 #include "impl/searcher/mci_searcher.h"
 #include "impl/searcher/parallel_searcher.h"
 #include "impl/thread_pool/default_thread_pool.h"
@@ -56,6 +58,9 @@
 #include "vsag/index_features.h"
 
 namespace vsag {
+
+class ChunkedManifest;
+struct ComponentManifestEntry;
 class FlattenOptimizedBuildInterface;
 class HGraphRaBitQFusedDataCell;
 class HGraphRaBitQSearcher;
@@ -108,14 +113,13 @@ public:
     CalcDistancesById(const float* query,
                       const int64_t* ids,
                       int64_t count,
-                      bool calculate_precise_distance = true) const override;
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const override;
 
-    DatasetPtr
-    CalDistanceById(const float* query,
-                    const int64_t* ids,
-                    int64_t count,
-                    bool calculate_precise_distance = true,
-                    int64_t topk = -1) const override;
+    float
+    CalcDistanceById(const DatasetPtr& query,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
 
     void
     Deserialize(StreamReader& reader) override;
@@ -237,6 +241,12 @@ public:
     void
     Serialize(StreamWriter& writer) const override;
 
+    void
+    Serialize(SerializeWriter& writer, uint64_t chunk_size) const override;
+
+    void
+    ParallelDeserialize(DeserializeReader& reader) override;
+
     /// Set the number of threads used during Build().
     void
     SetBuildThreadsCount(uint64_t count) {
@@ -291,17 +301,22 @@ public:
      * pointer is absent.
      */
     const void*
-    get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
+    get_data(const DatasetPtr& dataset, int64_t index = 0) const {
+        CHECK_ARGUMENT(index >= 0, "query index must be non-negative");
+        CHECK_ARGUMENT(
+            data_type_ == DataTypes::DATA_TYPE_SPARSE ||
+                (dim_ == 0 || (dim_ > 0 && index <= std::numeric_limits<int64_t>::max() / dim_)),
+            "query offset exceeds int64_t range");
         if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
             auto* ptr = dataset->GetFloat32Vectors();
-            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
+            return ptr ? ptr + index * dim_ : nullptr;
         } else if (data_type_ == DataTypes::DATA_TYPE_INT8) {
             auto* ptr = dataset->GetInt8Vectors();
-            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
+            return ptr ? ptr + index * dim_ : nullptr;
         } else if (data_type_ == DataTypes::DATA_TYPE_FP16 ||
                    data_type_ == DataTypes::DATA_TYPE_BF16) {
             auto* ptr = dataset->GetFloat16Vectors();
-            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
+            return ptr ? ptr + index * dim_ : nullptr;
         } else if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
             auto* ptr = dataset->GetSparseVectors();
             return ptr ? ptr + index : nullptr;
@@ -348,6 +363,13 @@ public:
     /// Build all graphs (bottom + route) via ODescent in batch mode.
     std::vector<int64_t>
     build_by_odescent(const DatasetPtr& data);
+    /// Build the bottom graph via PiPNN and route graphs via ODescent.
+    std::vector<int64_t>
+    build_by_pipnn(const DatasetPtr& data);
+
+    /// Shared batch-build orchestration for ODescent and PiPNN.
+    std::vector<int64_t>
+    build_by_batch_graph(const DatasetPtr& data, bool use_pipnn);
 
     /// Write codes for inner_id into the persistent flatten storage.
     void
@@ -431,6 +453,11 @@ public:
                      RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr) const;
 
 private:
+    float
+    calc_native_distance_by_id(const void* native_query,
+                               int64_t id,
+                               bool calculate_precise_distance) const;
+
     void
     check_fused_mutation_supported(std::string_view operation) const;
 
@@ -647,6 +674,60 @@ private:
     void
     serialize_label_info(StreamWriter& writer) const;
 
+    /// shared post-deserialization steps (dedup validation, memory accounting)
+    void
+    finish_deserialize();
+
+    /// validate and publish the logical state derived from the code-slot map
+    void
+    validate_and_publish_dedup_state(uint64_t serialized_total_count);
+
+    /// publish the physical code capacity after the code components are ready
+    void
+    publish_physical_code_capacity();
+
+    /// initialize runtime capacity shared by search and subsequent mutations
+    void
+    initialize_deserialized_runtime_state();
+
+    /// restore basic info and duplicate-format flags from the footer
+    /// metadata and return the serialized total count; shared by
+    /// Deserialize(StreamReader&) and the parallel deserialization paths
+    uint64_t
+    apply_footer_metadata(const MetadataPtr& metadata);
+
+    /// Restore a whole component whose Deserialize seeks inside its own payload
+    /// (see requires_seekable_payload). The frame is buffered first, so the
+    /// component gets a seekable reader and the frame stays exactly consumed
+    /// even though the component's own cursor does not reach the end.
+    void
+    deserialize_seekable_whole_component(DeserializeReader& reader,
+                                         const ComponentManifestEntry& comp,
+                                         bool compressed);
+
+    /// dispatch a whole component of the chunked manifest to its sequential
+    /// Deserialize by name.
+    ///
+    /// Not internally synchronized. The manifest path dispatches each whole
+    /// component as one pool task, so distinct components run concurrently:
+    /// every branch must touch only index members that no other branch
+    /// touches. Adding a branch that reads or writes shared state (a counter,
+    /// a capacity field) requires either moving that state out of here or
+    /// serializing the component on the calling thread.
+    void
+    deserialize_whole_component(const std::string& name, StreamReader& reader);
+
+    /// parallel body load driven by the manifest recorded in the footer
+    void
+    parallel_deserialize_manifest(DeserializeReader& reader,
+                                  ThreadPool& pool,
+                                  const ChunkedManifest& chunked_manifest);
+
+    /// parallel load of an uncompressed body without a recorded manifest:
+    /// probe the component extents sequentially, then fill io data in parallel
+    void
+    parallel_deserialize_probe(DeserializeReader& reader, ThreadPool& pool, uint64_t body_end);
+
     /// Read label (external id) mappings from stream.
     void
     deserialize_label_info(StreamReader& reader) const;
@@ -690,6 +771,12 @@ private:
                        float radius,
                        QueryContext* ctx,
                        const std::optional<float>& threshold = std::nullopt) const;
+
+    DatasetPtr
+    search_range_with_request(const SearchRequest& request,
+                              const HGraphSearchParameters& params,
+                              const FilterPtr& filter,
+                              QueryContext& ctx) const;
 
 private:
     /// Reorder the candidate heap using precise codes, updating in-place.
@@ -868,6 +955,11 @@ private:
         std::string route{"disabled"};
         uint64_t seed_count{0};
         bool used_precise_float_csr{false};
+        bool used_bitmap_fast_path{false};
+        // Counters of the dynamic neighbor traversal (route == "hybrid").
+        HybridSearchStats hybrid_stats{};
+        // Seed budget the traversal resolved for the current filter, before sampling.
+        uint64_t hybrid_seed_budget{0};
     };
 
     [[nodiscard]] MCIHybridSearchResult
@@ -877,6 +969,29 @@ private:
                    const void* query,
                    const InnerSearchParam& search_param,
                    QueryContext* ctx) const;
+
+    /**
+     * Seeds for the dynamic neighbor traversal. Uses the exact seed budget of try_mci_search
+     * -- max(ceil(sqrt(N) * mci_seed_ratio), ceil(mci_seed_coverage * valid)) with the cap rule
+     * -- and the same samplers (label sampling when the filter enumerates valid ids, uniform
+     * bitmap sampling when it only exposes a validity map). Keeping the two identical means a
+     * comparison between the two routes cannot be confounded by the seed strategy.
+     * The resolved budget is written to seed_budget_out, and seeds_are_exhaustive_out is set
+     * when the returned list is exactly the whole valid set -- in that case every valid point
+     * already has a distance and the traversal cannot improve on the seeds, so the caller can
+     * skip the expansion entirely. Returns an empty vector when the filter supports neither
+     * source, in which case the traversal falls back to the coarse-search entry point.
+     * total_count is the snapshot the caller already holds, so the budget is derived from the
+     * same count that the companion availability check uses.
+     */
+    [[nodiscard]] Vector<InnerIdType>
+    collect_hybrid_seeds(const SearchRequest& request,
+                         const FilterPtr& inner_filter,
+                         const HGraphSearchParameters& params,
+                         uint64_t total_count,
+                         uint64_t* seed_budget_out,
+                         bool* seeds_are_exhaustive_out,
+                         Allocator* alloc) const;
 
     void
     build_mci_clique_index(const void* vectors = nullptr);
@@ -914,9 +1029,10 @@ private:
     bool build_by_base_{false};      // build graph using base (not quantized) codes
     bool reorder_by_base_{false};    // use base codes for reorder (no separate precise)
 
-    BasicSearcherPtr searcher_;              // single-thread graph searcher
-    MCISearcherPtr mci_searcher_;            // companion MCI clique searcher
-    ParallelSearcherPtr parallel_searcher_;  // multi-thread graph searcher
+    BasicSearcherPtr searcher_;                 // single-thread graph searcher
+    MCISearcherPtr mci_searcher_;               // companion MCI clique searcher
+    HybridMCISearcherPtr hybrid_mci_searcher_;  // sparse + clique dynamic neighbor traversal
+    ParallelSearcherPtr parallel_searcher_;     // multi-thread graph searcher
 
     std::default_random_engine level_generator_{
         2021};          // random number generator for level sampling
@@ -925,6 +1041,7 @@ private:
     InnerIdType entry_point_id_{INVALID_ENTRY_POINT};  // top-level entry point
 
     ODescentParameterPtr odescent_param_{nullptr};  // ODescent build parameters
+    PiPNNGraphBuilderParameter pipnn_param_{};      // PiPNN build parameters
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};  // graph algorithm type
 
     CliqueDataCellPtr mci_cliques_{nullptr};  // companion MCI clique datacell
@@ -939,6 +1056,7 @@ private:
     mutable std::shared_mutex persistent_codes_mutex_;  // pins flatten storage during MCI search
     mutable std::mutex mci_build_mutex_;                // serializes full MCI reconstruction
     mutable std::mutex mci_add_mutex_;                  // serializes MCI-enabled Add calls
+    mutable std::mutex pipnn_initial_build_mutex_;      // serializes PiPNN's first Add batch
     mutable MutexArrayPtr neighbors_mutex_;             // per-node locks for neighbor lists
     mutable std::shared_mutex add_mutex_;               // serializes Add() operations
     mutable std::shared_mutex force_remove_mutex_;      // serializes force-remove operations
@@ -968,6 +1086,11 @@ private:
     bool support_force_remove_{false};  // enable physical deletion
     bool use_conjugate_graph_{false};   // enable graph-enhancement feedback
     std::shared_ptr<ConjugateGraph> conjugate_graph_{nullptr};
+    // guards conjugate_graph_ against concurrent search paths. During a
+    // parallel restore exactly one component task acquires it (the conjugate
+    // graph handler); before adding another acquirer there, read the INVARIANT
+    // in hgraph_parallel_deserialize.cpp — two restore tasks holding component
+    // locks while waiting on this one would deadlock.
     mutable std::shared_mutex conjugate_graph_mutex_;
     float duplicate_distance_threshold_{0.0F};  // distance threshold for duplicate detection
 

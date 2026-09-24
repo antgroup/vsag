@@ -28,6 +28,7 @@
 
 #include "datacell/sparse_dmq_datacell.h"
 #include "datacell/sparse_vector_datacell_parameter.h"
+#include "impl/filter/filter_callback_limiter.h"
 #include "impl/filter/inner_id_wrapper_filter.h"
 #include "impl/filter/white_list_filter.h"
 #include "impl/heap/standard_heap.h"
@@ -39,6 +40,7 @@
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
 #include "storage/tlv_section.h"
+#include "utils/timer.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
 #include "vsag/options.h"
@@ -212,7 +214,11 @@ create_rerank_flat(const IndexCommonParam& common_param,
     }
     auto rerank_param = std::make_shared<SparseVectorDataCellParameter>();
     rerank_param->io_parameter = io_param;
-    rerank_param->quantizer_parameter = std::make_shared<SparseQuantizerParameter>();
+    auto quantizer_param = std::make_shared<SparseQuantizerParameter>();
+    if (rerank_type == SPARSE_RERANK_TYPE_FP16) {
+        quantizer_param->value_type = SparseQuantizerValueType::FP16;
+    }
+    rerank_param->quantizer_parameter = quantizer_param;
     return FlattenInterface::MakeInstance(rerank_param, common_param);
 }
 
@@ -812,10 +818,20 @@ SINDIV2::KnnSearch(const DatasetPtr& query,
     InnerSearchParam inner_param;
     inner_param.ef = std::max(candidate_count, static_cast<uint64_t>(k));
     inner_param.topk = k;
+    if (search_param.enable_time_record) {
+        inner_param.time_cost = std::make_shared<Timer>();
+        inner_param.time_cost->SetThreshold(search_param.timeout_ms);
+    }
 
+    auto filter_callback_remaining =
+        filter != nullptr and search_param.filter_callback_limit > 0
+            ? std::make_shared<uint64_t>(search_param.filter_callback_limit)
+            : nullptr;
+    const uint64_t* filter_callback_remaining_ptr = filter_callback_remaining.get();
     FilterPtr ft = nullptr;
     if (filter != nullptr) {
-        ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
+        ft = std::make_shared<InnerIdWrapperFilter>(
+            create_filter_callback_limiter(filter, filter_callback_remaining), *this->label_table_);
     }
     inner_param.is_inner_id_allowed = ft;
 
@@ -853,6 +869,7 @@ SINDIV2::KnnSearch(const DatasetPtr& query,
                                           query_context,
                                           rerank_query,
                                           &statistics,
+                                          filter_callback_remaining_ptr,
                                           metadata_route);
     result->Statistics(statistics.Dump());
     return result;
@@ -867,6 +884,7 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                      SindiQueryContext& query_context,
                      const SparseVector* original_query,
                      SearchStatistics* statistics,
+                     const uint64_t* filter_callback_remaining,
                      const SindiMetadataSearchRoute& metadata_route) const {
     MaxHeap heap(allocator);
     int64_t k = 0;
@@ -894,6 +912,7 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
         term_datacell_->QueryWindow(
             dists.data(), window_id, computer, use_term_lists_heap_insert, query_context);
 
+        bool filter_callback_limit_reached = false;
         if (not has_effective_query_terms) {
             uint32_t valid_window_size = 0;
             if (window_start_id < static_cast<uint64_t>(cur_element_count_)) {
@@ -904,11 +923,22 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
             }
             for (uint32_t local_id = 0; local_id < valid_window_size; ++local_id) {
                 const auto inner_id = window_start_id + local_id;
-                if (filter != nullptr && not filter->CheckValid(inner_id)) {
-                    continue;
+                if (filter != nullptr) {
+                    const bool valid = filter->CheckValid(inner_id);
+                    filter_callback_limit_reached =
+                        filter_callback_remaining != nullptr && *filter_callback_remaining == 0;
+                    if (not valid) {
+                        if (filter_callback_limit_reached) {
+                            break;
+                        }
+                        continue;
+                    }
                 }
                 if (inner_param.distance_threshold.has_value() && not inner_param.enable_reorder &&
                     1.0F > inner_param.distance_threshold.value()) {
+                    if (filter_callback_limit_reached) {
+                        break;
+                    }
                     continue;
                 }
                 if constexpr (mode == KNN_SEARCH) {
@@ -918,6 +948,9 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                     }
                 } else {
                     if (1.0F > inner_param.radius) {
+                        if (filter_callback_limit_reached) {
+                            break;
+                        }
                         continue;
                     }
                     heap.emplace(0.0F, inner_id);
@@ -926,17 +959,22 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                         heap.pop();
                     }
                 }
+                if (filter_callback_limit_reached) {
+                    break;
+                }
             }
         } else if (use_term_lists_heap_insert) {
-            term_datacell_->InsertHeapByWindow(dists.data(),
-                                               window_id,
-                                               computer,
-                                               heap,
-                                               inner_param,
-                                               window_start_id,
-                                               mode,
-                                               inner_param.is_inner_id_allowed != nullptr,
-                                               query_context);
+            filter_callback_limit_reached =
+                term_datacell_->InsertHeapByWindow(dists.data(),
+                                                   window_id,
+                                                   computer,
+                                                   heap,
+                                                   inner_param,
+                                                   window_start_id,
+                                                   mode,
+                                                   inner_param.is_inner_id_allowed != nullptr,
+                                                   query_context,
+                                                   filter_callback_remaining);
         } else {
             uint32_t valid_window_size = 0;
             if (window_start_id < static_cast<uint64_t>(cur_element_count_)) {
@@ -944,13 +982,24 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                 valid_window_size =
                     static_cast<uint32_t>(std::min<uint64_t>(window_size_, remaining_count));
             }
-            term_datacell_->InsertHeapByDists(dists.data(),
-                                              valid_window_size,
-                                              heap,
-                                              inner_param,
-                                              window_start_id,
-                                              mode,
-                                              inner_param.is_inner_id_allowed != nullptr);
+            filter_callback_limit_reached =
+                term_datacell_->InsertHeapByDists(dists.data(),
+                                                  valid_window_size,
+                                                  heap,
+                                                  inner_param,
+                                                  window_start_id,
+                                                  mode,
+                                                  inner_param.is_inner_id_allowed != nullptr,
+                                                  filter_callback_remaining);
+        }
+        if (filter_callback_limit_reached) {
+            break;
+        }
+        if (inner_param.time_cost != nullptr and inner_param.time_cost->CheckOvertime()) {
+            if (statistics != nullptr) {
+                statistics->is_timeout.store(true, std::memory_order_relaxed);
+            }
+            break;
         }
     }
 
@@ -1071,9 +1120,18 @@ SINDIV2::RangeSearch(const DatasetPtr& query,
     InnerSearchParam inner_param;
     inner_param.radius = radius;
     inner_param.range_search_limit_size = static_cast<int>(limited_size);
+    if (search_param.enable_time_record) {
+        inner_param.time_cost = std::make_shared<Timer>();
+        inner_param.time_cost->SetThreshold(search_param.timeout_ms);
+    }
+    auto filter_callback_remaining =
+        filter != nullptr and search_param.filter_callback_limit > 0
+            ? std::make_shared<uint64_t>(search_param.filter_callback_limit)
+            : nullptr;
+    const uint64_t* filter_callback_remaining_ptr = filter_callback_remaining.get();
     if (filter != nullptr) {
-        inner_param.is_inner_id_allowed =
-            std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
+        inner_param.is_inner_id_allowed = std::make_shared<InnerIdWrapperFilter>(
+            create_filter_callback_limiter(filter, filter_callback_remaining), *this->label_table_);
     }
 
     Vector<uint32_t> tmp_ids(allocator_);
@@ -1096,7 +1154,8 @@ SINDIV2::RangeSearch(const DatasetPtr& query,
                                   sparse_query.len_ != 0 && UseTermListsHeapInsert(search_param),
                                   query_context,
                                   rerank_query,
-                                  &statistics);
+                                  &statistics,
+                                  filter_callback_remaining_ptr);
     result->Statistics(statistics.Dump());
     return result;
 }
@@ -1774,9 +1833,16 @@ SINDIV2::EstimateMemory(uint64_t num_elements) const {
             mem += estimated_codebook_count * sizeof(SparseDmqQuantizer::Codebook);
             mem += estimated_term_count * 2 * sizeof(uint32_t);
         } else {
-            const auto rerank_payload_bytes =
-                num_elements *
-                (sizeof(uint32_t) + avg_doc_term_length_ * (sizeof(uint32_t) + sizeof(float)));
+            const uint64_t rerank_value_size =
+                rerank_type_ == SPARSE_RERANK_TYPE_FP16 ? sizeof(uint16_t) : sizeof(float);
+            uint64_t rerank_code_size =
+                sizeof(uint32_t) + static_cast<uint64_t>(avg_doc_term_length_) *
+                                       (sizeof(uint32_t) + rerank_value_size);
+            if (rerank_type_ == SPARSE_RERANK_TYPE_FP16) {
+                constexpr uint64_t alignment = alignof(uint32_t);
+                rerank_code_size = (rerank_code_size + alignment - 1) / alignment * alignment;
+            }
+            const auto rerank_payload_bytes = num_elements * rerank_code_size;
             const auto rerank_offset_bytes = num_elements * (sizeof(uint64_t) + sizeof(uint32_t));
             mem += block_memory_ceil(rerank_offset_bytes);
             if (param_->rerank_io_parameter != nullptr &&
@@ -1814,10 +1880,9 @@ SINDIV2::CalcDistanceById(const DatasetPtr& vector,
                           bool calculate_precise_distance) const {
     std::shared_lock rlock(this->global_mutex_);
 
-    if (vector == nullptr || vector->GetNumElements() == 0 ||
-        vector->GetSparseVectors() == nullptr) {
-        return -1.0F;
-    }
+    CHECK_ARGUMENT(vector != nullptr, "distance query must not be null");
+    CHECK_ARGUMENT(vector->GetNumElements() == 1, "single-ID distance requires one query");
+    CHECK_ARGUMENT(vector->GetSparseVectors() != nullptr, "query must contain sparse vectors");
 
     auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
     if (not success) {
@@ -1847,29 +1912,29 @@ SINDIV2::CalcDistanceById(const DatasetPtr& vector,
 }
 
 DatasetPtr
-SINDIV2::CalDistanceById(const DatasetPtr& query,
-                         const int64_t* ids,
-                         int64_t count,
-                         bool calculate_precise_distance,
-                         int64_t topk) const {
+SINDIV2::CalcDistancesById(const DatasetPtr& query,
+                           const int64_t* ids,
+                           int64_t count,
+                           bool calculate_precise_distance,
+                           int64_t topk) const {
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
         topk == -1 || topk > 0,
-        "CalDistanceById topk must be -1 or positive");
-    CHECK_ARGUMENT(query != nullptr, "CalDistanceById query must not be null");
-    CHECK_ARGUMENT(count >= 0, "CalDistanceById count must be non-negative");
+        "CalcDistancesById topk must be -1 or positive");
+    CHECK_ARGUMENT(query != nullptr, "CalcDistancesById query must not be null");
+    CHECK_ARGUMENT(count >= 0, "CalcDistancesById count must be non-negative");
     if (count > 0) {
-        CHECK_ARGUMENT(ids != nullptr, "CalDistanceById ids must not be null");
+        CHECK_ARGUMENT(ids != nullptr, "CalcDistancesById ids must not be null");
     }
     const int64_t num_queries = query->GetNumElements();
-    CHECK_ARGUMENT(num_queries > 0, "CalDistanceById query count must be positive");
+    CHECK_ARGUMENT(num_queries > 0, "CalcDistancesById query count must be positive");
     CHECK_ARGUMENT(query->GetSparseVectors() != nullptr,
-                   "CalDistanceById query sparse vectors must not be null");
+                   "CalcDistancesById query sparse vectors must not be null");
     const auto count_size = static_cast<uint64_t>(count);
     const auto num_queries_size = static_cast<uint64_t>(num_queries);
     const auto max_distance_count = std::numeric_limits<uint64_t>::max() / sizeof(float);
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
         count_size == 0 || num_queries_size <= max_distance_count / count_size,
-        "CalDistanceById distance buffer size overflows");
+        "CalcDistancesById distance buffer size overflows");
 
     auto result = Dataset::Make();
     result->NumElements(num_queries)->Dim(count)->Owner(true, allocator_);
@@ -1973,9 +2038,7 @@ SINDIV2::InitFeatures() {
         IndexFeature::SUPPORT_SEARCH_CONCURRENT,
         IndexFeature::SUPPORT_METRIC_TYPE_INNER_PRODUCT,
     });
-    if (not immutable_enabled_) {
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID);
-    }
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID);
     if (not immutable_enabled_ && rerank_type_ != SPARSE_RERANK_TYPE_DMQ8 &&
         param_->term_io_parameter->GetTypeName() == IO_TYPE_VALUE_MEMORY_IO) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_AFTER_BUILD);

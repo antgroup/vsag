@@ -39,6 +39,7 @@
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
 #include "io/memory_io/memory_io_parameter.h"
+#include "quantization/fp32_quantizer.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer.h"
 #include "quantization/transform_quantization/transform_quantizer.h"
 #include "rabitq_split_datacell.h"
@@ -47,6 +48,17 @@
 using namespace vsag;
 
 namespace {
+
+class FailingBatchLayout : public FixedLayout<MemoryIO> {
+public:
+    using FixedLayout<MemoryIO>::FixedLayout;
+    static constexpr bool InMemory = false;
+
+    bool
+    MultiRead(const InnerIdType*, uint64_t, uint8_t*, Allocator*) const {
+        return false;
+    }
+};
 
 bool
 IsNaNBitPattern(float value) {
@@ -110,6 +122,46 @@ private:
 
 }  // namespace
 
+TEST_CASE("FlattenDataCell rejects invalid distance reads", "[ut][Flatten][invalid_reads]") {
+    IndexCommonParam common;
+    common.dim_ = 8;
+    common.metric_ = MetricType::METRIC_TYPE_IP;
+    common.allocator_ = std::make_shared<DefaultAllocator>();
+    auto quantizer = std::make_shared<FP32QuantizerParameter>();
+    auto io = std::make_shared<MemoryIOParameter>();
+    using Cell = FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_IP>, FixedLayout<MemoryIO>>;
+    Cell cell(quantizer, io, common);
+    float vector[8] = {0.25F};
+    cell.Train(vector, 1);
+    cell.Resize(10);
+    cell.InsertVector(vector, 0);
+    auto computer = cell.FactoryComputer(vector);
+    InnerIdType ids[4] = {0, 0, 0, 1};
+    float distances[4] = {};
+    SECTION("reserved and sentinel IDs") {
+        CHECK_THROWS_AS(cell.Query(distances, computer, ids + 3, 1), VsagException);
+        CHECK_THROWS_AS(cell.Query(distances, computer, ids, 4), VsagException);
+        CHECK_THROWS_AS(cell.ComputePairVectors(0, 1), VsagException);
+        CHECK_THROWS_AS(cell.ComputePairVectors(1, 0), VsagException);
+        ids[0] = std::numeric_limits<InnerIdType>::max();
+        CHECK_THROWS_AS(cell.Query(distances, computer, ids, 1), VsagException);
+    }
+    SECTION("failed leases for valid IDs") {
+        cell.SetIO(std::make_shared<MemoryIO>(common.allocator_.get()));
+        ids[3] = 0;
+        CHECK_THROWS_AS(cell.Query(distances, computer, ids, 1), VsagException);
+        CHECK_THROWS_AS(cell.Query(distances, computer, ids, 4), VsagException);
+        CHECK_THROWS_AS(cell.ComputePairVectors(0, 0), VsagException);
+    }
+    SECTION("failed batch read") {
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_IP>, FailingBatchLayout> failing(
+            quantizer, io, common);
+        failing.InsertVector(vector, 0);
+        ids[3] = 0;
+        CHECK_THROWS_AS(failing.Query(distances, computer, ids, 4), VsagException);
+    }
+}
+
 void
 TestFlattenDataCell(FlattenDataCellParamPtr& param,
                     IndexCommonParam& common_param,
@@ -154,6 +206,54 @@ TEST_CASE("FlattenDataCell Basic Test", "[ut][FlattenDataCell] ") {
 
             TestFlattenDataCell(param, common_param, quantizer_error.second);
         }
+    }
+}
+
+TEST_CASE("FlattenDataCell supports concurrent contiguous batch insertion",
+          "[ut][FlattenDataCell][pipnn]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr InnerIdType count = 128;
+    constexpr InnerIdType batch_size = 32;
+    constexpr uint64_t dim = 32;
+    auto vectors = fixtures::generate_vectors(count, dim);
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(JsonType::Parse(R"({
+        "io_params": {"type": "memory_io"},
+        "quantization_params": {"type": "sq8"}
+    })"));
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_COSINE;
+
+    auto parallel = FlattenInterface::MakeInstance(param, common_param);
+    auto serial = FlattenInterface::MakeInstance(param, common_param);
+    parallel->Train(vectors.data(), count);
+    parallel->ExportModel(serial);
+    parallel->Resize(count);
+
+    std::vector<InnerIdType> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::future<void>> futures;
+    for (InnerIdType begin = 0; begin < count; begin += batch_size) {
+        futures.emplace_back(std::async(std::launch::async, [&, begin]() {
+            parallel->BatchInsertVector(vectors.data() + static_cast<uint64_t>(begin) * dim,
+                                        batch_size,
+                                        ids.data() + begin);
+        }));
+    }
+    for (auto& future : futures) {
+        future.get();
+    }
+    serial->BatchInsertVector(vectors.data(), count);
+
+    REQUIRE(parallel->TotalCount() == count);
+    std::vector<uint8_t> parallel_code(parallel->code_size_);
+    std::vector<uint8_t> serial_code(serial->code_size_);
+    for (InnerIdType id = 0; id < count; ++id) {
+        REQUIRE(parallel->GetCodesById(id, parallel_code.data()));
+        REQUIRE(serial->GetCodesById(id, serial_code.data()));
+        REQUIRE(parallel_code == serial_code);
     }
 }
 

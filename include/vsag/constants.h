@@ -84,6 +84,15 @@ extern const char* const ODESCENT_PARAMETER_MIN_IN_DEGREE;
 extern const char* const ODESCENT_PARAMETER_BUILD_BLOCK_SIZE;
 extern const char* const GRAPH_TYPE_ODESCENT;
 extern const char* const GRAPH_TYPE_NSW;
+extern const char* const GRAPH_TYPE_PIPNN;
+
+extern const char* const PIPNN_PARAMETER_MAX_LEAF_SIZE;
+extern const char* const PIPNN_PARAMETER_MIN_LEAF_SIZE;
+extern const char* const PIPNN_PARAMETER_LEADER_SAMPLE_RATE;
+extern const char* const PIPNN_PARAMETER_FANOUT;
+extern const char* const PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT;
+extern const char* const PIPNN_PARAMETER_HASH_PLANE_COUNT;
+extern const char* const PIPNN_PARAMETER_RESERVOIR_SIZE;
 
 extern const char* const INDEX_PARAM;
 
@@ -217,6 +226,11 @@ extern const char* const HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD;
 extern const char* const HGRAPH_PARAMETER_SKIP_RATIO;
 extern const char* const HGRAPH_PARAMETER_SKIP_STRATEGY;
 extern const char* const HGRAPH_USE_MCI;
+extern const char* const HGRAPH_USE_HYBRID_TRAVERSAL;
+extern const char* const HGRAPH_HYBRID_VOB;
+extern const char* const HGRAPH_HYBRID_FILTER_COST_RATIO;
+extern const char* const HGRAPH_MCI_SEED_COVERAGE;
+extern const char* const HGRAPH_MCI_SEED_MAX_COUNT;
 extern const char* const HGRAPH_MCI_MCS;
 extern const char* const HGRAPH_MCI_CLIQUE_MAX;
 extern const char* const HGRAPH_MCI_ALPHA;

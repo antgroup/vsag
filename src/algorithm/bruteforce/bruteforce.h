@@ -26,6 +26,7 @@
 namespace vsag {
 
 class SafeThreadPool;
+class SearchMetrics;
 
 DEFINE_POINTER2(AttrInvertedInterface, AttributeInvertedInterface);
 DEFINE_POINTER(FlattenInterface);
@@ -54,6 +55,11 @@ public:
 
     float
     CalcDistanceById(const float* vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
+
+    float
+    CalcDistanceById(const DatasetPtr& query,
                      int64_t id,
                      bool calculate_precise_distance = true) const override;
 
@@ -117,6 +123,9 @@ public:
 
     [[nodiscard]] DatasetPtr
     SearchWithRequest(const SearchRequest& request) const override;
+
+    [[nodiscard]] DatasetPtr
+    SearchWithRequest(const SearchRequest& request, SearchMetrics* metrics) const;
 
     void
     Serialize(StreamWriter& writer) const override;

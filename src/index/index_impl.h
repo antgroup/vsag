@@ -16,11 +16,15 @@
 
 #include <nlohmann/json.hpp>
 #include <set>
+#include <type_traits>
+#include <utility>
 
 #include "algorithm/inner_index_interface.h"
 #include "common.h"
+#include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
 #include "query_context.h"
+#include "search_metrics_internal.h"
 #include "utils/search_threshold.h"
 #include "vsag/index.h"
 namespace vsag {
@@ -29,6 +33,16 @@ GENERATE_HAS_STATIC_CLASS_FUNCTION(CheckAndMappingExternalParam,
                                    ParamPtr,
                                    std::declval<const JsonType&>(),
                                    std::declval<const IndexCommonParam&>());
+
+template <typename T, typename = void>
+struct HasTypedSearchWithRequest : std::false_type {};
+
+template <typename T>
+struct HasTypedSearchWithRequest<
+    T,
+    std::void_t<decltype(std::declval<const T&>().SearchWithRequest(
+        std::declval<const SearchRequest&>(), std::declval<SearchMetrics*>()))>> : std::true_type {
+};
 
 template <class T>
 class IndexImpl : public Index {
@@ -57,9 +71,15 @@ public:
         return DatasetImpl::MakeEmptyDataset(); \
     }
 
-#define CHECK_QUERY_RETURN_EMPTY_DATASET(query) \
-    if ((query)->GetNumElements() == 0) {       \
-        return make_empty_search_result();      \
+#define CHECK_QUERY_RETURN_EMPTY_DATASET(query)                 \
+    if ((query) != nullptr && (query)->GetNumElements() == 0) { \
+        return make_empty_search_result();                      \
+    }
+#define CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters) \
+    if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters) &&       \
+        ((query) == nullptr || (query)->GetNumElements() <= 1 ||                  \
+         this->inner_index_->GetIndexType() != IndexType::HGRAPH)) {              \
+        return make_empty_search_result();                                        \
     }
 #define CHECK_IMMUTABLE_INDEX(operation_str)                                       \
     if (this->inner_index_->immutable_.load(std::memory_order_acquire)) {          \
@@ -121,22 +141,22 @@ public:
     }
 
     tl::expected<DatasetPtr, Error>
-    CalDistanceById(const float* query,
-                    const int64_t* ids,
-                    int64_t count,
-                    bool calculate_precise_distance = true,
-                    int64_t topk = -1) const override {
-        SAFE_CALL(return this->inner_index_->CalDistanceById(
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const override {
+        SAFE_CALL(return this->inner_index_->CalcDistancesById(
             query, ids, count, calculate_precise_distance, topk));
     }
 
     tl::expected<DatasetPtr, Error>
-    CalDistanceById(const DatasetPtr& query,
-                    const int64_t* ids,
-                    int64_t count,
-                    bool calculate_precise_distance = true,
-                    int64_t topk = -1) const override {
-        SAFE_CALL(return this->inner_index_->CalDistanceById(
+    CalcDistancesById(const DatasetPtr& query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const override {
+        SAFE_CALL(return this->inner_index_->CalcDistancesById(
             query, ids, count, calculate_precise_distance, topk));
     }
 
@@ -185,6 +205,12 @@ public:
     Deserialize(std::istream& in_stream) override {
         CHECK_DESERIALIZE_EMPTY_INDEX;
         SAFE_CALL(this->inner_index_->Deserialize(in_stream));
+    }
+
+    tl::expected<void, Error>
+    ParallelDeserialize(DeserializeReader& reader) override {
+        CHECK_DESERIALIZE_EMPTY_INDEX;
+        SAFE_CALL(this->inner_index_->ParallelDeserialize(reader));
     }
 
     tl::expected<void, Error>
@@ -315,9 +341,7 @@ public:
             return tl::unexpected(threshold_validation.error());
         }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return make_empty_search_result();
-        }
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, invalid));
     }
 
@@ -331,9 +355,7 @@ public:
             return tl::unexpected(threshold_validation.error());
         }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return make_empty_search_result();
-        }
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, filter));
     }
 
@@ -347,9 +369,7 @@ public:
             return tl::unexpected(threshold_validation.error());
         }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return make_empty_search_result();
-        }
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, filter));
     }
 
@@ -360,9 +380,7 @@ public:
             return tl::unexpected(threshold_validation.error());
         }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(search_param.parameters)) {
-            return make_empty_search_result();
-        }
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, search_param.parameters);
         if (search_param.is_iter_filter) {
             SAFE_CALL(return this->inner_index_->KnnSearch(query,
                                                            k,
@@ -389,9 +407,7 @@ public:
             return tl::unexpected(threshold_validation.error());
         }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return make_empty_search_result();
-        }
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
         SAFE_CALL(return this->inner_index_->KnnSearch(
             query, k, parameters, filter, nullptr, iter_ctx, is_last_filter));
     }
@@ -428,9 +444,7 @@ public:
                 const std::string& parameters,
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return make_empty_search_result();
-        }
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
         SAFE_CALL(return this->inner_index_->RangeSearch(query, radius, parameters, limited_size));
     }
 
@@ -441,9 +455,7 @@ public:
                 BitsetPtr invalid,
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return make_empty_search_result();
-        }
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
         SAFE_CALL(return this->inner_index_->RangeSearch(
             query, radius, parameters, invalid, limited_size));
     }
@@ -455,9 +467,7 @@ public:
                 const std::function<bool(int64_t)>& filter,
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return make_empty_search_result();
-        }
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
         SAFE_CALL(return this->inner_index_->RangeSearch(
             query, radius, parameters, filter, limited_size));
     }
@@ -469,9 +479,7 @@ public:
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return make_empty_search_result();
-        }
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
         SAFE_CALL(return this->inner_index_->RangeSearch(
             query, radius, parameters, filter, limited_size));
     }
@@ -498,33 +506,73 @@ public:
     }
 
     tl::expected<void, Error>
+    Serialize(SerializeWriter& writer, uint64_t chunk_size) override {
+        SAFE_CALL(this->inner_index_->Serialize(writer, chunk_size));
+    }
+
+    tl::expected<void, Error>
     SerializeStreaming(std::ostream& out_stream) const override {
         SAFE_CALL(this->inner_index_->SerializeStreaming(out_stream));
     }
 
     [[nodiscard]] tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const override {
+        bool want_statistics = true;
+        std::optional<SearchRequest> normalized_request;
+        std::optional<nlohmann::json> parsed_params;
+        // Heuristic pre-filter only: false positives may trigger an extra parse, while the parsed
+        // top-level JSON object remains authoritative for the reserved option. Parse escaped
+        // inputs too: JSON permits Unicode escapes in keys (e.g. "want_\\u0073tatistics"). Note the
+        // fallback defaults to collecting statistics, so an unparsed false option is a false
+        // negative that only over-collects — it never suppresses a request that asked for metrics.
+        // Requests whose key is fully Unicode-escaped (containing neither the literal substring
+        // nor an easy textual marker) are intentionally left to the conservative backslash check.
+        const bool may_have_statistics_option =
+            request.params_str_.find("\"want_statistics\"") != std::string::npos or
+            request.params_str_.find('\\') != std::string::npos;
+        if (may_have_statistics_option or not request.bucket_ids_.empty()) {
+            try {
+                parsed_params.emplace(nlohmann::json::parse(request.params_str_));
+                if (parsed_params->contains("want_statistics")) {
+                    if (not(*parsed_params)["want_statistics"].is_boolean()) {
+                        return tl::unexpected(Error(ErrorType::INVALID_ARGUMENT,
+                                                    "want_statistics must be a boolean"));
+                    }
+                    want_statistics = (*parsed_params)["want_statistics"].get<bool>();
+                    normalized_request.emplace(request);
+                    parsed_params->erase("want_statistics");
+                    normalized_request->params_str_ = parsed_params->dump();
+                }
+            } catch (const nlohmann::json::exception&) {
+                // Preserve legacy behavior: concrete indexes handle malformed params.
+                parsed_params.reset();
+            }
+        }
+        const auto& effective_request = normalized_request ? normalized_request.value() : request;
+
         // Validate bucket_ids_ structural constraints before empty-index early return
-        if (not request.bucket_ids_.empty()) {
-            if (request.query_ == nullptr) {
+        if (not effective_request.bucket_ids_.empty()) {
+            if (effective_request.query_ == nullptr) {
                 return tl::unexpected(Error(ErrorType::INVALID_ARGUMENT,
                                             "query_ cannot be null when bucket_ids_ is set"));
             }
-            if (request.bucket_ids_.size() !=
-                static_cast<size_t>(request.query_->GetNumElements())) {
-                return tl::unexpected(
-                    Error(ErrorType::INVALID_ARGUMENT,
-                          "bucket_ids_ size (" + std::to_string(request.bucket_ids_.size()) +
-                              ") must match the number of query vectors (" +
-                              std::to_string(request.query_->GetNumElements()) + ")"));
+            if (effective_request.bucket_ids_.size() !=
+                static_cast<size_t>(effective_request.query_->GetNumElements())) {
+                return tl::unexpected(Error(
+                    ErrorType::INVALID_ARGUMENT,
+                    "bucket_ids_ size (" + std::to_string(effective_request.bucket_ids_.size()) +
+                        ") must match the number of query vectors (" +
+                        std::to_string(effective_request.query_->GetNumElements()) + ")"));
             }
-            if (this->GetIndexType() != IndexType::IVF && request.bucket_ids_.size() != 1) {
+            if (this->GetIndexType() != IndexType::IVF &&
+                effective_request.bucket_ids_.size() != 1) {
                 return tl::unexpected(
                     Error(ErrorType::INVALID_ARGUMENT,
                           "bucket_ids_ supports multiple query vectors only for IVF indexes"));
             }
-            for (uint64_t query_idx = 0; query_idx < request.bucket_ids_.size(); ++query_idx) {
-                const auto& ids = request.bucket_ids_[query_idx];
+            for (uint64_t query_idx = 0; query_idx < effective_request.bucket_ids_.size();
+                 ++query_idx) {
+                const auto& ids = effective_request.bucket_ids_[query_idx];
                 if (ids.empty()) {
                     return tl::unexpected(
                         Error(ErrorType::INVALID_ARGUMENT,
@@ -546,21 +594,70 @@ public:
                 }
             }
             try {
-                auto json_params = nlohmann::json::parse(request.params_str_);
-                if (json_params.contains("ivf") and
-                    json_params["ivf"].contains("disable_bucket_scan") and
-                    json_params["ivf"]["disable_bucket_scan"].get<bool>()) {
+                if (parsed_params and parsed_params->contains("ivf") and
+                    (*parsed_params)["ivf"].contains("disable_bucket_scan") and
+                    (*parsed_params)["ivf"]["disable_bucket_scan"].get<bool>()) {
                     return tl::unexpected(
                         Error(ErrorType::INVALID_ARGUMENT,
                               "bucket_ids_ is incompatible with disable_bucket_scan mode"));
                 }
             } catch (const nlohmann::json::exception&) {
+                // Preserve the existing concrete-index validation for malformed IVF parameters.
             }
         }
-        SAFE_CALL(ValidateSearchThreshold(request.threshold_);
-                  if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(request.params_str_)) {
-                      return make_empty_search_result();
-                  } return this->inner_index_->SearchWithRequest(request));
+        SAFE_CALL(
+            ValidateSearchThreshold(effective_request.threshold_);
+            if constexpr (HasTypedSearchWithRequest<T>::value) {
+                std::optional<SearchMetrics> metrics;
+                if (want_statistics) {
+                    metrics.emplace();
+                }
+                if (GetNumElements() == 0 &&
+                    !this->ShouldSkipEmptyCheck(effective_request.params_str_) &&
+                    (effective_request.query_ == nullptr ||
+                     effective_request.query_->GetNumElements() <= 1 ||
+                     this->inner_index_->GetIndexType() != IndexType::HGRAPH)) {
+                    auto result = make_empty_search_result();
+                    if (metrics) {
+                        CHECK_ARGUMENT(
+                            AttachSearchMetrics(result, std::move(metrics.value()).Snapshot()),
+                            "search result does not support typed metrics");
+                    } else {
+                        result->Statistics("{}");
+                    }
+                    return result;
+                }
+                auto typed_index = std::static_pointer_cast<T>(this->inner_index_);
+                auto result = typed_index->SearchWithRequest(effective_request,
+                                                             metrics ? &metrics.value() : nullptr);
+                if (metrics) {
+                    CHECK_ARGUMENT(
+                        AttachSearchMetrics(result, std::move(metrics.value()).Snapshot()),
+                        "search result does not support typed metrics");
+                } else {
+                    result->Statistics("{}");
+                }
+                return result;
+            } else {
+                if (GetNumElements() == 0 &&
+                    !this->ShouldSkipEmptyCheck(effective_request.params_str_) &&
+                    (effective_request.query_ == nullptr ||
+                     effective_request.query_->GetNumElements() <= 1 ||
+                     this->inner_index_->GetIndexType() != IndexType::HGRAPH)) {
+                    auto result = make_empty_search_result();
+                    if (not want_statistics) {
+                        result->Statistics("{}");
+                    }
+                    return result;
+                }
+                auto result = this->inner_index_->SearchWithRequest(effective_request);
+                if (not want_statistics) {
+                    // Intentionally clears any legacy JSON statistics the inner index produced so
+                    // an opting-out caller sees "{}" rather than partial accounting.
+                    result->Statistics("{}");
+                }
+                return result;
+            })
     }
 
     tl::expected<void, Error>

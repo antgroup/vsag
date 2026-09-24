@@ -38,6 +38,7 @@
 #include "index_feature_list.h"
 #include "inner_string_params.h"
 #include "io/common/io_parameter.h"
+#include "search_metrics_internal.h"
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
 #include "storage/tlv_section.h"
@@ -373,10 +374,24 @@ BruteForce::KnnSearch(const DatasetPtr& query,
 
 DatasetPtr
 BruteForce::SearchWithRequest(const SearchRequest& request) const {
+    // Preserve typed and legacy JSON statistics for direct/legacy callers; IndexImpl uses the
+    // collector-aware overload to suppress collection when requested. Direct callers of this
+    // overload therefore always collect statistics — request-level `want_statistics:false` is only
+    // honored through IndexImpl::SearchWithRequest, not through the legacy KnnSearch/RangeSearch
+    // overloads nor this wrapper.
+    SearchMetrics metrics;
+    auto result = this->SearchWithRequest(request, &metrics);
+    CHECK_ARGUMENT(AttachSearchMetrics(result, std::move(metrics).Snapshot()),
+                   "search result does not support typed metrics");
+    return result;
+}
+
+DatasetPtr
+BruteForce::SearchWithRequest(const SearchRequest& request, SearchMetrics* metrics) const {
     ValidateSearchThreshold(request.threshold_);
     std::shared_lock read_lock(this->global_mutex_);
-    SearchStatistics statistics;
-    QueryContext query_context{.stats = &statistics};
+    auto* statistics = metrics == nullptr ? nullptr : &metrics->base;
+    QueryContext query_context{.stats = statistics};
 
     const bool use_custom_distance = request.distance_batch_func_ != nullptr;
     if (use_custom_distance) {
@@ -413,7 +428,8 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
     auto radius = is_range ? request.radius_ : std::numeric_limits<float>::max();
 
     if (total_count_.load() == 0) {
-        return make_empty_result(statistics.Dump());
+        // SearchMetrics is value-initialized, so the wrapper publishes an explicit all-zero snapshot.
+        return make_empty_result();
     }
 
     DistHeapPtr heap = nullptr;
@@ -467,8 +483,10 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
                 const auto label = this->label_table_->GetLabelById(inner_id);
                 request.distance_batch_func_(&label, 1, &dist);
                 CHECK_ARGUMENT(std::isfinite(dist), "distance callback must return finite scores");
-                statistics.AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
-                                       DistanceEvaluationBackend::UNKNOWN);
+                if (statistics != nullptr) {
+                    statistics->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
+                                            DistanceEvaluationBackend::UNKNOWN);
+                }
             } else {
                 this->inner_codes_->Query(&dist, computer, &inner_id, 1, &query_context);
             }
@@ -514,7 +532,9 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
                     cur_heap->Push(dist, custom_inner_ids[j]);
                 }
             }
-            dist_cmp_local += static_cast<uint32_t>(custom_inner_ids.size());
+            if (statistics != nullptr) {
+                dist_cmp_local += static_cast<uint32_t>(custom_inner_ids.size());
+            }
             custom_inner_ids.clear();
             custom_labels.clear();
         };
@@ -539,7 +559,9 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
                 } else {
                     float dist = 0.0F;
                     inner_codes_->Query(&dist, computer, &i, 1, &local_query_context);
-                    ++dist_cmp_local;
+                    if (statistics != nullptr) {
+                        ++dist_cmp_local;
+                    }
                     if (reasoning != nullptr) {
                         reasoning->RecordVisit(i, dist, 0);
                     }
@@ -557,11 +579,13 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
             }
         }
         flush_custom_batch();
-        dist_cmp.fetch_add(dist_cmp_local, std::memory_order_relaxed);
-        statistics.AddDistance(
-            SearchStatistics::DistancePhase::APPROXIMATE,
-            use_custom_distance ? DistanceEvaluationBackend::UNKNOWN : inner_codes_->backend_,
-            dist_cmp_local);
+        if (statistics != nullptr) {
+            dist_cmp.fetch_add(dist_cmp_local, std::memory_order_relaxed);
+            statistics->AddDistance(
+                SearchStatistics::DistancePhase::APPROXIMATE,
+                use_custom_distance ? DistanceEvaluationBackend::UNKNOWN : inner_codes_->backend_,
+                dist_cmp_local);
+        }
     };
 
     auto count = total_count_.load();
@@ -634,10 +658,12 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         result->Reasoning(reasoning_ctx->GenerateReport());
     }
 
-    auto stats = JsonType::Parse(statistics.Dump());
-    stats["dist_cmp"].SetInt(dist_cmp.load(std::memory_order_relaxed));
-    result->Statistics(stats.Dump());
-
+    if (statistics != nullptr) {
+        // `dist_cmp` was already updated via fetch_add by workers; storing its own value back
+        // reflects the final count into the SearchStatistics base for downstream consumers.
+        statistics->dist_cmp.store(dist_cmp.load(std::memory_order_relaxed),
+                                   std::memory_order_relaxed);
+    }
     return result;
 }
 
@@ -670,21 +696,50 @@ BruteForce::make_search_computer(const DatasetPtr& query) const {
 }
 
 float
+BruteForce::CalcDistanceById(const DatasetPtr& query,
+                             int64_t id,
+                             bool calculate_precise_distance) const {
+    if (not is_multi_vector_) {
+        return InnerIndexInterface::CalcDistanceById(query, id, calculate_precise_distance);
+    }
+    CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
+    CHECK_ARGUMENT(query->GetNumElements() == 1, "single-ID distance requires one query");
+    CHECK_ARGUMENT(query->GetMultiVectorDim() == dim_, "query multi-vector dimension mismatch");
+    const auto* vectors = query->GetMultiVectors();
+    CHECK_ARGUMENT(vectors != nullptr, "query must contain multi-vectors");
+    const bool valid_vector = vectors[0].len_ > 0 && vectors[0].vectors_ != nullptr;
+    CHECK_ARGUMENT(valid_vector, "query multi-vector must contain token vectors");
+    std::shared_lock global_lock(global_mutex_, std::defer_lock);
+    std::shared_lock label_lock(label_lookup_mutex_, std::defer_lock);
+    std::lock(global_lock, label_lock);
+    const auto [valid, inner_id] = label_table_->TryGetIdByLabel(id);
+    if (not valid) {
+        return -1.0F;
+    }
+    auto computer = inner_codes_->FactoryComputer(vectors);
+    float distance = 0.0F;
+    inner_codes_->Query(&distance, computer, &inner_id, 1);
+    return distance;
+}
+
+float
 BruteForce::CalcDistanceById(const float* vector,
                              int64_t id,
                              bool calculate_precise_distance) const {
-    auto computer = this->inner_codes_->FactoryComputer(vector);
-    float result = 0.0F;
-    InnerIdType inner_id = 0;
-    {
-        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
-        auto [success, mapped_id] = this->label_table_->TryGetIdByLabel(id);
-        if (not success) {
-            return -1.0F;
-        }
-        inner_id = mapped_id;
+    CHECK_ARGUMENT(not is_multi_vector_, "multi-vector distance requires a Dataset query");
+    CHECK_ARGUMENT(vector != nullptr, "distance query must not be null");
+    // ForceRemove can move the last vector into this slot. Keep label mapping and code
+    // storage stable through Query, using deadlock-safe acquisition as in the native path.
+    std::shared_lock global_lock(global_mutex_, std::defer_lock);
+    std::shared_lock label_lock(label_lookup_mutex_, std::defer_lock);
+    std::lock(global_lock, label_lock);
+    const auto [success, inner_id] = label_table_->TryGetIdByLabel(id);
+    if (not success) {
+        return -1.0F;
     }
-    this->inner_codes_->Query(&result, computer, &inner_id, 1);
+    auto computer = inner_codes_->FactoryComputer(vector);
+    float result = 0.0F;
+    inner_codes_->Query(&result, computer, &inner_id, 1);
     return result;
 }
 
@@ -1076,6 +1131,8 @@ BruteForce::Deserialize(StreamReader& reader) {
 
 void
 BruteForce::InitFeatures() {
+    this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
+                                            IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID});
     auto name = this->inner_codes_->GetQuantizerName();
     if (is_multi_vector_) {
         if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16) {

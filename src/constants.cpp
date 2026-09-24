@@ -83,6 +83,15 @@ const char* const ODESCENT_PARAMETER_BUILD_BLOCK_SIZE = "build_block_size";
 
 const char* const GRAPH_TYPE_ODESCENT = "odescent";
 const char* const GRAPH_TYPE_NSW = "nsw";
+const char* const GRAPH_TYPE_PIPNN = "pipnn";
+
+const char* const PIPNN_PARAMETER_MAX_LEAF_SIZE = "pipnn_max_leaf_size";
+const char* const PIPNN_PARAMETER_MIN_LEAF_SIZE = "pipnn_min_leaf_size";
+const char* const PIPNN_PARAMETER_LEADER_SAMPLE_RATE = "pipnn_leader_sample_rate";
+const char* const PIPNN_PARAMETER_FANOUT = "pipnn_fanout";
+const char* const PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT = "pipnn_leaf_neighbor_count";
+const char* const PIPNN_PARAMETER_HASH_PLANE_COUNT = "pipnn_hash_plane_count";
+const char* const PIPNN_PARAMETER_RESERVOIR_SIZE = "pipnn_reservoir_size";
 
 const char* const INDEX_PARAM = "index_param";
 
@@ -177,6 +186,11 @@ const char* const HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD = "brute_force_threshol
 const char* const HGRAPH_PARAMETER_SKIP_RATIO = "skip_ratio";
 const char* const HGRAPH_PARAMETER_SKIP_STRATEGY = "skip_strategy";
 const char* const HGRAPH_USE_MCI = "use_mci";
+const char* const HGRAPH_USE_HYBRID_TRAVERSAL = "use_hybrid_traversal";
+const char* const HGRAPH_HYBRID_VOB = "hybrid_vob";
+const char* const HGRAPH_HYBRID_FILTER_COST_RATIO = "hybrid_filter_cost_ratio";
+const char* const HGRAPH_MCI_SEED_COVERAGE = "mci_seed_coverage";
+const char* const HGRAPH_MCI_SEED_MAX_COUNT = "mci_seed_max_count";
 const char* const HGRAPH_MCI_MCS = "mci_mcs";
 const char* const HGRAPH_MCI_CLIQUE_MAX = "mci_clique_max";
 const char* const HGRAPH_MCI_ALPHA = "mci_alpha";

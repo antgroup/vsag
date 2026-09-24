@@ -630,3 +630,70 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     REQUIRE(result.has_value());
     REQUIRE_FALSE(result.value()->GetReasoning().empty());
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Timeout Search",
+                             "[ft][sindi][timeout][pr]") {
+    fixtures::SINDIParam param;
+    param.use_reorder = false;
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(dataset->base_->GetSparseVectors())->Owner(false);
+
+    // Test with timeout_ms=0 — should trigger timeout immediately
+    std::string timeout_param = R"(
+        {
+            "sindi":
+            {
+                "n_candidate": 20,
+                "query_prune_ratio": 0.0,
+                "term_prune_ratio": 0.0,
+                "timeout_ms": 0
+            }
+        })";
+    auto result = index->KnnSearch(query, 5, timeout_param);
+    REQUIRE(result.has_value());
+    auto stats = result.value()->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "true");
+
+    // Test without timeout — should complete normally
+    result = index->KnnSearch(query, 5, fixtures::SINDITestIndex::search_param);
+    REQUIRE(result.has_value());
+    stats = result.value()->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "false");
+
+    auto range = index->RangeSearch(query, 100.0F, timeout_param, 5);
+    REQUIRE(range.has_value());
+    stats = range.value()->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "true");
+    // Cooperative timeout may retain results from the current window.
+    REQUIRE(range.value()->GetDim() <= 5);
+
+    auto normal_range =
+        index->RangeSearch(query, 100.0F, fixtures::SINDITestIndex::search_param, 5);
+    REQUIRE(normal_range.has_value());
+    stats = normal_range.value()->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "false");
+    REQUIRE(normal_range.value()->GetDim() > 0);
+
+    const std::string generous_param = R"({"sindi":{"n_candidate":20,
+        "query_prune_ratio":0.0,"term_prune_ratio":0.0,"timeout_ms":60000}})";
+    range = index->RangeSearch(query, 100.0F, generous_param, 5);
+    REQUIRE(range.has_value());
+    stats = range.value()->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "false");
+    REQUIRE(range.value()->GetDim() == normal_range.value()->GetDim());
+    for (int64_t i = 0; i < normal_range.value()->GetDim(); ++i) {
+        REQUIRE(range.value()->GetIds()[i] == normal_range.value()->GetIds()[i]);
+        REQUIRE(range.value()->GetDistances()[i] == normal_range.value()->GetDistances()[i]);
+    }
+}

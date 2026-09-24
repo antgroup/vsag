@@ -22,16 +22,21 @@
 #include <exception>
 #include <limits>
 #include <nlohmann/json.hpp>
+#include <numeric>
+#include <unordered_set>
 
 #include "algorithm/inner_index_interface.h"
 #include "analyzer/analyzer.h"
 #include "datacell/compressed_graph_datacell_parameter.h"
+#include "datacell/flatten_build_utils.h"
 #include "datacell/flatten_datacell_parameter.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_datacell_parameter.h"
+#include "dataset_impl.h"
 #include "impl/distance_provider_for_graph.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
+#include "impl/pipnn/pipnn_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "io/common/io_parameter.h"
@@ -281,14 +286,22 @@ Pyramid::search_graph_for_add(const GraphInterfacePtr& graph,
                               const float* vector,
                               InnerSearchParam& search_param) {
     VisitedListGuard vl_guard(pool_.get());
-    if (vector != nullptr) {
+    if (vector != nullptr and optimized_build_codes_ == nullptr) {
         return searcher_->Search(
             graph, codes, vl_guard.get(), vector, search_param, (LabelTablePtr) nullptr, nullptr);
     }
 
-    FlattenIdDistanceProvider distance_provider(codes, inner_id);
-    auto results =
-        searcher_->Search(graph, distance_provider, vl_guard.get(), search_param, nullptr, nullptr);
+    DistHeapPtr results;
+    if (optimized_build_codes_ != nullptr) {
+        FlattenDistanceProvider distance_provider(
+            codes, optimized_build_codes_->FactoryComputerForBuild(vector, inner_id));
+        results = searcher_->Search(
+            graph, distance_provider, vl_guard.get(), search_param, nullptr, nullptr);
+    } else {
+        FlattenIdDistanceProvider distance_provider(codes, inner_id);
+        results = searcher_->Search(
+            graph, distance_provider, vl_guard.get(), search_param, nullptr, nullptr);
+    }
     if (not search_param.find_duplicate || results->Empty()) {
         return results;
     }
@@ -596,75 +609,217 @@ Pyramid::run_parallel_insertions(
 }
 
 std::vector<int64_t>
-Pyramid::build_by_odescent(const DatasetPtr& base) {
-    int64_t data_num = base->GetNumElements();
+Pyramid::build_by_batch_graph(const DatasetPtr& base) {
+    const int64_t input_count = base->GetNumElements();
     const auto* data_vectors = base->GetFloat32Vectors();
     const auto* data_ids = base->GetIds();
     const auto* source_ids = base->GetSourceID();
+    Vector<int64_t> input_indices(allocator_);
+    input_indices.reserve(static_cast<uint64_t>(input_count));
+    std::vector<int64_t> failed_ids;
+    if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        UnorderedSet<LabelType> seen_labels(allocator_);
+        for (int64_t input_index = 0; input_index < input_count; ++input_index) {
+            if (seen_labels.emplace(data_ids[input_index]).second) {
+                input_indices.emplace_back(input_index);
+            } else {
+                failed_ids.emplace_back(data_ids[input_index]);
+            }
+        }
+        populate_hierarchy_trees(base, &input_indices);
+    } else {
+        for (int64_t input_index = 0; input_index < input_count; ++input_index) {
+            input_indices.emplace_back(input_index);
+        }
+    }
+    const auto data_num = static_cast<int64_t>(input_indices.size());
 
+    // A datacell's initial logical capacity may not have physical backing yet. As in
+    // prepare_add_batch(), parallel writes are safe only after Resize actually grows each store.
+    const bool storage_preallocated =
+        data_num > static_cast<int64_t>(base_codes_->max_capacity_) and
+        (not has_precise_reorder() or
+         data_num > static_cast<int64_t>(precise_codes_->max_capacity_)) and
+        (raw_vector_ == nullptr or data_num > static_cast<int64_t>(raw_vector_->max_capacity_));
     resize(data_num);
     for (InnerIdType inner_id = 0; inner_id < data_num; ++inner_id) {
-        label_table_->Insert(inner_id, data_ids[inner_id]);
+        const auto input_index = input_indices[inner_id];
+        label_table_->Insert(inner_id, data_ids[input_index]);
         if (source_ids != nullptr) {
-            label_table_->InsertSourceId(inner_id, source_ids[inner_id]);
+            label_table_->InsertSourceId(inner_id, source_ids[input_index]);
         }
     }
 
-    base_codes_->BatchInsertVector(data_vectors, data_num);
-    if (has_precise_reorder()) {
-        precise_codes_->BatchInsertVector(data_vectors, data_num);
-    }
-    if (raw_vector_ != nullptr) {
-        raw_vector_->BatchInsertVector(data_vectors, data_num);
+    if (optimized_build_codes_ != nullptr) {
+        AddBatch batch(allocator_);
+        batch.storage_preallocated = storage_preallocated;
+        batch.input_indices = input_indices;
+        encode_add_batch(base, batch);
+    } else {
+        const auto insert_codes = [&](const FlattenInterfacePtr& codes) {
+            if (data_num == input_count) {
+                ParallelBatchInsertVector(codes,
+                                          static_cast<InnerIdType>(data_num),
+                                          nullptr,
+                                          this->thread_pool_.get(),
+                                          this->build_thread_count_,
+                                          [=](InnerIdType begin) {
+                                              return data_vectors +
+                                                     static_cast<uint64_t>(begin) * dim_;
+                                          });
+                return;
+            }
+            for (InnerIdType inner_id = 0; inner_id < data_num; ++inner_id) {
+                codes->InsertVector(data_vectors + input_indices[inner_id] * dim_, inner_id);
+            }
+        };
+        insert_codes(base_codes_);
+        if (has_precise_reorder()) {
+            insert_codes(precise_codes_);
+        }
+        if (raw_vector_ != nullptr) {
+            insert_codes(raw_vector_);
+        }
     }
     if (store_paths_) {
         for (const auto& [hierarchy_name, hierarchy] : hierarchies_) {
-            const auto* paths = base->GetPaths(hierarchy_name);
-            if (paths != nullptr) {
+            uint64_t total_path_count = 0;
+            bool has_paths = false;
+            for (uint64_t offset = 0; offset < static_cast<uint64_t>(data_num); ++offset) {
+                uint64_t path_count = 0;
+                const auto input_index = static_cast<uint64_t>(input_indices[offset]);
+                if (GetDatasetPaths(*base, hierarchy_name, input_index, path_count) != nullptr) {
+                    has_paths = true;
+                    total_path_count += path_count;
+                }
+            }
+            if (has_paths) {
                 auto writer = hierarchy->path_store->AcquireWriter();
-                writer.Prepare(static_cast<uint64_t>(data_num), static_cast<uint64_t>(data_num));
+                writer.Prepare(static_cast<uint64_t>(data_num), total_path_count);
                 for (uint64_t offset = 0; offset < static_cast<uint64_t>(data_num); ++offset) {
-                    writer.Insert(static_cast<InnerIdType>(offset), paths[offset]);
+                    uint64_t path_count = 0;
+                    const auto input_index = static_cast<uint64_t>(input_indices[offset]);
+                    const auto* paths =
+                        GetDatasetPaths(*base, hierarchy_name, input_index, path_count);
+                    if (paths != nullptr) {
+                        writer.Insert(static_cast<InnerIdType>(offset), paths, path_count);
+                    }
                 }
             }
         }
     }
     auto codes = construction_codes();
+    // Scalar RaBitQ codes already provide symmetric SIMD distances; do not create SQ8 copies.
+    const auto* build_vectors = optimized_build_codes_ == nullptr ? data_vectors : nullptr;
 
-    if (thread_pool_ != nullptr && hierarchies_.size() > 1) {
-        auto build_flatten = ODescent::CreateBuildFlatten(codes, data_vectors, data_num);
+    if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        Vector<const float*> rows(allocator_);
+        rows.reserve(static_cast<uint64_t>(data_num));
+        for (const auto input_index : input_indices) {
+            rows.emplace_back((build_vectors == nullptr ? data_vectors : build_vectors) +
+                              input_index * dim_);
+        }
+        for (const auto& [hname, hierarchy] : hierarchies_) {
+            auto pipnn_parameter = pipnn_param_;
+            pipnn_parameter.alpha = hierarchy->alpha;
+            PiPNNGraphBuilder pipnn_builder(pipnn_parameter,
+                                            static_cast<uint64_t>(dim_),
+                                            common_param_.metric_,
+                                            allocator_,
+                                            this->thread_pool_.get(),
+                                            this->build_thread_count_);
+            GraphBuildFunc build_graph =
+                [&](GraphInterfacePtr& graph, const Vector<InnerIdType>& ids, uint32_t level) {
+                    // `rows` is indexed by compacted inner id while `ids` is this node's own id
+                    // list, which is a strict subset as soon as an element is missing from the
+                    // node. Remap positionally for every level rather than assuming level 0 spans
+                    // the whole [0, data_num) range: the public path API currently requires at
+                    // least one path per element, but that caller-side invariant is not something
+                    // this builder should depend on.
+                    Vector<const float*> node_rows(allocator_);
+                    node_rows.reserve(ids.size());
+                    for (const auto id : ids) {
+                        node_rows.emplace_back(rows[id]);
+                    }
+                    graph->SetMaxCapacity(static_cast<InnerIdType>(data_num));
+                    pipnn_builder.Build(graph, ids, node_rows);
+                };
+            hierarchy->root->Build(build_graph);
+
+            auto& root = *hierarchy->root;
+            if (root.has_routing()) {
+                auto route_levels = sample_route_levels(root, static_cast<uint64_t>(data_num));
+                if (support_duplicate_) {
+                    auto sampled_levels = route_levels;
+                    std::fill(route_levels.begin(), route_levels.end(), -1);
+                    for (InnerIdType id = 0; id < data_num; ++id) {
+                        const auto representative = root.graph_->GetGroupId(id);
+                        route_levels[representative] =
+                            std::max(route_levels[representative], sampled_levels[id]);
+                    }
+                }
+                const auto max_route = std::max_element(route_levels.begin(), route_levels.end());
+                const int max_route_level = max_route == route_levels.end() ? -1 : *max_route;
+                if (max_route != route_levels.end() and max_route_level >= 0) {
+                    root.entry_point_ =
+                        static_cast<InnerIdType>(std::distance(route_levels.begin(), max_route));
+                    root.routing_->graphs.reserve(static_cast<uint64_t>(max_route_level) + 1);
+                }
+                for (int level = 0; level <= max_route_level; ++level) {
+                    Vector<InnerIdType> route_ids(allocator_);
+                    Vector<const float*> route_rows(allocator_);
+                    for (InnerIdType id = 0; id < data_num; ++id) {
+                        if (route_levels[id] >= level) {
+                            route_ids.emplace_back(id);
+                            route_rows.emplace_back(rows[id]);
+                        }
+                    }
+                    auto route_graph = root.make_route_graph();
+                    route_graph->SetMaxCapacity(static_cast<InnerIdType>(data_num));
+                    pipnn_builder.Build(route_graph, route_ids, route_rows);
+                    root.routing_->graphs.emplace_back(std::move(route_graph));
+                }
+            }
+        }
+    } else if (thread_pool_ != nullptr && hierarchies_.size() > 1) {
+        auto build_flatten = ODescent::CreateBuildFlatten(codes, build_vectors, data_num);
         Vector<std::future<void>> futures(allocator_);
-        for (const auto& [hname, h_ptr] : hierarchies_) {
-            auto* hierarchy = h_ptr.get();
-            futures.push_back(thread_pool_->GeneralEnqueue([&, codes, build_flatten, hierarchy]() {
-                ODescent builder(odescent_param_,
-                                 codes,
-                                 allocator_,
-                                 nullptr,
-                                 true,
-                                 data_vectors,
-                                 data_num,
-                                 build_flatten);
-                hierarchy->root->Build(builder);
-            }));
+        futures.reserve(hierarchies_.size());
+        std::exception_ptr submit_exception = nullptr;
+        try {
+            for (const auto& [hname, h_ptr] : hierarchies_) {
+                auto* hierarchy = h_ptr.get();
+                futures.push_back(
+                    thread_pool_->GeneralEnqueue([&, codes, build_flatten, hierarchy]() {
+                        ODescent builder(odescent_param_,
+                                         codes,
+                                         allocator_,
+                                         nullptr,
+                                         true,
+                                         build_vectors,
+                                         data_num,
+                                         build_flatten);
+                        hierarchy->root->Build(builder);
+                    }));
+            }
+        } catch (...) {
+            submit_exception = std::current_exception();
         }
-        for (auto& f : futures) {
-            f.get();
-        }
+        drain_futures(futures, submit_exception);
     } else {
         ODescent graph_builder(odescent_param_,
                                codes,
                                allocator_,
                                this->thread_pool_.get(),
                                true,
-                               data_vectors,
+                               build_vectors,
                                data_num);
         for (const auto& [hname, h_ptr] : hierarchies_) {
             h_ptr->root->Build(graph_builder);
         }
     }
     cur_element_count_ = data_num;
-    return {};
+    return failed_ids;
 }
 
 DatasetPtr
@@ -973,12 +1128,30 @@ Pyramid::search_impl(const DatasetPtr& query,
                    fmt::format("unknown hierarchy name: '{}'", hierarchy_name));
     const auto& h = *h_iter->second;
 
-    const auto* query_path = query->GetPaths(hierarchy_name);
-    if (query_path == nullptr) {
-        query_path = query->GetPaths();
+    std::vector<std::vector<std::string>> parsed_query_paths;
+    const auto load_query_paths = [&](const std::string& name) {
+        if (const auto* legacy_paths = query->GetPaths(name)) {
+            parsed_query_paths = parse_path(legacy_paths[0]);
+            return true;
+        }
+
+        uint64_t path_count = 0;
+        const auto* paths = GetDatasetPaths(*query, name, 0, path_count);
+        if (paths == nullptr) {
+            return false;
+        }
+        parsed_query_paths.reserve(path_count);
+        for (uint64_t i = 0; i < path_count; ++i) {
+            parsed_query_paths.push_back(split(paths[i], PART_SLASH));
+        }
+        return true;
+    };
+    bool has_query_paths = load_query_paths(hierarchy_name);
+    if (not has_query_paths && not hierarchy_name.empty()) {
+        has_query_paths = load_query_paths("");
     }
     // NOLINTNEXTLINE(readability-simplify-boolean-expr)
-    CHECK_ARGUMENT(query_path != nullptr || h.root->status_ != IndexNode::Status::NO_INDEX,
+    CHECK_ARGUMENT(has_query_paths || h.root->status_ != IndexNode::Status::NO_INDEX,
                    "query_path is required when level0 is not built");
     CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr, "query vectors is required");
 
@@ -987,10 +1160,9 @@ Pyramid::search_impl(const DatasetPtr& query,
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     VisitedListGuard vl_guard(pool_.get());
     const VisitedListPtr& vl = vl_guard.get();
-    if (query_path != nullptr) {
-        const std::string& current_path = query_path[0];
+    if (has_query_paths) {
         search_hierarchy(
-            h, search_func, vl, search_result, current_path, search_param, ctx.reasoning_ctx);
+            h, search_func, vl, search_result, parsed_query_paths, search_param, ctx.reasoning_ctx);
     } else {
         h.root->Search(search_func, vl, search_result, search_param.ef, ctx.reasoning_ctx);
     }
@@ -1464,6 +1636,7 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
                             "Pyramid streaming serialization paths block is missing");
     }
 
+    label_table_->TrimUnusedSlots(base_codes_->TotalCount());
     resize(max_capacity);
     this->current_memory_usage_ = static_cast<int64_t>(this->CalSerializeSize());
 }
@@ -1501,6 +1674,8 @@ Pyramid::Deserialize(StreamReader& reader) {
         raw_vector_->Deserialize(buffer_reader);
     }
     cur_element_count_ = base_codes_->TotalCount();
+
+    label_table_->TrimUnusedSlots(base_codes_->TotalCount());
 
     if (param_json.Contains(PYRAMID_HIERARCHIES)) {
         uint64_t hierarchy_count = 0;
@@ -1593,18 +1768,23 @@ Pyramid::prepare_add_batch(const DatasetPtr& base) {
     }
 
     batch.input_indices.reserve(data_num);
-    for (int64_t input_index = 0; input_index < data_num; ++input_index) {
-        if (not label_table_->CheckLabel(data_ids[input_index])) {
-            const auto inner_id =
-                static_cast<InnerIdType>(batch.first_inner_id + batch.input_indices.size());
-            label_table_->Insert(inner_id, data_ids[input_index]);
-            if (source_ids != nullptr) {
-                label_table_->InsertSourceId(inner_id, source_ids[input_index]);
+    {
+        // Inserting into reserved storage changes the label vector's logical size.
+        // Search readers hold resize_mutex_ while accessing that vector.
+        std::unique_lock<std::shared_mutex> storage_lock(resize_mutex_);
+        for (int64_t input_index = 0; input_index < data_num; ++input_index) {
+            if (not label_table_->CheckLabel(data_ids[input_index])) {
+                const auto inner_id =
+                    static_cast<InnerIdType>(batch.first_inner_id + batch.input_indices.size());
+                label_table_->Insert(inner_id, data_ids[input_index]);
+                if (source_ids != nullptr) {
+                    label_table_->InsertSourceId(inner_id, source_ids[input_index]);
+                }
+                batch.input_indices.push_back(input_index);
+            } else {
+                logger::warn("Label {} already exists, skip adding.", data_ids[input_index]);
+                batch.failed_ids.push_back(data_ids[input_index]);
             }
-            batch.input_indices.push_back(input_index);
-        } else {
-            logger::warn("Label {} already exists, skip adding.", data_ids[input_index]);
-            batch.failed_ids.push_back(data_ids[input_index]);
         }
     }
 
@@ -1686,21 +1866,40 @@ Pyramid::insert_add_batch(const DatasetPtr& base, const AddBatch& batch) {
     std::shared_lock<std::shared_mutex> storage_lock(resize_mutex_);
     const auto* data_vectors = base->GetFloat32Vectors();
     for (const auto& [hname, h_ptr] : hierarchies_) {
-        const auto* hpath = base->GetPaths(hname);
-        if (hpath != nullptr) {
-            if (store_paths_ and not batch.input_indices.empty()) {
+        if (store_paths_ and not batch.input_indices.empty()) {
+            uint64_t total_path_count = 0;
+            bool has_paths = false;
+            for (const auto input_index : batch.input_indices) {
+                uint64_t path_count = 0;
+                if (GetDatasetPaths(*base, hname, static_cast<uint64_t>(input_index), path_count) !=
+                    nullptr) {
+                    has_paths = true;
+                    total_path_count += path_count;
+                }
+            }
+
+            if (has_paths) {
                 auto writer = h_ptr->path_store->AcquireWriter();
                 const auto required_capacity =
                     static_cast<uint64_t>(batch.first_inner_id) + batch.input_indices.size();
-                writer.Prepare(required_capacity, batch.input_indices.size());
+                writer.Prepare(required_capacity, total_path_count);
                 for (uint64_t offset = 0; offset < batch.input_indices.size(); ++offset) {
-                    const auto inner_id = static_cast<InnerIdType>(batch.first_inner_id + offset);
-                    writer.Insert(inner_id, hpath[batch.input_indices[offset]]);
+                    uint64_t path_count = 0;
+                    const auto* paths =
+                        GetDatasetPaths(*base,
+                                        hname,
+                                        static_cast<uint64_t>(batch.input_indices[offset]),
+                                        path_count);
+                    if (paths != nullptr) {
+                        const auto inner_id =
+                            static_cast<InnerIdType>(batch.first_inner_id + offset);
+                        writer.Insert(inner_id, paths, path_count);
+                    }
                 }
             }
-            add_to_hierarchy(
-                *h_ptr, data_vectors, hpath, batch.input_indices, batch.first_inner_id);
         }
+        add_to_hierarchy(
+            *h_ptr, data_vectors, base, hname, batch.input_indices, batch.first_inner_id);
     }
 }
 
@@ -1711,7 +1910,7 @@ Pyramid::resize(int64_t new_max_capacity) {
         return;
     }
     pool_ = std::make_unique<VisitedListPool>(1, allocator_, new_max_capacity, allocator_);
-    label_table_->Resize(new_max_capacity);
+    label_table_->Reserve(new_max_capacity);
     base_codes_->Resize(new_max_capacity);
     if (has_precise_reorder()) {
         precise_codes_->Resize(new_max_capacity);
@@ -1966,6 +2165,12 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
             inner_json[GRAPH_KEY][ODESCENT_PARAMETER_GRAPH_ITER_TURN].SetJson(value);
         } else if (key == ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE) {
             inner_json[GRAPH_KEY][ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE].SetJson(value);
+        } else if (key == PIPNN_PARAMETER_MAX_LEAF_SIZE or key == PIPNN_PARAMETER_MIN_LEAF_SIZE or
+                   key == PIPNN_PARAMETER_LEADER_SAMPLE_RATE or key == PIPNN_PARAMETER_FANOUT or
+                   key == PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT or
+                   key == PIPNN_PARAMETER_HASH_PLANE_COUNT or
+                   key == PIPNN_PARAMETER_RESERVOIR_SIZE) {
+            inner_json[GRAPH_KEY][key].SetJson(value);
         } else if (key == PYRAMID_INDEX_MIN_SIZE) {
             inner_json[INDEX_MIN_SIZE].SetJson(value);
         } else if (key == PYRAMID_ROOT_GRAPH_TYPE) {
@@ -2035,12 +2240,36 @@ Pyramid::Build(const DatasetPtr& base) {
                 "[pyramid_build_cache] duplicate source_id or label; falling back to cold build");
         }
     }
-    populate_hierarchy_trees(base);
-    if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
-        return this->Add(base);
+    if (graph_type_ != GRAPH_TYPE_VALUE_PIPNN) {
+        populate_hierarchy_trees(base);
     }
-    this->Train(base);
-    return this->build_by_odescent(base);
+    auto optimized_codes =
+        std::dynamic_pointer_cast<FlattenOptimizedBuildInterface>(construction_codes());
+    if (optimized_codes != nullptr and
+        optimized_codes->BeginOptimizedBuild({thread_pool_, build_thread_count_})) {
+        optimized_build_codes_ = std::move(optimized_codes);
+    }
+    try {
+        std::vector<int64_t> result;
+        if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
+            result = this->Add(base);
+        } else {
+            this->Train(base);
+            result = this->build_by_batch_graph(base);
+        }
+        if (optimized_build_codes_ != nullptr) {
+            optimized_build_codes_->FinalizeOptimizedBuild();
+            optimized_build_codes_.reset();
+        }
+        return result;
+    } catch (...) {
+        // All build workers must be drained before releasing their temporary scalar codes.
+        if (optimized_build_codes_ != nullptr) {
+            optimized_build_codes_->AbortOptimizedBuild();
+            optimized_build_codes_.reset();
+        }
+        throw;
+    }
 }
 
 void
@@ -2205,39 +2434,65 @@ Pyramid::add_one_point(const Hierarchy& hierarchy,
                     sampled_route_level);
 }
 
-void
-Pyramid::populate_path_tree(Hierarchy& h, const std::string* paths, int64_t count) {
-    for (int64_t i = 0; i < count; ++i) {
-        std::string current_path = paths[i];
-        auto path_slices = split(current_path, PART_SLASH);
-        IndexNode* node = h.root.get();
-        if (std::find(h.no_build_levels.begin(), h.no_build_levels.end(), node->level_) ==
-            h.no_build_levels.end()) {
-            node->ids_.push_back(i);
+std::vector<IndexNode*>
+Pyramid::collect_path_nodes(Hierarchy& h, const std::string* paths, uint64_t path_count) {
+    std::vector<IndexNode*> nodes;
+    const bool needs_deduplication = path_count > 1;
+    std::unordered_set<IndexNode*> seen_nodes;
+    const auto add_node = [&](IndexNode* node) {
+        if (not needs_deduplication || seen_nodes.insert(node).second) {
+            nodes.push_back(node);
         }
-        for (auto& path_slice : path_slices) {
+    };
+    for (uint64_t i = 0; i < path_count; ++i) {
+        auto path_slices = split(paths[i], PART_SLASH);
+        IndexNode* node = h.root.get();
+        add_node(node);
+        for (const auto& path_slice : path_slices) {
             node = node->GetChild(path_slice, true);
+            add_node(node);
+        }
+    }
+    return nodes;
+}
+
+void
+Pyramid::populate_path_tree(Hierarchy& h,
+                            const DatasetPtr& dataset,
+                            const std::string& hierarchy_name,
+                            int64_t count,
+                            const Vector<int64_t>* input_indices) {
+    const auto* legacy_paths = dataset->GetPaths(hierarchy_name);
+    const auto valid_count =
+        input_indices == nullptr ? count : static_cast<int64_t>(input_indices->size());
+    for (InnerIdType inner_id = 0; inner_id < valid_count; ++inner_id) {
+        const auto input_index = input_indices == nullptr ? inner_id : input_indices->at(inner_id);
+        uint64_t path_count = legacy_paths == nullptr ? 0 : 1;
+        const auto* paths =
+            legacy_paths == nullptr
+                ? GetDatasetPaths(
+                      *dataset, hierarchy_name, static_cast<uint64_t>(input_index), path_count)
+                : legacy_paths + input_index;
+        for (auto* node : collect_path_nodes(h, paths, path_count)) {
             if (std::find(h.no_build_levels.begin(), h.no_build_levels.end(), node->level_) ==
                 h.no_build_levels.end()) {
-                node->ids_.push_back(i);
+                node->ids_.push_back(inner_id);
             }
         }
     }
 }
 
 void
-Pyramid::populate_hierarchy_trees(const DatasetPtr& base) {
+Pyramid::populate_hierarchy_trees(const DatasetPtr& base, const Vector<int64_t>* input_indices) {
     const auto data_num = base->GetNumElements();
     if (thread_pool_ != nullptr && hierarchies_.size() > 1) {
         Vector<std::future<void>> futures(allocator_);
         for (const auto& [hname, hierarchy_ptr] : hierarchies_) {
-            const auto* paths = base->GetPaths(hname);
-            if (paths != nullptr) {
-                futures.push_back(thread_pool_->GeneralEnqueue(
-                    [&hierarchy = *hierarchy_ptr, paths, data_num, this]() {
-                        populate_path_tree(hierarchy, paths, data_num);
-                    }));
-            }
+            const std::string hierarchy_name = hname;
+            futures.push_back(thread_pool_->GeneralEnqueue(
+                [&hierarchy = *hierarchy_ptr, base, hierarchy_name, data_num, input_indices]() {
+                    populate_path_tree(hierarchy, base, hierarchy_name, data_num, input_indices);
+                }));
         }
         for (auto& future : futures) {
             future.get();
@@ -2246,48 +2501,15 @@ Pyramid::populate_hierarchy_trees(const DatasetPtr& base) {
     }
 
     for (const auto& [hname, hierarchy_ptr] : hierarchies_) {
-        const auto* paths = base->GetPaths(hname);
-        if (paths != nullptr) {
-            populate_path_tree(*hierarchy_ptr, paths, data_num);
-        }
-    }
-}
-
-void
-Pyramid::add_to_path(Hierarchy& hierarchy,
-                     const std::string& path,
-                     InnerIdType inner_id,
-                     const float* vector,
-                     int sampled_root_level) {
-    auto path_slices = split(path, PART_SLASH);
-    IndexNode* node = hierarchy.root.get();
-    int no_build_level_index = 0;
-    for (int depth = 0; depth <= static_cast<int>(path_slices.size()); ++depth) {
-        IndexNode* child = nullptr;
-        if (depth != static_cast<int>(path_slices.size())) {
-            child = node->GetChild(path_slices[depth], true);
-        }
-        if (no_build_level_index < static_cast<int>(hierarchy.no_build_levels.size()) &&
-            depth == hierarchy.no_build_levels[no_build_level_index]) {
-            node = child;
-            ++no_build_level_index;
-            continue;
-        }
-        add_one_point(hierarchy,
-                      node,
-                      inner_id,
-                      vector,
-                      0,
-                      false,
-                      depth == 0 ? sampled_root_level : std::numeric_limits<int>::min());
-        node = child;
+        populate_path_tree(*hierarchy_ptr, base, hname, data_num, input_indices);
     }
 }
 
 void
 Pyramid::add_to_hierarchy(Hierarchy& h,
                           const float* data_vectors,
-                          const std::string* paths,
+                          const DatasetPtr& dataset,
+                          const std::string& hierarchy_name,
                           const Vector<int64_t>& input_indices,
                           int64_t first_inner_id) {
     run_parallel_insertions(*h.root, input_indices.size(), [&](uint64_t offset, int sampled_level) {
@@ -2296,7 +2518,22 @@ Pyramid::add_to_hierarchy(Hierarchy& h,
         const auto* vector = base_codes_->SupportSplitCodeStorage() and raw_vector_ == nullptr
                                  ? nullptr
                                  : data_vectors + dim_ * input_index;
-        add_to_path(h, paths[input_index], inner_id, vector, sampled_level);
+        uint64_t path_count = 0;
+        const auto* paths = GetDatasetPaths(
+            *dataset, hierarchy_name, static_cast<uint64_t>(input_index), path_count);
+        for (auto* node : collect_path_nodes(h, paths, path_count)) {
+            if (std::find(h.no_build_levels.begin(), h.no_build_levels.end(), node->level_) !=
+                h.no_build_levels.end()) {
+                continue;
+            }
+            add_one_point(h,
+                          node,
+                          inner_id,
+                          vector,
+                          0,
+                          false,
+                          node == h.root.get() ? sampled_level : std::numeric_limits<int>::min());
+        }
     });
 }
 
@@ -2305,39 +2542,65 @@ Pyramid::search_hierarchy(const Hierarchy& h,
                           const SearchFunc& search_func,
                           const VisitedListPtr& vl,
                           DistHeapPtr& search_result,
-                          const std::string& path,
+                          const std::vector<std::vector<std::string>>& parsed_paths,
                           const InnerSearchParam& search_param,
                           ReasoningContext* reasoning_ctx) const {
-    std::vector<std::future<void>> futures;
-    auto parsed_path = parse_path(path);
-    Vector<DistHeapPtr> search_result_lists(parsed_path.size(), allocator_);
-    for (uint32_t i = 0; i < parsed_path.size(); ++i) {
-        const auto& one_path = parsed_path[i];
-        search_result_lists[i] = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+    std::vector<IndexNode*> search_nodes;
+    std::unordered_set<IndexNode*> seen_nodes;
+    const std::function<void(IndexNode*)> collect_search_nodes = [&](IndexNode* node) {
+        std::vector<IndexNode*> children;
+        {
+            std::shared_lock lock(node->mutex_);
+            if (node->status_ != IndexNode::Status::NO_INDEX) {
+                if (seen_nodes.insert(node).second) {
+                    search_nodes.push_back(node);
+                }
+                return;
+            }
+            children.reserve(node->children_.size());
+            for (const auto& [key, child] : node->children_) {
+                children.push_back(child.get());
+            }
+        }
+        for (auto* child : children) {
+            collect_search_nodes(child);
+        }
+    };
+
+    for (const auto& one_path : parsed_paths) {
         IndexNode* node = h.root.get();
-        bool valid = true;
         for (const auto& item : one_path) {
             node = node->GetChild(item, false);
             if (node == nullptr) {
-                valid = false;
                 break;
             }
         }
-        if (valid) {
-            if (thread_pool_ != nullptr && search_param.parallel_search_thread_count > 1) {
-                futures.push_back(thread_pool_->GeneralEnqueue([&, node, i]() -> void {
-                    VisitedListGuard vl_guard(pool_.get());
-                    const VisitedListPtr& local_vl = vl_guard.get();
-                    node->Search(search_func,
-                                 local_vl,
-                                 search_result_lists[i],
-                                 search_param.ef,
-                                 reasoning_ctx);
-                }));
-            } else {
+        if (node != nullptr) {
+            collect_search_nodes(node);
+        }
+    }
+
+    std::vector<std::future<void>> futures;
+    Vector<DistHeapPtr> search_result_lists(search_nodes.size(), allocator_);
+    for (uint32_t i = 0; i < search_nodes.size(); ++i) {
+        search_result_lists[i] = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+        auto* node = search_nodes[i];
+        if (thread_pool_ != nullptr && search_param.parallel_search_thread_count > 1) {
+            futures.push_back(thread_pool_->GeneralEnqueue([&, node, i]() -> void {
+                VisitedListGuard vl_guard(pool_.get());
+                const VisitedListPtr& local_vl = vl_guard.get();
                 node->Search(
-                    search_func, vl, search_result_lists[i], search_param.ef, reasoning_ctx);
-            }
+                    search_func, local_vl, search_result_lists[i], search_param.ef, reasoning_ctx);
+            }));
+        } else if (search_nodes.size() > 1) {
+            VisitedListGuard vl_guard(pool_.get());
+            node->Search(search_func,
+                         vl_guard.get(),
+                         search_result_lists[i],
+                         search_param.ef,
+                         reasoning_ctx);
+        } else {
+            node->Search(search_func, vl, search_result_lists[i], search_param.ef, reasoning_ctx);
         }
     }
 
@@ -2345,13 +2608,30 @@ Pyramid::search_hierarchy(const Hierarchy& h,
         future.get();
     }
 
-    for (uint32_t i = 0; i < search_result_lists.size(); ++i) {
-        if (i != 0) {
-            search_result->Merge(*search_result_lists[i]);
-        } else {
-            search_result = search_result_lists[i];
+    if (search_result_lists.size() == 1) {
+        search_result = search_result_lists[0];
+        return;
+    }
+
+    auto merged_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+    UnorderedMap<InnerIdType, float> best_distances(allocator_);
+    Vector<InnerIdType> result_ids(allocator_);
+    for (const auto& result : search_result_lists) {
+        const auto* records = result->GetData();
+        for (uint64_t i = 0; i < result->Size(); ++i) {
+            const auto& [distance, inner_id] = records[i];
+            auto [iter, inserted] = best_distances.emplace(inner_id, distance);
+            if (inserted) {
+                result_ids.push_back(inner_id);
+            } else {
+                iter.value() = std::min(iter.value(), distance);
+            }
         }
     }
+    for (const auto inner_id : result_ids) {
+        merged_result->Push(best_distances.at(inner_id), inner_id);
+    }
+    search_result = std::move(merged_result);
 }
 
 std::vector<std::vector<std::string>>
@@ -2360,9 +2640,14 @@ Pyramid::parse_path(const std::string& path) {
     std::vector<std::vector<std::string>> parsed_paths;
     parsed_paths.reserve(multi_paths.size());
     for (const auto& single_path : multi_paths) {
-        parsed_paths.push_back(split(single_path, PART_SLASH));
+        parsed_paths.push_back(parse_atomic_path(single_path));
     }
     return parsed_paths;
+}
+
+std::vector<std::string>
+Pyramid::parse_atomic_path(const std::string& path) {
+    return split(path, PART_SLASH);
 }
 
 DistHeapPtr
@@ -2473,23 +2758,25 @@ Pyramid::CalcDistanceById(const float* query, int64_t id, bool calculate_precise
     if (raw_vector_ != nullptr && calculate_precise_distance) {
         flat = this->raw_vector_;
     }
-    return InnerIndexInterface::calc_distance_by_id(query, id, flat);
+    InnerIdType inner_id;
+    {
+        std::shared_lock<std::shared_mutex> label_lock(label_lookup_mutex_);
+        inner_id = label_table_->GetIdByLabel(id);
+    }
+    auto computer = flat->FactoryComputer(query);
+    float distance = 0.0F;
+    flat->Query(&distance, computer, &inner_id, 1);
+    return distance;
 }
 
 DatasetPtr
 Pyramid::CalcDistancesById(const float* query,
                            const int64_t* ids,
                            int64_t count,
-                           bool calculate_precise_distance) const {
-    return this->CalDistanceById(query, ids, count, calculate_precise_distance);
-}
-
-DatasetPtr
-Pyramid::CalDistanceById(const float* query,
-                         const int64_t* ids,
-                         int64_t count,
-                         bool calculate_precise_distance,
-                         int64_t topk) const {
+                           bool calculate_precise_distance,
+                           int64_t topk) const {
+    const bool valid_topk = topk == -1 || topk > 0;
+    CHECK_ARGUMENT(valid_topk, "distance topk must be -1 or positive");
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     auto flat = this->base_codes_;
     if (has_precise_reorder() && calculate_precise_distance) {
@@ -2499,7 +2786,7 @@ Pyramid::CalDistanceById(const float* query,
         flat = this->raw_vector_;
     }
     std::vector<bool> validity;
-    auto result = InnerIndexInterface::cal_distance_by_id(query, ids, count, flat, &validity);
+    auto result = InnerIndexInterface::calc_distance_by_id(query, ids, count, flat, &validity);
     if (topk == -1) {
         return result;
     }
@@ -2711,17 +2998,29 @@ Pyramid::build_with_cache(const DatasetPtr& base) {
     cur_element_count_ = data_num;
 
     for (const auto& [hname, h_ptr] : hierarchies_) {
-        const auto* hpath = base->GetPaths(hname);
-        if (hpath != nullptr) {
-            if (store_paths_) {
-                auto writer = h_ptr->path_store->AcquireWriter();
-                writer.Prepare(static_cast<uint64_t>(data_num), static_cast<uint64_t>(data_num));
-                for (uint64_t offset = 0; offset < static_cast<uint64_t>(data_num); ++offset) {
-                    writer.Insert(static_cast<InnerIdType>(offset), hpath[offset]);
+        if (store_paths_) {
+            uint64_t total_path_count = 0;
+            bool has_paths = false;
+            for (uint64_t offset = 0; offset < static_cast<uint64_t>(data_num); ++offset) {
+                uint64_t path_count = 0;
+                if (GetDatasetPaths(*base, hname, offset, path_count) != nullptr) {
+                    has_paths = true;
+                    total_path_count += path_count;
                 }
             }
-            populate_path_tree(*h_ptr, hpath, data_num);
+            if (has_paths) {
+                auto writer = h_ptr->path_store->AcquireWriter();
+                writer.Prepare(static_cast<uint64_t>(data_num), total_path_count);
+                for (uint64_t offset = 0; offset < static_cast<uint64_t>(data_num); ++offset) {
+                    uint64_t path_count = 0;
+                    const auto* paths = GetDatasetPaths(*base, hname, offset, path_count);
+                    if (paths != nullptr) {
+                        writer.Insert(static_cast<InnerIdType>(offset), paths, path_count);
+                    }
+                }
+            }
         }
+        populate_path_tree(*h_ptr, base, hname, data_num);
     }
 
     for (const auto& [hname, h_ptr] : hierarchies_) {

@@ -99,6 +99,7 @@ const char* const QUANTIZATION_TYPE_VALUE_PQ = "pq";
 const char* const QUANTIZATION_TYPE_VALUE_PQFS = "pqfs";
 const char* const QUANTIZATION_TYPE_VALUE_RABITQ = "rabitq";
 const char* const QUANTIZATION_TYPE_VALUE_SPARSE = "sparse";
+const char* const QUANTIZATION_TYPE_VALUE_SPARSE_FP16 = "sparse_fp16";
 const char* const QUANTIZATION_TYPE_VALUE_TQ = "tq";
 
 // vector transformer type
@@ -150,6 +151,7 @@ const char* const EF_CONSTRUCTION_KEY = "ef_construction";
 
 const char* const GRAPH_TYPE_KEY = "graph_type";
 const char* const GRAPH_TYPE_VALUE_ODESCENT = "odescent";
+const char* const GRAPH_TYPE_VALUE_PIPNN = "pipnn";
 const char* const GRAPH_TYPE_VALUE_NSW = "nsw";
 
 const char* const GRAPH_STORAGE_TYPE_KEY = "graph_storage_type";

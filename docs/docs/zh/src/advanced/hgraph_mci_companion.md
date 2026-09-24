@@ -40,7 +40,7 @@ MCI 会直接基于已存储向量构建专用 KNN 图。若内部配置了外�
 | --- | --- |
 | `use_mci` | 设为 `true` 时使用默认构建参数启用 MCI。 |
 | `mci_mcs` | 构建团时使用的候选邻居数量。 |
-| `mci_clique_max` | 全量构建时的最大团大小。 |
+| `mci_clique_max` | 全量构建时保留的极大团的最小大小。团始终完整保存，因此这是下限而非上限。 |
 | `mci_knng_source` | KNN 图来源：`hgraph`（默认）或 `odescent`。 |
 | `mci_alpha` | 团构建扩展系数。 |
 | `mci_incremental_join_ratio_threshold` | Add 时加入已有团的阈值。 |

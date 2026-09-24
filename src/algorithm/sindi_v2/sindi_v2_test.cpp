@@ -136,19 +136,22 @@ create_sindi_v2_param(uint32_t term_id_limit,
                       const std::string& term_path,
                       const std::string& term_io_type = "buffer_io",
                       const std::string& rerank_io_type = "memory_io",
-                      uint32_t rerank_layout = 0) {
+                      uint32_t rerank_layout = 0,
+                      const std::string& rerank_type = "fp32") {
     auto param_str = fmt::format(R"({{
         "term_id_limit": {},
         "window_size": 10000,
         "doc_prune_ratio": 0.0,
         "use_quantization": false,
         "use_reorder": true,
+        "rerank_type": "{}",
         "avg_doc_term_length": 100,
         "rerank_layout": {},
         "term_io": {{ "type": "{}", "file_path": "{}" }},
         "rerank_io": {{ "type": "{}" }}
     }})",
                                  term_id_limit,
+                                 rerank_type,
                                  rerank_layout,
                                  term_io_type,
                                  term_path,
@@ -172,7 +175,127 @@ private:
     int64_t label_;
 };
 
+class CountingFilter : public Filter {
+public:
+    explicit CountingFilter(int64_t only_valid_label) : only_valid_label_(only_valid_label) {
+    }
+
+    [[nodiscard]] bool
+    CheckValid(int64_t label) const override {
+        ++count_;
+        return WouldAccept(label);
+    }
+
+    [[nodiscard]] bool
+    WouldAccept(int64_t label) const {
+        return label == only_valid_label_;
+    }
+
+    [[nodiscard]] uint64_t
+    Count() const {
+        return count_;
+    }
+
+private:
+    int64_t only_valid_label_{-1};
+    mutable uint64_t count_{0};
+};
+
 }  // namespace
+
+TEST_CASE("SINDIV2 Filter Callback Limit", "[ut][SINDIV2]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 1;
+
+    const bool immutable = GENERATE(false, true);
+    const float query_prune_ratio = GENERATE(0.0F, 0.2F);
+    const auto search_mode = GENERATE(SearchMode::KNN_SEARCH, SearchMode::RANGE_SEARCH);
+    const bool remap_term_ids = GENERATE(false, true);
+    CAPTURE(immutable, query_prune_ratio, search_mode, remap_term_ids);
+
+    auto parameter = std::make_shared<SINDIV2Parameter>();
+    parameter->term_id_limit = 8;
+    parameter->window_size = 4;
+    parameter->doc_prune_ratio = 0.0F;
+    parameter->avg_doc_term_length = 1;
+    parameter->immutable = immutable;
+    parameter->remap_term_ids = remap_term_ids;
+    parameter->term_io_parameter = std::make_shared<MemoryIOParameter>();
+    parameter->rerank_io_parameter = std::make_shared<MemoryBlockIOParameter>();
+
+    constexpr uint64_t count = 8;
+    uint32_t term = 3;
+    std::vector<float> values(count, 1.0F);
+    std::vector<int64_t> labels(count);
+    std::vector<SparseVector> vectors(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        labels[i] = static_cast<int64_t>(i);
+        vectors[i] = SparseVector{1, &term, &values[i]};
+    }
+    auto base = Dataset::Make();
+    base->NumElements(count)->SparseVectors(vectors.data())->Ids(labels.data())->Owner(false);
+
+    SINDIV2 index(parameter, common_param);
+    REQUIRE(index.Build(base).empty());
+
+    float query_value = 1.0F;
+    SparseVector query_vector{1, &term, &query_value};
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+
+    const auto search = [&](const std::string& parameters, const FilterPtr& filter) {
+        if (search_mode == SearchMode::RANGE_SEARCH) {
+            return index.RangeSearch(query, 0.0F, parameters, filter, 4);
+        }
+        return index.KnnSearch(query, 4, parameters, filter);
+    };
+
+    const auto limited_parameters = fmt::format(
+        R"({{"sindi_v2": {{"n_candidate": 4, "query_prune_ratio": {}, "filter_callback_limit": 3}}}})",
+        query_prune_ratio);
+    auto limited_filter = std::make_shared<CountingFilter>(2);
+    auto limited_result = search(limited_parameters, limited_filter);
+
+    REQUIRE(limited_filter->Count() == 3);
+    REQUIRE(limited_result->GetDim() == 1);
+    REQUIRE(limited_result->GetIds()[0] == 2);
+    REQUIRE(limited_filter->WouldAccept(limited_result->GetIds()[0]));
+
+    auto rejecting_filter = std::make_shared<CountingFilter>(-1);
+    auto rejected_result = search(limited_parameters, rejecting_filter);
+    REQUIRE(rejecting_filter->Count() == 3);
+    REQUIRE(rejected_result->GetDim() == 0);
+
+    const auto unlimited_parameters = fmt::format(
+        R"({{"sindi_v2": {{"n_candidate": 4, "query_prune_ratio": {}, "filter_callback_limit": 0}}}})",
+        query_prune_ratio);
+    auto unlimited_filter = std::make_shared<CountingFilter>(2);
+    auto unlimited_result = search(unlimited_parameters, unlimited_filter);
+    REQUIRE(unlimited_filter->Count() > 3);
+    REQUIRE(unlimited_result->GetDim() == 1);
+    REQUIRE(unlimited_result->GetIds()[0] == 2);
+
+    auto unfiltered_result = search(limited_parameters, nullptr);
+    REQUIRE(unfiltered_result->GetDim() == 4);
+
+    if (remap_term_ids) {
+        uint32_t unknown_term = 7;
+        query_vector.ids_ = &unknown_term;
+        auto empty_query_filter = std::make_shared<CountingFilter>(2);
+        auto empty_query_result = search(limited_parameters, empty_query_filter);
+        REQUIRE(empty_query_filter->Count() == 3);
+        if (search_mode == SearchMode::KNN_SEARCH) {
+            REQUIRE(empty_query_result->GetDim() == 1);
+            REQUIRE(empty_query_result->GetIds()[0] == 2);
+        } else {
+            REQUIRE(empty_query_result->GetDim() == 0);
+        }
+        query_vector.ids_ = &term;
+    }
+}
 
 TEST_CASE("SINDIV2 immutable host filter routes", "[ut][SINDIV2][host_filter]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
@@ -1094,11 +1217,14 @@ TEST_CASE("SINDIV2 Top Terms Rerank Layout End-To-End", "[ut][SINDIV2]") {
 
     fixtures::TempDir dir("sindi_v2_top_terms_layout");
     const std::string term_path = dir.GenerateRandomFile(false);
+    const std::string rerank_type = GENERATE("fp32", "fp16");
+    CAPTURE(rerank_type);
     auto param = create_sindi_v2_param(term_id_limit,
                                        term_path,
                                        "buffer_io",
                                        "memory_io",
-                                       /*rerank_layout=*/8);
+                                       /*rerank_layout=*/8,
+                                       rerank_type);
     auto index = std::make_unique<SINDIV2>(param, common_param);
     REQUIRE(index->Build(base).empty());
 
@@ -1114,6 +1240,9 @@ TEST_CASE("SINDIV2 Top Terms Rerank Layout End-To-End", "[ut][SINDIV2]") {
     auto result = index->KnnSearch(query, k, search_param, nullptr);
     REQUIRE(result->GetDim() == k);
     REQUIRE(result->GetIds()[0] == 0);
+    const auto statistics = JsonType::Parse(result->GetStatistics());
+    const auto backend = rerank_type == SPARSE_RERANK_TYPE_FP16 ? "sparse_fp16" : "sparse_fp32";
+    REQUIRE(statistics["distance_evaluations_by_backend"][backend].GetUint64() > 0);
     for (int64_t i = 0; i < result->GetDim(); ++i) {
         auto precise_dist = index->CalcDistanceById(query, result->GetIds()[i], true);
         REQUIRE(std::abs(result->GetDistances()[i] - precise_dist) < 1e-5);
@@ -1390,56 +1519,75 @@ TEST_CASE("SINDIV2 mutable memory index supports Add after Deserialize", "[ut][S
     common_param.metric_ = MetricType::METRIC_TYPE_IP;
     common_param.dim_ = 8;
 
-    auto parameter = std::make_shared<SINDIV2Parameter>();
-    parameter->FromJson(JsonType::Parse(R"({
+    const std::string rerank_type = GENERATE("fp32", "fp16");
+    DYNAMIC_SECTION("rerank_type=" << rerank_type) {
+        auto parameter = std::make_shared<SINDIV2Parameter>();
+        parameter->FromJson(JsonType::Parse(fmt::format(R"({{
         "term_id_limit": 8,
         "window_size": 10000,
+        "avg_doc_term_length": 3,
         "use_reorder": true,
-        "term_io": {"type": "memory_io"},
-        "rerank_io": {"type": "block_memory_io"}
-    })"));
+        "rerank_type": "{}",
+        "term_io": {{"type": "memory_io"}},
+        "rerank_io": {{"type": "block_memory_io"}}
+    }})",
+                                                        rerank_type)));
 
-    uint32_t base_term = 1;
-    float base_value = 1.0F;
-    int64_t base_label = 10;
-    SparseVector base_vector{1, &base_term, &base_value};
-    auto base = Dataset::Make();
-    base->NumElements(1)->SparseVectors(&base_vector)->Ids(&base_label)->Owner(false);
+        uint32_t base_term = 1;
+        float base_value = 1.0F;
+        int64_t base_label = 10;
+        SparseVector base_vector{1, &base_term, &base_value};
+        auto base = Dataset::Make();
+        base->NumElements(1)->SparseVectors(&base_vector)->Ids(&base_label)->Owner(false);
 
-    SINDIV2 built(parameter, common_param);
-    REQUIRE(built.Build(base).empty());
+        SINDIV2 built(parameter, common_param);
+        REQUIRE(built.Build(base).empty());
 
-    std::stringstream stream;
-    IOStreamWriter writer(stream);
-    built.Serialize(writer);
+        std::stringstream stream;
+        IOStreamWriter writer(stream);
+        built.Serialize(writer);
 
-    SINDIV2 loaded(parameter, common_param);
-    stream.seekg(0, std::ios::beg);
-    loaded.Deserialize(stream);
+        SINDIV2 loaded(parameter, common_param);
+        stream.seekg(0, std::ios::beg);
+        loaded.Deserialize(stream);
 
-    uint32_t added_term = 2;
-    float added_value = 2.0F;
-    int64_t added_label = 20;
-    SparseVector added_vector{1, &added_term, &added_value};
-    auto added = Dataset::Make();
-    added->NumElements(1)->SparseVectors(&added_vector)->Ids(&added_label)->Owner(false);
-    REQUIRE(loaded.Add(added).empty());
-    REQUIRE(loaded.GetNumElements() == 2);
+        uint32_t added_term = 2;
+        float added_value = 2.0F;
+        int64_t added_label = 20;
+        SparseVector added_vector{1, &added_term, &added_value};
+        auto added = Dataset::Make();
+        added->NumElements(1)->SparseVectors(&added_vector)->Ids(&added_label)->Owner(false);
+        REQUIRE(loaded.Add(added).empty());
+        REQUIRE(loaded.GetNumElements() == 2);
 
-    auto query = Dataset::Make();
-    query->NumElements(1)->SparseVectors(&added_vector)->Owner(false);
-    const auto result = loaded.KnnSearch(query,
-                                         1,
-                                         R"({
+        auto query = Dataset::Make();
+        query->NumElements(1)->SparseVectors(&added_vector)->Owner(false);
+        const auto result = loaded.KnnSearch(query,
+                                             1,
+                                             R"({
             "sindi_v2": {
                 "query_prune_ratio": 0.0,
                 "term_prune_ratio": 0.0,
                 "n_candidate": 2
             }
         })",
-                                         nullptr);
-    REQUIRE(result->GetDim() == 1);
-    REQUIRE(result->GetIds()[0] == added_label);
+                                             nullptr);
+        REQUIRE(result->GetDim() == 1);
+        REQUIRE(result->GetIds()[0] == added_label);
+        const auto statistics = JsonType::Parse(result->GetStatistics());
+        const auto backend = rerank_type == SPARSE_RERANK_TYPE_FP16 ? "sparse_fp16" : "sparse_fp32";
+        REQUIRE(statistics["distance_evaluations_by_backend"][backend].GetUint64() > 0);
+
+        if (rerank_type == SPARSE_RERANK_TYPE_FP16) {
+            auto fp32_parameter = std::make_shared<SINDIV2Parameter>();
+            auto fp32_json = parameter->ToJson();
+            fp32_json[SPARSE_RERANK_TYPE].SetString(SPARSE_RERANK_TYPE_FP32);
+            fp32_parameter->FromJson(fp32_json);
+            SINDIV2 fp32(fp32_parameter, common_param);
+            constexpr uint64_t estimate_count = 10'000'000;
+            REQUIRE(loaded.EstimateMemory(estimate_count) < fp32.EstimateMemory(estimate_count));
+        }
+    }
 }
 
 TEST_CASE("SINDIV2 rejects corrupted term layout", "[ut][SINDIV2]") {
@@ -1610,6 +1758,15 @@ TEST_CASE("SINDIV2 memory term layout mutable and immutable roundtrip", "[ut][SI
             REQUIRE(disk_knn->GetIds()[0] == labels[0]);
             REQUIRE(std::abs(disk_loaded.CalcDistanceById(query, labels[0], false) -
                              expected_distance) <= 1e-5F);
+            int64_t candidates[] = {-1, labels[0], labels[1]};
+            auto batch = disk_loaded.CalcDistancesById(query, candidates, 3, false);
+            REQUIRE(batch->GetDistances()[0] == -1.0F);
+            REQUIRE(std::abs(batch->GetDistances()[1] - expected_distance) <= 1e-5F);
+            auto top = disk_loaded.CalcDistancesById(query, candidates, 3, false, 2);
+            REQUIRE(top->GetIds()[0] != -1);
+            REQUIRE(top->GetIds()[1] != -1);
+            REQUIRE(top->GetDistances()[0] <= top->GetDistances()[1]);
+            REQUIRE_THROWS(disk_loaded.CalcDistanceById(DatasetPtr{}, labels[0]));
 
             if (config.immutable) {
                 REQUIRE_THROWS_WITH(
@@ -1946,13 +2103,13 @@ TEST_CASE("SINDIV2 optimized DMQ and batch distance end-to-end", "[ut][SINDIV2]"
             REQUIRE(search_result->GetIds()[0] == 10);
 
             int64_t distance_ids[] = {30, 999, 10, 10, 999, 20};
-            auto all_distances = built.CalDistanceById(batch_query, distance_ids, 3, true, -1);
+            auto all_distances = built.CalcDistancesById(batch_query, distance_ids, 3, true, -1);
             REQUIRE(all_distances->GetNumElements() == 2);
             REQUIRE(all_distances->GetDim() == 3);
             REQUIRE(all_distances->GetDistances()[1] == -1.0F);
             REQUIRE(all_distances->GetDistances()[4] == -1.0F);
 
-            auto precise_topk = built.CalDistanceById(batch_query, distance_ids, 3, true, 2);
+            auto precise_topk = built.CalcDistancesById(batch_query, distance_ids, 3, true, 2);
             REQUIRE(precise_topk->GetNumElements() == 2);
             REQUIRE(precise_topk->GetDim() == 2);
             REQUIRE(precise_topk->GetIds()[0] == 10);
@@ -1960,7 +2117,7 @@ TEST_CASE("SINDIV2 optimized DMQ and batch distance end-to-end", "[ut][SINDIV2]"
             REQUIRE(precise_topk->GetIds()[2] == 20);
             REQUIRE(precise_topk->GetIds()[3] == 10);
 
-            auto approximate_topk = built.CalDistanceById(batch_query, distance_ids, 3, false, 2);
+            auto approximate_topk = built.CalcDistancesById(batch_query, distance_ids, 3, false, 2);
             REQUIRE(approximate_topk->GetNumElements() == 2);
             REQUIRE(approximate_topk->GetDim() == 2);
             REQUIRE(approximate_topk->GetIds()[0] == 10);
@@ -1984,5 +2141,91 @@ TEST_CASE("SINDIV2 optimized DMQ and batch distance end-to-end", "[ut][SINDIV2]"
 
             REQUIRE_THROWS(built.Add(base));
         }
+    }
+}
+
+TEST_CASE("SINDI V2 timeout triggers is_timeout", "[ut][SINDIV2][timeout]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    uint32_t term = 1;
+    std::array<float, 4> values{4.0F, 0.0F, 2.0F, 3.0F};
+    std::array<int64_t, 4> labels{10, 40, 20, 30};
+    std::array<SparseVector, 4> vectors{};
+    vectors[0] = SparseVector{1, &term, &values[0]};
+    vectors[2] = SparseVector{1, &term, &values[2]};
+    vectors[3] = SparseVector{1, &term, &values[3]};
+    auto base = Dataset::Make()
+                    ->NumElements(4)
+                    ->SparseVectors(vectors.data())
+                    ->Ids(labels.data())
+                    ->Owner(false);
+
+    auto parameter = std::make_shared<SINDIV2Parameter>();
+    parameter->term_id_limit = 8;
+    parameter->window_size = 10000;
+    parameter->use_reorder = false;
+    parameter->term_io_parameter = std::make_shared<MemoryIOParameter>();
+    parameter->rerank_io_parameter = std::make_shared<MemoryBlockIOParameter>();
+    SINDIV2 index(parameter, common_param);
+    REQUIRE(index.Build(base) == std::vector<int64_t>{40});
+
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&vectors[0])->Owner(false);
+
+    // With timeout_ms=0, search should hit timeout
+    const std::string timeout_param = R"(
+        {
+            "sindi_v2":
+            {
+                "n_candidate": 20,
+                "query_prune_ratio": 0.0,
+                "term_prune_ratio": 0.0,
+                "timeout_ms": 0
+            }
+        })";
+    auto result = index.KnnSearch(query, 2, timeout_param, nullptr);
+    auto stats_json = JsonType::Parse(result->GetStatistics());
+    REQUIRE(stats_json.Contains("is_timeout"));
+    REQUIRE(stats_json["is_timeout"].GetBool() == true);
+
+    // Without timeout, search completes normally
+    const std::string normal_param = R"(
+        {
+            "sindi_v2":
+            {
+                "n_candidate": 20,
+                "query_prune_ratio": 0.0,
+                "term_prune_ratio": 0.0
+            }
+        })";
+    result = index.KnnSearch(query, 2, normal_param, nullptr);
+    stats_json = JsonType::Parse(result->GetStatistics());
+    REQUIRE(stats_json.Contains("is_timeout"));
+    REQUIRE(stats_json["is_timeout"].GetBool() == false);
+
+    auto range = index.RangeSearch(query, 100.0F, timeout_param, nullptr, 2);
+    stats_json = JsonType::Parse(range->GetStatistics());
+    REQUIRE(stats_json.Contains("is_timeout"));
+    REQUIRE(stats_json["is_timeout"].GetBool());
+    REQUIRE(range->GetDim() <= 2);
+
+    auto normal_range = index.RangeSearch(query, 100.0F, normal_param, nullptr, 2);
+    stats_json = JsonType::Parse(normal_range->GetStatistics());
+    REQUIRE(stats_json.Contains("is_timeout"));
+    REQUIRE_FALSE(stats_json["is_timeout"].GetBool());
+    REQUIRE(normal_range->GetDim() == 2);
+
+    const std::string generous_param = R"({"sindi_v2":{"n_candidate":20,
+        "query_prune_ratio":0.0,"term_prune_ratio":0.0,"timeout_ms":60000}})";
+    range = index.RangeSearch(query, 100.0F, generous_param, nullptr, 2);
+    stats_json = JsonType::Parse(range->GetStatistics());
+    REQUIRE_FALSE(stats_json["is_timeout"].GetBool());
+    REQUIRE(range->GetDim() == normal_range->GetDim());
+    for (int64_t i = 0; i < normal_range->GetDim(); ++i) {
+        REQUIRE(range->GetIds()[i] == normal_range->GetIds()[i]);
+        REQUIRE(range->GetDistances()[i] == normal_range->GetDistances()[i]);
     }
 }

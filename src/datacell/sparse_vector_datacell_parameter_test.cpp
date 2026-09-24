@@ -16,6 +16,7 @@
 #include "sparse_vector_datacell_parameter.h"
 
 #include "parameter_test.h"
+#include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
 #include "unittest.h"
 
 namespace vsag {
@@ -34,6 +35,31 @@ TEST_CASE("SparseVectorDataCellParameter ToJson Test", "[ut][SparseVectorDataCel
     auto json = JsonType::Parse(param_str);
     param->FromJson(json);
     ParameterTest::TestToJson(param);
+}
+
+TEST_CASE("SparseVectorDataCellParameter FP16 value type", "[ut][SparseVectorDataCellParameter]") {
+    auto fp16 = std::make_shared<SparseVectorDataCellParameter>();
+    fp16->FromJson(JsonType::Parse(R"({
+        "io_params": {"type": "memory_io"},
+        "quantization_params": {"type": "sparse", "value_type": "fp16"}
+    })"));
+    REQUIRE(fp16->quantizer_parameter->ToJson()[SPARSE_QUANTIZER_VALUE_TYPE_KEY].GetString() ==
+            QUANTIZATION_TYPE_VALUE_FP16);
+
+    auto restored = std::make_shared<SparseVectorDataCellParameter>();
+    restored->FromJson(fp16->ToJson());
+    REQUIRE(fp16->CheckCompatibility(restored));
+
+    auto fp32 = std::make_shared<SparseVectorDataCellParameter>();
+    fp32->FromJson(JsonType::Parse(R"({
+        "io_params": {"type": "memory_io"},
+        "quantization_params": {"type": "sparse"}
+    })"));
+    REQUIRE_FALSE(fp16->CheckCompatibility(fp32));
+
+    auto invalid = fp16->ToJson();
+    invalid[QUANTIZATION_PARAMS_KEY][SPARSE_QUANTIZER_VALUE_TYPE_KEY].SetString("bf16");
+    REQUIRE_THROWS(restored->FromJson(invalid));
 }
 
 }  // namespace vsag

@@ -408,22 +408,14 @@ DatasetPtr
 IVF::CalcDistancesById(const float* query,
                        const int64_t* ids,
                        int64_t count,
-                       bool calculate_precise_distance) const {
-    return this->CalDistanceById(query, ids, count, calculate_precise_distance);
-}
-
-DatasetPtr
-IVF::CalDistanceById(const float* query,
-                     const int64_t* ids,
-                     int64_t count,
-                     bool calculate_precise_distance,
-                     int64_t topk) const {
-    CHECK_ARGUMENT(count >= 0, "CalDistanceById count must be non-negative");
+                       bool calculate_precise_distance,
+                       int64_t topk) const {
+    CHECK_ARGUMENT(count >= 0, "CalcDistancesById count must be non-negative");
     const bool invalid_topk = topk != -1 && topk <= 0;
-    CHECK_ARGUMENT(not invalid_topk, "CalDistanceById topk must be -1 or positive");
+    CHECK_ARGUMENT(not invalid_topk, "CalcDistancesById topk must be -1 or positive");
     if (count > 0) {
-        CHECK_ARGUMENT(query != nullptr, "CalDistanceById query must not be null");
-        CHECK_ARGUMENT(ids != nullptr, "CalDistanceById ids must not be null");
+        CHECK_ARGUMENT(query != nullptr, "CalcDistancesById query must not be null");
+        CHECK_ARGUMENT(ids != nullptr, "CalcDistancesById ids must not be null");
     }
     const int64_t result_count = (topk == -1) ? count : std::min(topk, count);
     auto result = Dataset::Make();
@@ -446,8 +438,23 @@ IVF::CalDistanceById(const float* query,
         }
     }
     if (this->use_reorder_ && calculate_precise_distance && reorder_codes_ != nullptr) {
-        auto computer = this->reorder_codes_->FactoryComputer(query);
-        this->reorder_codes_->Query(distances, computer, inner_ids.data(), count);
+        Vector<InnerIdType> valid_ids(allocator_);
+        Vector<int64_t> positions(allocator_);
+        for (int64_t i = 0; i < count; ++i) {
+            if (validity[i]) {
+                valid_ids.push_back(inner_ids[i]);
+                positions.push_back(i);
+            }
+        }
+        if (not valid_ids.empty()) {
+            auto computer = this->reorder_codes_->FactoryComputer(query);
+            Vector<float> valid_distances(valid_ids.size(), allocator_);
+            this->reorder_codes_->Query(
+                valid_distances.data(), computer, valid_ids.data(), valid_ids.size());
+            for (uint64_t i = 0; i < positions.size(); ++i) {
+                distances[positions[i]] = valid_distances[i];
+            }
+        }
     } else if (this->use_reorder_ && calculate_precise_distance && precise_bucket_ != nullptr) {
         auto computer = this->precise_bucket_->FactoryComputer(query);
         Vector<BucketIdType> bucket_ids(allocator_);
@@ -495,6 +502,7 @@ IVF::CalDistanceById(const float* query,
 
 float
 IVF::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance) const {
+    CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
     std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
     auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
     if (not success) {

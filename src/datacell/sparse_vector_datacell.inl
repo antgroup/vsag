@@ -161,7 +161,20 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(LvalueOrRvalue<StreamReader
         // New 64-bit format. Layout written by Serialize().
         uint32_t version = 0;
         StreamReader::ReadObj(reader, version);
-        if (version != SERIALIZE_FORMAT_VERSION_V2) {
+        if (version == SERIALIZE_FORMAT_VERSION_V2) {
+            CHECK_ARGUMENT(not typed_quantizer().IsFP16(),
+                           "SparseVectorDataCell v2 payload requires fp32 sparse values");
+        } else if (version == SERIALIZE_FORMAT_VERSION_V3) {
+            uint8_t value_type = 0;
+            StreamReader::ReadObj(reader, value_type);
+            CHECK_ARGUMENT(value_type <= static_cast<uint8_t>(SparseQuantizerValueType::FP16),
+                           "invalid SparseVectorDataCell sparse value type");
+            const auto expected_value_type =
+                static_cast<uint8_t>(typed_quantizer().IsFP16() ? SparseQuantizerValueType::FP16
+                                                                : SparseQuantizerValueType::FP32);
+            CHECK_ARGUMENT(value_type == expected_value_type,
+                           "SparseVectorDataCell payload does not match sparse value_type");
+        } else {
             throw VsagException(
                 ErrorType::INVALID_ARGUMENT,
                 fmt::format("unsupported SparseVectorDataCell serialization version: {}", version));
@@ -173,6 +186,8 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(LvalueOrRvalue<StreamReader
         layout_.Locations().Deserialize(reader);
     } else {
         // Legacy 32-bit format. The uint32 we just read is the old current_offset_.
+        CHECK_ARGUMENT(not typed_quantizer().IsFP16(),
+                       "legacy SparseVectorDataCell payload requires fp32 sparse values");
         layout_.SetNextOffset(static_cast<uint64_t>(maybe_sentinel));
         layout_.Payload().Deserialize(reader);
         // Legacy offset_io_ holds an array of 8-byte LegacyDocLocation records. We
@@ -228,9 +243,14 @@ void
 SparseVectorDataCell<QuantTmpl, IOTmpl>::Serialize(StreamWriter& writer) {
     FlattenInterface::Serialize(writer);
     const uint32_t sentinel = SERIALIZE_FORMAT_SENTINEL;
-    const uint32_t version = SERIALIZE_FORMAT_VERSION_V2;
+    const uint32_t version =
+        typed_quantizer().IsFP16() ? SERIALIZE_FORMAT_VERSION_V3 : SERIALIZE_FORMAT_VERSION_V2;
     StreamWriter::WriteObj(writer, sentinel);
     StreamWriter::WriteObj(writer, version);
+    if (version == SERIALIZE_FORMAT_VERSION_V3) {
+        const uint8_t value_type = static_cast<uint8_t>(typed_quantizer().GetValueType());
+        StreamWriter::WriteObj(writer, value_type);
+    }
     StreamWriter::WriteObj(writer, layout_.GetNextOffset());
     layout_.Payload().Serialize(writer);
     layout_.Locations().Serialize(writer);
@@ -267,7 +287,7 @@ template <typename QuantTmpl, typename IOTmpl>
 void
 SparseVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerIdType idx) {
     auto sparse_vector = (const SparseVector*)vector;
-    uint64_t code_size = (static_cast<uint64_t>(sparse_vector->len_) * 2 + 1) * sizeof(uint32_t);
+    uint64_t code_size = typed_quantizer().GetCodeSizeByLength(sparse_vector->len_);
     if (code_size > std::numeric_limits<uint32_t>::max()) {
         throw VsagException(
             ErrorType::INVALID_ARGUMENT,
@@ -330,7 +350,6 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::GetSparseVectorByInnerId(
     auto lease = this->acquire_codes_by_id_no_lock(inner_id);
     const auto* codes = lease.Data();
     data->len_ = *reinterpret_cast<const uint32_t*>(codes);
-    const auto* entries = reinterpret_cast<const BufferEntry*>(codes + sizeof(uint32_t));
     if (data->len_ == 0) {
         data->ids_ = nullptr;
         data->vals_ = nullptr;
@@ -344,10 +363,7 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::GetSparseVectorByInnerId(
         data->ids_ = nullptr;
         throw;
     }
-    for (uint32_t i = 0; i < data->len_; ++i) {
-        data->ids_[i] = entries[i].id;
-        data->vals_[i] = entries[i].val;
-    }
+    typed_quantizer().DecodeSparseVector(codes, data->ids_, data->vals_);
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -403,8 +419,8 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::SparseVectorDataCell(
     auto offset_io =
         std::make_shared<MemoryBlockIO>(Options::Instance().block_size_limit(), allocator_);
     layout_.SetIO(std::move(offset_io), std::move(io));
-    this->max_code_size_ = std::max<uint64_t>(
-        sizeof(uint32_t), (static_cast<uint64_t>(common_param.dim_) * 2 + 1) * sizeof(uint32_t));
+    this->max_code_size_ =
+        typed_quantizer().GetCodeSizeByLength(static_cast<uint32_t>(common_param.dim_));
     this->max_capacity_ = 0;
     this->code_size_ = this->quantizer_->GetCodeSize();
 }

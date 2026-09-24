@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -23,6 +24,7 @@
 #include "vsag/allocator.h"
 #include "vsag/attribute.h"
 #include "vsag/constants.h"
+#include "vsag/search_metrics.h"
 
 namespace vsag {
 
@@ -338,9 +340,29 @@ public:
     Paths(const std::string& hierarchy_name, const std::string* paths) = 0;
 
     /**
+     * @brief Sets one or multiple paths per element for a named hierarchy.
+     *
+     * @details
+     * The outer vector must contain exactly NumElements() entries. Each non-empty inner vector
+     * contains the independent paths assigned to that element. An empty string represents the
+     * hierarchy root. The path strings use '/' to separate hierarchy levels.
+     *
+     * Unlike the pointer overload, the dataset stores this container by value, so its lifetime is
+     * independent of Owner().
+     *
+     * @param hierarchy_name The hierarchy name. An empty string targets the default hierarchy.
+     * @param paths Paths grouped by dataset element.
+     * @return DatasetPtr A shared pointer to the dataset with updated paths.
+     * @note This overload is non-virtual so extending the API does not change Dataset's vtable.
+     */
+    DatasetPtr
+    Paths(const std::string& hierarchy_name, std::vector<std::vector<std::string>> paths);
+
+    /**
      * @brief Retrieves the paths array of the dataset.
      *
      * @return const std::string* Pointer to the array of paths.
+     * @note Returns nullptr when the default hierarchy uses structured paths.
      */
     virtual const std::string*
     GetPaths() const = 0;
@@ -350,9 +372,25 @@ public:
      *
      * @param hierarchy_name The hierarchy name. An empty string targets the default hierarchy.
      * @return const std::string* Pointer to the array of paths.
+     * @note Returns nullptr when the hierarchy uses structured paths.
      */
     virtual const std::string*
     GetPaths(const std::string& hierarchy_name) const = 0;
+
+    /**
+     * @brief Retrieves paths grouped by dataset element for a named hierarchy.
+     *
+     * @details
+     * This overload normalizes both the legacy single-path representation and the structured
+     * multi-path representation into one non-empty path vector per dataset element.
+     *
+     * @param hierarchy_name The hierarchy name. An empty string targets the default hierarchy.
+     * @param paths Output paths grouped by dataset element. Cleared when the hierarchy is absent.
+     * @return true when the hierarchy is present, otherwise false.
+     * @note This overload is non-virtual so extending the API does not change Dataset's vtable.
+     */
+    bool
+    GetPaths(const std::string& hierarchy_name, std::vector<std::vector<std::string>>& paths) const;
 
     /**
      * @brief Sets a named array of uint32 metadata values.
@@ -457,6 +495,15 @@ public:
      */
     virtual std::vector<std::string>
     GetStatistics(const std::vector<std::string>& stat_keys) const = 0;
+
+    /**
+     * @brief Returns the typed search-statistics snapshot when supported and collected.
+     *
+     * @return std::nullopt when statistics were not collected or when the Dataset implementation
+     * does not support typed search statistics.
+     */
+    [[nodiscard]] std::optional<SearchResultMetrics>
+    GetSearchMetrics() const;
 
     /**
      * @brief Sets the Reasoning report for the dataset.

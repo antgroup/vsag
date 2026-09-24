@@ -50,6 +50,7 @@ jobs:
             coverage:
               - '.github/codecov.yml'
               - '.github/workflows/coverage.yml'
+              - '.github/workflows/pr-simd-coverage.yml'
               - '.github/workflows/pr-ci.yml'
               - 'CMakeLists.txt'
               - 'Makefile'
@@ -59,6 +60,7 @@ jobs:
               - 'src/**/CMakeLists.txt'
               - 'tests/CMakeLists.txt'
               - 'tests/scripts/coverage_diagnostics_test.py'
+              - 'tests/scripts/simd_coverage_test.py'
             python:
               - 'python/**'
               - 'python_bindings/**'
@@ -93,6 +95,8 @@ jobs:
       - name: Test coverage configuration
         run: |
           python3 -m unittest tests/scripts/coverage_diagnostics_test.py
+          python3 -m unittest tests/scripts/simd_coverage_test.py
+          bash -n scripts/coverage/run_simd_coverage.sh
           bash -n scripts/coverage/collect_cpp_coverage.sh
           bash -n scripts/coverage/check_cov.sh
           bash -n scripts/testing/test_parallel_bg.sh
@@ -117,83 +121,45 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts/linters -p 'test_changed_source_filter.py'
           python3 -m unittest tests/scripts/configure_git_safe_directory_test.py
+          python3 -m unittest tests/scripts/test_build_benchmark_workflow.py
+          python3 -m unittest tests/scripts/test_collect_build_metrics.py
+          python3 -m unittest tests/scripts/test_dependency_workflows.py
       - name: Prepare Host
         run: |
           sudo env VSAG_INSTALL_INTEL_MKL=OFF bash ./scripts/deps/install_deps_ubuntu.sh
-          sudo apt-get install -y clang-tidy-15 time
+          sudo apt-get install -y ccache clang-tidy-15 time
           ninja --version
           cmake --version
           g++ --version
-      - name: Start Dependency Preparation Timer
-        id: dependency-preparation-start
-        run: echo "started_ns=$(date +%s%N)" >> "$GITHUB_OUTPUT"
       - name: Prepare FetchContent Sources
         uses: ./.github/actions/prepare-fetchcontent
         with:
           include-tests: "true"
           include-tools: "true"
-      - name: Cache ExternalProject Archives
-        uses: actions/cache@v4
+      - name: Restore ExternalProject Archives
+        uses: actions/cache/restore@v4
         with:
           path: .ci-downloads
           key: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
           restore-keys: |
             external-${{ runner.os }}-${{ runner.arch }}-
-      - name: Finish Dependency Preparation Timer
-        id: dependency-preparation
-        env:
-          STARTED_NS: ${{ steps.dependency-preparation-start.outputs.started_ns }}
-        run: |
-          python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import os
-          import time
-
-          elapsed = (time.time_ns() - int(os.environ["STARTED_NS"])) / 1_000_000_000
-          print(f"seconds={elapsed:.3f}")
-          PY
-      - name: Make Asan and collect build metrics
+      - name: Make Asan
         # The source-build OpenBLAS path remains covered by daily_test.yml.
-        env:
-          BUILD_BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
-          CCACHE_DIR: ${{ github.workspace }}/.build-metrics-ccache
-          COMPILER_CACHE_KEY: build-metrics-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
-          DEPENDENCY_CACHE_KEY: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
-          DEPENDENCY_PREPARATION_SECONDS: ${{ steps.dependency-preparation.outputs.seconds }}
         run: |
           export CMAKE_GENERATOR="Ninja"
           export CMAKE_EXPORT_COMPILE_COMMANDS=ON
           export EXTRA_DEFINED="-DVSAG_USE_SYSTEM_OPENBLAS=ON"
           export VSAG_ENABLE_EXAMPLES=ON
           export VSAG_ENABLE_TOOLS=ON
-          COMPILER=$(g++ -dumpfullversion -dumpversion)
-          python3 scripts/collect_build_metrics.py \
-            --base-sha "$BUILD_BASE_SHA" \
-            --commit-sha "$GITHUB_SHA" \
-            --compiler "gcc-$COMPILER" \
-            --compiler-cache-key "$COMPILER_CACHE_KEY-gcc-$COMPILER" \
-            --dependency-cache-key "$DEPENDENCY_CACHE_KEY" \
-            --dependency-preparation-seconds "$DEPENDENCY_PREPARATION_SECONDS" \
-            --jobs 3 \
-            --clear-ccache
-      - name: Append build metrics job summary
+          # Reset counters, not cached objects. ccache uses its default directory
+          # on this disposable GitHub-hosted VM; no compiler cache is restored or saved.
+          ccache --zero-stats
+          /usr/bin/time -p make asan COMPILE_JOBS=3
+      - name: Show compiler cache diagnostics
         if: always()
         run: |
-          if [ -f build-metrics/job-summary.md ]; then
-            cat build-metrics/job-summary.md >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "## Build performance metrics" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "The collector failed before producing a report." >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Upload build metrics
-        if: always()
-        uses: actions/upload-artifact@v5
-        with:
-          path: ./build-metrics
-          name: build-performance-metrics-${{ github.run_id }}
-          compression-level: 6
-          retention-days: 14
-          if-no-files-found: warn
+          ccache --show-stats --verbose || ccache --show-stats || true
+          ccache --print-stats || true
       - name: Get changed source files
         id: changed-srcs
         env:

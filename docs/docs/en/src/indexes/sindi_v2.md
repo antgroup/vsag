@@ -62,6 +62,7 @@ auto result = index->KnnSearch(
     query, 10,
     R"({"sindi_v2": {
         "n_candidate": 100,
+        "filter_callback_limit": 10000,
         "query_prune_ratio": 0.1,
         "term_prune_ratio": 0.2,
         "term_retain_threshold": 10000
@@ -80,7 +81,7 @@ Build parameters live under `index_param`.
 | `doc_prune_ratio` | float | `0.0` | Fraction of lowest-weight document terms removed during build (`[0.0, 1.0)`). |
 | `use_quantization` | bool or string | `false` | `false` stores FP32, `true` stores SQ8, and `"fp16"` stores FP16 values. |
 | `use_reorder` | bool | `false` | Store high-precision vectors and rerank coarse candidates. |
-| `rerank_type` | string | `"fp32"` | Rerank storage type: `fp32` or `dmq8`. |
+| `rerank_type` | string | `"fp32"` | Rerank storage type: `fp32`, `fp16`, or `dmq8`. FP16 stores document values in half precision and scores in FP32. |
 | `dmq_shared_codebook_threshold` | int | `1024` | Low-frequency term threshold for the shared DMQ codebook. |
 | `remap_term_ids` | bool | `false` | Compact sparse or widely separated external term IDs. |
 | `avg_doc_term_length` | int | `100` | Memory-estimation hint only. |
@@ -93,7 +94,8 @@ File-backed `term_io` supports `mmap_io`, `buffer_io`, and `async_io`, and
 requires `file_path`. If a file-backed `rerank_io` omits `file_path`, VSAG
 derives it as `<term_io.file_path>.rerank`.
 
-`rerank_layout > 0` requires `use_reorder: true`. `rerank_type: "dmq8"`
+`rerank_type: "fp16"` requires `use_reorder: true` and supports the same rerank I/O and layout
+options as `fp32`. `rerank_layout > 0` requires `use_reorder: true`. `rerank_type: "dmq8"`
 requires `rerank_layout: 0` and the default `block_memory_io` rerank backend.
 
 ### Host filtering
@@ -127,6 +129,7 @@ Search parameters live under `{"sindi_v2": {...}}`.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `n_candidate` | int | `0` | Coarse candidate count; `0` uses the index default derived from `topk`. |
+| `filter_callback_limit` | uint64 | `0` | Maximum user `Filter::CheckValid` callback invocations for one filtered search. `0` disables the limit. Reaching a positive limit stops candidate and window scanning after processing the final callback result and returns the candidates accepted so far, so the result may be partial. The limit applies to the regular KNN and range-search APIs. |
 | `query_prune_ratio` | float | `0.0` | Fraction of the lowest-weight query terms skipped (`[0.0, 1.0)`). |
 | `term_prune_ratio` | float | `0.0` | Fraction of the lowest stored values skipped in each term list (`[0.0, 1.0)`). |
 | `term_retain_threshold` | uint64 | `0` | Maximum postings for one term across all windows. `0` disables the limit; positive values allow each non-empty window posting list to scan at most `max(1, floor(threshold / window_count))` postings. |

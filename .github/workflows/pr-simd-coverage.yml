@@ -1,0 +1,77 @@
+name: PR SIMD Coverage
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/simd/**'
+      # make cov configures the aggregate library/test build.
+      - 'Makefile'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'src/**/CMakeLists.txt'
+      - 'src/version.h.in'
+      - 'tests/CMakeLists.txt'
+      - 'tests/test_main.cpp'
+      - 'tests/fixtures/**'
+      # Keep the controller's dependency-comparability guard reachable.
+      - 'extern/**'
+      - '.github/actions/prepare-fetchcontent/**'
+      - '.github/workflows/pr-simd-coverage.yml'
+      - 'scripts/coverage/**'
+      - 'tests/scripts/simd_coverage_test.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-simd-coverage-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  simd-coverage:
+    name: SIMD scoped coverage (not full project)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    container:
+      image: vsaglib/vsag:ci-x86-openblas
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-fetchcontent
+        with:
+          include-tests: 'true'
+      - name: Install lcov
+        run: |
+          apt-get update
+          apt-get install -y libcapture-tiny-perl libdatetime-perl curl
+          # lcov v2.3, pinned to its immutable commit and archive checksum.
+          curl --fail --location --retry 3 \
+            https://github.com/linux-test-project/lcov/archive/79595562392671d4a30afbc1100033a8b27dc1c7.tar.gz \
+            --output /tmp/lcov.tar.gz
+          echo '4d567d920cd6e1ae9c941e285f00d0b564733af91c4d0f2482d7481855b9f955  /tmp/lcov.tar.gz' | sha256sum --check --strict
+          mkdir /tmp/lcov
+          tar -xzf /tmp/lcov.tar.gz --strip-components=1 -C /tmp/lcov
+          make -C /tmp/lcov SHELL=/bin/bash install
+      - name: Compare base and merge candidate
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: bash scripts/coverage/run_simd_coverage.sh "$BASE_SHA" "$HEAD_SHA"
+      - name: Publish scoped result
+        if: always()
+        run: |
+          if [ -f simd-coverage/summary.md ]; then
+            cat simd-coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'SIMD coverage unavailable: build, test, or collection did not finish. No passing result is claimed.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr-simd-coverage
+          path: simd-coverage/
+          retention-days: 14
+          if-no-files-found: warn

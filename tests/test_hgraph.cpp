@@ -19,6 +19,7 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <chrono>
 #include <cstring>
+#include <future>
 #include <limits>
 #include <random>
 #include <sstream>
@@ -32,9 +33,13 @@
 #include "storage/streaming_serialization_test_utils.h"
 #include "test_index.h"
 #include "typing.h"
+#include "vsag/deserialize_reader.h"
+#include "vsag/engine.h"
 #include "vsag/filter.h"
 #include "vsag/options.h"
+#include "vsag/resource.h"
 #include "vsag/search_request.h"
+#include "vsag/serialize_writer.h"
 
 namespace fixtures {
 
@@ -44,6 +49,7 @@ public:
     std::vector<std::pair<std::string, float>> test_cases;
     std::vector<std::string> metric_types;
     uint64_t base_count;
+    std::string graph_type{"nsw"};
 };
 
 using HGraphResourcePtr = std::shared_ptr<HGraphTestResource>;
@@ -78,6 +84,9 @@ public:
 
     static HGraphResourcePtr
     GetResource(bool sample = true);
+
+    static HGraphResourcePtr
+    GetPiPNNResource();
 
     static bool
     IsRaBitQ(const std::string& quantization_str);
@@ -168,6 +177,17 @@ HGraphTestIndex::GetResource(bool sample) {
         resource->metric_types = fixtures::RandomSelect<std::string>({"ip", "l2", "cosine"}, 2);
         resource->base_count = HGraphTestIndex::base_count * 3;
     }
+    return resource;
+}
+
+HGraphResourcePtr
+HGraphTestIndex::GetPiPNNResource() {
+    auto resource = std::make_shared<HGraphTestResource>();
+    resource->dims = {128};
+    resource->test_cases = {{"fp32", 0.99F}};
+    resource->metric_types = {"l2"};
+    resource->base_count = HGraphTestIndex::base_count;
+    resource->graph_type = "pipnn";
     return resource;
 }
 
@@ -320,10 +340,13 @@ HGraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
     TestFilterSearch(index, dataset, search_param, recall, true, true);
     TestCheckIdExist(index, dataset);
-    TestCalcDistanceById(index, dataset, 1e-5, expect_success);
+    // Sparse dot products accumulate in a different order from the ground-truth backend.
+    const float distance_tolerance = dataset->query_->GetSparseVectors() != nullptr ? 1e-4F : 1e-5F;
+    if (expect_success) {
+        TestStoredDistanceConsistency(index, dataset);
+    }
     TestGetRawVectorByIds(index, dataset, expect_success);
-    TestBatchCalcDistanceById(index, dataset, 1e-5, expect_success);
-    TestMultiQueryBatchCalcDistanceById(index, dataset, 1e-5, expect_success);
+    TestMultiQueryBatchCalcDistanceById(index, dataset, distance_tolerance, expect_success);
     TestSearchAllocator(index, dataset, search_param, recall, true);
     TestUpdateVector(index, dataset, search_param, false);
     TestUpdateId(index, dataset, search_param, true);
@@ -416,11 +439,149 @@ ForEachHGraphCase(const fixtures::HGraphResourcePtr& resource, const Cases& test
     }
 }
 
+class CountingThreadPool : public vsag::ThreadPool {
+public:
+    explicit CountingThreadPool(std::shared_ptr<vsag::ThreadPool> delegate)
+        : delegate_(std::move(delegate)) {
+    }
+
+    void
+    WaitUntilEmpty() override {
+        delegate_->WaitUntilEmpty();
+    }
+
+    void
+    SetQueueSizeLimit(uint64_t limit) override {
+        delegate_->SetQueueSizeLimit(limit);
+    }
+
+    void
+    SetPoolSize(uint64_t limit) override {
+        delegate_->SetPoolSize(limit);
+    }
+
+    std::future<void>
+    Enqueue(std::function<void(void)> task) override {
+        submissions_.fetch_add(1, std::memory_order_relaxed);
+        return delegate_->Enqueue(std::move(task));
+    }
+
+    [[nodiscard]] uint64_t
+    Submissions() const {
+        return submissions_.load(std::memory_order_relaxed);
+    }
+
+private:
+    std::shared_ptr<vsag::ThreadPool> delegate_;
+    std::atomic<uint64_t> submissions_{0};
+};
+
+class ChunkedBufferWriter : public vsag::SerializeWriter {
+public:
+    void
+    Write(const char* data, uint64_t size) override {
+        bytes_.append(data, size);
+    }
+
+    std::string bytes_;
+};
+
+class FramedChunkedBufferWriter : public vsag::SerializeWriter {
+public:
+    void
+    Write(const char* data, uint64_t size) override {
+        if (in_frame_) {
+            frame_.append(data, size);
+        } else {
+            bytes_.append(data, size);
+        }
+    }
+
+    [[nodiscard]] std::string
+    GetCompressorName() const override {
+        return "test-frame";
+    }
+
+    void
+    BeginCompressedFrame() override {
+        REQUIRE(not in_frame_);
+        in_frame_ = true;
+        frame_.clear();
+    }
+
+    uint64_t
+    EndCompressedFrame() override {
+        REQUIRE(in_frame_);
+        in_frame_ = false;
+        const uint64_t payload_size = frame_.size();
+        bytes_.append(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+        bytes_.append(frame_);
+        ++frame_count_;
+        return sizeof(payload_size) + payload_size;
+    }
+
+    std::string bytes_;
+    uint64_t frame_count_{0};
+
+private:
+    bool in_frame_{false};
+    std::string frame_;
+};
+
+class ChunkedBufferReader : public vsag::DeserializeReader {
+public:
+    explicit ChunkedBufferReader(std::string bytes) : bytes_(std::move(bytes)) {
+    }
+
+    [[nodiscard]] uint64_t
+    Size() const override {
+        return bytes_.size();
+    }
+
+    void
+    Read(uint64_t offset, uint64_t len, void* dest) override {
+        if (len > bytes_.size() or offset > bytes_.size() - len) {
+            throw std::runtime_error("chunked functional-test read is out of range");
+        }
+        std::memcpy(dest, bytes_.data() + offset, len);
+    }
+
+protected:
+    const std::string bytes_;
+};
+
+class FramedChunkedBufferReader : public ChunkedBufferReader {
+public:
+    using ChunkedBufferReader::ChunkedBufferReader;
+
+    void
+    ReadDecompressed(uint64_t offset,
+                     uint64_t compressed_size,
+                     const std::function<void(std::istream&)>& consume) override {
+        uint64_t payload_size = 0;
+        Read(offset, sizeof(payload_size), &payload_size);
+        if (compressed_size != sizeof(payload_size) + payload_size) {
+            throw std::runtime_error("compressed frame size does not match its header");
+        }
+        std::string payload(payload_size, '\0');
+        Read(offset + sizeof(payload_size), payload_size, payload.data());
+        std::istringstream stream(payload, std::ios::in | std::ios::binary);
+        consume(stream);
+    }
+};
+
 using vsag::test::EraseStreamingBlock;
 using vsag::test::InsertUnknownStreamingBlock;
 using vsag::test::SetStreamingBlockVersion;
 using vsag::test::SetStreamingMajorVersion;
 using vsag::test::SetStreamingMinorVersion;
+
+std::string
+WithHGraphGraphType(const std::string& parameters, const std::string& graph_type) {
+    auto parsed = vsag::JsonType::Parse(parameters);
+    parsed[vsag::INDEX_PARAM]["graph_type"].SetString(graph_type);
+    return parsed.Dump();
+}
 
 struct HGraphStreamingFixture {
     std::string param;
@@ -560,9 +721,9 @@ RequireHGraphStreamingDeserializeFails(const std::string& param, const std::stri
 }
 
 void
-RequireHGraphStreamingSearchMatches(const fixtures::TestIndex::IndexPtr& expected,
-                                    const fixtures::TestIndex::IndexPtr& actual,
-                                    const fixtures::TestDatasetPtr& dataset) {
+RequireHGraphSearchMatches(const fixtures::TestIndex::IndexPtr& expected,
+                           const fixtures::TestIndex::IndexPtr& actual,
+                           const fixtures::TestDatasetPtr& dataset) {
     auto query = fixtures::get_one_query(dataset->query_, 0);
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     auto expected_result = expected->KnnSearch(query, 10, search_param);
@@ -578,10 +739,12 @@ RequireHGraphStreamingSearchMatches(const fixtures::TestIndex::IndexPtr& expecte
 }
 
 TEST_CASE("HGraph conjugate graph feedback, update, and serialization",
-          "[ft][hgraph][conjugate_graph]") {
+          "[ft][hgraph][conjugate_graph][pipnn]") {
     using namespace fixtures;
     constexpr int64_t dim = 2;
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "fp32");
+    build_param.graph_type = graph_type;
     build_param.thread_count = 1;
     build_param.use_attr_filter = true;
     auto param_json =
@@ -708,10 +871,12 @@ TEST_CASE("HGraph conjugate graph feedback, update, and serialization",
 }
 
 TEST_CASE("HGraph feedback exact search is safe during concurrent Add",
-          "[ft][hgraph][conjugate_graph][concurrent]") {
+          "[ft][hgraph][conjugate_graph][concurrent][pipnn]") {
     using namespace fixtures;
     constexpr int64_t dim = 2;
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "fp32");
+    build_param.graph_type = graph_type;
     build_param.thread_count = 1;
     auto param_json =
         vsag::JsonType::Parse(HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
@@ -774,13 +939,15 @@ TEST_CASE("HGraph feedback exact search is safe during concurrent Add",
 }
 
 TEST_CASE("HGraph conjugate graph does not widen range reorder",
-          "[ft][hgraph][conjugate_graph][range]") {
+          "[ft][hgraph][conjugate_graph][range][pipnn]") {
     const auto params = R"({
         "dtype":"float32", "metric_type":"l2", "dim":1,
         "index_param":{"base_quantization_type":"sq8","precise_quantization_type":"fp32",
         "max_degree":16,"ef_construction":32,"use_reorder":true,"use_conjugate_graph":true}
     })";
-    auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index =
+        vsag::Factory::CreateIndex("hgraph", WithHGraphGraphType(params, graph_type)).value();
     constexpr int64_t count = 20;
     std::vector<float> vectors(count);
     std::vector<int64_t> ids(count);
@@ -807,12 +974,14 @@ std::string
 MakeHGraphQueryComputerCountParam(const std::string& quantization,
                                   const std::string& reorder_source,
                                   bool store_raw_vector = false,
-                                  int build_thread_count = 4) {
+                                  int build_thread_count = 4,
+                                  const std::string& graph_type = "nsw") {
     using namespace fixtures;
     HGraphTestIndex::HGraphBuildParam build_param("l2", 16, quantization);
     build_param.thread_count = build_thread_count;
     build_param.graph_io_type = "memory_io";
     build_param.store_raw_vector = store_raw_vector;
+    build_param.graph_type = graph_type;
 
     auto param =
         vsag::JsonType::Parse(HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
@@ -833,20 +1002,32 @@ MakeHGraphQueryComputerCountParam(const std::string& quantization,
         helper(test_index, resource);                                    \
     }
 
+#define HGRAPH_PR_DAILY_CASE_WITH_PIPNN(title, tags, helper)             \
+    HGRAPH_PR_DAILY_CASE(title, tags, helper)                            \
+    TEST_CASE("(PR) " title " PiPNN", tags "[pipnn][pr]") {              \
+        auto test_index = std::make_shared<fixtures::HGraphTestIndex>(); \
+        auto resource = test_index->GetPiPNNResource();                  \
+        helper(test_index, resource);                                    \
+    }
+
 }  // namespace
 
 TEST_CASE("(PR) HGraph query computer count follows cell identity",
-          "[ft][hgraph][query_computer][pr]") {
+          "[ft][hgraph][query_computer][pipnn][pr]") {
     using namespace fixtures;
     constexpr int64_t kDim = 16;
     // HGraph's fixed level RNG samples route-layer nodes within this prefix.
     constexpr uint64_t kBaseCount = 200;
     constexpr int64_t kResultSize = 10;
     const bool precise_reorder = GENERATE(false, true);
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     INFO(fmt::format("reorder_source={}", precise_reorder ? "precise" : "base"));
 
     auto param = MakeHGraphQueryComputerCountParam(precise_reorder ? "fp32,fp32,memory_io" : "fp32",
-                                                   precise_reorder ? "precise" : "base");
+                                                   precise_reorder ? "precise" : "base",
+                                                   false,
+                                                   4,
+                                                   graph_type);
     auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
     auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(kDim, kBaseCount, "l2");
     TestIndex::TestBuildIndex(index, dataset, true);
@@ -931,11 +1112,12 @@ TEST_CASE("(PR) HGraph query computer count follows cell identity",
 }
 
 TEST_CASE("(PR) HGraph reasoning query computer count follows raw cell identity",
-          "[ft][hgraph][query_computer][reasoning][pr]") {
+          "[ft][hgraph][query_computer][reasoning][pipnn][pr]") {
     using namespace fixtures;
     constexpr int64_t kDim = 16;
     constexpr uint64_t kBaseCount = 200;
     constexpr int64_t kResultSize = 10;
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     constexpr const char* kSearchParam = R"({
         "hgraph": {
             "ef_search": 32,
@@ -960,7 +1142,7 @@ TEST_CASE("(PR) HGraph reasoning query computer count follows raw cell identity"
         DYNAMIC_SECTION("quantization=" << test_case.quantization
                                         << ", reorder_source=" << test_case.reorder_source) {
             auto param = MakeHGraphQueryComputerCountParam(
-                test_case.quantization, test_case.reorder_source, true);
+                test_case.quantization, test_case.reorder_source, true, 4, graph_type);
             auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
             auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(kDim, kBaseCount, "l2");
             TestIndex::TestBuildIndex(index, dataset, true);
@@ -984,18 +1166,20 @@ TEST_CASE("(PR) HGraph reasoning query computer count follows raw cell identity"
 }
 
 TEST_CASE("(PR) HGraph parallel search falls back without an executor",
-          "[ft][hgraph][parallel_fallback][pr]") {
+          "[ft][hgraph][parallel_fallback][pipnn][pr]") {
     using namespace fixtures;
     constexpr int64_t kDim = 16;
     constexpr uint64_t kBaseCount = 200;
     constexpr int64_t kResultSize = 10;
     const bool precise_reorder = GENERATE(false, true);
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     INFO(fmt::format("reorder_source={}", precise_reorder ? "precise" : "base"));
 
     auto param = MakeHGraphQueryComputerCountParam(precise_reorder ? "fp32,fp32,memory_io" : "fp32",
                                                    precise_reorder ? "precise" : "base",
                                                    false,
-                                                   1);
+                                                   1,
+                                                   graph_type);
     auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
     auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(kDim, kBaseCount, "l2");
     TestIndex::TestBuildIndex(index, dataset, true);
@@ -1307,6 +1491,7 @@ TestHGraphBuildAndContinueAdd(const fixtures::HGraphTestIndexPtr& test_index,
             RunWithGeneratedBlockSizeLimit([&] {
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
+                build_param.graph_type = resource->graph_type;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
@@ -1318,9 +1503,9 @@ TestHGraphBuildAndContinueAdd(const fixtures::HGraphTestIndexPtr& test_index,
         });
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Build & ContinueAdd Test",
-                     "[ft][build][hgraph]",
-                     TestHGraphBuildAndContinueAdd)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Build & ContinueAdd Test",
+                                "[ft][build][hgraph]",
+                                TestHGraphBuildAndContinueAdd)
 
 static void
 TestHGraphFactor(const fixtures::HGraphTestIndexPtr& test_index,
@@ -1351,6 +1536,7 @@ TestHGraphFactor(const fixtures::HGraphTestIndexPtr& test_index,
                 vsag::Options::Instance().set_block_size_limit(size);
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
+                build_param.graph_type = resource->graph_type;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
@@ -1370,6 +1556,12 @@ TestHGraphFactor(const fixtures::HGraphTestIndexPtr& test_index,
 TEST_CASE("HGraph Factor Test", "[ft][factory][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
+    TestHGraphFactor(test_index, resource);
+}
+
+TEST_CASE("HGraph Factor Test PiPNN", "[ft][factory][hgraph][pipnn][pr]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetPiPNNResource();
     TestHGraphFactor(test_index, resource);
 }
 
@@ -1412,6 +1604,51 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
     auto param = GenerateHGraphBuildParametersString(build_param);
     auto index = TestFactory(name, param, true);
     auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+    auto batch_query = vsag::Dataset::Make();
+    batch_query->NumElements(2)
+        ->Dim(dataset->query_->GetDim())
+        ->Float32Vectors(dataset->query_->GetFloat32Vectors())
+        ->Owner(false);
+    auto batch_result = index->KnnSearch(batch_query, 10, search_param);
+    REQUIRE(batch_result.has_value());
+    REQUIRE(batch_result.value()->GetNumElements() == batch_query->GetNumElements());
+    // Batch KNN preserves requested row width on an empty index; every
+    // slot is padding rather than dropping the two-query shape.
+    REQUIRE(batch_result.value()->GetDim() == 10);
+    for (int64_t i = 0; i < 20; ++i) {
+        REQUIRE(batch_result.value()->GetIds()[i] == -1);
+        REQUIRE(batch_result.value()->GetDistances()[i] == std::numeric_limits<float>::infinity());
+    }
+
+    auto removed_index = TestFactory(name, param, true);
+    TestIndex::TestBuildIndex(removed_index, dataset, true);
+    std::vector<int64_t> removed_ids(dataset->base_->GetIds(),
+                                     dataset->base_->GetIds() + dataset->base_->GetNumElements());
+    auto remove_result = removed_index->Remove(removed_ids, vsag::RemoveMode::MARK_REMOVE);
+    REQUIRE(remove_result.has_value());
+    REQUIRE(remove_result.value() == removed_ids.size());
+    auto removed_batch_result = removed_index->KnnSearch(batch_query, 10, search_param);
+    REQUIRE(removed_batch_result.has_value());
+    REQUIRE(removed_batch_result.value()->GetNumElements() == batch_query->GetNumElements());
+    // Batch KNN preserves requested row width on an empty index; every
+    // slot is padding rather than dropping the two-query shape.
+    REQUIRE(removed_batch_result.value()->GetDim() == 10);
+    for (int64_t i = 0; i < 20; ++i) {
+        REQUIRE(removed_batch_result.value()->GetIds()[i] == -1);
+        REQUIRE(removed_batch_result.value()->GetDistances()[i] ==
+                std::numeric_limits<float>::infinity());
+    }
+
+    vsag::SearchRequest batch_range_request;
+    batch_range_request.mode_ = vsag::SearchMode::RANGE_SEARCH;
+    batch_range_request.query_ = batch_query;
+    batch_range_request.radius_ = 10.0F;
+    batch_range_request.limited_size_ = 1;
+    batch_range_request.params_str_ = search_param;
+    auto batch_range_result = index->SearchWithRequest(batch_range_request);
+    REQUIRE_FALSE(batch_range_result.has_value());
+    auto direct_batch_range_result = index->RangeSearch(batch_query, 10.0F, search_param, 1);
+    REQUIRE_FALSE(direct_batch_range_result.has_value());
     TestGetMinAndMaxId(index, dataset, false);
     TestKnnSearch(index, dataset, search_param, recall, false);
     TestKnnSearchIter(index, dataset, search_param, recall, false);
@@ -1457,6 +1694,7 @@ TestHGraphBuild(const fixtures::HGraphTestIndexPtr& test_index,
             RunWithGeneratedBlockSizeLimit([&] {
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
+                build_param.graph_type = resource->graph_type;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
 
@@ -1470,7 +1708,101 @@ TestHGraphBuild(const fixtures::HGraphTestIndexPtr& test_index,
         });
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Build Test", "[ft][build][hgraph]", TestHGraphBuild)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Build Test", "[ft][build][hgraph]", TestHGraphBuild)
+
+TEST_CASE("HGraph PiPNN reuses core HGraph build checks", "[ft][build][hgraph][pipnn][pr]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 128;
+    constexpr uint64_t count = 600;
+    const auto quantization = GENERATE(
+        std::string("fp32"), std::string("sq8"), std::string("rabitq,sq8,block_memory_io,32,1"));
+    const auto graph_storage = GENERATE(std::string("flat"), std::string("compressed"));
+    const auto metric_type = GENERATE(std::string("l2"), std::string("ip"), std::string("cosine"));
+    CAPTURE(quantization, graph_storage, metric_type);
+
+    HGraphTestIndex::HGraphBuildParam build_param(metric_type, dim, quantization);
+    build_param.graph_type = "pipnn";
+    build_param.graph_storage = graph_storage;
+    build_param.thread_count = 4;
+    build_param.store_raw_vector = true;
+    const auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim, count, metric_type);
+    const auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
+
+    TestIndex::TestBuildIndex(index, dataset, true);
+    TestIndex::TestExportIDs(index, dataset);
+    const float recall = quantization == "fp32" ? 0.99F : quantization == "sq8" ? 0.95F : 0.3F;
+    TestIndex::TestKnnSearch(index, dataset, search_param, recall, true);
+
+    auto restored = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    TestIndex::TestSerializeBinarySet(index, restored, dataset, search_param, true);
+}
+
+TEST_CASE("HGraph PiPNN supports remove after build", "[ft][hgraph][remove][pipnn][pr]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 128;
+    constexpr uint64_t count = 200;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "fp32");
+    build_param.graph_type = "pipnn";
+    build_param.support_remove = true;
+    build_param.thread_count = 4;
+    const auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim, count, "l2");
+    REQUIRE(index->Build(dataset->base_).has_value());
+    const auto removed_label = dataset->base_->GetIds()[0];
+    auto remove_result = index->Remove(removed_label, vsag::RemoveMode::MARK_REMOVE);
+    REQUIRE(remove_result.has_value());
+    REQUIRE(remove_result.value() == 1);
+    REQUIRE_FALSE(index->CheckIdExist(removed_label));
+}
+
+TEST_CASE("HGraph PiPNN preserves duplicate-vector search quality",
+          "[ft][build][hgraph][duplicate][pipnn][pr]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 128;
+    constexpr uint64_t count = 1000;
+    const auto graph_storage = GENERATE(std::string("flat"), std::string("compressed"));
+    const auto quantization = GENERATE(
+        std::string("fp32"), std::string("sq8"), std::string("rabitq,sq8,block_memory_io,32,1"));
+    CAPTURE(graph_storage, quantization);
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", dim, quantization);
+    build_param.graph_type = "pipnn";
+    build_param.graph_storage = graph_storage;
+    build_param.support_duplicate = true;
+    build_param.thread_count = 4;
+    const auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDuplicateDataset(dim, count, "l2");
+    const auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
+
+    TestIndex::TestBuildDuplicateIndex(index, dataset, "prefix", true);
+    auto duplicate_query = vsag::Dataset::Make();
+    duplicate_query->NumElements(1)
+        ->Dim(dim)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+    for (const int64_t search_thread_count : {1, 2}) {
+        const auto duplicate_search_param =
+            fmt::format(R"({{"hgraph":{{"ef_search":200,"parallel_search_thread_count":{}}}}})",
+                        search_thread_count);
+        auto duplicate_result = index->KnnSearch(duplicate_query, 10, duplicate_search_param);
+        REQUIRE(duplicate_result.has_value());
+        REQUIRE(duplicate_result.value()->GetDim() == 10);
+        const auto duplicate_distance = duplicate_result.value()->GetDistances()[0];
+        for (int64_t i = 0; i < duplicate_result.value()->GetDim(); ++i) {
+            REQUIRE(std::abs(duplicate_result.value()->GetDistances()[i] - duplicate_distance) <=
+                    2e-6F);
+        }
+    }
+    const float recall = quantization == "fp32" ? 0.99F : quantization == "sq8" ? 0.95F : 0.3F;
+    TestIndex::TestKnnSearch(index, dataset, search_param, recall, true);
+    auto restored = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    TestIndex::TestSerializeBinarySet(index, restored, dataset, search_param, true);
+}
+
 static void
 TestHGraphWithAttr(const fixtures::HGraphTestIndexPtr& test_index,
                    const fixtures::HGraphResourcePtr& resource) {
@@ -1487,6 +1819,7 @@ TestHGraphWithAttr(const fixtures::HGraphTestIndexPtr& test_index,
             RunWithGeneratedBlockSizeLimit([&] {
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
+                build_param.graph_type = resource->graph_type;
                 build_param.use_attr_filter = true;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
 
@@ -1508,9 +1841,11 @@ TestHGraphWithAttr(const fixtures::HGraphTestIndexPtr& test_index,
         });
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph With Attr", "[ft][filter_search][hgraph]", TestHGraphWithAttr)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph With Attr",
+                                "[ft][filter_search][hgraph]",
+                                TestHGraphWithAttr)
 
-TEST_CASE("HGraph CalDistanceById default topk returns shaped result", "[ft][hgraph][pr]") {
+TEST_CASE("HGraph CalcDistancesById default topk returns shaped result", "[ft][hgraph][pr]") {
     using namespace fixtures;
 
     HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
@@ -1522,7 +1857,7 @@ TEST_CASE("HGraph CalDistanceById default topk returns shaped result", "[ft][hgr
     const auto count = dataset->top_k;
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    auto result = index->CalDistanceById(
+    auto result = index->CalcDistancesById(
         dataset->query_->GetFloat32Vectors(), dataset->ground_truth_->GetIds(), count, true, -1);
 #pragma GCC diagnostic pop
 
@@ -1890,6 +2225,7 @@ TestHGraphGetRawVector(const fixtures::HGraphTestIndexPtr& test_index,
             RunWithGeneratedBlockSizeLimit([&] {
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
+                build_param.graph_type = resource->graph_type;
                 build_param.store_raw_vector = true;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
 
@@ -1903,9 +2239,9 @@ TestHGraphGetRawVector(const fixtures::HGraphTestIndexPtr& test_index,
         });
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Support Get Raw Vector",
-                     "[ft][update][hgraph]",
-                     TestHGraphGetRawVector)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Support Get Raw Vector",
+                                "[ft][update][hgraph]",
+                                TestHGraphGetRawVector)
 
 static void
 TestHGraphTune(const fixtures::HGraphTestIndexPtr& test_index,
@@ -1953,12 +2289,14 @@ TestHGraphTune(const fixtures::HGraphTestIndexPtr& test_index,
                 // Generate index parameters with attribute support enabled
                 HGraphTestIndex::HGraphBuildParam build_param1(
                     metric_type, dim, base_quantization_str1);
+                build_param1.graph_type = resource->graph_type;
                 build_param1.store_raw_vector = true;
                 auto param1 = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param1);
 
                 // Generate alter index param
                 HGraphTestIndex::HGraphBuildParam build_param2(
                     metric_type, dim, base_quantization_str2);
+                build_param2.graph_type = resource->graph_type;
                 build_param2.store_raw_vector = true;
                 auto param2 = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param2);
 
@@ -2005,7 +2343,7 @@ TestHGraphTune(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Tune", "[ft][search][hgraph]", TestHGraphTune)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Tune", "[ft][search][hgraph]", TestHGraphTune)
 
 TEST_CASE("HGraph Tune uses available codes", "[ft][search][hgraph][tune_codes]") {
     using namespace fixtures;
@@ -2118,7 +2456,7 @@ TEST_CASE("HGraph Tune uses available codes", "[ft][search][hgraph][tune_codes]"
     }
 }
 
-TEST_CASE("(PR) HGraph Tune with ignore_reorder", "[ft][search][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Tune with ignore_reorder", "[ft][search][hgraph][pipnn][pr]") {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = 1024 * 1024 * 2;
@@ -2126,6 +2464,7 @@ TEST_CASE("(PR) HGraph Tune with ignore_reorder", "[ft][search][hgraph][pr]") {
 
     int64_t dim = 128;
     auto metric_type = "l2";
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
 
     std::string param1 = fmt::format(R"({{
         "dtype": "float32",
@@ -2142,6 +2481,7 @@ TEST_CASE("(PR) HGraph Tune with ignore_reorder", "[ft][search][hgraph][pr]") {
                                      metric_type,
                                      dim);
 
+    param1 = WithHGraphGraphType(param1, graph_type);
     auto index = TestIndex::TestFactory("hgraph", param1, true);
     auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim, 200, metric_type);
     TestIndex::TestBuildIndex(index, dataset, true);
@@ -2273,6 +2613,7 @@ TestHGraphCompressedBuild(const fixtures::HGraphTestIndexPtr& test_index,
             RunWithGeneratedBlockSizeLimit([&] {
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
+                build_param.graph_type = resource->graph_type;
                 build_param.graph_storage = "compressed";
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
@@ -2284,9 +2625,9 @@ TestHGraphCompressedBuild(const fixtures::HGraphTestIndexPtr& test_index,
         });
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Compressed Graph Build",
-                     "[ft][build][hgraph]",
-                     TestHGraphCompressedBuild)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Compressed Graph Build",
+                                "[ft][build][hgraph]",
+                                TestHGraphCompressedBuild)
 
 static void
 TestHGraphMerge(const fixtures::HGraphTestIndexPtr& test_index,
@@ -2447,6 +2788,7 @@ RunHGraphDuplicateChecks(const fixtures::HGraphTestIndexPtr& test_index,
                 vsag::Options::Instance().set_block_size_limit(size);
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
+                build_param.graph_type = resource->graph_type;
                 build_param.support_duplicate = true;
                 build_param.graph_storage = graph_storage;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
@@ -2463,9 +2805,15 @@ RunHGraphDuplicateChecks(const fixtures::HGraphTestIndexPtr& test_index,
                     TestIndex::TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
                     TestIndex::TestFilterSearch(index, dataset, search_param, recall, true, true);
                     TestIndex::TestCheckIdExist(index, dataset);
-                    TestIndex::TestCalcDistanceById(index, dataset);
+                    // Duplicate indexes can retain lossy codes without FP32 originals.
+                    // Check stored-distance consistency for every configuration, while
+                    // retaining exact-oracle coverage when FP32 storage is available.
+                    TestIndex::TestStoredDistanceConsistency(index, dataset);
+                    if (base_quantization_str.find("fp32") != std::string::npos) {
+                        TestIndex::TestCalcDistanceById(index, dataset);
+                        TestIndex::TestBatchCalcDistanceById(index, dataset);
+                    }
                     TestIndex::TestGetRawVectorByIds(index, dataset);
-                    TestIndex::TestBatchCalcDistanceById(index, dataset);
                     TestIndex::TestMultiQueryBatchCalcDistanceById(index, dataset);
                     TestIndex::TestSearchAllocator(index, dataset, search_param, recall, true);
                 }
@@ -2491,12 +2839,21 @@ TestHGraphDuplicateSerializeCompressed(const fixtures::HGraphTestIndexPtr& test_
     RunHGraphDuplicateChecks(test_index, resource, "compressed", false, true);
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Duplicate", "[ft][build][hgraph][duplicate]", TestHGraphDuplicate)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Duplicate",
+                                "[ft][build][hgraph][duplicate]",
+                                TestHGraphDuplicate)
 
 TEST_CASE("(PR) HGraph Duplicate Serialize Compressed",
           "[ft][build][duplicate][serialize][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
+    TestHGraphDuplicateSerializeCompressed(test_index, resource);
+}
+
+TEST_CASE("(PR) HGraph Duplicate Serialize Compressed PiPNN",
+          "[ft][build][duplicate][serialize][hgraph][pipnn][pr]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetPiPNNResource();
     TestHGraphDuplicateSerializeCompressed(test_index, resource);
 }
 
@@ -2524,6 +2881,7 @@ TestHGraphSearchWithDirtyVector(const fixtures::HGraphTestIndexPtr& test_index,
             }
             vsag::Options::Instance().set_block_size_limit(size);
             HGraphTestIndex::HGraphBuildParam build_param(metric_type, dim, base_quantization_str);
+            build_param.graph_type = resource->graph_type;
             auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
             auto index = TestIndex::TestFactory(test_index->name, param, true);
             TestIndex::TestBuildIndex(index, dataset, true);
@@ -2533,9 +2891,9 @@ TestHGraphSearchWithDirtyVector(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Search with Dirty Vector",
-                     "[ft][search][hgraph]",
-                     TestHGraphSearchWithDirtyVector)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Search with Dirty Vector",
+                                "[ft][search][hgraph]",
+                                TestHGraphSearchWithDirtyVector)
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
                              "HGraph Search with Sparse Vector",
@@ -2638,6 +2996,7 @@ TestHGraphConcurrentAddSearchRemove(const fixtures::HGraphTestIndexPtr& test_ind
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
                 build_param.support_remove = true;
+                build_param.graph_type = resource->graph_type;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
@@ -2650,9 +3009,9 @@ TestHGraphConcurrentAddSearchRemove(const fixtures::HGraphTestIndexPtr& test_ind
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Concurrent Add Search Remove",
-                     "[ft][build][concurrent][hgraph]",
-                     TestHGraphConcurrentAddSearchRemove)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Concurrent Add Search Remove",
+                                "[ft][build][concurrent][hgraph]",
+                                TestHGraphConcurrentAddSearchRemove)
 
 static void
 TestHGraphSerialize(const fixtures::HGraphTestIndexPtr& test_index,
@@ -2679,6 +3038,7 @@ TestHGraphSerialize(const fixtures::HGraphTestIndexPtr& test_index,
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
                 build_param.extra_info_size = extra_info_size;
+                build_param.graph_type = resource->graph_type;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim,
@@ -2703,13 +3063,68 @@ TestHGraphSerialize(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Serialize File",
-                     "[ft][serialize][hgraph][serialization]",
-                     TestHGraphSerialize)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Serialize File",
+                                "[ft][serialize][hgraph][serialization]",
+                                TestHGraphSerialize)
 
-TEST_CASE("HGraph Serialize Streaming", "[ft][serialize][hgraph][streaming]") {
+TEST_CASE("HGraph Chunked Serialize And Parallel Deserialize",
+          "[ft][serialize][parallel_deserialize][hgraph][pr]") {
     using namespace fixtures;
+
     HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    build_param.thread_count = 4;
+    const auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    const auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 100, "l2");
+
+    auto delegate = vsag::Engine::CreateThreadPool(4);
+    REQUIRE(delegate.has_value());
+    auto counting_pool = std::make_shared<CountingThreadPool>(delegate.value());
+    auto allocator = vsag::Engine::CreateDefaultAllocator();
+    vsag::Resource resource(allocator, counting_pool);
+    vsag::Engine engine(&resource);
+
+    auto index = engine.CreateIndex(HGraphTestIndex::name, param);
+    REQUIRE(index.has_value());
+    TestIndex::TestBuildIndex(index.value(), dataset, true);
+
+    constexpr uint64_t chunk_size = 512;
+
+    SECTION("plain frames") {
+        ChunkedBufferWriter writer;
+        REQUIRE(index.value()->Serialize(writer, chunk_size).has_value());
+
+        auto restored = engine.CreateIndex(HGraphTestIndex::name, param);
+        REQUIRE(restored.has_value());
+        ChunkedBufferReader reader(std::move(writer.bytes_));
+        const auto submissions_before = counting_pool->Submissions();
+        REQUIRE(restored.value()->ParallelDeserialize(reader).has_value());
+        REQUIRE(counting_pool->Submissions() > submissions_before);
+        REQUIRE(restored.value()->GetNumElements() == index.value()->GetNumElements());
+        RequireHGraphSearchMatches(index.value(), restored.value(), dataset);
+    }
+
+    SECTION("compressed frames") {
+        FramedChunkedBufferWriter writer;
+        REQUIRE(index.value()->Serialize(writer, chunk_size).has_value());
+        REQUIRE(writer.frame_count_ > 10);
+
+        auto restored = engine.CreateIndex(HGraphTestIndex::name, param);
+        REQUIRE(restored.has_value());
+        FramedChunkedBufferReader reader(std::move(writer.bytes_));
+        const auto submissions_before = counting_pool->Submissions();
+        REQUIRE(restored.value()->ParallelDeserialize(reader).has_value());
+        REQUIRE(counting_pool->Submissions() > submissions_before);
+        REQUIRE(restored.value()->GetNumElements() == index.value()->GetNumElements());
+        RequireHGraphSearchMatches(index.value(), restored.value(), dataset);
+    }
+}
+
+TEST_CASE("HGraph Serialize Streaming", "[ft][serialize][hgraph][streaming][pipnn]") {
+    using namespace fixtures;
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    CAPTURE(graph_type);
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    build_param.graph_type = graph_type;
     auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
     auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
     auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 100, "l2");
@@ -2751,9 +3166,12 @@ TEST_CASE("HGraph Serialize Streaming", "[ft][serialize][hgraph][streaming]") {
     }
 }
 
-TEST_CASE("HGraph streaming Load applies IO parameters", "[ft][serialize][hgraph][streaming]") {
+TEST_CASE("HGraph streaming Load applies IO parameters",
+          "[ft][serialize][hgraph][streaming][pipnn]") {
     using namespace fixtures;
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     HGraphTestIndex::HGraphBuildParam build_param("l2", 128, "rabitq,sq8,block_memory_io,32,3");
+    build_param.graph_type = graph_type;
     build_param.graph_storage = "compressed";
     build_param.thread_count = 1;
     auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
@@ -2784,7 +3202,7 @@ TEST_CASE("HGraph streaming serialization compatibility",
         auto fixture = MakeHGraphStreamingFixture();
         auto bytes = SetStreamingMinorVersion(fixture.bytes, 7);
         auto restored = DeserializeHGraphStreamingBytes(fixture.param, bytes);
-        RequireHGraphStreamingSearchMatches(fixture.index, restored, fixture.dataset);
+        RequireHGraphSearchMatches(fixture.index, restored, fixture.dataset);
     }
 
     SECTION("rejects unsupported major version") {
@@ -2797,14 +3215,14 @@ TEST_CASE("HGraph streaming serialization compatibility",
         auto fixture = MakeHGraphStreamingFixture();
         auto bytes = InsertUnknownStreamingBlock(fixture.bytes, false);
         auto restored = DeserializeHGraphStreamingBytes(fixture.param, bytes);
-        RequireHGraphStreamingSearchMatches(fixture.index, restored, fixture.dataset);
+        RequireHGraphSearchMatches(fixture.index, restored, fixture.dataset);
     }
 
     SECTION("skips unknown non-critical block with unsupported version") {
         auto fixture = MakeHGraphStreamingFixture();
         auto bytes = InsertUnknownStreamingBlock(fixture.bytes, false, 99);
         auto restored = DeserializeHGraphStreamingBytes(fixture.param, bytes);
-        RequireHGraphStreamingSearchMatches(fixture.index, restored, fixture.dataset);
+        RequireHGraphSearchMatches(fixture.index, restored, fixture.dataset);
     }
 
     SECTION("rejects unknown critical block") {
@@ -2882,6 +3300,7 @@ TestHGraphReaderIO(const fixtures::HGraphTestIndexPtr& test_index,
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
                 build_param.extra_info_size = extra_info_size;
+                build_param.graph_type = resource->graph_type;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim,
@@ -2906,7 +3325,7 @@ TestHGraphReaderIO(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Reader IO", "[ft][serialize][hgraph]", TestHGraphReaderIO)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Reader IO", "[ft][serialize][hgraph]", TestHGraphReaderIO)
 
 static void
 TestHGraphClone(const fixtures::HGraphTestIndexPtr& test_index,
@@ -2933,6 +3352,7 @@ TestHGraphClone(const fixtures::HGraphTestIndexPtr& test_index,
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
                 build_param.extra_info_size = extra_info_size;
+                build_param.graph_type = resource->graph_type;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim,
@@ -2949,7 +3369,7 @@ TestHGraphClone(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Clone", "[ft][clone][hgraph]", TestHGraphClone)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Clone", "[ft][clone][hgraph]", TestHGraphClone)
 
 static void
 TestHGraphExportModel(const fixtures::HGraphTestIndexPtr& test_index,
@@ -2976,6 +3396,7 @@ TestHGraphExportModel(const fixtures::HGraphTestIndexPtr& test_index,
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
                 build_param.extra_info_size = extra_info_size;
+                build_param.graph_type = resource->graph_type;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto index2 = TestIndex::TestFactory(test_index->name, param, true);
@@ -2993,7 +3414,9 @@ TestHGraphExportModel(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Export Model", "[ft][export][hgraph]", TestHGraphExportModel)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Export Model",
+                                "[ft][export][hgraph]",
+                                TestHGraphExportModel)
 
 static void
 TestHGraphRandomAllocator(const fixtures::HGraphTestIndexPtr& test_index,
@@ -3022,6 +3445,7 @@ TestHGraphRandomAllocator(const fixtures::HGraphTestIndexPtr& test_index,
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
                 build_param.thread_count = 1;
+                build_param.graph_type = resource->graph_type;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = vsag::Factory::CreateIndex(test_index->name, param, allocator.get());
                 if (not index.has_value()) {
@@ -3036,9 +3460,9 @@ TestHGraphRandomAllocator(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Build & ContinueAdd Test With Random Allocator",
-                     "[ft][build][hgraph]",
-                     TestHGraphRandomAllocator)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Build & ContinueAdd Test With Random Allocator",
+                                "[ft][build][hgraph]",
+                                TestHGraphRandomAllocator)
 
 static void
 TestHGraphDuplicateBuild(const fixtures::HGraphTestIndexPtr& test_index,
@@ -3068,6 +3492,7 @@ TestHGraphDuplicateBuild(const fixtures::HGraphTestIndexPtr& test_index,
                     metric_type, dim, base_quantization_str);
                 build_param.support_duplicate = true;
                 build_param.graph_storage = graph_storage;
+                build_param.graph_type = resource->graph_type;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
@@ -3080,9 +3505,9 @@ TestHGraphDuplicateBuild(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Duplicate Build",
-                     "[ft][build][duplicate][hgraph]",
-                     TestHGraphDuplicateBuild)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Duplicate Build",
+                                "[ft][build][duplicate][hgraph]",
+                                TestHGraphDuplicateBuild)
 
 static void
 TestHGraphEstimateMemoryAndGetMemoryUsage(const fixtures::HGraphTestIndexPtr& test_index,
@@ -3111,6 +3536,7 @@ TestHGraphEstimateMemoryAndGetMemoryUsage(const fixtures::HGraphTestIndexPtr& te
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
                 build_param.extra_info_size = extra_info_size;
+                build_param.graph_type = resource->graph_type;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim,
                                                                          estimate_count,
@@ -3126,9 +3552,9 @@ TestHGraphEstimateMemoryAndGetMemoryUsage(const fixtures::HGraphTestIndexPtr& te
     }
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Estimate Memory And Get Memory Usage",
-                     "[ft][memory][hgraph]",
-                     TestHGraphEstimateMemoryAndGetMemoryUsage)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Estimate Memory And Get Memory Usage",
+                                "[ft][memory][hgraph]",
+                                TestHGraphEstimateMemoryAndGetMemoryUsage)
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
                              "HGraph ELP Optimizer",
@@ -3189,6 +3615,7 @@ TestHGraphIgnoreReorder(const fixtures::HGraphTestIndexPtr& test_index,
             "max_degree": 96,
             "ef_construction": 400,
             "precise_quantization_type": "fp32",
+            "graph_type": "{}",
             "ignore_reorder": true
         }}
     }}
@@ -3200,7 +3627,8 @@ TestHGraphIgnoreReorder(const fixtures::HGraphTestIndexPtr& test_index,
             vsag::Options::Instance().set_block_size_limit(size);
             auto dataset =
                 HGraphTestIndex::pool.GetDatasetAndCreate(dim, resource->base_count, metric_type);
-            std::string param = fmt::format(parameter_temp_reorder, metric_type, dim);
+            std::string param =
+                fmt::format(parameter_temp_reorder, metric_type, dim, resource->graph_type);
             auto index = TestIndex::TestFactory(test_index->name, param, true);
             TestIndex::TestBuildIndex(index, dataset);
             HGraphTestIndex::TestGeneral(index, dataset, search_param, recall);
@@ -3209,7 +3637,9 @@ TestHGraphIgnoreReorder(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Ignore Reorder", "[ft][search][hgraph]", TestHGraphIgnoreReorder)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Ignore Reorder",
+                                "[ft][search][hgraph]",
+                                TestHGraphIgnoreReorder)
 
 static void
 TestHGraphSearchDisableReorder(const fixtures::HGraphTestIndexPtr& test_index,
@@ -3239,6 +3669,7 @@ TestHGraphSearchDisableReorder(const fixtures::HGraphTestIndexPtr& test_index,
                             recall_without_reorder));
             vsag::Options::Instance().set_block_size_limit(size);
             HGraphTestIndex::HGraphBuildParam build_param(metric_type, dim, base_quantization_str);
+            build_param.graph_type = resource->graph_type;
             auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
             auto index = TestIndex::TestFactory(test_index->name, param, true);
             auto dataset =
@@ -3280,9 +3711,9 @@ TestHGraphSearchDisableReorder(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Search Disable Reorder",
-                     "[ft][search][hgraph]",
-                     TestHGraphSearchDisableReorder)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Search Disable Reorder",
+                                "[ft][search][hgraph]",
+                                TestHGraphSearchDisableReorder)
 
 static void
 TestHGraphWithExtraInfo(const fixtures::HGraphTestIndexPtr& test_index,
@@ -3310,6 +3741,7 @@ TestHGraphWithExtraInfo(const fixtures::HGraphTestIndexPtr& test_index,
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
                 build_param.extra_info_size = extra_info_size;
+                build_param.graph_type = resource->graph_type;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim,
@@ -3336,7 +3768,9 @@ TestHGraphWithExtraInfo(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph With Extra Info", "[ft][search][hgraph]", TestHGraphWithExtraInfo)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph With Extra Info",
+                                "[ft][search][hgraph]",
+                                TestHGraphWithExtraInfo)
 
 static void
 TestHGraphSearchOverTime(const fixtures::HGraphTestIndexPtr& test_index,
@@ -3365,6 +3799,7 @@ TestHGraphSearchOverTime(const fixtures::HGraphTestIndexPtr& test_index,
                 vsag::Options::Instance().set_block_size_limit(size);
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
+                build_param.graph_type = resource->graph_type;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
@@ -3377,7 +3812,9 @@ TestHGraphSearchOverTime(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Search Over Time", "[ft][search][hgraph]", TestHGraphSearchOverTime)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Search Over Time",
+                                "[ft][search][hgraph]",
+                                TestHGraphSearchOverTime)
 
 static void
 TestHGraphDiskIOType(const fixtures::HGraphTestIndexPtr& test_index,
@@ -3408,6 +3845,7 @@ TestHGraphDiskIOType(const fixtures::HGraphTestIndexPtr& test_index,
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
                 HGraphTestIndex::HGraphBuildParam build_param(metric_type, dim, memory_io_str);
+                build_param.graph_type = resource->graph_type;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
@@ -3429,7 +3867,9 @@ TestHGraphDiskIOType(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Disk IO Type Index", "[ft][serialize][hgraph]", TestHGraphDiskIOType)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Disk IO Type Index",
+                                "[ft][serialize][hgraph]",
+                                TestHGraphDiskIOType)
 
 TEST_CASE("HGraph Concurrent Read Write", "[ft][concurrent][hgraph]") {
     uint32_t op_num = 10000;
@@ -3608,6 +4048,7 @@ TestHGraphHopsLimit(const fixtures::HGraphTestIndexPtr& test_index,
                 vsag::Options::Instance().set_block_size_limit(size);
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
+                build_param.graph_type = resource->graph_type;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
@@ -3633,7 +4074,7 @@ TestHGraphHopsLimit(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Hops Limit", "[ft][search][hgraph]", TestHGraphHopsLimit)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Hops Limit", "[ft][search][hgraph]", TestHGraphHopsLimit)
 
 static void
 TestHGraphReverseEdges(const fixtures::HGraphTestIndexPtr& test_index,
@@ -3643,7 +4084,9 @@ TestHGraphReverseEdges(const fixtures::HGraphTestIndexPtr& test_index,
 
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
-            for (auto& [base_quantization_str, recall] : resource->test_cases) {
+            for (const auto& test_case : resource->test_cases) {
+                const auto& base_quantization_str = test_case.first;
+                const auto& recall = test_case.second;
                 INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}",
                                  metric_type,
                                  dim,
@@ -3657,6 +4100,7 @@ TestHGraphReverseEdges(const fixtures::HGraphTestIndexPtr& test_index,
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
                 build_param.thread_count = 1;
+                build_param.graph_type = resource->graph_type;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
 
                 SECTION("Build with use_reverse_edges enabled") {
@@ -3712,7 +4156,9 @@ TestHGraphReverseEdges(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-HGRAPH_PR_DAILY_CASE("HGraph Reverse Edges", "[ft][build][hgraph]", TestHGraphReverseEdges)
+HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Reverse Edges",
+                                "[ft][build][hgraph]",
+                                TestHGraphReverseEdges)
 
 namespace {
 
@@ -3740,7 +4186,7 @@ private:
 
 }  // namespace
 
-TEST_CASE("(PR) HGraph brute_force_threshold", "[ft][hgraph][pr][brute_force_threshold]") {
+TEST_CASE("(PR) HGraph brute_force_threshold", "[ft][hgraph][pipnn][pr][brute_force_threshold]") {
     constexpr int64_t dim = 16;
     constexpr int64_t base_count = 1000;
     constexpr int64_t modulus = 50;
@@ -3758,7 +4204,9 @@ TEST_CASE("(PR) HGraph brute_force_threshold", "[ft][hgraph][pr][brute_force_thr
             "use_reorder": false
         }
     })";
-    auto factory_res = vsag::Factory::CreateIndex("hgraph", hgraph_params);
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto factory_res =
+        vsag::Factory::CreateIndex("hgraph", WithHGraphGraphType(hgraph_params, graph_type));
     REQUIRE(factory_res.has_value());
     auto index = std::move(factory_res.value());
 
@@ -3826,7 +4274,7 @@ TEST_CASE("(PR) HGraph brute_force_threshold", "[ft][hgraph][pr][brute_force_thr
 }
 
 TEST_CASE("(PR) HGraph brute_force_threshold default is no-op",
-          "[ft][hgraph][pr][brute_force_threshold]") {
+          "[ft][hgraph][pipnn][pr][brute_force_threshold]") {
     constexpr int64_t dim = 8;
     constexpr int64_t base_count = 200;
     constexpr int64_t topk = 3;
@@ -3842,7 +4290,10 @@ TEST_CASE("(PR) HGraph brute_force_threshold default is no-op",
             "use_reorder": false
         }
     })";
-    auto index = vsag::Factory::CreateIndex("hgraph", hgraph_params).value();
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index =
+        vsag::Factory::CreateIndex("hgraph", WithHGraphGraphType(hgraph_params, graph_type))
+            .value();
 
     std::mt19937 rng(42);
     std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
@@ -3892,7 +4343,7 @@ TEST_CASE("(PR) HGraph brute_force_threshold default is no-op",
 }
 
 TEST_CASE("(PR) HGraph threshold iterator consumes rejected pages",
-          "[ft][hgraph][threshold][iterator][pr]") {
+          "[ft][hgraph][threshold][iterator][pipnn][pr]") {
     constexpr int64_t dim = 1;
     constexpr int64_t base_count = 32;
     std::string params = R"({
@@ -3900,7 +4351,9 @@ TEST_CASE("(PR) HGraph threshold iterator consumes rejected pages",
         "index_param":{"base_quantization_type":"fp32","max_degree":16,
         "ef_construction":64,"use_reorder":false}
     })";
-    auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index =
+        vsag::Factory::CreateIndex("hgraph", WithHGraphGraphType(params, graph_type)).value();
     std::vector<float> vectors(base_count);
     std::vector<int64_t> ids(base_count);
     for (int64_t i = 0; i < base_count; ++i) {
@@ -3930,13 +4383,15 @@ TEST_CASE("(PR) HGraph threshold iterator consumes rejected pages",
 }
 
 TEST_CASE("(PR) HGraph ignores non-finite entry distances",
-          "[ft][hgraph][threshold][nonfinite][pr]") {
+          "[ft][hgraph][threshold][nonfinite][pipnn][pr]") {
     const auto params = R"({
         "dtype":"float32", "metric_type":"l2", "dim":1,
         "index_param":{"base_quantization_type":"fp32","max_degree":16,
         "ef_construction":32,"use_reorder":false}
     })";
-    auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index =
+        vsag::Factory::CreateIndex("hgraph", WithHGraphGraphType(params, graph_type)).value();
     std::vector<float> vectors = {0.0F, std::numeric_limits<float>::max()};
     std::vector<int64_t> ids = {0, 1};
     auto base = vsag::Dataset::Make();
@@ -4084,13 +4539,15 @@ TEST_CASE("(PR) HGraph iterator preserves infinity without threshold",
 }
 
 TEST_CASE("HGraph build tolerates empty non-finite graph probes",
-          "[ft][hgraph][build][nonfinite]") {
+          "[ft][hgraph][build][nonfinite][pipnn]") {
     const auto params = R"({
         "dtype":"float32", "metric_type":"l2", "dim":64,
         "index_param":{"base_quantization_type":"fp32","max_degree":16,
         "ef_construction":32,"use_reorder":false}
     })";
-    auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index =
+        vsag::Factory::CreateIndex("hgraph", WithHGraphGraphType(params, graph_type)).value();
     constexpr int64_t count = 128;
     std::vector<float> vectors(count * 64, std::numeric_limits<float>::quiet_NaN());
     std::vector<int64_t> ids(count);
@@ -4116,13 +4573,16 @@ TEST_CASE("HGraph build tolerates empty non-finite graph probes",
     }
 }
 
-TEST_CASE("HGraph range reorder ignores KNN threshold", "[ft][hgraph][range][reorder][threshold]") {
+TEST_CASE("HGraph range reorder ignores KNN threshold",
+          "[ft][hgraph][range][reorder][threshold][pipnn]") {
     const auto params = R"({
         "dtype":"float32", "metric_type":"l2", "dim":1,
         "index_param":{"base_quantization_type":"sq8","precise_quantization_type":"fp32",
         "max_degree":16,"ef_construction":32,"use_reorder":true}
     })";
-    auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index =
+        vsag::Factory::CreateIndex("hgraph", WithHGraphGraphType(params, graph_type)).value();
     std::vector<float> vectors = {0.0F, 1.0F};
     std::vector<int64_t> ids = {10, 20};
     auto base = vsag::Dataset::Make();
@@ -4175,6 +4635,75 @@ TEST_CASE("HGraph returns non-finite duplicate labels within ef",
         REQUIRE(result_ids == std::set<int64_t>{20, 30});
         REQUIRE(std::isinf(result.value()->GetDistances()[0]));
         REQUIRE(std::isinf(result.value()->GetDistances()[1]));
+    }
+}
+
+TEST_CASE("HGraph returns non-finite duplicate labels at the entry point within ef",
+          "[ft][hgraph][duplicate][nonfinite]") {
+    // Both labels hold the same non-finite-distance vector, so the expectation does not depend on
+    // which label owns the entry point (level sampling is platform dependent).
+    const auto params = R"({
+        "dtype":"float32", "metric_type":"ip", "dim":1,
+        "index_param":{"base_quantization_type":"fp32","max_degree":16,
+        "ef_construction":32,"use_reorder":false,"support_duplicate":true,
+        "deduplicate_storage":true}
+    })";
+    auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+    std::vector<float> vectors = {std::numeric_limits<float>::max(),
+                                  std::numeric_limits<float>::max()};
+    std::vector<int64_t> ids = {10, 20};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->Dim(1)->Ids(ids.data())->Float32Vectors(vectors.data())->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    const float query_vector = std::numeric_limits<float>::max();
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(1)->Float32Vectors(&query_vector)->Owner(false);
+    for (const int64_t thread_count : {1, 2}) {
+        const auto search_params = fmt::format(
+            R"({{"hgraph":{{"ef_search":2,"parallel_search_thread_count":{}}}}})", thread_count);
+        auto result = index->KnnSearch(query, 2, search_params);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 2);
+        std::set<int64_t> result_ids(result.value()->GetIds(),
+                                     result.value()->GetIds() + result.value()->GetDim());
+        REQUIRE(result_ids == std::set<int64_t>{10, 20});
+        REQUIRE(std::isinf(result.value()->GetDistances()[0]));
+        REQUIRE(std::isinf(result.value()->GetDistances()[1]));
+    }
+}
+
+TEST_CASE("HGraph returns finite duplicate labels at the entry point within ef",
+          "[ft][hgraph][duplicate]") {
+    // Mirror of the non-finite case: the entry point's duplicate labels must be expanded when its
+    // own distance is finite as well.
+    const auto params = R"({
+        "dtype":"float32", "metric_type":"l2", "dim":1,
+        "index_param":{"base_quantization_type":"fp32","max_degree":16,
+        "ef_construction":32,"use_reorder":false,"support_duplicate":true,
+        "deduplicate_storage":true}
+    })";
+    auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+    std::vector<float> vectors = {0.5F, 0.5F};
+    std::vector<int64_t> ids = {10, 20};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->Dim(1)->Ids(ids.data())->Float32Vectors(vectors.data())->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    const float query_vector = 0.5F;
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(1)->Float32Vectors(&query_vector)->Owner(false);
+    for (const int64_t thread_count : {1, 2}) {
+        const auto search_params = fmt::format(
+            R"({{"hgraph":{{"ef_search":2,"parallel_search_thread_count":{}}}}})", thread_count);
+        auto result = index->KnnSearch(query, 2, search_params);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 2);
+        std::set<int64_t> result_ids(result.value()->GetIds(),
+                                     result.value()->GetIds() + result.value()->GetDim());
+        REQUIRE(result_ids == std::set<int64_t>{10, 20});
+        REQUIRE(result.value()->GetDistances()[0] <= 1e-6F);
+        REQUIRE(result.value()->GetDistances()[1] <= 1e-6F);
     }
 }
 
@@ -4483,7 +5012,7 @@ TEST_CASE("HGraph GetStats reports build cache hit-rate", "[ft][hgraph][cache][p
     const auto missed_nodes = parsed["build_cache_missed_nodes"].GetInt();
     REQUIRE(hit_nodes + missed_nodes == TEST_COUNT);
 }
-TEST_CASE("HGraph Concurrent Tune and CalDistanceById", "[ft][concurrent][hgraph]") {
+TEST_CASE("HGraph Concurrent Tune and CalcDistancesById", "[ft][concurrent][hgraph][pipnn]") {
     constexpr uint32_t dim = 64;
     constexpr uint32_t num_vectors = 1000;
 
@@ -4532,6 +5061,8 @@ TEST_CASE("HGraph Concurrent Tune and CalDistanceById", "[ft][concurrent][hgraph
         ->Float32Vectors(vectors.data())
         ->Owner(false);
 
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    build_params = WithHGraphGraphType(build_params, graph_type);
     auto index = vsag::Factory::CreateIndex("hgraph", build_params);
     REQUIRE(index.has_value());
     REQUIRE(index.value()->Build(base).has_value());
@@ -4565,7 +5096,8 @@ TEST_CASE("HGraph Concurrent Tune and CalDistanceById", "[ft][concurrent][hgraph
     REQUIRE(cal_count.load() > 0);
 }
 
-TEST_CASE("HGraph Concurrent Tune and CalcDistanceById (single id)", "[ft][concurrent][hgraph]") {
+TEST_CASE("HGraph Concurrent Tune and CalcDistanceById (single id)",
+          "[ft][concurrent][hgraph][pipnn]") {
     constexpr uint32_t dim = 64;
     constexpr uint32_t num_vectors = 1000;
 
@@ -4614,6 +5146,8 @@ TEST_CASE("HGraph Concurrent Tune and CalcDistanceById (single id)", "[ft][concu
         ->Float32Vectors(vectors.data())
         ->Owner(false);
 
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    build_params = WithHGraphGraphType(build_params, graph_type);
     auto index = vsag::Factory::CreateIndex("hgraph", build_params);
     REQUIRE(index.has_value());
     REQUIRE(index.value()->Build(base).has_value());
@@ -4646,8 +5180,8 @@ TEST_CASE("HGraph Concurrent Tune and CalcDistanceById (single id)", "[ft][concu
     REQUIRE(cal_count.load() > 0);
 }
 
-TEST_CASE("HGraph Concurrent Tune(disable_future_tuning=false) and CalDistanceById",
-          "[ft][concurrent][hgraph]") {
+TEST_CASE("HGraph Concurrent Tune(disable_future_tuning=false) and CalcDistancesById",
+          "[ft][concurrent][hgraph][pipnn]") {
     constexpr uint32_t dim = 64;
     constexpr uint32_t num_vectors = 1000;
 
@@ -4697,6 +5231,8 @@ TEST_CASE("HGraph Concurrent Tune(disable_future_tuning=false) and CalDistanceBy
         ->Float32Vectors(vectors.data())
         ->Owner(false);
 
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    build_params = WithHGraphGraphType(build_params, graph_type);
     auto index = vsag::Factory::CreateIndex("hgraph", build_params);
     REQUIRE(index.has_value());
     REQUIRE(index.value()->Build(base).has_value());
@@ -4768,4 +5304,332 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
     auto cache_index = TestIndex::TestFactory(name, read_cache_param, true);
     TestIndex::TestBuildIndex(cache_index, dataset, true);
     HGraphTestIndex::TestGeneral(cache_index, dataset, search_param, 0.98f);
+}
+
+static void
+test_hgraph_multi_query_knn_search(const fixtures::HGraphTestIndexPtr& test_index,
+                                   const fixtures::HGraphResourcePtr& resource) {
+    using namespace fixtures;
+    auto search_param_str = fmt::format(search_param_tmp, 200, false);
+
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (const auto& test_case : resource->test_cases) {
+                const auto& base_quantization_str = test_case.first;
+                INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}",
+                                 metric_type,
+                                 dim,
+                                 base_quantization_str));
+
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    dim < fixtures::RABITQ_MIN_RACALL_DIM) {
+                    dim = fixtures::RABITQ_MIN_RACALL_DIM;
+                }
+
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+
+                auto index = TestIndex::TestFactory(test_index->name, param, true);
+                auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
+                    dim, resource->base_count, metric_type);
+
+                TestIndex::TestBuildIndex(index, dataset, true);
+
+                const int64_t num_queries = 5;
+                const int64_t k = 10;
+                int64_t dim_val = dataset->query_->GetDim();
+                int64_t available_queries = dataset->query_->GetNumElements();
+
+                std::vector<float> multi_query_data(num_queries * dim_val);
+                const float* original_queries = dataset->query_->GetFloat32Vectors();
+                for (int64_t i = 0; i < num_queries; ++i) {
+                    int64_t src_idx = i % available_queries;
+                    std::copy(original_queries + src_idx * dim_val,
+                              original_queries + (src_idx + 1) * dim_val,
+                              multi_query_data.data() + i * dim_val);
+                }
+
+                auto multi_query = vsag::Dataset::Make();
+                multi_query->NumElements(num_queries)
+                    ->Dim(dim_val)
+                    ->Float32Vectors(multi_query_data.data())
+                    ->Owner(false);
+
+                auto multi_result = index->KnnSearch(multi_query, k, search_param_str);
+                REQUIRE(multi_result.has_value());
+                REQUIRE(multi_result.value()->GetNumElements() == num_queries);
+                REQUIRE(multi_result.value()->GetDim() == k);
+
+                const auto* multi_ids = multi_result.value()->GetIds();
+                for (int64_t q_idx = 0; q_idx < num_queries; ++q_idx) {
+                    auto single_query = vsag::Dataset::Make();
+                    single_query->NumElements(1)
+                        ->Dim(dim_val)
+                        ->Float32Vectors(multi_query_data.data() + q_idx * dim_val)
+                        ->Owner(false);
+                    auto single_result = index->KnnSearch(single_query, k, search_param_str);
+                    REQUIRE(single_result.has_value());
+
+                    int64_t single_count = single_result.value()->GetDim();
+                    const auto* single_ids = single_result.value()->GetIds();
+                    int64_t offset = q_idx * k;
+                    // Without filter, all queries should return exactly k results.
+                    REQUIRE(single_count == k);
+                    for (int64_t i = 0; i < k; ++i) {
+                        REQUIRE(multi_ids[offset + i] == single_ids[i]);
+                    }
+                }
+            }
+        }
+    }
+}
+
+HGRAPH_PR_DAILY_CASE("HGraph Multi-Query Knn Search",
+                     "[ft][search][hgraph]",
+                     test_hgraph_multi_query_knn_search)
+
+static void
+test_hgraph_multi_query_range_search(const fixtures::HGraphTestIndexPtr& test_index,
+                                     const fixtures::HGraphResourcePtr& resource) {
+    using namespace fixtures;
+    auto search_param_str = fmt::format(search_param_tmp, 200, false);
+
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (const auto& test_case : resource->test_cases) {
+                const auto& base_quantization_str = test_case.first;
+                INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}",
+                                 metric_type,
+                                 dim,
+                                 base_quantization_str));
+
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    dim < fixtures::RABITQ_MIN_RACALL_DIM) {
+                    dim = fixtures::RABITQ_MIN_RACALL_DIM;
+                }
+
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+
+                auto index = TestIndex::TestFactory(test_index->name, param, true);
+                auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
+                    dim, resource->base_count, metric_type);
+
+                TestIndex::TestBuildIndex(index, dataset, true);
+
+                const int64_t num_queries = 3;
+                int64_t dim_val = dataset->query_->GetDim();
+                int64_t available_queries = dataset->query_->GetNumElements();
+                const float radius = 0.5F;
+                const int64_t limited_size = 10;
+
+                std::vector<float> multi_query_data(num_queries * dim_val);
+                const float* original_queries = dataset->query_->GetFloat32Vectors();
+                for (int64_t i = 0; i < num_queries; ++i) {
+                    int64_t src_idx = i % available_queries;
+                    std::copy(original_queries + src_idx * dim_val,
+                              original_queries + (src_idx + 1) * dim_val,
+                              multi_query_data.data() + i * dim_val);
+                }
+
+                auto multi_query = vsag::Dataset::Make();
+                multi_query->NumElements(num_queries)
+                    ->Dim(dim_val)
+                    ->Float32Vectors(multi_query_data.data())
+                    ->Owner(false);
+
+                auto multi_result =
+                    index->RangeSearch(multi_query, radius, search_param_str, limited_size);
+                REQUIRE_FALSE(multi_result.has_value());
+            }
+        }
+    }
+}
+
+HGRAPH_PR_DAILY_CASE("HGraph Multi-Query Range Search",
+                     "[ft][search][hgraph]",
+                     test_hgraph_multi_query_range_search)
+
+TEST_CASE("(PR) HGraph Batch SearchWithRequest layout and restore", "[ft][hgraph][pr][batch]") {
+    using namespace fixtures;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    const auto params = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, params, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 128, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+    auto query = vsag::Dataset::Make();
+    query->NumElements(2)
+        ->Dim(16)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+    vsag::SearchRequest request;
+    request.mode_ = vsag::SearchMode::KNN_SEARCH;
+    request.query_ = query;
+    request.topk_ = 5;
+    request.params_str_ = fmt::format(fixtures::search_param_tmp, 200, false);
+    const auto check_batch = [&](const vsag::IndexPtr& target) {
+        auto result = target->SearchWithRequest(request);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetNumElements() == 2);
+        REQUIRE(result.value()->GetDim() == 5);
+        for (int64_t row = 0; row < 2; ++row) {
+            auto one_query = vsag::Dataset::Make();
+            one_query->NumElements(1)
+                ->Dim(16)
+                ->Float32Vectors(query->GetFloat32Vectors() + row * 16)
+                ->Owner(false);
+            auto one_request = request;
+            one_request.query_ = one_query;
+            auto one = target->SearchWithRequest(one_request);
+            REQUIRE(one.has_value());
+            REQUIRE(one.value()->GetDim() == 5);
+            for (int64_t col = 0; col < 5; ++col) {
+                REQUIRE(result.value()->GetIds()[row * 5 + col] == one.value()->GetIds()[col]);
+                REQUIRE(result.value()->GetDistances()[row * 5 + col] ==
+                        one.value()->GetDistances()[col]);
+            }
+        }
+    };
+    check_batch(index);
+    auto serialized = index->Serialize();
+    REQUIRE(serialized.has_value());
+    auto restored = TestIndex::TestFactory(HGraphTestIndex::name, params, true);
+    REQUIRE(restored->Deserialize(serialized.value()).has_value());
+    check_batch(restored);
+
+    SECTION("filtered rows are padded") {
+        request.enable_filter_ = true;
+        request.filter_ = std::make_shared<RejectAllFilter>();
+        auto result = restored->SearchWithRequest(request);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetNumElements() == 2);
+        REQUIRE(result.value()->GetDim() == 5);
+        for (int64_t i = 0; i < 10; ++i) {
+            REQUIRE(result.value()->GetIds()[i] == -1);
+            REQUIRE(std::isinf(result.value()->GetDistances()[i]));
+        }
+        const auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
+        REQUIRE(statistics["batch_routes"]["hgraph"].GetUint64() +
+                    statistics["batch_routes"]["mci"].GetUint64() +
+                    statistics["batch_routes"]["hybrid"].GetUint64() +
+                    statistics["batch_routes"]["brute_force"].GetUint64() ==
+                2);
+    }
+    SECTION("empty index retains rectangular shape") {
+        auto empty = TestIndex::TestFactory(HGraphTestIndex::name, params, true);
+        auto result = empty->SearchWithRequest(request);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetNumElements() == 2);
+        REQUIRE(result.value()->GetDim() == 5);
+        for (int64_t i = 0; i < 10; ++i) {
+            REQUIRE(result.value()->GetIds()[i] == -1);
+            REQUIRE(std::isinf(result.value()->GetDistances()[i]));
+        }
+    }
+    SECTION("active padding label is rejected") {
+        const auto old_label = dataset->base_->GetIds()[0];
+        auto update = restored->UpdateId(old_label, -1);
+        REQUIRE(update.has_value());
+        REQUIRE(update.value());
+        auto result = restored->SearchWithRequest(request);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+    SECTION("label update during filtering cannot escape as padding") {
+        class RelabelDuringSearchFilter : public vsag::Filter {
+        public:
+            explicit RelabelDuringSearchFilter(vsag::IndexPtr target, int64_t label)
+                : target_(std::move(target)), label_(label) {
+            }
+            bool
+            CheckValid(int64_t /*id*/) const override {
+                if (not updated_) {
+                    updated_ = true;
+                    // Deterministically publish after the initial -1 snapshot,
+                    // before result packing, without timing-dependent sleeps.
+                    auto result = target_->UpdateId(label_, -1);
+                    update_ok_ = result.has_value() and result.value();
+                }
+                return true;
+            }
+            bool
+            CheckValid(const char* /*data*/) const override {
+                return true;
+            }
+            float
+            ValidRatio() const override {
+                return 1.0F;
+            }
+            vsag::IndexPtr target_;
+            int64_t label_;
+            mutable bool updated_ = false;
+            mutable bool update_ok_ = false;
+        };
+        auto filter =
+            std::make_shared<RelabelDuringSearchFilter>(restored, dataset->base_->GetIds()[0]);
+        request.enable_filter_ = true;
+        request.filter_ = filter;
+        auto result = restored->SearchWithRequest(request);
+        REQUIRE(filter->updated_);
+        REQUIRE(filter->update_ok_);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+    SECTION("null query on a populated index reports invalid argument") {
+        request.query_ = nullptr;
+        auto result = restored->SearchWithRequest(request);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+}
+
+TEST_CASE("HGraph dense Dataset single-ID distance contract", "[hgraph][distance_contract]") {
+    using namespace fixtures;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(16)
+                     ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+                     ->Owner(false);
+    const auto id = dataset->base_->GetIds()[0];
+    auto raw = index->CalcDistanceById(query->GetFloat32Vectors(), id);
+    auto wrapped = index->CalcDistanceById(query, id);
+    REQUIRE(raw.has_value());
+    REQUIRE(wrapped.has_value());
+    REQUIRE(raw.value() == wrapped.value());
+    query->Dim(15);
+    REQUIRE_FALSE(index->CalcDistanceById(query, id).has_value());
+    query->Dim(16)->NumElements(2);
+    REQUIRE_FALSE(index->CalcDistanceById(query, id).has_value());
+    REQUIRE_FALSE(index->CalcDistanceById(vsag::DatasetPtr{}, id).has_value());
+}
+
+TEST_CASE("HGraph empty index distance validation", "[hgraph][distance_contract]") {
+    using namespace fixtures;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    float query[16] = {};
+    int64_t ids[] = {100, 200};
+    auto single = index->CalcDistanceById(query, ids[0]);
+    REQUIRE(single.has_value());
+    REQUIRE(single.value() == -1.0F);
+    auto batch = index->CalcDistancesById(query, ids, 2);
+    REQUIRE(batch.has_value());
+    REQUIRE(batch.value()->GetDim() == 2);
+    REQUIRE(batch.value()->GetDistances()[0] == -1.0F);
+    REQUIRE(batch.value()->GetDistances()[1] == -1.0F);
+    auto empty = index->CalcDistancesById(static_cast<const float*>(nullptr), nullptr, 0);
+    REQUIRE(empty.has_value());
+    REQUIRE(empty.value()->GetDim() == 0);
+    REQUIRE_FALSE(index->CalcDistancesById(query, ids, -1).has_value());
+    REQUIRE_FALSE(index->CalcDistancesById(query, ids, 2, true, 0).has_value());
+    REQUIRE_FALSE(index->CalcDistancesById(query, nullptr, 2).has_value());
+    REQUIRE_FALSE(index->CalcDistanceById(static_cast<const float*>(nullptr), ids[0]).has_value());
 }

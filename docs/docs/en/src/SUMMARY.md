@@ -7,6 +7,7 @@
 - [Installation](guide/installation.md)
 - [Creating an Index](guide/create_index.md)
 - [k-Nearest Neighbor Search](guide/knn_search.md)
+- [Search Statistics](guide/search_statistics.md)
 - [C API](guide/c_api.md)
 - [pyvsag](guide/pyvsag.md)
 
@@ -57,6 +58,8 @@
 - [Attribute Filter (Hybrid Search)](advanced/attribute_filter.md)
 - [Serialization](advanced/serialization.md)
 - [New Serialization](advanced/new_serialization.md)
+- [Chunked Serialization](advanced/chunked_serialization.md)
+- [Parallel Deserialization](advanced/parallel_deserialization.md)
 - [Memory Management](advanced/memory.md)
 - [Per-Search Allocator](advanced/search_allocator.md)
 - [Index Introspection](advanced/introspection.md)

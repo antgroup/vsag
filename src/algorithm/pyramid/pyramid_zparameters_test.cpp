@@ -20,6 +20,7 @@
 #include <cmath>
 #include <nlohmann/json.hpp>
 
+#include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
 #include "parameter_test.h"
 #include "pyramid.h"
@@ -134,6 +135,52 @@ TEST_CASE("Pyramid Parameters Test", "[ut][PyramidParameters]") {
     auto param = std::make_shared<vsag::PyramidParameters>();
     param->FromJson(param_json);
     vsag::ParameterTest::TestToJson(param);
+}
+
+TEST_CASE("Pyramid accepts PiPNN as a batch graph builder", "[ut][PyramidParameters][pipnn]") {
+    PyramidDefaultParam index_param;
+    index_param.graph_type = vsag::GRAPH_TYPE_VALUE_PIPNN;
+    auto param = std::make_shared<vsag::PyramidParameters>();
+    REQUIRE_NOTHROW(param->FromJson(vsag::JsonType::Parse(generate_pyramid(index_param))));
+    REQUIRE(param->graph_type == vsag::GRAPH_TYPE_VALUE_PIPNN);
+    REQUIRE(param->odescent_param != nullptr);
+
+    index_param.graph_type = "unknown";
+    REQUIRE_THROWS(param->FromJson(vsag::JsonType::Parse(generate_pyramid(index_param))));
+}
+
+TEST_CASE("Pyramid exposes PiPNN build parameters", "[ut][PyramidParameters][pipnn]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    const auto external = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "graph_type": "pipnn",
+        "max_degree": 32,
+        "pipnn_max_leaf_size": 256,
+        "pipnn_min_leaf_size": 32,
+        "pipnn_leader_sample_rate": 0.02,
+        "pipnn_fanout": [5, 3, 1],
+        "pipnn_leaf_neighbor_count": 6,
+        "pipnn_hash_plane_count": 6,
+        "pipnn_reservoir_size": 80
+    })");
+    auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(external, common_param);
+    auto param = std::dynamic_pointer_cast<vsag::PyramidParameters>(mapped);
+    REQUIRE(param != nullptr);
+    REQUIRE(param->pipnn_param.max_leaf_size == 256);
+    REQUIRE(param->pipnn_param.min_leaf_size == 32);
+    REQUIRE(param->pipnn_param.leader_sample_rate == 0.02F);
+    REQUIRE(param->pipnn_param.fanout == std::vector<uint64_t>{5, 3, 1});
+    REQUIRE(param->pipnn_param.leaf_neighbor_count == 6);
+    REQUIRE(param->pipnn_param.hash_plane_count == 6);
+    REQUIRE(param->pipnn_param.reservoir_size == 80);
+
+    const auto serialized = param->ToJson();
+    const auto restored_graph_json = serialized[vsag::GRAPH_KEY];
+    REQUIRE(restored_graph_json[vsag::PIPNN_PARAMETER_MAX_LEAF_SIZE].GetUint64() == 256);
+    REQUIRE(restored_graph_json[vsag::PIPNN_PARAMETER_RESERVOIR_SIZE].GetUint64() == 80);
 }
 
 std::shared_ptr<vsag::PyramidParameters>
@@ -845,6 +892,23 @@ TEST_CASE("Pyramid validates root graph type and hierarchy overrides", "[ut][Pyr
     })");
     REQUIRE_THROWS(
         vsag::Pyramid::CheckAndMappingExternalParam(invalid_hierarchy_degree, common_param));
+}
+
+TEST_CASE("Pyramid PiPNN rejects non-dense input representations", "[ut][pipnn][pyramid]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.repr_ = vsag::RecordRepr::MULTI_VECTOR;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    const auto external = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "graph_type": "pipnn",
+        "max_degree": 32,
+        "ef_construction": 64
+    })");
+    const auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(external, common_param);
+
+    REQUIRE_THROWS(std::make_shared<vsag::Pyramid>(mapped, common_param));
 }
 
 TEST_CASE("Pyramid validates explicit factor", "[ut][PyramidParameters]") {

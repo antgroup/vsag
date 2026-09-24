@@ -60,6 +60,7 @@ auto result = index->KnnSearch(
     query, 10,
     R"({"sindi_v2": {
         "n_candidate": 100,
+        "filter_callback_limit": 10000,
         "query_prune_ratio": 0.1,
         "term_prune_ratio": 0.2,
         "term_retain_threshold": 10000
@@ -78,7 +79,7 @@ auto result = index->KnnSearch(
 | `doc_prune_ratio` | float | `0.0` | 构建时丢弃最低权重文档 term 的比例，范围为 `[0.0, 1.0)`。 |
 | `use_quantization` | bool 或 string | `false` | `false` 存 FP32，`true` 存 SQ8，`"fp16"` 存 FP16。 |
 | `use_reorder` | bool | `false` | 保存高精度向量并对粗排候选重排。 |
-| `rerank_type` | string | `"fp32"` | 重排存储类型：`fp32` 或 `dmq8`。 |
+| `rerank_type` | string | `"fp32"` | 重排存储类型：`fp32`、`fp16` 或 `dmq8`。FP16 以半精度保存文档 value，并以 FP32 打分。 |
 | `dmq_shared_codebook_threshold` | int | `1024` | 低频 term 使用共享 DMQ codebook 的阈值。 |
 | `remap_term_ids` | bool | `false` | 压缩稀疏或间隔很大的外部 term ID。 |
 | `avg_doc_term_length` | int | `100` | 仅用于内存估算。 |
@@ -91,7 +92,8 @@ auto result = index->KnnSearch(
 `file_path`。文件型 `rerank_io` 未设置 `file_path` 时，VSAG 使用
 `<term_io.file_path>.rerank`。
 
-`rerank_layout > 0` 要求 `use_reorder: true`。`rerank_type: "dmq8"` 要求
+`rerank_type: "fp16"` 要求 `use_reorder: true`，并支持与 `fp32` 相同的重排 I/O 和布局
+选项。`rerank_layout > 0` 要求 `use_reorder: true`。`rerank_type: "dmq8"` 要求
 `rerank_layout: 0`，并使用默认的 `block_memory_io` 重排后端。
 
 ### Host 过滤
@@ -121,6 +123,7 @@ window 都会关闭 term 级 posting 剪枝，因此日期查询可能比仅 hos
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `n_candidate` | int | `0` | 粗排候选数量；`0` 使用根据 `topk` 推导的索引默认值。 |
+| `filter_callback_limit` | uint64 | `0` | 单次带过滤检索最多调用用户 `Filter::CheckValid` 回调的次数；`0` 表示不限制。达到正数上限时，在正常处理最后一次回调结果后停止候选及后续 window 扫描，并返回此前已经通过过滤的候选，因此结果可能不完整。该限制适用于常规 KNN 和范围检索 API。 |
 | `query_prune_ratio` | float | `0.0` | 跳过最低权重查询 term 的比例，范围为 `[0.0, 1.0)`。 |
 | `term_prune_ratio` | float | `0.0` | 每条 term list 中跳过最低存储权重的比例，范围为 `[0.0, 1.0)`。 |
 | `term_retain_threshold` | uint64 | `0` | 单个 term 在所有 window 中最多扫描的 posting 总数；`0` 表示关闭，正数使每个非空 window posting list 最多扫描 `max(1, floor(threshold / window_count))` 条。 |
