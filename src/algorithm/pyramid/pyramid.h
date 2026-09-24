@@ -467,6 +467,8 @@ private:
                     bool use_self_as_entry,
                     int sampled_route_level);
 
+    struct BottomGraphBuildOperations;
+
     void
     add_bottom_graph_point(const Hierarchy& hierarchy,
                            IndexNode& node,

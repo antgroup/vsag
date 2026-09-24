@@ -35,6 +35,7 @@
 #include "storage/stream_writer.h"
 #include "unittest.h"
 #include "vsag/options.h"
+#include "vsag/serialize_writer.h"
 #include "vsag/vsag.h"
 
 TEST_CASE("Pyramid reserved slots are not labels", "[ut][pyramid][reserved_labels]") {
@@ -121,7 +122,8 @@ MakePyramidIndex(uint32_t index_min_size,
                  bool use_mrle_split = false,
                  bool use_mrle_fp32 = false,
                  bool use_reorder = false,
-                 bool store_raw_vector = false) {
+                 bool store_raw_vector = false,
+                 bool support_duplicate = false) {
     PyramidTestIndex result;
     vsag::IndexCommonParam common_param;
     common_param.dim_ = PYRAMID_TEST_DIM;
@@ -165,6 +167,7 @@ MakePyramidIndex(uint32_t index_min_size,
         external_param[vsag::INDEX_TQ_CHAIN].SetString("mrle, fp32");
         external_param[vsag::INDEX_MRLE_DIM].SetInt(2);
     }
+    external_param[vsag::PYRAMID_SUPPORT_DUPLICATE].SetBool(support_duplicate);
     external_param[vsag::PYRAMID_INDEX_MIN_SIZE].SetInt(index_min_size);
     external_param[vsag::PYRAMID_BUILD_THREAD_COUNT].SetUint64(build_thread_count);
     external_param[vsag::STORE_RAW_VECTOR].SetBool(store_raw_vector);
@@ -695,6 +698,144 @@ TEST_CASE("Pyramid promotes flat node at index minimum size", "[ut][pyramid]") {
             REQUIRE(std::stoul(stats[0]) > 0);
         }
     }
+}
+
+TEST_CASE("Pyramid candidate replay preserves sparse members and duplicates", "[ut][pyramid]") {
+    const bool support_duplicate = GENERATE(false, true);
+    auto test_index =
+        MakePyramidIndex(3, 1, false, false, false, false, false, false, support_duplicate);
+    const auto& index = test_index.index;
+    // Interleave paths: each candidate's global IDs are sparse, and one candidate
+    // consists entirely of equal vectors. Processing three members need not create
+    // three physical graph nodes when duplicate support is enabled.
+    std::vector<float> vectors(6 * PYRAMID_TEST_DIM, 1.0F);
+    std::vector<int64_t> ids = {901, 117, 603, 229, 405, 331};
+    std::vector<std::string> paths = {"a", "b", "a", "b", "a", "b"};
+    REQUIRE(index->Add(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), 4)).empty());
+    REQUIRE(GetPyramidSubindexCount(index, "flat_subindexes") == 2);
+    REQUIRE(index
+                ->Add(MakePyramidDataset(
+                    vectors.data() + 4 * PYRAMID_TEST_DIM, ids.data() + 4, paths.data() + 4, 2))
+                .empty());
+    REQUIRE(GetPyramidSubindexCount(index, "flat_subindexes") == 0);
+    REQUIRE(GetPyramidSubindexCount(index, "graph_subindexes") == 2);
+    REQUIRE(GetPyramidSubindexCount(index, "total_vectors_in_graph") ==
+            (support_duplicate ? 2 : 6));
+    REQUIRE(index->GetNumElements() == 6);
+    for (int p = 0; p < 2; ++p) {
+        auto query = MakePyramidDataset(vectors.data(), nullptr, paths.data() + p, 1);
+        auto result =
+            index->KnnSearch(query, 3, R"({"pyramid":{"ef_search":16}})", vsag::FilterPtr{});
+        // Baseline returns the representative only for an all-duplicate leaf.
+        // Preserve that behavior here; expanding duplicate results is a separate fix.
+        if (support_duplicate) {
+            REQUIRE(result->GetDim() == 1);
+            REQUIRE(result->GetIds()[0] == ids[p]);
+        } else {
+            REQUIRE(result->GetDim() == 3);
+            std::set<int64_t> actual(result->GetIds(), result->GetIds() + 3);
+            REQUIRE(actual == std::set<int64_t>{ids[p], ids[p + 2], ids[p + 4]});
+        }
+    }
+    int64_t next_id = 777;
+    REQUIRE(index->Add(MakePyramidDataset(vectors.data(), &next_id, paths.data(), 1)).empty());
+    REQUIRE(index->GetNumElements() == 7);
+}
+
+TEST_CASE("Pyramid multipath flat candidates promote after streaming restore",
+          "[ut][pyramid][multi_path][streaming_serialize]") {
+    const bool restore_flat = GENERATE(false, true);
+    auto common = vsag::IndexCommonParam{};
+    common.dim_ = PYRAMID_TEST_DIM;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"fp32", "max_degree":8, "ef_construction":32,
+        "build_thread_count":1, "graph_type":"nsw", "index_min_size":3,
+        "hierarchies":[{"name":"tag","no_build_levels":[0]}]
+    })");
+    auto make_index = [&] {
+        return std::make_shared<vsag::IndexImpl<vsag::Pyramid>>(param, common);
+    };
+    auto index = make_index();
+    std::vector<float> vectors = {0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0};
+    std::vector<int64_t> ids = {17, 81, 43, 99};
+    auto dataset = [&](int64_t offset, int64_t count) {
+        return vsag::Dataset::Make()
+            ->NumElements(count)
+            ->Dim(PYRAMID_TEST_DIM)
+            ->Float32Vectors(vectors.data() + offset * PYRAMID_TEST_DIM)
+            ->Ids(ids.data() + offset)
+            ->Paths("tag", std::vector<std::vector<std::string>>(count, {"a/x", "a/y", "a/x", "a"}))
+            ->Owner(false);
+    };
+    auto add = [&](int64_t offset, int64_t count) {
+        auto result = index->Add(dataset(offset, count));
+        REQUIRE(result.has_value());
+        REQUIRE(result.value().empty());
+    };
+    add(0, 2);
+    auto check_stats = [&](uint64_t flat, uint64_t graph) {
+        auto stats = index->GetStats();
+        auto json = vsag::JsonType::Parse(stats);
+        auto quality = json["hierarchies"]["tag"]["subindex_quality"];
+        REQUIRE(quality["flat_subindexes"].GetUint64() == flat);
+        REQUIRE(quality["graph_subindexes"].GetUint64() == graph);
+    };
+    // Quality stats count leaves only, not their shared prefix a. Repeated paths
+    // must not inflate leaf membership and trigger promotion before the threshold.
+    check_stats(2, 0);
+    auto round_trip = [&] {
+        class BufferWriter : public vsag::SerializeWriter {
+        public:
+            std::string bytes;
+            void
+            Write(const char* data, uint64_t size) override {
+                bytes.append(data, size);
+            }
+        } writer;
+        // Chunked serialization is currently unsupported by Pyramid, unlike HGraph.
+        auto chunked = index->Serialize(writer, 64);
+        REQUIRE_FALSE(chunked.has_value());
+        REQUIRE(chunked.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+        REQUIRE(chunked.error().message.find("chunked serialization") != std::string::npos);
+        std::stringstream stream;
+        REQUIRE(index->SerializeStreaming(stream).has_value());
+        auto restored = make_index();
+        REQUIRE(restored->DeserializeStreaming(stream).has_value());
+        index = restored;
+    };
+    if (restore_flat) {
+        round_trip();
+        check_stats(2, 0);
+    }
+    auto prefix_query = dataset(0, 1);
+    prefix_query->Paths("tag", std::vector<std::vector<std::string>>{{"a"}});
+    auto prefix_result =
+        index->KnnSearch(prefix_query, 10, R"({"pyramid":{"ef_search":32,"hierarchies":["tag"]}})");
+    REQUIRE(prefix_result.has_value());
+    REQUIRE(prefix_result.value()->GetDim() == 2);
+    add(2, 1);
+    check_stats(0, 2);
+    REQUIRE(index->GetNumElements() == 3);
+    auto query = dataset(0, 1);
+    auto result =
+        index->KnnSearch(query, 10, R"({"pyramid":{"ef_search":32,"hierarchies":["tag"]}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 3);
+    std::set<int64_t> actual(result.value()->GetIds(), result.value()->GetIds() + 3);
+    REQUIRE(actual == std::set<int64_t>{17, 81, 43});
+    round_trip();
+    check_stats(0, 2);
+    add(3, 1);
+    REQUIRE(index->GetNumElements() == 4);
+    check_stats(0, 2);
+    result = index->KnnSearch(query, 10, R"({"pyramid":{"ef_search":32,"hierarchies":["tag"]}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 4);
+    actual = std::set<int64_t>(result.value()->GetIds(), result.value()->GetIds() + 4);
+    REQUIRE(actual == std::set<int64_t>{17, 81, 43, 99});
 }
 
 TEST_CASE("Pyramid SearchWithRequest reports reasoning for expected labels",
