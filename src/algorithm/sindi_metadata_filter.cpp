@@ -625,146 +625,6 @@ SindiHostFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
 
 namespace {
 
-constexpr uint32_t DATE_YEAR_SHIFT = 9;
-constexpr uint32_t DATE_MONTH_SHIFT = 5;
-constexpr uint32_t DATE_MONTH_MASK = 0xF;
-constexpr uint32_t DATE_DAY_MASK = 0x1F;
-constexpr uint32_t MAX_DATE_YEAR = 9999;
-constexpr uint32_t MISSING_DATE_BUCKET = 0;
-constexpr uint32_t MISSING_DATE_QUARTER = 0;
-
-uint32_t
-date_year(uint32_t bucket) {
-    return bucket >> DATE_YEAR_SHIFT;
-}
-
-uint32_t
-date_month(uint32_t bucket) {
-    return (bucket >> DATE_MONTH_SHIFT) & DATE_MONTH_MASK;
-}
-
-uint32_t
-date_day(uint32_t bucket) {
-    return bucket & DATE_DAY_MASK;
-}
-
-bool
-is_leap_year(uint32_t year) {
-    return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0);
-}
-
-uint32_t
-days_in_month(uint32_t year, uint32_t month) {
-    constexpr uint32_t days_per_month[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-    return month == 2 and is_leap_year(year) ? 29 : days_per_month[month - 1];
-}
-
-uint32_t
-parse_date_component(const std::string& value, uint32_t begin, uint32_t count) {
-    uint32_t result = 0;
-    for (uint32_t i = begin; i < begin + count; ++i) {
-        const bool valid_digit = value[i] >= '0' and value[i] <= '9';
-        CHECK_ARGUMENT(valid_digit, fmt::format("invalid SINDI date bucket: {}", value));
-        result = result * 10 + static_cast<uint32_t>(value[i] - '0');
-    }
-    return result;
-}
-
-uint32_t
-parse_date_bucket(const std::string& value) {
-    const bool valid_size = value.size() == 4 or value.size() == 7 or value.size() == 10;
-    CHECK_ARGUMENT(valid_size, fmt::format("invalid SINDI date bucket: {}", value));
-    const auto year = parse_date_component(value, 0, 4);
-    const bool valid_year = year > 0 and year <= MAX_DATE_YEAR;
-    CHECK_ARGUMENT(valid_year, fmt::format("invalid SINDI date bucket: {}", value));
-    if (value.size() == 4) {
-        return year << DATE_YEAR_SHIFT;
-    }
-
-    CHECK_ARGUMENT(value[4] == '/', fmt::format("invalid SINDI date bucket: {}", value));
-    const auto month = parse_date_component(value, 5, 2);
-    const bool valid_month = month > 0 and month <= 12;
-    CHECK_ARGUMENT(valid_month, fmt::format("invalid SINDI date bucket: {}", value));
-    if (value.size() == 7) {
-        return (year << DATE_YEAR_SHIFT) | (month << DATE_MONTH_SHIFT);
-    }
-
-    CHECK_ARGUMENT(value[7] == '/', fmt::format("invalid SINDI date bucket: {}", value));
-    const auto day = parse_date_component(value, 8, 2);
-    const bool valid_day = day > 0 and day <= days_in_month(year, month);
-    CHECK_ARGUMENT(valid_day, fmt::format("invalid SINDI date bucket: {}", value));
-    return (year << DATE_YEAR_SHIFT) | (month << DATE_MONTH_SHIFT) | day;
-}
-
-bool
-is_valid_date_bucket(uint32_t bucket) {
-    const auto year = date_year(bucket);
-    const auto month = date_month(bucket);
-    const auto day = date_day(bucket);
-    if (year == 0 or year > MAX_DATE_YEAR or month > 12) {
-        return false;
-    }
-    if (month == 0) {
-        return day == 0;
-    }
-    return day == 0 or day <= days_in_month(year, month);
-}
-
-uint32_t
-date_bucket_to_quarter(uint32_t bucket) {
-    const auto month = date_month(bucket);
-    return date_year(bucket) * 4 + ((month == 0 ? 1 : month) - 1) / 3;
-}
-
-bool
-date_bucket_matches(uint32_t base_bucket, uint32_t query_bucket) {
-    if (base_bucket == MISSING_DATE_BUCKET) {
-        return false;
-    }
-    if (date_year(base_bucket) != date_year(query_bucket)) {
-        return false;
-    }
-    const auto query_month = date_month(query_bucket);
-    if (query_month == 0) {
-        return true;
-    }
-    if (date_month(base_bucket) != query_month) {
-        return false;
-    }
-    const auto query_day = date_day(query_bucket);
-    return query_day == 0 or date_day(base_bucket) == query_day;
-}
-
-uint32_t
-date_bucket_first_day(uint32_t bucket) {
-    const auto month = date_month(bucket);
-    if (month == 0) {
-        return bucket | (1U << DATE_MONTH_SHIFT) | 1U;
-    }
-    return date_day(bucket) == 0 ? bucket | 1U : bucket;
-}
-
-uint32_t
-date_bucket_last_day(uint32_t bucket) {
-    const auto month = date_month(bucket);
-    if (month == 0) {
-        return bucket | (12U << DATE_MONTH_SHIFT) | 31U;
-    }
-    return date_day(bucket) == 0 ? bucket | days_in_month(date_year(bucket), month) : bucket;
-}
-
-bool
-date_bucket_within_range(uint32_t bucket, uint32_t query_begin, uint32_t query_end) {
-    if (bucket == MISSING_DATE_BUCKET) {
-        return false;
-    }
-    if (date_day(bucket) != 0) {
-        return bucket >= query_begin and bucket <= query_end;
-    }
-    return date_bucket_first_day(bucket) >= query_begin and
-           date_bucket_last_day(bucket) <= query_end;
-}
-
 bool
 contains_value(const std::vector<std::pair<uint32_t, uint32_t>>& ranges, uint32_t value) {
     const auto iter = std::upper_bound(
@@ -788,18 +648,16 @@ append_merged_range(std::vector<std::pair<uint32_t, uint32_t>>& ranges,
     ranges.emplace_back(begin, end);
 }
 
-class DateRouteFilter : public Filter {
+class TimeRouteFilter : public Filter {
 public:
-    DateRouteFilter(const SindiDateSearchRoute& route,
-                    const Vector<uint32_t>* document_buckets,
+    TimeRouteFilter(const SindiTimeSearchRoute& route,
+                    const Vector<int32_t>* document_days,
                     FilterPtr filter)
-        : inner_ranges_(&route.inner_ranges),
-          has_date_bucket_(route.has_date_bucket),
-          has_date_range_(route.has_date_range),
-          query_bucket_(route.query_bucket),
+        : inner_ranges_(route.inner_ranges),
+          has_time_(route.has_time),
           query_begin_(route.query_begin),
           query_end_(route.query_end),
-          document_buckets_(document_buckets),
+          document_days_(document_days),
           filter_(std::move(filter)) {
     }
 
@@ -809,18 +667,14 @@ public:
             return false;
         }
         const auto inner_id = static_cast<uint32_t>(id);
-        if (not contains_value(*inner_ranges_, inner_id)) {
+        if (not contains_value(inner_ranges_, inner_id)) {
             return false;
         }
-        if ((has_date_bucket_ or has_date_range_) and inner_id >= document_buckets_->size()) {
+        if (has_time_ and inner_id >= document_days_->size()) {
             return false;
         }
-        if (has_date_bucket_ and
-            not date_bucket_matches((*document_buckets_)[inner_id], query_bucket_)) {
-            return false;
-        }
-        if (has_date_range_ and not date_bucket_within_range(
-                                    (*document_buckets_)[inner_id], query_begin_, query_end_)) {
+        if (has_time_ and ((*document_days_)[inner_id] < query_begin_ or
+                           (*document_days_)[inner_id] > query_end_)) {
             return false;
         }
         return filter_ == nullptr or filter_->CheckValid(id);
@@ -844,14 +698,11 @@ public:
     }
 
 private:
-    // Borrows route.inner_ranges and must not outlive the owning search-local route.
-    const std::vector<std::pair<uint32_t, uint32_t>>* inner_ranges_{nullptr};
-    bool has_date_bucket_{false};
-    bool has_date_range_{false};
-    uint32_t query_bucket_{0};
-    uint32_t query_begin_{0};
-    uint32_t query_end_{0};
-    const Vector<uint32_t>* document_buckets_{nullptr};
+    std::vector<std::pair<uint32_t, uint32_t>> inner_ranges_;
+    bool has_time_{false};
+    int32_t query_begin_{0};
+    int32_t query_end_{0};
+    const Vector<int32_t>* document_days_{nullptr};
     FilterPtr filter_;
 };
 
@@ -869,19 +720,19 @@ read_vector(StreamReader& reader, Vector<T>& values, uint64_t max_count, const c
 
 }  // namespace
 
-SindiDateBuildPlan::SindiDateBuildPlan(Allocator* allocator)
+SindiTimeBuildPlan::SindiTimeBuildPlan(Allocator* allocator)
     : order_(allocator),
-      source_buckets_(allocator),
+      source_days_(allocator),
       source_host_ids_(allocator),
-      group_quarters_(allocator),
+      group_partitions_(allocator),
       group_hosts_(allocator),
       input_offsets_(allocator),
       successful_counts_(allocator),
-      successful_buckets_(allocator) {
+      successful_days_(allocator) {
 }
 
 void
-SindiDateBuildPlan::RecordSuccess(uint32_t ordered_position) {
+SindiTimeBuildPlan::RecordSuccess(uint32_t ordered_position) {
     if (not enabled_) {
         return;
     }
@@ -891,29 +742,30 @@ SindiDateBuildPlan::RecordSuccess(uint32_t ordered_position) {
         ++successful_group_cursor_;
     }
     ++successful_counts_[successful_group_cursor_];
-    successful_buckets_.push_back(source_buckets_[order_[ordered_position]]);
+    successful_days_.push_back(source_days_[order_[ordered_position]]);
 }
 
-SindiDateFilter::SindiDateFilter(Allocator* allocator)
+SindiTimeFilter::SindiTimeFilter(Allocator* allocator)
     : allocator_(allocator),
       host_dictionary_(allocator),
-      document_buckets_(allocator),
+      document_days_(allocator),
       partitions_(allocator) {
 }
 
-SindiDateBuildPlan
-SindiDateFilter::PrepareBuild(const DatasetPtr& base) const {
-    SindiDateBuildPlan plan(allocator_);
+SindiTimeBuildPlan
+SindiTimeFilter::PrepareBuild(const DatasetPtr& base, uint32_t window_size) const {
+    SindiTimeBuildPlan plan(allocator_);
     CHECK_ARGUMENT(base->GetUInt32Metadata(SINDI_LEGACY_HOST_METADATA_NAME) == nullptr,
                    "numeric SINDI host_id metadata is unsupported; use string metadata host");
-    const auto* date_buckets = base->GetPaths(SINDI_DATE_PATH_NAME);
-    if (date_buckets == nullptr) {
+    const auto* source_timestamps = base->GetInt64Metadata(SINDI_PUBLISH_TIME_METADATA_NAME);
+    if (source_timestamps == nullptr) {
         return plan;
     }
+    CHECK_ARGUMENT(window_size > 0, "SINDI window_size must be greater than zero");
 
     const auto data_num = base->GetNumElements();
     CHECK_ARGUMENT(data_num <= static_cast<int64_t>(std::numeric_limits<uint32_t>::max()),
-                   "SINDI date-filtered build exceeds uint32_t document capacity");
+                   "SINDI time-filtered build exceeds uint32_t document capacity");
 
     const auto* source_hosts = base->GetStringMetadata(SINDI_HOST_METADATA_NAME);
     plan.enabled_ = true;
@@ -924,77 +776,120 @@ SindiDateFilter::PrepareBuild(const DatasetPtr& base) const {
     }
     const auto* source_host_ids = plan.has_host_metadata_ ? plan.source_host_ids_.data() : nullptr;
     plan.order_.resize(static_cast<uint64_t>(data_num));
-    plan.source_buckets_.resize(static_cast<uint64_t>(data_num));
-    Vector<uint32_t> source_quarters(static_cast<uint64_t>(data_num), allocator_);
+    plan.source_days_.resize(static_cast<uint64_t>(data_num));
     std::iota(plan.order_.begin(), plan.order_.end(), 0);
     for (uint32_t i = 0; i < static_cast<uint32_t>(data_num); ++i) {
-        if (date_buckets[i].empty()) {
-            plan.source_buckets_[i] = MISSING_DATE_BUCKET;
-            source_quarters[i] = MISSING_DATE_QUARTER;
-        } else {
-            plan.source_buckets_[i] = parse_date_bucket(date_buckets[i]);
-            source_quarters[i] = date_bucket_to_quarter(plan.source_buckets_[i]);
+        const auto timestamp = source_timestamps[i];
+        CHECK_ARGUMENT(timestamp >= 0, "SINDI publish_time_stamp base values must be non-negative");
+        if (timestamp == 0) {
+            plan.source_days_[i] = SINDI_MISSING_EPOCH_DAY;
+            continue;
         }
+        const auto day = timestamp / SINDI_SECONDS_PER_DAY;
+        CHECK_ARGUMENT(day <= std::numeric_limits<int32_t>::max(),
+                       "SINDI publish_time_stamp exceeds the supported epoch day range");
+        plan.source_days_[i] = static_cast<int32_t>(day);
     }
 
     std::sort(plan.order_.begin(), plan.order_.end(), [&](uint32_t lhs, uint32_t rhs) {
-        if (source_quarters[lhs] != source_quarters[rhs]) {
-            return source_quarters[lhs] < source_quarters[rhs];
+        const bool lhs_missing = plan.source_days_[lhs] == SINDI_MISSING_EPOCH_DAY;
+        const bool rhs_missing = plan.source_days_[rhs] == SINDI_MISSING_EPOCH_DAY;
+        if (lhs_missing != rhs_missing) {
+            return not lhs_missing;
         }
-        if (source_host_ids != nullptr and source_host_ids[lhs] != source_host_ids[rhs]) {
-            return source_host_ids[lhs] < source_host_ids[rhs];
+        if (not lhs_missing and source_timestamps[lhs] != source_timestamps[rhs]) {
+            return source_timestamps[lhs] < source_timestamps[rhs];
         }
         return lhs < rhs;
     });
 
+    const auto dated_end =
+        std::find_if(plan.order_.begin(), plan.order_.end(), [&](uint32_t source) {
+            return plan.source_days_[source] == SINDI_MISSING_EPOCH_DAY;
+        });
+    const auto dated_count = static_cast<uint32_t>(dated_end - plan.order_.begin());
+    const auto dated_partition_count = dated_count == 0 ? 0 : (dated_count - 1) / window_size + 1;
+    Vector<uint32_t> source_partitions(static_cast<uint64_t>(data_num), allocator_);
+    for (uint32_t position = 0; position < dated_count; ++position) {
+        source_partitions[plan.order_[position]] = position / window_size;
+    }
+    for (uint32_t position = dated_count; position < static_cast<uint32_t>(data_num); ++position) {
+        source_partitions[plan.order_[position]] = dated_partition_count;
+    }
+
+    const auto sort_partition = [&](uint32_t begin, uint32_t end) {
+        std::sort(
+            plan.order_.begin() + begin,
+            plan.order_.begin() + end,
+            [&](uint32_t lhs, uint32_t rhs) {
+                if (source_host_ids != nullptr and source_host_ids[lhs] != source_host_ids[rhs]) {
+                    return source_host_ids[lhs] < source_host_ids[rhs];
+                }
+                return lhs < rhs;
+            });
+    };
+    for (uint64_t begin = 0; begin < dated_count; begin += window_size) {
+        const auto end = std::min<uint64_t>(dated_count, begin + window_size);
+        sort_partition(static_cast<uint32_t>(begin), static_cast<uint32_t>(end));
+    }
+    if (dated_count < static_cast<uint32_t>(data_num)) {
+        sort_partition(dated_count, static_cast<uint32_t>(data_num));
+    }
+
     for (uint32_t position = 0; position < plan.order_.size(); ++position) {
         const auto source = plan.order_[position];
-        const auto quarter = source_quarters[source];
+        const auto partition = source_partitions[source];
         const auto host = source_host_ids == nullptr ? 0 : source_host_ids[source];
-        if (plan.group_quarters_.empty() or plan.group_quarters_.back() != quarter or
+        if (plan.group_partitions_.empty() or plan.group_partitions_.back() != partition or
             plan.group_hosts_.back() != host) {
-            plan.group_quarters_.push_back(quarter);
+            plan.group_partitions_.push_back(partition);
             plan.group_hosts_.push_back(host);
             plan.input_offsets_.push_back(position);
         }
     }
     plan.input_offsets_.push_back(static_cast<uint32_t>(data_num));
-    plan.successful_counts_.resize(plan.group_quarters_.size(), 0);
-    plan.successful_buckets_.reserve(static_cast<uint64_t>(data_num));
+    plan.successful_counts_.resize(plan.group_partitions_.size(), 0);
+    plan.successful_days_.reserve(static_cast<uint64_t>(data_num));
     return plan;
 }
 
 void
-SindiDateFilter::CommitBuild(SindiDateBuildPlan&& plan, uint64_t element_count) {
+SindiTimeFilter::CommitBuild(SindiTimeBuildPlan&& plan, uint64_t element_count) {
     this->Clear();
     if (not plan.Enabled()) {
         return;
     }
-    CHECK_ARGUMENT(plan.successful_buckets_.size() == element_count,
-                   "SINDI successful date bucket count does not match element count");
+    CHECK_ARGUMENT(plan.successful_days_.size() == element_count,
+                   "SINDI successful epoch day count does not match element count");
 
     has_host_metadata_ = plan.has_host_metadata_;
     if (has_host_metadata_) {
         host_dictionary_.Commit(plan.new_hosts_);
     }
-    document_buckets_ = std::move(plan.successful_buckets_);
+    document_days_ = std::move(plan.successful_days_);
     uint32_t inner_cursor = 0;
-    for (uint64_t group_begin = 0; group_begin < plan.group_quarters_.size();) {
+    for (uint64_t group_begin = 0; group_begin < plan.group_partitions_.size();) {
         uint64_t group_end = group_begin + 1;
-        while (group_end < plan.group_quarters_.size() and
-               plan.group_quarters_[group_end] == plan.group_quarters_[group_begin]) {
+        while (group_end < plan.group_partitions_.size() and
+               plan.group_partitions_[group_end] == plan.group_partitions_[group_begin]) {
             ++group_end;
         }
-        uint32_t quarter_count = 0;
+        uint32_t partition_count = 0;
         for (uint64_t group = group_begin; group < group_end; ++group) {
-            quarter_count += plan.successful_counts_[group];
+            partition_count += plan.successful_counts_[group];
         }
-        if (quarter_count > 0) {
+        if (partition_count > 0) {
             partitions_.emplace_back(allocator_);
             auto& partition = partitions_.back();
-            partition.quarter = plan.group_quarters_[group_begin];
             partition.begin = inner_cursor;
-            partition.end = inner_cursor + quarter_count;
+            partition.end = inner_cursor + partition_count;
+            const auto day_range = std::minmax_element(document_days_.begin() + partition.begin,
+                                                       document_days_.begin() + partition.end);
+            partition.min_day = *day_range.first;
+            partition.max_day = *day_range.second;
+            CHECK_ARGUMENT((partition.min_day == SINDI_MISSING_EPOCH_DAY) ==
+                               (partition.max_day == SINDI_MISSING_EPOCH_DAY),
+                           "SINDI missing timestamps must be isolated in the final partition");
             if (has_host_metadata_) {
                 partition.host_offsets.push_back(0);
                 uint32_t local_offset = 0;
@@ -1013,21 +908,21 @@ SindiDateFilter::CommitBuild(SindiDateBuildPlan&& plan, uint64_t element_count) 
         group_begin = group_end;
     }
     CHECK_ARGUMENT(inner_cursor == element_count,
-                   "SINDI date partitions do not cover every indexed document");
+                   "SINDI time partitions do not cover every indexed document");
 }
 
 void
-SindiDateFilter::Clear() {
+SindiTimeFilter::Clear() {
     host_dictionary_.Clear();
-    Vector<uint32_t>(allocator_).swap(document_buckets_);
+    Vector<int32_t>(allocator_).swap(document_days_);
     Vector<Partition>(allocator_).swap(partitions_);
     has_host_metadata_ = false;
 }
 
 uint64_t
-SindiDateFilter::GetMemoryUsage() const {
+SindiTimeFilter::GetMemoryUsage() const {
     uint64_t memory = host_dictionary_.GetMemoryUsage();
-    memory += document_buckets_.size() * sizeof(uint32_t);
+    memory += document_days_.size() * sizeof(int32_t);
     memory += partitions_.size() * sizeof(Partition);
     for (const auto& partition : partitions_) {
         memory += (partition.host_ids.size() + partition.host_offsets.size()) * sizeof(uint32_t);
@@ -1035,40 +930,43 @@ SindiDateFilter::GetMemoryUsage() const {
     return memory;
 }
 
-SindiDateSearchRoute
-SindiDateFilter::Classify(const DatasetPtr& query, uint32_t window_size) const {
+SindiTimeSearchRoute
+SindiTimeFilter::Classify(const DatasetPtr& query, uint32_t window_size) const {
     CHECK_ARGUMENT(query->GetUInt32Metadata(SINDI_LEGACY_HOST_METADATA_NAME) == nullptr,
                    "numeric SINDI host_id metadata is unsupported; use string metadata host");
-    SindiDateSearchRoute route;
+    SindiTimeSearchRoute route;
     if (partitions_.empty()) {
         return route;
     }
     route.enabled = true;
+    CHECK_ARGUMENT(window_size > 0, "SINDI window_size must be greater than zero");
 
-    uint32_t begin_quarter = 0;
-    uint32_t end_quarter = std::numeric_limits<uint32_t>::max();
-    const auto* query_date = query->GetPaths(SINDI_DATE_PATH_NAME);
-    const auto* query_date_begin = query->GetPaths(SINDI_DATE_BEGIN_PATH_NAME);
-    const auto* query_date_end = query->GetPaths(SINDI_DATE_END_PATH_NAME);
-    CHECK_ARGUMENT((query_date_begin == nullptr) == (query_date_end == nullptr),
-                   "SINDI date_begin and date_end must be provided together");
-    const bool conflicting_date_query = query_date != nullptr and query_date_begin != nullptr;
-    CHECK_ARGUMENT(not conflicting_date_query,
-                   "SINDI date cannot be combined with date_begin and date_end");
-    if (query_date != nullptr) {
-        route.has_date_bucket = true;
-        route.query_bucket = parse_date_bucket(query_date[0]);
-        begin_quarter = date_bucket_to_quarter(route.query_bucket);
-        // A year-only bucket is anchored in Q1, so include Q1 through Q4.
-        end_quarter = date_month(route.query_bucket) == 0 ? begin_quarter + 3 : begin_quarter;
-    } else if (query_date_begin != nullptr) {
-        route.has_date_range = true;
-        route.query_begin = date_bucket_first_day(parse_date_bucket(query_date_begin[0]));
-        route.query_end = date_bucket_last_day(parse_date_bucket(query_date_end[0]));
-        CHECK_ARGUMENT(route.query_begin <= route.query_end,
-                       "SINDI date_begin must not exceed date_end");
-        begin_quarter = date_bucket_to_quarter(route.query_begin);
-        end_quarter = date_bucket_to_quarter(route.query_end);
+    const auto* query_time = query->GetInt64Metadata(SINDI_PUBLISH_TIME_METADATA_NAME);
+    const auto* query_begin = query->GetInt64Metadata(SINDI_PUBLISH_TIME_BEGIN_METADATA_NAME);
+    const auto* query_end = query->GetInt64Metadata(SINDI_PUBLISH_TIME_END_METADATA_NAME);
+    CHECK_ARGUMENT((query_begin == nullptr) == (query_end == nullptr),
+                   "SINDI publish_time_stamp_begin and publish_time_stamp_end must be provided "
+                   "together");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        not(query_time != nullptr and query_begin != nullptr),
+        "SINDI publish_time_stamp cannot be combined with a time range");
+    const auto to_day = [](int64_t timestamp) {
+        CHECK_ARGUMENT(timestamp > 0, "SINDI query timestamps must be greater than zero");
+        const auto day = timestamp / SINDI_SECONDS_PER_DAY;
+        CHECK_ARGUMENT(day <= std::numeric_limits<int32_t>::max(),
+                       "SINDI query timestamp exceeds the supported epoch day range");
+        return static_cast<int32_t>(day);
+    };
+    if (query_time != nullptr) {
+        route.has_time = true;
+        route.query_begin = to_day(query_time[0]);
+        route.query_end = route.query_begin;
+    } else if (query_begin != nullptr) {
+        CHECK_ARGUMENT(query_begin[0] <= query_end[0],
+                       "SINDI publish_time_stamp_begin must not exceed publish_time_stamp_end");
+        route.has_time = true;
+        route.query_begin = to_day(query_begin[0]);
+        route.query_end = to_day(query_end[0]);
     }
 
     const auto* query_host = query->GetStringMetadata(SINDI_HOST_METADATA_NAME);
@@ -1078,18 +976,28 @@ SindiDateFilter::Classify(const DatasetPtr& query, uint32_t window_size) const {
         route.kind = SindiHostRouteKind::EMPTY;
         return route;
     }
-    if (not route.has_date_bucket and not route.has_date_range and not use_host) {
+    if (not route.has_time and not use_host) {
         return route;
     }
 
-    const bool has_date_query = route.has_date_bucket or route.has_date_range;
-    const uint64_t route_quarter_count =
-        has_date_query ? static_cast<uint64_t>(end_quarter) - begin_quarter + 1
-                       : partitions_.size();
-    route.inner_ranges.reserve(std::min<uint64_t>(partitions_.size(), route_quarter_count));
-    for (const auto& partition : partitions_) {
-        if (partition.quarter < begin_quarter or partition.quarter > end_quarter) {
-            continue;
+    auto partition_begin = partitions_.begin();
+    auto partition_end = partitions_.end();
+    if (route.has_time) {
+        partition_end =
+            std::find_if(partition_begin, partition_end, [](const Partition& partition) {
+                return partition.min_day == SINDI_MISSING_EPOCH_DAY;
+            });
+        partition_begin = std::lower_bound(
+            partition_begin,
+            partition_end,
+            route.query_begin,
+            [](const Partition& partition, int32_t day) { return partition.max_day < day; });
+    }
+    route.inner_ranges.reserve(static_cast<uint64_t>(partition_end - partition_begin));
+    for (auto partition_iter = partition_begin; partition_iter != partition_end; ++partition_iter) {
+        const auto& partition = *partition_iter;
+        if (route.has_time and partition.min_day > route.query_end) {
+            break;
         }
         uint32_t begin = partition.begin;
         uint32_t end = partition.end;
@@ -1119,12 +1027,12 @@ SindiDateFilter::Classify(const DatasetPtr& query, uint32_t window_size) const {
 }
 
 FilterPtr
-SindiDateFilter::create_filter(const SindiDateSearchRoute& route, FilterPtr filter) const {
-    return std::make_shared<DateRouteFilter>(route, &document_buckets_, std::move(filter));
+SindiTimeFilter::create_filter(const SindiTimeSearchRoute& route, FilterPtr filter) const {
+    return std::make_shared<TimeRouteFilter>(route, &document_days_, std::move(filter));
 }
 
 void
-SindiDateFilter::ApplyFilter(const SindiDateSearchRoute& route, FilterPtr& filter) const {
+SindiTimeFilter::ApplyFilter(const SindiTimeSearchRoute& route, FilterPtr& filter) const {
     if (not route.enabled or route.kind != SindiHostRouteKind::WINDOW) {
         return;
     }
@@ -1132,18 +1040,20 @@ SindiDateFilter::ApplyFilter(const SindiDateSearchRoute& route, FilterPtr& filte
 }
 
 void
-SindiDateFilter::ApplyWindowRoute(const SindiDateSearchRoute& route,
+SindiTimeFilter::ApplyWindowRoute(const SindiTimeSearchRoute& route,
                                   int64_t& min_window_id,
                                   int64_t& max_window_id) {
     if (not route.enabled or route.kind != SindiHostRouteKind::WINDOW) {
         return;
     }
+    CHECK_ARGUMENT(not route.window_ranges.empty(),
+                   "SINDI WINDOW route must contain at least one window range");
     min_window_id = std::max<int64_t>(min_window_id, route.window_ranges.front().first);
     max_window_id = std::min<int64_t>(max_window_id, route.window_ranges.back().second - 1);
 }
 
 int64_t
-SindiDateFilter::NextMatchingWindow(const SindiDateSearchRoute& route,
+SindiTimeFilter::NextMatchingWindow(const SindiTimeSearchRoute& route,
                                     int64_t current_window_id,
                                     int64_t max_window_id) {
     if (not route.enabled or route.kind != SindiHostRouteKind::WINDOW) {
@@ -1166,16 +1076,16 @@ SindiDateFilter::NextMatchingWindow(const SindiDateSearchRoute& route,
 }
 
 bool
-SindiDateFilter::RequiresFullTermScan(const SindiDateSearchRoute& route,
+SindiTimeFilter::RequiresFullTermScan(const SindiTimeSearchRoute& route,
                                       uint32_t window_id,
                                       uint32_t window_size) {
     if (not route.enabled or route.kind != SindiHostRouteKind::WINDOW) {
         return false;
     }
-    if (route.has_date_bucket or route.has_date_range) {
+    if (route.has_time) {
         return true;
     }
-    // A host-only route can include partial windows at quarter or host boundaries.
+    // A host-only route can include partial windows at time-partition or host boundaries.
     const uint64_t window_begin = static_cast<uint64_t>(window_id) * window_size;
     const uint64_t window_end = window_begin + window_size;
     const auto range = std::upper_bound(
@@ -1191,16 +1101,17 @@ SindiDateFilter::RequiresFullTermScan(const SindiDateSearchRoute& route,
 }
 
 void
-SindiDateFilter::Serialize(StreamWriter& writer) const {
-    StreamWriter::WriteObj(writer, SINDI_DATE_METADATA_FORMAT_VERSION);
+SindiTimeFilter::Serialize(StreamWriter& writer) const {
+    StreamWriter::WriteObj(writer, SINDI_TIME_METADATA_FORMAT_VERSION);
     StreamWriter::WriteObj(writer, static_cast<uint32_t>(has_host_metadata_));
     if (has_host_metadata_) {
         host_dictionary_.Serialize(writer);
     }
-    StreamWriter::WriteVector(writer, document_buckets_);
+    StreamWriter::WriteVector(writer, document_days_);
     StreamWriter::WriteObj(writer, static_cast<uint64_t>(partitions_.size()));
     for (const auto& partition : partitions_) {
-        StreamWriter::WriteObj(writer, partition.quarter);
+        StreamWriter::WriteObj(writer, partition.min_day);
+        StreamWriter::WriteObj(writer, partition.max_day);
         StreamWriter::WriteObj(writer, partition.begin);
         StreamWriter::WriteObj(writer, partition.end);
         StreamWriter::WriteVector(writer, partition.host_ids);
@@ -1209,10 +1120,10 @@ SindiDateFilter::Serialize(StreamWriter& writer) const {
 }
 
 void
-SindiDateFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
+SindiTimeFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
         element_count > 0 && element_count <= std::numeric_limits<uint32_t>::max(),
-        fmt::format("serialized SINDI date metadata element count must be in [1, {}], got {}",
+        fmt::format("serialized SINDI time metadata element count must be in [1, {}], got {}",
                     std::numeric_limits<uint32_t>::max(),
                     element_count));
 
@@ -1220,47 +1131,61 @@ SindiDateFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
     uint32_t has_host = 0;
     StreamReader::ReadObj(reader, version);
     StreamReader::ReadObj(reader, has_host);
-    CHECK_ARGUMENT(has_host <= 1, "serialized SINDI date host flag is invalid");
-    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
-        IsSupportedSindiDateMetadataVersion(version) &&
-            (version != SINDI_DATE_METADATA_LEGACY_FORMAT_VERSION || has_host == 0),
-        fmt::format("unsupported SINDI date metadata version {}", version));
+    CHECK_ARGUMENT(has_host <= 1, "serialized SINDI time host flag is invalid");
+    CHECK_ARGUMENT(IsSupportedSindiTimeMetadataVersion(version),
+                   fmt::format("unsupported SINDI time metadata version {}", version));
 
     SindiHostDictionary host_dictionary(allocator_);
     if (has_host != 0) {
         host_dictionary.Deserialize(reader, element_count);
     }
 
-    Vector<uint32_t> document_buckets(allocator_);
-    read_vector(reader, document_buckets, element_count, "document date bucket");
-    CHECK_ARGUMENT(document_buckets.size() == element_count,
-                   "serialized SINDI document date bucket count does not match element count");
+    Vector<int32_t> document_days(allocator_);
+    read_vector(reader, document_days, element_count, "document epoch day");
+    CHECK_ARGUMENT(document_days.size() == element_count,
+                   "serialized SINDI document epoch day count does not match element count");
     uint64_t partition_count = 0;
     StreamReader::ReadObj(reader, partition_count);
-    CHECK_ARGUMENT(partition_count > 0, "serialized SINDI date partition count is invalid");
+    CHECK_ARGUMENT(partition_count > 0, "serialized SINDI time partition count is invalid");
     CHECK_ARGUMENT(partition_count <= element_count,
-                   "serialized SINDI date partition count exceeds element count");
+                   "serialized SINDI time partition count exceeds element count");
 
     Vector<Partition> partitions(allocator_);
     partitions.reserve(partition_count);
-    uint32_t previous_quarter = 0;
+    int32_t previous_max_day = SINDI_MISSING_EPOCH_DAY;
+    bool seen_dated_partition = false;
     uint32_t inner_cursor = 0;
     for (uint64_t i = 0; i < partition_count; ++i) {
         partitions.emplace_back(allocator_);
         auto& partition = partitions.back();
-        StreamReader::ReadObj(reader, partition.quarter);
+        StreamReader::ReadObj(reader, partition.min_day);
+        StreamReader::ReadObj(reader, partition.max_day);
         StreamReader::ReadObj(reader, partition.begin);
         StreamReader::ReadObj(reader, partition.end);
-        if (i > 0) {
-            CHECK_ARGUMENT(partition.quarter > previous_quarter,
-                           "serialized SINDI quarters must be strictly ordered");
+        const bool missing_partition = partition.min_day == SINDI_MISSING_EPOCH_DAY or
+                                       partition.max_day == SINDI_MISSING_EPOCH_DAY;
+        if (missing_partition) {
+            CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+                partition.min_day == SINDI_MISSING_EPOCH_DAY and
+                    partition.max_day == SINDI_MISSING_EPOCH_DAY and i + 1 == partition_count,
+                "serialized SINDI missing-time partition must be last with range [-1, -1]");
+        } else {
+            CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+                partition.min_day >= 0 and partition.min_day <= partition.max_day,
+                "serialized SINDI time partition day range is invalid");
+            if (seen_dated_partition) {
+                CHECK_ARGUMENT(previous_max_day <= partition.min_day,
+                               "serialized SINDI time partition ranges must be ordered");
+            }
+            previous_max_day = partition.max_day;
+            seen_dated_partition = true;
         }
         CHECK_ARGUMENT(partition.begin == inner_cursor,
-                       "serialized SINDI date partitions must be contiguous");
+                       "serialized SINDI time partitions must be contiguous");
         CHECK_ARGUMENT(partition.end > partition.begin,
-                       "serialized SINDI date partition must not be empty");
+                       "serialized SINDI time partition must not be empty");
         CHECK_ARGUMENT(partition.end <= element_count,
-                       "serialized SINDI date partition exceeds element count");
+                       "serialized SINDI time partition exceeds element count");
         read_vector(reader, partition.host_ids, element_count, "partition host");
         read_vector(reader, partition.host_offsets, element_count + 1, "partition host offset");
         if (has_host != 0) {
@@ -1288,49 +1213,43 @@ SindiDateFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
                            "serialized SINDI partition host offsets must cover the partition");
         } else {
             CHECK_ARGUMENT(partition.host_ids.empty() and partition.host_offsets.empty(),
-                           "serialized SINDI date metadata has unexpected host directory");
+                           "serialized SINDI time metadata has unexpected host directory");
         }
         for (uint32_t inner_id = partition.begin; inner_id < partition.end; ++inner_id) {
-            const auto bucket = document_buckets[inner_id];
-            if (bucket == MISSING_DATE_BUCKET) {
-                CHECK_ARGUMENT(version == SINDI_DATE_METADATA_FORMAT_VERSION,
-                               "serialized SINDI missing date bucket requires metadata version 3");
-                CHECK_ARGUMENT(partition.quarter == MISSING_DATE_QUARTER,
-                               "serialized SINDI missing date bucket is outside its partition");
-                continue;
-            }
-            CHECK_ARGUMENT(is_valid_date_bucket(bucket),
-                           "serialized SINDI document date bucket is invalid");
-            CHECK_ARGUMENT(date_bucket_to_quarter(bucket) == partition.quarter,
-                           "serialized SINDI document date bucket does not match its quarter");
+            const auto day = document_days[inner_id];
+            CHECK_ARGUMENT(missing_partition
+                               ? day == SINDI_MISSING_EPOCH_DAY
+                               : day >= partition.min_day and day <= partition.max_day,
+                           "serialized SINDI document epoch day is outside its partition");
         }
-        previous_quarter = partition.quarter;
         inner_cursor = partition.end;
     }
     CHECK_ARGUMENT(inner_cursor == element_count,
-                   "serialized SINDI date partitions do not cover every indexed document");
+                   "serialized SINDI time partitions do not cover every indexed document");
 
     has_host_metadata_ = has_host != 0;
     host_dictionary_ = std::move(host_dictionary);
-    document_buckets_ = std::move(document_buckets);
+    document_days_ = std::move(document_days);
     partitions_ = std::move(partitions);
 }
 
 SindiMetadataFilter::SindiMetadataFilter(Allocator* allocator)
-    : allocator_(allocator), host_filter_(allocator), date_filter_(allocator) {
+    : allocator_(allocator), host_filter_(allocator), time_filter_(allocator) {
 }
 
 SindiMetadataBuildPlan
-SindiMetadataFilter::PrepareBuild(const DatasetPtr& base, uint64_t current_element_count) const {
+SindiMetadataFilter::PrepareBuild(const DatasetPtr& base,
+                                  uint64_t current_element_count,
+                                  uint32_t window_size) const {
     SindiMetadataBuildPlan plan(allocator_);
     if (current_element_count != 0) {
-        CHECK_ARGUMENT(not date_filter_.HasMetadata(),
-                       "SINDI date-aware index does not support incremental Add");
+        CHECK_ARGUMENT(not time_filter_.HasMetadata(),
+                       "SINDI time-aware index does not support incremental Add");
     }
-    plan.date_plan_ = date_filter_.PrepareBuild(base);
-    if (plan.date_plan_.Enabled()) {
+    plan.time_plan_ = time_filter_.PrepareBuild(base, window_size);
+    if (plan.time_plan_.Enabled()) {
         CHECK_ARGUMENT(current_element_count == 0,
-                       "SINDI cannot add date metadata after existing documents");
+                       "SINDI cannot add time metadata after existing documents");
     } else {
         plan.host_plan_ = host_filter_.PrepareBuild(base, current_element_count);
     }
@@ -1341,30 +1260,36 @@ void
 SindiMetadataFilter::CommitBuild(SindiMetadataBuildPlan&& plan,
                                  uint32_t first_inner_id,
                                  uint32_t end_inner_id) {
-    if (plan.date_plan_.Enabled()) {
+    if (plan.time_plan_.Enabled()) {
         host_filter_.Clear();
-        date_filter_.CommitBuild(std::move(plan.date_plan_), end_inner_id);
+        time_filter_.CommitBuild(std::move(plan.time_plan_), end_inner_id);
         return;
     }
     host_filter_.CommitBuild(std::move(plan.host_plan_), first_inner_id, end_inner_id);
     if (first_inner_id == 0) {
-        date_filter_.Clear();
+        time_filter_.Clear();
     }
 }
 
 void
 SindiMetadataFilter::Clear() {
     host_filter_.Clear();
-    date_filter_.Clear();
+    time_filter_.Clear();
 }
 
 SindiMetadataSearchRoute
 SindiMetadataFilter::Classify(const DatasetPtr& query, uint32_t window_size) const {
     SindiMetadataSearchRoute route;
-    if (date_filter_.HasMetadata()) {
-        route.date_route = date_filter_.Classify(query, window_size);
-        route.kind = route.date_route.kind;
+    if (time_filter_.HasMetadata()) {
+        route.time_route = time_filter_.Classify(query, window_size);
+        route.kind = route.time_route.kind;
     } else {
+        const bool has_time_query =
+            query->GetInt64Metadata(SINDI_PUBLISH_TIME_METADATA_NAME) != nullptr or
+            query->GetInt64Metadata(SINDI_PUBLISH_TIME_BEGIN_METADATA_NAME) != nullptr or
+            query->GetInt64Metadata(SINDI_PUBLISH_TIME_END_METADATA_NAME) != nullptr;
+        CHECK_ARGUMENT(not has_time_query,
+                       "SINDI time queries require an index built with publish_time_stamp");
         route.host_route = host_filter_.Classify(query);
         route.kind = route.host_route.kind;
     }
@@ -1373,8 +1298,8 @@ SindiMetadataFilter::Classify(const DatasetPtr& query, uint32_t window_size) con
 
 void
 SindiMetadataFilter::ApplyFilter(const SindiMetadataSearchRoute& route, FilterPtr& filter) const {
-    if (route.date_route.enabled) {
-        date_filter_.ApplyFilter(route.date_route, filter);
+    if (route.time_route.enabled) {
+        time_filter_.ApplyFilter(route.time_route, filter);
     } else {
         host_filter_.ApplyFilter(route.host_route, filter);
     }
@@ -1385,8 +1310,8 @@ SindiMetadataFilter::ApplyWindowRoute(const SindiMetadataSearchRoute& route,
                                       uint32_t window_size,
                                       int64_t& min_window_id,
                                       int64_t& max_window_id) {
-    if (route.date_route.enabled) {
-        SindiDateFilter::ApplyWindowRoute(route.date_route, min_window_id, max_window_id);
+    if (route.time_route.enabled) {
+        SindiTimeFilter::ApplyWindowRoute(route.time_route, min_window_id, max_window_id);
     } else {
         SindiHostFilter::ApplyWindowRoute(
             route.host_route, window_size, min_window_id, max_window_id);
@@ -1398,9 +1323,9 @@ SindiMetadataFilter::NextMatchingWindow(const SindiMetadataSearchRoute& route,
                                         uint32_t window_size,
                                         int64_t current_window_id,
                                         int64_t max_window_id) const {
-    if (route.date_route.enabled) {
-        return SindiDateFilter::NextMatchingWindow(
-            route.date_route, current_window_id, max_window_id);
+    if (route.time_route.enabled) {
+        return SindiTimeFilter::NextMatchingWindow(
+            route.time_route, current_window_id, max_window_id);
     }
     return host_filter_.NextMatchingWindow(
         route.host_route, window_size, current_window_id, max_window_id);
@@ -1410,8 +1335,8 @@ bool
 SindiMetadataFilter::RequiresFullTermScan(const SindiMetadataSearchRoute& route,
                                           uint32_t window_id,
                                           uint32_t window_size) const {
-    if (route.date_route.enabled) {
-        return SindiDateFilter::RequiresFullTermScan(route.date_route, window_id, window_size);
+    if (route.time_route.enabled) {
+        return SindiTimeFilter::RequiresFullTermScan(route.time_route, window_id, window_size);
     }
     return host_filter_.RequiresFullTermScan(route.host_route, window_id, window_size);
 }
@@ -1419,12 +1344,12 @@ SindiMetadataFilter::RequiresFullTermScan(const SindiMetadataSearchRoute& route,
 void
 SindiMetadataFilter::DeserializeHostMetadata(StreamReader& reader, uint64_t element_count) {
     host_filter_.Deserialize(reader, element_count);
-    date_filter_.Clear();
+    time_filter_.Clear();
 }
 
 void
-SindiMetadataFilter::DeserializeDateMetadata(StreamReader& reader, uint64_t element_count) {
-    date_filter_.Deserialize(reader, element_count);
+SindiMetadataFilter::DeserializeTimeMetadata(StreamReader& reader, uint64_t element_count) {
+    time_filter_.Deserialize(reader, element_count);
     host_filter_.Clear();
 }
 

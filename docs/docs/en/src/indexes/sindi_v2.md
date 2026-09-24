@@ -106,20 +106,19 @@ Host membership is enforced during posting-window search, including multiple ran
 mutable `Add()`. The empty-string missing-host value, persisted internal dictionary, mutable `Add()`
 metadata rules, streaming serialization, and the KNN-only scope are the same as SINDI.
 
-### Date-bucket filtering
+### Publish-time filtering
 
-SINDI_V2 also supports the [SINDI date-bucket, inclusive range, and hierarchical matching
-contract](sindi.md#date-bucket-filtering). The two indexes share one metadata filtering
-component for date-only, host-only, and combined date-and-host KNN routing. SINDI_V2 retains its
-term-first posting layout and legacy serialization format. Date filtering supports mutable and
-immutable indexes with either `use_reorder` setting and is preserved by both legacy and streaming
-serialization; range search remains unfiltered. A mutable date-aware SINDI_V2 is build-once and
-follows the same initial `Build()` or first-`Add()` and later-`Add()` rejection rules as SINDI.
-Empty base date strings use the same missing-date semantics as SINDI: unfiltered and host-only
-queries include them, while date bucket and range queries exclude them.
-Exact bucket filtering disables term-level posting pruning in each selected window, so date queries
-may scan more postings than host-only queries. Host-only queries on date-enabled indexes share the
-boundary-window behavior documented for SINDI.
+SINDI_V2 supports the same [SINDI Unix-second input, UTC-day matching, and inclusive time-range
+contract](sindi.md#publish-time-filtering). The two indexes share one metadata filtering component
+for time-only, host-only, and combined time-and-host KNN routing. SINDI_V2 retains its term-first
+posting layout. Publish-time filtering supports mutable and immutable indexes with either
+`use_reorder` setting and is preserved by standard and streaming serialization; range search
+remains unfiltered. A mutable time-aware SINDI_V2 is build-once and follows the same initial
+`Build()` or first-`Add()` and later-`Add()` rejection rules as SINDI. Base timestamp `0` uses the
+same missing-time semantics: unfiltered and host-only queries include those documents, while time
+queries exclude them. Exact day filtering disables term-level posting pruning in each selected
+window, so time queries may scan more postings than host-only queries. Host-only queries on
+time-enabled indexes share the boundary-window behavior documented for SINDI.
 
 ## Search parameters
 

@@ -193,25 +193,23 @@ private:
     Vector<SindiHostRange> host_ranges_;
 };
 
-inline constexpr const char* SINDI_DATE_PATH_NAME = "date";
-inline constexpr const char* SINDI_DATE_BEGIN_PATH_NAME = "date_begin";
-inline constexpr const char* SINDI_DATE_END_PATH_NAME = "date_end";
-inline constexpr const char* SINDI_DATE_METADATA_FORMAT_VERSION_KEY =
-    "sindi_date_metadata_format_version";
-inline constexpr uint32_t SINDI_DATE_METADATA_FORMAT_VERSION = 3;
-inline constexpr uint32_t SINDI_DATE_METADATA_STRING_HOST_FORMAT_VERSION = 2;
-inline constexpr uint32_t SINDI_DATE_METADATA_LEGACY_FORMAT_VERSION = 1;
+inline constexpr const char* SINDI_PUBLISH_TIME_METADATA_NAME = "publish_time_stamp";
+inline constexpr const char* SINDI_PUBLISH_TIME_BEGIN_METADATA_NAME = "publish_time_stamp_begin";
+inline constexpr const char* SINDI_PUBLISH_TIME_END_METADATA_NAME = "publish_time_stamp_end";
+inline constexpr const char* SINDI_TIME_METADATA_FORMAT_VERSION_KEY =
+    "sindi_time_metadata_format_version";
+inline constexpr uint32_t SINDI_TIME_METADATA_FORMAT_VERSION = 1;
+inline constexpr int32_t SINDI_MISSING_EPOCH_DAY = -1;
+inline constexpr int64_t SINDI_SECONDS_PER_DAY = 86400;
 
 inline bool
-IsSupportedSindiDateMetadataVersion(int64_t version) {
-    return version == SINDI_DATE_METADATA_LEGACY_FORMAT_VERSION ||
-           version == SINDI_DATE_METADATA_STRING_HOST_FORMAT_VERSION ||
-           version == SINDI_DATE_METADATA_FORMAT_VERSION;
+IsSupportedSindiTimeMetadataVersion(int64_t version) {
+    return version == SINDI_TIME_METADATA_FORMAT_VERSION;
 }
 
-class SindiDateBuildPlan {
+class SindiTimeBuildPlan {
 public:
-    explicit SindiDateBuildPlan(Allocator* allocator);
+    explicit SindiTimeBuildPlan(Allocator* allocator);
 
     [[nodiscard]] bool
     Enabled() const {
@@ -227,44 +225,41 @@ public:
     RecordSuccess(uint32_t ordered_position);
 
 private:
-    friend class SindiDateFilter;
+    friend class SindiTimeFilter;
 
     bool enabled_{false};
     bool has_host_metadata_{false};
     uint32_t successful_group_cursor_{0};
     Vector<uint32_t> order_;
-    Vector<uint32_t> source_buckets_;
+    Vector<int32_t> source_days_;
     Vector<uint32_t> source_host_ids_;
-    Vector<uint32_t> group_quarters_;
+    Vector<uint32_t> group_partitions_;
     Vector<uint32_t> group_hosts_;
     Vector<uint32_t> input_offsets_;
     Vector<uint32_t> successful_counts_;
-    Vector<uint32_t> successful_buckets_;
+    Vector<int32_t> successful_days_;
     std::vector<std::string_view> new_hosts_;
 };
 
-struct SindiDateSearchRoute {
-    // Search-local filters may reference these ranges and must not outlive this route.
+struct SindiTimeSearchRoute {
     bool enabled{false};
     SindiHostRouteKind kind{SindiHostRouteKind::UNFILTERED};
-    bool has_date_bucket{false};
-    bool has_date_range{false};
-    uint32_t query_bucket{0};
-    uint32_t query_begin{0};
-    uint32_t query_end{0};
+    bool has_time{false};
+    int32_t query_begin{0};
+    int32_t query_end{0};
     std::vector<std::pair<uint32_t, uint32_t>> inner_ranges;
     std::vector<std::pair<uint32_t, uint32_t>> window_ranges;
 };
 
-class SindiDateFilter {
+class SindiTimeFilter {
 public:
-    explicit SindiDateFilter(Allocator* allocator);
+    explicit SindiTimeFilter(Allocator* allocator);
 
-    [[nodiscard]] SindiDateBuildPlan
-    PrepareBuild(const DatasetPtr& base) const;
+    [[nodiscard]] SindiTimeBuildPlan
+    PrepareBuild(const DatasetPtr& base, uint32_t window_size) const;
 
     void
-    CommitBuild(SindiDateBuildPlan&& plan, uint64_t element_count);
+    CommitBuild(SindiTimeBuildPlan&& plan, uint64_t element_count);
 
     void
     Clear();
@@ -277,26 +272,26 @@ public:
     [[nodiscard]] uint64_t
     GetMemoryUsage() const;
 
-    [[nodiscard]] SindiDateSearchRoute
+    [[nodiscard]] SindiTimeSearchRoute
     Classify(const DatasetPtr& query, uint32_t window_size) const;
 
     void
-    ApplyFilter(const SindiDateSearchRoute& route, FilterPtr& filter) const;
+    ApplyFilter(const SindiTimeSearchRoute& route, FilterPtr& filter) const;
 
     static void
-    ApplyWindowRoute(const SindiDateSearchRoute& route,
+    ApplyWindowRoute(const SindiTimeSearchRoute& route,
                      int64_t& min_window_id,
                      int64_t& max_window_id);
 
     [[nodiscard]] static int64_t
-    NextMatchingWindow(const SindiDateSearchRoute& route,
+    NextMatchingWindow(const SindiTimeSearchRoute& route,
                        int64_t current_window_id,
                        int64_t max_window_id);
 
-    // Exact date predicates are evaluated per document, so date queries scan every term in each
-    // routed window before applying the date filter.
+    // Exact time predicates are evaluated per document, so time queries scan every term in each
+    // routed window before applying the time filter.
     [[nodiscard]] static bool
-    RequiresFullTermScan(const SindiDateSearchRoute& route,
+    RequiresFullTermScan(const SindiTimeSearchRoute& route,
                          uint32_t window_id,
                          uint32_t window_size);
 
@@ -311,7 +306,8 @@ private:
         explicit Partition(Allocator* allocator) : host_ids(allocator), host_offsets(allocator) {
         }
 
-        uint32_t quarter{0};
+        int32_t min_day{SINDI_MISSING_EPOCH_DAY};
+        int32_t max_day{SINDI_MISSING_EPOCH_DAY};
         uint32_t begin{0};
         uint32_t end{0};
         Vector<uint32_t> host_ids;
@@ -319,49 +315,52 @@ private:
     };
 
     [[nodiscard]] FilterPtr
-    create_filter(const SindiDateSearchRoute& route, FilterPtr filter) const;
+    create_filter(const SindiTimeSearchRoute& route, FilterPtr filter) const;
 
     Allocator* allocator_{nullptr};
     bool has_host_metadata_{false};
     SindiHostDictionary host_dictionary_;
-    Vector<uint32_t> document_buckets_;
+    Vector<int32_t> document_days_;
     Vector<Partition> partitions_;
 };
 
 class SindiMetadataBuildPlan {
 public:
     explicit SindiMetadataBuildPlan(Allocator* allocator)
-        : host_plan_(allocator), date_plan_(allocator) {
+        : host_plan_(allocator), time_plan_(allocator) {
     }
 
     [[nodiscard]] bool
     Enabled() const {
-        return host_plan_.Enabled() or date_plan_.Enabled();
+        return host_plan_.Enabled() or time_plan_.Enabled();
     }
 
     [[nodiscard]] uint32_t
     SourceIndex(uint32_t ordered_position) const {
-        return date_plan_.Enabled() ? date_plan_.SourceIndex(ordered_position)
+        // A time-aware plan owns the canonical timestamp/host ordering. Otherwise the standalone
+        // host plan owns the ordering; the unused plan remains disabled and ignores successes.
+        return time_plan_.Enabled() ? time_plan_.SourceIndex(ordered_position)
                                     : host_plan_.SourceIndex(ordered_position);
     }
 
     void
     RecordSuccess(uint32_t ordered_position) {
+        // Exactly one plan is enabled; the disabled plan ignores this call.
         host_plan_.RecordSuccess(ordered_position);
-        date_plan_.RecordSuccess(ordered_position);
+        time_plan_.RecordSuccess(ordered_position);
     }
 
 private:
     friend class SindiMetadataFilter;
 
     SindiHostBuildPlan host_plan_;
-    SindiDateBuildPlan date_plan_;
+    SindiTimeBuildPlan time_plan_;
 };
 
 struct SindiMetadataSearchRoute {
     SindiHostRouteKind kind{SindiHostRouteKind::UNFILTERED};
     SindiHostSearchRoute host_route;
-    SindiDateSearchRoute date_route;
+    SindiTimeSearchRoute time_route;
 };
 
 class SindiMetadataFilter {
@@ -369,7 +368,9 @@ public:
     explicit SindiMetadataFilter(Allocator* allocator);
 
     [[nodiscard]] SindiMetadataBuildPlan
-    PrepareBuild(const DatasetPtr& base, uint64_t current_element_count) const;
+    PrepareBuild(const DatasetPtr& base,
+                 uint64_t current_element_count,
+                 uint32_t window_size) const;
 
     void
     CommitBuild(SindiMetadataBuildPlan&& plan, uint32_t first_inner_id, uint32_t end_inner_id);
@@ -383,13 +384,13 @@ public:
     }
 
     [[nodiscard]] bool
-    HasDateMetadata() const {
-        return date_filter_.HasMetadata();
+    HasTimeMetadata() const {
+        return time_filter_.HasMetadata();
     }
 
     [[nodiscard]] uint64_t
     GetMemoryUsage() const {
-        return host_filter_.GetMemoryUsage() + date_filter_.GetMemoryUsage();
+        return host_filter_.GetMemoryUsage() + time_filter_.GetMemoryUsage();
     }
 
     [[nodiscard]] SindiMetadataSearchRoute
@@ -421,20 +422,20 @@ public:
     }
 
     void
-    SerializeDateMetadata(StreamWriter& writer) const {
-        date_filter_.Serialize(writer);
+    SerializeTimeMetadata(StreamWriter& writer) const {
+        time_filter_.Serialize(writer);
     }
 
     void
     DeserializeHostMetadata(StreamReader& reader, uint64_t element_count);
 
     void
-    DeserializeDateMetadata(StreamReader& reader, uint64_t element_count);
+    DeserializeTimeMetadata(StreamReader& reader, uint64_t element_count);
 
 private:
     Allocator* allocator_{nullptr};
     SindiHostFilter host_filter_;
-    SindiDateFilter date_filter_;
+    SindiTimeFilter time_filter_;
 };
 
 }  // namespace vsag

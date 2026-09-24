@@ -456,7 +456,7 @@ SINDI::add(const DatasetPtr& base, bool sort_affected_windows) {
     auto data_num = base->GetNumElements();
     CHECK_ARGUMENT(data_num > 0, "data_num is zero when add vectors");
     const auto current_element_count = cur_element_count_.load(std::memory_order_relaxed);
-    auto metadata_build = metadata_filter_.PrepareBuild(base, current_element_count);
+    auto metadata_build = metadata_filter_.PrepareBuild(base, current_element_count, window_size_);
     const auto first_inner_id = static_cast<uint32_t>(current_element_count);
 
     const auto* sparse_vectors = base->GetSparseVectors();
@@ -573,7 +573,7 @@ SINDI::build_immutable(const DatasetPtr& base) {
     const auto* ids = base->GetIds();
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
-    auto metadata_build = metadata_filter_.PrepareBuild(base, 0);
+    auto metadata_build = metadata_filter_.PrepareBuild(base, 0, window_size_);
 
     if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
         this->init_quantization_params_from_vectors(base);
@@ -1302,8 +1302,8 @@ SINDI::Serialize(StreamWriter& writer) const {
     }
     if (metadata_filter_.HasHostMetadata()) {
         metadata_filter_.SerializeHostMetadata(writer);
-    } else if (metadata_filter_.HasDateMetadata()) {
-        metadata_filter_.SerializeDateMetadata(writer);
+    } else if (metadata_filter_.HasTimeMetadata()) {
+        metadata_filter_.SerializeTimeMetadata(writer);
     }
 
     JsonType jsonify_basic_info;
@@ -1317,9 +1317,9 @@ SINDI::Serialize(StreamWriter& writer) const {
     }
     if (metadata_filter_.HasHostMetadata()) {
         jsonify_basic_info[SINDI_HAS_HOST_METADATA_KEY].SetBool(true);
-    } else if (metadata_filter_.HasDateMetadata()) {
-        jsonify_basic_info[SINDI_DATE_METADATA_FORMAT_VERSION_KEY].SetInt(
-            SINDI_DATE_METADATA_FORMAT_VERSION);
+    } else if (metadata_filter_.HasTimeMetadata()) {
+        jsonify_basic_info[SINDI_TIME_METADATA_FORMAT_VERSION_KEY].SetInt(
+            SINDI_TIME_METADATA_FORMAT_VERSION);
     }
     write_index_footer(writer, jsonify_basic_info);
 }
@@ -1350,9 +1350,9 @@ SINDI::collect_streaming_header() const {
     if (metadata_filter_.HasHostMetadata()) {
         basic_info[SINDI_HAS_HOST_METADATA_KEY].SetBool(true);
     }
-    if (metadata_filter_.HasDateMetadata()) {
-        basic_info[SINDI_DATE_METADATA_FORMAT_VERSION_KEY].SetInt(
-            SINDI_DATE_METADATA_FORMAT_VERSION);
+    if (metadata_filter_.HasTimeMetadata()) {
+        basic_info[SINDI_TIME_METADATA_FORMAT_VERSION_KEY].SetInt(
+            SINDI_TIME_METADATA_FORMAT_VERSION);
     }
     metadata->Set(BASIC_INFO, basic_info);
 
@@ -1388,8 +1388,8 @@ SINDI::collect_streaming_header() const {
                                      StreamSerializationBlockCurrentVersion(tag),
                                      StreamSerializationTagCritical(tag));
     }
-    if (metadata_filter_.HasDateMetadata()) {
-        auto tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_DATE_METADATA);
+    if (metadata_filter_.HasTimeMetadata()) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_TIME_METADATA);
         AppendStreamingManifestBlock(manifest,
                                      tag,
                                      StreamSerializationBlockCurrentVersion(tag),
@@ -1456,11 +1456,11 @@ SINDI::serialize_streaming_body(StreamWriter& writer) const {
                 metadata_filter_.SerializeHostMetadata(block);
             });
     }
-    if (metadata_filter_.HasDateMetadata()) {
-        auto tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_DATE_METADATA);
+    if (metadata_filter_.HasTimeMetadata()) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_TIME_METADATA);
         WriteStreamingBlock(
             writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& block) {
-                metadata_filter_.SerializeDateMetadata(block);
+                metadata_filter_.SerializeTimeMetadata(block);
             });
     }
 }
@@ -1544,14 +1544,14 @@ SINDI::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
     const auto postings_sorted = has_sorted_posting_lists(basic_info);
     const bool expects_host_metadata = basic_info.Contains(SINDI_HAS_HOST_METADATA_KEY) &&
                                        basic_info[SINDI_HAS_HOST_METADATA_KEY].GetBool();
-    const bool expects_date_metadata = basic_info.Contains(SINDI_DATE_METADATA_FORMAT_VERSION_KEY);
-    if (expects_date_metadata) {
-        CHECK_ARGUMENT(IsSupportedSindiDateMetadataVersion(
-                           basic_info[SINDI_DATE_METADATA_FORMAT_VERSION_KEY].GetInt()),
-                       "unsupported SINDI streaming date metadata version");
+    const bool expects_time_metadata = basic_info.Contains(SINDI_TIME_METADATA_FORMAT_VERSION_KEY);
+    if (expects_time_metadata) {
+        CHECK_ARGUMENT(IsSupportedSindiTimeMetadataVersion(
+                           basic_info[SINDI_TIME_METADATA_FORMAT_VERSION_KEY].GetInt()),
+                       "unsupported SINDI streaming time metadata version");
     }
-    CHECK_ARGUMENT(not(expects_host_metadata and expects_date_metadata),
-                   "SINDI streaming metadata cannot contain separate host and date blocks");
+    CHECK_ARGUMENT(not(expects_host_metadata and expects_time_metadata),
+                   "SINDI streaming metadata cannot contain separate host and time blocks");
     if (basic_info.Contains(INDEX_PARAM)) {
         auto index_param = std::make_shared<SINDIParameter>();
         index_param->FromString(basic_info[INDEX_PARAM].GetString());
@@ -1569,7 +1569,7 @@ SINDI::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
     bool loaded_rerank = false;
     bool loaded_term_mapper = false;
     bool loaded_host_metadata = false;
-    bool loaded_date_metadata = false;
+    bool loaded_time_metadata = false;
 
     bool has_dmq_rerank_format = false;
     if (this->use_reorder_) {
@@ -1660,19 +1660,19 @@ SINDI::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
                 });
                 loaded_host_metadata = true;
                 break;
-            case StreamSerializationTag::SINDI_DATE_METADATA:
-                CHECK_ARGUMENT(expects_date_metadata,
-                               "unexpected SINDI streaming date metadata block");
-                CHECK_ARGUMENT(not loaded_date_metadata,
-                               "duplicate SINDI streaming date metadata block");
+            case StreamSerializationTag::SINDI_TIME_METADATA:
+                CHECK_ARGUMENT(expects_time_metadata,
+                               "unexpected SINDI streaming time metadata block");
+                CHECK_ARGUMENT(not loaded_time_metadata,
+                               "duplicate SINDI streaming time metadata block");
                 CHECK_ARGUMENT(not loaded_host_metadata,
-                               "SINDI streaming metadata cannot load host and date blocks");
-                CHECK_ARGUMENT(loaded_windows, "SINDI streaming date metadata must follow windows");
+                               "SINDI streaming metadata cannot load host and time blocks");
+                CHECK_ARGUMENT(loaded_windows, "SINDI streaming time metadata must follow windows");
                 ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
-                    metadata_filter_.DeserializeDateMetadata(
+                    metadata_filter_.DeserializeTimeMetadata(
                         block, static_cast<uint64_t>(cur_element_count_.load()));
                 });
-                loaded_date_metadata = true;
+                loaded_time_metadata = true;
                 break;
             default:
                 if (block_header.IsCritical()) {
@@ -1707,11 +1707,11 @@ SINDI::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
         throw VsagException(ErrorType::READ_ERROR,
                             "SINDI streaming serialization host metadata block is missing");
     }
-    if (expects_date_metadata && !loaded_date_metadata) {
+    if (expects_time_metadata && !loaded_time_metadata) {
         throw VsagException(ErrorType::READ_ERROR,
-                            "SINDI streaming serialization date metadata block is missing");
+                            "SINDI streaming serialization time metadata block is missing");
     }
-    if (!loaded_host_metadata && !loaded_date_metadata) {
+    if (!loaded_host_metadata && !loaded_time_metadata) {
         metadata_filter_.Clear();
     }
     this->cal_memory_usage();
@@ -1726,7 +1726,7 @@ SINDI::Deserialize(StreamReader& reader) {
     bool has_footer = false;
     bool has_dmq_rerank_format = false;
     bool has_host_metadata = false;
-    bool has_date_metadata = false;
+    bool has_time_metadata = false;
     bool postings_sorted = false;
     if (not deserialize_without_footer_) {
         JsonType jsonify_basic_info;
@@ -1760,17 +1760,17 @@ SINDI::Deserialize(StreamReader& reader) {
                     has_datacell_rerank_format = rerank_format == SINDI_RERANK_FLAT_FORMAT_DATACELL;
                     has_dmq_rerank_format = rerank_format == SINDI_RERANK_FLAT_FORMAT_DMQ;
                 }
-                if (jsonify_basic_info.Contains(SINDI_DATE_METADATA_FORMAT_VERSION_KEY)) {
+                if (jsonify_basic_info.Contains(SINDI_TIME_METADATA_FORMAT_VERSION_KEY)) {
                     CHECK_ARGUMENT(
-                        IsSupportedSindiDateMetadataVersion(
-                            jsonify_basic_info[SINDI_DATE_METADATA_FORMAT_VERSION_KEY].GetInt()),
-                        "unsupported SINDI date metadata version");
-                    has_date_metadata = true;
+                        IsSupportedSindiTimeMetadataVersion(
+                            jsonify_basic_info[SINDI_TIME_METADATA_FORMAT_VERSION_KEY].GetInt()),
+                        "unsupported SINDI time metadata version");
+                    has_time_metadata = true;
                 }
                 has_host_metadata = jsonify_basic_info.Contains(SINDI_HAS_HOST_METADATA_KEY) &&
                                     jsonify_basic_info[SINDI_HAS_HOST_METADATA_KEY].GetBool();
-                CHECK_ARGUMENT(not(has_host_metadata and has_date_metadata),
-                               "SINDI metadata cannot contain separate host and date payloads");
+                CHECK_ARGUMENT(not(has_host_metadata and has_time_metadata),
+                               "SINDI metadata cannot contain separate host and time payloads");
             } else {
                 logger::debug("SINDI footer not found, fallback to legacy deserialize path");
             }
@@ -1859,8 +1859,8 @@ SINDI::Deserialize(StreamReader& reader) {
     if (has_host_metadata) {
         metadata_filter_.DeserializeHostMetadata(reader_ref,
                                                  static_cast<uint64_t>(cur_element_count_.load()));
-    } else if (has_date_metadata) {
-        metadata_filter_.DeserializeDateMetadata(reader_ref,
+    } else if (has_time_metadata) {
+        metadata_filter_.DeserializeTimeMetadata(reader_ref,
                                                  static_cast<uint64_t>(cur_element_count_.load()));
     }
     this->cal_memory_usage();

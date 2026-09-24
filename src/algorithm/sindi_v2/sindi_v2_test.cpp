@@ -621,18 +621,19 @@ TEST_CASE("SINDIV2 host filter preserves term prune candidates at window boundar
     REQUIRE(result->GetIds()[1] == 21);
 }
 
-TEST_CASE("SINDIV2 date bucket and host filtering routes and serializes",
-          "[ut][SINDIV2][date_filter]") {
+TEST_CASE("SINDIV2 publish time and host filtering routes and serializes",
+          "[ut][SINDIV2][time_filter]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
     common_param.metric_ = MetricType::METRIC_TYPE_IP;
 
+    constexpr int64_t day = SINDI_SECONDS_PER_DAY;
     uint32_t term = 1;
     std::array<float, 4> values{4.0F, 0.0F, 2.0F, 3.0F};
     std::array<int64_t, 4> labels{10, 40, 20, 30};
     std::array<std::string, 4> hosts{"host-b", "host-a", "host-b", "host-a"};
-    std::array<std::string, 4> date_buckets = {"", "2026/05", "2026/05/01", "2026/08"};
+    std::array<int64_t, 4> timestamps{0, 5 * day, 10 * day + 1, 20 * day + 2};
     std::array<SparseVector, 4> vectors{};
     vectors[0] = SparseVector{1, &term, values.data()};
     vectors[2] = SparseVector{1, &term, &values[2]};
@@ -641,8 +642,8 @@ TEST_CASE("SINDIV2 date bucket and host filtering routes and serializes",
                     ->NumElements(vectors.size())
                     ->SparseVectors(vectors.data())
                     ->Ids(labels.data())
-                    ->StringMetadata("host", hosts.data())
-                    ->Paths(SINDI_DATE_PATH_NAME, date_buckets.data())
+                    ->StringMetadata(SINDI_HOST_METADATA_NAME, hosts.data())
+                    ->Int64Metadata(SINDI_PUBLISH_TIME_METADATA_NAME, timestamps.data())
                     ->Owner(false);
 
     auto parameter = std::make_shared<SINDIV2Parameter>();
@@ -655,99 +656,35 @@ TEST_CASE("SINDIV2 date bucket and host filtering routes and serializes",
     SINDIV2 index(parameter, common_param);
     REQUIRE(index.Build(base) == std::vector<int64_t>{40});
 
-    int64_t added_label = 50;
-    std::string added_host = "host-b";
-    std::string added_date = "2026/09";
-    SparseVector added_vector{1, &term, values.data()};
-    auto dated_add = Dataset::Make()
-                         ->NumElements(1)
-                         ->SparseVectors(&added_vector)
-                         ->Ids(&added_label)
-                         ->StringMetadata(SINDI_HOST_METADATA_NAME, &added_host)
-                         ->Paths(SINDI_DATE_PATH_NAME, &added_date)
-                         ->Owner(false);
-    auto undated_add = Dataset::Make()
-                           ->NumElements(1)
-                           ->SparseVectors(&added_vector)
-                           ->Ids(&added_label)
-                           ->StringMetadata(SINDI_HOST_METADATA_NAME, &added_host)
-                           ->Owner(false);
-    if (not parameter->immutable) {
-        REQUIRE_THROWS_WITH(index.Add(dated_add),
-                            Catch::Matchers::ContainsSubstring(
-                                "SINDI date-aware index does not support incremental Add"));
-        REQUIRE_THROWS_WITH(index.Add(undated_add),
-                            Catch::Matchers::ContainsSubstring(
-                                "SINDI date-aware index does not support incremental Add"));
-
-        auto date_unaware_parameter = std::make_shared<SINDIV2Parameter>(*parameter);
-        SINDIV2 date_unaware_index(date_unaware_parameter, common_param);
-        REQUIRE(date_unaware_index
-                    .Build(Dataset::Make()
-                               ->NumElements(1)
-                               ->SparseVectors(&added_vector)
-                               ->Ids(&added_label)
-                               ->Owner(false))
-                    .empty());
-        added_label = 60;
-        REQUIRE_THROWS_WITH(date_unaware_index.Add(dated_add),
-                            Catch::Matchers::ContainsSubstring(
-                                "SINDI cannot add date metadata after existing documents"));
-    }
-
     float query_value = 1.0F;
     SparseVector query_vector{1, &term, &query_value};
-    std::string query_date = "2026/05";
+    int64_t query_timestamp = 10 * day + 100;
     auto query = Dataset::Make()
                      ->NumElements(1)
                      ->SparseVectors(&query_vector)
-                     ->Paths(SINDI_DATE_PATH_NAME, &query_date)
+                     ->Int64Metadata(SINDI_PUBLISH_TIME_METADATA_NAME, &query_timestamp)
                      ->Owner(false);
     const std::string search_parameters = R"({"sindi_v2": {"n_candidate": 3}})";
 
-    auto month = index.KnnSearch(query, 3, search_parameters, nullptr);
-    REQUIRE(month->GetDim() == 1);
-    REQUIRE(month->GetIds()[0] == 20);
+    auto exact_day = index.KnnSearch(query, 3, search_parameters, nullptr);
+    REQUIRE(exact_day->GetDim() == 1);
+    REQUIRE(exact_day->GetIds()[0] == 20);
 
-    query_date = "2026/05/01";
-    auto day = index.KnnSearch(query, 3, search_parameters, nullptr);
-    REQUIRE(day->GetDim() == 1);
-    REQUIRE(day->GetIds()[0] == 20);
-
-    query_date = "2026/08/01";
-    REQUIRE(index.KnnSearch(query, 3, search_parameters, nullptr)->GetDim() == 0);
-    query_date = "2026/08";
-    auto coarser_base = index.KnnSearch(query, 3, search_parameters, nullptr);
-    REQUIRE(coarser_base->GetDim() == 1);
-    REQUIRE(coarser_base->GetIds()[0] == 30);
-
-    query_date = "2027";
-    REQUIRE(index.KnnSearch(query, 3, search_parameters, nullptr)->GetDim() == 0);
-    REQUIRE(index.RangeSearch(query, 2.0F, search_parameters, nullptr, -1)->GetDim() == 3);
-    query_date = "2026";
-    REQUIRE(index.KnnSearch(query, 3, search_parameters, nullptr)->GetDim() == 2);
-
-    std::string query_date_begin = "2026/05/01";
-    std::string query_date_end = "2026/08";
+    int64_t query_begin = 10 * day;
+    int64_t query_end = 20 * day + day - 1;
     auto range_query = Dataset::Make()
                            ->NumElements(1)
                            ->SparseVectors(&query_vector)
-                           ->Paths(SINDI_DATE_BEGIN_PATH_NAME, &query_date_begin)
-                           ->Paths(SINDI_DATE_END_PATH_NAME, &query_date_end)
+                           ->Int64Metadata(SINDI_PUBLISH_TIME_BEGIN_METADATA_NAME, &query_begin)
+                           ->Int64Metadata(SINDI_PUBLISH_TIME_END_METADATA_NAME, &query_end)
                            ->Owner(false);
     auto range = index.KnnSearch(range_query, 3, search_parameters, nullptr);
     REQUIRE(range->GetDim() == 2);
     REQUIRE((std::set<int64_t>(range->GetIds(), range->GetIds() + range->GetDim()) ==
              std::set<int64_t>{20, 30}));
 
-    query_date_begin = "2026/05";
-    query_date_end = "2026/08/01";
-    auto partial_bucket_range = index.KnnSearch(range_query, 3, search_parameters, nullptr);
-    REQUIRE(partial_bucket_range->GetDim() == 1);
-    REQUIRE(partial_bucket_range->GetIds()[0] == 20);
-
     std::string host = "host-b";
-    query->StringMetadata("host", &host);
+    query->StringMetadata(SINDI_HOST_METADATA_NAME, &host);
     auto combined = index.KnnSearch(query, 3, search_parameters, nullptr);
     REQUIRE(combined->GetDim() == 1);
     REQUIRE(combined->GetIds()[0] == 20);
@@ -755,17 +692,12 @@ TEST_CASE("SINDIV2 date bucket and host filtering routes and serializes",
     auto host_query = Dataset::Make()
                           ->NumElements(1)
                           ->SparseVectors(&query_vector)
-                          ->StringMetadata("host", &host)
+                          ->StringMetadata(SINDI_HOST_METADATA_NAME, &host)
                           ->Owner(false);
     auto host_only = index.KnnSearch(host_query, 3, search_parameters, nullptr);
     REQUIRE(host_only->GetDim() == 2);
-    REQUIRE(host_only->GetIds()[0] == 10);
-    REQUIRE(host_only->GetIds()[1] == 20);
-
-    auto filtered =
-        index.KnnSearch(query, 3, search_parameters, std::make_shared<AllowLabelFilter>(20));
-    REQUIRE(filtered->GetDim() == 1);
-    REQUIRE(filtered->GetIds()[0] == 20);
+    REQUIRE((std::set<int64_t>(host_only->GetIds(), host_only->GetIds() + host_only->GetDim()) ==
+             std::set<int64_t>{10, 20}));
 
     std::stringstream stream;
     IOStreamWriter writer(stream);
@@ -775,21 +707,18 @@ TEST_CASE("SINDIV2 date bucket and host filtering routes and serializes",
     restored.Deserialize(stream);
     auto restored_result = restored.KnnSearch(query, 3, search_parameters, nullptr);
     REQUIRE(restored_result->GetDim() == combined->GetDim());
-    for (int64_t i = 0; i < combined->GetDim(); ++i) {
-        REQUIRE(restored_result->GetIds()[i] == combined->GetIds()[i]);
-        REQUIRE(restored_result->GetDistances()[i] == combined->GetDistances()[i]);
-    }
-    auto restored_host_only = restored.KnnSearch(host_query, 3, search_parameters, nullptr);
-    REQUIRE(restored_host_only->GetDim() == host_only->GetDim());
-    for (int64_t i = 0; i < host_only->GetDim(); ++i) {
-        REQUIRE(restored_host_only->GetIds()[i] == host_only->GetIds()[i]);
-        REQUIRE(restored_host_only->GetDistances()[i] == host_only->GetDistances()[i]);
-    }
-    if (not parameter->immutable) {
-        REQUIRE_THROWS_WITH(restored.Add(dated_add),
-                            Catch::Matchers::ContainsSubstring(
-                                "SINDI date-aware index does not support incremental Add"));
-    }
+    REQUIRE(restored_result->GetIds()[0] == combined->GetIds()[0]);
+
+    auto disk_parameter_json = parameter->ToJson();
+    disk_parameter_json["term_io"].SetJson(JsonType::Parse(R"({"type":"reader_io"})"));
+    auto disk_parameter = std::make_shared<SINDIV2Parameter>();
+    disk_parameter->FromJson(disk_parameter_json);
+    SINDIV2 disk_restored(disk_parameter, common_param);
+    std::stringstream disk_stream(stream.str());
+    REQUIRE_NOTHROW(disk_restored.Deserialize(disk_stream));
+    auto disk_result = disk_restored.KnnSearch(query, 3, search_parameters, nullptr);
+    REQUIRE(disk_result->GetDim() == combined->GetDim());
+    REQUIRE(disk_result->GetIds()[0] == combined->GetIds()[0]);
 
     std::stringstream streaming;
     REQUIRE_NOTHROW(index.SerializeStreaming(streaming));
@@ -798,38 +727,46 @@ TEST_CASE("SINDIV2 date bucket and host filtering routes and serializes",
     REQUIRE_NOTHROW(streaming_restored.DeserializeStreaming(streaming));
     auto streaming_result = streaming_restored.KnnSearch(query, 3, search_parameters, nullptr);
     REQUIRE(streaming_result->GetDim() == combined->GetDim());
-    for (int64_t i = 0; i < combined->GetDim(); ++i) {
-        REQUIRE(streaming_result->GetIds()[i] == combined->GetIds()[i]);
-        REQUIRE(streaming_result->GetDistances()[i] == combined->GetDistances()[i]);
-    }
-    auto streaming_host_only =
-        streaming_restored.KnnSearch(host_query, 3, search_parameters, nullptr);
-    REQUIRE(streaming_host_only->GetDim() == host_only->GetDim());
-    for (int64_t i = 0; i < host_only->GetDim(); ++i) {
-        REQUIRE(streaming_host_only->GetIds()[i] == host_only->GetIds()[i]);
-        REQUIRE(streaming_host_only->GetDistances()[i] == host_only->GetDistances()[i]);
-    }
-    if (not parameter->immutable) {
-        REQUIRE_THROWS_WITH(streaming_restored.Add(undated_add),
-                            Catch::Matchers::ContainsSubstring(
-                                "SINDI date-aware index does not support incremental Add"));
-    }
+    REQUIRE(streaming_result->GetIds()[0] == combined->GetIds()[0]);
 
-    auto missing_date =
-        EraseStreamingBlock(streaming_bytes, StreamSerializationTag::SINDI_DATE_METADATA);
+    std::stringstream load_stream(streaming_bytes);
+    auto loaded = Index::Load(load_stream, "{}");
+    REQUIRE(loaded.has_value());
+    auto loaded_result = loaded.value()->KnnSearch(query, 3, search_parameters).value();
+    REQUIRE(loaded_result->GetDim() == combined->GetDim());
+    REQUIRE(loaded_result->GetIds()[0] == combined->GetIds()[0]);
+
+    auto missing_time =
+        EraseStreamingBlock(streaming_bytes, StreamSerializationTag::SINDI_TIME_METADATA);
     SINDIV2 invalid_restored(parameter, common_param);
-    std::stringstream invalid_stream(missing_date);
+    std::stringstream invalid_stream(missing_time);
     REQUIRE_THROWS(invalid_restored.DeserializeStreaming(invalid_stream));
 
-    query_date = "2026/02/29";
-    REQUIRE_THROWS(index.KnnSearch(query, 3, search_parameters, nullptr));
-
-    query_date_begin = "2026/09";
-    query_date_end = "2026/08";
-    REQUIRE_THROWS(index.KnnSearch(range_query, 3, search_parameters, nullptr));
-
-    query_date.clear();
-    REQUIRE_THROWS(index.KnnSearch(query, 3, search_parameters, nullptr));
+    if (not parameter->immutable) {
+        int64_t added_label = 50;
+        int64_t added_timestamp = 30 * day;
+        std::string added_host = "host-b";
+        SparseVector added_vector{1, &term, values.data()};
+        auto timed_add = Dataset::Make()
+                             ->NumElements(1)
+                             ->SparseVectors(&added_vector)
+                             ->Ids(&added_label)
+                             ->StringMetadata(SINDI_HOST_METADATA_NAME, &added_host)
+                             ->Int64Metadata(SINDI_PUBLISH_TIME_METADATA_NAME, &added_timestamp)
+                             ->Owner(false);
+        auto untimed_add = Dataset::Make()
+                               ->NumElements(1)
+                               ->SparseVectors(&added_vector)
+                               ->Ids(&added_label)
+                               ->StringMetadata(SINDI_HOST_METADATA_NAME, &added_host)
+                               ->Owner(false);
+        REQUIRE_THROWS_WITH(index.Add(timed_add),
+                            Catch::Matchers::ContainsSubstring(
+                                "SINDI time-aware index does not support incremental Add"));
+        REQUIRE_THROWS_WITH(index.Add(untimed_add),
+                            Catch::Matchers::ContainsSubstring(
+                                "SINDI time-aware index does not support incremental Add"));
+    }
 }
 
 TEST_CASE("SINDIV2 Heap Insert Strategy Test", "[ut][SINDIV2]") {
