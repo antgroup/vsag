@@ -46,6 +46,7 @@ struct SplitTask {
 
 /** Single Index for Multi-vector Query (SIMQ) implementation. */
 class SIMQ : public InnerIndexInterface {
+    friend class SIMQAnalyzer;
 public:
     static ParamPtr
     CheckAndMappingExternalParam(const JsonType& external_param,
@@ -103,6 +104,9 @@ public:
     GetNumElements() const override {
         return static_cast<int64_t>(total_count_);
     }
+
+    [[nodiscard]] std::string
+    GetStats() const override;
 
     void
     InitFeatures() override;

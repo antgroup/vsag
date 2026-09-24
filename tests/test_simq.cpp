@@ -874,3 +874,39 @@ TEST_CASE("SIMQ timeout search", "[simq][timeout]") {
     REQUIRE(stats.size() == 1);
     REQUIRE(stats[0] == "true");
 }
+
+TEST_CASE("SIMQ GetStats reports doc vector count distribution", "[simq][stats][analyzer]") {
+    auto ds = generate_dataset();
+    TempFile tmp;
+
+    auto build_param = make_build_param(tmp.path);
+    auto result = Factory::CreateIndex("simq", build_param);
+    REQUIRE(result.has_value());
+    auto index = result.value();
+    auto build_result = index->Build(ds.base_dataset);
+    REQUIRE(build_result.has_value());
+
+    auto stats_str = index->GetStats();
+    REQUIRE_FALSE(stats_str.empty());
+    auto stats = JsonType::Parse(stats_str);
+
+    REQUIRE(stats.Contains("total_count"));
+    REQUIRE(stats["total_count"].GetUint64() == BASE_DOCS);
+
+    REQUIRE(stats.Contains("doc_vector_count_distribution"));
+    const auto& dist = stats["doc_vector_count_distribution"];
+
+    REQUIRE(dist.Contains("mean"));
+    REQUIRE(dist.Contains("p90"));
+    REQUIRE(dist.Contains("p99"));
+    REQUIRE(dist.Contains("min"));
+    REQUIRE(dist.Contains("max"));
+
+    // All docs have DOC_TOKENS token vectors
+    float expected = static_cast<float>(DOC_TOKENS);
+    REQUIRE(dist["mean"].GetFloat() == expected);
+    REQUIRE(dist["p90"].GetFloat() == expected);
+    REQUIRE(dist["p99"].GetFloat() == expected);
+    REQUIRE(dist["min"].GetInt() == static_cast<int64_t>(DOC_TOKENS));
+    REQUIRE(dist["max"].GetInt() == static_cast<int64_t>(DOC_TOKENS));
+}
