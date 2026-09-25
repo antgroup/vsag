@@ -24,6 +24,77 @@
 #include "unittest.h"
 #include "vsag_exception.h"
 
+namespace vsag {
+namespace {
+
+class CountingStreamBuffer : public std::stringbuf {
+public:
+    explicit CountingStreamBuffer(const std::string& data) : std::stringbuf(data) {
+    }
+
+    std::streamsize
+    xsgetn(char* data, std::streamsize size) override {
+        bytes_read += size;
+        return std::stringbuf::xsgetn(data, size);
+    }
+
+    pos_type
+    seekoff(off_type offset,
+            std::ios_base::seekdir direction,
+            std::ios_base::openmode mode) override {
+        if (reject_seek && direction != std::ios_base::cur) {
+            return pos_type(off_type(-1));
+        }
+        return std::stringbuf::seekoff(offset, direction, mode);
+    }
+
+    uint64_t bytes_read{0};
+    bool reject_seek{false};
+};
+
+}  // namespace
+
+TEST_CASE("IOStreamReader Skip seeks without reading payloads", "[ut][stream_reader]") {
+    CountingStreamBuffer buffer(std::string(20000, 'x') + "tail");
+    std::istream input(&buffer);
+    const uint64_t start = GENERATE(0, 7);
+    input.seekg(start);
+    IOStreamReader reader(input);
+    REQUIRE(reader.Length() == 20004 - start);
+    reader.Skip(0);
+    REQUIRE(reader.GetCursor() == start);
+    reader.Skip(20000 - start);
+    REQUIRE(reader.GetCursor() == 20000);
+    REQUIRE(buffer.bytes_read == 0);
+    REQUIRE_THROWS_AS(reader.Skip(5), VsagException);
+    REQUIRE_THROWS_AS(reader.Skip(std::numeric_limits<uint64_t>::max()), VsagException);
+    REQUIRE(reader.GetCursor() == 20000);
+    char tail[4];
+    reader.Read(tail, sizeof(tail));
+    REQUIRE(std::string(tail, sizeof(tail)) == "tail");
+    REQUIRE(buffer.bytes_read == 4);
+    reader.Skip(0);
+    REQUIRE_THROWS_AS(reader.Skip(1), VsagException);
+    REQUIRE(reader.GetCursor() == 20004);
+}
+
+TEST_CASE("IOStreamReader Skip reports stream errors", "[ut][stream_reader]") {
+    CountingStreamBuffer buffer("payload");
+    std::istream input(&buffer);
+    IOStreamReader reader(input);
+    SECTION("failed seek") {
+        buffer.reject_seek = true;
+        REQUIRE_THROWS_AS(reader.Skip(1), VsagException);
+    }
+    SECTION("invalid cursor") {
+        input.setstate(std::ios::failbit);
+        REQUIRE_THROWS_AS(reader.Skip(1), VsagException);
+    }
+    REQUIRE(buffer.bytes_read == 0);
+}
+
+}  // namespace vsag
+
 TEST_CASE("StreamReader Skip consumes forward input", "[ut][stream_reader]") {
     std::istringstream input(std::string(20000, 'x') + "tail");
     vsag::ForwardStreamReader reader(input);

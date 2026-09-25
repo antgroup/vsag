@@ -149,6 +149,9 @@ private:
 class IOStreamReader : public StreamReader {
 public:
     void
+    Skip(uint64_t size) override;
+
+    void
     Read(char* data, uint64_t size) override;
 
     void
@@ -164,6 +167,7 @@ public:
 
 private:
     std::istream& istream_;
+    uint64_t end_cursor_{0};
 };
 
 class ForwardStreamReader : public StreamReader {

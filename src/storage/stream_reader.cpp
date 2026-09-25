@@ -110,6 +110,22 @@ IOStreamReader::Read(char* data, uint64_t size) {
 }
 
 void
+IOStreamReader::Skip(uint64_t size) {
+    const auto position = istream_.tellg();
+    if (position == std::streampos(-1)) {
+        throw VsagException(ErrorType::READ_ERROR, "IOStreamReader: cannot determine cursor");
+    }
+    const auto cursor = static_cast<uint64_t>(position);
+    if (cursor > end_cursor_ || size > end_cursor_ - cursor) {
+        throw VsagException(ErrorType::READ_ERROR, "IOStreamReader: skip exceeds stream boundary");
+    }
+    this->Seek(cursor + size);
+    if (istream_.fail()) {
+        throw VsagException(ErrorType::READ_ERROR, "IOStreamReader: skip seek failed");
+    }
+}
+
+void
 IOStreamReader::Seek(uint64_t cursor) {
     // vsag::logger::trace("reader seek absolute::{}", cursor);
     istream_.seekg(static_cast<int64_t>(cursor), std::ios::beg);
@@ -124,6 +140,7 @@ IOStreamReader::GetCursor() const {
 IOStreamReader::IOStreamReader(std::istream& istream) : istream_(istream) {
     auto cur_pos = istream.tellg();
     istream.seekg(0, std::ios::end);
+    end_cursor_ = istream.tellg();
     length_ = istream.tellg() - cur_pos;
     istream.seekg(cur_pos);
 }

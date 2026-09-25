@@ -151,6 +151,29 @@ TEST_CASE("Forward block reader rejects invalid input without unwinding drains",
     }
 }
 
+TEST_CASE("Forward block reader checks skipped bytes from seekable streams",
+          "[ut][streaming_serialization]") {
+    const std::string payload(20000, 'x');
+    auto serialized = payload + "suffix";
+    const uint64_t corrupt_offset = GENERATE(0, 19999, 20000);
+    serialized[corrupt_offset] = 'y';
+    std::istringstream input(serialized);
+    vsag::IOStreamReader reader(input);
+    vsag::StreamBlockHeader header;
+    header.value_len = payload.size();
+    header.payload_checksum = vsag::StreamHeader::CalculateChecksum(payload);
+    auto load = [&]() {
+        vsag::ReadForwardBlockPayload(
+            reader, header, [](vsag::StreamReader& block) { block.Skip(10000); });
+    };
+    if (corrupt_offset < payload.size()) {
+        REQUIRE_THROWS_AS(load(), vsag::VsagException);
+    } else {
+        REQUIRE_NOTHROW(load());
+    }
+    REQUIRE(reader.GetCursor() == payload.size());
+}
+
 TEST_CASE("Forward block reader drains a large generated payload with bounded reads",
           "[ut][streaming_serialization]") {
     const uint64_t size = vsag::Options::Instance().block_size_limit() + 1;
