@@ -135,7 +135,7 @@ else()
         message(WARNING "Intel MKL is not supported on this architecture (${CMAKE_HOST_SYSTEM_PROCESSOR}). Falling back to OpenBLAS.")
     endif()
 
-    set(BLAS_LIBRARIES libopenblas.a gfortran)
+    set(BLAS_LIBRARIES libopenblas.a)
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         list(PREPEND BLAS_LIBRARIES omp)
     else()

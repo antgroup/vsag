@@ -51,7 +51,7 @@ endif ()
 
 file (READ "${VSAG_SOURCE_DIR}/extern/openblas/openblas.cmake" openblas_content)
 assert_matches ("${openblas_content}"
-                "vsag_resolve_thirdparty_override \\(OPENBLAS v0\\.3\\.23 openblas_urls\\)"
+                "vsag_resolve_thirdparty_override \\(OPENBLAS v0\\.3\\.34 openblas_urls\\)"
                 "0.18 OpenBLAS pin")
 file (READ "${VSAG_SOURCE_DIR}/extern/yaml-cpp/yaml-cpp.cmake" yaml_cpp_content)
 assert_matches ("${yaml_cpp_content}"
@@ -93,8 +93,8 @@ vsag_thirdparty_pinned_variable (HDF5 hdf5_1.14.4 actual)
 assert_equal ("${actual}" "VSAG_THIRDPARTY_HDF5_1_14_4" "decorated version")
 vsag_thirdparty_pinned_variable (YAML_CPP yaml-cpp-0.9.0 actual)
 assert_equal ("${actual}" "VSAG_THIRDPARTY_YAML_CPP_0_9_0" "separator normalization")
-vsag_thirdparty_pinned_variable (OPENBLAS v0.3.23 actual)
-assert_equal ("${actual}" "VSAG_THIRDPARTY_OPENBLAS_0_3_23" "0.18 OpenBLAS pin")
+vsag_thirdparty_pinned_variable (OPENBLAS v0.3.34 actual)
+assert_equal ("${actual}" "VSAG_THIRDPARTY_OPENBLAS_0_3_34" "0.18 OpenBLAS pin")
 vsag_thirdparty_pinned_variable (YAML_CPP 0.8.0 actual)
 assert_equal ("${actual}" "VSAG_THIRDPARTY_YAML_CPP_0_8_0" "0.18 yaml-cpp pin")
 
@@ -184,5 +184,22 @@ set (output "${stdout}\n${stderr}")
 assert_matches ("${output}" "HASH mismatch" "mismatched archive rejection")
 assert_not_matches ("${output}" "wrong archive content" "hash diagnostic content safety")
 file (REMOVE "${hash_fixture}" "${download_fixture}")
+
+
+# OpenBLAS old pins must not select an archive for the upgraded dependency.
+unset(ENV{VSAG_THIRDPARTY_OPENBLAS_0_3_34})
+unset(ENV{VSAG_THIRDPARTY_OPENBLAS})
+set(ENV{VSAG_THIRDPARTY_OPENBLAS_0_3_23} "old-archive")
+set(urls "upstream-archive")
+vsag_resolve_thirdparty_override(OPENBLAS v0.3.34 urls)
+assert_equal("${urls}" "upstream-archive" "obsolete OpenBLAS pin ignored")
+set(ENV{VSAG_THIRDPARTY_OPENBLAS} "legacy-archive")
+set(urls "upstream-archive")
+vsag_resolve_thirdparty_override(OPENBLAS v0.3.34 urls)
+assert_equal("${urls}" "legacy-archive;upstream-archive" "OpenBLAS legacy fallback")
+set(ENV{VSAG_THIRDPARTY_OPENBLAS_0_3_34} "new-archive")
+set(urls "upstream-archive")
+vsag_resolve_thirdparty_override(OPENBLAS v0.3.34 urls)
+assert_equal("${urls}" "new-archive;upstream-archive" "OpenBLAS versioned precedence")
 
 message (STATUS "Third-party pinned-variable tests passed")
