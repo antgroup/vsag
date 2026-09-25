@@ -308,14 +308,10 @@ public:
     }
 
     void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+    Deserialize(lvalue_or_rvalue<StreamReader> reader, bool defer_remap = false) {
         StreamReader::ReadVector(reader, label_table_);
-        if (use_reverse_map_) {
-            this->label_remap_.Clear();
-            this->label_remap_.Reserve(label_table_.size());
-            for (InnerIdType id = 0; id < label_table_.size(); ++id) {
-                this->label_remap_.InsertOrAssign(label_table_[id], id);
-            }
+        if (not defer_remap) {
+            this->RestoreLogicalCount(label_table_.size());
         }
         if (compress_duplicate_data_) {
             this->DeserializeDuplicateRecords(reader, label_table_.size());
@@ -323,7 +319,23 @@ public:
         if (support_tombstone_) {
             StreamReader::ReadObj(reader, deleted_ids_);
         }
-        this->total_count_.store(label_table_.size());
+    }
+
+    // Capacity-sized payloads need the vector store's logical bound before rebuilding the map.
+    void
+    RestoreLogicalCount(uint64_t logical_count) {
+        if (logical_count > label_table_.size()) {
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                "logical element count exceeds label capacity");
+        }
+        if (use_reverse_map_) {
+            label_remap_.Clear();
+            label_remap_.Reserve(logical_count);
+            for (InnerIdType id = 0; id < logical_count; ++id) {
+                label_remap_.InsertOrAssign(label_table_[id], id);
+            }
+        }
+        total_count_.store(static_cast<int64_t>(logical_count));
     }
 
     void
