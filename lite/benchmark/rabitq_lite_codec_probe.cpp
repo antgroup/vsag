@@ -56,6 +56,16 @@ milliseconds(Clock::time_point start, Clock::time_point end) {
 }
 
 double
+process_cpu_microseconds() {
+    rusage usage{};
+    require(getrusage(RUSAGE_SELF, &usage) == 0, "getrusage failed");
+    const auto convert = [](const auto& value) {
+        return static_cast<double>(value.tv_sec) * 1'000'000.0 + static_cast<double>(value.tv_usec);
+    };
+    return convert(usage.ru_utime) + convert(usage.ru_stime);
+}
+
+double
 percentile(const std::vector<double>& sorted, double fraction) {
     require(not sorted.empty(), "cannot compute an empty percentile");
     const auto position =
@@ -1879,6 +1889,7 @@ run(const std::filesystem::path& root,
                 base.count <= static_cast<uint64_t>(std::numeric_limits<int32_t>::max()),
             "inconsistent SIFT dataset");
     const auto build_start = Clock::now();
+    const double build_cpu_start_us = process_cpu_microseconds();
     const auto model = train(base.values, base.count, dim, 47);
     EncodedRecords codes(dim);
     codes.Reserve(base.count);
@@ -1887,12 +1898,16 @@ run(const std::filesystem::path& root,
     }
     const double build_ms =
         std::chrono::duration<double, std::milli>(Clock::now() - build_start).count();
+    const double build_cpu_ms = (process_cpu_microseconds() - build_cpu_start_us) / 1'000.0;
     require(max_degree >= 4 and max_degree <= 64, "max_degree must be in [4, 64]");
     require(ef_search >= k and ef_search <= base.count, "ef_search must be in [10, base_count]");
     const auto graph_build_start = Clock::now();
+    const double graph_build_cpu_start_us = process_cpu_microseconds();
     const auto graph = build_graph_topology(base.values, base.count, dim, max_degree, ef_search);
     const double graph_build_ms =
         std::chrono::duration<double, std::milli>(Clock::now() - graph_build_start).count();
+    const double graph_build_cpu_ms =
+        (process_cpu_microseconds() - graph_build_cpu_start_us) / 1'000.0;
     if (not snapshot_path.empty()) {
         require(not std::filesystem::exists(snapshot_path), "snapshot output already exists");
         std::ofstream output(snapshot_path, std::ios::binary);
@@ -1908,7 +1923,9 @@ run(const std::filesystem::path& root,
     uint64_t graph_visited = 0;
     uint64_t graph_reordered = 0;
     std::vector<double> search_us;
+    std::vector<double> search_cpu_us;
     std::vector<double> graph_search_us;
+    std::vector<double> graph_search_cpu_us;
     for (uint64_t q = 0; q < queries.count; ++q) {
         float query_norm = 0.0F;
         const auto query = normalize(model, queries.values.data() + q * dim, query_norm);
@@ -1917,13 +1934,17 @@ run(const std::filesystem::path& root,
             return full_distance(query, query_norm, codes.At(id), coarse.centered_ip);
         });
         const auto start = Clock::now();
+        const double search_cpu_start_us = process_cpu_microseconds();
         const auto filtered = filtered_search(query, query_norm, codes, k);
         search_us.push_back(
             std::chrono::duration<double, std::micro>(Clock::now() - start).count());
+        search_cpu_us.push_back(process_cpu_microseconds() - search_cpu_start_us);
         const auto graph_start = Clock::now();
+        const double graph_search_cpu_start_us = process_cpu_microseconds();
         const auto graph_result = graph_search(query, query_norm, codes, graph, k, ef_search);
         graph_search_us.push_back(
             std::chrono::duration<double, std::micro>(Clock::now() - graph_start).count());
+        graph_search_cpu_us.push_back(process_cpu_microseconds() - graph_search_cpu_start_us);
         const int32_t* expected = truth.values.data() + q * k;
         for (uint64_t i = 0; i < k; ++i) {
             require(expected[i] >= 0 and static_cast<uint64_t>(expected[i]) < base.count,
@@ -1941,18 +1962,21 @@ run(const std::filesystem::path& root,
         }
     }
     std::sort(search_us.begin(), search_us.end());
+    std::sort(search_cpu_us.begin(), search_cpu_us.end());
     std::sort(graph_search_us.begin(), graph_search_us.end());
+    std::sort(graph_search_cpu_us.begin(), graph_search_cpu_us.end());
     const uint64_t opportunities = queries.count * k;
     const uint64_t plane_bytes = (dim + 7) / 8;
-    std::cout << "base_count,query_count,dim,max_degree,ef_search,build_encode_ms,graph_build_ms,"
-                 "full_recall_at_10,"
+    std::cout << "base_count,query_count,dim,max_degree,ef_search,build_encode_ms,"
+                 "build_encode_cpu_ms,graph_build_ms,graph_build_cpu_ms,full_recall_at_10,"
                  "filtered_recall_at_10,graph_recall_at_10,filtered_full_agreement,"
                  "graph_full_agreement,mean_reordered,reorder_ratio,search_p50_us,"
-                 "mean_graph_visited,mean_graph_reordered,graph_search_p50_us,filter_bytes,"
-                 "supplement_bytes,metadata_bytes,graph_bytes\n";
+                 "search_cpu_p50_us,mean_graph_visited,mean_graph_reordered,graph_search_p50_us,"
+                 "graph_search_cpu_p50_us,filter_bytes,supplement_bytes,metadata_bytes,"
+                 "graph_bytes\n";
     std::cout << std::fixed << std::setprecision(6) << base.count << ',' << queries.count << ','
               << dim << ',' << max_degree << ',' << ef_search << ',' << build_ms << ','
-              << graph_build_ms << ','
+              << build_cpu_ms << ',' << graph_build_ms << ',' << graph_build_cpu_ms << ','
               << static_cast<double>(full_hits) / static_cast<double>(opportunities) << ','
               << static_cast<double>(filtered_hits) / static_cast<double>(opportunities) << ','
               << static_cast<double>(graph_hits) / static_cast<double>(opportunities) << ','
@@ -1961,9 +1985,11 @@ run(const std::filesystem::path& root,
               << static_cast<double>(reordered) / static_cast<double>(queries.count) << ','
               << static_cast<double>(reordered) / static_cast<double>(queries.count * base.count)
               << ',' << search_us[search_us.size() / 2] << ','
+              << search_cpu_us[search_cpu_us.size() / 2] << ','
               << static_cast<double>(graph_visited) / static_cast<double>(queries.count) << ','
               << static_cast<double>(graph_reordered) / static_cast<double>(queries.count) << ','
               << graph_search_us[graph_search_us.size() / 2] << ','
+              << graph_search_cpu_us[graph_search_cpu_us.size() / 2] << ','
               << base.count * plane_bytes * K_FILTER_BITS << ','
               << base.count * plane_bytes * K_SUPPLEMENT_BITS << ','
               << base.count * 6 * sizeof(float) << ','
@@ -2072,6 +2098,7 @@ run_crud(const std::filesystem::path& root,
     }
 
     const auto encode_start = Clock::now();
+    const double encode_cpu_start_us = process_cpu_microseconds();
     auto model = train(base.values, base.count, dim, 47);
     EncodedRecords codes(dim);
     codes.Reserve(base.count);
@@ -2079,20 +2106,26 @@ run_crud(const std::filesystem::path& root,
         codes.Append(encode(model, base.values.data() + slot * dim));
     }
     const double build_encode_ms = milliseconds(encode_start, Clock::now());
+    const double build_encode_cpu_ms = (process_cpu_microseconds() - encode_cpu_start_us) / 1'000.0;
 
     const auto graph_start = Clock::now();
+    const double graph_cpu_start_us = process_cpu_microseconds();
     const auto initial_graph =
         build_graph_topology(base.values, base.count, dim, max_degree, ef_search);
     const double graph_build_ms = milliseconds(graph_start, Clock::now());
+    const double graph_build_cpu_ms = (process_cpu_microseconds() - graph_cpu_start_us) / 1'000.0;
     std::vector<int64_t> ids(base.count);
     std::iota(ids.begin(), ids.end(), 0);
     MutableGraphState state(
         std::move(model), std::move(codes), initial_graph, std::move(ids), max_degree, ef_search);
 
     std::cout
-        << "round,count,dim,crud_ops,queries,max_degree,ef_search,build_encode_ms,graph_build_ms,"
-           "update_p50_us,update_p99_us,remove_p50_us,remove_p99_us,add_p50_us,add_p99_us,"
-           "mutation_fallbacks,compact_ms,search_p50_us,search_p99_us,full_self_top1_recall,"
+        << "round,count,dim,crud_ops,queries,max_degree,ef_search,build_encode_ms,"
+           "build_encode_cpu_ms,graph_build_ms,graph_build_cpu_ms,update_p50_us,update_p99_us,"
+           "update_cpu_p50_us,update_cpu_p99_us,remove_p50_us,remove_p99_us,"
+           "remove_cpu_p50_us,remove_cpu_p99_us,add_p50_us,add_p99_us,add_cpu_p50_us,"
+           "add_cpu_p99_us,mutation_fallbacks,compact_ms,search_p50_us,search_p99_us,"
+           "search_cpu_p50_us,search_cpu_p99_us,full_self_top1_recall,"
            "graph_self_top1_recall,graph_full_top1_agreement,graph_full_positional_agreement,"
            "mean_visited,mean_reordered,save_ms,load_ms,snapshot_bytes,state_rss_kib,"
            "roundtrip_rss_kib,peak_rss_kib,result_checksum\n";
@@ -2100,11 +2133,17 @@ run_crud(const std::filesystem::path& root,
     constexpr uint64_t k = 10;
     for (uint64_t round = 0; round < rounds; ++round) {
         std::vector<double> update_us;
+        std::vector<double> update_cpu_us;
         std::vector<double> remove_us;
+        std::vector<double> remove_cpu_us;
         std::vector<double> add_us;
+        std::vector<double> add_cpu_us;
         update_us.reserve(crud_ops);
+        update_cpu_us.reserve(crud_ops);
         remove_us.reserve(crud_ops);
+        remove_cpu_us.reserve(crud_ops);
         add_us.reserve(crud_ops);
+        add_cpu_us.reserve(crud_ops);
         const uint64_t fallbacks_before = state.GetMutationFallbacks();
         for (uint64_t operation = 0; operation < crud_ops; ++operation) {
             const uint64_t id = (round * 65537ULL + operation * 8191ULL) % base.count;
@@ -2116,28 +2155,39 @@ run_crud(const std::filesystem::path& root,
             }
 
             auto start = Clock::now();
+            double cpu_start_us = process_cpu_microseconds();
             require(state.Update(static_cast<int64_t>(id), vector), "CRUD Update failed");
             update_us.push_back(microseconds(start, Clock::now()));
+            update_cpu_us.push_back(process_cpu_microseconds() - cpu_start_us);
 
             start = Clock::now();
+            cpu_start_us = process_cpu_microseconds();
             require(state.Remove(static_cast<int64_t>(id)), "CRUD Remove failed");
             remove_us.push_back(microseconds(start, Clock::now()));
+            remove_cpu_us.push_back(process_cpu_microseconds() - cpu_start_us);
 
             start = Clock::now();
+            cpu_start_us = process_cpu_microseconds();
             require(state.Add(static_cast<int64_t>(id), vector), "CRUD Add failed");
             add_us.push_back(microseconds(start, Clock::now()));
+            add_cpu_us.push_back(process_cpu_microseconds() - cpu_start_us);
         }
         state.Validate();
         require(state.Size() == base.count, "CRUD changed the active record count");
         std::sort(update_us.begin(), update_us.end());
+        std::sort(update_cpu_us.begin(), update_cpu_us.end());
         std::sort(remove_us.begin(), remove_us.end());
+        std::sort(remove_cpu_us.begin(), remove_cpu_us.end());
         std::sort(add_us.begin(), add_us.end());
+        std::sort(add_cpu_us.begin(), add_cpu_us.end());
 
         const auto compact_start = Clock::now();
         const auto topology = state.GetGraph();
         const double compact_ms = milliseconds(compact_start, Clock::now());
         std::vector<double> search_us;
+        std::vector<double> search_cpu_us;
         search_us.reserve(query_count);
+        search_cpu_us.reserve(query_count);
         std::vector<std::vector<Candidate>> expected;
         expected.reserve(query_count);
         uint64_t full_self_hits = 0;
@@ -2158,8 +2208,10 @@ run_crud(const std::filesystem::path& root,
                 return full_distance(query, query_norm, code, coarse.centered_ip);
             });
             const auto start = Clock::now();
+            const double search_cpu_start_us = process_cpu_microseconds();
             auto found = graph_search(query, query_norm, state.GetCodes(), topology, k, ef_search);
             search_us.push_back(microseconds(start, Clock::now()));
+            search_cpu_us.push_back(process_cpu_microseconds() - search_cpu_start_us);
             require(found.neighbors.size() == k, "CRUD search result size changed");
             full_self_hits += state.IdAt(full.front().id) == static_cast<int64_t>(id) ? 1 : 0;
             graph_self_hits +=
@@ -2177,6 +2229,7 @@ run_crud(const std::filesystem::path& root,
             expected.push_back(std::move(found.neighbors));
         }
         std::sort(search_us.begin(), search_us.end());
+        std::sort(search_cpu_us.begin(), search_cpu_us.end());
 
         const auto save_start = Clock::now();
         {
@@ -2220,15 +2273,21 @@ run_crud(const std::filesystem::path& root,
         const uint64_t opportunities = query_count * k;
         std::cout << std::fixed << std::setprecision(6) << round + 1 << ',' << state.Size() << ','
                   << dim << ',' << crud_ops << ',' << query_count << ',' << max_degree << ','
-                  << ef_search << ',' << build_encode_ms << ',' << graph_build_ms << ','
+                  << ef_search << ',' << build_encode_ms << ',' << build_encode_cpu_ms << ','
+                  << graph_build_ms << ',' << graph_build_cpu_ms << ','
                   << percentile(update_us, 0.50) << ',' << percentile(update_us, 0.99) << ','
-                  << percentile(remove_us, 0.50) << ',' << percentile(remove_us, 0.99) << ','
-                  << percentile(add_us, 0.50) << ',' << percentile(add_us, 0.99) << ','
+                  << percentile(update_cpu_us, 0.50) << ',' << percentile(update_cpu_us, 0.99)
+                  << ',' << percentile(remove_us, 0.50) << ',' << percentile(remove_us, 0.99) << ','
+                  << percentile(remove_cpu_us, 0.50) << ',' << percentile(remove_cpu_us, 0.99)
+                  << ',' << percentile(add_us, 0.50) << ',' << percentile(add_us, 0.99) << ','
+                  << percentile(add_cpu_us, 0.50) << ',' << percentile(add_cpu_us, 0.99) << ','
                   << state.GetMutationFallbacks() - fallbacks_before << ',' << compact_ms << ','
                   << percentile(search_us, 0.50) << ',' << percentile(search_us, 0.99) << ','
-                  << static_cast<double>(full_self_hits) / static_cast<double>(query_count) << ','
-                  << static_cast<double>(graph_self_hits) / static_cast<double>(query_count) << ','
-                  << static_cast<double>(top1_agreement) / static_cast<double>(query_count) << ','
+                  << percentile(search_cpu_us, 0.50) << ',' << percentile(search_cpu_us, 0.99)
+                  << ',' << static_cast<double>(full_self_hits) / static_cast<double>(query_count)
+                  << ',' << static_cast<double>(graph_self_hits) / static_cast<double>(query_count)
+                  << ',' << static_cast<double>(top1_agreement) / static_cast<double>(query_count)
+                  << ','
                   << static_cast<double>(positional_agreement) / static_cast<double>(opportunities)
                   << ',' << static_cast<double>(visited) / static_cast<double>(query_count) << ','
                   << static_cast<double>(reordered) / static_cast<double>(query_count) << ','

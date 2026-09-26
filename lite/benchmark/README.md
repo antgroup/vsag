@@ -531,3 +531,35 @@ snapshot formats.
 
 The proposed public API, fixed-model lifecycle, version 4 snapshot boundary, and
 promotion gates are documented in [`RABITQ_LITE_BACKEND_DESIGN.md`](RABITQ_LITE_BACKEND_DESIGN.md).
+
+### Single-core CPU and CRUD runner
+
+The probe reports both monotonic wall time and process CPU time from
+`getrusage(RUSAGE_SELF)` for encoding, graph construction, Update, Remove,
+Add, and graph search. Per-operation fields use the same P50/P99 aggregation
+for both clocks. Process CPU time includes user and system time for the process;
+it is not a hardware-counter measurement, and the `getrusage` calls add a
+small fixed cost to microsecond-scale operations.
+
+Run the fixed-affinity experiment on prepared 10k and 100k prefixes with:
+
+```bash
+lite/benchmark/run_rabitq_single_core.sh \
+  build-lite-rabitq/lite_rabitq_codec_probe \
+  /data/prepared-dataset /new/output-directory 0
+```
+
+The runner starts each repetition in a fresh process, binds it to one logical
+CPU with `taskset`, and sets common BLAS/OpenMP thread-count variables to one.
+It records the inherited CPU affinity, topology, commit, binary checksum, raw
+CSV, `/usr/bin/time -v`, dataset manifests, snapshots, and a verified SHA-256
+manifest. If a working `perf stat` is available, it also records task-clock,
+cycles, instructions, branches, cache events, context switches, migrations, and
+page faults; otherwise the run remains valid with process CPU time and
+`/usr/bin/time -v` evidence.
+
+This runner measures the experiment-only fixed-model RaBitQ state. It does not
+make the public Lite backend single-threaded by contract, establish
+cross-machine performance, or replace Recall@10 validation on independent
+queries. SIFT, GIST, and Cohere should be reported as separate datasets rather
+than pooled; a missing dataset must be recorded instead of substituted.
