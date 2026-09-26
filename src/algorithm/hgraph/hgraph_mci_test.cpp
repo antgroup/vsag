@@ -3635,19 +3635,20 @@ TEST_CASE("HGraph MCI parallel incremental add keeps full coverage",
           "[ut][hgraph][mci][parallel_add]") {
     constexpr int64_t dim = 4;
     constexpr int64_t base = 256;
-    constexpr int64_t added = 500;
-    constexpr int64_t total = base + added;
+    constexpr int64_t max_added = 2500;
+    constexpr int64_t total = base + max_added;
     std::vector<int64_t> ids(total);
     std::iota(ids.begin(), ids.end(), 0);
     std::vector<float> vectors(total * dim);
     for (uint64_t i = 0; i < vectors.size(); ++i) {
         vectors[i] = static_cast<float>((i * 13) % 251);
     }
-    // The 500-row batch is above the parallel threshold and a multiple of the parallel chunk, so
-    // threads == 4 exercises the worker path (and drains the batch delta at the last chunk
-    // boundary) while threads == 1 is the serial reference. Clique structure may differ between
-    // them, but every live node must stay covered in both.
-    auto build_and_add = [&](int64_t threads) {
+    // A batch above the parallel threshold exercises the worker path, a batch larger than the
+    // planning chunk exercises the chunk loop and its flush points, and a small batch keeps the
+    // serial branch reachable while workers are configured. The structure is not asserted because
+    // Add inserts graph rows in parallel, so the graph itself is schedule dependent; coverage,
+    // delta accounting and search usability are.
+    auto build_and_add = [&](int64_t threads, int64_t added) {
         auto params = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
         params["index_param"]["graph_type"].SetString("nsw");
         params["index_param"]["base_io_type"].SetString("memory_io");
@@ -3659,20 +3660,49 @@ TEST_CASE("HGraph MCI parallel incremental add keeps full coverage",
         REQUIRE(added_result.has_value());
         REQUIRE(added_result.value().empty());
         const auto stats = vsag::JsonType::Parse(index->GetStats());
-        REQUIRE(stats["mci_total_nodes"].GetInt() == total);
-        REQUIRE(stats["mci_covered_nodes"].GetInt() == total);
+        REQUIRE(stats["mci_total_nodes"].GetInt() == base + added);
+        REQUIRE(stats["mci_covered_nodes"].GetInt() == base + added);
         REQUIRE(stats["mci_total_clique_count"].GetInt() > 0);
-        return stats;
+        return index;
     };
-    SECTION("parallel workers cover every live node and drain the batch delta") {
-        const auto stats = build_and_add(4);
-        // Chunk accounting keeps the flush points aligned with the serial path, so a batch that
-        // is a multiple of the chunk drains its delta by the last chunk boundary.
+    auto stats_of = [](const vsag::IndexPtr& index) {
+        return vsag::JsonType::Parse(index->GetStats());
+    };
+    // Every chunk ends with the serial per-chunk accounting, so the last chunk boundary drains the
+    // whole batch delta instead of leaving it for a later mutation.
+    auto require_drained_delta = [](const vsag::JsonType& stats) {
         REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
         REQUIRE(stats["mci_delta_clique_membership_count"].GetInt() == 0);
         REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 0);
+    };
+    SECTION("parallel workers cover every live node and drain the batch delta") {
+        require_drained_delta(stats_of(build_and_add(4, 500)));
+    }
+    SECTION("a batch spanning several planning chunks stays covered and drained") {
+        require_drained_delta(stats_of(build_and_add(4, 2500)));
+    }
+    SECTION("a batch below the parallel threshold stays covered and drained") {
+        require_drained_delta(stats_of(build_and_add(4, 100)));
     }
     SECTION("serial reference reaches the same coverage") {
-        REQUIRE(build_and_add(1)["mci_covered_nodes"].GetInt() == total);
+        REQUIRE(stats_of(build_and_add(1, 500))["mci_covered_nodes"].GetInt() == base + 500);
+    }
+    SECTION("search stays usable after a planned batch") {
+        const auto index = build_and_add(4, 2500);
+        for (const auto& search_param :
+             {R"({"hgraph":{"ef_search":100,"use_mci":true}})",
+              R"({"hgraph":{"ef_search":100,"use_mci":false}})",
+              R"({"hgraph":{"ef_search":100,"use_hybrid_traversal":true}})"}) {
+            auto result = index->KnnSearch(make_dataset(ids, vectors, 0, 1, dim), 10, search_param);
+            REQUIRE(result.has_value());
+            REQUIRE(result.value()->GetDim() == 10);
+            std::set<int64_t> unique;
+            for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+                const auto id = result.value()->GetIds()[i];
+                REQUIRE(id >= 0);
+                REQUIRE(id < total);
+                REQUIRE(unique.insert(id).second);
+            }
+        }
     }
 }
