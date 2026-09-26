@@ -77,6 +77,67 @@ class RaBitQSplitDataCellInterface;
  * Supports quantized codes, reorder, attribute filtering, cache warm-start,
  * force remove, and iterative search. Introduced since v0.12.
  */
+/// One row of a batched MCI update: the row to update plus its query source. Exactly one source is
+/// set - a ready vector pointer, a precomputed candidate list, or the row's stored codes to decode.
+struct MciUpdateRow {
+    InnerIdType inner_id{0};
+    const void* vector{nullptr};
+    const Vector<InnerIdType>* knn{nullptr};
+    bool decode_codes{false};
+    /// Candidate bound: 0 keeps Add's insertion prefix (inner_id + 1), a value applies to every row
+    /// (delete repair passes the whole live graph).
+    uint64_t visible_total{0};
+};
+
+/// Outcome of one plan merge pass, logged by the callers.
+struct MCIPlanMergeStats {
+    uint64_t fallbacks{0};
+    uint64_t skipped_covered{0};
+};
+
+/// Per-row MCI work precomputed by the lock-free planning pass.
+///
+/// Every field is derived from one frozen CliqueDataCell read view plus this row's own KNN, so
+/// the workers that fill these plans never write shared state. The planning pass only records;
+/// the merge pass revalidates each decision against the live structure, so a plan that is
+/// older than the live structure can under-report work but never over-report it.
+struct MciAddPlan {
+    explicit MciAddPlan(Allocator* allocator)
+        : knn_ids(allocator), join_targets(allocator), new_cliques(allocator) {
+    }
+
+    void
+    Reset() {
+        this->inner_id = 0;
+        this->visible_total = 0;
+        this->degree_target = 0;
+        this->live_neighbor_count = 0;
+        this->memberships_empty = false;
+        this->knn_empty = false;
+        this->knn_ids.clear();
+        this->join_targets.clear();
+        this->new_cliques.clear();
+    }
+
+    InnerIdType inner_id{0};
+    /// Insertion-prefix candidate bound (inner_id + 1) used while planning.
+    uint64_t visible_total{0};
+    /// Degree target and both flags below are relative to the planning view, which is a lower
+    /// bound of the live structure.
+    uint64_t degree_target{0};
+    /// Neighbors the frozen view already gives this row, excluding the cliques the plan only
+    /// projects. The merge skips a row once this reaches degree_target, because then the live
+    /// structure is already covered and there is nothing left for the merge to write.
+    uint64_t live_neighbor_count{0};
+    bool memberships_empty{false};
+    bool knn_empty{false};
+    Vector<InnerIdType> knn_ids;
+    /// Existing cliques worth joining as (intersection, clique_id), ordered by gain.
+    Vector<std::pair<uint64_t, InnerIdType>> join_targets;
+    /// Local MCE proposals, already mapped to global inner IDs and sorted by member ID.
+    Vector<Vector<InnerIdType>> new_cliques;
+};
+
 class HGraph : public InnerIndexInterface {
 public:
     static ParamPtr
@@ -1028,6 +1089,40 @@ private:
     void
     build_mci_clique_index(const void* vectors = nullptr);
 
+    /// Planned batched MCI update shared by Add and delete repair: plan chunks of rows against a
+    /// frozen read view, then commit them in inner-ID order. compact_after_chunk keeps Add's
+    /// per-chunk flush point; repair compacts once after the whole set instead.
+    MCIPlanMergeStats
+    parallel_incremental_mci_update(const Vector<MciUpdateRow>& rows,
+                                    uint64_t min_memberships_to_skip,
+                                    bool compact_after_chunk);
+
+    /// True when a repair row can be updated straight from its stored FP32 codes.
+    [[nodiscard]] bool
+    mci_repair_uses_fp32_pipeline() const;
+
+    /// Nearest live candidates for a repair row by stored-code distance. O(total) scratch for
+    /// quantized indexes, which is why those rows stay on the serial path.
+    void
+    collect_mci_repair_knn(InnerIdType node_id, Vector<InnerIdType>& knn_ids) const;
+
+    /// Decode a repair row's stored codes into `out` (non-contiguous FP32 storage).
+    void
+    decode_mci_repair_codes(InnerIdType node_id, Vector<float>& out) const;
+
+    /// Build the batched-update rows for a delete repair set.
+    void
+    build_mci_repair_rows(const Vector<InnerIdType>& repair_node_ids,
+                          Vector<MciUpdateRow>& rows) const;
+
+    /// Repair an explicit set of live inner IDs, in parallel when the index and the batch allow it.
+    /// Returns the number of rows that were actually repaired.
+    uint64_t
+    repair_mci_cliques(const Vector<InnerIdType>& repair_node_ids);
+
+    /// Companion reads shared by the serial update and the planning pass. A null view reads the
+    /// live structure under the cell lock; a non-null view is the frozen read session of one
+    /// planning chunk, which reports the same clique ids without taking a lock per query.
     void
     mci_read_node_cliques(const std::shared_lock<std::shared_mutex>* view,
                           InnerIdType node_id,
@@ -1076,6 +1171,15 @@ private:
                             const Vector<InnerIdType>& knn_ids,
                             uint64_t visible_total,
                             const std::function<void(const Vector<InnerIdType>&)>& emit);
+
+    /// Apply the first plan_count plans of one chunk in inner-ID order. min_memberships_to_skip
+    /// re-checks live coverage in row order before committing a row, which is the serial delete
+    /// repair guard; zero keeps the Add semantics. Caller holds mci_mutation_mutex_.
+    MCIPlanMergeStats
+    merge_incremental_mci_clique_plans(Vector<MciAddPlan>& plans,
+                                       uint64_t plan_count,
+                                       uint64_t total,
+                                       uint64_t min_memberships_to_skip = 0);
 
     /// Search HGraph KNN and update MCI without inserting a vector into HGraph.
     /// visible_total is the exclusive inner-ID bound for accepted KNN candidates, not live count.

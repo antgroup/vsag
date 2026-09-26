@@ -40,49 +40,6 @@ public:
     MciIncrementalAddExecutor&
     operator=(const MciIncrementalAddExecutor&) = delete;
 
-    /// Per-row MCI work precomputed by the lock-free planning pass.
-    ///
-    /// Every field is derived from one frozen CliqueDataCell read view plus this row's own KNN, so
-    /// the workers that fill these plans never write shared state. The planning pass only records;
-    /// the merge pass revalidates each decision against the live structure, so a plan that is
-    /// older than the live structure can under-report work but never over-report it.
-    struct MciAddPlan {
-        explicit MciAddPlan(Allocator* allocator)
-            : knn_ids(allocator), join_targets(allocator), new_cliques(allocator) {
-        }
-
-        void
-        Reset() {
-            this->inner_id = 0;
-            this->visible_total = 0;
-            this->degree_target = 0;
-            this->live_neighbor_count = 0;
-            this->memberships_empty = false;
-            this->knn_empty = false;
-            this->knn_ids.clear();
-            this->join_targets.clear();
-            this->new_cliques.clear();
-        }
-
-        InnerIdType inner_id{0};
-        /// Insertion-prefix candidate bound (inner_id + 1) used while planning.
-        uint64_t visible_total{0};
-        /// Degree target and both flags below are relative to the planning view, which is a lower
-        /// bound of the live structure.
-        uint64_t degree_target{0};
-        /// Neighbors the frozen view already gives this row, excluding the cliques the plan only
-        /// projects. The merge skips a row once this reaches degree_target, because then the live
-        /// structure is already covered and there is nothing left for the merge to write.
-        uint64_t live_neighbor_count{0};
-        bool memberships_empty{false};
-        bool knn_empty{false};
-        Vector<InnerIdType> knn_ids;
-        /// Existing cliques worth joining as (intersection, clique_id), ordered by gain.
-        Vector<std::pair<uint64_t, InnerIdType>> join_targets;
-        /// Local MCE proposals, already mapped to global inner IDs and sorted by member ID.
-        Vector<Vector<InnerIdType>> new_cliques;
-    };
-
     void
     Run(const HGraph::AddBatch& batch, const DatasetPtr& data);
 
@@ -96,14 +53,6 @@ public:
                                 uint64_t visible_total,
                                 uint64_t degree_target,
                                 MciAddPlan& plan);
-
-    /// Apply the first plan_count plans of one chunk in inner-ID order. Returns the number of rows
-    /// that needed the serial repair fallback, which is logged by the caller. Caller holds
-    /// mci_mutation_mutex_.
-    uint64_t
-    merge_incremental_mci_clique_plans(Vector<MciAddPlan>& plans,
-                                       uint64_t plan_count,
-                                       uint64_t total);
 
 private:
     HGraph& hgraph_;

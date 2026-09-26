@@ -733,7 +733,6 @@ CliqueDataCell::IsNodeLiveUnlocked(InnerIdType node_id) const {
     return node_id < inactive_nodes_.size() and inactive_nodes_[node_id] == 0;
 }
 
-
 MCIDeleteSnapshot
 CliqueDataCell::PrepareDeleteParallel(const Vector<InnerIdType>& node_ids,
                                       uint64_t clique_size_threshold,

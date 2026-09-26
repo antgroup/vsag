@@ -4043,3 +4043,86 @@ TEST_CASE("Parallel clique compaction matches the serial rebuild",
         }
     }
 }
+
+TEST_CASE("HGraph MCI heavy delete repairs survivors over workers",
+          "[ut][hgraph][mci][parallel_delete]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t base = 512;
+    constexpr int64_t added = 3584;
+    constexpr int64_t total = base + added;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> vectors(total * dim);
+    for (uint64_t i = 0; i < vectors.size(); ++i) {
+        vectors[i] = static_cast<float>((i * 11) % 251);
+    }
+    auto make_index = [&]() {
+        auto params = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+        params["index_param"]["graph_type"].SetString("nsw");
+        params["index_param"]["base_io_type"].SetString("memory_io");
+        params["index_param"]["build_thread_count"].SetInt(4);
+        params["index_param"]["support_force_remove"].SetBool(true);
+        params["index_param"]["mci_delete_clique_size_threshold"].SetInt(3);
+        params["index_param"]["mci_delete_node_mct_threshold"].SetInt(3);
+        auto index = vsag::Factory::CreateIndex("hgraph", params.Dump()).value();
+        REQUIRE(index->Build(make_dataset(ids, vectors, 0, base, dim)).has_value());
+        auto added_result = index->Add(make_dataset(ids, vectors, base, added, dim));
+        REQUIRE(added_result.has_value());
+        REQUIRE(added_result.value().empty());
+        return index;
+    };
+    auto require_repaired_and_usable = [&](const vsag::IndexPtr& index, int64_t expected_live) {
+        const auto stats = vsag::JsonType::Parse(index->GetStats());
+        REQUIRE(static_cast<int64_t>(index->GetNumElements()) == expected_live);
+        REQUIRE(stats["mci_covered_nodes"].GetInt() == expected_live);
+        REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
+        REQUIRE(stats["mci_delta_clique_membership_count"].GetInt() == 0);
+        for (const auto& search_param :
+             {R"({"hgraph":{"ef_search":100,"use_mci":true}})",
+              R"({"hgraph":{"ef_search":100,"use_hybrid_traversal":true}})",
+              R"({"hgraph":{"ef_search":100,"use_mci":false}})"}) {
+            auto result = index->KnnSearch(make_dataset(ids, vectors, 0, 1, dim), 10, search_param);
+            REQUIRE(result.has_value());
+            // The synthetic values are highly duplicated, so a small graph can answer with fewer
+            // than topk neighbours; what matters is that the search stays usable and unique.
+            REQUIRE(result.value()->GetDim() > 0);
+            REQUIRE(result.value()->GetDim() <= 10);
+            std::set<int64_t> unique;
+            for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+                const auto id = result.value()->GetIds()[i];
+                REQUIRE(id >= 0);
+                REQUIRE(id < total);
+                REQUIRE(unique.insert(id).second);
+            }
+        }
+    };
+    // Deleting three of every four added nodes retires most cliques and leaves far more than the
+    // 256-row threshold to repair, so the batched repair over workers is what runs here.
+    std::vector<int64_t> victims;
+    for (int64_t i = 0; i < added; ++i) {
+        if (i % 4 != 0) {
+            victims.push_back(ids[base + i]);
+        }
+    }
+    const auto expected_live = total - static_cast<int64_t>(victims.size());
+
+    SECTION("MARK_REMOVE repairs the survivors in place") {
+        const auto index = make_index();
+        const auto cliques_before =
+            vsag::JsonType::Parse(index->GetStats())["mci_total_clique_count"].GetInt();
+        auto removed = index->Remove(victims, vsag::RemoveMode::MARK_REMOVE);
+        REQUIRE(removed.has_value());
+        REQUIRE(removed.value() == static_cast<uint32_t>(victims.size()));
+        REQUIRE(vsag::JsonType::Parse(index->GetStats())["mci_total_clique_count"].GetInt() <
+                cliques_before);
+        require_repaired_and_usable(index, expected_live);
+    }
+
+    SECTION("FORCE_REMOVE repairs the remapped survivors") {
+        const auto index = make_index();
+        auto removed = index->Remove(victims, vsag::RemoveMode::FORCE_REMOVE);
+        REQUIRE(removed.has_value());
+        REQUIRE(removed.value() == static_cast<uint32_t>(victims.size()));
+        require_repaired_and_usable(index, expected_live);
+    }
+}
