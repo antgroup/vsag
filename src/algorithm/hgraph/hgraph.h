@@ -1090,6 +1090,14 @@ private:
                                   const Vector<InnerIdType>& knn_ids,
                                   uint64_t visible_total);
 
+    /// Delete snapshot used by MARK_REMOVE and FORCE_REMOVE. Small batches, or a single build
+    /// thread, use the serial PrepareDelete; larger ones spread the read-only stages over workers.
+    /// Caller holds mci_mutation_mutex_ and no mutation runs while the snapshot is prepared.
+    [[nodiscard]] MCIDeleteSnapshot
+    prepare_mci_delete(const Vector<InnerIdType>& removed_inner_ids,
+                       uint64_t clique_size_threshold,
+                       uint64_t node_mct_threshold);
+
     /// Apply deletion to MCI only, retiring small cliques and repairing under-covered survivors.
     /// Uses unchanged inner IDs; does not remove vectors, remap graph IDs or shrink storage.
     /// Caller owns mutation locking and handles label deletion and MCI publication.

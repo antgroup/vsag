@@ -225,9 +225,15 @@ public:
     [[nodiscard]] CliqueDataCellStats
     CollectStats(uint64_t total) const;
 
+    /// One live node slot: in range and not marked inactive. This is the exact condition
+    /// PrepareDelete uses to accept a vector id as deleting.
+    [[nodiscard]] bool
+    IsNodeLiveUnlocked(InnerIdType node_id) const;
+
     /// Batch-scoped read access for callers that must read many cliques, such as the chunked Add
-    /// planning pass. Such a caller takes the shared lock once with AcquireReadLock and then uses
-    /// the *Unlocked readers below, paying one lock acquisition per chunk instead of one per query.
+    /// planning pass and the parallel delete prepare. Such a caller takes the shared lock once with
+    /// AcquireReadLock and then uses the *Unlocked readers below, paying one lock acquisition per
+    /// chunk instead of one per query.
     ///
     /// Contract: the returned lock must stay alive for the whole read burst, no session may
     /// outlive the burst, and no mutating call may run (here or on another thread) until it is
@@ -247,6 +253,16 @@ public:
 
     [[nodiscard]] uint64_t
     TotalLogicalCliqueCountUnlocked() const;
+
+    /// PrepareDelete with the same snapshot semantics, but the three read-only stages are spread
+    /// over Min(thread_count, items) workers with per-worker output buffers that are merged, sorted
+    /// and deduplicated between stages. Every stage reads the same pre-mutation state, so the
+    /// returned sets are identical to the serial PrepareDelete.
+    [[nodiscard]] MCIDeleteSnapshot
+    PrepareDeleteParallel(const Vector<InnerIdType>& node_ids,
+                          uint64_t clique_size_threshold,
+                          uint64_t node_mct_threshold,
+                          uint64_t thread_count) const;
 
 private:
     void

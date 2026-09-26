@@ -1955,6 +1955,9 @@ constexpr uint64_t K_MCI_COMPACTION_INTERVAL = 100;
 // renumber clique ids - can only run between chunks; the chunk size therefore also bounds how much
 // dead delta one view can accumulate before the next flush.
 constexpr uint64_t K_MCI_PLAN_CHUNK = 1024;
+// Minimum delete batch size before the read-only delete snapshot is spread over workers; below it
+// the scheduling overhead outweighs the parallel win.
+constexpr uint64_t K_MCI_PARALLEL_DELETE_MIN_ROWS = 256;
 }  // namespace
 
 // Plan one row against a frozen read view: no shared state is written here, so workers only share
@@ -2336,6 +2339,20 @@ HGraph::repair_mci_clique_if_undercovered(InnerIdType node_id, Vector<InnerIdTyp
     return true;
 }
 
+MCIDeleteSnapshot
+HGraph::prepare_mci_delete(const Vector<InnerIdType>& removed_inner_ids,
+                           uint64_t clique_size_threshold,
+                           uint64_t node_mct_threshold) {
+    const auto thread_count =
+        std::max<uint64_t>(1, static_cast<uint64_t>(this->build_thread_count_));
+    if (thread_count <= 1 or removed_inner_ids.size() < K_MCI_PARALLEL_DELETE_MIN_ROWS) {
+        return this->mci_cliques_->PrepareDelete(
+            removed_inner_ids, clique_size_threshold, node_mct_threshold);
+    }
+    return this->mci_cliques_->PrepareDeleteParallel(
+        removed_inner_ids, clique_size_threshold, node_mct_threshold, thread_count);
+}
+
 void
 HGraph::remove_from_mci(const Vector<InnerIdType>& removed_inner_ids) {
     if (not this->mci_parameters_.enabled or this->mci_cliques_ == nullptr or
@@ -2345,9 +2362,9 @@ HGraph::remove_from_mci(const Vector<InnerIdType>& removed_inner_ids) {
     std::shared_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
     // Project the whole batch before repairing: no temporary cliques for later deletions.
     const auto snapshot =
-        this->mci_cliques_->PrepareDelete(removed_inner_ids,
-                                          this->mci_parameters_.delete_clique_size_threshold,
-                                          this->mci_parameters_.delete_node_mct_threshold);
+        this->prepare_mci_delete(removed_inner_ids,
+                                 this->mci_parameters_.delete_clique_size_threshold,
+                                 this->mci_parameters_.delete_node_mct_threshold);
     this->mci_cliques_->CommitDelete(
         removed_inner_ids, snapshot.retired_clique_ids, this->total_count_.load());
     uint64_t repaired_node_count = 0;
@@ -2401,9 +2418,9 @@ HGraph::force_remove_with_mci(const std::vector<int64_t>& ids) {
         removed.push_back(target.first);
     }
     const auto snapshot =
-        this->mci_cliques_->PrepareDelete(removed,
-                                          this->mci_parameters_.delete_clique_size_threshold,
-                                          this->mci_parameters_.delete_node_mct_threshold);
+        this->prepare_mci_delete(removed,
+                                 this->mci_parameters_.delete_clique_size_threshold,
+                                 this->mci_parameters_.delete_node_mct_threshold);
     this->mci_cliques_->MarkUnavailable();
     // On failure, never expose the old CSR under moved vector IDs. Physical deletions, like
     // the existing HGraph FORCE_REMOVE operation, are not transactionally rolled back.

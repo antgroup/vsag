@@ -17,7 +17,12 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <atomic>
+#include <exception>
+#include <functional>
 #include <limits>
+#include <mutex>
+#include <thread>
 #include <utility>
 
 #include "common.h"
@@ -484,7 +489,7 @@ CliqueDataCell::PrepareDelete(const Vector<InnerIdType>& node_ids,
     UnorderedSet<InnerIdType> deleting(allocator_);
     deleting.reserve(node_ids.size());
     for (auto node_id : node_ids) {
-        if (node_id < inactive_nodes_.size() and not is_node_inactive_unlocked(node_id)) {
+        if (this->IsNodeLiveUnlocked(node_id)) {
             deleting.insert(node_id);
             collect_node_clique_ids_unlocked(node_id, snapshot.affected_clique_ids);
         }
@@ -538,6 +543,201 @@ CliqueDataCell::PrepareDelete(const Vector<InnerIdType>& node_ids,
         }
     }
     std::sort(snapshot.repair_node_ids.begin(), snapshot.repair_node_ids.end());
+    return snapshot;
+}
+
+bool
+CliqueDataCell::IsNodeLiveUnlocked(InnerIdType node_id) const {
+    return node_id < inactive_nodes_.size() and inactive_nodes_[node_id] == 0;
+}
+
+namespace {
+
+// Run `body(worker_id, begin, end)` over [0, count) with a shared atomic cursor. The calling thread
+// is worker 0, exceptions are re-thrown after every worker joins, and small inputs stay serial.
+void
+ParallelForItems(uint64_t count,
+                 uint64_t workers,
+                 const std::function<void(uint64_t, uint64_t, uint64_t)>& body) {
+    if (count == 0) {
+        return;
+    }
+    constexpr uint64_t kGrain = 256;
+    // One worker per grain at most, and no threads at all for a single grain: spawning a pool for
+    // a few hundred items costs more than the items themselves.
+    const auto grains = (count + kGrain - 1) / kGrain;
+    workers = std::min<uint64_t>(workers, grains);
+    if (workers <= 1) {
+        body(0, 0, count);
+        return;
+    }
+    std::atomic<uint64_t> next{0};
+    std::exception_ptr worker_exception = nullptr;
+    std::mutex exception_mutex;
+    auto worker = [&](uint64_t worker_id) {
+        while (true) {
+            const auto begin = next.fetch_add(kGrain, std::memory_order_relaxed);
+            if (begin >= count) {
+                break;
+            }
+            body(worker_id, begin, std::min<uint64_t>(count, begin + kGrain));
+        }
+    };
+    auto guarded = [&](uint64_t worker_id) {
+        try {
+            worker(worker_id);
+        } catch (...) {
+            std::lock_guard<std::mutex> lock(exception_mutex);
+            if (worker_exception == nullptr) {
+                worker_exception = std::current_exception();
+            }
+        }
+    };
+    std::vector<std::thread> pool;
+    pool.reserve(workers - 1);
+    for (uint64_t worker_id = 1; worker_id < workers; ++worker_id) {
+        pool.emplace_back(guarded, worker_id);
+    }
+    guarded(0);
+    for (auto& thread : pool) {
+        thread.join();
+    }
+    if (worker_exception != nullptr) {
+        std::rethrow_exception(worker_exception);
+    }
+}
+
+void
+SortAndUnique(Vector<InnerIdType>& values) {
+    std::sort(values.begin(), values.end());
+    values.erase(std::unique(values.begin(), values.end()), values.end());
+}
+
+}  // namespace
+
+MCIDeleteSnapshot
+CliqueDataCell::PrepareDeleteParallel(const Vector<InnerIdType>& node_ids,
+                                      uint64_t clique_size_threshold,
+                                      uint64_t node_mct_threshold,
+                                      uint64_t thread_count) const {
+    const auto workers = std::max<uint64_t>(1, thread_count);
+    MCIDeleteSnapshot snapshot(allocator_);
+    // One shared lock covers all three stages: no mutation can run while a snapshot is prepared,
+    // and every stage therefore reads the same pre-mutation state.
+    auto read_lock = this->AcquireReadLock();
+
+    // Membership masks keep the per-member decisions O(1) and cache friendly. They are read-only
+    // while the stages run, so every worker shares them without copying.
+    Vector<uint8_t> deleting_mask(inactive_nodes_.size(), 0, allocator_);
+    for (auto node_id : node_ids) {
+        if (this->IsNodeLiveUnlocked(node_id)) {
+            deleting_mask[node_id] = 1;
+        }
+    }
+    auto is_deleting = [&deleting_mask](InnerIdType node_id) {
+        return node_id < deleting_mask.size() and deleting_mask[node_id] != 0;
+    };
+
+    // Stage 1: affected cliques of every deleting node.
+    std::vector<Vector<InnerIdType>> affected_by_worker(workers, Vector<InnerIdType>(allocator_));
+    ParallelForItems(
+        node_ids.size(), workers, [&](uint64_t worker_id, uint64_t begin, uint64_t end) {
+            auto& local = affected_by_worker[worker_id];
+            for (uint64_t i = begin; i < end; ++i) {
+                const auto node_id = node_ids[i];
+                if (is_deleting(node_id)) {
+                    this->collect_node_clique_ids_unlocked(node_id, local);
+                }
+            }
+        });
+    // Deduplicate while merging, then sort only the unique ids: the raw per-node lists repeat each
+    // shared clique once per removing node, and sorting that many entries would dominate the stage.
+    Vector<uint8_t> affected_mask(total_logical_clique_count_unlocked(), 0, allocator_);
+    for (const auto& local : affected_by_worker) {
+        for (auto clique_id : local) {
+            if (clique_id < affected_mask.size() and affected_mask[clique_id] == 0) {
+                affected_mask[clique_id] = 1;
+                snapshot.affected_clique_ids.push_back(clique_id);
+            }
+        }
+    }
+    SortAndUnique(snapshot.affected_clique_ids);
+
+    // Stage 2: retire every affected clique whose surviving member count falls below the threshold,
+    // and collect its survivors as repair candidates.
+    std::vector<Vector<InnerIdType>> retired_by_worker(workers, Vector<InnerIdType>(allocator_));
+    std::vector<Vector<InnerIdType>> candidates_by_worker(workers, Vector<InnerIdType>(allocator_));
+    const auto affected = snapshot.affected_clique_ids;
+    ParallelForItems(
+        affected.size(), workers, [&](uint64_t worker_id, uint64_t begin, uint64_t end) {
+            Vector<InnerIdType> members(allocator_);
+            for (uint64_t i = begin; i < end; ++i) {
+                const auto clique_id = affected[i];
+                members.clear();
+                this->get_clique_members_unlocked(clique_id, members);
+                uint64_t remaining_count = 0;
+                for (auto member : members) {
+                    if (not is_deleting(member)) {
+                        ++remaining_count;
+                    }
+                }
+                if (remaining_count >= clique_size_threshold) {
+                    continue;
+                }
+                retired_by_worker[worker_id].push_back(clique_id);
+                for (auto member : members) {
+                    if (not is_deleting(member)) {
+                        candidates_by_worker[worker_id].push_back(member);
+                    }
+                }
+            }
+        });
+    Vector<InnerIdType> candidates(allocator_);
+    Vector<uint8_t> candidate_mask(inactive_nodes_.size(), 0, allocator_);
+    for (const auto& local : retired_by_worker) {
+        snapshot.retired_clique_ids.insert(
+            snapshot.retired_clique_ids.end(), local.begin(), local.end());
+    }
+    for (const auto& local : candidates_by_worker) {
+        for (auto node_id : local) {
+            if (candidate_mask[node_id] == 0) {
+                candidate_mask[node_id] = 1;
+                candidates.push_back(node_id);
+            }
+        }
+    }
+    SortAndUnique(snapshot.retired_clique_ids);
+    // Filled after the parallel stage so the mask itself is never written concurrently.
+    Vector<uint8_t> retiring_mask(total_logical_clique_count_unlocked(), 0, allocator_);
+    for (auto clique_id : snapshot.retired_clique_ids) {
+        retiring_mask[clique_id] = 1;
+    }
+
+    // Stage 3: project the whole batch. Every retiring clique is excluded together, and a survivor
+    // is repaired only when its remaining memberships fall below the threshold.
+    std::vector<Vector<InnerIdType>> repair_by_worker(workers, Vector<InnerIdType>(allocator_));
+    ParallelForItems(
+        candidates.size(), workers, [&](uint64_t worker_id, uint64_t begin, uint64_t end) {
+            Vector<InnerIdType> clique_ids(allocator_);
+            for (uint64_t i = begin; i < end; ++i) {
+                const auto node_id = candidates[i];
+                clique_ids.clear();
+                this->collect_node_clique_ids_unlocked(node_id, clique_ids);
+                uint64_t projected_mct = 0;
+                for (auto clique_id : clique_ids) {
+                    if (clique_id >= retiring_mask.size() or retiring_mask[clique_id] == 0) {
+                        ++projected_mct;
+                    }
+                }
+                if (projected_mct < node_mct_threshold) {
+                    repair_by_worker[worker_id].push_back(node_id);
+                }
+            }
+        });
+    for (const auto& local : repair_by_worker) {
+        snapshot.repair_node_ids.insert(snapshot.repair_node_ids.end(), local.begin(), local.end());
+    }
+    SortAndUnique(snapshot.repair_node_ids);
     return snapshot;
 }
 

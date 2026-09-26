@@ -3746,3 +3746,158 @@ TEST_CASE("HGraph MCI parallel incremental add keeps full coverage",
         }
     }
 }
+
+TEST_CASE("Parallel clique delete prepare matches the serial snapshot",
+          "[ut][hgraph][mci][parallel_delete]") {
+    vsag::DefaultAllocator allocator;
+
+    // A CSR with two cliques plus a delta clique, the same shape the delete tests use.
+    auto build_delta_cell = [&](vsag::CliqueDataCell& cell) {
+        constexpr uint64_t total = 7;
+        vsag::Vector<vsag::InnerIdType> p_maxc(&allocator);
+        vsag::Vector<vsag::InnerIdType> maxcs(&allocator);
+        vsag::Vector<vsag::InnerIdType> p_node_to_cid(&allocator);
+        vsag::Vector<vsag::InnerIdType> node_to_cids(&allocator);
+        p_maxc.insert(p_maxc.end(), {0, 3, 5});
+        maxcs.insert(maxcs.end(), {0, 1, 2, 0, 3});
+        p_node_to_cid.insert(p_node_to_cid.end(), {0, 2, 3, 4, 5, 5, 5, 5});
+        node_to_cids.insert(node_to_cids.end(), {0, 1, 0, 0, 1});
+        cell.Assign(std::move(p_maxc),
+                    std::move(maxcs),
+                    std::move(p_node_to_cid),
+                    std::move(node_to_cids),
+                    total);
+        REQUIRE(cell.AppendNodeToClique(4, 0, total, 8));
+        vsag::Vector<vsag::InnerIdType> added_clique(&allocator);
+        added_clique.insert(added_clique.end(), {0, 5});
+        cell.AppendNewClique(added_clique, total);
+        return total;
+    };
+    auto compare = [&](vsag::CliqueDataCell& cell, const std::vector<int64_t>& removed_labels) {
+        vsag::Vector<vsag::InnerIdType> removed(&allocator);
+        for (auto label : removed_labels) {
+            removed.push_back(static_cast<vsag::InnerIdType>(label));
+        }
+        const auto serial = cell.PrepareDelete(removed, 3, 3);
+        for (uint64_t threads : {2, 4, 8}) {
+            const auto parallel = cell.PrepareDeleteParallel(removed, 3, 3, threads);
+            REQUIRE(parallel.affected_clique_ids == serial.affected_clique_ids);
+            REQUIRE(parallel.retired_clique_ids == serial.retired_clique_ids);
+            REQUIRE(parallel.repair_node_ids == serial.repair_node_ids);
+        }
+    };
+
+    SECTION("small cell covers empty, out-of-range, duplicate and all-live removals") {
+        vsag::CliqueDataCell cell(&allocator);
+        build_delta_cell(cell);
+        compare(cell, {});
+        compare(cell, {0});
+        compare(cell, {0, 3, 5});
+        compare(cell, {0, 0, 99});
+        compare(cell, {99});
+        compare(cell, {0, 1, 2, 3, 4, 5, 6});
+        // A committed batch is a second shape: some ids are already inactive.
+        vsag::Vector<vsag::InnerIdType> first_removed(&allocator);
+        first_removed.push_back(1);
+        const auto first = cell.PrepareDelete(first_removed, 3, 3);
+        cell.CommitDelete(first_removed, first.retired_clique_ids, 7);
+        compare(cell, {0, 1, 4});
+    }
+
+    SECTION("large synthetic cell crosses the worker grain") {
+        constexpr uint64_t total = 4096;
+        vsag::CliqueDataCell cell(&allocator);
+        vsag::Vector<vsag::InnerIdType> p_maxc(&allocator);
+        vsag::Vector<vsag::InnerIdType> maxcs(&allocator);
+        vsag::Vector<vsag::InnerIdType> p_node_to_cid(&allocator);
+        vsag::Vector<vsag::InnerIdType> node_to_cids(&allocator);
+        p_maxc.push_back(0);
+        for (uint64_t clique = 0; clique < total / 4; ++clique) {
+            for (uint64_t member = 0; member < 4; ++member) {
+                maxcs.push_back(static_cast<vsag::InnerIdType>(clique * 4 + member));
+            }
+            p_maxc.push_back(static_cast<vsag::InnerIdType>(maxcs.size()));
+        }
+        p_node_to_cid.push_back(0);
+        for (uint64_t node = 0; node < total; ++node) {
+            node_to_cids.push_back(static_cast<vsag::InnerIdType>(node / 4));
+            p_node_to_cid.push_back(static_cast<vsag::InnerIdType>(node_to_cids.size()));
+        }
+        cell.Assign(std::move(p_maxc),
+                    std::move(maxcs),
+                    std::move(p_node_to_cid),
+                    std::move(node_to_cids),
+                    total);
+        // One member per clique keeps every clique alive; two members per clique retires all of them.
+        std::vector<int64_t> single;
+        std::vector<int64_t> pair;
+        for (int64_t clique = 0; clique < static_cast<int64_t>(total / 4); ++clique) {
+            single.push_back(clique * 4);
+            pair.push_back(clique * 4);
+            pair.push_back(clique * 4 + 1);
+        }
+        compare(cell, single);
+        compare(cell, pair);
+        vsag::Vector<vsag::InnerIdType> none(&allocator);
+        REQUIRE(cell.PrepareDeleteParallel(none, 3, 3, 4).affected_clique_ids.empty());
+    }
+}
+
+TEST_CASE("HGraph MCI parallel delete keeps coverage and search usable",
+          "[ut][hgraph][mci][parallel_delete]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t base = 512;
+    constexpr int64_t added = 1024;
+    constexpr int64_t total = base + added;
+    constexpr int64_t removed = 400;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> vectors(total * dim);
+    for (uint64_t i = 0; i < vectors.size(); ++i) {
+        vectors[i] = static_cast<float>((i * 7) % 251);
+    }
+    auto params = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    params["index_param"]["graph_type"].SetString("nsw");
+    params["index_param"]["base_io_type"].SetString("memory_io");
+    params["index_param"]["build_thread_count"].SetInt(4);
+    params["index_param"]["mci_delete_clique_size_threshold"].SetInt(3);
+    params["index_param"]["mci_delete_node_mct_threshold"].SetInt(3);
+    auto index = vsag::Factory::CreateIndex("hgraph", params.Dump()).value();
+    REQUIRE(index->Build(make_dataset(ids, vectors, 0, base, dim)).has_value());
+    auto added_result = index->Add(make_dataset(ids, vectors, base, added, dim));
+    REQUIRE(added_result.has_value());
+    REQUIRE(added_result.value().empty());
+    const auto cliques_before =
+        vsag::JsonType::Parse(index->GetStats())["mci_total_clique_count"].GetInt();
+
+    // 400 removals exceed the parallel prepare threshold and retire cliques in this small graph.
+    std::vector<int64_t> victims;
+    for (int64_t i = 0; i < removed; ++i) {
+        victims.push_back(ids[base + i * 2]);
+    }
+    auto remove_result = index->Remove(victims, vsag::RemoveMode::MARK_REMOVE);
+    REQUIRE(remove_result.has_value());
+    REQUIRE(remove_result.value() == static_cast<uint32_t>(removed));
+
+    const auto stats = vsag::JsonType::Parse(index->GetStats());
+    const auto live = static_cast<int64_t>(index->GetNumElements());
+    REQUIRE(live == total - removed);
+    REQUIRE(stats["mci_covered_nodes"].GetInt() == live);
+    REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
+    REQUIRE(stats["mci_delta_clique_membership_count"].GetInt() == 0);
+    REQUIRE(stats["mci_total_clique_count"].GetInt() < cliques_before);
+
+    for (const auto& search_param :
+         {R"({"hgraph":{"ef_search":100,"use_mci":true}})",
+          R"({"hgraph":{"ef_search":100,"use_hybrid_traversal":true}})"}) {
+        auto result = index->KnnSearch(make_dataset(ids, vectors, 0, 1, dim), 10, search_param);
+        REQUIRE(result.has_value());
+        std::set<int64_t> unique;
+        for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+            const auto id = result.value()->GetIds()[i];
+            REQUIRE(id >= 0);
+            REQUIRE(id < total);
+            REQUIRE(unique.insert(id).second);
+        }
+    }
+}
