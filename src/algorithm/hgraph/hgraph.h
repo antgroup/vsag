@@ -1025,6 +1025,14 @@ private:
     void
     build_mci_clique_index(const void* vectors = nullptr);
 
+    /// Update MCI for one completed Add batch.
+    /// Large batches are spread over build_thread_count_ workers sharing one atomic row cursor.
+    /// Every row keeps its own insertion-prefix candidate bound (inner_id + 1) and all shared
+    /// companion state is reached through CliqueDataCell's lock. As with the parallel full build,
+    /// the resulting clique structure may depend on scheduling; per-row coverage is unaffected.
+    void
+    parallel_incremental_mci_add(const AddBatch& batch, const DatasetPtr& data);
+
     /// Search HGraph KNN and update MCI without inserting a vector into HGraph.
     /// visible_total is the exclusive inner-ID bound for accepted KNN candidates, not live count.
     /// Zero defaults to node_id + 1 for ADD; existing FP32 repair points pass total_count_.

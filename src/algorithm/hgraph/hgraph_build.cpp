@@ -511,14 +511,8 @@ HGraph::add_impl(const DatasetPtr& data) {
             force_remove_rlock.unlock();
         }
         if (had_mci_clique_index) {
-            logger::info("hgraph mci incremental add started, added={}", batch.rows.size());
-            for (const auto& row : batch.rows) {
-                this->incremental_update_mci_clique(row.inner_id, get_data(data, row.input_idx));
-                this->maybe_compact_mci(1);
-            }
+            this->parallel_incremental_mci_add(batch, data);
             this->mci_cliques_->MarkAvailable(this->total_count_.load());
-            logger::info("hgraph mci incremental add finished, total={}",
-                         this->total_count_.load());
         } else {
             const void* vectors = nullptr;
             if (mci_start_total == 0 and batch.failed_ids.empty()) {

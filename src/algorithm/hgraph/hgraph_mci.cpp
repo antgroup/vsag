@@ -1822,6 +1822,69 @@ HGraph::build_incremental_mci_clique(InnerIdType new_inner_id,
     }
 }
 
+namespace {
+// Minimum Add batch size before the per-row MCI update is spread over workers; below it the
+// scheduling overhead outweighs the parallel win.
+constexpr uint64_t K_MCI_PARALLEL_ADD_MIN_ROWS = 256;
+// Automatic compaction interval, in successful vector mutations.
+constexpr uint64_t K_MCI_COMPACTION_INTERVAL = 100;
+// Rows per parallel chunk. Aligned with the compaction interval so the flush points match the
+// serial per-row accounting. Compaction may renumber clique ids, so it must not run while workers
+// are inside incremental_update_mci_clique; accounting once per chunk keeps the delta bounded by
+// a chunk instead of letting a very large Add accumulate it for the whole batch.
+constexpr uint64_t K_MCI_PARALLEL_ADD_CHUNK = K_MCI_COMPACTION_INTERVAL;
+}  // namespace
+
+void
+HGraph::parallel_incremental_mci_add(const AddBatch& batch, const DatasetPtr& data) {
+    const auto row_count = static_cast<uint64_t>(batch.rows.size());
+    const auto thread_count = std::max<uint64_t>(
+        1, std::min<uint64_t>(static_cast<uint64_t>(this->build_thread_count_), row_count));
+    const bool use_workers = thread_count > 1 and row_count >= K_MCI_PARALLEL_ADD_MIN_ROWS;
+    logger::info("hgraph mci incremental add started, added={}, threads={}",
+                 row_count,
+                 use_workers ? thread_count : 1);
+    if (not use_workers) {
+        for (const auto& row : batch.rows) {
+            this->incremental_update_mci_clique(row.inner_id, get_data(data, row.input_idx));
+            this->maybe_compact_mci(1);
+        }
+        logger::info("hgraph mci incremental add finished, total={}", this->total_count_.load());
+        return;
+    }
+    // Every row keeps its own insertion-prefix candidate bound (inner_id + 1) and all shared
+    // companion state is reached through CliqueDataCell's lock, so the workers only share an
+    // atomic row cursor. As with the parallel full build, the resulting clique structure may
+    // depend on scheduling; per-row coverage does not.
+    for (uint64_t begin = 0; begin < row_count; begin += K_MCI_PARALLEL_ADD_CHUNK) {
+        const auto end = std::min<uint64_t>(row_count, begin + K_MCI_PARALLEL_ADD_CHUNK);
+        const auto workers_here = std::min<uint64_t>(thread_count, end - begin);
+        std::atomic<uint64_t> next_row{begin};
+        std::vector<std::future<void>> workers;
+        workers.reserve(workers_here);
+        for (uint64_t worker_id = 0; worker_id < workers_here; ++worker_id) {
+            workers.emplace_back(std::async(std::launch::async, [&, end]() {
+                while (true) {
+                    const auto index = next_row.fetch_add(1, std::memory_order_relaxed);
+                    if (index >= end) {
+                        break;
+                    }
+                    const auto& row = batch.rows[index];
+                    this->incremental_update_mci_clique(row.inner_id,
+                                                        get_data(data, row.input_idx));
+                }
+            }));
+        }
+        for (auto& worker : workers) {
+            worker.get();
+        }
+        // The counter is not atomic and mutation serialization is already held by the caller, so
+        // the chunk is accounted once its workers have joined.
+        this->maybe_compact_mci(end - begin);
+    }
+    logger::info("hgraph mci incremental add finished, total={}", this->total_count_.load());
+}
+
 // Update the MCI companion index after one vector is inserted into HGraph.
 void
 HGraph::incremental_update_mci_clique(InnerIdType node_id,
@@ -2040,15 +2103,14 @@ HGraph::maybe_compact_mci(uint64_t changed_count) {
     if (changed_count == 0) {
         return;
     }
-    constexpr uint64_t interval = 100;
     // Saturate instead of adding: a very large batch must neither overflow the counter nor reset
     // it to 0, which would delay the next compaction by a full interval. The batch that reaches the
     // threshold is compacted in full, so the excess is not carried over and the effective mutation
     // span between two compactions is at most 2 * interval - 1.
     // A failed compaction keeps the count and retries on the next successful change.
     this->mci_pending_mutations_ +=
-        std::min(changed_count, interval - this->mci_pending_mutations_);
-    if (this->mci_pending_mutations_ < interval) {
+        std::min(changed_count, K_MCI_COMPACTION_INTERVAL - this->mci_pending_mutations_);
+    if (this->mci_pending_mutations_ < K_MCI_COMPACTION_INTERVAL) {
         return;
     }
     try {

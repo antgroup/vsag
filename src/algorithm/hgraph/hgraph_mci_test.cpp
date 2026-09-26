@@ -3631,3 +3631,48 @@ TEST_CASE("HGraph MCI bitmap remains equivalent after removal readdition and rel
     reload();
     verify(false, false);
 }
+TEST_CASE("HGraph MCI parallel incremental add keeps full coverage",
+          "[ut][hgraph][mci][parallel_add]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t base = 256;
+    constexpr int64_t added = 500;
+    constexpr int64_t total = base + added;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> vectors(total * dim);
+    for (uint64_t i = 0; i < vectors.size(); ++i) {
+        vectors[i] = static_cast<float>((i * 13) % 251);
+    }
+    // The 500-row batch is above the parallel threshold and a multiple of the parallel chunk, so
+    // threads == 4 exercises the worker path (and drains the batch delta at the last chunk
+    // boundary) while threads == 1 is the serial reference. Clique structure may differ between
+    // them, but every live node must stay covered in both.
+    auto build_and_add = [&](int64_t threads) {
+        auto params = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+        params["index_param"]["graph_type"].SetString("nsw");
+        params["index_param"]["base_io_type"].SetString("memory_io");
+        params["index_param"]["build_thread_count"].SetInt(threads);
+        auto index = vsag::Factory::CreateIndex("hgraph", params.Dump()).value();
+        REQUIRE(index->Build(make_dataset(ids, vectors, 0, base, dim)).has_value());
+        REQUIRE(vsag::JsonType::Parse(index->GetStats())["mci_covered_nodes"].GetInt() == base);
+        auto added_result = index->Add(make_dataset(ids, vectors, base, added, dim));
+        REQUIRE(added_result.has_value());
+        REQUIRE(added_result.value().empty());
+        const auto stats = vsag::JsonType::Parse(index->GetStats());
+        REQUIRE(stats["mci_total_nodes"].GetInt() == total);
+        REQUIRE(stats["mci_covered_nodes"].GetInt() == total);
+        REQUIRE(stats["mci_total_clique_count"].GetInt() > 0);
+        return stats;
+    };
+    SECTION("parallel workers cover every live node and drain the batch delta") {
+        const auto stats = build_and_add(4);
+        // Chunk accounting keeps the flush points aligned with the serial path, so a batch that
+        // is a multiple of the chunk drains its delta by the last chunk boundary.
+        REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
+        REQUIRE(stats["mci_delta_clique_membership_count"].GetInt() == 0);
+        REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 0);
+    }
+    SECTION("serial reference reaches the same coverage") {
+        REQUIRE(build_and_add(1)["mci_covered_nodes"].GetInt() == total);
+    }
+}
