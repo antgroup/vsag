@@ -2437,7 +2437,8 @@ HGraph::force_remove_with_mci(const std::vector<int64_t>& ids) {
         }
     }
     const auto total = this->total_count_.load();
-    this->mci_cliques_->RemapNodes(old_to_new, total);
+    this->mci_cliques_->RemapNodes(
+        old_to_new, total, static_cast<uint64_t>(this->build_thread_count_));
     this->bottom_graph_->SetTotalCount(total);
     // Graph repair and ID remapping are complete. As in Add, public HGraph search must
     // acquire its own force-remove read lock. Mutation serialization still excludes Add,
@@ -2456,7 +2457,7 @@ HGraph::force_remove_with_mci(const std::vector<int64_t>& ids) {
         }
     }
     force_lock.lock();
-    this->mci_cliques_->Flush(total);
+    this->mci_cliques_->Flush(total, static_cast<uint64_t>(this->build_thread_count_));
     this->mci_pending_mutations_ = 0;
     {
         std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
@@ -2488,7 +2489,8 @@ HGraph::maybe_compact_mci(uint64_t changed_count) {
     }
     try {
         // The caller already serializes mutations. Storage replacement pins out query views.
-        this->mci_cliques_->Flush(this->total_count_.load());
+        this->mci_cliques_->Flush(this->total_count_.load(),
+                                  static_cast<uint64_t>(this->build_thread_count_));
         this->mci_pending_mutations_ = 0;
     } catch (const std::bad_alloc&) {
         // Automatic compaction is optional maintenance: preserve a completed Add/Remove and

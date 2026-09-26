@@ -150,13 +150,14 @@ public:
            uint64_t total);
 
     // Merge live base/delta memberships into CSR without changing vector inner IDs.
+    // thread_count spreads the rebuild over workers; the rebuilt CSR is identical for any count.
     void
-    Flush(uint64_t total);
+    Flush(uint64_t total, uint64_t thread_count = 1);
 
     // Compact into CSR while remapping vector slots. The maximum InnerIdType removes a slot.
     // The caller must exclude mutations and publish only after vector moves and repair finish.
     void
-    RemapNodes(const Vector<InnerIdType>& old_to_new, uint64_t total);
+    RemapNodes(const Vector<InnerIdType>& old_to_new, uint64_t total, uint64_t thread_count = 1);
 
     Vector<InnerIdType>
     GetInactiveNodeIds() const;
@@ -321,7 +322,7 @@ private:
     validate(uint64_t total) const;
 
     void
-    compact_unlocked(uint64_t total, const Vector<InnerIdType>* old_to_new);
+    compact_unlocked(uint64_t total, const Vector<InnerIdType>* old_to_new, uint64_t thread_count);
 
 private:
     Allocator* allocator_{nullptr};

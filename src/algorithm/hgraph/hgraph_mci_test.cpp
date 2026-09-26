@@ -3901,3 +3901,145 @@ TEST_CASE("HGraph MCI parallel delete keeps coverage and search usable",
         }
     }
 }
+
+TEST_CASE("Parallel clique compaction matches the serial rebuild",
+          "[ut][hgraph][mci][parallel_compact]") {
+    vsag::DefaultAllocator allocator;
+    // 4096 nodes with 1024 base cliques of four: every parallel stage of the rebuild has more than
+    // one scheduling grain, so thread_count > 1 really spreads the work.
+    constexpr uint64_t total = 4096;
+    constexpr uint64_t base_cliques = total / 4;
+
+    // Deterministic base CSR plus a delta layer, tombstones and retired cliques, so the rebuild has
+    // to drop empty rows, merge delta members and renumber the surviving clique ids.
+    auto build_cell = [&](vsag::CliqueDataCell& cell) {
+        vsag::Vector<vsag::InnerIdType> p_maxc(&allocator);
+        vsag::Vector<vsag::InnerIdType> maxcs(&allocator);
+        vsag::Vector<vsag::InnerIdType> p_node_to_cid(&allocator);
+        vsag::Vector<vsag::InnerIdType> node_to_cids(&allocator);
+        p_maxc.push_back(0);
+        p_node_to_cid.push_back(0);
+        for (uint64_t clique = 0; clique < base_cliques; ++clique) {
+            for (uint64_t member = 0; member < 4; ++member) {
+                maxcs.push_back(static_cast<vsag::InnerIdType>(clique * 4 + member));
+            }
+            p_maxc.push_back(static_cast<vsag::InnerIdType>(maxcs.size()));
+            for (uint64_t member = 0; member < 4; ++member) {
+                node_to_cids.push_back(static_cast<vsag::InnerIdType>(clique));
+                p_node_to_cid.push_back(static_cast<vsag::InnerIdType>(node_to_cids.size()));
+            }
+        }
+        cell.Assign(std::move(p_maxc),
+                    std::move(maxcs),
+                    std::move(p_node_to_cid),
+                    std::move(node_to_cids),
+                    total);
+        // Delta layer: two new cliques plus an append into an existing base clique.
+        vsag::Vector<vsag::InnerIdType> delta_one(&allocator);
+        delta_one.insert(delta_one.end(), {0, 5, 9});
+        cell.AppendNewClique(delta_one, total);
+        vsag::Vector<vsag::InnerIdType> delta_two(&allocator);
+        delta_two.insert(delta_two.end(), {1, 6, 10, 14});
+        cell.AppendNewClique(delta_two, total);
+        REQUIRE(cell.AppendNodeToClique(4, 0, total, 8));
+        // Delete whole base cliques plus some extra members so rows empty out and others shrink.
+        vsag::Vector<vsag::InnerIdType> removed(&allocator);
+        for (uint64_t clique = 0; clique < base_cliques; clique += 3) {
+            for (uint64_t member = 0; member < 4; ++member) {
+                removed.push_back(static_cast<vsag::InnerIdType>(clique * 4 + member));
+            }
+        }
+        for (uint64_t node = 1; node < total; node += 97) {
+            removed.push_back(static_cast<vsag::InnerIdType>(node));
+        }
+        const auto snapshot = cell.PrepareDelete(removed, 3, 3);
+        cell.CommitDelete(removed, snapshot.retired_clique_ids, total);
+    };
+    auto observables = [&](vsag::CliqueDataCell& cell, uint64_t node_total) {
+        std::vector<int64_t> rows;
+        vsag::Vector<vsag::InnerIdType> ids(&allocator);
+        for (uint64_t node = 0; node < node_total; ++node) {
+            ids.clear();
+            cell.CollectNodeCliqueIds(static_cast<vsag::InnerIdType>(node), ids);
+            rows.push_back(static_cast<int64_t>(ids.size()));
+            for (auto cid : ids) {
+                rows.push_back(cid);
+            }
+        }
+        for (uint64_t cid = 0; cid < cell.TotalLogicalCliqueCount(); ++cid) {
+            vsag::Vector<vsag::InnerIdType> members(&allocator);
+            cell.GetCliqueMembers(static_cast<vsag::InnerIdType>(cid), members);
+            rows.push_back(static_cast<int64_t>(members.size()));
+            for (auto member : members) {
+                rows.push_back(member);
+            }
+        }
+        const auto stats = cell.CollectStats(node_total);
+        rows.push_back(static_cast<int64_t>(stats.total_clique_count));
+        rows.push_back(static_cast<int64_t>(stats.covered_nodes));
+        rows.push_back(static_cast<int64_t>(stats.total_membership_count));
+        rows.push_back(static_cast<int64_t>(stats.max_clique_size));
+        return rows;
+    };
+
+    SECTION("Flush rebuilds the same CSR for one thread and for several") {
+        vsag::CliqueDataCell serial(&allocator);
+        vsag::CliqueDataCell parallel(&allocator);
+        build_cell(serial);
+        build_cell(parallel);
+        const auto before = serial.CollectStats(total);
+        REQUIRE(before.total_clique_count > 0);
+        REQUIRE(before.inactive_node_count > 0);
+        serial.Flush(total, 1);
+        parallel.Flush(total, 8);
+        REQUIRE(observables(parallel, total) == observables(serial, total));
+        const auto stats = parallel.CollectStats(total);
+        REQUIRE(stats.total_clique_count > 0);
+        REQUIRE(stats.delta_clique_count == 0);
+        REQUIRE(stats.covered_nodes > 0);
+        // Dropping empty-rows renumbers the survivors, so fewer cliques must remain.
+        REQUIRE(stats.total_clique_count < before.total_clique_count);
+    }
+
+    SECTION("RemapNodes rebuilds the same CSR for one thread and for several") {
+        vsag::CliqueDataCell serial(&allocator);
+        vsag::CliqueDataCell parallel(&allocator);
+        build_cell(serial);
+        build_cell(parallel);
+        // Physically drop node 0: every later slot moves down one and its mask moves with it.
+        const auto invalid = std::numeric_limits<vsag::InnerIdType>::max();
+        vsag::Vector<vsag::InnerIdType> mapping(&allocator);
+        mapping.push_back(invalid);
+        for (uint64_t id = 1; id < total; ++id) {
+            mapping.push_back(static_cast<vsag::InnerIdType>(id - 1));
+        }
+        serial.RemapNodes(mapping, total - 1, 1);
+        parallel.RemapNodes(mapping, total - 1, 8);
+        REQUIRE(observables(parallel, total - 1) == observables(serial, total - 1));
+    }
+
+    SECTION("A parallel rebuild keeps every node and clique row consistent") {
+        vsag::CliqueDataCell cell(&allocator);
+        build_cell(cell);
+        cell.Flush(total, 8);
+        vsag::Vector<vsag::InnerIdType> ids(&allocator);
+        for (uint64_t node = 0; node < total; ++node) {
+            ids.clear();
+            cell.CollectNodeCliqueIds(static_cast<vsag::InnerIdType>(node), ids);
+            REQUIRE(std::is_sorted(ids.begin(), ids.end()));
+            REQUIRE(std::adjacent_find(ids.begin(), ids.end()) == ids.end());
+        }
+        for (uint64_t cid = 0; cid < cell.TotalLogicalCliqueCount(); ++cid) {
+            vsag::Vector<vsag::InnerIdType> members(&allocator);
+            cell.GetCliqueMembers(static_cast<vsag::InnerIdType>(cid), members);
+            REQUIRE(std::is_sorted(members.begin(), members.end()));
+            for (auto member : members) {
+                REQUIRE(member < total);
+                ids.clear();
+                cell.CollectNodeCliqueIds(member, ids);
+                REQUIRE(std::find(ids.begin(), ids.end(), static_cast<vsag::InnerIdType>(cid)) !=
+                        ids.end());
+            }
+        }
+    }
+}
