@@ -563,3 +563,29 @@ make the public Lite backend single-threaded by contract, establish
 cross-machine performance, or replace Recall@10 validation on independent
 queries. SIFT, GIST, and Cohere should be reported as separate datasets rather
 than pooled; a missing dataset must be recorded instead of substituted.
+
+#### Recorded single-core SIFT and GIST results
+
+At code commit `835eab3f75cf9c2a4393392daa097393cb2dd00c`, all runs were bound to logical CPU 0. A working kernel-compatible `perf stat` was unavailable, so the evidence uses phase-level process CPU time plus `/usr/bin/time -v`. CPU time closely matched wall time and whole-process utilization was 99% in every independent-query quality run.
+
+| Dataset | Scale | Degree / ef | Full / filtered Recall@10 | Graph Recall@10 | Encode wall / CPU | Graph build wall / CPU | Graph query P50 wall / CPU | Peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| SIFT-128 | 10k | 16 / 128 | 0.994 / 0.994 | 0.966 | 41.072 / 41.071 ms | 857.759 / 857.666 ms | 170.998 / 171 us | 28,888 KiB |
+| SIFT-128 | 100k | 16 / 128 | 0.985 / 0.985 | 0.940 | 412.683 / 412.652 ms | 20,795.175 / 20,794.270 ms | 288.355 / 289 us | 222,492 KiB |
+| GIST-960 | 10k | 32 / 512 | 0.997 / 0.997 | 0.984 | 274.384 / 274.345 ms | 6,813.658 / 6,813.344 ms | 1,888.441 / 1,889 us | 188,160 KiB |
+| GIST-960 | 100k | 32 / 512 | 0.997 / 0.997 | 0.949 | 2,719.856 / 2,719.694 ms | 177,230.169 / 177,221.877 ms | 3,239.007 / 3,240 us | 1,408,812 KiB |
+
+The quality rows use 100 independent queries and separately recomputed prefix ground truth. They are deterministic quality controls and single-run latency observations, not stable latency medians.
+
+The fixed-count CRUD runner used seven fresh processes per dataset and scale at degree 16 and `ef_search=128`. Values below are medians; every run had zero exhaustive mutation fallbacks and passed exact result-and-distance checks after Save/Load.
+
+| Dataset | Scale | Process CPU | Update P50 | Remove P50 | Add P50 | Graph search P50 | Graph self Top-1 | Graph/full positional |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| SIFT-128 | 10k | 100% | 447.992 us | 93.978 us | 374.833 us | 178.967 us | 0.960 | 0.943 |
+| SIFT-128 | 100k | 99% | 2,430.080 us | 1,047.621 us | 1,792.649 us | 365.354 us | 0.930 | 0.831 |
+| GIST-960 | 10k | 99% | 2,003.082 us | 95.509 us | 1,834.524 us | 598.172 us | 0.580 | 0.510 |
+| GIST-960 | 100k | 99% | 4,157.985 us | 963.585 us | 3,434.265 us | 881.308 us | 0.370 | 0.208 |
+
+The CRUD self-query columns are post-mutation reachability diagnostics, not standard Recall@10. A GIST-100k parameter sweep showed that `16/256`, `32/128`, `32/256`, and `64/256` raised Graph self Top-1 from the default 0.37 to 0.42, 0.56, 0.60, and 0.78. The `64/256` point increased graph build from 39.6 to 182.0 seconds, Update P50 from 4.13 to 40.77 ms, Add P50 from 3.41 to 38.09 ms, and snapshot size from 112.8 to 151.2 MB. This rules out simply maximizing graph parameters when single-insert efficiency matters; independent-query quality should use the documented GIST `32/512` configuration, while CRUD quality needs a separate graph-repair investigation.
+
+Raw evidence and verified SHA-256 manifests are in `/home/ubuntu/project/vsag-lite-rabitq-single-core-{sift,gist}-20260926-835eab3`, `/home/ubuntu/project/vsag-lite-rabitq-single-core-{sift,gist}-quality-20260926-835eab3`, and `/home/ubuntu/project/vsag-lite-rabitq-gist-tuning-20260926-835eab3`. Cohere was not present on the measured server and is therefore recorded as pending rather than replaced with another dataset.
