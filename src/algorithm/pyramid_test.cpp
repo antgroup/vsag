@@ -18,6 +18,7 @@
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <limits>
 
 #include "impl/allocator/safe_allocator.h"
 #include "index/index_impl.h"
@@ -313,4 +314,28 @@ TEST_CASE("Pyramid ODescent build registers non-contiguous external ids",
         MakePyramidRawVectorTestDataset(vectors.data(), ids.data(), paths.data(), ids.size()));
     REQUIRE(build_result.has_value());
     RequireRawVectors(index, ids.data(), ids.size(), vectors.data());
+}
+
+TEST_CASE("Pyramid preserves its entry point after an unconnectable addition",
+          "[ut][pyramid][nonfinite]") {
+    auto index = MakePyramidRawVectorTestIndex("nsw", false, vsag::MetricType::METRIC_TYPE_L2SQR);
+    const std::array<float, 4> finite{0.0F, 0.0F, 0.0F, 0.0F};
+    const int64_t finite_id = 0;
+    const std::string path = "a/b/c";
+    auto base = MakePyramidRawVectorTestDataset(finite.data(), &finite_id, &path, 1);
+    REQUIRE(index->Build(base).has_value());
+
+    std::array<float, 4> dirty;
+    dirty.fill(std::numeric_limits<float>::quiet_NaN());
+    const int64_t dirty_id = 1;
+    auto added = index->Add(MakePyramidRawVectorTestDataset(dirty.data(), &dirty_id, &path, 1));
+    REQUIRE(added.has_value());
+    REQUIRE(added.value().empty());
+    REQUIRE(index->GetNumElements() == 2);
+
+    auto result = index->KnnSearch(base, 1, R"({"pyramid":{"ef_search":8}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == finite_id);
+    REQUIRE(result.value()->GetDistances()[0] == 0.0F);
 }

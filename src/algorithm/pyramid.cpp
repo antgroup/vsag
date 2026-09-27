@@ -897,9 +897,9 @@ Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
                                          inner_id);
             return;
         }
-        mutually_connect_new_element(
+        const auto next_entry_point = mutually_connect_new_element(
             inner_id, results, node->graph_, codes, points_mutex_, allocator_, alpha_);
-        if (update_entry_point) {
+        if (update_entry_point and next_entry_point != INVALID_ENTRY_POINT) {
             node->entry_point_ = inner_id;
         }
     }

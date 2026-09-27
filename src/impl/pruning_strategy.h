@@ -31,6 +31,7 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
                           Allocator* allocator,
                           float alpha = 1.0F);
 
+// Returns INVALID_ENTRY_POINT when no candidates can be connected.
 InnerIdType
 mutually_connect_new_element(InnerIdType cur_c,
                              const DistHeapPtr& top_candidates,
