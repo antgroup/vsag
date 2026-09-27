@@ -21,6 +21,7 @@
 #include <memory>
 #include <vector>
 
+#include "common.h"
 #include "datacell/flatten_datacell.h"
 #include "datacell/flatten_datacell_parameter.h"
 #include "datacell/graph_datacell_parameter.h"
@@ -193,6 +194,27 @@ TEST_CASE("Pruning Strategy Select Edges With Heuristic", "[ut][pruning_strategy
         Vector<InnerIdType> neighbors_0(allocator.get());
         graph->GetNeighbors(0, neighbors_0);
         REQUIRE(neighbors_0.size() == 1);
+    }
+
+    SECTION("Empty candidates leave existing neighbors unchanged") {
+        auto graph_param = std::make_shared<GraphDataCellParameter>();
+        graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+        graph_param->max_degree_ = 4;
+        auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+        graph->InsertNeighborsById(0, Vector<InnerIdType>(1, 1, allocator.get()));
+        graph->InsertNeighborsById(1, Vector<InnerIdType>(1, 0, allocator.get()));
+        auto candidates = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
+        auto mutexes = std::make_shared<EmptyMutex>();
+
+        REQUIRE(
+            mutually_connect_new_element(2, candidates, graph, flatten, mutexes, allocator.get()) ==
+            INVALID_ENTRY_POINT);
+        Vector<InnerIdType> neighbors(allocator.get());
+        REQUIRE(graph->GetNeighborSize(2) == 0);
+        graph->GetNeighbors(0, neighbors);
+        REQUIRE(neighbors == Vector<InnerIdType>(1, 1, allocator.get()));
+        graph->GetNeighbors(1, neighbors);
+        REQUIRE(neighbors == Vector<InnerIdType>(1, 0, allocator.get()));
     }
 }
 

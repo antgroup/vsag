@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <functional>
 #include <future>
+#include <limits>
 #include <new>
 #include <vector>
 
@@ -138,4 +141,51 @@ TEST_CASE("HGraph Tune accepts an incomplete source after Add failure",
     })");
     REQUIRE(tune_result.has_value());
     CHECK(tune_result.value());
+}
+
+TEST_CASE("HGraph preserves finite entry points after unconnectable additions",
+          "[ut][hgraph][add][nonfinite]") {
+    constexpr int64_t dim = 4;
+    const int64_t base_count = GENERATE(1, 64);
+    auto common_param = MakeCommonParam(dim);
+    auto hgraph_json = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "max_degree": 8,
+        "ef_construction": 32,
+        "build_thread_count": 1
+    })");
+    auto index = std::make_shared<vsag::IndexImpl<vsag::HGraph>>(hgraph_json, common_param);
+    std::vector<float> vectors(base_count * dim);
+    std::vector<int64_t> ids(base_count);
+    for (int64_t i = 0; i < base_count; ++i) {
+        ids[i] = i;
+        std::fill_n(vectors.data() + i * dim, dim, static_cast<float>(i));
+    }
+    REQUIRE(index->Build(MakeFloatDataset(vectors, ids, dim, base_count)).has_value());
+
+    std::vector<float> dirty(dim, std::numeric_limits<float>::quiet_NaN());
+    std::vector<int64_t> dirty_id(1);
+    // Repeated additions exercise both existing route levels and attempted level growth.
+    for (int64_t i = 0; i < 128; ++i) {
+        dirty_id[0] = base_count + i;
+        auto added = index->Add(MakeFloatDataset(dirty, dirty_id, dim, 1));
+        REQUIRE(added.has_value());
+        REQUIRE(added.value().empty());
+        auto query = MakeFloatDataset(vectors, ids, dim, 1);
+        auto result = index->KnnSearch(query, 1, R"({"hgraph":{"ef_search":32}})");
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 1);
+        REQUIRE(result.value()->GetIds()[0] == 0);
+        REQUIRE(result.value()->GetDistances()[0] == 0.0F);
+    }
+    REQUIRE(index->GetNumElements() == base_count + 128);
+    std::vector<float> next(dim, -1.0F);
+    std::vector<int64_t> next_id{base_count + 128};
+    auto next_dataset = MakeFloatDataset(next, next_id, dim, 1);
+    REQUIRE(index->Add(next_dataset).has_value());
+    auto result = index->KnnSearch(next_dataset, 1, R"({"hgraph":{"ef_search":32}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == next_id[0]);
+    REQUIRE(result.value()->GetDistances()[0] == 0.0F);
 }
