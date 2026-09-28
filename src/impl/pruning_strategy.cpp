@@ -15,6 +15,10 @@
 
 #include "pruning_strategy.h"
 
+#include <cstdlib>
+
+#include <fmt/format.h>
+
 #include "datacell/flatten_datacell.h"
 #include "datacell/graph_interface.h"
 #include "hash_types.h"
@@ -23,6 +27,17 @@
 namespace vsag {
 
 namespace {
+
+/// Reverse edges are applied through an optimistic snapshot/validate/commit by default;
+/// set VSAG_OPTIMISTIC_EDGE=0 to use the fully-locked reference path.
+inline bool
+optimistic_edge_on() {
+    static const bool on = []() {
+        const char* env = std::getenv("VSAG_OPTIMISTIC_EDGE");
+        return env == nullptr or env[0] != '0';
+    }();
+    return on;
+}
 
 class PairwiseDistanceComputer {
 public:
@@ -169,49 +184,134 @@ link_back_edges(InnerIdType cur_c,
     PairwiseDistanceComputer pairwise_distance(distance_provider, allocator);
     const uint64_t max_size = graph->MaximumDegree();
 
+    uint64_t optimistic_commits = 0;
+    uint64_t optimistic_conflicts = 0;
+
     for (auto selected_neighbor : selected_neighbors) {
         if (selected_neighbor == cur_c) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
                                 "Trying to connect an element to itself");
         }
 
-        LockGuard lock(neighbors_mutexes, selected_neighbor);
+        // Reference path: the whole read-modify-write under the neighbour lock.
+        auto locked_update = [&]() {
+            LockGuard lock(neighbors_mutexes, selected_neighbor);
 
-        Vector<InnerIdType> neighbors(allocator);
-        graph->GetNeighbors(selected_neighbor, neighbors);
+            Vector<InnerIdType> neighbors(allocator);
+            graph->GetNeighbors(selected_neighbor, neighbors);
 
-        uint64_t sz_link_list_other = neighbors.size();
+            const uint64_t sz = neighbors.size();
+            if (sz > max_size) {
+                throw VsagException(ErrorType::INTERNAL_ERROR, "Bad value of sz_link_list_other");
+            }
+            if (sz < max_size) {
+                neighbors.emplace_back(cur_c);
+                graph->InsertNeighborsById(selected_neighbor, neighbors);
+                return;
+            }
 
-        if (sz_link_list_other > max_size) {
-            throw VsagException(ErrorType::INTERNAL_ERROR, "Bad value of sz_link_list_other");
-        }
-        // If cur_c is already present in the neighboring connections of `selected_neighbors[idx]` then no need to modify any connections or run the heuristics.
-        if (sz_link_list_other < max_size) {
-            neighbors.emplace_back(cur_c);
-            graph->InsertNeighborsById(selected_neighbor, neighbors);
-        } else {
-            // finding the "weakest" element to replace it with the new one
             float d_max = pairwise_distance.PairwiseDistance(selected_neighbor, cur_c);
-
             auto candidates = std::make_shared<StandardHeap<true, false>>(allocator, -1);
             candidates->Push(d_max, cur_c);
-
-            for (uint64_t j = 0; j < sz_link_list_other; j++) {
+            for (uint64_t j = 0; j < sz; ++j) {
                 candidates->Push(
                     pairwise_distance.PairwiseDistance(selected_neighbor, neighbors[j]),
                     neighbors[j]);
             }
-
             select_edges_by_heuristic(candidates, max_size, distance_provider, allocator, alpha);
-
             Vector<InnerIdType> cand_neighbors(allocator);
             while (not candidates->Empty()) {
                 cand_neighbors.emplace_back(candidates->Top().second);
                 candidates->Pop();
             }
-
             graph->InsertNeighborsById(selected_neighbor, cand_neighbors);
+        };
+
+        if (not optimistic_edge_on()) {
+            locked_update();
+            continue;
         }
+
+        // ---- phase 1: snapshot the neighbour list under a short lock ----
+        Vector<InnerIdType> snapshot(allocator);
+        {
+            LockGuard lock(neighbors_mutexes, selected_neighbor);
+            graph->GetNeighbors(selected_neighbor, snapshot);
+        }
+
+        const uint64_t snap_sz = snapshot.size();
+        if (snap_sz > max_size) {
+            throw VsagException(ErrorType::INTERNAL_ERROR, "Bad value of sz_link_list_other");
+        }
+
+        if (snap_sz < max_size) {
+            // Cheap append: the outcome does not depend on list contents, only on the size,
+            // so a size check is enough to validate. The write stays under the lock because
+            // InsertNeighborsById reads the current list as part of its own update.
+            bool appended = false;
+            {
+                LockGuard lock(neighbors_mutexes, selected_neighbor);
+                Vector<InnerIdType> cur(allocator);
+                graph->GetNeighbors(selected_neighbor, cur);
+                if (cur.size() == snap_sz) {
+                    cur.emplace_back(cur_c);
+                    graph->InsertNeighborsById(selected_neighbor, cur);
+                    appended = true;
+                    ++optimistic_commits;
+                } else {
+                    ++optimistic_conflicts;
+                }
+            }
+            if (not appended) {
+                locked_update();  // lock already released above
+            }
+            continue;
+        }
+
+        // ---- phase 2: the expensive pruning, with NO lock held ----
+        auto candidates = std::make_shared<StandardHeap<true, false>>(allocator, -1);
+        candidates->Push(pairwise_distance.PairwiseDistance(selected_neighbor, cur_c), cur_c);
+        for (uint64_t j = 0; j < snap_sz; ++j) {
+            candidates->Push(
+                pairwise_distance.PairwiseDistance(selected_neighbor, snapshot[j]),
+                snapshot[j]);
+        }
+        select_edges_by_heuristic(candidates, max_size, distance_provider, allocator, alpha);
+        Vector<InnerIdType> cand_neighbors(allocator);
+        while (not candidates->Empty()) {
+            cand_neighbors.emplace_back(candidates->Top().second);
+            candidates->Pop();
+        }
+
+        // ---- phase 3: validate under the lock and commit, or fall back ----
+        bool snapshot_still_valid = false;
+        {
+            LockGuard lock(neighbors_mutexes, selected_neighbor);
+            Vector<InnerIdType> cur(allocator);
+            graph->GetNeighbors(selected_neighbor, cur);
+            snapshot_still_valid =
+                (cur.size() == snap_sz and std::equal(cur.begin(), cur.end(), snapshot.begin()));
+            if (snapshot_still_valid) {
+                graph->InsertNeighborsById(selected_neighbor, cand_neighbors);
+                ++optimistic_commits;
+            } else {
+                ++optimistic_conflicts;
+            }
+        }
+        if (not snapshot_still_valid) {
+            // The lock is released, so recomputing through locked_update() cannot
+            // self-deadlock on the same non-recursive shared_mutex.
+            locked_update();
+        }
+    }
+
+    if (optimistic_edge_on() and optimistic_commits + optimistic_conflicts > 0) {
+        fmt::print(stderr,
+                   "[optimistic-edge] commits={} conflicts={} fallback={:.2f}%\n",
+                   optimistic_commits,
+                   optimistic_conflicts,
+                   100.0 * static_cast<double>(optimistic_conflicts) /
+                       static_cast<double>(optimistic_commits + optimistic_conflicts));
     }
 }
 
