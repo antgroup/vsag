@@ -201,29 +201,31 @@ write_dataset(const std::string& path) {
 
 JsonType
 request(const std::string& dataset, const std::string& workspace) {
-    return {{"version", 1},
-            {"data_path", dataset},
-            {"indexes",
-             JsonType::array({{{"name", "hgraph"},
-                               {"create_params",
-                                {{"index_param",
-                                  {{"base_quantization_type", "fp32"},
-                                   {"max_degree", 8},
-                                   {"ef_construction", 40},
-                                   {"build_thread_count", 2}}}}},
-                               {"search_params", {{"hgraph", {{"ef_search", {8, 16}}}}}}},
-                              {{"name", "ivf"},
-                               {"create_params",
-                                {{"index_param",
-                                  {{"base_quantization_type", "fp32"},
-                                   {"buckets_count", 4},
-                                   {"thread_count", 2}}}}},
-                               {"search_params", {{"ivf", {{"scan_buckets_count", {1, 4}}}}}}}})},
-            {"workload", {{"top_k", 3}, {"concurrency", 2}}},
-            {"constraints", {{"recall_at_k", 0.0}, {"build_seconds", 1000.0}}},
-            {"objective", {{"metric", "latency_avg_ms"}}},
-            {"tuning_config",
-             {{"workspace_path", workspace}, {"keep_intermediate", true}, {"max_trials", 4}}}};
+    return {
+        {"version", 1},
+        {"data_path", dataset},
+        {"indexes",
+         JsonType::array(
+             {{{"name", "hgraph"},
+               {"create_params",
+                {{"index_param",
+                  {{"base_quantization_type", "fp32"},
+                   {"max_degree", 8},
+                   {"ef_construction", 40},
+                   {"build_thread_count", 2}}}}},
+               {"search_params", {{"hgraph", {{"ef_search", {{"$choices", {8, 16}}}}}}}}},
+              {{"name", "ivf"},
+               {"create_params",
+                {{"index_param",
+                  {{"base_quantization_type", "fp32"},
+                   {"buckets_count", 4},
+                   {"thread_count", 2}}}}},
+               {"search_params", {{"ivf", {{"scan_buckets_count", {{"$choices", {1, 4}}}}}}}}}})},
+        {"workload", {{"top_k", 3}, {"concurrency", 2}}},
+        {"constraints", {{"recall_at_k", 0.0}, {"build_seconds", 1000.0}}},
+        {"objective", {{"metric", "latency_avg_ms"}}},
+        {"tuning_config",
+         {{"workspace_path", workspace}, {"keep_intermediate", true}, {"max_trials", 4}}}};
 }
 
 struct MemoryFixture {
@@ -285,11 +287,11 @@ struct MemoryFixture {
         result.base = base;
         result.metric_type = vsag::METRIC_L2;
         result.workload = {queries, ground_truth, 3, 2};
-        result.index_spaces = {
-            {"hgraph",
-             R"({"index_param":{"base_quantization_type":"fp32",)"
-             R"("max_degree":[8,12],"ef_construction":40,"build_thread_count":2}})",
-             R"({"hgraph":{"ef_search":16}})"}};
+        result.index_spaces = {{"hgraph",
+                                R"({"index_param":{"base_quantization_type":"fp32",)"
+                                R"("max_degree":{"$choices":[8,12]},"ef_construction":40,)"
+                                R"("build_thread_count":2}})",
+                                R"({"hgraph":{"ef_search":16}})"}};
         result.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 0.0},
                               {vsag::autotune::Metric::BUILD_SECONDS, 1000.0}};
         result.objective = vsag::autotune::Metric::LATENCY_AVG_MS;
@@ -379,6 +381,76 @@ TEST_CASE("AutoTune candidate rules only fill missing fields") {
                         Catch::Matchers::ContainsSubstring("$range integer values must fit int64"));
 }
 
+TEST_CASE("AutoTune distinguishes native arrays from explicit choices") {
+    vsag::autotune::internal::IndexTuningRequest build_request;
+    build_request.context.top_k = 10;
+    build_request.context.max_trials = 3;
+    build_request.indexes = {{"pyramid",
+                              {{"index_param", {{"no_build_levels", JsonType::array({0, 1})}}}},
+                              {{"pyramid", {{"ef_search", 40}}}}}};
+
+    auto candidates = vsag::autotune::internal::GenerateCandidates(build_request);
+    REQUIRE(candidates.size() == 1);
+    REQUIRE(candidates[0].create_params["index_param"]["no_build_levels"] ==
+            JsonType::array({0, 1}));
+
+    build_request.indexes[0].create_params["index_param"]["no_build_levels"] = JsonType::array();
+    candidates = vsag::autotune::internal::GenerateCandidates(build_request);
+    REQUIRE(candidates.size() == 1);
+    REQUIRE(candidates[0].create_params["index_param"]["no_build_levels"] == JsonType::array());
+
+    build_request.indexes[0].create_params["index_param"]["no_build_levels"] = {
+        {"$choices",
+         JsonType::array({JsonType::array(), JsonType::array({0}), JsonType::array({0, 1})})}};
+    candidates = vsag::autotune::internal::GenerateCandidates(build_request);
+    REQUIRE(candidates.size() == 3);
+    REQUIRE(candidates[0].create_params["index_param"]["no_build_levels"] == JsonType::array());
+    REQUIRE(candidates[1].create_params["index_param"]["no_build_levels"] == JsonType::array({0}));
+    REQUIRE(candidates[2].create_params["index_param"]["no_build_levels"] ==
+            JsonType::array({0, 1}));
+
+    vsag::autotune::internal::SearchTuningRequest search_request;
+    search_request.context.top_k = 10;
+    search_request.context.max_trials = 2;
+    search_request.index_input = {"pyramid",
+                                  JsonType::object(),
+                                  {{"pyramid",
+                                    {{"ef_search", {{"$choices", {40, 80}}}},
+                                     {"hierarchies", JsonType::array({"site", "taxonomy"})}}}}};
+    candidates = vsag::autotune::internal::GenerateCandidates(search_request);
+    REQUIRE(candidates.size() == 2);
+    for (const auto& candidate : candidates) {
+        REQUIRE(candidate.search_params["pyramid"]["hierarchies"] ==
+                JsonType::array({"site", "taxonomy"}));
+    }
+}
+
+TEST_CASE("AutoTune validates explicit choices") {
+    vsag::autotune::internal::SearchTuningRequest request;
+    request.context.top_k = 10;
+    request.context.max_trials = 2;
+    request.index_input.name = "hgraph";
+
+    request.index_input.search_params = {{"hgraph", {{"ef_search", {{"$choices", 40}}}}}};
+    REQUIRE_THROWS_WITH(vsag::autotune::internal::GenerateCandidates(request),
+                        Catch::Matchers::ContainsSubstring("$choices must be an array"));
+
+    request.index_input.search_params = {
+        {"hgraph", {{"ef_search", {{"$choices", JsonType::array()}}}}}};
+    REQUIRE_THROWS_WITH(vsag::autotune::internal::GenerateCandidates(request),
+                        Catch::Matchers::ContainsSubstring("$choices must not be empty"));
+
+    request.index_input.search_params = {
+        {"hgraph", {{"ef_search", {{"$choices", {40, 80}}, {"other", true}}}}}};
+    REQUIRE_THROWS_WITH(
+        vsag::autotune::internal::GenerateCandidates(request),
+        Catch::Matchers::ContainsSubstring("$choices cannot be mixed with other keys"));
+
+    request.index_input.search_params = {{"hgraph", {{"ef_search", {{"$choices", {40, 40, 80}}}}}}};
+    const auto candidates = vsag::autotune::internal::GenerateCandidates(request);
+    REQUIRE(candidates.size() == 2);
+}
+
 TEST_CASE("AutoTune proposes conservative defaults for existing IVF indexes") {
     vsag::autotune::internal::SearchTuningRequest request;
     request.context.top_k = 10;
@@ -416,6 +488,9 @@ TEST_CASE("AutoTune plans an adaptive HGraph ef_search range") {
     request.context.objective = "latency_avg_ms";
     request.context.constraints = {{"recall_at_k", 0.95}};
     request.context.max_trials = 30;
+    const JsonType search_space = {{"hgraph",
+                                    {{"ef_search", {{"$range", {{"start", 40}, {"stop", 1000}}}}},
+                                     {"use_reorder", {{"$choices", {true, false}}}}}}};
     request.indexes = {
         {"hgraph",
          {{"dim", 8},
@@ -423,9 +498,7 @@ TEST_CASE("AutoTune plans an adaptive HGraph ef_search range") {
           {"metric_type", "l2"},
           {"index_param",
            {{"base_quantization_type", "fp32"}, {"max_degree", 24}, {"ef_construction", 80}}}},
-         {{"hgraph",
-           {{"ef_search", {{"$range", {{"start", 40}, {"stop", 1000}}}}},
-            {"use_reorder", {true, false}}}}}}};
+         search_space}};
 
     const auto candidates = vsag::autotune::internal::GenerateCandidates(request);
     REQUIRE(candidates.size() == 2);
@@ -787,10 +860,10 @@ TEST_CASE("AutoTune builds once per create candidate and supports an existing in
     REQUIRE(hgraph != result["builds"].end());
     auto existing = request(dataset.Get(), workspace.Get());
     existing["index_path"] = (*hgraph)["artifacts"]["index_path"];
-    existing["indexes"] =
-        JsonType::array({{{"name", "hgraph"},
-                          {"create_params", (*hgraph)["create_params"]},
-                          {"search_params", {{"hgraph", {{"ef_search", {8, 16}}}}}}}});
+    existing["indexes"] = JsonType::array(
+        {{{"name", "hgraph"},
+          {"create_params", (*hgraph)["create_params"]},
+          {"search_params", {{"hgraph", {{"ef_search", {{"$choices", {8, 16}}}}}}}}}});
     existing["constraints"] = {{"recall_at_k", 0.0}};
     existing["tuning_config"]["max_trials"] = 2;
 
@@ -845,7 +918,7 @@ TEST_CASE("AutoTune searches an in-memory existing index") {
     vsag::autotune::SearchRequest input;
     input.index = created.value();
     input.workload = {fixture.queries, fixture.ground_truth, 3, 2};
-    input.parameter_space = R"({"hgraph":{"ef_search":[8,16]}})";
+    input.parameter_space = R"({"hgraph":{"ef_search":{"$choices":[8,16]}}})";
     input.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 0.0}};
     input.objective = vsag::autotune::Metric::LATENCY_AVG_MS;
     input.config.workspace_path = workspace.Get();
@@ -950,7 +1023,7 @@ TEST_CASE("AutoTune searches an existing Pyramid index for one path workload") {
     input.workload.ground_truth = fixture.ground_truth;
     input.workload.top_k = 3;
     input.workload.concurrency = 2;
-    input.parameter_space = R"({"pyramid":{"ef_search":[4,8]}})";
+    input.parameter_space = R"({"pyramid":{"ef_search":{"$choices":[4,8]}}})";
     input.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 0.0}};
     input.objective = vsag::autotune::Metric::LATENCY_AVG_MS;
     input.config.workspace_path = workspace.Get();
