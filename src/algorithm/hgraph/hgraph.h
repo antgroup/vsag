@@ -151,6 +151,30 @@ public:
         return static_cast<int64_t>(this->PublishedCount()) - delete_count_;
     }
 
+    /// Order-sensitive FNV-1a hash over every bottom-graph neighbour list.
+    ///
+    /// Diagnostic only: lets a test tell "the graph differs" apart from "search amplifies a
+    /// difference", and lets two builds be compared content-wise instead of via hit lists.
+    [[nodiscard]] uint64_t
+    GraphChecksum() const override {
+        uint64_t hash = 1469598103934665603ULL;
+        const auto nodes = this->bottom_graph_->TotalCount();
+        for (InnerIdType node = 0; node < nodes; ++node) {
+            Vector<InnerIdType> neighbors(allocator_);
+            this->bottom_graph_->GetNeighbors(node, neighbors);
+            auto mix = [&hash](uint64_t value) {
+                hash ^= value;
+                hash *= 1099511628211ULL;
+            };
+            mix(node);
+            mix(neighbors.size());
+            for (const auto neighbor : neighbors) {
+                mix(neighbor);
+            }
+        }
+        return hash;
+    }
+
     /// Number of leading inner ids that concurrent readers may observe.
     [[nodiscard]] InnerIdType
     PublishedCount() const {

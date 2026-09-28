@@ -339,6 +339,13 @@ public:
     [[nodiscard]] virtual int64_t
     GetNumElements() const = 0;
 
+    /// Diagnostic: a content fingerprint of the built graph, for tests that need to tell a
+    /// changed graph apart from changed search behaviour. Zero means "not implemented".
+    [[nodiscard]] virtual uint64_t
+    GraphChecksum() const {
+        return 0;
+    }
+
     [[nodiscard]] virtual int64_t
     GetNumberRemoved() const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,

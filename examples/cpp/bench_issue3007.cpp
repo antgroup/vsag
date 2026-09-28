@@ -11,6 +11,9 @@
 
 #include <vsag/vsag.h>
 
+#include "algorithm/hgraph/hgraph.h"
+#include "index/index_impl.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -204,6 +207,20 @@ main(int argc, char** argv) {
                 if (rid[k] != rid2[k]) { ++repeat_mismatch; }
                 if (rid[k] >= 0) { same += rid[k] + 1; } else { ++diff; }
             }
+        }
+        // Direct graph-content fingerprint: tells "the graph differs" apart from "search
+        // amplifies a difference".
+        {
+            // Same downcast path the HGraph tests use.
+            uint64_t graph_hash = 0;
+            auto index_impl = std::dynamic_pointer_cast<vsag::IndexImpl<vsag::HGraph>>(index);
+            if (index_impl != nullptr) {
+                auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(index_impl->GetInnerIndex());
+                if (hgraph != nullptr) {
+                    graph_hash = hgraph->GraphChecksum();
+                }
+            }
+            std::printf("GRAPHCHECK hash=%llu\n", static_cast<unsigned long long>(graph_hash));
         }
         std::printf("DIGEST sum=%lld neg=%lld elements=%lld repeat_mismatch=%lld\n",
                     static_cast<long long>(same), static_cast<long long>(diff),
