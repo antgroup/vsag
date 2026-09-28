@@ -105,9 +105,23 @@ public:
     }
 
     void
+    SetImmutable() override;
+    void
     InitFeatures() override;
 
 private:
+    DatasetPtr
+    KnnSearchImpl(const DatasetPtr& query,
+                  int64_t k,
+                  const std::string& parameters,
+                  const FilterPtr& filter) const;
+
+    DatasetPtr
+    RangeSearchImpl(const DatasetPtr& query,
+                    float radius,
+                    const std::string& parameters,
+                    const FilterPtr& filter,
+                    int64_t limited_size) const;
     void
     run_clustering(const float* flat_vecs,
                    const Vector<InnerIdType>& vec_to_doc,
@@ -190,16 +204,7 @@ private:
 
     uint64_t resize_increase_count_bit_{10};
 
-    // Scratch buffers for coarse_search (flat-array fast-path). Mutable so const
-    // search methods can reuse them across calls without re-allocation.
-    //
-    // NOTE: using member buffers means concurrent searches on the same SIMQ
-    // instance are NOT safe. If concurrent search is needed, callers should use
-    // separate index instances.
-    mutable std::vector<float> coarse_score_buf_;
-    mutable std::vector<bool> coarse_seen_buf_;
-    mutable std::vector<InnerIdType> coarse_dirty_;
-    mutable std::vector<InnerIdType> coarse_seen_dirty_;
+    mutable std::atomic<bool> immutable_{false};
 
     mutable std::shared_mutex global_mutex_;
     mutable std::mutex rep_hgraph_mutex_;  // Protects rep_hgraph_ mutations in parallel splits
