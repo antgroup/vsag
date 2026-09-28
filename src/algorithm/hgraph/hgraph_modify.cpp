@@ -233,7 +233,9 @@ HGraph::force_remove_one(int64_t label) {
             this->bottom_graph_->SetTotalCount(0);
             this->route_graphs_.clear();
         }
-        this->total_count_.fetch_sub(1);
+        // acq_rel: the decrement must be visible to the acquire load in
+        // PublishThroughTotalCount below, which lowers the visibility mark in step.
+        this->total_count_.fetch_sub(1, std::memory_order_acq_rel);
         // Removal shrinks the id range; keep the visibility mark in step so it can never
         // exceed the reserved range.
         this->PublishThroughTotalCount();

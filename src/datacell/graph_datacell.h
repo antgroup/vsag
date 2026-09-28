@@ -340,7 +340,12 @@ GraphDataCell<IOTmpl>::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbo
     // The matching release fence lives in InsertNeighborsById, between the payload and the count
     // write. The count itself is stored with a plain (non-atomic) write because the layout is a
     // byte array; the fence pair plus the monotonic count value is what makes a reader that
-    // observes the new count read the matching payload rather than the previous list.
+    // observes the new count read the matching payload rather than the previous list. The count
+    // is read *before* the acquire fence on purpose: the fence-to-fence rule requires the load
+    // that observes the released value to be sequenced before the acquire fence, so moving the
+    // read after the fence would remove the synchronisation instead of strengthening it. Readers
+    // currently hold the shared neighbour lock (see BasicSearcher::visit), so this ordering is a
+    // fallback for a lock-free reader rather than the live mechanism.
     uint32_t neighbor_count = 0;
     this->layout_.ReadAt(
         id, COUNT_OFFSET, sizeof(neighbor_count), reinterpret_cast<uint8_t*>(&neighbor_count));

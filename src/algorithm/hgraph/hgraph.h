@@ -16,6 +16,7 @@
 #pragma once
 
 #include <atomic>
+#include <cassert>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -222,6 +223,9 @@ public:
     /// concurrently with the build.
     void
     PublishNode(InnerIdType inner_id) {
+        // Ids come from the range reserved by prepare_add_batch, so the mark can always reach
+        // inner_id + 1; the loop below exits immediately for an id that is already covered.
+        assert(inner_id < this->total_count_.load(std::memory_order_relaxed));
         InnerIdType current = this->published_count_.load(std::memory_order_relaxed);
         while (current <= inner_id and
                not this->published_count_.compare_exchange_strong(
