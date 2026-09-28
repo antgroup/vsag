@@ -2962,3 +2962,117 @@ TEST_CASE("Pyramid dense native distance contract", "[distance_contract]") {
         }
     }
 }
+
+TEST_CASE("Pyramid with extra_info: build, search, get_extra_info", "[ft][pyramid][extra_info]") {
+    using namespace fixtures;
+    const uint64_t dim = 16;
+    const uint64_t base_count = 200;
+    int64_t extra_info_size = 64;
+
+    PyramidParam build_param;
+    build_param.no_build_levels = {};
+    auto param_str = PyramidTestIndex::GeneratePyramidBuildParametersString("l2", dim, build_param);
+    auto j = nlohmann::json::parse(param_str);
+    j["extra_info_size"] = extra_info_size;
+    nlohmann::json extra_info_cfg;
+    extra_info_cfg["io_params"]["type"] = "block_memory_io";
+    j["index_param"]["extra_info"] = extra_info_cfg;
+    std::string param = j.dump();
+
+    auto created = vsag::Factory::CreateIndex("pyramid", param);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_GET_EXTRA_INFO_BY_ID));
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_KNN_SEARCH_WITH_EX_FILTER));
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT));
+
+    auto dataset = PyramidTestIndex::pool.GetDatasetAndCreate(
+        dim, base_count, "l2", true, 0.8, extra_info_size);
+
+    TestIndex::TestBuildIndex(index, dataset, true);
+    TestIndex::TestGetExtraInfoById(index, dataset, extra_info_size);
+}
+
+TEST_CASE("Pyramid with extra_info: serialize roundtrip", "[ft][pyramid][extra_info]") {
+    using namespace fixtures;
+    const uint64_t dim = 16;
+    const uint64_t base_count = 200;
+    int64_t extra_info_size = 64;
+
+    PyramidParam build_param;
+    build_param.no_build_levels = {};
+    auto param_str = PyramidTestIndex::GeneratePyramidBuildParametersString("l2", dim, build_param);
+    auto j = nlohmann::json::parse(param_str);
+    j["extra_info_size"] = extra_info_size;
+    nlohmann::json extra_info_cfg;
+    extra_info_cfg["io_params"]["type"] = "block_memory_io";
+    j["index_param"]["extra_info"] = extra_info_cfg;
+    std::string param = j.dump();
+
+    auto created = vsag::Factory::CreateIndex("pyramid", param);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+
+    auto dataset = PyramidTestIndex::pool.GetDatasetAndCreate(
+        dim, base_count, "l2", true, 0.8, extra_info_size);
+
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    // file serialize roundtrip
+    auto created2 = vsag::Factory::CreateIndex("pyramid", param);
+    REQUIRE(created2.has_value());
+    auto restored = created2.value();
+    TestIndex::TestSerializeFile(index,
+                                 restored,
+                                 dataset,
+                                 PyramidTestIndex::GeneratePyramidSearchParametersString(100),
+                                 true);
+    TestIndex::TestGetExtraInfoById(restored, dataset, extra_info_size);
+
+    // binary set serialize roundtrip
+    auto created3 = vsag::Factory::CreateIndex("pyramid", param);
+    REQUIRE(created3.has_value());
+    auto streamed = created3.value();
+    TestIndex::TestSerializeBinarySet(index,
+                                      streamed,
+                                      dataset,
+                                      PyramidTestIndex::GeneratePyramidSearchParametersString(100),
+                                      true);
+    TestIndex::TestGetExtraInfoById(streamed, dataset, extra_info_size);
+}
+
+TEST_CASE("Pyramid with extra_info: PIPNN dedup path", "[ft][pyramid][extra_info]") {
+    using namespace fixtures;
+    const uint64_t dim = 16;
+    const uint64_t base_count = 50;
+    int64_t extra_info_size = 64;
+
+    auto param_str = R"(
+    {
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 16,
+        "extra_info_size": 64,
+        "index_param": {
+            "graph_type": "pipnn",
+            "extra_info": {
+                "io_params": {
+                    "type": "block_memory_io"
+                }
+            }
+        }
+    }
+    )";
+    std::string param = param_str;
+
+    auto created = vsag::Factory::CreateIndex("pyramid", param);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+
+    auto dataset = PyramidTestIndex::pool.GetDuplicateDataset(
+        dim, base_count, "l2", true, 0.8, extra_info_size);
+
+    TestIndex::TestBuildIndex(index, dataset, true);
+    TestIndex::TestGetExtraInfoById(index, dataset, extra_info_size);
+}
