@@ -34,22 +34,38 @@
 
 namespace sampling {
 
-constexpr int kMaxSamples = 400000;
+constexpr int kMaxSamples = 200000;
+constexpr int kFrames = 6;
 std::atomic<uint64_t> g_ips[kMaxSamples];
+// Return addresses leading to the interrupted instruction, so a sample that lands in
+// futex_wait can be attributed to the exact call site / lock that blocked.
+std::atomic<uint64_t> g_frames[kMaxSamples][kFrames];
 std::atomic<int> g_count{0};
 
-inline void
-record(uint64_t ip) {
-    const int slot = g_count.fetch_add(1, std::memory_order_relaxed);
-    if (slot < kMaxSamples) {
-        g_ips[slot].store(ip, std::memory_order_relaxed);
-    }
-}
-
+// Signal-safe frame-pointer walk. The build keeps frame pointers enabled
+// (ENABLE_FRAME_POINTER defaults on), so rbp-chasing is valid.
 extern "C" void
 handler(int, siginfo_t*, void* ucontext) {
     auto* uc = static_cast<ucontext_t*>(ucontext);
-    record(static_cast<uint64_t>(uc->uc_mcontext.gregs[REG_RIP]));
+    const int slot = g_count.fetch_add(1, std::memory_order_relaxed);
+    if (slot >= kMaxSamples) {
+        return;
+    }
+    g_ips[slot].store(static_cast<uint64_t>(uc->uc_mcontext.gregs[REG_RIP]),
+                      std::memory_order_relaxed);
+    uint64_t* rbp = reinterpret_cast<uint64_t*>(uc->uc_mcontext.gregs[REG_RBP]);
+    for (int i = 0; i < kFrames; ++i) {
+        if (rbp == nullptr) {
+            break;
+        }
+        const uint64_t ret = rbp[1];
+        g_frames[slot][i].store(ret, std::memory_order_relaxed);
+        auto* next = reinterpret_cast<uint64_t*>(rbp[0]);
+        if (next <= rbp) {
+            break;
+        }
+        rbp = next;
+    }
 }
 
 void
@@ -121,7 +137,11 @@ dump(const char* path) {
         return;
     }
     for (int i = 0; i < n; ++i) {
-        std::fprintf(f, "%llx\n", static_cast<unsigned long long>(g_ips[i].load()));
+        std::fprintf(f, "%llx", static_cast<unsigned long long>(g_ips[i].load()));
+        for (int k = 0; k < kFrames; ++k) {
+            std::fprintf(f, " %llx", static_cast<unsigned long long>(g_frames[i][k].load()));
+        }
+        std::fprintf(f, "\n");
     }
     std::fclose(f);
 }
