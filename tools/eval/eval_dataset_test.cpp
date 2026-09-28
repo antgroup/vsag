@@ -26,9 +26,11 @@
 #include <filesystem>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "case/eval_case.h"
+#include "case/search_eval_case.h"
 #include "evaluator.h"
 #include "monitor/recall_monitor.h"
 #include "vsag/factory.h"
@@ -475,18 +477,28 @@ TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][
     config.num_threads_searching = caller_thread_count == 1 ? 2 : 1;
     config.enable_recall = false;
     config.enable_percent_recall = false;
+    config.recall_target = 1.0;
     config.enable_qps = true;
     config.enable_tps = false;
     config.enable_memory = false;
     config.enable_latency = false;
     config.enable_percent_latency = false;
 
-    const auto qps_only = vsag::eval::EvaluateSearch(index, dataset, config);
-    REQUIRE(qps_only.contains("qps"));
-    REQUIRE(qps_only["measurement_sample_count"].get<uint64_t>() == 2);
-    REQUIRE(qps_only["index_info"].is_object());
-    REQUIRE(qps_only["index_info"].empty());
+    const auto coverage_result = vsag::eval::EvaluateSearch(index, dataset, config);
+    REQUIRE(coverage_result.contains("qps"));
+    REQUIRE(coverage_result["measurement_sample_count"].get<uint64_t>() == 2);
+    REQUIRE(coverage_result["query_coverage"]["recall_target"].get<double>() == 1.0);
+    REQUIRE(coverage_result["query_coverage"]["reached_queries"].get<uint64_t>() == 2);
+    REQUIRE(coverage_result["query_coverage"]["query_count"].get<uint64_t>() == 2);
+    REQUIRE(coverage_result["query_coverage"]["rate"].get<double>() == 1.0);
+    REQUIRE(coverage_result["index_info"].is_object());
+    REQUIRE(coverage_result["index_info"].empty());
     REQUIRE(omp_get_max_threads() == caller_thread_count);
+
+    config.recall_target = 1.01;
+    REQUIRE_THROWS_WITH(vsag::eval::EvaluateSearch(index, dataset, config),
+                        "recall_target must be finite and in [0, 1]");
+    config.recall_target = 1.0;
 
     config.search_param = R"({"hgraph":{"ef_search":0}})";
     REQUIRE_THROWS_WITH(
@@ -506,6 +518,7 @@ TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][
                         "evaluation top_k must be positive");
 
     config.top_k = 1;
+    config.recall_target.reset();
     config.search_mode = "range";
     REQUIRE_THROWS_WITH(vsag::eval::EvaluateSearch(index, dataset, config),
                         "in-memory evaluation supports only knn search mode");
@@ -571,6 +584,7 @@ TEST_CASE("EvalCase builds and searches an in-memory dataset with original ids",
     })";
     config.top_k = 1;
     config.search_query_count = 1;
+    config.recall_target = 1.0;
     config.enable_memory = false;
     std::remove(config.index_path.c_str());
 
@@ -580,6 +594,8 @@ TEST_CASE("EvalCase builds and searches an in-memory dataset with original ids",
     const auto result = search->Run();
     REQUIRE(result["action"] == "search");
     REQUIRE(result["recall_avg"].get<double>() == 1.0);
+    REQUIRE(result["query_coverage"]["reached_queries"].get<uint64_t>() == 1);
+    REQUIRE(result["query_coverage"]["query_count"].get<uint64_t>() == 1);
     REQUIRE(result["statistics_query_count"].get<uint64_t>() == 1);
     REQUIRE(std::isfinite(result["qps"].get<double>()));
     REQUIRE(std::isfinite(result["latency_avg(ms)"].get<double>()));
@@ -599,17 +615,84 @@ TEST_CASE("EvalCase builds and searches an in-memory dataset with original ids",
         ->Owner(false);
     auto concurrent_dataset =
         EvalDataset::FromDatasets(base, concurrent_queries, concurrent_ground_truth, "l2");
-    config.search_query_count = 2;
+    config.search_query_count = 4;
     config.num_threads_searching = 2;
     auto concurrent_search =
         vsag::eval::EvalCase::MakeInstance(config, "search", concurrent_dataset);
     const auto concurrent_result = concurrent_search->Run();
     REQUIRE(concurrent_result["recall_avg"].get<double>() == 1.0);
-    REQUIRE(concurrent_result["statistics_query_count"].get<uint64_t>() == 2);
+    REQUIRE(concurrent_result["query_coverage"]["reached_queries"].get<uint64_t>() == 4);
+    REQUIRE(concurrent_result["query_coverage"]["query_count"].get<uint64_t>() == 4);
+    REQUIRE(concurrent_result["query_coverage"]["rate"].get<double>() == 1.0);
+    REQUIRE(concurrent_result["statistics_query_count"].get<uint64_t>() == 4);
     REQUIRE(std::isfinite(concurrent_result["qps"].get<double>()));
     REQUIRE(std::isfinite(concurrent_result["latency_avg(ms)"].get<double>()));
     REQUIRE(std::isfinite(concurrent_result["latency_detail(ms)"]["p99"].get<double>()));
     std::remove(config.index_path.c_str());
+}
+
+TEST_CASE("Filtered evaluation honors the configured query count", "[ut][eval_dataset]") {
+    const auto path = TempPath("filtered_query_count");
+    {
+        H5::H5File file(path, H5F_ACC_TRUNC);
+        const auto write = [&](const std::string& name,
+                               const H5::DataType& type,
+                               const std::vector<hsize_t>& shape,
+                               const void* values) {
+            H5::DataSpace space(static_cast<int>(shape.size()), shape.data());
+            file.createDataSet(name, type, space).write(values, type);
+        };
+        const float train[]{0.0F, 1.0F, 4.0F};
+        const float queries[]{0.0F, 1.0F};
+        const int64_t neighbors[]{1, 0};
+        const float distances[]{1.0F, 1.0F};
+        const int64_t train_labels[]{0, 1, 0};
+        const int64_t test_labels[]{1, 0};
+        const float valid_ratios[]{2.0F / 3.0F, 1.0F / 3.0F};
+        write("train", H5::PredType::NATIVE_FLOAT, {3, 1}, train);
+        write("test", H5::PredType::NATIVE_FLOAT, {2, 1}, queries);
+        write("neighbors", H5::PredType::NATIVE_INT64, {2, 1}, neighbors);
+        write("distances", H5::PredType::NATIVE_FLOAT, {2, 1}, distances);
+        write("train_labels", H5::PredType::NATIVE_INT64, {3}, train_labels);
+        write("test_labels", H5::PredType::NATIVE_INT64, {2}, test_labels);
+        write("valid_ratios", H5::PredType::NATIVE_FLOAT, {2}, valid_ratios);
+        const H5::StrType string_type(H5::PredType::C_S1, H5T_VARIABLE);
+        auto metric = file.createAttribute("distance", string_type, H5::DataSpace(H5S_SCALAR));
+        metric.write(string_type, std::string("euclidean"));
+    }
+    auto dataset = EvalDataset::Load(path);
+    std::remove(path.c_str());
+
+    const auto created = vsag::Factory::CreateIndex("brute_force", R"({
+        "dtype": "float32", "metric_type": "l2", "dim": 1,
+        "index_param": {"base_quantization_type": "fp32", "store_raw_vector": true}
+    })");
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    vsag::eval::EvalConfig config;
+    config.index_name = "brute_force";
+    config.enable_memory = false;
+    vsag::eval::EvaluateBuild(index, dataset, config);
+    config.search_mode = "knn_filter";
+    config.search_param = "{}";
+    config.top_k = 1;
+    config.use_id_based_recall = true;
+    config.recall_target = 1.0;
+    config.enable_recall = false;
+    config.enable_percent_recall = false;
+    config.enable_qps = true;
+
+    const std::vector<std::pair<uint64_t, uint64_t>> counts{{1, 2}, {5, 5}, {10001, 10001}};
+    for (const auto& [requested, expected] : counts) {
+        CAPTURE(requested);
+        config.search_query_count = requested;
+        vsag::eval::SearchEvalCase search("", "", index, config, dataset);
+        const auto result = search.RunInMemory();
+        REQUIRE(result["query_coverage"]["query_count"].get<uint64_t>() == expected);
+        REQUIRE(result["query_coverage"]["reached_queries"].get<uint64_t>() == expected);
+        REQUIRE(result["query_coverage"]["rate"].get<double>() == 1.0);
+        REQUIRE(result["measurement_sample_count"].get<uint64_t>() == expected);
+    }
 }
 
 TEST_CASE("EvalDataset sparse round-trip without token sequences", "[ut][eval_dataset]") {
