@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,28 +14,24 @@
 
 #pragma once
 
-#include <optional>
-
-#include "impl/heap/distance_heap.h"
-#include "quantization/computer.h"
-#include "utils/pointer_define.h"
+#include "ivf_bucket_searcher.h"
 
 namespace vsag {
-class IteratorFilterContext;
 
-DEFINE_POINTER(ReorderInterface)
-
-class ReorderInterface {
+class RaBitQSplitBucketSearcher : public IVFBucketSearcher {
 public:
-    virtual DistHeapPtr
-    Reorder(const DistHeapPtr& input,
-            const void* query,
-            int64_t topk,
-            QueryContext& ctx,
-            IteratorFilterContext* iter_ctx = nullptr,
-            const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr,
-            const std::optional<float>& distance_threshold = std::nullopt,
-            const ComputerInterfacePtr& preset_computer = nullptr) = 0;
+    void
+    Search(BucketIdType bucket_id,
+           const BucketInterfacePtr& bucket,
+           const ComputerInterfacePtr& computer,
+           const InnerSearchParam& param,
+           int64_t thread_id,
+           int64_t topk,
+           BucketIdType buckets_per_data,
+           DistHeapPtr& heap,
+           Vector<float>& dist,
+           Vector<InnerIdType>& scanned_inner_ids,
+           ReasoningContext* reasoning_ctx) const override;
 };
 
 }  // namespace vsag

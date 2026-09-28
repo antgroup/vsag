@@ -50,6 +50,93 @@ class ComparisonTest(unittest.TestCase):
                                   {"src/simd/new.h": {1}})
         self.assertIn("Unmeasured changed file", result["errors"][0])
 
+    def test_declaration_only_changed_header_is_not_an_error(self):
+        header = "src/simd/declarations.h"
+        result = coverage.compare({SOURCE: {1: True}}, {SOURCE: {1: True}},
+                                  {header: {1}}, (), [header])
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(result["declaration_only"], [header])
+
+    def test_executable_code_detection_keeps_the_gate_fail_closed(self):
+        declarations = ("#include <cstdint>\n"
+                        "#define DECLARE(ns)          \\\n"
+                        "    namespace ns {               \\\n"
+                        "    void Run(int value);         \\\n"
+                        "    }\n"
+                        "namespace vsag {\n"
+                        "DECLARE(generic)\n"
+                        "using RunType = void (*)(int value);\n"
+                        "extern RunType Run;\n"
+                        "}  // namespace vsag\n")
+        self.assertFalse(coverage.defines_executable_code(declarations))
+        for definition in ("void Run(int value) {\n    (void)value;\n}\n",
+                           "auto Run(int value) const\n    -> int {\n    return value;\n}\n",
+                           "void Run(int value)\n{\n    (void)value;\n}\n"):
+            with self.subTest(definition=definition):
+                self.assertTrue(coverage.defines_executable_code(definition))
+
+    def test_unmeasurable_helper_skips_only_headers_without_code(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "src/simd").mkdir(parents=True)
+            (root / "src/simd/declarations.h").write_text("void Run(int value);\n")
+            (root / "src/simd/measured.h").write_text("inline int Run() {\n    return 1;\n}\n")
+            (root / "src/simd/missing.cpp").write_text("void Run(int value) {\n    (void)value;\n}\n")
+            changes = {"src/simd/declarations.h": {1},
+                       "src/simd/measured.h": {1},
+                       "src/simd/missing.cpp": {1}}
+            self.assertEqual(coverage.unmeasurable_changes(root, changes, {}),
+                             {"src/simd/declarations.h"})
+
+    def test_unavailable_step_is_excluded_from_patch_and_totals(self):
+        step = "src/simd/avx512.cpp"
+        base = {SOURCE: {1: True}, step: {1: False, 2: False}}
+        head = {SOURCE: {1: True}, step: {1: False, 2: False}}
+        result = coverage.compare(base, head, {step: {1}}, unavailable=[step])
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(result["isa_unavailable"], [step])
+        self.assertEqual(result["patch"], {"covered": 0, "measured": 0})
+        self.assertEqual(result["base"], {"covered": 1, "measured": 1})
+        self.assertEqual(result["head"], {"covered": 1, "measured": 1})
+
+    def test_unavailable_step_does_not_trip_the_regression_gate(self):
+        step = "src/simd/avx512.cpp"
+        base = {SOURCE: {1: True}, step: {1: True, 2: True}}
+        head = {SOURCE: {1: True}, step: {1: False, 2: False}}
+        self.assertIn("SIMD scoped line coverage regressed",
+                      coverage.compare(base, head, {})["errors"])
+        self.assertEqual(coverage.compare(base, head, {}, unavailable=[step])["errors"], [])
+
+    def test_runner_without_avx512_marks_only_its_steps_unavailable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            log = Path(temp) / "head.log"
+            log.write_text("cpu sse >> dist_support:Y + platform:Y = using:Y\n"
+                           "cpu avx2 >> dist_support:Y + platform:Y = using:Y\n"
+                           "\x1b[0mcpu avx512f >> dist_support:Y + platform:N = using:N\n"
+                           "cpu avx512vpopcntdq >> dist_support:Y + platform:N = using:N\n"
+                           "cpu neon >> dist_support:N + platform:N = using:N\n"
+                           "cpu sve >> dist_support:N + platform:N = using:N\n")
+            self.assertEqual(coverage.unavailable_isa_files(log),
+                             {"src/simd/avx512.cpp", "src/simd/avx512vpopcntdq.cpp",
+                              "src/simd/neon.cpp", "src/simd/sve.cpp"})
+
+    def test_runner_with_every_step_enabled_marks_nothing_unavailable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            log = Path(temp) / "head.log"
+            log.write_text("cpu sse >> dist_support:Y + platform:Y = using:Y\n"
+                           "cpu avx >> dist_support:Y + platform:Y = using:Y\n"
+                           "cpu avx2 >> dist_support:Y + platform:Y = using:Y\n"
+                           "cpu avx512f >> dist_support:Y + platform:Y = using:Y\n"
+                           "cpu avx512vpopcntdq >> dist_support:Y + platform:Y = using:Y\n")
+            self.assertEqual(coverage.unavailable_isa_files(log), set())
+
+    def test_missing_or_bannerless_log_keeps_every_step_gated(self):
+        with tempfile.TemporaryDirectory() as temp:
+            self.assertEqual(coverage.unavailable_isa_files(Path(temp) / "absent.log"), set())
+            blank = Path(temp) / "blank.log"
+            blank.write_text("All tests passed\n")
+            self.assertEqual(coverage.unavailable_isa_files(blank), set())
+
     def test_only_actual_deletions_can_disappear(self):
         other = "src/simd/other.cpp"
         base = {SOURCE: {1: True}, other: {1: True}}

@@ -42,7 +42,8 @@ public:
             QueryContext& ctx,
             IteratorFilterContext* iter_ctx = nullptr,
             const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr,
-            const std::optional<float>& distance_threshold = std::nullopt) override;
+            const std::optional<float>& distance_threshold = std::nullopt,
+            const ComputerInterfacePtr& preset_computer = nullptr) override;
 
 private:
     const BucketInterfacePtr bucket_;

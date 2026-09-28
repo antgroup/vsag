@@ -95,12 +95,10 @@ IVF::Serialize(StreamWriter& writer) const {
     WRITE_DATACELL_WITH_NAME(writer, "partition_strategy", partition_strategy_);
     WRITE_DATACELL_WITH_NAME(writer, "label_table", label_table_);
 
-    if (use_reorder_) {
-        if (precise_bucket_ != nullptr) {
-            WRITE_DATACELL_WITH_NAME(writer, "precise_bucket", precise_bucket_);
-        } else {
-            WRITE_DATACELL_WITH_NAME(writer, "reorder_codes", reorder_codes_);
-        }
+    if (precise_bucket_ != nullptr) {
+        WRITE_DATACELL_WITH_NAME(writer, "precise_bucket", precise_bucket_);
+    } else if (reorder_codes_ != nullptr) {
+        WRITE_DATACELL_WITH_NAME(writer, "reorder_codes", reorder_codes_);
     }
 
     if (use_attribute_filter_) {
@@ -186,7 +184,7 @@ IVF::collect_streaming_header() const {
                                  label_tag,
                                  StreamSerializationBlockCurrentVersion(label_tag),
                                  StreamSerializationTagCritical(label_tag));
-    if (this->use_reorder_) {
+    if (precise_bucket_ != nullptr or reorder_codes_ != nullptr) {
         auto tag = static_cast<uint32_t>(precise_bucket_ != nullptr
                                              ? StreamSerializationTag::IVF_PRECISE_BUCKET
                                              : StreamSerializationTag::HIGH_PRECISION_CODES);
@@ -233,7 +231,7 @@ IVF::serialize_streaming_body(StreamWriter& writer) const {
         writer, label_tag, StreamSerializationTagCritical(label_tag), [this](StreamWriter& w) {
             this->label_table_->Serialize(w);
         });
-    if (this->use_reorder_) {
+    if (precise_bucket_ != nullptr or reorder_codes_ != nullptr) {
         auto tag = static_cast<uint32_t>(precise_bucket_ != nullptr
                                              ? StreamSerializationTag::IVF_PRECISE_BUCKET
                                              : StreamSerializationTag::HIGH_PRECISION_CODES);
@@ -393,7 +391,7 @@ IVF::read_streaming_body(StreamReader& reader,
                 loaded_label_table = true;
                 break;
             case StreamSerializationTag::HIGH_PRECISION_CODES:
-                if (this->use_reorder_ and this->reorder_codes_ != nullptr) {
+                if (this->reorder_codes_ != nullptr) {
                     read_precise_block(
                         [this](StreamReader& block) { this->reorder_codes_->Deserialize(block); },
                         [this](const IOParamPtr& io_param) {
@@ -503,7 +501,8 @@ IVF::read_streaming_body(StreamReader& reader,
         throw VsagException(ErrorType::READ_ERROR,
                             "IVF streaming serialization required block is missing");
     }
-    if (this->use_reorder_ && !loaded_precise_codes) {
+    if ((this->reorder_codes_ != nullptr or this->precise_bucket_ != nullptr) and
+        not loaded_precise_codes) {
         throw VsagException(ErrorType::READ_ERROR,
                             "IVF streaming serialization reorder block is missing");
     }
@@ -511,6 +510,7 @@ IVF::read_streaming_body(StreamReader& reader,
         throw VsagException(ErrorType::READ_ERROR,
                             "IVF streaming serialization attribute filter block is missing");
     }
+    this->bucket_->FinalizeLoad();
     if (this->bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
         this->has_raw_vector_ = true;
     }
@@ -545,7 +545,7 @@ IVF::Deserialize(StreamReader& reader) {
         this->bucket_->Deserialize(buffer_reader);
         this->partition_strategy_->Deserialize(buffer_reader);
         this->label_table_->Deserialize(buffer_reader);
-        if (use_reorder_) {
+        if (reorder_codes_ != nullptr) {
             this->reorder_codes_->Deserialize(buffer_reader);
         }
 
@@ -590,12 +590,10 @@ IVF::Deserialize(StreamReader& reader) {
         READ_DATACELL_WITH_NAME(buffer_reader, "bucket", this->bucket_);
         READ_DATACELL_WITH_NAME(buffer_reader, "partition_strategy", this->partition_strategy_);
         READ_DATACELL_WITH_NAME(buffer_reader, "label_table", this->label_table_);
-        if (use_reorder_) {
-            if (precise_bucket_ != nullptr) {
-                READ_DATACELL_WITH_NAME(buffer_reader, "precise_bucket", this->precise_bucket_);
-            } else {
-                READ_DATACELL_WITH_NAME(buffer_reader, "reorder_codes", this->reorder_codes_);
-            }
+        if (precise_bucket_ != nullptr) {
+            READ_DATACELL_WITH_NAME(buffer_reader, "precise_bucket", this->precise_bucket_);
+        } else if (reorder_codes_ != nullptr) {
+            READ_DATACELL_WITH_NAME(buffer_reader, "reorder_codes", this->reorder_codes_);
         }
         if (use_attribute_filter_) {
             READ_DATACELL_WITH_NAME(buffer_reader, "attr_filter_index", this->attr_filter_index_);
@@ -656,6 +654,7 @@ IVF::Deserialize(StreamReader& reader) {
             }
         }
     }
+    this->bucket_->FinalizeLoad();
     this->fill_location_map();
     this->cal_memory_usage();
 }

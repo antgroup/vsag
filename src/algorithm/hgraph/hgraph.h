@@ -171,14 +171,14 @@ public:
     [[nodiscard]] uint64_t
     GraphChecksum() const override {
         uint64_t hash = 1469598103934665603ULL;
+        auto mix = [&hash](uint64_t value) {
+            hash ^= value;
+            hash *= 1099511628211ULL;
+        };
         const auto nodes = this->bottom_graph_->TotalCount();
         for (InnerIdType node = 0; node < nodes; ++node) {
             Vector<InnerIdType> neighbors(allocator_);
             this->bottom_graph_->GetNeighbors(node, neighbors);
-            auto mix = [&hash](uint64_t value) {
-                hash ^= value;
-                hash *= 1099511628211ULL;
-            };
             mix(node);
             mix(neighbors.size());
             for (const auto neighbor : neighbors) {

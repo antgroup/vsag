@@ -17,6 +17,8 @@
 
 #include <cstdint>
 
+#include "simd/kernels/rabitq_packed_supplement.h"
+
 namespace vsag {
 
 namespace avx512vpopcntdq {
@@ -148,6 +150,12 @@ RaBitQFloatSupplementCodeIP(const float* vector,
                             uint64_t dim,
                             uint32_t supplement_bits);
 
+float
+RaBitQFloatPackedSupplementCodeIP(const float* vector,
+                                  const uint8_t* packed_supplement_code,
+                                  uint64_t dim,
+                                  uint32_t supplement_bits);
+
 uint32_t
 RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
 
@@ -160,6 +168,14 @@ RaBitQPackScalarToSplitPlanes(const uint8_t* scalar_codes,
                               uint64_t dim,
                               uint32_t total_bits,
                               uint32_t filter_bits);
+
+void
+RaBitQPackScalarToSplitCode(const uint8_t* scalar_codes,
+                            uint8_t* filter_planes,
+                            uint8_t* packed_supplement_code,
+                            uint64_t dim,
+                            uint32_t total_bits,
+                            uint32_t filter_bits);
 
 void
 KacsWalk(float* data, uint64_t len);
@@ -202,6 +218,14 @@ RaBitQPackScalarToSplitPlanes(const uint8_t* scalar_codes,
                               uint64_t dim,
                               uint32_t total_bits,
                               uint32_t filter_bits);
+
+void
+RaBitQPackScalarToSplitCode(const uint8_t* scalar_codes,
+                            uint8_t* filter_planes,
+                            uint8_t* packed_supplement_code,
+                            uint64_t dim,
+                            uint32_t total_bits,
+                            uint32_t filter_bits);
 
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
@@ -308,6 +332,12 @@ RaBitQFloatSupplementCodeIP(const float* vector,
                             const uint8_t* supplement_code,
                             uint64_t dim,
                             uint32_t supplement_bits);
+
+float
+RaBitQFloatPackedSupplementCodeIP(const float* vector,
+                                  const uint8_t* packed_supplement_code,
+                                  uint64_t dim,
+                                  uint32_t supplement_bits);
 
 float
 RaBitQFloatExCode7IP(const float* vector, const uint8_t* compact_code, uint64_t dim);
@@ -556,6 +586,12 @@ RaBitQFloatSupplementCodeIP(const float* vector,
                             uint32_t supplement_bits);
 
 float
+RaBitQFloatPackedSupplementCodeIP(const float* vector,
+                                  const uint8_t* packed_supplement_code,
+                                  uint64_t dim,
+                                  uint32_t supplement_bits);
+
+float
 RaBitQFloatExCode7IP(const float* vector, const uint8_t* compact_code, uint64_t dim);
 
 bool
@@ -602,6 +638,26 @@ RaBitQPackScalarToSplitPlanes(const uint8_t* scalar_codes,
                               uint64_t dim,
                               uint32_t total_bits,
                               uint32_t filter_bits);
+
+void
+RaBitQPackScalarToSplitCode(const uint8_t* scalar_codes,
+                            uint8_t* filter_planes,
+                            uint8_t* packed_supplement_code,
+                            uint64_t dim,
+                            uint32_t total_bits,
+                            uint32_t filter_bits);
+
+void
+RaBitQPackSupplementPlanes(const uint8_t* supplement_planes,
+                           uint8_t* packed_supplement_code,
+                           uint64_t dim,
+                           uint32_t supplement_bits);
+
+void
+RaBitQUnpackSupplementPlanes(const uint8_t* packed_supplement_code,
+                             uint8_t* supplement_planes,
+                             uint64_t dim,
+                             uint32_t supplement_bits);
 
 void
 KacsWalk(float* data, uint64_t len);
@@ -874,7 +930,10 @@ using RaBitQExCode7ToVectorType = bool (*)(const uint8_t* one_bit_code,
                                            float full_center,
                                            uint64_t dim,
                                            float* out);
-
+using RaBitQFloatPackedSupplementCodeType = float (*)(const float* vector,
+                                                      const uint8_t* packed_supplement_code,
+                                                      uint64_t dim,
+                                                      uint32_t supplement_bits);
 using RaBitQSQ4UBinaryType = uint32_t (*)(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
 using RaBitQSQ4UBinaryWithBaseSumType = uint64_t (*)(const uint8_t* codes,
                                                      const uint8_t* bits,
@@ -895,6 +954,13 @@ using RaBitQPackScalarToSplitPlanesType = void (*)(const uint8_t* scalar_codes,
                                                    uint64_t dim,
                                                    uint32_t total_bits,
                                                    uint32_t filter_bits);
+
+using RaBitQPackScalarToSplitCodeType = void (*)(const uint8_t* scalar_codes,
+                                                 uint8_t* filter_planes,
+                                                 uint8_t* packed_supplement_code,
+                                                 uint64_t dim,
+                                                 uint32_t total_bits,
+                                                 uint32_t filter_bits);
 
 using RaBitQFloatSQType = float (*)(const float* vector, const uint8_t* codes, uint64_t dim);
 
@@ -931,6 +997,7 @@ extern RaBitQFloatMultiBitByLookupType RaBitQFloatMultiBitIPByLookup;
 extern RaBitQFloatMultiBitBatch4ByLookupType RaBitQFloatMultiBitIPBatch4ByLookup;
 extern RaBitQFloatSplitCodeType RaBitQFloatSplitCodeIP;
 extern RaBitQFloatSupplementCodeType RaBitQFloatSupplementCodeIP;
+extern RaBitQFloatPackedSupplementCodeType RaBitQFloatPackedSupplementCodeIP;
 extern RaBitQFloatExCode7Type RaBitQFloatExCode7IP;
 extern RaBitQExCode7ToVectorType RaBitQExCode7ToVector;
 extern RaBitQExCode7ToBytesType RaBitQExCode7ToBytes;
@@ -940,6 +1007,7 @@ extern RaBitQSQ4UBinaryWithBaseSumType RaBitQSQ4UBinaryIPWithBaseSum;
 extern RaBitQSQ4UBinaryWithBaseSumBatch4Type RaBitQSQ4UBinaryIPWithBaseSumBatch4;
 extern RaBitQCodeCodeType RaBitQCodeCodeIP;
 extern RaBitQPackScalarToSplitPlanesType RaBitQPackScalarToSplitPlanes;
+extern RaBitQPackScalarToSplitCodeType RaBitQPackScalarToSplitCode;
 extern FHTRotateType FHTRotate;
 extern KacsWalkType KacsWalk;
 extern VecRescaleType VecRescale;

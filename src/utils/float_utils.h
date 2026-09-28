@@ -14,24 +14,21 @@
 
 #pragma once
 
-#include "ivf_bucket_searcher.h"
+#include <cstdint>
+#include <cstring>
 
 namespace vsag {
 
-class FlatBucketSearcher : public IVFBucketSearcher {
-public:
-    void
-    Search(BucketIdType bucket_id,
-           const BucketInterfacePtr& bucket,
-           const ComputerInterfacePtr& computer,
-           const InnerSearchParam& param,
-           int64_t thread_id,
-           int64_t topk,
-           BucketIdType buckets_per_data,
-           DistHeapPtr& heap,
-           Vector<float>& dist,
-           Vector<InnerIdType>& scanned_inner_ids,
-           ReasoningContext* reasoning_ctx) const override;
-};
+// Release builds on Linux compile with -Ofast, which implies -ffast-math and
+// lets the compiler assume that no NaN or infinity is ever produced. Under that
+// assumption std::isfinite/std::isnan fold to a constant and the distance
+// filters silently disappear, so test the IEEE-754 exponent bits instead. A
+// value is finite when not all exponent bits are set.
+inline bool
+IsFiniteFloatBits(float value) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return (bits & 0x7F800000U) != 0x7F800000U;
+}
 
 }  // namespace vsag
