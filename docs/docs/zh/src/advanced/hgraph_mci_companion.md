@@ -70,8 +70,56 @@ seed 数量按 `ceil(sqrt(当前向量总数) * mci_seed_ratio)` 计算，并且
 `mci_seed_ratio` 默认值为 `0.1`，必须是有限的非负数。最终 seed 数量不会超过
 满足过滤条件的点数。
 
+当该目标不超过 `mci_seed_max_count`、也不超过向量总数时，`mci_seed_coverage` 会把
+seed 数量提高到 `ceil(mci_seed_coverage * 合法点数)`；否则覆盖项整体丢弃，而不是
+截断。`mci_seed_coverage` 默认 `1.0`，`mci_seed_max_count` 默认 `32768`（`0` 表示
+不限）。seed 数量不会低于 1，所以播种无法被完全关闭——把两项都设为 `0` 只会留下
+一个 seed。
+
+正因为覆盖项是整体丢弃而不是钳制，当合法集超过 `mci_seed_max_count` 时
+`mci_seed_coverage` 就不起作用了：这类宽过滤查询的 seed 数量会静默退回到
+`ceil(sqrt(N) * mci_seed_ratio)` 这个下限。想扩大“精确播种”的适用范围就要调大
+上限，代价是更长的播种阶段。默认值 `32768` 让枚举本身在绝对量级上仍然便宜——
+32768 个 inner id 是 128 KiB，可以留在 cache 里——所以饱和跳过依然划算，而不会把
+宽谓词变成接近全扫描规模的播种阶段。
+
 MCI 挂件依赖过滤器提供合理的 `ValidRatio()`。bitset 和函数过滤器也可以
 使用，但自定义 `Filter` 能给搜索规划提供更准确的选择率信息。
+
+## 动态邻居遍历
+
+`use_hybrid_traversal`（默认 `false`）把上面的“二选一”路由换成一次遍历：对每个
+被展开的向量，在同一趟里同时处理它的两个邻居来源——
+
+- 先按距离优先处理 HGraph 稀疏邻居，并把它们压入候选堆，这样无论选择率多低，
+  搜索子图都保持连通；
+- 再按谓词优先处理同一向量的团成员，这部分由一个虚拟开销预算提前截断。
+
+当 `considered * (hybrid_filter_cost_ratio + local_selectivity)` 达到 `hybrid_vob`
+时，团部分停止。其中 `hybrid_filter_cost_ratio` 是 `O_filter / O_dist`（一次谓词
+过滤相对于一次距离计算的代价），`local_selectivity` 是当前邻居遍历中谓词的实时
+命中率。`hybrid_vob` 非正时关闭提前停止。这两个参数默认值分别是 `0.0` 和 `1.0`，
+`hybrid_vob` 的单位是 `O_dist`。
+
+```json
+{
+    "hgraph": {
+      "ef_search": 600,
+      "use_hybrid_traversal": true,
+      "hybrid_vob": 32.0,
+      "mci_seed_ratio": 1.0,
+      "mci_seed_coverage": 1.0
+    }
+}
+```
+
+遍历的 seed 来自谓词的合法集，与 MCI 路由使用完全相同的预算公式和采样器，因此两条
+路线的对比不会被 seed 策略干扰。当该预算最终覆盖了全部合法点时，所有合法距离都已
+算出，遍历直接由 seed 给出答案；此时跳过展开是因为它可证明是多余的，而不是近似。
+`GetStatistics()` 通过 `mci_hybrid_route`（遍历实际运行时为 `"hybrid"`）、
+`hybrid_seed_budget`、`hybrid_seeded_entries`、`hybrid_expansion_skipped`、
+`hybrid_expanded_nodes`、`hybrid_mci_members_considered`、
+`hybrid_dist_computations` 和 `hybrid_mci_stopped_early` 报告这些行为。
 
 ## Add、序列化和统计
 
