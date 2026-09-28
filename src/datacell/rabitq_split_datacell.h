@@ -924,12 +924,14 @@ public:
     // Code-domain pair distance for fused codes; false when the layout is not the
     // HNSW-compatible 1 + 7 codec, in which case the reconstruction path is used.
     bool
-    compute_fused_pair_distance(InnerIdType id1, InnerIdType id2, float* distance) {
+    compute_fused_pair_distance(InnerIdType id1, InnerIdType id2, float* distance) const {
         if constexpr (metric != MetricType::METRIC_TYPE_IP and
                       metric != MetricType::METRIC_TYPE_L2SQR) {
             return false;
         }
         const uint64_t dim = static_cast<uint64_t>(common_param_.dim_);
+        // The code-domain kernels unpack whole 64-lane blocks; other dimensions (and other
+        // codec layouts) keep using the float reconstruction path.
         if (fused_code_storage_ == nullptr or fused_quantizers_.empty() or
             fused_centroid_sums_.size() != fused_quantizers_.size() or (dim & 63U) != 0U or
             bottom_quantizer().FilterBits() != 1 or bottom_quantizer().ReorderBits() != 7) {

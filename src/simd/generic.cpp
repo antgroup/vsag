@@ -937,6 +937,7 @@ RaBitQExCode7ToBytes(const uint8_t* one_bit_code,
     constexpr uint64_t kLegacyLowDimensionCount = 48;
     uint64_t sum = 0;
     uint64_t sum_sq = 0;
+    const bool want_sq_sum = code_sq_sum != nullptr;
     for (uint64_t d = 0; d < dim; ++d) {
         const uint64_t byte_idx = d >> 3U;
         const auto bit_mask = static_cast<uint8_t>(1U << (d & 7U));
@@ -956,7 +957,9 @@ RaBitQExCode7ToBytes(const uint8_t* one_bit_code,
         const auto code = static_cast<uint8_t>((filter_code << 7U) | (top << 6U) | low);
         out[d] = code;
         sum += code;
-        sum_sq += static_cast<uint64_t>(code) * code;
+        if (want_sq_sum) {
+            sum_sq += static_cast<uint64_t>(code) * code;
+        }
     }
     *code_sum = sum;
     if (code_sq_sum != nullptr) {

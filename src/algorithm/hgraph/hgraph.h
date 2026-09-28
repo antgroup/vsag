@@ -208,11 +208,16 @@ public:
     }
 
     /// Mark one node visible, once its codes and links are both written.
+    ///
+    /// This relies on nodes finishing in (roughly) increasing inner id order: prepare_add_batch
+    /// hands out ids sequentially and every worker publishes its own node after construction, so
+    /// advancing the mark to inner_id + 1 never exposes a node that is still being built. The
+    /// CAS loop is bounded by the number of concurrent publishers.
     void
     PublishNode(InnerIdType inner_id) {
         InnerIdType current = this->published_count_.load(std::memory_order_relaxed);
         while (current <= inner_id and
-               not this->published_count_.compare_exchange_weak(
+               not this->published_count_.compare_exchange_strong(
                    current, inner_id + 1, std::memory_order_release, std::memory_order_relaxed)) {
         }
     }

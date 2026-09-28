@@ -1002,6 +1002,9 @@ HGraph::publish_unique_under_unique_global_lock(const void* data,
     this->publish_unique_storage_if_needed(data, inner_id, context);
     this->publish_unique_to_graphs(data, level, inner_id, param, probe, context);
     if (should_update_entry_point) {
+        // Only move the entry point once the node's codes and links are published: publishing
+        // no longer takes the node's own lock, so nothing may reach it before its link lists
+        // are written.
         this->entry_point_id_ = inner_id;
     }
 }

@@ -15,8 +15,6 @@
 
 #include "pruning_strategy.h"
 
-#include <fmt/format.h>
-
 #include <cstdlib>
 
 #include "datacell/flatten_datacell.h"
@@ -186,9 +184,6 @@ link_back_edges(InnerIdType cur_c,
     PairwiseDistanceComputer pairwise_distance(distance_provider, allocator);
     const uint64_t max_size = graph->MaximumDegree();
 
-    uint64_t optimistic_commits = 0;
-    uint64_t optimistic_conflicts = 0;
-
     for (auto selected_neighbor : selected_neighbors) {
         if (selected_neighbor == cur_c) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
@@ -259,9 +254,7 @@ link_back_edges(InnerIdType cur_c,
                     cur.emplace_back(cur_c);
                     graph->InsertNeighborsById(selected_neighbor, cur);
                     appended = true;
-                    ++optimistic_commits;
                 } else {
-                    ++optimistic_conflicts;
                 }
             }
             if (not appended) {
@@ -294,9 +287,7 @@ link_back_edges(InnerIdType cur_c,
                 (cur.size() == snap_sz and std::equal(cur.begin(), cur.end(), snapshot.begin()));
             if (snapshot_still_valid) {
                 graph->InsertNeighborsById(selected_neighbor, cand_neighbors);
-                ++optimistic_commits;
             } else {
-                ++optimistic_conflicts;
             }
         }
         if (not snapshot_still_valid) {
@@ -304,15 +295,6 @@ link_back_edges(InnerIdType cur_c,
             // self-deadlock on the same non-recursive shared_mutex.
             locked_update();
         }
-    }
-
-    if (optimistic_edge_on() and optimistic_commits + optimistic_conflicts > 0) {
-        fmt::print(stderr,
-                   "[optimistic-edge] commits={} conflicts={} fallback={:.2f}%\n",
-                   optimistic_commits,
-                   optimistic_conflicts,
-                   100.0 * static_cast<double>(optimistic_conflicts) /
-                       static_cast<double>(optimistic_commits + optimistic_conflicts));
     }
 }
 
