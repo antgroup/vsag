@@ -155,6 +155,8 @@ dump(const char* path) {
 #include "utils/lock_strategy.h"
 
 #include <algorithm>
+#include <atomic>
+#include <thread>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -240,6 +242,7 @@ main(int argc, char** argv) {
     const int64_t max_degree = arg_int(argc, argv, "--max-degree", 48);
     const bool digest = arg_int(argc, argv, "--digest", 0) != 0;
     const bool profile = arg_int(argc, argv, "--profile", 0) != 0;
+    const int64_t stress_readers = arg_int(argc, argv, "--stress-readers", 0);
     const int64_t profile_us = arg_int(argc, argv, "--profile-us", 500);
     const int64_t ef_construction = arg_int(argc, argv, "--ef-construction", 600);
     std::cout << "max_degree=" << max_degree << " ef_construction=" << ef_construction << "\n";
@@ -282,6 +285,45 @@ main(int argc, char** argv) {
     vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
     vsag::Engine engine(&resource);
     auto index = engine.CreateIndex("hgraph", params).value();
+
+    std::atomic<bool> stress_stop{false};
+    std::atomic<int64_t> stress_queries{0};
+    std::atomic<int64_t> stress_bad_ids{0};
+    std::atomic<int64_t> stress_failed{0};
+    std::vector<std::thread> stress_threads;
+    if (stress_readers > 0) {
+        for (int64_t r = 0; r < stress_readers; ++r) {
+            stress_threads.emplace_back([&, r]() {
+                std::string sp = R"({"hgraph": {"ef_search": 100}})";
+                int64_t q = r * 7;
+                while (not stress_stop.load(std::memory_order_relaxed)) {
+                    const int64_t row = (q++) % total;
+                    const float* qv = data.data() + static_cast<size_t>(row) * dim;
+                    auto qds = vsag::Dataset::Make();
+                    qds->NumElements(1)->Dim(dim)->Float32Vectors(const_cast<float*>(qv))->Owner(false);
+                    auto res = index->KnnSearch(qds, 10, sp);
+                    stress_queries.fetch_add(1, std::memory_order_relaxed);
+                    if (not res.has_value()) {
+                        stress_failed.fetch_add(1, std::memory_order_relaxed);
+                        continue;
+                    }
+                    const auto* got = res.value()->GetIds();
+                    const int64_t elements = index->GetNumElements();
+                    if (elements == 0) {
+                        continue;  // nothing built yet; no id can be validated
+                    }
+                    for (int64_t k = 0; k < 10; ++k) {
+                        // Every non-negative id must name a node that exists.
+                        if (got[k] >= 0 and got[k] >= elements) {
+                            stress_bad_ids.fetch_add(1, std::memory_order_relaxed);
+                        }
+                    }
+                }
+            });
+        }
+        std::printf("STRESS readers=%lld (concurrent with Add)\n",
+                    static_cast<long long>(stress_readers));
+    }
 
     if (profile) {
         std::remove("/tmp/vsag_samples.txt");
@@ -465,6 +507,17 @@ main(int argc, char** argv) {
                     static_cast<long long>(same), static_cast<long long>(diff),
                     static_cast<long long>(index->GetNumElements()),
                     static_cast<long long>(repeat_mismatch));
+    }
+
+    if (stress_readers > 0) {
+        stress_stop.store(true, std::memory_order_relaxed);
+        for (auto& t : stress_threads) {
+            t.join();
+        }
+        std::printf("STRESS queries=%lld failed=%lld bad_ids=%lld\n",
+                    static_cast<long long>(stress_queries.load()),
+                    static_cast<long long>(stress_failed.load()),
+                    static_cast<long long>(stress_bad_ids.load()));
     }
 
     const double cpu_dt = cpu_seconds_now() - cpu_0;
