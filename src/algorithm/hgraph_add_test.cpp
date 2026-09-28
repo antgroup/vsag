@@ -189,3 +189,44 @@ TEST_CASE("HGraph preserves finite entry points after unconnectable additions",
     REQUIRE(result.value()->GetIds()[0] == next_id[0]);
     REQUIRE(result.value()->GetDistances()[0] == 0.0F);
 }
+
+TEST_CASE("HGraph search handles an empty route result", "[ut][hgraph][search][nonfinite]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t base_count = 64;
+
+    auto common_param = MakeCommonParam(dim);
+    auto hgraph_json = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "max_degree": 8,
+        "ef_construction": 32,
+        "build_thread_count": 1
+    })");
+    auto index = std::make_shared<vsag::IndexImpl<vsag::HGraph>>(hgraph_json, common_param);
+
+    std::vector<float> base_vectors(base_count * dim);
+    std::vector<int64_t> base_ids(base_count);
+    for (int64_t i = 0; i < base_count; ++i) {
+        base_ids[i] = i;
+        for (int64_t j = 0; j < dim; ++j) {
+            base_vectors[i * dim + j] = static_cast<float>(i + j);
+        }
+    }
+    auto base = MakeFloatDataset(base_vectors, base_ids, dim, base_count);
+    REQUIRE(index->Build(base).has_value());
+
+    std::vector<float> query_vectors(dim, std::numeric_limits<float>::quiet_NaN());
+    std::vector<int64_t> query_ids = {base_count};
+    auto query = MakeFloatDataset(query_vectors, query_ids, dim, 1);
+    auto add_result = index->Add(query);
+    REQUIRE(add_result.has_value());
+    REQUIRE(add_result.value().empty());
+
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 10;
+    request.params_str_ = R"({"hgraph":{"ef_search":32}})";
+
+    auto result = index->SearchWithRequest(request);
+    REQUIRE(result.has_value());
+    CHECK(result.value()->GetDim() == 0);
+}
