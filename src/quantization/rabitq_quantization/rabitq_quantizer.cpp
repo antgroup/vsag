@@ -2817,7 +2817,8 @@ bool
 RaBitQuantizer<metric>::DecodeFusedSplitCode(const uint8_t* one_bit_code,
                                              const uint8_t* supplement_code,
                                              bool legacy_hnsw_codec,
-                                             float* data) const {
+                                             float* data,
+                                             bool apply_inverse_rotation) const {
     if constexpr (metric != MetricType::METRIC_TYPE_L2SQR and
                   metric != MetricType::METRIC_TYPE_IP) {
         return false;
@@ -2852,53 +2853,77 @@ RaBitQuantizer<metric>::DecodeFusedSplitCode(const uint8_t* one_bit_code,
 
     const uint64_t plane_bytes = PlaneBytes();
     const float full_center = 0.5F * static_cast<float>((1U << base_bits) - 1U);
-    Vector<float> transformed_data(this->dim_, 0.0F, this->allocator_);
-    for (uint64_t d = 0; d < this->dim_; ++d) {
-        const uint64_t byte_idx = d >> 3U;
-        const auto bit_mask = static_cast<uint8_t>(1U << (d & 7U));
-        uint32_t filter_code = 0;
-        for (uint32_t bit = 0; bit < filter_bits; ++bit) {
-            const auto* plane = one_bit_code + static_cast<uint64_t>(bit) * plane_bytes;
-            if ((plane[byte_idx] & bit_mask) != 0U) {
-                filter_code |= 1U << (filter_bits - bit - 1U);
-            }
+    // Reconstruction without the inverse rotation already is the result, so it is written
+    // straight into the destination buffer and the scratch buffer is not needed.
+    Vector<float> transformed_storage(this->allocator_);
+    float* transformed_data = data;
+    if (apply_inverse_rotation) {
+        transformed_storage.resize(this->dim_);
+        transformed_data = transformed_storage.data();
+    }
+    // The HNSW-compatible 1 + 7 codec has a vectorized reconstruction kernel.
+    const bool vectorized_reconstruction = legacy_hnsw_codec and filter_bits == 1 and
+                                           supplement_bits == 7 and (this->dim_ & 63U) == 0U;
+    if (vectorized_reconstruction) {
+        if (not RaBitQExCode7ToVector(one_bit_code,
+                                      supplement_code,
+                                      centroid_.data(),
+                                      residual_scale,
+                                      full_center,
+                                      this->dim_,
+                                      transformed_data)) {
+            return false;
         }
-
-        uint32_t supplement = 0;
-        if (legacy_hnsw_codec and (this->dim_ & 63U) == 0U) {
-            constexpr uint64_t legacy_block_size = 56;
-            constexpr uint64_t legacy_low_dimension_count = 48;
-            const uint64_t lane = d & 63U;
-            const auto* block = supplement_code + (d >> 6U) * legacy_block_size;
-            const uint32_t top = (block[48U + (lane & 7U)] >> (lane >> 3U)) & 1U;
-            uint32_t low = 0;
-            if (lane < legacy_low_dimension_count) {
-                low = block[lane] & 0x3FU;
-            } else {
-                const uint64_t packed_lane = lane - legacy_low_dimension_count;
-                low = ((block[packed_lane] >> 6U) & 0x3U) |
-                      (((block[16U + packed_lane] >> 6U) & 0x3U) << 2U) |
-                      (((block[32U + packed_lane] >> 6U) & 0x3U) << 4U);
-            }
-            supplement = low | (top << 6U);
-        } else {
-            for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
-                const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
+    } else {
+        for (uint64_t d = 0; d < this->dim_; ++d) {
+            const uint64_t byte_idx = d >> 3U;
+            const auto bit_mask = static_cast<uint8_t>(1U << (d & 7U));
+            uint32_t filter_code = 0;
+            for (uint32_t bit = 0; bit < filter_bits; ++bit) {
+                const auto* plane = one_bit_code + static_cast<uint64_t>(bit) * plane_bytes;
                 if ((plane[byte_idx] & bit_mask) != 0U) {
-                    supplement |= 1U << bit;
+                    filter_code |= 1U << (filter_bits - bit - 1U);
                 }
             }
-        }
 
-        const uint32_t full_code = (filter_code << supplement_bits) | supplement;
-        transformed_data[d] =
-            centroid_[d] + residual_scale * (static_cast<float>(full_code) - full_center);
-        if (not IsFiniteRaBitQValue(transformed_data[d])) {
-            return false;
+            uint32_t supplement = 0;
+            if (legacy_hnsw_codec and (this->dim_ & 63U) == 0U) {
+                constexpr uint64_t legacy_block_size = 56;
+                constexpr uint64_t legacy_low_dimension_count = 48;
+                const uint64_t lane = d & 63U;
+                const auto* block = supplement_code + (d >> 6U) * legacy_block_size;
+                const uint32_t top = (block[48U + (lane & 7U)] >> (lane >> 3U)) & 1U;
+                uint32_t low = 0;
+                if (lane < legacy_low_dimension_count) {
+                    low = block[lane] & 0x3FU;
+                } else {
+                    const uint64_t packed_lane = lane - legacy_low_dimension_count;
+                    low = ((block[packed_lane] >> 6U) & 0x3U) |
+                          (((block[16U + packed_lane] >> 6U) & 0x3U) << 2U) |
+                          (((block[32U + packed_lane] >> 6U) & 0x3U) << 4U);
+                }
+                supplement = low | (top << 6U);
+            } else {
+                for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
+                    const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
+                    if ((plane[byte_idx] & bit_mask) != 0U) {
+                        supplement |= 1U << bit;
+                    }
+                }
+            }
+
+            const uint32_t full_code = (filter_code << supplement_bits) | supplement;
+            transformed_data[d] =
+                centroid_[d] + residual_scale * (static_cast<float>(full_code) - full_center);
+            if (not IsFiniteRaBitQValue(transformed_data[d])) {
+                return false;
+            }
         }
     }
 
-    rom_->InverseTransform(transformed_data.data(), data);
+    if (apply_inverse_rotation) {
+        rom_->InverseTransform(transformed_data, data);
+    }
     for (uint64_t d = 0; d < original_dim_; ++d) {
         if (not IsFiniteRaBitQValue(data[d])) {
             return false;

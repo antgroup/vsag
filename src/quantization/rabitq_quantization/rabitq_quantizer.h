@@ -180,11 +180,15 @@ public:
                               uint8_t* one_bit_code,
                               uint8_t* supplement_code) const;
 
+    // Reconstructs the stored vector. `apply_inverse_rotation == false` stops after the
+    // rotated-domain reconstruction; the result is then the inverse-rotation preimage, which
+    // is what pairwise distances need.
     bool
     DecodeFusedSplitCode(const uint8_t* one_bit_code,
                          const uint8_t* supplement_code,
                          bool legacy_hnsw_codec,
-                         float* data) const;
+                         float* data,
+                         bool apply_inverse_rotation = true) const;
 
     bool
     ComputeFusedAffineFilter(const float* transformed_query,

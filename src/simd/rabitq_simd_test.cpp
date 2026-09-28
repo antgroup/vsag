@@ -1090,6 +1090,103 @@ TEST_CASE("RaBitQ HNSW 7-bit ExData SIMD", "[ut][simd]") {
         return;                                                                                 \
     }
 
+TEST_CASE("RaBitQ HNSW ExData reconstruction SIMD", "[ut][simd]") {
+    constexpr uint64_t dim = 960;
+    constexpr float residual_scale = 0.037F;
+    constexpr float full_center = 127.5F;
+    std::vector<float> centroid(dim);
+    std::vector<uint8_t> codes(dim);
+    std::vector<uint8_t> filter(dim / 8, 0);
+    std::vector<uint8_t> packed(dim * 7 / 8, 0);
+    for (uint64_t d = 0; d < dim; ++d) {
+        centroid[d] = static_cast<float>(static_cast<int>(d % 23) - 11) / 23.0F;
+        codes[d] = static_cast<uint8_t>((d * 73U + 19U) & 127U);
+        if (((d * 29U + 7U) & 3U) == 0U) {
+            filter[d / 8] |= static_cast<uint8_t>(1U << (d % 8));
+            codes[d] = static_cast<uint8_t>(codes[d] | 128U);
+        }
+    }
+    auto* output = packed.data();
+    for (uint64_t block = 0; block < dim; block += 64) {
+        const auto* input = codes.data() + block;
+        for (uint64_t lane = 0; lane < 16; ++lane) {
+            output[lane] =
+                static_cast<uint8_t>((input[lane] & 0x3FU) | ((input[48 + lane] & 0x03U) << 6U));
+            output[16 + lane] = static_cast<uint8_t>((input[16 + lane] & 0x3FU) |
+                                                     ((input[48 + lane] & 0x0CU) << 4U));
+            output[32 + lane] = static_cast<uint8_t>((input[32 + lane] & 0x3FU) |
+                                                     ((input[48 + lane] & 0x30U) << 2U));
+        }
+        uint64_t top_bits = 0;
+        constexpr uint64_t k_top_mask = 0x0101010101010101ULL;
+        for (uint64_t lane = 0; lane < 64; lane += 8) {
+            uint64_t source = 0;
+            std::memcpy(&source, input + lane, sizeof(source));
+            top_bits |= ((source >> 6U) & k_top_mask) << (lane / 8U);
+        }
+        std::memcpy(output + 48, &top_bits, sizeof(top_bits));
+        output += 56;
+    }
+
+    std::vector<float> expected(dim);
+    for (uint64_t d = 0; d < dim; ++d) {
+        expected[d] = centroid[d] + residual_scale * (static_cast<float>(codes[d]) - full_center);
+    }
+
+    std::vector<float> result(dim, 0.0F);
+    REQUIRE(generic::RaBitQExCode7ToVector(filter.data(),
+                                           packed.data(),
+                                           centroid.data(),
+                                           residual_scale,
+                                           full_center,
+                                           dim,
+                                           result.data()));
+    for (uint64_t d = 0; d < dim; ++d) {
+        REQUIRE(std::abs(expected[d] - result[d]) < 1e-4F);
+    }
+    if (SimdStatus::SupportAVX2()) {
+        std::fill(result.begin(), result.end(), 0.0F);
+        REQUIRE(avx2::RaBitQExCode7ToVector(filter.data(),
+                                            packed.data(),
+                                            centroid.data(),
+                                            residual_scale,
+                                            full_center,
+                                            dim,
+                                            result.data()));
+        for (uint64_t d = 0; d < dim; ++d) {
+            REQUIRE(std::abs(expected[d] - result[d]) < 1e-4F);
+        }
+    }
+
+    std::fill(result.begin(), result.end(), 0.0F);
+    REQUIRE(RaBitQExCode7ToVector(filter.data(),
+                                  packed.data(),
+                                  centroid.data(),
+                                  residual_scale,
+                                  full_center,
+                                  dim,
+                                  result.data()));
+    for (uint64_t d = 0; d < dim; ++d) {
+        REQUIRE(std::abs(expected[d] - result[d]) < 1e-4F);
+    }
+
+    // A malformed request is rejected rather than silently reconstructed.
+    REQUIRE_FALSE(generic::RaBitQExCode7ToVector(filter.data(),
+                                                 packed.data(),
+                                                 centroid.data(),
+                                                 residual_scale,
+                                                 full_center,
+                                                 dim - 1,
+                                                 result.data()));
+    REQUIRE_FALSE(avx2::RaBitQExCode7ToVector(filter.data(),
+                                              packed.data(),
+                                              centroid.data(),
+                                              residual_scale,
+                                              full_center,
+                                              0,
+                                              result.data()));
+}
+
 TEST_CASE("RaBitQ FP32-BQ SIMD Compute Benchmark", "[ut][simd][!benchmark]") {
     int64_t count = 100;
     int64_t dim = 256;

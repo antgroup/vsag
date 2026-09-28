@@ -1367,6 +1367,123 @@ RaBitQFloatExCode7IP(const float* vector, const uint8_t* compact_code, uint64_t 
 #endif
 }
 
+namespace {
+// Byte b -> eight bytes, byte k set to 0x80 when bit k of b is set.
+struct ExCode7FilterMaskTable {
+    long long mask[256];
+    constexpr ExCode7FilterMaskTable() : mask() {
+        for (int value = 0; value < 256; ++value) {
+            long long expanded = 0;
+            for (int lane = 0; lane < 8; ++lane) {
+                if (((value >> lane) & 1) != 0) {
+                    expanded |= static_cast<long long>(0x80) << (8 * lane);
+                }
+            }
+            this->mask[value] = expanded;
+        }
+    }
+};
+constexpr ExCode7FilterMaskTable kExCode7FilterMask{};
+}  // namespace
+
+bool
+RaBitQExCode7ToVector(const uint8_t* one_bit_code,
+                      const uint8_t* supplement_code,
+                      const float* centroid,
+                      float residual_scale,
+                      float full_center,
+                      uint64_t dim,
+                      float* out) {
+#if defined(ENABLE_AVX2)
+    if (one_bit_code == nullptr or supplement_code == nullptr or centroid == nullptr or
+        out == nullptr or dim == 0 or (dim & 63U) != 0U) {
+        return generic::RaBitQExCode7ToVector(
+            one_bit_code, supplement_code, centroid, residual_scale, full_center, dim, out);
+    }
+    const __m128i mask6 = _mm_set1_epi8(0x3F);
+    const __m128i mask2 = _mm_set1_epi8(static_cast<char>(0xC0));
+    const __m128i top_mask = _mm_set1_epi8(0x40);
+    const __m256 scale = _mm256_set1_ps(residual_scale);
+    const __m256 center = _mm256_set1_ps(full_center);
+    const __m256i exponent_mask = _mm256_set1_epi32(0x7F800000);
+
+    bool finite = true;
+    for (uint64_t block = 0; block < dim; block += 64) {
+        const __m128i compact1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(supplement_code));
+        const __m128i compact2 =
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(supplement_code + 16));
+        const __m128i compact3 =
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(supplement_code + 32));
+        uint64_t top_bits = 0;
+        std::memcpy(&top_bits, supplement_code + 48, sizeof(top_bits));
+        supplement_code += 56;
+
+        __m128i code0 = _mm_and_si128(compact1, mask6);
+        __m128i code1 = _mm_and_si128(compact2, mask6);
+        __m128i code2 = _mm_and_si128(compact3, mask6);
+        __m128i code3 =
+            _mm_or_si128(_mm_or_si128(_mm_srli_epi16(_mm_and_si128(compact1, mask2), 6),
+                                      _mm_srli_epi16(_mm_and_si128(compact2, mask2), 4)),
+                         _mm_srli_epi16(_mm_and_si128(compact3, mask2), 2));
+
+        code0 = _mm_or_si128(code0,
+                             _mm_and_si128(_mm_set_epi64x(static_cast<long long>(top_bits << 5),
+                                                          static_cast<long long>(top_bits << 6)),
+                                           top_mask));
+        code1 = _mm_or_si128(code1,
+                             _mm_and_si128(_mm_set_epi64x(static_cast<long long>(top_bits << 3),
+                                                          static_cast<long long>(top_bits << 4)),
+                                           top_mask));
+        code2 = _mm_or_si128(code2,
+                             _mm_and_si128(_mm_set_epi64x(static_cast<long long>(top_bits << 1),
+                                                          static_cast<long long>(top_bits << 2)),
+                                           top_mask));
+        code3 = _mm_or_si128(code3,
+                             _mm_and_si128(_mm_set_epi64x(static_cast<long long>(top_bits >> 1),
+                                                          static_cast<long long>(top_bits)),
+                                           top_mask));
+
+        const uint8_t* filter = one_bit_code + (block >> 3);
+        code0 = _mm_or_si128(
+            code0,
+            _mm_set_epi64x(kExCode7FilterMask.mask[filter[1]], kExCode7FilterMask.mask[filter[0]]));
+        code1 = _mm_or_si128(
+            code1,
+            _mm_set_epi64x(kExCode7FilterMask.mask[filter[3]], kExCode7FilterMask.mask[filter[2]]));
+        code2 = _mm_or_si128(
+            code2,
+            _mm_set_epi64x(kExCode7FilterMask.mask[filter[5]], kExCode7FilterMask.mask[filter[4]]));
+        code3 = _mm_or_si128(
+            code3,
+            _mm_set_epi64x(kExCode7FilterMask.mask[filter[7]], kExCode7FilterMask.mask[filter[6]]));
+
+        const __m128i groups[4] = {code0, code1, code2, code3};
+        for (int group = 0; group < 4; ++group) {
+            const uint64_t offset = block + static_cast<uint64_t>(group) * 16;
+            const __m256 code_low = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(groups[group]));
+            const __m256 code_high =
+                _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_srli_si128(groups[group], 8)));
+            const __m256 value_low = _mm256_fmadd_ps(
+                scale, _mm256_sub_ps(code_low, center), _mm256_loadu_ps(centroid + offset));
+            const __m256 value_high = _mm256_fmadd_ps(
+                scale, _mm256_sub_ps(code_high, center), _mm256_loadu_ps(centroid + offset + 8));
+            _mm256_storeu_ps(out + offset, value_low);
+            _mm256_storeu_ps(out + offset + 8, value_high);
+
+            const __m256i bad_low = _mm256_cmpeq_epi32(
+                _mm256_and_si256(_mm256_castps_si256(value_low), exponent_mask), exponent_mask);
+            const __m256i bad_high = _mm256_cmpeq_epi32(
+                _mm256_and_si256(_mm256_castps_si256(value_high), exponent_mask), exponent_mask);
+            finite = finite and (_mm256_movemask_epi8(_mm256_or_si256(bad_low, bad_high)) == 0);
+        }
+    }
+    return finite;
+#else
+    return generic::RaBitQExCode7ToVector(
+        one_bit_code, supplement_code, centroid, residual_scale, full_center, dim, out);
+#endif
+}
+
 void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
 #if defined(ENABLE_AVX2)

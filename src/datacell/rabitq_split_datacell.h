@@ -102,7 +102,7 @@ public:
     CopySplitCodes(InnerIdType id, uint8_t* one_bit_code, uint8_t* supplement_code) const = 0;
 
     virtual bool
-    DecodeFusedById(InnerIdType id, float* data) const = 0;
+    DecodeFusedById(InnerIdType id, float* data, bool apply_inverse_rotation = true) const = 0;
 
     virtual void
     QueryWithDistanceLowerBoundAndFilterIP(float* result_dists,
@@ -880,11 +880,15 @@ public:
     float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) override {
         if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
+            // Pairwise distances only ever compare one distance against another, and the inverse
+            // rotation is a conformal map. Reconstructing the rotated-domain vectors and skipping
+            // the rotation therefore preserves every pruning decision while removing the
+            // transform from the hottest path of construction.
             Vector<float> vector1(this->common_param_.dim_, 0.0F, this->allocator_);
             Vector<float> vector2(this->common_param_.dim_, 0.0F, this->allocator_);
-            CHECK_ARGUMENT(this->DecodeFusedById(id1, vector1.data()),
+            CHECK_ARGUMENT(this->DecodeFusedById(id1, vector1.data(), false),
                            "failed to decode the first fused RaBitQ vector");
-            CHECK_ARGUMENT(this->DecodeFusedById(id2, vector2.data()),
+            CHECK_ARGUMENT(this->DecodeFusedById(id2, vector2.data(), false),
                            "failed to decode the second fused RaBitQ vector");
             const auto dim = static_cast<uint64_t>(this->common_param_.dim_);
             if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
@@ -1108,7 +1112,7 @@ public:
     }
 
     bool
-    DecodeFusedById(InnerIdType id, float* data) const override {
+    DecodeFusedById(InnerIdType id, float* data, bool apply_inverse_rotation) const override {
         if (data == nullptr or fused_code_storage_ == nullptr or id >= this->TotalCount() or
             fused_quantizers_.empty()) {
             return false;
@@ -1118,8 +1122,11 @@ public:
             view.cluster_id >= fused_quantizers_.size()) {
             return false;
         }
-        return fused_quantizers_[view.cluster_id]->DecodeFusedSplitCode(
-            view.one_bit_code, view.supplement_code, IsLegacyHnswFusedCodec(), data);
+        return fused_quantizers_[view.cluster_id]->DecodeFusedSplitCode(view.one_bit_code,
+                                                                        view.supplement_code,
+                                                                        IsLegacyHnswFusedCodec(),
+                                                                        data,
+                                                                        apply_inverse_rotation);
     }
 
     bool

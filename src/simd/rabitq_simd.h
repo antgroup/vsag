@@ -312,6 +312,15 @@ RaBitQFloatSupplementCodeIP(const float* vector,
 float
 RaBitQFloatExCode7IP(const float* vector, const uint8_t* compact_code, uint64_t dim);
 
+bool
+RaBitQExCode7ToVector(const uint8_t* one_bit_code,
+                      const uint8_t* supplement_code,
+                      const float* centroid,
+                      float residual_scale,
+                      float full_center,
+                      uint64_t dim,
+                      float* out);
+
 void
 FHTRotate(float* data, uint64_t dim_);
 
@@ -540,6 +549,15 @@ RaBitQFloatSupplementCodeIP(const float* vector,
 
 float
 RaBitQFloatExCode7IP(const float* vector, const uint8_t* compact_code, uint64_t dim);
+
+bool
+RaBitQExCode7ToVector(const uint8_t* one_bit_code,
+                      const uint8_t* supplement_code,
+                      const float* centroid,
+                      float residual_scale,
+                      float full_center,
+                      uint64_t dim,
+                      float* out);
 
 float
 RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim);
@@ -826,6 +844,14 @@ using RaBitQFloatExCode7Type = float (*)(const float* vector,
                                          const uint8_t* compact_code,
                                          uint64_t dim);
 
+using RaBitQExCode7ToVectorType = bool (*)(const uint8_t* one_bit_code,
+                                           const uint8_t* supplement_code,
+                                           const float* centroid,
+                                           float residual_scale,
+                                           float full_center,
+                                           uint64_t dim,
+                                           float* out);
+
 using RaBitQSQ4UBinaryType = uint32_t (*)(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
 using RaBitQSQ4UBinaryWithBaseSumType = uint64_t (*)(const uint8_t* codes,
                                                      const uint8_t* bits,
@@ -874,6 +900,7 @@ extern RaBitQFloatMultiBitBatch4ByLookupType RaBitQFloatMultiBitIPBatch4ByLookup
 extern RaBitQFloatSplitCodeType RaBitQFloatSplitCodeIP;
 extern RaBitQFloatSupplementCodeType RaBitQFloatSupplementCodeIP;
 extern RaBitQFloatExCode7Type RaBitQFloatExCode7IP;
+extern RaBitQExCode7ToVectorType RaBitQExCode7ToVector;
 extern RaBitQFloatSQType RaBitQFloatSQIP;
 extern RaBitQSQ4UBinaryType RaBitQSQ4UBinaryIP;
 extern RaBitQSQ4UBinaryWithBaseSumType RaBitQSQ4UBinaryIPWithBaseSum;
