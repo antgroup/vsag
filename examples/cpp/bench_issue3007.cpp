@@ -11,6 +11,125 @@
 
 #include <vsag/vsag.h>
 
+// ---------------------------------------------------------------------------
+// Minimal SIGPROF sampling profiler.
+//
+// This container has no perf and gdb cannot attach, so sampling is done in-process:
+// one POSIX timer per thread delivers SIGPROF at a fixed interval, and the signal
+// handler records the interrupted instruction pointer. Addresses are resolved to
+// symbols offline (addr2line against the dumped /proc/self/maps), so no external
+// profiler is needed. Async-signal-safe: only a bounded atomic array is written.
+// ---------------------------------------------------------------------------
+#include <dirent.h>
+#include <sys/syscall.h>
+
+#include <csignal>
+#include <cstdint>
+#include <cstring>
+#include <ctime>
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <atomic>
+
+namespace sampling {
+
+constexpr int kMaxSamples = 400000;
+std::atomic<uint64_t> g_ips[kMaxSamples];
+std::atomic<int> g_count{0};
+
+inline void
+record(uint64_t ip) {
+    const int slot = g_count.fetch_add(1, std::memory_order_relaxed);
+    if (slot < kMaxSamples) {
+        g_ips[slot].store(ip, std::memory_order_relaxed);
+    }
+}
+
+extern "C" void
+handler(int, siginfo_t*, void* ucontext) {
+    auto* uc = static_cast<ucontext_t*>(ucontext);
+    record(static_cast<uint64_t>(uc->uc_mcontext.gregs[REG_RIP]));
+}
+
+void
+start_thread_timer(int interval_us) {
+    struct sigaction sa {};
+    sa.sa_sigaction = handler;
+    sa.sa_flags = SA_SIGINFO | SA_RESTART;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGPROF, &sa, nullptr);
+
+    struct sigevent sev {};
+    sev.sigev_notify = SIGEV_THREAD_ID;
+    sev.sigev_signo = SIGPROF;
+    sev._sigev_un._tid = static_cast<pid_t>(::syscall(SYS_gettid));
+    timer_t timer{};
+    if (timer_create(CLOCK_MONOTONIC, &sev, &timer) != 0) {
+        return;
+    }
+    struct itimerspec its {};
+    its.it_interval.tv_nsec = interval_us * 1000L;
+    its.it_value.tv_nsec = interval_us * 1000L;
+    timer_settime(timer, 0, &its, nullptr);
+}
+
+void
+start_all_threads(int interval_us) {
+    static const bool installed = []() {
+        struct sigaction sa {};
+        sa.sa_sigaction = handler;
+        sa.sa_flags = SA_SIGINFO | SA_RESTART;
+        sigemptyset(&sa.sa_mask);
+        sigaction(SIGPROF, &sa, nullptr);
+        return true;
+    }();
+    (void)installed;
+    DIR* dir = opendir("/proc/self/task");
+    if (dir == nullptr) {
+        return;
+    }
+    while (struct dirent* ent = readdir(dir)) {
+        if (ent->d_name[0] == '.') {
+            continue;
+        }
+        const auto tid = static_cast<pid_t>(std::strtol(ent->d_name, nullptr, 10));
+        struct sigevent sev {};
+        sev.sigev_notify = SIGEV_THREAD_ID;
+        sev.sigev_signo = SIGPROF;
+        sev._sigev_un._tid = tid;
+        timer_t timer{};
+        if (timer_create(CLOCK_MONOTONIC, &sev, &timer) != 0) {
+            continue;
+        }
+        struct itimerspec its {};
+        its.it_interval.tv_nsec = interval_us * 1000L;
+        its.it_value.tv_nsec = interval_us * 1000L;
+        timer_settime(timer, 0, &its, nullptr);
+    }
+    closedir(dir);
+}
+
+void
+dump(const char* path) {
+    const int n = std::min(g_count.load(), kMaxSamples);
+    if (n <= 0) {
+        return;
+    }
+    FILE* f = std::fopen(path, "a");
+    if (f == nullptr) {
+        return;
+    }
+    for (int i = 0; i < n; ++i) {
+        std::fprintf(f, "%llx\n", static_cast<unsigned long long>(g_ips[i].load()));
+    }
+    std::fclose(f);
+}
+
+}  // namespace sampling
+
+
+
 #include "algorithm/hgraph/hgraph.h"
 #include "index/index_impl.h"
 
@@ -99,6 +218,8 @@ main(int argc, char** argv) {
 
     const int64_t max_degree = arg_int(argc, argv, "--max-degree", 48);
     const bool digest = arg_int(argc, argv, "--digest", 0) != 0;
+    const bool profile = arg_int(argc, argv, "--profile", 0) != 0;
+    const int64_t profile_us = arg_int(argc, argv, "--profile-us", 500);
     const int64_t ef_construction = arg_int(argc, argv, "--ef-construction", 600);
     std::cout << "max_degree=" << max_degree << " ef_construction=" << ef_construction << "\n";
 
@@ -140,6 +261,31 @@ main(int argc, char** argv) {
     vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
     vsag::Engine engine(&resource);
     auto index = engine.CreateIndex("hgraph", params).value();
+
+    if (profile) {
+        std::remove("/tmp/vsag_samples.txt");
+        std::printf("PROFILING interval=%lldus\n", static_cast<long long>(profile_us));
+        sampling::start_all_threads(static_cast<int>(profile_us));
+    }
+    // Dump samples as soon as the workload finishes (also on the error paths below).
+    struct SampleDumper {
+        bool enabled;
+        ~SampleDumper() {
+            if (enabled) {
+                sampling::dump("/tmp/vsag_samples.txt");
+                if (FILE* m = std::fopen("/tmp/vsag_maps.txt", "w")) {
+                    if (FILE* self = std::fopen("/proc/self/maps", "r")) {
+                        char buf[4096];
+                        while (std::fgets(buf, sizeof(buf), self) != nullptr) {
+                            std::fputs(buf, m);
+                        }
+                        std::fclose(self);
+                    }
+                    std::fclose(m);
+                }
+            }
+        }
+    } sample_dumper{profile};
 
     const double cpu_0 = cpu_seconds_now();
     const double wall_0 = wall_seconds_now();
