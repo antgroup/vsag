@@ -475,8 +475,9 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
             if (inner_id >= total_count_) {
                 this->resize(total_count_.load() + 1);
                 ++total_count_;
-                // Phase 1: visibility is kept equal to reservation; phase 2 narrows this.
-                this->PublishThroughTotalCount();
+                // Deliberately NOT published here: this only reserves the id. The node
+                // becomes visible when insert_one_logical_point has written both its codes
+                // and its link lists.
             }
         }
 
@@ -708,11 +709,13 @@ HGraph::insert_one_logical_point(const void* data, const AddRow& row, const AddC
         rlock.unlock();
         std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
         this->publish_unique_under_unique_global_lock(data, level, inner_id, param, probe, context);
+        this->PublishNode(inner_id);
         return true;
     }
 
     this->publish_unique_under_shared_global_lock(
         data, level, inner_id, param, probe, context, rlock);
+    this->PublishNode(inner_id);
     return true;
 }
 
