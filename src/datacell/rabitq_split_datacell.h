@@ -1641,6 +1641,12 @@ public:
 
     // Per-cluster constants used by the code-domain pair distance. All of them are derived from
     // the centroids that the codec already stores, so nothing is added to the index.
+    //
+    // Memory shape: fused_centroid_sums_ is cluster_count floats, fused_centroid_pair_ip_ is
+    // cluster_count^2 floats, and the cluster-pair difference vector is computed per pair into a
+    // thread-local buffer instead of being tabulated, which would have cost cluster_count^2 * dim
+    // floats. The fused codec uses K_FUSED_CLUSTER_COUNT = 16 today (256 floats for the pair
+    // table); the quadratic term only becomes material if that constant grows a lot.
     void
     refresh_fused_cluster_stats() {
         const uint64_t cluster_count = fused_quantizers_.size();
