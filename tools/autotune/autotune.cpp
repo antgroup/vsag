@@ -735,10 +735,28 @@ SelectResult(const RequestContext& request, const Evaluation& evaluation) {
     JsonType trials = JsonType::array();
     int64_t best = -1;
     int64_t best_effort = -1;
+    int64_t best_pruned = -1;
     uint64_t best_violations = std::numeric_limits<uint64_t>::max();
+    uint64_t best_pruned_violations = std::numeric_limits<uint64_t>::max();
     double best_violation_score = std::numeric_limits<double>::infinity();
+    double best_pruned_violation_score = std::numeric_limits<double>::infinity();
     bool has_successful_trial = false;
     bool has_successful_objective = false;
+
+    const auto violation_rank = [](const JsonType& trial) {
+        const auto& violations = trial["constraint_evaluation"]["violations"];
+        double score = 0.0;
+        for (const auto& violation : violations) {
+            if (violation["actual"].is_null()) {
+                score += 1.0;
+            } else {
+                score += std::abs(violation["actual"].get<double>() -
+                                  violation["expected"].get<double>()) /
+                         std::max(violation["expected"].get<double>(), 1e-12);
+            }
+        }
+        return std::make_pair(static_cast<uint64_t>(violations.size()), score);
+    };
 
     for (const auto& source : evaluation.trials) {
         auto trial = source;
@@ -746,6 +764,18 @@ SelectResult(const RequestContext& request, const Evaluation& evaluation) {
         trials.push_back(std::move(trial));
         const auto stored_index = static_cast<int64_t>(trials.size() - 1);
         const auto& stored = trials.back();
+        if (stored["status"] == "pruned") {
+            const auto [violation_count, score] = violation_rank(stored);
+            if (violation_count > 0 &&
+                (best_pruned < 0 || violation_count < best_pruned_violations ||
+                 (violation_count == best_pruned_violations &&
+                  score < best_pruned_violation_score))) {
+                best_pruned = stored_index;
+                best_pruned_violations = violation_count;
+                best_pruned_violation_score = score;
+            }
+            continue;
+        }
         if (stored["status"] != "success") {
             continue;
         }
@@ -755,8 +785,7 @@ SelectResult(const RequestContext& request, const Evaluation& evaluation) {
         }
         has_successful_objective = true;
 
-        const auto violation_count =
-            static_cast<uint64_t>(stored["constraint_evaluation"]["violations"].size());
+        const auto [violation_count, score] = violation_rank(stored);
         if (violation_count == 0) {
             if (best < 0 ||
                 (higher_is_better(request.objective)
@@ -767,16 +796,6 @@ SelectResult(const RequestContext& request, const Evaluation& evaluation) {
             continue;
         }
 
-        double score = 0.0;
-        for (const auto& violation : stored["constraint_evaluation"]["violations"]) {
-            if (violation["actual"].is_null()) {
-                score += 1.0;
-            } else {
-                score += std::abs(violation["actual"].get<double>() -
-                                  violation["expected"].get<double>()) /
-                         std::max(violation["expected"].get<double>(), 1e-12);
-            }
-        }
         if (best_effort < 0 || violation_count < best_violations ||
             (violation_count == best_violations && score < best_violation_score)) {
             best_effort = stored_index;
@@ -796,6 +815,10 @@ SelectResult(const RequestContext& request, const Evaluation& evaluation) {
         result["best_effort"] = recommendation(request, result["trials"][best_effort]);
         result["best_effort"]["constraint_evaluation"] =
             result["trials"][best_effort]["constraint_evaluation"];
+    } else if (best_pruned >= 0 && !has_successful_trial) {
+        result["best_effort"] = recommendation(request, result["trials"][best_pruned]);
+        result["best_effort"]["constraint_evaluation"] =
+            result["trials"][best_pruned]["constraint_evaluation"];
     } else {
         result["status"] = "failed";
         result["failure"] =
