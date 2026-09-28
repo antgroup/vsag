@@ -907,6 +907,15 @@ using VecRescaleType = void (*)(float* data, uint64_t dim, float val);
 using FlipSignType = void (*)(const uint8_t* flip, float* data, uint64_t dim);
 
 using RotateOpType = void (*)(float* data, int idx, int dim_, int step);
+
+/// Precondition of the legacy 1+7 codec kernels: seven supplement bits per dimension are packed
+/// into 56-byte blocks, one block per 64 dimensions, so a non-zero multiple of 64 is required.
+/// Named once here instead of repeating the masking at every kernel and call site.
+inline bool
+RaBitQExCode7SupportedDim(uint64_t dim) {
+    return dim != 0 and (dim & 63U) == 0U;
+}
+
 extern RaBitQFloatBinaryType RaBitQFloatBinaryIP;
 extern RaBitQFloatBinaryBatch4Type RaBitQFloatBinaryIPBatch4;
 extern RaBitQFloatThreeBitBatch4Type RaBitQFloatThreeBitIPBatch4;

@@ -1395,7 +1395,7 @@ RaBitQExCode7ToBytes(const uint8_t* one_bit_code,
                      uint64_t* code_sq_sum) {
 #if defined(ENABLE_AVX2)
     if (one_bit_code == nullptr or supplement_code == nullptr or out == nullptr or
-        code_sum == nullptr or dim == 0 or (dim & 63U) != 0U) {
+        code_sum == nullptr or not RaBitQExCode7SupportedDim(dim)) {
         return generic::RaBitQExCode7ToBytes(
             one_bit_code, supplement_code, dim, out, code_sum, code_sq_sum);
     }
@@ -1500,7 +1500,7 @@ RaBitQExCode7ToVector(const uint8_t* one_bit_code,
                       float* out) {
 #if defined(ENABLE_AVX2)
     if (one_bit_code == nullptr or supplement_code == nullptr or centroid == nullptr or
-        out == nullptr or dim == 0 or (dim & 63U) != 0U) {
+        out == nullptr or not RaBitQExCode7SupportedDim(dim)) {
         return generic::RaBitQExCode7ToVector(
             one_bit_code, supplement_code, centroid, residual_scale, full_center, dim, out);
     }

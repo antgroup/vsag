@@ -930,7 +930,7 @@ RaBitQExCode7ToBytes(const uint8_t* one_bit_code,
                      uint64_t* code_sum,
                      uint64_t* code_sq_sum) {
     if (one_bit_code == nullptr or supplement_code == nullptr or out == nullptr or
-        code_sum == nullptr or dim == 0 or (dim & 63U) != 0U) {
+        code_sum == nullptr or not RaBitQExCode7SupportedDim(dim)) {
         return false;
     }
     constexpr uint64_t kLegacyBlockSize = 56;
@@ -977,7 +977,7 @@ RaBitQExCode7ToVector(const uint8_t* one_bit_code,
                       uint64_t dim,
                       float* out) {
     if (one_bit_code == nullptr or supplement_code == nullptr or centroid == nullptr or
-        out == nullptr or dim == 0 or (dim & 63U) != 0U) {
+        out == nullptr or not RaBitQExCode7SupportedDim(dim)) {
         return false;
     }
     // HNSW-compatible codec: one filter bit plane plus a 7-bit supplement packed in 56-byte

@@ -2951,7 +2951,7 @@ RaBitQuantizer<metric>::ComputeFusedPairIP(const uint8_t* one_bit_code1,
     if (distance == nullptr or one_bit_code1 == nullptr or supplement_code1 == nullptr or
         one_bit_code2 == nullptr or supplement_code2 == nullptr or centroid1 == nullptr or
         centroid2 == nullptr or not SupportSplitCodeStorage() or pca_dim_ != original_dim_ or
-        this->dim_ == 0 or (this->dim_ & 63U) != 0U or FilterBits() != 1 or ReorderBits() != 7 or
+        not RaBitQExCode7SupportedDim(this->dim_) or FilterBits() != 1 or ReorderBits() != 7 or
         centroid_.size() != this->dim_) {
         return false;
     }
@@ -3037,7 +3037,7 @@ RaBitQuantizer<metric>::ComputeFusedPairL2Difference(const uint8_t* one_bit_code
         if (distance == nullptr or one_bit_code1 == nullptr or supplement_code1 == nullptr or
             one_bit_code2 == nullptr or supplement_code2 == nullptr or
             not SupportSplitCodeStorage() or pca_dim_ != original_dim_ or this->dim_ == 0 or
-            (this->dim_ & 63U) != 0U or FilterBits() != 1 or ReorderBits() != 7 or
+            not RaBitQExCode7SupportedDim(this->dim_) or FilterBits() != 1 or ReorderBits() != 7 or
             centroid_.size() != this->dim_) {
             return false;
         }
