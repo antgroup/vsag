@@ -1387,6 +1387,90 @@ constexpr ExCode7FilterMaskTable kExCode7FilterMask{};
 }  // namespace
 
 bool
+RaBitQExCode7ToBytes(const uint8_t* one_bit_code,
+                     const uint8_t* supplement_code,
+                     uint64_t dim,
+                     uint8_t* out,
+                     uint64_t* code_sum) {
+#if defined(ENABLE_AVX2)
+    if (one_bit_code == nullptr or supplement_code == nullptr or out == nullptr or
+        code_sum == nullptr or dim == 0 or (dim & 63U) != 0U) {
+        return generic::RaBitQExCode7ToBytes(one_bit_code, supplement_code, dim, out, code_sum);
+    }
+    const __m128i mask6 = _mm_set1_epi8(0x3F);
+    const __m128i mask2 = _mm_set1_epi8(static_cast<char>(0xC0));
+    const __m128i top_mask = _mm_set1_epi8(0x40);
+    const __m128i zero = _mm_setzero_si128();
+    __m128i sums = _mm_setzero_si128();
+    for (uint64_t block = 0; block < dim; block += 64) {
+        const __m128i compact1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(supplement_code));
+        const __m128i compact2 =
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(supplement_code + 16));
+        const __m128i compact3 =
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(supplement_code + 32));
+        uint64_t top_bits = 0;
+        std::memcpy(&top_bits, supplement_code + 48, sizeof(top_bits));
+        supplement_code += 56;
+
+        __m128i code0 = _mm_and_si128(compact1, mask6);
+        __m128i code1 = _mm_and_si128(compact2, mask6);
+        __m128i code2 = _mm_and_si128(compact3, mask6);
+        __m128i code3 =
+            _mm_or_si128(_mm_or_si128(_mm_srli_epi16(_mm_and_si128(compact1, mask2), 6),
+                                      _mm_srli_epi16(_mm_and_si128(compact2, mask2), 4)),
+                         _mm_srli_epi16(_mm_and_si128(compact3, mask2), 2));
+        code0 = _mm_or_si128(code0,
+                             _mm_and_si128(_mm_set_epi64x(static_cast<long long>(top_bits << 5),
+                                                          static_cast<long long>(top_bits << 6)),
+                                           top_mask));
+        code1 = _mm_or_si128(code1,
+                             _mm_and_si128(_mm_set_epi64x(static_cast<long long>(top_bits << 3),
+                                                          static_cast<long long>(top_bits << 4)),
+                                           top_mask));
+        code2 = _mm_or_si128(code2,
+                             _mm_and_si128(_mm_set_epi64x(static_cast<long long>(top_bits << 1),
+                                                          static_cast<long long>(top_bits << 2)),
+                                           top_mask));
+        code3 = _mm_or_si128(code3,
+                             _mm_and_si128(_mm_set_epi64x(static_cast<long long>(top_bits >> 1),
+                                                          static_cast<long long>(top_bits)),
+                                           top_mask));
+
+        const uint8_t* filter = one_bit_code + (block >> 3);
+        code0 = _mm_or_si128(
+            code0,
+            _mm_set_epi64x(kExCode7FilterMask.mask[filter[1]], kExCode7FilterMask.mask[filter[0]]));
+        code1 = _mm_or_si128(
+            code1,
+            _mm_set_epi64x(kExCode7FilterMask.mask[filter[3]], kExCode7FilterMask.mask[filter[2]]));
+        code2 = _mm_or_si128(
+            code2,
+            _mm_set_epi64x(kExCode7FilterMask.mask[filter[5]], kExCode7FilterMask.mask[filter[4]]));
+        code3 = _mm_or_si128(
+            code3,
+            _mm_set_epi64x(kExCode7FilterMask.mask[filter[7]], kExCode7FilterMask.mask[filter[6]]));
+
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(out), code0);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(out + 16), code1);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(out + 32), code2);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(out + 48), code3);
+        out += 64;
+
+        sums = _mm_add_epi64(sums, _mm_sad_epu8(code0, zero));
+        sums = _mm_add_epi64(sums, _mm_sad_epu8(code1, zero));
+        sums = _mm_add_epi64(sums, _mm_sad_epu8(code2, zero));
+        sums = _mm_add_epi64(sums, _mm_sad_epu8(code3, zero));
+    }
+    alignas(16) uint64_t lanes[2];
+    _mm_store_si128(reinterpret_cast<__m128i*>(lanes), sums);
+    *code_sum = lanes[0] + lanes[1];
+    return true;
+#else
+    return generic::RaBitQExCode7ToBytes(one_bit_code, supplement_code, dim, out, code_sum);
+#endif
+}
+
+bool
 RaBitQExCode7ToVector(const uint8_t* one_bit_code,
                       const uint8_t* supplement_code,
                       const float* centroid,

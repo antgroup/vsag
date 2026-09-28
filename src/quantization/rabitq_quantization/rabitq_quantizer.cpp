@@ -2934,6 +2934,82 @@ RaBitQuantizer<metric>::DecodeFusedSplitCode(const uint8_t* one_bit_code,
 
 template <MetricType metric>
 bool
+RaBitQuantizer<metric>::ComputeFusedPairIP(const uint8_t* one_bit_code1,
+                                           const uint8_t* supplement_code1,
+                                           const float* centroid1,
+                                           float centroid1_sum,
+                                           const uint8_t* one_bit_code2,
+                                           const uint8_t* supplement_code2,
+                                           const float* centroid2,
+                                           float centroid2_sum,
+                                           float centroid_pair_ip,
+                                           float* distance) const {
+    if constexpr (metric != MetricType::METRIC_TYPE_IP) {
+        return false;
+    }
+    if (distance == nullptr or one_bit_code1 == nullptr or supplement_code1 == nullptr or
+        one_bit_code2 == nullptr or supplement_code2 == nullptr or centroid1 == nullptr or
+        centroid2 == nullptr or not SupportSplitCodeStorage() or pca_dim_ != original_dim_ or
+        this->dim_ == 0 or (this->dim_ & 63U) != 0U or FilterBits() != 1 or ReorderBits() != 7 or
+        centroid_.size() != this->dim_) {
+        return false;
+    }
+    Vector<uint8_t> codes1(this->dim_, 0, this->allocator_);
+    Vector<uint8_t> codes2(this->dim_, 0, this->allocator_);
+    uint64_t code_sum1 = 0;
+    uint64_t code_sum2 = 0;
+    if (not RaBitQExCode7ToBytes(
+            one_bit_code1, supplement_code1, this->dim_, codes1.data(), &code_sum1) or
+        not RaBitQExCode7ToBytes(
+            one_bit_code2, supplement_code2, this->dim_, codes2.data(), &code_sum2)) {
+        return false;
+    }
+
+    // residual scales, stored next to the supplement metadata exactly like the reconstruction does
+    float full_rescale1 = 0.0F;
+    float full_rescale2 = 0.0F;
+    const uint64_t rescale_offset = SupplementMetaOffset() + sizeof(float);
+    std::memcpy(&full_rescale1, supplement_code1 + rescale_offset, sizeof(float));
+    std::memcpy(&full_rescale2, supplement_code2 + rescale_offset, sizeof(float));
+    constexpr float metric_scale = 1.0F;  // inner product
+    const float residual_scale1 = -full_rescale1 / metric_scale;
+    const float residual_scale2 = -full_rescale2 / metric_scale;
+    if (not IsFiniteRaBitQValue(residual_scale1) or not IsFiniteRaBitQValue(residual_scale2)) {
+        return false;
+    }
+
+    // Centering is done in exact integer arithmetic: with D = 2*code - 255 (integer),
+    // sum(D1*D2) = 4*sum((code1-c0)*(code2-c0)) with c0 = 127.5, which keeps the large
+    // intermediate sums out of float. The centroid terms are float SIMD results and are
+    // combined in double before the single narrowing back to float.
+    constexpr double full_center = 127.5;  // 0.5 * ((1 << (filter_bits + reorder_bits)) - 1)
+    const auto code_code_ip =
+        static_cast<int64_t>(RaBitQCodeCodeIP(codes1.data(), codes2.data(), this->dim_));
+    const auto code_sum = static_cast<int64_t>(code_sum1 + code_sum2);
+    const auto dim = static_cast<int64_t>(this->dim_);
+    const double centered_code_code_ip =
+        0.25 * static_cast<double>(4 * code_code_ip - 510 * code_sum + 65025 * dim);
+    const float centroid1_code2 = RaBitQFloatSQIP(centroid1, codes2.data(), this->dim_);
+    const float code1_centroid2 = RaBitQFloatSQIP(centroid2, codes1.data(), this->dim_);
+    const double centroid1_centered_code2 =
+        static_cast<double>(centroid1_code2) - full_center * static_cast<double>(centroid1_sum);
+    const double centered_code1_centroid2 =
+        static_cast<double>(code1_centroid2) - full_center * static_cast<double>(centroid2_sum);
+    const double inner_product =
+        static_cast<double>(centroid_pair_ip) +
+        static_cast<double>(residual_scale2) * centroid1_centered_code2 +
+        static_cast<double>(residual_scale1) * centered_code1_centroid2 +
+        static_cast<double>(residual_scale1 * residual_scale2) * centered_code_code_ip;
+    const auto distance_value = static_cast<float>(1.0 - inner_product);
+    if (not IsFiniteRaBitQValue(distance_value)) {
+        return false;
+    }
+    *distance = distance_value;
+    return true;
+}
+
+template <MetricType metric>
+bool
 RaBitQuantizer<metric>::ComputeFusedExactCenteredFilterIP(
     const float* transformed_query,
     const uint8_t* one_bit_code,

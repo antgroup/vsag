@@ -1170,6 +1170,24 @@ TEST_CASE("RaBitQ HNSW ExData reconstruction SIMD", "[ut][simd]") {
         REQUIRE(std::abs(expected[d] - result[d]) < 1e-4F);
     }
 
+    // The byte-output twin used by the code-domain pairwise inner product is bit exact.
+    for (int which = 0; which < 2; ++which) {
+        std::vector<uint8_t> bytes(dim, 0);
+        uint64_t code_sum = 0;
+        const bool ok = which == 0
+                            ? generic::RaBitQExCode7ToBytes(
+                                  filter.data(), packed.data(), dim, bytes.data(), &code_sum)
+                            : avx2::RaBitQExCode7ToBytes(
+                                  filter.data(), packed.data(), dim, bytes.data(), &code_sum);
+        REQUIRE(ok);
+        uint64_t expected_sum = 0;
+        for (uint64_t d = 0; d < dim; ++d) {
+            REQUIRE(bytes[d] == codes[d]);
+            expected_sum += codes[d];
+        }
+        REQUIRE(code_sum == expected_sum);
+    }
+
     // A malformed request is rejected rather than silently reconstructed.
     REQUIRE_FALSE(generic::RaBitQExCode7ToVector(filter.data(),
                                                  packed.data(),

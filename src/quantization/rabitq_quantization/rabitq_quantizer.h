@@ -190,6 +190,27 @@ public:
                          float* data,
                          bool apply_inverse_rotation = true) const;
 
+    // Pairwise inner product of two fused codes evaluated in the code domain. With
+    // v = centroid + residual_scale * (code - full_center),
+    //   <v1,v2> = <c1,c2> + a2*(<c1,code2> - c0*S(c1)) + a1*(<code1,c2> - c0*S(c2))
+    //             + a1*a2*(<code1,code2> - c0*(K1+K2) + c0^2*dim)
+    // so only an integer code-code inner product and two float-code inner products are needed
+    // instead of reconstructing two float vectors. The caller supplies the per-cluster constants
+    // (centroid sums and the centroid pair inner product). Returns false when the fused storage
+    // does not use the HNSW-compatible 1 + 7 codec, in which case the reconstruction path must
+    // be used.
+    bool
+    ComputeFusedPairIP(const uint8_t* one_bit_code1,
+                       const uint8_t* supplement_code1,
+                       const float* centroid1,
+                       float centroid1_sum,
+                       const uint8_t* one_bit_code2,
+                       const uint8_t* supplement_code2,
+                       const float* centroid2,
+                       float centroid2_sum,
+                       float centroid_pair_ip,
+                       float* distance) const;
+
     bool
     ComputeFusedAffineFilter(const float* transformed_query,
                              const uint8_t* query_planes,

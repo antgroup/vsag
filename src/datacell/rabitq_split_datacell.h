@@ -877,9 +877,77 @@ public:
         }
     }
 
+    // Per-cluster constants used by the code-domain pairwise inner product.
+    void
+    refresh_fused_cluster_stats() {
+        const uint64_t cluster_count = fused_quantizers_.size();
+        const uint64_t dim = static_cast<uint64_t>(common_param_.dim_);
+        fused_centroid_sums_.assign(cluster_count, 0.0F);
+        fused_centroid_pair_ip_.assign(cluster_count * cluster_count, 0.0F);
+        if (cluster_count == 0 or fused_centroids_.size() != cluster_count * dim) {
+            return;
+        }
+        for (uint64_t i = 0; i < cluster_count; ++i) {
+            const float* centroid_i = fused_centroids_.data() + i * dim;
+            float sum = 0.0F;
+            for (uint64_t d = 0; d < dim; ++d) {
+                sum += centroid_i[d];
+            }
+            fused_centroid_sums_[i] = sum;
+            for (uint64_t j = 0; j <= i; ++j) {
+                const float* centroid_j = fused_centroids_.data() + j * dim;
+                const float ip = FP32ComputeIP(centroid_i, centroid_j, dim);
+                fused_centroid_pair_ip_[i * cluster_count + j] = ip;
+                fused_centroid_pair_ip_[j * cluster_count + i] = ip;
+            }
+        }
+    }
+
+    // Code-domain pairwise distance for fused codes; false when the layout is not the
+    // HNSW-compatible 1 + 7 codec, in which case the reconstruction path is used.
+    bool
+    compute_fused_pair_distance(InnerIdType id1, InnerIdType id2, float* distance) const {
+        if constexpr (metric != MetricType::METRIC_TYPE_IP) {
+            return false;
+        }
+        const uint64_t dim = static_cast<uint64_t>(common_param_.dim_);
+        if (fused_code_storage_ == nullptr or fused_quantizers_.empty() or
+            fused_centroid_sums_.size() != fused_quantizers_.size() or (dim & 63U) != 0U or
+            bottom_quantizer().FilterBits() != 1 or bottom_quantizer().ReorderBits() != 7) {
+            return false;
+        }
+        RaBitQFusedCodeView view1;
+        RaBitQFusedCodeView view2;
+        if (not fused_code_storage_->GetFusedCodeView(id1, view1) or
+            not fused_code_storage_->GetFusedCodeView(id2, view2) or
+            view1.cluster_id >= fused_quantizers_.size() or
+            view2.cluster_id >= fused_quantizers_.size()) {
+            return false;
+        }
+        const uint64_t cluster_count = fused_quantizers_.size();
+        return fused_quantizers_[view1.cluster_id]->ComputeFusedPairIP(
+            view1.one_bit_code,
+            view1.supplement_code,
+            fused_centroids_.data() + static_cast<uint64_t>(view1.cluster_id) * dim,
+            fused_centroid_sums_[view1.cluster_id],
+            view2.one_bit_code,
+            view2.supplement_code,
+            fused_centroids_.data() + static_cast<uint64_t>(view2.cluster_id) * dim,
+            fused_centroid_sums_[view2.cluster_id],
+            fused_centroid_pair_ip_[static_cast<uint64_t>(view1.cluster_id) * cluster_count +
+                                    view2.cluster_id],
+            distance);
+    }
+
     float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) override {
         if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
+            // Cheapest path first: the HNSW-compatible 1 + 7 codec can be compared directly in
+            // the code domain, without reconstructing either float vector.
+            float code_domain_distance = 0.0F;
+            if (this->compute_fused_pair_distance(id1, id2, &code_domain_distance)) {
+                return code_domain_distance;
+            }
             // Pairwise distances only ever compare one distance against another, and the inverse
             // rotation is a conformal map. Reconstructing the rotated-domain vectors and skipping
             // the rotation therefore preserves every pruning decision while removing the
@@ -1228,6 +1296,7 @@ public:
                                    static_cast<uint64_t>(cluster_id) * common_param_.dim_);
             fused_quantizers_.push_back(std::move(quantizer));
         }
+        refresh_fused_cluster_stats();
     }
 
     bool
@@ -1531,6 +1600,7 @@ public:
                                    static_cast<uint64_t>(cluster_id) * common_param_.dim_);
             fused_quantizers_.push_back(std::move(quantizer));
         }
+        refresh_fused_cluster_stats();
     }
 
     bool
@@ -1793,6 +1863,8 @@ public:
     std::shared_ptr<QuantizerT> quantizer_{nullptr};
     std::vector<std::shared_ptr<RaBitQuantizer<metric>>> fused_quantizers_;
     std::vector<float> fused_centroids_;
+    std::vector<float> fused_centroid_sums_;
+    std::vector<float> fused_centroid_pair_ip_;
     std::shared_ptr<FixedLayout<OneBitIOTmpl>> x_bit_layout_{nullptr};
     std::shared_ptr<FixedLayout<SupplementIOTmpl>> supplement_layout_{nullptr};
     std::shared_ptr<FixedLayout<MemoryIO>> optimized_build_scalar_layout_{nullptr};
