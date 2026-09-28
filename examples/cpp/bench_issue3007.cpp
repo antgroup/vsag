@@ -21,7 +21,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <algorithm>
 #include <random>
+#include <utility>
+#include <vector>
 #include <string>
 #include <sys/resource.h>
 #include <vector>
@@ -188,6 +191,20 @@ main(int argc, char** argv) {
         }
     }
 
+    // Held-out query set: drawn after the base data, never inserted, so recall measures
+    // search quality rather than "did the index find the vector we just inserted".
+    std::vector<float> queries;
+    if (digest) {
+        std::normal_distribution<float> qnormal(0.0F, 1.0F);
+        std::lognormal_distribution<float> qmag(0.0F, 0.6F);
+        queries.resize(static_cast<size_t>(50) * dim);
+        for (int64_t qi = 0; qi < 50; ++qi) {
+            const float scale = qmag(rng);
+            for (int64_t d2 = 0; d2 < dim; ++d2) {
+                queries[static_cast<size_t>(qi) * dim + d2] = qnormal(rng) * scale;
+            }
+        }
+    }
     if (digest) {
         // Deterministic post-build digest: fixed queries, fixed topk, ordered ids.
         // Identical graphs (same neighbour lists) produce identical digests.
@@ -221,6 +238,42 @@ main(int argc, char** argv) {
                 }
             }
             std::printf("GRAPHCHECK hash=%llu\n", static_cast<unsigned long long>(graph_hash));
+        }
+        // recall@10 against an exact brute-force ground truth computed on the raw vectors
+        {
+            int64_t hit = 0;
+            int64_t recall_total = 0;
+            for (int64_t qi = 0; qi < 50; ++qi) {
+                const float* q = queries.data() + static_cast<size_t>(qi) * dim;
+                std::vector<std::pair<float, int64_t>> exact;
+                exact.reserve(static_cast<size_t>(total));  // `total` = dataset size
+                for (int64_t j = 0; j < total; ++j) {
+                    const float* v = data.data() + static_cast<size_t>(j) * dim;
+                    double ip = 0.0;
+                    for (int64_t d2 = 0; d2 < dim; ++d2) {
+                        ip += static_cast<double>(q[d2]) * static_cast<double>(v[d2]);
+                    }
+                    exact.emplace_back(static_cast<float>(ip), ids[j]);
+                }
+                std::partial_sort(exact.begin(), exact.begin() + 10, exact.end(),
+                                  [](const auto& a, const auto& b) { return a.first > b.first; });
+                auto qds = vsag::Dataset::Make();
+                qds->NumElements(1)->Dim(dim)->Float32Vectors(const_cast<float*>(q))->Owner(false);
+                auto res = index->KnnSearch(qds, 10, search_params);
+                if (not res.has_value()) { continue; }
+                const auto* got = res.value()->GetIds();
+                for (int64_t k = 0; k < 10; ++k) {
+                    ++recall_total;
+                    for (int64_t e = 0; e < 10; ++e) {
+                        if (exact[e].second == got[k]) { ++hit; break; }
+                    }
+                }
+            }
+            std::printf("RECALL10 %.4f (%lld/%lld)\n",
+                        recall_total > 0 ? static_cast<double>(hit) /
+                                               static_cast<double>(recall_total)
+                                         : 0.0,
+                        static_cast<long long>(hit), static_cast<long long>(recall_total));
         }
         std::printf("DIGEST sum=%lld neg=%lld elements=%lld repeat_mismatch=%lld\n",
                     static_cast<long long>(same), static_cast<long long>(diff),

@@ -52,8 +52,13 @@ FhtKacRotator::Train() {
     // a constant seed costs nothing in quality but makes construction reproducible. Seeding
     // from std::random_device made every process use a different rotation, which in turn
     // made the quantized codes, the graph, and therefore search results differ run to run.
-    constexpr uint32_t kFhtFlipSeed = 0x46485431U;  // "FHT1"
-    std::mt19937 gen(kFhtFlipSeed);                 // Mersenne Twister RNG
+    // Seed is overridable only so that the quality spread across seeds can be measured
+    // during validation; production uses the fixed default.
+    uint32_t flip_seed = 0x46485431U;  // "FHT1"
+    if (const char* env = std::getenv("VSAG_FHT_SEED")) {
+        flip_seed = static_cast<uint32_t>(std::strtoul(env, nullptr, 0));
+    }
+    std::mt19937 gen(flip_seed);  // Mersenne Twister RNG
     std::uniform_int_distribution<int> dist(0, 255);
     for (auto& i : flip_) {
         i = static_cast<uint8_t>(dist(gen));
