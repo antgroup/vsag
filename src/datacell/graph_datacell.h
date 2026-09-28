@@ -256,15 +256,20 @@ GraphDataCell<IOTmpl>::InsertNeighborsById(InnerIdType id,
                               reinterpret_cast<const uint8_t*>(neighbor_ids_ptr.data()),
                               static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType));
     } else {
-        uint32_t neighbor_count = std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
-        this->layout_.WriteAt(id,
-                              COUNT_OFFSET,
-                              reinterpret_cast<const uint8_t*>(&neighbor_count),
-                              sizeof(neighbor_count));
+        const auto neighbor_count =
+            std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
+        // Publish the payload before the count, with a release fence in between, so a
+        // lock-free reader that sees the new count is guaranteed to see the matching payload
+        // rather than bytes left over from the previous list.
         this->layout_.WriteAt(id,
                               NEIGHBORS_OFFSET,
                               reinterpret_cast<const uint8_t*>(neighbor_ids.data()),
                               static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType));
+        std::atomic_thread_fence(std::memory_order_release);
+        this->layout_.WriteAt(id,
+                              COUNT_OFFSET,
+                              reinterpret_cast<const uint8_t*>(&neighbor_count),
+                              sizeof(neighbor_count));
     }
 }
 
@@ -304,6 +309,9 @@ GraphDataCell<IOTmpl>::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbo
             }
         }
     } else {
+        // Pair with the release fence in InsertNeighborsById: the count was read above, so the
+        // payload below is safe to read without a lock.
+        std::atomic_thread_fence(std::memory_order_acquire);
         neighbor_ids.resize(neighbor_count);
         this->layout_.ReadAt(id,
                              NEIGHBORS_OFFSET,

@@ -18,6 +18,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 
@@ -50,7 +51,15 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
                      Vector<InnerIdType>& neighbors) const {
     uint32_t count_no_visited = 0;
 
-    if (this->mutex_array_ != nullptr) {
+    // Reading a neighbour list does not need mutual exclusion: the writer publishes the
+    // payload before the count (release) and this read pairs with it (acquire), so we observe
+    // either the previous list or the new one, never a mix. VSAG_LOCKFREE_NEIGHBORS=0 restores
+    // the shared-lock behaviour for comparison.
+    static const bool lockfree_neighbors = []() {
+        const char* env = std::getenv("VSAG_LOCKFREE_NEIGHBORS");
+        return env == nullptr or env[0] != '0';
+    }();
+    if (this->mutex_array_ != nullptr and not lockfree_neighbors) {
         SharedLock lock(this->mutex_array_, current_node_pair.second);
         graph->GetNeighbors(current_node_pair.second, neighbors);
     } else {

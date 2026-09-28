@@ -18,6 +18,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 
@@ -34,19 +35,30 @@ namespace {
 
 class MaybeSharedLock {
 public:
+    static bool
+    lockfree_enabled() {
+        static const bool on = []() {
+            const char* env = std::getenv("VSAG_LOCKFREE_NEIGHBORS");
+            return env == nullptr or env[0] != '0';
+        }();
+        return on;
+    }
+
     MaybeSharedLock(const MutexArrayPtr& mutexes, InnerIdType id) : mutexes_(mutexes), id_(id) {
-        if (mutexes_ != nullptr) {
+        if (mutexes_ != nullptr and not lockfree_enabled()) {
             mutexes_->SharedLock(id_);
+            locked_ = true;
         }
     }
 
     ~MaybeSharedLock() {
-        if (mutexes_ != nullptr) {
+        if (locked_) {
             mutexes_->SharedUnlock(id_);
         }
     }
 
 private:
+    bool locked_{false};
     // Search owns the shared mutex array for longer than every per-node guard; retaining only a
     // reference avoids shared_ptr atomic traffic in the traversal hot loop.
     const MutexArrayPtr& mutexes_;
