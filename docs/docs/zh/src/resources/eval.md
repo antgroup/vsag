@@ -134,6 +134,39 @@ global:
 可使用 [ann-benchmarks](https://github.com/erikbern/ann-benchmarks) 提供的 HDF5 格式数据集
 （如 `sift-128-euclidean.hdf5`、`gist-960-euclidean.hdf5`）。
 
+## 准备校准与验证输入
+
+`tools/eval/prepare_query_split.py` 用于准备参数校准和独立查询验证所需的输入。
+它支持[数据集格式](dataset_format.md)中不带过滤条件的稠密 HDF5：向量为 float32 或 int8，
+包含 `train`、`test`、`neighbors` 和 `distances` 四个数据集。
+稀疏、多向量及带过滤字段的数据集会被拒绝。
+
+在运行工具的 Python 环境中安装 NumPy 和 h5py，再指定两个子集使用的原始查询行号。例如：
+
+```bash
+python3 -m pip install numpy h5py
+cat > query_rows.json <<'JSON'
+{
+  "calibration": [0, 2, 4],
+  "validation": [1, 3, 5]
+}
+JSON
+python3 tools/eval/prepare_query_split.py \
+  /path/to/sift-128-euclidean.hdf5 query_rows.json /tmp/sift-query-split
+```
+
+实际使用时应选择能代表工作负载的查询，上面的短列表只演示输入格式。两个列表均须非空。
+工具拒绝重复行号及跨组的相同查询向量；查询比较采用精确向量值，正零与负零视为相同。
+同一组内不同原始行上的相同向量保留其行权重，未列出的查询行不进入输出。
+
+新输出目录包含 `calibration.hdf5`、`validation.hdf5`，以及记录源文件路径和行号映射的
+`query_rows.json`。查询向量与对应真值按指定顺序复制，保留类型和属性。两个 HDF5 文件
+通过相对外部链接引用原文件的 `/train`，保留库向量行号且不重复复制库向量。
+源文件应保持不变，移动时保留这些文件的相对位置。工具不会覆盖已有输出目录。
+
+选参时将 `calibration.hdf5` 作为 `datapath`，冻结参数后再使用 `validation.hdf5` 验证。
+使用原库向量构建的索引可以供两个文件复用。
+
 ## 参考
 
 - 源码：`tools/eval/`

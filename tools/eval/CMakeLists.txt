@@ -50,10 +50,11 @@ target_link_libraries (eval_obj PRIVATE vsag_eval_common)
 add_dependencies (eval_obj hdf5 yaml-cpp tabulate)
 
 add_executable (eval_performance main.cpp)
+# Resolve shared SIMD state from vsag before linking eval-only SIMD helpers.
 target_link_libraries (eval_performance PRIVATE
     eval_obj
-    simd
     vsag
+    simd
     vsag_eval_common
     ${HDF5_CPP_STATIC_LIBRARY}
     ${HDF5_C_STATIC_LIBRARY}
