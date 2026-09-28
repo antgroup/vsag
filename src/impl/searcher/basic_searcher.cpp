@@ -50,9 +50,11 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
                      Vector<InnerIdType>& neighbors) const {
     uint32_t count_no_visited = 0;
 
-    // The shared lock is required: the storages behind GetNeighbors rewrite (and free) their own
-    // buffers on every update, and the flat layout may reallocate while growing, so a read
-    // without the lock can observe a freed or half rewritten list.
+    // The shared lock protects the storage behind GetNeighbors, not GetNeighbors itself: the
+    // graph storages rewrite (and free) their own buffers on every update and the flat layout may
+    // reallocate while growing, so a read without the lock can observe a freed or half rewritten
+    // list. The neighbour list is also written payload-before-count with a release fence, which a
+    // lock-free reader would need to pair with an acquire fence, but that path is not taken.
     if (this->mutex_array_ != nullptr) {
         SharedLock lock(this->mutex_array_, current_node_pair.second);
         graph->GetNeighbors(current_node_pair.second, neighbors);

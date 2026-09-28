@@ -1399,6 +1399,8 @@ RaBitQExCode7ToBytes(const uint8_t* one_bit_code,
         return generic::RaBitQExCode7ToBytes(
             one_bit_code, supplement_code, dim, out, code_sum, code_sq_sum);
     }
+    // dim is a non-zero multiple of 64 from here on, which is what lets the loop below consume
+    // exactly one 56-byte supplement block per 64 lanes.
     const __m128i mask6 = _mm_set1_epi8(0x3F);
     const __m128i mask2 = _mm_set1_epi8(static_cast<char>(0xC0));
     const __m128i top_mask = _mm_set1_epi8(0x40);
@@ -1504,6 +1506,8 @@ RaBitQExCode7ToVector(const uint8_t* one_bit_code,
         return generic::RaBitQExCode7ToVector(
             one_bit_code, supplement_code, centroid, residual_scale, full_center, dim, out);
     }
+    // dim is a non-zero multiple of 64 from here on: the loop below consumes exactly one 56-byte
+    // supplement block per 64 lanes.
     const __m128i mask6 = _mm_set1_epi8(0x3F);
     const __m128i mask2 = _mm_set1_epi8(static_cast<char>(0xC0));
     const __m128i top_mask = _mm_set1_epi8(0x40);

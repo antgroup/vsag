@@ -2956,11 +2956,13 @@ RaBitQuantizer<metric>::ComputeFusedPairIP(const uint8_t* one_bit_code1,
         return false;
     }
     // The decode buffers are dim_ bytes each, past the small-object fast path, and this runs
-    // O(degree) times per inserted node from link_back_edges, so they are kept per-thread
-    // instead of being allocated on every pair distance.
+    // O(degree) times per inserted node from link_back_edges, so they are kept per-thread instead
+    // of being allocated on every pair distance. They are grown, never shrunk, and released when
+    // the thread exits: the retention is bounded by the number of build threads times the largest
+    // dimension they saw. Both sizes are checked so the two buffers cannot drift apart.
     thread_local std::vector<uint8_t> codes1;
     thread_local std::vector<uint8_t> codes2;
-    if (codes1.size() < this->dim_) {
+    if (codes1.size() < this->dim_ or codes2.size() < this->dim_) {
         codes1.resize(this->dim_);
         codes2.resize(this->dim_);
     }
@@ -3041,10 +3043,11 @@ RaBitQuantizer<metric>::ComputeFusedPairL2Difference(const uint8_t* one_bit_code
             centroid_.size() != this->dim_) {
             return false;
         }
-        // See ComputeFusedPairIP: per-thread scratch instead of a heap allocation per pair.
+        // See ComputeFusedPairIP: per-thread scratch instead of a heap allocation per pair,
+        // retained until the thread exits and checked on both buffers.
         thread_local std::vector<uint8_t> codes1;
         thread_local std::vector<uint8_t> codes2;
-        if (codes1.size() < this->dim_) {
+        if (codes1.size() < this->dim_ or codes2.size() < this->dim_) {
             codes1.resize(this->dim_);
             codes2.resize(this->dim_);
         }

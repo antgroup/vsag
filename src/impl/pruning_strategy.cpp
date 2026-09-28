@@ -254,7 +254,6 @@ link_back_edges(InnerIdType cur_c,
                     cur.emplace_back(cur_c);
                     graph->InsertNeighborsById(selected_neighbor, cur);
                     appended = true;
-                } else {
                 }
             }
             if (not appended) {
@@ -287,7 +286,6 @@ link_back_edges(InnerIdType cur_c,
                 (cur.size() == snap_sz and std::equal(cur.begin(), cur.end(), snapshot.begin()));
             if (snapshot_still_valid) {
                 graph->InsertNeighborsById(selected_neighbor, cand_neighbors);
-            } else {
             }
         }
         if (not snapshot_still_valid) {

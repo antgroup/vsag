@@ -161,7 +161,10 @@ public:
     /// Order-sensitive FNV-1a hash over every bottom-graph neighbour list.
     ///
     /// Only the bottom graph is covered; the route-graph layers are not hashed, so two indexes
-    /// with identical bottom connectivity but different upper layers share a checksum.
+    /// with identical bottom connectivity but different upper layers share a checksum. FNV-1a is
+    /// not collision-resistant: this compares two builds inside a test, it is not an identity
+    /// check. Every bottom-graph node is walked, so this must run after the ids were built and
+    /// published (all callers do).
     ///
     /// Diagnostic only: lets a test tell "the graph differs" apart from "search amplifies a
     /// difference", and lets two builds be compared content-wise instead of via hit lists.
@@ -185,14 +188,6 @@ public:
         return hash;
     }
 
-    /// add_mutex_ exclusive-path accounting: how often the structure-update path is taken and
-    /// how long that critical section lasts in total (summed over threads).
-    struct AddMutexStats {
-        std::atomic<uint64_t> exclusive_calls{0};
-        std::atomic<uint64_t> exclusive_hold_ns{0};
-    };
-    mutable AddMutexStats add_mutex_stats;
-
     /// The per-node lock array, for diagnostics.
     [[nodiscard]] MutexArrayPtr
     GetNeighborsMutexArray() const {
@@ -207,6 +202,10 @@ public:
 
     /// Mark every id below total_count_ visible. Used where a whole id range is created and
     /// completed together (batch reservation, ODescent build, deserialization).
+    ///
+    /// The two counters are read and written separately, so the caller must be the single writer
+    /// of the id range at that moment: this runs on the thread that just grew, shrank (remove
+    /// lowers the mark) or restored the range, never concurrently with another range transition.
     void
     PublishThroughTotalCount() {
         this->published_count_.store(this->total_count_.load(std::memory_order_acquire),
@@ -215,10 +214,12 @@ public:
 
     /// Mark one node visible, once its codes and links are both written.
     ///
-    /// This relies on nodes finishing in (roughly) increasing inner id order: prepare_add_batch
-    /// hands out ids sequentially and every worker publishes its own node after construction, so
-    /// advancing the mark to inner_id + 1 never exposes a node that is still being built. The
-    /// CAS loop is bounded by the number of concurrent publishers.
+    /// prepare_add_batch hands out ids in increasing order and every worker publishes its own node
+    /// after construction, so the mark advances in (roughly) increasing id order; a node that is
+    /// already covered exits the loop immediately and retries are bounded by the number of
+    /// concurrent publishers. This is a visibility and counting mark, not a barrier: like the
+    /// bulk Build path, which publishes the reserved range up front, it assumes no search runs
+    /// concurrently with the build.
     void
     PublishNode(InnerIdType inner_id) {
         InnerIdType current = this->published_count_.load(std::memory_order_relaxed);
