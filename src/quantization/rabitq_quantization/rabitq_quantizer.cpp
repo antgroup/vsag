@@ -2995,8 +2995,8 @@ RaBitQuantizer<metric>::ComputeFusedPairIP(const uint8_t* one_bit_code1,
     constexpr double full_center = 127.5;  // 0.5 * ((1 << (filter_bits + reorder_bits)) - 1)
     // Coefficients of 4*sum((code1-c0)*(code2-c0)) = 4*ip - 4*c0*code_sum + 4*c0^2*dim, derived
     // from full_center so a codec bit-width change cannot silently leave them behind.
-    constexpr int64_t centering_linear = static_cast<int64_t>(4.0 * full_center);
-    constexpr int64_t centering_constant = static_cast<int64_t>(4.0 * full_center * full_center);
+    constexpr auto centering_linear = static_cast<int64_t>(4.0 * full_center);
+    constexpr auto centering_constant = static_cast<int64_t>(4.0 * full_center * full_center);
     const auto code_code_ip =
         static_cast<int64_t>(RaBitQCodeCodeIP(codes1.data(), codes2.data(), this->dim_));
     const auto code_sum = static_cast<int64_t>(code_sum1 + code_sum2);
@@ -3087,10 +3087,9 @@ RaBitQuantizer<metric>::ComputeFusedPairL2Difference(const uint8_t* one_bit_code
         // The coefficients follow full_center (127.5): 4*sum(w1*w2) = 4*ip - 4*c0*(sum1+sum2)
         // + 4*c0^2*dim and 4*|wi|^2 = 4*sqi - 8*c0*sumi + 4*c0^2*dim.
         constexpr double full_center = 127.5;
-        constexpr int64_t centering_linear = static_cast<int64_t>(4.0 * full_center);
-        constexpr int64_t centering_double_linear = 2 * centering_linear;
-        constexpr int64_t centering_constant =
-            static_cast<int64_t>(4.0 * full_center * full_center);
+        constexpr auto centering_linear = static_cast<int64_t>(4.0 * full_center);
+        constexpr auto centering_double_linear = 2 * centering_linear;
+        constexpr auto centering_constant = static_cast<int64_t>(4.0 * full_center * full_center);
         const auto dim = static_cast<int64_t>(this->dim_);
         const auto sum1 = static_cast<int64_t>(code_sum1);
         const auto sum2 = static_cast<int64_t>(code_sum2);
@@ -3105,11 +3104,11 @@ RaBitQuantizer<metric>::ComputeFusedPairL2Difference(const uint8_t* one_bit_code
         const double w2_sq = 0.25 * static_cast<double>(4 * sq2 - centering_double_linear * sum2 +
                                                         centering_constant * dim);
 
-        const double a1 = static_cast<double>(residual_scale1);
-        const double a2 = static_cast<double>(residual_scale2);
+        const auto a1 = static_cast<double>(residual_scale1);
+        const auto a2 = static_cast<double>(residual_scale2);
         double value = a1 * a1 * w1_sq + a2 * a2 * w2_sq - 2.0 * a1 * a2 * w1w2;
         if (centroid_diff != nullptr) {
-            const double diff_sum = static_cast<double>(centroid_diff_sum);
+            const auto diff_sum = static_cast<double>(centroid_diff_sum);
             const double x1 =
                 static_cast<double>(RaBitQFloatSQIP(centroid_diff, codes1.data(), this->dim_)) -
                 full_center * diff_sum;
