@@ -105,6 +105,59 @@ select_edges_by_heuristic(Vector<InnerIdType>& neighbors,
  * @return InnerIdType The ID of the farthest selected neighbor, typically used
  *                     as an entry point for subsequent operations.
  */
+/**
+ * @brief Phase A of edge construction: select cur_c's own outgoing edges and write them.
+ *
+ * Prunes @p top_candidates down to at most MaximumDegree neighbours, copies them into
+ * @p selected_neighbors_out, and writes them as cur_c's neighbour list. Only cur_c's own
+ * slots are touched, and cur_c is not reachable from the graph until that write completes,
+ * so this phase needs no neighbour lock. It is the parallel-safe half of
+ * mutually_connect_new_element and is what a batched build drives in parallel.
+ *
+ * @param cur_c The new element whose outgoing edges are being built.
+ * @param top_candidates Candidate neighbours; consumed by the heuristic.
+ * @param graph Graph interface for storing neighbour connections.
+ * @param distance_provider Supplies pairwise distances.
+ * @param allocator Allocator for temporary storage.
+ * @param alpha Diversity parameter for the heuristic.
+ * @param selected_neighbors_out Receives the chosen neighbours, farthest first.
+ * @return The farthest selected neighbour, used as the next entry point.
+ */
+InnerIdType
+build_forward_links(InnerIdType cur_c,
+                    const DistHeapPtr& top_candidates,
+                    const GraphInterfacePtr& graph,
+                    const DistanceProviderForGraph& distance_provider,
+                    Allocator* allocator,
+                    float alpha,
+                    Vector<InnerIdType>& selected_neighbors_out);
+
+/**
+ * @brief Phase B of edge construction: add cur_c to each selected neighbour's list.
+ *
+ * For every neighbour in @p selected_neighbors, takes that neighbour's lock, merges cur_c
+ * into its list, and re-runs the pruning heuristic when the list is already full. This is
+ * the conflicting half of mutually_connect_new_element: it is the only part that needs a
+ * lock, which is why it is separated out — a batched build can group edges by target
+ * neighbour and call this once per neighbour instead of once per edge.
+ *
+ * @param cur_c The element being linked back from.
+ * @param selected_neighbors cur_c's outgoing neighbours, as produced by build_forward_links.
+ * @param graph Graph interface for reading and writing neighbour connections.
+ * @param distance_provider Supplies pairwise distances.
+ * @param neighbors_mutexes Per-node locks protecting each neighbour's list.
+ * @param allocator Allocator for temporary storage.
+ * @param alpha Diversity parameter for the heuristic.
+ */
+void
+link_back_edges(InnerIdType cur_c,
+                const Vector<InnerIdType>& selected_neighbors,
+                const GraphInterfacePtr& graph,
+                const DistanceProviderForGraph& distance_provider,
+                const MutexArrayPtr& neighbors_mutexes,
+                Allocator* allocator,
+                float alpha);
+
 InnerIdType
 mutually_connect_new_element(InnerIdType cur_c,
                              const DistHeapPtr& top_candidates,

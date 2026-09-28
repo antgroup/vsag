@@ -127,14 +127,13 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
 }
 
 InnerIdType
-mutually_connect_new_element(InnerIdType cur_c,
-                             const DistHeapPtr& top_candidates,
-                             const GraphInterfacePtr& graph,
-                             const DistanceProviderForGraph& distance_provider,
-                             const MutexArrayPtr& neighbors_mutexes,
-                             Allocator* allocator,
-                             float alpha) {
-    PairwiseDistanceComputer pairwise_distance(distance_provider, allocator);
+build_forward_links(InnerIdType cur_c,
+                    const DistHeapPtr& top_candidates,
+                    const GraphInterfacePtr& graph,
+                    const DistanceProviderForGraph& distance_provider,
+                    Allocator* allocator,
+                    float alpha,
+                    Vector<InnerIdType>& selected_neighbors_out) {
     const uint64_t max_size = graph->MaximumDegree();
     select_edges_by_heuristic(top_candidates, max_size, distance_provider, allocator, alpha);
     if (top_candidates->Size() > max_size) {
@@ -143,16 +142,32 @@ mutually_connect_new_element(InnerIdType cur_c,
             "Should be not be more than max_size candidates returned by the heuristic");
     }
 
-    Vector<InnerIdType> selected_neighbors(allocator);
-    selected_neighbors.reserve(max_size);
+    selected_neighbors_out.clear();
+    selected_neighbors_out.reserve(max_size);
     while (not top_candidates->Empty()) {
-        selected_neighbors.emplace_back(top_candidates->Top().second);
+        selected_neighbors_out.emplace_back(top_candidates->Top().second);
         top_candidates->Pop();
     }
 
-    InnerIdType next_closest_entry_point = selected_neighbors.back();
+    const InnerIdType next_closest_entry_point = selected_neighbors_out.back();
 
-    graph->InsertNeighborsById(cur_c, selected_neighbors);
+    // Stage A writes only cur_c's own link lists. cur_c is not reachable from the graph
+    // until this write completes, which is what lets stage A run without neighbour locks.
+    graph->InsertNeighborsById(cur_c, selected_neighbors_out);
+
+    return next_closest_entry_point;
+}
+
+void
+link_back_edges(InnerIdType cur_c,
+                const Vector<InnerIdType>& selected_neighbors,
+                const GraphInterfacePtr& graph,
+                const DistanceProviderForGraph& distance_provider,
+                const MutexArrayPtr& neighbors_mutexes,
+                Allocator* allocator,
+                float alpha) {
+    PairwiseDistanceComputer pairwise_distance(distance_provider, allocator);
+    const uint64_t max_size = graph->MaximumDegree();
 
     for (auto selected_neighbor : selected_neighbors) {
         if (selected_neighbor == cur_c) {
@@ -198,6 +213,26 @@ mutually_connect_new_element(InnerIdType cur_c,
             graph->InsertNeighborsById(selected_neighbor, cand_neighbors);
         }
     }
+}
+
+InnerIdType
+mutually_connect_new_element(InnerIdType cur_c,
+                             const DistHeapPtr& top_candidates,
+                             const GraphInterfacePtr& graph,
+                             const DistanceProviderForGraph& distance_provider,
+                             const MutexArrayPtr& neighbors_mutexes,
+                             Allocator* allocator,
+                             float alpha) {
+    Vector<InnerIdType> selected_neighbors(allocator);
+    const auto next_closest_entry_point = build_forward_links(
+        cur_c, top_candidates, graph, distance_provider, allocator, alpha, selected_neighbors);
+    link_back_edges(cur_c,
+                    selected_neighbors,
+                    graph,
+                    distance_provider,
+                    neighbors_mutexes,
+                    allocator,
+                    alpha);
 
     return next_closest_entry_point;
 }
