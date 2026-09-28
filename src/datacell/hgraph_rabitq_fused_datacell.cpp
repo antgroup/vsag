@@ -172,11 +172,14 @@ HGraphRaBitQFusedDataCell::InsertNeighborsById(InnerIdType id,
 
     auto* record = MutableNodeRecord(id);
     const auto count = static_cast<uint32_t>(neighbor_ids.size());
-    std::memcpy(record + K_COUNT_OFFSET, &count, sizeof(count));
+    // Publish the payload before the count: neighbour lists are read without a lock, so a count
+    // that becomes visible first would expose the previous (or unwritten) neighbours.
     auto* output = reinterpret_cast<InnerIdType*>(record + neighbors_offset_);
     for (uint64_t i = 0; i < neighbor_ids.size(); ++i) {
         output[i] = neighbor_ids[i];
     }
+    std::atomic_thread_fence(std::memory_order_release);
+    std::memcpy(record + K_COUNT_OFFSET, &count, sizeof(count));
     auto current = total_count_.load(std::memory_order_relaxed);
     while (current < id + 1 and
            not total_count_.compare_exchange_weak(
@@ -266,6 +269,7 @@ HGraphRaBitQFusedDataCell::GetNeighbors(InnerIdType id, Vector<InnerIdType>& nei
         neighbor_ids.clear();
         return;
     }
+    std::atomic_thread_fence(std::memory_order_acquire);
     const auto* input = GetNeighborData(record);
     neighbor_ids.clear();
     neighbor_ids.reserve(count);

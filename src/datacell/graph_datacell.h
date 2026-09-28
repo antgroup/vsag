@@ -288,20 +288,25 @@ GraphDataCell<IOTmpl>::InsertNeighborsById(InnerIdType id,
     while (current < id + 1 && !total_count_.compare_exchange_weak(current, id + 1)) {
     }
     if (is_support_delete_) {
-        uint32_t neighbor_count = std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
-        this->layout_.WriteAt(id,
-                              COUNT_OFFSET,
-                              reinterpret_cast<const uint8_t*>(&neighbor_count),
-                              sizeof(neighbor_count));
-        Vector<InnerIdType> neighbor_ids_ptr(neighbor_ids.size(), 0, this->allocator_);
-        for (int i = 0; i < neighbor_ids.size(); ++i) {
-            auto neighbor_id = neighbor_ids[i];
+        const auto neighbor_count =
+            std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
+        Vector<InnerIdType> neighbor_ids_ptr(neighbor_count, 0, this->allocator_);
+        for (uint32_t i = 0; i < neighbor_count; ++i) {
+            const auto neighbor_id = neighbor_ids[i];
             neighbor_ids_ptr[i] = neighbor_id | (node_versions_[neighbor_id] << id_bit_);
         }
+        // Payload first, then the count with a release fence in between: readers no longer hold a
+        // lock, so a count that is visible before its payload would expose stale or unwritten
+        // neighbour entries.
         this->layout_.WriteAt(id,
                               NEIGHBORS_OFFSET,
                               reinterpret_cast<const uint8_t*>(neighbor_ids_ptr.data()),
                               static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType));
+        std::atomic_thread_fence(std::memory_order_release);
+        this->layout_.WriteAt(id,
+                              COUNT_OFFSET,
+                              reinterpret_cast<const uint8_t*>(&neighbor_count),
+                              sizeof(neighbor_count));
     } else {
         const auto neighbor_count =
             std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
@@ -332,15 +337,22 @@ GraphDataCell<IOTmpl>::GetNeighborSize(InnerIdType id) const {
 template <typename IOTmpl>
 void
 GraphDataCell<IOTmpl>::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const {
+    // The matching release fence lives in InsertNeighborsById, between the payload and the count
+    // write. The count itself is stored with a plain (non-atomic) write because the layout is a
+    // byte array; the fence pair plus the monotonic count value is what makes a reader that
+    // observes the new count read the matching payload rather than the previous list.
     uint32_t neighbor_count = 0;
     this->layout_.ReadAt(
         id, COUNT_OFFSET, sizeof(neighbor_count), reinterpret_cast<uint8_t*>(&neighbor_count));
+    if (is_support_delete_) {
+        neighbor_count &= remove_flag_mask_;
+    }
     if (neighbor_count > this->maximum_degree_) {
         neighbor_ids.clear();
         return;
     }
     if (is_support_delete_) {
-        neighbor_count &= remove_flag_mask_;
+        std::atomic_thread_fence(std::memory_order_acquire);
         Vector<InnerIdType> shared_neighbor_ids(neighbor_count, this->allocator_);
         this->layout_.ReadAt(id,
                              NEIGHBORS_OFFSET,
@@ -348,10 +360,11 @@ GraphDataCell<IOTmpl>::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbo
                              reinterpret_cast<uint8_t*>(shared_neighbor_ids.data()));
         neighbor_ids.clear();
         neighbor_ids.reserve(neighbor_count);
+        const auto id_limit = static_cast<InnerIdType>(node_versions_.size());
         for (int i = 0; i < neighbor_count; ++i) {
-            uint8_t neighbor_version = shared_neighbor_ids[i] >> id_bit_;
-            InnerIdType neighbor_id = shared_neighbor_ids[i] & remove_flag_mask_;
-            if (node_versions_[neighbor_id] == neighbor_version) {
+            const uint8_t neighbor_version = shared_neighbor_ids[i] >> id_bit_;
+            const InnerIdType neighbor_id = shared_neighbor_ids[i] & remove_flag_mask_;
+            if (neighbor_id < id_limit and node_versions_[neighbor_id] == neighbor_version) {
                 neighbor_ids.push_back(neighbor_id);
             }
         }
@@ -359,11 +372,23 @@ GraphDataCell<IOTmpl>::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbo
         // Pair with the release fence in InsertNeighborsById: the count was read above, so the
         // payload below is safe to read without a lock.
         std::atomic_thread_fence(std::memory_order_acquire);
-        neighbor_ids.resize(neighbor_count);
+        Vector<InnerIdType> raw_neighbors(neighbor_count, this->allocator_);
         this->layout_.ReadAt(id,
                              NEIGHBORS_OFFSET,
-                             static_cast<uint64_t>(neighbor_ids.size()) * sizeof(InnerIdType),
-                             reinterpret_cast<uint8_t*>(neighbor_ids.data()));
+                             static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType),
+                             reinterpret_cast<uint8_t*>(raw_neighbors.data()));
+        // Only ids that already exist may be handed to a traversal: a neighbour list that is being
+        // rewritten (or that was never written) must not leak unwritten ids into the walk.
+        const auto id_limit =
+            static_cast<InnerIdType>(total_count_.load(std::memory_order_acquire));
+        neighbor_ids.clear();
+        neighbor_ids.reserve(neighbor_count);
+        for (uint32_t i = 0; i < neighbor_count; ++i) {
+            const InnerIdType neighbor_id = raw_neighbors[i];
+            if (neighbor_id < id_limit) {
+                neighbor_ids.push_back(neighbor_id);
+            }
+        }
     }
 }
 
