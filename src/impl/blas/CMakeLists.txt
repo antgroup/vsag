@@ -15,6 +15,7 @@
 
 
 add_library (vsag_blas OBJECT blas_function.cpp)
+target_link_libraries (vsag_blas PRIVATE coverage_config)
 if (TARGET vsag_openmp)
     target_link_libraries (vsag_blas PRIVATE vsag_openmp)
 endif ()

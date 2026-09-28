@@ -237,7 +237,7 @@ instead of raw string literals avoids typos. They fall into several groups:
 | Statistics keys | `STATSTIC_MEMORY`, `STATSTIC_KNN_TIME`, `STATSTIC_RANGE_TIME` |
 
 For the meaning of each parameter key, see [Index Parameters](../resources/index_parameters.md) and
-the individual [index pages](../indexes/README.md).
+the individual [index pages](../indexes/).
 
 ## See also
 

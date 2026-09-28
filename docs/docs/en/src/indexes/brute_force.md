@@ -22,7 +22,7 @@ corpora or for workloads where 100% recall is mandatory.
    configured `metric_type` (`l2`, `ip`, or `cosine`), then a top-k heap returns the closest
    ids. Search uses SIMD kernels and supports **intra-query parallelism** — a single query can
    be split across multiple threads via the `parallelism` search parameter (see
-   `BruteForce::SearchWithRequest` in `src/algorithm/brute_force.cpp`).
+   `BruteForce::SearchWithRequest` in `src/algorithm/bruteforce/bruteforce.cpp`).
 
 Because the index keeps every vector verbatim (modulo the chosen quantizer), the result is
 **exact** when `base_quantization_type` is `fp32` and is the standard reference used to compute
@@ -69,7 +69,7 @@ Advanced users can pass an `index_param` object to enable quantization or storag
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` — see the [Quantization chapter](../quantization/README.md) for per-quantizer details |
+| `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` — see the [Quantization chapter](../quantization/) for per-quantizer details |
 | `use_attribute_filter` | bool | `false` | Enable attribute-based filtering (see [Attribute Filter](../advanced/attribute_filter.md)) |
 | `resize_increase_count_bit` | int | `10` | `log2` of the slot-growth batch. Valid range is `1` to `31`; `1` grows in 2-slot batches and `10` in 1,024-slot batches. Smaller values reduce preallocation but can increase reallocations. |
 
@@ -159,7 +159,7 @@ immediately returns memory to the operating system or that RSS drops.
 ## Capabilities
 
 BruteForce advertises the following capability flags (see `BruteForce::InitFeatures` in
-`src/algorithm/brute_force.cpp`):
+`src/algorithm/bruteforce/bruteforce.cpp`):
 
 | Capability                          | Notes |
 |-------------------------------------|-------|

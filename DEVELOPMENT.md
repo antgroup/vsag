@@ -59,6 +59,7 @@ help:                    ## Show the help.
 debug:                   ## Build vsag with debug options.
 dev:                     ## Build full developer configuration.
 test:                    ## Build and run unit tests.
+test-module:             ## Build and run one unit-test module. Usage: make test-module MODULE=datacell
 asan:                    ## Build with AddressSanitizer option.
 test_asan: asan          ## Run unit tests with AddressSanitizer option.
 tsan:                    ## Build with ThreadSanitizer option.
@@ -93,6 +94,7 @@ Build target behavior:
 - `make debug` builds the default minimal configuration. It does not enable tests, examples, tools, or Python bindings unless they are explicitly turned on.
 - `make dev` builds the full developer configuration with tests, examples, tools, and Python bindings enabled.
 - `make test`, `make asan`, `make tsan`, and the related parallel test targets automatically enable tests.
+- `make test-module MODULE=<name>` builds and runs one unit-test subsystem without building the other unit-test modules. `CASE=<filter>` applies the usual Catch2 runtime filter; run `make test` for full validation.
 - `make release` is the reproducible release/package path. It uses the minimal configuration, Release optimization semantics, and disables ccache by default. Enable optional components explicitly when needed, for example `make release VSAG_ENABLE_TOOLS=ON`.
 - `make release-perf` uses the same Release optimization semantics and minimal configuration in `build-release-perf/`, but enables ccache by default for iterative development and benchmarking.
 - Override either cache default explicitly with `VSAG_ENABLE_CCACHE=ON` or `VSAG_ENABLE_CCACHE=OFF`.
@@ -169,7 +171,7 @@ unversioned variable remains as a deprecated compatibility fallback. The value m
 be a local filesystem path or URL, making this the primary mechanism for offline,
 air-gapped, or internal-mirror builds.
 
-- **`VSAG_THIRDPARTY_OPENBLAS_0_3_24`** (representative `main` example)
+- **`VSAG_THIRDPARTY_OPENBLAS_0_3_34`** (representative `main` example)
   - Override the OpenBLAS source archive URL/path used by `ExternalProject_Add`
   - Useful for offline builds, local mirrors, or pre-downloaded archives
 
@@ -191,6 +193,18 @@ source of truth for the exact upstream URL and expected checksum.
 
 - **`ENABLE_PYBINDS`** (default: `OFF`)
   - Build the `_pyvsag` Python extension module
+
+- **`ENABLE_CUDA`** (default: `OFF`)
+  - Build the optional CUDA backend. Requires CUDA 11.8 or later, with `nvcc` on
+    `PATH` or `CMAKE_CUDA_COMPILER` set. With the option off a stub exporting the
+    same symbols is compiled instead, so callers link unconditionally and decide at
+    runtime.
+  - The CUDA host pass uses `CMAKE_CXX_COMPILER`. If nvcc rejects that compiler,
+    point `CMAKE_CUDA_HOST_COMPILER` at one it accepts.
+  - `VSAG_CUDA_ARCHITECTURES` is a `;`-separated CMake list, default
+    `75-real;80-real;86-real;89-real;90` (Turing through Hopper). Older devices
+    such as Volta need CUDA 12 or earlier and an explicit list, e.g.
+    `-DVSAG_CUDA_ARCHITECTURES="70-real;75-real;80"`.
 
 For a complete list of build options, see the `option()` directives in `cmake/VSAGOptions.cmake`.
 

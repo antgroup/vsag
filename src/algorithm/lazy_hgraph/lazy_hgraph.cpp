@@ -257,23 +257,23 @@ LazyHGraph::CalcDistanceById(const float* query,
 }
 
 DatasetPtr
-LazyHGraph::CalDistanceById(const float* query,
-                            const int64_t* ids,
-                            int64_t count,
-                            bool calculate_precise_distance,
-                            int64_t topk) const {
+LazyHGraph::CalcDistancesById(const float* query,
+                              const int64_t* ids,
+                              int64_t count,
+                              bool calculate_precise_distance,
+                              int64_t topk) const {
     std::shared_lock lock(this->phase_mutex_);
-    return ActiveIndex()->CalDistanceById(query, ids, count, calculate_precise_distance, topk);
+    return ActiveIndex()->CalcDistancesById(query, ids, count, calculate_precise_distance, topk);
 }
 
 DatasetPtr
-LazyHGraph::CalDistanceById(const DatasetPtr& query,
-                            const int64_t* ids,
-                            int64_t count,
-                            bool calculate_precise_distance,
-                            int64_t topk) const {
+LazyHGraph::CalcDistancesById(const DatasetPtr& query,
+                              const int64_t* ids,
+                              int64_t count,
+                              bool calculate_precise_distance,
+                              int64_t topk) const {
     std::shared_lock lock(this->phase_mutex_);
-    return ActiveIndex()->CalDistanceById(query, ids, count, calculate_precise_distance, topk);
+    return ActiveIndex()->CalcDistancesById(query, ids, count, calculate_precise_distance, topk);
 }
 
 bool

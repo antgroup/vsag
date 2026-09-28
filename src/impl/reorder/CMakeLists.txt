@@ -23,4 +23,4 @@ set (REORDER_SRC
 )
 
 add_library (reorder OBJECT ${REORDER_SRC})
-target_link_libraries (reorder PRIVATE vsag_src_common)
+target_link_libraries (reorder PRIVATE coverage_config vsag_src_common)

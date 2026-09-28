@@ -85,6 +85,26 @@ public:
     virtual void
     GetValidIds(const int64_t** valid_ids, int64_t& count) const {
     }
+
+    /**
+      * @brief Get an optional dense validity bitmap of the pre-filter
+      *
+      * The bitmap holds one byte per id in the same id space CheckValid() is called with: a
+      * non-zero byte means the id is not filtered out. Exposing it lets index implementations
+      * inline the per-candidate check instead of paying a virtual call for every probed vector.
+      * Providers whose id space is not the inner-id space must keep the default nullptr, and
+      * callers must confirm *size covers the ids they are about to index.
+      *
+      * @param size receives the number of ids covered by the returned bitmap
+      * @return pointer to the bitmap, or nullptr when this filter cannot provide one
+      */
+    [[nodiscard]] virtual const uint8_t*
+    GetValidBitmap(uint64_t* size) const {
+        if (size != nullptr) {
+            *size = 0;
+        }
+        return nullptr;
+    }
 };
 
 };  // namespace vsag

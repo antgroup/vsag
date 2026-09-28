@@ -45,6 +45,8 @@ TEST_CASE("AttrTypeSchema Basic Test", "[ut][AttrTypeSchema]") {
     REQUIRE(map->GetTypeOfField("field_uint16") == AttrValueType::UINT16);
     REQUIRE(map->GetTypeOfField("field_int8") == AttrValueType::INT8);
     REQUIRE(map->GetTypeOfField("field_uint8") == AttrValueType::UINT8);
+    const AttrTypeSchema& const_schema = *map;
+    REQUIRE(const_schema.GetTypeOfField("field_str") == AttrValueType::STRING);
 
     REQUIRE_THROWS(map->GetTypeOfField("field_float"));
 

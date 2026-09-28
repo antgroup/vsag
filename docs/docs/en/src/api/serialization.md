@@ -134,6 +134,33 @@ auto fresh = vsag::Factory::CreateIndex("hgraph", params).value();
 fresh->Deserialize(readers);
 ```
 
+### Optional prefetch hints for custom readers
+
+A custom reader can additionally inherit from `ReaderPrefetcher`. This keeps the existing `Reader`
+ABI unchanged while allowing `reader_io` to forward best-effort search-time hints:
+
+```cpp
+class RemoteReader : public vsag::Reader, public vsag::ReaderPrefetcher {
+public:
+    void Read(uint64_t offset, uint64_t len, void* dest) override;
+    void AsyncRead(uint64_t offset, uint64_t len, void* dest, vsag::CallBack callback) override;
+    uint64_t Size() const override;
+
+    void Prefetch(uint64_t offset, uint64_t len) override {
+        // Optionally enqueue a non-blocking range fetch. Do not let failures escape.
+        remote_cache.TryPrefetch(offset, len);
+    }
+};
+
+vsag::LoadParameters load_parameters;
+load_parameters.Set("precise_io_type", "reader_io")
+    .Set("precise_enable_prefetch_hint", true)
+    .SetReader("precise_reader", std::make_shared<RemoteReader>());
+```
+
+Readers that only implement `Reader` remain compatible; the enabled hint is then a safe no-op.
+See the runnable `examples/cpp/408_feature_reader_prefetch.cpp` example.
+
 ## See also
 
 - [Index](index_class.md#serialization) — the `Serialize` / `Deserialize` method family.

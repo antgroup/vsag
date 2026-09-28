@@ -44,6 +44,7 @@ struct SplitTask {
     std::unordered_set<InnerIdType> new_docs;  // Docs moving to new cluster
 };
 
+/** Single Index for Multi-vector Query (SIMQ) implementation. */
 class SIMQ : public InnerIndexInterface {
 public:
     static ParamPtr
@@ -76,6 +77,11 @@ public:
                 const std::string& parameters,
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
+
+    float
+    CalcDistanceById(const DatasetPtr& query,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
 
     void
     Serialize(StreamWriter& writer) const override;

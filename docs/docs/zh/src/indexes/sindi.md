@@ -18,8 +18,9 @@ SINDI（**S**parse **IN**verted **D**ense **I**ndex）是 VSAG 面向 **稀疏�
    `use_quantization: true` 使用 SQ8，`use_quantization: "fp16"` 使用半精度值。
 3. **打分。** 检索时，SINDI 遍历查询向量的非零项，按窗口访问对应的倒排表，使用大小为
    `n_candidate` 的大顶堆聚合得分，最后取 top-k。启用 `use_reorder` 时，候选会在正排
-   存储上重打分。默认正排存储保留 fp32 值；设置 `rerank_type: "dmq8"` 时使用压缩的
-   DMQ 正排以降低重排内存。
+   存储上重打分。默认正排存储保留 FP32 值；设置 `rerank_type: "fp16"` 时以半精度
+   保存 value、打分时转为 FP32；设置 `rerank_type: "dmq8"` 时使用压缩的 DMQ 正排，
+   进一步降低重排内存。
 
 返回的距离为 `1 - inner_product`，使结果与稠密索引一样按升序排序。
 
@@ -74,7 +75,7 @@ auto result = index->KnnSearch(
 | `doc_prune_ratio` | float | `0.0` | 构建阶段按文档丢弃权重最低词项的比例，取值范围为 `[0.0, 1.0)` |
 | `use_quantization` | bool 或 string | `false` | `false` 存 FP32，`true` 存 SQ8，`"fp16"` 存 FP16 |
 | `use_reorder` | bool | `false` | 是否保留一份正排存储，在 SINDI 粗排后对候选做精排 |
-| `rerank_type` | string | `"fp32"` | `use_reorder` 开启时使用的正排存储类型。`fp32` 保留精确值；`dmq8` 使用压缩的 8-bit DMQ 编码 |
+| `rerank_type` | string | `"fp32"` | `use_reorder` 开启时使用的正排存储类型。`fp32` 保留精确值；`fp16` 以半精度保存、以 FP32 打分；`dmq8` 使用压缩的 8-bit DMQ 编码 |
 | `dmq_shared_codebook_threshold` | int | `1024` | `rerank_type: "dmq8"` 时，出现次数不超过该值的 term 共用一个 codebook；更高频的 term 保持独立 codebook。设为 `0` 可关闭共享 |
 | `remap_term_ids` | bool | `false` | 是否在建索引前重映射词项 ID，适用于词项 ID 很稀疏或存在大量空洞的词表 |
 | `avg_doc_term_length` | int | `100` | 仅用于内存估算 |
@@ -96,6 +97,16 @@ auto result = index->KnnSearch(
 
 使用 `false` 或 `true` 构建的索引仍保留旧版序列化表示。旧版本 VSAG 无法解析使用新
 `"fp16"` 格式的 SINDI 索引；部署 FP16 产物前应先升级读取端。
+
+### 重排值格式
+
+`rerank_type` 控制 `use_reorder: true` 创建的独立正排存储，与倒排表的
+`use_quantization` 无关。`fp16` 保持查询 value 和累加为 FP32，只把文档 value 存成
+FP16。由于 term ID 仍为 32-bit，在不计记录与块开销时，每个正排非零项的核心存储从
+8 字节降到 6 字节。FP16 转换会增加计算指令，因此受内存带宽限制时延迟可能下降，短向量
+或已在缓存中的数据也可能变慢，应使用代表性数据实测。
+
+`fp16` 和 `dmq8` 都要求设置 `use_reorder: true`。旧版本 VSAG 无法读取 FP16 重排 payload。
 
 ### 不可变低内存构建
 
@@ -121,7 +132,8 @@ auto result = index->KnnSearch(
 构建时间则从约 330 秒增加到 599 秒。这些数字是特定负载的实测证据，不是容量保证。
 
 不可变运行态支持 KNN、范围搜索以及旧版 `Serialize`/`Deserialize`。它不支持增量
-`Add`、`GetSparseVectorByInnerId`、`CalcDistanceById` 与 `CalDistanceById`。
+`Add` 与 `GetSparseVectorByInnerId`。支持单 ID `CalcDistanceById` 和批量
+`CalcDistancesById`（包括旧名 `CalDistanceById`），详见[按 ID 计算距离](../advanced/calc_distance_by_id.md)。
 mutable 和 immutable 运行态均支持 `SerializeStreaming`、`DeserializeStreaming` 与
 `Index::Load`。
 反序列化时，新建 SINDI 的 `immutable` 设置必须与存储格式一致。
@@ -130,22 +142,22 @@ mutable 和 immutable 运行态均支持 `SerializeStreaming`、`DeserializeStre
 
 ### Host 过滤
 
-mutable 和 immutable SINDI 及 [SINDI_V2](sindi_v2.md) 索引都可以按单值数值 host 对文档
+mutable 和 immutable SINDI 及 [SINDI_V2](sindi_v2.md) 索引都可以按来源 host 对文档
 分组，避免返回其他 host 的文档。host-aware `Build()` 或 mutable `Add()` 批次需要提供完整的
-`uint32_t` `host_id` 数组；没有 host 的文档使用 `0`：
+字符串 `host` 数组；没有 host 的文档使用空字符串：
 
 ```cpp
 base->NumElements(n)
     ->SparseVectors(sparse_vectors)
     ->Ids(ids)
-    ->UInt32Metadata("host_id", base_host_ids)
+    ->StringMetadata("host", base_hosts)
     ->Owner(false);
 index->Build(base);
 
-uint32_t query_host_id = 42;
+std::string query_host = "example.com";
 query->NumElements(1)
     ->SparseVectors(&query_vec)
-    ->UInt32Metadata("host_id", &query_host_id)
+    ->StringMetadata("host", &query_host)
     ->Owner(false);
 ```
 
@@ -154,12 +166,13 @@ query->NumElements(1)
 精确成员检查。多次 mutable `Add()` 可以为同一 host 追加互不连续的区间；删除标记和额外的
 用户 `Filter` 会与 host 成员检查共同生效。
 
-host ID `0` 是缺失 host 分组，`1` 到 `UINT32_MAX` 表示普通 host；不同 host 的数量不能超过
-成功写入索引的文档数。mutable 索引一旦包含 host metadata，后续每次 `Add()` 都必须提供
-完整的 `host_id` 数组；已有 host-unaware 文档后不能再引入 host metadata。查询
-`host_id: 0` 时只检索缺失 host 的文档，不提供 `host_id` 时保留全索引 KNN 行为；查询没有
-已索引文档的 host 返回空结果。构建时没有 base host metadata 的索引会忽略查询 host
-metadata，行为保持不变。host 过滤当前仅适用于 KNN；范围搜索仍使用原有全索引路径。
+host 字符串按字节精确匹配，不做大小写折叠或 URL 归一化。VSAG 在内部为字符串分配紧凑 ID，
+并将字符串到 ID 的字典随索引落盘；调用方不需要接触这些 ID。空字符串是缺失 host 分组。
+mutable 索引一旦包含 host metadata，后续每次 `Add()` 都必须提供完整的 `host` 数组；已有
+host-unaware 文档后不能再引入 host metadata。空字符串查询只检索缺失 host 的文档，不提供
+`host` 时保留全索引 KNN 行为；未知 host 返回空结果。构建时没有 base host metadata 的索引会
+忽略查询 host metadata，行为保持不变。旧的数值 `host_id` 输入会被拒绝。host 过滤当前仅适用于
+KNN；范围搜索仍使用原有全索引路径。
 
 ### 日期 bucket 过滤
 
@@ -167,7 +180,7 @@ mutable 和 immutable SINDI 无论是否开启 rerank，都可以按日历层级
 构建时为每篇文档附加一个规范字符串 bucket：
 
 ```cpp
-std::string base_dates[] = {"2026", "2026/05", "2026/05/01"};
+std::string base_dates[] = {"", "2026/05", "2026/05/01"};
 base->Paths("date", base_dates);
 
 std::string query_date = "2026/05";
@@ -184,15 +197,21 @@ query->Paths("date_begin", &date_begin)
 匹配只向下进行：`2026` 匹配 2026 年的年、月、日 base bucket；`2026/05` 匹配
 `2026/05` 及其下所有日；`2026/05/01` 只匹配该日。更精确的查询不会匹配更粗粒度的 base bucket。
 
+base 空字符串表示该文档没有日期。查询不提供任何日期 selector 时仍会检索缺失日期文档，
+仅按 host 查询时同样包含其中 host 匹配的缺失日期文档；`date` 或日期范围查询永远不会命中它们。
+每篇 base 文档仍须在数组中占一项，因此应传入空字符串，而不是省略对应行。query 日期不接受
+空字符串；需要关闭日期过滤时应省略该 selector。
+
 闭区间查询必须同时提供 `date_begin` 和 `date_end`。开始端的年或月扩展到该周期第一天，结束端
 的年或月扩展到该周期最后一天。例如 `2025/11/20` 到 `2026/02` 表示包含首尾的
 `2025/11/20` 至 `2026/02/28`。只有完整日历周期都落在查询范围内的 base bucket 才会命中；
 因此结束于 `2026/08/01` 的范围可以命中 8 月 1 日的日 bucket，但不能命中较粗的
 `2026/08` bucket。两个端点缺一不可，扩展后必须保持正序，并且不能与单值 `date` 同时使用。
 
-日期构建按自然季度排序；同时提供 `host_id` 时，再在每个季度内按 host 排序。mutable 索引只能在
-索引为空时通过 `Build()` 或第一次 `Add()` 提供日期 metadata。索引已有文档后不能再引入日期
-metadata，已经包含日期 metadata 的 mutable 索引会拒绝之后的所有 `Add()`，从而避免增量维护季度
+日期构建把缺失日期放入独立分区，并将其余文档按自然季度排序；同时提供 `host` 时，再在每个分区内
+按 host 排序。mutable 索引只能在索引为空时通过 `Build()` 或第一次 `Add()` 提供日期 metadata。
+索引已有文档后不能再引入日期 metadata，已经包含日期 metadata 的 mutable 索引会拒绝之后的所有
+`Add()`，从而避免增量维护季度
 分区。仅使用 host 的 mutable 索引仍保留原有的增量 `Add()` 能力。
 
 仅包含年份的 base bucket 锚定到该年第一季度并且只存储一次。原有固定大小 window 布局保持不变。
@@ -241,8 +260,9 @@ auto result = index->KnnSearch(
 - 使用 BM25、SPLADE、uniCOIL 等学习稀疏编码器的稀疏检索场景。
 - 稠密 + 稀疏的混合检索管线：SINDI 负责稀疏一路，HGraph / IVF 负责稠密 embedding。
 - 稀疏语料的内存受限部署：`use_quantization: true` 选择 SQ8，`"fp16"` 把 FP32
-  权重字节数减半；
-  `use_reorder: true` 以正排内存换召回，`rerank_type: "dmq8"` 可降低这部分正排开销。
+  倒排 value 字节数减半；`use_reorder: true` 以正排内存换召回，
+  `rerank_type: "fp16"` 以较小精度损失降低正排 value 开销，`rerank_type: "dmq8"`
+  可进一步压缩这部分存储。
 - 需要降低构建峰值内存的只读快照：使用 `immutable: true`，接受更慢的构建和不能增量写入。
 
 SINDI **不支持** 稠密向量，只支持内积相似度。范围检索与基于 ID 的过滤均已支持，
@@ -269,8 +289,9 @@ SINDI **不支持** 稠密向量，只支持内积相似度。范围检索与基
 2. 剪枝高精索引。构建时剪掉大部分低权重词项（`doc_prune_ratio: 0.4`），保留正排索引
      用于重排（`use_reorder: true`），并开启量化减少倒排索引内存
      （`use_quantization: true`）。这是常见的精度与内存折中配置。
-3. 压缩正排重排索引。在上一种配置基础上，设置 `rerank_type: "dmq8"`，与
-     `use_reorder: true` 一起使用，以降低正排重排内存。
+3. 压缩正排重排索引。在上一种配置基础上，将 `rerank_type: "fp16"` 与
+     `use_reorder: true` 一起使用，在侧重精度的前提下降低正排内存；需要更高压缩率时
+     可选择 `dmq8`。
 4. 超大稀疏词表支持。对于词项 ID 在 `uint32` 范围内非常稀疏的场景，例如基于哈希的
      分词器、外部词表 ID，或存在大量空白区间的词表，建议设置 `remap_term_ids: true`。
      这样可以避免管理大量空倒排列表带来的内存浪费，也能降低触达 `term_id_limit`

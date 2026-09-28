@@ -353,7 +353,9 @@ private:
     CalcDistancesById(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
 
-        if (info.Length() < 2) {
+        if (info.Length() < 2 || !info[0].IsTypedArray() || !info[1].IsTypedArray() ||
+            info[0].As<Napi::TypedArray>().TypedArrayType() != napi_float32_array ||
+            info[1].As<Napi::TypedArray>().TypedArrayType() != napi_bigint64_array) {
             Napi::TypeError::New(env, "Expected (query: Float32Array, ids: BigInt64Array)")
                 .ThrowAsJavaScriptException();
             return env.Undefined();
@@ -362,18 +364,28 @@ private:
         auto query = info[0].As<Napi::Float32Array>();
         auto ids = info[1].As<Napi::BigInt64Array>();
         int64_t count = static_cast<int64_t>(ids.ElementLength());
-
-        auto distances = Napi::Float32Array::New(env, count);
-        for (int64_t i = 0; i < count; ++i) {
-            distances[i] = -1.0F;
+        if (query.ElementLength() == 0) {
+            Napi::Error::New(env, "calcDistancesById failed: query must not be empty")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
         }
 
-        auto result = index_->CalcDistancesById(query.Data(), ids.Data(), count);
-        if (result.has_value()) {
-            const auto* dist_data = result.value()->GetDistances();
-            for (int64_t i = 0; i < count; ++i) {
-                distances[i] = dist_data[i];
-            }
+        auto dataset = vsag::Dataset::Make();
+        dataset->Owner(false)
+            ->NumElements(1)
+            ->Dim(static_cast<int64_t>(query.ElementLength()))
+            ->Float32Vectors(query.Data());
+        auto result = index_->CalcDistancesById(dataset, ids.Data(), count);
+        if (!result.has_value()) {
+            Napi::Error::New(env, "calcDistancesById failed: " + result.error().message)
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        auto distances = Napi::Float32Array::New(env, count);
+        const auto* dist_data = result.value()->GetDistances();
+        for (int64_t i = 0; i < count; ++i) {
+            distances.Data()[i] = dist_data[i];
         }
 
         return distances;

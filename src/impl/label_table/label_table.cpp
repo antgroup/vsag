@@ -44,6 +44,7 @@ LabelTable::LabelTable(Allocator* allocator,
       label_remap_(allocator, label_remap_type),
       allocator_(allocator),
       deleted_ids_(allocator),
+      active_padding_label_ids_(allocator),
       source_id_table_(0, allocator) {
     (void)compress_redundant_data;
     deleted_ids_filter_ = std::make_shared<RemoveListFilter>(deleted_ids_, delete_ids_mutex_);
@@ -142,6 +143,7 @@ LabelTable::MarkRemove(const std::vector<LabelType>& labels) {
     std::scoped_lock wlock(delete_ids_mutex_);
     for (const auto& id : ids) {
         if (this->deleted_ids_.insert(id).second) {
+            active_padding_label_ids_.erase(id);
             ++removed_count;
         }
     }
@@ -151,6 +153,8 @@ LabelTable::MarkRemove(const std::vector<LabelType>& labels) {
 void
 LabelTable::Deserialize(StreamReader& reader) {
     StreamReader::ReadVector(reader, label_table_);
+    MarkLabelsMutated();
+    RebuildActivePaddingLabelIds();
     if (use_reverse_map_) {
         this->label_remap_.Clear();
         this->label_remap_.Reserve(label_table_.size());
@@ -168,6 +172,24 @@ LabelTable::Deserialize(StreamReader& reader) {
 }
 
 void
+LabelTable::TrimUnusedSlots(uint64_t valid_count) {
+    if (valid_count > label_table_.size()) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "label table is smaller than the stored vector count");
+    }
+    label_table_.resize(valid_count);
+    total_count_.store(static_cast<int64_t>(valid_count));
+    RebuildActivePaddingLabelIds();
+    if (use_reverse_map_) {
+        label_remap_.Clear();
+        label_remap_.Reserve(valid_count);
+        for (InnerIdType id = 0; id < valid_count; ++id) {
+            label_remap_.InsertOrAssign(label_table_[id], id);
+        }
+    }
+}
+
+void
 LabelTable::MergeOther(const LabelTablePtr& other, const IdMapFunction& id_map) {
     auto other_size = other->GetTotalCount();
     auto current_total_count = total_count_.load();
@@ -180,14 +202,24 @@ LabelTable::MergeOther(const LabelTablePtr& other, const IdMapFunction& id_map) 
             auto new_label = std::get<1>(id_map(other->label_table_[i]));
             auto new_inner_id = static_cast<InnerIdType>(i + current_total_count_u);
             this->label_table_[i + current_total_count_u] = new_label;
+            if (new_label == -1 && !other->IsRemoved(static_cast<InnerIdType>(i))) {
+                std::scoped_lock wlock(delete_ids_mutex_);
+                active_padding_label_ids_.insert(new_inner_id);
+            }
             this->label_remap_.InsertOrAssign(new_label, new_inner_id);
         }
     } else {
         for (uint64_t i = 0; i < other_size_u; ++i) {
             auto new_label = std::get<1>(id_map(other->label_table_[i]));
             this->label_table_[i + current_total_count_u] = new_label;
+            if (new_label == -1 && !other->IsRemoved(static_cast<InnerIdType>(i))) {
+                std::scoped_lock wlock(delete_ids_mutex_);
+                active_padding_label_ids_.insert(
+                    static_cast<InnerIdType>(i + current_total_count_u));
+            }
         }
     }
+    MarkLabelsMutated();
     total_count_ += static_cast<int64_t>(other_size_u);
 }
 }  // namespace vsag

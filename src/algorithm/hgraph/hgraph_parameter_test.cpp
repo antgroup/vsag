@@ -571,6 +571,62 @@ TEST_CASE("HGraph Search Parameters parse MCI seed ratio", "[ut][HGraphParameter
     })"));
 }
 
+TEST_CASE("HGraph Search Parameters parse hybrid traversal and seed coverage",
+          "[ut][HGraphParameter]") {
+    auto defaults = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200
+        }
+    })");
+    REQUIRE_FALSE(defaults.use_hybrid_traversal);
+    REQUIRE(defaults.hybrid_vob == 0.0);
+    REQUIRE(defaults.hybrid_filter_cost_ratio == 1.0);
+    REQUIRE(defaults.mci_seed_coverage == 1.0F);
+    REQUIRE(defaults.mci_seed_max_count == 32768);
+
+    auto params = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "use_hybrid_traversal": true,
+            "hybrid_vob": 32.0,
+            "hybrid_filter_cost_ratio": 2.5,
+            "mci_seed_coverage": 0.1,
+            "mci_seed_max_count": 4096
+        }
+    })");
+    REQUIRE(params.use_hybrid_traversal);
+    REQUIRE(params.hybrid_vob == 32.0);
+    REQUIRE(params.hybrid_filter_cost_ratio == 2.5);
+    REQUIRE(params.mci_seed_coverage == 0.1F);
+    REQUIRE(params.mci_seed_max_count == 4096);
+
+    // hybrid_vob <= 0 is the documented way to disable the early stop, not an error.
+    auto unbounded = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "use_hybrid_traversal": true,
+            "hybrid_vob": 0.0
+        }
+    })");
+    REQUIRE(unbounded.hybrid_vob == 0.0);
+
+    // mci_seed_max_count == 0 means "unlimited" and must be accepted.
+    auto unlimited = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "mci_seed_max_count": 0
+        }
+    })");
+    REQUIRE(unlimited.mci_seed_max_count == 0);
+
+    for (const auto* bad : {R"({"hgraph":{"ef_search":200,"hybrid_vob":-1.0}})",
+                            R"({"hgraph":{"ef_search":200,"hybrid_filter_cost_ratio":-0.5}})",
+                            R"({"hgraph":{"ef_search":200,"mci_seed_coverage":-0.1}})",
+                            R"({"hgraph":{"ef_search":200,"mci_seed_max_count":-1}})"}) {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(bad));
+    }
+}
+
 TEST_CASE("HGraph Search Parameters parse RaBitQ error rate", "[ut][HGraphParameter]") {
     auto params = vsag::HGraphSearchParameters::FromJson(R"({
         "hgraph": {
@@ -773,12 +829,10 @@ TEST_CASE("HGraph maps RaBitQ x+y split params", "[ut][HGraphParameter]") {
     auto base_json = typed_param->base_codes_param->ToJson();
     REQUIRE(base_json["codes_type"].GetString() == std::string("rabitq_split"));
     REQUIRE(base_json["io_params"]["type"].GetString() == std::string("block_memory_io"));
-#if HAVE_LIBAIO
-    const std::string expected_supplement_io_type = "async_io";
-#else
-    const std::string expected_supplement_io_type = "buffer_io";
-#endif
-    REQUIRE(base_json["supplement_io_params"]["type"].GetString() == expected_supplement_io_type);
+    REQUIRE(typed_param->base_codes_param->supplement_io_parameter != nullptr);
+    REQUIRE(typed_param->base_codes_param->supplement_io_parameter->GetTypeName() ==
+            std::string("async_io"));
+    REQUIRE(base_json["supplement_io_params"]["type"].GetString() == std::string("async_io"));
     REQUIRE(base_json["supplement_io_params"]["file_path"].GetString() ==
             std::string("/tmp/vsag_rabitq_split_supplement"));
     REQUIRE(base_json["quantization_params"]["rabitq_version"].GetString() == std::string("split"));

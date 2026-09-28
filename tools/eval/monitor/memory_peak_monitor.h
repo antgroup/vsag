@@ -18,7 +18,9 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <condition_variable>
 #include <fstream>
+#include <thread>
 
 #include "monitor.h"
 
@@ -28,7 +30,7 @@ class MemoryPeakMonitor : public Monitor {
 public:
     explicit MemoryPeakMonitor(const std::string& name);
 
-    ~MemoryPeakMonitor() override = default;
+    ~MemoryPeakMonitor() override;
 
     void
     Start() override;
@@ -43,6 +45,9 @@ public:
     Record(void* input) override;
 
 private:
+    void
+    sample();
+
     uint64_t max_memory_{0};
     uint64_t init_memory_{0};
     std::string process_name_{};
@@ -50,6 +55,10 @@ private:
     pid_t pid_{0};
 
     std::ifstream infile_{};
+    std::mutex sampling_mutex_{};
+    std::condition_variable sampling_condition_{};
+    std::thread sampling_thread_{};
+    bool sampling_{false};
 };
 
 }  // namespace vsag::eval

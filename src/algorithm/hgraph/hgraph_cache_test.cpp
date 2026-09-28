@@ -169,6 +169,24 @@ TEST_CASE("BuildCache GetNeighbors", "[ut][build_cache]") {
         REQUIRE(result[1] == "ccc");
     }
 
+    SECTION("find raw neighbor inner ids") {
+        vsag::BuildCache cache(allocator.get());
+        cache.source_ids_.push_back("a");
+        cache.source_ids_.push_back("b");
+
+        vsag::Vector<vsag::InnerIdType> neighbors(allocator.get());
+        neighbors.push_back(0);
+        neighbors.push_back(1);
+        cache.neighbors_.emplace("a", std::move(neighbors));
+
+        const auto* result = cache.FindNeighborInnerIds("a");
+        REQUIRE(result != nullptr);
+        REQUIRE(result->size() == 2);
+        REQUIRE((*result)[0] == 0);
+        REQUIRE((*result)[1] == 1);
+        REQUIRE(cache.FindNeighborInnerIds("missing") == nullptr);
+    }
+
     SECTION("get neighbors after deserialize") {
         vsag::BuildCache cache1(allocator.get());
         cache1.source_ids_.push_back("key_a");

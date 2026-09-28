@@ -116,4 +116,4 @@ which is also what makes uniform scaling close to optimal for that metric.
 
 - [Scalar Quantization (SQ4 / SQ8)](sq.md)
 - [Transform Quantizer](../advanced/quantization_transform.md)
-- [Quantization overview](README.md)
+- [Quantization overview](./)

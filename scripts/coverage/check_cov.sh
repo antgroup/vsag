@@ -4,7 +4,9 @@ set -eo pipefail
 
 MIN_LINE_COVERAGE=90
 
-line_coverage=$(lcov --summary coverage/coverage.info | \
+line_coverage=$(lcov --rc branch_coverage=1 \
+  --summary coverage/coverage.info \
+  --ignore-errors inconsistent,inconsistent | \
   grep "lines......" | \
   awk '/lines/ { print $2 }' | \
   cut -d '%' -f 1)

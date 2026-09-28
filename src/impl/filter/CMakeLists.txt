@@ -19,6 +19,7 @@ set (FILTER_SRC
         black_list_filter.cpp
         extrainfo_wrapper_filter.h
         extrainfo_wrapper_filter.cpp
+        filter_callback_limiter.h
         inner_id_wrapper_filter.h
         white_list_filter.h
         white_list_filter.cpp

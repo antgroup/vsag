@@ -5,7 +5,7 @@
 所有权，以及各部分之间如何协作。
 
 > 想了解如何*配置*索引（JSON `index_param` / 搜索键）？相关内容请见
-> [索引参数](../resources/index_parameters.md) 与各 [索引页面](../indexes/README.md)。本章覆盖的是
+> [索引参数](../resources/index_parameters.md) 与各 [索引页面](../indexes/)。本章覆盖的是
 > *代码*层面的接口（类型与方法），而不是 JSON 配置模式。
 
 ## 头文件与命名空间

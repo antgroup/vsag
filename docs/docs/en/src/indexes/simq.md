@@ -1,10 +1,10 @@
 # SIMQ
 
-SIMQ is VSAG's index for **multi-vector** retrieval — the kind of data where each
-document is a *set* of token-level vectors rather than a single embedding. This
-pattern arises in late-interaction models such as ColBERT, where a document is
-represented by one vector per token and relevance is computed via **MaxSim**
-(sum of maximum per-query-token similarities).
+SIMQ (Single Index for Multi-vector Query) is VSAG's index for **multi-vector**
+retrieval — the kind of data where each document is a *set* of token-level vectors
+rather than a single embedding. This pattern arises in late-interaction models such
+as ColBERT, where a document is represented by one vector per token and relevance
+is computed via **MaxSim** (sum of maximum per-query-token similarities).
 
 
 - Source: `src/algorithm/simq/`

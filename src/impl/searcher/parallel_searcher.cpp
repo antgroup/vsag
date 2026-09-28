@@ -189,7 +189,8 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     if (check_func(ep) and is_result_distance_eligible<mode>(dist, inner_search_param)) {
         top_candidates->Push(dist, ep);
     }
-    if (not is_finite_distance(dist) and inner_search_param.consider_duplicate and
+    // See BasicSearcher: the entry point's duplicate labels are only expanded from this seed block.
+    if (inner_search_param.consider_duplicate and
         is_result_distance_eligible<mode>(dist, inner_search_param)) {
         for (const auto duplicate_id : graph->GetDuplicateIds(ep)) {
             if (check_func(duplicate_id)) {

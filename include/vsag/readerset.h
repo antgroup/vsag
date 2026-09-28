@@ -51,6 +51,22 @@ class Reader;
 using ReaderPtr = std::shared_ptr<Reader>;
 
 /**
+ * @brief Optional interface for readers that support best-effort prefetch hints.
+ *
+ * Reader implementations may inherit from both Reader and ReaderPrefetcher. Keeping this hook in
+ * a separate interface avoids changing the Reader vtable for existing implementations. ReaderIO
+ * safely ignores prefetch hints when its Reader does not implement this interface. Implementations
+ * should return promptly, suppress hint failures, and must not affect subsequent reads.
+ */
+class ReaderPrefetcher {
+public:
+    virtual ~ReaderPrefetcher() = default;
+
+    virtual void
+    Prefetch(uint64_t offset, uint64_t len) = 0;
+};
+
+/**
  * @class Reader
  * @brief An abstract base class for reading data from various sources.
  *

@@ -32,6 +32,8 @@ namespace vsag {
 class IndexNode;
 class ReasoningContext;
 using SearchFunc = std::function<DistHeapPtr(const IndexNode* node, const VisitedListPtr& vl)>;
+using GraphBuildFunc =
+    std::function<void(GraphInterfacePtr& graph, const Vector<InnerIdType>& ids, uint32_t level)>;
 
 /**
  * @brief IndexNode: a tree node in the Pyramid hierarchy.
@@ -55,6 +57,10 @@ public:
     /// Build the internal graph using ODescent over the stored ids.
     void
     Build(ODescent& odescent);
+
+    /// Build the internal graph using a batch builder selected by the caller.
+    void
+    Build(const GraphBuildFunc& build_graph);
 
     /// Allocate the graph storage if not yet done.
     void

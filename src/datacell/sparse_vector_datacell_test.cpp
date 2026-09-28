@@ -14,8 +14,12 @@
 // limitations under the License.
 
 #include <atomic>
+#include <catch2/matchers/catch_matchers.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
+#include <limits>
 
 #include "datacell/sparse_vector_datacell_parameter.h"
 #include "framework/test_thread_pool.h"
@@ -23,6 +27,7 @@
 #include "index_common_param.h"
 #include "io/reader_io/reader_io_parameter.h"
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
+#include "simd/fp16_simd.h"
 #include "storage/serialization_template_test.h"
 #include "unittest.h"
 
@@ -126,6 +131,140 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
         delete[] item.vals_;
         delete[] item.ids_;
     }
+}
+
+TEST_CASE("SparseDataCell FP16 values", "[ut][SparseDataCell][fp16]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 16;
+
+    auto make_parameter = [](const char* value_type) {
+        const auto value_type_field = value_type == nullptr
+                                          ? std::string{}
+                                          : fmt::format(R"(, "value_type": "{}")", value_type);
+        auto parameter = std::make_shared<SparseVectorDataCellParameter>();
+        parameter->FromJson(JsonType::Parse(fmt::format(R"({{
+            "io_params": {{"type": "memory_io"}},
+            "quantization_params": {{"type": "sparse"{}}}
+        }})",
+                                                        value_type_field)));
+        return parameter;
+    };
+
+    uint32_t ids0[] = {7, 1, 4};
+    float values0[] = {0.3333F, 1.25F, -0.2F};
+    uint32_t ids1[] = {4, 7, 2};
+    float values1[] = {0.75F, -0.125F, 0.5F};
+    SparseVector vectors[] = {{3, ids0, values0}, {3, ids1, values1}};
+
+    auto fp16 = FlattenInterface::MakeInstance(make_parameter("fp16"), common_param);
+    REQUIRE(fp16->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_SPARSE_FP16);
+    fp16->Train(vectors, 2);
+    fp16->BatchInsertVector(vectors, 2, nullptr);
+
+    bool need_release = false;
+    const auto* codes = fp16->GetCodesById(0, need_release);
+    REQUIRE(*reinterpret_cast<const uint32_t*>(codes) == 3);
+    const auto* stored_ids = reinterpret_cast<const uint32_t*>(codes + sizeof(uint32_t));
+    REQUIRE(std::vector<uint32_t>(stored_ids, stored_ids + 3) == std::vector<uint32_t>{1, 4, 7});
+    const auto* stored_values =
+        reinterpret_cast<const uint16_t*>(codes + sizeof(uint32_t) + 3 * sizeof(uint32_t));
+    REQUIRE(generic::FP16ToFloat(stored_values[0]) ==
+            generic::FP16ToFloat(generic::FloatToFP16(values0[1])));
+    REQUIRE(reinterpret_cast<uintptr_t>(codes) % alignof(uint32_t) == 0);
+    REQUIRE(codes[22] == 0);
+    REQUIRE(codes[23] == 0);
+    if (need_release) {
+        fp16->Release(codes);
+    }
+
+    bool second_need_release = false;
+    const auto* second_codes = fp16->GetCodesById(1, second_need_release);
+    REQUIRE(reinterpret_cast<uintptr_t>(second_codes) % alignof(uint32_t) == 0);
+    if (second_need_release) {
+        fp16->Release(second_codes);
+    }
+
+    SparseVector decoded{};
+    fp16->GetSparseVectorByInnerId(0, &decoded, allocator.get());
+    REQUIRE(decoded.len_ == 3);
+    REQUIRE(std::vector<uint32_t>(decoded.ids_, decoded.ids_ + 3) ==
+            std::vector<uint32_t>{1, 4, 7});
+    REQUIRE(decoded.vals_[0] == generic::FP16ToFloat(generic::FloatToFP16(values0[1])));
+    REQUIRE(decoded.vals_[1] == generic::FP16ToFloat(generic::FloatToFP16(values0[2])));
+    REQUIRE(decoded.vals_[2] == generic::FP16ToFloat(generic::FloatToFP16(values0[0])));
+    allocator->Deallocate(decoded.ids_);
+    allocator->Deallocate(decoded.vals_);
+
+    uint32_t query_ids[] = {7, 4};
+    float query_values[] = {0.6F, -0.4F};
+    SparseVector query{2, query_ids, query_values};
+    auto computer = fp16->FactoryComputer(&query);
+    InnerIdType inner_ids[] = {0, 1};
+    float distances[2]{};
+    SearchStatistics statistics;
+    QueryContext context{.stats = &statistics};
+    fp16->Query(distances, computer, inner_ids, 2, &context);
+    const auto rounded = [](float value) {
+        return generic::FP16ToFloat(generic::FloatToFP16(value));
+    };
+    const float expected_distance0 =
+        1.0F - query_values[0] * rounded(values0[0]) - query_values[1] * rounded(values0[2]);
+    const float expected_distance1 =
+        1.0F - query_values[0] * rounded(values1[1]) - query_values[1] * rounded(values1[0]);
+    REQUIRE(std::abs(distances[0] - expected_distance0) < 1e-6F);
+    REQUIRE(std::abs(distances[1] - expected_distance1) < 1e-6F);
+    REQUIRE(JsonType::Parse(statistics.Dump())["distance_evaluations_by_backend"]["sparse_fp16"]
+                .GetUint64() == 2);
+
+    const float expected_pair_distance = 1.0F - rounded(values0[0]) * rounded(values1[1]) -
+                                         rounded(values0[2]) * rounded(values1[0]);
+    REQUIRE(std::abs(fp16->ComputePairVectors(0, 1) - expected_pair_distance) < 1e-6F);
+
+    auto fp32 = FlattenInterface::MakeInstance(make_parameter(nullptr), common_param);
+    fp32->Train(vectors, 2);
+    fp32->BatchInsertVector(vectors, 2, nullptr);
+    std::stringstream fp16_stream;
+    IOStreamWriter fp16_writer(fp16_stream);
+    fp16->Serialize(fp16_writer);
+    std::stringstream fp32_stream;
+    IOStreamWriter fp32_writer(fp32_stream);
+    fp32->Serialize(fp32_writer);
+    const auto fp16_bytes = fp16_stream.str();
+    const auto fp32_bytes = fp32_stream.str();
+    REQUIRE(fp16_bytes.size() < fp32_bytes.size());
+
+    std::stringstream header_stream(fp16_bytes);
+    IOStreamReader header_reader(header_stream);
+    fp16->FlattenInterface::Deserialize(header_reader);
+    uint32_t sentinel = 0;
+    uint32_t version = 0;
+    uint8_t value_type = 0;
+    StreamReader::ReadObj(header_reader, sentinel);
+    StreamReader::ReadObj(header_reader, version);
+    StreamReader::ReadObj(header_reader, value_type);
+    REQUIRE(sentinel == std::numeric_limits<uint32_t>::max());
+    REQUIRE(version == 3);
+    REQUIRE(value_type == static_cast<uint8_t>(SparseQuantizerValueType::FP16));
+
+    auto restored = FlattenInterface::MakeInstance(make_parameter("fp16"), common_param);
+    std::stringstream restored_stream(fp16_bytes);
+    IOStreamReader restored_reader(restored_stream);
+    restored->Deserialize(restored_reader);
+    auto restored_computer = restored->FactoryComputer(&query);
+    float restored_distances[2]{};
+    restored->Query(restored_distances, restored_computer, inner_ids, 2);
+    REQUIRE(std::abs(restored_distances[0] - distances[0]) < 1e-6F);
+    REQUIRE(std::abs(restored_distances[1] - distances[1]) < 1e-6F);
+
+    auto mismatched = FlattenInterface::MakeInstance(make_parameter(nullptr), common_param);
+    std::stringstream mismatched_stream(fp16_bytes);
+    IOStreamReader mismatched_reader(mismatched_stream);
+    REQUIRE_THROWS_WITH(
+        mismatched->Deserialize(mismatched_reader),
+        Catch::Matchers::ContainsSubstring("payload does not match sparse value_type"));
 }
 
 TEST_CASE("SparseDataCell Concurrent Test", "[ut][SparseDataCell][concurrent] ") {

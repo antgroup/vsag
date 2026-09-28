@@ -103,6 +103,15 @@ BuildCache::Deserialize(StreamReader& reader) {
     }
 }
 
+const Vector<InnerIdType>*
+BuildCache::FindNeighborInnerIds(const std::string& source_id) const {
+    auto it = neighbors_.find(source_id);
+    if (it == neighbors_.end()) {
+        return nullptr;
+    }
+    return &it->second;
+}
+
 std::vector<std::string>
 BuildCache::GetNeighbors(const std::string& source_id) const {
     std::vector<std::string> result;

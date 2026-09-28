@@ -160,14 +160,8 @@ public:
     CalcDistancesById(const DatasetPtr& query,
                       const int64_t* ids,
                       int64_t count,
-                      bool calculate_precise_distance = true) const override;
-
-    DatasetPtr
-    CalDistanceById(const DatasetPtr& query,
-                    const int64_t* ids,
-                    int64_t count,
-                    bool calculate_precise_distance = true,
-                    int64_t topk = -1) const override;
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const override;
 
     std::pair<int64_t, int64_t>
     GetMinAndMaxId() const override;

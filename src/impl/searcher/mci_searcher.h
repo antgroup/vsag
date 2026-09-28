@@ -38,6 +38,10 @@ struct MCISearcherParam {
     uint64_t precise_vector_stride{0};
     MetricType metric{MetricType::METRIC_TYPE_L2SQR};
     bool* used_precise_float_csr{nullptr};
+    // Optional dense validity bitmap indexed by inner id (non-zero means valid) and its size.
+    const uint8_t* valid_bitmap{nullptr};
+    uint64_t valid_bitmap_size{0};
+    bool* used_bitmap_fast_path{nullptr};
 };
 
 class MCISearcher {

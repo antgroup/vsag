@@ -85,6 +85,27 @@ PyramidBuildCache::GetGraphCache(const std::string& hierarchy_name,
     return it->second.get();
 }
 
+uint64_t
+PyramidBuildCache::CountMatchedSourceIds(const std::string* source_ids, uint64_t count) const {
+    UnorderedSet<std::string> cached_source_ids(allocator_);
+    cached_source_ids.reserve(count);
+    for (const auto& [key, graph_cache] : graph_caches_) {
+        if (graph_cache == nullptr) {
+            continue;
+        }
+        for (const auto& source_id : graph_cache->source_ids_) {
+            cached_source_ids.emplace(source_id);
+        }
+    }
+    uint64_t matched = 0;
+    for (uint64_t index = 0; index < count; ++index) {
+        if (cached_source_ids.find(source_ids[index]) != cached_source_ids.end()) {
+            ++matched;
+        }
+    }
+    return matched;
+}
+
 BuildCache&
 PyramidBuildCache::CreateGraphCache(const std::string& hierarchy_name,
                                     const std::string& node_path) {

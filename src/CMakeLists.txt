@@ -14,6 +14,7 @@
 # limitations under the License.
 
 
+add_subdirectory (gpu)
 add_subdirectory (simd)
 add_subdirectory (io)
 add_subdirectory (layout)
@@ -36,7 +37,7 @@ list (FILTER CPP_INDEX_SRCS EXCLUDE REGEX "_test.cpp")
 set (VSAG_SRCS ${CPP_SRCS} ${CPP_INDEX_SRCS})
 
 set (VSAG_DEP_LIBS antlr4-autogen antlr4-runtime simd io quantizer storage utils factory analyzer
-     datacell rabitq_split_datacell_factory ${IMPL_LIBS} ${ALGORITHM_LIBS} attr pthread m dl
+     datacell rabitq_split_datacell_factory ${IMPL_LIBS} ${ALGORITHM_LIBS} attr vsag_gpu pthread m dl
      ${BLAS_LIBRARIES})
 
 add_library (vsag_objects OBJECT ${VSAG_SRCS})

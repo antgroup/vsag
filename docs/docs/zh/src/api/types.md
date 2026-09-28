@@ -230,7 +230,7 @@ float range_search_recall(const float* base, const int64_t* base_ids, int64_t nu
 | 各索引参数 | `HGRAPH_*`、`IVF_*`、`PYRAMID_*`、`BRUTE_FORCE_*` |
 | 统计键 | `STATSTIC_MEMORY`、`STATSTIC_KNN_TIME`、`STATSTIC_RANGE_TIME` |
 
-各参数键的含义见 [索引参数](../resources/index_parameters.md) 与各 [索引页面](../indexes/README.md)。
+各参数键的含义见 [索引参数](../resources/index_parameters.md) 与各 [索引页面](../indexes/)。
 
 ## 参见
 

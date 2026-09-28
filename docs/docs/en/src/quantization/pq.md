@@ -87,4 +87,4 @@ on pre-normalized vectors.
 - [PQ FastScan](pqfs.md)
 - [Transform Quantizer](../advanced/quantization_transform.md)
 - [HGraph index](../indexes/hgraph.md)
-- [Quantization overview](README.md)
+- [Quantization overview](./)

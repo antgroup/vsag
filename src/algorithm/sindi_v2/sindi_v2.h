@@ -120,11 +120,11 @@ public:
                      bool calculate_precise_distance = true) const override;
 
     DatasetPtr
-    CalDistanceById(const DatasetPtr& query,
-                    const int64_t* ids,
-                    int64_t count,
-                    bool calculate_precise_distance = true,
-                    int64_t topk = -1) const override;
+    CalcDistancesById(const DatasetPtr& query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const override;
 
     std::pair<int64_t, int64_t>
     GetMinAndMaxId() const override;
@@ -154,6 +154,7 @@ private:
                 SindiQueryContext& query_context,
                 const SparseVector* original_query = nullptr,
                 SearchStatistics* statistics = nullptr,
+                const uint64_t* filter_callback_remaining = nullptr,
                 const SindiMetadataSearchRoute& metadata_route = {}) const;
 
     bool

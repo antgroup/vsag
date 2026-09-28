@@ -22,8 +22,9 @@ pairs and is one of the VSAG indexes that accepts `dtype: "sparse"`.
    walks the corresponding inverted lists in each window, aggregates contributions
    into a max-heap of size `n_candidate`, and returns the top-k. When `use_reorder`
    is enabled, the candidates are re-scored against a forward store. The default
-   forward store keeps fp32 values, while `rerank_type: "dmq8"` uses a compressed
-   DMQ store to reduce rerank memory.
+   forward store keeps FP32 values. `rerank_type: "fp16"` stores half-precision
+   values and converts them to FP32 for scoring, while `rerank_type: "dmq8"` uses
+   a compressed DMQ store to reduce rerank memory further.
 
 Distance is returned as `1 - inner_product` so results sort ascending as in the
 dense indexes.
@@ -80,7 +81,7 @@ and `metric_type` **must** be `"ip"`.
 | `doc_prune_ratio` | float | `0.0` | Fraction of lowest-weight terms dropped per doc at build time (`[0.0, 1.0)`). |
 | `use_quantization` | bool or string | `false` | `false` stores FP32 values, `true` stores SQ8 values, and `"fp16"` stores FP16 values. |
 | `use_reorder` | bool | `false` | Keep a forward store and rescore candidates after coarse SINDI scoring. |
-| `rerank_type` | string | `"fp32"` | Forward-store type used when `use_reorder` is enabled. `fp32` keeps exact values; `dmq8` stores compressed 8-bit DMQ codes. |
+| `rerank_type` | string | `"fp32"` | Forward-store type used when `use_reorder` is enabled. `fp32` keeps exact values, `fp16` stores half-precision values while scoring in FP32, and `dmq8` stores compressed 8-bit DMQ codes. |
 | `dmq_shared_codebook_threshold` | int | `1024` | With `rerank_type: "dmq8"`, terms occurring at most this many times share one codebook; more frequent terms keep independent codebooks. Set to `0` to disable sharing. |
 | `remap_term_ids` | bool | `false` | Remap term IDs before indexing; useful when term IDs are sparse or have large gaps. |
 | `avg_doc_term_length` | int | `100` | Hint for memory estimation only. |
@@ -104,6 +105,18 @@ and `metric_type` **must** be `"ip"`.
 Indexes built with `false` or `true` retain the legacy serialization representation. Older VSAG
 versions cannot parse a SINDI index that uses the new `"fp16"` value format; upgrade readers
 before deploying FP16 artifacts.
+
+### Rerank value formats
+
+`rerank_type` controls the separate forward store created by `use_reorder: true`; it is independent
+of the posting-list `use_quantization` setting. `fp16` keeps query values and accumulation in FP32
+but stores document values in FP16. Because term IDs remain 32-bit, the core bytes per non-zero
+forward-store entry decrease from 8 to 6 before record and block overhead. FP16 conversion adds
+compute work, so latency may improve for memory-bound workloads but can regress for short or
+cache-resident vectors. Measure with representative data.
+
+Both `fp16` and `dmq8` require `use_reorder: true`. Older VSAG versions cannot read the FP16 rerank
+payload.
 
 ### Immutable low-memory build
 
@@ -131,8 +144,9 @@ build time increased from about 330 seconds to 599 seconds. Treat these figures 
 evidence, not a capacity guarantee.
 
 The immutable runtime supports KNN and range search plus legacy `Serialize`/`Deserialize`.
-It rejects incremental `Add`, `GetSparseVectorByInnerId`, `CalcDistanceById`, and
-`CalDistanceById`. Mutable and immutable runtimes both support `SerializeStreaming`,
+It rejects incremental `Add` and `GetSparseVectorByInnerId`. Single-ID
+`CalcDistanceById` and batch `CalcDistancesById` (including the legacy `CalDistanceById` alias)
+are supported; see [distance-by-ID](../advanced/calc_distance_by_id.md). Mutable and immutable runtimes both support `SerializeStreaming`,
 `DeserializeStreaming`, and `Index::Load`.
 The serialized index must be loaded into a SINDI created with the same `immutable` setting.
 New indexes record the sorted posting-list format version and skip normalization when loaded.
@@ -140,22 +154,22 @@ Indexes written without this marker remain compatible and are normalized during 
 
 ### Host filtering
 
-Mutable and immutable SINDI and [SINDI_V2](sindi_v2.md) indexes can group documents by a single
-numeric host and avoid returning documents from other hosts. Attach a complete `uint32_t` `host_id`
-array to a host-aware `Build()` or mutable `Add()` batch. Use `0` for a document with no host:
+Mutable and immutable SINDI and [SINDI_V2](sindi_v2.md) indexes can group documents by their source
+host and avoid returning documents from other hosts. Attach a complete string `host` array to a
+host-aware `Build()` or mutable `Add()` batch. Use an empty string for a document with no host:
 
 ```cpp
 base->NumElements(n)
     ->SparseVectors(sparse_vectors)
     ->Ids(ids)
-    ->UInt32Metadata("host_id", base_host_ids)
+    ->StringMetadata("host", base_hosts)
     ->Owner(false);
 index->Build(base);
 
-uint32_t query_host_id = 42;
+std::string query_host = "example.com";
 query->NumElements(1)
     ->SparseVectors(&query_vec)
-    ->UInt32Metadata("host_id", &query_host_id)
+    ->StringMetadata("host", &query_host)
     ->Owner(false);
 ```
 
@@ -164,14 +178,15 @@ labels. Host queries scan the relevant posting windows and apply exact membershi
 host's one or more internal-ID ranges. Repeated mutable `Add()` calls may append disjoint ranges for
 the same host. Tombstones and an additional user `Filter` are applied together with host membership.
 
-Host ID `0` is the missing-host bucket; values from `1` through `UINT32_MAX` identify normal hosts.
-The number of distinct hosts cannot exceed the number of successfully indexed documents. Once a
-mutable index contains host metadata, every later `Add()` must provide a complete `host_id` array;
-host metadata cannot be introduced after host-unaware documents. A query with `host_id: 0` searches
-only missing-host documents, while omitting `host_id` preserves full-index KNN behavior. A host with
-no indexed documents returns an empty result. Indexes built without base host metadata ignore query
-host metadata and retain their previous behavior. Host filtering currently applies only to KNN;
-range search keeps its existing full-index behavior.
+Host strings are matched byte for byte without case folding or URL normalization. VSAG assigns
+compact internal IDs and persists the string-to-ID dictionary with the index; callers never provide
+those IDs. The empty string is the missing-host bucket. Once a mutable index contains host metadata,
+every later `Add()` must provide a complete `host` array; host metadata cannot be introduced after
+host-unaware documents. An empty-string query searches only missing-host documents, while omitting
+`host` preserves full-index KNN behavior. An unknown host returns an empty result. Indexes built
+without base host metadata ignore query host metadata and retain their previous behavior. The old
+numeric `host_id` input is rejected. Host filtering currently applies only to KNN; range search keeps
+its existing full-index behavior.
 
 ### Date-bucket filtering
 
@@ -179,7 +194,7 @@ Mutable and immutable SINDI can filter KNN queries by hierarchical calendar buck
 without reranking. Attach one canonical string bucket to each base document:
 
 ```cpp
-std::string base_dates[] = {"2026", "2026/05", "2026/05/01"};
+std::string base_dates[] = {"", "2026/05", "2026/05/01"};
 base->Paths("date", base_dates);
 
 std::string query_date = "2026/05";
@@ -197,6 +212,11 @@ months and days. Matching proceeds down the hierarchy: `2026` matches base bucke
 or day granularity in 2026; `2026/05` matches `2026/05` and every day below it; `2026/05/01`
 matches only that exact day. A more precise query never matches a coarser base bucket.
 
+An empty base string means that the document has no date. Missing-date documents remain searchable
+when the query omits all date selectors, including host-only queries, but never match a `date` or
+date-range query. Every base document still needs one array entry, so use an empty string instead of
+omitting a row. Empty query date strings remain invalid; omit the selector to disable date filtering.
+
 For an inclusive range query, provide `date_begin` and `date_end` together. A year or month at the
 beginning expands to its first day, while a year or month at the end expands to its last day. For
 example, `2025/11/20` through `2026/02` means `2025/11/20` through `2026/02/28`, inclusive. A base
@@ -205,10 +225,11 @@ range ending at `2026/08/01` can match a base day bucket on August 1, but not th
 `2026/08` bucket. The two range endpoints are required together, must be ordered after expansion,
 and cannot be combined with the single `date` selector.
 
-The date-aware build orders documents by calendar quarter and, when `host_id` is present, by host
-inside each quarter. For a mutable index, date metadata can be supplied by `Build()` or the first
-`Add()` while the index is empty. Once the index contains documents, date metadata cannot be
-introduced, and a date-aware mutable index rejects every later `Add()`. This build-once restriction
+The date-aware build places missing dates in a dedicated partition, orders dated documents by
+calendar quarter and, when `host` is present, by host inside each partition. For a mutable index,
+date metadata can be supplied by `Build()` or the first `Add()` while the index is empty. Once the
+index contains documents, date metadata cannot be introduced, and a date-aware mutable index
+rejects every later `Add()`. This build-once restriction
 avoids incrementally maintaining the quarter partitions. Mutable host-only indexes retain their
 existing incremental `Add()` support.
 
@@ -267,9 +288,10 @@ auto result = index->KnnSearch(
 - Hybrid dense+sparse pipelines where SINDI handles the sparse leg in parallel with
   HGraph / IVF for dense embeddings.
 - Memory-constrained deployments of sparse corpora (`use_quantization: true` selects SQ8,
-  while `"fp16"` halves FP32 value bytes; `use_reorder:
-  true` trades forward-store memory for recall, and `rerank_type: "dmq8"` reduces
-  that forward-store overhead).
+  while `"fp16"` halves FP32 posting value bytes; `use_reorder: true` trades
+  forward-store memory for recall, `rerank_type: "fp16"` reduces forward-store
+  value bytes with modest precision loss, and `rerank_type: "dmq8"` compresses
+  that store further).
 - Read-only snapshots that need lower peak build memory (`immutable: true`), accepting slower
   construction and no incremental writes.
 
@@ -303,8 +325,9 @@ When `rerank_type` is `dmq8`, codebooks are fixed by the initial build, so incre
      (`use_quantization: true`). This is a common balance between memory and
      recall.
 3. Pruned high-accuracy index with compressed reranking. Use the same pruning and
-     inverted-list quantization as above, but set `rerank_type: "dmq8"` together
-     with `use_reorder: true` to reduce forward-store memory.
+     inverted-list quantization as above, but set `rerank_type: "fp16"` together
+     with `use_reorder: true` for a precision-oriented reduction in forward-store
+     memory, or select `dmq8` for stronger compression.
 4. Very large sparse vocabularies. When term IDs are sparse within the `uint32`
      range, such as hash-based tokenizers, external vocabulary IDs, or vocabularies
      with large gaps, enable `remap_term_ids: true`. This avoids managing many

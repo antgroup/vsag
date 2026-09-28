@@ -213,7 +213,7 @@ private:
     uint64_t origin_size_;
 };
 
-class CountingMemoryReader : public vsag::Reader {
+class CountingMemoryReader : public vsag::Reader, public vsag::ReaderPrefetcher {
 public:
     explicit CountingMemoryReader(std::string bytes, bool fail_reads = false)
         : bytes_(std::move(bytes)), fail_reads_(fail_reads) {
@@ -259,10 +259,24 @@ public:
     }
 
     void
+    Prefetch(uint64_t offset, uint64_t len) override {
+        prefetch_calls_.fetch_add(1, std::memory_order_relaxed);
+        prefetch_bytes_.fetch_add(len, std::memory_order_relaxed);
+        this->CheckRead(offset, len);
+    }
+
+    void
     ResetCounters() {
         read_calls_.store(0, std::memory_order_relaxed);
         multi_read_calls_.store(0, std::memory_order_relaxed);
         read_bytes_.store(0, std::memory_order_relaxed);
+        prefetch_calls_.store(0, std::memory_order_relaxed);
+        prefetch_bytes_.store(0, std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] uint64_t
+    PrefetchCalls() const {
+        return prefetch_calls_.load(std::memory_order_relaxed);
     }
 
     [[nodiscard]] uint64_t
@@ -296,6 +310,8 @@ private:
     std::atomic<uint64_t> read_calls_{0};
     std::atomic<uint64_t> multi_read_calls_{0};
     std::atomic<uint64_t> read_bytes_{0};
+    std::atomic<uint64_t> prefetch_calls_{0};
+    std::atomic<uint64_t> prefetch_bytes_{0};
 };
 
 std::string
@@ -472,7 +488,7 @@ IVFTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestRangeSearch(index, dataset, search_param, recall, 10, true);
     TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
     TestFilterSearch(index, dataset, search_param, recall, true);
-    TestCalcDistanceById(index, dataset, 2e-6, true);
+    TestStoredDistanceConsistency(index, dataset);
     TestMultiQueryBatchCalcDistanceById(
         index, dataset, 2e-6, index->CheckFeature(vsag::SUPPORT_BATCH_CALC_DISTANCE_BY_ID));
     TestCheckIdExist(index, dataset);
@@ -663,6 +679,7 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
         vsag::LoadParameters load_parameters;
         load_parameters.Set("precise_io_type", "reader_io")
             .Set("precise_enable_read_cache", enable_read_cache)
+            .Set("precise_enable_prefetch_hint", true)
             .Set("precise_cache_total_size", precise_cache_total_size)
             .SetReader("precise_reader", reader);
         std::stringstream load_stream(bytes);
@@ -690,6 +707,9 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
     REQUIRE(std::abs(actual_search.value()->GetDistances()[0] -
                      expected_search.value()->GetDistances()[0]) < 2e-6F);
     REQUIRE(precise_reader->ReadBytes() > 0);
+    if (precise_codes_layout == "flat") {
+        REQUIRE(precise_reader->PrefetchCalls() > 0);
+    }
     if (enable_read_cache) {
         REQUIRE(precise_reader->ReadCalls() + precise_reader->MultiReadCalls() > 0);
         precise_reader->ResetCounters();
@@ -799,6 +819,7 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
             R"({"precise_io_type": 1})",
             R"({"precise_io_type": "unknown_io"})",
             R"({"precise_io_type": "reader_io", "precise_enable_read_cache": "true"})",
+            R"({"precise_io_type": "reader_io", "precise_enable_prefetch_hint": "true"})",
             R"({"precise_io_type": "reader_io", "precise_cache_total_size": -1})",
         };
         for (const auto& parameters : invalid_parameters) {
@@ -3338,4 +3359,69 @@ TEST_CASE("IVF Batch Search Parallel", "[ft][ivf][pr]") {
         REQUIRE(serial_ids[i] == parallel_ids[i]);
         REQUIRE(serial_dists[i] == parallel_dists[i]);
     }
+}
+
+TEST_CASE("IVF dense native distance contract", "[distance_contract]") {
+    using namespace fixtures;
+    for (const auto* quantizer : {"fp32", "sq8", "pqfs"}) {
+        auto param =
+            IVFTestIndex::GenerateIVFBuildParametersString("l2", 16, quantizer, 8, "random");
+        auto created = vsag::Factory::CreateIndex("ivf", param);
+        REQUIRE(created.has_value());
+        auto index = created.value();
+        REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID));
+        REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID));
+        std::vector<float> values(64 * 16);
+        std::vector<int64_t> labels(64);
+        std::vector<std::string> paths(64, "a/b");
+        for (int64_t i = 0; i < 64; ++i) {
+            labels[i] = 100 + i;
+            for (int64_t j = 0; j < 16; ++j) {
+                values[i * 16 + j] = static_cast<float>((i + j) % 23) / 23.0F;
+            }
+        }
+        auto base = vsag::Dataset::Make()
+                        ->NumElements(64)
+                        ->Dim(16)
+                        ->Ids(labels.data())
+                        ->Float32Vectors(values.data())
+                        ->Paths(paths.data())
+                        ->Owner(false);
+        REQUIRE(index->Build(base).has_value());
+        auto query = vsag::Dataset::Make()
+                         ->NumElements(1)
+                         ->Dim(16)
+                         ->Float32Vectors(values.data())
+                         ->Owner(false);
+        for (bool precise : {false, true}) {
+            auto raw = index->CalcDistanceById(values.data(), labels[1], precise);
+            auto native = index->CalcDistanceById(query, labels[1], precise);
+            REQUIRE(raw.has_value());
+            REQUIRE(native.has_value());
+            REQUIRE(std::abs(raw.value() - native.value()) < 1e-5F);
+            int64_t candidates[] = {labels[1], -999, labels[0], labels[1], labels[0], -999};
+            query->NumElements(2);
+            auto batch = index->CalcDistancesById(query, candidates, 3, precise);
+            REQUIRE(batch.has_value());
+            REQUIRE(batch.value()->GetNumElements() == 2);
+            REQUIRE(batch.value()->GetDim() == 3);
+            REQUIRE(std::abs(batch.value()->GetDistances()[0] - raw.value()) < 1e-5F);
+            REQUIRE(batch.value()->GetDistances()[1] == -1.0F);
+            auto top = index->CalcDistancesById(query, candidates, 3, precise, 2);
+            REQUIRE(top.has_value());
+            REQUIRE(top.value()->GetDim() == 2);
+            for (int i = 0; i < 4; ++i) {
+                REQUIRE(top.value()->GetIds()[i] != -999);
+            }
+            query->NumElements(1);
+        }
+    }
+}
+
+TEST_CASE("IVF rejects unpackaged PQFS flat reorder", "[distance_contract]") {
+    auto param = fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
+        "l2", 16, "fp32,pqfs", 8, "random");
+    auto created = vsag::Factory::CreateIndex("ivf", param);
+    REQUIRE_FALSE(created.has_value());
+    REQUIRE(created.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 }

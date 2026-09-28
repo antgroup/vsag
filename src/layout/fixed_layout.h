@@ -177,6 +177,30 @@ public:
     }
 
     [[nodiscard]] uint64_t
+    GetIOSize() const {
+        return io_->Size();
+    }
+
+    void
+    ResizeForOverwrite(uint64_t size) {
+        io_->ResizeForOverwrite(size);
+    }
+
+    /**
+     * @brief Write to a raw byte offset, bypassing the record-oriented offset
+     * calculation of the normal write path.
+     *
+     * Intended for the parallel deserialization fill only, where the caller
+     * has already validated and pre-allocated the extent through ReserveIO /
+     * ResizeForOverwrite and writes to disjoint pre-assigned ranges. General
+     * callers should use the record-oriented write path instead.
+     */
+    void
+    WriteRaw(const uint8_t* data, uint64_t size, uint64_t offset) {
+        io_->Write(data, size, offset);
+    }
+
+    [[nodiscard]] uint64_t
     GetMemoryUsage() const {
         if constexpr (InMemory) {
             return static_cast<uint64_t>(io_->GetMemoryUsage());
