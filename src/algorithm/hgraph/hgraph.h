@@ -696,6 +696,13 @@ private:
     uint64_t
     apply_footer_metadata(const MetadataPtr& metadata);
 
+    // Load clique-owned state only; restore labels after all parallel component tasks finish.
+    void
+    deserialize_mci_cliques(StreamReader& reader, const JsonType& basic_info);
+
+    void
+    restore_mci_label_state(const JsonType& basic_info);
+
     /// Restore a whole component whose Deserialize seeks inside its own payload
     /// (see requires_seekable_payload). The frame is buffered first, so the
     /// component gets a seekable reader and the frame stays exactly consumed
@@ -703,7 +710,8 @@ private:
     void
     deserialize_seekable_whole_component(DeserializeReader& reader,
                                          const ComponentManifestEntry& comp,
-                                         bool compressed);
+                                         bool compressed,
+                                         const JsonType& basic_info);
 
     /// dispatch a whole component of the chunked manifest to its sequential
     /// Deserialize by name.
@@ -715,18 +723,24 @@ private:
     /// a capacity field) requires either moving that state out of here or
     /// serializing the component on the calling thread.
     void
-    deserialize_whole_component(const std::string& name, StreamReader& reader);
+    deserialize_whole_component(const std::string& name,
+                                StreamReader& reader,
+                                const JsonType& basic_info);
 
     /// parallel body load driven by the manifest recorded in the footer
     void
     parallel_deserialize_manifest(DeserializeReader& reader,
                                   ThreadPool& pool,
-                                  const ChunkedManifest& chunked_manifest);
+                                  const ChunkedManifest& chunked_manifest,
+                                  const JsonType& basic_info);
 
     /// parallel load of an uncompressed body without a recorded manifest:
     /// probe the component extents sequentially, then fill io data in parallel
     void
-    parallel_deserialize_probe(DeserializeReader& reader, ThreadPool& pool, uint64_t body_end);
+    parallel_deserialize_probe(DeserializeReader& reader,
+                               ThreadPool& pool,
+                               uint64_t body_end,
+                               const JsonType& basic_info);
 
     /// Read label (external id) mappings from stream.
     void
@@ -761,6 +775,11 @@ private:
     /// Compact internal storage after deletions.
     void
     shrink_to_fit();
+
+    /// Physically remove external labels, remap graph/MCI IDs, repair cliques and shrink storage.
+    /// Owns mutation locking; called by Remove(FORCE_REMOVE) when MCI is enabled.
+    uint32_t
+    force_remove_with_mci(const std::vector<int64_t>& ids);
 
     /// Flat brute-force search used when the index is too small or graph is unavailable.
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
@@ -996,20 +1015,54 @@ private:
     void
     build_mci_clique_index(const void* vectors = nullptr);
 
+    /// Search HGraph KNN and update MCI without inserting a vector into HGraph.
+    /// visible_total is the exclusive inner-ID bound for accepted KNN candidates, not live count.
+    /// Zero defaults to node_id + 1 for ADD; existing FP32 repair points pass total_count_.
     void
-    incremental_update_mci_clique(InnerIdType new_inner_id, const void* vector);
+    incremental_update_mci_clique(InnerIdType node_id,
+                                  const void* vector,
+                                  uint64_t visible_total = 0);
 
-    [[nodiscard]] Vector<InnerIdType>
-    find_mci_knn_for_new_node(InnerIdType new_inner_id, const void* vector) const;
+    void
+    incremental_update_mci_clique(InnerIdType node_id,
+                                  const Vector<InnerIdType>& knn_ids,
+                                  uint64_t visible_total);
+
+    /// Apply deletion to MCI only, retiring small cliques and repairing under-covered survivors.
+    /// Uses unchanged inner IDs; does not remove vectors, remap graph IDs or shrink storage.
+    /// Caller owns mutation locking and handles label deletion and MCI publication.
+    void
+    remove_from_mci(const Vector<InnerIdType>& removed_inner_ids);
+
+    /// Account successful vector mutations and compact at 100. Caller holds mci_mutation_mutex_.
+    /// MARK_REMOVE accounts the complete batch after repair; FORCE_REMOVE compacts separately.
+    void
+    maybe_compact_mci(uint64_t changed_count);
+
+    /// Recover an existing query vector and run the same MCI update as Add, without reinserting it.
+    /// Non-FP32 repair scans O(N) stored-code distances per seed with O(mcs) heap storage;
+    /// FP32 repair uses HGraph KNN. Neither path promises logarithmic worst-case search time.
+    void
+    repair_mci_clique(InnerIdType node_id);
+
+    /// Recheck live coverage after earlier repairs, reusing caller-owned scratch storage.
+    /// Caller holds mutation and persistent-codes locks and supplies a current inner ID.
+    bool
+    repair_mci_clique_if_undercovered(InnerIdType node_id, Vector<InnerIdType>& memberships);
 
     [[nodiscard]] Vector<InnerIdType>
     search_mci_knn(InnerIdType query_inner_id, const void* vector, uint64_t visible_total) const;
 
-    bool
-    try_join_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+    void
+    try_join_mci_clique(InnerIdType new_inner_id,
+                        const Vector<InnerIdType>& knn_ids,
+                        uint64_t degree_target,
+                        UnorderedSet<InnerIdType>& neighbors);
 
     void
-    build_incremental_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+    build_incremental_mci_clique(InnerIdType new_inner_id,
+                                 const Vector<InnerIdType>& knn_ids,
+                                 uint64_t visible_total);
 
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};  // coarse/quantized codes for graph search
@@ -1046,6 +1099,7 @@ private:
 
     CliqueDataCellPtr mci_cliques_{nullptr};  // companion MCI clique datacell
     HGraphMCIParameters mci_parameters_{};
+    uint64_t mci_pending_mutations_{0};  // runtime-only; guarded by mci_mutation_mutex_
 
     uint64_t ef_construct_{400};  // expansion factor during graph construction
     float alpha_{1.0};            // Relative Neighborhood Graph pruning coefficient
@@ -1055,11 +1109,18 @@ private:
     mutable std::shared_mutex global_mutex_;            // guards total_count_, entry_point_id_
     mutable std::shared_mutex persistent_codes_mutex_;  // pins flatten storage during MCI search
     mutable std::mutex mci_build_mutex_;                // serializes full MCI reconstruction
-    mutable std::mutex mci_add_mutex_;                  // serializes MCI-enabled Add calls
-    mutable std::mutex pipnn_initial_build_mutex_;      // serializes PiPNN's first Add batch
-    mutable MutexArrayPtr neighbors_mutex_;             // per-node locks for neighbor lists
-    mutable std::shared_mutex add_mutex_;               // serializes Add() operations
-    mutable std::shared_mutex force_remove_mutex_;      // serializes force-remove operations
+    // MCI writers take mutation before force_remove; label scopes end before repair/search.
+    // Add insertion and Shrink/UpdateVector take force_remove before persistent_codes.
+    // FORCE_REMOVE spans the same pair: it holds force_remove exclusively, releases it, then takes
+    // persistent_codes shared for repair, and finally reacquires force_remove exclusively before
+    // pinning codes exclusively to shrink. The release is required because repair enters public
+    // search, which reacquires force_remove itself (shared_mutex is non-recursive); mutation still
+    // excludes all ID-moving operations. CSR storage/view locks are internal to CliqueDataCell.
+    mutable std::mutex mci_mutation_mutex_;         // serializes MCI Add, Remove and compaction
+    mutable std::mutex pipnn_initial_build_mutex_;  // serializes PiPNN's first Add batch
+    mutable MutexArrayPtr neighbors_mutex_;         // per-node locks for neighbor lists
+    mutable std::shared_mutex add_mutex_;           // serializes Add() operations
+    mutable std::shared_mutex force_remove_mutex_;  // serializes force-remove operations
     // Single-flights physical code growth before taking the global writer lock.
     mutable std::mutex physical_code_resize_mutex_;
     std::atomic<bool> physical_code_resize_pending_{false};
