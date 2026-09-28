@@ -880,7 +880,10 @@ void
 HGraph::publish_unique_to_bottom_graph(InnerIdType inner_id,
                                        const DistHeapPtr& neighbors,
                                        const FlattenInterfacePtr& flatten_codes) {
-    LockGuard cur_lock(neighbors_mutex_, inner_id);
+    // No lock on inner_id: it has not been published to the graph yet, so no other thread
+    // can reach it (entry_point_id_ is updated only after this returns). Only its own
+    // slots are written here; the neighbour locks taken inside mutually_connect_new_element
+    // protect the existing nodes it links back from.
     if (neighbors != nullptr and not neighbors->Empty()) {
         mutually_connect_new_element(inner_id,
                                      neighbors,
@@ -915,7 +918,6 @@ HGraph::publish_unique_to_route_graphs(const void* data,
                     filtered_result->Push(dist, id);
                 }
             }
-            LockGuard cur_lock(neighbors_mutex_, inner_id);
             if (not filtered_result->Empty()) {
                 mutually_connect_new_element(inner_id,
                                              filtered_result,
@@ -928,7 +930,6 @@ HGraph::publish_unique_to_route_graphs(const void* data,
                 route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
             }
         } else {
-            LockGuard cur_lock(neighbors_mutex_, inner_id);
             route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         }
     }
