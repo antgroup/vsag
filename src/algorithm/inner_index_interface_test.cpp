@@ -15,9 +15,12 @@
 
 #include "inner_index_interface.h"
 
+#include <algorithm>
+#include <future>
 #include <memory>
 #include <sstream>
 #include <utility>
+#include <vector>
 
 #include "algorithm/bruteforce/bruteforce.h"
 #include "algorithm/hgraph/hgraph.h"
@@ -76,6 +79,10 @@ class EmptyInnerIndex : public InnerIndexInterface {
 public:
     EmptyInnerIndex() = default;
 
+    EmptyInnerIndex(const InnerIndexParameterPtr& index_param, const IndexCommonParam& common_param)
+        : InnerIndexInterface(index_param, common_param) {
+    }
+
     std::string
     GetName() const override {
         return "EmptyInnerIndex";
@@ -124,6 +131,110 @@ public:
     GetNumElements() const override {
         return 0;
     }
+};
+
+class DataReadingInnerIndex : public EmptyInnerIndex {
+public:
+    class TestExtraInfo : public ExtraInfoInterface {
+    public:
+        void
+        InsertExtraInfo(const char*, InnerIdType) override {
+        }
+
+        void
+        BatchInsertExtraInfo(const char*, InnerIdType, InnerIdType*) override {
+        }
+
+        void
+        Prefetch(InnerIdType) override {
+        }
+
+        void
+        Resize(InnerIdType) override {
+        }
+
+        void
+        Release(const char*) const override {
+        }
+
+        const char*
+        GetExtraInfoById(InnerIdType, bool& need_release) const override {
+            need_release = false;
+            return nullptr;
+        }
+
+        bool
+        GetExtraInfoById(InnerIdType inner_id, char* extra_info) const override {
+            extra_info[0] = static_cast<char>(inner_id);
+            extra_info[1] = static_cast<char>(inner_id + 10);
+            return true;
+        }
+
+        [[nodiscard]] bool
+        InMemory() const override {
+            return true;
+        }
+    };
+
+    DataReadingInnerIndex(const InnerIndexParameterPtr& index_param,
+                          const IndexCommonParam& common_param,
+                          uint64_t count)
+        : EmptyInnerIndex(index_param, common_param) {
+        this->has_raw_vector_ = true;
+        this->has_attribute_ = true;
+        this->extra_info_size_ = 2;
+        this->extra_infos_ = std::make_shared<TestExtraInfo>();
+        for (InnerIdType inner_id = 0; inner_id != count; ++inner_id) {
+            this->label_table_->Insert(inner_id, static_cast<LabelType>(100 + inner_id));
+        }
+    }
+
+    void
+    GetVectorByInnerId(InnerIdType inner_id, float* data) const override {
+        data[0] = static_cast<float>(inner_id);
+        data[1] = static_cast<float>(inner_id) + 0.5F;
+    }
+
+    void
+    GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const override {
+        auto* value = new AttributeValue<int64_t>();
+        value->name_ = "inner_id";
+        value->GetValue().push_back(static_cast<int64_t>(inner_id));
+        attr->attrs_.push_back(value);
+    }
+};
+
+class CountingThreadPool : public ThreadPool {
+public:
+    void
+    WaitUntilEmpty() override {
+    }
+
+    void
+    SetQueueSizeLimit(uint64_t) override {
+    }
+
+    void
+    SetPoolSize(uint64_t) override {
+    }
+
+    std::future<void>
+    Enqueue(std::function<void(void)> task) override {
+        ++submission_count_;
+        std::promise<void> promise;
+        auto future = promise.get_future();
+        task();
+        promise.set_value();
+        return future;
+    }
+
+    [[nodiscard]] uint64_t
+    SubmissionCount() const {
+        return submission_count_;
+    }
+
+private:
+    uint64_t submission_count_{0};
 };
 
 class ReadingInnerIndex : public EmptyInnerIndex {
@@ -288,4 +399,71 @@ TEST_CASE("InnerIndexInterface rejects malformed binary set", "[ut][InnerIndexIn
 
         RequireReadError([&index, &binary]() { index->Deserialize(binary); });
     }
+}
+
+TEST_CASE("GetDataByIds handles serial build thread counts", "[ut][InnerIndexInterface]") {
+    constexpr uint64_t count = 3;
+    auto index_param = std::make_shared<InnerIndexParameter>();
+    index_param->build_thread_count = GENERATE(uint64_t{0}, uint64_t{1}, uint64_t{2}, uint64_t{8});
+
+    IndexCommonParam common_param;
+    common_param.dim_ = 2;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto pool = std::make_shared<CountingThreadPool>();
+    common_param.thread_pool_ = std::make_shared<SafeThreadPool>(pool);
+
+    auto index = std::make_shared<DataReadingInnerIndex>(index_param, common_param, count);
+    const std::vector<int64_t> ids{102, 100, 101};
+
+    auto result = index->GetDataByIds(ids.data(), static_cast<int64_t>(ids.size()));
+
+    REQUIRE(result->GetNumElements() == static_cast<int64_t>(ids.size()));
+    REQUIRE(result->GetDim() == common_param.dim_);
+    const std::vector<float> expected_vectors{2.0F, 2.5F, 0.0F, 0.5F, 1.0F, 1.5F};
+    REQUIRE(std::equal(ids.begin(), ids.end(), result->GetIds()));
+    REQUIRE(
+        std::equal(expected_vectors.begin(), expected_vectors.end(), result->GetFloat32Vectors()));
+    const std::vector<char> expected_extra_info{2, 12, 0, 10, 1, 11};
+    REQUIRE(std::equal(
+        expected_extra_info.begin(), expected_extra_info.end(), result->GetExtraInfos()));
+    for (uint64_t i = 0; i < count; ++i) {
+        const auto& attrs = result->GetAttributeSets()[i].attrs_;
+        REQUIRE(attrs.size() == 1);
+        auto* value = dynamic_cast<AttributeValue<int64_t>*>(attrs[0]);
+        REQUIRE(value != nullptr);
+        REQUIRE(value->name_ == "inner_id");
+        REQUIRE(value->GetValue() == std::vector<int64_t>{ids[i] - 100});
+    }
+    const auto expected_submissions =
+        index_param->build_thread_count > 1
+            ? 3 * std::min<uint64_t>(index_param->build_thread_count, count)
+            : uint64_t{0};
+    REQUIRE(pool->SubmissionCount() == expected_submissions);
+}
+
+TEST_CASE("GetDataByIds does not schedule empty work", "[ut][InnerIndexInterface]") {
+    auto index_param = std::make_shared<InnerIndexParameter>();
+    index_param->build_thread_count = 8;
+
+    IndexCommonParam common_param;
+    common_param.dim_ = 2;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto pool = std::make_shared<CountingThreadPool>();
+    common_param.thread_pool_ = std::make_shared<SafeThreadPool>(pool);
+
+    auto index = std::make_shared<DataReadingInnerIndex>(index_param, common_param, 0);
+    auto result = index->GetDataByIds(nullptr, 0);
+
+    REQUIRE(result->GetNumElements() == 0);
+    REQUIRE(result->GetIds() == nullptr);
+    REQUIRE(result->GetFloat32Vectors() == nullptr);
+    REQUIRE(result->GetAttributeSets() == nullptr);
+    REQUIRE(result->GetExtraInfos() == nullptr);
+    REQUIRE(pool->SubmissionCount() == 0);
+
+    auto unsupported = std::make_shared<EmptyInnerIndex>(index_param, common_param);
+    REQUIRE_THROWS_AS(unsupported->GetDataByIdsWithFlag(nullptr, 0, DATA_FLAG_FLOAT32_VECTOR),
+                      VsagException);
 }
