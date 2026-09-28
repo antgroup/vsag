@@ -195,6 +195,16 @@ arg_int(int argc, char** argv, const char* name, int64_t fallback) {
     return fallback;
 }
 
+std::string
+arg_str(int argc, char** argv, const char* name, const char* fallback) {
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::strcmp(argv[i], name) == 0) {
+            return std::string(argv[i + 1]);
+        }
+    }
+    return std::string(fallback);
+}
+
 }  // namespace
 
 int
@@ -205,6 +215,10 @@ main(int argc, char** argv) {
     const int64_t threads = arg_int(argc, argv, "--threads", 32);
     const int64_t total = batch * batches;
     const bool use_build = arg_int(argc, argv, "--use-build", 0) != 0;
+    const std::string metric = arg_str(argc, argv, "--metric", "ip");
+    const std::string data_path = arg_str(argc, argv, "--data", "");
+    const std::string query_path = arg_str(argc, argv, "--query", "");
+    const bool use_l2 = metric == "l2";
 
     vsag::init();
 
@@ -213,13 +227,27 @@ main(int argc, char** argv) {
               << " build_threads=" << threads
               << " mode=" << (use_build ? "single Build()" : "batched Add()") << "\n";
 
-    // Synthetic dataset. Log-normal magnitude gives a skewed radius distribution,
-    // closer to real embedding data than a uniform hypercube.
     std::mt19937 rng(47);
     std::normal_distribution<float> normal(0.0F, 1.0F);
     std::lognormal_distribution<float> magnitude(0.0F, 0.6F);
     std::vector<float> data(static_cast<size_t>(total) * dim);
-    {
+    if (not data_path.empty()) {
+        // Raw little-endian float32 rows, no header, exactly total * dim values.
+        std::FILE* fp = std::fopen(data_path.c_str(), "rb");
+        if (fp == nullptr) {
+            std::fprintf(stderr, "cannot open data file %s\n", data_path.c_str());
+            return 1;
+        }
+        const size_t got = std::fread(data.data(), sizeof(float), data.size(), fp);
+        std::fclose(fp);
+        if (got != data.size()) {
+            std::fprintf(stderr, "short data file: %zu of %zu floats\n", got, data.size());
+            return 1;
+        }
+        std::cout << "loaded " << total << " rows from " << data_path << "\n";
+    } else {
+        // Synthetic dataset. Log-normal magnitude gives a skewed radius distribution,
+        // closer to real embedding data than a uniform hypercube.
         auto t0 = wall_seconds_now();
         for (int64_t i = 0; i < total; ++i) {
             const float scale = magnitude(rng);
@@ -279,6 +307,16 @@ main(int argc, char** argv) {
             "use_mci": false
         }
     })";
+
+    if (use_l2) {
+        const std::string from = "\"metric_type\": \"ip\"";
+        const auto at = params.find(from);
+        if (at == std::string::npos) {
+            std::fprintf(stderr, "cannot switch the metric in the index parameters\n");
+            return 1;
+        }
+        params.replace(at, from.size(), "\"metric_type\": \"l2\"");
+    }
 
     vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
     vsag::Engine engine(&resource);
@@ -405,13 +443,28 @@ main(int argc, char** argv) {
     // search quality rather than "did the index find the vector we just inserted".
     std::vector<float> queries;
     if (digest) {
-        std::normal_distribution<float> qnormal(0.0F, 1.0F);
-        std::lognormal_distribution<float> qmag(0.0F, 0.6F);
         queries.resize(static_cast<size_t>(50) * dim);
-        for (int64_t qi = 0; qi < 50; ++qi) {
-            const float scale = qmag(rng);
-            for (int64_t d2 = 0; d2 < dim; ++d2) {
-                queries[static_cast<size_t>(qi) * dim + d2] = qnormal(rng) * scale;
+        if (not query_path.empty()) {
+            std::FILE* fp = std::fopen(query_path.c_str(), "rb");
+            if (fp == nullptr) {
+                std::fprintf(stderr, "cannot open query file %s\n", query_path.c_str());
+                return 1;
+            }
+            const size_t got = std::fread(queries.data(), sizeof(float), queries.size(), fp);
+            std::fclose(fp);
+            if (got != queries.size()) {
+                std::fprintf(stderr, "short query file: %zu of %zu floats\n", got, queries.size());
+                return 1;
+            }
+            std::cout << "loaded 50 queries from " << query_path << "\n";
+        } else {
+            std::normal_distribution<float> qnormal(0.0F, 1.0F);
+            std::lognormal_distribution<float> qmag(0.0F, 0.6F);
+            for (int64_t qi = 0; qi < 50; ++qi) {
+                const float scale = qmag(rng);
+                for (int64_t d2 = 0; d2 < dim; ++d2) {
+                    queries[static_cast<size_t>(qi) * dim + d2] = qnormal(rng) * scale;
+                }
             }
         }
     }
@@ -490,16 +543,26 @@ main(int argc, char** argv) {
                 exact.reserve(static_cast<size_t>(total));  // `total` = dataset size
                 for (int64_t j = 0; j < total; ++j) {
                     const float* v = data.data() + static_cast<size_t>(j) * dim;
-                    double ip = 0.0;
-                    for (int64_t d2 = 0; d2 < dim; ++d2) {
-                        ip += static_cast<double>(q[d2]) * static_cast<double>(v[d2]);
+                    double value = 0.0;
+                    if (use_l2) {
+                        for (int64_t d2 = 0; d2 < dim; ++d2) {
+                            const double diff =
+                                static_cast<double>(q[d2]) - static_cast<double>(v[d2]);
+                            value += diff * diff;
+                        }
+                    } else {
+                        for (int64_t d2 = 0; d2 < dim; ++d2) {
+                            value += static_cast<double>(q[d2]) * static_cast<double>(v[d2]);
+                        }
                     }
-                    exact.emplace_back(static_cast<float>(ip), ids[j]);
+                    exact.emplace_back(static_cast<float>(value), ids[j]);
                 }
                 std::partial_sort(exact.begin(),
                                   exact.begin() + 10,
                                   exact.end(),
-                                  [](const auto& a, const auto& b) { return a.first > b.first; });
+                                  [use_l2](const auto& a, const auto& b) {
+                                      return use_l2 ? a.first < b.first : a.first > b.first;
+                                  });
                 auto qds = vsag::Dataset::Make();
                 qds->NumElements(1)->Dim(dim)->Float32Vectors(const_cast<float*>(q))->Owner(false);
                 auto res = index->KnnSearch(qds, 10, search_params);

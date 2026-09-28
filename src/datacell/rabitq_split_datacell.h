@@ -877,7 +877,8 @@ public:
         }
     }
 
-    // Per-cluster constants used by the code-domain pairwise inner product.
+    // Per-cluster constants used by the code-domain pair distance. All of them are derived from
+    // the centroids that the codec already stores, so nothing is added to the index.
     void
     refresh_fused_cluster_stats() {
         const uint64_t cluster_count = fused_quantizers_.size();
@@ -901,13 +902,31 @@ public:
                 fused_centroid_pair_ip_[j * cluster_count + i] = ip;
             }
         }
+        if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+            // c1 - c2 for the cross cluster terms of the difference form.
+            fused_centroid_diff_.assign(cluster_count * cluster_count * dim, 0.0F);
+            for (uint64_t i = 0; i < cluster_count; ++i) {
+                const float* centroid_i = fused_centroids_.data() + i * dim;
+                for (uint64_t j = 0; j < cluster_count; ++j) {
+                    if (i == j) {
+                        continue;
+                    }
+                    const float* centroid_j = fused_centroids_.data() + j * dim;
+                    float* out = fused_centroid_diff_.data() + (i * cluster_count + j) * dim;
+                    for (uint64_t d = 0; d < dim; ++d) {
+                        out[d] = centroid_i[d] - centroid_j[d];
+                    }
+                }
+            }
+        }
     }
 
-    // Code-domain pairwise distance for fused codes; false when the layout is not the
+    // Code-domain pair distance for fused codes; false when the layout is not the
     // HNSW-compatible 1 + 7 codec, in which case the reconstruction path is used.
     bool
-    compute_fused_pair_distance(InnerIdType id1, InnerIdType id2, float* distance) const {
-        if constexpr (metric != MetricType::METRIC_TYPE_IP) {
+    compute_fused_pair_distance(InnerIdType id1, InnerIdType id2, float* distance) {
+        if constexpr (metric != MetricType::METRIC_TYPE_IP and
+                      metric != MetricType::METRIC_TYPE_L2SQR) {
             return false;
         }
         const uint64_t dim = static_cast<uint64_t>(common_param_.dim_);
@@ -925,18 +944,52 @@ public:
             return false;
         }
         const uint64_t cluster_count = fused_quantizers_.size();
-        return fused_quantizers_[view1.cluster_id]->ComputeFusedPairIP(
-            view1.one_bit_code,
-            view1.supplement_code,
-            fused_centroids_.data() + static_cast<uint64_t>(view1.cluster_id) * dim,
-            fused_centroid_sums_[view1.cluster_id],
-            view2.one_bit_code,
-            view2.supplement_code,
-            fused_centroids_.data() + static_cast<uint64_t>(view2.cluster_id) * dim,
-            fused_centroid_sums_[view2.cluster_id],
-            fused_centroid_pair_ip_[static_cast<uint64_t>(view1.cluster_id) * cluster_count +
-                                    view2.cluster_id],
-            distance);
+        const uint64_t index1 =
+            static_cast<uint64_t>(view1.cluster_id) * cluster_count + view2.cluster_id;
+        const uint64_t index2 =
+            static_cast<uint64_t>(view2.cluster_id) * cluster_count + view1.cluster_id;
+        if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+            return fused_quantizers_[view1.cluster_id]->ComputeFusedPairIP(
+                view1.one_bit_code,
+                view1.supplement_code,
+                fused_centroids_.data() + static_cast<uint64_t>(view1.cluster_id) * dim,
+                fused_centroid_sums_[view1.cluster_id],
+                view2.one_bit_code,
+                view2.supplement_code,
+                fused_centroids_.data() + static_cast<uint64_t>(view2.cluster_id) * dim,
+                fused_centroid_sums_[view2.cluster_id],
+                fused_centroid_pair_ip_[index1],
+                distance);
+        } else {
+            const bool same_cluster = view1.cluster_id == view2.cluster_id;
+            const float* centroid_diff = nullptr;
+            if (not same_cluster) {
+                const uint64_t offset = index1 * dim;
+                if (fused_centroid_diff_.size() < offset + dim) {
+                    return false;
+                }
+                centroid_diff = fused_centroid_diff_.data() + offset;
+            }
+            const uint64_t diagonal1 =
+                static_cast<uint64_t>(view1.cluster_id) * cluster_count + view1.cluster_id;
+            const uint64_t diagonal2 =
+                static_cast<uint64_t>(view2.cluster_id) * cluster_count + view2.cluster_id;
+            // |c1 - c2|^2 from the centroid pair inner products (the diagonal is |c|^2)
+            const float centroid_diff_sq = fused_centroid_pair_ip_[diagonal1] +
+                                           fused_centroid_pair_ip_[diagonal2] -
+                                           2.0F * fused_centroid_pair_ip_[index2];
+            const float centroid_diff_sum =
+                fused_centroid_sums_[view1.cluster_id] - fused_centroid_sums_[view2.cluster_id];
+            return fused_quantizers_[view1.cluster_id]->ComputeFusedPairL2Difference(
+                view1.one_bit_code,
+                view1.supplement_code,
+                view2.one_bit_code,
+                view2.supplement_code,
+                centroid_diff_sq,
+                centroid_diff_sum,
+                centroid_diff,
+                distance);
+        }
     }
 
     float
@@ -1865,6 +1918,7 @@ public:
     std::vector<float> fused_centroids_;
     std::vector<float> fused_centroid_sums_;
     std::vector<float> fused_centroid_pair_ip_;
+    std::vector<float> fused_centroid_diff_;
     std::shared_ptr<FixedLayout<OneBitIOTmpl>> x_bit_layout_{nullptr};
     std::shared_ptr<FixedLayout<SupplementIOTmpl>> supplement_layout_{nullptr};
     std::shared_ptr<FixedLayout<MemoryIO>> optimized_build_scalar_layout_{nullptr};

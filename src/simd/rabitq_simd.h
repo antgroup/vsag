@@ -317,7 +317,8 @@ RaBitQExCode7ToBytes(const uint8_t* one_bit_code,
                      const uint8_t* supplement_code,
                      uint64_t dim,
                      uint8_t* out,
-                     uint64_t* code_sum);
+                     uint64_t* code_sum,
+                     uint64_t* code_sq_sum);
 
 bool
 RaBitQExCode7ToVector(const uint8_t* one_bit_code,
@@ -562,7 +563,8 @@ RaBitQExCode7ToBytes(const uint8_t* one_bit_code,
                      const uint8_t* supplement_code,
                      uint64_t dim,
                      uint8_t* out,
-                     uint64_t* code_sum);
+                     uint64_t* code_sum,
+                     uint64_t* code_sq_sum);
 
 bool
 RaBitQExCode7ToVector(const uint8_t* one_bit_code,
@@ -862,7 +864,8 @@ using RaBitQExCode7ToBytesType = bool (*)(const uint8_t* one_bit_code,
                                           const uint8_t* supplement_code,
                                           uint64_t dim,
                                           uint8_t* out,
-                                          uint64_t* code_sum);
+                                          uint64_t* code_sum,
+                                          uint64_t* code_sq_sum);
 
 using RaBitQExCode7ToVectorType = bool (*)(const uint8_t* one_bit_code,
                                            const uint8_t* supplement_code,

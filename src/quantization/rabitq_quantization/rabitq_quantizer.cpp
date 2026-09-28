@@ -2959,9 +2959,9 @@ RaBitQuantizer<metric>::ComputeFusedPairIP(const uint8_t* one_bit_code1,
     uint64_t code_sum1 = 0;
     uint64_t code_sum2 = 0;
     if (not RaBitQExCode7ToBytes(
-            one_bit_code1, supplement_code1, this->dim_, codes1.data(), &code_sum1) or
+            one_bit_code1, supplement_code1, this->dim_, codes1.data(), &code_sum1, nullptr) or
         not RaBitQExCode7ToBytes(
-            one_bit_code2, supplement_code2, this->dim_, codes2.data(), &code_sum2)) {
+            one_bit_code2, supplement_code2, this->dim_, codes2.data(), &code_sum2, nullptr)) {
         return false;
     }
 
@@ -3006,6 +3006,95 @@ RaBitQuantizer<metric>::ComputeFusedPairIP(const uint8_t* one_bit_code1,
     }
     *distance = distance_value;
     return true;
+}
+
+template <MetricType metric>
+bool
+RaBitQuantizer<metric>::ComputeFusedPairL2Difference(const uint8_t* one_bit_code1,
+                                                     const uint8_t* supplement_code1,
+                                                     const uint8_t* one_bit_code2,
+                                                     const uint8_t* supplement_code2,
+                                                     float centroid_diff_sq,
+                                                     float centroid_diff_sum,
+                                                     const float* centroid_diff,
+                                                     float* distance) const {
+    if constexpr (metric != MetricType::METRIC_TYPE_L2SQR) {
+        return false;
+    } else {
+        if (distance == nullptr or one_bit_code1 == nullptr or supplement_code1 == nullptr or
+            one_bit_code2 == nullptr or supplement_code2 == nullptr or
+            not SupportSplitCodeStorage() or pca_dim_ != original_dim_ or this->dim_ == 0 or
+            (this->dim_ & 63U) != 0U or FilterBits() != 1 or ReorderBits() != 7 or
+            centroid_.size() != this->dim_) {
+            return false;
+        }
+        Vector<uint8_t> codes1(this->dim_, 0, this->allocator_);
+        Vector<uint8_t> codes2(this->dim_, 0, this->allocator_);
+        uint64_t code_sum1 = 0;
+        uint64_t code_sum2 = 0;
+        uint64_t code_sq_sum1 = 0;
+        uint64_t code_sq_sum2 = 0;
+        if (not RaBitQExCode7ToBytes(one_bit_code1,
+                                     supplement_code1,
+                                     this->dim_,
+                                     codes1.data(),
+                                     &code_sum1,
+                                     &code_sq_sum1) or
+            not RaBitQExCode7ToBytes(one_bit_code2,
+                                     supplement_code2,
+                                     this->dim_,
+                                     codes2.data(),
+                                     &code_sum2,
+                                     &code_sq_sum2)) {
+            return false;
+        }
+
+        // L2 reconstruction uses half the stored residual scale
+        constexpr float metric_scale = 2.0F;
+        float full_rescale1 = 0.0F;
+        float full_rescale2 = 0.0F;
+        const uint64_t rescale_offset = SupplementMetaOffset() + sizeof(float);
+        std::memcpy(&full_rescale1, supplement_code1 + rescale_offset, sizeof(float));
+        std::memcpy(&full_rescale2, supplement_code2 + rescale_offset, sizeof(float));
+        const float residual_scale1 = -full_rescale1 / metric_scale;
+        const float residual_scale2 = -full_rescale2 / metric_scale;
+        if (not IsFiniteRaBitQValue(residual_scale1) or not IsFiniteRaBitQValue(residual_scale2)) {
+            return false;
+        }
+
+        // integer exact code statistics, 2*code - 255 keeps the centring free of cancellation
+        const auto dim = static_cast<int64_t>(this->dim_);
+        const auto sum1 = static_cast<int64_t>(code_sum1);
+        const auto sum2 = static_cast<int64_t>(code_sum2);
+        const auto sq1 = static_cast<int64_t>(code_sq_sum1);
+        const auto sq2 = static_cast<int64_t>(code_sq_sum2);
+        const double w1w2 =
+            0.25 * static_cast<double>(4 * static_cast<int64_t>(RaBitQCodeCodeIP(
+                                               codes1.data(), codes2.data(), this->dim_)) -
+                                       510 * (sum1 + sum2) + 65025 * dim);
+        const double w1_sq = 0.25 * static_cast<double>(4 * sq1 - 1020 * sum1 + 65025 * dim);
+        const double w2_sq = 0.25 * static_cast<double>(4 * sq2 - 1020 * sum2 + 65025 * dim);
+
+        const double a1 = static_cast<double>(residual_scale1);
+        const double a2 = static_cast<double>(residual_scale2);
+        double value = a1 * a1 * w1_sq + a2 * a2 * w2_sq - 2.0 * a1 * a2 * w1w2;
+        if (centroid_diff != nullptr) {
+            const double diff_sum = static_cast<double>(centroid_diff_sum);
+            const double x1 =
+                static_cast<double>(RaBitQFloatSQIP(centroid_diff, codes1.data(), this->dim_)) -
+                127.5 * diff_sum;
+            const double x2 =
+                static_cast<double>(RaBitQFloatSQIP(centroid_diff, codes2.data(), this->dim_)) -
+                127.5 * diff_sum;
+            value += static_cast<double>(centroid_diff_sq) + 2.0 * a1 * x1 - 2.0 * a2 * x2;
+        }
+        const auto result = static_cast<float>(value);
+        if (not IsFiniteRaBitQValue(result)) {
+            return false;
+        }
+        *distance = result;
+        return true;
+    }
 }
 
 template <MetricType metric>

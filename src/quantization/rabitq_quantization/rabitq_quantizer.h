@@ -211,6 +211,23 @@ public:
                        float centroid_pair_ip,
                        float* distance) const;
 
+    // L2 pair distance in the difference form, i.e. no per-code norm is needed:
+    //   |v1-v2|^2 = |c1-c2|^2 + 2*a1*<c1-c2,w1> - 2*a2*<c1-c2,w2>
+    //               + a1^2*|w1|^2 + a2^2*|w2|^2 - 2*a1*a2*<w1,w2>
+    // with w = code - 127.5 and v = centroid + residual_scale * w. Everything but the two
+    // float-code inner products is exact integer arithmetic over the codes, so nothing has to be
+    // stored per code. When both codes belong to the same cluster c1 == c2, the centroid terms
+    // vanish and `centroid_diff` may be null.
+    bool
+    ComputeFusedPairL2Difference(const uint8_t* one_bit_code1,
+                                 const uint8_t* supplement_code1,
+                                 const uint8_t* one_bit_code2,
+                                 const uint8_t* supplement_code2,
+                                 float centroid_diff_sq,
+                                 float centroid_diff_sum,
+                                 const float* centroid_diff,
+                                 float* distance) const;
+
     bool
     ComputeFusedAffineFilter(const float* transformed_query,
                              const uint8_t* query_planes,

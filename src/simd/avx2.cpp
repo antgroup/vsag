@@ -1391,17 +1391,20 @@ RaBitQExCode7ToBytes(const uint8_t* one_bit_code,
                      const uint8_t* supplement_code,
                      uint64_t dim,
                      uint8_t* out,
-                     uint64_t* code_sum) {
+                     uint64_t* code_sum,
+                     uint64_t* code_sq_sum) {
 #if defined(ENABLE_AVX2)
     if (one_bit_code == nullptr or supplement_code == nullptr or out == nullptr or
         code_sum == nullptr or dim == 0 or (dim & 63U) != 0U) {
-        return generic::RaBitQExCode7ToBytes(one_bit_code, supplement_code, dim, out, code_sum);
+        return generic::RaBitQExCode7ToBytes(
+            one_bit_code, supplement_code, dim, out, code_sum, code_sq_sum);
     }
     const __m128i mask6 = _mm_set1_epi8(0x3F);
     const __m128i mask2 = _mm_set1_epi8(static_cast<char>(0xC0));
     const __m128i top_mask = _mm_set1_epi8(0x40);
     const __m128i zero = _mm_setzero_si128();
     __m128i sums = _mm_setzero_si128();
+    __m256i squares = _mm256_setzero_si256();
     for (uint64_t block = 0; block < dim; block += 64) {
         const __m128i compact1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(supplement_code));
         const __m128i compact2 =
@@ -1460,13 +1463,30 @@ RaBitQExCode7ToBytes(const uint8_t* one_bit_code,
         sums = _mm_add_epi64(sums, _mm_sad_epu8(code1, zero));
         sums = _mm_add_epi64(sums, _mm_sad_epu8(code2, zero));
         sums = _mm_add_epi64(sums, _mm_sad_epu8(code3, zero));
+        if (code_sq_sum != nullptr) {
+            const __m128i codes[4] = {code0, code1, code2, code3};
+            for (int g = 0; g < 4; ++g) {
+                const __m256i wide = _mm256_cvtepu8_epi16(codes[g]);
+                squares = _mm256_add_epi32(squares, _mm256_madd_epi16(wide, wide));
+            }
+        }
     }
     alignas(16) uint64_t lanes[2];
     _mm_store_si128(reinterpret_cast<__m128i*>(lanes), sums);
     *code_sum = lanes[0] + lanes[1];
+    if (code_sq_sum != nullptr) {
+        alignas(32) int32_t partial[8];
+        _mm256_store_si256(reinterpret_cast<__m256i*>(partial), squares);
+        uint64_t total = 0;
+        for (int i = 0; i < 8; ++i) {
+            total += static_cast<uint64_t>(partial[i]);
+        }
+        *code_sq_sum = total;
+    }
     return true;
 #else
-    return generic::RaBitQExCode7ToBytes(one_bit_code, supplement_code, dim, out, code_sum);
+    return generic::RaBitQExCode7ToBytes(
+        one_bit_code, supplement_code, dim, out, code_sum, code_sq_sum);
 #endif
 }
 
