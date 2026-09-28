@@ -489,6 +489,13 @@ private:
         int level{-1};
     };
 
+    /// Assign the level of every row up front, in input order.
+    ///
+    /// Drawing all levels before the parallel insert phase makes level assignment a pure
+    /// function of the batch contents instead of a function of worker scheduling.
+    void
+    assign_batch_levels(Vector<AddRow>& rows);
+
     struct AddBatch {
         explicit AddBatch(Allocator* allocator) : rows(allocator) {
         }

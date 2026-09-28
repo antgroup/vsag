@@ -439,6 +439,17 @@ HGraph::prepare_add_context(const DatasetPtr& data) {
     return context;
 }
 
+void
+HGraph::assign_batch_levels(Vector<AddRow>& rows) {
+    if (rows.empty()) {
+        return;
+    }
+    std::scoped_lock lock(this->add_mutex_);
+    for (auto& row : rows) {
+        row.level = this->get_random_level() - 1;
+    }
+}
+
 HGraph::AddBatch
 HGraph::prepare_add_batch(const DatasetPtr& data) {
     AddBatch batch(this->allocator_);
@@ -476,10 +487,15 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
             if (source_id != nullptr && not source_id[j].empty()) {
                 this->label_table_->InsertSourceId(inner_id, source_id[j]);
             }
-            row.level = this->get_random_level() - 1;
+            // Level is assigned in a separate, deterministic pass (see
+            // assign_batch_levels) so that it cannot depend on thread scheduling.
             batch.rows.emplace_back(row);
         }
     }
+
+    // Assign all levels up front, in input order, so the value is a pure function of
+    // the batch contents rather than of the order workers reach the insert path.
+    this->assign_batch_levels(batch.rows);
 
     return batch;
 }

@@ -48,8 +48,12 @@ FhtKacRotator::FhtKacRotator(Allocator* allocator, int64_t dim)
 
 void
 FhtKacRotator::Train() {
-    std::random_device rd;   // Seed
-    std::mt19937 gen(rd());  // Mersenne Twister RNG
+    // Fixed seed: the flip signs are an arbitrary choice among equally valid rotations, so
+    // a constant seed costs nothing in quality but makes construction reproducible. Seeding
+    // from std::random_device made every process use a different rotation, which in turn
+    // made the quantized codes, the graph, and therefore search results differ run to run.
+    constexpr uint32_t kFhtFlipSeed = 0x46485431U;  // "FHT1"
+    std::mt19937 gen(kFhtFlipSeed);                 // Mersenne Twister RNG
     std::uniform_int_distribution<int> dist(0, 255);
     for (auto& i : flip_) {
         i = static_cast<uint8_t>(dist(gen));
