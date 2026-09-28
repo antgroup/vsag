@@ -11,21 +11,11 @@ is computed via **MaxSim** (sum of maximum per-query-token similarities).
 
 ## How it works
 
-1. **Dynamic clustering of token vectors.** At build time, all token vectors
-   across every document are extracted into a flat pool and clustered using an
-   HGraph-based dynamic clustering algorithm. The initial cluster centers are
-   sampled at a ratio controlled by `init_cluster_ratio`; clusters that grow
-   beyond `max_cluster_size` are split incrementally.
-2. **Representative graph for coarse search.** A representative HGraph is built
-   over the cluster centroids. At query time, each query token searches this
-   graph to find its nearest clusters (controlled by `coarse_k`). The cluster
-   scores are accumulated across all query tokens to produce a candidate set.
-3. **Exact MaxSim reranking.** The top `rerank_k` candidates are re-scored by
-   reading back the original token vectors from disk (or memory) and computing
-   the exact MaxSim similarity between query tokens and document tokens.
+1. **Graph-driven token partitioning.** Tokens are encoded in a temporary pool. Sampled real tokens initialize an HGraph; remaining tokens route through the graph, and oversized partitions split dynamically. This is not iterative k-means.
+2. **Representative graph routing.** Each partition selects a real member token as its representative. A quantized HGraph routes each query token to candidate partitions, whose document lists form a coarse-ranked candidate set.
+3. **MaxSim reranking.** The top `rerank_k` candidate documents are read from memory or disk and decoded. MaxSim is evaluated over these stored representations. With lossy quantization this is not exact scoring against the original FP32 input.
 
-The combination of cluster-level coarse search and exact reranking gives SIMQ a
-tunable recall/latency tradeoff for multi-vector workloads.
+The two-stage pipeline trades candidate recall, quantization error, memory, and latency.
 
 ## Quick start
 
@@ -221,3 +211,15 @@ for those).
 - [Creating an Index](../guide/create_index.md)
 - [Index Parameters](../resources/index_parameters.md)
 - [k-Nearest Neighbor Search](../guide/knn_search.md)
+
+## Quantized construction and incremental ingestion
+
+The Dataset input remains FP32 `MultiVector`, including when `quantization_type` is `fp16`, `bf16`, or `sq8_uniform`. SIMQ encodes tokens before partition construction and uses the selected quantizer's native code-to-code distance for partition maintenance. Both construction and representative HGraphs use quantized base storage without an FP32 reorder copy. Temporary FP32 decoding remains necessary for graph insertion/query APIs and mean accumulation; this is not zero-decode construction.
+
+Construction avoids a full FP32 flattened token copy. It uses a temporary encoded token pool, token-address metadata, and at most 4096 FP32 tokens per training/staging buffer. The encoded pool duplicates document codes until Build returns. Caller-owned FP32 input and O(tokens) metadata still contribute to peak memory. Models requiring training use a deterministic sample of at most 4096 tokens (sampling with replacement for larger inputs); subsequent Add calls reuse the trained document model. HGraphs own separate models and never exchange encoded bytes across models.
+
+Use `Build(first_batch)` followed by `Add(next_batch)` for incremental ingestion. The first batch should represent subsequent data. A quantized or incrementally built index need not produce the same partitions or recall as an all-at-once FP32 build; benchmark your workload. FP32/BF16/FP16/SQ8 input and storage types must not be confused. SIMQ continues to accept only FP32 input and inner-product metric.
+
+### Serialization compatibility
+
+New readers support legacy, unversioned SIMQ indexes when constructed with matching dimension and document quantization. Legacy representative graphs remain FP32 to preserve existing search behavior. Load reconstructs document-model representative codes and refreshes token distances, requiring an O(tokens) migration pass with bounded vector scratch; subsequent incremental partitions are not promised to match older implementations. Resaving preserves the actual graph quantization and upgraded representative metadata. New writes use SIMQ format version 1; unknown versions and mismatched dimensions/quantizers are rejected. Reading new files with older binaries is not guaranteed.
