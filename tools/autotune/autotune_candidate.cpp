@@ -291,6 +291,17 @@ supports_adaptive_ef_search_objective(const std::string& objective) {
            objective == "search_seconds" || objective == "build_and_search_seconds";
 }
 
+bool
+uses_extra_info_filter(const JsonType& search_params) {
+    if (!search_params.contains("hgraph") || !search_params["hgraph"].is_object()) {
+        return false;
+    }
+    const auto& hgraph = search_params["hgraph"];
+    return hgraph.contains("use_extra_info_filter") &&
+           hgraph["use_extra_info_filter"].is_boolean() &&
+           hgraph["use_extra_info_filter"].get<bool>();
+}
+
 int64_t
 positive_int64(const JsonType& value, const std::string& path) {
     if (!value.is_number_integer()) {
@@ -408,6 +419,11 @@ generate_candidates(const RequestContext& context,
                                              ? take_hgraph_ef_search_range(search_space, context)
                                              : std::nullopt;
             expand(search_space, [&](const JsonType& search_params) {
+                if (context.has_query_filters && uses_extra_info_filter(search_params)) {
+                    throw std::invalid_argument(
+                        "filtered workloads currently support only ID filters; "
+                        "hgraph.use_extra_info_filter must be false");
+                }
                 Candidate candidate{index.name, create_params, search_params, ef_search_range};
                 JsonType identity{{"index_name", candidate.index_name},
                                   {"create_params", candidate.create_params},
