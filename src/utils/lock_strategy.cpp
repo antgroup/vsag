@@ -27,9 +27,22 @@ PointsMutex::MutexBlockDeleter::operator()(MutexBlock* block) const {
     allocator->Delete(block);
 }
 
+namespace {
+inline uint64_t
+lock_now_ns() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                     std::chrono::steady_clock::now().time_since_epoch())
+                                     .count());
+}
+}  // namespace
+
 void
 PointsMutex::SharedLock(uint32_t i) {
+    const uint64_t t0 = lock_now_ns();
     GetMutex(i).lock_shared();
+    const uint64_t t1 = lock_now_ns();
+    this->stats.shared_calls.fetch_add(1, std::memory_order_relaxed);
+    this->stats.shared_wait_ns.fetch_add(t1 - t0, std::memory_order_relaxed);
 }
 
 void
@@ -39,7 +52,11 @@ PointsMutex::SharedUnlock(uint32_t i) {
 
 void
 PointsMutex::Lock(uint32_t i) {
+    const uint64_t t0 = lock_now_ns();
     GetMutex(i).lock();
+    const uint64_t t1 = lock_now_ns();
+    this->stats.exclusive_calls.fetch_add(1, std::memory_order_relaxed);
+    this->stats.exclusive_wait_ns.fetch_add(t1 - t0, std::memory_order_relaxed);
 }
 
 void

@@ -16,6 +16,8 @@
 #pragma once
 
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <memory>
 #include <shared_mutex>
 
@@ -51,6 +53,15 @@ public:
 class PointsMutex : public MutexArray {
 public:
     static constexpr uint64_t kMutexesPerBlock = 1024;
+
+    /// Per-node lock accounting, for attributing blocked time to this lock array.
+    struct Stats {
+        std::atomic<uint64_t> exclusive_calls{0};
+        std::atomic<uint64_t> exclusive_wait_ns{0};
+        std::atomic<uint64_t> shared_calls{0};
+        std::atomic<uint64_t> shared_wait_ns{0};
+    };
+    Stats stats;
 
     PointsMutex(uint32_t element_num, Allocator* allocator);
 

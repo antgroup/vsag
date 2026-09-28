@@ -152,6 +152,7 @@ dump(const char* path) {
 
 #include "algorithm/hgraph/hgraph.h"
 #include "index/index_impl.h"
+#include "utils/lock_strategy.h"
 
 #include <algorithm>
 #include <chrono>
@@ -396,14 +397,33 @@ main(int argc, char** argv) {
         {
             // Same downcast path the HGraph tests use.
             uint64_t graph_hash = 0;
+            std::shared_ptr<vsag::HGraph> hgraph;
             auto index_impl = std::dynamic_pointer_cast<vsag::IndexImpl<vsag::HGraph>>(index);
             if (index_impl != nullptr) {
-                auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(index_impl->GetInnerIndex());
+                hgraph = std::dynamic_pointer_cast<vsag::HGraph>(index_impl->GetInnerIndex());
                 if (hgraph != nullptr) {
                     graph_hash = hgraph->GraphChecksum();
                 }
             }
             std::printf("GRAPHCHECK hash=%llu\n", static_cast<unsigned long long>(graph_hash));
+            if (hgraph != nullptr) {
+                const auto amc = hgraph->add_mutex_stats.exclusive_calls.load();
+                const auto amn = hgraph->add_mutex_stats.exclusive_hold_ns.load();
+                std::printf("ADDMUTEX calls=%llu hold=%.3f s\n",
+                            static_cast<unsigned long long>(amc),
+                            static_cast<double>(amn) / 1e9);
+                auto nbr = std::dynamic_pointer_cast<vsag::PointsMutex>(
+                    hgraph->GetNeighborsMutexArray());
+                if (nbr != nullptr) {
+                    std::printf("NEIGHMUTEX excl_calls=%llu excl_wait=%.3f s "
+                                "shared_calls=%llu shared_wait=%.3f s\n",
+                                static_cast<unsigned long long>(
+                                    nbr->stats.exclusive_calls.load()),
+                                static_cast<double>(nbr->stats.exclusive_wait_ns.load()) / 1e9,
+                                static_cast<unsigned long long>(nbr->stats.shared_calls.load()),
+                                static_cast<double>(nbr->stats.shared_wait_ns.load()) / 1e9);
+                }
+            }
         }
         // recall@10 against an exact brute-force ground truth computed on the raw vectors
         {

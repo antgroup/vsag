@@ -175,6 +175,20 @@ public:
         return hash;
     }
 
+    /// add_mutex_ exclusive-path accounting: how often the structure-update path is taken and
+    /// how long that critical section lasts in total (summed over threads).
+    struct AddMutexStats {
+        std::atomic<uint64_t> exclusive_calls{0};
+        std::atomic<uint64_t> exclusive_hold_ns{0};
+    };
+    mutable AddMutexStats add_mutex_stats;
+
+    /// The per-node lock array, for diagnostics.
+    [[nodiscard]] MutexArrayPtr
+    GetNeighborsMutexArray() const {
+        return this->neighbors_mutex_;
+    }
+
     /// Number of leading inner ids that concurrent readers may observe.
     [[nodiscard]] InnerIdType
     PublishedCount() const {
