@@ -16,6 +16,7 @@
 #include "pruning_strategy.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <memory>
 #include <vector>
@@ -194,6 +195,107 @@ TEST_CASE("Pruning Strategy Select Edges With Heuristic", "[ut][pruning_strategy
         Vector<InnerIdType> neighbors_0(allocator.get());
         graph->GetNeighbors(0, neighbors_0);
         REQUIRE(neighbors_0.size() == 1);
+    }
+}
+
+TEST_CASE("Reverse edge linking applies edges and respects the degree bound",
+          "[ut][pruning_strategy]") {
+    auto allocator = Engine::CreateDefaultAllocator();
+
+    auto flatten_param = std::make_shared<FlattenDataCellParameter>();
+    flatten_param->quantizer_parameter = std::make_shared<FP32QuantizerParameter>();
+    flatten_param->io_parameter = std::make_shared<MemoryIOParameter>();
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.dim_ = 128;
+
+    auto flatten = FlattenInterface::MakeInstance(flatten_param, common_param);
+    REQUIRE(flatten != nullptr);
+
+    // Points live far apart on distinct coordinates so pruning decisions are unambiguous.
+    std::vector<std::array<float, 128>> vectors(8);
+    for (auto& v : vectors) {
+        v.fill(0.0F);
+    }
+    for (size_t i = 0; i < vectors.size(); ++i) {
+        vectors[i][i] = static_cast<float>(i + 1);
+    }
+    std::vector<const float*> vector_ptrs;
+    for (const auto& v : vectors) {
+        vector_ptrs.push_back(v.data());
+    }
+    flatten->Train(vector_ptrs[0], 1);
+    for (size_t i = 0; i < vectors.size(); ++i) {
+        flatten->InsertVector(vectors[i].data(), static_cast<InnerIdType>(i));
+    }
+
+    SECTION("cheap append path adds the reverse edge") {
+        auto graph_param = std::make_shared<GraphDataCellParameter>();
+        graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+        graph_param->max_degree_ = 4;
+        auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+
+        auto mutexes = std::make_shared<PointsMutex>(8, allocator.get());
+        Vector<InnerIdType> forward(allocator.get());
+        forward.emplace_back(1);
+        forward.emplace_back(2);
+        graph->InsertNeighborsById(0, forward);
+
+        // Link 0 back from 2 and 3; both target lists have room, so this takes the cheap
+        // append branch in both the locked and the optimistic implementation.
+        Vector<InnerIdType> targets(allocator.get());
+        targets.emplace_back(2);
+        targets.emplace_back(3);
+        const FlattenDistanceProvider provider(flatten, nullptr);
+        link_back_edges(0, targets, graph, provider, mutexes, allocator.get(), 1.0F);
+
+        Vector<InnerIdType> neighbors_2(allocator.get());
+        Vector<InnerIdType> neighbors_3(allocator.get());
+        graph->GetNeighbors(2, neighbors_2);
+        graph->GetNeighbors(3, neighbors_3);
+        REQUIRE(neighbors_2.size() == 1);
+        REQUIRE(neighbors_2[0] == 0);
+        REQUIRE(neighbors_3.size() == 1);
+        REQUIRE(neighbors_3[0] == 0);
+
+        // A node that was not a target must be untouched.
+        Vector<InnerIdType> neighbors_4(allocator.get());
+        graph->GetNeighbors(4, neighbors_4);
+        REQUIRE(neighbors_4.empty());
+    }
+
+    SECTION("a full neighbour list is pruned to the degree bound") {
+        auto graph_param = std::make_shared<GraphDataCellParameter>();
+        graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+        graph_param->max_degree_ = 2;
+        auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+
+        auto mutexes = std::make_shared<PointsMutex>(8, allocator.get());
+
+        // Node 1 is already full, so linking 0 -> 1 must take the expensive pruning branch
+        // and still leave the list within the bound.
+        Vector<InnerIdType> full(allocator.get());
+        full.emplace_back(2);
+        full.emplace_back(3);
+        graph->InsertNeighborsById(1, full);
+
+        Vector<InnerIdType> forward(allocator.get());
+        forward.emplace_back(1);
+        graph->InsertNeighborsById(0, forward);
+
+        Vector<InnerIdType> targets(allocator.get());
+        targets.emplace_back(1);
+        const FlattenDistanceProvider provider(flatten, nullptr);
+        link_back_edges(0, targets, graph, provider, mutexes, allocator.get(), 1.0F);
+
+        Vector<InnerIdType> neighbors_1(allocator.get());
+        graph->GetNeighbors(1, neighbors_1);
+        REQUIRE(neighbors_1.size() <= 2);
+        // The newly linked node must have been considered, i.e. the list is still valid and
+        // non-empty after pruning.
+        REQUIRE(not neighbors_1.empty());
     }
 }
 

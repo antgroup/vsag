@@ -22,6 +22,7 @@
 #include <queue>
 #include <random>
 #include <utility>
+#include <vector>
 
 #include "impl/transform/transformer_headers.h"
 #include "simd/fp32_simd.h"
@@ -3955,7 +3956,8 @@ bool
 RaBitQuantizer<metric>::DecodeFusedSplitCode(const uint8_t* one_bit_code,
                                              const uint8_t* supplement_code,
                                              bool legacy_hnsw_codec,
-                                             float* data) const {
+                                             float* data,
+                                             bool apply_inverse_rotation) const {
     if constexpr (metric != MetricType::METRIC_TYPE_L2SQR and
                   metric != MetricType::METRIC_TYPE_IP) {
         return false;
@@ -3990,59 +3992,276 @@ RaBitQuantizer<metric>::DecodeFusedSplitCode(const uint8_t* one_bit_code,
 
     const uint64_t plane_bytes = PlaneBytes();
     const float full_center = 0.5F * static_cast<float>((1U << base_bits) - 1U);
-    Vector<float> transformed_data(this->dim_, 0.0F, this->allocator_);
-    for (uint64_t d = 0; d < this->dim_; ++d) {
-        const uint64_t byte_idx = d >> 3U;
-        const auto bit_mask = static_cast<uint8_t>(1U << (d & 7U));
-        uint32_t filter_code = 0;
-        for (uint32_t bit = 0; bit < filter_bits; ++bit) {
-            const auto* plane = one_bit_code + static_cast<uint64_t>(bit) * plane_bytes;
-            if ((plane[byte_idx] & bit_mask) != 0U) {
-                filter_code |= 1U << (filter_bits - bit - 1U);
-            }
+    // Reconstruction without the inverse rotation already is the result, so it is written
+    // straight into the destination buffer and the scratch buffer is not needed.
+    Vector<float> transformed_storage(this->allocator_);
+    float* transformed_data = data;
+    if (apply_inverse_rotation) {
+        transformed_storage.resize(this->dim_);
+        transformed_data = transformed_storage.data();
+    }
+    // The HNSW-compatible 1 + 7 codec has a vectorized reconstruction kernel.
+    const bool vectorized_reconstruction = legacy_hnsw_codec and filter_bits == 1 and
+                                           supplement_bits == 7 and (this->dim_ & 63U) == 0U;
+    if (vectorized_reconstruction) {
+        if (not RaBitQExCode7ToVector(one_bit_code,
+                                      supplement_code,
+                                      centroid_.data(),
+                                      residual_scale,
+                                      full_center,
+                                      this->dim_,
+                                      transformed_data)) {
+            return false;
         }
-
-        uint32_t supplement = 0;
-        if (legacy_hnsw_codec and (this->dim_ & 63U) == 0U) {
-            constexpr uint64_t legacy_block_size = 56;
-            constexpr uint64_t legacy_low_dimension_count = 48;
-            const uint64_t lane = d & 63U;
-            const auto* block = supplement_code + (d >> 6U) * legacy_block_size;
-            const uint32_t top = (block[48U + (lane & 7U)] >> (lane >> 3U)) & 1U;
-            uint32_t low = 0;
-            if (lane < legacy_low_dimension_count) {
-                low = block[lane] & 0x3FU;
-            } else {
-                const uint64_t packed_lane = lane - legacy_low_dimension_count;
-                low = ((block[packed_lane] >> 6U) & 0x3U) |
-                      (((block[16U + packed_lane] >> 6U) & 0x3U) << 2U) |
-                      (((block[32U + packed_lane] >> 6U) & 0x3U) << 4U);
-            }
-            supplement = low | (top << 6U);
-        } else {
-            for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
-                const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
+    } else {
+        for (uint64_t d = 0; d < this->dim_; ++d) {
+            const uint64_t byte_idx = d >> 3U;
+            const auto bit_mask = static_cast<uint8_t>(1U << (d & 7U));
+            uint32_t filter_code = 0;
+            for (uint32_t bit = 0; bit < filter_bits; ++bit) {
+                const auto* plane = one_bit_code + static_cast<uint64_t>(bit) * plane_bytes;
                 if ((plane[byte_idx] & bit_mask) != 0U) {
-                    supplement |= 1U << bit;
+                    filter_code |= 1U << (filter_bits - bit - 1U);
                 }
             }
-        }
 
-        const uint32_t full_code = (filter_code << supplement_bits) | supplement;
-        transformed_data[d] =
-            centroid_[d] + residual_scale * (static_cast<float>(full_code) - full_center);
-        if (not IsFiniteRaBitQValue(transformed_data[d])) {
-            return false;
+            uint32_t supplement = 0;
+            if (legacy_hnsw_codec and (this->dim_ & 63U) == 0U) {
+                constexpr uint64_t legacy_block_size = 56;
+                constexpr uint64_t legacy_low_dimension_count = 48;
+                const uint64_t lane = d & 63U;
+                const auto* block = supplement_code + (d >> 6U) * legacy_block_size;
+                const uint32_t top = (block[48U + (lane & 7U)] >> (lane >> 3U)) & 1U;
+                uint32_t low = 0;
+                if (lane < legacy_low_dimension_count) {
+                    low = block[lane] & 0x3FU;
+                } else {
+                    const uint64_t packed_lane = lane - legacy_low_dimension_count;
+                    low = ((block[packed_lane] >> 6U) & 0x3U) |
+                          (((block[16U + packed_lane] >> 6U) & 0x3U) << 2U) |
+                          (((block[32U + packed_lane] >> 6U) & 0x3U) << 4U);
+                }
+                supplement = low | (top << 6U);
+            } else {
+                for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
+                    const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
+                    if ((plane[byte_idx] & bit_mask) != 0U) {
+                        supplement |= 1U << bit;
+                    }
+                }
+            }
+
+            const uint32_t full_code = (filter_code << supplement_bits) | supplement;
+            transformed_data[d] =
+                centroid_[d] + residual_scale * (static_cast<float>(full_code) - full_center);
+            if (not IsFiniteRaBitQValue(transformed_data[d])) {
+                return false;
+            }
         }
     }
 
-    rom_->InverseTransform(transformed_data.data(), data);
+    if (apply_inverse_rotation) {
+        rom_->InverseTransform(transformed_data, data);
+    }
     for (uint64_t d = 0; d < original_dim_; ++d) {
         if (not IsFiniteRaBitQValue(data[d])) {
             return false;
         }
     }
     return true;
+}
+
+template <MetricType metric>
+bool
+RaBitQuantizer<metric>::ComputeFusedPairIP(const uint8_t* one_bit_code1,
+                                           const uint8_t* supplement_code1,
+                                           const float* centroid1,
+                                           float centroid1_sum,
+                                           const uint8_t* one_bit_code2,
+                                           const uint8_t* supplement_code2,
+                                           const float* centroid2,
+                                           float centroid2_sum,
+                                           float centroid_pair_ip,
+                                           float* distance) const {
+    if constexpr (metric != MetricType::METRIC_TYPE_IP) {
+        return false;
+    }
+    if (distance == nullptr or one_bit_code1 == nullptr or supplement_code1 == nullptr or
+        one_bit_code2 == nullptr or supplement_code2 == nullptr or centroid1 == nullptr or
+        centroid2 == nullptr or not SupportSplitCodeStorage() or pca_dim_ != original_dim_ or
+        not RaBitQExCode7SupportedDim(this->dim_) or FilterBits() != 1 or ReorderBits() != 7 or
+        centroid_.size() != this->dim_) {
+        return false;
+    }
+    // The decode buffers are dim_ bytes each, past the small-object fast path, and this runs
+    // O(degree) times per inserted node from link_back_edges, so they are kept per-thread instead
+    // of being allocated on every pair distance. They are grown, never shrunk, and released when
+    // the thread exits: the retention is bounded by the number of build threads times the largest
+    // dimension they saw. Both sizes are checked so the two buffers cannot drift apart.
+    thread_local std::vector<uint8_t> codes1;
+    thread_local std::vector<uint8_t> codes2;
+    if (codes1.size() < this->dim_ or codes2.size() < this->dim_) {
+        codes1.resize(this->dim_);
+        codes2.resize(this->dim_);
+    }
+    uint64_t code_sum1 = 0;
+    uint64_t code_sum2 = 0;
+    if (not RaBitQExCode7ToBytes(
+            one_bit_code1, supplement_code1, this->dim_, codes1.data(), &code_sum1, nullptr) or
+        not RaBitQExCode7ToBytes(
+            one_bit_code2, supplement_code2, this->dim_, codes2.data(), &code_sum2, nullptr)) {
+        return false;
+    }
+
+    // residual scales, stored next to the supplement metadata exactly like the reconstruction does
+    float full_rescale1 = 0.0F;
+    float full_rescale2 = 0.0F;
+    const uint64_t rescale_offset = SupplementMetaOffset() + sizeof(float);
+    std::memcpy(&full_rescale1, supplement_code1 + rescale_offset, sizeof(float));
+    std::memcpy(&full_rescale2, supplement_code2 + rescale_offset, sizeof(float));
+    constexpr float metric_scale = 1.0F;  // inner product
+    const float residual_scale1 = -full_rescale1 / metric_scale;
+    const float residual_scale2 = -full_rescale2 / metric_scale;
+    if (not IsFiniteRaBitQValue(residual_scale1) or not IsFiniteRaBitQValue(residual_scale2)) {
+        return false;
+    }
+
+    // Centering is done in exact integer arithmetic: with D = 2*code - 255 (integer),
+    // sum(D1*D2) = 4*sum((code1-c0)*(code2-c0)) with c0 = 127.5, which keeps the large
+    // intermediate sums out of float. The centroid terms are float SIMD results and are
+    // combined in double before the single narrowing back to float.
+    constexpr double full_center = 127.5;  // 0.5 * ((1 << (filter_bits + reorder_bits)) - 1)
+    // Coefficients of 4*sum((code1-c0)*(code2-c0)) = 4*ip - 4*c0*code_sum + 4*c0^2*dim, derived
+    // from full_center so a codec bit-width change cannot silently leave them behind.
+    constexpr auto centering_linear = static_cast<int64_t>(4.0 * full_center);
+    constexpr auto centering_constant = static_cast<int64_t>(4.0 * full_center * full_center);
+    const auto code_code_ip =
+        static_cast<int64_t>(RaBitQCodeCodeIP(codes1.data(), codes2.data(), this->dim_));
+    const auto code_sum = static_cast<int64_t>(code_sum1 + code_sum2);
+    const auto dim = static_cast<int64_t>(this->dim_);
+    const double centered_code_code_ip =
+        0.25 * static_cast<double>(4 * code_code_ip - centering_linear * code_sum +
+                                   centering_constant * dim);
+    const float centroid1_code2 = RaBitQFloatSQIP(centroid1, codes2.data(), this->dim_);
+    const float code1_centroid2 = RaBitQFloatSQIP(centroid2, codes1.data(), this->dim_);
+    const double centroid1_centered_code2 =
+        static_cast<double>(centroid1_code2) - full_center * static_cast<double>(centroid1_sum);
+    const double centered_code1_centroid2 =
+        static_cast<double>(code1_centroid2) - full_center * static_cast<double>(centroid2_sum);
+    const double inner_product =
+        static_cast<double>(centroid_pair_ip) +
+        static_cast<double>(residual_scale2) * centroid1_centered_code2 +
+        static_cast<double>(residual_scale1) * centered_code1_centroid2 +
+        static_cast<double>(residual_scale1 * residual_scale2) * centered_code_code_ip;
+    const auto distance_value = static_cast<float>(1.0 - inner_product);
+    if (not IsFiniteRaBitQValue(distance_value)) {
+        return false;
+    }
+    *distance = distance_value;
+    return true;
+}
+
+template <MetricType metric>
+bool
+RaBitQuantizer<metric>::ComputeFusedPairL2Difference(const uint8_t* one_bit_code1,
+                                                     const uint8_t* supplement_code1,
+                                                     const uint8_t* one_bit_code2,
+                                                     const uint8_t* supplement_code2,
+                                                     float centroid_diff_sq,
+                                                     float centroid_diff_sum,
+                                                     const float* centroid_diff,
+                                                     float* distance) const {
+    if constexpr (metric != MetricType::METRIC_TYPE_L2SQR) {
+        return false;
+    } else {
+        if (distance == nullptr or one_bit_code1 == nullptr or supplement_code1 == nullptr or
+            one_bit_code2 == nullptr or supplement_code2 == nullptr or
+            not SupportSplitCodeStorage() or pca_dim_ != original_dim_ or this->dim_ == 0 or
+            not RaBitQExCode7SupportedDim(this->dim_) or FilterBits() != 1 or ReorderBits() != 7 or
+            centroid_.size() != this->dim_) {
+            return false;
+        }
+        // See ComputeFusedPairIP: per-thread scratch instead of a heap allocation per pair,
+        // retained until the thread exits and checked on both buffers.
+        thread_local std::vector<uint8_t> codes1;
+        thread_local std::vector<uint8_t> codes2;
+        if (codes1.size() < this->dim_ or codes2.size() < this->dim_) {
+            codes1.resize(this->dim_);
+            codes2.resize(this->dim_);
+        }
+        uint64_t code_sum1 = 0;
+        uint64_t code_sum2 = 0;
+        uint64_t code_sq_sum1 = 0;
+        uint64_t code_sq_sum2 = 0;
+        if (not RaBitQExCode7ToBytes(one_bit_code1,
+                                     supplement_code1,
+                                     this->dim_,
+                                     codes1.data(),
+                                     &code_sum1,
+                                     &code_sq_sum1) or
+            not RaBitQExCode7ToBytes(one_bit_code2,
+                                     supplement_code2,
+                                     this->dim_,
+                                     codes2.data(),
+                                     &code_sum2,
+                                     &code_sq_sum2)) {
+            return false;
+        }
+
+        // L2 reconstruction uses half the stored residual scale
+        constexpr float metric_scale = 2.0F;
+        float full_rescale1 = 0.0F;
+        float full_rescale2 = 0.0F;
+        const uint64_t rescale_offset = SupplementMetaOffset() + sizeof(float);
+        std::memcpy(&full_rescale1, supplement_code1 + rescale_offset, sizeof(float));
+        std::memcpy(&full_rescale2, supplement_code2 + rescale_offset, sizeof(float));
+        const float residual_scale1 = -full_rescale1 / metric_scale;
+        const float residual_scale2 = -full_rescale2 / metric_scale;
+        if (not IsFiniteRaBitQValue(residual_scale1) or not IsFiniteRaBitQValue(residual_scale2)) {
+            return false;
+        }
+
+        // integer exact code statistics, 2*code - 255 keeps the centring free of cancellation.
+        // The coefficients follow full_center (127.5): 4*sum(w1*w2) = 4*ip - 4*c0*(sum1+sum2)
+        // + 4*c0^2*dim and 4*|wi|^2 = 4*sqi - 8*c0*sumi + 4*c0^2*dim.
+        constexpr double full_center = 127.5;
+        constexpr auto centering_linear = static_cast<int64_t>(4.0 * full_center);
+        constexpr auto centering_double_linear = 2 * centering_linear;
+        constexpr auto centering_constant = static_cast<int64_t>(4.0 * full_center * full_center);
+        const auto dim = static_cast<int64_t>(this->dim_);
+        const auto sum1 = static_cast<int64_t>(code_sum1);
+        const auto sum2 = static_cast<int64_t>(code_sum2);
+        const auto sq1 = static_cast<int64_t>(code_sq_sum1);
+        const auto sq2 = static_cast<int64_t>(code_sq_sum2);
+        const double w1w2 =
+            0.25 * static_cast<double>(4 * static_cast<int64_t>(RaBitQCodeCodeIP(
+                                               codes1.data(), codes2.data(), this->dim_)) -
+                                       centering_linear * (sum1 + sum2) + centering_constant * dim);
+        const double w1_sq = 0.25 * static_cast<double>(4 * sq1 - centering_double_linear * sum1 +
+                                                        centering_constant * dim);
+        const double w2_sq = 0.25 * static_cast<double>(4 * sq2 - centering_double_linear * sum2 +
+                                                        centering_constant * dim);
+
+        const auto a1 = static_cast<double>(residual_scale1);
+        const auto a2 = static_cast<double>(residual_scale2);
+        double value = a1 * a1 * w1_sq + a2 * a2 * w2_sq - 2.0 * a1 * a2 * w1w2;
+        if (centroid_diff != nullptr) {
+            const auto diff_sum = static_cast<double>(centroid_diff_sum);
+            const double x1 =
+                static_cast<double>(RaBitQFloatSQIP(centroid_diff, codes1.data(), this->dim_)) -
+                full_center * diff_sum;
+            const double x2 =
+                static_cast<double>(RaBitQFloatSQIP(centroid_diff, codes2.data(), this->dim_)) -
+                full_center * diff_sum;
+            value += static_cast<double>(centroid_diff_sq) + 2.0 * a1 * x1 - 2.0 * a2 * x2;
+        }
+        const auto result = static_cast<float>(value);
+        if (not IsFiniteRaBitQValue(result)) {
+            return false;
+        }
+        *distance = result;
+        return true;
+    }
 }
 
 template <MetricType metric>

@@ -172,14 +172,19 @@ HGraphRaBitQFusedDataCell::InsertNeighborsById(InnerIdType id,
 
     auto* record = MutableNodeRecord(id);
     const auto count = static_cast<uint32_t>(neighbor_ids.size());
-    std::memcpy(record + K_COUNT_OFFSET, &count, sizeof(count));
+    // Publish the payload before the count, with a release fence in between. Readers currently
+    // take the shared neighbour lock, so this is not the only guarantee they rely on, but the
+    // count is a plain write into the node record: keeping the payload first means a future
+    // lock-free reader cannot observe a count that outruns its neighbours.
     auto* output = reinterpret_cast<InnerIdType*>(record + neighbors_offset_);
     for (uint64_t i = 0; i < neighbor_ids.size(); ++i) {
         output[i] = neighbor_ids[i];
     }
+    std::atomic_thread_fence(std::memory_order_release);
+    std::memcpy(record + K_COUNT_OFFSET, &count, sizeof(count));
     auto current = total_count_.load(std::memory_order_relaxed);
     while (current < id + 1 and
-           not total_count_.compare_exchange_weak(
+           not total_count_.compare_exchange_strong(
                current, id + 1, std::memory_order_release, std::memory_order_relaxed)) {
     }
 }
@@ -266,6 +271,11 @@ HGraphRaBitQFusedDataCell::GetNeighbors(InnerIdType id, Vector<InnerIdType>& nei
         neighbor_ids.clear();
         return;
     }
+    // The matching release fence lives in InsertNeighborsById. The count read above is a plain
+    // read of a plain write, so the fence pair is what orders it against the payload for a
+    // lock-free reader; today readers hold the shared neighbour lock and this is defence in
+    // depth.
+    std::atomic_thread_fence(std::memory_order_acquire);
     const auto* input = GetNeighborData(record);
     neighbor_ids.clear();
     neighbor_ids.reserve(count);

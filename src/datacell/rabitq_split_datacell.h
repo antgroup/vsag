@@ -147,7 +147,7 @@ public:
     CopySplitCodes(InnerIdType id, uint8_t* one_bit_code, uint8_t* supplement_code) const = 0;
 
     virtual bool
-    DecodeFusedById(InnerIdType id, float* data) const = 0;
+    DecodeFusedById(InnerIdType id, float* data, bool apply_inverse_rotation = true) const = 0;
 
     virtual void
     QueryWithDistanceLowerBoundAndFilterIP(float* result_dists,
@@ -1639,14 +1639,136 @@ public:
         }
     }
 
+    // Per-cluster constants used by the code-domain pair distance. All of them are derived from
+    // the centroids that the codec already stores, so nothing is added to the index.
+    //
+    // Memory shape: fused_centroid_sums_ is cluster_count floats, fused_centroid_pair_ip_ is
+    // cluster_count^2 floats, and the cluster-pair difference vector is computed per pair into a
+    // thread-local buffer instead of being tabulated, which would have cost cluster_count^2 * dim
+    // floats. The fused codec uses K_FUSED_CLUSTER_COUNT = 16 today (256 floats for the pair
+    // table); the quadratic term only becomes material if that constant grows a lot.
+    void
+    refresh_fused_cluster_stats() {
+        const uint64_t cluster_count = fused_quantizers_.size();
+        const uint64_t dim = static_cast<uint64_t>(common_param_.dim_);
+        fused_centroid_sums_.assign(cluster_count, 0.0F);
+        fused_centroid_pair_ip_.assign(cluster_count * cluster_count, 0.0F);
+        if (cluster_count == 0 or fused_centroids_.size() != cluster_count * dim) {
+            return;
+        }
+        for (uint64_t i = 0; i < cluster_count; ++i) {
+            const float* centroid_i = fused_centroids_.data() + i * dim;
+            float sum = 0.0F;
+            for (uint64_t d = 0; d < dim; ++d) {
+                sum += centroid_i[d];
+            }
+            fused_centroid_sums_[i] = sum;
+            for (uint64_t j = 0; j <= i; ++j) {
+                const float* centroid_j = fused_centroids_.data() + j * dim;
+                const float ip = FP32ComputeIP(centroid_i, centroid_j, dim);
+                fused_centroid_pair_ip_[i * cluster_count + j] = ip;
+                fused_centroid_pair_ip_[j * cluster_count + i] = ip;
+            }
+        }
+    }
+
+    // Code-domain pair distance for fused codes; false when the layout is not the
+    // HNSW-compatible 1 + 7 codec, in which case the reconstruction path is used.
+    bool
+    compute_fused_pair_distance(InnerIdType id1, InnerIdType id2, float* distance) const {
+        if constexpr (metric != MetricType::METRIC_TYPE_IP and
+                      metric != MetricType::METRIC_TYPE_L2SQR) {
+            return false;
+        }
+        const uint64_t dim = static_cast<uint64_t>(common_param_.dim_);
+        // The code-domain kernels unpack whole 64-lane blocks; other dimensions (and other
+        // codec layouts) keep using the float reconstruction path.
+        if (fused_code_storage_ == nullptr or fused_quantizers_.empty() or
+            fused_centroid_sums_.size() != fused_quantizers_.size() or (dim & 63U) != 0U or
+            bottom_quantizer().FilterBits() != 1 or bottom_quantizer().ReorderBits() != 7) {
+            return false;
+        }
+        RaBitQFusedCodeView view1;
+        RaBitQFusedCodeView view2;
+        if (not fused_code_storage_->GetFusedCodeView(id1, view1) or
+            not fused_code_storage_->GetFusedCodeView(id2, view2) or
+            view1.cluster_id >= fused_quantizers_.size() or
+            view2.cluster_id >= fused_quantizers_.size()) {
+            return false;
+        }
+        if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+            const uint64_t cluster_count = fused_quantizers_.size();
+            const uint64_t index1 =
+                static_cast<uint64_t>(view1.cluster_id) * cluster_count + view2.cluster_id;
+            return fused_quantizers_[view1.cluster_id]->ComputeFusedPairIP(
+                view1.one_bit_code,
+                view1.supplement_code,
+                fused_centroids_.data() + static_cast<uint64_t>(view1.cluster_id) * dim,
+                fused_centroid_sums_[view1.cluster_id],
+                view2.one_bit_code,
+                view2.supplement_code,
+                fused_centroids_.data() + static_cast<uint64_t>(view2.cluster_id) * dim,
+                fused_centroid_sums_[view2.cluster_id],
+                fused_centroid_pair_ip_[index1],
+                distance);
+        } else {
+            const bool same_cluster = view1.cluster_id == view2.cluster_id;
+            // c1 - c2 is derived here rather than tabulated for every cluster pair: that table
+            // would cost cluster_count^2 * dim floats (hundreds of MB for a few hundred clusters
+            // at dim 1024), while one subtraction pass over dim per cross-cluster pair is small
+            // next to the pair distance itself.
+            const float* centroid_diff = nullptr;
+            float centroid_diff_sq = 0.0F;
+            if (not same_cluster) {
+                thread_local std::vector<float> diff_scratch;
+                if (diff_scratch.size() < dim) {
+                    diff_scratch.resize(dim);
+                }
+                const float* centroid1 =
+                    fused_centroids_.data() + static_cast<uint64_t>(view1.cluster_id) * dim;
+                const float* centroid2 =
+                    fused_centroids_.data() + static_cast<uint64_t>(view2.cluster_id) * dim;
+                float sq = 0.0F;
+                for (uint64_t d = 0; d < dim; ++d) {
+                    const float delta = centroid1[d] - centroid2[d];
+                    diff_scratch[d] = delta;
+                    sq += delta * delta;
+                }
+                centroid_diff = diff_scratch.data();
+                centroid_diff_sq = sq;
+            }
+            const float centroid_diff_sum =
+                fused_centroid_sums_[view1.cluster_id] - fused_centroid_sums_[view2.cluster_id];
+            return fused_quantizers_[view1.cluster_id]->ComputeFusedPairL2Difference(
+                view1.one_bit_code,
+                view1.supplement_code,
+                view2.one_bit_code,
+                view2.supplement_code,
+                centroid_diff_sq,
+                centroid_diff_sum,
+                centroid_diff,
+                distance);
+        }
+    }
+
     float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) override {
         if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
+            // Cheapest path first: the HNSW-compatible 1 + 7 codec can be compared directly in
+            // the code domain, without reconstructing either float vector.
+            float code_domain_distance = 0.0F;
+            if (this->compute_fused_pair_distance(id1, id2, &code_domain_distance)) {
+                return code_domain_distance;
+            }
+            // Pairwise distances only ever compare one distance against another, and the inverse
+            // rotation is a conformal map. Reconstructing the rotated-domain vectors and skipping
+            // the rotation therefore preserves every pruning decision while removing the
+            // transform from the hottest path of construction.
             Vector<float> vector1(this->common_param_.dim_, 0.0F, this->allocator_);
             Vector<float> vector2(this->common_param_.dim_, 0.0F, this->allocator_);
-            CHECK_ARGUMENT(this->DecodeFusedById(id1, vector1.data()),
+            CHECK_ARGUMENT(this->DecodeFusedById(id1, vector1.data(), false),
                            "failed to decode the first fused RaBitQ vector");
-            CHECK_ARGUMENT(this->DecodeFusedById(id2, vector2.data()),
+            CHECK_ARGUMENT(this->DecodeFusedById(id2, vector2.data(), false),
                            "failed to decode the second fused RaBitQ vector");
             const auto dim = static_cast<uint64_t>(this->common_param_.dim_);
             if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
@@ -1872,7 +1994,7 @@ public:
     }
 
     bool
-    DecodeFusedById(InnerIdType id, float* data) const override {
+    DecodeFusedById(InnerIdType id, float* data, bool apply_inverse_rotation) const override {
         if (data == nullptr or fused_code_storage_ == nullptr or id >= this->TotalCount() or
             fused_quantizers_.empty()) {
             return false;
@@ -1882,8 +2004,11 @@ public:
             view.cluster_id >= fused_quantizers_.size()) {
             return false;
         }
-        return fused_quantizers_[view.cluster_id]->DecodeFusedSplitCode(
-            view.one_bit_code, view.supplement_code, IsLegacyHnswFusedCodec(), data);
+        return fused_quantizers_[view.cluster_id]->DecodeFusedSplitCode(view.one_bit_code,
+                                                                        view.supplement_code,
+                                                                        IsLegacyHnswFusedCodec(),
+                                                                        data,
+                                                                        apply_inverse_rotation);
     }
 
     bool
@@ -1985,6 +2110,7 @@ public:
                                    static_cast<uint64_t>(cluster_id) * common_param_.dim_);
             fused_quantizers_.push_back(std::move(quantizer));
         }
+        refresh_fused_cluster_stats();
     }
 
     bool
@@ -2288,6 +2414,7 @@ public:
                                    static_cast<uint64_t>(cluster_id) * common_param_.dim_);
             fused_quantizers_.push_back(std::move(quantizer));
         }
+        refresh_fused_cluster_stats();
     }
 
     bool
@@ -2557,6 +2684,8 @@ public:
     std::shared_ptr<QuantizerT> quantizer_{nullptr};
     std::vector<std::shared_ptr<RaBitQuantizer<metric>>> fused_quantizers_;
     std::vector<float> fused_centroids_;
+    std::vector<float> fused_centroid_sums_;
+    std::vector<float> fused_centroid_pair_ip_;
     std::shared_ptr<FixedLayout<OneBitIOTmpl>> x_bit_layout_{nullptr};
     std::shared_ptr<FixedLayout<SupplementIOTmpl>> supplement_layout_{nullptr};
     std::shared_ptr<FixedLayout<MemoryIO>> optimized_build_scalar_layout_{nullptr};

@@ -957,6 +957,101 @@ RaBitQPackScalarToSplitPlanes(const uint8_t* scalar_codes,
         scalar_codes, filter_planes, supplement_planes, dim, total_bits, filter_bits, 0);
 }
 
+bool
+RaBitQExCode7ToBytes(const uint8_t* one_bit_code,
+                     const uint8_t* supplement_code,
+                     uint64_t dim,
+                     uint8_t* out,
+                     uint64_t* code_sum,
+                     uint64_t* code_sq_sum) {
+    if (one_bit_code == nullptr or supplement_code == nullptr or out == nullptr or
+        code_sum == nullptr or not RaBitQExCode7SupportedDim(dim)) {
+        return false;
+    }
+    constexpr uint64_t kLegacyBlockSize = 56;
+    constexpr uint64_t kLegacyLowDimensionCount = 48;
+    uint64_t sum = 0;
+    uint64_t sum_sq = 0;
+    const bool want_sq_sum = code_sq_sum != nullptr;
+    for (uint64_t d = 0; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3U;
+        const auto bit_mask = static_cast<uint8_t>(1U << (d & 7U));
+        const uint32_t filter_code = ((one_bit_code[byte_idx] & bit_mask) != 0U) ? 1U : 0U;
+        const uint64_t lane = d & 63U;
+        const auto* block = supplement_code + (d >> 6U) * kLegacyBlockSize;
+        const uint32_t top = (block[48U + (lane & 7U)] >> (lane >> 3U)) & 1U;
+        uint32_t low = 0;
+        if (lane < kLegacyLowDimensionCount) {
+            low = block[lane] & 0x3FU;
+        } else {
+            const uint64_t packed_lane = lane - kLegacyLowDimensionCount;
+            low = ((block[packed_lane] >> 6U) & 0x3U) |
+                  (((block[16U + packed_lane] >> 6U) & 0x3U) << 2U) |
+                  (((block[32U + packed_lane] >> 6U) & 0x3U) << 4U);
+        }
+        const auto code = static_cast<uint8_t>((filter_code << 7U) | (top << 6U) | low);
+        out[d] = code;
+        sum += code;
+        if (want_sq_sum) {
+            sum_sq += static_cast<uint64_t>(code) * code;
+        }
+    }
+    *code_sum = sum;
+    if (code_sq_sum != nullptr) {
+        *code_sq_sum = sum_sq;
+    }
+    return true;
+}
+
+bool
+RaBitQExCode7ToVector(const uint8_t* one_bit_code,
+                      const uint8_t* supplement_code,
+                      const float* centroid,
+                      float residual_scale,
+                      float full_center,
+                      uint64_t dim,
+                      float* out) {
+    if (one_bit_code == nullptr or supplement_code == nullptr or centroid == nullptr or
+        out == nullptr or not RaBitQExCode7SupportedDim(dim)) {
+        return false;
+    }
+    // HNSW-compatible codec: one filter bit plane plus a 7-bit supplement packed in 56-byte
+    // blocks, one block per 64 dimensions.
+    constexpr uint64_t kLegacyBlockSize = 56;
+    constexpr uint64_t kLegacyLowDimensionCount = 48;
+    constexpr uint32_t kSupplementBits = 7;
+    for (uint64_t d = 0; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3U;
+        const auto bit_mask = static_cast<uint8_t>(1U << (d & 7U));
+        const uint32_t filter_code = ((one_bit_code[byte_idx] & bit_mask) != 0U) ? 1U : 0U;
+
+        const uint64_t lane = d & 63U;
+        const auto* block = supplement_code + (d >> 6U) * kLegacyBlockSize;
+        const uint32_t top = (block[48U + (lane & 7U)] >> (lane >> 3U)) & 1U;
+        uint32_t low = 0;
+        if (lane < kLegacyLowDimensionCount) {
+            low = block[lane] & 0x3FU;
+        } else {
+            const uint64_t packed_lane = lane - kLegacyLowDimensionCount;
+            low = ((block[packed_lane] >> 6U) & 0x3U) |
+                  (((block[16U + packed_lane] >> 6U) & 0x3U) << 2U) |
+                  (((block[32U + packed_lane] >> 6U) & 0x3U) << 4U);
+        }
+        const uint32_t supplement = low | (top << 6U);
+        const uint32_t full_code = (filter_code << kSupplementBits) | supplement;
+
+        const float value =
+            centroid[d] + residual_scale * (static_cast<float>(full_code) - full_center);
+        uint32_t bits = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        if ((bits & 0x7F800000U) == 0x7F800000U) {
+            return false;
+        }
+        out[d] = value;
+    }
+    return true;
+}
+
 void
 RaBitQPackScalarToSplitCode(const uint8_t* scalar_codes,
                             uint8_t* filter_planes,

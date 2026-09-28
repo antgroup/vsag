@@ -192,11 +192,53 @@ public:
                               uint8_t* one_bit_code,
                               uint8_t* supplement_code) const;
 
+    // Reconstructs the stored vector. `apply_inverse_rotation == false` stops after the
+    // rotated-domain reconstruction; the result is then the inverse-rotation preimage, which
+    // is what pairwise distances need.
     bool
     DecodeFusedSplitCode(const uint8_t* one_bit_code,
                          const uint8_t* supplement_code,
                          bool legacy_hnsw_codec,
-                         float* data) const;
+                         float* data,
+                         bool apply_inverse_rotation = true) const;
+
+    // Pairwise inner product of two fused codes evaluated in the code domain. With
+    // v = centroid + residual_scale * (code - full_center),
+    //   <v1,v2> = <c1,c2> + a2*(<c1,code2> - c0*S(c1)) + a1*(<code1,c2> - c0*S(c2))
+    //             + a1*a2*(<code1,code2> - c0*(K1+K2) + c0^2*dim)
+    // so only an integer code-code inner product and two float-code inner products are needed
+    // instead of reconstructing two float vectors. The caller supplies the per-cluster constants
+    // (centroid sums and the centroid pair inner product). Returns false when the fused storage
+    // does not use the HNSW-compatible 1 + 7 codec, in which case the reconstruction path must
+    // be used.
+    bool
+    ComputeFusedPairIP(const uint8_t* one_bit_code1,
+                       const uint8_t* supplement_code1,
+                       const float* centroid1,
+                       float centroid1_sum,
+                       const uint8_t* one_bit_code2,
+                       const uint8_t* supplement_code2,
+                       const float* centroid2,
+                       float centroid2_sum,
+                       float centroid_pair_ip,
+                       float* distance) const;
+
+    // L2 pair distance in the difference form, i.e. no per-code norm is needed:
+    //   |v1-v2|^2 = |c1-c2|^2 + 2*a1*<c1-c2,w1> - 2*a2*<c1-c2,w2>
+    //               + a1^2*|w1|^2 + a2^2*|w2|^2 - 2*a1*a2*<w1,w2>
+    // with w = code - 127.5 and v = centroid + residual_scale * w. Everything but the two
+    // float-code inner products is exact integer arithmetic over the codes, so nothing has to be
+    // stored per code. When both codes belong to the same cluster c1 == c2, the centroid terms
+    // vanish and `centroid_diff` may be null.
+    bool
+    ComputeFusedPairL2Difference(const uint8_t* one_bit_code1,
+                                 const uint8_t* supplement_code1,
+                                 const uint8_t* one_bit_code2,
+                                 const uint8_t* supplement_code2,
+                                 float centroid_diff_sq,
+                                 float centroid_diff_sum,
+                                 const float* centroid_diff,
+                                 float* distance) const;
 
     bool
     ComputeFusedAffineFilter(const float* transformed_query,
