@@ -117,6 +117,12 @@ together when the directory is listed:
 | --- | --- |
 | [`501_quantization_transform.cpp`](501_quantization_transform.cpp) | Transform Quantizer (TQ) recipe. |
 
+### Utilities (`6xx`)
+
+| File | What it shows |
+| --- | --- |
+| [`601_utils_rpt_partition.cpp`](601_utils_rpt_partition.cpp) | Random projection tree (RPT) partitioning: split vectors into near-uniform buckets with `vsag::rpt_partition`. |
+
 ## Where to go next
 
 - For the equivalent recipes in other languages, see

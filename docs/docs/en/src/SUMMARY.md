@@ -68,6 +68,7 @@
 - [Extra Info](advanced/extra_info.md)
 - [Index Lifecycle Management](advanced/index_lifecycle.md)
 - [HGraph MCI Companion](advanced/hgraph_mci_companion.md)
+- [Random Projection Tree Partitioning](advanced/rpt_partition.md)
 
 # API Reference
 
