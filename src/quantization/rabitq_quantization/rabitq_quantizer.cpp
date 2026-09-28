@@ -21,6 +21,7 @@
 #include <limits>
 #include <queue>
 #include <utility>
+#include <vector>
 
 #include "impl/transform/transformer_headers.h"
 #include "simd/fp32_simd.h"
@@ -2954,8 +2955,15 @@ RaBitQuantizer<metric>::ComputeFusedPairIP(const uint8_t* one_bit_code1,
         centroid_.size() != this->dim_) {
         return false;
     }
-    Vector<uint8_t> codes1(this->dim_, 0, this->allocator_);
-    Vector<uint8_t> codes2(this->dim_, 0, this->allocator_);
+    // The decode buffers are dim_ bytes each, past the small-object fast path, and this runs
+    // O(degree) times per inserted node from link_back_edges, so they are kept per-thread
+    // instead of being allocated on every pair distance.
+    thread_local std::vector<uint8_t> codes1;
+    thread_local std::vector<uint8_t> codes2;
+    if (codes1.size() < this->dim_) {
+        codes1.resize(this->dim_);
+        codes2.resize(this->dim_);
+    }
     uint64_t code_sum1 = 0;
     uint64_t code_sum2 = 0;
     if (not RaBitQExCode7ToBytes(
@@ -2983,12 +2991,17 @@ RaBitQuantizer<metric>::ComputeFusedPairIP(const uint8_t* one_bit_code1,
     // intermediate sums out of float. The centroid terms are float SIMD results and are
     // combined in double before the single narrowing back to float.
     constexpr double full_center = 127.5;  // 0.5 * ((1 << (filter_bits + reorder_bits)) - 1)
+    // Coefficients of 4*sum((code1-c0)*(code2-c0)) = 4*ip - 4*c0*code_sum + 4*c0^2*dim, derived
+    // from full_center so a codec bit-width change cannot silently leave them behind.
+    constexpr int64_t centering_linear = static_cast<int64_t>(4.0 * full_center);
+    constexpr int64_t centering_constant = static_cast<int64_t>(4.0 * full_center * full_center);
     const auto code_code_ip =
         static_cast<int64_t>(RaBitQCodeCodeIP(codes1.data(), codes2.data(), this->dim_));
     const auto code_sum = static_cast<int64_t>(code_sum1 + code_sum2);
     const auto dim = static_cast<int64_t>(this->dim_);
     const double centered_code_code_ip =
-        0.25 * static_cast<double>(4 * code_code_ip - 510 * code_sum + 65025 * dim);
+        0.25 * static_cast<double>(4 * code_code_ip - centering_linear * code_sum +
+                                   centering_constant * dim);
     const float centroid1_code2 = RaBitQFloatSQIP(centroid1, codes2.data(), this->dim_);
     const float code1_centroid2 = RaBitQFloatSQIP(centroid2, codes1.data(), this->dim_);
     const double centroid1_centered_code2 =
@@ -3028,8 +3041,13 @@ RaBitQuantizer<metric>::ComputeFusedPairL2Difference(const uint8_t* one_bit_code
             centroid_.size() != this->dim_) {
             return false;
         }
-        Vector<uint8_t> codes1(this->dim_, 0, this->allocator_);
-        Vector<uint8_t> codes2(this->dim_, 0, this->allocator_);
+        // See ComputeFusedPairIP: per-thread scratch instead of a heap allocation per pair.
+        thread_local std::vector<uint8_t> codes1;
+        thread_local std::vector<uint8_t> codes2;
+        if (codes1.size() < this->dim_) {
+            codes1.resize(this->dim_);
+            codes2.resize(this->dim_);
+        }
         uint64_t code_sum1 = 0;
         uint64_t code_sum2 = 0;
         uint64_t code_sq_sum1 = 0;
@@ -3062,7 +3080,14 @@ RaBitQuantizer<metric>::ComputeFusedPairL2Difference(const uint8_t* one_bit_code
             return false;
         }
 
-        // integer exact code statistics, 2*code - 255 keeps the centring free of cancellation
+        // integer exact code statistics, 2*code - 255 keeps the centring free of cancellation.
+        // The coefficients follow full_center (127.5): 4*sum(w1*w2) = 4*ip - 4*c0*(sum1+sum2)
+        // + 4*c0^2*dim and 4*|wi|^2 = 4*sqi - 8*c0*sumi + 4*c0^2*dim.
+        constexpr double full_center = 127.5;
+        constexpr int64_t centering_linear = static_cast<int64_t>(4.0 * full_center);
+        constexpr int64_t centering_double_linear = 2 * centering_linear;
+        constexpr int64_t centering_constant =
+            static_cast<int64_t>(4.0 * full_center * full_center);
         const auto dim = static_cast<int64_t>(this->dim_);
         const auto sum1 = static_cast<int64_t>(code_sum1);
         const auto sum2 = static_cast<int64_t>(code_sum2);
@@ -3071,9 +3096,11 @@ RaBitQuantizer<metric>::ComputeFusedPairL2Difference(const uint8_t* one_bit_code
         const double w1w2 =
             0.25 * static_cast<double>(4 * static_cast<int64_t>(RaBitQCodeCodeIP(
                                                codes1.data(), codes2.data(), this->dim_)) -
-                                       510 * (sum1 + sum2) + 65025 * dim);
-        const double w1_sq = 0.25 * static_cast<double>(4 * sq1 - 1020 * sum1 + 65025 * dim);
-        const double w2_sq = 0.25 * static_cast<double>(4 * sq2 - 1020 * sum2 + 65025 * dim);
+                                       centering_linear * (sum1 + sum2) + centering_constant * dim);
+        const double w1_sq = 0.25 * static_cast<double>(4 * sq1 - centering_double_linear * sum1 +
+                                                        centering_constant * dim);
+        const double w2_sq = 0.25 * static_cast<double>(4 * sq2 - centering_double_linear * sum2 +
+                                                        centering_constant * dim);
 
         const double a1 = static_cast<double>(residual_scale1);
         const double a2 = static_cast<double>(residual_scale2);
@@ -3082,10 +3109,10 @@ RaBitQuantizer<metric>::ComputeFusedPairL2Difference(const uint8_t* one_bit_code
             const double diff_sum = static_cast<double>(centroid_diff_sum);
             const double x1 =
                 static_cast<double>(RaBitQFloatSQIP(centroid_diff, codes1.data(), this->dim_)) -
-                127.5 * diff_sum;
+                full_center * diff_sum;
             const double x2 =
                 static_cast<double>(RaBitQFloatSQIP(centroid_diff, codes2.data(), this->dim_)) -
-                127.5 * diff_sum;
+                full_center * diff_sum;
             value += static_cast<double>(centroid_diff_sq) + 2.0 * a1 * x1 - 2.0 * a2 * x2;
         }
         const auto result = static_cast<float>(value);

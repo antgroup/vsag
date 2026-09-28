@@ -150,12 +150,18 @@ public:
         return INDEX_TYPE_HGRAPH;
     }
 
+    /// Number of searchable elements. Ids reserved by prepare_add_batch but not published yet are
+    /// excluded, so this can under-report while a batched Add is in flight; that is intended,
+    /// because those nodes are deliberately not searchable.
     int64_t
     GetNumElements() const override {
         return static_cast<int64_t>(this->PublishedCount()) - delete_count_;
     }
 
     /// Order-sensitive FNV-1a hash over every bottom-graph neighbour list.
+    ///
+    /// Only the bottom graph is covered; the route-graph layers are not hashed, so two indexes
+    /// with identical bottom connectivity but different upper layers share a checksum.
     ///
     /// Diagnostic only: lets a test tell "the graph differs" apart from "search amplifies a
     /// difference", and lets two builds be compared content-wise instead of via hit lists.
