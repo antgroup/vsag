@@ -28,13 +28,15 @@ namespace vsag {
 
 namespace {
 
-/// Reverse edges are applied through an optimistic snapshot/validate/commit by default;
-/// set VSAG_OPTIMISTIC_EDGE=0 to use the fully-locked reference path.
+/// Optimistic snapshot/validate/commit for reverse edges. Measured as no faster than the
+/// fully-locked path while costing about 27% more CPU (each neighbour then takes the lock
+/// twice instead of once), so it is OFF by default and kept only as an opt-in experiment:
+/// set VSAG_OPTIMISTIC_EDGE=1 to enable it.
 inline bool
 optimistic_edge_on() {
     static const bool on = []() {
         const char* env = std::getenv("VSAG_OPTIMISTIC_EDGE");
-        return env == nullptr or env[0] != '0';
+        return env != nullptr and env[0] == '1';
     }();
     return on;
 }
