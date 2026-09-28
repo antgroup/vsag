@@ -23,7 +23,11 @@
 using namespace vsag;
 
 void
-TestRandomness(FhtKacRotator& rom1, FhtKacRotator& rom2, int dim) {
+TestDeterministic(FhtKacRotator& rom1, FhtKacRotator& rom2, int dim) {
+    // FhtKacRotator::Train() must be reproducible: the flip-sign matrix is an arbitrary but
+    // fixed choice, so two independently constructed rotators of the same dimension have to
+    // produce the same matrix. (It used to be seeded from std::random_device, which made
+    // every process build a different rotation and therefore a different index.)
     uint64_t flip_len = (dim + 7) / FhtKacRotator::BYTE_LEN * FhtKacRotator::ROUND;
     std::vector<uint8_t> mat1(flip_len);
     rom1.CopyFlip(mat1.data());
@@ -31,19 +35,7 @@ TestRandomness(FhtKacRotator& rom1, FhtKacRotator& rom2, int dim) {
     std::vector<uint8_t> mat2(flip_len);
     rom2.CopyFlip(mat2.data());
 
-    uint64_t count_same = 0;
-    for (uint64_t i = 0; i < flip_len; i++) {
-        if (mat1[i] == mat2[i]) {
-            count_same++;
-        }
-    }
-    // For small samples (e.g., dim=32, flip_len=16), the 10% threshold truncates
-    // to 1. With random uniform bytes, the probability of 2+ byte collisions
-    // in 16 elements is P(X>=2) for B(16, 1/256) ~ 0.17%, which causes
-    // intermittent CI failures. A minimum floor of 2 eliminates this flakiness.
-    constexpr uint64_t kMinCollisionThreshold = 2;
-    uint64_t threshold = std::max<uint64_t>(kMinCollisionThreshold, flip_len / 10);
-    REQUIRE(count_same <= threshold);
+    REQUIRE(mat1 == mat2);
 }
 
 void
@@ -95,7 +87,7 @@ TEST_CASE("Basic Hadamard Test", "[ut][FhtKacRotator]") {
         rom.Train();
         rom_alter.Train();
         TestTransform(rom, dim);
-        TestRandomness(rom, rom_alter, dim);
+        TestDeterministic(rom, rom_alter, dim);
     }
 }
 
