@@ -102,7 +102,9 @@ HGraph::KnnSearch(const DatasetPtr& query,
     FilterPtr ft = this->create_search_filter(filter, params.use_extra_info_filter);
 
     if (iter_ctx == nullptr) {
-        auto cur_count = this->total_count_.load();
+        // Gate on the visibility mark, not the reservation mark: ids below total_count_ may
+        // still be under construction.
+        auto cur_count = this->PublishedCount();
 
         if (cur_count == 0) {
             return make_empty_dataset_with_stats(stats);
@@ -430,7 +432,7 @@ HGraph::brute_force_search(const void* query,
     // Add reserves logical ids before their code slots are published.
     auto total =
         this->using_dedup_storage() ? this->GetCodeStorageCounts().first : flatten->TotalCount();
-    total = std::min(total, static_cast<InnerIdType>(this->total_count_.load()));
+    total = std::min(total, this->PublishedCount());
     if (total == 0) {
         return result;
     }

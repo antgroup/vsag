@@ -576,6 +576,8 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
             route_graphs_[j]->MergeOther(other_index->route_graphs_[j], logical_bias);
         }
         this->total_count_ += other_index->GetNumElements();
+        // Merged ids are fully built before being handed over, so they are immediately visible.
+        this->PublishThroughTotalCount();
     }
     if (this->odescent_param_ == nullptr) {
         odescent_param_ = std::make_shared<ODescentParameter>();

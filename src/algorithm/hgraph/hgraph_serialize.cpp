@@ -930,11 +930,13 @@ HGraph::read_streaming_body(StreamReader& reader,
         this->physical_code_capacity_.store(physical_capacity, std::memory_order_release);
         this->code_slot_map_->ReserveLogicalSize(static_cast<InnerIdType>(new_size));
         this->total_count_.store(logical_count, std::memory_order_release);
+        this->PublishThroughTotalCount();
     }
     this->neighbors_mutex_->Resize(new_size);
     pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
     if (not this->using_dedup_storage()) {
         this->total_count_ = this->basic_flatten_codes_->TotalCount();
+        this->PublishThroughTotalCount();
     }
     if (this->raw_vector_ != nullptr) {
         this->has_raw_vector_ = true;
@@ -984,6 +986,7 @@ HGraph::Deserialize(StreamReader& reader) {
             this->extra_infos_->Deserialize(reader);
         }
         this->total_count_ = this->basic_flatten_codes_->TotalCount();
+        this->PublishThroughTotalCount();
 
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Deserialize(reader);
@@ -1039,6 +1042,7 @@ HGraph::Deserialize(StreamReader& reader) {
                                 logical_count));
             }
             this->total_count_.store(logical_count, std::memory_order_release);
+            this->PublishThroughTotalCount();
         }
 
         this->basic_flatten_codes_->Deserialize(buffer_reader);
@@ -1067,6 +1071,7 @@ HGraph::Deserialize(StreamReader& reader) {
         }
         if (not this->using_dedup_storage()) {
             this->total_count_ = this->basic_flatten_codes_->TotalCount();
+            this->PublishThroughTotalCount();
         }
 
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {

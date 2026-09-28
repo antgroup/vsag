@@ -242,6 +242,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
                                        static_cast<uint64_t>(total));
     this->resize(current_count + new_ids_count);
     this->total_count_ += new_ids_count;
+    this->PublishThroughTotalCount();
     Vector<std::pair<InnerIdType, int64_t>> deferred_code_ids(allocator_);
     for (InnerIdType cur_size = 0; cur_size < valid_indices.size(); ++cur_size) {
         auto i = valid_indices[cur_size];
@@ -474,6 +475,8 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
             if (inner_id >= total_count_) {
                 this->resize(total_count_.load() + 1);
                 ++total_count_;
+                // Phase 1: visibility is kept equal to reservation; phase 2 narrows this.
+                this->PublishThroughTotalCount();
             }
         }
 
@@ -1648,6 +1651,7 @@ HGraph::cache_collect_valid_indices(const DatasetPtr& data, BuildCachePlan& plan
     }
     this->resize(current_count + new_ids_count);
     this->total_count_ += new_ids_count;
+    this->PublishThroughTotalCount();
     plan.inserted_inner_ids.reserve(static_cast<uint64_t>(plan.valid_indices.size()));
     plan.inner_id_to_input_idx.reserve(static_cast<uint64_t>(plan.valid_indices.size()));
     plan.source_id_to_new_inner.reserve(static_cast<uint64_t>(plan.valid_indices.size()));

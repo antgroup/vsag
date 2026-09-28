@@ -211,6 +211,9 @@ HGraph::force_remove_one(int64_t label) {
             this->route_graphs_.clear();
         }
         this->total_count_.fetch_sub(1);
+        // Removal shrinks the id range; keep the visibility mark in step so it can never
+        // exceed the reserved range.
+        this->PublishThroughTotalCount();
     }
     return 1;
 }

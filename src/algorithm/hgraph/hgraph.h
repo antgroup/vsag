@@ -148,7 +148,33 @@ public:
 
     int64_t
     GetNumElements() const override {
-        return static_cast<int64_t>(this->total_count_) - delete_count_;
+        return static_cast<int64_t>(this->PublishedCount()) - delete_count_;
+    }
+
+    /// Number of leading inner ids that concurrent readers may observe.
+    [[nodiscard]] InnerIdType
+    PublishedCount() const {
+        return this->published_count_.load(std::memory_order_acquire);
+    }
+
+    /// Mark every id below total_count_ visible. Used where a whole id range is created and
+    /// completed together (batch reservation, ODescent build, deserialization).
+    void
+    PublishThroughTotalCount() {
+        this->published_count_.store(this->total_count_.load(std::memory_order_acquire),
+                                     std::memory_order_release);
+    }
+
+    /// Mark one node visible, once its codes and links are both written.
+    void
+    PublishNode(InnerIdType inner_id) {
+        InnerIdType current = this->published_count_.load(std::memory_order_relaxed);
+        while (current <= inner_id and
+               not this->published_count_.compare_exchange_weak(current,
+                                                                inner_id + 1,
+                                                                std::memory_order_release,
+                                                                std::memory_order_relaxed)) {
+        }
     }
 
     int64_t
@@ -159,7 +185,7 @@ public:
     [[nodiscard]] std::pair<InnerIdType, CodeSlotIdType>
     GetCodeStorageCounts() const {
         if (this->code_slot_map_ == nullptr) {
-            auto count = static_cast<InnerIdType>(this->total_count_.load());
+            auto count = this->PublishedCount();
             return {count, count};
         }
         return {this->code_slot_map_->PublishedLogicalCount(),
@@ -954,6 +980,18 @@ private:
     std::atomic<bool> physical_code_resize_pending_{false};
 
     std::atomic<InnerIdType> max_capacity_{0};               // allocated storage capacity
+
+    /// Visibility high-water mark: the number of leading inner ids whose codes *and* graph
+    /// links are both fully written, and which concurrent readers may therefore observe.
+    ///
+    /// total_count_ (base class) means "reserved": the id range is allocated and the
+    /// underlying storage is sized for it. A reserved id can name a node whose codes or link
+    /// lists are still being written by a construction worker, so readers gate on
+    /// published_count_ rather than total_count_.
+    ///
+    /// Monotonically non-decreasing. Kept equal to total_count_ wherever nodes are created in
+    /// bulk; insert paths advance it per node once that node is complete.
+    std::atomic<InnerIdType> published_count_{0};
     std::atomic<CodeSlotIdType> physical_code_capacity_{0};  // physical flatten slot capacity
 
     uint64_t resize_increase_count_bit_{
