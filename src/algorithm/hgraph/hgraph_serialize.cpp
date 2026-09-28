@@ -1281,6 +1281,10 @@ HGraph::initialize_deserialized_runtime_state() {
 
 void
 HGraph::finish_deserialize() {
+    // A deserialized index is complete: every restored id is already searchable. Publish before
+    // anything below can search or report the element count, otherwise the two-phase Add
+    // publication mark would still be zero and the restored index would look empty.
+    this->PublishThroughTotalCount();
     if (this->using_dedup_storage()) {
         auto logical_count = this->code_slot_map_->PublishedLogicalCount();
         auto physical_count = this->code_slot_map_->PhysicalCount();
