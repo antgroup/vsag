@@ -1,6 +1,10 @@
 # Disk-Based Index Best Practices
 
-![Disk-backed HGraph: the graph and compact base codes stay in memory for traversal, while a higher-precision precise copy on disk is read only for the ef_search finalists during reorder](../figures/resources/disk-index-overview.svg)
+## User-defined IO callbacks
+
+Assign `precise_io_type` to `"user_defined_io"` and register callbacks through
+`Factory::CreateUserDefinedIO`. See **[User-Defined IO](../advanced/user_defined_io.md)**
+for the full callback contract, configuration table, and runnable example.
 
 When a corpus grows past the point where every vector fits in RAM, moving the coldest,
 largest part of the index onto an SSD is the most direct way to control cost. VSAG does
