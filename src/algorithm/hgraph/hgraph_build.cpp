@@ -702,27 +702,30 @@ HGraph::insert_one_logical_point(const void* data, const AddRow& row, const AddC
     auto param = make_search_param();
     auto probe = this->probe_graph_for_add(data, level, inner_id, param, context.graph_read_codes);
     if (this->publish_duplicate_if_found(probe, inner_id, context)) {
+        // The duplicate still consumed an inner id and was fully ingested (its storage was
+        // published above), so it must count as visible; otherwise the visibility mark lags
+        // the reserved range and GetNumElements() under-reports.
+        this->PublishNode(inner_id);
         return false;
     }
 
     if (this->unique_add_needs_structure_update(level)) {
         rlock.unlock();
-        const uint64_t am_t0 = static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now().time_since_epoch())
-                .count());
+        const uint64_t am_t0 =
+            static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                      std::chrono::steady_clock::now().time_since_epoch())
+                                      .count());
         {
             std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
             this->publish_unique_under_unique_global_lock(
                 data, level, inner_id, param, probe, context);
         }
-        const uint64_t am_t1 = static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now().time_since_epoch())
-                .count());
+        const uint64_t am_t1 =
+            static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                      std::chrono::steady_clock::now().time_since_epoch())
+                                      .count());
         this->add_mutex_stats.exclusive_calls.fetch_add(1, std::memory_order_relaxed);
-        this->add_mutex_stats.exclusive_hold_ns.fetch_add(am_t1 - am_t0,
-                                                           std::memory_order_relaxed);
+        this->add_mutex_stats.exclusive_hold_ns.fetch_add(am_t1 - am_t0, std::memory_order_relaxed);
         this->PublishNode(inner_id);
         return true;
     }

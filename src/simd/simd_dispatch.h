@@ -132,7 +132,7 @@ namespace vsag {
         }                                          \
         return generic::FnName;                    \
     }                                              \
-    FnType FnName = Get##FnName()
+    inline FnType FnName = Get##FnName()
 
 // Register a dispatch that additionally prefers AVX512VPOPCNTDQ over
 // AVX512. Used by rabitq binary inner-product routines. AVX2/AVX/SSE
@@ -157,7 +157,7 @@ namespace vsag {
         }                                                   \
         return generic::FnName;                             \
     }                                                       \
-    FnType FnName = Get##FnName()
+    inline FnType FnName = Get##FnName()
 
 // Register a narrow dispatch for prefetch-like routines that only have
 // SSE / SVE / NEON implementations. AVX512/AVX2/AVX are intentionally
@@ -178,6 +178,6 @@ namespace vsag {
         }                                                  \
         return generic::FnName;                            \
     }                                                      \
-    FnType FnName = Get##FnName()
+    inline FnType FnName = Get##FnName()
 
 }  // namespace vsag

@@ -21,16 +21,15 @@
 // profiler is needed. Async-signal-safe: only a bounded atomic array is written.
 // ---------------------------------------------------------------------------
 #include <dirent.h>
+#include <fcntl.h>
 #include <sys/syscall.h>
+#include <unistd.h>
 
+#include <atomic>
 #include <csignal>
 #include <cstdint>
 #include <cstring>
 #include <ctime>
-#include <fcntl.h>
-#include <unistd.h>
-
-#include <atomic>
 
 namespace sampling {
 
@@ -148,28 +147,25 @@ dump(const char* path) {
 
 }  // namespace sampling
 
-
-
-#include "algorithm/hgraph/hgraph.h"
-#include "index/index_impl.h"
-#include "utils/lock_strategy.h"
+#include <sys/resource.h>
 
 #include <algorithm>
 #include <atomic>
-#include <thread>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
-#include <algorithm>
 #include <random>
+#include <string>
+#include <thread>
 #include <utility>
 #include <vector>
-#include <string>
-#include <sys/resource.h>
-#include <vector>
+
+#include "algorithm/hgraph/hgraph.h"
+#include "index/index_impl.h"
+#include "utils/lock_strategy.h"
 
 namespace {
 
@@ -213,8 +209,8 @@ main(int argc, char** argv) {
     vsag::init();
 
     std::cout << "== issue #3007 harness ==\n"
-              << "dim=" << dim << " batch=" << batch << " batches=" << batches
-              << " total=" << total << " build_threads=" << threads
+              << "dim=" << dim << " batch=" << batch << " batches=" << batches << " total=" << total
+              << " build_threads=" << threads
               << " mode=" << (use_build ? "single Build()" : "batched Add()") << "\n";
 
     // Synthetic dataset. Log-normal magnitude gives a skewed radius distribution,
@@ -263,8 +259,10 @@ main(int argc, char** argv) {
             "rabitq_use_fht": true,
             "rabitq_pca_dim": 0,
             "fast_encode_rabitq": true,
-            "max_degree": )" + std::to_string(max_degree) + R"(,
-            "ef_construction": )" + std::to_string(ef_construction) + R"(,
+            "max_degree": )" +
+                         std::to_string(max_degree) + R"(,
+            "ef_construction": )" +
+                         std::to_string(ef_construction) + R"(,
             "build_thread_count": )" +
                          std::to_string(threads) +
                          R"(,
@@ -300,7 +298,10 @@ main(int argc, char** argv) {
                     const int64_t row = (q++) % total;
                     const float* qv = data.data() + static_cast<size_t>(row) * dim;
                     auto qds = vsag::Dataset::Make();
-                    qds->NumElements(1)->Dim(dim)->Float32Vectors(const_cast<float*>(qv))->Owner(false);
+                    qds->NumElements(1)
+                        ->Dim(dim)
+                        ->Float32Vectors(const_cast<float*>(qv))
+                        ->Owner(false);
                     auto res = index->KnnSearch(qds, 10, sp);
                     stress_queries.fetch_add(1, std::memory_order_relaxed);
                     if (not res.has_value()) {
@@ -423,15 +424,27 @@ main(int argc, char** argv) {
         std::string search_params = R"({"hgraph": {"ef_search": 100}})";
         for (int64_t qi = 0; qi < 50; ++qi) {
             auto q = vsag::Dataset::Make();
-            q->NumElements(1)->Dim(dim)->Float32Vectors(data.data() + static_cast<size_t>(qi) * dim)->Owner(false);
+            q->NumElements(1)
+                ->Dim(dim)
+                ->Float32Vectors(data.data() + static_cast<size_t>(qi) * dim)
+                ->Owner(false);
             auto res = index->KnnSearch(q, 10, search_params);
             auto res2 = index->KnnSearch(q, 10, search_params);
-            if (not res.has_value() or not res2.has_value()) { std::printf("DIGEST search-failed\n"); break; }
+            if (not res.has_value() or not res2.has_value()) {
+                std::printf("DIGEST search-failed\n");
+                break;
+            }
             const auto* rid = res.value()->GetIds();
             const auto* rid2 = res2.value()->GetIds();
             for (int64_t k = 0; k < 10; ++k) {
-                if (rid[k] != rid2[k]) { ++repeat_mismatch; }
-                if (rid[k] >= 0) { same += rid[k] + 1; } else { ++diff; }
+                if (rid[k] != rid2[k]) {
+                    ++repeat_mismatch;
+                }
+                if (rid[k] >= 0) {
+                    same += rid[k] + 1;
+                } else {
+                    ++diff;
+                }
             }
         }
         // Direct graph-content fingerprint: tells "the graph differs" apart from "search
@@ -454,16 +467,16 @@ main(int argc, char** argv) {
                 std::printf("ADDMUTEX calls=%llu hold=%.3f s\n",
                             static_cast<unsigned long long>(amc),
                             static_cast<double>(amn) / 1e9);
-                auto nbr = std::dynamic_pointer_cast<vsag::PointsMutex>(
-                    hgraph->GetNeighborsMutexArray());
+                auto nbr =
+                    std::dynamic_pointer_cast<vsag::PointsMutex>(hgraph->GetNeighborsMutexArray());
                 if (nbr != nullptr) {
-                    std::printf("NEIGHMUTEX excl_calls=%llu excl_wait=%.3f s "
-                                "shared_calls=%llu shared_wait=%.3f s\n",
-                                static_cast<unsigned long long>(
-                                    nbr->stats.exclusive_calls.load()),
-                                static_cast<double>(nbr->stats.exclusive_wait_ns.load()) / 1e9,
-                                static_cast<unsigned long long>(nbr->stats.shared_calls.load()),
-                                static_cast<double>(nbr->stats.shared_wait_ns.load()) / 1e9);
+                    std::printf(
+                        "NEIGHMUTEX excl_calls=%llu excl_wait=%.3f s "
+                        "shared_calls=%llu shared_wait=%.3f s\n",
+                        static_cast<unsigned long long>(nbr->stats.exclusive_calls.load()),
+                        static_cast<double>(nbr->stats.exclusive_wait_ns.load()) / 1e9,
+                        static_cast<unsigned long long>(nbr->stats.shared_calls.load()),
+                        static_cast<double>(nbr->stats.shared_wait_ns.load()) / 1e9);
                 }
             }
         }
@@ -483,28 +496,37 @@ main(int argc, char** argv) {
                     }
                     exact.emplace_back(static_cast<float>(ip), ids[j]);
                 }
-                std::partial_sort(exact.begin(), exact.begin() + 10, exact.end(),
+                std::partial_sort(exact.begin(),
+                                  exact.begin() + 10,
+                                  exact.end(),
                                   [](const auto& a, const auto& b) { return a.first > b.first; });
                 auto qds = vsag::Dataset::Make();
                 qds->NumElements(1)->Dim(dim)->Float32Vectors(const_cast<float*>(q))->Owner(false);
                 auto res = index->KnnSearch(qds, 10, search_params);
-                if (not res.has_value()) { continue; }
+                if (not res.has_value()) {
+                    continue;
+                }
                 const auto* got = res.value()->GetIds();
                 for (int64_t k = 0; k < 10; ++k) {
                     ++recall_total;
                     for (int64_t e = 0; e < 10; ++e) {
-                        if (exact[e].second == got[k]) { ++hit; break; }
+                        if (exact[e].second == got[k]) {
+                            ++hit;
+                            break;
+                        }
                     }
                 }
             }
             std::printf("RECALL10 %.4f (%lld/%lld)\n",
-                        recall_total > 0 ? static_cast<double>(hit) /
-                                               static_cast<double>(recall_total)
-                                         : 0.0,
-                        static_cast<long long>(hit), static_cast<long long>(recall_total));
+                        recall_total > 0
+                            ? static_cast<double>(hit) / static_cast<double>(recall_total)
+                            : 0.0,
+                        static_cast<long long>(hit),
+                        static_cast<long long>(recall_total));
         }
         std::printf("DIGEST sum=%lld neg=%lld elements=%lld repeat_mismatch=%lld\n",
-                    static_cast<long long>(same), static_cast<long long>(diff),
+                    static_cast<long long>(same),
+                    static_cast<long long>(diff),
                     static_cast<long long>(index->GetNumElements()),
                     static_cast<long long>(repeat_mismatch));
     }

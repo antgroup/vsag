@@ -208,10 +208,8 @@ public:
     PublishNode(InnerIdType inner_id) {
         InnerIdType current = this->published_count_.load(std::memory_order_relaxed);
         while (current <= inner_id and
-               not this->published_count_.compare_exchange_weak(current,
-                                                                inner_id + 1,
-                                                                std::memory_order_release,
-                                                                std::memory_order_relaxed)) {
+               not this->published_count_.compare_exchange_weak(
+                   current, inner_id + 1, std::memory_order_release, std::memory_order_relaxed)) {
         }
     }
 
@@ -1017,7 +1015,7 @@ private:
     mutable std::mutex physical_code_resize_mutex_;
     std::atomic<bool> physical_code_resize_pending_{false};
 
-    std::atomic<InnerIdType> max_capacity_{0};               // allocated storage capacity
+    std::atomic<InnerIdType> max_capacity_{0};  // allocated storage capacity
 
     /// Visibility high-water mark: the number of leading inner ids whose codes *and* graph
     /// links are both fully written, and which concurrent readers may therefore observe.

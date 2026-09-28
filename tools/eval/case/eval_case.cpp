@@ -52,8 +52,7 @@ EvalCase::MakeInstance(const EvalConfig& config, std::string type, const EvalDat
     if (not index.has_value()) {
         // Surface the real reason instead of letting .value() throw bad_expected_access.
         const auto& err = index.error();
-        throw std::runtime_error("failed to create index '" + index_name + "': " +
-                                 err.message);
+        throw std::runtime_error("failed to create index '" + index_name + "': " + err.message);
     }
 
     // to support BuildSearch

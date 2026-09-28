@@ -15,9 +15,9 @@
 
 #include "pruning_strategy.h"
 
-#include <cstdlib>
-
 #include <fmt/format.h>
+
+#include <cstdlib>
 
 #include "datacell/flatten_datacell.h"
 #include "datacell/graph_interface.h"
@@ -272,9 +272,8 @@ link_back_edges(InnerIdType cur_c,
         auto candidates = std::make_shared<StandardHeap<true, false>>(allocator, -1);
         candidates->Push(pairwise_distance.PairwiseDistance(selected_neighbor, cur_c), cur_c);
         for (uint64_t j = 0; j < snap_sz; ++j) {
-            candidates->Push(
-                pairwise_distance.PairwiseDistance(selected_neighbor, snapshot[j]),
-                snapshot[j]);
+            candidates->Push(pairwise_distance.PairwiseDistance(selected_neighbor, snapshot[j]),
+                             snapshot[j]);
         }
         select_edges_by_heuristic(candidates, max_size, distance_provider, allocator, alpha);
         Vector<InnerIdType> cand_neighbors(allocator);
@@ -326,13 +325,8 @@ mutually_connect_new_element(InnerIdType cur_c,
     Vector<InnerIdType> selected_neighbors(allocator);
     const auto next_closest_entry_point = build_forward_links(
         cur_c, top_candidates, graph, distance_provider, allocator, alpha, selected_neighbors);
-    link_back_edges(cur_c,
-                    selected_neighbors,
-                    graph,
-                    distance_provider,
-                    neighbors_mutexes,
-                    allocator,
-                    alpha);
+    link_back_edges(
+        cur_c, selected_neighbors, graph, distance_provider, neighbors_mutexes, allocator, alpha);
 
     return next_closest_entry_point;
 }
