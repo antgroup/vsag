@@ -49,6 +49,12 @@ EvalCase::MakeInstance(const EvalConfig& config, std::string type, const EvalDat
     auto create_params = config.build_param;
 
     auto index = vsag::Factory::CreateIndex(index_name, create_params);
+    if (not index.has_value()) {
+        // Surface the real reason instead of letting .value() throw bad_expected_access.
+        const auto& err = index.error();
+        throw std::runtime_error("failed to create index '" + index_name + "': " +
+                                 err.message);
+    }
 
     // to support BuildSearch
     if (type == "none") {
