@@ -45,7 +45,7 @@ include (extern/tsl/tsl.cmake)
 # include (extern/roaringbitmap/roaringbitmap_amalgamation.cmake)
 include (extern/roaringbitmap/roaringbitmap.cmake)
 
-if (ENABLE_TOOLS AND ENABLE_CXX11_ABI)
+if ((ENABLE_TOOLS AND ENABLE_CXX11_ABI) OR ENABLE_PYBINDS)
     include (extern/hdf5/hdf5.cmake)
     include (extern/argparse/argparse.cmake)
     include (extern/yaml-cpp/yaml-cpp.cmake)
