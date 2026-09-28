@@ -32,6 +32,11 @@
 namespace vsag {
 
 void
+StreamReader::Skip(uint64_t size) {
+    SkipForward(*this, size);
+}
+
+void
 SkipForward(StreamReader& reader, uint64_t size) {
     constexpr uint64_t buffer_size = 8192;
     std::array<char, buffer_size> buffer{};
@@ -65,6 +70,15 @@ ReadFuncStreamReader::Seek(uint64_t cursor) {
     cursor_ = cursor;
 }
 
+void
+ReadFuncStreamReader::Skip(uint64_t size) {
+    if (cursor_ > length_ || size > length_ - cursor_) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "ReadFuncStreamReader: skip exceeds stream boundary");
+    }
+    cursor_ += size;
+}
+
 uint64_t
 ReadFuncStreamReader::GetCursor() const {
     return cursor_;
@@ -96,6 +110,22 @@ IOStreamReader::Read(char* data, uint64_t size) {
 }
 
 void
+IOStreamReader::Skip(uint64_t size) {
+    const auto position = istream_.tellg();
+    if (position == std::streampos(-1)) {
+        throw VsagException(ErrorType::READ_ERROR, "IOStreamReader: cannot determine cursor");
+    }
+    const auto cursor = static_cast<uint64_t>(position);
+    if (cursor > end_cursor_ || size > end_cursor_ - cursor) {
+        throw VsagException(ErrorType::READ_ERROR, "IOStreamReader: skip exceeds stream boundary");
+    }
+    this->Seek(cursor + size);
+    if (istream_.fail()) {
+        throw VsagException(ErrorType::READ_ERROR, "IOStreamReader: skip seek failed");
+    }
+}
+
+void
 IOStreamReader::Seek(uint64_t cursor) {
     // vsag::logger::trace("reader seek absolute::{}", cursor);
     istream_.seekg(static_cast<int64_t>(cursor), std::ios::beg);
@@ -110,6 +140,7 @@ IOStreamReader::GetCursor() const {
 IOStreamReader::IOStreamReader(std::istream& istream) : istream_(istream) {
     auto cur_pos = istream.tellg();
     istream.seekg(0, std::ios::end);
+    end_cursor_ = istream.tellg();
     length_ = istream.tellg() - cur_pos;
     istream.seekg(cur_pos);
 }
@@ -215,6 +246,23 @@ BufferStreamReader::Seek(uint64_t cursor) {
     cursor_ = cursor;
 }
 
+void
+BufferStreamReader::Skip(uint64_t size) {
+    const uint64_t buffered = valid_size_ - buffer_cursor_;
+    if (size <= buffered) {
+        buffer_cursor_ += size;
+        return;
+    }
+    const uint64_t remaining = size - buffered;
+    if (cursor_ > max_size_ || remaining > max_size_ - cursor_) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "BufferStreamReader: skip exceeds stream boundary");
+    }
+    reader_impl_->Skip(remaining);
+    buffer_cursor_ = valid_size_;
+    cursor_ += remaining;
+}
+
 uint64_t
 BufferStreamReader::GetCursor() const {
     return reader_impl_->GetCursor() - (valid_size_ - buffer_cursor_);
@@ -259,6 +307,16 @@ SliceStreamReader::Seek(uint64_t cursor) {
     }
     reader_impl_->Seek(begin_ + cursor);
     cursor_ = cursor;
+}
+
+void
+SliceStreamReader::Skip(uint64_t size) {
+    if (cursor_ > length_ || size > length_ - cursor_) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "SliceStreamReader: skip exceeds slice boundary");
+    }
+    reader_impl_->Skip(size);
+    cursor_ += size;
 }
 
 uint64_t

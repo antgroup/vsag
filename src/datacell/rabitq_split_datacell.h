@@ -2414,7 +2414,9 @@ public:
     Deserialize(LvalueOrRvalue<StreamReader> reader) override {
         FlattenInterface::Deserialize(reader);
         if (this->fused_code_storage_ != nullptr) {
-            const uint64_t payload_cursor = reader->GetCursor();
+            // Review pending (#2582): disable the legacy split-payload fallback below so fused
+            // deserialization does not require rewinding. Keep the old code for removal review.
+            // const uint64_t payload_cursor = reader->GetCursor();
             uint64_t magic = 0;
             StreamReader::ReadObj(reader, magic);
             if (magic == kFusedModelMagic) {
@@ -2437,6 +2439,11 @@ public:
                                "serialized fused RaBitQ code sizes do not match the node layout");
                 return;
             }
+            // Review pending (#2582): accepting legacy split payloads in fused mode requires
+            // rewind/seek compatibility. Disable this path for forward-only loading; this also
+            // affects ordinary Deserialize(), not just streaming. Retain until review confirms
+            // whether these old artifacts may be rejected permanently.
+            /*
             reader->Seek(payload_cursor);
             this->DeserializeSupplementIOType(reader);
             // Legacy (detached-code) payloads also carry the supplement layout descriptor
@@ -2460,6 +2467,9 @@ public:
                         this->supplement_code_size_,
                 "legacy split RaBitQ code sizes do not match the fused node layout");
             return;
+            */
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                "legacy split payload is unsupported for fused RaBitQ storage");
         }
         this->DeserializeSupplementIOType(reader);
         const auto supplement_layout = this->deserialize_supplement_layout(reader);
@@ -2743,7 +2753,10 @@ private:
     void
     DeserializeSupplementIOType(StreamReader& reader) {
         this->supplement_io_type_.clear();
-        const uint64_t cursor = reader.GetCursor();
+        // Review pending (#2582): disable missing-field compatibility for old snapshots to avoid
+        // rewinding. The current supplement_io_type field (including an empty string) is required
+        // by both ordinary and streaming Deserialize(). Keep fallback code for removal review.
+        // const uint64_t cursor = reader.GetCursor();
         uint64_t length = 0;
         StreamReader::ReadObj(reader, length);
 
@@ -2752,9 +2765,13 @@ private:
         }
 
         constexpr uint64_t kMaxIOTypeLength = 64;
-        if (length > kMaxIOTypeLength or reader.GetCursor() + length > reader.Length()) {
-            reader.Seek(cursor);
-            return;
+        if (length > kMaxIOTypeLength or reader.GetCursor() > reader.Length() or
+            length > reader.Length() - reader.GetCursor()) {
+            // Review pending (#2582): do not reinterpret an invalid length as a missing field.
+            // reader.Seek(cursor);
+            // return;
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                "invalid RaBitQ supplement IO type length");
         }
 
         std::string io_type(length, '\0');
@@ -2764,7 +2781,9 @@ private:
             return;
         }
 
-        reader.Seek(cursor);
+        // Review pending (#2582): do not reinterpret an unknown IO type as a missing field.
+        // reader.Seek(cursor);
+        throw VsagException(ErrorType::INVALID_BINARY, "unknown RaBitQ supplement IO type");
     }
 
     void
