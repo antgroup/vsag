@@ -18,6 +18,7 @@
 #include <queue>
 
 #include "distance_heap.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 template <bool max_heap = true, bool fixed_size = true>
@@ -32,11 +33,19 @@ public:
 
     [[nodiscard]] const DistanceRecord&
     Top() const override {
+        if (this->queue_.empty()) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "StandardHeap::Top() called on an empty heap");
+        }
         return this->queue_.front();
     }
 
     void
     Pop() override {
+        if (this->queue_.empty()) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "StandardHeap::Pop() called on an empty heap");
+        }
         if constexpr (max_heap) {
             std::pop_heap(queue_.begin(), queue_.end(), CompareMax());
         } else {

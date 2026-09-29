@@ -110,3 +110,19 @@ TEST_CASE_METHOD(TestDistanceHeap, "memmove_heap test", "[ut][distance_heap]") {
         RunBasicTest(heap4, false);
     }
 }
+
+TEST_CASE("DistanceHeap rejects Top and Pop on an empty heap", "[ut][distance_heap]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    {
+        StandardHeap<true, false> heap(allocator.get(), 16);
+        REQUIRE(heap.Empty());
+        REQUIRE_THROWS_AS(heap.Top(), VsagException);
+        REQUIRE_THROWS_AS(heap.Pop(), VsagException);
+    }
+    {
+        MemmoveHeap<true, true> heap(allocator.get(), 4);
+        REQUIRE(heap.Empty());
+        REQUIRE_THROWS_AS(heap.Top(), VsagException);
+        REQUIRE_THROWS_AS(heap.Pop(), VsagException);
+    }
+}
