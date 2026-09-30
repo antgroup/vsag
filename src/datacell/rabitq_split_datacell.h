@@ -1470,6 +1470,29 @@ public:
             build_codes->Resize(this->max_capacity_);
             code_sums->resize(this->max_capacity_, 0);
         }
+        // A session may also be opened over a non-empty datacell, as Pyramid::Add() does for an
+        // incremental insert. Rehydration is required there because FinalizeOptimizedBuild() packs
+        // the whole temporary scalar layout back into split storage, which would otherwise
+        // overwrite the split codes of the already-stored IDs with uninitialized scalars.
+        //
+        // Only the ordinary split layout can be re-read this way. Fused storage keeps its codes in
+        // the node slab and aborts during finalization instead, and external filter-code storage
+        // keeps the one-bit codes outside this datacell, so GetCodesById() cannot serve either.
+        const bool persisted_codes_readable =
+            this->fused_code_storage_ == nullptr and not this->external_filter_code_storage_;
+        if (persisted_codes_readable and this->total_count_ > 0) {
+            ByteBuffer full_code(this->code_size_, this->allocator_);
+            ByteBuffer scalar_code(this->bottom_quantizer().GetScalarCodeSize(), this->allocator_);
+            for (InnerIdType id = 0; id < this->total_count_; ++id) {
+                if (not this->GetCodesById(id, full_code.data)) {
+                    throw VsagException(ErrorType::INTERNAL_ERROR,
+                                        "failed to read persisted split RaBitQ build code");
+                }
+                (*code_sums)[id] =
+                    this->bottom_quantizer().UnpackScalarCode(full_code.data, scalar_code.data);
+                build_codes->Write(id, scalar_code.data);
+            }
+        }
         this->optimized_build_scalar_layout_ = build_codes;
         this->optimized_build_code_sums_ = std::move(code_sums);
         this->optimized_build_record_size_ = this->bottom_quantizer().GetScalarCodeSize();

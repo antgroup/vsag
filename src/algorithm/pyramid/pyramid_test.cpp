@@ -1792,4 +1792,12 @@ TEST_CASE("Pyramid scalar RaBitQ split build supports search serialization and A
     REQUIRE(loaded->Add(dataset(count, 1)).empty());
     check_query(index, count);
     check_query(loaded, count);
+    // Opening the optimized build session over a non-empty datacell rehydrates the temporary
+    // scalar layout from the persisted split codes, and finalization packs that whole layout back
+    // into split storage. Vectors stored before the incremental Add must therefore survive it
+    // unchanged, so re-check the pre-existing ids instead of only the newly added one.
+    for (int64_t id : {0, 37, 95}) {
+        check_query(index, id);
+        check_query(loaded, id);
+    }
 }

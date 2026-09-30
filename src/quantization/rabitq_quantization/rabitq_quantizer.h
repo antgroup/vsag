@@ -350,6 +350,11 @@ public:
                               const uint8_t* scalar_code,
                               float* dist) const;
 
+    // Restores the scalar build representation from a persisted full code. Used to rehydrate a
+    // temporary scalar build layout from split codes that were persisted by an earlier build.
+    [[nodiscard]] uint64_t
+    UnpackScalarCode(const uint8_t* codes, uint8_t* scalar_code) const;
+
     [[nodiscard]] float
     ComputeScalarCodesDistance(const uint8_t* scalar_code1,
                                uint64_t code_sum1,
@@ -662,9 +667,6 @@ private:
                       uint8_t* codes,
                       uint8_t* scalar_code,
                       uint64_t* code_sum) const;
-
-    uint64_t
-    UnpackScalarCode(const uint8_t* codes, uint8_t* scalar_code) const;
 
     struct SplitLayout {
         bool is_split{false};

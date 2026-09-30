@@ -1735,9 +1735,34 @@ Pyramid::ExportModel(const IndexCommonParam& param) const {
 
 std::vector<int64_t>
 Pyramid::Add(const DatasetPtr& base) {
-    auto batch = prepare_add_batch(base);
-    insert_add_batch(base, batch);
-    return batch.failed_ids;
+    // Reuse the temporary scalar build representation while inserting into an already built
+    // index, mirroring Pyramid::Build(). Pyramid::Build() owns the session for the Add() it
+    // performs for GRAPH_TYPE_VALUE_NSW, so only start one when no outer session is active.
+    FlattenOptimizedBuildInterfacePtr local_build_codes{nullptr};
+    if (optimized_build_codes_ == nullptr) {
+        auto optimized_codes =
+            std::dynamic_pointer_cast<FlattenOptimizedBuildInterface>(construction_codes());
+        if (optimized_codes != nullptr and
+            optimized_codes->BeginOptimizedBuild({thread_pool_, build_thread_count_})) {
+            optimized_build_codes_ = std::move(optimized_codes);
+            local_build_codes = optimized_build_codes_;
+        }
+    }
+    try {
+        auto batch = prepare_add_batch(base);
+        insert_add_batch(base, batch);
+        if (local_build_codes != nullptr) {
+            local_build_codes->FinalizeOptimizedBuild();
+            optimized_build_codes_.reset();
+        }
+        return batch.failed_ids;
+    } catch (...) {
+        if (local_build_codes != nullptr) {
+            local_build_codes->AbortOptimizedBuild();
+            optimized_build_codes_.reset();
+        }
+        throw;
+    }
 }
 
 Pyramid::AddBatch
