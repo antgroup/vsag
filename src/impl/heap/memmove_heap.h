@@ -16,6 +16,7 @@
 #pragma once
 
 #include "distance_heap.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 template <bool max_heap = true, bool fixed_size = true>
@@ -30,11 +31,19 @@ public:
 
     [[nodiscard]] const DistanceRecord&
     Top() const override {
+        if (this->cur_size_ == 0) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "MemmoveHeap::Top() called on an empty heap");
+        }
         return this->ordered_buffer_[cur_size_ - 1];
     }
 
     void
     Pop() override {
+        if (this->cur_size_ == 0) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "MemmoveHeap::Pop() called on an empty heap");
+        }
         cur_size_--;
     }
 
