@@ -406,7 +406,7 @@ TEST_CASE("RaBitQ FP32-BQ SIMD Batch4 Compute Codes", "[ut][simd]") {
 }
 
 TEST_CASE("RaBitQ FP32-BQ Batch4 preserves legacy high-dimensional coding", "[ut][simd]") {
-    const uint64_t dim = GENERATE(1000000ULL, 1000001ULL, 1048576ULL);
+    const uint64_t dim = GENERATE(1000000ULL, 1000001ULL, 1000002ULL, 1000003ULL, 1048576ULL);
     const uint64_t code_size = (dim + 7) / 8;
     const float inv_sqrt_d = 1.0F / std::sqrt(static_cast<float>(dim));
     if (dim == 1000000) {
@@ -429,6 +429,13 @@ TEST_CASE("RaBitQ FP32-BQ Batch4 preserves legacy high-dimensional coding", "[ut
         codes[0] = 0b0101;
         codes[code_size * 2] = 0b0101;
     }
+    const uint64_t tail = dim % 4;
+    for (uint64_t d = dim - tail; d < dim; ++d) {
+        query[d] = 1.0F;
+        const auto bit_mask = static_cast<uint8_t>(1U << (d % 8));
+        codes[d / 8] |= bit_mask;
+        codes[code_size * 2 + d / 8] |= bit_mask;
+    }
     const uint8_t* bits[4] = {codes.data(),
                               codes.data() + code_size,
                               codes.data() + code_size * 2,
@@ -440,7 +447,7 @@ TEST_CASE("RaBitQ FP32-BQ Batch4 preserves legacy high-dimensional coding", "[ut
         for (uint32_t i = 0; i < 4; ++i) {
             REQUIRE(results[i] == single(query.data(), bits[i], dim, inv_sqrt_d));
             if (dim > 1000000) {
-                REQUIRE(results[i] == (i % 2 == 0 ? 1.0F : 0.0F));
+                REQUIRE(results[i] == (i % 2 == 0 ? 1.0F + static_cast<float>(tail) : 0.0F));
             }
         }
     };
@@ -466,13 +473,17 @@ TEST_CASE("RaBitQ FP32-BQ Batch4 preserves legacy high-dimensional coding", "[ut
     }
 }
 
-TEST_CASE("RaBitQ NEON Batch4 preserves raw-bit tail", "[ut][simd]") {
+TEST_CASE("RaBitQ NEON single and Batch4 preserve binary tail", "[ut][simd]") {
     const float query[7] = {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F};
     const uint8_t bits = 0b01010101;
+    const uint64_t dim = GENERATE(5ULL, 6ULL, 7ULL);
+    const float inv_sqrt_d = GENERATE(0.0F, 0.0005F, 1e-3F);
+    const float expected = generic::RaBitQFloatBinaryIP(query, &bits, dim, inv_sqrt_d);
+    REQUIRE(std::abs(neon::RaBitQFloatBinaryIP(query, &bits, dim, inv_sqrt_d) - expected) < 1e-6F);
     float results[4];
-    neon::RaBitQFloatBinaryIPBatch4(query, &bits, &bits, &bits, &bits, 7, 0.0F, results);
+    neon::RaBitQFloatBinaryIPBatch4(query, &bits, &bits, &bits, &bits, dim, inv_sqrt_d, results);
     for (float result : results) {
-        REQUIRE(result == generic::RaBitQFloatBinaryIP(query, &bits, 7, 0.0F));
+        REQUIRE(std::abs(result - expected) < 1e-6F);
     }
 }
 
