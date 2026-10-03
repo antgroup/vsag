@@ -1105,6 +1105,18 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 #endif
 }
 
+#if defined(ENABLE_SVE)
+static svbool_t
+RaBitQBinaryMask(svbool_t predicate,
+                 const uint8_t* bits,
+                 svuint32_t byte_offsets,
+                 svuint32_t bit_shifts) {
+    const svuint32_t bytes = svld1ub_gather_u32offset_u32(predicate, bits, byte_offsets);
+    const svuint32_t shifted = svlsr_u32_x(predicate, bytes, bit_shifts);
+    return svcmpne_n_u32(predicate, svand_n_u32_x(predicate, shifted, 1U), 0U);
+}
+#endif
+
 void
 RaBitQFloatBinaryIPBatch4(const float* vector,
                           const uint8_t* bits1,
@@ -1114,8 +1126,48 @@ RaBitQFloatBinaryIPBatch4(const float* vector,
                           uint64_t dim,
                           float inv_sqrt_d,
                           float* results) {
+#if defined(ENABLE_SVE)
+    svfloat32_t sum1 = svdup_f32(0.0F);
+    svfloat32_t sum2 = svdup_f32(0.0F);
+    svfloat32_t sum3 = svdup_f32(0.0F);
+    svfloat32_t sum4 = svdup_f32(0.0F);
+    const svfloat32_t pos = svdup_f32(inv_sqrt_d > 1e-3 ? inv_sqrt_d : 1.0F);
+    const svfloat32_t neg = svdup_f32(inv_sqrt_d > 1e-3 ? -inv_sqrt_d : 0.0F);
+    const svuint32_t lanes = svindex_u32(0, 1);
+    const uint64_t step = svcntw();
+
+    for (uint64_t d = 0; d < dim; d += step) {
+        const svbool_t predicate = svwhilelt_b32(d, dim);
+        const svfloat32_t query = svld1_f32(predicate, vector + d);
+        // Offsets are relative to the current code byte, including mid-byte starts.
+        const svuint32_t bit_indices =
+            svadd_n_u32_x(predicate, lanes, static_cast<uint32_t>(d & 7U));
+        const svuint32_t byte_offsets = svlsr_n_u32_x(predicate, bit_indices, 3);
+        const svuint32_t bit_shifts = svand_n_u32_x(predicate, bit_indices, 7U);
+        const uint64_t byte_id = d >> 3;
+
+        const svfloat32_t binary1 = svsel_f32(
+            RaBitQBinaryMask(predicate, bits1 + byte_id, byte_offsets, bit_shifts), pos, neg);
+        const svfloat32_t binary2 = svsel_f32(
+            RaBitQBinaryMask(predicate, bits2 + byte_id, byte_offsets, bit_shifts), pos, neg);
+        const svfloat32_t binary3 = svsel_f32(
+            RaBitQBinaryMask(predicate, bits3 + byte_id, byte_offsets, bit_shifts), pos, neg);
+        const svfloat32_t binary4 = svsel_f32(
+            RaBitQBinaryMask(predicate, bits4 + byte_id, byte_offsets, bit_shifts), pos, neg);
+        sum1 = svmla_f32_m(predicate, sum1, query, binary1);
+        sum2 = svmla_f32_m(predicate, sum2, query, binary2);
+        sum3 = svmla_f32_m(predicate, sum3, query, binary3);
+        sum4 = svmla_f32_m(predicate, sum4, query, binary4);
+    }
+
+    results[0] = svaddv_f32(svptrue_b32(), sum1);
+    results[1] = svaddv_f32(svptrue_b32(), sum2);
+    results[2] = svaddv_f32(svptrue_b32(), sum3);
+    results[3] = svaddv_f32(svptrue_b32(), sum4);
+#else
     generic::RaBitQFloatBinaryIPBatch4(
         vector, bits1, bits2, bits3, bits4, dim, inv_sqrt_d, results);
+#endif
 }
 
 void

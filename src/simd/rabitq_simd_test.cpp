@@ -487,6 +487,54 @@ TEST_CASE("RaBitQ NEON single and Batch4 preserve binary tail", "[ut][simd]") {
     }
 }
 
+TEST_CASE("RaBitQ SVE Batch4 packed-bit tails and scale boundary", "[ut][simd]") {
+    if (not SimdStatus::SupportSVE()) {
+        return;
+    }
+    const uint64_t dim = GENERATE(0ULL,
+                                  1ULL,
+                                  5ULL,
+                                  6ULL,
+                                  7ULL,
+                                  8ULL,
+                                  9ULL,
+                                  15ULL,
+                                  17ULL,
+                                  31ULL,
+                                  33ULL,
+                                  63ULL,
+                                  65ULL,
+                                  95ULL,
+                                  97ULL,
+                                  127ULL,
+                                  129ULL);
+    const float scale = GENERATE(0.0F, 0.0005F, 1e-3F, 0.25F);
+    const uint64_t code_size = std::max<uint64_t>(1, (dim + 7) / 8);
+    std::vector<float> query(dim);
+    std::vector<uint8_t> codes(code_size * 4);
+    for (uint64_t d = 0; d < dim; ++d) {
+        query[d] = static_cast<float>(static_cast<int>(d % 11) - 5) * 0.125F;
+    }
+    for (uint64_t i = 0; i < codes.size(); ++i) {
+        codes[i] = static_cast<uint8_t>(31U * i + 17U);
+    }
+    float results[4];
+    sve::RaBitQFloatBinaryIPBatch4(query.data(),
+                                   codes.data(),
+                                   codes.data() + code_size,
+                                   codes.data() + 2 * code_size,
+                                   codes.data() + 3 * code_size,
+                                   dim,
+                                   scale,
+                                   results);
+    for (uint64_t i = 0; i < 4; ++i) {
+        const auto* bits = codes.data() + i * code_size;
+        const float expected = generic::RaBitQFloatBinaryIP(query.data(), bits, dim, scale);
+        REQUIRE(std::abs(results[i] - expected) < 1e-5F);
+        REQUIRE(results[i] == sve::RaBitQFloatBinaryIP(query.data(), bits, dim, scale));
+    }
+}
+
 TEST_CASE("RaBitQ FP32 three-bit SIMD Batch4 Compute Codes", "[ut][simd]") {
     const std::vector<uint64_t> dims = {0, 1, 7, 8, 9, 15, 16, 17, 63, 64, 65, 960};
 
