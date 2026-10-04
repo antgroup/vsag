@@ -780,10 +780,9 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     ctx.rabitq_error_rate = parsed_param.rabitq_error_rate;
     CHECK_ARGUMENT(parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::SINGLE,
                    "multi-hierarchy search (union/intersection) is not yet implemented");
+    const auto ef_search = static_cast<int64_t>(parsed_param.ef_search);
     InnerSearchParam search_param;
-    search_param.ef = limited_size > 0
-                          ? std::max(static_cast<int64_t>(parsed_param.ef_search), limited_size)
-                          : parsed_param.ef_search;
+    search_param.ef = limited_size > 0 ? std::max(ef_search, limited_size) : ef_search;
     search_param.radius = radius;
     search_param.search_mode = RANGE_SEARCH;
     search_param.parallel_search_thread_count = parsed_param.parallel_search_thread_count;
@@ -877,10 +876,9 @@ Pyramid::SearchWithRequest(const SearchRequest& request) const {
     } else {
         CHECK_ARGUMENT(parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::SINGLE,
                        "multi-hierarchy search (union/intersection) is not yet implemented");
+        const auto ef_search = static_cast<int64_t>(parsed_param.ef_search);
         search_param.ef =
-            request.limited_size_ > 0
-                ? std::max(static_cast<int64_t>(parsed_param.ef_search), request.limited_size_)
-                : parsed_param.ef_search;
+            request.limited_size_ > 0 ? std::max(ef_search, request.limited_size_) : ef_search;
         search_param.radius = request.radius_;
         search_param.search_mode = RANGE_SEARCH;
         search_param.enable_reorder = use_reorder_;
