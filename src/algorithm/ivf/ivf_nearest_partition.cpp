@@ -20,10 +20,14 @@
 #include <atomic>
 #include <cstdlib>
 #include <limits>
+#include <optional>
+#include <type_traits>
 
 #include "algorithm/hgraph/hgraph.h"
 #include "algorithm/inner_index_interface.h"
 #include "container_types.h"
+#include "gpu/cuda_backend.h"
+#include "gpu/gpu_plan.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/blas/blas_function.h"
 #include "impl/cluster/kmeans_cluster.h"
@@ -104,7 +108,13 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
     if (ivf_partition_strategy_param_->partition_train_type ==
         IVFNearestPartitionTrainerType::KMeansTrainer) {
         constexpr int32_t kmeans_iter_count = 25;
-        KMeansCluster cls(static_cast<int32_t>(dim), this->allocator_, this->thread_pool_);
+        KMeansGpuConfig gpu_config;
+        gpu_config.enabled = ivf_partition_strategy_param_->enable_gpu_build;
+        gpu_config.device_id = ivf_partition_strategy_param_->gpu_device_id;
+        gpu_config.memory_budget = ivf_partition_strategy_param_->gpu_memory_budget;
+        gpu_config.min_work_threshold = ivf_partition_strategy_param_->gpu_min_work_threshold;
+        KMeansCluster cls(
+            static_cast<int32_t>(dim), this->allocator_, this->thread_pool_, gpu_config);
         cls.Run(this->bucket_count_,
                 dataset->GetFloat32Vectors(),
                 dataset->GetNumElements(),
@@ -159,6 +169,124 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
                                    int64_t count,
                                    BucketIdType buckets_per_data,
                                    QueryContext* ctx) const {
+    // Build time: one nearest centroid for every base vector at once, which is a
+    // dense matrix product. Try the device first.
+    if (auto assigned = classify_datas_on_device(datas, count, buckets_per_data)) {
+        return std::move(assigned.value());
+    }
+    return classify_datas_on_host(datas, count, buckets_per_data, ctx);
+}
+
+Vector<BucketIdType>
+IVFNearestPartition::ClassifyDatasForSearch(const void* datas,
+                                            int64_t count,
+                                            const InnerSearchParam& param,
+                                            QueryContext* ctx) {
+    // Search time: one query, a handful of buckets. The graph search is the right
+    // shape, and the device would prepare the whole centroid set per query. The
+    // routing statistics also come only from here.
+    return classify_datas_on_host(datas, count, param.scan_bucket_size, ctx);
+}
+
+/// The build-time assignment, offloaded. Nothing means use the host path: the
+/// backend is off or absent, more than one bucket was asked for, the partition is
+/// untrained, or the metric is not one this pass computes.
+std::optional<Vector<BucketIdType>>
+IVFNearestPartition::classify_datas_on_device(const void* datas,
+                                              int64_t count,
+                                              BucketIdType buckets_per_data) const {
+    if (not ivf_partition_strategy_param_->enable_gpu_build) {
+        return std::nullopt;
+    }
+    // One bucket per vector is what this computes; more is a nearest-k problem the
+    // routing graph already answers.
+    if (buckets_per_data != 1 or count <= 0 or datas == nullptr) {
+        return std::nullopt;
+    }
+    // Before Train() the centroids are uninitialised; the host path returns
+    // INVALID_BUCKET_ID for that.
+    if (not this->is_trained_ or this->bucket_count_ == 0) {
+        return std::nullopt;
+    }
+    // This minimises squared L2, which orders the same as the host routing key for
+    // L2SQR, and for cosine too because training normalises those centroids. Inner
+    // product orders by the dot alone and would disagree where norms differ.
+    if (metric_type_ != MetricType::METRIC_TYPE_L2SQR and
+        metric_type_ != MetricType::METRIC_TYPE_COSINE) {
+        return std::nullopt;
+    }
+    // Settled before a device is touched, because binding creates a context and
+    // takes memory on the card.
+    if (not gpu::WorthOffloading(static_cast<uint64_t>(count),
+                                 static_cast<uint64_t>(bucket_count_),
+                                 static_cast<int32_t>(this->dim_),
+                                 ivf_partition_strategy_param_->gpu_min_work_threshold)) {
+        return std::nullopt;
+    }
+
+    // Bound for this call only, since the thread belongs to whoever is building.
+    // A scope that could not bind covers every reason there is no device. What the
+    // card has free is read again here rather than carried over from training,
+    // which ran earlier and has since released its own working set.
+    const gpu::CudaDeviceScope device(ivf_partition_strategy_param_->gpu_device_id);
+    if (not device.Bound()) {
+        return std::nullopt;
+    }
+
+    // The layout decides where the centroids live, the same question GetCentroid
+    // asks. With a routing graph they are inside it and gathered once here, which
+    // is per build, not per query.
+    Vector<float> gathered(this->allocator_);
+    const float* centroids = nullptr;
+    if (this->use_route_graph_) {
+        gathered.resize(static_cast<uint64_t>(bucket_count_) * dim_);
+        for (BucketIdType b = 0; b < bucket_count_; ++b) {
+            this->route_index_ptr_->GetCodeByInnerId(
+                b, reinterpret_cast<uint8_t*>(gathered.data() + static_cast<uint64_t>(b) * dim_));
+        }
+        centroids = gathered.data();
+    } else {
+        if (this->centroids_.size() != static_cast<uint64_t>(bucket_count_) * dim_) {
+            return std::nullopt;
+        }
+        centroids = this->centroids_.data();
+    }
+
+    // Cosine needs no query normalisation. In ||x||^2 - 2<x,c> + ||c||^2 the first
+    // term is the same for every centroid and the last for every normalised one, so
+    // the winner maximises <x,c>, which positive scaling does not move. Normalising
+    // would cost a full copy of the base vectors.
+    Vector<BucketIdType> result(count, INVALID_BUCKET_ID, this->allocator_);
+    static_assert(std::is_same_v<BucketIdType, int32_t>,
+                  "the pass writes labels straight into the bucket ids it returns");
+    const uint64_t budget = gpu::CudaSuggestedBudget(
+        gpu::EffectiveChunkedCap(ivf_partition_strategy_param_->gpu_memory_budget));
+    // float32 is the interface's precondition, not this function's: ClassifyDatas
+    // takes `const void*` in ivf_partition_strategy.h, and classify_datas_on_host
+    // casts it the same way. Every caller in the tree passes float, IVF::add from
+    // base->GetFloat32Vectors() and both bucket data cells from a `const float*`
+    // of their own, so the device path assumes nothing the host path does not.
+    // There is also nothing left to assert on, the type being gone by the time it
+    // arrives here.
+    if (not gpu::CudaAssignNearest(static_cast<const float*>(datas),
+                                   static_cast<uint64_t>(count),
+                                   centroids,
+                                   static_cast<uint64_t>(bucket_count_),
+                                   static_cast<int32_t>(this->dim_),
+                                   result.data(),
+                                   nullptr,
+                                   budget,
+                                   ivf_partition_strategy_param_->gpu_min_work_threshold)) {
+        return std::nullopt;
+    }
+    return result;
+}
+
+Vector<BucketIdType>
+IVFNearestPartition::classify_datas_on_host(const void* datas,
+                                            int64_t count,
+                                            BucketIdType buckets_per_data,
+                                            QueryContext* ctx) const {
     if (not this->use_route_graph_) {
         return this->classify_datas_by_scan(datas, count, buckets_per_data, ctx);
     }
