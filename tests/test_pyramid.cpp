@@ -2962,3 +2962,110 @@ TEST_CASE("Pyramid dense native distance contract", "[distance_contract]") {
         }
     }
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid RangeSearch radius filtering and ef_search alignment",
+                             "[ft][pyramid][range_search]") {
+    for (bool use_reorder : {false, true}) {
+        PyramidParam pyramid_param;
+        pyramid_param.no_build_levels = {};
+        pyramid_param.base_quantization_type = "fp32";
+        pyramid_param.use_reorder = use_reorder;
+        pyramid_param.precise_quantization_type = "fp32";
+        const auto param = GeneratePyramidBuildParametersString("l2", 4, pyramid_param);
+        auto index = TestFactory("pyramid", param, true);
+
+        // 1. Test radius leakage: candidates in (radius, radius * 1.1] must NOT be returned
+        // Query is at origin (0, 0, 0, 0).
+        // ID 1: dist^2 = 0.25 <= 1.0 (inside)
+        // ID 2: dist^2 = 1.00 <= 1.0 (at boundary)
+        // ID 3: dist^2 = 1.05 > 1.0 and <= 1.10 (within enlarged radius 1.1, must be filtered out)
+        // ID 4: dist^2 = 4.00 > 1.10 (far outside)
+        auto base = MakeDenseDataset({{{0.5F, 0.0F, 0.0F, 0.0F}},
+                                      {{1.0F, 0.0F, 0.0F, 0.0F}},
+                                      {{1.0247F, 0.0F, 0.0F, 0.0F}},
+                                      {{2.0F, 0.0F, 0.0F, 0.0F}}},
+                                     {1, 2, 3, 4},
+                                     {"cat/sub", "cat/sub", "cat/sub", "cat/sub"});
+        REQUIRE(index->Build(base).has_value());
+
+        auto query = MakeSingleQuery({0.0F, 0.0F, 0.0F, 0.0F}, "cat/sub");
+        const float test_radius = 1.0F;
+
+        // Test RangeSearch entrypoint
+        auto range_res =
+            index->RangeSearch(query, test_radius, GeneratePyramidSearchParametersString(20));
+        REQUIRE(range_res.has_value());
+        for (int64_t i = 0; i < range_res.value()->GetDim(); ++i) {
+            UNSCOPED_INFO("id: " << range_res.value()->GetIds()[i]
+                                 << ", dist: " << range_res.value()->GetDistances()[i]);
+        }
+        auto range_ids = CollectIds(range_res.value());
+        REQUIRE(range_ids.count(1) == 1);
+        REQUIRE(range_ids.count(2) == 1);
+        REQUIRE(range_ids.count(3) == 0);
+        REQUIRE(range_ids.count(4) == 0);
+
+        // Test SearchWithRequest RANGE_SEARCH entrypoint
+        vsag::SearchRequest req;
+        req.mode_ = vsag::SearchMode::RANGE_SEARCH;
+        req.query_ = query;
+        req.radius_ = test_radius;
+        req.params_str_ = GeneratePyramidSearchParametersString(20);
+        auto req_res = index->SearchWithRequest(req);
+        REQUIRE(req_res.has_value());
+        auto req_ids = CollectIds(req_res.value());
+        REQUIRE(req_ids.count(1) == 1);
+        REQUIRE(req_ids.count(2) == 1);
+        REQUIRE(req_ids.count(3) == 0);
+        REQUIRE(req_ids.count(4) == 0);
+    }
+
+    // 2. Test ef_search vs limited_size: when limited_size > ef_search, results must not be capped at ef_search
+    {
+        PyramidParam pyramid_param;
+        pyramid_param.no_build_levels = {};
+        pyramid_param.base_quantization_type = "fp32";
+        pyramid_param.use_reorder = false;
+        const auto param = GeneratePyramidBuildParametersString("l2", 4, pyramid_param);
+        auto index = TestFactory("pyramid", param, true);
+
+        constexpr int64_t total_points = 35;
+        std::vector<std::array<float, 4>> vectors;
+        std::vector<int64_t> ids;
+        std::vector<std::string> paths;
+        for (int64_t i = 0; i < total_points; ++i) {
+            // Distances from origin: (0.1 * (i+1))^2, well within radius 10.0
+            float val = 0.1F * static_cast<float>(i + 1);
+            vectors.push_back({val, 0.0F, 0.0F, 0.0F});
+            ids.push_back(i + 1);
+            paths.push_back("path/a");
+        }
+        auto dataset = MakeDenseDataset(vectors, ids, paths);
+        REQUIRE(index->Build(dataset).has_value());
+
+        auto query = MakeSingleQuery({0.0F, 0.0F, 0.0F, 0.0F}, "path/a");
+        constexpr int64_t ef_search = 5;
+        constexpr int64_t limited_size = 20;
+
+        // With ef_search = 5 and limited_size = 20, RangeSearch must return 20 candidates
+        auto range_res = index->RangeSearch(query,
+                                            10.0F,
+                                            GeneratePyramidSearchParametersString(ef_search),
+                                            vsag::FilterPtr(nullptr),
+                                            limited_size);
+        REQUIRE(range_res.has_value());
+        REQUIRE(range_res.value()->GetDim() == limited_size);
+
+        // SearchWithRequest must also return 20 candidates
+        vsag::SearchRequest req;
+        req.mode_ = vsag::SearchMode::RANGE_SEARCH;
+        req.query_ = query;
+        req.radius_ = 10.0F;
+        req.limited_size_ = limited_size;
+        req.params_str_ = GeneratePyramidSearchParametersString(ef_search);
+        auto req_res = index->SearchWithRequest(req);
+        REQUIRE(req_res.has_value());
+        REQUIRE(req_res.value()->GetDim() == limited_size);
+    }
+}
