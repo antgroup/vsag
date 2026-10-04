@@ -168,6 +168,26 @@ class QuerySplitTest(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             SPLIT.prepare_split(self.source, self.rows, link)
         self.assertTrue(link.is_symlink())
+        self.assertFalse((self.root / "missing").exists())
+
+    def test_existing_destination_through_parent_symlink_is_rejected_early(self):
+        self.output.mkdir()
+        sentinel = self.output / "user.txt"
+        sentinel.write_text("keep")
+        alias = self.root / "alias"
+        alias.symlink_to(self.root, target_is_directory=True)
+        selection = self.root / "rows.json"
+        selection.write_text(json.dumps(self.rows))
+        for output in [alias / "split", Path("alias/split")]:
+            with self.subTest(output=output):
+                command = [sys.executable, str(SCRIPT), str(self.source), str(selection), str(output)]
+                done = subprocess.run(command, cwd=self.root, capture_output=True, text=True)
+                self.assertNotEqual(done.returncode, 0)
+                self.assertIn(f"output directory already exists: {output}", done.stderr)
+                self.assertNotIn("Traceback", done.stderr)
+                self.assertEqual(sentinel.read_text(), "keep")
+                self.assertEqual(list(self.output.iterdir()), [sentinel])
+                self.assertEqual(list(self.root.glob(".query-split-*")), [])
 
     @unittest.skipUnless(os.environ.get("VSAG_EVAL_BINARY"), "set VSAG_EVAL_BINARY for native integration")
     def test_native_eval_reuses_the_index_with_both_subsets(self):
