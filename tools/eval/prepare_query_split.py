@@ -111,6 +111,7 @@ def copy_attributes(source, destination):
 def prepare_split(source_path, rows, output_path):
     source_path = Path(source_path).resolve(strict=True)
     output_path = Path(output_path)
+    # Check before resolve() so dangling destination symlinks are also rejected.
     if output_path.exists() or output_path.is_symlink():
         raise FileExistsError(f"output directory already exists: {output_path}")
     output_path = output_path.resolve()
