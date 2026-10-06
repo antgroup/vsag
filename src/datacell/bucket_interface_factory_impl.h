@@ -20,6 +20,7 @@
 #include "quantization/product_quantization/pq_fastscan_quantizer.h"
 #include "quantization/product_quantization/product_quantizer.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer.h"
+#include "quantization/saq_quantization/saq_quantizer.h"
 #include "quantization/scalar_quantization/sq_headers.h"
 
 namespace vsag {
@@ -73,6 +74,9 @@ MakeBucketDataCellInstance(const BucketDataCellParamPtr& param,
     }
     if (quantization_string == QUANTIZATION_TYPE_VALUE_RABITQ) {
         return MakeBucketDataCellInstance<RaBitQuantizer<metric>, IOTemp>(param, common_param);
+    }
+    if (quantization_string == QUANTIZATION_TYPE_VALUE_SAQ) {
+        return MakeBucketDataCellInstance<SAQQuantizer<metric>, IOTemp>(param, common_param);
     }
     return nullptr;
 }
