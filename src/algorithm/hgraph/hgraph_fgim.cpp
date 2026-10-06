@@ -134,8 +134,9 @@ HGraphFGIM::CrossQuery(const HGraph& target,
         }
     }
     const int64_t topk = std::min(l, target.GetNumElements());
-    param.ef = l;
-    param.topk = l;
+    // A source with fewer than L nodes cannot fill an L-sized search pool.
+    param.ef = static_cast<uint64_t>(topk);
+    param.topk = topk;
     param.rerank_topk = topk;
     param.consider_duplicate = target.support_duplicate_;
     param.is_inner_id_allowed = target.create_search_filter(nullptr, false);
@@ -153,6 +154,8 @@ HGraphFGIM::CrossQuery(const HGraph& target,
     while (!result->Empty()) {
         const auto record = result->Top();
         result->Pop();
+        // Match unthresholded HGraph search: omit NaN, but preserve infinity so
+        // BuildInitialKnnGraph rejects non-finite candidates instead of dropping them.
         if (!std::isnan(record.first)) {
             neighbors.push_back({record.second, record.first});
         }
@@ -175,7 +178,8 @@ HGraphFGIM::BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, uin
 
     for (uint64_t i = 0; i < source_graphs.size(); ++i) {
         const auto& source = *source_graphs[i];
-        for (InnerIdType local_u = 0; local_u < source.GetNumElements(); ++local_u) {
+        const auto source_count = static_cast<InnerIdType>(source.GetNumElements());
+        for (InnerIdType local_u = 0; local_u < source_count; ++local_u) {
             auto& candidates = graph[offsets[i] + local_u];
             AppendOriginalCandidates(source, local_u, offsets[i], candidates);
             source.GetVectorByInnerId(local_u, vector.data());
@@ -199,6 +203,7 @@ HGraphFGIM::BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, uin
                       });
             if (candidates.size() > k) {
                 candidates.resize(k);
+                candidates.shrink_to_fit();
             }
         }
     }

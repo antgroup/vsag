@@ -36,6 +36,8 @@ using FGIMNeighborList = std::vector<FGIMNeighbor>;
 using FGIMKnnGraph = std::vector<FGIMNeighborList>;
 
 class HGraphFGIM {
+    friend class HGraphFGIMTest;
+
 public:
     // Sources are non-owning, non-empty, disjoint HGraphs with successful Builds.
     // No concurrent mutation is allowed. Only float32/L2/fp32 without deletion
@@ -43,6 +45,7 @@ public:
     static FGIMKnnGraph
     BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, uint64_t k);
 
+private:
     // Internal-only search, not a public index API. The caller must validate the target
     // as FGIM-compatible and provide at least target.dim_ floats in query.
     // CrossQuery does not repeat full source validation.
@@ -53,7 +56,6 @@ public:
                int64_t l,
                SearchStatistics* stats = nullptr);
 
-private:
     static std::vector<InnerIdType>
     ValidateSourcesAndGetOffsets(const Vector<const HGraph*>& source_graphs, uint64_t k);
 
