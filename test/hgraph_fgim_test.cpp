@@ -29,61 +29,9 @@
 
 namespace vsag {
 
-// Test-only fixture: no test entry points are added to HGraphFGIM.
-class HGraphFGIMTest {
+// Test-only access remains independent of the fixture name.
+class HGraphFGIMTestAccessor {
 public:
-    HGraphFGIMTest() {
-        common.dim_ = 4;
-        common.metric_ = MetricType::METRIC_TYPE_L2SQR;
-        common.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-        common.allocator_ = SafeAllocator::FactoryDefaultAllocator();
-    }
-
-    std::unique_ptr<HGraph>
-    MakeSource(uint64_t count,
-               uint64_t source_index,
-               bool tied = false,
-               const std::string& base_quantization = "fp32",
-               bool random = false) {
-        auto parameters = JsonType::Parse(R"({
-            "base_quantization_type": "fp32",
-            "max_degree": 8,
-            "ef_construction": 32,
-            "build_thread_count": 1,
-            "support_duplicate": false,
-            "deduplicate_storage": false
-        })");
-        parameters["base_quantization_type"].SetString(base_quantization);
-        auto graph = std::make_unique<HGraph>(
-            HGraph::CheckAndMappingExternalParam(parameters, common), common);
-        std::vector<float> vectors(count * common.dim_);
-        std::vector<int64_t> labels(count);
-        std::mt19937 rng(47 + source_index);
-        std::uniform_real_distribution<float> distribution(-10.0F, 1400.0F);
-        for (uint64_t u = 0; u < count; ++u) {
-            // Reverse label order makes label arithmetic an invalid substitute for lookup.
-            labels[u] = 1000 * (source_index + 1) + count - 1 - u;
-            for (int64_t d = 0; d < common.dim_; ++d) {
-                // Interleave sources so cross candidates survive top-k selection.
-                vectors[u * common.dim_ + d] =
-                    tied ? 0.0F
-                         : (random ? distribution(rng)
-                                   : static_cast<float>(10 * u + source_index + d));
-            }
-        }
-        auto data = Dataset::Make();
-        data->NumElements(count)
-            ->Dim(common.dim_)
-            ->Ids(labels.data())
-            ->Float32Vectors(vectors.data())
-            ->Owner(false);
-        if (count > 0) {
-            REQUIRE(graph->Build(data).empty());
-        }
-        REQUIRE(graph->GetNumElements() == count);
-        return graph;
-    }
-
     struct Snapshot {
         std::vector<LabelType> labels;
         std::vector<float> vectors;
@@ -152,17 +100,6 @@ public:
     }
 
     void
-    ExpectInvalid(const Vector<const HGraph*>& sources, uint64_t k, const std::string& reason) {
-        try {
-            (void)HGraphFGIM::BuildInitialKnnGraph(sources, k);
-            FAIL("unsupported FGIM input was accepted");
-        } catch (const VsagException& e) {
-            REQUIRE(e.error_.type == ErrorType::INVALID_ARGUMENT);
-            REQUIRE(std::string(e.what()).find(reason) != std::string::npos);
-        }
-    }
-
-    void
     SetUnsupported(HGraph& graph, const std::string& condition) {
         if (condition == "conjugate") {
             graph.use_conjugate_graph_ = true;
@@ -186,7 +123,7 @@ public:
     void
     CompareCross(const HGraph& target, const std::vector<float>& vector, int64_t l) {
         auto query = Dataset::Make();
-        query->NumElements(1)->Dim(common.dim_)->Float32Vectors(vector.data())->Owner(false);
+        query->NumElements(1)->Dim(target.dim_)->Float32Vectors(vector.data())->Owner(false);
         const auto parameters = fmt::format(R"({{"hgraph":{{"ef_search":{}}}}})", l);
         const auto public_result = target.KnnSearch(query, l, parameters, nullptr);
         FGIMNeighborList expected;
@@ -211,6 +148,72 @@ public:
         const auto public_stats = JsonType::Parse(public_result->GetStatistics());
         REQUIRE(stats.distance_evaluations.load() ==
                 public_stats["distance_evaluations"].GetUint64());
+    }
+};
+
+class HGraphFGIMTest : public HGraphFGIMTestAccessor {
+public:
+    HGraphFGIMTest() {
+        common.dim_ = 4;
+        common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+        common.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+        common.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    }
+
+    std::unique_ptr<HGraph>
+    MakeSource(uint64_t count,
+               uint64_t source_index,
+               bool tied = false,
+               const std::string& base_quantization = "fp32",
+               bool random = false) {
+        auto parameters = JsonType::Parse(R"({
+            "base_quantization_type": "fp32",
+            "max_degree": 8,
+            "ef_construction": 32,
+            "build_thread_count": 1,
+            "support_duplicate": false,
+            "deduplicate_storage": false
+        })");
+        parameters["base_quantization_type"].SetString(base_quantization);
+        auto graph = std::make_unique<HGraph>(
+            HGraph::CheckAndMappingExternalParam(parameters, common), common);
+        std::vector<float> vectors(count * common.dim_);
+        std::vector<int64_t> labels(count);
+        std::mt19937 rng(47 + source_index);
+        std::uniform_real_distribution<float> distribution(-10.0F, 1400.0F);
+        for (uint64_t u = 0; u < count; ++u) {
+            // Reverse label order makes label arithmetic an invalid substitute for lookup.
+            labels[u] = 1000 * (source_index + 1) + count - 1 - u;
+            for (int64_t d = 0; d < common.dim_; ++d) {
+                // Interleave sources so cross candidates survive top-k selection.
+                vectors[u * common.dim_ + d] =
+                    tied ? 0.0F
+                         : (random ? distribution(rng)
+                                   : static_cast<float>(10 * u + source_index + d));
+            }
+        }
+        auto data = Dataset::Make();
+        data->NumElements(count)
+            ->Dim(common.dim_)
+            ->Ids(labels.data())
+            ->Float32Vectors(vectors.data())
+            ->Owner(false);
+        if (count > 0) {
+            REQUIRE(graph->Build(data).empty());
+        }
+        REQUIRE(graph->GetNumElements() == count);
+        return graph;
+    }
+
+    void
+    ExpectInvalid(const Vector<const HGraph*>& sources, uint64_t k, const std::string& reason) {
+        try {
+            (void)HGraphFGIM::BuildInitialKnnGraph(sources, k);
+            FAIL("unsupported FGIM input was accepted");
+        } catch (const VsagException& e) {
+            REQUIRE(e.error_.type == ErrorType::INVALID_ARGUMENT);
+            REQUIRE(std::string(e.what()).find(reason) != std::string::npos);
+        }
     }
 
     IndexCommonParam common;
@@ -324,7 +327,7 @@ TEST_CASE_METHOD(HGraphFGIMTest, "FGIM rejects unsupported inputs", "[ut][hgraph
     }
     SECTION("invalid k") {
         ExpectInvalid(sources, 0, "k must");
-        ExpectInvalid(sources, std::numeric_limits<std::size_t>::max(), "k must");
+        ExpectInvalid(sources, std::numeric_limits<uint64_t>::max(), "k must");
     }
     SECTION("empty source") {
         auto empty = MakeSource(0, 2);

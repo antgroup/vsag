@@ -82,7 +82,7 @@ public:
 
     friend class HGraphAnalyzer;
     friend class HGraphFGIM;
-    friend class HGraphFGIMTest;
+    friend class HGraphFGIMTestAccessor;
     friend class HGraphOptimizedBuildSession;
 
 public:

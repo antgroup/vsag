@@ -36,7 +36,7 @@ using FGIMNeighborList = std::vector<FGIMNeighbor>;
 using FGIMKnnGraph = std::vector<FGIMNeighborList>;
 
 class HGraphFGIM {
-    friend class HGraphFGIMTest;
+    friend class HGraphFGIMTestAccessor;
 
 public:
     // Sources are non-owning, non-empty, disjoint HGraphs with successful Builds.

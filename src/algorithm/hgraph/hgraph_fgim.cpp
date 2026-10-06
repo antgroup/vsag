@@ -203,7 +203,7 @@ HGraphFGIM::BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, uin
                       });
             if (candidates.size() > k) {
                 candidates.resize(k);
-                candidates.shrink_to_fit();
+                FGIMNeighborList(candidates.begin(), candidates.end()).swap(candidates);
             }
         }
     }
