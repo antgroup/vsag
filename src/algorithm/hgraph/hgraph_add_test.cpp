@@ -15,11 +15,13 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <functional>
 #include <future>
 #include <initializer_list>
 #include <new>
+#include <numeric>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -1920,6 +1922,108 @@ TEST_CASE("HGraph deduplicate_storage physical growth is single-flight",
         resizer.get();
     }
     REQUIRE(all_resizers_finished);
+}
+
+TEST_CASE("HGraph SAQ rejects insufficient initial training data", "[ut][hgraph][SAQ]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 16;
+    auto common_param = MakeCommonParam(dim);
+    common_param.metric_ = GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR,
+                                    vsag::MetricType::METRIC_TYPE_IP,
+                                    vsag::MetricType::METRIC_TYPE_COSINE);
+    auto hgraph_json = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "saq",
+        "saq_avg_bits": 4,
+        "saq_segment_count": 1,
+        "saq_random_rotation": false,
+        "max_degree": 8,
+        "ef_construction": 32,
+        "build_thread_count": 1,
+        "use_reorder": false
+    })");
+    auto vectors = fixtures::generate_vectors(count, dim, false, 229);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 1000);
+    auto single = MakeFloatDataset(vectors, ids, dim, 1);
+    auto index = MakeHGraphIndex(hgraph_json, common_param);
+    SECTION("Train") {
+        auto result = index->Train(single);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+    SECTION("Build") {
+        auto result = index->Build(single);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+    SECTION("Add") {
+        auto result = index->Add(single);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+    REQUIRE(index->GetNumElements() == 0);
+
+    auto training = MakeFloatDataset(vectors, ids, dim, count);
+    REQUIRE(index->Train(training).has_value());
+    REQUIRE(index->Add(single).has_value());
+    REQUIRE(index->GetNumElements() == 1);
+    std::vector<float> query_vector(vectors.begin(), vectors.begin() + dim);
+    auto query = MakeFloatQuery(query_vector, dim);
+    auto result = index->KnnSearch(query, 1, R"({"hgraph":{"ef_search":32}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == ids[0]);
+    REQUIRE(std::isfinite(result.value()->GetDistances()[0]));
+}
+
+TEST_CASE("HGraph SAQ index survives serialization round trip", "[ut][hgraph][SAQ]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 64;
+    constexpr int64_t k = 10;
+    auto common_param = MakeCommonParam(dim);
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_COSINE;
+    auto hgraph_json = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "saq",
+        "saq_avg_bits": 2,
+        "saq_segment_count": 1,
+        "saq_random_rotation": true,
+        "max_degree": 8,
+        "ef_construction": 32,
+        "build_thread_count": 1,
+        "use_reorder": false
+    })");
+
+    auto vectors = fixtures::generate_vectors(count, dim, false, 229);
+    std::fill(vectors.begin(), vectors.begin() + dim, 0.0F);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 1000);
+    auto base = MakeFloatDataset(vectors, ids, dim, count);
+    std::vector<float> query_vector(vectors.begin() + dim, vectors.begin() + 2 * dim);
+    auto query = MakeFloatQuery(query_vector, dim);
+    auto index = MakeHGraphIndex(hgraph_json, common_param);
+    REQUIRE(index->Build(base).has_value());
+
+    const std::string search_parameters = R"({"hgraph": {"ef_search": 32}})";
+    auto before = index->KnnSearch(query, k, search_parameters);
+    REQUIRE(before.has_value());
+    REQUIRE(before.value()->GetDim() == k);
+
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = MakeHGraphIndex(hgraph_json, common_param);
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    REQUIRE(restored->GetNumElements() == count);
+    auto after = restored->KnnSearch(query, k, search_parameters);
+    REQUIRE(after.has_value());
+    REQUIRE(after.value()->GetDim() == before.value()->GetDim());
+
+    for (int64_t i = 0; i < k; ++i) {
+        REQUIRE(after.value()->GetIds()[i] == before.value()->GetIds()[i]);
+        REQUIRE(std::isfinite(before.value()->GetDistances()[i]));
+        REQUIRE(std::isfinite(after.value()->GetDistances()[i]));
+        REQUIRE(std::abs(after.value()->GetDistances()[i] - before.value()->GetDistances()[i]) <=
+                1e-6F);
+    }
 }
 
 TEST_CASE("HGraph deduplicate_storage concurrent Add keeps visible duplicates searchable",
