@@ -3566,6 +3566,81 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     fixtures::TestIndex::TestSerializeBinarySet(index, restored, dataset, search_param, true);
 }
 
+TEST_CASE("IVF SAQ build add and serialization preserve search results", "[ft][ivf][SAQ]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t base_count = 640;
+    constexpr int64_t initial_count = 512;
+    constexpr int64_t k = 8;
+    const std::string metric = GENERATE("l2", "ip", "cosine");
+    const bool use_residual = GENERATE(false, true);
+    INFO("metric=" << metric << ", use_residual=" << use_residual);
+    auto params = nlohmann::json::parse(R"({
+        "dtype": "float32",
+        "dim": 64,
+        "index_param": {
+            "base_quantization_type": "saq",
+            "saq_avg_bits": 4,
+            "saq_random_rotation": true,
+            "buckets_count": 4,
+            "ivf_train_type": "random",
+            "train_sample_count": 512,
+            "use_reorder": false,
+            "thread_count": 1
+        }
+    })");
+    params["metric_type"] = metric;
+    params["index_param"]["use_residual"] = use_residual;
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric);
+    auto initial = vsag::Dataset::Make()
+                       ->NumElements(initial_count)
+                       ->Dim(dim)
+                       ->Ids(dataset->base_->GetIds())
+                       ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+                       ->Owner(false);
+    auto added = vsag::Dataset::Make()
+                     ->NumElements(base_count - initial_count)
+                     ->Dim(dim)
+                     ->Ids(dataset->base_->GetIds() + initial_count)
+                     ->Float32Vectors(dataset->base_->GetFloat32Vectors() + initial_count * dim)
+                     ->Owner(false);
+    auto created = vsag::Factory::CreateIndex("ivf", params.dump());
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    auto built = index->Build(initial);
+    REQUIRE(built.has_value());
+    REQUIRE(built.value().empty());
+    auto inserted = index->Add(added);
+    REQUIRE(inserted.has_value());
+    REQUIRE(inserted.value().empty());
+    REQUIRE(index->GetNumElements() == base_count);
+
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored_result = vsag::Factory::CreateIndex("ivf", params.dump());
+    REQUIRE(restored_result.has_value());
+    auto restored = restored_result.value();
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    REQUIRE(restored->GetNumElements() == base_count);
+
+    constexpr auto search_param = R"({"ivf":{"scan_buckets_count":4}})";
+    for (int64_t query_id = 0; query_id < 3; ++query_id) {
+        auto query = fixtures::get_one_query(dataset->query_, query_id);
+        auto before = index->KnnSearch(query, k, search_param);
+        auto after = restored->KnnSearch(query, k, search_param);
+        REQUIRE(before.has_value());
+        REQUIRE(after.has_value());
+        REQUIRE(before.value()->GetDim() == k);
+        REQUIRE(after.value()->GetDim() == k);
+        for (int64_t i = 0; i < k; ++i) {
+            REQUIRE(after.value()->GetIds()[i] == before.value()->GetIds()[i]);
+            REQUIRE(std::isfinite(before.value()->GetDistances()[i]));
+            REQUIRE(std::isfinite(after.value()->GetDistances()[i]));
+            REQUIRE(std::abs(after.value()->GetDistances()[i] -
+                             before.value()->GetDistances()[i]) <= 1e-6F);
+        }
+    }
+}
+
 TEST_CASE("IVF dense native distance contract", "[distance_contract]") {
     using namespace fixtures;
     for (const auto* quantizer : {"fp32", "sq8", "pqfs"}) {
