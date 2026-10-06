@@ -48,6 +48,7 @@ HGraphFGIM::ValidateSourcesAndGetOffsets(const Vector<const HGraph*>& source_gra
         const bool valid_dimension = source->dim_ > 0 && (i == 0 || source->dim_ == dimension);
         CHECK_ARGUMENT(valid_dimension, "FGIM requires matching positive dimensions");
         dimension = source->dim_;
+        CHECK_ARGUMENT(!source->support_duplicate_, "FGIM does not support duplicate grouping");
         CHECK_ARGUMENT(!source->deduplicate_storage_, "FGIM does not support deduplicate storage");
         CHECK_ARGUMENT(!source->use_conjugate_graph_,
                        "FGIM internal search does not support conjugate graph enhancement");
@@ -139,6 +140,7 @@ HGraphFGIM::CrossQuery(const HGraph& target,
     param.topk = topk;
     param.rerank_topk = topk;
     param.consider_duplicate = target.support_duplicate_;
+    // Validated sources have no deletions; no user filter is applied.
     param.is_inner_id_allowed = target.create_search_filter(nullptr, false);
     ctx.distance_phase = DistanceEvaluationPhase::APPROXIMATE;
     auto result = target.search_one_graph(

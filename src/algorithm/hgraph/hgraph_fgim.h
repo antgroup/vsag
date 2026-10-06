@@ -41,7 +41,7 @@ class HGraphFGIM {
 public:
     // Sources are non-owning, non-empty, disjoint HGraphs with successful Builds.
     // No concurrent mutation is allowed. Only float32/L2/fp32 without deletion
-    // or deduplicate storage is supported. Result rows use merged internal IDs.
+    // or duplicate grouping/deduplicate storage is supported. Result rows use merged internal IDs.
     static FGIMKnnGraph
     BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, uint64_t k);
 

@@ -32,6 +32,16 @@ namespace vsag {
 // Test-only access remains independent of the fixture name.
 class HGraphFGIMTestAccessor {
 public:
+    void
+    CheckDuplicateSource(const HGraph& source) {
+        REQUIRE(source.support_duplicate_);
+        bool found = false;
+        for (InnerIdType u = 0; u < source.GetNumElements(); ++u) {
+            found = found || !source.bottom_graph_->GetDuplicateIds(u).empty();
+        }
+        REQUIRE(found);
+    }
+
     struct Snapshot {
         std::vector<LabelType> labels;
         std::vector<float> vectors;
@@ -139,7 +149,10 @@ public:
         const auto fast = HGraphFGIM::CrossQuery(target, vector.data(), l);
         REQUIRE(fast.size() == expected.size());
         REQUIRE(counted.size() == expected.size());
+        std::set<InnerIdType> seen;
         for (uint64_t i = 0; i < fast.size(); ++i) {
+            REQUIRE(fast[i].id < target.GetNumElements());
+            REQUIRE(seen.insert(fast[i].id).second);
             REQUIRE(fast[i].id == expected[i].id);
             REQUIRE(fast[i].distance == expected[i].distance);
             REQUIRE(counted[i].id == fast[i].id);
@@ -165,7 +178,8 @@ public:
                uint64_t source_index,
                bool tied = false,
                const std::string& base_quantization = "fp32",
-               bool random = false) {
+               bool random = false,
+               bool support_duplicate = false) {
         auto parameters = JsonType::Parse(R"({
             "base_quantization_type": "fp32",
             "max_degree": 8,
@@ -175,6 +189,7 @@ public:
             "deduplicate_storage": false
         })");
         parameters["base_quantization_type"].SetString(base_quantization);
+        parameters["support_duplicate"].SetBool(support_duplicate);
         auto graph = std::make_unique<HGraph>(
             HGraph::CheckAndMappingExternalParam(parameters, common), common);
         std::vector<float> vectors(count * common.dim_);
@@ -189,7 +204,8 @@ public:
                 vectors[u * common.dim_ + d] =
                     tied ? 0.0F
                          : (random ? distribution(rng)
-                                   : static_cast<float>(10 * u + source_index + d));
+                                   : static_cast<float>(10 * (support_duplicate ? u / 2 : u) +
+                                                        source_index + d));
             }
         }
         auto data = Dataset::Make();
@@ -389,6 +405,44 @@ TEST_CASE_METHOD(HGraphFGIMTest,
     sources.push_back(other.get());
     SetUnsupported(*target, "conjugate");
     ExpectInvalid(sources, 8, "conjugate");
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM CrossQuery preserves distinct IDs with duplicate vector support",
+                 "[ut][hgraph][fgim]") {
+    const int64_t l = GENERATE(1, 3, 20);
+    CAPTURE(l);
+    auto target = MakeSource(6, 0, false, "fp32", false, true);
+    CheckDuplicateSource(*target);
+    const auto before = Capture(*target);
+    REQUIRE(std::set<LabelType>(before.labels.begin(), before.labels.end()).size() ==
+            target->GetNumElements());
+    for (InnerIdType u = 0; u < target->GetNumElements(); ++u) {
+        std::vector<float> query(common.dim_);
+        target->GetVectorByInnerId(u, query.data());
+        CompareCross(*target, query, l);
+    }
+    const auto after = Capture(*target);
+    REQUIRE(after.labels == before.labels);
+    REQUIRE(after.vectors == before.vectors);
+    REQUIRE(after.neighbors == before.neighbors);
+    REQUIRE(after.removed == before.removed);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM rejects duplicate-supporting sources",
+                 "[ut][hgraph][fgim]") {
+    const uint64_t k = GENERATE(1, 3, 20);
+    const bool tied = GENERATE(false, true);
+    CAPTURE(k, tied);
+    auto a = MakeSource(6, 0);
+    // Reject the configuration even when no duplicate group was formed.
+    auto b = MakeSource(6, 1, tied, "fp32", !tied, true);
+    if (tied) {
+        CheckDuplicateSource(*b);
+    }
+    Vector<const HGraph*> sources({a.get(), b.get()}, common.allocator_.get());
+    ExpectInvalid(sources, k, "duplicate grouping");
 }
 
 }  // namespace vsag
