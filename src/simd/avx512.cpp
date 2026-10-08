@@ -540,6 +540,41 @@ SQ8ComputeL2Sqr(const float* RESTRICT query,
 #endif
 }
 
+void
+SQ8ComputeL2SqrBatch4(const float* query,
+                      const uint8_t* codes1,
+                      const uint8_t* codes2,
+                      const uint8_t* codes3,
+                      const uint8_t* codes4,
+                      const float* lower_bound,
+                      const float* diff,
+                      uint64_t dim,
+                      float& dist1,
+                      float& dist2,
+                      float& dist3,
+                      float& dist4) {
+#if defined(ENABLE_AVX512)
+    simd::SQ8ComputeL2SqrBatch4Impl<simd::SQ8Traits<simd::Avx512SQ8Tag>>(query,
+                                                                         codes1,
+                                                                         codes2,
+                                                                         codes3,
+                                                                         codes4,
+                                                                         lower_bound,
+                                                                         diff,
+                                                                         dim,
+                                                                         dist1,
+                                                                         dist2,
+                                                                         dist3,
+                                                                         dist4,
+                                                                         &avx2::SQ8ComputeL2Sqr);
+#else
+    dist1 = avx2::SQ8ComputeL2Sqr(query, codes1, lower_bound, diff, dim);
+    dist2 = avx2::SQ8ComputeL2Sqr(query, codes2, lower_bound, diff, dim);
+    dist3 = avx2::SQ8ComputeL2Sqr(query, codes3, lower_bound, diff, dim);
+    dist4 = avx2::SQ8ComputeL2Sqr(query, codes4, lower_bound, diff, dim);
+#endif
+}
+
 float
 SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const uint8_t* RESTRICT codes2,

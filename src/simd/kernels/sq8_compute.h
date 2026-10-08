@@ -136,6 +136,50 @@ SQ8ComputeL2SqrImpl(const float* query,
     return result;
 }
 
+template <typename T>
+inline void
+SQ8ComputeL2SqrBatch4Impl(
+    const float* query,
+    const uint8_t* codes1,
+    const uint8_t* codes2,
+    const uint8_t* codes3,
+    const uint8_t* codes4,
+    const float* lower_bound,
+    const float* diff,
+    uint64_t dim,
+    float& dist1,
+    float& dist2,
+    float& dist3,
+    float& dist4,
+    float (*fallback)(const float*, const uint8_t*, const float*, const float*, uint64_t)) {
+    using V = typename T::FloatVec;
+    constexpr uint64_t W = T::Width;
+    V sums[4] = {T::zero(), T::zero(), T::zero(), T::zero()};
+    const uint8_t* codes[4] = {codes1, codes2, codes3, codes4};
+    const V inv255 = T::set1(1.0f / 255.0f);
+
+    uint64_t i = 0;
+    for (; i + W <= dim; i += W) {
+        const V q = T::load(query + i);
+        const V lb = T::load(lower_bound + i);
+        const V scale = T::load(diff + i);
+        for (uint64_t j = 0; j < 4; ++j) {
+            const V code = T::load_u8_as_float(codes[j] + i);
+            const V adjusted = T::fmadd(T::mul(code, inv255), scale, lb);
+            const V delta = T::sub(q, adjusted);
+            sums[j] = T::fmadd(delta, delta, sums[j]);
+        }
+    }
+
+    float* results[4] = {&dist1, &dist2, &dist3, &dist4};
+    for (uint64_t j = 0; j < 4; ++j) {
+        *results[j] = T::reduce_add(sums[j]);
+        if (i < dim) {
+            *results[j] += fallback(query + i, codes[j] + i, lower_bound + i, diff + i, dim - i);
+        }
+    }
+}
+
 // --- SQ8ComputeCodesIP ---
 
 template <typename T>

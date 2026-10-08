@@ -64,6 +64,22 @@ DECLARE_SQ8_FUNCTIONS(sve)
 
 #undef DECLARE_SQ8_FUNCTIONS
 
+namespace avx512 {
+void
+SQ8ComputeL2SqrBatch4(const float* query,
+                      const uint8_t* codes1,
+                      const uint8_t* codes2,
+                      const uint8_t* codes3,
+                      const uint8_t* codes4,
+                      const float* lower_bound,
+                      const float* diff,
+                      uint64_t dim,
+                      float& dist1,
+                      float& dist2,
+                      float& dist3,
+                      float& dist4);
+}
+
 using SQ8ComputeType = float (*)(const float* RESTRICT query,
                                  const uint8_t* RESTRICT codes,
                                  const float* RESTRICT lower_bound,
@@ -71,6 +87,20 @@ using SQ8ComputeType = float (*)(const float* RESTRICT query,
                                  uint64_t dim);
 extern SQ8ComputeType SQ8ComputeIP;
 extern SQ8ComputeType SQ8ComputeL2Sqr;
+
+using SQ8ComputeBatch4Type = void (*)(const float*,
+                                      const uint8_t*,
+                                      const uint8_t*,
+                                      const uint8_t*,
+                                      const uint8_t*,
+                                      const float*,
+                                      const float*,
+                                      uint64_t,
+                                      float&,
+                                      float&,
+                                      float&,
+                                      float&);
+extern SQ8ComputeBatch4Type SQ8ComputeL2SqrBatch4;
 
 using SQ8ComputeCodesType = float (*)(const uint8_t* RESTRICT codes1,
                                       const uint8_t* RESTRICT codes2,
