@@ -28,6 +28,7 @@
 #include "analyzer/analyzer.h"
 #include "datacell/sparse_dmq_datacell.h"
 #include "datacell/sparse_vector_datacell_parameter.h"
+#include "impl/filter/filter_callback_limiter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "index_feature_list.h"
@@ -38,6 +39,7 @@
 #include "storage/serialization_tags.h"
 #include "storage/tlv_section.h"
 #include "utils/search_threshold.h"
+#include "utils/timer.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
 #include "vsag/options.h"
@@ -53,51 +55,6 @@ constexpr int64_t SINDI_RERANK_FLAT_FORMAT_DATACELL = 2;
 constexpr int64_t SINDI_RERANK_FLAT_FORMAT_DMQ = 3;
 constexpr const char* SINDI_POSTING_LIST_FORMAT_VERSION_KEY = "sindi_posting_list_format_version";
 constexpr int64_t SINDI_SORTED_POSTING_LIST_FORMAT_VERSION = 1;
-
-class FilterCallbackLimiter : public Filter {
-public:
-    FilterCallbackLimiter(FilterPtr filter, std::shared_ptr<uint64_t> remaining)
-        : filter_(std::move(filter)), remaining_(std::move(remaining)) {
-    }
-
-    [[nodiscard]] bool
-    CheckValid(int64_t id) const override {
-        if (*remaining_ == 0) {
-            return false;
-        }
-        const bool valid = filter_->CheckValid(id);
-        --(*remaining_);
-        return valid;
-    }
-
-    [[nodiscard]] float
-    ValidRatio() const override {
-        return filter_->ValidRatio();
-    }
-
-    [[nodiscard]] Distribution
-    FilterDistribution() const override {
-        return filter_->FilterDistribution();
-    }
-
-    void
-    GetValidIds(const int64_t** valid_ids, int64_t& count) const override {
-        filter_->GetValidIds(valid_ids, count);
-    }
-
-private:
-    FilterPtr filter_;
-    std::shared_ptr<uint64_t> remaining_;
-};
-
-FilterPtr
-create_filter_callback_limiter(const FilterPtr& filter,
-                               const std::shared_ptr<uint64_t>& remaining) {
-    if (filter == nullptr or remaining == nullptr) {
-        return filter;
-    }
-    return std::make_shared<FilterCallbackLimiter>(filter, remaining);
-}
 
 bool
 has_sorted_posting_lists(const JsonType& basic_info) {
@@ -149,7 +106,11 @@ create_rerank_flat(const IndexCommonParam& common_param,
     }
     auto rerank_param = std::make_shared<SparseVectorDataCellParameter>();
     rerank_param->io_parameter = std::make_shared<MemoryBlockIOParameter>();
-    rerank_param->quantizer_parameter = std::make_shared<SparseQuantizerParameter>();
+    auto quantizer_param = std::make_shared<SparseQuantizerParameter>();
+    if (rerank_type == SPARSE_RERANK_TYPE_FP16) {
+        quantizer_param->value_type = SparseQuantizerValueType::FP16;
+    }
+    rerank_param->quantizer_parameter = quantizer_param;
     return FlattenInterface::MakeInstance(rerank_param, common_param);
 }
 
@@ -688,7 +649,17 @@ SINDI::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     auto check_and_cleanup = [this, inner_id, &new_sv](auto&& get_sparse_vector) -> bool {
         SparseVector old_sv;
         get_sparse_vector(inner_id, &old_sv, this->allocator_);
-        bool ret = is_subset_of_sparse_vector(old_sv, new_sv);
+        bool ret = false;
+        if (rerank_type_ == SPARSE_RERANK_TYPE_FP16) {
+            Vector<float> rounded_values(new_sv.len_, allocator_);
+            for (uint32_t i = 0; i < new_sv.len_; ++i) {
+                rounded_values[i] = generic::FP16ToFloat(generic::FloatToFP16(new_sv.vals_[i]));
+            }
+            SparseVector rounded_new_sv{new_sv.len_, new_sv.ids_, rounded_values.data()};
+            ret = is_subset_of_sparse_vector(old_sv, rounded_new_sv);
+        } else {
+            ret = is_subset_of_sparse_vector(old_sv, new_sv);
+        }
 
         this->allocator_->Deallocate(old_sv.vals_);
         this->allocator_->Deallocate(old_sv.ids_);
@@ -747,6 +718,10 @@ SINDI::KnnSearch(const DatasetPtr& query,
     inner_param.topk = threshold.has_value() ? static_cast<int64_t>(inner_param.ef) : k;
     inner_param.distance_threshold = threshold;
     inner_param.enable_reorder = use_reorder_;
+    if (search_param.enable_time_record) {
+        inner_param.time_cost = std::make_shared<Timer>();
+        inner_param.time_cost->SetThreshold(search_param.timeout_ms);
+    }
 
     auto filter_callback_remaining =
         filter != nullptr and search_param.filter_callback_limit > 0
@@ -883,6 +858,12 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         if (filter_callback_limit_reached) {
             break;
         }
+        if (inner_param.time_cost != nullptr and inner_param.time_cost->CheckOvertime()) {
+            if (statistics != nullptr) {
+                statistics->is_timeout.store(true, std::memory_order_relaxed);
+            }
+            break;
+        }
     }
 
     if (statistics != nullptr and query_context.has_untracked_approximate_evaluations) {
@@ -1003,6 +984,10 @@ SINDI::RangeSearch(const DatasetPtr& query,
 
     inner_param.range_search_limit_size = static_cast<int>(limited_size);
     inner_param.radius = radius;
+    if (search_param.enable_time_record) {
+        inner_param.time_cost = std::make_shared<Timer>();
+        inner_param.time_cost->SetThreshold(search_param.timeout_ms);
+    }
 
     auto filter_callback_remaining =
         filter != nullptr and search_param.filter_callback_limit > 0
@@ -1071,6 +1056,10 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
         filter_enabled ? create_filter_callback_limiter(request.filter_, filter_callback_remaining)
                        : nullptr;
     inner_param.is_inner_id_allowed = this->create_search_filter(user_filter);
+    if (search_param.enable_time_record) {
+        inner_param.time_cost = std::make_shared<Timer>();
+        inner_param.time_cost->SetThreshold(search_param.timeout_ms);
+    }
 
     std::shared_ptr<ReasoningContext> reasoning_ctx;
     if (not request.expected_labels_.empty()) {
@@ -1907,8 +1896,16 @@ SINDI::EstimateMemory(uint64_t num_elements) const {
             mem += estimated_codebook_count * sizeof(SparseDmqQuantizer::Codebook);
             mem += estimated_term_count * 2 * sizeof(uint32_t);
         } else {
-            mem += num_elements *
-                   (sizeof(uint32_t) + avg_doc_term_length_ * (sizeof(uint32_t) + sizeof(float)));
+            const uint64_t rerank_value_size =
+                rerank_type_ == SPARSE_RERANK_TYPE_FP16 ? sizeof(uint16_t) : sizeof(float);
+            uint64_t rerank_code_size =
+                sizeof(uint32_t) + static_cast<uint64_t>(avg_doc_term_length_) *
+                                       (sizeof(uint32_t) + rerank_value_size);
+            if (rerank_type_ == SPARSE_RERANK_TYPE_FP16) {
+                constexpr uint64_t alignment = alignof(uint32_t);
+                rerank_code_size = (rerank_code_size + alignment - 1) / alignment * alignment;
+            }
+            mem += num_elements * rerank_code_size;
 
             const auto block_size = Options::Instance().block_size_limit();
             const auto offset_bytes = num_elements * (sizeof(uint64_t) + sizeof(uint32_t));

@@ -168,7 +168,7 @@ TEST_CASE("Pyramid retains unnamed paths for ODescent Build", "[ft][pyramid][pat
 }
 
 TEST_CASE("Pyramid stores structured path rows", "[ft][pyramid][paths][multi_path]") {
-    for (const std::string graph_type : {"nsw", "odescent"}) {
+    for (const std::string graph_type : {"nsw", "odescent", "pipnn"}) {
         auto index = MakePyramidIndex(graph_type, true);
         auto base = MakeDataset({1, 2, 3}, {});
         base->Paths("", std::vector<std::vector<std::string>>{{"left", "right"}, {"single"}, {""}});

@@ -22,6 +22,7 @@
 #include <memory>
 #include <vector>
 
+#include "container_types.h"
 #include "impl/heap/search_candidate_queue.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/query_computer_pool.h"
@@ -65,6 +66,64 @@ struct MCIEpochMarks {
         marks[id] = tag;
     }
 };
+
+// Merge "filtered out" and "visited" into one byte array, so a probe answers both questions with a
+// single memory access and without a virtual Filter::CheckValid() call. The state is rebuilt per
+// search from the filter bitmap: the probe loop walks the index in random order, so faulting in
+// one dense array is cheaper than faulting in two sparse ones per probe.
+// NOLINTNEXTLINE(readability-identifier-naming)
+struct MCIMergedVisitMarks {
+    // Scratch for one search: the marks must not outlive it, because they are allocated from the
+    // allocator the search was given, which the caller owns and can destroy together with the index.
+    Vector<uint8_t> state;
+
+    explicit MCIMergedVisitMarks(Allocator* allocator) : state(allocator) {
+    }
+
+    void
+    Reset(const uint8_t* valid_bitmap, uint64_t total) {
+        if (state.size() < total) {
+            state.resize(total);
+        }
+        // The destination is reached through a local pointer: indexing the vector member directly
+        // makes the compiler reload its data pointer on every iteration and keeps the loop scalar.
+        auto* destination = state.data();
+        for (uint64_t id = 0; id < total; ++id) {
+            // Normalize: any non-zero bitmap value means valid, 0 stays filtered out.
+            destination[id] = valid_bitmap[id] == 0 ? 0 : 1;
+        }
+    }
+
+    // Returns true only for a valid id that was not visited yet; 2 records the visit.
+    [[nodiscard]] bool
+    TryVisit(InnerIdType id) {
+        if (id >= state.size()) {
+            return false;
+        }
+        uint8_t& value = state[id];
+        if (value != 1) {
+            return false;
+        }
+        value = 2;
+        return true;
+    }
+};
+
+// Returns the filter bitmap when the searcher may index it with inner ids, and prepares the merged
+// marks in that case. Callers must already have validated the id space of the provider.
+const uint8_t*
+// NOLINTNEXTLINE(readability-identifier-naming)
+PrepareMergedVisitMarks(const MCISearcherParam& mci_param,
+                        Allocator* allocator,
+                        uint64_t total,
+                        MCIMergedVisitMarks& merged_marks) {
+    if (mci_param.valid_bitmap == nullptr or allocator == nullptr or
+        mci_param.valid_bitmap_size < total) {
+        return nullptr;
+    }
+    merged_marks.Reset(mci_param.valid_bitmap, total);
+    return mci_param.valid_bitmap;
+}
 
 bool
 mci_check_overtime(const InnerSearchParam& inner_search_param, QueryContext* ctx) {
@@ -131,6 +190,11 @@ search_precise_float_csr(const CliqueDataCellBaseView& view,
     SearchCandidateQueue candidates(allocator);
     visited_nodes.Reset(total);
     visited_cliques.Reset(view.total_clique_count);
+    MCIMergedVisitMarks merged_marks(allocator);
+    const auto* valid_bitmap = PrepareMergedVisitMarks(mci_param, allocator, total, merged_marks);
+    if (mci_param.used_bitmap_fast_path != nullptr) {
+        *mci_param.used_bitmap_fast_path = (valid_bitmap != nullptr);
+    }
     candidates.Reset(static_cast<uint64_t>(candidate_limit));
     uint32_t dist_cmp = 0;
 
@@ -146,13 +210,23 @@ search_precise_float_csr(const CliqueDataCellBaseView& view,
         return candidates.GetClosestUnexpanded();
     };
     auto try_visit = [&](InnerIdType inner_id) -> bool {
-        if (inner_id >= total or visited_nodes.Get(inner_id)) {
+        if (inner_id >= total) {
             return false;
         }
-        visited_nodes.Set(inner_id);
-        if (inner_search_param.is_inner_id_allowed != nullptr and
-            not inner_search_param.is_inner_id_allowed->CheckValid(inner_id)) {
-            return false;
+        if (valid_bitmap != nullptr) {
+            // The merged marks answer "already visited" and "filtered out" in one access.
+            if (not merged_marks.TryVisit(inner_id)) {
+                return false;
+            }
+        } else {
+            if (visited_nodes.Get(inner_id)) {
+                return false;
+            }
+            visited_nodes.Set(inner_id);
+            if (inner_search_param.is_inner_id_allowed != nullptr and
+                not inner_search_param.is_inner_id_allowed->CheckValid(inner_id)) {
+                return false;
+            }
         }
         const auto* vector =
             precise_vectors + static_cast<uint64_t>(inner_id) * precise_vector_stride;
@@ -292,6 +366,11 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
     thread_local MCIEpochMarks visited_cliques;
     visited_nodes.Reset(total);
     visited_cliques.Reset(cliques->TotalLogicalCliqueCount());
+    MCIMergedVisitMarks merged_marks(alloc);
+    const auto* valid_bitmap = PrepareMergedVisitMarks(mci_param, alloc, total, merged_marks);
+    if (mci_param.used_bitmap_fast_path != nullptr) {
+        *mci_param.used_bitmap_fast_path = (valid_bitmap != nullptr);
+    }
     Vector<SearchCandidate> candidates(alloc);
     candidates.reserve(static_cast<uint64_t>(candidate_limit));
 
@@ -322,13 +401,23 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
     };
     uint32_t dist_cmp = 0;
     auto try_visit = [&](InnerIdType inner_id) -> bool {
-        if (inner_id >= total or visited_nodes.Get(inner_id)) {
+        if (inner_id >= total) {
             return false;
         }
-        visited_nodes.Set(inner_id);
-        if (inner_search_param.is_inner_id_allowed != nullptr and
-            not inner_search_param.is_inner_id_allowed->CheckValid(inner_id)) {
-            return false;
+        if (valid_bitmap != nullptr) {
+            // The merged marks answer "already visited" and "filtered out" in one access.
+            if (not merged_marks.TryVisit(inner_id)) {
+                return false;
+            }
+        } else {
+            if (visited_nodes.Get(inner_id)) {
+                return false;
+            }
+            visited_nodes.Set(inner_id);
+            if (inner_search_param.is_inner_id_allowed != nullptr and
+                not inner_search_param.is_inner_id_allowed->CheckValid(inner_id)) {
+                return false;
+            }
         }
         float dist = 0.0F;
         flatten->Query(&dist, computer, &inner_id, 1, ctx);

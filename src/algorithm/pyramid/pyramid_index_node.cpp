@@ -82,6 +82,22 @@ IndexNode::Build(ODescent& odescent) {
 }
 
 void
+IndexNode::Build(const GraphBuildFunc& build_graph) {
+    std::unique_lock lock(mutex_);
+    if (not ids_.empty()) {
+        Init();
+    }
+    if (status_ == Status::GRAPH) {
+        entry_point_ = ids_[0];
+        build_graph(graph_, ids_, level_);
+        Vector<InnerIdType>(allocator_).swap(ids_);
+    }
+    for (const auto& item : children_) {
+        item.second->Build(build_graph);
+    }
+}
+
+void
 IndexNode::AddChild(const std::string& key) {
     // AddChild is not thread-safe; ensure thread safety in calls to it.
     children_[key] = std::make_unique<IndexNode>(
@@ -201,6 +217,15 @@ IndexNode::get_memory_usage_detail() const {
     uint64_t memory = sizeof(IndexNode);
     uint64_t routing_memory = 0;
     std::shared_lock lock(mutex_);
+    if (duplicate_admission_ != nullptr) {
+        // As for other container estimates, include node bookkeeping but not malloc
+        // overhead. Count atomically: taking stripe locks here would invert admission's
+        // stripe -> topology publication lock order.
+        memory += sizeof(DuplicateAdmission) +
+                  DuplicateAdmission::Stripe::kStripeCount * sizeof(DuplicateAdmission::Stripe) +
+                  duplicate_admission_->representative_count.load(std::memory_order_relaxed) *
+                      (sizeof(DuplicateAdmission::Stripe::Entry) + 4 * sizeof(void*));
+    }
     if (has_routing()) {
         routing_memory +=
             sizeof(RoutingOverlay) + routing_->graphs.capacity() * sizeof(GraphInterfacePtr);

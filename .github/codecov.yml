@@ -64,6 +64,10 @@ component_management:
       name: factory
       paths:
         - src/factory/**
+    - component_id: module_gpu
+      name: gpu
+      paths:
+        - src/gpu/**
     - component_id: module_impl
       name: impl
       paths:

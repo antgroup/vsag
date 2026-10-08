@@ -30,6 +30,17 @@ class DistanceHeap {
 public:
     using DistanceRecord = std::pair<float, InnerIdType>;
 
+    struct AuxiliaryDistanceRecord {
+        DistanceRecord record;
+        float auxiliary;
+        BucketIdType source_bucket_id{-1};
+        InnerIdType source_offset_id{std::numeric_limits<InnerIdType>::max()};
+        uint32_t reserved{0};
+        uint64_t source_version{std::numeric_limits<uint64_t>::max()};
+    };
+
+    static_assert(sizeof(AuxiliaryDistanceRecord) == 32);
+
     template <class HeapImpl>
     HeapImpl&
     GetImpl() {
@@ -55,6 +66,10 @@ public:
     static DistHeapPtr
     MakeInstanceBySize(Allocator* allocator, int64_t max_size);
 
+    template <bool max_heap, bool fixed_size>
+    static DistHeapPtr
+    MakeInstanceBySizeWithAuxiliary(Allocator* allocator, int64_t max_size);
+
 public:
     explicit DistanceHeap(Allocator* allocator);
 
@@ -67,6 +82,17 @@ public:
 
     virtual void
     Push(float dist, InnerIdType id) = 0;
+
+    virtual void
+    PushWithAuxiliary(float dist, InnerIdType id, float auxiliary);
+
+    virtual void
+    PushWithAuxiliary(float dist,
+                      InnerIdType id,
+                      float auxiliary,
+                      BucketIdType source_bucket_id,
+                      InnerIdType source_offset_id,
+                      uint64_t source_version);
 
     [[nodiscard]] virtual const DistanceRecord&
     Top() const = 0;
@@ -82,6 +108,12 @@ public:
 
     [[nodiscard]] virtual const DistanceRecord*
     GetData() const = 0;
+
+    [[nodiscard]] virtual bool
+    StoresAuxiliary() const;
+
+    [[nodiscard]] virtual const AuxiliaryDistanceRecord*
+    GetDataWithAuxiliary() const;
 
     virtual void
     Merge(const DistanceHeap& other);

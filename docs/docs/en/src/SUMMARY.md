@@ -7,6 +7,7 @@
 - [Installation](guide/installation.md)
 - [Creating an Index](guide/create_index.md)
 - [k-Nearest Neighbor Search](guide/knn_search.md)
+- [Search Statistics](guide/search_statistics.md)
 - [C API](guide/c_api.md)
 - [pyvsag](guide/pyvsag.md)
 

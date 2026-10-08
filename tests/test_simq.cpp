@@ -45,6 +45,7 @@
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -52,6 +53,7 @@
 #include <iostream>
 #include <random>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <vector>
 
@@ -757,4 +759,118 @@ TEST_CASE("SIMQ distance-by-ID native query contract", "[simq][distance_contract
         REQUIRE(top.value()->GetDistances()[1] == expected);
     }
     REQUIRE_FALSE(index->CalcDistanceById(DatasetPtr{}, label).has_value());
+}
+TEST_CASE("SIMQ timeout search", "[simq][timeout]") {
+    TempFile tf;
+    auto build_param = make_build_param(tf.path);
+    auto search_param = make_search_param();
+    auto ds = generate_dataset();
+    auto r = vsag::Factory::CreateIndex("simq", build_param);
+    REQUIRE(r.has_value());
+    auto index = r.value();
+
+    auto build_ds = vsag::Dataset::Make();
+    build_ds->NumElements(static_cast<int64_t>(BASE_DOCS))
+        ->Dim(SIMQ_DIM)
+        ->Ids(ds.base_ids.data())
+        ->MultiVectors(ds.base_mvs.data())
+        ->MultiVectorDim(SIMQ_DIM)
+        ->Owner(false);
+    REQUIRE(index->Build(build_ds).has_value());
+
+    auto query_ds = vsag::Dataset::Make();
+    query_ds->NumElements(1)
+        ->Dim(SIMQ_DIM)
+        ->MultiVectors(&ds.query_mvs[0])
+        ->MultiVectorDim(SIMQ_DIM)
+        ->Owner(false);
+
+    // Test with a very short timeout — should trigger timeout
+    const std::string timeout_param = R"({"simq":{"coarse_k":10,"rerank_k":1000,"timeout_ms":0}})";
+    auto sr = index->KnnSearch(query_ds, TOP_K, timeout_param, vsag::FilterPtr(nullptr));
+    REQUIRE(sr.has_value());
+    auto result = sr.value();
+    auto stats = result->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "true");
+
+    // Test without timeout — should complete normally
+    sr = index->KnnSearch(query_ds, TOP_K, search_param, vsag::FilterPtr(nullptr));
+    REQUIRE(sr.has_value());
+    result = sr.value();
+    stats = result->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "false");
+
+    const auto normal_result = result;
+    const std::string generous_param =
+        R"({"simq":{"coarse_k":10,"rerank_k":1000,"timeout_ms":60000}})";
+    auto complete = index->KnnSearch(query_ds, TOP_K, generous_param);
+    REQUIRE(complete.has_value());
+    REQUIRE(complete.value()->GetDim() == normal_result->GetDim());
+    stats = complete.value()->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "false");
+    for (int64_t i = 0; i < normal_result->GetDim(); ++i) {
+        REQUIRE(complete.value()->GetIds()[i] == normal_result->GetIds()[i]);
+        REQUIRE(complete.value()->GetDistances()[i] == normal_result->GetDistances()[i]);
+    }
+
+    auto range =
+        index->RangeSearch(query_ds, 100.0F, timeout_param, vsag::FilterPtr(nullptr), TOP_K);
+    REQUIRE(range.has_value());
+    stats = range.value()->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "true");
+    REQUIRE(range.value()->GetDim() == 0);
+    range = index->RangeSearch(query_ds, 100.0F, generous_param, vsag::FilterPtr(nullptr), TOP_K);
+    REQUIRE(range.has_value());
+    stats = range.value()->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "false");
+    auto normal_range =
+        index->RangeSearch(query_ds, 100.0F, search_param, vsag::FilterPtr(nullptr), TOP_K);
+    REQUIRE(normal_range.has_value());
+    REQUIRE(normal_range.value()->GetDim() <= TOP_K);
+    REQUIRE(normal_range.value()->GetDim() > 0);
+    REQUIRE(range.value()->GetDim() == normal_range.value()->GetDim());
+    for (int64_t i = 0; i < normal_range.value()->GetDim(); ++i) {
+        REQUIRE(range.value()->GetIds()[i] == normal_range.value()->GetIds()[i]);
+        REQUIRE(range.value()->GetDistances()[i] == normal_range.value()->GetDistances()[i]);
+    }
+
+    // Deadlines are cooperative: even a callback on the final candidate must
+    // be reflected in the returned statistics. Rejecting it avoids rerank work.
+    class SlowRejectFilter : public vsag::Filter {
+    public:
+        explicit SlowRejectFilter(std::chrono::milliseconds delay) : delay_(delay) {
+        }
+
+        bool
+        CheckValid(int64_t) const override {
+            std::this_thread::sleep_for(delay_);
+            return false;
+        }
+
+    private:
+        std::chrono::milliseconds delay_;
+    };
+    constexpr auto timeout = std::chrono::milliseconds(1);
+    const auto short_param = fmt::format(
+        R"({{"simq":{{"coarse_k":10,"rerank_k":1,"timeout_ms":{}}}}})", timeout.count());
+    // Exercise the real clock with a delay well beyond the budget. Scheduling
+    // delays may lengthen the sleep; this test asserts no wall-clock upper bound.
+    auto filter = std::make_shared<SlowRejectFilter>(10 * timeout);
+    auto filtered = index->KnnSearch(query_ds, 1, short_param, filter);
+    REQUIRE(filtered.has_value());
+    REQUIRE(filtered.value()->GetDim() == 0);
+    stats = filtered.value()->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "true");
+    range = index->RangeSearch(query_ds, 100.0F, short_param, filter, 1);
+    REQUIRE(range.has_value());
+    REQUIRE(range.value()->GetDim() == 0);
+    stats = range.value()->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "true");
 }

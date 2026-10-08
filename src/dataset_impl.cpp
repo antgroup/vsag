@@ -32,6 +32,12 @@ Dataset::Make() {
     return std::make_shared<DatasetImpl>();
 }
 
+std::optional<SearchResultMetrics>
+Dataset::GetSearchMetrics() const {
+    const auto* accessor = dynamic_cast<const SearchMetricsDatasetAccessor*>(this);
+    return accessor == nullptr ? std::nullopt : accessor->GetSearchMetricsInternal();
+}
+
 DatasetPtr
 Dataset::Paths(const std::string& hierarchy_name, std::vector<std::vector<std::string>> paths) {
     auto* dataset = dynamic_cast<DatasetImpl*>(this);
@@ -1029,7 +1035,7 @@ DatasetImpl::Append(const DatasetPtr& other) {
 
 std::vector<std::string>
 DatasetImpl::GetStatistics(const std::vector<std::string>& stat_keys) const {
-    auto json = JsonType::Parse(this->Statistics_);
+    auto json = JsonType::Parse(this->GetStatistics());
     std::vector<std::string> result;
     for (const auto& key : stat_keys) {
         if (json.Contains(key)) {

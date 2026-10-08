@@ -18,8 +18,9 @@ SINDI（**S**parse **IN**verted **D**ense **I**ndex）是 VSAG 面向 **稀疏�
    `use_quantization: true` 使用 SQ8，`use_quantization: "fp16"` 使用半精度值。
 3. **打分。** 检索时，SINDI 遍历查询向量的非零项，按窗口访问对应的倒排表，使用大小为
    `n_candidate` 的大顶堆聚合得分，最后取 top-k。启用 `use_reorder` 时，候选会在正排
-   存储上重打分。默认正排存储保留 fp32 值；设置 `rerank_type: "dmq8"` 时使用压缩的
-   DMQ 正排以降低重排内存。
+   存储上重打分。默认正排存储保留 FP32 值；设置 `rerank_type: "fp16"` 时以半精度
+   保存 value、打分时转为 FP32；设置 `rerank_type: "dmq8"` 时使用压缩的 DMQ 正排，
+   进一步降低重排内存。
 
 返回的距离为 `1 - inner_product`，使结果与稠密索引一样按升序排序。
 
@@ -74,7 +75,7 @@ auto result = index->KnnSearch(
 | `doc_prune_ratio` | float | `0.0` | 构建阶段按文档丢弃权重最低词项的比例，取值范围为 `[0.0, 1.0)` |
 | `use_quantization` | bool 或 string | `false` | `false` 存 FP32，`true` 存 SQ8，`"fp16"` 存 FP16 |
 | `use_reorder` | bool | `false` | 是否保留一份正排存储，在 SINDI 粗排后对候选做精排 |
-| `rerank_type` | string | `"fp32"` | `use_reorder` 开启时使用的正排存储类型。`fp32` 保留精确值；`dmq8` 使用压缩的 8-bit DMQ 编码 |
+| `rerank_type` | string | `"fp32"` | `use_reorder` 开启时使用的正排存储类型。`fp32` 保留精确值；`fp16` 以半精度保存、以 FP32 打分；`dmq8` 使用压缩的 8-bit DMQ 编码 |
 | `dmq_shared_codebook_threshold` | int | `1024` | `rerank_type: "dmq8"` 时，出现次数不超过该值的 term 共用一个 codebook；更高频的 term 保持独立 codebook。设为 `0` 可关闭共享 |
 | `remap_term_ids` | bool | `false` | 是否在建索引前重映射词项 ID，适用于词项 ID 很稀疏或存在大量空洞的词表 |
 | `avg_doc_term_length` | int | `100` | 仅用于内存估算 |
@@ -96,6 +97,16 @@ auto result = index->KnnSearch(
 
 使用 `false` 或 `true` 构建的索引仍保留旧版序列化表示。旧版本 VSAG 无法解析使用新
 `"fp16"` 格式的 SINDI 索引；部署 FP16 产物前应先升级读取端。
+
+### 重排值格式
+
+`rerank_type` 控制 `use_reorder: true` 创建的独立正排存储，与倒排表的
+`use_quantization` 无关。`fp16` 保持查询 value 和累加为 FP32，只把文档 value 存成
+FP16。由于 term ID 仍为 32-bit，在不计记录与块开销时，每个正排非零项的核心存储从
+8 字节降到 6 字节。FP16 转换会增加计算指令，因此受内存带宽限制时延迟可能下降，短向量
+或已在缓存中的数据也可能变慢，应使用代表性数据实测。
+
+`fp16` 和 `dmq8` 都要求设置 `use_reorder: true`。旧版本 VSAG 无法读取 FP16 重排 payload。
 
 ### 不可变低内存构建
 
@@ -249,8 +260,9 @@ auto result = index->KnnSearch(
 - 使用 BM25、SPLADE、uniCOIL 等学习稀疏编码器的稀疏检索场景。
 - 稠密 + 稀疏的混合检索管线：SINDI 负责稀疏一路，HGraph / IVF 负责稠密 embedding。
 - 稀疏语料的内存受限部署：`use_quantization: true` 选择 SQ8，`"fp16"` 把 FP32
-  权重字节数减半；
-  `use_reorder: true` 以正排内存换召回，`rerank_type: "dmq8"` 可降低这部分正排开销。
+  倒排 value 字节数减半；`use_reorder: true` 以正排内存换召回，
+  `rerank_type: "fp16"` 以较小精度损失降低正排 value 开销，`rerank_type: "dmq8"`
+  可进一步压缩这部分存储。
 - 需要降低构建峰值内存的只读快照：使用 `immutable: true`，接受更慢的构建和不能增量写入。
 
 SINDI **不支持** 稠密向量，只支持内积相似度。范围检索与基于 ID 的过滤均已支持，
@@ -277,8 +289,9 @@ SINDI **不支持** 稠密向量，只支持内积相似度。范围检索与基
 2. 剪枝高精索引。构建时剪掉大部分低权重词项（`doc_prune_ratio: 0.4`），保留正排索引
      用于重排（`use_reorder: true`），并开启量化减少倒排索引内存
      （`use_quantization: true`）。这是常见的精度与内存折中配置。
-3. 压缩正排重排索引。在上一种配置基础上，设置 `rerank_type: "dmq8"`，与
-     `use_reorder: true` 一起使用，以降低正排重排内存。
+3. 压缩正排重排索引。在上一种配置基础上，将 `rerank_type: "fp16"` 与
+     `use_reorder: true` 一起使用，在侧重精度的前提下降低正排内存；需要更高压缩率时
+     可选择 `dmq8`。
 4. 超大稀疏词表支持。对于词项 ID 在 `uint32` 范围内非常稀疏的场景，例如基于哈希的
      分词器、外部词表 ID，或存在大量空白区间的词表，建议设置 `remap_term_ids: true`。
      这样可以避免管理大量空倒排列表带来的内存浪费，也能降低触达 `term_id_limit`

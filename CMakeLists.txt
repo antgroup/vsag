@@ -36,6 +36,18 @@ endif ()
 
 message (STATUS "CPU ARCH: ${Yellow}${VSAG_TARGET_PROCESSOR}${CR}")
 
+if (ENABLE_CUDA)
+    # nvcc's host pass uses the tree's C++ compiler so both halves agree on ABI.
+    if (NOT CMAKE_CUDA_HOST_COMPILER)
+        set (CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
+    endif ()
+    # Language first, so the toolkit search anchors on the compiler picked.
+    # 11.8 is the oldest toolkit that targets every entry of the default list.
+    enable_language (CUDA)
+    find_package (CUDAToolkit 11.8 REQUIRED)
+    message (STATUS "CUDA backend: ${Yellow}ON${CR} (toolkit ${CUDAToolkit_VERSION}, arch ${VSAG_CUDA_ARCHITECTURES})")
+endif ()
+
 include (cmake/VSAGCompilerConfig.cmake)        # Compiler, ABI, sanitizer, and linker setup.
 include (cmake/VSAGSystemDeps.cmake)            # System dependency discovery.
 include (cmake/DarwinDep.cmake)                 # macOS-specific dependency handling.

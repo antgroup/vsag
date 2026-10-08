@@ -15,6 +15,7 @@
 
 #include "distance_heap.h"
 
+#include "auxiliary_standard_heap.h"
 #include "memmove_heap.h"
 #include "standard_heap.h"
 
@@ -38,6 +39,21 @@ DistanceHeap::MakeInstanceBySize<false, true>(Allocator* allocator, int64_t max_
 template DistHeapPtr
 DistanceHeap::MakeInstanceBySize<false, false>(Allocator* allocator, int64_t max_size);
 
+template <bool max_heap, bool fixed_size>
+DistHeapPtr
+DistanceHeap::MakeInstanceBySizeWithAuxiliary(Allocator* allocator, int64_t max_size) {
+    return std::make_shared<AuxiliaryStandardHeap<max_heap, fixed_size>>(allocator, max_size);
+}
+
+template DistHeapPtr
+DistanceHeap::MakeInstanceBySizeWithAuxiliary<true, true>(Allocator* allocator, int64_t max_size);
+template DistHeapPtr
+DistanceHeap::MakeInstanceBySizeWithAuxiliary<true, false>(Allocator* allocator, int64_t max_size);
+template DistHeapPtr
+DistanceHeap::MakeInstanceBySizeWithAuxiliary<false, true>(Allocator* allocator, int64_t max_size);
+template DistHeapPtr
+DistanceHeap::MakeInstanceBySizeWithAuxiliary<false, false>(Allocator* allocator, int64_t max_size);
+
 DistanceHeap::DistanceHeap(Allocator* allocator) : DistanceHeap(allocator, -1){};
 
 DistanceHeap::DistanceHeap(Allocator* allocator, int64_t max_size)
@@ -49,9 +65,52 @@ DistanceHeap::Push(const DistanceRecord& record) {
 }
 
 void
+DistanceHeap::PushWithAuxiliary(float dist, InnerIdType id, float auxiliary) {
+    (void)auxiliary;
+    this->Push(dist, id);
+}
+
+void
+DistanceHeap::PushWithAuxiliary(float dist,
+                                InnerIdType id,
+                                float auxiliary,
+                                BucketIdType source_bucket_id,
+                                InnerIdType source_offset_id,
+                                uint64_t source_version) {
+    (void)auxiliary;
+    (void)source_bucket_id;
+    (void)source_offset_id;
+    (void)source_version;
+    this->Push(dist, id);
+}
+
+bool
+DistanceHeap::StoresAuxiliary() const {
+    return false;
+}
+
+const DistanceHeap::AuxiliaryDistanceRecord*
+DistanceHeap::GetDataWithAuxiliary() const {
+    return nullptr;
+}
+
+void
 DistanceHeap::Merge(const DistanceHeap& other) {
+    if (other.StoresAuxiliary()) {
+        const auto* data = other.GetDataWithAuxiliary();
+        for (uint64_t i = 0; i < other.Size(); ++i) {
+            this->PushWithAuxiliary(data[i].record.first,
+                                    data[i].record.second,
+                                    data[i].auxiliary,
+                                    data[i].source_bucket_id,
+                                    data[i].source_offset_id,
+                                    data[i].source_version);
+        }
+        return;
+    }
+
     const auto* data = other.GetData();
-    for (auto i = 0; i < other.Size(); ++i) {
+    for (uint64_t i = 0; i < other.Size(); ++i) {
         this->Push(data[i]);
     }
 }

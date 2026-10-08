@@ -27,6 +27,7 @@ set (VSAG_UNITTEST_FIXTURES
 )
 
 set (VSAG_UNITTEST_MODULES
+        gpu
         simd
         common
         algorithm
@@ -42,6 +43,7 @@ set (VSAG_UNITTEST_MODULES
 )
 
 set (VSAG_UNITTEST_LIBRARIES
+        gpu_test
         simd_test
         vsag_test
         algorithm_test
