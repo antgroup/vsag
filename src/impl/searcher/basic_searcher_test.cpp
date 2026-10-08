@@ -283,6 +283,17 @@ TEST_CASE("Optimize SQ4", "[ut][BasicOptimizer]") {
     auto loss_after = searcher->MockRun(stats);
 }
 
+TEST_CASE("Descending RuntimeParameter restores its initial value", "[ut][BasicOptimizer]") {
+    RuntimeParameter param(PREFETCH_STRIDE_CODE, 16, 1, -1);
+    for (int value = 16; value >= 1; --value) {
+        REQUIRE_FALSE(param.IsEnd());
+        REQUIRE(param.Cur() == static_cast<float>(value));
+        REQUIRE(param.Next() == static_cast<float>(value));
+    }
+    REQUIRE(param.IsEnd());
+    REQUIRE(param.Cur() == 16.0F);
+}
+
 TEST_CASE("BasicSearcher duplicate threshold keeps nearest owner",
           "[ut][BasicSearcher][duplicate]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
