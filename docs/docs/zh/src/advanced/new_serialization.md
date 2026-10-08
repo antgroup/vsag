@@ -147,7 +147,17 @@ HGraph 按顺序写入以下 streaming blocks：
 `DeserializeStreaming` 会恢复完整的内存索引。`Load` 默认把 HGraph blocks 加载到内存中；如果
 load parameters 中设置 `precise_io_type`，可以覆盖 `precise_codes` 的 IO 类型。如果同时提供
 `precise_reader`，并且该 reader 大小与 `high_precision_codes` payload 大小一致，`Load` 会校验该外部
-reader 的 payload checksum，然后将 reorder codes 绑定到该 reader。
+reader 的 payload checksum，并在返回索引前完成校验；reorder codes 的绑定可能先于校验完成。
+
+HGraph 直接使用向前读取和跳过操作解析已知 block payload，不使用与 payload 等大的缓冲区或
+临时文件。跳过的字节也参与增量 checksum 校验；组件反序列化成功后，使用 8 KiB 缓冲区消费
+未读取的尾部。分配内存前，会检查序列化向量计数、字符串长度和字节存储长度是否超出 block
+剩余字节数。标签计数还受记录的索引容量限制，标签映射计数不得超过标签表大小。
+压缩图的顶点数必须与容量一致，且剩余字节必须足以容纳每个顶点的头部；编码器数组以及
+属性 schema、字段映射、位图映射和位图 payload 的计数也会在分配前检查。压缩并行加载使用的
+有界 reader 同样执行这些检查。字符串长度转换为分配大小之前，还必须符合平台容器的大小限制。
+校验完成时组件状态可能已被修改，因此 `DeserializeStreaming` 失败后必须丢弃
+目标索引，不得查询或复用。其他索引类型暂时保留现有 block reader。
 
 ## IVF Blocks
 

@@ -165,8 +165,22 @@ HGraph writes these streaming blocks in order:
 `DeserializeStreaming` restores the full in-memory index. `Load` loads HGraph blocks into memory by
 default. Load parameters can set `precise_io_type` to override the IO type for `precise_codes`. If
 they also provide `precise_reader`, and that reader size matches the `high_precision_codes` payload
-size, `Load` validates the external reader payload checksum and then binds reorder codes to that
-reader.
+size, `Load` binds reorder codes to that reader and validates its payload checksum before returning
+the index.
+
+HGraph parses known block payloads directly with forward reads and skips, without payload-sized
+buffers or temporary files. Skipped bytes are included in incremental checksum validation; any
+unconsumed suffix is drained with an 8 KiB buffer after component deserialization succeeds.
+Serialized vector counts, string lengths, and byte-storage extents are checked against the
+remaining block bytes before allocation. Label counts are also bounded by the recorded index
+capacity, and label-remap counts cannot exceed the label-table size. Compressed-graph vertex
+counts must match capacity and fit their per-vertex headers; encoder arrays and attribute schema,
+field-map, bitset-map, and bitset payload counts are bounded before allocation as well. These
+checks also apply to bounded readers used for compressed parallel loads. String lengths must
+fit the platform container limits before conversion to the allocation size.
+Checksum validation may finish after component state has changed. If `DeserializeStreaming`
+fails, discard the target index; it must not be queried or reused. Other index types still use
+their existing block readers.
 
 ## IVF Blocks
 

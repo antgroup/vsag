@@ -15,7 +15,6 @@
 #include <fmt/format.h>
 
 #include <algorithm>
-#include <array>
 #include <limits>
 #include <nlohmann/json.hpp>
 
@@ -53,85 +52,6 @@ dump_basic_info_for_log(const JsonType& basic_info) {
     }
     return log_basic_info.Dump(4);
 }
-
-class PayloadChecksumStreamReader : public StreamReader {
-public:
-    PayloadChecksumStreamReader(StreamReader& reader, const StreamBlockHeader& header)
-        : StreamReader(header.value_len),
-          reader_(reader),
-          expected_checksum_(header.payload_checksum) {
-    }
-
-    void
-    Read(char* data, uint64_t size) override {
-        const auto cursor = reader_.GetCursor();
-        if (cursor > length_ || size > length_ - cursor) {
-            throw VsagException(ErrorType::READ_ERROR,
-                                "checksum stream reader exceeds payload boundary");
-        }
-        if (cursor > checksum_cursor_) {
-            checksum_range(checksum_cursor_, cursor - checksum_cursor_);
-        }
-
-        reader_.Read(data, size);
-        if (cursor + size > checksum_cursor_) {
-            const auto checksum_offset = checksum_cursor_ > cursor ? checksum_cursor_ - cursor : 0;
-            const auto checksum_size = size - checksum_offset;
-            crc_ = StreamHeader::UpdateChecksum(
-                crc_, std::string_view(data + checksum_offset, checksum_size));
-            checksum_cursor_ += checksum_size;
-        }
-    }
-
-    void
-    Seek(uint64_t cursor) override {
-        if (cursor > length_) {
-            throw VsagException(ErrorType::READ_ERROR,
-                                "checksum stream reader seek exceeds payload boundary");
-        }
-        reader_.Seek(cursor);
-    }
-
-    [[nodiscard]] uint64_t
-    GetCursor() const override {
-        return reader_.GetCursor();
-    }
-
-    void
-    Validate() {
-        if (checksum_cursor_ < length_) {
-            checksum_range(checksum_cursor_, length_ - checksum_cursor_);
-        }
-        if (StreamHeader::FinalizeChecksum(crc_) != expected_checksum_) {
-            throw VsagException(ErrorType::INVALID_BINARY,
-                                "streaming block payload checksum mismatch");
-        }
-    }
-
-private:
-    void
-    checksum_range(uint64_t offset, uint64_t size) {
-        constexpr uint64_t k_buffer_size = 8192;
-        std::array<char, k_buffer_size> buffer{};
-        const auto original_cursor = reader_.GetCursor();
-        reader_.Seek(offset);
-        uint64_t remaining = size;
-        while (remaining > 0) {
-            const auto read_size = std::min<uint64_t>(remaining, k_buffer_size);
-            reader_.Read(buffer.data(), read_size);
-            crc_ = StreamHeader::UpdateChecksum(crc_, std::string_view(buffer.data(), read_size));
-            remaining -= read_size;
-        }
-        checksum_cursor_ += size;
-        reader_.Seek(original_cursor);
-    }
-
-private:
-    StreamReader& reader_;
-    uint32_t expected_checksum_{0};
-    uint32_t crc_{StreamHeader::InitialChecksum()};
-    uint64_t checksum_cursor_{0};
-};
 
 }  // namespace
 
@@ -764,11 +684,17 @@ HGraph::serialize_streaming_body(StreamWriter& writer) const {
 void
 HGraph::deserialize_label_info_streaming(StreamReader& reader) const {
     if (this->support_duplicate_) {
-        this->label_table_->Deserialize(reader);
+        this->label_table_->Deserialize(reader, this->max_capacity_.load());
     } else {
-        StreamReader::ReadVector(reader, this->label_table_->label_table_);
+        StreamReader::ReadVector(
+            reader, this->label_table_->label_table_, this->max_capacity_.load());
         uint64_t size;
         StreamReader::ReadObj(reader, size);
+        reader.ValidateCount(size, sizeof(LabelType) + sizeof(InnerIdType));
+        if (size > this->label_table_->label_table_.size()) {
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                "serialized label remap exceeds label table size");
+        }
         this->label_table_->ResetRemap(size);
         for (uint64_t i = 0; i < size; ++i) {
             LabelType key;
@@ -797,6 +723,7 @@ HGraph::deserialize_label_info_streaming(StreamReader& reader) const {
                                             sid_count,
                                             label_table_size));
         }
+        reader.ValidateCount(sid_count, sizeof(uint64_t));
         Vector<std::string> sid_table(sid_count, std::string{}, allocator_);
         for (uint64_t i = 0; i < sid_count; ++i) {
             sid_table[i] = StreamReader::ReadString(reader);
@@ -884,7 +811,7 @@ HGraph::read_streaming_body(StreamReader& reader,
 
         switch (static_cast<StreamSerializationTag>(block_header.tag)) {
             case StreamSerializationTag::LABEL_TABLE:
-                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                ReadForwardBlockPayload(block_reader, block_header, [this](StreamReader& block) {
                     this->deserialize_label_info_streaming(block);
                 });
                 loaded_label_table = true;
@@ -895,20 +822,20 @@ HGraph::read_streaming_body(StreamReader& reader,
                         ErrorType::INVALID_BINARY,
                         "HGraph streaming serialization has an unexpected code slot map block");
                 }
-                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                ReadForwardBlockPayload(block_reader, block_header, [this](StreamReader& block) {
                     this->code_slot_map_->Deserialize(block);
                 });
                 loaded_code_slot_map = true;
                 break;
             case StreamSerializationTag::BASE_CODES:
-                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                ReadForwardBlockPayload(block_reader, block_header, [this](StreamReader& block) {
                     this->basic_flatten_codes_->Deserialize(block);
                 });
                 loaded_base_codes = true;
                 break;
             case StreamSerializationTag::BOTTOM_GRAPH:
-                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
-                    this->bottom_graph_->Deserialize(block);
+                ReadForwardBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    this->bottom_graph_->DeserializeBounded(block, this->max_capacity_.load());
                 });
                 loaded_bottom_graph = true;
                 break;
@@ -936,11 +863,12 @@ HGraph::read_streaming_body(StreamReader& reader,
                         block_reader.SkipRemaining();
                         this->SetPreciseCodesIO(reader_ptr);
                         ReadFuncStreamReader external_reader(read_func, 0, reader_ptr->Size());
-                        PayloadChecksumStreamReader checksum_reader(external_reader, block_header);
-                        this->high_precise_codes_->Deserialize(checksum_reader);
-                        checksum_reader.Validate();
+                        ReadForwardBlockPayload(
+                            external_reader, block_header, [this](StreamReader& block) {
+                                this->high_precise_codes_->Deserialize(block);
+                            });
                     } else {
-                        ReadSeekableBlockPayload(
+                        ReadForwardBlockPayload(
                             block_reader, block_header, [this](StreamReader& block) {
                                 this->high_precise_codes_->Deserialize(block);
                             });
@@ -949,16 +877,16 @@ HGraph::read_streaming_body(StreamReader& reader,
                 }
                 break;
             case StreamSerializationTag::ROUTE_GRAPHS:
-                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                ReadForwardBlockPayload(block_reader, block_header, [this](StreamReader& block) {
                     for (auto& route_graph : this->route_graphs_) {
-                        route_graph->Deserialize(block);
+                        route_graph->DeserializeBounded(block, this->max_capacity_.load());
                     }
                 });
                 loaded_route_graphs = true;
                 break;
             case StreamSerializationTag::EXTRA_INFO:
                 if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-                    ReadSeekableBlockPayload(
+                    ReadForwardBlockPayload(
                         block_reader, block_header, [this](StreamReader& block) {
                             this->extra_infos_->Deserialize(block);
                         });
@@ -967,7 +895,7 @@ HGraph::read_streaming_body(StreamReader& reader,
                 break;
             case StreamSerializationTag::ATTRIBUTE_FILTER:
                 if (this->use_attribute_filter_ && this->attr_filter_index_ != nullptr) {
-                    ReadSeekableBlockPayload(
+                    ReadForwardBlockPayload(
                         block_reader, block_header, [this](StreamReader& block) {
                             this->attr_filter_index_->Deserialize(block);
                         });
@@ -976,7 +904,7 @@ HGraph::read_streaming_body(StreamReader& reader,
                 break;
             case StreamSerializationTag::RAW_VECTOR:
                 if (create_new_raw_vector_) {
-                    ReadSeekableBlockPayload(
+                    ReadForwardBlockPayload(
                         block_reader, block_header, [this](StreamReader& block) {
                             this->raw_vector_->Deserialize(block);
                         });
@@ -989,7 +917,7 @@ HGraph::read_streaming_body(StreamReader& reader,
                         ErrorType::INVALID_ARGUMENT,
                         "serialized HGraph uses conjugate graph but the target does not");
                 }
-                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                ReadForwardBlockPayload(block_reader, block_header, [this](StreamReader& block) {
                     std::unique_lock graph_lock(this->conjugate_graph_mutex_);
                     auto result = this->conjugate_graph_->Deserialize(block);
                     if (not result) {
