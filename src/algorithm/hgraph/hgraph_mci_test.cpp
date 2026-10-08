@@ -1151,8 +1151,8 @@ TEST_CASE("HGraph dynamic neighbor traversal stops early on a tight overhead bou
     std::iota(valid_ids.begin(), valid_ids.end(), total / 2);
     auto filter = std::make_shared<HalfRatioAllValidFilter>(valid_ids);
 
-    // A boundary of 2.0 with ratio = 1.0 admits a single clique member,
-    // so the remaining members of the first clique must be skipped.
+    // With ratio = 1.0, each member costs at least 1.0, so a boundary of 2.0
+    // admits at most two members per expanded node (one if the first is valid).
     const std::string tight_params =
         R"({"hgraph":{"ef_search":64,"use_mci":false,"use_hybrid_traversal":true,)"
         R"("hybrid_vob":2.0,"hybrid_filter_cost_ratio":1.0,)"
@@ -1162,10 +1162,13 @@ TEST_CASE("HGraph dynamic neighbor traversal stops early on a tight overhead bou
     REQUIRE(tight.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("hybrid")");
     const auto tight_stats = vsag::JsonType::Parse(tight.value()->GetStatistics());
     REQUIRE(tight_stats["hybrid_mci_stopped_early"].GetBool());
-    REQUIRE(tight_stats["hybrid_mci_members_considered"].GetUint64() <
-            tight_stats["hybrid_mci_cliques_expanded"].GetUint64() * (total / 2));
+    REQUIRE(tight_stats["hybrid_mci_members_considered"].GetUint64() > 0);
+    REQUIRE(tight_stats["hybrid_mci_members_considered"].GetUint64() <=
+            2 * tight_stats["hybrid_expanded_nodes"].GetUint64());
 
-    // The relaxed boundary has to consider at least as much work.
+    // Disabling the boundary must exercise MCI without stopping early. Total MCI
+    // work is not monotonic: the budget changes the search path, and members reached
+    // through sparse edges first are excluded from the MCI counter.
     const std::string relaxed_params =
         R"({"hgraph":{"ef_search":64,"use_mci":false,"use_hybrid_traversal":true,)"
         R"("hybrid_vob":0.0,"hybrid_filter_cost_ratio":1.0,)"
@@ -1174,8 +1177,14 @@ TEST_CASE("HGraph dynamic neighbor traversal stops early on a tight overhead bou
     REQUIRE(relaxed.has_value());
     const auto relaxed_stats = vsag::JsonType::Parse(relaxed.value()->GetStatistics());
     REQUIRE_FALSE(relaxed_stats["hybrid_mci_stopped_early"].GetBool());
-    REQUIRE(relaxed_stats["hybrid_mci_members_considered"].GetUint64() >=
-            tight_stats["hybrid_mci_members_considered"].GetUint64());
+    REQUIRE(relaxed_stats["hybrid_mci_members_considered"].GetUint64() > 0);
+    for (const auto& result : {tight.value(), relaxed.value()}) {
+        REQUIRE(result->GetDim() == 5);
+        for (int64_t i = 0; i < result->GetDim(); ++i) {
+            REQUIRE(std::find(valid_ids.begin(), valid_ids.end(), result->GetIds()[i]) !=
+                    valid_ids.end());
+        }
+    }
 }
 
 TEST_CASE("HGraph hybrid seed budget follows the coverage rule", "[ut][hgraph][mci][hybrid]") {
