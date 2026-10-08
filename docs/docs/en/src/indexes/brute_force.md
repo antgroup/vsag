@@ -19,14 +19,15 @@ corpora or for workloads where 100% recall is mandatory.
    training pass when used.
 2. **Add.** New vectors are appended to the flat store. There is no rebalancing or rebuild cost.
 3. **Search.** For each query the distance is computed against every stored vector under the
-   configured `metric_type` (`l2`, `ip`, or `cosine`), then a top-k heap returns the closest
-   ids. Search uses SIMD kernels and supports **intra-query parallelism** — a single query can
+   configured `metric_type` (`l2`, `ip`, or `cosine` for dense vectors; `ip` for sparse vectors),
+   then a top-k heap returns the closest ids. Search uses SIMD kernels and supports
+   **intra-query parallelism** — a single query can
    be split across multiple threads via the `parallelism` search parameter (see
    `BruteForce::SearchWithRequest` in `src/algorithm/bruteforce/bruteforce.cpp`).
 
 Because the index keeps every vector verbatim (modulo the chosen quantizer), the result is
-**exact** when `base_quantization_type` is `fp32` and is the standard reference used to compute
-ground truth in the `eval_performance` tool.
+**exact** when `base_quantization_type` is `fp32` or the input is sparse, and is the standard
+reference used to compute ground truth in the `eval_performance` tool.
 
 ## Quick start
 
@@ -56,9 +57,30 @@ A full runnable program is at
 
 ## Input data type
 
-The public `Build`, `Add`, `KnnSearch`, `RangeSearch`, and `UpdateVector` paths accept FP32 vectors only. At runtime, supply vectors via `Dataset::Float32Vectors`. At index creation, set `dtype` to `"float32"`; `dtype: "int8"` is not supported when creating a BruteForce index.
+BruteForce accepts either dense FP32 vectors (`dtype: "float32"`) or sparse vectors
+(`dtype: "sparse"`). Supply dense vectors through `Dataset::Float32Vectors` and sparse vectors
+through `Dataset::SparseVectors`. Sparse BruteForce supports only `metric_type: "ip"`; it stores
+the original sparse term/value pairs in `SparseVectorDataCell` and reports the exact distance
+`1 - inner_product`. A sparse vector may contain at most `dim` entries. Input term order is not
+preserved.
 
-The `base_quantization_type` parameter controls the index's internal encoding and storage, not the input type. Selecting an internal `fp16`, `bf16`, or other quantizer does not enable FP16/BF16 input.
+Sparse build, add, k-NN search, range search, filters, parallel search, distance-by-id, and
+serialization are supported. Sparse `UpdateVector`, raw-vector retrieval, and
+`RemoveMode::FORCE_REMOVE` are not supported; use `MARK_REMOVE`.
+
+For dense input, `base_quantization_type` controls the internal encoding and storage, not the
+input type. Selecting an internal `fp16`, `bf16`, or other quantizer does not enable FP16/BF16
+input. `dtype: "int8"` is not supported.
+
+Minimal sparse configuration:
+
+```json
+{
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "dim": 128
+}
+```
 
 ## Build parameters
 
@@ -69,7 +91,7 @@ Advanced users can pass an `index_param` object to enable quantization or storag
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` — see the [Quantization chapter](../quantization/) for per-quantizer details |
+| `base_quantization_type` | string | `"fp32"` (dense), `"sparse"` (sparse) | Dense: `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`. Sparse accepts only `sparse`. See the [Quantization chapter](../quantization/) for dense quantizer details. |
 | `use_attribute_filter` | bool | `false` | Enable attribute-based filtering (see [Attribute Filter](../advanced/attribute_filter.md)) |
 | `resize_increase_count_bit` | int | `10` | `log2` of the slot-growth batch. Valid range is `1` to `31`; `1` grows in 2-slot batches and `10` in 1,024-slot batches. Smaller values reduce preallocation but can increase reallocations. |
 
@@ -125,10 +147,13 @@ For range search semantics, see [Range Search](../advanced/range_search.md).
 
 ## Removing vectors
 
-BruteForce supports both `RemoveMode::MARK_REMOVE` and `RemoveMode::FORCE_REMOVE`; neither mode
-needs an HGraph-style `support_force_remove` setting.
+Dense BruteForce supports both `RemoveMode::MARK_REMOVE` and `RemoveMode::FORCE_REMOVE`; neither
+mode needs an HGraph-style `support_force_remove` setting. Sparse and multi-vector BruteForce
+support `MARK_REMOVE` only.
 
-When `use_attribute_filter: true` is enabled, neither removal mode is available. Rebuild the index instead if attribute-filtered data must be deleted.
+For dense BruteForce, enabling `use_attribute_filter: true` disables both removal modes. Sparse
+and multi-vector BruteForce still support `MARK_REMOVE`: the tombstone filter is combined with the
+attribute filter during search. `FORCE_REMOVE` remains unavailable for these vector types.
 
 - `MARK_REMOVE` is the default. It records a tombstone, so the id is excluded from later searches
   while its vector storage remains allocated. `GetNumElements()` excludes marked ids and
@@ -167,14 +192,14 @@ BruteForce advertises the following capability flags (see `BruteForce::InitFeatu
 | `SUPPORT_ADD_FROM_EMPTY` | Available with non-training quantizers (`fp32`, `fp16`, `bf16`). |
 | `SUPPORT_KNN_SEARCH` / `SUPPORT_KNN_SEARCH_WITH_ID_FILTER` / `SUPPORT_SEARCH_CONCURRENT` | Standard top-k API and id-list filters, with concurrent search. |
 | `SUPPORT_RANGE_SEARCH` / `SUPPORT_RANGE_SEARCH_WITH_ID_FILTER` | Available with non-training quantizers (`fp32`, `fp16`, `bf16`). |
-| `SUPPORT_DELETE_BY_ID` / `SUPPORT_DELETE_CONCURRENT` | `Remove` by id is supported. Searches and delete operations are synchronized; `FORCE_REMOVE` takes an exclusive lock. |
+| `SUPPORT_DELETE_BY_ID` / `SUPPORT_DELETE_CONCURRENT` | `Remove` by id is supported. Sparse and multi-vector indexes accept only `MARK_REMOVE`; dense `FORCE_REMOVE` takes an exclusive lock. |
 | `SUPPORT_CAL_DISTANCE_BY_ID` | Distance lookup against stored vectors (non-training quantizers only). |
-| `SUPPORT_UPDATE_VECTOR_CONCURRENT` | `UpdateVector` replaces an existing FP32 vector with the same dimension. BruteForce has no graph connectivity check, so `force_update` does not change its update behavior. |
-| `SUPPORT_GET_RAW_VECTOR_BY_IDS` | Available only when `base_quantization_type` is `fp32` and either the metric is not `cosine` or the underlying quantizer holds molds (`hold_molds`). Quantized BruteForce indexes do **not** advertise this flag. |
+| `SUPPORT_UPDATE_VECTOR_CONCURRENT` | Dense and multi-vector only. For dense FP32 data, `UpdateVector` replaces an existing vector with the same dimension. BruteForce has no graph connectivity check, so `force_update` does not change its update behavior. |
+| `SUPPORT_GET_RAW_VECTOR_BY_IDS` | Dense only, when `base_quantization_type` is `fp32` and either the metric is not `cosine` or the underlying quantizer holds molds (`hold_molds`). Sparse and quantized BruteForce indexes do **not** advertise this flag. |
 | `SUPPORT_CHECK_ID_EXIST` / `SUPPORT_CLONE` / `SUPPORT_ESTIMATE_MEMORY` / `SUPPORT_GET_MEMORY_USAGE` | Standard introspection and lifecycle. |
 | `SUPPORT_SERIALIZE_BINARY_SET` / `SUPPORT_SERIALIZE_FILE` / `SUPPORT_SERIALIZE_WRITE_FUNC` | Full save surface. |
 | `SUPPORT_DESERIALIZE_BINARY_SET` / `SUPPORT_DESERIALIZE_FILE` / `SUPPORT_DESERIALIZE_READER_SET` | Full load surface. (There is no `DESERIALIZE_WRITE_FUNC` counterpart — read paths use `READER_SET` instead.) |
-| `NEED_TRAIN` | Set when `base_quantization_type` is one of `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`. |
+| `NEED_TRAIN` | Dense only: set when `base_quantization_type` is one of `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`. Sparse storage needs no training. |
 
 Notably **not** supported by BruteForce: `SUPPORT_UPDATE_ID_CONCURRENT` and
 `SUPPORT_EXPORT_MODEL`.

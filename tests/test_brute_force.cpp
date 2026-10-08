@@ -2007,6 +2007,209 @@ TEST_CASE("BruteForce dense native distance contract", "[distance_contract]") {
     }
 }
 
+TEST_CASE("BruteForce sparse vectors use exact flat search", "[ft][bruteforce][sparse][pr]") {
+    const std::string parameters = R"({
+        "dtype": "sparse",
+        "metric_type": "ip",
+        "dim": 4
+    })";
+    auto created = vsag::Factory::CreateIndex("brute_force", parameters);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_ADD_FROM_EMPTY));
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_RANGE_SEARCH));
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER));
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_SEARCH_CONCURRENT));
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID));
+    REQUIRE_FALSE(index->CheckFeature(vsag::IndexFeature::NEED_TRAIN));
+    REQUIRE_FALSE(index->CheckFeature(vsag::IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT));
+    REQUIRE_FALSE(index->CheckFeature(vsag::IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS));
+    const auto one_vector_memory = index->EstimateMemory(1);
+    REQUIRE(one_vector_memory > 0);
+    REQUIRE(index->EstimateMemory(2) == one_vector_memory * 2);
+
+    uint32_t ids0[] = {3, 1};
+    float vals0[] = {1.0F, 1.0F};
+    uint32_t ids1[] = {3};
+    float vals1[] = {0.8F};
+    uint32_t ids2[] = {1};
+    float vals2[] = {0.2F};
+    uint32_t ids3[] = {2};
+    float vals3[] = {5.0F};
+    std::vector<vsag::SparseVector> vectors = {
+        {2, ids0, vals0}, {1, ids1, vals1}, {1, ids2, vals2}, {1, ids3, vals3}};
+    int64_t labels[] = {10, 11, 12, 13};
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(4)
+                    ->Ids(labels)
+                    ->SparseVectors(vectors.data())
+                    ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+    REQUIRE(index->GetMemoryUsage() > 0);
+
+    vsag::SparseVector empty;
+    int64_t empty_label = 14;
+    auto appended = vsag::Dataset::Make()
+                        ->NumElements(1)
+                        ->Ids(&empty_label)
+                        ->SparseVectors(&empty)
+                        ->Owner(false);
+    REQUIRE(index->Add(appended).has_value());
+
+    uint32_t query_ids[] = {1, 3};
+    float query_vals[] = {0.5F, 1.0F};
+    vsag::SparseVector query_vector{2, query_ids, query_vals};
+    auto query = vsag::Dataset::Make()->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+
+    auto knn = index->KnnSearch(query, 3, R"({"parallelism": 2})");
+    REQUIRE(knn.has_value());
+    REQUIRE(knn.value()->GetDim() == 3);
+    const int64_t expected_ids[] = {10, 11, 12};
+    const float expected_distances[] = {-0.5F, 0.2F, 0.9F};
+    for (int64_t i = 0; i < 3; ++i) {
+        REQUIRE(knn.value()->GetIds()[i] == expected_ids[i]);
+        REQUIRE(std::abs(knn.value()->GetDistances()[i] - expected_distances[i]) < 1e-6F);
+    }
+
+    auto range = index->RangeSearch(query, 0.9F, R"({"parallelism": 2})");
+    REQUIRE(range.has_value());
+    REQUIRE(range.value()->GetDim() == 3);
+
+    auto filtered = index->KnnSearch(query, 3, "{}", std::make_shared<fixtures::EvenIdFilter>());
+    REQUIRE(filtered.has_value());
+    REQUIRE(filtered.value()->GetIds()[0] == 10);
+    REQUIRE(filtered.value()->GetIds()[1] == 12);
+
+    auto distance = index->CalcDistanceById(query, 11);
+    REQUIRE(distance.has_value());
+    REQUIRE(std::abs(distance.value() - 0.2F) < 1e-6F);
+    int64_t distance_ids[] = {10, 13, -1};
+    auto distances = index->CalcDistancesById(query, distance_ids, 3);
+    REQUIRE(distances.has_value());
+    REQUIRE(std::abs(distances.value()->GetDistances()[0] + 0.5F) < 1e-6F);
+    REQUIRE(std::abs(distances.value()->GetDistances()[1] - 1.0F) < 1e-6F);
+    REQUIRE(distances.value()->GetDistances()[2] == -1.0F);
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    stream.seekg(0, std::ios::beg);
+    auto restored = vsag::Index::Load(stream, R"({"load":{"base_codes":"memory"}})");
+    REQUIRE(restored.has_value());
+    REQUIRE_FALSE(
+        restored.value()->CheckFeature(vsag::IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT));
+    REQUIRE_FALSE(
+        restored.value()->CheckFeature(vsag::IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS));
+    auto restored_result = restored.value()->KnnSearch(query, 2, "{}");
+    REQUIRE(restored_result.has_value());
+    REQUIRE(restored_result.value()->GetIds()[0] == 10);
+    REQUIRE(restored_result.value()->GetIds()[1] == 11);
+    REQUIRE_FALSE(restored.value()->Remove(10, vsag::RemoveMode::FORCE_REMOVE).has_value());
+
+    REQUIRE(index->Remove(10, vsag::RemoveMode::MARK_REMOVE).has_value());
+    auto after_remove = index->KnnSearch(query, 1, "{}");
+    REQUIRE(after_remove.has_value());
+    REQUIRE(after_remove.value()->GetIds()[0] == 11);
+    REQUIRE_FALSE(index->Remove(11, vsag::RemoveMode::FORCE_REMOVE).has_value());
+    REQUIRE_FALSE(index->UpdateVector(11, query).has_value());
+}
+
+TEST_CASE("BruteForce sparse mark removal works with attribute filtering",
+          "[ft][bruteforce][sparse][filter_search][pr]") {
+    const std::string parameters = R"({
+        "dtype": "sparse",
+        "metric_type": "ip",
+        "dim": 4,
+        "index_param": {
+            "use_attribute_filter": true
+        }
+    })";
+    auto created = vsag::Factory::CreateIndex("brute_force", parameters);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+
+    uint32_t ids0[] = {1, 3};
+    float vals0[] = {1.0F, 1.0F};
+    uint32_t ids1[] = {3};
+    float vals1[] = {0.8F};
+    uint32_t ids2[] = {1};
+    float vals2[] = {0.2F};
+    std::vector<vsag::SparseVector> vectors = {
+        {2, ids0, vals0}, {1, ids1, vals1}, {1, ids2, vals2}};
+    int64_t labels[] = {10, 11, 12};
+    std::vector<vsag::AttributeSet> attribute_sets(3);
+    std::vector<vsag::AttributeValue<std::string>> attributes(3);
+    for (uint64_t i = 0; i < attributes.size(); ++i) {
+        attributes[i].name_ = "group";
+        attributes[i].GetValue() = {i < 2 ? "allowed" : "excluded"};
+        attribute_sets[i].attrs_.push_back(&attributes[i]);
+    }
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(3)
+                    ->Ids(labels)
+                    ->SparseVectors(vectors.data())
+                    ->AttributeSets(attribute_sets.data())
+                    ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    uint32_t query_ids[] = {1, 3};
+    float query_vals[] = {0.5F, 1.0F};
+    vsag::SparseVector query_vector{2, query_ids, query_vals};
+    auto query = vsag::Dataset::Make()->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 3;
+    request.params_str_ = "{}";
+    request.enable_attribute_filter_ = true;
+    request.attribute_filter_str_ = R"(multi_in(group, "allowed", "|"))";
+
+    auto before_remove = index->SearchWithRequest(request);
+    REQUIRE(before_remove.has_value());
+    REQUIRE(before_remove.value()->GetDim() == 2);
+    REQUIRE(before_remove.value()->GetIds()[0] == 10);
+    REQUIRE(before_remove.value()->GetIds()[1] == 11);
+
+    REQUIRE(index->Remove(10, vsag::RemoveMode::MARK_REMOVE).has_value());
+    auto after_remove = index->SearchWithRequest(request);
+    REQUIRE(after_remove.has_value());
+    REQUIRE(after_remove.value()->GetDim() == 1);
+    REQUIRE(after_remove.value()->GetIds()[0] == 11);
+    REQUIRE_FALSE(index->Remove(11, vsag::RemoveMode::FORCE_REMOVE).has_value());
+}
+
+TEST_CASE("BruteForce sparse parameter and vector validation", "[ft][bruteforce][sparse][pr]") {
+    auto l2 = vsag::Factory::CreateIndex("brute_force",
+                                         R"({"dtype":"sparse","metric_type":"l2","dim":4})");
+    REQUIRE_FALSE(l2.has_value());
+
+    auto dense_quantization =
+        vsag::Factory::CreateIndex("brute_force",
+                                   R"({"dtype":"sparse","metric_type":"ip","dim":4,
+             "index_param":{"base_quantization_type":"fp32"}})");
+    REQUIRE_FALSE(dense_quantization.has_value());
+
+    auto created = vsag::Factory::CreateIndex("brute_force",
+                                              R"({"dtype":"sparse","metric_type":"ip","dim":1})");
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    uint32_t term_ids[] = {0, 1};
+    float term_values[] = {1.0F, 1.0F};
+    vsag::SparseVector too_long{2, term_ids, term_values};
+    int64_t label = 1;
+    auto invalid_base =
+        vsag::Dataset::Make()->NumElements(1)->Ids(&label)->SparseVectors(&too_long)->Owner(false);
+    REQUIRE_FALSE(index->Build(invalid_base).has_value());
+
+    vsag::SparseVector valid{1, term_ids, term_values};
+    auto valid_base =
+        vsag::Dataset::Make()->NumElements(1)->Ids(&label)->SparseVectors(&valid)->Owner(false);
+    REQUIRE(index->Build(valid_base).has_value());
+
+    vsag::SparseVector missing_values{1, term_ids, nullptr};
+    auto invalid_query =
+        vsag::Dataset::Make()->NumElements(1)->SparseVectors(&missing_values)->Owner(false);
+    REQUIRE_FALSE(index->KnnSearch(invalid_query, 1, "{}").has_value());
+}
+
 TEST_CASE("BruteForce valid minus-one distance sorts before missing IDs", "[distance_contract]") {
     auto param =
         fixtures::BruteForceTestIndex::GenerateBruteForceBuildParametersString("ip", 1, "fp32");

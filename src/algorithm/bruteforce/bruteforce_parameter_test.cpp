@@ -16,6 +16,7 @@
 #include "bruteforce_parameter.h"
 
 #include "bruteforce.h"
+#include "inner_string_params.h"
 #include "parameter_test.h"
 #include "unittest.h"
 
@@ -86,4 +87,29 @@ TEST_CASE("BruteForce maps store raw vector to flatten quantizers", "[ut][BruteF
     REQUIRE(
         json[vsag::PRECISE_CODES_KEY][vsag::QUANTIZATION_PARAMS_KEY][vsag::HOLD_MOLDS].GetBool());
     REQUIRE_FALSE(json.Contains(vsag::QUANTIZATION_PARAMS_KEY));
+}
+
+TEST_CASE("BruteForce maps sparse data to sparse vector datacell", "[ut][BruteForceParameter]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_SPARSE;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_IP;
+
+    auto parameter = std::dynamic_pointer_cast<vsag::BruteForceParameter>(
+        vsag::BruteForce::CheckAndMappingExternalParam(vsag::JsonType::Parse("{}"), common_param));
+    REQUIRE(parameter != nullptr);
+    REQUIRE(parameter->base_codes_param->name == vsag::SPARSE_VECTOR_DATA_CELL);
+    const auto json = parameter->ToJson();
+    REQUIRE(json[vsag::BASE_CODES_KEY][vsag::CODES_TYPE_KEY].GetString() == vsag::SPARSE_CODES);
+    REQUIRE(json[vsag::BASE_CODES_KEY][vsag::QUANTIZATION_PARAMS_KEY][vsag::TYPE_KEY].GetString() ==
+            vsag::QUANTIZATION_TYPE_VALUE_SPARSE);
+
+    REQUIRE_THROWS(vsag::BruteForce::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"base_quantization_type": "fp32"})"), common_param));
+    REQUIRE_THROWS(vsag::BruteForce::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"base_pq_dim": 16})"), common_param));
+
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    REQUIRE_THROWS(
+        vsag::BruteForce::CheckAndMappingExternalParam(vsag::JsonType::Parse("{}"), common_param));
 }

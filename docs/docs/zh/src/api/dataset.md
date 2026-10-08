@@ -63,7 +63,7 @@ DatasetPtr DeepCopy(Allocator* allocator = nullptr) const;  // 独立副本
 | `Float32Vectors(const float*)` | `GetFloat32Vectors()` | `float` | `dtype: float32` |
 | `Float16Vectors(const uint16_t*)` | `GetFloat16Vectors()` | `uint16_t` | `dtype: float16` **及** `bfloat16`（原始 16 位负载） |
 | `Int8Vectors(const int8_t*)` | `GetInt8Vectors()` | `int8_t` | `dtype: int8` |
-| `SparseVectors(const SparseVector*)` | `GetSparseVectors()` | [`SparseVector`](#sparsevector) | `dtype: sparse`（SINDI） |
+| `SparseVectors(const SparseVector*)` | `GetSparseVectors()` | [`SparseVector`](#sparsevector) | `dtype: sparse`（BruteForce、HGraph、SINDI、SINDI_V2） |
 
 稠密向量按行主序排列：元素 `i` 的维度 `j` 位于 `vectors[i * dim + j]`。
 多向量数据集使用 `repr: multi_vector`，并配合标量 `dtype`（通常为 `float32`）及下文的

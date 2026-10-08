@@ -15,14 +15,15 @@ top-k —— 没有图遍历、没有倒排表、不做近似。它的主要用�
    扁平数据单元中。对于不压缩的量化器，不需要训练；当使用 PQ/SQ_uniform 等需要训练的量化器
    时，`Build` 会先跑一遍训练。
 2. **Add。** 新向量直接追加到扁平存储中，没有再平衡或重建成本。
-3. **Search。** 针对每条查询，按照配置的 `metric_type`（`l2`、`ip` 或 `cosine`）逐条计算
-   距离，再用 top-k 小顶堆得到最近邻 id。距离计算使用 SIMD 内核，并支持**单查询内并行**：
+3. **Search。** 针对每条查询，按照配置的 `metric_type`（稠密向量支持 `l2`、`ip` 或
+   `cosine`，稀疏向量仅支持 `ip`）逐条计算距离，再用 top-k 小顶堆得到最近邻 id。
+   距离计算使用 SIMD 内核，并支持**单查询内并行**：
    通过 `parallelism` 搜索参数可以把同一条查询的扫描拆分到多个线程上（实现见
    `BruteForce::SearchWithRequest`，`src/algorithm/bruteforce/bruteforce.cpp`）。
 
-由于索引保留了每一条向量（除非选择了有损量化器），当 `base_quantization_type = fp32` 时
-结果是**完全精确的**，因此 `eval_performance` 工具默认用 BruteForce 作为生成 ground truth 的
-参考索引。
+由于索引保留了每一条向量（除非选择了有损量化器），当
+`base_quantization_type = fp32` 或输入为稀疏向量时，结果是**完全精确的**，因此
+`eval_performance` 工具默认用 BruteForce 作为生成 ground truth 的参考索引。
 
 ## 快速开始
 
@@ -52,9 +53,29 @@ auto result = index->KnnSearch(query, /*topk=*/10, "{}").value();
 
 ## 支持的输入数据类型
 
-当前公开的 `Build`、`Add`、`KnnSearch`、`RangeSearch` 与 `UpdateVector` 路径仅接受 FP32 向量。运行时通过 `Dataset::Float32Vectors` 传入向量；创建索引时 `dtype` 应设为 `"float32"`，不支持 `dtype: "int8"`。
+BruteForce 接受稠密 FP32 向量（`dtype: "float32"`）或稀疏向量
+（`dtype: "sparse"`）。稠密向量通过 `Dataset::Float32Vectors` 传入，稀疏向量通过
+`Dataset::SparseVectors` 传入。稀疏 BruteForce 仅支持 `metric_type: "ip"`，使用
+`SparseVectorDataCell` 保存原始稀疏 term/value 对，并返回精确距离
+`1 - inner_product`。每条稀疏向量最多包含 `dim` 个条目，不保留输入 term 顺序。
 
-`base_quantization_type` 描述的是索引内部编码和存储，而非输入类型。选择内部 `fp16`、`bf16` 等量化器不会使 API 接受 FP16/BF16 输入。
+稀疏模式支持构建、追加、k-NN、范围搜索、过滤器、并行扫描、按 id 计算距离和序列化；
+不支持稀疏 `UpdateVector`、原始向量读取和 `RemoveMode::FORCE_REMOVE`，删除时应使用
+`MARK_REMOVE`。
+
+对于稠密输入，`base_quantization_type` 描述的是索引内部编码和存储，而非输入类型。
+选择内部 `fp16`、`bf16` 等量化器不会使 API 接受 FP16/BF16 输入。不支持
+`dtype: "int8"`。
+
+最简稀疏配置如下：
+
+```json
+{
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "dim": 128
+}
+```
 
 ## 构建参数
 
@@ -65,7 +86,7 @@ auto result = index->KnnSearch(query, /*topk=*/10, "{}").value();
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `base_quantization_type` | string | `"fp32"` | `fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq` —— 各量化器细节见[量化章节](../quantization/) |
+| `base_quantization_type` | string | 稠密为 `"fp32"`，稀疏为 `"sparse"` | 稠密模式支持 `fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`；稀疏模式仅接受 `sparse`。稠密量化器细节见[量化章节](../quantization/)。 |
 | `use_attribute_filter` | bool | `false` | 启用属性过滤（参见 [属性过滤](../advanced/attribute_filter.md)） |
 | `resize_increase_count_bit` | int | `10` | 扩容批次 slot 数的 `log2`，取值范围为 `1` 到 `31`。`1` 表示每次按 2 个 slot 对齐，`10` 表示按 1024 个 slot 对齐。较小取值减少预分配，但可能增加重分配次数。 |
 
@@ -118,10 +139,13 @@ auto r3 = index->RangeSearch(query, radius, R"({"parallelism": 8})").value();
 
 ## 删除向量
 
-BruteForce 同时支持 `RemoveMode::MARK_REMOVE` 与 `RemoveMode::FORCE_REMOVE`；两种模式都不需要
-配置 HGraph 专用的 `support_force_remove`。
+稠密 BruteForce 同时支持 `RemoveMode::MARK_REMOVE` 与 `RemoveMode::FORCE_REMOVE`；两种模式
+都不需要配置 HGraph 专用的 `support_force_remove`。稀疏和多向量 BruteForce 仅支持
+`MARK_REMOVE`。
 
-启用 `use_attribute_filter: true` 时，BruteForce 不支持任一种删除模式；如需删除属性过滤数据，请重建索引。
+对于稠密 BruteForce，启用 `use_attribute_filter: true` 后两种删除模式都不可用。稀疏和多向量
+BruteForce 仍支持 `MARK_REMOVE`：搜索时会将墓碑过滤器与属性过滤器组合使用。这两种向量类型仍不支持
+`FORCE_REMOVE`。
 
 - `MARK_REMOVE` 是默认模式。它只写入墓碑标记，后续搜索会过滤该 id，但向量存储仍保持已分配状态。
   `GetNumElements()` 不计已标记的 id，`GetNumberRemoved()` 返回其数量。
@@ -153,14 +177,14 @@ BruteForce 声明的能力标志如下（参见 `BruteForce::InitFeatures`，
 | `SUPPORT_ADD_FROM_EMPTY` | 仅在非训练型量化器（`fp32`、`fp16`、`bf16`）下可用。 |
 | `SUPPORT_KNN_SEARCH` / `SUPPORT_KNN_SEARCH_WITH_ID_FILTER` / `SUPPORT_SEARCH_CONCURRENT` | 标准 top-k 查询、id 列表过滤，以及并发搜索。 |
 | `SUPPORT_RANGE_SEARCH` / `SUPPORT_RANGE_SEARCH_WITH_ID_FILTER` | 仅在非训练型量化器（`fp32`、`fp16`、`bf16`）下可用。 |
-| `SUPPORT_DELETE_BY_ID` / `SUPPORT_DELETE_CONCURRENT` | 支持按 id 删除。查询和删除操作会同步；`FORCE_REMOVE` 会获取独占锁。 |
+| `SUPPORT_DELETE_BY_ID` / `SUPPORT_DELETE_CONCURRENT` | 支持按 id 删除。稀疏和多向量索引仅接受 `MARK_REMOVE`；稠密 `FORCE_REMOVE` 会获取独占锁。 |
 | `SUPPORT_CAL_DISTANCE_BY_ID` | 与已存储向量计算距离（仅非训练型量化器）。 |
-| `SUPPORT_UPDATE_VECTOR_CONCURRENT` | 支持 `UpdateVector`：以维度相同的 FP32 向量替换已有向量。BruteForce 没有图连通性检查，因此 `force_update` 不改变更新行为。 |
-| `SUPPORT_GET_RAW_VECTOR_BY_IDS` | 仅当 `base_quantization_type = fp32`，且度量不是 `cosine` 或底层量化器持有向量范数（`hold_molds`）时才声明。量化的 BruteForce 索引**不会**声明该能力。 |
+| `SUPPORT_UPDATE_VECTOR_CONCURRENT` | 仅稠密和多向量模式支持。稠密 FP32 模式下，`UpdateVector` 以维度相同的向量替换已有向量。BruteForce 没有图连通性检查，因此 `force_update` 不改变更新行为。 |
+| `SUPPORT_GET_RAW_VECTOR_BY_IDS` | 仅稠密模式可用：要求 `base_quantization_type = fp32`，且度量不是 `cosine` 或底层量化器持有向量范数（`hold_molds`）。稀疏和量化的 BruteForce 索引**不会**声明该能力。 |
 | `SUPPORT_CHECK_ID_EXIST` / `SUPPORT_CLONE` / `SUPPORT_ESTIMATE_MEMORY` / `SUPPORT_GET_MEMORY_USAGE` | 标准的内省与生命周期接口。 |
 | `SUPPORT_SERIALIZE_BINARY_SET` / `SUPPORT_SERIALIZE_FILE` / `SUPPORT_SERIALIZE_WRITE_FUNC` | 完整的保存能力。 |
 | `SUPPORT_DESERIALIZE_BINARY_SET` / `SUPPORT_DESERIALIZE_FILE` / `SUPPORT_DESERIALIZE_READER_SET` | 完整的加载能力。（没有对应的 `DESERIALIZE_WRITE_FUNC`，读路径使用 `READER_SET` 形式。） |
-| `NEED_TRAIN` | 当 `base_quantization_type` 是 `sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq` 之一时声明。 |
+| `NEED_TRAIN` | 仅稠密模式：当 `base_quantization_type` 是 `sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq` 之一时声明。稀疏存储不需要训练。 |
 
 BruteForce **不支持** 的能力包括：`SUPPORT_UPDATE_ID_CONCURRENT`、`SUPPORT_EXPORT_MODEL`。
 

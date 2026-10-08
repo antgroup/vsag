@@ -18,7 +18,11 @@ a `DatasetPtr` (works for both dense and sparse vectors).
 > `CalcDistancesById`. The two names have identical semantics. See
 > [issue #2068](https://github.com/antgroup/vsag/issues/2068).
 
-HGraph also supports configured sparse and non-FP32 data types. In those configurations, use a Dataset containing the native query field (`SparseVectors`, `Int8Vectors`, or `Float16Vectors` for FP16/BF16); a raw `float*` distance query is only valid for a float32 index. The Dataset representation must match the index configuration, not merely its vector dimension.
+BruteForce and HGraph also support configured sparse data; HGraph additionally supports non-FP32
+dense data types. In those configurations, use a Dataset containing the native query field
+(`SparseVectors`, `Int8Vectors`, or `Float16Vectors` for FP16/BF16); a raw `float*` distance query
+is only valid for a float32 index. The Dataset representation must match the index configuration,
+not merely its vector dimension.
 
 ### C++ implementation migration
 
@@ -77,11 +81,15 @@ Declarations live in
 
 | Index | Single-ID query | Multi-query batch query |
 |---|---|---|
-| BruteForce, HGraph, IVF, Pyramid, LazyHGraph | `float*` or one-row `DatasetPtr` with `Float32Vectors` | `DatasetPtr` with `Float32Vectors` |
+| BruteForce, HGraph | `float*` for float32, or one-row `DatasetPtr` with the configured native representation (including `SparseVectors`) | `DatasetPtr` with the configured native representation |
+| IVF, Pyramid, LazyHGraph | `float*` or one-row `DatasetPtr` with `Float32Vectors` | `DatasetPtr` with `Float32Vectors` |
 | SINDI, SINDI_V2 | one-row `DatasetPtr` with `SparseVectors` | `DatasetPtr` with `SparseVectors` |
 | WARP, SIMQ | one-row `DatasetPtr` with `MultiVectors` and `MultiVectorDim` | `DatasetPtr` with `MultiVectors` and `MultiVectorDim` |
 
-SINDI immutable storage supports single-ID and batch distances, including after deserialization. WARP/SIMQ calculate the same multi-vector aggregation as their search distance backend, without coarse candidate selection. Raw float pointers cannot represent these native sparse/multi-vector queries.
+Sparse BruteForce and SINDI immutable storage support single-ID and batch distances, including
+after deserialization. WARP/SIMQ calculate the same multi-vector aggregation as their search
+distance backend, without coarse candidate selection. Raw float pointers cannot represent these
+native sparse/multi-vector queries.
 
 For N query rows and `count` candidates per row, provide N × count candidate IDs in row-major order (`ids[q * count + j]`); a single candidate list is **not** implicitly broadcast. `CalcDistancesById` is the preferred batch name; `CalDistanceById` remains the compatibility alias.
 
