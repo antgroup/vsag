@@ -284,6 +284,9 @@ GraphDataCell<IOTmpl>::InsertNeighborsById(InnerIdType id,
     }
     UpdateReverseEdges(id, old_neighbors, neighbor_ids);
 
+    // weak is enough here: the loop reloads current on every failure and a spurious failure only
+    // costs one retry. PublishNode uses the strong form because it exits once the mark already
+    // covers the node, so it has no reload to hide behind.
     InnerIdType current = total_count_.load();
     while (current < id + 1 && !total_count_.compare_exchange_weak(current, id + 1)) {
     }
@@ -295,9 +298,10 @@ GraphDataCell<IOTmpl>::InsertNeighborsById(InnerIdType id,
             const auto neighbor_id = neighbor_ids[i];
             neighbor_ids_ptr[i] = neighbor_id | (node_versions_[neighbor_id] << id_bit_);
         }
-        // Payload first, then the count with a release fence in between: readers no longer hold a
-        // lock, so a count that is visible before its payload would expose stale or unwritten
-        // neighbour entries.
+        // Payload first, then the count with a release fence in between, so a reader that
+        // observes the new count reads the matching payload rather than the previous list.
+        // Readers hold the shared neighbour lock today; the fence pair is what a lock-free
+        // reader would need in addition to re-reading the count.
         this->layout_.WriteAt(id,
                               NEIGHBORS_OFFSET,
                               reinterpret_cast<const uint8_t*>(neighbor_ids_ptr.data()),
@@ -310,9 +314,10 @@ GraphDataCell<IOTmpl>::InsertNeighborsById(InnerIdType id,
     } else {
         const auto neighbor_count =
             std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
-        // Publish the payload before the count, with a release fence in between, so a
-        // lock-free reader that sees the new count is guaranteed to see the matching payload
-        // rather than bytes left over from the previous list.
+        // Publish the payload before the count, with a release fence in between, so a reader
+        // that observes the new count reads the matching payload rather than bytes left over
+        // from the previous list. Readers hold the shared neighbour lock today; the fence pair
+        // is what a lock-free reader would additionally need.
         this->layout_.WriteAt(id,
                               NEIGHBORS_OFFSET,
                               reinterpret_cast<const uint8_t*>(neighbor_ids.data()),
@@ -375,25 +380,26 @@ GraphDataCell<IOTmpl>::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbo
         }
     } else {
         // Pair with the release fence in InsertNeighborsById: the count was read above, so the
-        // payload below is safe to read without a lock.
+        // payload below is safe to read.
         std::atomic_thread_fence(std::memory_order_acquire);
-        Vector<InnerIdType> raw_neighbors(neighbor_count, this->allocator_);
+        // Read straight into the caller's vector (a traversal reuses it, so this does not
+        // allocate) and compact out ids that do not exist yet: a neighbour list that is being
+        // rewritten, or that was never written, must not leak unwritten ids into the walk.
+        const auto id_limit =
+            static_cast<InnerIdType>(total_count_.load(std::memory_order_acquire));
+        neighbor_ids.resize(neighbor_count);
         this->layout_.ReadAt(id,
                              NEIGHBORS_OFFSET,
                              static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType),
-                             reinterpret_cast<uint8_t*>(raw_neighbors.data()));
-        // Only ids that already exist may be handed to a traversal: a neighbour list that is being
-        // rewritten (or that was never written) must not leak unwritten ids into the walk.
-        const auto id_limit =
-            static_cast<InnerIdType>(total_count_.load(std::memory_order_acquire));
-        neighbor_ids.clear();
-        neighbor_ids.reserve(neighbor_count);
+                             reinterpret_cast<uint8_t*>(neighbor_ids.data()));
+        uint32_t kept = 0;
         for (uint32_t i = 0; i < neighbor_count; ++i) {
-            const InnerIdType neighbor_id = raw_neighbors[i];
+            const InnerIdType neighbor_id = neighbor_ids[i];
             if (neighbor_id < id_limit) {
-                neighbor_ids.push_back(neighbor_id);
+                neighbor_ids[kept++] = neighbor_id;
             }
         }
+        neighbor_ids.resize(kept);
     }
 }
 

@@ -1295,6 +1295,11 @@ TEST_CASE("RaBitQ HNSW ExData reconstruction SIMD", "[ut][simd]") {
 
     // The byte-output twin used by the code-domain pairwise inner product is bit exact.
     for (int which = 0; which < 2; ++which) {
+        if (which == 1 and not SimdStatus::SupportAVX2()) {
+            // avx2:: only contains AVX2 instructions when the build enables them; call it only
+            // when the running CPU actually has them.
+            continue;
+        }
         std::vector<uint8_t> bytes(dim, 0);
         uint64_t code_sum = 0;
         uint64_t code_sq_sum = 0;
@@ -1324,13 +1329,15 @@ TEST_CASE("RaBitQ HNSW ExData reconstruction SIMD", "[ut][simd]") {
                                                  full_center,
                                                  dim - 1,
                                                  result.data()));
-    REQUIRE_FALSE(avx2::RaBitQExCode7ToVector(filter.data(),
-                                              packed.data(),
-                                              centroid.data(),
-                                              residual_scale,
-                                              full_center,
-                                              0,
-                                              result.data()));
+    if (SimdStatus::SupportAVX2()) {
+        REQUIRE_FALSE(avx2::RaBitQExCode7ToVector(filter.data(),
+                                                  packed.data(),
+                                                  centroid.data(),
+                                                  residual_scale,
+                                                  full_center,
+                                                  0,
+                                                  result.data()));
+    }
 }
 
 TEST_CASE("RaBitQ FP32-BQ SIMD Compute Benchmark", "[ut][simd][!benchmark]") {
