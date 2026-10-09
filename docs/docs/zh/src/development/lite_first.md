@@ -4,8 +4,8 @@
 > v1 快照字节格式不变。显式调用 BuildGraph(degree, ef_search) 成功后才切换为
 > 独立的单层近似图；失败不修改原索引。图模式继续使用同一套 Add/Update/Remove/
 > Search 接口；FP32 图 Save 写入 v2，FP16 图写入 v3，均包含向量、ID、参数和
-> 邻接关系；Load 接受 v1/v2/v3。图快照与 Full VSAG 不兼容，不提供并发、校验和、
-> SQ8 或 mmap。
+> 邻接关系；Load 接受 v1/v2/v3。图快照与 Full VSAG 不兼容，不提供并发、
+> 校验和、SQ8 或 mmap；可选的 RaBitQ8 后端见下文。
 > BuildGraph 后同样支持按外部 ID 过滤；图搜索可经过不允许返回的节点以保持连通性，
 > 但这些节点不会出现在结果中。
 > 本页余下内容说明首版默认 BruteForce 行为。
@@ -207,3 +207,27 @@ Debug 构建可加 `-DENABLE_COVERAGE=ON`，运行测试后用 gcov 收集源码
 独立安装示例使用预算 8 建图、预算 64 查询。
 
 图 Update 先验证输入，再判断 FP32 字节或 FP16 编码是否与存储相同。相同值更新保留图结构及快照字节；不存在的 ID、无效维度、非有限数和 FP16 溢出仍返回错误。
+
+## 可选 RaBitQ8 图存储
+
+配置 Lite 时加入 `-DENABLE_RABITQ_LITE_BACKEND=ON`，再调用
+`BuildGraph(VectorStorage::RABITQ8, max_degree, ef_search)`，即可构建 8 位
+RaBitQ 图后端。该选项默认关闭，既有 Lite 构建仍保持原来的源码和依赖闭包。
+RaBitQ8 的 API 输入仍为 FP32；建图时从当前 BruteForce 数据训练并固定量化模型，
+查询返回估算 L2 距离。成功建图后，`ActiveVectorStorage()` 返回 `RABITQ8`。
+
+RaBitQ8 支持 Add、Update、Remove、过滤查询、单次查询预算和独立的版本化快照
+（`VSAGLQ01`）。增删改会先完成可能失败的准备工作，再发布状态；失败时保持图可达性
+及编码存储一致。RaBitQ 快照采用持有内存和小端编码，与 FP32/FP16 的 v1/v2/v3
+格式以及 Full VSAG 序列化均相互独立。加载 RaBitQ 快照也要求构建时启用相同选项。
+
+启用后还会构建 `lite_rabitq_example`；同时启用测试时，会注册
+`lite_rabitq_api`：
+
+```sh
+cmake -S lite -B build-lite-rabitq -DCMAKE_BUILD_TYPE=Release \
+  -DENABLE_TESTS=ON -DENABLE_RABITQ_LITE_BACKEND=ON
+cmake --build build-lite-rabitq -j2
+ctest --test-dir build-lite-rabitq --output-on-failure
+./build-lite-rabitq/lite_rabitq_example
+```

@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 get_filename_component(VSAG_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 option(ENABLE_TESTS "Build Lite tests with the repository's Catch2" OFF)
 option(ENABLE_COVERAGE "Instrument Lite sources for gcov" OFF)
+option(ENABLE_RABITQ_LITE_BACKEND "Enable the optional 8-bit RaBitQ graph backend" OFF)
 
 set(VSAG_LITE_SOURCES
     "${VSAG_ROOT}/src/lite/index.cpp"
@@ -33,8 +34,7 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$"
         PROPERTIES COMPILE_FLAGS
         "-mavx512f -mavx512dq -mavx512bw -mavx512vl -mavx2 -mf16c")
     set_source_files_properties("${VSAG_ROOT}/src/lite/fp32_distance_sse.cpp"
-        PROPERTIES COMPILE_FLAGS
-        "-msse4.1")
+        PROPERTIES COMPILE_FLAGS "-msse4.1")
     set_source_files_properties("${VSAG_ROOT}/src/lite/fp32_distance_avx2.cpp"
         PROPERTIES COMPILE_FLAGS "-mavx2 -mfma")
     set_source_files_properties("${VSAG_ROOT}/src/lite/fp32_distance_avx512.cpp"
@@ -42,6 +42,22 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$"
         "-mavx512f -mavx512dq -mavx512bw -mavx512vl")
     set(VSAG_LITE_HAS_X86_SIMD ON)
 endif()
+
+if(ENABLE_RABITQ_LITE_BACKEND)
+    list(APPEND VSAG_LITE_SOURCES
+        "${VSAG_ROOT}/src/lite/rabitq_backend.cpp"
+        "${VSAG_ROOT}/src/lite/rabitq_filter_ip.cpp")
+    if(VSAG_LITE_HAS_X86_SIMD)
+        list(APPEND VSAG_LITE_SOURCES
+            "${VSAG_ROOT}/src/lite/rabitq_filter_ip_avx2.cpp"
+            "${VSAG_ROOT}/src/lite/rabitq_filter_ip_avx512.cpp")
+        set_source_files_properties("${VSAG_ROOT}/src/lite/rabitq_filter_ip_avx2.cpp"
+            PROPERTIES COMPILE_FLAGS "-mavx2 -mfma")
+        set_source_files_properties("${VSAG_ROOT}/src/lite/rabitq_filter_ip_avx512.cpp"
+            PROPERTIES COMPILE_FLAGS "-mavx512f -mavx512dq -mavx512bw -mavx512vl")
+    endif()
+endif()
+
 add_library(vsag_lite_objects OBJECT ${VSAG_LITE_SOURCES})
 add_library(vsag_lite SHARED $<TARGET_OBJECTS:vsag_lite_objects>)
 add_library(vsag_lite_static STATIC $<TARGET_OBJECTS:vsag_lite_objects>)
@@ -57,6 +73,12 @@ foreach(target vsag_lite_objects vsag_lite vsag_lite_static)
         PRIVATE "${VSAG_ROOT}/src")
 endforeach()
 target_compile_options(vsag_lite_objects PRIVATE -Wall -Wextra -Wpedantic)
+if(ENABLE_RABITQ_LITE_BACKEND)
+    target_compile_definitions(vsag_lite_objects PRIVATE VSAG_LITE_HAS_RABITQ_BACKEND)
+    if(VSAG_LITE_HAS_X86_SIMD)
+        target_compile_definitions(vsag_lite_objects PRIVATE VSAG_LITE_RABITQ_X86_SIMD)
+    endif()
+endif()
 if(VSAG_LITE_HAS_X86_SIMD)
     target_compile_definitions(vsag_lite_objects PRIVATE VSAG_LITE_HAS_X86_SIMD)
 endif()
@@ -65,21 +87,41 @@ if(ENABLE_COVERAGE)
     target_link_options(vsag_lite PRIVATE --coverage)
 endif()
 
+if(ENABLE_RABITQ_LITE_BACKEND)
+    add_executable(lite_rabitq_example example/rabitq_example.cpp)
+    target_link_libraries(lite_rabitq_example PRIVATE vsag::lite)
+endif()
+
 if(ENABLE_TESTS)
     include("${VSAG_ROOT}/cmake/VSAGThirdPartyOverride.cmake")
     include("${VSAG_ROOT}/extern/catch2/catch2.cmake")
+    enable_testing()
     add_executable(lite_tests "${VSAG_ROOT}/src/lite/index_test.cpp")
     add_executable(lite_graph_tests "${VSAG_ROOT}/src/lite/graph_backend_test.cpp")
     target_link_libraries(lite_tests PRIVATE vsag::lite Catch2::Catch2WithMain)
     target_include_directories(lite_graph_tests PRIVATE "${VSAG_ROOT}/src")
     target_link_libraries(lite_graph_tests PRIVATE vsag::lite Catch2::Catch2WithMain)
+    if(ENABLE_COVERAGE)
+        target_link_options(lite_tests PRIVATE --coverage)
+        target_link_options(lite_graph_tests PRIVATE --coverage)
+    endif()
     if(VSAG_LITE_HAS_X86_SIMD)
         target_compile_definitions(lite_tests PRIVATE VSAG_LITE_HAS_X86_SIMD)
     endif()
-    enable_testing()
     add_test(NAME lite_unit COMMAND lite_tests "[lite]")
     add_test(NAME lite_scale COMMAND lite_tests "[lite-scale]")
     add_test(NAME lite_graph COMMAND lite_graph_tests "[lite-graph]")
+
+    if(ENABLE_RABITQ_LITE_BACKEND)
+        add_executable(lite_rabitq_api_tests "${VSAG_ROOT}/src/lite/rabitq_backend_test.cpp")
+        target_include_directories(lite_rabitq_api_tests PRIVATE "${VSAG_ROOT}/src")
+        target_link_libraries(lite_rabitq_api_tests PRIVATE vsag::lite Catch2::Catch2WithMain)
+        target_compile_definitions(lite_rabitq_api_tests PRIVATE VSAG_LITE_HAS_RABITQ_BACKEND)
+        if(ENABLE_COVERAGE)
+            target_link_options(lite_rabitq_api_tests PRIVATE --coverage)
+        endif()
+        add_test(NAME lite_rabitq_api COMMAND lite_rabitq_api_tests "[lite-rabitq]")
+    endif()
 endif()
 
 include(GNUInstallDirs)
