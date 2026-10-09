@@ -392,6 +392,35 @@ TEST_CASE("HGraph ParallelDeserialize Compressed Chunked Round-Trip",
     RequireSameKnnResults(index, loaded, data);
 }
 
+TEST_CASE("HGraph ParallelDeserialize restores fused multi-centroid codes",
+          "[ut][hgraph][parallel_deserialize][fused_full]") {
+    auto data = MakeTestData(32, 100);
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"rabitq", "precise_quantization_type":"rabitq",
+        "rabitq_bits_per_dim_base":2, "rabitq_bits_per_dim_precise":6,
+        "rabitq_use_fht":true, "max_degree":8, "ef_construction":32,
+        "build_thread_count":1, "use_reorder":true, "reorder_source":"base",
+        "rabitq_fused_datacell":true, "rabitq_centroid_count":7, "kmeans_iterations":2
+    })");
+    auto index = MakeHGraphIndex(MakeCommonParam(data.dim), param);
+    REQUIRE(index->Build(MakeDataset(data)).has_value());
+    auto loaded = MakeHGraphIndex(MakeCommonParam(data.dim, MakeThreadPool(4)), param);
+    SECTION("compressed chunked components") {
+        FrameSerializeWriter writer;
+        REQUIRE(index->Serialize(writer, 4096).has_value());
+        FrameMemoryReader reader(writer.buffer_);
+        REQUIRE(loaded->ParallelDeserialize(reader).has_value());
+    }
+    SECTION("sequential stream without chunk manifest") {
+        std::ostringstream out(std::ios::out | std::ios::binary);
+        REQUIRE(index->Serialize(out).has_value());
+        PlainMemoryReader reader(out.str());
+        REQUIRE(loaded->ParallelDeserialize(reader).has_value());
+    }
+    REQUIRE(loaded->GetNumElements() == data.count);
+    RequireSameKnnResults(index, loaded, data);
+}
+
 TEST_CASE("HGraph ParallelDeserialize Compressed Source IDs",
           "[ut][hgraph][parallel_deserialize]") {
     auto data = MakeTestData(32, 300);

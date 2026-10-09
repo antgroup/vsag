@@ -52,6 +52,17 @@ public:
 public:
     float* k_centroids_{nullptr};
 
+    // Full-data Lloyd iterations with exact FP32 assignment, without approximate center routing.
+    // Returns assignments to the final centers, or an empty vector when only centers are needed.
+    // Workspace is O(count + k * dim); disabling assignments skips the final full-data pass.
+    Vector<int32_t>
+    RunFull(uint32_t k,
+            const float* data,
+            uint64_t count,
+            uint32_t iterations = 25,
+            uint32_t seed = 0x52425131U,
+            bool return_assignments = true);
+
 private:
     double
     find_nearest_one_with_hgraph(const float* query,

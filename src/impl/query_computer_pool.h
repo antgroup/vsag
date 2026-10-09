@@ -99,6 +99,8 @@ private:
     uint64_t size_{0};
 };
 
+// Pool reuse is optional: a null context or null computer_pool creates a fresh owned computer.
+// When supplied, the pool must outlive this call and be accessed sequentially for one query.
 [[nodiscard]] inline ComputerLease
 AcquireQueryComputer(const FlattenInterfacePtr& cell, const void* query, QueryContext* ctx) {
     if (ctx != nullptr and ctx->computer_pool != nullptr) {

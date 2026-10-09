@@ -64,7 +64,7 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
     flatten->Train(vectors.data(), count);
     auto split = std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(flatten);
     REQUIRE(split != nullptr);
-    split->TrainFusedCodec(vectors.data(), count, cluster_count);
+    split->TrainFusedCodec(vectors.data(), count, cluster_count, 25);
     auto computer = split->FactoryFusedComputer(vectors.data());
     REQUIRE(computer != nullptr);
 
