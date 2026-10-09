@@ -86,8 +86,9 @@ never its value.
 
 The bundled OpenBLAS version is 0.3.34, built with C LAPACK (`NOFORTRAN=1`),
 `DYNAMIC_ARCH=1`, `USE_THREAD=0`, and `USE_LOCKING=1`, without a Fortran runtime link.
-Nested build jobs follow `NUM_BUILDING_JOBS`. Its CPU detection tools use
-strict floating-point flags, and GCC 15 builds use GNU C17 for translated LAPACK.
+Nested build jobs follow `NUM_BUILDING_JOBS`. Inherited `-Ofast` and `-ffast-math`
+are removed from the whole OpenBLAS build environment, including CPU detection tools;
+other flags are preserved. GCC 15 builds use GNU C17 for translated LAPACK.
 For offline builds, place the release archive in the configured `DOWNLOAD_DIR` as
 `OpenBLAS-v0.3.34.tar.gz`. CMake verifies SHA-256
 `cd7e129868320cc2d033afa920e31202dfe0b8066a5b66661900ccc0f197dfed` before extraction.
@@ -95,13 +96,16 @@ For an HTTP mirror, use `VSAG_THIRDPARTY_OPENBLAS_0_3_34`; the old 0.3.23 variab
 is ignored. Use the download cache for local files: the shared override helper
 prepends mirror URLs to upstream fallbacks, which CMake cannot combine with local paths.
 
-To validate only the bundled OpenBLAS dependency and both libstdc++ ABI consumers:
+Both OpenBLAS override variables select mirrors of the exact pinned **source** archive.
+They do not support prebuilt libraries or alternate OpenBLAS builds: the same SHA-256
+check and `NOFORTRAN=1` build apply to overrides. Fortran-built static libraries that
+require `libgfortran` cannot be substituted through these variables.
+
+`make test-cmake COMPILE_JOBS=4` runs the configuration checks, builds the bundled
+static archive, and executes both libstdc++ ABI consumers. To run only the native smoke tests:
 
 ```bash
-cmake -S tests/cmake/openblas_fixture -B build/openblas-smoke -DVSAG_SOURCE_DIR="$PWD"
-cmake --build build/openblas-smoke --parallel 8
-build/openblas-smoke/openblas_smoke_0
-build/openblas-smoke/openblas_smoke_1
+make test-openblas COMPILE_JOBS=4
 ```
 
 This fixture builds the pinned source archive and links it by absolute path, so an

@@ -54,9 +54,18 @@ test:                    ## Build and run unit tests.
 	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 
 .PHONY: test-cmake
-test-cmake:              ## Run focused CMake helper tests.
+test-cmake:              ## Run CMake helper tests and native OpenBLAS smoke tests.
 	cmake -DVSAG_SOURCE_DIR=$(CURDIR) -P tests/cmake/openblas_config_test.cmake
 	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/thirdparty_override_test.cmake
+	$(MAKE) test-openblas
+
+.PHONY: test-openblas
+test-openblas:           ## Build pinned OpenBLAS and run both libstdc++ ABI consumers.
+	cmake -S tests/cmake/openblas_fixture -B ${DEBUG_BUILD_DIR}/openblas-smoke \
+		-DVSAG_SOURCE_DIR=${CURDIR} -DNUM_BUILDING_JOBS=${COMPILE_JOBS}
+	cmake --build ${DEBUG_BUILD_DIR}/openblas-smoke --parallel ${COMPILE_JOBS}
+	${DEBUG_BUILD_DIR}/openblas-smoke/openblas_smoke_0
+	${DEBUG_BUILD_DIR}/openblas-smoke/openblas_smoke_1
 
 .PHONY: asan
 asan:                    ## Build with AddressSanitizer option.

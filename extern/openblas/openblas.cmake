@@ -9,7 +9,8 @@ set(openblas_urls
 )
 vsag_resolve_thirdparty_override (OPENBLAS v0.3.34 openblas_urls)
 
-# Keep the existing environment, but build OpenBLAS CPU detection tools with strict FP.
+# Remove inherited -Ofast/-ffast-math from the whole OpenBLAS build environment,
+# including CPU detection tools; preserve the other flags.
 set(openblas_configure_envs)
 foreach(entry IN LISTS common_configure_envs)
     if(entry MATCHES "^(CFLAGS|CXXFLAGS)=")

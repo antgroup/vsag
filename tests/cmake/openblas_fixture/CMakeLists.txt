@@ -6,7 +6,7 @@ set(BUILD_INFO_DIR ${CMAKE_CURRENT_BINARY_DIR}/stamps)
 if(NOT DOWNLOAD_DIR)
     set(DOWNLOAD_DIR ${CMAKE_CURRENT_BINARY_DIR}/downloads)
 endif()
-set(NUM_BUILDING_JOBS 8)
+set(NUM_BUILDING_JOBS 8 CACHE STRING "OpenBLAS build parallelism")
 set(common_configure_envs env "CC=${CMAKE_C_COMPILER}" "CXX=${CMAKE_CXX_COMPILER}"
     "CFLAGS=-Ofast -ffast-math -fPIC -D_DEFAULT_SOURCE -D_GNU_SOURCE"
     "CXXFLAGS=-Ofast -ffast-math -fPIC")
