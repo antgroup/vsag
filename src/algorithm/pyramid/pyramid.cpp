@@ -108,13 +108,21 @@ IndexNode::AddChild(const std::string& key) {
 
 IndexNode*
 IndexNode::GetChild(const std::string& key, bool need_init) {
+    {
+        std::shared_lock lock(mutex_);
+        auto result = children_.find(key);
+        if (result != children_.end()) {
+            return result->second.get();
+        }
+        if (not need_init) {
+            return nullptr;
+        }
+    }
+
     std::unique_lock lock(mutex_);
     auto result = children_.find(key);
     if (result != children_.end()) {
         return result->second.get();
-    }
-    if (not need_init) {
-        return nullptr;
     }
     AddChild(key);
     return children_[key].get();

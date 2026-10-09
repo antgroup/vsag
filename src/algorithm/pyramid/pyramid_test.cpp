@@ -17,6 +17,8 @@
 
 #include <array>
 #include <catch2/generators/catch_generators.hpp>
+#include <chrono>
+#include <future>
 
 #include "impl/allocator/safe_allocator.h"
 #include "index/index_impl.h"
@@ -283,4 +285,53 @@ TEST_CASE("Pyramid ODescent build registers non-contiguous external ids",
         MakePyramidRawVectorTestDataset(vectors.data(), ids.data(), paths.data(), ids.size()));
     REQUIRE(build_result.has_value());
     RequireRawVectors(index, ids.data(), ids.size(), vectors.data());
+}
+
+TEST_CASE("Pyramid IndexNode allows concurrent existing-child lookup",
+          "[ut][pyramid][index_node]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto graph_param = std::make_shared<vsag::SparseGraphDatacellParameter>();
+    vsag::IndexNode node(allocator.get(), graph_param, 1);
+    auto* expected = node.GetChild("existing", true);
+    const bool need_init = GENERATE(false, true);
+
+    std::shared_lock node_lock(node.mutex_);
+    std::promise<void> started;
+    auto started_future = started.get_future();
+    auto lookup = std::async(std::launch::async, [&]() {
+        started.set_value();
+        return node.GetChild("existing", need_init);
+    });
+    started_future.wait();
+    const bool completed_while_shared =
+        lookup.wait_for(std::chrono::seconds(1)) == std::future_status::ready;
+    node_lock.unlock();
+
+    REQUIRE(lookup.get() == expected);
+    REQUIRE(completed_while_shared);
+}
+
+TEST_CASE("Pyramid IndexNode preserves child creation semantics", "[ut][pyramid][index_node]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto graph_param = std::make_shared<vsag::SparseGraphDatacellParameter>();
+    vsag::IndexNode node(allocator.get(), graph_param, 1);
+    REQUIRE(node.GetChild("missing", false) == nullptr);
+
+    std::promise<void> start;
+    auto ready = start.get_future().share();
+    std::array<std::future<vsag::IndexNode*>, 8> children;
+    for (auto& child : children) {
+        child = std::async(std::launch::async, [&]() {
+            ready.wait();
+            return node.GetChild("shared", true);
+        });
+    }
+    start.set_value();
+    auto* expected = children[0].get();
+    REQUIRE(expected != nullptr);
+    for (uint64_t i = 1; i < children.size(); ++i) {
+        REQUIRE(children[i].get() == expected);
+    }
+    REQUIRE(node.GetChild("shared", false) == expected);
+    REQUIRE(node.GetChild("missing", false) == nullptr);
 }
