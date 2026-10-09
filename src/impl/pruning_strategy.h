@@ -115,7 +115,9 @@ select_edges_by_heuristic(Vector<InnerIdType>& neighbors,
  * mutually_connect_new_element and is what a batched build drives in parallel.
  *
  * @param cur_c The new element whose outgoing edges are being built.
- * @param top_candidates Candidate neighbours; consumed by the heuristic.
+ * @param top_candidates Candidate neighbours; consumed by the heuristic, which pops every
+ *        element. `const DistHeapPtr&` binds the shared_ptr, not the heap it points at, so
+ *        draining it is intentional rather than a signature accident; callers must not reuse it.
  * @param graph Graph interface for storing neighbour connections.
  * @param distance_provider Supplies pairwise distances.
  * @param allocator Allocator for temporary storage.

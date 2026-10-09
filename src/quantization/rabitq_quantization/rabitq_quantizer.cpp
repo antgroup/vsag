@@ -4119,7 +4119,10 @@ RaBitQuantizer<metric>::ComputeFusedPairIP(const uint8_t* one_bit_code1,
     const uint64_t rescale_offset = SupplementMetaOffset() + sizeof(float);
     std::memcpy(&full_rescale1, supplement_code1 + rescale_offset, sizeof(float));
     std::memcpy(&full_rescale2, supplement_code2 + rescale_offset, sizeof(float));
-    constexpr float metric_scale = 1.0F;  // inner product
+    // Inner product keeps the stored residual scale as is; the division by the compile-time 1.0F
+    // is retained only so this reads the same as the L2 difference path (which halves it) and is
+    // folded away by the compiler.
+    constexpr float metric_scale = 1.0F;
     const float residual_scale1 = -full_rescale1 / metric_scale;
     const float residual_scale2 = -full_rescale2 / metric_scale;
     if (not IsFiniteRaBitQValue(residual_scale1) or not IsFiniteRaBitQValue(residual_scale2)) {
