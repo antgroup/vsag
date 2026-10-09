@@ -91,3 +91,5 @@ The installed consumer and v0.1 measurements are documented in the linked Englis
 ## FP16 graph storage
 
 Call `BuildGraph(VectorStorage::FP16, max_degree, ef_search)` to store graph vectors as IEEE binary16 while keeping the existing FP32 input and search API. The original `BuildGraph(max_degree, ef_search)` remains FP32. `ActiveVectorStorage()` reports the active representation. FP16 graphs use snapshot version 3; versions 1 and 2 remain readable and unchanged. Loading does not require the save host ISA because the stored representation is portable little-endian binary16. The loader bulk-reads v3 vectors directly into final FP16 storage, validates finite binary16 exponent fields, and converts byte order in place on non-little-endian hosts. Values outside the finite FP16 range are rejected when the graph is built or updated.
+
+Per-call query budgets are available through `SearchWithOptions`; see the [guide](../docs/docs/en/src/development/lite_first.md#per-query-graph-budget). Graph updates with identical stored values preserve topology after input validation.

@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <limits>
 #include <new>
 #include <queue>
@@ -37,6 +38,21 @@ farther(const Candidate& left, const Candidate& right) {
     return left.distance > right.distance or
            (left.distance == right.distance and left.slot > right.slot);
 }
+
+// Concrete comparator types let heap operations inline the existing total ordering.
+struct Closer {
+    bool
+    operator()(const Candidate& left, const Candidate& right) const {
+        return closer(left, right);
+    }
+};
+
+struct Farther {
+    bool
+    operator()(const Candidate& left, const Candidate& right) const {
+        return farther(left, right);
+    }
+};
 
 class GraphBackend final : public Backend {
 public:
@@ -119,6 +135,15 @@ public:
                 encoded = encode(vector);
             }
             const uint64_t slot = found->second;
+            // Validation and FP16 encoding must precede the identity check. Preserve
+            // the graph when the stored representation is unchanged.
+            const bool unchanged =
+                fp16_
+                    ? std::equal(encoded.begin(), encoded.end(), fp16_vectors_.data() + slot * dim)
+                    : std::memcmp(vector, vectors_.data() + slot * dim, dim * sizeof(float)) == 0;
+            if (unchanged) {
+                return {};
+            }
             auto neighbors = nearest(vector, max_degree_, slot);
             if (not neighbors) {
                 return tl::unexpected(neighbors.error());
@@ -194,16 +219,30 @@ public:
 
     tl::expected<std::vector<Neighbor>, Error>
     Search(const float* query, uint64_t dim, uint64_t k) const override {
-        return SearchImpl(query, dim, k, nullptr);
+        return SearchImpl(query, dim, k, nullptr, ef_search_);
     }
 
     tl::expected<std::vector<Neighbor>, Error>
     Search(const float* query, uint64_t dim, uint64_t k, const IdFilter& filter) const override {
-        return SearchImpl(query, dim, k, filter ? &filter : nullptr);
+        return SearchImpl(query, dim, k, filter ? &filter : nullptr, ef_search_);
     }
 
     tl::expected<std::vector<Neighbor>, Error>
-    SearchImpl(const float* query, uint64_t dim, uint64_t k, const IdFilter* filter) const {
+    SearchWithOptions(const float* query,
+                      uint64_t dim,
+                      uint64_t k,
+                      const SearchOptions& options,
+                      const IdFilter& filter) const override {
+        const uint64_t budget = options.ef_search == 0 ? ef_search_ : options.ef_search;
+        return SearchImpl(query, dim, k, filter ? &filter : nullptr, budget);
+    }
+
+    tl::expected<std::vector<Neighbor>, Error>
+    SearchImpl(const float* query,
+               uint64_t dim,
+               uint64_t k,
+               const IdFilter* filter,
+               uint64_t budget) const {
         auto valid = validate(query, dim, Dim());
         if (not valid) {
             return tl::unexpected(valid.error());
@@ -213,13 +252,11 @@ public:
             if (k == 0) {
                 return std::vector<Neighbor>{};
             }
-            const uint64_t ef = std::min(Size(), std::max(k, ef_search_));
+            const uint64_t ef = std::min(Size(), std::max(k, budget));
             // With closer as Compare, top() is the farthest candidate and pop() evicts it.
-            std::priority_queue<Candidate, std::vector<Candidate>, decltype(&closer)> best(&closer);
-            std::priority_queue<Candidate, std::vector<Candidate>, decltype(&closer)> accepted(
-                &closer);
-            std::priority_queue<Candidate, std::vector<Candidate>, decltype(&farther)> candidates(
-                &farther);
+            std::priority_queue<Candidate, std::vector<Candidate>, Closer> best;
+            std::priority_queue<Candidate, std::vector<Candidate>, Closer> accepted;
+            std::priority_queue<Candidate, std::vector<Candidate>, Farther> candidates;
             std::vector<uint8_t> visited(Size(), 0);
             std::vector<uint16_t> encoded_query;
             if (fp16_) {
@@ -495,7 +532,7 @@ private:
             }
             std::sort(ranked.begin(),
                       ranked.begin() + static_cast<std::ptrdiff_t>(neighbors.size()),
-                      closer);
+                      Closer{});
             for (uint64_t i = 0; i < max_degree_; ++i) {
                 neighbors[i] = ranked[i].slot;
             }

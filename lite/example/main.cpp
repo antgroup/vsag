@@ -128,4 +128,18 @@ main(int argc, char** argv) {
     }
     std::cout << "loaded id=" << restored->front().id
               << " squared_l2=" << restored->front().distance << '\n';
+    auto graph = (*loaded)->BuildGraph(4, 8);
+    if (not graph) {
+        std::cerr << "BuildGraph failed: " << graph.error().message << '\n';
+        return 1;
+    }
+    const vsag::lite::SearchOptions options{64};
+    auto graph_result = (*loaded)->SearchWithOptions(remaining, 3, 1, options);
+    if (not graph_result or graph_result->size() != 1 or graph_result->front().id != 7 or
+        graph_result->front().distance != 0) {
+        std::cerr << "Graph SearchWithOptions returned an unexpected result\n";
+        return 1;
+    }
+    std::cout << "graph query id=" << graph_result->front().id << " budget=" << options.ef_search
+              << '\n';
 }

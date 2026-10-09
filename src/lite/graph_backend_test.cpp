@@ -642,3 +642,30 @@ TEST_CASE("Lite graph SIFT fresh-process load probe", "[.][lite-sift-load]") {
               << std::filesystem::file_size(snapshot_path) << '\n';
     REQUIRE(hits >= queries.size() * 5);
 }
+
+TEST_CASE("Lite restore rejects invalid layouts and duplicate FP16 IDs", "[lite-graph]") {
+    REQUIRE_FALSE(vsag::lite::detail::restore_brute_force_backend(0, {1}, {1.0F}));
+    REQUIRE_FALSE(vsag::lite::detail::restore_brute_force_backend(1, {1}, {}));
+    REQUIRE_FALSE(
+        vsag::lite::detail::restore_fp16_graph_backend(1, 2, 8, {1, 1}, {0, 0}, {{}, {}}));
+}
+
+TEST_CASE("Lite FP16 restore and conversion reject unsafe inputs", "[lite-graph]") {
+    using vsag::lite::detail::restore_fp16_graph_backend;
+    REQUIRE_FALSE(restore_fp16_graph_backend(1, 2, 8, {1}, {}, {{}}));
+    REQUIRE_FALSE(restore_fp16_graph_backend(1, 2, 8, {1, 2}, {0, 0}, {{0}, {}}));
+    REQUIRE_FALSE(
+        restore_fp16_graph_backend(1, 2, 8, {1, 2, 3, 4}, {0, 0, 0, 0}, {{1, 2, 3}, {}, {}, {}}));
+    auto flat = make_brute_force_backend(1);
+    REQUIRE(flat);
+    const float huge = 70000.0F;
+    REQUIRE((*flat)->Add(17, &huge, 1));
+    REQUIRE_FALSE(make_fp16_graph_backend(**flat, 2, 8));
+    REQUIRE_FALSE(make_fp16_graph_backend(**flat, 1, 8));
+    const float small = 1.0F;
+    REQUIRE((*flat)->Update(17, &small, 1));
+    auto graph = make_fp16_graph_backend(**flat, 2, 8);
+    REQUIRE(graph);
+    REQUIRE_FALSE((*graph)->Search(&huge, 1, 1));
+    REQUIRE((*graph)->Search(&small, 1, 1)->front().id == 17);
+}
