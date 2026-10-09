@@ -2,6 +2,41 @@
 
 set -e
 
+# Optional Docker env-file: one unquoted VSAG_THIRDPARTY_<NAME>=URL per line.
+# Pinned names are supported; blank lines and full-line comments are ignored.
+# Values are literal (including =, &, # and $); no shell expansion or inline comments.
+# File values override image defaults; duplicate keys are rejected. Host
+# variables are not forwarded. CMake prefers pinned names over legacy names.
+thirdparty_env_args=()
+if [[ ${VSAG_THIRDPARTY_ENV_FILE+x} ]]; then
+    if [[ ! -f "$VSAG_THIRDPARTY_ENV_FILE" || ! -r "$VSAG_THIRDPARTY_ENV_FILE" ]]; then
+        echo "VSAG_THIRDPARTY_ENV_FILE must name a readable regular file" >&2
+        exit 1
+    fi
+    # Validate a strict subset of Docker's env-file format before any image build.
+    # Reject bare keys (host inheritance), export prefixes, non-ASCII/control bytes,
+    # and lines exceeding Docker's scanner limit. Never print file contents.
+    LC_ALL=C awk '
+        function invalid() {
+            printf "Invalid VSAG_THIRDPARTY_ENV_FILE entry at line %d: expected a unique VSAG_THIRDPARTY_<NAME>=URL\n", NR > "/dev/stderr"
+            exit 1
+        }
+        {
+            sub(/\r$/, "")
+            if (length($0) > 65534 || $0 ~ /[^\t -~]/) invalid()
+        }
+        /^[[:blank:]]*(#|$)/ { next }
+        {
+            if ($0 !~ /^VSAG_THIRDPARTY_[A-Z0-9_]+=([A-Za-z][A-Za-z0-9+.-]*):\/\/[!-~]+$/) {
+                invalid()
+            }
+            key = substr($0, 1, index($0, "=") - 1)
+            if (seen[key]++) invalid()
+        }
+    ' "$VSAG_THIRDPARTY_ENV_FILE"
+    thirdparty_env_args=(--env-file "$VSAG_THIRDPARTY_ENV_FILE")
+fi
+
 CURRENT_UID=$(id -u)
 CURRENT_GID=$(id -g)
 
@@ -18,7 +53,8 @@ build() {
 
     docker build -t $image_name -f $dockerfile .
 
-    docker run -u $CURRENT_UID:$CURRENT_GID --rm -v $(pwd):/work $image_name \
+    docker run -u "$CURRENT_UID:$CURRENT_GID" --rm -v "$(pwd):/work" \
+           "${thirdparty_env_args[@]}" "$image_name" \
            bash -c "\
            export COMPILE_JOBS=\"$compile_jobs\" && \
            export CMAKE_INSTALL_PREFIX=/tmp/vsag && \
