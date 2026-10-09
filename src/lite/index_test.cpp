@@ -5,11 +5,17 @@
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
+#include <iterator>
 #include <limits>
+#include <new>
 #include <random>
 #include <sstream>
+#include <stdexcept>
+#include <streambuf>
 #include <unordered_map>
+#include <vector>
 
+#include "fp16_distance.h"
 #include "fp32_distance.h"
 
 using vsag::lite::Index;
@@ -367,4 +373,249 @@ TEST_CASE("Lite FP32 ISA kernels preserve squared-L2 across short and tail dimen
             REQUIRE(std::abs(actual - expected) <= 1e-4F * std::max(1.0F, expected));
         }
     }
+}
+
+TEST_CASE("Lite per-query budget preserves defaults, filters and mutation policy", "[lite]") {
+    auto reference = Index::Create(2);
+    REQUIRE(reference);
+    for (int64_t id = -32; id < 32; ++id) {
+        const int64_t row = (id + 32) / 11;
+        const float vector[]{static_cast<float>((id + 32) % 11 - 5), static_cast<float>(row - 3)};
+        REQUIRE((*reference)->Add(id, vector, 2));
+    }
+    std::stringstream base;
+    REQUIRE((*reference)->Save(base));
+    const float query[]{4.25F, -3.75F};
+    const vsag::lite::IdFilter even = [](int64_t id) { return id % 2 == 0; };
+    const auto compare = [](const auto& left, const auto& right) {
+        REQUIRE(left);
+        REQUIRE(right);
+        REQUIRE(left->size() == right->size());
+        for (uint64_t i = 0; i < left->size(); ++i) {
+            REQUIRE((*left)[i].id == (*right)[i].id);
+            REQUIRE((*left)[i].distance == (*right)[i].distance);
+        }
+    };
+    for (const int mode : {0, 1, 2}) {
+        std::stringstream input(base.str());
+        auto created = Index::Load(input);
+        REQUIRE(created);
+        if (mode != 0) {
+            const auto storage =
+                mode == 1 ? vsag::lite::VectorStorage::FP32 : vsag::lite::VectorStorage::FP16;
+            REQUIRE((*created)->BuildGraph(storage, 4, 8));
+        }
+        std::stringstream before;
+        REQUIRE((*created)->Save(before));
+        compare((*created)->Search(query, 2, 10), (*created)->SearchWithOptions(query, 2, 10, {}));
+        compare((*created)->Search(query, 2, 10, {}),
+                (*created)->SearchWithOptions(query, 2, 10, {}, {}));
+        compare((*created)->Search(query, 2, 10, even),
+                (*created)->SearchWithOptions(query, 2, 10, {}, even));
+        compare((*reference)->Search(query, 2, 10),
+                (*created)->SearchWithOptions(query, 2, 10, {UINT64_MAX}));
+        compare((*reference)->Search(query, 2, 10, even),
+                (*created)->SearchWithOptions(query, 2, 10, {UINT64_MAX}, even));
+        REQUIRE((*created)->SearchWithOptions(query, 2, 10, {1})->size() == 10);
+        REQUIRE((*created)->SearchWithOptions(query, 2, 0, {UINT64_MAX})->empty());
+        REQUIRE_FALSE((*created)->SearchWithOptions(nullptr, 2, 10, {64}));
+        REQUIRE_FALSE((*created)->SearchWithOptions(query, 1, 10, {64}));
+        const vsag::lite::IdFilter reject = [](int64_t) { return false; };
+        REQUIRE((*created)->SearchWithOptions(query, 2, 10, {64}, reject)->empty());
+        std::stringstream after;
+        REQUIRE((*created)->Save(after));
+        REQUIRE(after.str() == before.str());
+        std::stringstream twin_input(before.str());
+        auto twin = Index::Load(twin_input);
+        REQUIRE(twin);
+        const float changed[]{20, 21};
+        for (auto* index : {created->get(), twin->get()}) {
+            REQUIRE(index->Update(-32, changed, 2));
+            REQUIRE(index->Remove(31));
+            REQUIRE(index->Add(100, changed, 2));
+        }
+        std::stringstream mutated;
+        std::stringstream twin_mutated;
+        REQUIRE((*created)->Save(mutated));
+        REQUIRE((*twin)->Save(twin_mutated));
+        REQUIRE(mutated.str() == twin_mutated.str());
+    }
+    auto empty = Index::Create(2);
+    REQUIRE(empty);
+    REQUIRE((*empty)->BuildGraph(4, 8));
+    REQUIRE((*empty)->SearchWithOptions(query, 2, 10, {UINT64_MAX})->empty());
+}
+
+TEST_CASE("Lite identical graph updates preserve snapshots after validation", "[lite]") {
+    for (const auto storage : {vsag::lite::VectorStorage::FP32, vsag::lite::VectorStorage::FP16}) {
+        auto created = vsag::lite::Index::Create(2);
+        REQUIRE(created);
+        auto& index = **created;
+        const float origin[]{0.0F, 0.0F};
+        const float a[]{1.0F, 0.0F};
+        const float b[]{0.0F, 1.0F};
+        const float c[]{2.0F, 1.0F};
+        REQUIRE(index.Add(1, origin, 2));
+        REQUIRE(index.Add(2, a, 2));
+        REQUIRE(index.Add(3, b, 2));
+        REQUIRE(index.Add(4, c, 2));
+        REQUIRE(index.BuildGraph(storage, 2, 8));
+        auto snapshot = [&index]() {
+            std::stringstream bytes;
+            REQUIRE(index.Save(bytes));
+            return bytes.str();
+        };
+        const auto before = snapshot();
+        REQUIRE(index.Update(1, origin, 2));
+        REQUIRE(static_cast<bool>(snapshot() == before));
+        REQUIRE_FALSE(index.Update(99, origin, 2));
+        REQUIRE_FALSE(index.Update(1, nullptr, 2));
+        REQUIRE_FALSE(index.Update(1, origin, 1));
+        const float invalid[]{std::numeric_limits<float>::infinity(), 0.0F};
+        REQUIRE_FALSE(index.Update(1, invalid, 2));
+        REQUIRE(static_cast<bool>(snapshot() == before));
+        if (storage == vsag::lite::VectorStorage::FP16) {
+            const auto encoded_before = snapshot();
+            const float equivalent[]{1.0001F, 0.0F};
+            REQUIRE(index.Update(2, equivalent, 2));
+            REQUIRE(static_cast<bool>(snapshot() == encoded_before));
+            const float overflow[]{70000.0F, 0.0F};
+            REQUIRE_FALSE(index.Update(2, overflow, 2));
+            REQUIRE(static_cast<bool>(snapshot() == encoded_before));
+        } else {
+            const float signed_zero[]{-0.0F, 0.0F};
+            REQUIRE(index.Update(1, signed_zero, 2));
+            REQUIRE(static_cast<bool>(snapshot() != before));
+        }
+        const float changed[]{0.25F, 0.0F};
+        const auto old = snapshot();
+        REQUIRE(index.Update(1, changed, 2));
+        REQUIRE(static_cast<bool>(snapshot() != old));
+        const auto found = index.Search(changed, 2, 1);
+        REQUIRE(found);
+        REQUIRE(found->front().id == 1);
+        REQUIRE(found->front().distance == 0.0F);
+    }
+}
+
+TEST_CASE("Lite filter allocation errors preserve the index", "[lite]") {
+    for (const bool graph : {false, true}) {
+        auto created = Index::Create(1);
+        REQUIRE(created);
+        const float vector = 1.0F;
+        REQUIRE((*created)->Add(17, &vector, 1));
+        if (graph) {
+            REQUIRE((*created)->BuildGraph(2, 8));
+        }
+        const vsag::lite::IdFilter allocation_failure = [](int64_t) -> bool {
+            throw std::bad_alloc();
+        };
+        const vsag::lite::IdFilter capacity_failure = [](int64_t) -> bool {
+            throw std::length_error("filter capacity failure");
+        };
+        REQUIRE_FALSE((*created)->Search(&vector, 1, 1, allocation_failure));
+        REQUIRE_FALSE((*created)->Search(&vector, 1, 1, capacity_failure));
+        REQUIRE((*created)->Size() == 1);
+        REQUIRE((*created)->Search(&vector, 1, 1)->front().id == 17);
+    }
+}
+
+TEST_CASE("Lite FP16 graph handles tiny values and rounding boundaries", "[lite]") {
+    auto created = Index::Create(8);
+    REQUIRE(created);
+    const float vector[]{0.0F,
+                         -0.0F,
+                         std::numeric_limits<float>::denorm_min(),
+                         std::ldexp(1.0F, -30),
+                         std::ldexp(1.5F, -24),
+                         1.00146484375F,
+                         std::nextafter(2.0F, 0.0F),
+                         65504.0F};
+    REQUIRE((*created)->Add(17, vector, 8));
+    REQUIRE((*created)->BuildGraph(vsag::lite::VectorStorage::FP16, 2, 8));
+    std::stringstream saved;
+    REQUIRE((*created)->Save(saved));
+    auto loaded = Index::Load(saved);
+    REQUIRE(loaded);
+    REQUIRE((*loaded)->Search(vector, 8, 1)->front().id == 17);
+    auto overflow = std::vector<float>(std::begin(vector), std::end(vector));
+    overflow[0] = 65520.0F;
+    REQUIRE_FALSE((*loaded)->Add(18, overflow.data(), 8));
+    overflow[0] = 70000.0F;
+    REQUIRE_FALSE((*loaded)->Update(17, overflow.data(), 8));
+    REQUIRE((*loaded)->Size() == 1);
+    REQUIRE((*loaded)->Search(vector, 8, 1)->front().id == 17);
+}
+
+namespace {
+class FailingPositionBuffer : public std::streambuf {
+public:
+    explicit FailingPositionBuffer(bool allocation) : allocation_(allocation) {
+    }
+
+protected:
+    pos_type
+    seekoff([[maybe_unused]] off_type offset,
+            [[maybe_unused]] std::ios_base::seekdir direction,
+            [[maybe_unused]] std::ios_base::openmode mode) override {
+        if (allocation_) {
+            throw std::bad_alloc();
+        }
+        throw std::length_error("stream position capacity failure");
+    }
+
+private:
+    bool allocation_;
+};
+}  // namespace
+
+TEST_CASE("Lite load translates stream allocation and capacity failures", "[lite]") {
+    for (const bool allocation : {false, true}) {
+        FailingPositionBuffer buffer(allocation);
+        std::istream input(&buffer);
+        input.exceptions(std::ios::badbit);
+        REQUIRE_FALSE(Index::Load(input));
+    }
+}
+
+#ifdef VSAG_LITE_HAS_X86_SIMD
+TEST_CASE("Lite FP16 dispatch requires complete feature combinations", "[lite]") {
+    using namespace vsag::lite::detail;
+    REQUIRE(select_fp16_distance_for(false, false, false, false, false) == generic_fp16_distance);
+    REQUIRE(select_fp16_distance_for(true, true, true, true, false) == generic_fp16_distance);
+    REQUIRE(select_fp16_distance_for(false, true, false, false, true) == generic_fp16_distance);
+    REQUIRE(select_fp16_distance_for(true, false, false, false, true) == avx_fp16_distance);
+    REQUIRE(select_fp16_distance_for(true, true, false, false, true) == avx_fp16_distance);
+    REQUIRE(select_fp16_distance_for(true, true, false, true, true) == avx2_fp16_distance);
+    REQUIRE(select_fp16_distance_for(true, true, true, true, true) == avx512_fp16_distance);
+}
+#endif
+
+TEST_CASE("Lite FP16 removal compacts vectors and reloads with query options", "[lite]") {
+    auto created = Index::Create(2);
+    REQUIRE(created);
+    const float first[]{0.0F, 0.0F};
+    const float middle[]{1.0F, 0.0F};
+    const float last[]{2.0F, 1.0F};
+    REQUIRE((*created)->Add(-10, first, 2));
+    REQUIRE((*created)->Add(20, middle, 2));
+    REQUIRE((*created)->Add(30, last, 2));
+    REQUIRE((*created)->BuildGraph(vsag::lite::VectorStorage::FP16, 2, 8));
+    REQUIRE((*created)->Remove(20));
+    REQUIRE((*created)->Size() == 2);
+    std::stringstream bytes;
+    REQUIRE((*created)->Save(bytes));
+    auto loaded = Index::Load(bytes);
+    REQUIRE(loaded);
+    const auto result = (*loaded)->SearchWithOptions(last, 2, 3, {UINT64_MAX});
+    REQUIRE(result);
+    REQUIRE(result->size() == 2);
+    REQUIRE(result->front().id == 30);
+    REQUIRE(result->front().distance == 0.0F);
+    REQUIRE(std::none_of(result->begin(), result->end(), [](const auto& n) { return n.id == 20; }));
+    const vsag::lite::IdFilter allocation_failure = [](int64_t) -> bool { throw std::bad_alloc(); };
+    const auto failed = (*loaded)->SearchWithOptions(last, 2, 1, {64}, allocation_failure);
+    REQUIRE_FALSE(failed);
+    REQUIRE(failed.error().type == vsag::ErrorType::NO_ENOUGH_MEMORY);
+    REQUIRE((*loaded)->SearchWithOptions(last, 2, 1, {})->front().id == 30);
 }

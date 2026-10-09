@@ -25,6 +25,15 @@ public:
     virtual tl::expected<std::vector<Neighbor>, Error>
     Search(const float* query, uint64_t dim, uint64_t k, const IdFilter& filter) const = 0;
 
+    virtual tl::expected<std::vector<Neighbor>, Error>
+    SearchWithOptions(const float* query,
+                      uint64_t dim,
+                      uint64_t k,
+                      [[maybe_unused]] const SearchOptions& options,
+                      const IdFilter& filter) const {
+        return filter ? Search(query, dim, k, filter) : Search(query, dim, k);
+    }
+
     [[nodiscard]] virtual uint64_t
     Size() const = 0;
     [[nodiscard]] virtual uint64_t

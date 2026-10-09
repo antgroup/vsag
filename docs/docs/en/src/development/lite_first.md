@@ -38,6 +38,7 @@ filtered id=7 squared_l2=48
 updated id=42 squared_l2=0
 removed id=42 remaining=1
 loaded id=7 squared_l2=0
+graph query id=7 budget=64
 ```
 
 Unlike the Full `make` targets, `cmake -S lite` is a separate dependency-isolated
@@ -239,3 +240,12 @@ WARP, SQ8, mmap and concurrent calls are out of scope.
 ## FP16 graph storage
 
 Call `BuildGraph(VectorStorage::FP16, max_degree, ef_search)` to store graph vectors as IEEE binary16 while keeping the existing FP32 input and search API. The original `BuildGraph(max_degree, ef_search)` remains FP32. `ActiveVectorStorage()` reports the active representation. FP16 graphs use snapshot version 3; versions 1 and 2 remain readable and unchanged. Loading does not require the save host ISA because the stored representation is portable little-endian binary16. Version 3 values are bulk-read directly into final FP16 storage, validated by their binary16 exponent fields, and byte-swapped in place when required. Values outside the finite FP16 range are rejected when the graph is built or updated.
+
+
+## Per-query graph budget
+
+`SearchWithOptions(query, dim, k, SearchOptions{ef_search}, filter)` sets the graph budget for one call. Zero uses the configured default; the effective budget is clamped to the live count and at least the requested result count. BruteForce ignores the budget and remains exact. Filtering uses external IDs. Existing Search calls, construction/CRUD budgets and saved defaults remain unchanged. Larger budgets require more work and do not guarantee a recall target. Calls still require external serialization.
+
+The installed consumer example builds with budget 8 and queries with budget 64.
+
+Graph Update validates its input before detecting identical storage: FP32 bytes or encoded FP16 values. An identical update preserves graph topology and snapshot bytes. Missing IDs, invalid dimensions, nonfinite values and FP16 overflow remain errors.
