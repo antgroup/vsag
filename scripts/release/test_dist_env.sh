@@ -83,7 +83,8 @@ VSAG_THIRDPARTY_SPDLOG_COMMIT_0123456789AB=https://mirror.invalid/commit
 VSAG_THIRDPARTY_SPDLOG_TAG_TEST_H0123456789AB=https://mirror.invalid/tag
 ENV
 # CRLF and a final line without a newline are both supported by Docker.
-printf '\r\nVSAG_THIRDPARTY_OPENBLAS_0_3_34=https://mirror.invalid/blas?x=1&y=2#hash' >> "$VSAG_THIRDPARTY_ENV_FILE"
+printf '\r\nVSAG_THIRDPARTY_OPENBLAS_0_3_34=https://mirror.invalid/blas?x=1&y=2#hash' \
+    >> "$VSAG_THIRDPARTY_ENV_FILE"
 run_dist
 [[ ! -e sentinel ]]
 [[ "$VSAG_THIRDPARTY_FMT" == https://host.invalid/fmt ]]

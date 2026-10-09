@@ -18,7 +18,8 @@ if [[ ${VSAG_THIRDPARTY_ENV_FILE+x} ]]; then
     # and lines exceeding Docker's scanner limit. Never print file contents.
     LC_ALL=C awk '
         function invalid() {
-            printf "Invalid VSAG_THIRDPARTY_ENV_FILE entry at line %d: expected a unique VSAG_THIRDPARTY_<NAME>=URL\n", NR > "/dev/stderr"
+            printf ("Invalid VSAG_THIRDPARTY_ENV_FILE entry at line %d: " \
+                    "expected a unique VSAG_THIRDPARTY_<NAME>=URL\n"), NR > "/dev/stderr"
             exit 1
         }
         {

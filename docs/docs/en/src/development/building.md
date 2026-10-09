@@ -133,7 +133,8 @@ in names, including [pin-qualified names](offline_build.md). URLs must start wit
 such as `https://` and contain no whitespace; do not use `export`, quotes or inline comments.
 Blank lines and full-line `#` comments are allowed; LF, CRLF and a missing final newline work.
 Values are literal: `=`, `&`, `#` and `$` are preserved without shell expansion. Duplicate keys,
-invalid entries and lines longer than 65,534 bytes (excluding line endings) fail before image builds.
+invalid entries and lines longer than 65,534 bytes (excluding line endings) fail before image
+builds.
 File values override image defaults; host dependency variables are not forwarded or modified.
 CMake prefers pinned names over legacy names and retains default URLs as download fallbacks.
 An unset path preserves existing behavior; an explicitly empty or unreadable path is an error.
