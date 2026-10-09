@@ -12,7 +12,7 @@
 
 namespace vsag::lite {
 
-/** One owned search result, ordered by squared L2 then ascending external ID. */
+/** One owned result, ordered by L2 distance (or quantized estimate), then external ID. */
 struct Neighbor {
     int64_t id;
     float distance;
@@ -25,7 +25,9 @@ using IdFilter = std::function<bool(int64_t)>;
 enum class BackendKind { BRUTE_FORCE, GRAPH };
 
 /** Vector storage used by the active backend. */
-enum class VectorStorage { FP32, FP16 };
+// RABITQ8 is available only with ENABLE_RABITQ_LITE_BACKEND; distances are
+// quantized L2 estimates. Build requires nonempty training data and fixes the model.
+enum class VectorStorage { FP32, FP16, RABITQ8 };
 
 /** Per-call graph query budget; zero uses the configured default. */
 struct SearchOptions {
@@ -33,7 +35,7 @@ struct SearchOptions {
 };
 
 /**
- * Minimal FP32, squared-L2 index. No concurrent calls are supported.
+ * FP32-input L2 index; RABITQ8 returns quantized estimates. No concurrent calls are supported.
  * Input vectors are borrowed for the duration of a call; stored data is owned.
  * This API and its versioned snapshot are separate from the Full Index ABI/format.
  */
@@ -63,7 +65,7 @@ public:
     tl::expected<void, Error>
     Add(int64_t id, const float* vector, uint64_t dim);
     /** Update an existing ID; a missing ID or invalid vector is an error.
-     * Graph updates preserve topology when the validated stored representation is identical.
+     * Graph updates preserve topology when the complete stored representation is identical.
      */
     tl::expected<void, Error>
     Update(int64_t id, const float* vector, uint64_t dim);

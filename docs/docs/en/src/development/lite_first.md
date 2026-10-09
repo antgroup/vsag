@@ -9,8 +9,8 @@
 > are not compatible with Full VSAG.
 > The filtered Search overload also applies after BuildGraph: rejected external IDs
 > can be traversed to keep the graph connected, but are never returned.
-> No concurrent calls, checksum, SQ8 or mmap are provided. The
-> remainder of this page documents the original v0.1 default behavior.
+> No concurrent calls, checksum, SQ8 or mmap are provided. An optional RaBitQ8
+> backend is documented below. The remainder of this page documents the original v0.1 default behavior.
 
 
 This experimental entry point starts with exact FP32 squared-L2 BruteForce and
@@ -249,3 +249,32 @@ Call `BuildGraph(VectorStorage::FP16, max_degree, ef_search)` to store graph vec
 The installed consumer example builds with budget 8 and queries with budget 64.
 
 Graph Update validates its input before detecting identical storage: FP32 bytes or encoded FP16 values. An identical update preserves graph topology and snapshot bytes. Missing IDs, invalid dimensions, nonfinite values and FP16 overflow remain errors.
+
+## Optional RaBitQ8 graph storage
+
+Configure Lite with `-DENABLE_RABITQ_LITE_BACKEND=ON` and call
+`BuildGraph(VectorStorage::RABITQ8, max_degree, ef_search)` to build the
+8-bit RaBitQ graph backend. The option is off by default, so existing Lite
+builds keep the original source and dependency closure. RaBitQ8 keeps FP32
+inputs at the API boundary, trains its immutable quantization model while
+building from the current BruteForce contents, and reports estimated L2
+values. `ActiveVectorStorage()` returns `RABITQ8` after a successful build.
+
+RaBitQ8 supports Add, Update, Remove, filtered and per-query-budget Search,
+and a dedicated versioned snapshot (`VSAGLQ01`). Mutations prepare all
+fallible work before publishing state and preserve graph reachability and
+encoded storage consistency on failure. The RaBitQ snapshot is owned-memory,
+little-endian and separate from the v1/v2/v3 FP32/FP16 format and from Full
+VSAG serialization. Loading a RaBitQ snapshot requires a build with the same
+option enabled.
+
+The enabled build also provides `lite_rabitq_example` and registers
+`lite_rabitq_api` when tests are enabled:
+
+```sh
+cmake -S lite -B build-lite-rabitq -DCMAKE_BUILD_TYPE=Release \
+  -DENABLE_TESTS=ON -DENABLE_RABITQ_LITE_BACKEND=ON
+cmake --build build-lite-rabitq -j2
+ctest --test-dir build-lite-rabitq --output-on-failure
+./build-lite-rabitq/lite_rabitq_example
+```

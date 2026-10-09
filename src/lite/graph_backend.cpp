@@ -21,6 +21,7 @@ namespace vsag::lite::detail {
 namespace {
 
 constexpr uint64_t K_MAX_DEGREE = 64;
+constexpr uint64_t K_MIN_INCOMING_COMPACT_INTERVAL = 1000;
 
 struct Candidate {
     uint64_t slot;
@@ -95,6 +96,7 @@ public:
             }
             grow(ids_, Size() + 1);
             grow(extras_, Size() + 1);
+            grow(incoming_, Size() + 1);
             for (uint64_t neighbor : *neighbors) {
                 extras_[neighbor].reserve(max_degree_ + 1);
             }
@@ -106,9 +108,12 @@ public:
             }
             ids_.push_back(id);
             extras_.push_back(std::move(*neighbors));
+            incoming_.emplace_back();
+            sync_incoming(Size() - 1, {});
             for (uint64_t neighbor : extras_.back()) {
                 link(neighbor, Size() - 1);
             }
+            ensure_incoming(Size() - 1);
             return {};
         } catch (const std::invalid_argument&) {
             return failure(ErrorType::INVALID_ARGUMENT, "vector exceeds FP16 range");
@@ -151,18 +156,27 @@ public:
             for (uint64_t neighbor : *neighbors) {
                 extras_[neighbor].reserve(max_degree_ + 1);
             }
-            for (uint64_t old_neighbor : extras_[slot]) {
-                auto& reverse = extras_[old_neighbor];
-                reverse.erase(std::remove(reverse.begin(), reverse.end(), slot), reverse.end());
+            const auto old_neighbors = extras_[slot];
+            const auto affected_nodes = incoming_[slot];
+            for (const uint64_t source : affected_nodes) {
+                erase_value(extras_[source], slot);
             }
+            incoming_[slot].clear();
             if (fp16_) {
                 std::copy_n(encoded.data(), dim, fp16_vectors_.data() + slot * dim);
             } else {
                 std::copy_n(vector, dim, vectors_.data() + slot * dim);
             }
-            extras_[slot] = std::move(*neighbors);
+            replace_neighbors(slot, *neighbors);
             for (uint64_t neighbor : extras_[slot]) {
                 link(neighbor, slot);
+            }
+            ensure_incoming(slot);
+            repair(affected_nodes, old_neighbors);
+            // Replacing outgoing edges can orphan old targets, even when they did not
+            // point back to this slot. Their outgoing lists do not need rebuilding.
+            for (const uint64_t target : old_neighbors) {
+                ensure_incoming(target);
             }
             return {};
         } catch (const std::invalid_argument&) {
@@ -182,14 +196,24 @@ public:
         }
         const uint64_t slot = found->second;
         const uint64_t last = Size() - 1;
-        // Degree pruning and restored snapshots may be asymmetric, so outgoing neighbors do not
-        // identify every edge that points to slot or last. Scan all stored edges for correctness.
-        for (auto& neighbors : extras_) {
-            neighbors.erase(std::remove(neighbors.begin(), neighbors.end(), slot), neighbors.end());
-            for (auto& neighbor : neighbors) {
-                if (neighbor == last) {
-                    neighbor = slot;
-                }
+        const auto removed_neighbors = extras_[slot];
+        const auto removed_incoming = incoming_[slot];
+        std::vector<uint64_t> affected_nodes = removed_neighbors;
+        affected_nodes.insert(
+            affected_nodes.end(), removed_incoming.begin(), removed_incoming.end());
+        for (const uint64_t target : removed_neighbors) {
+            erase_value(incoming_[target], slot);
+        }
+        for (const uint64_t source : removed_incoming) {
+            erase_value(extras_[source], slot);
+        }
+        incoming_[slot].clear();
+        if (slot != last) {
+            for (const uint64_t target : extras_[last]) {
+                replace_value(incoming_[target], last, slot);
+            }
+            for (const uint64_t source : incoming_[last]) {
+                replace_value(extras_[source], last, slot);
             }
         }
         if (slot != last) {
@@ -202,6 +226,7 @@ public:
             }
             ids_[slot] = ids_[last];
             extras_[slot] = std::move(extras_[last]);
+            incoming_[slot] = std::move(incoming_[last]);
             extras_[slot].erase(std::remove(extras_[slot].begin(), extras_[slot].end(), slot),
                                 extras_[slot].end());
             slots_.at(ids_[slot]) = slot;
@@ -214,6 +239,18 @@ public:
             vectors_.resize(last * Dim());
         }
         extras_.pop_back();
+        incoming_.pop_back();
+        auto remap = [slot, last](uint64_t node) { return node == last ? slot : node; };
+        for (auto& node : affected_nodes) {
+            node = remap(node);
+        }
+        std::vector<uint64_t> repair_candidates;
+        repair_candidates.reserve(removed_neighbors.size());
+        for (const uint64_t old_candidate : removed_neighbors) {
+            repair_candidates.push_back(remap(old_candidate));
+        }
+        repair(std::move(affected_nodes), repair_candidates);
+        maybe_compact_incoming();
         return true;
     }
 
@@ -371,6 +408,7 @@ public:
         ids_ = std::move(ids);
         vectors_ = std::move(vectors);
         extras_ = std::move(links);
+        incoming_ = build_incoming(extras_);
         return true;
     }
 
@@ -390,6 +428,7 @@ public:
         ids_ = std::move(ids);
         fp16_vectors_ = std::move(vectors);
         extras_ = std::move(links);
+        incoming_ = build_incoming(extras_);
         return true;
     }
 
@@ -424,6 +463,31 @@ public:
     }
 
     [[nodiscard]] uint64_t
+    IncomingLinkCountAt(uint64_t slot) const override {
+        return incoming_[slot].size();
+    }
+
+    [[nodiscard]] uint64_t
+    IncomingLinkAt(uint64_t slot, uint64_t offset) const override {
+        return incoming_[slot][offset];
+    }
+
+    [[nodiscard]] uint64_t
+    IncomingLogicalBytes() const override {
+        return incoming_bytes(false);
+    }
+
+    [[nodiscard]] uint64_t
+    IncomingCapacityBytes() const override {
+        return incoming_bytes(true);
+    }
+
+    [[nodiscard]] uint64_t
+    IncomingCompactionCount() const override {
+        return incoming_compactions_;
+    }
+
+    [[nodiscard]] uint64_t
     Size() const override {
         return ids_.size();
     }
@@ -451,6 +515,168 @@ public:
     }
 
 private:
+    static void
+    erase_value(std::vector<uint64_t>& values, uint64_t value) {
+        values.erase(std::remove(values.begin(), values.end(), value), values.end());
+    }
+
+    static void
+    replace_value(std::vector<uint64_t>& values, uint64_t old_value, uint64_t new_value) {
+        for (uint64_t& value : values) {
+            if (value == old_value) {
+                value = new_value;
+            }
+        }
+    }
+
+    static std::vector<std::vector<uint64_t>>
+    build_incoming(const std::vector<std::vector<uint64_t>>& links) {
+        std::vector<uint64_t> counts(links.size());
+        for (const auto& neighbors : links) {
+            for (const uint64_t target : neighbors) {
+                ++counts[target];
+            }
+        }
+        std::vector<std::vector<uint64_t>> incoming(links.size());
+        for (uint64_t target = 0; target < links.size(); ++target) {
+            incoming[target].reserve(counts[target]);
+        }
+        for (uint64_t source = 0; source < links.size(); ++source) {
+            for (const uint64_t target : links[source]) {
+                incoming[target].push_back(source);
+            }
+        }
+        return incoming;
+    }
+
+    void
+    sync_incoming(uint64_t source, const std::vector<uint64_t>& old_neighbors) {
+        const auto& neighbors = extras_[source];
+        for (const uint64_t target : old_neighbors) {
+            if (std::find(neighbors.begin(), neighbors.end(), target) == neighbors.end()) {
+                erase_value(incoming_[target], source);
+            }
+        }
+        for (const uint64_t target : neighbors) {
+            if (std::find(old_neighbors.begin(), old_neighbors.end(), target) ==
+                old_neighbors.end()) {
+                incoming_[target].push_back(source);
+            }
+        }
+    }
+
+    void
+    replace_neighbors(uint64_t source, const std::vector<uint64_t>& neighbors) {
+        const auto old_neighbors = extras_[source];
+        extras_[source] = neighbors;
+        sync_incoming(source, old_neighbors);
+    }
+
+    [[nodiscard]] uint64_t
+    incoming_bytes(bool capacity) const {
+        uint64_t bytes =
+            (capacity ? incoming_.capacity() : incoming_.size()) * sizeof(std::vector<uint64_t>);
+        for (const auto& sources : incoming_) {
+            bytes += (capacity ? sources.capacity() : sources.size()) * sizeof(uint64_t);
+        }
+        return bytes;
+    }
+
+    void
+    maybe_compact_incoming() {
+        ++removes_since_incoming_check_;
+        const uint64_t interval = std::max(K_MIN_INCOMING_COMPACT_INTERVAL, Size() / 100);
+        if (removes_since_incoming_check_ < interval) {
+            return;
+        }
+        removes_since_incoming_check_ = 0;
+        const uint64_t logical = incoming_bytes(false);
+        const uint64_t capacity = incoming_bytes(true);
+        if (logical == 0 or capacity - logical <= logical / 4) {
+            return;
+        }
+        try {
+            for (auto& sources : incoming_) {
+                sources.shrink_to_fit();
+            }
+            incoming_.shrink_to_fit();
+            ++incoming_compactions_;
+        } catch (const std::bad_alloc&) {
+            // Capacity recovery is best-effort and must not make a successful Remove fail.
+        }
+    }
+
+    void
+    ensure_incoming(uint64_t target) {
+        if (Size() <= 1 or not incoming_[target].empty()) {
+            return;
+        }
+        uint64_t selected_source = Size();
+        uint64_t selected_edge = 0;
+        float farthest_distance = -1.0F;
+        for (const uint64_t source : extras_[target]) {
+            for (uint64_t edge = 0; edge < extras_[source].size(); ++edge) {
+                const uint64_t displaced = extras_[source][edge];
+                if (incoming_[displaced].size() <= 1) {
+                    continue;
+                }
+                const float candidate_distance = distance(source, displaced);
+                if (selected_source == Size() or candidate_distance > farthest_distance) {
+                    selected_source = source;
+                    selected_edge = edge;
+                    farthest_distance = candidate_distance;
+                }
+            }
+        }
+        if (selected_source == Size()) {
+            return;
+        }
+        const auto old_neighbors = extras_[selected_source];
+        extras_[selected_source][selected_edge] = target;
+        sync_incoming(selected_source, old_neighbors);
+    }
+
+    void
+    repair(std::vector<uint64_t> affected_nodes,
+           const std::vector<uint64_t>& additional_candidates) {
+        std::sort(affected_nodes.begin(), affected_nodes.end());
+        affected_nodes.erase(std::unique(affected_nodes.begin(), affected_nodes.end()),
+                             affected_nodes.end());
+        for (const uint64_t source : affected_nodes) {
+            if (source >= Size()) {
+                continue;
+            }
+            // Preserve valid links to limit topology drift; rank only candidates that can
+            // refill the degree lost by the mutation.
+            auto& repaired = extras_[source];
+            if (repaired.size() >= max_degree_) {
+                continue;
+            }
+            const auto old_neighbors = repaired;
+            std::vector<Candidate> ranked;
+            ranked.reserve(additional_candidates.size());
+            for (const uint64_t candidate : additional_candidates) {
+                if (candidate < Size() and candidate != source and
+                    std::find(repaired.begin(), repaired.end(), candidate) == repaired.end()) {
+                    ranked.push_back({candidate, distance(source, candidate)});
+                }
+            }
+            std::sort(ranked.begin(), ranked.end(), Closer{});
+            const uint64_t needed = max_degree_ - repaired.size();
+            const uint64_t retained = std::min(needed, ranked.size());
+            repaired.reserve(repaired.size() + retained);
+            for (uint64_t i = 0; i < retained; ++i) {
+                repaired.push_back(ranked[i].slot);
+            }
+            sync_incoming(source, old_neighbors);
+        }
+        for (const uint64_t target : affected_nodes) {
+            if (target < Size()) {
+                ensure_incoming(target);
+            }
+        }
+    }
+
     template <typename T>
     static void
     grow(std::vector<T>& values, uint64_t required) {
@@ -519,9 +745,11 @@ private:
     void
     link(uint64_t source, uint64_t target) {
         auto& neighbors = extras_[source];
-        if (std::find(neighbors.begin(), neighbors.end(), target) != neighbors.end()) {
+        if (source == target or
+            std::find(neighbors.begin(), neighbors.end(), target) != neighbors.end()) {
             return;
         }
+        const auto old_neighbors = neighbors;
         neighbors.push_back(target);
         if (neighbors.size() > max_degree_) {
             // Cache each distance once before sorting. The shared limit keeps this capacity in
@@ -533,11 +761,24 @@ private:
             std::sort(ranked.begin(),
                       ranked.begin() + static_cast<std::ptrdiff_t>(neighbors.size()),
                       Closer{});
-            for (uint64_t i = 0; i < max_degree_; ++i) {
-                neighbors[i] = ranked[i].slot;
+            uint64_t dropped = max_degree_;
+            for (uint64_t i = neighbors.size(); i > 0; --i) {
+                const uint64_t candidate = ranked[i - 1].slot;
+                const bool safe_to_drop = candidate == target ? not incoming_[candidate].empty()
+                                                              : incoming_[candidate].size() > 1;
+                if (safe_to_drop) {
+                    dropped = i - 1;
+                    break;
+                }
+            }
+            for (uint64_t source = 0, destination = 0; source < neighbors.size(); ++source) {
+                if (source != dropped) {
+                    neighbors[destination++] = ranked[source].slot;
+                }
             }
             neighbors.resize(max_degree_);
         }
+        sync_incoming(source, old_neighbors);
     }
 
     uint64_t dim_;
@@ -551,6 +792,9 @@ private:
     std::vector<int64_t> ids_;
     std::unordered_map<int64_t, uint64_t> slots_;
     std::vector<std::vector<uint64_t>> extras_;
+    std::vector<std::vector<uint64_t>> incoming_;
+    uint64_t removes_since_incoming_check_{};
+    uint64_t incoming_compactions_{};
 };
 
 }  // namespace

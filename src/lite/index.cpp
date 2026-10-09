@@ -118,9 +118,21 @@ Index::BuildGraph(VectorStorage storage, uint64_t max_degree, uint64_t ef_search
     if (impl_->backend->Kind() != BackendKind::BRUTE_FORCE) {
         return failure(ErrorType::INVALID_ARGUMENT, "index is already a graph");
     }
-    auto graph = storage == VectorStorage::FP16
-                     ? detail::make_fp16_graph_backend(*impl_->backend, max_degree, ef_search)
-                     : detail::make_graph_backend(*impl_->backend, max_degree, ef_search);
+    tl::expected<std::unique_ptr<detail::Backend>, Error> graph =
+        failure(ErrorType::UNSUPPORTED_INDEX_OPERATION, "unsupported vector storage");
+    switch (storage) {
+        case VectorStorage::FP32:
+            graph = detail::make_graph_backend(*impl_->backend, max_degree, ef_search);
+            break;
+        case VectorStorage::FP16:
+            graph = detail::make_fp16_graph_backend(*impl_->backend, max_degree, ef_search);
+            break;
+        case VectorStorage::RABITQ8:
+#ifdef VSAG_LITE_HAS_RABITQ_BACKEND
+            graph = detail::make_rabitq_graph_backend(*impl_->backend, max_degree, ef_search);
+#endif
+            break;
+    }
     if (not graph) {
         return tl::unexpected(graph.error());
     }
@@ -185,6 +197,9 @@ Index::SearchWithOptions(const float* query,
 
 tl::expected<void, Error>
 Index::Save(std::ostream& output) const {
+    if (ActiveVectorStorage() == VectorStorage::RABITQ8) {
+        return impl_->backend->SaveEncoded(output);
+    }
     const bool graph = ActiveBackend() == BackendKind::GRAPH;
     const bool fp16 = graph and ActiveVectorStorage() == VectorStorage::FP16;
     const uint64_t vector_bytes = fp16 ? 2 : 4;
@@ -269,6 +284,17 @@ Index::Load(std::istream& input) {
         const auto available = static_cast<uint64_t>(end - start);
         char magic[8];
         input.read(magic, 8);
+#ifdef VSAG_LITE_HAS_RABITQ_BACKEND
+        if (input and std::memcmp(magic, "VSAGLQ01", 8) == 0) {
+            input.seekg(start);
+            auto backend = detail::load_rabitq_graph_backend(input);
+            if (not backend) {
+                return tl::unexpected(backend.error());
+            }
+            auto impl = std::make_unique<Impl>(std::move(*backend));
+            return std::unique_ptr<Index>(new Index(std::move(impl)));
+        }
+#endif
         if (not input or std::memcmp(magic, K_MAGIC, 8) != 0) {
             return failure(ErrorType::INVALID_BINARY, "invalid snapshot magic");
         }
