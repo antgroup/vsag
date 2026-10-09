@@ -14,9 +14,19 @@
 # limitations under the License.
 
 
-add_subdirectory (eval)
-add_subdirectory (autotune)
-add_subdirectory (check_compatibility)
-add_subdirectory (analyze_index)
-add_subdirectory (visualize_index)
-add_subdirectory (rpt_bench)
+add_executable (rpt_bench
+    main.cpp
+    metrics.cpp
+    partitioners.cpp)
+target_include_directories (rpt_bench PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/tools/eval)
+target_link_libraries (rpt_bench PRIVATE
+    eval_obj
+    simd
+    vsag
+    vsag_eval_common
+    ${HDF5_CPP_STATIC_LIBRARY}
+    ${HDF5_C_STATIC_LIBRARY}
+    z dl)
+add_dependencies (rpt_bench hdf5)
