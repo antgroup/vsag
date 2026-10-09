@@ -17,6 +17,7 @@
 
 #include <string>
 
+#include "quantization/caq_encoder.h"
 #include "quantization/quantizer_parameter.h"
 #include "utils/pointer_define.h"
 namespace vsag {
@@ -30,7 +31,7 @@ public:
     static constexpr float DEFAULT_RABITQ_ERROR_RATE = 1.9F;
     static constexpr uint64_t DEFAULT_RABITQ_BITS_PER_DIM_FILTER = 1;
     static constexpr bool DEFAULT_FAST_ENCODE_RABITQ = true;
-    static constexpr uint64_t DEFAULT_FAST_ENCODE_RABITQ_ROUNDS = 6;
+    static constexpr uint64_t DEFAULT_FAST_ENCODE_RABITQ_ROUNDS = DEFAULT_CAQ_ROUNDS;
     static constexpr uint64_t MIN_FAST_ENCODE_RABITQ_ROUNDS = 1;
     static constexpr uint64_t MAX_FAST_ENCODE_RABITQ_ROUNDS = 32;
 
