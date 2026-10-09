@@ -174,6 +174,15 @@ Index::Search(const float* query, uint64_t dim, uint64_t k, const IdFilter& filt
                   : impl_->backend->Search(query, dim, k);
 }
 
+tl::expected<std::vector<Neighbor>, Error>
+Index::SearchWithOptions(const float* query,
+                         uint64_t dim,
+                         uint64_t k,
+                         const SearchOptions& options,
+                         const IdFilter& filter) const {
+    return impl_->backend->SearchWithOptions(query, dim, k, options, filter);
+}
+
 tl::expected<void, Error>
 Index::Save(std::ostream& output) const {
     const bool graph = ActiveBackend() == BackendKind::GRAPH;

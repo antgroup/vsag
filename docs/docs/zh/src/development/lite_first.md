@@ -35,6 +35,7 @@ filtered id=7 squared_l2=48
 updated id=42 squared_l2=0
 removed id=42 remaining=1
 loaded id=7 squared_l2=0
+graph query id=7 budget=64
 ```
 
 与 Full 的 make 入口不同，`cmake -S lite` 刻意隔离依赖。测试复用仓库固定版本
@@ -197,3 +198,12 @@ Debug 构建可加 `-DENABLE_COVERAGE=ON`，运行测试后用 gcov 收集源码
 ## FP16 图存储
 
 调用 `BuildGraph(VectorStorage::FP16, max_degree, ef_search)` 可让图向量使用 IEEE binary16 存储，同时保持现有 FP32 输入与查询接口。原有 `BuildGraph(max_degree, ef_search)` 仍默认使用 FP32；`ActiveVectorStorage()` 可查询当前表示。FP16 图使用 v3 快照，既有 v1/v2 字节与加载行为不变。v3 采用可移植的小端 binary16，加载不依赖保存机器的指令集。加载器将 v3 向量批量读入最终 FP16 存储，通过 binary16 指数位检查有限值，并在需要时原地转换字节序。建图或更新时会拒绝超出有限 FP16 范围的值。
+
+
+## 单次查询的图搜索预算
+
+`SearchWithOptions(query, dim, k, SearchOptions{ef_search}, filter)` 只设置本次图查询预算。零使用已有配置；有效预算不超过当前记录数且至少覆盖所需结果数。BruteForce 忽略该预算并保持精确搜索。过滤仍使用外部 ID。原 Search 调用、建图及 CRUD 预算、快照中的默认配置不变。提高预算会增加工作量，不能保证召回率目标。调用仍需外部串行化。
+
+独立安装示例使用预算 8 建图、预算 64 查询。
+
+图 Update 先验证输入，再判断 FP32 字节或 FP16 编码是否与存储相同。相同值更新保留图结构及快照字节；不存在的 ID、无效维度、非有限数和 FP16 溢出仍返回错误。
