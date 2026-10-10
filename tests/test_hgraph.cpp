@@ -5459,6 +5459,8 @@ TEST_CASE("(PR) HGraph Batch SearchWithRequest layout and restore", "[ft][hgraph
     auto index = TestIndex::TestFactory(HGraphTestIndex::name, params, true);
     auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 128, "l2");
     TestIndex::TestBuildIndex(index, dataset, true);
+    // Batched queries are a public capability and must be discoverable by callers.
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_BATCH_SEARCH));
     auto query = vsag::Dataset::Make();
     query->NumElements(2)
         ->Dim(16)
