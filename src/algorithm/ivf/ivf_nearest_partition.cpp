@@ -107,7 +107,6 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
 
     if (ivf_partition_strategy_param_->partition_train_type ==
         IVFNearestPartitionTrainerType::KMeansTrainer) {
-        constexpr int32_t kmeans_iter_count = 25;
         KMeansGpuConfig gpu_config;
         gpu_config.enabled = ivf_partition_strategy_param_->enable_gpu_build;
         gpu_config.device_id = ivf_partition_strategy_param_->gpu_device_id;
@@ -118,7 +117,7 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
         cls.Run(this->bucket_count_,
                 dataset->GetFloat32Vectors(),
                 dataset->GetNumElements(),
-                kmeans_iter_count);
+                ivf_partition_strategy_param_->GetKMeansIterCount());
         memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
     } else if (ivf_partition_strategy_param_->partition_train_type ==
                IVFNearestPartitionTrainerType::RandomTrainer) {

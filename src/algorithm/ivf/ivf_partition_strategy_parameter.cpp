@@ -115,6 +115,11 @@ IVFPartitionStrategyParameters::FromJson(const JsonType& json) {
         this->gpu_min_work_threshold = gpu_unsigned_or_throw(json, IVF_GPU_MIN_WORK_THRESHOLD_KEY);
     }
 
+    if (json.Contains(IVF_KMEANS_ITER_COUNT_KEY)) {
+        this->kmeans_iter_count = static_cast<int32_t>(json[IVF_KMEANS_ITER_COUNT_KEY].GetInt());
+        CHECK_ARGUMENT(this->kmeans_iter_count > 0, "kmeans_iter_count must be positive");
+    }
+
     this->gnoimi_param = std::make_shared<GNOIMIParameter>();
     if (this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI) {
         CHECK_ARGUMENT(
@@ -147,10 +152,24 @@ IVFPartitionStrategyParameters::ToJson() const {
     json[IVF_GPU_DEVICE_ID_KEY].SetInt(this->gpu_device_id);
     json[IVF_GPU_MEMORY_BUDGET_KEY].SetUint64(this->gpu_memory_budget);
     json[IVF_GPU_MIN_WORK_THRESHOLD_KEY].SetUint64(this->gpu_min_work_threshold);
+    json[IVF_KMEANS_ITER_COUNT_KEY].SetInt(this->GetKMeansIterCount());
     if (this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI) {
         json[IVF_PARTITION_STRATEGY_TYPE_GNO_IMI].SetJson(this->gnoimi_param->ToJson());
     }
     return json;
+}
+
+int32_t
+IVFPartitionStrategyParameters::GetKMeansIterCount() const {
+    if (this->kmeans_iter_count > 0) {
+        return this->kmeans_iter_count;
+    }
+    // Historical defaults: the single-level IVF trainer used 25 iterations while the
+    // GNO-IMI two-level trainer used 30. Keeping them per-strategy preserves the exact
+    // build behaviour of existing users while making both configurable.
+    return this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI
+               ? DEFAULT_GNO_IMI_KMEANS_ITER_COUNT
+               : DEFAULT_IVF_KMEANS_ITER_COUNT;
 }
 
 bool
@@ -159,6 +178,13 @@ IVFPartitionStrategyParameters::CheckCompatibility(const ParamPtr& other) const 
     CHECK_FIELD_EQ(*this, *p, partition_strategy_type);
     CHECK_FIELD_EQ(*this, *p, route_max_degree);
     CHECK_FIELD_EQ(*this, *p, route_ef_construction);
+    // Compare the resolved iteration count, not the raw field: ToJson() persists the resolved
+    // value, so a reader created without the key (raw -1) must still match an index that was
+    // trained and stored with the strategy default.
+    if (this->GetKMeansIterCount() != p->GetKMeansIterCount()) {
+        logger::error("kmeans_iter_count mismatch");
+        return false;
+    }
     // use_route_graph selects the layout only when a new index is trained. Serialized partitions
     // are self-describing and must remain loadable by readers created with either setting.
     CHECK_SUB_PARAM(*this, *p, gnoimi_param);
