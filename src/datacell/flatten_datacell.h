@@ -126,7 +126,8 @@ public:
         std::unique_lock lock(this->mutex_);
         // Caller has moved survivors below capacity; only stale tail slots are truncated.
         // Logical truncation must survive a best-effort physical shrink allocation failure.
-        this->total_count_ = std::min(this->total_count_, capacity);
+        const auto total_count = this->total_count_.load(std::memory_order_relaxed);
+        this->total_count_.store(std::min(total_count, capacity), std::memory_order_release);
         this->layout_->Shrink(capacity);
         this->max_capacity_ = capacity;
     }
