@@ -15,14 +15,16 @@
 
 #pragma once
 
-#include <chrono>
+#include <optional>
 
 #include "monitor.h"
 namespace vsag::eval {
 
 class RecallMonitor : public Monitor {
 public:
-    explicit RecallMonitor(uint64_t max_record_counts = 0, bool use_id_based_recall = false);
+    explicit RecallMonitor(uint64_t max_record_counts = 0,
+                           bool use_id_based_recall = false,
+                           std::optional<double> recall_target = std::nullopt);
 
     ~RecallMonitor() override = default;
 
@@ -32,6 +34,8 @@ public:
     void
     Stop() override;
 
+    // Read results after all Record() calls have completed. SearchEvalCase waits at
+    // the search loop's OpenMP barrier before collecting results; Stop() is a no-op.
     JsonType
     GetResult() override;
 
@@ -51,11 +55,16 @@ private:
     double
     cal_recall_rate(double rate);
 
+    void
+    record_recall(double recall);
+
 private:
     std::vector<double> recall_records_;
 
     std::vector<std::string> metrics_;
     bool use_id_based_recall_{false};
+    std::optional<double> recall_target_;
+    uint64_t reached_queries_{0};
 };
 
 }  // namespace vsag::eval
