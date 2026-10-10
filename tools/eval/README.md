@@ -19,3 +19,4 @@ The canonical documentation for `eval_performance` lives in the website source t
 - Website: <https://vsag.io/docs/resources/eval.html>
 - Chinese website: <https://vsag.io/docs/zh/resources/eval.html>
 - Config template: [eval_template.yaml](eval_template.yaml)
+- Query subset preparation: [prepare_query_split.py](prepare_query_split.py), with [usage instructions](../../docs/docs/en/src/resources/eval.md#prepare-calibration-and-validation-inputs).
