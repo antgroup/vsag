@@ -70,6 +70,8 @@ auto result = index->KnnSearch(
 | `pipnn_leaf_neighbor_count` | int | `5` | 每个点在每个叶子中贡献的最近候选数，是 PiPNN 主要的质量/构建工作量旋钮；小于 `pipnn_min_leaf_size` 的叶子至少使用 `4` |
 | `pipnn_hash_plane_count` | int | `12` | 方向 hash 位数，范围 `[1, 15]`；`max_degree` 不能超过 `2` 的该次幂 |
 | `pipnn_reservoir_size` | int | `64` | 最终剪枝前每个点保留的候选槽数；实际容量至少为 `max_degree` |
+| `pipnn_adaptive_pruning` | bool | `false` | 实验性逐点动态 alpha，仅用于 PiPNN 最终剪枝，要求 L2 |
+| `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | 调整步长；启用时要求有限、非负、`alpha - 2*step > 0`，且 `alpha + 3*step` 有限 |
 | `use_reverse_edges` | bool | `false` | 跟踪入边，实现 O(1) 反向邻居查找；边存储约翻倍，且 `graph_storage_type: "compressed"` 不支持 |
 | `label_remap_type` | string | `"pg"` | label 到内部 ID 的 map 实现：`"pg"` 或 `"robin"`；恢复或组合兼容索引时应保持一致 |
 | `use_reorder` | bool | `false` | 是否额外保留一份高精度副本用于精排 |
@@ -117,6 +119,17 @@ HGraph 现有的路由层、向量存储、搜索、过滤、精排、增量 `Ad
 `OPENBLAS_NUM_THREADS=1`，避免 BLAS 线程影响构建线程扩展性。可复现配置
 `tools/eval/pipnn_parallel.yaml` 会在 SIFT1M 上以相同 Recall@10 目标比较 NSW、ODescent 和
 PiPNN，并通过查询验证每一份生成的图。
+
+
+### 实验性 PiPNN 动态 alpha
+
+在 `index_param` 中设置 `pipnn_adaptive_pruning: true`，将 [PR #2933](https://github.com/antgroup/vsag/pull/2933) 的逐点计数反馈规则用于 PiPNN 最终 reservoir 剪枝。此实验功能默认关闭，仅支持 L2 和初始批量 `Build`；分区、leaf 内候选、relative hash、reservoir 内容、后续增量 `Add` 及 ODescent 路由层构建保持原有行为。
+
+设目标度数为 K，首轮按配置的 alpha 扫描原有有序 reservoir，得到接受集合 A 和已扫描的拒绝集合 B；未扫描尾部不计入 B。步长非零时，若 `0 < |A| < K`，保留 A，根据 `K/|A| <= 1.5`、`(1.5, 3]`、`> 3` 分别将 alpha 增加 1、2、3 个步长，重扫 B。若 `|A| = K`，根据 `|B|/K < 2.5`、`[2.5, 5)`、`>= 5` 分别将 alpha 减少 2、1、0 个步长，清空 A 并重扫完整原候选列表（包括首轮未扫描尾部）。收紧后若不足 K，保留当前接受项，按原 alpha 重扫收紧阶段新产生的拒绝集合。不会无条件补入被拒绝的邻居。
+
+拒绝条件仍为 `alpha * d(已选邻居, 候选) < d(源点, 候选)`。保留 PiPNN 的 BF16 源点距离缓存、FP32 两点平方 L2 计算和 `(距离, 源点 ID 差, ID)` 排序。PiPNN 原算法已对较短 reservoir 剪枝，因此零步长会复现其原单轮邻接结果。贪心选择和度数上限意味着 Recall 不一定随 alpha 单调增加。
+
+策略和步长会序列化；加载已启用的索引要求策略、基础 alpha、步长一致，旧参数缺失字段按关闭处理。关闭时保留原有行为。该功能属于实验性质，需对比构建开销和匹配召回率时的查询吞吐。
 
 ### 向量存储去重
 

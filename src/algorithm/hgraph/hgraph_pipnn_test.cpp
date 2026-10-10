@@ -180,6 +180,106 @@ TEST_CASE("HGraph exposes PiPNN build parameters", "[ut][pipnn][hgraph][paramete
     REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(parameter, MakePiPNNCommonParam(8)));
 }
 
+TEST_CASE("HGraph PiPNN adaptive policy validates and persists", "[ut][pipnn_adaptive][hgraph]") {
+    const auto common = MakePiPNNCommonParam(8);
+    auto parameter = MakePiPNNHGraphParam();
+    parameter["alpha"].SetFloat(1.2F);
+    parameter["pipnn_adaptive_pruning"].SetBool(true);
+    parameter["pipnn_adaptive_pruning_adjust_step"].SetFloat(0.04F);
+    auto mapped = std::dynamic_pointer_cast<vsag::HGraphParameter>(
+        vsag::HGraph::CheckAndMappingExternalParam(parameter, common));
+    REQUIRE(mapped->pipnn_param.adaptive_pruning);
+    CHECK(mapped->pipnn_param.alpha == 1.2F);
+    CHECK(mapped->pipnn_param.adaptive_pruning_adjust_step == 0.04F);
+    CHECK(mapped->odescent_param->alpha == 1.2F);
+    auto restored = std::make_shared<vsag::HGraphParameter>();
+    restored->FromJson(mapped->ToJson());
+    REQUIRE(mapped->CheckCompatibility(restored));
+    restored->pipnn_param.adaptive_pruning_adjust_step = 0.06F;
+    CHECK_FALSE(mapped->CheckCompatibility(restored));
+    restored->FromJson(mapped->ToJson());
+    restored->alpha = 1.1F;
+    CHECK_FALSE(mapped->CheckCompatibility(restored));
+    restored->FromJson(mapped->ToJson());
+    restored->pipnn_param.adaptive_pruning = false;
+    CHECK_FALSE(mapped->CheckCompatibility(restored));
+
+    auto legacy_json = mapped->ToJson();
+    legacy_json[vsag::GRAPH_KEY].GetInnerJson()->erase("pipnn_adaptive_pruning");
+    legacy_json[vsag::GRAPH_KEY].GetInnerJson()->erase("pipnn_adaptive_pruning_adjust_step");
+    restored->FromJson(legacy_json);
+    CHECK_FALSE(restored->pipnn_param.adaptive_pruning);
+    CHECK(restored->pipnn_param.adaptive_pruning_adjust_step == 0.06F);
+
+    for (const auto metric :
+         {vsag::MetricType::METRIC_TYPE_IP, vsag::MetricType::METRIC_TYPE_COSINE}) {
+        CHECK_THROWS(MakePiPNNIndex(parameter, MakePiPNNCommonParam(8, metric)));
+    }
+    for (const auto* graph_type : {"nsw", "odescent"}) {
+        auto wrong_graph = vsag::JsonType::Parse(parameter.Dump());
+        wrong_graph["graph_type"].SetString(graph_type);
+        CHECK_THROWS(vsag::HGraph::CheckAndMappingExternalParam(wrong_graph, common));
+    }
+    parameter["pipnn_adaptive_pruning_adjust_step"].SetFloat(0.6F);
+    CHECK_THROWS(vsag::HGraph::CheckAndMappingExternalParam(parameter, common));
+}
+
+TEST_CASE("HGraph PiPNN adaptive build reload and search", "[ut][pipnn_adaptive][hgraph]") {
+    const int threads = GENERATE(1, 4);
+    const auto common = MakePiPNNCommonParam(8);
+    auto parameter = MakePiPNNHGraphParam();
+    parameter["build_thread_count"].SetInt(threads);
+    parameter["alpha"].SetFloat(1.2F);
+    parameter["pipnn_adaptive_pruning"].SetBool(true);
+    parameter["pipnn_max_leaf_size"].SetUint64(24);
+    parameter["pipnn_min_leaf_size"].SetUint64(8);
+    auto index = MakePiPNNIndex(parameter, common);
+    std::vector<float> vectors(128 * 8);
+    std::vector<int64_t> labels(128);
+    for (int64_t point = 0; point < 128; ++point) {
+        labels[point] = 1000 + point;
+        for (int64_t dim = 0; dim < 8; ++dim) {
+            vectors[point * 8 + dim] =
+                std::sin(static_cast<float>(point * 13 + dim * 5)) + point * 0.001F;
+        }
+    }
+    REQUIRE(index->Build(MakeDataset(vectors, labels, 8, 128)).has_value());
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = MakePiPNNIndex(parameter, common);
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    REQUIRE(restored->GetNumElements() == 128);
+    for (int64_t point : {0, 31, 95}) {
+        auto query = vsag::Dataset::Make()
+                         ->NumElements(1)
+                         ->Dim(8)
+                         ->Float32Vectors(vectors.data() + point * 8)
+                         ->Owner(false);
+        auto before = index->KnnSearch(query, 10, R"({"hgraph":{"ef_search":128}})");
+        auto after = restored->KnnSearch(query, 10, R"({"hgraph":{"ef_search":128}})");
+        REQUIRE(before.has_value());
+        REQUIRE(after.has_value());
+        REQUIRE(before.value()->GetDim() == 10);
+        REQUIRE(after.value()->GetDim() == 10);
+        // Approximate search may miss a self neighbor; persistence must preserve every result.
+        for (int64_t k = 0; k < 10; ++k) {
+            REQUIRE(before.value()->GetIds()[k] == after.value()->GetIds()[k]);
+            CHECK(before.value()->GetDistances()[k] == after.value()->GetDistances()[k]);
+        }
+    }
+    SECTION("disabled policy cannot load an adaptive index") {
+        parameter["pipnn_adaptive_pruning"].SetBool(false);
+    }
+    SECTION("different base alpha cannot load an adaptive index") {
+        parameter["alpha"].SetFloat(1.3F);
+    }
+    SECTION("different adjustment step cannot load an adaptive index") {
+        parameter["pipnn_adaptive_pruning_adjust_step"].SetFloat(0.04F);
+    }
+    auto incompatible = MakePiPNNIndex(parameter, common);
+    CHECK_FALSE(incompatible->Deserialize(binary.value()).has_value());
+}
+
 TEST_CASE("HGraph PiPNN keeps duplicate-label and entry-point semantics", "[ut][pipnn][hgraph]") {
     constexpr int64_t dimensions = 4;
     auto index = MakePiPNNIndex(MakePiPNNHGraphParam(), MakePiPNNCommonParam(dimensions));

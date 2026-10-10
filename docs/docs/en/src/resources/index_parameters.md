@@ -76,6 +76,8 @@ When `graph_type` is `pipnn`, HGraph and Pyramid also accept the following build
 The existing `alpha` field controls PiPNN's final robust pruning. `ef_construction` only tunes NSW
 and has no effect on PiPNN.
 
+HGraph additionally supports the experimental L2-only options `pipnn_adaptive_pruning` (default `false`) and `pipnn_adaptive_pruning_adjust_step` (default `0.06`). They adapt the final per-point pruning threshold during initial `Build`; see [HGraph adaptive PiPNN pruning](../indexes/hgraph.md). These options are not exposed by Pyramid.
+
 At search time:
 
 ```json

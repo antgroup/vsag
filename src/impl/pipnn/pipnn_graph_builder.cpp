@@ -38,6 +38,7 @@
 #include "hash_types.h"
 #include "impl/blas/blas_function.h"
 #include "impl/thread_pool/safe_thread_pool.h"
+#include "pipnn_adaptive_pruning.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp32_simd.h"
 #include "utils/lock_strategy.h"
@@ -1224,6 +1225,21 @@ PiPNNPipeline::robust_prune(uint32_t source, const ReservoirEntry* row, uint16_t
     std::sort(ordered.begin(), ordered.end(), comparator);
 
     const uint64_t max_degree = graph_->MaximumDegree();
+    if (parameter_.adaptive_pruning) {
+        const auto positions = select_pipnn_edges_adaptive(
+            ordered,
+            max_degree,
+            parameter_.alpha,
+            parameter_.adaptive_pruning_adjust_step,
+            [this](uint32_t lhs, uint32_t rhs) { return pair_distance(lhs, rhs); },
+            allocator_);
+        Vector<InnerIdType> result(allocator_);
+        result.reserve(positions.size());
+        for (const auto position : positions) {
+            result.emplace_back(ids_[ordered[position].second]);
+        }
+        return result;
+    }
     Vector<uint32_t> selected(allocator_);
     selected.reserve(std::min<uint64_t>(ordered.size(), max_degree));
     for (const auto& [source_distance, candidate] : ordered) {
@@ -1326,6 +1342,13 @@ PiPNNPipeline::parallel_for(uint64_t total,
 
 void
 PiPNNGraphBuilderParameter::FromJson(const JsonType& json) {
+    adaptive_pruning = json.Contains(PIPNN_PARAMETER_ADAPTIVE_PRUNING)
+                           ? json[PIPNN_PARAMETER_ADAPTIVE_PRUNING].GetBool()
+                           : false;
+    adaptive_pruning_adjust_step =
+        json.Contains(PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP)
+            ? json[PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP].GetFloat()
+            : 0.06F;
     auto read_uint = [&](const char* key, uint64_t& target) {
         if (not json.Contains(key)) {
             return;
@@ -1372,6 +1395,8 @@ PiPNNGraphBuilderParameter::ToJson() const {
     json[PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT].SetUint64(leaf_neighbor_count);
     json[PIPNN_PARAMETER_HASH_PLANE_COUNT].SetUint64(hash_plane_count);
     json[PIPNN_PARAMETER_RESERVOIR_SIZE].SetUint64(reservoir_size);
+    json[PIPNN_PARAMETER_ADAPTIVE_PRUNING].SetBool(adaptive_pruning);
+    json[PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP].SetFloat(adaptive_pruning_adjust_step);
     return json;
 }
 
@@ -1396,6 +1421,9 @@ PiPNNGraphBuilderParameter::Validate(uint64_t max_degree) const {
     require_argument(reservoir_size > 0, "PiPNN reservoir_size must be positive");
     require_argument(std::isfinite(alpha) and alpha >= 1.0F,
                      "PiPNN alpha must be finite and at least 1");
+    if (adaptive_pruning) {
+        validate_pipnn_adaptive_pruning(alpha, adaptive_pruning_adjust_step);
+    }
     require_argument(max_degree > 0, "PiPNN graph degree must be positive");
     const uint64_t hash_capacity = 1ULL << hash_plane_count;
     require_argument(max_degree <= hash_capacity,
@@ -1425,6 +1453,8 @@ PiPNNGraphBuilder::PiPNNGraphBuilder(PiPNNGraphBuilderParameter parameter,
                          metric_ == MetricType::METRIC_TYPE_COSINE,
                      "PiPNN metric is not supported");
     require_argument(allocator_ != nullptr, "PiPNN allocator must not be null");
+    require_argument(not parameter_.adaptive_pruning or metric_ == MetricType::METRIC_TYPE_L2SQR,
+                     "PiPNN adaptive pruning only supports L2");
 }
 
 void

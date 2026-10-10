@@ -226,7 +226,47 @@ TEST_CASE("PiPNN graph builder writes an empty row for one point", "[ut][pipnn]"
     REQUIRE(neighbors.empty());
 }
 
-TEST_CASE("PiPNN graph builder runs overlapping leaves in parallel", "[ut][pipnn]") {
+TEST_CASE("PiPNN adaptive zero step preserves original adjacency", "[ut][pipnn][pipnn_adaptive]") {
+    constexpr uint64_t dimensions = 8;
+    constexpr uint64_t count = 80;
+    auto common = MakeCommonParam(dimensions);
+    auto vectors = MakeVectors(count, dimensions);
+    vsag::Vector<vsag::InnerIdType> ids(common.allocator_.get());
+    for (uint32_t id = 0; id < count; ++id) {
+        ids.emplace_back(id);
+    }
+    const auto rows = MakeRows(vectors, ids, dimensions, common.allocator_.get());
+    vsag::PiPNNGraphBuilderParameter parameter;
+    parameter.alpha = 1.2F;
+    parameter.max_leaf_size = 12;
+    parameter.min_leaf_size = 4;
+    auto baseline = MakeGraph(common, count, 8);
+    auto zero_step = MakeGraph(common, count, 8);
+    auto adaptive = MakeGraph(common, count, 8);
+    vsag::PiPNNGraphBuilder(parameter, dimensions, common.metric_, common.allocator_.get())
+        .Build(baseline, ids, rows);
+    parameter.adaptive_pruning = true;
+    parameter.adaptive_pruning_adjust_step = 0;
+    vsag::PiPNNGraphBuilder(parameter, dimensions, common.metric_, common.allocator_.get())
+        .Build(zero_step, ids, rows);
+    parameter.adaptive_pruning_adjust_step = 0.06F;
+    vsag::PiPNNGraphBuilder(parameter, dimensions, common.metric_, common.allocator_.get())
+        .Build(adaptive, ids, rows);
+    RequireGraphInvariants(adaptive, ids, 8, common.allocator_.get());
+    for (const auto id : ids) {
+        vsag::Vector<vsag::InnerIdType> first(common.allocator_.get()),
+            second(common.allocator_.get());
+        baseline->GetNeighbors(id, first);
+        zero_step->GetNeighbors(id, second);
+        REQUIRE(first == second);
+    }
+    REQUIRE_THROWS(vsag::PiPNNGraphBuilder(
+        parameter, dimensions, vsag::MetricType::METRIC_TYPE_IP, common.allocator_.get()));
+}
+
+TEST_CASE("PiPNN graph builder runs overlapping leaves in parallel",
+          "[ut][pipnn][pipnn_adaptive]") {
+    const bool adaptive_pruning = GENERATE(false, true);
     constexpr uint64_t dimensions = 8;
     constexpr uint64_t count = 96;
     constexpr uint64_t max_degree = 8;
@@ -247,6 +287,8 @@ TEST_CASE("PiPNN graph builder runs overlapping leaves in parallel", "[ut][pipnn
     parameter.leader_sample_rate = 0.25F;
     parameter.fanout = {3, 2};
     parameter.reservoir_size = 16;
+    parameter.alpha = 1.2F;
+    parameter.adaptive_pruning = adaptive_pruning;
     vsag::PiPNNGraphBuilder(
         parameter, dimensions, common_param.metric_, common_param.allocator_.get())
         .Build(serial, ids, rows);

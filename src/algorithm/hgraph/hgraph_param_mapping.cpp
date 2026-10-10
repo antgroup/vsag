@@ -237,7 +237,9 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                    key == PIPNN_PARAMETER_LEADER_SAMPLE_RATE or key == PIPNN_PARAMETER_FANOUT or
                    key == PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT or
                    key == PIPNN_PARAMETER_HASH_PLANE_COUNT or
-                   key == PIPNN_PARAMETER_RESERVOIR_SIZE) {
+                   key == PIPNN_PARAMETER_RESERVOIR_SIZE or
+                   key == PIPNN_PARAMETER_ADAPTIVE_PRUNING or
+                   key == PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP) {
             inner_json[GRAPH_KEY][key].SetJson(value);
         } else if (key == HGRAPH_BUILD_THREAD_COUNT) {
             inner_json[BUILD_THREAD_COUNT_KEY].SetJson(value);
