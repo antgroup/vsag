@@ -31,8 +31,8 @@ class SearchMetrics;
 DEFINE_POINTER2(AttrInvertedInterface, AttributeInvertedInterface);
 DEFINE_POINTER(FlattenInterface);
 
-// BruteForce index supports both single-vector and multi-vector (WARP-style) modes
-// via FlattenInterface polymorphism (introduced since v0.13)
+// BruteForce index supports dense, sparse, and multi-vector (WARP-style) modes via
+// FlattenInterface polymorphism (introduced since v0.13).
 class BruteForce : public InnerIndexInterface {
 public:
     static ParamPtr
@@ -222,7 +222,19 @@ private:
     shrink_to_fit();
 
     void
-    add_one(const float* data, InnerIdType inner_id);
+    add_one(const void* data, InnerIdType inner_id);
+
+    /**
+     * @brief Return one vector in the representation native to this index.
+     */
+    const void*
+    get_data(const DatasetPtr& dataset, int64_t index = 0) const;
+
+    /**
+     * @brief Validate one sparse vector before passing it to SparseVectorDataCell.
+     */
+    void
+    validate_sparse_vector(const SparseVector& vector, const std::string& name) const;
 
     /**
      * @brief Recalculate and cache the memory-usage counter.
@@ -260,6 +272,7 @@ private:
 
     std::atomic<InnerIdType> max_capacity_{0};  // allocated slot count
 
-    bool is_multi_vector_{false};  // true ⇒ WARP / multi-vector mode
+    bool is_multi_vector_{false};   // true ⇒ WARP / multi-vector mode
+    bool is_sparse_vector_{false};  // true ⇒ sparse single-vector mode
 };
 }  // namespace vsag
