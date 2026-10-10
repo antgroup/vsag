@@ -102,6 +102,12 @@ public:
         }
     }
 
+    // Rebuild derived state after all ReserveIO/WriteRaw/DeserializeTail operations finish.
+    // In the probe path DeserializeTail runs before IO fills, so it cannot do this itself.
+    virtual void
+    FinishDeserialize() {
+    }
+
     virtual void
     Move(InnerIdType from, InnerIdType to) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "Move not implemented in GraphInterface");
@@ -176,6 +182,9 @@ public:
     }
 
     /// Read the tail (e.g. code line size, node versions) following the io data.
+    /// Restore layout/configuration derived from these fields, such as the layout's code size.
+    /// The probe path calls this before WriteRaw fills the backing IO: defer any reconstruction
+    /// that reads backing IO contents (e.g. reverse edges) to FinishDeserialize after all fills join.
     virtual void
     DeserializeTail(StreamReader& reader) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,

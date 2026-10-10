@@ -31,6 +31,29 @@
 
 namespace vsag {
 namespace {
+// Pin one deletion generation while filtering; release it before any label lookup.
+void
+filter_deleted_candidates(const DistHeapPtr& result,
+                          const LabelTablePtr& labels,
+                          Allocator* allocator) {
+    const auto deleted_view = labels->GetDeletedIdsReadView();
+    if (deleted_view == nullptr) {
+        return;
+    }
+    DistanceRecordVector live_records(allocator);
+    live_records.reserve(result->Size());
+    while (not result->Empty()) {
+        const auto record = result->Top();
+        result->Pop();
+        if (deleted_view->CheckValid(record.second)) {
+            live_records.push_back(record);
+        }
+    }
+    for (const auto& record : live_records) {
+        result->Push(record);
+    }
+}
+
 struct HGraphVisitedListGuard {
     std::shared_ptr<VisitedListPool> pool;
     VisitedListPtr visited_list;
@@ -651,6 +674,9 @@ HGraph::search_range_with_request(const SearchRequest& request,
                       ctx);
     }
 
+    if (mci_result.route != "mci") {
+        filter_deleted_candidates(search_result, this->label_table_, ctx.alloc);
+    }
     while (not search_result->Empty() and
            search_result->Top().first > request.radius_ + THRESHOLD_ERROR) {
         search_result->Pop();
@@ -1237,6 +1263,11 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             }
         }
 
+        // A fallback may accept a slot before MARK_REMOVE and another incarnation after Add.
+        // MCI pins its deletion state during traversal; fallback results need this recheck.
+        if (mci_result.route != "mci") {
+            filter_deleted_candidates(search_result, this->label_table_, ctx.alloc);
+        }
         DistanceRecordVector finite_records(ctx.alloc);
         finite_records.reserve(search_result->Size());
         while (not search_result->Empty()) {

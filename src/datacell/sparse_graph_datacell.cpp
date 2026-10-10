@@ -178,6 +178,24 @@ SparseGraphDataCell::Deserialize(StreamReader& reader) {
             this->node_version_[key] = value;
         }
     }
+    if (reverse_edges_) {
+        // Sparse upper-level IDs are not a dense [0, total_count_) range. Reconstruct
+        // incoming edges from the loaded rows using decoded, version-valid neighbors.
+        // GetNeighbors releases its map lock before AddReverseEdge takes the new object's lock;
+        // loading is exclusive to the caller and no graph/reverse-edge lock is nested here.
+        // Its uncontended shared lock preserves the usual decoding/version checks on this
+        // cold path without adding a separate unlocked neighbor API.
+        auto restored = std::make_unique<ReverseEdge>(allocator_);
+        Vector<InnerIdType> neighbors(allocator_);
+        for (const auto& row : neighbors_) {
+            neighbors.clear();
+            this->GetNeighbors(row.first, neighbors);
+            for (auto neighbor : neighbors) {
+                restored->AddReverseEdge(row.first, neighbor);
+            }
+        }
+        reverse_edges_.swap(restored);
+    }
 }
 
 void

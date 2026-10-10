@@ -478,9 +478,11 @@ HGraph::Add(const DatasetPtr& data) {
 
 std::vector<int64_t>
 HGraph::add_impl(const DatasetPtr& data) {
-    std::unique_lock<std::mutex> mci_add_lock(this->mci_add_mutex_, std::defer_lock);
+    // Match FORCE_REMOVE: acquire mutation serialization before pinning vector IDs.
+    // Reversing these locks could block a remover that needs to reacquire its write lock.
+    std::unique_lock<std::mutex> mci_mutation_lock(this->mci_mutation_mutex_, std::defer_lock);
     if (this->mci_parameters_.enabled) {
-        mci_add_lock.lock();
+        mci_mutation_lock.lock();
     }
     const auto mci_start_total = this->total_count_.load();
     const bool had_mci_clique_index = this->mci_parameters_.enabled and
@@ -503,10 +505,16 @@ HGraph::add_impl(const DatasetPtr& data) {
     }
     this->insert_add_batch(data, context, batch);
     if (this->mci_parameters_.enabled) {
+        // MCI candidate generation enters public search, which pins the force-remove lock.
+        // The mutation lock still excludes MCI physical deletion; avoid recursive read locking.
+        if (force_remove_rlock.owns_lock()) {
+            force_remove_rlock.unlock();
+        }
         if (had_mci_clique_index) {
             logger::info("hgraph mci incremental add started, added={}", batch.rows.size());
             for (const auto& row : batch.rows) {
                 this->incremental_update_mci_clique(row.inner_id, get_data(data, row.input_idx));
+                this->maybe_compact_mci(1);
             }
             this->mci_cliques_->MarkAvailable(this->total_count_.load());
             logger::info("hgraph mci incremental add finished, total={}",
@@ -517,6 +525,11 @@ HGraph::add_impl(const DatasetPtr& data) {
                 vectors = this->get_data(data);
             }
             this->build_mci_clique_index(vectors);
+            if (this->support_force_remove()) {
+                const auto removed = this->label_table_->GetAllDeletedIds(this->allocator_);
+                this->remove_from_mci(removed);
+                this->mci_cliques_->MarkAvailable(this->total_count_.load());
+            }
         }
         this->cal_memory_usage();
     }

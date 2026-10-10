@@ -154,6 +154,7 @@ HGraph::ParallelDeserialize(DeserializeReader& reader) {
     auto metadata = footer->GetMetadata();
 
     const auto serialized_total_count = this->apply_footer_metadata(metadata);
+    const auto basic_info = metadata->Get(BASIC_INFO);
 
     auto layout_json = metadata->Get(CHUNKED_LAYOUT_KEY);
     if (layout_json.IsObject()) {
@@ -163,19 +164,27 @@ HGraph::ParallelDeserialize(DeserializeReader& reader) {
         // a tampered footer cannot alias frames or escape the body bounds
         const uint64_t physical_body = reader.Size() - footer->Length();
         chunked_manifest.Validate(physical_body);
-        this->parallel_deserialize_manifest(reader, pool, chunked_manifest);
+        this->parallel_deserialize_manifest(reader, pool, chunked_manifest, basic_info);
     } else {
         // no recorded layout: probe an uncompressed sequential body
         const uint64_t physical_body = reader.Size() - footer->Length();
-        this->parallel_deserialize_probe(reader, pool, physical_body);
+        this->parallel_deserialize_probe(reader, pool, physical_body, basic_info);
     }
 
+    // The probe path parses graph tails before filling IO. Rebuild incoming edges only
+    // after all fills have joined, before any FORCE_REMOVE may relocate tail IDs.
+    this->bottom_graph_->FinishDeserialize();
     this->validate_and_publish_dedup_state(serialized_total_count);
-    this->publish_physical_code_capacity();
-    this->initialize_deserialized_runtime_state();
     if (!this->using_dedup_storage()) {
         this->total_count_ = this->basic_flatten_codes_->TotalCount();
     }
+    if (this->mci_parameters_.enabled) {
+        // Label and MCI whole components can load concurrently; join all tasks before
+        // validating their shared ID domain or restoring the label deletion set.
+        this->restore_mci_label_state(basic_info);
+    }
+    this->publish_physical_code_capacity();
+    this->initialize_deserialized_runtime_state();
     if (this->raw_vector_ != nullptr) {
         this->has_raw_vector_ = true;
     }
@@ -185,7 +194,8 @@ HGraph::ParallelDeserialize(DeserializeReader& reader) {
 void
 HGraph::parallel_deserialize_manifest(DeserializeReader& reader,
                                       ThreadPool& pool,
-                                      const ChunkedManifest& chunked_manifest) {
+                                      const ChunkedManifest& chunked_manifest,
+                                      const JsonType& basic_info) {
     // Validate() proves the physical invariants but does not know which
     // components can be restored frame by frame; reject a tampered
     // granularity here, before any extent is reserved or task dispatched
@@ -301,7 +311,7 @@ HGraph::parallel_deserialize_manifest(DeserializeReader& reader,
             // in place exactly like the sequential Deserialize would
             ReadFuncStreamReader whole_reader(
                 read_func, comp.head_offset, comp.tail_offset + comp.tail_size);
-            this->deserialize_whole_component(comp.name, whole_reader);
+            this->deserialize_whole_component(comp.name, whole_reader, basic_info);
             consumed[i] = true;
         }
     }
@@ -363,9 +373,10 @@ HGraph::parallel_deserialize_manifest(DeserializeReader& reader,
                 // the lock site). A new handler reading or writing a member
                 // shared with another component (e.g. label_table_) is a data
                 // race; give it its own deserialization-phase synchronization.
-                batch.Submit([this, &reader, &read_func, &comp, compressed]() {
+                batch.Submit([this, &reader, &read_func, &comp, compressed, &basic_info]() {
                     if (requires_seekable_payload(comp.name)) {
-                        this->deserialize_seekable_whole_component(reader, comp, compressed);
+                        this->deserialize_seekable_whole_component(
+                            reader, comp, compressed, basic_info);
                         return;
                     }
                     if (compressed) {
@@ -373,7 +384,7 @@ HGraph::parallel_deserialize_manifest(DeserializeReader& reader,
                             reader, comp.offset, comp.compressed_size, [&](std::istream& is) {
                                 ForwardStreamReader forward_reader(is);
                                 BoundedForwardReader bounded(&forward_reader, comp.logical_size);
-                                this->deserialize_whole_component(comp.name, bounded);
+                                this->deserialize_whole_component(comp.name, bounded, basic_info);
                                 if (bounded.GetCursor() != comp.logical_size) {
                                     throw VsagException(
                                         ErrorType::INVALID_BINARY,
@@ -398,7 +409,7 @@ HGraph::parallel_deserialize_manifest(DeserializeReader& reader,
                     } else {
                         ReadFuncStreamReader plain_reader(
                             read_func, comp.offset, comp.offset + comp.logical_size);
-                        this->deserialize_whole_component(comp.name, plain_reader);
+                        this->deserialize_whole_component(comp.name, plain_reader, basic_info);
                         if (plain_reader.GetCursor() != comp.offset + comp.logical_size) {
                             throw VsagException(
                                 ErrorType::INVALID_BINARY,
@@ -435,7 +446,8 @@ HGraph::parallel_deserialize_manifest(DeserializeReader& reader,
 void
 HGraph::deserialize_seekable_whole_component(DeserializeReader& reader,
                                              const ComponentManifestEntry& comp,
-                                             bool compressed) {
+                                             bool compressed,
+                                             const JsonType& basic_info) {
     // Whatever the source, the component gets a reader it can seek in and its
     // own cursor is not used as the consumption check: a component that seeks
     // does not leave the cursor at the end of its frame.
@@ -453,7 +465,7 @@ HGraph::deserialize_seekable_whole_component(DeserializeReader& reader,
             }
         };
         ReadFuncStreamReader frame_reader(frame_read, 0, comp.logical_size);
-        this->deserialize_whole_component(comp.name, frame_reader);
+        this->deserialize_whole_component(comp.name, frame_reader, basic_info);
         return;
     }
 
@@ -500,7 +512,7 @@ HGraph::deserialize_seekable_whole_component(DeserializeReader& reader,
         }
     };
     ReadFuncStreamReader payload_reader(payload_read, 0, comp.logical_size);
-    this->deserialize_whole_component(comp.name, payload_reader);
+    this->deserialize_whole_component(comp.name, payload_reader, basic_info);
 }
 
 // Dispatch one whole component by name. During a parallel restore this runs
@@ -509,7 +521,9 @@ HGraph::deserialize_seekable_whole_component(DeserializeReader& reader,
 // dispatch site in parallel_deserialize_manifest). The conjugate graph branch
 // is the sole acquirer of conjugate_graph_mutex_ among restore tasks.
 void
-HGraph::deserialize_whole_component(const std::string& name, StreamReader& reader) {
+HGraph::deserialize_whole_component(const std::string& name,
+                                    StreamReader& reader,
+                                    const JsonType& basic_info) {
     auto require_enabled = [&name](bool enabled) { require_component_enabled(name, enabled); };
     if (name == COMPONENT_LABEL_TABLE) {
         this->deserialize_label_info(reader);
@@ -542,10 +556,7 @@ HGraph::deserialize_whole_component(const std::string& name, StreamReader& reade
         // (see parallel_deserialize_manifest), so this lazy shared_ptr assignment
         // has no concurrent writer. Preserve that invariant if mci_cliques is
         // ever moved to chunked dispatch or duplicated across tasks.
-        if (this->mci_cliques_ == nullptr) {
-            this->mci_cliques_ = std::make_shared<CliqueDataCell>(this->allocator_);
-        }
-        this->mci_cliques_->Deserialize(reader);
+        this->deserialize_mci_cliques(reader, basic_info);
     } else if (name == COMPONENT_CONJUGATE_GRAPH) {
         require_enabled(this->use_conjugate_graph_);
         // INVARIANT (deadlock safety): this is the only component task that
@@ -568,7 +579,10 @@ HGraph::deserialize_whole_component(const std::string& name, StreamReader& reade
 }
 
 void
-HGraph::parallel_deserialize_probe(DeserializeReader& reader, ThreadPool& pool, uint64_t body_end) {
+HGraph::parallel_deserialize_probe(DeserializeReader& reader,
+                                   ThreadPool& pool,
+                                   uint64_t body_end,
+                                   const JsonType& basic_info) {
     // without a recorded layout the component boundaries are only discovered
     // while reading, so the body is walked as one sequential stream in
     // Serialize(StreamWriter&) order and every head / tail stays on this thread;
@@ -653,10 +667,7 @@ HGraph::parallel_deserialize_probe(DeserializeReader& reader, ThreadPool& pool, 
         // walks the body on the calling thread and only dispatches io-extent
         // fills to the pool, so this lazy shared_ptr assignment has no
         // concurrent writer. Preserve that if this section is ever dispatched.
-        if (this->mci_cliques_ == nullptr) {
-            this->mci_cliques_ = std::make_shared<CliqueDataCell>(this->allocator_);
-        }
-        this->mci_cliques_->Deserialize(body);
+        this->deserialize_mci_cliques(body, basic_info);
     }
     if (this->use_conjugate_graph_) {
         // the conjugate graph declares its total size in its first field and

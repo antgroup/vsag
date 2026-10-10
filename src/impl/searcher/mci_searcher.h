@@ -42,6 +42,8 @@ struct MCISearcherParam {
     const uint8_t* valid_bitmap{nullptr};
     uint64_t valid_bitmap_size{0};
     bool* used_bitmap_fast_path{nullptr};
+    // Pinned deletion filter is independent of the user bitmap and must also be respected.
+    FilterPtr deleted_ids_filter{nullptr};
 };
 
 class MCISearcher {
