@@ -16,6 +16,7 @@
 #pragma once
 
 #include <atomic>
+#include <cassert>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -160,9 +161,86 @@ public:
         return INDEX_TYPE_HGRAPH;
     }
 
+    /// Number of searchable elements. Ids reserved by prepare_add_batch but not published yet are
+    /// excluded, so this can under-report while a batched Add is in flight; that is intended,
+    /// because those nodes are deliberately not searchable.
     int64_t
     GetNumElements() const override {
-        return static_cast<int64_t>(this->total_count_) - delete_count_;
+        return static_cast<int64_t>(this->PublishedCount()) - delete_count_;
+    }
+
+    /// Order-sensitive FNV-1a hash over every bottom-graph neighbour list.
+    ///
+    /// Only the bottom graph is covered; the route-graph layers are not hashed, so two indexes
+    /// with identical bottom connectivity but different upper layers share a checksum. FNV-1a is
+    /// not collision-resistant: this compares two builds inside a test, it is not an identity
+    /// check. Every bottom-graph node is walked, so this must run after the ids were built and
+    /// published (all callers do).
+    ///
+    /// Diagnostic only: lets a test tell "the graph differs" apart from "search amplifies a
+    /// difference", and lets two builds be compared content-wise instead of via hit lists.
+    [[nodiscard]] uint64_t
+    GraphChecksum() const override {
+        uint64_t hash = 1469598103934665603ULL;
+        auto mix = [&hash](uint64_t value) {
+            hash ^= value;
+            hash *= 1099511628211ULL;
+        };
+        const auto nodes = this->bottom_graph_->TotalCount();
+        for (InnerIdType node = 0; node < nodes; ++node) {
+            Vector<InnerIdType> neighbors(allocator_);
+            this->bottom_graph_->GetNeighbors(node, neighbors);
+            mix(node);
+            mix(neighbors.size());
+            for (const auto neighbor : neighbors) {
+                mix(neighbor);
+            }
+        }
+        return hash;
+    }
+
+    /// The per-node lock array, for diagnostics.
+    [[nodiscard]] MutexArrayPtr
+    GetNeighborsMutexArray() const {
+        return this->neighbors_mutex_;
+    }
+
+    /// Number of leading inner ids that concurrent readers may observe.
+    [[nodiscard]] InnerIdType
+    PublishedCount() const {
+        return this->published_count_.load(std::memory_order_acquire);
+    }
+
+    /// Mark every id below total_count_ visible. Used where a whole id range is created and
+    /// completed together (batch reservation, ODescent build, deserialization).
+    ///
+    /// The two counters are read and written separately, so the caller must be the single writer
+    /// of the id range at that moment: this runs on the thread that just grew, shrank (remove
+    /// lowers the mark) or restored the range, never concurrently with another range transition.
+    void
+    PublishThroughTotalCount() {
+        this->published_count_.store(this->total_count_.load(std::memory_order_acquire),
+                                     std::memory_order_release);
+    }
+
+    /// Mark one node visible, once its codes and links are both written.
+    ///
+    /// prepare_add_batch hands out ids in increasing order and every worker publishes its own node
+    /// after construction, so the mark advances in (roughly) increasing id order; a node that is
+    /// already covered exits the loop immediately and retries are bounded by the number of
+    /// concurrent publishers. This is a visibility and counting mark, not a barrier: like the
+    /// bulk Build path, which publishes the reserved range up front, it assumes no search runs
+    /// concurrently with the build.
+    void
+    PublishNode(InnerIdType inner_id) {
+        // Ids come from the range reserved by prepare_add_batch, so the mark can always reach
+        // inner_id + 1; the loop below exits immediately for an id that is already covered.
+        assert(inner_id < this->total_count_.load(std::memory_order_relaxed));
+        InnerIdType current = this->published_count_.load(std::memory_order_relaxed);
+        while (current <= inner_id and
+               not this->published_count_.compare_exchange_strong(
+                   current, inner_id + 1, std::memory_order_release, std::memory_order_relaxed)) {
+        }
     }
 
     int64_t
@@ -173,7 +251,7 @@ public:
     [[nodiscard]] std::pair<InnerIdType, CodeSlotIdType>
     GetCodeStorageCounts() const {
         if (this->code_slot_map_ == nullptr) {
-            auto count = static_cast<InnerIdType>(this->total_count_.load());
+            auto count = this->PublishedCount();
             return {count, count};
         }
         return {this->code_slot_map_->PublishedLogicalCount(),
@@ -525,6 +603,13 @@ private:
         InnerIdType inner_id{0};
         int level{-1};
     };
+
+    /// Assign the level of every row up front, in input order.
+    ///
+    /// Drawing all levels before the parallel insert phase makes level assignment a pure
+    /// function of the batch contents instead of a function of worker scheduling.
+    void
+    assign_batch_levels(Vector<AddRow>& rows);
 
     struct AddBatch {
         explicit AddBatch(Allocator* allocator) : rows(allocator) {
@@ -1074,7 +1159,19 @@ private:
     mutable std::mutex physical_code_resize_mutex_;
     std::atomic<bool> physical_code_resize_pending_{false};
 
-    std::atomic<InnerIdType> max_capacity_{0};               // allocated storage capacity
+    std::atomic<InnerIdType> max_capacity_{0};  // allocated storage capacity
+
+    /// Visibility high-water mark: the number of leading inner ids whose codes *and* graph
+    /// links are both fully written, and which concurrent readers may therefore observe.
+    ///
+    /// total_count_ (base class) means "reserved": the id range is allocated and the
+    /// underlying storage is sized for it. A reserved id can name a node whose codes or link
+    /// lists are still being written by a construction worker, so readers gate on
+    /// published_count_ rather than total_count_.
+    ///
+    /// Monotonically non-decreasing. Kept equal to total_count_ wherever nodes are created in
+    /// bulk; insert paths advance it per node once that node is complete.
+    std::atomic<InnerIdType> published_count_{0};
     std::atomic<CodeSlotIdType> physical_code_capacity_{0};  // physical flatten slot capacity
 
     uint64_t resize_increase_count_bit_{

@@ -52,6 +52,26 @@ GetRaBitQFloatExCode7IP() {
     return generic::RaBitQFloatExCode7IP;
 }
 RaBitQFloatExCode7Type RaBitQFloatExCode7IP = GetRaBitQFloatExCode7IP();
+static RaBitQExCode7ToVectorType
+GetRaBitQExCode7ToVector() {
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQExCode7ToVector;
+#endif
+    }
+    return generic::RaBitQExCode7ToVector;
+}
+RaBitQExCode7ToVectorType RaBitQExCode7ToVector = GetRaBitQExCode7ToVector();
+static RaBitQExCode7ToBytesType
+GetRaBitQExCode7ToBytes() {
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQExCode7ToBytes;
+#endif
+    }
+    return generic::RaBitQExCode7ToBytes;
+}
+RaBitQExCode7ToBytesType RaBitQExCode7ToBytes = GetRaBitQExCode7ToBytes();
 VSAG_DEFINE_SIMD_DISPATCH_VPOPCNTDQ(RaBitQSQ4UBinaryIP, RaBitQSQ4UBinaryType);
 static RaBitQSQ4UBinaryWithBaseSumType
 GetRaBitQSQ4UBinaryIPWithBaseSum() {

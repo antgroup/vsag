@@ -320,6 +320,9 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         batch_insert_flatten_codes(temporary_sq8_build_data);
         temporary_codes_batched = true;
     }
+    // Every code page of the batch is written at this point (or by the per-row loop below when
+    // rows were skipped), so the batch can be published exactly like a sequence of Add() calls.
+    this->PublishThroughTotalCount();
     Vector<std::pair<InnerIdType, int64_t>> deferred_code_ids(allocator_);
     Vector<const float*> pipnn_vectors(allocator_);
     if (use_pipnn) {
@@ -602,6 +605,17 @@ HGraph::prepare_add_context(const DatasetPtr& data) {
     return context;
 }
 
+void
+HGraph::assign_batch_levels(Vector<AddRow>& rows) {
+    if (rows.empty()) {
+        return;
+    }
+    std::scoped_lock lock(this->add_mutex_);
+    for (auto& row : rows) {
+        row.level = this->get_random_level() - 1;
+    }
+}
+
 HGraph::AddBatch
 HGraph::prepare_add_batch(const DatasetPtr& data) {
     AddBatch batch(this->allocator_);
@@ -626,6 +640,9 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
             if (inner_id >= total_count_) {
                 this->resize(total_count_.load() + 1);
                 ++total_count_;
+                // Deliberately NOT published here: this only reserves the id. The node
+                // becomes visible when insert_one_logical_point has written both its codes
+                // and its link lists.
             }
         }
 
@@ -639,10 +656,15 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
             if (source_id != nullptr && not source_id[j].empty()) {
                 this->label_table_->InsertSourceId(inner_id, source_id[j]);
             }
-            row.level = this->get_random_level() - 1;
+            // Level is assigned in a separate, deterministic pass (see
+            // assign_batch_levels) so that it cannot depend on thread scheduling.
             batch.rows.emplace_back(row);
         }
     }
+
+    // Assign all levels up front, in input order, so the value is a pure function of
+    // the batch contents rather than of the order workers reach the insert path.
+    this->assign_batch_levels(batch.rows);
 
     return batch;
 }
@@ -845,18 +867,27 @@ HGraph::insert_one_logical_point(const void* data, const AddRow& row, const AddC
     auto param = make_search_param();
     auto probe = this->probe_graph_for_add(data, level, inner_id, param, context.graph_read_codes);
     if (this->publish_duplicate_if_found(probe, inner_id, context)) {
+        // The duplicate still consumed an inner id and was fully ingested (its storage was
+        // published above), so it must count as visible; otherwise the visibility mark lags
+        // the reserved range and GetNumElements() under-reports.
+        this->PublishNode(inner_id);
         return false;
     }
 
     if (this->unique_add_needs_structure_update(level)) {
         rlock.unlock();
-        std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
-        this->publish_unique_under_unique_global_lock(data, level, inner_id, param, probe, context);
+        {
+            std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
+            this->publish_unique_under_unique_global_lock(
+                data, level, inner_id, param, probe, context);
+        }
+        this->PublishNode(inner_id);
         return true;
     }
 
     this->publish_unique_under_shared_global_lock(
         data, level, inner_id, param, probe, context, rlock);
+    this->PublishNode(inner_id);
     return true;
 }
 
@@ -961,6 +992,9 @@ HGraph::publish_unique_under_unique_global_lock(const void* data,
     this->publish_unique_storage_if_needed(data, inner_id, context);
     this->publish_unique_to_graphs(data, level, inner_id, param, probe, context);
     if (should_update_entry_point) {
+        // Only move the entry point once the node's codes and links are published: publishing
+        // no longer takes the node's own lock, so nothing may reach it before its link lists
+        // are written.
         this->entry_point_id_ = inner_id;
     }
 }
@@ -1027,7 +1061,10 @@ void
 HGraph::publish_unique_to_bottom_graph(InnerIdType inner_id,
                                        const DistHeapPtr& neighbors,
                                        const FlattenInterfacePtr& flatten_codes) {
-    LockGuard cur_lock(neighbors_mutex_, inner_id);
+    // No lock on inner_id: it has not been published to the graph yet, so no other thread
+    // can reach it (entry_point_id_ is updated only after this returns). Only its own
+    // slots are written here; the neighbour locks taken inside mutually_connect_new_element
+    // protect the existing nodes it links back from.
     if (neighbors != nullptr and not neighbors->Empty()) {
         mutually_connect_new_element(inner_id,
                                      neighbors,
@@ -1062,7 +1099,6 @@ HGraph::publish_unique_to_route_graphs(const void* data,
                     filtered_result->Push(dist, id);
                 }
             }
-            LockGuard cur_lock(neighbors_mutex_, inner_id);
             if (not filtered_result->Empty()) {
                 mutually_connect_new_element(inner_id,
                                              filtered_result,
@@ -1075,7 +1111,6 @@ HGraph::publish_unique_to_route_graphs(const void* data,
                 route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
             }
         } else {
-            LockGuard cur_lock(neighbors_mutex_, inner_id);
             route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         }
     }
@@ -1795,6 +1830,7 @@ HGraph::cache_collect_valid_indices(const DatasetPtr& data, BuildCachePlan& plan
     }
     this->resize(current_count + new_ids_count);
     this->total_count_ += new_ids_count;
+    this->PublishThroughTotalCount();
     plan.inserted_inner_ids.reserve(static_cast<uint64_t>(plan.valid_indices.size()));
     plan.inner_id_to_input_idx.reserve(static_cast<uint64_t>(plan.valid_indices.size()));
     plan.source_id_to_new_inner.reserve(static_cast<uint64_t>(plan.valid_indices.size()));
