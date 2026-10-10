@@ -543,9 +543,20 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             if (min_distance <= inner_search_param.duplicate_distance_threshold) {
                 inner_search_param.duplicate_id = min_index;
             }
-        } else if (inner_search_param.duplicate_query_id < flatten->TotalCount() &&
-                   flatten->CompareVectors(inner_search_param.duplicate_query_id, min_index)) {
-            inner_search_param.duplicate_id = min_index;
+        } else if (inner_search_param.duplicate_query_id < flatten->TotalCount()) {
+            if (flatten->CompareVectors(inner_search_param.duplicate_query_id, min_index)) {
+                inner_search_param.duplicate_id = min_index;
+            } else {
+                // Quantization can rank a different code ahead of an identical one.
+                for (uint32_t i = 0; i < top_candidates->Size(); ++i) {
+                    if (data[i].second != min_index &&
+                        flatten->CompareVectors(inner_search_param.duplicate_query_id,
+                                                data[i].second)) {
+                        inner_search_param.duplicate_id = data[i].second;
+                        break;
+                    }
+                }
+            }
         }
     }
 
