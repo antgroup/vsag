@@ -22,7 +22,7 @@ namespace vsag {
 
 class HGraphAnalyzer : public AnalyzerBase {
 public:
-    HGraphAnalyzer(HGraph* hgraph, const AnalyzerParam& param)
+    HGraphAnalyzer(const HGraph* hgraph, const AnalyzerParam& param)
         : hgraph_(hgraph),
           base_ground_truth_(hgraph->allocator_),
           base_sample_ids_(hgraph->allocator_),
@@ -151,7 +151,7 @@ private:
                       const UnorderedMap<InnerIdType, Vector<LabelType>>& search_result);
 
 private:
-    HGraph* hgraph_;
+    const HGraph* hgraph_;
 
     uint32_t base_sample_size_{10};
     Vector<InnerIdType> base_sample_ids_;
