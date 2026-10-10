@@ -261,7 +261,11 @@ HGraphTestIndex::IsRaBitQ(const std::string& quantization_str) {
 
 TEST_CASE("HGraph RangeSearch filters reranked distances", "[ft][hgraph][pr]") {
     constexpr int64_t dim = 8;
-    constexpr int64_t count = 100;
+    // Keep the fixture below max_degree: a saturated graph of identical vectors can
+    // prune all incoming edges to the zero vector before range search even starts.
+    constexpr int64_t count = 3;
+    const auto thread_count = GENERATE(1, 5);
+    CAPTURE(thread_count);
     std::vector<int64_t> ids(count);
     std::vector<float> vectors(count * dim, 0.0F);
     for (int64_t i = 0; i < count; ++i) {
@@ -271,6 +275,7 @@ TEST_CASE("HGraph RangeSearch filters reranked distances", "[ft][hgraph][pr]") {
     }
 
     HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "sq8_uniform,fp32");
+    build_param.thread_count = thread_count;
     auto parameters = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
     auto index = TestIndex::TestFactory(HGraphTestIndex::name, parameters, true);
     auto base = vsag::Dataset::Make();
@@ -289,6 +294,25 @@ TEST_CASE("HGraph RangeSearch filters reranked distances", "[ft][hgraph][pr]") {
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() == 1);
     REQUIRE(result.value()->GetIds()[0] == 0);
+    REQUIRE(result.value()->GetDistances()[0] == 0.0F);
+
+    // The nearby vector is inside this radius after FP32 reranking.
+    auto wider_result = index->RangeSearch(query, 0.000018F, search_param, -1);
+    REQUIRE(wider_result.has_value());
+    REQUIRE(wider_result.value()->GetDim() == 2);
+    REQUIRE(wider_result.value()->GetIds()[0] == 0);
+    REQUIRE(wider_result.value()->GetIds()[1] == 1);
+
+    // Confirm that the zero-radius query has a false positive before reranking.
+    build_param.quantization_str = "sq8_uniform";
+    parameters = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto coarse_index = TestIndex::TestFactory(HGraphTestIndex::name, parameters, true);
+    REQUIRE(coarse_index->Build(base).has_value());
+    auto coarse_result = coarse_index->RangeSearch(query, 0.0F, search_param, -1);
+    REQUIRE(coarse_result.has_value());
+    REQUIRE(coarse_result.value()->GetDim() == 2);
+    REQUIRE(coarse_result.value()->GetDistances()[0] == 0.0F);
+    REQUIRE(coarse_result.value()->GetDistances()[1] == 0.0F);
 }
 
 void
