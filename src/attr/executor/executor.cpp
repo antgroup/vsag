@@ -15,10 +15,10 @@
 
 #include "executor.h"
 
+#include "builtin_executor.h"
 #include "comparison_executor.h"
 #include "integer_list_executor.h"
 #include "logical_executor.h"
-#include "region_filter_executor.h"
 #include "string_list_executor.h"
 namespace vsag {
 
@@ -49,8 +49,8 @@ Executor::MakeInstance(Allocator* allocator,
     if (std::dynamic_pointer_cast<LogicalExpression>(expression)) {
         return std::make_shared<LogicalExecutor>(allocator, expression, attr_index);
     }
-    if (std::dynamic_pointer_cast<RegionFilterExpression>(expression)) {
-        return std::make_shared<RegionFilterExecutor>(allocator, expression, attr_index);
+    if (auto executor = CreateBuiltinExecutor(allocator, expression, attr_index)) {
+        return executor;
     }
     if (std::dynamic_pointer_cast<FunctionExpression>(expression)) {
         throw VsagException(
