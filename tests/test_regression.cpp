@@ -25,6 +25,7 @@
 #include <numeric>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "algorithm/hnswlib/visited_list_pool.h"
 
@@ -60,11 +61,13 @@ TEST_CASE("gh#369", "[ft][github]") {
         }
     };
 
-    auto dim = 32;
+    constexpr int64_t dim = 32;
+    constexpr int64_t count = 11000;
     MyAllocator vsag_allocator;
-    int64_t ids[11000];
-    float vector_list[11000 * dim];
-    float query_vector[dim];
+    std::vector<int64_t> ids(count);
+    std::vector<float> vector_list(count * dim, 0.0F);
+    std::vector<float> query_vector(dim, 0.0F);
+    std::iota(ids.begin(), ids.end(), 0);
     auto search_parameters = R"(
     {
         "hgraph": {
@@ -90,13 +93,17 @@ TEST_CASE("gh#369", "[ft][github]") {
     auto hgraph = create_result.value();
 
     auto dataset = Dataset::Make();
-    dataset->Dim(dim)->NumElements(11000)->Ids(ids)->Float32Vectors(vector_list)->Owner(false);
+    dataset->Dim(dim)
+        ->NumElements(count)
+        ->Ids(ids.data())
+        ->Float32Vectors(vector_list.data())
+        ->Owner(false);
 
     auto build_result = hgraph->Build(dataset);
     REQUIRE(build_result.has_value());
 
     auto query = Dataset::Make();
-    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Owner(false);
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
 
     auto search_result = hgraph->KnnSearch(query, 10, search_parameters.dump(), filter);
     REQUIRE(search_result.has_value());
