@@ -263,6 +263,8 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
         } else if (key == IVF_GPU_MIN_WORK_THRESHOLD) {
             inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_GPU_MIN_WORK_THRESHOLD_KEY].SetJson(
                 value);
+        } else if (key == IVF_KMEANS_ITER_COUNT) {
+            inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_KMEANS_ITER_COUNT_KEY].SetJson(value);
         } else if (key == GNO_IMI_FIRST_ORDER_BUCKETS_COUNT) {
             inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_PARTITION_STRATEGY_TYPE_GNO_IMI]
                       [GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY]

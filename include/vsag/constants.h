@@ -269,6 +269,7 @@ extern const char* const IVF_ENABLE_GPU_BUILD;
 extern const char* const IVF_GPU_DEVICE_ID;
 extern const char* const IVF_GPU_MEMORY_BUDGET;
 extern const char* const IVF_GPU_MIN_WORK_THRESHOLD;
+extern const char* const IVF_KMEANS_ITER_COUNT;
 extern const char* const IVF_BUCKETS_COUNT;
 extern const char* const IVF_BASE_QUANTIZATION_TYPE;
 extern const char* const IVF_BASE_IO_TYPE;

@@ -229,6 +229,7 @@ const char* const IVF_ENABLE_GPU_BUILD = "enable_gpu_build";
 const char* const IVF_GPU_DEVICE_ID = "gpu_device_id";
 const char* const IVF_GPU_MEMORY_BUDGET = "gpu_memory_budget";
 const char* const IVF_GPU_MIN_WORK_THRESHOLD = "gpu_min_work_threshold";
+const char* const IVF_KMEANS_ITER_COUNT = "kmeans_iter_count";
 const char* const IVF_BUCKETS_COUNT = "buckets_count";
 const char* const IVF_BASE_QUANTIZATION_TYPE = "base_quantization_type";
 const char* const IVF_BASE_IO_TYPE = "base_io_type";
