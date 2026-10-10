@@ -38,6 +38,8 @@ struct PiPNNGraphBuilderParameter {
     uint64_t hash_plane_count{12};
     uint64_t reservoir_size{64};
     float alpha{1.0F};
+    bool adaptive_pruning{false};
+    float adaptive_pruning_adjust_step{0.06F};
 
     void
     FromJson(const JsonType& json);

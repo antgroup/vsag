@@ -76,6 +76,8 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `pipnn_leaf_neighbor_count` | int | `5` | Nearest candidates contributed per point in each leaf. This is the primary PiPNN quality/build-work knob; leaves smaller than `pipnn_min_leaf_size` use at least `4`. |
 | `pipnn_hash_plane_count` | int | `12` | Direction-hash bits, in `[1, 15]`; `max_degree <= 2^pipnn_hash_plane_count`. |
 | `pipnn_reservoir_size` | int | `64` | Candidate slots retained per point before final pruning; effective capacity is at least `max_degree`. |
+| `pipnn_adaptive_pruning` | bool | `false` | Experimental per-point alpha adjustment in PiPNN final pruning; L2 only. |
+| `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | Alpha adjustment step; finite, non-negative, `alpha - 2*step > 0`, and `alpha + 3*step` finite when enabled. |
 | `use_reverse_edges` | bool | `false` | Track incoming neighbors for O(1) reverse-edge lookup. Roughly doubles edge storage and is unsupported with `graph_storage_type: "compressed"`. |
 | `label_remap_type` | string | `"pg"` | Label-to-inner-ID map implementation: `"pg"` or `"robin"`. Keep the same value when restoring or combining compatible indexes. |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse search |
@@ -126,6 +128,17 @@ supported with PiPNN. The `pipnn_*` parameters in the table above tune this buil
 final pruning. Keep `OPENBLAS_NUM_THREADS=1` when benchmarking so BLAS threads do not obscure
 builder scaling. The reproducible `tools/eval/pipnn_parallel.yaml` workload compares NSW,
 ODescent, and PiPNN at a matched Recall@10 target on SIFT1M and query-validates every graph.
+
+
+### Experimental PiPNN adaptive alpha
+
+Set `pipnn_adaptive_pruning: true` under `index_param` to apply [PR #2933](https://github.com/antgroup/vsag/pull/2933)'s per-node count-based schedule to the final PiPNN reservoir pruning. This opt-in experiment supports L2 and affects the initial batch `Build` only. It leaves partitioning, leaf neighbors, relative hashes, reservoir contents, incremental `Add`, and ODescent route-layer construction unchanged.
+
+For target degree K, scan the existing ordered reservoir at the configured `alpha`, yielding accepted A and scanned rejects B. Unscanned tail candidates do not count toward B. With a nonzero step, if `0 < |A| < K`, keep A and retry B with alpha increased by 1, 2, or 3 steps for `K/|A| <= 1.5`, `(1.5, 3]`, or `> 3`. If `|A| = K`, clear A and rescan the complete original reservoir, including the tail, with alpha decreased by 2, 1, or 0 steps for `|B|/K < 2.5`, `[2.5, 5)`, or `>= 5`. If the tightened pass is short, keep its accepted neighbors and retry its new rejects at the original alpha. Rejected neighbors are never appended unconditionally.
+
+The strict rejection rule remains `alpha * d(selected, candidate) < d(source, candidate)`. PiPNN retains its BF16 source-distance cache, FP32 pairwise squared-L2 calculations, and `(distance, source-ID gap, ID)` order. Unlike the NSW selector's disabled fast path, PiPNN already prunes short reservoirs, so zero adjustment step reproduces its original single-pass adjacency. Greedy selection and the degree cap mean recall need not improve monotonically with alpha.
+
+The policy and step are serialized. Loading an enabled index requires matching policy, base alpha, and step. Missing fields mean disabled. The disabled path preserves legacy behavior. This is experimental: compare build cost and query throughput at matched recall.
 
 ### Deduplicating vector storage
 

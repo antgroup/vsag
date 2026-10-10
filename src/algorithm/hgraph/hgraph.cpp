@@ -86,6 +86,9 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
                             "HGraph deduplicate_storage only supports dense vectors");
     }
     if (this->graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        const bool valid_adaptive_metric = not this->pipnn_param_.adaptive_pruning or
+                                           common_param.metric_ == MetricType::METRIC_TYPE_L2SQR;
+        CHECK_ARGUMENT(valid_adaptive_metric, "PiPNN adaptive pruning only supports L2");
         if (common_param.repr_ != RecordRepr::DENSE or
             common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,

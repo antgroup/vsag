@@ -93,6 +93,8 @@ extern const char* const PIPNN_PARAMETER_FANOUT;
 extern const char* const PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT;
 extern const char* const PIPNN_PARAMETER_HASH_PLANE_COUNT;
 extern const char* const PIPNN_PARAMETER_RESERVOIR_SIZE;
+extern const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING;
+extern const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP;
 
 extern const char* const INDEX_PARAM;
 
