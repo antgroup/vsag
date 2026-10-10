@@ -2831,3 +2831,59 @@ TEST_CASE("Pyramid dense native distance contract", "[distance_contract]") {
         }
     }
 }
+
+TEST_CASE("Pyramid root KNN returns all duplicate IDs for identical vectors",
+          "[ft][pyramid][duplicate][root_knn]") {
+    const auto mode = GENERATE(std::string("build"), std::string("add"));
+    // index_min_size > 3 keeps data at root level to test root KNN duplicate behavior (#3036).
+    const std::string params = R"({
+        "dtype":"float32", "metric_type":"ip", "dim":32,
+        "index_param":{
+            "base_quantization_type":"fp32", "use_reorder":false,
+            "max_degree":16, "ef_construction":100, "support_duplicate":true,
+            "index_min_size":500,
+            "hierarchies":[{"name":"host", "root_graph_type":"multi_layer", "no_build_levels":[]}]
+        }
+    })";
+    auto created = vsag::Factory::CreateIndex("pyramid", params);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+
+    std::vector<int64_t> ids{101, 102, 103};
+    std::vector<float> vectors(3 * 32, 0.0F);
+    std::vector<std::string> paths(3, "host_a");
+    vectors[0] = vectors[32] = vectors[64] = 1.0F;
+
+    auto make_dataset = [&](int offset, int count) {
+        auto data = vsag::Dataset::Make()->Owner(false)->Dim(32)->NumElements(count)
+                        ->Ids(ids.data() + offset)->Float32Vectors(vectors.data() + offset * 32);
+        data->Paths("host", paths.data() + offset);
+        return data;
+    };
+
+    if (mode == "build") {
+        auto built = index->Build(make_dataset(0, 3));
+        REQUIRE(built.has_value());
+        REQUIRE(built.value().empty());
+    } else {
+        for (int i = 0; i < 3; ++i) {
+            auto added = index->Add(make_dataset(i, 1));
+            REQUIRE(added.has_value());
+            REQUIRE(added.value().empty());
+        }
+    }
+
+    REQUIRE(index->GetNumElements() == 3);
+
+    auto query = vsag::Dataset::Make()->Owner(false)->Dim(32)->NumElements(1)
+                     ->Float32Vectors(vectors.data());
+    const std::string search_params = R"({"pyramid":{"ef_search":200,"hierarchies":["host"]}})";
+    auto result = index->KnnSearch(query, 10, search_params);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 3);
+
+    std::set<int64_t> returned_ids(result.value()->GetIds(),
+                                   result.value()->GetIds() + result.value()->GetDim());
+    REQUIRE(returned_ids == std::set<int64_t>{101, 102, 103});
+}
+
