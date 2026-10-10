@@ -131,6 +131,37 @@ build/openblas-smoke/openblas_smoke_1
 This fixture builds the pinned source archive and links it by absolute path, so an
 installed OpenBLAS cannot substitute for the dependency under test.
 
+### Distribution Packaging Dependency URLs
+
+Run `COMPILE_JOBS=6 bash scripts/release/dist.sh` to build both ABI packages.
+To supply dependency mirrors to both containers, set `VSAG_THIRDPARTY_ENV_FILE`
+to a readable regular file on the host (quote paths containing spaces):
+
+```bash
+VSAG_THIRDPARTY_ENV_FILE="/path/to/dependency urls.env" bash scripts/release/dist.sh
+```
+
+For example, the file can contain:
+
+```text
+VSAG_THIRDPARTY_OPENBLAS_0_3_34=https://mirror.example.org/OpenBLAS-v0.3.34.tar.gz
+```
+
+Use ASCII `VSAG_THIRDPARTY_<NAME>=URL` lines, with uppercase letters, digits and
+underscores in names, including the pin-qualified names described above. URLs
+must start with a scheme such as `https://` and contain no whitespace; do not use
+`export`, quotes or inline comments. Blank lines and full-line `#` comments are
+allowed; LF, CRLF and a missing final newline work. Values are literal: `=`, `&`,
+`#` and `$` are preserved without shell expansion. Duplicate keys, invalid entries
+and lines longer than 65,534 bytes (excluding line endings) fail before image builds.
+File values override image defaults; host dependency variables are not forwarded
+or modified. CMake prefers pinned names over legacy names and retains default URLs
+as download fallbacks. An unset path preserves existing behavior; an explicitly
+empty or unreadable path is an error.
+
+Run `bash scripts/release/test_dist_env.sh` for focused tests using mocked Docker
+and the actual CMake override resolver; Bash, Python 3 and CMake are required.
+
 ### Other Build Options
 
 For a complete list of build options, see the `option()` directives in `CMakeLists.txt`.
