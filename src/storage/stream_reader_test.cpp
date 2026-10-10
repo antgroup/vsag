@@ -17,8 +17,216 @@
 #include "stream_reader.h"
 
 #include <cstdint>
+#include <limits>
+#include <sstream>
 
+#include "impl/allocator/safe_allocator.h"
 #include "unittest.h"
+#include "vsag_exception.h"
+
+namespace vsag {
+namespace {
+
+class CountingStreamBuffer : public std::stringbuf {
+public:
+    explicit CountingStreamBuffer(const std::string& data) : std::stringbuf(data) {
+    }
+
+    std::streamsize
+    xsgetn(char* data, std::streamsize size) override {
+        const auto count = std::stringbuf::xsgetn(data, size);
+        bytes_read += count;
+        return count;
+    }
+
+    pos_type
+    seekoff(off_type offset,
+            std::ios_base::seekdir direction,
+            std::ios_base::openmode mode) override {
+        if (reject_seek && direction != std::ios_base::cur) {
+            return pos_type(off_type(-1));
+        }
+        if (reject_end_position && at_end && direction == std::ios_base::cur) {
+            return pos_type(off_type(-1));
+        }
+        at_end = direction == std::ios_base::end;
+        return std::stringbuf::seekoff(offset, direction, mode);
+    }
+
+    pos_type
+    seekpos(pos_type position, std::ios_base::openmode mode) override {
+        if (reject_restore) {
+            return pos_type(off_type(-1));
+        }
+        return std::stringbuf::seekpos(position, mode);
+    }
+
+    uint64_t bytes_read{0};
+    bool reject_seek{false};
+    bool reject_restore{false};
+    bool reject_end_position{false};
+    bool at_end{false};
+};
+
+}  // namespace
+
+TEST_CASE("CountingStreamBuffer counts consumed bytes on short reads", "[ut][stream_reader]") {
+    CountingStreamBuffer buffer("abc");
+    std::istream input(&buffer);
+    char data[4]{};
+    input.read(data, sizeof(data));
+    REQUIRE(input.gcount() == 3);
+    REQUIRE(buffer.bytes_read == 3);
+    input.clear();
+    input.read(data, 1);
+    REQUIRE(input.gcount() == 0);
+    REQUIRE(buffer.bytes_read == 3);
+}
+
+TEST_CASE("IOStreamReader Skip seeks without reading payloads", "[ut][stream_reader]") {
+    CountingStreamBuffer buffer(std::string(20000, 'x') + "tail");
+    std::istream input(&buffer);
+    const uint64_t start = GENERATE(0, 7);
+    input.seekg(start);
+    IOStreamReader reader(input);
+    REQUIRE(reader.Length() == 20004 - start);
+    reader.Skip(0);
+    REQUIRE(reader.GetCursor() == start);
+    reader.Skip(20000 - start);
+    REQUIRE(reader.GetCursor() == 20000);
+    REQUIRE(buffer.bytes_read == 0);
+    REQUIRE_THROWS_AS(reader.Skip(5), VsagException);
+    REQUIRE_THROWS_AS(reader.Skip(std::numeric_limits<uint64_t>::max()), VsagException);
+    REQUIRE(reader.GetCursor() == 20000);
+    char tail[4];
+    reader.Read(tail, sizeof(tail));
+    REQUIRE(std::string(tail, sizeof(tail)) == "tail");
+    REQUIRE(buffer.bytes_read == 4);
+    reader.Skip(0);
+    REQUIRE_THROWS_AS(reader.Skip(1), VsagException);
+    REQUIRE(reader.GetCursor() == 20004);
+}
+
+TEST_CASE("IOStreamReader rejects invalid construction positions", "[ut][stream_reader]") {
+    CountingStreamBuffer buffer("payload");
+    std::istream input(&buffer);
+    SECTION("stream already failed") {
+        input.setstate(std::ios::failbit);
+    }
+    SECTION("end seek fails") {
+        buffer.reject_seek = true;
+    }
+    SECTION("end tellg fails without setting failbit") {
+        buffer.reject_end_position = true;
+        input.seekg(0, std::ios::end);
+        REQUIRE(input.tellg() == std::streampos(-1));
+        REQUIRE_FALSE(input.fail());
+        input.seekg(0, std::ios::beg);
+    }
+    SECTION("restoring the initial position fails") {
+        buffer.reject_restore = true;
+    }
+    REQUIRE_THROWS_AS(IOStreamReader(input), VsagException);
+    REQUIRE(buffer.bytes_read == 0);
+}
+
+TEST_CASE("IOStreamReader Skip reports stream errors", "[ut][stream_reader]") {
+    CountingStreamBuffer buffer("payload");
+    std::istream input(&buffer);
+    IOStreamReader reader(input);
+    SECTION("failed seek") {
+        buffer.reject_seek = true;
+        REQUIRE_THROWS_AS(reader.Skip(1), VsagException);
+    }
+    SECTION("invalid cursor") {
+        input.setstate(std::ios::failbit);
+        REQUIRE_THROWS_AS(reader.Skip(1), VsagException);
+    }
+    REQUIRE(buffer.bytes_read == 0);
+}
+
+}  // namespace vsag
+
+TEST_CASE("StreamReader Skip consumes forward input", "[ut][stream_reader]") {
+    std::istringstream input(std::string(20000, 'x') + "tail");
+    vsag::ForwardStreamReader reader(input);
+    reader.Skip(0);
+    REQUIRE(reader.GetCursor() == 0);
+    reader.Skip(20000);
+    REQUIRE(reader.GetCursor() == 20000);
+    char tail[4];
+    reader.Read(tail, sizeof(tail));
+    REQUIRE(std::string(tail, sizeof(tail)) == "tail");
+    REQUIRE_THROWS_AS(reader.Skip(1), vsag::VsagException);
+}
+
+TEST_CASE("StreamReader Skip respects bounds without reading random-access data",
+          "[ut][stream_reader]") {
+    uint64_t read_count = 0;
+    vsag::ReadFuncStreamReader reader(
+        [&](uint64_t, uint64_t size, void* dest) {
+            ++read_count;
+            std::memset(dest, 'x', size);
+        },
+        0,
+        100);
+    auto slice = reader.Slice(50);
+    slice.Skip(20);
+    REQUIRE(slice.GetCursor() == 20);
+    REQUIRE(reader.GetCursor() == 20);
+    REQUIRE_THROWS_AS(slice.Skip(31), vsag::VsagException);
+    REQUIRE(slice.GetCursor() == 20);
+    slice.Skip(30);
+    reader.Skip(50);
+    reader.Skip(0);
+    REQUIRE(read_count == 0);
+    REQUIRE(reader.GetCursor() == 100);
+    REQUIRE_THROWS_AS(reader.Skip(1), vsag::VsagException);
+    REQUIRE_THROWS_AS(reader.Skip(std::numeric_limits<uint64_t>::max()), vsag::VsagException);
+    REQUIRE(reader.GetCursor() == 100);
+}
+
+TEST_CASE("BufferStreamReader Skip preserves buffered cursor and delegates unread bytes",
+          "[ut][stream_reader]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    const std::string data = "0123456789";
+    uint64_t read_count = 0;
+    vsag::ReadFuncStreamReader source(
+        [&](uint64_t offset, uint64_t size, void* dest) {
+            ++read_count;
+            std::memcpy(dest, data.data() + offset, size);
+        },
+        0,
+        data.size());
+    vsag::BufferStreamReader reader(&source, data.size(), allocator.get());
+    reader.Skip(3);
+    REQUIRE(read_count == 0);
+    REQUIRE(reader.GetCursor() == 3);
+    char value = 0;
+    reader.Read(&value, 1);
+    REQUIRE(value == '3');
+    reader.Skip(2);
+    REQUIRE(reader.GetCursor() == 6);
+    reader.Read(&value, 1);
+    REQUIRE(value == '6');
+    REQUIRE_THROWS_AS(reader.Skip(4), vsag::VsagException);
+    REQUIRE(reader.GetCursor() == 7);
+    reader.Skip(3);
+    reader.Skip(0);
+    REQUIRE(reader.GetCursor() == data.size());
+    REQUIRE(read_count == 1);
+}
+
+TEST_CASE("BoundedForwardReader Skip consumes only its payload", "[ut][stream_reader]") {
+    std::istringstream input("payloadsuffix");
+    vsag::ForwardStreamReader source(input);
+    vsag::BoundedForwardReader reader(&source, 7);
+    REQUIRE_THROWS_AS(reader.Skip(8), vsag::VsagException);
+    REQUIRE(source.GetCursor() == 0);
+    reader.Skip(7);
+    REQUIRE(reader.GetCursor() == 7);
+    REQUIRE(source.GetCursor() == 7);
+}
 
 // fill buffer with below and return a wrappered StreamReader object:
 // ['1' '1' ... repeats 1024 times]
