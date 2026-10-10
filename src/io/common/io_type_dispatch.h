@@ -25,6 +25,8 @@
 #include "io/mmap_io/mmap_io.h"
 #include "io/reader_io/reader_io.h"
 #include "io/uring_io/uring_io.h"
+#include "io/user_defined_io/user_defined_io.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -33,6 +35,7 @@ struct IOTypeTag {
     using Type = IO;
 };
 
+// NOLINTBEGIN(readability-identifier-naming)
 template <typename Visitor>
 decltype(auto)
 VisitIOKind(IOKind kind, Visitor&& visitor) {
@@ -51,6 +54,12 @@ VisitIOKind(IOKind kind, Visitor&& visitor) {
             return std::forward<Visitor>(visitor)(IOTypeTag<UringIO>{});
         case IOKind::READER:
             return std::forward<Visitor>(visitor)(IOTypeTag<ReaderIO>{});
+        // Intentionally not instantiable through generic visitors: user defined IO is constructed
+        // by the precise FP32 factory path only, to avoid instantiating unrelated graph/quantizer
+        // combinations. Failing loudly here surfaces accidental generic use instead of a silent void.
+        case IOKind::USER_DEFINED:
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "user_defined_io is not instantiable through generic IO dispatch");
         case IOKind::UNKNOWN:
             return std::forward<Visitor>(visitor)(IOTypeTag<void>{});
     }
@@ -58,3 +67,4 @@ VisitIOKind(IOKind kind, Visitor&& visitor) {
 }
 
 }  // namespace vsag
+// NOLINTEND(readability-identifier-naming)

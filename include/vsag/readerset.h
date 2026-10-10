@@ -18,6 +18,8 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -49,6 +51,9 @@ using CallBack = std::function<void(IOErrorCode code, const std::string& message
 
 class Reader;
 using ReaderPtr = std::shared_ptr<Reader>;
+
+class Writer;
+using WriterPtr = std::shared_ptr<Writer>;
 
 /**
  * @brief Optional interface for readers that support best-effort prefetch hints.
@@ -147,6 +152,82 @@ public:
      */
     [[nodiscard]] virtual uint64_t
     Size() const = 0;
+};
+
+/**
+ * @brief Synchronous random-access writer for externally managed storage.
+ *
+ * A successful Write makes the bytes visible through the paired Reader and consumes the source
+ * synchronously, so the caller may reuse or release the source buffer after Write returns. Resize
+ * preserves the existing prefix through min(old_size, new_size), zero-fills growth only if the
+ * implementation's storage normally does so, and truncates bytes beyond a smaller new size.
+ * This interface does not provide crash durability, transactions, or synchronization for
+ * overlapping writes.
+ */
+class Writer {
+public:
+    Writer() = default;
+    virtual ~Writer() = default;
+
+    virtual void
+    Write(uint64_t offset, uint64_t len, const void* source) = 0;
+
+    virtual void
+    Resize(uint64_t size) = 0;
+};
+
+struct UserDefinedIOPair {
+    ReaderPtr reader;
+    WriterPtr writer;
+};
+
+/**
+ * @brief Named Reader and Writer pairs retained by indexes created with user-defined IO.
+ */
+class UserDefinedIOSet {
+public:
+    /**
+     * @brief Retains shared ownership of a named pair.
+     * Parameters are taken by value and moved into the set: passing lvalue shared_ptrs copies them,
+     * so the caller's own handles stay valid and can be reused. Passing an rvalue transfers the
+     * caller's handle. The set keeps the pair alive for as long as the entry exists.
+     * Configure the set before sharing it with index construction; concurrent mutation is unsupported.
+     */
+    void
+    Set(const std::string& name, ReaderPtr reader, WriterPtr writer) {
+        if (name.empty()) {
+            throw std::invalid_argument("user defined IO name must not be empty");
+        }
+        if (reader == nullptr or writer == nullptr) {
+            throw std::invalid_argument("user defined IO Reader and Writer must not be null");
+        }
+        if (data_.find(name) != data_.end()) {
+            throw std::invalid_argument("duplicate user defined IO name: " + name);
+        }
+        data_.emplace(name, UserDefinedIOPair{std::move(reader), std::move(writer)});
+    }
+
+    /**
+     * @brief Returns a copy of the named pair, or std::nullopt when absent.
+     * The copy retains independent shared ownership, so it stays valid regardless of later
+     * mutation or destruction of the set, avoiding the dangling-pointer hazard of a borrowed view.
+     */
+    [[nodiscard]] std::optional<UserDefinedIOPair>
+    Get(const std::string& name) const {
+        const auto iter = data_.find(name);
+        if (iter == data_.end()) {
+            return std::nullopt;
+        }
+        return iter->second;
+    }
+
+    [[nodiscard]] bool
+    Contains(const std::string& name) const {
+        return data_.find(name) != data_.end();
+    }
+
+private:
+    std::unordered_map<std::string, UserDefinedIOPair> data_;
 };
 
 /**
