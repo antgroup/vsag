@@ -259,6 +259,7 @@ result.
 
 ## V1 Boundaries
 
-V1 evaluates one KNN workload and performs a full sweep except for the supported HGraph
-`ef_search` adaptive search. It does not provide filtered or range-search workloads, adaptive query
-sampling, cross-request build cache, or model-based candidate generation.
+V1 evaluates one KNN workload and plans a full sweep except for the supported HGraph `ef_search`
+adaptive search. It skips search for candidates already known to violate the index-memory
+constraint. It does not provide filtered or range-search workloads, adaptive query sampling,
+cross-request build cache, or model-based candidate generation.
