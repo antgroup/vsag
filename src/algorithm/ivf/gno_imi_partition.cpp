@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <atomic>
 #include <fstream>
+#include <limits>
 #include <numeric>
 #include <vector>
 
@@ -35,6 +36,32 @@
 namespace vsag {
 
 static constexpr BucketIdType INVALID_BUCKET_ID = static_cast<BucketIdType>(-1);
+
+static uint64_t
+saturated_add(uint64_t lhs, uint64_t rhs) {
+    const auto max = std::numeric_limits<uint64_t>::max();
+    if (lhs > max - rhs) {
+        return max;
+    }
+    return lhs + rhs;
+}
+
+static uint64_t
+saturated_mul(uint64_t lhs, uint64_t rhs) {
+    const auto max = std::numeric_limits<uint64_t>::max();
+    if (lhs != 0 and rhs > max / lhs) {
+        return max;
+    }
+    return lhs * rhs;
+}
+
+static constexpr const char* SEARCH_PARAM_TEMPLATE_STR = R"(
+{{
+    "hnsw": {{
+        "ef_search": {}
+    }}
+}}
+)";
 
 // C = A * B^T
 void
@@ -451,6 +478,24 @@ GNOIMIPartition::GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) {
             data_centroids_t_.data() + bucket_id_t * dim_,
             centroid.data(),
             dim_);
+}
+
+uint64_t
+GNOIMIPartition::EstimateMemory(uint64_t num_elements) const {
+    (void)num_elements;
+    uint64_t memory = sizeof(GNOIMIPartition);
+    const auto first_order_bucket_count = static_cast<uint64_t>(bucket_count_s_);
+    const auto second_order_bucket_count = static_cast<uint64_t>(bucket_count_t_);
+    const auto bucket_count = saturated_add(first_order_bucket_count, second_order_bucket_count);
+    const auto dim = static_cast<uint64_t>(dim_);
+
+    memory = saturated_add(memory, saturated_mul(saturated_mul(bucket_count, dim), sizeof(float)));
+    memory = saturated_add(memory, saturated_mul(bucket_count, sizeof(float)));
+    memory = saturated_add(
+        memory,
+        saturated_mul(saturated_mul(first_order_bucket_count, second_order_bucket_count),
+                      sizeof(float)));
+    return memory;
 }
 
 }  // namespace vsag

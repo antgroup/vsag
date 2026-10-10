@@ -178,6 +178,12 @@ public:
     [[nodiscard]] uint64_t
     GetMemoryUsage() const override;
 
+    [[nodiscard]] uint64_t
+    EstimateMemory(uint64_t num_elements) const override;
+
+    void
+    SetImmutable() override;
+
 private:
     std::vector<int64_t>
     add(const DatasetPtr& base, bool try_optimized_build);

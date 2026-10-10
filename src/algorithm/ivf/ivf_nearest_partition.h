@@ -58,6 +58,9 @@ public:
     [[nodiscard]] uint64_t
     GetMemoryUsage() const override;
 
+    [[nodiscard]] uint64_t
+    EstimateMemory(uint64_t num_elements) const override;
+
 public:
     IVFPartitionStrategyParametersPtr ivf_partition_strategy_param_{nullptr};
 

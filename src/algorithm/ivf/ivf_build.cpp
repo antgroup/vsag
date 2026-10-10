@@ -83,6 +83,9 @@ IVF::InitFeatures() {
         IndexFeature::SUPPORT_ADD_CONCURRENT,
     });
 
+    // memory estimation
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ESTIMATE_MEMORY);
+
     // search
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_KNN_SEARCH,
