@@ -33,7 +33,7 @@
 #include "flat_bucket_searcher.h"
 #include "gno_imi_partition.h"
 #include "graph_bucket_searcher.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/reorder/bucket_reorder.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "index/index_impl.h"
