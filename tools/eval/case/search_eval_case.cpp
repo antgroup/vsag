@@ -30,6 +30,7 @@
 #include "../monitor/latency_monitor.h"
 #include "../monitor/memory_peak_monitor.h"
 #include "../monitor/recall_monitor.h"
+#include "search_pass_runner.h"
 #include "search_timing.h"
 #include "typing.h"
 #include "vsag/filter.h"
@@ -156,8 +157,7 @@ SearchEvalCase::init_recall_monitor() {
 void
 SearchEvalCase::init_memory_monitor() {
     if (config_.enable_memory) {
-        auto memory_peak_monitor = std::make_shared<MemoryPeakMonitor>("search");
-        this->monitors_.emplace_back(std::move(memory_peak_monitor));
+        this->memory_monitor_ = std::make_shared<MemoryPeakMonitor>("search");
     }
 }
 
@@ -198,11 +198,27 @@ SearchEvalCase::deserialize(std::ifstream& infile) {
 
 void
 SearchEvalCase::do_knn_search() {
+    bool statistics_collected = false;
+    SearchPassRunner::Run(
+        this->monitors_,
+        this->latency_monitor_,
+        this->memory_monitor_,
+        [this](const MonitorPtr& monitor) { this->run_knn_search_pass(monitor.get(), false); },
+        [this, &statistics_collected]() {
+            this->run_knn_search_pass(nullptr, true);
+            statistics_collected = true;
+        });
+    if (not statistics_collected) {
+        this->run_knn_search_pass(nullptr, true);
+    }
+}
+
+void
+SearchEvalCase::run_knn_search_pass(Monitor* monitor, bool collect_statistics) {
     uint64_t topk = config_.top_k;
     auto query_count = this->dataset_ptr_->GetNumberOfQuery();
     this->logger_->Debug("query count is " + std::to_string(query_count));
     auto min_query = std::max(static_cast<uint64_t>(query_count), config_.search_query_count);
-
     auto prepare_query = [this](uint64_t query_id) {
         auto query = vsag::Dataset::Make();
         query->NumElements(1)->Dim(this->dataset_ptr_->GetDim())->Owner(false);
@@ -222,49 +238,14 @@ SearchEvalCase::do_knn_search() {
         return std::make_pair(std::move(query), query_vector);
     };
 
-    bool statistics_collected = false;
-    for (auto& monitor : this->monitors_) {
-        const bool is_latency_monitor =
-            this->latency_monitor_ != nullptr and monitor.get() == this->latency_monitor_.get();
-        // Statistics share the first non-performance pass, or use the fallback pass below.
-        const bool collect_statistics = not is_latency_monitor and not statistics_collected;
-        monitor->Start();
-
-        omp_set_num_threads(config_.num_threads_searching);
-        if (is_latency_monitor) {
-            using Clock = std::chrono::steady_clock;
-            std::vector<double> latency_records(min_query);
-            SearchFailure search_failure;
-            const auto wall_start = Clock::now();
-#pragma omp parallel for schedule(dynamic)
-            for (int64_t id = 0; id < min_query; ++id) {
-                if (search_failure.Failed()) {
-                    continue;
-                }
-                auto i = static_cast<uint64_t>(id) % query_count;
-                auto query_and_vector = prepare_query(i);
-                auto& query = query_and_vector.first;
-                auto [result, latency_ms] = MeasureSearch(
-                    [&]() { return this->index_->KnnSearch(query, topk, config_.search_param); });
-                if (not result.has_value()) {
-                    search_failure.Record(result.error().message);
-                    continue;
-                }
-                latency_records[static_cast<uint64_t>(id)] = latency_ms;
-            }
-            search_failure.ThrowIfFailed();
-            const auto wall_end = Clock::now();
-            auto timing_batch = LatencyTimingBatch{
-                std::move(latency_records),
-                min_query,
-                std::chrono::duration<double>(wall_end - wall_start).count(),
-            };
-            this->latency_monitor_->SetTimingBatch(std::move(timing_batch));
-            monitor->Stop();
-            continue;
-        }
-
+    omp_set_num_threads(config_.num_threads_searching);
+    const bool is_latency_monitor =
+        this->latency_monitor_ != nullptr and monitor == this->latency_monitor_.get();
+    if (is_latency_monitor) {
+        using Clock = std::chrono::steady_clock;
+        std::vector<double> latency_records(min_query);
         SearchFailure search_failure;
+        const auto wall_start = Clock::now();
 #pragma omp parallel for schedule(dynamic)
         for (int64_t id = 0; id < min_query; ++id) {
             if (search_failure.Failed()) {
@@ -273,15 +254,44 @@ SearchEvalCase::do_knn_search() {
             auto i = static_cast<uint64_t>(id) % query_count;
             auto query_and_vector = prepare_query(i);
             auto& query = query_and_vector.first;
-            const void* query_vector = query_and_vector.second;
-            auto result = this->index_->KnnSearch(query, topk, config_.search_param);
+            auto [result, latency_ms] = MeasureSearch(
+                [&]() { return this->index_->KnnSearch(query, topk, config_.search_param); });
             if (not result.has_value()) {
                 search_failure.Record(result.error().message);
                 continue;
             }
-            if (collect_statistics) {
-                this->record_statistics(result.value());
-            }
+            latency_records[static_cast<uint64_t>(id)] = latency_ms;
+        }
+        search_failure.ThrowIfFailed();
+        const auto wall_end = Clock::now();
+        auto timing_batch = LatencyTimingBatch{
+            std::move(latency_records),
+            min_query,
+            std::chrono::duration<double>(wall_end - wall_start).count(),
+        };
+        this->latency_monitor_->SetTimingBatch(std::move(timing_batch));
+        return;
+    }
+
+    SearchFailure search_failure;
+#pragma omp parallel for schedule(dynamic)
+    for (int64_t id = 0; id < min_query; ++id) {
+        if (search_failure.Failed()) {
+            continue;
+        }
+        auto i = static_cast<uint64_t>(id) % query_count;
+        auto query_and_vector = prepare_query(i);
+        auto& query = query_and_vector.first;
+        const void* query_vector = query_and_vector.second;
+        auto result = this->index_->KnnSearch(query, topk, config_.search_param);
+        if (not result.has_value()) {
+            search_failure.Record(result.error().message);
+            continue;
+        }
+        if (collect_statistics) {
+            this->record_statistics(result.value());
+        }
+        if (monitor != nullptr) {
             SearchRecord record{result.value()->GetIds(),
                                 dataset_ptr_->GetNeighbors(i),
                                 dataset_ptr_.get(),
@@ -290,31 +300,8 @@ SearchEvalCase::do_knn_search() {
                                 topk};
             monitor->Record(&record);
         }
-        search_failure.ThrowIfFailed();
-        monitor->Stop();
-        statistics_collected = statistics_collected or collect_statistics;
     }
-
-    if (not statistics_collected) {
-        omp_set_num_threads(config_.num_threads_searching);
-        SearchFailure search_failure;
-#pragma omp parallel for schedule(dynamic)
-        for (int64_t id = 0; id < min_query; ++id) {
-            if (search_failure.Failed()) {
-                continue;
-            }
-            auto i = static_cast<uint64_t>(id) % query_count;
-            auto query_and_vector = prepare_query(i);
-            auto& query = query_and_vector.first;
-            auto result = this->index_->KnnSearch(query, topk, config_.search_param);
-            if (not result.has_value()) {
-                search_failure.Record(result.error().message);
-                continue;
-            }
-            this->record_statistics(result.value());
-        }
-        search_failure.ThrowIfFailed();
-    }
+    search_failure.ThrowIfFailed();
 }
 
 void
@@ -323,6 +310,16 @@ SearchEvalCase::do_range_search() {
 
 void
 SearchEvalCase::do_knn_filter_search() {
+    SearchPassRunner::Run(
+        this->monitors_,
+        this->latency_monitor_,
+        this->memory_monitor_,
+        [this](const MonitorPtr& monitor) { this->run_knn_filter_search_pass(monitor.get()); },
+        []() {});
+}
+
+void
+SearchEvalCase::run_knn_filter_search_pass(Monitor* monitor) {
     uint64_t topk = config_.top_k;
     auto query_count = this->dataset_ptr_->GetNumberOfQuery();
     auto train_labels = this->dataset_ptr_->GetTrainLabels();
@@ -335,48 +332,14 @@ SearchEvalCase::do_knn_filter_search() {
     }
     this->logger_->Debug("query count is " + std::to_string(query_count));
     auto min_query = std::max<int64_t>(query_count, 10000);
-    for (auto& monitor : this->monitors_) {
-        const bool is_latency_monitor =
-            this->latency_monitor_ != nullptr and monitor.get() == this->latency_monitor_.get();
-        monitor->Start();
-        if (is_latency_monitor) {
-            using Clock = std::chrono::steady_clock;
-            std::vector<double> latency_records(min_query);
-            const auto wall_start = Clock::now();
-            for (int64_t id = 0; id < min_query; ++id) {
-                auto i = id % query_count;
-                auto query = vsag::Dataset::Make();
-                query->NumElements(1)->Dim(this->dataset_ptr_->GetDim())->Owner(false);
-                const void* query_vector = this->dataset_ptr_->GetOneTest(i);
-                if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
-                    query->Float32Vectors((const float*)query_vector);
-                } else if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_INT8) {
-                    query->Int8Vectors((const int8_t*)query_vector);
-                }
-                auto test_label = test_labels[i];
-                auto filter = std::make_shared<FilterObj>(
-                    train_labels, test_label, this->dataset_ptr_->GetValidRatio(test_label));
-                auto [result, latency_ms] = MeasureSearch([&]() {
-                    return this->index_->KnnSearch(query, topk, config_.search_param, filter);
-                });
-                if (not result.has_value()) {
-                    throw std::runtime_error("query error: " + result.error().message);
-                }
-                latency_records[static_cast<uint64_t>(id)] = latency_ms;
-            }
-            const auto wall_end = Clock::now();
-            auto timing_batch = LatencyTimingBatch{
-                std::move(latency_records),
-                static_cast<uint64_t>(min_query),
-                std::chrono::duration<double>(wall_end - wall_start).count(),
-            };
-            this->latency_monitor_->SetTimingBatch(std::move(timing_batch));
-            monitor->Stop();
-            continue;
-        }
-
+    const bool is_latency_monitor =
+        this->latency_monitor_ != nullptr and monitor == this->latency_monitor_.get();
+    if (is_latency_monitor) {
+        using Clock = std::chrono::steady_clock;
+        std::vector<double> latency_records(min_query);
+        const auto wall_start = Clock::now();
         for (int64_t id = 0; id < min_query; ++id) {
-            auto i = id % query_count;
+            auto i = static_cast<uint64_t>(id) % query_count;
             auto query = vsag::Dataset::Make();
             query->NumElements(1)->Dim(this->dataset_ptr_->GetDim())->Owner(false);
             const void* query_vector = this->dataset_ptr_->GetOneTest(i);
@@ -388,10 +351,42 @@ SearchEvalCase::do_knn_filter_search() {
             auto test_label = test_labels[i];
             auto filter = std::make_shared<FilterObj>(
                 train_labels, test_label, this->dataset_ptr_->GetValidRatio(test_label));
-            auto result = this->index_->KnnSearch(query, topk, config_.search_param, filter);
+            auto [result, latency_ms] = MeasureSearch([&]() {
+                return this->index_->KnnSearch(query, topk, config_.search_param, filter);
+            });
             if (not result.has_value()) {
                 throw std::runtime_error("query error: " + result.error().message);
             }
+            latency_records[static_cast<uint64_t>(id)] = latency_ms;
+        }
+        const auto wall_end = Clock::now();
+        auto timing_batch = LatencyTimingBatch{
+            std::move(latency_records),
+            static_cast<uint64_t>(min_query),
+            std::chrono::duration<double>(wall_end - wall_start).count(),
+        };
+        this->latency_monitor_->SetTimingBatch(std::move(timing_batch));
+        return;
+    }
+
+    for (int64_t id = 0; id < min_query; ++id) {
+        auto i = static_cast<uint64_t>(id) % query_count;
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)->Dim(this->dataset_ptr_->GetDim())->Owner(false);
+        const void* query_vector = this->dataset_ptr_->GetOneTest(i);
+        if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
+            query->Float32Vectors((const float*)query_vector);
+        } else if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_INT8) {
+            query->Int8Vectors((const int8_t*)query_vector);
+        }
+        auto test_label = test_labels[i];
+        auto filter = std::make_shared<FilterObj>(
+            train_labels, test_label, this->dataset_ptr_->GetValidRatio(test_label));
+        auto result = this->index_->KnnSearch(query, topk, config_.search_param, filter);
+        if (not result.has_value()) {
+            throw std::runtime_error("query error: " + result.error().message);
+        }
+        if (monitor != nullptr) {
             SearchRecord record{result.value()->GetIds(),
                                 dataset_ptr_->GetNeighbors(i),
                                 dataset_ptr_.get(),
@@ -400,7 +395,6 @@ SearchEvalCase::do_knn_filter_search() {
                                 topk};
             monitor->Record(&record);
         }
-        monitor->Stop();
     }
 }
 
@@ -414,6 +408,9 @@ SearchEvalCase::process_result() {
     for (auto& monitor : this->monitors_) {
         const auto& one_result = monitor->GetResult();
         EvalCase::MergeJsonType(one_result, result);
+    }
+    if (this->memory_monitor_ != nullptr) {
+        EvalCase::MergeJsonType(this->memory_monitor_->GetResult(), result);
     }
     result["action"] = "search";
     result["search_mode"] = config_.search_mode;
