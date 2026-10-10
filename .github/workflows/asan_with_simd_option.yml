@@ -10,7 +10,7 @@ on:
 jobs:
   build_asan_simd:
     name: Asan Build Simd
-    runs-on: ubuntu-22.04
+    runs-on: [ linux, self-hosted, X64 ]
     container:
       image: vsaglib/vsag:ci-x86-mkl
       volumes:
@@ -58,7 +58,7 @@ jobs:
   test_asan_simd:
     name: Unit Test Simd
     needs: build_asan_simd
-    runs-on: ubuntu-22.04
+    runs-on: [ linux, self-hosted ]
     strategy:
       matrix:
         test_type: [ unittests, functests ]
