@@ -89,6 +89,7 @@ auto result = index->KnnSearch(
 | `no_build_levels` | int[] | `[]` | 跳过构图的层级（从根节点开始的 0-based 下标） |
 | `use_reorder` | bool | `false` | 是否保留高精度副本用于精排 |
 | `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型 |
+| `store_paths` | bool | `false` | 顶层开关；保留传给 `Build` 和 `Add` 的原始路径，使 `GetDataByIdsWithFlag` 在选择 `DATA_FLAG_PATH` 时可以返回它们。该开关对所有已配置的 hierarchy 生效，不支持按 hierarchy 覆盖 |
 | `index_min_size` | int | `0` | 子索引的最小规模；小于该值的分区会退化为线性扫描 |
 | `support_duplicate` | bool | `false` | 是否允许重复 ID |
 | `build_thread_count` | int | `1` | 构建阶段并发线程数 |
@@ -171,6 +172,29 @@ base->NumElements(n)
 index->Build(base);
 ```
 
+### 按 ID 取回路径
+
+将顶层构建参数 `store_paths` 设为 `true` 后，Pyramid 会保留原始路径，供按 ID
+取回。在 `GetDataByIdsWithFlag` 中选择 `DATA_FLAG_PATH` 后，返回路径的顺序与请求 ID
+的顺序一致。默认匿名 hierarchy 使用 `GetPaths()`，命名 hierarchy 使用
+`GetPaths(hierarchy_name)`：
+
+```cpp
+int64_t requested_ids[] = {product_id_b, product_id_a};
+auto data = index->GetDataByIdsWithFlag(
+    requested_ids, 2, DATA_FLAG_ID | DATA_FLAG_PATH).value();
+
+const std::string* site_paths = data->GetPaths("site");
+const std::string* category_paths = data->GetPaths("category");
+```
+
+`GetDataByIds` 以及未选择 `DATA_FLAG_PATH` 的 `GetDataByIdsWithFlag` 都不会附带路径
+数组。`store_paths` 为 `false` 时选择 `DATA_FLAG_PATH` 会返回参数错误。开启路径存储
+后，只有当所有请求 ID 在某个 hierarchy 中都有已记录的路径，结果才会包含该
+hierarchy。只要其中一个 ID 在构建或追加时没有提供该 hierarchy 的路径，对应 getter
+就返回 `nullptr`；其他路径完整的 hierarchy 仍会正常返回。单 hierarchy 模式下，
+`GetPaths()` 遵循相同的完整性规则。
+
 ### 检索指定层级
 
 通过检索参数中的 `"hierarchies"` 指定要检索的层级。查询 Dataset 也需要在对应的
@@ -216,7 +240,10 @@ auto result = index->RangeSearch(
 
 ### 序列化与反序列化
 
-多层级索引的序列化和反序列化完全透明。序列化格式包含所有层级名称及其图结构：
+多 hierarchy 索引的序列化和反序列化完全透明。序列化格式包含所有 hierarchy
+名称及其图结构。当 `store_paths: true` 时，常规序列化和 streaming 序列化还会持久化
+已保留的原始路径，因此反序列化后仍可通过 `GetDataByIdsWithFlag` 获取。使用默认值
+`false` 时，图 hierarchy 会被持久化，但不会保留按 ID 索引的原始路径：
 
 ```cpp
 // 序列化
