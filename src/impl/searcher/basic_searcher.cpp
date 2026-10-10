@@ -702,8 +702,11 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     if (check_func(ep) and is_result_distance_eligible<mode>(dist, inner_search_param)) {
         top_candidates->Push(dist, ep);
     }
-    if (not is_finite_distance(dist) and inner_search_param.consider_duplicate and
-        not use_custom_distance and is_result_distance_eligible<mode>(dist, inner_search_param)) {
+    // The entry point is marked visited before its neighbours are expanded, so its own duplicate
+    // labels are never reached by the traversal loop. Expand them here whether the seed distance is
+    // finite or not.
+    if (inner_search_param.consider_duplicate and not use_custom_distance and
+        is_result_distance_eligible<mode>(dist, inner_search_param)) {
         for (const auto duplicate_id : graph->GetDuplicateIds(ep)) {
             if (check_func(duplicate_id)) {
                 top_candidates->Push(dist, duplicate_id);
