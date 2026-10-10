@@ -185,3 +185,5 @@ target_link_libraries(330_feature_timeout_search vsag)
 
 add_executable(332_feature_search_session 332_feature_search_session.cpp)
 target_link_libraries(332_feature_search_session vsag)
+add_executable (115_index_uhg 115_index_uhg.cpp)
+target_link_libraries (115_index_uhg vsag)

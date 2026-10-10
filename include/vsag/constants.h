@@ -23,6 +23,7 @@ constexpr uint64_t MIN_RESIZE_INCREASE_COUNT_BIT = 1;
 constexpr uint64_t MAX_RESIZE_INCREASE_COUNT_BIT = 31;
 
 extern const char* const INDEX_HGRAPH;
+extern const char* const INDEX_UHG;
 extern const char* const INDEX_LAZY_HGRAPH;
 extern const char* const INDEX_PYRAMID;
 extern const char* const INDEX_SINDI;

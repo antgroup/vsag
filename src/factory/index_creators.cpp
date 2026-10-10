@@ -27,6 +27,7 @@
 #include "algorithm/simq/simq.h"
 #include "algorithm/sindi/sindi.h"
 #include "algorithm/sindi_v2/sindi_v2.h"
+#include "algorithm/uhg/uhg.h"
 #include "common.h"
 #include "index/index_impl.h"
 #include "index_registry.h"
@@ -93,6 +94,12 @@ create_ivf_index(JsonType& parsed_params, const IndexCommonParam& index_common_p
 }
 
 tl::expected<std::shared_ptr<Index>, Error>
+create_uhg_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
+    return create_index_impl_with_param_log<UHG>(
+        "created a uhg index", parsed_params, index_common_params);
+}
+
+tl::expected<std::shared_ptr<Index>, Error>
 create_sindi_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
     return create_index_impl_with_param_log<SINDI>(
         "created a sindi index", parsed_params, index_common_params);
@@ -128,6 +135,7 @@ register_all_index_creators() {
     std::call_once(registration_once, []() {
         register_index_creator(INDEX_BRUTE_FORCE, &create_brute_force_index);
         register_index_creator(INDEX_HGRAPH, &create_hgraph_index);
+        register_index_creator(INDEX_UHG, &create_uhg_index);
         register_index_creator(INDEX_LAZY_HGRAPH, &create_lazy_hgraph_index);
         register_index_creator(INDEX_IVF, &create_ivf_index);
         register_index_creator(INDEX_PYRAMID, &create_pyramid_index);
