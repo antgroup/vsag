@@ -23,7 +23,10 @@ A k-NN search needs two datasets:
 
 - **base**: all vectors in the database; size = `num_vectors * dim`.
 - **query**: the query vector(s) for which to find nearest neighbors; size = `num_queries * dim`.
-  Currently the public `KnnSearch` API processes one query at a time.
+  All indexes accept a single query vector (`num_queries == 1`). HGraph and IVF additionally
+  accept batched queries (`num_queries > 1`), returning a row-major `num_queries x dim` result;
+  HGraph pads missing neighbors with `id == -1` and infinite distance. Check
+  `SUPPORT_BATCH_SEARCH` via `Index::CheckFeature` before relying on batched input.
 
 ```cpp
 int64_t num_vectors = 10000;

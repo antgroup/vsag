@@ -3322,6 +3322,9 @@ TEST_CASE("IVF Batch Search Parallel", "[ft][ivf][pr]") {
     auto build_result = index.value()->Build(dataset->base_);
     REQUIRE(build_result.has_value());
 
+    // Batched queries are a public capability and must be discoverable by callers.
+    REQUIRE(index.value()->CheckFeature(vsag::IndexFeature::SUPPORT_BATCH_SEARCH));
+
     std::vector<float> batch_query_vectors;
     for (int64_t i = 0; i < num_queries; ++i) {
         batch_query_vectors.insert(batch_query_vectors.end(),
