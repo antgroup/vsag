@@ -67,7 +67,8 @@ GNOIMIPartition::GNOIMIPartition(const IndexCommonParam& common_param,
       norms_s_(allocator_),
       norms_t_(allocator_),
       precomputed_terms_st_(allocator_),
-      common_param_(common_param) {
+      common_param_(common_param),
+      ivf_partition_strategy_param_(param) {
     data_centroids_s_.resize(bucket_count_s_ * dim_);
     data_centroids_t_.resize(bucket_count_t_ * dim_);
     norms_s_.resize(bucket_count_s_);
@@ -125,7 +126,11 @@ GNOIMIPartition::Train(const DatasetPtr dataset) {
     auto train_and_get_residual = [&, this](const DatasetPtr& centroids,
                                             float* data_centroids,
                                             double* err) {
-        cls.Run(centroids->GetNumElements(), residuals.data(), num_element, 30, err);
+        cls.Run(centroids->GetNumElements(),
+                residuals.data(),
+                num_element,
+                ivf_partition_strategy_param_->GetKMeansIterCount(),
+                err);
         memcpy(data_centroids, cls.k_centroids_, dim * centroids->GetNumElements() * sizeof(float));
         BruteForce route_index(param_ptr_, common_param_);
         auto build_result = route_index.Build(centroids);

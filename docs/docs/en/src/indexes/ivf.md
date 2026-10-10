@@ -80,6 +80,7 @@ Build-time parameters live under `index_param`. See
 | `first_order_buckets_count` | int | `10` | First-level count (effective for `gno_imi`) |
 | `second_order_buckets_count` | int | `10` | Second-level count (effective for `gno_imi`) |
 | `ivf_train_type` | string | `"kmeans"` | Centroid training: `kmeans` or `random` |
+| `kmeans_iter_count` | int | `25` (`ivf`), `30` (`gno_imi`) | KMeans training iterations for centroid training (effective with `ivf_train_type: "kmeans"`). Higher → better bucket quality, longer build. |
 | `route_max_degree` | int | `64` | Routing HGraph maximum degree (effective for `ivf`) |
 | `route_ef_construction` | int | `300` | Routing HGraph construction search breadth (effective for `ivf`) |
 | `enable_gpu_build` | bool | `false` | Use the CUDA backend while building (effective for `ivf`); see [GPU-accelerated build](#gpu-accelerated-build) |
