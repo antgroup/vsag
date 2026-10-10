@@ -62,6 +62,7 @@ namespace vsag {
 class ChunkedManifest;
 struct ComponentManifestEntry;
 class FlattenOptimizedBuildInterface;
+class HGraphFGIM;
 class HGraphRaBitQFusedDataCell;
 class HGraphRaBitQSearcher;
 class HGraphOptimizedBuildSession;
@@ -92,6 +93,8 @@ public:
                       std::shared_ptr<const InnerIndexInterface> owner) const override;
 
     friend class HGraphAnalyzer;
+    friend class HGraphFGIM;
+    friend class HGraphFGIMTestAccessor;
     friend class HGraphOptimizedBuildSession;
 
 public:
