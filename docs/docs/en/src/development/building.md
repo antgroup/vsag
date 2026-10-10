@@ -121,5 +121,23 @@ For a local dry run of the same packaging script, run:
 COMPILE_JOBS=6 bash ./scripts/release/dist.sh
 ```
 
+For accelerated dependency downloads in both ABI containers, optionally set
+`VSAG_THIRDPARTY_ENV_FILE` to a readable regular file on the host (quote paths containing spaces):
+
+```bash
+VSAG_THIRDPARTY_ENV_FILE="/path/to/dependency urls.env" bash ./scripts/release/dist.sh
+```
+
+Use ASCII `VSAG_THIRDPARTY_<NAME>=URL` lines, with uppercase letters, digits and underscores
+in names, including [pin-qualified names](offline_build.md). URLs must start with a scheme
+such as `https://` and contain no whitespace; do not use `export`, quotes or inline comments.
+Blank lines and full-line `#` comments are allowed; LF, CRLF and a missing final newline work.
+Values are literal: `=`, `&`, `#` and `$` are preserved without shell expansion. Duplicate keys,
+invalid entries and lines longer than 65,534 bytes (excluding line endings) fail before image
+builds.
+File values override image defaults; host dependency variables are not forwarded or modified.
+CMake prefers pinned names over legacy names and retains default URLs as download fallbacks.
+An unset path preserves existing behavior; an explicitly empty or unreadable path is an error.
+
 You can increase `COMPILE_JOBS` if your machine has enough memory, but the default is conservative
 to avoid out-of-memory failures in CI runners.

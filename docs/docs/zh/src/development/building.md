@@ -158,5 +158,19 @@ VSAG 会在配置 / 构建阶段下载第三方库。在离线或网络受限的
 COMPILE_JOBS=6 bash ./scripts/release/dist.sh
 ```
 
+如需加速两个 ABI 容器中的依赖下载，可将 `VSAG_THIRDPARTY_ENV_FILE` 设置为宿主机上可读的普通文件路径（路径包含空格时需要引号）：
+
+```bash
+VSAG_THIRDPARTY_ENV_FILE="/path/to/dependency urls.env" bash ./scripts/release/dist.sh
+```
+
+文件使用 ASCII `VSAG_THIRDPARTY_<NAME>=URL` 行，变量名仅包含大写字母、数字和下划线，支持[带版本后缀的变量名](offline_build.md)。
+URL 必须以 `https://` 等协议开头且不含空白；不要使用 `export`、引号或行尾注释。
+允许空行和整行 `#` 注释，支持 LF、CRLF 和末行无换行符。
+值按字面传递，保留 `=`、`&`、`#` 和 `$`，不执行 shell 展开。重复键、无效条目及超过 65,534 字节的行（不含行尾符）会在构建镜像前报错。
+文件值覆盖镜像默认值；不会转发或修改宿主机的依赖环境变量。
+CMake 优先使用带版本后缀的变量，再使用旧变量，并保留默认 URL 作为下载回退。
+不设置该路径时保持原有行为；显式设置为空或不可读路径会报错。
+
 如果机器内存足够，可以适当调大 `COMPILE_JOBS`；默认值会比较保守，以避免 CI 里再次触发
 内存不足。
