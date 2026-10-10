@@ -1,0 +1,214 @@
+# Lite RaBitQ 3+5 feasibility boundary
+
+This document records the source-based boundary for a possible standalone Lite
+RaBitQ backend. It is an experiment design, not a public API commitment. The
+Full HGraph reference measurements are recorded in `README.md` and
+`FINAL_REPORT.md`.
+
+## Source evidence
+
+The proposed direction follows the repository's existing implementation rather
+than defining a new quantizer:
+
+- `docs/docs/en/src/quantization/rabitq_split.md` defines x+y split storage:
+  x filter bits drive traversal, y supplement bits are read for reorder, and
+  the final distance uses x+y bits.
+- `src/algorithm/hgraph/hgraph_parameter_test.cpp` verifies that external
+  `rabitq_bits_per_dim_base=3` and `rabitq_bits_per_dim_precise=5` map to an
+  eight-bit RaBitQ quantizer with `rabitq_bits_per_dim_filter=3`.
+- `src/quantization/rabitq_quantization/rabitq_quantizer.cpp` trains a centroid
+  and random transform, encodes normalized vectors, lays out split bit planes
+  and metadata, and combines filter and supplement contributions.
+- `src/simd/generic.cpp` and `src/simd/rabitq_simd.h` provide the scalar
+  split-code inner product, supplement inner product, and scalar-to-plane pack
+  operations together with dispatched SIMD variants.
+- `src/datacell/rabitq_split_datacell.h` owns two independent fixed layouts and
+  performs filter-only traversal followed by supplement-backed full distance.
+- `src/impl/transform/fht_kac_rotate_transformer.cpp` applies four rounds of
+  persisted random sign flips and FHT/Kac transforms. Its model is not a dense
+  orthogonal matrix.
+- `include/vsag/lite/index.h`, `src/lite/backend.h`, and
+  `src/lite/graph_backend.cpp` show that Lite currently exposes FP32/FP16
+  storage and a single-stage graph distance. Add, Update, Remove, filtered
+  Search, and versioned snapshots all operate through this smaller contract.
+
+## Exact 128-dimensional L2 layout
+
+For the measured x=3, y=5 configuration, Full maps the quantizer to total
+bits B=8 and filter bits x=3. With dimension d=128, one bit plane is
+`ceil(d/8)=16` bytes.
+
+The ordinary split layout derived from `RefreshSplitLayout` is:
+
+| Record | Planes | L2 metadata | Bytes/vector |
+| --- | ---: | --- | ---: |
+| Filter | 3 x 16 | norm, filter-code norm, lower-bound error, filter error | 64 |
+| Supplement | 5 x 16 | full-code norm, vector norm, full error, lower-bound error, filter error | 100 |
+| Combined | 8 x 16 | metadata above | 164 |
+
+The combined code payload is 68.0% smaller than a 512-byte FP32 vector and
+35.9% smaller than a 256-byte FP16 vector before IDs, graph links, container
+capacity, and model state. The model also needs a 128-float centroid and four
+128-bit FHT sign masks. These arithmetic sizes explain why the candidate is
+plausible, but they are not a prediction of complete Lite snapshot or RSS.
+
+## Dependency decision
+
+### Behavior and small kernels to reuse
+
+- Preserve the official x+y bit ordering, centering, norm/error metadata, and
+  lower-bound equations.
+- Reuse or minimally extract the repository's generic plane pack and split
+  inner-product kernels; add ISA translation units only after the scalar path
+  is correct and measured.
+- Preserve the official FHT transform shape and persist its sign masks so a
+  loaded index reproduces the build-time model.
+- Keep the existing Lite error contract, physical remove/fill-hole behavior,
+  external-ID filter semantics, and little-endian bounded snapshot parsing.
+
+### Full components that must stay outside Lite
+
+- `Quantizer`/`Computer` CRTP infrastructure, `Allocator`, Full `Stream`, JSON
+  parameter factories, DataCell/Layout/IO classes, HGraph/Pyramid, thread
+  pools, PCA/MRQ, fused residual clusters, disk IO, and Full serialization.
+- The dense random orthogonal matrix path. The measured configuration uses
+  FHT; importing the alternative ROM/BLAS dependency would defeat the
+  standalone boundary.
+- Full raw-vector or FP32 reorder storage. The reference one-bit mode showed
+  that retaining FP32 reorder data misses the Lite storage objective.
+
+The entire `RaBitQuantizer` or `RaBitQSplitDataCell` cannot be linked into the
+standalone Lite target: their direct contract brings the Full allocator,
+transform, parameter, stream, IO, and datacell closure. Only the required
+math and byte layout should cross the boundary, with repository provenance
+kept in comments and tests.
+
+## Proposed minimal change
+
+The next implementation should remain opt-in under `lite/benchmark` and should
+not change `VectorStorage`, `Index`, or snapshot versions.
+
+1. Add a standalone L2-only 3+5 codec probe with a fixed internal model
+   representation: dimension, centroid, four FHT sign-mask rounds, and the
+   official filter/supplement records.
+2. Train once from a batch, encode the batch, and support query transform,
+   filter estimate/lower bound, and full 8-bit reorder distance. The probe must
+   use a reproducible model input or persist the generated masks; it must not
+   claim byte identity with a separately trained Full model.
+3. Differentially test plane packing and scalar distances against direct
+   decoded-code formulas, including non-multiple-of-eight dimensions, constant
+   vectors, zero norm, non-finite input rejection, truncated model/code data,
+   and round-trip persistence.
+4. Run the existing prepared SIFT 10k/100k inputs in fresh processes and report
+   encoded bytes, model bytes, Recall@10, build/search latency, and RSS. Compare
+   with the current Lite FP32/FP16 evidence and with the Full reference, while
+   keeping algorithm-level comparisons separate.
+
+Only after that probe meets an agreed quality and latency budget should a
+feature design extend the graph backend. That later design must add two-stage
+traversal/reorder rather than substituting an eight-bit distance everywhere;
+otherwise it would not implement the official split search pipeline.
+
+## Excluded from the next implementation
+
+- No change to PR #2904, the public Lite API, `VectorStorage`, or v1/v2/v3
+  snapshots.
+- No PCA, MRQ, cosine/IP, disk supplement IO, mmap, fused datacell, concurrent
+  search, or Full HGraph linkage.
+- No SIMD-first implementation and no performance claim from a scalar probe.
+- No reuse of the old dirty graph exploration workspace.
+
+## Validation and promotion gates
+
+The experiment must pass clang-format-15, clang-tidy-15, its focused codec
+tests, the existing Release Lite CTest suite, malformed-input tests, and
+fresh-process round trips. Formal measurements require seven alternating-order
+runs at both prepared scales with exact commit and binary hashes and empty
+stderr.
+
+Promotion to a public backend remains blocked until the maintainer/mentor
+accepts a Recall@10 floor and latency budget, the Lite-specific snapshot and
+steady-RSS results materially improve on FP16, and CRUD behavior with a fixed
+trained model is specified and tested. The current Full reference supports
+continuing the 3+5 experiment; it does not by itself satisfy those gates.
+
+## Prototype gate status at `a99b0e6`
+
+The standalone probe now covers deterministic batch training, FHT masks, fast 8-bit CAQ encoding, 3+5 plane packing, the official L2 lower-bound calculation, candidate pruning, and supplement-only reranking. Its self-test checks deterministic model/code generation, scalar-versus-split inner-product parity, and filtered-versus-full-code Top-10 equality. It also rejects non-finite vectors and malformed, duplicate, or out-of-range SIFT ground truth.
+
+Seven fresh SIFT-100k processes all produced 0.985 Recall@10 and exact Top-10 agreement between filtered search and an exhaustive full-code scan. The filter read the supplement for a mean 0.2273% of records. These results pass the standalone functional and quality gate for this fixed dataset and seed. The probe now also round-trips its FHT model, split payloads, and metadata through an independent bounded little-endian format, with truncation, magic, metadata, size, and trailing-byte rejection. It does not yet pass the public-backend promotion gate: in-memory records still use per-record allocations, and graph integration, CRUD model lifecycle, SIMD filter kernels, and owned-memory measurement remain open. The next bounded implementation is contiguous in-memory storage, followed by graph traversal integration only if the mentor accepts the measured quality floor.
+
+## Contiguous-storage gate
+
+The in-memory probe now stores all filter planes, supplement planes, and fixed-size metadata in three contiguous owned arrays. It retains no per-record vectors after encoding, verifies fixed record strides, and preserves the `VSLRBQ01` v1 snapshot bytes across load/save. Single fresh-process SIFT-10k/100k checks retained Recall@10 of 0.994/0.985, exact filtered/full agreement, and the previous reorder ratios. The 100k peak RSS was 69,048 KiB, 12.0% below the earlier seven-run median of 78,456 KiB; this is directional rather than a stable performance result because the new value is a single run and source vectors remain resident.
+
+The public-backend promotion gate remains open: graph traversal integration, CRUD behavior for a fixed trained model, SIMD filter kernels, and isolated owned-memory measurement are not yet complete. The next bounded implementation is an experiment-only graph traversal adapter that uses the contiguous records for filter-first exploration and supplement-backed result reorder. It must remain outside `VectorStorage` and public snapshots until its quality and latency are measured and the mentor accepts the promotion boundary.
+
+## Filter-first graph traversal gate
+
+The experiment now reuses the official Lite FP32 graph builder as a reference topology and exports its adjacency into contiguous CSR storage. Search traverses with the 3-bit filter distance and reads the 5-bit supplement only for the final `ef_search=128` candidate set. Snapshot-loaded encoded records produce byte-identical graph results on the same topology.
+
+At SIFT-10k/100k, graph Recall@10 was 0.966/0.940, with mean visited counts of 829.15/1,150.83 and graph-search P50 of 281.383/406.009 us. The corresponding scalar full-scan P50 values were 1,461.610/14,266.271 us. The 100k result is close to the existing public FP32 graph Recall@10 of 0.946, so the traversal experiment passes its bounded quality gate.
+
+This does not yet establish a standalone RaBitQ graph backend. The graph topology is built through temporary FP32 Lite backends, topology persistence is not part of `VSLRBQ01`, CRUD/model lifecycle is unspecified, and the filter kernel is scalar. The next bounded step is to persist and restore the CSR topology with strict validation, then define Add/Update/Remove behavior under one fixed trained model before considering a public `VectorStorage` value.
+
+## High-dimensional GIST gate
+
+The codec now follows the official non-power-of-two `FHTKacRotator` behavior instead of requiring a power-of-two dimension. The 768/960-dimensional self-tests verify norm preservation, deterministic split-code bytes, expected plane sizes, and snapshot round trips. A bounded `lite_prepare_gist` tool converts GIST fbin prefixes and recomputes exact squared-L2 Top-10 for every prefix; it rejects invalid shapes, truncated payloads, and non-finite values.
+
+Using 100 independent queries against 960-dimensional GIST prefixes, exhaustive 8-bit full-code and lower-bound-filtered Recall@10 were both 0.997 at 10k and 100k. For filter-first graph traversal, degree 16 / ef 128 produced Recall@10 of 0.880/0.722. Increasing only ef to 512 produced 0.960/0.872. Degree 32 / ef 512 produced 0.984/0.949, showing that high-dimensional graph connectivity mattered more than deeper traversal alone. At 100k, that last configuration used a 26,400,008-byte CSR topology, 4,939.93 mean visited nodes, 512 supplement reorders per query, 9,139.447 us graph-search P50, 180,568.435 ms graph build time, and 1,408,628 KiB process peak RSS.
+
+This passes the bounded high-dimensional codec and graph-quality experiment gate. It does not justify a public RaBitQ backend yet: topology still comes from a temporary FP32 Lite graph, filter distance is scalar, CSR is not persisted, and fixed-model CRUD semantics remain undefined. Full GIST1M is an optional pressure test, not a current Lite gate; the next implementation priority remains validated topology persistence and CRUD/model lifecycle.
+
+## CSR persistence gate
+
+The experiment now persists the filter-first topology with the trained model and contiguous split records in `VSLRBQ01` version 2. Version 1 remains byte-compatible and code-only. Version 2 stores CSR offsets and neighbors in little-endian order and rejects invalid offset counts, non-zero origins, decreasing or out-of-range ranges, degrees above 64, final edge-count mismatches, out-of-range neighbors, self-loops, duplicates, truncation, and trailing bytes.
+
+Independent SIFT processes saved and loaded 10k/100k snapshots of 2,880,648/28,800,648 bytes. Load time was 6.817/66.843 ms, graph Recall@10 remained 0.966/0.940, and visited/reordered counts were unchanged. The 100k loader peak RSS was 32,176 KiB. Page cache was uncontrolled and each scale was measured once, so these values are functional evidence rather than stable cold-load performance.
+
+This closes the experiment topology-persistence gate without changing public Lite snapshots.
+
+## Fixed-model CRUD gate
+
+The experiment now defines Add, Update, and Remove under one immutable trained RaBitQ model. Add and Update encode with the existing centroid and FHT masks and never retrain them. Neighbor selection uses an exhaustive full-code control path; reverse links use a decoded-code approximation only for bounded degree pruning. This is a correctness-oriented mutation reference, not a claimed ANN build or latency result.
+
+The mutable state keeps external IDs separate from physical slots. Remove follows the official Lite graph backend's last-slot-to-hole compaction and scans every adjacency list because degree pruning can make the graph asymmetric. Update removes all inbound references before replacing the code and relinking. The deterministic self-test performs 180 mixed operations, validates the ID map, bounds, self-loop and duplicate invariants after every operation, and verifies search equality after persistence.
+
+Experiment-only VSLRBQ01 version 3 adds external IDs, graph parameters, and CSR topology to the fixed model and split records. Versions 1 and 2 remain unchanged. Version 3 rejects duplicate IDs, count mismatches, malformed CSR, truncation, and trailing bytes. This does not alter public Lite snapshots or expose a new VectorStorage value.
+
+This closes the bounded CRUD-semantics gate. At this gate, mutation expands CSR into adjacency vectors, pairwise pruning uses decoded codes, and filter execution is still scalar; the later SIMD gate addresses only that final item.
+
+The probe now also has a configurable fixed-count CRUD stability mode. It times Update, Remove, and Add separately, validates the full structure at each batch boundary, separates CSR compaction from graph search, compares graph results with exhaustive full-code search, and verifies exact search equality after every version 3 save/load. RSS is reported both before loading and with original/restored states resident. This measurement path is intended to identify the next bottleneck; it does not turn the scalar mutation reference into a production performance claim.
+
+At cf7a0f08, fixed-count SIFT-10k/100k runs completed 250/60 Update-Remove-Add cycles with exact post-load result equality and no stderr. Median Update/Add P50 increased from 4.118/4.027 ms at 10k to 39.843/39.208 ms at 100k; Remove increased from 0.446 to 4.449 ms. Full-code self Top-1 stayed 1.000, while graph self Top-1 medians were 0.960/0.920. The next implementation reuses the existing filter-first graph traversal for mutation neighbor discovery with the official exploration-depth rule, while retaining exhaustive full-code selection as a candidate-shortage fallback and differential quality oracle. Remove still scans all adjacency lists for asymmetric correctness, but no longer sorts every list after the official erase-and-rewrite operation.
+
+On the same SIFT matrices, the graph-selected path used zero fallbacks. Median Update/Remove/Add P50 improved by 6.67x/4.41x/7.83x at 10k and 13.66x/4.83x/17.78x at 100k. Full-code self Top-1 remained 1.000; graph self Top-1 and graph/full positional medians matched the exhaustive-control medians at both scales. Snapshot size, RSS, and query latency were effectively unchanged. This closes the bounded mutation-neighbor optimization gate for these inputs. Targeted tests additionally cover empty adjacency, low-ef search, empty/one/two-element mutation, last-slot deletion, and non-last-slot compaction without an unexpected fallback.
+
+The experiment now dispatches the official centered 3-bit inner-product kernel through standalone Generic/AVX2/AVX512 translation units. On the same fixed-count matrices, Update/Add/graph-search P50 improved by 1.29x/1.32x/1.57x at 10k and 1.08x/1.10x/1.42x at 100k, with unchanged median quality and zero fallbacks. The probe retains Lite-only linkage. This closes the scalar-filter risk for the measured x86 host, while ARM SIMD, adjacency-vector mutation memory, and a maintainer-approved public backend contract remain open.
+
+## Isolated mutable-state memory gate
+
+The probe now loads a version 3 mutable snapshot in a fresh process and reports
+component-level logical/capacity bytes before any dataset or temporary FP32
+graph builder is created. Seven-process medians at SIFT-10k/100k were
+3,103,312/31,195,840 known owned-capacity bytes and 7,792/43,556 KiB current
+RSS. The corresponding snapshot sizes were 2,943,408/29,595,936 bytes and
+median load times were 10.257/101.869 ms.
+
+At both scales, adjacency capacity equaled adjacency logical bytes after load.
+The 100k state contained 1,599,408 edges and 15,195,264 adjacency-capacity
+bytes, including the outer adjacency-vector objects. The known-capacity total
+excludes `std::unordered_map` nodes and buckets; the loader separately reported
+100,000 entries and 172,933 buckets. These results explain why the earlier
+mixed-process `state_rss` was not a measurement of the mutable backend alone
+and provide no current evidence that reserved adjacency capacity or
+fragmentation warrants a flat-storage rewrite.
+
+This closes the isolated owned-memory measurement gate for the experiment.
+The highest-priority remaining decision is a maintainer/mentor-approved public
+RaBitQ backend contract: configuration and selection, fixed-model lifecycle,
+search/reorder behavior, persistence/versioning, CRUD guarantees, and
+compatibility with the existing Lite API. A future inbound-edge index or Remove
+optimization should be justified with a workload showing that Remove is the
+dominant cost; ARM SIMD and batch-four full-scan work remain optional follow-up
+experiments.
