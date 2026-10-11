@@ -60,6 +60,9 @@ public:
     CheckCompatibility(const ParamPtr& other) const override;
 
 public:
+    std::string merge_strategy{"odescent"};
+    uint64_t fgim_refinement_iterations{4};
+
     FlattenInterfaceParamPtr base_codes_param{nullptr};
     GraphInterfaceParamPtr bottom_graph_param{nullptr};
     SparseGraphDatacellParamPtr hierarchical_graph_param{nullptr};

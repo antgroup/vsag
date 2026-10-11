@@ -341,6 +341,29 @@ auto result = index->KnnSearch(query, topk, params, my_filter).value();
 如果你的业务偏向粗粒度分桶（每次查询只扫部分桶）或严重受 SSD I/O 制约，建议先对比
 [IVF](ivf.md) 再决定是否选择 HGraph。
 
+## FGIM 合并（显式启用）
+
+在目标 HGraph 参数中设置 `merge_strategy: "fgim"`，即可通过现有
+`Index::Merge(vector<MergeUnit>)` 接口使用 FGIM。默认策略仍为 `"odescent"`。
+`fgim_refinement_iterations` 为非负整数，默认 4；设置为 0 时不执行 refinement。
+持久 k-NNG 的度数上限 k 使用目标索引的 `max_degree`；CrossQuery 的 top-k
+和搜索宽度均为 `ceil(k / (源图数量 - 1))`。
+
+非空目标索引作为第一张源图，总共至少需要两张非空源图。源图须正常完成 Build，
+使用同维度 float32/L2/FP32 存储，且合并期间不得并发修改。
+第一版拒绝删除、重复向量跟踪/去重存储、conjugate graph、MCI、属性、
+extra information 和持久 source ID。请显式设置 `support_duplicate: false`
+及 `deduplicate_storage: false`。
+
+目标已有标签保持不变。每个 MergeUnit 回调仅对 external label 执行一次；
+空回调表示保持原标签。回调返回 false（过滤节点）或最终标签发生冲突时，
+会在修改目标数据前拒绝合并。源索引不会被修改。
+
+FGIM 依次构建 initial k-NNG、refinement、bottom 邻居选择及反向连接，
+再复用 HGraph 原有插入能力重建上层，不拼接旧上层。
+性能和召回率取决于数据与度数/迭代参数；此选项不保证加速比或全图连通。
+发布阶段发生内存分配或存储异常时，不提供事务回滚保证。
+
 ## 相关文档
 
 - [创建索引](../guide/create_index.md)

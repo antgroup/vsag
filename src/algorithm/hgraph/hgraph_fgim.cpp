@@ -15,11 +15,14 @@
 #include "hgraph_fgim.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
+#include <memory>
 
 #include "hgraph.h"
 #include "impl/query_computer_pool.h"
+#include "index/index_impl.h"
 #include "simd/fp32_simd.h"
 #include "vsag/constants.h"
 
@@ -171,7 +174,14 @@ HGraphFGIM::CrossQuery(const HGraph& target,
 }
 
 FGIMKnnGraph
-HGraphFGIM::BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, uint64_t k) {
+HGraphFGIM::BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs,
+                                 uint64_t k,
+                                 uint64_t* distance_evaluations) {
+    std::unique_ptr<SearchStatistics> search_statistics;
+    if (distance_evaluations != nullptr) {
+        search_statistics = std::make_unique<SearchStatistics>();
+    }
+    uint64_t original_distances = 0;
     const auto offsets = ValidateSourcesAndGetOffsets(source_graphs, k);
     const uint64_t other_count = source_graphs.size() - 1;
     // ceil(k / (m - 1)), without overflowing k + m - 2.
@@ -185,10 +195,14 @@ HGraphFGIM::BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, uin
         for (InnerIdType local_u = 0; local_u < source_count; ++local_u) {
             auto& candidates = graph[offsets[i] + local_u];
             AppendOriginalCandidates(source, local_u, offsets[i], candidates);
+            if (distance_evaluations != nullptr) {
+                original_distances += candidates.size();
+            }
             source.GetVectorByInnerId(local_u, vector.data());
             for (uint64_t j = 0; j < source_graphs.size(); ++j) {
                 if (j != i) {
-                    const auto cross = CrossQuery(*source_graphs[j], vector.data(), query_count);
+                    const auto cross = CrossQuery(
+                        *source_graphs[j], vector.data(), query_count, search_statistics.get());
                     for (const auto& neighbor : cross) {
                         // CrossQuery IDs are target-local; apply the target prefix exactly once.
                         candidates.push_back({offsets[j] + neighbor.id, neighbor.distance});
@@ -209,6 +223,9 @@ HGraphFGIM::BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, uin
                 FGIMNeighborList(candidates.begin(), candidates.end()).swap(candidates);
             }
         }
+    }
+    if (distance_evaluations != nullptr) {
+        *distance_evaluations = original_distances + search_statistics->distance_evaluations.load();
     }
     return graph;
 }
@@ -553,6 +570,203 @@ HGraphFGIM::WriteBottomGraph(HGraph& destination, const FGIMKnnGraph& graph, uin
         destination.bottom_graph_->InsertNeighborsById(u, neighbors);
     }
     destination.bottom_graph_->SetTotalCount(graph.size());
+}
+
+void
+HGraphFGIM::RebuildUpperLayers(HGraph& destination) {
+    const bool valid_condition_4 =
+        destination.GetNumElements() > 0 && destination.GetNumberRemoved() == 0 &&
+        !destination.deduplicate_storage_ && destination.data_type_ == DataTypes::DATA_TYPE_FLOAT &&
+        destination.metric_ == MetricType::METRIC_TYPE_L2SQR &&
+        destination.basic_flatten_codes_ != nullptr &&
+        destination.basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32;
+    CHECK_ARGUMENT(valid_condition_4,
+                   "FGIM upper rebuild requires a non-empty float32/L2/fp32 destination");
+    const bool valid_condition_5 =
+        destination.bottom_graph_->TotalCount() == destination.GetNumElements() &&
+        destination.basic_flatten_codes_->TotalCount() == destination.GetNumElements();
+    CHECK_ARGUMENT(valid_condition_5,
+                   "FGIM upper rebuild requires prepared bottom graph and vectors");
+    CHECK_ARGUMENT(
+        destination.ef_construct_ <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+        "FGIM upper construction width exceeds the search limit");
+    destination.route_graphs_.clear();
+    destination.entry_point_id_ = 0;
+    destination.level_generator_.seed(2021);
+    std::vector<float> vector(destination.dim_);
+    const auto codes = destination.has_precise_reorder() && !destination.build_by_base_
+                           ? destination.high_precise_codes_
+                           : destination.basic_flatten_codes_;
+    for (InnerIdType u = 0; u < destination.GetNumElements(); ++u) {
+        // VSAG uses -1 for bottom-only nodes and 0 for the first route graph.
+        const int level = destination.get_random_level() - 1;
+        if (level < 0) {
+            continue;
+        }
+        destination.GetVectorByInnerId(u, vector.data());
+        const int previous_height = static_cast<int>(destination.route_graphs_.size());
+        InnerSearchParam param;
+        param.ep = destination.entry_point_id_;
+        param.ef = 1;
+        param.topk = 1;
+        const auto computer = destination.make_build_computer(vector.data(), u);
+        for (int layer = previous_height - 1; layer > level; --layer) {
+            const auto result = destination.search_graph_for_build(
+                vector.data(), destination.route_graphs_[layer], codes, param, computer);
+            if (!result->Empty()) {
+                param.ep = result->Top().second;
+            }
+        }
+        destination.ensure_route_graphs_for_level(level);
+        param.ef = destination.ef_construct_;
+        param.topk = static_cast<int64_t>(destination.ef_construct_);
+        // Reuse native layer search, heuristic selection and bidirectional connection.
+        destination.publish_unique_to_route_graphs(vector.data(), level, u, param, codes);
+        if (level >= previous_height) {
+            destination.entry_point_id_ = u;
+        }
+    }
+}
+
+void
+HGraphFGIM::Merge(HGraph& destination,
+                  const std::vector<MergeUnit>& merge_units,
+                  uint64_t max_iterations,
+                  FGIMMergeStatistics* statistics) {
+    if (statistics != nullptr) {
+        *statistics = {};
+    }
+    if (merge_units.empty()) {
+        return;
+    }
+    CHECK_ARGUMENT(!destination.immutable_.load(), "FGIM cannot merge into an immutable HGraph");
+    std::unique_lock<std::shared_mutex> add_lock(destination.add_mutex_);
+    std::unique_lock<std::shared_mutex> global_lock(destination.global_mutex_);
+    Vector<const HGraph*> sources(destination.allocator_);
+    if (destination.GetNumElements() != 0) {
+        sources.push_back(&destination);
+    }
+    for (const auto& unit : merge_units) {
+        const auto wrapper = std::dynamic_pointer_cast<IndexImpl<HGraph>>(unit.index);
+        CHECK_ARGUMENT(wrapper != nullptr, "FGIM MergeUnit must contain an HGraph");
+        const auto source = std::dynamic_pointer_cast<HGraph>(wrapper->GetInnerIndex());
+        const bool valid_condition_6 = source != nullptr && source.get() != &destination;
+        CHECK_ARGUMENT(valid_condition_6, "FGIM cannot merge a destination into itself");
+        sources.push_back(source.get());
+    }
+    const auto k = destination.bottom_graph_->MaximumDegree();
+    const auto offsets = ValidateSourcesAndGetOffsets(sources, k);
+    const auto validate_metadata = [&](const HGraph& index) {
+        const bool valid_condition_7 =
+            index.data_type_ == DataTypes::DATA_TYPE_FLOAT &&
+            index.metric_ == MetricType::METRIC_TYPE_L2SQR && index.dim_ == sources.front()->dim_ &&
+            index.basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32 &&
+            (!index.has_precise_reorder() ||
+             index.high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) &&
+            (!index.create_new_raw_vector_ ||
+             index.raw_vector_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32);
+        CHECK_ARGUMENT(valid_condition_7,
+                       "FGIM destination and sources require homogeneous float32/L2/fp32 storage");
+        const bool valid_condition_8 = !index.deduplicate_storage_ && !index.support_duplicate_ &&
+                                       index.GetNumberRemoved() == 0 &&
+                                       !index.use_conjugate_graph_ &&
+                                       !index.mci_parameters_.enabled && !index.has_attribute_ &&
+                                       index.extra_info_size_ == 0 && !index.persist_source_id_;
+        CHECK_ARGUMENT(valid_condition_8,
+                       "FGIM does not support deletion, duplicate tracking or auxiliary metadata");
+    };
+    validate_metadata(destination);
+    for (const auto* source : sources) {
+        validate_metadata(*source);
+    }
+
+    // Evaluate callbacks once, before changing storage; only public integration handles labels.
+    std::vector<LabelType> labels;
+    labels.reserve(offsets.back());
+    const uint64_t original_count = destination.GetNumElements();
+    for (InnerIdType u = 0; u < original_count; ++u) {
+        labels.push_back(destination.label_table_->GetLabelById(u));
+    }
+    for (const auto& unit : merge_units) {
+        const auto wrapper = std::dynamic_pointer_cast<IndexImpl<HGraph>>(unit.index);
+        const auto source = std::dynamic_pointer_cast<HGraph>(wrapper->GetInnerIndex());
+        for (InnerIdType u = 0; u < source->GetNumElements(); ++u) {
+            const auto original_label = source->label_table_->GetLabelById(u);
+            const auto mapped = unit.id_map_func ? unit.id_map_func(original_label)
+                                                 : std::make_tuple(true, original_label);
+            CHECK_ARGUMENT(std::get<0>(mapped),
+                           "FGIM does not support filtering nodes through id_map_func");
+            labels.push_back(std::get<1>(mapped));
+        }
+    }
+    auto sorted_labels = labels;
+    std::sort(sorted_labels.begin(), sorted_labels.end());
+    CHECK_ARGUMENT(
+        std::adjacent_find(sorted_labels.begin(), sorted_labels.end()) == sorted_labels.end(),
+        "FGIM merged external labels must be unique");
+    sorted_labels.clear();
+    sorted_labels.shrink_to_fit();
+
+    using Clock = std::chrono::steady_clock;
+    auto checkpoint = statistics != nullptr ? Clock::now() : Clock::time_point{};
+    const auto lap = [&]() {
+        if (statistics == nullptr) {
+            return 0.0;
+        }
+        const auto now = Clock::now();
+        const auto seconds = std::chrono::duration<double>(now - checkpoint).count();
+        checkpoint = now;
+        return seconds;
+    };
+    auto graph = BuildInitialKnnGraph(
+        sources, k, statistics != nullptr ? &statistics->initial_distance_evaluations : nullptr);
+    if (statistics != nullptr) {
+        statistics->initial_seconds = lap();
+    }
+    const auto refinement = RefineKnnGraph(sources, graph, k, max_iterations);
+    if (statistics != nullptr) {
+        statistics->refinement = refinement;
+        statistics->refinement_seconds = lap();
+    }
+    graph = KnnGraphToPG(
+        sources,
+        graph,
+        k,
+        statistics != nullptr ? &statistics->reconstruction_distance_evaluations : nullptr);
+    if (statistics != nullptr) {
+        statistics->reconstruction_seconds = lap();
+    }
+
+    // All source-dependent graph work finishes before mutating a non-empty destination.
+    // resize acquires global_mutex_ itself; add_mutex_ still excludes concurrent insertion.
+    global_lock.unlock();
+    destination.resize(offsets.back());
+    global_lock.lock();
+    std::vector<float> vector(destination.dim_);
+    for (uint64_t i = 0; i < sources.size(); ++i) {
+        const auto& source = *sources[i];
+        if (&source == &destination) {
+            continue;
+        }
+        for (InnerIdType local = 0; local < source.GetNumElements(); ++local) {
+            const auto merged = offsets[i] + local;
+            source.GetVectorByInnerId(local, vector.data());
+            destination.insert_persistent_codes_unlocked(vector.data(), merged);
+            destination.label_table_->Insert(merged, labels[merged]);
+        }
+    }
+    destination.total_count_.store(offsets.back());
+    if (statistics != nullptr) {
+        statistics->storage_seconds = lap();
+    }
+    WriteBottomGraph(destination, graph, k);
+    if (statistics != nullptr) {
+        statistics->bottom_write_seconds = lap();
+    }
+    RebuildUpperLayers(destination);
+    if (statistics != nullptr) {
+        statistics->upper_seconds = lap();
+    }
 }
 
 }  // namespace vsag

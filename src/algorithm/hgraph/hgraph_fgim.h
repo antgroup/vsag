@@ -23,6 +23,7 @@
 namespace vsag {
 
 class HGraph;
+struct MergeUnit;
 class SearchStatistics;
 
 struct FGIMNeighbor {
@@ -45,10 +46,34 @@ struct FGIMRefinementStatistics {
     uint64_t indegree_repairs{0};
 };
 
+// Optional internal diagnostics; normal public Merge does not collect search counters.
+// Counts cover the three FGIM stages, not upper rebuild or external query evaluation.
+struct FGIMMergeStatistics {
+    double initial_seconds{0};
+    double refinement_seconds{0};
+    double reconstruction_seconds{0};
+    double storage_seconds{0};
+    double bottom_write_seconds{0};
+    double upper_seconds{0};
+    uint64_t initial_distance_evaluations{0};
+    FGIMRefinementStatistics refinement;
+    uint64_t reconstruction_distance_evaluations{0};
+};
+
 class HGraphFGIM {
     friend class HGraphFGIMTestAccessor;
 
 public:
+    static void
+    Merge(HGraph& destination,
+          const std::vector<MergeUnit>& merge_units,
+          uint64_t max_iterations,
+          FGIMMergeStatistics* statistics = nullptr);
+
+    // Rebuild route graphs with the existing HGraph insertion primitives.
+    static void
+    RebuildUpperLayers(HGraph& destination);
+
     // Algorithm 5. Input rows are not modified; output rows remain distance-sorted.
     static FGIMKnnGraph
     KnnGraphToPG(const Vector<const HGraph*>& source_graphs,
@@ -71,7 +96,9 @@ public:
     // No concurrent mutation is allowed. Only float32/L2/fp32 without deletion
     // or duplicate grouping/deduplicate storage is supported. Result rows use merged internal IDs.
     static FGIMKnnGraph
-    BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, uint64_t k);
+    BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs,
+                         uint64_t k,
+                         uint64_t* distance_evaluations = nullptr);
 
 private:
     static void

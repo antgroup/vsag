@@ -31,6 +31,7 @@
 #include "datacell/rabitq_split_datacell.h"
 #include "datacell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
+#include "hgraph_fgim.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
@@ -540,6 +541,11 @@ HGraph::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
 
 void
 HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
+    const auto parameters = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
+    if (parameters->merge_strategy == "fgim") {
+        HGraphFGIM::Merge(*this, merge_units, parameters->fgim_refinement_iterations);
+        return;
+    }
     this->check_fused_mutation_supported("Merge");
     CHECK_ARGUMENT(not this->using_dedup_storage(),
                    "HGraph deduplicate_storage does not support Merge");

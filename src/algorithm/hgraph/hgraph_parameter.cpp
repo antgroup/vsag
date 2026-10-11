@@ -41,6 +41,17 @@ HGraphParameter::HGraphParameter() : name(INDEX_TYPE_HGRAPH) {
 void
 HGraphParameter::FromJson(const JsonType& json) {
     InnerIndexParameter::FromJson(json);
+    if (json.Contains("merge_strategy")) {
+        CHECK_ARGUMENT(json["merge_strategy"].IsString(), "merge_strategy must be a string");
+        merge_strategy = json["merge_strategy"].GetString();
+    }
+    CHECK_ARGUMENT(merge_strategy == "odescent" || merge_strategy == "fgim",
+                   "merge_strategy must be odescent or fgim");
+    if (json.Contains("fgim_refinement_iterations")) {
+        CHECK_ARGUMENT(json["fgim_refinement_iterations"].IsNumberUnsigned(),
+                       "fgim_refinement_iterations must be a non-negative integer");
+        fgim_refinement_iterations = json["fgim_refinement_iterations"].GetUint64();
+    }
 
     if (json.Contains(RESIZE_INCREASE_COUNT_BIT)) {
         CHECK_ARGUMENT(json[RESIZE_INCREASE_COUNT_BIT].IsNumberInteger(),
@@ -281,6 +292,8 @@ HGraphParameter::FromJson(const JsonType& json) {
 JsonType
 HGraphParameter::ToJson() const {
     JsonType json = InnerIndexParameter::ToJson();
+    json["merge_strategy"].SetString(merge_strategy);
+    json["fgim_refinement_iterations"].SetUint64(fgim_refinement_iterations);
     json[TYPE_KEY].SetString(INDEX_TYPE_HGRAPH);
 
     json[HGRAPH_USE_ELP_OPTIMIZER_KEY].SetBool(this->use_elp_optimizer);
