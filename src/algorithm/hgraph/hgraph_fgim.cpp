@@ -304,24 +304,7 @@ HGraphFGIM::RefineKnnGraph(const Vector<const HGraph*>& source_graphs,
                            uint64_t k,
                            uint64_t max_iterations) {
     const auto offsets = ValidateSourcesAndGetOffsets(source_graphs, k);
-    CHECK_ARGUMENT(graph.size() == offsets.back(), "FGIM refinement node count mismatch");
-    std::vector<InnerIdType> ids;
-    for (InnerIdType u = 0; u < graph.size(); ++u) {
-        const auto& row = graph[u];
-        CHECK_ARGUMENT(row.size() <= k, "FGIM refinement degree exceeds k");
-        CHECK_ARGUMENT(std::is_sorted(row.begin(), row.end(), fgim_less),
-                       "FGIM refinement requires sorted neighbor lists");
-        ids.clear();
-        for (const auto& edge : row) {
-            const bool valid_condition_1 = edge.id < graph.size() && edge.id != u &&
-                                           std::isfinite(edge.distance) && edge.distance >= 0;
-            CHECK_ARGUMENT(valid_condition_1, "FGIM refinement encountered an invalid neighbor");
-            ids.push_back(edge.id);
-        }
-        std::sort(ids.begin(), ids.end());
-        CHECK_ARGUMENT(std::adjacent_find(ids.begin(), ids.end()) == ids.end(),
-                       "FGIM refinement encountered duplicate neighbors");
-    }
+    ValidateKnnGraph(graph, k, offsets.back());
     FGIMRefinementStatistics stats;
     if (max_iterations == 0) {
         return stats;
@@ -442,6 +425,134 @@ HGraphFGIM::RefineKnnGraph(const Vector<const HGraph*>& source_graphs,
         }
     }
     return stats;
+}
+
+void
+HGraphFGIM::ValidateKnnGraph(const FGIMKnnGraph& graph, uint64_t k, uint64_t expected_count) {
+    CHECK_ARGUMENT(k > 0, "FGIM degree must be positive");
+    CHECK_ARGUMENT(graph.size() == expected_count, "FGIM node count mismatch");
+    std::vector<InnerIdType> ids;
+    for (InnerIdType u = 0; u < graph.size(); ++u) {
+        const auto& row = graph[u];
+        CHECK_ARGUMENT(row.size() <= k, "FGIM degree exceeds k");
+        CHECK_ARGUMENT(std::is_sorted(row.begin(), row.end(), fgim_less),
+                       "FGIM requires sorted neighbor lists");
+        ids.clear();
+        for (const auto& edge : row) {
+            const bool valid_condition_1 = edge.id < graph.size() && edge.id != u &&
+                                           std::isfinite(edge.distance) && edge.distance >= 0;
+            CHECK_ARGUMENT(valid_condition_1, "FGIM encountered an invalid neighbor");
+            ids.push_back(edge.id);
+        }
+        std::sort(ids.begin(), ids.end());
+        CHECK_ARGUMENT(std::adjacent_find(ids.begin(), ids.end()) == ids.end(),
+                       "FGIM encountered duplicate neighbors");
+    }
+}
+
+FGIMKnnGraph
+HGraphFGIM::KnnGraphToPG(const Vector<const HGraph*>& source_graphs,
+                         const FGIMKnnGraph& graph,
+                         uint64_t k,
+                         uint64_t* distance_evaluations) {
+    const auto offsets = ValidateSourcesAndGetOffsets(source_graphs, k);
+    ValidateKnnGraph(graph, k, offsets.back());
+    uint64_t count = 0;
+    const uint64_t dimension = source_graphs.front()->dim_;
+    CHECK_ARGUMENT(graph.size() <= std::numeric_limits<uint64_t>::max() / dimension,
+                   "FGIM reconstruction vector size overflow");
+    Vector<float> vectors(source_graphs.front()->allocator_);
+    vectors.resize(graph.size() * dimension);
+    for (uint64_t i = 0; i < source_graphs.size(); ++i) {
+        for (InnerIdType u = 0; u < source_graphs[i]->GetNumElements(); ++u) {
+            source_graphs[i]->GetVectorByInnerId(
+                u, vectors.data() + (uint64_t{offsets[i]} + u) * dimension);
+        }
+    }
+    std::vector<uint64_t> indegree(graph.size(), 0);
+    for (const auto& row : graph) {
+        for (const auto& edge : row) {
+            ++indegree[edge.id];
+        }
+    }
+    FGIMKnnGraph selected(graph.size());
+    for (InnerIdType u = 0; u < graph.size(); ++u) {
+        auto& retained = selected[u];
+        for (const auto& edge : graph[u]) {
+            bool keep = true;
+            if (indegree[edge.id] > 1) {
+                for (const auto& previous : retained) {
+                    const float distance =
+                        FP32ComputeL2Sqr(vectors.data() + uint64_t{edge.id} * dimension,
+                                         vectors.data() + uint64_t{previous.id} * dimension,
+                                         dimension);
+                    ++count;
+                    CHECK_ARGUMENT(std::isfinite(distance),
+                                   "FGIM reconstruction encountered a non-finite distance");
+                    if (!(edge.distance < distance)) {
+                        keep = false;
+                        break;
+                    }
+                }
+            }
+            if (keep) {
+                retained.push_back(edge);
+            } else {
+                // Update the recorder so later removals cannot delete the last incoming edge.
+                --indegree[edge.id];
+            }
+        }
+    }
+
+    // Reverse edges come from a fixed pruned snapshot, not from partially augmented rows.
+    auto result = selected;
+    for (InnerIdType u = 0; u < selected.size(); ++u) {
+        for (const auto& edge : selected[u]) {
+            result[edge.id].push_back({u, edge.distance});
+        }
+    }
+    for (auto& row : result) {
+        // Deduplicate by ID first; retain the smaller stored distance if roundoff differs.
+        std::sort(row.begin(), row.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.id < rhs.id || (lhs.id == rhs.id && lhs.distance < rhs.distance);
+        });
+        row.erase(std::unique(row.begin(),
+                              row.end(),
+                              [](const auto& lhs, const auto& rhs) { return lhs.id == rhs.id; }),
+                  row.end());
+        std::sort(row.begin(), row.end(), fgim_less);
+        if (row.size() > k) {
+            row.resize(k);
+        }
+    }
+    if (distance_evaluations != nullptr) {
+        *distance_evaluations = count;
+    }
+    return result;
+}
+
+void
+HGraphFGIM::WriteBottomGraph(HGraph& destination, const FGIMKnnGraph& graph, uint64_t k) {
+    ValidateKnnGraph(graph, k, destination.GetNumElements());
+    const bool valid_condition_2 = destination.bottom_graph_ != nullptr &&
+                                   destination.bottom_graph_->MaximumDegree() >= k &&
+                                   destination.bottom_graph_->MaxCapacity() >= graph.size();
+    CHECK_ARGUMENT(valid_condition_2, "FGIM destination bottom graph capacity is insufficient");
+    const bool valid_condition_3 = destination.basic_flatten_codes_ != nullptr &&
+                                   destination.basic_flatten_codes_->TotalCount() == graph.size() &&
+                                   destination.label_table_->GetTotalCount() == graph.size() &&
+                                   destination.GetNumberRemoved() == 0;
+    CHECK_ARGUMENT(valid_condition_3, "FGIM destination storage is not prepared");
+    Vector<InnerIdType> neighbors(destination.allocator_);
+    neighbors.reserve(k);
+    for (InnerIdType u = 0; u < graph.size(); ++u) {
+        neighbors.clear();
+        for (const auto& edge : graph[u]) {
+            neighbors.push_back(edge.id);
+        }
+        destination.bottom_graph_->InsertNeighborsById(u, neighbors);
+    }
+    destination.bottom_graph_->SetTotalCount(graph.size());
 }
 
 }  // namespace vsag

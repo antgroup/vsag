@@ -49,6 +49,16 @@ class HGraphFGIM {
     friend class HGraphFGIMTestAccessor;
 
 public:
+    // Algorithm 5. Input rows are not modified; output rows remain distance-sorted.
+    static FGIMKnnGraph
+    KnnGraphToPG(const Vector<const HGraph*>& source_graphs,
+                 const FGIMKnnGraph& graph,
+                 uint64_t k,
+                 uint64_t* distance_evaluations = nullptr);
+
+    // Destination vectors and labels must already occupy the merged internal ID space.
+    static void
+    WriteBottomGraph(HGraph& destination, const FGIMKnnGraph& graph, uint64_t k);
     // Paper Algorithm 3: bounded persistent lists, unbounded temporary reverse candidates.
     // A zero iteration budget validates the graph but leaves it unchanged.
     static FGIMRefinementStatistics
@@ -64,6 +74,9 @@ public:
     BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, uint64_t k);
 
 private:
+    static void
+    ValidateKnnGraph(const FGIMKnnGraph& graph, uint64_t k, uint64_t expected_count);
+
     // Internal-only search, not a public index API. The caller must validate the target
     // as FGIM-compatible and provide at least target.dim_ floats in query.
     // CrossQuery does not repeat full source validation.

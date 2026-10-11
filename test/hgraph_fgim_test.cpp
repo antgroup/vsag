@@ -744,4 +744,118 @@ TEST_CASE_METHOD(HGraphFGIMTest,
     REQUIRE(after_indegree[4] == 1);
     REQUIRE(*std::min_element(after_indegree.begin(), after_indegree.end()) > 0);
 }
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM reconstruction prunes redundant edges and preserves a connected chain",
+                 "[ut][hgraph][fgim]") {
+    auto lhs = MakeSource(2, 0);
+    auto rhs = MakeSource(2, 1);
+    Vector<const HGraph*> sources(common.allocator_.get());
+    sources.push_back(lhs.get());
+    sources.push_back(rhs.get());
+    const FGIMKnnGraph input{{{2, 4}, {1, 400}, {3, 484}},
+                             {{3, 4}, {2, 324}, {0, 400}},
+                             {{0, 4}, {1, 324}, {3, 400}},
+                             {{1, 4}, {2, 400}, {0, 484}}};
+    uint64_t distances = 0;
+    const auto result = HGraphFGIM::KnnGraphToPG(sources, input, 3, &distances);
+    REQUIRE(distances > 0);
+    const std::vector<std::vector<InnerIdType>> expected{{2}, {3, 2}, {0, 1}, {1}};
+    for (uint64_t u = 0; u < result.size(); ++u) {
+        REQUIRE(result[u].size() == expected[u].size());
+        REQUIRE(input[u].size() == 3);
+        for (uint64_t i = 0; i < result[u].size(); ++i) {
+            REQUIRE(result[u][i].id == expected[u][i]);
+        }
+    }
+    std::set<InnerIdType> visited{0};
+    std::vector<InnerIdType> stack{0};
+    while (!stack.empty()) {
+        const auto u = stack.back();
+        stack.pop_back();
+        for (const auto& edge : result[u]) {
+            if (visited.insert(edge.id).second) {
+                stack.push_back(edge.id);
+            }
+        }
+    }
+    REQUIRE(visited.size() == result.size());
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM reconstruction protects sole incoming edges and bounds reverse edges",
+                 "[ut][hgraph][fgim]") {
+    auto lhs = MakeSource(2, 0);
+    auto rhs = MakeSource(2, 1);
+    Vector<const HGraph*> sources(common.allocator_.get());
+    sources.push_back(lhs.get());
+    sources.push_back(rhs.get());
+    SECTION("sole incoming edge survives geometric pruning") {
+        const FGIMKnnGraph input{{{2, 4}, {1, 400}}, {}, {{0, 4}}, {}};
+        const auto result = HGraphFGIM::KnnGraphToPG(sources, input, 2);
+        REQUIRE(result[0].size() == 2);
+        REQUIRE(result[0][1].id == 1);
+        REQUIRE(result[1].size() == 1);
+        REQUIRE(result[1][0].id == 0);
+    }
+    SECTION("redundant incoming edge may be pruned") {
+        const FGIMKnnGraph input{{{2, 4}, {1, 400}}, {}, {{0, 4}}, {{1, 4}}};
+        const auto result = HGraphFGIM::KnnGraphToPG(sources, input, 2);
+        REQUIRE(result[0].size() == 1);
+        REQUIRE(result[0][0].id == 2);
+    }
+    SECTION("reverse additions are truncated by distance") {
+        const FGIMKnnGraph input{{}, {{0, 400}}, {{0, 4}}, {{0, 484}}};
+        const auto result = HGraphFGIM::KnnGraphToPG(sources, input, 1);
+        REQUIRE(result[0].size() == 1);
+        REQUIRE(result[0][0].id == 2);
+        REQUIRE(result[0][0].distance == 4);
+        for (const auto& row : result) {
+            REQUIRE(row.size() <= 1);
+        }
+    }
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM stages write valid bottom graph without changing vector or label storage",
+                 "[ut][hgraph][fgim]") {
+    auto lhs = MakeSource(6, 0);
+    auto rhs = MakeSource(5, 1);
+    auto third = MakeSource(4, 2);
+    Vector<const HGraph*> sources(common.allocator_.get());
+    sources.push_back(lhs.get());
+    sources.push_back(rhs.get());
+    sources.push_back(third.get());
+    auto initial = HGraphFGIM::BuildInitialKnnGraph(sources, 4);
+    HGraphFGIM::RefineKnnGraph(sources, initial, 4, 3);
+    const auto pg = HGraphFGIM::KnnGraphToPG(sources, initial, 4);
+    // Only tests the topology writer. Public Merge supplies merged vectors/labels in PR4.
+    auto destination = MakeSource(15, 3);
+    const auto before = Capture(*destination);
+    HGraphFGIM::WriteBottomGraph(*destination, pg, 4);
+    const auto after = Capture(*destination);
+    REQUIRE(after.labels == before.labels);
+    REQUIRE(after.vectors == before.vectors);
+    REQUIRE(after.removed == before.removed);
+    REQUIRE(after.neighbors.size() == pg.size());
+    for (uint64_t u = 0; u < pg.size(); ++u) {
+        REQUIRE(after.neighbors[u].size() == pg[u].size());
+        REQUIRE(pg[u].size() <= 4);
+        std::set<InnerIdType> seen;
+        for (uint64_t i = 0; i < pg[u].size(); ++i) {
+            REQUIRE(after.neighbors[u][i] == pg[u][i].id);
+            REQUIRE(pg[u][i].id != u);
+            REQUIRE(pg[u][i].id < pg.size());
+            REQUIRE(seen.insert(pg[u][i].id).second);
+        }
+    }
+    auto invalid = pg;
+    invalid[0] = {{0, 0}};
+    REQUIRE_THROWS_AS(HGraphFGIM::WriteBottomGraph(*destination, invalid, 4), VsagException);
+    REQUIRE(Capture(*destination).neighbors == after.neighbors);
+    REQUIRE_THROWS_AS(HGraphFGIM::WriteBottomGraph(*destination, pg, 9), VsagException);
+    REQUIRE(Capture(*destination).neighbors == after.neighbors);
+    invalid.pop_back();
+    REQUIRE_THROWS_AS(HGraphFGIM::KnnGraphToPG(sources, invalid, 4), VsagException);
+}
+
 }  // namespace vsag
