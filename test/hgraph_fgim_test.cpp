@@ -15,6 +15,7 @@
 #include "algorithm/hgraph/hgraph_fgim.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <memory>
 #include <random>
@@ -445,4 +446,302 @@ TEST_CASE_METHOD(HGraphFGIMTest,
     ExpectInvalid(sources, k, "duplicate grouping");
 }
 
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM refinement preserves bounded graph and sources",
+                 "[ut][hgraph][fgim]") {
+    const uint64_t k = GENERATE(1, 4, 12);
+    std::vector<std::unique_ptr<HGraph>> owned;
+    Vector<const HGraph*> sources(common.allocator_.get());
+    std::vector<Snapshot> snapshots;
+    std::vector<float> vectors;
+    for (uint64_t i = 0; i < 3; ++i) {
+        owned.push_back(MakeSource(12, i, false, "fp32", true));
+        sources.push_back(owned.back().get());
+        snapshots.push_back(Capture(*owned.back()));
+        vectors.insert(
+            vectors.end(), snapshots.back().vectors.begin(), snapshots.back().vectors.end());
+    }
+    auto graph = HGraphFGIM::BuildInitialKnnGraph(sources, k);
+    auto repeated = graph;
+    const auto stats = HGraphFGIM::RefineKnnGraph(sources, graph, k, 4);
+    const auto again = HGraphFGIM::RefineKnnGraph(sources, repeated, k, 4);
+    REQUIRE(stats.iterations > 0);
+    REQUIRE(stats.iterations <= 4);
+    REQUIRE(stats.distance_evaluations == stats.new_new_pairs + stats.new_old_pairs);
+    REQUIRE(stats.distance_evaluations == again.distance_evaluations);
+    REQUIRE(stats.same_source_pairs_skipped > 0);
+    REQUIRE(graph.size() == 36);
+    for (uint64_t u = 0; u < graph.size(); ++u) {
+        REQUIRE(graph[u].size() <= k);
+        REQUIRE(graph[u].size() == repeated[u].size());
+        std::set<InnerIdType> seen;
+        for (uint64_t i = 0; i < graph[u].size(); ++i) {
+            const auto& edge = graph[u][i];
+            REQUIRE(edge.id < graph.size());
+            REQUIRE(edge.id != u);
+            REQUIRE(seen.insert(edge.id).second);
+            REQUIRE(edge.id == repeated[u][i].id);
+            REQUIRE(edge.distance == repeated[u][i].distance);
+            float exact = 0;
+            for (int64_t d = 0; d < common.dim_; ++d) {
+                const float delta =
+                    vectors[u * common.dim_ + d] - vectors[edge.id * common.dim_ + d];
+                exact += delta * delta;
+            }
+            REQUIRE(std::abs(edge.distance - exact) <= 0.00001F * std::max(1.0F, exact));
+            if (i > 0) {
+                REQUIRE(std::tie(graph[u][i - 1].distance, graph[u][i - 1].id) <=
+                        std::tie(edge.distance, edge.id));
+            }
+        }
+    }
+    for (uint64_t i = 0; i < sources.size(); ++i) {
+        const auto after = Capture(*sources[i]);
+        REQUIRE(after.labels == snapshots[i].labels);
+        REQUIRE(after.vectors == snapshots[i].vectors);
+        REQUIRE(after.neighbors == snapshots[i].neighbors);
+        REQUIRE(after.removed == snapshots[i].removed);
+    }
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM refinement repairs zero indegree without exceeding k",
+                 "[ut][hgraph][fgim]") {
+    auto lhs = MakeSource(2, 0, true);
+    auto rhs = MakeSource(2, 1, true);
+    Vector<const HGraph*> sources(common.allocator_.get());
+    sources.push_back(lhs.get());
+    sources.push_back(rhs.get());
+    FGIMKnnGraph graph{{{1, 0}, {2, 0}}, {{0, 0}, {2, 0}}, {{0, 0}, {1, 0}}, {{0, 0}, {1, 0}}};
+    auto unchanged = graph;
+    const auto zero = HGraphFGIM::RefineKnnGraph(sources, unchanged, 2, 0);
+    REQUIRE(zero.iterations == 0);
+    for (uint64_t u = 0; u < graph.size(); ++u) {
+        for (uint64_t i = 0; i < graph[u].size(); ++i) {
+            REQUIRE(unchanged[u][i].id == graph[u][i].id);
+            REQUIRE(unchanged[u][i].distance == graph[u][i].distance);
+        }
+    }
+    const auto stats = HGraphFGIM::RefineKnnGraph(sources, graph, 2, 1);
+    REQUIRE(stats.neighbor_updates == 0);  // Equal distances do not replace a full row.
+    REQUIRE(stats.indegree_repairs == 1);
+    REQUIRE(graph[0][0].id == 1);
+    REQUIRE(graph[0][1].id == 3);
+    std::vector<uint64_t> indegree(4);
+    for (const auto& row : graph) {
+        REQUIRE(row.size() == 2);
+        for (const auto& edge : row) {
+            ++indegree[edge.id];
+        }
+    }
+    REQUIRE(*std::min_element(indegree.begin(), indegree.end()) > 0);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM refinement pairs cross-source neighbors and replaces farthest",
+                 "[ut][hgraph][fgim]") {
+    auto lhs = MakeSource(2, 0);
+    auto rhs = MakeSource(2, 1);
+    Vector<const HGraph*> sources(common.allocator_.get());
+    sources.push_back(lhs.get());
+    sources.push_back(rhs.get());
+    // Coordinates are [0,10] in lhs and [1,11] in rhs, repeated over four dimensions.
+    // Visiting 0 proposes pair (1,3); distance 4 must replace 1->2 (distance 324).
+    FGIMKnnGraph graph{{{1, 400}, {3, 484}}, {{2, 324}, {0, 400}}, {{0, 4}, {1, 324}}, {{0, 484}}};
+    const auto stats = HGraphFGIM::RefineKnnGraph(sources, graph, 2, 3);
+    REQUIRE(stats.new_new_pairs > 0);
+    REQUIRE(stats.new_old_pairs > 0);
+    REQUIRE(stats.neighbor_updates > 0);
+    REQUIRE(graph[1].front().id == 3);
+    REQUIRE(graph[1].front().distance == 4);
+    REQUIRE(graph[3].front().id == 1);
+    REQUIRE(graph[3].front().distance == 4);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM refinement validates intermediate graphs before mutation",
+                 "[ut][hgraph][fgim]") {
+    auto lhs = MakeSource(2, 0);
+    auto rhs = MakeSource(2, 1);
+    Vector<const HGraph*> sources(common.allocator_.get());
+    sources.push_back(lhs.get());
+    sources.push_back(rhs.get());
+    auto graph = HGraphFGIM::BuildInitialKnnGraph(sources, 2);
+    SECTION("node count") {
+        graph.pop_back();
+    }
+    SECTION("degree") {
+        graph[0].push_back({3, 484});
+    }
+    SECTION("self loop") {
+        graph[0] = {{0, 0}};
+    }
+    SECTION("invalid id") {
+        graph[0] = {{4, 0}};
+    }
+    SECTION("duplicate") {
+        graph[0] = {{1, 400}, {1, 400}};
+    }
+    SECTION("unsorted") {
+        graph[0] = {{1, 400}, {2, 4}};
+    }
+    SECTION("nonfinite") {
+        graph[0] = {{1, std::numeric_limits<float>::infinity()}};
+    }
+    SECTION("negative distance") {
+        graph[0] = {{1, -1}};
+    }
+    const auto before = graph;
+    REQUIRE_THROWS_AS(HGraphFGIM::RefineKnnGraph(sources, graph, 2, 1), VsagException);
+    REQUIRE(graph.size() == before.size());
+    for (uint64_t u = 0; u < graph.size(); ++u) {
+        REQUIRE(graph[u].size() == before[u].size());
+        for (uint64_t i = 0; i < graph[u].size(); ++i) {
+            REQUIRE(graph[u][i].id == before[u][i].id);
+            REQUIRE(graph[u][i].distance == before[u][i].distance);
+        }
+    }
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM refinement skips all same-source pairs",
+                 "[ut][hgraph][fgim]") {
+    auto lhs = MakeSource(3, 0);
+    auto rhs = MakeSource(3, 1);
+    Vector<const HGraph*> sources(common.allocator_.get());
+    sources.push_back(lhs.get());
+    sources.push_back(rhs.get());
+    FGIMKnnGraph graph(6);
+    for (InnerIdType offset : {0U, 3U}) {
+        graph[offset] = {{offset + 1, 400}, {offset + 2, 1600}};
+        graph[offset + 1] = {{offset, 400}, {offset + 2, 400}};
+        graph[offset + 2] = {{offset + 1, 400}, {offset, 1600}};
+    }
+    const auto stats = HGraphFGIM::RefineKnnGraph(sources, graph, 2, 8);
+    REQUIRE(stats.same_source_pairs_skipped > 0);
+    REQUIRE(stats.distance_evaluations == 0);
+    REQUIRE(stats.neighbor_updates == 0);
+    REQUIRE(stats.indegree_repairs == 0);
+    REQUIRE(stats.iterations < 8);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM refinement visits pending reverse-new before convergence",
+                 "[ut][hgraph][fgim]") {
+    auto lhs = MakeSource(2, 0);
+    auto rhs = MakeSource(2, 1);
+    Vector<const HGraph*> sources(common.allocator_.get());
+    sources.push_back(lhs.get());
+    sources.push_back(rhs.get());
+    // Node 0 has no outgoing edges. Only its incoming edges expose pair (1,2).
+    FGIMKnnGraph graph{{}, {{0, 400}}, {{0, 4}}, {}};
+    auto one_iteration = graph;
+    const auto first = HGraphFGIM::RefineKnnGraph(sources, one_iteration, 1, 1);
+    REQUIRE(first.distance_evaluations == 0);
+    REQUIRE(first.neighbor_updates == 0);
+    REQUIRE(first.indegree_repairs == 0);
+    const auto second = HGraphFGIM::RefineKnnGraph(sources, graph, 1, 2);
+    REQUIRE(second.iterations == 2);
+    REQUIRE(second.new_new_pairs > 0);
+    REQUIRE(second.neighbor_updates > 0);
+    REQUIRE(graph[1].front().id == 2);
+    REQUIRE(graph[1].front().distance == 324);
+    REQUIRE(graph[3].empty());  // Repair cannot invent a neighbor for an empty row.
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM refinement discovers an edge exclusively through new-old pairs",
+                 "[ut][hgraph][fgim]") {
+    auto lhs = MakeSource(2, 0);
+    auto rhs = MakeSource(2, 1);
+    Vector<const HGraph*> sources({lhs.get(), rhs.get()}, common.allocator_.get());
+    // Merged coordinates are [0,10,1,11], repeated in four dimensions.
+    // The first traversal only compares new-new pair (0,3), which cannot improve a row.
+    // On the second traversal, pending reverse-new meets old neighbors: (3,1), then (2,0).
+    const FGIMKnnGraph input{{{1, 400}}, {{3, 4}}, {{1, 324}}, {{0, 484}}};
+    REQUIRE(input[0].front().id != 2);
+    REQUIRE(input[2].front().id != 0);
+
+    auto first = input;
+    const auto first_stats = HGraphFGIM::RefineKnnGraph(sources, first, 1, 1);
+    REQUIRE(first_stats.new_new_pairs == 1);
+    REQUIRE(first_stats.new_old_pairs == 0);
+    REQUIRE(first_stats.neighbor_updates == 0);
+    REQUIRE(first_stats.indegree_repairs == 0);
+    for (uint64_t u = 0; u < input.size(); ++u) {
+        REQUIRE(first[u].size() == input[u].size());
+        REQUIRE(first[u].front().id == input[u].front().id);
+        REQUIRE(first[u].front().distance == input[u].front().distance);
+    }
+
+    // Run both iterations in one call so edge flags and reverse state survive.
+    auto refined = input;
+    const auto stats = HGraphFGIM::RefineKnnGraph(sources, refined, 1, 2);
+    REQUIRE(stats.iterations == 2);
+    REQUIRE(stats.new_new_pairs == first_stats.new_new_pairs);
+    REQUIRE(stats.new_old_pairs == 2);
+    REQUIRE(stats.distance_evaluations == 3);
+    REQUIRE(stats.indegree_repairs == 0);
+    // No additional new-new comparison or repair can explain these newly inserted edges.
+    REQUIRE(refined[0].front().id == 2);
+    REQUIRE(refined[2].front().id == 0);
+    REQUIRE(refined[0].front().distance == 4);
+    REQUIRE(refined[2].front().distance == 4);
+    for (InnerIdType u = 0; u < refined.size(); ++u) {
+        REQUIRE(refined[u].size() == 1);
+        const auto v = refined[u].front().id;
+        REQUIRE(v < refined.size());
+        REQUIRE(v != u);
+        REQUIRE((u < 2) != (v < 2));
+    }
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM refinement repair skips a farthest sole incoming edge",
+                 "[ut][hgraph][fgim]") {
+    auto lhs = MakeSource(3, 0, true);
+    auto rhs = MakeSource(2, 1, true);
+    Vector<const HGraph*> sources({lhs.get(), rhs.get()}, common.allocator_.get());
+    // All distances are zero and all rows are full, so pair updates cannot alter the fixture.
+    // Node 4 has no incoming edge. Its first donor is 1, whose last (farthest-tied) edge
+    // 1->3 is the sole incoming edge of 3. Edge 1->2 is a safe alternative.
+    FGIMKnnGraph graph{
+        {{1, 0}, {2, 0}}, {{2, 0}, {3, 0}}, {{0, 0}, {1, 0}}, {{0, 0}, {2, 0}}, {{1, 0}, {2, 0}}};
+    const auto before = graph;
+    std::vector<uint64_t> before_indegree(graph.size(), 0);
+    for (const auto& row : graph) {
+        for (const auto& edge : row) {
+            ++before_indegree[edge.id];
+        }
+    }
+    REQUIRE(before_indegree[4] == 0);
+    REQUIRE(before_indegree[3] == 1);
+    REQUIRE(before_indegree[2] > 1);
+    REQUIRE(graph[1].back().id == 3);
+
+    const auto stats = HGraphFGIM::RefineKnnGraph(sources, graph, 2, 1);
+    REQUIRE(stats.neighbor_updates == 0);
+    REQUIRE(stats.indegree_repairs == 1);
+    REQUIRE(graph[1][0].id == 3);
+    REQUIRE(graph[1][1].id == 4);
+    std::vector<uint64_t> after_indegree(graph.size(), 0);
+    for (InnerIdType u = 0; u < graph.size(); ++u) {
+        REQUIRE(graph[u].size() == 2);
+        REQUIRE(graph[u][0].id < graph[u][1].id);
+        for (uint64_t i = 0; i < graph[u].size(); ++i) {
+            const auto& edge = graph[u][i];
+            REQUIRE(edge.id < graph.size());
+            REQUIRE(edge.id != u);
+            REQUIRE(edge.distance == 0);
+            ++after_indegree[edge.id];
+            if (u != 1) {
+                REQUIRE(edge.id == before[u][i].id);
+            }
+        }
+    }
+    REQUIRE(after_indegree[3] == before_indegree[3]);
+    REQUIRE(after_indegree[2] == before_indegree[2] - 1);
+    REQUIRE(after_indegree[4] == 1);
+    REQUIRE(*std::min_element(after_indegree.begin(), after_indegree.end()) > 0);
+}
 }  // namespace vsag

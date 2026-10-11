@@ -35,10 +35,28 @@ struct FGIMNeighbor {
 using FGIMNeighborList = std::vector<FGIMNeighbor>;
 using FGIMKnnGraph = std::vector<FGIMNeighborList>;
 
+struct FGIMRefinementStatistics {
+    uint64_t iterations{0};
+    uint64_t distance_evaluations{0};
+    uint64_t new_new_pairs{0};
+    uint64_t new_old_pairs{0};
+    uint64_t same_source_pairs_skipped{0};
+    uint64_t neighbor_updates{0};
+    uint64_t indegree_repairs{0};
+};
+
 class HGraphFGIM {
     friend class HGraphFGIMTestAccessor;
 
 public:
+    // Paper Algorithm 3: bounded persistent lists, unbounded temporary reverse candidates.
+    // A zero iteration budget validates the graph but leaves it unchanged.
+    static FGIMRefinementStatistics
+    RefineKnnGraph(const Vector<const HGraph*>& source_graphs,
+                   FGIMKnnGraph& graph,
+                   uint64_t k,
+                   uint64_t max_iterations);
+
     // Sources are non-owning, non-empty, disjoint HGraphs with successful Builds.
     // No concurrent mutation is allowed. Only float32/L2/fp32 without deletion
     // or duplicate grouping/deduplicate storage is supported. Result rows use merged internal IDs.

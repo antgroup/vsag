@@ -20,6 +20,7 @@
 
 #include "hgraph.h"
 #include "impl/query_computer_pool.h"
+#include "simd/fp32_simd.h"
 #include "vsag/constants.h"
 
 namespace vsag {
@@ -210,6 +211,237 @@ HGraphFGIM::BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, uin
         }
     }
     return graph;
+}
+
+namespace {
+
+// Persistent rows are always sorted; flags move with their corresponding edges.
+bool
+fgim_less(const FGIMNeighbor& lhs, const FGIMNeighbor& rhs) {
+    return lhs.distance < rhs.distance || (lhs.distance == rhs.distance && lhs.id < rhs.id);
+}
+
+void
+fgim_insert(FGIMNeighborList& row, std::vector<uint8_t>& flags, FGIMNeighbor edge) {
+    const auto position = std::lower_bound(row.begin(), row.end(), edge, fgim_less) - row.begin();
+    row.insert(row.begin() + position, edge);
+    flags.insert(flags.begin() + position, 1);
+}
+
+bool
+fgim_update(FGIMNeighborList& row, std::vector<uint8_t>& flags, FGIMNeighbor edge, uint64_t k) {
+    if (row.size() == k && edge.distance >= row.back().distance) {
+        return false;
+    }
+    for (const auto& current : row) {
+        if (current.id == edge.id) {
+            return false;
+        }
+    }
+    if (row.size() == k) {
+        row.pop_back();
+        flags.pop_back();
+    }
+    fgim_insert(row, flags, edge);
+    return true;
+}
+
+void
+fgim_unique(std::vector<InnerIdType>& ids) {
+    std::sort(ids.begin(), ids.end());
+    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+}
+
+// Algorithm 4. Replacement preserves degree and never removes a sole incoming edge.
+uint64_t
+fgim_repair_indegree(FGIMKnnGraph& graph, std::vector<std::vector<uint8_t>>& flags) {
+    std::vector<uint64_t> indegree(graph.size(), 0);
+    std::vector<std::vector<InnerIdType>> protected_edges(graph.size());
+    for (const auto& row : graph) {
+        for (const auto& edge : row) {
+            ++indegree[edge.id];
+        }
+    }
+    uint64_t repairs = 0;
+    for (InnerIdType u = 0; u < graph.size(); ++u) {
+        if (indegree[u] != 0) {
+            continue;
+        }
+        // The source row cannot change: self loops are forbidden.
+        for (const auto& edge : graph[u]) {
+            auto& target = graph[edge.id];
+            auto& target_flags = flags[edge.id];
+            auto& protected_ids = protected_edges[edge.id];
+            for (uint64_t i = target.size(); i > 0; --i) {
+                const auto removed = target[i - 1].id;
+                if (indegree[removed] <= 1 ||
+                    std::find(protected_ids.begin(), protected_ids.end(), removed) !=
+                        protected_ids.end()) {
+                    continue;
+                }
+                --indegree[removed];
+                ++indegree[u];
+                target.erase(target.begin() + static_cast<int64_t>(i - 1));
+                target_flags.erase(target_flags.begin() + static_cast<int64_t>(i - 1));
+                fgim_insert(target, target_flags, {u, edge.distance});
+                protected_ids.push_back(u);
+                ++repairs;
+                break;
+            }
+            if (indegree[u] != 0) {
+                break;
+            }
+        }
+    }
+    return repairs;
+}
+
+}  // namespace
+
+FGIMRefinementStatistics
+HGraphFGIM::RefineKnnGraph(const Vector<const HGraph*>& source_graphs,
+                           FGIMKnnGraph& graph,
+                           uint64_t k,
+                           uint64_t max_iterations) {
+    const auto offsets = ValidateSourcesAndGetOffsets(source_graphs, k);
+    CHECK_ARGUMENT(graph.size() == offsets.back(), "FGIM refinement node count mismatch");
+    std::vector<InnerIdType> ids;
+    for (InnerIdType u = 0; u < graph.size(); ++u) {
+        const auto& row = graph[u];
+        CHECK_ARGUMENT(row.size() <= k, "FGIM refinement degree exceeds k");
+        CHECK_ARGUMENT(std::is_sorted(row.begin(), row.end(), fgim_less),
+                       "FGIM refinement requires sorted neighbor lists");
+        ids.clear();
+        for (const auto& edge : row) {
+            const bool valid_condition_1 = edge.id < graph.size() && edge.id != u &&
+                                           std::isfinite(edge.distance) && edge.distance >= 0;
+            CHECK_ARGUMENT(valid_condition_1, "FGIM refinement encountered an invalid neighbor");
+            ids.push_back(edge.id);
+        }
+        std::sort(ids.begin(), ids.end());
+        CHECK_ARGUMENT(std::adjacent_find(ids.begin(), ids.end()) == ids.end(),
+                       "FGIM refinement encountered duplicate neighbors");
+    }
+    FGIMRefinementStatistics stats;
+    if (max_iterations == 0) {
+        return stats;
+    }
+
+    const uint64_t dimension = source_graphs.front()->dim_;
+    CHECK_ARGUMENT(graph.size() <= std::numeric_limits<uint64_t>::max() / dimension,
+                   "FGIM refinement vector size overflow");
+    // Decode once, not for every candidate pair. Reuse the FP32 storage distance kernel.
+    Vector<float> vectors(source_graphs.front()->allocator_);
+    vectors.resize(graph.size() * dimension);
+    std::vector<uint64_t> source_ids(graph.size());
+    for (uint64_t i = 0; i < source_graphs.size(); ++i) {
+        for (InnerIdType local = 0; local < source_graphs[i]->GetNumElements(); ++local) {
+            const uint64_t merged = offsets[i] + local;
+            source_graphs[i]->GetVectorByInnerId(local, vectors.data() + merged * dimension);
+            source_ids[merged] = i;
+        }
+    }
+    std::vector<std::vector<uint8_t>> flags(graph.size());
+    std::vector<std::vector<InnerIdType>> reverse_new(graph.size());
+    std::vector<std::vector<InnerIdType>> reverse_old(graph.size());
+    for (uint64_t u = 0; u < graph.size(); ++u) {
+        flags[u].assign(graph[u].size(), 1);
+    }
+    std::vector<uint8_t> visited(graph.size());
+    std::vector<InnerIdType> stack;
+    std::vector<InnerIdType> new_ids;
+    std::vector<InnerIdType> old_ids;
+    for (uint64_t iteration = 0; iteration < max_iterations; ++iteration) {
+        std::fill(visited.begin(), visited.end(), 0);
+        const auto updates_before = stats.neighbor_updates;
+        for (InnerIdType root = 0; root < graph.size(); ++root) {
+            if (visited[root] != 0) {
+                continue;
+            }
+            visited[root] = 1;
+            stack.push_back(root);
+            while (!stack.empty()) {
+                const auto u = stack.back();
+                stack.pop_back();
+                new_ids.clear();
+                old_ids.clear();
+                for (uint64_t i = 0; i < graph[u].size(); ++i) {
+                    const auto v = graph[u][i].id;
+                    if (flags[u][i] != 0) {
+                        new_ids.push_back(v);
+                        reverse_new[v].push_back(u);
+                        flags[u][i] = 0;
+                    } else {
+                        old_ids.push_back(v);
+                        reverse_old[v].push_back(u);
+                    }
+                    if (visited[v] == 0) {
+                        visited[v] = 1;
+                        stack.push_back(v);
+                    }
+                }
+                new_ids.insert(new_ids.end(), reverse_new[u].begin(), reverse_new[u].end());
+                old_ids.insert(old_ids.end(), reverse_old[u].begin(), reverse_old[u].end());
+                reverse_new[u].clear();
+                reverse_old[u].clear();
+                fgim_unique(new_ids);
+                fgim_unique(old_ids);
+                // A vertex seen as both new and old is processed only as new.
+                old_ids.erase(std::remove_if(old_ids.begin(),
+                                             old_ids.end(),
+                                             [&](InnerIdType v) {
+                                                 return std::binary_search(
+                                                     new_ids.begin(), new_ids.end(), v);
+                                             }),
+                              old_ids.end());
+                const auto compare = [&](InnerIdType a, InnerIdType b, bool both_new) {
+                    if (a == b) {
+                        return;
+                    }
+                    if (source_ids[a] == source_ids[b]) {
+                        ++stats.same_source_pairs_skipped;
+                        return;
+                    }
+                    if (both_new) {
+                        ++stats.new_new_pairs;
+                    } else {
+                        ++stats.new_old_pairs;
+                    }
+                    const float distance =
+                        FP32ComputeL2Sqr(vectors.data() + uint64_t{a} * dimension,
+                                         vectors.data() + uint64_t{b} * dimension,
+                                         dimension);
+                    ++stats.distance_evaluations;
+                    CHECK_ARGUMENT(std::isfinite(distance),
+                                   "FGIM refinement encountered a non-finite distance");
+                    if (fgim_update(graph[a], flags[a], {b, distance}, k)) {
+                        ++stats.neighbor_updates;
+                    }
+                    if (fgim_update(graph[b], flags[b], {a, distance}, k)) {
+                        ++stats.neighbor_updates;
+                    }
+                };
+                for (uint64_t i = 0; i < new_ids.size(); ++i) {
+                    for (uint64_t j = i + 1; j < new_ids.size(); ++j) {
+                        compare(new_ids[i], new_ids[j], true);
+                    }
+                    for (const auto old_id : old_ids) {
+                        compare(new_ids[i], old_id, false);
+                    }
+                }
+            }
+        }
+        const auto repairs = fgim_repair_indegree(graph, flags);
+        stats.indegree_repairs += repairs;
+        ++stats.iterations;
+        const bool pending_new = std::any_of(
+            reverse_new.begin(), reverse_new.end(), [](const auto& row) { return !row.empty(); });
+        // Pending reverse-new edges must get their next visit before convergence.
+        if (stats.neighbor_updates == updates_before && repairs == 0 && !pending_new) {
+            break;
+        }
+    }
+    return stats;
 }
 
 }  // namespace vsag
