@@ -42,6 +42,7 @@ namespace vsag {
 namespace {
 
 constexpr uint64_t K_CENTROID_SCAN_LAYOUT_MARKER = 0x565341475343414EULL;  // "VSAGSCAN"
+constexpr uint64_t K_CENTROID_SCAN_DOTS_BUFFER_SIZE_BYTES = 256ULL * 1024ULL * 1024ULL;
 
 constexpr BucketIdType INVALID_BUCKET_ID = static_cast<BucketIdType>(-1);
 
@@ -300,7 +301,8 @@ IVFNearestPartition::classify_datas_on_host(const void* datas,
                                             BucketIdType buckets_per_data,
                                             QueryContext* ctx) const {
     if (not this->use_route_graph_) {
-        return this->classify_datas_by_scan(datas, count, buckets_per_data, ctx);
+        return this->classify_datas_by_scan(
+            datas, count, buckets_per_data, ctx, K_CENTROID_SCAN_DOTS_BUFFER_SIZE_BYTES);
     }
     std::mutex dist_cmp_reduce_mutex;
     uint32_t dist_cmp = 0;
@@ -454,7 +456,8 @@ Vector<BucketIdType>
 IVFNearestPartition::classify_datas_by_scan(const void* datas,
                                             int64_t count,
                                             BucketIdType buckets_per_data,
-                                            QueryContext* ctx) const {
+                                            QueryContext* ctx,
+                                            uint64_t dots_buffer_size_bytes) const {
     Vector<BucketIdType> result(buckets_per_data * count, INVALID_BUCKET_ID, this->allocator_);
     // Centroids only exist after Train(). An untrained index must not route: leave every slot
     // at INVALID_BUCKET_ID (mirrors the untrained route-graph behavior).
@@ -477,16 +480,17 @@ IVFNearestPartition::classify_datas_by_scan(const void* datas,
         query_data = norm_vectors.data();
     }
 
-    // Batch dot products query x centroids^T via Sgemm (same shape as GNOIMIPartition).
-    Vector<float> dots(count * bucket_count_, allocator_);
-    compute_centroid_dots(
-        query_data, this->centroids_.data(), dots.data(), count, bucket_count_, dim_);
+    const uint64_t bytes_per_row = static_cast<uint64_t>(bucket_count_) * sizeof(float);
+    const uint64_t rows_per_batch =
+        std::min<uint64_t>(static_cast<uint64_t>(count),
+                           std::max<uint64_t>(1, dots_buffer_size_bytes / bytes_per_row));
+    Vector<float> dots(rows_per_batch * static_cast<uint64_t>(bucket_count_), allocator_);
 
-    auto task = [&](int64_t i) {
+    auto task = [&](int64_t batch_row, int64_t result_row) {
         Vector<std::pair<float, InnerIdType>> heap_storage(this->allocator_);
         heap_storage.reserve(k);
         ScanRouteHeap heap(std::less<>{}, std::move(heap_storage));
-        const auto* dots_i = dots.data() + i * bucket_count_;
+        const auto* dots_i = dots.data() + batch_row * bucket_count_;
         for (BucketIdType b = 0; b < bucket_count_; ++b) {
             const std::pair<float, InnerIdType> candidate{this->norms_[b] - dots_i[b],
                                                           static_cast<InnerIdType>(b)};
@@ -498,21 +502,36 @@ IVFNearestPartition::classify_datas_by_scan(const void* datas,
             }
         }
         for (BucketIdType j = k; j > 0; --j) {
-            result[i * buckets_per_data + j - 1] = static_cast<BucketIdType>(heap.top().second);
+            result[result_row * buckets_per_data + j - 1] =
+                static_cast<BucketIdType>(heap.top().second);
             heap.pop();
         }
     };
-    if (thread_pool_ == nullptr or count == 1) {
-        for (int64_t i = 0; i < count; ++i) {
-            task(i);
-        }
-    } else {
-        Vector<std::future<void>> futures(allocator_);
-        for (int64_t i = 0; i < count; ++i) {
-            futures.push_back(thread_pool_->GeneralEnqueue(task, i));
-        }
-        for (auto& item : futures) {
-            item.get();
+
+    for (int64_t batch_begin = 0; batch_begin < count;
+         batch_begin += static_cast<int64_t>(rows_per_batch)) {
+        const int64_t batch_count =
+            std::min<int64_t>(count - batch_begin, static_cast<int64_t>(rows_per_batch));
+        compute_centroid_dots(query_data + batch_begin * dim_,
+                              this->centroids_.data(),
+                              dots.data(),
+                              batch_count,
+                              bucket_count_,
+                              dim_);
+        if (thread_pool_ == nullptr or batch_count == 1) {
+            for (int64_t batch_row = 0; batch_row < batch_count; ++batch_row) {
+                task(batch_row, batch_begin + batch_row);
+            }
+        } else {
+            Vector<std::future<void>> futures(allocator_);
+            futures.reserve(batch_count);
+            for (int64_t batch_row = 0; batch_row < batch_count; ++batch_row) {
+                futures.push_back(
+                    thread_pool_->GeneralEnqueue(task, batch_row, batch_begin + batch_row));
+            }
+            for (auto& item : futures) {
+                item.get();
+            }
         }
     }
 
