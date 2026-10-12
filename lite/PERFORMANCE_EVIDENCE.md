@@ -17,8 +17,10 @@ Promoted improvements include 32-bit incoming adjacency and local mutation
 journals, shared native SIMD supplementary-code kernels, cached query sums and
 coarse inner products, bounded query heaps, size-specialized visited bitmaps,
 owned graph construction, streamed snapshot I/O, and direct FP16 serialization.
-Internal incoming-protection experiments remain disabled by the public adapter;
-their experimental recall numbers are not public-default acceptance results.
+The current public RaBitQ adapter enables reverse adjacency and CACHED incoming
+protection with safe link pruning: `CACHED, false, false, false, true`.
+Update protection is active; optional Add/Remove/displaced-target guards remain
+off. Historical NONE/reverse-disabled cohorts are not the current configuration.
 
 ## Historical measurements, not a composite current-version matrix
 
