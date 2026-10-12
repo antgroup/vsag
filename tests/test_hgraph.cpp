@@ -311,6 +311,9 @@ TEST_CASE("HGraph RangeSearch filters reranked distances", "[ft][hgraph][pr]") {
     auto coarse_result = coarse_index->RangeSearch(query, 0.0F, search_param, -1);
     REQUIRE(coarse_result.has_value());
     REQUIRE(coarse_result.value()->GetDim() == 2);
+    const auto* coarse_ids = coarse_result.value()->GetIds();
+    REQUIRE(
+        ((coarse_ids[0] == 0 && coarse_ids[1] == 1) || (coarse_ids[0] == 1 && coarse_ids[1] == 0)));
     REQUIRE(coarse_result.value()->GetDistances()[0] == 0.0F);
     REQUIRE(coarse_result.value()->GetDistances()[1] == 0.0F);
 }
