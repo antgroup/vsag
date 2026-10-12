@@ -1522,3 +1522,50 @@ TEST_CASE("HGraph fused RaBitQ split expands a sole representative and its alias
         delete iterator_context;
     }
 }
+
+TEST_CASE("HGraph fused Add drains preencoding tasks before rejecting an enqueue",
+          "[ft][rabitq_split][hgraph][preencode]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 64;
+    constexpr uint64_t count = 32;
+    auto param =
+        HGraphRaBitQSplitTestIndex::GenerateBuildParam("l2", dim, "memory_io", "", 1, 7, true);
+    auto json = vsag::JsonType::Parse(param);
+    json["index_param"]["build_thread_count"].SetInt(2);
+    json["index_param"]["graph_io_type"].SetString("memory_io");
+    json["index_param"]["graph_storage_type"].SetString("flat");
+    json["index_param"]["graph_type"].SetString("nsw");
+    json["index_param"]["reorder_source"].SetString("base");
+    json["index_param"]["rabitq_fused_datacell"].SetBool(true);
+    json["index_param"]["rabitq_use_fht"].SetBool(true);
+    json["index_param"]["use_mci"].SetBool(false);
+    auto dataset = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, count, "l2");
+    auto source = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, json.Dump(), true);
+    REQUIRE(source->Build(dataset->base_).has_value());
+    auto binary = source->Serialize();
+    REQUIRE(binary.has_value());
+    auto rejecting_pool = std::make_shared<RejectSecondBuildThreadPool>();
+    vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), rejecting_pool);
+    vsag::Engine engine(&resource);
+    auto result = engine.CreateIndex(HGraphRaBitQSplitTestIndex::name, json.Dump());
+    REQUIRE(result.has_value());
+    auto index = result.value();
+    REQUIRE(index->Deserialize(binary.value()).has_value());
+    std::vector<int64_t> labels(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        labels[i] = 1000000 + i;
+    }
+    auto batch = vsag::Dataset::Make()
+                     ->NumElements(count)
+                     ->Dim(dim)
+                     ->Ids(labels.data())
+                     ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+                     ->Owner(false);
+    auto added = index->Add(batch);
+    REQUIRE_FALSE(added.has_value());
+    REQUIRE(rejecting_pool->TaskFinished());
+    REQUIRE(index->GetNumElements() == count);
+    for (uint64_t i = 0; i < count; ++i) {
+        REQUIRE_FALSE(index->CheckIdExist(labels[i]));
+    }
+}

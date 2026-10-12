@@ -1539,3 +1539,87 @@ TEST_CASE("HGraph optimized build accepts MRLE RaBitQ split with raw-vector stor
     vsag::HGraphOptimizedBuildSession session(*hgraph);
     REQUIRE(session.Active());
 }
+
+TEST_CASE("HGraph fused Add preencoding preserves row mapping and rejects failed batches",
+          "[ut][hgraph][fused][preencode]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 64;
+    const auto threads = GENERATE(0U, 4U);
+    const auto bits = GENERATE(1, 3);
+    const auto metric =
+        GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR, vsag::MetricType::METRIC_TYPE_IP);
+    auto common = MakeCommonParam(dim, threads);
+    common.metric_ = metric;
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"rabitq", "precise_quantization_type":"rabitq",
+        "base_io_type":"memory_io", "base_supplement_io_type":"memory_io",
+        "graph_io_type":"memory_io", "graph_storage_type":"flat", "graph_type":"nsw",
+        "rabitq_use_fht":true, "rabitq_fused_datacell":true,
+        "use_reorder":true, "reorder_source":"base", "store_raw_vector":false,
+        "use_mci":false, "max_degree":8, "ef_construction":32
+    })");
+    param["build_thread_count"].SetInt(threads == 0 ? 1 : threads);
+    param["rabitq_bits_per_dim_base"].SetInt(bits);
+    param["rabitq_bits_per_dim_precise"].SetInt(8 - bits);
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = 1000 + i;
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[i * dim + d] = 0.01F * static_cast<float>((i * 17 + d * 13) % 97 - 48);
+        }
+    }
+    auto dataset = MakeFloatDataset(vectors, ids, dim, count);
+    auto index = MakeHGraphIndex(param, common);
+    auto seed = MakeFloatDataset(vectors, ids, dim, 16);
+    REQUIRE(index->Add(seed).has_value());
+    auto original = index->CalcDistanceById(vectors.data(), ids.front());
+    REQUIRE(original.has_value());
+
+    // A finite input can still overflow encoding. Other worker ranges contain valid rows.
+    auto invalid = vectors;
+    std::fill_n(invalid.data() + 53 * dim, dim, std::numeric_limits<float>::max());
+    auto failed = index->Add(MakeFloatDataset(invalid, ids, dim, count));
+    REQUIRE_FALSE(failed.has_value());
+    REQUIRE(failed.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(index->GetNumElements() == 16);
+    for (int64_t i = 16; i < count; ++i) {
+        REQUIRE_FALSE(index->CheckIdExist(ids[i]));
+    }
+    REQUIRE(index->CalcDistanceById(vectors.data(), ids.front()).value() == original.value());
+
+    // Retrying the same labels must work; skipped input row 0 must not shift cached codes.
+    auto added = index->Add(dataset);
+    REQUIRE(added.has_value());
+    REQUIRE(added.value() == std::vector<int64_t>(ids.begin(), ids.begin() + 16));
+    REQUIRE(index->GetNumElements() == count);
+    auto serial_common = MakeCommonParam(dim);
+    serial_common.metric_ = metric;
+    param["build_thread_count"].SetInt(1);
+    auto serial = MakeHGraphIndex(param, serial_common);
+    REQUIRE(serial->Add(seed).has_value());
+    for (int64_t i = 16; i < count; ++i) {
+        auto one = vsag::Dataset::Make()
+                       ->NumElements(1)
+                       ->Dim(dim)
+                       ->Ids(ids.data() + i)
+                       ->Float32Vectors(vectors.data() + i * dim)
+                       ->Owner(false);
+        REQUIRE(serial->Add(one).has_value());
+    }
+    auto decoded = index->GetInnerIndex()->GetVectorByIds(ids.data(), count, nullptr);
+    auto expected = serial->GetInnerIndex()->GetVectorByIds(ids.data(), count, nullptr);
+    REQUIRE(decoded->GetNumElements() == count);
+    for (int64_t i = 0; i < count * dim; ++i) {
+        REQUIRE(decoded->GetFloat32Vectors()[i] == expected->GetFloat32Vectors()[i]);
+    }
+    auto serialized = index->Serialize();
+    REQUIRE(serialized.has_value());
+    auto restored = MakeHGraphIndex(param, serial_common);
+    REQUIRE(restored->Deserialize(serialized.value()).has_value());
+    REQUIRE(restored->GetNumElements() == count);
+    auto restored_vectors = restored->GetInnerIndex()->GetVectorByIds(ids.data(), count, nullptr);
+    for (int64_t i = 0; i < count * dim; ++i) {
+        REQUIRE(restored_vectors->GetFloat32Vectors()[i] == expected->GetFloat32Vectors()[i]);
+    }
+}

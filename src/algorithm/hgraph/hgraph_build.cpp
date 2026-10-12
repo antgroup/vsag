@@ -496,8 +496,7 @@ HGraph::add_impl(const DatasetPtr& data) {
 
     this->validate_add_data(data);
     auto context = this->prepare_add_context(data);
-    this->validate_fused_encoding_data(static_cast<const float*>(get_data(data)),
-                                       static_cast<uint64_t>(data->GetNumElements()));
+    this->prepare_fused_add_codes(data, context);
     this->prepare_graph_read_codes(data, context);
     auto batch = this->prepare_add_batch(data);
     this->prepare_temporary_graph_read_codes(data, context, batch);
@@ -558,6 +557,61 @@ HGraph::validate_fused_encoding_data(const float* data, uint64_t count) const {
                            data + row * dim, one_bit.data, supplement.data, &cluster_id),
                        "failed to encode fused RaBitQ node codes");
     }
+}
+
+void
+HGraph::prepare_fused_add_codes(const DatasetPtr& data, AddContext& context) const {
+    if (this->rabitq_fused_datacell_ == nullptr or this->optimized_build_codes_ != nullptr) {
+        return;
+    }
+    CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
+    auto encoded = std::make_unique<FusedAddCodes>(this->allocator_);
+    const auto count = static_cast<uint64_t>(data->GetNumElements());
+    const auto dim = static_cast<uint64_t>(this->dim_);
+    encoded->one_bit_size = rabitq_split_codes_->OneBitCodeSize();
+    encoded->stride = encoded->one_bit_size + rabitq_split_codes_->SupplementCodeSize();
+    CHECK_ARGUMENT(
+        encoded->stride > 0 and count <= std::numeric_limits<uint64_t>::max() / encoded->stride,
+        "fused Add code buffer size overflow");
+    encoded->codes.resize(count * encoded->stride);
+    encoded->clusters.resize(count);
+    const auto* vectors = static_cast<const float*>(get_data(data));
+    auto encode_range = [&](uint64_t begin, uint64_t end) {
+        for (uint64_t row = begin; row < end; ++row) {
+            auto* code = encoded->codes.data() + row * encoded->stride;
+            CHECK_ARGUMENT(rabitq_split_codes_->EncodeFused(vectors + row * dim,
+                                                            code,
+                                                            code + encoded->one_bit_size,
+                                                            &encoded->clusters[row]),
+                           "failed to encode fused RaBitQ node codes");
+        }
+    };
+    // Do not reserve IDs or publish labels until the complete batch is encodable.
+    // One task per range avoids a future/allocation for every input vector.
+    const auto workers = std::min<uint64_t>(this->build_thread_count_, count);
+    if (this->thread_pool_ != nullptr and workers > 1) {
+        const uint64_t block = (count + workers - 1) / workers;
+        std::vector<std::future<void>> futures;
+        HGraphBuildTaskGuard guard(futures, workers);
+        try {
+            for (uint64_t begin = 0; begin < count; begin += block) {
+                futures.emplace_back(this->thread_pool_->GeneralEnqueue(
+                    encode_range, begin, std::min(count, begin + block)));
+            }
+        } catch (...) {
+            const auto enqueue_exception = std::current_exception();
+            // A packaged-task future can become ready before its pool wrapper returns.
+            try {
+                this->thread_pool_->WaitUntilEmpty();
+            } catch (...) {
+            }
+            std::rethrow_exception(enqueue_exception);
+        }
+        wait_all_futures(futures);
+    } else {
+        encode_range(0, count);
+    }
+    context.fused_codes = std::move(encoded);
 }
 
 void
@@ -769,19 +823,32 @@ HGraph::graph_read_codes_is_temporary(const AddContext& context) const {
 }
 
 void
-HGraph::insert_persistent_codes(const void* data, InnerIdType inner_id) {
+HGraph::insert_persistent_codes(const void* data,
+                                InnerIdType inner_id,
+                                const RaBitQFusedCodeView* preencoded) {
     std::shared_lock<std::shared_mutex> add_lock;
     if (not this->support_force_remove()) {
         add_lock = std::shared_lock<std::shared_mutex>(this->add_mutex_);
     }
     std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
-    this->insert_persistent_codes_unlocked(data, inner_id);
+    this->insert_persistent_codes_unlocked(data, inner_id, preencoded);
 }
 
 void
-HGraph::insert_persistent_codes_unlocked(const void* data, InnerIdType inner_id) {
+HGraph::insert_persistent_codes_unlocked(const void* data,
+                                         InnerIdType inner_id,
+                                         const RaBitQFusedCodeView* preencoded) {
     this->basic_flatten_codes_->InsertVector(data, inner_id);
-    this->sync_fused_node_codes(inner_id, data);
+    if (preencoded != nullptr) {
+        // InsertVector above advances the flatten count; fused storage owns the actual bytes.
+        this->rabitq_fused_datacell_->SetNodeCodes(inner_id,
+                                                   label_table_->GetLabelById(inner_id),
+                                                   preencoded->cluster_id,
+                                                   preencoded->one_bit_code,
+                                                   preencoded->supplement_code);
+    } else {
+        this->sync_fused_node_codes(inner_id, data);
+    }
     if (has_precise_reorder()) {
         this->high_precise_codes_->InsertVector(data, inner_id);
     }
@@ -845,7 +912,7 @@ bool
 HGraph::insert_one_logical_point(const void* data, const AddRow& row, const AddContext& context) {
     const auto inner_id = row.inner_id;
     const auto level = row.level;
-    this->prepare_codes_before_probe_if_needed(data, inner_id, context);
+    this->prepare_codes_before_probe_if_needed(data, row, context);
 
     auto make_search_param = [&]() {
         InnerSearchParam param;
@@ -893,10 +960,20 @@ HGraph::insert_one_logical_point(const void* data, const AddRow& row, const AddC
 
 void
 HGraph::prepare_codes_before_probe_if_needed(const void* data,
-                                             InnerIdType inner_id,
+                                             const AddRow& row,
                                              const AddContext& context) {
     if (this->should_insert_codes_before_probe(context.use_dedup_storage)) {
-        this->insert_persistent_codes(data, inner_id);
+        if (context.fused_codes != nullptr) {
+            const auto& encoded = *context.fused_codes;
+            const auto input_idx = static_cast<uint64_t>(row.input_idx);
+            RaBitQFusedCodeView view;
+            view.one_bit_code = encoded.codes.data() + input_idx * encoded.stride;
+            view.supplement_code = view.one_bit_code + encoded.one_bit_size;
+            view.cluster_id = encoded.clusters[input_idx];
+            this->insert_persistent_codes(data, row.inner_id, &view);
+        } else {
+            this->insert_persistent_codes(data, row.inner_id);
+        }
     }
 }
 

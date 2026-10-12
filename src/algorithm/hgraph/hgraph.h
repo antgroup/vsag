@@ -68,6 +68,7 @@ class HGraphRaBitQSearcher;
 class HGraphOptimizedBuildSession;
 class IteratorFilterContext;
 class RaBitQSplitDataCellInterface;
+struct RaBitQFusedCodeView;
 
 /**
  * @brief HGraph: hierarchical navigable graph index.
@@ -451,11 +452,15 @@ public:
 
     /// Write codes for inner_id into the persistent flatten storage.
     void
-    insert_persistent_codes(const void* data, InnerIdType inner_id);
+    insert_persistent_codes(const void* data,
+                            InnerIdType inner_id,
+                            const RaBitQFusedCodeView* preencoded = nullptr);
 
     /// Write codes when the caller already protects storage capacity.
     void
-    insert_persistent_codes_unlocked(const void* data, InnerIdType inner_id);
+    insert_persistent_codes_unlocked(const void* data,
+                                     InnerIdType inner_id,
+                                     const RaBitQFusedCodeView* preencoded = nullptr);
 
     void
     insert_fused_optimized_build_codes(const void* data, InnerIdType inner_id);
@@ -579,11 +584,23 @@ private:
     void
     train_codes_with_dataset(const DatasetPtr& train_data);
 
+    // Batch-local encoded rows, indexed by input position rather than reserved inner ID.
+    // Keep them alive until every insertion task has drained, including on failure.
+    struct FusedAddCodes {
+        explicit FusedAddCodes(Allocator* allocator) : codes(allocator), clusters(allocator) {
+        }
+        Vector<uint8_t> codes;
+        Vector<uint32_t> clusters;
+        uint64_t one_bit_size{0};
+        uint64_t stride{0};
+    };
+
     struct AddContext {
         bool first_empty_add{false};
         bool use_dedup_storage{false};
         bool need_temporary_sq8_build_data{false};
         bool use_parallel_add{false};
+        std::unique_ptr<FusedAddCodes> fused_codes;
         DatasetPtr train_data{nullptr};
         FlattenInterfacePtr graph_read_codes{nullptr};
     };
@@ -645,6 +662,9 @@ private:
     void
     validate_fused_encoding_data(const float* data, uint64_t count) const;
 
+    void
+    prepare_fused_add_codes(const DatasetPtr& data, AddContext& context) const;
+
     AddContext
     prepare_add_context(const DatasetPtr& data);
 
@@ -670,7 +690,7 @@ private:
 
     void
     prepare_codes_before_probe_if_needed(const void* data,
-                                         InnerIdType inner_id,
+                                         const AddRow& row,
                                          const AddContext& context);
 
     void
