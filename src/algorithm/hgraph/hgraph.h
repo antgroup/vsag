@@ -66,6 +66,7 @@ class FlattenOptimizedBuildInterface;
 class HGraphRaBitQFusedDataCell;
 class HGraphRaBitQSearcher;
 class HGraphOptimizedBuildSession;
+class MciIncrementalAddExecutor;
 class IteratorFilterContext;
 class RaBitQSplitDataCellInterface;
 
@@ -94,6 +95,7 @@ public:
 
     friend class HGraphAnalyzer;
     friend class HGraphOptimizedBuildSession;
+    friend class MciIncrementalAddExecutor;
 
 public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
@@ -533,46 +535,6 @@ private:
 
         Vector<AddRow> rows;
         std::vector<int64_t> failed_ids;
-    };
-
-    /// Per-row MCI work precomputed by the lock-free planning pass.
-    ///
-    /// Every field is derived from one frozen CliqueDataCell read view plus this row's own KNN, so
-    /// the workers that fill these plans never write shared state. The planning pass only records;
-    /// the merge pass revalidates each decision against the live structure, so a plan that is
-    /// older than the live structure can under-report work but never over-report it.
-    struct MciAddPlan {
-        explicit MciAddPlan(Allocator* allocator)
-            : knn_ids(allocator), join_targets(allocator), new_cliques(allocator) {
-        }
-
-        void
-        Reset() {
-            this->inner_id = 0;
-            this->visible_total = 0;
-            this->degree_target = 0;
-            this->planned_neighbor_count = 0;
-            this->memberships_empty = false;
-            this->knn_empty = false;
-            this->knn_ids.clear();
-            this->join_targets.clear();
-            this->new_cliques.clear();
-        }
-
-        InnerIdType inner_id{0};
-        /// Insertion-prefix candidate bound (inner_id + 1) used while planning.
-        uint64_t visible_total{0};
-        /// Degree target and both flags below are relative to the planning view, which is a lower
-        /// bound of the live structure.
-        uint64_t degree_target{0};
-        uint64_t planned_neighbor_count{0};
-        bool memberships_empty{false};
-        bool knn_empty{false};
-        Vector<InnerIdType> knn_ids;
-        /// Existing cliques worth joining as (intersection, clique_id), ordered by gain.
-        Vector<std::pair<uint64_t, InnerIdType>> join_targets;
-        /// Local MCE proposals, already mapped to global inner IDs and sorted by member ID.
-        Vector<Vector<InnerIdType>> new_cliques;
     };
 
     std::optional<std::vector<int64_t>>
@@ -1066,31 +1028,6 @@ private:
     void
     build_mci_clique_index(const void* vectors = nullptr);
 
-    /// Update MCI for one completed Add batch.
-    ///
-    /// The batch is processed in chunks. For each chunk a planning pass spreads the per-row work
-    /// (candidate KNN, clique JOIN proposals, local MCE) over build_thread_count_ workers that only
-    /// read one frozen CliqueDataCell view and only write their own plan slot, followed by a
-    /// single-threaded merge that applies the plans in inner-ID order with the same predicates as
-    /// the serial path. Planning shares nothing but an atomic row cursor, so per-row coverage, the
-    /// degree target and the merge order do not depend on the planning schedule. The candidate KNN
-    /// still comes from concurrent graph search, so as in the full parallel build the structure may
-    /// depend on scheduling; per-row coverage does not.
-    void
-    parallel_incremental_mci_add(const AddBatch& batch, const DatasetPtr& data);
-
-    /// Plan one row of an Add batch against a frozen read view. Caller owns view and plan and must
-    /// not hold any CliqueDataCell write lock. Plans are not applied here.
-    void
-    plan_incremental_mci_clique(const std::shared_lock<std::shared_mutex>& view,
-                                const Vector<InnerIdType>& knn_ids,
-                                uint64_t visible_total,
-                                uint64_t degree_target,
-                                MciAddPlan& plan);
-
-    /// Companion reads shared by the serial update and the planning pass. A null view reads the
-    /// live structure under the cell lock; a non-null view is the frozen read session of one
-    /// planning chunk, which reports the same clique ids without taking a lock per query.
     void
     mci_read_node_cliques(const std::shared_lock<std::shared_mutex>* view,
                           InnerIdType node_id,
@@ -1139,14 +1076,6 @@ private:
                             const Vector<InnerIdType>& knn_ids,
                             uint64_t visible_total,
                             const std::function<void(const Vector<InnerIdType>&)>& emit);
-
-    /// Apply the first plan_count plans of one chunk in inner-ID order. Returns the number of rows
-    /// that needed the serial repair fallback, which is logged by the caller. Caller holds
-    /// mci_mutation_mutex_.
-    uint64_t
-    merge_incremental_mci_clique_plans(Vector<MciAddPlan>& plans,
-                                       uint64_t plan_count,
-                                       uint64_t total);
 
     /// Search HGraph KNN and update MCI without inserting a vector into HGraph.
     /// visible_total is the exclusive inner-ID bound for accepted KNN candidates, not live count.
